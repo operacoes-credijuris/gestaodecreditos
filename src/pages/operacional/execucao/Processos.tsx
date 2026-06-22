@@ -270,7 +270,7 @@ export default function Processos() {
                       {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
                       {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
                         <div className="text-[11px] text-slate-400">
-                          RTDPJ {p.numero_rtdpj}
+                          {p.numero_rtdpj}
                         </div>
                       )}
                     </TD>
