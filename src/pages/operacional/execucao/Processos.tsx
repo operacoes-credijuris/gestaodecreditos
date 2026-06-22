@@ -67,7 +67,8 @@ export default function Processos() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
-  const [filtroStatus, setFiltroStatus] = useState('todos')
+  // Padrão ao abrir a página: mostra apenas processos ativos.
+  const [filtroStatus, setFiltroStatus] = useState('ativo')
   // Ordenação padrão: data de aquisição, do mais antigo para o mais novo.
   const [sortBy, setSortBy] = useState<
     'data_aquisicao' | 'expectativa_liquidacao'
