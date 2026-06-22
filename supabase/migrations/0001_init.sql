@@ -74,8 +74,7 @@ create table if not exists public.processos (
   entidade_devedora      text,
   data_aquisicao         date,
   expectativa_liquidacao date,
-  instrumento            text
-                         check (instrumento in ('particular','registro_publico','escritura_publica')),
+  numero_rtdpj           text,
   advbox_lawsuit_id      text,
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now()

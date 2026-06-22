@@ -36,8 +36,6 @@ export interface AnaliseCredito {
 }
 
 // ---------- Operacional: Processos ----------
-export type Instrumento = 'particular' | 'registro_publico' | 'escritura_publica'
-
 export interface Processo {
   id: UUID
   numero_cnj: string
@@ -50,7 +48,7 @@ export interface Processo {
   entidade_devedora: string | null
   data_aquisicao: string | null
   expectativa_liquidacao: string | null
-  instrumento: Instrumento | null
+  numero_rtdpj: string | null
   advbox_lawsuit_id: string | null
   created_at: string
   updated_at: string

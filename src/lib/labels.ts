@@ -27,12 +27,6 @@ export const RISCO_ANALISE: Record<string, LabelDef> = {
   alto: { label: 'Alto', tone: 'red' },
 }
 
-export const INSTRUMENTO: Record<string, LabelDef> = {
-  particular: { label: 'Particular', tone: 'gray' },
-  registro_publico: { label: 'Registro público', tone: 'blue' },
-  escritura_publica: { label: 'Escritura pública', tone: 'purple' },
-}
-
 export const TIPO_PUBLICACAO: Record<string, LabelDef> = {
   publicacao: { label: 'Publicação', tone: 'blue' },
   movimentacao: { label: 'Movimentação', tone: 'purple' },

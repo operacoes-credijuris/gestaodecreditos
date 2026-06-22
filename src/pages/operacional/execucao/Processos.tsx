@@ -9,12 +9,11 @@ import {
   ArrowUpDown,
 } from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
-import type { Processo, Instrumento } from '@/lib/types'
+import type { Processo } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select } from '@/components/ui/Field'
+import { Field, Input } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
@@ -29,7 +28,6 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { getLabel, INSTRUMENTO } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
 
 const VAZIO: Partial<Processo> = {
@@ -43,7 +41,7 @@ const VAZIO: Partial<Processo> = {
   entidade_devedora: '',
   data_aquisicao: '',
   expectativa_liquidacao: '',
-  instrumento: null,
+  numero_rtdpj: '',
 }
 
 export default function Processos() {
@@ -55,7 +53,6 @@ export default function Processos() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
-  const [filtroInstrumento, setFiltroInstrumento] = useState('todos')
   // Ordenação padrão: data de aquisição, do mais antigo para o mais novo.
   const [sortBy, setSortBy] = useState<
     'data_aquisicao' | 'expectativa_liquidacao'
@@ -74,8 +71,6 @@ export default function Processos() {
 
   const lista = useMemo(() => {
     let l = data ?? []
-    if (filtroInstrumento !== 'todos')
-      l = l.filter((p) => p.instrumento === filtroInstrumento)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((p) =>
@@ -86,6 +81,7 @@ export default function Processos() {
           p.entidade_devedora,
           p.comarca,
           p.tribunal,
+          p.numero_rtdpj,
         ]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
@@ -100,7 +96,7 @@ export default function Processos() {
       if (!bv) return -1
       return av.localeCompare(bv) * dir
     })
-  }, [data, busca, filtroInstrumento, sortBy, sortDir])
+  }, [data, busca, sortBy, sortDir])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -112,7 +108,6 @@ export default function Processos() {
     try {
       const { id, created_at, updated_at, advbox_lawsuit_id, ...payload } =
         editing as Processo
-      if (!payload.instrumento) payload.instrumento = null
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Processo atualizado.')
@@ -150,28 +145,14 @@ export default function Processos() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por número, cedente, cessionário, devedora, comarca…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
-          <Select
-            className="sm:w-56"
-            value={filtroInstrumento}
-            onChange={(e) => setFiltroInstrumento(e.target.value)}
-          >
-            <option value="todos">Todos os instrumentos</option>
-            {Object.entries(INSTRUMENTO).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="pl-9"
+            placeholder="Buscar por número, cedente, cessionário, devedora, comarca, RTDPJ…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
         </div>
       </Card>
 
@@ -191,7 +172,7 @@ export default function Processos() {
                 <TH>Cedente</TH>
                 <TH>Cessionário</TH>
                 <TH>Entidade devedora</TH>
-                <TH>Instrumento</TH>
+                <TH>Nº RTDPJ</TH>
                 <TH>
                   <button
                     type="button"
@@ -235,7 +216,6 @@ export default function Processos() {
             </THead>
             <TBody>
               {lista.map((p) => {
-                const inst = getLabel(INSTRUMENTO, p.instrumento)
                 return (
                   <TR key={p.id}>
                     <TD className="font-medium text-slate-800">
@@ -258,9 +238,7 @@ export default function Processos() {
                     </TD>
                     <TD>{p.cessionario || '—'}</TD>
                     <TD>{p.entidade_devedora || '—'}</TD>
-                    <TD>
-                      {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
-                    </TD>
+                    <TD>{p.numero_rtdpj || '—'}</TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.data_aquisicao)}
                     </TD>
@@ -389,23 +367,14 @@ export default function Processos() {
                   }
                 />
               </Field>
-              <Field label="Instrumento" className="sm:col-span-2">
-                <Select
-                  value={editing.instrumento ?? ''}
+              <Field label="Nº RTDPJ" className="sm:col-span-2">
+                <Input
+                  value={editing.numero_rtdpj ?? ''}
                   onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      instrumento: (e.target.value || null) as Instrumento | null,
-                    })
+                    setEditing({ ...editing, numero_rtdpj: e.target.value })
                   }
-                >
-                  <option value="">Não informado</option>
-                  {Object.entries(INSTRUMENTO).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
+                  placeholder="Número do registro no RTDPJ"
+                />
               </Field>
             </div>
           </form>
