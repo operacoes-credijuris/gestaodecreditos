@@ -264,7 +264,11 @@ export default function Processos() {
                         </div>
                       )}
                     </TD>
-                    <TD className="whitespace-nowrap">{p.cessionario || '—'}</TD>
+                    <TD>
+                      <div className="max-w-[150px] whitespace-normal break-words">
+                        {p.cessionario || '—'}
+                      </div>
+                    </TD>
                     <TD className="whitespace-nowrap">{p.entidade_devedora || '—'}</TD>
                     <TD className="whitespace-nowrap">
                       {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
