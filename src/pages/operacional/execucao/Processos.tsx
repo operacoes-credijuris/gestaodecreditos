@@ -1,5 +1,13 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search } from 'lucide-react'
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+} from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
 import type { Processo, Instrumento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -48,8 +56,21 @@ export default function Processos() {
 
   const [busca, setBusca] = useState('')
   const [filtroInstrumento, setFiltroInstrumento] = useState('todos')
+  // Ordenação padrão: data de aquisição, do mais antigo para o mais novo.
+  const [sortBy, setSortBy] = useState<
+    'data_aquisicao' | 'expectativa_liquidacao'
+  >('data_aquisicao')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Partial<Processo> | null>(null)
   const [toDelete, setToDelete] = useState<Processo | null>(null)
+
+  function toggleSort(col: 'data_aquisicao' | 'expectativa_liquidacao') {
+    if (sortBy === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSortBy(col)
+      setSortDir('asc')
+    }
+  }
 
   const lista = useMemo(() => {
     let l = data ?? []
@@ -70,8 +91,16 @@ export default function Processos() {
           .some((v) => v!.toLowerCase().includes(q)),
       )
     }
-    return l
-  }, [data, busca, filtroInstrumento])
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...l].sort((a, b) => {
+      const av = a[sortBy] || ''
+      const bv = b[sortBy] || ''
+      if (!av && !bv) return 0
+      if (!av) return 1 // datas vazias sempre por último
+      if (!bv) return -1
+      return av.localeCompare(bv) * dir
+    })
+  }, [data, busca, filtroInstrumento, sortBy, sortDir])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -121,28 +150,14 @@ export default function Processos() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por número, cedente, cessionário, devedora, comarca…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
-          <Select
-            className="sm:w-56"
-            value={filtroInstrumento}
-            onChange={(e) => setFiltroInstrumento(e.target.value)}
-          >
-            <option value="todos">Todos os instrumentos</option>
-            {Object.entries(INSTRUMENTO).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="pl-9"
+            placeholder="Buscar por número, cedente, cessionário, devedora, comarca…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
         </div>
       </Card>
 
@@ -162,9 +177,62 @@ export default function Processos() {
                 <TH>Cedente</TH>
                 <TH>Cessionário</TH>
                 <TH>Entidade devedora</TH>
-                <TH>Instrumento</TH>
-                <TH>Aquisição</TH>
-                <TH>Expectativa</TH>
+                <TH>
+                  <div className="flex items-center gap-2">
+                    <span>Instrumento</span>
+                    <select
+                      value={filtroInstrumento}
+                      onChange={(e) => setFiltroInstrumento(e.target.value)}
+                      title="Filtrar por instrumento"
+                      className="rounded border border-slate-200 bg-white px-1 py-0.5 text-xs font-normal normal-case text-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-300"
+                    >
+                      <option value="todos">Todos</option>
+                      {Object.entries(INSTRUMENTO).map(([k, v]) => (
+                        <option key={k} value={k}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </TH>
+                <TH>
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('data_aquisicao')}
+                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
+                    title="Ordenar por data de aquisição"
+                  >
+                    Aquisição
+                    {sortBy === 'data_aquisicao' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
+                      ) : (
+                        <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
+                    )}
+                  </button>
+                </TH>
+                <TH>
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('expectativa_liquidacao')}
+                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
+                    title="Ordenar por expectativa de liquidação"
+                  >
+                    Expectativa
+                    {sortBy === 'expectativa_liquidacao' ? (
+                      sortDir === 'asc' ? (
+                        <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
+                      ) : (
+                        <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
+                    )}
+                  </button>
+                </TH>
                 <TH className="text-right">Ações</TH>
               </tr>
             </THead>
