@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
-import type { Processo, StatusProcesso } from '@/lib/types'
+import type { Processo, Instrumento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -21,21 +21,21 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
-import { formatBRL, formatCNJ } from '@/lib/format'
+import { getLabel, INSTRUMENTO } from '@/lib/labels'
+import { formatCNJ, formatDate } from '@/lib/format'
 
 const VAZIO: Partial<Processo> = {
   numero_cnj: '',
   tribunal: '',
-  vara: '',
   comarca: '',
-  classe: '',
-  assunto: '',
-  parte_autora: '',
-  parte_re: '',
-  fase: '',
-  valor_causa: null,
-  status: 'ativo',
+  vara: '',
+  cedente: '',
+  cedente_advogado: '',
+  cessionario: '',
+  entidade_devedora: '',
+  data_aquisicao: '',
+  expectativa_liquidacao: '',
+  instrumento: null,
 }
 
 export default function Processos() {
@@ -47,23 +47,31 @@ export default function Processos() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
-  const [filtroStatus, setFiltroStatus] = useState('todos')
+  const [filtroInstrumento, setFiltroInstrumento] = useState('todos')
   const [editing, setEditing] = useState<Partial<Processo> | null>(null)
   const [toDelete, setToDelete] = useState<Processo | null>(null)
 
   const lista = useMemo(() => {
     let l = data ?? []
-    if (filtroStatus !== 'todos') l = l.filter((p) => p.status === filtroStatus)
+    if (filtroInstrumento !== 'todos')
+      l = l.filter((p) => p.instrumento === filtroInstrumento)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((p) =>
-        [p.numero_cnj, p.parte_autora, p.parte_re, p.comarca, p.tribunal, p.classe]
+        [
+          p.numero_cnj,
+          p.cedente,
+          p.cessionario,
+          p.entidade_devedora,
+          p.comarca,
+          p.tribunal,
+        ]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
       )
     }
     return l
-  }, [data, busca, filtroStatus])
+  }, [data, busca, filtroInstrumento])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -73,7 +81,9 @@ export default function Processos() {
       return
     }
     try {
-      const { id, created_at, updated_at, ...payload } = editing as Processo
+      const { id, created_at, updated_at, advbox_lawsuit_id, ...payload } =
+        editing as Processo
+      if (!payload.instrumento) payload.instrumento = null
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Processo atualizado.')
@@ -102,7 +112,7 @@ export default function Processos() {
     <div>
       <PageHeader
         title="Processos"
-        description="Repositório central dos processos em execução."
+        description="Registro dos processos das cessões/aquisições de crédito."
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
             Novo processo
@@ -116,18 +126,18 @@ export default function Processos() {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
               className="pl-9"
-              placeholder="Buscar por número, partes, comarca, classe…"
+              placeholder="Buscar por número, cedente, cessionário, devedora, comarca…"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
           <Select
-            className="sm:w-52"
-            value={filtroStatus}
-            onChange={(e) => setFiltroStatus(e.target.value)}
+            className="sm:w-56"
+            value={filtroInstrumento}
+            onChange={(e) => setFiltroInstrumento(e.target.value)}
           >
-            <option value="todos">Todos os status</option>
-            {Object.entries(STATUS_PROCESSO).map(([k, v]) => (
+            <option value="todos">Todos os instrumentos</option>
+            {Object.entries(INSTRUMENTO).map(([k, v]) => (
               <option key={k} value={k}>
                 {v.label}
               </option>
@@ -148,41 +158,51 @@ export default function Processos() {
             <THead>
               <tr>
                 <TH>Processo</TH>
-                <TH>Partes</TH>
                 <TH>Comarca / Vara</TH>
-                <TH>Fase</TH>
-                <TH>Valor da causa</TH>
-                <TH>Status</TH>
+                <TH>Cedente / Cessionário</TH>
+                <TH>Entidade devedora</TH>
+                <TH>Instrumento</TH>
+                <TH>Aquisição → Expectativa</TH>
                 <TH className="text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
               {lista.map((p) => {
-                const st = getLabel(STATUS_PROCESSO, p.status)
+                const inst = getLabel(INSTRUMENTO, p.instrumento)
                 return (
                   <TR key={p.id}>
                     <TD className="font-medium text-slate-800">
                       {formatCNJ(p.numero_cnj)}
                       <div className="text-xs font-normal text-slate-400">
-                        {p.tribunal || '—'} {p.classe ? `· ${p.classe}` : ''}
-                      </div>
-                    </TD>
-                    <TD>
-                      <div className="text-xs">
-                        <span className="text-slate-400">Autor:</span> {p.parte_autora || '—'}
-                      </div>
-                      <div className="text-xs">
-                        <span className="text-slate-400">Réu:</span> {p.parte_re || '—'}
+                        {p.tribunal || '—'}
                       </div>
                     </TD>
                     <TD>
                       {p.comarca || '—'}
                       <div className="text-xs text-slate-400">{p.vara || '—'}</div>
                     </TD>
-                    <TD>{p.fase || '—'}</TD>
-                    <TD>{formatBRL(p.valor_causa)}</TD>
                     <TD>
-                      <Badge tone={st.tone}>{st.label}</Badge>
+                      <div>
+                        {p.cedente || '—'}
+                        {p.cedente_advogado && (
+                          <span className="text-xs text-slate-400">
+                            {' '}
+                            (adv. {p.cedente_advogado})
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        Cessionário: {p.cessionario || '—'}
+                      </div>
+                    </TD>
+                    <TD>{p.entidade_devedora || '—'}</TD>
+                    <TD>
+                      {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
+                    </TD>
+                    <TD className="whitespace-nowrap text-slate-600">
+                      {formatDate(p.data_aquisicao)}
+                      <span className="text-slate-300"> → </span>
+                      {formatDate(p.expectativa_liquidacao)}
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
@@ -232,14 +252,14 @@ export default function Processos() {
       >
         {editing && (
           <form id="form-processo" onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Número do processo (CNJ)" required className="sm:col-span-2">
-                <Input
-                  value={editing.numero_cnj ?? ''}
-                  onChange={(e) => setEditing({ ...editing, numero_cnj: e.target.value })}
-                  placeholder="0000000-00.0000.0.00.0000"
-                />
-              </Field>
+            <Field label="Número do processo" required>
+              <Input
+                value={editing.numero_cnj ?? ''}
+                onChange={(e) => setEditing({ ...editing, numero_cnj: e.target.value })}
+                placeholder="0000000-00.0000.0.00.0000"
+              />
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-3">
               <Field label="Tribunal">
                 <Input
                   value={editing.tribunal ?? ''}
@@ -258,62 +278,71 @@ export default function Processos() {
                   onChange={(e) => setEditing({ ...editing, vara: e.target.value })}
                 />
               </Field>
-              <Field label="Classe">
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Cedente">
                 <Input
-                  value={editing.classe ?? ''}
-                  onChange={(e) => setEditing({ ...editing, classe: e.target.value })}
+                  value={editing.cedente ?? ''}
+                  onChange={(e) => setEditing({ ...editing, cedente: e.target.value })}
                 />
               </Field>
-              <Field label="Parte autora">
+              <Field label="Advogado do cedente">
                 <Input
-                  value={editing.parte_autora ?? ''}
-                  onChange={(e) => setEditing({ ...editing, parte_autora: e.target.value })}
+                  value={editing.cedente_advogado ?? ''}
+                  onChange={(e) =>
+                    setEditing({ ...editing, cedente_advogado: e.target.value })
+                  }
                 />
               </Field>
-              <Field label="Parte ré">
+              <Field label="Cessionário">
                 <Input
-                  value={editing.parte_re ?? ''}
-                  onChange={(e) => setEditing({ ...editing, parte_re: e.target.value })}
+                  value={editing.cessionario ?? ''}
+                  onChange={(e) => setEditing({ ...editing, cessionario: e.target.value })}
                 />
               </Field>
-              <Field label="Fase">
+              <Field label="Entidade devedora">
                 <Input
-                  value={editing.fase ?? ''}
-                  onChange={(e) => setEditing({ ...editing, fase: e.target.value })}
+                  value={editing.entidade_devedora ?? ''}
+                  onChange={(e) =>
+                    setEditing({ ...editing, entidade_devedora: e.target.value })
+                  }
                 />
               </Field>
-              <Field label="Valor da causa (R$)">
+              <Field label="Data de aquisição">
                 <Input
-                  type="number"
-                  step="0.01"
-                  value={editing.valor_causa ?? ''}
+                  type="date"
+                  value={editing.data_aquisicao ?? ''}
+                  onChange={(e) =>
+                    setEditing({ ...editing, data_aquisicao: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Expectativa de liquidação">
+                <Input
+                  type="date"
+                  value={editing.expectativa_liquidacao ?? ''}
+                  onChange={(e) =>
+                    setEditing({ ...editing, expectativa_liquidacao: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Instrumento" className="sm:col-span-2">
+                <Select
+                  value={editing.instrumento ?? ''}
                   onChange={(e) =>
                     setEditing({
                       ...editing,
-                      valor_causa: e.target.value ? Number(e.target.value) : null,
+                      instrumento: (e.target.value || null) as Instrumento | null,
                     })
                   }
-                />
-              </Field>
-              <Field label="Status" required>
-                <Select
-                  value={editing.status ?? 'ativo'}
-                  onChange={(e) =>
-                    setEditing({ ...editing, status: e.target.value as StatusProcesso })
-                  }
                 >
-                  {Object.entries(STATUS_PROCESSO).map(([k, v]) => (
+                  <option value="">Não informado</option>
+                  {Object.entries(INSTRUMENTO).map(([k, v]) => (
                     <option key={k} value={k}>
                       {v.label}
                     </option>
                   ))}
                 </Select>
-              </Field>
-              <Field label="Assunto" className="sm:col-span-2">
-                <Input
-                  value={editing.assunto ?? ''}
-                  onChange={(e) => setEditing({ ...editing, assunto: e.target.value })}
-                />
               </Field>
             </div>
           </form>

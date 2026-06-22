@@ -34,7 +34,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
 import { Loading } from '@/components/ui/Table'
 import { useAuth } from '@/contexts/AuthContext'
-import { STATUS_ANALISE, STATUS_PROCESSO, getLabel, PRIORIDADE_TAREFA } from '@/lib/labels'
+import { STATUS_ANALISE, INSTRUMENTO, getLabel, PRIORIDADE_TAREFA } from '@/lib/labels'
 import { formatBRL, formatDate } from '@/lib/format'
 
 const CORES = ['#234e88', '#2f64ab', '#4d83c6', '#7ba7da', '#cda032', '#e3b84d']
@@ -66,9 +66,7 @@ export default function Dashboard() {
     const nCessoes = (cessoes.data ?? []).length
     const nContratos = (contratos.data ?? []).length
 
-    const processosAtivos = (processos.data ?? []).filter(
-      (p) => p.status === 'ativo',
-    ).length
+    const processosTotal = (processos.data ?? []).length
     const analisesAbertas = (analises.data ?? []).filter(
       (a) => a.status === 'pendente' || a.status === 'em_analise',
     ).length
@@ -82,7 +80,7 @@ export default function Dashboard() {
       investidoresAtivos,
       nCessoes,
       nContratos,
-      processosAtivos,
+      processosTotal,
       analisesAbertas,
       pubPendentes,
       tarefasAbertas,
@@ -111,8 +109,8 @@ export default function Dashboard() {
   const chartProcessos = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const p of processos.data ?? [])
-      counts[p.status] = (counts[p.status] || 0) + 1
-    return Object.entries(STATUS_PROCESSO).map(([k, v]) => ({
+      if (p.instrumento) counts[p.instrumento] = (counts[p.instrumento] || 0) + 1
+    return Object.entries(INSTRUMENTO).map(([k, v]) => ({
       nome: v.label,
       total: counts[k] || 0,
     }))
@@ -177,8 +175,8 @@ export default function Dashboard() {
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="Processos ativos"
-            value={kpis.processosAtivos}
+            label="Processos cadastrados"
+            value={kpis.processosTotal}
             icon={<FolderKanban className="h-5 w-5" />}
             tone="brand"
           />
@@ -227,7 +225,7 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader title="Processos por status" />
+          <CardHeader title="Processos por instrumento" />
           <CardBody>
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">

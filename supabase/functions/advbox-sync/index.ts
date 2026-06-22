@@ -16,8 +16,6 @@ function pickArray(json: unknown): Record<string, unknown>[] {
 
 const str = (v: unknown): string | null =>
   v == null ? null : String(v)
-const num = (v: unknown): number | null =>
-  v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v)
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -79,12 +77,9 @@ Deno.serve(async (req: Request) => {
           .map((l) => ({
             advbox_lawsuit_id: str(l.id ?? l.lawsuit_id),
             numero_cnj: str(l.protocol_number ?? l.number ?? l.numero ?? l.cnj ?? '') ?? '',
+            tribunal: str(l.court_name ?? l.tribunal),
             comarca: str(l.county ?? l.comarca),
             vara: str(l.court ?? l.vara),
-            parte_autora: str(l.author ?? l.claimant),
-            parte_re: str(l.defendant ?? l.respondent),
-            valor_causa: num(l.value ?? l.case_value),
-            status: 'ativo',
           }))
           .filter((p) => p.numero_cnj)
         if (novos.length) {

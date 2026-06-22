@@ -36,26 +36,21 @@ export interface AnaliseCredito {
 }
 
 // ---------- Operacional: Processos ----------
-export type StatusProcesso =
-  | 'ativo'
-  | 'suspenso'
-  | 'arquivado'
-  | 'baixado'
-  | 'encerrado'
+export type Instrumento = 'particular' | 'registro_publico' | 'escritura_publica'
 
 export interface Processo {
   id: UUID
   numero_cnj: string
   tribunal: string | null
-  vara: string | null
   comarca: string | null
-  classe: string | null
-  assunto: string | null
-  parte_autora: string | null
-  parte_re: string | null
-  fase: string | null
-  valor_causa: number | null
-  status: StatusProcesso
+  vara: string | null
+  cedente: string | null
+  cedente_advogado: string | null
+  cessionario: string | null
+  entidade_devedora: string | null
+  data_aquisicao: string | null
+  expectativa_liquidacao: string | null
+  instrumento: Instrumento | null
   advbox_lawsuit_id: string | null
   created_at: string
   updated_at: string

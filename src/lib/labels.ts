@@ -27,12 +27,10 @@ export const RISCO_ANALISE: Record<string, LabelDef> = {
   alto: { label: 'Alto', tone: 'red' },
 }
 
-export const STATUS_PROCESSO: Record<string, LabelDef> = {
-  ativo: { label: 'Ativo', tone: 'green' },
-  suspenso: { label: 'Suspenso', tone: 'yellow' },
-  arquivado: { label: 'Arquivado', tone: 'gray' },
-  baixado: { label: 'Baixado', tone: 'gray' },
-  encerrado: { label: 'Encerrado', tone: 'gray' },
+export const INSTRUMENTO: Record<string, LabelDef> = {
+  particular: { label: 'Particular', tone: 'gray' },
+  registro_publico: { label: 'Registro público', tone: 'blue' },
+  escritura_publica: { label: 'Escritura pública', tone: 'purple' },
 }
 
 export const TIPO_PUBLICACAO: Record<string, LabelDef> = {

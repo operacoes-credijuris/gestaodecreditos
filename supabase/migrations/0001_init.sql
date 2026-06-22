@@ -63,22 +63,22 @@ create table if not exists public.analises_credito (
 );
 
 create table if not exists public.processos (
-  id                uuid primary key default gen_random_uuid(),
-  numero_cnj        text not null,
-  tribunal          text,
-  vara              text,
-  comarca           text,
-  classe            text,
-  assunto           text,
-  parte_autora      text,
-  parte_re          text,
-  fase              text,
-  valor_causa       numeric,
-  status            text not null default 'ativo'
-                    check (status in ('ativo','suspenso','arquivado','baixado','encerrado')),
-  advbox_lawsuit_id text,
-  created_at        timestamptz not null default now(),
-  updated_at        timestamptz not null default now()
+  id                     uuid primary key default gen_random_uuid(),
+  numero_cnj             text not null,
+  tribunal               text,
+  comarca                text,
+  vara                   text,
+  cedente                text,
+  cedente_advogado       text,
+  cessionario            text,
+  entidade_devedora      text,
+  data_aquisicao         date,
+  expectativa_liquidacao date,
+  instrumento            text
+                         check (instrumento in ('particular','registro_publico','escritura_publica')),
+  advbox_lawsuit_id      text,
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now()
 );
 
 create table if not exists public.publicacoes (
