@@ -270,13 +270,21 @@ export default function Processos() {
                       </div>
                     </TD>
                     <TD className="whitespace-nowrap">{p.entidade_devedora || '—'}</TD>
-                    <TD className="whitespace-nowrap">
-                      {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
-                      {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
-                        <div className="text-[11px] text-slate-400">
-                          {p.numero_rtdpj}
-                        </div>
-                      )}
+                    <TD>
+                      <div className="max-w-[120px]">
+                        {p.instrumento ? (
+                          <Badge tone={inst.tone} className="whitespace-nowrap">
+                            {inst.label}
+                          </Badge>
+                        ) : (
+                          '—'
+                        )}
+                        {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
+                          <div className="whitespace-normal break-all text-[11px] text-slate-400">
+                            {p.numero_rtdpj}
+                          </div>
+                        )}
+                      </div>
                     </TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.data_aquisicao)}
