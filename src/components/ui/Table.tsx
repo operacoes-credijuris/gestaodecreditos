@@ -2,10 +2,18 @@ import type { ReactNode } from 'react'
 import { Inbox, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
-export function Table({ children }: { children: ReactNode }) {
+export function Table({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
   return (
     <div className="overflow-x-auto scrollbar-thin">
-      <table className="w-full border-collapse text-sm">{children}</table>
+      <table className={cn('w-full border-collapse text-sm', className)}>
+        {children}
+      </table>
     </div>
   )
 }
