@@ -57,6 +57,7 @@ export default function Processos() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
+  const [filtroStatus, setFiltroStatus] = useState('todos')
   // Ordenação padrão: data de aquisição, do mais antigo para o mais novo.
   const [sortBy, setSortBy] = useState<
     'data_aquisicao' | 'expectativa_liquidacao'
@@ -75,6 +76,7 @@ export default function Processos() {
 
   const lista = useMemo(() => {
     let l = data ?? []
+    if (filtroStatus !== 'todos') l = l.filter((p) => p.status === filtroStatus)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((p) =>
@@ -100,7 +102,7 @@ export default function Processos() {
       if (!bv) return -1
       return av.localeCompare(bv) * dir
     })
-  }, [data, busca, sortBy, sortDir])
+  }, [data, busca, filtroStatus, sortBy, sortDir])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -151,14 +153,28 @@ export default function Processos() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por número, cedente, cessionário, devedora, comarca, RTDPJ…"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              className="pl-9"
+              placeholder="Buscar por número, cedente, cessionário, devedora, comarca, RTDPJ…"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
+          </div>
+          <Select
+            className="sm:w-56"
+            value={filtroStatus}
+            onChange={(e) => setFiltroStatus(e.target.value)}
+          >
+            <option value="todos">Todos os status</option>
+            {Object.entries(STATUS_PROCESSO).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label}
+              </option>
+            ))}
+          </Select>
         </div>
       </Card>
 
