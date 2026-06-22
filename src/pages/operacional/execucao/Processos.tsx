@@ -190,11 +190,11 @@ export default function Processos() {
             <THead>
               <tr>
                 <TH>Processo</TH>
-                <TH>Comarca / Vara</TH>
+                <TH className="whitespace-nowrap">Comarca / Vara</TH>
                 <TH>Cedente</TH>
                 <TH>Cessionário</TH>
-                <TH>Entidade devedora</TH>
-                <TH>Nº RTDPJ</TH>
+                <TH className="whitespace-nowrap">Entidade devedora</TH>
+                <TH className="whitespace-nowrap">Nº RTDPJ</TH>
                 <TH>
                   <button
                     type="button"
@@ -242,17 +242,17 @@ export default function Processos() {
                 const st = getLabel(STATUS_PROCESSO, p.status)
                 return (
                   <TR key={p.id}>
-                    <TD className="font-medium text-slate-800">
+                    <TD className="whitespace-nowrap font-medium text-slate-800">
                       {formatCNJ(p.numero_cnj)}
                       <div className="text-xs font-normal text-slate-400">
                         {p.tribunal || '—'}
                       </div>
                     </TD>
-                    <TD>
+                    <TD className="whitespace-nowrap">
                       {p.comarca || '—'}
                       <div className="text-xs text-slate-400">{p.vara || '—'}</div>
                     </TD>
-                    <TD>
+                    <TD className="whitespace-nowrap">
                       {p.cedente || '—'}
                       {p.cedente_advogado && (
                         <div className="text-xs text-slate-400">
@@ -260,8 +260,8 @@ export default function Processos() {
                         </div>
                       )}
                     </TD>
-                    <TD>{p.cessionario || '—'}</TD>
-                    <TD>{p.entidade_devedora || '—'}</TD>
+                    <TD className="whitespace-nowrap">{p.cessionario || '—'}</TD>
+                    <TD className="whitespace-nowrap">{p.entidade_devedora || '—'}</TD>
                     <TD>{p.numero_rtdpj || '—'}</TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.data_aquisicao)}
