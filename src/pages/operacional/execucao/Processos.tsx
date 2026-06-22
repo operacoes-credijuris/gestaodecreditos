@@ -150,14 +150,28 @@ export default function Processos() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por número, cedente, cessionário, devedora, comarca…"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              className="pl-9"
+              placeholder="Buscar por número, cedente, cessionário, devedora, comarca…"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
+          </div>
+          <Select
+            className="sm:w-56"
+            value={filtroInstrumento}
+            onChange={(e) => setFiltroInstrumento(e.target.value)}
+          >
+            <option value="todos">Todos os instrumentos</option>
+            {Object.entries(INSTRUMENTO).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label}
+              </option>
+            ))}
+          </Select>
         </div>
       </Card>
 
@@ -177,24 +191,7 @@ export default function Processos() {
                 <TH>Cedente</TH>
                 <TH>Cessionário</TH>
                 <TH>Entidade devedora</TH>
-                <TH>
-                  <div className="flex items-center gap-2">
-                    <span>Instrumento</span>
-                    <select
-                      value={filtroInstrumento}
-                      onChange={(e) => setFiltroInstrumento(e.target.value)}
-                      title="Filtrar por instrumento"
-                      className="rounded border border-slate-200 bg-white px-1 py-0.5 text-xs font-normal normal-case text-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-300"
-                    >
-                      <option value="todos">Todos</option>
-                      {Object.entries(INSTRUMENTO).map(([k, v]) => (
-                        <option key={k} value={k}>
-                          {v.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </TH>
+                <TH>Instrumento</TH>
                 <TH>
                   <button
                     type="button"
