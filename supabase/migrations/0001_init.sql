@@ -16,8 +16,20 @@ begin
 end;
 $$;
 
+-- ----------- Tabelas -----------
+
+create table if not exists public.profiles (
+  id          uuid primary key references auth.users (id) on delete cascade,
+  email       text not null,
+  nome        text,
+  role        text not null default 'usuario' check (role in ('admin','usuario')),
+  ativo       boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+
 -- Verifica se o usuário atual é administrador (SECURITY DEFINER evita
--- recursão de RLS ao ler a tabela profiles).
+-- recursão de RLS ao ler a tabela profiles). Definida após a tabela profiles
+-- pois funções SQL têm o corpo validado na criação.
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -32,17 +44,6 @@ as $$
       where p.id = auth.uid() and p.role = 'admin'
     );
 $$;
-
--- ----------- Tabelas -----------
-
-create table if not exists public.profiles (
-  id          uuid primary key references auth.users (id) on delete cascade,
-  email       text not null,
-  nome        text,
-  role        text not null default 'usuario' check (role in ('admin','usuario')),
-  ativo       boolean not null default true,
-  created_at  timestamptz not null default now()
-);
 
 create table if not exists public.analises_credito (
   id              uuid primary key default gen_random_uuid(),
