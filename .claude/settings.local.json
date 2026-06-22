@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Write-Output \"node: $\\(node --version 2>&1\\)\"; Write-Output \"npm: $\\(npm --version 2>&1\\)\"; Write-Output \"git: $\\(git --version 2>&1\\)\"; Write-Output \"gh: $\\(gh --version 2>&1 | Select-Object -First 1\\)\")"
+    ]
+  }
+}

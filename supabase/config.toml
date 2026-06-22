@@ -1,0 +1,22 @@
+# Configuração da CLI do Supabase para este projeto.
+# Para conectar ao seu projeto remoto: supabase link --project-ref <ref-do-projeto>
+project_id = "credijuris-sistema"
+
+[api]
+enabled = true
+
+[db]
+# Versão do Postgres (ajuste se necessário ao do seu projeto).
+major_version = 15
+
+[functions.admin-create-user]
+verify_jwt = true
+
+[functions.salvar-token-advbox]
+verify_jwt = true
+
+[functions.advbox-sync]
+verify_jwt = true
+
+[functions.djen-consulta]
+verify_jwt = true
