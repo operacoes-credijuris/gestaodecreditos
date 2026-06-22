@@ -250,7 +250,9 @@ export default function Processos() {
                   </button>
                 </TH>
                 <TH>Status</TH>
-                <TH className="text-right">Ações</TH>
+                <TH className="text-right">
+                  <span className="sr-only">Ações</span>
+                </TH>
               </tr>
             </THead>
             <TBody>
