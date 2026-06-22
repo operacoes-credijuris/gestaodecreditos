@@ -186,16 +186,16 @@ export default function Processos() {
         ) : lista.length === 0 ? (
           <EmptyState title="Nenhum processo" description="Cadastre o primeiro processo." />
         ) : (
-          <Table className="table-fixed">
+          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
             <THead>
               <tr>
-                <TH className="w-[13%]">Processo</TH>
-                <TH className="w-[10%]">Comarca / Vara</TH>
-                <TH className="w-[13%]">Cedente</TH>
-                <TH className="w-[11%]">Cessionário</TH>
-                <TH className="w-[11%]">Entidade devedora</TH>
-                <TH className="w-[7%]">Nº RTDPJ</TH>
-                <TH className="w-[9%]">
+                <TH>Processo</TH>
+                <TH>Comarca / Vara</TH>
+                <TH>Cedente</TH>
+                <TH>Cessionário</TH>
+                <TH>Entidade devedora</TH>
+                <TH>Nº RTDPJ</TH>
+                <TH>
                   <button
                     type="button"
                     onClick={() => toggleSort('data_aquisicao')}
@@ -214,7 +214,7 @@ export default function Processos() {
                     )}
                   </button>
                 </TH>
-                <TH className="w-[9%]">
+                <TH>
                   <button
                     type="button"
                     onClick={() => toggleSort('expectativa_liquidacao')}
@@ -233,8 +233,8 @@ export default function Processos() {
                     )}
                   </button>
                 </TH>
-                <TH className="w-[9%]">Status</TH>
-                <TH className="w-[8%] text-right">Ações</TH>
+                <TH>Status</TH>
+                <TH className="text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -242,66 +242,37 @@ export default function Processos() {
                 const st = getLabel(STATUS_PROCESSO, p.status)
                 return (
                   <TR key={p.id}>
-                    <TD className="font-medium text-slate-800">
-                      <div className="truncate" title={p.numero_cnj}>
-                        {formatCNJ(p.numero_cnj)}
-                      </div>
-                      <div
-                        className="truncate text-xs font-normal text-slate-400"
-                        title={p.tribunal ?? ''}
-                      >
+                    <TD className="whitespace-nowrap font-medium text-slate-800">
+                      {formatCNJ(p.numero_cnj)}
+                      <div className="text-[11px] font-normal text-slate-400">
                         {p.tribunal || '—'}
                       </div>
                     </TD>
-                    <TD>
-                      <div className="truncate" title={p.comarca ?? ''}>
-                        {p.comarca || '—'}
-                      </div>
-                      <div
-                        className="truncate text-xs text-slate-400"
-                        title={p.vara ?? ''}
-                      >
-                        {p.vara || '—'}
-                      </div>
+                    <TD className="whitespace-nowrap">
+                      {p.comarca || '—'}
+                      <div className="text-[11px] text-slate-400">{p.vara || '—'}</div>
                     </TD>
-                    <TD>
-                      <div className="truncate" title={p.cedente ?? ''}>
-                        {p.cedente || '—'}
-                      </div>
+                    <TD className="whitespace-nowrap">
+                      {p.cedente || '—'}
                       {p.cedente_advogado && (
-                        <div
-                          className="truncate text-xs text-slate-400"
-                          title={p.cedente_advogado}
-                        >
+                        <div className="text-[11px] text-slate-400">
                           adv. {p.cedente_advogado}
                         </div>
                       )}
                     </TD>
-                    <TD>
-                      <div className="truncate" title={p.cessionario ?? ''}>
-                        {p.cessionario || '—'}
-                      </div>
-                    </TD>
-                    <TD>
-                      <div className="truncate" title={p.entidade_devedora ?? ''}>
-                        {p.entidade_devedora || '—'}
-                      </div>
-                    </TD>
-                    <TD>
-                      <div className="truncate" title={p.numero_rtdpj ?? ''}>
-                        {p.numero_rtdpj || '—'}
-                      </div>
-                    </TD>
+                    <TD className="whitespace-nowrap">{p.cessionario || '—'}</TD>
+                    <TD className="whitespace-nowrap">{p.entidade_devedora || '—'}</TD>
+                    <TD className="whitespace-nowrap">{p.numero_rtdpj || '—'}</TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.data_aquisicao)}
                     </TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.expectativa_liquidacao)}
                     </TD>
-                    <TD>
+                    <TD className="whitespace-nowrap">
                       <Badge tone={st.tone}>{st.label}</Badge>
                       {p.data_liquidacao && (
-                        <div className="truncate text-xs text-slate-400">
+                        <div className="text-[11px] text-slate-400">
                           Liq. {formatDate(p.data_liquidacao)}
                         </div>
                       )}
