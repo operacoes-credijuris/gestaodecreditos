@@ -264,11 +264,7 @@ export default function Processos() {
                         </div>
                       )}
                     </TD>
-                    <TD>
-                      <div className="max-w-[150px] whitespace-normal break-words">
-                        {p.cessionario || '—'}
-                      </div>
-                    </TD>
+                    <TD className="whitespace-nowrap">{p.cessionario || '—'}</TD>
                     <TD className="whitespace-nowrap">{p.entidade_devedora || '—'}</TD>
                     <TD>
                       <div className="max-w-[120px]">
