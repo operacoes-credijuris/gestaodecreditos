@@ -94,11 +94,13 @@ export default function Processos() {
         [
           p.numero_cnj,
           p.cedente,
+          p.cedente_advogado,
           p.cessionario,
           p.entidade_devedora,
           p.comarca,
           p.tribunal,
           p.numero_rtdpj,
+          p.instrumento ? getLabel(INSTRUMENTO, p.instrumento).label : null,
         ]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
@@ -172,7 +174,7 @@ export default function Processos() {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
               className="pl-9"
-              placeholder="Buscar por número, cedente, cessionário, devedora, comarca, RTDPJ…"
+              placeholder="Buscar por número, cedente, advogado, cessionário, devedora, comarca, tribunal, instrumento, RTDPJ…"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
