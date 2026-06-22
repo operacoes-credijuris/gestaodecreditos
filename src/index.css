@@ -12,9 +12,9 @@
   }
 
   /* Reduz levemente a escala geral (fontes e espaçamentos em rem do
-     Tailwind) — base 16px → 15px. Reajusta os layouts proporcionalmente. */
+     Tailwind) — base 16px → 14.5px. Reajusta os layouts proporcionalmente. */
   html {
-    font-size: 15px;
+    font-size: 14.5px;
   }
 
   body {
