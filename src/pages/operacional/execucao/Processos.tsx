@@ -126,8 +126,9 @@ export default function Processos() {
         editing as Processo
       // Data de liquidação só faz sentido para complementar/encerrado.
       if (payload.status === 'ativo') payload.data_liquidacao = null
-      // Nº RTDPJ só se aplica a registro público.
-      if (payload.instrumento !== 'registro_publico') payload.numero_rtdpj = null
+      // Nº RTDPJ só se aplica a registro público e é opcional (vazio = nulo).
+      if (payload.instrumento !== 'registro_publico' || !payload.numero_rtdpj?.trim())
+        payload.numero_rtdpj = null
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Processo atualizado.')
@@ -440,7 +441,7 @@ export default function Processos() {
                 </Select>
               </Field>
               {editing.instrumento === 'registro_publico' && (
-                <Field label="Nº RTDPJ">
+                <Field label="Nº RTDPJ" hint="Opcional. Para mais de um, separe por vírgula.">
                   <Input
                     value={editing.numero_rtdpj ?? ''}
                     onChange={(e) =>
