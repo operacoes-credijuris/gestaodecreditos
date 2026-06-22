@@ -159,10 +159,12 @@ export default function Processos() {
               <tr>
                 <TH>Processo</TH>
                 <TH>Comarca / Vara</TH>
-                <TH>Cedente / Cessionário</TH>
+                <TH>Cedente</TH>
+                <TH>Cessionário</TH>
                 <TH>Entidade devedora</TH>
                 <TH>Instrumento</TH>
-                <TH>Aquisição → Expectativa</TH>
+                <TH>Aquisição</TH>
+                <TH>Expectativa</TH>
                 <TH className="text-right">Ações</TH>
               </tr>
             </THead>
@@ -182,26 +184,22 @@ export default function Processos() {
                       <div className="text-xs text-slate-400">{p.vara || '—'}</div>
                     </TD>
                     <TD>
-                      <div>
-                        {p.cedente || '—'}
-                        {p.cedente_advogado && (
-                          <span className="text-xs text-slate-400">
-                            {' '}
-                            (adv. {p.cedente_advogado})
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        Cessionário: {p.cessionario || '—'}
-                      </div>
+                      {p.cedente || '—'}
+                      {p.cedente_advogado && (
+                        <div className="text-xs text-slate-400">
+                          adv. {p.cedente_advogado}
+                        </div>
+                      )}
                     </TD>
+                    <TD>{p.cessionario || '—'}</TD>
                     <TD>{p.entidade_devedora || '—'}</TD>
                     <TD>
                       {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
                     </TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.data_aquisicao)}
-                      <span className="text-slate-300"> → </span>
+                    </TD>
+                    <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.expectativa_liquidacao)}
                     </TD>
                     <TD className="text-right">
