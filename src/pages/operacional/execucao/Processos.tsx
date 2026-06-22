@@ -9,11 +9,12 @@ import {
   ArrowUpDown,
 } from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
-import type { Processo } from '@/lib/types'
+import type { Processo, StatusProcesso } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Field, Input } from '@/components/ui/Field'
+import { Badge } from '@/components/ui/Badge'
+import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
@@ -28,6 +29,7 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
+import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
 
 const VAZIO: Partial<Processo> = {
@@ -42,6 +44,8 @@ const VAZIO: Partial<Processo> = {
   data_aquisicao: '',
   expectativa_liquidacao: '',
   numero_rtdpj: '',
+  status: 'ativo',
+  data_liquidacao: '',
 }
 
 export default function Processos() {
@@ -108,6 +112,8 @@ export default function Processos() {
     try {
       const { id, created_at, updated_at, advbox_lawsuit_id, ...payload } =
         editing as Processo
+      // Data de liquidação só faz sentido para complementar/encerrado.
+      if (payload.status === 'ativo') payload.data_liquidacao = null
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Processo atualizado.')
@@ -211,11 +217,13 @@ export default function Processos() {
                     )}
                   </button>
                 </TH>
+                <TH>Status</TH>
                 <TH className="text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
               {lista.map((p) => {
+                const st = getLabel(STATUS_PROCESSO, p.status)
                 return (
                   <TR key={p.id}>
                     <TD className="font-medium text-slate-800">
@@ -244,6 +252,14 @@ export default function Processos() {
                     </TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.expectativa_liquidacao)}
+                    </TD>
+                    <TD>
+                      <Badge tone={st.tone}>{st.label}</Badge>
+                      {p.data_liquidacao && (
+                        <div className="text-xs text-slate-400">
+                          Liq. {formatDate(p.data_liquidacao)}
+                        </div>
+                      )}
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
@@ -376,6 +392,35 @@ export default function Processos() {
                   placeholder="Número do registro no RTDPJ"
                 />
               </Field>
+              <Field label="Status" required>
+                <Select
+                  value={editing.status ?? 'ativo'}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      status: e.target.value as StatusProcesso,
+                    })
+                  }
+                >
+                  {Object.entries(STATUS_PROCESSO).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {(editing.status === 'complementar' ||
+                editing.status === 'encerrado') && (
+                <Field label="Data de liquidação">
+                  <Input
+                    type="date"
+                    value={editing.data_liquidacao ?? ''}
+                    onChange={(e) =>
+                      setEditing({ ...editing, data_liquidacao: e.target.value })
+                    }
+                  />
+                </Field>
+              )}
             </div>
           </form>
         )}

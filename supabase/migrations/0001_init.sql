@@ -75,6 +75,9 @@ create table if not exists public.processos (
   data_aquisicao         date,
   expectativa_liquidacao date,
   numero_rtdpj           text,
+  status                 text not null default 'ativo'
+                         check (status in ('ativo','complementar','encerrado')),
+  data_liquidacao        date,
   advbox_lawsuit_id      text,
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now()

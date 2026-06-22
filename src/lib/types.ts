@@ -36,6 +36,8 @@ export interface AnaliseCredito {
 }
 
 // ---------- Operacional: Processos ----------
+export type StatusProcesso = 'ativo' | 'complementar' | 'encerrado'
+
 export interface Processo {
   id: UUID
   numero_cnj: string
@@ -49,6 +51,8 @@ export interface Processo {
   data_aquisicao: string | null
   expectativa_liquidacao: string | null
   numero_rtdpj: string | null
+  status: StatusProcesso
+  data_liquidacao: string | null
   advbox_lawsuit_id: string | null
   created_at: string
   updated_at: string
