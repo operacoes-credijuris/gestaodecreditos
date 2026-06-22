@@ -74,6 +74,8 @@ create table if not exists public.processos (
   entidade_devedora      text,
   data_aquisicao         date,
   expectativa_liquidacao date,
+  instrumento            text
+                         check (instrumento in ('particular','registro_publico','escritura_publica')),
   numero_rtdpj           text,
   status                 text not null default 'ativo'
                          check (status in ('ativo','complementar','encerrado')),

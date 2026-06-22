@@ -9,7 +9,7 @@ import {
   ArrowUpDown,
 } from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
-import type { Processo, StatusProcesso } from '@/lib/types'
+import type { Processo, StatusProcesso, Instrumento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -29,7 +29,7 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
+import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
 
 const VAZIO: Partial<Processo> = {
@@ -43,6 +43,7 @@ const VAZIO: Partial<Processo> = {
   entidade_devedora: '',
   data_aquisicao: '',
   expectativa_liquidacao: '',
+  instrumento: null,
   numero_rtdpj: '',
   status: 'ativo',
   data_liquidacao: '',
@@ -116,6 +117,8 @@ export default function Processos() {
         editing as Processo
       // Data de liquidação só faz sentido para complementar/encerrado.
       if (payload.status === 'ativo') payload.data_liquidacao = null
+      // Nº RTDPJ só se aplica a registro público.
+      if (payload.instrumento !== 'registro_publico') payload.numero_rtdpj = null
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Processo atualizado.')
@@ -194,7 +197,7 @@ export default function Processos() {
                 <TH>Cedente</TH>
                 <TH>Cessionário</TH>
                 <TH>Entidade devedora</TH>
-                <TH>Nº RTDPJ</TH>
+                <TH>Instrumento</TH>
                 <TH>
                   <button
                     type="button"
@@ -240,6 +243,7 @@ export default function Processos() {
             <TBody>
               {lista.map((p) => {
                 const st = getLabel(STATUS_PROCESSO, p.status)
+                const inst = getLabel(INSTRUMENTO, p.instrumento)
                 return (
                   <TR key={p.id}>
                     <TD className="whitespace-nowrap font-medium text-slate-800">
@@ -262,7 +266,14 @@ export default function Processos() {
                     </TD>
                     <TD className="whitespace-nowrap">{p.cessionario || '—'}</TD>
                     <TD className="whitespace-nowrap">{p.entidade_devedora || '—'}</TD>
-                    <TD className="whitespace-nowrap">{p.numero_rtdpj || '—'}</TD>
+                    <TD className="whitespace-nowrap">
+                      {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
+                      {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
+                        <div className="text-[11px] text-slate-400">
+                          RTDPJ {p.numero_rtdpj}
+                        </div>
+                      )}
+                    </TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.data_aquisicao)}
                     </TD>
@@ -399,15 +410,35 @@ export default function Processos() {
                   }
                 />
               </Field>
-              <Field label="Nº RTDPJ" className="sm:col-span-2">
-                <Input
-                  value={editing.numero_rtdpj ?? ''}
+              <Field label="Instrumento">
+                <Select
+                  value={editing.instrumento ?? ''}
                   onChange={(e) =>
-                    setEditing({ ...editing, numero_rtdpj: e.target.value })
+                    setEditing({
+                      ...editing,
+                      instrumento: (e.target.value || null) as Instrumento | null,
+                    })
                   }
-                  placeholder="Número do registro no RTDPJ"
-                />
+                >
+                  <option value="">Não informado</option>
+                  {Object.entries(INSTRUMENTO).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.label}
+                    </option>
+                  ))}
+                </Select>
               </Field>
+              {editing.instrumento === 'registro_publico' && (
+                <Field label="Nº RTDPJ">
+                  <Input
+                    value={editing.numero_rtdpj ?? ''}
+                    onChange={(e) =>
+                      setEditing({ ...editing, numero_rtdpj: e.target.value })
+                    }
+                    placeholder="Número do registro no RTDPJ"
+                  />
+                </Field>
+              )}
               <Field label="Status" required>
                 <Select
                   value={editing.status ?? 'ativo'}
