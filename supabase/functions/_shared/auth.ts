@@ -1,7 +1,7 @@
 // Helpers de autenticação/serviço compartilhados pelas Edge Functions.
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-export const ADMIN_EMAIL = 'operacoes@credijuris.com'
+export const ADMIN_EMAIL = 'contato@credijuris.com'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!

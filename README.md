@@ -20,7 +20,7 @@ com uma camada de **Gestão Estratégica** consolidando os dois. Integra com
 - **Configurações** (somente administrador) — token ADVBOX, parâmetros DJEN, gestão de usuários.
 
 > **Acesso:** todo usuário autenticado vê o sistema inteiro. Apenas o
-> administrador (`operacoes@credijuris.com`) cadastra usuários e edita as
+> administrador (`contato@credijuris.com`) cadastra usuários e edita as
 > integrações.
 
 ---
@@ -70,7 +70,7 @@ supabase db push
 
 Em *Authentication → Users → Add user*, crie:
 
-- **E-mail:** `operacoes@credijuris.com`
+- **E-mail:** `contato@credijuris.com`
 - **Senha:** defina uma senha
 - Marque **Auto Confirm User**
 

@@ -10,7 +10,7 @@ import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '@/lib/types'
 
-export const ADMIN_EMAIL = 'operacoes@credijuris.com'
+export const ADMIN_EMAIL = 'contato@credijuris.com'
 
 interface AuthContextValue {
   session: Session | null

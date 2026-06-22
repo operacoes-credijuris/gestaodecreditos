@@ -38,7 +38,7 @@ stable
 set search_path = public
 as $$
   select
-    coalesce((auth.jwt() ->> 'email') = 'operacoes@credijuris.com', false)
+    coalesce((auth.jwt() ->> 'email') = 'contato@credijuris.com', false)
     or exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.role = 'admin'
@@ -253,7 +253,7 @@ begin
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data ->> 'nome', ''),
-    case when new.email = 'operacoes@credijuris.com' then 'admin' else 'usuario' end
+    case when new.email = 'contato@credijuris.com' then 'admin' else 'usuario' end
   )
   on conflict (id) do nothing;
   return new;
@@ -271,7 +271,7 @@ select
   u.id,
   u.email,
   coalesce(u.raw_user_meta_data ->> 'nome', ''),
-  case when u.email = 'operacoes@credijuris.com' then 'admin' else 'usuario' end,
+  case when u.email = 'contato@credijuris.com' then 'admin' else 'usuario' end,
   true
 from auth.users u
 on conflict (id) do update
