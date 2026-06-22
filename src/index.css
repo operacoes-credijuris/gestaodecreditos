@@ -11,6 +11,12 @@
     height: 100%;
   }
 
+  /* Reduz levemente a escala geral (fontes e espaçamentos em rem do
+     Tailwind) — base 16px → 15px. Reajusta os layouts proporcionalmente. */
+  html {
+    font-size: 15px;
+  }
+
   body {
     @apply bg-slate-100 text-slate-800 antialiased;
   }
