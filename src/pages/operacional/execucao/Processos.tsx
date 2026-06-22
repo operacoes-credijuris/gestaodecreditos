@@ -32,6 +32,15 @@ import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
 
+// Separa múltiplos nº RTDPJ (digitados com "e", vírgula, ";", "/" ou quebra)
+// para exibir um por linha.
+function splitRtdpj(v: string): string[] {
+  return v
+    .split(/\s*(?:\be\b|,|;|\/|\n)\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
 const VAZIO: Partial<Processo> = {
   numero_cnj: '',
   tribunal: '',
@@ -266,21 +275,15 @@ export default function Processos() {
                     </TD>
                     <TD className="whitespace-nowrap">{p.cessionario || '—'}</TD>
                     <TD className="whitespace-nowrap">{p.entidade_devedora || '—'}</TD>
-                    <TD>
-                      <div className="max-w-[120px]">
-                        {p.instrumento ? (
-                          <Badge tone={inst.tone} className="whitespace-nowrap">
-                            {inst.label}
-                          </Badge>
-                        ) : (
-                          '—'
-                        )}
-                        {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
-                          <div className="whitespace-normal break-all text-[11px] text-slate-400">
-                            {p.numero_rtdpj}
-                          </div>
-                        )}
-                      </div>
+                    <TD className="whitespace-nowrap">
+                      {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
+                      {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
+                        <div className="text-[11px] text-slate-400">
+                          {splitRtdpj(p.numero_rtdpj).map((n, i) => (
+                            <div key={i}>{n}</div>
+                          ))}
+                        </div>
+                      )}
                     </TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.data_aquisicao)}
