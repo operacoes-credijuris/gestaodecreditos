@@ -245,6 +245,10 @@ export default function ContatosServentias() {
       toast.error('Informe o órgão.')
       return
     }
+    if (auxiliar && !editing.tribunal?.trim()) {
+      toast.error('Informe o tribunal / entidade.')
+      return
+    }
     const fones = [
       editing.serventia_telefone,
       editing.serventia_whatsapp,
@@ -446,7 +450,7 @@ export default function ContatosServentias() {
                     placeholder="Ex.: Cartório do 2º Ofício"
                   />
                 </Field>
-                <Field label="Tribunal / Entidade">
+                <Field label="Tribunal / Entidade" required>
                   <Input
                     value={editing.tribunal ?? ''}
                     onChange={(e) => setEditing({ ...editing, tribunal: e.target.value })}
