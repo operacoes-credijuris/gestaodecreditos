@@ -65,7 +65,7 @@ export interface Requerimento {
   id: UUID
   numero_protocolo: string | null
   orgao: string | null
-  materia: string | null
+  tribunal_entidade: string | null
   classe_processual: string | null
   data_protocolo: string | null
   observacoes: string | null
