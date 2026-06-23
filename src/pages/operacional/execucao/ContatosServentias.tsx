@@ -22,11 +22,20 @@ import {
 import { useToast } from '@/components/ui/Toast'
 
 // Identificador do órgão = "comarca / vara" (mesma composição da aba Créditos).
+// É a chave interna que casa o contato com os créditos — não muda.
 function buildOrgao(comarca?: string | null, vara?: string | null): string {
   const c = (comarca ?? '').trim()
   const v = (vara ?? '').trim()
   if (c && v) return `${c} / ${v}`
   return c || v
+}
+
+// Exibição do órgão na tela: "[vara] de [comarca]"
+// (ex.: "11ª Vara Federal de Belo Horizonte"). Converte a chave interna.
+function formatOrgaoLabel(orgao: string): string {
+  const parts = orgao.split(' / ')
+  if (parts.length === 2) return `${parts[1]} de ${parts[0]}`
+  return orgao
 }
 
 interface OrgaoRow {
@@ -193,12 +202,7 @@ export default function ContatosServentias() {
                 return (
                   <TR key={row.orgao}>
                     <TD className="font-medium text-slate-800">
-                      {row.comarca || row.orgao}
-                      {row.vara && (
-                        <div className="text-[11px] font-normal text-slate-400">
-                          {row.vara}
-                        </div>
-                      )}
+                      {formatOrgaoLabel(row.orgao)}
                     </TD>
                     <TD>
                       {c?.serventia_telefone && (
@@ -265,7 +269,7 @@ export default function ContatosServentias() {
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title={`Contatos — ${editing?.orgao ?? ''}`}
+        title={`Contatos — ${formatOrgaoLabel(editing?.orgao ?? '')}`}
         size="lg"
         footer={
           <>
