@@ -1,6 +1,7 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { Fragment, useMemo, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search, ArrowUp, ArrowDown } from 'lucide-react'
 import { requerimentosCrud } from '@/lib/queries'
+import { useApensosManager } from '@/components/Apensos'
 import type { Requerimento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -39,6 +40,7 @@ export default function Requerimentos() {
   const update = useUpdate()
   const remove = useRemove()
   const toast = useToast()
+  const apensos = useApensosManager('requerimento_id')
 
   const [busca, setBusca] = useState('')
   // Ordenação padrão: data de protocolo, do mais antigo para o mais novo.
@@ -183,7 +185,8 @@ export default function Requerimentos() {
             </THead>
             <TBody>
               {lista.map((r) => (
-                <TR key={r.id}>
+                <Fragment key={r.id}>
+                <TR>
                   <TD className="font-medium text-slate-800">
                     {r.numero_protocolo || '—'}
                     <div className="text-[11px] font-normal text-slate-400">
@@ -198,6 +201,7 @@ export default function Requerimentos() {
                   </TD>
                   <TD className="text-right">
                     <div className="flex justify-end gap-1">
+                      {apensos.actions(r.id)}
                       <button
                         onClick={() => setEditing(r)}
                         className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
@@ -215,6 +219,8 @@ export default function Requerimentos() {
                     </div>
                   </TD>
                 </TR>
+                {apensos.detailRow(r.id, 6)}
+                </Fragment>
               ))}
             </TBody>
           </Table>
@@ -310,6 +316,8 @@ export default function Requerimentos() {
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}
       />
+
+      {apensos.modals()}
     </div>
   )
 }

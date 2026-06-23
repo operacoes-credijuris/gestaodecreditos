@@ -1,6 +1,7 @@
 import { makeCrud } from './crud'
 import type {
   AnaliseCredito,
+  Apenso,
   Cessao,
   ContatoServentia,
   Contrato,
@@ -22,6 +23,11 @@ export const processosCrud = makeCrud<Processo, Partial<Processo>>('processos')
 export const requerimentosCrud = makeCrud<Requerimento, Partial<Requerimento>>(
   'requerimentos',
 )
+
+export const apensosCrud = makeCrud<Apenso, Partial<Apenso>>('apensos', {
+  orderBy: 'created_at',
+  ascending: true,
+})
 
 export const publicacoesCrud = makeCrud<Publicacao, Partial<Publicacao>>(
   'publicacoes',

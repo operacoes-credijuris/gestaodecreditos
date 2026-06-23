@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { Fragment, useMemo, useState, type FormEvent } from 'react'
 import {
   Plus,
   Pencil,
@@ -9,6 +9,7 @@ import {
   ArrowUpDown,
 } from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
+import { useApensosManager } from '@/components/Apensos'
 import type { Processo, StatusProcesso, Instrumento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -65,6 +66,7 @@ export default function Processos() {
   const update = useUpdate()
   const remove = useRemove()
   const toast = useToast()
+  const apensos = useApensosManager('processo_id')
 
   const [busca, setBusca] = useState('')
   // Padrão ao abrir a página: mostra apenas processos ativos.
@@ -264,7 +266,8 @@ export default function Processos() {
                 const st = getLabel(STATUS_PROCESSO, p.status)
                 const inst = getLabel(INSTRUMENTO, p.instrumento)
                 return (
-                  <TR key={p.id}>
+                  <Fragment key={p.id}>
+                  <TR>
                     <TD className="whitespace-nowrap font-medium text-slate-800">
                       {formatCNJ(p.numero_cnj)}
                       <div className="text-[11px] font-normal text-slate-400">
@@ -311,6 +314,7 @@ export default function Processos() {
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
+                        {apensos.actions(p.id)}
                         <button
                           onClick={() => setEditing(p)}
                           className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
@@ -328,6 +332,8 @@ export default function Processos() {
                       </div>
                     </TD>
                   </TR>
+                  {apensos.detailRow(p.id, 10)}
+                  </Fragment>
                 )
               })}
             </TBody>
@@ -503,6 +509,8 @@ export default function Processos() {
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}
       />
+
+      {apensos.modals()}
     </div>
   )
 }

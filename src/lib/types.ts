@@ -74,6 +74,22 @@ export interface Requerimento {
   updated_at: string
 }
 
+// ---------- Operacional: Apensos (incidentes/recursos do principal) ----------
+export interface Apenso {
+  id: UUID
+  processo_id: UUID | null
+  requerimento_id: UUID | null
+  numero: string | null
+  classe_processual: string | null
+  tribunal: string | null
+  comarca: string | null
+  vara: string | null
+  polo_ativo: string | null
+  polo_passivo: string | null
+  created_at: string
+  updated_at: string
+}
+
 // ---------- Operacional: Publicações e Movimentações ----------
 export type FontePublicacao = 'djen' | 'advbox' | 'manual'
 export type TipoPublicacao = 'publicacao' | 'movimentacao'
