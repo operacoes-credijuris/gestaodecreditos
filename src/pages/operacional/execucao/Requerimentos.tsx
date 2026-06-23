@@ -41,8 +41,8 @@ export default function Requerimentos() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
-  // Ordenação padrão: data de protocolo, do mais recente para o mais antigo.
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  // Ordenação padrão: data de protocolo, do mais antigo para o mais novo.
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Partial<Requerimento> | null>(null)
   const [toDelete, setToDelete] = useState<Requerimento | null>(null)
 
