@@ -26,6 +26,7 @@ const VAZIO: Partial<Requerimento> = {
   numero_protocolo: '',
   orgao: '',
   tribunal_entidade: '',
+  materia: '',
   classe_processual: '',
   data_protocolo: '',
   observacoes: '',
@@ -54,7 +55,14 @@ export default function Requerimentos() {
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((r) =>
-        [r.numero_protocolo, r.orgao, r.tribunal_entidade, r.classe_processual, r.observacoes]
+        [
+          r.numero_protocolo,
+          r.orgao,
+          r.tribunal_entidade,
+          r.materia,
+          r.classe_processual,
+          r.observacoes,
+        ]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
       )
@@ -82,6 +90,7 @@ export default function Requerimentos() {
         numero_protocolo: editing.numero_protocolo?.trim() || null,
         orgao: editing.orgao?.trim() || null,
         tribunal_entidade: editing.tribunal_entidade?.trim() || null,
+        materia: editing.materia?.trim() || null,
         classe_processual: editing.classe_processual?.trim() || null,
         data_protocolo: editing.data_protocolo || null,
         observacoes: editing.observacoes?.trim() || null,
@@ -149,8 +158,9 @@ export default function Requerimentos() {
             <THead>
               <tr>
                 <TH>Protocolo</TH>
+                <TH>Órgão</TH>
                 <TH>Classe processual</TH>
-                <TH>Tribunal / Entidade</TH>
+                <TH>Matéria</TH>
                 <TH>
                   <button
                     type="button"
@@ -177,11 +187,12 @@ export default function Requerimentos() {
                   <TD className="font-medium text-slate-800">
                     {r.numero_protocolo || '—'}
                     <div className="text-[11px] font-normal text-slate-400">
-                      {r.orgao || '—'}
+                      {r.tribunal_entidade || '—'}
                     </div>
                   </TD>
+                  <TD className="whitespace-nowrap">{r.orgao || '—'}</TD>
                   <TD className="whitespace-nowrap">{r.classe_processual || '—'}</TD>
-                  <TD>{r.tribunal_entidade || '—'}</TD>
+                  <TD>{r.materia || '—'}</TD>
                   <TD className="whitespace-nowrap text-slate-600">
                     {formatDate(r.data_protocolo)}
                   </TD>
@@ -261,6 +272,12 @@ export default function Requerimentos() {
                   onChange={(e) =>
                     setEditing({ ...editing, classe_processual: e.target.value })
                   }
+                />
+              </Field>
+              <Field label="Matéria">
+                <Input
+                  value={editing.materia ?? ''}
+                  onChange={(e) => setEditing({ ...editing, materia: e.target.value })}
                 />
               </Field>
               <Field label="Data de protocolo">

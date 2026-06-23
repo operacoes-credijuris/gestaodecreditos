@@ -66,6 +66,7 @@ export interface Requerimento {
   numero_protocolo: string | null
   orgao: string | null
   tribunal_entidade: string | null
+  materia: string | null
   classe_processual: string | null
   data_protocolo: string | null
   observacoes: string | null
