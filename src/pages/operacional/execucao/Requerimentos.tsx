@@ -1,13 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  Search,
-  ArrowUp,
-  ArrowDown,
-  ArrowUpDown,
-} from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, ArrowUp, ArrowDown } from 'lucide-react'
 import { requerimentosCrud } from '@/lib/queries'
 import type { Requerimento, StatusRequerimento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
