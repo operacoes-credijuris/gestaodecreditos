@@ -132,6 +132,10 @@ export default function Processos() {
       // Nº RTDPJ só se aplica a registro público e é opcional (vazio = nulo).
       if (payload.instrumento !== 'registro_publico' || !payload.numero_rtdpj?.trim())
         payload.numero_rtdpj = null
+      // Datas em branco viram null (o Postgres rejeita "" em coluna date).
+      if (!payload.data_aquisicao) payload.data_aquisicao = null
+      if (!payload.expectativa_liquidacao) payload.expectativa_liquidacao = null
+      if (!payload.data_liquidacao) payload.data_liquidacao = null
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Processo atualizado.')
