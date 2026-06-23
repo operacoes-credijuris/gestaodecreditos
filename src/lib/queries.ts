@@ -35,7 +35,7 @@ export const tarefasCrud = makeCrud<Tarefa, Partial<Tarefa>>('tarefas', {
 
 export const contatosCrud = makeCrud<ContatoServentia, Partial<ContatoServentia>>(
   'contatos_serventias',
-  { orderBy: 'nome', ascending: true },
+  { orderBy: 'orgao', ascending: true },
 )
 
 export const investidoresCrud = makeCrud<Investidor, Partial<Investidor>>(

@@ -123,24 +123,16 @@ export interface Tarefa {
   updated_at: string
 }
 
-// ---------- Operacional: Contatos de Serventias e Gabinetes ----------
-export type TipoContato =
-  | 'serventia'
-  | 'gabinete'
-  | 'cartorio'
-  | 'vara'
-  | 'outro'
-
+// ---------- Operacional: Contatos (por órgão = comarca / vara) ----------
+// Os órgãos são puxados automaticamente da comarca/vara dos créditos.
+// Cada órgão guarda WhatsApp + e-mail da serventia e do gabinete.
 export interface ContatoServentia {
   id: UUID
-  tipo: TipoContato
-  nome: string
-  tribunal: string | null
-  comarca: string | null
-  telefone: string | null
-  email: string | null
-  horario_atendimento: string | null
-  observacoes: string | null
+  orgao: string | null
+  serventia_telefone: string | null
+  serventia_email: string | null
+  gabinete_telefone: string | null
+  gabinete_email: string | null
   created_at: string
   updated_at: string
 }
