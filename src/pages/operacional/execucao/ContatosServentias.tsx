@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search, Phone, Mail, MessageCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
 import type { ContatoServentia } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -74,46 +74,62 @@ interface OrgaoRow {
   contato: ContatoServentia | null
 }
 
-// Bloco de contato (telefone, whatsapp clicável, e-mail) reaproveitado
-// pela serventia e pelo gabinete.
-function BlocoContato({
-  telefone,
+// Uma linha de valor dentro da célula (opcionalmente com rótulo Serv./Gab.
+// e, no caso do WhatsApp, como link clicável para o wa.me).
+function LinhaValor({
+  label,
+  value,
   whatsapp,
-  email,
 }: {
-  telefone?: string | null
-  whatsapp?: string | null
-  email?: string | null
+  label?: string
+  value: string
+  whatsapp?: boolean
 }) {
-  if (!telefone && !whatsapp && !email) {
-    return <span className="text-slate-400">—</span>
-  }
   return (
-    <div className="space-y-0.5">
-      {telefone && (
-        <div className="flex items-center gap-1.5 text-slate-700">
-          <Phone className="h-3.5 w-3.5 text-slate-400" />
-          {telefone}
-        </div>
-      )}
-      {whatsapp && (
+    <div className="flex items-baseline gap-1">
+      {label && <span className="text-[11px] text-slate-400">{label}</span>}
+      {whatsapp ? (
         <a
-          href={waLink(whatsapp)}
+          href={waLink(value)}
           target="_blank"
           rel="noreferrer"
-          className="flex items-center gap-1.5 text-emerald-600 hover:underline"
+          className="text-emerald-600 hover:underline"
           title="Abrir conversa no WhatsApp"
         >
-          <MessageCircle className="h-3.5 w-3.5" />
-          {whatsapp}
+          {value}
         </a>
+      ) : (
+        <span className="text-slate-700">{value}</span>
       )}
-      {email && (
-        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-          <Mail className="h-3.5 w-3.5 text-slate-400" />
-          {email}
-        </div>
-      )}
+    </div>
+  )
+}
+
+// Célula de um tipo de contato (telefone, whatsapp ou e-mail). Para julgadores
+// separa Serventia/Gabinete; para auxiliares mostra um valor único.
+function CelulaContato({
+  serventia,
+  gabinete,
+  tipo,
+  whatsapp,
+}: {
+  serventia?: string | null
+  gabinete?: string | null
+  tipo: 'julgador' | 'auxiliar'
+  whatsapp?: boolean
+}) {
+  if (tipo === 'auxiliar') {
+    return serventia ? (
+      <LinhaValor value={serventia} whatsapp={whatsapp} />
+    ) : (
+      <span className="text-slate-400">—</span>
+    )
+  }
+  if (!serventia && !gabinete) return <span className="text-slate-400">—</span>
+  return (
+    <div className="space-y-0.5">
+      {serventia && <LinhaValor label="Serv." value={serventia} whatsapp={whatsapp} />}
+      {gabinete && <LinhaValor label="Gab." value={gabinete} whatsapp={whatsapp} />}
     </div>
   )
 }
@@ -267,9 +283,10 @@ export default function ContatosServentias() {
         serventia_telefone: nn(editing.serventia_telefone),
         serventia_whatsapp: nn(editing.serventia_whatsapp),
         serventia_email: nn(editing.serventia_email),
-        gabinete_telefone: nn(editing.gabinete_telefone),
-        gabinete_whatsapp: nn(editing.gabinete_whatsapp),
-        gabinete_email: nn(editing.gabinete_email),
+        // Auxiliar não tem separação serventia/gabinete.
+        gabinete_telefone: auxiliar ? null : nn(editing.gabinete_telefone),
+        gabinete_whatsapp: auxiliar ? null : nn(editing.gabinete_whatsapp),
+        gabinete_email: auxiliar ? null : nn(editing.gabinete_email),
       }
       if (editing.id) {
         await update.mutateAsync({ id: editing.id, changes: payload })
@@ -344,8 +361,9 @@ export default function ContatosServentias() {
               <tr>
                 <TH>Órgão</TH>
                 <TH>Tribunal</TH>
-                <TH>Serventia</TH>
-                <TH>Gabinete</TH>
+                <TH>Telefone</TH>
+                <TH>WhatsApp</TH>
+                <TH>E-mail</TH>
                 <TH className="text-right">Ações</TH>
               </tr>
             </THead>
@@ -367,18 +385,26 @@ export default function ContatosServentias() {
                     <TD className="whitespace-nowrap text-slate-600">
                       {row.tribunal || '—'}
                     </TD>
-                    <TD>
-                      <BlocoContato
-                        telefone={c?.serventia_telefone}
-                        whatsapp={c?.serventia_whatsapp}
-                        email={c?.serventia_email}
+                    <TD className="whitespace-nowrap">
+                      <CelulaContato
+                        tipo={row.tipo}
+                        serventia={c?.serventia_telefone}
+                        gabinete={c?.gabinete_telefone}
+                      />
+                    </TD>
+                    <TD className="whitespace-nowrap">
+                      <CelulaContato
+                        tipo={row.tipo}
+                        serventia={c?.serventia_whatsapp}
+                        gabinete={c?.gabinete_whatsapp}
+                        whatsapp
                       />
                     </TD>
                     <TD>
-                      <BlocoContato
-                        telefone={c?.gabinete_telefone}
-                        whatsapp={c?.gabinete_whatsapp}
-                        email={c?.gabinete_email}
+                      <CelulaContato
+                        tipo={row.tipo}
+                        serventia={c?.serventia_email}
+                        gabinete={c?.gabinete_email}
                       />
                     </TD>
                     <TD className="text-right">
@@ -441,99 +467,139 @@ export default function ContatosServentias() {
       >
         {editing && (
           <form id="form-contato" onSubmit={handleSubmit} className="space-y-5">
-            {editandoAuxiliar && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Órgão" required>
-                  <Input
-                    value={editing.orgao ?? ''}
-                    onChange={(e) => setEditing({ ...editing, orgao: e.target.value })}
-                    placeholder="Ex.: Cartório do 2º Ofício"
-                  />
-                </Field>
-                <Field label="Tribunal / Entidade" required>
-                  <Input
-                    value={editing.tribunal ?? ''}
-                    onChange={(e) => setEditing({ ...editing, tribunal: e.target.value })}
-                  />
-                </Field>
-              </div>
+            {editandoAuxiliar ? (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Órgão" required>
+                    <Input
+                      value={editing.orgao ?? ''}
+                      onChange={(e) => setEditing({ ...editing, orgao: e.target.value })}
+                      placeholder="Ex.: Cartório do 2º Ofício"
+                    />
+                  </Field>
+                  <Field label="Tribunal / Entidade" required>
+                    <Input
+                      value={editing.tribunal ?? ''}
+                      onChange={(e) => setEditing({ ...editing, tribunal: e.target.value })}
+                    />
+                  </Field>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Telefone">
+                    <Input
+                      value={editing.serventia_telefone ?? ''}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          serventia_telefone: formatTelefone(e.target.value),
+                        })
+                      }
+                      placeholder="(00) 0000-0000"
+                    />
+                  </Field>
+                  <Field label="WhatsApp">
+                    <Input
+                      value={editing.serventia_whatsapp ?? ''}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          serventia_whatsapp: formatTelefone(e.target.value),
+                        })
+                      }
+                      placeholder="(00) 00000-0000"
+                    />
+                  </Field>
+                  <Field label="E-mail" className="sm:col-span-2">
+                    <Input
+                      type="email"
+                      value={editing.serventia_email ?? ''}
+                      onChange={(e) =>
+                        setEditing({ ...editing, serventia_email: e.target.value })
+                      }
+                    />
+                  </Field>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-slate-700">Serventia</h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Telefone">
+                      <Input
+                        value={editing.serventia_telefone ?? ''}
+                        onChange={(e) =>
+                          setEditing({
+                            ...editing,
+                            serventia_telefone: formatTelefone(e.target.value),
+                          })
+                        }
+                        placeholder="(00) 0000-0000"
+                      />
+                    </Field>
+                    <Field label="WhatsApp">
+                      <Input
+                        value={editing.serventia_whatsapp ?? ''}
+                        onChange={(e) =>
+                          setEditing({
+                            ...editing,
+                            serventia_whatsapp: formatTelefone(e.target.value),
+                          })
+                        }
+                        placeholder="(00) 00000-0000"
+                      />
+                    </Field>
+                    <Field label="E-mail" className="sm:col-span-2">
+                      <Input
+                        type="email"
+                        value={editing.serventia_email ?? ''}
+                        onChange={(e) =>
+                          setEditing({ ...editing, serventia_email: e.target.value })
+                        }
+                      />
+                    </Field>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-slate-700">Gabinete</h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Telefone">
+                      <Input
+                        value={editing.gabinete_telefone ?? ''}
+                        onChange={(e) =>
+                          setEditing({
+                            ...editing,
+                            gabinete_telefone: formatTelefone(e.target.value),
+                          })
+                        }
+                        placeholder="(00) 0000-0000"
+                      />
+                    </Field>
+                    <Field label="WhatsApp">
+                      <Input
+                        value={editing.gabinete_whatsapp ?? ''}
+                        onChange={(e) =>
+                          setEditing({
+                            ...editing,
+                            gabinete_whatsapp: formatTelefone(e.target.value),
+                          })
+                        }
+                        placeholder="(00) 00000-0000"
+                      />
+                    </Field>
+                    <Field label="E-mail" className="sm:col-span-2">
+                      <Input
+                        type="email"
+                        value={editing.gabinete_email ?? ''}
+                        onChange={(e) =>
+                          setEditing({ ...editing, gabinete_email: e.target.value })
+                        }
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </>
             )}
-            <div>
-              <h3 className="mb-2 text-sm font-semibold text-slate-700">Serventia</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Telefone">
-                  <Input
-                    value={editing.serventia_telefone ?? ''}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        serventia_telefone: formatTelefone(e.target.value),
-                      })
-                    }
-                    placeholder="(00) 0000-0000"
-                  />
-                </Field>
-                <Field label="WhatsApp">
-                  <Input
-                    value={editing.serventia_whatsapp ?? ''}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        serventia_whatsapp: formatTelefone(e.target.value),
-                      })
-                    }
-                    placeholder="(00) 00000-0000"
-                  />
-                </Field>
-                <Field label="E-mail" className="sm:col-span-2">
-                  <Input
-                    type="email"
-                    value={editing.serventia_email ?? ''}
-                    onChange={(e) =>
-                      setEditing({ ...editing, serventia_email: e.target.value })
-                    }
-                  />
-                </Field>
-              </div>
-            </div>
-            <div>
-              <h3 className="mb-2 text-sm font-semibold text-slate-700">Gabinete</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Telefone">
-                  <Input
-                    value={editing.gabinete_telefone ?? ''}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        gabinete_telefone: formatTelefone(e.target.value),
-                      })
-                    }
-                    placeholder="(00) 0000-0000"
-                  />
-                </Field>
-                <Field label="WhatsApp">
-                  <Input
-                    value={editing.gabinete_whatsapp ?? ''}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        gabinete_whatsapp: formatTelefone(e.target.value),
-                      })
-                    }
-                    placeholder="(00) 00000-0000"
-                  />
-                </Field>
-                <Field label="E-mail" className="sm:col-span-2">
-                  <Input
-                    type="email"
-                    value={editing.gabinete_email ?? ''}
-                    onChange={(e) =>
-                      setEditing({ ...editing, gabinete_email: e.target.value })
-                    }
-                  />
-                </Field>
-              </div>
-            </div>
           </form>
         )}
       </Modal>
