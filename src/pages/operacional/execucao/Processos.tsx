@@ -216,42 +216,43 @@ export default function Processos() {
                 <TH>Entidade devedora</TH>
                 <TH>Instrumento</TH>
                 <TH>
-                  <button
-                    type="button"
-                    onClick={() => toggleSort('data_aquisicao')}
-                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
-                    title="Ordenar por data de aquisição"
-                  >
-                    Aquisição
-                    {sortBy === 'data_aquisicao' ? (
-                      sortDir === 'asc' ? (
-                        <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
+                  <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleSort('data_aquisicao')}
+                      className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
+                      title="Ordenar por data de aquisição"
+                    >
+                      Aquisição
+                      {sortBy === 'data_aquisicao' ? (
+                        sortDir === 'asc' ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
+                        )
                       ) : (
-                        <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
-                      )
-                    ) : (
-                      <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
-                    )}
-                  </button>
-                </TH>
-                <TH>
-                  <button
-                    type="button"
-                    onClick={() => toggleSort('expectativa_liquidacao')}
-                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
-                    title="Ordenar por expectativa de liquidação"
-                  >
-                    Expectativa
-                    {sortBy === 'expectativa_liquidacao' ? (
-                      sortDir === 'asc' ? (
-                        <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
+                        <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
+                      )}
+                    </button>
+                    <span className="text-slate-300">/</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleSort('expectativa_liquidacao')}
+                      className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
+                      title="Ordenar por expectativa de liquidação"
+                    >
+                      Expectativa
+                      {sortBy === 'expectativa_liquidacao' ? (
+                        sortDir === 'asc' ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
+                        )
                       ) : (
-                        <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
-                      )
-                    ) : (
-                      <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
-                    )}
-                  </button>
+                        <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
+                      )}
+                    </button>
+                  </span>
                 </TH>
                 <TH>Status</TH>
                 <TH className="text-right">
@@ -295,11 +296,11 @@ export default function Processos() {
                         </div>
                       )}
                     </TD>
-                    <TD className="whitespace-nowrap text-slate-600">
+                    <TD className="whitespace-nowrap">
                       {formatDate(p.data_aquisicao)}
-                    </TD>
-                    <TD className="whitespace-nowrap text-slate-600">
-                      {formatDate(p.expectativa_liquidacao)}
+                      <div className="text-[11px] text-slate-400">
+                        {formatDate(p.expectativa_liquidacao)}
+                      </div>
                     </TD>
                     <TD className="whitespace-nowrap">
                       <Badge tone={st.tone}>{st.label}</Badge>
