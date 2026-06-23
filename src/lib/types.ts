@@ -61,20 +61,13 @@ export interface Processo {
 }
 
 // ---------- Operacional: Requerimentos administrativos ----------
-export type StatusRequerimento =
-  | 'pendente'
-  | 'protocolado'
-  | 'em_analise'
-  | 'deferido'
-  | 'indeferido'
-
 export interface Requerimento {
   id: UUID
-  assunto: string
-  orgao: string | null
   numero_protocolo: string | null
+  orgao: string | null
+  materia: string | null
+  classe_processual: string | null
   data_protocolo: string | null
-  status: StatusRequerimento
   observacoes: string | null
   created_at: string
   updated_at: string

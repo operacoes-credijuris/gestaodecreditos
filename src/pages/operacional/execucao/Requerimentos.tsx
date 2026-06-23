@@ -1,12 +1,11 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search, ArrowUp, ArrowDown } from 'lucide-react'
 import { requerimentosCrud } from '@/lib/queries'
-import type { Requerimento, StatusRequerimento } from '@/lib/types'
+import type { Requerimento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select, Textarea } from '@/components/ui/Field'
+import { Field, Input, Textarea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
@@ -21,15 +20,14 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { getLabel, STATUS_REQUERIMENTO } from '@/lib/labels'
 import { formatDate } from '@/lib/format'
 
 const VAZIO: Partial<Requerimento> = {
-  assunto: '',
-  orgao: '',
   numero_protocolo: '',
+  orgao: '',
+  materia: '',
+  classe_processual: '',
   data_protocolo: '',
-  status: 'pendente',
   observacoes: '',
 }
 
@@ -42,7 +40,6 @@ export default function Requerimentos() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
-  const [filtroStatus, setFiltroStatus] = useState('todos')
   // Ordenação padrão: data de protocolo, do mais recente para o mais antigo.
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [editing, setEditing] = useState<Partial<Requerimento> | null>(null)
@@ -54,11 +51,10 @@ export default function Requerimentos() {
 
   const lista = useMemo(() => {
     let l = data ?? []
-    if (filtroStatus !== 'todos') l = l.filter((r) => r.status === filtroStatus)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((r) =>
-        [r.assunto, r.orgao, r.numero_protocolo, r.observacoes]
+        [r.numero_protocolo, r.orgao, r.materia, r.classe_processual, r.observacoes]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
       )
@@ -72,21 +68,26 @@ export default function Requerimentos() {
       if (!bv) return -1
       return av.localeCompare(bv) * dir
     })
-  }, [data, busca, filtroStatus, sortDir])
+  }, [data, busca, sortDir])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
-    if (!editing.assunto?.trim()) {
-      toast.error('Informe o assunto do requerimento.')
+    if (!editing.numero_protocolo?.trim()) {
+      toast.error('Informe o número de protocolo.')
       return
     }
     try {
-      const { id, created_at, updated_at, ...payload } = editing as Requerimento
-      // Data em branco vira null (o Postgres rejeita "" em coluna date).
-      if (!payload.data_protocolo) payload.data_protocolo = null
-      if (id) {
-        await update.mutateAsync({ id, changes: payload })
+      const payload = {
+        numero_protocolo: editing.numero_protocolo?.trim() || null,
+        orgao: editing.orgao?.trim() || null,
+        materia: editing.materia?.trim() || null,
+        classe_processual: editing.classe_processual?.trim() || null,
+        data_protocolo: editing.data_protocolo || null,
+        observacoes: editing.observacoes?.trim() || null,
+      }
+      if (editing.id) {
+        await update.mutateAsync({ id: editing.id, changes: payload })
         toast.success('Requerimento atualizado.')
       } else {
         await create.mutateAsync(payload)
@@ -122,28 +123,14 @@ export default function Requerimentos() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por assunto, órgão, protocolo, observações…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
-          <Select
-            className="sm:w-56"
-            value={filtroStatus}
-            onChange={(e) => setFiltroStatus(e.target.value)}
-          >
-            <option value="todos">Todos os status</option>
-            {Object.entries(STATUS_REQUERIMENTO).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="pl-9"
+            placeholder="Buscar por protocolo, órgão, matéria, classe processual…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
         </div>
       </Card>
 
@@ -161,8 +148,9 @@ export default function Requerimentos() {
           <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
             <THead>
               <tr>
-                <TH>Assunto</TH>
-                <TH>Órgão / Entidade</TH>
+                <TH>Protocolo</TH>
+                <TH>Classe processual</TH>
+                <TH>Matéria</TH>
                 <TH>
                   <button
                     type="button"
@@ -170,7 +158,7 @@ export default function Requerimentos() {
                     className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
                     title="Ordenar por data de protocolo"
                   >
-                    Protocolo
+                    Data de protocolo
                     {sortDir === 'asc' ? (
                       <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
                     ) : (
@@ -178,49 +166,45 @@ export default function Requerimentos() {
                     )}
                   </button>
                 </TH>
-                <TH>Status</TH>
                 <TH className="text-right">
                   <span className="sr-only">Ações</span>
                 </TH>
               </tr>
             </THead>
             <TBody>
-              {lista.map((r) => {
-                const st = getLabel(STATUS_REQUERIMENTO, r.status)
-                return (
-                  <TR key={r.id}>
-                    <TD className="font-medium text-slate-800">{r.assunto}</TD>
-                    <TD className="whitespace-nowrap">{r.orgao || '—'}</TD>
-                    <TD className="whitespace-nowrap">
-                      {r.numero_protocolo || '—'}
-                      <div className="text-[11px] text-slate-400">
-                        {formatDate(r.data_protocolo)}
-                      </div>
-                    </TD>
-                    <TD className="whitespace-nowrap">
-                      <Badge tone={st.tone}>{st.label}</Badge>
-                    </TD>
-                    <TD className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => setEditing(r)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Editar"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => setToDelete(r)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </TD>
-                  </TR>
-                )
-              })}
+              {lista.map((r) => (
+                <TR key={r.id}>
+                  <TD className="font-medium text-slate-800">
+                    {r.numero_protocolo || '—'}
+                    <div className="text-[11px] font-normal text-slate-400">
+                      {r.orgao || '—'}
+                    </div>
+                  </TD>
+                  <TD className="whitespace-nowrap">{r.classe_processual || '—'}</TD>
+                  <TD>{r.materia || '—'}</TD>
+                  <TD className="whitespace-nowrap text-slate-600">
+                    {formatDate(r.data_protocolo)}
+                  </TD>
+                  <TD className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <button
+                        onClick={() => setEditing(r)}
+                        className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
+                        title="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setToDelete(r)}
+                        className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
+                        title="Excluir"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </TD>
+                </TR>
+              ))}
             </TBody>
           </Table>
         )}
@@ -248,25 +232,32 @@ export default function Requerimentos() {
       >
         {editing && (
           <form id="form-requerimento" onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Assunto" required>
-              <Input
-                value={editing.assunto ?? ''}
-                onChange={(e) => setEditing({ ...editing, assunto: e.target.value })}
-                placeholder="Ex.: Habilitação de crédito, pedido de certidão…"
-              />
-            </Field>
             <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Número de protocolo" required>
+                <Input
+                  value={editing.numero_protocolo ?? ''}
+                  onChange={(e) =>
+                    setEditing({ ...editing, numero_protocolo: e.target.value })
+                  }
+                />
+              </Field>
               <Field label="Órgão / Entidade">
                 <Input
                   value={editing.orgao ?? ''}
                   onChange={(e) => setEditing({ ...editing, orgao: e.target.value })}
                 />
               </Field>
-              <Field label="Número de protocolo">
+              <Field label="Matéria">
                 <Input
-                  value={editing.numero_protocolo ?? ''}
+                  value={editing.materia ?? ''}
+                  onChange={(e) => setEditing({ ...editing, materia: e.target.value })}
+                />
+              </Field>
+              <Field label="Classe processual">
+                <Input
+                  value={editing.classe_processual ?? ''}
                   onChange={(e) =>
-                    setEditing({ ...editing, numero_protocolo: e.target.value })
+                    setEditing({ ...editing, classe_processual: e.target.value })
                   }
                 />
               </Field>
@@ -278,23 +269,6 @@ export default function Requerimentos() {
                     setEditing({ ...editing, data_protocolo: e.target.value })
                   }
                 />
-              </Field>
-              <Field label="Status" required>
-                <Select
-                  value={editing.status ?? 'pendente'}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      status: e.target.value as StatusRequerimento,
-                    })
-                  }
-                >
-                  {Object.entries(STATUS_REQUERIMENTO).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
               </Field>
             </div>
             <Field label="Observações">
@@ -312,7 +286,7 @@ export default function Requerimentos() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
-        message={`Excluir o requerimento ${toDelete?.assunto || ''}?`}
+        message={`Excluir o requerimento ${toDelete?.numero_protocolo || ''}?`}
         confirmLabel="Excluir"
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}
