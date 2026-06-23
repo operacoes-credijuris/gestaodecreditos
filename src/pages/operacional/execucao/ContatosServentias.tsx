@@ -356,7 +356,7 @@ export default function ContatosServentias() {
             description="Cadastre créditos/requerimentos ou adicione um contato auxiliar."
           />
         ) : (
-          <Table>
+          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
             <THead>
               <tr>
                 <TH>Órgão</TH>
