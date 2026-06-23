@@ -1,10 +1,11 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Pencil, Trash2, Search, Phone, Mail, MessageCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, Phone, Mail, MessageCircle } from 'lucide-react'
 import { contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
 import type { ContatoServentia } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
 import { Field, Input } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -21,8 +22,7 @@ import {
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 
-// Identificador do órgão = "comarca / vara" (mesma composição da aba Créditos).
-// É a chave interna que casa o contato com os créditos — não muda.
+// Identificador do órgão julgador = "comarca / vara" (igual à aba Créditos).
 function buildOrgao(comarca?: string | null, vara?: string | null): string {
   const c = (comarca ?? '').trim()
   const v = (vara ?? '').trim()
@@ -30,15 +30,14 @@ function buildOrgao(comarca?: string | null, vara?: string | null): string {
   return c || v
 }
 
-// Exibição do órgão na tela: "[vara] de [comarca]"
-// (ex.: "11ª Vara Federal de Belo Horizonte"). Converte a chave interna.
+// Exibição do órgão: "[vara] de [comarca]" (ex.: "11ª Vara Federal de Belo
+// Horizonte"). Órgãos auxiliares (texto livre) ficam como digitados.
 function formatOrgaoLabel(orgao: string): string {
   const parts = orgao.split(' / ')
   if (parts.length === 2) return `${parts[1]} de ${parts[0]}`
   return orgao
 }
 
-// Apenas dígitos.
 function soDigitos(v?: string | null): string {
   return (v ?? '').replace(/\D/g, '')
 }
@@ -53,26 +52,25 @@ function formatTelefone(v: string): string {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
 }
 
-// Telefone preenchido mas com menos de 10 dígitos (DDD + 8) = incompleto.
 function telefoneIncompleto(v?: string | null): boolean {
   const d = soDigitos(v)
   return d.length > 0 && d.length < 10
 }
 
-// Link wa.me com DDI do Brasil (55).
 function waLink(v: string): string {
   return `https://wa.me/55${soDigitos(v)}`
 }
 
-// '' -> null para não gravar string vazia em coluna de texto.
 function nn(v: string | null | undefined): string | null {
   const t = (v ?? '').trim()
   return t === '' ? null : t
 }
 
 interface OrgaoRow {
+  key: string
   orgao: string
   tribunal: string
+  tipo: 'julgador' | 'auxiliar'
   contato: ContatoServentia | null
 }
 
@@ -120,6 +118,18 @@ function BlocoContato({
   )
 }
 
+const AUXILIAR_VAZIO: Partial<ContatoServentia> = {
+  tipo: 'auxiliar',
+  orgao: '',
+  tribunal: '',
+  serventia_telefone: '',
+  serventia_whatsapp: '',
+  serventia_email: '',
+  gabinete_telefone: '',
+  gabinete_whatsapp: '',
+  gabinete_email: '',
+}
+
 export default function ContatosServentias() {
   const contatos = contatosCrud.useList()
   const processos = processosCrud.useList()
@@ -138,53 +148,56 @@ export default function ContatosServentias() {
   const error = (contatos.error || processos.error || requerimentos.error) as Error | null
 
   const linhas = useMemo<OrgaoRow[]>(() => {
-    const contatoPorOrgao = new Map<string, ContatoServentia>()
+    // Separa contatos salvos: julgadores (por órgão) e auxiliares.
+    const julgadorContatos = new Map<string, ContatoServentia>()
+    const auxiliares: ContatoServentia[] = []
     for (const c of contatos.data ?? []) {
-      if (c.orgao) contatoPorOrgao.set(c.orgao, c)
+      if (c.tipo === 'auxiliar') auxiliares.push(c)
+      else if (c.orgao) julgadorContatos.set(c.orgao, c)
     }
 
-    const rows = new Map<string, OrgaoRow>()
-    // Órgãos puxados automaticamente da comarca/vara dos créditos.
+    // Julgadores: órgãos puxados de Créditos e Requerimentos.
+    const julgMap = new Map<string, OrgaoRow>()
+    const addJulgador = (orgao: string, tribunal: string) => {
+      if (!orgao) return
+      const ex = julgMap.get(orgao)
+      if (ex) {
+        if (!ex.tribunal && tribunal) ex.tribunal = tribunal
+        return
+      }
+      julgMap.set(orgao, {
+        key: `j:${orgao}`,
+        orgao,
+        tribunal,
+        tipo: 'julgador',
+        contato: julgadorContatos.get(orgao) ?? null,
+      })
+    }
     for (const p of processos.data ?? []) {
-      const orgao = buildOrgao(p.comarca, p.vara)
-      if (!orgao) continue
-      const existente = rows.get(orgao)
-      if (existente) {
-        // Completa o tribunal caso o primeiro crédito não tivesse.
-        if (!existente.tribunal && p.tribunal) existente.tribunal = p.tribunal.trim()
-        continue
-      }
-      rows.set(orgao, {
-        orgao,
-        tribunal: (p.tribunal ?? '').trim(),
-        contato: contatoPorOrgao.get(orgao) ?? null,
-      })
+      addJulgador(buildOrgao(p.comarca, p.vara), (p.tribunal ?? '').trim())
     }
-    // Órgãos puxados também dos requerimentos (campo órgão + tribunal/entidade).
     for (const req of requerimentos.data ?? []) {
-      const orgao = (req.orgao ?? '').trim()
-      if (!orgao) continue
-      const existente = rows.get(orgao)
-      if (existente) {
-        if (!existente.tribunal && req.tribunal_entidade) {
-          existente.tribunal = req.tribunal_entidade.trim()
-        }
-        continue
-      }
-      rows.set(orgao, {
-        orgao,
-        tribunal: (req.tribunal_entidade ?? '').trim(),
-        contato: contatoPorOrgao.get(orgao) ?? null,
-      })
+      addJulgador((req.orgao ?? '').trim(), (req.tribunal_entidade ?? '').trim())
     }
-    // Contatos já salvos cujo órgão não aparece (mais) nos créditos/requerimentos.
-    for (const [orgao, contato] of contatoPorOrgao) {
-      if (!rows.has(orgao)) {
-        rows.set(orgao, { orgao, tribunal: '', contato })
+    // Contatos julgadores salvos cujo órgão não aparece (mais) nas origens.
+    for (const [orgao, c] of julgadorContatos) {
+      if (!julgMap.has(orgao)) {
+        julgMap.set(orgao, { key: `j:${orgao}`, orgao, tribunal: '', tipo: 'julgador', contato: c })
       }
     }
 
-    let l = [...rows.values()]
+    let l: OrgaoRow[] = [...julgMap.values()]
+    // Auxiliares (cadastro manual).
+    for (const c of auxiliares) {
+      l.push({
+        key: `a:${c.id}`,
+        orgao: c.orgao ?? '',
+        tribunal: c.tribunal ?? '',
+        tipo: 'auxiliar',
+        contato: c,
+      })
+    }
+
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((r) =>
@@ -208,22 +221,30 @@ export default function ContatosServentias() {
   }, [contatos.data, processos.data, requerimentos.data, busca])
 
   function abrirEdicao(row: OrgaoRow) {
-    setEditing(
-      row.contato ?? {
-        orgao: row.orgao,
-        serventia_telefone: '',
-        serventia_whatsapp: '',
-        serventia_email: '',
-        gabinete_telefone: '',
-        gabinete_whatsapp: '',
-        gabinete_email: '',
-      },
-    )
+    if (row.contato) {
+      setEditing(row.contato)
+      return
+    }
+    setEditing({
+      tipo: 'julgador',
+      orgao: row.orgao,
+      serventia_telefone: '',
+      serventia_whatsapp: '',
+      serventia_email: '',
+      gabinete_telefone: '',
+      gabinete_whatsapp: '',
+      gabinete_email: '',
+    })
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
+    const auxiliar = editing.tipo === 'auxiliar'
+    if (auxiliar && !editing.orgao?.trim()) {
+      toast.error('Informe o órgão.')
+      return
+    }
     const fones = [
       editing.serventia_telefone,
       editing.serventia_whatsapp,
@@ -236,7 +257,9 @@ export default function ContatosServentias() {
     }
     try {
       const payload = {
+        tipo: editing.tipo ?? 'julgador',
         orgao: nn(editing.orgao),
+        tribunal: auxiliar ? nn(editing.tribunal) : null,
         serventia_telefone: nn(editing.serventia_telefone),
         serventia_whatsapp: nn(editing.serventia_whatsapp),
         serventia_email: nn(editing.serventia_email),
@@ -261,18 +284,32 @@ export default function ContatosServentias() {
     if (!toDelete) return
     try {
       await remove.mutateAsync(toDelete.id)
-      toast.success('Contatos do órgão removidos.')
+      toast.success(
+        toDelete.tipo === 'auxiliar'
+          ? 'Contato auxiliar removido.'
+          : 'Contatos do órgão removidos.',
+      )
       setToDelete(null)
     } catch (err) {
       toast.error((err as Error).message)
     }
   }
 
+  const editandoAuxiliar = editing?.tipo === 'auxiliar'
+
   return (
     <div>
       <PageHeader
         title="Contatos"
-        description="Contatos por órgão (comarca / vara), puxados automaticamente dos créditos."
+        description="Órgãos julgadores (puxados de Créditos/Requerimentos) e auxiliares (manuais)."
+        actions={
+          <Button
+            icon={<Plus className="h-4 w-4" />}
+            onClick={() => setEditing({ ...AUXILIAR_VAZIO })}
+          >
+            Novo contato
+          </Button>
+        }
       />
 
       <Card className="mb-4 p-4">
@@ -295,7 +332,7 @@ export default function ContatosServentias() {
         ) : linhas.length === 0 ? (
           <EmptyState
             title="Nenhum órgão"
-            description="Cadastre créditos com comarca/vara para que os órgãos apareçam aqui."
+            description="Cadastre créditos/requerimentos ou adicione um contato auxiliar."
           />
         ) : (
           <Table>
@@ -312,9 +349,16 @@ export default function ContatosServentias() {
               {linhas.map((row) => {
                 const c = row.contato
                 return (
-                  <TR key={row.orgao}>
+                  <TR key={row.key}>
                     <TD className="font-medium text-slate-800">
-                      {formatOrgaoLabel(row.orgao)}
+                      <div className="flex items-center gap-1.5">
+                        {formatOrgaoLabel(row.orgao)}
+                        {row.tipo === 'auxiliar' ? (
+                          <Badge tone="purple">aux.</Badge>
+                        ) : (
+                          <Badge tone="blue">julg.</Badge>
+                        )}
+                      </div>
                     </TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {row.tribunal || '—'}
@@ -346,7 +390,11 @@ export default function ContatosServentias() {
                           <button
                             onClick={() => setToDelete(c)}
                             className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                            title="Limpar contatos do órgão"
+                            title={
+                              row.tipo === 'auxiliar'
+                                ? 'Excluir contato auxiliar'
+                                : 'Limpar contatos do órgão'
+                            }
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -364,7 +412,13 @@ export default function ContatosServentias() {
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title={`Contatos — ${formatOrgaoLabel(editing?.orgao ?? '')}`}
+        title={
+          editandoAuxiliar
+            ? editing?.id
+              ? `Editar — ${editing?.orgao ?? ''}`
+              : 'Novo contato auxiliar'
+            : `Contatos — ${formatOrgaoLabel(editing?.orgao ?? '')}`
+        }
         size="lg"
         footer={
           <>
@@ -383,6 +437,23 @@ export default function ContatosServentias() {
       >
         {editing && (
           <form id="form-contato" onSubmit={handleSubmit} className="space-y-5">
+            {editandoAuxiliar && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Órgão" required>
+                  <Input
+                    value={editing.orgao ?? ''}
+                    onChange={(e) => setEditing({ ...editing, orgao: e.target.value })}
+                    placeholder="Ex.: Cartório do 2º Ofício"
+                  />
+                </Field>
+                <Field label="Tribunal / Entidade">
+                  <Input
+                    value={editing.tribunal ?? ''}
+                    onChange={(e) => setEditing({ ...editing, tribunal: e.target.value })}
+                  />
+                </Field>
+              </div>
+            )}
             <div>
               <h3 className="mb-2 text-sm font-semibold text-slate-700">Serventia</h3>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -467,8 +538,12 @@ export default function ContatosServentias() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
-        message={`Limpar os contatos do órgão "${formatOrgaoLabel(toDelete?.orgao ?? '')}"?`}
-        confirmLabel="Limpar"
+        message={
+          toDelete?.tipo === 'auxiliar'
+            ? `Excluir o contato auxiliar "${toDelete?.orgao || ''}"?`
+            : `Limpar os contatos do órgão "${formatOrgaoLabel(toDelete?.orgao ?? '')}"?`
+        }
+        confirmLabel={toDelete?.tipo === 'auxiliar' ? 'Excluir' : 'Limpar'}
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}
       />

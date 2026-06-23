@@ -117,12 +117,16 @@ export interface Tarefa {
   updated_at: string
 }
 
-// ---------- Operacional: Contatos (por órgão = comarca / vara) ----------
-// Os órgãos são puxados automaticamente da comarca/vara dos créditos.
-// Cada órgão guarda WhatsApp + e-mail da serventia e do gabinete.
+// ---------- Operacional: Contatos (por órgão) ----------
+// Julgadores são puxados de Créditos/Requerimentos; auxiliares são manuais.
+// Cada órgão guarda telefone, WhatsApp e e-mail da serventia e do gabinete.
+export type TipoOrgaoContato = 'julgador' | 'auxiliar'
+
 export interface ContatoServentia {
   id: UUID
   orgao: string | null
+  tribunal: string | null
+  tipo: TipoOrgaoContato
   serventia_telefone: string | null
   serventia_whatsapp: string | null
   serventia_email: string | null
