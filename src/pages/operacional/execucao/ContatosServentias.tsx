@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
-import { contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
+import { apensosCrud, contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
 import type { ContatoServentia } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -150,6 +150,7 @@ export default function ContatosServentias() {
   const contatos = contatosCrud.useList()
   const processos = processosCrud.useList()
   const requerimentos = requerimentosCrud.useList()
+  const apensos = apensosCrud.useList()
   const create = contatosCrud.useCreate()
   const update = contatosCrud.useUpdate()
   const remove = contatosCrud.useRemove()
@@ -159,9 +160,14 @@ export default function ContatosServentias() {
   const [editing, setEditing] = useState<Partial<ContatoServentia> | null>(null)
   const [toDelete, setToDelete] = useState<ContatoServentia | null>(null)
 
-  const isLoading = contatos.isLoading || processos.isLoading || requerimentos.isLoading
-  const isError = contatos.isError || processos.isError || requerimentos.isError
-  const error = (contatos.error || processos.error || requerimentos.error) as Error | null
+  const isLoading =
+    contatos.isLoading || processos.isLoading || requerimentos.isLoading || apensos.isLoading
+  const isError =
+    contatos.isError || processos.isError || requerimentos.isError || apensos.isError
+  const error = (contatos.error ||
+    processos.error ||
+    requerimentos.error ||
+    apensos.error) as Error | null
 
   const linhas = useMemo<OrgaoRow[]>(() => {
     // Separa contatos salvos: julgadores (por órgão) e auxiliares.
@@ -194,6 +200,10 @@ export default function ContatosServentias() {
     }
     for (const req of requerimentos.data ?? []) {
       addJulgador((req.orgao ?? '').trim(), (req.tribunal_entidade ?? '').trim())
+    }
+    // Apensos (de créditos e requerimentos) têm comarca/vara/tribunal próprios.
+    for (const a of apensos.data ?? []) {
+      addJulgador(buildOrgao(a.comarca, a.vara), (a.tribunal ?? '').trim())
     }
     // Contatos julgadores salvos cujo órgão não aparece (mais) nas origens.
     for (const [orgao, c] of julgadorContatos) {
@@ -234,7 +244,7 @@ export default function ContatosServentias() {
     return l.sort((a, b) =>
       formatOrgaoLabel(a.orgao).localeCompare(formatOrgaoLabel(b.orgao), 'pt-BR'),
     )
-  }, [contatos.data, processos.data, requerimentos.data, busca])
+  }, [contatos.data, processos.data, requerimentos.data, apensos.data, busca])
 
   function abrirEdicao(row: OrgaoRow) {
     if (row.contato) {
