@@ -138,10 +138,10 @@ export default function Processos() {
       if (!payload.data_liquidacao) payload.data_liquidacao = null
       if (id) {
         await update.mutateAsync({ id, changes: payload })
-        toast.success('Processo atualizado.')
+        toast.success('Crédito atualizado.')
       } else {
         await create.mutateAsync(payload)
-        toast.success('Processo cadastrado.')
+        toast.success('Crédito cadastrado.')
       }
       setEditing(null)
     } catch (err) {
@@ -153,7 +153,7 @@ export default function Processos() {
     if (!toDelete) return
     try {
       await remove.mutateAsync(toDelete.id)
-      toast.success('Processo excluído.')
+      toast.success('Crédito excluído.')
       setToDelete(null)
     } catch (err) {
       toast.error((err as Error).message)
@@ -163,11 +163,11 @@ export default function Processos() {
   return (
     <div>
       <PageHeader
-        title="Processos"
-        description="Registro dos processos das cessões/aquisições de crédito."
+        title="Créditos"
+        description="Registro dos créditos adquiridos via cessão/aquisição."
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
-            Novo processo
+            Novo crédito
           </Button>
         }
       />
@@ -204,7 +204,7 @@ export default function Processos() {
         ) : isError ? (
           <ErrorState message={(error as Error)?.message} />
         ) : lista.length === 0 ? (
-          <EmptyState title="Nenhum processo" description="Cadastre o primeiro processo." />
+          <EmptyState title="Nenhum crédito" description="Cadastre o primeiro crédito." />
         ) : (
           <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
             <THead>
@@ -338,7 +338,7 @@ export default function Processos() {
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title={editing?.id ? 'Editar processo' : 'Novo processo'}
+        title={editing?.id ? 'Editar crédito' : 'Novo crédito'}
         size="lg"
         footer={
           <>
@@ -498,7 +498,7 @@ export default function Processos() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
-        message={`Excluir o processo ${toDelete?.numero_cnj || ''}?`}
+        message={`Excluir o crédito ${toDelete?.numero_cnj || ''}?`}
         confirmLabel="Excluir"
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}

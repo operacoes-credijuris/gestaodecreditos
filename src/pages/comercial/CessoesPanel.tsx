@@ -208,7 +208,7 @@ export function CessoesPanel() {
                   placeholder="Ex.: CES-2026-001"
                 />
               </Field>
-              <Field label="Processo vinculado">
+              <Field label="Crédito vinculado">
                 <Select
                   value={editing.processo_id ?? ''}
                   onChange={(e) =>

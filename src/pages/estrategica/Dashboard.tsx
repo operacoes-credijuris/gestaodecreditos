@@ -177,7 +177,7 @@ export default function Dashboard() {
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="Processos cadastrados"
+            label="Créditos cadastrados"
             value={kpis.processosTotal}
             icon={<FolderKanban className="h-5 w-5" />}
             tone="brand"
@@ -227,7 +227,7 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader title="Processos por tribunal" />
+          <CardHeader title="Créditos por tribunal" />
           <CardBody>
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">

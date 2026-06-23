@@ -64,7 +64,7 @@ export const NAVIGATION: NavSection[] = [
         icon: ListChecks,
       },
       {
-        label: 'Processos',
+        label: 'Créditos',
         to: '/operacional/execucao/processos',
         icon: FolderKanban,
       },
