@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Pencil, Trash2, Search, Phone, Mail } from 'lucide-react'
+import { Pencil, Trash2, Search, Phone, Mail, MessageCircle } from 'lucide-react'
 import { contatosCrud, processosCrud } from '@/lib/queries'
 import type { ContatoServentia } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -38,17 +38,86 @@ function formatOrgaoLabel(orgao: string): string {
   return orgao
 }
 
-interface OrgaoRow {
-  orgao: string
-  comarca: string
-  vara: string
-  contato: ContatoServentia | null
+// Apenas dígitos.
+function soDigitos(v?: string | null): string {
+  return (v ?? '').replace(/\D/g, '')
+}
+
+// Máscara de telefone brasileiro: (DD) XXXXX-XXXX (9 díg.) ou (DD) XXXX-XXXX (8 díg.).
+function formatTelefone(v: string): string {
+  const d = soDigitos(v).slice(0, 11)
+  if (d.length === 0) return ''
+  if (d.length <= 2) return `(${d}`
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
+}
+
+// Telefone preenchido mas com menos de 10 dígitos (DDD + 8) = incompleto.
+function telefoneIncompleto(v?: string | null): boolean {
+  const d = soDigitos(v)
+  return d.length > 0 && d.length < 10
+}
+
+// Link wa.me com DDI do Brasil (55).
+function waLink(v: string): string {
+  return `https://wa.me/55${soDigitos(v)}`
 }
 
 // '' -> null para não gravar string vazia em coluna de texto.
 function nn(v: string | null | undefined): string | null {
   const t = (v ?? '').trim()
   return t === '' ? null : t
+}
+
+interface OrgaoRow {
+  orgao: string
+  tribunal: string
+  contato: ContatoServentia | null
+}
+
+// Bloco de contato (telefone, whatsapp clicável, e-mail) reaproveitado
+// pela serventia e pelo gabinete.
+function BlocoContato({
+  telefone,
+  whatsapp,
+  email,
+}: {
+  telefone?: string | null
+  whatsapp?: string | null
+  email?: string | null
+}) {
+  if (!telefone && !whatsapp && !email) {
+    return <span className="text-slate-400">—</span>
+  }
+  return (
+    <div className="space-y-0.5">
+      {telefone && (
+        <div className="flex items-center gap-1.5 text-slate-700">
+          <Phone className="h-3.5 w-3.5 text-slate-400" />
+          {telefone}
+        </div>
+      )}
+      {whatsapp && (
+        <a
+          href={waLink(whatsapp)}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1.5 text-emerald-600 hover:underline"
+          title="Abrir conversa no WhatsApp"
+        >
+          <MessageCircle className="h-3.5 w-3.5" />
+          {whatsapp}
+        </a>
+      )}
+      {email && (
+        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+          <Mail className="h-3.5 w-3.5 text-slate-400" />
+          {email}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ContatosServentias() {
@@ -77,18 +146,23 @@ export default function ContatosServentias() {
     // Órgãos puxados automaticamente da comarca/vara dos créditos.
     for (const p of processos.data ?? []) {
       const orgao = buildOrgao(p.comarca, p.vara)
-      if (!orgao || rows.has(orgao)) continue
+      if (!orgao) continue
+      const existente = rows.get(orgao)
+      if (existente) {
+        // Completa o tribunal caso o primeiro crédito não tivesse.
+        if (!existente.tribunal && p.tribunal) existente.tribunal = p.tribunal.trim()
+        continue
+      }
       rows.set(orgao, {
         orgao,
-        comarca: (p.comarca ?? '').trim(),
-        vara: (p.vara ?? '').trim(),
+        tribunal: (p.tribunal ?? '').trim(),
         contato: contatoPorOrgao.get(orgao) ?? null,
       })
     }
     // Contatos já salvos cujo órgão não aparece (mais) nos créditos.
     for (const [orgao, contato] of contatoPorOrgao) {
       if (!rows.has(orgao)) {
-        rows.set(orgao, { orgao, comarca: orgao, vara: '', contato })
+        rows.set(orgao, { orgao, tribunal: '', contato })
       }
     }
 
@@ -97,10 +171,13 @@ export default function ContatosServentias() {
       const q = busca.toLowerCase()
       l = l.filter((r) =>
         [
-          r.orgao,
+          formatOrgaoLabel(r.orgao),
+          r.tribunal,
           r.contato?.serventia_telefone,
+          r.contato?.serventia_whatsapp,
           r.contato?.serventia_email,
           r.contato?.gabinete_telefone,
+          r.contato?.gabinete_whatsapp,
           r.contato?.gabinete_email,
         ]
           .filter(Boolean)
@@ -115,8 +192,10 @@ export default function ContatosServentias() {
       row.contato ?? {
         orgao: row.orgao,
         serventia_telefone: '',
+        serventia_whatsapp: '',
         serventia_email: '',
         gabinete_telefone: '',
+        gabinete_whatsapp: '',
         gabinete_email: '',
       },
     )
@@ -125,12 +204,24 @@ export default function ContatosServentias() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
+    const fones = [
+      editing.serventia_telefone,
+      editing.serventia_whatsapp,
+      editing.gabinete_telefone,
+      editing.gabinete_whatsapp,
+    ]
+    if (fones.some(telefoneIncompleto)) {
+      toast.error('Telefone incompleto. Use DDD + 8 ou 9 dígitos.')
+      return
+    }
     try {
       const payload = {
         orgao: nn(editing.orgao),
         serventia_telefone: nn(editing.serventia_telefone),
+        serventia_whatsapp: nn(editing.serventia_whatsapp),
         serventia_email: nn(editing.serventia_email),
         gabinete_telefone: nn(editing.gabinete_telefone),
+        gabinete_whatsapp: nn(editing.gabinete_whatsapp),
         gabinete_email: nn(editing.gabinete_email),
       }
       if (editing.id) {
@@ -169,7 +260,7 @@ export default function ContatosServentias() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
             className="pl-9"
-            placeholder="Buscar por órgão, telefone ou e-mail…"
+            placeholder="Buscar por órgão, tribunal, telefone ou e-mail…"
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
           />
@@ -191,6 +282,7 @@ export default function ContatosServentias() {
             <THead>
               <tr>
                 <TH>Órgão</TH>
+                <TH>Tribunal</TH>
                 <TH>Serventia</TH>
                 <TH>Gabinete</TH>
                 <TH className="text-right">Ações</TH>
@@ -204,39 +296,22 @@ export default function ContatosServentias() {
                     <TD className="font-medium text-slate-800">
                       {formatOrgaoLabel(row.orgao)}
                     </TD>
-                    <TD>
-                      {c?.serventia_telefone && (
-                        <div className="flex items-center gap-1.5 text-slate-700">
-                          <Phone className="h-3.5 w-3.5 text-slate-400" />
-                          {c.serventia_telefone}
-                        </div>
-                      )}
-                      {c?.serventia_email && (
-                        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                          <Mail className="h-3.5 w-3.5 text-slate-400" />
-                          {c.serventia_email}
-                        </div>
-                      )}
-                      {!c?.serventia_telefone && !c?.serventia_email && (
-                        <span className="text-slate-400">—</span>
-                      )}
+                    <TD className="whitespace-nowrap text-slate-600">
+                      {row.tribunal || '—'}
                     </TD>
                     <TD>
-                      {c?.gabinete_telefone && (
-                        <div className="flex items-center gap-1.5 text-slate-700">
-                          <Phone className="h-3.5 w-3.5 text-slate-400" />
-                          {c.gabinete_telefone}
-                        </div>
-                      )}
-                      {c?.gabinete_email && (
-                        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                          <Mail className="h-3.5 w-3.5 text-slate-400" />
-                          {c.gabinete_email}
-                        </div>
-                      )}
-                      {!c?.gabinete_telefone && !c?.gabinete_email && (
-                        <span className="text-slate-400">—</span>
-                      )}
+                      <BlocoContato
+                        telefone={c?.serventia_telefone}
+                        whatsapp={c?.serventia_whatsapp}
+                        email={c?.serventia_email}
+                      />
+                    </TD>
+                    <TD>
+                      <BlocoContato
+                        telefone={c?.gabinete_telefone}
+                        whatsapp={c?.gabinete_whatsapp}
+                        email={c?.gabinete_email}
+                      />
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
@@ -291,16 +366,31 @@ export default function ContatosServentias() {
             <div>
               <h3 className="mb-2 text-sm font-semibold text-slate-700">Serventia</h3>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="WhatsApp">
+                <Field label="Telefone">
                   <Input
                     value={editing.serventia_telefone ?? ''}
                     onChange={(e) =>
-                      setEditing({ ...editing, serventia_telefone: e.target.value })
+                      setEditing({
+                        ...editing,
+                        serventia_telefone: formatTelefone(e.target.value),
+                      })
+                    }
+                    placeholder="(00) 0000-0000"
+                  />
+                </Field>
+                <Field label="WhatsApp">
+                  <Input
+                    value={editing.serventia_whatsapp ?? ''}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        serventia_whatsapp: formatTelefone(e.target.value),
+                      })
                     }
                     placeholder="(00) 00000-0000"
                   />
                 </Field>
-                <Field label="E-mail">
+                <Field label="E-mail" className="sm:col-span-2">
                   <Input
                     type="email"
                     value={editing.serventia_email ?? ''}
@@ -314,16 +404,31 @@ export default function ContatosServentias() {
             <div>
               <h3 className="mb-2 text-sm font-semibold text-slate-700">Gabinete</h3>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="WhatsApp">
+                <Field label="Telefone">
                   <Input
                     value={editing.gabinete_telefone ?? ''}
                     onChange={(e) =>
-                      setEditing({ ...editing, gabinete_telefone: e.target.value })
+                      setEditing({
+                        ...editing,
+                        gabinete_telefone: formatTelefone(e.target.value),
+                      })
+                    }
+                    placeholder="(00) 0000-0000"
+                  />
+                </Field>
+                <Field label="WhatsApp">
+                  <Input
+                    value={editing.gabinete_whatsapp ?? ''}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        gabinete_whatsapp: formatTelefone(e.target.value),
+                      })
                     }
                     placeholder="(00) 00000-0000"
                   />
                 </Field>
-                <Field label="E-mail">
+                <Field label="E-mail" className="sm:col-span-2">
                   <Input
                     type="email"
                     value={editing.gabinete_email ?? ''}
@@ -342,7 +447,7 @@ export default function ContatosServentias() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
-        message={`Limpar os contatos do órgão "${toDelete?.orgao || ''}"?`}
+        message={`Limpar os contatos do órgão "${formatOrgaoLabel(toDelete?.orgao ?? '')}"?`}
         confirmLabel="Limpar"
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}

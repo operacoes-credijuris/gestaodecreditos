@@ -130,8 +130,10 @@ export interface ContatoServentia {
   id: UUID
   orgao: string | null
   serventia_telefone: string | null
+  serventia_whatsapp: string | null
   serventia_email: string | null
   gabinete_telefone: string | null
+  gabinete_whatsapp: string | null
   gabinete_email: string | null
   created_at: string
   updated_at: string
