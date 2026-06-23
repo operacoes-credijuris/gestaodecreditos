@@ -9,6 +9,7 @@ import type {
   Investimento,
   Processo,
   Publicacao,
+  Requerimento,
   Tarefa,
 } from './types'
 
@@ -17,6 +18,10 @@ export const analisesCrud = makeCrud<AnaliseCredito, Partial<AnaliseCredito>>(
 )
 
 export const processosCrud = makeCrud<Processo, Partial<Processo>>('processos')
+
+export const requerimentosCrud = makeCrud<Requerimento, Partial<Requerimento>>(
+  'requerimentos',
+)
 
 export const publicacoesCrud = makeCrud<Publicacao, Partial<Publicacao>>(
   'publicacoes',

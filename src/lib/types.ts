@@ -60,6 +60,26 @@ export interface Processo {
   updated_at: string
 }
 
+// ---------- Operacional: Requerimentos administrativos ----------
+export type StatusRequerimento =
+  | 'pendente'
+  | 'protocolado'
+  | 'em_analise'
+  | 'deferido'
+  | 'indeferido'
+
+export interface Requerimento {
+  id: UUID
+  assunto: string
+  orgao: string | null
+  numero_protocolo: string | null
+  data_protocolo: string | null
+  status: StatusRequerimento
+  observacoes: string | null
+  created_at: string
+  updated_at: string
+}
+
 // ---------- Operacional: Publicações e Movimentações ----------
 export type FontePublicacao = 'djen' | 'advbox' | 'manual'
 export type TipoPublicacao = 'publicacao' | 'movimentacao'

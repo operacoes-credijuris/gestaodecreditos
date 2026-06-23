@@ -7,6 +7,7 @@ import {
   Newspaper,
   ListChecks,
   FolderKanban,
+  ClipboardList,
   Phone,
   Settings,
   type LucideIcon,
@@ -67,6 +68,11 @@ export const NAVIGATION: NavSection[] = [
         label: 'Créditos',
         to: '/operacional/execucao/processos',
         icon: FolderKanban,
+      },
+      {
+        label: 'Requerimentos',
+        to: '/operacional/execucao/requerimentos',
+        icon: ClipboardList,
       },
       {
         label: 'Serventias e Gabinetes',

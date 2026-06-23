@@ -39,6 +39,14 @@ export const INSTRUMENTO: Record<string, LabelDef> = {
   escritura_publica: { label: 'Escritura pública', tone: 'purple' },
 }
 
+export const STATUS_REQUERIMENTO: Record<string, LabelDef> = {
+  pendente: { label: 'Pendente', tone: 'gray' },
+  protocolado: { label: 'Protocolado', tone: 'blue' },
+  em_analise: { label: 'Em análise', tone: 'yellow' },
+  deferido: { label: 'Deferido', tone: 'green' },
+  indeferido: { label: 'Indeferido', tone: 'red' },
+}
+
 export const TIPO_PUBLICACAO: Record<string, LabelDef> = {
   publicacao: { label: 'Publicação', tone: 'blue' },
   movimentacao: { label: 'Movimentação', tone: 'purple' },

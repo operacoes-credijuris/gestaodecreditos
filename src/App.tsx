@@ -9,6 +9,7 @@ import AnaliseCredito from '@/pages/operacional/AnaliseCredito'
 import PublicacoesMovimentacoes from '@/pages/operacional/execucao/PublicacoesMovimentacoes'
 import TarefasAdvbox from '@/pages/operacional/execucao/TarefasAdvbox'
 import Processos from '@/pages/operacional/execucao/Processos'
+import Requerimentos from '@/pages/operacional/execucao/Requerimentos'
 import ContatosServentias from '@/pages/operacional/execucao/ContatosServentias'
 import Configuracoes from '@/pages/configuracoes/Configuracoes'
 
@@ -39,6 +40,10 @@ export default function App() {
         />
         <Route path="/operacional/execucao/tarefas" element={<TarefasAdvbox />} />
         <Route path="/operacional/execucao/processos" element={<Processos />} />
+        <Route
+          path="/operacional/execucao/requerimentos"
+          element={<Requerimentos />}
+        />
         <Route
           path="/operacional/execucao/contatos"
           element={<ContatosServentias />}
