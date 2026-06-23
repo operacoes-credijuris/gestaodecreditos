@@ -374,7 +374,9 @@ export default function ContatosServentias() {
                 <TH>Telefone</TH>
                 <TH>WhatsApp</TH>
                 <TH>E-mail</TH>
-                <TH className="text-right">Ações</TH>
+                <TH className="text-right">
+                  <span className="sr-only">Ações</span>
+                </TH>
               </tr>
             </THead>
             <TBody>
