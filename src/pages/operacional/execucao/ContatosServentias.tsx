@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Pencil, Trash2, Search, Phone, Mail, MessageCircle } from 'lucide-react'
-import { contatosCrud, processosCrud } from '@/lib/queries'
+import { contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
 import type { ContatoServentia } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -123,6 +123,7 @@ function BlocoContato({
 export default function ContatosServentias() {
   const contatos = contatosCrud.useList()
   const processos = processosCrud.useList()
+  const requerimentos = requerimentosCrud.useList()
   const create = contatosCrud.useCreate()
   const update = contatosCrud.useUpdate()
   const remove = contatosCrud.useRemove()
@@ -132,9 +133,9 @@ export default function ContatosServentias() {
   const [editing, setEditing] = useState<Partial<ContatoServentia> | null>(null)
   const [toDelete, setToDelete] = useState<ContatoServentia | null>(null)
 
-  const isLoading = contatos.isLoading || processos.isLoading
-  const isError = contatos.isError || processos.isError
-  const error = (contatos.error || processos.error) as Error | null
+  const isLoading = contatos.isLoading || processos.isLoading || requerimentos.isLoading
+  const isError = contatos.isError || processos.isError || requerimentos.isError
+  const error = (contatos.error || processos.error || requerimentos.error) as Error | null
 
   const linhas = useMemo<OrgaoRow[]>(() => {
     const contatoPorOrgao = new Map<string, ContatoServentia>()
@@ -159,7 +160,24 @@ export default function ContatosServentias() {
         contato: contatoPorOrgao.get(orgao) ?? null,
       })
     }
-    // Contatos já salvos cujo órgão não aparece (mais) nos créditos.
+    // Órgãos puxados também dos requerimentos (campo órgão + tribunal/entidade).
+    for (const req of requerimentos.data ?? []) {
+      const orgao = (req.orgao ?? '').trim()
+      if (!orgao) continue
+      const existente = rows.get(orgao)
+      if (existente) {
+        if (!existente.tribunal && req.tribunal_entidade) {
+          existente.tribunal = req.tribunal_entidade.trim()
+        }
+        continue
+      }
+      rows.set(orgao, {
+        orgao,
+        tribunal: (req.tribunal_entidade ?? '').trim(),
+        contato: contatoPorOrgao.get(orgao) ?? null,
+      })
+    }
+    // Contatos já salvos cujo órgão não aparece (mais) nos créditos/requerimentos.
     for (const [orgao, contato] of contatoPorOrgao) {
       if (!rows.has(orgao)) {
         rows.set(orgao, { orgao, tribunal: '', contato })
@@ -184,8 +202,10 @@ export default function ContatosServentias() {
           .some((v) => v!.toLowerCase().includes(q)),
       )
     }
-    return l.sort((a, b) => a.orgao.localeCompare(b.orgao))
-  }, [contatos.data, processos.data, busca])
+    return l.sort((a, b) =>
+      formatOrgaoLabel(a.orgao).localeCompare(formatOrgaoLabel(b.orgao), 'pt-BR'),
+    )
+  }, [contatos.data, processos.data, requerimentos.data, busca])
 
   function abrirEdicao(row: OrgaoRow) {
     setEditing(
