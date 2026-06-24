@@ -9,7 +9,7 @@ import {
 import { Plus, Search, Flame, Star, FileText } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invokeFunction } from '@/lib/functions'
-import { processosCrud, apensosCrud } from '@/lib/queries'
+import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -337,14 +337,22 @@ export default function TarefasAdvbox() {
   )
 }
 
+// Opção do combobox: número do processo + rótulo já resolvido
+// (Cedente v. Cessionário, Requerimento administrativo, etc.).
+interface LawOpt {
+  id: number
+  numero: string
+  label: string
+}
+
 // Caixa de seleção digitável (combobox) para o processo: digita e
 // escolhe numa lista filtrada que aparece logo abaixo (estilo busca).
 function ProcessoCombobox({
-  lawsuits,
+  options,
   value,
   onChange,
 }: {
-  lawsuits: Opcoes['lawsuits']
+  options: LawOpt[]
   value: string
   onChange: (v: string) => void
 }) {
@@ -356,19 +364,15 @@ function ProcessoCombobox({
   const q = value.trim().toLowerCase()
   const qd = dig(value)
   const matches = useMemo(() => {
-    const list = lawsuits.map((l) => ({
-      l,
-      label: `${l.numero}${l.cliente ? ` — ${l.cliente}` : ''}`,
-    }))
-    if (!q) return list.slice(0, 50)
-    return list
+    if (!q) return options.slice(0, 50)
+    return options
       .filter(
-        ({ l, label }) =>
-          label.toLowerCase().includes(q) ||
-          (qd.length >= 3 && dig(l.numero).includes(qd)),
+        (o) =>
+          o.label.toLowerCase().includes(q) ||
+          (qd.length >= 3 && dig(o.numero).includes(qd)),
       )
       .slice(0, 50)
-  }, [lawsuits, q, qd])
+  }, [options, q, qd])
 
   useEffect(() => {
     if (!open) return
@@ -421,7 +425,7 @@ function ProcessoCombobox({
       {open && matches.length > 0 && (
         <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
           {matches.map((m, i) => (
-            <li key={m.l.id}>
+            <li key={m.id}>
               <button
                 type="button"
                 onMouseDown={(e) => {
@@ -478,6 +482,58 @@ export function NovaTarefaModal({
     gcTime: Infinity,
   })
 
+  // Resolve cada processo do ADVBOX contra os cadastros para exibir
+  // "Cedente v. Cessionário" (Créditos) ou "Requerimento administrativo"
+  // (Requerimentos), em vez do cliente "CREDIJURIS" devolvido pela API.
+  const processos = processosCrud.useList()
+  const requerimentos = requerimentosCrud.useList()
+  const apensos = apensosCrud.useList()
+  const lawOptions = useMemo<LawOpt[]>(() => {
+    const dig = (v?: string | null) => (v ?? '').replace(/\D/g, '')
+    const credPorNum = new Map<string, string>()
+    const credPorId = new Map<string, string>()
+    for (const p of processos.data ?? []) {
+      const desc = `${p.cedente || '—'} v. ${p.cessionario || '—'}`
+      credPorId.set(p.id, desc)
+      const d = dig(p.numero_cnj)
+      if (d.length >= 15) credPorNum.set(d, desc)
+    }
+    const reqNums = new Set<string>()
+    for (const r of requerimentos.data ?? []) {
+      const d = dig(r.numero_protocolo)
+      if (d.length >= 15) reqNums.add(d)
+    }
+    const apPorNum = new Map<
+      string,
+      { processo_id: string | null; requerimento_id: string | null }
+    >()
+    for (const a of apensos.data ?? []) {
+      const d = dig(a.numero)
+      if (d.length >= 15)
+        apPorNum.set(d, {
+          processo_id: a.processo_id,
+          requerimento_id: a.requerimento_id,
+        })
+    }
+    const descricao = (numero: string): string => {
+      const d = dig(numero)
+      const cred = credPorNum.get(d)
+      if (cred) return cred
+      if (reqNums.has(d)) return 'Requerimento administrativo'
+      const ap = apPorNum.get(d)
+      if (ap) {
+        if (ap.processo_id && credPorId.has(ap.processo_id))
+          return credPorId.get(ap.processo_id)!
+        if (ap.requerimento_id) return 'Requerimento administrativo'
+      }
+      return ''
+    }
+    return (opcoes.data?.lawsuits ?? []).map((l) => {
+      const d = descricao(l.numero)
+      return { id: l.id, numero: l.numero, label: d ? `${l.numero} — ${d}` : l.numero }
+    })
+  }, [opcoes.data, processos.data, requerimentos.data, apensos.data])
+
   // Ao fechar, limpa o formulário. Ao abrir a partir de uma publicação,
   // pré-preenche o número do processo (casando com a lista quando possível).
   useEffect(() => {
@@ -487,14 +543,12 @@ export function NovaTarefaModal({
     }
     if (!processoNumero) return
     const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
-    const found = opcoes.data?.lawsuits?.find(
-      (l) => dig(l.numero) === dig(processoNumero),
+    const d = dig(processoNumero)
+    const found = lawOptions.find((o) => dig(o.numero) === d)
+    setForm((f) =>
+      f.processoBusca ? f : { ...f, processoBusca: found ? found.label : processoNumero },
     )
-    const disp = found
-      ? `${found.numero}${found.cliente ? ` — ${found.cliente}` : ''}`
-      : processoNumero
-    setForm((f) => (f.processoBusca ? f : { ...f, processoBusca: disp }))
-  }, [open, opcoes.data, processoNumero])
+  }, [open, lawOptions, processoNumero])
 
   const criar = useMutation({
     mutationFn: (lawsuitId: number) =>
@@ -521,10 +575,9 @@ export function NovaTarefaModal({
     e.preventDefault()
     const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
     const d = dig(form.processoBusca)
-    const law = (opcoes.data?.lawsuits ?? []).find((l) => {
-      const disp = `${l.numero}${l.cliente ? ` — ${l.cliente}` : ''}`
-      return form.processoBusca === disp || (d.length >= 6 && dig(l.numero) === d)
-    })
+    const law = lawOptions.find(
+      (o) => o.label === form.processoBusca || (d.length >= 6 && dig(o.numero) === d),
+    )
     if (!law) return toast.error('Selecione um processo válido da lista.')
     if (!form.tasks_id) return toast.error('Selecione o tipo de tarefa.')
     if (!form.start_date) return toast.error('Informe a data.')
@@ -544,7 +597,6 @@ export function NovaTarefaModal({
 
   const users = opcoes.data?.users ?? []
   const tasks = opcoes.data?.tasks ?? []
-  const lawsuits = opcoes.data?.lawsuits ?? []
 
   return (
     <Modal
@@ -576,7 +628,7 @@ export function NovaTarefaModal({
             hint="Digite o número e escolha na lista (só processos cadastrados)."
           >
             <ProcessoCombobox
-              lawsuits={lawsuits}
+              options={lawOptions}
               value={form.processoBusca}
               onChange={(v) => setForm((f) => ({ ...f, processoBusca: v }))}
             />
