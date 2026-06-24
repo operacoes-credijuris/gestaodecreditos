@@ -27,7 +27,7 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatDate, formatNome } from '@/lib/format'
+import { formatCNJ, formatDate, formatNome, sentenceCase } from '@/lib/format'
 
 // ---------- Tipos vindos da Edge Function advbox-tarefas ----------
 interface TarefaAdvbox {
@@ -281,7 +281,9 @@ export default function TarefasAdvbox() {
                             <Star className="h-3.5 w-3.5 text-amber-500" />
                           </span>
                         )}
-                        <span>{t.tipo || '—'}</span>
+                        <span className="font-bold">
+                          {t.tipo ? sentenceCase(t.tipo) : '—'}
+                        </span>
                       </div>
                       {t.notes && <Observacao text={t.notes} />}
                     </TD>

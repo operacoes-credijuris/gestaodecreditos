@@ -66,3 +66,13 @@ export function formatNome(value: string | null | undefined): string {
     )
     .join(' ')
 }
+
+/**
+ * "Sentence case": tudo minúsculo, só a primeira letra maiúscula
+ * (ex.: "ENTRAR EM CONTATO" -> "Entrar em contato").
+ */
+export function sentenceCase(value: string | null | undefined): string {
+  if (!value) return ''
+  const s = value.toLocaleLowerCase('pt-BR')
+  return s.charAt(0).toLocaleUpperCase('pt-BR') + s.slice(1)
+}
