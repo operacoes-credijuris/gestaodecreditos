@@ -155,8 +155,8 @@ export default function TarefasAdvbox() {
           <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
             <THead>
               <tr>
-                <TH>Tarefa</TH>
                 <TH>Processo</TH>
+                <TH>Tarefa</TH>
                 <TH>Responsáveis</TH>
                 <TH>Data</TH>
                 <TH>Prazo</TH>
@@ -166,6 +166,7 @@ export default function TarefasAdvbox() {
             <TBody>
               {lista.map((t) => (
                 <TR key={t.id}>
+                  <TD className="whitespace-nowrap">{formatCNJ(t.processo)}</TD>
                   <TD className="font-medium text-slate-800">
                     <div className="flex items-center gap-1.5">
                       {t.urgent && (
@@ -181,13 +182,24 @@ export default function TarefasAdvbox() {
                       <span>{t.tipo || '—'}</span>
                     </div>
                     {t.notes && (
-                      <div className="line-clamp-1 text-xs font-normal text-slate-400">
+                      <div className="max-w-[480px] whitespace-normal break-words text-xs font-normal text-slate-400">
                         {t.notes}
                       </div>
                     )}
                   </TD>
-                  <TD className="whitespace-nowrap">{formatCNJ(t.processo)}</TD>
-                  <TD>{t.responsaveis?.length ? t.responsaveis.join(', ') : '—'}</TD>
+                  <TD>
+                    {t.responsaveis?.length ? (
+                      <div className="space-y-0.5">
+                        {t.responsaveis.map((r, i) => (
+                          <div key={i} className="whitespace-nowrap">
+                            {r}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      '—'
+                    )}
+                  </TD>
                   <TD className="whitespace-nowrap">{formatDate(t.start_date)}</TD>
                   <TD className="whitespace-nowrap">{formatDate(t.date_deadline)}</TD>
                   <TD>
