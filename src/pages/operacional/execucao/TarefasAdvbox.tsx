@@ -1,11 +1,18 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react'
 import { Plus, Search, Flame, Star } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invokeFunction } from '@/lib/functions'
+import { processosCrud } from '@/lib/queries'
+import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import {
@@ -20,7 +27,7 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatDate } from '@/lib/format'
+import { formatCNJ, formatDate, formatNome } from '@/lib/format'
 
 // ---------- Tipos vindos da Edge Function advbox-tarefas ----------
 interface TarefaAdvbox {
@@ -65,6 +72,36 @@ const FORM_VAZIO: FormState = {
   comments: '',
 }
 
+// Observação com no máximo 3 linhas; mostra "ler mais" quando excede.
+function Observacao({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [clamped, setClamped] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
+  }, [text])
+  return (
+    <div className="mt-0.5 max-w-[520px] text-xs font-normal text-slate-400">
+      <div
+        ref={ref}
+        className={cn('whitespace-pre-wrap break-words', !expanded && 'line-clamp-3')}
+      >
+        {text}
+      </div>
+      {(clamped || expanded) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-0.5 font-medium text-brand-600 hover:underline"
+        >
+          {expanded ? 'ler menos' : 'ler mais'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function TarefasAdvbox() {
   const qc = useQueryClient()
   const toast = useToast()
@@ -80,14 +117,22 @@ export default function TarefasAdvbox() {
   })
   const tarefas = data?.tarefas ?? []
 
+  // Cedente/cessionário dos Créditos (exibidos sob o nº do processo).
+  const processos = processosCrud.useList()
+  const creditoPorNumero = useMemo(() => {
+    const m = new Map<string, { cedente: string | null; cessionario: string | null }>()
+    for (const p of processos.data ?? []) {
+      const d = (p.numero_cnj ?? '').replace(/\D/g, '')
+      if (d.length >= 6) m.set(d, { cedente: p.cedente, cessionario: p.cessionario })
+    }
+    return m
+  }, [processos.data])
+
   const [busca, setBusca] = useState('')
-  const [filtro, setFiltro] = useState<'todas' | 'pendentes' | 'concluidas'>('pendentes')
   const [novo, setNovo] = useState(false)
 
   const lista = useMemo(() => {
     let l = tarefas
-    if (filtro === 'pendentes') l = l.filter((t) => !t.concluida)
-    if (filtro === 'concluidas') l = l.filter((t) => t.concluida)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((t) =>
@@ -97,9 +142,7 @@ export default function TarefasAdvbox() {
       )
     }
     return l
-  }, [tarefas, filtro, busca])
-
-  const abertas = tarefas.filter((t) => !t.concluida).length
+  }, [tarefas, busca])
 
   return (
     <div>
@@ -114,31 +157,15 @@ export default function TarefasAdvbox() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por tipo, processo, responsável…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
-          <Select
-            className="sm:w-52"
-            value={filtro}
-            onChange={(e) => setFiltro(e.target.value as typeof filtro)}
-          >
-            <option value="pendentes">Pendentes</option>
-            <option value="concluidas">Concluídas</option>
-            <option value="todas">Todas</option>
-          </Select>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="pl-9"
+            placeholder="Buscar por tipo, processo, responsável…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
         </div>
-        {abertas > 0 && (
-          <p className="mt-3 text-sm text-slate-500">
-            <strong>{abertas}</strong> tarefa(s) pendente(s).
-          </p>
-        )}
       </Card>
 
       <Card>
@@ -149,7 +176,7 @@ export default function TarefasAdvbox() {
         ) : lista.length === 0 ? (
           <EmptyState
             title="Nenhuma tarefa"
-            description="Não há tarefas no ADVBOX para os processos cadastrados (com este filtro)."
+            description="Não há tarefas no ADVBOX para os processos cadastrados."
           />
         ) : (
           <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
@@ -160,57 +187,57 @@ export default function TarefasAdvbox() {
                 <TH>Responsáveis</TH>
                 <TH>Data</TH>
                 <TH>Prazo</TH>
-                <TH>Status</TH>
               </tr>
             </THead>
             <TBody>
-              {lista.map((t) => (
-                <TR key={t.id}>
-                  <TD className="whitespace-nowrap">{formatCNJ(t.processo)}</TD>
-                  <TD className="font-medium text-slate-800">
-                    <div className="flex items-center gap-1.5">
-                      {t.urgent && (
-                        <span title="Urgente">
-                          <Flame className="h-3.5 w-3.5 text-red-500" />
-                        </span>
+              {lista.map((t) => {
+                const cred = creditoPorNumero.get(
+                  (t.processo ?? '').replace(/\D/g, ''),
+                )
+                return (
+                  <TR key={t.id}>
+                    <TD className="whitespace-nowrap font-medium text-slate-800">
+                      {formatCNJ(t.processo)}
+                      {cred && (cred.cedente || cred.cessionario) && (
+                        <div className="text-xs font-normal text-slate-400">
+                          {cred.cedente || '—'} v. {cred.cessionario || '—'}
+                        </div>
                       )}
-                      {t.important && (
-                        <span title="Importante">
-                          <Star className="h-3.5 w-3.5 text-amber-500" />
-                        </span>
+                    </TD>
+                    <TD className="font-medium text-slate-800">
+                      <div className="flex items-center gap-1.5">
+                        {t.urgent && (
+                          <span title="Urgente">
+                            <Flame className="h-3.5 w-3.5 text-red-500" />
+                          </span>
+                        )}
+                        {t.important && (
+                          <span title="Importante">
+                            <Star className="h-3.5 w-3.5 text-amber-500" />
+                          </span>
+                        )}
+                        <span>{t.tipo || '—'}</span>
+                      </div>
+                      {t.notes && <Observacao text={t.notes} />}
+                    </TD>
+                    <TD>
+                      {t.responsaveis?.length ? (
+                        <div className="space-y-0.5">
+                          {t.responsaveis.map((r, i) => (
+                            <div key={i} className="whitespace-nowrap">
+                              {formatNome(r)}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        '—'
                       )}
-                      <span>{t.tipo || '—'}</span>
-                    </div>
-                    {t.notes && (
-                      <div className="max-w-[480px] whitespace-normal break-words text-xs font-normal text-slate-400">
-                        {t.notes}
-                      </div>
-                    )}
-                  </TD>
-                  <TD>
-                    {t.responsaveis?.length ? (
-                      <div className="space-y-0.5">
-                        {t.responsaveis.map((r, i) => (
-                          <div key={i} className="whitespace-nowrap">
-                            {r}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      '—'
-                    )}
-                  </TD>
-                  <TD className="whitespace-nowrap">{formatDate(t.start_date)}</TD>
-                  <TD className="whitespace-nowrap">{formatDate(t.date_deadline)}</TD>
-                  <TD>
-                    {t.concluida ? (
-                      <Badge tone="green">Concluída</Badge>
-                    ) : (
-                      <Badge tone="yellow">Pendente</Badge>
-                    )}
-                  </TD>
-                </TR>
-              ))}
+                    </TD>
+                    <TD className="whitespace-nowrap">{formatDate(t.start_date)}</TD>
+                    <TD className="whitespace-nowrap">{formatDate(t.date_deadline)}</TD>
+                  </TR>
+                )
+              })}
             </TBody>
           </Table>
         )}

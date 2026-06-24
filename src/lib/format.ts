@@ -42,3 +42,27 @@ export function formatCNJ(value: string | null | undefined): string {
     13,
   )}.${digits.slice(13, 14)}.${digits.slice(14, 16)}.${digits.slice(16, 20)}`
 }
+
+// Partículas que permanecem em minúsculo no meio do nome.
+const PARTICULAS_NOME = new Set([
+  'de', 'da', 'do', 'das', 'dos', 'e', 'di', 'du', 'del', 'la', 'van', 'von',
+])
+
+/**
+ * Converte um nome em CAIXA ALTA (vindo do ADVBOX) para "Primeira Letra
+ * Maiúscula", mantendo partículas em minúsculo (ex.: "ERCÍLIO DA COSTA" ->
+ * "Ercílio da Costa").
+ */
+export function formatNome(value: string | null | undefined): string {
+  if (!value) return ''
+  return value
+    .toLocaleLowerCase('pt-BR')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w, i) =>
+      i > 0 && PARTICULAS_NOME.has(w)
+        ? w
+        : w.charAt(0).toLocaleUpperCase('pt-BR') + w.slice(1),
+    )
+    .join(' ')
+}
