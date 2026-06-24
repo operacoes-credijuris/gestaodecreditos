@@ -13,6 +13,7 @@ import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input, Select } from '@/components/ui/Field'
@@ -183,6 +184,10 @@ function Publicacoes({ busca }: { busca: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Exibição em blocos (o volume por OAB pode ser grande).
+  const [mostrar, setMostrar] = useState(50)
+  useEffect(() => setMostrar(50), [busca])
+
   const filtradas = useMemo(() => {
     const all = lista.data ?? []
     if (!busca.trim()) return all
@@ -231,9 +236,21 @@ function Publicacoes({ busca }: { busca: string }) {
           />
         </Card>
       ) : (
-        filtradas.map((p) => (
-          <PublicacaoCard key={p.id} p={p} info={resolve(p.numero_processo)} />
-        ))
+        <>
+          {filtradas.slice(0, mostrar).map((p) => (
+            <PublicacaoCard key={p.id} p={p} info={resolve(p.numero_processo)} />
+          ))}
+          {filtradas.length > mostrar && (
+            <div className="flex justify-center pt-1">
+              <Button
+                variant="outline"
+                onClick={() => setMostrar((m) => m + 50)}
+              >
+                Mostrar mais ({filtradas.length - mostrar} restantes)
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

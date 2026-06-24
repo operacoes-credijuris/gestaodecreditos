@@ -5,6 +5,7 @@ import {
   Newspaper,
   Users,
   Plus,
+  Trash2,
   CheckCircle2,
   XCircle,
   ShieldCheck,
@@ -166,46 +167,56 @@ function AdvboxConfig() {
 }
 
 // ----------------------- DJEN -----------------------
+const UFS = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
+  'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE',
+  'TO',
+]
+
+interface OabItem {
+  uf: string
+  numero: string
+}
+
 function DjenConfig() {
   const { data, isLoading } = useIntegracao('djen')
   const qc = useQueryClient()
   const toast = useToast()
-  const [oabs, setOabs] = useState('')
-  const [numeros, setNumeros] = useState('')
-  const [tribunais, setTribunais] = useState('')
-  const [dias, setDias] = useState('7')
+  const [itens, setItens] = useState<OabItem[]>([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     const cfg = (data?.config as ConfigDjen) ?? {}
-    setOabs((cfg.oabs ?? []).join(', '))
-    setNumeros((cfg.numeros_processo ?? []).join(', '))
-    setTribunais((cfg.tribunais ?? []).join(', '))
-    setDias(String(cfg.dias_retroativos ?? 7))
+    const parsed = (cfg.oabs ?? [])
+      .map((s) => {
+        const m = String(s).match(/(\d+)\s*\/?\s*([A-Za-z]{2})?/)
+        return { numero: m?.[1] ?? '', uf: (m?.[2] ?? 'GO').toUpperCase() }
+      })
+      .filter((o) => o.numero)
+    setItens(parsed)
   }, [data])
 
-  function parseList(v: string) {
-    return v
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  }
+  const setOab = (i: number, patch: Partial<OabItem>) =>
+    setItens((l) => l.map((o, idx) => (idx === i ? { ...o, ...patch } : o)))
+  const addOab = () => setItens((l) => [...l, { uf: 'GO', numero: '' }])
+  const removeOab = (i: number) =>
+    setItens((l) => l.filter((_, idx) => idx !== i))
 
   async function salvar() {
     setSaving(true)
     try {
-      const cfg: ConfigDjen = {
-        oabs: parseList(oabs),
-        numeros_processo: parseList(numeros),
-        tribunais: parseList(tribunais),
-        dias_retroativos: Number(dias) || 7,
-      }
+      const oabs = itens
+        .map((o) => ({ uf: o.uf, numero: o.numero.replace(/\D/g, '') }))
+        .filter((o) => o.numero)
+        .map((o) => `${o.numero}/${o.uf}`)
+      // Janela fixa de 30 dias.
+      const cfg: ConfigDjen = { oabs, dias_retroativos: 30 }
       const { error } = await supabase
         .from('integracoes')
         .upsert({ servico: 'djen', config: cfg, ativo: true }, { onConflict: 'servico' })
       if (error) throw new Error(error.message)
       await qc.invalidateQueries({ queryKey: ['integracoes', 'djen'] })
-      toast.success('Configurações do DJEN salvas.')
+      toast.success('OABs salvas.')
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
@@ -221,33 +232,59 @@ function DjenConfig() {
             <Newspaper className="h-5 w-5 text-brand-600" /> Integração DJEN
           </span>
         }
-        description="Parâmetros de monitoramento das publicações (consulta pública)."
+        description="OAB(s) monitoradas. As publicações (intimações) são puxadas por OAB, dos últimos 30 dias."
       />
       <CardBody>
         {isLoading ? (
           <Loading />
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="OABs monitoradas" hint="Separadas por vírgula. Ex.: 123456/SP, 78910/RJ">
-              <Input value={oabs} onChange={(e) => setOabs(e.target.value)} />
-            </Field>
-            <Field label="Números de processo" hint="Separados por vírgula (opcional).">
-              <Input value={numeros} onChange={(e) => setNumeros(e.target.value)} />
-            </Field>
-            <Field label="Tribunais" hint="Siglas separadas por vírgula. Ex.: TJSP, TRF3">
-              <Input value={tribunais} onChange={(e) => setTribunais(e.target.value)} />
-            </Field>
-            <Field label="Dias retroativos" hint="Janela de consulta a cada sincronização.">
-              <Input
-                type="number"
-                min={1}
-                value={dias}
-                onChange={(e) => setDias(e.target.value)}
-              />
-            </Field>
-            <div className="sm:col-span-2">
+          <div className="space-y-3">
+            {itens.length === 0 && (
+              <p className="text-sm text-slate-400">Nenhuma OAB cadastrada.</p>
+            )}
+            {itens.map((o, i) => (
+              <div key={i} className="flex items-end gap-2">
+                <Field label={i === 0 ? 'UF' : undefined} className="w-24">
+                  <Select value={o.uf} onChange={(e) => setOab(i, { uf: e.target.value })}>
+                    {UFS.map((uf) => (
+                      <option key={uf} value={uf}>
+                        {uf}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label={i === 0 ? 'Número da OAB' : undefined}
+                  className="flex-1"
+                >
+                  <Input
+                    value={o.numero}
+                    inputMode="numeric"
+                    placeholder="Somente números (ex.: 54162)"
+                    onChange={(e) =>
+                      setOab(i, { numero: e.target.value.replace(/\D/g, '') })
+                    }
+                  />
+                </Field>
+                <Button
+                  variant="ghost"
+                  onClick={() => removeOab(i)}
+                  title="Remover OAB"
+                  icon={<Trash2 className="h-4 w-4" />}
+                />
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              icon={<Plus className="h-4 w-4" />}
+              onClick={addOab}
+            >
+              Adicionar OAB
+            </Button>
+            <div className="pt-1">
               <Button onClick={salvar} loading={saving}>
-                Salvar DJEN
+                Salvar OABs
               </Button>
             </div>
           </div>
