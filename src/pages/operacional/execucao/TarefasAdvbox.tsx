@@ -148,10 +148,15 @@ export default function TarefasAdvbox() {
   }, [processos.data, apensos.data])
 
   const [busca, setBusca] = useState('')
+  const [filtroPrazo, setFiltroPrazo] = useState<'todos' | 'fatais' | 'sem_prazo'>(
+    'todos',
+  )
   const [novo, setNovo] = useState(false)
 
   const lista = useMemo(() => {
     let l = tarefas
+    if (filtroPrazo === 'fatais') l = l.filter((t) => !!t.date_deadline)
+    if (filtroPrazo === 'sem_prazo') l = l.filter((t) => !t.date_deadline)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((t) =>
@@ -161,7 +166,7 @@ export default function TarefasAdvbox() {
       )
     }
     return l
-  }, [tarefas, busca])
+  }, [tarefas, busca, filtroPrazo])
 
   return (
     <div>
@@ -176,14 +181,25 @@ export default function TarefasAdvbox() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por tipo, processo, responsável…"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              className="pl-9"
+              placeholder="Buscar por tipo, processo, responsável…"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
+          </div>
+          <Select
+            className="sm:w-52"
+            value={filtroPrazo}
+            onChange={(e) => setFiltroPrazo(e.target.value as typeof filtroPrazo)}
+          >
+            <option value="todos">Todos</option>
+            <option value="fatais">Fatais</option>
+            <option value="sem_prazo">Sem prazo</option>
+          </Select>
         </div>
       </Card>
 
