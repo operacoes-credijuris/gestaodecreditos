@@ -9,7 +9,9 @@ import { Search, ExternalLink, RefreshCw } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
+import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
+import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -26,6 +28,14 @@ interface DjenRow {
   tipo_comunicacao: string | null
   raw: Record<string, unknown>
   sincronizado_em: string
+}
+
+// Resolução do processo da publicação contra os cadastros.
+interface ResolveInfo {
+  kind: 'credito' | 'requerimento' | null
+  status?: string | null
+  cedente?: string | null
+  cessionario?: string | null
 }
 
 // Decodifica entidades HTML do texto do DJEN (&Aacute; -> Á etc.).
@@ -87,6 +97,55 @@ export default function PublicacoesMovimentacoes() {
 function Publicacoes({ busca }: { busca: string }) {
   const qc = useQueryClient()
   const toast = useToast()
+
+  // Resolve cada publicação contra os cadastros: Crédito (status + partes),
+  // Requerimento, ou Apenso (herda do crédito/requerimento pai).
+  const processos = processosCrud.useList()
+  const requerimentos = requerimentosCrud.useList()
+  const apensos = apensosCrud.useList()
+  const resolve = useMemo(() => {
+    const dig = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '')
+    const credPorNum = new Map<string, ResolveInfo>()
+    const credPorId = new Map<string, ResolveInfo>()
+    for (const p of processos.data ?? []) {
+      const info: ResolveInfo = {
+        kind: 'credito',
+        status: p.status,
+        cedente: p.cedente,
+        cessionario: p.cessionario,
+      }
+      credPorId.set(p.id, info)
+      const d = dig(p.numero_cnj)
+      if (d.length >= 15) credPorNum.set(d, info)
+    }
+    const reqNums = new Set<string>()
+    for (const r of requerimentos.data ?? []) {
+      const d = dig(r.numero_protocolo)
+      if (d.length >= 15) reqNums.add(d)
+    }
+    const apPorNum = new Map<
+      string,
+      { processo_id: string | null; requerimento_id: string | null }
+    >()
+    for (const a of apensos.data ?? []) {
+      const d = dig(a.numero)
+      if (d.length >= 15)
+        apPorNum.set(d, { processo_id: a.processo_id, requerimento_id: a.requerimento_id })
+    }
+    return (numProc: string | null): ResolveInfo => {
+      const d = dig(numProc)
+      const cred = credPorNum.get(d)
+      if (cred) return cred
+      if (reqNums.has(d)) return { kind: 'requerimento' }
+      const ap = apPorNum.get(d)
+      if (ap) {
+        if (ap.processo_id && credPorId.has(ap.processo_id))
+          return credPorId.get(ap.processo_id)!
+        if (ap.requerimento_id) return { kind: 'requerimento' }
+      }
+      return { kind: null }
+    }
+  }, [processos.data, requerimentos.data, apensos.data])
 
   // Janela de 30 dias (data de disponibilização >= hoje - 30, horário local).
   const ini30 = useMemo(
@@ -172,38 +231,39 @@ function Publicacoes({ busca }: { busca: string }) {
           />
         </Card>
       ) : (
-        filtradas.map((p) => <PublicacaoCard key={p.id} p={p} />)
+        filtradas.map((p) => (
+          <PublicacaoCard key={p.id} p={p} info={resolve(p.numero_processo)} />
+        ))
       )}
     </div>
   )
 }
 
-function PublicacaoCard({ p }: { p: DjenRow }) {
+function PublicacaoCard({ p, info }: { p: DjenRow; info: ResolveInfo }) {
   const raw = p.raw ?? {}
   const [showRaw, setShowRaw] = useState(false)
   const texto = useMemo(() => textoLimpo(raw.texto), [raw.texto])
+  const st = getLabel(STATUS_PROCESSO, info.status)
 
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] font-semibold text-slate-800">
-          {formatDate(p.data_disponibilizacao)}
-        </span>
         {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
-        {p.tipo_comunicacao && <Badge tone="purple">{p.tipo_comunicacao}</Badge>}
-        {typeof raw.tipoDocumento === 'string' && raw.tipoDocumento && (
-          <Badge tone="gray">{raw.tipoDocumento}</Badge>
-        )}
+        {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
+        {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
       </div>
 
       <div className="mt-1 text-[13px] font-medium text-slate-800">
         {formatCNJ(p.numero_processo ?? '')}
       </div>
-      {Boolean(raw.nomeOrgao || raw.nomeClasse) && (
-        <div className="text-[11px] text-slate-500">
-          {[raw.nomeOrgao, raw.nomeClasse].filter(Boolean).join(' · ')}
+      {info.kind === 'credito' && (info.cedente || info.cessionario) && (
+        <div className="text-[11px] text-slate-400">
+          {info.cedente || '—'} v. {info.cessionario || '—'}
         </div>
       )}
+      <div className="text-[11px] text-slate-500">
+        Data de disponibilização: {formatDate(p.data_disponibilizacao)}
+      </div>
 
       {texto && <TextoExpand text={texto} />}
 
