@@ -115,7 +115,16 @@ export default function TarefasAdvbox() {
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   })
-  const tarefas = data?.tarefas ?? []
+  // Data de hoje (YYYY-MM-DD, horário local) para descartar prazos vencidos.
+  const hoje = useMemo(() => new Date().toLocaleDateString('sv-SE'), [])
+  // Oculta tarefas com prazo fatal anterior a hoje (vencidas). Sem prazo: mantém.
+  const tarefas = useMemo(
+    () =>
+      (data?.tarefas ?? []).filter(
+        (t) => !t.date_deadline || t.date_deadline.slice(0, 10) >= hoje,
+      ),
+    [data, hoje],
+  )
 
   // Cedente/cessionário dos Créditos (exibidos sob o nº do processo). Tarefas de
   // apensos vinculados a um crédito herdam o cedente/cessionário do crédito pai.
