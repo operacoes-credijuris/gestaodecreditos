@@ -250,7 +250,7 @@ export default function TarefasAdvbox() {
               <tr>
                 <TH className="whitespace-nowrap">Processo</TH>
                 <TH className="w-full">Tarefa</TH>
-                <TH className="whitespace-nowrap">Gerar petição</TH>
+                <TH className="whitespace-nowrap text-center">Gerar petição</TH>
                 <TH className="whitespace-nowrap">Responsáveis</TH>
                 <TH className="whitespace-nowrap">Data</TH>
                 <TH className="whitespace-nowrap">Prazo</TH>
@@ -287,7 +287,7 @@ export default function TarefasAdvbox() {
                       </div>
                       {t.notes && <Observacao text={t.notes} />}
                     </TD>
-                    <TD className="whitespace-nowrap">
+                    <TD className="whitespace-nowrap text-center">
                       <Button
                         size="sm"
                         variant="outline"
