@@ -6,14 +6,16 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Search, ExternalLink, RefreshCw } from 'lucide-react'
+import { Search, ExternalLink, RefreshCw, ListChecks } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
+import { NovaTarefaModal } from '@/pages/operacional/execucao/TarefasAdvbox'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input, Select } from '@/components/ui/Field'
@@ -212,6 +214,9 @@ function Publicacoes({ busca }: { busca: string }) {
     onSettled: () => qc.invalidateQueries({ queryKey: ['djen_publicacoes'] }),
   })
 
+  // Publicação para a qual estamos criando tarefa (abre o modal).
+  const [tarefaPub, setTarefaPub] = useState<DjenRow | null>(null)
+
   const filtradas = useMemo(() => {
     const all = lista.data ?? []
     if (!busca.trim()) return all
@@ -243,6 +248,7 @@ function Publicacoes({ busca }: { busca: string }) {
       p={p}
       info={resolve(p.numero_processo)}
       onToggle={() => toggleTratada.mutate(p)}
+      onCriarTarefa={() => setTarefaPub(p)}
     />
   )
 
@@ -290,6 +296,16 @@ function Publicacoes({ busca }: { busca: string }) {
           </Secao>
         </>
       )}
+
+      <NovaTarefaModal
+        open={!!tarefaPub}
+        processoNumero={tarefaPub?.numero_processo ?? null}
+        onClose={() => setTarefaPub(null)}
+        onCreated={() => {
+          setTarefaPub(null)
+          toast.success('Tarefa criada no ADVBOX.')
+        }}
+      />
     </div>
   )
 }
@@ -322,10 +338,12 @@ function PublicacaoCard({
   p,
   info,
   onToggle,
+  onCriarTarefa,
 }: {
   p: DjenRow
   info: ResolveInfo
   onToggle: () => void
+  onCriarTarefa: () => void
 }) {
   const raw = p.raw ?? {}
   const texto = useMemo(() => textoLimpo(raw.texto), [raw.texto])
@@ -350,10 +368,21 @@ function PublicacaoCard({
             </div>
           )}
         </div>
-        <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-          {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
-          {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
-          {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+        <div className="flex flex-shrink-0 flex-col items-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
+            {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
+            {info.kind === 'requerimento' && (
+              <Badge tone="purple">Requerimentos</Badge>
+            )}
+          </div>
+          <Button
+            size="md"
+            icon={<ListChecks className="h-4 w-4" />}
+            onClick={onCriarTarefa}
+          >
+            Criar tarefa
+          </Button>
         </div>
       </div>
 

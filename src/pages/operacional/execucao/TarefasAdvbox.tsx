@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -339,14 +340,16 @@ export default function TarefasAdvbox() {
 }
 
 // ----------------------- Modal de criação -----------------------
-function NovaTarefaModal({
+export function NovaTarefaModal({
   open,
   onClose,
   onCreated,
+  processoNumero,
 }: {
   open: boolean
   onClose: () => void
   onCreated: () => void
+  processoNumero?: string | null
 }) {
   const toast = useToast()
   const [form, setForm] = useState<FormState>({ ...FORM_VAZIO })
@@ -358,6 +361,22 @@ function NovaTarefaModal({
     enabled: open,
     staleTime: 5 * 60 * 1000,
   })
+
+  // Ao fechar, limpa o formulário. Ao abrir a partir de uma publicação,
+  // pré-seleciona o processo correspondente (se houver).
+  useEffect(() => {
+    if (!open) {
+      setForm({ ...FORM_VAZIO })
+      return
+    }
+    const law = opcoes.data?.lawsuits
+    if (processoNumero && law) {
+      const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
+      const found = law.find((l) => dig(l.numero) === dig(processoNumero))
+      if (found)
+        setForm((f) => (f.lawsuits_id ? f : { ...f, lawsuits_id: String(found.id) }))
+    }
+  }, [open, opcoes.data, processoNumero])
 
   const criar = useMutation({
     mutationFn: () =>
