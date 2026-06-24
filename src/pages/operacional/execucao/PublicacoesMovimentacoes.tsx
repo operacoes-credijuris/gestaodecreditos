@@ -1,424 +1,279 @@
-import { useMemo, useState, type FormEvent } from 'react'
 import {
-  Plus,
-  Trash2,
-  Search,
-  RefreshCw,
-  CheckCircle2,
-  Circle,
-  Eye,
-} from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
-import { publicacoesCrud } from '@/lib/queries'
-import type { Publicacao, TipoPublicacao } from '@/lib/types'
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { Search, ExternalLink, RefreshCw } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
+import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select, Textarea } from '@/components/ui/Field'
-import { Modal } from '@/components/ui/Modal'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import {
-  Table,
-  THead,
-  TH,
-  TBody,
-  TR,
-  TD,
-  Loading,
-  ErrorState,
-  EmptyState,
-} from '@/components/ui/Table'
+import { Input, Select } from '@/components/ui/Field'
+import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { getLabel, FONTE_PUBLICACAO, TIPO_PUBLICACAO } from '@/lib/labels'
-import { formatDate } from '@/lib/format'
+import { formatCNJ, formatDate } from '@/lib/format'
 
-const VAZIO: Partial<Publicacao> = {
-  numero_processo: '',
-  fonte: 'manual',
-  tipo: 'publicacao',
-  tribunal: '',
-  data_publicacao: '',
-  conteudo: '',
-  lida: false,
-  tratada: false,
+interface DjenRow {
+  id: number
+  data_disponibilizacao: string | null
+  numero_processo: string | null
+  sigla_tribunal: string | null
+  tipo_comunicacao: string | null
+  raw: Record<string, unknown>
+  sincronizado_em: string
+}
+
+// Decodifica entidades HTML do texto do DJEN (&Aacute; -> Á etc.).
+function decodeHtml(s: string): string {
+  const el = document.createElement('textarea')
+  el.innerHTML = s
+  return el.value
+}
+function textoLimpo(html: unknown): string {
+  if (!html) return ''
+  const noTags = String(html).replace(/<[^>]+>/g, ' ')
+  return decodeHtml(noTags)
+    .replace(/ /g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 export default function PublicacoesMovimentacoes() {
-  const { useList, useCreate, useUpdate, useRemove } = publicacoesCrud
-  const { data, isLoading, isError, error } = useList()
-  const create = useCreate()
-  const update = useUpdate()
-  const remove = useRemove()
-  const toast = useToast()
-  const qc = useQueryClient()
-
+  const [aba, setAba] = useState<'publicacoes' | 'movimentacoes'>('publicacoes')
   const [busca, setBusca] = useState('')
-  const [filtroFonte, setFiltroFonte] = useState('todas')
-  const [filtroTrat, setFiltroTrat] = useState('todas')
-  const [editing, setEditing] = useState<Partial<Publicacao> | null>(null)
-  const [viewing, setViewing] = useState<Publicacao | null>(null)
-  const [toDelete, setToDelete] = useState<Publicacao | null>(null)
-  const [syncing, setSyncing] = useState<null | 'djen' | 'advbox'>(null)
-
-  const lista = useMemo(() => {
-    let l = data ?? []
-    if (filtroFonte !== 'todas') l = l.filter((p) => p.fonte === filtroFonte)
-    if (filtroTrat === 'pendentes') l = l.filter((p) => !p.tratada)
-    if (filtroTrat === 'tratadas') l = l.filter((p) => p.tratada)
-    if (filtroTrat === 'nao_lidas') l = l.filter((p) => !p.lida)
-    if (busca.trim()) {
-      const q = busca.toLowerCase()
-      l = l.filter((p) =>
-        [p.numero_processo, p.tribunal, p.conteudo]
-          .filter(Boolean)
-          .some((v) => v!.toLowerCase().includes(q)),
-      )
-    }
-    return l
-  }, [data, busca, filtroFonte, filtroTrat])
-
-  const pendentes = (data ?? []).filter((p) => !p.tratada).length
-
-  async function toggle(p: Publicacao, campo: 'lida' | 'tratada') {
-    try {
-      await update.mutateAsync({ id: p.id, changes: { [campo]: !p[campo] } })
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
-
-  async function sync(servico: 'djen' | 'advbox') {
-    setSyncing(servico)
-    try {
-      const fn = servico === 'djen' ? 'djen-consulta' : 'advbox-sync'
-      const res = await invokeFunction<{ inseridos?: number; mensagem?: string }>(fn)
-      await qc.invalidateQueries({ queryKey: ['publicacoes'] })
-      toast.success(
-        res?.mensagem ??
-          `Sincronização ${servico.toUpperCase()} concluída${
-            res?.inseridos != null ? ` (${res.inseridos} novos)` : ''
-          }.`,
-      )
-    } catch (err) {
-      toast.error(`Falha na sincronização ${servico.toUpperCase()}: ${(err as Error).message}`)
-    } finally {
-      setSyncing(null)
-    }
-  }
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!editing) return
-    try {
-      const { id, created_at, ...payload } = editing as Publicacao
-      if (id) {
-        await update.mutateAsync({ id, changes: payload })
-        toast.success('Registro atualizado.')
-      } else {
-        await create.mutateAsync(payload)
-        toast.success('Registro cadastrado.')
-      }
-      setEditing(null)
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
-
-  async function confirmDelete() {
-    if (!toDelete) return
-    try {
-      await remove.mutateAsync(toDelete.id)
-      toast.success('Registro excluído.')
-      setToDelete(null)
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
 
   return (
     <div>
       <PageHeader
         title="Publicações e Movimentações"
-        description="Controle das publicações (DJEN) e movimentações processuais (ADVBOX)."
-        actions={
-          <>
-            <Button
-              variant="outline"
-              icon={<RefreshCw className={syncing === 'djen' ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />}
-              loading={syncing === 'djen'}
-              onClick={() => sync('djen')}
-            >
-              Sincronizar DJEN
-            </Button>
-            <Button
-              variant="outline"
-              icon={<RefreshCw className={syncing === 'advbox' ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />}
-              loading={syncing === 'advbox'}
-              onClick={() => sync('advbox')}
-            >
-              Sincronizar ADVBOX
-            </Button>
-            <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
-              Manual
-            </Button>
-          </>
-        }
+        description="Publicações oficiais do DJEN vinculadas aos processos cadastrados e às OABs configuradas. Atualiza automaticamente."
       />
 
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row">
+        <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
               className="pl-9"
-              placeholder="Buscar por processo, tribunal, conteúdo…"
+              placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
           <Select
-            className="lg:w-44"
-            value={filtroFonte}
-            onChange={(e) => setFiltroFonte(e.target.value)}
+            className="sm:w-52"
+            value={aba}
+            onChange={(e) => setAba(e.target.value as typeof aba)}
           >
-            <option value="todas">Todas as fontes</option>
-            {Object.entries(FONTE_PUBLICACAO).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
-          <Select
-            className="lg:w-48"
-            value={filtroTrat}
-            onChange={(e) => setFiltroTrat(e.target.value)}
-          >
-            <option value="todas">Todas</option>
-            <option value="pendentes">Pendentes (não tratadas)</option>
-            <option value="nao_lidas">Não lidas</option>
-            <option value="tratadas">Tratadas</option>
+            <option value="publicacoes">Publicações</option>
+            <option value="movimentacoes">Movimentações</option>
           </Select>
         </div>
-        {pendentes > 0 && (
-          <p className="mt-3 text-sm text-amber-700">
-            <strong>{pendentes}</strong> registro(s) pendente(s) de tratamento.
-          </p>
-        )}
       </Card>
 
-      <Card>
-        {isLoading ? (
-          <Loading />
-        ) : isError ? (
-          <ErrorState message={(error as Error)?.message} />
-        ) : lista.length === 0 ? (
-          <EmptyState
-            title="Nenhum registro"
-            description="Sincronize com DJEN/ADVBOX ou cadastre manualmente."
-          />
-        ) : (
-          <Table>
-            <THead>
-              <tr>
-                <TH>Data</TH>
-                <TH>Processo</TH>
-                <TH>Fonte / Tipo</TH>
-                <TH>Conteúdo</TH>
-                <TH className="text-center">Lida</TH>
-                <TH className="text-center">Tratada</TH>
-                <TH className="text-right">Ações</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {lista.map((p) => {
-                const ft = getLabel(FONTE_PUBLICACAO, p.fonte)
-                const tp = getLabel(TIPO_PUBLICACAO, p.tipo)
-                return (
-                  <TR key={p.id} className={!p.lida ? 'bg-blue-50/40' : undefined}>
-                    <TD className="whitespace-nowrap">{formatDate(p.data_publicacao)}</TD>
-                    <TD className="font-medium text-slate-800">
-                      {p.numero_processo || '—'}
-                      <div className="text-xs font-normal text-slate-400">
-                        {p.tribunal || '—'}
-                      </div>
-                    </TD>
-                    <TD>
-                      <div className="flex flex-col gap-1">
-                        <Badge tone={ft.tone}>{ft.label}</Badge>
-                        <Badge tone={tp.tone}>{tp.label}</Badge>
-                      </div>
-                    </TD>
-                    <TD className="max-w-md">
-                      <p className="line-clamp-2 text-slate-600">{p.conteudo || '—'}</p>
-                    </TD>
-                    <TD className="text-center">
-                      <button onClick={() => toggle(p, 'lida')} title="Marcar lida">
-                        {p.lida ? (
-                          <CheckCircle2 className="mx-auto h-5 w-5 text-emerald-600" />
-                        ) : (
-                          <Circle className="mx-auto h-5 w-5 text-slate-300" />
-                        )}
-                      </button>
-                    </TD>
-                    <TD className="text-center">
-                      <button onClick={() => toggle(p, 'tratada')} title="Marcar tratada">
-                        {p.tratada ? (
-                          <CheckCircle2 className="mx-auto h-5 w-5 text-emerald-600" />
-                        ) : (
-                          <Circle className="mx-auto h-5 w-5 text-slate-300" />
-                        )}
-                      </button>
-                    </TD>
-                    <TD className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => setViewing(p)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Ver"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => setToDelete(p)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </TD>
-                  </TR>
-                )
-              })}
-            </TBody>
-          </Table>
-        )}
-      </Card>
-
-      {/* Visualização */}
-      <Modal
-        open={!!viewing}
-        onClose={() => setViewing(null)}
-        title="Detalhe da publicação"
-        size="lg"
-      >
-        {viewing && (
-          <div className="space-y-3 text-sm">
-            <div className="flex flex-wrap gap-2">
-              <Badge tone={getLabel(FONTE_PUBLICACAO, viewing.fonte).tone}>
-                {getLabel(FONTE_PUBLICACAO, viewing.fonte).label}
-              </Badge>
-              <Badge tone={getLabel(TIPO_PUBLICACAO, viewing.tipo).tone}>
-                {getLabel(TIPO_PUBLICACAO, viewing.tipo).label}
-              </Badge>
-            </div>
-            <p>
-              <span className="text-slate-400">Processo:</span>{' '}
-              {viewing.numero_processo || '—'}
-            </p>
-            <p>
-              <span className="text-slate-400">Tribunal:</span> {viewing.tribunal || '—'}
-            </p>
-            <p>
-              <span className="text-slate-400">Data:</span>{' '}
-              {formatDate(viewing.data_publicacao)}
-            </p>
-            <div className="rounded-lg bg-slate-50 p-3 text-slate-700 whitespace-pre-wrap">
-              {viewing.conteudo || '—'}
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Cadastro manual */}
-      <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title="Registro manual"
-        size="lg"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              form="form-pub"
-              loading={create.isPending || update.isPending}
-            >
-              Salvar
-            </Button>
-          </>
-        }
-      >
-        {editing && (
-          <form id="form-pub" onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Número do processo">
-                <Input
-                  value={editing.numero_processo ?? ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, numero_processo: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Tribunal">
-                <Input
-                  value={editing.tribunal ?? ''}
-                  onChange={(e) => setEditing({ ...editing, tribunal: e.target.value })}
-                />
-              </Field>
-              <Field label="Tipo" required>
-                <Select
-                  value={editing.tipo ?? 'publicacao'}
-                  onChange={(e) =>
-                    setEditing({ ...editing, tipo: e.target.value as TipoPublicacao })
-                  }
-                >
-                  {Object.entries(TIPO_PUBLICACAO).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Data">
-                <Input
-                  type="date"
-                  value={editing.data_publicacao ?? ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, data_publicacao: e.target.value })
-                  }
-                />
-              </Field>
-            </div>
-            <Field label="Conteúdo">
-              <Textarea
-                rows={5}
-                value={editing.conteudo ?? ''}
-                onChange={(e) => setEditing({ ...editing, conteudo: e.target.value })}
-              />
-            </Field>
-            <input
-              type="hidden"
-              value={editing.fonte ?? 'manual'}
-              readOnly
-            />
-          </form>
-        )}
-      </Modal>
-
-      <ConfirmDialog
-        open={!!toDelete}
-        danger
-        loading={remove.isPending}
-        message="Excluir este registro?"
-        confirmLabel="Excluir"
-        onConfirm={confirmDelete}
-        onClose={() => setToDelete(null)}
-      />
+      {aba === 'publicacoes' ? <Publicacoes busca={busca} /> : <Movimentacoes />}
     </div>
+  )
+}
+
+// ----------------------- Publicações (DJEN) -----------------------
+function Publicacoes({ busca }: { busca: string }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+
+  const lista = useQuery({
+    queryKey: ['djen_publicacoes'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('djen_publicacoes')
+        .select('*')
+        .order('data_disponibilizacao', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(2000)
+      if (error) throw new Error(error.message)
+      return (data ?? []) as DjenRow[]
+    },
+  })
+
+  // Sincroniza com o DJEN em segundo plano ao abrir a página.
+  const sync = useMutation({
+    mutationFn: () => invokeFunction('djen-publicacoes', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['djen_publicacoes'] }),
+    onError: (e) =>
+      toast.error(`Sincronização DJEN: ${(e as Error).message}`),
+  })
+  const jaSincronizou = useRef(false)
+  useEffect(() => {
+    if (jaSincronizou.current) return
+    jaSincronizou.current = true
+    sync.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const filtradas = useMemo(() => {
+    const all = lista.data ?? []
+    if (!busca.trim()) return all
+    const q = busca.toLowerCase()
+    return all.filter((p) => {
+      const r = p.raw ?? {}
+      return [
+        p.numero_processo,
+        p.sigla_tribunal,
+        p.tipo_comunicacao,
+        r.nomeOrgao,
+        r.nomeClasse,
+        r.texto,
+      ]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q))
+    })
+  }, [lista.data, busca])
+
+  if (lista.isLoading) return <Loading label="Carregando publicações…" />
+  if (lista.isError)
+    return <ErrorState message={(lista.error as Error)?.message} />
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 text-sm text-slate-500">
+        <span>
+          <strong>{filtradas.length}</strong> publicação(ões)
+        </span>
+        {sync.isPending && (
+          <span className="inline-flex items-center gap-1.5 text-brand-600">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" /> atualizando do DJEN…
+          </span>
+        )}
+      </div>
+
+      {filtradas.length === 0 ? (
+        <Card>
+          <EmptyState
+            title="Nenhuma publicação"
+            description={
+              sync.isPending
+                ? 'Sincronizando com o DJEN pela primeira vez… isso pode levar até ~1 min.'
+                : 'Não há publicações no DJEN para os processos/OABs configurados.'
+            }
+          />
+        </Card>
+      ) : (
+        filtradas.map((p) => <PublicacaoCard key={p.id} p={p} />)
+      )}
+    </div>
+  )
+}
+
+function PublicacaoCard({ p }: { p: DjenRow }) {
+  const raw = p.raw ?? {}
+  const [showRaw, setShowRaw] = useState(false)
+  const texto = useMemo(() => textoLimpo(raw.texto), [raw.texto])
+
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-slate-800">
+          {formatDate(p.data_disponibilizacao)}
+        </span>
+        {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
+        {p.tipo_comunicacao && <Badge tone="purple">{p.tipo_comunicacao}</Badge>}
+        {typeof raw.tipoDocumento === 'string' && raw.tipoDocumento && (
+          <Badge tone="gray">{raw.tipoDocumento}</Badge>
+        )}
+      </div>
+
+      <div className="mt-1 text-sm font-medium text-slate-800">
+        {formatCNJ(p.numero_processo ?? '')}
+      </div>
+      {Boolean(raw.nomeOrgao || raw.nomeClasse) && (
+        <div className="text-xs text-slate-500">
+          {[raw.nomeOrgao, raw.nomeClasse].filter(Boolean).join(' · ')}
+        </div>
+      )}
+
+      {texto && <TextoExpand text={texto} />}
+
+      <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
+        {typeof raw.link === 'string' && raw.link && (
+          <a
+            href={raw.link}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline"
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Abrir no DJEN
+          </a>
+        )}
+        <button
+          type="button"
+          onClick={() => setShowRaw((v) => !v)}
+          className="text-slate-500 hover:underline"
+        >
+          {showRaw ? 'ocultar campos' : 'todos os campos'}
+        </button>
+      </div>
+
+      {showRaw && (
+        <div className="mt-2 space-y-0.5 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+          {Object.entries(raw)
+            .filter(([k]) => k !== 'texto')
+            .map(([k, v]) => (
+              <div key={k} className="break-words">
+                <span className="text-slate-400">{k}:</span>{' '}
+                {v && typeof v === 'object' ? JSON.stringify(v) : String(v)}
+              </div>
+            ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// Texto da publicação: até 4 linhas + "ler mais".
+function TextoExpand({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [clamped, setClamped] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
+  }, [text])
+  return (
+    <div className="mt-2 text-sm text-slate-700">
+      <div
+        ref={ref}
+        className={cn('whitespace-pre-line break-words', !expanded && 'line-clamp-4')}
+      >
+        {text}
+      </div>
+      {(clamped || expanded) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-0.5 text-xs font-medium text-brand-600 hover:underline"
+        >
+          {expanded ? 'ler menos' : 'ler mais'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ----------------------- Movimentações (fonte a definir) -----------------------
+function Movimentacoes() {
+  return (
+    <Card>
+      <EmptyState
+        title="Movimentações"
+        description="A fonte das movimentações será definida em seguida."
+      />
+    </Card>
   )
 }
