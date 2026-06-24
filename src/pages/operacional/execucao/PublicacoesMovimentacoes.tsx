@@ -335,8 +335,14 @@ function PublicacaoCard({
     <Card className="p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[13px] font-medium text-slate-800">
-            {formatCNJ(p.numero_processo ?? '')}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-[13px] font-medium text-slate-800">
+              {formatCNJ(p.numero_processo ?? '')}
+            </span>
+            <label className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+              <input type="checkbox" checked={p.tratada} onChange={onToggle} />
+              Tratada
+            </label>
           </div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
             <div className="text-[11px] text-slate-400">
@@ -345,10 +351,6 @@ function PublicacaoCard({
           )}
         </div>
         <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
-            <input type="checkbox" checked={p.tratada} onChange={onToggle} />
-            Tratada
-          </label>
           {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
           {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
           {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
