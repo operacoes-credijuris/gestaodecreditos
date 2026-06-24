@@ -265,7 +265,8 @@ export default function TarefasAdvbox() {
                       {formatCNJ(t.processo)}
                       {cred && (cred.cedente || cred.cessionario) && (
                         <div className="text-xs font-normal text-slate-400">
-                          {cred.cedente || '—'} v. {cred.cessionario || '—'}
+                          <div>Ced.: {cred.cedente || '—'}</div>
+                          <div>Ces.: {cred.cessionario || '—'}</div>
                         </div>
                       )}
                     </TD>
