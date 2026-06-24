@@ -258,34 +258,37 @@ function Publicacoes({ busca }: { busca: string }) {
 
 function PublicacaoCard({ p, info }: { p: DjenRow; info: ResolveInfo }) {
   const raw = p.raw ?? {}
-  const [showRaw, setShowRaw] = useState(false)
   const texto = useMemo(() => textoLimpo(raw.texto), [raw.texto])
   const st = getLabel(STATUS_PROCESSO, info.status)
 
   return (
     <Card className="p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
-        {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
-        {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-slate-800">
+            {formatCNJ(p.numero_processo ?? '')}
+          </div>
+          {info.kind === 'credito' && (info.cedente || info.cessionario) && (
+            <div className="text-[11px] text-slate-400">
+              {info.cedente || '—'} v. {info.cessionario || '—'}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+          {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
+          {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
+          {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+        </div>
       </div>
 
-      <div className="mt-1 text-[13px] font-medium text-slate-800">
-        {formatCNJ(p.numero_processo ?? '')}
-      </div>
-      {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-        <div className="text-[11px] text-slate-400">
-          {info.cedente || '—'} v. {info.cessionario || '—'}
-        </div>
-      )}
-      <div className="text-[11px] text-slate-500">
+      <div className="mt-3 text-[11px] text-slate-500">
         Data de disponibilização: {formatDate(p.data_disponibilizacao)}
       </div>
 
       {texto && <TextoExpand text={texto} />}
 
-      <div className="mt-2 flex flex-wrap items-center gap-4 text-[11px]">
-        {typeof raw.link === 'string' && raw.link && (
+      {typeof raw.link === 'string' && raw.link && (
+        <div className="mt-2 text-[11px]">
           <a
             href={raw.link}
             target="_blank"
@@ -294,26 +297,6 @@ function PublicacaoCard({ p, info }: { p: DjenRow; info: ResolveInfo }) {
           >
             <ExternalLink className="h-3.5 w-3.5" /> Abrir no DJEN
           </a>
-        )}
-        <button
-          type="button"
-          onClick={() => setShowRaw((v) => !v)}
-          className="text-slate-500 hover:underline"
-        >
-          {showRaw ? 'ocultar campos' : 'todos os campos'}
-        </button>
-      </div>
-
-      {showRaw && (
-        <div className="mt-2 space-y-0.5 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-600">
-          {Object.entries(raw)
-            .filter(([k]) => k !== 'texto')
-            .map(([k, v]) => (
-              <div key={k} className="break-words">
-                <span className="text-slate-400">{k}:</span>{' '}
-                {v && typeof v === 'object' ? JSON.stringify(v) : String(v)}
-              </div>
-            ))}
         </div>
       )}
     </Card>
