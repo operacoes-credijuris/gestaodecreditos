@@ -19,32 +19,52 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts'
+import { useQuery } from '@tanstack/react-query'
 import {
   analisesCrud,
   processosCrud,
   publicacoesCrud,
-  tarefasCrud,
   investidoresCrud,
   cessoesCrud,
   investimentosCrud,
   contratosCrud,
 } from '@/lib/queries'
+import { invokeFunction } from '@/lib/functions'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
 import { Loading } from '@/components/ui/Table'
 import { useAuth } from '@/contexts/AuthContext'
-import { STATUS_ANALISE, getLabel, PRIORIDADE_TAREFA } from '@/lib/labels'
+import { STATUS_ANALISE } from '@/lib/labels'
 import { formatBRL, formatDate } from '@/lib/format'
 
 const CORES = ['#234e88', '#2f64ab', '#4d83c6', '#7ba7da', '#cda032', '#e3b84d']
+
+// Tarefas vêm do ADVBOX (fonte única), via Edge Function advbox-tarefas.
+interface TarefaAdvbox {
+  id: number
+  tipo: string | null
+  processo: string
+  date_deadline: string | null
+  responsaveis: string[]
+  important: boolean
+  urgent: boolean
+  concluida: boolean
+}
 
 export default function Dashboard() {
   const { profile, user } = useAuth()
   const analises = analisesCrud.useList()
   const processos = processosCrud.useList()
   const publicacoes = publicacoesCrud.useList()
-  const tarefas = tarefasCrud.useList()
+  // Tarefas ao vivo do ADVBOX (não bloqueia o dashboard se demorar/falhar).
+  const tarefas = useQuery({
+    queryKey: ['advbox-tarefas'],
+    queryFn: () =>
+      invokeFunction<{ tarefas: TarefaAdvbox[] }>('advbox-tarefas', { action: 'list' }),
+    staleTime: 0,
+  })
+  const tarefasLista = tarefas.data?.tarefas ?? []
   const investidores = investidoresCrud.useList()
   const cessoes = cessoesCrud.useList()
   const investimentos = investimentosCrud.useList()
@@ -54,7 +74,6 @@ export default function Dashboard() {
     analises.isLoading ||
     processos.isLoading ||
     publicacoes.isLoading ||
-    tarefas.isLoading ||
     investimentos.isLoading
 
   const kpis = useMemo(() => {
@@ -71,9 +90,7 @@ export default function Dashboard() {
       (a) => a.status === 'pendente' || a.status === 'em_analise',
     ).length
     const pubPendentes = (publicacoes.data ?? []).filter((p) => !p.tratada).length
-    const tarefasAbertas = (tarefas.data ?? []).filter(
-      (t) => t.status !== 'concluida',
-    ).length
+    const tarefasAbertas = tarefasLista.filter((t) => !t.concluida).length
 
     return {
       totalInvestido,
@@ -119,10 +136,11 @@ export default function Dashboard() {
   }, [processos.data])
 
   const proximasTarefas = useMemo(() => {
-    return (tarefas.data ?? [])
-      .filter((t) => t.status !== 'concluida' && t.prazo)
-      .sort((a, b) => (a.prazo || '').localeCompare(b.prazo || ''))
+    return tarefasLista
+      .filter((t) => !t.concluida && t.date_deadline)
+      .sort((a, b) => (a.date_deadline || '').localeCompare(b.date_deadline || ''))
       .slice(0, 6)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tarefas.data])
 
   if (loading) return <Loading label="Carregando indicadores…" />
@@ -261,25 +279,28 @@ export default function Dashboard() {
             </p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {proximasTarefas.map((t) => {
-                const pr = getLabel(PRIORIDADE_TAREFA, t.prioridade)
-                return (
-                  <li key={t.id} className="flex items-center justify-between gap-3 py-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-slate-800">{t.titulo}</p>
-                      <p className="text-xs text-slate-400">
-                        {t.responsavel || 'Sem responsável'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Badge tone={pr.tone}>{pr.label}</Badge>
-                      <span className="whitespace-nowrap text-sm text-slate-500">
-                        {formatDate(t.prazo)}
-                      </span>
-                    </div>
-                  </li>
-                )
-              })}
+              {proximasTarefas.map((t) => (
+                <li key={t.id} className="flex items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-slate-800">{t.tipo || '—'}</p>
+                    <p className="text-xs text-slate-400">
+                      {t.responsaveis?.length
+                        ? t.responsaveis.join(', ')
+                        : 'Sem responsável'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {t.urgent ? (
+                      <Badge tone="red">Urgente</Badge>
+                    ) : t.important ? (
+                      <Badge tone="yellow">Importante</Badge>
+                    ) : null}
+                    <span className="whitespace-nowrap text-sm text-slate-500">
+                      {formatDate(t.date_deadline)}
+                    </span>
+                  </div>
+                </li>
+              ))}
             </ul>
           )}
         </CardBody>

@@ -1,8 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search, RefreshCw } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
-import { tarefasCrud } from '@/lib/queries'
-import type { Tarefa, StatusTarefa, PrioridadeTarefa } from '@/lib/types'
+import { Plus, Search, Flame, Star } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invokeFunction } from '@/lib/functions'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -10,7 +8,6 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   Table,
   THead,
@@ -23,118 +20,96 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { getLabel, STATUS_TAREFA, PRIORIDADE_TAREFA } from '@/lib/labels'
-import { formatDate } from '@/lib/format'
+import { formatCNJ, formatDate } from '@/lib/format'
 
-const VAZIO: Partial<Tarefa> = {
-  titulo: '',
-  descricao: '',
-  responsavel: '',
-  prazo: '',
-  status: 'pendente',
-  prioridade: 'media',
+// ---------- Tipos vindos da Edge Function advbox-tarefas ----------
+interface TarefaAdvbox {
+  id: number
+  tipo: string | null
+  processo: string
+  start_date: string | null
+  date_deadline: string | null
+  notes: string | null
+  responsaveis: string[]
+  important: boolean
+  urgent: boolean
+  concluida: boolean
+  created_at: string | null
+}
+interface Opcoes {
+  users: { id: number; name: string }[]
+  tasks: { id: number; name: string }[]
+  lawsuits: { id: number; numero: string; folder: string | null; cliente: string | null }[]
+}
+
+interface FormState {
+  lawsuits_id: string
+  tasks_id: string
+  start_date: string
+  date_deadline: string
+  from: string
+  guests: number[]
+  important: boolean
+  urgent: boolean
+  comments: string
+}
+const FORM_VAZIO: FormState = {
+  lawsuits_id: '',
+  tasks_id: '',
+  start_date: '',
+  date_deadline: '',
+  from: '',
+  guests: [],
+  important: false,
+  urgent: false,
+  comments: '',
 }
 
 export default function TarefasAdvbox() {
-  const { useList, useCreate, useUpdate, useRemove } = tarefasCrud
-  const { data, isLoading, isError, error } = useList()
-  const create = useCreate()
-  const update = useUpdate()
-  const remove = useRemove()
-  const toast = useToast()
   const qc = useQueryClient()
+  const toast = useToast()
+
+  // Lista ao vivo do ADVBOX — recarrega ao abrir a página e ao focar a aba.
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['advbox-tarefas'],
+    queryFn: () =>
+      invokeFunction<{ tarefas: TarefaAdvbox[] }>('advbox-tarefas', { action: 'list' }),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  })
+  const tarefas = data?.tarefas ?? []
 
   const [busca, setBusca] = useState('')
-  const [filtroStatus, setFiltroStatus] = useState('todos')
-  const [editing, setEditing] = useState<Partial<Tarefa> | null>(null)
-  const [toDelete, setToDelete] = useState<Tarefa | null>(null)
-  const [syncing, setSyncing] = useState(false)
+  const [filtro, setFiltro] = useState<'todas' | 'pendentes' | 'concluidas'>('pendentes')
+  const [novo, setNovo] = useState(false)
 
   const lista = useMemo(() => {
-    let l = data ?? []
-    if (filtroStatus !== 'todos') l = l.filter((t) => t.status === filtroStatus)
+    let l = tarefas
+    if (filtro === 'pendentes') l = l.filter((t) => !t.concluida)
+    if (filtro === 'concluidas') l = l.filter((t) => t.concluida)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((t) =>
-        [t.titulo, t.descricao, t.responsavel]
+        [t.tipo, t.processo, t.notes, ...(t.responsaveis ?? [])]
           .filter(Boolean)
-          .some((v) => v!.toLowerCase().includes(q)),
+          .some((v) => String(v).toLowerCase().includes(q)),
       )
     }
     return l
-  }, [data, busca, filtroStatus])
+  }, [tarefas, filtro, busca])
 
-  const abertas = (data ?? []).filter(
-    (t) => t.status !== 'concluida',
-  ).length
-
-  async function sync() {
-    setSyncing(true)
-    try {
-      const res = await invokeFunction<{ inseridos?: number; mensagem?: string }>(
-        'advbox-sync',
-      )
-      await qc.invalidateQueries({ queryKey: ['tarefas'] })
-      toast.success(res?.mensagem ?? 'Sincronização ADVBOX concluída.')
-    } catch (err) {
-      toast.error(`Falha na sincronização: ${(err as Error).message}`)
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!editing) return
-    if (!editing.titulo?.trim()) {
-      toast.error('Informe o título da tarefa.')
-      return
-    }
-    try {
-      const { id, created_at, updated_at, ...payload } = editing as Tarefa
-      if (id) {
-        await update.mutateAsync({ id, changes: payload })
-        toast.success('Tarefa atualizada.')
-      } else {
-        await create.mutateAsync(payload)
-        toast.success('Tarefa cadastrada.')
-      }
-      setEditing(null)
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
-
-  async function confirmDelete() {
-    if (!toDelete) return
-    try {
-      await remove.mutateAsync(toDelete.id)
-      toast.success('Tarefa excluída.')
-      setToDelete(null)
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
+  const abertas = tarefas.filter((t) => !t.concluida).length
 
   return (
     <div>
       <PageHeader
         title="Tarefas"
-        description="Controle das tarefas sincronizadas do ADVBOX e tarefas internas."
+        description="Tarefas do ADVBOX vinculadas aos processos cadastrados (Créditos, Requerimentos e Apensos). Atualiza automaticamente."
         actions={
-          <>
-            <Button
-              variant="outline"
-              icon={<RefreshCw className={syncing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />}
-              loading={syncing}
-              onClick={sync}
-            >
-              Sincronizar ADVBOX
-            </Button>
-            <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
-              Nova tarefa
-            </Button>
-          </>
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNovo(true)}>
+            Nova tarefa
+          </Button>
         }
       />
 
@@ -144,203 +119,299 @@ export default function TarefasAdvbox() {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
               className="pl-9"
-              placeholder="Buscar por título, responsável…"
+              placeholder="Buscar por tipo, processo, responsável…"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
           <Select
             className="sm:w-52"
-            value={filtroStatus}
-            onChange={(e) => setFiltroStatus(e.target.value)}
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value as typeof filtro)}
           >
-            <option value="todos">Todos os status</option>
-            {Object.entries(STATUS_TAREFA).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
+            <option value="pendentes">Pendentes</option>
+            <option value="concluidas">Concluídas</option>
+            <option value="todas">Todas</option>
           </Select>
         </div>
         {abertas > 0 && (
           <p className="mt-3 text-sm text-slate-500">
-            <strong>{abertas}</strong> tarefa(s) em aberto.
+            <strong>{abertas}</strong> tarefa(s) pendente(s).
           </p>
         )}
       </Card>
 
       <Card>
         {isLoading ? (
-          <Loading />
+          <Loading label="Buscando tarefas no ADVBOX…" />
         ) : isError ? (
           <ErrorState message={(error as Error)?.message} />
         ) : lista.length === 0 ? (
           <EmptyState
             title="Nenhuma tarefa"
-            description="Sincronize com o ADVBOX ou cadastre uma tarefa."
+            description="Não há tarefas no ADVBOX para os processos cadastrados (com este filtro)."
           />
         ) : (
-          <Table>
+          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
             <THead>
               <tr>
                 <TH>Tarefa</TH>
-                <TH>Responsável</TH>
+                <TH>Processo</TH>
+                <TH>Responsáveis</TH>
+                <TH>Data</TH>
                 <TH>Prazo</TH>
-                <TH>Prioridade</TH>
                 <TH>Status</TH>
-                <TH>Origem</TH>
-                <TH className="text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
-              {lista.map((t) => {
-                const st = getLabel(STATUS_TAREFA, t.status)
-                const pr = getLabel(PRIORIDADE_TAREFA, t.prioridade)
-                return (
-                  <TR key={t.id}>
-                    <TD className="font-medium text-slate-800">
-                      {t.titulo}
-                      {t.descricao && (
-                        <div className="line-clamp-1 text-xs font-normal text-slate-400">
-                          {t.descricao}
-                        </div>
+              {lista.map((t) => (
+                <TR key={t.id}>
+                  <TD className="font-medium text-slate-800">
+                    <div className="flex items-center gap-1.5">
+                      {t.urgent && (
+                        <span title="Urgente">
+                          <Flame className="h-3.5 w-3.5 text-red-500" />
+                        </span>
                       )}
-                    </TD>
-                    <TD>{t.responsavel || '—'}</TD>
-                    <TD className="whitespace-nowrap">{formatDate(t.prazo)}</TD>
-                    <TD>
-                      <Badge tone={pr.tone}>{pr.label}</Badge>
-                    </TD>
-                    <TD>
-                      <Badge tone={st.tone}>{st.label}</Badge>
-                    </TD>
-                    <TD>
-                      {t.advbox_id ? (
-                        <Badge tone="orange">ADVBOX</Badge>
-                      ) : (
-                        <Badge tone="gray">Interna</Badge>
+                      {t.important && (
+                        <span title="Importante">
+                          <Star className="h-3.5 w-3.5 text-amber-500" />
+                        </span>
                       )}
-                    </TD>
-                    <TD className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => setEditing(t)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Editar"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => setToDelete(t)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                      <span>{t.tipo || '—'}</span>
+                    </div>
+                    {t.notes && (
+                      <div className="line-clamp-1 text-xs font-normal text-slate-400">
+                        {t.notes}
                       </div>
-                    </TD>
-                  </TR>
-                )
-              })}
+                    )}
+                  </TD>
+                  <TD className="whitespace-nowrap">{formatCNJ(t.processo)}</TD>
+                  <TD>{t.responsaveis?.length ? t.responsaveis.join(', ') : '—'}</TD>
+                  <TD className="whitespace-nowrap">{formatDate(t.start_date)}</TD>
+                  <TD className="whitespace-nowrap">{formatDate(t.date_deadline)}</TD>
+                  <TD>
+                    {t.concluida ? (
+                      <Badge tone="green">Concluída</Badge>
+                    ) : (
+                      <Badge tone="yellow">Pendente</Badge>
+                    )}
+                  </TD>
+                </TR>
+              ))}
             </TBody>
           </Table>
         )}
       </Card>
 
-      <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title={editing?.id ? 'Editar tarefa' : 'Nova tarefa'}
-        size="lg"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              form="form-tarefa"
-              loading={create.isPending || update.isPending}
-            >
-              Salvar
-            </Button>
-          </>
-        }
-      >
-        {editing && (
-          <form id="form-tarefa" onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Título" required>
-              <Input
-                value={editing.titulo ?? ''}
-                onChange={(e) => setEditing({ ...editing, titulo: e.target.value })}
-              />
-            </Field>
-            <Field label="Descrição">
-              <Textarea
-                rows={3}
-                value={editing.descricao ?? ''}
-                onChange={(e) => setEditing({ ...editing, descricao: e.target.value })}
-              />
-            </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Responsável">
-                <Input
-                  value={editing.responsavel ?? ''}
-                  onChange={(e) => setEditing({ ...editing, responsavel: e.target.value })}
-                />
-              </Field>
-              <Field label="Prazo">
-                <Input
-                  type="date"
-                  value={editing.prazo ?? ''}
-                  onChange={(e) => setEditing({ ...editing, prazo: e.target.value })}
-                />
-              </Field>
-              <Field label="Prioridade" required>
-                <Select
-                  value={editing.prioridade ?? 'media'}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      prioridade: e.target.value as PrioridadeTarefa,
-                    })
-                  }
-                >
-                  {Object.entries(PRIORIDADE_TAREFA).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Status" required>
-                <Select
-                  value={editing.status ?? 'pendente'}
-                  onChange={(e) =>
-                    setEditing({ ...editing, status: e.target.value as StatusTarefa })
-                  }
-                >
-                  {Object.entries(STATUS_TAREFA).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-          </form>
-        )}
-      </Modal>
-
-      <ConfirmDialog
-        open={!!toDelete}
-        danger
-        loading={remove.isPending}
-        message={`Excluir a tarefa "${toDelete?.titulo || ''}"?`}
-        confirmLabel="Excluir"
-        onConfirm={confirmDelete}
-        onClose={() => setToDelete(null)}
+      <NovaTarefaModal
+        open={novo}
+        onClose={() => setNovo(false)}
+        onCreated={() => {
+          qc.invalidateQueries({ queryKey: ['advbox-tarefas'] })
+          setNovo(false)
+          toast.success('Tarefa criada no ADVBOX.')
+        }}
       />
     </div>
+  )
+}
+
+// ----------------------- Modal de criação -----------------------
+function NovaTarefaModal({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const toast = useToast()
+  const [form, setForm] = useState<FormState>({ ...FORM_VAZIO })
+
+  const opcoes = useQuery({
+    queryKey: ['advbox-tarefas-options'],
+    queryFn: () =>
+      invokeFunction<Opcoes>('advbox-tarefas', { action: 'options' }),
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const criar = useMutation({
+    mutationFn: () =>
+      invokeFunction('advbox-tarefas', {
+        action: 'create',
+        lawsuits_id: Number(form.lawsuits_id),
+        tasks_id: Number(form.tasks_id),
+        start_date: form.start_date,
+        date_deadline: form.date_deadline || null,
+        from: Number(form.from),
+        guests: form.guests,
+        important: form.important,
+        urgent: form.urgent,
+        comments: form.comments || null,
+      }),
+    onSuccess: () => {
+      setForm({ ...FORM_VAZIO })
+      onCreated()
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!form.lawsuits_id) return toast.error('Selecione o processo.')
+    if (!form.tasks_id) return toast.error('Selecione o tipo de tarefa.')
+    if (!form.start_date) return toast.error('Informe a data.')
+    if (!form.from) return toast.error('Selecione o remetente.')
+    if (form.guests.length === 0) return toast.error('Selecione ao menos um responsável.')
+    criar.mutate()
+  }
+
+  function toggleGuest(id: number) {
+    setForm((f) => ({
+      ...f,
+      guests: f.guests.includes(id)
+        ? f.guests.filter((g) => g !== id)
+        : [...f.guests, id],
+    }))
+  }
+
+  const users = opcoes.data?.users ?? []
+  const tasks = opcoes.data?.tasks ?? []
+  const lawsuits = opcoes.data?.lawsuits ?? []
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Nova tarefa"
+      description="Cria a tarefa diretamente no ADVBOX."
+      size="lg"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button type="submit" form="form-nova-tarefa" loading={criar.isPending}>
+            Criar tarefa
+          </Button>
+        </>
+      }
+    >
+      {opcoes.isLoading ? (
+        <Loading label="Carregando opções do ADVBOX…" />
+      ) : opcoes.isError ? (
+        <ErrorState message={(opcoes.error as Error)?.message} />
+      ) : (
+        <form id="form-nova-tarefa" onSubmit={handleSubmit} className="space-y-4">
+          <Field label="Processo" required hint="Apenas processos cadastrados (Créditos/Requerimentos/Apensos).">
+            <Select
+              value={form.lawsuits_id}
+              onChange={(e) => setForm({ ...form, lawsuits_id: e.target.value })}
+            >
+              <option value="">Selecione…</option>
+              {lawsuits.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.numero}
+                  {l.cliente ? ` — ${l.cliente}` : ''}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Tipo de tarefa" required>
+            <Select
+              value={form.tasks_id}
+              onChange={(e) => setForm({ ...form, tasks_id: e.target.value })}
+            >
+              <option value="">Selecione…</option>
+              {tasks.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Data" required>
+              <Input
+                type="date"
+                value={form.start_date}
+                onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+              />
+            </Field>
+            <Field label="Prazo">
+              <Input
+                type="date"
+                value={form.date_deadline}
+                onChange={(e) => setForm({ ...form, date_deadline: e.target.value })}
+              />
+            </Field>
+          </div>
+
+          <Field label="Remetente (de)" required>
+            <Select
+              value={form.from}
+              onChange={(e) => setForm({ ...form, from: e.target.value })}
+            >
+              <option value="">Selecione…</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Responsáveis" required hint="Marque um ou mais.">
+            <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2 scrollbar-thin">
+              {users.map((u) => (
+                <label
+                  key={u.id}
+                  className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.guests.includes(u.id)}
+                    onChange={() => toggleGuest(u.id)}
+                  />
+                  {u.name}
+                </label>
+              ))}
+            </div>
+          </Field>
+
+          <div className="flex gap-6">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.important}
+                onChange={(e) => setForm({ ...form, important: e.target.checked })}
+              />
+              <Star className="h-4 w-4 text-amber-500" /> Importante
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.urgent}
+                onChange={(e) => setForm({ ...form, urgent: e.target.checked })}
+              />
+              <Flame className="h-4 w-4 text-red-500" /> Urgente
+            </label>
+          </div>
+
+          <Field label="Observação">
+            <Textarea
+              rows={3}
+              value={form.comments}
+              onChange={(e) => setForm({ ...form, comments: e.target.value })}
+            />
+          </Field>
+        </form>
+      )}
+    </Modal>
   )
 }
