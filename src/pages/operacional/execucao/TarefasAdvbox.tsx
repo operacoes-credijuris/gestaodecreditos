@@ -82,7 +82,7 @@ function Observacao({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-0.5 max-w-[520px] text-xs font-normal text-slate-400">
+    <div className="mt-0.5 text-xs font-normal text-slate-400">
       <div
         ref={ref}
         className={cn('whitespace-pre-wrap break-words', !expanded && 'line-clamp-3')}
@@ -239,11 +239,11 @@ export default function TarefasAdvbox() {
           <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
             <THead>
               <tr>
-                <TH>Processo</TH>
-                <TH>Tarefa</TH>
-                <TH>Responsáveis</TH>
-                <TH>Data</TH>
-                <TH>Prazo</TH>
+                <TH className="whitespace-nowrap">Processo</TH>
+                <TH className="w-full">Tarefa</TH>
+                <TH className="whitespace-nowrap">Responsáveis</TH>
+                <TH className="whitespace-nowrap">Data</TH>
+                <TH className="whitespace-nowrap">Prazo</TH>
               </tr>
             </THead>
             <TBody>
