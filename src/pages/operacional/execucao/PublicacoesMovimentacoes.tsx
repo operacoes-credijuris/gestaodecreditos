@@ -149,7 +149,7 @@ function Publicacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 text-sm text-slate-500">
+      <div className="flex items-center gap-3 text-[13px] text-slate-500">
         <span>
           <strong>{filtradas.length}</strong> publicação(ões)
         </span>
@@ -186,7 +186,7 @@ function PublicacaoCard({ p }: { p: DjenRow }) {
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold text-slate-800">
+        <span className="text-[13px] font-semibold text-slate-800">
           {formatDate(p.data_disponibilizacao)}
         </span>
         {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
@@ -196,18 +196,18 @@ function PublicacaoCard({ p }: { p: DjenRow }) {
         )}
       </div>
 
-      <div className="mt-1 text-sm font-medium text-slate-800">
+      <div className="mt-1 text-[13px] font-medium text-slate-800">
         {formatCNJ(p.numero_processo ?? '')}
       </div>
       {Boolean(raw.nomeOrgao || raw.nomeClasse) && (
-        <div className="text-xs text-slate-500">
+        <div className="text-[11px] text-slate-500">
           {[raw.nomeOrgao, raw.nomeClasse].filter(Boolean).join(' · ')}
         </div>
       )}
 
       {texto && <TextoExpand text={texto} />}
 
-      <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
+      <div className="mt-2 flex flex-wrap items-center gap-4 text-[11px]">
         {typeof raw.link === 'string' && raw.link && (
           <a
             href={raw.link}
@@ -228,7 +228,7 @@ function PublicacaoCard({ p }: { p: DjenRow }) {
       </div>
 
       {showRaw && (
-        <div className="mt-2 space-y-0.5 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+        <div className="mt-2 space-y-0.5 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-600">
           {Object.entries(raw)
             .filter(([k]) => k !== 'texto')
             .map(([k, v]) => (
@@ -253,7 +253,7 @@ function TextoExpand({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-2 text-sm text-slate-700">
+    <div className="mt-2 text-[13px] text-slate-700">
       <div
         ref={ref}
         className={cn('whitespace-pre-line break-words', !expanded && 'line-clamp-4')}
@@ -264,7 +264,7 @@ function TextoExpand({ text }: { text: string }) {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-0.5 text-xs font-medium text-brand-600 hover:underline"
+          className="mt-0.5 text-[11px] font-medium text-brand-600 hover:underline"
         >
           {expanded ? 'ler menos' : 'ler mais'}
         </button>
