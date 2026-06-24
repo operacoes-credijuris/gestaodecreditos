@@ -337,6 +337,120 @@ export default function TarefasAdvbox() {
   )
 }
 
+// Caixa de seleção digitável (combobox) para o processo: digita e
+// escolhe numa lista filtrada que aparece logo abaixo (estilo busca).
+function ProcessoCombobox({
+  lawsuits,
+  value,
+  onChange,
+}: {
+  lawsuits: Opcoes['lawsuits']
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [hi, setHi] = useState(0)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
+  const q = value.trim().toLowerCase()
+  const qd = dig(value)
+  const matches = useMemo(() => {
+    const list = lawsuits.map((l) => ({
+      l,
+      label: `${l.numero}${l.cliente ? ` — ${l.cliente}` : ''}`,
+    }))
+    if (!q) return list.slice(0, 50)
+    return list
+      .filter(
+        ({ l, label }) =>
+          label.toLowerCase().includes(q) ||
+          (qd.length >= 3 && dig(l.numero).includes(qd)),
+      )
+      .slice(0, 50)
+  }, [lawsuits, q, qd])
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node))
+        setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const choose = (label: string) => {
+    onChange(label)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={boxRef} className="relative">
+      <Input
+        value={value}
+        autoComplete="off"
+        placeholder="Digite o número do processo…"
+        onChange={(e) => {
+          onChange(e.target.value)
+          setOpen(true)
+          setHi(0)
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            setOpen(true)
+            return
+          }
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setHi((h) => Math.min(h + 1, matches.length - 1))
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setHi((h) => Math.max(h - 1, 0))
+          } else if (e.key === 'Enter') {
+            if (open && matches[hi]) {
+              e.preventDefault()
+              choose(matches[hi].label)
+            }
+          } else if (e.key === 'Escape') {
+            setOpen(false)
+          }
+        }}
+      />
+      {open && matches.length > 0 && (
+        <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+          {matches.map((m, i) => (
+            <li key={m.l.id}>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  choose(m.label)
+                }}
+                onMouseEnter={() => setHi(i)}
+                className={cn(
+                  'block w-full px-3 py-1.5 text-left text-[12px]',
+                  i === hi
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-slate-700 hover:bg-slate-50',
+                )}
+              >
+                {m.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && q && matches.length === 0 && (
+        <div className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-400 shadow-lg">
+          Nenhum processo encontrado.
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ----------------------- Modal de criação -----------------------
 export function NovaTarefaModal({
   open,
@@ -457,20 +571,11 @@ export function NovaTarefaModal({
             required
             hint="Digite o número e escolha na lista (só processos cadastrados)."
           >
-            <Input
-              list="nova-tarefa-lawsuits"
+            <ProcessoCombobox
+              lawsuits={lawsuits}
               value={form.processoBusca}
-              onChange={(e) => setForm({ ...form, processoBusca: e.target.value })}
-              placeholder="Digite o número do processo…"
+              onChange={(v) => setForm((f) => ({ ...f, processoBusca: v }))}
             />
-            <datalist id="nova-tarefa-lawsuits">
-              {lawsuits.map((l) => (
-                <option
-                  key={l.id}
-                  value={`${l.numero}${l.cliente ? ` — ${l.cliente}` : ''}`}
-                />
-              ))}
-            </datalist>
           </Field>
 
           <Field label="Tipo de tarefa" required>
