@@ -85,7 +85,7 @@ function Observacao({ text }: { text: string }) {
     <div className="mt-0.5 text-xs font-normal text-slate-400">
       <div
         ref={ref}
-        className={cn('whitespace-pre-wrap break-words', !expanded && 'line-clamp-3')}
+        className={cn('whitespace-normal break-words', !expanded && 'line-clamp-3')}
       >
         {text}
       </div>
