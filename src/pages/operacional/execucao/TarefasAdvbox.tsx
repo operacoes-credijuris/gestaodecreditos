@@ -82,7 +82,7 @@ function Observacao({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-0.5 text-xs font-normal text-slate-400">
+    <div className="mt-0.5 text-[11px] font-normal text-slate-400">
       <div
         ref={ref}
         className={cn('whitespace-normal break-words', !expanded && 'line-clamp-3')}
@@ -264,7 +264,7 @@ export default function TarefasAdvbox() {
                     <TD className="whitespace-nowrap font-medium text-slate-800">
                       {formatCNJ(t.processo)}
                       {cred && (cred.cedente || cred.cessionario) && (
-                        <div className="text-xs font-normal text-slate-400">
+                        <div className="text-[11px] font-normal text-slate-400">
                           <div>Ced.: {cred.cedente || '—'}</div>
                           <div>Ces.: {cred.cessionario || '—'}</div>
                         </div>
