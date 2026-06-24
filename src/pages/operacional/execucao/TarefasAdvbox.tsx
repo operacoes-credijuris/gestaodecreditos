@@ -8,7 +8,7 @@ import {
 import { Plus, Search, Flame, Star } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invokeFunction } from '@/lib/functions'
-import { processosCrud } from '@/lib/queries'
+import { processosCrud, apensosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -117,16 +117,35 @@ export default function TarefasAdvbox() {
   })
   const tarefas = data?.tarefas ?? []
 
-  // Cedente/cessionário dos Créditos (exibidos sob o nº do processo).
+  // Cedente/cessionário dos Créditos (exibidos sob o nº do processo). Tarefas de
+  // apensos vinculados a um crédito herdam o cedente/cessionário do crédito pai.
   const processos = processosCrud.useList()
-  const creditoPorNumero = useMemo(() => {
-    const m = new Map<string, { cedente: string | null; cessionario: string | null }>()
+  const apensos = apensosCrud.useList()
+  const resolveCredito = useMemo(() => {
+    type Info = { cedente: string | null; cessionario: string | null }
+    const dig = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '')
+    const porNumero = new Map<string, Info>()
+    const porId = new Map<string, Info>()
     for (const p of processos.data ?? []) {
-      const d = (p.numero_cnj ?? '').replace(/\D/g, '')
-      if (d.length >= 6) m.set(d, { cedente: p.cedente, cessionario: p.cessionario })
+      const info: Info = { cedente: p.cedente, cessionario: p.cessionario }
+      porId.set(p.id, info)
+      const d = dig(p.numero_cnj)
+      if (d.length >= 6) porNumero.set(d, info)
     }
-    return m
-  }, [processos.data])
+    // numero do apenso -> id do crédito pai
+    const apensoParent = new Map<string, string>()
+    for (const a of apensos.data ?? []) {
+      const d = dig(a.numero)
+      if (d.length >= 6 && a.processo_id) apensoParent.set(d, a.processo_id)
+    }
+    return (processoNum: string): Info | null => {
+      const d = dig(processoNum)
+      const direto = porNumero.get(d)
+      if (direto) return direto
+      const parentId = apensoParent.get(d)
+      return parentId ? porId.get(parentId) ?? null : null
+    }
+  }, [processos.data, apensos.data])
 
   const [busca, setBusca] = useState('')
   const [novo, setNovo] = useState(false)
@@ -191,9 +210,7 @@ export default function TarefasAdvbox() {
             </THead>
             <TBody>
               {lista.map((t) => {
-                const cred = creditoPorNumero.get(
-                  (t.processo ?? '').replace(/\D/g, ''),
-                )
+                const cred = resolveCredito(t.processo ?? '')
                 return (
                   <TR key={t.id}>
                     <TD className="whitespace-nowrap font-medium text-slate-800">
