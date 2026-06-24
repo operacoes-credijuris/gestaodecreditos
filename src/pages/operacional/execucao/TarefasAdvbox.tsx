@@ -291,6 +291,7 @@ export default function TarefasAdvbox() {
                       <Button
                         size="sm"
                         variant="outline"
+                        title="Gerar petição"
                         icon={<FileText className="h-4 w-4" />}
                         onClick={() =>
                           toast.toast(
@@ -298,9 +299,7 @@ export default function TarefasAdvbox() {
                             'info',
                           )
                         }
-                      >
-                        Gerar petição
-                      </Button>
+                      />
                     </TD>
                     <TD>
                       {t.responsaveis?.length ? (
