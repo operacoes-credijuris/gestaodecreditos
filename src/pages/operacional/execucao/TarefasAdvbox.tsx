@@ -471,7 +471,11 @@ export function NovaTarefaModal({
     queryFn: () =>
       invokeFunction<Opcoes>('advbox-tarefas', { action: 'options' }),
     enabled: open,
-    staleTime: 5 * 60 * 1000,
+    // Carrega uma vez e mantém no cache pela sessão inteira: o modal só
+    // mostra "Carregando…" na primeira abertura. Depois reusa o cache;
+    // após 30 min, atualiza em 2º plano (sem tela de carregamento).
+    staleTime: 30 * 60 * 1000,
+    gcTime: Infinity,
   })
 
   // Ao fechar, limpa o formulário. Ao abrir a partir de uma publicação,
