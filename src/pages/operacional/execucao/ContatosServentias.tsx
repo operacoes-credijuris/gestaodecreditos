@@ -205,12 +205,9 @@ export default function ContatosServentias() {
     for (const a of apensos.data ?? []) {
       addJulgador(buildOrgao(a.comarca, a.vara), (a.tribunal ?? '').trim())
     }
-    // Contatos julgadores salvos cujo órgão não aparece (mais) nas origens.
-    for (const [orgao, c] of julgadorContatos) {
-      if (!julgMap.has(orgao)) {
-        julgMap.set(orgao, { key: `j:${orgao}`, orgao, tribunal: '', tipo: 'julgador', contato: c })
-      }
-    }
+    // Julgadores são SEMPRE derivados das origens (Créditos/Requerimentos/
+    // Apensos). Se o órgão some da origem, some daqui — contato salvo órfão
+    // (de um órgão que não existe mais) não aparece na lista.
 
     let l: OrgaoRow[] = [...julgMap.values()]
     // Auxiliares (cadastro manual).
@@ -428,15 +425,11 @@ export default function ContatosServentias() {
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
-                        {c && (
+                        {row.tipo === 'auxiliar' && c && (
                           <button
                             onClick={() => setToDelete(c)}
                             className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                            title={
-                              row.tipo === 'auxiliar'
-                                ? 'Excluir contato auxiliar'
-                                : 'Limpar contatos do órgão'
-                            }
+                            title="Excluir contato auxiliar"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
