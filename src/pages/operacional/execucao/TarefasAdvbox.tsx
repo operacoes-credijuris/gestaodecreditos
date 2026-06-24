@@ -283,9 +283,7 @@ export default function TarefasAdvbox() {
                             <Star className="h-3.5 w-3.5 text-amber-500" />
                           </span>
                         )}
-                        <span className="font-bold">
-                          {t.tipo ? sentenceCase(t.tipo) : '—'}
-                        </span>
+                        <span>{t.tipo ? sentenceCase(t.tipo) : '—'}</span>
                       </div>
                       {t.notes && <Observacao text={t.notes} />}
                     </TD>
