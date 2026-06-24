@@ -87,9 +87,10 @@ export default function Processos() {
     }
   }
 
-  const lista = useMemo(() => {
+  // Busca textual (sem o filtro de status) — reaproveitada na lista e nas
+  // contagens exibidas no seletor de status.
+  const baseBusca = useMemo(() => {
     let l = data ?? []
-    if (filtroStatus !== 'todos') l = l.filter((p) => p.status === filtroStatus)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((p) =>
@@ -108,6 +109,19 @@ export default function Processos() {
           .some((v) => v!.toLowerCase().includes(q)),
       )
     }
+    return l
+  }, [data, busca])
+
+  const contagemStatus = useMemo(() => {
+    const c: Record<string, number> = { todos: baseBusca.length }
+    for (const k of Object.keys(STATUS_PROCESSO))
+      c[k] = baseBusca.filter((p) => p.status === k).length
+    return c
+  }, [baseBusca])
+
+  const lista = useMemo(() => {
+    let l = baseBusca
+    if (filtroStatus !== 'todos') l = l.filter((p) => p.status === filtroStatus)
     const dir = sortDir === 'asc' ? 1 : -1
     return [...l].sort((a, b) => {
       const av = a[sortBy] || ''
@@ -117,7 +131,7 @@ export default function Processos() {
       if (!bv) return -1
       return av.localeCompare(bv) * dir
     })
-  }, [data, busca, filtroStatus, sortBy, sortDir])
+  }, [baseBusca, filtroStatus, sortBy, sortDir])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -190,10 +204,10 @@ export default function Processos() {
             value={filtroStatus}
             onChange={(e) => setFiltroStatus(e.target.value)}
           >
-            <option value="todos">Todos os status</option>
+            <option value="todos">Todos ({contagemStatus.todos})</option>
             {Object.entries(STATUS_PROCESSO).map(([k, v]) => (
               <option key={k} value={k}>
-                {v.label}
+                {v.label} ({contagemStatus[k] ?? 0})
               </option>
             ))}
           </Select>

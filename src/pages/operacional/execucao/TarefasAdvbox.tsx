@@ -148,25 +148,37 @@ export default function TarefasAdvbox() {
   }, [processos.data, apensos.data])
 
   const [busca, setBusca] = useState('')
+  // Padrão ao abrir: tarefas fatais (com prazo).
   const [filtroPrazo, setFiltroPrazo] = useState<'todos' | 'fatais' | 'sem_prazo'>(
-    'todos',
+    'fatais',
   )
   const [novo, setNovo] = useState(false)
 
+  // Busca textual (sem o filtro de prazo) — base para lista e contagens.
+  const baseBusca = useMemo(() => {
+    if (!busca.trim()) return tarefas
+    const q = busca.toLowerCase()
+    return tarefas.filter((t) =>
+      [t.tipo, t.processo, t.notes, ...(t.responsaveis ?? [])]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q)),
+    )
+  }, [tarefas, busca])
+
+  const contagemPrazo = useMemo(
+    () => ({
+      todos: baseBusca.length,
+      fatais: baseBusca.filter((t) => !!t.date_deadline).length,
+      sem_prazo: baseBusca.filter((t) => !t.date_deadline).length,
+    }),
+    [baseBusca],
+  )
+
   const lista = useMemo(() => {
-    let l = tarefas
-    if (filtroPrazo === 'fatais') l = l.filter((t) => !!t.date_deadline)
-    if (filtroPrazo === 'sem_prazo') l = l.filter((t) => !t.date_deadline)
-    if (busca.trim()) {
-      const q = busca.toLowerCase()
-      l = l.filter((t) =>
-        [t.tipo, t.processo, t.notes, ...(t.responsaveis ?? [])]
-          .filter(Boolean)
-          .some((v) => String(v).toLowerCase().includes(q)),
-      )
-    }
-    return l
-  }, [tarefas, busca, filtroPrazo])
+    if (filtroPrazo === 'fatais') return baseBusca.filter((t) => !!t.date_deadline)
+    if (filtroPrazo === 'sem_prazo') return baseBusca.filter((t) => !t.date_deadline)
+    return baseBusca
+  }, [baseBusca, filtroPrazo])
 
   return (
     <div>
@@ -196,9 +208,9 @@ export default function TarefasAdvbox() {
             value={filtroPrazo}
             onChange={(e) => setFiltroPrazo(e.target.value as typeof filtroPrazo)}
           >
-            <option value="todos">Todos</option>
-            <option value="fatais">Fatais</option>
-            <option value="sem_prazo">Sem prazo</option>
+            <option value="todos">Todos ({contagemPrazo.todos})</option>
+            <option value="fatais">Fatais ({contagemPrazo.fatais})</option>
+            <option value="sem_prazo">Sem prazo ({contagemPrazo.sem_prazo})</option>
           </Select>
         </div>
       </Card>
