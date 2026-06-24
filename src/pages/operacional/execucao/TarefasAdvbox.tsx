@@ -51,7 +51,7 @@ interface Opcoes {
 }
 
 interface FormState {
-  lawsuits_id: string
+  processoBusca: string
   tasks_id: string
   start_date: string
   date_deadline: string
@@ -62,7 +62,7 @@ interface FormState {
   comments: string
 }
 const FORM_VAZIO: FormState = {
-  lawsuits_id: '',
+  processoBusca: '',
   tasks_id: '',
   start_date: '',
   date_deadline: '',
@@ -361,26 +361,28 @@ export function NovaTarefaModal({
   })
 
   // Ao fechar, limpa o formulário. Ao abrir a partir de uma publicação,
-  // pré-seleciona o processo correspondente (se houver).
+  // pré-preenche o número do processo (casando com a lista quando possível).
   useEffect(() => {
     if (!open) {
       setForm({ ...FORM_VAZIO })
       return
     }
-    const law = opcoes.data?.lawsuits
-    if (processoNumero && law) {
-      const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
-      const found = law.find((l) => dig(l.numero) === dig(processoNumero))
-      if (found)
-        setForm((f) => (f.lawsuits_id ? f : { ...f, lawsuits_id: String(found.id) }))
-    }
+    if (!processoNumero) return
+    const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
+    const found = opcoes.data?.lawsuits?.find(
+      (l) => dig(l.numero) === dig(processoNumero),
+    )
+    const disp = found
+      ? `${found.numero}${found.cliente ? ` — ${found.cliente}` : ''}`
+      : processoNumero
+    setForm((f) => (f.processoBusca ? f : { ...f, processoBusca: disp }))
   }, [open, opcoes.data, processoNumero])
 
   const criar = useMutation({
-    mutationFn: () =>
+    mutationFn: (lawsuitId: number) =>
       invokeFunction('advbox-tarefas', {
         action: 'create',
-        lawsuits_id: Number(form.lawsuits_id),
+        lawsuits_id: lawsuitId,
         tasks_id: Number(form.tasks_id),
         start_date: form.start_date,
         date_deadline: form.date_deadline || null,
@@ -399,12 +401,18 @@ export function NovaTarefaModal({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!form.lawsuits_id) return toast.error('Selecione o processo.')
+    const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
+    const d = dig(form.processoBusca)
+    const law = (opcoes.data?.lawsuits ?? []).find((l) => {
+      const disp = `${l.numero}${l.cliente ? ` — ${l.cliente}` : ''}`
+      return form.processoBusca === disp || (d.length >= 6 && dig(l.numero) === d)
+    })
+    if (!law) return toast.error('Selecione um processo válido da lista.')
     if (!form.tasks_id) return toast.error('Selecione o tipo de tarefa.')
     if (!form.start_date) return toast.error('Informe a data.')
     if (!form.from) return toast.error('Selecione o remetente.')
     if (form.guests.length === 0) return toast.error('Selecione ao menos um responsável.')
-    criar.mutate()
+    criar.mutate(law.id)
   }
 
   function toggleGuest(id: number) {
@@ -444,19 +452,25 @@ export function NovaTarefaModal({
         <ErrorState message={(opcoes.error as Error)?.message} />
       ) : (
         <form id="form-nova-tarefa" onSubmit={handleSubmit} className="space-y-4">
-          <Field label="Processo" required hint="Apenas processos cadastrados (Créditos/Requerimentos/Apensos).">
-            <Select
-              value={form.lawsuits_id}
-              onChange={(e) => setForm({ ...form, lawsuits_id: e.target.value })}
-            >
-              <option value="">Selecione…</option>
+          <Field
+            label="Processo"
+            required
+            hint="Digite o número e escolha na lista (só processos cadastrados)."
+          >
+            <Input
+              list="nova-tarefa-lawsuits"
+              value={form.processoBusca}
+              onChange={(e) => setForm({ ...form, processoBusca: e.target.value })}
+              placeholder="Digite o número do processo…"
+            />
+            <datalist id="nova-tarefa-lawsuits">
               {lawsuits.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.numero}
-                  {l.cliente ? ` — ${l.cliente}` : ''}
-                </option>
+                <option
+                  key={l.id}
+                  value={`${l.numero}${l.cliente ? ` — ${l.cliente}` : ''}`}
+                />
               ))}
-            </Select>
+            </datalist>
           </Field>
 
           <Field label="Tipo de tarefa" required>
