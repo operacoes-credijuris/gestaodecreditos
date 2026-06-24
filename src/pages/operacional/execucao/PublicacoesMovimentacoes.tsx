@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react'
 import { Search, ExternalLink, RefreshCw } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -13,7 +14,6 @@ import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input, Select } from '@/components/ui/Field'
@@ -29,6 +29,7 @@ interface DjenRow {
   tipo_comunicacao: string | null
   raw: Record<string, unknown>
   sincronizado_em: string
+  tratada: boolean
 }
 
 // Resolução do processo da publicação contra os cadastros.
@@ -184,9 +185,32 @@ function Publicacoes({ busca }: { busca: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Exibição em blocos (o volume por OAB pode ser grande).
-  const [mostrar, setMostrar] = useState(50)
-  useEffect(() => setMostrar(50), [busca])
+  // Marca/desmarca "tratada" (move entre Novas e Providenciadas).
+  const toggleTratada = useMutation({
+    mutationFn: async (row: DjenRow) => {
+      const { error } = await supabase
+        .from('djen_publicacoes')
+        .update({ tratada: !row.tratada })
+        .eq('id', row.id)
+      if (error) throw new Error(error.message)
+    },
+    onMutate: async (row) => {
+      const key = ['djen_publicacoes', ini30]
+      await qc.cancelQueries({ queryKey: ['djen_publicacoes'] })
+      const prev = qc.getQueryData<DjenRow[]>(key)
+      qc.setQueryData<DjenRow[]>(key, (old) =>
+        (old ?? []).map((r) =>
+          r.id === row.id ? { ...r, tratada: !r.tratada } : r,
+        ),
+      )
+      return { prev, key }
+    },
+    onError: (e, _row, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev)
+      toast.error((e as Error).message)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['djen_publicacoes'] }),
+  })
 
   const filtradas = useMemo(() => {
     const all = lista.data ?? []
@@ -211,8 +235,19 @@ function Publicacoes({ busca }: { busca: string }) {
   if (lista.isError)
     return <ErrorState message={(lista.error as Error)?.message} />
 
+  const novas = filtradas.filter((p) => !p.tratada)
+  const providenciadas = filtradas.filter((p) => p.tratada)
+  const card = (p: DjenRow) => (
+    <PublicacaoCard
+      key={p.id}
+      p={p}
+      info={resolve(p.numero_processo)}
+      onToggle={() => toggleTratada.mutate(p)}
+    />
+  )
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex items-center gap-3 text-[13px] text-slate-500">
         <span>
           <strong>{filtradas.length}</strong> publicação(ões)
@@ -237,26 +272,61 @@ function Publicacoes({ busca }: { busca: string }) {
         </Card>
       ) : (
         <>
-          {filtradas.slice(0, mostrar).map((p) => (
-            <PublicacaoCard key={p.id} p={p} info={resolve(p.numero_processo)} />
-          ))}
-          {filtradas.length > mostrar && (
-            <div className="flex justify-center pt-1">
-              <Button
-                variant="outline"
-                onClick={() => setMostrar((m) => m + 50)}
-              >
-                Mostrar mais ({filtradas.length - mostrar} restantes)
-              </Button>
-            </div>
-          )}
+          <Secao titulo="Novas" qtd={novas.length}>
+            {novas.length ? (
+              novas.map(card)
+            ) : (
+              <p className="text-sm text-slate-400">Nenhuma publicação nova.</p>
+            )}
+          </Secao>
+          <Secao titulo="Providenciadas" qtd={providenciadas.length}>
+            {providenciadas.length ? (
+              providenciadas.map(card)
+            ) : (
+              <p className="text-sm text-slate-400">
+                Nenhuma publicação providenciada.
+              </p>
+            )}
+          </Secao>
         </>
       )}
     </div>
   )
 }
 
-function PublicacaoCard({ p, info }: { p: DjenRow; info: ResolveInfo }) {
+// Cabeçalho de seção: "Título (n) ————————".
+function Secao({
+  titulo,
+  qtd,
+  children,
+}: {
+  titulo: string
+  qtd: number
+  children: ReactNode
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 pt-1">
+        <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          {titulo}
+        </span>
+        <span className="text-[11px] text-slate-400">({qtd})</span>
+        <div className="h-px flex-1 bg-slate-200" />
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function PublicacaoCard({
+  p,
+  info,
+  onToggle,
+}: {
+  p: DjenRow
+  info: ResolveInfo
+  onToggle: () => void
+}) {
   const raw = p.raw ?? {}
   const texto = useMemo(() => textoLimpo(raw.texto), [raw.texto])
   const st = getLabel(STATUS_PROCESSO, info.status)
@@ -275,6 +345,10 @@ function PublicacaoCard({ p, info }: { p: DjenRow; info: ResolveInfo }) {
           )}
         </div>
         <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+            <input type="checkbox" checked={p.tratada} onChange={onToggle} />
+            Tratada
+          </label>
           {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
           {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
           {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
