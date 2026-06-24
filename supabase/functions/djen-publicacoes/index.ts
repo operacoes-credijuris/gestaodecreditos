@@ -83,6 +83,10 @@ Deno.serve(async (req: Request) => {
     }
     const oabs = (cfg.oabs ?? []).filter(Boolean)
     const dias = Number(cfg.dias_retroativos ?? 30)
+    // Janela: dos últimos `dias` (default 30) até hoje.
+    const fim = new Date().toISOString().slice(0, 10)
+    const ini = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10)
+    const janela = `&dataDisponibilizacaoInicio=${ini}&dataDisponibilizacaoFim=${fim}`
 
     const porId = new Map<string, Record<string, unknown>>()
     const add = (items: Record<string, unknown>[]) => {
@@ -91,28 +95,28 @@ Deno.serve(async (req: Request) => {
 
     add(
       await pmap([...numeros], 6, (n) =>
-        fetchItems(`${DJEN}?numeroProcesso=${n}&itensPorPagina=200&pagina=1`),
+        fetchItems(`${DJEN}?numeroProcesso=${n}${janela}&itensPorPagina=200&pagina=1`),
       ),
     )
 
     if (oabs.length) {
-      const fim = new Date().toISOString().slice(0, 10)
-      const ini = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10)
       add(
         await pmap(oabs, 3, (oab) => {
           const m = String(oab).match(/(\d+)\s*\/?\s*([A-Za-z]{2})?/)
           if (!m) return Promise.resolve([])
-          let url =
-            `${DJEN}?numeroOab=${m[1]}` +
-            `&dataDisponibilizacaoInicio=${ini}&dataDisponibilizacaoFim=${fim}` +
-            `&itensPorPagina=200&pagina=1`
+          let url = `${DJEN}?numeroOab=${m[1]}${janela}&itensPorPagina=200&pagina=1`
           if (m[2]) url += `&ufOab=${m[2].toUpperCase()}`
           return fetchItems(url)
         }),
       )
     }
 
-    const items = [...porId.values()]
+    // Apenas intimações.
+    const items = [...porId.values()].filter((it) =>
+      String(it.tipoComunicacao ?? '')
+        .toLowerCase()
+        .includes('intima'),
+    )
     const agora = new Date().toISOString()
     const rows = items
       .filter((it) => it.id != null)
@@ -139,6 +143,9 @@ Deno.serve(async (req: Request) => {
       if (error) throw new Error(error.message)
       gravados += slice.length
     }
+
+    // Mantém o cache só com a janela atual (remove anteriores a `ini`).
+    await svc.from('djen_publicacoes').delete().lt('data_disponibilizacao', ini)
 
     return jsonResponse({ ok: true, total: items.length, gravados })
   } catch (err) {

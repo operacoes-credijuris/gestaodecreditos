@@ -88,12 +88,19 @@ function Publicacoes({ busca }: { busca: string }) {
   const qc = useQueryClient()
   const toast = useToast()
 
+  // Janela de 30 dias (data de disponibilização >= hoje - 30, horário local).
+  const ini30 = useMemo(
+    () => new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE'),
+    [],
+  )
+
   const lista = useQuery({
-    queryKey: ['djen_publicacoes'],
+    queryKey: ['djen_publicacoes', ini30],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('djen_publicacoes')
         .select('*')
+        .gte('data_disponibilizacao', ini30)
         .order('data_disponibilizacao', { ascending: false })
         .order('id', { ascending: false })
         .limit(2000)
