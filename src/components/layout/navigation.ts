@@ -60,7 +60,7 @@ export const NAVIGATION: NavSection[] = [
         icon: Newspaper,
       },
       {
-        label: 'Tarefas ADVBOX',
+        label: 'Tarefas',
         to: '/operacional/execucao/tarefas',
         icon: ListChecks,
       },

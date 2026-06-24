@@ -119,7 +119,7 @@ export default function TarefasAdvbox() {
   return (
     <div>
       <PageHeader
-        title="Tarefas ADVBOX"
+        title="Tarefas"
         description="Controle das tarefas sincronizadas do ADVBOX e tarefas internas."
         actions={
           <>
