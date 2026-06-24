@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from 'react'
-import { Plus, Search, Flame, Star } from 'lucide-react'
+import { Plus, Search, Flame, Star, FileText } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invokeFunction } from '@/lib/functions'
 import { processosCrud, apensosCrud } from '@/lib/queries'
@@ -250,6 +250,7 @@ export default function TarefasAdvbox() {
               <tr>
                 <TH className="whitespace-nowrap">Processo</TH>
                 <TH className="w-full">Tarefa</TH>
+                <TH className="whitespace-nowrap">Gerar petição</TH>
                 <TH className="whitespace-nowrap">Responsáveis</TH>
                 <TH className="whitespace-nowrap">Data</TH>
                 <TH className="whitespace-nowrap">Prazo</TH>
@@ -283,6 +284,21 @@ export default function TarefasAdvbox() {
                         <span>{t.tipo || '—'}</span>
                       </div>
                       {t.notes && <Observacao text={t.notes} />}
+                    </TD>
+                    <TD className="whitespace-nowrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        icon={<FileText className="h-4 w-4" />}
+                        onClick={() =>
+                          toast.toast(
+                            'Geração de petição será configurada em breve.',
+                            'info',
+                          )
+                        }
+                      >
+                        Gerar petição
+                      </Button>
                     </TD>
                     <TD>
                       {t.responsaveis?.length ? (
