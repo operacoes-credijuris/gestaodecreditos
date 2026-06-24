@@ -175,9 +175,19 @@ export default function TarefasAdvbox() {
   )
 
   const lista = useMemo(() => {
-    if (filtroPrazo === 'fatais') return baseBusca.filter((t) => !!t.date_deadline)
-    if (filtroPrazo === 'sem_prazo') return baseBusca.filter((t) => !t.date_deadline)
-    return baseBusca
+    const dataRef = (t: TarefaAdvbox) => t.start_date || t.created_at || ''
+    // Com prazo: prazo fatal mais próximo primeiro (crescente).
+    const comPrazo = baseBusca
+      .filter((t) => !!t.date_deadline)
+      .sort((a, b) => (a.date_deadline || '').localeCompare(b.date_deadline || ''))
+    // Sem prazo: data mais nova primeiro (decrescente).
+    const semPrazo = baseBusca
+      .filter((t) => !t.date_deadline)
+      .sort((a, b) => dataRef(b).localeCompare(dataRef(a)))
+    if (filtroPrazo === 'fatais') return comPrazo
+    if (filtroPrazo === 'sem_prazo') return semPrazo
+    // Todos: primeiro as com prazo, depois as sem prazo (cada uma com seu critério).
+    return [...comPrazo, ...semPrazo]
   }, [baseBusca, filtroPrazo])
 
   return (
