@@ -1,11 +1,13 @@
-// Sincroniza as INTIMAÇÕES do DJEN (Comunica PJe) para o cache
-// public.djen_publicacoes. Fonte ÚNICA: as OAB(s) cadastradas em
-// integracoes.djen (cada uma como "numero/UF"). Janela: últimos `dias`
-// (default 30). A página lê do banco; esta função roda em 2º plano.
+// Sincroniza as INTIMAÇÕES do DJEN para o cache public.djen_publicacoes.
+// Critério (interseção): publicações dos PROCESSOS CADASTRADOS
+// (Créditos/Requerimentos/Apensos) que foram expedidas EM NOME das OAB(s)
+// cadastradas em integracoes.djen. Janela: últimos `dias` (default 30).
+// A página lê do banco; esta função roda em 2º plano.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { getCaller, serviceClient } from '../_shared/auth.ts'
 
 const DJEN = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao'
+const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '')
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 async function fetchItems(url: string, tries = 3): Promise<Record<string, unknown>[]> {
@@ -39,12 +41,27 @@ async function pmap<T>(
       try {
         out.push(...(await fn(items[idx])))
       } catch {
-        /* ignora falha pontual */
+        /* ignora falha pontual de um processo */
       }
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
   return out
+}
+
+// A publicação está em nome de alguma OAB cadastrada?
+function temOabCadastrada(it: Record<string, unknown>, oabSet: Set<string>): boolean {
+  if (oabSet.size === 0) return true // sem OAB cadastrada: não filtra por OAB
+  const advs = it.destinatarioadvogados
+  if (!Array.isArray(advs)) return false
+  for (const a of advs) {
+    const adv = (a as { advogado?: { numero_oab?: string; uf_oab?: string } })?.advogado
+    if (!adv) continue
+    const num = onlyDigits(adv.numero_oab)
+    const uf = String(adv.uf_oab ?? '').toUpperCase()
+    if (num && oabSet.has(`${num}/${uf}`)) return true
+  }
+  return false
 }
 
 Deno.serve(async (req: Request) => {
@@ -54,53 +71,55 @@ Deno.serve(async (req: Request) => {
     if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
 
     const svc = serviceClient()
-    const { data: integ } = await svc
-      .from('integracoes')
-      .select('config')
-      .eq('servico', 'djen')
-      .maybeSingle()
+    const [proc, ap, reqs, integ] = await Promise.all([
+      svc.from('processos').select('numero_cnj'),
+      svc.from('apensos').select('numero'),
+      svc.from('requerimentos').select('numero_protocolo'),
+      svc.from('integracoes').select('config').eq('servico', 'djen').maybeSingle(),
+    ])
 
-    const cfg = (integ?.config ?? {}) as {
+    const numeros = new Set<string>()
+    for (const r of proc.data ?? []) {
+      const d = onlyDigits((r as { numero_cnj?: string }).numero_cnj)
+      if (d.length >= 15) numeros.add(d)
+    }
+    for (const r of ap.data ?? []) {
+      const d = onlyDigits((r as { numero?: string }).numero)
+      if (d.length >= 15) numeros.add(d)
+    }
+    for (const r of reqs.data ?? []) {
+      const d = onlyDigits((r as { numero_protocolo?: string }).numero_protocolo)
+      if (d.length >= 15) numeros.add(d)
+    }
+
+    const cfg = (integ.data?.config ?? {}) as {
       oabs?: string[]
       dias_retroativos?: number
     }
-    const oabs = (cfg.oabs ?? []).filter(Boolean)
+    // Conjunto de OABs cadastradas, normalizado como "numero/UF".
+    const oabSet = new Set<string>()
+    for (const o of cfg.oabs ?? []) {
+      const m = String(o).match(/(\d+)\s*\/?\s*([A-Za-z]{2})/)
+      if (m) oabSet.add(`${onlyDigits(m[1])}/${m[2].toUpperCase()}`)
+    }
     const dias = Number(cfg.dias_retroativos ?? 30)
     const fim = new Date().toISOString().slice(0, 10)
     const ini = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10)
+    const janela = `&dataDisponibilizacaoInicio=${ini}&dataDisponibilizacaoFim=${fim}`
 
+    // Busca por número de processo (dos cadastros).
     const porId = new Map<string, Record<string, unknown>>()
-    const add = (items: Record<string, unknown>[]) => {
-      for (const it of items) if (it?.id != null) porId.set(String(it.id), it)
-    }
-
-    // Por OAB (paginado, mais recentes primeiro). Cap de páginas p/ não estourar.
-    const MAX_PAGINAS = 12
-    add(
-      await pmap(oabs, 3, async (oab) => {
-        const m = String(oab).match(/(\d+)\s*\/?\s*([A-Za-z]{2})?/)
-        if (!m) return []
-        const numero = m[1]
-        const uf = m[2] ? `&ufOab=${m[2].toUpperCase()}` : ''
-        const acc: Record<string, unknown>[] = []
-        for (let pg = 1; pg <= MAX_PAGINAS; pg++) {
-          const url =
-            `${DJEN}?numeroOab=${numero}${uf}` +
-            `&dataDisponibilizacaoInicio=${ini}&dataDisponibilizacaoFim=${fim}` +
-            `&itensPorPagina=200&pagina=${pg}`
-          const items = await fetchItems(url)
-          acc.push(...items)
-          if (items.length < 200) break
-        }
-        return acc
-      }),
+    const fetched = await pmap([...numeros], 6, (n) =>
+      fetchItems(`${DJEN}?numeroProcesso=${n}${janela}&itensPorPagina=200&pagina=1`),
     )
+    for (const it of fetched) if (it?.id != null) porId.set(String(it.id), it)
 
-    // Apenas intimações.
-    const items = [...porId.values()].filter((it) =>
-      String(it.tipoComunicacao ?? '')
-        .toLowerCase()
-        .includes('intima'),
+    // Filtro: só intimações E em nome de uma OAB cadastrada.
+    const items = [...porId.values()].filter(
+      (it) =>
+        String(it.tipoComunicacao ?? '')
+          .toLowerCase()
+          .includes('intima') && temOabCadastrada(it, oabSet),
     )
 
     const agora = new Date().toISOString()
@@ -130,7 +149,7 @@ Deno.serve(async (req: Request) => {
       gravados += slice.length
     }
 
-    // Mantém o cache só com a janela atual (remove anteriores a `ini`).
+    // Remove do cache o que saiu da janela de 30 dias.
     await svc.from('djen_publicacoes').delete().lt('data_disponibilizacao', ini)
 
     return jsonResponse({ ok: true, total: items.length, gravados })
