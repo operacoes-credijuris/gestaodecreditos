@@ -16,19 +16,9 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
-import {
-  Table,
-  THead,
-  TH,
-  TBody,
-  TR,
-  TD,
-  Loading,
-  ErrorState,
-  EmptyState,
-} from '@/components/ui/Table'
+import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatDate, formatNome, sentenceCase } from '@/lib/format'
+import { formatCNJ, formatNome, sentenceCase } from '@/lib/format'
 
 // ---------- Tipos vindos da Edge Function advbox-tarefas ----------
 interface TarefaAdvbox {
@@ -101,6 +91,65 @@ function Observacao({ text }: { text: string }) {
       )}
     </div>
   )
+}
+
+// ---------- Helpers de urgência / data / avatares ----------
+const MESES = [
+  'jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez',
+]
+
+// Diferença em dias inteiros entre duas datas ISO (YYYY-MM-DD), horário local.
+function diffDias(fromISO: string, toISO: string): number {
+  const a = new Date(`${fromISO}T00:00:00`).getTime()
+  const b = new Date(`${toISO}T00:00:00`).getTime()
+  return Math.round((b - a) / 86400000)
+}
+
+type Urgencia = 'danger' | 'warning' | 'neutral'
+
+// Classifica o prazo fatal: vence hoje/amanhã (vermelho), nesta semana
+// (âmbar) ou depois/sem prazo (neutro). Também devolve o rótulo relativo.
+function prazoInfo(
+  deadline: string | null | undefined,
+  hoje: string,
+): { tone: Urgencia; rel: string } | null {
+  if (!deadline) return null
+  const n = diffDias(hoje, deadline.slice(0, 10))
+  if (n <= 1) return { tone: 'danger', rel: n <= 0 ? 'hoje' : 'amanhã' }
+  if (n <= 7) return { tone: 'warning', rel: `em ${n} dias` }
+  return { tone: 'neutral', rel: '' }
+}
+
+// Dia + mês abreviado para o bloco de calendário.
+function diaMes(iso?: string | null): { dia: string; mes: string } | null {
+  if (!iso) return null
+  const dt = new Date(`${iso.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(dt.getTime())) return null
+  return { dia: String(dt.getDate()).padStart(2, '0'), mes: MESES[dt.getMonth()] }
+}
+
+// Iniciais (2 letras) do responsável para o avatar.
+function iniciais(nome: string): string {
+  const parts = formatNome(nome).split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toLocaleUpperCase('pt-BR')
+  return (parts[0][0] + parts[parts.length - 1][0]).toLocaleUpperCase('pt-BR')
+}
+
+const TONE_BAR: Record<Urgencia, string> = {
+  danger: 'bg-red-500',
+  warning: 'bg-amber-500',
+  neutral: 'bg-slate-200',
+}
+const TONE_BLOCK: Record<Urgencia, string> = {
+  danger: 'bg-red-50 text-red-700',
+  warning: 'bg-amber-50 text-amber-700',
+  neutral: 'bg-slate-100 text-slate-500',
+}
+const TONE_TEXT: Record<Urgencia, string> = {
+  danger: 'text-red-600',
+  warning: 'text-amber-600',
+  neutral: 'text-slate-400',
 }
 
 export default function TarefasAdvbox() {
@@ -235,94 +284,118 @@ export default function TarefasAdvbox() {
         </div>
       </Card>
 
-      <Card>
-        {isLoading ? (
+      {isLoading ? (
+        <Card>
           <Loading label="Buscando tarefas no ADVBOX…" />
-        ) : isError ? (
+        </Card>
+      ) : isError ? (
+        <Card>
           <ErrorState message={(error as Error)?.message} />
-        ) : lista.length === 0 ? (
+        </Card>
+      ) : lista.length === 0 ? (
+        <Card>
           <EmptyState
             title="Nenhuma tarefa"
             description="Não há tarefas no ADVBOX para os processos cadastrados."
           />
-        ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
-            <THead>
-              <tr>
-                <TH className="whitespace-nowrap">Processo</TH>
-                <TH className="w-full">Tarefa</TH>
-                <TH className="whitespace-nowrap text-center">Gerar petição</TH>
-                <TH className="whitespace-nowrap">Responsáveis</TH>
-                <TH className="whitespace-nowrap">Data</TH>
-                <TH className="whitespace-nowrap">Prazo</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {lista.map((t) => {
-                const cred = resolveCredito(t.processo ?? '')
-                return (
-                  <TR key={t.id}>
-                    <TD className="whitespace-nowrap font-medium text-slate-800">
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {lista.map((t) => {
+            const cred = resolveCredito(t.processo ?? '')
+            const partes =
+              cred && (cred.cedente || cred.cessionario)
+                ? `${cred.cedente || '—'} v. ${cred.cessionario || '—'}`
+                : ''
+            const prazo = prazoInfo(t.date_deadline, hoje)
+            const tone: Urgencia = prazo?.tone ?? 'neutral'
+            const bloco = diaMes(t.date_deadline || t.start_date)
+            const resp = t.responsaveis ?? []
+            return (
+              <div
+                key={t.id}
+                className="flex overflow-hidden rounded-xl border border-slate-200 bg-white"
+              >
+                <div className={cn('w-1 flex-none', TONE_BAR[tone])} />
+                <div className="flex min-w-0 flex-1 items-start gap-3 p-3">
+                  <div
+                    className={cn(
+                      'w-12 flex-none rounded-md py-1.5 text-center',
+                      TONE_BLOCK[tone],
+                    )}
+                  >
+                    {bloco ? (
+                      <>
+                        <div className="text-lg font-bold leading-none">{bloco.dia}</div>
+                        <div className="text-[11px] leading-tight">{bloco.mes}</div>
+                      </>
+                    ) : (
+                      <div className="py-1 text-sm">—</div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {t.urgent && (
+                        <span title="Urgente">
+                          <Flame className="h-3.5 w-3.5 text-red-500" />
+                        </span>
+                      )}
+                      {t.important && (
+                        <span title="Importante">
+                          <Star className="h-3.5 w-3.5 text-amber-500" />
+                        </span>
+                      )}
+                      <span className="text-sm font-medium text-slate-800">
+                        {t.tipo ? sentenceCase(t.tipo) : '—'}
+                      </span>
+                      {prazo?.rel && (
+                        <span className={cn('text-xs font-medium', TONE_TEXT[tone])}>
+                          · {prazo.rel}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-slate-500">
                       {formatCNJ(t.processo)}
-                      {cred && (cred.cedente || cred.cessionario) && (
-                        <div className="text-[11px] font-normal text-slate-400">
-                          <div>Ced.: {cred.cedente || '—'}</div>
-                          <div>Ces.: {cred.cessionario || '—'}</div>
+                      {partes && ` · ${partes}`}
+                    </div>
+                    {t.notes && <Observacao text={t.notes} />}
+                  </div>
+                  {resp.length > 0 && (
+                    <div className="flex flex-none items-center pt-0.5">
+                      {resp.slice(0, 3).map((r, i) => (
+                        <div
+                          key={i}
+                          title={formatNome(r)}
+                          className="-ml-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-brand-50 text-[10px] font-medium text-brand-700 first:ml-0"
+                        >
+                          {iniciais(r)}
+                        </div>
+                      ))}
+                      {resp.length > 3 && (
+                        <div className="-ml-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-[10px] font-medium text-slate-500">
+                          +{resp.length - 3}
                         </div>
                       )}
-                    </TD>
-                    <TD className="font-medium text-slate-800">
-                      <div className="flex items-center gap-1.5">
-                        {t.urgent && (
-                          <span title="Urgente">
-                            <Flame className="h-3.5 w-3.5 text-red-500" />
-                          </span>
-                        )}
-                        {t.important && (
-                          <span title="Importante">
-                            <Star className="h-3.5 w-3.5 text-amber-500" />
-                          </span>
-                        )}
-                        <span>{t.tipo ? sentenceCase(t.tipo) : '—'}</span>
-                      </div>
-                      {t.notes && <Observacao text={t.notes} />}
-                    </TD>
-                    <TD className="whitespace-nowrap text-center">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        title="Gerar petição"
-                        icon={<FileText className="h-4 w-4" />}
-                        onClick={() =>
-                          toast.toast(
-                            'Geração de petição será configurada em breve.',
-                            'info',
-                          )
-                        }
-                      />
-                    </TD>
-                    <TD>
-                      {t.responsaveis?.length ? (
-                        <div className="space-y-0.5">
-                          {t.responsaveis.map((r, i) => (
-                            <div key={i} className="whitespace-nowrap">
-                              {formatNome(r)}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        '—'
-                      )}
-                    </TD>
-                    <TD className="whitespace-nowrap">{formatDate(t.start_date)}</TD>
-                    <TD className="whitespace-nowrap">{formatDate(t.date_deadline)}</TD>
-                  </TR>
-                )
-              })}
-            </TBody>
-          </Table>
-        )}
-      </Card>
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    title="Gerar petição"
+                    icon={<FileText className="h-4 w-4" />}
+                    onClick={() =>
+                      toast.toast(
+                        'Geração de petição será configurada em breve.',
+                        'info',
+                      )
+                    }
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <NovaTarefaModal
         open={novo}
