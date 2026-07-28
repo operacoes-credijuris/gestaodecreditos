@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Search, ExternalLink, RefreshCw, ListChecks } from 'lucide-react'
+import { Search, ExternalLink, RefreshCw, ListChecks, ChevronDown } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
@@ -574,7 +574,9 @@ function Movimentacoes({ busca }: { busca: string }) {
   )
 }
 
-// Card de um processo com seus andamentos (mais recente no topo).
+// Card de um processo. Por padrão mostra só o cabeçalho; clicar nele expande a
+// lista de andamentos (mais recente no topo). O chevron à direita indica o
+// estado de expansão.
 function ProcessoMovimentacoes({
   numero,
   movs,
@@ -584,10 +586,16 @@ function ProcessoMovimentacoes({
   movs: MovRow[]
   info: ResolveInfo
 }) {
+  const [aberto, setAberto] = useState(false)
   const st = getLabel(STATUS_PROCESSO, info.status)
   return (
-    <Card className="p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3">
+    <Card className="overflow-hidden p-0">
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        aria-expanded={aberto}
+        className="flex w-full items-start justify-between gap-2 p-4 text-left transition-colors hover:bg-slate-50"
+      >
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-slate-800">
             {formatCNJ(numero)}
@@ -598,30 +606,40 @@ function ProcessoMovimentacoes({
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Badge tone="gray">{movs.length} and.</Badge>
-          {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
-          {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+        <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge tone="gray">{movs.length} and.</Badge>
+            {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
+            {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+          </div>
+          <ChevronDown
+            className={cn(
+              'h-4 w-4 text-slate-400 transition-transform',
+              aberto && 'rotate-180',
+            )}
+          />
         </div>
-      </div>
+      </button>
 
-      <ol className="mt-3 space-y-3">
-        {movs.map((m) => (
-          <li key={m.id} className="flex gap-3">
-            <div className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-brand-400" />
-            <div className="min-w-0">
-              <div className="text-[11px] font-medium text-slate-500">
-                {formatDate(m.data)}
-              </div>
-              {m.conteudo && (
-                <div className="whitespace-pre-line break-words text-[13px] text-slate-700">
-                  {m.conteudo}
+      {aberto && (
+        <ol className="space-y-3 border-t border-slate-100 px-4 pb-4 pt-3">
+          {movs.map((m) => (
+            <li key={m.id} className="flex gap-3">
+              <div className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-brand-400" />
+              <div className="min-w-0">
+                <div className="text-[11px] font-medium text-slate-500">
+                  {formatDate(m.data)}
                 </div>
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
+                {m.conteudo && (
+                  <div className="whitespace-pre-line break-words text-[13px] text-slate-700">
+                    {m.conteudo}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
     </Card>
   )
 }

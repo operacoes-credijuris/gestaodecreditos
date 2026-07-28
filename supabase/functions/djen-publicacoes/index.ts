@@ -67,8 +67,14 @@ function temOabCadastrada(it: Record<string, unknown>, oabSet: Set<string>): boo
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
-    const caller = await getCaller(req)
-    if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
+    // Autorização: JWT de usuário (chamada do app) OU segredo de cron.
+    const cronSecret = Deno.env.get('CRON_SECRET')
+    const headerSecret = req.headers.get('x-cron-secret')
+    const autorizadoPorCron = !!cronSecret && headerSecret === cronSecret
+    if (!autorizadoPorCron) {
+      const caller = await getCaller(req)
+      if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
+    }
 
     const svc = serviceClient()
     const [proc, ap, reqs, integ] = await Promise.all([

@@ -24,10 +24,10 @@ verify_jwt = true
 [functions.advbox-tarefas]
 verify_jwt = true
 
-[functions.djen-publicacoes]
-verify_jwt = true
-
 # Chamada tanto pelo app (JWT do usuário) quanto pelo cron (x-cron-secret);
 # a própria função valida a autorização, por isso verify_jwt = false.
+[functions.djen-publicacoes]
+verify_jwt = false
+
 [functions.advbox-movimentacoes]
 verify_jwt = false
