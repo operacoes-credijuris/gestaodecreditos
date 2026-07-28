@@ -1,5 +1,5 @@
 // Sincroniza as MOVIMENTAÇÕES (andamentos) do ADVBOX para o cache
-// public.advbox_movimentacoes. Passos:
+// public.advbox_movimentacoes (deploy automático via GitHub Actions). Passos:
 //  1. Compila os números dos processos cadastrados em Créditos (numero_cnj),
 //     Requerimentos (numero_protocolo) e Apensos (numero).
 //  2. Casa esses números com os processos do ADVBOX (/lawsuits) por
