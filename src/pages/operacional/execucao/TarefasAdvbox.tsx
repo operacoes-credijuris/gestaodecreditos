@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent,
 } from 'react'
-import { Plus, Search, Flame, Star, FileText } from 'lucide-react'
+import { Plus, Search, Flame, Star, FileText, Users } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invokeFunction } from '@/lib/functions'
 import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
@@ -126,14 +126,6 @@ function diaMes(iso?: string | null): { dia: string; mes: string } | null {
   const dt = new Date(`${iso.slice(0, 10)}T00:00:00`)
   if (Number.isNaN(dt.getTime())) return null
   return { dia: String(dt.getDate()).padStart(2, '0'), mes: MESES[dt.getMonth()] }
-}
-
-// Iniciais (2 letras) do responsável para o avatar.
-function iniciais(nome: string): string {
-  const parts = formatNome(nome).split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  if (parts.length === 1) return parts[0].slice(0, 2).toLocaleUpperCase('pt-BR')
-  return (parts[0][0] + parts[parts.length - 1][0]).toLocaleUpperCase('pt-BR')
 }
 
 const TONE_BAR: Record<Urgencia, string> = {
@@ -358,26 +350,16 @@ export default function TarefasAdvbox() {
                       {formatCNJ(t.processo)}
                       {partes && ` · ${partes}`}
                     </div>
+                    {resp.length > 0 && (
+                      <div className="mt-1 flex items-start gap-1.5 text-sm text-slate-600">
+                        <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-400" />
+                        <span className="break-words">
+                          {resp.map((r) => formatNome(r)).join(', ')}
+                        </span>
+                      </div>
+                    )}
                     {t.notes && <Observacao text={t.notes} />}
                   </div>
-                  {resp.length > 0 && (
-                    <div className="flex flex-none items-center pt-0.5">
-                      {resp.slice(0, 3).map((r, i) => (
-                        <div
-                          key={i}
-                          title={formatNome(r)}
-                          className="-ml-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-brand-50 text-[10px] font-medium text-brand-700 first:ml-0"
-                        >
-                          {iniciais(r)}
-                        </div>
-                      ))}
-                      {resp.length > 3 && (
-                        <div className="-ml-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-[10px] font-medium text-slate-500">
-                          +{resp.length - 3}
-                        </div>
-                      )}
-                    </div>
-                  )}
                   <Button
                     size="sm"
                     variant="outline"
