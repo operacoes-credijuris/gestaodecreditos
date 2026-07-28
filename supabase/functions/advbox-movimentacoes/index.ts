@@ -13,8 +13,18 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { getCaller, serviceClient } from '../_shared/auth.ts'
 
 const DIAS_JANELA = 20
+const MIN_DIGITS = 6 // casa números com >= 6 dígitos (igual à aba de Tarefas)
 const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 const str = (v: unknown): string | null => (v == null ? null : String(v))
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// Detecta corpo de erro do Cloudflare (o ADVBOX às vezes devolve isso, inclusive
+// com HTTP 200, quando há rate limit). Nesses casos devemos tentar de novo.
+function isCloudflareError(j: unknown): boolean {
+  if (!j || typeof j !== 'object') return false
+  const o = j as Record<string, unknown>
+  return 'cloudflare_error' in o || ('error_code' in o && 'ray_id' in o)
+}
 
 // Hash estável (djb2) em base36 — usado para gerar um id determinístico quando
 // a movimentação do ADVBOX não traz um id próprio.
@@ -62,6 +72,60 @@ function pickArray(json: unknown): Record<string, unknown>[] {
   return []
 }
 
+// Throttle GLOBAL: serializa o início de todas as requisições ao ADVBOX com um
+// espaçamento mínimo, para não estourar o rate limit do Cloudflare (o problema
+// não é uma requisição isolada, e sim o ritmo agregado de todas juntas).
+const MIN_INTERVALO_MS = 350
+let proximoSlot = 0
+async function throttle(): Promise<void> {
+  const agora = Date.now()
+  const alvo = Math.max(agora, proximoSlot)
+  proximoSlot = alvo + MIN_INTERVALO_MS
+  const espera = alvo - agora
+  if (espera > 0) await sleep(espera)
+}
+
+// GET com throttle + retry/backoff, respeitando Retry-After. Resistente a rate
+// limit do Cloudflare (429/403/5xx e corpos de erro do CF, às vezes com 200).
+async function getJson(
+  ctx: AdvboxCtx,
+  path: string,
+  tries = 7,
+): Promise<unknown> {
+  let ultimoErro = 'desconhecido'
+  for (let a = 1; a <= tries; a++) {
+    await throttle()
+    try {
+      const res = await fetch(`${ctx.base}${path}`, { headers: ctx.headers })
+      if (res.status === 429 || res.status === 403 || res.status >= 500) {
+        ultimoErro = `HTTP ${res.status}`
+        if (a < tries) {
+          const ra = Number(res.headers.get('retry-after'))
+          const espera =
+            Number.isFinite(ra) && ra > 0
+              ? Math.min(ra * 1000, 15000)
+              : 600 * 2 ** (a - 1)
+          await sleep(espera + Math.floor(Math.random() * 400))
+        }
+        continue
+      }
+      const j = await res.json()
+      if (isCloudflareError(j)) {
+        ultimoErro = 'cloudflare rate limit'
+        if (a < tries) await sleep(600 * 2 ** (a - 1) + Math.floor(Math.random() * 400))
+        continue
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return j
+    } catch (e) {
+      // Erro de rede/parse: backoff e tenta de novo.
+      ultimoErro = (e as Error).message
+      if (a < tries) await sleep(600 * 2 ** (a - 1) + Math.floor(Math.random() * 300))
+    }
+  }
+  throw new Error(`${path} → ${ultimoErro}`)
+}
+
 // Paginação padrão do ADVBOX: { offset, limit, totalCount, data }.
 async function fetchAll(
   ctx: AdvboxCtx,
@@ -73,17 +137,40 @@ async function fetchAll(
   let offset = 0
   for (let i = 0; i < 60; i++) {
     const sep = path.includes('?') ? '&' : '?'
-    const res = await fetch(`${ctx.base}${path}${sep}limit=${limit}&offset=${offset}`, {
-      headers: ctx.headers,
-    })
-    if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`)
-    const j = await res.json()
+    const j = await getJson(ctx, `${path}${sep}limit=${limit}&offset=${offset}`)
     const data = pickArray(j)
     out.push(...data)
     const total = Number((j as { totalCount?: number }).totalCount ?? out.length)
     offset += limit
     if (data.length === 0 || out.length >= total || out.length >= cap) break
   }
+  return out
+}
+
+// Busca robusta das movimentações de um processo (com retry/backoff).
+async function fetchMovements(
+  ctx: AdvboxCtx,
+  lawsuitId: string,
+): Promise<Record<string, unknown>[]> {
+  return pickArray(await getJson(ctx, `/movements/${lawsuitId}`))
+}
+
+// Map com concorrência limitada que devolve UM resultado por item (1:1),
+// preservando a ordem. Falhas viram o valor de `onError(item, erro)`.
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let i = 0
+  const worker = async () => {
+    while (i < items.length) {
+      const idx = i++
+      out[idx] = await fn(items[idx])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
   return out
 }
 
@@ -98,7 +185,7 @@ async function numerosCadastrados(): Promise<Set<string>> {
   const set = new Set<string>()
   const add = (v: unknown) => {
     const d = onlyDigits(v)
-    if (d.length >= 15) set.add(d)
+    if (d.length >= MIN_DIGITS) set.add(d)
   }
   for (const r of proc.data ?? []) add((r as { numero_cnj?: string }).numero_cnj)
   for (const r of ap.data ?? []) add((r as { numero?: string }).numero)
@@ -123,28 +210,6 @@ async function processosCasaveis(ctx: AdvboxCtx): Promise<Map<string, string>> {
   return map
 }
 
-// Executa `fn` sobre `items` com concorrência limitada, ignorando falhas pontuais.
-async function pmap<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R[]>,
-): Promise<R[]> {
-  const out: R[] = []
-  let i = 0
-  const worker = async () => {
-    while (i < items.length) {
-      const idx = i++
-      try {
-        out.push(...(await fn(items[idx])))
-      } catch {
-        /* ignora falha pontual de um processo */
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
-  return out
-}
-
 // Extrai a data de um andamento (defensivo: vários nomes possíveis).
 function extrairData(m: Record<string, unknown>): string | null {
   const cands = [m.date, m.created_at, m.data, m.movement_date, m.datetime, m.updated_at]
@@ -163,6 +228,26 @@ function extrairConteudo(m: Record<string, unknown>): string | null {
     if (c != null && String(c).trim()) return String(c).trim()
   }
   return null
+}
+
+// Processos por invocação. Pequeno o bastante para caber no limite de recursos
+// do edge function mesmo com o rate limit do ADVBOX; o restante é encadeado.
+const BATCH = 12
+
+// Dispara a próxima fatia numa invocação SEPARADA (fire-and-forget), autenticada
+// pelo segredo de cron. Assim nenhuma execução isolada passa do limite.
+function dispararProximo(fila: { lid: string; numero: string }[], dias: number): void {
+  const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/advbox-movimentacoes`
+  const secret = Deno.env.get('CRON_SECRET') ?? ''
+  const p = fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-cron-secret': secret },
+    body: JSON.stringify({ fila, dias }),
+  }).catch(() => {})
+  const rt = (globalThis as unknown as {
+    EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void }
+  }).EdgeRuntime
+  if (rt?.waitUntil) rt.waitUntil(p)
 }
 
 Deno.serve(async (req: Request) => {
@@ -186,53 +271,73 @@ Deno.serve(async (req: Request) => {
     // Data-limite (só a parte da data) para a janela.
     const ini = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10)
 
-    // Processos casados: lawsuits_id -> número exibível.
-    const casaveis = await processosCasaveis(ctx)
-    const lawsuitIds = [...casaveis.keys()]
+    // Lista de trabalho: vem no corpo (fatia encadeada) ou é computada na 1ª
+    // chamada da cadeia. O processamento é feito em lotes pequenos que se
+    // auto-encadeiam, para não estourar o limite de recursos do edge function.
+    const primeira = !Array.isArray((body as { fila?: unknown }).fila)
+    let fila: { lid: string; numero: string }[]
+    if (primeira) {
+      const casaveis = await processosCasaveis(ctx)
+      fila = [...casaveis.entries()].map(([lid, numero]) => ({ lid, numero }))
+      // Poda o que saiu da janela — só na primeira chamada da cadeia.
+      await svc.from('advbox_movimentacoes').delete().lt('data', ini)
+    } else {
+      fila = (body as { fila: { lid: string; numero: string }[] }).fila
+    }
+    const lote = fila.slice(0, BATCH)
+    const resto = fila.slice(BATCH)
 
-    // Busca as movimentações de cada processo casado (concorrência limitada).
-    const brutos = await pmap(lawsuitIds, 6, async (lid) => {
-      const res = await fetch(`${ctx.base}/movements/${lid}`, { headers: ctx.headers })
-      if (!res.ok) throw new Error(`/movements/${lid} → HTTP ${res.status}`)
-      const arr = pickArray(await res.json())
-      return arr.map((m) => ({ lawsuitId: lid, m }))
-    })
-
-    // Modo debug: devolve amostra crua para conferência dos nomes de campo.
-    if (body.debug) {
-      return jsonResponse({
-        ok: true,
-        processos_casados: casaveis.size,
-        amostra: brutos.slice(0, 5).map((x) => x.m),
-      })
+    // Modo debug: só reporta o tamanho da fila (sem buscar movimentações).
+    if ((body as { debug?: boolean }).debug) {
+      return jsonResponse({ ok: true, primeira, fila: fila.length })
     }
 
+    // Busca as movimentações do lote (concorrência baixa + throttle + retry).
+    const resultados = await mapPool(lote, 3, async ({ lid, numero }) => {
+      try {
+        return {
+          lid,
+          numero,
+          movs: await fetchMovements(ctx, lid),
+          erro: null as string | null,
+        }
+      } catch (e) {
+        return {
+          lid,
+          numero,
+          movs: [] as Record<string, unknown>[],
+          erro: (e as Error).message,
+        }
+      }
+    })
+
+    // Monta as linhas do lote (só andamentos com data na janela e com conteúdo).
     const agora = new Date().toISOString()
     const vistos = new Set<string>()
-    const rows = brutos
-      .map(({ lawsuitId, m }) => {
-        const dataIso = extrairData(m)
-        const conteudo = extrairConteudo(m)
-        const dataDia = dataIso ? dataIso.slice(0, 10) : null
-        // id estável: id do ADVBOX quando existir; senão hash determinístico do
-        // processo + data + conteúdo (movimentações do ADVBOX não trazem id).
-        const id =
-          str(m.id) ??
-          `${lawsuitId}-${dataDia ?? 'sd'}-${hash(`${dataIso ?? ''}|${conteudo ?? ''}`)}`
-        return {
-          id,
-          advbox_lawsuit_id: lawsuitId,
-          numero_processo: casaveis.get(lawsuitId) ?? null,
-          data: dataDia,
-          data_ts: dataIso,
-          conteudo,
-          raw: m,
-          sincronizado_em: agora,
-        }
-      })
-      // Só andamentos com data dentro da janela e com conteúdo.
+    const rows = resultados
+      .flatMap((r) =>
+        r.movs.map((m) => {
+          const dataIso = extrairData(m)
+          const conteudo = extrairConteudo(m)
+          const dataDia = dataIso ? dataIso.slice(0, 10) : null
+          // id estável: id do ADVBOX quando existir; senão hash determinístico
+          // (as movimentações do ADVBOX não trazem id próprio).
+          const id =
+            str(m.id) ??
+            `${r.lid}-${dataDia ?? 'sd'}-${hash(`${dataIso ?? ''}|${conteudo ?? ''}`)}`
+          return {
+            id,
+            advbox_lawsuit_id: r.lid,
+            numero_processo: r.numero,
+            data: dataDia,
+            data_ts: dataIso,
+            conteudo,
+            raw: m,
+            sincronizado_em: agora,
+          }
+        }),
+      )
       .filter((r) => r.data && r.data >= ini && r.conteudo)
-      // Dedup por id (o mesmo andamento pode vir repetido).
       .filter((r) => {
         if (vistos.has(r.id)) return false
         vistos.add(r.id)
@@ -240,24 +345,26 @@ Deno.serve(async (req: Request) => {
       })
 
     let gravados = 0
-    const chunk = 500
-    for (let i = 0; i < rows.length; i += chunk) {
-      const slice = rows.slice(i, i + chunk)
+    if (rows.length) {
       const { error } = await svc
         .from('advbox_movimentacoes')
-        .upsert(slice, { onConflict: 'id' })
+        .upsert(rows, { onConflict: 'id' })
       if (error) throw new Error(error.message)
-      gravados += slice.length
+      gravados = rows.length
     }
 
-    // Remove do cache o que saiu da janela de `dias`.
-    await svc.from('advbox_movimentacoes').delete().lt('data', ini)
+    const errosNoLote = resultados.filter((r) => r.erro).length
+
+    // Encadeia a próxima fatia, se houver.
+    if (resto.length) dispararProximo(resto, dias)
 
     return jsonResponse({
       ok: true,
-      processos_casados: casaveis.size,
-      movimentacoes: rows.length,
+      primeira,
+      lote: lote.length,
+      restante: resto.length,
       gravados,
+      erros_no_lote: errosNoLote,
     })
   } catch (err) {
     return jsonResponse({ error: (err as Error).message }, 500)

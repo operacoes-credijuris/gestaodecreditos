@@ -73,7 +73,7 @@ function Observacao({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-0.5 text-[11px] font-normal text-slate-400">
+    <div className="mt-0.5 text-[13px] font-normal text-slate-400">
       <div
         ref={ref}
         className={cn('whitespace-normal break-words', !expanded && 'line-clamp-3')}
@@ -354,7 +354,7 @@ export default function TarefasAdvbox() {
                         </span>
                       )}
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-slate-500">
+                    <div className="mt-0.5 truncate text-sm text-slate-500">
                       {formatCNJ(t.processo)}
                       {partes && ` · ${partes}`}
                     </div>
