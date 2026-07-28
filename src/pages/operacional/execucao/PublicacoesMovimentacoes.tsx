@@ -42,6 +42,58 @@ interface ResolveInfo {
   cessionario?: string | null
 }
 
+// Resolve um número de processo contra os cadastros: Crédito (status + partes),
+// Requerimento, ou Apenso (herda do crédito/requerimento pai). Usado pelas
+// Publicações e pelas Movimentações.
+function useResolveProcesso() {
+  const processos = processosCrud.useList()
+  const requerimentos = requerimentosCrud.useList()
+  const apensos = apensosCrud.useList()
+  return useMemo(() => {
+    const dig = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '')
+    const credPorNum = new Map<string, ResolveInfo>()
+    const credPorId = new Map<string, ResolveInfo>()
+    for (const p of processos.data ?? []) {
+      const info: ResolveInfo = {
+        kind: 'credito',
+        status: p.status,
+        cedente: p.cedente,
+        cessionario: p.cessionario,
+      }
+      credPorId.set(p.id, info)
+      const d = dig(p.numero_cnj)
+      if (d.length >= 15) credPorNum.set(d, info)
+    }
+    const reqNums = new Set<string>()
+    for (const r of requerimentos.data ?? []) {
+      const d = dig(r.numero_protocolo)
+      if (d.length >= 15) reqNums.add(d)
+    }
+    const apPorNum = new Map<
+      string,
+      { processo_id: string | null; requerimento_id: string | null }
+    >()
+    for (const a of apensos.data ?? []) {
+      const d = dig(a.numero)
+      if (d.length >= 15)
+        apPorNum.set(d, { processo_id: a.processo_id, requerimento_id: a.requerimento_id })
+    }
+    return (numProc: string | null): ResolveInfo => {
+      const d = dig(numProc)
+      const cred = credPorNum.get(d)
+      if (cred) return cred
+      if (reqNums.has(d)) return { kind: 'requerimento' }
+      const ap = apPorNum.get(d)
+      if (ap) {
+        if (ap.processo_id && credPorId.has(ap.processo_id))
+          return credPorId.get(ap.processo_id)!
+        if (ap.requerimento_id) return { kind: 'requerimento' }
+      }
+      return { kind: null }
+    }
+  }, [processos.data, requerimentos.data, apensos.data])
+}
+
 // Decodifica entidades HTML do texto do DJEN (&Aacute; -> Á etc.).
 function decodeHtml(s: string): string {
   const el = document.createElement('textarea')
@@ -92,7 +144,11 @@ export default function PublicacoesMovimentacoes() {
         </div>
       </Card>
 
-      {aba === 'publicacoes' ? <Publicacoes busca={busca} /> : <Movimentacoes />}
+      {aba === 'publicacoes' ? (
+        <Publicacoes busca={busca} />
+      ) : (
+        <Movimentacoes busca={busca} />
+      )}
     </div>
   )
 }
@@ -102,54 +158,8 @@ function Publicacoes({ busca }: { busca: string }) {
   const qc = useQueryClient()
   const toast = useToast()
 
-  // Resolve cada publicação contra os cadastros: Crédito (status + partes),
-  // Requerimento, ou Apenso (herda do crédito/requerimento pai).
-  const processos = processosCrud.useList()
-  const requerimentos = requerimentosCrud.useList()
-  const apensos = apensosCrud.useList()
-  const resolve = useMemo(() => {
-    const dig = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '')
-    const credPorNum = new Map<string, ResolveInfo>()
-    const credPorId = new Map<string, ResolveInfo>()
-    for (const p of processos.data ?? []) {
-      const info: ResolveInfo = {
-        kind: 'credito',
-        status: p.status,
-        cedente: p.cedente,
-        cessionario: p.cessionario,
-      }
-      credPorId.set(p.id, info)
-      const d = dig(p.numero_cnj)
-      if (d.length >= 15) credPorNum.set(d, info)
-    }
-    const reqNums = new Set<string>()
-    for (const r of requerimentos.data ?? []) {
-      const d = dig(r.numero_protocolo)
-      if (d.length >= 15) reqNums.add(d)
-    }
-    const apPorNum = new Map<
-      string,
-      { processo_id: string | null; requerimento_id: string | null }
-    >()
-    for (const a of apensos.data ?? []) {
-      const d = dig(a.numero)
-      if (d.length >= 15)
-        apPorNum.set(d, { processo_id: a.processo_id, requerimento_id: a.requerimento_id })
-    }
-    return (numProc: string | null): ResolveInfo => {
-      const d = dig(numProc)
-      const cred = credPorNum.get(d)
-      if (cred) return cred
-      if (reqNums.has(d)) return { kind: 'requerimento' }
-      const ap = apPorNum.get(d)
-      if (ap) {
-        if (ap.processo_id && credPorId.has(ap.processo_id))
-          return credPorId.get(ap.processo_id)!
-        if (ap.requerimento_id) return { kind: 'requerimento' }
-      }
-      return { kind: null }
-    }
-  }, [processos.data, requerimentos.data, apensos.data])
+  // Resolve cada publicação contra os cadastros (Crédito/Requerimento/Apenso).
+  const resolve = useResolveProcesso()
 
   // Janela de 30 dias (data de disponibilização >= hoje - 30, horário local).
   const ini30 = useMemo(
@@ -438,14 +448,180 @@ function TextoExpand({ text }: { text: string }) {
   )
 }
 
-// ----------------------- Movimentações (fonte a definir) -----------------------
-function Movimentacoes() {
+// ----------------------- Movimentações (ADVBOX) -----------------------
+interface MovRow {
+  id: string
+  advbox_lawsuit_id: string | null
+  numero_processo: string | null
+  data: string | null
+  data_ts: string | null
+  conteudo: string | null
+  raw: Record<string, unknown>
+  sincronizado_em: string
+}
+
+// Chave de ordenação decrescente (mais recente primeiro). ISO ordena como texto.
+const movOrdem = (m: MovRow) => m.data_ts ?? m.data ?? ''
+
+function Movimentacoes({ busca }: { busca: string }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const resolve = useResolveProcesso()
+
+  // Janela de 20 dias (data do andamento >= hoje - 20, horário local).
+  const ini20 = useMemo(
+    () => new Date(Date.now() - 20 * 86400000).toLocaleDateString('sv-SE'),
+    [],
+  )
+
+  const lista = useQuery({
+    queryKey: ['advbox_movimentacoes', ini20],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('advbox_movimentacoes')
+        .select('*')
+        .gte('data', ini20)
+        .order('data', { ascending: false })
+        .limit(5000)
+      if (error) throw new Error(error.message)
+      return (data ?? []) as MovRow[]
+    },
+  })
+
+  // Sincroniza com o ADVBOX em 2º plano ao abrir a aba.
+  const sync = useMutation({
+    mutationFn: () => invokeFunction('advbox-movimentacoes', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['advbox_movimentacoes'] }),
+    onError: (e) => toast.error(`Sincronização ADVBOX: ${(e as Error).message}`),
+  })
+  const jaSincronizou = useRef(false)
+  useEffect(() => {
+    if (jaSincronizou.current) return
+    jaSincronizou.current = true
+    sync.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Filtra pela busca e agrupa por processo, ordenando andamentos e grupos
+  // da movimentação mais recente para a mais antiga.
+  const grupos = useMemo(() => {
+    const all = lista.data ?? []
+    const q = busca.trim().toLowerCase()
+    const filtradas = !q
+      ? all
+      : all.filter((m) => {
+          const info = resolve(m.numero_processo)
+          return [m.numero_processo, m.conteudo, info.cedente, info.cessionario]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(q))
+        })
+    const mapa = new Map<string, MovRow[]>()
+    for (const m of filtradas) {
+      const chave = m.numero_processo ?? '—'
+      const arr = mapa.get(chave)
+      if (arr) arr.push(m)
+      else mapa.set(chave, [m])
+    }
+    const grupos = [...mapa.entries()].map(([numero, movs]) => {
+      movs.sort((a, b) => movOrdem(b).localeCompare(movOrdem(a)))
+      return { numero, movs, recente: movOrdem(movs[0]) }
+    })
+    grupos.sort((a, b) => b.recente.localeCompare(a.recente))
+    return grupos
+  }, [lista.data, busca, resolve])
+
+  if (lista.isLoading) return <Loading label="Carregando movimentações…" />
+  if (lista.isError) return <ErrorState message={(lista.error as Error)?.message} />
+
+  const totalMovs = grupos.reduce((s, g) => s + g.movs.length, 0)
+
   return (
-    <Card>
-      <EmptyState
-        title="Movimentações"
-        description="A fonte das movimentações será definida em seguida."
-      />
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 text-[13px] text-slate-500">
+        <span>
+          <strong>{totalMovs}</strong> movimentação(ões) em{' '}
+          <strong>{grupos.length}</strong> processo(s) — últimos 20 dias
+        </span>
+        {sync.isPending && (
+          <span className="inline-flex items-center gap-1.5 text-brand-600">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" /> atualizando do ADVBOX…
+          </span>
+        )}
+      </div>
+
+      {grupos.length === 0 ? (
+        <Card>
+          <EmptyState
+            title="Nenhuma movimentação"
+            description={
+              sync.isPending
+                ? 'Compilando os processos e buscando no ADVBOX… isso pode levar até ~1 min.'
+                : 'Não há movimentações no ADVBOX (últimos 20 dias) para os processos cadastrados.'
+            }
+          />
+        </Card>
+      ) : (
+        grupos.map((g) => (
+          <ProcessoMovimentacoes
+            key={g.numero}
+            numero={g.numero}
+            movs={g.movs}
+            info={resolve(g.numero)}
+          />
+        ))
+      )}
+    </div>
+  )
+}
+
+// Card de um processo com seus andamentos (mais recente no topo).
+function ProcessoMovimentacoes({
+  numero,
+  movs,
+  info,
+}: {
+  numero: string
+  movs: MovRow[]
+  info: ResolveInfo
+}) {
+  const st = getLabel(STATUS_PROCESSO, info.status)
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-slate-800">
+            {formatCNJ(numero)}
+          </div>
+          {info.kind === 'credito' && (info.cedente || info.cessionario) && (
+            <div className="text-[11px] text-slate-400">
+              {info.cedente || '—'} v. {info.cessionario || '—'}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Badge tone="gray">{movs.length} and.</Badge>
+          {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
+          {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+        </div>
+      </div>
+
+      <ol className="mt-3 space-y-3">
+        {movs.map((m) => (
+          <li key={m.id} className="flex gap-3">
+            <div className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-brand-400" />
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium text-slate-500">
+                {formatDate(m.data)}
+              </div>
+              {m.conteudo && (
+                <div className="whitespace-pre-line break-words text-[13px] text-slate-700">
+                  {m.conteudo}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
     </Card>
   )
 }
