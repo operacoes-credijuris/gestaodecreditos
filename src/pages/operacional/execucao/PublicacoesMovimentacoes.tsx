@@ -753,7 +753,7 @@ function ProcessoParalisado({
   const b = badgeParalisado(dias)
   const st = getLabel(STATUS_PROCESSO, info.status)
   return (
-    <Card className="p-4">
+    <Card className="p-4 opacity-60 transition-opacity hover:opacity-100">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-slate-800">{formatCNJ(numero)}</div>
