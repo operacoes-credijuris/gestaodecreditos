@@ -581,7 +581,10 @@ function Movimentacoes({ busca }: { busca: string }) {
   // dias. Ordenados do menos parado (última mov. mais recente) ao mais parado;
   // quem nunca movimentou vai por último.
   const paralisados = useMemo(() => {
-    let l = (status.data ?? []).filter((s) => !numerosNovas.has(s.numero_processo))
+    let l = (status.data ?? [])
+      .filter((s) => !numerosNovas.has(s.numero_processo))
+      // Processos encerrados não entram em Paralisados.
+      .filter((s) => resolve(s.numero_processo).status !== 'encerrado')
     if (q) {
       l = l.filter((s) => {
         const info = resolve(s.numero_processo)
