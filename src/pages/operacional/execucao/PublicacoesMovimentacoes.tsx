@@ -463,6 +463,32 @@ interface MovRow {
 // Chave de ordenação decrescente (mais recente primeiro). ISO ordena como texto.
 const movOrdem = (m: MovRow) => m.data_ts ?? m.data ?? ''
 
+// Status por processo (última movimentação) — alimenta o grupo Paralisados.
+interface StatusRow {
+  numero_processo: string
+  advbox_lawsuit_id: string | null
+  ultima_movimentacao: string | null
+  sincronizado_em: string
+}
+
+// Dias corridos desde uma data (YYYY-MM-DD), no mínimo 0.
+function diasDesde(dateStr: string): number {
+  const d = new Date(dateStr.length <= 10 ? `${dateStr}T00:00:00` : dateStr)
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000))
+}
+
+// Badge de tempo sem movimentação: texto (dias → meses) e cor escalonando de
+// amarelo a vermelho (20–45 / 45–90 / 90–180 / +180 dias). null = nunca moveu.
+function badgeParalisado(dias: number | null): { classes: string; texto: string } {
+  if (dias == null) return { classes: 'bg-rose-700 text-white', texto: 'sem movimentação' }
+  const texto = dias < 60 ? `há ${dias} dias` : `há ${Math.floor(dias / 30)} meses`
+  let classes = 'bg-amber-100 text-amber-700'
+  if (dias > 180) classes = 'bg-red-200 text-red-800'
+  else if (dias > 90) classes = 'bg-red-100 text-red-700'
+  else if (dias > 45) classes = 'bg-orange-100 text-orange-700'
+  return { classes, texto }
+}
+
 function Movimentacoes({ busca }: { busca: string }) {
   const qc = useQueryClient()
   const toast = useToast()
@@ -488,10 +514,28 @@ function Movimentacoes({ busca }: { busca: string }) {
     },
   })
 
+  // Status por processo (última movimentação) — grupo Paralisados. Se a tabela
+  // ainda não existir, falha em silêncio (paralisados = []) sem quebrar a aba.
+  const status = useQuery({
+    queryKey: ['advbox_processo_status'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('advbox_processo_status')
+        .select('*')
+        .limit(5000)
+      if (error) throw new Error(error.message)
+      return (data ?? []) as StatusRow[]
+    },
+    retry: false,
+  })
+
   // Sincroniza com o ADVBOX em 2º plano ao abrir a aba.
   const sync = useMutation({
     mutationFn: () => invokeFunction('advbox-movimentacoes', {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['advbox_movimentacoes'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['advbox_movimentacoes'] })
+      qc.invalidateQueries({ queryKey: ['advbox_processo_status'] })
+    },
     onError: (e) => toast.error(`Sincronização ADVBOX: ${(e as Error).message}`),
   })
   const jaSincronizou = useRef(false)
@@ -502,11 +546,12 @@ function Movimentacoes({ busca }: { busca: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Filtra pela busca e agrupa por processo, ordenando andamentos e grupos
-  // da movimentação mais recente para a mais antiga.
-  const grupos = useMemo(() => {
+  const q = busca.trim().toLowerCase()
+
+  // NOVAS: processos com movimentação nos últimos 20 dias, agrupados por
+  // processo; andamentos e grupos do mais recente para o mais antigo.
+  const novas = useMemo(() => {
     const all = lista.data ?? []
-    const q = busca.trim().toLowerCase()
     const filtradas = !q
       ? all
       : all.filter((m) => {
@@ -528,19 +573,42 @@ function Movimentacoes({ busca }: { busca: string }) {
     })
     grupos.sort((a, b) => b.recente.localeCompare(a.recente))
     return grupos
-  }, [lista.data, busca, resolve])
+  }, [lista.data, q, resolve])
+
+  const numerosNovas = useMemo(() => new Set(novas.map((g) => g.numero)), [novas])
+
+  // PARALISADOS: processos cadastrados/casados SEM movimento nos últimos 20
+  // dias. Ordenados do menos parado (última mov. mais recente) ao mais parado;
+  // quem nunca movimentou vai por último.
+  const paralisados = useMemo(() => {
+    let l = (status.data ?? []).filter((s) => !numerosNovas.has(s.numero_processo))
+    if (q) {
+      l = l.filter((s) => {
+        const info = resolve(s.numero_processo)
+        return [s.numero_processo, info.cedente, info.cessionario]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(q))
+      })
+    }
+    return [...l].sort((a, b) => {
+      if (!a.ultima_movimentacao && !b.ultima_movimentacao) return 0
+      if (!a.ultima_movimentacao) return 1
+      if (!b.ultima_movimentacao) return -1
+      return b.ultima_movimentacao.localeCompare(a.ultima_movimentacao)
+    })
+  }, [status.data, numerosNovas, q, resolve])
 
   if (lista.isLoading) return <Loading label="Carregando movimentações…" />
   if (lista.isError) return <ErrorState message={(lista.error as Error)?.message} />
 
-  const totalMovs = grupos.reduce((s, g) => s + g.movs.length, 0)
+  const totalMovs = novas.reduce((s, g) => s + g.movs.length, 0)
+  const vazio = novas.length === 0 && paralisados.length === 0
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 text-[13px] text-slate-500">
         <span>
-          <strong>{totalMovs}</strong> movimentação(ões) em{' '}
-          <strong>{grupos.length}</strong> processo(s) — últimos 20 dias
+          <strong>{totalMovs}</strong> movimentação(ões) nos últimos 20 dias
         </span>
         {sync.isPending && (
           <span className="inline-flex items-center gap-1.5 text-brand-600">
@@ -549,7 +617,7 @@ function Movimentacoes({ busca }: { busca: string }) {
         )}
       </div>
 
-      {grupos.length === 0 ? (
+      {vazio ? (
         <Card>
           <EmptyState
             title="Nenhuma movimentação"
@@ -561,14 +629,36 @@ function Movimentacoes({ busca }: { busca: string }) {
           />
         </Card>
       ) : (
-        grupos.map((g) => (
-          <ProcessoMovimentacoes
-            key={g.numero}
-            numero={g.numero}
-            movs={g.movs}
-            info={resolve(g.numero)}
-          />
-        ))
+        <>
+          <Secao titulo="Novas" qtd={novas.length}>
+            {novas.length ? (
+              novas.map((g) => (
+                <ProcessoMovimentacoes
+                  key={g.numero}
+                  numero={g.numero}
+                  movs={g.movs}
+                  info={resolve(g.numero)}
+                />
+              ))
+            ) : (
+              <p className="text-sm text-slate-400">Nenhuma movimentação nova.</p>
+            )}
+          </Secao>
+          <Secao titulo="Paralisados" qtd={paralisados.length}>
+            {paralisados.length ? (
+              paralisados.map((s) => (
+                <ProcessoParalisado
+                  key={s.numero_processo}
+                  numero={s.numero_processo}
+                  ultima={s.ultima_movimentacao}
+                  info={resolve(s.numero_processo)}
+                />
+              ))
+            ) : (
+              <p className="text-sm text-slate-400">Nenhum processo paralisado.</p>
+            )}
+          </Secao>
+        </>
       )}
     </div>
   )
@@ -640,6 +730,54 @@ function ProcessoMovimentacoes({
           ))}
         </ol>
       )}
+    </Card>
+  )
+}
+
+// Card de um processo paralisado: sem andamentos na janela. Mostra a última
+// movimentação conhecida e um badge de tempo (cor escalona de amarelo a
+// vermelho conforme o tempo parado).
+function ProcessoParalisado({
+  numero,
+  ultima,
+  info,
+}: {
+  numero: string
+  ultima: string | null
+  info: ResolveInfo
+}) {
+  const dias = ultima ? diasDesde(ultima) : null
+  const b = badgeParalisado(dias)
+  const st = getLabel(STATUS_PROCESSO, info.status)
+  return (
+    <Card className="p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-slate-800">{formatCNJ(numero)}</div>
+          {info.kind === 'credito' && (info.cedente || info.cessionario) && (
+            <div className="text-[11px] text-slate-400">
+              {info.cedente || '—'} v. {info.cessionario || '—'}
+            </div>
+          )}
+          <div className="text-[11px] text-slate-400">
+            {ultima
+              ? `Última movimentação: ${formatDate(ultima)}`
+              : 'Sem movimentação registrada no ADVBOX'}
+          </div>
+        </div>
+        <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
+          <span
+            className={cn(
+              'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
+              b.classes,
+            )}
+          >
+            {b.texto}
+          </span>
+          {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
+          {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+        </div>
+      </div>
     </Card>
   )
 }

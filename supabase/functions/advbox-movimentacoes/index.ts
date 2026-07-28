@@ -221,6 +221,19 @@ function extrairData(m: Record<string, unknown>): string | null {
   return null
 }
 
+// Data (YYYY-MM-DD) da última movimentação entre todos os andamentos de um
+// processo (independente da janela). null = nenhum andamento com data válida.
+function ultimaData(movs: Record<string, unknown>[]): string | null {
+  let max: string | null = null
+  for (const m of movs) {
+    const iso = extrairData(m)
+    if (!iso) continue
+    const dia = iso.slice(0, 10)
+    if (!max || dia > max) max = dia
+  }
+  return max
+}
+
 // Extrai o texto de um andamento (defensivo).
 function extrairConteudo(m: Record<string, unknown>): string | null {
   const cands = [m.description, m.text, m.movement, m.content, m.title, m.name, m.description_movement]
@@ -281,6 +294,11 @@ Deno.serve(async (req: Request) => {
       fila = [...casaveis.entries()].map(([lid, numero]) => ({ lid, numero }))
       // Poda o que saiu da janela — só na primeira chamada da cadeia.
       await svc.from('advbox_movimentacoes').delete().lt('data', ini)
+      // Poda o status de processos que não estão mais cadastrados/casados.
+      const numeros = [...casaveis.values()]
+      const lst = numeros.length ? numeros : ['__none__']
+      const inStr = '(' + lst.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
+      await svc.from('advbox_processo_status').delete().not('numero_processo', 'in', inStr)
     } else {
       fila = (body as { fila: { lid: string; numero: string }[] }).fila
     }
@@ -351,6 +369,23 @@ Deno.serve(async (req: Request) => {
         .upsert(rows, { onConflict: 'id' })
       if (error) throw new Error(error.message)
       gravados = rows.length
+    }
+
+    // Status por processo (última movimentação de todo o histórico). Só grava
+    // para processos buscados com sucesso, para não sobrescrever com null.
+    const statusRows = resultados
+      .filter((r) => r.erro == null)
+      .map((r) => ({
+        numero_processo: r.numero,
+        advbox_lawsuit_id: r.lid,
+        ultima_movimentacao: ultimaData(r.movs),
+        sincronizado_em: agora,
+      }))
+    if (statusRows.length) {
+      const { error } = await svc
+        .from('advbox_processo_status')
+        .upsert(statusRows, { onConflict: 'numero_processo' })
+      if (error) throw new Error(error.message)
     }
 
     const errosNoLote = resultados.filter((r) => r.erro).length
