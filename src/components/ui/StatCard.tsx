@@ -28,7 +28,7 @@ export function StatCard({
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-slate-500">{label}</p>
           <p className="mt-1 text-2xl font-bold text-slate-800">{value}</p>
-          {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+          {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
         </div>
         {icon && (
           <div className={cn('rounded-lg p-2.5', tones[tone])}>{icon}</div>

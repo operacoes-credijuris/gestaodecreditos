@@ -240,7 +240,7 @@ function DjenConfig() {
         ) : (
           <div className="space-y-3">
             {itens.length === 0 && (
-              <p className="text-sm text-slate-400">Nenhuma OAB cadastrada.</p>
+              <p className="text-sm text-slate-500">Nenhuma OAB cadastrada.</p>
             )}
             {itens.map((o, i) => (
               <div key={i} className="flex items-end gap-2">

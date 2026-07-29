@@ -1,5 +1,5 @@
-import { NavLink } from 'react-router-dom'
-import { X } from 'lucide-react'
+import { NavLink, useLocation } from 'react-router-dom'
+import { X, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useAuth } from '@/contexts/AuthContext'
 import { NAVIGATION, NAV_CONFIG } from './navigation'
@@ -12,7 +12,7 @@ function LeafLink({
 }: {
   to: string
   label: string
-  icon: typeof NAV_CONFIG.icon
+  icon: LucideIcon
   onNavigate?: () => void
 }) {
   return (
@@ -21,10 +21,12 @@ function LeafLink({
       onClick={onNavigate}
       className={({ isActive }) =>
         cn(
-          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+          // borda esquerda sempre presente (transparente) para o item não
+          // "pular" quando o indicador dourado do ativo aparece
+          'flex items-center gap-3 rounded-lg border-l-2 px-3 py-2 text-sm font-medium transition-colors',
           isActive
-            ? 'bg-brand-700 text-white'
-            : 'text-brand-100 hover:bg-brand-800/60 hover:text-white',
+            ? 'border-gold-400 bg-brand-700 text-white'
+            : 'border-transparent text-brand-100 hover:bg-brand-800/60 hover:text-white',
         )
       }
     >
@@ -42,6 +44,7 @@ export function Sidebar({
   onClose: () => void
 }) {
   const { isAdmin } = useAuth()
+  const { pathname } = useLocation()
   const content = (
     <div className="flex h-full flex-col bg-brand-900 text-white">
       <div className="flex items-center justify-between gap-2 border-b border-brand-800 px-5 py-4">
@@ -64,18 +67,30 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4 scrollbar-thin">
-        {NAVIGATION.map((section, idx) => (
-          <div key={idx} className="space-y-1">
-            {section.title && (
-              <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-brand-400">
-                {section.title}
-              </p>
-            )}
-            {section.items.map((item) => (
-              <LeafLink key={item.to} {...item} onNavigate={onClose} />
-            ))}
-          </div>
-        ))}
+        {NAVIGATION.map((section, idx) => {
+          // A seção que contém a rota ativa fica mais visível — responde
+          // "em que setor do negócio estou?" sem varrer a lista inteira.
+          const sectionActive = section.items.some(
+            (i) => pathname === i.to || pathname.startsWith(`${i.to}/`),
+          )
+          return (
+            <div key={idx} className="space-y-1">
+              {section.title && (
+                <p
+                  className={cn(
+                    'px-3 pb-1 text-xs font-semibold uppercase tracking-wider',
+                    sectionActive ? 'text-gold-400' : 'text-brand-300',
+                  )}
+                >
+                  {section.title}
+                </p>
+              )}
+              {section.items.map((item) => (
+                <LeafLink key={item.to} {...item} onNavigate={onClose} />
+              ))}
+            </div>
+          )
+        })}
       </nav>
 
       {isAdmin && (

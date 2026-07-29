@@ -124,9 +124,9 @@ export function CessoesPanel() {
             <THead>
               <tr>
                 <TH>Código</TH>
-                <TH>Valor de face</TH>
-                <TH>Aquisição</TH>
-                <TH>Cessão</TH>
+                <TH className="text-right tabular-nums">Valor de face</TH>
+                <TH className="text-right tabular-nums">Aquisição</TH>
+                <TH className="text-right tabular-nums">Cessão</TH>
                 <TH>Data</TH>
                 <TH>Status</TH>
                 <TH className="text-right">Ações</TH>
@@ -140,14 +140,14 @@ export function CessoesPanel() {
                     <TD className="font-medium text-slate-800">
                       {c.codigo}
                       {c.descricao && (
-                        <div className="line-clamp-1 text-xs font-normal text-slate-400">
+                        <div className="line-clamp-1 text-xs font-normal text-slate-500">
                           {c.descricao}
                         </div>
                       )}
                     </TD>
-                    <TD>{formatBRL(c.valor_face)}</TD>
-                    <TD>{formatBRL(c.valor_aquisicao)}</TD>
-                    <TD>{formatBRL(c.valor_cessao)}</TD>
+                    <TD className="text-right tabular-nums">{formatBRL(c.valor_face)}</TD>
+                    <TD className="text-right tabular-nums">{formatBRL(c.valor_aquisicao)}</TD>
+                    <TD className="text-right tabular-nums">{formatBRL(c.valor_cessao)}</TD>
                     <TD className="whitespace-nowrap">{formatDate(c.data_cessao)}</TD>
                     <TD>
                       <Badge tone={st.tone}>{st.label}</Badge>

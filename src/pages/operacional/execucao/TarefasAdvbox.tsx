@@ -73,7 +73,7 @@ function Observacao({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-0.5 text-[13px] font-normal text-slate-400">
+    <div className="mt-0.5 text-sm font-normal text-slate-500">
       <div
         ref={ref}
         className={cn('whitespace-normal break-words', !expanded && 'line-clamp-3')}
@@ -319,7 +319,7 @@ export default function TarefasAdvbox() {
                     {bloco ? (
                       <>
                         <div className="text-lg font-bold leading-none">{bloco.dia}</div>
-                        <div className="text-[11px] leading-tight">{bloco.mes}</div>
+                        <div className="text-xs leading-tight">{bloco.mes}</div>
                       </>
                     ) : (
                       <div className="py-1 text-sm">—</div>
@@ -489,7 +489,7 @@ function ProcessoCombobox({
                 }}
                 onMouseEnter={() => setHi(i)}
                 className={cn(
-                  'block w-full px-3 py-1.5 text-left text-[12px]',
+                  'block w-full px-3 py-1.5 text-left text-xs',
                   i === hi
                     ? 'bg-blue-50 text-blue-700'
                     : 'text-slate-700 hover:bg-slate-50',
@@ -502,7 +502,7 @@ function ProcessoCombobox({
         </ul>
       )}
       {open && q && matches.length === 0 && (
-        <div className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-400 shadow-lg">
+        <div className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg">
           Nenhum processo encontrado.
         </div>
       )}

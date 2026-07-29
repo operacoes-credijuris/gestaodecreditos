@@ -42,13 +42,12 @@ import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_INVESTIMENTO } from '@/lib/labels'
 import { formatBRL, formatPercent, formatDate } from '@/lib/format'
 import { InvestidoresPanel } from './InvestidoresPanel'
-import { CessoesPanel } from './CessoesPanel'
 
+// Cessões agora é página própria no menu Comercial (/comercial/cessoes).
 const TABS = [
   { key: 'consolidado', label: 'Consolidado' },
   { key: 'individual', label: 'Por Investidor' },
   { key: 'investidores', label: 'Investidores' },
-  { key: 'cessoes', label: 'Cessões' },
 ]
 
 export default function CarteirasInvestidores() {
@@ -67,7 +66,6 @@ export default function CarteirasInvestidores() {
       {tab === 'consolidado' && <Consolidado />}
       {tab === 'individual' && <PorInvestidor />}
       {tab === 'investidores' && <InvestidoresPanel />}
-      {tab === 'cessoes' && <CessoesPanel />}
     </div>
   )
 }
@@ -351,9 +349,9 @@ function PorInvestidor() {
                 <THead>
                   <tr>
                     <TH>Cessão</TH>
-                    <TH>Valor investido</TH>
-                    <TH>Participação</TH>
-                    <TH>Rentab. esperada</TH>
+                    <TH className="text-right tabular-nums">Valor investido</TH>
+                    <TH className="text-right tabular-nums">Participação</TH>
+                    <TH className="text-right tabular-nums">Rentabilidade esperada</TH>
                     <TH>Data</TH>
                     <TH>Status</TH>
                     <TH className="text-right">Ações</TH>
@@ -367,9 +365,9 @@ function PorInvestidor() {
                         <TD className="font-medium text-slate-800">
                           {codigoCessao(i.cessao_id)}
                         </TD>
-                        <TD>{formatBRL(i.valor_investido)}</TD>
-                        <TD>{formatPercent(i.percentual)}</TD>
-                        <TD>{formatPercent(i.rentabilidade_esperada)}</TD>
+                        <TD className="text-right tabular-nums">{formatBRL(i.valor_investido)}</TD>
+                        <TD className="text-right tabular-nums">{formatPercent(i.percentual)}</TD>
+                        <TD className="text-right tabular-nums">{formatPercent(i.rentabilidade_esperada)}</TD>
                         <TD className="whitespace-nowrap">
                           {formatDate(i.data_investimento)}
                         </TD>

@@ -222,7 +222,7 @@ export default function Processos() {
         ) : lista.length === 0 ? (
           <EmptyState title="Nenhum crédito" description="Cadastre o primeiro crédito." />
         ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
+          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm">
             <THead>
               <tr>
                 <TH>Processo</TH>
@@ -284,18 +284,18 @@ export default function Processos() {
                   <TR>
                     <TD className="whitespace-nowrap font-medium text-slate-800">
                       {formatCNJ(p.numero_cnj)}
-                      <div className="text-[11px] font-normal text-slate-400">
+                      <div className="text-xs font-normal text-slate-500">
                         {p.tribunal || '—'}
                       </div>
                     </TD>
                     <TD className="whitespace-nowrap">
                       {p.comarca || '—'}
-                      <div className="text-[11px] text-slate-400">{p.vara || '—'}</div>
+                      <div className="text-xs text-slate-500">{p.vara || '—'}</div>
                     </TD>
                     <TD className="whitespace-nowrap">
                       {p.cedente || '—'}
                       {p.cedente_advogado && (
-                        <div className="text-[11px] text-slate-400">
+                        <div className="text-xs text-slate-500">
                           adv. {p.cedente_advogado}
                         </div>
                       )}
@@ -305,7 +305,7 @@ export default function Processos() {
                     <TD className="whitespace-nowrap">
                       {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
                       {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
-                        <div className="text-[11px] text-slate-400">
+                        <div className="text-xs text-slate-500">
                           {splitRtdpj(p.numero_rtdpj).map((n, i) => (
                             <div key={i}>{n}</div>
                           ))}
@@ -321,7 +321,7 @@ export default function Processos() {
                     <TD className="whitespace-nowrap">
                       <Badge tone={st.tone}>{st.label}</Badge>
                       {p.data_liquidacao && (
-                        <div className="text-[11px] text-slate-400">
+                        <div className="text-xs text-slate-500">
                           Liq. {formatDate(p.data_liquidacao)}
                         </div>
                       )}

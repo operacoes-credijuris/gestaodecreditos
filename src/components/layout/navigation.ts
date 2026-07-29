@@ -2,8 +2,8 @@ import {
   LayoutDashboard,
   FileSignature,
   Wallet,
+  Handshake,
   ScanSearch,
-  Gavel,
   Newspaper,
   ListChecks,
   FolderKanban,
@@ -41,6 +41,7 @@ export const NAVIGATION: NavSection[] = [
   {
     title: 'Comercial',
     items: [
+      { label: 'Cessões', to: '/comercial/cessoes', icon: Handshake },
       { label: 'Geração de Contratos', to: '/comercial/contratos', icon: FileSignature },
       { label: 'Carteiras de Investidores', to: '/comercial/carteiras', icon: Wallet },
     ],
@@ -75,7 +76,7 @@ export const NAVIGATION: NavSection[] = [
         icon: ClipboardList,
       },
       {
-        label: 'Contatos',
+        label: 'Contatos de Serventias',
         to: '/operacional/execucao/contatos',
         icon: Phone,
       },
@@ -89,4 +90,20 @@ export const NAV_CONFIG: NavLeaf = {
   icon: Settings,
 }
 
-export const ICON_GAVEL = Gavel
+/** Resolve a rota atual para (seção, página) — usado por breadcrumb e title. */
+export function findNavLocation(pathname: string): {
+  section: string | null
+  leaf: NavLeaf
+} | null {
+  for (const section of NAVIGATION) {
+    for (const leaf of section.items) {
+      if (pathname === leaf.to || pathname.startsWith(`${leaf.to}/`)) {
+        return { section: section.title, leaf }
+      }
+    }
+  }
+  if (pathname.startsWith(NAV_CONFIG.to)) {
+    return { section: null, leaf: NAV_CONFIG }
+  }
+  return null
+}

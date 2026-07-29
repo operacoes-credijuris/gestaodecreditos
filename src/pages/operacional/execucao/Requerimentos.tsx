@@ -156,7 +156,7 @@ export default function Requerimentos() {
             description="Cadastre o primeiro requerimento."
           />
         ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
+          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm">
             <THead>
               <tr>
                 <TH>Protocolo</TH>
@@ -189,7 +189,7 @@ export default function Requerimentos() {
                 <TR>
                   <TD className="font-medium text-slate-800">
                     {r.numero_protocolo || '—'}
-                    <div className="text-[11px] font-normal text-slate-400">
+                    <div className="text-xs font-normal text-slate-500">
                       {r.tribunal_entidade || '—'}
                     </div>
                   </TD>

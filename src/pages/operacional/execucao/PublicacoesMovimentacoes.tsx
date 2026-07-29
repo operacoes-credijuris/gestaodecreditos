@@ -197,7 +197,7 @@ function Publicacoes({ busca }: { busca: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Marca/desmarca "tratada" (move entre Novas e Providenciadas).
+  // Marca/desmarca "tratada" (move entre Novas e Tratadas).
   const toggleTratada = useMutation({
     mutationFn: async (row: DjenRow) => {
       const { error } = await supabase
@@ -264,7 +264,7 @@ function Publicacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 text-[13px] text-slate-500">
+      <div className="flex items-center gap-3 text-sm text-slate-500">
         <span>
           <strong>{filtradas.length}</strong> publicação(ões)
         </span>
@@ -292,15 +292,15 @@ function Publicacoes({ busca }: { busca: string }) {
             {novas.length ? (
               novas.map(card)
             ) : (
-              <p className="text-sm text-slate-400">Nenhuma publicação nova.</p>
+              <p className="text-sm text-slate-500">Nenhuma publicação nova.</p>
             )}
           </Secao>
-          <Secao titulo="Providenciadas" qtd={providenciadas.length}>
+          <Secao titulo="Tratadas" qtd={providenciadas.length}>
             {providenciadas.length ? (
               providenciadas.map(card)
             ) : (
-              <p className="text-sm text-slate-400">
-                Nenhuma publicação providenciada.
+              <p className="text-sm text-slate-500">
+                Nenhuma publicação tratada.
               </p>
             )}
           </Secao>
@@ -336,7 +336,7 @@ function Secao({
         <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           {titulo}
         </span>
-        <span className="text-[11px] text-slate-400">({qtd})</span>
+        <span className="text-xs text-slate-500">({qtd})</span>
         <div className="h-px flex-1 bg-slate-200" />
       </div>
       {children}
@@ -364,16 +364,16 @@ function PublicacaoCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-[13px] font-medium text-slate-800">
+            <span className="text-sm font-medium text-slate-800">
               {formatCNJ(p.numero_processo ?? '')}
             </span>
-            <label className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+            <label className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 text-xs text-slate-600">
               <input type="checkbox" checked={p.tratada} onChange={onToggle} />
               Tratada
             </label>
           </div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-[11px] text-slate-400">
+            <div className="text-xs text-slate-500">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
@@ -396,14 +396,14 @@ function PublicacaoCard({
         </div>
       </div>
 
-      <div className="mt-3 text-[11px] text-slate-500">
+      <div className="mt-3 text-xs text-slate-500">
         Data de disponibilização: {formatDate(p.data_disponibilizacao)}
       </div>
 
       {texto && <TextoExpand text={texto} />}
 
       {typeof raw.link === 'string' && raw.link && (
-        <div className="mt-2 text-[11px]">
+        <div className="mt-2 text-xs">
           <a
             href={raw.link}
             target="_blank"
@@ -428,7 +428,7 @@ function TextoExpand({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-2 text-[13px] text-slate-700">
+    <div className="mt-2 text-sm text-slate-700">
       <div
         ref={ref}
         className={cn('whitespace-pre-line break-words', !expanded && 'line-clamp-4')}
@@ -439,7 +439,7 @@ function TextoExpand({ text }: { text: string }) {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-0.5 text-[11px] font-medium text-brand-600 hover:underline"
+          className="mt-0.5 text-xs font-medium text-brand-600 hover:underline"
         >
           {expanded ? 'ler menos' : 'ler mais'}
         </button>
@@ -609,7 +609,7 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 text-[13px] text-slate-500">
+      <div className="flex items-center gap-3 text-sm text-slate-500">
         <span>
           <strong>{totalMovs}</strong> movimentação(ões) nos últimos 20 dias
         </span>
@@ -644,7 +644,7 @@ function Movimentacoes({ busca }: { busca: string }) {
                 />
               ))
             ) : (
-              <p className="text-sm text-slate-400">Nenhuma movimentação nova.</p>
+              <p className="text-sm text-slate-500">Nenhuma movimentação nova.</p>
             )}
           </Secao>
           <Secao titulo="Paralisados" qtd={paralisados.length}>
@@ -658,7 +658,7 @@ function Movimentacoes({ busca }: { busca: string }) {
                 />
               ))
             ) : (
-              <p className="text-sm text-slate-400">Nenhum processo paralisado.</p>
+              <p className="text-sm text-slate-500">Nenhum processo paralisado.</p>
             )}
           </Secao>
         </>
@@ -690,18 +690,20 @@ function ProcessoMovimentacoes({
         className="flex w-full items-start justify-between gap-2 p-4 text-left transition-colors hover:bg-slate-50"
       >
         <div className="min-w-0">
-          <div className="text-[13px] font-medium text-slate-800">
+          <div className="text-sm font-medium text-slate-800">
             {formatCNJ(numero)}
           </div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-[11px] text-slate-400">
+            <div className="text-xs text-slate-500">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
         </div>
         <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Badge tone="gray">{movs.length} and.</Badge>
+            <Badge tone="gray">
+              {movs.length} {movs.length === 1 ? 'andamento' : 'andamentos'}
+            </Badge>
             {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
             {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
           </div>
@@ -720,11 +722,11 @@ function ProcessoMovimentacoes({
             <li key={m.id} className="flex gap-3">
               <div className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-brand-400" />
               <div className="min-w-0">
-                <div className="text-[11px] font-medium text-slate-500">
+                <div className="text-xs font-medium text-slate-500">
                   {formatDate(m.data)}
                 </div>
                 {m.conteudo && (
-                  <div className="whitespace-pre-line break-words text-[13px] text-slate-700">
+                  <div className="whitespace-pre-line break-words text-sm text-slate-700">
                     {m.conteudo}
                   </div>
                 )}
@@ -756,13 +758,13 @@ function ProcessoParalisado({
     <Card className="p-4 opacity-60 transition-opacity hover:opacity-100">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[13px] font-medium text-slate-800">{formatCNJ(numero)}</div>
+          <div className="text-sm font-medium text-slate-800">{formatCNJ(numero)}</div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-[11px] text-slate-400">
+            <div className="text-xs text-slate-500">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
-          <div className="text-[11px] text-slate-400">
+          <div className="text-xs text-slate-500">
             {ultima
               ? `Última movimentação: ${formatDate(ultima)}`
               : 'Sem movimentação registrada no ADVBOX'}
@@ -771,7 +773,7 @@ function ProcessoParalisado({
         <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
           <span
             className={cn(
-              'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
+              'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
               b.classes,
             )}
           >

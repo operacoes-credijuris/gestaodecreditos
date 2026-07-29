@@ -157,7 +157,7 @@ export default function Dashboard() {
 
       {/* Comercial */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
           Comercial
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -190,7 +190,7 @@ export default function Dashboard() {
 
       {/* Operacional */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
           Operacional
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -274,7 +274,7 @@ export default function Dashboard() {
         />
         <CardBody>
           {proximasTarefas.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">
+            <p className="py-6 text-center text-sm text-slate-500">
               Nenhuma tarefa com prazo em aberto.
             </p>
           ) : (
@@ -283,7 +283,7 @@ export default function Dashboard() {
                 <li key={t.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
                     <p className="truncate font-medium text-slate-800">{t.tipo || '—'}</p>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-slate-500">
                       {t.responsaveis?.length
                         ? t.responsaveis.join(', ')
                         : 'Sem responsável'}

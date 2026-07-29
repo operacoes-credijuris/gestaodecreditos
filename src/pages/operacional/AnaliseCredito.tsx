@@ -146,8 +146,8 @@ export default function AnaliseCredito() {
               <tr>
                 <TH>Processo</TH>
                 <TH>Cedente / Devedor</TH>
-                <TH>Valor de face</TH>
-                <TH>Avaliado</TH>
+                <TH className="text-right tabular-nums">Valor de face</TH>
+                <TH className="text-right tabular-nums">Avaliado</TH>
                 <TH>Risco</TH>
                 <TH>Status</TH>
                 <TH className="text-right">Ações</TH>
@@ -161,18 +161,18 @@ export default function AnaliseCredito() {
                   <TR key={a.id}>
                     <TD className="font-medium text-slate-800">
                       {a.numero_processo || '—'}
-                      <div className="text-xs font-normal text-slate-400">
+                      <div className="text-xs font-normal text-slate-500">
                         {a.tribunal || '—'}
                       </div>
                     </TD>
                     <TD>
                       {a.cedente || '—'}
-                      <div className="text-xs text-slate-400">
+                      <div className="text-xs text-slate-500">
                         Devedor: {a.devedor || '—'}
                       </div>
                     </TD>
-                    <TD>{formatBRL(a.valor_face)}</TD>
-                    <TD>{formatBRL(a.valor_avaliado)}</TD>
+                    <TD className="text-right tabular-nums">{formatBRL(a.valor_face)}</TD>
+                    <TD className="text-right tabular-nums">{formatBRL(a.valor_avaliado)}</TD>
                     <TD>{a.risco ? <Badge tone={ri.tone}>{ri.label}</Badge> : '—'}</TD>
                     <TD>
                       <Badge tone={st.tone}>{st.label}</Badge>

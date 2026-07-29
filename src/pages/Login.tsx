@@ -96,7 +96,7 @@ export default function Login() {
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-xs text-slate-400">
+          <p className="mt-6 text-center text-xs text-slate-500">
             Acesso restrito. Novos usuários são cadastrados pelo administrador.
           </p>
         </div>

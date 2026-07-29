@@ -120,7 +120,7 @@ export function useApensosManager(parentField: ParentField) {
           ) : (
             <ChevronDown className="h-4 w-4" />
           )}
-          {count > 0 && <span className="ml-0.5 text-[11px] font-medium">{count}</span>}
+          {count > 0 && <span className="ml-0.5 text-xs font-medium">{count}</span>}
         </button>
         <button
           type="button"
@@ -141,33 +141,33 @@ export function useApensosManager(parentField: ParentField) {
       <tr className="bg-slate-50">
         <td colSpan={colSpan} className="px-4 py-3">
           {apensos.length === 0 ? (
-            <div className="text-sm text-slate-400">
+            <div className="text-sm text-slate-500">
               Nenhum apenso. Use o botão + para adicionar.
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Apensos
               </div>
               {apensos.map((a) => (
                 <div
                   key={a.id}
-                  className="flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-white p-2.5 text-[13px]"
+                  className="flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-white p-2.5 text-sm"
                 >
                   <div className="space-y-0.5">
                     <div className="font-medium text-slate-800">
                       {a.numero || '—'}
                       {a.classe_processual && (
-                        <span className="font-normal text-slate-400">
+                        <span className="font-normal text-slate-500">
                           {' '}
                           · {a.classe_processual}
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-xs text-slate-500">
                       {[a.tribunal, a.comarca, a.vara].filter(Boolean).join(' · ') || '—'}
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-xs text-slate-500">
                       Polo ativo: {a.polo_ativo || '—'} · Polo passivo:{' '}
                       {a.polo_passivo || '—'}
                     </div>

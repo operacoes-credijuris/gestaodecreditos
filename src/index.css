@@ -11,8 +11,11 @@
     height: 100%;
   }
 
-  /* Reduz levemente a escala geral (fontes e espaçamentos em rem do
-     Tailwind) — base 16px → 12px. Reajusta os layouts proporcionalmente. */
+  /* Densidade do layout: os ESPAÇAMENTOS do Tailwind são em rem, então a
+     base 12px compacta o app inteiro (padrão desejado para sistema interno).
+     Os TAMANHOS DE FONTE não dependem disso: estão fixos em px no
+     tailwind.config.js (fontSize). Não "consertar" este valor — mudar aqui
+     altera apenas espaçamentos, nunca a tipografia. */
   html {
     font-size: 12px;
   }

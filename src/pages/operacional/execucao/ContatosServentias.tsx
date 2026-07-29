@@ -87,7 +87,7 @@ function LinhaValor({
 }) {
   return (
     <div className="flex items-baseline gap-1">
-      {label && <span className="text-[11px] text-slate-400">{label}</span>}
+      {label && <span className="text-xs text-slate-500">{label}</span>}
       {whatsapp ? (
         <a
           href={waLink(value)}
@@ -122,10 +122,10 @@ function CelulaContato({
     return serventia ? (
       <LinhaValor value={serventia} whatsapp={whatsapp} />
     ) : (
-      <span className="text-slate-400">—</span>
+      <span className="text-slate-500">—</span>
     )
   }
-  if (!serventia && !gabinete) return <span className="text-slate-400">—</span>
+  if (!serventia && !gabinete) return <span className="text-slate-500">—</span>
   return (
     <div className="space-y-0.5">
       {serventia && <LinhaValor label="Serv." value={serventia} whatsapp={whatsapp} />}
@@ -363,7 +363,7 @@ export default function ContatosServentias() {
             description="Cadastre créditos/requerimentos ou adicione um contato auxiliar."
           />
         ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
+          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm">
             <THead>
               <tr>
                 <TH>Órgão</TH>
@@ -385,9 +385,9 @@ export default function ContatosServentias() {
                       <div className="flex items-center gap-1.5">
                         {formatOrgaoLabel(row.orgao)}
                         {row.tipo === 'auxiliar' ? (
-                          <Badge tone="purple">aux.</Badge>
+                          <Badge tone="purple">auxiliar</Badge>
                         ) : (
-                          <Badge tone="blue">julg.</Badge>
+                          <Badge tone="blue">julgador</Badge>
                         )}
                       </div>
                     </TD>

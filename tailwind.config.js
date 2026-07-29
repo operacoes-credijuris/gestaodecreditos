@@ -27,6 +27,22 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'Segoe UI', 'sans-serif'],
       },
+      // Escala tipográfica com px explícitos, desacoplada do font-size do
+      // <html> (que fica em 12px só para manter a densidade dos espaçamentos
+      // em rem). Hierarquia oficial do app — NÃO usar text-[NNpx] arbitrário:
+      //   xs   = metadados, rótulos auxiliares (mínimo legível)
+      //   sm   = corpo padrão de texto e tabelas
+      //   base = corpo enfatizado / campos
+      //   2xl  = título de página (PageHeader)
+      fontSize: {
+        xs: ['12px', { lineHeight: '16px' }],
+        sm: ['13px', { lineHeight: '19px' }],
+        base: ['14px', { lineHeight: '21px' }],
+        lg: ['16px', { lineHeight: '24px' }],
+        xl: ['18px', { lineHeight: '26px' }],
+        '2xl': ['22px', { lineHeight: '28px' }],
+        '3xl': ['26px', { lineHeight: '32px' }],
+      },
     },
   },
   plugins: [],

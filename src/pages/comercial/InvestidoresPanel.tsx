@@ -139,7 +139,7 @@ export function InvestidoresPanel() {
                     </TD>
                     <TD>
                       {i.email || '—'}
-                      <div className="text-xs text-slate-400">{i.telefone || ''}</div>
+                      <div className="text-xs text-slate-500">{i.telefone || ''}</div>
                     </TD>
                     <TD>
                       <Badge tone={st.tone}>{st.label}</Badge>

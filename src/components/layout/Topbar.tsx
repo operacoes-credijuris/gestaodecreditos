@@ -1,11 +1,15 @@
 import { useState } from 'react'
-import { Menu, LogOut, ChevronDown } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+import { Menu, LogOut, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
+import { findNavLocation } from './navigation'
 
 export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { user, profile, isAdmin, signOut } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
+  const { pathname } = useLocation()
+  const nav = findNavLocation(pathname)
 
   const nome = profile?.nome || user?.email || 'Usuário'
   const iniciais = nome
@@ -25,7 +29,27 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         <Menu className="h-5 w-5" />
       </button>
 
-      <div className="flex-1" />
+      {/* Breadcrumb de localização: "Seção › Página" (derivado da navegação) */}
+      <nav
+        aria-label="Você está em"
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-sm"
+      >
+        {nav && (
+          <>
+            {nav.section && (
+              <>
+                <span className="hidden shrink-0 text-slate-500 sm:inline">
+                  {nav.section}
+                </span>
+                <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-slate-400 sm:inline" />
+              </>
+            )}
+            <span className="truncate font-semibold text-slate-800">
+              {nav.leaf.label}
+            </span>
+          </>
+        )}
+      </nav>
 
       <div className="relative">
         <button
