@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Wallet,
   Users,
@@ -23,22 +24,22 @@ import { useQuery } from '@tanstack/react-query'
 import {
   analisesCrud,
   processosCrud,
-  publicacoesCrud,
   investidoresCrud,
   cessoesCrud,
   investimentosCrud,
   contratosCrud,
 } from '@/lib/queries'
+import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
 import { Loading } from '@/components/ui/Table'
 import { useAuth } from '@/contexts/AuthContext'
 import { STATUS_ANALISE } from '@/lib/labels'
+import { CHART } from '@/lib/chartColors'
 import { formatBRL, formatDate } from '@/lib/format'
-
-const CORES = ['#234e88', '#2f64ab', '#4d83c6', '#7ba7da', '#cda032', '#e3b84d']
 
 // Tarefas vêm do ADVBOX (fonte única), via Edge Function advbox-tarefas.
 interface TarefaAdvbox {
@@ -56,7 +57,6 @@ export default function Dashboard() {
   const { profile, user } = useAuth()
   const analises = analisesCrud.useList()
   const processos = processosCrud.useList()
-  const publicacoes = publicacoesCrud.useList()
   // Tarefas ao vivo do ADVBOX (não bloqueia o dashboard se demorar/falhar).
   const tarefas = useQuery({
     queryKey: ['advbox-tarefas'],
@@ -70,11 +70,33 @@ export default function Dashboard() {
   const investimentos = investimentosCrud.useList()
   const contratos = contratosCrud.useList()
 
+  // Publicações pendentes = as "Novas" da aba Publicações (DJEN, janela de
+  // 30 dias, não tratadas) — mesma régua da tela, sem números órfãos.
+  const ini30 = useMemo(
+    () => new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE'),
+    [],
+  )
+  const pubPendentes = useQuery({
+    queryKey: ['djen_publicacoes_pendentes_count', ini30],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('djen_publicacoes')
+        .select('*', { count: 'exact', head: true })
+        .gte('data_disponibilizacao', ini30)
+        .eq('tratada', false)
+      if (error) throw new Error(error.message)
+      return count ?? 0
+    },
+  })
+
   const loading =
     analises.isLoading ||
     processos.isLoading ||
-    publicacoes.isLoading ||
-    investimentos.isLoading
+    investimentos.isLoading ||
+    investidores.isLoading ||
+    cessoes.isLoading ||
+    contratos.isLoading ||
+    pubPendentes.isLoading
 
   const kpis = useMemo(() => {
     const invsAtivos = (investimentos.data ?? []).filter((i) => i.status === 'ativo')
@@ -89,7 +111,6 @@ export default function Dashboard() {
     const analisesAbertas = (analises.data ?? []).filter(
       (a) => a.status === 'pendente' || a.status === 'em_analise',
     ).length
-    const pubPendentes = (publicacoes.data ?? []).filter((p) => !p.tratada).length
     const tarefasAbertas = tarefasLista.filter((t) => !t.concluida).length
 
     return {
@@ -99,9 +120,9 @@ export default function Dashboard() {
       nContratos,
       processosTotal,
       analisesAbertas,
-      pubPendentes,
       tarefasAbertas,
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     investimentos.data,
     investidores.data,
@@ -109,7 +130,6 @@ export default function Dashboard() {
     contratos.data,
     processos.data,
     analises.data,
-    publicacoes.data,
     tarefas.data,
   ])
 
@@ -135,6 +155,7 @@ export default function Dashboard() {
       .slice(0, 6)
   }, [processos.data])
 
+  const hoje = useMemo(() => new Date().toLocaleDateString('sv-SE'), [])
   const proximasTarefas = useMemo(() => {
     return tarefasLista
       .filter((t) => !t.concluida && t.date_deadline)
@@ -147,13 +168,10 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800">Gestão Estratégica</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Olá, {profile?.nome || user?.email}. Visão consolidada dos setores
-          Comercial e Operacional.
-        </p>
-      </div>
+      <PageHeader
+        title="Gestão Estratégica"
+        description={`Olá, ${profile?.nome || user?.email}. Visão consolidada dos setores Comercial e Operacional — clique em qualquer indicador para abrir a tela correspondente.`}
+      />
 
       {/* Comercial */}
       <div>
@@ -164,26 +182,34 @@ export default function Dashboard() {
           <StatCard
             label="Total investido (ativo)"
             value={formatBRL(kpis.totalInvestido)}
+            hint="Soma dos investimentos com status ativo"
             icon={<Wallet className="h-5 w-5" />}
             tone="brand"
+            to="/comercial/carteiras"
           />
           <StatCard
             label="Investidores ativos"
             value={kpis.investidoresAtivos}
+            hint="Investidores com status ativo"
             icon={<Users className="h-5 w-5" />}
             tone="green"
+            to="/comercial/carteiras"
           />
           <StatCard
             label="Cessões na operação"
             value={kpis.nCessoes}
+            hint="Todas as cessões cadastradas"
             icon={<Layers className="h-5 w-5" />}
             tone="amber"
+            to="/comercial/cessoes"
           />
           <StatCard
             label="Contratos gerados"
             value={kpis.nContratos}
+            hint="Todos os contratos, em qualquer status"
             icon={<FileSignature className="h-5 w-5" />}
             tone="slate"
+            to="/comercial/contratos"
           />
         </div>
       </div>
@@ -197,26 +223,34 @@ export default function Dashboard() {
           <StatCard
             label="Créditos cadastrados"
             value={kpis.processosTotal}
+            hint="Todos os status (ativos, complementares, encerrados)"
             icon={<FolderKanban className="h-5 w-5" />}
             tone="brand"
+            to="/operacional/execucao/processos"
           />
           <StatCard
             label="Análises em aberto"
             value={kpis.analisesAbertas}
+            hint="Status pendente ou em análise"
             icon={<ScanSearch className="h-5 w-5" />}
             tone="amber"
+            to="/operacional/analise"
           />
           <StatCard
             label="Publicações pendentes"
-            value={kpis.pubPendentes}
+            value={pubPendentes.data ?? 0}
+            hint="DJEN: novas (não tratadas) nos últimos 30 dias"
             icon={<Newspaper className="h-5 w-5" />}
             tone="red"
+            to="/operacional/execucao/publicacoes"
           />
           <StatCard
             label="Tarefas em aberto"
             value={kpis.tarefasAbertas}
+            hint="Não concluídas no ADVBOX"
             icon={<ListChecks className="h-5 w-5" />}
             tone="green"
+            to="/operacional/execucao/tarefas"
           />
         </div>
       </div>
@@ -229,13 +263,17 @@ export default function Dashboard() {
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartAnalises}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke={CHART.grid}
+                  />
                   <XAxis dataKey="nome" tick={{ fontSize: 11 }} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
+                  <Tooltip labelStyle={{ color: CHART.ink }} />
                   <Bar dataKey="total" radius={[4, 4, 0, 0]}>
                     {chartAnalises.map((_, i) => (
-                      <Cell key={i} fill={CORES[i % CORES.length]} />
+                      <Cell key={i} fill={CHART.series[i % CHART.series.length]} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -250,13 +288,17 @@ export default function Dashboard() {
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartProcessos}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke={CHART.grid}
+                  />
                   <XAxis dataKey="nome" tick={{ fontSize: 11 }} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
+                  <Tooltip labelStyle={{ color: CHART.ink }} />
                   <Bar dataKey="total" radius={[4, 4, 0, 0]}>
                     {chartProcessos.map((_, i) => (
-                      <Cell key={i} fill={CORES[i % CORES.length]} />
+                      <Cell key={i} fill={CHART.series[i % CHART.series.length]} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -270,7 +312,7 @@ export default function Dashboard() {
       <Card>
         <CardHeader
           title="Próximas tarefas"
-          description="Tarefas em aberto com prazo mais próximo."
+          description="Tarefas em aberto com prazo mais próximo — vencidas em destaque."
         />
         <CardBody>
           {proximasTarefas.length === 0 ? (
@@ -279,30 +321,54 @@ export default function Dashboard() {
             </p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {proximasTarefas.map((t) => (
-                <li key={t.id} className="flex items-center justify-between gap-3 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-slate-800">{t.tipo || '—'}</p>
-                    <p className="text-xs text-slate-500">
-                      {t.responsaveis?.length
-                        ? t.responsaveis.join(', ')
-                        : 'Sem responsável'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {t.urgent ? (
-                      <Badge tone="red">Urgente</Badge>
-                    ) : t.important ? (
-                      <Badge tone="yellow">Importante</Badge>
-                    ) : null}
-                    <span className="whitespace-nowrap text-sm text-slate-500">
-                      {formatDate(t.date_deadline)}
-                    </span>
-                  </div>
-                </li>
-              ))}
+              {proximasTarefas.map((t) => {
+                const vencida = (t.date_deadline || '').slice(0, 10) < hoje
+                return (
+                  <li
+                    key={t.id}
+                    className="flex items-center justify-between gap-3 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-slate-800">
+                        {t.tipo || '—'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {t.responsaveis?.length
+                          ? t.responsaveis.join(', ')
+                          : 'Sem responsável'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {vencida ? (
+                        <Badge tone="red">Vencida</Badge>
+                      ) : t.urgent ? (
+                        <Badge tone="red">Urgente</Badge>
+                      ) : t.important ? (
+                        <Badge tone="yellow">Importante</Badge>
+                      ) : null}
+                      <span
+                        className={
+                          vencida
+                            ? 'whitespace-nowrap text-sm font-semibold text-red-600'
+                            : 'whitespace-nowrap text-sm text-slate-500'
+                        }
+                      >
+                        {formatDate(t.date_deadline)}
+                      </span>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           )}
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <Link
+              to="/operacional/execucao/tarefas"
+              className="text-sm font-medium text-brand-600 hover:underline"
+            >
+              Ver todas as tarefas →
+            </Link>
+          </div>
         </CardBody>
       </Card>
     </div>

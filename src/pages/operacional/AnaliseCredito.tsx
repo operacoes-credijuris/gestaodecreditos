@@ -4,6 +4,7 @@ import { analisesCrud } from '@/lib/queries'
 import type { AnaliseCredito as Analise, StatusAnalise, RiscoAnalise } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
@@ -39,7 +40,7 @@ const VAZIO: Partial<Analise> = {
 
 export default function AnaliseCredito() {
   const { useList, useCreate, useUpdate, useRemove } = analisesCrud
-  const { data, isLoading, isError, error } = useList()
+  const { data, isLoading, isError, error, refetch } = useList()
   const create = useCreate()
   const update = useUpdate()
   const remove = useRemove()
@@ -152,14 +153,19 @@ export default function AnaliseCredito() {
         {isLoading ? (
           <Loading />
         ) : isError ? (
-          <ErrorState message={(error as Error)?.message} />
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : lista.length === 0 ? (
           <EmptyState
             title="Nenhuma análise"
             description="Cadastre a primeira análise de crédito."
+            action={
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+                Nova análise
+              </Button>
+            }
           />
         ) : (
-          <Table>
+          <Table dense>
             <THead>
               <tr>
                 <TH>Processo</TH>
@@ -197,20 +203,17 @@ export default function AnaliseCredito() {
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
-                        <button
+                        <IconButton
+                          label="Editar"
+                          icon={<Pencil className="h-4 w-4" />}
                           onClick={() => setEditing(a)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Editar"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
+                        />
+                        <IconButton
+                          label="Excluir"
+                          variant="danger"
+                          icon={<Trash2 className="h-4 w-4" />}
                           onClick={() => setToDelete(a)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        />
                       </div>
                     </TD>
                   </TR>

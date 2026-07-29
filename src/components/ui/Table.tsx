@@ -1,16 +1,25 @@
 import type { ReactNode } from 'react'
-import { Inbox, Loader2 } from 'lucide-react'
+import { Inbox, Loader2, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { Button } from './Button'
 
 export function Table({
   children,
   className,
+  dense,
 }: {
   children: ReactNode
   className?: string
+  dense?: boolean
 }) {
   return (
-    <div className="overflow-x-auto scrollbar-thin">
+    <div
+      className={cn(
+        'overflow-x-auto scrollbar-thin',
+        // Densidade compacta usada nas listagens (Processos/Requerimentos/Contatos)
+        dense && '[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm',
+      )}
+    >
       <table className={cn('w-full border-collapse text-sm', className)}>
         {children}
       </table>
@@ -111,11 +120,28 @@ export function Loading({ label = 'Carregando…' }: { label?: string }) {
   )
 }
 
-export function ErrorState({ message }: { message?: string }) {
+export function ErrorState({
+  message,
+  onRetry,
+}: {
+  message?: string
+  onRetry?: () => void
+}) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-14 text-center text-red-600">
       <p className="font-medium">Não foi possível carregar os dados.</p>
       {message && <p className="text-sm text-red-500">{message}</p>}
+      {onRetry && (
+        <Button
+          variant="outline"
+          size="sm"
+          icon={<RefreshCw className="h-4 w-4" />}
+          onClick={onRetry}
+          className="mt-2"
+        >
+          Tentar novamente
+        </Button>
+      )}
     </div>
   )
 }

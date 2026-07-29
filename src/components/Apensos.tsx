@@ -4,15 +4,13 @@ import { apensosCrud } from '@/lib/queries'
 import type { Apenso } from '@/lib/types'
 import { cn } from '@/lib/cn'
 import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
 import { Field, Input } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 
 type ParentField = 'processo_id' | 'requerimento_id'
-
-const acaoBtn =
-  'inline-flex items-center rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700'
 
 /**
  * Gerencia os apensos (incidentes, recursos etc.) atrelados a um principal
@@ -124,14 +122,11 @@ export function useApensosManager(parentField: ParentField) {
             className={cn('h-3.5 w-3.5 transition-transform', aberto && 'rotate-180')}
           />
         </button>
-        <button
-          type="button"
+        <IconButton
+          label="Adicionar apenso"
+          icon={<Plus className="h-4 w-4" />}
           onClick={() => openNew(parentId)}
-          className={acaoBtn}
-          title="Adicionar apenso"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
+        />
       </>
     )
   }
@@ -183,22 +178,17 @@ export function useApensosManager(parentField: ParentField) {
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    <button
-                      type="button"
+                    <IconButton
+                      label="Editar apenso"
+                      icon={<Pencil className="h-4 w-4" />}
                       onClick={() => setEditing(a)}
-                      className={acaoBtn}
-                      title="Editar apenso"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
+                    />
+                    <IconButton
+                      label="Excluir apenso"
+                      variant="danger"
+                      icon={<Trash2 className="h-4 w-4" />}
                       onClick={() => setToDelete(a)}
-                      className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                      title="Excluir apenso"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    />
                   </div>
                 </div>
               ))}

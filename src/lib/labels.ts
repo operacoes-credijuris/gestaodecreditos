@@ -1,4 +1,13 @@
 // Rótulos e cores de badges por status. Centraliza a apresentação.
+//
+// Convenção semântica de cores:
+//   verde (green)     = concluído / positivo
+//   azul (blue)       = em andamento
+//   âmbar (yellow)    = atenção
+//   vermelho (red)    = bloqueio / crítico
+//   cinza (gray)      = neutro / encerrado
+//   roxo (purple)     = categoria especial
+// Mapas categóricos (tipos, fontes) usam cores apenas para distinguir.
 
 type BadgeTone =
   | 'gray'
@@ -42,7 +51,7 @@ export const INSTRUMENTO: Record<string, LabelDef> = {
 export const STATUS_REQUERIMENTO: Record<string, LabelDef> = {
   pendente: { label: 'Pendente', tone: 'gray' },
   protocolado: { label: 'Protocolado', tone: 'blue' },
-  em_analise: { label: 'Em análise', tone: 'yellow' },
+  em_analise: { label: 'Em análise', tone: 'blue' },
   deferido: { label: 'Deferido', tone: 'green' },
   indeferido: { label: 'Indeferido', tone: 'red' },
 }
@@ -98,7 +107,7 @@ export const STATUS_CESSAO: Record<string, LabelDef> = {
 
 export const STATUS_INVESTIMENTO: Record<string, LabelDef> = {
   ativo: { label: 'Ativo', tone: 'green' },
-  liquidado: { label: 'Liquidado', tone: 'blue' },
+  liquidado: { label: 'Liquidado', tone: 'gray' },
   cancelado: { label: 'Cancelado', tone: 'red' },
 }
 

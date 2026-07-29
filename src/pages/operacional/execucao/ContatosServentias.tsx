@@ -20,6 +20,7 @@ import {
   ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
+import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/components/ui/Toast'
 
 // Identificador do órgão julgador = "comarca / vara" (igual à aba Créditos).
@@ -356,14 +357,31 @@ export default function ContatosServentias() {
         {isLoading ? (
           <Loading />
         ) : isError ? (
-          <ErrorState message={error?.message} />
+          <ErrorState
+            message={error?.message}
+            onRetry={() => {
+              // Refaz as quatro consultas que alimentam a listagem.
+              contatos.refetch()
+              processos.refetch()
+              requerimentos.refetch()
+              apensos.refetch()
+            }}
+          />
         ) : linhas.length === 0 ? (
           <EmptyState
             title="Nenhum órgão"
             description="Cadastre créditos/requerimentos ou adicione um contato auxiliar."
+            action={
+              <Button
+                icon={<Plus className="h-4 w-4" />}
+                onClick={() => setEditing({ ...AUXILIAR_VAZIO })}
+              >
+                Novo contato
+              </Button>
+            }
           />
         ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm">
+          <Table dense>
             <THead>
               <tr>
                 <TH>Órgão</TH>
@@ -418,21 +436,18 @@ export default function ContatosServentias() {
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
-                        <button
+                        <IconButton
+                          label="Editar contatos"
+                          icon={<Pencil className="h-4 w-4" />}
                           onClick={() => abrirEdicao(row)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Editar contatos"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
+                        />
                         {row.tipo === 'auxiliar' && c && (
-                          <button
+                          <IconButton
+                            label="Excluir contato auxiliar"
+                            variant="danger"
+                            icon={<Trash2 className="h-4 w-4" />}
                             onClick={() => setToDelete(c)}
-                            className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                            title="Excluir contato auxiliar"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          />
                         )}
                       </div>
                     </TD>

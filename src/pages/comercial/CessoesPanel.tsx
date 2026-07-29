@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { IconButton } from '@/components/ui/IconButton'
 import {
   Table,
   THead,
@@ -37,7 +38,7 @@ const VAZIO: Partial<Cessao> = {
 
 export function CessoesPanel() {
   const { useList, useCreate, useUpdate, useRemove } = cessoesCrud
-  const { data, isLoading, isError, error } = useList()
+  const { data, isLoading, isError, error, refetch } = useList()
   const processos = processosCrud.useList()
   const create = useCreate()
   const update = useUpdate()
@@ -116,9 +117,17 @@ export function CessoesPanel() {
         {isLoading ? (
           <Loading />
         ) : isError ? (
-          <ErrorState message={(error as Error)?.message} />
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : lista.length === 0 ? (
-          <EmptyState title="Nenhuma cessão" description="Cadastre o primeiro crédito da operação." />
+          <EmptyState
+            title="Nenhuma cessão"
+            description="Cadastre o primeiro crédito da operação."
+            action={
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+                Nova cessão
+              </Button>
+            }
+          />
         ) : (
           <Table>
             <THead>
@@ -154,20 +163,17 @@ export function CessoesPanel() {
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
-                        <button
+                        <IconButton
+                          label="Editar"
+                          icon={<Pencil className="h-4 w-4" />}
                           onClick={() => setEditing(c)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Editar"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
+                        />
+                        <IconButton
+                          label="Excluir"
+                          variant="danger"
+                          icon={<Trash2 className="h-4 w-4" />}
                           onClick={() => setToDelete(c)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        />
                       </div>
                     </TD>
                   </TR>

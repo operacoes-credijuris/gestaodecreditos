@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { requerimentosCrud } from '@/lib/queries'
 import { useApensosManager } from '@/components/Apensos'
 import type { Requerimento } from '@/lib/types'
@@ -20,6 +20,8 @@ import {
   ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
+import { IconButton } from '@/components/ui/IconButton'
+import { SortableTH } from '@/components/ui/SortableTH'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate } from '@/lib/format'
 
@@ -33,9 +35,12 @@ const VAZIO: Partial<Requerimento> = {
   observacoes: '',
 }
 
+// Total de colunas da tabela — usado no colSpan da linha de apensos.
+const N_COLUNAS = 6
+
 export default function Requerimentos() {
   const { useList, useCreate, useUpdate, useRemove } = requerimentosCrud
-  const { data, isLoading, isError, error } = useList()
+  const { data, isLoading, isError, error, refetch } = useList()
   const create = useCreate()
   const update = useUpdate()
   const remove = useRemove()
@@ -149,35 +154,31 @@ export default function Requerimentos() {
         {isLoading ? (
           <Loading />
         ) : isError ? (
-          <ErrorState message={(error as Error)?.message} />
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : lista.length === 0 ? (
           <EmptyState
             title="Nenhum requerimento"
             description="Cadastre o primeiro requerimento."
+            action={
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+                Novo requerimento
+              </Button>
+            }
           />
         ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm">
+          <Table dense>
             <THead>
               <tr>
                 <TH>Protocolo</TH>
                 <TH>Órgão</TH>
                 <TH>Classe processual</TH>
                 <TH>Matéria</TH>
-                <TH>
-                  <button
-                    type="button"
-                    onClick={toggleSort}
-                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
-                    title="Ordenar por data de protocolo"
-                  >
-                    Data de protocolo
-                    {sortDir === 'asc' ? (
-                      <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
-                    ) : (
-                      <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
-                    )}
-                  </button>
-                </TH>
+                <SortableTH
+                  label="Data de protocolo"
+                  active
+                  dir={sortDir}
+                  onToggle={toggleSort}
+                />
                 <TH className="text-right">
                   <span className="sr-only">Ações</span>
                 </TH>
@@ -202,24 +203,21 @@ export default function Requerimentos() {
                   <TD className="text-right">
                     <div className="flex justify-end gap-1">
                       {apensos.actions(r.id)}
-                      <button
+                      <IconButton
+                        label="Editar"
+                        icon={<Pencil className="h-4 w-4" />}
                         onClick={() => setEditing(r)}
-                        className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                        title="Editar"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
+                      />
+                      <IconButton
+                        label="Excluir"
+                        variant="danger"
+                        icon={<Trash2 className="h-4 w-4" />}
                         onClick={() => setToDelete(r)}
-                        className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                        title="Excluir"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      />
                     </div>
                   </TD>
                 </TR>
-                {apensos.detailRow(r.id, 6)}
+                {apensos.detailRow(r.id, N_COLUNAS)}
                 </Fragment>
               ))}
             </TBody>

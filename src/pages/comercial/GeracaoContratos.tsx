@@ -20,6 +20,7 @@ import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Tabs } from '@/components/ui/Tabs'
+import { IconButton } from '@/components/ui/IconButton'
 import {
   Table,
   THead,
@@ -28,6 +29,7 @@ import {
   TR,
   TD,
   Loading,
+  ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
@@ -77,7 +79,7 @@ const TPL_VAZIO: Partial<ContratoTemplate> = {
 
 function ModelosPanel() {
   const { useList, useCreate, useUpdate, useRemove } = templatesCrud
-  const { data, isLoading } = useList()
+  const { data, isLoading, isError, error, refetch } = useList()
   const create = useCreate()
   const update = useUpdate()
   const remove = useRemove()
@@ -128,10 +130,17 @@ function ModelosPanel() {
       <Card>
         {isLoading ? (
           <Loading />
+        ) : isError ? (
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : (data ?? []).length === 0 ? (
           <EmptyState
             title="Nenhum modelo"
             description="Crie modelos com variáveis no formato {{variavel}}."
+            action={
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...TPL_VAZIO })}>
+                Novo modelo
+              </Button>
+            }
           />
         ) : (
           <Table>
@@ -158,20 +167,17 @@ function ModelosPanel() {
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
-                        <button
+                        <IconButton
+                          label="Editar"
+                          icon={<Pencil className="h-4 w-4" />}
                           onClick={() => setEditing(t)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Editar"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
+                        />
+                        <IconButton
+                          label="Excluir"
+                          variant="danger"
+                          icon={<Trash2 className="h-4 w-4" />}
                           onClick={() => setToDelete(t)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        />
                       </div>
                     </TD>
                   </TR>
@@ -260,7 +266,7 @@ function ContratosPanel() {
   const investidores = investidoresCrud.useList()
   const cessoes = cessoesCrud.useList()
   const { useList, useCreate, useUpdate, useRemove } = contratosCrud
-  const { data, isLoading } = useList()
+  const { data, isLoading, isError, error, refetch } = useList()
   const create = useCreate()
   const update = useUpdate()
   const remove = useRemove()
@@ -390,10 +396,17 @@ function ContratosPanel() {
       <Card>
         {isLoading ? (
           <Loading />
+        ) : isError ? (
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : (data ?? []).length === 0 ? (
           <EmptyState
             title="Nenhum contrato"
             description="Crie modelos e gere contratos a partir deles."
+            action={
+              <Button icon={<FileText className="h-4 w-4" />} onClick={abrirNovo}>
+                Gerar contrato
+              </Button>
+            }
           />
         ) : (
           <Table>
@@ -424,27 +437,22 @@ function ContratosPanel() {
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
-                        <button
+                        <IconButton
+                          label="Visualizar"
+                          icon={<Eye className="h-4 w-4" />}
                           onClick={() => setViewing(c)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Visualizar"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                        <button
+                        />
+                        <IconButton
+                          label="Editar"
+                          icon={<Pencil className="h-4 w-4" />}
                           onClick={() => abrirEdicao(c)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Editar"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
+                        />
+                        <IconButton
+                          label="Excluir"
+                          variant="danger"
+                          icon={<Trash2 className="h-4 w-4" />}
                           onClick={() => setToDelete(c)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        />
                       </div>
                     </TD>
                   </TR>

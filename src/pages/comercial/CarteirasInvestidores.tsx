@@ -28,6 +28,7 @@ import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Tabs } from '@/components/ui/Tabs'
+import { IconButton } from '@/components/ui/IconButton'
 import {
   Table,
   THead,
@@ -36,11 +37,13 @@ import {
   TR,
   TD,
   Loading,
+  ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_INVESTIMENTO } from '@/lib/labels'
 import { formatBRL, formatPercent, formatDate } from '@/lib/format'
+import { CHART } from '@/lib/chartColors'
 import { InvestidoresPanel } from './InvestidoresPanel'
 
 // Cessões agora é página própria no menu Comercial (/comercial/cessoes).
@@ -78,6 +81,7 @@ function Consolidado() {
 
   const loading =
     investidores.isLoading || investimentos.isLoading || cessoes.isLoading
+  const erro = investidores.isError || investimentos.isError || cessoes.isError
 
   const stats = useMemo(() => {
     const invs = investimentos.data ?? []
@@ -122,6 +126,24 @@ function Consolidado() {
   }, [investimentos.data, cessoes.data, investidores.data])
 
   if (loading) return <Loading />
+
+  // Sem este tratamento, erro em qualquer query aparecia como carteira "zerada".
+  if (erro) {
+    return (
+      <Card>
+        <ErrorState
+          message={
+            ((investidores.error ?? investimentos.error ?? cessoes.error) as Error)?.message
+          }
+          onRetry={() => {
+            investidores.refetch()
+            investimentos.refetch()
+            cessoes.refetch()
+          }}
+        />
+      </Card>
+    )
+  }
 
   return (
     <div className="space-y-5">
@@ -168,7 +190,7 @@ function Consolidado() {
             <div className="h-72 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stats.chart} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART.grid} />
                   <XAxis
                     dataKey="nome"
                     tick={{ fontSize: 11 }}
@@ -183,9 +205,9 @@ function Consolidado() {
                   />
                   <Tooltip
                     formatter={(v: number) => formatBRL(v)}
-                    labelStyle={{ color: '#0f223d' }}
+                    labelStyle={{ color: CHART.ink }}
                   />
-                  <Bar dataKey="valor" fill="#234e88" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="valor" fill={CHART.primary} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -339,10 +361,23 @@ function PorInvestidor() {
           <Card>
             {investimentos.isLoading ? (
               <Loading />
+            ) : investimentos.isError ? (
+              <ErrorState
+                message={(investimentos.error as Error)?.message}
+                onRetry={() => investimentos.refetch()}
+              />
             ) : daCarteira.length === 0 ? (
               <EmptyState
                 title="Carteira vazia"
                 description="Registre o primeiro investimento deste investidor."
+                action={
+                  <Button
+                    icon={<Plus className="h-4 w-4" />}
+                    onClick={() => setEditing({ ...INV_VAZIO, investidor_id: selecionado })}
+                  >
+                    Novo investimento
+                  </Button>
+                }
               />
             ) : (
               <Table>
@@ -376,20 +411,17 @@ function PorInvestidor() {
                         </TD>
                         <TD className="text-right">
                           <div className="flex justify-end gap-1">
-                            <button
+                            <IconButton
+                              label="Editar"
+                              icon={<Pencil className="h-4 w-4" />}
                               onClick={() => setEditing(i)}
-                              className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                              title="Editar"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                            <button
+                            />
+                            <IconButton
+                              label="Excluir"
+                              variant="danger"
+                              icon={<Trash2 className="h-4 w-4" />}
                               onClick={() => setToDelete(i)}
-                              className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                              title="Excluir"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            />
                           </div>
                         </TD>
                       </TR>

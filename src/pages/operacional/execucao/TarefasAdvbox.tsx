@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
+import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Modal } from '@/components/ui/Modal'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
@@ -152,7 +153,7 @@ export default function TarefasAdvbox() {
   const toast = useToast()
 
   // Lista ao vivo do ADVBOX — recarrega ao abrir a página e ao focar a aba.
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['advbox-tarefas'],
     queryFn: () =>
       invokeFunction<{ tarefas: TarefaAdvbox[] }>('advbox-tarefas', { action: 'list' }),
@@ -285,6 +286,15 @@ export default function TarefasAdvbox() {
           </div>
         </div>
       </Card>
+
+      {/* A lista recarrega em silêncio ao focar a janela; o indicador avisa. */}
+      <div className="mb-2">
+        <SyncStatus
+          syncing={isFetching}
+          updatedAt={dataUpdatedAt}
+          label="atualizando do ADVBOX…"
+        />
+      </div>
 
       {isLoading ? (
         <Card>

@@ -1,13 +1,5 @@
 import { Fragment, useMemo, useState, type FormEvent } from 'react'
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  Search,
-  ArrowUp,
-  ArrowDown,
-  ArrowUpDown,
-} from 'lucide-react'
+import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
 import { useApensosManager } from '@/components/Apensos'
 import type { Processo, StatusProcesso, Instrumento } from '@/lib/types'
@@ -30,6 +22,8 @@ import {
   ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
+import { IconButton } from '@/components/ui/IconButton'
+import { SortableTH } from '@/components/ui/SortableTH'
 import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
@@ -60,9 +54,13 @@ const VAZIO: Partial<Processo> = {
   data_liquidacao: '',
 }
 
+// Nº de colunas da tabela de créditos — usado no colSpan da linha de apensos.
+// Atualizar ao adicionar/remover colunas para a linha continuar ocupando a largura toda.
+const N_COLUNAS = 10
+
 export default function Processos() {
   const { useList, useCreate, useUpdate, useRemove } = processosCrud
-  const { data, isLoading, isError, error } = useList()
+  const { data, isLoading, isError, error, refetch } = useList()
   const create = useCreate()
   const update = useUpdate()
   const remove = useRemove()
@@ -220,11 +218,22 @@ export default function Processos() {
         {isLoading ? (
           <Loading />
         ) : isError ? (
-          <ErrorState message={(error as Error)?.message} />
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : lista.length === 0 ? (
-          <EmptyState title="Nenhum crédito" description="Cadastre o primeiro crédito." />
+          <EmptyState
+            title="Nenhum crédito"
+            description="Cadastre o primeiro crédito."
+            action={
+              <Button
+                icon={<Plus className="h-4 w-4" />}
+                onClick={() => setEditing({ ...VAZIO })}
+              >
+                Novo crédito
+              </Button>
+            }
+          />
         ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm">
+          <Table dense>
             <THead>
               <tr>
                 <TH>Processo</TH>
@@ -233,44 +242,18 @@ export default function Processos() {
                 <TH>Cessionário</TH>
                 <TH>Entidade devedora</TH>
                 <TH>Instrumento</TH>
-                <TH>
-                  <button
-                    type="button"
-                    onClick={() => toggleSort('data_aquisicao')}
-                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
-                    title="Ordenar por data de aquisição"
-                  >
-                    Aquisição
-                    {sortBy === 'data_aquisicao' ? (
-                      sortDir === 'asc' ? (
-                        <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
-                      ) : (
-                        <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
-                      )
-                    ) : (
-                      <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
-                    )}
-                  </button>
-                </TH>
-                <TH>
-                  <button
-                    type="button"
-                    onClick={() => toggleSort('expectativa_liquidacao')}
-                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-700"
-                    title="Ordenar por expectativa de liquidação"
-                  >
-                    Expectativa
-                    {sortBy === 'expectativa_liquidacao' ? (
-                      sortDir === 'asc' ? (
-                        <ArrowUp className="h-3.5 w-3.5 text-brand-600" />
-                      ) : (
-                        <ArrowDown className="h-3.5 w-3.5 text-brand-600" />
-                      )
-                    ) : (
-                      <ArrowUpDown className="h-3.5 w-3.5 text-slate-300" />
-                    )}
-                  </button>
-                </TH>
+                <SortableTH
+                  label="Aquisição"
+                  active={sortBy === 'data_aquisicao'}
+                  dir={sortDir}
+                  onToggle={() => toggleSort('data_aquisicao')}
+                />
+                <SortableTH
+                  label="Expectativa"
+                  active={sortBy === 'expectativa_liquidacao'}
+                  dir={sortDir}
+                  onToggle={() => toggleSort('expectativa_liquidacao')}
+                />
                 <TH>Status</TH>
                 <TH className="text-right">
                   <span className="sr-only">Ações</span>
@@ -331,24 +314,21 @@ export default function Processos() {
                     <TD className="text-right">
                       <div className="flex justify-end gap-1">
                         {apensos.actions(p.id)}
-                        <button
+                        <IconButton
+                          label="Editar"
+                          icon={<Pencil className="h-4 w-4" />}
                           onClick={() => setEditing(p)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
-                          title="Editar"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
+                        />
+                        <IconButton
+                          label="Excluir"
+                          variant="danger"
+                          icon={<Trash2 className="h-4 w-4" />}
                           onClick={() => setToDelete(p)}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        />
                       </div>
                     </TD>
                   </TR>
-                  {apensos.detailRow(p.id, 10)}
+                  {apensos.detailRow(p.id, N_COLUNAS)}
                   </Fragment>
                 )
               })}

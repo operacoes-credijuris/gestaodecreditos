@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Search, ExternalLink, RefreshCw, ListChecks, ChevronDown } from 'lucide-react'
+import { Search, ExternalLink, ListChecks, ChevronDown } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
@@ -20,6 +20,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
+import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { formatCNJ, formatDate } from '@/lib/format'
@@ -321,11 +322,11 @@ function Publicacoes({ busca }: { busca: string }) {
         <span>
           <strong>{filtradas.length}</strong> publicação(ões)
         </span>
-        {sync.isPending && (
-          <span className="inline-flex items-center gap-1.5 text-brand-600">
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" /> atualizando do DJEN…
-          </span>
-        )}
+        <SyncStatus
+          syncing={sync.isPending}
+          updatedAt={lista.dataUpdatedAt}
+          label="atualizando do DJEN…"
+        />
       </div>
 
       {filtradas.length === 0 ? (
@@ -683,11 +684,11 @@ function Movimentacoes({ busca }: { busca: string }) {
         <span>
           <strong>{totalMovs}</strong> movimentação(ões) nos últimos 20 dias
         </span>
-        {sync.isPending && (
-          <span className="inline-flex items-center gap-1.5 text-brand-600">
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" /> atualizando do ADVBOX…
-          </span>
-        )}
+        <SyncStatus
+          syncing={sync.isPending}
+          updatedAt={lista.dataUpdatedAt}
+          label="atualizando do ADVBOX…"
+        />
       </div>
 
       {vazio ? (
