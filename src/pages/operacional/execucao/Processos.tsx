@@ -297,15 +297,15 @@ export default function Processos() {
                       <span className="whitespace-nowrap">
                         {formatCNJ(p.numero_cnj)}
                       </span>
-                      <div className="max-w-[300px] truncate text-xs font-normal text-slate-500">
+                      <div className="max-w-[230px] truncate text-xs font-normal text-slate-500">
                         {p.cedente || '—'} v. {p.cessionario || '—'}
                       </div>
                     </TD>
                     <TD>
-                      <div className="max-w-[220px] truncate">
+                      <div className="max-w-[170px] truncate">
                         {p.entidade_devedora || '—'}
                       </div>
-                      <div className="max-w-[220px] truncate text-xs text-slate-500">
+                      <div className="max-w-[170px] truncate text-xs text-slate-500">
                         {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
                       </div>
                     </TD>
