@@ -1,7 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import { apensosCrud } from '@/lib/queries'
 import type { Apenso } from '@/lib/types'
+import { cn } from '@/lib/cn'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
@@ -109,18 +110,19 @@ export function useApensosManager(parentField: ParentField) {
     const aberto = !!expanded[parentId]
     return (
       <>
+        {/* Botão rotulado: um novato entende "Apensos (2)" sem tooltip. */}
         <button
           type="button"
           onClick={() => toggle(parentId)}
-          className={acaoBtn}
+          aria-expanded={aberto}
+          className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-brand-700"
           title={aberto ? 'Ocultar apensos' : 'Ver apensos'}
         >
-          {aberto ? (
-            <ChevronUp className="h-4 w-4" />
-          ) : (
-            <ChevronDown className="h-4 w-4" />
-          )}
-          {count > 0 && <span className="ml-0.5 text-xs font-medium">{count}</span>}
+          Apensos
+          <span className="font-semibold tabular-nums">({count})</span>
+          <ChevronDown
+            className={cn('h-3.5 w-3.5 transition-transform', aberto && 'rotate-180')}
+          />
         </button>
         <button
           type="button"
@@ -141,8 +143,16 @@ export function useApensosManager(parentField: ParentField) {
       <tr className="bg-slate-50">
         <td colSpan={colSpan} className="px-4 py-3">
           {apensos.length === 0 ? (
-            <div className="text-sm text-slate-500">
-              Nenhum apenso. Use o botão + para adicionar.
+            <div className="flex items-center gap-3 text-sm text-slate-500">
+              Nenhum apenso vinculado a este registro.
+              <Button
+                size="sm"
+                variant="outline"
+                icon={<Plus className="h-3.5 w-3.5" />}
+                onClick={() => openNew(parentId)}
+              >
+                Adicionar apenso
+              </Button>
             </div>
           ) : (
             <div className="space-y-2">

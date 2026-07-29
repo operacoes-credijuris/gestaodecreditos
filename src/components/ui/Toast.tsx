@@ -9,16 +9,25 @@ import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 type ToastType = 'success' | 'error' | 'info'
+interface ToastAction {
+  label: string
+  onClick: () => void
+}
 interface ToastItem {
   id: number
   type: ToastType
   message: string
+  action?: ToastAction
+}
+interface ToastOptions {
+  /** Botão de ação inline (ex.: "Desfazer"). Estende a duração do toast. */
+  action?: ToastAction
 }
 
 interface ToastContextValue {
-  toast: (message: string, type?: ToastType) => void
-  success: (message: string) => void
-  error: (message: string) => void
+  toast: (message: string, type?: ToastType, opts?: ToastOptions) => void
+  success: (message: string, opts?: ToastOptions) => void
+  error: (message: string, opts?: ToastOptions) => void
 }
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined)
@@ -33,18 +42,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const toast = useCallback(
-    (message: string, type: ToastType = 'info') => {
+    (message: string, type: ToastType = 'info', opts?: ToastOptions) => {
       const id = ++counter
-      setItems((prev) => [...prev, { id, type, message }])
-      setTimeout(() => remove(id), 4500)
+      setItems((prev) => [...prev, { id, type, message, action: opts?.action }])
+      // Com ação, o usuário precisa de tempo para clicar em "Desfazer".
+      setTimeout(() => remove(id), opts?.action ? 7000 : 4500)
     },
     [remove],
   )
 
   const value: ToastContextValue = {
     toast,
-    success: (m) => toast(m, 'success'),
-    error: (m) => toast(m, 'error'),
+    success: (m, opts) => toast(m, 'success', opts),
+    error: (m, opts) => toast(m, 'error', opts),
   }
 
   const icons = {
@@ -69,9 +79,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           >
             {icons[t.type]}
             <p className="flex-1 text-sm text-slate-700">{t.message}</p>
+            {t.action && (
+              <button
+                onClick={() => {
+                  t.action?.onClick()
+                  remove(t.id)
+                }}
+                className="shrink-0 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+              >
+                {t.action.label}
+              </button>
+            )}
             <button
               onClick={() => remove(t.id)}
               className="text-slate-400 hover:text-slate-600"
+              aria-label="Fechar aviso"
             >
               <X className="h-4 w-4" />
             </button>

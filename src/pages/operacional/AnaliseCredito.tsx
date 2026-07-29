@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
+import { Segmented } from '@/components/ui/Segmented'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
@@ -49,9 +50,10 @@ export default function AnaliseCredito() {
   const [editing, setEditing] = useState<Partial<Analise> | null>(null)
   const [toDelete, setToDelete] = useState<Analise | null>(null)
 
-  const lista = useMemo(() => {
+  // Busca textual (sem o filtro de status) — base para a lista e as contagens
+  // exibidas nas pílulas de filtro.
+  const baseBusca = useMemo(() => {
     let l = data ?? []
-    if (filtroStatus !== 'todos') l = l.filter((a) => a.status === filtroStatus)
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((a) =>
@@ -61,7 +63,22 @@ export default function AnaliseCredito() {
       )
     }
     return l
-  }, [data, busca, filtroStatus])
+  }, [data, busca])
+
+  const contagemStatus = useMemo(() => {
+    const c: Record<string, number> = { todos: baseBusca.length }
+    for (const k of Object.keys(STATUS_ANALISE))
+      c[k] = baseBusca.filter((a) => a.status === k).length
+    return c
+  }, [baseBusca])
+
+  const lista = useMemo(
+    () =>
+      filtroStatus === 'todos'
+        ? baseBusca
+        : baseBusca.filter((a) => a.status === filtroStatus),
+    [baseBusca, filtroStatus],
+  )
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -115,18 +132,19 @@ export default function AnaliseCredito() {
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
-          <Select
-            className="sm:w-56"
+          <Segmented
+            ariaLabel="Filtrar análises por status"
+            items={[
+              { key: 'todos', label: 'Todas', count: contagemStatus.todos },
+              ...Object.entries(STATUS_ANALISE).map(([k, v]) => ({
+                key: k,
+                label: v.label,
+                count: contagemStatus[k] ?? 0,
+              })),
+            ]}
             value={filtroStatus}
-            onChange={(e) => setFiltroStatus(e.target.value)}
-          >
-            <option value="todos">Todos os status</option>
-            {Object.entries(STATUS_ANALISE).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
+            onChange={setFiltroStatus}
+          />
         </div>
       </Card>
 

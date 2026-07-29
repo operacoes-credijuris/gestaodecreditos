@@ -15,6 +15,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
+import { Segmented } from '@/components/ui/Segmented'
 import { Modal } from '@/components/ui/Modal'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
@@ -115,7 +116,9 @@ function prazoInfo(
 ): { tone: Urgencia; rel: string } | null {
   if (!deadline) return null
   const n = diffDias(hoje, deadline.slice(0, 10))
-  if (n <= 1) return { tone: 'danger', rel: n <= 0 ? 'hoje' : 'amanhã' }
+  if (n < 0)
+    return { tone: 'danger', rel: `venceu há ${-n} ${-n === 1 ? 'dia' : 'dias'}` }
+  if (n <= 1) return { tone: 'danger', rel: n === 0 ? 'hoje' : 'amanhã' }
   if (n <= 7) return { tone: 'warning', rel: `em ${n} dias` }
   return { tone: 'neutral', rel: '' }
 }
@@ -157,16 +160,13 @@ export default function TarefasAdvbox() {
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   })
-  // Data de hoje (YYYY-MM-DD, horário local) para descartar prazos vencidos.
+  // Data de hoje (YYYY-MM-DD, horário local) para classificar os prazos.
   const hoje = useMemo(() => new Date().toLocaleDateString('sv-SE'), [])
-  // Oculta tarefas com prazo fatal anterior a hoje (vencidas). Sem prazo: mantém.
-  const tarefas = useMemo(
-    () =>
-      (data?.tarefas ?? []).filter(
-        (t) => !t.date_deadline || t.date_deadline.slice(0, 10) >= hoje,
-      ),
-    [data, hoje],
-  )
+  // Nenhuma tarefa é ocultada: vencidas viram um grupo próprio (antes eram
+  // silenciosamente descartadas, e ninguém via o que estava atrasado).
+  const tarefas = useMemo(() => data?.tarefas ?? [], [data])
+  const estaVencida = (t: TarefaAdvbox) =>
+    !!t.date_deadline && t.date_deadline.slice(0, 10) < hoje
 
   // Cedente/cessionário dos Créditos (exibidos sob o nº do processo). Tarefas de
   // apensos vinculados a um crédito herdam o cedente/cessionário do crédito pai.
@@ -199,10 +199,10 @@ export default function TarefasAdvbox() {
   }, [processos.data, apensos.data])
 
   const [busca, setBusca] = useState('')
-  // Padrão ao abrir: tarefas fatais (com prazo).
-  const [filtroPrazo, setFiltroPrazo] = useState<'todos' | 'fatais' | 'sem_prazo'>(
-    'fatais',
-  )
+  // Padrão ao abrir: tarefas fatais (com prazo a vencer).
+  const [filtroPrazo, setFiltroPrazo] = useState<
+    'todos' | 'fatais' | 'vencidas' | 'sem_prazo'
+  >('fatais')
   const [novo, setNovo] = useState(false)
 
   // Busca textual (sem o filtro de prazo) — base para lista e contagens.
@@ -219,27 +219,35 @@ export default function TarefasAdvbox() {
   const contagemPrazo = useMemo(
     () => ({
       todos: baseBusca.length,
-      fatais: baseBusca.filter((t) => !!t.date_deadline).length,
+      fatais: baseBusca.filter((t) => !!t.date_deadline && !estaVencida(t)).length,
+      vencidas: baseBusca.filter(estaVencida).length,
       sem_prazo: baseBusca.filter((t) => !t.date_deadline).length,
     }),
-    [baseBusca],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [baseBusca, hoje],
   )
 
   const lista = useMemo(() => {
     const dataRef = (t: TarefaAdvbox) => t.start_date || t.created_at || ''
-    // Com prazo: prazo fatal mais próximo primeiro (crescente).
-    const comPrazo = baseBusca
-      .filter((t) => !!t.date_deadline)
-      .sort((a, b) => (a.date_deadline || '').localeCompare(b.date_deadline || ''))
-    // Sem prazo: data mais nova primeiro (decrescente).
+    const porPrazoAsc = (a: TarefaAdvbox, b: TarefaAdvbox) =>
+      (a.date_deadline || '').localeCompare(b.date_deadline || '')
+    // Vencidas: atraso mais antigo primeiro (é o mais urgente de resolver).
+    const vencidas = baseBusca.filter(estaVencida).sort(porPrazoAsc)
+    // Fatais (a vencer): prazo mais próximo primeiro.
+    const fatais = baseBusca
+      .filter((t) => !!t.date_deadline && !estaVencida(t))
+      .sort(porPrazoAsc)
+    // Sem prazo: data mais nova primeiro.
     const semPrazo = baseBusca
       .filter((t) => !t.date_deadline)
       .sort((a, b) => dataRef(b).localeCompare(dataRef(a)))
-    if (filtroPrazo === 'fatais') return comPrazo
+    if (filtroPrazo === 'fatais') return fatais
+    if (filtroPrazo === 'vencidas') return vencidas
     if (filtroPrazo === 'sem_prazo') return semPrazo
-    // Todos: primeiro as com prazo, depois as sem prazo (cada uma com seu critério).
-    return [...comPrazo, ...semPrazo]
-  }, [baseBusca, filtroPrazo])
+    // Todas: vencidas no topo (mais críticas), depois fatais, depois sem prazo.
+    return [...vencidas, ...fatais, ...semPrazo]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseBusca, filtroPrazo, hoje])
 
   return (
     <div>
@@ -254,7 +262,18 @@ export default function TarefasAdvbox() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <Segmented
+            ariaLabel="Filtrar tarefas por prazo"
+            items={[
+              { key: 'fatais', label: 'Fatais', count: contagemPrazo.fatais },
+              { key: 'vencidas', label: 'Vencidas', count: contagemPrazo.vencidas },
+              { key: 'sem_prazo', label: 'Sem prazo', count: contagemPrazo.sem_prazo },
+              { key: 'todos', label: 'Todas', count: contagemPrazo.todos },
+            ]}
+            value={filtroPrazo}
+            onChange={(k) => setFiltroPrazo(k as typeof filtroPrazo)}
+          />
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
@@ -264,15 +283,6 @@ export default function TarefasAdvbox() {
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
-          <Select
-            className="sm:w-52"
-            value={filtroPrazo}
-            onChange={(e) => setFiltroPrazo(e.target.value as typeof filtroPrazo)}
-          >
-            <option value="todos">Todos ({contagemPrazo.todos})</option>
-            <option value="fatais">Fatais ({contagemPrazo.fatais})</option>
-            <option value="sem_prazo">Sem prazo ({contagemPrazo.sem_prazo})</option>
-          </Select>
         </div>
       </Card>
 

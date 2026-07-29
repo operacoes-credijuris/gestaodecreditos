@@ -18,7 +18,8 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Input, Select } from '@/components/ui/Field'
+import { Input } from '@/components/ui/Field'
+import { Segmented } from '@/components/ui/Segmented'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { formatCNJ, formatDate } from '@/lib/format'
@@ -115,15 +116,61 @@ export default function PublicacoesMovimentacoes() {
   const [aba, setAba] = useState<'publicacoes' | 'movimentacoes'>('publicacoes')
   const [busca, setBusca] = useState('')
 
+  // Contagens leves (head:true não baixa linhas) para as pílulas — quem chega
+  // na tela vê que existem DUAS visões e quantos registros há em cada uma.
+  const ini30 = useMemo(
+    () => new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE'),
+    [],
+  )
+  const ini20 = useMemo(
+    () => new Date(Date.now() - 20 * 86400000).toLocaleDateString('sv-SE'),
+    [],
+  )
+  const nPub = useQuery({
+    queryKey: ['djen_publicacoes_count', ini30],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('djen_publicacoes')
+        .select('*', { count: 'exact', head: true })
+        .gte('data_disponibilizacao', ini30)
+      if (error) throw new Error(error.message)
+      return count ?? 0
+    },
+  })
+  const nMov = useQuery({
+    queryKey: ['advbox_movimentacoes_count', ini20],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('advbox_movimentacoes')
+        .select('*', { count: 'exact', head: true })
+        .gte('data', ini20)
+      if (error) throw new Error(error.message)
+      return count ?? 0
+    },
+  })
+
   return (
     <div>
       <PageHeader
         title="Publicações e Movimentações"
-        description="Publicações oficiais do DJEN vinculadas aos processos cadastrados e às OABs configuradas. Atualiza automaticamente."
+        description={
+          aba === 'publicacoes'
+            ? 'Publicações oficiais do DJEN vinculadas aos processos cadastrados e às OABs configuradas. Atualiza automaticamente.'
+            : 'Andamentos do ADVBOX dos últimos 20 dias, agrupados por processo. Atualiza automaticamente.'
+        }
       />
 
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <Segmented
+            ariaLabel="Alternar entre publicações e movimentações"
+            items={[
+              { key: 'publicacoes', label: 'Publicações', count: nPub.data },
+              { key: 'movimentacoes', label: 'Movimentações', count: nMov.data },
+            ]}
+            value={aba}
+            onChange={(k) => setAba(k as typeof aba)}
+          />
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
@@ -133,14 +180,6 @@ export default function PublicacoesMovimentacoes() {
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
-          <Select
-            className="sm:w-52"
-            value={aba}
-            onChange={(e) => setAba(e.target.value as typeof aba)}
-          >
-            <option value="publicacoes">Publicações</option>
-            <option value="movimentacoes">Movimentações</option>
-          </Select>
         </div>
       </Card>
 
@@ -220,6 +259,20 @@ function Publicacoes({ busca }: { busca: string }) {
     onError: (e, _row, ctx) => {
       if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev)
       toast.error((e as Error).message)
+    },
+    onSuccess: (_data, row) => {
+      // row é o estado ANTES do toggle; "Desfazer" aplica o toggle inverso.
+      toast.success(
+        row.tratada
+          ? 'Publicação devolvida para Novas.'
+          : 'Publicação marcada como tratada.',
+        {
+          action: {
+            label: 'Desfazer',
+            onClick: () => toggleTratada.mutate({ ...row, tratada: !row.tratada }),
+          },
+        },
+      )
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ['djen_publicacoes'] }),
   })
@@ -479,14 +532,31 @@ function diasDesde(dateStr: string): number {
 
 // Badge de tempo sem movimentação: texto (dias → meses) e cor escalonando de
 // amarelo a vermelho (20–45 / 45–90 / 90–180 / +180 dias). null = nunca moveu.
-function badgeParalisado(dias: number | null): { classes: string; texto: string } {
-  if (dias == null) return { classes: 'bg-rose-700 text-white', texto: 'sem movimentação' }
+function badgeParalisado(dias: number | null): {
+  classes: string
+  texto: string
+  borda: string
+} {
+  if (dias == null)
+    return {
+      classes: 'bg-rose-700 text-white',
+      texto: 'sem movimentação',
+      borda: 'border-l-rose-700',
+    }
   const texto = dias < 60 ? `há ${dias} dias` : `há ${Math.floor(dias / 30)} meses`
   let classes = 'bg-amber-100 text-amber-700'
-  if (dias > 180) classes = 'bg-red-200 text-red-800'
-  else if (dias > 90) classes = 'bg-red-100 text-red-700'
-  else if (dias > 45) classes = 'bg-orange-100 text-orange-700'
-  return { classes, texto }
+  let borda = 'border-l-amber-400'
+  if (dias > 180) {
+    classes = 'bg-red-200 text-red-800'
+    borda = 'border-l-red-500'
+  } else if (dias > 90) {
+    classes = 'bg-red-100 text-red-700'
+    borda = 'border-l-red-400'
+  } else if (dias > 45) {
+    classes = 'bg-orange-100 text-orange-700'
+    borda = 'border-l-orange-400'
+  }
+  return { classes, texto, borda }
 }
 
 function Movimentacoes({ busca }: { busca: string }) {
@@ -707,12 +777,12 @@ function ProcessoMovimentacoes({
             {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
             {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
           </div>
-          <ChevronDown
-            className={cn(
-              'h-4 w-4 text-slate-400 transition-transform',
-              aberto && 'rotate-180',
-            )}
-          />
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-brand-600">
+            {aberto ? 'ocultar' : 'ver andamentos'}
+            <ChevronDown
+              className={cn('h-3.5 w-3.5 transition-transform', aberto && 'rotate-180')}
+            />
+          </span>
         </div>
       </button>
 
@@ -755,7 +825,9 @@ function ProcessoParalisado({
   const b = badgeParalisado(dias)
   const st = getLabel(STATUS_PROCESSO, info.status)
   return (
-    <Card className="p-4 opacity-60 transition-opacity hover:opacity-100">
+    // A gravidade do tempo parado vira borda esquerda colorida (o antigo
+    // opacity-60 fazia o card parecer desabilitado).
+    <Card className={cn('border-l-4 p-4', b.borda)}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-medium text-slate-800">{formatCNJ(numero)}</div>

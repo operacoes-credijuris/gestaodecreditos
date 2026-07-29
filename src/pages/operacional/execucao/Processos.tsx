@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select } from '@/components/ui/Field'
+import { Segmented } from '@/components/ui/Segmented'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
@@ -199,18 +200,19 @@ export default function Processos() {
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
-          <Select
-            className="sm:w-56"
+          <Segmented
+            ariaLabel="Filtrar créditos por status"
+            items={[
+              ...Object.entries(STATUS_PROCESSO).map(([k, v]) => ({
+                key: k,
+                label: v.label,
+                count: contagemStatus[k] ?? 0,
+              })),
+              { key: 'todos', label: 'Todos', count: contagemStatus.todos },
+            ]}
             value={filtroStatus}
-            onChange={(e) => setFiltroStatus(e.target.value)}
-          >
-            <option value="todos">Todos ({contagemStatus.todos})</option>
-            {Object.entries(STATUS_PROCESSO).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label} ({contagemStatus[k] ?? 0})
-              </option>
-            ))}
-          </Select>
+            onChange={setFiltroStatus}
+          />
         </div>
       </Card>
 
