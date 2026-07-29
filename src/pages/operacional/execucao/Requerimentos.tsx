@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type FormEvent } from 'react'
+import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { requerimentosCrud } from '@/lib/queries'
 import { useApensosManager } from '@/components/Apensos'
@@ -38,6 +38,9 @@ const VAZIO: Partial<Requerimento> = {
 // Total de colunas da tabela — usado no colSpan da linha de apensos.
 const N_COLUNAS = 6
 
+// Normaliza string vazia (ou só espaços) para null antes de enviar ao backend.
+const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
+
 export default function Requerimentos() {
   const { useList, useCreate, useUpdate, useRemove } = requerimentosCrud
   const { data, isLoading, isError, error, refetch } = useList()
@@ -52,6 +55,26 @@ export default function Requerimentos() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Partial<Requerimento> | null>(null)
   const [toDelete, setToDelete] = useState<Requerimento | null>(null)
+  // Erros de validação por campo (mensagens inline nos <Field>).
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário ao abrir — base do cálculo de dirty.
+  const snapshotRef = useRef('')
+
+  const dirty = !!editing && JSON.stringify(editing) !== snapshotRef.current
+
+  // Abre o formulário zerando erros e registrando o snapshot inicial.
+  function abrirForm(valores: Partial<Requerimento>) {
+    snapshotRef.current = JSON.stringify(valores)
+    setErros({})
+    setEditing(valores)
+  }
+
+  // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
+  // cobre X/overlay/Escape via prop dirty).
+  function fecharForm() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    setEditing(null)
+  }
 
   function toggleSort() {
     setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -88,19 +111,20 @@ export default function Requerimentos() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
+    // Validação inline por campo — toast fica só para erro de rede/backend.
     if (!editing.numero_protocolo?.trim()) {
-      toast.error('Informe o número de protocolo.')
+      setErros({ numero_protocolo: 'Informe o número de protocolo' })
       return
     }
     try {
       const payload = {
-        numero_protocolo: editing.numero_protocolo?.trim() || null,
-        orgao: editing.orgao?.trim() || null,
-        tribunal_entidade: editing.tribunal_entidade?.trim() || null,
-        materia: editing.materia?.trim() || null,
-        classe_processual: editing.classe_processual?.trim() || null,
-        data_protocolo: editing.data_protocolo || null,
-        observacoes: editing.observacoes?.trim() || null,
+        numero_protocolo: vazioNull(editing.numero_protocolo),
+        orgao: vazioNull(editing.orgao),
+        tribunal_entidade: vazioNull(editing.tribunal_entidade),
+        materia: vazioNull(editing.materia),
+        classe_processual: vazioNull(editing.classe_processual),
+        data_protocolo: vazioNull(editing.data_protocolo),
+        observacoes: vazioNull(editing.observacoes),
       }
       if (editing.id) {
         await update.mutateAsync({ id: editing.id, changes: payload })
@@ -132,7 +156,7 @@ export default function Requerimentos() {
         title="Requerimentos"
         description="Cadastro dos requerimentos administrativos."
         actions={
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
             Novo requerimento
           </Button>
         }
@@ -160,7 +184,7 @@ export default function Requerimentos() {
             title="Nenhum requerimento"
             description="Cadastre o primeiro requerimento."
             action={
-              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
                 Novo requerimento
               </Button>
             }
@@ -206,7 +230,7 @@ export default function Requerimentos() {
                       <IconButton
                         label="Editar"
                         icon={<Pencil className="h-4 w-4" />}
-                        onClick={() => setEditing(r)}
+                        onClick={() => abrirForm(r)}
                       />
                       <IconButton
                         label="Excluir"
@@ -230,9 +254,10 @@ export default function Requerimentos() {
         onClose={() => setEditing(null)}
         title={editing?.id ? 'Editar requerimento' : 'Novo requerimento'}
         size="lg"
+        dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button variant="outline" onClick={fecharForm}>
               Cancelar
             </Button>
             <Button
@@ -248,12 +273,14 @@ export default function Requerimentos() {
         {editing && (
           <form id="form-requerimento" onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Número de protocolo" required>
+              <Field label="Número de protocolo" required error={erros.numero_protocolo}>
                 <Input
                   value={editing.numero_protocolo ?? ''}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setEditing({ ...editing, numero_protocolo: e.target.value })
-                  }
+                    // Digitar no campo limpa o erro inline.
+                    if (erros.numero_protocolo) setErros({})
+                  }}
                 />
               </Field>
               <Field label="Órgão">

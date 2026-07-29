@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { analisesCrud } from '@/lib/queries'
 import type { AnaliseCredito as Analise, StatusAnalise, RiscoAnalise } from '@/lib/types'
@@ -50,6 +50,27 @@ export default function AnaliseCredito() {
   const [filtroStatus, setFiltroStatus] = useState<string>('todos')
   const [editing, setEditing] = useState<Partial<Analise> | null>(null)
   const [toDelete, setToDelete] = useState<Analise | null>(null)
+  // Erros de validação por campo, exibidos inline nos <Field> (toast fica só
+  // para erros de rede/backend).
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário tirado ao abrir — base do cálculo de `dirty`.
+  const snapshotRef = useRef<string>('')
+
+  // Abre o formulário zerando erros e registrando o snapshot para o `dirty`.
+  function abrirForm(analise: Partial<Analise>) {
+    snapshotRef.current = JSON.stringify(analise)
+    setErros({})
+    setEditing(analise)
+  }
+
+  const dirty = editing !== null && JSON.stringify(editing) !== snapshotRef.current
+
+  // Fechamento pelo botão "Cancelar": não passa pela confirmação interna do
+  // Modal (que só cobre X/overlay/Escape), então trata o `dirty` aqui.
+  function cancelarForm() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    setEditing(null)
+  }
 
   // Busca textual (sem o filtro de status) — base para a lista e as contagens
   // exibidas nas pílulas de filtro.
@@ -84,6 +105,11 @@ export default function AnaliseCredito() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
+    // Validação inline: número do processo é obrigatório.
+    if (!editing.numero_processo?.trim()) {
+      setErros({ numero_processo: 'Informe o número do processo' })
+      return
+    }
     try {
       const { id, created_at, updated_at, ...payload } = editing as Analise
       if (id) {
@@ -116,7 +142,7 @@ export default function AnaliseCredito() {
         title="Análise de Crédito"
         description="Avaliação e due diligence dos créditos antes da aquisição/cessão."
         actions={
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
             Nova análise
           </Button>
         }
@@ -159,7 +185,7 @@ export default function AnaliseCredito() {
             title="Nenhuma análise"
             description="Cadastre a primeira análise de crédito."
             action={
-              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
                 Nova análise
               </Button>
             }
@@ -206,7 +232,7 @@ export default function AnaliseCredito() {
                         <IconButton
                           label="Editar"
                           icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => setEditing(a)}
+                          onClick={() => abrirForm(a)}
                         />
                         <IconButton
                           label="Excluir"
@@ -229,9 +255,10 @@ export default function AnaliseCredito() {
         onClose={() => setEditing(null)}
         title={editing?.id ? 'Editar análise' : 'Nova análise de crédito'}
         size="lg"
+        dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button variant="outline" onClick={cancelarForm}>
               Cancelar
             </Button>
             <Button
@@ -247,12 +274,14 @@ export default function AnaliseCredito() {
         {editing && (
           <form id="form-analise" onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Número do processo">
+              <Field label="Número do processo" required error={erros.numero_processo}>
                 <Input
                   value={editing.numero_processo ?? ''}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setEditing({ ...editing, numero_processo: e.target.value })
-                  }
+                    // Limpa o erro do campo assim que o usuário digita.
+                    if (erros.numero_processo) setErros({})
+                  }}
                 />
               </Field>
               <Field label="Tribunal">

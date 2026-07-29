@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -36,9 +37,34 @@ let counter = 0
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([])
+  // Timeout de auto-dismiss de cada toast, indexado pelo id.
+  const timersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>())
 
   const remove = useCallback((id: number) => {
+    const timer = timersRef.current.get(id)
+    if (timer) clearTimeout(timer)
+    timersRef.current.delete(id)
     setItems((prev) => prev.filter((t) => t.id !== id))
+  }, [])
+
+  // (Re)agenda o auto-dismiss de um toast, cancelando o timeout anterior.
+  const scheduleRemove = useCallback(
+    (id: number, ms: number) => {
+      const timer = timersRef.current.get(id)
+      if (timer) clearTimeout(timer)
+      timersRef.current.set(
+        id,
+        setTimeout(() => remove(id), ms),
+      )
+    },
+    [remove],
+  )
+
+  // Pausa o auto-dismiss enquanto o mouse está sobre o toast.
+  const pauseRemove = useCallback((id: number) => {
+    const timer = timersRef.current.get(id)
+    if (timer) clearTimeout(timer)
+    timersRef.current.delete(id)
   }, [])
 
   const toast = useCallback(
@@ -46,9 +72,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const id = ++counter
       setItems((prev) => [...prev, { id, type, message, action: opts?.action }])
       // Com ação, o usuário precisa de tempo para clicar em "Desfazer".
-      setTimeout(() => remove(id), opts?.action ? 7000 : 4500)
+      scheduleRemove(id, opts?.action ? 7000 : 4500)
     },
-    [remove],
+    [scheduleRemove],
   )
 
   const value: ToastContextValue = {
@@ -66,10 +92,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-2">
+      <div
+        aria-live="polite"
+        className="fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-2"
+      >
         {items.map((t) => (
           <div
             key={t.id}
+            role="status"
+            // Pausa o auto-dismiss no hover; ao sair, reinicia com ~2s.
+            onMouseEnter={() => pauseRemove(t.id)}
+            onMouseLeave={() => scheduleRemove(t.id, 2000)}
             className={cn(
               'flex items-start gap-3 rounded-lg border bg-white p-3 shadow-lg',
               t.type === 'success' && 'border-emerald-200',

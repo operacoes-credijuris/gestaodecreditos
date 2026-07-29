@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Plus,
   Pencil,
@@ -242,6 +242,30 @@ function PorInvestidor() {
   const [selecionado, setSelecionado] = useState('')
   const [editing, setEditing] = useState<Partial<Investimento> | null>(null)
   const [toDelete, setToDelete] = useState<Investimento | null>(null)
+  // Erros de validação por campo, exibidos inline nos <Field>.
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário ao abrir, para detectar alterações não salvas.
+  const snapRef = useRef('')
+
+  const dirty = !!editing && JSON.stringify(editing) !== snapRef.current
+
+  // Abre o formulário guardando o snapshot inicial e limpando erros antigos.
+  function abrirForm(valores: Partial<Investimento>) {
+    snapRef.current = JSON.stringify(valores)
+    setErros({})
+    setEditing(valores)
+  }
+
+  // Limpa o erro de um campo assim que o usuário o altera.
+  function limparErro(campo: string) {
+    setErros((prev) => (prev[campo] ? { ...prev, [campo]: '' } : prev))
+  }
+
+  // Botões próprios do footer não passam pela confirmação do Modal.
+  function cancelar() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    setEditing(null)
+  }
 
   const codigoCessao = (id: string | null) =>
     id ? (cessoes.data ?? []).find((c) => c.id === id)?.codigo ?? '—' : '—'
@@ -268,7 +292,7 @@ function PorInvestidor() {
     e.preventDefault()
     if (!editing) return
     if (!editing.investidor_id) {
-      toast.error('Selecione o investidor.')
+      setErros({ investidor_id: 'Selecione o investidor' })
       return
     }
     try {
@@ -320,7 +344,7 @@ function PorInvestidor() {
             <Button
               icon={<Plus className="h-4 w-4" />}
               onClick={() =>
-                setEditing({ ...INV_VAZIO, investidor_id: selecionado })
+                abrirForm({ ...INV_VAZIO, investidor_id: selecionado })
               }
             >
               Novo investimento
@@ -373,7 +397,7 @@ function PorInvestidor() {
                 action={
                   <Button
                     icon={<Plus className="h-4 w-4" />}
-                    onClick={() => setEditing({ ...INV_VAZIO, investidor_id: selecionado })}
+                    onClick={() => abrirForm({ ...INV_VAZIO, investidor_id: selecionado })}
                   >
                     Novo investimento
                   </Button>
@@ -414,7 +438,7 @@ function PorInvestidor() {
                             <IconButton
                               label="Editar"
                               icon={<Pencil className="h-4 w-4" />}
-                              onClick={() => setEditing(i)}
+                              onClick={() => abrirForm(i)}
                             />
                             <IconButton
                               label="Excluir"
@@ -438,9 +462,10 @@ function PorInvestidor() {
         open={!!editing}
         onClose={() => setEditing(null)}
         title={editing?.id ? 'Editar investimento' : 'Novo investimento'}
+        dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button variant="outline" onClick={cancelar}>
               Cancelar
             </Button>
             <Button
@@ -455,12 +480,13 @@ function PorInvestidor() {
       >
         {editing && (
           <form id="form-investimento" onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Investidor" required>
+            <Field label="Investidor" required error={erros.investidor_id}>
               <Select
                 value={editing.investidor_id ?? ''}
-                onChange={(e) =>
+                onChange={(e) => {
                   setEditing({ ...editing, investidor_id: e.target.value })
-                }
+                  limparErro('investidor_id')
+                }}
               >
                 <option value="">Selecione…</option>
                 {(investidores.data ?? []).map((i) => (

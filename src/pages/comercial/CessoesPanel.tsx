@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { cessoesCrud, processosCrud } from '@/lib/queries'
 import type { Cessao, StatusCessao } from '@/lib/types'
@@ -48,6 +48,30 @@ export function CessoesPanel() {
   const [busca, setBusca] = useState('')
   const [editing, setEditing] = useState<Partial<Cessao> | null>(null)
   const [toDelete, setToDelete] = useState<Cessao | null>(null)
+  // Erros de validação por campo, exibidos inline nos <Field>.
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário ao abrir, para detectar alterações não salvas.
+  const snapRef = useRef('')
+
+  const dirty = !!editing && JSON.stringify(editing) !== snapRef.current
+
+  // Abre o formulário guardando o snapshot inicial e limpando erros antigos.
+  function abrirForm(valores: Partial<Cessao>) {
+    snapRef.current = JSON.stringify(valores)
+    setErros({})
+    setEditing(valores)
+  }
+
+  // Limpa o erro de um campo assim que o usuário o altera.
+  function limparErro(campo: string) {
+    setErros((prev) => (prev[campo] ? { ...prev, [campo]: '' } : prev))
+  }
+
+  // Botões próprios do footer não passam pela confirmação do Modal.
+  function cancelar() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    setEditing(null)
+  }
 
   const lista = useMemo(() => {
     let l = data ?? []
@@ -66,7 +90,7 @@ export function CessoesPanel() {
     e.preventDefault()
     if (!editing) return
     if (!editing.codigo?.trim()) {
-      toast.error('Informe o código da cessão.')
+      setErros({ codigo: 'Obrigatório' })
       return
     }
     try {
@@ -108,7 +132,7 @@ export function CessoesPanel() {
             onChange={(e) => setBusca(e.target.value)}
           />
         </div>
-        <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+        <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
           Nova cessão
         </Button>
       </div>
@@ -123,7 +147,7 @@ export function CessoesPanel() {
             title="Nenhuma cessão"
             description="Cadastre o primeiro crédito da operação."
             action={
-              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
                 Nova cessão
               </Button>
             }
@@ -166,7 +190,7 @@ export function CessoesPanel() {
                         <IconButton
                           label="Editar"
                           icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => setEditing(c)}
+                          onClick={() => abrirForm(c)}
                         />
                         <IconButton
                           label="Excluir"
@@ -189,9 +213,10 @@ export function CessoesPanel() {
         onClose={() => setEditing(null)}
         title={editing?.id ? 'Editar cessão' : 'Nova cessão'}
         size="lg"
+        dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button variant="outline" onClick={cancelar}>
               Cancelar
             </Button>
             <Button
@@ -207,10 +232,13 @@ export function CessoesPanel() {
         {editing && (
           <form id="form-cessao" onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Código" required>
+              <Field label="Código" required error={erros.codigo}>
                 <Input
                   value={editing.codigo ?? ''}
-                  onChange={(e) => setEditing({ ...editing, codigo: e.target.value })}
+                  onChange={(e) => {
+                    setEditing({ ...editing, codigo: e.target.value })
+                    limparErro('codigo')
+                  }}
                   placeholder="Ex.: CES-2026-001"
                 />
               </Field>

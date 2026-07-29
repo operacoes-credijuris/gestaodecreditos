@@ -1,8 +1,23 @@
 import type { ReactNode } from 'react'
-import { useEffect } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
+// Seletor dos elementos focáveis dentro do painel (usado pelo focus trap).
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Modal acessível com focus trap.
+ *
+ * - Fecha com Escape, clique no overlay ou no botão X.
+ * - Ao abrir, foca o primeiro elemento focável do painel; Tab/Shift+Tab
+ *   circulam apenas entre os focáveis do modal; ao fechar, o foco volta ao
+ *   elemento que estava focado antes da abertura.
+ * - `dirty`: quando true, QUALQUER tentativa de fechar (X, overlay, Escape)
+ *   pede confirmação com `window.confirm('Descartar alterações não salvas?')`
+ *   antes de chamar `onClose`. Útil em formulários com alterações pendentes.
+ */
 export function Modal({
   open,
   onClose,
@@ -11,6 +26,7 @@ export function Modal({
   children,
   footer,
   size = 'md',
+  dirty = false,
 }: {
   open: boolean
   onClose: () => void
@@ -19,15 +35,64 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl'
+  /** Quando true, fechar exige confirmação antes de descartar alterações. */
+  dirty?: boolean
 }) {
+  const titleId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  // Elemento focado antes do modal abrir — recebe o foco de volta ao fechar.
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+
+  // Centraliza a checagem de "dirty" para todas as formas de fechar.
+  function requestClose() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    onClose()
+  }
+
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab') return
+      // Focus trap: Tab/Shift+Tab circulam entre os focáveis do painel.
+      const panel = panelRef.current
+      if (!panel) return
+      const focusables = Array.from(
+        panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      )
+      if (focusables.length === 0) return
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      const active = document.activeElement
+      if (e.shiftKey) {
+        if (active === first || !panel.contains(active)) {
+          e.preventDefault()
+          last.focus()
+        }
+      } else if (active === last || !panel.contains(active)) {
+        e.preventDefault()
+        first.focus()
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, dirty])
+
+  // Foco inicial ao abrir e devolução do foco ao elemento anterior ao fechar.
+  useEffect(() => {
+    if (!open) return
+    previousFocusRef.current = document.activeElement as HTMLElement | null
+    const panel = panelRef.current
+    const first = panel?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
+    ;(first ?? panel)?.focus()
+    return () => {
+      previousFocusRef.current?.focus()
+    }
+  }, [open])
 
   if (!open) return null
 
@@ -39,24 +104,35 @@ export function Modal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6">
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6"
+      onClick={(e) => {
+        // Fecha só quando o clique é no próprio overlay, não dentro do painel.
+        if (e.target === e.currentTarget) requestClose()
+      }}
+    >
       <div
+        ref={panelRef}
+        tabIndex={-1}
         className={cn(
-          'mt-6 w-full rounded-xl bg-white shadow-xl',
+          'mt-6 w-full rounded-xl bg-white shadow-xl outline-none',
           sizes[size],
         )}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
+            <h2 id={titleId} className="text-lg font-semibold text-slate-800">
+              {title}
+            </h2>
             {description && (
               <p className="mt-0.5 text-sm text-slate-500">{description}</p>
             )}
           </div>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
             aria-label="Fechar"
           >

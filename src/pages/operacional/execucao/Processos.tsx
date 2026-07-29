@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type FormEvent } from 'react'
+import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
 import { useApensosManager } from '@/components/Apensos'
@@ -36,6 +36,9 @@ function splitRtdpj(v: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean)
 }
+
+// Converte string vazia/só espaços em null (o Postgres rejeita "" em coluna date).
+const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
 
 const VAZIO: Partial<Processo> = {
   numero_cnj: '',
@@ -77,6 +80,18 @@ export default function Processos() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Partial<Processo> | null>(null)
   const [toDelete, setToDelete] = useState<Processo | null>(null)
+  // Erros de validação por campo, exibidos inline nos <Field>.
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário ao abrir — base do cálculo de "dirty".
+  const snapshotRef = useRef('')
+  const dirty = !!editing && JSON.stringify(editing) !== snapshotRef.current
+
+  // Abre o formulário limpando erros e registrando o snapshot do estado inicial.
+  function abrirForm(p: Partial<Processo>) {
+    setErros({})
+    snapshotRef.current = JSON.stringify(p)
+    setEditing(p)
+  }
 
   function toggleSort(col: 'data_aquisicao' | 'expectativa_liquidacao') {
     if (sortBy === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -136,7 +151,8 @@ export default function Processos() {
     e.preventDefault()
     if (!editing) return
     if (!editing.numero_cnj?.trim()) {
-      toast.error('Informe o número do processo.')
+      // Validação inline: erro aparece junto ao campo, sem toast.
+      setErros({ numero_cnj: 'Informe o número do processo' })
       return
     }
     try {
@@ -145,12 +161,14 @@ export default function Processos() {
       // Data de liquidação só faz sentido para complementar/encerrado.
       if (payload.status === 'ativo') payload.data_liquidacao = null
       // Nº RTDPJ só se aplica a registro público e é opcional (vazio = nulo).
-      if (payload.instrumento !== 'registro_publico' || !payload.numero_rtdpj?.trim())
-        payload.numero_rtdpj = null
-      // Datas em branco viram null (o Postgres rejeita "" em coluna date).
-      if (!payload.data_aquisicao) payload.data_aquisicao = null
-      if (!payload.expectativa_liquidacao) payload.expectativa_liquidacao = null
-      if (!payload.data_liquidacao) payload.data_liquidacao = null
+      payload.numero_rtdpj =
+        payload.instrumento === 'registro_publico'
+          ? vazioNull(payload.numero_rtdpj)
+          : null
+      // Datas em branco viram null.
+      payload.data_aquisicao = vazioNull(payload.data_aquisicao)
+      payload.expectativa_liquidacao = vazioNull(payload.expectativa_liquidacao)
+      payload.data_liquidacao = vazioNull(payload.data_liquidacao)
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Crédito atualizado.')
@@ -181,7 +199,7 @@ export default function Processos() {
         title="Créditos"
         description="Registro dos créditos adquiridos via cessão/aquisição."
         actions={
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...VAZIO })}>
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
             Novo crédito
           </Button>
         }
@@ -226,7 +244,7 @@ export default function Processos() {
             action={
               <Button
                 icon={<Plus className="h-4 w-4" />}
-                onClick={() => setEditing({ ...VAZIO })}
+                onClick={() => abrirForm({ ...VAZIO })}
               >
                 Novo crédito
               </Button>
@@ -317,7 +335,7 @@ export default function Processos() {
                         <IconButton
                           label="Editar"
                           icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => setEditing(p)}
+                          onClick={() => abrirForm(p)}
                         />
                         <IconButton
                           label="Excluir"
@@ -342,9 +360,17 @@ export default function Processos() {
         onClose={() => setEditing(null)}
         title={editing?.id ? 'Editar crédito' : 'Novo crédito'}
         size="lg"
+        dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                // Botão próprio não passa pela confirmação do Modal — checa dirty aqui.
+                if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+                setEditing(null)
+              }}
+            >
               Cancelar
             </Button>
             <Button
@@ -359,10 +385,14 @@ export default function Processos() {
       >
         {editing && (
           <form id="form-processo" onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Número do processo" required>
+            <Field label="Número do processo" required error={erros.numero_cnj}>
               <Input
                 value={editing.numero_cnj ?? ''}
-                onChange={(e) => setEditing({ ...editing, numero_cnj: e.target.value })}
+                onChange={(e) => {
+                  setEditing({ ...editing, numero_cnj: e.target.value })
+                  // Digitar no campo limpa o erro de validação dele.
+                  if (erros.numero_cnj) setErros({})
+                }}
                 placeholder="0000000-00.0000.0.00.0000"
               />
             </Field>
@@ -433,7 +463,16 @@ export default function Processos() {
                   }
                 />
               </Field>
-              <Field label="Instrumento">
+              <Field
+                label="Instrumento"
+                // Avisa que o campo condicional oculto será descartado no salvamento.
+                hint={
+                  editing.instrumento !== 'registro_publico' &&
+                  editing.numero_rtdpj?.trim()
+                    ? 'Ao salvar sem "Registro público", o nº RTDPJ será descartado.'
+                    : undefined
+                }
+              >
                 <Select
                   value={editing.instrumento ?? ''}
                   onChange={(e) =>
@@ -462,7 +501,16 @@ export default function Processos() {
                   />
                 </Field>
               )}
-              <Field label="Status" required>
+              <Field
+                label="Status"
+                required
+                // Avisa que o campo condicional oculto será descartado no salvamento.
+                hint={
+                  editing.status === 'ativo' && editing.data_liquidacao
+                    ? 'Ao salvar como Ativo, a data de liquidação será descartada.'
+                    : undefined
+                }
+              >
                 <Select
                   value={editing.status ?? 'ativo'}
                   onChange={(e) =>

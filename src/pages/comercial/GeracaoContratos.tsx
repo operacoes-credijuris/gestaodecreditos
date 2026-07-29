@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, FileText, Eye, Printer, Download } from 'lucide-react'
 import {
   templatesCrud,
@@ -53,6 +53,9 @@ function renderizar(texto: string, dados: Record<string, string>): string {
   return texto.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k) => dados[k] ?? `____`)
 }
 
+// Normaliza string vazia (ou só espaços) para null — campos opcionais do payload.
+const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
+
 export default function GeracaoContratos() {
   const [tab, setTab] = useState('contratos')
   return (
@@ -86,12 +89,36 @@ function ModelosPanel() {
   const toast = useToast()
   const [editing, setEditing] = useState<Partial<ContratoTemplate> | null>(null)
   const [toDelete, setToDelete] = useState<ContratoTemplate | null>(null)
+  // Erros de validação por campo, exibidos inline nos <Field>.
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário ao abrir, para detectar alterações não salvas.
+  const snapRef = useRef('')
+
+  const dirty = !!editing && JSON.stringify(editing) !== snapRef.current
+
+  // Abre o formulário guardando o snapshot inicial e limpando erros antigos.
+  function abrirForm(valores: Partial<ContratoTemplate>) {
+    snapRef.current = JSON.stringify(valores)
+    setErros({})
+    setEditing(valores)
+  }
+
+  // Limpa o erro de um campo assim que o usuário o altera.
+  function limparErro(campo: string) {
+    setErros((prev) => (prev[campo] ? { ...prev, [campo]: '' } : prev))
+  }
+
+  // Botões próprios do footer não passam pela confirmação do Modal.
+  function cancelar() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    setEditing(null)
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
     if (!editing.nome?.trim()) {
-      toast.error('Informe o nome do modelo.')
+      setErros({ nome: 'Obrigatório' })
       return
     }
     try {
@@ -123,7 +150,7 @@ function ModelosPanel() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...TPL_VAZIO })}>
+        <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...TPL_VAZIO })}>
           Novo modelo
         </Button>
       </div>
@@ -137,7 +164,7 @@ function ModelosPanel() {
             title="Nenhum modelo"
             description="Crie modelos com variáveis no formato {{variavel}}."
             action={
-              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...TPL_VAZIO })}>
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...TPL_VAZIO })}>
                 Novo modelo
               </Button>
             }
@@ -170,7 +197,7 @@ function ModelosPanel() {
                         <IconButton
                           label="Editar"
                           icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => setEditing(t)}
+                          onClick={() => abrirForm(t)}
                         />
                         <IconButton
                           label="Excluir"
@@ -193,9 +220,10 @@ function ModelosPanel() {
         onClose={() => setEditing(null)}
         title={editing?.id ? 'Editar modelo' : 'Novo modelo'}
         size="lg"
+        dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button variant="outline" onClick={cancelar}>
               Cancelar
             </Button>
             <Button
@@ -211,10 +239,13 @@ function ModelosPanel() {
         {editing && (
           <form id="form-modelo" onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Nome do modelo" required>
+              <Field label="Nome do modelo" required error={erros.nome}>
                 <Input
                   value={editing.nome ?? ''}
-                  onChange={(e) => setEditing({ ...editing, nome: e.target.value })}
+                  onChange={(e) => {
+                    setEditing({ ...editing, nome: e.target.value })
+                    limparErro('nome')
+                  }}
                 />
               </Field>
               <Field label="Tipo" required>
@@ -276,6 +307,23 @@ function ContratosPanel() {
   const [dados, setDados] = useState<Record<string, string>>({})
   const [viewing, setViewing] = useState<Contrato | null>(null)
   const [toDelete, setToDelete] = useState<Contrato | null>(null)
+  // Erros de validação por campo, exibidos inline nos <Field>.
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário (editing + dados das variáveis) ao abrir.
+  const snapRef = useRef('')
+
+  const dirty = !!editing && JSON.stringify({ editing, dados }) !== snapRef.current
+
+  // Limpa o erro de um campo assim que o usuário o altera.
+  function limparErro(campo: string) {
+    setErros((prev) => (prev[campo] ? { ...prev, [campo]: '' } : prev))
+  }
+
+  // Botões próprios do footer não passam pela confirmação do Modal.
+  function cancelar() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    setEditing(null)
+  }
 
   const templateAtual = useMemo(
     () => (templates.data ?? []).find((t) => t.id === editing?.template_id),
@@ -287,19 +335,25 @@ function ContratosPanel() {
   )
 
   function abrirNovo() {
-    setDados({})
-    setEditing({
+    const valores: Partial<Contrato> = {
       numero: `CT-${new Date().getFullYear()}-${String((data?.length ?? 0) + 1).padStart(3, '0')}`,
       tipo: 'cessao',
       status: 'rascunho',
       template_id: null,
       investidor_id: null,
       cessao_id: null,
-    })
+    }
+    snapRef.current = JSON.stringify({ editing: valores, dados: {} })
+    setErros({})
+    setDados({})
+    setEditing(valores)
   }
 
   function abrirEdicao(c: Contrato) {
-    setDados((c.dados as Record<string, string>) ?? {})
+    const dadosIniciais = (c.dados as Record<string, string>) ?? {}
+    snapRef.current = JSON.stringify({ editing: c, dados: dadosIniciais })
+    setErros({})
+    setDados(dadosIniciais)
     setEditing(c)
   }
 
@@ -324,7 +378,18 @@ function ContratosPanel() {
     e.preventDefault()
     if (!editing) return
     if (!editing.template_id) {
-      toast.error('Selecione um modelo.')
+      setErros({ template_id: 'Selecione um modelo' })
+      return
+    }
+    // Variáveis do modelo sem valor: ausentes viram "____" no texto final
+    // (vazias saem em branco) — confirma com o usuário antes de salvar.
+    const vazias = placeholders.filter((ph) => !dados[ph]?.trim())
+    if (
+      vazias.length > 0 &&
+      !window.confirm(
+        `As variáveis a seguir não foram preenchidas e sairão como "____" (ou em branco) no contrato:\n\n${vazias.join(', ')}\n\nSalvar mesmo assim?`,
+      )
+    ) {
       return
     }
     const conteudo_final = templateAtual
@@ -333,8 +398,8 @@ function ContratosPanel() {
     try {
       const { id, created_at, updated_at, ...rest } = editing as Contrato
       const payload = { ...rest, dados, conteudo_final }
-      if (!payload.investidor_id) payload.investidor_id = null
-      if (!payload.cessao_id) payload.cessao_id = null
+      payload.investidor_id = vazioNull(payload.investidor_id)
+      payload.cessao_id = vazioNull(payload.cessao_id)
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Contrato atualizado.')
@@ -502,9 +567,10 @@ function ContratosPanel() {
         onClose={() => setEditing(null)}
         title={editing?.id ? 'Editar contrato' : 'Gerar contrato'}
         size="lg"
+        dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button variant="outline" onClick={cancelar}>
               Cancelar
             </Button>
             <Button
@@ -526,16 +592,17 @@ function ContratosPanel() {
                   onChange={(e) => setEditing({ ...editing, numero: e.target.value })}
                 />
               </Field>
-              <Field label="Modelo" required>
+              <Field label="Modelo" required error={erros.template_id}>
                 <Select
                   value={editing.template_id ?? ''}
                   onChange={(e) => {
                     const t = (templates.data ?? []).find((x) => x.id === e.target.value)
                     setEditing({
                       ...editing,
-                      template_id: e.target.value || null,
+                      template_id: vazioNull(e.target.value),
                       tipo: t?.tipo ?? editing.tipo,
                     })
+                    limparErro('template_id')
                   }}
                 >
                   <option value="">Selecione…</option>
@@ -550,7 +617,7 @@ function ContratosPanel() {
                 <Select
                   value={editing.investidor_id ?? ''}
                   onChange={(e) =>
-                    setEditing({ ...editing, investidor_id: e.target.value || null })
+                    setEditing({ ...editing, investidor_id: vazioNull(e.target.value) })
                   }
                 >
                   <option value="">— Nenhum —</option>
@@ -565,7 +632,7 @@ function ContratosPanel() {
                 <Select
                   value={editing.cessao_id ?? ''}
                   onChange={(e) =>
-                    setEditing({ ...editing, cessao_id: e.target.value || null })
+                    setEditing({ ...editing, cessao_id: vazioNull(e.target.value) })
                   }
                 >
                   <option value="">— Nenhuma —</option>

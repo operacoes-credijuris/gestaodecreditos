@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import { apensosCrud } from '@/lib/queries'
 import type { Apenso } from '@/lib/types'
@@ -11,6 +11,9 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 
 type ParentField = 'processo_id' | 'requerimento_id'
+
+// Converte string vazia/só espaços em null (mantém o banco sem "").
+const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
 
 /**
  * Gerencia os apensos (incidentes, recursos etc.) atrelados a um principal
@@ -29,6 +32,18 @@ export function useApensosManager(parentField: ParentField) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [editing, setEditing] = useState<Partial<Apenso> | null>(null)
   const [toDelete, setToDelete] = useState<Apenso | null>(null)
+  // Erros de validação por campo, exibidos inline nos <Field>.
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário ao abrir — base do cálculo de "dirty".
+  const snapshotRef = useRef('')
+  const dirty = !!editing && JSON.stringify(editing) !== snapshotRef.current
+
+  // Abre o formulário limpando erros e registrando o snapshot do estado inicial.
+  function abrirForm(a: Partial<Apenso>) {
+    setErros({})
+    snapshotRef.current = JSON.stringify(a)
+    setEditing(a)
+  }
 
   const porPai = useMemo(() => {
     const m = new Map<string, Apenso[]>()
@@ -57,7 +72,7 @@ export function useApensosManager(parentField: ParentField) {
       polo_passivo: '',
     }
     base[parentField] = parentId
-    setEditing(base)
+    abrirForm(base)
     setExpanded((e) => ({ ...e, [parentId]: true }))
   }
 
@@ -65,18 +80,19 @@ export function useApensosManager(parentField: ParentField) {
     e.preventDefault()
     if (!editing) return
     if (!editing.numero?.trim()) {
-      toast.error('Informe o número do apenso.')
+      // Validação inline: erro aparece junto ao campo, sem toast.
+      setErros({ numero: 'Informe o número do apenso' })
       return
     }
     try {
       const payload: Partial<Apenso> = {
-        numero: editing.numero?.trim() || null,
-        classe_processual: editing.classe_processual?.trim() || null,
-        tribunal: editing.tribunal?.trim() || null,
-        comarca: editing.comarca?.trim() || null,
-        vara: editing.vara?.trim() || null,
-        polo_ativo: editing.polo_ativo?.trim() || null,
-        polo_passivo: editing.polo_passivo?.trim() || null,
+        numero: vazioNull(editing.numero),
+        classe_processual: vazioNull(editing.classe_processual),
+        tribunal: vazioNull(editing.tribunal),
+        comarca: vazioNull(editing.comarca),
+        vara: vazioNull(editing.vara),
+        polo_ativo: vazioNull(editing.polo_ativo),
+        polo_passivo: vazioNull(editing.polo_passivo),
       }
       payload[parentField] = editing[parentField] ?? null
       if (editing.id) {
@@ -181,7 +197,7 @@ export function useApensosManager(parentField: ParentField) {
                     <IconButton
                       label="Editar apenso"
                       icon={<Pencil className="h-4 w-4" />}
-                      onClick={() => setEditing(a)}
+                      onClick={() => abrirForm(a)}
                     />
                     <IconButton
                       label="Excluir apenso"
@@ -207,9 +223,17 @@ export function useApensosManager(parentField: ParentField) {
           onClose={() => setEditing(null)}
           title={editing?.id ? 'Editar apenso' : 'Novo apenso'}
           size="lg"
+          dirty={dirty}
           footer={
             <>
-              <Button variant="outline" onClick={() => setEditing(null)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // Botão próprio não passa pela confirmação do Modal — checa dirty aqui.
+                  if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+                  setEditing(null)
+                }}
+              >
                 Cancelar
               </Button>
               <Button
@@ -225,10 +249,14 @@ export function useApensosManager(parentField: ParentField) {
           {editing && (
             <form id="form-apenso" onSubmit={handleSubmit} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Número" required>
+                <Field label="Número" required error={erros.numero}>
                   <Input
                     value={editing.numero ?? ''}
-                    onChange={(e) => setEditing({ ...editing, numero: e.target.value })}
+                    onChange={(e) => {
+                      setEditing({ ...editing, numero: e.target.value })
+                      // Digitar no campo limpa o erro de validação dele.
+                      if (erros.numero) setErros({})
+                    }}
                   />
                 </Field>
                 <Field label="Classe processual">

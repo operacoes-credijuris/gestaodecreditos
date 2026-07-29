@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { X, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
@@ -45,6 +46,42 @@ export function Sidebar({
 }) {
   const { isAdmin } = useAuth()
   const { pathname } = useLocation()
+
+  // Drawer mobile animado: `rendered` mantém o nó montado durante a saída;
+  // `visible` controla as classes de "aberto" (translate/fade).
+  const [rendered, setRendered] = useState(mobileOpen)
+  const [visible, setVisible] = useState(mobileOpen)
+
+  useEffect(() => {
+    if (mobileOpen) {
+      setRendered(true)
+      // Dois rAFs garantem que o navegador pinte o estado inicial (fechado)
+      // antes de aplicar as classes de aberto — senão a transição não ocorre.
+      let raf2 = 0
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setVisible(true))
+      })
+      return () => {
+        cancelAnimationFrame(raf1)
+        cancelAnimationFrame(raf2)
+      }
+    }
+    setVisible(false)
+    // Desmonta só depois da animação de saída (mesma duração do duration-200).
+    const timer = setTimeout(() => setRendered(false), 200)
+    return () => clearTimeout(timer)
+  }, [mobileOpen])
+
+  // Fecha o drawer mobile com Escape.
+  useEffect(() => {
+    if (!mobileOpen) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [mobileOpen, onClose])
+
   const content = (
     <div className="flex h-full flex-col bg-brand-900 text-white">
       <div className="flex items-center justify-between gap-2 border-b border-brand-800 px-5 py-4">
@@ -107,13 +144,28 @@ export function Sidebar({
       <aside className="hidden w-64 shrink-0 lg:block">{content}</aside>
 
       {/* Mobile drawer */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
+      {rendered && (
+        <div
+          className="fixed inset-0 z-40 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Menu de navegação"
+        >
           <div
-            className="absolute inset-0 bg-slate-900/50"
+            className={cn(
+              'absolute inset-0 bg-slate-900/50 transition-opacity duration-200',
+              visible ? 'opacity-100' : 'opacity-0',
+            )}
             onClick={onClose}
           />
-          <div className="absolute inset-y-0 left-0 w-64">{content}</div>
+          <div
+            className={cn(
+              'absolute inset-y-0 left-0 w-64 transition-transform duration-200',
+              visible ? 'translate-x-0' : '-translate-x-full',
+            )}
+          >
+            {content}
+          </div>
         </div>
       )}
     </>

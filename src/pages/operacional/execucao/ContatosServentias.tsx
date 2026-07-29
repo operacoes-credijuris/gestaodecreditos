@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { apensosCrud, contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
 import type { ContatoServentia } from '@/lib/types'
@@ -135,6 +135,23 @@ function CelulaContato({
   )
 }
 
+// Campos de texto do formulário que podem carregar erro de validação inline.
+type CampoContato =
+  | 'orgao'
+  | 'tribunal'
+  | 'serventia_telefone'
+  | 'serventia_whatsapp'
+  | 'gabinete_telefone'
+  | 'gabinete_whatsapp'
+
+// Telefones sujeitos à validação de completude (DDD + 8 ou 9 dígitos).
+const CAMPOS_FONE = [
+  'serventia_telefone',
+  'serventia_whatsapp',
+  'gabinete_telefone',
+  'gabinete_whatsapp',
+] as const
+
 const AUXILIAR_VAZIO: Partial<ContatoServentia> = {
   tipo: 'auxiliar',
   orgao: '',
@@ -160,6 +177,37 @@ export default function ContatosServentias() {
   const [busca, setBusca] = useState('')
   const [editing, setEditing] = useState<Partial<ContatoServentia> | null>(null)
   const [toDelete, setToDelete] = useState<ContatoServentia | null>(null)
+  // Erros de validação por campo (mensagens inline nos <Field>).
+  const [erros, setErros] = useState<Record<string, string>>({})
+  // Snapshot do formulário ao abrir — base do cálculo de dirty.
+  const snapshotRef = useRef('')
+
+  const dirty = !!editing && JSON.stringify(editing) !== snapshotRef.current
+
+  // Abre o formulário zerando erros e registrando o snapshot inicial.
+  function abrirForm(valores: Partial<ContatoServentia>) {
+    snapshotRef.current = JSON.stringify(valores)
+    setErros({})
+    setEditing(valores)
+  }
+
+  // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
+  // cobre X/overlay/Escape via prop dirty).
+  function fecharForm() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    setEditing(null)
+  }
+
+  // Atualiza um campo do formulário e limpa o erro inline correspondente.
+  function alterarCampo(campo: CampoContato, valor: string) {
+    setEditing((atual) => (atual ? { ...atual, [campo]: valor } : atual))
+    setErros((prev) => {
+      if (!(campo in prev)) return prev
+      const proximos = { ...prev }
+      delete proximos[campo]
+      return proximos
+    })
+  }
 
   const isLoading =
     contatos.isLoading || processos.isLoading || requerimentos.isLoading || apensos.isLoading
@@ -246,10 +294,10 @@ export default function ContatosServentias() {
 
   function abrirEdicao(row: OrgaoRow) {
     if (row.contato) {
-      setEditing(row.contato)
+      abrirForm(row.contato)
       return
     }
-    setEditing({
+    abrirForm({
       tipo: 'julgador',
       orgao: row.orgao,
       serventia_telefone: '',
@@ -265,22 +313,19 @@ export default function ContatosServentias() {
     e.preventDefault()
     if (!editing) return
     const auxiliar = editing.tipo === 'auxiliar'
-    if (auxiliar && !editing.orgao?.trim()) {
-      toast.error('Informe o órgão.')
-      return
-    }
+    // Validação inline por campo — toast fica só para erro de rede/backend.
+    const novosErros: Record<string, string> = {}
+    if (auxiliar && !editing.orgao?.trim()) novosErros.orgao = 'Informe o órgão'
     if (auxiliar && !editing.tribunal?.trim()) {
-      toast.error('Informe o tribunal / entidade.')
-      return
+      novosErros.tribunal = 'Informe o tribunal / entidade'
     }
-    const fones = [
-      editing.serventia_telefone,
-      editing.serventia_whatsapp,
-      editing.gabinete_telefone,
-      editing.gabinete_whatsapp,
-    ]
-    if (fones.some(telefoneIncompleto)) {
-      toast.error('Telefone incompleto. Use DDD + 8 ou 9 dígitos.')
+    for (const campo of CAMPOS_FONE) {
+      if (telefoneIncompleto(editing[campo])) {
+        novosErros[campo] = 'Use DDD + 8 ou 9 dígitos'
+      }
+    }
+    if (Object.keys(novosErros).length > 0) {
+      setErros(novosErros)
       return
     }
     try {
@@ -334,7 +379,7 @@ export default function ContatosServentias() {
         actions={
           <Button
             icon={<Plus className="h-4 w-4" />}
-            onClick={() => setEditing({ ...AUXILIAR_VAZIO })}
+            onClick={() => abrirForm({ ...AUXILIAR_VAZIO })}
           >
             Novo contato
           </Button>
@@ -374,7 +419,7 @@ export default function ContatosServentias() {
             action={
               <Button
                 icon={<Plus className="h-4 w-4" />}
-                onClick={() => setEditing({ ...AUXILIAR_VAZIO })}
+                onClick={() => abrirForm({ ...AUXILIAR_VAZIO })}
               >
                 Novo contato
               </Button>
@@ -470,9 +515,10 @@ export default function ContatosServentias() {
             : `Contatos — ${formatOrgaoLabel(editing?.orgao ?? '')}`
         }
         size="lg"
+        dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditing(null)}>
+            <Button variant="outline" onClick={fecharForm}>
               Cancelar
             </Button>
             <Button
@@ -490,41 +536,35 @@ export default function ContatosServentias() {
             {editandoAuxiliar ? (
               <>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Órgão" required>
+                  <Field label="Órgão" required error={erros.orgao}>
                     <Input
                       value={editing.orgao ?? ''}
-                      onChange={(e) => setEditing({ ...editing, orgao: e.target.value })}
+                      onChange={(e) => alterarCampo('orgao', e.target.value)}
                       placeholder="Ex.: Cartório do 2º Ofício"
                     />
                   </Field>
-                  <Field label="Tribunal / Entidade" required>
+                  <Field label="Tribunal / Entidade" required error={erros.tribunal}>
                     <Input
                       value={editing.tribunal ?? ''}
-                      onChange={(e) => setEditing({ ...editing, tribunal: e.target.value })}
+                      onChange={(e) => alterarCampo('tribunal', e.target.value)}
                     />
                   </Field>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Telefone">
+                  <Field label="Telefone" error={erros.serventia_telefone}>
                     <Input
                       value={editing.serventia_telefone ?? ''}
                       onChange={(e) =>
-                        setEditing({
-                          ...editing,
-                          serventia_telefone: formatTelefone(e.target.value),
-                        })
+                        alterarCampo('serventia_telefone', formatTelefone(e.target.value))
                       }
                       placeholder="(00) 0000-0000"
                     />
                   </Field>
-                  <Field label="WhatsApp">
+                  <Field label="WhatsApp" error={erros.serventia_whatsapp}>
                     <Input
                       value={editing.serventia_whatsapp ?? ''}
                       onChange={(e) =>
-                        setEditing({
-                          ...editing,
-                          serventia_whatsapp: formatTelefone(e.target.value),
-                        })
+                        alterarCampo('serventia_whatsapp', formatTelefone(e.target.value))
                       }
                       placeholder="(00) 00000-0000"
                     />
@@ -545,26 +585,20 @@ export default function ContatosServentias() {
                 <div>
                   <h3 className="mb-2 text-sm font-semibold text-slate-700">Serventia</h3>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Telefone">
+                    <Field label="Telefone" error={erros.serventia_telefone}>
                       <Input
                         value={editing.serventia_telefone ?? ''}
                         onChange={(e) =>
-                          setEditing({
-                            ...editing,
-                            serventia_telefone: formatTelefone(e.target.value),
-                          })
+                          alterarCampo('serventia_telefone', formatTelefone(e.target.value))
                         }
                         placeholder="(00) 0000-0000"
                       />
                     </Field>
-                    <Field label="WhatsApp">
+                    <Field label="WhatsApp" error={erros.serventia_whatsapp}>
                       <Input
                         value={editing.serventia_whatsapp ?? ''}
                         onChange={(e) =>
-                          setEditing({
-                            ...editing,
-                            serventia_whatsapp: formatTelefone(e.target.value),
-                          })
+                          alterarCampo('serventia_whatsapp', formatTelefone(e.target.value))
                         }
                         placeholder="(00) 00000-0000"
                       />
@@ -583,26 +617,20 @@ export default function ContatosServentias() {
                 <div>
                   <h3 className="mb-2 text-sm font-semibold text-slate-700">Gabinete</h3>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Telefone">
+                    <Field label="Telefone" error={erros.gabinete_telefone}>
                       <Input
                         value={editing.gabinete_telefone ?? ''}
                         onChange={(e) =>
-                          setEditing({
-                            ...editing,
-                            gabinete_telefone: formatTelefone(e.target.value),
-                          })
+                          alterarCampo('gabinete_telefone', formatTelefone(e.target.value))
                         }
                         placeholder="(00) 0000-0000"
                       />
                     </Field>
-                    <Field label="WhatsApp">
+                    <Field label="WhatsApp" error={erros.gabinete_whatsapp}>
                       <Input
                         value={editing.gabinete_whatsapp ?? ''}
                         onChange={(e) =>
-                          setEditing({
-                            ...editing,
-                            gabinete_whatsapp: formatTelefone(e.target.value),
-                          })
+                          alterarCampo('gabinete_whatsapp', formatTelefone(e.target.value))
                         }
                         placeholder="(00) 00000-0000"
                       />
