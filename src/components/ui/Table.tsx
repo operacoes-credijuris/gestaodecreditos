@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Inbox, Loader2, RefreshCw } from 'lucide-react'
+import { Inbox, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Button } from './Button'
 
