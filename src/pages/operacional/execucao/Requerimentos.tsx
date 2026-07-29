@@ -36,7 +36,7 @@ const VAZIO: Partial<Requerimento> = {
 }
 
 // Total de colunas da tabela — usado no colSpan da linha de apensos.
-const N_COLUNAS = 6
+const N_COLUNAS = 5
 
 // Normaliza string vazia (ou só espaços) para null antes de enviar ao backend.
 const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
@@ -194,8 +194,7 @@ export default function Requerimentos() {
               <tr>
                 <TH>Protocolo</TH>
                 <TH>Órgão</TH>
-                <TH>Classe processual</TH>
-                <TH>Matéria</TH>
+                <TH>Classe / Matéria</TH>
                 <SortableTH
                   label="Data de protocolo"
                   active
@@ -217,9 +216,17 @@ export default function Requerimentos() {
                       {r.tribunal_entidade || '—'}
                     </div>
                   </TD>
-                  <TD className="whitespace-nowrap">{r.orgao || '—'}</TD>
-                  <TD className="whitespace-nowrap">{r.classe_processual || '—'}</TD>
-                  <TD>{r.materia || '—'}</TD>
+                  <TD>
+                    <div className="max-w-[220px] truncate">{r.orgao || '—'}</div>
+                  </TD>
+                  <TD>
+                    <div className="max-w-[240px] truncate">
+                      {r.classe_processual || '—'}
+                    </div>
+                    <div className="max-w-[240px] truncate text-xs text-slate-500">
+                      {r.materia || '—'}
+                    </div>
+                  </TD>
                   <TD className="whitespace-nowrap text-slate-600">
                     {formatDate(r.data_protocolo)}
                   </TD>

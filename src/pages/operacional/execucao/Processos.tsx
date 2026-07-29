@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search } from 'lucide-react'
-import { processosCrud } from '@/lib/queries'
+import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
+import { processosCrud, apensosCrud } from '@/lib/queries'
 import { useApensosManager } from '@/components/Apensos'
 import type { Processo, StatusProcesso, Instrumento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/Table'
 import { IconButton } from '@/components/ui/IconButton'
 import { SortableTH } from '@/components/ui/SortableTH'
+import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
@@ -59,7 +60,9 @@ const VAZIO: Partial<Processo> = {
 
 // Nº de colunas da tabela de créditos — usado no colSpan da linha de apensos.
 // Atualizar ao adicionar/remover colunas para a linha continuar ocupando a largura toda.
-const N_COLUNAS = 10
+// A tabela mostra só o essencial para escanear; a ficha completa (advogado,
+// instrumento, RTDPJ, tribunal etc.) abre no Drawer ao clicar na linha.
+const N_COLUNAS = 6
 
 export default function Processos() {
   const { useList, useCreate, useUpdate, useRemove } = processosCrud
@@ -80,6 +83,17 @@ export default function Processos() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Partial<Processo> | null>(null)
   const [toDelete, setToDelete] = useState<Processo | null>(null)
+  // Crédito com a ficha aberta no painel lateral (clique na linha).
+  const [detalhe, setDetalhe] = useState<Processo | null>(null)
+  // Apensos do crédito em detalhe (lista de leitura na ficha).
+  const todosApensos = apensosCrud.useList()
+  const apensosDoDetalhe = useMemo(
+    () =>
+      detalhe
+        ? (todosApensos.data ?? []).filter((a) => a.processo_id === detalhe.id)
+        : [],
+    [todosApensos.data, detalhe],
+  )
   // Erros de validação por campo, exibidos inline nos <Field>.
   const [erros, setErros] = useState<Record<string, string>>({})
   // Snapshot do formulário ao abrir — base do cálculo de "dirty".
@@ -254,11 +268,7 @@ export default function Processos() {
             <THead>
               <tr>
                 <TH>Processo</TH>
-                <TH>Comarca / Vara</TH>
-                <TH>Cedente</TH>
-                <TH>Cessionário</TH>
                 <TH>Entidade devedora</TH>
-                <TH>Instrumento</TH>
                 <SortableTH
                   label="Aquisição"
                   active={sortBy === 'data_aquisicao'}
@@ -280,39 +290,24 @@ export default function Processos() {
             <TBody>
               {lista.map((p) => {
                 const st = getLabel(STATUS_PROCESSO, p.status)
-                const inst = getLabel(INSTRUMENTO, p.instrumento)
                 return (
                   <Fragment key={p.id}>
-                  <TR>
-                    <TD className="whitespace-nowrap font-medium text-slate-800">
-                      {formatCNJ(p.numero_cnj)}
-                      <div className="text-xs font-normal text-slate-500">
-                        {p.tribunal || '—'}
+                  <TR onClick={() => setDetalhe(p)}>
+                    <TD className="font-medium text-slate-800">
+                      <span className="whitespace-nowrap">
+                        {formatCNJ(p.numero_cnj)}
+                      </span>
+                      <div className="max-w-[300px] truncate text-xs font-normal text-slate-500">
+                        {p.cedente || '—'} v. {p.cessionario || '—'}
                       </div>
                     </TD>
-                    <TD className="whitespace-nowrap">
-                      {p.comarca || '—'}
-                      <div className="text-xs text-slate-500">{p.vara || '—'}</div>
-                    </TD>
-                    <TD className="whitespace-nowrap">
-                      {p.cedente || '—'}
-                      {p.cedente_advogado && (
-                        <div className="text-xs text-slate-500">
-                          adv. {p.cedente_advogado}
-                        </div>
-                      )}
-                    </TD>
-                    <TD className="whitespace-nowrap">{p.cessionario || '—'}</TD>
-                    <TD className="whitespace-nowrap">{p.entidade_devedora || '—'}</TD>
-                    <TD className="whitespace-nowrap">
-                      {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
-                      {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
-                        <div className="text-xs text-slate-500">
-                          {splitRtdpj(p.numero_rtdpj).map((n, i) => (
-                            <div key={i}>{n}</div>
-                          ))}
-                        </div>
-                      )}
+                    <TD>
+                      <div className="max-w-[220px] truncate">
+                        {p.entidade_devedora || '—'}
+                      </div>
+                      <div className="max-w-[220px] truncate text-xs text-slate-500">
+                        {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
+                      </div>
                     </TD>
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.data_aquisicao)}
@@ -329,7 +324,11 @@ export default function Processos() {
                       )}
                     </TD>
                     <TD className="text-right">
-                      <div className="flex justify-end gap-1">
+                      {/* stopPropagation: os botões não devem abrir a ficha da linha */}
+                      <div
+                        className="flex items-center justify-end gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {apensos.actions(p.id)}
                         <IconButton
                           label="Editar"
@@ -341,6 +340,10 @@ export default function Processos() {
                           variant="danger"
                           icon={<Trash2 className="h-4 w-4" />}
                           onClick={() => setToDelete(p)}
+                        />
+                        <ChevronRight
+                          className="h-4 w-4 text-slate-300"
+                          aria-hidden="true"
                         />
                       </div>
                     </TD>
@@ -542,6 +545,127 @@ export default function Processos() {
           </form>
         )}
       </Modal>
+
+      {/* Ficha completa do crédito — abre ao clicar na linha da tabela. */}
+      <Drawer
+        open={!!detalhe}
+        onClose={() => setDetalhe(null)}
+        title={
+          detalhe && (
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="truncate text-base font-bold tracking-tight text-slate-800">
+                  {formatCNJ(detalhe.numero_cnj)}
+                </h2>
+                <Badge tone={getLabel(STATUS_PROCESSO, detalhe.status).tone}>
+                  {getLabel(STATUS_PROCESSO, detalhe.status).label}
+                </Badge>
+              </div>
+              <p className="truncate text-xs text-slate-500">
+                {detalhe.cedente || '—'} v. {detalhe.cessionario || '—'}
+              </p>
+            </div>
+          )
+        }
+        footer={
+          detalhe && (
+            <>
+              <Button
+                variant="outline"
+                icon={<Trash2 className="h-4 w-4" />}
+                onClick={() => {
+                  setDetalhe(null)
+                  setToDelete(detalhe)
+                }}
+              >
+                Excluir
+              </Button>
+              <Button
+                icon={<Pencil className="h-4 w-4" />}
+                onClick={() => {
+                  setDetalhe(null)
+                  abrirForm(detalhe)
+                }}
+              >
+                Editar
+              </Button>
+            </>
+          )
+        }
+      >
+        {detalhe && (
+          <>
+            <DrawerSection title="Partes">
+              <DrawerField label="Cedente">{detalhe.cedente || '—'}</DrawerField>
+              <DrawerField label="Advogado do cedente">
+                {detalhe.cedente_advogado || '—'}
+              </DrawerField>
+              <DrawerField label="Cessionário">
+                {detalhe.cessionario || '—'}
+              </DrawerField>
+              <DrawerField label="Entidade devedora">
+                {detalhe.entidade_devedora || '—'}
+              </DrawerField>
+            </DrawerSection>
+
+            <DrawerSection title="Processo">
+              <DrawerField label="Tribunal">{detalhe.tribunal || '—'}</DrawerField>
+              <DrawerField label="Comarca">{detalhe.comarca || '—'}</DrawerField>
+              <DrawerField label="Vara">{detalhe.vara || '—'}</DrawerField>
+            </DrawerSection>
+
+            <DrawerSection title="Aquisição e liquidação">
+              <DrawerField label="Instrumento">
+                {detalhe.instrumento
+                  ? getLabel(INSTRUMENTO, detalhe.instrumento).label
+                  : '—'}
+              </DrawerField>
+              <DrawerField label="Nº RTDPJ">
+                {detalhe.instrumento === 'registro_publico' && detalhe.numero_rtdpj
+                  ? splitRtdpj(detalhe.numero_rtdpj).map((n, i) => (
+                      <div key={i}>{n}</div>
+                    ))
+                  : '—'}
+              </DrawerField>
+              <DrawerField label="Data de aquisição">
+                {formatDate(detalhe.data_aquisicao)}
+              </DrawerField>
+              <DrawerField label="Expectativa de liquidação">
+                {formatDate(detalhe.expectativa_liquidacao)}
+              </DrawerField>
+              <DrawerField label="Data de liquidação">
+                {detalhe.data_liquidacao ? formatDate(detalhe.data_liquidacao) : '—'}
+              </DrawerField>
+            </DrawerSection>
+
+            <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
+              {apensosDoDetalhe.length === 0 ? (
+                <p className="col-span-2 text-sm text-slate-500">
+                  Nenhum apenso vinculado.
+                </p>
+              ) : (
+                <div className="col-span-2 space-y-2">
+                  {apensosDoDetalhe.map((a) => (
+                    <div
+                      key={a.id}
+                      className="rounded-lg border border-slate-200 p-2.5"
+                    >
+                      <div className="text-sm font-medium text-slate-800">
+                        {formatCNJ(a.numero || '')}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {[a.classe_processual, a.tribunal, a.comarca]
+                          .filter(Boolean)
+                          .join(' · ') || '—'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </DrawerSection>
+          </>
+        )}
+      </Drawer>
 
       <ConfirmDialog
         open={!!toDelete}
