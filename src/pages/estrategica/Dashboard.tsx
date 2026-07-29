@@ -36,7 +36,6 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
 import { Loading } from '@/components/ui/Table'
-import { useAuth } from '@/contexts/AuthContext'
 import { STATUS_ANALISE } from '@/lib/labels'
 import { CHART } from '@/lib/chartColors'
 import { formatBRL, formatDate } from '@/lib/format'
@@ -54,7 +53,6 @@ interface TarefaAdvbox {
 }
 
 export default function Dashboard() {
-  const { profile, user } = useAuth()
   const analises = analisesCrud.useList()
   const processos = processosCrud.useList()
   // Tarefas ao vivo do ADVBOX (não bloqueia o dashboard se demorar/falhar).
@@ -168,10 +166,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Gestão Estratégica"
-        description={`Olá, ${profile?.nome || user?.email}. Visão consolidada dos setores Comercial e Operacional — clique em qualquer indicador para abrir a tela correspondente.`}
-      />
+      <PageHeader title="Gestão Estratégica" />
 
       {/* Comercial */}
       <div>
@@ -310,10 +305,7 @@ export default function Dashboard() {
 
       {/* Próximas tarefas */}
       <Card>
-        <CardHeader
-          title="Próximas tarefas"
-          description="Tarefas em aberto com prazo mais próximo — vencidas em destaque."
-        />
+        <CardHeader title="Próximas tarefas" />
         <CardBody>
           {proximasTarefas.length === 0 ? (
             <p className="py-6 text-center text-sm text-slate-500">

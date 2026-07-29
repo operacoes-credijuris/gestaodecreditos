@@ -60,10 +60,7 @@ export default function GeracaoContratos() {
   const [tab, setTab] = useState('contratos')
   return (
     <div>
-      <PageHeader
-        title="Geração de Contratos"
-        description="Modelos de contrato com variáveis e geração de documentos."
-      />
+      <PageHeader title="Geração de Contratos" />
       <div className="mb-5">
         <Tabs items={TABS} value={tab} onChange={setTab} />
       </div>
@@ -162,7 +159,7 @@ function ModelosPanel() {
         ) : (data ?? []).length === 0 ? (
           <EmptyState
             title="Nenhum modelo"
-            description="Crie modelos com variáveis no formato {{variavel}}."
+            description="Crie o primeiro modelo."
             action={
               <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...TPL_VAZIO })}>
                 Novo modelo
@@ -466,7 +463,7 @@ function ContratosPanel() {
         ) : (data ?? []).length === 0 ? (
           <EmptyState
             title="Nenhum contrato"
-            description="Crie modelos e gere contratos a partir deles."
+            description="Crie modelos e gere contratos."
             action={
               <Button icon={<FileText className="h-4 w-4" />} onClick={abrirNovo}>
                 Gerar contrato

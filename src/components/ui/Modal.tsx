@@ -105,7 +105,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6"
+      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-[2px] sm:p-6"
       onClick={(e) => {
         // Fecha só quando o clique é no próprio overlay, não dentro do painel.
         if (e.target === e.currentTarget) requestClose()
@@ -115,7 +115,7 @@ export function Modal({
         ref={panelRef}
         tabIndex={-1}
         className={cn(
-          'mt-6 w-full rounded-xl bg-white shadow-xl outline-none',
+          'animate-modal-in mt-6 w-full rounded-xl bg-white shadow-xl outline-none',
           sizes[size],
         )}
         role="dialog"

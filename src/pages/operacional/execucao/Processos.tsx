@@ -197,7 +197,6 @@ export default function Processos() {
     <div>
       <PageHeader
         title="Créditos"
-        description="Registro dos créditos adquiridos via cessão/aquisição."
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
             Novo crédito

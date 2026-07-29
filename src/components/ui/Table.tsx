@@ -112,10 +112,13 @@ export function EmptyState({
 }
 
 export function Loading({ label = 'Carregando…' }: { label?: string }) {
+  // Skeleton shimmer: sugere o conteúdo que está chegando, sem spinner.
   return (
-    <div className="flex items-center justify-center gap-2 py-14 text-slate-500">
-      <Loader2 className="h-5 w-5 animate-spin" />
-      <span className="text-sm">{label}</span>
+    <div aria-busy="true" aria-label={label} className="space-y-3 py-8">
+      <div className="skeleton h-9 w-full rounded-lg" />
+      <div className="skeleton h-9 w-11/12 rounded-lg" />
+      <div className="skeleton h-9 w-full rounded-lg" />
+      <span className="sr-only">{label}</span>
     </div>
   )
 }

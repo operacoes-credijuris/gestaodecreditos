@@ -11,7 +11,8 @@ export function Card({
   return (
     <div
       className={cn(
-        'rounded-xl border border-slate-200 bg-white shadow-sm',
+        // sombra levemente tingida da marca dá profundidade sem peso
+        'rounded-xl border border-slate-200/80 bg-white shadow-sm shadow-brand-950/[0.04]',
         className,
       )}
     >

@@ -83,7 +83,7 @@ export function Sidebar({
   }, [mobileOpen, onClose])
 
   const content = (
-    <div className="flex h-full flex-col bg-brand-900 text-white">
+    <div className="flex h-full flex-col bg-gradient-to-b from-brand-900 to-brand-950 text-white">
       <div className="flex items-center justify-between gap-2 border-b border-brand-800 px-5 py-4">
         <div className="flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-700 font-bold text-gold-400">

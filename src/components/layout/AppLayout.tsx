@@ -22,8 +22,12 @@ export function AppLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onOpenMenu={() => setMobileOpen(true)} />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
-          {/* max-width evita tabelas esticadas de ponta a ponta em monitores largos */}
-          <div className="mx-auto w-full max-w-[1400px] px-4 py-6 lg:px-8">
+          {/* max-width evita tabelas esticadas de ponta a ponta em monitores
+              largos; key={pathname} re-anima a entrada a cada troca de rota. */}
+          <div
+            key={pathname}
+            className="animate-page mx-auto w-full max-w-[1400px] px-4 py-6 lg:px-8"
+          >
             <Outlet />
           </div>
         </main>

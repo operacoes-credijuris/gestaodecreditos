@@ -254,7 +254,6 @@ export default function TarefasAdvbox() {
     <div>
       <PageHeader
         title="Tarefas"
-        description="Tarefas do ADVBOX vinculadas aos processos cadastrados (Créditos, Requerimentos e Apensos). Atualiza automaticamente."
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNovo(true)}>
             Nova tarefa
@@ -306,10 +305,7 @@ export default function TarefasAdvbox() {
         </Card>
       ) : lista.length === 0 ? (
         <Card>
-          <EmptyState
-            title="Nenhuma tarefa"
-            description="Não há tarefas no ADVBOX para os processos cadastrados."
-          />
+          <EmptyState title="Nenhuma tarefa" />
         </Card>
       ) : (
         <div className="space-y-2">

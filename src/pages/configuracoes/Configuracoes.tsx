@@ -34,10 +34,7 @@ import { useToast } from '@/components/ui/Toast'
 export default function Configuracoes() {
   return (
     <div>
-      <PageHeader
-        title="Configurações"
-        description="Integrações (ADVBOX e DJEN) e gestão de usuários do sistema."
-      />
+      <PageHeader title="Configurações" />
       <div className="space-y-6">
         <AdvboxConfig />
         <DjenConfig />
@@ -110,7 +107,6 @@ function AdvboxConfig() {
             <KeyRound className="h-5 w-5 text-brand-600" /> Integração ADVBOX
           </span>
         }
-        description="Token de API (mantido em segredo no servidor) e URL base."
         action={
           configurado ? (
             <Badge tone="green">
@@ -232,7 +228,7 @@ function DjenConfig() {
             <Newspaper className="h-5 w-5 text-brand-600" /> Integração DJEN
           </span>
         }
-        description="OAB(s) monitoradas. As publicações (intimações) são puxadas por OAB, dos últimos 30 dias."
+        description="Publicações puxadas por OAB, últimos 30 dias."
       />
       <CardBody>
         {isLoading ? (
@@ -359,7 +355,6 @@ function UsuariosConfig() {
             <Users className="h-5 w-5 text-brand-600" /> Usuários
           </span>
         }
-        description="Cadastro de usuários e senhas (exclusivo do administrador)."
         action={
           <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setOpen(true)}>
             Novo usuário

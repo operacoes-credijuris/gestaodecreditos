@@ -58,10 +58,7 @@ export default function CarteirasInvestidores() {
 
   return (
     <div>
-      <PageHeader
-        title="Carteiras de Investidores"
-        description="Carteira individual de cada investidor e visão consolidada da operação."
-      />
+      <PageHeader title="Carteiras de Investidores" />
       <div className="mb-5">
         <Tabs items={TABS} value={tab} onChange={setTab} />
       </div>
@@ -176,15 +173,12 @@ function Consolidado() {
       </div>
 
       <Card>
-        <CardHeader
-          title="Investido por investidor"
-          description="Maiores posições ativas da carteira consolidada."
-        />
+        <CardHeader title="Investido por investidor" />
         <CardBody>
           {stats.chart.length === 0 ? (
             <EmptyState
               title="Sem investimentos ainda"
-              description="Cadastre investidores, cessões e registre os aportes."
+              description="Registre o primeiro aporte."
             />
           ) : (
             <div className="h-72 w-full">
@@ -355,10 +349,7 @@ function PorInvestidor() {
 
       {!selecionado ? (
         <Card>
-          <EmptyState
-            title="Selecione um investidor"
-            description="Escolha um investidor para ver a carteira individual."
-          />
+          <EmptyState title="Selecione um investidor" />
         </Card>
       ) : (
         <>

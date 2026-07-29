@@ -375,7 +375,6 @@ export default function ContatosServentias() {
     <div>
       <PageHeader
         title="Contatos"
-        description="Órgãos julgadores (puxados de Créditos/Requerimentos) e auxiliares (manuais)."
         actions={
           <Button
             icon={<Plus className="h-4 w-4" />}
@@ -415,7 +414,7 @@ export default function ContatosServentias() {
         ) : linhas.length === 0 ? (
           <EmptyState
             title="Nenhum órgão"
-            description="Cadastre créditos/requerimentos ou adicione um contato auxiliar."
+            description="Cadastre créditos/requerimentos ou um contato auxiliar."
             action={
               <Button
                 icon={<Plus className="h-4 w-4" />}

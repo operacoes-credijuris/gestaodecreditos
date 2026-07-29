@@ -43,12 +43,9 @@ export default function Login() {
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-xl sm:p-8">
-          <h2 className="mb-1 text-lg font-semibold text-slate-800">
+          <h2 className="mb-6 text-lg font-semibold text-slate-800">
             Acessar o sistema
           </h2>
-          <p className="mb-6 text-sm text-slate-500">
-            Informe suas credenciais para continuar.
-          </p>
 
           {!isSupabaseConfigured && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
@@ -97,7 +94,7 @@ export default function Login() {
           </form>
 
           <p className="mt-6 text-center text-xs text-slate-500">
-            Acesso restrito. Novos usuários são cadastrados pelo administrador.
+            Cadastro de usuários pelo administrador.
           </p>
         </div>
       </div>

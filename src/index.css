@@ -36,4 +36,85 @@
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  /* ---- Micro-animações do design system (sutis, 150–250ms) ---- */
+
+  /* Conteúdo da página ao trocar de rota. */
+  .animate-page {
+    animation: cj-fade-up 0.22s ease-out;
+  }
+  /* Painel de modal entrando. */
+  .animate-modal-in {
+    animation: cj-modal-in 0.18s ease-out;
+  }
+  /* Overlay/backdrops. */
+  .animate-fade-in {
+    animation: cj-fade 0.15s ease-out;
+  }
+  /* Toast deslizando da direita. */
+  .animate-toast-in {
+    animation: cj-toast-in 0.2s ease-out;
+  }
+  /* Bloco de carregamento (skeleton shimmer). */
+  .skeleton {
+    @apply relative overflow-hidden bg-slate-200/70;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.65),
+      transparent
+    );
+    animation: cj-shimmer 1.4s infinite;
+  }
+
+  @keyframes cj-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes cj-modal-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97) translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes cj-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes cj-toast-in {
+    from {
+      opacity: 0;
+      transform: translateX(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes cj-shimmer {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
 }

@@ -104,7 +104,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             onMouseEnter={() => pauseRemove(t.id)}
             onMouseLeave={() => scheduleRemove(t.id, 2000)}
             className={cn(
-              'flex items-start gap-3 rounded-lg border bg-white p-3 shadow-lg',
+              'animate-toast-in flex items-start gap-3 rounded-lg border bg-white p-3 shadow-lg',
               t.type === 'success' && 'border-emerald-200',
               t.type === 'error' && 'border-red-200',
               t.type === 'info' && 'border-blue-200',

@@ -152,14 +152,7 @@ export default function PublicacoesMovimentacoes() {
 
   return (
     <div>
-      <PageHeader
-        title="Publicações e Movimentações"
-        description={
-          aba === 'publicacoes'
-            ? 'Publicações oficiais do DJEN vinculadas aos processos cadastrados e às OABs configuradas. Atualiza automaticamente.'
-            : 'Andamentos do ADVBOX dos últimos 20 dias, agrupados por processo. Atualiza automaticamente.'
-        }
-      />
+      <PageHeader title="Publicações e Movimentações" />
 
       <Card className="mb-4 p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -334,9 +327,7 @@ function Publicacoes({ busca }: { busca: string }) {
           <EmptyState
             title="Nenhuma publicação"
             description={
-              sync.isPending
-                ? 'Sincronizando com o DJEN pela primeira vez… isso pode levar até ~1 min.'
-                : 'Não há publicações no DJEN para os processos/OABs configurados.'
+              sync.isPending ? 'Sincronizando… pode levar ~1 min.' : undefined
             }
           />
         </Card>
@@ -696,9 +687,7 @@ function Movimentacoes({ busca }: { busca: string }) {
           <EmptyState
             title="Nenhuma movimentação"
             description={
-              sync.isPending
-                ? 'Compilando os processos e buscando no ADVBOX… isso pode levar até ~1 min.'
-                : 'Não há movimentações no ADVBOX (últimos 20 dias) para os processos cadastrados.'
+              sync.isPending ? 'Sincronizando… pode levar ~1 min.' : undefined
             }
           />
         </Card>

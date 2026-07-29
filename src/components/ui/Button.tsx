@@ -13,8 +13,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants: Record<Variant, string> = {
+  // gradiente vertical sutil + sombra dão o acabamento "sólido" do primário
   primary:
-    'bg-brand-700 text-white hover:bg-brand-800 focus-visible:ring-brand-500 disabled:bg-brand-300',
+    'bg-gradient-to-b from-brand-600 to-brand-700 text-white shadow-sm hover:from-brand-500 hover:to-brand-600 focus-visible:ring-brand-500 disabled:from-brand-300 disabled:to-brand-300 disabled:shadow-none',
   secondary:
     'bg-slate-800 text-white hover:bg-slate-900 focus-visible:ring-slate-500',
   outline:
@@ -43,9 +44,9 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center rounded-lg font-medium transition-colors',
+        'inline-flex items-center justify-center rounded-lg font-medium transition-all duration-150',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
-        'disabled:cursor-not-allowed disabled:opacity-70',
+        'active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 disabled:active:scale-100',
         variants[variant],
         sizes[size],
         className,

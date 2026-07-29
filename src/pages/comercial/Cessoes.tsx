@@ -8,10 +8,7 @@ import { CessoesPanel } from './CessoesPanel'
 export default function Cessoes() {
   return (
     <div>
-      <PageHeader
-        title="Cessões"
-        description="Inventário de créditos disponíveis, captados e liquidados — a vitrine comercial da operação."
-      />
+      <PageHeader title="Cessões" />
       <CessoesPanel />
     </div>
   )

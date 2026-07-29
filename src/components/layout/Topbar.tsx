@@ -20,7 +20,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
     .toUpperCase()
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 lg:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-md lg:px-6">
       <button
         onClick={onOpenMenu}
         className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"

@@ -145,7 +145,7 @@ export function CessoesPanel() {
         ) : lista.length === 0 ? (
           <EmptyState
             title="Nenhuma cessão"
-            description="Cadastre o primeiro crédito da operação."
+            description="Cadastre o primeiro crédito."
             action={
               <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
                 Nova cessão

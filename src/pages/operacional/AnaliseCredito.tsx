@@ -140,7 +140,6 @@ export default function AnaliseCredito() {
     <div>
       <PageHeader
         title="Análise de Crédito"
-        description="Avaliação e due diligence dos créditos antes da aquisição/cessão."
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
             Nova análise
