@@ -1,151 +1,250 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search } from 'lucide-react'
-import { analisesCrud } from '@/lib/queries'
-import type { AnaliseCredito as Analise, StatusAnalise, RiscoAnalise } from '@/lib/types'
+// Análise de Crédito: as cinco telas do fluxo do operacional, alimentadas pelos
+// cards do kanban do Kommo (espelho local em public.kommo_leads).
+//
+// O comercial cria o card com os dados do crédito; o operacional analisa e
+// devolve movendo de coluna. A tela de Revisão é a única sem coluna
+// correspondente no Kommo — é controle interno, marcado na nossa base.
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Search, RefreshCw, ExternalLink, CheckCircle2, Undo2 } from 'lucide-react'
+import { invokeFunction } from '@/lib/functions'
+import {
+  FUNIL_RPV,
+  TELAS,
+  NOME_STATUS,
+  agruparPorTela,
+  useKommoLeads,
+  useMarcacoes,
+  useMarcarRevisao,
+  type TelaAnalise,
+} from '@/lib/kommo'
+import type { KommoLead } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
-import { IconButton } from '@/components/ui/IconButton'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select, Textarea } from '@/components/ui/Field'
+import { Input } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
-import { Modal } from '@/components/ui/Modal'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import {
-  Table,
-  THead,
-  TH,
-  TBody,
-  TR,
-  TD,
-  Loading,
-  ErrorState,
-  EmptyState,
-} from '@/components/ui/Table'
+import { SyncStatus } from '@/components/ui/SyncStatus'
+import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { getLabel, STATUS_ANALISE, RISCO_ANALISE } from '@/lib/labels'
-import { formatBRL } from '@/lib/format'
+import { formatCNJ, formatDate } from '@/lib/format'
 
-const VAZIO: Partial<Analise> = {
-  numero_processo: '',
-  cedente: '',
-  devedor: '',
-  tribunal: '',
-  valor_face: null,
-  valor_avaliado: null,
-  risco: null,
-  status: 'pendente',
-  observacoes: '',
+const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
+
+/** Link para o card no Kommo — o operacional às vezes precisa do original. */
+function urlCard(leadId: number): string {
+  return `https://${KOMMO_SUBDOMINIO}.kommo.com/leads/detail/${leadId}`
+}
+
+/**
+ * O nome do card no Kommo costuma vir como "CEDENTE - NOME - CNJ". Mostrar o
+ * CNJ separado já é útil; o resto do nome fica como veio, sem tentar adivinhar
+ * a estrutura (ela varia entre cards).
+ */
+function tituloCard(lead: KommoLead): string {
+  return lead.nome?.trim() || `Card ${lead.kommo_lead_id}`
+}
+
+function CardCredito({
+  lead,
+  tela,
+  onConcluir,
+  onReabrir,
+  ocupado,
+}: {
+  lead: KommoLead
+  tela: TelaAnalise
+  onConcluir: (l: KommoLead) => void
+  onReabrir: (l: KommoLead) => void
+  ocupado: boolean
+}) {
+  const [aberto, setAberto] = useState(false)
+  const nota = lead.nota_texto?.trim()
+
+  return (
+    <div className="border-b border-slate-100 p-4 last:border-b-0 hover:bg-slate-50">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-slate-800">{tituloCard(lead)}</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+            {lead.processo_cnj && (
+              <span className="whitespace-nowrap font-medium text-slate-600">
+                {formatCNJ(lead.processo_cnj)}
+              </span>
+            )}
+            <span>{NOME_STATUS[lead.status_id] ?? `coluna ${lead.status_id}`}</span>
+            {lead.responsavel_nome && <span>· {lead.responsavel_nome}</span>}
+            {lead.criado_em && <span>· criado em {formatDate(lead.criado_em)}</span>}
+          </div>
+          {lead.tags.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {lead.tags.map((t) => (
+                <Badge key={t} size="sm" tone="gray">
+                  {t}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-none items-center gap-1.5">
+          {tela === 'pendentes' && (
+            <Button
+              size="sm"
+              icon={<CheckCircle2 className="h-4 w-4" />}
+              onClick={() => onConcluir(lead)}
+              loading={ocupado}
+            >
+              Concluir análise
+            </Button>
+          )}
+          {tela === 'revisao' && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<Undo2 className="h-4 w-4" />}
+              onClick={() => onReabrir(lead)}
+              loading={ocupado}
+            >
+              Reabrir
+            </Button>
+          )}
+          <a
+            href={urlCard(lead.kommo_lead_id)}
+            target="_blank"
+            rel="noreferrer"
+            title="Abrir card no Kommo"
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </a>
+        </div>
+      </div>
+
+      {/* A nota do comercial vem em texto livre e o formato varia entre cards,
+          então é exibida crua, recolhida por padrão para não dominar a lista. */}
+      {nota && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setAberto((v) => !v)}
+            className="text-xs font-medium text-brand-600 hover:underline"
+          >
+            {aberto ? 'Ocultar dados do card' : 'Ver dados do card'}
+          </button>
+          {aberto && (
+            <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+              {nota}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function AnaliseCredito() {
-  const { useList, useCreate, useUpdate, useRemove } = analisesCrud
-  const { data, isLoading, isError, error, refetch } = useList()
-  const create = useCreate()
-  const update = useUpdate()
-  const remove = useRemove()
+  const qc = useQueryClient()
   const toast = useToast()
+  const leads = useKommoLeads(FUNIL_RPV)
+  const marcacoes = useMarcacoes()
+  const marcar = useMarcarRevisao()
 
+  const [tela, setTela] = useState<TelaAnalise>('pendentes')
   const [busca, setBusca] = useState('')
-  const [filtroStatus, setFiltroStatus] = useState<string>('todos')
-  const [editing, setEditing] = useState<Partial<Analise> | null>(null)
-  const [toDelete, setToDelete] = useState<Analise | null>(null)
-  // Erros de validação por campo, exibidos inline nos <Field> (toast fica só
-  // para erros de rede/backend).
-  const [erros, setErros] = useState<Record<string, string>>({})
-  // Snapshot do formulário tirado ao abrir — base do cálculo de `dirty`.
-  const snapshotRef = useRef<string>('')
+  const [leadOcupado, setLeadOcupado] = useState<number | null>(null)
 
-  // Abre o formulário zerando erros e registrando o snapshot para o `dirty`.
-  function abrirForm(analise: Partial<Analise>) {
-    snapshotRef.current = JSON.stringify(analise)
-    setErros({})
-    setEditing(analise)
-  }
+  // Sincroniza com o Kommo ao abrir a página, no mesmo padrão de Publicações e
+  // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
+  const sync = useMutation({
+    mutationFn: () => invokeFunction('kommo-sync', {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['kommo_leads'] })
+      qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
+    },
+    onError: (e) => toast.error(`Sincronização Kommo: ${(e as Error).message}`),
+  })
+  const jaSincronizou = useRef(false)
+  useEffect(() => {
+    if (jaSincronizou.current) return
+    jaSincronizou.current = true
+    sync.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const dirty = editing !== null && JSON.stringify(editing) !== snapshotRef.current
+  const grupos = useMemo(
+    () => agruparPorTela(leads.data ?? [], marcacoes.data ?? []),
+    [leads.data, marcacoes.data],
+  )
 
-  // Fechamento pelo botão "Cancelar": não passa pela confirmação interna do
-  // Modal (que só cobre X/overlay/Escape), então trata o `dirty` aqui.
-  function cancelarForm() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
-    setEditing(null)
-  }
-
-  // Busca textual (sem o filtro de status) — base para a lista e as contagens
-  // exibidas nas pílulas de filtro.
-  const baseBusca = useMemo(() => {
-    let l = data ?? []
+  const lista = useMemo(() => {
+    let l = grupos[tela]
     if (busca.trim()) {
       const q = busca.toLowerCase()
-      l = l.filter((a) =>
-        [a.numero_processo, a.cedente, a.devedor, a.tribunal]
+      l = l.filter((x) =>
+        [x.nome, x.processo_cnj, x.nota_texto, x.responsavel_nome]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
       )
     }
     return l
-  }, [data, busca])
+  }, [grupos, tela, busca])
 
-  const contagemStatus = useMemo(() => {
-    const c: Record<string, number> = { todos: baseBusca.length }
-    for (const k of Object.keys(STATUS_ANALISE))
-      c[k] = baseBusca.filter((a) => a.status === k).length
-    return c
-  }, [baseBusca])
-
-  const lista = useMemo(
-    () =>
-      filtroStatus === 'todos'
-        ? baseBusca
-        : baseBusca.filter((a) => a.status === filtroStatus),
-    [baseBusca, filtroStatus],
-  )
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!editing) return
-    // Validação inline: número do processo é obrigatório.
-    if (!editing.numero_processo?.trim()) {
-      setErros({ numero_processo: 'Informe o número do processo' })
-      return
-    }
+  async function alterarMarcacao(lead: KommoLead, marcarComo: boolean) {
+    setLeadOcupado(lead.kommo_lead_id)
     try {
-      const { id, created_at, updated_at, ...payload } = editing as Analise
-      if (id) {
-        await update.mutateAsync({ id, changes: payload })
-        toast.success('Análise atualizada.')
-      } else {
-        await create.mutateAsync(payload)
-        toast.success('Análise cadastrada.')
-      }
-      setEditing(null)
+      await marcar.mutateAsync({
+        leadId: lead.kommo_lead_id,
+        statusAtual: lead.status_id,
+        marcar: marcarComo,
+      })
+      toast.success(
+        marcarComo
+          ? 'Análise concluída — o card foi para Revisão.'
+          : 'Card devolvido para Pendentes.',
+      )
     } catch (err) {
       toast.error((err as Error).message)
+    } finally {
+      setLeadOcupado(null)
     }
   }
 
-  async function confirmDelete() {
-    if (!toDelete) return
-    try {
-      await remove.mutateAsync(toDelete.id)
-      toast.success('Análise excluída.')
-      setToDelete(null)
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
+  const defTela = TELAS.find((t) => t.key === tela)!
+  const carregando = leads.isLoading || marcacoes.isLoading
+  const erro = leads.isError || marcacoes.isError
+  const mensagemErro = ((leads.error ?? marcacoes.error) as Error | null)?.message
 
   return (
     <div>
       <PageHeader
         title="Análise de Crédito"
         actions={
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
-            Nova análise
-          </Button>
+          <SyncStatus
+            syncing={sync.isPending}
+            updatedAt={leads.dataUpdatedAt}
+            label="sincronizando com o Kommo…"
+          />
         }
       />
+
+      {/* Divisão por tipo de crédito. Precatórios entram na fase 2: o funil
+          existe no Kommo, mas o sync ainda só traz o de RPV. */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Segmented
+          ariaLabel="Tipo de crédito"
+          items={[
+            { key: 'rpv', label: 'RPV', count: (leads.data ?? []).length },
+            { key: 'precatorio', label: 'Precatórios', disabled: true },
+          ]}
+          value="rpv"
+          onChange={() => {}}
+        />
+        <span className="text-xs text-slate-500">
+          Precatórios em breve — hoje o sync traz apenas o Funil Geral RPV.
+        </span>
+      </div>
 
       <Card className="mb-4 p-4">
         <div className="flex flex-col gap-3 sm:flex-row">
@@ -153,233 +252,69 @@ export default function AnaliseCredito() {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
               className="pl-9"
-              placeholder="Buscar por processo, cedente, devedor, tribunal…"
+              placeholder="Buscar por nome do card, processo, responsável ou conteúdo…"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
+          <Button
+            variant="outline"
+            icon={<RefreshCw className="h-4 w-4" />}
+            onClick={() => sync.mutate()}
+            loading={sync.isPending}
+          >
+            Sincronizar
+          </Button>
+        </div>
+        <div className="mt-3">
           <Segmented
-            ariaLabel="Filtrar análises por status"
-            items={[
-              { key: 'todos', label: 'Todas', count: contagemStatus.todos },
-              ...Object.entries(STATUS_ANALISE).map(([k, v]) => ({
-                key: k,
-                label: v.label,
-                count: contagemStatus[k] ?? 0,
-              })),
-            ]}
-            value={filtroStatus}
-            onChange={setFiltroStatus}
+            ariaLabel="Etapa da análise"
+            items={TELAS.map((t) => ({
+              key: t.key,
+              label: t.label,
+              count: grupos[t.key].length,
+            }))}
+            value={tela}
+            onChange={(v) => setTela(v as TelaAnalise)}
           />
         </div>
       </Card>
 
       <Card>
-        {isLoading ? (
+        {carregando ? (
           <Loading />
-        ) : isError ? (
-          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
+        ) : erro ? (
+          <ErrorState
+            message={mensagemErro}
+            onRetry={() => {
+              leads.refetch()
+              marcacoes.refetch()
+            }}
+          />
         ) : lista.length === 0 ? (
           <EmptyState
-            title="Nenhuma análise"
-            description="Cadastre a primeira análise de crédito."
-            action={
-              <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
-                Nova análise
-              </Button>
+            title={busca.trim() ? 'Nada encontrado' : `Nenhum card em ${defTela.label}`}
+            description={
+              busca.trim()
+                ? 'Nenhum card corresponde à busca nesta etapa.'
+                : defTela.descricaoVazia
             }
           />
         ) : (
-          <Table dense>
-            <THead>
-              <tr>
-                <TH>Processo</TH>
-                <TH>Cedente / Devedor</TH>
-                <TH className="text-right tabular-nums">Valor de face</TH>
-                <TH className="text-right tabular-nums">Avaliado</TH>
-                <TH>Risco</TH>
-                <TH>Status</TH>
-                <TH className="text-right">Ações</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {lista.map((a) => {
-                const st = getLabel(STATUS_ANALISE, a.status)
-                const ri = getLabel(RISCO_ANALISE, a.risco)
-                return (
-                  <TR key={a.id}>
-                    <TD className="font-medium text-slate-800">
-                      {a.numero_processo || '—'}
-                      <div className="text-xs font-normal text-slate-500">
-                        {a.tribunal || '—'}
-                      </div>
-                    </TD>
-                    <TD>
-                      {a.cedente || '—'}
-                      <div className="text-xs text-slate-500">
-                        Devedor: {a.devedor || '—'}
-                      </div>
-                    </TD>
-                    <TD className="text-right tabular-nums">{formatBRL(a.valor_face)}</TD>
-                    <TD className="text-right tabular-nums">{formatBRL(a.valor_avaliado)}</TD>
-                    <TD>{a.risco ? <Badge tone={ri.tone}>{ri.label}</Badge> : '—'}</TD>
-                    <TD>
-                      <Badge tone={st.tone}>{st.label}</Badge>
-                    </TD>
-                    <TD className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <IconButton
-                          label="Editar"
-                          icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => abrirForm(a)}
-                        />
-                        <IconButton
-                          label="Excluir"
-                          variant="danger"
-                          icon={<Trash2 className="h-4 w-4" />}
-                          onClick={() => setToDelete(a)}
-                        />
-                      </div>
-                    </TD>
-                  </TR>
-                )
-              })}
-            </TBody>
-          </Table>
+          <div>
+            {lista.map((l) => (
+              <CardCredito
+                key={l.kommo_lead_id}
+                lead={l}
+                tela={tela}
+                ocupado={leadOcupado === l.kommo_lead_id}
+                onConcluir={(x) => alterarMarcacao(x, true)}
+                onReabrir={(x) => alterarMarcacao(x, false)}
+              />
+            ))}
+          </div>
         )}
       </Card>
-
-      <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title={editing?.id ? 'Editar análise' : 'Nova análise de crédito'}
-        size="lg"
-        dirty={dirty}
-        footer={
-          <>
-            <Button variant="outline" onClick={cancelarForm}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              form="form-analise"
-              loading={create.isPending || update.isPending}
-            >
-              Salvar
-            </Button>
-          </>
-        }
-      >
-        {editing && (
-          <form id="form-analise" onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Número do processo" required error={erros.numero_processo}>
-                <Input
-                  value={editing.numero_processo ?? ''}
-                  onChange={(e) => {
-                    setEditing({ ...editing, numero_processo: e.target.value })
-                    // Limpa o erro do campo assim que o usuário digita.
-                    if (erros.numero_processo) setErros({})
-                  }}
-                />
-              </Field>
-              <Field label="Tribunal">
-                <Input
-                  value={editing.tribunal ?? ''}
-                  onChange={(e) => setEditing({ ...editing, tribunal: e.target.value })}
-                />
-              </Field>
-              <Field label="Cedente">
-                <Input
-                  value={editing.cedente ?? ''}
-                  onChange={(e) => setEditing({ ...editing, cedente: e.target.value })}
-                />
-              </Field>
-              <Field label="Devedor">
-                <Input
-                  value={editing.devedor ?? ''}
-                  onChange={(e) => setEditing({ ...editing, devedor: e.target.value })}
-                />
-              </Field>
-              <Field label="Valor de face (R$)">
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={editing.valor_face ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      valor_face: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Valor avaliado (R$)">
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={editing.valor_avaliado ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      valor_avaliado: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Risco">
-                <Select
-                  value={editing.risco ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      risco: (e.target.value || null) as RiscoAnalise | null,
-                    })
-                  }
-                >
-                  <option value="">Não classificado</option>
-                  {Object.entries(RISCO_ANALISE).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Status" required>
-                <Select
-                  value={editing.status ?? 'pendente'}
-                  onChange={(e) =>
-                    setEditing({ ...editing, status: e.target.value as StatusAnalise })
-                  }
-                >
-                  {Object.entries(STATUS_ANALISE).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-            <Field label="Observações">
-              <Textarea
-                rows={4}
-                value={editing.observacoes ?? ''}
-                onChange={(e) => setEditing({ ...editing, observacoes: e.target.value })}
-              />
-            </Field>
-          </form>
-        )}
-      </Modal>
-
-      <ConfirmDialog
-        open={!!toDelete}
-        danger
-        loading={remove.isPending}
-        message={`Excluir a análise do processo ${toDelete?.numero_processo || ''}? Esta ação não pode ser desfeita.`}
-        confirmLabel="Excluir"
-        onConfirm={confirmDelete}
-        onClose={() => setToDelete(null)}
-      />
     </div>
   )
 }

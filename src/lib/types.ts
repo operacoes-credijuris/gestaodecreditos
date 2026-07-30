@@ -31,8 +31,45 @@ export interface AnaliseCredito {
   status: StatusAnalise
   observacoes: string | null
   responsavel_id: UUID | null
+  /** Card do Kommo que originou esta análise. Nulo nas linhas antigas. */
+  kommo_lead_id: number | null
   created_at: string
   updated_at: string
+}
+
+/**
+ * Espelho local de um card do Kommo, mantido pela Edge Function kommo-sync.
+ * A chave é kommo_lead_id (bigint), não um uuid `id` — por isso esta tabela
+ * não usa makeCrud, que pressupõe `id: string`.
+ */
+export interface KommoLead {
+  kommo_lead_id: number
+  pipeline_id: number
+  status_id: number
+  nome: string | null
+  responsavel_id: number | null
+  responsavel_nome: string | null
+  /** Nota do comercial com os dados do crédito, em texto livre. */
+  nota_texto: string | null
+  processo_cnj: string | null
+  tags: string[]
+  criado_em: string | null
+  atualizado_em: string | null
+  sincronizado_em: string
+}
+
+/**
+ * Etapa interna do operacional. Existe porque a tela de Revisão não
+ * corresponde a nenhuma coluna do Kommo — é controle nosso.
+ */
+export interface KommoAnaliseInterna {
+  kommo_lead_id: number
+  etapa_interna: 'em_revisao'
+  /** Coluna em que o card estava quando foi marcado. Se ele saiu de lá, a
+   *  marcação perde validade (alguém moveu direto no Kommo). */
+  status_id_quando_marcado: number
+  marcado_por: UUID | null
+  marcado_em: string
 }
 
 // ---------- Operacional: Processos ----------

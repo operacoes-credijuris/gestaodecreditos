@@ -5,6 +5,12 @@ export interface SegmentedItem {
   label: string
   /** Contagem exibida ao lado do rótulo (torna o filtro transparente). */
   count?: number
+  /**
+   * Opção visível mas não selecionável — para o caso de uma visão existir no
+   * domínio mas ainda não estar disponível. Deixar visível é melhor do que
+   * omitir: o usuário sabe que ela virá.
+   */
+  disabled?: boolean
 }
 
 /**
@@ -41,12 +47,15 @@ export function Segmented({
             key={item.key}
             type="button"
             aria-pressed={active}
+            disabled={item.disabled}
             onClick={() => onChange(item.key)}
             className={cn(
               'flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-              active
-                ? 'bg-white text-brand-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700',
+              item.disabled
+                ? 'cursor-not-allowed text-slate-400 opacity-60'
+                : active
+                  ? 'bg-white text-brand-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700',
             )}
           >
             {item.label}
