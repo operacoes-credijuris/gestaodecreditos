@@ -161,7 +161,7 @@ function AdvboxConfig() {
             </Field>
             <div className="sm:col-span-2">
               <Button onClick={salvar} loading={saving}>
-                Salvar ADVBOX
+                Salvar
               </Button>
             </div>
           </div>
@@ -293,7 +293,7 @@ function KommoConfig() {
                 nesta tela só serviria para depurar a integração. */}
             <div className="sm:col-span-2">
               <Button onClick={salvar} loading={saving}>
-                Salvar Kommo
+                Salvar
               </Button>
             </div>
           </div>
@@ -421,7 +421,7 @@ function DjenConfig() {
             </Button>
             <div className="pt-1">
               <Button onClick={salvar} loading={saving}>
-                Salvar OABs
+                Salvar
               </Button>
             </div>
           </div>

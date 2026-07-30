@@ -84,27 +84,35 @@ export const TELAS: DefTela[] = [
   },
 ]
 
-/** Nome da coluna do Kommo, para exibir a origem do card. */
+/**
+ * Etapa exibida ao usuário, por coluna do Kommo. Usa o vocabulário DA
+ * PLATAFORMA, não o do Kommo: quem opera aqui não precisa saber que "Aprovados"
+ * é "Apresentação de Proposta" no CRM do comercial.
+ *
+ * ST_ANALISE alimenta duas telas (Pendentes e Revisão, separadas pela marcação
+ * interna). Rotula como "Pendentes" porque é onde um card cai ao ser movido para
+ * essa coluna — a kommo-mover apaga a marcação.
+ */
 export const NOME_STATUS: Record<number, string> = {
-  [ST_ANALISE]: 'Análise Jurídica-Econômico',
-  [ST_DECISAO]: 'Revisão e Decisão do Pedro',
+  [ST_ANALISE]: 'Pendentes',
+  [ST_DECISAO]: 'Decisão',
   [ST_DILIGENCIA]: 'Diligência',
-  [ST_PROPOSTA]: 'Apresentação de Proposta',
-  [ST_REPROVADO]: 'Reprovados Operacional',
+  [ST_PROPOSTA]: 'Aprovados',
+  [ST_REPROVADO]: 'Reprovados',
 }
 
 /**
- * Destinos oferecidos ao mover um card. A ordem segue o fluxo do operacional.
- * Precisa espelhar o COLUNAS da Edge Function kommo-mover, que rejeita destino
+ * Destinos oferecidos ao mover um card, na ordem do fluxo. Os ids precisam
+ * espelhar o COLUNAS da Edge Function kommo-mover, que rejeita destino
  * desconhecido — a validação de verdade é lá, isto é só a lista da interface.
  */
 export const DESTINOS: { statusId: number; label: string }[] = [
-  { statusId: ST_ANALISE, label: 'Análise Jurídica-Econômico' },
-  { statusId: ST_DECISAO, label: 'Revisão e Decisão do Pedro' },
-  { statusId: ST_DILIGENCIA, label: 'Diligência' },
-  { statusId: ST_PROPOSTA, label: 'Apresentação de Proposta' },
-  { statusId: ST_REPROVADO, label: 'Reprovados Operacional' },
-]
+  ST_ANALISE,
+  ST_DECISAO,
+  ST_PROPOSTA,
+  ST_DILIGENCIA,
+  ST_REPROVADO,
+].map((statusId) => ({ statusId, label: NOME_STATUS[statusId] }))
 
 /** Reprovar exige justificativa. Espelha o EXIGE_MOTIVO da Edge Function. */
 export function exigeMotivo(statusId: number): boolean {

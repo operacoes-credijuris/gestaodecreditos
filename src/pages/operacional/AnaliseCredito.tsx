@@ -6,7 +6,7 @@
 // correspondente no Kommo — é controle interno, marcado na nossa base.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, RefreshCw, ExternalLink, ArrowRightLeft } from 'lucide-react'
+import { Search, ExternalLink, ArrowRightLeft } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
   FUNIL_RPV,
@@ -241,7 +241,7 @@ export default function AnaliseCredito() {
 
       {/* Divisão por tipo de crédito. Precatórios entram na fase 2: o funil
           existe no Kommo, mas o sync ainda só traz o de RPV. */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4">
         <Segmented
           ariaLabel="Tipo de crédito"
           items={[
@@ -251,30 +251,19 @@ export default function AnaliseCredito() {
           value="rpv"
           onChange={() => {}}
         />
-        <span className="text-xs text-slate-500">
-          Precatórios em breve — hoje o sync traz apenas o Funil Geral RPV.
-        </span>
       </div>
 
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por nome do card, processo, responsável ou conteúdo…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
-          <Button
-            variant="outline"
-            icon={<RefreshCw className="h-4 w-4" />}
-            onClick={() => sync.mutate()}
-            loading={sync.isPending}
-          >
-            Sincronizar
-          </Button>
+        {/* Sem botão de sincronizar: o cron roda de 15 em 15 min e a página
+            sincroniza ao abrir. O SyncStatus no cabeçalho mostra quando corre. */}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="pl-9"
+            placeholder="Buscar por nome do card, processo, responsável ou conteúdo…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
         </div>
         <div className="mt-3">
           <Segmented
