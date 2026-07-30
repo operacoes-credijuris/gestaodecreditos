@@ -61,10 +61,18 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const svc = serviceClient()
-    const caller = await getCaller(req)
-    if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
+    // Autorização: JWT de usuário (chamada do app) OU segredo de cron —
+    // mesmo padrão de djen-publicacoes e advbox-movimentacoes. O cron precisa
+    // rodar sem ninguém logado, daí verify_jwt = false no config.toml.
+    const cronSecret = Deno.env.get('CRON_SECRET')
+    const headerSecret = req.headers.get('x-cron-secret')
+    const autorizadoPorCron = !!cronSecret && headerSecret === cronSecret
+    if (!autorizadoPorCron) {
+      const caller = await getCaller(req)
+      if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
+    }
 
+    const svc = serviceClient()
     const { data: secret } = await svc
       .from('integracao_kommo_secret')
       .select('token, subdominio')
