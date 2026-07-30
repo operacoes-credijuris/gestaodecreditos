@@ -2,7 +2,14 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
-type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger'
+type Variant =
+  | 'primary'
+  | 'secondary'
+  | 'outline'
+  | 'ghost'
+  | 'danger'
+  | 'success'
+  | 'warning'
 type Size = 'sm' | 'md' | 'lg'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -23,6 +30,14 @@ const variants: Record<Variant, string> = {
   ghost: 'text-slate-600 hover:bg-slate-100 focus-visible:ring-slate-400',
   danger:
     'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:bg-red-300',
+  // Desfechos positivo e intermediário, para telas em que as saídas são
+  // alternativas legítimas e a cor comunica mais rápido que o rótulo.
+  success:
+    'bg-emerald-700 text-white hover:bg-emerald-800 focus-visible:ring-emerald-600 disabled:bg-emerald-300',
+  // orange-600 e não 700: no 700 o laranja escurece para um tijolo que fica
+  // perto demais do vermelho de perigo, e as duas ações precisam se distinguir.
+  warning:
+    'bg-orange-600 text-white hover:bg-orange-700 focus-visible:ring-orange-500 disabled:bg-orange-300',
 }
 
 const sizes: Record<Size, string> = {

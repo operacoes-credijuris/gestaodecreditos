@@ -107,10 +107,10 @@ function CardCredito({
           )}
         </div>
 
-        {/* Ações empilhadas e esticadas à mesma largura: em Decisão são três, e
-            lado a lado competiriam com o conteúdo do card. */}
+        {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
+            em vez de três. flex-wrap para não estourar em tela estreita. */}
         {acoes.length > 0 && (
-          <div className="flex flex-none flex-col items-stretch gap-1.5">
+          <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
             {acoes.map((a) => (
               <Button
                 key={a.statusId}

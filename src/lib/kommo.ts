@@ -97,7 +97,7 @@ export const TELAS: DefTela[] = [
 export interface AcaoTela {
   statusId: number
   label: string
-  variant: 'primary' | 'outline' | 'danger'
+  variant: 'primary' | 'success' | 'warning' | 'danger'
 }
 
 /**
@@ -112,9 +112,12 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   pendentes: [
     { statusId: ST_DECISAO, label: 'Enviar para decisão', variant: 'primary' },
   ],
+  // Cores em vez de hierarquia: as três são alternativas legítimas, e
+  // verde/laranja/vermelho se lê mais rápido que o rótulo numa tela onde a mesma
+  // decisão é tomada dezenas de vezes.
   decisao: [
-    { statusId: ST_PROPOSTA, label: 'Aprovar', variant: 'primary' },
-    { statusId: ST_DILIGENCIA, label: 'Diligência', variant: 'outline' },
+    { statusId: ST_PROPOSTA, label: 'Aprovar', variant: 'success' },
+    { statusId: ST_DILIGENCIA, label: 'Diligência', variant: 'warning' },
     { statusId: ST_REPROVADO, label: 'Reprovar', variant: 'danger' },
   ],
   aprovados: [],
