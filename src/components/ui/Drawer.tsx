@@ -64,7 +64,9 @@ export function Drawer({
       />
       <div
         className={cn(
-          'absolute inset-y-0 right-0 flex w-full max-w-md flex-col bg-white shadow-2xl transition-transform duration-200',
+          // max-w-2xl: a ficha usa grid de 2 colunas (DrawerSection) e em
+          // max-w-md os valores longos quebravam demais.
+          'absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col bg-white shadow-2xl transition-transform duration-200',
           visible ? 'translate-x-0' : 'translate-x-full',
         )}
       >

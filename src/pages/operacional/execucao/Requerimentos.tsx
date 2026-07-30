@@ -192,19 +192,21 @@ export default function Requerimentos() {
         ) : (
           <Table dense>
             <THead>
+              {/* Larguras explícitas: sem elas o layout automático dava quase
+                  toda a tabela para Matéria e comprimia o protocolo. Data e
+                  Ações usam w-[1%]+nowrap para encolher até o conteúdo. */}
               <tr>
-                <TH>Protocolo</TH>
-                <TH>Classe</TH>
+                <TH className="w-[26%]">Protocolo</TH>
+                <TH className="w-[18%]">Classe</TH>
                 <TH>Matéria</TH>
                 <SortableTH
                   label="Data de protocolo"
                   active
                   dir={sortDir}
                   onToggle={toggleSort}
+                  className="w-[1%] whitespace-nowrap"
                 />
-                <TH className="text-right">
-                  <span className="sr-only">Ações</span>
-                </TH>
+                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>

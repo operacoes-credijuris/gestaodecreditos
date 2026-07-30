@@ -297,9 +297,7 @@ export default function Processos() {
                   onToggle={() => toggleSort('expectativa_liquidacao')}
                 />
                 <TH>Instrumento</TH>
-                <TH className="text-right">
-                  <span className="sr-only">Ações</span>
-                </TH>
+                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -603,31 +601,8 @@ export default function Processos() {
             </div>
           )
         }
-        footer={
-          detalhe && (
-            <>
-              <Button
-                variant="outline"
-                icon={<Trash2 className="h-4 w-4" />}
-                onClick={() => {
-                  setDetalhe(null)
-                  setToDelete(detalhe)
-                }}
-              >
-                Excluir
-              </Button>
-              <Button
-                icon={<Pencil className="h-4 w-4" />}
-                onClick={() => {
-                  setDetalhe(null)
-                  abrirForm(detalhe)
-                }}
-              >
-                Editar
-              </Button>
-            </>
-          )
-        }
+        // Sem footer: a ficha é só leitura. Editar e excluir ficam nos botões
+        // da própria linha da tabela.
       >
         {detalhe && (
           <>

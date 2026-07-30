@@ -440,6 +440,20 @@ export default function ContatosServentias() {
             ))}
           </Select>
         </div>
+
+        {/* Legenda das bolinhas da tabela. Derivada de DOT_TIPO justamente para
+            não divergir das cores usadas nas linhas. */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+          {Object.entries(DOT_TIPO).map(([tipo, { cor, label }]) => (
+            <span key={tipo} className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className={cn('h-2 w-2 shrink-0 rounded-full', cor)}
+              />
+              Órgão {label.toLowerCase()}
+            </span>
+          ))}
+        </div>
       </Card>
 
       <Card>
@@ -478,9 +492,7 @@ export default function ContatosServentias() {
                 <TH>Telefone</TH>
                 <TH>WhatsApp</TH>
                 <TH>E-mail</TH>
-                <TH className="text-right">
-                  <span className="sr-only">Ações</span>
-                </TH>
+                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
