@@ -415,7 +415,7 @@ export default function ContatosServentias() {
         }
       />
 
-      <Card className="mb-4 p-4">
+      <Card className="mb-3 p-4">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -440,21 +440,21 @@ export default function ContatosServentias() {
             ))}
           </Select>
         </div>
-
-        {/* Legenda das bolinhas da tabela. Derivada de DOT_TIPO justamente para
-            não divergir das cores usadas nas linhas. */}
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-          {Object.entries(DOT_TIPO).map(([tipo, { cor, label }]) => (
-            <span key={tipo} className="inline-flex items-center gap-1.5">
-              <span
-                aria-hidden="true"
-                className={cn('h-2 w-2 shrink-0 rounded-full', cor)}
-              />
-              Órgão {label.toLowerCase()}
-            </span>
-          ))}
-        </div>
       </Card>
+
+      {/* Legenda das bolinhas, no respiro entre a busca e a tabela. Derivada de
+          DOT_TIPO justamente para não divergir das cores usadas nas linhas. */}
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-500">
+        {Object.entries(DOT_TIPO).map(([tipo, { cor, label }]) => (
+          <span key={tipo} className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className={cn('h-2 w-2 shrink-0 rounded-full', cor)}
+            />
+            órgão {label.toLowerCase()}
+          </span>
+        ))}
+      </div>
 
       <Card>
         {isLoading ? (

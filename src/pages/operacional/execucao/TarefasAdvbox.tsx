@@ -359,16 +359,18 @@ export default function TarefasAdvbox() {
                       {formatCNJ(t.processo)}
                       {partes && ` · ${partes}`}
                     </div>
-                    {resp.length > 0 && (
-                      <div className="mt-1 flex items-start gap-1.5 text-sm text-slate-600">
-                        <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-400" />
-                        <span className="break-words">
-                          {resp.map((r) => formatNome(r)).join(', ')}
-                        </span>
-                      </div>
-                    )}
                     {t.notes && <Observacao text={t.notes} />}
                   </div>
+                  {/* Responsáveis à esquerda do botão de petição. max-w evita
+                      que nomes longos comam a coluna de conteúdo. */}
+                  {resp.length > 0 && (
+                    <div className="flex max-w-[11rem] flex-none items-start gap-1.5 text-sm text-slate-600">
+                      <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-400" />
+                      <span className="break-words">
+                        {resp.map((r) => formatNome(r)).join(', ')}
+                      </span>
+                    </div>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
