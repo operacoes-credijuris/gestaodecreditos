@@ -39,3 +39,7 @@ verify_jwt = true
 # função valida a autorização, por isso verify_jwt = false.
 [functions.kommo-sync]
 verify_jwt = false
+
+# Escreve no Kommo em nome de um usuário: exige autenticação, nunca cron.
+[functions.kommo-mover]
+verify_jwt = true

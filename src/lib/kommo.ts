@@ -93,6 +93,24 @@ export const NOME_STATUS: Record<number, string> = {
   [ST_REPROVADO]: 'Reprovados Operacional',
 }
 
+/**
+ * Destinos oferecidos ao mover um card. A ordem segue o fluxo do operacional.
+ * Precisa espelhar o COLUNAS da Edge Function kommo-mover, que rejeita destino
+ * desconhecido — a validação de verdade é lá, isto é só a lista da interface.
+ */
+export const DESTINOS: { statusId: number; label: string }[] = [
+  { statusId: ST_ANALISE, label: 'Análise Jurídica-Econômico' },
+  { statusId: ST_DECISAO, label: 'Revisão e Decisão do Pedro' },
+  { statusId: ST_DILIGENCIA, label: 'Diligência' },
+  { statusId: ST_PROPOSTA, label: 'Apresentação de Proposta' },
+  { statusId: ST_REPROVADO, label: 'Reprovados Operacional' },
+]
+
+/** Reprovar exige justificativa. Espelha o EXIGE_MOTIVO da Edge Function. */
+export function exigeMotivo(statusId: number): boolean {
+  return statusId === ST_REPROVADO
+}
+
 // ---------- Consultas ----------
 
 /** Cards do funil informado (espelho local). */
