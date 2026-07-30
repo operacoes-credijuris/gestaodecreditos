@@ -37,3 +37,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Artefato local do "deno check" nas Edge Functions (nao usado no deploy)
+deno.lock
