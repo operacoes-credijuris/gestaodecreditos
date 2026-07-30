@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
 import { processosCrud, apensosCrud } from '@/lib/queries'
+import { cn } from '@/lib/cn'
 import { useApensosManager } from '@/components/Apensos'
 import type { Processo, StatusProcesso, Instrumento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -61,8 +62,22 @@ const VAZIO: Partial<Processo> = {
 // Nº de colunas da tabela de créditos — usado no colSpan da linha de apensos.
 // Atualizar ao adicionar/remover colunas para a linha continuar ocupando a largura toda.
 // A tabela mostra só o essencial para escanear; a ficha completa (advogado,
-// instrumento, RTDPJ, tribunal etc.) abre no Drawer ao clicar na linha.
+// tribunal, datas de liquidação etc.) abre no Drawer ao clicar na linha.
 const N_COLUNAS = 6
+
+// Bolinha de status ao lado do nº do processo — o status por extenso é
+// redundante com o filtro de pílulas acima da tabela; a cor basta.
+const DOT_STATUS: Record<string, string> = {
+  green: 'bg-emerald-500',
+  blue: 'bg-blue-500',
+  yellow: 'bg-amber-400',
+  amber: 'bg-amber-400',
+  orange: 'bg-orange-500',
+  red: 'bg-red-500',
+  purple: 'bg-violet-500',
+  violet: 'bg-violet-500',
+  gray: 'bg-slate-400',
+}
 
 export default function Processos() {
   const { useList, useCreate, useUpdate, useRemove } = processosCrud
@@ -281,7 +296,7 @@ export default function Processos() {
                   dir={sortDir}
                   onToggle={() => toggleSort('expectativa_liquidacao')}
                 />
-                <TH>Status</TH>
+                <TH>Instrumento</TH>
                 <TH className="text-right">
                   <span className="sr-only">Ações</span>
                 </TH>
@@ -290,15 +305,28 @@ export default function Processos() {
             <TBody>
               {lista.map((p) => {
                 const st = getLabel(STATUS_PROCESSO, p.status)
+                const inst = getLabel(INSTRUMENTO, p.instrumento)
                 return (
                   <Fragment key={p.id}>
                   <TR onClick={() => setDetalhe(p)}>
                     <TD className="font-medium text-slate-800">
-                      <span className="whitespace-nowrap">
-                        {formatCNJ(p.numero_cnj)}
-                      </span>
-                      <div className="max-w-[230px] truncate text-xs font-normal text-slate-500">
-                        {p.cedente || '—'} v. {p.cessionario || '—'}
+                      <div className="flex items-start gap-2">
+                        <span
+                          title={st.label}
+                          aria-label={`Status: ${st.label}`}
+                          className={cn(
+                            'mt-1.5 h-2 w-2 shrink-0 rounded-full',
+                            DOT_STATUS[st.tone] ?? 'bg-slate-400',
+                          )}
+                        />
+                        <div className="min-w-0">
+                          <span className="whitespace-nowrap">
+                            {formatCNJ(p.numero_cnj)}
+                          </span>
+                          <div className="max-w-[230px] truncate text-xs font-normal text-slate-500">
+                            {p.cedente || '—'} v. {p.cessionario || '—'}
+                          </div>
+                        </div>
                       </div>
                     </TD>
                     <TD>
@@ -316,10 +344,16 @@ export default function Processos() {
                       {formatDate(p.expectativa_liquidacao)}
                     </TD>
                     <TD className="whitespace-nowrap">
-                      <Badge tone={st.tone}>{st.label}</Badge>
-                      {p.data_liquidacao && (
-                        <div className="text-xs text-slate-500">
-                          Liq. {formatDate(p.data_liquidacao)}
+                      {p.instrumento ? (
+                        <Badge tone={inst.tone}>{inst.label}</Badge>
+                      ) : (
+                        '—'
+                      )}
+                      {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {splitRtdpj(p.numero_rtdpj).map((n, i) => (
+                            <div key={i}>{n}</div>
+                          ))}
                         </div>
                       )}
                     </TD>

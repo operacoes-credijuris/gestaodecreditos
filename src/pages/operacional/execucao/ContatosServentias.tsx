@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Input } from '@/components/ui/Field'
+import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
@@ -175,6 +175,8 @@ export default function ContatosServentias() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
+  // Filtro por tribunal — 'todos' mostra todos os órgãos.
+  const [filtroTribunal, setFiltroTribunal] = useState('todos')
   const [editing, setEditing] = useState<Partial<ContatoServentia> | null>(null)
   const [toDelete, setToDelete] = useState<ContatoServentia | null>(null)
   // Erros de validação por campo (mensagens inline nos <Field>).
@@ -218,7 +220,8 @@ export default function ContatosServentias() {
     requerimentos.error ||
     apensos.error) as Error | null
 
-  const linhas = useMemo<OrgaoRow[]>(() => {
+  // Base completa (sem busca/filtro) — alimenta a lista e as opções de tribunal.
+  const todasLinhas = useMemo<OrgaoRow[]>(() => {
     // Separa contatos salvos: julgadores (por órgão) e auxiliares.
     const julgadorContatos = new Map<string, ContatoServentia>()
     const auxiliares: ContatoServentia[] = []
@@ -270,6 +273,27 @@ export default function ContatosServentias() {
       })
     }
 
+    return l.sort((a, b) =>
+      formatOrgaoLabel(a.orgao).localeCompare(formatOrgaoLabel(b.orgao), 'pt-BR'),
+    )
+  }, [contatos.data, processos.data, requerimentos.data, apensos.data])
+
+  // Tribunais distintos (com contagem de órgãos) para o filtro.
+  const tribunais = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const r of todasLinhas) {
+      const t = r.tribunal.trim()
+      if (!t) continue
+      m.set(t, (m.get(t) ?? 0) + 1)
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
+  }, [todasLinhas])
+
+  const linhas = useMemo<OrgaoRow[]>(() => {
+    let l = todasLinhas
+    if (filtroTribunal !== 'todos') {
+      l = l.filter((r) => r.tribunal.trim() === filtroTribunal)
+    }
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((r) =>
@@ -287,10 +311,8 @@ export default function ContatosServentias() {
           .some((v) => v!.toLowerCase().includes(q)),
       )
     }
-    return l.sort((a, b) =>
-      formatOrgaoLabel(a.orgao).localeCompare(formatOrgaoLabel(b.orgao), 'pt-BR'),
-    )
-  }, [contatos.data, processos.data, requerimentos.data, apensos.data, busca])
+    return l
+  }, [todasLinhas, filtroTribunal, busca])
 
   function abrirEdicao(row: OrgaoRow) {
     if (row.contato) {
@@ -386,14 +408,29 @@ export default function ContatosServentias() {
       />
 
       <Card className="mb-4 p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por órgão, tribunal, telefone ou e-mail…"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              className="pl-9"
+              placeholder="Buscar por órgão, tribunal, telefone ou e-mail…"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
+          </div>
+          <Select
+            className="sm:w-64"
+            value={filtroTribunal}
+            onChange={(e) => setFiltroTribunal(e.target.value)}
+            aria-label="Filtrar por tribunal"
+          >
+            <option value="todos">Todos os tribunais ({todasLinhas.length})</option>
+            {tribunais.map(([t, n]) => (
+              <option key={t} value={t}>
+                {t} ({n})
+              </option>
+            ))}
+          </Select>
         </div>
       </Card>
 
@@ -444,12 +481,18 @@ export default function ContatosServentias() {
                 return (
                   <TR key={row.key}>
                     <TD className="font-medium text-slate-800">
-                      <div className="flex items-center gap-1.5">
+                      <div className="max-w-[280px] truncate">
                         {formatOrgaoLabel(row.orgao)}
+                      </div>
+                      <div className="mt-0.5">
                         {row.tipo === 'auxiliar' ? (
-                          <Badge tone="purple">auxiliar</Badge>
+                          <Badge size="sm" tone="purple">
+                            auxiliar
+                          </Badge>
                         ) : (
-                          <Badge tone="blue">julgador</Badge>
+                          <Badge size="sm" tone="blue">
+                            julgador
+                          </Badge>
                         )}
                       </div>
                     </TD>

@@ -36,7 +36,7 @@ const VAZIO: Partial<Requerimento> = {
 }
 
 // Total de colunas da tabela — usado no colSpan da linha de apensos.
-const N_COLUNAS = 5
+const N_COLUNAS = 6
 
 // Normaliza string vazia (ou só espaços) para null antes de enviar ao backend.
 const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
@@ -193,8 +193,9 @@ export default function Requerimentos() {
             <THead>
               <tr>
                 <TH>Protocolo</TH>
-                <TH>Órgão</TH>
-                <TH>Classe / Matéria</TH>
+                <TH>Tribunal / Órgão</TH>
+                <TH>Classe</TH>
+                <TH>Matéria</TH>
                 <SortableTH
                   label="Data de protocolo"
                   active
@@ -210,22 +211,24 @@ export default function Requerimentos() {
               {lista.map((r) => (
                 <Fragment key={r.id}>
                 <TR>
-                  <TD className="font-medium text-slate-800">
+                  <TD className="whitespace-nowrap font-medium text-slate-800">
                     {r.numero_protocolo || '—'}
-                    <div className="text-xs font-normal text-slate-500">
+                  </TD>
+                  <TD>
+                    <div className="max-w-[200px] truncate">
                       {r.tribunal_entidade || '—'}
                     </div>
+                    <div className="max-w-[200px] truncate text-xs text-slate-500">
+                      {r.orgao || '—'}
+                    </div>
                   </TD>
                   <TD>
-                    <div className="max-w-[220px] truncate">{r.orgao || '—'}</div>
-                  </TD>
-                  <TD>
-                    <div className="max-w-[240px] truncate">
+                    <div className="max-w-[180px] truncate">
                       {r.classe_processual || '—'}
                     </div>
-                    <div className="max-w-[240px] truncate text-xs text-slate-500">
-                      {r.materia || '—'}
-                    </div>
+                  </TD>
+                  <TD>
+                    <div className="max-w-[180px] truncate">{r.materia || '—'}</div>
                   </TD>
                   <TD className="whitespace-nowrap text-slate-600">
                     {formatDate(r.data_protocolo)}
