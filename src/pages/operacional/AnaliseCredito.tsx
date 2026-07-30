@@ -16,6 +16,7 @@ import {
   exigeMotivo,
   agruparPorTela,
   useKommoLeads,
+  useAnalisesProntas,
   type TelaAnalise,
   type AcaoTela,
 } from '@/lib/kommo'
@@ -47,10 +48,13 @@ function CardCredito({
   lead,
   acoes,
   onAcao,
+  analisePronta,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
   onAcao: (l: KommoLead, a: AcaoTela) => void
+  /** null = não mostrar o selo (só faz sentido na etapa de revisão). */
+  analisePronta: boolean | null
 }) {
   const [aberto, setAberto] = useState(false)
   const nota = lead.nota_texto?.trim()
@@ -59,7 +63,14 @@ function CardCredito({
     <div className="border-b border-slate-100 p-4 last:border-b-0 hover:bg-slate-50">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-slate-800">{tituloCard(lead)}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
+            {analisePronta !== null && (
+              <Badge size="sm" tone={analisePronta ? 'green' : 'yellow'}>
+                {analisePronta ? 'finalizado' : 'em curso'}
+              </Badge>
+            )}
+          </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
             {lead.processo_cnj && (
               <span className="whitespace-nowrap font-medium text-slate-600">
@@ -133,6 +144,7 @@ export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
   const leads = useKommoLeads(FUNIL_RPV)
+  const prontas = useAnalisesProntas()
 
   const [tela, setTela] = useState<TelaAnalise>('pendentes')
   const [busca, setBusca] = useState('')
@@ -148,7 +160,10 @@ export default function AnaliseCredito() {
   // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
   const sync = useMutation({
     mutationFn: () => invokeFunction('kommo-sync', {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['kommo_leads'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['kommo_leads'] })
+      qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
+    },
     onError: (e) => toast.error(`Sincronização Kommo: ${(e as Error).message}`),
   })
   const jaSincronizou = useRef(false)
@@ -179,6 +194,7 @@ export default function AnaliseCredito() {
       invokeFunction<{ mensagem: string; aviso: string | null }>('kommo-mover', args),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['kommo_leads'] })
+      qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
       // A função devolve aviso quando o card moveu mas a anotação não gravou —
       // é sucesso parcial, não erro, e o usuário precisa saber da diferença.
       if (r?.aviso) toast.error(r.aviso)
@@ -294,6 +310,14 @@ export default function AnaliseCredito() {
                 lead={l}
                 acoes={ACOES[tela]}
                 onAcao={abrir}
+                // O selo só aparece em Pendentes: nas etapas seguintes a
+                // análise já passou pela revisão, então dizer "finalizado"
+                // seria ruído.
+                analisePronta={
+                  tela === 'pendentes'
+                    ? (prontas.data?.has(l.kommo_lead_id) ?? false)
+                    : null
+                }
               />
             ))}
           </div>

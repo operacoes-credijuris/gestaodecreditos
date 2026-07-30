@@ -17,7 +17,7 @@
 // exista só na nossa base — o kanban é a fonte de verdade.
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from './supabase'
-import type { KommoLead } from './types'
+import type { KommoLead, KommoAnaliseInterna } from './types'
 
 // Funis que o operacional usa, na conta contatocredijuriscom.
 export const FUNIL_RPV = 13901939
@@ -140,6 +140,34 @@ export function useKommoLeads(pipelineId: number) {
         .order('atualizado_em', { ascending: false })
       if (error) throw new Error(error.message)
       return (data ?? []) as KommoLead[]
+    },
+  })
+}
+
+/**
+ * Cards cuja análise automática já ficou pronta.
+ *
+ * A tabela é escrita pelo processo de análise (IA), do lado servidor — a
+ * interface só lê. Serve para o revisor distinguir, dentro de Pendentes, o que
+ * já dá para revisar do que ainda está na fila: sem isso os cards são
+ * visualmente idênticos e ele abre no escuro.
+ *
+ * Devolve um Set dos ids com análise concluída; a ausência da linha é o estado
+ * "em curso".
+ */
+export function useAnalisesProntas() {
+  return useQuery({
+    queryKey: ['kommo_analise_interna'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('kommo_analise_interna')
+        .select('kommo_lead_id')
+      if (error) throw new Error(error.message)
+      return new Set(
+        ((data ?? []) as Pick<KommoAnaliseInterna, 'kommo_lead_id'>[]).map(
+          (r) => r.kommo_lead_id,
+        ),
+      )
     },
   })
 }
