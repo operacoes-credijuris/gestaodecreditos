@@ -31,3 +31,11 @@ verify_jwt = false
 
 [functions.advbox-movimentacoes]
 verify_jwt = false
+
+# Kommo: ambas exigem usuário autenticado (a de token exige admin, validado
+# dentro da própria função).
+[functions.salvar-token-kommo]
+verify_jwt = true
+
+[functions.kommo-sync]
+verify_jwt = true

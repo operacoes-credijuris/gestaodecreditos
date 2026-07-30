@@ -130,6 +130,10 @@ configuração extra de servidor.
 > Node, então precisam de `check:functions` — que exige o
 > [Deno](https://deno.com) instalado (`winget install DenoLand.Deno`). O mesmo
 > passo roda no CI antes do deploy das funções.
+>
+> As funções importam o cliente do Supabase com especificador `npm:` e **versão
+> fixa** (`_shared/auth.ts`). Para atualizar, troque a versão lá de propósito e
+> rode `npm run check:functions`.
 
 ## 6. Estrutura do projeto
 

@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "check:functions": "deno check supabase/functions"
+    "check:functions": "deno check --node-modules-dir=none supabase/functions"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

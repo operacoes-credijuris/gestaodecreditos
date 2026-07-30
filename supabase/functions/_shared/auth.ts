@@ -1,5 +1,15 @@
 // Helpers de autenticação/serviço compartilhados pelas Edge Functions.
-import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+//
+// Especificador `npm:` em vez de https://esm.sh, e versão fixa. Motivo: este é
+// o único import externo das 9 funções, então ele era um ponto único de falha
+// em dois sentidos.
+//   1. Disponibilidade: em 30/07/2026 o esm.sh devolveu 522 durante o deploy e
+//      derrubou a implantação inteira, inclusive de funções não alteradas.
+//   2. Versão: `@2` significa "qualquer 2.x" — resolvia para o que estivesse
+//      publicado no dia, então uma mudança de comportamento chegaria em
+//      produção sem ninguém ter mexido no código.
+// Para atualizar, troque a versão aqui de propósito e rode `npm run check:functions`.
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
 export const ADMIN_EMAIL = 'contato@credijuris.com'
 

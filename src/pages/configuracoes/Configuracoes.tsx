@@ -172,6 +172,9 @@ function AdvboxConfig() {
 }
 
 // ----------------------- KOMMO -----------------------
+/** Conta Kommo da Credijuris. Não é segredo — é o que aparece na URL. */
+const SUBDOMINIO_PADRAO = 'contatocredijuriscom'
+
 // O Kommo é o CRM em kanban onde o comercial cria os cards de análise de
 // crédito. Precisa de DUAS informações, não só do token: a API resolve a conta
 // pelo host (https://<subdominio>.kommo.com), então subdomínio errado devolve
@@ -186,7 +189,10 @@ function KommoConfig() {
 
   useEffect(() => {
     const cfg = (data?.config as ConfigKommo) ?? {}
-    setSubdominio(cfg.subdominio ?? '')
+    // Pré-preenche com a conta da Credijuris: é sempre a mesma, e digitar
+    // subdomínio errado dá 401 confuso (a API resolve a conta pelo host).
+    // Continua editável para o caso de a conta mudar.
+    setSubdominio(cfg.subdominio ?? SUBDOMINIO_PADRAO)
   }, [data])
 
   const cfg = (data?.config as ConfigKommo) ?? {}

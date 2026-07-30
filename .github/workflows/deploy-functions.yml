@@ -29,8 +29,10 @@ jobs:
         with:
           deno-version: v2.x
 
+      # --node-modules-dir=none: o package.json do site na raiz faz o Deno
+      # procurar node_modules; as funções resolvem npm: pelo cache dele.
       - name: Verificação de tipos das Edge Functions
-        run: deno check supabase/functions
+        run: deno check --node-modules-dir=none supabase/functions
 
       - name: Deploy de todas as Edge Functions
         run: supabase functions deploy --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
