@@ -95,15 +95,9 @@ function CardCredito({
               criado em {formatDate(lead.criado_em)}
             </div>
           )}
-          {lead.tags.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {lead.tags.map((t) => (
-                <Badge key={t} size="sm" tone="gray">
-                  {t}
-                </Badge>
-              ))}
-            </div>
-          )}
+          {/* Tags não são exibidas: as dos cards atuais são artefato da migração
+              do Chatwoot (migracao-chatwoot, importar_25062026_1440) e não dizem
+              nada a quem analisa. Continuam sincronizadas em kommo_leads.tags. */}
         </div>
 
         {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
