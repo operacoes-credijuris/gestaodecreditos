@@ -35,7 +35,7 @@ import { Modal } from '@/components/ui/Modal'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatDate } from '@/lib/format'
+import { formatDate } from '@/lib/format'
 
 const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
 
@@ -87,15 +87,14 @@ function CardCredito({
               </Badge>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
-            {lead.processo_cnj && (
-              <span className="whitespace-nowrap font-medium text-slate-600">
-                {formatCNJ(lead.processo_cnj)}
-              </span>
-            )}
-            {lead.responsavel_nome && <span>{lead.responsavel_nome}</span>}
-            {lead.criado_em && <span>· criado em {formatDate(lead.criado_em)}</span>}
-          </div>
+          {/* O processo já vem no título do card e o responsável é sempre a
+              Credijuris — repetir os dois só afastava o que interessa. O CNJ
+              continua indexado para a busca e visível em "Ver dados do card". */}
+          {lead.criado_em && (
+            <div className="mt-1 text-xs text-slate-500">
+              criado em {formatDate(lead.criado_em)}
+            </div>
+          )}
           {lead.tags.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {lead.tags.map((t) => (
