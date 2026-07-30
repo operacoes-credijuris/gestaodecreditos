@@ -181,8 +181,9 @@ Deno.serve(async (req: Request) => {
         // created_by = 0 é o robô/automação do Kommo, não uma pessoa.
         autor: n.created_by ? usuarios.get(n.created_by) ?? null : null,
       }))
-      // nota_texto segue sendo a PRIMEIRA: é o campo semântico "dados do
-      // crédito", de onde sai o CNJ. O histórico completo vai em `notas`.
+      // nota_texto é simplesmente a PRIMEIRA anotação — sem promessa de conter
+      // os dados do crédito. Há cards em que a primeira é um comentário curto
+      // ("qualificado") e o bloco de dados vem na segunda.
       const nota = notas[0]?.texto ?? null
       return {
         kommo_lead_id: l.id,
@@ -195,7 +196,9 @@ Deno.serve(async (req: Request) => {
           : null,
         nota_texto: nota,
         notas,
-        processo_cnj: extrairCnj(nota, l.name),
+        // Procura em TODAS as anotações, não só na primeira: o bloco com o
+        // processo às vezes está numa nota posterior.
+        processo_cnj: extrairCnj(...notas.map((n) => n.texto), l.name),
         // filter(Boolean) não estreita o tipo em TS, então o predicado é
         // explícito — a coluna é text[] not null e não aceita nulo no meio.
         tags: (l._embedded?.tags ?? [])

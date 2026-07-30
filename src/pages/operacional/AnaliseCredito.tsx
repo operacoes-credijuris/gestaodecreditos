@@ -39,6 +39,12 @@ import { formatDate } from '@/lib/format'
 
 const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
 
+/**
+ * Conta genérica do Kommo. Anotação assinada por ela não diz quem escreveu, então
+ * o autor é omitido; quando vem outro nome, aí sim informa algo.
+ */
+const CONTA_PADRAO = 'Credijuris'
+
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
 const ICONES: Record<number, ReactNode> = {
   [ST_DECISAO]: <ArrowRight className="h-4 w-4" />,
@@ -95,17 +101,10 @@ function CardCredito({
               </Badge>
             )}
           </div>
-          {/* O processo já vem no título do card e o responsável é sempre a
-              Credijuris — repetir os dois só afastava o que interessa. O CNJ
-              continua indexado para a busca e visível em "Ver dados do card". */}
-          {lead.criado_em && (
-            <div className="mt-1 text-xs text-slate-500">
-              criado em {formatDate(lead.criado_em)}
-            </div>
-          )}
-          {/* Tags não são exibidas: as dos cards atuais são artefato da migração
-              do Chatwoot (migracao-chatwoot, importar_25062026_1440) e não dizem
-              nada a quem analisa. Continuam sincronizadas em kommo_leads.tags. */}
+          {/* Sem linha de metadados: o processo já vem no título, o responsável é
+              sempre a Credijuris, e a data de criação do card é redundante com as
+              datas das próprias anotações. Tags também ficam de fora — as atuais
+              são artefato da migração do Chatwoot. Tudo continua em kommo_leads. */}
         </div>
 
         {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
@@ -141,9 +140,8 @@ function CardCredito({
             onClick={() => setAberto((v) => !v)}
             className="text-xs font-medium text-brand-600 hover:underline"
           >
-            {aberto ? 'Ocultar dados do card' : 'Ver dados do card'}
-            {posteriores > 0 &&
-              ` (+${posteriores} anotação${posteriores > 1 ? 'ões' : ''})`}
+            {aberto ? 'Ocultar histórico' : 'Ver histórico'}
+            {posteriores > 0 && ` (+${posteriores})`}
           </button>
         )}
         <a
@@ -160,13 +158,14 @@ function CardCredito({
         <div className="mt-2 space-y-2">
           {notas.map((n, i) => (
             <div key={n.id || i}>
-              {/* A primeira é o dado do crédito; as seguintes são o histórico. */}
+              {/* Sem rótulo de posição: há cards em que a primeira anotação é um
+                  comentário curto e o bloco de dados vem depois, então numerar
+                  ou chamar a primeira de "dados do crédito" seria mentira.
+                  O autor só aparece quando NÃO é a conta padrão — nela ele não
+                  distingue nada, mas quando é uma pessoa, distingue. */}
               <div className="mb-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
-                <span className="font-medium text-slate-500">
-                  {i === 0 ? 'Dados do crédito' : `Anotação ${i + 1}`}
-                </span>
                 {n.criado_em && <span>{formatDate(n.criado_em)}</span>}
-                {n.autor && <span>· {n.autor}</span>}
+                {n.autor && n.autor !== CONTA_PADRAO && <span>· {n.autor}</span>}
               </div>
               <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
                 {n.texto}
