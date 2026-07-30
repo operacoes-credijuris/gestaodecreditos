@@ -36,7 +36,8 @@ const VAZIO: Partial<Requerimento> = {
 }
 
 // Total de colunas da tabela — usado no colSpan da linha de apensos.
-const N_COLUNAS = 6
+// Tribunal/órgão não têm coluna própria: viram subtítulo do protocolo.
+const N_COLUNAS = 5
 
 // Normaliza string vazia (ou só espaços) para null antes de enviar ao backend.
 const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
@@ -193,7 +194,6 @@ export default function Requerimentos() {
             <THead>
               <tr>
                 <TH>Protocolo</TH>
-                <TH>Tribunal / Órgão</TH>
                 <TH>Classe</TH>
                 <TH>Matéria</TH>
                 <SortableTH
@@ -211,13 +211,15 @@ export default function Requerimentos() {
               {lista.map((r) => (
                 <Fragment key={r.id}>
                 <TR>
-                  <TD className="whitespace-nowrap font-medium text-slate-800">
-                    {r.numero_protocolo || '—'}
-                  </TD>
-                  <TD>
-                    {/* Duas linhas: tribunal/entidade em cima, órgão embaixo — sem truncar. */}
-                    <div>{r.tribunal_entidade || '—'}</div>
-                    <div className="text-xs text-slate-500">{r.orgao || '—'}</div>
+                  {/* Sem nowrap na célula: o protocolo não quebra, mas o
+                      subtítulo tribunal · órgão pode. */}
+                  <TD className="font-medium text-slate-800">
+                    <span className="whitespace-nowrap">
+                      {r.numero_protocolo || '—'}
+                    </span>
+                    <div className="text-xs font-normal text-slate-500">
+                      {[r.tribunal_entidade, r.orgao].filter(Boolean).join(' · ') || '—'}
+                    </div>
                   </TD>
                   <TD>{r.classe_processual || '—'}</TD>
                   <TD>{r.materia || '—'}</TD>

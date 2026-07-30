@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { apensosCrud, contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
+import { cn } from '@/lib/cn'
 import type { ContatoServentia } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -73,6 +73,13 @@ interface OrgaoRow {
   tribunal: string
   tipo: 'julgador' | 'auxiliar'
   contato: ContatoServentia | null
+}
+
+// Bolinha de tipo ao lado do nome do órgão (igual à aba Créditos): a cor basta,
+// o rótulo por extenso ocupava uma linha inteira da célula.
+const DOT_TIPO: Record<OrgaoRow['tipo'], { cor: string; label: string }> = {
+  julgador: { cor: 'bg-blue-500', label: 'Julgador' },
+  auxiliar: { cor: 'bg-violet-500', label: 'Auxiliar' },
 }
 
 // Uma linha de valor dentro da célula (opcionalmente com rótulo Serv./Gab.
@@ -482,18 +489,17 @@ export default function ContatosServentias() {
                 return (
                   <TR key={row.key}>
                     <TD className="font-medium text-slate-800">
-                      {/* Nome do órgão é longo: quebra em várias linhas, sem truncar. */}
-                      <div>{formatOrgaoLabel(row.orgao)}</div>
-                      <div className="mt-0.5">
-                        {row.tipo === 'auxiliar' ? (
-                          <Badge size="sm" tone="purple">
-                            auxiliar
-                          </Badge>
-                        ) : (
-                          <Badge size="sm" tone="blue">
-                            julgador
-                          </Badge>
-                        )}
+                      <div className="flex items-start gap-2">
+                        <span
+                          title={DOT_TIPO[row.tipo].label}
+                          aria-label={`Tipo: ${DOT_TIPO[row.tipo].label}`}
+                          className={cn(
+                            'mt-1.5 h-2 w-2 shrink-0 rounded-full',
+                            DOT_TIPO[row.tipo].cor,
+                          )}
+                        />
+                        {/* Nome do órgão é longo: quebra em várias linhas, sem truncar. */}
+                        <div className="min-w-0">{formatOrgaoLabel(row.orgao)}</div>
                       </div>
                     </TD>
                     <TD className="text-slate-600">{row.tribunal || '—'}</TD>

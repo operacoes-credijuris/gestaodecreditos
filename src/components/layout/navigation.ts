@@ -74,7 +74,7 @@ export const NAVIGATION: NavSection[] = [
         icon: ClipboardList,
       },
       {
-        label: 'Contatos de Serventias',
+        label: 'Contatos',
         to: '/operacional/execucao/contatos',
         icon: Phone,
       },
