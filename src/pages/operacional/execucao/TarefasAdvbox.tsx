@@ -160,7 +160,26 @@ export default function TarefasAdvbox() {
     refetchOnWindowFocus: true,
   })
   // Data de hoje (YYYY-MM-DD, horário local) para classificar os prazos.
-  const hoje = useMemo(() => new Date().toLocaleDateString('sv-SE'), [])
+  // Precisa acompanhar a virada do dia: a lista recarrega ao focar a janela,
+  // e uma data fixa deixaria os dados frescos sendo medidos por uma régua
+  // velha — tarefa que vence hoje seguiria marcada "amanhã", e vencida
+  // seguiria na lista. Só um F5 corrigia.
+  const [hoje, setHoje] = useState(() => new Date().toLocaleDateString('sv-SE'))
+  useEffect(() => {
+    const sincronizar = () => setHoje(new Date().toLocaleDateString('sv-SE'))
+    document.addEventListener('visibilitychange', sincronizar)
+    window.addEventListener('focus', sincronizar)
+    // Os eventos acima só disparam se alguém interagir; o intervalo cobre o
+    // caso real do painel deixado aberto e visível a noite toda. Rechamar com
+    // a mesma string é no-op no React, então nos outros 1439 minutos do dia
+    // isto não provoca re-render.
+    const timer = setInterval(sincronizar, 60_000)
+    return () => {
+      document.removeEventListener('visibilitychange', sincronizar)
+      window.removeEventListener('focus', sincronizar)
+      clearInterval(timer)
+    }
+  }, [])
   // Tarefas com prazo já vencido ficam fora da aba (decisão de produto:
   // aqui só o que está por fazer — Fatais, Sem prazo e a soma das duas).
   const tarefas = useMemo(
