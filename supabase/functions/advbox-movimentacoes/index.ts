@@ -11,20 +11,25 @@
 // por cron (pg_cron), autenticada por JWT do usuário OU por x-cron-secret.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { getCaller, serviceClient } from '../_shared/auth.ts'
+// Cliente compartilhado (throttle + retry/backoff contra o rate limit do
+// Cloudflare na frente da API do ADVBOX).
+import {
+  configurarThrottle,
+  fetchAll,
+  getAdvboxCtx,
+  getJson,
+  pickArray,
+  type AdvboxCtx,
+} from '../_shared/advbox.ts'
+
+// Esta função varre dezenas de processos em paralelo — precisa de espaçamento
+// maior que o padrão sequencial do módulo compartilhado.
+configurarThrottle(350)
 
 const DIAS_JANELA = 20
 const MIN_DIGITS = 6 // casa números com >= 6 dígitos (igual à aba de Tarefas)
 const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 const str = (v: unknown): string | null => (v == null ? null : String(v))
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-// Detecta corpo de erro do Cloudflare (o ADVBOX às vezes devolve isso, inclusive
-// com HTTP 200, quando há rate limit). Nesses casos devemos tentar de novo.
-function isCloudflareError(j: unknown): boolean {
-  if (!j || typeof j !== 'object') return false
-  const o = j as Record<string, unknown>
-  return 'cloudflare_error' in o || ('error_code' in o && 'ray_id' in o)
-}
 
 // Hash estável (djb2) em base36 — usado para gerar um id determinístico quando
 // a movimentação do ADVBOX não traz um id próprio.
@@ -32,119 +37,6 @@ function hash(s: string): string {
   let h = 5381
   for (let i = 0; i < s.length; i++) h = (h * 33) ^ s.charCodeAt(i)
   return (h >>> 0).toString(36)
-}
-
-interface AdvboxCtx {
-  base: string
-  headers: Record<string, string>
-}
-
-async function getCtx(): Promise<AdvboxCtx> {
-  const svc = serviceClient()
-  const { data: secret } = await svc
-    .from('integracao_advbox_secret')
-    .select('token')
-    .eq('id', 1)
-    .maybeSingle()
-  const token = secret?.token
-  if (!token) throw new Error('Token do ADVBOX não configurado. Defina em Configurações.')
-  const { data: integ } = await svc
-    .from('integracoes')
-    .select('config')
-    .eq('servico', 'advbox')
-    .maybeSingle()
-  const base =
-    ((integ?.config ?? {}) as { base_url?: string }).base_url ??
-    'https://app.advbox.com.br/api/v1'
-  return {
-    base,
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-  }
-}
-
-// Extrai o array de dados de uma resposta do ADVBOX (array direto ou {data}).
-function pickArray(json: unknown): Record<string, unknown>[] {
-  if (Array.isArray(json)) return json as Record<string, unknown>[]
-  const obj = (json ?? {}) as Record<string, unknown>
-  for (const k of ['data', 'items', 'movements', 'results', 'movimentacoes']) {
-    if (Array.isArray(obj[k])) return obj[k] as Record<string, unknown>[]
-  }
-  return []
-}
-
-// Throttle GLOBAL: serializa o início de todas as requisições ao ADVBOX com um
-// espaçamento mínimo, para não estourar o rate limit do Cloudflare (o problema
-// não é uma requisição isolada, e sim o ritmo agregado de todas juntas).
-const MIN_INTERVALO_MS = 350
-let proximoSlot = 0
-async function throttle(): Promise<void> {
-  const agora = Date.now()
-  const alvo = Math.max(agora, proximoSlot)
-  proximoSlot = alvo + MIN_INTERVALO_MS
-  const espera = alvo - agora
-  if (espera > 0) await sleep(espera)
-}
-
-// GET com throttle + retry/backoff, respeitando Retry-After. Resistente a rate
-// limit do Cloudflare (429/403/5xx e corpos de erro do CF, às vezes com 200).
-async function getJson(
-  ctx: AdvboxCtx,
-  path: string,
-  tries = 7,
-): Promise<unknown> {
-  let ultimoErro = 'desconhecido'
-  for (let a = 1; a <= tries; a++) {
-    await throttle()
-    try {
-      const res = await fetch(`${ctx.base}${path}`, { headers: ctx.headers })
-      if (res.status === 429 || res.status === 403 || res.status >= 500) {
-        ultimoErro = `HTTP ${res.status}`
-        if (a < tries) {
-          const ra = Number(res.headers.get('retry-after'))
-          const espera =
-            Number.isFinite(ra) && ra > 0
-              ? Math.min(ra * 1000, 15000)
-              : 600 * 2 ** (a - 1)
-          await sleep(espera + Math.floor(Math.random() * 400))
-        }
-        continue
-      }
-      const j = await res.json()
-      if (isCloudflareError(j)) {
-        ultimoErro = 'cloudflare rate limit'
-        if (a < tries) await sleep(600 * 2 ** (a - 1) + Math.floor(Math.random() * 400))
-        continue
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return j
-    } catch (e) {
-      // Erro de rede/parse: backoff e tenta de novo.
-      ultimoErro = (e as Error).message
-      if (a < tries) await sleep(600 * 2 ** (a - 1) + Math.floor(Math.random() * 300))
-    }
-  }
-  throw new Error(`${path} → ${ultimoErro}`)
-}
-
-// Paginação padrão do ADVBOX: { offset, limit, totalCount, data }.
-async function fetchAll(
-  ctx: AdvboxCtx,
-  path: string,
-  cap = 8000,
-): Promise<Record<string, unknown>[]> {
-  const out: Record<string, unknown>[] = []
-  const limit = 200
-  let offset = 0
-  for (let i = 0; i < 60; i++) {
-    const sep = path.includes('?') ? '&' : '?'
-    const j = await getJson(ctx, `${path}${sep}limit=${limit}&offset=${offset}`)
-    const data = pickArray(j)
-    out.push(...data)
-    const total = Number((j as { totalCount?: number }).totalCount ?? out.length)
-    offset += limit
-    if (data.length === 0 || out.length >= total || out.length >= cap) break
-  }
-  return out
 }
 
 // Busca robusta das movimentações de um processo (com retry/backoff).
@@ -278,7 +170,7 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json().catch(() => ({}))
     const dias = Number(body.dias ?? DIAS_JANELA)
-    const ctx = await getCtx()
+    const ctx = await getAdvboxCtx()
     const svc = serviceClient()
 
     // Data-limite (só a parte da data) para a janela.

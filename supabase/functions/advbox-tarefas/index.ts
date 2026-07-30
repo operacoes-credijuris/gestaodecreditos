@@ -8,61 +8,16 @@
 //  - 'create'  : cria a tarefa no ADVBOX (POST /posts).
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { getCaller, serviceClient } from '../_shared/auth.ts'
+// Cliente compartilhado com throttle + retry/backoff: a API do ADVBOX responde
+// 429/503 sob carga e sem retry isso vira erro na tela do usuário.
+import {
+  fetchAll,
+  getAdvboxCtx,
+  getJson,
+  type AdvboxCtx,
+} from '../_shared/advbox.ts'
 
 const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
-
-interface AdvboxCtx {
-  base: string
-  headers: Record<string, string>
-}
-
-async function getCtx(): Promise<AdvboxCtx> {
-  const svc = serviceClient()
-  const { data: secret } = await svc
-    .from('integracao_advbox_secret')
-    .select('token')
-    .eq('id', 1)
-    .maybeSingle()
-  const token = secret?.token
-  if (!token) throw new Error('Token do ADVBOX não configurado.')
-  const { data: integ } = await svc
-    .from('integracoes')
-    .select('config')
-    .eq('servico', 'advbox')
-    .maybeSingle()
-  const base =
-    ((integ?.config ?? {}) as { base_url?: string }).base_url ??
-    'https://app.advbox.com.br/api/v1'
-  return {
-    base,
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-  }
-}
-
-// Paginação padrão do ADVBOX: { offset, limit, totalCount, data }.
-async function fetchAll(
-  ctx: AdvboxCtx,
-  path: string,
-  cap = 8000,
-): Promise<Record<string, unknown>[]> {
-  const out: Record<string, unknown>[] = []
-  const limit = 200
-  let offset = 0
-  for (let i = 0; i < 60; i++) {
-    const sep = path.includes('?') ? '&' : '?'
-    const res = await fetch(`${ctx.base}${path}${sep}limit=${limit}&offset=${offset}`, {
-      headers: ctx.headers,
-    })
-    if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`)
-    const j = await res.json()
-    const data: Record<string, unknown>[] = Array.isArray(j) ? j : (j.data ?? [])
-    out.push(...data)
-    const total = Number((j as { totalCount?: number }).totalCount ?? out.length)
-    offset += limit
-    if (data.length === 0 || out.length >= total || out.length >= cap) break
-  }
-  return out
-}
 
 // Conjunto de números de processo cadastrados no nosso sistema (só dígitos).
 async function numerosCadastrados(): Promise<Set<string>> {
@@ -108,21 +63,20 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json().catch(() => ({}))
     const action = body.action ?? 'list'
-    const ctx = await getCtx()
+    const ctx = await getAdvboxCtx()
 
     if (action === 'options') {
-      const settings = await fetch(`${ctx.base}/settings`, { headers: ctx.headers }).then(
-        (r) => r.json(),
-      )
-      const users = (settings.users ?? []).map((u: Record<string, unknown>) => ({
+      const settings = (await getJson(ctx, '/settings')) as {
+        users?: { id?: unknown; name?: unknown }[]
+        tasks?: { id?: unknown; task?: unknown }[]
+      }
+      const users = (settings.users ?? []).map((u) => ({
         id: u.id,
-        name: u.name,
+        name: String(u.name ?? ''),
       }))
       const tasks = (settings.tasks ?? [])
-        .map((t: Record<string, unknown>) => ({ id: t.id, name: t.task }))
-        .sort((a: { name: string }, b: { name: string }) =>
-          String(a.name).localeCompare(String(b.name), 'pt-BR'),
-        )
+        .map((t) => ({ id: t.id, name: String(t.task ?? '') }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
       const map = await processosCasaveis(ctx)
       const lawsuits = [...map.values()]
         .map((l) => ({

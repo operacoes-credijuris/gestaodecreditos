@@ -2,7 +2,6 @@ import {
   LayoutDashboard,
   FileSignature,
   Wallet,
-  Handshake,
   ScanSearch,
   Newspaper,
   ListChecks,
@@ -41,7 +40,6 @@ export const NAVIGATION: NavSection[] = [
   {
     title: 'Comercial',
     items: [
-      { label: 'Cessões', to: '/comercial/cessoes', icon: Handshake },
       { label: 'Geração de Contratos', to: '/comercial/contratos', icon: FileSignature },
       { label: 'Carteiras de Investidores', to: '/comercial/carteiras', icon: Wallet },
     ],

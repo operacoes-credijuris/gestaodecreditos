@@ -215,21 +215,12 @@ export default function Requerimentos() {
                     {r.numero_protocolo || '—'}
                   </TD>
                   <TD>
-                    <div className="max-w-[150px] truncate">
-                      {r.tribunal_entidade || '—'}
-                    </div>
-                    <div className="max-w-[150px] truncate text-xs text-slate-500">
-                      {r.orgao || '—'}
-                    </div>
+                    {/* Duas linhas: tribunal/entidade em cima, órgão embaixo — sem truncar. */}
+                    <div>{r.tribunal_entidade || '—'}</div>
+                    <div className="text-xs text-slate-500">{r.orgao || '—'}</div>
                   </TD>
-                  <TD>
-                    <div className="max-w-[120px] truncate">
-                      {r.classe_processual || '—'}
-                    </div>
-                  </TD>
-                  <TD>
-                    <div className="max-w-[120px] truncate">{r.materia || '—'}</div>
-                  </TD>
+                  <TD>{r.classe_processual || '—'}</TD>
+                  <TD>{r.materia || '—'}</TD>
                   <TD className="whitespace-nowrap text-slate-600">
                     {formatDate(r.data_protocolo)}
                   </TD>

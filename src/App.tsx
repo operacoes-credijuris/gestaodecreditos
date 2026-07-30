@@ -4,7 +4,6 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import Login from '@/pages/Login'
 import NotFound from '@/pages/NotFound'
 import Dashboard from '@/pages/estrategica/Dashboard'
-import Cessoes from '@/pages/comercial/Cessoes'
 import GeracaoContratos from '@/pages/comercial/GeracaoContratos'
 import CarteirasInvestidores from '@/pages/comercial/CarteirasInvestidores'
 import AnaliseCredito from '@/pages/operacional/AnaliseCredito'
@@ -31,7 +30,6 @@ export default function App() {
         <Route path="/estrategica" element={<Dashboard />} />
 
         {/* Comercial */}
-        <Route path="/comercial/cessoes" element={<Cessoes />} />
         <Route path="/comercial/contratos" element={<GeracaoContratos />} />
         <Route path="/comercial/carteiras" element={<CarteirasInvestidores />} />
 

@@ -196,7 +196,7 @@ export default function Dashboard() {
             hint="Todas as cessões cadastradas"
             icon={<Layers className="h-5 w-5" />}
             tone="amber"
-            to="/comercial/cessoes"
+            to="/comercial/carteiras"
           />
           <StatCard
             label="Contratos gerados"

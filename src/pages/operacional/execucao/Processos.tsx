@@ -323,17 +323,17 @@ export default function Processos() {
                           <span className="whitespace-nowrap">
                             {formatCNJ(p.numero_cnj)}
                           </span>
-                          <div className="max-w-[180px] truncate text-xs font-normal text-slate-500">
+                          {/* Nomes completos: quebram em linhas em vez de truncar. */}
+                          <div className="text-xs font-normal text-slate-500">
                             {p.cedente || '—'} v. {p.cessionario || '—'}
                           </div>
                         </div>
                       </div>
                     </TD>
                     <TD>
-                      <div className="max-w-[150px] truncate">
-                        {p.entidade_devedora || '—'}
-                      </div>
-                      <div className="max-w-[150px] truncate text-xs text-slate-500">
+                      {/* Devedora e comarca/vara em linhas próprias, texto completo. */}
+                      <div>{p.entidade_devedora || '—'}</div>
+                      <div className="text-xs text-slate-500">
                         {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
                       </div>
                     </TD>
@@ -343,7 +343,9 @@ export default function Processos() {
                     <TD className="whitespace-nowrap text-slate-600">
                       {formatDate(p.expectativa_liquidacao)}
                     </TD>
-                    <TD className="whitespace-nowrap">
+                    {/* Sem nowrap: nº RTDPJ longo deve quebrar em vez de
+                        alargar a tabela. O Badge é inline-flex e não quebra. */}
+                    <TD>
                       {p.instrumento ? (
                         <Badge tone={inst.tone}>{inst.label}</Badge>
                       ) : (
@@ -352,9 +354,7 @@ export default function Processos() {
                       {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
                         <div className="mt-0.5 text-xs text-slate-500">
                           {splitRtdpj(p.numero_rtdpj).map((n, i) => (
-                            <div key={i} className="max-w-[130px] truncate">
-                              {n}
-                            </div>
+                            <div key={i}>{n}</div>
                           ))}
                         </div>
                       )}
@@ -590,14 +590,14 @@ export default function Processos() {
           detalhe && (
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="truncate text-base font-bold tracking-tight text-slate-800">
+                <h2 className="text-base font-bold tracking-tight text-slate-800">
                   {formatCNJ(detalhe.numero_cnj)}
                 </h2>
                 <Badge tone={getLabel(STATUS_PROCESSO, detalhe.status).tone}>
                   {getLabel(STATUS_PROCESSO, detalhe.status).label}
                 </Badge>
               </div>
-              <p className="truncate text-xs text-slate-500">
+              <p className="text-xs text-slate-500">
                 {detalhe.cedente || '—'} v. {detalhe.cessionario || '—'}
               </p>
             </div>

@@ -45,12 +45,13 @@ import { getLabel, STATUS_INVESTIMENTO } from '@/lib/labels'
 import { formatBRL, formatPercent, formatDate } from '@/lib/format'
 import { CHART } from '@/lib/chartColors'
 import { InvestidoresPanel } from './InvestidoresPanel'
+import { CessoesPanel } from './CessoesPanel'
 
-// Cessões agora é página própria no menu Comercial (/comercial/cessoes).
 const TABS = [
   { key: 'consolidado', label: 'Consolidado' },
   { key: 'individual', label: 'Por Investidor' },
   { key: 'investidores', label: 'Investidores' },
+  { key: 'cessoes', label: 'Cessões' },
 ]
 
 export default function CarteirasInvestidores() {
@@ -66,6 +67,7 @@ export default function CarteirasInvestidores() {
       {tab === 'consolidado' && <Consolidado />}
       {tab === 'individual' && <PorInvestidor />}
       {tab === 'investidores' && <InvestidoresPanel />}
+      {tab === 'cessoes' && <CessoesPanel />}
     </div>
   )
 }

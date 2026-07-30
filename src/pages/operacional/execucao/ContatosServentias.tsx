@@ -88,7 +88,8 @@ function LinhaValor({
 }) {
   return (
     <div className="flex items-baseline gap-1">
-      {label && <span className="text-xs text-slate-500">{label}</span>}
+      {/* Rótulo Serv./Gab. não encolhe nem quebra; o valor ao lado é que quebra. */}
+      {label && <span className="shrink-0 text-xs text-slate-500">{label}</span>}
       {whatsapp ? (
         <a
           href={waLink(value)}
@@ -481,9 +482,8 @@ export default function ContatosServentias() {
                 return (
                   <TR key={row.key}>
                     <TD className="font-medium text-slate-800">
-                      <div className="max-w-[280px] truncate">
-                        {formatOrgaoLabel(row.orgao)}
-                      </div>
+                      {/* Nome do órgão é longo: quebra em várias linhas, sem truncar. */}
+                      <div>{formatOrgaoLabel(row.orgao)}</div>
                       <div className="mt-0.5">
                         {row.tipo === 'auxiliar' ? (
                           <Badge size="sm" tone="purple">
@@ -496,9 +496,8 @@ export default function ContatosServentias() {
                         )}
                       </div>
                     </TD>
-                    <TD className="whitespace-nowrap text-slate-600">
-                      {row.tribunal || '—'}
-                    </TD>
+                    <TD className="text-slate-600">{row.tribunal || '—'}</TD>
+                    {/* Telefones/WhatsApp seguem sem quebra (números). */}
                     <TD className="whitespace-nowrap">
                       <CelulaContato
                         tipo={row.tipo}
@@ -514,14 +513,16 @@ export default function ContatosServentias() {
                         whatsapp
                       />
                     </TD>
-                    <TD>
+                    {/* E-mails longos podem quebrar em qualquer caractere. */}
+                    <TD className="break-all">
                       <CelulaContato
                         tipo={row.tipo}
                         serventia={c?.serventia_email}
                         gabinete={c?.gabinete_email}
                       />
                     </TD>
-                    <TD className="text-right">
+                    {/* Ações: botões permanecem em linha única. */}
+                    <TD className="whitespace-nowrap text-right">
                       <div className="flex justify-end gap-1">
                         <IconButton
                           label="Editar contatos"

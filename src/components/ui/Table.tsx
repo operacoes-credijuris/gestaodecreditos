@@ -80,7 +80,11 @@ export function TD({
   className?: string
 }) {
   return (
-    <td className={cn('px-4 py-3 align-middle text-slate-700', className)}>
+    // align-top + break-words: as células mostram o texto INTEIRO, quebrando em
+    // linhas quando necessário (o app não usa truncamento com "…" nas tabelas).
+    <td
+      className={cn('break-words px-4 py-3 align-top text-slate-700', className)}
+    >
       {children}
     </td>
   )
