@@ -44,7 +44,9 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center rounded-lg font-medium transition-all duration-150',
+        // whitespace-nowrap: as alturas são fixas (h-8/h-10/h-11), então rótulo
+        // que quebra em duas linhas vaza do botão em vez de esticá-lo.
+        'inline-flex items-center justify-center whitespace-nowrap rounded-lg font-medium transition-all duration-150',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
         'active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 disabled:active:scale-100',
         variants[variant],

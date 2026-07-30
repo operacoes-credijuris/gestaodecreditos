@@ -101,11 +101,12 @@ export interface AcaoTela {
 }
 
 /**
- * Botões de ação por tela: em vez de um "Mover" genérico que obriga a escolher
- * o destino numa lista, cada etapa oferece direto as saídas que fazem sentido
- * nela. As telas terminais ficam sem ação — de Aprovados e Reprovados o card não
- * volta pelo app, e de Diligência a saída depende do resultado da diligência,
- * que ainda não foi definido.
+ * Botões de ação por tela: cada etapa oferece direto as saídas que fazem sentido
+ * nela, com um clique. Só reprovar abre diálogo, porque exige motivo.
+ *
+ * As telas terminais ficam sem ação: de Aprovados e Reprovados o card não volta
+ * pelo app, e a diligência é encargo do comercial — concluída, ele move o card
+ * de volta para análise no Kommo e o sync o traz de novo para Pendentes.
  */
 export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   pendentes: [

@@ -2,17 +2,20 @@
 // do kanban do Kommo (espelho local em public.kommo_leads).
 //
 // Cada tela corresponde a exatamente uma coluna do Kommo, e as ações de cada
-// etapa aparecem como botões no próprio card — em vez de um "Mover" genérico que
-// obrigaria a escolher o destino numa lista.
-import { useEffect, useMemo, useRef, useState } from 'react'
+// etapa aparecem como botões no próprio card. Ação com um clique: o único caso
+// que abre diálogo é reprovar, porque exige motivo.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, ExternalLink } from 'lucide-react'
+import { Search, ExternalLink, ArrowRight, Check, FileSearch, X } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
   FUNIL_RPV,
   TELAS,
   ACOES,
-  NOME_STATUS,
+  ST_DECISAO,
+  ST_PROPOSTA,
+  ST_DILIGENCIA,
+  ST_REPROVADO,
   exigeMotivo,
   agruparPorTela,
   useKommoLeads,
@@ -36,6 +39,14 @@ import { formatCNJ, formatDate } from '@/lib/format'
 
 const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
 
+/** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
+const ICONES: Record<number, ReactNode> = {
+  [ST_DECISAO]: <ArrowRight className="h-4 w-4" />,
+  [ST_PROPOSTA]: <Check className="h-4 w-4" />,
+  [ST_DILIGENCIA]: <FileSearch className="h-4 w-4" />,
+  [ST_REPROVADO]: <X className="h-4 w-4" />,
+}
+
 /** Link para o card no Kommo — o operacional às vezes precisa do original. */
 function urlCard(leadId: number): string {
   return `https://${KOMMO_SUBDOMINIO}.kommo.com/leads/detail/${leadId}`
@@ -50,19 +61,23 @@ function CardCredito({
   acoes,
   onAcao,
   analisePronta,
+  statusEmAndamento,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
   onAcao: (l: KommoLead, a: AcaoTela) => void
   /** null = não mostrar o selo (só faz sentido na etapa de revisão). */
   analisePronta: boolean | null
+  /** Destino sendo processado neste card, ou null. */
+  statusEmAndamento: number | null
 }) {
   const [aberto, setAberto] = useState(false)
   const nota = lead.nota_texto?.trim()
+  const ocupado = statusEmAndamento !== null
 
   return (
-    <div className="border-b border-slate-100 p-4 last:border-b-0 hover:bg-slate-50">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="border-b border-slate-100 p-4 transition-colors last:border-b-0 hover:bg-slate-50/70">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
@@ -72,7 +87,7 @@ function CardCredito({
               </Badge>
             )}
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
             {lead.processo_cnj && (
               <span className="whitespace-nowrap font-medium text-slate-600">
                 {formatCNJ(lead.processo_cnj)}
@@ -92,16 +107,21 @@ function CardCredito({
           )}
         </div>
 
-        {/* Ações empilhadas: em Decisão são três, e lado a lado competiriam com
-            o conteúdo do card. */}
+        {/* Ações empilhadas e esticadas à mesma largura: em Decisão são três, e
+            lado a lado competiriam com o conteúdo do card. */}
         {acoes.length > 0 && (
-          <div className="flex w-full flex-none flex-col gap-1.5 sm:w-44">
+          <div className="flex flex-none flex-col items-stretch gap-1.5">
             {acoes.map((a) => (
               <Button
                 key={a.statusId}
                 size="sm"
                 variant={a.variant}
+                icon={ICONES[a.statusId]}
                 onClick={() => onAcao(lead, a)}
+                loading={statusEmAndamento === a.statusId}
+                // Trava as outras ações do card enquanto uma corre: duas
+                // movimentações simultâneas no mesmo card se atropelariam.
+                disabled={ocupado}
               >
                 {a.label}
               </Button>
@@ -126,14 +146,14 @@ function CardCredito({
           href={urlCard(lead.kommo_lead_id)}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
+          className="inline-flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
         >
           <ExternalLink className="h-3.5 w-3.5" /> Abrir no Kommo
         </a>
       </div>
 
       {nota && aberto && (
-        <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+        <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
           {nota}
         </pre>
       )}
@@ -149,20 +169,21 @@ export default function AnaliseCredito() {
   const prontas = useAnalisesProntas()
 
   // Mesma cadeia de fallback da Edge Function kommo-mover, para o diálogo
-  // mostrar exatamente o que vai ser gravado no card. Perfil sem nome cai no
-  // e-mail — e ver isso na tela é o que faz a pessoa ir preencher o nome.
+  // mostrar exatamente o que vai ser gravado no card.
   const assinatura =
     profile?.nome?.trim() || profile?.email || user?.email || 'usuário do sistema'
 
   const [tela, setTela] = useState<TelaAnalise>('pendentes')
   const [busca, setBusca] = useState('')
-  // Ação pendente de confirmação: o card e o destino já escolhidos pelo botão.
-  const [confirmando, setConfirmando] = useState<{
-    lead: KommoLead
-    acao: AcaoTela
+  // Ação em curso, para o botão certo do card certo mostrar o spinner.
+  const [emAndamento, setEmAndamento] = useState<{
+    leadId: number
+    statusId: number
   } | null>(null)
-  const [comentario, setComentario] = useState('')
-  const [erroMover, setErroMover] = useState<string | null>(null)
+  // Só reprovar abre diálogo, porque exige motivo.
+  const [reprovando, setReprovando] = useState<KommoLead | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [erroMotivo, setErroMotivo] = useState<string | null>(null)
 
   // Sincroniza com o Kommo ao abrir a página, no mesmo padrão de Publicações e
   // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
@@ -207,40 +228,52 @@ export default function AnaliseCredito() {
       // é sucesso parcial, não erro, e o usuário precisa saber da diferença.
       if (r?.aviso) toast.error(r.aviso)
       else toast.success(r?.mensagem ?? 'Card movido.')
-      fechar()
+      setEmAndamento(null)
+      fecharReprovar()
     },
-    onError: (e) => setErroMover((e as Error).message),
+    onError: (e) => {
+      setEmAndamento(null)
+      // Reprovando, o erro fica no próprio diálogo (o motivo digitado não se
+      // perde). Nas ações diretas não há diálogo, então vai por toast.
+      if (reprovando) setErroMotivo((e as Error).message)
+      else toast.error((e as Error).message)
+    },
   })
 
-  function abrir(lead: KommoLead, acao: AcaoTela) {
-    setConfirmando({ lead, acao })
-    setComentario('')
-    setErroMover(null)
-  }
-
-  function fechar() {
-    setConfirmando(null)
-    setComentario('')
-    setErroMover(null)
-  }
-
-  function confirmar() {
-    if (!confirmando) return
-    const { lead, acao } = confirmando
-    if (exigeMotivo(acao.statusId) && !comentario.trim()) {
-      setErroMover('Informe o motivo da reprovação.')
+  /** Reprovar pede motivo; as outras ações vão direto, com um clique. */
+  function acionar(lead: KommoLead, acao: AcaoTela) {
+    if (exigeMotivo(acao.statusId)) {
+      setReprovando(lead)
+      setMotivo('')
+      setErroMotivo(null)
       return
     }
-    setErroMover(null)
+    setEmAndamento({ leadId: lead.kommo_lead_id, statusId: acao.statusId })
+    mover.mutate({ leadId: lead.kommo_lead_id, statusId: acao.statusId, comentario: '' })
+  }
+
+  function fecharReprovar() {
+    setReprovando(null)
+    setMotivo('')
+    setErroMotivo(null)
+  }
+
+  function confirmarReprovar() {
+    if (!reprovando) return
+    if (!motivo.trim()) {
+      setErroMotivo('Informe o motivo da reprovação.')
+      return
+    }
+    setErroMotivo(null)
+    setEmAndamento({ leadId: reprovando.kommo_lead_id, statusId: ST_REPROVADO })
     mover.mutate({
-      leadId: lead.kommo_lead_id,
-      statusId: acao.statusId,
-      comentario: comentario.trim(),
+      leadId: reprovando.kommo_lead_id,
+      statusId: ST_REPROVADO,
+      comentario: motivo.trim(),
     })
   }
 
   const defTela = TELAS.find((t) => t.key === tela)!
-  const reprovando = confirmando ? exigeMotivo(confirmando.acao.statusId) : false
 
   return (
     <div>
@@ -317,13 +350,18 @@ export default function AnaliseCredito() {
                 key={l.kommo_lead_id}
                 lead={l}
                 acoes={ACOES[tela]}
-                onAcao={abrir}
+                onAcao={acionar}
                 // O selo só aparece em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, então dizer "finalizado"
                 // seria ruído.
                 analisePronta={
                   tela === 'pendentes'
                     ? (prontas.data?.has(l.kommo_lead_id) ?? false)
+                    : null
+                }
+                statusEmAndamento={
+                  emAndamento?.leadId === l.kommo_lead_id
+                    ? emAndamento.statusId
                     : null
                 }
               />
@@ -333,60 +371,43 @@ export default function AnaliseCredito() {
       </Card>
 
       <Modal
-        open={!!confirmando}
-        onClose={fechar}
-        title={confirmando ? confirmando.acao.label : ''}
+        open={!!reprovando}
+        onClose={fecharReprovar}
+        title="Reprovar crédito"
         footer={
           <>
-            <Button variant="outline" onClick={fechar}>
+            <Button variant="outline" onClick={fecharReprovar}>
               Cancelar
             </Button>
             <Button
-              variant={reprovando ? 'danger' : 'primary'}
-              onClick={confirmar}
+              variant="danger"
+              icon={<X className="h-4 w-4" />}
+              onClick={confirmarReprovar}
               loading={mover.isPending}
             >
-              Confirmar
+              Reprovar
             </Button>
           </>
         }
       >
-        {confirmando && (
+        {reprovando && (
           <div className="space-y-4">
-            <div>
-              <div className="text-sm font-medium text-slate-800">
-                {tituloCard(confirmando.lead)}
-              </div>
-              <div className="text-xs text-slate-500">
-                Vai para{' '}
-                <span className="font-medium text-slate-700">
-                  {NOME_STATUS[confirmando.acao.statusId]}
-                </span>
-              </div>
+            <div className="text-sm font-medium text-slate-800">
+              {tituloCard(reprovando)}
             </div>
-
             <Field
-              label={reprovando ? 'Motivo da reprovação' : 'Observação para o comercial'}
-              required={reprovando}
-              error={erroMover ?? undefined}
+              label="Motivo da reprovação"
+              required
+              error={erroMotivo ?? undefined}
               hint={`O comercial lê este texto no card, dentro do Kommo, assinado como "${assinatura}".`}
             >
               <Textarea
                 rows={3}
-                value={comentario}
-                onChange={(e) => setComentario(e.target.value)}
-                placeholder={
-                  reprovando
-                    ? 'Ex.: processo com penhora anterior à cessão.'
-                    : 'Opcional. Ex.: análise concluída, dentro dos parâmetros.'
-                }
+                value={motivo}
+                onChange={(e) => setMotivo(e.target.value)}
+                placeholder="Ex.: processo com penhora anterior à cessão."
               />
             </Field>
-
-            <p className="text-xs text-slate-500">
-              A movimentação dispara as automações configuradas nesse funil do
-              Kommo, e não há como suprimi-las.
-            </p>
           </div>
         )}
       </Modal>
