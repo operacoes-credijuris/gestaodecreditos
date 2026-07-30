@@ -21,8 +21,9 @@ export const ST_REPROVADO = 107830031 // Reprovados Operacional
 export type TelaAnalise =
   | 'pendentes'
   | 'revisao'
-  | 'aprovacao'
+  | 'decisao'
   | 'aprovados'
+  | 'diligencia'
   | 'reprovados'
 
 export interface DefTela {
@@ -58,17 +59,22 @@ export const TELAS: DefTela[] = [
       'Nenhuma análise aguardando revisão. Concluir uma análise em "Pendentes" move o card para cá.',
   },
   {
-    key: 'aprovacao',
-    label: 'Aprovação',
+    key: 'decisao',
+    label: 'Decisão',
     status: [ST_DECISAO],
     descricaoVazia: 'Nenhum crédito em "Revisão e Decisão do Pedro" no Kommo.',
   },
   {
     key: 'aprovados',
-    label: 'Aprovados / Diligência',
-    status: [ST_DILIGENCIA, ST_PROPOSTA],
-    descricaoVazia:
-      'Nenhum crédito em "Diligência" ou "Apresentação de Proposta" no Kommo.',
+    label: 'Aprovados',
+    status: [ST_PROPOSTA],
+    descricaoVazia: 'Nenhum crédito em "Apresentação de Proposta" no Kommo.',
+  },
+  {
+    key: 'diligencia',
+    label: 'Diligência',
+    status: [ST_DILIGENCIA],
+    descricaoVazia: 'Nenhum crédito em "Diligência" no Kommo.',
   },
   {
     key: 'reprovados',
@@ -178,8 +184,9 @@ export function agruparPorTela(
   const out = {
     pendentes: [],
     revisao: [],
-    aprovacao: [],
+    decisao: [],
     aprovados: [],
+    diligencia: [],
     reprovados: [],
   } as Record<TelaAnalise, KommoLead[]>
 
