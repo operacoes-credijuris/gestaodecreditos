@@ -361,13 +361,21 @@ export default function TarefasAdvbox() {
                     </div>
                     {t.notes && <Observacao text={t.notes} />}
                   </div>
-                  {/* Responsáveis à esquerda do botão de petição. max-w evita
-                      que nomes longos comam a coluna de conteúdo. */}
+                  {/* Responsáveis à esquerda do botão de petição. flex-none: só
+                      ocupa o que precisa, e a coluna de conteúdo (flex-1) cede o
+                      espaço — que sobra. O max-w é só teto para lista longa. */}
                   {resp.length > 0 && (
-                    <div className="flex max-w-[11rem] flex-none items-start gap-1.5 text-sm text-slate-600">
+                    <div className="flex max-w-[20rem] flex-none items-start gap-1.5 text-sm text-slate-600">
                       <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-400" />
-                      <span className="break-words">
-                        {resp.map((r) => formatNome(r)).join(', ')}
+                      {/* Cada nome é uma unidade que não quebra: com vários
+                          responsáveis a quebra cai ENTRE nomes, nunca no meio de um. */}
+                      <span className="flex flex-wrap gap-x-1.5">
+                        {resp.map((r, i) => (
+                          <span key={i} className="whitespace-nowrap">
+                            {formatNome(r)}
+                            {i < resp.length - 1 && ','}
+                          </span>
+                        ))}
                       </span>
                     </div>
                   )}
