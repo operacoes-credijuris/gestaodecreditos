@@ -12,6 +12,9 @@ major_version = 15
 [functions.admin-create-user]
 verify_jwt = true
 
+[functions.admin-update-user]
+verify_jwt = true
+
 [functions.salvar-token-advbox]
 verify_jwt = true
 

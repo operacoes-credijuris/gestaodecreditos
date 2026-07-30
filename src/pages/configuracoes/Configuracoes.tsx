@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   XCircle,
   ShieldCheck,
+  Pencil,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
@@ -28,6 +29,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
+import { IconButton } from '@/components/ui/IconButton'
 import {
   Table,
   THead,
@@ -450,23 +452,39 @@ function UsuariosConfig() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({ email: '', nome: '', password: '', role: 'usuario' })
   const [saving, setSaving] = useState(false)
-  // Edição do nome. Existe porque o nome é o que assina as anotações que a
-  // plataforma grava no Kommo — e quem é criado direto no painel do Supabase
-  // entra sem nome, sem nenhuma forma de corrigir pelo app.
+  // Edição de usuário existente. O nome importa além do cadastro: é ele que
+  // assina as anotações que a plataforma grava nos cards do Kommo.
   const [editando, setEditando] = useState<Profile | null>(null)
-  const [nomeEdit, setNomeEdit] = useState('')
+  const [edicao, setEdicao] = useState({ nome: '', email: '', password: '' })
 
-  async function salvarNome() {
+  function abrirEdicao(p: Profile) {
+    setEditando(p)
+    // Senha em branco: o campo só é enviado se for preenchido.
+    setEdicao({ nome: p.nome ?? '', email: p.email, password: '' })
+  }
+
+  async function salvarEdicao() {
     if (!editando) return
+    if (!edicao.email.trim()) {
+      toast.error('Informe o e-mail.')
+      return
+    }
+    if (edicao.password && edicao.password.length < 6) {
+      toast.error('A senha precisa ter ao menos 6 caracteres.')
+      return
+    }
     setSaving(true)
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ nome: nomeEdit.trim() })
-        .eq('id', editando.id)
-      if (error) throw new Error(error.message)
+      // Vai por Edge Function porque e-mail e senha vivem no Supabase Auth, e
+      // alterá-los exige a Admin API.
+      await invokeFunction('admin-update-user', {
+        userId: editando.id,
+        nome: edicao.nome.trim(),
+        email: edicao.email.trim(),
+        ...(edicao.password ? { password: edicao.password } : {}),
+      })
       await qc.invalidateQueries({ queryKey: ['profiles'] })
-      toast.success('Nome atualizado.')
+      toast.success('Usuário atualizado.')
       setEditando(null)
     } catch (err) {
       toast.error((err as Error).message)
@@ -562,22 +580,17 @@ function UsuariosConfig() {
                       </Badge>
                     </TD>
                     <TD className="whitespace-nowrap text-right">
-                      <div className="flex justify-end gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setEditando(p)
-                            setNomeEdit(p.nome ?? '')
-                          }}
-                        >
-                          Editar nome
-                        </Button>
+                      <div className="flex items-center justify-end gap-1.5">
                         {!admin && (
                           <Button size="sm" variant="outline" onClick={() => toggleAtivo(p)}>
                             {p.ativo ? 'Desativar' : 'Ativar'}
                           </Button>
                         )}
+                        <IconButton
+                          label="Editar usuário"
+                          icon={<Pencil className="h-4 w-4" />}
+                          onClick={() => abrirEdicao(p)}
+                        />
                       </div>
                     </TD>
                   </TR>
@@ -591,27 +604,50 @@ function UsuariosConfig() {
       <Modal
         open={!!editando}
         onClose={() => setEditando(null)}
-        title="Editar nome"
-        description="É este nome que assina as anotações gravadas no Kommo."
+        title="Editar usuário"
         footer={
           <>
             <Button variant="outline" onClick={() => setEditando(null)}>
               Cancelar
             </Button>
-            <Button onClick={salvarNome} loading={saving}>
+            <Button onClick={salvarEdicao} loading={saving}>
               Salvar
             </Button>
           </>
         }
       >
         {editando && (
-          <Field label="Nome" hint={editando.email}>
-            <Input
-              value={nomeEdit}
-              onChange={(e) => setNomeEdit(e.target.value)}
-              placeholder="Nome completo"
-            />
-          </Field>
+          <div className="space-y-4">
+            <Field
+              label="Nome"
+              hint="Assina as anotações que a plataforma grava nos cards do Kommo."
+            >
+              <Input
+                value={edicao.nome}
+                onChange={(e) => setEdicao({ ...edicao, nome: e.target.value })}
+                placeholder="Nome completo"
+              />
+            </Field>
+            <Field label="E-mail" required>
+              <Input
+                type="email"
+                value={edicao.email}
+                onChange={(e) => setEdicao({ ...edicao, email: e.target.value })}
+              />
+            </Field>
+            <Field
+              label="Nova senha"
+              hint="Deixe em branco para manter a senha atual. Mínimo de 6 caracteres."
+            >
+              <Input
+                type="password"
+                value={edicao.password}
+                onChange={(e) => setEdicao({ ...edicao, password: e.target.value })}
+                placeholder="••••••••"
+                autoComplete="new-password"
+              />
+            </Field>
+          </div>
         )}
       </Modal>
 
