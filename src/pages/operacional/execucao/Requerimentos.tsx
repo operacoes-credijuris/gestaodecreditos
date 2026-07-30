@@ -215,20 +215,20 @@ export default function Requerimentos() {
                     {r.numero_protocolo || '—'}
                   </TD>
                   <TD>
-                    <div className="max-w-[200px] truncate">
+                    <div className="max-w-[170px] truncate">
                       {r.tribunal_entidade || '—'}
                     </div>
-                    <div className="max-w-[200px] truncate text-xs text-slate-500">
+                    <div className="max-w-[170px] truncate text-xs text-slate-500">
                       {r.orgao || '—'}
                     </div>
                   </TD>
                   <TD>
-                    <div className="max-w-[180px] truncate">
+                    <div className="max-w-[130px] truncate">
                       {r.classe_processual || '—'}
                     </div>
                   </TD>
                   <TD>
-                    <div className="max-w-[180px] truncate">{r.materia || '—'}</div>
+                    <div className="max-w-[130px] truncate">{r.materia || '—'}</div>
                   </TD>
                   <TD className="whitespace-nowrap text-slate-600">
                     {formatDate(r.data_protocolo)}

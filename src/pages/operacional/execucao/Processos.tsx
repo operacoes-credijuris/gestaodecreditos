@@ -323,17 +323,17 @@ export default function Processos() {
                           <span className="whitespace-nowrap">
                             {formatCNJ(p.numero_cnj)}
                           </span>
-                          <div className="max-w-[230px] truncate text-xs font-normal text-slate-500">
+                          <div className="max-w-[200px] truncate text-xs font-normal text-slate-500">
                             {p.cedente || '—'} v. {p.cessionario || '—'}
                           </div>
                         </div>
                       </div>
                     </TD>
                     <TD>
-                      <div className="max-w-[170px] truncate">
+                      <div className="max-w-[150px] truncate">
                         {p.entidade_devedora || '—'}
                       </div>
-                      <div className="max-w-[170px] truncate text-xs text-slate-500">
+                      <div className="max-w-[150px] truncate text-xs text-slate-500">
                         {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
                       </div>
                     </TD>
@@ -352,7 +352,9 @@ export default function Processos() {
                       {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
                         <div className="mt-0.5 text-xs text-slate-500">
                           {splitRtdpj(p.numero_rtdpj).map((n, i) => (
-                            <div key={i}>{n}</div>
+                            <div key={i} className="max-w-[130px] truncate">
+                              {n}
+                            </div>
                           ))}
                         </div>
                       )}
