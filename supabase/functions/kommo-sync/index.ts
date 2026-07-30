@@ -54,7 +54,16 @@ interface KommoNote {
   id: number
   entity_id: number
   created_at?: number
+  created_by?: number
   params?: { text?: string }
+}
+
+/** Uma anotação como fica guardada em kommo_leads.notas. */
+interface NotaGravada {
+  id: number
+  texto: string
+  criado_em: string | null
+  autor: string | null
 }
 
 Deno.serve(async (req: Request) => {
@@ -138,7 +147,9 @@ Deno.serve(async (req: Request) => {
     // card (que seriam dezenas). O filtro note_type=common é o que mantém as
     // anotações da própria integração (service_message) fora daqui — sem isso,
     // nosso registro de auditoria seria confundido com dado do crédito.
-    const notaPorLead = new Map<number, KommoNote>()
+    // Acumula TODAS as notas de cada card, não só a mais antiga: comentários
+    // posteriores do comercial também interessam ao operacional.
+    const notasPorLead = new Map<number, KommoNote[]>()
     for (let pagina = 1; pagina <= 40; pagina++) {
       const r = await kommo<{
         _embedded?: { notes?: KommoNote[] }
@@ -146,21 +157,33 @@ Deno.serve(async (req: Request) => {
       }>(`/leads/notes?filter[note_type][]=common&limit=250&page=${pagina}`)
       if (!r) break
       for (const n of r._embedded?.notes ?? []) {
-        // Guarda a nota MAIS ANTIGA de cada card: é a que o comercial escreve ao
-        // criar, com os dados do crédito. Comentários posteriores não a
-        // sobrescrevem.
-        const atual = notaPorLead.get(n.entity_id)
-        if (!atual || (n.created_at ?? 0) < (atual.created_at ?? 0)) {
-          notaPorLead.set(n.entity_id, n)
-        }
+        if (!n.params?.text?.trim()) continue
+        const lista = notasPorLead.get(n.entity_id)
+        if (lista) lista.push(n)
+        else notasPorLead.set(n.entity_id, [n])
       }
       if (!r._links?.next?.href) break
+    }
+    // Da mais antiga para a mais recente. A API não garante ordem entre páginas,
+    // então ordenar aqui é o que torna notas[0] confiável como "primeira".
+    for (const lista of notasPorLead.values()) {
+      lista.sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0))
     }
 
     // ---------- Grava o espelho ----------
     const agora = new Date().toISOString()
     const registros = leads.map((l) => {
-      const nota = notaPorLead.get(l.id)?.params?.text ?? null
+      const doLead = notasPorLead.get(l.id) ?? []
+      const notas: NotaGravada[] = doLead.map((n) => ({
+        id: n.id,
+        texto: n.params?.text ?? '',
+        criado_em: iso(n.created_at),
+        // created_by = 0 é o robô/automação do Kommo, não uma pessoa.
+        autor: n.created_by ? usuarios.get(n.created_by) ?? null : null,
+      }))
+      // nota_texto segue sendo a PRIMEIRA: é o campo semântico "dados do
+      // crédito", de onde sai o CNJ. O histórico completo vai em `notas`.
+      const nota = notas[0]?.texto ?? null
       return {
         kommo_lead_id: l.id,
         pipeline_id: l.pipeline_id,
@@ -171,6 +194,7 @@ Deno.serve(async (req: Request) => {
           ? usuarios.get(l.responsible_user_id) ?? null
           : null,
         nota_texto: nota,
+        notas,
         processo_cnj: extrairCnj(nota, l.name),
         // filter(Boolean) não estreita o tipo em TS, então o predicado é
         // explícito — a coluna é text[] not null e não aceita nulo no meio.

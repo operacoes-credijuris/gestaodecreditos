@@ -37,6 +37,15 @@ export interface AnaliseCredito {
   updated_at: string
 }
 
+/** Uma anotação de um card do Kommo. */
+export interface KommoNota {
+  id: number
+  texto: string
+  criado_em: string | null
+  /** Nulo quando a anotação veio de automação do Kommo, não de uma pessoa. */
+  autor: string | null
+}
+
 /**
  * Espelho local de um card do Kommo, mantido pela Edge Function kommo-sync.
  * A chave é kommo_lead_id (bigint), não um uuid `id` — por isso esta tabela
@@ -49,8 +58,10 @@ export interface KommoLead {
   nome: string | null
   responsavel_id: number | null
   responsavel_nome: string | null
-  /** Nota do comercial com os dados do crédito, em texto livre. */
+  /** PRIMEIRA anotação: os dados do crédito, em texto livre. É de onde sai o CNJ. */
   nota_texto: string | null
+  /** Todas as anotações do card, da mais antiga para a mais recente. */
+  notas: KommoNota[]
   processo_cnj: string | null
   tags: string[]
   criado_em: string | null

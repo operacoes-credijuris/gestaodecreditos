@@ -72,8 +72,16 @@ function CardCredito({
   statusEmAndamento: number | null
 }) {
   const [aberto, setAberto] = useState(false)
-  const nota = lead.nota_texto?.trim()
   const ocupado = statusEmAndamento !== null
+  // Compatibilidade com cards sincronizados antes da coluna `notas` existir:
+  // cai no nota_texto para não sumir o dado do crédito antes do próximo sync.
+  const notas =
+    lead.notas?.length > 0
+      ? lead.notas
+      : lead.nota_texto?.trim()
+        ? [{ id: 0, texto: lead.nota_texto, criado_em: null, autor: null }]
+        : []
+  const posteriores = notas.length - 1
 
   return (
     <div className="border-b border-slate-100 p-4 transition-colors last:border-b-0 hover:bg-slate-50/70">
@@ -124,15 +132,18 @@ function CardCredito({
       </div>
 
       <div className="mt-2 flex items-center gap-3">
-        {/* A nota do comercial vem em texto livre e o formato varia entre cards,
-            então é exibida crua, recolhida por padrão. */}
-        {nota && (
+        {/* As anotações vêm em texto livre e o formato varia entre cards, então
+            são exibidas cruas, recolhidas por padrão. A contagem no rótulo evita
+            que anotação nova passe batida com o bloco fechado. */}
+        {notas.length > 0 && (
           <button
             type="button"
             onClick={() => setAberto((v) => !v)}
             className="text-xs font-medium text-brand-600 hover:underline"
           >
             {aberto ? 'Ocultar dados do card' : 'Ver dados do card'}
+            {posteriores > 0 &&
+              ` (+${posteriores} anotação${posteriores > 1 ? 'ões' : ''})`}
           </button>
         )}
         <a
@@ -145,10 +156,24 @@ function CardCredito({
         </a>
       </div>
 
-      {nota && aberto && (
-        <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
-          {nota}
-        </pre>
+      {aberto && notas.length > 0 && (
+        <div className="mt-2 space-y-2">
+          {notas.map((n, i) => (
+            <div key={n.id || i}>
+              {/* A primeira é o dado do crédito; as seguintes são o histórico. */}
+              <div className="mb-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
+                <span className="font-medium text-slate-500">
+                  {i === 0 ? 'Dados do crédito' : `Anotação ${i + 1}`}
+                </span>
+                {n.criado_em && <span>{formatDate(n.criado_em)}</span>}
+                {n.autor && <span>· {n.autor}</span>}
+              </div>
+              <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
+                {n.texto}
+              </pre>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -203,7 +228,15 @@ export default function AnaliseCredito() {
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((x) =>
-        [x.nome, x.processo_cnj, x.nota_texto, x.responsavel_nome]
+        [
+          x.nome,
+          x.processo_cnj,
+          x.responsavel_nome,
+          // Busca em TODAS as anotações, não só na primeira: informação
+          // relevante costuma vir num comentário posterior.
+          ...(x.notas ?? []).map((n) => n.texto),
+          x.nota_texto,
+        ]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
       )
