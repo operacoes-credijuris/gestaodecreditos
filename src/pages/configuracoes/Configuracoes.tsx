@@ -655,7 +655,6 @@ function UsuariosConfig() {
         open={open}
         onClose={() => setOpen(false)}
         title="Novo usuário"
-        description="O usuário poderá acessar o sistema com o e-mail e senha definidos."
         footer={
           <>
             <Button variant="outline" onClick={() => setOpen(false)}>
