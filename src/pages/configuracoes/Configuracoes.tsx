@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   XCircle,
   ShieldCheck,
-  RefreshCw,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
@@ -187,10 +186,6 @@ function KommoConfig() {
   const [subdominio, setSubdominio] = useState('')
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
-  const [sincronizando, setSincronizando] = useState(false)
-  // Resumo do último sync desta sessão — some ao recarregar, serve só de
-  // confirmação imediata de que a integração puxou dados.
-  const [ultimoSync, setUltimoSync] = useState<string | null>(null)
 
   useEffect(() => {
     const cfg = (data?.config as ConfigKommo) ?? {}
@@ -232,23 +227,6 @@ function KommoConfig() {
       toast.error((err as Error).message)
     } finally {
       setSaving(false)
-    }
-  }
-
-  // Puxa os cards do Kommo para public.kommo_leads. Manual por ora: a aba
-  // Análise de Crédito ainda não existe, e é aqui que se confirma que a
-  // integração está de fato trazendo dados.
-  async function sincronizar() {
-    setSincronizando(true)
-    setUltimoSync(null)
-    try {
-      const r = await invokeFunction<{ mensagem: string }>('kommo-sync', {})
-      setUltimoSync(r?.mensagem ?? 'Sincronizado.')
-      toast.success(r?.mensagem ?? 'Kommo sincronizado.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSincronizando(false)
     }
   }
 
@@ -310,23 +288,13 @@ function KommoConfig() {
                 autoComplete="off"
               />
             </Field>
-            <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+            {/* Sem botão de sincronizar aqui: o cron roda de 15 em 15 min e a
+                aba Análise de Crédito sincroniza ao abrir. Um terceiro gatilho
+                nesta tela só serviria para depurar a integração. */}
+            <div className="sm:col-span-2">
               <Button onClick={salvar} loading={saving}>
                 Salvar Kommo
               </Button>
-              <Button
-                variant="outline"
-                icon={<RefreshCw className="h-4 w-4" />}
-                onClick={sincronizar}
-                loading={sincronizando}
-                // Sincronizar sem credencial só produziria um erro previsível.
-                disabled={!configurado}
-              >
-                Sincronizar agora
-              </Button>
-              {ultimoSync && (
-                <span className="text-sm text-slate-600">{ultimoSync}</span>
-              )}
             </div>
           </div>
         )}

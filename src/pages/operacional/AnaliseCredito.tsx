@@ -6,14 +6,7 @@
 // correspondente no Kommo — é controle interno, marcado na nossa base.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  Search,
-  RefreshCw,
-  ExternalLink,
-  CheckCircle2,
-  Undo2,
-  ArrowRightLeft,
-} from 'lucide-react'
+import { Search, RefreshCw, ExternalLink, ArrowRightLeft } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
   FUNIL_RPV,
@@ -24,7 +17,6 @@ import {
   agruparPorTela,
   useKommoLeads,
   useMarcacoes,
-  useMarcarRevisao,
   type TelaAnalise,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
@@ -58,18 +50,10 @@ function tituloCard(lead: KommoLead): string {
 
 function CardCredito({
   lead,
-  tela,
-  onConcluir,
-  onReabrir,
   onMover,
-  ocupado,
 }: {
   lead: KommoLead
-  tela: TelaAnalise
-  onConcluir: (l: KommoLead) => void
-  onReabrir: (l: KommoLead) => void
   onMover: (l: KommoLead) => void
-  ocupado: boolean
 }) {
   const [aberto, setAberto] = useState(false)
   const nota = lead.nota_texto?.trim()
@@ -101,33 +85,11 @@ function CardCredito({
         </div>
 
         <div className="flex flex-none items-center gap-1.5">
-          {tela === 'pendentes' && (
-            <Button
-              size="sm"
-              icon={<CheckCircle2 className="h-4 w-4" />}
-              onClick={() => onConcluir(lead)}
-              loading={ocupado}
-            >
-              Concluir análise
-            </Button>
-          )}
-          {tela === 'revisao' && (
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<Undo2 className="h-4 w-4" />}
-              onClick={() => onReabrir(lead)}
-              loading={ocupado}
-            >
-              Reabrir
-            </Button>
-          )}
           <Button
             size="sm"
             variant="outline"
             icon={<ArrowRightLeft className="h-4 w-4" />}
             onClick={() => onMover(lead)}
-            disabled={ocupado}
           >
             Mover
           </Button>
@@ -170,11 +132,9 @@ export default function AnaliseCredito() {
   const toast = useToast()
   const leads = useKommoLeads(FUNIL_RPV)
   const marcacoes = useMarcacoes()
-  const marcar = useMarcarRevisao()
 
   const [tela, setTela] = useState<TelaAnalise>('pendentes')
   const [busca, setBusca] = useState('')
-  const [leadOcupado, setLeadOcupado] = useState<number | null>(null)
   // Card com o diálogo de movimentação aberto, e o formulário dele.
   const [movendo, setMovendo] = useState<KommoLead | null>(null)
   const [destino, setDestino] = useState<string>('')
@@ -259,26 +219,6 @@ export default function AnaliseCredito() {
     }
     setErroMover(null)
     mover.mutate({ leadId: movendo.kommo_lead_id, statusId, comentario: comentario.trim() })
-  }
-
-  async function alterarMarcacao(lead: KommoLead, marcarComo: boolean) {
-    setLeadOcupado(lead.kommo_lead_id)
-    try {
-      await marcar.mutateAsync({
-        leadId: lead.kommo_lead_id,
-        statusAtual: lead.status_id,
-        marcar: marcarComo,
-      })
-      toast.success(
-        marcarComo
-          ? 'Análise concluída — o card foi para Revisão.'
-          : 'Card devolvido para Pendentes.',
-      )
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setLeadOcupado(null)
-    }
   }
 
   const defTela = TELAS.find((t) => t.key === tela)!
@@ -376,10 +316,6 @@ export default function AnaliseCredito() {
               <CardCredito
                 key={l.kommo_lead_id}
                 lead={l}
-                tela={tela}
-                ocupado={leadOcupado === l.kommo_lead_id}
-                onConcluir={(x) => alterarMarcacao(x, true)}
-                onReabrir={(x) => alterarMarcacao(x, false)}
                 onMover={abrirMover}
               />
             ))}

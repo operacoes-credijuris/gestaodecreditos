@@ -3,7 +3,7 @@
 //
 // A UI nunca fala com a API do Kommo: ela não devolve headers de CORS e o token
 // tem direitos de administrador. Quem busca é a Edge Function kommo-sync.
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import type { KommoLead, KommoAnaliseInterna } from './types'
 
@@ -56,7 +56,7 @@ export const TELAS: DefTela[] = [
     status: [ST_ANALISE],
     exigeMarcacao: true,
     descricaoVazia:
-      'Nenhuma análise aguardando revisão. Concluir uma análise em "Pendentes" move o card para cá.',
+      'Nenhuma análise aguardando revisão. Os cards chegam aqui quando a análise automática é produzida — ainda não implementada.',
   },
   {
     key: 'decisao',
@@ -143,43 +143,11 @@ export function useMarcacoes() {
   })
 }
 
-/**
- * Marca/desmarca "análise concluída, aguardando revisão".
- * Não toca o Kommo: é etapa interna do operacional.
- */
-export function useMarcarRevisao() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async (args: {
-      leadId: number
-      statusAtual: number
-      marcar: boolean
-    }) => {
-      if (!args.marcar) {
-        const { error } = await supabase
-          .from('kommo_analise_interna')
-          .delete()
-          .eq('kommo_lead_id', args.leadId)
-        if (error) throw new Error(error.message)
-        return
-      }
-      const { data: sessao } = await supabase.auth.getUser()
-      const { error } = await supabase.from('kommo_analise_interna').upsert(
-        {
-          kommo_lead_id: args.leadId,
-          etapa_interna: 'em_revisao',
-          // Guardado para invalidar a marcação se o card sair desta coluna.
-          status_id_quando_marcado: args.statusAtual,
-          marcado_por: sessao?.user?.id ?? null,
-        },
-        { onConflict: 'kommo_lead_id' },
-      )
-      if (error) throw new Error(error.message)
-    },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] }),
-  })
-}
+// A marcação em kommo_analise_interna é escrita pelo processo de análise
+// automática (IA), do lado servidor, e apagada pela kommo-mover quando o card
+// troca de coluna. A interface só LÊ: não existe caminho manual para marcar ou
+// desmarcar, de propósito — se a análise da IA sair errada, o revisor corrige e
+// segue para Decisão, sem devolver o card para a fila.
 
 /**
  * Uma marcação só vale enquanto o card estiver na coluna em que foi marcado.
