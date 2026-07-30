@@ -40,3 +40,6 @@ Thumbs.db
 
 # Artefato local do "deno check" nas Edge Functions (nao usado no deploy)
 deno.lock
+
+# Cache incremental do tsc (artefato local, regenerado a cada typecheck)
+*.tsbuildinfo
