@@ -21,6 +21,7 @@ import {
   type AcaoTela,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
+import { useAuth } from '@/contexts/AuthContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -143,8 +144,15 @@ function CardCredito({
 export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
+  const { profile, user } = useAuth()
   const leads = useKommoLeads(FUNIL_RPV)
   const prontas = useAnalisesProntas()
+
+  // Mesma cadeia de fallback da Edge Function kommo-mover, para o diálogo
+  // mostrar exatamente o que vai ser gravado no card. Perfil sem nome cai no
+  // e-mail — e ver isso na tela é o que faz a pessoa ir preencher o nome.
+  const assinatura =
+    profile?.nome?.trim() || profile?.email || user?.email || 'usuário do sistema'
 
   const [tela, setTela] = useState<TelaAnalise>('pendentes')
   const [busca, setBusca] = useState('')
@@ -358,16 +366,20 @@ export default function AnaliseCredito() {
             </div>
 
             <Field
-              label={reprovando ? 'Motivo da reprovação' : 'Observação'}
+              label={reprovando ? 'Motivo da reprovação' : 'Observação para o comercial'}
               required={reprovando}
               error={erroMover ?? undefined}
-              hint="Vai como anotação no card do Kommo, assinada com o seu nome."
+              hint={`O comercial lê este texto no card, dentro do Kommo, assinado como "${assinatura}".`}
             >
               <Textarea
                 rows={3}
                 value={comentario}
                 onChange={(e) => setComentario(e.target.value)}
-                placeholder={reprovando ? 'Por que o crédito foi reprovado?' : 'Opcional.'}
+                placeholder={
+                  reprovando
+                    ? 'Ex.: processo com penhora anterior à cessão.'
+                    : 'Opcional. Ex.: análise concluída, dentro dos parâmetros.'
+                }
               />
             </Field>
 

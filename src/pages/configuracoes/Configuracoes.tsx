@@ -450,6 +450,30 @@ function UsuariosConfig() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({ email: '', nome: '', password: '', role: 'usuario' })
   const [saving, setSaving] = useState(false)
+  // Edição do nome. Existe porque o nome é o que assina as anotações que a
+  // plataforma grava no Kommo — e quem é criado direto no painel do Supabase
+  // entra sem nome, sem nenhuma forma de corrigir pelo app.
+  const [editando, setEditando] = useState<Profile | null>(null)
+  const [nomeEdit, setNomeEdit] = useState('')
+
+  async function salvarNome() {
+    if (!editando) return
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ nome: nomeEdit.trim() })
+        .eq('id', editando.id)
+      if (error) throw new Error(error.message)
+      await qc.invalidateQueries({ queryKey: ['profiles'] })
+      toast.success('Nome atualizado.')
+      setEditando(null)
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function criar() {
     if (!form.email.trim() || !form.password) {
@@ -537,12 +561,24 @@ function UsuariosConfig() {
                         {p.ativo ? 'Ativo' : 'Inativo'}
                       </Badge>
                     </TD>
-                    <TD className="text-right">
-                      {!admin && (
-                        <Button size="sm" variant="outline" onClick={() => toggleAtivo(p)}>
-                          {p.ativo ? 'Desativar' : 'Ativar'}
+                    <TD className="whitespace-nowrap text-right">
+                      <div className="flex justify-end gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditando(p)
+                            setNomeEdit(p.nome ?? '')
+                          }}
+                        >
+                          Editar nome
                         </Button>
-                      )}
+                        {!admin && (
+                          <Button size="sm" variant="outline" onClick={() => toggleAtivo(p)}>
+                            {p.ativo ? 'Desativar' : 'Ativar'}
+                          </Button>
+                        )}
+                      </div>
                     </TD>
                   </TR>
                 )
@@ -551,6 +587,33 @@ function UsuariosConfig() {
           </Table>
         )}
       </CardBody>
+
+      <Modal
+        open={!!editando}
+        onClose={() => setEditando(null)}
+        title="Editar nome"
+        description="É este nome que assina as anotações gravadas no Kommo."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setEditando(null)}>
+              Cancelar
+            </Button>
+            <Button onClick={salvarNome} loading={saving}>
+              Salvar
+            </Button>
+          </>
+        }
+      >
+        {editando && (
+          <Field label="Nome" hint={editando.email}>
+            <Input
+              value={nomeEdit}
+              onChange={(e) => setNomeEdit(e.target.value)}
+              placeholder="Nome completo"
+            />
+          </Field>
+        )}
+      </Modal>
 
       <Modal
         open={open}
