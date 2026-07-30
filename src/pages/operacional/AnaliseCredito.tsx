@@ -39,12 +39,6 @@ import { formatDate } from '@/lib/format'
 
 const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
 
-/**
- * Conta genérica do Kommo. Anotação assinada por ela não diz quem escreveu, então
- * o autor é omitido; quando vem outro nome, aí sim informa algo.
- */
-const CONTA_PADRAO = 'Credijuris'
-
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
 const ICONES: Record<number, ReactNode> = {
   [ST_DECISAO]: <ArrowRight className="h-4 w-4" />,
@@ -158,14 +152,14 @@ function CardCredito({
         <div className="mt-2 space-y-2">
           {notas.map((n, i) => (
             <div key={n.id || i}>
-              {/* Sem rótulo de posição: há cards em que a primeira anotação é um
-                  comentário curto e o bloco de dados vem depois, então numerar
-                  ou chamar a primeira de "dados do crédito" seria mentira.
-                  O autor só aparece quando NÃO é a conta padrão — nela ele não
-                  distingue nada, mas quando é uma pessoa, distingue. */}
-              <div className="mb-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
-                {n.criado_em && <span>{formatDate(n.criado_em)}</span>}
-                {n.autor && n.autor !== CONTA_PADRAO && <span>· {n.autor}</span>}
+              {/* Só a data. Sem rótulo de posição, porque há cards em que a
+                  primeira anotação é um comentário curto e o bloco de dados vem
+                  depois — numerar sugeriria uma ordem semântica que não existe.
+                  E sem autor: a equipe usa um login só e se identifica no próprio
+                  texto da anotação; os nomes que aparecem são de antes disso.
+                  O campo continua guardado em kommo_leads.notas. */}
+              <div className="mb-0.5 text-xs text-slate-400">
+                {n.criado_em && formatDate(n.criado_em)}
               </div>
               <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
                 {n.texto}
