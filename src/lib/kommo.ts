@@ -2,10 +2,22 @@
 // Crédito, mais as consultas ao espelho local (public.kommo_leads).
 //
 // A UI nunca fala com a API do Kommo: ela não devolve headers de CORS e o token
-// tem direitos de administrador. Quem busca é a Edge Function kommo-sync.
+// tem direitos de administrador. Quem busca é a Edge Function kommo-sync; quem
+// escreve é a kommo-mover.
+//
+// Fluxo do operacional:
+//   Pendentes  a IA analisa o card, que fica aqui até a equipe de revisão
+//              considerar a análise boa
+//        ↓     "Enviar para decisão"
+//   Decisão    três saídas
+//        ↓
+//   Aprovados | Diligência | Reprovados
+//
+// Toda tela corresponde a exatamente uma coluna do Kommo. Não há estado que
+// exista só na nossa base — o kanban é a fonte de verdade.
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from './supabase'
-import type { KommoLead, KommoAnaliseInterna } from './types'
+import type { KommoLead } from './types'
 
 // Funis que o operacional usa, na conta contatocredijuriscom.
 export const FUNIL_RPV = 13901939
@@ -20,78 +32,18 @@ export const ST_REPROVADO = 107830031 // Reprovados Operacional
 
 export type TelaAnalise =
   | 'pendentes'
-  | 'revisao'
   | 'decisao'
   | 'aprovados'
   | 'diligencia'
   | 'reprovados'
-
-export interface DefTela {
-  key: TelaAnalise
-  label: string
-  /** Colunas do Kommo que alimentam a tela. */
-  status: number[]
-  /**
-   * Pendentes e Revisão saem da MESMA coluna do Kommo (Análise
-   * Jurídica-Econômico) e se distinguem pela marcação interna: sem marcação é
-   * pendente, com marcação está aguardando revisão. Nas outras telas a coluna
-   * do Kommo já basta, e a marcação é irrelevante.
-   */
-  exigeMarcacao?: boolean
-  descricaoVazia: string
-}
-
-export const TELAS: DefTela[] = [
-  {
-    key: 'pendentes',
-    label: 'Pendentes',
-    status: [ST_ANALISE],
-    exigeMarcacao: false,
-    descricaoVazia:
-      'Nenhum card aguardando análise. Quando o comercial mover um crédito para "Análise Jurídica-Econômico" no Kommo, ele aparece aqui.',
-  },
-  {
-    key: 'revisao',
-    label: 'Revisão',
-    status: [ST_ANALISE],
-    exigeMarcacao: true,
-    descricaoVazia:
-      'Nenhuma análise aguardando revisão. Os cards chegam aqui quando a análise automática é produzida — ainda não implementada.',
-  },
-  {
-    key: 'decisao',
-    label: 'Decisão',
-    status: [ST_DECISAO],
-    descricaoVazia: 'Nenhum crédito em "Revisão e Decisão do Pedro" no Kommo.',
-  },
-  {
-    key: 'aprovados',
-    label: 'Aprovados',
-    status: [ST_PROPOSTA],
-    descricaoVazia: 'Nenhum crédito em "Apresentação de Proposta" no Kommo.',
-  },
-  {
-    key: 'diligencia',
-    label: 'Diligência',
-    status: [ST_DILIGENCIA],
-    descricaoVazia: 'Nenhum crédito em "Diligência" no Kommo.',
-  },
-  {
-    key: 'reprovados',
-    label: 'Reprovados',
-    status: [ST_REPROVADO],
-    descricaoVazia: 'Nenhum crédito em "Reprovados Operacional" no Kommo.',
-  },
-]
 
 /**
  * Etapa exibida ao usuário, por coluna do Kommo. Usa o vocabulário DA
  * PLATAFORMA, não o do Kommo: quem opera aqui não precisa saber que "Aprovados"
  * é "Apresentação de Proposta" no CRM do comercial.
  *
- * ST_ANALISE alimenta duas telas (Pendentes e Revisão, separadas pela marcação
- * interna). Rotula como "Pendentes" porque é onde um card cai ao ser movido para
- * essa coluna — a kommo-mover apaga a marcação.
+ * A anotação gravada no card do Kommo usa o nome de lá, de propósito — quem a
+ * lê é o comercial, dentro do Kommo.
  */
 export const NOME_STATUS: Record<number, string> = {
   [ST_ANALISE]: 'Pendentes',
@@ -101,18 +53,73 @@ export const NOME_STATUS: Record<number, string> = {
   [ST_REPROVADO]: 'Reprovados',
 }
 
+export interface DefTela {
+  key: TelaAnalise
+  label: string
+  statusId: number
+  descricaoVazia: string
+}
+
+export const TELAS: DefTela[] = [
+  {
+    key: 'pendentes',
+    label: 'Pendentes',
+    statusId: ST_ANALISE,
+    descricaoVazia:
+      'Nenhum card aguardando revisão. Quando o comercial mover um crédito para análise no Kommo, ele aparece aqui.',
+  },
+  {
+    key: 'decisao',
+    label: 'Decisão',
+    statusId: ST_DECISAO,
+    descricaoVazia: 'Nenhum crédito aguardando decisão.',
+  },
+  {
+    key: 'aprovados',
+    label: 'Aprovados',
+    statusId: ST_PROPOSTA,
+    descricaoVazia: 'Nenhum crédito aprovado nesta etapa.',
+  },
+  {
+    key: 'diligencia',
+    label: 'Diligência',
+    statusId: ST_DILIGENCIA,
+    descricaoVazia: 'Nenhum crédito em diligência.',
+  },
+  {
+    key: 'reprovados',
+    label: 'Reprovados',
+    statusId: ST_REPROVADO,
+    descricaoVazia: 'Nenhum crédito reprovado.',
+  },
+]
+
+export interface AcaoTela {
+  statusId: number
+  label: string
+  variant: 'primary' | 'outline' | 'danger'
+}
+
 /**
- * Destinos oferecidos ao mover um card, na ordem do fluxo. Os ids precisam
- * espelhar o COLUNAS da Edge Function kommo-mover, que rejeita destino
- * desconhecido — a validação de verdade é lá, isto é só a lista da interface.
+ * Botões de ação por tela: em vez de um "Mover" genérico que obriga a escolher
+ * o destino numa lista, cada etapa oferece direto as saídas que fazem sentido
+ * nela. As telas terminais ficam sem ação — de Aprovados e Reprovados o card não
+ * volta pelo app, e de Diligência a saída depende do resultado da diligência,
+ * que ainda não foi definido.
  */
-export const DESTINOS: { statusId: number; label: string }[] = [
-  ST_ANALISE,
-  ST_DECISAO,
-  ST_PROPOSTA,
-  ST_DILIGENCIA,
-  ST_REPROVADO,
-].map((statusId) => ({ statusId, label: NOME_STATUS[statusId] }))
+export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
+  pendentes: [
+    { statusId: ST_DECISAO, label: 'Enviar para decisão', variant: 'primary' },
+  ],
+  decisao: [
+    { statusId: ST_PROPOSTA, label: 'Aprovar', variant: 'primary' },
+    { statusId: ST_DILIGENCIA, label: 'Diligência', variant: 'outline' },
+    { statusId: ST_REPROVADO, label: 'Reprovar', variant: 'danger' },
+  ],
+  aprovados: [],
+  diligencia: [],
+  reprovados: [],
+}
 
 /** Reprovar exige justificativa. Espelha o EXIGE_MOTIVO da Edge Function. */
 export function exigeMotivo(statusId: number): boolean {
@@ -137,47 +144,12 @@ export function useKommoLeads(pipelineId: number) {
   })
 }
 
-/** Marcações internas (quais cards já tiveram a análise concluída). */
-export function useMarcacoes() {
-  return useQuery({
-    queryKey: ['kommo_analise_interna'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('kommo_analise_interna')
-        .select('*')
-      if (error) throw new Error(error.message)
-      return (data ?? []) as KommoAnaliseInterna[]
-    },
-  })
-}
-
-// A marcação em kommo_analise_interna é escrita pelo processo de análise
-// automática (IA), do lado servidor, e apagada pela kommo-mover quando o card
-// troca de coluna. A interface só LÊ: não existe caminho manual para marcar ou
-// desmarcar, de propósito — se a análise da IA sair errada, o revisor corrige e
-// segue para Decisão, sem devolver o card para a fila.
-
-/**
- * Uma marcação só vale enquanto o card estiver na coluna em que foi marcado.
- * Se alguém o moveu direto no Kommo, a marcação é ignorada — é o que evita a
- * tela de Revisão mostrar card que já seguiu adiante.
- */
-export function marcacaoValida(
-  lead: KommoLead,
-  marcacao: KommoAnaliseInterna | undefined,
-): boolean {
-  return !!marcacao && marcacao.status_id_quando_marcado === lead.status_id
-}
-
 /** Separa os cards de um funil nas telas definidas em TELAS. */
 export function agruparPorTela(
   leads: KommoLead[],
-  marcacoes: KommoAnaliseInterna[],
 ): Record<TelaAnalise, KommoLead[]> {
-  const porLead = new Map(marcacoes.map((m) => [m.kommo_lead_id, m]))
   const out = {
     pendentes: [],
-    revisao: [],
     decisao: [],
     aprovados: [],
     diligencia: [],
@@ -186,12 +158,7 @@ export function agruparPorTela(
 
   for (const tela of TELAS) {
     for (const l of leads) {
-      if (!tela.status.includes(l.status_id)) continue
-      if (tela.exigeMarcacao !== undefined) {
-        const temMarcacao = marcacaoValida(l, porLead.get(l.kommo_lead_id))
-        if (temMarcacao !== tela.exigeMarcacao) continue
-      }
-      out[tela.key].push(l)
+      if (l.status_id === tela.statusId) out[tela.key].push(l)
     }
   }
   return out

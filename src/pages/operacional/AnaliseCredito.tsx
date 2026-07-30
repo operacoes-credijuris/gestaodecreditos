@@ -1,30 +1,30 @@
-// Análise de Crédito: as cinco telas do fluxo do operacional, alimentadas pelos
-// cards do kanban do Kommo (espelho local em public.kommo_leads).
+// Análise de Crédito: as etapas do fluxo do operacional, alimentadas pelos cards
+// do kanban do Kommo (espelho local em public.kommo_leads).
 //
-// O comercial cria o card com os dados do crédito; o operacional analisa e
-// devolve movendo de coluna. A tela de Revisão é a única sem coluna
-// correspondente no Kommo — é controle interno, marcado na nossa base.
+// Cada tela corresponde a exatamente uma coluna do Kommo, e as ações de cada
+// etapa aparecem como botões no próprio card — em vez de um "Mover" genérico que
+// obrigaria a escolher o destino numa lista.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, ExternalLink, ArrowRightLeft } from 'lucide-react'
+import { Search, ExternalLink } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
   FUNIL_RPV,
   TELAS,
+  ACOES,
   NOME_STATUS,
-  DESTINOS,
   exigeMotivo,
   agruparPorTela,
   useKommoLeads,
-  useMarcacoes,
   type TelaAnalise,
+  type AcaoTela,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select, Textarea } from '@/components/ui/Field'
+import { Field, Input, Textarea } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
 import { Modal } from '@/components/ui/Modal'
 import { SyncStatus } from '@/components/ui/SyncStatus'
@@ -39,21 +39,18 @@ function urlCard(leadId: number): string {
   return `https://${KOMMO_SUBDOMINIO}.kommo.com/leads/detail/${leadId}`
 }
 
-/**
- * O nome do card no Kommo costuma vir como "CEDENTE - NOME - CNJ". Mostrar o
- * CNJ separado já é útil; o resto do nome fica como veio, sem tentar adivinhar
- * a estrutura (ela varia entre cards).
- */
 function tituloCard(lead: KommoLead): string {
   return lead.nome?.trim() || `Card ${lead.kommo_lead_id}`
 }
 
 function CardCredito({
   lead,
-  onMover,
+  acoes,
+  onAcao,
 }: {
   lead: KommoLead
-  onMover: (l: KommoLead) => void
+  acoes: AcaoTela[]
+  onAcao: (l: KommoLead, a: AcaoTela) => void
 }) {
   const [aberto, setAberto] = useState(false)
   const nota = lead.nota_texto?.trim()
@@ -69,8 +66,7 @@ function CardCredito({
                 {formatCNJ(lead.processo_cnj)}
               </span>
             )}
-            <span>{NOME_STATUS[lead.status_id] ?? `coluna ${lead.status_id}`}</span>
-            {lead.responsavel_nome && <span>· {lead.responsavel_nome}</span>}
+            {lead.responsavel_nome && <span>{lead.responsavel_nome}</span>}
             {lead.criado_em && <span>· criado em {formatDate(lead.criado_em)}</span>}
           </div>
           {lead.tags.length > 0 && (
@@ -84,31 +80,28 @@ function CardCredito({
           )}
         </div>
 
-        <div className="flex flex-none items-center gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            icon={<ArrowRightLeft className="h-4 w-4" />}
-            onClick={() => onMover(lead)}
-          >
-            Mover
-          </Button>
-          <a
-            href={urlCard(lead.kommo_lead_id)}
-            target="_blank"
-            rel="noreferrer"
-            title="Abrir card no Kommo"
-            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-          >
-            <ExternalLink className="h-4 w-4" />
-          </a>
-        </div>
+        {/* Ações empilhadas: em Decisão são três, e lado a lado competiriam com
+            o conteúdo do card. */}
+        {acoes.length > 0 && (
+          <div className="flex w-full flex-none flex-col gap-1.5 sm:w-44">
+            {acoes.map((a) => (
+              <Button
+                key={a.statusId}
+                size="sm"
+                variant={a.variant}
+                onClick={() => onAcao(lead, a)}
+              >
+                {a.label}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* A nota do comercial vem em texto livre e o formato varia entre cards,
-          então é exibida crua, recolhida por padrão para não dominar a lista. */}
-      {nota && (
-        <div className="mt-2">
+      <div className="mt-2 flex items-center gap-3">
+        {/* A nota do comercial vem em texto livre e o formato varia entre cards,
+            então é exibida crua, recolhida por padrão. */}
+        {nota && (
           <button
             type="button"
             onClick={() => setAberto((v) => !v)}
@@ -116,12 +109,21 @@ function CardCredito({
           >
             {aberto ? 'Ocultar dados do card' : 'Ver dados do card'}
           </button>
-          {aberto && (
-            <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
-              {nota}
-            </pre>
-          )}
-        </div>
+        )}
+        <a
+          href={urlCard(lead.kommo_lead_id)}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
+        >
+          <ExternalLink className="h-3.5 w-3.5" /> Abrir no Kommo
+        </a>
+      </div>
+
+      {nota && aberto && (
+        <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+          {nota}
+        </pre>
       )}
     </div>
   )
@@ -131,13 +133,14 @@ export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
   const leads = useKommoLeads(FUNIL_RPV)
-  const marcacoes = useMarcacoes()
 
   const [tela, setTela] = useState<TelaAnalise>('pendentes')
   const [busca, setBusca] = useState('')
-  // Card com o diálogo de movimentação aberto, e o formulário dele.
-  const [movendo, setMovendo] = useState<KommoLead | null>(null)
-  const [destino, setDestino] = useState<string>('')
+  // Ação pendente de confirmação: o card e o destino já escolhidos pelo botão.
+  const [confirmando, setConfirmando] = useState<{
+    lead: KommoLead
+    acao: AcaoTela
+  } | null>(null)
   const [comentario, setComentario] = useState('')
   const [erroMover, setErroMover] = useState<string | null>(null)
 
@@ -145,10 +148,7 @@ export default function AnaliseCredito() {
   // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
   const sync = useMutation({
     mutationFn: () => invokeFunction('kommo-sync', {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['kommo_leads'] })
-      qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['kommo_leads'] }),
     onError: (e) => toast.error(`Sincronização Kommo: ${(e as Error).message}`),
   })
   const jaSincronizou = useRef(false)
@@ -159,10 +159,7 @@ export default function AnaliseCredito() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const grupos = useMemo(
-    () => agruparPorTela(leads.data ?? [], marcacoes.data ?? []),
-    [leads.data, marcacoes.data],
-  )
+  const grupos = useMemo(() => agruparPorTela(leads.data ?? []), [leads.data])
 
   const lista = useMemo(() => {
     let l = grupos[tela]
@@ -182,49 +179,44 @@ export default function AnaliseCredito() {
       invokeFunction<{ mensagem: string; aviso: string | null }>('kommo-mover', args),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['kommo_leads'] })
-      qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
       // A função devolve aviso quando o card moveu mas a anotação não gravou —
       // é sucesso parcial, não erro, e o usuário precisa saber da diferença.
       if (r?.aviso) toast.error(r.aviso)
       else toast.success(r?.mensagem ?? 'Card movido.')
-      fecharMover()
+      fechar()
     },
     onError: (e) => setErroMover((e as Error).message),
   })
 
-  function abrirMover(lead: KommoLead) {
-    setMovendo(lead)
-    setDestino('')
+  function abrir(lead: KommoLead, acao: AcaoTela) {
+    setConfirmando({ lead, acao })
     setComentario('')
     setErroMover(null)
   }
 
-  function fecharMover() {
-    setMovendo(null)
-    setDestino('')
+  function fechar() {
+    setConfirmando(null)
     setComentario('')
     setErroMover(null)
   }
 
-  function confirmarMover() {
-    if (!movendo) return
-    const statusId = Number(destino)
-    if (!statusId) {
-      setErroMover('Escolha a coluna de destino.')
-      return
-    }
-    if (exigeMotivo(statusId) && !comentario.trim()) {
+  function confirmar() {
+    if (!confirmando) return
+    const { lead, acao } = confirmando
+    if (exigeMotivo(acao.statusId) && !comentario.trim()) {
       setErroMover('Informe o motivo da reprovação.')
       return
     }
     setErroMover(null)
-    mover.mutate({ leadId: movendo.kommo_lead_id, statusId, comentario: comentario.trim() })
+    mover.mutate({
+      leadId: lead.kommo_lead_id,
+      statusId: acao.statusId,
+      comentario: comentario.trim(),
+    })
   }
 
   const defTela = TELAS.find((t) => t.key === tela)!
-  const carregando = leads.isLoading || marcacoes.isLoading
-  const erro = leads.isError || marcacoes.isError
-  const mensagemErro = ((leads.error ?? marcacoes.error) as Error | null)?.message
+  const reprovando = confirmando ? exigeMotivo(confirmando.acao.statusId) : false
 
   return (
     <div>
@@ -239,8 +231,8 @@ export default function AnaliseCredito() {
         }
       />
 
-      {/* Divisão por tipo de crédito. Precatórios entram na fase 2: o funil
-          existe no Kommo, mas o sync ainda só traz o de RPV. */}
+      {/* Precatórios entram na fase 2: o funil existe no Kommo, mas o sync
+          ainda só traz o de RPV. */}
       <div className="mb-4">
         <Segmented
           ariaLabel="Tipo de crédito"
@@ -254,8 +246,6 @@ export default function AnaliseCredito() {
       </div>
 
       <Card className="mb-4 p-4">
-        {/* Sem botão de sincronizar: o cron roda de 15 em 15 min e a página
-            sincroniza ao abrir. O SyncStatus no cabeçalho mostra quando corre. */}
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
@@ -280,15 +270,12 @@ export default function AnaliseCredito() {
       </Card>
 
       <Card>
-        {carregando ? (
+        {leads.isLoading ? (
           <Loading />
-        ) : erro ? (
+        ) : leads.isError ? (
           <ErrorState
-            message={mensagemErro}
-            onRetry={() => {
-              leads.refetch()
-              marcacoes.refetch()
-            }}
+            message={(leads.error as Error)?.message}
+            onRetry={() => leads.refetch()}
           />
         ) : lista.length === 0 ? (
           <EmptyState
@@ -305,7 +292,8 @@ export default function AnaliseCredito() {
               <CardCredito
                 key={l.kommo_lead_id}
                 lead={l}
-                onMover={abrirMover}
+                acoes={ACOES[tela]}
+                onAcao={abrir}
               />
             ))}
           </div>
@@ -313,63 +301,52 @@ export default function AnaliseCredito() {
       </Card>
 
       <Modal
-        open={!!movendo}
-        onClose={fecharMover}
-        title="Mover card no Kommo"
+        open={!!confirmando}
+        onClose={fechar}
+        title={confirmando ? confirmando.acao.label : ''}
         footer={
           <>
-            <Button variant="outline" onClick={fecharMover}>
+            <Button variant="outline" onClick={fechar}>
               Cancelar
             </Button>
-            <Button onClick={confirmarMover} loading={mover.isPending}>
-              Mover
+            <Button
+              variant={reprovando ? 'danger' : 'primary'}
+              onClick={confirmar}
+              loading={mover.isPending}
+            >
+              Confirmar
             </Button>
           </>
         }
       >
-        {movendo && (
+        {confirmando && (
           <div className="space-y-4">
             <div>
               <div className="text-sm font-medium text-slate-800">
-                {tituloCard(movendo)}
+                {tituloCard(confirmando.lead)}
               </div>
               <div className="text-xs text-slate-500">
-                Está em {NOME_STATUS[movendo.status_id] ?? `coluna ${movendo.status_id}`}
+                Vai para{' '}
+                <span className="font-medium text-slate-700">
+                  {NOME_STATUS[confirmando.acao.statusId]}
+                </span>
               </div>
             </div>
 
-            <Field label="Mover para" required error={erroMover ?? undefined}>
-              <Select value={destino} onChange={(e) => setDestino(e.target.value)}>
-                <option value="">Escolha a coluna…</option>
-                {/* Sem a coluna atual: mover para onde já está não faz nada. */}
-                {DESTINOS.filter((d) => d.statusId !== movendo.status_id).map((d) => (
-                  <option key={d.statusId} value={String(d.statusId)}>
-                    {d.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-
             <Field
-              label={exigeMotivo(Number(destino)) ? 'Motivo da reprovação' : 'Observação'}
-              required={exigeMotivo(Number(destino))}
-              hint="Vai como anotação no card, assinada com o seu nome."
+              label={reprovando ? 'Motivo da reprovação' : 'Observação'}
+              required={reprovando}
+              error={erroMover ?? undefined}
+              hint="Vai como anotação no card do Kommo, assinada com o seu nome."
             >
               <Textarea
                 rows={3}
                 value={comentario}
                 onChange={(e) => setComentario(e.target.value)}
-                placeholder={
-                  exigeMotivo(Number(destino))
-                    ? 'Por que o crédito foi reprovado?'
-                    : 'Opcional.'
-                }
+                placeholder={reprovando ? 'Por que o crédito foi reprovado?' : 'Opcional.'}
               />
             </Field>
 
-            {/* O Kommo não registra quem fez a movimentação quando ela vem pela
-                API — o histórico mostra "Integração com a Plataforma". A
-                anotação é o que preserva a autoria para o comercial. */}
             <p className="text-xs text-slate-500">
               A movimentação dispara as automações configuradas nesse funil do
               Kommo, e não há como suprimi-las.
