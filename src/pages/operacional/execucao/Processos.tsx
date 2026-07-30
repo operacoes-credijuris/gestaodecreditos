@@ -323,7 +323,7 @@ export default function Processos() {
                           <span className="whitespace-nowrap">
                             {formatCNJ(p.numero_cnj)}
                           </span>
-                          <div className="max-w-[200px] truncate text-xs font-normal text-slate-500">
+                          <div className="max-w-[180px] truncate text-xs font-normal text-slate-500">
                             {p.cedente || '—'} v. {p.cessionario || '—'}
                           </div>
                         </div>
