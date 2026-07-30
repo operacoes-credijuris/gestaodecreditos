@@ -118,12 +118,18 @@ configuração extra de servidor.
 
 ## 5. Scripts
 
-| Comando           | Descrição                          |
-| ----------------- | ---------------------------------- |
-| `npm run dev`     | Servidor de desenvolvimento        |
-| `npm run build`   | Type-check + build de produção     |
-| `npm run preview` | Pré-visualiza o build              |
-| `npm run lint`    | Verificação de tipos (tsc)         |
+| Comando                    | Descrição                                     |
+| -------------------------- | --------------------------------------------- |
+| `npm run dev`              | Servidor de desenvolvimento                   |
+| `npm run build`            | Type-check + build de produção                |
+| `npm run preview`          | Pré-visualiza o build                         |
+| `npm run lint`             | Verificação de tipos do site (tsc)            |
+| `npm run check:functions`  | Verificação de tipos das Edge Functions (Deno) |
+
+> `npm run lint` cobre apenas `src/`. As Edge Functions rodam em **Deno**, não em
+> Node, então precisam de `check:functions` — que exige o
+> [Deno](https://deno.com) instalado (`winget install DenoLand.Deno`). O mesmo
+> passo roda no CI antes do deploy das funções.
 
 ## 6. Estrutura do projeto
 

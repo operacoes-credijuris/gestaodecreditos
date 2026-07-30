@@ -238,7 +238,7 @@ export interface Contrato {
 }
 
 // ---------- Configurações / Integrações ----------
-export type ServicoIntegracao = 'advbox' | 'djen'
+export type ServicoIntegracao = 'advbox' | 'djen' | 'kommo'
 
 export interface Integracao {
   id: UUID
@@ -258,4 +258,12 @@ export interface ConfigDjen {
   numeros_processo?: string[]
   tribunais?: string[]
   dias_retroativos?: number
+}
+
+export interface ConfigKommo {
+  /** Subdomínio da conta (a API resolve a conta pelo host, não pelo token). */
+  subdominio?: string
+  configurado?: boolean
+  /** Última gravação conseguiu falar com a API do Kommo. */
+  validado?: boolean
 }

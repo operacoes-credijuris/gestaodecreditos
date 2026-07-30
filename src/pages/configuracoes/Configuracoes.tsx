@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   KeyRound,
+  KanbanSquare,
   Newspaper,
   Users,
   Plus,
@@ -12,7 +13,14 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
-import type { Integracao, Profile, ConfigAdvbox, ConfigDjen } from '@/lib/types'
+import type {
+  Integracao,
+  Profile,
+  ConfigAdvbox,
+  ConfigDjen,
+  ConfigKommo,
+  ServicoIntegracao,
+} from '@/lib/types'
 import { ADMIN_EMAIL } from '@/contexts/AuthContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -37,6 +45,7 @@ export default function Configuracoes() {
       <PageHeader title="Configurações" />
       <div className="space-y-6">
         <AdvboxConfig />
+        <KommoConfig />
         <DjenConfig />
         <UsuariosConfig />
       </div>
@@ -44,7 +53,7 @@ export default function Configuracoes() {
   )
 }
 
-function useIntegracao(servico: 'advbox' | 'djen') {
+function useIntegracao(servico: ServicoIntegracao) {
   return useQuery({
     queryKey: ['integracoes', servico],
     queryFn: async () => {
@@ -153,6 +162,129 @@ function AdvboxConfig() {
             <div className="sm:col-span-2">
               <Button onClick={salvar} loading={saving}>
                 Salvar ADVBOX
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  )
+}
+
+// ----------------------- KOMMO -----------------------
+// O Kommo é o CRM em kanban onde o comercial cria os cards de análise de
+// crédito. Precisa de DUAS informações, não só do token: a API resolve a conta
+// pelo host (https://<subdominio>.kommo.com), então subdomínio errado devolve
+// 401 mesmo com token correto — daí a validação ao salvar.
+function KommoConfig() {
+  const { data, isLoading } = useIntegracao('kommo')
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [subdominio, setSubdominio] = useState('')
+  const [token, setToken] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    const cfg = (data?.config as ConfigKommo) ?? {}
+    setSubdominio(cfg.subdominio ?? '')
+  }, [data])
+
+  const cfg = (data?.config as ConfigKommo) ?? {}
+  const configurado = Boolean(cfg.configurado)
+
+  async function salvar() {
+    if (!subdominio.trim()) {
+      toast.error('Informe o subdomínio da conta Kommo.')
+      return
+    }
+    if (!configurado && !token.trim()) {
+      toast.error('Informe o token de longa duração do Kommo.')
+      return
+    }
+    setSaving(true)
+    try {
+      // Token e subdomínio vão juntos pela Edge Function admin-only: o token
+      // nunca passa pela tabela integracoes (que é legível pelo cliente).
+      const r = await invokeFunction<{ validado: boolean; aviso: string | null }>(
+        'salvar-token-kommo',
+        {
+          subdominio: subdominio.trim(),
+          ...(token.trim() ? { token: token.trim() } : {}),
+        },
+      )
+      setToken('')
+      await qc.invalidateQueries({ queryKey: ['integracoes', 'kommo'] })
+      if (r?.validado) toast.success('Kommo salvo e conexão verificada.')
+      else if (r?.aviso) toast.error(r.aviso)
+      else toast.success('Kommo salvo.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <KanbanSquare className="h-5 w-5 text-brand-600" /> Integração Kommo
+          </span>
+        }
+        action={
+          configurado ? (
+            cfg.validado ? (
+              <Badge tone="green">
+                <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> Conexão verificada
+              </Badge>
+            ) : (
+              <Badge tone="amber">
+                <XCircle className="mr-1 inline h-3.5 w-3.5" /> Salvo, sem conexão
+              </Badge>
+            )
+          ) : (
+            <Badge tone="gray">
+              <XCircle className="mr-1 inline h-3.5 w-3.5" /> Não configurado
+            </Badge>
+          )
+        }
+      />
+      <CardBody>
+        {isLoading ? (
+          <Loading />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Subdomínio da conta"
+              hint="O que aparece antes de .kommo.com. Pode colar a URL inteira."
+            >
+              <Input
+                value={subdominio}
+                onChange={(e) => setSubdominio(e.target.value)}
+                placeholder="minhaconta"
+                autoComplete="off"
+              />
+            </Field>
+            <Field
+              label="Token de longa duração"
+              hint={
+                configurado
+                  ? 'Já configurado. Preencha apenas para substituir.'
+                  : 'Kommo > Configurações > Integrações > criar integração privada.'
+              }
+            >
+              <Input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="••••••••••••"
+                autoComplete="off"
+              />
+            </Field>
+            <div className="sm:col-span-2">
+              <Button onClick={salvar} loading={saving}>
+                Salvar Kommo
               </Button>
             </div>
           </div>

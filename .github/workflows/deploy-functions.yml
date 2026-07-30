@@ -22,5 +22,15 @@ jobs:
         with:
           version: latest
 
+      # As Edge Functions rodam em Deno, então o `tsc --noEmit` do site não as
+      # cobre. Sem este passo, erro de tipo em função só apareceria em produção
+      # — o deploy abaixo é automático a cada push.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Verificação de tipos das Edge Functions
+        run: deno check supabase/functions
+
       - name: Deploy de todas as Edge Functions
         run: supabase functions deploy --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
