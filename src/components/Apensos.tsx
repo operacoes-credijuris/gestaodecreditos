@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, ChevronDown } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import { apensosCrud } from '@/lib/queries'
 import type { Apenso } from '@/lib/types'
 import { cn } from '@/lib/cn'
@@ -7,8 +7,12 @@ import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { Field, Input } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
+import { Badge } from '@/components/ui/Badge'
+import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
+import { DrawerMovimentacoes } from '@/components/Movimentacoes'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
+import { formatCNJ } from '@/lib/format'
 
 type ParentField = 'processo_id' | 'requerimento_id'
 
@@ -32,6 +36,10 @@ export function useApensosManager(parentField: ParentField) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [editing, setEditing] = useState<Partial<Apenso> | null>(null)
   const [toDelete, setToDelete] = useState<Apenso | null>(null)
+  // Apenso com a ficha aberta (painel lateral). O apenso é um processo por
+  // direito próprio — tem os próprios autos e as próprias movimentações; o
+  // vínculo com o principal é a única coisa que o distingue de um crédito.
+  const [ficha, setFicha] = useState<Apenso | null>(null)
   // Erros de validação por campo, exibidos inline nos <Field>.
   const [erros, setErros] = useState<Record<string, string>>({})
   // Snapshot do formulário ao abrir — base do cálculo de "dirty".
@@ -171,9 +179,12 @@ export function useApensosManager(parentField: ParentField) {
                 Apensos
               </div>
               {apensos.map((a) => (
+                // Clique abre a ficha do apenso, como nas linhas de Créditos.
                 <div
                   key={a.id}
-                  className="flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-white p-2.5 text-sm"
+                  onClick={() => setFicha(a)}
+                  className="flex cursor-pointer items-start justify-between gap-3 rounded-md border border-slate-200 bg-white p-2.5 text-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  title="Abrir ficha do apenso"
                 >
                   <div className="space-y-0.5">
                     <div className="font-medium text-slate-800">
@@ -193,7 +204,11 @@ export function useApensosManager(parentField: ParentField) {
                       {a.polo_passivo || '—'}
                     </div>
                   </div>
-                  <div className="flex shrink-0 gap-1">
+                  {/* stopPropagation: os botões não devem abrir a ficha. */}
+                  <div
+                    className="flex shrink-0 items-center gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <IconButton
                       label="Editar apenso"
                       icon={<Pencil className="h-4 w-4" />}
@@ -205,6 +220,7 @@ export function useApensosManager(parentField: ParentField) {
                       icon={<Trash2 className="h-4 w-4" />}
                       onClick={() => setToDelete(a)}
                     />
+                    <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden="true" />
                   </div>
                 </div>
               ))}
@@ -315,6 +331,67 @@ export function useApensosManager(parentField: ParentField) {
           onConfirm={confirmDelete}
           onClose={() => setToDelete(null)}
         />
+
+        {/* Ficha do apenso — mesmo padrão da ficha de Créditos, com as
+            movimentações SÓ dele (autos próprios). */}
+        <Drawer
+          open={!!ficha}
+          onClose={() => setFicha(null)}
+          title={
+            ficha && (
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold tracking-tight text-slate-800">
+                    {formatCNJ(ficha.numero || '')}
+                  </h2>
+                  {ficha.classe_processual && (
+                    <Badge tone="blue">{ficha.classe_processual}</Badge>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500">
+                  Apenso vinculado a{' '}
+                  {parentField === 'processo_id' ? 'um crédito' : 'um requerimento'}
+                </p>
+              </div>
+            )
+          }
+          footer={
+            ficha && (
+              <Button
+                icon={<Pencil className="h-4 w-4" />}
+                onClick={() => {
+                  setFicha(null)
+                  abrirForm(ficha)
+                }}
+              >
+                Editar
+              </Button>
+            )
+          }
+        >
+          {ficha && (
+            <>
+              <DrawerSection title="Processo">
+                <DrawerField label="Tribunal">{ficha.tribunal || '—'}</DrawerField>
+                <DrawerField label="Comarca">{ficha.comarca || '—'}</DrawerField>
+                <DrawerField label="Vara">{ficha.vara || '—'}</DrawerField>
+                <DrawerField label="Classe processual">
+                  {ficha.classe_processual || '—'}
+                </DrawerField>
+              </DrawerSection>
+
+              <DrawerSection title="Partes">
+                <DrawerField label="Polo ativo">{ficha.polo_ativo || '—'}</DrawerField>
+                <DrawerField label="Polo passivo">
+                  {ficha.polo_passivo || '—'}
+                </DrawerField>
+              </DrawerSection>
+
+              {/* Só o número do apenso: aqui ele é o principal dos autos. */}
+              <DrawerMovimentacoes principal={ficha.numero} numeros={[ficha.numero]} />
+            </>
+          )}
+        </Drawer>
       </>
     )
   }

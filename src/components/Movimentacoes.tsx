@@ -12,7 +12,7 @@ import { cn } from '@/lib/cn'
 import { DrawerSection } from '@/components/ui/Drawer'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { formatDate } from '@/lib/format'
+import { formatCNJ, formatDate } from '@/lib/format'
 
 interface MovLinha {
   id: string
@@ -39,11 +39,12 @@ const CLAMP_CHARS = 280
 // estado global de expansão obrigaria a rolar a lista toda ao alternar um.
 function MovItem({
   mov,
-  apenso,
+  numeroApenso,
   primeiro,
 }: {
   mov: MovLinha
-  apenso: boolean
+  /** Número do apenso dono do andamento, ou null quando é do principal. */
+  numeroApenso: string | null
   primeiro: boolean
 }) {
   const [expandido, setExpandido] = useState(false)
@@ -61,14 +62,21 @@ function MovItem({
           primeiro ? 'bg-brand-500' : 'bg-slate-300',
         )}
       />
-      <div className="flex flex-wrap items-center gap-x-2 text-xs">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
         <span className="font-semibold tabular-nums text-slate-600">
           {mov.data ? formatDate(mov.data) : 'sem data'}
         </span>
-        {apenso && (
-          <Badge size="sm" tone="gray">
-            apenso
-          </Badge>
+        {/* Não só "apenso": com mais de um apenso, saber QUAL é o que separa
+            os autos de verdade. */}
+        {numeroApenso && (
+          <>
+            <Badge size="sm" tone="gray">
+              apenso
+            </Badge>
+            <span className="tabular-nums text-slate-400">
+              {formatCNJ(numeroApenso)}
+            </span>
+          </>
         )}
       </div>
       <p
@@ -164,7 +172,11 @@ export function DrawerMovimentacoes({
                   key={m.id}
                   mov={m}
                   primeiro={i === 0}
-                  apenso={digits.length > 1 && m.numero_digits !== digPrincipal}
+                  numeroApenso={
+                    digits.length > 1 && m.numero_digits !== digPrincipal
+                      ? m.numero_digits
+                      : null
+                  }
                 />
               ))}
             </ol>

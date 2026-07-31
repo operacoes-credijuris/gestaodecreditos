@@ -241,17 +241,30 @@ Deno.serve(async (req: Request) => {
           const dataIso = extrairData(m)
           const conteudo = extrairConteudo(m)
           const dataDia = dataIso ? dataIso.slice(0, 10) : null
-          // id estável: id do ADVBOX quando existir; senão hash determinístico
-          // (as movimentações do ADVBOX não trazem id próprio).
+          // Número DO ANDAMENTO, não do lawsuit: o ADVBOX manda
+          // process_number/protocol_number em cada movimentação, e é isso que
+          // distingue o andamento de um agravo dentro do feed do principal.
+          // Carimbar tudo com o número do lawsuit (comportamento antigo)
+          // misturava os autos e o apenso ficava indistinguível na ficha.
+          // Fallback para o número do lawsuit quando o campo vier vazio/lixo.
+          const numeroMov =
+            str(m.process_number)?.trim() || str(m.protocol_number)?.trim() || ''
+          const usarProprio = onlyDigits(numeroMov).length >= MIN_DIGITS
+          const numeroFinal = usarProprio ? numeroMov : r.numero
+          const digitsFinal = onlyDigits(numeroFinal)
+          // id estável baseado no NÚMERO do andamento (não no lawsuit): o mesmo
+          // andamento pode chegar por dois lawsuits (principal e apenso) e
+          // precisa colapsar numa linha só — id por lawsuit gerava a MESMA
+          // movimentação duplicada na ficha combinada.
           const id =
             str(m.id) ??
-            `${r.lid}-${dataDia ?? 'sd'}-${hash(`${dataIso ?? ''}|${conteudo ?? ''}`)}`
+            `${digitsFinal}-${dataDia ?? 'sd'}-${hash(`${dataIso ?? ''}|${conteudo ?? ''}`)}`
           return {
             id,
             advbox_lawsuit_id: r.lid,
-            numero_processo: r.numero,
+            numero_processo: numeroFinal,
             // Forma normalizada — é por ela que a ficha do processo busca.
-            numero_digits: onlyDigits(r.numero),
+            numero_digits: digitsFinal,
             data: dataDia,
             data_ts: dataIso,
             conteudo,
