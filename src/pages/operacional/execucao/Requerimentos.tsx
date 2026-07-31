@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search } from 'lucide-react'
-import { requerimentosCrud } from '@/lib/queries'
+import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
+import { requerimentosCrud, apensosCrud } from '@/lib/queries'
 import { useApensosManager } from '@/components/Apensos'
 import type { Requerimento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/Table'
 import { IconButton } from '@/components/ui/IconButton'
 import { SortableTH } from '@/components/ui/SortableTH'
+import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
+import { DrawerMovimentacoes } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate } from '@/lib/format'
 
@@ -56,6 +58,17 @@ export default function Requerimentos() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Partial<Requerimento> | null>(null)
   const [toDelete, setToDelete] = useState<Requerimento | null>(null)
+  // Requerimento com a ficha aberta no painel lateral (clique na linha).
+  const [detalhe, setDetalhe] = useState<Requerimento | null>(null)
+  // Apensos do requerimento em detalhe (lista de leitura na ficha).
+  const todosApensos = apensosCrud.useList()
+  const apensosDoDetalhe = useMemo(
+    () =>
+      detalhe
+        ? (todosApensos.data ?? []).filter((a) => a.requerimento_id === detalhe.id)
+        : [],
+    [todosApensos.data, detalhe],
+  )
   // Erros de validação por campo (mensagens inline nos <Field>).
   const [erros, setErros] = useState<Record<string, string>>({})
   // Snapshot do formulário ao abrir — base do cálculo de dirty.
@@ -212,7 +225,7 @@ export default function Requerimentos() {
             <TBody>
               {lista.map((r) => (
                 <Fragment key={r.id}>
-                <TR>
+                <TR onClick={() => setDetalhe(r)}>
                   {/* Sem nowrap na célula: o protocolo não quebra, mas o
                       subtítulo tribunal · órgão pode. */}
                   <TD className="font-medium text-slate-800">
@@ -229,7 +242,11 @@ export default function Requerimentos() {
                     {formatDate(r.data_protocolo)}
                   </TD>
                   <TD className="text-right">
-                    <div className="flex justify-end gap-1">
+                    {/* stopPropagation: os botões não devem abrir a ficha da linha */}
+                    <div
+                      className="flex items-center justify-end gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {apensos.actions(r.id)}
                       <IconButton
                         label="Editar"
@@ -241,6 +258,10 @@ export default function Requerimentos() {
                         variant="danger"
                         icon={<Trash2 className="h-4 w-4" />}
                         onClick={() => setToDelete(r)}
+                      />
+                      <ChevronRight
+                        className="h-4 w-4 text-slate-300"
+                        aria-hidden="true"
                       />
                     </div>
                   </TD>
@@ -335,6 +356,84 @@ export default function Requerimentos() {
           </form>
         )}
       </Modal>
+
+      {/* Ficha do requerimento — abre ao clicar na linha. Só leitura, como a
+          de Créditos: as ações ficam nos botões da própria linha. */}
+      <Drawer
+        open={!!detalhe}
+        onClose={() => setDetalhe(null)}
+        title={
+          detalhe && (
+            <div className="min-w-0">
+              <h2 className="text-base font-bold tracking-tight text-slate-800">
+                {detalhe.numero_protocolo || '—'}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {[detalhe.tribunal_entidade, detalhe.orgao].filter(Boolean).join(' · ') ||
+                  '—'}
+              </p>
+            </div>
+          )
+        }
+      >
+        {detalhe && (
+          <>
+            <DrawerSection title="Requerimento">
+              <DrawerField label="Órgão">{detalhe.orgao || '—'}</DrawerField>
+              <DrawerField label="Tribunal / Entidade">
+                {detalhe.tribunal_entidade || '—'}
+              </DrawerField>
+              <DrawerField label="Classe processual">
+                {detalhe.classe_processual || '—'}
+              </DrawerField>
+              <DrawerField label="Matéria">{detalhe.materia || '—'}</DrawerField>
+              <DrawerField label="Data de protocolo">
+                {formatDate(detalhe.data_protocolo)}
+              </DrawerField>
+            </DrawerSection>
+
+            {detalhe.observacoes && (
+              <DrawerSection title="Observações">
+                <p className="col-span-2 whitespace-pre-wrap break-words text-sm text-slate-800">
+                  {detalhe.observacoes}
+                </p>
+              </DrawerSection>
+            )}
+
+            <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
+              {apensosDoDetalhe.length === 0 ? (
+                <p className="col-span-2 text-sm text-slate-500">
+                  Nenhum apenso vinculado.
+                </p>
+              ) : (
+                <div className="col-span-2 space-y-2">
+                  {apensosDoDetalhe.map((a) => (
+                    <div key={a.id} className="rounded-lg border border-slate-200 p-2.5">
+                      <div className="text-sm font-medium text-slate-800">
+                        {a.numero || '—'}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {[a.classe_processual, a.tribunal, a.comarca]
+                          .filter(Boolean)
+                          .join(' · ') || '—'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </DrawerSection>
+
+            {/* Histórico integral do ADVBOX — inclui os apensos da ficha. */}
+            <DrawerMovimentacoes
+              principal={detalhe.numero_protocolo}
+              numeros={[
+                detalhe.numero_protocolo,
+                ...apensosDoDetalhe.map((a) => a.numero),
+              ]}
+            />
+          </>
+        )}
+      </Drawer>
 
       <ConfirmDialog
         open={!!toDelete}

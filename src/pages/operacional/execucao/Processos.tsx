@@ -26,6 +26,7 @@ import {
 import { IconButton } from '@/components/ui/IconButton'
 import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
+import { DrawerMovimentacoes } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
@@ -674,6 +675,12 @@ export default function Processos() {
                 </div>
               )}
             </DrawerSection>
+
+            {/* Histórico integral do ADVBOX — inclui os apensos da ficha. */}
+            <DrawerMovimentacoes
+              principal={detalhe.numero_cnj}
+              numeros={[detalhe.numero_cnj, ...apensosDoDetalhe.map((a) => a.numero)]}
+            />
           </>
         )}
       </Drawer>

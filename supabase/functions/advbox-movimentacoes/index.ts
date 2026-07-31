@@ -4,9 +4,14 @@
 //     Requerimentos (numero_protocolo) e Apensos (numero).
 //  2. Casa esses números com os processos do ADVBOX (/lawsuits) por
 //     process_number/protocol_number → obtém os lawsuits_id.
-//  3. Para cada processo casado, busca GET /movements/{lawsuit_id} e mantém só
-//     os andamentos dos últimos `dias` (default 20).
-//  4. Faz upsert no cache e remove o que saiu da janela.
+//  3. Para cada processo casado, busca GET /movements/{lawsuit_id} e grava o
+//     HISTÓRICO INTEIRO (o endpoint não tem parâmetro de data — sempre baixou
+//     tudo; até 2026-07 só se gravava a janela de 20 dias e o resto era
+//     descartado).
+//  4. Upsert no cache; a poda remove apenas movimentações de processos que
+//     saíram do cadastro, nunca por idade.
+// Quem consome: a ficha de cada processo (Créditos/Requerimentos) mostra o
+// histórico dele; a aba Movimentações filtra os últimos 20 dias NA CONSULTA.
 // A página lê do banco; esta função roda em 2º plano (ao abrir a aba) e também
 // por cron (pg_cron), autenticada por JWT do usuário OU por x-cron-secret.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
@@ -26,7 +31,6 @@ import {
 // maior que o padrão sequencial do módulo compartilhado.
 configurarThrottle(350)
 
-const DIAS_JANELA = 20
 const MIN_DIGITS = 6 // casa números com >= 6 dígitos (igual à aba de Tarefas)
 const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 const str = (v: unknown): string | null => (v == null ? null : String(v))
@@ -141,13 +145,13 @@ const BATCH = 12
 
 // Dispara a próxima fatia numa invocação SEPARADA (fire-and-forget), autenticada
 // pelo segredo de cron. Assim nenhuma execução isolada passa do limite.
-function dispararProximo(fila: { lid: string; numero: string }[], dias: number): void {
+function dispararProximo(fila: { lid: string; numero: string }[]): void {
   const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/advbox-movimentacoes`
   const secret = Deno.env.get('CRON_SECRET') ?? ''
   const p = fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-cron-secret': secret },
-    body: JSON.stringify({ fila, dias }),
+    body: JSON.stringify({ fila }),
   }).catch(() => {})
   const rt = (globalThis as unknown as {
     EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void }
@@ -169,12 +173,8 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json().catch(() => ({}))
-    const dias = Number(body.dias ?? DIAS_JANELA)
     const ctx = await getAdvboxCtx()
     const svc = serviceClient()
-
-    // Data-limite (só a parte da data) para a janela.
-    const ini = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10)
 
     // Lista de trabalho: vem no corpo (fatia encadeada) ou é computada na 1ª
     // chamada da cadeia. O processamento é feito em lotes pequenos que se
@@ -184,9 +184,15 @@ Deno.serve(async (req: Request) => {
     if (primeira) {
       const casaveis = await processosCasaveis(ctx)
       fila = [...casaveis.entries()].map(([lid, numero]) => ({ lid, numero }))
-      // Poda o que saiu da janela — só na primeira chamada da cadeia.
-      await svc.from('advbox_movimentacoes').delete().lt('data', ini)
-      // Poda o status de processos que não estão mais cadastrados/casados.
+      // Poda SÓ o que saiu do cadastro (histórico não expira por idade).
+      // Movimentações: por lawsuit_id, que é estável; o número exibível pode
+      // mudar de formato entre syncs. Só na primeira chamada da cadeia.
+      const lids = [...casaveis.keys()]
+      const lidsLst = lids.length ? lids : ['__none__']
+      const lidsStr =
+        '(' + lidsLst.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
+      await svc.from('advbox_movimentacoes').delete().not('advbox_lawsuit_id', 'in', lidsStr)
+      // Status: a tabela é chaveada pelo número exibível.
       const numeros = [...casaveis.values()]
       const lst = numeros.length ? numeros : ['__none__']
       const inStr = '(' + lst.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
@@ -221,7 +227,8 @@ Deno.serve(async (req: Request) => {
       }
     })
 
-    // Monta as linhas do lote (só andamentos com data na janela e com conteúdo).
+    // Monta as linhas do lote — HISTÓRICO INTEIRO, sem janela. Andamento sem
+    // data ou sem conteúdo continua fora: não ordena nem informa nada.
     const agora = new Date().toISOString()
     const vistos = new Set<string>()
     const rows = resultados
@@ -239,6 +246,8 @@ Deno.serve(async (req: Request) => {
             id,
             advbox_lawsuit_id: r.lid,
             numero_processo: r.numero,
+            // Forma normalizada — é por ela que a ficha do processo busca.
+            numero_digits: onlyDigits(r.numero),
             data: dataDia,
             data_ts: dataIso,
             conteudo,
@@ -247,7 +256,7 @@ Deno.serve(async (req: Request) => {
           }
         }),
       )
-      .filter((r) => r.data && r.data >= ini && r.conteudo)
+      .filter((r) => r.data && r.conteudo)
       .filter((r) => {
         if (vistos.has(r.id)) return false
         vistos.add(r.id)
@@ -283,7 +292,7 @@ Deno.serve(async (req: Request) => {
     const errosNoLote = resultados.filter((r) => r.erro).length
 
     // Encadeia a próxima fatia, se houver.
-    if (resto.length) dispararProximo(resto, dias)
+    if (resto.length) dispararProximo(resto)
 
     return jsonResponse({
       ok: true,
