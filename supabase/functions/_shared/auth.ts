@@ -37,6 +37,18 @@ export async function getCaller(req: Request) {
   return user
 }
 
+/**
+ * Client que carrega o JWT de quem chamou — logo, as RLS valem normalmente.
+ * Use quando a função só precisa LER o que o próprio usuário já poderia ver;
+ * é o oposto do serviceClient(), que ignora RLS.
+ */
+export function callerClient(req: Request): SupabaseClient {
+  return createClient(SUPABASE_URL, ANON_KEY, {
+    global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+}
+
 /** Verifica se o usuário é administrador. */
 export async function isAdmin(
   user: { id: string; email?: string } | null,

@@ -17,7 +17,11 @@ com uma camada de **Gestão Estratégica** consolidando os dois. Integra com
 - **Operacional**
   - Análise de Crédito
   - Execução Processual: Publicações e Movimentações · Tarefas ADVBOX · Processos · Serventias e Gabinetes
-- **Configurações** (somente administrador) — token ADVBOX, parâmetros DJEN, gestão de usuários.
+- **Configurações** (somente administrador) — token ADVBOX, parâmetros DJEN, chave Anthropic, gestão de usuários.
+
+Em qualquer tela, o botão no canto inferior direito abre o **assistente de
+dados**: responde perguntas sobre os créditos, publicações e cessões
+cadastrados. Só faz leitura, e sob as permissões de quem perguntou.
 
 > **Acesso:** todo usuário autenticado vê o sistema inteiro. Apenas o
 > administrador (`contato@credijuris.com`) cadastra usuários e edita as
@@ -99,6 +103,10 @@ supabase functions deploy
   no servidor e nunca exposto ao navegador.
 - **DJEN:** informe as OABs e/ou números de processo a monitorar, tribunais e a
   janela de dias. Use o botão **Sincronizar DJEN** em *Publicações e Movimentações*.
+- **Anthropic:** informe a chave de API (gerada em *console.anthropic.com → API
+  Keys*). É o que liga o assistente de dados — o botão no canto inferior direito
+  de qualquer tela. Sem a chave, o assistente responde dizendo que falta
+  configurar; o resto do sistema não é afetado.
 
 ## 4. Publicar no GitHub Pages
 

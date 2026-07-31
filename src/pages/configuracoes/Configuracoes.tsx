@@ -11,6 +11,7 @@ import {
   XCircle,
   ShieldCheck,
   Pencil,
+  Sparkles,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
@@ -19,6 +20,7 @@ import type {
   Integracao,
   Profile,
   ConfigAdvbox,
+  ConfigAnthropic,
   ConfigDjen,
   ConfigKommo,
   ServicoIntegracao,
@@ -50,6 +52,7 @@ export default function Configuracoes() {
         <AdvboxConfig />
         <KommoConfig />
         <DjenConfig />
+        <AnthropicConfig />
         <UsuariosConfig />
       </div>
     </div>
@@ -69,6 +72,92 @@ function useIntegracao(servico: ServicoIntegracao) {
       return (data as Integracao) ?? null
     },
   })
+}
+
+// ----------------------- Anthropic (assistente) -----------------------
+// Só a chave, sem campo de configuração: ao contrário do ADVBOX (URL base) e do
+// Kommo (subdomínio), a API da Anthropic tem endereço único.
+function AnthropicConfig() {
+  const { data, isLoading } = useIntegracao('anthropic')
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [token, setToken] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const configurado = Boolean((data?.config as ConfigAnthropic)?.configurado)
+
+  async function salvar() {
+    if (!token.trim()) {
+      toast.error('Informe a chave da API.')
+      return
+    }
+    setSaving(true)
+    try {
+      // A chave é secreta, então vai só pela Edge Function admin-only — nunca
+      // pela tabela integracoes, que é legível por qualquer autenticado.
+      await invokeFunction('salvar-token-anthropic', { token: token.trim() })
+      setToken('')
+      await qc.invalidateQueries({ queryKey: ['integracoes', 'anthropic'] })
+      toast.success('Chave da Anthropic salva. O assistente já pode ser usado.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-brand-600" /> Integração Anthropic
+          </span>
+        }
+        description="Chave usada pelo assistente de dados (o botão no canto da tela)."
+        action={
+          configurado ? (
+            <Badge tone="green">
+              <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> Chave configurada
+            </Badge>
+          ) : (
+            <Badge tone="gray">
+              <XCircle className="mr-1 inline h-3.5 w-3.5" /> Sem chave
+            </Badge>
+          )
+        }
+      />
+      <CardBody>
+        {isLoading ? (
+          <Loading />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Chave de API"
+              hint={
+                configurado
+                  ? 'Já configurada. Preencha apenas para substituir.'
+                  : 'Gerada em console.anthropic.com > API Keys. Começa com "sk-ant-".'
+              }
+            >
+              <Input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="••••••••••••"
+                autoComplete="off"
+              />
+            </Field>
+            <div className="sm:col-span-2">
+              <Button onClick={salvar} loading={saving}>
+                Salvar
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  )
 }
 
 // ----------------------- ADVBOX -----------------------

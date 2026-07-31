@@ -40,3 +40,11 @@ verify_jwt = false
 # Escreve no Kommo em nome de um usuário: exige autenticação, nunca cron.
 [functions.kommo-mover]
 verify_jwt = true
+
+# Assistente de dados: lê o banco sob as RLS de quem perguntou, então precisa
+# do JWT do usuário. Nunca é chamado por cron.
+[functions.assistente]
+verify_jwt = true
+
+[functions.salvar-token-anthropic]
+verify_jwt = true
