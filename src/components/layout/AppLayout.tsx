@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { findNavLocation } from './navigation'
+import { Assistente } from '@/components/Assistente'
 
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -32,6 +33,9 @@ export function AppLayout() {
           </div>
         </main>
       </div>
+      {/* Fora do <main>: é fixo na tela e acompanha a pessoa em todas as
+          páginas, em vez de rolar junto com o conteúdo. */}
+      <Assistente />
     </div>
   )
 }

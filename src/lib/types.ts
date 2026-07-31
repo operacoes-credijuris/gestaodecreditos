@@ -288,7 +288,7 @@ export interface Contrato {
 }
 
 // ---------- Configurações / Integrações ----------
-export type ServicoIntegracao = 'advbox' | 'djen' | 'kommo'
+export type ServicoIntegracao = 'advbox' | 'djen' | 'kommo' | 'anthropic'
 
 export interface Integracao {
   id: UUID
@@ -308,6 +308,14 @@ export interface ConfigDjen {
   numeros_processo?: string[]
   tribunais?: string[]
   dias_retroativos?: number
+}
+
+/**
+ * Anthropic: só o indicador de que a chave está gravada. A chave em si vive na
+ * tabela integracao_anthropic_secret, inacessível ao cliente.
+ */
+export interface ConfigAnthropic {
+  configurado?: boolean
 }
 
 export interface ConfigKommo {
