@@ -14,10 +14,12 @@ import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Field, Input, Select, Textarea } from '@/components/ui/Field'
+import { Field, Input, Textarea } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Modal } from '@/components/ui/Modal'
+import { Combobox, MultiCombobox, type OpcaoCombo } from '@/components/ui/Combobox'
+import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { formatCNJ, formatNome, sentenceCase } from '@/lib/format'
@@ -43,7 +45,8 @@ interface Opcoes {
 }
 
 interface FormState {
-  processoBusca: string
+  /** Id do lawsuit no ADVBOX, escolhido na lista. */
+  lawsuit_id: number | null
   tasks_id: string
   start_date: string
   date_deadline: string
@@ -54,7 +57,7 @@ interface FormState {
   comments: string
 }
 const FORM_VAZIO: FormState = {
-  processoBusca: '',
+  lawsuit_id: null,
   tasks_id: '',
   start_date: '',
   date_deadline: '',
@@ -430,123 +433,14 @@ export default function TarefasAdvbox() {
   )
 }
 
-// Opção do combobox: número do processo + rótulo já resolvido
+// Opção do combobox: número do processo + descrição já resolvida
 // (Cedente v. Cessionário, Requerimento administrativo, etc.).
 interface LawOpt {
   id: number
   numero: string
-  label: string
+  descricao: string
 }
 
-// Caixa de seleção digitável (combobox) para o processo: digita e
-// escolhe numa lista filtrada que aparece logo abaixo (estilo busca).
-function ProcessoCombobox({
-  options,
-  value,
-  onChange,
-}: {
-  options: LawOpt[]
-  value: string
-  onChange: (v: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [hi, setHi] = useState(0)
-  const boxRef = useRef<HTMLDivElement>(null)
-
-  const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
-  const q = value.trim().toLowerCase()
-  const qd = dig(value)
-  const matches = useMemo(() => {
-    if (!q) return options.slice(0, 50)
-    return options
-      .filter(
-        (o) =>
-          o.label.toLowerCase().includes(q) ||
-          (qd.length >= 3 && dig(o.numero).includes(qd)),
-      )
-      .slice(0, 50)
-  }, [options, q, qd])
-
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node))
-        setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
-
-  const choose = (label: string) => {
-    onChange(label)
-    setOpen(false)
-  }
-
-  return (
-    <div ref={boxRef} className="relative">
-      <Input
-        value={value}
-        autoComplete="off"
-        placeholder="Digite o número do processo…"
-        onChange={(e) => {
-          onChange(e.target.value)
-          setOpen(true)
-          setHi(0)
-        }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={(e) => {
-          if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-            setOpen(true)
-            return
-          }
-          if (e.key === 'ArrowDown') {
-            e.preventDefault()
-            setHi((h) => Math.min(h + 1, matches.length - 1))
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault()
-            setHi((h) => Math.max(h - 1, 0))
-          } else if (e.key === 'Enter') {
-            if (open && matches[hi]) {
-              e.preventDefault()
-              choose(matches[hi].label)
-            }
-          } else if (e.key === 'Escape') {
-            setOpen(false)
-          }
-        }}
-      />
-      {open && matches.length > 0 && (
-        <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
-          {matches.map((m, i) => (
-            <li key={m.id}>
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  choose(m.label)
-                }}
-                onMouseEnter={() => setHi(i)}
-                className={cn(
-                  'block w-full px-3 py-1.5 text-left text-xs',
-                  i === hi
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'text-slate-700 hover:bg-slate-50',
-                )}
-              >
-                {m.label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {open && q && matches.length === 0 && (
-        <div className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg">
-          Nenhum processo encontrado.
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ----------------------- Modal de criação -----------------------
 export function NovaTarefaModal({
@@ -561,6 +455,7 @@ export function NovaTarefaModal({
   processoNumero?: string | null
 }) {
   const toast = useToast()
+  const { profile, isAdmin } = useAuth()
   const [form, setForm] = useState<FormState>({ ...FORM_VAZIO })
 
   const opcoes = useQuery({
@@ -621,14 +516,15 @@ export function NovaTarefaModal({
       }
       return ''
     }
-    return (opcoes.data?.lawsuits ?? []).map((l) => {
-      const d = descricao(l.numero)
-      return { id: l.id, numero: l.numero, label: d ? `${l.numero} — ${d}` : l.numero }
-    })
+    return (opcoes.data?.lawsuits ?? []).map((l) => ({
+      id: l.id,
+      numero: l.numero,
+      descricao: descricao(l.numero),
+    }))
   }, [opcoes.data, processos.data, requerimentos.data, apensos.data])
 
   // Ao fechar, limpa o formulário. Ao abrir a partir de uma publicação,
-  // pré-preenche o número do processo (casando com a lista quando possível).
+  // pré-seleciona o processo casando pelo número.
   useEffect(() => {
     if (!open) {
       setForm({ ...FORM_VAZIO })
@@ -638,9 +534,7 @@ export function NovaTarefaModal({
     const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
     const d = dig(processoNumero)
     const found = lawOptions.find((o) => dig(o.numero) === d)
-    setForm((f) =>
-      f.processoBusca ? f : { ...f, processoBusca: found ? found.label : processoNumero },
-    )
+    if (found) setForm((f) => (f.lawsuit_id ? f : { ...f, lawsuit_id: found.id }))
   }, [open, lawOptions, processoNumero])
 
   const criar = useMutation({
@@ -666,37 +560,66 @@ export function NovaTarefaModal({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
-    const d = dig(form.processoBusca)
-    const law = lawOptions.find(
-      (o) => o.label === form.processoBusca || (d.length >= 6 && dig(o.numero) === d),
-    )
-    if (!law) return toast.error('Selecione um processo válido da lista.')
+    if (!form.lawsuit_id) return toast.error('Selecione um processo da lista.')
     if (!form.tasks_id) return toast.error('Selecione o tipo de tarefa.')
     if (!form.start_date) return toast.error('Informe a data.')
     if (!form.from) return toast.error('Selecione o remetente.')
     if (form.guests.length === 0) return toast.error('Selecione ao menos um responsável.')
-    criar.mutate(law.id)
-  }
-
-  function toggleGuest(id: number) {
-    setForm((f) => ({
-      ...f,
-      guests: f.guests.includes(id)
-        ? f.guests.filter((g) => g !== id)
-        : [...f.guests, id],
-    }))
+    criar.mutate(form.lawsuit_id)
   }
 
   const users = opcoes.data?.users ?? []
   const tasks = opcoes.data?.tasks ?? []
+
+  // ---------- Remetente ----------
+  // Quem cria a tarefa é quem a envia, então o remetente não deveria ser uma
+  // escolha. O vínculo com o ADVBOX é feito pelo NOME do perfil, porque não há
+  // campo de id do ADVBOX em profiles — comparação sem acento e sem
+  // maiúsculas para tolerar divergência de digitação.
+  const norm = (s: string) =>
+    s
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .trim()
+      .toLowerCase()
+  const meuUsuarioAdvbox = useMemo(() => {
+    const nome = profile?.nome?.trim()
+    if (!nome) return null
+    return users.find((u) => norm(u.name) === norm(nome)) ?? null
+  }, [users, profile?.nome])
+
+  // O admin escolhe (cria tarefa em nome de outros). Quem não foi encontrado no
+  // ADVBOX também escolhe — travar num remetente inexistente impediria criar.
+  const escolheRemetente = isAdmin || !meuUsuarioAdvbox
+
+  useEffect(() => {
+    if (!open || escolheRemetente || !meuUsuarioAdvbox) return
+    setForm((f) => (f.from ? f : { ...f, from: String(meuUsuarioAdvbox.id) }))
+  }, [open, escolheRemetente, meuUsuarioAdvbox])
+
+  const opcoesProcesso = useMemo<OpcaoCombo[]>(
+    () =>
+      lawOptions.map((l) => ({
+        id: l.id,
+        titulo: formatCNJ(l.numero),
+        subtitulo: l.descricao || null,
+      })),
+    [lawOptions],
+  )
+  const opcoesTarefa = useMemo<OpcaoCombo[]>(
+    () => tasks.map((t) => ({ id: t.id, titulo: t.name })),
+    [tasks],
+  )
+  const opcoesUsuario = useMemo<OpcaoCombo[]>(
+    () => users.map((u) => ({ id: u.id, titulo: u.name })),
+    [users],
+  )
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Nova tarefa"
-      description="Cria a tarefa diretamente no ADVBOX."
       size="lg"
       footer={
         <>
@@ -715,30 +638,24 @@ export function NovaTarefaModal({
         <ErrorState message={(opcoes.error as Error)?.message} />
       ) : (
         <form id="form-nova-tarefa" onSubmit={handleSubmit} className="space-y-4">
-          <Field
-            label="Processo"
-            required
-            hint="Digite o número e escolha na lista (só processos cadastrados)."
-          >
-            <ProcessoCombobox
-              options={lawOptions}
-              value={form.processoBusca}
-              onChange={(v) => setForm((f) => ({ ...f, processoBusca: v }))}
+          <Field label="Processo" required>
+            <Combobox
+              opcoes={opcoesProcesso}
+              valor={form.lawsuit_id}
+              onChange={(id) => setForm((f) => ({ ...f, lawsuit_id: id }))}
+              placeholder="Digite o número do processo…"
+              vazio="Nenhum processo encontrado."
             />
           </Field>
 
           <Field label="Tipo de tarefa" required>
-            <Select
-              value={form.tasks_id}
-              onChange={(e) => setForm({ ...form, tasks_id: e.target.value })}
-            >
-              <option value="">Selecione…</option>
-              {tasks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </Select>
+            <Combobox
+              opcoes={opcoesTarefa}
+              valor={form.tasks_id ? Number(form.tasks_id) : null}
+              onChange={(id) => setForm((f) => ({ ...f, tasks_id: id ? String(id) : '' }))}
+              placeholder="Digite parte do nome…"
+              vazio="Nenhum tipo encontrado."
+            />
           </Field>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -758,36 +675,30 @@ export function NovaTarefaModal({
             </Field>
           </div>
 
-          <Field label="Remetente (de)" required>
-            <Select
-              value={form.from}
-              onChange={(e) => setForm({ ...form, from: e.target.value })}
-            >
-              <option value="">Selecione…</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {/* Remetente só aparece para quem pode escolher: o admin, que cria em
+              nome de outros, e quem não foi encontrado no ADVBOX pelo nome do
+              perfil. Para o resto é sempre a própria pessoa, e um campo com uma
+              resposta só é campo a menos para preencher. */}
+          {escolheRemetente && (
+            <Field label="Remetente" required>
+              <Combobox
+                opcoes={opcoesUsuario}
+                valor={form.from ? Number(form.from) : null}
+                onChange={(id) => setForm((f) => ({ ...f, from: id ? String(id) : '' }))}
+                placeholder="Digite o nome…"
+                vazio="Nenhum usuário encontrado."
+              />
+            </Field>
+          )}
 
-          <Field label="Responsáveis" required hint="Marque um ou mais.">
-            <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2 scrollbar-thin">
-              {users.map((u) => (
-                <label
-                  key={u.id}
-                  className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.guests.includes(u.id)}
-                    onChange={() => toggleGuest(u.id)}
-                  />
-                  {u.name}
-                </label>
-              ))}
-            </div>
+          <Field label="Responsáveis" required>
+            <MultiCombobox
+              opcoes={opcoesUsuario}
+              valores={form.guests}
+              onChange={(ids) => setForm((f) => ({ ...f, guests: ids }))}
+              placeholder="Digite o nome e escolha…"
+              vazio="Nenhum usuário encontrado."
+            />
           </Field>
 
           <div className="flex gap-6">
@@ -809,7 +720,7 @@ export function NovaTarefaModal({
             </label>
           </div>
 
-          <Field label="Observação">
+          <Field label="Descrição">
             <Textarea
               rows={3}
               value={form.comments}
