@@ -6,12 +6,16 @@
 // escreve é a kommo-mover.
 //
 // Fluxo do operacional:
-//   Pendentes  a IA analisa o card, que fica aqui até a equipe de revisão
-//              considerar a análise boa
-//        ↓     "Enviar para decisão"
-//   Decisão    três saídas
+//   Pendentes   a IA analisa o card, que fica aqui até a equipe de revisão
+//               considerar a análise boa
+//        ↓      "Enviar para validação"
+//   Validação   três saídas
 //        ↓
 //   Aprovados | Diligência | Reprovados
+//
+// A análise (inclusive o motivo de uma eventual reprovação) é produzida em
+// Pendentes. Validação só ratifica — por isso nenhuma das três saídas pede
+// justificativa: ela já foi escrita antes.
 //
 // Toda tela corresponde a exatamente uma coluna do Kommo. Não há estado que
 // exista só na nossa base — o kanban é a fonte de verdade.
@@ -23,7 +27,9 @@ import type { KommoLead, KommoAnaliseInterna } from './types'
 export const FUNIL_RPV = 13901939
 export const FUNIL_PRECATORIO = 13971995
 
-/** Estágios do Funil Geral RPV que interessam ao operacional. */
+// Estágios do Funil Geral RPV que interessam ao operacional. Os nomes das
+// constantes seguem os nomes das COLUNAS NO KOMMO; o rótulo que o usuário vê
+// está em NOME_STATUS e pode divergir (ST_DECISAO aparece como "Validação").
 export const ST_ANALISE = 107272803 // Análise Jurídica-Econômico
 export const ST_DECISAO = 107272807 // Revisão e Decisão do Pedro
 export const ST_DILIGENCIA = 107830027 // Diligência
@@ -32,7 +38,7 @@ export const ST_REPROVADO = 107830031 // Reprovados Operacional
 
 export type TelaAnalise =
   | 'pendentes'
-  | 'decisao'
+  | 'validacao'
   | 'aprovados'
   | 'diligencia'
   | 'reprovados'
@@ -47,7 +53,7 @@ export type TelaAnalise =
  */
 export const NOME_STATUS: Record<number, string> = {
   [ST_ANALISE]: 'Pendentes',
-  [ST_DECISAO]: 'Decisão',
+  [ST_DECISAO]: 'Validação',
   [ST_DILIGENCIA]: 'Diligência',
   [ST_PROPOSTA]: 'Aprovados',
   [ST_REPROVADO]: 'Reprovados',
@@ -69,10 +75,10 @@ export const TELAS: DefTela[] = [
       'Nenhum card aguardando revisão. Quando o comercial mover um crédito para análise no Kommo, ele aparece aqui.',
   },
   {
-    key: 'decisao',
-    label: 'Decisão',
+    key: 'validacao',
+    label: 'Validação',
     statusId: ST_DECISAO,
-    descricaoVazia: 'Nenhum crédito aguardando decisão.',
+    descricaoVazia: 'Nenhum crédito aguardando validação.',
   },
   {
     key: 'aprovados',
@@ -110,12 +116,12 @@ export interface AcaoTela {
  */
 export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   pendentes: [
-    { statusId: ST_DECISAO, label: 'Enviar para decisão', variant: 'primary' },
+    { statusId: ST_DECISAO, label: 'Enviar para validação', variant: 'primary' },
   ],
   // Cores em vez de hierarquia: as três são alternativas legítimas, e
   // verde/laranja/vermelho se lê mais rápido que o rótulo numa tela onde a mesma
   // decisão é tomada dezenas de vezes.
-  decisao: [
+  validacao: [
     { statusId: ST_PROPOSTA, label: 'Aprovar', variant: 'success' },
     { statusId: ST_DILIGENCIA, label: 'Diligência', variant: 'warning' },
     { statusId: ST_REPROVADO, label: 'Reprovar', variant: 'danger' },
@@ -123,11 +129,6 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   aprovados: [],
   diligencia: [],
   reprovados: [],
-}
-
-/** Reprovar exige justificativa. Espelha o EXIGE_MOTIVO da Edge Function. */
-export function exigeMotivo(statusId: number): boolean {
-  return statusId === ST_REPROVADO
 }
 
 // ---------- Consultas ----------
@@ -182,7 +183,7 @@ export function agruparPorTela(
 ): Record<TelaAnalise, KommoLead[]> {
   const out = {
     pendentes: [],
-    decisao: [],
+    validacao: [],
     aprovados: [],
     diligencia: [],
     reprovados: [],

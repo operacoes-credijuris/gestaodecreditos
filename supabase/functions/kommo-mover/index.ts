@@ -30,8 +30,10 @@ const COLUNAS: Record<number, string> = {
   107830031: 'Reprovados Operacional',
 }
 
-/** Mover para cá exige justificativa: é decisão negativa. */
-const EXIGE_MOTIVO = new Set([107830031])
+// Nenhum destino exige justificativa. A análise — inclusive o motivo de uma
+// eventual reprovação — é produzida na etapa de Pendentes; a de Validação apenas
+// ratifica o que já foi escrito. Pedir o motivo aqui seria perguntar à pessoa
+// errada, no momento errado. O comentário segue aceito, mas é opcional.
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -58,13 +60,6 @@ Deno.serve(async (req: Request) => {
         400,
       )
     }
-    if (EXIGE_MOTIVO.has(statusId) && !comentario) {
-      return jsonResponse(
-        { error: 'Informe o motivo da reprovação.' },
-        400,
-      )
-    }
-
     const svc = serviceClient()
 
     const { data: secret } = await svc
@@ -124,9 +119,7 @@ Deno.serve(async (req: Request) => {
         ? `Movido de "${origem}" para "${COLUNAS[statusId]}" por ${autor}.`
         : `Movido para "${COLUNAS[statusId]}" por ${autor}.`,
     ]
-    if (comentario) {
-      linhas.push(EXIGE_MOTIVO.has(statusId) ? `Motivo: ${comentario}` : comentario)
-    }
+    if (comentario) linhas.push(comentario)
 
     let avisoNota: string | null = null
     const resNota = await fetch(`${base}/leads/notes`, {

@@ -16,7 +16,6 @@ import {
   ST_PROPOSTA,
   ST_DILIGENCIA,
   ST_REPROVADO,
-  exigeMotivo,
   agruparPorTela,
   useKommoLeads,
   useAnalisesProntas,
@@ -24,14 +23,12 @@ import {
   type AcaoTela,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
-import { useAuth } from '@/contexts/AuthContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Textarea } from '@/components/ui/Field'
+import { Input } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
-import { Modal } from '@/components/ui/Modal'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
@@ -175,14 +172,8 @@ function CardCredito({
 export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
-  const { profile, user } = useAuth()
   const leads = useKommoLeads(FUNIL_RPV)
   const prontas = useAnalisesProntas()
-
-  // Mesma cadeia de fallback da Edge Function kommo-mover, para o diálogo
-  // mostrar exatamente o que vai ser gravado no card.
-  const assinatura =
-    profile?.nome?.trim() || profile?.email || user?.email || 'usuário do sistema'
 
   const [tela, setTela] = useState<TelaAnalise>('pendentes')
   const [busca, setBusca] = useState('')
@@ -191,10 +182,6 @@ export default function AnaliseCredito() {
     leadId: number
     statusId: number
   } | null>(null)
-  // Só reprovar abre diálogo, porque exige motivo.
-  const [reprovando, setReprovando] = useState<KommoLead | null>(null)
-  const [motivo, setMotivo] = useState('')
-  const [erroMotivo, setErroMotivo] = useState<string | null>(null)
 
   // Sincroniza com o Kommo ao abrir a página, no mesmo padrão de Publicações e
   // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
@@ -248,48 +235,17 @@ export default function AnaliseCredito() {
       if (r?.aviso) toast.error(r.aviso)
       else toast.success(r?.mensagem ?? 'Card movido.')
       setEmAndamento(null)
-      fecharReprovar()
     },
     onError: (e) => {
       setEmAndamento(null)
-      // Reprovando, o erro fica no próprio diálogo (o motivo digitado não se
-      // perde). Nas ações diretas não há diálogo, então vai por toast.
-      if (reprovando) setErroMotivo((e as Error).message)
-      else toast.error((e as Error).message)
+      toast.error((e as Error).message)
     },
   })
 
-  /** Reprovar pede motivo; as outras ações vão direto, com um clique. */
+  /** Toda ação é um clique: nenhuma etapa pede justificativa. */
   function acionar(lead: KommoLead, acao: AcaoTela) {
-    if (exigeMotivo(acao.statusId)) {
-      setReprovando(lead)
-      setMotivo('')
-      setErroMotivo(null)
-      return
-    }
     setEmAndamento({ leadId: lead.kommo_lead_id, statusId: acao.statusId })
     mover.mutate({ leadId: lead.kommo_lead_id, statusId: acao.statusId, comentario: '' })
-  }
-
-  function fecharReprovar() {
-    setReprovando(null)
-    setMotivo('')
-    setErroMotivo(null)
-  }
-
-  function confirmarReprovar() {
-    if (!reprovando) return
-    if (!motivo.trim()) {
-      setErroMotivo('Informe o motivo da reprovação.')
-      return
-    }
-    setErroMotivo(null)
-    setEmAndamento({ leadId: reprovando.kommo_lead_id, statusId: ST_REPROVADO })
-    mover.mutate({
-      leadId: reprovando.kommo_lead_id,
-      statusId: ST_REPROVADO,
-      comentario: motivo.trim(),
-    })
   }
 
   const defTela = TELAS.find((t) => t.key === tela)!
@@ -388,48 +344,6 @@ export default function AnaliseCredito() {
           </div>
         )}
       </Card>
-
-      <Modal
-        open={!!reprovando}
-        onClose={fecharReprovar}
-        title="Reprovar crédito"
-        footer={
-          <>
-            <Button variant="outline" onClick={fecharReprovar}>
-              Cancelar
-            </Button>
-            <Button
-              variant="danger"
-              icon={<X className="h-4 w-4" />}
-              onClick={confirmarReprovar}
-              loading={mover.isPending}
-            >
-              Reprovar
-            </Button>
-          </>
-        }
-      >
-        {reprovando && (
-          <div className="space-y-4">
-            <div className="text-sm font-medium text-slate-800">
-              {tituloCard(reprovando)}
-            </div>
-            <Field
-              label="Motivo da reprovação"
-              required
-              error={erroMotivo ?? undefined}
-              hint={`O comercial lê este texto no card, dentro do Kommo, assinado como "${assinatura}".`}
-            >
-              <Textarea
-                rows={3}
-                value={motivo}
-                onChange={(e) => setMotivo(e.target.value)}
-                placeholder="Ex.: processo com penhora anterior à cessão."
-              />
-            </Field>
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }
