@@ -45,14 +45,12 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
   {
+    // Execução Processual deixou de ser seção própria: eram dois títulos para
+    // um setor só. As rotas seguem em /operacional/execucao/* — mudar URL
+    // quebraria links salvos sem ganho nenhum.
     title: 'Operacional',
     items: [
       { label: 'Análise de Crédito', to: '/operacional/analise', icon: ScanSearch },
-    ],
-  },
-  {
-    title: 'Execução Processual',
-    items: [
       {
         label: 'Publicações e Movimentações',
         to: '/operacional/execucao/publicacoes',
