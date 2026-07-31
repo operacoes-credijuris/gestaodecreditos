@@ -5,11 +5,13 @@
 // advbox-movimentacoes, pelo cron e pela sincronização da aba Movimentações.
 // Esta ficha só consulta; não dispara sincronização, para abrir a ficha não
 // custar uma varredura do ADVBOX.
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { cn } from '@/lib/cn'
 import { DrawerSection } from '@/components/ui/Drawer'
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { formatDate } from '@/lib/format'
 
 interface MovLinha {
@@ -26,6 +28,70 @@ const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 // para o aviso de truncamento não depender de configuração do servidor.
 const LIMITE = 1000
 
+// Renderização progressiva: histórico integral pode ter centenas de itens, e
+// montar tudo de uma vez trava a abertura da ficha.
+const PAGINA = 50
+
+// Acima disso o texto abre recolhido (andamento de diário costuma ser longo).
+const CLAMP_CHARS = 280
+
+// Um andamento na linha do tempo. Cada item controla o próprio "ver mais" —
+// estado global de expansão obrigaria a rolar a lista toda ao alternar um.
+function MovItem({
+  mov,
+  apenso,
+  primeiro,
+}: {
+  mov: MovLinha
+  apenso: boolean
+  primeiro: boolean
+}) {
+  const [expandido, setExpandido] = useState(false)
+  const texto = mov.conteudo ?? ''
+  const longo = texto.length > CLAMP_CHARS
+
+  return (
+    <li className="relative">
+      {/* Bolinha sobre o trilho; a borda branca impede a linha de atravessá-la.
+          A primeira (andamento mais recente) é destacada para ancorar o olhar. */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          'absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-white',
+          primeiro ? 'bg-brand-500' : 'bg-slate-300',
+        )}
+      />
+      <div className="flex flex-wrap items-center gap-x-2 text-xs">
+        <span className="font-semibold tabular-nums text-slate-600">
+          {mov.data ? formatDate(mov.data) : 'sem data'}
+        </span>
+        {apenso && (
+          <Badge size="sm" tone="gray">
+            apenso
+          </Badge>
+        )}
+      </div>
+      <p
+        className={cn(
+          'mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700',
+          longo && !expandido && 'line-clamp-4',
+        )}
+      >
+        {texto}
+      </p>
+      {longo && (
+        <button
+          type="button"
+          onClick={() => setExpandido((v) => !v)}
+          className="mt-0.5 text-xs font-medium text-brand-600 hover:underline"
+        >
+          {expandido ? 'ver menos' : 'ver mais'}
+        </button>
+      )}
+    </li>
+  )
+}
+
 /**
  * Seção "Movimentações" da ficha. `principal` é o número do processo da ficha;
  * `numeros` inclui também os apensos — movimentação de apenso ganha selo.
@@ -40,11 +106,11 @@ export function DrawerMovimentacoes({
   // Dígitos normalizados, deduplicados, na MESMA regra da Edge Function
   // (>= 6 dígitos) — números curtos são lixo de digitação.
   const digits = useMemo(
-    () =>
-      [...new Set(numeros.map(onlyDigits).filter((d) => d.length >= 6))],
+    () => [...new Set(numeros.map(onlyDigits).filter((d) => d.length >= 6))],
     [numeros],
   )
   const digPrincipal = onlyDigits(principal)
+  const [visiveis, setVisiveis] = useState(PAGINA)
 
   const q = useQuery({
     queryKey: ['advbox_movimentacoes', 'ficha', digits],
@@ -63,17 +129,20 @@ export function DrawerMovimentacoes({
   })
 
   const lista = q.data ?? []
+  const mostradas = lista.slice(0, visiveis)
+  const restantes = lista.length - mostradas.length
   const titulo =
-    'Movimentações' + (q.data ? ` (${lista.length === LIMITE ? `${LIMITE}+` : lista.length})` : '')
+    'Movimentações' +
+    (q.data ? ` (${lista.length === LIMITE ? `${LIMITE}+` : lista.length})` : '')
 
   return (
     <DrawerSection title={titulo}>
-      <div className="col-span-2 space-y-2">
+      <div className="col-span-2">
         {q.isLoading ? (
-          <>
+          <div className="space-y-2">
             <div className="skeleton h-12 w-full rounded-lg" />
             <div className="skeleton h-12 w-11/12 rounded-lg" />
-          </>
+          </div>
         ) : q.isError ? (
           <p className="text-sm text-red-600">{(q.error as Error).message}</p>
         ) : lista.length === 0 ? (
@@ -84,25 +153,32 @@ export function DrawerMovimentacoes({
         ) : (
           <>
             {lista.length === LIMITE && (
-              <p className="text-xs text-slate-500">
+              <p className="mb-3 text-xs text-slate-500">
                 Mostrando as {LIMITE} mais recentes.
               </p>
             )}
-            {lista.map((m) => (
-              <div key={m.id} className="rounded-lg border border-slate-200 p-2.5">
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  {m.data ? formatDate(m.data) : '—'}
-                  {digits.length > 1 && m.numero_digits !== digPrincipal && (
-                    <Badge size="sm" tone="gray">
-                      apenso
-                    </Badge>
-                  )}
-                </div>
-                <div className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-800">
-                  {m.conteudo}
-                </div>
+            {/* Linha do tempo: trilho à esquerda, mais recente no topo. */}
+            <ol className="ml-1.5 space-y-4 border-l border-slate-200 pl-4">
+              {mostradas.map((m, i) => (
+                <MovItem
+                  key={m.id}
+                  mov={m}
+                  primeiro={i === 0}
+                  apenso={digits.length > 1 && m.numero_digits !== digPrincipal}
+                />
+              ))}
+            </ol>
+            {restantes > 0 && (
+              <div className="mt-3">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setVisiveis((v) => v + PAGINA * 2)}
+                >
+                  Mostrar mais ({restantes} restantes)
+                </Button>
               </div>
-            ))}
+            )}
           </>
         )}
       </div>

@@ -4,10 +4,12 @@
 //     Requerimentos (numero_protocolo) e Apensos (numero).
 //  2. Casa esses números com os processos do ADVBOX (/lawsuits) por
 //     process_number/protocol_number → obtém os lawsuits_id.
-//  3. Para cada processo casado, busca GET /movements/{lawsuit_id} e grava o
-//     HISTÓRICO INTEIRO (o endpoint não tem parâmetro de data — sempre baixou
-//     tudo; até 2026-07 só se gravava a janela de 20 dias e o resto era
-//     descartado).
+//  3. Para cada processo casado, busca GET /movements/{lawsuit_id} PAGINADO
+//     (fetchAll segue offset/totalCount — uma chamada única pegaria só a
+//     primeira página e truncaria o histórico de processos antigos sem nenhum
+//     aviso) e grava o HISTÓRICO INTEIRO. O endpoint não tem parâmetro de
+//     data; até 2026-07 só se gravava a janela de 20 dias e o resto era
+//     descartado.
 //  4. Upsert no cache; a poda remove apenas movimentações de processos que
 //     saíram do cadastro, nunca por idade.
 // Quem consome: a ficha de cada processo (Créditos/Requerimentos) mostra o
@@ -22,8 +24,6 @@ import {
   configurarThrottle,
   fetchAll,
   getAdvboxCtx,
-  getJson,
-  pickArray,
   type AdvboxCtx,
 } from '../_shared/advbox.ts'
 
@@ -43,12 +43,16 @@ function hash(s: string): string {
   return (h >>> 0).toString(36)
 }
 
-// Busca robusta das movimentações de um processo (com retry/backoff).
+// Busca TODAS as movimentações de um processo (com retry/backoff). fetchAll
+// segue a paginação padrão do ADVBOX (offset/limit/totalCount); se o endpoint
+// devolver tudo de uma vez, ela faz uma única requisição e para — seguro nos
+// dois casos. Duplicatas de uma paginação mal-comportada colapsam no id
+// determinístico + upsert.
 async function fetchMovements(
   ctx: AdvboxCtx,
   lawsuitId: string,
 ): Promise<Record<string, unknown>[]> {
-  return pickArray(await getJson(ctx, `/movements/${lawsuitId}`))
+  return fetchAll(ctx, `/movements/${lawsuitId}`)
 }
 
 // Map com concorrência limitada que devolve UM resultado por item (1:1),
