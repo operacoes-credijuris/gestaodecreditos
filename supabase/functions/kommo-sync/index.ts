@@ -143,7 +143,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---------- Notas ----------
-    // Busca as notas em nível de conta (6 páginas) em vez de uma requisição por
+    // Busca as notas em nível de conta (até 40 páginas) em vez de uma requisição por
     // card (que seriam dezenas). O filtro note_type=common é o que mantém as
     // anotações da própria integração (service_message) fora daqui — sem isso,
     // nosso registro de auditoria seria confundido com dado do crédito.

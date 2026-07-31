@@ -70,14 +70,16 @@ export interface KommoLead {
 }
 
 /**
- * Etapa interna do operacional. Existe porque a tela de Revisão não
- * corresponde a nenhuma coluna do Kommo — é controle nosso.
+ * Registro de que a análise automática (IA) de um card ficou pronta — escrita
+ * SÓ do lado servidor. A interface lê apenas a presença de kommo_lead_id (via
+ * useAnalisesProntas): linha presente = "Finalizado", ausente = "Em curso".
+ * A kommo-mover e o kommo-sync apagam a linha quando o card sai da análise.
+ * Os demais campos espelham a tabela da migração 0014 por fidelidade ao
+ * schema, ainda que a UI não os leia.
  */
 export interface KommoAnaliseInterna {
   kommo_lead_id: number
   etapa_interna: 'em_revisao'
-  /** Coluna em que o card estava quando foi marcado. Se ele saiu de lá, a
-   *  marcação perde validade (alguém moveu direto no Kommo). */
   status_id_quando_marcado: number
   marcado_por: UUID | null
   marcado_em: string

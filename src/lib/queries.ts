@@ -9,9 +9,7 @@ import type {
   Investidor,
   Investimento,
   Processo,
-  Publicacao,
   Requerimento,
-  Tarefa,
 } from './types'
 
 export const analisesCrud = makeCrud<AnaliseCredito, Partial<AnaliseCredito>>(
@@ -26,16 +24,6 @@ export const requerimentosCrud = makeCrud<Requerimento, Partial<Requerimento>>(
 
 export const apensosCrud = makeCrud<Apenso, Partial<Apenso>>('apensos', {
   orderBy: 'created_at',
-  ascending: true,
-})
-
-export const publicacoesCrud = makeCrud<Publicacao, Partial<Publicacao>>(
-  'publicacoes',
-  { orderBy: 'data_publicacao' },
-)
-
-export const tarefasCrud = makeCrud<Tarefa, Partial<Tarefa>>('tarefas', {
-  orderBy: 'prazo',
   ascending: true,
 })
 

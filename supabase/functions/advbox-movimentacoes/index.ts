@@ -56,7 +56,8 @@ async function fetchMovements(
 }
 
 // Map com concorrência limitada que devolve UM resultado por item (1:1),
-// preservando a ordem. Falhas viram o valor de `onError(item, erro)`.
+// preservando a ordem. Erros de `fn` propagam (rejeitam o Promise.all) — o
+// chamador trata falhas com try/catch dentro do próprio `fn`.
 async function mapPool<T, R>(
   items: T[],
   limit: number,
@@ -206,11 +207,6 @@ Deno.serve(async (req: Request) => {
     }
     const lote = fila.slice(0, BATCH)
     const resto = fila.slice(BATCH)
-
-    // Modo debug: só reporta o tamanho da fila (sem buscar movimentações).
-    if ((body as { debug?: boolean }).debug) {
-      return jsonResponse({ ok: true, primeira, fila: fila.length })
-    }
 
     // Busca as movimentações do lote (concorrência baixa + throttle + retry).
     const resultados = await mapPool(lote, 3, async ({ lid, numero }) => {

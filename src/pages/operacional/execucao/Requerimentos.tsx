@@ -25,7 +25,7 @@ import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { DrawerMovimentacoes } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
-import { formatDate } from '@/lib/format'
+import { formatDate, vazioNull } from '@/lib/format'
 
 const VAZIO: Partial<Requerimento> = {
   numero_protocolo: '',
@@ -41,8 +41,6 @@ const VAZIO: Partial<Requerimento> = {
 // Tribunal/órgão não têm coluna própria: viram subtítulo do protocolo.
 const N_COLUNAS = 5
 
-// Normaliza string vazia (ou só espaços) para null antes de enviar ao backend.
-const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
 
 export default function Requerimentos() {
   const { useList, useCreate, useUpdate, useRemove } = requerimentosCrud

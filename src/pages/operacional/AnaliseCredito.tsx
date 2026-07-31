@@ -2,14 +2,16 @@
 // do kanban do Kommo (espelho local em public.kommo_leads).
 //
 // Cada tela corresponde a exatamente uma coluna do Kommo, e as ações de cada
-// etapa aparecem como botões no próprio card. Ação com um clique: o único caso
-// que abre diálogo é reprovar, porque exige motivo.
+// etapa aparecem como botões no próprio card, com um clique — nenhuma etapa
+// pede justificativa: a análise, inclusive o motivo de uma eventual reprovação,
+// já foi escrita em Pendentes (ver src/lib/kommo.ts).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, ExternalLink, ArrowRight, Check, FileSearch, X } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
   FUNIL_RPV,
+  KOMMO_SUBDOMINIO,
   TELAS,
   ACOES,
   ST_DECISAO,
@@ -33,8 +35,6 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate } from '@/lib/format'
-
-const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
 
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
 const ICONES: Record<number, ReactNode> = {

@@ -20,7 +20,6 @@ interface AuthContextValue {
   isAdmin: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
-  refreshProfile: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -82,10 +81,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null)
   }
 
-  async function refreshProfile() {
-    if (session?.user) await loadProfile(session.user.id)
-  }
-
   const user = session?.user ?? null
   const isAdmin = useMemo(
     () => user?.email === ADMIN_EMAIL || profile?.role === 'admin',
@@ -100,7 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAdmin,
     signIn,
     signOut,
-    refreshProfile,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

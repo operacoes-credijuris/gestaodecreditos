@@ -22,7 +22,7 @@ import { Combobox, MultiCombobox, type OpcaoCombo } from '@/components/ui/Combob
 import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatNome, sentenceCase } from '@/lib/format'
+import { formatCNJ, formatNome, onlyDigits as dig, sentenceCase } from '@/lib/format'
 
 // ---------- Tipos vindos da Edge Function advbox-tarefas ----------
 interface TarefaAdvbox {
@@ -35,13 +35,12 @@ interface TarefaAdvbox {
   responsaveis: string[]
   important: boolean
   urgent: boolean
-  concluida: boolean
   created_at: string | null
 }
 interface Opcoes {
   users: { id: number; name: string }[]
   tasks: { id: number; name: string }[]
-  lawsuits: { id: number; numero: string; folder: string | null; cliente: string | null }[]
+  lawsuits: { id: number; numero: string }[]
 }
 
 interface FormState {
@@ -199,7 +198,6 @@ export default function TarefasAdvbox() {
   const apensos = apensosCrud.useList()
   const resolveCredito = useMemo(() => {
     type Info = { cedente: string | null; cessionario: string | null }
-    const dig = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '')
     const porNumero = new Map<string, Info>()
     const porId = new Map<string, Info>()
     for (const p of processos.data ?? []) {
@@ -477,7 +475,6 @@ export function NovaTarefaModal({
   const requerimentos = requerimentosCrud.useList()
   const apensos = apensosCrud.useList()
   const lawOptions = useMemo<LawOpt[]>(() => {
-    const dig = (v?: string | null) => (v ?? '').replace(/\D/g, '')
     const credPorNum = new Map<string, string>()
     const credPorId = new Map<string, string>()
     for (const p of processos.data ?? []) {
@@ -531,7 +528,6 @@ export function NovaTarefaModal({
       return
     }
     if (!processoNumero) return
-    const dig = (s?: string | null) => (s ?? '').replace(/\D/g, '')
     const d = dig(processoNumero)
     const found = lawOptions.find((o) => dig(o.numero) === d)
     if (found) setForm((f) => (f.lawsuit_id ? f : { ...f, lawsuit_id: found.id }))

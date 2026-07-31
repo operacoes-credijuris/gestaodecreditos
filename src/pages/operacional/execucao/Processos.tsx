@@ -29,7 +29,7 @@ import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { DrawerMovimentacoes } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
-import { formatCNJ, formatDate } from '@/lib/format'
+import { formatCNJ, formatDate, vazioNull } from '@/lib/format'
 
 // Separa múltiplos nº RTDPJ (digitados com "e", vírgula, ";", "/" ou quebra)
 // para exibir um por linha.
@@ -39,9 +39,6 @@ function splitRtdpj(v: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean)
 }
-
-// Converte string vazia/só espaços em null (o Postgres rejeita "" em coluna date).
-const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
 
 const VAZIO: Partial<Processo> = {
   numero_cnj: '',
@@ -68,15 +65,10 @@ const N_COLUNAS = 6
 
 // Bolinha de status ao lado do nº do processo — o status por extenso é
 // redundante com o filtro de pílulas acima da tabela; a cor basta.
+// Só os tones que STATUS_PROCESSO produz; tone novo cai no fallback cinza.
 const DOT_STATUS: Record<string, string> = {
   green: 'bg-emerald-500',
-  blue: 'bg-blue-500',
   yellow: 'bg-amber-400',
-  amber: 'bg-amber-400',
-  orange: 'bg-orange-500',
-  red: 'bg-red-500',
-  purple: 'bg-violet-500',
-  violet: 'bg-violet-500',
   gray: 'bg-slate-400',
 }
 
@@ -121,6 +113,13 @@ export default function Processos() {
     setErros({})
     snapshotRef.current = JSON.stringify(p)
     setEditing(p)
+  }
+
+  // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
+  // cobre X/overlay/Escape via prop dirty).
+  function fecharForm() {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+    setEditing(null)
   }
 
   function toggleSort(col: 'data_aquisicao' | 'expectativa_liquidacao') {
@@ -400,14 +399,7 @@ export default function Processos() {
         dirty={dirty}
         footer={
           <>
-            <Button
-              variant="outline"
-              onClick={() => {
-                // Botão próprio não passa pela confirmação do Modal — checa dirty aqui.
-                if (dirty && !window.confirm('Descartar alterações não salvas?')) return
-                setEditing(null)
-              }}
-            >
+            <Button variant="outline" onClick={fecharForm}>
               Cancelar
             </Button>
             <Button

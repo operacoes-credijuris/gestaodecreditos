@@ -9,9 +9,8 @@ type Tone =
   | 'blue'
   | 'purple'
   | 'orange'
-  // Aliases semânticos (mesmas classes dos tons originais)
+  // Alias semântico (mesmas classes do tom original)
   | 'amber'
-  | 'violet'
 
 type Size = 'md' | 'sm'
 
@@ -24,7 +23,6 @@ const tones: Record<Tone, string> = {
   purple: 'bg-violet-50 text-violet-700 ring-violet-200',
   orange: 'bg-orange-50 text-orange-700 ring-orange-200',
   amber: 'bg-amber-50 text-amber-700 ring-amber-200',
-  violet: 'bg-violet-50 text-violet-700 ring-violet-200',
 }
 
 const sizes: Record<Size, string> = {

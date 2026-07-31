@@ -23,7 +23,24 @@ import { Segmented } from '@/components/ui/Segmented'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatDate } from '@/lib/format'
+import { formatCNJ, formatDate, onlyDigits as dig } from '@/lib/format'
+
+// Data-limite (YYYY-MM-DD, fuso local) de uma janela de N dias — usada em
+// dupla pela contagem da pílula e pela lista, que precisam andar juntas.
+const isoDiasAtras = (n: number) =>
+  new Date(Date.now() - n * 86400000).toLocaleDateString('sv-SE')
+
+// Dispara a sincronização UMA vez ao montar (o guard por ref preserva o
+// comportamento no StrictMode). Compartilhado pelas abas Publicações e
+// Movimentações, que têm o mesmo padrão de sync em 2º plano.
+function useSincronizaAoMontar(mutate: () => void) {
+  const ja = useRef(false)
+  useEffect(() => {
+    if (ja.current) return
+    ja.current = true
+    mutate()
+  }, [mutate])
+}
 
 interface DjenRow {
   id: number
@@ -32,7 +49,6 @@ interface DjenRow {
   sigla_tribunal: string | null
   tipo_comunicacao: string | null
   raw: Record<string, unknown>
-  sincronizado_em: string
   tratada: boolean
 }
 
@@ -52,7 +68,6 @@ function useResolveProcesso() {
   const requerimentos = requerimentosCrud.useList()
   const apensos = apensosCrud.useList()
   return useMemo(() => {
-    const dig = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '')
     const credPorNum = new Map<string, ResolveInfo>()
     const credPorId = new Map<string, ResolveInfo>()
     for (const p of processos.data ?? []) {
@@ -119,14 +134,8 @@ export default function PublicacoesMovimentacoes() {
 
   // Contagens leves (head:true não baixa linhas) para as pílulas — quem chega
   // na tela vê que existem DUAS visões e quantos registros há em cada uma.
-  const ini30 = useMemo(
-    () => new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE'),
-    [],
-  )
-  const ini20 = useMemo(
-    () => new Date(Date.now() - 20 * 86400000).toLocaleDateString('sv-SE'),
-    [],
-  )
+  const ini30 = useMemo(() => isoDiasAtras(30), [])
+  const ini20 = useMemo(() => isoDiasAtras(20), [])
   const nPub = useQuery({
     queryKey: ['djen_publicacoes_count', ini30],
     queryFn: async () => {
@@ -195,10 +204,7 @@ function Publicacoes({ busca }: { busca: string }) {
   const resolve = useResolveProcesso()
 
   // Janela de 30 dias (data de disponibilização >= hoje - 30, horário local).
-  const ini30 = useMemo(
-    () => new Date(Date.now() - 30 * 86400000).toLocaleDateString('sv-SE'),
-    [],
-  )
+  const ini30 = useMemo(() => isoDiasAtras(30), [])
 
   const lista = useQuery({
     queryKey: ['djen_publicacoes', ini30],
@@ -222,13 +228,7 @@ function Publicacoes({ busca }: { busca: string }) {
     onError: (e) =>
       toast.error(`Sincronização DJEN: ${(e as Error).message}`),
   })
-  const jaSincronizou = useRef(false)
-  useEffect(() => {
-    if (jaSincronizou.current) return
-    jaSincronizou.current = true
-    sync.mutate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  useSincronizaAoMontar(sync.mutate)
 
   // Marca/desmarca "tratada" (move entre Novas e Tratadas).
   const toggleTratada = useMutation({
@@ -496,13 +496,10 @@ function TextoExpand({ text }: { text: string }) {
 // ----------------------- Movimentações (ADVBOX) -----------------------
 interface MovRow {
   id: string
-  advbox_lawsuit_id: string | null
   numero_processo: string | null
   data: string | null
   data_ts: string | null
   conteudo: string | null
-  raw: Record<string, unknown>
-  sincronizado_em: string
 }
 
 // Chave de ordenação decrescente (mais recente primeiro). ISO ordena como texto.
@@ -511,9 +508,7 @@ const movOrdem = (m: MovRow) => m.data_ts ?? m.data ?? ''
 // Status por processo (última movimentação) — alimenta o grupo Paralisados.
 interface StatusRow {
   numero_processo: string
-  advbox_lawsuit_id: string | null
   ultima_movimentacao: string | null
-  sincronizado_em: string
 }
 
 // Dias corridos desde uma data (YYYY-MM-DD), no mínimo 0.
@@ -557,10 +552,7 @@ function Movimentacoes({ busca }: { busca: string }) {
   const resolve = useResolveProcesso()
 
   // Janela de 20 dias (data do andamento >= hoje - 20, horário local).
-  const ini20 = useMemo(
-    () => new Date(Date.now() - 20 * 86400000).toLocaleDateString('sv-SE'),
-    [],
-  )
+  const ini20 = useMemo(() => isoDiasAtras(20), [])
 
   const lista = useQuery({
     queryKey: ['advbox_movimentacoes', ini20],
@@ -600,13 +592,7 @@ function Movimentacoes({ busca }: { busca: string }) {
     },
     onError: (e) => toast.error(`Sincronização ADVBOX: ${(e as Error).message}`),
   })
-  const jaSincronizou = useRef(false)
-  useEffect(() => {
-    if (jaSincronizou.current) return
-    jaSincronizou.current = true
-    sync.mutate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  useSincronizaAoMontar(sync.mutate)
 
   const q = busca.trim().toLowerCase()
 

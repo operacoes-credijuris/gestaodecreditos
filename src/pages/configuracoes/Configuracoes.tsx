@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
+import { KOMMO_SUBDOMINIO as SUBDOMINIO_PADRAO } from '@/lib/kommo'
 import type {
   Integracao,
   Profile,
@@ -174,9 +175,6 @@ function AdvboxConfig() {
 }
 
 // ----------------------- KOMMO -----------------------
-/** Conta Kommo da Credijuris. Não é segredo — é o que aparece na URL. */
-const SUBDOMINIO_PADRAO = 'contatocredijuriscom'
-
 // O Kommo é o CRM em kanban onde o comercial cria os cards de análise de
 // crédito. Precisa de DUAS informações, não só do token: a API resolve a conta
 // pelo host (https://<subdominio>.kommo.com), então subdomínio errado devolve

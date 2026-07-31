@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/Table'
 import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/components/ui/Toast'
+import { onlyDigits, vazioNull } from '@/lib/format'
 
 // Identificador do órgão julgador = "comarca / vara" (igual à aba Créditos).
 function buildOrgao(comarca?: string | null, vara?: string | null): string {
@@ -39,13 +40,9 @@ function formatOrgaoLabel(orgao: string): string {
   return orgao
 }
 
-function soDigitos(v?: string | null): string {
-  return (v ?? '').replace(/\D/g, '')
-}
-
 // Máscara de telefone brasileiro: (DD) XXXXX-XXXX (9 díg.) ou (DD) XXXX-XXXX (8 díg.).
 function formatTelefone(v: string): string {
-  const d = soDigitos(v).slice(0, 11)
+  const d = onlyDigits(v).slice(0, 11)
   if (d.length === 0) return ''
   if (d.length <= 2) return `(${d}`
   if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`
@@ -54,17 +51,12 @@ function formatTelefone(v: string): string {
 }
 
 function telefoneIncompleto(v?: string | null): boolean {
-  const d = soDigitos(v)
+  const d = onlyDigits(v)
   return d.length > 0 && d.length < 10
 }
 
 function waLink(v: string): string {
-  return `https://wa.me/55${soDigitos(v)}`
-}
-
-function nn(v: string | null | undefined): string | null {
-  const t = (v ?? '').trim()
-  return t === '' ? null : t
+  return `https://wa.me/55${onlyDigits(v)}`
 }
 
 interface OrgaoRow {
@@ -160,6 +152,8 @@ const CAMPOS_FONE = [
   'gabinete_whatsapp',
 ] as const
 
+// Sem chaves gabinete_*: contato auxiliar não tem separação serventia/gabinete
+// (o formulário nem renderiza esses campos e o submit os força a null).
 const AUXILIAR_VAZIO: Partial<ContatoServentia> = {
   tipo: 'auxiliar',
   orgao: '',
@@ -167,9 +161,6 @@ const AUXILIAR_VAZIO: Partial<ContatoServentia> = {
   serventia_telefone: '',
   serventia_whatsapp: '',
   serventia_email: '',
-  gabinete_telefone: '',
-  gabinete_whatsapp: '',
-  gabinete_email: '',
 }
 
 export default function ContatosServentias() {
@@ -361,15 +352,15 @@ export default function ContatosServentias() {
     try {
       const payload = {
         tipo: editing.tipo ?? 'julgador',
-        orgao: nn(editing.orgao),
-        tribunal: auxiliar ? nn(editing.tribunal) : null,
-        serventia_telefone: nn(editing.serventia_telefone),
-        serventia_whatsapp: nn(editing.serventia_whatsapp),
-        serventia_email: nn(editing.serventia_email),
+        orgao: vazioNull(editing.orgao),
+        tribunal: auxiliar ? vazioNull(editing.tribunal) : null,
+        serventia_telefone: vazioNull(editing.serventia_telefone),
+        serventia_whatsapp: vazioNull(editing.serventia_whatsapp),
+        serventia_email: vazioNull(editing.serventia_email),
         // Auxiliar não tem separação serventia/gabinete.
-        gabinete_telefone: auxiliar ? null : nn(editing.gabinete_telefone),
-        gabinete_whatsapp: auxiliar ? null : nn(editing.gabinete_whatsapp),
-        gabinete_email: auxiliar ? null : nn(editing.gabinete_email),
+        gabinete_telefone: auxiliar ? null : vazioNull(editing.gabinete_telefone),
+        gabinete_whatsapp: auxiliar ? null : vazioNull(editing.gabinete_whatsapp),
+        gabinete_email: auxiliar ? null : vazioNull(editing.gabinete_email),
       }
       if (editing.id) {
         await update.mutateAsync({ id: editing.id, changes: payload })

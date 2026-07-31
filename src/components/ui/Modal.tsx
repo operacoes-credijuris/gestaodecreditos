@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect, useId, useRef } from 'react'
+import { useCallback, useEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
@@ -43,18 +43,18 @@ export function Modal({
   // Elemento focado antes do modal abrir — recebe o foco de volta ao fechar.
   const previousFocusRef = useRef<HTMLElement | null>(null)
 
-  // Centraliza a checagem de "dirty" para todas as formas de fechar.
-  function requestClose() {
+  // Centraliza a checagem de "dirty" para todas as formas de fechar
+  // (X, overlay e Escape passam TODOS por aqui — uma única fonte da regra).
+  const requestClose = useCallback(() => {
     if (dirty && !window.confirm('Descartar alterações não salvas?')) return
     onClose()
-  }
+  }, [dirty, onClose])
 
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        if (dirty && !window.confirm('Descartar alterações não salvas?')) return
-        onClose()
+        requestClose()
         return
       }
       if (e.key !== 'Tab') return
@@ -80,7 +80,7 @@ export function Modal({
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose, dirty])
+  }, [open, requestClose])
 
   // Foco inicial ao abrir e devolução do foco ao elemento anterior ao fechar.
   useEffect(() => {

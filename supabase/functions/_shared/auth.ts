@@ -1,7 +1,7 @@
 // Helpers de autenticação/serviço compartilhados pelas Edge Functions.
 //
 // Especificador `npm:` em vez de https://esm.sh, e versão fixa. Motivo: este é
-// o único import externo das 9 funções, então ele era um ponto único de falha
+// o único import externo das funções, então ele era um ponto único de falha
 // em dois sentidos.
 //   1. Disponibilidade: em 30/07/2026 o esm.sh devolveu 522 durante o deploy e
 //      derrubou a implantação inteira, inclusive de funções não alteradas.

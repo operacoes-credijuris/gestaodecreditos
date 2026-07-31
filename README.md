@@ -86,11 +86,11 @@ A chave `service_role` já está disponível dentro das funções automaticament
 não é preciso configurar segredos manualmente.
 
 ```bash
-supabase functions deploy admin-create-user
-supabase functions deploy salvar-token-advbox
-supabase functions deploy advbox-sync
-supabase functions deploy djen-consulta
+supabase functions deploy
 ```
+
+> O deploy também acontece automaticamente a cada push na `main`, via
+> [`.github/workflows/deploy-functions.yml`](.github/workflows/deploy-functions.yml).
 
 ### 3.4. Integrações (na página Configurações)
 
@@ -99,9 +99,6 @@ supabase functions deploy djen-consulta
   no servidor e nunca exposto ao navegador.
 - **DJEN:** informe as OABs e/ou números de processo a monitorar, tribunais e a
   janela de dias. Use o botão **Sincronizar DJEN** em *Publicações e Movimentações*.
-
-> O mapeamento dos campos da ADVBOX em `supabase/functions/advbox-sync` é
-> defensivo e pode precisar de ajuste fino conforme a resposta real da sua conta.
 
 ## 4. Publicar no GitHub Pages
 
@@ -145,7 +142,7 @@ src/
   pages/           estrategica / comercial / operacional / configuracoes
 supabase/
   migrations/      0001_init.sql (tabelas, RLS, triggers, storage)
-  functions/       admin-create-user, salvar-token-advbox, advbox-sync, djen-consulta
+  functions/       Edge Functions (ADVBOX, DJEN, Kommo, gestão de usuários)
 ```
 
 ## Segurança

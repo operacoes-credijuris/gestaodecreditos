@@ -23,13 +23,16 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import type { KommoLead, KommoAnaliseInterna } from './types'
 
-// Funis que o operacional usa, na conta contatocredijuriscom.
+// Conta do Kommo. O subdomínio não é segredo — é o que aparece na URL.
+export const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
+
+// Funis que o operacional usa.
 export const FUNIL_RPV = 13901939
 export const FUNIL_PRECATORIO = 13971995
 
 // Estágios do Funil Geral RPV que interessam ao operacional. Os nomes das
 // constantes seguem os nomes das COLUNAS NO KOMMO; o rótulo que o usuário vê
-// está em NOME_STATUS e pode divergir (ST_DECISAO aparece como "Validação").
+// está em TELAS[].label e pode divergir (ST_DECISAO aparece como "Validação").
 export const ST_ANALISE = 107272803 // Análise Jurídica-Econômico
 export const ST_DECISAO = 107272807 // Revisão e Decisão do Pedro
 export const ST_DILIGENCIA = 107830027 // Diligência
@@ -43,22 +46,6 @@ export type TelaAnalise =
   | 'diligencia'
   | 'reprovados'
 
-/**
- * Etapa exibida ao usuário, por coluna do Kommo. Usa o vocabulário DA
- * PLATAFORMA, não o do Kommo: quem opera aqui não precisa saber que "Aprovados"
- * é "Apresentação de Proposta" no CRM do comercial.
- *
- * A anotação gravada no card do Kommo usa o nome de lá, de propósito — quem a
- * lê é o comercial, dentro do Kommo.
- */
-export const NOME_STATUS: Record<number, string> = {
-  [ST_ANALISE]: 'Pendentes',
-  [ST_DECISAO]: 'Validação',
-  [ST_DILIGENCIA]: 'Diligência',
-  [ST_PROPOSTA]: 'Aprovados',
-  [ST_REPROVADO]: 'Reprovados',
-}
-
 export interface DefTela {
   key: TelaAnalise
   label: string
@@ -66,6 +53,14 @@ export interface DefTela {
   descricaoVazia: string
 }
 
+/**
+ * As telas da Análise de Crédito, uma por coluna do Kommo. Os rótulos usam o
+ * vocabulário DA PLATAFORMA, não o do Kommo: quem opera aqui não precisa saber
+ * que "Aprovados" é "Apresentação de Proposta" no CRM do comercial.
+ *
+ * A anotação gravada no card do Kommo usa o nome de lá, de propósito — quem a
+ * lê é o comercial, dentro do Kommo (ver COLUNAS na Edge Function kommo-mover).
+ */
 export const TELAS: DefTela[] = [
   {
     key: 'pendentes',
@@ -108,7 +103,7 @@ export interface AcaoTela {
 
 /**
  * Botões de ação por tela: cada etapa oferece direto as saídas que fazem sentido
- * nela, com um clique. Só reprovar abre diálogo, porque exige motivo.
+ * nela, com um clique.
  *
  * As telas terminais ficam sem ação: de Aprovados e Reprovados o card não volta
  * pelo app, e a diligência é encargo do comercial — concluída, ele move o card

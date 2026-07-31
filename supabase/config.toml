@@ -18,12 +18,6 @@ verify_jwt = true
 [functions.salvar-token-advbox]
 verify_jwt = true
 
-[functions.advbox-sync]
-verify_jwt = true
-
-[functions.djen-consulta]
-verify_jwt = true
-
 [functions.advbox-tarefas]
 verify_jwt = true
 

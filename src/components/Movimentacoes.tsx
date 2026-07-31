@@ -17,16 +17,13 @@ import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { DrawerSection } from '@/components/ui/Drawer'
 import { Button } from '@/components/ui/Button'
-import { formatDate } from '@/lib/format'
+import { formatDate, onlyDigits } from '@/lib/format'
 
 interface MovLinha {
   id: string
   data: string | null
-  data_ts: string | null
   conteudo: string | null
 }
-
-const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 
 // Teto da consulta. PostgREST corta em 1000 de qualquer forma; explícito aqui
 // para o aviso de truncamento não depender de configuração do servidor.
@@ -93,7 +90,7 @@ export function DrawerMovimentacoes({ numero }: { numero?: string | null }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('advbox_movimentacoes')
-        .select('id, data, data_ts, conteudo')
+        .select('id, data, conteudo')
         .eq('numero_digits', digits)
         .order('data', { ascending: false })
         .order('data_ts', { ascending: false })

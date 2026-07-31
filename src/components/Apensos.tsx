@@ -12,12 +12,9 @@ import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { DrawerMovimentacoes } from '@/components/Movimentacoes'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ } from '@/lib/format'
+import { formatCNJ, vazioNull } from '@/lib/format'
 
 type ParentField = 'processo_id' | 'requerimento_id'
-
-// Converte string vazia/só espaços em null (mantém o banco sem "").
-const vazioNull = (s?: string | null) => (s?.trim() ? s.trim() : null)
 
 /**
  * Gerencia os apensos (incidentes, recursos etc.) atrelados a um principal

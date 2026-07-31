@@ -59,17 +59,10 @@ export default function App() {
             </AdminRoute>
           }
         />
-      </Route>
 
-      {/* Rota desconhecida: página 404 dentro do layout (com sidebar),
-          em vez de redirecionar silenciosamente para o dashboard. */}
-      <Route
-        element={
-          <ProtectedRoute>
-            <AppLayout />
-          </ProtectedRoute>
-        }
-      >
+        {/* Rota desconhecida: página 404 dentro do layout (com sidebar),
+            em vez de redirecionar silenciosamente para o dashboard. O ranking
+            do React Router mantém /login e as rotas específicas acima do "*". */}
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
