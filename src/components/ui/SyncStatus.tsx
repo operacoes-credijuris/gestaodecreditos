@@ -14,7 +14,7 @@ export function SyncStatus({
 }) {
   if (syncing) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-brand-600">
+      <span className="inline-flex items-center gap-1.5 text-xs text-brand-600">
         <RefreshCw className="h-3.5 w-3.5 animate-spin" /> {label ?? 'sincronizando…'}
       </span>
     )

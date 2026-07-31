@@ -701,6 +701,7 @@ export function NovaTarefaModal({
             <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
               <input
                 type="checkbox"
+                className="accent-brand-600"
                 checked={form.important}
                 onChange={(e) => setForm({ ...form, important: e.target.checked })}
               />
@@ -709,6 +710,7 @@ export function NovaTarefaModal({
             <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
               <input
                 type="checkbox"
+                className="accent-brand-600"
                 checked={form.urgent}
                 onChange={(e) => setForm({ ...form, urgent: e.target.checked })}
               />

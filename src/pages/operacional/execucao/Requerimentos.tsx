@@ -25,7 +25,7 @@ import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { DrawerMovimentacoes } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
-import { formatDate, vazioNull } from '@/lib/format'
+import { formatCNJ, formatDate, vazioNull } from '@/lib/format'
 
 const VAZIO: Partial<Requerimento> = {
   numero_protocolo: '',
@@ -408,7 +408,7 @@ export default function Requerimentos() {
                   {apensosDoDetalhe.map((a) => (
                     <div key={a.id} className="rounded-lg border border-slate-200 p-2.5">
                       <div className="text-sm font-medium text-slate-800">
-                        {a.numero || '—'}
+                        {formatCNJ(a.numero)}
                       </div>
                       <div className="text-xs text-slate-500">
                         {[a.classe_processual, a.tribunal, a.comarca]

@@ -36,7 +36,7 @@ const PAGINA = 50
 // Acima disso o texto abre recolhido (andamento de diário costuma ser longo).
 const CLAMP_CHARS = 280
 
-// Um andamento na linha do tempo. Cada item controla o próprio "ver mais" —
+// Um andamento na linha do tempo. Cada item controla o próprio "ler mais" —
 // estado global de expansão obrigaria a rolar a lista toda ao alternar um.
 function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
   const [expandido, setExpandido] = useState(false)
@@ -71,7 +71,7 @@ function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
           onClick={() => setExpandido((v) => !v)}
           className="mt-0.5 text-xs font-medium text-brand-600 hover:underline"
         >
-          {expandido ? 'ver menos' : 'ver mais'}
+          {expandido ? 'ler menos' : 'ler mais'}
         </button>
       )}
     </li>

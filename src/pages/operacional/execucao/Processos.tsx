@@ -335,10 +335,10 @@ export default function Processos() {
                         {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
                       </div>
                     </TD>
-                    <TD className="whitespace-nowrap text-slate-600">
+                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
                       {formatDate(p.data_aquisicao)}
                     </TD>
-                    <TD className="whitespace-nowrap text-slate-600">
+                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
                       {formatDate(p.expectativa_liquidacao)}
                     </TD>
                     {/* Sem nowrap: nº RTDPJ longo deve quebrar em vez de
@@ -680,7 +680,7 @@ export default function Processos() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
-        message={`Excluir o crédito ${toDelete?.numero_cnj || ''}?`}
+        message={`Excluir o crédito ${formatCNJ(toDelete?.numero_cnj)}?`}
         confirmLabel="Excluir"
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}

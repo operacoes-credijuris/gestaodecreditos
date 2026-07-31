@@ -62,13 +62,13 @@ function Lista({
             onMouseEnter={() => onDestacar(i)}
             className={cn(
               'block w-full px-3 py-1.5 text-left',
-              i === destaque ? 'bg-blue-50' : 'hover:bg-slate-50',
+              i === destaque ? 'bg-brand-50' : 'hover:bg-slate-50',
             )}
           >
             <div
               className={cn(
                 'text-sm',
-                i === destaque ? 'text-blue-700' : 'text-slate-700',
+                i === destaque ? 'text-brand-700' : 'text-slate-700',
               )}
             >
               {o.titulo}

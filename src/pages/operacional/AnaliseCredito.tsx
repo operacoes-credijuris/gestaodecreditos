@@ -88,7 +88,7 @@ function CardCredito({
             <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
             {analisePronta !== null && (
               <Badge size="sm" tone={analisePronta ? 'green' : 'yellow'}>
-                {analisePronta ? 'finalizado' : 'em curso'}
+                {analisePronta ? 'Finalizado' : 'Em curso'}
               </Badge>
             )}
           </div>

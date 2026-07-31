@@ -12,8 +12,8 @@ interface IconButtonProps
 }
 
 const variants: Record<Variant, string> = {
-  default: 'hover:bg-slate-100 hover:text-brand-700',
-  danger: 'hover:bg-red-50 hover:text-red-600',
+  default: 'hover:bg-slate-100 hover:text-brand-700 focus-visible:ring-brand-500',
+  danger: 'hover:bg-red-50 hover:text-red-600 focus-visible:ring-red-500',
 }
 
 // Botão de ícone das linhas de tabela (Editar/Excluir etc.).
@@ -31,7 +31,9 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cn(
-        'rounded-md p-1.5 text-slate-500',
+        // transition + focus-visible: mesmo acabamento do Button e do X do
+        // Drawer — as ações de linha não devem ser as únicas sem foco visível.
+        'rounded-md p-1.5 text-slate-500 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
         variants[variant],
         className,
       )}

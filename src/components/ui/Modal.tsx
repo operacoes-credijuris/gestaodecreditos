@@ -133,7 +133,7 @@ export function Modal({
           </div>
           <button
             onClick={requestClose}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
             aria-label="Fechar"
           >
             <X className="h-5 w-5" />

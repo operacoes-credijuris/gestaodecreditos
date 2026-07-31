@@ -313,7 +313,8 @@ function Publicacoes({ busca }: { busca: string }) {
     <div className="space-y-4">
       <div className="flex items-center gap-3 text-sm text-slate-500">
         <span>
-          <strong>{filtradas.length}</strong> publicação(ões)
+          <strong>{filtradas.length}</strong>{' '}
+          {filtradas.length === 1 ? 'publicação' : 'publicações'}
         </span>
         <SyncStatus
           syncing={sync.isPending}
@@ -413,7 +414,12 @@ function PublicacaoCard({
               {formatCNJ(p.numero_processo ?? '')}
             </span>
             <label className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 text-xs text-slate-600">
-              <input type="checkbox" checked={p.tratada} onChange={onToggle} />
+              <input
+                type="checkbox"
+                className="accent-brand-600"
+                checked={p.tratada}
+                onChange={onToggle}
+              />
               Tratada
             </label>
           </div>
@@ -428,11 +434,11 @@ function PublicacaoCard({
             {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
             {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
             {info.kind === 'requerimento' && (
-              <Badge tone="purple">Requerimentos</Badge>
+              <Badge tone="purple">Requerimento</Badge>
             )}
           </div>
           <Button
-            size="md"
+            size="sm"
             icon={<ListChecks className="h-4 w-4" />}
             onClick={onCriarTarefa}
           >
@@ -526,9 +532,9 @@ function badgeParalisado(dias: number | null): {
 } {
   if (dias == null)
     return {
-      classes: 'bg-rose-700 text-white',
+      classes: 'bg-red-700 text-white',
       texto: 'sem movimentação',
-      borda: 'border-l-rose-700',
+      borda: 'border-l-red-700',
     }
   const texto = dias < 60 ? `há ${dias} dias` : `há ${Math.floor(dias / 30)} meses`
   let classes = 'bg-amber-100 text-amber-700'
@@ -659,7 +665,8 @@ function Movimentacoes({ busca }: { busca: string }) {
     <div className="space-y-4">
       <div className="flex items-center gap-3 text-sm text-slate-500">
         <span>
-          <strong>{totalMovs}</strong> movimentação(ões) nos últimos 20 dias
+          <strong>{totalMovs}</strong>{' '}
+          {totalMovs === 1 ? 'movimentação' : 'movimentações'} nos últimos 20 dias
         </span>
         <SyncStatus
           syncing={sync.isPending}
@@ -728,7 +735,7 @@ function ProcessoMovimentacoes({
   const [aberto, setAberto] = useState(false)
   const st = getLabel(STATUS_PROCESSO, info.status)
   return (
-    <Card className="overflow-hidden p-0">
+    <Card className="overflow-hidden">
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
@@ -751,7 +758,7 @@ function ProcessoMovimentacoes({
               {movs.length} {movs.length === 1 ? 'andamento' : 'andamentos'}
             </Badge>
             {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
-            {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+            {info.kind === 'requerimento' && <Badge tone="purple">Requerimento</Badge>}
           </div>
           <span className="inline-flex items-center gap-1 text-xs font-medium text-brand-600">
             {aberto ? 'ocultar' : 'ver andamentos'}
@@ -828,7 +835,7 @@ function ProcessoParalisado({
             {b.texto}
           </span>
           {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
-          {info.kind === 'requerimento' && <Badge tone="purple">Requerimentos</Badge>}
+          {info.kind === 'requerimento' && <Badge tone="purple">Requerimento</Badge>}
         </div>
       </div>
     </Card>

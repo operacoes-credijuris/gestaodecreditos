@@ -185,7 +185,7 @@ export function useApensosManager(parentField: ParentField) {
                 >
                   <div className="space-y-0.5">
                     <div className="font-medium text-slate-800">
-                      {a.numero || '—'}
+                      {formatCNJ(a.numero)}
                       {a.classe_processual && (
                         <span className="font-normal text-slate-500">
                           {' '}
