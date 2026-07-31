@@ -18,10 +18,36 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Chave inválida.' }, 400)
     }
 
+    // Confere o formato antes de gravar. Sem isto, uma chave colada pela
+    // metade — o caso comum, já que a Anthropic só a exibe uma vez — é aceita
+    // aqui e só falha depois, na primeira pergunta, como "invalid x-api-key":
+    // longe do campo que a pessoa precisa corrigir.
+    const chave = token.trim()
+    if (!chave.startsWith('sk-ant-')) {
+      return jsonResponse(
+        {
+          error:
+            'Isto não parece uma chave de API da Anthropic — ela começa com ' +
+            '"sk-ant-". Confira em console.anthropic.com → API Keys.',
+        },
+        400,
+      )
+    }
+    if (chave.length < 40) {
+      return jsonResponse(
+        {
+          error:
+            'A chave parece incompleta. Ela é exibida uma única vez, na ' +
+            'criação — se tiver dúvida, gere uma nova e copie inteira.',
+        },
+        400,
+      )
+    }
+
     const { error: e1 } = await svc.from('integracao_anthropic_secret').upsert(
       {
         id: 1,
-        token: token.trim(),
+        token: chave,
         atualizado_em: new Date().toISOString(),
         atualizado_por: caller?.id ?? null,
       },
