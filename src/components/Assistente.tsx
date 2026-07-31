@@ -180,14 +180,9 @@ export function Assistente() {
     >
       <header className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
         <Sparkles className="h-4 w-4 shrink-0 text-brand-700" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-slate-800">
-            Assistente de dados
-          </p>
-          <p className="truncate text-xs text-slate-500">
-            Só leitura — não altera nada no sistema
-          </p>
-        </div>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">
+          Assistente de dados
+        </p>
         <IconButton
           label="Fechar assistente"
           icon={<X className="h-4 w-4" />}

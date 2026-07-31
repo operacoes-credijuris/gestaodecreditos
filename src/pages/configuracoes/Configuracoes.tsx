@@ -51,8 +51,8 @@ export default function Configuracoes() {
       <div className="space-y-6">
         <AdvboxConfig />
         <KommoConfig />
-        <DjenConfig />
         <AnthropicConfig />
+        <DjenConfig />
         <UsuariosConfig />
       </div>
     </div>
@@ -114,7 +114,6 @@ function AnthropicConfig() {
             <Sparkles className="h-5 w-5 text-brand-600" /> Integração Anthropic
           </span>
         }
-        description="Chave usada pelo assistente de dados (o botão no canto da tela)."
         action={
           configurado ? (
             <Badge tone="green">
