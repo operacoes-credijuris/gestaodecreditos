@@ -1,22 +1,26 @@
-// Movimentações de UM processo (e seus apensos) dentro da ficha lateral.
+// Movimentações de UM processo dentro da ficha lateral.
 //
-// Lê do cache local (public.advbox_movimentacoes), que desde a migração 0016
-// guarda o histórico INTEIRO — quem o mantém é a Edge Function
-// advbox-movimentacoes, pelo cron e pela sincronização da aba Movimentações.
-// Esta ficha só consulta; não dispara sincronização, para abrir a ficha não
-// custar uma varredura do ADVBOX.
-import { useMemo, useState } from 'react'
+// Separação total por autos: a ficha do principal mostra SÓ os andamentos do
+// principal, e a ficha de cada apenso mostra só os dele (o apenso é um processo
+// por direito próprio — decisão de produto, 2026-07). É a Edge Function
+// advbox-movimentacoes que garante isso, carimbando cada andamento com o número
+// do processo A QUE ELE PERTENCE, mesmo quando o ADVBOX entrega andamentos do
+// apenso dentro do feed do principal.
+//
+// Lê do cache local (public.advbox_movimentacoes), que guarda o histórico
+// INTEIRO — mantido pelo cron e pela sincronização da aba Movimentações. Esta
+// ficha só consulta; não dispara sincronização, para abrir a ficha não custar
+// uma varredura do ADVBOX.
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { DrawerSection } from '@/components/ui/Drawer'
-import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { formatCNJ, formatDate } from '@/lib/format'
+import { formatDate } from '@/lib/format'
 
 interface MovLinha {
   id: string
-  numero_digits: string | null
   data: string | null
   data_ts: string | null
   conteudo: string | null
@@ -37,16 +41,7 @@ const CLAMP_CHARS = 280
 
 // Um andamento na linha do tempo. Cada item controla o próprio "ver mais" —
 // estado global de expansão obrigaria a rolar a lista toda ao alternar um.
-function MovItem({
-  mov,
-  numeroApenso,
-  primeiro,
-}: {
-  mov: MovLinha
-  /** Número do apenso dono do andamento, ou null quando é do principal. */
-  numeroApenso: string | null
-  primeiro: boolean
-}) {
+function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
   const [expandido, setExpandido] = useState(false)
   const texto = mov.conteudo ?? ''
   const longo = texto.length > CLAMP_CHARS
@@ -62,22 +57,8 @@ function MovItem({
           primeiro ? 'bg-brand-500' : 'bg-slate-300',
         )}
       />
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-        <span className="font-semibold tabular-nums text-slate-600">
-          {mov.data ? formatDate(mov.data) : 'sem data'}
-        </span>
-        {/* Não só "apenso": com mais de um apenso, saber QUAL é o que separa
-            os autos de verdade. */}
-        {numeroApenso && (
-          <>
-            <Badge size="sm" tone="gray">
-              apenso
-            </Badge>
-            <span className="tabular-nums text-slate-400">
-              {formatCNJ(numeroApenso)}
-            </span>
-          </>
-        )}
+      <div className="text-xs font-semibold tabular-nums text-slate-600">
+        {mov.data ? formatDate(mov.data) : 'sem data'}
       </div>
       <p
         className={cn(
@@ -100,34 +81,20 @@ function MovItem({
   )
 }
 
-/**
- * Seção "Movimentações" da ficha. `principal` é o número do processo da ficha;
- * `numeros` inclui também os apensos — movimentação de apenso ganha selo.
- */
-export function DrawerMovimentacoes({
-  principal,
-  numeros,
-}: {
-  principal?: string | null
-  numeros: (string | null | undefined)[]
-}) {
-  // Dígitos normalizados, deduplicados, na MESMA regra da Edge Function
-  // (>= 6 dígitos) — números curtos são lixo de digitação.
-  const digits = useMemo(
-    () => [...new Set(numeros.map(onlyDigits).filter((d) => d.length >= 6))],
-    [numeros],
-  )
-  const digPrincipal = onlyDigits(principal)
+/** Seção "Movimentações" da ficha: os andamentos DESTE número, e só dele. */
+export function DrawerMovimentacoes({ numero }: { numero?: string | null }) {
+  const digits = onlyDigits(numero)
   const [visiveis, setVisiveis] = useState(PAGINA)
 
   const q = useQuery({
     queryKey: ['advbox_movimentacoes', 'ficha', digits],
-    enabled: digits.length > 0,
+    // Mesma regra da Edge Function (>= 6 dígitos) — menos que isso é lixo.
+    enabled: digits.length >= 6,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('advbox_movimentacoes')
-        .select('id, numero_digits, data, data_ts, conteudo')
-        .in('numero_digits', digits)
+        .select('id, data, data_ts, conteudo')
+        .eq('numero_digits', digits)
         .order('data', { ascending: false })
         .order('data_ts', { ascending: false })
         .limit(LIMITE)
@@ -168,16 +135,7 @@ export function DrawerMovimentacoes({
             {/* Linha do tempo: trilho à esquerda, mais recente no topo. */}
             <ol className="ml-1.5 space-y-4 border-l border-slate-200 pl-4">
               {mostradas.map((m, i) => (
-                <MovItem
-                  key={m.id}
-                  mov={m}
-                  primeiro={i === 0}
-                  numeroApenso={
-                    digits.length > 1 && m.numero_digits !== digPrincipal
-                      ? m.numero_digits
-                      : null
-                  }
-                />
+                <MovItem key={m.id} mov={m} primeiro={i === 0} />
               ))}
             </ol>
             {restantes > 0 && (

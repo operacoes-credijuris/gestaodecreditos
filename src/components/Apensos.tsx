@@ -387,8 +387,8 @@ export function useApensosManager(parentField: ParentField) {
                 </DrawerField>
               </DrawerSection>
 
-              {/* Só o número do apenso: aqui ele é o principal dos autos. */}
-              <DrawerMovimentacoes principal={ficha.numero} numeros={[ficha.numero]} />
+              {/* Aqui o apenso é o principal dos próprios autos. */}
+              <DrawerMovimentacoes numero={ficha.numero} />
             </>
           )}
         </Drawer>

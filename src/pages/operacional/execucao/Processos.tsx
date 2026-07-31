@@ -676,11 +676,10 @@ export default function Processos() {
               )}
             </DrawerSection>
 
-            {/* Histórico integral do ADVBOX — inclui os apensos da ficha. */}
-            <DrawerMovimentacoes
-              principal={detalhe.numero_cnj}
-              numeros={[detalhe.numero_cnj, ...apensosDoDetalhe.map((a) => a.numero)]}
-            />
+            {/* Histórico integral do ADVBOX — SÓ do principal. Andamento de
+                apenso fica na ficha do apenso (clique no card dele): autos
+                próprios, sem mistura. */}
+            <DrawerMovimentacoes numero={detalhe.numero_cnj} />
           </>
         )}
       </Drawer>
