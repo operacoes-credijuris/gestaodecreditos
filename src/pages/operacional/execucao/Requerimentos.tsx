@@ -217,7 +217,7 @@ export default function Requerimentos() {
                   onToggle={toggleSort}
                   className="w-[1%] whitespace-nowrap"
                 />
-                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
+                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -244,10 +244,10 @@ export default function Requerimentos() {
                   <TD className="whitespace-nowrap text-slate-600">
                     {formatDate(r.data_protocolo)}
                   </TD>
-                  <TD className="text-right">
+                  <TD>
                     {/* stopPropagation: os botões não devem abrir a ficha da linha */}
                     <div
-                      className="flex items-center justify-end gap-1"
+                      className="flex items-center gap-1"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {apensos.actions(r.id)}

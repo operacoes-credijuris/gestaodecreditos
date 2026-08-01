@@ -117,8 +117,10 @@ export default function Processos() {
   // Padrão ao abrir a página: mostra apenas processos ativos.
   const [filtroStatus, setFiltroStatus] = useState('ativo')
   // Ordenação padrão: data de aquisição, do mais antigo para o mais novo.
+  // ultima_movimentacao não é campo do processo — vem do cache do ADVBOX, e o
+  // comparador resolve pelo mapa (ver `lista`).
   const [sortBy, setSortBy] = useState<
-    'data_aquisicao' | 'expectativa_liquidacao'
+    'data_aquisicao' | 'expectativa_liquidacao' | 'ultima_movimentacao'
   >('data_aquisicao')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Partial<Processo> | null>(null)
@@ -154,7 +156,9 @@ export default function Processos() {
     setEditing(null)
   }
 
-  function toggleSort(col: 'data_aquisicao' | 'expectativa_liquidacao') {
+  function toggleSort(
+    col: 'data_aquisicao' | 'expectativa_liquidacao' | 'ultima_movimentacao',
+  ) {
     if (sortBy === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else {
       setSortBy(col)
@@ -198,15 +202,22 @@ export default function Processos() {
     let l = baseBusca
     if (filtroStatus !== 'todos') l = l.filter((p) => p.status === filtroStatus)
     const dir = sortDir === 'asc' ? 1 : -1
+    // A última movimentação não está no registro: resolve pelo mapa do ADVBOX.
+    // Ambos os formatos são ISO (YYYY-MM-DD...), então localeCompare ordena
+    // cronologicamente como texto.
+    const valor = (p: Processo) =>
+      sortBy === 'ultima_movimentacao'
+        ? (ultimaMov.data?.get(onlyDigits(p.numero_cnj)) ?? '')
+        : (p[sortBy] || '')
     return [...l].sort((a, b) => {
-      const av = a[sortBy] || ''
-      const bv = b[sortBy] || ''
+      const av = valor(a)
+      const bv = valor(b)
       if (!av && !bv) return 0
       if (!av) return 1 // datas vazias sempre por último
       if (!bv) return -1
       return av.localeCompare(bv) * dir
     })
-  }, [baseBusca, filtroStatus, sortBy, sortDir])
+  }, [baseBusca, filtroStatus, sortBy, sortDir, ultimaMov.data])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -328,9 +339,15 @@ export default function Processos() {
                   dir={sortDir}
                   onToggle={() => toggleSort('expectativa_liquidacao')}
                 />
-                <TH className="w-[1%] whitespace-nowrap">Últ. movimentação</TH>
+                <SortableTH
+                  label="Últ. movimentação"
+                  active={sortBy === 'ultima_movimentacao'}
+                  dir={sortDir}
+                  onToggle={() => toggleSort('ultima_movimentacao')}
+                  className="w-[1%] whitespace-nowrap"
+                />
                 <TH>Instrumento</TH>
-                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
+                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -404,10 +421,10 @@ export default function Processos() {
                         </div>
                       )}
                     </TD>
-                    <TD className="text-right">
+                    <TD>
                       {/* stopPropagation: os botões não devem abrir a ficha da linha */}
                       <div
-                        className="flex items-center justify-end gap-1"
+                        className="flex items-center gap-1"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {apensos.actions(p.id)}

@@ -483,7 +483,7 @@ export default function ContatosServentias() {
                 <TH>Telefone</TH>
                 <TH>WhatsApp</TH>
                 <TH>E-mail</TH>
-                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
+                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -531,8 +531,8 @@ export default function ContatosServentias() {
                       />
                     </TD>
                     {/* Ações: botões permanecem em linha única. */}
-                    <TD className="whitespace-nowrap text-right">
-                      <div className="flex justify-end gap-1">
+                    <TD className="whitespace-nowrap">
+                      <div className="flex gap-1">
                         <IconButton
                           label="Editar contatos"
                           icon={<Pencil className="h-4 w-4" />}

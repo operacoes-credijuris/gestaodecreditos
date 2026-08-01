@@ -457,7 +457,6 @@ function DjenConfig() {
             <Newspaper className="h-5 w-5 text-brand-600" /> Integração DJEN
           </span>
         }
-        description="Publicações puxadas por OAB, últimos 30 dias."
       />
       <CardBody>
         {isLoading ? (
