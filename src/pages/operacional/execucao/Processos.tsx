@@ -1,6 +1,8 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
 import { processosCrud, apensosCrud } from '@/lib/queries'
+import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { useApensosManager } from '@/components/Apensos'
 import type { Processo, StatusProcesso, Instrumento } from '@/lib/types'
@@ -29,7 +31,36 @@ import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { DrawerMovimentacoes } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
-import { formatCNJ, formatDate, vazioNull } from '@/lib/format'
+import { formatCNJ, formatDate, onlyDigits, vazioNull } from '@/lib/format'
+
+/**
+ * Data da última movimentação por processo, vinda do cache que a Edge Function
+ * advbox-movimentacoes mantém. Casa por dígitos porque o número que o ADVBOX
+ * devolve tem formatação própria, diferente do numero_cnj cadastrado aqui.
+ *
+ * Falha em silêncio (mapa vazio): a coluna mostra "—" e o resto da tabela segue
+ * funcionando — o cadastro de créditos não depende do ADVBOX estar de pé.
+ */
+function useUltimaMovimentacao() {
+  return useQuery({
+    queryKey: ['advbox_processo_status', 'mapa'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('advbox_processo_status')
+        .select('numero_processo, ultima_movimentacao')
+      const m = new Map<string, string>()
+      for (const r of (data ?? []) as {
+        numero_processo: string | null
+        ultima_movimentacao: string | null
+      }[]) {
+        const d = onlyDigits(r.numero_processo)
+        if (d.length >= 6 && r.ultima_movimentacao) m.set(d, r.ultima_movimentacao)
+      }
+      return m
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+}
 
 // Separa múltiplos nº RTDPJ (digitados com "e", vírgula, ";", "/" ou quebra)
 // para exibir um por linha.
@@ -61,7 +92,7 @@ const VAZIO: Partial<Processo> = {
 // Atualizar ao adicionar/remover colunas para a linha continuar ocupando a largura toda.
 // A tabela mostra só o essencial para escanear; a ficha completa (advogado,
 // tribunal, datas de liquidação etc.) abre no Drawer ao clicar na linha.
-const N_COLUNAS = 6
+const N_COLUNAS = 7
 
 // Bolinha de status ao lado do nº do processo — o status por extenso é
 // redundante com o filtro de pílulas acima da tabela; a cor basta.
@@ -80,6 +111,7 @@ export default function Processos() {
   const remove = useRemove()
   const toast = useToast()
   const apensos = useApensosManager('processo_id')
+  const ultimaMov = useUltimaMovimentacao()
 
   const [busca, setBusca] = useState('')
   // Padrão ao abrir a página: mostra apenas processos ativos.
@@ -296,6 +328,7 @@ export default function Processos() {
                   dir={sortDir}
                   onToggle={() => toggleSort('expectativa_liquidacao')}
                 />
+                <TH className="w-[1%] whitespace-nowrap">Últ. movimentação</TH>
                 <TH>Instrumento</TH>
                 <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
               </tr>
@@ -318,8 +351,13 @@ export default function Processos() {
                           )}
                         />
                         <div className="min-w-0">
-                          <span className="whitespace-nowrap">
-                            {formatCNJ(p.numero_cnj)}
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="whitespace-nowrap">
+                              {formatCNJ(p.numero_cnj)}
+                            </span>
+                            {/* Contador de apensos colado no número: pertence ao
+                                processo, não à coluna de ações. */}
+                            {apensos.contador(p.id)}
                           </span>
                           {/* Nomes completos: quebram em linhas em vez de truncar. */}
                           <div className="text-xs font-normal text-slate-500">
@@ -340,6 +378,15 @@ export default function Processos() {
                     </TD>
                     <TD className="whitespace-nowrap tabular-nums text-slate-600">
                       {formatDate(p.expectativa_liquidacao)}
+                    </TD>
+                    {/* Puxada do cache do ADVBOX, não digitada. Enquanto o mapa
+                        carrega mostra vazio em vez de "—", que seria mentira. */}
+                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                      {ultimaMov.isLoading
+                        ? ''
+                        : formatDate(
+                            ultimaMov.data?.get(onlyDigits(p.numero_cnj)) ?? null,
+                          )}
                     </TD>
                     {/* Sem nowrap: nº RTDPJ longo deve quebrar em vez de
                         alargar a tabela. O Badge é inline-flex e não quebra. */}

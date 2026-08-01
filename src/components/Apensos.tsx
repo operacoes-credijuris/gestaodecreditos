@@ -124,31 +124,45 @@ export function useApensosManager(parentField: ParentField) {
     }
   }
 
-  function actions(parentId: string) {
+  /**
+   * Contador de apensos: só o número e a seta, para ficar ao lado do número do
+   * processo. O rótulo "Apensos" saiu porque a posição já diz o que é — o
+   * contador pertence ao processo, não à coluna de ações.
+   * Devolve null quando não há apenso: contador zerado seria ruído em toda linha.
+   */
+  function contador(parentId: string) {
     const count = porPai.get(parentId)?.length ?? 0
+    if (count === 0) return null
     const aberto = !!expanded[parentId]
     return (
-      <>
-        {/* Botão rotulado: um novato entende "Apensos (2)" sem tooltip. */}
-        <button
-          type="button"
-          onClick={() => toggle(parentId)}
-          aria-expanded={aberto}
-          className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-brand-700"
-          title={aberto ? 'Ocultar apensos' : 'Ver apensos'}
-        >
-          Apensos
-          <span className="font-semibold tabular-nums">({count})</span>
-          <ChevronDown
-            className={cn('h-3.5 w-3.5 transition-transform', aberto && 'rotate-180')}
-          />
-        </button>
-        <IconButton
-          label="Adicionar apenso"
-          icon={<Plus className="h-4 w-4" />}
-          onClick={() => openNew(parentId)}
+      <button
+        type="button"
+        onClick={(e) => {
+          // A linha inteira abre a ficha; o contador não deve disparar isso.
+          e.stopPropagation()
+          toggle(parentId)
+        }}
+        aria-expanded={aberto}
+        aria-label={`${count} apenso${count > 1 ? 's' : ''} — ${aberto ? 'ocultar' : 'ver'}`}
+        title={`${count} apenso${count > 1 ? 's' : ''}`}
+        className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-xs font-normal text-slate-500 transition-colors hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+      >
+        <span className="tabular-nums">{count}</span>
+        <ChevronDown
+          className={cn('h-3 w-3 transition-transform', aberto && 'rotate-180')}
+          aria-hidden="true"
         />
-      </>
+      </button>
+    )
+  }
+
+  function actions(parentId: string) {
+    return (
+      <IconButton
+        label="Adicionar apenso"
+        icon={<Plus className="h-4 w-4" />}
+        onClick={() => openNew(parentId)}
+      />
     )
   }
 
@@ -393,5 +407,5 @@ export function useApensosManager(parentField: ParentField) {
     )
   }
 
-  return { actions, detailRow, modals }
+  return { contador, actions, detailRow, modals }
 }

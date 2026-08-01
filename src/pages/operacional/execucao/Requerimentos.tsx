@@ -227,8 +227,13 @@ export default function Requerimentos() {
                   {/* Sem nowrap na célula: o protocolo não quebra, mas o
                       subtítulo tribunal · órgão pode. */}
                   <TD className="font-medium text-slate-800">
-                    <span className="whitespace-nowrap">
-                      {r.numero_protocolo || '—'}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="whitespace-nowrap">
+                        {r.numero_protocolo || '—'}
+                      </span>
+                      {/* Mesmo padrão de Créditos: o contador de apensos fica
+                          colado no número, não na coluna de ações. */}
+                      {apensos.contador(r.id)}
                     </span>
                     <div className="text-xs font-normal text-slate-500">
                       {[r.tribunal_entidade, r.orgao].filter(Boolean).join(' · ') || '—'}
