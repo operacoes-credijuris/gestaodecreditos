@@ -14,7 +14,7 @@ import { serviceClient, getCaller } from "../_shared/auth.ts";
 import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import ExcelJS from 'npm:exceljs@4.4.0';
-import { encode as b64encode } from 'https://deno.land/std@0.168.0/encoding/base64.ts';
+import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
 
 // ----------------------------------------------------------------------------
 // Helpers compartilhados — em supabase/functions/_shared/credijuris.ts
@@ -992,7 +992,7 @@ Deno.serve(async (req) => {
     dados.data_pagamento = dataPagamento(T5);
 
     // 3d. Calibragem do deságio
-    const calc = calibrarDesagio({
+    const calc: any = calibrarDesagio({
       brutoTotal: Number(dados.bruto_total), honorarios: Number(dados.honorarios) || 0,
       ir: Number(dados.ir) || 0, inss: Number(dados.inss) || 0, T5, modelo: dados.modelo,
     });
