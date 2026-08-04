@@ -20,7 +20,6 @@ import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { Segmented } from '@/components/ui/Segmented'
 import { formatDate, formatNome, onlyDigits, sentenceCase } from '@/lib/format'
 
 interface MovLinha {
@@ -312,25 +311,44 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
 
   return (
     <section className="border-b border-slate-100 py-4 first:pt-0 last:border-b-0">
-      {/* Abas à esquerda; o filtro de situação vive à direita delas, discreto. */}
+      {/* As duas visões são títulos de seção, não um controle à parte: usam a
+          mesma tipografia de "Partes"/"Processo" (DrawerSection) e ficam
+          separadas por uma barra. A ativa fica na cor do título; a outra
+          recua. Contagem entre parênteses, como em "Apensos (3)". */}
       <div className="mb-3 flex items-center justify-between gap-3">
-        <Segmented
-          ariaLabel="Alternar entre movimentações e tarefas do processo"
-          items={[
-            {
-              key: 'movimentacoes',
-              label: 'Movimentações',
-              count: movs.data ? listaMov.length : undefined,
-            },
-            {
-              key: 'tarefas',
-              label: 'Tarefas',
-              count: tarefas.data ? listaTar.length : undefined,
-            },
-          ]}
-          value={aba}
-          onChange={(k) => setAba(k as typeof aba)}
-        />
+        <h3
+          role="group"
+          aria-label="Alternar entre movimentações e tarefas do processo"
+          className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider"
+        >
+          <button
+            type="button"
+            onClick={() => setAba('movimentacoes')}
+            aria-pressed={aba === 'movimentacoes'}
+            className={cn(
+              'transition-colors',
+              aba === 'movimentacoes'
+                ? 'text-brand-600'
+                : 'text-slate-400 hover:text-slate-600',
+            )}
+          >
+            Movimentações{movs.data ? ` (${listaMov.length})` : ''}
+          </button>
+          <span aria-hidden="true" className="font-normal text-slate-300">
+            |
+          </span>
+          <button
+            type="button"
+            onClick={() => setAba('tarefas')}
+            aria-pressed={aba === 'tarefas'}
+            className={cn(
+              'transition-colors',
+              aba === 'tarefas' ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600',
+            )}
+          >
+            Tarefas{tarefas.data ? ` (${listaTar.length})` : ''}
+          </button>
+        </h3>
         {aba === 'tarefas' && (
           <div
             role="group"
