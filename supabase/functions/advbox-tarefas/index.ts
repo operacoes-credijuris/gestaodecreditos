@@ -14,7 +14,7 @@
 // então descobrir as tarefas de UM processo exige baixar todas e casar por
 // lawsuits_id. Uma passada alimenta a ficha de todos os processos de uma vez.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { getCaller, serviceClient } from '../_shared/auth.ts'
+import { getCaller, isAdmin, serviceClient } from '../_shared/auth.ts'
 // Cliente compartilhado com throttle + retry/backoff: a API do ADVBOX responde
 // 429/503 sob carga e sem retry isso vira erro na tela do usuário.
 import {
@@ -28,6 +28,21 @@ const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 
 // Piso para considerar um número de processo válido (igual às outras funções).
 const MIN_DIGITS = 6
+
+/**
+ * Normaliza um nome para comparação: sem acento, sem caixa, sem espaço
+ * sobrando. O vínculo entre o perfil e o usuário do ADVBOX é feito pelo NOME
+ * (não existe id do ADVBOX em profiles), então a comparação precisa tolerar
+ * divergência de digitação.
+ */
+function normNome(s: unknown): string {
+  return String(s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
 
 /**
  * Normaliza uma data do ADVBOX para YYYY-MM-DD (coluna `date` do Postgres).
@@ -193,8 +208,9 @@ Deno.serve(async (req: Request) => {
     const cronSecret = Deno.env.get('CRON_SECRET')
     const headerSecret = req.headers.get('x-cron-secret')
     const autorizadoPorCron = !!cronSecret && headerSecret === cronSecret
+    let caller: Awaited<ReturnType<typeof getCaller>> = null
     if (!autorizadoPorCron) {
-      const caller = await getCaller(req)
+      caller = await getCaller(req)
       if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
     }
 
@@ -402,9 +418,46 @@ Deno.serve(async (req: Request) => {
     }
 
     // action === 'list'
+    //
+    // VISIBILIDADE: quem não é administrador vê apenas as tarefas em que é
+    // responsável. O corte é feito AQUI, no servidor — filtrar só na tela
+    // deixaria as tarefas dos colegas trafegarem até o navegador.
+    // Sem correspondência entre o nome do perfil e um usuário do ADVBOX, não
+    // devolve nada: na dúvida, não mostra. A tela avisa o que aconteceu, senão
+    // a pessoa conclui que está sem tarefas.
+    const svcPerfil = serviceClient()
+    const admin = await isAdmin(caller, svcPerfil)
+    let meuNomeAdvbox: string | null = null
+    if (!admin) {
+      const { data: perfil } = await svcPerfil
+        .from('profiles')
+        .select('nome')
+        .eq('id', caller?.id ?? '')
+        .maybeSingle()
+      const nomePerfil = String(perfil?.nome ?? '').trim()
+      const settings = (await getJson(ctx, '/settings')) as {
+        users?: { name?: unknown }[]
+      }
+      const achado = nomePerfil
+        ? (settings.users ?? []).find(
+            (u) => normNome(u.name) === normNome(nomePerfil),
+          )
+        : undefined
+      if (!achado) {
+        return jsonResponse({
+          tarefas: [],
+          total: 0,
+          restrito: true,
+          sem_correspondencia: true,
+          perfil_nome: nomePerfil || null,
+        })
+      }
+      meuNomeAdvbox = String(achado.name)
+    }
+
     const map = await processosCasaveis(ctx)
     const posts = await fetchAll(ctx, '/posts')
-    const tarefas = posts
+    const todas = posts
       .filter((p) => p.lawsuits_id != null && map.has(Number(p.lawsuits_id)))
       .map((p) => {
         const law = map.get(Number(p.lawsuits_id))
@@ -415,7 +468,12 @@ Deno.serve(async (req: Request) => {
           created_at: p.created_at ?? null,
         }
       })
-    return jsonResponse({ tarefas, total: tarefas.length })
+    const tarefas = admin
+      ? todas
+      : todas.filter((t) =>
+          t.responsaveis.some((r) => normNome(r) === normNome(meuNomeAdvbox)),
+        )
+    return jsonResponse({ tarefas, total: tarefas.length, restrito: !admin })
   } catch (err) {
     return jsonResponse({ error: (err as Error).message }, 500)
   }

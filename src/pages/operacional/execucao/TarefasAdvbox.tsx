@@ -38,6 +38,20 @@ interface TarefaAdvbox {
   urgent: boolean
   created_at: string | null
 }
+/**
+ * Resposta da action 'list'. Quem não é admin recebe só as próprias tarefas
+ * (o corte é no servidor); `sem_correspondencia` avisa que o nome do perfil
+ * não bate com nenhum usuário do ADVBOX — sem isso a lista viria vazia e a
+ * pessoa concluiria que está sem tarefas.
+ */
+interface RespostaTarefas {
+  tarefas: TarefaAdvbox[]
+  total?: number
+  restrito?: boolean
+  sem_correspondencia?: boolean
+  perfil_nome?: string | null
+}
+
 interface Opcoes {
   users: { id: number; name: string }[]
   tasks: { id: number; name: string }[]
@@ -157,7 +171,7 @@ export default function TarefasAdvbox() {
   const { data, isLoading, isError, error, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['advbox-tarefas'],
     queryFn: () =>
-      invokeFunction<{ tarefas: TarefaAdvbox[] }>('advbox-tarefas', { action: 'list' }),
+      invokeFunction<RespostaTarefas>('advbox-tarefas', { action: 'list' }),
     staleTime: 0,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
@@ -411,6 +425,22 @@ export default function TarefasAdvbox() {
         <Card>
           <ErrorState message={(error as Error)?.message} />
         </Card>
+      ) : data?.sem_correspondencia ? (
+        // Lista vazia por falta de vínculo, não por ausência de trabalho — dizer
+        // isso evita que a pessoa conclua que não tem tarefas.
+        <Card className="p-4">
+          <p className="text-sm font-medium text-slate-800">
+            Perfil não encontrado no ADVBOX
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            {data.perfil_nome
+              ? `O nome do seu perfil ("${data.perfil_nome}") não corresponde a nenhum usuário do ADVBOX`
+              : 'Seu perfil está sem nome cadastrado'}
+            , então não há como identificar quais tarefas são suas. Peça a um
+            administrador para acertar o nome em Configurações → Usuários,
+            exatamente como aparece no ADVBOX.
+          </p>
+        </Card>
       ) : vazio ? (
         <Card>
           <EmptyState title="Nenhuma tarefa" />
@@ -626,9 +656,15 @@ export function NovaTarefaModal({
     return users.find((u) => norm(u.name) === norm(nome)) ?? null
   }, [users, profile?.nome])
 
-  // O admin escolhe (cria tarefa em nome de outros). Quem não foi encontrado no
-  // ADVBOX também escolhe — travar num remetente inexistente impediria criar.
-  const escolheRemetente = isAdmin || !meuUsuarioAdvbox
+  // Só o admin escolhe o remetente (cria tarefa em nome de outros). Para os
+  // demais o remetente é sempre a própria pessoa, preenchido sozinho e sem
+  // campo na tela.
+  const escolheRemetente = isAdmin
+
+  // Não-admin sem correspondência no ADVBOX fica impedido de criar: deixá-lo
+  // escolher o remetente seria justamente permitir mandar tarefa em nome de
+  // outra pessoa, que é o que esta regra existe para impedir.
+  const semRemetente = !isAdmin && !meuUsuarioAdvbox
 
   useEffect(() => {
     if (!open || escolheRemetente || !meuUsuarioAdvbox) return
@@ -664,7 +700,12 @@ export function NovaTarefaModal({
           <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
-          <Button type="submit" form="form-nova-tarefa" loading={criar.isPending}>
+          <Button
+            type="submit"
+            form="form-nova-tarefa"
+            loading={criar.isPending}
+            disabled={semRemetente}
+          >
             Criar tarefa
           </Button>
         </>
@@ -674,6 +715,20 @@ export function NovaTarefaModal({
         <Loading label="Carregando opções do ADVBOX…" />
       ) : opcoes.isError ? (
         <ErrorState message={(opcoes.error as Error)?.message} />
+      ) : semRemetente ? (
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-slate-800">
+            Perfil não encontrado no ADVBOX
+          </p>
+          <p className="text-sm text-slate-600">
+            {profile?.nome
+              ? `O nome do seu perfil ("${profile.nome}") não corresponde a nenhum usuário do ADVBOX`
+              : 'Seu perfil está sem nome cadastrado'}
+            , e a tarefa precisa sair em seu nome. Peça a um administrador para
+            acertar o nome em Configurações → Usuários, exatamente como aparece
+            no ADVBOX.
+          </p>
+        </div>
       ) : (
         <form id="form-nova-tarefa" onSubmit={handleSubmit} className="space-y-4">
           <Field label="Processo" required>
