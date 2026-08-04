@@ -21,7 +21,7 @@ import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/Segmented'
-import { formatDate, onlyDigits } from '@/lib/format'
+import { formatDate, formatNome, onlyDigits, sentenceCase } from '@/lib/format'
 
 interface MovLinha {
   id: string
@@ -137,18 +137,62 @@ function TarefaItem({ t }: { t: TarefaLinha }) {
           </Badge>
         )}
       </div>
+      {/* CAIXA ALTA do ADVBOX pesa na leitura: tipo em sentence case e nomes
+          em Title Case (partículas minúsculas), como na página de Tarefas. */}
       <p className="mt-0.5 text-sm font-medium text-slate-800">
-        {t.tipo || 'Tarefa'}
+        {t.tipo ? sentenceCase(t.tipo) : 'Tarefa'}
       </p>
       {(t.date_deadline || resp.length > 0) && (
         <p className="mt-0.5 text-xs text-slate-500">
           {t.date_deadline && <>Prazo: {formatDate(t.date_deadline)}</>}
           {t.date_deadline && resp.length > 0 && ' · '}
-          {resp.length > 0 && resp.join(', ')}
+          {resp.length > 0 && resp.map((n) => formatNome(n)).join(', ')}
         </p>
       )}
       {t.notes && <TextoLongo texto={t.notes} />}
     </li>
+  )
+}
+
+/**
+ * Filtro de situação, à direita das abas: bolinha + rótulo minúsculo, sem
+ * caixa. Ligado = cor cheia; desligado = apagado. Deliberadamente discreto —
+ * é um refinamento da lista, não o assunto da seção. Os dois começam ligados,
+ * então nada fica escondido sem o usuário mandar.
+ */
+function ChipSituacao({
+  ativo,
+  cor,
+  rotulo,
+  qtd,
+  onClick,
+}: {
+  ativo: boolean
+  cor: string
+  rotulo: string
+  qtd: number
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={ativo}
+      title={ativo ? `Ocultar ${rotulo}` : `Mostrar ${rotulo}`}
+      className={cn(
+        'inline-flex items-center gap-1 text-[11px] transition-colors',
+        ativo
+          ? 'text-slate-500 hover:text-slate-700'
+          : 'text-slate-300 hover:text-slate-400',
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn('h-1.5 w-1.5 rounded-full', ativo ? cor : 'bg-slate-300')}
+      />
+      {rotulo}
+      <span className="tabular-nums">{qtd}</span>
+    </button>
   )
 }
 
@@ -173,7 +217,9 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
   // Mesma regra da Edge Function (>= 6 dígitos) — menos que isso é lixo.
   const habilitado = digits.length >= 6
   const [aba, setAba] = useState<'movimentacoes' | 'tarefas'>('movimentacoes')
-  const [filtro, setFiltro] = useState<'todas' | 'concluidas' | 'abertas'>('todas')
+  // Situações visíveis. Ambas ligadas por padrão: o filtro serve para tirar
+  // ruído quando o usuário quiser, não para esconder tarefas por conta própria.
+  const [mostrar, setMostrar] = useState({ concluidas: true, abertas: true })
   const [visiveisMov, setVisiveisMov] = useState(PAGINA)
   const [visiveisTar, setVisiveisTar] = useState(PAGINA)
   const qc = useQueryClient()
@@ -235,11 +281,11 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
   const listaMov = movs.data ?? []
   const listaTar = tarefas.data ?? []
 
-  const tarFiltradas = useMemo(() => {
-    if (filtro === 'concluidas') return listaTar.filter((t) => t.concluida)
-    if (filtro === 'abertas') return listaTar.filter((t) => !t.concluida)
-    return listaTar
-  }, [listaTar, filtro])
+  const tarFiltradas = useMemo(
+    () =>
+      listaTar.filter((t) => (t.concluida ? mostrar.concluidas : mostrar.abertas)),
+    [listaTar, mostrar],
+  )
 
   const contagens = useMemo(
     () => ({
@@ -254,24 +300,54 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
 
   return (
     <section className="border-b border-slate-100 py-4 first:pt-0 last:border-b-0">
-      <Segmented
-        ariaLabel="Alternar entre movimentações e tarefas do processo"
-        className="mb-3"
-        items={[
-          {
-            key: 'movimentacoes',
-            label: 'Movimentações',
-            count: movs.data ? listaMov.length : undefined,
-          },
-          {
-            key: 'tarefas',
-            label: 'Tarefas',
-            count: tarefas.data ? listaTar.length : undefined,
-          },
-        ]}
-        value={aba}
-        onChange={(k) => setAba(k as typeof aba)}
-      />
+      {/* Abas à esquerda; o filtro de situação vive à direita delas, discreto. */}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <Segmented
+          ariaLabel="Alternar entre movimentações e tarefas do processo"
+          items={[
+            {
+              key: 'movimentacoes',
+              label: 'Movimentações',
+              count: movs.data ? listaMov.length : undefined,
+            },
+            {
+              key: 'tarefas',
+              label: 'Tarefas',
+              count: tarefas.data ? listaTar.length : undefined,
+            },
+          ]}
+          value={aba}
+          onChange={(k) => setAba(k as typeof aba)}
+        />
+        {aba === 'tarefas' && (
+          <div
+            role="group"
+            aria-label="Filtrar tarefas por situação"
+            className="flex shrink-0 items-center gap-3"
+          >
+            <ChipSituacao
+              ativo={mostrar.concluidas}
+              cor="bg-emerald-500"
+              rotulo="concluídas"
+              qtd={contagens.concluidas}
+              onClick={() => {
+                setMostrar((m) => ({ ...m, concluidas: !m.concluidas }))
+                setVisiveisTar(PAGINA)
+              }}
+            />
+            <ChipSituacao
+              ativo={mostrar.abertas}
+              cor="bg-amber-400"
+              rotulo="em aberto"
+              qtd={contagens.abertas}
+              onClick={() => {
+                setMostrar((m) => ({ ...m, abertas: !m.abertas }))
+                setVisiveisTar(PAGINA)
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       {aba === 'movimentacoes' ? (
         movs.isLoading ? (
@@ -307,24 +383,9 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
         )
       ) : (
         <>
-          <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <Segmented
-              ariaLabel="Filtrar tarefas por situação"
-              items={[
-                { key: 'todas', label: 'Todas', count: listaTar.length },
-                { key: 'concluidas', label: 'Concluídas', count: contagens.concluidas },
-                { key: 'abertas', label: 'Em aberto', count: contagens.abertas },
-              ]}
-              value={filtro}
-              onChange={(k) => {
-                setFiltro(k as typeof filtro)
-                setVisiveisTar(PAGINA)
-              }}
-            />
-            {sync.isPending && (
-              <span className="text-xs text-slate-500">atualizando do ADVBOX…</span>
-            )}
-          </div>
+          {sync.isPending && listaTar.length > 0 && (
+            <p className="mb-2 text-[11px] text-slate-400">atualizando do ADVBOX…</p>
+          )}
 
           {tarefas.isLoading ? (
             <div className="space-y-2">
@@ -339,9 +400,11 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
                 ? sync.isPending
                   ? 'Buscando as tarefas deste processo no ADVBOX…'
                   : 'Nenhuma tarefa registrada no ADVBOX para este processo.'
-                : filtro === 'concluidas'
-                  ? 'Nenhuma tarefa concluída neste processo.'
-                  : 'Nenhuma tarefa em aberto neste processo.'}
+                : !mostrar.concluidas && !mostrar.abertas
+                  ? 'Nenhuma situação selecionada — clique em "concluídas" ou "em aberto".'
+                  : mostrar.concluidas
+                    ? 'Nenhuma tarefa concluída neste processo.'
+                    : 'Nenhuma tarefa em aberto neste processo.'}
             </p>
           ) : (
             <>
