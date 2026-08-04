@@ -119,13 +119,28 @@ function TarefaItem({ t }: { t: TarefaLinha }) {
   return (
     <li className="relative">
       <Bolinha tone={t.concluida ? 'bg-emerald-500' : 'bg-amber-400'} />
+      {/* Data e tarefa na mesma linha. A situação NÃO vira selo: a cor da
+          bolinha à esquerda já diz se está concluída ou em aberto, e repetir
+          isso num selo só pesava. CAIXA ALTA do ADVBOX pesa na leitura, então
+          o tipo vai em sentence case (mesma regra da página de Tarefas). */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-xs font-semibold tabular-nums text-slate-600">
-          {t.data ? formatDate(t.data) : 'sem data'}
+        <span className="text-sm text-slate-800">
+          {/* A cor da bolinha é a única pista visual da situação; para quem usa
+              leitor de tela, o estado vai aqui. */}
+          <span className="sr-only">
+            {t.concluida ? 'Concluída. ' : 'Em aberto. '}
+          </span>
+          <span className="text-xs font-semibold tabular-nums text-slate-600">
+            {t.data ? formatDate(t.data) : 'sem data'}
+          </span>
+          <span aria-hidden="true" className="mx-1.5 text-slate-300">
+            ·
+          </span>
+          <span className="font-medium">
+            {t.tipo ? sentenceCase(t.tipo) : 'Tarefa'}
+          </span>
         </span>
-        <Badge size="sm" tone={t.concluida ? 'green' : 'yellow'}>
-          {t.concluida ? 'Concluída' : 'Em aberto'}
-        </Badge>
+        {/* Só aparecem se a origem informar (o /history não traz). */}
         {t.urgent && (
           <Badge size="sm" tone="red">
             Urgente
@@ -137,11 +152,6 @@ function TarefaItem({ t }: { t: TarefaLinha }) {
           </Badge>
         )}
       </div>
-      {/* CAIXA ALTA do ADVBOX pesa na leitura: tipo em sentence case e nomes
-          em Title Case (partículas minúsculas), como na página de Tarefas. */}
-      <p className="mt-0.5 text-sm font-medium text-slate-800">
-        {t.tipo ? sentenceCase(t.tipo) : 'Tarefa'}
-      </p>
       {(t.date_deadline || resp.length > 0) && (
         <p className="mt-0.5 text-xs text-slate-500">
           {t.date_deadline && <>Prazo: {formatDate(t.date_deadline)}</>}
