@@ -1,10 +1,14 @@
 -- Cache das TAREFAS do ADVBOX, para a aba "Tarefas" da ficha de cada processo.
 --
--- Por que cache, e não consulta ao vivo: o endpoint /posts do ADVBOX não filtra
--- por processo — a única forma de saber as tarefas de UM processo é baixar
--- todas e casar por lawsuits_id. Fazer isso a cada abertura de ficha seria uma
--- varredura completa por clique. A Edge Function advbox-tarefas (action 'sync')
--- mantém esta tabela; a ficha lê daqui e abre instantânea.
+-- Fonte: GET /history/{lawsuit_id} do ADVBOX ("histórico de tarefas de um
+-- processo"), que devolve tarefas CONCLUÍDAS e pendentes (filtro status). O
+-- /posts, usado pela tela de Tarefas, só lista as em aberto — por isso não
+-- serve para histórico.
+--
+-- Por que cache, e não consulta ao vivo: descobrir o lawsuit_id de um processo
+-- exige varrer /lawsuits, e a ficha precisa abrir instantânea. A Edge Function
+-- advbox-tarefas (action 'sync') mantém esta tabela — por cron (todos os
+-- processos) e ao abrir a aba (só o processo em tela).
 --
 -- numero_digits: mesma decisão de advbox_movimentacoes (migração 0016) — o
 -- número vem do ADVBOX em formatos variados e PostgREST não normaliza em

@@ -52,11 +52,11 @@ const PAGINA = 50
 // Acima disso o texto abre recolhido (andamento de diário costuma ser longo).
 const CLAMP_CHARS = 280
 
-// Intervalo mínimo entre sincronizações de tarefas disparadas por abertura de
-// aba. O sync é uma varredura global do ADVBOX: repetir a cada ficha aberta
-// seria desperdício. Módulo (não componente) para valer entre fichas.
-const INTERVALO_SYNC_MS = 5 * 60 * 1000
-let ultimoSyncTarefas = 0
+// Intervalo mínimo entre sincronizações do MESMO processo. O sync é dirigido
+// ao processo aberto (o /history do ADVBOX é por lawsuit), então é barato e o
+// intervalo pode ser curto. Mapa de módulo para valer entre aberturas de ficha.
+const INTERVALO_SYNC_MS = 60 * 1000
+const ultimoSyncPorProcesso = new Map<string, number>()
 
 /** Trilho da linha do tempo: bolinha ancorada à esquerda do item. */
 function Bolinha({ tone }: { tone: string }) {
@@ -261,22 +261,24 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
   // Atualização em 2º plano ao entrar na aba: a lista já aparece com o cache e
   // se completa quando a varredura termina.
   const sync = useMutation({
-    mutationFn: () => invokeFunction('advbox-tarefas', { action: 'sync' }),
+    mutationFn: () =>
+      // `numero` restringe a varredura a este processo.
+      invokeFunction('advbox-tarefas', { action: 'sync', numero: digits }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['advbox_tarefas'] }),
     // Libera nova tentativa na próxima abertura em vez de esperar o intervalo.
     onError: () => {
-      ultimoSyncTarefas = 0
+      ultimoSyncPorProcesso.delete(digits)
     },
   })
 
   useEffect(() => {
     if (aba !== 'tarefas' || !habilitado) return
-    if (Date.now() - ultimoSyncTarefas < INTERVALO_SYNC_MS) return
+    if (Date.now() - (ultimoSyncPorProcesso.get(digits) ?? 0) < INTERVALO_SYNC_MS) return
     // Marca antes de disparar: evita disparo duplo no StrictMode.
-    ultimoSyncTarefas = Date.now()
+    ultimoSyncPorProcesso.set(digits, Date.now())
     sync.mutate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aba, habilitado])
+  }, [aba, habilitado, digits])
 
   const listaMov = movs.data ?? []
   const listaTar = tarefas.data ?? []
