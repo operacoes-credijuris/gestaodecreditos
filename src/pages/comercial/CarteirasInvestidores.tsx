@@ -1,34 +1,19 @@
 import { useMemo, useState } from 'react'
 import {
   Wallet,
-  Users,
-  Layers,
-  TrendingUp,
   Percent,
   Target,
   CheckCircle2,
   Clock,
   Hash,
+  CalendarDays,
 } from 'lucide-react'
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from 'recharts'
-import {
-  investidoresCrud,
-  cessoesCrud,
-  investimentosCrud,
-  processosCrud,
-} from '@/lib/queries'
+import { processosCrud } from '@/lib/queries'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { Card, CardHeader, CardBody } from '@/components/ui/Card'
+import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
+import { Select } from '@/components/ui/Field'
 import { Tabs } from '@/components/ui/Tabs'
 import {
   Table,
@@ -41,8 +26,7 @@ import {
   ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
-import { formatBRL, formatPercent, formatCNJ } from '@/lib/format'
-import { CHART } from '@/lib/chartColors'
+import { formatCNJ } from '@/lib/format'
 
 const TABS = [
   { key: 'individual', label: 'Individual' },
@@ -67,161 +51,7 @@ export default function CarteirasInvestidores() {
   )
 }
 
-// ----------------------- Consolidado -----------------------
-function Consolidado() {
-  const investidores = investidoresCrud.useList()
-  const investimentos = investimentosCrud.useList()
-  const cessoes = cessoesCrud.useList()
-
-  const loading =
-    investidores.isLoading || investimentos.isLoading || cessoes.isLoading
-  const erro = investidores.isError || investimentos.isError || cessoes.isError
-
-  const stats = useMemo(() => {
-    const invs = investimentos.data ?? []
-    const ativos = invs.filter((i) => i.status === 'ativo')
-    const totalInvestido = ativos.reduce((s, i) => s + (i.valor_investido || 0), 0)
-    const totalCessoes = (cessoes.data ?? []).reduce(
-      (s, c) => s + (c.valor_cessao || 0),
-      0,
-    )
-    const investidoresAtivos = new Set(ativos.map((i) => i.investidor_id)).size
-    const rentMedia =
-      totalInvestido > 0
-        ? ativos.reduce(
-            (s, i) => s + (i.rentabilidade_esperada || 0) * (i.valor_investido || 0),
-            0,
-          ) / totalInvestido
-        : 0
-
-    // Investido por investidor (top 8)
-    const porInvestidor = new Map<string, number>()
-    for (const i of ativos) {
-      porInvestidor.set(
-        i.investidor_id,
-        (porInvestidor.get(i.investidor_id) || 0) + (i.valor_investido || 0),
-      )
-    }
-    const nomeDe = (id: string) =>
-      (investidores.data ?? []).find((x) => x.id === id)?.nome ?? '—'
-    const chart = [...porInvestidor.entries()]
-      .map(([id, valor]) => ({ nome: nomeDe(id), valor }))
-      .sort((a, b) => b.valor - a.valor)
-      .slice(0, 8)
-
-    return {
-      totalInvestido,
-      totalCessoes,
-      investidoresAtivos,
-      rentMedia,
-      nCessoes: (cessoes.data ?? []).length,
-      chart,
-    }
-  }, [investimentos.data, cessoes.data, investidores.data])
-
-  if (loading) return <Loading />
-
-  // Sem este tratamento, erro em qualquer query aparecia como carteira "zerada".
-  if (erro) {
-    return (
-      <Card>
-        <ErrorState
-          message={
-            ((investidores.error ?? investimentos.error ?? cessoes.error) as Error)?.message
-          }
-          onRetry={() => {
-            investidores.refetch()
-            investimentos.refetch()
-            cessoes.refetch()
-          }}
-        />
-      </Card>
-    )
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Total investido (ativo)"
-          value={formatBRL(stats.totalInvestido)}
-          icon={<Wallet className="h-5 w-5" />}
-          tone="brand"
-        />
-        <StatCard
-          label="Investidores ativos"
-          value={stats.investidoresAtivos}
-          icon={<Users className="h-5 w-5" />}
-          tone="green"
-        />
-        <StatCard
-          label="Cessões na operação"
-          value={stats.nCessoes}
-          hint={formatBRL(stats.totalCessoes)}
-          icon={<Layers className="h-5 w-5" />}
-          tone="amber"
-        />
-        <StatCard
-          label="Rentabilidade média esperada"
-          value={formatPercent(stats.rentMedia)}
-          icon={<TrendingUp className="h-5 w-5" />}
-          tone="slate"
-        />
-      </div>
-
-      <Card>
-        <CardHeader title="Investido por investidor" />
-        <CardBody>
-          {stats.chart.length === 0 ? (
-            <EmptyState
-              title="Sem investimentos ainda"
-              description="Registre o primeiro aporte."
-            />
-          ) : (
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stats.chart} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART.grid} />
-                  <XAxis
-                    dataKey="nome"
-                    tick={{ fontSize: 11 }}
-                    interval={0}
-                    angle={-15}
-                    textAnchor="end"
-                    height={60}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={(v) => `R$${(v / 1000).toLocaleString('pt-BR')}k`}
-                  />
-                  <Tooltip
-                    formatter={(v: number) => formatBRL(v)}
-                    labelStyle={{ color: CHART.ink }}
-                  />
-                  <Bar dataKey="valor" fill={CHART.primary} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </CardBody>
-      </Card>
-    </div>
-  )
-}
-
-// ----------------------- Individual -----------------------
-// Carteira de UM investidor. Os investidores não têm cadastro próprio aqui:
-// são os CESSIONÁRIOS distintos que aparecem nos Créditos — quem comprou o
-// crédito é o investidor daquela operação.
-//
-// Os cinco cards financeiros ainda não têm de onde puxar número: o cadastro de
-// Créditos não guarda valor de aquisição, valor projetado nem recebimentos.
-// Exibir zero se leria como "não rendeu nada", então mostram travessão e dizem
-// do que dependem. "Nº de operações" e a tabela já saem com dado real.
-const AGUARDANDO = 'aguardando dados financeiros no cadastro de Créditos'
-
-// Separador entre grupos de colunas da carteira.
-const SEP = 'border-l border-slate-200'
+// ---------- Helpers comuns ----------
 
 // Normaliza para agrupar o mesmo investidor escrito de formas diferentes.
 function normNome(s: string): string {
@@ -232,6 +62,53 @@ function normNome(s: string): string {
     .trim()
     .toLowerCase()
 }
+
+/** "2026-08" -> "Agosto de 2026". */
+function rotuloMes(iso: string): string {
+  const [ano, mes] = iso.split('-').map(Number)
+  const s = new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+  })
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/** Rótulo de seção fora do card, como abertura da tabela. */
+function TituloSecao({ children }: { children: string }) {
+  return (
+    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+      {children}
+    </h3>
+  )
+}
+
+// ----------------------- Individual -----------------------
+// Carteira de UM investidor. Os investidores não têm cadastro próprio: são os
+// CESSIONÁRIOS distintos que aparecem nos Créditos.
+//
+// Fora o nº do processo, as colunas nascem vazias de propósito. O cadastro de
+// Créditos não guarda capital, valor de face nem recebimentos, e preencher por
+// semelhança de nome produziria número errado com cara de certo numa tabela
+// financeira. Cada coluna será ligada de propósito nas próximas edições.
+const AGUARDANDO = 'aguardando dados financeiros no cadastro de Créditos'
+
+// Separador entre grupos de colunas.
+const SEP = 'border-l border-slate-200'
+
+// Cor do TÍTULO de cada grupo. Tons escolhidos para contrastar com o fundo
+// claro do cabeçalho — amarelo e azul-claro puros ficariam ilegíveis.
+const COR_GRUPO = {
+  identificacao: 'text-sky-500',
+  tir: 'text-amber-600',
+  credito: 'text-emerald-600',
+  recebimento: 'text-red-600',
+  complementar: 'text-orange-600',
+  vivos: 'text-blue-800',
+  calculado: 'text-violet-500',
+}
+
+// Caixa alta desligada nos títulos dos grupos (o <thead> aplica uppercase).
+const GRUPO = 'text-[13px] font-bold normal-case tracking-normal'
 
 function Individual() {
   const processos = processosCrud.useList()
@@ -259,10 +136,7 @@ function Individual() {
   )
 
   // Mês de referência: sempre o corrente, sem opção de troca.
-  const mesRef = useMemo(() => {
-    const s = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
-    return s.charAt(0).toUpperCase() + s.slice(1)
-  }, [])
+  const mesRef = useMemo(() => rotuloMes(new Date().toLocaleDateString('sv-SE')), [])
 
   const carteira = useMemo(() => {
     if (!investidor) return []
@@ -286,9 +160,11 @@ function Individual() {
 
   return (
     <div className="space-y-5">
+      {/* Seletor à esquerda ocupando a folga, competência à direita: a linha
+          inteira é aproveitada em vez de deixar metade vazia. */}
       <Card className="p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="w-full sm:max-w-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0 flex-1 sm:max-w-md">
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
               Investidor
             </label>
@@ -302,12 +178,13 @@ function Individual() {
               vazio="Nenhum investidor nos créditos."
             />
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <div className="sm:text-right">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
               Mês de referência
-            </label>
+            </div>
             {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+              <CalendarDays className="h-4 w-4 text-slate-400" />
               {mesRef}
             </div>
           </div>
@@ -359,135 +236,257 @@ function Individual() {
         />
       </div>
 
+      <div>
+        <TituloSecao>Carteira</TituloSecao>
+        <Card>
+          {!investidor ? (
+            <EmptyState
+              title="Selecione um investidor"
+              description="Escolha acima para ver a carteira dele."
+            />
+          ) : carteira.length === 0 ? (
+            <EmptyState
+              title="Nenhum crédito"
+              description="Este investidor não consta como cessionário em nenhum crédito."
+            />
+          ) : (
+            <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:whitespace-nowrap [&_td]:text-[13px]">
+              <THead>
+                {/* Nível 1: grupos, cada um na sua cor. Nível 2: as colunas. */}
+                <tr>
+                  <TH colSpan={5} className={`${GRUPO} ${COR_GRUPO.identificacao}`}>
+                    Identificação · fixo na abertura
+                  </TH>
+                  <TH colSpan={2} className={`${SEP} ${GRUPO} ${COR_GRUPO.tir}`}>
+                    TIR obrigatório
+                  </TH>
+                  <TH colSpan={3} className={`${SEP} ${GRUPO} ${COR_GRUPO.credito}`}>
+                    Crédito · fixo na abertura
+                  </TH>
+                  <TH colSpan={3} className={`${SEP} ${GRUPO} ${COR_GRUPO.recebimento}`}>
+                    Recebimento principal
+                  </TH>
+                  <TH colSpan={1} className={`${SEP} ${GRUPO} ${COR_GRUPO.complementar}`}>
+                    Complementar
+                  </TH>
+                  <TH colSpan={4} className={`${SEP} ${GRUPO} ${COR_GRUPO.vivos}`}>
+                    Dados vivos · atualizar mensalmente
+                  </TH>
+                  <TH colSpan={7} className={`${SEP} ${GRUPO} ${COR_GRUPO.calculado}`}>
+                    Calculado automaticamente
+                  </TH>
+                </tr>
+                <tr className="border-t border-slate-200 text-[11px] font-medium normal-case tracking-normal text-slate-400">
+                  <TH>Nº processo</TH>
+                  <TH>Cedente</TH>
+                  <TH>Advogado</TH>
+                  <TH>Tipo de crédito</TH>
+                  <TH>Tribunal</TH>
+
+                  <TH className={SEP}>Capital investido</TH>
+                  <TH>Data da cessão</TH>
+
+                  <TH className={SEP}>Valor de face</TH>
+                  <TH>Data ref. do face</TH>
+                  <TH>Índice de atualização</TH>
+
+                  <TH className={SEP}>Data est. recebimento</TH>
+                  <TH>Já recebido</TH>
+                  <TH>Data receb. efetivo</TH>
+
+                  <TH className={SEP}>Valor est. complementar</TH>
+
+                  <TH className={SEP}>Status</TH>
+                  <TH>Estágio processual</TH>
+                  <TH>Providências / prox. passos</TH>
+                  <TH>Últ. atualização</TH>
+
+                  <TH className={SEP}>Valor projetado</TH>
+                  <TH>Status TIR</TH>
+                  <TH>TIR a.a.</TH>
+                  <TH>TIR mensal</TH>
+                  <TH>Dias em carteira</TH>
+                  <TH>Ganho projetado</TH>
+                  <TH>Retorno</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {carteira.map((p) => (
+                  <TR key={p.id}>
+                    {/* Identificação */}
+                    <TD className="font-medium text-slate-800">
+                      {formatCNJ(p.numero_cnj)}
+                    </TD>
+                    <TD />
+                    <TD />
+                    <TD />
+                    <TD />
+
+                    {/* TIR obrigatório */}
+                    <TD className={SEP} />
+                    <TD />
+
+                    {/* Crédito · fixo na abertura */}
+                    <TD className={SEP} />
+                    <TD />
+                    <TD />
+
+                    {/* Recebimento principal */}
+                    <TD className={SEP} />
+                    <TD />
+                    <TD />
+
+                    {/* Complementar */}
+                    <TD className={SEP} />
+
+                    {/* Dados vivos */}
+                    <TD className={SEP} />
+                    <TD />
+                    <TD />
+                    <TD />
+
+                    {/* Calculado automaticamente */}
+                    <TD className={SEP} />
+                    <TD />
+                    <TD />
+                    <TD />
+                    <TD />
+                    <TD />
+                    <TD />
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          )}
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+// ----------------------- Consolidado -----------------------
+// Panorama por mês: um investidor por linha, com o fechamento do período.
+// O recorte é pela DATA DE AQUISIÇÃO do crédito — "os processos fechados
+// naquele mês". Só investidor e quantidade de operações saem preenchidos; os
+// valores financeiros dependem de campos que o cadastro ainda não tem.
+function Consolidado() {
+  const processos = processosCrud.useList()
+  const [mes, setMes] = useState('todos')
+
+  // Meses presentes nos créditos, do mais recente ao mais antigo.
+  const meses = useMemo(() => {
+    const set = new Set<string>()
+    for (const p of processos.data ?? []) {
+      const ym = (p.data_aquisicao ?? '').slice(0, 7)
+      if (ym.length === 7) set.add(ym)
+    }
+    return [...set].sort().reverse()
+  }, [processos.data])
+
+  const linhas = useMemo(() => {
+    const noPeriodo = (processos.data ?? []).filter((p) =>
+      mes === 'todos' ? true : (p.data_aquisicao ?? '').slice(0, 7) === mes,
+    )
+    const porInvestidor = new Map<string, { nome: string; operacoes: number }>()
+    for (const p of noPeriodo) {
+      const nome = (p.cessionario ?? '').trim()
+      if (!nome) continue
+      const chave = normNome(nome)
+      const atual = porInvestidor.get(chave)
+      if (atual) atual.operacoes += 1
+      else porInvestidor.set(chave, { nome, operacoes: 1 })
+    }
+    return [...porInvestidor.values()].sort((a, b) =>
+      a.nome.localeCompare(b.nome, 'pt-BR'),
+    )
+  }, [processos.data, mes])
+
+  const totalOperacoes = linhas.reduce((s, l) => s + l.operacoes, 0)
+
+  if (processos.isLoading) return <Loading label="Carregando créditos…" />
+  if (processos.isError) {
+    return (
       <Card>
-        <CardHeader
-          title={investidor ? `Carteira — ${investidor}` : 'Carteira do investidor'}
+        <ErrorState
+          message={(processos.error as Error)?.message}
+          onRetry={() => processos.refetch()}
         />
-        {!investidor ? (
-          <EmptyState
-            title="Selecione um investidor"
-            description="Escolha acima para ver a carteira dele."
-          />
-        ) : carteira.length === 0 ? (
-          <EmptyState
-            title="Nenhum crédito"
-            description="Este investidor não consta como cessionário em nenhum crédito."
-          />
-        ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:whitespace-nowrap [&_td]:text-[13px]">
-            <THead>
-              {/* Nível 1: os grupos. Nível 2: as colunas. A borda à esquerda
-                  marca onde um grupo começa — com 25 colunas, sem isso o
-                  cabeçalho vira uma fileira indistinta. */}
-              <tr>
-                <TH colSpan={5}>Identificação</TH>
-                <TH colSpan={2} className={SEP}>
-                  TIR obrigatório
-                </TH>
-                <TH colSpan={3} className={SEP}>
-                  Crédito · fixo na abertura
-                </TH>
-                <TH colSpan={3} className={SEP}>
-                  Recebimento principal
-                </TH>
-                <TH colSpan={1} className={SEP}>
-                  Complementar
-                </TH>
-                <TH colSpan={4} className={SEP}>
-                  Dados vivos · atualizar mensalmente
-                </TH>
-                <TH colSpan={7} className={SEP}>
-                  Calculado automaticamente
-                </TH>
-              </tr>
-              <tr className="border-t border-slate-200 text-[11px] font-medium normal-case tracking-normal text-slate-400">
-                <TH>Nº processo</TH>
-                <TH>Cedente</TH>
-                <TH>Advogado</TH>
-                <TH>Tipo de crédito</TH>
-                <TH>Tribunal</TH>
-
-                <TH className={SEP}>Capital investido</TH>
-                <TH>Data da cessão</TH>
-
-                <TH className={SEP}>Valor de face</TH>
-                <TH>Data ref. do face</TH>
-                <TH>Índice de atualização</TH>
-
-                <TH className={SEP}>Data est. recebimento</TH>
-                <TH>Já recebido</TH>
-                <TH>Data receb. efetivo</TH>
-
-                <TH className={SEP}>Valor est. complementar</TH>
-
-                <TH className={SEP}>Status</TH>
-                <TH>Estágio processual</TH>
-                <TH>Providências / prox. passos</TH>
-                <TH>Últ. atualização</TH>
-
-                <TH className={SEP}>Valor projetado</TH>
-                <TH>Status TIR</TH>
-                <TH>TIR a.a.</TH>
-                <TH>TIR mensal</TH>
-                <TH>Dias em carteira</TH>
-                <TH>Ganho projetado</TH>
-                <TH>Retorno</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {/* Só o nº do processo é preenchido. As demais colunas ficam
-                  vazias de propósito: o que existe hoje no cadastro não
-                  corresponde com segurança a esses campos, e preencher por
-                  semelhança de nome produziria número errado numa tabela
-                  financeira. Vão ser ligadas uma a uma nas próximas edições. */}
-              {carteira.map((p) => (
-                <TR key={p.id}>
-                  {/* Identificação */}
-                  <TD className="font-medium text-slate-800">
-                    {formatCNJ(p.numero_cnj)}
-                  </TD>
-                  <TD />
-                  <TD />
-                  <TD />
-                  <TD />
-
-                  {/* TIR obrigatório */}
-                  <TD className={SEP} />
-                  <TD />
-
-                  {/* Crédito · fixo na abertura */}
-                  <TD className={SEP} />
-                  <TD />
-                  <TD />
-
-                  {/* Recebimento principal */}
-                  <TD className={SEP} />
-                  <TD />
-                  <TD />
-
-                  {/* Complementar */}
-                  <TD className={SEP} />
-
-                  {/* Dados vivos */}
-                  <TD className={SEP} />
-                  <TD />
-                  <TD />
-                  <TD />
-
-                  {/* Calculado automaticamente */}
-                  <TD className={SEP} />
-                  <TD />
-                  <TD />
-                  <TD />
-                  <TD />
-                  <TD />
-                  <TD />
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        )}
       </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <Card className="p-4">
+        <div className="w-full sm:max-w-xs">
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Filtrar por mês
+          </label>
+          <Select value={mes} onChange={(e) => setMes(e.target.value)}>
+            <option value="todos">Tudo</option>
+            {meses.map((m) => (
+              <option key={m} value={m}>
+                {rotuloMes(m)}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </Card>
+
+      <div>
+        <TituloSecao>
+          {mes === 'todos' ? 'Consolidado — todos os períodos' : `Consolidado — ${rotuloMes(mes)}`}
+        </TituloSecao>
+        <Card>
+          {linhas.length === 0 ? (
+            <EmptyState
+              title="Nenhum crédito no período"
+              description="Não há créditos adquiridos no mês selecionado."
+            />
+          ) : (
+            <Table className="[&_th]:px-3 [&_td]:px-3 [&_td]:text-[13px]">
+              <THead>
+                <tr>
+                  <TH>Investidor</TH>
+                  <TH className="text-right">Capital investido (R$)</TH>
+                  <TH className="text-right">A receber (R$)</TH>
+                  <TH className="text-right">Já recebido (R$)</TH>
+                  <TH className="text-right">Retorno (%)</TH>
+                  <TH className="text-right">TIR a.a.</TH>
+                  <TH className="text-right">Qtde. operações</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {linhas.map((l) => (
+                  <TR key={l.nome}>
+                    <TD className="font-medium text-slate-800">{l.nome}</TD>
+                    <TD />
+                    <TD />
+                    <TD />
+                    <TD />
+                    <TD />
+                    <TD className="text-right tabular-nums text-slate-700">
+                      {l.operacoes}
+                    </TD>
+                  </TR>
+                ))}
+                {/* Fechamento da carteira no período. */}
+                <TR className="bg-slate-50 font-semibold">
+                  <TD className="text-slate-800">Total da carteira</TD>
+                  <TD />
+                  <TD />
+                  <TD />
+                  <TD />
+                  <TD />
+                  <TD className="text-right tabular-nums text-slate-800">
+                    {totalOperacoes}
+                  </TD>
+                </TR>
+              </TBody>
+            </Table>
+          )}
+        </Card>
+      </div>
     </div>
   )
 }
@@ -503,4 +502,3 @@ function DadosPessoais() {
     </Card>
   )
 }
-
