@@ -18,8 +18,11 @@ verify_jwt = true
 [functions.salvar-token-advbox]
 verify_jwt = true
 
+# Chamada tanto pelo app (JWT do usuário) quanto pelo cron (x-cron-secret, na
+# action 'sync' que alimenta o cache das fichas); a própria função valida a
+# autorização, por isso verify_jwt = false.
 [functions.advbox-tarefas]
-verify_jwt = true
+verify_jwt = false
 
 # Chamada tanto pelo app (JWT do usuário) quanto pelo cron (x-cron-secret);
 # a própria função valida a autorização, por isso verify_jwt = false.

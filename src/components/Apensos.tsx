@@ -9,7 +9,7 @@ import { Field, Input } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
-import { DrawerMovimentacoes } from '@/components/Movimentacoes'
+import { DrawerHistorico } from '@/components/Movimentacoes'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 import { formatCNJ, vazioNull } from '@/lib/format'
@@ -399,7 +399,7 @@ export function useApensosManager(parentField: ParentField) {
               </DrawerSection>
 
               {/* Aqui o apenso é o principal dos próprios autos. */}
-              <DrawerMovimentacoes numero={ficha.numero} />
+              <DrawerHistorico numero={ficha.numero} />
             </>
           )}
         </Drawer>

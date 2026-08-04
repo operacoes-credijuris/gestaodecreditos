@@ -1,28 +1,44 @@
-// Movimentações de UM processo dentro da ficha lateral.
+// Histórico de UM processo dentro da ficha lateral, em duas abas:
+// "Movimentações" (andamentos do tribunal) e "Tarefas" (o que a equipe fez ou
+// tem para fazer naquele processo, do ADVBOX).
 //
-// Separação total por autos: a ficha do principal mostra SÓ os andamentos do
-// principal, e a ficha de cada apenso mostra só os dele (o apenso é um processo
-// por direito próprio — decisão de produto, 2026-07). É a Edge Function
-// advbox-movimentacoes que garante isso, carimbando cada andamento com o número
-// do processo A QUE ELE PERTENCE, mesmo quando o ADVBOX entrega andamentos do
-// apenso dentro do feed do principal.
+// Separação total por autos: a ficha do principal mostra SÓ o que é do
+// principal, e a ficha de cada apenso só o dela (o apenso é um processo por
+// direito próprio — decisão de produto, 2026-07). Vale para os dois: cada
+// registro é carimbado com o número do processo A QUE ELE PERTENCE.
 //
-// Lê do cache local (public.advbox_movimentacoes), que guarda o histórico
-// INTEIRO — mantido pelo cron e pela sincronização da aba Movimentações. Esta
-// ficha só consulta; não dispara sincronização, para abrir a ficha não custar
-// uma varredura do ADVBOX.
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+// Ambas as abas leem de cache local (public.advbox_movimentacoes e
+// public.advbox_tarefas), então a ficha abre instantânea. Quem mantém o cache:
+//  - Movimentações: cron + a sincronização da aba Movimentações. A ficha só lê.
+//  - Tarefas: cron + esta ficha, ao abrir a aba (o /posts do ADVBOX não filtra
+//    por processo, então a varredura é global e vale para todas as fichas — por
+//    isso o intervalo mínimo entre disparos).
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
-import { DrawerSection } from '@/components/ui/Drawer'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { Segmented } from '@/components/ui/Segmented'
 import { formatDate, onlyDigits } from '@/lib/format'
 
 interface MovLinha {
   id: string
   data: string | null
   conteudo: string | null
+}
+
+interface TarefaLinha {
+  id: string
+  tipo: string | null
+  data: string | null
+  date_deadline: string | null
+  notes: string | null
+  responsaveis: string[] | null
+  important: boolean
+  urgent: boolean
+  concluida: boolean
 }
 
 // Teto da consulta. PostgREST corta em 1000 de qualquer forma; explícito aqui
@@ -36,27 +52,31 @@ const PAGINA = 50
 // Acima disso o texto abre recolhido (andamento de diário costuma ser longo).
 const CLAMP_CHARS = 280
 
-// Um andamento na linha do tempo. Cada item controla o próprio "ler mais" —
-// estado global de expansão obrigaria a rolar a lista toda ao alternar um.
-function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
-  const [expandido, setExpandido] = useState(false)
-  const texto = mov.conteudo ?? ''
-  const longo = texto.length > CLAMP_CHARS
+// Intervalo mínimo entre sincronizações de tarefas disparadas por abertura de
+// aba. O sync é uma varredura global do ADVBOX: repetir a cada ficha aberta
+// seria desperdício. Módulo (não componente) para valer entre fichas.
+const INTERVALO_SYNC_MS = 5 * 60 * 1000
+let ultimoSyncTarefas = 0
 
+/** Trilho da linha do tempo: bolinha ancorada à esquerda do item. */
+function Bolinha({ tone }: { tone: string }) {
   return (
-    <li className="relative">
-      {/* Bolinha sobre o trilho; a borda branca impede a linha de atravessá-la.
-          A primeira (andamento mais recente) é destacada para ancorar o olhar. */}
-      <span
-        aria-hidden="true"
-        className={cn(
-          'absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-white',
-          primeiro ? 'bg-brand-500' : 'bg-slate-300',
-        )}
-      />
-      <div className="text-xs font-semibold tabular-nums text-slate-600">
-        {mov.data ? formatDate(mov.data) : 'sem data'}
-      </div>
+    <span
+      aria-hidden="true"
+      className={cn(
+        'absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-white',
+        tone,
+      )}
+    />
+  )
+}
+
+/** Texto longo com "ler mais" próprio — estado por item, não global. */
+function TextoLongo({ texto }: { texto: string }) {
+  const [expandido, setExpandido] = useState(false)
+  const longo = texto.length > CLAMP_CHARS
+  return (
+    <>
       <p
         className={cn(
           'mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700',
@@ -74,19 +94,93 @@ function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
           {expandido ? 'ler menos' : 'ler mais'}
         </button>
       )}
+    </>
+  )
+}
+
+// Um andamento na linha do tempo. A primeira (mais recente) é destacada para
+// ancorar o olhar.
+function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
+  return (
+    <li className="relative">
+      <Bolinha tone={primeiro ? 'bg-brand-500' : 'bg-slate-300'} />
+      <div className="text-xs font-semibold tabular-nums text-slate-600">
+        {mov.data ? formatDate(mov.data) : 'sem data'}
+      </div>
+      <TextoLongo texto={mov.conteudo ?? ''} />
     </li>
   )
 }
 
-/** Seção "Movimentações" da ficha: os andamentos DESTE número, e só dele. */
-export function DrawerMovimentacoes({ numero }: { numero?: string | null }) {
-  const digits = onlyDigits(numero)
-  const [visiveis, setVisiveis] = useState(PAGINA)
+// Uma tarefa na linha do tempo. A cor da bolinha e o selo dizem o estado —
+// verde para feita, âmbar para pendente.
+function TarefaItem({ t }: { t: TarefaLinha }) {
+  const resp = (t.responsaveis ?? []).filter(Boolean)
+  return (
+    <li className="relative">
+      <Bolinha tone={t.concluida ? 'bg-emerald-500' : 'bg-amber-400'} />
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-xs font-semibold tabular-nums text-slate-600">
+          {t.data ? formatDate(t.data) : 'sem data'}
+        </span>
+        <Badge size="sm" tone={t.concluida ? 'green' : 'yellow'}>
+          {t.concluida ? 'Concluída' : 'Em aberto'}
+        </Badge>
+        {t.urgent && (
+          <Badge size="sm" tone="red">
+            Urgente
+          </Badge>
+        )}
+        {t.important && (
+          <Badge size="sm" tone="orange">
+            Importante
+          </Badge>
+        )}
+      </div>
+      <p className="mt-0.5 text-sm font-medium text-slate-800">
+        {t.tipo || 'Tarefa'}
+      </p>
+      {(t.date_deadline || resp.length > 0) && (
+        <p className="mt-0.5 text-xs text-slate-500">
+          {t.date_deadline && <>Prazo: {formatDate(t.date_deadline)}</>}
+          {t.date_deadline && resp.length > 0 && ' · '}
+          {resp.length > 0 && resp.join(', ')}
+        </p>
+      )}
+      {t.notes && <TextoLongo texto={t.notes} />}
+    </li>
+  )
+}
 
-  const q = useQuery({
+/** Botão "Mostrar mais" da renderização progressiva. */
+function MostrarMais({ restantes, onClick }: { restantes: number; onClick: () => void }) {
+  if (restantes <= 0) return null
+  return (
+    <div className="mt-3">
+      <Button size="sm" variant="outline" onClick={onClick}>
+        Mostrar mais ({restantes} restantes)
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Seção final da ficha: movimentações e tarefas do processo, em abas.
+ * `numero` é o número do próprio processo (crédito, requerimento ou apenso).
+ */
+export function DrawerHistorico({ numero }: { numero?: string | null }) {
+  const digits = onlyDigits(numero)
+  // Mesma regra da Edge Function (>= 6 dígitos) — menos que isso é lixo.
+  const habilitado = digits.length >= 6
+  const [aba, setAba] = useState<'movimentacoes' | 'tarefas'>('movimentacoes')
+  const [filtro, setFiltro] = useState<'todas' | 'concluidas' | 'abertas'>('todas')
+  const [visiveisMov, setVisiveisMov] = useState(PAGINA)
+  const [visiveisTar, setVisiveisTar] = useState(PAGINA)
+  const qc = useQueryClient()
+
+  const movs = useQuery({
     queryKey: ['advbox_movimentacoes', 'ficha', digits],
-    // Mesma regra da Edge Function (>= 6 dígitos) — menos que isso é lixo.
-    enabled: digits.length >= 6,
+    enabled: habilitado,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('advbox_movimentacoes')
@@ -100,55 +194,176 @@ export function DrawerMovimentacoes({ numero }: { numero?: string | null }) {
     },
   })
 
-  const lista = q.data ?? []
-  const mostradas = lista.slice(0, visiveis)
-  const restantes = lista.length - mostradas.length
-  const titulo =
-    'Movimentações' +
-    (q.data ? ` (${lista.length === LIMITE ? `${LIMITE}+` : lista.length})` : '')
+  const tarefas = useQuery({
+    queryKey: ['advbox_tarefas', 'ficha', digits],
+    enabled: habilitado,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('advbox_tarefas')
+        .select(
+          'id, tipo, data, date_deadline, notes, responsaveis, important, urgent, concluida',
+        )
+        .eq('numero_digits', digits)
+        // nullsFirst: false — tarefa sem data vai para o fim, não para o topo.
+        .order('data', { ascending: false, nullsFirst: false })
+        .limit(LIMITE)
+      if (error) throw new Error(error.message)
+      return (data ?? []) as TarefaLinha[]
+    },
+  })
+
+  // Atualização em 2º plano ao entrar na aba: a lista já aparece com o cache e
+  // se completa quando a varredura termina.
+  const sync = useMutation({
+    mutationFn: () => invokeFunction('advbox-tarefas', { action: 'sync' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['advbox_tarefas'] }),
+    // Libera nova tentativa na próxima abertura em vez de esperar o intervalo.
+    onError: () => {
+      ultimoSyncTarefas = 0
+    },
+  })
+
+  useEffect(() => {
+    if (aba !== 'tarefas' || !habilitado) return
+    if (Date.now() - ultimoSyncTarefas < INTERVALO_SYNC_MS) return
+    // Marca antes de disparar: evita disparo duplo no StrictMode.
+    ultimoSyncTarefas = Date.now()
+    sync.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aba, habilitado])
+
+  const listaMov = movs.data ?? []
+  const listaTar = tarefas.data ?? []
+
+  const tarFiltradas = useMemo(() => {
+    if (filtro === 'concluidas') return listaTar.filter((t) => t.concluida)
+    if (filtro === 'abertas') return listaTar.filter((t) => !t.concluida)
+    return listaTar
+  }, [listaTar, filtro])
+
+  const contagens = useMemo(
+    () => ({
+      concluidas: listaTar.filter((t) => t.concluida).length,
+      abertas: listaTar.filter((t) => !t.concluida).length,
+    }),
+    [listaTar],
+  )
+
+  const movMostradas = listaMov.slice(0, visiveisMov)
+  const tarMostradas = tarFiltradas.slice(0, visiveisTar)
 
   return (
-    <DrawerSection title={titulo}>
-      <div className="col-span-2">
-        {q.isLoading ? (
+    <section className="border-b border-slate-100 py-4 first:pt-0 last:border-b-0">
+      <Segmented
+        ariaLabel="Alternar entre movimentações e tarefas do processo"
+        className="mb-3"
+        items={[
+          {
+            key: 'movimentacoes',
+            label: 'Movimentações',
+            count: movs.data ? listaMov.length : undefined,
+          },
+          {
+            key: 'tarefas',
+            label: 'Tarefas',
+            count: tarefas.data ? listaTar.length : undefined,
+          },
+        ]}
+        value={aba}
+        onChange={(k) => setAba(k as typeof aba)}
+      />
+
+      {aba === 'movimentacoes' ? (
+        movs.isLoading ? (
           <div className="space-y-2">
             <div className="skeleton h-12 w-full rounded-lg" />
             <div className="skeleton h-12 w-11/12 rounded-lg" />
           </div>
-        ) : q.isError ? (
-          <p className="text-sm text-red-600">{(q.error as Error).message}</p>
-        ) : lista.length === 0 ? (
+        ) : movs.isError ? (
+          <p className="text-sm text-red-600">{(movs.error as Error).message}</p>
+        ) : listaMov.length === 0 ? (
           <p className="text-sm text-slate-500">
             Nenhuma movimentação sincronizada para este processo. O histórico é
             atualizado pelo cron e ao abrir a aba Movimentações.
           </p>
         ) : (
           <>
-            {lista.length === LIMITE && (
+            {listaMov.length === LIMITE && (
               <p className="mb-3 text-xs text-slate-500">
                 Mostrando as {LIMITE} mais recentes.
               </p>
             )}
             {/* Linha do tempo: trilho à esquerda, mais recente no topo. */}
             <ol className="ml-1.5 space-y-4 border-l border-slate-200 pl-4">
-              {mostradas.map((m, i) => (
+              {movMostradas.map((m, i) => (
                 <MovItem key={m.id} mov={m} primeiro={i === 0} />
               ))}
             </ol>
-            {restantes > 0 && (
-              <div className="mt-3">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setVisiveis((v) => v + PAGINA * 2)}
-                >
-                  Mostrar mais ({restantes} restantes)
-                </Button>
-              </div>
-            )}
+            <MostrarMais
+              restantes={listaMov.length - movMostradas.length}
+              onClick={() => setVisiveisMov((v) => v + PAGINA * 2)}
+            />
           </>
-        )}
-      </div>
-    </DrawerSection>
+        )
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Segmented
+              ariaLabel="Filtrar tarefas por situação"
+              items={[
+                { key: 'todas', label: 'Todas', count: listaTar.length },
+                { key: 'concluidas', label: 'Concluídas', count: contagens.concluidas },
+                { key: 'abertas', label: 'Em aberto', count: contagens.abertas },
+              ]}
+              value={filtro}
+              onChange={(k) => {
+                setFiltro(k as typeof filtro)
+                setVisiveisTar(PAGINA)
+              }}
+            />
+            {sync.isPending && (
+              <span className="text-xs text-slate-500">atualizando do ADVBOX…</span>
+            )}
+          </div>
+
+          {tarefas.isLoading ? (
+            <div className="space-y-2">
+              <div className="skeleton h-12 w-full rounded-lg" />
+              <div className="skeleton h-12 w-11/12 rounded-lg" />
+            </div>
+          ) : tarefas.isError ? (
+            <p className="text-sm text-red-600">{(tarefas.error as Error).message}</p>
+          ) : tarFiltradas.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              {listaTar.length === 0
+                ? sync.isPending
+                  ? 'Buscando as tarefas deste processo no ADVBOX…'
+                  : 'Nenhuma tarefa registrada no ADVBOX para este processo.'
+                : filtro === 'concluidas'
+                  ? 'Nenhuma tarefa concluída neste processo.'
+                  : 'Nenhuma tarefa em aberto neste processo.'}
+            </p>
+          ) : (
+            <>
+              <ol className="ml-1.5 space-y-4 border-l border-slate-200 pl-4">
+                {tarMostradas.map((t) => (
+                  <TarefaItem key={t.id} t={t} />
+                ))}
+              </ol>
+              <MostrarMais
+                restantes={tarFiltradas.length - tarMostradas.length}
+                onClick={() => setVisiveisTar((v) => v + PAGINA * 2)}
+              />
+            </>
+          )}
+          {/* Falha de sincronização não esconde o cache: avisa e segue. */}
+          {sync.isError && listaTar.length > 0 && (
+            <p className="mt-3 text-xs text-amber-700">
+              Não foi possível atualizar do ADVBOX agora: {(sync.error as Error).message}
+            </p>
+          )}
+        </>
+      )}
+    </section>
   )
 }

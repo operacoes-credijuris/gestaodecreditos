@@ -28,7 +28,7 @@ import {
 import { IconButton } from '@/components/ui/IconButton'
 import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
-import { DrawerMovimentacoes } from '@/components/Movimentacoes'
+import { DrawerHistorico } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
 import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
 import { formatCNJ, formatDate, onlyDigits, vazioNull } from '@/lib/format'
@@ -735,7 +735,7 @@ export default function Processos() {
             {/* Histórico integral do ADVBOX — SÓ do principal. Andamento de
                 apenso fica na ficha do apenso (clique no card dele): autos
                 próprios, sem mistura. */}
-            <DrawerMovimentacoes numero={detalhe.numero_cnj} />
+            <DrawerHistorico numero={detalhe.numero_cnj} />
           </>
         )}
       </Drawer>
