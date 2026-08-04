@@ -470,7 +470,13 @@ function Consolidado() {
                     </TD>
                   </TR>
                 ))}
-                {/* Fechamento da carteira no período. */}
+                {/* Fechamento da carteira no período.
+                    REGRA DEFINIDA (ago/2026): Capital investido, A receber e
+                    Já recebido são SOMA. Retorno (%) e TIR a.a. são MÉDIA
+                    PONDERADA PELO CAPITAL INVESTIDO — somar percentual não
+                    produz número com significado (12% + 15% não é 27% de
+                    carteira), e a média simples daria a um aporte de R$ 10 mil
+                    o mesmo peso de um de R$ 500 mil. */}
                 <TR className="bg-slate-50 font-semibold">
                   <TD className="text-slate-800">Total da carteira</TD>
                   <TD />
