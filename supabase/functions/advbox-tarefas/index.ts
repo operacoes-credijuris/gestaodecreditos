@@ -21,7 +21,6 @@ import {
   fetchAll,
   getAdvboxCtx,
   getJson,
-  pickArray,
   type AdvboxCtx,
 } from '../_shared/advbox.ts'
 
@@ -117,6 +116,11 @@ async function numerosCadastrados(): Promise<Set<string>> {
     svc.from('apensos').select('numero'),
     svc.from('requerimentos').select('numero_protocolo'),
   ])
+  // Falhar alto: um erro engolido aqui devolveria conjunto vazio, o que faria
+  // a varredura concluir que NENHUM processo está cadastrado.
+  for (const r of [proc, ap, req]) {
+    if (r.error) throw new Error(`cadastro: ${r.error.message}`)
+  }
   const set = new Set<string>()
   const add = (v: unknown) => {
     const d = onlyDigits(v)
@@ -277,15 +281,20 @@ Deno.serve(async (req: Request) => {
             // e dizer isso é melhor do que devolver um ok mudo.
             return jsonResponse({ ok: true, alvo, sem_correspondencia: true })
           }
-        } else {
+        } else if (fila.length) {
           // Poda processos que saíram do cadastro (ou do ADVBOX) — por CONJUNTO
           // de lawsuits, não por carimbo de tempo: dois syncs concorrentes
           // derivam o mesmo conjunto, então apagar duas vezes é inofensivo.
           // Só na varredura completa: com alvo, a fila é parcial de propósito.
-          await svc
+          //
+          // A guarda `fila.length` é ESSENCIAL: com a fila vazia, listaIn([])
+          // vira ("__none__") e o filtro `not in` casa TODAS as linhas —
+          // apagaria a tabela inteira por um soluço em /lawsuits ou no cadastro.
+          const { error } = await svc
             .from('advbox_tarefas')
             .delete()
             .not('advbox_lawsuit_id', 'in', listaIn(fila.map((f) => f.lid)))
+          if (error) throw new Error(error.message)
         }
       } else {
         fila = (body as { fila: FilaItem[] }).fila
@@ -296,69 +305,82 @@ Deno.serve(async (req: Request) => {
       let gravadas = 0
       let podadas = 0
       let erros = 0
+      // Respostas vazias (sem erro). Alto demais = suspeita de envelope
+      // inesperado ou instabilidade — não é "processo sem tarefas".
+      let vazios = 0
 
       for (const item of lote) {
         try {
           // Duas chamadas por processo: o /history só informa a situação pelo
           // filtro, então é ele que define concluida (o item em si não diz).
-          const rows: Record<string, unknown>[] = []
+          // Cada situação é tratada como um CONJUNTO PRÓPRIO — ver a poda.
           for (const st of ['pending', 'completed'] as const) {
-            const j = await getJson(ctx, `/history/${item.lid}?status=${st}`)
-            for (const h of pickArray(j)) {
+            // fetchAll em vez de getJson: a doc diz que /history ignora
+            // limit/offset e devolve tudo, mas se um dia paginar, uma chamada
+            // única traria só a 1ª página e a poda apagaria o resto.
+            const itens = await fetchAll(ctx, `/history/${item.lid}?status=${st}`)
+            const rows = itens.flatMap((h) => {
               const assinatura = [h.task, h.start, h.date_deadline, h.comments, h.responsible]
                 .map((v) => String(v ?? ''))
                 .join('|')
               // Uma linha por número cadastrado que casou (normalmente um só).
-              for (const digits of item.digits) {
-                rows.push({
-                  id: `${item.lid}-${digits}-${st[0]}-${hash(assinatura)}`,
-                  advbox_lawsuit_id: item.lid,
-                  numero_processo: item.numero,
-                  numero_digits: digits,
-                  tipo: (h.task ?? null) as string | null,
-                  data: dataDia(h.start) ?? dataDia(h.created_at),
-                  date_deadline: dataDia(h.date_deadline),
-                  notes: (h.comments ?? null) as string | null,
-                  responsaveis: [h.responsible].filter(Boolean),
-                  // O /history não traz urgência/importância (só o /posts).
-                  important: false,
-                  urgent: false,
-                  concluida: st === 'completed',
-                  raw: h,
-                  sincronizado_em: agora,
-                })
-              }
-            }
-          }
+              return item.digits.map((digits) => ({
+                id: `${item.lid}-${digits}-${st[0]}-${hash(assinatura)}`,
+                advbox_lawsuit_id: item.lid,
+                numero_processo: item.numero,
+                numero_digits: digits,
+                tipo: (h.task ?? null) as string | null,
+                data: dataDia(h.start) ?? dataDia(h.created_at),
+                date_deadline: dataDia(h.date_deadline),
+                notes: (h.comments ?? null) as string | null,
+                responsaveis: [h.responsible].filter(Boolean),
+                // O /history não traz urgência/importância (só o /posts).
+                important: false,
+                urgent: false,
+                concluida: st === 'completed',
+                raw: h,
+                sincronizado_em: agora,
+              }))
+            })
 
-          // Tarefas idênticas repetidas colapsam no mesmo id determinístico.
-          const unicas = [...new Map(rows.map((r) => [r.id as string, r])).values()]
-          if (unicas.length) {
+            // Tarefas idênticas repetidas colapsam no mesmo id determinístico.
+            const unicas = [...new Map(rows.map((r) => [r.id, r])).values()]
+
+            // NADA LIDO => NADA PODADO. Uma resposta vazia bem-sucedida (soluço
+            // da API, envelope inesperado) não pode ser lida como "o processo
+            // não tem mais tarefas": apagaria histórico legítimo em silêncio,
+            // sem sequer contar como erro.
+            if (!unicas.length) {
+              vazios++
+              continue
+            }
+
             const { error } = await svc
               .from('advbox_tarefas')
               .upsert(unicas, { onConflict: 'id' })
             if (error) throw new Error(error.message)
             gravadas += unicas.length
-          }
 
-          // Poda ESCOPADA a este processo: o que não veio agora saiu do ADVBOX.
-          // Escopo estreito de propósito — uma poda global por carimbo de tempo
-          // pode esvaziar o cache inteiro quando dois syncs se sobrepõem.
-          const ids = unicas.map((r) => r.id as string)
-          const base = svc
-            .from('advbox_tarefas')
-            .delete({ count: 'exact' })
-            .eq('advbox_lawsuit_id', item.lid)
-          const { error: eDel, count } =
-            ids.length && ids.length <= 200
-              ? await base.not('id', 'in', listaIn(ids))
-              : ids.length
+            // Poda escopada a ESTE processo E ESTA situação: o que não veio
+            // agora saiu do ADVBOX. Escopo estreito de propósito — assim uma
+            // resposta vazia de 'completed' não derruba as pendentes (e
+            // vice-versa), e nenhuma poda global por carimbo de tempo pode
+            // esvaziar o cache quando dois syncs se sobrepõem.
+            const ids = unicas.map((r) => r.id)
+            const base = svc
+              .from('advbox_tarefas')
+              .delete({ count: 'exact' })
+              .eq('advbox_lawsuit_id', item.lid)
+              .eq('concluida', st === 'completed')
+            const { error: eDel, count } =
+              ids.length <= 200
+                ? await base.not('id', 'in', listaIn(ids))
                 // Lista longa demais para a query string: cai no carimbo, mas
-                // ainda restrito a este processo.
-                ? await base.lt('sincronizado_em', agora)
-                : await base
-          if (eDel) throw new Error(eDel.message)
-          podadas += count ?? 0
+                // ainda restrito a este processo e a esta situação.
+                : await base.lt('sincronizado_em', agora)
+            if (eDel) throw new Error(eDel.message)
+            podadas += count ?? 0
+          }
         } catch (_e) {
           // Um processo que falha não derruba o lote inteiro nem a cadeia.
           erros++
@@ -375,6 +397,7 @@ Deno.serve(async (req: Request) => {
         gravadas,
         podadas,
         erros,
+        vazios,
       })
     }
 
