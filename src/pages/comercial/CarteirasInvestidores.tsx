@@ -25,6 +25,7 @@ import {
   investimentosCrud,
   processosCrud,
 } from '@/lib/queries'
+import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -222,6 +223,12 @@ function Consolidado() {
 // do que dependem. "Nº de operações" e a tabela já saem com dado real.
 const AGUARDANDO = 'aguardando dados financeiros no cadastro de Créditos'
 
+// Separador entre grupos de colunas da carteira.
+const SEP = 'border-l border-slate-200'
+// Célula cujo dado ainda não existe no cadastro — cinza claro para o olho
+// distinguir "não temos esse campo" de "o campo está vazio neste crédito".
+const VAZIO = 'text-slate-300'
+
 // Normaliza para agrupar o mesmo investidor escrito de formas diferentes.
 function normNome(s: string): string {
   return s
@@ -373,16 +380,64 @@ function Individual() {
             description="Este investidor não consta como cessionário em nenhum crédito."
           />
         ) : (
-          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
+          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:whitespace-nowrap [&_td]:text-[13px]">
             <THead>
+              {/* Nível 1: os grupos. Nível 2: as colunas. A borda à esquerda
+                  marca onde um grupo começa — com 25 colunas, sem isso o
+                  cabeçalho vira uma fileira indistinta. */}
               <tr>
-                <TH>Processo</TH>
+                <TH colSpan={5}>Identificação</TH>
+                <TH colSpan={2} className={SEP}>
+                  TIR obrigatório
+                </TH>
+                <TH colSpan={3} className={SEP}>
+                  Crédito · fixo na abertura
+                </TH>
+                <TH colSpan={3} className={SEP}>
+                  Recebimento principal
+                </TH>
+                <TH colSpan={1} className={SEP}>
+                  Complementar
+                </TH>
+                <TH colSpan={4} className={SEP}>
+                  Dados vivos · atualizar mensalmente
+                </TH>
+                <TH colSpan={7} className={SEP}>
+                  Calculado automaticamente
+                </TH>
+              </tr>
+              <tr className="border-t border-slate-200 text-[11px] font-medium normal-case tracking-normal text-slate-400">
+                <TH>Nº processo</TH>
                 <TH>Cedente</TH>
-                <TH>Entidade devedora</TH>
-                <TH>Comarca / Vara</TH>
-                <TH>Aquisição</TH>
-                <TH>Expectativa</TH>
-                <TH>Status</TH>
+                <TH>Advogado</TH>
+                <TH>Tipo de crédito</TH>
+                <TH>Tribunal</TH>
+
+                <TH className={SEP}>Capital investido</TH>
+                <TH>Data da cessão</TH>
+
+                <TH className={SEP}>Valor de face</TH>
+                <TH>Data ref. do face</TH>
+                <TH>Índice de atualização</TH>
+
+                <TH className={SEP}>Data est. recebimento</TH>
+                <TH>Já recebido</TH>
+                <TH>Data receb. efetivo</TH>
+
+                <TH className={SEP}>Valor est. complementar</TH>
+
+                <TH className={SEP}>Status</TH>
+                <TH>Estágio processual</TH>
+                <TH>Providências / prox. passos</TH>
+                <TH>Últ. atualização</TH>
+
+                <TH className={SEP}>Valor projetado</TH>
+                <TH>Status TIR</TH>
+                <TH>TIR a.a.</TH>
+                <TH>TIR mensal</TH>
+                <TH>Dias em carteira</TH>
+                <TH>Ganho projetado</TH>
+                <TH>Retorno</TH>
               </tr>
             </THead>
             <TBody>
@@ -390,24 +445,54 @@ function Individual() {
                 const st = getLabel(STATUS_PROCESSO, p.status)
                 return (
                   <TR key={p.id}>
-                    <TD className="whitespace-nowrap font-medium text-slate-800">
+                    {/* Identificação */}
+                    <TD className="font-medium text-slate-800">
                       {formatCNJ(p.numero_cnj)}
-                      <div className="text-xs font-normal text-slate-500">
-                        {p.tribunal || '—'}
-                      </div>
                     </TD>
                     <TD>{p.cedente || '—'}</TD>
-                    <TD>{p.entidade_devedora || '—'}</TD>
-                    <TD>{[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}</TD>
-                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                    <TD>{p.cedente_advogado || '—'}</TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD>{p.tribunal || '—'}</TD>
+
+                    {/* TIR obrigatório */}
+                    <TD className={cn(SEP, VAZIO)}>—</TD>
+                    <TD className="tabular-nums text-slate-600">
                       {formatDate(p.data_aquisicao)}
                     </TD>
-                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
+
+                    {/* Crédito · fixo na abertura */}
+                    <TD className={cn(SEP, VAZIO)}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+
+                    {/* Recebimento principal */}
+                    <TD className={cn(SEP, 'tabular-nums text-slate-600')}>
                       {formatDate(p.expectativa_liquidacao)}
                     </TD>
-                    <TD className="whitespace-nowrap">
+                    <TD className={VAZIO}>—</TD>
+                    <TD className="tabular-nums text-slate-600">
+                      {formatDate(p.data_liquidacao)}
+                    </TD>
+
+                    {/* Complementar */}
+                    <TD className={cn(SEP, VAZIO)}>—</TD>
+
+                    {/* Dados vivos */}
+                    <TD className={SEP}>
                       <Badge tone={st.tone}>{st.label}</Badge>
                     </TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+
+                    {/* Calculado automaticamente */}
+                    <TD className={cn(SEP, VAZIO)}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD className={VAZIO}>—</TD>
+                    <TD className={VAZIO}>—</TD>
                   </TR>
                 )
               })}

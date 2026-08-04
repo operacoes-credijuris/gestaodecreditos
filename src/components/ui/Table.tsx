@@ -38,11 +38,18 @@ export function THead({ children }: { children: ReactNode }) {
 export function TH({
   children,
   className,
+  colSpan,
 }: {
   children?: ReactNode
   className?: string
+  /** Agrupa colunas em cabeçalho de dois níveis (ex.: carteira do investidor). */
+  colSpan?: number
 }) {
-  return <th className={cn('px-4 py-3 font-semibold', className)}>{children}</th>
+  return (
+    <th colSpan={colSpan} className={cn('px-4 py-3 font-semibold', className)}>
+      {children}
+    </th>
+  )
 }
 
 export function TBody({ children }: { children: ReactNode }) {
