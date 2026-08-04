@@ -325,8 +325,10 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             type="button"
             onClick={() => setAba('movimentacoes')}
             aria-pressed={aba === 'movimentacoes'}
+            // `uppercase` repetido no botão: o reset de formulário do preflight
+            // impede a herança do <h3>, e sem isto o título sai em caixa mista.
             className={cn(
-              'transition-colors',
+              'uppercase transition-colors',
               aba === 'movimentacoes'
                 ? 'text-brand-600'
                 : 'text-slate-400 hover:text-slate-600',
@@ -342,7 +344,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             onClick={() => setAba('tarefas')}
             aria-pressed={aba === 'tarefas'}
             className={cn(
-              'transition-colors',
+              'uppercase transition-colors',
               aba === 'tarefas' ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600',
             )}
           >

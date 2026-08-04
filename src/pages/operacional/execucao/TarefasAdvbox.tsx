@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from 'react'
 import { Plus, Search, Flame, Star, FileText, Users } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -182,15 +183,10 @@ export default function TarefasAdvbox() {
       clearInterval(timer)
     }
   }, [])
-  // Tarefas com prazo já vencido ficam fora da aba (decisão de produto:
-  // aqui só o que está por fazer — Fatais, Sem prazo e a soma das duas).
-  const tarefas = useMemo(
-    () =>
-      (data?.tarefas ?? []).filter(
-        (t) => !t.date_deadline || t.date_deadline.slice(0, 10) >= hoje,
-      ),
-    [data, hoje],
-  )
+  // Tarefas com prazo vencido NÃO são mais escondidas: em Fatais elas ficam
+  // no grupo "Vencidas", abaixo das pendentes (mesmo padrão de Publicações,
+  // com Novas e Tratadas). Sumir com prazo estourado escondia o problema.
+  const tarefas = useMemo(() => data?.tarefas ?? [], [data])
 
   // Cedente/cessionário dos Créditos (exibidos sob o nº do processo). Tarefas de
   // apensos vinculados a um crédito herdam o cedente/cessionário do crédito pai.
@@ -222,10 +218,9 @@ export default function TarefasAdvbox() {
   }, [processos.data, apensos.data])
 
   const [busca, setBusca] = useState('')
-  // Padrão ao abrir: tarefas fatais (com prazo).
-  const [filtroPrazo, setFiltroPrazo] = useState<'todos' | 'fatais' | 'sem_prazo'>(
-    'fatais',
-  )
+  // Padrão ao abrir: tarefas fatais (com prazo). Só duas visões — "Todas"
+  // saiu: era a soma de duas listas que não se comparam entre si.
+  const [filtroPrazo, setFiltroPrazo] = useState<'fatais' | 'sem_prazo'>('fatais')
   const [novo, setNovo] = useState(false)
 
   // Busca textual (sem o filtro de prazo) — base para lista e contagens.
@@ -239,30 +234,131 @@ export default function TarefasAdvbox() {
     )
   }, [tarefas, busca])
 
+  // Fatais viram dois grupos (Pendentes / Vencidas); Sem prazo segue lista
+  // única — sem termo final não há o que vencer.
+  const { pendentes, vencidas, semPrazo } = useMemo(() => {
+    const prazo = (t: TarefaAdvbox) => (t.date_deadline || '').slice(0, 10)
+    const dataRef = (t: TarefaAdvbox) => t.start_date || t.created_at || ''
+    const comPrazo = baseBusca.filter((t) => !!t.date_deadline)
+    return {
+      // Pendentes: prazo mais próximo primeiro — é o que aperta.
+      pendentes: comPrazo
+        .filter((t) => prazo(t) >= hoje)
+        .sort((a, b) => prazo(a).localeCompare(prazo(b))),
+      // Vencidas: a que estourou há menos tempo no topo; quanto mais fundo na
+      // lista, mais velho o atraso.
+      vencidas: comPrazo
+        .filter((t) => prazo(t) < hoje)
+        .sort((a, b) => prazo(b).localeCompare(prazo(a))),
+      // Sem prazo: data mais nova primeiro.
+      semPrazo: baseBusca
+        .filter((t) => !t.date_deadline)
+        .sort((a, b) => dataRef(b).localeCompare(dataRef(a))),
+    }
+  }, [baseBusca, hoje])
+
   const contagemPrazo = useMemo(
     () => ({
-      todos: baseBusca.length,
-      fatais: baseBusca.filter((t) => !!t.date_deadline).length,
-      sem_prazo: baseBusca.filter((t) => !t.date_deadline).length,
+      fatais: pendentes.length + vencidas.length,
+      sem_prazo: semPrazo.length,
     }),
-    [baseBusca],
+    [pendentes, vencidas, semPrazo],
   )
 
-  const lista = useMemo(() => {
-    const dataRef = (t: TarefaAdvbox) => t.start_date || t.created_at || ''
-    // Fatais: prazo mais próximo primeiro.
-    const fatais = baseBusca
-      .filter((t) => !!t.date_deadline)
-      .sort((a, b) => (a.date_deadline || '').localeCompare(b.date_deadline || ''))
-    // Sem prazo: data mais nova primeiro.
-    const semPrazo = baseBusca
-      .filter((t) => !t.date_deadline)
-      .sort((a, b) => dataRef(b).localeCompare(dataRef(a)))
-    if (filtroPrazo === 'fatais') return fatais
-    if (filtroPrazo === 'sem_prazo') return semPrazo
-    // Todas: fatais primeiro (têm prazo), depois as sem prazo.
-    return [...fatais, ...semPrazo]
-  }, [baseBusca, filtroPrazo])
+  const vazio =
+    filtroPrazo === 'fatais'
+      ? pendentes.length === 0 && vencidas.length === 0
+      : semPrazo.length === 0
+
+  // Cartão de uma tarefa. Função (e não JSX inline) porque os grupos
+  // Pendentes e Vencidas renderizam o mesmo cartão.
+  const card = (t: TarefaAdvbox) => {
+    const cred = resolveCredito(t.processo ?? '')
+    const partes =
+      cred && (cred.cedente || cred.cessionario)
+        ? `${cred.cedente || '—'} v. ${cred.cessionario || '—'}`
+        : ''
+    const prazo = prazoInfo(t.date_deadline, hoje)
+    const tone: Urgencia = prazo?.tone ?? 'neutral'
+    const bloco = diaMes(t.date_deadline || t.start_date)
+    const resp = t.responsaveis ?? []
+    return (
+      <div
+        key={t.id}
+        className="flex overflow-hidden rounded-xl border border-slate-200 bg-white"
+      >
+        <div className={cn('w-1 flex-none', TONE_BAR[tone])} />
+        <div className="flex min-w-0 flex-1 items-start gap-3 p-3">
+          <div
+            className={cn('w-12 flex-none rounded-md py-1.5 text-center', TONE_BLOCK[tone])}
+          >
+            {bloco ? (
+              <>
+                <div className="text-lg font-bold leading-none">{bloco.dia}</div>
+                <div className="text-xs leading-tight">{bloco.mes}</div>
+              </>
+            ) : (
+              <div className="py-1 text-sm">—</div>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {t.urgent && (
+                <span title="Urgente">
+                  <Flame className="h-3.5 w-3.5 text-red-500" />
+                </span>
+              )}
+              {t.important && (
+                <span title="Importante">
+                  <Star className="h-3.5 w-3.5 text-amber-500" />
+                </span>
+              )}
+              <span className="text-sm font-medium text-slate-800">
+                {t.tipo ? sentenceCase(t.tipo) : '—'}
+              </span>
+              {prazo?.rel && (
+                <span className={cn('text-xs font-medium', TONE_TEXT[tone])}>
+                  · {prazo.rel}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 truncate text-sm text-slate-500">
+              {formatCNJ(t.processo)}
+              {partes && ` · ${partes}`}
+            </div>
+            {t.notes && <Observacao text={t.notes} />}
+          </div>
+          {/* Responsáveis à esquerda do botão de petição. flex-none: só
+              ocupa o que precisa, e a coluna de conteúdo (flex-1) cede o
+              espaço — que sobra. O max-w é só teto para lista longa. */}
+          {resp.length > 0 && (
+            <div className="flex max-w-[20rem] flex-none items-start gap-1.5 text-sm text-slate-600">
+              <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-400" />
+              {/* Cada nome é uma unidade que não quebra: com vários
+                  responsáveis a quebra cai ENTRE nomes, nunca no meio de um. */}
+              <span className="flex flex-wrap gap-x-1.5">
+                {resp.map((r, i) => (
+                  <span key={i} className="whitespace-nowrap">
+                    {formatNome(r)}
+                    {i < resp.length - 1 && ','}
+                  </span>
+                ))}
+              </span>
+            </div>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            title="Gerar petição"
+            icon={<FileText className="h-4 w-4" />}
+            onClick={() =>
+              toast.toast('Geração de petição será configurada em breve.', 'info')
+            }
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -282,7 +378,6 @@ export default function TarefasAdvbox() {
             items={[
               { key: 'fatais', label: 'Fatais', count: contagemPrazo.fatais },
               { key: 'sem_prazo', label: 'Sem prazo', count: contagemPrazo.sem_prazo },
-              { key: 'todos', label: 'Todas', count: contagemPrazo.todos },
             ]}
             value={filtroPrazo}
             onChange={(k) => setFiltroPrazo(k as typeof filtroPrazo)}
@@ -316,105 +411,28 @@ export default function TarefasAdvbox() {
         <Card>
           <ErrorState message={(error as Error)?.message} />
         </Card>
-      ) : lista.length === 0 ? (
+      ) : vazio ? (
         <Card>
           <EmptyState title="Nenhuma tarefa" />
         </Card>
+      ) : filtroPrazo === 'sem_prazo' ? (
+        <div className="space-y-2">{semPrazo.map(card)}</div>
       ) : (
-        <div className="space-y-2">
-          {lista.map((t) => {
-            const cred = resolveCredito(t.processo ?? '')
-            const partes =
-              cred && (cred.cedente || cred.cessionario)
-                ? `${cred.cedente || '—'} v. ${cred.cessionario || '—'}`
-                : ''
-            const prazo = prazoInfo(t.date_deadline, hoje)
-            const tone: Urgencia = prazo?.tone ?? 'neutral'
-            const bloco = diaMes(t.date_deadline || t.start_date)
-            const resp = t.responsaveis ?? []
-            return (
-              <div
-                key={t.id}
-                className="flex overflow-hidden rounded-xl border border-slate-200 bg-white"
-              >
-                <div className={cn('w-1 flex-none', TONE_BAR[tone])} />
-                <div className="flex min-w-0 flex-1 items-start gap-3 p-3">
-                  <div
-                    className={cn(
-                      'w-12 flex-none rounded-md py-1.5 text-center',
-                      TONE_BLOCK[tone],
-                    )}
-                  >
-                    {bloco ? (
-                      <>
-                        <div className="text-lg font-bold leading-none">{bloco.dia}</div>
-                        <div className="text-xs leading-tight">{bloco.mes}</div>
-                      </>
-                    ) : (
-                      <div className="py-1 text-sm">—</div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {t.urgent && (
-                        <span title="Urgente">
-                          <Flame className="h-3.5 w-3.5 text-red-500" />
-                        </span>
-                      )}
-                      {t.important && (
-                        <span title="Importante">
-                          <Star className="h-3.5 w-3.5 text-amber-500" />
-                        </span>
-                      )}
-                      <span className="text-sm font-medium text-slate-800">
-                        {t.tipo ? sentenceCase(t.tipo) : '—'}
-                      </span>
-                      {prazo?.rel && (
-                        <span className={cn('text-xs font-medium', TONE_TEXT[tone])}>
-                          · {prazo.rel}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 truncate text-sm text-slate-500">
-                      {formatCNJ(t.processo)}
-                      {partes && ` · ${partes}`}
-                    </div>
-                    {t.notes && <Observacao text={t.notes} />}
-                  </div>
-                  {/* Responsáveis à esquerda do botão de petição. flex-none: só
-                      ocupa o que precisa, e a coluna de conteúdo (flex-1) cede o
-                      espaço — que sobra. O max-w é só teto para lista longa. */}
-                  {resp.length > 0 && (
-                    <div className="flex max-w-[20rem] flex-none items-start gap-1.5 text-sm text-slate-600">
-                      <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-400" />
-                      {/* Cada nome é uma unidade que não quebra: com vários
-                          responsáveis a quebra cai ENTRE nomes, nunca no meio de um. */}
-                      <span className="flex flex-wrap gap-x-1.5">
-                        {resp.map((r, i) => (
-                          <span key={i} className="whitespace-nowrap">
-                            {formatNome(r)}
-                            {i < resp.length - 1 && ','}
-                          </span>
-                        ))}
-                      </span>
-                    </div>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    title="Gerar petição"
-                    icon={<FileText className="h-4 w-4" />}
-                    onClick={() =>
-                      toast.toast(
-                        'Geração de petição será configurada em breve.',
-                        'info',
-                      )
-                    }
-                  />
-                </div>
-              </div>
-            )
-          })}
+        <div className="space-y-5">
+          <Secao titulo="Pendentes" qtd={pendentes.length}>
+            {pendentes.length ? (
+              <div className="space-y-2">{pendentes.map(card)}</div>
+            ) : (
+              <p className="text-sm text-slate-500">Nenhuma tarefa pendente.</p>
+            )}
+          </Secao>
+          <Secao titulo="Vencidas" qtd={vencidas.length}>
+            {vencidas.length ? (
+              <div className="space-y-2">{vencidas.map(card)}</div>
+            ) : (
+              <p className="text-sm text-slate-500">Nenhuma tarefa vencida.</p>
+            )}
+          </Secao>
         </div>
       )}
 
@@ -427,6 +445,30 @@ export default function TarefasAdvbox() {
           toast.success('Tarefa criada no ADVBOX.')
         }}
       />
+    </div>
+  )
+}
+
+/** Cabeçalho de seção: "Título (n) ————————" (mesmo padrão de Publicações). */
+function Secao({
+  titulo,
+  qtd,
+  children,
+}: {
+  titulo: string
+  qtd: number
+  children: ReactNode
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 pt-1">
+        <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          {titulo}
+        </span>
+        <span className="text-xs text-slate-500">({qtd})</span>
+        <div className="h-px flex-1 bg-slate-200" />
+      </div>
+      {children}
     </div>
   )
 }
