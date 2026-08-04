@@ -1,12 +1,14 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  Plus,
-  Pencil,
-  Trash2,
   Wallet,
   Users,
   Layers,
   TrendingUp,
+  Percent,
+  Target,
+  CheckCircle2,
+  Clock,
+  Hash,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -17,18 +19,18 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import { investidoresCrud, cessoesCrud, investimentosCrud } from '@/lib/queries'
-import type { Investimento, StatusInvestimento } from '@/lib/types'
+import {
+  investidoresCrud,
+  cessoesCrud,
+  investimentosCrud,
+  processosCrud,
+} from '@/lib/queries'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { Button } from '@/components/ui/Button'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { StatCard } from '@/components/ui/StatCard'
-import { Field, Input, Select } from '@/components/ui/Field'
-import { Modal } from '@/components/ui/Modal'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { Tabs } from '@/components/ui/Tabs'
-import { IconButton } from '@/components/ui/IconButton'
 import {
   Table,
   THead,
@@ -40,22 +42,18 @@ import {
   ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
-import { useToast } from '@/components/ui/Toast'
-import { getLabel, STATUS_INVESTIMENTO } from '@/lib/labels'
-import { formatBRL, formatPercent, formatDate } from '@/lib/format'
+import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
+import { formatBRL, formatPercent, formatDate, formatCNJ } from '@/lib/format'
 import { CHART } from '@/lib/chartColors'
-import { InvestidoresPanel } from './InvestidoresPanel'
-import { CessoesPanel } from './CessoesPanel'
 
 const TABS = [
+  { key: 'individual', label: 'Individual' },
   { key: 'consolidado', label: 'Consolidado' },
-  { key: 'individual', label: 'Por Investidor' },
-  { key: 'investidores', label: 'Investidores' },
-  { key: 'cessoes', label: 'Cessões' },
+  { key: 'dados_pessoais', label: 'Dados pessoais' },
 ]
 
 export default function CarteirasInvestidores() {
-  const [tab, setTab] = useState('consolidado')
+  const [tab, setTab] = useState('individual')
 
   return (
     <div>
@@ -64,10 +62,9 @@ export default function CarteirasInvestidores() {
         <Tabs items={TABS} value={tab} onChange={setTab} />
       </div>
 
+      {tab === 'individual' && <Individual />}
       {tab === 'consolidado' && <Consolidado />}
-      {tab === 'individual' && <PorInvestidor />}
-      {tab === 'investidores' && <InvestidoresPanel />}
-      {tab === 'cessoes' && <CessoesPanel />}
+      {tab === 'dados_pessoais' && <DadosPessoais />}
     </div>
   )
 }
@@ -214,378 +211,223 @@ function Consolidado() {
   )
 }
 
-// ----------------------- Por Investidor -----------------------
-const INV_VAZIO: Partial<Investimento> = {
-  investidor_id: '',
-  cessao_id: null,
-  valor_investido: 0,
-  percentual: null,
-  rentabilidade_esperada: null,
-  data_investimento: '',
-  status: 'ativo',
+// ----------------------- Individual -----------------------
+// Carteira de UM investidor. Os investidores não têm cadastro próprio aqui:
+// são os CESSIONÁRIOS distintos que aparecem nos Créditos — quem comprou o
+// crédito é o investidor daquela operação.
+//
+// Os cinco cards financeiros ainda não têm de onde puxar número: o cadastro de
+// Créditos não guarda valor de aquisição, valor projetado nem recebimentos.
+// Exibir zero se leria como "não rendeu nada", então mostram travessão e dizem
+// do que dependem. "Nº de operações" e a tabela já saem com dado real.
+const AGUARDANDO = 'aguardando dados financeiros no cadastro de Créditos'
+
+// Normaliza para agrupar o mesmo investidor escrito de formas diferentes.
+function normNome(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
 }
 
-function PorInvestidor() {
-  const investidores = investidoresCrud.useList()
-  const cessoes = cessoesCrud.useList()
-  const { useList, useCreate, useUpdate, useRemove } = investimentosCrud
-  const investimentos = useList()
-  const create = useCreate()
-  const update = useUpdate()
-  const remove = useRemove()
-  const toast = useToast()
+function Individual() {
+  const processos = processosCrud.useList()
 
-  const [selecionado, setSelecionado] = useState('')
-  const [editing, setEditing] = useState<Partial<Investimento> | null>(null)
-  const [toDelete, setToDelete] = useState<Investimento | null>(null)
-  // Erros de validação por campo, exibidos inline nos <Field>.
-  const [erros, setErros] = useState<Record<string, string>>({})
-  // Snapshot do formulário ao abrir, para detectar alterações não salvas.
-  const snapRef = useRef('')
+  // Cessionários distintos, em ordem alfabética.
+  const investidores = useMemo(() => {
+    const porChave = new Map<string, string>()
+    for (const p of processos.data ?? []) {
+      const nome = (p.cessionario ?? '').trim()
+      if (!nome) continue
+      const chave = normNome(nome)
+      if (!porChave.has(chave)) porChave.set(chave, nome)
+    }
+    return [...porChave.values()].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [processos.data])
 
-  const dirty = !!editing && JSON.stringify(editing) !== snapRef.current
+  // Guarda o NOME, não o índice: a lista muda quando os créditos carregam, e
+  // um índice guardado passaria a apontar para outro investidor.
+  const [investidor, setInvestidor] = useState<string | null>(null)
+  const indice = investidor ? investidores.indexOf(investidor) : -1
 
-  // Abre o formulário guardando o snapshot inicial e limpando erros antigos.
-  function abrirForm(valores: Partial<Investimento>) {
-    snapRef.current = JSON.stringify(valores)
-    setErros({})
-    setEditing(valores)
-  }
-
-  // Limpa o erro de um campo assim que o usuário o altera.
-  function limparErro(campo: string) {
-    setErros((prev) => (prev[campo] ? { ...prev, [campo]: '' } : prev))
-  }
-
-  // Botões próprios do footer não passam pela confirmação do Modal.
-  function cancelar() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
-    setEditing(null)
-  }
-
-  const codigoCessao = (id: string | null) =>
-    id ? (cessoes.data ?? []).find((c) => c.id === id)?.codigo ?? '—' : '—'
-
-  const daCarteira = useMemo(
-    () => (investimentos.data ?? []).filter((i) => i.investidor_id === selecionado),
-    [investimentos.data, selecionado],
+  const opcoes = useMemo<OpcaoCombo[]>(
+    () => investidores.map((nome, i) => ({ id: i, titulo: nome })),
+    [investidores],
   )
 
-  const totais = useMemo(() => {
-    const ativos = daCarteira.filter((i) => i.status === 'ativo')
-    const total = ativos.reduce((s, i) => s + (i.valor_investido || 0), 0)
-    const rent =
-      total > 0
-        ? ativos.reduce(
-            (s, i) => s + (i.rentabilidade_esperada || 0) * (i.valor_investido || 0),
-            0,
-          ) / total
-        : 0
-    return { total, rent, posicoes: daCarteira.length }
-  }, [daCarteira])
+  // Mês de referência: sempre o corrente, sem opção de troca.
+  const mesRef = useMemo(() => {
+    const s = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+    return s.charAt(0).toUpperCase() + s.slice(1)
+  }, [])
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!editing) return
-    if (!editing.investidor_id) {
-      setErros({ investidor_id: 'Selecione o investidor' })
-      return
-    }
-    try {
-      const { id, created_at, updated_at, ...payload } = editing as Investimento
-      if (!payload.cessao_id) payload.cessao_id = null
-      payload.valor_investido = Number(payload.valor_investido || 0)
-      if (id) {
-        await update.mutateAsync({ id, changes: payload })
-        toast.success('Investimento atualizado.')
-      } else {
-        await create.mutateAsync(payload)
-        toast.success('Investimento registrado.')
-      }
-      setEditing(null)
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
+  const carteira = useMemo(() => {
+    if (!investidor) return []
+    const alvo = normNome(investidor)
+    return (processos.data ?? [])
+      .filter((p) => normNome(p.cessionario ?? '') === alvo)
+      .sort((a, b) => (b.data_aquisicao || '').localeCompare(a.data_aquisicao || ''))
+  }, [processos.data, investidor])
 
-  async function confirmDelete() {
-    if (!toDelete) return
-    try {
-      await remove.mutateAsync(toDelete.id)
-      toast.success('Investimento excluído.')
-      setToDelete(null)
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
+  if (processos.isLoading) return <Loading label="Carregando créditos…" />
+  if (processos.isError) {
+    return (
+      <Card>
+        <ErrorState
+          message={(processos.error as Error)?.message}
+          onRetry={() => processos.refetch()}
+        />
+      </Card>
+    )
   }
 
   return (
     <div className="space-y-5">
       <Card className="p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <Field label="Investidor" className="w-full sm:max-w-sm">
-            <Select
-              value={selecionado}
-              onChange={(e) => setSelecionado(e.target.value)}
-            >
-              <option value="">Selecione um investidor…</option>
-              {(investidores.data ?? []).map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.nome}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {selecionado && (
-            <Button
-              icon={<Plus className="h-4 w-4" />}
-              onClick={() =>
-                abrirForm({ ...INV_VAZIO, investidor_id: selecionado })
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="w-full sm:max-w-sm">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Investidor
+            </label>
+            <Combobox
+              opcoes={opcoes}
+              valor={indice >= 0 ? indice : null}
+              onChange={(id) =>
+                setInvestidor(id === null ? null : investidores[id] ?? null)
               }
-            >
-              Novo investimento
-            </Button>
-          )}
+              placeholder="Digite o nome…"
+              vazio="Nenhum investidor nos créditos."
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Mês de referência
+            </label>
+            {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              {mesRef}
+            </div>
+          </div>
         </div>
       </Card>
 
-      {!selecionado ? (
-        <Card>
-          <EmptyState title="Selecione um investidor" />
-        </Card>
-      ) : (
-        <>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard
-              label="Total investido (ativo)"
-              value={formatBRL(totais.total)}
-              icon={<Wallet className="h-5 w-5" />}
-            />
-            <StatCard
-              label="Posições"
-              value={totais.posicoes}
-              icon={<Layers className="h-5 w-5" />}
-              tone="amber"
-            />
-            <StatCard
-              label="Rentabilidade média esperada"
-              value={formatPercent(totais.rent)}
-              icon={<TrendingUp className="h-5 w-5" />}
-              tone="green"
-            />
-          </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard
+          label="Capital total"
+          value="—"
+          hint={AGUARDANDO}
+          icon={<Wallet className="h-5 w-5" />}
+          tone="brand"
+        />
+        <StatCard
+          label="TIR média"
+          value="—"
+          hint={AGUARDANDO}
+          icon={<Percent className="h-5 w-5" />}
+          tone="green"
+        />
+        <StatCard
+          label="Retorno projetado"
+          value="—"
+          hint={AGUARDANDO}
+          icon={<Target className="h-5 w-5" />}
+          tone="amber"
+        />
+        <StatCard
+          label="Já recebido"
+          value="—"
+          hint={AGUARDANDO}
+          icon={<CheckCircle2 className="h-5 w-5" />}
+          tone="green"
+        />
+        <StatCard
+          label="A receber estimado"
+          value="—"
+          hint={AGUARDANDO}
+          icon={<Clock className="h-5 w-5" />}
+          tone="slate"
+        />
+        <StatCard
+          label="Nº de operações"
+          value={investidor ? carteira.length : '—'}
+          hint={investidor ? 'créditos deste investidor' : 'selecione um investidor'}
+          icon={<Hash className="h-5 w-5" />}
+          tone="brand"
+        />
+      </div>
 
-          <Card>
-            {investimentos.isLoading ? (
-              <Loading />
-            ) : investimentos.isError ? (
-              <ErrorState
-                message={(investimentos.error as Error)?.message}
-                onRetry={() => investimentos.refetch()}
-              />
-            ) : daCarteira.length === 0 ? (
-              <EmptyState
-                title="Carteira vazia"
-                description="Registre o primeiro investimento deste investidor."
-                action={
-                  <Button
-                    icon={<Plus className="h-4 w-4" />}
-                    onClick={() => abrirForm({ ...INV_VAZIO, investidor_id: selecionado })}
-                  >
-                    Novo investimento
-                  </Button>
-                }
-              />
-            ) : (
-              <Table>
-                <THead>
-                  <tr>
-                    <TH>Cessão</TH>
-                    <TH className="text-right tabular-nums">Valor investido</TH>
-                    <TH className="text-right tabular-nums">Participação</TH>
-                    <TH className="text-right tabular-nums">Rentabilidade esperada</TH>
-                    <TH>Data</TH>
-                    <TH>Status</TH>
-                    <TH className="text-right">Ações</TH>
-                  </tr>
-                </THead>
-                <TBody>
-                  {daCarteira.map((i) => {
-                    const st = getLabel(STATUS_INVESTIMENTO, i.status)
-                    return (
-                      <TR key={i.id}>
-                        <TD className="font-medium text-slate-800">
-                          {codigoCessao(i.cessao_id)}
-                        </TD>
-                        <TD className="text-right tabular-nums">{formatBRL(i.valor_investido)}</TD>
-                        <TD className="text-right tabular-nums">{formatPercent(i.percentual)}</TD>
-                        <TD className="text-right tabular-nums">{formatPercent(i.rentabilidade_esperada)}</TD>
-                        <TD className="whitespace-nowrap">
-                          {formatDate(i.data_investimento)}
-                        </TD>
-                        <TD>
-                          <Badge tone={st.tone}>{st.label}</Badge>
-                        </TD>
-                        <TD className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <IconButton
-                              label="Editar"
-                              icon={<Pencil className="h-4 w-4" />}
-                              onClick={() => abrirForm(i)}
-                            />
-                            <IconButton
-                              label="Excluir"
-                              variant="danger"
-                              icon={<Trash2 className="h-4 w-4" />}
-                              onClick={() => setToDelete(i)}
-                            />
-                          </div>
-                        </TD>
-                      </TR>
-                    )
-                  })}
-                </TBody>
-              </Table>
-            )}
-          </Card>
-        </>
-      )}
-
-      <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title={editing?.id ? 'Editar investimento' : 'Novo investimento'}
-        dirty={dirty}
-        footer={
-          <>
-            <Button variant="outline" onClick={cancelar}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              form="form-investimento"
-              loading={create.isPending || update.isPending}
-            >
-              Salvar
-            </Button>
-          </>
-        }
-      >
-        {editing && (
-          <form id="form-investimento" onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Investidor" required error={erros.investidor_id}>
-              <Select
-                value={editing.investidor_id ?? ''}
-                onChange={(e) => {
-                  setEditing({ ...editing, investidor_id: e.target.value })
-                  limparErro('investidor_id')
-                }}
-              >
-                <option value="">Selecione…</option>
-                {(investidores.data ?? []).map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.nome}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Cessão (crédito)">
-              <Select
-                value={editing.cessao_id ?? ''}
-                onChange={(e) =>
-                  setEditing({ ...editing, cessao_id: e.target.value || null })
-                }
-              >
-                <option value="">— Não vinculado —</option>
-                {(cessoes.data ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.codigo}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Valor investido (R$)" required>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={editing.valor_investido ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      valor_investido: e.target.value ? Number(e.target.value) : 0,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Participação (%)">
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={editing.percentual ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      percentual: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Rentabilidade esperada (%)">
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={editing.rentabilidade_esperada ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      rentabilidade_esperada: e.target.value
-                        ? Number(e.target.value)
-                        : null,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Data do investimento">
-                <Input
-                  type="date"
-                  value={editing.data_investimento ?? ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, data_investimento: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Status" required>
-                <Select
-                  value={editing.status ?? 'ativo'}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      status: e.target.value as StatusInvestimento,
-                    })
-                  }
-                >
-                  {Object.entries(STATUS_INVESTIMENTO).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-          </form>
+      <Card>
+        <CardHeader
+          title={investidor ? `Carteira — ${investidor}` : 'Carteira do investidor'}
+        />
+        {!investidor ? (
+          <EmptyState
+            title="Selecione um investidor"
+            description="Escolha acima para ver a carteira dele."
+          />
+        ) : carteira.length === 0 ? (
+          <EmptyState
+            title="Nenhum crédito"
+            description="Este investidor não consta como cessionário em nenhum crédito."
+          />
+        ) : (
+          <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-[13px]">
+            <THead>
+              <tr>
+                <TH>Processo</TH>
+                <TH>Cedente</TH>
+                <TH>Entidade devedora</TH>
+                <TH>Comarca / Vara</TH>
+                <TH>Aquisição</TH>
+                <TH>Expectativa</TH>
+                <TH>Status</TH>
+              </tr>
+            </THead>
+            <TBody>
+              {carteira.map((p) => {
+                const st = getLabel(STATUS_PROCESSO, p.status)
+                return (
+                  <TR key={p.id}>
+                    <TD className="whitespace-nowrap font-medium text-slate-800">
+                      {formatCNJ(p.numero_cnj)}
+                      <div className="text-xs font-normal text-slate-500">
+                        {p.tribunal || '—'}
+                      </div>
+                    </TD>
+                    <TD>{p.cedente || '—'}</TD>
+                    <TD>{p.entidade_devedora || '—'}</TD>
+                    <TD>{[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}</TD>
+                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                      {formatDate(p.data_aquisicao)}
+                    </TD>
+                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                      {formatDate(p.expectativa_liquidacao)}
+                    </TD>
+                    <TD className="whitespace-nowrap">
+                      <Badge tone={st.tone}>{st.label}</Badge>
+                    </TD>
+                  </TR>
+                )
+              })}
+            </TBody>
+          </Table>
         )}
-      </Modal>
-
-      <ConfirmDialog
-        open={!!toDelete}
-        danger
-        loading={remove.isPending}
-        message="Excluir este investimento?"
-        confirmLabel="Excluir"
-        onConfirm={confirmDelete}
-        onClose={() => setToDelete(null)}
-      />
+      </Card>
     </div>
   )
 }
+
+// ----------------------- Dados pessoais -----------------------
+function DadosPessoais() {
+  return (
+    <Card>
+      <EmptyState
+        title="Em construção"
+        description="O conteúdo desta aba ainda será definido."
+      />
+    </Card>
+  )
+}
+
