@@ -25,10 +25,8 @@ import {
   investimentosCrud,
   processosCrud,
 } from '@/lib/queries'
-import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
 import { StatCard } from '@/components/ui/StatCard'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { Tabs } from '@/components/ui/Tabs'
@@ -43,8 +41,7 @@ import {
   ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
-import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
-import { formatBRL, formatPercent, formatDate, formatCNJ } from '@/lib/format'
+import { formatBRL, formatPercent, formatCNJ } from '@/lib/format'
 import { CHART } from '@/lib/chartColors'
 
 const TABS = [
@@ -225,9 +222,6 @@ const AGUARDANDO = 'aguardando dados financeiros no cadastro de Créditos'
 
 // Separador entre grupos de colunas da carteira.
 const SEP = 'border-l border-slate-200'
-// Célula cujo dado ainda não existe no cadastro — cinza claro para o olho
-// distinguir "não temos esse campo" de "o campo está vazio neste crédito".
-const VAZIO = 'text-slate-300'
 
 // Normaliza para agrupar o mesmo investidor escrito de formas diferentes.
 function normNome(s: string): string {
@@ -441,61 +435,55 @@ function Individual() {
               </tr>
             </THead>
             <TBody>
-              {carteira.map((p) => {
-                const st = getLabel(STATUS_PROCESSO, p.status)
-                return (
-                  <TR key={p.id}>
-                    {/* Identificação */}
-                    <TD className="font-medium text-slate-800">
-                      {formatCNJ(p.numero_cnj)}
-                    </TD>
-                    <TD>{p.cedente || '—'}</TD>
-                    <TD>{p.cedente_advogado || '—'}</TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD>{p.tribunal || '—'}</TD>
+              {/* Só o nº do processo é preenchido. As demais colunas ficam
+                  vazias de propósito: o que existe hoje no cadastro não
+                  corresponde com segurança a esses campos, e preencher por
+                  semelhança de nome produziria número errado numa tabela
+                  financeira. Vão ser ligadas uma a uma nas próximas edições. */}
+              {carteira.map((p) => (
+                <TR key={p.id}>
+                  {/* Identificação */}
+                  <TD className="font-medium text-slate-800">
+                    {formatCNJ(p.numero_cnj)}
+                  </TD>
+                  <TD />
+                  <TD />
+                  <TD />
+                  <TD />
 
-                    {/* TIR obrigatório */}
-                    <TD className={cn(SEP, VAZIO)}>—</TD>
-                    <TD className="tabular-nums text-slate-600">
-                      {formatDate(p.data_aquisicao)}
-                    </TD>
+                  {/* TIR obrigatório */}
+                  <TD className={SEP} />
+                  <TD />
 
-                    {/* Crédito · fixo na abertura */}
-                    <TD className={cn(SEP, VAZIO)}>—</TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className={VAZIO}>—</TD>
+                  {/* Crédito · fixo na abertura */}
+                  <TD className={SEP} />
+                  <TD />
+                  <TD />
 
-                    {/* Recebimento principal */}
-                    <TD className={cn(SEP, 'tabular-nums text-slate-600')}>
-                      {formatDate(p.expectativa_liquidacao)}
-                    </TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className="tabular-nums text-slate-600">
-                      {formatDate(p.data_liquidacao)}
-                    </TD>
+                  {/* Recebimento principal */}
+                  <TD className={SEP} />
+                  <TD />
+                  <TD />
 
-                    {/* Complementar */}
-                    <TD className={cn(SEP, VAZIO)}>—</TD>
+                  {/* Complementar */}
+                  <TD className={SEP} />
 
-                    {/* Dados vivos */}
-                    <TD className={SEP}>
-                      <Badge tone={st.tone}>{st.label}</Badge>
-                    </TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className={VAZIO}>—</TD>
+                  {/* Dados vivos */}
+                  <TD className={SEP} />
+                  <TD />
+                  <TD />
+                  <TD />
 
-                    {/* Calculado automaticamente */}
-                    <TD className={cn(SEP, VAZIO)}>—</TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className={VAZIO}>—</TD>
-                    <TD className={VAZIO}>—</TD>
-                  </TR>
-                )
-              })}
+                  {/* Calculado automaticamente */}
+                  <TD className={SEP} />
+                  <TD />
+                  <TD />
+                  <TD />
+                  <TD />
+                  <TD />
+                  <TD />
+                </TR>
+              ))}
             </TBody>
           </Table>
         )}
