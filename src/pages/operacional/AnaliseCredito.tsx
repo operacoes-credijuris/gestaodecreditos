@@ -36,6 +36,82 @@ import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate } from '@/lib/format'
 
+// ===== Análise automática do card (Judit -> due diligence -> planilha) =====
+// Lê os dados do próprio card (título + notas) e roda a sequência no motor.
+type ResultadoAnalise = {
+  reprovado?: boolean
+  motivo?: string
+  relatorio_due_diligence?: string | null
+  due_diligence_url?: string | null
+  drive_file_url?: string | null
+  drive_folder_url?: string | null
+  aviso?: string | null
+  erro?: string
+  motivos?: string[]
+  avisos?: string[]
+  [k: string]: unknown
+}
+
+function lerCardCredijuris(lead: KommoLead) {
+  const notas =
+    lead.notas && lead.notas.length > 0
+      ? lead.notas.map((n) => n.texto).join('\n')
+      : (lead.nota_texto ?? '')
+  const pegar = (re: RegExp) => (notas.match(re)?.[1] ?? '').trim()
+
+  const numero = (lead.processo_cnj ?? pegar(/PROCESSO:\s*([0-9.\-]+)/i)).trim()
+  const tipo = pegar(/TIPO:\s*(.+)/i)
+  const categoria = /precat/i.test(tipo) ? 'Precatórios' : 'Requisições de Pequeno Valor'
+
+  const partesTitulo = (lead.nome ?? '').split(' - ')
+  const intermediador = (partesTitulo[0] ?? '').trim()
+  const cedente =
+    pegar(/CEDENTE:\s*(.+)/i) || (partesTitulo.length >= 2 ? partesTitulo[1].trim() : '')
+
+  const parcela = pegar(/PARCELA CEDIDA:\s*(.+)/i).toLowerCase()
+  const tipo_aquisicao =
+    parcela.includes('principal') && parcela.includes('honor')
+      ? 'ambos'
+      : parcela.includes('honor')
+        ? 'honorarios'
+        : parcela.includes('principal')
+          ? 'principal'
+          : 'auto'
+
+  const honMatch = notas.match(/HONOR[ÁA]RIOS?\s*C\.?:\s*([\d.,]+)\s*%/i)
+  const honorarios_pct = honMatch ? honMatch[1].replace(/\./g, '').replace(',', '.') : ''
+
+  return { numero, categoria, cedente, intermediador, tipo_aquisicao, honorarios_pct }
+}
+
+async function analisarLeadCredijuris(lead: KommoLead): Promise<ResultadoAnalise> {
+  const dados = lerCardCredijuris(lead)
+
+  // 1) Kommo: baixa o PDF anexado no card e grava no storage
+  const bk = await invokeFunction<{
+    pronto?: boolean
+    job_id?: string
+    erro?: string
+    nome_arquivo?: string
+  }>('buscar-kommo', { lead_id: lead.kommo_lead_id })
+  if (bk.erro) throw new Error(bk.erro)
+  if (!bk.pronto || !bk.job_id)
+    throw new Error(
+      'Não consegui pegar o PDF do card. Confira se o PDF do processo está anexado no card.',
+    )
+
+  // 2) Análise + precificação — o motor lê o PDF e gera a planilha no Drive
+  const res = await invokeFunction<ResultadoAnalise>('gerar-analise-rpv', {
+    job_id: bk.job_id,
+    intermediador: dados.intermediador,
+    numero_processo: dados.numero,
+    categoria: dados.categoria,
+    tipo_aquisicao: dados.tipo_aquisicao,
+    honorarios_pct: dados.honorarios_pct,
+  })
+  return res
+}
+
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
 const ICONES: Record<number, ReactNode> = {
   [ST_DECISAO]: <ArrowRight className="h-4 w-4" />,
@@ -59,6 +135,9 @@ function CardCredito({
   onAcao,
   analisePronta,
   statusEmAndamento,
+  onAnalisar,
+  analisando,
+  resultadoAnalise,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -67,6 +146,9 @@ function CardCredito({
   analisePronta: boolean | null
   /** Destino sendo processado neste card, ou null. */
   statusEmAndamento: number | null
+  onAnalisar: (l: KommoLead) => void
+  analisando: boolean
+  resultadoAnalise?: ResultadoAnalise
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -117,6 +199,72 @@ function CardCredito({
                 {a.label}
               </Button>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Análise automática Credijuris: Judit -> due diligence -> planilha */}
+      <div className="mt-3">
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<FileSearch className="h-4 w-4" />}
+          onClick={() => onAnalisar(lead)}
+          loading={analisando}
+          disabled={ocupado || analisando}
+        >
+          {analisando ? 'Analisando…' : 'Analisar (PDF do card)'}
+        </Button>
+        {resultadoAnalise && (
+          <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+            {resultadoAnalise.erro ? (
+              <div className="text-red-700">Erro: {resultadoAnalise.erro}</div>
+            ) : resultadoAnalise.reprovado && resultadoAnalise.motivo ? (
+              <div className="text-red-700">
+                ⛔ {resultadoAnalise.motivo}{' '}
+                {resultadoAnalise.relatorio_due_diligence && (
+                  <a
+                    className="font-medium underline"
+                    href={resultadoAnalise.relatorio_due_diligence}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Ver relatório
+                  </a>
+                )}
+              </div>
+            ) : resultadoAnalise.reprovado ? (
+              <div className="text-red-700">
+                Reprovado no Portão 1: {(resultadoAnalise.motivos ?? []).join(' ')}
+              </div>
+            ) : (
+              <div className="text-green-700">
+                ✅ Planilha gerada.{' '}
+                {typeof resultadoAnalise.drive_file_url === 'string' && (
+                  <a
+                    className="font-medium underline"
+                    href={resultadoAnalise.drive_file_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Abrir planilha
+                  </a>
+                )}{' '}
+                {typeof resultadoAnalise.due_diligence_url === 'string' && (
+                  <a
+                    className="font-medium underline"
+                    href={resultadoAnalise.due_diligence_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Relatório de due diligence
+                  </a>
+                )}
+                {resultadoAnalise.aviso && (
+                  <div className="mt-1 text-amber-700">⚠️ {resultadoAnalise.aviso}</div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -182,6 +330,24 @@ export default function AnaliseCredito() {
     leadId: number
     statusId: number
   } | null>(null)
+  // Análise automática (Judit + due diligence + planilha) por card.
+  const [analisandoId, setAnalisandoId] = useState<number | null>(null)
+  const [resultadoAnalise, setResultadoAnalise] = useState<Record<number, ResultadoAnalise>>({})
+
+  async function onAnalisar(lead: KommoLead) {
+    setAnalisandoId(lead.kommo_lead_id)
+    try {
+      const r = await analisarLeadCredijuris(lead)
+      setResultadoAnalise((p) => ({ ...p, [lead.kommo_lead_id]: r }))
+    } catch (e) {
+      setResultadoAnalise((p) => ({
+        ...p,
+        [lead.kommo_lead_id]: { erro: (e as Error)?.message ?? String(e) },
+      }))
+    } finally {
+      setAnalisandoId(null)
+    }
+  }
 
   // Sincroniza com o Kommo ao abrir a página, no mesmo padrão de Publicações e
   // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
@@ -339,6 +505,9 @@ export default function AnaliseCredito() {
                     ? emAndamento.statusId
                     : null
                 }
+                onAnalisar={onAnalisar}
+                analisando={analisandoId === l.kommo_lead_id}
+                resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
               />
             ))}
           </div>
