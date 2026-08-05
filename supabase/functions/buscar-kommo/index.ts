@@ -75,14 +75,44 @@ Deno.serve(async (req) => {
     const bytes = new Uint8Array(await dlRes.arrayBuffer());
     if (bytes.length === 0) return json({ erro: "O arquivo baixado está vazio." }, 502);
 
-    // 5) grava no storage, no mesmo padrão do buscar-judit
+    // 5) SE for PDF, lê o TEXTO AQUI (a leitura pesada fica nesta função, não na
+    //    gerar-analise-rpv) e grava só o texto (leve). Assim nenhuma das duas estoura a CPU.
     const svc = serviceClient();
     const jobId = crypto.randomUUID();
-    const path = `${userId}/${jobId}/processo/${nomeBase}.${ext}`;
-    const up = await svc.storage.from(BUCKET_INPUT).upload(path, new Blob([bytes], { type: mime }), { upsert: true });
+    let path: string;
+    let corpo: Blob;
+    let paginas = 0;
+
+    if (ext === "pdf" || mime.includes("pdf")) {
+      const { extractText } = await import("npm:unpdf@1.6.2");
+      const extraido = await extractText(bytes, { mergePages: true });
+      paginas = (extraido as any).totalPages ?? 0;
+      const bruto = (extraido as any).text;
+      let txt = (Array.isArray(bruto) ? bruto.join("\n") : String(bruto || "")).trim();
+
+      // Corta se gigante (mantém início e FINAL — cálculo/RPV costumam estar no fim)
+      const MAX = 600000; // ~150k tokens
+      if (txt.length > MAX) {
+        const ini = Math.floor(MAX * 0.6);
+        txt = txt.slice(0, ini) +
+          "\n\n[...TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO...]\n\n" +
+          txt.slice(txt.length - (MAX - ini));
+      }
+      if (!txt) {
+        txt = `(PDF de ${paginas} páginas SEM texto extraível — provavelmente escaneado/imagem; não foi possível ler o conteúdo.)`;
+      }
+      path = `${userId}/${jobId}/processo/${nomeBase}.txt`;
+      corpo = new Blob([`[Documento: ${nomeBase} — ${paginas} páginas]\n\n${txt}`], { type: "text/plain" });
+    } else {
+      // Não-PDF (imagem, etc.): grava como veio, a gerar-analise-rpv trata.
+      path = `${userId}/${jobId}/processo/${nomeBase}.${ext}`;
+      corpo = new Blob([bytes], { type: mime });
+    }
+
+    const up = await svc.storage.from(BUCKET_INPUT).upload(path, corpo, { upsert: true });
     if (up.error) return json({ erro: `Falha ao gravar no storage: ${up.error.message}` }, 500);
 
-    return json({ pronto: true, job_id: jobId, nome_arquivo: `${nomeBase}.${ext}`, tamanho: bytes.length });
+    return json({ pronto: true, job_id: jobId, nome_arquivo: path.split("/").pop(), paginas, tamanho_pdf: bytes.length });
   } catch (e) {
     return json({ erro: String((e as Error)?.message || e) }, 500);
   }
