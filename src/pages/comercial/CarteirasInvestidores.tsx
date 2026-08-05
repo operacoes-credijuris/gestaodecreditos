@@ -110,6 +110,11 @@ const COR_GRUPO = {
 // Caixa alta desligada nos títulos dos grupos (o <thead> aplica uppercase).
 const GRUPO = 'text-[13px] font-bold normal-case tracking-normal'
 
+// nowrap também nos <th>: com 25 colunas, um título como "Providências /
+// prox. passos" quebrava em quatro linhas e esticava o cabeçalho inteiro.
+const CLASSES_CARTEIRA =
+  '[&_th]:whitespace-nowrap [&_th]:px-2.5 [&_td]:whitespace-nowrap [&_td]:px-2.5 [&_td]:text-[13px]'
+
 function Individual() {
   const processos = processosCrud.useList()
 
@@ -249,10 +254,7 @@ function Individual() {
               description="Este investidor não consta como cessionário em nenhum crédito."
             />
           ) : (
-            {/* nowrap também nos <th>: com 25 colunas, um título como
-                "Providências / prox. passos" quebrava em quatro linhas e
-                empurrava o cabeçalho inteiro para baixo. */}
-            <Table className="[&_th]:whitespace-nowrap [&_th]:px-2.5 [&_td]:whitespace-nowrap [&_td]:px-2.5 [&_td]:text-[13px]">
+            <Table className={CLASSES_CARTEIRA}>
               <THead>
                 {/* Nível 1: grupos, cada um na sua cor. Nível 2: as colunas. */}
                 <tr>
