@@ -1,518 +1,1072 @@
-// Análise de Crédito: as etapas do fluxo do operacional, alimentadas pelos cards
-// do kanban do Kommo (espelho local em public.kommo_leads).
+// ============================================================================
+// Edge Function: gerar-analise-rpv
+// ----------------------------------------------------------------------------
+// Gêmea da `gerar-contrato`. Recebe o PDF do processo (com a CUC dentro),
+// extrai os dados pela IA, calcula a precificação (deságio calibrado p/ >=2,80%),
+// gera a planilha de Análise de RPV colorida (ExcelJS) e sobe no Drive em
+// A. Análises de crédito / {categoria} / {intermediador} / {cedente}.
 //
-// Cada tela corresponde a exatamente uma coluna do Kommo, e as ações de cada
-// etapa aparecem como botões no próprio card, com um clique — nenhuma etapa
-// pede justificativa: a análise, inclusive o motivo de uma eventual reprovação,
-// já foi escrita em Pendentes (ver src/lib/kommo.ts).
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, ExternalLink, ArrowRight, Check, FileSearch, X } from 'lucide-react'
-import { invokeFunction } from '@/lib/functions'
-import {
-  FUNIL_RPV,
-  KOMMO_SUBDOMINIO,
-  TELAS,
-  ACOES,
-  ST_DECISAO,
-  ST_PROPOSTA,
-  ST_DILIGENCIA,
-  ST_REPROVADO,
-  agruparPorTela,
-  useKommoLeads,
-  useAnalisesProntas,
-  type TelaAnalise,
-  type AcaoTela,
-} from '@/lib/kommo'
-import type { KommoLead } from '@/lib/types'
-import { PageHeader } from '@/components/ui/PageHeader'
-import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
-import { Input } from '@/components/ui/Field'
-import { Segmented } from '@/components/ui/Segmented'
-import { SyncStatus } from '@/components/ui/SyncStatus'
-import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
-import { useToast } from '@/components/ui/Toast'
-import { formatDate } from '@/lib/format'
+// REAPROVEITA helpers idênticos da gerar-contrato (ver bloco "_shared" abaixo).
+// ============================================================================
 
-// ===== Análise automática do card (Judit -> due diligence -> planilha) =====
-// Lê os dados do próprio card (título + notas) e roda a sequência no motor.
-type ResultadoAnalise = {
-  reprovado?: boolean
-  motivo?: string
-  relatorio_due_diligence?: string | null
-  due_diligence_url?: string | null
-  drive_file_url?: string | null
-  drive_folder_url?: string | null
-  aviso?: string | null
-  erro?: string
-  motivos?: string[]
-  avisos?: string[]
-  [k: string]: unknown
+import { corsHeaders } from "../_shared/cors.ts";
+import { serviceClient, getCaller } from "../_shared/auth.ts";
+import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
+import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
+import ExcelJS from 'npm:exceljs@4.4.0';
+import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
+
+// ----------------------------------------------------------------------------
+// Helpers compartilhados — em supabase/functions/_shared/credijuris.ts
+// (extraídos VERBATIM da gerar-contrato; ver arquivo _shared/credijuris.ts).
+// ----------------------------------------------------------------------------
+
+// ======================= HELPERS (extraídos da gerar-contrato) =======================
+// ============================================================================
+// _shared/credijuris.ts
+// Helpers compartilhados, EXTRAÍDOS VERBATIM da função gerar-contrato (testados).
+// Importados por gerar-analise-rpv. Não reescrever — fonte única de verdade.
+// ============================================================================
+
+// ---- constantes ----
+const DRIVE_ROOT_NAME = 'Credijuris - Atualizado';
+const DRIVE_ANALISES_NAME = 'A. Análises de crédito';
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+
+// ---- tipos ----
+type SB = SupabaseClient<any, any, any>;
+interface DriveFile { id: string; name: string; mimeType?: string; parents?: string[] }
+
+// ---- helpers ----
+
+function normalizar(s: string): string {
+  // Lowercase, sem acento, sem pontuação — pra busca.
+  // O range ̀-ͯ cobre as combining marks (NFD separa "á" em "a"+◌́);
+  // usar escapes Unicode em vez de caracteres literais sobrevive a deploys que
+  // corrompam encoding (cmd → CP1252 → Deno UTF-8 invalidaria chars literais).
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036F]/g, '')
+    .replace(/[.\-/() ]/g, '');
 }
 
-function lerCardCredijuris(lead: KommoLead) {
-  const notas =
-    lead.notas && lead.notas.length > 0
-      ? lead.notas.map((n) => n.texto).join('\n')
-      : (lead.nota_texto ?? '')
-  const pegar = (re: RegExp) => (notas.match(re)?.[1] ?? '').trim()
-
-  const numero = (lead.processo_cnj ?? pegar(/PROCESSO:\s*([0-9.\-]+)/i)).trim()
-  const tipo = pegar(/TIPO:\s*(.+)/i)
-  const categoria = /precat/i.test(tipo) ? 'Precatórios' : 'Requisições de Pequeno Valor'
-
-  const partesTitulo = (lead.nome ?? '').split(' - ')
-  const intermediador = (partesTitulo[0] ?? '').trim()
-  const cedente =
-    pegar(/CEDENTE:\s*(.+)/i) || (partesTitulo.length >= 2 ? partesTitulo[1].trim() : '')
-
-  const parcela = pegar(/PARCELA CEDIDA:\s*(.+)/i).toLowerCase()
-  const tipo_aquisicao =
-    parcela.includes('principal') && parcela.includes('honor')
-      ? 'ambos'
-      : parcela.includes('honor')
-        ? 'honorarios'
-        : parcela.includes('principal')
-          ? 'principal'
-          : 'auto'
-
-  const honMatch = notas.match(/HONOR[ÁA]RIOS?\s*C\.?:\s*([\d.,]+)\s*%/i)
-  const honorarios_pct = honMatch ? honMatch[1].replace(/\./g, '').replace(',', '.') : ''
-
-  return { numero, categoria, cedente, intermediador, tipo_aquisicao, honorarios_pct }
+function escapeDriveQuery(s: string): string {
+  return s.replace(/'/g, "\\'");
 }
 
-async function analisarLeadCredijuris(lead: KommoLead): Promise<ResultadoAnalise> {
-  const dados = lerCardCredijuris(lead)
-
-  // 1) Kommo: baixa o PDF anexado no card e grava no storage
-  const bk = await invokeFunction<{
-    pronto?: boolean
-    job_id?: string
-    erro?: string
-    nome_arquivo?: string
-  }>('buscar-kommo', { lead_id: lead.kommo_lead_id })
-  if (bk.erro) throw new Error(bk.erro)
-  if (!bk.pronto || !bk.job_id)
-    throw new Error(
-      'Não consegui pegar o PDF do card. Confira se o PDF do processo está anexado no card.',
-    )
-
-  // 2) Análise + precificação — o motor lê o PDF e gera a planilha no Drive
-  const res = await invokeFunction<ResultadoAnalise>('gerar-analise-rpv', {
-    job_id: bk.job_id,
-    intermediador: dados.intermediador,
-    numero_processo: dados.numero,
-    categoria: dados.categoria,
-    tipo_aquisicao: dados.tipo_aquisicao,
-    honorarios_pct: dados.honorarios_pct,
-  })
-  return res
+async function storageGetBytes(sb: SB, bucket: string, path: string): Promise<Uint8Array> {
+  const { data, error } = await sb.storage.from(bucket).download(path);
+  if (error) throw new Error(`Storage download falhou (${bucket}/${path}): ${error.message}`);
+  const buf = await data.arrayBuffer();
+  return new Uint8Array(buf);
 }
 
-/** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
-const ICONES: Record<number, ReactNode> = {
-  [ST_DECISAO]: <ArrowRight className="h-4 w-4" />,
-  [ST_PROPOSTA]: <Check className="h-4 w-4" />,
-  [ST_DILIGENCIA]: <FileSearch className="h-4 w-4" />,
-  [ST_REPROVADO]: <X className="h-4 w-4" />,
+async function refreshGoogleAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<string> {
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Google OAuth refresh falhou (${res.status}): ${txt.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  if (!data.access_token) throw new Error('Google OAuth: sem access_token na resposta');
+  return data.access_token as string;
 }
 
-/** Link para o card no Kommo — o operacional às vezes precisa do original. */
-function urlCard(leadId: number): string {
-  return `https://${KOMMO_SUBDOMINIO}.kommo.com/leads/detail/${leadId}`
+async function driveListFiles(
+  token: string,
+  query: string,
+  driveId?: string,
+): Promise<DriveFile[]> {
+  const params = new URLSearchParams({
+    q: query,
+    fields: 'files(id,name,mimeType,parents)',
+    includeItemsFromAllDrives: 'true',
+    supportsAllDrives: 'true',
+    pageSize: '1000',
+  });
+  if (driveId) {
+    params.set('corpora', 'drive');
+    params.set('driveId', driveId);
+  } else {
+    params.set('corpora', 'allDrives');
+  }
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+    headers: { Authorization: 'Bearer ' + token },
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Drive list (${res.status}): ${txt.slice(0, 300)} | query=${query}`);
+  }
+  const data = await res.json();
+  return data.files || [];
 }
 
-function tituloCard(lead: KommoLead): string {
-  return lead.nome?.trim() || `Card ${lead.kommo_lead_id}`
+async function driveFindSharedDrive(token: string, name: string): Promise<{ id: string; name: string } | null> {
+  let pageToken: string | undefined;
+  while (true) {
+    const params = new URLSearchParams({ fields: 'nextPageToken,drives(id,name)' });
+    if (pageToken) params.set('pageToken', pageToken);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/drives?${params}`, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!res.ok) {
+      // pode não ter permissão de listar drives — não é fatal, segue pra busca normal
+      return null;
+    }
+    const data = await res.json();
+    for (const d of (data.drives || [])) if (d.name === name) return d;
+    pageToken = data.nextPageToken;
+    if (!pageToken) return null;
+  }
 }
 
-function CardCredito({
-  lead,
-  acoes,
-  onAcao,
-  analisePronta,
-  statusEmAndamento,
-  onAnalisar,
-  analisando,
-  resultadoAnalise,
-}: {
-  lead: KommoLead
-  acoes: AcaoTela[]
-  onAcao: (l: KommoLead, a: AcaoTela) => void
-  /** null = não mostrar o selo (só faz sentido na etapa de revisão). */
-  analisePronta: boolean | null
-  /** Destino sendo processado neste card, ou null. */
-  statusEmAndamento: number | null
-  onAnalisar: (l: KommoLead) => void
-  analisando: boolean
-  resultadoAnalise?: ResultadoAnalise
+async function driveFindChild(token: string, name: string, parentId: string, mime?: string): Promise<DriveFile | null> {
+  let q = `name = '${escapeDriveQuery(name)}' and '${parentId}' in parents and trashed = false`;
+  if (mime) q += ` and mimeType = '${mime}'`;
+  const files = await driveListFiles(token, q);
+  return files[0] || null;
+}
+
+async function driveCreateFolder(token: string, name: string, parentId: string): Promise<string> {
+  const res = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parentId] }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Drive criar pasta '${name}' (${res.status}): ${txt.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  return data.id;
+}
+
+async function driveFindOrCreateFolder(token: string, name: string, parentId: string): Promise<string> {
+  const existing = await driveFindChild(token, name, parentId, FOLDER_MIME);
+  if (existing) return existing.id;
+  return driveCreateFolder(token, name, parentId);
+}
+
+async function driveFindChildByTolerantName(
+  token: string,
+  parentId: string,
+  needle: string,
+  mustBeFolder = true,
+): Promise<DriveFile | null> {
+  let q = `'${parentId}' in parents and trashed = false`;
+  if (mustBeFolder) q += ` and mimeType = '${FOLDER_MIME}'`;
+  const files = await driveListFiles(token, q);
+  const n = normalizar(needle);
+  return files.find(f => normalizar(f.name) === n)
+      ?? files.find(f => normalizar(f.name).includes(n))
+      ?? null;
+}
+
+async function driveEncontrarAnalisesRoot(token: string): Promise<string> {
+  const drive = await driveFindSharedDrive(token, DRIVE_ROOT_NAME);
+  if (drive) {
+    const child = await driveFindChildByTolerantName(token, drive.id, DRIVE_ANALISES_NAME);
+    if (child) return child.id;
+    throw new Error(`Shared Drive '${DRIVE_ROOT_NAME}' achado, mas pasta '${DRIVE_ANALISES_NAME}' não existe nele.`);
+  }
+  const roots = await driveListFiles(token, `name = '${escapeDriveQuery(DRIVE_ROOT_NAME)}' and trashed = false and mimeType = '${FOLDER_MIME}'`);
+  if (!roots[0]) throw new Error(`'${DRIVE_ROOT_NAME}' não encontrado no Drive. Confirma que a conta do refresh_token tem acesso.`);
+  const child = await driveFindChildByTolerantName(token, roots[0].id, DRIVE_ANALISES_NAME);
+  if (!child) throw new Error(`Pasta '${DRIVE_ANALISES_NAME}' não existe dentro de '${DRIVE_ROOT_NAME}'.`);
+  return child.id;
+}
+
+async function driveListarIntermediadoresAnalise(token: string, categoria: string): Promise<string[]> {
+  const analisesRootId = await driveEncontrarAnalisesRoot(token);
+  const catFolder = await driveFindChildByTolerantName(token, analisesRootId, categoria);
+  if (!catFolder) return [];
+  const subs = await driveListFiles(token, `'${catFolder.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
+  return subs.map(s => s.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
+async function driveUploadBytes(
+  token: string,
+  name: string,
+  parentId: string,
+  bytes: Uint8Array,
+  mime: string,
+  sobrescrever = true,
+): Promise<{ id: string; webViewLink?: string }> {
+  if (sobrescrever) {
+    const existing = await driveFindChild(token, name, parentId);
+    if (existing) {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${existing.id}?supportsAllDrives=true`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token },
+      });
+    }
+  }
+  // Multipart upload (mais simples que resumable pra arquivos pequenos)
+  const boundary = '-------cred' + Math.random().toString(36).slice(2);
+  const metadata = JSON.stringify({ name, parents: [parentId] });
+  const enc = new TextEncoder();
+  const head = enc.encode(
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${metadata}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: ${mime}\r\n\r\n`,
+  );
+  const tail = enc.encode(`\r\n--${boundary}--\r\n`);
+  const body = new Uint8Array(head.length + bytes.length + tail.length);
+  body.set(head, 0);
+  body.set(bytes, head.length);
+  body.set(tail, head.length + bytes.length);
+
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+    },
+    body,
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Drive upload '${name}' (${res.status}): ${txt.slice(0, 300)}`);
+  }
+  return await res.json();
+}
+// ===================== FIM DOS HELPERS COMPARTILHADOS =====================
+
+
+// ============================================================================
+// Constantes
+// ============================================================================
+const CLAUDE_MODEL = 'claude-opus-4-5';
+const CLAUDE_MAX_TOKENS = 8000;                 // extração da análise é grande (M1+M2+M4)
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const BUCKET_INPUT = 'analises-input';            // bucket novo (criar no painel)
+const BUCKET_TEMPLATES = 'contratos-templates';  // MESMO bucket de templates da gerar-contrato
+const TEMPLATE_NOME = 'Modelo_Analise_de_RPV.xlsx';  // sem acento — Supabase rejeita acento no nome
+const DRIVE_CATEGORIA_PADRAO = 'Requisições de Pequeno Valor';
+// A tela manda rótulo curto ("RPV"); o Drive usa o nome completo da pasta.
+const CATEGORIA_MAP: Record<string, string> = {
+  'RPV': 'Requisições de Pequeno Valor',
+  'Requisições de Pequeno Valor': 'Requisições de Pequeno Valor',
+  'Precatórios': 'Precatórios',
+};
+const resolverCategoria = (c?: string) => CATEGORIA_MAP[(c || '').trim()] ?? ((c || '').trim() || DRIVE_CATEGORIA_PADRAO);
+
+const CORS = corsHeaders;
+const jsonResponse = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+const errorResponse = (message: string, status = 400, extra?: Record<string, unknown>) =>
+  jsonResponse({ ok: false, error: message, ...(extra || {}) }, status);
+
+const brl = (n: any) => 'R$ ' + (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = (n: any) => ((Number(n) || 0) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+// Converte um número escrito como texto (US "1234.56", BR "1.234,56", "1234,56"...) para Number. null se não der.
+function parseNumeroFlex(num: string): number | null {
+  const t = String(num).trim().replace(/\s/g, '');
+  if (!/\d/.test(t)) return null;
+  const temP = t.includes('.'), temV = t.includes(',');
+  let s = t;
+  if (temP && temV) s = (t.lastIndexOf(',') > t.lastIndexOf('.')) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+  else if (temV) s = t.replace(/\./g, '').replace(',', '.');
+  else if (temP) { const p = t.split('.'); s = (p.length === 2 && p[1].length <= 2) ? t : t.replace(/\./g, ''); }
+  const v = Number(s);
+  return isNaN(v) ? null : v;
+}
+// Reescreve valores em Real dentro de um texto para o padrão brasileiro (R$ 1.234,56).
+// Só mexe em trechos "R$ <número>" — NÃO toca em datas (10/01/2024) nem números de processo.
+function reformatarMoeda(s: any): any {
+  if (typeof s !== 'string') return s;
+  return s.replace(/R\$\s*(\d[\d.,]*\d|\d)/g, (full: string, num: string) => {
+    const v = parseNumeroFlex(num);
+    return v == null ? full : brl(v);
+  });
+}
+
+// ============================================================================
+// MOTOR DE PRECIFICAÇÃO  (porte fiel das fórmulas do template)
+// ============================================================================
+
+// Tabela TJMG / Cartório de Virginópolis-MG — escritura com conteúdo financeiro,
+// base = preço da cessão. Portaria 8.664/CGJ/2025. Reconferir anualmente.
+function emolumentoCartorio(precoCessao: number): { valor: number | null; faixa: string } {
+  const p = precoCessao;
+  if (p <= 1400)   return { valor: 220.55,  faixa: 'até R$ 1.400,00' };
+  if (p <= 2720)   return { valor: 359.76,  faixa: 'R$ 1.400,01 a R$ 2.720,00' };
+  if (p <= 5440)   return { valor: 521.35,  faixa: 'R$ 2.720,01 a R$ 5.440,00' };
+  if (p <= 7000)   return { valor: 721.75,  faixa: 'R$ 5.440,01 a R$ 7.000,00' };
+  if (p <= 14000)  return { valor: 962.47,  faixa: 'R$ 7.000,01 a R$ 14.000,00' };
+  if (p <= 28000)  return { valor: 1243.47, faixa: 'R$ 14.000,01 a R$ 28.000,00' };
+  return { valor: null, faixa: 'acima de R$ 28.000,00 — CONFIRMAR COM O CARTÓRIO' };
+}
+
+// Prazo em meses (linhas 21–33 do template). Cenário A = RPV não expedida; B = já expedida.
+// Piso de 6 meses. T5/T42 SEMPRE vêm daqui — nunca de prazos de convênio inventados.
+function prazoMeses(o: {
+  serventiaDias: number; gabineteDias: number; scenario: 'A' | 'B';
+  dataAquisicao: Date; dataFatalConvenio?: Date; diasAlvaraFixo?: number; periodoGraca?: number;
+}): number {
+  const sg = o.serventiaDias + o.gabineteDias;       // A17 + C17
+  const c21 = sg, c22 = sg, c25 = sg, c26 = sg;
+  const c27 = o.serventiaDias * 1.5;
+  const c24 = o.periodoGraca ?? 60;
+  let dias: number;
+  if (o.scenario === 'A') {
+    if (!o.dataFatalConvenio) throw new Error('Cenário A exige dataFatalConvenio (prazo do convênio p/ expedir RPV).');
+    const e23 = Math.round((o.dataFatalConvenio.getTime() - o.dataAquisicao.getTime()) / 86400000);
+    dias = c21 + c22 + e23 + c24 + c25 + c26 + c27;
+  } else {
+    dias = c21 + c22 + (o.diasAlvaraFixo ?? 21) + c24 + c25 + c26 + c27;
+  }
+  return Math.max(6, dias / 30);
+}
+
+// Modelo 1 (verde) se há honorários contratuais a destacar; senão Modelo 2 (azul).
+function escolherModelo(honorariosContratuais: number): 1 | 2 {
+  return honorariosContratuais > 0 ? 1 : 2;
+}
+
+// Calibra o MENOR deságio (mesmo % no principal e nos honorários) p/ rentab. mensal >= alvo.
+// NUNCA lança erro: se nem no deságio máximo (95%) der pra atingir o alvo, devolve o MELHOR
+// caso (maior rentabilidade) com atingiuAlvo=false, pra a planilha sempre ser gerada.
+// Regra INSS: para horas extras com INSS zerado na CUC, aplicar reserva de 14,25% (feito no extrator).
+function calibrarDesagio(o: {
+  brutoTotal: number; honorarios: number; ir: number; inss: number;
+  T5: number; modelo: 1 | 2; comissaoPct?: number; diligencia?: number; alvo?: number;
 }) {
-  const [aberto, setAberto] = useState(false)
-  const ocupado = statusEmAndamento !== null
-  // Compatibilidade com cards sincronizados antes da coluna `notas` existir:
-  // cai no nota_texto para não sumir o dado do crédito antes do próximo sync.
-  const notas =
-    lead.notas?.length > 0
-      ? lead.notas
-      : lead.nota_texto?.trim()
-        ? [{ id: 0, texto: lead.nota_texto, criado_em: null, autor: null }]
-        : []
-  const posteriores = notas.length - 1
+  const alvo = o.alvo ?? 0.028;
+  const dilig = o.diligencia ?? 250;
+  // L5 = principal líquido; L7 = honorários (no Modelo 2, L7 é deduzido mas não adquirido)
+  const L5 = o.brutoTotal - (o.ir + o.inss + o.honorarios);
+  const L7 = o.honorarios;
+  // Base e cessão dependem do modelo:
+  //   Modelo 1: Y3 = L5+L7 ; cessão = (L5+L7)*(1-d)
+  //   Modelo 2: Y3 = L5    ; cessão = L5*(1-d)
+  const baseY3 = o.modelo === 1 ? L5 + L7 : L5;
+  const Y5 = (o.comissaoPct ?? 0.05) * baseY3;
 
-  return (
-    <div className="border-b border-slate-100 p-4 transition-colors last:border-b-0 hover:bg-slate-50/70">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
-            {analisePronta !== null && (
-              <Badge size="sm" tone={analisePronta ? 'green' : 'yellow'}>
-                {analisePronta ? 'Finalizado' : 'Em curso'}
-              </Badge>
-            )}
-          </div>
-          {/* Sem linha de metadados: o processo já vem no título, o responsável é
-              sempre a Credijuris, e a data de criação do card é redundante com as
-              datas das próprias anotações. Tags também ficam de fora — as atuais
-              são artefato da migração do Chatwoot. Tudo continua em kommo_leads. */}
-        </div>
+  const avaliar = (d: number) => {
+    const cessao = o.modelo === 1 ? (L5 + L7) * (1 - d) : L5 * (1 - d);
+    const emol = emolumentoCartorio(cessao);
+    if (emol.valor === null) return null;          // cessão > 28k: cartório indefinido, ignora esse d
+    const Y4 = cessao + Y5 + emol.valor + dilig;
+    const Y9 = Math.pow(baseY3 / Y4, 1 / o.T5) - 1;
+    return { d, cessao, emol, Y4, Y9 };
+  };
+  const montar = (r: any, atingiuAlvo: boolean) => ({
+    desagio: r.d, L5, L7, Y3: baseY3, Y5,
+    S5: L5 * (1 - r.d),
+    S7: o.modelo === 1 ? L7 * (1 - r.d) : 0,
+    cessao: r.cessao, Y10: r.emol.valor, faixaCartorio: r.emol.faixa, Y4: r.Y4, Y9: r.Y9,
+    desagioEfetivo: 1 - r.cessao / baseY3, atingiuAlvo,
+  });
 
-        {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
-            em vez de três. flex-wrap para não estourar em tela estreita. */}
-        {acoes.length > 0 && (
-          <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
-            {acoes.map((a) => (
-              <Button
-                key={a.statusId}
-                size="sm"
-                variant={a.variant}
-                icon={ICONES[a.statusId]}
-                onClick={() => onAcao(lead, a)}
-                loading={statusEmAndamento === a.statusId}
-                // Trava as outras ações do card enquanto uma corre: duas
-                // movimentações simultâneas no mesmo card se atropelariam.
-                disabled={ocupado}
-              >
-                {a.label}
-              </Button>
-            ))}
-          </div>
-        )}
-      </div>
+  let melhor: any = null;                          // maior rentabilidade entre os d válidos (fallback)
+  for (let d = 0; d <= 0.95 + 1e-9; d += 0.0001) {
+    const r = avaliar(d);
+    if (!r) continue;
+    if (r.Y9 >= alvo) return montar(r, true);      // 1º deságio que bate o alvo = menor deságio
+    if (!melhor || r.Y9 > melhor.Y9) melhor = r;
+  }
+  if (melhor) return montar(melhor, false);        // não bateu o alvo: melhor caso possível + flag
 
-      {/* Análise automática Credijuris: Judit -> due diligence -> planilha */}
-      <div className="mt-3">
-        <Button
-          size="sm"
-          variant="secondary"
-          icon={<FileSearch className="h-4 w-4" />}
-          onClick={() => onAnalisar(lead)}
-          loading={analisando}
-          disabled={ocupado || analisando}
-        >
-          {analisando ? 'Analisando…' : 'Analisar (PDF do card)'}
-        </Button>
-        {resultadoAnalise && (
-          <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
-            {resultadoAnalise.erro ? (
-              <div className="text-red-700">Erro: {resultadoAnalise.erro}</div>
-            ) : resultadoAnalise.reprovado && resultadoAnalise.motivo ? (
-              <div className="text-red-700">
-                ⛔ {resultadoAnalise.motivo}{' '}
-                {resultadoAnalise.relatorio_due_diligence && (
-                  <a
-                    className="font-medium underline"
-                    href={resultadoAnalise.relatorio_due_diligence}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Ver relatório
-                  </a>
-                )}
-              </div>
-            ) : resultadoAnalise.reprovado ? (
-              <div className="text-red-700">
-                Reprovado no Portão 1: {(resultadoAnalise.motivos ?? []).join(' ')}
-              </div>
-            ) : (
-              <div className="text-green-700">
-                ✅ Planilha gerada.{' '}
-                {typeof resultadoAnalise.drive_file_url === 'string' && (
-                  <a
-                    className="font-medium underline"
-                    href={resultadoAnalise.drive_file_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Abrir planilha
-                  </a>
-                )}{' '}
-                {typeof resultadoAnalise.due_diligence_url === 'string' && (
-                  <a
-                    className="font-medium underline"
-                    href={resultadoAnalise.due_diligence_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Relatório de due diligence
-                  </a>
-                )}
-                {resultadoAnalise.aviso && (
-                  <div className="mt-1 text-amber-700">⚠️ {resultadoAnalise.aviso}</div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="mt-2 flex items-center gap-3">
-        {/* As anotações vêm em texto livre e o formato varia entre cards, então
-            são exibidas cruas, recolhidas por padrão. A contagem no rótulo evita
-            que anotação nova passe batida com o bloco fechado. */}
-        {notas.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setAberto((v) => !v)}
-            className="text-xs font-medium text-brand-600 hover:underline"
-          >
-            {aberto ? 'Ocultar histórico' : 'Ver histórico'}
-            {posteriores > 0 && ` (+${posteriores})`}
-          </button>
-        )}
-        <a
-          href={urlCard(lead.kommo_lead_id)}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
-        >
-          <ExternalLink className="h-3.5 w-3.5" /> Abrir no Kommo
-        </a>
-      </div>
-
-      {aberto && notas.length > 0 && (
-        <div className="mt-2 space-y-2">
-          {notas.map((n, i) => (
-            <div key={n.id || i}>
-              {/* Só a data. Sem rótulo de posição, porque há cards em que a
-                  primeira anotação é um comentário curto e o bloco de dados vem
-                  depois — numerar sugeriria uma ordem semântica que não existe.
-                  E sem autor: a equipe usa um login só e se identifica no próprio
-                  texto da anotação; os nomes que aparecem são de antes disso.
-                  O campo continua guardado em kommo_leads.notas. */}
-              <div className="mb-0.5 text-xs text-slate-400">
-                {n.criado_em && formatDate(n.criado_em)}
-              </div>
-              <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
-                {n.texto}
-              </pre>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  // Caso extremo: nenhum deságio válido (cessão sempre > R$28k). Usa 95% com cartório a confirmar.
+  const dMax = 0.95;
+  const cessao = o.modelo === 1 ? (L5 + L7) * (1 - dMax) : L5 * (1 - dMax);
+  const Y4 = cessao + Y5 + dilig;
+  const Y9 = Math.pow(baseY3 / Y4, 1 / o.T5) - 1;
+  return {
+    desagio: dMax, L5, L7, Y3: baseY3, Y5,
+    S5: L5 * (1 - dMax), S7: o.modelo === 1 ? L7 * (1 - dMax) : 0,
+    cessao, Y10: null, faixaCartorio: 'Confirmar com cartório (cessão acima de R$28.000)',
+    Y4, Y9, desagioEfetivo: 1 - cessao / baseY3, atingiuAlvo: false,
+  };
 }
 
-export default function AnaliseCredito() {
-  const qc = useQueryClient()
-  const toast = useToast()
-  const leads = useKommoLeads(FUNIL_RPV)
-  const prontas = useAnalisesProntas()
+// ============================================================================
+// GERAÇÃO DA PLANILHA  (ExcelJS — carrega o template e preenche/colore)
+// ============================================================================
 
-  const [tela, setTela] = useState<TelaAnalise>('pendentes')
-  const [busca, setBusca] = useState('')
-  // Ação em curso, para o botão certo do card certo mostrar o spinner.
-  const [emAndamento, setEmAndamento] = useState<{
-    leadId: number
-    statusId: number
-  } | null>(null)
-  // Análise automática (Judit + due diligence + planilha) por card.
-  const [analisandoId, setAnalisandoId] = useState<number | null>(null)
-  const [resultadoAnalise, setResultadoAnalise] = useState<Record<number, ResultadoAnalise>>({})
+// Cores (formatação condicional — regras tipo "expression", como na pipeline atual)
+const COR = {
+  verde: 'FFD9EAD3', vermelho: 'FFF4CCCC', azul: 'FFCFE2F3', roxo: 'FFD9D2E9',
+  laranja: 'FFFCE5CD', cinza: 'FFEFEFEF',
+};
+const fill = (argb: string) => ({ type: 'pattern' as const, pattern: 'solid' as const, bgColor: { argb }, fgColor: { argb } });
+const regra = (ref: string, formula: string, cor: string, priority: number) =>
+  ({ ref, formula, cor, priority });
 
-  async function onAnalisar(lead: KommoLead) {
-    setAnalisandoId(lead.kommo_lead_id)
-    try {
-      const r = await analisarLeadCredijuris(lead)
-      setResultadoAnalise((p) => ({ ...p, [lead.kommo_lead_id]: r }))
-    } catch (e) {
-      setResultadoAnalise((p) => ({
-        ...p,
-        [lead.kommo_lead_id]: { erro: (e as Error)?.message ?? String(e) },
-      }))
-    } finally {
-      setAnalisandoId(null)
+// Aplica todas as regras de cor da aba jurídica (texto = valor do dropdown).
+function aplicarCoresJuridica(ws: any) {
+  const add = (ref: string, rules: Array<{ f: string; cor: string }>) =>
+    ws.addConditionalFormatting({
+      ref,
+      rules: rules.map((r, i) => ({ type: 'expression', formulae: [r.f], priority: i + 1, style: { fill: fill(r.cor) } })),
+    });
+
+  // Sim/Não — aplica em toda a faixa de respostas (só pinta onde o texto casa)
+  add('B9:B40', [
+    { f: '$B9="Sim"', cor: COR.verde },
+    { f: '$B9="Não"', cor: COR.vermelho },
+  ]);
+  // B20 — tipo de sentença
+  add('B20', [
+    { f: '$B20="Procedência"', cor: COR.verde },
+    { f: '$B20="Improcedência"', cor: COR.vermelho },
+    { f: '$B20="Procedência parcial"', cor: COR.azul },
+    { f: '$B20="Homologatória de acordo"', cor: COR.roxo },
+  ]);
+  // B21 — líquida/ilíquida
+  add('B21', [
+    { f: '$B21="Líquida"', cor: COR.verde },
+    { f: '$B21="Iliquída"', cor: COR.vermelho },
+  ]);
+  // B25 — valor apresentado / execução invertida
+  add('B25', [
+    { f: '$B25="Valor apresentado no CS"', cor: COR.roxo },
+    { f: '$B25="Execução invertida"', cor: COR.azul },
+  ]);
+  // B27 — cenários de execução invertida (cinza p/ qualquer preenchimento)
+  add('B27', [{ f: '$B27<>""', cor: COR.cinza }]);
+  // B39 — expedição
+  add('B39', [
+    { f: '$B39="Minuta de RPV"', cor: COR.laranja },
+    { f: '$B39="RPV"', cor: COR.verde },
+    { f: '$B39="Alvará de pagamento"', cor: COR.azul },
+    { f: '$B39="Sem expedição"', cor: COR.roxo },
+  ]);
+  // B40 — necessidade de alvará
+  add('B40', [
+    { f: '$B40="Não precisa de alvará"', cor: COR.azul },
+    { f: '$B40="Precisa de alvará"', cor: COR.roxo },
+  ]);
+}
+
+// Title Case para nomes: 1ª letra de cada palavra maiúscula, resto minúsculo
+// (conectores comuns em pt-BR ficam minúsculos: "Vanderlan Gomes de Morais").
+function tituloNome(s: string): string {
+  const conect = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'di', 'du', 'del', 'la', 'le', 'van', 'von']);
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w, i) => (i > 0 && conect.has(w)) ? w : (w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
+}
+
+// Remove caracteres proibidos em nome de arquivo do Drive
+function limparNomeArquivo(s: string): string {
+  return String(s || '').replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
+}
+
+// dados = saída do extrator. Estrutura em SCHEMA_ANALISE (abaixo).
+async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T5: number): Promise<Uint8Array> {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(templateBytes as any);
+
+  const aj = wb.getWorksheet('Análise jurídica')!;
+  const MODELO1 = 'Quando o principal e honorários';
+  const MODELO2 = 'Quando apenas o crédito princip';
+
+  // ---------------- Aba jurídica: cabeçalho ----------------
+  aj.getCell('C1').value = dados.numero_processo ?? '';
+  aj.getCell('C2').value = dados.intermediador ?? '';
+  aj.getCell('C3').value = dados.tipo_credito ?? '';          // dropdown: tipo de crédito
+  aj.getCell('C4').value = dados.cedente_cpf ?? '';
+  aj.getCell('C5').value = dados.advogado_oab ?? '';
+  aj.getCell('C6').value = dados.tribunal ?? '';
+
+  // ---------------- Aba jurídica: respostas M2 (col B) + complementos (col D) ----------------
+  // dados.m2 = { "9": {resposta, complemento}, "10": {...}, ... } indexado pela LINHA da planilha
+  const PULAR_LINHA = new Set([26]);       // 26 = bloco fixo "CUIDADO" (mesclado A26:D26) — nunca escrever
+  const SEM_COMPLEMENTO = new Set([29]);   // 29: C29:D29 já é mesclado (instrução) — não gravar D29
+  for (const [linha, item] of Object.entries<any>(dados.m2 || {})) {
+    const r = Number(linha);
+    if (PULAR_LINHA.has(r)) continue;
+    if (item?.resposta != null && item.resposta !== '') aj.getCell(`B${r}`).value = item.resposta;
+    // complemento só quando houver (regra: "Não" => D vazio; nada de "não encontrado")
+    if (!SEM_COMPLEMENTO.has(r) && item?.complemento != null && item.complemento !== '') aj.getCell(`D${r}`).value = reformatarMoeda(item.complemento);
+  }
+
+  // bloco do valor final (B41) — espelha D37/B43 da metodologia
+  aj.getCell('B41').value =
+    `VALOR TOTAL BRUTO: ${brl(dados.bruto_total)}\n` +
+    `Valor principal líquido: ${brl(calc.L5)}\n` +
+    `Valor dos honorários contratuais: ${brl(calc.L7)}`;
+
+  aplicarCoresJuridica(aj);
+
+  // ---------------- Aba do modelo escolhido: precificação ----------------
+  const m = wb.getWorksheet(dados.modelo === 1 ? MODELO1 : MODELO2)!;
+  m.getCell('K5').value = dados.bruto_total;
+  m.getCell('M5').value = dados.ir;
+  m.getCell('N5').value = dados.inss;
+  if (dados._soHonorarios) {
+    m.getCell('L7').value = 0;                          // adquirindo só honorários: sem sub-honorários
+    m.getCell('G5').value = 'Honorários Contratuais';   // natureza do que está sendo adquirido
+  } else if (dados.modelo === 1) {
+    m.getCell('L7').value = dados.honorarios;           // M1: honorários adquiridos (CUC ou % informado)
+    m.getCell('R7').value = calc.desagio;               // mesmo deságio no principal e honorários
+  } else if (dados._honPctInformado) {
+    m.getCell('L7').value = dados.honorarios;           // M2 com % informado: aplica a dedução de honorários calculada
+  }
+  m.getCell('R5').value = calc.desagio;
+  m.getCell('T5').value = Number(T5.toFixed(4));
+  m.getCell('I5').value = dados.data_aquisicao;        // DD/MM/AAAA (hoje)
+  m.getCell('J5').value = dados.data_pagamento;        // hoje + T5 meses (último dia do mês)
+  m.getCell('A17').value = dados.serventia_dias;       // M4
+  m.getCell('C17').value = dados.gabinete_dias;        // M4
+  m.getCell('W10').value = calc.Y10;                   // emolumento cartório (coluna W, após remover as colunas U e V)
+
+  // Processo e Resumo (M1) no bloco de cima (B4 mesclado B4:B7, C4 mesclado C4:C7)
+  m.getCell('B4').value = dados.numero_processo ?? '';
+  m.getCell('C4').value = dados.m1_sintese ?? '';
+
+  // Credor / Advogado / Ente / Fase processual (bloco de cima: linha 5 = principal, linha 7 = honorários)
+  m.getCell('D5').value = dados._credor_titulo ?? dados.credor_nome ?? '';  // REQUERENTE (credor)
+  m.getCell('D7').value = dados.advogado_nome ?? '';                        // ADVOGADO(A)
+  m.getCell('F5').value = dados.ente_devedor ?? '';                        // Ente devedor
+  m.getCell('F7').value = dados.ente_devedor ?? '';
+  m.getCell('H5').value = dados.fase_processual ?? '';                     // Fase processual
+  m.getCell('H7').value = dados.fase_processual ?? '';
+
+  // Rótulo correto do bloco mantido (o bloco de cima fica para ambos os modelos)
+  m.getCell('A1').value = dados.modelo === 1
+    ? 'MODELO 1 (VERDE): USADO PARA QUANDO OS HONORÁRIOS FORAM DESTACADOS NA RPV OU NOS CÁLCULOS DA CONTADORIA JUDICIAL'
+    : 'MODELO 2 (AZUL): USADO PARA QUANDO OS HONORÁRIOS NÃO FORAM DESTACADOS NA RPV OU NOS CÁLCULOS DA CONTADORIA JUDICIAL';
+
+  // Apaga o bloco de baixo (sempre não usado: linhas 38-73). Desmescla primeiro p/ não corromper.
+  try {
+    const merges: string[] = ((m as any).model?.merges || []).slice();
+    for (const rng of merges) {
+      const mm = /[A-Z]+(\d+):[A-Z]+(\d+)/.exec(String(rng));
+      if (mm && Number(mm[1]) >= 38) { try { (m as any).unMergeCells(rng); } catch (_) { /* ok */ } }
+    }
+  } catch (_) { /* ok */ }
+  // spliceRows em bloco falha quando há mescladas; remove uma linha por vez, de baixo p/ cima (funciona)
+  for (let r = m.rowCount; r >= 38; r--) m.spliceRows(r, 1);
+
+  // Apaga a aba do outro modelo (não usada)
+  wb.removeWorksheet(wb.getWorksheet(dados.modelo === 1 ? MODELO2 : MODELO1)!.id);
+
+  const out = await wb.xlsx.writeBuffer();
+  return new Uint8Array(out as ArrayBuffer);
+}
+
+// ============================================================================
+// EXTRAÇÃO PELA IA  (mesmo padrão da gerar-contrato: api.anthropic.com direto)
+// ============================================================================
+
+// Esquema do que a IA deve devolver. Linhas em m2 = nº da linha na aba jurídica.
+const SCHEMA_ANALISE = {
+  numero_processo: 'número do processo',
+  tribunal: 'tribunal (sigla, ex.: TJGO)',
+  cedente_cpf: 'nome do cedente e CPF',
+  advogado_oab: 'nome do advogado/escritório e OAB/CNPJ',
+  credor_nome: 'nome completo do credor/cedente SEM o CPF (ex.: "Vanderlan Gomes de Morais")',
+  advogado_nome: 'nome do advogado ou escritório SEM OAB/CNPJ',
+  ente_devedor: 'ente devedor (quem vai pagar o crédito), ex.: "Estado de Goiás", "Município de Goiânia", "União", "Fazenda Pública do Estado de Goiás"',
+  fase_processual: 'fase processual atual resumida em poucas palavras, ex.: "Cumprimento de sentença", "Aguardando expedição de RPV", "RPV expedida", "Trânsito em julgado"',
+  tipo_credito: 'um de: "Apenas o crédito principal" | "Crédito principal e honorários" | "Apenas os honorários"',
+
+  // financeiro (da CUC dentro do PDF)
+  bruto_total: 'valor bruto total (principal + juros + Selic), número sem R$',
+  principal_liquido: 'valor principal líquido após IR/INSS, número',
+  honorarios: 'HONORÁRIOS CONTRATUAIS A DESTACAR (0 se não houver), número',
+  ir: 'IR retido, número (0 se isento)',
+  inss: 'INSS retido conforme CUC, número (0 se zerado)',
+  eh_horas_extras: 'true/false — se o crédito é de horas extras',
+
+  // prazo / cenário
+  rpv_ja_expedida: 'true se a RPV já foi expedida (cenário B); false se ainda não (cenário A)',
+  data_fatal_convenio: 'se cenário A: data limite do convênio p/ expedir RPV (DD/MM/AAAA) ou null',
+
+  // M4 — médias de tempo (em DIAS). Devolver também os pares para auditoria.
+  serventia_dias: 'tempo médio da serventia em dias (média dos pares petição→conclusão)',
+  gabinete_dias: 'tempo médio do gabinete em dias (média dos pares conclusão→decisão)',
+  m4_pares: 'lista de pares {de, ate, dias, tipo:"serventia"|"gabinete"} usados na média',
+
+  // M2 — 25 respostas. Chave = nº da linha na aba jurídica (9..40).
+  m2: 'objeto { "9": {"resposta":"Sim/Não/...", "complemento":"data DD/MM/AAAA ou valor R$ ou vazio"}, ... } cobrindo as linhas 9 a 40',
+
+  // M1 + riscos (vão no .md, não na planilha)
+  m1_sintese: 'Síntese do processo em UM parágrafo corrido, começando com "Trata-se", no máximo 10 linhas, SEM tópicos/bullets. ' +
+    'Deve citar: (a) tipo da ação e natureza do crédito; (b) autor (cedente) e réu (ente devedor); (c) pedido e causa de pedir; ' +
+    '(d) principais eventos processuais COM DATAS (sentença, recurso, trânsito em julgado, início do cumprimento de sentença, ' +
+    'manifestação da contadoria, decisão que determinou a expedição); (e) tipo de requisitório (RPV/minuta/alvará); (f) fase atual do processo.',
+  bloco_g_riscos: 'lista de riscos {risco, fundamento, grau:"Impeditivo|Elevado|Moderado|Ponto de atenção"}',
+};
+
+// ---- PORTÃO 1: QUALIFICAÇÃO (roda ANTES da análise) ----
+const SCHEMA_QUALIFICACAO = {
+  numero_processo: 'número no padrão CNJ ou "NÃO LOCALIZADO"',
+  numero_credito_anexo: 'número do precatório/crédito anexo, ou null',
+  titular_nome: 'nome completo do titular do crédito',
+  cpf: 'CPF do titular',
+  esfera: 'Federal | Estadual | Municipal',
+  ente_devedor: 'qual Estado/Município/Órgão (ex.: "Estado de Goiás", "União")',
+  entidade_devedora: 'nome completo da entidade devedora',
+  valor_credito: 'valor total atualizado do crédito como número (ex.: 124500.00), ou "NÃO LOCALIZADO"',
+  data_planilha_calculo: 'DD/MM/AAAA da planilha MAIS ATUALIZADA (maior data / última homologada), ou "NÃO LOCALIZADO"',
+  requisitorio_expedido: 'SIM | NÃO — o ofício requisitório (RPV/precatório) já foi expedido?',
+  tipo_requisitorio: 'RPV | Precatório | null (se ainda não expedido, só há cálculo homologado)',
+  oficio_localizacao: 'ID e páginas do ofício requisitório, ou null',
+  planilha_localizacao: 'ID, data e páginas da planilha mais atualizada, ou null',
+  honorarios_destacados: 'SIM | NÃO',
+  honorarios_detalhe: 'se SIM: tipo (contratuais/sucumbenciais) e valor de cada; senão null',
+  parcela_preferencial: 'PAGA | NÃO PAGA | NÃO HÁ MENÇÃO',
+  credor_menor_ou_curatelado: 'SIM - Menor | SIM - Curatelado | NÃO HÁ INDICAÇÃO | INFORMAÇÃO INCERTA (não confundir com o advogado)',
+  transito_conhecimento_data: 'DD/MM/AAAA do trânsito em julgado da FASE DE CONHECIMENTO (mérito), ou "NÃO LOCALIZADO"',
+  transito_conhecimento_localizacao: 'ID/página, ou null',
+  prazo_pagamento_vencido: 'SIM | NÃO | NÃO HÁ MENÇÃO — há decisão informando que o prazo de pagamento (60 dias) já venceu?',
+  reserva_financeira: 'SIM | NÃO | NÃO HÁ MENÇÃO — há decisão informando reserva/sequestro/depósito de verba para o pagamento?',
+  reserva_localizacao: 'ID/página, ou null',
+  prazo_pagamento_iniciado: 'SIM | NÃO | NÃO HÁ MENÇÃO — a FASE DE PAGAMENTO já começou? Ex.: RPV expedida seguida de certidão/movimentação de "início do prazo de 60 dias para pagamento", certidão da CCARPV, ou intimação do ente público para pagar. (Diferente de "vencido": aqui o prazo apenas COMEÇOU, ainda não passou.)',
+  prazo_pagamento_iniciado_localizacao: 'ID/página/data da movimentação, ou null',
+  evidencias_referencias: 'breve indicação de onde cada informação aparece no processo',
+  comentarios_analise: 'observações úteis para a análise (sem recomendação de investimento)',
+};
+
+const SYSTEM_QUALIFICACAO =
+  'Você é um analista jurídico especializado em precatórios e RPVs, fazendo a QUALIFICAÇÃO (pré-análise) de um crédito para a Credijuris. ' +
+  'A fonte é um processo judicial completo. Analise-o página por página com rigor e seja conservador: quando um dado não estiver claro, use "NÃO LOCALIZADO" (NUNCA invente datas, valores ou nomes). ' +
+  'REGRA DE LOCALIZAÇÃO: indique onde cada dado está nesta ordem de prioridade: (1) numeração impressa ("fls.", "Pág. X de Y", numeração do PJe); (2) ID do documento (ex.: ID 295ff54); (3) a passagem. Informe o intervalo de páginas quando possível. ' +
+  'REGRAS: datas em DD/MM/AAAA; valores como número puro (ex.: 124500.00); uma linha por credor (se houver mais de um, use o principal e cite os demais em comentarios_analise); baseie-se somente no documento enviado. ' +
+  'DEFINIÇÕES IMPORTANTES: ' +
+  '(a) "trânsito em julgado da FASE DE CONHECIMENTO" é a data em que a decisão de MÉRITO se tornou definitiva — NÃO confunda com o trânsito da fase de execução/cumprimento de sentença; ' +
+  '(b) "prazo de pagamento (60 dias) vencido" e "reserva financeira": procure decisão/despacho informando que o prazo de pagamento já passou e/ou que já existe reserva, sequestro ou depósito de verba destinada ao pagamento; ' +
+  '(b2) "prazo de pagamento iniciado": marque SIM se a FASE DE PAGAMENTO já começou — RPV expedida seguida de certidão/movimentação de "início do prazo de 60 dias para pagamento", certidão da CCARPV, ou intimação do ente para pagar — mesmo que o prazo ainda NÃO tenha vencido; se marcar SIM, informe a data/ID em prazo_pagamento_iniciado_localizacao; ' +
+  '(c) "requisitório expedido": SIM se já foi expedido o ofício de RPV ou de precatório; se só há cálculo homologado nos autos, é NÃO (e tipo_requisitorio = null); ' +
+  '(d) "credor menor/curatelado": indique se o TITULAR do crédito é menor de idade ou curatelado/interditado; NÃO confunda com o advogado.';
+
+const SYSTEM_ANALISE =
+  'Você é analista jurídico-financeiro da Credijuris especializado em créditos RPV (TJGO/TJSP/TRF1). ' +
+  'Trabalha com a metodologia Prompt Mestre v1.0 (módulos M1–M4). Seja preciso e conservador: ' +
+  'quando um dado não estiver claro no documento, devolva null (NUNCA invente datas, valores ou nomes). ' +
+  'Regra do INSS: se o crédito é de horas extras e a CUC zerou o INSS, calcule uma reserva preventiva ' +
+  'de 14,25% sobre o valor sem correção e devolva esse valor em "inss". Para os demais créditos, siga a CUC. ' +
+  'O valor bruto = principal + juros + Selic. Os tempos do M4 são médias de pares de datas reais do andamento processual. ' +
+  '=== MAPA EXATO DO M2 (objeto "m2"; a chave é o NÚMERO DA LINHA na aba jurídica) === ' +
+  'Para cada linha, "resposta" vai na coluna B e "complemento" (quando o item pedir) vai na coluna D. ' +
+  'Use SEMPRE os valores EXATOS das listas suspensas quando indicado — a coluna B só aceita esses valores. ' +
+  'Datas em DD/MM/AAAA. Valores monetários SEMPRE em Real no padrão brasileiro: VÍRGULA como separador decimal e PONTO como separador de milhar, com prefixo R$ (ex.: R$ 1.234,56). NUNCA use ponto como separador decimal. Se a resposta for "Não", deixe o complemento vazio. ' +
+  'Se o dado não estiver claro, deixe vazio (NUNCA escreva "não encontrado"/"verificar" no complemento). ' +
+  '9: "Histórico do cedente: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
+  '10: "Histórico do advogado: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
+  '11: "Nesse tribunal, precisa de registro público?" -> Sim/Não; complemento: se Sim, link da jurisprudência. ' +
+  '12: "Qual é o tipo da ação?" -> TEXTO livre (ex.: "ação de cobrança de horas extras de piso de magistério"); sem complemento. ' +
+  '13: "Esse tipo de crédito pode ser negociado pela jurisprudência?" -> Sim/Não; complemento: se Sim, link. ' +
+  '14: "Quem é o polo ativo?" -> TEXTO (nome); sem complemento. ' +
+  '15: "O polo ativo é maior de idade?" -> Sim/Não. ' +
+  '16: "O polo ativo possui prioridade legal (60+/doença grave/PCD)?" -> Sim/Não; complemento: qual(is). ' +
+  '17: "Possui curatela ou tutela?" -> Sim/Não; complemento: nome do curador/tutor. ' +
+  '18: "Quem está sendo processado?" -> TEXTO (ente); sem complemento. ' +
+  '19: "Houve sentença?" -> Sim/Não; complemento: data. ' +
+  '20: "Tipo da sentença" -> um EXATO de: Improcedência | Procedência | Procedência parcial | Homologatória de acordo. ' +
+  '21: "A sentença é líquida ou ilíquida?" -> um EXATO de: Líquida | Iliquída; complemento: se Líquida, o valor. ' +
+  '22: "Houve recurso?" -> Sim/Não; complemento: resultado e data do julgamento. ' +
+  '23: "Houve trânsito em julgado?" -> Sim/Não; complemento: data. ' +
+  '24: "Iniciou o cumprimento de sentença?" -> Sim/Não; complemento: data do peticionamento. ' +
+  '25: "Foi apresentado valor no CS ou solicitado execução invertida?" -> um EXATO de: Valor apresentado no CS | Execução invertida. ' +
+  '26: BLOCO FIXO "CUIDADO" — NÃO é pergunta. NÃO inclua a chave "26" no m2. ' +
+  '27: "Em caso de execução invertida, qual cenário?" (só se foi execução invertida; senão vazio) -> um EXATO de: ' +
+  '"Executado não apresentou valores e prazo ainda em curso" | "Executado não apresentou valores, prazo decorrido, sem manifestação da parte exequente" | ' +
+  '"Executado não apresentou valores, prazo decorrido, já houve manifestação da parte exequente" | "Executado apresentou valores". ' +
+  '28: "Em CS ordinário, a parte apresentou valor?" -> Sim/Não; complemento: valor total. ' +
+  '29: "Houve impugnação ao valor?" -> Sim/Não; NÃO preencha complemento aqui (a data vai na linha 30). ' +
+  '30: datas da impugnação -> resposta: se houve, a data da impugnação; complemento: se NÃO houve, a data do decurso do prazo. ' +
+  '31: "Data da manifestação de concordância" -> resposta: a data (se houve concordância); sem complemento. ' +
+  '32: "Houve homologação do valor (e impugnação resolvida)?" -> Sim/Não; complemento: data da homologação. ' +
+  '33: "Existe contrato de honorários contratuais nos autos?" -> Sim/Não; complemento: data do contrato. ' +
+  '34: "Contadoria judicial se manifestou?" -> Sim/Não; complemento: data da juntada dos cálculos. ' +
+  '35: "Houve pedido de destaque de honorários contratuais?" -> Sim/Não; complemento: valor dos honorários destacados e o valor principal. ' +
+  '36: "A manifestação da contadoria foi homologada/precluiu o prazo?" -> Sim/Não; complemento: data. ' +
+  '37: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
+  '38: "Nesse tribunal, é a serventia que expede ou outro órgão?" -> TEXTO (ex.: "Serventia" ou o órgão); complemento: números dos processos usados. ' +
+  '39: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
+  '40: "Nesse tribunal, precisa emitir alvará ou só a RPV?" -> um EXATO de: Não precisa de alvará | Precisa de alvará; complemento: números dos processos usados.';
+
+async function extrairAnalise(apiKey: string, contentBlocks: any[]): Promise<any> {
+  const userContent = [
+    ...contentBlocks,
+    { type: 'text', text: 'Extraia os dados e retorne APENAS este JSON preenchido (sem markdown, sem comentários):\n' + JSON.stringify(SCHEMA_ANALISE, null, 2) },
+  ];
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: CLAUDE_MAX_TOKENS, system: SYSTEM_ANALISE, messages: [{ role: 'user', content: userContent }] }),
+  });
+  if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 500)}`);
+  const data = await res.json();
+  const block = data.content?.find((c: { type: string }) => c.type === 'text');
+  if (!block) throw new Error('Claude retornou sem bloco de texto');
+  let raw: string = block.text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+  try { return JSON.parse(raw); }
+  catch { const m = raw.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('JSON inválido da IA: ' + raw.slice(0, 200)); }
+}
+
+// ---- PORTÃO 1: chamada de IA + decisão ----
+async function extrairQualificacao(apiKey: string, contentBlocks: any[]): Promise<any> {
+  const userContent = [
+    ...contentBlocks,
+    { type: 'text', text: 'Faça a QUALIFICAÇÃO e retorne APENAS este JSON preenchido (sem markdown, sem comentários):\n' + JSON.stringify(SCHEMA_QUALIFICACAO, null, 2) },
+  ];
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 4000, system: SYSTEM_QUALIFICACAO, messages: [{ role: 'user', content: userContent }] }),
+  });
+  if (!res.ok) throw new Error(`Claude API (qualificação) ${res.status}: ${(await res.text()).slice(0, 500)}`);
+  const data = await res.json();
+  const block = data.content?.find((c: { type: string }) => c.type === 'text');
+  if (!block) throw new Error('Claude retornou sem bloco de texto (qualificação)');
+  let raw: string = block.text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+  try { return JSON.parse(raw); }
+  catch { const m = raw.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('JSON inválido da IA (qualificação): ' + raw.slice(0, 200)); }
+}
+
+// "DD/MM/AAAA" -> Date (ou null se inválido)
+function parseDataBR(s: any): Date | null {
+  if (typeof s !== 'string') return null;
+  const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  return isNaN(d.getTime()) ? null : d;
+}
+const ehSim = (v: any) => typeof v === 'string' && v.trim().toUpperCase().startsWith('SIM');
+
+// Aplica a ÁRVORE DE DECISÃO do Portão 1 sobre o JSON da IA.
+// Retorna aprovado + motivos de recusa (se houver) + avisos (não reprovam).
+function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; avisos: string[] } {
+  const motivos: string[] = [];
+  const avisos: string[] = [];
+
+  // 1) Dinheiro já reservado / prazo de pagamento vencido -> REPROVA
+  if (ehSim(q.reserva_financeira) || ehSim(q.prazo_pagamento_vencido))
+    motivos.push('Já há decisão de reserva financeira ou o prazo de pagamento (60 dias) já venceu — o valor já está designado para a conta do credor, então não é possível adquirir o crédito.');
+
+  // 1b) Prazo de pagamento apenas INICIADO (RPV em fase de pagamento) -> ALERTA FORTE (revisão humana), NÃO reprova
+  else if (ehSim(q.prazo_pagamento_iniciado))
+    avisos.unshift('⚠️ ATENÇÃO — RPV JÁ EM FASE DE PAGAMENTO: a movimentação indica que o prazo de 60 dias para o ente público pagar JÁ COMEÇOU' +
+      (q.prazo_pagamento_iniciado_localizacao ? ` (${q.prazo_pagamento_iniciado_localizacao})` : '') +
+      '. RISCO: o pagamento pode ocorrer ANTES de a cessão ser habilitada nos autos — se isso acontecer, o valor cai na conta do credor original e não na de vocês. AVALIE COM A EQUIPE JURÍDICA se há tempo hábil para habilitar a cessão antes do pagamento ANTES de fechar este crédito.');
+
+  // 2) Credor menor de idade ou curatelado
+  if (ehSim(q.credor_menor_ou_curatelado))
+    motivos.push('Credor menor de idade ou curatelado — a cessão exige autorização judicial (alvará).');
+
+  // 3) Valor / tipo do crédito
+  const valor = Number(q.valor_credito);
+  const temValor = !isNaN(valor) && valor > 0;
+  const tipo = String(q.tipo_requisitorio || '').toLowerCase();
+  const isPrecatorio = tipo.includes('precat');
+  const isRPV = tipo === 'rpv' || tipo.includes('rpv');
+  const expedido = ehSim(q.requisitorio_expedido);
+  if (temValor) {
+    if (isPrecatorio) {
+      if (valor <= 100000) motivos.push('Valor do precatório igual ou abaixo de R$ 100 mil (mínimo exigido para precatório).');
+    } else {
+      // RPV, ou ainda não expedido (só cálculo homologado) -> piso de R$ 20 mil
+      if (valor < 20000) motivos.push('Valor abaixo de R$ 20 mil (mínimo exigido para RPV).');
+    }
+  } else {
+    avisos.push('Valor do crédito não identificado no processo — confira o valor manualmente.');
+  }
+
+  // 3b) RPV já expedida: trânsito da fase de conhecimento posterior a 15/11/2025 derruba o teto para 10 SM
+  if (expedido && isRPV) {
+    const d = parseDataBR(q.transito_conhecimento_data);
+    const corte = new Date(2025, 10, 15); // 15/11/2025 (mês 10 = novembro)
+    if (d) {
+      if (d.getTime() > corte.getTime())
+        motivos.push('Trânsito em julgado da fase de conhecimento posterior a 15/11/2025 — o teto da RPV cai para 10 salários mínimos, ficando abaixo de ~R$ 20 mil.');
+    } else {
+      avisos.push('Data do trânsito da fase de conhecimento não localizada — confira manualmente se é posterior a 15/11/2025.');
     }
   }
 
-  // Sincroniza com o Kommo ao abrir a página, no mesmo padrão de Publicações e
-  // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
-  const sync = useMutation({
-    mutationFn: () => invokeFunction('kommo-sync', {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['kommo_leads'] })
-      qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
-    },
-    onError: (e) => toast.error(`Sincronização Kommo: ${(e as Error).message}`),
-  })
-  const jaSincronizou = useRef(false)
-  useEffect(() => {
-    if (jaSincronizou.current) return
-    jaSincronizou.current = true
-    sync.mutate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  return { aprovado: motivos.length === 0, motivos, avisos };
+}
 
-  const grupos = useMemo(() => agruparPorTela(leads.data ?? []), [leads.data])
+// Arquivo -> blocos de conteúdo p/ a IA.
+// PDF: extrai TEXTO (sem limite de páginas). Imagem: envia como imagem. Texto: inline.
+const MAX_DOC_CHARS = 420000; // ~150-160k tokens (texto jurídico pt-BR é denso); deixa folga p/ o system prompt + a saída (Opus = 200k)
+const MARCA_CORTE = 'TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO';
 
-  const lista = useMemo(() => {
-    let l = grupos[tela]
-    if (busca.trim()) {
-      const q = busca.toLowerCase()
-      l = l.filter((x) =>
-        [
-          x.nome,
-          x.processo_cnj,
-          x.responsavel_nome,
-          // Busca em TODAS as anotações, não só na primeira: informação
-          // relevante costuma vir num comentário posterior.
-          ...(x.notas ?? []).map((n) => n.texto),
-          x.nota_texto,
-        ]
-          .filter(Boolean)
-          .some((v) => v!.toLowerCase().includes(q)),
-      )
-    }
-    return l
-  }, [grupos, tela, busca])
+// Corta textos muito grandes mantendo INÍCIO e FINAL (a inicial fica no começo; CUC/expedição costumam ficar no fim).
+function capTextoDoc(txt: string): string {
+  if (txt.length <= MAX_DOC_CHARS) return txt;
+  const head = Math.floor(MAX_DOC_CHARS * 0.5);
+  const tail = MAX_DOC_CHARS - head;
+  return txt.slice(0, head) +
+    `\n\n[...${MARCA_CORTE} — documento muito grande; exibindo apenas o início e o final...]\n\n` +
+    txt.slice(txt.length - tail);
+}
 
-  const mover = useMutation({
-    mutationFn: (args: { leadId: number; statusId: number; comentario: string }) =>
-      invokeFunction<{ mensagem: string; aviso: string | null }>('kommo-mover', args),
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['kommo_leads'] })
-      qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
-      // A função devolve aviso quando o card moveu mas a anotação não gravou —
-      // é sucesso parcial, não erro, e o usuário precisa saber da diferença.
-      if (r?.aviso) toast.error(r.aviso)
-      else toast.success(r?.mensagem ?? 'Card movido.')
-      setEmAndamento(null)
-    },
-    onError: (e) => {
-      setEmAndamento(null)
-      toast.error((e as Error).message)
-    },
-  })
+function montarTextoPdf(filename: string, totalPages: number, txt: string): string {
+  const cortado = capTextoDoc(txt);
+  const parcial = cortado.length !== txt.length ? ', TEXTO PARCIAL' : '';
+  return `[Documento: ${filename} — ${totalPages} páginas${parcial}]\n\n${cortado}`;
+}
 
-  /** Toda ação é um clique: nenhuma etapa pede justificativa. */
-  function acionar(lead: KommoLead, acao: AcaoTela) {
-    setEmAndamento({ leadId: lead.kommo_lead_id, statusId: acao.statusId })
-    mover.mutate({ leadId: lead.kommo_lead_id, statusId: acao.statusId, comentario: '' })
+async function arquivoToContentBlocks(filename: string, bytes: Uint8Array): Promise<any[]> {
+  const lower = filename.toLowerCase();
+  const imgType =
+    lower.endsWith('.png') ? 'image/png' :
+    (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) ? 'image/jpeg' :
+    lower.endsWith('.webp') ? 'image/webp' :
+    lower.endsWith('.gif') ? 'image/gif' : '';
+  if (imgType) {
+    return [
+      { type: 'text', text: `[Documento (imagem): ${filename}]` },
+      { type: 'image', source: { type: 'base64', media_type: imgType, data: b64encode(bytes) } },
+    ];
   }
+  if (lower.endsWith('.pdf')) {
+    const { extractText } = await import('npm:unpdf@1.6.2');  // import preguiçoso: só carrega se receber PDF cru
+    const { text, totalPages } = await extractText(bytes, { mergePages: true });
+    const txt = (text || '').trim();
+    if (!txt) {
+      return [{ type: 'text', text: `[Documento: ${filename}] (PDF de ${totalPages} páginas SEM texto extraível — provavelmente escaneado/imagem; não foi possível ler o conteúdo. Envie um PDF com texto selecionável.)` }];
+    }
+    return [{ type: 'text', text: montarTextoPdf(filename, totalPages, txt) }];
+  }
+  if (lower.endsWith('.txt') || lower.endsWith('.csv') || lower.endsWith('.md')) {
+    const bruto = new TextDecoder().decode(bytes).trim();
+    const cortado = capTextoDoc(bruto);
+    const parcial = cortado.length !== bruto.length ? ' — TEXTO PARCIAL (documento muito grande)' : '';
+    return [{ type: 'text', text: `[Documento: ${filename}${parcial}]\n\n${cortado}` }];
+  }
+  return [{ type: 'text', text: `[Documento: ${filename}] (formato não suportado para leitura automática — por favor, envie o processo em PDF com texto.)` }];
+}
 
-  const defTela = TELAS.find((t) => t.key === tela)!
+// ============================================================================
+// Datas
+// ============================================================================
+function hojeDDMMAAAA(): string {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
+// hoje + meses, ajustado pro ÚLTIMO dia do mês resultante
+function dataPagamento(meses: number): string {
+  const d = new Date();
+  const alvo = new Date(d.getFullYear(), d.getMonth() + Math.floor(meses) + 1, 0); // dia 0 do mês seguinte = último dia
+  return `${String(alvo.getDate()).padStart(2, '0')}/${String(alvo.getMonth() + 1).padStart(2, '0')}/${alvo.getFullYear()}`;
+}
 
-  return (
-    <div>
-      <PageHeader
-        title="Análise de Crédito"
-        actions={
-          <SyncStatus
-            syncing={sync.isPending}
-            updatedAt={leads.dataUpdatedAt}
-            label="sincronizando com o Kommo…"
-          />
-        }
-      />
+// ============================================================================
+// Handler
+// ============================================================================
 
-      {/* Precatórios entram na fase 2: o funil existe no Kommo, mas o sync
-          ainda só traz o de RPV. */}
-      <div className="mb-4">
-        <Segmented
-          ariaLabel="Tipo de crédito"
-          items={[
-            { key: 'rpv', label: 'RPV', count: (leads.data ?? []).length },
-            { key: 'precatorio', label: 'Precatórios', disabled: true },
-          ]}
-          value="rpv"
-          onChange={() => {}}
-        />
-      </div>
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
 
-      <Card className="mb-4 p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por nome do card, processo, responsável ou conteúdo…"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
-        </div>
-        <div className="mt-3">
-          <Segmented
-            ariaLabel="Etapa da análise"
-            items={TELAS.map((t) => ({
-              key: t.key,
-              label: t.label,
-              count: grupos[t.key].length,
-            }))}
-            value={tela}
-            onChange={(v) => setTela(v as TelaAnalise)}
-          />
-        </div>
-      </Card>
+  try {
+    // 1. Auth (JWT do usuário)
+    const user = await getCaller(req);
+    if (!user) return errorResponse('Não autenticado / sessão inválida', 401);
+    const userId = user.id;
 
-      <Card>
-        {leads.isLoading ? (
-          <Loading />
-        ) : leads.isError ? (
-          <ErrorState
-            message={(leads.error as Error)?.message}
-            onRetry={() => leads.refetch()}
-          />
-        ) : lista.length === 0 ? (
-          <EmptyState
-            title={busca.trim() ? 'Nada encontrado' : `Nenhum card em ${defTela.label}`}
-            description={
-              busca.trim()
-                ? 'Nenhum card corresponde à busca nesta etapa.'
-                : defTela.descricaoVazia
-            }
-          />
-        ) : (
-          <div>
-            {lista.map((l) => (
-              <CardCredito
-                key={l.kommo_lead_id}
-                lead={l}
-                acoes={ACOES[tela]}
-                onAcao={acionar}
-                // O selo só aparece em Pendentes: nas etapas seguintes a
-                // análise já passou pela revisão, então dizer "finalizado"
-                // seria ruído.
-                analisePronta={
-                  tela === 'pendentes'
-                    ? (prontas.data?.has(l.kommo_lead_id) ?? false)
-                    : null
-                }
-                statusEmAndamento={
-                  emAndamento?.leadId === l.kommo_lead_id
-                    ? emAndamento.statusId
-                    : null
-                }
-                onAnalisar={onAnalisar}
-                analisando={analisandoId === l.kommo_lead_id}
-                resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
-              />
-            ))}
-          </div>
-        )}
-      </Card>
-    </div>
-  )
+    const body = await req.json();
+    const categoria: string = resolverCategoria(body.categoria);  // "RPV" -> "Requisições de Pequeno Valor"
+
+    // service-role: lê secrets de configuracoes
+    const sbAdmin = serviceClient();
+    const _google = await segredoGoogle();
+    const cfg: Record<string, string> = {
+      anthropic_api_key: (await chaveAnthropic()) ?? '',
+      google_oauth_client_id: _google?.client_id ?? '',
+      google_oauth_client_secret: _google?.client_secret ?? '',
+      google_oauth_refresh_token: _google?.refresh_token ?? '',
+    };
+
+    // 2. Ação leve: listar intermediadores (popular dropdown do front)
+    if (body.acao === 'listar_intermediadores') {
+      const token = await refreshGoogleAccessToken(cfg.google_oauth_client_id, cfg.google_oauth_client_secret, cfg.google_oauth_refresh_token);
+      const intermediadores = await driveListarIntermediadoresAnalise(token, categoria);
+      return jsonResponse({ ok: true, intermediadores });
+    }
+
+    // 3. Job principal
+    const jobId: string = body.job_id;
+    const intermediador: string = body.intermediador;
+    const numeroProcesso: string = (body.numero_processo || '').trim();
+    const tipoAquisicao: string = (body.tipo_aquisicao || 'auto');  // 'auto'|'principal'|'honorarios'|'ambos'
+    const honPctRaw = (body.honorarios_pct === '' || body.honorarios_pct == null) ? null : Number(body.honorarios_pct);
+    const honorariosPct = (honPctRaw != null && !isNaN(honPctRaw) && honPctRaw >= 0) ? honPctRaw : null;
+    if (!intermediador) return errorResponse('Campo obrigatório: intermediador');
+    for (const k of ['anthropic_api_key', 'google_oauth_client_id', 'google_oauth_client_secret', 'google_oauth_refresh_token'])
+      if (!cfg[k]) return errorResponse(`Secret '${k}' não configurado (Anthropic/Google — ver integracao_*_secret)`, 500);
+
+    // 3a. Fonte do texto do processo:
+    //   (A) texto já extraído no NAVEGADOR (pdf.js) e enviado no corpo -> caminho leve, sem estourar CPU;
+    //   (B) fallback: lê o(s) arquivo(s) do storage analises-input/{userId}/{jobId}/processo/* (fluxo antigo).
+    let contentBlocks: any[] = [];
+    let arquivos: Array<{ name: string }> = [];
+    let prefix = '';
+    const textoDireto = String(body.texto ?? body.texto_processo ?? '').trim();
+    if (textoDireto) {
+      contentBlocks = [{ type: 'text', text: `[Documento do processo]\n\n${textoDireto}` }];
+    } else {
+      if (!jobId) return errorResponse('Faltou o texto do processo (ou o job_id).');
+      prefix = `${userId}/${jobId}/processo`;
+      const { data: arqs, error: listErr } = await sbAdmin.storage.from(BUCKET_INPUT).list(prefix, { limit: 50 });
+      if (listErr) throw new Error('Erro listando uploads: ' + listErr.message);
+      if (!arqs?.length) return errorResponse('Nenhum PDF encontrado para esse job. Faça o upload do processo antes de gerar.');
+      arquivos = arqs;
+      for (const a of arquivos) {
+        const bytes = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${a.name}`);
+        contentBlocks.push(...await arquivoToContentBlocks(a.name, bytes));
+      }
+    }
+    const houveCorte = contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
+
+    // 3b. PORTÃO 1 — QUALIFICAÇÃO (roda ANTES de tudo)
+    const qualif = await extrairQualificacao(cfg.anthropic_api_key, contentBlocks);
+    if (numeroProcesso) qualif.numero_processo = numeroProcesso;
+    const veredito = avaliarQualificacao(qualif);
+    if (!veredito.aprovado) {
+      // Reprovado: não monta tabela jurídica nem precificação. Limpa os uploads e devolve o motivo.
+      if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
+      return jsonResponse({
+        ok: true,
+        reprovado: true,
+        motivos: veredito.motivos,
+        avisos: veredito.avisos,
+        qualificacao: qualif,
+      });
+    }
+    const avisosQualif = veredito.avisos;  // alertas da qualificação (seguem para a resposta final)
+
+    // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
+    const dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
+    dados.intermediador = intermediador;
+    if (numeroProcesso) dados.numero_processo = numeroProcesso;
+    // Garante que os valores financeiros sejam NÚMERO (não texto) — assim o formato de moeda (R$) da planilha funciona
+    dados.bruto_total = Number(dados.bruto_total) || 0;
+    dados.ir = Number(dados.ir) || 0;
+    dados.inss = Number(dados.inss) || 0;
+    dados.honorarios = Number(dados.honorarios) || 0;
+
+    // 3b.1 O que está sendo cedido (escolha manual sobrepõe a detecção automática) + % de honorários
+    const honAI = Number(dados.honorarios) || 0;          // honorários destacados na CUC (0 = sem destaque)
+    const houveDestaque = honAI > 0;
+    const brutoNum = Number(dados.bruto_total) || 0;
+    const irNum = Number(dados.ir) || 0;
+    const inssNum = Number(dados.inss) || 0;
+    // honorários a usar: se o usuário informou %, aplica a regra (com destaque→bruto; sem destaque→líquido); senão, usa o da CUC
+    let honorariosCalc = honAI;
+    if (honorariosPct != null) {
+      const base = houveDestaque ? brutoNum : (brutoNum - irNum - inssNum);
+      honorariosCalc = base * (honorariosPct / 100);
+    }
+    let soHonorarios = false;
+    if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Apenas o crédito principal'; }
+    else if (tipoAquisicao === 'ambos')      { dados.modelo = 1; dados.tipo_credito = 'Crédito principal e honorários'; }
+    else if (tipoAquisicao === 'honorarios') { dados.modelo = 2; soHonorarios = true; dados.tipo_credito = 'Apenas os honorários'; }
+    else                                     { dados.modelo = escolherModelo(honAI); }  // automático (como hoje), pela CUC
+
+    if (soHonorarios) {
+      const valorHon = honorariosPct != null ? brutoNum * (honorariosPct / 100) : honAI;
+      if (!(valorHon > 0))
+        return errorResponse('Para calcular APENAS os honorários, informe o percentual de honorários no formulário (ou use um processo com honorários destacados na CUC).');
+      dados.bruto_total = valorHon;                          // o "bruto" do cálculo passa a ser o honorário
+      dados.ir = 0; dados.inss = 0; dados.honorarios = 0;    // sem deduções do principal; cessão sobre o honorário
+    } else {
+      dados.honorarios = honorariosCalc;                     // dedução do líquido (L5) e, no Modelo 1, valor adquirido (L7)
+    }
+    dados._soHonorarios = soHonorarios;
+    dados._honPctInformado = honorariosPct != null;
+
+    // 3c. Prazo (T5) + datas
+    const scenario: 'A' | 'B' = dados.rpv_ja_expedida ? 'B' : 'A';
+    const T5 = prazoMeses({
+      serventiaDias: Number(dados.serventia_dias) || 0,
+      gabineteDias: Number(dados.gabinete_dias) || 0,
+      scenario,
+      dataAquisicao: new Date(),
+      dataFatalConvenio: dados.data_fatal_convenio ? parseBR(dados.data_fatal_convenio) : undefined,
+    });
+    dados.data_aquisicao = hojeDDMMAAAA();
+    dados.data_pagamento = dataPagamento(T5);
+
+    // 3d. Calibragem do deságio
+    const calc: any = calibrarDesagio({
+      brutoTotal: Number(dados.bruto_total), honorarios: Number(dados.honorarios) || 0,
+      ir: Number(dados.ir) || 0, inss: Number(dados.inss) || 0, T5, modelo: dados.modelo,
+    });
+    calc.IR = Number(dados.ir) || 0; calc.INSS = Number(dados.inss) || 0;
+
+    // 3e. Gera a planilha colorida
+    // Nome do credor em Title Case (usado na pasta do Drive, no nome do arquivo e na aba de precificação)
+    const credorBruto = (dados.credor_nome || (dados.cedente_cpf || '').split(/\bCPF\b/i)[0] || numeroProcesso || 'cedente');
+    const credorTitulo = (tituloNome(credorBruto).slice(0, 80)) || 'Cedente';
+    dados._credor_titulo = credorTitulo;
+    const templateBytes = await storageGetBytes(sbAdmin, BUCKET_TEMPLATES, TEMPLATE_NOME);
+    const xlsx = await gerarPlanilha(templateBytes, dados, calc, T5);
+
+    // 3f. Sobe no Drive: A. Análises de crédito / {categoria} / {intermediador} / {credor (Title Case)}
+    const token = await refreshGoogleAccessToken(cfg.google_oauth_client_id, cfg.google_oauth_client_secret, cfg.google_oauth_refresh_token);
+    const analisesRoot = await driveEncontrarAnalisesRoot(token);
+    const catFolder = await driveFindChildByTolerantName(token, analisesRoot, categoria);
+    const catId = catFolder?.id ?? await driveFindOrCreateFolder(token, categoria, analisesRoot);
+    const interId = await driveFindOrCreateFolder(token, intermediador, catId);
+    const cedenteId = await driveFindOrCreateFolder(token, credorTitulo, interId);
+    // Nome do arquivo: "Análise de RPV - CREDOR v. ENTE DEVEDOR - NÚMERO DO PROCESSO"
+    const enteDevedor = String(dados.ente_devedor || '').trim();
+    const nomeArquivo = limparNomeArquivo(
+      `Análise de RPV - ${credorTitulo}${enteDevedor ? ` v. ${enteDevedor}` : ''} - ${numeroProcesso}`,
+    ) + '.xlsx';
+    const up = await driveUploadBytes(token, nomeArquivo, cedenteId, xlsx, XLSX_MIME, true);
+
+    // limpeza best-effort dos uploads
+    if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
+
+    // Avisos (alertas da qualificação + rentabilidade abaixo da meta e/ou documento cortado por tamanho)
+    const avisos: string[] = [...avisosQualif];
+    if (calc.atingiuAlvo === false)
+      avisos.push(`Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
+    if (houveCorte)
+      avisos.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas; se possível, gere de novo enviando um PDF menor só com os documentos essenciais (cálculo/CUC, sentença e a decisão de expedição da RPV).');
+    if (dados._soHonorarios)
+      avisos.push('Cálculo de APENAS os honorários: confira se há descontos (como IR) sobre o valor dos honorários, pois isso varia conforme o processo.');
+    const avisoFinal = avisos.length ? avisos.join(' ') + ' A planilha foi gerada assim mesmo para você conferir à mão.' : null;
+
+    return jsonResponse({
+      ok: true,
+      cedente: credorTitulo,
+      modelo: dados.modelo === 1 ? 'Modelo 1 (verde)' : 'Modelo 2 (azul)',
+      desagio: pct(calc.desagio),
+      rentabilidade_mensal: pct(calc.Y9),
+      cessao: brl(calc.cessao),
+      cartorio: { valor: calc.Y10 == null ? '—' : brl(calc.Y10), faixa: calc.faixaCartorio },
+      atingiu_alvo: calc.atingiuAlvo !== false,
+      aviso: avisoFinal,
+      drive_folder_url: `https://drive.google.com/drive/folders/${cedenteId}`,
+      drive_file_url: up.webViewLink ?? null,
+      // dados úteis pro .md/.csv (gerados no front ou em passo futuro)
+      m1_sintese: dados.m1_sintese ?? null,
+      riscos: dados.bloco_g_riscos ?? [],
+    });
+  } catch (e) {
+    return errorResponse('Falha ao gerar análise: ' + (e instanceof Error ? e.message : String(e)), 500);
+  }
+});
+
+// DD/MM/AAAA -> Date
+function parseBR(s: string): Date {
+  const [d, m, y] = s.split('/').map(Number);
+  return new Date(y, m - 1, d);
 }
