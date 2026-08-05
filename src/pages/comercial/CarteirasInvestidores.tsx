@@ -160,36 +160,35 @@ function Individual() {
 
   return (
     <div className="space-y-5">
-      {/* Seletor à esquerda ocupando a folga, competência à direita: a linha
-          inteira é aproveitada em vez de deixar metade vazia. */}
-      <Card className="p-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0 flex-1 sm:max-w-md">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Investidor
-            </label>
-            <Combobox
-              opcoes={opcoes}
-              valor={indice >= 0 ? indice : null}
-              onChange={(id) =>
-                setInvestidor(id === null ? null : investidores[id] ?? null)
-              }
-              placeholder="Digite o nome…"
-              vazio="Nenhum investidor nos créditos."
-            />
+      {/* Sem card: os dois controles ficam soltos sobre o fundo da página,
+          lado a lado. A competência acompanha o seletor em vez de ir para a
+          borda oposta — separá-los só afastava dois campos que se leem juntos. */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div className="w-full sm:max-w-md">
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Investidor
+          </label>
+          <Combobox
+            opcoes={opcoes}
+            valor={indice >= 0 ? indice : null}
+            onChange={(id) =>
+              setInvestidor(id === null ? null : investidores[id] ?? null)
+            }
+            placeholder="Digite o nome…"
+            vazio="Nenhum investidor nos créditos."
+          />
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Mês de referência
           </div>
-          <div className="sm:text-right">
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Mês de referência
-            </div>
-            {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
-            <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-              <CalendarDays className="h-4 w-4 text-slate-400" />
-              {mesRef}
-            </div>
+          {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
+          <div className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
+            <CalendarDays className="h-4 w-4 text-slate-400" />
+            {mesRef}
           </div>
         </div>
-      </Card>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
@@ -250,7 +249,10 @@ function Individual() {
               description="Este investidor não consta como cessionário em nenhum crédito."
             />
           ) : (
-            <Table className="[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:whitespace-nowrap [&_td]:text-[13px]">
+            {/* nowrap também nos <th>: com 25 colunas, um título como
+                "Providências / prox. passos" quebrava em quatro linhas e
+                empurrava o cabeçalho inteiro para baixo. */}
+            <Table className="[&_th]:whitespace-nowrap [&_th]:px-2.5 [&_td]:whitespace-nowrap [&_td]:px-2.5 [&_td]:text-[13px]">
               <THead>
                 {/* Nível 1: grupos, cada um na sua cor. Nível 2: as colunas. */}
                 <tr>
@@ -417,26 +419,22 @@ function Consolidado() {
 
   return (
     <div className="space-y-5">
-      <Card className="p-4">
-        <div className="w-full sm:max-w-xs">
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Filtrar por mês
-          </label>
-          <Select value={mes} onChange={(e) => setMes(e.target.value)}>
-            <option value="todos">Tudo</option>
-            {meses.map((m) => (
-              <option key={m} value={m}>
-                {rotuloMes(m)}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </Card>
+      {/* Solto sobre o fundo da página, como o seletor da aba Individual. */}
+      <div className="w-full sm:max-w-xs">
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Filtrar por mês
+        </label>
+        <Select value={mes} onChange={(e) => setMes(e.target.value)}>
+          <option value="todos">Tudo</option>
+          {meses.map((m) => (
+            <option key={m} value={m}>
+              {rotuloMes(m)}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       <div>
-        <TituloSecao>
-          {mes === 'todos' ? 'Consolidado — todos os períodos' : `Consolidado — ${rotuloMes(mes)}`}
-        </TituloSecao>
         <Card>
           {linhas.length === 0 ? (
             <EmptyState
@@ -444,7 +442,7 @@ function Consolidado() {
               description="Não há créditos adquiridos no mês selecionado."
             />
           ) : (
-            <Table className="[&_th]:px-3 [&_td]:px-3 [&_td]:text-[13px]">
+            <Table className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:text-[13px]">
               <THead>
                 <tr>
                   <TH>Investidor</TH>
