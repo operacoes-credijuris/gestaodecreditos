@@ -42,3 +42,14 @@ export async function segredoGoogle(): Promise<SegredoGoogle | null> {
     .maybeSingle()
   return (data as SegredoGoogle | null) ?? null
 }
+
+export async function chaveKommo(): Promise<string | null> {
+  const doAmbiente = Deno.env.get('KOMMO_TOKEN')
+  if (doAmbiente) return doAmbiente
+  const { data } = await serviceClient()
+    .from('integracao_kommo_secret')
+    .select('token')
+    .eq('id', 1)
+    .maybeSingle()
+  return data?.token ?? null
+}
