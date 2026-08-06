@@ -36,6 +36,18 @@ export const STATUS_PROCESSO: Record<string, LabelDef> = {
   encerrado: { label: 'Encerrado', tone: 'gray' },
 }
 
+// Tipos que um crédito pode acumular (marcáveis em conjunto).
+export const TIPO_CREDITO: Record<string, LabelDef> = {
+  principal: { label: 'Crédito principal', tone: 'blue' },
+  honorarios_contratuais: { label: 'Honorários contratuais', tone: 'purple' },
+  honorarios_advocaticios: { label: 'Honorários advocatícios', tone: 'orange' },
+}
+
+export const INDICE_ATUALIZACAO: Record<string, LabelDef> = {
+  selic: { label: 'SELIC', tone: 'blue' },
+  ipca_2: { label: 'IPCA + 2% a.a.', tone: 'purple' },
+}
+
 export const INSTRUMENTO: Record<string, LabelDef> = {
   particular: { label: 'Particular', tone: 'gray' },
   registro_publico: { label: 'Registro público', tone: 'blue' },

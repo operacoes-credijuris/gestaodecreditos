@@ -5,7 +5,13 @@ import { processosCrud, apensosCrud } from '@/lib/queries'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { useApensosManager } from '@/components/Apensos'
-import type { Processo, StatusProcesso, Instrumento } from '@/lib/types'
+import type {
+  Processo,
+  StatusProcesso,
+  Instrumento,
+  TipoCredito,
+  IndiceAtualizacao,
+} from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -30,8 +36,22 @@ import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { DrawerHistorico } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
-import { getLabel, STATUS_PROCESSO, INSTRUMENTO } from '@/lib/labels'
-import { formatCNJ, formatDate, onlyDigits, vazioNull } from '@/lib/format'
+import {
+  getLabel,
+  STATUS_PROCESSO,
+  INSTRUMENTO,
+  TIPO_CREDITO,
+  INDICE_ATUALIZACAO,
+} from '@/lib/labels'
+import {
+  formatBRL,
+  formatBRLInput,
+  formatCNJ,
+  formatDate,
+  onlyDigits,
+  parseBRLInput,
+  vazioNull,
+} from '@/lib/format'
 
 /**
  * Data da última movimentação por processo, vinda do cache que a Edge Function
@@ -120,6 +140,42 @@ const VAZIO: Partial<Processo> = {
   numero_rtdpj: '',
   status: 'ativo',
   data_liquidacao: '',
+  tipo_credito: [],
+  capital_investido: null,
+  valor_face: null,
+  data_referencia: '',
+  indice_atualizacao: null,
+  ja_recebido: null,
+  data_recebimento_efetivo: '',
+  valor_estimado_complementar: null,
+}
+
+/**
+ * Campo de dinheiro com "R$" fixo à esquerda. O valor vive como número no
+ * estado; os dígitos digitados entram como centavos (ver parseBRLInput), então
+ * o campo nunca aceita um formato inválido.
+ */
+function CampoMoeda({
+  valor,
+  onChange,
+}: {
+  valor: number | null | undefined
+  onChange: (v: number | null) => void
+}) {
+  return (
+    <div className="relative">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+        R$
+      </span>
+      <Input
+        className="pl-9 text-right tabular-nums"
+        inputMode="numeric"
+        placeholder="0,00"
+        value={formatBRLInput(valor)}
+        onChange={(e) => onChange(parseBRLInput(e.target.value))}
+      />
+    </div>
+  )
 }
 
 // Nº de colunas da tabela de créditos — usado no colSpan da linha de apensos.
@@ -280,6 +336,10 @@ export default function Processos() {
       payload.data_aquisicao = vazioNull(payload.data_aquisicao)
       payload.expectativa_liquidacao = vazioNull(payload.expectativa_liquidacao)
       payload.data_liquidacao = vazioNull(payload.data_liquidacao)
+      payload.data_referencia = vazioNull(payload.data_referencia)
+      payload.data_recebimento_efetivo = vazioNull(payload.data_recebimento_efetivo)
+      // Sem tipo marcado o banco espera lista vazia, não null (coluna NOT NULL).
+      payload.tipo_credito = payload.tipo_credito ?? []
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Crédito atualizado.')
@@ -678,6 +738,113 @@ export default function Processos() {
                 </Field>
               )}
             </div>
+
+            {/* Financeiro do crédito. Fica só aqui e na ficha lateral — de
+                propósito fora da tabela, que segue enxuta para escanear. */}
+            <div className="border-t border-slate-100 pt-4">
+              <h3 className="mb-3 text-sm font-semibold text-slate-700">
+                Tipo e valores do crédito
+              </h3>
+              <Field
+                label="Tipo de crédito"
+                hint="Marque quantos se aplicarem — um crédito pode acumular mais de um."
+              >
+                <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
+                  {Object.entries(TIPO_CREDITO).map(([k, v]) => (
+                    <label
+                      key={k}
+                      className="flex cursor-pointer items-center gap-2 text-sm text-slate-700"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={(editing.tipo_credito ?? []).includes(
+                          k as TipoCredito,
+                        )}
+                        onChange={() => {
+                          const atuais = editing.tipo_credito ?? []
+                          setEditing({
+                            ...editing,
+                            tipo_credito: atuais.includes(k as TipoCredito)
+                              ? atuais.filter((t) => t !== k)
+                              : [...atuais, k as TipoCredito],
+                          })
+                        }}
+                      />
+                      {v.label}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <Field label="Capital investido">
+                  <CampoMoeda
+                    valor={editing.capital_investido}
+                    onChange={(v) => setEditing({ ...editing, capital_investido: v })}
+                  />
+                </Field>
+                <Field label="Valor de face">
+                  <CampoMoeda
+                    valor={editing.valor_face}
+                    onChange={(v) => setEditing({ ...editing, valor_face: v })}
+                  />
+                </Field>
+                <Field label="Data de referência">
+                  <Input
+                    type="date"
+                    value={editing.data_referencia ?? ''}
+                    onChange={(e) =>
+                      setEditing({ ...editing, data_referencia: e.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Índice de atualização">
+                  <Select
+                    value={editing.indice_atualizacao ?? ''}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        indice_atualizacao: (e.target.value ||
+                          null) as IndiceAtualizacao | null,
+                      })
+                    }
+                  >
+                    <option value="">Não informado</option>
+                    {Object.entries(INDICE_ATUALIZACAO).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Já recebido">
+                  <CampoMoeda
+                    valor={editing.ja_recebido}
+                    onChange={(v) => setEditing({ ...editing, ja_recebido: v })}
+                  />
+                </Field>
+                <Field label="Data de recebimento efetivo">
+                  <Input
+                    type="date"
+                    value={editing.data_recebimento_efetivo ?? ''}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        data_recebimento_efetivo: e.target.value,
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Valor estimado complementar" className="sm:col-span-2">
+                  <CampoMoeda
+                    valor={editing.valor_estimado_complementar}
+                    onChange={(v) =>
+                      setEditing({ ...editing, valor_estimado_complementar: v })
+                    }
+                  />
+                </Field>
+              </div>
+            </div>
           </form>
         )}
       </Modal>
@@ -748,6 +915,48 @@ export default function Processos() {
               </DrawerField>
               <DrawerField label="Data de liquidação">
                 {detalhe.data_liquidacao ? formatDate(detalhe.data_liquidacao) : '—'}
+              </DrawerField>
+              {/* Ocupa a linha inteira: são até três selos lado a lado. */}
+              <div className="col-span-2">
+                <DrawerField label="Tipo de crédito">
+                  {detalhe.tipo_credito?.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {detalhe.tipo_credito.map((t) => {
+                        const l = getLabel(TIPO_CREDITO, t)
+                        return (
+                          <Badge key={t} tone={l.tone}>
+                            {l.label}
+                          </Badge>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    '—'
+                  )}
+                </DrawerField>
+              </div>
+              <DrawerField label="Capital investido">
+                {formatBRL(detalhe.capital_investido)}
+              </DrawerField>
+              <DrawerField label="Valor de face">
+                {formatBRL(detalhe.valor_face)}
+              </DrawerField>
+              <DrawerField label="Data de referência">
+                {formatDate(detalhe.data_referencia)}
+              </DrawerField>
+              <DrawerField label="Índice de atualização">
+                {detalhe.indice_atualizacao
+                  ? getLabel(INDICE_ATUALIZACAO, detalhe.indice_atualizacao).label
+                  : '—'}
+              </DrawerField>
+              <DrawerField label="Já recebido">
+                {formatBRL(detalhe.ja_recebido)}
+              </DrawerField>
+              <DrawerField label="Data de recebimento efetivo">
+                {formatDate(detalhe.data_recebimento_efetivo)}
+              </DrawerField>
+              <DrawerField label="Valor estimado complementar">
+                {formatBRL(detalhe.valor_estimado_complementar)}
               </DrawerField>
             </DrawerSection>
 

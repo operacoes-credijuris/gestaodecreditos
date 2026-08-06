@@ -88,6 +88,12 @@ export interface KommoAnaliseInterna {
 // ---------- Operacional: Processos ----------
 export type StatusProcesso = 'ativo' | 'complementar' | 'encerrado'
 export type Instrumento = 'particular' | 'registro_publico' | 'escritura_publica'
+/** Um crédito pode acumular mais de um tipo — daí ser lista, não valor único. */
+export type TipoCredito =
+  | 'principal'
+  | 'honorarios_contratuais'
+  | 'honorarios_advocaticios'
+export type IndiceAtualizacao = 'selic' | 'ipca_2'
 
 export interface Processo {
   id: UUID
@@ -105,6 +111,15 @@ export interface Processo {
   numero_rtdpj: string | null
   status: StatusProcesso
   data_liquidacao: string | null
+  // Financeiro — só na ficha lateral ("Aquisição e liquidação"), fora da tabela.
+  tipo_credito: TipoCredito[]
+  capital_investido: number | null
+  valor_face: number | null
+  data_referencia: string | null
+  indice_atualizacao: IndiceAtualizacao | null
+  ja_recebido: number | null
+  data_recebimento_efetivo: string | null
+  valor_estimado_complementar: number | null
   advbox_lawsuit_id: string | null
   created_at: string
   updated_at: string

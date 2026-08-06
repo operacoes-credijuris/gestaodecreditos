@@ -17,6 +17,25 @@ export function formatBRL(value: number | null | undefined): string {
   })
 }
 
+/**
+ * Campo de dinheiro: os dígitos entram pela direita como centavos, então
+ * digitar "1234" vira 12,34 e não há como montar um valor inválido. Devolve
+ * null quando não sobrou dígito nenhum (campo em branco = não informado).
+ */
+export function parseBRLInput(v: string): number | null {
+  const d = onlyDigits(v)
+  return d ? Number(d) / 100 : null
+}
+
+/** Valor para dentro do campo de dinheiro: 1234.5 -> "1.234,50" (sem "R$"). */
+export function formatBRLInput(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return ''
+  return value.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
 export function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
   return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`
