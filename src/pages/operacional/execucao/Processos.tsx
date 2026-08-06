@@ -324,8 +324,13 @@ export default function Processos() {
     try {
       const { id, created_at, updated_at, advbox_lawsuit_id, ...payload } =
         editing as Processo
-      // Data de liquidação só faz sentido para complementar/encerrado.
-      if (payload.status === 'ativo') payload.data_liquidacao = null
+      // Liquidação e valores já pagos só fazem sentido para complementar/
+      // encerrado; em Ativo os campos ficam ocultos e são descartados.
+      if (payload.status === 'ativo') {
+        payload.data_liquidacao = null
+        payload.ja_recebido = null
+        payload.valor_estimado_complementar = null
+      }
       // Nº RTDPJ só se aplica a registro público e é opcional (vazio = nulo).
       payload.numero_rtdpj =
         payload.instrumento === 'registro_publico'
@@ -700,10 +705,13 @@ export default function Processos() {
               <Field
                 label="Status"
                 required
-                // Avisa que o campo condicional oculto será descartado no salvamento.
+                // Avisa que os campos condicionais ocultos serão descartados.
                 hint={
-                  editing.status === 'ativo' && editing.data_liquidacao
-                    ? 'Ao salvar como Ativo, a data de liquidação será descartada.'
+                  editing.status === 'ativo' &&
+                  (editing.data_liquidacao ||
+                    editing.ja_recebido != null ||
+                    editing.valor_estimado_complementar != null)
+                    ? 'Ao salvar como Ativo, a data de liquidação, o já recebido e o valor estimado complementar serão descartados.'
                     : undefined
                 }
               >
@@ -739,14 +747,8 @@ export default function Processos() {
 
             {/* Financeiro do crédito. Fica só aqui e na ficha lateral — de
                 propósito fora da tabela, que segue enxuta para escanear. */}
-            <div className="border-t border-slate-100 pt-4">
-              <h3 className="mb-3 text-sm font-semibold text-slate-700">
-                Tipo e valores do crédito
-              </h3>
-              <Field
-                label="Tipo de crédito"
-                hint="Marque quantos se aplicarem — um crédito pode acumular mais de um."
-              >
+            <div>
+              <Field label="Tipo de crédito">
                 <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
                   {Object.entries(TIPO_CREDITO).map(([k, v]) => (
                     <label
@@ -815,20 +817,28 @@ export default function Processos() {
                     ))}
                   </Select>
                 </Field>
-                <Field label="Já recebido">
-                  <CampoMoeda
-                    valor={editing.ja_recebido}
-                    onChange={(v) => setEditing({ ...editing, ja_recebido: v })}
-                  />
-                </Field>
-                <Field label="Valor estimado complementar">
-                  <CampoMoeda
-                    valor={editing.valor_estimado_complementar}
-                    onChange={(v) =>
-                      setEditing({ ...editing, valor_estimado_complementar: v })
-                    }
-                  />
-                </Field>
+                {/* Só fazem sentido depois que o crédito começou a ser pago —
+                    mesma regra da data de liquidação. Em Ativo ficam ocultos e
+                    o salvamento os descarta. */}
+                {(editing.status === 'complementar' ||
+                  editing.status === 'encerrado') && (
+                  <>
+                    <Field label="Já recebido">
+                      <CampoMoeda
+                        valor={editing.ja_recebido}
+                        onChange={(v) => setEditing({ ...editing, ja_recebido: v })}
+                      />
+                    </Field>
+                    <Field label="Valor estimado complementar">
+                      <CampoMoeda
+                        valor={editing.valor_estimado_complementar}
+                        onChange={(v) =>
+                          setEditing({ ...editing, valor_estimado_complementar: v })
+                        }
+                      />
+                    </Field>
+                  </>
+                )}
               </div>
             </div>
           </form>
