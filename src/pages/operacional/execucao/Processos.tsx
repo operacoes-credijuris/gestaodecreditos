@@ -125,6 +125,15 @@ function corExpectativa(
   return { classe: 'font-medium text-emerald-600', titulo: 'Vence em mais de um mês' }
 }
 
+/**
+ * Data de liquidação, já recebido e valor estimado complementar só existem
+ * depois que o crédito começou a ser pago — ou seja, fora do status Ativo.
+ * Ficam ocultos no formulário e na ficha, e o salvamento os descarta em Ativo.
+ * Ponto único da regra: mudou aqui, mudou nos quatro lugares que a usam.
+ */
+const emLiquidacao = (status?: StatusProcesso): boolean =>
+  status === 'complementar' || status === 'encerrado'
+
 const VAZIO: Partial<Processo> = {
   numero_cnj: '',
   tribunal: '',
@@ -324,9 +333,8 @@ export default function Processos() {
     try {
       const { id, created_at, updated_at, advbox_lawsuit_id, ...payload } =
         editing as Processo
-      // Liquidação e valores já pagos só fazem sentido para complementar/
-      // encerrado; em Ativo os campos ficam ocultos e são descartados.
-      if (payload.status === 'ativo') {
+      // Em Ativo os três campos ficam ocultos, então são descartados.
+      if (!emLiquidacao(payload.status)) {
         payload.data_liquidacao = null
         payload.ja_recebido = null
         payload.valor_estimado_complementar = null
@@ -707,7 +715,7 @@ export default function Processos() {
                 required
                 // Avisa que os campos condicionais ocultos serão descartados.
                 hint={
-                  editing.status === 'ativo' &&
+                  !emLiquidacao(editing.status) &&
                   (editing.data_liquidacao ||
                     editing.ja_recebido != null ||
                     editing.valor_estimado_complementar != null)
@@ -731,8 +739,7 @@ export default function Processos() {
                   ))}
                 </Select>
               </Field>
-              {(editing.status === 'complementar' ||
-                editing.status === 'encerrado') && (
+              {emLiquidacao(editing.status) && (
                 <Field label="Data de liquidação">
                   <Input
                     type="date"
@@ -817,11 +824,7 @@ export default function Processos() {
                     ))}
                   </Select>
                 </Field>
-                {/* Só fazem sentido depois que o crédito começou a ser pago —
-                    mesma regra da data de liquidação. Em Ativo ficam ocultos e
-                    o salvamento os descarta. */}
-                {(editing.status === 'complementar' ||
-                  editing.status === 'encerrado') && (
+                {emLiquidacao(editing.status) && (
                   <>
                     <Field label="Já recebido">
                       <CampoMoeda
@@ -909,9 +912,11 @@ export default function Processos() {
               <DrawerField label="Expectativa de liquidação">
                 {formatDate(detalhe.expectativa_liquidacao)}
               </DrawerField>
-              <DrawerField label="Data de liquidação">
-                {detalhe.data_liquidacao ? formatDate(detalhe.data_liquidacao) : '—'}
-              </DrawerField>
+              {emLiquidacao(detalhe.status) && (
+                <DrawerField label="Data de liquidação">
+                  {formatDate(detalhe.data_liquidacao)}
+                </DrawerField>
+              )}
               {/* Ocupa a linha inteira: são até três selos lado a lado. */}
               <div className="col-span-2">
                 <DrawerField label="Tipo de crédito">
@@ -945,12 +950,16 @@ export default function Processos() {
                   ? getLabel(INDICE_ATUALIZACAO, detalhe.indice_atualizacao).label
                   : '—'}
               </DrawerField>
-              <DrawerField label="Já recebido">
-                {formatBRL(detalhe.ja_recebido)}
-              </DrawerField>
-              <DrawerField label="Valor estimado complementar">
-                {formatBRL(detalhe.valor_estimado_complementar)}
-              </DrawerField>
+              {emLiquidacao(detalhe.status) && (
+                <>
+                  <DrawerField label="Já recebido">
+                    {formatBRL(detalhe.ja_recebido)}
+                  </DrawerField>
+                  <DrawerField label="Valor estimado complementar">
+                    {formatBRL(detalhe.valor_estimado_complementar)}
+                  </DrawerField>
+                </>
+              )}
             </DrawerSection>
 
             <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
