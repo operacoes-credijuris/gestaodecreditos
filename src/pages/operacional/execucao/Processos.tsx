@@ -91,12 +91,16 @@ function splitRtdpj(v: string): string[] {
     .filter(Boolean)
 }
 
-// Data de "daqui a um mês" a partir de um ISO local (YYYY-MM-DD). Mês de
+// Antecedência que acende o âmbar na coluna Expectativa. Régua num só lugar:
+// mudar aqui muda a cor e o texto da dica junto.
+const MESES_ALERTA_EXPECTATIVA = 3
+
+// Data de "daqui a N meses" a partir de um ISO local (YYYY-MM-DD). Meses de
 // CALENDÁRIO, com o dia preso ao último do mês quando ele não existe
-// (31/01 -> 28/02) — somar 30 dias erraria "um mês" em boa parte do ano.
-function umMesDepois(iso: string): string {
+// (31/01 -> 28/02) — somar 30 dias por mês erraria em boa parte do ano.
+function mesesDepois(iso: string, meses: number): string {
   const [y, m, d] = iso.split('-').map(Number)
-  const seq = m + 1
+  const seq = m + meses
   const ano = y + Math.floor((seq - 1) / 12)
   const mes = ((seq - 1) % 12) + 1
   // Dia 0 do mês seguinte = último dia deste mês.
@@ -107,22 +111,29 @@ function umMesDepois(iso: string): string {
 
 /**
  * Semáforo da expectativa de liquidação: vermelho já venceu, âmbar vence
- * dentro de um mês, verde ainda tem folga. Comparação por texto (ISO é
- * ordenável) contra a data de hoje, recalculada a cada render — então a cor
- * vira sozinha na virada do dia, sem ninguém mexer no cadastro.
+ * dentro da janela de MESES_ALERTA_EXPECTATIVA, verde ainda tem folga.
+ * Comparação por texto (ISO é ordenável) contra a data de hoje, recalculada a
+ * cada render — então a cor vira sozinha na virada do dia, sem ninguém mexer
+ * no cadastro.
  */
 function corExpectativa(
   data: string | null | undefined,
   hoje: string,
-  emUmMes: string,
+  limiteAlerta: string,
 ): { classe: string; titulo?: string } {
   const d = (data ?? '').slice(0, 10)
   if (!d) return { classe: 'text-slate-600' }
   if (d < hoje) return { classe: 'font-medium text-red-600', titulo: 'Expectativa vencida' }
-  if (d <= emUmMes) {
-    return { classe: 'font-medium text-amber-600', titulo: 'Vence em até um mês' }
+  if (d <= limiteAlerta) {
+    return {
+      classe: 'font-medium text-amber-600',
+      titulo: `Vence em até ${MESES_ALERTA_EXPECTATIVA} meses`,
+    }
   }
-  return { classe: 'font-medium text-emerald-600', titulo: 'Vence em mais de um mês' }
+  return {
+    classe: 'font-medium text-emerald-600',
+    titulo: `Vence em mais de ${MESES_ALERTA_EXPECTATIVA} meses`,
+  }
 }
 
 /**
@@ -214,7 +225,10 @@ export default function Processos() {
   // Referências do semáforo da coluna Expectativa. Data local (sv-SE dá o
   // formato ISO), calculada no render: no dia seguinte a régua anda sozinha.
   const hoje = useMemo(() => new Date().toLocaleDateString('sv-SE'), [])
-  const emUmMes = useMemo(() => umMesDepois(hoje), [hoje])
+  const limiteAlerta = useMemo(
+    () => mesesDepois(hoje, MESES_ALERTA_EXPECTATIVA),
+    [hoje],
+  )
 
   const [busca, setBusca] = useState('')
   // Padrão ao abrir a página: mostra apenas processos ativos.
@@ -464,7 +478,7 @@ export default function Processos() {
               {lista.map((p) => {
                 const st = getLabel(STATUS_PROCESSO, p.status)
                 const inst = getLabel(INSTRUMENTO, p.instrumento)
-                const exp = corExpectativa(p.expectativa_liquidacao, hoje, emUmMes)
+                const exp = corExpectativa(p.expectativa_liquidacao, hoje, limiteAlerta)
                 return (
                   <Fragment key={p.id}>
                   <TR onClick={() => setDetalhe(p)}>
@@ -504,9 +518,9 @@ export default function Processos() {
                     <TD className="whitespace-nowrap tabular-nums text-slate-600">
                       {formatDate(p.data_aquisicao)}
                     </TD>
-                    {/* Semáforo: vencida (vermelho), até um mês (âmbar), com
-                        folga (verde). O title mantém a informação para quem
-                        não distingue as cores. */}
+                    {/* Semáforo: vencida (vermelho), dentro da janela de alerta
+                        (âmbar), com folga (verde). O title mantém a informação
+                        para quem não distingue as cores. */}
                     <TD className="whitespace-nowrap tabular-nums">
                       <span className={exp.classe} title={exp.titulo}>
                         {formatDate(p.expectativa_liquidacao)}
