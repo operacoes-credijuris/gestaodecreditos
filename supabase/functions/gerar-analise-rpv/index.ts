@@ -906,20 +906,30 @@ Deno.serve(async (req) => {
     const tipoAquisicao: string = (body.tipo_aquisicao || 'auto');  // 'auto'|'principal'|'honorarios'|'ambos'
     const honPctRaw = (body.honorarios_pct === '' || body.honorarios_pct == null) ? null : Number(body.honorarios_pct);
     const honorariosPct = (honPctRaw != null && !isNaN(honPctRaw) && honPctRaw >= 0) ? honPctRaw : null;
-    if (!jobId || !intermediador) return errorResponse('Campos obrigatórios: job_id, intermediador');
+    if (!intermediador) return errorResponse('Campo obrigatório: intermediador');
     for (const k of ['anthropic_api_key', 'google_oauth_client_id', 'google_oauth_client_secret', 'google_oauth_refresh_token'])
       if (!cfg[k]) return errorResponse(`Secret '${k}' não configurado (Anthropic/Google — ver integracao_*_secret)`, 500);
 
-    // 3a. Lê o PDF do processo do bucket analises-input/{userId}/{jobId}/processo/*
-    const prefix = `${userId}/${jobId}/processo`;
-    const { data: arquivos, error: listErr } = await sbAdmin.storage.from(BUCKET_INPUT).list(prefix, { limit: 50 });
-    if (listErr) throw new Error('Erro listando uploads: ' + listErr.message);
-    if (!arquivos?.length) return errorResponse('Nenhum PDF encontrado para esse job. Faça o upload do processo antes de gerar.');
-
-    const contentBlocks: any[] = [];
-    for (const a of arquivos) {
-      const bytes = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${a.name}`);
-      contentBlocks.push(...await arquivoToContentBlocks(a.name, bytes));
+    // 3a. Fonte do texto do processo:
+    //   (A) texto já extraído no NAVEGADOR (pdf.js) e enviado no corpo -> caminho leve, sem estourar CPU;
+    //   (B) fallback: lê o(s) arquivo(s) do storage analises-input/{userId}/{jobId}/processo/* (fluxo antigo).
+    let contentBlocks: any[] = [];
+    let arquivos: Array<{ name: string }> = [];
+    let prefix = '';
+    const textoDireto = String(body.texto ?? body.texto_processo ?? '').trim();
+    if (textoDireto) {
+      contentBlocks = [{ type: 'text', text: `[Documento do processo]\n\n${textoDireto}` }];
+    } else {
+      if (!jobId) return errorResponse('Faltou o texto do processo (ou o job_id).');
+      prefix = `${userId}/${jobId}/processo`;
+      const { data: arqs, error: listErr } = await sbAdmin.storage.from(BUCKET_INPUT).list(prefix, { limit: 50 });
+      if (listErr) throw new Error('Erro listando uploads: ' + listErr.message);
+      if (!arqs?.length) return errorResponse('Nenhum PDF encontrado para esse job. Faça o upload do processo antes de gerar.');
+      arquivos = arqs;
+      for (const a of arquivos) {
+        const bytes = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${a.name}`);
+        contentBlocks.push(...await arquivoToContentBlocks(a.name, bytes));
+      }
     }
     const houveCorte = contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
 
@@ -929,7 +939,7 @@ Deno.serve(async (req) => {
     const veredito = avaliarQualificacao(qualif);
     if (!veredito.aprovado) {
       // Reprovado: não monta tabela jurídica nem precificação. Limpa os uploads e devolve o motivo.
-      try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ }
+      if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
       return jsonResponse({
         ok: true,
         reprovado: true,
@@ -1022,7 +1032,7 @@ Deno.serve(async (req) => {
     const up = await driveUploadBytes(token, nomeArquivo, cedenteId, xlsx, XLSX_MIME, true);
 
     // limpeza best-effort dos uploads
-    try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ }
+    if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
 
     // Avisos (alertas da qualificação + rentabilidade abaixo da meta e/ou documento cortado por tamanho)
     const avisos: string[] = [...avisosQualif];
