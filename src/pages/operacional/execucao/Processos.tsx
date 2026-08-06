@@ -146,7 +146,6 @@ const VAZIO: Partial<Processo> = {
   data_referencia: '',
   indice_atualizacao: null,
   ja_recebido: null,
-  data_recebimento_efetivo: '',
   valor_estimado_complementar: null,
 }
 
@@ -337,7 +336,6 @@ export default function Processos() {
       payload.expectativa_liquidacao = vazioNull(payload.expectativa_liquidacao)
       payload.data_liquidacao = vazioNull(payload.data_liquidacao)
       payload.data_referencia = vazioNull(payload.data_referencia)
-      payload.data_recebimento_efetivo = vazioNull(payload.data_recebimento_efetivo)
       // Sem tipo marcado o banco espera lista vazia, não null (coluna NOT NULL).
       payload.tipo_credito = payload.tipo_credito ?? []
       if (id) {
@@ -823,19 +821,7 @@ export default function Processos() {
                     onChange={(v) => setEditing({ ...editing, ja_recebido: v })}
                   />
                 </Field>
-                <Field label="Data de recebimento efetivo">
-                  <Input
-                    type="date"
-                    value={editing.data_recebimento_efetivo ?? ''}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        data_recebimento_efetivo: e.target.value,
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="Valor estimado complementar" className="sm:col-span-2">
+                <Field label="Valor estimado complementar">
                   <CampoMoeda
                     valor={editing.valor_estimado_complementar}
                     onChange={(v) =>
@@ -951,9 +937,6 @@ export default function Processos() {
               </DrawerField>
               <DrawerField label="Já recebido">
                 {formatBRL(detalhe.ja_recebido)}
-              </DrawerField>
-              <DrawerField label="Data de recebimento efetivo">
-                {formatDate(detalhe.data_recebimento_efetivo)}
               </DrawerField>
               <DrawerField label="Valor estimado complementar">
                 {formatBRL(detalhe.valor_estimado_complementar)}

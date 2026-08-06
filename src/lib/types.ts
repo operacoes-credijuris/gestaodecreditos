@@ -118,7 +118,6 @@ export interface Processo {
   data_referencia: string | null
   indice_atualizacao: IndiceAtualizacao | null
   ja_recebido: number | null
-  data_recebimento_efetivo: string | null
   valor_estimado_complementar: number | null
   advbox_lawsuit_id: string | null
   created_at: string
