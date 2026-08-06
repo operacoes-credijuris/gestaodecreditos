@@ -40,7 +40,9 @@ export const STATUS_PROCESSO: Record<string, LabelDef> = {
 export const TIPO_CREDITO: Record<string, LabelDef> = {
   principal: { label: 'Crédito principal', tone: 'blue' },
   honorarios_contratuais: { label: 'Honorários contratuais', tone: 'purple' },
-  honorarios_advocaticios: { label: 'Honorários advocatícios', tone: 'orange' },
+  // Chave mantida como honorarios_advocaticios: e ela que esta no check
+  // constraint da migracao 0019 e nos registros ja gravados. Só o rótulo muda.
+  honorarios_advocaticios: { label: 'Honorários sucumbenciais', tone: 'orange' },
 }
 
 export const INDICE_ATUALIZACAO: Record<string, LabelDef> = {
