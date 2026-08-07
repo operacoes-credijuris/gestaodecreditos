@@ -41,7 +41,7 @@ export const NAVIGATION: NavSection[] = [
     title: 'Comercial',
     items: [
       { label: 'Geração de Contratos', to: '/comercial/contratos', icon: FileSignature },
-      { label: 'Carteiras de Investidores', to: '/comercial/carteiras', icon: Wallet },
+      { label: 'Carteiras de Investimentos', to: '/comercial/carteiras', icon: Wallet },
     ],
   },
   {

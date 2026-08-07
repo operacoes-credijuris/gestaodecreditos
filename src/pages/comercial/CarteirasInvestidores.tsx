@@ -1,14 +1,7 @@
 import { useMemo, useState } from 'react'
-import {
-  Wallet,
-  Percent,
-  Target,
-  CheckCircle2,
-  Clock,
-  Hash,
-  CalendarDays,
-} from 'lucide-react'
+import { Wallet, Percent, Target, CheckCircle2, Clock, Hash } from 'lucide-react'
 import { processosCrud } from '@/lib/queries'
+import { getLabel, INDICE_ATUALIZACAO } from '@/lib/labels'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
@@ -26,10 +19,10 @@ import {
   ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
-import { formatCNJ } from '@/lib/format'
+import { formatBRL, formatCNJ, formatDate, sentenceCase } from '@/lib/format'
 
 const TABS = [
-  { key: 'individual', label: 'Individual' },
+  { key: 'individual', label: 'Por investidor' },
   { key: 'consolidado', label: 'Consolidado' },
   { key: 'dados_pessoais', label: 'Dados pessoais' },
 ]
@@ -39,7 +32,7 @@ export default function CarteirasInvestidores() {
 
   return (
     <div>
-      <PageHeader title="Carteiras de Investidores" />
+      <PageHeader title="Carteiras de Investimentos" />
       <div className="mb-5">
         <Tabs items={TABS} value={tab} onChange={setTab} />
       </div>
@@ -63,14 +56,44 @@ function normNome(s: string): string {
     .toLowerCase()
 }
 
-/** "2026-08" -> "Agosto de 2026". */
+/**
+ * "2026-08" -> "agosto de 2026". Minúsculo, que é a forma natural em pt-BR;
+ * quem precisa de inicial maiúscula (opção de dropdown) aplica sentenceCase.
+ */
 function rotuloMes(iso: string): string {
   const [ano, mes] = iso.split('-').map(Number)
-  const s = new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', {
+  return new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', {
     month: 'long',
     year: 'numeric',
   })
-  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/**
+ * Tipos do crédito em texto corrido, não como lista de selos: a carteira é um
+ * relatório para ler, não uma tabela para escanear.
+ *
+ *   principal + contratuais  -> "crédito principal e honorários contratuais"
+ *   os três                  -> "crédito principal, honorários contratuais e sucumbenciais"
+ *   os dois honorários       -> "honorários contratuais e sucumbenciais"
+ *
+ * Quando os dois honorários aparecem, o segundo vira só "sucumbenciais" — a
+ * palavra "honorários" já foi dita e repetir soa burocrático. Sozinho, ele
+ * mantém o substantivo.
+ */
+function textoTipoCredito(tipos: string[] | null | undefined): string {
+  const t = tipos ?? []
+  if (t.length === 0) return '—'
+  const temContratuais = t.includes('honorarios_contratuais')
+  const partes: string[] = []
+  if (t.includes('principal')) partes.push('crédito principal')
+  if (temContratuais) partes.push('honorários contratuais')
+  if (t.includes('honorarios_advocaticios')) {
+    partes.push(temContratuais ? 'sucumbenciais' : 'honorários sucumbenciais')
+  }
+  if (partes.length === 0) return '—'
+  if (partes.length === 1) return partes[0]
+  // "A, B e C" — vírgula entre os primeiros, "e" antes do último.
+  return `${partes.slice(0, -1).join(', ')} e ${partes[partes.length - 1]}`
 }
 
 /** Rótulo de seção fora do card, como abertura da tabela. */
@@ -151,6 +174,38 @@ function Individual() {
       .sort((a, b) => (b.data_aquisicao || '').localeCompare(a.data_aquisicao || ''))
   }, [processos.data, investidor])
 
+  /**
+   * Somas do que JÁ está cadastrado. `preenchidos` conta quantos créditos têm o
+   * valor: sem isso, uma carteira com metade dos cadastros em branco mostraria
+   * um total com cara de completo — numa tela financeira, isso é pior que "—".
+   */
+  const totais = useMemo(() => {
+    const soma = (f: (p: (typeof carteira)[number]) => number | null | undefined) => {
+      let t = 0
+      let n = 0
+      for (const p of carteira) {
+        const v = f(p)
+        if (typeof v === 'number' && !Number.isNaN(v)) {
+          t += v
+          n++
+        }
+      }
+      return { total: n > 0 ? t : null, preenchidos: n }
+    }
+    return {
+      capital: soma((p) => p.capital_investido),
+      recebido: soma((p) => p.ja_recebido),
+    }
+  }, [carteira])
+
+  // "3 de 7 créditos" quando falta cadastro; some quando está tudo lá.
+  const cobertura = (n: number) =>
+    carteira.length === 0
+      ? AGUARDANDO
+      : n === carteira.length
+        ? 'soma dos créditos deste investidor'
+        : `soma de ${n} de ${carteira.length} créditos — os demais sem valor cadastrado`
+
   if (processos.isLoading) return <Loading label="Carregando créditos…" />
   if (processos.isError) {
     return (
@@ -188,8 +243,7 @@ function Individual() {
             Mês de referência
           </div>
           {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
-          <div className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
-            <CalendarDays className="h-4 w-4 text-slate-400" />
+          <div className="inline-flex items-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
             {mesRef}
           </div>
         </div>
@@ -198,8 +252,14 @@ function Individual() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           label="Capital total"
-          value="—"
-          hint={AGUARDANDO}
+          value={
+            investidor && totais.capital.total !== null
+              ? formatBRL(totais.capital.total)
+              : '—'
+          }
+          hint={
+            investidor ? cobertura(totais.capital.preenchidos) : 'selecione um investidor'
+          }
           icon={<Wallet className="h-5 w-5" />}
           tone="brand"
         />
@@ -219,8 +279,16 @@ function Individual() {
         />
         <StatCard
           label="Já recebido"
-          value="—"
-          hint={AGUARDANDO}
+          value={
+            investidor && totais.recebido.total !== null
+              ? formatBRL(totais.recebido.total)
+              : '—'
+          }
+          hint={
+            investidor
+              ? cobertura(totais.recebido.preenchidos)
+              : 'selecione um investidor'
+          }
           icon={<CheckCircle2 className="h-5 w-5" />}
           tone="green"
         />
@@ -317,31 +385,48 @@ function Individual() {
               <TBody>
                 {carteira.map((p) => (
                   <TR key={p.id}>
-                    {/* Identificação */}
+                    {/* Identificação — tudo vem do cadastro do crédito. */}
                     <TD className="font-medium text-slate-800">
                       {formatCNJ(p.numero_cnj)}
                     </TD>
-                    <TD />
-                    <TD />
-                    <TD />
-                    <TD />
+                    <TD>{p.cedente || '—'}</TD>
+                    <TD>{p.cedente_advogado || '—'}</TD>
+                    {/* Única coluna que pode ser longa: deixa quebrar. */}
+                    <TD className="!whitespace-normal">
+                      {textoTipoCredito(p.tipo_credito)}
+                    </TD>
+                    <TD>{p.tribunal || '—'}</TD>
 
                     {/* TIR obrigatório */}
-                    <TD className={SEP} />
-                    <TD />
+                    <TD className={`${SEP} text-right tabular-nums`}>
+                      {formatBRL(p.capital_investido)}
+                    </TD>
+                    <TD className="tabular-nums">{formatDate(p.data_aquisicao)}</TD>
 
                     {/* Crédito · fixo na abertura */}
-                    <TD className={SEP} />
-                    <TD />
-                    <TD />
+                    <TD className={`${SEP} text-right tabular-nums`}>
+                      {formatBRL(p.valor_face)}
+                    </TD>
+                    <TD className="tabular-nums">{formatDate(p.data_referencia)}</TD>
+                    <TD>
+                      {p.indice_atualizacao
+                        ? getLabel(INDICE_ATUALIZACAO, p.indice_atualizacao).label
+                        : '—'}
+                    </TD>
 
                     {/* Recebimento principal */}
-                    <TD className={SEP} />
-                    <TD />
-                    <TD />
+                    <TD className={`${SEP} tabular-nums`}>
+                      {formatDate(p.expectativa_liquidacao)}
+                    </TD>
+                    <TD className="text-right tabular-nums">
+                      {formatBRL(p.ja_recebido)}
+                    </TD>
+                    <TD className="tabular-nums">{formatDate(p.data_liquidacao)}</TD>
 
                     {/* Complementar */}
-                    <TD className={SEP} />
+                    <TD className={`${SEP} text-right tabular-nums`}>
+                      {formatBRL(p.valor_estimado_complementar)}
+                    </TD>
 
                     {/* Dados vivos */}
                     <TD className={SEP} />
@@ -430,7 +515,7 @@ function Consolidado() {
           <option value="todos">Tudo</option>
           {meses.map((m) => (
             <option key={m} value={m}>
-              {rotuloMes(m)}
+              {sentenceCase(rotuloMes(m))}
             </option>
           ))}
         </Select>
