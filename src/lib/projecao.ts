@@ -145,13 +145,17 @@ export function valorProjetado(
 /**
  * Ganho projetado do crédito.
  *
- *   ganho = (valor projetado + valor estimado complementar) − capital investido
+ *   ganho = (valor projetado − capital investido) + valor estimado complementar
  *
- * O complementar entra do lado do RECEBIMENTO, não do capital. Nos 29 créditos
- * que o têm preenchido hoje, todos já liquidados, ele é o resto a receber por
- * cima do que entrou (capital 7.681,17 / recebido 10.248,89 / complementar
- * 839,81). Somá-lo ao capital trataria um recebível futuro como se fosse custo e
- * subestimaria o ganho — no caso acima, 1.727,91 em vez de 3.407,53.
+ * Primeiro a diferença entre o projetado e o capital, e sobre ela soma-se o
+ * complementar. Escrito como `valor + comp − capital` porque é a mesma conta,
+ * mas a ordem acima é a regra como o produto a enuncia.
+ *
+ * O complementar é RECEBÍVEL, nunca custo: nos créditos que o têm preenchido,
+ * todos já liquidados, ele é o resto a receber por cima do que entrou (capital
+ * 7.681,17 / recebido 10.248,89 / complementar 839,81 → ganho 3.407,53). Passá-lo
+ * para o lado do capital daria 1.727,91 e subestimaria o ganho em duas vezes o
+ * complementar.
  */
 export function ganhoProjetado(
   proj: Projecao,
