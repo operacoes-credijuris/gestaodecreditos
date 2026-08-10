@@ -19,6 +19,7 @@ import {
 import { invokeFunction } from '@/lib/functions'
 import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
 import {
+  diasEmCarteira,
   getLabel,
   INDICE_ATUALIZACAO,
   MESES_ALERTA_LIQUIDACAO,
@@ -47,7 +48,6 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import {
-  diasEntre,
   formatBRL,
   formatCNJ,
   formatDate,
@@ -718,10 +718,11 @@ function Individual() {
                     </TD>
                     <TD />
                     <TD />
-                    {/* Dias corridos da cessão até hoje, recalculados no render:
-                        o número anda sozinho na virada do dia. */}
+                    {/* Da cessão até hoje enquanto não liquida; liquidado, para
+                        na data de recebimento efetivo. Recalculado no render, o
+                        número anda sozinho na virada do dia. */}
                     <TD className="text-right tabular-nums">
-                      {diasEntre(p.data_aquisicao, hoje) ?? '—'}
+                      {diasEmCarteira(p.data_aquisicao, p.data_liquidacao, hoje) ?? '—'}
                     </TD>
                     <TD />
                     <TD />

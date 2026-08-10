@@ -8,6 +8,12 @@
 //   cinza (gray)      = neutro / encerrado
 //   roxo (purple)     = categoria especial
 // Mapas categóricos (tipos, fontes) usam cores apenas para distinguir.
+//
+// Além dos rótulos, este arquivo guarda as regras DERIVADAS da carteira
+// (statusLiquidacao, statusTir, diasEmCarteira). Elas moram juntas porque as
+// três dependem do mesmo critério — "o crédito já foi pago?" — e separá-las
+// abriria espaço para discordarem sobre o mesmo crédito.
+import { diasEntre } from './format'
 
 type BadgeTone =
   | 'gray'
@@ -98,6 +104,27 @@ export function getLabel(
 ): LabelDef {
   if (!key) return { label: '—', tone: 'gray' }
   return map[key] ?? { label: key, tone: 'gray' }
+}
+
+/**
+ * Dias em carteira — CALCULADO. Enquanto o crédito não foi pago, conta da
+ * cessão até hoje; quando foi pago, PARA na data de liquidação, porque crédito
+ * liquidado saiu da carteira e não segue acumulando tempo.
+ *
+ * ⚠️ A data de corte é `data_liquidacao` (coluna "Data receb. efetivo" da
+ * carteira), NUNCA `expectativa_liquidacao` (coluna "Data est. recebimento"):
+ * a expectativa é previsão, e usá-la contaria tempo que pode nunca ter
+ * existido. É o mesmo campo que acende o verde em statusLiquidacao e o
+ * "Efetivada" em statusTir — as três regras giram em torno de "está pago?" e
+ * ficam juntas aqui para não poderem discordar.
+ */
+export function diasEmCarteira(
+  dataAquisicao: string | null | undefined,
+  dataLiquidacao: string | null | undefined,
+  hoje: string,
+): number | null {
+  const fim = (dataLiquidacao ?? '').slice(0, 10) || hoje
+  return diasEntre(dataAquisicao, fim)
 }
 
 /**

@@ -14,8 +14,13 @@
 // abertura de todas as outras telas.
 import type { Processo } from './types'
 import type { CarteiraResumo } from './queries'
-import { MESES_ALERTA_LIQUIDACAO, statusLiquidacao, statusTir } from './labels'
-import { diasEntre, formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
+import {
+  diasEmCarteira,
+  MESES_ALERTA_LIQUIDACAO,
+  statusLiquidacao,
+  statusTir,
+} from './labels'
+import { formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
 
 const MOEDA = 'R$ #,##0.00'
 const DATA = 'dd/mm/yyyy'
@@ -264,7 +269,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       statusTir(p.data_liquidacao),
       null, // TIR a.a.
       null, // TIR mensal
-      diasEntre(p.data_aquisicao, hoje),
+      diasEmCarteira(p.data_aquisicao, p.data_liquidacao, hoje),
       null, // Ganho projetado
       null, // Retorno
     ]
@@ -322,6 +327,17 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     .toLowerCase()
   a.href = url
   a.download = `carteira-${slug || 'investidor'}-${hoje}.xlsx`
+  // Dois cuidados, e os dois já falharam na prática (downloads que simplesmente
+  // não aconteciam, de forma intermitente):
+  //   1. o <a> precisa estar NO documento — clique em elemento solto é ignorado
+  //      por parte dos navegadores;
+  //   2. revogar a URL logo depois do clique CANCELA o download, porque o
+  //      clique só agenda a transferência. A revogação vai para depois.
+  a.style.display = 'none'
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => {
+    a.remove()
+    URL.revokeObjectURL(url)
+  }, 60_000)
 }
