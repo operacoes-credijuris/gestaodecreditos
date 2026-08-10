@@ -72,10 +72,12 @@ import {
   sentenceCase,
 } from '@/lib/format'
 
+// As `key` são internas e não mudam com o rótulo: elas aparecem em estado e em
+// comparações pelo arquivo, e renomeá-las não traria nada.
 const TABS = [
-  { key: 'individual', label: 'Por investidor' },
-  { key: 'consolidado', label: 'Consolidado' },
-  { key: 'dados_pessoais', label: 'Dados pessoais' },
+  { key: 'individual', label: 'Relatórios individuais' },
+  { key: 'consolidado', label: 'Visão global' },
+  { key: 'dados_pessoais', label: 'Dados dos investidores' },
 ]
 
 export default function CarteirasInvestidores() {

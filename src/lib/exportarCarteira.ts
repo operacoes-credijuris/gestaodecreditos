@@ -386,6 +386,19 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   // linhas, rolar sem isso faz perder de vista qual coluna se está lendo. Só a
   // LINHA congela — a primeira coluna fica livre, por decisão de produto.
   ws.views = [{ state: 'frozen', ySplit: LINHA_COLUNA }]
+
+  // Planilha protegida contra edição: este arquivo é RETRATO do que a plataforma
+  // calculou, e editar aqui criaria um número que não existe no sistema. Não há
+  // fórmula em célula nenhuma, só valores.
+  // Senha vazia de propósito — é trava contra edição acidental, não segredo:
+  // quem precisar desproteger consegue em dois cliques, sem pedir senha a
+  // ninguém. Selecionar e copiar seguem liberados.
+  await ws.protect('', {
+    selectLockedCells: true,
+    selectUnlockedCells: true,
+    autoFilter: true,
+    sort: true,
+  })
   if (d.carteira.length > 0) {
     ws.autoFilter = {
       from: { row: LINHA_COLUNA, column: 1 },
