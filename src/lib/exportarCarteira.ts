@@ -26,6 +26,8 @@ import {
   aReceberEstimado,
   ganhoProjetado,
   ipcaMais2,
+  retorno,
+  retornoProjetadoCarteira,
   tir,
   tirMediaPonderada,
   valorProjetado,
@@ -94,7 +96,7 @@ const COLUNAS: { titulo: string; largura: number; fmt?: string }[] = [
   { titulo: 'TIR mensal', largura: 11, fmt: PCT },
   { titulo: 'Dias em carteira', largura: 13 },
   { titulo: 'Ganho projetado', largura: 15, fmt: MOEDA },
-  { titulo: 'Retorno', largura: 10 },
+  { titulo: 'Retorno', largura: 11, fmt: PCT },
 ]
 
 const INDICES: Record<string, string> = {
@@ -214,12 +216,18 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       valorComplementar: p.valor_estimado_complementar,
     })),
   )
+  const retornoCarteira = retornoProjetadoCarteira(
+    porCredito.map(({ p, proj }) => ({
+      ganho: ganhoProjetado(proj, p.capital_investido, p.valor_estimado_complementar),
+      capital: p.capital_investido,
+    })),
+  )
 
   // Mesma ordem dos cards na tela.
   const indicadores: [string, number | string | Date | null, string | undefined][] = [
     ['Capital total', centavos(d.capitalTotal) ?? SEM, MOEDA],
     ['TIR média', tirMedia.valor ?? SEM, PCT],
-    ['Retorno projetado', SEM, undefined],
+    ['Retorno projetado', retornoCarteira.valor ?? SEM, PCT],
     ['Já recebido', centavos(d.jaRecebidoTotal) ?? SEM, MOEDA],
     ['A receber estimado', centavos(aReceber.total) ?? SEM, MOEDA],
     ['Nº de operações', d.carteira.length, undefined],
@@ -314,6 +322,11 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     const textos = textosResumo(p.status, d.resumos?.get(p.id))
     const proj = valorProjetado(p, d.parametros, hoje)
     const t = tir(p.capital_investido, p.data_aquisicao, proj)
+    const ganho = ganhoProjetado(
+      proj,
+      p.capital_investido,
+      p.valor_estimado_complementar,
+    )
     const linha = ws.getRow(PRIMEIRA_DADO + idx)
     const valores: (string | number | Date | null)[] = [
       formatCNJ(p.numero_cnj),
@@ -339,8 +352,8 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       t.anual,
       t.mensal,
       diasEmCarteira(p.data_aquisicao, p.data_liquidacao, hoje),
-      ganhoProjetado(proj, p.capital_investido, p.valor_estimado_complementar),
-      null, // Retorno
+      ganho,
+      retorno(ganho, p.capital_investido),
     ]
     const zebrar = idx % 2 === 1
     valores.forEach((v, i) => {

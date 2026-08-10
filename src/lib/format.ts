@@ -46,9 +46,16 @@ export function formatBRLInput(value: number | null | undefined): string {
 export const parsePercentInput = parseBRLInput
 export const formatPercentInput = formatBRLInput
 
+/**
+ * Percentual com DUAS casas sempre: "10,00%" e não "10%". Casas fixas alinham a
+ * coluna e evitam que 81,4 e 81,40 pareçam números de precisão diferente.
+ */
 export function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
-  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`
+  return `${value.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`
 }
 
 export function formatDate(value: string | null | undefined): string {

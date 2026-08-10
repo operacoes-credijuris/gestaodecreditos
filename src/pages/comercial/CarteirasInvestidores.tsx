@@ -21,6 +21,8 @@ import {
 import {
   aReceberEstimado,
   ganhoProjetado,
+  retorno,
+  retornoProjetadoCarteira,
   tir,
   tirMediaPonderada,
   valorProjetado,
@@ -401,7 +403,13 @@ function Individual() {
         valorComplementar: p.valor_estimado_complementar,
       })),
     )
-    return { tirMedia: media, aReceber }
+    const retornoCarteira = retornoProjetadoCarteira(
+      itens.map(({ p, proj }) => ({
+        ganho: ganhoProjetado(proj, p.capital_investido, p.valor_estimado_complementar),
+        capital: p.capital_investido,
+      })),
+    )
+    return { tirMedia: media, aReceber, retorno: retornoCarteira }
   }, [carteira, parametros.data, hoje])
 
   // "3 de 7 créditos" quando falta cadastro; some quando está tudo lá.
@@ -552,8 +560,18 @@ function Individual() {
         />
         <StatCard
           label="Retorno projetado"
-          value="—"
-          hint={AGUARDANDO}
+          value={
+            investidor && derivados.retorno.valor !== null
+              ? formatPercent(derivados.retorno.valor)
+              : '—'
+          }
+          hint={
+            !investidor
+              ? 'selecione um investidor'
+              : derivados.retorno.valor === null
+                ? 'nenhum crédito com ganho calculável'
+                : `soma dos ganhos sobre a soma do capital, de ${derivados.retorno.considerados} de ${carteira.length} créditos`
+          }
           icon={<Target className="h-5 w-5" />}
           tone="amber"
         />
@@ -697,6 +715,7 @@ function Individual() {
                     p.capital_investido,
                     p.valor_estimado_complementar,
                   )
+                  const ret = retorno(ganho, p.capital_investido)
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
@@ -880,7 +899,19 @@ function Individual() {
                         </span>
                       )}
                     </TD>
-                    <TD />
+                    {/* Ganho sobre o capital, em %. Negativo em vermelho, como
+                        o ganho que o origina. */}
+                    <TD className="text-right tabular-nums">
+                      {ret === null ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        <span
+                          className={ret < 0 ? 'font-medium text-red-600' : undefined}
+                        >
+                          {formatPercent(ret)}
+                        </span>
+                      )}
+                    </TD>
                   </TR>
                   )
                 })}

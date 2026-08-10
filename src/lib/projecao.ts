@@ -169,6 +169,50 @@ export function ganhoProjetado(
 }
 
 /**
+ * Retorno do crédito, em % sobre o capital investido.
+ *
+ *   retorno = ganho projetado / capital investido × 100
+ */
+export function retorno(
+  ganho: number | null,
+  capitalInvestido: number | null | undefined,
+): number | null {
+  if (ganho === null) return null
+  if (typeof capitalInvestido !== 'number' || capitalInvestido <= 0) return null
+  return Math.round((ganho / capitalInvestido) * 10000) / 100
+}
+
+/**
+ * Retorno projetado da carteira: soma dos ganhos dividida pela soma dos capitais.
+ *
+ * É AGREGADO, e não média dos retornos individuais — assim cada real investido
+ * pesa igual, e um crédito pequeno de retorno alto não distorce o número.
+ *
+ * Crédito cujo ganho não dá para calcular fica fora das DUAS somas. Deixar o
+ * capital dele no denominador sem o ganho correspondente no numerador equivaleria
+ * a afirmar que rendeu zero, quando o que falta é cadastro.
+ */
+export function retornoProjetadoCarteira(
+  itens: { ganho: number | null; capital: number | null | undefined }[],
+): { valor: number | null; considerados: number } {
+  let somaGanho = 0
+  let somaCapital = 0
+  let considerados = 0
+  for (const it of itens) {
+    if (it.ganho === null) continue
+    if (typeof it.capital !== 'number' || it.capital <= 0) continue
+    somaGanho += it.ganho
+    somaCapital += it.capital
+    considerados++
+  }
+  if (somaCapital === 0) return { valor: null, considerados: 0 }
+  return {
+    valor: Math.round((somaGanho / somaCapital) * 10000) / 100,
+    considerados,
+  }
+}
+
+/**
  * "A receber estimado" da carteira. Soma DUAS parcelas, porque há dinheiro por
  * vir em dois estados diferentes:
  *
