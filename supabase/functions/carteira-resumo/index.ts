@@ -27,8 +27,10 @@ import { chaveAnthropic } from '../_shared/segredos.ts'
 const MODELO = 'claude-haiku-4-5-20251001'
 
 // Créditos por invocação, e quantas chamadas ao modelo em paralelo dentro do
-// lote. 10 x 3 dá ~4 ondas de ~12s: folgado dentro do limite de recursos.
-const BATCH = 10
+// lote. Cada crédito pode custar DUAS idas ao modelo (a conferência de forma
+// manda reescrever quando viola), então o pior caso de 8 x 3 é ~6 ondas de
+// ~12s. Ainda com folga sobre o WORKER_RESOURCE_LIMIT de ~150s.
+const BATCH = 8
 const CONCORRENCIA = 3
 
 // Teto de insumo por crédito. O histórico é integral e alguns processos têm
@@ -61,7 +63,7 @@ A Credijuris adquire créditos judiciais de credores originais (cedentes) e os c
 QUEM LÊ: o investidor que comprou o crédito. Pessoa de bom nível de compreensão, mas NÃO formada em Direito. Português formal e técnico, explicando o termo quando ele for indispensável. Direto ao ponto, sem floreio, sem citar artigos de lei, sem jargão desnecessário.
 
 PARA QUE SERVE O TEXTO
-É a prestação de contas da Credijuris ao investidor. Ele precisa deixar evidente que a equipe acompanha o caso de perto e age sempre que existe algo a fazer. A maneira de demonstrar isso é ser ESPECÍFICO sobre os atos praticados, dizendo que petição foi protocolada, o que ela pedia e o que se obteve com ela. Não é usar adjetivos sobre a própria atuação. NUNCA escreva que a equipe é diligente, atenta, dedicada, proativa ou empenhada, e não elogie o próprio trabalho. Mostre o trabalho e deixe o investidor concluir sozinho.
+É a prestação de contas da Credijuris ao investidor. Ele precisa deixar evidente que a equipe acompanha o caso de perto e age sempre que existe algo a fazer. A maneira de demonstrar isso é ser ESPECÍFICO sobre os atos praticados, dizendo que petição foi protocolada, o que ela pedia e o que se obteve com ela. Não é usar adjetivos sobre a própria atuação. NUNCA qualifique a equipe. As palavras diligente, diligência, atenta, atentos, dedicada, proativa, empenhada, empenho, zelosa e comprometida estão PROIBIDAS, inclusive em fechamentos do tipo "permanecemos atentos" ou "a equipe segue atenta aos prazos". Diga o que se está acompanhando, não que se está atento. Mostre o trabalho e deixe o investidor concluir sozinho.
 Todo ato praticado pela Credijuris deve aparecer. Quando o processo depende de terceiro, seja o juízo, a Fazenda ou o banco, diga o que a Credijuris fez para provocar esse terceiro e o que fará em seguida, para o investidor nunca ter a impressão de que o caso dele está parado sem ninguém olhando. Escreva na primeira pessoa do plural, como parte da equipe (acompanhamos, protocolamos, requereremos).
 
 REGRAS DE CONTEÚDO:
@@ -79,8 +81,8 @@ FORMA (regra rígida):
 - NÃO use dois-pontos em nenhum lugar do texto.
 - NÃO use travessão nem meia-risca. Para separar ideias use vírgula, ponto, ou reescreva a frase.
 - Texto corrido, sem listas, marcadores ou negrito.
-- Cada campo tem no MÁXIMO 600 caracteres. Mire em 400.
-- Corte o histórico antigo antes de cortar a situação atual. O investidor precisa saber onde o processo está, não a lista do que já passou.`
+- Cada campo tem no MÁXIMO 600 caracteres. O limite é CONFERIDO automaticamente e o texto é devolvido para reescrita se estourar. Mire em 350 para ter folga.
+- Corte o histórico antigo antes de cortar a situação atual. O investidor precisa saber onde o processo está, não a lista do que já passou. Não é preciso narrar todos os atos, só os que explicam onde o processo chegou.`
 
 const FERRAMENTA = {
   name: 'registrar_resumo',
@@ -208,25 +210,76 @@ function montarDossie(
   return linhas.join('\n')
 }
 
-/** Uma chamada ao modelo; devolve os dois textos. */
-async function gerarUm(
+// ---------- Conferência das regras de forma ----------
+// POR QUE ISTO EXISTE: instrução no prompt não basta. Na varredura de
+// 2026-08-10, com as regras já escritas, 12 de 94 textos citaram data e 52
+// estouraram o limite de caracteres. Confiar na auto-observância do modelo
+// entrega texto fora do padrão ao investidor, então o código confere e manda
+// reescrever apontando exatamente o que violou.
+const LIMITE_CHARS = 600
+
+const RE_DATA =
+  /\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b|\b(19|20)\d{2}\b|\b(janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i
+
+// Só adjetivo de autoelogio. "Diligenciamos o registro" é verbo de ação e deve
+// passar; "a equipe segue atenta" é elogio e não deve.
+const RE_AUTOELOGIO =
+  /\b(diligente|diligentes|diligência|proativ\w*|empenhad\w*|empenho|dedicad\w*|atent[oa]s?|zelos\w*|comprometid\w*)\b/i
+
+function problemas(campo: string, texto: string): string[] {
+  const p: string[] = []
+  if (texto.length > LIMITE_CHARS) {
+    p.push(
+      `${campo} tem ${texto.length} caracteres. O limite é ${LIMITE_CHARS}. Encurte cortando o histórico antigo, nunca a situação atual.`,
+    )
+  }
+  const d = texto.match(RE_DATA)
+  if (d) p.push(`${campo} menciona "${d[0]}". Datas são proibidas.`)
+  if (texto.includes(':')) p.push(`${campo} usa dois-pontos, que são proibidos.`)
+  if (/[—–]/.test(texto)) p.push(`${campo} usa travessão, que é proibido.`)
+  const a = texto.match(RE_AUTOELOGIO)
+  if (a) {
+    p.push(
+      `${campo} usa "${a[0]}", que é elogio à própria atuação. Descreva o ato praticado em vez de qualificar a equipe.`,
+    )
+  }
+  return p
+}
+
+interface Resumo {
+  estagio_processual: string
+  providencias: string
+}
+
+const conferir = (r: Resumo): string[] => [
+  ...problemas('O estágio processual', r.estagio_processual),
+  ...problemas('As providências', r.providencias),
+]
+
+/** Uma ida ao modelo. `correcao` presente = segunda tentativa. */
+async function chamar(
   anthropic: Anthropic,
   dossie: string,
   modelo: string,
-): Promise<{ estagio_processual: string; providencias: string }> {
+  correcao: { anterior: Resumo; problemas: string[] } | null,
+): Promise<Resumo> {
+  let conteudo = 'Analise o crédito abaixo e registre os dois textos.\n\n' + dossie
+  if (correcao) {
+    conteudo +=
+      '\n\n## Sua resposta anterior violou as regras\n' +
+      `Estágio processual anterior:\n${correcao.anterior.estagio_processual}\n\n` +
+      `Providências anteriores:\n${correcao.anterior.providencias}\n\n` +
+      'Problemas a corrigir:\n' +
+      correcao.problemas.map((p) => `- ${p}`).join('\n') +
+      '\n\nReescreva os DOIS campos corrigindo esses problemas e preservando os fatos.'
+  }
   const r = await anthropic.messages.create({
     model: modelo,
     max_tokens: 1200,
     system: SISTEMA,
     tools: [FERRAMENTA],
     tool_choice: { type: 'tool', name: FERRAMENTA.name },
-    messages: [
-      {
-        role: 'user',
-        content:
-          'Analise o crédito abaixo e registre os dois textos.\n\n' + dossie,
-      },
-    ],
+    messages: [{ role: 'user', content: conteudo }],
   })
   for (const bloco of r.content) {
     if (bloco.type === 'tool_use') {
@@ -238,6 +291,21 @@ async function gerarUm(
     }
   }
   throw new Error('O modelo não retornou os campos esperados.')
+}
+
+/** Gera e, se a forma violar as regras, manda reescrever uma vez. */
+async function gerarUm(
+  anthropic: Anthropic,
+  dossie: string,
+  modelo: string,
+): Promise<Resumo> {
+  const r1 = await chamar(anthropic, dossie, modelo, null)
+  const p1 = conferir(r1)
+  if (p1.length === 0) return r1
+  const r2 = await chamar(anthropic, dossie, modelo, { anterior: r1, problemas: p1 })
+  // Fica com a tentativa menos problemática; empate vai para a mais recente,
+  // que já nasceu sabendo das regras violadas.
+  return conferir(r2).length <= p1.length ? r2 : r1
 }
 
 /** Map com concorrência limitada, 1 resultado por item, preservando a ordem. */
