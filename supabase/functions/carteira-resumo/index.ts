@@ -27,10 +27,10 @@ import { chaveAnthropic } from '../_shared/segredos.ts'
 const MODELO = 'claude-haiku-4-5-20251001'
 
 // Créditos por invocação, e quantas chamadas ao modelo em paralelo dentro do
-// lote. Cada crédito pode custar DUAS idas ao modelo (a conferência de forma
-// manda reescrever quando viola), então o pior caso de 8 x 3 é ~6 ondas de
-// ~12s. Ainda com folga sobre o WORKER_RESOURCE_LIMIT de ~150s.
-const BATCH = 8
+// lote. Cada crédito pode custar até TRÊS idas ao modelo (a conferência de
+// forma manda reescrever até duas vezes), então o pior caso de 6 x 3 é ~6 ondas
+// de ~12s. Folga sobre o WORKER_RESOURCE_LIMIT de ~150s.
+const BATCH = 6
 const CONCORRENCIA = 3
 
 // Teto de insumo por crédito. O histórico é integral e alguns processos têm
@@ -221,13 +221,28 @@ const LIMITE_CHARS = 600
 const RE_DATA =
   /\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b|\b(19|20)\d{2}\b|\b(janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i
 
-// Só adjetivo de autoelogio. "Diligenciamos o registro" é verbo de ação e deve
-// passar; "a equipe segue atenta" é elogio e não deve.
+// Só ADJETIVO de autoelogio. Duas exclusões deliberadas, aprendidas medindo:
+//   "diligenciamos o registro cartorial"  -> verbo de ação, passa
+//   "os autos saíram da diligência"       -> estado processual dos autos, passa
+// O substantivo "diligência" é vocabulário jurídico corrente; bani-lo forçava
+// reescrita de texto correto. O que não passa é qualificar a equipe, como em
+// "a equipe segue atenta".
 const RE_AUTOELOGIO =
-  /\b(diligente|diligentes|diligência|proativ\w*|empenhad\w*|empenho|dedicad\w*|atent[oa]s?|zelos\w*|comprometid\w*)\b/i
+  /\b(diligente|diligentes|proativ\w*|empenhad\w*|dedicad\w*|atent[oa]s?|zelos[oa]s?|comprometid[oa]s?)\b/i
+
+// Piso de tamanho. SEM ISTO A CONFERÊNCIA PREMIA O CAMPO VAZIO: texto vazio não
+// tem data, nem dois-pontos, nem excesso de caracteres, então pontua como
+// perfeitamente conforme, e a escolha da "tentativa menos problemática" acaba
+// preferindo uma resposta que abandonou o campo. Aconteceu de verdade.
+const MIN_CHARS = 80
 
 function problemas(campo: string, texto: string): string[] {
   const p: string[] = []
+  if (texto.trim().length < MIN_CHARS) {
+    p.push(
+      `${campo} está vazio ou muito curto (${texto.trim().length} caracteres). Escreva o texto completo, entre ${MIN_CHARS} e ${LIMITE_CHARS} caracteres.`,
+    )
+  }
   if (texto.length > LIMITE_CHARS) {
     p.push(
       `${campo} tem ${texto.length} caracteres. O limite é ${LIMITE_CHARS}. Encurte cortando o histórico antigo, nunca a situação atual.`,
@@ -293,19 +308,33 @@ async function chamar(
   throw new Error('O modelo não retornou os campos esperados.')
 }
 
-/** Gera e, se a forma violar as regras, manda reescrever uma vez. */
+// Reescritas depois da primeira tentativa. Com UMA só, sobraram 6 estouros de
+// tamanho e 3 datas em 94 créditos; a segunda existe para essa cauda.
+const TENTATIVAS_CORRECAO = 2
+
+/** Gera e, enquanto a forma violar as regras, manda reescrever. */
 async function gerarUm(
   anthropic: Anthropic,
   dossie: string,
   modelo: string,
 ): Promise<Resumo> {
-  const r1 = await chamar(anthropic, dossie, modelo, null)
-  const p1 = conferir(r1)
-  if (p1.length === 0) return r1
-  const r2 = await chamar(anthropic, dossie, modelo, { anterior: r1, problemas: p1 })
-  // Fica com a tentativa menos problemática; empate vai para a mais recente,
-  // que já nasceu sabendo das regras violadas.
-  return conferir(r2).length <= p1.length ? r2 : r1
+  let melhor = await chamar(anthropic, dossie, modelo, null)
+  let problemasMelhor = conferir(melhor)
+
+  for (let i = 0; i < TENTATIVAS_CORRECAO && problemasMelhor.length > 0; i++) {
+    const nova = await chamar(anthropic, dossie, modelo, {
+      anterior: melhor,
+      problemas: problemasMelhor,
+    })
+    const problemasNova = conferir(nova)
+    // Fica com a tentativa menos problemática; empate vai para a mais recente,
+    // que já nasceu sabendo das regras violadas.
+    if (problemasNova.length <= problemasMelhor.length) {
+      melhor = nova
+      problemasMelhor = problemasNova
+    }
+  }
+  return melhor
 }
 
 /** Map com concorrência limitada, 1 resultado por item, preservando a ordem. */
