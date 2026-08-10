@@ -57,13 +57,19 @@ A Credijuris adquire créditos judiciais de credores originais (cedentes) e os c
 
 QUEM LÊ: o investidor que comprou o crédito. Pessoa de bom nível de compreensão, mas NÃO formada em Direito. Português formal e técnico, explicando o termo quando ele for indispensável. Direto ao ponto, sem floreio, sem citar artigos de lei, sem jargão desnecessário.
 
-REGRAS:
-- No máximo 6 linhas por campo (cerca de 600 caracteres). Prefira 4.
+REGRAS DE CONTEÚDO:
 - Só afirme o que os andamentos e tarefas fornecidos sustentam. Se a informação não está ali, diga que não há registro — NUNCA invente data, valor ou etapa.
+- O ÚLTIMO andamento da lista define a situação de HOJE. Não diga que algo está pendente, resolvido ou a caminho se um andamento posterior disser o contrário.
+- Quando o MESMO tipo de evento se repete no processo (por exemplo: alvará expedido e não cumprido mais de uma vez, ou petição seguida de nova petição do mesmo teor), entenda que são CICLOS DISTINTOS. Diga quantas vezes ocorreu e use a data da ÚLTIMA ocorrência. Nunca descreva a mesma ocorrência duas vezes como se fossem duas, nem trate um pedido como já atendido só porque um pedido anterior semelhante foi atendido.
+- Distinga PEDIDO de DEFERIMENTO: uma petição requerendo algo não é o ato requerido. Só diga que foi expedido, homologado ou deferido se houver andamento dizendo isso.
 - Não prometa prazo de pagamento que o processo não indique.
 - Nada de "provavelmente", "acredito", "parece". Se é incerto, diga que é incerto.
 - Não repita número do processo nem nome das partes: já estão na tabela.
-- Nenhum valor em reais que não esteja nos andamentos.`
+- Nenhum valor em reais que não esteja nos andamentos.
+
+TAMANHO (regra rígida):
+- Cada campo tem no MÁXIMO 600 caracteres. Mire em 400.
+- Corte o histórico antigo antes de cortar a situação atual: o investidor precisa saber onde o processo está, não a lista do que já passou.`
 
 const FERRAMENTA = {
   name: 'registrar_resumo',
@@ -75,12 +81,12 @@ const FERRAMENTA = {
       estagio_processual: {
         type: 'string',
         description:
-          'Em que ponto do caminho o processo está HOJE, e o evento mais recente e relevante que levou até aí. Situe o investidor: o que já foi vencido e o que falta. Se houver requisitório expedido, diga qual (RPV ou precatório) e desde quando. Se o processo estiver parado, diga desde quando e aguardando o quê. Máximo 6 linhas.',
+          'Em que ponto do caminho o processo está HOJE, e o evento mais recente e relevante que levou até aí. Situe o investidor: o que já foi vencido e o que falta. Se houver requisitório expedido, diga qual (RPV ou precatório) e desde quando. Se o processo estiver parado, diga desde quando e aguardando o quê. MÁXIMO 600 CARACTERES, mire em 400.',
       },
       providencias: {
         type: 'string',
         description:
-          'O que a Credijuris está fazendo e o que fará em seguida, considerando o estágio apurado. Baseie-se nas tarefas registradas e no próximo passo que o estágio exige. Escreva em nome da Credijuris, no presente e no futuro ("acompanhamos", "peticionaremos"). Se não houver tarefa registrada e o processo aguardar ato do juízo ou da Fazenda, diga que o acompanhamento é de monitoramento, sem ato a praticar no momento. Máximo 6 linhas.',
+          'O que a Credijuris está fazendo e o que fará em seguida, considerando o estágio apurado. Baseie-se nas tarefas registradas e no próximo passo que o estágio exige. Escreva em nome da Credijuris, no presente e no futuro ("acompanhamos", "peticionaremos"). Se não houver tarefa registrada e o processo aguardar ato do juízo ou da Fazenda, diga que o acompanhamento é de monitoramento, sem ato a praticar no momento. MÁXIMO 600 CARACTERES, mire em 400.',
       },
     },
     required: ['estagio_processual', 'providencias'],
@@ -138,15 +144,32 @@ function montarDossie(
   )
 
   linhas.push('')
+  // ORDEM CRONOLÓGICA CRESCENTE, de propósito. `movs` chega do mais recente
+  // para o mais antigo (é assim que se seleciona os N últimos), mas entregar
+  // nessa ordem ao modelo embaralha a causalidade: num processo com dois ciclos
+  // de "alvará expedido → não cumprido", ele tratou o segundo alvará como um
+  // terceiro, ainda pendente, quando o andamento seguinte já dizia que também
+  // não foi cumprido. Lida de trás para frente, a sequência causal se desfaz.
+  const cronologico = [...movs].reverse()
   linhas.push(
-    `## Andamentos (${movs.length} enviados, do mais recente ao mais antigo)`,
+    `## Andamentos (${movs.length} enviados, do mais ANTIGO para o mais RECENTE)`,
   )
-  if (movs.length === 0) {
+  if (cronologico.length === 0) {
     linhas.push('Nenhum andamento registrado.')
   } else {
-    for (const m of movs) {
+    for (const m of cronologico) {
       linhas.push(`- ${m.data ?? 'sem data'}: ${(m.conteudo ?? '').trim()}`)
     }
+    const ultimo = cronologico[cronologico.length - 1]
+    linhas.push('')
+    linhas.push(
+      `>>> SITUAÇÃO MAIS RECENTE (${ultimo.data ?? 'sem data'}): ` +
+        `${(ultimo.conteudo ?? '').trim()}`,
+    )
+    linhas.push(
+      '>>> É este andamento que descreve onde o processo está HOJE. Nenhuma ' +
+        'afirmação sobre a situação atual pode contrariá-lo.',
+    )
   }
 
   const pendentes = tarefas.filter((t) => !t.concluida)
@@ -159,13 +182,16 @@ function montarDossie(
     const descreve = (t: TarefaRow) =>
       `- ${t.data ?? 'sem data'}${t.date_deadline ? ` (prazo ${t.date_deadline})` : ''}: ` +
       `${t.tipo ?? 'sem tipo'}${t.notes ? ` — ${t.notes.trim()}` : ''}`
+    // Também em ordem crescente, e pelo mesmo motivo: a sequência de petições
+    // (pedir → reiterar → pedir dilação) só faz sentido lida para frente.
+    const asc = (l: TarefaRow[]) => [...l].reverse()
     if (pendentes.length) {
-      linhas.push('Em aberto:')
-      for (const t of pendentes) linhas.push(descreve(t))
+      linhas.push('Em aberto (do mais antigo para o mais recente):')
+      for (const t of asc(pendentes)) linhas.push(descreve(t))
     }
     if (concluidas.length) {
-      linhas.push('Concluídas:')
-      for (const t of concluidas) linhas.push(descreve(t))
+      linhas.push('Concluídas (do mais antigo para o mais recente):')
+      for (const t of asc(concluidas)) linhas.push(descreve(t))
     }
   }
   return linhas.join('\n')
