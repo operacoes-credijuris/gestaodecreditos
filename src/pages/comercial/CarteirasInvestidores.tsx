@@ -11,11 +11,14 @@ import {
   RefreshCw,
   Download,
   SlidersHorizontal,
+  Pencil,
 } from 'lucide-react'
 import {
   processosCrud,
   useCarteiraResumos,
+  useInvestidorDados,
   useParametrosAtualizacao,
+  useSalvarInvestidorDados,
   useUltimaMovimentacao,
 } from '@/lib/queries'
 import type { Processo } from '@/lib/types'
@@ -48,7 +51,8 @@ import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
-import { Select } from '@/components/ui/Field'
+import { Field, Input, Select } from '@/components/ui/Field'
+import { IconButton } from '@/components/ui/IconButton'
 import { Tabs } from '@/components/ui/Tabs'
 import {
   Table,
@@ -69,6 +73,7 @@ import {
   formatPercent,
   hojeISO,
   mesesDepois,
+  normalizarNome,
   onlyDigits,
   sentenceCase,
 } from '@/lib/format'
@@ -100,15 +105,10 @@ export default function CarteirasInvestidores() {
 
 // ---------- Helpers comuns ----------
 
-// Normaliza para agrupar o mesmo investidor escrito de formas diferentes.
-function normNome(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-}
+// Agrupa o mesmo investidor escrito de formas diferentes. Vem de lib/format
+// porque virou CHAVE de public.investidor_dados: duas versões da normalização
+// órfanariam os dados gravados.
+const normNome = normalizarNome
 
 /**
  * "2026-08" -> "agosto de 2026". Minúsculo, que é a forma natural em pt-BR;
@@ -1212,13 +1212,206 @@ function Consolidado() {
 }
 
 // ----------------------- Dados pessoais -----------------------
+// ----------------------- Dados dos investidores -----------------------
+// A LISTA de investidores vem dos cessionários dos Créditos, igual à Visão
+// global, só sem filtro de mês. Não há como criar linha aqui: se um investidor
+// não aparece, é porque não é cessionário de nenhum crédito.
+//
+// Os DADOS vêm de public.investidor_dados, indexados pelo nome normalizado, e a
+// linha nasce no primeiro salvamento.
+const CAMPOS_INVESTIDOR = [
+  { chave: 'cpf', rotulo: 'CPF' },
+  { chave: 'rg', rotulo: 'RG' },
+  { chave: 'banco', rotulo: 'Banco' },
+  { chave: 'agencia', rotulo: 'Agência' },
+  { chave: 'conta', rotulo: 'Conta' },
+  { chave: 'pix', rotulo: 'Pix' },
+  { chave: 'endereco', rotulo: 'Endereço' },
+] as const
+
+type CampoInvestidor = (typeof CAMPOS_INVESTIDOR)[number]['chave']
+
 function DadosPessoais() {
+  const processos = processosCrud.useList()
+  const dados = useInvestidorDados()
+  const salvar = useSalvarInvestidorDados()
+  const toast = useToast()
+
+  // Investidor em edição: guarda a chave e o nome, e o formulário à parte.
+  const [editando, setEditando] = useState<{ chave: string; nome: string } | null>(
+    null,
+  )
+  const [form, setForm] = useState<Record<CampoInvestidor, string>>({
+    cpf: '',
+    rg: '',
+    banco: '',
+    agencia: '',
+    conta: '',
+    pix: '',
+    endereco: '',
+  })
+
+  // Cessionários distintos, em ordem alfabética.
+  const investidores = useMemo(() => {
+    const porChave = new Map<string, string>()
+    for (const p of processos.data ?? []) {
+      const nome = (p.cessionario ?? '').trim()
+      if (!nome) continue
+      const chave = normalizarNome(nome)
+      if (!porChave.has(chave)) porChave.set(chave, nome)
+    }
+    return [...porChave.entries()]
+      .map(([chave, nome]) => ({ chave, nome }))
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  }, [processos.data])
+
+  function abrirEdicao(chave: string, nome: string) {
+    const d = dados.data?.get(chave)
+    setForm({
+      cpf: d?.cpf ?? '',
+      rg: d?.rg ?? '',
+      banco: d?.banco ?? '',
+      agencia: d?.agencia ?? '',
+      conta: d?.conta ?? '',
+      pix: d?.pix ?? '',
+      endereco: d?.endereco ?? '',
+    })
+    setEditando({ chave, nome })
+  }
+
+  async function handleSalvar() {
+    if (!editando) return
+    // Campo em branco vira null, não string vazia: no banco "não informado" é
+    // ausência de valor, e "" faria a célula parecer preenchida com nada.
+    const vazioNull = (s: string) => (s.trim() ? s.trim() : null)
+    try {
+      await salvar.mutateAsync({
+        nome_chave: editando.chave,
+        nome_exibicao: editando.nome,
+        cpf: vazioNull(form.cpf),
+        rg: vazioNull(form.rg),
+        banco: vazioNull(form.banco),
+        agencia: vazioNull(form.agencia),
+        conta: vazioNull(form.conta),
+        pix: vazioNull(form.pix),
+        endereco: vazioNull(form.endereco),
+      })
+      toast.success('Dados salvos.')
+      setEditando(null)
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  if (processos.isLoading) return <Loading label="Carregando investidores…" />
+  if (processos.isError) {
+    return (
+      <Card>
+        <ErrorState
+          message={(processos.error as Error)?.message}
+          onRetry={() => processos.refetch()}
+        />
+      </Card>
+    )
+  }
+
   return (
-    <Card>
-      <EmptyState
-        title="Em construção"
-        description="O conteúdo desta aba ainda será definido."
-      />
-    </Card>
+    <div className="space-y-5">
+      <Card>
+        {investidores.length === 0 ? (
+          <EmptyState
+            title="Nenhum investidor"
+            description="Nenhum crédito tem cessionário cadastrado."
+          />
+        ) : (
+          <Table className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:text-[13px]">
+            <THead>
+              <tr>
+                <TH>Nome do investidor</TH>
+                {CAMPOS_INVESTIDOR.map((c) => (
+                  <TH key={c.chave}>{c.rotulo}</TH>
+                ))}
+                <TH className="w-[1%] whitespace-nowrap text-right">
+                  <span className="sr-only">Ações</span>
+                </TH>
+              </tr>
+            </THead>
+            <TBody>
+              {investidores.map((i) => {
+                const d = dados.data?.get(i.chave)
+                return (
+                  <TR key={i.chave}>
+                    <TD className="font-medium text-slate-800">{i.nome}</TD>
+                    {CAMPOS_INVESTIDOR.map((c) => (
+                      <TD key={c.chave}>
+                        {d?.[c.chave] ?? (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </TD>
+                    ))}
+                    <TD className="w-[1%] whitespace-nowrap text-right">
+                      <IconButton
+                        label={`Editar dados de ${i.nome}`}
+                        icon={<Pencil className="h-4 w-4" />}
+                        onClick={() => abrirEdicao(i.chave, i.nome)}
+                      />
+                    </TD>
+                  </TR>
+                )
+              })}
+            </TBody>
+          </Table>
+        )}
+      </Card>
+
+      <Modal
+        open={!!editando}
+        onClose={() => setEditando(null)}
+        title="Dados do investidor"
+        size="lg"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setEditando(null)}>
+              Cancelar
+            </Button>
+            <Button loading={salvar.isPending} onClick={handleSalvar}>
+              Salvar
+            </Button>
+          </>
+        }
+      >
+        {editando && (
+          <div className="space-y-4">
+            {/* O nome é FIXO: ele vem do cessionário do crédito, e editar aqui
+                criaria um investidor que não existe na carteira. */}
+            <Field label="Nome do investidor">
+              <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                {editando.nome}
+              </div>
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {CAMPOS_INVESTIDOR.filter((c) => c.chave !== 'endereco').map((c) => (
+                <Field key={c.chave} label={c.rotulo}>
+                  <Input
+                    value={form[c.chave]}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, [c.chave]: e.target.value }))
+                    }
+                  />
+                </Field>
+              ))}
+            </div>
+            {/* Endereço sozinho na largura toda: é o único que costuma passar de
+                uma linha. */}
+            <Field label="Endereço">
+              <Input
+                value={form.endereco}
+                onChange={(e) => setForm((f) => ({ ...f, endereco: e.target.value }))}
+              />
+            </Field>
+          </div>
+        )}
+      </Modal>
+    </div>
   )
 }

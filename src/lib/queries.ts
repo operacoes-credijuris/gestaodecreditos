@@ -75,6 +75,59 @@ export function useSalvarParametrosAtualizacao() {
   })
 }
 
+export interface InvestidorDados {
+  nome_chave: string
+  nome_exibicao: string | null
+  cpf: string | null
+  rg: string | null
+  banco: string | null
+  agencia: string | null
+  conta: string | null
+  pix: string | null
+  endereco: string | null
+  atualizado_em: string
+}
+
+/**
+ * Dados cadastrais dos investidores, indexados pelo NOME NORMALIZADO. A lista de
+ * investidores não vem daqui — vem dos cessionários dos Créditos; esta tabela só
+ * guarda os dados de quem já existe lá.
+ */
+export function useInvestidorDados() {
+  return useQuery({
+    queryKey: ['investidor_dados'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('investidor_dados')
+        .select(
+          'nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, atualizado_em',
+        )
+      const m = new Map<string, InvestidorDados>()
+      for (const r of (data ?? []) as InvestidorDados[]) m.set(r.nome_chave, r)
+      return m
+    },
+    staleTime: 60 * 1000,
+  })
+}
+
+export function useSalvarInvestidorDados() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (d: Omit<InvestidorDados, 'atualizado_em'>) => {
+      const { data: sessao } = await supabase.auth.getUser()
+      // upsert pela chave: a linha nasce no primeiro salvamento, e não há como
+      // criar investidor por aqui — a lista sempre vem dos Créditos.
+      const { error } = await supabase.from('investidor_dados').upsert({
+        ...d,
+        atualizado_em: new Date().toISOString(),
+        atualizado_por: sessao.user?.id ?? null,
+      })
+      if (error) throw new Error(error.message)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['investidor_dados'] }),
+  })
+}
+
 export interface CarteiraResumo {
   processo_id: string
   estagio_processual: string | null

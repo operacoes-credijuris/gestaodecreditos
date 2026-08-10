@@ -65,6 +65,27 @@ export function formatDate(value: string | null | undefined): string {
   return d.toLocaleDateString('pt-BR')
 }
 
+/**
+ * Nome normalizado: sem acento, sem espaço duplicado, minúsculo. Serve para
+ * agrupar o mesmo investidor escrito de formas diferentes ("José da Silva" e
+ * "jose da  silva" caem no mesmo lugar).
+ *
+ * ⚠️ É CHAVE PRIMÁRIA de public.investidor_dados. Mudar esta função órfã as
+ * linhas já gravadas, porque a chave deixaria de casar. Se algum dia precisar
+ * mudar, migre os dados junto.
+ *
+ * A faixa ̀-ͯ é a dos diacríticos combinantes, que é o que sobra
+ * depois do normalize('NFD') separar letra e acento.
+ */
+export function normalizarNome(s: string | null | undefined): string {
+  return (s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
 /** Data e hora local: "10/08/2026 às 16:21". Para carimbo de geração. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
