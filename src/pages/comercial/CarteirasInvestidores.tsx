@@ -25,7 +25,7 @@ import {
   retorno,
   retornoProjetadoCarteira,
   tir,
-  tirMediaPonderada,
+  tirAgregada,
   valorProjetado,
 } from '@/lib/projecao'
 import { invokeFunction } from '@/lib/functions'
@@ -396,8 +396,12 @@ function Individual() {
       const proj = valorProjetado(p, parametros.data, hoje)
       return { p, proj, t: tir(p.capital_investido, p.data_aquisicao, proj) }
     })
-    const media = tirMediaPonderada(
-      itens.map(({ p, t }) => ({ tirAnual: t.anual, capital: p.capital_investido })),
+    const media = tirAgregada(
+      itens.map(({ p, proj, t }) => ({
+        capital: p.capital_investido,
+        valor: proj.valor,
+        dias: t.dias,
+      })),
     )
     const aReceber = aReceberEstimado(
       itens.map(({ p, proj }) => ({
@@ -556,7 +560,7 @@ function Individual() {
               ? 'selecione um investidor'
               : derivados.tirMedia.valor === null
                 ? 'nenhum crédito com TIR calculável'
-                : `média ponderada pelo capital, de ${derivados.tirMedia.considerados} de ${carteira.length} créditos`
+                : `carteira como fluxo único, prazo médio de ${derivados.tirMedia.prazoMedioDias} dias, ${derivados.tirMedia.considerados} de ${carteira.length} créditos`
           }
           icon={<Percent className="h-5 w-5" />}
           tone="green"
@@ -1057,7 +1061,7 @@ function Consolidado() {
     const metricas = (creditos: Processo[]) => {
       const itens = creditos.map((p) => {
         const proj = valorProjetado(p, parametros.data, hoje)
-        return { p, proj }
+        return { p, proj, t: tir(p.capital_investido, p.data_aquisicao, proj) }
       })
       return {
         capital: soma(creditos, (p) => p.capital_investido),
@@ -1075,10 +1079,11 @@ function Consolidado() {
             capital: p.capital_investido,
           })),
         ).valor,
-        tirAa: tirMediaPonderada(
-          itens.map(({ p, proj }) => ({
-            tirAnual: tir(p.capital_investido, p.data_aquisicao, proj).anual,
+        tirAa: tirAgregada(
+          itens.map(({ p, proj, t }) => ({
             capital: p.capital_investido,
+            valor: proj.valor,
+            dias: t.dias,
           })),
         ).valor,
         operacoes: creditos.length,

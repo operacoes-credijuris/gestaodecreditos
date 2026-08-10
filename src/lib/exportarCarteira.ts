@@ -29,7 +29,7 @@ import {
   retorno,
   retornoProjetadoCarteira,
   tir,
-  tirMediaPonderada,
+  tirAgregada,
   valorProjetado,
   type ParametrosAtualizacao,
 } from './projecao'
@@ -206,8 +206,12 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     const proj = valorProjetado(p, d.parametros, hoje)
     return { p, proj, t: tir(p.capital_investido, p.data_aquisicao, proj) }
   })
-  const tirMedia = tirMediaPonderada(
-    porCredito.map(({ p, t }) => ({ tirAnual: t.anual, capital: p.capital_investido })),
+  const tirMedia = tirAgregada(
+    porCredito.map(({ p, proj, t }) => ({
+      capital: p.capital_investido,
+      valor: proj.valor,
+      dias: t.dias,
+    })),
   )
   const aReceber = aReceberEstimado(
     porCredito.map(({ p, proj }) => ({

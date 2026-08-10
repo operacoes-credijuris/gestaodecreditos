@@ -256,31 +256,57 @@ export function aReceberEstimado(
 }
 
 /**
- * TIR média da carteira, PONDERADA pelo capital investido de cada crédito.
+ * TIR da CARTEIRA, tratada como um fluxo único.
  *
- * Média simples daria o mesmo peso a um crédito de mil reais e a um de cem mil,
- * e a taxa resultante não descreveria a carteira. O peso é o capital porque é
- * sobre ele que a taxa incide.
+ *   taxa = (Σ valor / Σ capital) ^ (365 / prazo médio ponderado) − 1
  *
- * Créditos sem TIR (sem valor projetado, sem capital, prazo nulo) ficam fora da
- * conta E do denominador — entrar com zero puxaria a média para baixo por
- * ausência de dado, não por rentabilidade.
+ * O prazo médio é ponderado pelo capital, então cada crédito pesa pelo dinheiro
+ * que representa.
+ *
+ * POR QUE NÃO É A MÉDIA DAS TIRs ANUAIS. Tirar média de taxas já anualizadas
+ * deixa um crédito de prazo curto dominar o resultado. Na base de 2026-08 um
+ * crédito real liquidado em 12 DIAS com ganho de 21,8% tem TIR de 40.426% a.a.
+ * — número correto para ele —, e sozinho puxava a média da carteira para 406%,
+ * respondendo por 344 dos 406 pontos. Ninguém ganhou 406% ali: entraram 2,2
+ * milhões e voltam 2,9 em prazo médio de 276 dias, ou seja ~46,5% a.a. A média
+ * de taxas superestimava a realidade em nove vezes.
+ *
+ * NADA É EXCLUÍDO. Todo crédito entra com o capital e o valor reais; o que muda
+ * é não anualizar cada um isoladamente antes de somar. A TIR individual de cada
+ * crédito continua exibida como é, inclusive os 40.426%.
+ *
+ * Crédito sem valor, sem capital ou sem prazo fica fora das somas — entrar com
+ * zero afirmaria rentabilidade zero onde falta cadastro.
  */
-export function tirMediaPonderada(
-  itens: { tirAnual: number | null; capital: number | null | undefined }[],
-): { valor: number | null; considerados: number } {
-  let somaPesos = 0
-  let somaProduto = 0
+export function tirAgregada(
+  itens: {
+    capital: number | null | undefined
+    valor: number | null
+    dias: number | undefined
+  }[],
+): { valor: number | null; considerados: number; prazoMedioDias: number | null } {
+  let somaCapital = 0
+  let somaValor = 0
+  let somaDiasPonderados = 0
   let considerados = 0
   for (const it of itens) {
-    if (it.tirAnual === null) continue
     if (typeof it.capital !== 'number' || it.capital <= 0) continue
-    somaPesos += it.capital
-    somaProduto += it.tirAnual * it.capital
+    if (it.valor === null || typeof it.dias !== 'number' || it.dias <= 0) continue
+    somaCapital += it.capital
+    somaValor += it.valor
+    somaDiasPonderados += it.dias * it.capital
     considerados++
   }
-  if (somaPesos === 0) return { valor: null, considerados: 0 }
-  return { valor: Math.round((somaProduto / somaPesos) * 100) / 100, considerados }
+  if (somaCapital === 0) return { valor: null, considerados: 0, prazoMedioDias: null }
+  const prazoMedio = somaDiasPonderados / somaCapital
+  if (prazoMedio <= 0) return { valor: null, considerados, prazoMedioDias: null }
+  const taxa = (Math.pow(somaValor / somaCapital, 365 / prazoMedio) - 1) * 100
+  if (!Number.isFinite(taxa)) return { valor: null, considerados, prazoMedioDias: null }
+  return {
+    valor: Math.round(taxa * 100) / 100,
+    considerados,
+    prazoMedioDias: Math.round(prazoMedio),
+  }
 }
 
 // ---------------------------------------------------------------------------
