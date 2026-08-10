@@ -1308,6 +1308,9 @@ function DadosPessoais() {
   // edição: são ~86 kB que não fazem sentido no bundle de quem nunca edita.
   const [municipios, setMunicipios] = useState<Record<string, string[]> | null>(null)
   const [ufs, setUfs] = useState<string[]>([])
+  // Estado da busca por CEP, só para dar retorno visual no campo.
+  const [buscandoCep, setBuscandoCep] = useState(false)
+  const [avisoCep, setAvisoCep] = useState<string | null>(null)
 
   // Cessionários distintos, em ordem alfabética.
   const investidores = useMemo(() => {
@@ -1341,10 +1344,52 @@ function DadosPessoais() {
       cep: d?.cep ?? '',
     })
     setEditando({ chave, nome })
+    setAvisoCep(null)
     if (!municipios) {
       const m = await import('@/lib/municipios')
       setMunicipios(m.MUNICIPIOS_POR_UF)
       setUfs(m.UFS)
+    }
+  }
+
+  /**
+   * CEP completo (8 dígitos) busca o endereço e preenche logradouro, bairro,
+   * cidade e UF.
+   *
+   * NÚMERO e COMPLEMENTO não vêm, e nunca devem vir: um CEP cobre a rua (ou um
+   * trecho dela), não a casa. O "complemento" das bases de CEP é descritor de
+   * faixa ("de 612 a 1510 - lado par") e sujaria o endereço do contrato.
+   */
+  async function preencherPorCep(cepMascarado: string) {
+    if (onlyDigits(cepMascarado).length !== 8) {
+      setAvisoCep(null)
+      return
+    }
+    setBuscandoCep(true)
+    setAvisoCep(null)
+    try {
+      const { buscarCep } = await import('@/lib/cep')
+      const e = await buscarCep(cepMascarado)
+      if (!e) {
+        setAvisoCep('CEP não encontrado. Preencha à mão.')
+        return
+      }
+      // A cidade tem de existir na lista do IBGE, senão o combobox não a
+      // reconhece como selecionada e o campo pareceria vazio.
+      const m = municipios ?? (await import('@/lib/municipios')).MUNICIPIOS_POR_UF
+      const cidadeValida = e.uf && m[e.uf]?.includes(e.cidade)
+      setForm((f) => ({
+        ...f,
+        logradouro: e.logradouro || f.logradouro,
+        bairro: e.bairro || f.bairro,
+        uf: e.uf || f.uf,
+        cidade: cidadeValida ? e.cidade : '',
+      }))
+      if (e.uf && !cidadeValida) {
+        setAvisoCep(`"${e.cidade}" não está na lista do IBGE. Escolha a cidade à mão.`)
+      }
+    } finally {
+      setBuscandoCep(false)
     }
   }
 
@@ -1520,6 +1565,27 @@ function DadosPessoais() {
                 Endereço
               </h4>
               <div className="grid gap-4 sm:grid-cols-6">
+                {/* CEP PRIMEIRO: é ele que preenche logradouro, bairro, cidade e
+                    UF, então digitá-lo antes poupa quatro campos. */}
+                <div className="sm:col-span-2">
+                  <Field
+                    label="CEP"
+                    hint={buscandoCep ? 'Buscando…' : undefined}
+                    error={avisoCep ?? undefined}
+                  >
+                    <Input
+                      inputMode="numeric"
+                      placeholder="00000-000"
+                      value={form.cep}
+                      onChange={(e) => {
+                        const cep = formatCepInput(e.target.value)
+                        setForm((f) => ({ ...f, cep }))
+                        void preencherPorCep(cep)
+                      }}
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-4" />
                 <div className="sm:col-span-4">
                   <Field label="Logradouro">
                     <Input
@@ -1597,18 +1663,6 @@ function DadosPessoais() {
                       }
                       placeholder={form.uf ? 'Digite a cidade…' : 'Escolha a UF antes'}
                       vazio="Nenhuma cidade encontrada nesta UF."
-                    />
-                  </Field>
-                </div>
-                <div className="sm:col-span-2">
-                  <Field label="CEP">
-                    <Input
-                      inputMode="numeric"
-                      placeholder="00000-000"
-                      value={form.cep}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, cep: formatCepInput(e.target.value) }))
-                      }
                     />
                   </Field>
                 </div>
