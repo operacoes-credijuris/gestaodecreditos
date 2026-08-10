@@ -1,6 +1,21 @@
 import { useMemo, useState } from 'react'
-import { Wallet, Percent, Target, CheckCircle2, Clock, Hash } from 'lucide-react'
-import { processosCrud, useUltimaMovimentacao } from '@/lib/queries'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  Wallet,
+  Percent,
+  Target,
+  CheckCircle2,
+  Clock,
+  Hash,
+  Sparkles,
+  RefreshCw,
+} from 'lucide-react'
+import {
+  processosCrud,
+  useCarteiraResumos,
+  useUltimaMovimentacao,
+} from '@/lib/queries'
+import { invokeFunction } from '@/lib/functions'
 import {
   getLabel,
   INDICE_ATUALIZACAO,
@@ -9,6 +24,9 @@ import {
 } from '@/lib/labels'
 import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
+import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
@@ -158,6 +176,48 @@ const COR_STATUS: Record<string, string> = {
   gray: 'text-slate-400',
 }
 
+/**
+ * Célula de Estágio processual / Providências: mostra só o começo do texto,
+ * cortado com "…", e abre o texto inteiro numa caixa ao clicar.
+ *
+ * ESTA É A ÚNICA EXCEÇÃO ao "sem truncamento" das tabelas do app, e é
+ * deliberada: são 6 linhas de narrativa numa tabela de 25 colunas. Aqui a
+ * célula serve para VER QUE A COLUNA FOI PREENCHIDA; quem quer ler, clica.
+ */
+function CelulaResumo({
+  texto,
+  erro,
+  carregando,
+  onClick,
+}: {
+  texto: string | null | undefined
+  erro: string | null | undefined
+  carregando: boolean
+  onClick: () => void
+}) {
+  if (carregando) return <span className="text-slate-300">…</span>
+  if (!texto) {
+    return (
+      <span
+        className="text-slate-300"
+        title={erro || 'Resumo ainda não gerado para este crédito.'}
+      >
+        —
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Ver o texto completo"
+      className="block max-w-[220px] truncate text-left text-slate-700 underline decoration-slate-300 decoration-dotted underline-offset-4 hover:decoration-slate-500"
+    >
+      {texto}
+    </button>
+  )
+}
+
 // nowrap também nos <th>: com 25 colunas, um título como "Providências /
 // prox. passos" quebrava em quatro linhas e esticava o cabeçalho inteiro.
 const CLASSES_CARTEIRA =
@@ -168,6 +228,50 @@ function Individual() {
   // Última movimentação de cada crédito — mesmo cache do ADVBOX que alimenta a
   // ficha lateral do crédito e a tabela de Créditos.
   const ultimaMov = useUltimaMovimentacao()
+
+  const toast = useToast()
+  const qc = useQueryClient()
+  // Enquanto a varredura de todos os créditos corre no servidor, a tela fica
+  // perguntando pelos textos que vão chegando.
+  const [varrendo, setVarrendo] = useState(false)
+  const resumos = useCarteiraResumos(varrendo)
+  // Texto aberto na caixa: guarda o id e o campo, não o texto — assim, ao
+  // gerar novamente, a caixa mostra o texto novo sem fechar.
+  const [aberto, setAberto] = useState<{
+    id: string
+    cnj: string | null
+    campo: 'estagio' | 'providencias'
+  } | null>(null)
+
+  const gerar = useMutation({
+    mutationFn: (vars: { processo_id?: string; forcar?: boolean }) =>
+      invokeFunction<{ gerados: number; pulados: number; falhas: number; restantes: number }>(
+        'carteira-resumo',
+        vars,
+      ),
+    onSuccess: (r, vars) => {
+      qc.invalidateQueries({ queryKey: ['carteira_resumos'] })
+      if (vars.processo_id) {
+        if (r.falhas > 0) toast.error('Não foi possível gerar o resumo deste crédito.')
+        else toast.success('Resumo gerado.')
+        return
+      }
+      // Varredura: a resposta volta antes do fim (o servidor segue em lotes).
+      if (r.restantes > 0) {
+        setVarrendo(true)
+        toast.success('Gerando os resumos — os textos vão aparecendo aqui.')
+        // Teto do acompanhamento: 95 créditos levam poucos minutos.
+        window.setTimeout(() => setVarrendo(false), 6 * 60 * 1000)
+      } else {
+        toast.success(
+          r.gerados > 0
+            ? `${r.gerados} resumo(s) gerado(s).`
+            : 'Nenhum crédito teve novidade desde a última geração.',
+        )
+      }
+    },
+    onError: (e) => toast.error((e as Error).message),
+  })
 
   // Réguas do semáforo da coluna Status. Calculadas no render: na virada do dia
   // a cor anda sozinha, sem ninguém reabrir a tela.
@@ -291,6 +395,19 @@ function Individual() {
           <div className="inline-flex items-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
             {mesRef}
           </div>
+        </div>
+        {/* Regera o estágio e as providências de TODOS os créditos, ignorando a
+            checagem de novidade que a rodada semanal faz. sm:ml-auto joga para
+            a direita da mesma linha. */}
+        <div className="sm:ml-auto">
+          <Button
+            variant="outline"
+            icon={<Sparkles className="h-4 w-4" />}
+            loading={gerar.isPending && !gerar.variables?.processo_id}
+            onClick={() => gerar.mutate({ forcar: true })}
+          >
+            Gerar resumos
+          </Button>
         </div>
       </div>
 
@@ -435,6 +552,7 @@ function Individual() {
                     hoje,
                     limiteAlerta,
                   )
+                  const resumo = resumos.data?.get(p.id)
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
@@ -495,8 +613,26 @@ function Individual() {
                         {sl.label}
                       </span>
                     </TD>
-                    <TD />
-                    <TD />
+                    <TD>
+                      <CelulaResumo
+                        texto={resumo?.estagio_processual}
+                        erro={resumo?.erro}
+                        carregando={resumos.isLoading}
+                        onClick={() =>
+                          setAberto({ id: p.id, cnj: p.numero_cnj, campo: 'estagio' })
+                        }
+                      />
+                    </TD>
+                    <TD>
+                      <CelulaResumo
+                        texto={resumo?.providencias}
+                        erro={resumo?.erro}
+                        carregando={resumos.isLoading}
+                        onClick={() =>
+                          setAberto({ id: p.id, cnj: p.numero_cnj, campo: 'providencias' })
+                        }
+                      />
+                    </TD>
                     {/* Do cache do ADVBOX, casado por dígitos. Enquanto o mapa
                         carrega mostra vazio em vez de "—", que seria mentira. */}
                     <TD className="tabular-nums">
@@ -523,6 +659,55 @@ function Individual() {
           )}
         </Card>
       </div>
+
+      {/* Texto inteiro do estágio/providências. Guarda id + campo, então o
+          conteúdo se atualiza sozinho quando o botão gera de novo. */}
+      <Modal
+        open={!!aberto}
+        onClose={() => setAberto(null)}
+        title={aberto?.campo === 'estagio' ? 'Estágio processual' : 'Providências'}
+        size="lg"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setAberto(null)}>
+              Fechar
+            </Button>
+            <Button
+              icon={<RefreshCw className="h-4 w-4" />}
+              loading={gerar.isPending && !!gerar.variables?.processo_id}
+              onClick={() => aberto && gerar.mutate({ processo_id: aberto.id })}
+            >
+              Gerar novamente
+            </Button>
+          </>
+        }
+      >
+        {aberto && (
+          <div className="space-y-3">
+            <div className="text-xs tabular-nums text-slate-500">
+              {formatCNJ(aberto.cnj)}
+            </div>
+            {(() => {
+              const r = resumos.data?.get(aberto.id)
+              const texto =
+                aberto.campo === 'estagio' ? r?.estagio_processual : r?.providencias
+              if (texto) {
+                // whitespace-pre-line: preserva os parágrafos do modelo.
+                return (
+                  <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                    {texto}
+                  </p>
+                )
+              }
+              return (
+                <p className="text-sm text-slate-500">
+                  {r?.erro || 'Resumo ainda não gerado para este crédito.'}
+                </p>
+              )
+            })()}
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

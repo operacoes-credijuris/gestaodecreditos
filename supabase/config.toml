@@ -51,3 +51,8 @@ verify_jwt = true
 
 [functions.salvar-token-anthropic]
 verify_jwt = true
+
+# Resumos da carteira: chamada pelo app (JWT do usuário, botões de gerar) e pelo
+# cron semanal (x-cron-secret); a própria função valida a autorização.
+[functions.carteira-resumo]
+verify_jwt = false

@@ -27,6 +27,38 @@ import type {
  * Compartilhado entre a tabela de Créditos e a carteira do investidor: as duas
  * mostram a mesma data e devem concordar sempre.
  */
+export interface CarteiraResumo {
+  processo_id: string
+  estagio_processual: string | null
+  providencias: string | null
+  erro: string | null
+  gerado_em: string
+}
+
+/**
+ * Estágio processual e providências por crédito, escritos pela Edge Function
+ * carteira-resumo (Claude) a partir das movimentações e tarefas do ADVBOX.
+ * Indexado por processo_id — a carteira lê direto pelo id da linha.
+ */
+export function useCarteiraResumos(poll = false) {
+  return useQuery({
+    queryKey: ['carteira_resumos', 'mapa'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('carteira_resumos')
+        .select('processo_id, estagio_processual, providencias, erro, gerado_em')
+      const m = new Map<string, CarteiraResumo>()
+      for (const r of (data ?? []) as CarteiraResumo[]) m.set(r.processo_id, r)
+      return m
+    },
+    // A varredura roda em lotes auto-encadeados no servidor: a resposta da
+    // primeira chamada volta antes do fim. Com `poll`, a tela acompanha os
+    // textos chegando em vez de exigir recarregar a página.
+    staleTime: poll ? 0 : 60 * 1000,
+    refetchInterval: poll ? 5000 : false,
+  })
+}
+
 export function useUltimaMovimentacao() {
   return useQuery({
     queryKey: ['advbox_processo_status', 'mapa'],
