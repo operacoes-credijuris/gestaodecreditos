@@ -18,7 +18,7 @@ import {
   useParametrosAtualizacao,
   useUltimaMovimentacao,
 } from '@/lib/queries'
-import { valorProjetado } from '@/lib/projecao'
+import { tir, valorProjetado } from '@/lib/projecao'
 import { invokeFunction } from '@/lib/functions'
 import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
 import { ModalParametrosAtualizacao } from '@/components/ParametrosAtualizacao'
@@ -56,6 +56,8 @@ import {
   formatBRL,
   formatCNJ,
   formatDate,
+  formatDateTime,
+  formatPercent,
   hojeISO,
   mesesDepois,
   onlyDigits,
@@ -634,6 +636,7 @@ function Individual() {
                   // Encerrado usa mensagem fixa; o resto vem da IA.
                   const textos = textosResumo(p.status, resumo)
                   const proj = valorProjetado(p, parametros.data, hoje)
+                  const tirCred = tir(p.capital_investido, p.data_aquisicao, proj)
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
@@ -772,8 +775,27 @@ function Individual() {
                     >
                       {statusTir(p.data_liquidacao)}
                     </TD>
-                    <TD />
-                    <TD />
+                    {/* Taxa equivalente do fluxo cessão -> data do valor. O
+                        title mostra o prazo usado, que NÃO é "Dias em carteira"
+                        quando a expectativa é futura. */}
+                    <TD className="text-right tabular-nums">
+                      {tirCred.anual === null ? (
+                        <span className="text-slate-400" title={tirCred.motivo}>
+                          —
+                        </span>
+                      ) : (
+                        <span title={`${tirCred.dias} dias, até ${formatDate(tirCred.ate)}`}>
+                          {formatPercent(tirCred.anual)}
+                        </span>
+                      )}
+                    </TD>
+                    <TD className="text-right tabular-nums">
+                      {tirCred.mensal === null ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        formatPercent(tirCred.mensal)
+                      )}
+                    </TD>
                     {/* Da cessão até hoje enquanto não liquida; liquidado, para
                         na data de recebimento efetivo. Recalculado no render, o
                         número anda sozinho na virada do dia. */}
@@ -833,9 +855,19 @@ function Individual() {
               if (texto) {
                 // whitespace-pre-line: preserva os parágrafos do modelo.
                 return (
-                  <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
-                    {texto}
-                  </p>
+                  <>
+                    <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                      {texto}
+                    </p>
+                    {/* Carimbo de geração: sem ele não há como saber se o texto
+                        é de ontem ou de dois meses atrás. Não aparece na
+                        mensagem fixa dos encerrados, que não é gerada. */}
+                    {!t.fixo && r?.gerado_em && (
+                      <p className="border-t border-slate-100 pt-2 text-xs tabular-nums text-slate-400">
+                        Gerado em {formatDateTime(r.gerado_em)}
+                      </p>
+                    )}
+                  </>
                 )
               }
               return (

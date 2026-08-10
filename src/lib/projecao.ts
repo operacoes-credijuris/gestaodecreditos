@@ -6,7 +6,7 @@
 //   NÃO LIQUIDADO  atualiza o VALOR DE FACE da data de referência do face até a
 //                  data estimada de recebimento, pelo índice cadastrado no
 //                  crédito (SELIC ou IPCA + 2%).
-import { mesesEntre } from './format'
+import { diasEntre, mesesEntre } from './format'
 
 export interface ParametrosAtualizacao {
   /** SELIC vigente em % ao ano, como digitado (15.00 = 15%). */
@@ -81,11 +81,14 @@ export function valorProjetado(
   hoje: string,
 ): Projecao {
   // Liquidado: o valor é o que entrou, não uma projeção.
-  if ((c.data_liquidacao ?? '').slice(0, 10)) {
+  const liq = (c.data_liquidacao ?? '').slice(0, 10)
+  if (liq) {
     if (typeof c.ja_recebido !== 'number') {
       return { valor: null, motivo: 'Crédito liquidado sem valor recebido cadastrado.', realizado: true }
     }
-    return { valor: c.ja_recebido, realizado: true }
+    // atualizadoAte também no caso realizado: o campo significa "data a que o
+    // valor se refere", e a TIR precisa dele para casar valor e prazo.
+    return { valor: c.ja_recebido, realizado: true, atualizadoAte: liq }
   }
 
   if (typeof c.valor_face !== 'number') {
@@ -136,5 +139,69 @@ export function valorProjetado(
     realizado: false,
     atualizadoAte: fim,
     expectativaVencida: vencida,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TIR
+// ---------------------------------------------------------------------------
+
+export interface Tir {
+  /** % ao ano. */
+  anual: number | null
+  /** % ao mês. */
+  mensal: number | null
+  /** Dias entre a cessão e a data a que o valor se refere. */
+  dias?: number
+  /** Data final usada, para a célula poder explicar o prazo. */
+  ate?: string
+  motivo?: string
+}
+
+const SEM_TIR = (motivo: string): Tir => ({ anual: null, mensal: null, motivo })
+
+/**
+ * TIR do crédito, tratado como fluxo único: sai `capital_investido` na data da
+ * cessão e entra o valor da coluna "Valor projetado" na data a que esse valor se
+ * refere.
+ *
+ *   anual  = (valor / capital) ^ (365 / dias) − 1
+ *   mensal = (1 + anual) ^ (1/12) − 1
+ *
+ * É taxa EQUIVALENTE (composta), não a simples da projeção do valor: TIR é, por
+ * definição, a taxa que desconta o fluxo, e anualizar de forma linear daria um
+ * número que não se compara com nenhuma taxa de mercado.
+ *
+ * ⚠️ O PRAZO NÃO É "Dias em carteira". Aquela coluna conta até HOJE, enquanto o
+ * valor projetado de um crédito com expectativa futura se refere a uma data
+ * FUTURA. Casar os dois inflaria a TIR de forma grosseira — um crédito comprado
+ * há 30 dias com expectativa em 2 anos renderia (valor/capital)^(365/30). Por
+ * isso o prazo vem de `proj.atualizadoAte`, que é a data do próprio valor.
+ */
+export function tir(
+  capitalInvestido: number | null | undefined,
+  dataAquisicao: string | null | undefined,
+  proj: Projecao,
+): Tir {
+  if (proj.valor === null) return SEM_TIR('Sem valor projetado.')
+  if (typeof capitalInvestido !== 'number' || capitalInvestido <= 0) {
+    return SEM_TIR('Sem capital investido cadastrado.')
+  }
+  if (!proj.atualizadoAte) return SEM_TIR('Sem data de referência do valor.')
+  const dias = diasEntre(dataAquisicao, proj.atualizadoAte)
+  if (dias === null) return SEM_TIR('Sem data da cessão.')
+  if (dias <= 0) {
+    // Sem prazo não há taxa a anualizar (e dividir por zero explodiria).
+    return SEM_TIR('Prazo nulo entre a cessão e a data do valor.')
+  }
+  const razao = proj.valor / capitalInvestido
+  const anual = (Math.pow(razao, 365 / dias) - 1) * 100
+  if (!Number.isFinite(anual)) return SEM_TIR('Não foi possível calcular a TIR.')
+  const mensal = (Math.pow(1 + anual / 100, 1 / 12) - 1) * 100
+  return {
+    anual: Math.round(anual * 100) / 100,
+    mensal: Math.round(mensal * 100) / 100,
+    dias,
+    ate: proj.atualizadoAte,
   }
 }

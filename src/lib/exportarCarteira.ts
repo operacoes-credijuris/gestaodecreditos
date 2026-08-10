@@ -24,12 +24,16 @@ import {
 import { formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
 import {
   ipcaMais2,
+  tir,
   valorProjetado,
   type ParametrosAtualizacao,
 } from './projecao'
 
 const MOEDA = 'R$ #,##0.00'
 const DATA = 'dd/mm/yyyy'
+// 0.00"%" e não 0.00%: os valores já vêm em pontos percentuais (15.23 = 15,23%),
+// e o formato % do Excel multiplicaria por 100.
+const PCT = '0.00"%"'
 
 // Paleta espelhando a tela (tons do Tailwind já usados na interface).
 const C = {
@@ -83,8 +87,8 @@ const COLUNAS: { titulo: string; largura: number; fmt?: string }[] = [
   { titulo: 'Últ. atualização', largura: 14, fmt: DATA },
   { titulo: 'Valor projetado', largura: 15, fmt: MOEDA },
   { titulo: 'Status TIR', largura: 12 },
-  { titulo: 'TIR a.a.', largura: 10 },
-  { titulo: 'TIR mensal', largura: 10 },
+  { titulo: 'TIR a.a.', largura: 11, fmt: PCT },
+  { titulo: 'TIR mensal', largura: 11, fmt: PCT },
   { titulo: 'Dias em carteira', largura: 13 },
   { titulo: 'Ganho projetado', largura: 15, fmt: MOEDA },
   { titulo: 'Retorno', largura: 10 },
@@ -227,7 +231,6 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   // ---------- Parâmetros usados na projeção ----------
   // Vão no arquivo porque quem lê precisa saber sobre QUAL taxa o valor
   // projetado foi calculado; sem isso o número não é auditável.
-  const PCT = '0.00"%"'
   const pr = d.parametros
   linha += 1
   tituloSecao(linha, 'PARÂMETROS DE ATUALIZAÇÃO')
@@ -286,6 +289,8 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     const sl = statusLiquidacao(p.data_liquidacao, p.expectativa_liquidacao, hoje, limite)
     // Encerrado sai com a mensagem fixa, igual à tela.
     const textos = textosResumo(p.status, d.resumos?.get(p.id))
+    const proj = valorProjetado(p, d.parametros, hoje)
+    const t = tir(p.capital_investido, p.data_aquisicao, proj)
     const linha = ws.getRow(PRIMEIRA_DADO + idx)
     const valores: (string | number | Date | null)[] = [
       formatCNJ(p.numero_cnj),
@@ -306,10 +311,10 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       textos.estagio ?? '',
       textos.providencias ?? '',
       paraData(d.ultimaMov?.get(onlyDigits(p.numero_cnj)) ?? null),
-      valorProjetado(p, d.parametros, hoje).valor,
+      proj.valor,
       statusTir(p.data_liquidacao),
-      null, // TIR a.a.
-      null, // TIR mensal
+      t.anual,
+      t.mensal,
       diasEmCarteira(p.data_aquisicao, p.data_liquidacao, hoje),
       null, // Ganho projetado
       null, // Retorno

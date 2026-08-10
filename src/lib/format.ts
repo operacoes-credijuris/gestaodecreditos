@@ -58,6 +58,17 @@ export function formatDate(value: string | null | undefined): string {
   return d.toLocaleDateString('pt-BR')
 }
 
+/** Data e hora local: "10/08/2026 às 16:21". Para carimbo de geração. */
+export function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`
+}
+
 /**
  * Hoje em ISO local (YYYY-MM-DD). O locale sv-SE já entrega nesse formato, e
  * usar a data LOCAL (não UTC) importa: perto da meia-noite o toISOString()
