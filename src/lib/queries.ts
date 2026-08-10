@@ -1,4 +1,7 @@
+import { useQuery } from '@tanstack/react-query'
 import { makeCrud } from './crud'
+import { supabase } from './supabase'
+import { onlyDigits } from './format'
 import type {
   AnaliseCredito,
   Apenso,
@@ -11,6 +14,39 @@ import type {
   Processo,
   Requerimento,
 } from './types'
+
+/**
+ * Data da última movimentação por processo, vinda do cache que a Edge Function
+ * advbox-movimentacoes mantém (sincronizado pelo cron de 2h e ao abrir a aba
+ * Movimentações). Casa por DÍGITOS porque o número que o ADVBOX devolve tem
+ * formatação própria, diferente do numero_cnj cadastrado aqui.
+ *
+ * Falha em silêncio (mapa vazio): a coluna mostra "—" e o resto da tela segue
+ * funcionando — nenhuma tela depende do ADVBOX estar de pé.
+ *
+ * Compartilhado entre a tabela de Créditos e a carteira do investidor: as duas
+ * mostram a mesma data e devem concordar sempre.
+ */
+export function useUltimaMovimentacao() {
+  return useQuery({
+    queryKey: ['advbox_processo_status', 'mapa'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('advbox_processo_status')
+        .select('numero_processo, ultima_movimentacao')
+      const m = new Map<string, string>()
+      for (const r of (data ?? []) as {
+        numero_processo: string | null
+        ultima_movimentacao: string | null
+      }[]) {
+        const d = onlyDigits(r.numero_processo)
+        if (d.length >= 6 && r.ultima_movimentacao) m.set(d, r.ultima_movimentacao)
+      }
+      return m
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+}
 
 export const analisesCrud = makeCrud<AnaliseCredito, Partial<AnaliseCredito>>(
   'analises_credito',

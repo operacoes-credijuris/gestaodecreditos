@@ -18,7 +18,7 @@ type BadgeTone =
   | 'purple'
   | 'orange'
 
-interface LabelDef {
+export interface LabelDef {
   label: string
   tone: BadgeTone
 }
@@ -98,4 +98,66 @@ export function getLabel(
 ): LabelDef {
   if (!key) return { label: '—', tone: 'gray' }
   return map[key] ?? { label: key, tone: 'gray' }
+}
+
+// Antecedência que acende o âmbar no status da carteira: com menos de um mês
+// para a expectativa, o crédito passa a exigir acompanhamento. Régua num só
+// lugar — mudar aqui muda a cor e o texto da dica junto.
+export const MESES_ALERTA_LIQUIDACAO = 1
+
+/**
+ * Status de liquidação de um crédito — CALCULADO, nunca digitado. É a coluna
+ * Status da carteira do investidor.
+ *
+ *   verde     já liquidado (tem data de liquidação)
+ *   azul      não liquidado, falta MAIS de um mês para a expectativa
+ *   âmbar     não liquidado, falta MENOS de um mês para a expectativa
+ *   vermelho  não liquidado e a expectativa já venceu
+ *   cinza     não liquidado e sem expectativa cadastrada (não há o que medir)
+ *
+ * O `label` é o NOME DA COR, por decisão de produto: a carteira é lida junto
+ * com quem investiu, e "verde/âmbar/vermelho" é o vocabulário que se usa na
+ * conversa. Quem carrega o significado é a `dica` (title da célula) — sem ela a
+ * coluna diria apenas uma cor.
+ *
+ * A comparação é textual porque ISO (YYYY-MM-DD) é ordenável, e `hoje` é
+ * recalculado a cada render: a cor vira sozinha na virada do dia, sem ninguém
+ * mexer no cadastro.
+ */
+export function statusLiquidacao(
+  dataLiquidacao: string | null | undefined,
+  expectativa: string | null | undefined,
+  hoje: string,
+  limiteAlerta: string,
+): LabelDef & { dica: string } {
+  if ((dataLiquidacao ?? '').slice(0, 10)) {
+    return { label: 'Verde', tone: 'green', dica: 'Crédito liquidado' }
+  }
+  const exp = (expectativa ?? '').slice(0, 10)
+  if (!exp) {
+    return {
+      label: '—',
+      tone: 'gray',
+      dica: 'Sem expectativa de liquidação cadastrada',
+    }
+  }
+  if (exp < hoje) {
+    return {
+      label: 'Vermelho',
+      tone: 'red',
+      dica: 'Expectativa de liquidação vencida e crédito não liquidado',
+    }
+  }
+  if (exp <= limiteAlerta) {
+    return {
+      label: 'Âmbar',
+      tone: 'yellow',
+      dica: `Liquidação prevista em menos de ${MESES_ALERTA_LIQUIDACAO} mês`,
+    }
+  }
+  return {
+    label: 'Azul',
+    tone: 'blue',
+    dica: `Liquidação prevista em mais de ${MESES_ALERTA_LIQUIDACAO} mês`,
+  }
 }

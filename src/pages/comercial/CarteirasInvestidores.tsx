@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Wallet, Percent, Target, CheckCircle2, Clock, Hash } from 'lucide-react'
-import { processosCrud } from '@/lib/queries'
-import { getLabel, INDICE_ATUALIZACAO } from '@/lib/labels'
+import { processosCrud, useUltimaMovimentacao } from '@/lib/queries'
+import {
+  getLabel,
+  INDICE_ATUALIZACAO,
+  MESES_ALERTA_LIQUIDACAO,
+  statusLiquidacao,
+} from '@/lib/labels'
+import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
@@ -19,7 +25,15 @@ import {
   ErrorState,
   EmptyState,
 } from '@/components/ui/Table'
-import { formatBRL, formatCNJ, formatDate, sentenceCase } from '@/lib/format'
+import {
+  formatBRL,
+  formatCNJ,
+  formatDate,
+  hojeISO,
+  mesesDepois,
+  onlyDigits,
+  sentenceCase,
+} from '@/lib/format'
 
 const TABS = [
   { key: 'individual', label: 'Por investidor' },
@@ -133,6 +147,17 @@ const COR_GRUPO = {
 // Caixa alta desligada nos títulos dos grupos (o <thead> aplica uppercase).
 const GRUPO = 'text-[13px] font-bold normal-case tracking-normal'
 
+// Cor do TEXTO da coluna Status. Sem selo/pílula: o nome da cor escrito na
+// própria cor já é a informação. Tons alinhados com o semáforo da Expectativa
+// na aba Créditos, para a mesma cor significar a mesma coisa nas duas telas.
+const COR_STATUS: Record<string, string> = {
+  green: 'text-emerald-600',
+  blue: 'text-blue-600',
+  yellow: 'text-amber-600',
+  red: 'text-red-600',
+  gray: 'text-slate-400',
+}
+
 // nowrap também nos <th>: com 25 colunas, um título como "Providências /
 // prox. passos" quebrava em quatro linhas e esticava o cabeçalho inteiro.
 const CLASSES_CARTEIRA =
@@ -140,6 +165,17 @@ const CLASSES_CARTEIRA =
 
 function Individual() {
   const processos = processosCrud.useList()
+  // Última movimentação de cada crédito — mesmo cache do ADVBOX que alimenta a
+  // ficha lateral do crédito e a tabela de Créditos.
+  const ultimaMov = useUltimaMovimentacao()
+
+  // Réguas do semáforo da coluna Status. Calculadas no render: na virada do dia
+  // a cor anda sozinha, sem ninguém reabrir a tela.
+  const hoje = useMemo(() => hojeISO(), [])
+  const limiteAlerta = useMemo(
+    () => mesesDepois(hoje, MESES_ALERTA_LIQUIDACAO),
+    [hoje],
+  )
 
   // Cessionários distintos, em ordem alfabética.
   const investidores = useMemo(() => {
@@ -164,7 +200,7 @@ function Individual() {
   )
 
   // Mês de referência: sempre o corrente, sem opção de troca.
-  const mesRef = useMemo(() => rotuloMes(new Date().toLocaleDateString('sv-SE')), [])
+  const mesRef = useMemo(() => rotuloMes(hoje), [hoje])
 
   const carteira = useMemo(() => {
     if (!investidor) return []
@@ -383,7 +419,14 @@ function Individual() {
                 </tr>
               </THead>
               <TBody>
-                {carteira.map((p) => (
+                {carteira.map((p) => {
+                  const sl = statusLiquidacao(
+                    p.data_liquidacao,
+                    p.expectativa_liquidacao,
+                    hoje,
+                    limiteAlerta,
+                  )
+                  return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
                     <TD className="font-medium text-slate-800">
@@ -391,10 +434,10 @@ function Individual() {
                     </TD>
                     <TD>{p.cedente || '—'}</TD>
                     <TD>{p.cedente_advogado || '—'}</TD>
-                    {/* Única coluna que pode ser longa: deixa quebrar. */}
-                    <TD className="!whitespace-normal">
-                      {textoTipoCredito(p.tipo_credito)}
-                    </TD>
+                    {/* Numa linha só: a coluna se alarga conforme o texto (a
+                        tabela já rola na horizontal) em vez de esticar a altura
+                        da linha. Inicial maiúscula, resto minúsculo. */}
+                    <TD>{sentenceCase(textoTipoCredito(p.tipo_credito))}</TD>
                     <TD>{p.tribunal || '—'}</TD>
 
                     {/* TIR obrigatório */}
@@ -428,11 +471,32 @@ function Individual() {
                       {formatBRL(p.valor_estimado_complementar)}
                     </TD>
 
-                    {/* Dados vivos */}
-                    <TD className={SEP} />
+                    {/* Dados vivos.
+                        Status e Últ. atualização são CALCULADOS — ninguém
+                        digita. Estágio processual e Providências seguem
+                        pendentes de origem. */}
+                    <TD className={SEP}>
+                      {/* Só o nome da cor, escrito na cor. O title diz o que
+                          cada cor significa — é o que sustenta a coluna para
+                          quem não distingue os tons. */}
+                      <span
+                        title={sl.dica}
+                        className={cn('font-medium', COR_STATUS[sl.tone] ?? 'text-slate-400')}
+                      >
+                        {sl.label}
+                      </span>
+                    </TD>
                     <TD />
                     <TD />
-                    <TD />
+                    {/* Do cache do ADVBOX, casado por dígitos. Enquanto o mapa
+                        carrega mostra vazio em vez de "—", que seria mentira. */}
+                    <TD className="tabular-nums">
+                      {ultimaMov.isLoading
+                        ? ''
+                        : formatDate(
+                            ultimaMov.data?.get(onlyDigits(p.numero_cnj)) ?? null,
+                          )}
+                    </TD>
 
                     {/* Calculado automaticamente */}
                     <TD className={SEP} />
@@ -443,7 +507,8 @@ function Individual() {
                     <TD />
                     <TD />
                   </TR>
-                ))}
+                  )
+                })}
               </TBody>
             </Table>
           )}

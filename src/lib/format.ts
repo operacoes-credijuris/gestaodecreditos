@@ -48,6 +48,31 @@ export function formatDate(value: string | null | undefined): string {
   return d.toLocaleDateString('pt-BR')
 }
 
+/**
+ * Hoje em ISO local (YYYY-MM-DD). O locale sv-SE já entrega nesse formato, e
+ * usar a data LOCAL (não UTC) importa: perto da meia-noite o toISOString()
+ * viraria o dia antes da hora e acenderia semáforo errado.
+ */
+export function hojeISO(): string {
+  return new Date().toLocaleDateString('sv-SE')
+}
+
+/**
+ * Data de "daqui a N meses" a partir de um ISO local (YYYY-MM-DD). Meses de
+ * CALENDÁRIO, com o dia preso ao último do mês quando ele não existe
+ * (31/01 -> 28/02) — somar 30 dias por mês erraria em boa parte do ano.
+ */
+export function mesesDepois(iso: string, meses: number): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const seq = m + meses
+  const ano = y + Math.floor((seq - 1) / 12)
+  const mes = ((seq - 1) % 12) + 1
+  // Dia 0 do mês seguinte = último dia deste mês.
+  const ultimoDia = new Date(ano, mes, 0).getDate()
+  const dia = Math.min(d, ultimoDia)
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
+}
+
 /** Formata número de processo no padrão CNJ NNNNNNN-DD.AAAA.J.TR.OOOO. */
 export function formatCNJ(value: string | null | undefined): string {
   if (!value) return '—'

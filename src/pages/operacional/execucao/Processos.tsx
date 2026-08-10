@@ -1,8 +1,10 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
-import { processosCrud, apensosCrud } from '@/lib/queries'
-import { supabase } from '@/lib/supabase'
+import {
+  processosCrud,
+  apensosCrud,
+  useUltimaMovimentacao,
+} from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { useApensosManager } from '@/components/Apensos'
 import type {
@@ -48,39 +50,12 @@ import {
   formatBRLInput,
   formatCNJ,
   formatDate,
+  hojeISO,
+  mesesDepois,
   onlyDigits,
   parseBRLInput,
   vazioNull,
 } from '@/lib/format'
-
-/**
- * Data da última movimentação por processo, vinda do cache que a Edge Function
- * advbox-movimentacoes mantém. Casa por dígitos porque o número que o ADVBOX
- * devolve tem formatação própria, diferente do numero_cnj cadastrado aqui.
- *
- * Falha em silêncio (mapa vazio): a coluna mostra "—" e o resto da tabela segue
- * funcionando — o cadastro de créditos não depende do ADVBOX estar de pé.
- */
-function useUltimaMovimentacao() {
-  return useQuery({
-    queryKey: ['advbox_processo_status', 'mapa'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('advbox_processo_status')
-        .select('numero_processo, ultima_movimentacao')
-      const m = new Map<string, string>()
-      for (const r of (data ?? []) as {
-        numero_processo: string | null
-        ultima_movimentacao: string | null
-      }[]) {
-        const d = onlyDigits(r.numero_processo)
-        if (d.length >= 6 && r.ultima_movimentacao) m.set(d, r.ultima_movimentacao)
-      }
-      return m
-    },
-    staleTime: 5 * 60 * 1000,
-  })
-}
 
 // Separa múltiplos nº RTDPJ (digitados com "e", vírgula, ";", "/" ou quebra)
 // para exibir um por linha.
@@ -94,20 +69,6 @@ function splitRtdpj(v: string): string[] {
 // Antecedência que acende o âmbar na coluna Expectativa. Régua num só lugar:
 // mudar aqui muda a cor e o texto da dica junto.
 const MESES_ALERTA_EXPECTATIVA = 3
-
-// Data de "daqui a N meses" a partir de um ISO local (YYYY-MM-DD). Meses de
-// CALENDÁRIO, com o dia preso ao último do mês quando ele não existe
-// (31/01 -> 28/02) — somar 30 dias por mês erraria em boa parte do ano.
-function mesesDepois(iso: string, meses: number): string {
-  const [y, m, d] = iso.split('-').map(Number)
-  const seq = m + meses
-  const ano = y + Math.floor((seq - 1) / 12)
-  const mes = ((seq - 1) % 12) + 1
-  // Dia 0 do mês seguinte = último dia deste mês.
-  const ultimoDia = new Date(ano, mes, 0).getDate()
-  const dia = Math.min(d, ultimoDia)
-  return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
-}
 
 /**
  * Semáforo da expectativa de liquidação: vermelho já venceu, âmbar vence
@@ -224,7 +185,7 @@ export default function Processos() {
 
   // Referências do semáforo da coluna Expectativa. Data local (sv-SE dá o
   // formato ISO), calculada no render: no dia seguinte a régua anda sozinha.
-  const hoje = useMemo(() => new Date().toLocaleDateString('sv-SE'), [])
+  const hoje = useMemo(() => hojeISO(), [])
   const limiteAlerta = useMemo(
     () => mesesDepois(hoje, MESES_ALERTA_EXPECTATIVA),
     [hoje],
