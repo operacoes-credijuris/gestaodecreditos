@@ -69,11 +69,16 @@ export interface Projecao {
   motivo?: string
   /** true quando o valor é o recebido de fato, não uma projeção. */
   realizado: boolean
+  /** Data até onde o face foi atualizado (ISO). Ausente quando não houve conta. */
+  atualizadoAte?: string
+  /** true quando a expectativa venceu e a atualização seguiu até hoje. */
+  expectativaVencida?: boolean
 }
 
 export function valorProjetado(
   c: CreditoProjecao,
   params: ParametrosAtualizacao | undefined,
+  hoje: string,
 ): Projecao {
   // Liquidado: o valor é o que entrou, não uma projeção.
   if ((c.data_liquidacao ?? '').slice(0, 10)) {
@@ -97,7 +102,21 @@ export function valorProjetado(
       realizado: false,
     }
   }
-  const meses = mesesEntre(c.data_referencia, c.expectativa_liquidacao)
+  const exp = (c.expectativa_liquidacao ?? '').slice(0, 10)
+  if (!c.data_referencia || !exp) {
+    return {
+      valor: null,
+      motivo: 'Falta a data de referência do face ou a data estimada de recebimento.',
+      realizado: false,
+    }
+  }
+  // EXPECTATIVA VENCIDA E CRÉDITO NÃO PAGO: atualiza até HOJE, não até a
+  // expectativa. Parar na data vencida congelaria o valor no dia em que o prazo
+  // furou, subestimando justamente os créditos que mais demoram — o tempo
+  // correu de fato e a correção acompanha. Daí o fim ser o MAIOR entre os dois.
+  const vencida = exp < hoje
+  const fim = vencida ? hoje : exp
+  const meses = mesesEntre(c.data_referencia, fim)
   if (meses === null) {
     return {
       valor: null,
@@ -105,12 +124,17 @@ export function valorProjetado(
       realizado: false,
     }
   }
-  // Prazo negativo (estimativa anterior à referência do face) não encurta o
+  // Prazo negativo (data final anterior à referência do face) não encurta o
   // valor: sem tempo a correr, o projetado é o próprio face.
   const anos = Math.max(0, meses) / 12
   const i = taxa / 100
   const fator =
     CAPITALIZACAO === 'composta' ? Math.pow(1 + i, anos) : 1 + i * anos
-  // Arredonda a centavos: é dinheiro, e o resíduo de float vazaria para o Excel.
-  return { valor: Math.round(c.valor_face * fator * 100) / 100, realizado: false }
+  return {
+    // Arredonda a centavos: é dinheiro, e o resíduo de float vazaria para o Excel.
+    valor: Math.round(c.valor_face * fator * 100) / 100,
+    realizado: false,
+    atualizadoAte: fim,
+    expectativaVencida: vencida,
+  }
 }

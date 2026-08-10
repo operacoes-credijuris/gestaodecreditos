@@ -633,7 +633,7 @@ function Individual() {
                   const resumo = resumos.data?.get(p.id)
                   // Encerrado usa mensagem fixa; o resto vem da IA.
                   const textos = textosResumo(p.status, resumo)
-                  const proj = valorProjetado(p, parametros.data)
+                  const proj = valorProjetado(p, parametros.data, hoje)
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
@@ -744,7 +744,20 @@ function Individual() {
                           —
                         </span>
                       ) : (
-                        formatBRL(proj.valor)
+                        // O title diz até quando o face foi atualizado. Sem isso,
+                        // num crédito de expectativa vencida o número não casa
+                        // com a data da coluna ao lado e parece errado.
+                        <span
+                          title={
+                            proj.realizado
+                              ? 'Valor efetivamente recebido'
+                              : proj.expectativaVencida
+                                ? `Expectativa vencida: atualizado até hoje (${formatDate(proj.atualizadoAte)})`
+                                : `Atualizado até a data estimada (${formatDate(proj.atualizadoAte)})`
+                          }
+                        >
+                          {formatBRL(proj.valor)}
+                        </span>
                       )}
                     </TD>
                     {/* Efetivada = crédito já pago, então a taxa é a que

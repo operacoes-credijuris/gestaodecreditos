@@ -306,7 +306,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       textos.estagio ?? '',
       textos.providencias ?? '',
       paraData(d.ultimaMov?.get(onlyDigits(p.numero_cnj)) ?? null),
-      valorProjetado(p, d.parametros).valor,
+      valorProjetado(p, d.parametros, hoje).valor,
       statusTir(p.data_liquidacao),
       null, // TIR a.a.
       null, // TIR mensal
