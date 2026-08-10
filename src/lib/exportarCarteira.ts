@@ -23,8 +23,10 @@ import {
 } from './labels'
 import { formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
 import {
+  ganhoProjetado,
   ipcaMais2,
   tir,
+  tirMediaPonderada,
   valorProjetado,
   type ParametrosAtualizacao,
 } from './projecao'
@@ -192,13 +194,32 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   // "—" e não célula vazia nos que ainda não são calculados: vazio seria lido
   // como zero por quem consome a planilha, e a tela também mostra "—".
   const SEM = '—'
+
+  // TIR média e A receber estimado saem calculados AQUI, com as mesmas funções
+  // da tela, em vez de vir por parâmetro: recomputar da mesma fonte é mais
+  // seguro que plumbing, que poderia entregar no arquivo um número diferente do
+  // exibido.
+  const porCredito = d.carteira.map((p) => {
+    const proj = valorProjetado(p, d.parametros, hoje)
+    return { p, proj, t: tir(p.capital_investido, p.data_aquisicao, proj) }
+  })
+  const tirMedia = tirMediaPonderada(
+    porCredito.map(({ p, t }) => ({ tirAnual: t.anual, capital: p.capital_investido })),
+  )
+  let aReceber: number | null = null
+  for (const { p, proj } of porCredito) {
+    if ((p.data_liquidacao ?? '').slice(0, 10)) continue
+    if (proj.valor === null) continue
+    aReceber = (aReceber ?? 0) + proj.valor
+  }
+
   // Mesma ordem dos cards na tela.
-  const indicadores: [string, number | string | null, string | undefined][] = [
+  const indicadores: [string, number | string | Date | null, string | undefined][] = [
     ['Capital total', centavos(d.capitalTotal) ?? SEM, MOEDA],
-    ['TIR média', SEM, undefined],
+    ['TIR média', tirMedia.valor ?? SEM, PCT],
     ['Retorno projetado', SEM, undefined],
     ['Já recebido', centavos(d.jaRecebidoTotal) ?? SEM, MOEDA],
-    ['A receber estimado', SEM, undefined],
+    ['A receber estimado', centavos(aReceber) ?? SEM, MOEDA],
     ['Nº de operações', d.carteira.length, undefined],
   ]
   // Bloco rótulo/valor com moldura, usado por indicadores e parâmetros.
@@ -316,7 +337,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       t.anual,
       t.mensal,
       diasEmCarteira(p.data_aquisicao, p.data_liquidacao, hoje),
-      null, // Ganho projetado
+      ganhoProjetado(proj, p.capital_investido, p.valor_estimado_complementar),
       null, // Retorno
     ]
     const zebrar = idx % 2 === 1

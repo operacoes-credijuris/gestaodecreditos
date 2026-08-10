@@ -18,7 +18,12 @@ import {
   useParametrosAtualizacao,
   useUltimaMovimentacao,
 } from '@/lib/queries'
-import { tir, valorProjetado } from '@/lib/projecao'
+import {
+  ganhoProjetado,
+  tir,
+  tirMediaPonderada,
+  valorProjetado,
+} from '@/lib/projecao'
 import { invokeFunction } from '@/lib/functions'
 import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
 import { ModalParametrosAtualizacao } from '@/components/ParametrosAtualizacao'
@@ -376,6 +381,40 @@ function Individual() {
     }
   }, [carteira])
 
+  /**
+   * Cards que dependem da projeção. Ficam num memo próprio porque recalculam
+   * quando os parâmetros mudam, e não só quando a carteira muda.
+   */
+  const derivados = useMemo(() => {
+    const itens = carteira.map((p) => {
+      const proj = valorProjetado(p, parametros.data, hoje)
+      return { p, proj, t: tir(p.capital_investido, p.data_aquisicao, proj) }
+    })
+    const media = tirMediaPonderada(
+      itens.map(({ p, t }) => ({ tirAnual: t.anual, capital: p.capital_investido })),
+    )
+    // "Ainda não recebidos" = sem data de liquidação. Crédito de status
+    // complementar já teve o principal pago, então fica FORA desta soma, mesmo
+    // tendo complementar a receber.
+    let aReceber = 0
+    let contados = 0
+    for (const { p, proj } of itens) {
+      if ((p.data_liquidacao ?? '').slice(0, 10)) continue
+      if (proj.valor === null) continue
+      aReceber += proj.valor
+      contados++
+    }
+    const abertos = carteira.filter((p) => !(p.data_liquidacao ?? '').slice(0, 10)).length
+    return {
+      tirMedia: media,
+      aReceber: {
+        total: contados > 0 ? Math.round(aReceber * 100) / 100 : null,
+        contados,
+        abertos,
+      },
+    }
+  }, [carteira, parametros.data, hoje])
+
   // "3 de 7 créditos" quando falta cadastro; some quando está tudo lá.
   const cobertura = (n: number) =>
     carteira.length === 0
@@ -507,8 +546,18 @@ function Individual() {
         />
         <StatCard
           label="TIR média"
-          value="—"
-          hint={AGUARDANDO}
+          value={
+            investidor && derivados.tirMedia.valor !== null
+              ? formatPercent(derivados.tirMedia.valor)
+              : '—'
+          }
+          hint={
+            !investidor
+              ? 'selecione um investidor'
+              : derivados.tirMedia.valor === null
+                ? 'nenhum crédito com TIR calculável'
+                : `média ponderada pelo capital, de ${derivados.tirMedia.considerados} de ${carteira.length} créditos`
+          }
           icon={<Percent className="h-5 w-5" />}
           tone="green"
         />
@@ -536,8 +585,18 @@ function Individual() {
         />
         <StatCard
           label="A receber estimado"
-          value="—"
-          hint={AGUARDANDO}
+          value={
+            investidor && derivados.aReceber.total !== null
+              ? formatBRL(derivados.aReceber.total)
+              : '—'
+          }
+          hint={
+            !investidor
+              ? 'selecione um investidor'
+              : derivados.aReceber.abertos === 0
+                ? 'todos os créditos já liquidados'
+                : `soma projetada de ${derivados.aReceber.contados} de ${derivados.aReceber.abertos} créditos em aberto`
+          }
           icon={<Clock className="h-5 w-5" />}
           tone="slate"
         />
@@ -637,6 +696,11 @@ function Individual() {
                   const textos = textosResumo(p.status, resumo)
                   const proj = valorProjetado(p, parametros.data, hoje)
                   const tirCred = tir(p.capital_investido, p.data_aquisicao, proj)
+                  const ganho = ganhoProjetado(
+                    proj,
+                    p.capital_investido,
+                    p.valor_estimado_complementar,
+                  )
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
@@ -802,7 +866,24 @@ function Individual() {
                     <TD className="text-right tabular-nums">
                       {diasEmCarteira(p.data_aquisicao, p.data_liquidacao, hoje) ?? '—'}
                     </TD>
-                    <TD />
+                    {/* (projetado + complementar) − capital. Negativo em
+                        vermelho: prejuízo não pode passar batido. */}
+                    <TD className="text-right tabular-nums">
+                      {ganho === null ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        <span
+                          className={ganho < 0 ? 'font-medium text-red-600' : undefined}
+                          title={
+                            p.valor_estimado_complementar
+                              ? `Inclui ${formatBRL(p.valor_estimado_complementar)} de complementar a receber`
+                              : undefined
+                          }
+                        >
+                          {formatBRL(ganho)}
+                        </span>
+                      )}
+                    </TD>
                     <TD />
                   </TR>
                   )

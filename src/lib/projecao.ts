@@ -142,6 +142,56 @@ export function valorProjetado(
   }
 }
 
+/**
+ * Ganho projetado do crédito.
+ *
+ *   ganho = (valor projetado + valor estimado complementar) − capital investido
+ *
+ * O complementar entra do lado do RECEBIMENTO, não do capital. Nos 29 créditos
+ * que o têm preenchido hoje, todos já liquidados, ele é o resto a receber por
+ * cima do que entrou (capital 7.681,17 / recebido 10.248,89 / complementar
+ * 839,81). Somá-lo ao capital trataria um recebível futuro como se fosse custo e
+ * subestimaria o ganho — no caso acima, 1.727,91 em vez de 3.407,53.
+ */
+export function ganhoProjetado(
+  proj: Projecao,
+  capitalInvestido: number | null | undefined,
+  valorComplementar: number | null | undefined,
+): number | null {
+  if (proj.valor === null) return null
+  if (typeof capitalInvestido !== 'number') return null
+  const comp = typeof valorComplementar === 'number' ? valorComplementar : 0
+  return Math.round((proj.valor + comp - capitalInvestido) * 100) / 100
+}
+
+/**
+ * TIR média da carteira, PONDERADA pelo capital investido de cada crédito.
+ *
+ * Média simples daria o mesmo peso a um crédito de mil reais e a um de cem mil,
+ * e a taxa resultante não descreveria a carteira. O peso é o capital porque é
+ * sobre ele que a taxa incide.
+ *
+ * Créditos sem TIR (sem valor projetado, sem capital, prazo nulo) ficam fora da
+ * conta E do denominador — entrar com zero puxaria a média para baixo por
+ * ausência de dado, não por rentabilidade.
+ */
+export function tirMediaPonderada(
+  itens: { tirAnual: number | null; capital: number | null | undefined }[],
+): { valor: number | null; considerados: number } {
+  let somaPesos = 0
+  let somaProduto = 0
+  let considerados = 0
+  for (const it of itens) {
+    if (it.tirAnual === null) continue
+    if (typeof it.capital !== 'number' || it.capital <= 0) continue
+    somaPesos += it.capital
+    somaProduto += it.tirAnual * it.capital
+    considerados++
+  }
+  if (somaPesos === 0) return { valor: null, considerados: 0 }
+  return { valor: Math.round((somaProduto / somaPesos) * 100) / 100, considerados }
+}
+
 // ---------------------------------------------------------------------------
 // TIR
 // ---------------------------------------------------------------------------
