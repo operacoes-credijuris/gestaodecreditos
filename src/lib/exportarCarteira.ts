@@ -22,6 +22,11 @@ import {
   textosResumo,
 } from './labels'
 import { formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
+import {
+  ipcaMais2,
+  valorProjetado,
+  type ParametrosAtualizacao,
+} from './projecao'
 
 const MOEDA = 'R$ #,##0.00'
 const DATA = 'dd/mm/yyyy'
@@ -129,6 +134,8 @@ export interface DadosExportacao {
   /** Totais dos cards que já têm valor; null = ainda não cadastrado. */
   capitalTotal: number | null
   jaRecebidoTotal: number | null
+  /** SELIC/IPCA da projeção do valor. */
+  parametros: ParametrosAtualizacao | undefined
 }
 
 export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
@@ -190,26 +197,55 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     ['A receber estimado', SEM, undefined],
     ['Nº de operações', d.carteira.length, undefined],
   ]
-  indicadores.forEach(([rotulo, valor, fmt], i) => {
-    const linha = 7 + i
-    const r = ws.getCell(linha, 1)
-    r.value = rotulo
-    r.font = { size: 10, color: { argb: C.rotulo } }
-    r.border = contorno
-    r.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.zebra } }
-    const v = ws.getCell(linha, 2)
-    v.value = valor
-    v.font = { bold: true, size: 11, color: { argb: typeof valor === 'number' ? C.tinta : C.apagado } }
-    v.border = contorno
-    v.alignment = { horizontal: 'right' }
-    if (fmt && typeof valor === 'number') v.numFmt = fmt
-  })
+  // Bloco rótulo/valor com moldura, usado por indicadores e parâmetros.
+  const bloco = (
+    linhaInicial: number,
+    itens: [string, number | string | null, string | undefined][],
+  ) => {
+    itens.forEach(([rotulo, valor, fmt], i) => {
+      const linha = linhaInicial + i
+      const r = ws.getCell(linha, 1)
+      r.value = rotulo
+      r.font = { size: 10, color: { argb: C.rotulo } }
+      r.border = contorno
+      r.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.zebra } }
+      const v = ws.getCell(linha, 2)
+      v.value = valor
+      v.font = {
+        bold: true,
+        size: 11,
+        color: { argb: typeof valor === 'number' ? C.tinta : C.apagado },
+      }
+      v.border = contorno
+      v.alignment = { horizontal: 'right' }
+      if (fmt && typeof valor === 'number') v.numFmt = fmt
+    })
+    return linhaInicial + itens.length
+  }
+  let linha = bloco(7, indicadores)
+
+  // ---------- Parâmetros usados na projeção ----------
+  // Vão no arquivo porque quem lê precisa saber sobre QUAL taxa o valor
+  // projetado foi calculado; sem isso o número não é auditável.
+  const PCT = '0.00"%"'
+  const pr = d.parametros
+  linha += 1
+  tituloSecao(linha, 'PARÂMETROS DE ATUALIZAÇÃO')
+  linha = bloco(linha + 1, [
+    ['SELIC vigente (% a.a.)', pr?.selic_aa ?? SEM, PCT],
+    ['IPCA acumulado 12m (% a.a.)', pr?.ipca_12m_aa ?? SEM, PCT],
+    ['IPCA + 2% a.a.', ipcaMais2(pr?.ipca_12m_aa) ?? SEM, PCT],
+    ['Data de referência do relatório', pr?.data_referencia ?? SEM, undefined],
+  ])
 
   // ---------- Cabeçalho de dois níveis, como na tela ----------
-  const LINHA_GRUPO = 14
-  const LINHA_COLUNA = 15
-  const PRIMEIRA_DADO = 16
-  tituloSecao(13, 'CARTEIRA')
+  // Linhas calculadas, não fixas: um bloco novo no topo desloca a tabela toda.
+  linha += 1
+  const LINHA_SECAO = linha
+  const LINHA_GRUPO = linha + 1
+  const LINHA_COLUNA = linha + 2
+  const PRIMEIRA_DADO = linha + 3
+  tituloSecao(LINHA_SECAO, 'CARTEIRA')
 
   let col = 1
   for (const g of GRUPOS) {
@@ -267,7 +303,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       textos.estagio ?? '',
       textos.providencias ?? '',
       paraData(d.ultimaMov?.get(onlyDigits(p.numero_cnj)) ?? null),
-      null, // Valor projetado
+      valorProjetado(p, d.parametros).valor,
       statusTir(p.data_liquidacao),
       null, // TIR a.a.
       null, // TIR mensal

@@ -10,14 +10,18 @@ import {
   Sparkles,
   RefreshCw,
   Download,
+  SlidersHorizontal,
 } from 'lucide-react'
 import {
   processosCrud,
   useCarteiraResumos,
+  useParametrosAtualizacao,
   useUltimaMovimentacao,
 } from '@/lib/queries'
+import { valorProjetado } from '@/lib/projecao'
 import { invokeFunction } from '@/lib/functions'
 import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
+import { ModalParametrosAtualizacao } from '@/components/ParametrosAtualizacao'
 import {
   diasEmCarteira,
   getLabel,
@@ -250,6 +254,9 @@ function Individual() {
 
   const toast = useToast()
   const qc = useQueryClient()
+  // SELIC/IPCA da projeção e a janela que os edita.
+  const parametros = useParametrosAtualizacao()
+  const [abrirParametros, setAbrirParametros] = useState(false)
   // Enquanto a varredura de todos os créditos corre no servidor, a tela fica
   // perguntando pelos textos que vão chegando.
   const [varrendo, setVarrendo] = useState(false)
@@ -392,6 +399,7 @@ function Individual() {
         ultimaMov: ultimaMov.data,
         capitalTotal: totais.capital.total,
         jaRecebidoTotal: totais.recebido.total,
+        parametros: parametros.data,
       })
     } catch (e) {
       toast.error((e as Error).message)
@@ -441,8 +449,17 @@ function Individual() {
             {mesRef}
           </div>
         </div>
-        {/* sm:ml-auto joga a dupla de ações para a direita da mesma linha. */}
+        {/* sm:ml-auto joga o trio de ações para a direita da mesma linha. */}
         <div className="flex gap-2 sm:ml-auto">
+          {/* SELIC e IPCA que alimentam a coluna Valor projetado. */}
+          <Button
+            variant="outline"
+            className={ALTURA_CONTROLE}
+            icon={<SlidersHorizontal className="h-4 w-4" />}
+            onClick={() => setAbrirParametros(true)}
+          >
+            Parâmetros de atualização
+          </Button>
           {/* Regera o estágio e as providências de TODOS os créditos, ignorando
               a checagem de novidade que a rodada semanal faz. */}
           <Button
@@ -616,6 +633,7 @@ function Individual() {
                   const resumo = resumos.data?.get(p.id)
                   // Encerrado usa mensagem fixa; o resto vem da IA.
                   const textos = textosResumo(p.status, resumo)
+                  const proj = valorProjetado(p, parametros.data)
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
@@ -717,7 +735,18 @@ function Individual() {
                     </TD>
 
                     {/* Calculado automaticamente */}
-                    <TD className={SEP} />
+                    {/* Liquidado mostra o que entrou; o resto é o face
+                        atualizado até a expectativa. O title diz por que está
+                        vazio quando falta insumo, em vez de só mostrar "—". */}
+                    <TD className={cn(SEP, 'text-right tabular-nums')}>
+                      {proj.valor === null ? (
+                        <span className="text-slate-400" title={proj.motivo}>
+                          —
+                        </span>
+                      ) : (
+                        formatBRL(proj.valor)
+                      )}
+                    </TD>
                     {/* Efetivada = crédito já pago, então a taxa é a que
                         aconteceu; Estimada = ainda projeção. O verde segue a
                         mesma convenção da coluna Status. */}
@@ -748,6 +777,11 @@ function Individual() {
           )}
         </Card>
       </div>
+
+      <ModalParametrosAtualizacao
+        open={abrirParametros}
+        onClose={() => setAbrirParametros(false)}
+      />
 
       {/* Texto inteiro do estágio/providências. Guarda id + campo, então o
           conteúdo se atualiza sozinho quando o botão gera de novo. */}

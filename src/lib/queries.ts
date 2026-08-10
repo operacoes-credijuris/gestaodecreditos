@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { makeCrud } from './crud'
 import { supabase } from './supabase'
 import { onlyDigits } from './format'
+import type { ParametrosAtualizacao } from './projecao'
 import type {
   AnaliseCredito,
   Apenso,
@@ -27,6 +28,53 @@ import type {
  * Compartilhado entre a tabela de Créditos e a carteira do investidor: as duas
  * mostram a mesma data e devem concordar sempre.
  */
+/**
+ * Parâmetros globais de atualização monetária (linha única, id = 1). Alimentam
+ * a coluna "Valor projetado" da carteira.
+ */
+export function useParametrosAtualizacao() {
+  return useQuery({
+    queryKey: ['parametros_atualizacao'],
+    queryFn: async (): Promise<ParametrosAtualizacao> => {
+      const { data } = await supabase
+        .from('parametros_atualizacao')
+        .select('selic_aa, ipca_12m_aa, data_referencia')
+        .eq('id', 1)
+        .maybeSingle()
+      return {
+        selic_aa: data?.selic_aa ?? null,
+        ipca_12m_aa: data?.ipca_12m_aa ?? null,
+        data_referencia: data?.data_referencia ?? null,
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+export function useSalvarParametrosAtualizacao() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (p: ParametrosAtualizacao) => {
+      const { data: sessao } = await supabase.auth.getUser()
+      // upsert e não update: a linha é semeada pela migração, mas se o banco
+      // for recriado sem o seed a tela não deve quebrar.
+      const { error } = await supabase.from('parametros_atualizacao').upsert({
+        id: 1,
+        selic_aa: p.selic_aa,
+        ipca_12m_aa: p.ipca_12m_aa,
+        data_referencia: p.data_referencia,
+        atualizado_em: new Date().toISOString(),
+        atualizado_por: sessao.user?.id ?? null,
+      })
+      if (error) throw new Error(error.message)
+    },
+    onSuccess: () => {
+      // Invalida a carteira também: o valor projetado depende destes números.
+      qc.invalidateQueries({ queryKey: ['parametros_atualizacao'] })
+    },
+  })
+}
+
 export interface CarteiraResumo {
   processo_id: string
   estagio_processual: string | null
