@@ -205,9 +205,18 @@ function Individual() {
   const carteira = useMemo(() => {
     if (!investidor) return []
     const alvo = normNome(investidor)
+    // Ordem: data da cessão, do mais ANTIGO para o mais novo — a carteira se lê
+    // como a linha do tempo do investidor. Cessão sem data vai para o fim.
     return (processos.data ?? [])
       .filter((p) => normNome(p.cessionario ?? '') === alvo)
-      .sort((a, b) => (b.data_aquisicao || '').localeCompare(a.data_aquisicao || ''))
+      .sort((a, b) => {
+        const av = a.data_aquisicao || ''
+        const bv = b.data_aquisicao || ''
+        if (!av && !bv) return 0
+        if (!av) return 1
+        if (!bv) return -1
+        return av.localeCompare(bv)
+      })
   }, [processos.data, investidor])
 
   /**
