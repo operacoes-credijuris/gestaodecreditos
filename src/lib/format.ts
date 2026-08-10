@@ -97,6 +97,51 @@ export function limparNumeroConta(v: string | null | undefined): string {
   return (v ?? '').replace(/[^\d.\-/]/g, '')
 }
 
+/** Máscara de CEP: 00000-000. Só dígitos entram, teto de 8. */
+export function formatCepInput(v: string | null | undefined): string {
+  const d = onlyDigits(v).slice(0, 8)
+  return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d
+}
+
+export interface PartesEndereco {
+  logradouro?: string | null
+  numero?: string | null
+  complemento?: string | null
+  bairro?: string | null
+  cidade?: string | null
+  uf?: string | null
+  cep?: string | null
+}
+
+/**
+ * Endereço em texto corrido, a partir das partes. É o que a tabela mostra e o
+ * que se cola num contrato:
+ *
+ *   Rua Campos Sales, nº 223, apto 204, bairro Santa Tereza I,
+ *   Barbacena/MG, CEP 36201-082
+ *
+ * Parte vazia é OMITIDA junto com a pontuação dela — sem isso um investidor sem
+ * complemento sairia com ", ," no meio do endereço. Devolve string vazia quando
+ * não há nada, e aí quem exibe decide o que mostrar.
+ */
+export function compilarEndereco(p: PartesEndereco): string {
+  const t = (v: string | null | undefined) => (v ?? '').trim()
+  const partes: string[] = []
+  if (t(p.logradouro)) partes.push(t(p.logradouro))
+  if (t(p.numero)) partes.push(`nº ${t(p.numero)}`)
+  if (t(p.complemento)) partes.push(t(p.complemento))
+  if (t(p.bairro)) partes.push(`bairro ${t(p.bairro)}`)
+  // Cidade e UF andam juntas: "Barbacena/MG". Só a UF, sem cidade, não informa.
+  const cidadeUf = t(p.cidade)
+    ? t(p.uf)
+      ? `${t(p.cidade)}/${t(p.uf)}`
+      : t(p.cidade)
+    : ''
+  if (cidadeUf) partes.push(cidadeUf)
+  if (t(p.cep)) partes.push(`CEP ${formatCepInput(p.cep)}`)
+  return partes.join(', ')
+}
+
 /** Dígitos verificadores de CPF. Pega erro de digitação e de transcrição. */
 export function cpfValido(v: string | null | undefined): boolean {
   const d = onlyDigits(v)

@@ -66,8 +66,10 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import {
+  compilarEndereco,
   cpfCnpjValido,
   formatBRL,
+  formatCepInput,
   formatCNJ,
   formatCpfCnpjInput,
   formatDate,
@@ -1229,14 +1231,21 @@ type CampoInvestidor =
   | 'agencia'
   | 'conta'
   | 'pix'
-  | 'endereco'
+  | 'logradouro'
+  | 'numero'
+  | 'complemento'
+  | 'bairro'
+  | 'cidade'
+  | 'uf'
+  | 'cep'
 
 /**
  * `mascara` normaliza o que se digita, a cada tecla. É onde o formato deixa de
  * ser recomendação e passa a ser garantia: o CPF vira CNPJ sozinho ao passar de
- * 11 dígitos, e agência/conta descartam letra na hora.
+ * 11 dígitos, agência/conta descartam letra, número aceita só dígito e o CEP sai
+ * sempre 00000-000.
  */
-const CAMPOS_INVESTIDOR: {
+const CAMPOS_DOCUMENTO: {
   chave: CampoInvestidor
   rotulo: string
   mascara?: (v: string) => string
@@ -1253,14 +1262,35 @@ const CAMPOS_INVESTIDOR: {
   { chave: 'agencia', rotulo: 'Agência', mascara: limparNumeroConta },
   { chave: 'conta', rotulo: 'Conta', mascara: limparNumeroConta },
   { chave: 'pix', rotulo: 'Pix' },
-  {
-    chave: 'endereco',
-    rotulo: 'Endereço',
-    // Endereço não tem máscara: reformatar texto livre corrompe as variações
-    // legítimas (condomínio, lote, bloco). A dica orienta sem impor.
-    dica: 'Rua X, nº 000, apto 00, bairro Y, Cidade/UF, CEP 00000-000',
-  },
 ]
+
+// Colunas da tabela. Endereço é UMA coluna, em texto corrido compilado das
+// partes — a quebra em campos existe só na janela de edição.
+const COLUNAS_TABELA: { chave: CampoInvestidor | 'endereco'; rotulo: string }[] = [
+  { chave: 'cpf', rotulo: 'CPF / CNPJ' },
+  { chave: 'rg', rotulo: 'RG' },
+  { chave: 'banco', rotulo: 'Banco' },
+  { chave: 'agencia', rotulo: 'Agência' },
+  { chave: 'conta', rotulo: 'Conta' },
+  { chave: 'pix', rotulo: 'Pix' },
+  { chave: 'endereco', rotulo: 'Endereço' },
+]
+
+const VAZIO_INVESTIDOR: Record<CampoInvestidor, string> = {
+  cpf: '',
+  rg: '',
+  banco: '',
+  agencia: '',
+  conta: '',
+  pix: '',
+  logradouro: '',
+  numero: '',
+  complemento: '',
+  bairro: '',
+  cidade: '',
+  uf: '',
+  cep: '',
+}
 
 function DadosPessoais() {
   const processos = processosCrud.useList()
@@ -1272,15 +1302,12 @@ function DadosPessoais() {
   const [editando, setEditando] = useState<{ chave: string; nome: string } | null>(
     null,
   )
-  const [form, setForm] = useState<Record<CampoInvestidor, string>>({
-    cpf: '',
-    rg: '',
-    banco: '',
-    agencia: '',
-    conta: '',
-    pix: '',
-    endereco: '',
-  })
+  const [form, setForm] = useState<Record<CampoInvestidor, string>>(VAZIO_INVESTIDOR)
+
+  // Os 5.571 municípios entram por import DINÂMICO, e só quando alguém abre a
+  // edição: são ~86 kB que não fazem sentido no bundle de quem nunca edita.
+  const [municipios, setMunicipios] = useState<Record<string, string[]> | null>(null)
+  const [ufs, setUfs] = useState<string[]>([])
 
   // Cessionários distintos, em ordem alfabética.
   const investidores = useMemo(() => {
@@ -1296,7 +1323,7 @@ function DadosPessoais() {
       .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
   }, [processos.data])
 
-  function abrirEdicao(chave: string, nome: string) {
+  async function abrirEdicao(chave: string, nome: string) {
     const d = dados.data?.get(chave)
     setForm({
       cpf: d?.cpf ?? '',
@@ -1305,10 +1332,32 @@ function DadosPessoais() {
       agencia: d?.agencia ?? '',
       conta: d?.conta ?? '',
       pix: d?.pix ?? '',
-      endereco: d?.endereco ?? '',
+      logradouro: d?.logradouro ?? '',
+      numero: d?.numero ?? '',
+      complemento: d?.complemento ?? '',
+      bairro: d?.bairro ?? '',
+      cidade: d?.cidade ?? '',
+      uf: d?.uf ?? '',
+      cep: d?.cep ?? '',
     })
     setEditando({ chave, nome })
+    if (!municipios) {
+      const m = await import('@/lib/municipios')
+      setMunicipios(m.MUNICIPIOS_POR_UF)
+      setUfs(m.UFS)
+    }
   }
+
+  // Cidades da UF escolhida. Sem UF a lista fica vazia de propósito: escolher
+  // cidade antes do estado é o que produz "São Paulo" no Rio Grande do Sul.
+  const cidadesDaUf = useMemo(
+    () => (form.uf && municipios ? (municipios[form.uf] ?? []) : []),
+    [form.uf, municipios],
+  )
+  const opcoesCidade = useMemo<OpcaoCombo[]>(
+    () => cidadesDaUf.map((nome, i) => ({ id: i, titulo: nome })),
+    [cidadesDaUf],
+  )
 
   async function handleSalvar() {
     if (!editando) return
@@ -1325,7 +1374,17 @@ function DadosPessoais() {
         agencia: vazioNull(form.agencia),
         conta: vazioNull(form.conta),
         pix: vazioNull(form.pix),
-        endereco: vazioNull(form.endereco),
+        logradouro: vazioNull(form.logradouro),
+        numero: vazioNull(form.numero),
+        complemento: vazioNull(form.complemento),
+        bairro: vazioNull(form.bairro),
+        cidade: vazioNull(form.cidade),
+        uf: vazioNull(form.uf),
+        cep: vazioNull(form.cep),
+        // O texto corrido deixa de ser digitado: passa a ser derivado das partes
+        // e gravado junto, para quem lê a tabela direto no banco também ver o
+        // endereço pronto.
+        endereco: vazioNull(compilarEndereco(form)),
       })
       toast.success('Dados salvos.')
       setEditando(null)
@@ -1359,7 +1418,7 @@ function DadosPessoais() {
             <THead>
               <tr>
                 <TH>Nome do investidor</TH>
-                {CAMPOS_INVESTIDOR.map((c) => (
+                {COLUNAS_TABELA.map((c) => (
                   <TH key={c.chave}>{c.rotulo}</TH>
                 ))}
                 <TH className="w-[1%] whitespace-nowrap text-right">
@@ -1373,13 +1432,21 @@ function DadosPessoais() {
                 return (
                   <TR key={i.chave}>
                     <TD className="font-medium text-slate-800">{i.nome}</TD>
-                    {CAMPOS_INVESTIDOR.map((c) => (
-                      <TD key={c.chave}>
-                        {d?.[c.chave] ?? (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </TD>
-                    ))}
+                    {COLUNAS_TABELA.map((c) => {
+                      // Endereço em texto corrido, compilado das partes. Cai no
+                      // texto legado enquanto um registro não tiver as partes.
+                      const v =
+                        c.chave === 'endereco'
+                          ? d
+                            ? compilarEndereco(d) || d.endereco
+                            : null
+                          : d?.[c.chave as CampoInvestidor]
+                      return (
+                        <TD key={c.chave}>
+                          {v || <span className="text-slate-300">—</span>}
+                        </TD>
+                      )
+                    })}
                     <TD className="w-[1%] whitespace-nowrap text-right">
                       <IconButton
                         label={`Editar dados de ${i.nome}`}
@@ -1421,7 +1488,7 @@ function DadosPessoais() {
               </div>
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              {CAMPOS_INVESTIDOR.filter((c) => c.chave !== 'endereco').map((c) => (
+              {CAMPOS_DOCUMENTO.map((c) => (
                 <Field
                   key={c.chave}
                   label={c.rotulo}
@@ -1446,15 +1513,112 @@ function DadosPessoais() {
                 </Field>
               ))}
             </div>
-            {/* Endereço sozinho na largura toda: é o único que costuma passar de
-                uma linha. */}
-            <Field label="Endereço">
-              <Input
-                placeholder={CAMPOS_INVESTIDOR.find((c) => c.chave === 'endereco')?.dica}
-                value={form.endereco}
-                onChange={(e) => setForm((f) => ({ ...f, endereco: e.target.value }))}
-              />
-            </Field>
+
+            {/* ---------- Endereço em partes ---------- */}
+            <div>
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Endereço
+              </h4>
+              <div className="grid gap-4 sm:grid-cols-6">
+                <div className="sm:col-span-4">
+                  <Field label="Logradouro">
+                    <Input
+                      value={form.logradouro}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, logradouro: e.target.value }))
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-2">
+                  {/* Só dígito: "nº 223-A" tem de ir para o complemento. */}
+                  <Field label="Número">
+                    <Input
+                      inputMode="numeric"
+                      value={form.numero}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, numero: onlyDigits(e.target.value) }))
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-3">
+                  <Field label="Complemento">
+                    <Input
+                      value={form.complemento}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, complemento: e.target.value }))
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-3">
+                  <Field label="Bairro">
+                    <Input
+                      value={form.bairro}
+                      onChange={(e) => setForm((f) => ({ ...f, bairro: e.target.value }))}
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-2">
+                  {/* A UF vem PRIMEIRO porque é ela que define a lista de
+                      cidades. Trocar de UF limpa a cidade: manter "Belo
+                      Horizonte" depois de mudar para SP seria dado inválido. */}
+                  <Field label="UF">
+                    <Select
+                      value={form.uf}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, uf: e.target.value, cidade: '' }))
+                      }
+                    >
+                      <option value="">—</option>
+                      {ufs.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+                <div className="sm:col-span-4">
+                  {/* Combobox e não Select: MG tem 853 municípios, e sem busca a
+                      lista é inutilizável. */}
+                  <Field label="Cidade">
+                    <Combobox
+                      opcoes={opcoesCidade}
+                      valor={
+                        form.cidade ? cidadesDaUf.indexOf(form.cidade) : null
+                      }
+                      onChange={(id) =>
+                        setForm((f) => ({
+                          ...f,
+                          cidade: id === null ? '' : (cidadesDaUf[id as number] ?? ''),
+                        }))
+                      }
+                      placeholder={form.uf ? 'Digite a cidade…' : 'Escolha a UF antes'}
+                      vazio="Nenhuma cidade encontrada nesta UF."
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-2">
+                  <Field label="CEP">
+                    <Input
+                      inputMode="numeric"
+                      placeholder="00000-000"
+                      value={form.cep}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, cep: formatCepInput(e.target.value) }))
+                      }
+                    />
+                  </Field>
+                </div>
+              </div>
+              {/* Prévia do texto corrido: é exatamente o que vai para a tabela e
+                  para o contrato, então quem edita confere antes de salvar. */}
+              <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                {compilarEndereco(form) || 'Endereço em branco'}
+              </div>
+            </div>
           </div>
         )}
       </Modal>

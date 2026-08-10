@@ -84,9 +84,18 @@ export interface InvestidorDados {
   agencia: string | null
   conta: string | null
   pix: string | null
+  /** Texto corrido legado; a exibição prefere as partes abaixo. */
   endereco: string | null
+  logradouro: string | null
+  numero: string | null
+  complemento: string | null
+  bairro: string | null
+  cidade: string | null
+  uf: string | null
+  cep: string | null
   atualizado_em: string
 }
+
 
 /**
  * Dados cadastrais dos investidores, indexados pelo NOME NORMALIZADO. A lista de
@@ -97,10 +106,13 @@ export function useInvestidorDados() {
   return useQuery({
     queryKey: ['investidor_dados'],
     queryFn: async () => {
+      // Lista de colunas em literal, e não numa constante: o supabase-js infere
+      // o tipo do retorno lendo a string do select, e uma const widened para
+      // `string` derruba a inferência.
       const { data } = await supabase
         .from('investidor_dados')
         .select(
-          'nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, atualizado_em',
+          'nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
         )
       const m = new Map<string, InvestidorDados>()
       for (const r of (data ?? []) as InvestidorDados[]) m.set(r.nome_chave, r)
