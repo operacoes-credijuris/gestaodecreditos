@@ -9,6 +9,7 @@ import {
   Hash,
   Sparkles,
   RefreshCw,
+  Download,
 } from 'lucide-react'
 import {
   processosCrud,
@@ -16,6 +17,7 @@ import {
   useUltimaMovimentacao,
 } from '@/lib/queries'
 import { invokeFunction } from '@/lib/functions'
+import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
 import {
   getLabel,
   INDICE_ATUALIZACAO,
@@ -164,6 +166,20 @@ const COR_GRUPO = {
 
 // Caixa alta desligada nos títulos dos grupos (o <thead> aplica uppercase).
 const GRUPO = 'text-[13px] font-bold normal-case tracking-normal'
+
+/**
+ * Altura dos botões da barra do investidor.
+ *
+ * As alturas do Button são em rem (h-10) e o html está em 12px, então h-10 vale
+ * 30px. O Input (baseControl em ui/Field) e a caixa do mês usam `px-3 py-2` com
+ * text-sm, fechando 33px (6 + 19 de line-height + 6 + 2 de borda). Os dois
+ * nunca casam por coincidência, e o botão ficava 3px mais baixo.
+ *
+ * Solução: soltar a altura fixa e repetir aqui o `py-2` do Input. Reproduzir a
+ * receita, em vez de fixar 33px na mão, mantém os três alinhados se os tokens
+ * de tipografia mudarem.
+ */
+const ALTURA_CONTROLE = 'h-auto py-2'
 
 // Cor do TEXTO da coluna Status. Sem selo/pílula: o nome da cor escrito na
 // própria cor já é a informação. Tons alinhados com o semáforo da Expectativa
@@ -355,6 +371,31 @@ function Individual() {
         ? 'soma dos créditos deste investidor'
         : `soma de ${n} de ${carteira.length} créditos — os demais sem valor cadastrado`
 
+  // Download do xlsx com o conteúdo da tela. O ExcelJS entra por import
+  // dinâmico dentro de exportarCarteiraXlsx: quem clica é que paga o pacote.
+  // Declarado antes do primeiro return condicional, senão o hook desapareceria
+  // do render enquanto a lista estivesse carregando.
+  const [baixando, setBaixando] = useState(false)
+  async function baixarXlsx() {
+    if (!investidor) return
+    setBaixando(true)
+    try {
+      await exportarCarteiraXlsx({
+        investidor,
+        mesRef,
+        carteira,
+        resumos: resumos.data,
+        ultimaMov: ultimaMov.data,
+        capitalTotal: totais.capital.total,
+        jaRecebidoTotal: totais.recebido.total,
+      })
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBaixando(false)
+    }
+  }
+
   if (processos.isLoading) return <Loading label="Carregando créditos…" />
   if (processos.isError) {
     return (
@@ -396,17 +437,28 @@ function Individual() {
             {mesRef}
           </div>
         </div>
-        {/* Regera o estágio e as providências de TODOS os créditos, ignorando a
-            checagem de novidade que a rodada semanal faz. sm:ml-auto joga para
-            a direita da mesma linha. */}
-        <div className="sm:ml-auto">
+        {/* sm:ml-auto joga a dupla de ações para a direita da mesma linha. */}
+        <div className="flex gap-2 sm:ml-auto">
+          {/* Regera o estágio e as providências de TODOS os créditos, ignorando
+              a checagem de novidade que a rodada semanal faz. */}
           <Button
             variant="outline"
+            className={ALTURA_CONTROLE}
             icon={<Sparkles className="h-4 w-4" />}
             loading={gerar.isPending && !gerar.variables?.processo_id}
             onClick={() => gerar.mutate({ forcar: true })}
           >
             Gerar resumos
+          </Button>
+          <Button
+            variant="outline"
+            className={ALTURA_CONTROLE}
+            icon={<Download className="h-4 w-4" />}
+            loading={baixando}
+            disabled={!investidor || carteira.length === 0}
+            onClick={baixarXlsx}
+          >
+            Baixar Excel
           </Button>
         </div>
       </div>

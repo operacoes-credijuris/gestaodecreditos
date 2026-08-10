@@ -12,11 +12,12 @@
     "check:functions": "deno check --node-modules-dir=none supabase/functions"
   },
   "dependencies": {
-    "pdfjs-dist": "3.11.174",
     "@supabase/supabase-js": "^2.45.4",
     "@tanstack/react-query": "^5.56.2",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.441.0",
+    "pdfjs-dist": "3.11.174",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
