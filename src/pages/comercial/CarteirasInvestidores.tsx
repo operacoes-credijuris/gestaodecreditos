@@ -18,6 +18,7 @@ import {
   useParametrosAtualizacao,
   useUltimaMovimentacao,
 } from '@/lib/queries'
+import type { Processo } from '@/lib/types'
 import {
   aReceberEstimado,
   ganhoProjetado,
@@ -1000,6 +1001,10 @@ function Individual() {
 // valores financeiros dependem de campos que o cadastro ainda não tem.
 function Consolidado() {
   const processos = processosCrud.useList()
+  // Os mesmos parâmetros da aba individual: sem eles o valor projetado não
+  // existe, e A receber, Retorno e TIR ficam vazios.
+  const parametros = useParametrosAtualizacao()
+  const hoje = useMemo(() => hojeISO(), [])
   const [mes, setMes] = useState('todos')
 
   // Meses presentes nos créditos, do mais recente ao mais antigo.
@@ -1012,25 +1017,82 @@ function Consolidado() {
     return [...set].sort().reverse()
   }, [processos.data])
 
-  const linhas = useMemo(() => {
+  /**
+   * Uma linha por investidor, POR SAFRA: o recorte é a data de AQUISIÇÃO, então
+   * a linha descreve os créditos que aquele investidor comprou no mês escolhido,
+   * e as colunas medem como essa safra se comportou ATÉ HOJE.
+   *
+   * Todas as métricas saem das mesmas funções da aba individual (lib/projecao),
+   * o que é o que garante que o consolidado feche com a soma das carteiras.
+   */
+  const { linhas, total } = useMemo(() => {
     const noPeriodo = (processos.data ?? []).filter((p) =>
       mes === 'todos' ? true : (p.data_aquisicao ?? '').slice(0, 7) === mes,
     )
-    const porInvestidor = new Map<string, { nome: string; operacoes: number }>()
+    const porInvestidor = new Map<string, { nome: string; creditos: Processo[] }>()
     for (const p of noPeriodo) {
       const nome = (p.cessionario ?? '').trim()
       if (!nome) continue
       const chave = normNome(nome)
       const atual = porInvestidor.get(chave)
-      if (atual) atual.operacoes += 1
-      else porInvestidor.set(chave, { nome, operacoes: 1 })
+      if (atual) atual.creditos.push(p)
+      else porInvestidor.set(chave, { nome, creditos: [p] })
     }
-    return [...porInvestidor.values()].sort((a, b) =>
-      a.nome.localeCompare(b.nome, 'pt-BR'),
-    )
-  }, [processos.data, mes])
 
-  const totalOperacoes = linhas.reduce((s, l) => s + l.operacoes, 0)
+    // Soma que devolve null quando NENHUM crédito tem o valor: zero afirmaria
+    // que não há capital, quando o que falta é cadastro.
+    const soma = (cs: Processo[], f: (p: Processo) => number | null | undefined) => {
+      let t = 0
+      let n = 0
+      for (const p of cs) {
+        const v = f(p)
+        if (typeof v === 'number' && !Number.isNaN(v)) {
+          t += v
+          n++
+        }
+      }
+      return n > 0 ? Math.round(t * 100) / 100 : null
+    }
+
+    const metricas = (creditos: Processo[]) => {
+      const itens = creditos.map((p) => {
+        const proj = valorProjetado(p, parametros.data, hoje)
+        return { p, proj }
+      })
+      return {
+        capital: soma(creditos, (p) => p.capital_investido),
+        aReceber: aReceberEstimado(
+          itens.map(({ p, proj }) => ({
+            proj,
+            dataLiquidacao: p.data_liquidacao,
+            valorComplementar: p.valor_estimado_complementar,
+          })),
+        ).total,
+        jaRecebido: soma(creditos, (p) => p.ja_recebido),
+        retorno: retornoProjetadoCarteira(
+          itens.map(({ p, proj }) => ({
+            ganho: ganhoProjetado(proj, p.capital_investido, p.valor_estimado_complementar),
+            capital: p.capital_investido,
+          })),
+        ).valor,
+        tirAa: tirMediaPonderada(
+          itens.map(({ p, proj }) => ({
+            tirAnual: tir(p.capital_investido, p.data_aquisicao, proj).anual,
+            capital: p.capital_investido,
+          })),
+        ).valor,
+        operacoes: creditos.length,
+      }
+    }
+
+    const linhas = [...porInvestidor.values()]
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+      .map((i) => ({ nome: i.nome, ...metricas(i.creditos) }))
+
+    // O total recalcula sobre TODOS os créditos do período, e não soma as linhas:
+    // Retorno e TIR são taxas, e somá-las não produz número com significado.
+    return { linhas, total: metricas(noPeriodo) }
+  }, [processos.data, mes, parametros.data, hoje])
 
   if (processos.isLoading) return <Loading label="Carregando créditos…" />
   if (processos.isError) {
@@ -1085,11 +1147,23 @@ function Consolidado() {
                 {linhas.map((l) => (
                   <TR key={l.nome}>
                     <TD className="font-medium text-slate-800">{l.nome}</TD>
-                    <TD />
-                    <TD />
-                    <TD />
-                    <TD />
-                    <TD />
+                    <TD className="text-right tabular-nums">{formatBRL(l.capital)}</TD>
+                    <TD className="text-right tabular-nums">{formatBRL(l.aReceber)}</TD>
+                    <TD className="text-right tabular-nums">
+                      {formatBRL(l.jaRecebido)}
+                    </TD>
+                    <TD className="text-right tabular-nums">
+                      {l.retorno === null ? (
+                        '—'
+                      ) : (
+                        <span className={l.retorno < 0 ? 'font-medium text-red-600' : undefined}>
+                          {formatPercent(l.retorno)}
+                        </span>
+                      )}
+                    </TD>
+                    <TD className="text-right tabular-nums">
+                      {formatPercent(l.tirAa)}
+                    </TD>
                     <TD className="text-right tabular-nums text-slate-700">
                       {l.operacoes}
                     </TD>
@@ -1104,13 +1178,23 @@ function Consolidado() {
                     o mesmo peso de um de R$ 500 mil. */}
                 <TR className="bg-slate-50 font-semibold">
                   <TD className="text-slate-800">Total da carteira</TD>
-                  <TD />
-                  <TD />
-                  <TD />
-                  <TD />
-                  <TD />
                   <TD className="text-right tabular-nums text-slate-800">
-                    {totalOperacoes}
+                    {formatBRL(total.capital)}
+                  </TD>
+                  <TD className="text-right tabular-nums text-slate-800">
+                    {formatBRL(total.aReceber)}
+                  </TD>
+                  <TD className="text-right tabular-nums text-slate-800">
+                    {formatBRL(total.jaRecebido)}
+                  </TD>
+                  <TD className="text-right tabular-nums text-slate-800">
+                    {total.retorno === null ? '—' : formatPercent(total.retorno)}
+                  </TD>
+                  <TD className="text-right tabular-nums text-slate-800">
+                    {formatPercent(total.tirAa)}
+                  </TD>
+                  <TD className="text-right tabular-nums text-slate-800">
+                    {total.operacoes}
                   </TD>
                 </TR>
               </TBody>

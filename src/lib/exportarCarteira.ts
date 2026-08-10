@@ -269,10 +269,6 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     ['SELIC vigente (% a.a.)', pr?.selic_aa ?? SEM, PCT],
     ['IPCA acumulado 12m (% a.a.)', pr?.ipca_12m_aa ?? SEM, PCT],
     ['IPCA + 2% a.a.', ipcaMais2(pr?.ipca_12m_aa) ?? SEM, PCT],
-    // A competência é a data de HOJE, a da geração deste arquivo. Não vem do
-    // banco de propósito: lá o campo é registro do último salvamento, e usá-lo
-    // datar um relatório gerado hoje com a data de outro dia.
-    ['Data de referência do relatório', paraData(hoje), DATA],
   ])
 
   // ---------- Cabeçalho de dois níveis, como na tela ----------
@@ -382,11 +378,8 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     }
   })
 
-  // Cabeçalho sempre visível e filtro na tabela: com 25 colunas e dezenas de
-  // linhas, rolar sem isso faz perder de vista qual coluna se está lendo. Só a
-  // LINHA congela — a primeira coluna fica livre, por decisão de produto.
-  ws.views = [{ state: 'frozen', ySplit: LINHA_COLUNA }]
-
+  // Sem painel congelado, por decisão de produto: o arquivo é lido e entregue a
+  // um agente, não navegado como planilha de trabalho. O autofiltro fica.
   // Planilha protegida contra edição: este arquivo é RETRATO do que a plataforma
   // calculou, e editar aqui criaria um número que não existe no sistema. Não há
   // fórmula em célula nenhuma, só valores.
