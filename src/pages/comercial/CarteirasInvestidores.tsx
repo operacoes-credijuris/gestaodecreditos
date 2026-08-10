@@ -66,12 +66,15 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import {
+  cpfCnpjValido,
   formatBRL,
   formatCNJ,
+  formatCpfCnpjInput,
   formatDate,
   formatDateTime,
   formatPercent,
   hojeISO,
+  limparNumeroConta,
   mesesDepois,
   normalizarNome,
   onlyDigits,
@@ -1219,17 +1222,45 @@ function Consolidado() {
 //
 // Os DADOS vêm de public.investidor_dados, indexados pelo nome normalizado, e a
 // linha nasce no primeiro salvamento.
-const CAMPOS_INVESTIDOR = [
-  { chave: 'cpf', rotulo: 'CPF' },
+type CampoInvestidor =
+  | 'cpf'
+  | 'rg'
+  | 'banco'
+  | 'agencia'
+  | 'conta'
+  | 'pix'
+  | 'endereco'
+
+/**
+ * `mascara` normaliza o que se digita, a cada tecla. É onde o formato deixa de
+ * ser recomendação e passa a ser garantia: o CPF vira CNPJ sozinho ao passar de
+ * 11 dígitos, e agência/conta descartam letra na hora.
+ */
+const CAMPOS_INVESTIDOR: {
+  chave: CampoInvestidor
+  rotulo: string
+  mascara?: (v: string) => string
+  dica?: string
+}[] = [
+  {
+    chave: 'cpf',
+    rotulo: 'CPF / CNPJ',
+    mascara: formatCpfCnpjInput,
+    dica: '000.000.000-00',
+  },
   { chave: 'rg', rotulo: 'RG' },
   { chave: 'banco', rotulo: 'Banco' },
-  { chave: 'agencia', rotulo: 'Agência' },
-  { chave: 'conta', rotulo: 'Conta' },
+  { chave: 'agencia', rotulo: 'Agência', mascara: limparNumeroConta },
+  { chave: 'conta', rotulo: 'Conta', mascara: limparNumeroConta },
   { chave: 'pix', rotulo: 'Pix' },
-  { chave: 'endereco', rotulo: 'Endereço' },
-] as const
-
-type CampoInvestidor = (typeof CAMPOS_INVESTIDOR)[number]['chave']
+  {
+    chave: 'endereco',
+    rotulo: 'Endereço',
+    // Endereço não tem máscara: reformatar texto livre corrompe as variações
+    // legítimas (condomínio, lote, bloco). A dica orienta sem impor.
+    dica: 'Rua X, nº 000, apto 00, bairro Y, Cidade/UF, CEP 00000-000',
+  },
+]
 
 function DadosPessoais() {
   const processos = processosCrud.useList()
@@ -1391,11 +1422,25 @@ function DadosPessoais() {
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               {CAMPOS_INVESTIDOR.filter((c) => c.chave !== 'endereco').map((c) => (
-                <Field key={c.chave} label={c.rotulo}>
+                <Field
+                  key={c.chave}
+                  label={c.rotulo}
+                  // Dígito verificador errado quase sempre é erro de digitação, e
+                  // num campo desses o erro vira dinheiro no lugar errado.
+                  error={
+                    c.chave === 'cpf' && !cpfCnpjValido(form.cpf)
+                      ? 'Dígito verificador não confere'
+                      : undefined
+                  }
+                >
                   <Input
+                    placeholder={c.dica}
                     value={form[c.chave]}
                     onChange={(e) =>
-                      setForm((f) => ({ ...f, [c.chave]: e.target.value }))
+                      setForm((f) => ({
+                        ...f,
+                        [c.chave]: c.mascara ? c.mascara(e.target.value) : e.target.value,
+                      }))
                     }
                   />
                 </Field>
@@ -1405,6 +1450,7 @@ function DadosPessoais() {
                 uma linha. */}
             <Field label="Endereço">
               <Input
+                placeholder={CAMPOS_INVESTIDOR.find((c) => c.chave === 'endereco')?.dica}
                 value={form.endereco}
                 onChange={(e) => setForm((f) => ({ ...f, endereco: e.target.value }))}
               />

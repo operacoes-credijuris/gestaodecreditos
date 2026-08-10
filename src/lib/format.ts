@@ -66,6 +66,75 @@ export function formatDate(value: string | null | undefined): string {
 }
 
 /**
+ * Máscara de CPF/CNPJ que TROCA DE FORMATO sozinha no 12º dígito.
+ *
+ *   até 11 dígitos  000.000.000-00        (CPF)
+ *   12 ou mais      00.000.000/0000-00    (CNPJ)
+ *
+ * O 12º dígito digitado é o que vira CPF em CNPJ, e o teto é 14. Como só entram
+ * dígitos, não existe estado com formato inválido.
+ */
+export function formatCpfCnpjInput(v: string | null | undefined): string {
+  const d = onlyDigits(v).slice(0, 14)
+  if (d.length <= 11) {
+    let s = d.slice(0, 3)
+    if (d.length > 3) s += '.' + d.slice(3, 6)
+    if (d.length > 6) s += '.' + d.slice(6, 9)
+    if (d.length > 9) s += '-' + d.slice(9, 11)
+    return s
+  }
+  let s = d.slice(0, 2) + '.' + d.slice(2, 5) + '.' + d.slice(5, 8) + '/' + d.slice(8, 12)
+  if (d.length > 12) s += '-' + d.slice(12, 14)
+  return s
+}
+
+/**
+ * Agência e conta aceitam só dígitos e os separadores que aparecem de verdade
+ * nesses números (ponto, hífen, barra). Letra é descartada na digitação: agência
+ * e conta não têm letra, e uma que escape vira erro de transferência.
+ */
+export function limparNumeroConta(v: string | null | undefined): string {
+  return (v ?? '').replace(/[^\d.\-/]/g, '')
+}
+
+/** Dígitos verificadores de CPF. Pega erro de digitação e de transcrição. */
+export function cpfValido(v: string | null | undefined): boolean {
+  const d = onlyDigits(v)
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false
+  const dv = (ate: number) => {
+    let soma = 0
+    for (let i = 0; i < ate; i++) soma += Number(d[i]) * (ate + 1 - i)
+    const r = (soma * 10) % 11
+    return r === 10 ? 0 : r
+  }
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10])
+}
+
+/** Dígitos verificadores de CNPJ. */
+export function cnpjValido(v: string | null | undefined): boolean {
+  const d = onlyDigits(v)
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false
+  const dv = (ate: number) => {
+    let peso = ate - 7
+    let soma = 0
+    for (let i = 0; i < ate; i++) {
+      soma += Number(d[i]) * peso
+      peso = peso === 2 ? 9 : peso - 1
+    }
+    const r = soma % 11
+    return r < 2 ? 0 : 11 - r
+  }
+  return dv(12) === Number(d[12]) && dv(13) === Number(d[13])
+}
+
+/** true quando é CPF válido ou CNPJ válido; vazio conta como válido. */
+export function cpfCnpjValido(v: string | null | undefined): boolean {
+  const d = onlyDigits(v)
+  if (!d) return true
+  return d.length <= 11 ? cpfValido(d) : cnpjValido(d)
+}
+
+/**
  * Nome normalizado: sem acento, sem espaço duplicado, minúsculo. Serve para
  * agrupar o mesmo investidor escrito de formas diferentes ("José da Silva" e
  * "jose da  silva" caem no mesmo lugar).
