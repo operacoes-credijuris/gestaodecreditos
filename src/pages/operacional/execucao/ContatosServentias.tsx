@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/Table'
 import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/components/ui/Toast'
-import { onlyDigits, vazioNull } from '@/lib/format'
+import { normalizarBusca, onlyDigits, vazioNull } from '@/lib/format'
 
 // Identificador do órgão julgador = "comarca / vara" (igual à aba Créditos).
 function buildOrgao(comarca?: string | null, vara?: string | null): string {
@@ -33,16 +33,50 @@ function buildOrgao(comarca?: string | null, vara?: string | null): string {
 }
 
 // Exibição do órgão: "[vara] de [comarca]" (ex.: "11ª Vara Federal de Belo
-// Horizonte"). Órgãos auxiliares (texto livre) ficam como digitados.
-function formatOrgaoLabel(orgao: string): string {
+// Horizonte").
+//
+// O `tipo` não é enfeite: para julgador, "comarca / vara" é formato que a própria
+// plataforma monta, e inverter as partes produz o nome que se lê em petição. Para
+// AUXILIAR o campo é texto livre, e a inversão estragava o que foi digitado —
+// "Contadoria / Judicial" virava "Judicial de Contadoria". Sem o tipo a função
+// não tinha como distinguir, e invertia os dois.
+function formatOrgaoLabel(orgao: string, tipo?: OrgaoRow['tipo']): string {
+  if (tipo === 'auxiliar') return orgao
   const parts = orgao.split(' / ')
   if (parts.length === 2) return `${parts[1]} de ${parts[0]}`
   return orgao
 }
 
+/**
+ * Dígitos de um telefone brasileiro em forma canônica: DDD + número, sem código
+ * de país e sem zero de operadora.
+ *
+ * POR QUE PRECISA EXISTIR: quem pega o contato da vara copia de uma conversa do
+ * WhatsApp ou da agenda do celular, e o que vem colado é "+55 31 98888-7777". A
+ * máscara antiga fazia só onlyDigits().slice(0, 11), ou seja, cortava o EXCESSO
+ * PELA DIREITA — e nesse caso o excesso está à esquerda. Sobrava "55319888877",
+ * exibido como "(55) 31988-8877": onze dígitos, DDD 55 que existe de verdade
+ * (Pelotas), máscara sem defeito, validação aprovada, banco gravado. Ninguém
+ * tinha como perceber, e o link do WhatsApp na tabela apontava para um número de
+ * terceiro. Cortar pela direita só serve quando a sobra está na direita.
+ */
+function digitosTelefoneBR(v?: string | null): string {
+  let d = onlyDigits(v)
+  // ORDEM IMPORTA: o zero sai antes do código do país. "031 3222-1234" tem
+  // exatamente 11 dígitos, então uma guarda de "acima de 11" não pegaria o zero
+  // e o número viraria "(03) 13222-1234" — foi o que o teste mostrou. Número
+  // brasileiro nunca começa com zero, e abaixo de 11 dígitos é digitação em
+  // curso, que não se deve mexer.
+  while (d.startsWith('0') && d.length > 10) d = d.slice(1)
+  // Código do país colado junto (12 ou 13 dígitos começando em 55). Só corta
+  // acima de 11 dígitos, então celular legítimo de DDD 55 passa intacto.
+  if (d.length > 11 && d.startsWith('55')) d = d.slice(2)
+  return d.slice(0, 11)
+}
+
 // Máscara de telefone brasileiro: (DD) XXXXX-XXXX (9 díg.) ou (DD) XXXX-XXXX (8 díg.).
 function formatTelefone(v: string): string {
-  const d = onlyDigits(v).slice(0, 11)
+  const d = digitosTelefoneBR(v)
   if (d.length === 0) return ''
   if (d.length <= 2) return `(${d}`
   if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`
@@ -51,12 +85,15 @@ function formatTelefone(v: string): string {
 }
 
 function telefoneIncompleto(v?: string | null): boolean {
-  const d = onlyDigits(v)
+  const d = digitosTelefoneBR(v)
   return d.length > 0 && d.length < 10
 }
 
+// Normaliza também aqui, e não só na máscara: os contatos gravados antes desta
+// correção continuam no banco com o código do país embutido, e sem isto o link
+// sairia com 55 duplicado ("wa.me/5555319888877").
 function waLink(v: string): string {
-  return `https://wa.me/55${onlyDigits(v)}`
+  return `https://wa.me/55${digitosTelefoneBR(v)}`
 }
 
 interface OrgaoRow {
@@ -272,8 +309,16 @@ export default function ContatosServentias() {
       })
     }
 
+    // `numeric` porque vara é numerada: sem ele a comparação é caractere por
+    // caractere e dígito vem antes de letra, então a 11ª Vara aparecia antes da
+    // 1ª e a 21ª antes da 2ª — a lista parecia fora de ordem justamente onde o
+    // usuário procura por número.
     return l.sort((a, b) =>
-      formatOrgaoLabel(a.orgao).localeCompare(formatOrgaoLabel(b.orgao), 'pt-BR'),
+      formatOrgaoLabel(a.orgao, a.tipo).localeCompare(
+        formatOrgaoLabel(b.orgao, b.tipo),
+        'pt-BR',
+        { numeric: true },
+      ),
     )
   }, [contatos.data, processos.data, requerimentos.data, apensos.data])
 
@@ -294,10 +339,17 @@ export default function ContatosServentias() {
       l = l.filter((r) => r.tribunal.trim() === filtroTribunal)
     }
     if (busca.trim()) {
-      const q = busca.toLowerCase()
-      l = l.filter((r) =>
-        [
-          formatOrgaoLabel(r.orgao),
+      // Duas comparações, porque são dois jeitos de procurar a mesma coisa:
+      //   texto  sem acento ("goiania" acha "Goiânia" — antes não achava)
+      //   número só dígito ("3132221234" acha "(31) 3222-1234", que é como o
+      //          telefone está gravado; o placeholder promete busca por
+      //          telefone e ela só funcionava se a pontuação fosse digitada
+      //          igual)
+      const q = normalizarBusca(busca)
+      const qd = onlyDigits(busca)
+      l = l.filter((r) => {
+        const textos = [
+          formatOrgaoLabel(r.orgao, r.tipo),
           r.tribunal,
           r.contato?.serventia_telefone,
           r.contato?.serventia_whatsapp,
@@ -305,10 +357,20 @@ export default function ContatosServentias() {
           r.contato?.gabinete_telefone,
           r.contato?.gabinete_whatsapp,
           r.contato?.gabinete_email,
-        ]
-          .filter(Boolean)
-          .some((v) => v!.toLowerCase().includes(q)),
-      )
+        ].filter(Boolean) as string[]
+        if (textos.some((v) => normalizarBusca(v).includes(q))) return true
+        // A partir de 3 dígitos, para "31" não trazer meia lista.
+        if (qd.length >= 3) {
+          const tels = [
+            r.contato?.serventia_telefone,
+            r.contato?.serventia_whatsapp,
+            r.contato?.gabinete_telefone,
+            r.contato?.gabinete_whatsapp,
+          ].filter(Boolean) as string[]
+          if (tels.some((t) => onlyDigits(t).includes(qd))) return true
+        }
+        return false
+      })
     }
     return l
   }, [todasLinhas, filtroTribunal, busca])
@@ -462,18 +524,46 @@ export default function ContatosServentias() {
             }}
           />
         ) : linhas.length === 0 ? (
-          <EmptyState
-            title="Nenhum órgão"
-            description="Cadastre créditos/requerimentos ou um contato auxiliar."
-            action={
-              <Button
-                icon={<Plus className="h-4 w-4" />}
-                onClick={() => abrirForm({ ...AUXILIAR_VAZIO })}
-              >
-                Novo contato
-              </Button>
-            }
-          />
+          // Lista vazia POR CAUSA da busca/filtro é outra situação: convidar a
+          // cadastrar ali sugere que não existe nada, quando o que há é um
+          // recorte ativo escondendo o resto. A saída oferecida tem que ser
+          // limpar o recorte, não criar registro.
+          todasLinhas.length > 0 ? (
+            <EmptyState
+              title="Nada encontrado"
+              description={
+                busca.trim()
+                  ? `Nenhum órgão corresponde a "${busca.trim()}"${
+                      filtroTribunal !== 'todos' ? ` no tribunal ${filtroTribunal}` : ''
+                    }.`
+                  : `Nenhum órgão no tribunal ${filtroTribunal}.`
+              }
+              action={
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setBusca('')
+                    setFiltroTribunal('todos')
+                  }}
+                >
+                  Limpar busca e filtro
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              title="Nenhum órgão"
+              description="Cadastre créditos/requerimentos ou um contato auxiliar."
+              action={
+                <Button
+                  icon={<Plus className="h-4 w-4" />}
+                  onClick={() => abrirForm({ ...AUXILIAR_VAZIO })}
+                >
+                  Novo contato
+                </Button>
+              }
+            />
+          )
         ) : (
           <Table dense>
             <THead>
@@ -502,7 +592,9 @@ export default function ContatosServentias() {
                           )}
                         />
                         {/* Nome do órgão é longo: quebra em várias linhas, sem truncar. */}
-                        <div className="min-w-0">{formatOrgaoLabel(row.orgao)}</div>
+                        <div className="min-w-0">
+                          {formatOrgaoLabel(row.orgao, row.tipo)}
+                        </div>
                       </div>
                     </TD>
                     <TD className="text-slate-600">{row.tribunal || '—'}</TD>

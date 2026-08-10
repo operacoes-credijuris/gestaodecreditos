@@ -431,7 +431,14 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
               {listaTar.length === 0
                 ? sync.isPending
                   ? 'Buscando as tarefas deste processo no ADVBOX…'
-                  : 'Nenhuma tarefa registrada no ADVBOX para este processo.'
+                  : sync.isError
+                    ? // Afirmar "nenhuma tarefa registrada no ADVBOX" é afirmar
+                      // algo sobre o ADVBOX, e a consulta que provaria isso
+                      // falhou. Dito assim, o advogado concluía que o processo
+                      // não tem prazo agendado — falso negativo sobre prazo, o
+                      // pior tipo de erro nesta tela.
+                      'Não foi possível consultar o ADVBOX agora, e não há tarefa em cache para este processo.'
+                    : 'Nenhuma tarefa registrada no ADVBOX para este processo.'
                 : !mostrar.concluidas && !mostrar.abertas
                   ? 'Nenhuma situação selecionada — clique em "concluídas" ou "em aberto".'
                   : mostrar.concluidas
@@ -451,8 +458,10 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
               />
             </>
           )}
-          {/* Falha de sincronização não esconde o cache: avisa e segue. */}
-          {sync.isError && listaTar.length > 0 && (
+          {/* Falha de sincronização não esconde o cache: avisa e segue. O aviso
+              vale também com cache vazio — era justamente aí que ele mais
+              importava, e a guarda de listaTar.length o calava. */}
+          {sync.isError && (
             <p className="mt-3 text-xs text-amber-700">
               Não foi possível atualizar do ADVBOX agora: {(sync.error as Error).message}
             </p>

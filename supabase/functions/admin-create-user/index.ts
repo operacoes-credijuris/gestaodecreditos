@@ -27,7 +27,7 @@ Deno.serve(async (req: Request) => {
 
     const userId = created.user?.id
     // Garante o profile com nome/role corretos (o trigger cria como 'usuario').
-    await svc.from('profiles').upsert(
+    const { error: perfilErr } = await svc.from('profiles').upsert(
       {
         id: userId,
         email,
@@ -37,6 +37,23 @@ Deno.serve(async (req: Request) => {
       },
       { onConflict: 'id' },
     )
+    // Ignorar este erro era pior do que parece: a conta JÁ existe no Auth, e o
+    // trigger cria o profile como 'usuario'. Então "criar administrador" podia
+    // devolver ok:true e produzir um usuário comum, sem ninguém notar até a
+    // pessoa reclamar que não vê Configurações. O usuário criado não é revertido
+    // de propósito — apagar conta recém-criada por falha de espelho arrisca
+    // perder a senha já definida; melhor dizer o que ficou pendente.
+    if (perfilErr) {
+      return jsonResponse(
+        {
+          error:
+            `Usuário criado, mas o cadastro (nome e perfil) não foi gravado: ${perfilErr.message}. ` +
+            'Edite o usuário para completar.',
+          user_id: userId,
+        },
+        500,
+      )
+    }
 
     return jsonResponse({ ok: true, user_id: userId })
   } catch (err) {

@@ -180,6 +180,24 @@ export function cpfCnpjValido(v: string | null | undefined): boolean {
 }
 
 /**
+ * Texto pronto para comparação de BUSCA: sem acento, minúsculo, sem espaço
+ * sobrando. Quem digita numa caixa de busca não digita acento — procura "goiania"
+ * e espera achar "Goiânia". Sem isto, a busca só encontra o que já foi digitado
+ * com o acento certo, e a lista volta vazia com o item bem ali na tela.
+ *
+ * Separada de normalizarNome de propósito: aquela é CHAVE PRIMÁRIA no banco e
+ * não pode mudar de comportamento; esta é só de leitura e pode evoluir.
+ */
+export function normalizarBusca(s: string | null | undefined): string {
+  return (s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+/**
  * Nome normalizado: sem acento, sem espaço duplicado, minúsculo. Serve para
  * agrupar o mesmo investidor escrito de formas diferentes ("José da Silva" e
  * "jose da  silva" caem no mesmo lugar).

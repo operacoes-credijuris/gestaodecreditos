@@ -29,9 +29,16 @@ export async function getAdvboxCtx(): Promise<AdvboxCtx> {
     .select('config')
     .eq('servico', 'advbox')
     .maybeSingle()
+  // `?? ` não pega string VAZIA, e vazio é exatamente o que a tela de
+  // Configurações gravava ao salvar com o campo de URL em branco: o fallback não
+  // entrava, `base` virava '' e toda chamada saía como caminho relativo
+  // ("/lawsuits"), derrubando a integração inteira até alguém redigitar a URL.
+  // Por isso a checagem é de conteúdo, não de nulidade.
+  const configurada = ((integ?.config ?? {}) as { base_url?: string }).base_url
   const base =
-    ((integ?.config ?? {}) as { base_url?: string }).base_url ??
-    'https://app.advbox.com.br/api/v1'
+    configurada && configurada.trim()
+      ? configurada.trim().replace(/\/+$/, '')
+      : 'https://app.advbox.com.br/api/v1'
   return {
     base,
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },

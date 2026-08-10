@@ -59,6 +59,51 @@ export default function Configuracoes() {
   )
 }
 
+/**
+ * Falha de LEITURA não pode se disfarçar de "não configurado". Sem este aviso, o
+ * selo do cartão dizia "Sem token" quando o que houve foi erro ao consultar a
+ * tabela — e o administrador ia recadastrar token que já estava lá, ou pior,
+ * concluir que a integração caiu quando o problema era outro.
+ */
+function AvisoLeitura({ error }: { error: unknown }) {
+  if (!error) return null
+  return (
+    <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      Não foi possível ler o estado atual desta integração:{' '}
+      {(error as Error).message}
+    </p>
+  )
+}
+
+/** Selo dos cartões de integração, com o estado "não deu para saber". */
+function SeloIntegracao({
+  error,
+  configurado,
+  rotuloOk,
+  rotuloSem,
+}: {
+  error: unknown
+  configurado: boolean
+  rotuloOk: string
+  rotuloSem: string
+}) {
+  if (error)
+    return (
+      <Badge tone="amber">
+        <XCircle className="mr-1 inline h-3.5 w-3.5" /> Estado não carregado
+      </Badge>
+    )
+  return configurado ? (
+    <Badge tone="green">
+      <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> {rotuloOk}
+    </Badge>
+  ) : (
+    <Badge tone="gray">
+      <XCircle className="mr-1 inline h-3.5 w-3.5" /> {rotuloSem}
+    </Badge>
+  )
+}
+
 function useIntegracao(servico: ServicoIntegracao) {
   return useQuery({
     queryKey: ['integracoes', servico],
@@ -78,7 +123,7 @@ function useIntegracao(servico: ServicoIntegracao) {
 // Só a chave, sem campo de configuração: ao contrário do ADVBOX (URL base) e do
 // Kommo (subdomínio), a API da Anthropic tem endereço único.
 function AnthropicConfig() {
-  const { data, isLoading } = useIntegracao('anthropic')
+  const { data, isLoading, error } = useIntegracao('anthropic')
   const qc = useQueryClient()
   const toast = useToast()
   const [token, setToken] = useState('')
@@ -115,18 +160,16 @@ function AnthropicConfig() {
           </span>
         }
         action={
-          configurado ? (
-            <Badge tone="green">
-              <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> Chave configurada
-            </Badge>
-          ) : (
-            <Badge tone="gray">
-              <XCircle className="mr-1 inline h-3.5 w-3.5" /> Sem chave
-            </Badge>
-          )
+          <SeloIntegracao
+            error={error}
+            configurado={configurado}
+            rotuloOk="Chave configurada"
+            rotuloSem="Sem chave"
+          />
         }
       />
       <CardBody>
+        <AvisoLeitura error={error} />
         {isLoading ? (
           <Loading />
         ) : (
@@ -161,7 +204,7 @@ function AnthropicConfig() {
 
 // ----------------------- ADVBOX -----------------------
 function AdvboxConfig() {
-  const { data, isLoading } = useIntegracao('advbox')
+  const { data, isLoading, error } = useIntegracao('advbox')
   const qc = useQueryClient()
   const toast = useToast()
   const [baseUrl, setBaseUrl] = useState('')
@@ -176,10 +219,23 @@ function AdvboxConfig() {
   const configurado = Boolean((data?.config as { configurado?: boolean })?.configurado)
 
   async function salvar() {
+    const url = baseUrl.trim()
+    // URL sem esquema (ex.: "app.advbox.com.br/api/v1") vira caminho relativo no
+    // fetch do servidor e a integração cai inteira, com erro que não aponta para
+    // cá. Barrar na hora de salvar é o único momento em que dá para explicar.
+    if (url && !/^https?:\/\//i.test(url)) {
+      toast.error('A URL base precisa começar com https://.')
+      return
+    }
     setSaving(true)
     try {
-      // base_url (não secreto) vai direto na tabela integracoes
-      const cfg = { ...(data?.config as object), base_url: baseUrl }
+      // base_url (não secreto) vai direto na tabela integracoes.
+      // Campo em branco REMOVE a chave em vez de gravar string vazia: o servidor
+      // só cai no endereço padrão quando a chave está ausente (`??` não pega
+      // string vazia), e gravar '' derrubava a integração em silêncio.
+      const cfg: Record<string, unknown> = { ...(data?.config as object) }
+      if (url) cfg.base_url = url
+      else delete cfg.base_url
       const { error } = await supabase
         .from('integracoes')
         .upsert({ servico: 'advbox', config: cfg, ativo: true }, { onConflict: 'servico' })
@@ -208,18 +264,16 @@ function AdvboxConfig() {
           </span>
         }
         action={
-          configurado ? (
-            <Badge tone="green">
-              <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> Token configurado
-            </Badge>
-          ) : (
-            <Badge tone="gray">
-              <XCircle className="mr-1 inline h-3.5 w-3.5" /> Sem token
-            </Badge>
-          )
+          <SeloIntegracao
+            error={error}
+            configurado={configurado}
+            rotuloOk="Token configurado"
+            rotuloSem="Sem token"
+          />
         }
       />
       <CardBody>
+        <AvisoLeitura error={error} />
         {isLoading ? (
           <Loading />
         ) : (
@@ -268,7 +322,7 @@ function AdvboxConfig() {
 // pelo host (https://<subdominio>.kommo.com), então subdomínio errado devolve
 // 401 mesmo com token correto — daí a validação ao salvar.
 function KommoConfig() {
-  const { data, isLoading } = useIntegracao('kommo')
+  const { data, isLoading, error } = useIntegracao('kommo')
   const qc = useQueryClient()
   const toast = useToast()
   const [subdominio, setSubdominio] = useState('')
@@ -327,7 +381,11 @@ function KommoConfig() {
           </span>
         }
         action={
-          configurado ? (
+          error ? (
+            <Badge tone="amber">
+              <XCircle className="mr-1 inline h-3.5 w-3.5" /> Estado não carregado
+            </Badge>
+          ) : configurado ? (
             cfg.validado ? (
               <Badge tone="green">
                 <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> Conexão verificada
@@ -345,6 +403,7 @@ function KommoConfig() {
         }
       />
       <CardBody>
+        <AvisoLeitura error={error} />
         {isLoading ? (
           <Loading />
         ) : (
@@ -404,7 +463,7 @@ interface OabItem {
 }
 
 function DjenConfig() {
-  const { data, isLoading } = useIntegracao('djen')
+  const { data, isLoading, error } = useIntegracao('djen')
   const qc = useQueryClient()
   const toast = useToast()
   const [itens, setItens] = useState<OabItem[]>([])
@@ -459,6 +518,7 @@ function DjenConfig() {
         }
       />
       <CardBody>
+        <AvisoLeitura error={error} />
         {isLoading ? (
           <Loading />
         ) : (
@@ -522,7 +582,7 @@ function DjenConfig() {
 function UsuariosConfig() {
   const qc = useQueryClient()
   const toast = useToast()
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['profiles'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -630,7 +690,13 @@ function UsuariosConfig() {
         }
       />
       <CardBody className="p-0">
-        {isLoading ? (
+        {/* Erro antes de tudo: tabela vazia por falha de leitura era
+            indistinguível de "não há usuário cadastrado". */}
+        {error ? (
+          <p className="m-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Não foi possível carregar os usuários: {(error as Error).message}
+          </p>
+        ) : isLoading ? (
           <Loading />
         ) : (
           <Table>

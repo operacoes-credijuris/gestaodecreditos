@@ -23,7 +23,19 @@ import { Segmented } from '@/components/ui/Segmented'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatDate, onlyDigits as dig } from '@/lib/format'
+import {
+  formatCNJ,
+  formatDate,
+  normalizarBusca,
+  onlyDigits as dig,
+} from '@/lib/format'
+
+// Teto de linhas por consulta. Existe para a tela não puxar a tabela inteira,
+// mas bater no teto ESCONDE registro — e publicação escondida é intimação que
+// ninguém leu. Por isso o número mora aqui e a tela avisa quando chega nele, em
+// vez de cortar em silêncio.
+const LIMITE_PUBLICACOES = 2000
+const LIMITE_MOVIMENTACOES = 5000
 
 // Data-limite (YYYY-MM-DD, fuso local) de uma janela de N dias — usada em
 // dupla pela contagem da pílula e pela lista, que precisam andar juntas.
@@ -136,8 +148,14 @@ export default function PublicacoesMovimentacoes() {
   // na tela vê que existem DUAS visões e quantos registros há em cada uma.
   const ini30 = useMemo(() => isoDiasAtras(30), [])
   const ini20 = useMemo(() => isoDiasAtras(20), [])
+  // A chave começa com a MESMA raiz da lista ('djen_publicacoes') de propósito:
+  // invalidateQueries casa por prefixo, então a sincronização, que invalida a
+  // raiz, agora atualiza a pílula junto. Com a chave antiga
+  // ('djen_publicacoes_count') nada invalidava esta consulta, e a pílula ficava
+  // com o número da abertura da página enquanto o cabeçalho da lista já mostrava
+  // outro — dois números discordando na mesma tela até alguém recarregar.
   const nPub = useQuery({
-    queryKey: ['djen_publicacoes_count', ini30],
+    queryKey: ['djen_publicacoes', 'count', ini30],
     queryFn: async () => {
       const { count, error } = await supabase
         .from('djen_publicacoes')
@@ -148,7 +166,7 @@ export default function PublicacoesMovimentacoes() {
     },
   })
   const nMov = useQuery({
-    queryKey: ['advbox_movimentacoes_count', ini20],
+    queryKey: ['advbox_movimentacoes', 'count', ini20],
     queryFn: async () => {
       const { count, error } = await supabase
         .from('advbox_movimentacoes')
@@ -215,7 +233,7 @@ function Publicacoes({ busca }: { busca: string }) {
         .gte('data_disponibilizacao', ini30)
         .order('data_disponibilizacao', { ascending: false })
         .order('id', { ascending: false })
-        .limit(2000)
+        .limit(LIMITE_PUBLICACOES)
       if (error) throw new Error(error.message)
       return (data ?? []) as DjenRow[]
     },
@@ -274,24 +292,51 @@ function Publicacoes({ busca }: { busca: string }) {
   // Publicação para a qual estamos criando tarefa (abre o modal).
   const [tarefaPub, setTarefaPub] = useState<DjenRow | null>(null)
 
+  // Índice de busca por publicação.
+  //
+  // O texto do DJEN chega em HTML COM ENTIDADES, e a busca rodava nesse valor
+  // cru: procurar "citação" não achava "cita&ccedil;&atilde;o", ou seja, a
+  // palavra estava na tela e a lista voltava vazia. Aqui o texto passa pelo
+  // MESMO textoLimpo da exibição (o que se procura é o que se lê) e por
+  // normalizarBusca, porque ninguém digita acento em caixa de busca.
+  //
+  // Memoizado pela lista, e não recalculado por tecla: textoLimpo cria elemento
+  // de DOM para decodificar entidade, e fazer isso em até 2000 publicações a
+  // cada tecla travaria a digitação.
+  const indiceBusca = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const p of lista.data ?? []) {
+      const r = p.raw ?? {}
+      m.set(
+        p.id,
+        normalizarBusca(
+          [
+            p.numero_processo,
+            p.sigla_tribunal,
+            p.tipo_comunicacao,
+            r.nomeOrgao,
+            r.nomeClasse,
+            textoLimpo(r.texto),
+          ]
+            .filter(Boolean)
+            .join(' '),
+        ),
+      )
+    }
+    return m
+  }, [lista.data])
+
   const filtradas = useMemo(() => {
     const all = lista.data ?? []
-    if (!busca.trim()) return all
-    const q = busca.toLowerCase()
+    const q = normalizarBusca(busca)
+    if (!q) return all
+    const qd = dig(busca)
     return all.filter((p) => {
-      const r = p.raw ?? {}
-      return [
-        p.numero_processo,
-        p.sigla_tribunal,
-        p.tipo_comunicacao,
-        r.nomeOrgao,
-        r.nomeClasse,
-        r.texto,
-      ]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q))
+      if ((indiceBusca.get(p.id) ?? '').includes(q)) return true
+      // Número de processo colado sem pontuação ainda tem de achar o formatado.
+      return qd.length >= 4 && dig(p.numero_processo).includes(qd)
     })
-  }, [lista.data, busca])
+  }, [lista.data, busca, indiceBusca])
 
   if (lista.isLoading) return <Loading label="Carregando publicações…" />
   if (lista.isError)
@@ -322,6 +367,14 @@ function Publicacoes({ busca }: { busca: string }) {
           label="atualizando do DJEN…"
         />
       </div>
+
+      {(lista.data?.length ?? 0) >= LIMITE_PUBLICACOES && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Mostrando as {LIMITE_PUBLICACOES} publicações mais recentes da janela de
+          30 dias, que é o limite da consulta. As mais antigas do período ficaram
+          de fora — use a busca para encontrar uma publicação específica.
+        </p>
+      )}
 
       {filtradas.length === 0 ? (
         <Card>
@@ -568,7 +621,7 @@ function Movimentacoes({ busca }: { busca: string }) {
         .select('*')
         .gte('data', ini20)
         .order('data', { ascending: false })
-        .limit(5000)
+        .limit(LIMITE_MOVIMENTACOES)
       if (error) throw new Error(error.message)
       return (data ?? []) as MovRow[]
     },
@@ -600,7 +653,10 @@ function Movimentacoes({ busca }: { busca: string }) {
   })
   useSincronizaAoMontar(sync.mutate)
 
-  const q = busca.trim().toLowerCase()
+  // Mesma normalização das Publicações: sem acento, e número de processo
+  // comparado também por dígito. Antes, "goiania" e "5524530" não achavam nada.
+  const q = normalizarBusca(busca)
+  const qd = dig(busca)
 
   // NOVAS: processos com movimentação nos últimos 20 dias, agrupados por
   // processo; andamentos e grupos do mais recente para o mais antigo.
@@ -610,9 +666,13 @@ function Movimentacoes({ busca }: { busca: string }) {
       ? all
       : all.filter((m) => {
           const info = resolve(m.numero_processo)
-          return [m.numero_processo, m.conteudo, info.cedente, info.cessionario]
-            .filter(Boolean)
-            .some((v) => String(v).toLowerCase().includes(q))
+          if (
+            [m.numero_processo, m.conteudo, info.cedente, info.cessionario]
+              .filter(Boolean)
+              .some((v) => normalizarBusca(String(v)).includes(q))
+          )
+            return true
+          return qd.length >= 4 && dig(m.numero_processo).includes(qd)
         })
     const mapa = new Map<string, MovRow[]>()
     for (const m of filtradas) {
@@ -629,22 +689,38 @@ function Movimentacoes({ busca }: { busca: string }) {
     return grupos
   }, [lista.data, q, resolve])
 
-  const numerosNovas = useMemo(() => new Set(novas.map((g) => g.numero)), [novas])
+  // Casamento por DÍGITOS, e não pela string crua, porque as duas tabelas
+  // gravam o número a partir de payloads DIFERENTES do ADVBOX:
+  // advbox_movimentacoes usa o número DO ANDAMENTO
+  // (process_number/protocol_number de cada movimentação) e
+  // advbox_processo_status usa o número do LAWSUIT. Formatação e até o próprio
+  // número divergem — o caso de apenso está documentado na própria Edge
+  // Function. Com a comparação crua, o processo aparecia nas duas listas ao
+  // mesmo tempo: em Novas com o andamento de hoje e em Paralisados com o selo
+  // "há 0 dias", que é a cara do defeito.
+  const numerosNovas = useMemo(
+    () => new Set(novas.map((g) => dig(g.numero)).filter((d) => d.length > 0)),
+    [novas],
+  )
 
   // PARALISADOS: processos cadastrados/casados SEM movimento nos últimos 20
   // dias. Ordenados do menos parado (última mov. mais recente) ao mais parado;
   // quem nunca movimentou vai por último.
   const paralisados = useMemo(() => {
     let l = (status.data ?? [])
-      .filter((s) => !numerosNovas.has(s.numero_processo))
+      .filter((s) => !numerosNovas.has(dig(s.numero_processo)))
       // Processos encerrados não entram em Paralisados.
       .filter((s) => resolve(s.numero_processo).status !== 'encerrado')
     if (q) {
       l = l.filter((s) => {
         const info = resolve(s.numero_processo)
-        return [s.numero_processo, info.cedente, info.cessionario]
-          .filter(Boolean)
-          .some((v) => String(v).toLowerCase().includes(q))
+        if (
+          [s.numero_processo, info.cedente, info.cessionario]
+            .filter(Boolean)
+            .some((v) => normalizarBusca(String(v)).includes(q))
+        )
+          return true
+        return qd.length >= 4 && dig(s.numero_processo).includes(qd)
       })
     }
     return [...l].sort((a, b) => {
@@ -675,7 +751,18 @@ function Movimentacoes({ busca }: { busca: string }) {
         />
       </div>
 
-      {vazio ? (
+      {(lista.data?.length ?? 0) >= LIMITE_MOVIMENTACOES && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Mostrando as {LIMITE_MOVIMENTACOES} movimentações mais recentes da
+          janela de 20 dias, que é o limite da consulta. Com o corte, um processo
+          pode aparecer em Paralisados sem estar.
+        </p>
+      )}
+
+      {/* status.isError entra na conta: sem isto, falha na consulta de status com
+          nenhuma movimentação nova cairia no cartão de "nada aqui", que é
+          conclusão, e não o que aconteceu. */}
+      {vazio && !status.isError ? (
         <Card>
           <EmptyState
             title="Nenhuma movimentação"
@@ -710,6 +797,17 @@ function Movimentacoes({ busca }: { busca: string }) {
                   info={resolve(s.numero_processo)}
                 />
               ))
+            ) : status.isError ? (
+              // "Nenhum processo paralisado" é a melhor notícia desta tela, e era
+              // exatamente o que aparecia quando a consulta de status falhava.
+              // Dizer que nada está parado sem ter conseguido olhar é o pior
+              // jeito de errar aqui.
+              <p className="text-sm text-amber-700">
+                Não foi possível carregar o tempo sem movimentação dos processos:{' '}
+                {(status.error as Error).message}
+              </p>
+            ) : status.isLoading ? (
+              <p className="text-sm text-slate-500">Verificando…</p>
             ) : (
               <p className="text-sm text-slate-500">Nenhum processo paralisado.</p>
             )}
