@@ -21,7 +21,10 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { getCaller, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 
-const MODELO = 'claude-sonnet-5'
+// Haiku dá conta desta tarefa: o texto é curto, o formato é fixo e o dossiê
+// chega pronto e em ordem cronológica, então sobra pouca decisão para o modelo.
+// O corpo da requisição aceita `modelo` para comparar sem novo deploy.
+const MODELO = 'claude-haiku-4-5-20251001'
 
 // Créditos por invocação, e quantas chamadas ao modelo em paralelo dentro do
 // lote. 10 x 3 dá ~4 ondas de ~12s: folgado dentro do limite de recursos.
@@ -57,19 +60,27 @@ A Credijuris adquire créditos judiciais de credores originais (cedentes) e os c
 
 QUEM LÊ: o investidor que comprou o crédito. Pessoa de bom nível de compreensão, mas NÃO formada em Direito. Português formal e técnico, explicando o termo quando ele for indispensável. Direto ao ponto, sem floreio, sem citar artigos de lei, sem jargão desnecessário.
 
-REGRAS DE CONTEÚDO:
-- Só afirme o que os andamentos e tarefas fornecidos sustentam. Se a informação não está ali, diga que não há registro — NUNCA invente data, valor ou etapa.
-- O ÚLTIMO andamento da lista define a situação de HOJE. Não diga que algo está pendente, resolvido ou a caminho se um andamento posterior disser o contrário.
-- Quando o MESMO tipo de evento se repete no processo (por exemplo: alvará expedido e não cumprido mais de uma vez, ou petição seguida de nova petição do mesmo teor), entenda que são CICLOS DISTINTOS. Diga quantas vezes ocorreu e use a data da ÚLTIMA ocorrência. Nunca descreva a mesma ocorrência duas vezes como se fossem duas, nem trate um pedido como já atendido só porque um pedido anterior semelhante foi atendido.
-- Distinga PEDIDO de DEFERIMENTO: uma petição requerendo algo não é o ato requerido. Só diga que foi expedido, homologado ou deferido se houver andamento dizendo isso.
-- Não prometa prazo de pagamento que o processo não indique.
-- Nada de "provavelmente", "acredito", "parece". Se é incerto, diga que é incerto.
-- Não repita número do processo nem nome das partes: já estão na tabela.
-- Nenhum valor em reais que não esteja nos andamentos.
+PARA QUE SERVE O TEXTO
+É a prestação de contas da Credijuris ao investidor. Ele precisa deixar evidente que a equipe acompanha o caso de perto e age sempre que existe algo a fazer. A maneira de demonstrar isso é ser ESPECÍFICO sobre os atos praticados, dizendo que petição foi protocolada, o que ela pedia e o que se obteve com ela. Não é usar adjetivos sobre a própria atuação. NUNCA escreva que a equipe é diligente, atenta, dedicada, proativa ou empenhada, e não elogie o próprio trabalho. Mostre o trabalho e deixe o investidor concluir sozinho.
+Todo ato praticado pela Credijuris deve aparecer. Quando o processo depende de terceiro, seja o juízo, a Fazenda ou o banco, diga o que a Credijuris fez para provocar esse terceiro e o que fará em seguida, para o investidor nunca ter a impressão de que o caso dele está parado sem ninguém olhando. Escreva na primeira pessoa do plural, como parte da equipe (acompanhamos, protocolamos, requereremos).
 
-TAMANHO (regra rígida):
+REGRAS DE CONTEÚDO:
+- NÃO MENCIONE DATAS. Nenhuma, em nenhuma forma. Nem dia, nem mês, nem ano, nem "há três meses", nem "desde o ano passado", nem "recentemente" com data. As datas do dossiê existem só para você entender a ORDEM dos fatos. Para situar no tempo use palavras de sequência, como inicialmente, em seguida, depois, mais recentemente, ainda, já.
+- Só afirme o que os andamentos e tarefas fornecidos sustentam. Se a informação não está ali, diga que não há registro. NUNCA invente etapa nem valor.
+- O ÚLTIMO andamento da lista define a situação de HOJE. Não diga que algo está pendente, resolvido ou a caminho se um andamento posterior disser o contrário.
+- Quando o MESMO tipo de evento se repete no processo, por exemplo alvará expedido e não cumprido mais de uma vez, ou petição seguida de nova petição do mesmo teor, entenda que são CICLOS DISTINTOS. Diga quantas vezes ocorreu, sem datar. Nunca descreva a mesma ocorrência duas vezes como se fossem duas, nem trate um pedido como já atendido só porque um pedido anterior semelhante foi atendido.
+- Distinga PEDIDO de DEFERIMENTO. Uma petição requerendo algo não é o ato requerido. Só diga que foi expedido, homologado ou deferido se houver andamento dizendo isso.
+- Não prometa prazo de pagamento.
+- Nada de "provavelmente", "acredito", "parece". Se é incerto, diga que é incerto.
+- Não repita número do processo nem nome das partes, já estão na tabela.
+- Nenhum valor em reais.
+
+FORMA (regra rígida):
+- NÃO use dois-pontos em nenhum lugar do texto.
+- NÃO use travessão nem meia-risca. Para separar ideias use vírgula, ponto, ou reescreva a frase.
+- Texto corrido, sem listas, marcadores ou negrito.
 - Cada campo tem no MÁXIMO 600 caracteres. Mire em 400.
-- Corte o histórico antigo antes de cortar a situação atual: o investidor precisa saber onde o processo está, não a lista do que já passou.`
+- Corte o histórico antigo antes de cortar a situação atual. O investidor precisa saber onde o processo está, não a lista do que já passou.`
 
 const FERRAMENTA = {
   name: 'registrar_resumo',
@@ -81,12 +92,12 @@ const FERRAMENTA = {
       estagio_processual: {
         type: 'string',
         description:
-          'Em que ponto do caminho o processo está HOJE, e o evento mais recente e relevante que levou até aí. Situe o investidor: o que já foi vencido e o que falta. Se houver requisitório expedido, diga qual (RPV ou precatório) e desde quando. Se o processo estiver parado, diga desde quando e aguardando o quê. MÁXIMO 600 CARACTERES, mire em 400.',
+          'Em que ponto do caminho o processo está hoje e o que aconteceu de mais relevante para chegar aí. Situe o investidor sobre o que já foi vencido e o que ainda falta. Se houver requisitório expedido, diga qual, RPV ou precatório. Se o processo aguarda ato de terceiro, diga aguardando o quê. SEM NENHUMA DATA, sem dois-pontos e sem travessão. MÁXIMO 600 CARACTERES, mire em 400.',
       },
       providencias: {
         type: 'string',
         description:
-          'O que a Credijuris está fazendo e o que fará em seguida, considerando o estágio apurado. Baseie-se nas tarefas registradas e no próximo passo que o estágio exige. Escreva em nome da Credijuris, no presente e no futuro ("acompanhamos", "peticionaremos"). Se não houver tarefa registrada e o processo aguardar ato do juízo ou da Fazenda, diga que o acompanhamento é de monitoramento, sem ato a praticar no momento. MÁXIMO 600 CARACTERES, mire em 400.',
+          'O que a Credijuris fez, está fazendo e fará em seguida, considerando o estágio apurado. Cite os atos concretos praticados e o que cada um buscava, para o investidor ver o acompanhamento em vez de ouvir que ele existe. Se o próximo passo depende de decisão do juízo, da Fazenda ou do banco, diga o que a Credijuris fez para provocá-la e como seguirá acompanhando. Primeira pessoa do plural. SEM NENHUMA DATA, sem dois-pontos e sem travessão. MÁXIMO 600 CARACTERES, mire em 400.',
       },
     },
     required: ['estagio_processual', 'providencias'],
@@ -201,9 +212,10 @@ function montarDossie(
 async function gerarUm(
   anthropic: Anthropic,
   dossie: string,
+  modelo: string,
 ): Promise<{ estagio_processual: string; providencias: string }> {
   const r = await anthropic.messages.create({
-    model: MODELO,
+    model: modelo,
     max_tokens: 1200,
     system: SISTEMA,
     tools: [FERRAMENTA],
@@ -250,13 +262,15 @@ async function mapPool<T, R>(
 }
 
 /** Dispara a próxima fatia numa invocação separada (fire-and-forget). */
-function dispararProximo(fila: string[], forcar: boolean): void {
+function dispararProximo(fila: string[], forcar: boolean, modelo: string): void {
   const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/carteira-resumo`
   const secret = Deno.env.get('CRON_SECRET') ?? ''
   const p = fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-cron-secret': secret },
-    body: JSON.stringify({ fila, forcar }),
+    // O modelo vai adiante: sem isso a cadeia trocaria de modelo no meio da
+    // varredura e a carteira ficaria com textos de origens diferentes.
+    body: JSON.stringify({ fila, forcar, modelo }),
   }).catch(() => {})
   const rt = (globalThis as unknown as {
     EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void }
@@ -291,9 +305,12 @@ Deno.serve(async (req: Request) => {
       processo_id?: string
       fila?: string[]
       forcar?: boolean
+      modelo?: string
     }
     const svc = serviceClient()
     const anthropic = new Anthropic({ apiKey })
+    // Override só para comparar modelos sem redeploy; o padrão é MODELO.
+    const modelo = body.modelo && body.modelo.trim() ? body.modelo.trim() : MODELO
 
     // ----- Monta o lote desta invocação -----
     let lote: string[]
@@ -422,13 +439,13 @@ Deno.serve(async (req: Request) => {
       }
 
       try {
-        const r = await gerarUm(anthropic, montarDossie(p, movs, tarefas))
+        const r = await gerarUm(anthropic, montarDossie(p, movs, tarefas), modelo)
         await svc.from('carteira_resumos').upsert({
           processo_id: p.id,
           estagio_processual: r.estagio_processual,
           providencias: r.providencias,
           fonte_hash: fonte,
-          modelo: MODELO,
+          modelo,
           erro: null,
           gerado_em: new Date().toISOString(),
         })
@@ -445,10 +462,11 @@ Deno.serve(async (req: Request) => {
       }
     })
 
-    if (resto.length) dispararProximo(resto, forcar)
+    if (resto.length) dispararProximo(resto, forcar, modelo)
 
     return jsonResponse({
       ok: true,
+      modelo,
       gerados,
       pulados,
       falhas,
