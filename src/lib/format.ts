@@ -36,6 +36,16 @@ export function formatBRLInput(value: number | null | undefined): string {
   })
 }
 
+/**
+ * Campo de percentual com DUAS CASAS OBRIGATÓRIAS. Mesma mecânica do campo de
+ * dinheiro, e de propósito a mesma implementação: os dígitos entram pela
+ * direita, então digitar "1550" vira 15,50 e não existe momento em que o campo
+ * fique sem as duas casas nem como montar um valor inválido. Duas cópias da
+ * mesma regra divergiriam com o tempo.
+ */
+export const parsePercentInput = parseBRLInput
+export const formatPercentInput = formatBRLInput
+
 export function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
   return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`

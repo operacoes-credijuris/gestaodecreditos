@@ -9,24 +9,16 @@ import {
   useSalvarParametrosAtualizacao,
 } from '@/lib/queries'
 import { ipcaMais2 } from '@/lib/projecao'
-import { hojeISO } from '@/lib/format'
+import {
+  formatDate,
+  formatPercentInput,
+  hojeISO,
+  parsePercentInput,
+} from '@/lib/format'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
-
-/** "6,5" e "6.5" viram 6.5; vazio vira null. */
-function paraNumero(v: string): number | null {
-  const s = v.trim().replace(',', '.')
-  if (!s) return null
-  const n = Number(s)
-  return Number.isFinite(n) ? n : null
-}
-
-/** Sempre com duas casas e vírgula decimal, que é como se lê aqui. */
-function comDuasCasas(n: number | null): string {
-  return n === null ? '' : n.toFixed(2).replace('.', ',')
-}
 
 function LinhaParametro({
   rotulo,
@@ -54,28 +46,28 @@ export function ModalParametrosAtualizacao({
   const salvar = useSalvarParametrosAtualizacao()
   const toast = useToast()
 
-  // Texto durante a digitação, para não reformatar a cada tecla.
-  const [selic, setSelic] = useState('')
-  const [ipca, setIpca] = useState('')
-  const [dataRef, setDataRef] = useState('')
+  // Guarda NÚMERO, não texto: o campo é mascarado (dígitos pela direita), então
+  // não existe estado intermediário inválido para preservar.
+  const [selic, setSelic] = useState<number | null>(null)
+  const [ipca, setIpca] = useState<number | null>(null)
 
   // Recarrega o formulário a cada abertura, para não mostrar rascunho antigo.
   useEffect(() => {
     if (!open) return
-    setSelic(comDuasCasas(params.data?.selic_aa ?? null))
-    setIpca(comDuasCasas(params.data?.ipca_12m_aa ?? null))
-    setDataRef(params.data?.data_referencia ?? hojeISO())
+    setSelic(params.data?.selic_aa ?? null)
+    setIpca(params.data?.ipca_12m_aa ?? null)
   }, [open, params.data])
 
-  const ipcaNum = paraNumero(ipca)
-  const derivado = ipcaMais2(ipcaNum)
+  const derivado = ipcaMais2(ipca)
+  // Competência é sempre HOJE, sem campo para editar.
+  const hoje = hojeISO()
 
   async function handleSalvar() {
     try {
       await salvar.mutateAsync({
-        selic_aa: paraNumero(selic),
-        ipca_12m_aa: ipcaNum,
-        data_referencia: dataRef || null,
+        selic_aa: selic,
+        ipca_12m_aa: ipca,
+        data_referencia: hoje,
       })
       toast.success('Parâmetros salvos.')
       onClose()
@@ -102,44 +94,41 @@ export function ModalParametrosAtualizacao({
       }
     >
       <div>
+        {/* Máscara de duas casas: os dígitos entram pela direita, então "1550"
+            vira 15,50 e o campo nunca fica sem as casas decimais. */}
         <LinhaParametro rotulo="SELIC vigente (% a.a.)">
           <Input
             className="text-right tabular-nums"
-            inputMode="decimal"
+            inputMode="numeric"
             placeholder="0,00"
-            value={selic}
-            onChange={(e) => setSelic(e.target.value)}
-            // Formata ao sair do campo: durante a digitação, forçar duas casas
-            // brigaria com quem está no meio de "15,2".
-            onBlur={() => setSelic(comDuasCasas(paraNumero(selic)))}
+            value={formatPercentInput(selic)}
+            onChange={(e) => setSelic(parsePercentInput(e.target.value))}
           />
         </LinhaParametro>
 
         <LinhaParametro rotulo="IPCA acumulado 12m (% a.a.)">
           <Input
             className="text-right tabular-nums"
-            inputMode="decimal"
+            inputMode="numeric"
             placeholder="0,00"
-            value={ipca}
-            onChange={(e) => setIpca(e.target.value)}
-            onBlur={() => setIpca(comDuasCasas(paraNumero(ipca)))}
+            value={formatPercentInput(ipca)}
+            onChange={(e) => setIpca(parsePercentInput(e.target.value))}
           />
         </LinhaParametro>
 
         <LinhaParametro rotulo="IPCA + 2% a.a.">
           {/* Sem campo: é o IPCA acima somado a 2, calculado na hora. */}
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
-            {derivado === null ? '—' : comDuasCasas(derivado)}
+            {derivado === null ? '—' : formatPercentInput(derivado)}
           </div>
         </LinhaParametro>
 
         <LinhaParametro rotulo="Data de referência do relatório">
-          <Input
-            type="date"
-            className="tabular-nums"
-            value={dataRef}
-            onChange={(e) => setDataRef(e.target.value)}
-          />
+          {/* Fixa em hoje, sem campo: é a competência do relatório que está
+              sendo gerado, não uma escolha. */}
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
+            {formatDate(hoje)}
+          </div>
         </LinhaParametro>
       </div>
     </Modal>

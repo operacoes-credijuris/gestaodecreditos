@@ -200,7 +200,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   // Bloco rótulo/valor com moldura, usado por indicadores e parâmetros.
   const bloco = (
     linhaInicial: number,
-    itens: [string, number | string | null, string | undefined][],
+    itens: [string, number | string | Date | null, string | undefined][],
   ) => {
     itens.forEach(([rotulo, valor, fmt], i) => {
       const linha = linhaInicial + i
@@ -235,7 +235,10 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     ['SELIC vigente (% a.a.)', pr?.selic_aa ?? SEM, PCT],
     ['IPCA acumulado 12m (% a.a.)', pr?.ipca_12m_aa ?? SEM, PCT],
     ['IPCA + 2% a.a.', ipcaMais2(pr?.ipca_12m_aa) ?? SEM, PCT],
-    ['Data de referência do relatório', pr?.data_referencia ?? SEM, undefined],
+    // A competência é a data de HOJE, a da geração deste arquivo. Não vem do
+    // banco de propósito: lá o campo é registro do último salvamento, e usá-lo
+    // datar um relatório gerado hoje com a data de outro dia.
+    ['Data de referência do relatório', paraData(hoje), DATA],
   ])
 
   // ---------- Cabeçalho de dois níveis, como na tela ----------
