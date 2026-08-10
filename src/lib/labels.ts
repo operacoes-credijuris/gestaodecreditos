@@ -107,6 +107,50 @@ export function getLabel(
 }
 
 /**
+ * Texto das colunas Estágio processual e Providências quando o crédito está
+ * ENCERRADO. Não há processo a narrar nem providência a tomar, então a mensagem
+ * é fixa — resumo gerado ali só produziria variação de redação em algo que já
+ * terminou, e gastaria chamada ao modelo sem acrescentar informação.
+ *
+ * Segue as mesmas regras dos textos gerados: sem data, sem dois-pontos, sem
+ * travessão e sem adjetivo elogiando a equipe.
+ */
+export const RESUMO_ENCERRADO = {
+  estagio:
+    'Crédito integralmente liquidado e processo encerrado, com os valores recebidos conferidos e adequados.',
+  providencias: 'Operação concluída. Não há providências pendentes.',
+} as const
+
+/**
+ * Resolve os dois textos da carteira. Ponto único: tela e exportação chamam
+ * daqui, senão uma poderia mostrar a mensagem fixa e a outra o texto da IA.
+ *
+ * A troca acontece no ATO DA LEITURA, e não só na geração. Assim, no instante
+ * em que o crédito passa a encerrado a carteira já mostra a mensagem fixa, sem
+ * esperar a rodada semanal, e nunca exibe a narrativa antiga de um processo que
+ * acabou.
+ */
+export function textosResumo(
+  status: string | null | undefined,
+  resumo:
+    | { estagio_processual: string | null; providencias: string | null }
+    | undefined,
+): { estagio: string | null; providencias: string | null; fixo: boolean } {
+  if (status === 'encerrado') {
+    return {
+      estagio: RESUMO_ENCERRADO.estagio,
+      providencias: RESUMO_ENCERRADO.providencias,
+      fixo: true,
+    }
+  }
+  return {
+    estagio: resumo?.estagio_processual ?? null,
+    providencias: resumo?.providencias ?? null,
+    fixo: false,
+  }
+}
+
+/**
  * Dias em carteira — CALCULADO. Enquanto o crédito não foi pago, conta da
  * cessão até hoje; quando foi pago, PARA na data de liquidação, porque crédito
  * liquidado saiu da carteira e não segue acumulando tempo.

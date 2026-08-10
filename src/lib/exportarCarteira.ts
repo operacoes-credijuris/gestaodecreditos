@@ -19,6 +19,7 @@ import {
   MESES_ALERTA_LIQUIDACAO,
   statusLiquidacao,
   statusTir,
+  textosResumo,
 } from './labels'
 import { formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
 
@@ -244,7 +245,8 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   // ---------- Linhas da carteira ----------
   d.carteira.forEach((p, idx) => {
     const sl = statusLiquidacao(p.data_liquidacao, p.expectativa_liquidacao, hoje, limite)
-    const r = d.resumos?.get(p.id)
+    // Encerrado sai com a mensagem fixa, igual à tela.
+    const textos = textosResumo(p.status, d.resumos?.get(p.id))
     const linha = ws.getRow(PRIMEIRA_DADO + idx)
     const valores: (string | number | Date | null)[] = [
       formatCNJ(p.numero_cnj),
@@ -262,8 +264,8 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       paraData(p.data_liquidacao),
       p.valor_estimado_complementar ?? null,
       sl.label,
-      r?.estagio_processual ?? '',
-      r?.providencias ?? '',
+      textos.estagio ?? '',
+      textos.providencias ?? '',
       paraData(d.ultimaMov?.get(onlyDigits(p.numero_cnj)) ?? null),
       null, // Valor projetado
       statusTir(p.data_liquidacao),

@@ -25,6 +25,7 @@ import {
   MESES_ALERTA_LIQUIDACAO,
   statusLiquidacao,
   statusTir,
+  textosResumo,
 } from '@/lib/labels'
 import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -258,6 +259,7 @@ function Individual() {
   const [aberto, setAberto] = useState<{
     id: string
     cnj: string | null
+    status: string | null
     campo: 'estagio' | 'providencias'
   } | null>(null)
 
@@ -612,6 +614,8 @@ function Individual() {
                     limiteAlerta,
                   )
                   const resumo = resumos.data?.get(p.id)
+                  // Encerrado usa mensagem fixa; o resto vem da IA.
+                  const textos = textosResumo(p.status, resumo)
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
@@ -674,21 +678,31 @@ function Individual() {
                     </TD>
                     <TD>
                       <CelulaResumo
-                        texto={resumo?.estagio_processual}
-                        erro={resumo?.erro}
-                        carregando={resumos.isLoading}
+                        texto={textos.estagio}
+                        erro={textos.fixo ? null : resumo?.erro}
+                        carregando={!textos.fixo && resumos.isLoading}
                         onClick={() =>
-                          setAberto({ id: p.id, cnj: p.numero_cnj, campo: 'estagio' })
+                          setAberto({
+                            id: p.id,
+                            cnj: p.numero_cnj,
+                            status: p.status,
+                            campo: 'estagio',
+                          })
                         }
                       />
                     </TD>
                     <TD>
                       <CelulaResumo
-                        texto={resumo?.providencias}
-                        erro={resumo?.erro}
-                        carregando={resumos.isLoading}
+                        texto={textos.providencias}
+                        erro={textos.fixo ? null : resumo?.erro}
+                        carregando={!textos.fixo && resumos.isLoading}
                         onClick={() =>
-                          setAberto({ id: p.id, cnj: p.numero_cnj, campo: 'providencias' })
+                          setAberto({
+                            id: p.id,
+                            cnj: p.numero_cnj,
+                            status: p.status,
+                            campo: 'providencias',
+                          })
                         }
                       />
                     </TD>
@@ -747,13 +761,16 @@ function Individual() {
             <Button variant="outline" onClick={() => setAberto(null)}>
               Fechar
             </Button>
-            <Button
-              icon={<RefreshCw className="h-4 w-4" />}
-              loading={gerar.isPending && !!gerar.variables?.processo_id}
-              onClick={() => aberto && gerar.mutate({ processo_id: aberto.id })}
-            >
-              Gerar novamente
-            </Button>
+            {/* Crédito encerrado tem texto fixo: não há o que regerar. */}
+            {aberto?.status !== 'encerrado' && (
+              <Button
+                icon={<RefreshCw className="h-4 w-4" />}
+                loading={gerar.isPending && !!gerar.variables?.processo_id}
+                onClick={() => aberto && gerar.mutate({ processo_id: aberto.id })}
+              >
+                Gerar novamente
+              </Button>
+            )}
           </>
         }
       >
@@ -764,8 +781,8 @@ function Individual() {
             </div>
             {(() => {
               const r = resumos.data?.get(aberto.id)
-              const texto =
-                aberto.campo === 'estagio' ? r?.estagio_processual : r?.providencias
+              const t = textosResumo(aberto.status, r)
+              const texto = aberto.campo === 'estagio' ? t.estagio : t.providencias
               if (texto) {
                 // whitespace-pre-line: preserva os parágrafos do modelo.
                 return (

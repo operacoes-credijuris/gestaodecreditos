@@ -444,7 +444,20 @@ Deno.serve(async (req: Request) => {
         'id, numero_cnj, tribunal, comarca, vara, entidade_devedora, tipo_credito, data_aquisicao, expectativa_liquidacao, data_liquidacao, status',
       )
       .in('id', lote)
-    const processos = (procData ?? []) as ProcessoRow[]
+    const todos = (procData ?? []) as ProcessoRow[]
+
+    // Crédito ENCERRADO não recebe resumo gerado: não há processo a narrar nem
+    // providência a tomar, e a carteira mostra uma mensagem fixa no lugar (ver
+    // RESUMO_ENCERRADO em src/lib/labels.ts). Duas consequências aqui:
+    //   - não gasta chamada ao modelo;
+    //   - apaga o registro que existir, para não sobrar no banco a narrativa
+    //     antiga de um processo que já terminou. A tabela é cache derivado, e
+    //     volta a ser gerada sozinha se o status deixar de ser encerrado.
+    const encerrados = todos.filter((p) => p.status === 'encerrado').map((p) => p.id)
+    if (encerrados.length) {
+      await svc.from('carteira_resumos').delete().in('processo_id', encerrados)
+    }
+    const processos = todos.filter((p) => p.status !== 'encerrado')
 
     const digitsDe = new Map<string, string>()
     for (const p of processos) digitsDe.set(p.id, onlyDigits(p.numero_cnj))
@@ -494,8 +507,9 @@ Deno.serve(async (req: Request) => {
     }
 
     // ----- Gera -----
+    // Encerrados entram como pulados: não são falha, é a regra.
     let gerados = 0
-    let pulados = 0
+    let pulados = encerrados.length
     let falhas = 0
 
     await mapPool(processos, CONCORRENCIA, async (p) => {
