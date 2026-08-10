@@ -23,6 +23,7 @@ import {
 } from './labels'
 import { formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
 import {
+  aReceberEstimado,
   ganhoProjetado,
   ipcaMais2,
   tir,
@@ -206,12 +207,13 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   const tirMedia = tirMediaPonderada(
     porCredito.map(({ p, t }) => ({ tirAnual: t.anual, capital: p.capital_investido })),
   )
-  let aReceber: number | null = null
-  for (const { p, proj } of porCredito) {
-    if ((p.data_liquidacao ?? '').slice(0, 10)) continue
-    if (proj.valor === null) continue
-    aReceber = (aReceber ?? 0) + proj.valor
-  }
+  const aReceber = aReceberEstimado(
+    porCredito.map(({ p, proj }) => ({
+      proj,
+      dataLiquidacao: p.data_liquidacao,
+      valorComplementar: p.valor_estimado_complementar,
+    })),
+  )
 
   // Mesma ordem dos cards na tela.
   const indicadores: [string, number | string | Date | null, string | undefined][] = [
@@ -219,7 +221,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     ['TIR média', tirMedia.valor ?? SEM, PCT],
     ['Retorno projetado', SEM, undefined],
     ['Já recebido', centavos(d.jaRecebidoTotal) ?? SEM, MOEDA],
-    ['A receber estimado', centavos(aReceber) ?? SEM, MOEDA],
+    ['A receber estimado', centavos(aReceber.total) ?? SEM, MOEDA],
     ['Nº de operações', d.carteira.length, undefined],
   ]
   // Bloco rótulo/valor com moldura, usado por indicadores e parâmetros.

@@ -169,6 +169,49 @@ export function ganhoProjetado(
 }
 
 /**
+ * "A receber estimado" da carteira. Soma DUAS parcelas, porque há dinheiro por
+ * vir em dois estados diferentes:
+ *
+ *   1. créditos ainda NÃO liquidados  -> o valor projetado inteiro;
+ *   2. créditos JÁ liquidados que ainda têm complementar pendente -> só o
+ *      complementar, já que o principal entrou.
+ *
+ * Sem a segunda parcela o card ignorava o complementar a receber dos créditos
+ * liquidados — na base de 2026-08, R$ 93 mil que o investidor ainda vai receber.
+ */
+export function aReceberEstimado(
+  itens: {
+    proj: Projecao
+    dataLiquidacao: string | null | undefined
+    valorComplementar: number | null | undefined
+  }[],
+): { total: number | null; emAberto: number; complementares: number } {
+  let total = 0
+  let emAberto = 0
+  let complementares = 0
+  for (const it of itens) {
+    const liquidado = !!(it.dataLiquidacao ?? '').slice(0, 10)
+    if (!liquidado) {
+      if (it.proj.valor === null) continue
+      total += it.proj.valor
+      emAberto++
+      continue
+    }
+    const comp = it.valorComplementar
+    if (typeof comp === 'number' && comp > 0) {
+      total += comp
+      complementares++
+    }
+  }
+  const nenhum = emAberto === 0 && complementares === 0
+  return {
+    total: nenhum ? null : Math.round(total * 100) / 100,
+    emAberto,
+    complementares,
+  }
+}
+
+/**
  * TIR média da carteira, PONDERADA pelo capital investido de cada crédito.
  *
  * Média simples daria o mesmo peso a um crédito de mil reais e a um de cem mil,

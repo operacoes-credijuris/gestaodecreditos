@@ -19,6 +19,7 @@ import {
   useUltimaMovimentacao,
 } from '@/lib/queries'
 import {
+  aReceberEstimado,
   ganhoProjetado,
   tir,
   tirMediaPonderada,
@@ -393,26 +394,14 @@ function Individual() {
     const media = tirMediaPonderada(
       itens.map(({ p, t }) => ({ tirAnual: t.anual, capital: p.capital_investido })),
     )
-    // "Ainda não recebidos" = sem data de liquidação. Crédito de status
-    // complementar já teve o principal pago, então fica FORA desta soma, mesmo
-    // tendo complementar a receber.
-    let aReceber = 0
-    let contados = 0
-    for (const { p, proj } of itens) {
-      if ((p.data_liquidacao ?? '').slice(0, 10)) continue
-      if (proj.valor === null) continue
-      aReceber += proj.valor
-      contados++
-    }
-    const abertos = carteira.filter((p) => !(p.data_liquidacao ?? '').slice(0, 10)).length
-    return {
-      tirMedia: media,
-      aReceber: {
-        total: contados > 0 ? Math.round(aReceber * 100) / 100 : null,
-        contados,
-        abertos,
-      },
-    }
+    const aReceber = aReceberEstimado(
+      itens.map(({ p, proj }) => ({
+        proj,
+        dataLiquidacao: p.data_liquidacao,
+        valorComplementar: p.valor_estimado_complementar,
+      })),
+    )
+    return { tirMedia: media, aReceber }
   }, [carteira, parametros.data, hoje])
 
   // "3 de 7 créditos" quando falta cadastro; some quando está tudo lá.
@@ -593,9 +582,16 @@ function Individual() {
           hint={
             !investidor
               ? 'selecione um investidor'
-              : derivados.aReceber.abertos === 0
-                ? 'todos os créditos já liquidados'
-                : `soma projetada de ${derivados.aReceber.contados} de ${derivados.aReceber.abertos} créditos em aberto`
+              : derivados.aReceber.total === null
+                ? 'nada a receber nesta carteira'
+                : [
+                    derivados.aReceber.emAberto > 0 &&
+                      `${derivados.aReceber.emAberto} crédito(s) em aberto`,
+                    derivados.aReceber.complementares > 0 &&
+                      `${derivados.aReceber.complementares} complementar(es) pendente(s)`,
+                  ]
+                    .filter(Boolean)
+                    .join(' + ')
           }
           icon={<Clock className="h-5 w-5" />}
           tone="slate"
