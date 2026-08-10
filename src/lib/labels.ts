@@ -100,6 +100,22 @@ export function getLabel(
   return map[key] ?? { label: key, tone: 'gray' }
 }
 
+/**
+ * Status da TIR na carteira do investidor — CALCULADO, nunca digitado.
+ *
+ *   Efetivada  o crédito já foi pago, então a taxa é a que de fato aconteceu
+ *   Estimada   ainda não foi pago, então a taxa é projeção
+ *
+ * "Pago" é ter data de liquidação, a mesma leitura que acende o verde em
+ * statusLiquidacao. Ponto único da regra: as duas colunas não podem discordar
+ * sobre o mesmo crédito estar pago.
+ */
+export function statusTir(
+  dataLiquidacao: string | null | undefined,
+): 'Efetivada' | 'Estimada' {
+  return (dataLiquidacao ?? '').slice(0, 10) ? 'Efetivada' : 'Estimada'
+}
+
 // Antecedência que acende o âmbar no status da carteira: com menos de um mês
 // para a expectativa, o crédito passa a exigir acompanhamento. Régua num só
 // lugar — mudar aqui muda a cor e o texto da dica junto.

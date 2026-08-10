@@ -58,6 +58,26 @@ export function hojeISO(): string {
 }
 
 /**
+ * Dias corridos de `inicio` até `fim`, ambos ISO (YYYY-MM-DD). null quando a
+ * data inicial não existe ou está malformada.
+ *
+ * A conta é feita em UTC de propósito: subtrair Dates locais erra em um dia
+ * sempre que houver mudança de fuso no intervalo, e a diferença apareceria como
+ * "364 dias" num crédito comprado há exatamente um ano.
+ */
+export function diasEntre(
+  inicio: string | null | undefined,
+  fim: string,
+): number | null {
+  const a = (inicio ?? '').slice(0, 10)
+  const b = (fim ?? '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null
+  const [y1, m1, d1] = a.split('-').map(Number)
+  const [y2, m2, d2] = b.split('-').map(Number)
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000)
+}
+
+/**
  * Data de "daqui a N meses" a partir de um ISO local (YYYY-MM-DD). Meses de
  * CALENDÁRIO, com o dia preso ao último do mês quando ele não existe
  * (31/01 -> 28/02) — somar 30 dias por mês erraria em boa parte do ano.

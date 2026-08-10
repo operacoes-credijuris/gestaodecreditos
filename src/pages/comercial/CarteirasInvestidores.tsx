@@ -23,6 +23,7 @@ import {
   INDICE_ATUALIZACAO,
   MESES_ALERTA_LIQUIDACAO,
   statusLiquidacao,
+  statusTir,
 } from '@/lib/labels'
 import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -46,6 +47,7 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import {
+  diasEntre,
   formatBRL,
   formatCNJ,
   formatDate,
@@ -450,9 +452,14 @@ function Individual() {
           >
             Gerar resumos
           </Button>
+          {/* Verde do Excel: distingue do botão vizinho sem virar ação
+              primária, que continua sendo gerar os resumos. */}
           <Button
             variant="outline"
-            className={ALTURA_CONTROLE}
+            className={cn(
+              ALTURA_CONTROLE,
+              'border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800',
+            )}
             icon={<Download className="h-4 w-4" />}
             loading={baixando}
             disabled={!investidor || carteira.length === 0}
@@ -697,10 +704,25 @@ function Individual() {
 
                     {/* Calculado automaticamente */}
                     <TD className={SEP} />
+                    {/* Efetivada = crédito já pago, então a taxa é a que
+                        aconteceu; Estimada = ainda projeção. O verde segue a
+                        mesma convenção da coluna Status. */}
+                    <TD
+                      className={
+                        p.data_liquidacao
+                          ? 'font-medium text-emerald-600'
+                          : 'text-slate-500'
+                      }
+                    >
+                      {statusTir(p.data_liquidacao)}
+                    </TD>
                     <TD />
                     <TD />
-                    <TD />
-                    <TD />
+                    {/* Dias corridos da cessão até hoje, recalculados no render:
+                        o número anda sozinho na virada do dia. */}
+                    <TD className="text-right tabular-nums">
+                      {diasEntre(p.data_aquisicao, hoje) ?? '—'}
+                    </TD>
                     <TD />
                     <TD />
                   </TR>

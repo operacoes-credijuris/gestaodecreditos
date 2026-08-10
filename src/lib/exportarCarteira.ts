@@ -14,8 +14,8 @@
 // abertura de todas as outras telas.
 import type { Processo } from './types'
 import type { CarteiraResumo } from './queries'
-import { MESES_ALERTA_LIQUIDACAO, statusLiquidacao } from './labels'
-import { formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
+import { MESES_ALERTA_LIQUIDACAO, statusLiquidacao, statusTir } from './labels'
+import { diasEntre, formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
 
 const MOEDA = 'R$ #,##0.00'
 const DATA = 'dd/mm/yyyy'
@@ -261,10 +261,10 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       r?.providencias ?? '',
       paraData(d.ultimaMov?.get(onlyDigits(p.numero_cnj)) ?? null),
       null, // Valor projetado
-      '', // Status TIR
+      statusTir(p.data_liquidacao),
       null, // TIR a.a.
       null, // TIR mensal
-      null, // Dias em carteira
+      diasEntre(p.data_aquisicao, hoje),
       null, // Ganho projetado
       null, // Retorno
     ]
@@ -288,11 +288,17 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       bold: true,
       color: { argb: COR_STATUS[sl.tone] ?? C.apagado },
     }
+    // Status TIR segue a mesma convenção: pago em verde, projeção em cinza.
+    linha.getCell(20).font = {
+      size: 10,
+      color: { argb: p.data_liquidacao ? COR_STATUS.green : C.rotulo },
+    }
   })
 
   // Cabeçalho sempre visível e filtro na tabela: com 25 colunas e dezenas de
-  // linhas, rolar sem isso faz perder de vista qual coluna se está lendo.
-  ws.views = [{ state: 'frozen', xSplit: 1, ySplit: LINHA_COLUNA }]
+  // linhas, rolar sem isso faz perder de vista qual coluna se está lendo. Só a
+  // LINHA congela — a primeira coluna fica livre, por decisão de produto.
+  ws.views = [{ state: 'frozen', ySplit: LINHA_COLUNA }]
   if (d.carteira.length > 0) {
     ws.autoFilter = {
       from: { row: LINHA_COLUNA, column: 1 },
