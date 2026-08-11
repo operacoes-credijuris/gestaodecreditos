@@ -184,7 +184,25 @@ export function PeticaoModal({
       URL.revokeObjectURL(url)
       toast.success('Petição gerada.')
     } catch (err) {
-      toast.error((err as Error).message)
+      const msg = (err as Error).message ?? ''
+      // Chunk que não baixa quase nunca é falha de rede: é DEPLOY NOVO com a aba
+      // aberta. O index.js em memória aponta para um nome de arquivo que o build
+      // seguinte substituiu, e o antigo deixa de existir no servidor. Acontece
+      // justamente aqui porque o pdfmake é carregado sob demanda — quem abriu a
+      // plataforma antes do deploy e só depois clicou em gerar cai nisto.
+      // "Failed to fetch" seco não diz nada a quem está tentando protocolar.
+      const versaoVelha =
+        /dynamically imported module|Importing a module script failed|Failed to fetch/i.test(
+          msg,
+        )
+      if (versaoVelha) {
+        toast.error(
+          'A plataforma foi atualizada enquanto esta aba estava aberta. ' +
+            'Recarregue a página e gere novamente.',
+        )
+      } else {
+        toast.error(msg)
+      }
     } finally {
       setGerando(false)
     }
