@@ -83,9 +83,38 @@ function lerCardCredijuris(lead: KommoLead) {
           : 'auto'
 
   const honMatch = notas.match(/HONOR[ÁA]RIOS?\s*C\.?:\s*([\d.,]+)\s*%/i)
-  const honorarios_pct = honMatch ? honMatch[1].replace(/\./g, '').replace(',', '.') : ''
+  const honorarios_pct = percentualDaNota(honMatch?.[1])
 
   return { numero, categoria, cedente, intermediador, tipo_aquisicao, honorarios_pct }
+}
+
+/**
+ * Percentual de honorários escrito na anotação do card (texto livre).
+ *
+ * O `replace(/\./g, '')` que havia aqui apagava TODO ponto, e o ponto na anotação
+ * pode ser decimal: "HONORÁRIOS C.: 33.33%" saía como "3333" e o motor de
+ * precificação recebia 3333% de honorários. A planilha do cedente saía com valor
+ * líquido completamente errado e nada na tela indicava isso.
+ *
+ * Mesma regra do parseNumeroFlex da gerar-analise-rpv: um único grupo de até 2
+ * dígitos depois do ponto é decimal; mais que isso, o ponto é separador de
+ * milhar. E percentual fora de 0 a 100 não é percentual — devolve vazio, para o
+ * motor pedir o número em vez de precificar errado.
+ */
+function percentualDaNota(bruto: string | undefined): string {
+  const t = (bruto ?? '').trim()
+  if (!t) return ''
+  let s: string
+  if (t.includes(',')) {
+    // Vírgula presente: ela é o decimal, e o ponto é milhar.
+    s = t.replace(/\./g, '').replace(',', '.')
+  } else {
+    const partes = t.split('.')
+    s = partes.length === 2 && partes[1].length <= 2 ? t : t.replace(/\./g, '')
+  }
+  const v = Number(s)
+  if (!Number.isFinite(v) || v < 0 || v > 100) return ''
+  return String(v)
 }
 
 async function extrairTextoDoPdf(url: string): Promise<string> {
@@ -365,21 +394,41 @@ export default function AnaliseCredito() {
     statusId: number
   } | null>(null)
   // Análise automática (Judit + due diligence + planilha) por card.
-  const [analisandoId, setAnalisandoId] = useState<number | null>(null)
+  /**
+   * Ids em análise AGORA, e não um id só.
+   *
+   * Com um id global, começar a segunda análise apagava o spinner da primeira e
+   * reabilitava o botão dela: o usuário achava que havia travado, clicava de
+   * novo, e o `finally` da corrida antiga limpava o estado da nova. O resultado
+   * de uma corrida vencida ainda sobrescrevia o da mais recente. Cada análise são
+   * duas chamadas ao modelo com o processo inteiro — repetir à toa é caro.
+   */
+  const [analisandoIds, setAnalisandoIds] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  )
   const [resultadoAnalise, setResultadoAnalise] = useState<Record<number, ResultadoAnalise>>({})
 
   async function onAnalisar(lead: KommoLead) {
-    setAnalisandoId(lead.kommo_lead_id)
+    const id = lead.kommo_lead_id
+    // Clique repetido no mesmo cartão não dispara segunda corrida.
+    if (analisandoIds.has(id)) return
+    setAnalisandoIds((s) => new Set(s).add(id))
     try {
       const r = await analisarLeadCredijuris(lead)
-      setResultadoAnalise((p) => ({ ...p, [lead.kommo_lead_id]: r }))
+      setResultadoAnalise((p) => ({ ...p, [id]: r }))
     } catch (e) {
       setResultadoAnalise((p) => ({
         ...p,
-        [lead.kommo_lead_id]: { erro: (e as Error)?.message ?? String(e) },
+        [id]: { erro: (e as Error)?.message ?? String(e) },
       }))
     } finally {
-      setAnalisandoId(null)
+      // Remove SÓ este id: o `setAnalisandoId(null)` de antes liberava o cartão
+      // alheio junto.
+      setAnalisandoIds((s) => {
+        const n = new Set(s)
+        n.delete(id)
+        return n
+      })
     }
   }
 
@@ -540,7 +589,7 @@ export default function AnaliseCredito() {
                     : null
                 }
                 onAnalisar={onAnalisar}
-                analisando={analisandoId === l.kommo_lead_id}
+                analisando={analisandoIds.has(l.kommo_lead_id)}
                 resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
               />
             ))}

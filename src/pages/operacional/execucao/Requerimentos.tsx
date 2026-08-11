@@ -25,7 +25,13 @@ import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { DrawerHistorico } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatDate, vazioNull } from '@/lib/format'
+import {
+  formatCNJ,
+  formatDate,
+  normalizarBusca,
+  onlyDigits,
+  vazioNull,
+} from '@/lib/format'
 
 const VAZIO: Partial<Requerimento> = {
   numero_protocolo: '',
@@ -95,19 +101,26 @@ export default function Requerimentos() {
   const lista = useMemo(() => {
     let l = data ?? []
     if (busca.trim()) {
-      const q = busca.toLowerCase()
-      l = l.filter((r) =>
-        [
-          r.numero_protocolo,
-          r.orgao,
-          r.tribunal_entidade,
-          r.materia,
-          r.classe_processual,
-          r.observacoes,
-        ]
-          .filter(Boolean)
-          .some((v) => v!.toLowerCase().includes(q)),
-      )
+      // Sem acento e também por dígito, como nas outras telas: "goiania" tem de
+      // achar "Goiânia", e o protocolo colado cru tem de achar o formatado.
+      const q = normalizarBusca(busca)
+      const qd = onlyDigits(busca)
+      l = l.filter((r) => {
+        const texto = normalizarBusca(
+          [
+            r.numero_protocolo,
+            r.orgao,
+            r.tribunal_entidade,
+            r.materia,
+            r.classe_processual,
+            r.observacoes,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        )
+        if (texto.includes(q)) return true
+        return qd.length >= 4 && onlyDigits(r.numero_protocolo).includes(qd)
+      })
     }
     const dir = sortDir === 'asc' ? 1 : -1
     return [...l].sort((a, b) => {

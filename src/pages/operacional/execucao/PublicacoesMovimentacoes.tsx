@@ -34,8 +34,14 @@ import {
 // mas bater no teto ESCONDE registro — e publicação escondida é intimação que
 // ninguém leu. Por isso o número mora aqui e a tela avisa quando chega nele, em
 // vez de cortar em silêncio.
-const LIMITE_PUBLICACOES = 2000
-const LIMITE_MOVIMENTACOES = 5000
+//
+// 1000, e não 2000/5000: o PostgREST tem max-rows de 1000 e devolve no máximo
+// isso, independentemente do `.limit()` pedido (é o mesmo teto que
+// Movimentacoes.tsx já assume). Pedir 2000 não trazia 2000 — trazia 1000, e o
+// aviso de truncamento, que testava `>= 2000`, NUNCA disparava. O número aqui
+// tem de ser o teto real para o aviso valer de alguma coisa.
+const LIMITE_PUBLICACOES = 1000
+const LIMITE_MOVIMENTACOES = 1000
 
 // Data-limite (YYYY-MM-DD, fuso local) de uma janela de N dias — usada em
 // dupla pela contagem da pílula e pela lista, que precisam andar juntas.
@@ -340,7 +346,12 @@ function Publicacoes({ busca }: { busca: string }) {
 
   if (lista.isLoading) return <Loading label="Carregando publicações…" />
   if (lista.isError)
-    return <ErrorState message={(lista.error as Error)?.message} />
+    return (
+      <ErrorState
+        message={(lista.error as Error)?.message}
+        onRetry={() => void lista.refetch()}
+      />
+    )
 
   const novas = filtradas.filter((p) => !p.tratada)
   const providenciadas = filtradas.filter((p) => p.tratada)
@@ -732,7 +743,12 @@ function Movimentacoes({ busca }: { busca: string }) {
   }, [status.data, numerosNovas, q, resolve])
 
   if (lista.isLoading) return <Loading label="Carregando movimentações…" />
-  if (lista.isError) return <ErrorState message={(lista.error as Error)?.message} />
+  if (lista.isError) return (
+      <ErrorState
+        message={(lista.error as Error)?.message}
+        onRetry={() => void lista.refetch()}
+      />
+    )
 
   const totalMovs = novas.reduce((s, g) => s + g.movs.length, 0)
   const vazio = novas.length === 0 && paralisados.length === 0
@@ -754,8 +770,8 @@ function Movimentacoes({ busca }: { busca: string }) {
       {(lista.data?.length ?? 0) >= LIMITE_MOVIMENTACOES && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           Mostrando as {LIMITE_MOVIMENTACOES} movimentações mais recentes da
-          janela de 20 dias, que é o limite da consulta. Com o corte, um processo
-          pode aparecer em Paralisados sem estar.
+          janela de 20 dias, que é o teto de uma consulta. Com o corte, um
+          processo pode aparecer em Paralisados sem estar.
         </p>
       )}
 

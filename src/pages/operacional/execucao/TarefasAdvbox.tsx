@@ -23,7 +23,13 @@ import { Combobox, MultiCombobox, type OpcaoCombo } from '@/components/ui/Combob
 import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatNome, onlyDigits as dig, sentenceCase } from '@/lib/format'
+import {
+  formatCNJ,
+  formatNome,
+  normalizarBusca,
+  onlyDigits as dig,
+  sentenceCase,
+} from '@/lib/format'
 
 // ---------- Tipos vindos da Edge Function advbox-tarefas ----------
 interface TarefaAdvbox {
@@ -134,7 +140,18 @@ function prazoInfo(
 ): { tone: Urgencia; rel: string } | null {
   if (!deadline) return null
   const n = diffDias(hoje, deadline.slice(0, 10))
-  if (n <= 1) return { tone: 'danger', rel: n <= 0 ? 'hoje' : 'amanhã' }
+  // Prazo ESTOURADO tem rótulo próprio. Desde que as vencidas deixaram de ser
+  // escondidas (elas ficam no grupo "Vencidas"), `n` negativo passou a ser
+  // possível — e caía no ramo de hoje/amanhã, então um atraso de nove meses saía
+  // rotulado "· hoje", contradizendo o bloco de data ao lado no mesmo cartão.
+  if (n < 0) {
+    const dias = -n
+    return {
+      tone: 'danger',
+      rel: dias === 1 ? 'venceu ontem' : `venceu há ${dias} dias`,
+    }
+  }
+  if (n <= 1) return { tone: 'danger', rel: n === 0 ? 'hoje' : 'amanhã' }
   if (n <= 7) return { tone: 'warning', rel: `em ${n} dias` }
   return { tone: 'neutral', rel: '' }
 }
@@ -168,7 +185,7 @@ export default function TarefasAdvbox() {
   const toast = useToast()
 
   // Lista ao vivo do ADVBOX — recarrega ao abrir a página e ao focar a aba.
-  const { data, isLoading, isError, error, isFetching, dataUpdatedAt } = useQuery({
+  const { data, isLoading, isError, error, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ['advbox-tarefas'],
     queryFn: () =>
       invokeFunction<RespostaTarefas>('advbox-tarefas', { action: 'list' }),
@@ -238,14 +255,25 @@ export default function TarefasAdvbox() {
   const [novo, setNovo] = useState(false)
 
   // Busca textual (sem o filtro de prazo) — base para lista e contagens.
+  //
+  // normalizarBusca, e não toLowerCase cru: tipo e responsável chegam do ADVBOX
+  // em CAIXA ALTA e com acento, e ninguém digita acento em caixa de busca. E o
+  // número do processo é comparado também por dígito, porque na tela ele aparece
+  // formatado — colar o número cru não achava nada. Mesmo padrão das outras
+  // telas.
   const baseBusca = useMemo(() => {
-    if (!busca.trim()) return tarefas
-    const q = busca.toLowerCase()
-    return tarefas.filter((t) =>
-      [t.tipo, t.processo, t.notes, ...(t.responsaveis ?? [])]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q)),
-    )
+    const q = normalizarBusca(busca)
+    if (!q) return tarefas
+    const qd = dig(busca)
+    return tarefas.filter((t) => {
+      const texto = normalizarBusca(
+        [t.tipo, t.processo, t.notes, ...(t.responsaveis ?? [])]
+          .filter(Boolean)
+          .join(' '),
+      )
+      if (texto.includes(q)) return true
+      return qd.length >= 4 && dig(t.processo).includes(qd)
+    })
   }, [tarefas, busca])
 
   // Fatais viram dois grupos (Pendentes / Vencidas); Sem prazo segue lista
@@ -438,7 +466,7 @@ export default function TarefasAdvbox() {
         </Card>
       ) : isError ? (
         <Card>
-          <ErrorState message={(error as Error)?.message} />
+          <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />
         </Card>
       ) : data?.sem_correspondencia ? (
         // Lista vazia por falta de vínculo, não por ausência de trabalho — dizer
@@ -729,7 +757,10 @@ export function NovaTarefaModal({
       {opcoes.isLoading ? (
         <Loading label="Carregando opções do ADVBOX…" />
       ) : opcoes.isError ? (
-        <ErrorState message={(opcoes.error as Error)?.message} />
+        <ErrorState
+          message={(opcoes.error as Error)?.message}
+          onRetry={() => void opcoes.refetch()}
+        />
       ) : semRemetente ? (
         <div className="space-y-1">
           <p className="text-sm font-medium text-slate-800">
