@@ -17,7 +17,7 @@ export default function Login() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-brand-ice">
+      <div className="flex h-screen items-center justify-center bg-papel">
         <Loader2 className="h-8 w-8 animate-spin text-brand-500" />
       </div>
     )
@@ -42,7 +42,7 @@ export default function Login() {
   return (
     // Fundo claro, como os materiais comerciais da marca: a logomarca aparece
     // em cor plena (o azul dela não sobrevive legível sobre navy escuro).
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-ice via-white to-brand-100 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-papel via-white to-brand-100 p-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <h1 className="sr-only">Credijuris</h1>

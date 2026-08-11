@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
-import { Plus, Search, Flame, Star, FileText, Users } from 'lucide-react'
+import { Plus, Search, Flame, Star, FileText } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invokeFunction } from '@/lib/functions'
 import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
@@ -170,17 +170,30 @@ function diaMes(iso?: string | null): { dia: string; mes: string } | null {
 const TONE_BAR: Record<Urgencia, string> = {
   danger: 'bg-red-500',
   warning: 'bg-amber-500',
-  neutral: 'bg-slate-200',
+  // Neutro na cor da marca (e não cinza): a régua de urgência continua sendo
+  // vermelho > âmbar > calmo, só que "calmo" agora também é Credijuris.
+  neutral: 'bg-brand-200',
 }
 const TONE_BLOCK: Record<Urgencia, string> = {
   danger: 'bg-red-50 text-red-700',
   warning: 'bg-amber-50 text-amber-700',
-  neutral: 'bg-slate-100 text-slate-600',
+  neutral: 'bg-brand-50 text-brand-700',
 }
-const TONE_TEXT: Record<Urgencia, string> = {
-  danger: 'text-red-600',
-  warning: 'text-amber-700',
-  neutral: 'text-slate-600',
+// Pílula do prazo relativo ("hoje", "em 3 dias", "venceu há N dias").
+const TONE_PILL: Record<Urgencia, string> = {
+  danger: 'bg-red-50 text-red-700 ring-red-200',
+  warning: 'bg-amber-50 text-amber-700 ring-amber-200',
+  neutral: 'bg-slate-100 text-slate-600 ring-slate-200',
+}
+
+/** Iniciais para o avatar do responsável ("Luiz Guilherme…" → "LG"). */
+function iniciais(nome: string): string {
+  const partes = nome.trim().split(/\s+/)
+  return partes
+    .slice(0, 2)
+    .map((p) => p[0] ?? '')
+    .join('')
+    .toUpperCase()
 }
 
 export default function TarefasAdvbox() {
@@ -336,84 +349,98 @@ export default function TarefasAdvbox() {
     return (
       <div
         key={t.id}
-        className="flex overflow-hidden rounded-xl border border-slate-200 bg-white"
+        className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-brand-950/[0.03] transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md hover:shadow-brand-950/[0.08]"
       >
-        <div className={cn('w-1 flex-none', TONE_BAR[tone])} />
-        {/* flex-wrap: o bloco de responsáveis é flex-none e ocupa 173px fixos.
-            Numa tela de 375px isso deixava 52px para o conteúdo, e o número do
-            processo com as partes saía em 17 linhas de meia palavra — o
+        <div className={cn('absolute inset-y-0 left-0 w-1.5', TONE_BAR[tone])} />
+        {/* flex-wrap: o bloco de responsáveis é flex-none. Numa tela de 375px,
+            sem a quebra, o conteúdo ficava espremido a 52px de largura — o
             `truncate` que havia aqui escondia o aperto em vez de resolver. Com a
             quebra, os responsáveis descem para a linha de baixo quando não
-            cabem e o conteúdo fica com a largura toda. No desktop tudo continua
-            numa linha só, sem mudança nenhuma. */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-3 p-3">
+            cabem. No desktop tudo continua numa linha só. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-4 p-4 pl-5">
+          {/* Folhinha de calendário: o prazo é O dado desta tela, então ele é o
+              maior elemento do cartão. */}
           <div
-            className={cn('w-12 flex-none rounded-md py-1.5 text-center', TONE_BLOCK[tone])}
+            className={cn(
+              'flex w-14 flex-none flex-col items-center rounded-xl py-2',
+              TONE_BLOCK[tone],
+            )}
           >
             {bloco ? (
               <>
-                <div className="text-lg font-bold leading-none">{bloco.dia}</div>
-                <div className="text-xs leading-tight">{bloco.mes}</div>
+                <div className="text-2xl font-bold leading-none tracking-tight">
+                  {bloco.dia}
+                </div>
+                <div className="mt-1 text-xs font-semibold uppercase leading-none tracking-wider">
+                  {bloco.mes}
+                </div>
               </>
             ) : (
-              <div className="py-1 text-sm">—</div>
+              <div className="py-2 text-sm">—</div>
             )}
           </div>
           {/* min-w é o que FORÇA a quebra: sem um piso, o flex encolhe esta
               coluna até caber o resto na mesma linha, e foi assim que ela chegou
               a 52px. */}
           <div className="min-w-[11rem] flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {t.urgent && (
-                <span title="Urgente">
-                  <Flame className="h-3.5 w-3.5 text-red-500" />
-                </span>
-              )}
-              {t.important && (
-                <span title="Importante">
-                  <Star className="h-3.5 w-3.5 text-amber-500" />
-                </span>
-              )}
-              <span className="text-sm font-medium text-slate-800">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-base font-semibold tracking-tight text-slate-800">
                 {t.tipo ? sentenceCase(t.tipo) : '—'}
               </span>
               {prazo?.rel && (
-                <span className={cn('text-xs font-medium', TONE_TEXT[tone])}>
-                  · {prazo.rel}
+                <span
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
+                    TONE_PILL[tone],
+                  )}
+                >
+                  {prazo.rel}
+                </span>
+              )}
+              {t.urgent && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 ring-1 ring-inset ring-red-200">
+                  <Flame className="h-3 w-3" /> Urgente
+                </span>
+              )}
+              {t.important && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                  <Star className="h-3 w-3" /> Importante
                 </span>
               )}
             </div>
             {/* Sem truncate: medido a 375px, esta linha mostrava 9% do conteúdo
-                — "5007431-28.2024.8.09.0100 · Alisson ..." virava só o número
-                pela metade, e as PARTES do processo, que é o que identifica a
-                tarefa de relance, ficavam invisíveis. Quebrar em duas linhas
-                custa altura; esconder o nome da parte custa o entendimento. */}
-            <div className="mt-0.5 break-words text-sm text-slate-600">
+                — e as PARTES do processo, que é o que identifica a tarefa de
+                relance, ficavam invisíveis. Quebrar em duas linhas custa altura;
+                esconder o nome da parte custa o entendimento. */}
+            <div className="mt-1 break-words text-sm text-slate-600">
               {/* Mesmo componente da tela de Créditos: o clique no número tem de
                   levar à mesma pasta nas duas telas. `cred` é o crédito que a tarefa
                   casou — nulo quando o processo não está cadastrado, e aí o número
                   aparece como texto comum. */}
               <NumeroProcessoDrive processo={cred} numero={t.processo} />
-              {partes && ` · ${partes}`}
+              {partes && (
+                <span className="text-slate-500"> · {partes}</span>
+              )}
             </div>
             {t.notes && <Observacao text={t.notes} />}
           </div>
-          {/* Responsáveis à esquerda do botão de petição. flex-none: só
-              ocupa o que precisa, e a coluna de conteúdo (flex-1) cede o
-              espaço — que sobra. O max-w é só teto para lista longa. */}
+          {/* Responsáveis: um chip com avatar de iniciais por pessoa — cada
+              nome é uma unidade que não quebra; com vários, a quebra cai ENTRE
+              chips. flex-none: só ocupa o que precisa, e a coluna de conteúdo
+              (flex-1) cede o espaço. O max-w é só teto para lista longa. */}
           {resp.length > 0 && (
-            <div className="flex max-w-[20rem] flex-none items-start gap-1.5 text-sm text-slate-600">
-              <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-500" />
-              {/* Cada nome é uma unidade que não quebra: com vários
-                  responsáveis a quebra cai ENTRE nomes, nunca no meio de um. */}
-              <span className="flex flex-wrap gap-x-1.5">
-                {resp.map((r, i) => (
-                  <span key={i} className="whitespace-nowrap">
-                    {formatNome(r)}
-                    {i < resp.length - 1 && ','}
+            <div className="flex max-w-[20rem] flex-none flex-wrap items-center gap-1.5">
+              {resp.map((r, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-brand-900 ring-1 ring-inset ring-brand-100"
+                >
+                  <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">
+                    {iniciais(r)}
                   </span>
-                ))}
-              </span>
+                  {formatNome(r)}
+                </span>
+              ))}
             </div>
           )}
           <Button
@@ -500,19 +527,19 @@ export default function TarefasAdvbox() {
           <EmptyState title="Nenhuma tarefa" />
         </Card>
       ) : filtroPrazo === 'sem_prazo' ? (
-        <div className="space-y-2">{semPrazo.map(card)}</div>
+        <div className="space-y-3">{semPrazo.map(card)}</div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-6">
           <Secao titulo="Pendentes" qtd={pendentes.length}>
             {pendentes.length ? (
-              <div className="space-y-2">{pendentes.map(card)}</div>
+              <div className="space-y-3">{pendentes.map(card)}</div>
             ) : (
               <p className="text-sm text-slate-600">Nenhuma tarefa pendente.</p>
             )}
           </Secao>
           <Secao titulo="Vencidas" qtd={vencidas.length}>
             {vencidas.length ? (
-              <div className="space-y-2">{vencidas.map(card)}</div>
+              <div className="space-y-3">{vencidas.map(card)}</div>
             ) : (
               <p className="text-sm text-slate-600">Nenhuma tarefa vencida.</p>
             )}
@@ -561,11 +588,13 @@ function Secao({
 }) {
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 pt-1">
-        <span className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+      <div className="flex items-center gap-2.5 pt-1">
+        <span className="text-sm font-semibold uppercase tracking-wide text-brand-800">
           {titulo}
         </span>
-        <span className="text-xs text-slate-600">({qtd})</span>
+        <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-brand-800">
+          {qtd}
+        </span>
         <div className="h-px flex-1 bg-slate-200" />
       </div>
       {children}

@@ -12,7 +12,6 @@ export default {
         // O antigo dourado NÃO existe em nenhum material da marca — o acento
         // real é o verde (ver `verde` abaixo).
         brand: {
-          ice: '#f3f8fc', // fundo da aplicação (azul-gelo, quase branco)
           50: '#f2f9fd',
           100: '#e2f1fa',
           200: '#bfe2f4',
@@ -21,10 +20,14 @@ export default {
           500: '#0b81c5', // ← o azul da logomarca
           600: '#0a6296', // ← azul de títulos do contrato
           700: '#075278', // ← azul de cabeçalho do contrato
-          800: '#07425f',
-          900: '#062f44',
-          950: '#041e2c',
+          800: '#053f65',
+          900: '#042c53', // ← navy da apresentação de Oferta (literal)
+          950: '#021c38',
         },
+        // Fundo da aplicação: papel quente, o fundo de TODAS as apresentações
+        // comerciais da marca (#FAF7F0, #F5F2EC, #F1EFE8…). Um cinza-azulado
+        // aqui parecia genérico; o papel é o que faz "parecer Credijuris".
+        papel: '#f8f5ef',
         // Acento verde dos materiais comerciais (#2ECC71 e #1FA75B nas
         // apresentações) — usado para o indicador de navegação ativa e
         // destaques positivos/financeiros.

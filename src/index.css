@@ -21,9 +21,9 @@
   }
 
   body {
-    /* Azul-gelo da marca em vez de cinza: o fundo inteiro já "é Credijuris"
-       sem gritar — os cartões brancos ganham profundidade sobre ele. */
-    @apply bg-brand-ice text-slate-800 antialiased;
+    /* Papel quente, o fundo das apresentações da marca: o fundo inteiro já
+       "é Credijuris" sem gritar — os cartões brancos ganham profundidade. */
+    @apply bg-papel text-slate-800 antialiased;
   }
 
   /* Até selecionar texto tem a cor da casa. */
