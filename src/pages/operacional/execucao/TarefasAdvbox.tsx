@@ -20,6 +20,8 @@ import { Segmented } from '@/components/ui/Segmented'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Modal } from '@/components/ui/Modal'
 import { Combobox, MultiCombobox, type OpcaoCombo } from '@/components/ui/Combobox'
+import { PeticaoModal } from '@/components/PeticaoModal'
+import type { Processo } from '@/lib/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
@@ -223,15 +225,17 @@ export default function TarefasAdvbox() {
   // apensos vinculados a um crédito herdam o cedente/cessionário do crédito pai.
   const processos = processosCrud.useList()
   const apensos = apensosCrud.useList()
+  // Devolve o CRÉDITO INTEIRO, e não só cedente/cessionário: a geração de petição
+  // precisa também de vara, comarca, número e tipo do crédito. Um segundo
+  // resolvedor ao lado deste montaria os mesmos dois mapas para responder a mesma
+  // pergunta, e os dois poderiam divergir sobre qual crédito é o de uma tarefa.
   const resolveCredito = useMemo(() => {
-    type Info = { cedente: string | null; cessionario: string | null }
-    const porNumero = new Map<string, Info>()
-    const porId = new Map<string, Info>()
+    const porNumero = new Map<string, Processo>()
+    const porId = new Map<string, Processo>()
     for (const p of processos.data ?? []) {
-      const info: Info = { cedente: p.cedente, cessionario: p.cessionario }
-      porId.set(p.id, info)
+      porId.set(p.id, p)
       const d = dig(p.numero_cnj)
-      if (d.length >= 6) porNumero.set(d, info)
+      if (d.length >= 6) porNumero.set(d, p)
     }
     // numero do apenso -> id do crédito pai
     const apensoParent = new Map<string, string>()
@@ -239,7 +243,7 @@ export default function TarefasAdvbox() {
       const d = dig(a.numero)
       if (d.length >= 6 && a.processo_id) apensoParent.set(d, a.processo_id)
     }
-    return (processoNum: string): Info | null => {
+    return (processoNum: string): Processo | null => {
       const d = dig(processoNum)
       const direto = porNumero.get(d)
       if (direto) return direto
@@ -247,6 +251,10 @@ export default function TarefasAdvbox() {
       return parentId ? porId.get(parentId) ?? null : null
     }
   }, [processos.data, apensos.data])
+
+  // Tarefa cuja janela de petição está aberta. Guarda a tarefa toda, e não só o
+  // id: a janela precisa da descrição para sugerir o modelo.
+  const [peticaoDe, setPeticaoDe] = useState<TarefaAdvbox | null>(null)
 
   const [busca, setBusca] = useState('')
   // Padrão ao abrir: tarefas fatais (com prazo). Só duas visões — "Todas"
@@ -408,9 +416,7 @@ export default function TarefasAdvbox() {
             variant="outline"
             title="Gerar petição"
             icon={<FileText className="h-4 w-4" />}
-            onClick={() =>
-              toast.toast('Geração de petição será configurada em breve.', 'info')
-            }
+            onClick={() => setPeticaoDe(t)}
           />
         </div>
       </div>
@@ -517,6 +523,17 @@ export default function TarefasAdvbox() {
           setNovo(false)
           toast.success('Tarefa criada no ADVBOX.')
         }}
+      />
+
+      {/* O crédito é resolvido AQUI, e não dentro da janela: é esta tela que tem
+          os mapas de número e de apenso montados, e é aqui que a regra de "tarefa
+          de apenso herda o crédito pai" já vale. */}
+      <PeticaoModal
+        open={!!peticaoDe}
+        onClose={() => setPeticaoDe(null)}
+        descricao={peticaoDe?.tipo ?? null}
+        processo={peticaoDe ? resolveCredito(peticaoDe.processo) : null}
+        numeroTarefa={peticaoDe?.processo ?? ''}
       />
     </div>
   )

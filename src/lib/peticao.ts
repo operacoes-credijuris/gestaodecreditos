@@ -46,6 +46,27 @@ export async function baixarModelo(arquivo: string): Promise<string> {
   return texto
 }
 
+/**
+ * Papel timbrado como data URI, para entrar de fundo em todas as páginas do PDF.
+ *
+ * Devolve null em vez de lançar: sem a arte a petição sai em papel branco, o que
+ * ainda serve num aperto. Petição que não gera, não serve para nada.
+ */
+export async function baixarTimbrado(): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(BUCKET_MODELOS)
+    .download(ARQUIVO_TIMBRADO)
+  if (error || !data) return null
+  const bytes = new Uint8Array(await data.arrayBuffer())
+  let bin = ''
+  // Em pedaços: passar 80 mil bytes de uma vez para o apply estoura a pilha.
+  const passo = 8192
+  for (let i = 0; i < bytes.length; i += passo) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + passo))
+  }
+  return `data:image/jpeg;base64,${btoa(bin)}`
+}
+
 export type VariavelPeticao =
   | 'juizo'
   | 'processo_cnj'
