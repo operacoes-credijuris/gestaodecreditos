@@ -1,0 +1,820 @@
+// Assistente de perguntas sobre os dados do sistema (o "Clips").
+//
+// Recebe uma pergunta em português, consulta o banco através de um conjunto
+// FECHADO de ferramentas de leitura e devolve a resposta em texto.
+//
+// Três decisões de segurança, todas deliberadas:
+//   1. Usa callerClient() e não serviceClient(): as consultas rodam sob as RLS
+//      do usuário logado, então o assistente nunca mostra mais do que a pessoa
+//      já veria navegando pelas telas.
+//   2. Não existe ferramenta de escrita. O modelo não tem como alterar nada,
+//      mesmo que a pergunta peça — não é uma instrução no prompt, é ausência
+//      de capacidade.
+//   3. O modelo não escreve SQL. Ele escolhe entre as consultas prontas abaixo
+//      e informa os filtros; a montagem da query é nossa.
+import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
+import { montarPainel, type CreditoBruto } from '../_shared/nucleo/painel.ts'
+import { ERRO_ACESSO, callerClient, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+// Especificador npm: com versão fixa, pelo mesmo motivo do _shared/auth.ts:
+// "@latest" traria mudança de comportamento a produção sem ninguém mexer aqui.
+import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
+
+/**
+ * Chave da Anthropic, gravada pela tela de Configurações (mesmo caminho do
+ * ADVBOX e do Kommo). A leitura usa a service_role porque a tabela não tem
+ * policy nenhuma — é justamente o que impede o cliente de ler a chave.
+ *
+ * O secret de ambiente ANTHROPIC_API_KEY continua valendo como alternativa,
+ * para quem preferir configurar por fora do sistema.
+ */
+async function chaveAnthropic(): Promise<string | null> {
+  const doAmbiente = Deno.env.get('ANTHROPIC_API_KEY')
+  if (doAmbiente) return doAmbiente
+  const { data } = await serviceClient()
+    .from('integracao_anthropic_secret')
+    .select('token')
+    .eq('id', 1)
+    .maybeSingle()
+  return data?.token ?? null
+}
+
+/** Teto de idas e voltas com o modelo. Barreira contra laço infinito. */
+const MAX_RODADAS = 8
+
+/**
+ * Sonnet nas duas situações; o que varia é o esforço, escolhido pelo que a
+ * pergunta EXIGIU — não pelo que ela parecia exigir.
+ *
+ * Contagens, listas e somas são consulta estruturada: o trabalho é escolher o
+ * filtro certo, e esforço médio dá conta.
+ *
+ * Interpretar movimentação é outra coisa. O texto é jurídico, corrido, com
+ * redação que varia por tribunal, e a resposta precisa distinguir o que o
+ * andamento sustenta do que apenas se parece com a pergunta. Errar ali custa
+ * caro — um processo apontado como concluso quando não está —, então esse
+ * caminho roda em esforço alto.
+ *
+ * Classificar a pergunta pelas palavras dela erraria: "quantos processos estão
+ * conclusos" começa igual a uma contagem. Então começamos no esforço menor e
+ * promovemos a partir do momento em que a busca textual é acionada — a decisão
+ * vem do comportamento observado, não de um palpite sobre a intenção.
+ */
+const MODELO = 'claude-sonnet-5'
+/** Ferramenta cuja presença promove a conversa ao esforço alto. */
+const FERRAMENTA_QUE_PROMOVE = 'buscar_movimentacoes'
+/** Teto de linhas por consulta: o que vai para o modelo é contexto, não relatório. */
+const LIMITE_MAX = 50
+/**
+ * A busca textual tem tetos próprios, porque agrupa por processo. Varremos
+ * muitas linhas (baratas: só número, data e um trecho) e devolvemos poucos
+ * processos — assim dez andamentos do mesmo processo não ocupam dez vagas.
+ */
+const LINHAS_VARRIDAS = 600
+const PROCESSOS_POR_BUSCA = 60
+
+// ---------------------------------------------------------------- ferramentas
+
+const FERRAMENTAS: Anthropic.Tool[] = [
+  {
+    name: 'contar_processos',
+    description:
+      'Conta créditos/processos cadastrados, opcionalmente filtrando. ' +
+      'Use para perguntas de "quantos". Devolve um número exato.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['ativo', 'complementar', 'encerrado'],
+          description: 'Situação cadastral do crédito.',
+        },
+        tribunal: { type: 'string', description: 'Trecho do nome do tribunal.' },
+        entidade_devedora: {
+          type: 'string',
+          description: 'Trecho do nome da entidade devedora.',
+        },
+      },
+    },
+  },
+  {
+    name: 'listar_processos',
+    description:
+      'Lista créditos/processos com seus dados cadastrais. Use quando a ' +
+      'pergunta pedir quais são, não quantos são.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['ativo', 'complementar', 'encerrado'] },
+        tribunal: { type: 'string' },
+        entidade_devedora: { type: 'string' },
+        limite: {
+          type: 'integer',
+          description: `Máximo de linhas (teto ${LIMITE_MAX}).`,
+        },
+      },
+    },
+  },
+  {
+    name: 'buscar_movimentacoes',
+    description:
+      'Procura um trecho de texto nas movimentações e publicações dos ' +
+      'processos. É a ÚNICA forma de responder sobre fase processual ' +
+      '("concluso para decisão", "sentença", "trânsito em julgado"), porque ' +
+      'essas informações só existem no texto dos andamentos — não há campo ' +
+      'no cadastro. Devolve UM registro por processo (o andamento mais ' +
+      'recente que casou), mais a contagem exata de ocorrências e de ' +
+      'processos distintos. Sempre mostre os processos encontrados; use ' +
+      '`processos_distintos_encontrados` para dizer o total e ' +
+      '`pode_haver_mais_antigos` para saber se ficou algo de fora.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        texto: {
+          type: 'string',
+          description:
+            'Trecho a procurar. Prefira termos curtos ("concluso", ' +
+            '"sentença") — variações de redação são comuns.',
+        },
+        dias: {
+          type: 'integer',
+          description: 'Só andamentos dos últimos N dias. Omita para todos.',
+        },
+        limite: {
+          type: 'integer',
+          description: `Máximo de processos a listar (teto ${PROCESSOS_POR_BUSCA}).`,
+        },
+      },
+      required: ['texto'],
+    },
+  },
+  {
+    name: 'contar_publicacoes',
+    description:
+      'Conta publicações/intimações do DJEN por situação de tratamento. ' +
+      'Use para perguntas sobre pendências da equipe. A janela é contada por ' +
+      'data de disponibilização, no fuso de Brasília.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        // Sem `lida`: a tabela do DJEN só tem `tratada`. O parâmetro existia e
+        // apontava para uma coluna inexistente.
+        tratada: { type: 'boolean' },
+        dias: { type: 'integer', description: 'Últimos N dias.' },
+      },
+    },
+  },
+  {
+    name: 'panorama_economico',
+    description:
+      'Panorama econômico da carteira: capital investido, valor recebido, ganho, ' +
+      'rentabilidade (mediana, média e ponderada pelo capital), rentabilidade ' +
+      'anualizada, prazos, forecast de recebimentos por mês, previsões vencidas, ' +
+      'aderência das previsões e inconsistências. Use para QUALQUER pergunta de ' +
+      'valores, rentabilidade, prazo ou recebimentos da carteira. Os números vêm ' +
+      'da mesma camada de cálculo das telas — não refaça conta nenhuma sobre eles.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'recorte_economico',
+    description:
+      'Desempenho econômico agrupado por tribunal, ente devedor, investidor, ' +
+      'faixa de valor ou safra. Cada grupo vem com o tamanho da amostra e a classe ' +
+      'de representatividade, que diz se há base para comparar. Respeite essa ' +
+      'classificação: grupo marcado como insuficiente NÃO pode ser comparado nem ' +
+      'classificado como melhor ou pior.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        dimensao: {
+          type: 'string',
+          enum: ['tribunal', 'ente', 'investidor', 'faixa_valor', 'safra'],
+          description: 'Como agrupar as operações.',
+        },
+      },
+      required: ['dimensao'],
+    },
+  },
+]
+
+/** Fração -> pontos percentuais, arredondado. Null continua null. */
+function pctOuNulo(f: number | null | undefined): number | null {
+  return typeof f === 'number' && Number.isFinite(f) ? Math.round(f * 10000) / 100 : null
+}
+
+function limite(valor: unknown): number {
+  const n = typeof valor === 'number' ? valor : 20
+  return Math.min(Math.max(n, 1), LIMITE_MAX)
+}
+
+/**
+ * Data ISO de N dias atrás, no fuso de BRASÍLIA.
+ *
+ * toISOString() (UTC) errava o dia inteiro depois das 21h: às 21h30 de 10/08,
+ * "últimos 1 dia" virava ">= 2026-08-10" — contava HOJE e excluía 09/08, que era
+ * exatamente o dia pedido. E a resposta saía com número exato, sem ressalva.
+ * A Edge Function roda em UTC, então o fuso tem de ser explícito.
+ */
+function desde(dias: number): string {
+  const hojeSP = new Date().toLocaleDateString('sv-SE', {
+    timeZone: 'America/Sao_Paulo',
+  })
+  const [a, m, d] = hojeSP.split('-').map(Number)
+  const base = new Date(Date.UTC(a, m - 1, d))
+  base.setUTCDate(base.getUTCDate() - dias)
+  return base.toISOString().slice(0, 10)
+}
+
+/** Texto legível a partir do HTML do DJEN (o `raw.texto` vem com marcação). */
+function textoDjen(raw: unknown): string | null {
+  const t = (raw as { texto?: unknown } | null)?.texto
+  if (typeof t !== 'string') return null
+  return t
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Executa a ferramenta escolhida pelo modelo. Devolve texto (JSON) porque é o
+ * que o modelo lê — erro incluído, para ele poder tentar outro caminho.
+ */
+async function executar(
+  svc: SupabaseClient,
+  nome: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  switch (nome) {
+    case 'contar_processos': {
+      let q = svc.from('processos').select('id', { count: 'exact', head: true })
+      if (args.status) q = q.eq('status', args.status)
+      if (args.tribunal) q = q.ilike('tribunal', `%${args.tribunal}%`)
+      if (args.entidade_devedora)
+        q = q.ilike('entidade_devedora', `%${args.entidade_devedora}%`)
+      const { count, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      return JSON.stringify({ total: count ?? 0, filtros: args })
+    }
+
+    case 'listar_processos': {
+      let q = svc
+        .from('processos')
+        .select(
+          'numero_cnj, tribunal, comarca, vara, cedente, entidade_devedora, ' +
+            'status, data_aquisicao, expectativa_liquidacao, data_liquidacao',
+        )
+        .order('created_at', { ascending: false })
+        .limit(limite(args.limite))
+      if (args.status) q = q.eq('status', args.status)
+      if (args.tribunal) q = q.ilike('tribunal', `%${args.tribunal}%`)
+      if (args.entidade_devedora)
+        q = q.ilike('entidade_devedora', `%${args.entidade_devedora}%`)
+      const { data, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      return JSON.stringify({ quantidade_retornada: data?.length ?? 0, processos: data })
+    }
+
+    case 'buscar_movimentacoes': {
+      const texto = String(args.texto ?? '')
+      if (!texto) return JSON.stringify({ erro: 'Informe o texto a procurar.' })
+      const dias = typeof args.dias === 'number' ? args.dias : null
+      const maxProcessos = Math.min(
+        typeof args.limite === 'number' ? args.limite : PROCESSOS_POR_BUSCA,
+        PROCESSOS_POR_BUSCA,
+      )
+
+      // Duas fontes independentes: andamentos do ADVBOX e publicações do DJEN.
+      // Consultamos as duas porque a mesma fase pode aparecer só em uma delas.
+      //
+      // O campo de texto é PARÂMETRO porque as duas fontes guardam o texto em
+      // lugares diferentes: advbox_movimentacoes tem a coluna `conteudo`, e o
+      // DJEN guarda o comunicado dentro de `raw` (jsonb), em HTML.
+      const filtra = <T>(q: T, campoData: string, campoTexto: string): T => {
+        let r = (q as { ilike: (c: string, v: string) => unknown }).ilike(
+          campoTexto,
+          `%${texto}%`,
+        ) as T
+        if (dias) {
+          r = (r as { gte: (c: string, v: string) => unknown }).gte(
+            campoData,
+            desde(dias),
+          ) as T
+        }
+        return r
+      }
+
+      // Contagem exata em paralelo com a amostra: é o que permite dizer "521
+      // ocorrências em 87 processos, veja as 60 mais recentes" em vez de
+      // "atingi o teto e não sei o que ficou de fora".
+      // ⚠️ djen_publicacoes, e NÃO public.publicacoes: aquela tabela é legado e
+      // está vazia. Com ela, "quantas publicações não foram tratadas?" respondia
+      // "nenhuma pendente" com 180 na tela — número errado dado como exato, que é
+      // o pior jeito de errar num assistente.
+      const [totMov, totPub, mov, pub] = await Promise.all([
+        filtra(
+          svc
+            .from('advbox_movimentacoes')
+            .select('id', { count: 'exact', head: true }),
+          'data',
+          'conteudo',
+        ),
+        filtra(
+          svc.from('djen_publicacoes').select('id', { count: 'exact', head: true }),
+          'data_disponibilizacao',
+          'raw->>texto',
+        ),
+        filtra(
+          svc
+            .from('advbox_movimentacoes')
+            .select('numero_processo, data, conteudo')
+            .order('data', { ascending: false })
+            .limit(LINHAS_VARRIDAS),
+          'data',
+          'conteudo',
+        ),
+        filtra(
+          svc
+            .from('djen_publicacoes')
+            .select('numero_processo, data_disponibilizacao, tipo_comunicacao, tratada, raw')
+            .order('data_disponibilizacao', { ascending: false })
+            .limit(LINHAS_VARRIDAS),
+          'data_disponibilizacao',
+          'raw->>texto',
+        ),
+      ])
+      if (mov.error && pub.error)
+        return JSON.stringify({ erro: mov.error.message })
+
+      // Fonte que caiu tem de ser DECLARADA, não seguida em silêncio: antes, se a
+      // contagem exata estourasse o statement_timeout, count vinha null e o JSON
+      // dizia "total_ocorrencias: 0" ao lado de processos encontrados — o modelo
+      // lia zero como fato e afirmava que não havia nada.
+      const fontesIndisponiveis: string[] = []
+      if (mov.error || totMov.error) fontesIndisponiveis.push('movimentacoes')
+      if (pub.error || totPub.error) fontesIndisponiveis.push('publicacoes')
+      const contagemIncompleta =
+        totMov.count === null || totPub.count === null || fontesIndisponiveis.length > 0
+
+      // Agrupa por processo, guardando o andamento MAIS RECENTE de cada um.
+      // Sem isso, dez andamentos de um mesmo processo consumiam dez vagas do
+      // limite e escondiam nove outros processos — que é o que a pessoa quer
+      // ver. O trecho é cortado em 220 caracteres: o suficiente para conferir
+      // que casou de verdade, sem despejar o andamento inteiro.
+      interface Achado {
+        numero_processo: string
+        data: string | null
+        fonte: 'movimentacao' | 'publicacao'
+        trecho: string | null
+      }
+      const porProcesso = new Map<string, Achado>()
+      const registra = (a: Achado) => {
+        if (!a.numero_processo) return
+        const atual = porProcesso.get(a.numero_processo)
+        if (!atual || (a.data ?? '') > (atual.data ?? '')) {
+          porProcesso.set(a.numero_processo, a)
+        }
+      }
+      const corta = (t: string | null) =>
+        t && t.length > 220 ? `${t.slice(0, 220)}…` : t
+
+      for (const m of mov.data ?? []) {
+        registra({
+          numero_processo: m.numero_processo,
+          data: m.data,
+          fonte: 'movimentacao',
+          trecho: corta(m.conteudo),
+        })
+      }
+      for (const p of pub.data ?? []) {
+        registra({
+          numero_processo: p.numero_processo,
+          data: p.data_disponibilizacao,
+          fonte: 'publicacao',
+          // O comunicado do DJEN vem em HTML dentro de raw; sem limpar, o modelo
+          // receberia marcação em vez de texto.
+          trecho: corta(textoDjen(p.raw)),
+        })
+      }
+
+      const todos = [...porProcesso.values()].sort(
+        (a, b) => (b.data ?? '').localeCompare(a.data ?? ''),
+      )
+      const amostra = todos.slice(0, maxProcessos)
+      const totalOcorrencias = (totMov.count ?? 0) + (totPub.count ?? 0)
+      const varreduraTruncada =
+        (mov.data?.length ?? 0) >= LINHAS_VARRIDAS ||
+        (pub.data?.length ?? 0) >= LINHAS_VARRIDAS
+
+      return JSON.stringify({
+        aviso:
+          'Busca por texto: a redação varia entre tribunais, então a lista ' +
+          'pode não estar completa. Cada processo aparece uma vez, com seu ' +
+          'andamento mais recente que casou com o texto. O texto do DJEN é ' +
+          'guardado em HTML, então termo com acento pode deixar de casar.',
+        // null e não 0 quando a contagem não fechou: zero é afirmação, e afirmar
+        // zero sem ter conseguido contar é o erro que isto evita.
+        total_ocorrencias: contagemIncompleta ? null : totalOcorrencias,
+        contagem_exata_indisponivel: contagemIncompleta || undefined,
+        fontes_indisponiveis: fontesIndisponiveis.length ? fontesIndisponiveis : undefined,
+        processos_distintos_encontrados: todos.length,
+        processos_listados: amostra.length,
+        // Só quando true é que existe coisa fora da lista. Antes, o modelo não
+        // tinha como distinguir "achei tudo" de "bati no teto". Fonte que caiu
+        // também liga a bandeira: com uma das duas fora, a lista é parcial por
+        // definição.
+        pode_haver_mais_antigos:
+          varreduraTruncada || todos.length > amostra.length || contagemIncompleta,
+        processos: amostra,
+      })
+    }
+
+    case 'contar_publicacoes': {
+      // djen_publicacoes (a tabela viva). A coluna `lida` não existe nela — o
+      // parâmetro saiu do schema da ferramenta junto com esta troca.
+      let q = svc
+        .from('djen_publicacoes')
+        .select('id', { count: 'exact', head: true })
+      if (typeof args.tratada === 'boolean') q = q.eq('tratada', args.tratada)
+      if (typeof args.dias === 'number')
+        q = q.gte('data_disponibilizacao', desde(args.dias))
+      const { count, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      return JSON.stringify({ total: count ?? 0, filtros: args })
+    }
+
+    case 'panorama_economico':
+    case 'recorte_economico': {
+      // Lê os créditos e monta o painel com A MESMA função que as telas usam.
+      // Nada é recalculado aqui: se o número divergir da tela, é bug do núcleo,
+      // não de duas contas concorrentes.
+      const { data: creditos, error } = await svc
+        .from('processos')
+        .select(
+          'id, numero_cnj, tribunal, entidade_devedora, cessionario, status, ' +
+          'data_aquisicao, data_referencia, expectativa_liquidacao, data_liquidacao, ' +
+          'capital_investido, valor_face, ja_recebido, valor_estimado_complementar, ' +
+          'indice_atualizacao',
+        )
+      if (error) return JSON.stringify({ erro: error.message })
+      const { data: par } = await svc
+        .from('parametros_atualizacao')
+        .select('selic_aa, ipca_12m_aa, data_referencia')
+        .eq('id', 1)
+        .maybeSingle()
+
+      const hoje = new Date().toISOString().slice(0, 10)
+      const painel = montarPainel((creditos ?? []) as unknown as CreditoBruto[], par ?? undefined, hoje)
+
+      const resumir = (g: typeof painel.carteira) => ({
+        grupo: g.nome,
+        operacoes_total: g.total,
+        encerradas_analisadas: g.n,
+        excluidas_por_falta_de_dado: g.excluidas,
+        capital_investido: g.capitalInvestido,
+        valor_recebido: g.valorRecebido,
+        ganho_nominal: g.ganhoNominal,
+        rentabilidade_ponderada_pct: pctOuNulo(g.retornoPonderado),
+        rentabilidade_mediana_pct: pctOuNulo(g.retorno.mediana),
+        rentabilidade_media_pct: pctOuNulo(g.retorno.media),
+        anualizada_mediana_pct: pctOuNulo(g.tir.mediana),
+        prazo_mediano_dias: g.prazo.mediana,
+        prazo_medio_dias: g.prazo.media,
+        representatividade: g.representatividade.rotulo,
+        pode_comparar: g.representatividade.permiteComparacao,
+        pode_entrar_em_ranking: g.representatividade.permiteRanking,
+        participacao_no_capital_pct: pctOuNulo(g.pesoCapital),
+      })
+
+      if (nome === 'recorte_economico') {
+        const dim = String(args.dimensao ?? 'tribunal')
+        const fonte =
+          dim === 'ente' ? painel.porEnte
+          : dim === 'investidor' ? painel.porInvestidor
+          : dim === 'faixa_valor' ? painel.faixas.grupos
+          : dim === 'safra' ? []
+          : painel.porTribunal
+        if (dim === 'safra') {
+          return JSON.stringify({
+            aviso:
+              'Safras NÃO devem ser comparadas por resultado final: maturidades diferentes ' +
+              'favorecem artificialmente a safra mais nova, onde só as operações rápidas ' +
+              'tiveram tempo de encerrar. Compare pela curva, na mesma idade.',
+            idade_maxima_comparavel_meses: painel.safras.tetoComparavel,
+            safras_com_amostra_insuficiente_no_teto: painel.safras.safrasFracasNoTeto,
+            curvas: painel.safras.curvas.map((c) => ({
+              safra: c.safra,
+              operacoes: c.totalOperacoes,
+              taxa_encerramento_pct: pctOuNulo(c.taxaEncerramento),
+              devolucao_por_idade: c.pontos
+                .filter((p) => p.idadeMeses <= painel.safras.tetoComparavel)
+                .map((p) => ({
+                  idade_meses: p.idadeMeses,
+                  capital_devolvido_pct: pctOuNulo(p.fracaoDevolvida),
+                  operacoes_disponiveis: p.nDisponivel,
+                })),
+            })),
+          })
+        }
+        return JSON.stringify({
+          moeda: 'BRL',
+          dimensao: dim,
+          concentracao: painel.concentracao,
+          aviso_metodologico:
+            'Grupo com pode_comparar = false não tem base estatística para ser comparado ' +
+            'com outro nem chamado de melhor ou pior. Exiba o número e diga isso.',
+          grupos: fonte.map(resumir),
+          faixa_homogenea: dim === 'faixa_valor' ? painel.faixas.homogenea : undefined,
+        })
+      }
+
+      return JSON.stringify({
+        moeda: 'BRL',
+        data_base_parametros: painel.parametrosEm,
+        composicao: {
+          total: painel.operacoes.length,
+          encerradas_de_fato: painel.carteira.n,
+          realizacao_parcial_complementar: painel.operacoes.filter(
+            (o) => o.status === 'complementar',
+          ).length,
+          em_aberto: painel.operacoes.filter((o) => !o.dataLiquidacao).length,
+          nota:
+            'Operações em status complementar receberam o principal e aguardam um valor ' +
+            'complementar. NÃO entram em nenhuma métrica de performance: incluí-las ' +
+            'subestimaria a rentabilidade.',
+        },
+        performance: resumir(painel.carteira),
+        extremos_marcados: painel.carteira.extremosTir.length,
+        nota_extremos:
+          'Operações de prazo muito curto produzem rentabilidade anualizada altíssima. ' +
+          'Elas são marcadas mas nunca excluídas. Use a mediana e a rentabilidade ' +
+          'ponderada para falar da carteira, nunca a média da anualizada.',
+        forecast: {
+          por_mes: painel.forecast.meses.map((m) => ({
+            mes: m.mes, valor: m.valor, operacoes: m.operacoes,
+          })),
+          total_com_mes_definido: painel.forecast.totalFuturo,
+          blocos_sem_data: painel.forecast.blocos.map((b) => ({
+            bloco: b.rotulo, valor: b.valor, operacoes: b.operacoes, motivo: b.motivo,
+          })),
+          total_geral: painel.forecast.totalGeral,
+          fracao_em_previsao_vencida_pct: pctOuNulo(painel.forecast.fracaoVencida),
+        },
+        aderencia_das_previsoes: {
+          observacoes: painel.aderencia.n,
+          pagas_sem_previsao_registrada: painel.aderencia.semPrevisao,
+          desvio_mediano_dias: painel.aderencia.desvioDias.mediana,
+          desvio_medio_dias: painel.aderencia.desvioDias.media,
+          pagas_ate_a_previsao: painel.aderencia.pagasAteAPrevisao,
+          pagas_depois: painel.aderencia.pagasDepois,
+          representatividade: painel.aderencia.representatividade.rotulo,
+        },
+        estimativa_ajustada: painel.ajuste.disponivel
+          ? { disponivel: true, desvio_mediano_dias: painel.ajuste.desvioMediano }
+          : { disponivel: false, motivo: painel.ajuste.mensagem },
+        inconsistencias: {
+          operacoes_na_lista: painel.anomalias.operacoesComAchado,
+          achados: painel.anomalias.achados.map((a) => ({
+            titulo: a.titulo, natureza: a.natureza, gravidade: a.gravidade,
+            operacoes: a.refs.length,
+          })),
+        },
+        insights: painel.insights.map((i) => ({ texto: i.texto, base: i.base })),
+      })
+    }
+
+    default:
+      return JSON.stringify({ erro: `Ferramenta desconhecida: ${nome}` })
+  }
+}
+
+// -------------------------------------------------------------- prompt do sistema
+
+// Estável de propósito: é o prefixo em cache (cache_control abaixo), então
+// qualquer trecho que varie por pergunta invalidaria o cache de todas as
+// requisições. Nada de data de hoje ou nome de usuário aqui.
+const SISTEMA = `Você é o assistente de dados do sistema de Gestão de Cessões da Credijuris. Responde a perguntas da equipe sobre os dados do próprio sistema, em português do Brasil.
+
+# O que existe no sistema
+- **Créditos (processos)**: precatórios e créditos judiciais adquiridos. Campos: número CNJ, tribunal, comarca, vara, cedente, entidade devedora, datas de aquisição e liquidação, expectativa de liquidação, e uma situação cadastral que é só uma de três — \`ativo\`, \`complementar\` ou \`encerrado\`.
+- **Movimentações e publicações**: andamentos vindos do ADVBOX e intimações do DJEN. São TEXTO CORRIDO, sem classificação estruturada.
+- **Economia da carteira**: use \`panorama_economico\` para qualquer pergunta de dinheiro, rentabilidade, prazo ou recebimento futuro, e \`recorte_economico\` para desempenho por tribunal, ente, investidor, faixa de valor ou safra. Os números saem da mesma camada de cálculo das telas.
+- **Publicações pendentes**: a publicação do DJEN tem a marcação "tratada" (não
+  existe "lida"). A janela de dias é contada pela data de disponibilização, no
+  fuso de Brasília.
+
+# Regra que não se negocia
+Todo número que você afirmar precisa vir de uma ferramenta executada nesta conversa. Você não tem conhecimento prévio dos dados da Credijuris. Se não deu para consultar, diga que não deu — nunca estime, arredonde de cabeça ou complete com um valor plausível.
+
+# Fase processual exige cuidado
+Não existe campo de fase processual no cadastro. "Concluso para decisão", "sentenciado", "em recurso" e afins só aparecem no texto das movimentações, e a redação varia entre tribunais. Então, ao responder esse tipo de pergunta:
+1. Use \`buscar_movimentacoes\` e considere mais de uma redação possível.
+2. **Liste os processos encontrados**, com número e data do andamento, para a pessoa conferir.
+3. Diga explicitamente que é uma busca por texto e pode não ser completa. Um número redondo sem essa ressalva passa por exato e induz a erro.
+4. O total é \`processos_distintos_encontrados\`; a lista pode ser menor que ele. Só mencione que existem registros fora da lista quando \`pode_haver_mais_antigos\` for verdadeiro — dizer isso quando é falso faz a pessoa desconfiar de um resultado que está completo.
+5. O andamento diz que o processo **foi** concluso naquela data, não que ainda está. Deixe isso claro.
+
+Não repita as mesmas ressalvas em toda resposta: diga cada uma uma vez, de forma curta. Um bloco de avisos maior que a resposta faz a pessoa parar de lê-los.
+
+Para perguntas que uma contagem responde direto (quantos encerrados, quanto foi cedido), aí sim o número é exato e você pode afirmá-lo sem ressalva.
+
+# Análise econômica: quatro regras
+1. **Nunca compare grupos marcados como \`pode_comparar: false\`.** Mostre os números de cada um e diga que não há base para dizer qual é melhor. Um grupo com duas operações não perde nem ganha de um com cinquenta — a comparação simplesmente não existe.
+2. **Nunca use a média da rentabilidade anualizada para descrever a carteira.** Uma operação liquidada em poucos dias produz taxa anual de milhares por cento, correta para ela e absurda como média. Use a mediana e a rentabilidade ponderada pelo capital, e diga qual você está usando.
+3. **Distinga as duas leituras.** A mediana descreve a operação típica; a rentabilidade ponderada descreve o dinheiro. Quando divergem, a divergência é a informação — apresente as duas.
+4. **Repasse as ressalvas que a ferramenta trouxer.** Se ela devolve \`aviso_metodologico\` ou diz que a estimativa ajustada não está disponível, isso vai na resposta. Não invente cenário, não projete valor que a ferramenta não deu, e não some blocos que ela separou.
+
+# Como escrever
+Vá direto ao ponto: a resposta primeiro, o detalhe depois. Valores em reais no formato brasileiro (R$ 1.234,56). Datas como dd/mm/aaaa. Tabela só quando houver vários itens comparáveis; para um número só, uma frase basta.
+
+Se a pergunta for ambígua de um jeito que muda a resposta, pergunte antes de consultar. Se estiver fora do que os dados alcançam — conselho jurídico, previsão de quando um processo será pago, informação de fora do sistema — diga o que você tem e o que não tem.
+
+Você só faz leitura. Não existe ferramenta que altere dados; se pedirem para cadastrar, editar ou apagar algo, explique que isso é feito nas telas do sistema.`
+
+// ------------------------------------------------------------------- handler
+
+Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  try {
+    const caller = await getCallerAtivo(req, serviceClient())
+    if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
+
+    const apiKey = await chaveAnthropic()
+    if (!apiKey) {
+      return jsonResponse(
+        {
+          error:
+            'Assistente ainda não configurado: cadastre a chave da Anthropic ' +
+            'em Configurações → Integração Anthropic.',
+        },
+        503,
+      )
+    }
+
+    const { pergunta, historico } = await req.json()
+    if (!pergunta || typeof pergunta !== 'string') {
+      return jsonResponse({ error: 'Pergunta inválida.' }, 400)
+    }
+
+    const svc = callerClient(req)
+    const anthropic = new Anthropic({ apiKey })
+
+    // O histórico chega da interface como pares simples de texto. Truncamos em
+    // 20 turnos: conversa de assistente não precisa de memória infinita, e o
+    // histórico inteiro é reenviado a cada pergunta.
+    const mensagens: Anthropic.MessageParam[] = Array.isArray(historico)
+      ? historico
+          .slice(-20)
+          .filter(
+            (m: unknown): m is { role: 'user' | 'assistant'; content: string } =>
+              !!m &&
+              typeof (m as { content?: unknown }).content === 'string' &&
+              ((m as { role?: unknown }).role === 'user' ||
+                (m as { role?: unknown }).role === 'assistant'),
+          )
+          .map((m) => ({ role: m.role, content: m.content }))
+      : []
+    mensagens.push({ role: 'user', content: pergunta })
+
+    const ferramentasUsadas: string[] = []
+    // Promoção é de mão única: uma vez em texto livre, a conversa inteira
+    // segue em esforço alto. Voltar a abaixar no meio faria a redação final —
+    // a parte que a pessoa lê — sair mais rasa justamente na pergunta que
+    // exigiu mais.
+    let interpretandoTexto = false
+
+    for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
+      const resposta = await anthropic.messages.create({
+        model: MODELO,
+        // 16000 e não 8000: com thinking adaptativo o orçamento é dividido entre
+        // o pensamento e o texto visível, e o caminho de interpretação roda em
+        // esforço alto. Com 8000, pedir uma tabela de 60 processos estourava na
+        // linha ~35 e a resposta CORTADA era entregue como completa.
+        max_tokens: 16000,
+        // Prefixo estável (ferramentas + sistema) em cache: o mesmo bloco é
+        // reenviado em toda pergunta e em toda rodada de ferramenta.
+        system: [
+          { type: 'text', text: SISTEMA, cache_control: { type: 'ephemeral' } },
+        ],
+        tools: FERRAMENTAS,
+        messages: mensagens,
+        // Raciocínio adaptativo nos dois casos: o modelo decide se pensa. Fica
+        // ligado até no caminho barato porque, com ele desligado, o Sonnet
+        // aciona ferramentas com menos disposição — e aqui TODA resposta
+        // depende de uma consulta. O esforço é que muda entre os caminhos.
+        thinking: { type: 'adaptive' },
+        output_config: { effort: interpretandoTexto ? 'high' : 'medium' },
+      })
+
+      if (resposta.stop_reason === 'refusal') {
+        return jsonResponse(
+          {
+            error:
+              'O modelo recusou responder a esta pergunta. Tente reformulá-la.',
+          },
+          422,
+        )
+      }
+
+      mensagens.push({ role: 'assistant', content: resposta.content })
+
+      if (resposta.stop_reason !== 'tool_use') {
+        const texto = resposta.content
+          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+          .map((b) => b.text)
+          .join('\n')
+          .trim()
+        // Resposta INTERROMPIDA por limite de tokens não pode ser entregue como
+        // se estivesse inteira: uma tabela de 60 processos cortada na linha 35
+        // parece completa, e quem lê usa o pedaço como se fosse o todo.
+        const truncada = resposta.stop_reason === 'max_tokens'
+        return jsonResponse({
+          resposta:
+            texto ||
+            'Não consegui formular uma resposta. Tente reformular a pergunta.',
+          truncada: truncada || undefined,
+          ferramentas: ferramentasUsadas,
+        })
+      }
+
+      // Todas as ferramentas do turno em paralelo, e todos os resultados numa
+      // única mensagem — separá-los ensina o modelo a parar de paralelizar.
+      const chamadas = resposta.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+      )
+      if (chamadas.some((c) => c.name === FERRAMENTA_QUE_PROMOVE)) {
+        // A partir daqui há texto livre em jogo: as próximas rodadas — e,
+        // principalmente, a redação da resposta — vão em esforço alto.
+        interpretandoTexto = true
+      }
+
+      const resultados = await Promise.all(
+        chamadas.map(async (c) => {
+          ferramentasUsadas.push(c.name)
+          let conteudo: string
+          try {
+            conteudo = await executar(
+              svc,
+              c.name,
+              (c.input ?? {}) as Record<string, unknown>,
+            )
+          } catch (err) {
+            conteudo = JSON.stringify({ erro: (err as Error).message })
+          }
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: c.id,
+            content: conteudo,
+          }
+        }),
+      )
+      mensagens.push({ role: 'user', content: resultados })
+    }
+
+    return jsonResponse(
+      {
+        error:
+          'A consulta ficou longa demais e foi interrompida. Tente uma ' +
+          'pergunta mais específica.',
+      },
+      504,
+    )
+  } catch (err) {
+    return jsonResponse({ error: mensagemDeErro(err) }, 500)
+  }
+})
+
+/**
+ * Traduz a falha para algo acionável. O erro cru da Anthropic chega como
+ * `401 {"type":"error","error":{"type":"authentication_error",...}}` — que na
+ * tela do usuário não diz nem onde corrigir.
+ */
+function mensagemDeErro(err: unknown): string {
+  const bruto = (err as Error)?.message ?? String(err)
+  const status = (err as { status?: number })?.status
+
+  if (status === 401 || /invalid x-api-key|authentication_error/i.test(bruto)) {
+    return (
+      'A Anthropic recusou a chave de API. Confira em Configurações → ' +
+      'Integração Anthropic; se a chave foi colada incompleta, gere uma nova ' +
+      'em console.anthropic.com → API Keys.'
+    )
+  }
+  if (status === 429 || /rate_limit/i.test(bruto)) {
+    return 'Limite de uso da Anthropic atingido. Tente de novo em instantes.'
+  }
+  if (status === 400 && /credit balance|billing/i.test(bruto)) {
+    return (
+      'A conta da Anthropic está sem crédito. Verifique o saldo e o método de ' +
+      'pagamento em console.anthropic.com.'
+    )
+  }
+  if (status === 403 || /permission_error/i.test(bruto)) {
+    return 'A chave da Anthropic não tem permissão para esta operação.'
+  }
+  if (status && status >= 500) {
+    return 'A Anthropic está indisponível no momento. Tente de novo em instantes.'
+  }
+  return bruto
+}
