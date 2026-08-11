@@ -91,6 +91,19 @@ export function PeticaoModal({
 
   const escolhido = ativos.find((t) => t.id === idEscolhido) ?? null
 
+  /**
+   * O que está escolhido é um dos sugeridos?
+   *
+   * Serve para engrossar o PRÓPRIO campo, e não só a opção na lista: o select
+   * nativo desenha o valor fechado com o estilo dele mesmo, ignorando o da opção
+   * selecionada. Sem isto, o negrito aparecia ao abrir a lista e desaparecia ao
+   * escolher — justamente quando a informação importa.
+   *
+   * De quebra, o campo desengrossa ao trocar para um modelo fora da sugestão, o
+   * que avisa que a escolha saiu do que a ferramenta indicou.
+   */
+  const escolhidoEhSugerido = !!idEscolhido && sugeridos.some((s) => s.id === idEscolhido)
+
   // Baixa o .md do bucket quando o modelo muda.
   useEffect(() => {
     if (!open || !escolhido?.arquivo) return
@@ -239,6 +252,7 @@ export function PeticaoModal({
             // leitor de tela continuar sabendo o que o campo é.
             <Select
               aria-label="Modelo de petição"
+              className={escolhidoEhSugerido ? 'font-semibold' : undefined}
               value={idEscolhido ?? ''}
               onChange={(e) => setIdEscolhido(e.target.value || null)}
             >
