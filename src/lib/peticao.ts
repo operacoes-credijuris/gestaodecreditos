@@ -202,7 +202,7 @@ function dadosBancarios(nome: string, d: InvestidorDados | undefined): string | 
   // Sem conta nem Pix não há para onde pagar, e a petição pediria transferência
   // para lugar nenhum — pior que não gerar.
   if (!d.conta?.trim() && !d.pix?.trim()) return null
-  const linhas: string[] = [`Favorecido: ${nome}`]
+  const linhas: string[] = [`Favorecido: ${maiusculo(nome)}`]
   if (d.cpf?.trim()) linhas.push(`CPF/CNPJ: ${d.cpf.trim()}`)
   if (d.banco?.trim()) linhas.push(`Banco: ${d.banco.trim()}`)
   if (d.agencia?.trim()) linhas.push(`Agência: ${d.agencia.trim()}`)
@@ -211,12 +211,25 @@ function dadosBancarios(nome: string, d: InvestidorDados | undefined): string | 
   return linhas.join('\n')
 }
 
-/** Juízo endereçado: a vara, com a comarca quando as duas existem. */
+/**
+ * Caixa alta com acento correto. `toUpperCase()` puro erra em algumas línguas;
+ * a versão com locale não.
+ */
+const maiusculo = (s: string) => s.toLocaleUpperCase('pt-BR')
+
+/**
+ * Juízo endereçado: a vara, com a comarca quando as duas existem.
+ *
+ * Em CAIXA ALTA porque o endereçamento do modelo já está assim ("AO JUÍZO DE
+ * DIREITO DO(A) ..."), e o cadastro guarda a vara como foi digitada — sem isso
+ * saía "AO JUÍZO DE DIREITO DO(A) 1ª Vara Civil ... DA COMARCA DE Luziânia",
+ * misturando as duas grafias na mesma linha.
+ */
 function juizo(p: Processo): string | null {
   const vara = (p.vara ?? '').trim()
   const comarca = (p.comarca ?? '').trim()
-  if (vara && comarca) return `${vara} DA COMARCA DE ${comarca}`
-  return vara || comarca || null
+  if (vara && comarca) return maiusculo(`${vara} DA COMARCA DE ${comarca}`)
+  return vara ? maiusculo(vara) : comarca ? maiusculo(comarca) : null
 }
 
 export interface Preenchimento {
@@ -246,8 +259,10 @@ export function resolverVariaveis(
   if (cnj) valores.processo_cnj = formatCNJ(cnj)
   else falta('processo_cnj', 'O crédito não tem número de processo.')
 
+  // Em caixa alta: é o nome que abre a peça, ao lado de um endereçamento que já
+  // está todo em maiúsculas. O cadastro guarda como foi digitado.
   const nome = (processo.cessionario ?? '').trim()
-  if (nome) valores.cessionario = nome
+  if (nome) valores.cessionario = maiusculo(nome)
   else falta('cessionario', 'O crédito não tem cessionário informado.')
 
   // textoTipoCredito devolve '—' para lista vazia, o que é certo na tela e

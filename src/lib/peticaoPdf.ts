@@ -32,14 +32,15 @@ const CORPO = { fonte: 11, entrelinha: 1.08 }
 const DEPOIS = 12
 
 /**
- * Recuo da citação direta e do bloco de dados bancários, em milímetros.
+ * Recuo da citação direta, em milímetros. Convenção da peça: ementa transcrita
+ * entra afastada da margem, para o juízo distinguir de relance o que é texto do
+ * peticionário e o que é palavra do tribunal.
  *
- * Na citação é convenção da peça: ementa transcrita entra afastada da margem, para
- * o juízo distinguir de relance o que é texto do peticionário e o que é palavra do
- * tribunal. Nos dados bancários é a mesma lógica visual — é informação para ser
- * copiada, não lida em sequência.
+ * NÃO vale para os dados bancários: o cartão já os separa do texto corrido, e
+ * recuar também empurrava para o meio da página um dado que o juízo precisa achar
+ * de relance.
  */
-const RECUO_MM = 40
+const RECUO_CITACAO_MM = 40
 
 /**
  * Paleta extraída do CONTRATO_CREDIJURIS_MODELO.
@@ -211,16 +212,17 @@ export function markdownParaConteudo(md: string): Content[] {
           paddingTop: () => 0,
           paddingBottom: () => 0,
         },
-        margin: [RECUO_MM * MM, 0, 0, DEPOIS],
+        margin: [RECUO_CITACAO_MM * MM, 0, 0, DEPOIS],
       })
       return
     }
 
     // --- bloco de dados bancários ---------------------------------------------
-    // Recuado como a citação, com o fundo claro do contrato: é informação para ser
-    // copiada pelo juízo ao expedir alvará, não texto para ler em sequência. Fora
-    // do fecho, senão a assinatura (que também é toda em negrito e de duas linhas)
-    // cairia aqui em vez de ser centralizada.
+    // Cartão com o fundo claro do contrato, na largura toda e SEM recuo: o cartão
+    // já separa do texto corrido, e recuar empurrava para o meio da página um dado
+    // que o juízo precisa achar de relance ao expedir alvará. Fora do fecho, senão
+    // a assinatura (que também é toda em negrito e de duas linhas) cairia aqui em
+    // vez de ser centralizada.
     if (ehBlocoDados(bloco) && !noFecho) {
       conteudo.push({
         table: {
@@ -247,7 +249,7 @@ export function markdownParaConteudo(md: string): Content[] {
           paddingTop: () => 0,
           paddingBottom: () => 0,
         },
-        margin: [RECUO_MM * MM, 0, 0, DEPOIS],
+        margin: [0, 0, 0, DEPOIS],
       })
       return
     }

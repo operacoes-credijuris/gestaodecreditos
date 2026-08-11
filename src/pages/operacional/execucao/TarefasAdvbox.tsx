@@ -531,7 +531,12 @@ export default function TarefasAdvbox() {
       <PeticaoModal
         open={!!peticaoDe}
         onClose={() => setPeticaoDe(null)}
-        descricao={peticaoDe?.tipo ?? null}
+        // TIPO **E** OBSERVAÇÃO. O tipo é o catálogo do ADVBOX ("Petição
+        // simples") e quase nunca diz qual peça é; quem diz é a observação
+        // ("Elaborar petição de sequestro dos valores"). Passando só o tipo, a
+        // sugestão não achava nada em tarefa nenhuma — era o caso real que
+        // apareceu no primeiro teste.
+        descricao={[peticaoDe?.tipo, peticaoDe?.notes].filter(Boolean).join(' — ')}
         processo={peticaoDe ? resolveCredito(peticaoDe.processo) : null}
         numeroTarefa={peticaoDe?.processo ?? ''}
       />
