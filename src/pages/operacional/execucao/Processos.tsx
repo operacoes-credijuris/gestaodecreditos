@@ -87,12 +87,12 @@ function corExpectativa(
   if (d < hoje) return { classe: 'font-medium text-red-600', titulo: 'Expectativa vencida' }
   if (d <= limiteAlerta) {
     return {
-      classe: 'font-medium text-amber-600',
+      classe: 'font-medium text-amber-700',
       titulo: `Vence em até ${MESES_ALERTA_EXPECTATIVA} meses`,
     }
   }
   return {
-    classe: 'font-medium text-emerald-600',
+    classe: 'font-medium text-emerald-700',
     titulo: `Vence em mais de ${MESES_ALERTA_EXPECTATIVA} meses`,
   }
 }

@@ -159,8 +159,8 @@ const TONE_BLOCK: Record<Urgencia, string> = {
 }
 const TONE_TEXT: Record<Urgencia, string> = {
   danger: 'text-red-600',
-  warning: 'text-amber-600',
-  neutral: 'text-slate-400',
+  warning: 'text-amber-700',
+  neutral: 'text-slate-500',
 }
 
 export default function TarefasAdvbox() {
@@ -302,7 +302,14 @@ export default function TarefasAdvbox() {
         className="flex overflow-hidden rounded-xl border border-slate-200 bg-white"
       >
         <div className={cn('w-1 flex-none', TONE_BAR[tone])} />
-        <div className="flex min-w-0 flex-1 items-start gap-3 p-3">
+        {/* flex-wrap: o bloco de responsáveis é flex-none e ocupa 173px fixos.
+            Numa tela de 375px isso deixava 52px para o conteúdo, e o número do
+            processo com as partes saía em 17 linhas de meia palavra — o
+            `truncate` que havia aqui escondia o aperto em vez de resolver. Com a
+            quebra, os responsáveis descem para a linha de baixo quando não
+            cabem e o conteúdo fica com a largura toda. No desktop tudo continua
+            numa linha só, sem mudança nenhuma. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-3 p-3">
           <div
             className={cn('w-12 flex-none rounded-md py-1.5 text-center', TONE_BLOCK[tone])}
           >
@@ -315,7 +322,10 @@ export default function TarefasAdvbox() {
               <div className="py-1 text-sm">—</div>
             )}
           </div>
-          <div className="min-w-0 flex-1">
+          {/* min-w é o que FORÇA a quebra: sem um piso, o flex encolhe esta
+              coluna até caber o resto na mesma linha, e foi assim que ela chegou
+              a 52px. */}
+          <div className="min-w-[11rem] flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               {t.urgent && (
                 <span title="Urgente">
@@ -336,7 +346,12 @@ export default function TarefasAdvbox() {
                 </span>
               )}
             </div>
-            <div className="mt-0.5 truncate text-sm text-slate-500">
+            {/* Sem truncate: medido a 375px, esta linha mostrava 9% do conteúdo
+                — "5007431-28.2024.8.09.0100 · Alisson ..." virava só o número
+                pela metade, e as PARTES do processo, que é o que identifica a
+                tarefa de relance, ficavam invisíveis. Quebrar em duas linhas
+                custa altura; esconder o nome da parte custa o entendimento. */}
+            <div className="mt-0.5 break-words text-sm text-slate-500">
               {formatCNJ(t.processo)}
               {partes && ` · ${partes}`}
             </div>

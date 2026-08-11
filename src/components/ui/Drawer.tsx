@@ -75,7 +75,7 @@ export function Drawer({
           <button
             onClick={onClose}
             aria-label="Fechar painel"
-            className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            className="rounded-lg p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-600"
           >
             <X className="h-5 w-5" />
           </button>
@@ -103,7 +103,12 @@ export function DrawerField({
 }) {
   return (
     <div>
-      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+      {/* slate-600 e não slate-400: rótulo de 12px em caixa alta com slate-400
+          dá 2,34:1 de contraste sobre branco, menos da metade do mínimo de 4,5.
+          Era o texto menos legível da plataforma, e justamente o que diz ao
+          usuário qual campo ele está lendo. Em slate-600 vai a 7,48 e continua
+          secundário diante do valor, que é slate-800. */}
+      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-600">
         {label}
       </dt>
       <dd className="mt-0.5 text-sm text-slate-800">{children ?? '—'}</dd>

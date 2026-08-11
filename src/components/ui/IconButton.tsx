@@ -33,7 +33,12 @@ export function IconButton({
       className={cn(
         // transition + focus-visible: mesmo acabamento do Button e do X do
         // Drawer — as ações de linha não devem ser as únicas sem foco visível.
-        'rounded-md p-1.5 text-slate-500 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
+        // p-2 e não p-1.5: o <html> desta plataforma roda com font-size 12px
+        // (densidade), então TODO espaçamento em rem vale 3/4 do usual —
+        // p-1.5 dava 4,5px de cada lado e o botão media 21x21, abaixo do mínimo
+        // de 24x24 para alvo de clique. Com p-2 fecha exatamente 24, sem mudar
+        // a aparência do ícone.
+        'rounded-md p-2 text-slate-500 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
         variants[variant],
         className,
       )}

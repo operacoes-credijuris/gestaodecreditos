@@ -131,7 +131,7 @@ function LinhaValor({
           href={waLink(value)}
           target="_blank"
           rel="noreferrer"
-          className="text-emerald-600 hover:underline"
+          className="text-emerald-700 hover:underline"
           title="Abrir conversa no WhatsApp"
         >
           {value}

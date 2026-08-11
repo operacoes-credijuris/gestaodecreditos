@@ -180,13 +180,13 @@ const SEP = 'border-l border-slate-200'
 // Cor do TÍTULO de cada grupo. Tons escolhidos para contrastar com o fundo
 // claro do cabeçalho — amarelo e azul-claro puros ficariam ilegíveis.
 const COR_GRUPO = {
-  identificacao: 'text-sky-500',
-  tir: 'text-amber-600',
-  credito: 'text-emerald-600',
-  recebimento: 'text-red-600',
-  complementar: 'text-orange-600',
+  identificacao: 'text-sky-700',
+  tir: 'text-amber-700',
+  credito: 'text-emerald-700',
+  recebimento: 'text-red-700',
+  complementar: 'text-orange-700',
   vivos: 'text-blue-800',
-  calculado: 'text-violet-500',
+  calculado: 'text-violet-700',
 }
 
 // Caixa alta desligada nos títulos dos grupos (o <thead> aplica uppercase).
@@ -210,11 +210,11 @@ const ALTURA_CONTROLE = 'h-auto py-2'
 // própria cor já é a informação. Tons alinhados com o semáforo da Expectativa
 // na aba Créditos, para a mesma cor significar a mesma coisa nas duas telas.
 const COR_STATUS: Record<string, string> = {
-  green: 'text-emerald-600',
+  green: 'text-emerald-700',
   blue: 'text-blue-600',
-  yellow: 'text-amber-600',
+  yellow: 'text-amber-700',
   red: 'text-red-600',
-  gray: 'text-slate-400',
+  gray: 'text-slate-500',
 }
 
 /**
@@ -477,7 +477,7 @@ function Individual() {
           borda oposta — separá-los só afastava dois campos que se leem juntos. */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         <div className="w-full sm:max-w-md">
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
             Investidor
           </label>
           <Combobox
@@ -491,7 +491,7 @@ function Individual() {
           />
         </div>
         <div>
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
             Mês de referência
           </div>
           {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
@@ -860,7 +860,7 @@ function Individual() {
                     <TD
                       className={
                         p.data_liquidacao
-                          ? 'font-medium text-emerald-600'
+                          ? 'font-medium text-emerald-700'
                           : 'text-slate-500'
                       }
                     >
@@ -1120,7 +1120,7 @@ function Consolidado() {
     <div className="space-y-5">
       {/* Solto sobre o fundo da página, como o seletor da aba Individual. */}
       <div className="w-full sm:max-w-xs">
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
           Filtrar por mês
         </label>
         <Select value={mes} onChange={(e) => setMes(e.target.value)}>
@@ -1561,7 +1561,7 @@ function DadosPessoais() {
 
             {/* ---------- Endereço em partes ---------- */}
             <div>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
                 Endereço
               </h4>
               <div className="grid gap-4 sm:grid-cols-6">
