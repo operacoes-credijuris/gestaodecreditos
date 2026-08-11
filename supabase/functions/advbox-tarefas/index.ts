@@ -14,7 +14,14 @@
 // então descobrir as tarefas de UM processo exige baixar todas e casar por
 // lawsuits_id. Uma passada alimenta a ficha de todos os processos de uma vez.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { ERRO_ACESSO, getCaller, getCallerAtivo, isAdmin, serviceClient } from '../_shared/auth.ts'
+import {
+  ADMIN_EMAIL,
+  ERRO_ACESSO,
+  getCaller,
+  getCallerAtivo,
+  isAdmin,
+  serviceClient,
+} from '../_shared/auth.ts'
 // Cliente compartilhado com throttle + retry/backoff: a API do ADVBOX responde
 // 429/503 sob carga e sem retry isso vira erro na tela do usuário.
 import {
@@ -51,16 +58,11 @@ function normNome(s: unknown): string {
  * profiles). Serve para a criação de tarefa ser assinada SEMPRE por quem clicou:
  * antes, o `from` vinha do cliente e podia ser o id de qualquer pessoa.
  */
-async function usuarioAdvboxDoCaller(
+async function usuarioAdvboxPorNome(
   ctx: AdvboxCtx,
-  caller: { id: string },
+  nomePerfil: string | null | undefined,
 ): Promise<number | null> {
-  const { data: perfil } = await serviceClient()
-    .from('profiles')
-    .select('nome')
-    .eq('id', caller.id)
-    .maybeSingle()
-  const nome = normNome(perfil?.nome)
+  const nome = normNome(nomePerfil)
   if (!nome) return null
   const settings = (await getJson(ctx, '/settings')) as {
     users?: { id?: unknown; name?: unknown }[]
@@ -95,10 +97,18 @@ function hash(s: string): string {
   return (h >>> 0).toString(36)
 }
 
-/** Formata uma lista para o filtro `in` do PostgREST: ("a","b"). */
+/**
+ * Formata uma lista para o filtro `in` do PostgREST: ("a","b").
+ *
+ * RECUSA lista vazia em vez de devolver um sentinela. Com `("__none__")`, um
+ * `.not(col, 'in', ...)` casa TODAS as linhas e o DELETE vira delete-tudo. A
+ * proteção morava no chamador, num `if (fila.length)`; aqui ninguém esquece.
+ */
 function listaIn(valores: string[]): string {
-  const lst = valores.length ? valores : ['__none__']
-  return '(' + lst.map((v) => `"${String(v).replace(/["\\]/g, '')}"`).join(',') + ')'
+  if (valores.length === 0) {
+    throw new Error('listaIn recebeu lista vazia (evita filtro que casa tudo)')
+  }
+  return '(' + valores.map((v) => `"${String(v).replace(/["\\]/g, '')}"`).join(',') + ')'
 }
 
 /** Um processo na fila de sincronização. */
@@ -284,7 +294,15 @@ Deno.serve(async (req: Request) => {
       if (!caller) {
         return jsonResponse({ error: 'Sessão inválida.' }, 401)
       }
-      const ehAdmin = await isAdmin(caller, serviceClient())
+      // UMA leitura de profiles para as duas decisões (é admin? qual o nome?).
+      // Eram três idas ao banco pela mesma linha por clique em "Criar tarefa":
+      // getCallerAtivo, isAdmin e a busca do nome.
+      const { data: perfil } = await serviceClient()
+        .from('profiles')
+        .select('nome, role')
+        .eq('id', caller.id)
+        .maybeSingle()
+      const ehAdmin = caller.email === ADMIN_EMAIL || perfil?.role === 'admin'
       let remetente: number | null
       if (ehAdmin) {
         remetente = Number(body.from)
@@ -292,7 +310,7 @@ Deno.serve(async (req: Request) => {
           return jsonResponse({ error: 'Informe o remetente.' }, 400)
         }
       } else {
-        remetente = await usuarioAdvboxDoCaller(ctx, caller)
+        remetente = await usuarioAdvboxPorNome(ctx, perfil?.nome)
         if (!remetente) {
           return jsonResponse(
             {

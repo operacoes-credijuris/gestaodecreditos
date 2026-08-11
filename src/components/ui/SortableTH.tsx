@@ -24,10 +24,8 @@ export function SortableTH({
       <button
         type="button"
         onClick={onToggle}
-        // py-1.5 com -my-1.5: o alvo de clique passa de 16px para 25px de
-        // altura, e a margem negativa devolve o espaço, então a linha do
-        // cabeçalho não muda de altura nenhuma. Antes, só a faixa exata do texto
-        // ordenava — clicar no respiro em volta não fazia nada.
+        // py-1.5 amplia o alvo de ordenação para 25px; -my-1.5 devolve o espaço,
+        // então a linha do cabeçalho não muda de altura.
         className="-my-1.5 inline-flex items-center gap-1 py-1.5 font-semibold uppercase tracking-wide hover:text-slate-700"
       >
         {label ?? children}

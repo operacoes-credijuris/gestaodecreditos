@@ -331,7 +331,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
               'uppercase transition-colors',
               aba === 'movimentacoes'
                 ? 'text-brand-600'
-                : 'text-slate-600 hover:text-slate-600',
+                : 'text-slate-600 hover:text-slate-800',
             )}
           >
             Movimentações{movs.data ? ` (${listaMov.length})` : ''}
@@ -345,7 +345,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             aria-pressed={aba === 'tarefas'}
             className={cn(
               'uppercase transition-colors',
-              aba === 'tarefas' ? 'text-brand-600' : 'text-slate-600 hover:text-slate-600',
+              aba === 'tarefas' ? 'text-brand-600' : 'text-slate-600 hover:text-slate-800',
             )}
           >
             Tarefas{tarefas.data ? ` (${listaTar.length})` : ''}
@@ -461,7 +461,9 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
           {/* Falha de sincronização não esconde o cache: avisa e segue. O aviso
               vale também com cache vazio — era justamente aí que ele mais
               importava, e a guarda de listaTar.length o calava. */}
-          {sync.isError && (
+          {/* Só com cache: sem ele, o próprio estado vazio acima já diz que a
+              consulta falhou, e os dois juntos avisavam duas vezes. */}
+          {sync.isError && listaTar.length > 0 && (
             <p className="mt-3 text-xs text-amber-700">
               Não foi possível atualizar do ADVBOX agora: {(sync.error as Error).message}
             </p>

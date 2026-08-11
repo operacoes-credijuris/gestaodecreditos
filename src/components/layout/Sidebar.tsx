@@ -53,10 +53,6 @@ export function Sidebar({
   const [rendered, setRendered] = useState(mobileOpen)
   const [visible, setVisible] = useState(mobileOpen)
   const painelRef = useRef<HTMLDivElement>(null)
-  // O menu se declarava aria-modal sem prender foco: quem acionava "Abrir menu"
-  // e apertava Tab ia para o avatar e depois para os links da página ATRÁS do
-  // overlay, navegando na interface de fundo enquanto o leitor de tela anunciava
-  // um menu aberto — e o menu em si ficava inalcançável pelo teclado.
   useFocoPreso(mobileOpen, painelRef)
   useTravaScroll(mobileOpen)
 

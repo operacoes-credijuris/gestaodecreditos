@@ -145,11 +145,8 @@ export function useApensosManager(parentField: ParentField) {
         aria-expanded={aberto}
         aria-label={`${count} apenso${count > 1 ? 's' : ''} — ${aberto ? 'ocultar' : 'ver'}`}
         title={`${count} apenso${count > 1 ? 's' : ''}`}
-        // py-1.5 em vez de py-0.5: com o html em 12px o botão media 19px de
-        // altura, abaixo do mínimo de 24 para alvo de clique, e ele é o único
-        // jeito de abrir a lista de apensos da linha. py-1 dava 22, ainda pouco
-        // — medido, não estimado. O -my-1.5 devolve o espaço para a célula da
-        // tabela não crescer.
+        // py-1.5 para os 24px de alvo (é o único jeito de abrir a lista de
+        // apensos); -my-1.5 devolve o espaço à célula.
         className="-my-1.5 inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-1.5 text-xs font-normal text-slate-600 transition-colors hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
       >
         <span className="tabular-nums">{count}</span>

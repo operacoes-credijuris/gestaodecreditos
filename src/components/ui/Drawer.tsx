@@ -26,10 +26,6 @@ export function Drawer({
   const [rendered, setRendered] = useState(open)
   const [visible, setVisible] = useState(open)
   const painelRef = useRef<HTMLDivElement>(null)
-  // A ficha se declarava aria-modal e não prendia foco nenhum: aberta pelo
-  // clique na linha, o foco ficava no <body> e o primeiro Tab ia para a página
-  // ATRÁS do overlay — invisível sob o desfoque, e com Enter trocando de rota e
-  // destruindo a ficha que estava sendo lida.
   useFocoPreso(open, painelRef)
   useTravaScroll(open)
 

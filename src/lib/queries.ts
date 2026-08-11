@@ -42,10 +42,8 @@ export function useParametrosAtualizacao() {
         .select('selic_aa, ipca_12m_aa, data_referencia')
         .eq('id', 1)
         .maybeSingle()
-      // Sem isto, falha de leitura devolvia um objeto de nulos idêntico a
-      // "parâmetro nunca cadastrado": a carteira inteira mostrava "Preencha em
-      // Parâmetros de atualização" e o modal gravava nulo por cima da SELIC e do
-      // IPCA reais no salvamento seguinte.
+      // Vazio aqui é indistinguível de "nunca cadastrado": para a projeção da
+      // carteira toda e faz o modal gravar nulo por cima da SELIC real.
       if (error) throw new Error(error.message)
       return {
         selic_aa: data?.selic_aa ?? null,
@@ -120,13 +118,9 @@ export function useInvestidorDados() {
         .select(
           'nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
         )
-      // O `throw` aqui não é zelo: este mapa alimenta o FORMULÁRIO de edição do
-      // investidor, e o salvamento é um upsert da linha inteira. Mapa vazio por
-      // falha de leitura fazia a tela mostrar sete "—" (igual a "nunca
-      // cadastrado"), o formulário abrir em branco e o Salvar seguinte gravar
-      // null em CPF, RG, banco, agência, conta, Pix e nas sete partes do
-      // endereço — dado de pagamento a terceiro, apagado com toast de sucesso.
-      // Lançando, o React Query preserva o último dado bom e liga isError.
+      // Este mapa alimenta o formulário do investidor, e o Salvar é upsert da
+      // LINHA INTEIRA: mapa vazio abriria o formulário em branco e apagaria CPF,
+      // banco, conta e endereço no salvamento seguinte.
       if (error) throw new Error(error.message)
       const m = new Map<string, InvestidorDados>()
       for (const r of (data ?? []) as InvestidorDados[]) m.set(r.nome_chave, r)
@@ -200,9 +194,7 @@ export function useCarteiraResumos(poll = false) {
  * vazio), a coluna mostra "—" e o resto da tela segue funcionando. Vale aqui
  * porque nenhuma tela DEPENDE do ADVBOX estar de pé, e porque este mapa é só
  * exibição — não alimenta formulário nem cálculo, então o vazio não vira
- * apagamento nem número errado. (O comentário estava órfão acima de
- * useParametrosAtualizacao depois de um refactor, e por isso a exceção parecia
- * valer para aquela função, que é justamente onde ela NÃO vale.)
+ * apagamento nem número errado.
  *
  * Compartilhado entre a tabela de Créditos e a carteira do investidor: as duas
  * mostram a mesma data e devem concordar sempre.

@@ -675,6 +675,27 @@ function Movimentacoes({ busca }: { busca: string }) {
   const q = normalizarBusca(busca)
   const qd = dig(busca)
 
+  // Índice de busca, pelo mesmo motivo do das Publicações logo acima: `conteudo`
+  // é a descrição crua do ADVBOX (centenas a alguns milhares de caracteres), e
+  // normalizar isso linha por linha A CADA TECLA custava 14 ms medidos em 1.000
+  // andamentos — 111 ms só para digitar "goiania". Memoizado pela lista, cai para
+  // 0,1 ms por tecla.
+  const indice = useMemo(() => {
+    const m = new Map<string, { texto: string; dig: string }>()
+    for (const mov of lista.data ?? []) {
+      const info = resolve(mov.numero_processo)
+      m.set(mov.id, {
+        texto: normalizarBusca(
+          [mov.numero_processo, mov.conteudo, info.cedente, info.cessionario]
+            .filter(Boolean)
+            .join(' '),
+        ),
+        dig: dig(mov.numero_processo),
+      })
+    }
+    return m
+  }, [lista.data, resolve])
+
   // NOVAS: processos com movimentação nos últimos 20 dias, agrupados por
   // processo; andamentos e grupos do mais recente para o mais antigo.
   const novas = useMemo(() => {
@@ -682,14 +703,9 @@ function Movimentacoes({ busca }: { busca: string }) {
     const filtradas = !q
       ? all
       : all.filter((m) => {
-          const info = resolve(m.numero_processo)
-          if (
-            [m.numero_processo, m.conteudo, info.cedente, info.cessionario]
-              .filter(Boolean)
-              .some((v) => normalizarBusca(String(v)).includes(q))
-          )
-            return true
-          return qd.length >= 4 && dig(m.numero_processo).includes(qd)
+          const idx = indice.get(m.id)
+          if (idx?.texto.includes(q)) return true
+          return qd.length >= 4 && (idx?.dig ?? '').includes(qd)
         })
     const mapa = new Map<string, MovRow[]>()
     for (const m of filtradas) {
@@ -704,7 +720,7 @@ function Movimentacoes({ busca }: { busca: string }) {
     })
     grupos.sort((a, b) => b.recente.localeCompare(a.recente))
     return grupos
-  }, [lista.data, q, resolve])
+  }, [lista.data, q, qd, indice])
 
   // Casamento por DÍGITOS, e não pela string crua, porque as duas tabelas
   // gravam o número a partir de payloads DIFERENTES do ADVBOX:
