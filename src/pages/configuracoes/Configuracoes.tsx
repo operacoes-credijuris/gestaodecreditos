@@ -528,7 +528,9 @@ function DjenConfig() {
             )}
             {itens.map((o, i) => (
               <div key={i} className="flex items-end gap-2">
-                <Field label={i === 0 ? 'UF' : undefined} className="w-24">
+                {/* w-32, não menos: o <select> reserva pr-8 para a setinha, e
+                    com menos largura a sigla saía cortada ("MG" virava "MC"). */}
+                <Field label={i === 0 ? 'UF' : undefined} className="w-32">
                   <Select value={o.uf} onChange={(e) => setOab(i, { uf: e.target.value })}>
                     {UFS.map((uf) => (
                       <option key={uf} value={uf}>

@@ -11,8 +11,9 @@ export function Card({
   return (
     <div
       className={cn(
-        // sombra levemente tingida da marca dá profundidade sem peso
-        'rounded-xl border border-slate-200/80 bg-white shadow-sm shadow-brand-950/[0.04]',
+        // sombra levemente tingida da marca dá profundidade sem peso;
+        // cantos 2xl acompanham os cartões de Tarefas — um raio só no app inteiro
+        'rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-brand-950/[0.04]',
         className,
       )}
     >

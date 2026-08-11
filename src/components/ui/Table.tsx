@@ -15,7 +15,9 @@ export function Table({
   return (
     <div
       className={cn(
-        'overflow-x-auto scrollbar-thin',
+        // rounded acompanha o canto do Card que embrulha as listagens — sem
+        // isso o cabeçalho tingido vazaria quadrado sobre o canto redondo.
+        'overflow-x-auto rounded-2xl scrollbar-thin',
         // Densidade compacta usada nas listagens (Processos/Requerimentos/Contatos)
         dense && '[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm',
       )}
@@ -29,7 +31,9 @@ export function Table({
 
 export function THead({ children }: { children: ReactNode }) {
   return (
-    <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+    // Tinta da marca no cabeçalho (e não cinza): é o toque que faz toda tabela
+    // da plataforma "ser Credijuris" sem carregar a leitura.
+    <thead className="border-b border-brand-100 bg-brand-50/60 text-left text-xs font-semibold uppercase tracking-wide text-brand-800">
       {children}
     </thead>
   )
@@ -69,7 +73,8 @@ export function TR({
     <tr
       onClick={onClick}
       className={cn(
-        'hover:bg-slate-50',
+        // Hover levemente azulado + transição: a linha "acende" em vez de piscar.
+        'transition-colors duration-100 hover:bg-brand-50/40',
         onClick && 'cursor-pointer',
         className,
       )}
@@ -108,7 +113,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
-      <div className="rounded-full bg-slate-100 p-3 text-slate-500">
+      <div className="rounded-full bg-brand-50 p-3 text-brand-400">
         <Inbox className="h-6 w-6" />
       </div>
       <div>

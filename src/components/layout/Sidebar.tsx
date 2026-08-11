@@ -97,11 +97,10 @@ export function Sidebar({
             <img src={marca} alt="" className="h-full w-full object-contain" />
           </div>
           <div>
-            {/* minúsculas, como no wordmark oficial */}
             <p className="text-base font-bold leading-tight tracking-tight">
-              credijuris
+              Credijuris
             </p>
-            <p className="text-xs text-brand-300">Gestão de Cessões</p>
+            <p className="text-xs text-brand-300">Gestão de Créditos</p>
           </div>
         </div>
         <button

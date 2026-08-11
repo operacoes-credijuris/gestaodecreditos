@@ -46,7 +46,7 @@ export const NAVIGATION: NavSection[] = [
       // Era a terceira aba das Carteiras. Virou item próprio, logo abaixo dela,
       // porque não é carteira — e passou a cobrir investidores E originadores.
       {
-        label: 'Dados pessoais e bancários',
+        label: 'Dados cadastrais',
         to: '/comercial/dados-pessoais',
         icon: IdCard,
       },

@@ -46,12 +46,12 @@ export function StatCard({
               </span>
             )}
           </p>
-          <p className="mt-1 text-2xl font-bold tracking-tight text-slate-800">
+          <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-slate-800">
             {value}
           </p>
         </div>
         {icon && (
-          <div className={cn('rounded-lg p-2.5', tones[tone])}>{icon}</div>
+          <div className={cn('rounded-xl p-2.5', tones[tone])}>{icon}</div>
         )}
       </div>
     </Card>

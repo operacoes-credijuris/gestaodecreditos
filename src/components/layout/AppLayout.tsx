@@ -14,7 +14,7 @@ export function AppLayout() {
     const nav = findNavLocation(pathname)
     document.title = nav
       ? `${nav.leaf.label} — Credijuris`
-      : 'Credijuris — Gestão de Cessões'
+      : 'Credijuris — Gestão de Créditos'
   }, [pathname])
 
   return (

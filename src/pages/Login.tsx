@@ -51,7 +51,7 @@ export default function Login() {
             alt="Credijuris — créditos judiciais"
             className="mx-auto mb-3 h-12 w-auto"
           />
-          <p className="text-sm text-slate-600">Sistema de Gestão de Cessões</p>
+          <p className="text-sm text-slate-600">Sistema de Gestão de Créditos</p>
         </div>
 
         <div className="rounded-2xl border border-brand-100 bg-white p-6 shadow-xl shadow-brand-950/[0.07] sm:p-8">

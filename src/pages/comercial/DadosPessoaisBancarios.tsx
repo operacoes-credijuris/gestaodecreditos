@@ -96,17 +96,26 @@ const CAMPOS_DOCUMENTO: {
   { chave: 'pix', rotulo: 'Pix' },
 ]
 
-// Colunas da tabela. Endereço é UMA coluna, em texto corrido compilado das
-// partes — a quebra em campos existe só na janela de edição.
-const COLUNAS_TABELA: { chave: CampoPessoa | 'endereco'; rotulo: string }[] = [
-  { chave: 'cpf', rotulo: 'CPF / CNPJ' },
-  { chave: 'rg', rotulo: 'RG' },
-  { chave: 'banco', rotulo: 'Banco' },
-  { chave: 'agencia', rotulo: 'Agência' },
-  { chave: 'conta', rotulo: 'Conta' },
-  { chave: 'pix', rotulo: 'Pix' },
-  { chave: 'endereco', rotulo: 'Endereço' },
-]
+/**
+ * Linha "rótulo: valor" dentro de uma célula agrupada. A tabela tinha uma
+ * coluna por campo (9 colunas!) e cada célula quebrava em duas ou três linhas
+ * de meia palavra; agrupar em Dados pessoais / Dados bancários dá largura de
+ * sobra para cada valor sair inteiro — e o mini-rótulo diz o que é cada linha.
+ */
+function DadoMini({ rotulo, valor }: { rotulo: string; valor?: string | null }) {
+  return (
+    <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="w-14 flex-none text-xs font-medium uppercase tracking-wide text-slate-400">
+        {rotulo}
+      </span>
+      {valor ? (
+        <span className="text-slate-700">{valor}</span>
+      ) : (
+        <span className="text-slate-300">—</span>
+      )}
+    </div>
+  )
+}
 
 const VAZIO: Record<CampoPessoa, string> = {
   cpf: '',
@@ -407,7 +416,7 @@ export default function DadosPessoaisBancarios() {
   return (
     <div>
       <PageHeader
-        title="Dados pessoais e bancários"
+        title="Dados cadastrais"
         actions={
           <Button
             icon={<Plus className="h-4 w-4" />}
@@ -449,15 +458,18 @@ export default function DadosPessoaisBancarios() {
               <THead>
                 <tr>
                   <TH>Nome do {visao.rotulo.toLowerCase()}</TH>
-                  {COLUNAS_TABELA.map((c) => (
-                    <TH key={c.chave}>{c.rotulo}</TH>
-                  ))}
+                  <TH>Dados pessoais</TH>
+                  <TH>Dados bancários</TH>
+                  <TH>Endereço</TH>
                   <TH className="w-[1%] whitespace-nowrap">Ações</TH>
                 </tr>
               </THead>
               <TBody>
                 {pessoas.map((i) => {
                   const d = dados.data?.get(chavePessoa(tipo, i.chave))
+                  // Endereço em texto corrido, compilado das partes. Cai no
+                  // texto legado enquanto um registro não tiver as partes.
+                  const endereco = d ? compilarEndereco(d) || d.endereco : null
                   return (
                     <TR key={i.chave}>
                       <TD className="font-medium text-slate-800">
@@ -472,21 +484,31 @@ export default function DadosPessoaisBancarios() {
                           </Badge>
                         )}
                       </TD>
-                      {COLUNAS_TABELA.map((c) => {
-                        // Endereço em texto corrido, compilado das partes. Cai no
-                        // texto legado enquanto um registro não tiver as partes.
-                        const v =
-                          c.chave === 'endereco'
-                            ? d
-                              ? compilarEndereco(d) || d.endereco
-                              : null
-                            : d?.[c.chave as CampoPessoa]
-                        return (
-                          <TD key={c.chave}>
-                            {v || <span className="text-slate-300">—</span>}
-                          </TD>
-                        )
-                      })}
+                      <TD>
+                        <div className="space-y-1">
+                          <DadoMini rotulo="CPF" valor={d?.cpf} />
+                          <DadoMini rotulo="RG" valor={d?.rg} />
+                        </div>
+                      </TD>
+                      <TD>
+                        <div className="space-y-1">
+                          <DadoMini rotulo="Banco" valor={d?.banco} />
+                          {/* Agência e conta na mesma linha, como se escreve
+                              dado bancário — são curtos e andam juntos. */}
+                          <DadoMini
+                            rotulo="Ag/CC"
+                            valor={
+                              d?.agencia && d?.conta
+                                ? `${d.agencia} · ${d.conta}`
+                                : d?.agencia || d?.conta
+                            }
+                          />
+                          <DadoMini rotulo="Pix" valor={d?.pix} />
+                        </div>
+                      </TD>
+                      <TD className="min-w-[16rem]">
+                        {endereco || <span className="text-slate-300">—</span>}
+                      </TD>
                       <TD className="w-[1%] whitespace-nowrap text-right">
                         <div className="flex justify-end gap-1">
                           <IconButton
@@ -569,34 +591,53 @@ export default function DadosPessoaisBancarios() {
                   </div>
                 </Field>
               )}
-              <div className="grid gap-4 sm:grid-cols-2">
-                {CAMPOS_DOCUMENTO.map((c) => (
-                  <Field
-                    key={c.chave}
-                    label={c.rotulo}
-                    // Dígito verificador errado quase sempre é erro de digitação, e
-                    // num campo desses o erro vira dinheiro no lugar errado.
-                    error={
-                      c.chave === 'cpf' && !cpfCnpjValido(form.cpf)
-                        ? 'Dígito verificador não confere'
-                        : undefined
-                    }
-                  >
-                    <Input
-                      placeholder={c.dica}
-                      value={form[c.chave]}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          [c.chave]: c.mascara
-                            ? c.mascara(e.target.value)
-                            : e.target.value,
-                        }))
-                      }
-                    />
-                  </Field>
-                ))}
-              </div>
+              {/* Mesmos grupos da tabela (Dados pessoais / bancários / Endereço):
+                  quem lê a linha e abre a janela encontra a mesma ordem. */}
+              {(
+                [
+                  { titulo: 'Dados pessoais', chaves: ['cpf', 'rg'] },
+                  {
+                    titulo: 'Dados bancários',
+                    chaves: ['banco', 'agencia', 'conta', 'pix'],
+                  },
+                ] as const
+              ).map((grupo) => (
+                <div key={grupo.titulo}>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    {grupo.titulo}
+                  </h4>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {CAMPOS_DOCUMENTO.filter((c) =>
+                      (grupo.chaves as readonly string[]).includes(c.chave),
+                    ).map((c) => (
+                      <Field
+                        key={c.chave}
+                        label={c.rotulo}
+                        // Dígito verificador errado quase sempre é erro de digitação,
+                        // e num campo desses o erro vira dinheiro no lugar errado.
+                        error={
+                          c.chave === 'cpf' && !cpfCnpjValido(form.cpf)
+                            ? 'Dígito verificador não confere'
+                            : undefined
+                        }
+                      >
+                        <Input
+                          placeholder={c.dica}
+                          value={form[c.chave]}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              [c.chave]: c.mascara
+                                ? c.mascara(e.target.value)
+                                : e.target.value,
+                            }))
+                          }
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                </div>
+              ))}
 
               {/* ---------- Endereço em partes ---------- */}
               <div>

@@ -429,7 +429,10 @@ export default function TarefasAdvbox() {
               chips. flex-none: só ocupa o que precisa, e a coluna de conteúdo
               (flex-1) cede o espaço. O max-w é só teto para lista longa. */}
           {resp.length > 0 && (
-            <div className="flex max-w-[20rem] flex-none flex-wrap items-center gap-1.5">
+            // justify-end: com mais de um responsável os chips empilham, e
+            // alinhados à esquerda ficavam "soltos" no meio do cartão — a borda
+            // direita alinhada com o botão dá o encaixe.
+            <div className="flex max-w-[20rem] flex-none flex-wrap items-center justify-end gap-1.5">
               {resp.map((r, i) => (
                 <span
                   key={i}
