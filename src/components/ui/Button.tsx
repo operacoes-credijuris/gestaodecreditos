@@ -20,9 +20,11 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants: Record<Variant, string> = {
-  // gradiente vertical sutil + sombra dão o acabamento "sólido" do primário
+  // gradiente vertical sutil + sombra dão o acabamento "sólido" do primário.
+  // Parte do azul da logomarca (brand-500 = #0B81C5) e escurece no hover —
+  // é o botão mais "Credijuris" possível.
   primary:
-    'bg-gradient-to-b from-brand-600 to-brand-700 text-white shadow-sm hover:from-brand-500 hover:to-brand-600 focus-visible:ring-brand-500 disabled:from-brand-300 disabled:to-brand-300 disabled:shadow-none',
+    'bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-sm hover:from-brand-600 hover:to-brand-700 focus-visible:ring-brand-500 disabled:from-brand-300 disabled:to-brand-300 disabled:shadow-none',
   secondary:
     'bg-slate-800 text-white hover:bg-slate-900 focus-visible:ring-slate-500',
   outline:

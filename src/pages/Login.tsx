@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { isSupabaseConfigured } from '@/lib/supabase'
 import { Field, Input } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import logo from '@/assets/logo-credijuris.png'
 
 export default function Login() {
   const { session, loading, signIn } = useAuth()
@@ -16,8 +17,8 @@ export default function Login() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-brand-900">
-        <Loader2 className="h-8 w-8 animate-spin text-white" />
+      <div className="flex h-screen items-center justify-center bg-brand-ice">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-500" />
       </div>
     )
   }
@@ -39,17 +40,21 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-900 to-brand-950 p-4">
+    // Fundo claro, como os materiais comerciais da marca: a logomarca aparece
+    // em cor plena (o azul dela não sobrevive legível sobre navy escuro).
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-ice via-white to-brand-100 p-4">
       <div className="w-full max-w-md">
-        <div className="mb-8 text-center text-white">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-700 text-2xl font-bold text-gold-400">
-            C
-          </div>
-          <h1 className="text-2xl font-bold">Credijuris</h1>
-          <p className="text-sm text-brand-300">Sistema de Gestão de Cessões</p>
+        <div className="mb-8 text-center">
+          <h1 className="sr-only">Credijuris</h1>
+          <img
+            src={logo}
+            alt="Credijuris — créditos judiciais"
+            className="mx-auto mb-3 h-12 w-auto"
+          />
+          <p className="text-sm text-slate-600">Sistema de Gestão de Cessões</p>
         </div>
 
-        <div className="rounded-2xl bg-white p-6 shadow-xl sm:p-8">
+        <div className="rounded-2xl border border-brand-100 bg-white p-6 shadow-xl shadow-brand-950/[0.07] sm:p-8">
           <h2 className="mb-6 text-lg font-semibold text-slate-800">
             Acessar o sistema
           </h2>

@@ -5,6 +5,7 @@ import { cn } from '@/lib/cn'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 import { useAuth } from '@/contexts/AuthContext'
 import { NAVIGATION, NAV_CONFIG } from './navigation'
+import marca from '@/assets/marca-credijuris.png'
 
 function LeafLink({
   to,
@@ -24,10 +25,10 @@ function LeafLink({
       className={({ isActive }) =>
         cn(
           // borda esquerda sempre presente (transparente) para o item não
-          // "pular" quando o indicador dourado do ativo aparece
+          // "pular" quando o indicador verde do ativo aparece
           'flex items-center gap-3 rounded-lg border-l-2 px-3 py-2 text-sm font-medium transition-colors',
           isActive
-            ? 'border-gold-400 bg-brand-700 text-white'
+            ? 'border-verde-400 bg-brand-700 text-white'
             : 'border-transparent text-brand-100 hover:bg-brand-800/60 hover:text-white',
         )
       }
@@ -89,12 +90,17 @@ export function Sidebar({
   const content = (
     <div className="flex h-full flex-col bg-gradient-to-b from-brand-900 to-brand-950 text-white">
       <div className="flex items-center justify-between gap-2 border-b border-brand-800 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-700 font-bold text-gold-400">
-            C
+        <div className="flex items-center gap-2.5">
+          {/* A logomarca real (o "U" azul #0B81C5) sobre placa branca: é a
+              única forma fiel de exibi-la no fundo navy sem recolorir a marca. */}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white p-1.5 shadow-sm">
+            <img src={marca} alt="" className="h-full w-full object-contain" />
           </div>
           <div>
-            <p className="text-sm font-semibold leading-tight">Credijuris</p>
+            {/* minúsculas, como no wordmark oficial */}
+            <p className="text-base font-bold leading-tight tracking-tight">
+              credijuris
+            </p>
             <p className="text-xs text-brand-300">Gestão de Cessões</p>
           </div>
         </div>
@@ -120,7 +126,7 @@ export function Sidebar({
                 <p
                   className={cn(
                     'px-3 pb-1 text-xs font-semibold uppercase tracking-wider',
-                    sectionActive ? 'text-gold-400' : 'text-brand-300',
+                    sectionActive ? 'text-verde-400' : 'text-brand-300',
                   )}
                 >
                   {section.title}

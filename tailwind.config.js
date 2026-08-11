@@ -4,24 +4,35 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Identidade visual Credijuris (azul institucional + dourado)
+        // Identidade visual REAL da Credijuris, extraída dos materiais da marca
+        // (logomarca, contrato timbrado e apresentações comerciais):
+        //   - o azul da logomarca é EXATAMENTE #0B81C5 (amostrado pixel a pixel);
+        //   - #0A6296 e #075278 são os azuis de título e cabeçalho do contrato;
+        //   - os demais degraus interpolam esses três âncoras no mesmo matiz.
+        // O antigo dourado NÃO existe em nenhum material da marca — o acento
+        // real é o verde (ver `verde` abaixo).
         brand: {
-          50: '#eef4fb',
-          100: '#d6e4f5',
-          200: '#aecaeb',
-          300: '#7ba7da',
-          400: '#4d83c6',
-          500: '#2f64ab',
-          600: '#234e88',
-          700: '#1d406f',
-          800: '#1a3760',
-          900: '#0f223d',
-          950: '#0a172a',
+          ice: '#f3f8fc', // fundo da aplicação (azul-gelo, quase branco)
+          50: '#f2f9fd',
+          100: '#e2f1fa',
+          200: '#bfe2f4',
+          300: '#86caea',
+          400: '#40abdc',
+          500: '#0b81c5', // ← o azul da logomarca
+          600: '#0a6296', // ← azul de títulos do contrato
+          700: '#075278', // ← azul de cabeçalho do contrato
+          800: '#07425f',
+          900: '#062f44',
+          950: '#041e2c',
         },
-        gold: {
-          400: '#e3b84d',
-          500: '#cda032',
-          600: '#a98226',
+        // Acento verde dos materiais comerciais (#2ECC71 e #1FA75B nas
+        // apresentações) — usado para o indicador de navegação ativa e
+        // destaques positivos/financeiros.
+        verde: {
+          50: '#e9faf1',
+          400: '#2ecc71',
+          500: '#1fa75b',
+          600: '#147a43',
         },
       },
       fontFamily: {

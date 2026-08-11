@@ -18,7 +18,7 @@ export function AppLayout() {
   }, [pathname])
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-100">
+    <div className="flex h-screen overflow-hidden bg-brand-ice">
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onOpenMenu={() => setMobileOpen(true)} />

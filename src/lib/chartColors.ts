@@ -4,17 +4,17 @@
  */
 export const CHART = {
   /** Série principal (barras/linhas) — brand-600 */
-  primary: '#234e88',
+  primary: '#0a6296',
   /** Série secundária — brand-400 */
-  secondary: '#4d83c6',
-  /** Destaque/acento — gold-500 */
-  accent: '#cda032',
+  secondary: '#40abdc',
+  /** Destaque/acento — verde-500 (o acento real dos materiais da marca) */
+  accent: '#1fa75b',
   /** Grade e eixos */
   grid: '#e2e8f0',
   /** Texto de eixo/rótulo */
   label: '#64748b',
-  /** Título/tooltips */
-  ink: '#0f223d',
+  /** Título/tooltips — brand-900 */
+  ink: '#062f44',
   /** Paleta categórica (pizza/barras multi-série) */
-  series: ['#234e88', '#4d83c6', '#cda032', '#7ba7da', '#a98226', '#1a3760'],
+  series: ['#0a6296', '#40abdc', '#1fa75b', '#86caea', '#075278', '#2ecc71'],
 } as const
