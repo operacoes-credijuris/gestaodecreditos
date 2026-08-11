@@ -45,6 +45,32 @@ function normNome(s: unknown): string {
 }
 
 /**
+ * Id do usuário do ADVBOX que corresponde a quem chamou, ou null.
+ *
+ * Mesmo casamento por nome que a listagem usa (não existe id do ADVBOX em
+ * profiles). Serve para a criação de tarefa ser assinada SEMPRE por quem clicou:
+ * antes, o `from` vinha do cliente e podia ser o id de qualquer pessoa.
+ */
+async function usuarioAdvboxDoCaller(
+  ctx: AdvboxCtx,
+  caller: { id: string },
+): Promise<number | null> {
+  const { data: perfil } = await serviceClient()
+    .from('profiles')
+    .select('nome')
+    .eq('id', caller.id)
+    .maybeSingle()
+  const nome = normNome(perfil?.nome)
+  if (!nome) return null
+  const settings = (await getJson(ctx, '/settings')) as {
+    users?: { id?: unknown; name?: unknown }[]
+  }
+  const achado = (settings.users ?? []).find((u) => normNome(u.name) === nome)
+  const id = Number(achado?.id)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+/**
  * Normaliza uma data do ADVBOX para YYYY-MM-DD (coluna `date` do Postgres).
  * Defensivo: o campo chega ora ISO, ora só a data, ora em dd/mm/aaaa.
  */
@@ -244,12 +270,59 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === 'create') {
+      // VALIDAÇÃO NO SERVIDOR. Os campos vinham crus do cliente, então qualquer
+      // autenticado podia montar a requisição à mão e criar tarefa no ADVBOX da
+      // firma COMO SE FOSSE OUTRA PESSOA (`from` com o id do sócio) e escalar
+      // para quem quisesse (`guests`). Quem recebe a notificação não tem como
+      // saber que não foi o sócio que atribuiu.
+      //
+      // O ADMIN CONTINUA PODENDO escolher o remetente: criar tarefa em nome de
+      // outra pessoa é função dele, e a tela já mostra o campo só para ele. Para
+      // usuário comum, `from` é IGNORADO e resolvido no servidor pelo mesmo
+      // casamento de nome que a listagem usa. Sem correspondência, recusa com
+      // motivo — melhor não criar do que criar assinado por outro.
+      if (!caller) {
+        return jsonResponse({ error: 'Sessão inválida.' }, 401)
+      }
+      const ehAdmin = await isAdmin(caller, serviceClient())
+      let remetente: number | null
+      if (ehAdmin) {
+        remetente = Number(body.from)
+        if (!Number.isInteger(remetente) || remetente <= 0) {
+          return jsonResponse({ error: 'Informe o remetente.' }, 400)
+        }
+      } else {
+        remetente = await usuarioAdvboxDoCaller(ctx, caller)
+        if (!remetente) {
+          return jsonResponse(
+            {
+              error:
+                'Seu nome no cadastro não corresponde a nenhum usuário do ADVBOX, então a tarefa não pode ser criada em seu nome. Ajuste o nome em Configurações.',
+            },
+            409,
+          )
+        }
+      }
+      const inteiro = (v: unknown): number | null => {
+        const n = Number(v)
+        return Number.isInteger(n) && n > 0 ? n : null
+      }
+      const lawsuitsId = inteiro(body.lawsuits_id)
+      const tasksId = inteiro(body.tasks_id)
+      if (!lawsuitsId || !tasksId) {
+        return jsonResponse({ error: 'Informe o processo e o tipo de tarefa.' }, 400)
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.start_date ?? ''))) {
+        return jsonResponse({ error: 'Informe a data de início (AAAA-MM-DD).' }, 400)
+      }
       const payload = {
-        lawsuits_id: body.lawsuits_id,
-        tasks_id: body.tasks_id,
+        lawsuits_id: lawsuitsId,
+        tasks_id: tasksId,
         start_date: body.start_date,
-        from: body.from,
-        guests: body.guests,
+        from: remetente,
+        guests: Array.isArray(body.guests)
+          ? (body.guests as unknown[]).map(inteiro).filter((n): n is number => n !== null)
+          : [],
         date_deadline: body.date_deadline || undefined,
         comments: body.comments || undefined,
         important: body.important ? 1 : 0,
@@ -282,6 +355,32 @@ Deno.serve(async (req: Request) => {
       // recursos do edge function.
       const alvo = onlyDigits((body as { numero?: unknown }).numero)
       const primeira = !Array.isArray((body as { fila?: unknown }).fila)
+
+      // AS DUAS ENTRADAS PRIVILEGIADAS EXIGEM CRON.
+      //
+      // A fila é detalhe do auto-encadeamento e NUNCA vem do app. Aceitando-a de
+      // qualquer autenticado, dava para mandar {fila:[{lid: <lawsuit do crédito
+      // A>, digits:[<dígitos do crédito B>]}]}: a função buscava o histórico de A
+      // e gravava as tarefas dele carimbadas com o número de B, e a poda em
+      // seguida apagava as linhas verdadeiras de B. Ficha de crédito exibindo
+      // tarefa de outro processo é erro que ninguém percebe olhando.
+      //
+      // A varredura COMPLETA (sem alvo) também é só do cron: a chamada da ficha
+      // sempre manda `numero`, e a varredura inteira custa dezenas de chamadas ao
+      // ADVBOX, que tem limite de requisições.
+      if (!primeira && !autorizadoPorCron) {
+        return jsonResponse(
+          { error: 'Fila interna: apenas o encadeamento por cron.' },
+          403,
+        )
+      }
+      if (primeira && alvo.length < MIN_DIGITS && !autorizadoPorCron) {
+        return jsonResponse(
+          { error: 'Varredura completa: apenas por cron. Informe o número do processo.' },
+          403,
+        )
+      }
+
       let fila: FilaItem[]
       if (primeira) {
         const casaveis = await casaveisComDigits(ctx)

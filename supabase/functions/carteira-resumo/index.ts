@@ -121,12 +121,16 @@ interface ProcessoRow {
 }
 
 interface MovRow {
+  /** PK estável (text). Entra na impressão digital do insumo. */
+  id: string
   numero_digits: string | null
   data: string | null
+  data_ts: string | null
   conteudo: string | null
 }
 
 interface TarefaRow {
+  id: string
   numero_digits: string | null
   tipo: string | null
   data: string | null
@@ -327,14 +331,37 @@ async function gerarUm(
       problemas: problemasMelhor,
     })
     const problemasNova = conferir(nova)
-    // Fica com a tentativa menos problemática; empate vai para a mais recente,
-    // que já nasceu sabendo das regras violadas.
-    if (problemasNova.length <= problemasMelhor.length) {
+    // PESO, e não contagem. Contando, "providências vazias" (1 problema) empatava
+    // com "estágio 20 caracteres acima do limite" (1 problema) e, por ser mais
+    // recente, VENCIA: o loop trocava um texto completo e comprido por um campo
+    // abandonado, e gravava isso como resumo válido na carteira do investidor.
+    // Campo abandonado pesa 100; excesso de tamanho, acento de estilo e afins
+    // pesam 1. E nenhuma tentativa que ESVAZIA um campo que já estava cheio é
+    // aceita, mesmo que pontue melhor no resto.
+    if (esvaziouCampo(melhor, nova)) continue
+    if (pontuar(problemasNova) <= pontuar(problemasMelhor)) {
       melhor = nova
       problemasMelhor = problemasNova
     }
   }
   return melhor
+}
+
+/** Gravidade somada dos problemas: campo abandonado domina o resto. */
+function pontuar(problemas: string[]): number {
+  return problemas.reduce(
+    (t, p) => t + (/vazio ou muito curto/.test(p) ? 100 : 1),
+    0,
+  )
+}
+
+/** A nova tentativa deixou vazio um campo que a anterior tinha preenchido? */
+function esvaziouCampo(anterior: Resumo, nova: Resumo): boolean {
+  const cheio = (v: string) => v.trim().length >= MIN_CHARS
+  return (
+    (cheio(anterior.estagio_processual) && !cheio(nova.estagio_processual)) ||
+    (cheio(anterior.providencias) && !cheio(nova.providencias))
+  )
 }
 
 /** Map com concorrência limitada, 1 resultado por item, preservando a ordem. */
@@ -463,19 +490,29 @@ Deno.serve(async (req: Request) => {
     for (const p of processos) digitsDe.set(p.id, onlyDigits(p.numero_cnj))
     const todosDigits = [...new Set([...digitsDe.values()].filter((d) => d.length >= 6))]
 
+    // DESEMPATE OBRIGATÓRIO na ordenação. Com `.order('data')` só, dois
+    // andamentos do MESMO dia saíam em ordem indefinida — e o primeiro deles vira
+    // o ">>> SITUAÇÃO MAIS RECENTE" do dossiê. No caso real: "alvará expedido"
+    // (09:14) e "alvará devolvido sem cumprimento" (16:02) no dia 12/08; sem
+    // desempate o texto entregue ao investidor podia afirmar que o alvará saiu,
+    // quando ele havia voltado. data_ts primeiro, id como último critério —
+    // é ele que garante saída estável quando data_ts for meia-noite.
     const { data: movData } = todosDigits.length
       ? await svc
           .from('advbox_movimentacoes')
-          .select('numero_digits, data, conteudo')
+          .select('id, numero_digits, data, data_ts, conteudo')
           .in('numero_digits', todosDigits)
           .order('data', { ascending: false })
+          .order('data_ts', { ascending: false, nullsFirst: false })
+          .order('id', { ascending: false })
       : { data: [] }
     const { data: tarData } = todosDigits.length
       ? await svc
           .from('advbox_tarefas')
-          .select('numero_digits, tipo, data, date_deadline, notes, concluida')
+          .select('id, numero_digits, tipo, data, date_deadline, notes, concluida')
           .in('numero_digits', todosDigits)
           .order('data', { ascending: false })
+          .order('id', { ascending: false })
       : { data: [] }
 
     const movsPor = new Map<string, MovRow[]>()
@@ -517,14 +554,25 @@ Deno.serve(async (req: Request) => {
       const movs = (movsPor.get(d) ?? []).slice(0, MAX_ANDAMENTOS)
       const tarefas = (tarPor.get(d) ?? []).slice(0, MAX_TAREFAS)
 
-      // Impressão digital: quantidade e data do mais recente de cada fonte,
-      // mais os campos do cadastro que mudam o texto.
+      // Impressão digital pelos IDS da janela enviada, e não por contagem + data.
+      //
+      // O defeito que isso corrige: `movs.length` satura no teto de
+      // MAX_ANDAMENTOS. Num processo com 200 andamentos, a contagem já era 40 e
+      // continuava 40; se o novo andamento caísse no MESMO dia do anterior, a
+      // data também não mudava — hash idêntico, crédito "sem novidade", e a
+      // carteira seguia mostrando "aguardando alvará" depois de o RPV ter sido
+      // pago. Com os ids, qualquer troca na janela muda a impressão digital.
+      // A contagem NÃO truncada entra junto para o caso de o andamento novo ser
+      // mais antigo que os 40 da janela.
       const fonte = hash(
         [
-          movs.length,
-          movs[0]?.data ?? '',
-          tarefas.length,
-          tarefas[0]?.data ?? '',
+          (movsPor.get(d) ?? []).length,
+          movs.map((m) => m.id).join(','),
+          (tarPor.get(d) ?? []).length,
+          tarefas.map((t) => t.id).join(','),
+          // Tarefa muda de estado sem mudar de id, e o texto fala do que está
+          // pendente.
+          tarefas.map((t) => (t.concluida ? '1' : '0')).join(''),
           p.data_liquidacao ?? '',
           p.expectativa_liquidacao ?? '',
           p.status ?? '',

@@ -155,8 +155,20 @@ Deno.serve(async (req: Request) => {
       gravados += slice.length
     }
 
-    // Remove do cache o que saiu da janela de 30 dias.
-    await svc.from('djen_publicacoes').delete().lt('data_disponibilizacao', ini)
+    // Remove do cache o que saiu da janela de 30 dias, COM UM DIA DE FOLGA.
+    //
+    // A folga existe porque os dois lados calculam a janela em fusos diferentes:
+    // a Edge Function roda em UTC e a tela usa horário local. Depois das 21h de
+    // Brasília o UTC já virou o dia, então a poda apagava a publicação de um dia
+    // que a tela ainda pedia — e intimação sem o selo "tratada" desaparecia da
+    // lista um dia antes do previsto, sem deixar rastro. Guardar um dia a mais
+    // custa quase nada; perder intimação custa prazo.
+    const podaAte = new Date(`${ini}T00:00:00Z`)
+    podaAte.setUTCDate(podaAte.getUTCDate() - 1)
+    await svc
+      .from('djen_publicacoes')
+      .delete()
+      .lt('data_disponibilizacao', podaAte.toISOString().slice(0, 10))
 
     return jsonResponse({ ok: true, total: items.length, gravados })
   } catch (err) {

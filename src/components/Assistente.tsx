@@ -13,6 +13,8 @@ interface Mensagem {
 
 interface RespostaAssistente {
   resposta: string
+  /** O modelo bateu no limite de tokens: o texto está incompleto. */
+  truncada?: boolean
 }
 
 // Sugestões de partida: o painel em branco não dá pista do que ele sabe
@@ -132,11 +134,16 @@ export function Assistente() {
     setErro(null)
     setCarregando(true)
     try {
-      const { resposta } = await invokeFunction<RespostaAssistente>(
+      const { resposta, truncada } = await invokeFunction<RespostaAssistente>(
         'assistente',
         { pergunta: limpa, historico },
       )
-      setMensagens((atual) => [...atual, { role: 'assistant', content: resposta }])
+      // Aviso no PRÓPRIO texto, e não num selo à parte: lista cortada no meio
+      // parece completa, e quem lê usa o pedaço como se fosse o todo.
+      const conteudo = truncada
+        ? `${resposta}\n\n---\n\n**Resposta interrompida** por tamanho. Peça um recorte menor (por tribunal, por período) para ver o restante.`
+        : resposta
+      setMensagens((atual) => [...atual, { role: 'assistant', content: conteudo }])
     } catch (e) {
       // A pergunta continua na tela; o erro aparece embaixo. Recolher a
       // pergunta obrigaria a pessoa a digitar tudo de novo para tentar.

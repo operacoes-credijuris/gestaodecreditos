@@ -42,9 +42,27 @@ Deno.serve(async (req) => {
       return json({ erro: `Kommo recusou a lista de arquivos (HTTP ${listRes.status}).`, detalhe: (await listRes.text()).slice(0, 300) }, 502);
     }
     const listJson = await listRes.json();
-    const arquivos = (listJson?._embedded?.files ?? []) as Array<{ file_uuid: string }>;
+    const arquivos = (listJson?._embedded?.files ?? []) as Array<{
+      file_uuid: string;
+      name?: string;
+      metadata?: { mime_type?: string };
+    }>;
     if (arquivos.length === 0) return json({ erro: "Nenhum arquivo anexado neste card. Anexe o PDF do processo e tente de novo." }, 404);
-    const fileUuid = arquivos[0].file_uuid;
+    // ESCOLHE O PDF, e não o primeiro anexo. O comercial costuma anexar a foto do
+    // RG do credor antes do processo: pegando o primeiro, voltava o JPG e a tela
+    // dizia "o PDF não tem texto selecionável (parece escaneado)" — mandando o
+    // usuário procurar defeito no PDF certo, que nem havia sido baixado.
+    const ehPdf = (a: { name?: string; metadata?: { mime_type?: string } }) =>
+      a.metadata?.mime_type === "application/pdf" || /\.pdf$/i.test(a.name ?? "");
+    const pdfs = arquivos.filter(ehPdf);
+    if (pdfs.length === 0) {
+      return json({
+        erro: `O card tem ${arquivos.length} anexo(s), nenhum em PDF. Anexe o PDF do processo e tente de novo.`,
+      }, 404);
+    }
+    // Mais de um PDF: o último anexado é o mais provável (o processo entra depois
+    // dos documentos do credor).
+    const fileUuid = pdfs[pdfs.length - 1].file_uuid;
 
     // 2) descobre a URL do drive da conta (ex.: drive-g)
     const accRes = await fetch(`${base}/api/v4/account?with=drive_url`, { headers: auth });

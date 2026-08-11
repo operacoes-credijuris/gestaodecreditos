@@ -150,12 +150,14 @@ const FERRAMENTAS: Anthropic.Tool[] = [
   {
     name: 'contar_publicacoes',
     description:
-      'Conta publicações/intimações por situação de leitura e tratamento. ' +
-      'Use para perguntas sobre pendências da equipe.',
+      'Conta publicações/intimações do DJEN por situação de tratamento. ' +
+      'Use para perguntas sobre pendências da equipe. A janela é contada por ' +
+      'data de disponibilização, no fuso de Brasília.',
     input_schema: {
       type: 'object',
       properties: {
-        lida: { type: 'boolean' },
+        // Sem `lida`: a tabela do DJEN só tem `tratada`. O parâmetro existia e
+        // apontava para uma coluna inexistente.
         tratada: { type: 'boolean' },
         dias: { type: 'integer', description: 'Últimos N dias.' },
       },
@@ -175,11 +177,33 @@ function limite(valor: unknown): number {
   return Math.min(Math.max(n, 1), LIMITE_MAX)
 }
 
-/** Data ISO de N dias atrás, para os filtros de janela. */
+/**
+ * Data ISO de N dias atrás, no fuso de BRASÍLIA.
+ *
+ * toISOString() (UTC) errava o dia inteiro depois das 21h: às 21h30 de 10/08,
+ * "últimos 1 dia" virava ">= 2026-08-10" — contava HOJE e excluía 09/08, que era
+ * exatamente o dia pedido. E a resposta saía com número exato, sem ressalva.
+ * A Edge Function roda em UTC, então o fuso tem de ser explícito.
+ */
 function desde(dias: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - dias)
-  return d.toISOString().slice(0, 10)
+  const hojeSP = new Date().toLocaleDateString('sv-SE', {
+    timeZone: 'America/Sao_Paulo',
+  })
+  const [a, m, d] = hojeSP.split('-').map(Number)
+  const base = new Date(Date.UTC(a, m - 1, d))
+  base.setUTCDate(base.getUTCDate() - dias)
+  return base.toISOString().slice(0, 10)
+}
+
+/** Texto legível a partir do HTML do DJEN (o `raw.texto` vem com marcação). */
+function textoDjen(raw: unknown): string | null {
+  const t = (raw as { texto?: unknown } | null)?.texto
+  if (typeof t !== 'string') return null
+  return t
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /**
@@ -232,9 +256,13 @@ async function executar(
 
       // Duas fontes independentes: andamentos do ADVBOX e publicações do DJEN.
       // Consultamos as duas porque a mesma fase pode aparecer só em uma delas.
-      const filtra = <T>(q: T, campoData: string): T => {
+      //
+      // O campo de texto é PARÂMETRO porque as duas fontes guardam o texto em
+      // lugares diferentes: advbox_movimentacoes tem a coluna `conteudo`, e o
+      // DJEN guarda o comunicado dentro de `raw` (jsonb), em HTML.
+      const filtra = <T>(q: T, campoData: string, campoTexto: string): T => {
         let r = (q as { ilike: (c: string, v: string) => unknown }).ilike(
-          'conteudo',
+          campoTexto,
           `%${texto}%`,
         ) as T
         if (dias) {
@@ -249,16 +277,22 @@ async function executar(
       // Contagem exata em paralelo com a amostra: é o que permite dizer "521
       // ocorrências em 87 processos, veja as 60 mais recentes" em vez de
       // "atingi o teto e não sei o que ficou de fora".
+      // ⚠️ djen_publicacoes, e NÃO public.publicacoes: aquela tabela é legado e
+      // está vazia. Com ela, "quantas publicações não foram tratadas?" respondia
+      // "nenhuma pendente" com 180 na tela — número errado dado como exato, que é
+      // o pior jeito de errar num assistente.
       const [totMov, totPub, mov, pub] = await Promise.all([
         filtra(
           svc
             .from('advbox_movimentacoes')
             .select('id', { count: 'exact', head: true }),
           'data',
+          'conteudo',
         ),
         filtra(
-          svc.from('publicacoes').select('id', { count: 'exact', head: true }),
-          'data_publicacao',
+          svc.from('djen_publicacoes').select('id', { count: 'exact', head: true }),
+          'data_disponibilizacao',
+          'raw->>texto',
         ),
         filtra(
           svc
@@ -267,18 +301,30 @@ async function executar(
             .order('data', { ascending: false })
             .limit(LINHAS_VARRIDAS),
           'data',
+          'conteudo',
         ),
         filtra(
           svc
-            .from('publicacoes')
-            .select('numero_processo, data_publicacao, conteudo, tipo, tratada')
-            .order('data_publicacao', { ascending: false })
+            .from('djen_publicacoes')
+            .select('numero_processo, data_disponibilizacao, tipo_comunicacao, tratada, raw')
+            .order('data_disponibilizacao', { ascending: false })
             .limit(LINHAS_VARRIDAS),
-          'data_publicacao',
+          'data_disponibilizacao',
+          'raw->>texto',
         ),
       ])
       if (mov.error && pub.error)
         return JSON.stringify({ erro: mov.error.message })
+
+      // Fonte que caiu tem de ser DECLARADA, não seguida em silêncio: antes, se a
+      // contagem exata estourasse o statement_timeout, count vinha null e o JSON
+      // dizia "total_ocorrencias: 0" ao lado de processos encontrados — o modelo
+      // lia zero como fato e afirmava que não havia nada.
+      const fontesIndisponiveis: string[] = []
+      if (mov.error || totMov.error) fontesIndisponiveis.push('movimentacoes')
+      if (pub.error || totPub.error) fontesIndisponiveis.push('publicacoes')
+      const contagemIncompleta =
+        totMov.count === null || totPub.count === null || fontesIndisponiveis.length > 0
 
       // Agrupa por processo, guardando o andamento MAIS RECENTE de cada um.
       // Sem isso, dez andamentos de um mesmo processo consumiam dez vagas do
@@ -313,9 +359,11 @@ async function executar(
       for (const p of pub.data ?? []) {
         registra({
           numero_processo: p.numero_processo,
-          data: p.data_publicacao,
+          data: p.data_disponibilizacao,
           fonte: 'publicacao',
-          trecho: corta(p.conteudo),
+          // O comunicado do DJEN vem em HTML dentro de raw; sem limpar, o modelo
+          // receberia marcação em vez de texto.
+          trecho: corta(textoDjen(p.raw)),
         })
       }
 
@@ -332,23 +380,34 @@ async function executar(
         aviso:
           'Busca por texto: a redação varia entre tribunais, então a lista ' +
           'pode não estar completa. Cada processo aparece uma vez, com seu ' +
-          'andamento mais recente que casou com o texto.',
-        total_ocorrencias: totalOcorrencias,
+          'andamento mais recente que casou com o texto. O texto do DJEN é ' +
+          'guardado em HTML, então termo com acento pode deixar de casar.',
+        // null e não 0 quando a contagem não fechou: zero é afirmação, e afirmar
+        // zero sem ter conseguido contar é o erro que isto evita.
+        total_ocorrencias: contagemIncompleta ? null : totalOcorrencias,
+        contagem_exata_indisponivel: contagemIncompleta || undefined,
+        fontes_indisponiveis: fontesIndisponiveis.length ? fontesIndisponiveis : undefined,
         processos_distintos_encontrados: todos.length,
         processos_listados: amostra.length,
         // Só quando true é que existe coisa fora da lista. Antes, o modelo não
-        // tinha como distinguir "achei tudo" de "bati no teto".
-        pode_haver_mais_antigos: varreduraTruncada || todos.length > amostra.length,
+        // tinha como distinguir "achei tudo" de "bati no teto". Fonte que caiu
+        // também liga a bandeira: com uma das duas fora, a lista é parcial por
+        // definição.
+        pode_haver_mais_antigos:
+          varreduraTruncada || todos.length > amostra.length || contagemIncompleta,
         processos: amostra,
       })
     }
 
     case 'contar_publicacoes': {
-      let q = svc.from('publicacoes').select('id', { count: 'exact', head: true })
-      if (typeof args.lida === 'boolean') q = q.eq('lida', args.lida)
+      // djen_publicacoes (a tabela viva). A coluna `lida` não existe nela — o
+      // parâmetro saiu do schema da ferramenta junto com esta troca.
+      let q = svc
+        .from('djen_publicacoes')
+        .select('id', { count: 'exact', head: true })
       if (typeof args.tratada === 'boolean') q = q.eq('tratada', args.tratada)
       if (typeof args.dias === 'number')
-        q = q.gte('data_publicacao', desde(args.dias))
+        q = q.gte('data_disponibilizacao', desde(args.dias))
       const { count, error } = await q
       if (error) return JSON.stringify({ erro: error.message })
       return JSON.stringify({ total: count ?? 0, filtros: args })
@@ -395,7 +454,9 @@ const SISTEMA = `Você é o assistente de dados do sistema de Gestão de Cessõe
 - **Créditos (processos)**: precatórios e créditos judiciais adquiridos. Campos: número CNJ, tribunal, comarca, vara, cedente, entidade devedora, datas de aquisição e liquidação, expectativa de liquidação, e uma situação cadastral que é só uma de três — \`ativo\`, \`complementar\` ou \`encerrado\`.
 - **Movimentações e publicações**: andamentos vindos do ADVBOX e intimações do DJEN. São TEXTO CORRIDO, sem classificação estruturada.
 - **Cessões**: o inventário de créditos com valores de face, aquisição e cessão.
-- **Publicações pendentes**: cada publicação tem marcações de lida e tratada.
+- **Publicações pendentes**: a publicação do DJEN tem a marcação "tratada" (não
+  existe "lida"). A janela de dias é contada pela data de disponibilização, no
+  fuso de Brasília.
 
 # Regra que não se negocia
 Todo número que você afirmar precisa vir de uma ferramenta executada nesta conversa. Você não tem conhecimento prévio dos dados da Credijuris. Se não deu para consultar, diga que não deu — nunca estime, arredonde de cabeça ou complete com um valor plausível.
@@ -475,7 +536,11 @@ Deno.serve(async (req: Request) => {
     for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
       const resposta = await anthropic.messages.create({
         model: MODELO,
-        max_tokens: 8000,
+        // 16000 e não 8000: com thinking adaptativo o orçamento é dividido entre
+        // o pensamento e o texto visível, e o caminho de interpretação roda em
+        // esforço alto. Com 8000, pedir uma tabela de 60 processos estourava na
+        // linha ~35 e a resposta CORTADA era entregue como completa.
+        max_tokens: 16000,
         // Prefixo estável (ferramentas + sistema) em cache: o mesmo bloco é
         // reenviado em toda pergunta e em toda rodada de ferramenta.
         system: [
@@ -509,10 +574,15 @@ Deno.serve(async (req: Request) => {
           .map((b) => b.text)
           .join('\n')
           .trim()
+        // Resposta INTERROMPIDA por limite de tokens não pode ser entregue como
+        // se estivesse inteira: uma tabela de 60 processos cortada na linha 35
+        // parece completa, e quem lê usa o pedaço como se fosse o todo.
+        const truncada = resposta.stop_reason === 'max_tokens'
         return jsonResponse({
           resposta:
             texto ||
             'Não consegui formular uma resposta. Tente reformular a pergunta.',
+          truncada: truncada || undefined,
           ferramentas: ferramentasUsadas,
         })
       }

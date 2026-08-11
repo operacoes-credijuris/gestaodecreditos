@@ -143,26 +143,45 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---------- Notas ----------
-    // Busca as notas em nível de conta (até 40 páginas) em vez de uma requisição por
-    // card (que seriam dezenas). O filtro note_type=common é o que mantém as
-    // anotações da própria integração (service_message) fora daqui — sem isso,
-    // nosso registro de auditoria seria confundido com dado do crédito.
-    // Acumula TODAS as notas de cada card, não só a mais antiga: comentários
-    // posteriores do comercial também interessam ao operacional.
+    // Busca DIRIGIDA aos cards que acabaram de ser lidos, com
+    // filter[entity_id][], e não uma varredura de notas em nível de conta.
+    //
+    // POR QUE MUDOU: a varredura por conta tinha teto de 40 páginas × 250 = 10 mil
+    // notas. Passando disso, as notas dos últimos cards simplesmente não chegavam
+    // — e como o espelho é gravado com o que chegou, o sync gravava notas=[] e
+    // processo_cnj=null POR CIMA dos dados bons, respondendo "Kommo
+    // sincronizado" como se tudo estivesse certo. O mesmo acontecia se o filtro
+    // note_type deixasse de casar e a página 1 voltasse 204.
+    //
+    // A busca dirigida elimina o teto em vez de aumentá-lo, e para algumas
+    // dezenas de cards custa MENOS requisições que as 40 páginas anteriores.
+    // Também não gasta orçamento com notas de outros funis nem de cards fechados.
+    //
+    // O filtro note_type=common é o que mantém as anotações da própria integração
+    // (service_message) fora daqui — sem isso, nosso registro de auditoria seria
+    // confundido com dado do crédito. Acumula TODAS as notas de cada card, não só
+    // a mais antiga: comentários posteriores do comercial também interessam.
     const notasPorLead = new Map<number, KommoNote[]>()
-    for (let pagina = 1; pagina <= 40; pagina++) {
-      const r = await kommo<{
-        _embedded?: { notes?: KommoNote[] }
-        _links?: { next?: { href?: string } }
-      }>(`/leads/notes?filter[note_type][]=common&limit=250&page=${pagina}`)
-      if (!r) break
-      for (const n of r._embedded?.notes ?? []) {
-        if (!n.params?.text?.trim()) continue
-        const lista = notasPorLead.get(n.entity_id)
-        if (lista) lista.push(n)
-        else notasPorLead.set(n.entity_id, [n])
+    // 100 ids por requisição: 250 caberiam no limite da API, mas a URL passaria
+    // de 2.500 caracteres e servidor intermediário costuma cortar antes disso.
+    const IDS_POR_CONSULTA = 100
+    for (let i = 0; i < leads.length; i += IDS_POR_CONSULTA) {
+      const ids = leads.slice(i, i + IDS_POR_CONSULTA).map((l) => l.id)
+      const filtroIds = ids.map((id) => `filter[entity_id][]=${id}`).join('&')
+      for (let pagina = 1; pagina <= 40; pagina++) {
+        const r = await kommo<{
+          _embedded?: { notes?: KommoNote[] }
+          _links?: { next?: { href?: string } }
+        }>(`/leads/notes?${filtroIds}&filter[note_type][]=common&limit=250&page=${pagina}`)
+        if (!r) break
+        for (const n of r._embedded?.notes ?? []) {
+          if (!n.params?.text?.trim()) continue
+          const lista = notasPorLead.get(n.entity_id)
+          if (lista) lista.push(n)
+          else notasPorLead.set(n.entity_id, [n])
+        }
+        if (!r._links?.next?.href) break
       }
-      if (!r._links?.next?.href) break
     }
     // Da mais antiga para a mais recente. A API não garante ordem entre páginas,
     // então ordenar aqui é o que torna notas[0] confiável como "primeira".

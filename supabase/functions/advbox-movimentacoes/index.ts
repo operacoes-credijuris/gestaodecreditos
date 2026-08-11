@@ -83,6 +83,15 @@ async function numerosCadastrados(): Promise<Set<string>> {
     svc.from('apensos').select('numero'),
     svc.from('requerimentos').select('numero_protocolo'),
   ])
+  // FALHA ALTO, e não `?? []`. Este conjunto decide o que a poda APAGA: com um
+  // soluço de leitura (5xx, statement timeout) ele saía vazio, nada casava, e o
+  // DELETE limpava as dezenas de milhares de linhas de advbox_movimentacoes mais
+  // a tabela de status inteira — o histórico integral do ADVBOX, que o cron
+  // levaria horas para reconstruir. Melhor a sincronização falhar com 500 e
+  // tentar de novo em 2h do que apagar o que estava certo.
+  for (const r of [proc, ap, req]) {
+    if (r.error) throw new Error(`cadastro: ${r.error.message}`)
+  }
   const set = new Set<string>()
   const add = (v: unknown) => {
     const d = onlyDigits(v)
@@ -100,6 +109,12 @@ async function numerosCadastrados(): Promise<Set<string>> {
 async function processosCasaveis(ctx: AdvboxCtx): Promise<Map<string, string>> {
   const nums = await numerosCadastrados()
   const lawsuits = await fetchAll(ctx, '/lawsuits')
+  // Nenhum processo no ADVBOX é resposta SUSPEITA, não notícia: a conta tem
+  // processos. Vazio aqui significa API mudando de formato, token trocado ou
+  // página vindo curta — e seguir adiante levaria a poda a apagar tudo.
+  if (lawsuits.length === 0) {
+    throw new Error('/lawsuits devolveu lista vazia; sincronização abortada')
+  }
   const map = new Map<string, string>()
   for (const l of lawsuits) {
     const pn = onlyDigits(l.process_number)
@@ -192,16 +207,35 @@ Deno.serve(async (req: Request) => {
       // Poda SÓ o que saiu do cadastro (histórico não expira por idade).
       // Movimentações: por lawsuit_id, que é estável; o número exibível pode
       // mudar de formato entre syncs. Só na primeira chamada da cadeia.
-      const lids = [...casaveis.keys()]
-      const lidsLst = lids.length ? lids : ['__none__']
-      const lidsStr =
-        '(' + lidsLst.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
-      await svc.from('advbox_movimentacoes').delete().not('advbox_lawsuit_id', 'in', lidsStr)
-      // Status: a tabela é chaveada pelo número exibível.
-      const numeros = [...casaveis.values()]
-      const lst = numeros.length ? numeros : ['__none__']
-      const inStr = '(' + lst.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
-      await svc.from('advbox_processo_status').delete().not('numero_processo', 'in', inStr)
+      // SÓ PODA COM CONJUNTO NÃO VAZIO. O sentinela '__none__' tratava "não sei"
+      // como "não há nada cadastrado", e nesse caso o NOT IN não excluía nada:
+      // o DELETE virava um delete-tudo. Conjunto vazio aqui é sempre defeito de
+      // leitura ou de casamento, nunca cadastro realmente vazio — a base tem 95
+      // créditos.
+      if (casaveis.size === 0) {
+        console.warn('poda ignorada: nenhum processo casável (leitura suspeita)')
+      } else {
+        const lids = [...casaveis.keys()]
+        const lidsStr =
+          '(' + lids.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
+        const podaMov = await svc
+          .from('advbox_movimentacoes')
+          .delete()
+          .not('advbox_lawsuit_id', 'in', lidsStr)
+        // Status: a tabela é chaveada pelo número exibível.
+        const numeros = [...casaveis.values()]
+        const inStr =
+          '(' + numeros.map((n) => `"${String(n).replace(/["\\]/g, '')}"`).join(',') + ')'
+        const podaStatus = await svc
+          .from('advbox_processo_status')
+          .delete()
+          .not('numero_processo', 'in', inStr)
+        // Erro de poda não é fatal (o cache fica com linha a mais, não a menos),
+        // mas engolido some para sempre — ao menos vai para o log.
+        for (const p of [podaMov, podaStatus]) {
+          if (p.error) console.error('falha ao podar cache:', p.error.message)
+        }
+      }
     } else {
       fila = (body as { fila: { lid: string; numero: string }[] }).fila
     }
