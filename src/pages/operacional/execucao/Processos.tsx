@@ -120,6 +120,7 @@ const VAZIO: Partial<Processo> = {
   cedente: '',
   cedente_advogado: '',
   cessionario: '',
+  intermediador: '',
   entidade_devedora: '',
   data_aquisicao: '',
   expectativa_liquidacao: '',
@@ -400,6 +401,11 @@ export default function Processos() {
         payload.instrumento === 'registro_publico'
           ? vazioNull(payload.numero_rtdpj)
           : null
+      // Intermediador em branco vira null: é ele que monta a lista de nomes da
+      // aba Dados pessoais e bancários, e string vazia entraria como se fosse
+      // alguém. (O cessionário não passa por aqui — mudar isso agora afetaria
+      // filtros e comparações que já existem, e a tela trata os dois casos.)
+      payload.intermediador = vazioNull(payload.intermediador)
       // Datas em branco viram null.
       payload.data_aquisicao = vazioNull(payload.data_aquisicao)
       payload.expectativa_liquidacao = vazioNull(payload.expectativa_liquidacao)
@@ -747,6 +753,21 @@ export default function Processos() {
                   onChange={(e) => setEditing({ ...editing, cessionario: e.target.value })}
                 />
               </Field>
+              {/* É daqui que sai a lista de intermediadores da aba "Dados
+                  pessoais e bancários", do mesmo jeito que o cessionário produz a
+                  lista de investidores: o nome nasce no crédito e a outra tela só
+                  guarda os dados de quem já existe aqui. */}
+              <Field
+                label="Intermediador"
+                hint="Quem intermediou a aquisição. Alimenta a aba Dados pessoais e bancários."
+              >
+                <Input
+                  value={editing.intermediador ?? ''}
+                  onChange={(e) =>
+                    setEditing({ ...editing, intermediador: e.target.value })
+                  }
+                />
+              </Field>
               <Field label="Entidade devedora">
                 <Input
                   value={editing.entidade_devedora ?? ''}
@@ -993,6 +1014,9 @@ export default function Processos() {
               </DrawerField>
               <DrawerField label="Cessionário">
                 {detalhe.cessionario || '—'}
+              </DrawerField>
+              <DrawerField label="Intermediador">
+                {detalhe.intermediador || '—'}
               </DrawerField>
               <DrawerField label="Entidade devedora">
                 {detalhe.entidade_devedora || '—'}

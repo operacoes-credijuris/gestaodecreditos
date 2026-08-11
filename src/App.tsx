@@ -6,6 +6,7 @@ import NotFound from '@/pages/NotFound'
 import Dashboard from '@/pages/estrategica/Dashboard'
 import GeracaoContratos from '@/pages/comercial/GeracaoContratos'
 import CarteirasInvestidores from '@/pages/comercial/CarteirasInvestidores'
+import DadosPessoaisBancarios from '@/pages/comercial/DadosPessoaisBancarios'
 import AnaliseCredito from '@/pages/operacional/AnaliseCredito'
 import PublicacoesMovimentacoes from '@/pages/operacional/execucao/PublicacoesMovimentacoes'
 import TarefasAdvbox from '@/pages/operacional/execucao/TarefasAdvbox'
@@ -32,6 +33,10 @@ export default function App() {
         {/* Comercial */}
         <Route path="/comercial/contratos" element={<GeracaoContratos />} />
         <Route path="/comercial/carteiras" element={<CarteirasInvestidores />} />
+        <Route
+          path="/comercial/dados-pessoais"
+          element={<DadosPessoaisBancarios />}
+        />
 
         {/* Operacional */}
         <Route path="/operacional/analise" element={<AnaliseCredito />} />

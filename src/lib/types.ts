@@ -104,6 +104,12 @@ export interface Processo {
   cedente: string | null
   cedente_advogado: string | null
   cessionario: string | null
+  /**
+   * Quem intermediou a aquisição. Como o cessionário, é TEXTO no crédito e não
+   * cadastro: a aba "Dados pessoais e bancários" monta a lista de
+   * intermediadores a partir dos nomes distintos que aparecem aqui.
+   */
+  intermediador: string | null
   entidade_devedora: string | null
   data_aquisicao: string | null
   expectativa_liquidacao: string | null

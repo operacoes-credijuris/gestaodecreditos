@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Wallet,
@@ -11,14 +11,11 @@ import {
   RefreshCw,
   Download,
   SlidersHorizontal,
-  Pencil,
 } from 'lucide-react'
 import {
   processosCrud,
   useCarteiraResumos,
-  useInvestidorDados,
   useParametrosAtualizacao,
-  useSalvarInvestidorDados,
   useUltimaMovimentacao,
 } from '@/lib/queries'
 import type { Processo } from '@/lib/types'
@@ -52,8 +49,7 @@ import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
-import { Field, Input, Select } from '@/components/ui/Field'
-import { IconButton } from '@/components/ui/IconButton'
+import { Select } from '@/components/ui/Field'
 import { Tabs } from '@/components/ui/Tabs'
 import {
   Table,
@@ -67,17 +63,12 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import {
-  compilarEndereco,
-  cpfCnpjValido,
   formatBRL,
-  formatCepInput,
   formatCNJ,
-  formatCpfCnpjInput,
   formatDate,
   formatDateTime,
   formatPercent,
   hojeISO,
-  limparNumeroConta,
   mesesDepois,
   normalizarNome,
   onlyDigits,
@@ -86,10 +77,13 @@ import {
 
 // As `key` são internas e não mudam com o rótulo: elas aparecem em estado e em
 // comparações pelo arquivo, e renomeá-las não traria nada.
+// "Dados dos investidores" era a terceira aba daqui e virou página própria
+// (Dados pessoais e bancários), no menu, porque não é carteira: não tem investidor
+// selecionado, nem mês de referência, nem projeção — e passou a guardar também os
+// intermediadores.
 const TABS = [
   { key: 'individual', label: 'Relatórios individuais' },
   { key: 'consolidado', label: 'Visão global' },
-  { key: 'dados_pessoais', label: 'Dados dos investidores' },
 ]
 
 export default function CarteirasInvestidores() {
@@ -104,7 +98,6 @@ export default function CarteirasInvestidores() {
 
       {tab === 'individual' && <Individual />}
       {tab === 'consolidado' && <Consolidado />}
-      {tab === 'dados_pessoais' && <DadosPessoais />}
     </div>
   )
 }
@@ -128,18 +121,6 @@ function rotuloMes(iso: string): string {
   })
 }
 
-/**
- * Tipos do crédito em texto corrido, não como lista de selos: a carteira é um
- * relatório para ler, não uma tabela para escanear.
- *
- *   principal + contratuais  -> "crédito principal e honorários contratuais"
- *   os três                  -> "crédito principal, honorários contratuais e sucumbenciais"
- *   os dois honorários       -> "honorários contratuais e sucumbenciais"
- *
- * Quando os dois honorários aparecem, o segundo vira só "sucumbenciais" — a
- * palavra "honorários" já foi dita e repetir soa burocrático. Sozinho, ele
- * mantém o substantivo.
- */
 /** Rótulo de seção fora do card, como abertura da tabela. */
 function TituloSecao({ children }: { children: string }) {
   return (
@@ -1243,528 +1224,6 @@ function Consolidado() {
           </p>
         )}
       </div>
-    </div>
-  )
-}
-
-// ----------------------- Dados pessoais -----------------------
-// ----------------------- Dados dos investidores -----------------------
-// A LISTA de investidores vem dos cessionários dos Créditos, igual à Visão
-// global, só sem filtro de mês. Não há como criar linha aqui: se um investidor
-// não aparece, é porque não é cessionário de nenhum crédito.
-//
-// Os DADOS vêm de public.investidor_dados, indexados pelo nome normalizado, e a
-// linha nasce no primeiro salvamento.
-type CampoInvestidor =
-  | 'cpf'
-  | 'rg'
-  | 'banco'
-  | 'agencia'
-  | 'conta'
-  | 'pix'
-  | 'logradouro'
-  | 'numero'
-  | 'complemento'
-  | 'bairro'
-  | 'cidade'
-  | 'uf'
-  | 'cep'
-
-/**
- * `mascara` normaliza o que se digita, a cada tecla. É onde o formato deixa de
- * ser recomendação e passa a ser garantia: o CPF vira CNPJ sozinho ao passar de
- * 11 dígitos, agência/conta descartam letra, número aceita só dígito e o CEP sai
- * sempre 00000-000.
- */
-const CAMPOS_DOCUMENTO: {
-  chave: CampoInvestidor
-  rotulo: string
-  mascara?: (v: string) => string
-  dica?: string
-}[] = [
-  {
-    chave: 'cpf',
-    rotulo: 'CPF / CNPJ',
-    mascara: formatCpfCnpjInput,
-    dica: '000.000.000-00',
-  },
-  { chave: 'rg', rotulo: 'RG' },
-  { chave: 'banco', rotulo: 'Banco' },
-  { chave: 'agencia', rotulo: 'Agência', mascara: limparNumeroConta },
-  { chave: 'conta', rotulo: 'Conta', mascara: limparNumeroConta },
-  { chave: 'pix', rotulo: 'Pix' },
-]
-
-// Colunas da tabela. Endereço é UMA coluna, em texto corrido compilado das
-// partes — a quebra em campos existe só na janela de edição.
-const COLUNAS_TABELA: { chave: CampoInvestidor | 'endereco'; rotulo: string }[] = [
-  { chave: 'cpf', rotulo: 'CPF / CNPJ' },
-  { chave: 'rg', rotulo: 'RG' },
-  { chave: 'banco', rotulo: 'Banco' },
-  { chave: 'agencia', rotulo: 'Agência' },
-  { chave: 'conta', rotulo: 'Conta' },
-  { chave: 'pix', rotulo: 'Pix' },
-  { chave: 'endereco', rotulo: 'Endereço' },
-]
-
-const VAZIO_INVESTIDOR: Record<CampoInvestidor, string> = {
-  cpf: '',
-  rg: '',
-  banco: '',
-  agencia: '',
-  conta: '',
-  pix: '',
-  logradouro: '',
-  numero: '',
-  complemento: '',
-  bairro: '',
-  cidade: '',
-  uf: '',
-  cep: '',
-}
-
-function DadosPessoais() {
-  const processos = processosCrud.useList()
-  const dados = useInvestidorDados()
-  const salvar = useSalvarInvestidorDados()
-  const toast = useToast()
-
-  // Investidor em edição: guarda a chave e o nome, e o formulário à parte.
-  const [editando, setEditando] = useState<{ chave: string; nome: string } | null>(
-    null,
-  )
-  const [form, setForm] = useState<Record<CampoInvestidor, string>>(VAZIO_INVESTIDOR)
-
-  // Os 5.571 municípios entram por import DINÂMICO, e só quando alguém abre a
-  // edição: são ~86 kB que não fazem sentido no bundle de quem nunca edita.
-  const [municipios, setMunicipios] = useState<Record<string, string[]> | null>(null)
-  const [ufs, setUfs] = useState<string[]>([])
-  // Estado da busca por CEP, só para dar retorno visual no campo.
-  const [buscandoCep, setBuscandoCep] = useState(false)
-  /** Id da última busca de CEP disparada — descarta resposta atrasada. */
-  const reqCepRef = useRef(0)
-  /** Quais campos do endereço foram preenchidos pela ÚLTIMA busca de CEP. Só
-   *  esses podem ser substituídos por uma busca nova; o que foi digitado à mão
-   *  fica. */
-  const camposDoCep = useRef<Set<string>>(new Set())
-  const [avisoCep, setAvisoCep] = useState<string | null>(null)
-
-  // Cessionários distintos, em ordem alfabética.
-  const investidores = useMemo(() => {
-    const porChave = new Map<string, string>()
-    for (const p of processos.data ?? []) {
-      const nome = (p.cessionario ?? '').trim()
-      if (!nome) continue
-      const chave = normalizarNome(nome)
-      if (!porChave.has(chave)) porChave.set(chave, nome)
-    }
-    return [...porChave.entries()]
-      .map(([chave, nome]) => ({ chave, nome }))
-      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
-  }, [processos.data])
-
-  async function abrirEdicao(chave: string, nome: string) {
-    const d = dados.data?.get(chave)
-    setForm({
-      cpf: d?.cpf ?? '',
-      rg: d?.rg ?? '',
-      banco: d?.banco ?? '',
-      agencia: d?.agencia ?? '',
-      conta: d?.conta ?? '',
-      pix: d?.pix ?? '',
-      logradouro: d?.logradouro ?? '',
-      numero: d?.numero ?? '',
-      complemento: d?.complemento ?? '',
-      bairro: d?.bairro ?? '',
-      cidade: d?.cidade ?? '',
-      uf: d?.uf ?? '',
-      cep: d?.cep ?? '',
-    })
-    setEditando({ chave, nome })
-    setAvisoCep(null)
-    if (!municipios) {
-      const m = await import('@/lib/municipios')
-      setMunicipios(m.MUNICIPIOS_POR_UF)
-      setUfs(m.UFS)
-    }
-  }
-
-  /**
-   * CEP completo (8 dígitos) busca o endereço e preenche logradouro, bairro,
-   * cidade e UF.
-   *
-   * NÚMERO e COMPLEMENTO não vêm, e nunca devem vir: um CEP cobre a rua (ou um
-   * trecho dela), não a casa. O "complemento" das bases de CEP é descritor de
-   * faixa ("de 612 a 1510 - lado par") e sujaria o endereço do contrato.
-   */
-  async function preencherPorCep(cepMascarado: string) {
-    if (onlyDigits(cepMascarado).length !== 8) {
-      setAvisoCep(null)
-      return
-    }
-    // GUARDA DE OBSOLESCÊNCIA. Digitar rápido dispara mais de uma busca, e a
-    // resposta da rede não volta na ordem em que saiu: a do CEP antigo chegava
-    // depois e sobrescrevia o formulário já preenchido com o CEP novo. Pior
-    // ainda ao fechar e abrir OUTRO investidor no meio: o endereço de um caía na
-    // ficha do outro. Só a última requisição, e só se o investidor aberto for o
-    // mesmo, tem permissão de escrever.
-    const meuId = ++reqCepRef.current
-    const investidorNaChamada = editando?.chave
-    setBuscandoCep(true)
-    setAvisoCep(null)
-    try {
-      const { buscarCep } = await import('@/lib/cep')
-      const e = await buscarCep(cepMascarado)
-      if (meuId !== reqCepRef.current || investidorNaChamada !== editando?.chave)
-        return
-      if (!e) {
-        setAvisoCep('CEP não encontrado. Preencha à mão.')
-        return
-      }
-      // A cidade tem de existir na lista do IBGE, senão o combobox não a
-      // reconhece como selecionada e o campo pareceria vazio.
-      const m = municipios ?? (await import('@/lib/municipios')).MUNICIPIOS_POR_UF
-      const cidadeValida = e.uf && m[e.uf]?.includes(e.cidade)
-      // Logradouro e bairro do CEP NOVO substituem o que veio do CEP anterior, em
-      // vez de serem mantidos: CEP de cidade inteira (que não tem logradouro)
-      // deixava a rua do CEP antigo no formulário, montando um endereço com cara
-      // de completo e a rua errada — pronto para ir para o contrato. Só o que foi
-      // digitado à mão é preservado.
-      const veioDoCepAnterior = camposDoCep.current
-      setForm((f) => ({
-        ...f,
-        logradouro: e.logradouro || (veioDoCepAnterior.has('logradouro') ? '' : f.logradouro),
-        bairro: e.bairro || (veioDoCepAnterior.has('bairro') ? '' : f.bairro),
-        uf: e.uf || f.uf,
-        cidade: cidadeValida ? e.cidade : '',
-      }))
-      const preenchidos = new Set<string>()
-      if (e.logradouro) preenchidos.add('logradouro')
-      if (e.bairro) preenchidos.add('bairro')
-      camposDoCep.current = preenchidos
-      if (e.uf && !cidadeValida) {
-        setAvisoCep(`"${e.cidade}" não está na lista do IBGE. Escolha a cidade à mão.`)
-      } else if (!e.logradouro) {
-        setAvisoCep('Este CEP não tem logradouro. Preencha a rua à mão.')
-      }
-    } finally {
-      setBuscandoCep(false)
-    }
-  }
-
-  // Cidades da UF escolhida. Sem UF a lista fica vazia de propósito: escolher
-  // cidade antes do estado é o que produz "São Paulo" no Rio Grande do Sul.
-  const cidadesDaUf = useMemo(
-    () => (form.uf && municipios ? (municipios[form.uf] ?? []) : []),
-    [form.uf, municipios],
-  )
-  const opcoesCidade = useMemo<OpcaoCombo[]>(
-    () => cidadesDaUf.map((nome, i) => ({ id: i, titulo: nome })),
-    [cidadesDaUf],
-  )
-
-  async function handleSalvar() {
-    if (!editando) return
-    // O rótulo do campo promete "CPF / CNPJ", e 12 ou 13 dígitos não são nem um
-    // nem outro. Salvava calado, e um dígito trocado num CPF é dado de pagamento
-    // errado — o tipo de erro que só aparece quando a transferência falha.
-    if (!cpfCnpjValido(form.cpf)) {
-      toast.error('CPF/CNPJ inválido. Confira os dígitos antes de salvar.')
-      return
-    }
-    // Campo em branco vira null, não string vazia: no banco "não informado" é
-    // ausência de valor, e "" faria a célula parecer preenchida com nada.
-    const vazioNull = (s: string) => (s.trim() ? s.trim() : null)
-    const compilado = vazioNull(compilarEndereco(form))
-    try {
-      await salvar.mutateAsync({
-        nome_chave: editando.chave,
-        nome_exibicao: editando.nome,
-        cpf: vazioNull(form.cpf),
-        rg: vazioNull(form.rg),
-        banco: vazioNull(form.banco),
-        agencia: vazioNull(form.agencia),
-        conta: vazioNull(form.conta),
-        pix: vazioNull(form.pix),
-        logradouro: vazioNull(form.logradouro),
-        numero: vazioNull(form.numero),
-        complemento: vazioNull(form.complemento),
-        bairro: vazioNull(form.bairro),
-        cidade: vazioNull(form.cidade),
-        uf: vazioNull(form.uf),
-        cep: vazioNull(form.cep),
-        // O texto corrido deixa de ser digitado: passa a ser derivado das partes
-        // e gravado junto, para quem lê a tabela direto no banco também ver o
-        // endereço pronto.
-        //
-        // Partes vazias NÃO apagam o texto legado. Quem abria a ficha de um
-        // investidor que só tinha o endereço antigo (em texto corrido), mexia no
-        // Pix e salvava, perdia o endereço: as sete partes estavam em branco,
-        // compilarEndereco devolvia '' e o null ia por cima do único endereço que
-        // existia. Sem partes preenchidas, preserva o que está no banco.
-        endereco: compilado ?? dados.data?.get(editando.chave)?.endereco ?? null,
-      })
-      toast.success('Dados salvos.')
-      setEditando(null)
-    } catch (e) {
-      toast.error((e as Error).message)
-    }
-  }
-
-  // `dados` entra no portão junto com `processos`, e não é detalhe: esta tabela
-  // alimenta um formulário cujo Salvar é upsert da LINHA INTEIRA. Enquanto o mapa
-  // não tiver carregado, toda célula sairia "—" — igual a "nunca cadastrado" — e
-  // o lápis abriria formulário em branco sobre um investidor que tem CPF, banco e
-  // conta gravados. O primeiro Salvar apagaria os treze campos.
-  if (processos.isLoading || dados.isLoading)
-    return <Loading label="Carregando investidores…" />
-  if (processos.isError || dados.isError) {
-    return (
-      <Card>
-        <ErrorState
-          message={
-            ((processos.error ?? dados.error) as Error)?.message ??
-            'Não foi possível carregar os dados dos investidores.'
-          }
-          onRetry={() => {
-            void processos.refetch()
-            void dados.refetch()
-          }}
-        />
-      </Card>
-    )
-  }
-
-  return (
-    <div className="space-y-5">
-      <Card>
-        {investidores.length === 0 ? (
-          <EmptyState
-            title="Nenhum investidor"
-            description="Nenhum crédito tem cessionário cadastrado."
-          />
-        ) : (
-          <Table className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:text-[13px]">
-            <THead>
-              <tr>
-                <TH>Nome do investidor</TH>
-                {COLUNAS_TABELA.map((c) => (
-                  <TH key={c.chave}>{c.rotulo}</TH>
-                ))}
-                {/* Mesmo cabeçalho das outras cinco tabelas da plataforma: havia
-                    três tratamentos diferentes para a mesma coluna. */}
-                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {investidores.map((i) => {
-                const d = dados.data?.get(i.chave)
-                return (
-                  <TR key={i.chave}>
-                    <TD className="font-medium text-slate-800">{i.nome}</TD>
-                    {COLUNAS_TABELA.map((c) => {
-                      // Endereço em texto corrido, compilado das partes. Cai no
-                      // texto legado enquanto um registro não tiver as partes.
-                      const v =
-                        c.chave === 'endereco'
-                          ? d
-                            ? compilarEndereco(d) || d.endereco
-                            : null
-                          : d?.[c.chave as CampoInvestidor]
-                      return (
-                        <TD key={c.chave}>
-                          {v || <span className="text-slate-300">—</span>}
-                        </TD>
-                      )
-                    })}
-                    <TD className="w-[1%] whitespace-nowrap text-right">
-                      <IconButton
-                        label={`Editar dados de ${i.nome}`}
-                        icon={<Pencil className="h-4 w-4" />}
-                        // Cinto extra além do portão acima: abrir o formulário
-                        // sobre um mapa que não carregou é o que transforma erro
-                        // de leitura em apagamento de dado.
-                        disabled={!dados.data}
-                        onClick={() => abrirEdicao(i.chave, i.nome)}
-                      />
-                    </TD>
-                  </TR>
-                )
-              })}
-            </TBody>
-          </Table>
-        )}
-      </Card>
-
-      <Modal
-        open={!!editando}
-        onClose={() => setEditando(null)}
-        title="Dados do investidor"
-        size="lg"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setEditando(null)}>
-              Cancelar
-            </Button>
-            <Button loading={salvar.isPending} onClick={handleSalvar}>
-              Salvar
-            </Button>
-          </>
-        }
-      >
-        {editando && (
-          <div className="space-y-4">
-            {/* O nome é FIXO: ele vem do cessionário do crédito, e editar aqui
-                criaria um investidor que não existe na carteira. */}
-            <Field label="Nome do investidor">
-              <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                {editando.nome}
-              </div>
-            </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {CAMPOS_DOCUMENTO.map((c) => (
-                <Field
-                  key={c.chave}
-                  label={c.rotulo}
-                  // Dígito verificador errado quase sempre é erro de digitação, e
-                  // num campo desses o erro vira dinheiro no lugar errado.
-                  error={
-                    c.chave === 'cpf' && !cpfCnpjValido(form.cpf)
-                      ? 'Dígito verificador não confere'
-                      : undefined
-                  }
-                >
-                  <Input
-                    placeholder={c.dica}
-                    value={form[c.chave]}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        [c.chave]: c.mascara ? c.mascara(e.target.value) : e.target.value,
-                      }))
-                    }
-                  />
-                </Field>
-              ))}
-            </div>
-
-            {/* ---------- Endereço em partes ---------- */}
-            <div>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Endereço
-              </h4>
-              <div className="grid gap-4 sm:grid-cols-6">
-                {/* CEP PRIMEIRO: é ele que preenche logradouro, bairro, cidade e
-                    UF, então digitá-lo antes poupa quatro campos. */}
-                <div className="sm:col-span-2">
-                  <Field
-                    label="CEP"
-                    hint={buscandoCep ? 'Buscando…' : undefined}
-                    error={avisoCep ?? undefined}
-                  >
-                    <Input
-                      inputMode="numeric"
-                      placeholder="00000-000"
-                      value={form.cep}
-                      onChange={(e) => {
-                        const cep = formatCepInput(e.target.value)
-                        setForm((f) => ({ ...f, cep }))
-                        void preencherPorCep(cep)
-                      }}
-                    />
-                  </Field>
-                </div>
-                <div className="sm:col-span-4" />
-                <div className="sm:col-span-4">
-                  <Field label="Logradouro">
-                    <Input
-                      value={form.logradouro}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, logradouro: e.target.value }))
-                      }
-                    />
-                  </Field>
-                </div>
-                <div className="sm:col-span-2">
-                  {/* Só dígito: "nº 223-A" tem de ir para o complemento. */}
-                  <Field label="Número">
-                    <Input
-                      inputMode="numeric"
-                      value={form.numero}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, numero: onlyDigits(e.target.value) }))
-                      }
-                    />
-                  </Field>
-                </div>
-                <div className="sm:col-span-3">
-                  <Field label="Complemento">
-                    <Input
-                      value={form.complemento}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, complemento: e.target.value }))
-                      }
-                    />
-                  </Field>
-                </div>
-                <div className="sm:col-span-3">
-                  <Field label="Bairro">
-                    <Input
-                      value={form.bairro}
-                      onChange={(e) => setForm((f) => ({ ...f, bairro: e.target.value }))}
-                    />
-                  </Field>
-                </div>
-                <div className="sm:col-span-2">
-                  {/* A UF vem PRIMEIRO porque é ela que define a lista de
-                      cidades. Trocar de UF limpa a cidade: manter "Belo
-                      Horizonte" depois de mudar para SP seria dado inválido. */}
-                  <Field label="UF">
-                    <Select
-                      value={form.uf}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, uf: e.target.value, cidade: '' }))
-                      }
-                    >
-                      <option value="">—</option>
-                      {ufs.map((u) => (
-                        <option key={u} value={u}>
-                          {u}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                </div>
-                <div className="sm:col-span-4">
-                  {/* Combobox e não Select: MG tem 853 municípios, e sem busca a
-                      lista é inutilizável. */}
-                  <Field label="Cidade">
-                    <Combobox
-                      opcoes={opcoesCidade}
-                      valor={
-                        form.cidade ? cidadesDaUf.indexOf(form.cidade) : null
-                      }
-                      onChange={(id) =>
-                        setForm((f) => ({
-                          ...f,
-                          cidade: id === null ? '' : (cidadesDaUf[id as number] ?? ''),
-                        }))
-                      }
-                      placeholder={form.uf ? 'Digite a cidade…' : 'Escolha a UF antes'}
-                      vazio="Nenhuma cidade encontrada nesta UF."
-                    />
-                  </Field>
-                </div>
-              </div>
-              {/* Prévia do texto corrido: é exatamente o que vai para a tabela e
-                  para o contrato, então quem edita confere antes de salvar. */}
-              <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                {compilarEndereco(form) || 'Endereço em branco'}
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }

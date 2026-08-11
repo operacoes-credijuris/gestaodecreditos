@@ -79,7 +79,15 @@ export function useSalvarParametrosAtualizacao() {
   })
 }
 
+/** Papel da pessoa na operação. Faz parte da chave (ver migração 0027). */
+export type TipoPessoa = 'investidor' | 'intermediador'
+
+/** Chave do mapa: o papel importa, porque a mesma pessoa pode ter os dois. */
+export const chavePessoa = (tipo: TipoPessoa, nomeChave: string) =>
+  `${tipo}|${nomeChave}`
+
 export interface InvestidorDados {
+  tipo: TipoPessoa
   nome_chave: string
   nome_exibicao: string | null
   cpf: string | null
@@ -102,9 +110,11 @@ export interface InvestidorDados {
 
 
 /**
- * Dados cadastrais dos investidores, indexados pelo NOME NORMALIZADO. A lista de
- * investidores não vem daqui — vem dos cessionários dos Créditos; esta tabela só
- * guarda os dados de quem já existe lá.
+ * Dados pessoais e bancários, indexados por PAPEL + NOME NORMALIZADO.
+ *
+ * A lista de nomes não vem daqui: vem dos Créditos — cessionário para
+ * investidor, intermediador para intermediador. Esta tabela só guarda os dados
+ * de quem já existe lá.
  */
 export function useInvestidorDados() {
   return useQuery({
@@ -116,14 +126,15 @@ export function useInvestidorDados() {
       const { data, error } = await supabase
         .from('investidor_dados')
         .select(
-          'nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
+          'tipo, nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
         )
-      // Este mapa alimenta o formulário do investidor, e o Salvar é upsert da
-      // LINHA INTEIRA: mapa vazio abriria o formulário em branco e apagaria CPF,
-      // banco, conta e endereço no salvamento seguinte.
+      // Este mapa alimenta o formulário, e o Salvar é upsert da LINHA INTEIRA:
+      // mapa vazio abriria o formulário em branco e apagaria CPF, banco, conta e
+      // endereço no salvamento seguinte.
       if (error) throw new Error(error.message)
       const m = new Map<string, InvestidorDados>()
-      for (const r of (data ?? []) as InvestidorDados[]) m.set(r.nome_chave, r)
+      for (const r of (data ?? []) as InvestidorDados[])
+        m.set(chavePessoa(r.tipo, r.nome_chave), r)
       return m
     },
     staleTime: 60 * 1000,
@@ -135,8 +146,9 @@ export function useSalvarInvestidorDados() {
   return useMutation({
     mutationFn: async (d: Omit<InvestidorDados, 'atualizado_em'>) => {
       const { data: sessao } = await supabase.auth.getUser()
-      // upsert pela chave: a linha nasce no primeiro salvamento, e não há como
-      // criar investidor por aqui — a lista sempre vem dos Créditos.
+      // upsert pela chave (tipo, nome_chave): a linha nasce no primeiro
+      // salvamento, e não há como criar pessoa por aqui — a lista sempre vem dos
+      // Créditos.
       const { error } = await supabase.from('investidor_dados').upsert({
         ...d,
         atualizado_em: new Date().toISOString(),
