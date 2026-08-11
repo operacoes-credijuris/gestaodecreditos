@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 
 /**
  * Painel lateral (slide-over) para exibir detalhes de um registro sem sair da
@@ -24,6 +25,13 @@ export function Drawer({
   // mobile da sidebar).
   const [rendered, setRendered] = useState(open)
   const [visible, setVisible] = useState(open)
+  const painelRef = useRef<HTMLDivElement>(null)
+  // A ficha se declarava aria-modal e não prendia foco nenhum: aberta pelo
+  // clique na linha, o foco ficava no <body> e o primeiro Tab ia para a página
+  // ATRÁS do overlay — invisível sob o desfoque, e com Enter trocando de rota e
+  // destruindo a ficha que estava sendo lida.
+  useFocoPreso(open, painelRef)
+  useTravaScroll(open)
 
   useEffect(() => {
     if (open) {
@@ -63,10 +71,12 @@ export function Drawer({
         onClick={onClose}
       />
       <div
+        ref={painelRef}
+        tabIndex={-1}
         className={cn(
           // max-w-2xl: a ficha usa grid de 2 colunas (DrawerSection) e em
           // max-w-md os valores longos quebravam demais.
-          'absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col bg-white shadow-2xl transition-transform duration-200',
+          'absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col bg-white shadow-2xl outline-none transition-transform duration-200',
           visible ? 'translate-x-0' : 'translate-x-full',
         )}
       >

@@ -2,10 +2,7 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
-
-// Seletor dos elementos focáveis dentro do painel (usado pelo focus trap).
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 
 /**
  * Modal acessível com focus trap.
@@ -40,8 +37,11 @@ export function Modal({
 }) {
   const titleId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
-  // Elemento focado antes do modal abrir — recebe o foco de volta ao fechar.
-  const previousFocusRef = useRef<HTMLElement | null>(null)
+  // Foco inicial no primeiro CAMPO (não no X) e preso ao painel; scroll do fundo
+  // travado. As três regras moram em lib/dialogo.ts, compartilhadas com o Drawer
+  // e com o menu lateral do celular.
+  useFocoPreso(open, panelRef, true)
+  useTravaScroll(open)
 
   // Centraliza a checagem de "dirty" para todas as formas de fechar
   // (X, overlay e Escape passam TODOS por aqui — uma única fonte da regra).
@@ -53,46 +53,11 @@ export function Modal({
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        requestClose()
-        return
-      }
-      if (e.key !== 'Tab') return
-      // Focus trap: Tab/Shift+Tab circulam entre os focáveis do painel.
-      const panel = panelRef.current
-      if (!panel) return
-      const focusables = Array.from(
-        panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      )
-      if (focusables.length === 0) return
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      const active = document.activeElement
-      if (e.shiftKey) {
-        if (active === first || !panel.contains(active)) {
-          e.preventDefault()
-          last.focus()
-        }
-      } else if (active === last || !panel.contains(active)) {
-        e.preventDefault()
-        first.focus()
-      }
+      if (e.key === 'Escape') requestClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, requestClose])
-
-  // Foco inicial ao abrir e devolução do foco ao elemento anterior ao fechar.
-  useEffect(() => {
-    if (!open) return
-    previousFocusRef.current = document.activeElement as HTMLElement | null
-    const panel = panelRef.current
-    const first = panel?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
-    ;(first ?? panel)?.focus()
-    return () => {
-      previousFocusRef.current?.focus()
-    }
-  }, [open])
 
   if (!open) return null
 

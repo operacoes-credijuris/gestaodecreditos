@@ -650,9 +650,15 @@ export default function Processos() {
                           icon={<Trash2 className="h-4 w-4" />}
                           onClick={() => setToDelete(p)}
                         />
-                        <ChevronRight
-                          className="h-4 w-4 text-slate-300"
-                          aria-hidden="true"
+                        {/* Botão de verdade, e não seta decorativa: abrir a
+                            ficha era possível SÓ com o mouse, clicando na linha.
+                            Quem navega por teclado passava por Editar e Excluir e
+                            nunca alcançava a ficha — que é onde estão partes,
+                            valores, apensos e histórico. */}
+                        <IconButton
+                          label={`Abrir ficha de ${p.numero_cnj ?? 'crédito'}`}
+                          icon={<ChevronRight className="h-4 w-4" />}
+                          onClick={() => setDetalhe(p)}
                         />
                       </div>
                     </TD>

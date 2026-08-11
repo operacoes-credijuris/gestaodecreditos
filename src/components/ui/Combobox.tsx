@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { normalizarBusca, onlyDigits } from '@/lib/format'
 import { Input } from './Field'
 
 export interface OpcaoCombo {
@@ -16,14 +17,32 @@ export interface OpcaoCombo {
  * cumprimento de sentença", e "sentença cumprimento" também. Buscar por prefixo
  * obrigaria a lembrar como a opção começa, que é justamente o que não se lembra
  * numa lista de dezenas de tipos de tarefa.
+ *
+ * SEM ACENTO NOS DOIS LADOS. Só na consulta não resolveria — a lista é acentuada,
+ * e é ela que precisa ser achada. Medido antes da correção: dos 5.571 municípios
+ * do IBGE, 2.384 não retornavam nada quando o nome era digitado sem acento, e a
+ * tela dizia "Nenhuma cidade encontrada nesta UF" com a cidade ali na lista.
+ * "goiania", "brasilia", "sao paulo", "belem" e "uberlandia" todos falhavam. O
+ * mesmo valia para investidor: "jose" não achava "José".
+ *
+ * E CASAMENTO POR DÍGITO como alternativa, para número de processo: o CNJ na tela
+ * está formatado (5001234-56.2024.8.13.0000) e quem cola o número cru, ou digita
+ * só um pedaço dele, não casava com nada. normalizarBusca sozinha não cobre isso,
+ * porque a pontuação continua no meio.
  */
 function casa(opcao: OpcaoCombo, consulta: string): boolean {
-  const alvo = `${opcao.titulo} ${opcao.subtitulo ?? ''}`.toLowerCase()
-  return consulta
-    .toLowerCase()
+  const texto = `${opcao.titulo} ${opcao.subtitulo ?? ''}`
+  const alvo = normalizarBusca(texto)
+  const alvoDigitos = onlyDigits(texto)
+  return normalizarBusca(consulta)
     .split(/\s+/)
     .filter(Boolean)
-    .every((palavra) => alvo.includes(palavra))
+    .every((palavra) => {
+      if (alvo.includes(palavra)) return true
+      const d = onlyDigits(palavra)
+      // 3+ dígitos para "1" ou "24" não casarem meia lista de processos.
+      return d.length >= 3 && alvoDigitos.includes(d)
+    })
 }
 
 /** Lista suspensa compartilhada pelos dois comboboxes. */
@@ -33,13 +52,26 @@ function Lista({
   onDestacar,
   onEscolher,
   vazio,
+  truncada,
 }: {
   opcoes: OpcaoCombo[]
   destaque: number
   onDestacar: (i: number) => void
   onEscolher: (o: OpcaoCombo) => void
   vazio: string
+  /** Bateu no limite: há mais opções do que as exibidas. */
+  truncada?: boolean
 }) {
+  const ulRef = useRef<HTMLUListElement>(null)
+
+  // Rola o item destacado para a vista. Sem isto, navegar com as setas numa
+  // lista de 853 municípios movia um destaque invisível: o foco descia e a
+  // lista ficava parada nos primeiros itens.
+  useEffect(() => {
+    if (destaque < 0 || !ulRef.current) return
+    ulRef.current.children[destaque]?.scrollIntoView({ block: 'nearest' })
+  }, [destaque])
+
   if (opcoes.length === 0) {
     return (
       <div className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-lg">
@@ -48,7 +80,10 @@ function Lista({
     )
   }
   return (
-    <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg scrollbar-thin">
+    <ul
+      ref={ulRef}
+      className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg scrollbar-thin"
+    >
       {opcoes.map((o, i) => (
         <li key={o.id}>
           <button
@@ -79,20 +114,42 @@ function Lista({
           </button>
         </li>
       ))}
+      {/* Corte silencioso fazia quem rolava até o fim concluir que a opção não
+          existe: sem busca, a lista de MG mostrava 50 de 853 e terminava em
+          "Arinos", sem Belo Horizonte e sem dizer que havia mais. */}
+      {truncada && (
+        <li className="border-t border-slate-100 px-3 py-1.5 text-xs text-slate-600">
+          Mostrando os {opcoes.length} primeiros. Digite para refinar.
+        </li>
+      )}
     </ul>
   )
 }
 
-/** Navegação por teclado comum aos dois comboboxes. */
+/**
+ * Navegação por teclado comum aos dois comboboxes.
+ *
+ * NASCE COM -1, "nada destacado", e não com 0. Antes, abrir a lista já deixava a
+ * primeira opção destacada, e Enter a escolhia: quem tinha "Uberlândia" salvo,
+ * clicava no campo só para reler e apertava Enter, saía com "Abadia dos
+ * Dourados", o primeiro de 853. Enter agora só escolhe o que a pessoa destacou
+ * com as setas, ou o primeiro resultado de uma busca que ela mesma digitou.
+ */
 function useTeclado(
   qtd: number,
+  /** Consulta atual: reseta o destaque quando o conjunto filtrado muda. */
+  chave: string,
   aberto: boolean,
   abrir: () => void,
   fechar: () => void,
   escolherIndice: (i: number) => void,
 ) {
-  const [destaque, setDestaque] = useState(0)
-  useEffect(() => setDestaque(0), [qtd])
+  const [destaque, setDestaque] = useState(-1)
+  // `chave` junto de `qtd`: só a contagem não bastava. Com o corte em 50, digitar
+  // uma letra troca a lista inteira mantendo 50 itens, então o destaque ficava
+  // parado no índice antigo e Enter escolhia um município que não era o que
+  // estava sob os olhos.
+  useEffect(() => setDestaque(-1), [qtd, chave])
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (!aberto && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
@@ -106,11 +163,23 @@ function useTeclado(
       e.preventDefault()
       setDestaque((h) => Math.max(h - 1, 0))
     } else if (e.key === 'Enter') {
-      if (aberto && qtd > 0) {
-        e.preventDefault()
-        escolherIndice(destaque)
-      }
+      if (!aberto) return
+      // preventDefault mesmo sem escolher: o combobox costuma viver dentro de
+      // <form>, e deixar o Enter borbulhar submeteria o formulário no meio da
+      // escolha.
+      e.preventDefault()
+      if (qtd > 0 && destaque >= 0) escolherIndice(destaque)
+      else if (qtd > 0 && chave.trim()) escolherIndice(0)
+      else fechar()
     } else if (e.key === 'Escape') {
+      // Lista FECHADA: o Escape é do modal, não daqui. Sem esta guarda o
+      // combobox consumia a tecla de qualquer jeito.
+      if (!aberto) return
+      // Lista aberta: fecha só ela. Sem o stopPropagation o keydown borbulhava
+      // até o listener de document do Modal, que fechava o formulário inteiro —
+      // quem abria a lista de responsáveis para conferir e apertava Esc perdia
+      // a tarefa que estava digitando, sem confirmação nenhuma.
+      e.stopPropagation()
       fechar()
     }
   }
@@ -166,6 +235,7 @@ export function Combobox({
   }
   const { destaque, setDestaque, onKeyDown } = useTeclado(
     filtradas.length,
+    busca,
     aberto,
     () => setAberto(true),
     () => setAberto(false),
@@ -203,6 +273,7 @@ export function Combobox({
           onDestacar={setDestaque}
           onEscolher={escolher}
           vazio={vazio}
+          truncada={filtradas.length === limite}
         />
       )}
     </div>
@@ -250,6 +321,7 @@ export function MultiCombobox({
   }
   const { destaque, setDestaque, onKeyDown } = useTeclado(
     filtradas.length,
+    busca,
     aberto,
     () => setAberto(true),
     () => setAberto(false),
@@ -305,6 +377,7 @@ export function MultiCombobox({
           onDestacar={setDestaque}
           onEscolher={adicionar}
           vazio={vazio}
+          truncada={filtradas.length === limite}
         />
       )}
     </div>

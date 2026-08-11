@@ -262,9 +262,12 @@ export default function Requerimentos() {
                         icon={<Trash2 className="h-4 w-4" />}
                         onClick={() => setToDelete(r)}
                       />
-                      <ChevronRight
-                        className="h-4 w-4 text-slate-300"
-                        aria-hidden="true"
+                      {/* Botão de verdade, e não seta decorativa: sem ele a ficha
+                          só abria com o mouse, clicando na linha. */}
+                      <IconButton
+                        label={`Abrir ficha de ${r.numero_protocolo ?? 'requerimento'}`}
+                        icon={<ChevronRight className="h-4 w-4" />}
+                        onClick={() => setDetalhe(r)}
                       />
                     </div>
                   </TD>

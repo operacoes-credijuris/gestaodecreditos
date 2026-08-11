@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { X, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 import { useAuth } from '@/contexts/AuthContext'
 import { NAVIGATION, NAV_CONFIG } from './navigation'
 
@@ -51,6 +52,13 @@ export function Sidebar({
   // `visible` controla as classes de "aberto" (translate/fade).
   const [rendered, setRendered] = useState(mobileOpen)
   const [visible, setVisible] = useState(mobileOpen)
+  const painelRef = useRef<HTMLDivElement>(null)
+  // O menu se declarava aria-modal sem prender foco: quem acionava "Abrir menu"
+  // e apertava Tab ia para o avatar e depois para os links da página ATRÁS do
+  // overlay, navegando na interface de fundo enquanto o leitor de tela anunciava
+  // um menu aberto — e o menu em si ficava inalcançável pelo teclado.
+  useFocoPreso(mobileOpen, painelRef)
+  useTravaScroll(mobileOpen)
 
   useEffect(() => {
     if (mobileOpen) {
@@ -159,8 +167,10 @@ export function Sidebar({
             onClick={onClose}
           />
           <div
+            ref={painelRef}
+            tabIndex={-1}
             className={cn(
-              'absolute inset-y-0 left-0 w-64 transition-transform duration-200',
+              'absolute inset-y-0 left-0 w-64 outline-none transition-transform duration-200',
               visible ? 'translate-x-0' : '-translate-x-full',
             )}
           >
