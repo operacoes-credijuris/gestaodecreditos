@@ -1,6 +1,6 @@
 // Dados pessoais e bancários de quem entra na operação, em duas visões:
-// INVESTIDORES (os cessionários dos Créditos) e INTERMEDIADORES (quem intermediou
-// a aquisição).
+// INVESTIDORES (os cessionários dos Créditos) e ORIGINADORES (quem originou a
+// aquisição).
 //
 // A lista tem duas origens (ver lib/pessoas.ts): os nomes que aparecem nos
 // Créditos e as pessoas cadastradas aqui. O cadastro existe porque o comercial vem
@@ -131,10 +131,10 @@ const VISOES: Record<TipoPessoa, { rotulo: string; vazio: string }> = {
     vazio:
       'Cadastre um investidor aqui, ou lance um crédito com o campo Cessionário preenchido.',
   },
-  intermediador: {
-    rotulo: 'Intermediador',
+  originador: {
+    rotulo: 'Originador',
     vazio:
-      'Cadastre um intermediador aqui, ou lance um crédito com o campo Intermediador preenchido.',
+      'Cadastre um originador aqui, ou lance um crédito com o campo Originador preenchido.',
   },
 }
 
@@ -421,10 +421,10 @@ export default function DadosPessoaisBancarios() {
 
       <Card className="mb-4 p-4">
         <Segmented
-          ariaLabel="Alternar entre investidores e intermediadores"
+          ariaLabel="Alternar entre investidores e originadores"
           items={[
             { key: 'investidor', label: 'Investidores' },
-            { key: 'intermediador', label: 'Intermediadores' },
+            { key: 'originador', label: 'Originadores' },
           ]}
           value={tipo}
           onChange={(k) => {
@@ -554,11 +554,7 @@ export default function DadosPessoaisBancarios() {
                   deixaria a primeira com os dados. Renomear se faz onde o nome
                   nasce, no crédito. */}
               {editando.novo ? (
-                <Field
-                  label={`Nome do ${visao.rotulo.toLowerCase()}`}
-                  hint="Como deve sair no contrato."
-                  error={avisoNome}
-                >
+                <Field label={`Nome do ${visao.rotulo.toLowerCase()}`} error={avisoNome}>
                   <Input
                     value={editando.nome}
                     autoComplete="off"

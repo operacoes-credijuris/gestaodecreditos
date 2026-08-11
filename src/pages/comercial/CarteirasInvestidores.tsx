@@ -80,7 +80,7 @@ import {
 // "Dados dos investidores" era a terceira aba daqui e virou página própria
 // (Dados pessoais e bancários), no menu, porque não é carteira: não tem investidor
 // selecionado, nem mês de referência, nem projeção — e passou a guardar também os
-// intermediadores.
+// originadores.
 const TABS = [
   { key: 'individual', label: 'Relatórios individuais' },
   { key: 'consolidado', label: 'Visão global' },

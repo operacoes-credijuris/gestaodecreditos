@@ -259,7 +259,7 @@ function distanciaEdicao(a: string, b: string, max: number): number {
  * O nome da lista mais parecido com `consulta`, ou null. Serve para PERGUNTAR,
  * nunca para corrigir sozinho: quem digita é que sabe se são a mesma pessoa.
  *
- * Existe porque investidor e intermediador são identificados pelo nome
+ * Existe porque investidor e originador são identificados pelo nome
  * normalizado (ver normalizarNome). Uma letra trocada ou um sobrenome a menos
  * produz OUTRA chave, e o efeito não é cosmético: a pessoa aparece duas vezes na
  * aba de dados pessoais, cada metade com uma ficha bancária, e ninguém percebe

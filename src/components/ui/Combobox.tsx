@@ -292,13 +292,13 @@ export function Combobox({
  * que ainda não existe.
  *
  * É o contrário do Combobox acima, que só devolve id de opção. Serve aos campos
- * em que o nome NASCE ali (Cessionário e Intermediador do crédito): fechar a
+ * em que o nome NASCE ali (Cessionário e Originador do crédito): fechar a
  * lista impediria de lançar o primeiro crédito de alguém novo, e deixar só texto
  * livre é o que produz "José da Silva" e "Jose Silva" como duas pessoas.
  *
- * O aviso abaixo do campo é a outra metade: ele torna visível que o que está ali
- * é um nome NOVO, e aponta o parecido quando há um. Nunca corrige sozinho — só
- * quem está cadastrando sabe se são a mesma pessoa.
+ * A outra metade é o aviso abaixo do campo, que aparece SÓ quando o nome digitado
+ * é novo e parecido com um que já existe. Nunca corrige sozinho — só quem está
+ * cadastrando sabe se são a mesma pessoa.
  */
 export function ComboboxTexto({
   valor,
@@ -348,19 +348,16 @@ export function ComboboxTexto({
   )
   const boxRef = useCliqueFora(aberto, () => setAberto(false))
 
-  // Só é "novo" o que não casa com nenhuma opção pela MESMA regra do banco
-  // (normalizarNome): diferença de acento ou de caixa não cria pessoa nova, então
+  // O aviso só vale para nome que gera OUTRA chave: diferença de acento ou de
+  // caixa não cria pessoa nova (é a mesma regra do banco, normalizarNome), então
   // avisar nesse caso seria alarme falso.
-  const ehNovo = useMemo(() => {
+  const parecido = useMemo(() => {
     const q = valor.trim()
-    if (!q || opcoes.length === 0) return false
+    if (!q || opcoes.length === 0) return null
     const chave = normalizarNome(q)
-    return !opcoes.some((o) => normalizarNome(o) === chave)
+    if (opcoes.some((o) => normalizarNome(o) === chave)) return null
+    return nomeParecido(q, opcoes)
   }, [valor, opcoes])
-  const parecido = useMemo(
-    () => (ehNovo ? nomeParecido(valor.trim(), opcoes) : null),
-    [ehNovo, valor, opcoes],
-  )
 
   return (
     <div ref={boxRef} className="relative">
@@ -386,7 +383,7 @@ export function ComboboxTexto({
         onKeyDown={onKeyDown}
       />
       {/* Sem nada digitado e sem nada a mostrar, não abre: no primeiro
-          intermediador da plataforma a lista está vazia, e um balão dizendo
+          originador da plataforma a lista está vazia, e um balão dizendo
           "nenhum parecido" ao só clicar no campo é ruído. */}
       {aberto && (filtradas.length > 0 || consulta) && (
         <Lista
@@ -398,26 +395,20 @@ export function ComboboxTexto({
           truncada={filtradas.length === limite}
         />
       )}
-      {/* Escondido com a lista aberta: ela é absoluta e passa por cima. */}
-      {!aberto && ehNovo && (
-        <p
-          className={cn('mt-1 text-xs', parecido ? 'text-amber-700' : 'text-slate-600')}
-        >
-          {parecido ? (
-            <>
-              Parecido com{' '}
-              <button
-                type="button"
-                onClick={() => onChange(parecido)}
-                className="font-medium underline decoration-dotted hover:no-underline"
-              >
-                {parecido}
-              </button>
-              . Se for o mesmo, use o nome que já está cadastrado.
-            </>
-          ) : (
-            'Ainda não existe na plataforma — vai entrar como novo.'
-          )}
+      {/* Só aparece quando há mesmo um parecido — nome novo sem semelhante não
+          rende aviso nenhum, que é o caso comum. Escondido com a lista aberta:
+          ela é absoluta e passaria por cima. */}
+      {!aberto && parecido && (
+        <p className="mt-1 text-xs text-amber-700">
+          Parecido com{' '}
+          <button
+            type="button"
+            onClick={() => onChange(parecido)}
+            className="font-medium underline decoration-dotted hover:no-underline"
+          >
+            {parecido}
+          </button>
+          . Se for o mesmo, use o nome que já está cadastrado.
         </p>
       )}
     </div>

@@ -1,10 +1,10 @@
-// Quem entra na operação: INVESTIDOR (o cessionário do crédito) e INTERMEDIADOR
-// (quem intermediou a aquisição).
+// Quem entra na operação: INVESTIDOR (o cessionário do crédito) e ORIGINADOR
+// (quem originou a aquisição).
 //
 // A lista tem DUAS ORIGENS, e é por isso que ela vive aqui e não dentro de uma
 // tela:
 //
-//   • os nomes que aparecem nos Créditos, nos campos Cessionário e Intermediador;
+//   • os nomes que aparecem nos Créditos, nos campos Cessionário e Originador;
 //   • as fichas cadastradas direto na aba "Dados pessoais e bancários".
 //
 // A segunda origem existe porque o comercial vem ANTES do operacional: o
@@ -22,10 +22,10 @@ import type { Processo } from './types'
 /** De qual campo do crédito sai o nome de cada papel. */
 export const COLUNA_POR_TIPO: Record<
   TipoPessoa,
-  'cessionario' | 'intermediador'
+  'cessionario' | 'originador'
 > = {
   investidor: 'cessionario',
-  intermediador: 'intermediador',
+  originador: 'originador',
 }
 
 export interface PessoaLista {
@@ -48,7 +48,7 @@ export interface PessoaLista {
  */
 export function listarPessoas(
   tipo: TipoPessoa,
-  processos: Pick<Processo, 'cessionario' | 'intermediador'>[] | undefined,
+  processos: Pick<Processo, 'cessionario' | 'originador'>[] | undefined,
   dados: Map<string, InvestidorDados> | undefined,
 ): PessoaLista[] {
   const coluna = COLUNA_POR_TIPO[tipo]

@@ -4,7 +4,7 @@
 // Gêmea da `gerar-contrato`. Recebe o PDF do processo (com a CUC dentro),
 // extrai os dados pela IA, calcula a precificação (deságio calibrado p/ >=2,80%),
 // gera a planilha de Análise de RPV colorida (ExcelJS) e sobe no Drive em
-// A. Análises de crédito / {categoria} / {intermediador} / {cedente}.
+// A. Análises de crédito / {categoria} / {originador} / {cedente}.
 //
 // REAPROVEITA helpers idênticos da gerar-contrato (ver bloco "_shared" abaixo).
 // ============================================================================
@@ -186,7 +186,7 @@ async function driveEncontrarAnalisesRoot(token: string): Promise<string> {
   return child.id;
 }
 
-async function driveListarIntermediadoresAnalise(token: string, categoria: string): Promise<string[]> {
+async function driveListarOriginadoresAnalise(token: string, categoria: string): Promise<string[]> {
   const analisesRootId = await driveEncontrarAnalisesRoot(token);
   const catFolder = await driveFindChildByTolerantName(token, analisesRootId, categoria);
   if (!catFolder) return [];
@@ -481,7 +481,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
 
   // ---------------- Aba jurídica: cabeçalho ----------------
   aj.getCell('C1').value = dados.numero_processo ?? '';
-  aj.getCell('C2').value = dados.intermediador ?? '';
+  aj.getCell('C2').value = dados.originador ?? '';
   aj.getCell('C3').value = dados.tipo_credito ?? '';          // dropdown: tipo de crédito
   aj.getCell('C4').value = dados.cedente_cpf ?? '';
   aj.getCell('C5').value = dados.advogado_oab ?? '';
@@ -892,21 +892,27 @@ Deno.serve(async (req) => {
       google_oauth_refresh_token: _google?.refresh_token ?? '',
     };
 
-    // 2. Ação leve: listar intermediadores (popular dropdown do front)
-    if (body.acao === 'listar_intermediadores') {
+    // 2. Ação leve: listar originadores (popular dropdown do front)
+    //
+    // O nome antigo do papel ('intermediador') segue aceito aqui e no campo
+    // abaixo: esta função é chamada por HTTP e não há como saber, de dentro do
+    // repositório, se alguma automação de fora ainda manda o nome velho. Sem a
+    // tolerância, a falha seria silenciosa — o arquivamento no Drive
+    // simplesmente deixaria de acontecer.
+    if (body.acao === 'listar_originadores' || body.acao === 'listar_intermediadores') {
       const token = await refreshGoogleAccessToken(cfg.google_oauth_client_id, cfg.google_oauth_client_secret, cfg.google_oauth_refresh_token);
-      const intermediadores = await driveListarIntermediadoresAnalise(token, categoria);
-      return jsonResponse({ ok: true, intermediadores });
+      const originadores = await driveListarOriginadoresAnalise(token, categoria);
+      return jsonResponse({ ok: true, originadores });
     }
 
     // 3. Job principal
     const jobId: string = body.job_id;
-    const intermediador: string = body.intermediador;
+    const originador: string = body.originador ?? body.intermediador;
     const numeroProcesso: string = (body.numero_processo || '').trim();
     const tipoAquisicao: string = (body.tipo_aquisicao || 'auto');  // 'auto'|'principal'|'honorarios'|'ambos'
     const honPctRaw = (body.honorarios_pct === '' || body.honorarios_pct == null) ? null : Number(body.honorarios_pct);
     const honorariosPct = (honPctRaw != null && !isNaN(honPctRaw) && honPctRaw >= 0) ? honPctRaw : null;
-    if (!intermediador) return errorResponse('Campo obrigatório: intermediador');
+    if (!originador) return errorResponse('Campo obrigatório: originador');
     for (const k of ['anthropic_api_key', 'google_oauth_client_id', 'google_oauth_client_secret', 'google_oauth_refresh_token'])
       if (!cfg[k]) return errorResponse(`Secret '${k}' não configurado (Anthropic/Google — ver integracao_*_secret)`, 500);
 
@@ -952,7 +958,7 @@ Deno.serve(async (req) => {
 
     // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
     const dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
-    dados.intermediador = intermediador;
+    dados.originador = originador;
     if (numeroProcesso) dados.numero_processo = numeroProcesso;
     // Garante que os valores financeiros sejam NÚMERO (não texto) — assim o formato de moeda (R$) da planilha funciona
     dados.bruto_total = Number(dados.bruto_total) || 0;
@@ -1017,12 +1023,12 @@ Deno.serve(async (req) => {
     const templateBytes = await storageGetBytes(sbAdmin, BUCKET_TEMPLATES, TEMPLATE_NOME);
     const xlsx = await gerarPlanilha(templateBytes, dados, calc, T5);
 
-    // 3f. Sobe no Drive: A. Análises de crédito / {categoria} / {intermediador} / {credor (Title Case)}
+    // 3f. Sobe no Drive: A. Análises de crédito / {categoria} / {originador} / {credor (Title Case)}
     const token = await refreshGoogleAccessToken(cfg.google_oauth_client_id, cfg.google_oauth_client_secret, cfg.google_oauth_refresh_token);
     const analisesRoot = await driveEncontrarAnalisesRoot(token);
     const catFolder = await driveFindChildByTolerantName(token, analisesRoot, categoria);
     const catId = catFolder?.id ?? await driveFindOrCreateFolder(token, categoria, analisesRoot);
-    const interId = await driveFindOrCreateFolder(token, intermediador, catId);
+    const interId = await driveFindOrCreateFolder(token, originador, catId);
     const cedenteId = await driveFindOrCreateFolder(token, credorTitulo, interId);
     // Nome do arquivo: "Análise de RPV - CREDOR v. ENTE DEVEDOR - NÚMERO DO PROCESSO"
     const enteDevedor = String(dados.ente_devedor || '').trim();

@@ -123,7 +123,7 @@ const VAZIO: Partial<Processo> = {
   cedente: '',
   cedente_advogado: '',
   cessionario: '',
-  intermediador: '',
+  originador: '',
   entidade_devedora: '',
   data_aquisicao: '',
   expectativa_liquidacao: '',
@@ -218,7 +218,7 @@ export default function Processos() {
   const apensos = useApensosManager('processo_id')
   const ultimaMov = useUltimaMovimentacao()
 
-  // Nomes que já existem, para os campos Cessionário e Intermediador oferecerem
+  // Nomes que já existem, para os campos Cessionário e Originador oferecerem
   // em lista. Vêm dos próprios créditos e das fichas da aba "Dados pessoais e
   // bancários" — o comercial cadastra o investidor antes de haver crédito.
   //
@@ -229,8 +229,8 @@ export default function Processos() {
     () => listarPessoas('investidor', data, fichas.data).map((p) => p.nome),
     [data, fichas.data],
   )
-  const nomesIntermediador = useMemo(
-    () => listarPessoas('intermediador', data, fichas.data).map((p) => p.nome),
+  const nomesOriginador = useMemo(
+    () => listarPessoas('originador', data, fichas.data).map((p) => p.nome),
     [data, fichas.data],
   )
 
@@ -420,11 +420,11 @@ export default function Processos() {
         payload.instrumento === 'registro_publico'
           ? vazioNull(payload.numero_rtdpj)
           : null
-      // Intermediador em branco vira null: é ele que monta a lista de nomes da
+      // Originador em branco vira null: é ele que monta a lista de nomes da
       // aba Dados pessoais e bancários, e string vazia entraria como se fosse
       // alguém. (O cessionário não passa por aqui — mudar isso agora afetaria
       // filtros e comparações que já existem, e a tela trata os dois casos.)
-      payload.intermediador = vazioNull(payload.intermediador)
+      payload.originador = vazioNull(payload.originador)
       // Datas em branco viram null.
       payload.data_aquisicao = vazioNull(payload.data_aquisicao)
       payload.expectativa_liquidacao = vazioNull(payload.expectativa_liquidacao)
@@ -772,7 +772,7 @@ export default function Processos() {
                   uma letra trocada aqui cria uma segunda pessoa com ficha
                   bancária própria — sem erro na tela, porque as duas linhas
                   parecem certas. */}
-              <Field label="Cessionário" hint="É o investidor do crédito.">
+              <Field label="Cessionário">
                 <ComboboxTexto
                   valor={editing.cessionario ?? ''}
                   onChange={(v) => setEditing({ ...editing, cessionario: v })}
@@ -780,11 +780,11 @@ export default function Processos() {
                   placeholder="Escolha ou digite um nome novo"
                 />
               </Field>
-              <Field label="Intermediador" hint="Quem intermediou a aquisição.">
+              <Field label="Originador">
                 <ComboboxTexto
-                  valor={editing.intermediador ?? ''}
-                  onChange={(v) => setEditing({ ...editing, intermediador: v })}
-                  opcoes={nomesIntermediador}
+                  valor={editing.originador ?? ''}
+                  onChange={(v) => setEditing({ ...editing, originador: v })}
+                  opcoes={nomesOriginador}
                   placeholder="Escolha ou digite um nome novo"
                 />
               </Field>
@@ -1035,8 +1035,8 @@ export default function Processos() {
               <DrawerField label="Cessionário">
                 {detalhe.cessionario || '—'}
               </DrawerField>
-              <DrawerField label="Intermediador">
-                {detalhe.intermediador || '—'}
+              <DrawerField label="Originador">
+                {detalhe.originador || '—'}
               </DrawerField>
               <DrawerField label="Entidade devedora">
                 {detalhe.entidade_devedora || '—'}

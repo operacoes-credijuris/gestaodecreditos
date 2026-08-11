@@ -44,7 +44,7 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Geração de Contratos', to: '/comercial/contratos', icon: FileSignature },
       { label: 'Carteiras de Investimentos', to: '/comercial/carteiras', icon: Wallet },
       // Era a terceira aba das Carteiras. Virou item próprio, logo abaixo dela,
-      // porque não é carteira — e passou a cobrir investidores E intermediadores.
+      // porque não é carteira — e passou a cobrir investidores E originadores.
       {
         label: 'Dados pessoais e bancários',
         to: '/comercial/dados-pessoais',

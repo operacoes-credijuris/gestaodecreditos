@@ -79,8 +79,8 @@ export function useSalvarParametrosAtualizacao() {
   })
 }
 
-/** Papel da pessoa na operação. Faz parte da chave (ver migração 0027). */
-export type TipoPessoa = 'investidor' | 'intermediador'
+/** Papel da pessoa na operação. Faz parte da chave (migrações 0027 e 0029). */
+export type TipoPessoa = 'investidor' | 'originador'
 
 /** Chave do mapa: o papel importa, porque a mesma pessoa pode ter os dois. */
 export const chavePessoa = (tipo: TipoPessoa, nomeChave: string) =>

@@ -68,7 +68,7 @@ function lerCardCredijuris(lead: KommoLead) {
   const categoria = /precat/i.test(tipo) ? 'Precatórios' : 'Requisições de Pequeno Valor'
 
   const partesTitulo = (lead.nome ?? '').split(' - ')
-  const intermediador = (partesTitulo[0] ?? '').trim()
+  const originador = (partesTitulo[0] ?? '').trim()
   const cedente =
     pegar(/CEDENTE:\s*(.+)/i) || (partesTitulo.length >= 2 ? partesTitulo[1].trim() : '')
 
@@ -85,7 +85,7 @@ function lerCardCredijuris(lead: KommoLead) {
   const honMatch = notas.match(/HONOR[ÁA]RIOS?\s*C\.?:\s*([\d.,]+)\s*%/i)
   const honorarios_pct = percentualDaNota(honMatch?.[1])
 
-  return { numero, categoria, cedente, intermediador, tipo_aquisicao, honorarios_pct }
+  return { numero, categoria, cedente, originador, tipo_aquisicao, honorarios_pct }
 }
 
 /**
@@ -166,7 +166,7 @@ async function analisarLeadCredijuris(lead: KommoLead): Promise<ResultadoAnalise
   // 3) Análise + precificação — manda só o TEXTO (leve) pro motor
   const res = await invokeFunction<ResultadoAnalise>('gerar-analise-rpv', {
     texto,
-    intermediador: dados.intermediador,
+    originador: dados.originador,
     numero_processo: dados.numero,
     categoria: dados.categoria,
     tipo_aquisicao: dados.tipo_aquisicao,

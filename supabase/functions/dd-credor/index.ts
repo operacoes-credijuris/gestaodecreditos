@@ -282,17 +282,20 @@ Deno.serve(async (req) => {
 
     // Gera o relatório PDF e salva na subpasta "Processos do Credor" do cedente (se vierem os dados da pasta)
     let drive_folder_url: string | null = null, drive_report_url: string | null = null, drive_erro: string | null = null;
-    const intermediador = getParam("intermediador");
+    // "intermediador" era o nome antigo do papel. Segue aceito porque esta função
+    // é chamada por HTTP de fora do repositório: sem a tolerância, o
+    // arquivamento no Drive pararia em silêncio (o if abaixo só é pulado).
+    const originador = getParam("originador") || getParam("intermediador");
     const categoria = getParam("categoria") || "Requisições de Pequeno Valor";
     const cedente = getParam("cedente");
     const google = await segredoGoogle();
-    if (intermediador && cedente && google) {
+    if (originador && cedente && google) {
       try {
         const token = await refreshGoogleAccessToken(google.client_id, google.client_secret, google.refresh_token);
         const rootId = await driveEncontrarAnalisesRoot(token);
         const catFolder = await driveFindChildByTolerantName(token, rootId, categoria);
         const catId = catFolder?.id ?? await driveFindOrCreateFolder(token, categoria, rootId);
-        const interId = await driveFindOrCreateFolder(token, intermediador, catId);
+        const interId = await driveFindOrCreateFolder(token, originador, catId);
         const cedenteId = await driveFindOrCreateFolder(token, cedente, interId);
         const subId = await driveFindOrCreateFolder(token, "Processos do Credor", cedenteId);
         const pdf = await gerarRelatorioPdf({ cpf, credito_principal: principal, cedente, algum_reprovado: algumReprovado, processos: resultados });
