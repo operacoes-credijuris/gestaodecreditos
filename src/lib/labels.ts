@@ -179,6 +179,31 @@ export function diasEmCarteira(
 }
 
 /**
+ * Tipos do crédito em UMA linha de texto corrido, em caixa de frase.
+ *
+ * Mora aqui, ao lado de TIPO_CREDITO, porque a tela e o Excel exportado têm de
+ * dizer a MESMA coisa: existiam duas implementações, e elas divergiam — a da tela
+ * economiza a palavra repetida ("honorários contratuais e sucumbenciais") e a do
+ * exportador repetia ("honorários contratuais e honorários sucumbenciais"). Quem
+ * comparasse planilha com tela via textos diferentes para o mesmo crédito.
+ */
+export function textoTipoCredito(tipos: string[] | null | undefined): string {
+  const t = tipos ?? []
+  if (t.length === 0) return '—'
+  const temContratuais = t.includes('honorarios_contratuais')
+  const partes: string[] = []
+  if (t.includes('principal')) partes.push('crédito principal')
+  if (temContratuais) partes.push('honorários contratuais')
+  if (t.includes('honorarios_advocaticios')) {
+    partes.push(temContratuais ? 'sucumbenciais' : 'honorários sucumbenciais')
+  }
+  if (partes.length === 0) return '—'
+  if (partes.length === 1) return partes[0]
+  // "A, B e C" — vírgula entre os primeiros, "e" antes do último.
+  return `${partes.slice(0, -1).join(', ')} e ${partes[partes.length - 1]}`
+}
+
+/**
  * Status da TIR na carteira do investidor — CALCULADO, nunca digitado.
  *
  *   Efetivada  o crédito já foi pago, então a taxa é a que de fato aconteceu

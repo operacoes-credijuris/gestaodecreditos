@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Wallet,
@@ -41,6 +41,7 @@ import {
   MESES_ALERTA_LIQUIDACAO,
   statusLiquidacao,
   statusTir,
+  textoTipoCredito,
   textosResumo,
 } from '@/lib/labels'
 import { cn } from '@/lib/cn'
@@ -139,22 +140,6 @@ function rotuloMes(iso: string): string {
  * palavra "honorários" já foi dita e repetir soa burocrático. Sozinho, ele
  * mantém o substantivo.
  */
-function textoTipoCredito(tipos: string[] | null | undefined): string {
-  const t = tipos ?? []
-  if (t.length === 0) return '—'
-  const temContratuais = t.includes('honorarios_contratuais')
-  const partes: string[] = []
-  if (t.includes('principal')) partes.push('crédito principal')
-  if (temContratuais) partes.push('honorários contratuais')
-  if (t.includes('honorarios_advocaticios')) {
-    partes.push(temContratuais ? 'sucumbenciais' : 'honorários sucumbenciais')
-  }
-  if (partes.length === 0) return '—'
-  if (partes.length === 1) return partes[0]
-  // "A, B e C" — vírgula entre os primeiros, "e" antes do último.
-  return `${partes.slice(0, -1).join(', ')} e ${partes[partes.length - 1]}`
-}
-
 /** Rótulo de seção fora do card, como abertura da tabela. */
 function TituloSecao({ children }: { children: string }) {
   return (
@@ -450,6 +435,8 @@ function Individual() {
         capitalTotal: totais.capital.total,
         jaRecebidoTotal: totais.recebido.total,
         parametros: parametros.data,
+        // O mesmo `hoje` da tela, para o arquivo ser o retrato do que está nela.
+        hoje,
       })
     } catch (e) {
       toast.error((e as Error).message)
@@ -1041,7 +1028,7 @@ function Consolidado() {
    * Todas as métricas saem das mesmas funções da aba individual (lib/projecao),
    * o que é o que garante que o consolidado feche com a soma das carteiras.
    */
-  const { linhas, total } = useMemo(() => {
+  const { linhas, total, noPeriodo, semCessionario } = useMemo(() => {
     const noPeriodo = (processos.data ?? []).filter((p) =>
       mes === 'todos' ? true : (p.data_aquisicao ?? '').slice(0, 7) === mes,
     )
@@ -1106,9 +1093,21 @@ function Consolidado() {
       .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
       .map((i) => ({ nome: i.nome, ...metricas(i.creditos) }))
 
-    // O total recalcula sobre TODOS os créditos do período, e não soma as linhas:
-    // Retorno e TIR são taxas, e somá-las não produz número com significado.
-    return { linhas, total: metricas(noPeriodo) }
+    // O total RECALCULA (não soma as linhas), porque Retorno e TIR são taxas e
+    // somá-las não produz número com significado. Mas recalcula sobre o MESMO
+    // conjunto que as linhas mostram: crédito sem cessionário não vira linha
+    // nenhuma e, quando entrava no total, a coluna de capital não fechava com a
+    // soma visível — quem conferia a olho encontrava diferença sem explicação.
+    const creditosDasLinhas = [...porInvestidor.values()].flatMap((i) => i.creditos)
+    return {
+      linhas,
+      total: metricas(creditosDasLinhas),
+      // Quantos créditos o período tem de fato, com ou sem cessionário: é isto
+      // que distingue "mês sem aquisição" de "mês com aquisição e nenhum
+      // cessionário cadastrado", que a tela tratava como a mesma coisa.
+      noPeriodo: noPeriodo.length,
+      semCessionario: noPeriodo.length - creditosDasLinhas.length,
+    }
   }, [processos.data, mes, parametros.data, hoje])
 
   if (processos.isLoading) return <Loading label="Carregando créditos…" />
@@ -1143,10 +1142,25 @@ function Consolidado() {
       <div>
         <Card>
           {linhas.length === 0 ? (
-            <EmptyState
-              title="Nenhum crédito no período"
-              description="Não há créditos adquiridos no mês selecionado."
-            />
+            // Dois estados que a tela tratava como um só. Sem esta distinção, um
+            // mês COM aquisições em que nenhum crédito tem cessionário dizia "não
+            // há créditos adquiridos no mês" — e o operador ia procurar erro no
+            // cadastro do crédito, quando o que falta é o cessionário.
+            noPeriodo > 0 ? (
+              <EmptyState
+                title="Sem investidor identificado"
+                description={`${noPeriodo} crédito(s) adquirido(s) no período, nenhum com cessionário cadastrado. Preencha o cessionário na aba Créditos para eles aparecerem aqui.`}
+              />
+            ) : (
+              <EmptyState
+                title="Nenhum crédito no período"
+                description={
+                  mes === 'todos'
+                    ? 'Nenhum crédito cadastrado com data de cessão.'
+                    : 'Não há créditos adquiridos no mês selecionado.'
+                }
+              />
+            )
           ) : (
             <Table className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:text-[13px]">
               <THead>
@@ -1218,6 +1232,16 @@ function Consolidado() {
             </Table>
           )}
         </Card>
+        {/* O total é recalculado sobre os créditos QUE VIRARAM LINHA. Quando há
+            crédito sem cessionário no período, ele fica fora da tabela e do
+            total, e quem confere a soma a olho precisa saber por que a conta não
+            fecha com a aba Créditos. */}
+        {linhas.length > 0 && semCessionario > 0 && (
+          <p className="mt-2 text-xs text-slate-600">
+            {semCessionario} crédito(s) do período estão fora desta tabela por não
+            ter cessionário cadastrado, e por isso também não entram no total.
+          </p>
+        )}
       </div>
     </div>
   )
@@ -1317,6 +1341,12 @@ function DadosPessoais() {
   const [ufs, setUfs] = useState<string[]>([])
   // Estado da busca por CEP, só para dar retorno visual no campo.
   const [buscandoCep, setBuscandoCep] = useState(false)
+  /** Id da última busca de CEP disparada — descarta resposta atrasada. */
+  const reqCepRef = useRef(0)
+  /** Quais campos do endereço foram preenchidos pela ÚLTIMA busca de CEP. Só
+   *  esses podem ser substituídos por uma busca nova; o que foi digitado à mão
+   *  fica. */
+  const camposDoCep = useRef<Set<string>>(new Set())
   const [avisoCep, setAvisoCep] = useState<string | null>(null)
 
   // Cessionários distintos, em ordem alfabética.
@@ -1372,11 +1402,21 @@ function DadosPessoais() {
       setAvisoCep(null)
       return
     }
+    // GUARDA DE OBSOLESCÊNCIA. Digitar rápido dispara mais de uma busca, e a
+    // resposta da rede não volta na ordem em que saiu: a do CEP antigo chegava
+    // depois e sobrescrevia o formulário já preenchido com o CEP novo. Pior
+    // ainda ao fechar e abrir OUTRO investidor no meio: o endereço de um caía na
+    // ficha do outro. Só a última requisição, e só se o investidor aberto for o
+    // mesmo, tem permissão de escrever.
+    const meuId = ++reqCepRef.current
+    const investidorNaChamada = editando?.chave
     setBuscandoCep(true)
     setAvisoCep(null)
     try {
       const { buscarCep } = await import('@/lib/cep')
       const e = await buscarCep(cepMascarado)
+      if (meuId !== reqCepRef.current || investidorNaChamada !== editando?.chave)
+        return
       if (!e) {
         setAvisoCep('CEP não encontrado. Preencha à mão.')
         return
@@ -1385,15 +1425,27 @@ function DadosPessoais() {
       // reconhece como selecionada e o campo pareceria vazio.
       const m = municipios ?? (await import('@/lib/municipios')).MUNICIPIOS_POR_UF
       const cidadeValida = e.uf && m[e.uf]?.includes(e.cidade)
+      // Logradouro e bairro do CEP NOVO substituem o que veio do CEP anterior, em
+      // vez de serem mantidos: CEP de cidade inteira (que não tem logradouro)
+      // deixava a rua do CEP antigo no formulário, montando um endereço com cara
+      // de completo e a rua errada — pronto para ir para o contrato. Só o que foi
+      // digitado à mão é preservado.
+      const veioDoCepAnterior = camposDoCep.current
       setForm((f) => ({
         ...f,
-        logradouro: e.logradouro || f.logradouro,
-        bairro: e.bairro || f.bairro,
+        logradouro: e.logradouro || (veioDoCepAnterior.has('logradouro') ? '' : f.logradouro),
+        bairro: e.bairro || (veioDoCepAnterior.has('bairro') ? '' : f.bairro),
         uf: e.uf || f.uf,
         cidade: cidadeValida ? e.cidade : '',
       }))
+      const preenchidos = new Set<string>()
+      if (e.logradouro) preenchidos.add('logradouro')
+      if (e.bairro) preenchidos.add('bairro')
+      camposDoCep.current = preenchidos
       if (e.uf && !cidadeValida) {
         setAvisoCep(`"${e.cidade}" não está na lista do IBGE. Escolha a cidade à mão.`)
+      } else if (!e.logradouro) {
+        setAvisoCep('Este CEP não tem logradouro. Preencha a rua à mão.')
       }
     } finally {
       setBuscandoCep(false)
@@ -1413,9 +1465,17 @@ function DadosPessoais() {
 
   async function handleSalvar() {
     if (!editando) return
+    // O rótulo do campo promete "CPF / CNPJ", e 12 ou 13 dígitos não são nem um
+    // nem outro. Salvava calado, e um dígito trocado num CPF é dado de pagamento
+    // errado — o tipo de erro que só aparece quando a transferência falha.
+    if (!cpfCnpjValido(form.cpf)) {
+      toast.error('CPF/CNPJ inválido. Confira os dígitos antes de salvar.')
+      return
+    }
     // Campo em branco vira null, não string vazia: no banco "não informado" é
     // ausência de valor, e "" faria a célula parecer preenchida com nada.
     const vazioNull = (s: string) => (s.trim() ? s.trim() : null)
+    const compilado = vazioNull(compilarEndereco(form))
     try {
       await salvar.mutateAsync({
         nome_chave: editando.chave,
@@ -1436,7 +1496,13 @@ function DadosPessoais() {
         // O texto corrido deixa de ser digitado: passa a ser derivado das partes
         // e gravado junto, para quem lê a tabela direto no banco também ver o
         // endereço pronto.
-        endereco: vazioNull(compilarEndereco(form)),
+        //
+        // Partes vazias NÃO apagam o texto legado. Quem abria a ficha de um
+        // investidor que só tinha o endereço antigo (em texto corrido), mexia no
+        // Pix e salvava, perdia o endereço: as sete partes estavam em branco,
+        // compilarEndereco devolvia '' e o null ia por cima do único endereço que
+        // existia. Sem partes preenchidas, preserva o que está no banco.
+        endereco: compilado ?? dados.data?.get(editando.chave)?.endereco ?? null,
       })
       toast.success('Dados salvos.')
       setEditando(null)

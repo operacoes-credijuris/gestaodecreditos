@@ -19,9 +19,12 @@ import {
   MESES_ALERTA_LIQUIDACAO,
   statusLiquidacao,
   statusTir,
+  textoTipoCredito,
   textosResumo,
 } from './labels'
-import { formatCNJ, hojeISO, mesesDepois, onlyDigits } from './format'
+// Sem hojeISO de propósito: a data vem da tela (DadosExportacao.hoje) para o
+// arquivo ser o retrato exato do que estava na tela no momento do clique.
+import { formatCNJ, mesesDepois, onlyDigits, sentenceCase } from './format'
 import {
   aReceberEstimado,
   ganhoProjetado,
@@ -104,12 +107,20 @@ const INDICES: Record<string, string> = {
   ipca_2: 'IPCA + 2% a.a.',
 }
 
-/** "2026-08-10" -> Date local. Sem isto o Excel recebe um dia a menos (UTC). */
+/**
+ * "2026-08-10" -> Date em UTC à meia-noite.
+ *
+ * Date.UTC e não `new Date(a, m-1, d)`: a segunda constrói meia-noite LOCAL, e o
+ * ExcelJS converte para serial em UTC. Em fuso negativo (o nosso) o serial saía
+ * com resíduo de hora (45689,125 em vez de 45689) e, em fuso positivo, um dia a
+ * menos — a data no arquivo passava a ser a véspera da que está na tela. Com UTC
+ * o serial fica inteiro e o dia é o mesmo em qualquer fuso.
+ */
 function paraData(iso: string | null | undefined): Date | null {
   const s = (iso ?? '').slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null
   const [a, m, d] = s.split('-').map(Number)
-  return new Date(a, m - 1, d)
+  return new Date(Date.UTC(a, m - 1, d))
 }
 
 /**
@@ -119,19 +130,6 @@ function paraData(iso: string | null | undefined): Date | null {
  */
 function centavos(v: number | null): number | null {
   return v === null ? null : Math.round(v * 100) / 100
-}
-
-/** Tipos do crédito em texto, na mesma leitura da tela. */
-function tiposTexto(tipos: string[] | null | undefined): string {
-  const rotulos: Record<string, string> = {
-    principal: 'crédito principal',
-    honorarios_contratuais: 'honorários contratuais',
-    honorarios_advocaticios: 'honorários sucumbenciais',
-  }
-  const t = (tipos ?? []).map((x) => rotulos[x] ?? x)
-  if (t.length === 0) return '—'
-  if (t.length === 1) return t[0]
-  return `${t.slice(0, -1).join(', ')} e ${t[t.length - 1]}`
 }
 
 export interface DadosExportacao {
@@ -145,6 +143,14 @@ export interface DadosExportacao {
   jaRecebidoTotal: number | null
   /** SELIC/IPCA da projeção do valor. */
   parametros: ParametrosAtualizacao | undefined
+  /**
+   * O "hoje" QUE A TELA ESTÁ USANDO. Vem de fora de propósito: a tela congela a
+   * data na montagem, e o exportador chamava hojeISO() na hora do clique. Com a
+   * aba aberta atravessando a meia-noite, o arquivo era calculado com uma data e
+   * a tela com outra — dias em carteira e valor projetado saíam diferentes do que
+   * está na frente de quem baixou, e a planilha vai para o investidor.
+   */
+  hoje: string
 }
 
 export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
@@ -153,7 +159,9 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   wb.creator = 'Credijuris — Gestão de Cessões'
   const ws = wb.addWorksheet('Carteira')
 
-  const hoje = hojeISO()
+  // A data vem da TELA (ver DadosExportacao.hoje), não de hojeISO() aqui: com a
+  // aba aberta atravessando a meia-noite, arquivo e tela discordavam.
+  const hoje = d.hoje
   const limite = mesesDepois(hoje, MESES_ALERTA_LIQUIDACAO)
 
   COLUNAS.forEach((c, i) => {
@@ -332,7 +340,9 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       formatCNJ(p.numero_cnj),
       p.cedente ?? '',
       p.cedente_advogado ?? '',
-      tiposTexto(p.tipo_credito),
+      // Mesma função da tela (labels.ts), com o mesmo sentenceCase: planilha e
+      // tela têm de dizer a mesma coisa sobre o mesmo crédito.
+      sentenceCase(textoTipoCredito(p.tipo_credito)),
       p.tribunal ?? '',
       p.capital_investido ?? null,
       paraData(p.data_aquisicao),
