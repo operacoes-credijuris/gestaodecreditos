@@ -1,34 +1,39 @@
 -- Migração 0030: modelos de petição.
 --
--- Os modelos são escritos por advogado no Google Docs, numa pasta do Drive, e
--- são ESPELHADOS aqui. O Drive segue sendo onde se edita; esta tabela é de onde
--- a plataforma lê.
+-- Os 10 modelos nasceram no Google Docs e foram lidos UMA ÚNICA VEZ, na carga
+-- inicial (supabase/SEED_PETICAO_TEMPLATES*.sql). Daqui para frente esta tabela é
+-- a fonte: a edição acontece na plataforma, e não há credencial do Google, nem
+-- sincronização, nem API externa no caminho de gerar uma petição.
 --
--- POR QUE ESPELHAR, e não ler o Drive na hora de gerar: a leitura do Drive
--- depende de permissão por arquivo, e permissão insuficiente devolve resposta
--- BEM-SUCEDIDA com menos arquivos — não devolve erro. Ao ligar a pasta pela
--- primeira vez, uma consulta trouxe 2 dos 10 modelos sem nenhum aviso. Lendo no
--- ato da geração, esse silêncio viraria "nenhum modelo encontrado" no meio do
--- expediente, sem ninguém saber por quê. Espelhado, a importação é um evento
--- observável: conta quantos achou e a queda fica visível.
+-- POR QUE NÃO LER O DRIVE NA HORA DE GERAR: a leitura depende de permissão por
+-- arquivo, e permissão insuficiente devolve resposta BEM-SUCEDIDA com menos
+-- arquivos — não devolve erro. Ao ligar a pasta pela primeira vez, uma consulta
+-- trouxe 2 dos 10 modelos sem nenhum aviso. Na geração, esse silêncio viraria
+-- "nenhum modelo encontrado" no meio do expediente, sem ninguém saber por quê.
 --
 -- O `conteudo` guarda MARKDOWN, não texto puro: os modelos usam negrito nos
 -- títulos das seções e em frases-chave, e o produto final é um PDF que vai ao
 -- PJe. Perder o negrito obrigaria a refazê-lo à mão em toda petição, o que anula
 -- boa parte do ganho.
+--
+-- As lacunas são marcadas com RÓTULOS ENTRE COLCHETES — [NÚMERO DO PROCESSO], e
+-- não {{processo_cnj}}. Quem edita o modelo é advogado, e o texto continua
+-- legível como petição. O preço é que o rótulo é um contrato entre esta tabela e
+-- src/lib/peticao.ts: mudar de um lado sem o outro deixa o campo sem preencher.
 create table if not exists public.peticao_templates (
   id             uuid primary key default gen_random_uuid(),
   nome           text not null,
   -- O que a descrição da tarefa precisa conter para este modelo ser sugerido.
-  -- É lista, e EXPLÍCITA, em vez de derivada do título: "homologação",
-  -- "homologacao" e "homologatória" têm de cair no mesmo modelo, e o título do
-  -- arquivo no Drive não é contrato de código — alguém renomeia e a busca para.
+  -- É lista, e EXPLÍCITA, em vez de derivada do nome: "homologação",
+  -- "homologacao" e "homologatória" têm de cair no mesmo modelo. Também é o que
+  -- desempata as três colisões do acervo — "sequestro", "registro público" e
+  -- "RPV" aparecem no nome de dois modelos cada.
   palavras_chave text[] not null default '{}',
   conteudo       text not null default '',
-  -- Origem no Drive. UNIQUE porque a importação é reexecutável: sem isso, cada
-  -- sincronização criaria uma segunda cópia do mesmo Doc.
+  -- Doc de origem. Não é link vivo: serve de identidade estável para a carga
+  -- inicial poder ser reexecutada sem duplicar (o nome pode ser editado na
+  -- plataforma; este id, não).
   drive_file_id  text unique,
-  drive_sync_em  timestamptz,
   -- Modelo aposentado sai da lista sem perder o histórico de quem o usou.
   ativo          boolean not null default true,
   created_at     timestamptz not null default now(),
@@ -56,7 +61,7 @@ create policy "peticao_templates_write" on public.peticao_templates
   for all to authenticated using (true) with check (true);
 
 comment on table public.peticao_templates is
-  'Modelos de petição espelhados da pasta do Drive. O conteúdo usa {{variaveis}} resolvidas por lib/peticao.ts a partir do crédito.';
+  'Modelos de petição em markdown. As lacunas são rótulos entre colchetes, resolvidos por src/lib/peticao.ts a partir do crédito e da ficha do cessionário.';
 comment on column public.peticao_templates.palavras_chave is
   'Termos que, achados na descrição da tarefa, sugerem este modelo. Comparados sem acento e em minúsculas.';
 
