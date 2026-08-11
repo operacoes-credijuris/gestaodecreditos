@@ -306,7 +306,6 @@ export function ComboboxTexto({
   opcoes,
   placeholder,
   vazio = 'Nenhum parecido. Vai entrar como novo.',
-  avisoNovo = true,
   limite = 50,
 }: {
   valor: string
@@ -315,8 +314,6 @@ export function ComboboxTexto({
   opcoes: string[]
   placeholder?: string
   vazio?: string
-  /** Aviso de "não existe ainda" sob o campo. */
-  avisoNovo?: boolean
   limite?: number
 }) {
   const [aberto, setAberto] = useState(false)
@@ -402,7 +399,7 @@ export function ComboboxTexto({
         />
       )}
       {/* Escondido com a lista aberta: ela é absoluta e passa por cima. */}
-      {avisoNovo && !aberto && ehNovo && (
+      {!aberto && ehNovo && (
         <p
           className={cn('mt-1 text-xs', parecido ? 'text-amber-700' : 'text-slate-600')}
         >

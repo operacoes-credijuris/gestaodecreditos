@@ -29,6 +29,7 @@ import {
   formatCepInput,
   formatCpfCnpjInput,
   limparNumeroConta,
+  nomeParecido,
   normalizarNome,
   onlyDigits,
 } from '@/lib/format'
@@ -40,11 +41,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { Segmented } from '@/components/ui/Segmented'
-import {
-  Combobox,
-  ComboboxTexto,
-  type OpcaoCombo,
-} from '@/components/ui/Combobox'
+import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { IconButton } from '@/components/ui/IconButton'
 import {
   Table,
@@ -183,6 +180,31 @@ export default function DadosPessoaisBancarios() {
     () => listarPessoas(tipo, processos.data, dados.data),
     [tipo, processos.data, dados.data],
   )
+
+  /**
+   * Aviso do campo Nome, só no cadastro. Duas situações:
+   *
+   * • nome que já tem ficha — o Salvar barra, e avisar aqui poupa preencher o
+   *   formulário inteiro para descobrir no fim;
+   * • nome PARECIDO com alguém que já está na plataforma — não barra nada, porque
+   *   podem ser pessoas diferentes. É só a pergunta, que é o que segura o
+   *   "José Silva" cadastrado ao lado do "José da Silva" que já existia.
+   */
+  const avisoNome = useMemo(() => {
+    if (!editando?.novo) return undefined
+    const nome = editando.nome.trim()
+    if (!nome) return undefined
+    const chave = normalizarNome(nome)
+    if (dados.data?.has(chavePessoa(tipo, chave)))
+      return 'Já existe ficha com este nome. Cancele e edite pelo lápis na tabela.'
+    const p = nomeParecido(
+      nome,
+      pessoas.map((x) => x.nome),
+    )
+    return p
+      ? `Parecido com "${p}". Se for o mesmo, cancele e edite pelo lápis na tabela.`
+      : undefined
+  }, [editando, dados.data, pessoas, tipo])
 
   async function abrirJanela(chave: string, nome: string, novo: boolean) {
     const d = novo ? undefined : dados.data?.get(chavePessoa(tipo, chave))
@@ -521,23 +543,27 @@ export default function DadosPessoaisBancarios() {
         >
           {editando && (
             <div className="space-y-4">
-              {/* No cadastro o nome é digitado, com a lista de quem já existe ao
-                  lado para não se criar uma segunda versão da mesma pessoa. Na
-                  ficha de quem já existe o nome é FIXO: ele é a chave da linha, e
-                  editar aqui não renomearia — criaria outra pessoa e deixaria a
-                  primeira com os dados. Renomear se faz onde o nome nasce (no
-                  crédito, para quem tem crédito). */}
+              {/* No cadastro o nome é digitado, e SEM lista de quem já existe:
+                  cadastrar já pressupõe gente nova, e oferecer os que estão lá
+                  seria oferecer justamente o que não se quer. O aviso abaixo do
+                  campo cobre o caso raro em que a pessoa já está na plataforma
+                  escrita de outro jeito.
+
+                  Na ficha de quem já existe o nome é FIXO: ele é a chave da
+                  linha, e editar aqui não renomearia — criaria outra pessoa e
+                  deixaria a primeira com os dados. Renomear se faz onde o nome
+                  nasce, no crédito. */}
               {editando.novo ? (
                 <Field
                   label={`Nome do ${visao.rotulo.toLowerCase()}`}
                   hint="Como deve sair no contrato."
+                  error={avisoNome}
                 >
-                  <ComboboxTexto
-                    valor={editando.nome}
-                    onChange={(v) => setEditando({ ...editando, nome: v })}
-                    opcoes={pessoas.map((p) => p.nome)}
+                  <Input
+                    value={editando.nome}
+                    autoComplete="off"
                     placeholder="Nome completo ou razão social"
-                    vazio="Nenhum parecido. Vai entrar como novo."
+                    onChange={(e) => setEditando({ ...editando, nome: e.target.value })}
                   />
                 </Field>
               ) : (
