@@ -613,7 +613,14 @@ function Individual() {
             !investidor
               ? 'selecione um investidor'
               : derivados.aReceber.total === null
-                ? 'nada a receber nesta carteira'
+                ? // "Nada a receber" é conclusão, e só vale quando não há crédito
+                  // em aberto. Com crédito aberto e projeção incalculável (índice
+                  // do crédito ou parâmetro de atualização em falta), o card
+                  // afirmava que o investidor não tem nada a receber — o oposto
+                  // da verdade.
+                  derivados.aReceber.incalculaveis > 0
+                  ? `sem projeção calculável em ${derivados.aReceber.incalculaveis} crédito(s) — confira o índice e os Parâmetros de atualização`
+                  : 'nada a receber nesta carteira'
                 : [
                     derivados.aReceber.emAberto > 0 &&
                       `${derivados.aReceber.emAberto} crédito(s) em aberto`,

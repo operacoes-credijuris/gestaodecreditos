@@ -1,4 +1,5 @@
-import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
 import {
   processosCrud,
@@ -52,16 +53,21 @@ import {
   formatDate,
   hojeISO,
   mesesDepois,
+  normalizarBusca,
   onlyDigits,
   parseBRLInput,
   vazioNull,
 } from '@/lib/format'
 
-// Separa múltiplos nº RTDPJ (digitados com "e", vírgula, ";", "/" ou quebra)
-// para exibir um por linha.
+// Separa múltiplos nº RTDPJ (digitados com "e", vírgula, ";" ou quebra) para
+// exibir um por linha.
+//
+// A BARRA SAIU da lista de separadores: ela faz parte do próprio número quando
+// vem com o ano ("123456/2025"), e um registro único era exibido quebrado em dois
+// — "123456" e "2025" —, dando a entender que havia dois registros.
 function splitRtdpj(v: string): string[] {
   return v
-    .split(/\s*(?:\be\b|,|;|\/|\n)\s*/i)
+    .split(/\s*(?:\be\b|,|;|\n)\s*/i)
     .map((s) => s.trim())
     .filter(Boolean)
 }
@@ -142,6 +148,26 @@ function CampoMoeda({
   valor: number | null | undefined
   onChange: (v: number | null) => void
 }) {
+  // OS DÍGITOS são a fonte da verdade durante a digitação, não o número.
+  //
+  // Com o número, o estado "nenhum dígito" era inalcançável: ao apagar tudo, o
+  // valor chegava a 0, e formatBRLInput(0) devolve "0,00" — reintroduzindo
+  // dígitos no campo. O apagar seguinte movia entre 0,00 e 0,00 e o campo ficava
+  // preso em R$ 0,00, que NÃO é "não informado": a carteira lê zero como valor
+  // declarado e um "Já recebido" de R$ 0,00 num crédito liquidado produz ganho
+  // fictício de todo o capital. Guardando os dígitos, apagar tudo devolve string
+  // vazia e o campo volta a null.
+  const [digitos, setDigitos] = useState(() => onlyDigits(formatBRLInput(valor)))
+
+  // Ressincroniza quando o valor vem de FORA (abrir outro crédito, resetar o
+  // formulário). Compara pelo valor, não pelo texto, para não brigar com a
+  // digitação em curso.
+  useEffect(() => {
+    if (parseBRLInput(digitos) !== (valor ?? null))
+      setDigitos(onlyDigits(formatBRLInput(valor)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valor])
+
   return (
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-600">
@@ -151,8 +177,12 @@ function CampoMoeda({
         className="pl-9 text-right tabular-nums"
         inputMode="numeric"
         placeholder="0,00"
-        value={formatBRLInput(valor)}
-        onChange={(e) => onChange(parseBRLInput(e.target.value))}
+        value={digitos ? formatBRLInput(parseBRLInput(digitos)) : ''}
+        onChange={(e) => {
+          const d = onlyDigits(e.target.value)
+          setDigitos(d)
+          onChange(d ? parseBRLInput(d) : null)
+        }}
       />
     </div>
   )
@@ -180,6 +210,7 @@ export default function Processos() {
   const update = useUpdate()
   const remove = useRemove()
   const toast = useToast()
+  const qc = useQueryClient()
   const apensos = useApensosManager('processo_id')
   const ultimaMov = useUltimaMovimentacao()
 
@@ -249,9 +280,14 @@ export default function Processos() {
   const baseBusca = useMemo(() => {
     let l = data ?? []
     if (busca.trim()) {
-      const q = busca.toLowerCase()
-      l = l.filter((p) =>
-        [
+      // Mesmo padrão das outras telas: sem acento, e número de processo também
+      // por dígito. Antes, "goiania" não achava "Goiânia" e o número copiado da
+      // tela ("5001234-56.2020.8.13.0001") não achava nada, porque a comparação
+      // era literal contra o valor cru do banco.
+      const q = normalizarBusca(busca)
+      const qd = onlyDigits(busca)
+      l = l.filter((p) => {
+        const achouTexto = [
           p.numero_cnj,
           p.cedente,
           p.cedente_advogado,
@@ -263,8 +299,14 @@ export default function Processos() {
           p.instrumento ? getLabel(INSTRUMENTO, p.instrumento).label : null,
         ]
           .filter(Boolean)
-          .some((v) => v!.toLowerCase().includes(q)),
-      )
+          .some((v) => normalizarBusca(v!).includes(q))
+        if (achouTexto) return true
+        return (
+          qd.length >= 4 &&
+          (onlyDigits(p.numero_cnj).includes(qd) ||
+            onlyDigits(p.numero_rtdpj).includes(qd))
+        )
+      })
     }
     return l
   }, [data, busca])
@@ -300,9 +342,48 @@ export default function Processos() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
+    const novosErros: Record<string, string> = {}
     if (!editing.numero_cnj?.trim()) {
       // Validação inline: erro aparece junto ao campo, sem toast.
-      setErros({ numero_cnj: 'Informe o número do processo' })
+      novosErros.numero_cnj = 'Informe o número do processo'
+    }
+
+    // COERÊNCIA DA LIQUIDAÇÃO — é aqui que o estado nasce, e é aqui que tem de
+    // ser barrado. TODA a plataforma decide "este crédito foi pago?" pela
+    // PRESENÇA de data_liquidacao (projecao.ts, statusLiquidacao, statusTir,
+    // diasEmCarteira), nunca pelo status. Salvar "Encerrado" com valor recebido e
+    // sem a data fazia o mesmo dinheiro entrar em DOIS cards da carteira: somava
+    // em "Já recebido" e, por ser lido como não liquidado, somava o valor de face
+    // atualizado em "A receber estimado" — R$ 310 mil e R$ 372 mil do mesmo
+    // crédito, num caso medido. Corrigir na projeção não resolveria: a regra é
+    // compartilhada por quatro funções e mexer nela quebra a TIR.
+    if (emLiquidacao(editing.status)) {
+      const temValorRecebido =
+        editing.ja_recebido != null || editing.valor_estimado_complementar != null
+      if (temValorRecebido && !vazioNull(editing.data_liquidacao ?? null)) {
+        novosErros.data_liquidacao =
+          'Informe a data de liquidação do valor já recebido'
+      }
+      if (editing.status === 'encerrado' && !vazioNull(editing.data_liquidacao ?? null)) {
+        novosErros.data_liquidacao =
+          'Crédito encerrado precisa da data efetiva de liquidação'
+      }
+    }
+
+    // DATA FORA DE ORDEM: liquidar antes de comprar não existe, e o efeito era
+    // "Dias em carteira" imprimindo número negativo com a TIR justificando
+    // "Prazo nulo" — erro de digitação de ano que passava calado.
+    const aq = vazioNull(editing.data_aquisicao ?? null)
+    const liq = vazioNull(editing.data_liquidacao ?? null)
+    const exp = vazioNull(editing.expectativa_liquidacao ?? null)
+    if (aq && liq && liq < aq)
+      novosErros.data_liquidacao = 'A liquidação não pode ser anterior à cessão'
+    if (aq && exp && exp < aq)
+      novosErros.expectativa_liquidacao =
+        'A expectativa não pode ser anterior à cessão'
+
+    if (Object.keys(novosErros).length > 0) {
+      setErros(novosErros)
       return
     }
     try {
@@ -343,6 +424,13 @@ export default function Processos() {
     if (!toDelete) return
     try {
       await remove.mutateAsync(toDelete.id)
+      // A exclusão do crédito cascateia no banco para apensos e resumos, e o
+      // makeCrud só invalida a própria tabela. Sem isto, os apensos do crédito
+      // apagado continuavam listados na tela até recarregar a página.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['apensos'] }),
+        qc.invalidateQueries({ queryKey: ['carteira_resumos'] }),
+      ])
       toast.success('Crédito excluído.')
       setToDelete(null)
     } catch (err) {
@@ -394,18 +482,50 @@ export default function Processos() {
         ) : isError ? (
           <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : lista.length === 0 ? (
-          <EmptyState
-            title="Nenhum crédito"
-            description="Cadastre o primeiro crédito."
-            action={
-              <Button
-                icon={<Plus className="h-4 w-4" />}
-                onClick={() => abrirForm({ ...VAZIO })}
-              >
-                Novo crédito
-              </Button>
-            }
-          />
+          // Vazio POR RECORTE é outra coisa: com 95 créditos cadastrados e um
+          // filtro de status ativo, "Cadastre o primeiro crédito" afirma que a
+          // base está vazia e esconde que há dado atrás do recorte. A saída
+          // oferecida tem de ser limpar o recorte, não cadastrar de novo.
+          (data ?? []).length > 0 ? (
+            <EmptyState
+              title="Nada encontrado"
+              description={
+                busca.trim()
+                  ? `Nenhum crédito corresponde a "${busca.trim()}"${
+                      filtroStatus !== 'todos'
+                        ? ` no status ${getLabel(STATUS_PROCESSO, filtroStatus).label}`
+                        : ''
+                    }.`
+                  : `Nenhum crédito no status ${
+                      getLabel(STATUS_PROCESSO, filtroStatus).label
+                    }.`
+              }
+              action={
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setBusca('')
+                    setFiltroStatus('todos')
+                  }}
+                >
+                  Limpar busca e filtro
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              title="Nenhum crédito"
+              description="Cadastre o primeiro crédito."
+              action={
+                <Button
+                  icon={<Plus className="h-4 w-4" />}
+                  onClick={() => abrirForm({ ...VAZIO })}
+                >
+                  Novo crédito
+                </Button>
+              }
+            />
+          )
         ) : (
           <Table dense>
             <THead>
@@ -638,13 +758,18 @@ export default function Processos() {
                   }
                 />
               </Field>
-              <Field label="Expectativa de liquidação">
+              <Field
+                label="Expectativa de liquidação"
+                error={erros.expectativa_liquidacao}
+              >
                 <Input
                   type="date"
                   value={editing.expectativa_liquidacao ?? ''}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    if (erros.expectativa_liquidacao)
+                      setErros((v) => ({ ...v, expectativa_liquidacao: '' }))
                     setEditing({ ...editing, expectativa_liquidacao: e.target.value })
-                  }
+                  }}
                 />
               </Field>
               <Field
@@ -715,13 +840,19 @@ export default function Processos() {
                 </Select>
               </Field>
               {emLiquidacao(editing.status) && (
-                <Field label="Data de liquidação">
+                <Field
+                  label="Data de liquidação"
+                  error={erros.data_liquidacao}
+                  hint="Data em que o dinheiro caiu. É ela, e não o status, que diz à carteira que o crédito foi pago."
+                >
                   <Input
                     type="date"
                     value={editing.data_liquidacao ?? ''}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      if (erros.data_liquidacao)
+                        setErros((v) => ({ ...v, data_liquidacao: '' }))
                       setEditing({ ...editing, data_liquidacao: e.target.value })
-                    }
+                    }}
                   />
                 </Field>
               )}
@@ -975,7 +1106,17 @@ export default function Processos() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
-        message={`Excluir o crédito ${formatCNJ(toDelete?.numero_cnj)}?`}
+        // A cascata precisa estar na pergunta: o banco apaga os apensos junto, e
+        // eles são cadastro manual (número, classe, tribunal, comarca, vara,
+        // polos). Quem excluía um crédito para recadastrá-lo com o número certo
+        // perdia os apensos sem nunca ter sido avisado.
+        message={
+          toDelete && apensos.contagem(toDelete.id) > 0
+            ? `Excluir o crédito ${formatCNJ(toDelete.numero_cnj)}? Os ${apensos.contagem(
+                toDelete.id,
+              )} apensos vinculados serão excluídos também.`
+            : `Excluir o crédito ${formatCNJ(toDelete?.numero_cnj)}?`
+        }
         confirmLabel="Excluir"
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}

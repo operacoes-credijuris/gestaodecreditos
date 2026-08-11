@@ -168,7 +168,14 @@ export function diasEmCarteira(
   hoje: string,
 ): number | null {
   const fim = (dataLiquidacao ?? '').slice(0, 10) || hoje
-  return diasEntre(dataAquisicao, fim)
+  const dias = diasEntre(dataAquisicao, fim)
+  // Prazo negativo é dado inconsistente, não "zero dia": acontece com erro de
+  // ano na data de liquidação (01/12/2025 no lugar de 01/12/2026), e a célula
+  // imprimia "-40" como se fosse informação. Devolvendo null, a coluna mostra
+  // "—" e não finge saber. O formulário de Créditos agora barra a inversão na
+  // origem; isto é a rede de baixo, para o que já está gravado.
+  if (dias !== null && dias < 0) return null
+  return dias
 }
 
 /**

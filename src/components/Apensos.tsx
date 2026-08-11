@@ -412,5 +412,13 @@ export function useApensosManager(parentField: ParentField) {
     )
   }
 
-  return { contador, actions, detailRow, modals }
+  /**
+   * Quantos apensos pendem de um pai. Exposto porque a exclusão do CRÉDITO
+   * apaga os apensos em cascata no banco (FK on delete cascade), e a confirmação
+   * precisa dizer isso — apenso é cadastrado à mão, com número, classe, tribunal
+   * e polos, e some sem aviso junto com o pai.
+   */
+  const contagem = (parentId: string) => porPai.get(parentId)?.length ?? 0
+
+  return { contador, contagem, actions, detailRow, modals }
 }

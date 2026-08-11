@@ -229,19 +229,40 @@ export function aReceberEstimado(
     dataLiquidacao: string | null | undefined
     valorComplementar: number | null | undefined
   }[],
-): { total: number | null; emAberto: number; complementares: number } {
+): {
+  total: number | null
+  emAberto: number
+  complementares: number
+  /** Créditos em aberto cuja projeção não pôde ser calculada (índice ou
+   *  parâmetro ausente). Serve para o card não dizer "nada a receber" quando o
+   *  que houve foi impossibilidade de calcular. */
+  incalculaveis: number
+} {
   let total = 0
   let emAberto = 0
   let complementares = 0
+  let incalculaveis = 0
   for (const it of itens) {
     const liquidado = !!(it.dataLiquidacao ?? '').slice(0, 10)
+    const comp = it.valorComplementar
     if (!liquidado) {
-      if (it.proj.valor === null) continue
+      // Complementar declarado num crédito AINDA NÃO liquidado também é dinheiro
+      // a receber, e entrava no Ganho e no Retorno da linha mas ficava fora deste
+      // card — os dois números discordavam sobre o mesmo crédito.
+      if (typeof comp === 'number' && comp > 0) {
+        total += comp
+        complementares++
+      }
+      if (it.proj.valor === null) {
+        // Sem projeção calculável não se pode somar, mas também não se pode
+        // concluir "nada a receber": conta separado para o card poder dizer isso.
+        incalculaveis++
+        continue
+      }
       total += it.proj.valor
       emAberto++
       continue
     }
-    const comp = it.valorComplementar
     if (typeof comp === 'number' && comp > 0) {
       total += comp
       complementares++
@@ -252,6 +273,7 @@ export function aReceberEstimado(
     total: nenhum ? null : Math.round(total * 100) / 100,
     emAberto,
     complementares,
+    incalculaveis,
   }
 }
 
