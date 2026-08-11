@@ -296,3 +296,25 @@ export const templatesCrud = makeCrud<ContratoTemplate, Partial<ContratoTemplate
 )
 
 export const contratosCrud = makeCrud<Contrato, Partial<Contrato>>('contratos')
+
+/**
+ * Índice dos modelos de petição. O TEXTO de cada modelo não está aqui: é um .md
+ * no bucket `modelos-peticoes`, baixado por baixarModelo() em lib/peticao.ts.
+ * Esta tabela guarda o nome que aparece na tela, o arquivo a carregar e as
+ * palavras que sugerem o modelo a partir da descrição da tarefa.
+ */
+export interface PeticaoTemplate {
+  id: string
+  nome: string
+  /** Nome do arquivo no bucket, com extensão e com os espaços que tiver. */
+  arquivo: string | null
+  palavras_chave: string[]
+  ativo: boolean
+  created_at: string
+  updated_at: string
+}
+
+export const peticaoTemplatesCrud = makeCrud<
+  PeticaoTemplate,
+  Partial<PeticaoTemplate>
+>('peticao_templates', { orderBy: 'nome', ascending: true })

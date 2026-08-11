@@ -1,10 +1,11 @@
 // Preenchimento dos modelos de petição.
 //
-// Os modelos vivem no Drive, escritos por advogado, e marcam as lacunas com
-// rótulos entre colchetes — [NÚMERO DO PROCESSO], e não {{processo_cnj}}. A
-// escolha é deliberada: quem edita o modelo é advogado, e o documento continua
-// legível como petição. O preço é que o rótulo é um CONTRATO entre o Doc e este
-// arquivo: mudar o texto de um lado sem o outro deixa o campo sem preencher.
+// Os modelos são arquivos .md no bucket `modelos-peticoes` do Storage, e marcam
+// as lacunas com rótulos entre colchetes — [NÚMERO DO PROCESSO], e não
+// {{processo_cnj}}. A escolha é deliberada: quem edita o modelo é advogado, e o
+// texto continua legível como petição. O preço é que o rótulo é um CONTRATO entre
+// o arquivo e este módulo: mudar de um lado sem o outro deixa o campo sem
+// preencher.
 //
 // Este arquivo não formata nada por conta própria: reaproveita formatCNJ,
 // textoTipoCredito e compilarEndereco, as mesmas que a tela e o Excel usam. Uma
@@ -19,7 +20,31 @@ import {
 } from './format'
 import { textoTipoCredito } from './labels'
 import { chavePessoa, type InvestidorDados } from './queries'
+import { supabase } from './supabase'
 import type { Processo } from './types'
+
+/** Bucket onde vivem os modelos e o papel timbrado. */
+export const BUCKET_MODELOS = 'modelos-peticoes'
+
+/** Papel timbrado A4 (1242x1755 px, 150 DPI), fundo de todas as páginas do PDF. */
+export const ARQUIVO_TIMBRADO = 'timbrado-credijuris.jpg'
+
+/**
+ * Baixa o texto de um modelo do Storage.
+ *
+ * Lança em erro em vez de devolver vazio: modelo que não carrega tem de parar a
+ * geração com mensagem, porque string vazia viraria um PDF em branco com o
+ * timbrado — documento que parece pronto e não é.
+ */
+export async function baixarModelo(arquivo: string): Promise<string> {
+  const { data, error } = await supabase.storage.from(BUCKET_MODELOS).download(arquivo)
+  if (error) {
+    throw new Error(`Não foi possível carregar o modelo "${arquivo}": ${error.message}`)
+  }
+  const texto = (await data.text()).trim()
+  if (!texto) throw new Error(`O modelo "${arquivo}" está vazio no bucket.`)
+  return texto
+}
 
 export type VariavelPeticao =
   | 'juizo'
@@ -30,12 +55,12 @@ export type VariavelPeticao =
   | 'qualificacao_cessionario'
 
 /**
- * O rótulo, EXATAMENTE como está escrito nos Docs, e a variável que ele pede.
+ * O rótulo, como está escrito nos modelos, e a variável que ele pede.
  *
- * Comparado sem acento e em minúsculas (normalizarBusca), então "JUÍZO" e "juizo"
- * casam — mas a ordem das palavras importa: "CESSIONÁRIO/INVESTIDOR" e
- * "INVESTIDOR/CESSIONÁRIO" são rótulos diferentes, e essa divergência já
- * apareceu de verdade em um dos dez modelos.
+ * As chaves já estão sem acento e em minúsculas, porque é assim que chaveRotulo
+ * entrega o que leu do arquivo. A ordem das palavras importa:
+ * "CESSIONÁRIO/INVESTIDOR" e "INVESTIDOR/CESSIONÁRIO" são rótulos diferentes, e
+ * essa divergência já apareceu de verdade em um dos dez modelos.
  */
 const ROTULOS: Record<string, VariavelPeticao> = {
   'enderecamento do juizo': 'juizo',
@@ -46,10 +71,25 @@ const ROTULOS: Record<string, VariavelPeticao> = {
   'qualificacao do cessionario': 'qualificacao_cessionario',
 }
 
-/** Qualquer [texto entre colchetes] do modelo. */
-const RE_ROTULO = /\[([^\][\n]+)\]/g
+/**
+ * Qualquer [texto entre colchetes] do modelo.
+ *
+ * A barra invertida opcional é obrigatória aqui: a conversão de .docx para .md
+ * ESCAPA os colchetes, e os arquivos no bucket trazem `\[NÚMERO DO PROCESSO\]`.
+ * Sem tolerar isso, o rótulo capturado terminaria em barra, não casaria com
+ * nenhuma chave, e a petição sairia com o rótulo impresso — sem erro nenhum. O
+ * `*?` é preguiçoso para a barra final sobrar para o `\\?` e não entrar no nome.
+ */
+const RE_ROTULO = /\\?\[([^\][\n]*?)\\?\]/g
 
-/** O rótulo escrito de um jeito legível, para mensagem de tela. */
+/**
+ * O rótulo pronto para procurar no mapa: sem barra de escape, sem acento, em
+ * minúsculas. A limpeza da barra vem antes da normalização porque o escape pode
+ * aparecer no meio do rótulo, não só nas pontas.
+ */
+const chaveRotulo = (rotulo: string) => normalizarBusca(rotulo.replace(/\\/g, ''))
+
+/** O nome da variável em português, para mensagem de tela. */
 export const NOME_VARIAVEL: Record<VariavelPeticao, string> = {
   juizo: 'endereçamento do juízo',
   processo_cnj: 'número do processo',
@@ -76,24 +116,24 @@ export interface Pendencia {
 export function variaveisUsadas(conteudo: string): VariavelPeticao[] {
   const achadas = new Set<VariavelPeticao>()
   for (const m of conteudo.matchAll(RE_ROTULO)) {
-    const v = ROTULOS[normalizarBusca(m[1])]
+    const v = ROTULOS[chaveRotulo(m[1])]
     if (v) achadas.add(v)
   }
   return [...achadas]
 }
 
 /**
- * Rótulos entre colchetes que este arquivo não conhece.
+ * Rótulos entre colchetes que este módulo não conhece.
  *
- * É a rede contra erro de digitação no Doc: um "[NÚMERO DO PROCESO]" com um S a
- * menos nunca seria preenchido, e a petição sairia com o rótulo impresso. A
+ * É a rede contra erro de digitação no modelo: um "[NÚMERO DO PROCESO]" com um S
+ * a menos nunca seria preenchido, e a petição sairia com o rótulo impresso. A
  * importação avisa na hora, em vez de a descoberta acontecer depois de
  * protocolar.
  */
 export function rotulosDesconhecidos(conteudo: string): string[] {
   const fora = new Set<string>()
   for (const m of conteudo.matchAll(RE_ROTULO)) {
-    if (!ROTULOS[normalizarBusca(m[1])]) fora.add(m[1].trim())
+    if (!ROTULOS[chaveRotulo(m[1])]) fora.add(m[1].replace(/\\/g, '').trim())
   }
   return [...fora]
 }
@@ -245,7 +285,7 @@ export function aplicarModelo(
   valores: Partial<Record<VariavelPeticao, string>>,
 ): string {
   return conteudo.replace(RE_ROTULO, (inteiro, rotulo: string) => {
-    const v = ROTULOS[normalizarBusca(rotulo)]
+    const v = ROTULOS[chaveRotulo(rotulo)]
     return (v && valores[v]) || inteiro
   })
 }
