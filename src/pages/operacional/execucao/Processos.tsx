@@ -907,29 +907,6 @@ export default function Processos() {
             {/* Financeiro do crédito. Fica só aqui e na ficha lateral — de
                 propósito fora da tabela, que segue enxuta para escanear. */}
             <div>
-              {/* Antes do tipo de crédito de propósito: as duas são classificações
-                  do crédito, e a espécie é a que decide a pasta do Drive onde a
-                  petição gerada é salva. */}
-              <Field label="Espécie do requisitório" className="mb-4 sm:max-w-xs">
-                <Select
-                  value={editing.especie_requisitorio ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      especie_requisitorio: (e.target.value ||
-                        null) as EspecieRequisitorio | null,
-                    })
-                  }
-                >
-                  <option value="">Não informado</option>
-                  {Object.entries(ESPECIE_REQUISITORIO).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
               <Field label="Tipo de crédito">
                 <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
                   {Object.entries(TIPO_CREDITO).map(([k, v]) => (
@@ -959,6 +936,28 @@ export default function Processos() {
               </Field>
 
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {/* Dentro da grade, e não numa linha própria: sozinho ele deixava
+                    metade da linha em branco. Aqui divide a linha com o capital
+                    investido, e o vão que sobra cai no fim da grade. */}
+                <Field label="Espécie do requisitório">
+                  <Select
+                    value={editing.especie_requisitorio ?? ''}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        especie_requisitorio: (e.target.value ||
+                          null) as EspecieRequisitorio | null,
+                      })
+                    }
+                  >
+                    <option value="">Não informado</option>
+                    {Object.entries(ESPECIE_REQUISITORIO).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
                 <Field label="Capital investido">
                   <CampoMoeda
                     valor={editing.capital_investido}
