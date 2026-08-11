@@ -1,15 +1,18 @@
-// Leitura do modelo e medidas da petição — a parte que PDF e .docx compartilham.
+// Leitura do modelo e medidas da petição.
 //
-// POR QUE ESTE ARQUIVO EXISTE: a petição sai em dois formatos, e dois geradores
-// lendo o mesmo markdown por conta própria vão divergir. Um recua 4 cm, o outro
-// 3,8; um dá 24pt antes do título, o outro 20 — e ninguém percebe até um juiz
-// receber duas peças do mesmo escritório com formatações diferentes. É o mesmo
-// defeito que estaPago() e textoTipoCredito fecharam nesta plataforma.
+// Separado do gerador de .docx por dois motivos:
 //
-// Então a INTERPRETAÇÃO do modelo mora aqui, uma vez: `lerModelo` transforma o
-// markdown em blocos com significado (título, parágrafo, citação, dados, item), e
-// cada gerador só resolve a mecânica do seu formato. As MEDIDAS também moram aqui,
-// em milímetros e pontos, e cada formato converte para a sua unidade.
+//   • dá para conferir a leitura e as medidas FORA do navegador, com node — foi
+//     assim que o recuo das citações, o alinhamento das listas e o tamanho do
+//     timbrado foram verificados, sem depender de abrir a plataforma;
+//   • as medidas ficam num lugar só. Já houve um gerador de PDF ao lado deste, e as
+//     duas leituras do mesmo markdown teriam divergido — um recuando 4 cm, o outro
+//     3,8 — sem ninguém perceber até um juiz receber duas peças do mesmo escritório
+//     com formatações diferentes. Se o PDF voltar, volta consumindo daqui.
+//
+// `lerModelo` transforma o markdown em blocos com significado (título, parágrafo,
+// citação, dados, item); o gerador só resolve a mecânica do formato. As medidas
+// ficam em milímetros e pontos, e cada formato converte para a sua unidade.
 //
 // As medidas saíram do CONTRATO_CREDIJURIS_MODELO, o documento que a Credijuris já
 // usa: Calibri 11, entrelinha 1,08, 12pt depois de cada parágrafo, margens

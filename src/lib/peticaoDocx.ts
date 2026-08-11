@@ -14,10 +14,10 @@
 //   • imagem em PIXELS DE 96 DPI         -> A4 = 794 x 1123
 // Os números vêm de peticaoLayout em mm e pt; a conversão fica toda aqui.
 //
-// A fonte declarada é CALIBRI, e não Carlito como no PDF: aqui a fonte não é
-// embutida — é um NOME que o Word resolve na máquina de quem abre. Como todo mundo
-// aqui tem Office, sai Calibri de verdade, sem questão de licença. No PDF a fonte
-// tem de viajar dentro do arquivo, e daí a Carlito.
+// A fonte é declarada por NOME ("Calibri"), não embutida: o Word resolve na máquina
+// de quem abre. Como todo mundo aqui tem Office, sai Calibri de verdade e sem
+// questão de licença — embutir a Calibri num arquivo distribuído não é coberto pela
+// licença da Microsoft.
 import {
   CITACAO,
   COR,

@@ -2,7 +2,7 @@
 //
 // Duas abas: a partir de um MODELO (esta, pronta) e DO ZERO (a próxima). A partir
 // do modelo, a janela sugere qual usar lendo a descrição da tarefa, mostra a peça
-// já preenchida com os dados do crédito e entrega o PDF.
+// já preenchida com os dados do crédito e entrega o .docx.
 //
 // A sugestão NUNCA decide sozinha: os dez modelos ficam sempre na lista, porque
 // três pares deles colidem na mesma palavra ("sequestro", "registro público",
@@ -20,7 +20,7 @@ import { Loading } from '@/components/ui/Table'
 import {
   aplicarModelo,
   baixarModelo,
-  baixarTimbrado,
+  baixarTimbradoBytes,
   NOME_VARIAVEL,
   resolverVariaveis,
   rotulosDesconhecidos,
@@ -169,13 +169,13 @@ export function PeticaoModal({
     if (!textoFinal || !escolhido) return
     setGerando(true)
     try {
-      // Importado sob demanda junto com o pdfmake: mais de 1 MB que só desce para
-      // quem realmente gera uma petição.
-      const { gerarPdfPeticao } = await import('@/lib/peticaoPdf')
-      const timbrado = await baixarTimbrado()
-      const blob = await gerarPdfPeticao(textoFinal, timbrado)
+      // Sob demanda: a biblioteca de .docx só desce para quem realmente gera uma
+      // petição, não para quem abre a lista de tarefas.
+      const { gerarDocxPeticao } = await import('@/lib/peticaoDocx')
+      const timbrado = await baixarTimbradoBytes()
+      const blob = await gerarDocxPeticao(textoFinal, timbrado)
       const cnj = processo?.numero_cnj ? formatCNJ(processo.numero_cnj) : numeroTarefa
-      const nome = `${escolhido.nome} - ${cnj}.pdf`.replace(/[/\\?%*:|"<>]/g, '-')
+      const nome = `${escolhido.nome} - ${cnj}.docx`.replace(/[/\\?%*:|"<>]/g, '-')
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -188,7 +188,7 @@ export function PeticaoModal({
       // Chunk que não baixa quase nunca é falha de rede: é DEPLOY NOVO com a aba
       // aberta. O index.js em memória aponta para um nome de arquivo que o build
       // seguinte substituiu, e o antigo deixa de existir no servidor. Acontece
-      // justamente aqui porque o pdfmake é carregado sob demanda — quem abriu a
+      // justamente aqui porque a biblioteca de .docx é carregada sob demanda — quem abriu a
       // plataforma antes do deploy e só depois clicou em gerar cai nisto.
       // "Failed to fetch" seco não diz nada a quem está tentando protocolar.
       const versaoVelha =
@@ -234,7 +234,7 @@ export function PeticaoModal({
             disabled={impedido || gerando}
             icon={<Download className="h-4 w-4" />}
           >
-            {gerando ? 'Gerando…' : 'Gerar PDF'}
+            {gerando ? 'Gerando…' : 'Gerar petição'}
           </Button>
         </>
       }
@@ -333,7 +333,7 @@ export function PeticaoModal({
           ) : (
             textoFinal && (
               // Pré-visualização em texto, e não formatada: o que importa conferir
-              // aqui é o CONTEÚDO preenchido. A forma final está no PDF, e uma
+              // aqui é o CONTEÚDO preenchido. A forma final está no arquivo, e uma
               // prévia parecida-mas-não-igual daria falsa segurança.
               <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-sans text-xs leading-relaxed text-slate-700 scrollbar-thin">
                 {textoFinal}
