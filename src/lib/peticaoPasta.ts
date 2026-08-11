@@ -113,16 +113,18 @@ export type Resolucao =
     }
 
 /**
- * Desce a árvore até a pasta que recebe o arquivo.
+ * Desce até a pasta DO CRÉDITO — espécie, originador, crédito.
  *
- * Para na primeira etapa que não resolve, informando onde parou — descer "no
- * chute" a partir de um nível errado colocaria o arquivo num lugar plausível e
- * errado, que é o pior resultado possível aqui.
+ * Separada da resolução da petição porque tem dois usos: a geração desce um nível a
+ * mais (até `5. Petições`), e o número do processo nas telas de Créditos e Tarefas
+ * abre exatamente esta. Duas descidas escritas em separado divergiriam, e o clique
+ * no número levaria a uma pasta e a petição a outra.
+ *
+ * Para na primeira etapa que não resolve, informando onde parou — descer "no chute"
+ * a partir de um nível errado apontaria para um lugar plausível e errado, que é o
+ * pior resultado possível aqui.
  */
-export async function resolverPastaDaPeticao(
-  processo: Processo,
-  nomeDoModelo: string,
-): Promise<Resolucao> {
+export async function resolverPastaDoCredito(processo: Processo): Promise<Resolucao> {
   const caminho: string[] = []
 
   if (!processo.especie_requisitorio) {
@@ -189,23 +191,45 @@ export async function resolverPastaDaPeticao(
   }
   caminho.push(pastaCredito.nome)
 
+  return { tipo: 'pronto', pastaId: pastaCredito.id, caminho }
+}
+
+/**
+ * Desce até a pasta que RECEBE a petição: a do crédito, e dentro dela a `5.
+ * Petições` — ou a `7. RPV complementar`, quando o modelo é esse.
+ */
+export async function resolverPastaDaPeticao(
+  processo: Processo,
+  nomeDoModelo: string,
+): Promise<Resolucao> {
+  const doCredito = await resolverPastaDoCredito(processo)
+  if (doCredito.tipo !== 'pronto') return doCredito
+
   const numero = numeroDaPastaDestino(nomeDoModelo)
-  const setePastas = await listarSubpastas(pastaCredito.id)
+  const setePastas = await listarSubpastas(doCredito.pastaId)
   const destino = casarPorNumero(setePastas, numero)
+  const nomeCredito = doCredito.caminho[doCredito.caminho.length - 1]
   if (!destino) {
     return {
       tipo: 'escolher',
       etapa: 'destino',
       procurado: `pasta começando com "${numero}."`,
-      dentroDe: pastaCredito.id,
+      dentroDe: doCredito.pastaId,
       candidatas: setePastas,
-      caminho,
-      motivo: `Não achei a pasta "${numero}." dentro de ${pastaCredito.nome}.`,
+      caminho: doCredito.caminho,
+      motivo: `Não achei a pasta "${numero}." dentro de ${nomeCredito}.`,
     }
   }
-  caminho.push(destino.nome)
 
-  return { tipo: 'pronto', pastaId: destino.id, caminho }
+  return {
+    tipo: 'pronto',
+    pastaId: destino.id,
+    caminho: [...doCredito.caminho, destino.nome],
+  }
 }
+
+/** Link de uma pasta do Drive, para abrir em outra aba. */
+export const linkDaPasta = (pastaId: string) =>
+  `https://drive.google.com/drive/folders/${pastaId}`
 
 export { COMO_CHAMAR }

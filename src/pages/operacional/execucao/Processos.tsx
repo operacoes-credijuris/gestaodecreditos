@@ -10,6 +10,7 @@ import {
 import { listarPessoas } from '@/lib/pessoas'
 import { cn } from '@/lib/cn'
 import { useApensosManager } from '@/components/Apensos'
+import { NumeroProcessoDrive } from '@/components/NumeroProcessoDrive'
 import type {
   Processo,
   StatusProcesso,
@@ -410,7 +411,17 @@ export default function Processos() {
       return
     }
     try {
-      const { id, created_at, updated_at, advbox_lawsuit_id, ...payload } =
+      // drive_pasta_id fica FORA do payload: é cache que a resolução da pasta grava
+      // por conta própria, e o formulário reenviaria o valor que carregou ao abrir —
+      // sobrescrevendo com um id velho um que acabou de ser resolvido.
+      const {
+        id,
+        created_at,
+        updated_at,
+        advbox_lawsuit_id,
+        drive_pasta_id: _cachePasta,
+        ...payload
+      } =
         editing as Processo
       // Em Ativo os três campos ficam ocultos, então são descartados.
       if (!emLiquidacao(payload.status)) {
@@ -603,9 +614,11 @@ export default function Processos() {
                         />
                         <div className="min-w-0">
                           <span className="inline-flex items-center gap-1.5">
-                            <span className="whitespace-nowrap">
-                              {formatCNJ(p.numero_cnj)}
-                            </span>
+                            <NumeroProcessoDrive
+                              processo={p}
+                              numero={p.numero_cnj}
+                              className="whitespace-nowrap"
+                            />
                             {/* Contador de apensos colado no número: pertence ao
                                 processo, não à coluna de ações. */}
                             {apensos.contador(p.id)}

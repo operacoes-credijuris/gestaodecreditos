@@ -129,6 +129,11 @@ export interface Processo {
   ja_recebido: number | null
   valor_estimado_complementar: number | null
   advbox_lawsuit_id: string | null
+  /**
+   * Cache do id da pasta deste crédito no Drive. USO INTERNO — não exibir em tela:
+   * é atalho para o número do processo virar link direto, não informação.
+   */
+  drive_pasta_id: string | null
   created_at: string
   updated_at: string
 }

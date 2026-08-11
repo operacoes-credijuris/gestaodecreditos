@@ -21,6 +21,7 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Modal } from '@/components/ui/Modal'
 import { Combobox, MultiCombobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { PeticaoModal } from '@/components/PeticaoModal'
+import { NumeroProcessoDrive } from '@/components/NumeroProcessoDrive'
 import type { Processo } from '@/lib/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
@@ -388,7 +389,11 @@ export default function TarefasAdvbox() {
                 tarefa de relance, ficavam invisíveis. Quebrar em duas linhas
                 custa altura; esconder o nome da parte custa o entendimento. */}
             <div className="mt-0.5 break-words text-sm text-slate-600">
-              {formatCNJ(t.processo)}
+              {/* Mesmo componente da tela de Créditos: o clique no número tem de
+                  levar à mesma pasta nas duas telas. `cred` é o crédito que a tarefa
+                  casou — nulo quando o processo não está cadastrado, e aí o número
+                  aparece como texto comum. */}
+              <NumeroProcessoDrive processo={cred} numero={t.processo} />
               {partes && ` · ${partes}`}
             </div>
             {t.notes && <Observacao text={t.notes} />}
