@@ -388,7 +388,10 @@ export function ComboboxTexto({
         onBlur={() => setAberto(false)}
         onKeyDown={onKeyDown}
       />
-      {aberto && (
+      {/* Sem nada digitado e sem nada a mostrar, não abre: no primeiro
+          intermediador da plataforma a lista está vazia, e um balão dizendo
+          "nenhum parecido" ao só clicar no campo é ruído. */}
+      {aberto && (filtradas.length > 0 || consulta) && (
         <Lista
           opcoes={filtradas}
           destaque={destaque}
