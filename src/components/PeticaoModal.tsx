@@ -27,6 +27,7 @@ import {
   sugerirModelos,
   variaveisUsadas,
 } from '@/lib/peticao'
+import { driveConfigurado } from '@/lib/drive'
 import { peticaoTemplatesCrud, useInvestidorDados } from '@/lib/queries'
 import { formatCNJ } from '@/lib/format'
 import type { Processo } from '@/lib/types'
@@ -58,6 +59,13 @@ export function PeticaoModal({
   const [carregandoMd, setCarregandoMd] = useState(false)
   const [erroMd, setErroMd] = useState<string | null>(null)
   const [gerando, setGerando] = useState(false)
+  /** Etapa em curso, para o botão dizer o que está acontecendo. */
+  const [passo, setPasso] = useState<string | null>(null)
+  /** Quando o caminho no Drive não resolve: o motivo e até onde desceu. */
+  const [semPasta, setSemPasta] = useState<{
+    motivo: string
+    caminho: string[]
+  } | null>(null)
 
   const templates = peticaoTemplatesCrud.useList()
   const fichas = useInvestidorDados()
@@ -86,6 +94,7 @@ export function PeticaoModal({
     setIdEscolhido(null)
     setMd(null)
     setErroMd(null)
+    setSemPasta(null)
     setAba('modelo')
   }, [open])
 
@@ -165,24 +174,55 @@ export function PeticaoModal({
     desconhecidos.length > 0 ||
     semRotuloNenhum
 
+  /** Baixa no computador. É o caminho de escape quando o Drive não resolve. */
+  function baixar(blob: Blob, nome: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = nome
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   async function gerar() {
-    if (!textoFinal || !escolhido) return
+    if (!textoFinal || !escolhido || !processo) return
     setGerando(true)
+    setPasso(null)
     try {
       // Sob demanda: a biblioteca de .docx só desce para quem realmente gera uma
       // petição, não para quem abre a lista de tarefas.
       const { gerarDocxPeticao } = await import('@/lib/peticaoDocx')
       const timbrado = await baixarTimbradoBytes()
       const blob = await gerarDocxPeticao(textoFinal, timbrado)
-      const cnj = processo?.numero_cnj ? formatCNJ(processo.numero_cnj) : numeroTarefa
+      const cnj = processo.numero_cnj ? formatCNJ(processo.numero_cnj) : numeroTarefa
       const nome = `${escolhido.nome} - ${cnj}.docx`.replace(/[/\\?%*:|"<>]/g, '-')
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = nome
-      a.click()
-      URL.revokeObjectURL(url)
-      toast.success('Petição gerada.')
+
+      // O arquivo é gerado ANTES de procurar a pasta: se a pasta não resolver, o
+      // trabalho não se perde — cai no download e a pessoa sobe à mão.
+      if (!driveConfigurado) {
+        baixar(blob, nome)
+        toast.toast('Drive não configurado neste build. Baixei o arquivo.', 'info')
+        return
+      }
+
+      setPasso('Procurando a pasta no Drive…')
+      const { resolverPastaDaPeticao } = await import('@/lib/peticaoPasta')
+      const alvo = await resolverPastaDaPeticao(processo, escolhido.nome)
+
+      if (alvo.tipo !== 'pronto') {
+        setSemPasta({ motivo: alvo.motivo, caminho: alvo.caminho })
+        baixar(blob, nome)
+        toast.toast('Não achei a pasta no Drive. Baixei o arquivo.', 'info')
+        return
+      }
+
+      setPasso('Salvando no Drive…')
+      const { subirDocx } = await import('@/lib/drive')
+      const { link } = await subirDocx(alvo.pastaId, nome, blob)
+      // Nova aba, como pedido. `noopener` porque abrir aba com referência à página
+      // de origem é brecha conhecida, e aqui não há motivo para manter o vínculo.
+      window.open(link, '_blank', 'noopener,noreferrer')
+      toast.success(`Salvo em ${alvo.caminho.join(' › ')}`)
     } catch (err) {
       const msg = (err as Error).message ?? ''
       // Chunk que não baixa quase nunca é falha de rede: é DEPLOY NOVO com a aba
@@ -205,6 +245,7 @@ export function PeticaoModal({
       }
     } finally {
       setGerando(false)
+      setPasso(null)
     }
   }
 
@@ -234,7 +275,7 @@ export function PeticaoModal({
             disabled={impedido || gerando}
             icon={<Download className="h-4 w-4" />}
           >
-            {gerando ? 'Gerando…' : 'Gerar petição'}
+            {gerando ? (passo ?? 'Gerando…') : 'Gerar petição'}
           </Button>
         </>
       }
@@ -294,6 +335,24 @@ export function PeticaoModal({
           )}
 
           {erroMd && <Aviso tom="erro">{erroMd}</Aviso>}
+
+          {semPasta && (
+            <Aviso tom="atencao">
+              <p className="font-medium">
+                O arquivo foi baixado no seu computador, mas não subiu no Drive.
+              </p>
+              <p className="mt-1">{semPasta.motivo}</p>
+              {semPasta.caminho.length > 0 && (
+                <p className="mt-1">
+                  Desci até: <strong>{semPasta.caminho.join(' › ')}</strong>
+                </p>
+              )}
+              <p className="mt-1">
+                Suba o arquivo à mão nessa pasta, ou crie a pasta que falta e gere de
+                novo.
+              </p>
+            </Aviso>
+          )}
 
           {semRotuloNenhum && (
             <Aviso tom="erro">
