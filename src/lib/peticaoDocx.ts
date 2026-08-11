@@ -76,6 +76,7 @@ export async function gerarDocxPeticao(
     Packer,
     Paragraph,
     ShadingType,
+    Tab,
     TabStopType,
     TextRun,
     VerticalPositionRelativeFrom,
@@ -110,23 +111,27 @@ export async function gerarDocxPeticao(
   /**
    * Um item de lista: marcador, tabulação, texto, com recuo pendurado.
    *
-   * ⚠️ A PARADA DE TABULAÇÃO EXPLÍCITA (`tabStops`) É OBRIGATÓRIA. Duas tentativas
-   * falharam antes:
+   * ⚠️ SÃO DUAS COISAS, e faltar uma quebra o alinhamento. Três tentativas falharam
+   * antes de acertar as duas juntas:
    *
-   *   1. Recuo pendurado SEM tabStops. O Word inventa uma parada na posição do
-   *      recuo, o Google Docs não — o marcador saía colado ("1.Haja") e as linhas
-   *      seguintes voltavam à margem.
-   *   2. Tabela de duas células. As células colapsaram sem `columnWidths` e o texto
-   *      saiu uma letra por linha.
+   *   1. Recuo pendurado SEM `tabStops`. O Word inventa uma parada na posição do
+   *      recuo, o Google Docs não — marcador colado e linhas seguintes na margem.
+   *   2. Tabela de duas células. Colapsaram sem `columnWidths` e o texto saiu uma
+   *      letra por linha.
+   *   3. `tabStops` certo, mas a tabulação escrita como o CARACTERE `\t` dentro do
+   *      texto. Em OOXML tabulação é o ELEMENTO `<w:tab/>`; `\t` em `<w:t>` é espaço
+   *      em branco comum, e o editor o descarta — o recuo funcionava e o marcador
+   *      continuava colado ("1.Haja").
    *
-   * Com `w:tabs` gravado no XML, os dois editores levam o texto à posição certa, e o
-   * `hanging` alinha as linhas seguintes ali também.
+   * Daí `new Tab()` (que virá `<w:tab/>`) mais `tabStops` na mesma posição do
+   * `indent.left`: a tabulação leva o texto até lá, e o `hanging` alinha as linhas
+   * seguintes no mesmo ponto.
    */
   const itemDeLista = (marcador: string, trechos: Trecho[], ultimo: boolean) =>
     new Paragraph({
       children: [
         new TextRun({ text: marcador, bold: true, color: COR.titulo }),
-        new TextRun({ text: '\t' }),
+        new TextRun({ children: [new Tab()] }),
         ...runs(trechos),
       ],
       alignment: AlignmentType.JUSTIFIED,
