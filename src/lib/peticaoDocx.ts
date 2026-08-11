@@ -1,22 +1,23 @@
 // Desenha a petição em .docx.
 //
 // NÃO interpreta o modelo: quem lê o markdown e decide o que é título, citação ou
-// dado é lerModelo(), em peticaoLayout.ts, compartilhado com o gerador de PDF.
-// Aqui só se resolve a mecânica do Office Open XML. Duas leituras do mesmo
-// markdown divergiriam, e a divergência apareceria como duas petições do mesmo
-// escritório com formatações diferentes.
+// dado é lerModelo(), em peticaoLayout.ts, compartilhado com o gerador de PDF. Aqui
+// só se resolve a mecânica do Office Open XML. Duas leituras do mesmo markdown
+// divergiriam, e a divergência apareceria como duas petições do mesmo escritório
+// com formatações diferentes.
 //
 // AS UNIDADES do .docx são as do Word, e cada uma é diferente:
-//   • tamanho de fonte em MEIOS-PONTOS  -> 11pt = 22
-//   • espaçamento em TWIPS (1/20 de pt) -> 12pt = 240
+//   • tamanho de fonte em MEIOS-PONTOS   -> 11pt = 22
+//   • espaçamento em TWIPS (1/20 de pt)  -> 12pt = 240
 //   • entrelinha em 240-avos de linha    -> 1,08 = 259
-//   • recuo e margem em TWIPS            -> 1 mm = 56,7
+//   • recuo, margem e largura em TWIPS   -> 1 mm = 56,7
+//   • imagem em PIXELS DE 96 DPI         -> A4 = 794 x 1123
 // Os números vêm de peticaoLayout em mm e pt; a conversão fica toda aqui.
 //
 // A fonte declarada é CALIBRI, e não Carlito como no PDF: aqui a fonte não é
-// embutida — é um NOME que o Word resolve na máquina de quem abre. Como todo
-// mundo aqui tem Office, sai Calibri de verdade, sem questão de licença. No PDF a
-// fonte tem de viajar dentro do arquivo, e daí a Carlito.
+// embutida — é um NOME que o Word resolve na máquina de quem abre. Como todo mundo
+// aqui tem Office, sai Calibri de verdade, sem questão de licença. No PDF a fonte
+// tem de viajar dentro do arquivo, e daí a Carlito.
 import {
   CITACAO,
   COR,
@@ -26,12 +27,12 @@ import {
   MARGENS_MM,
   RECUO_CITACAO_MM,
   type Alinhamento,
+  type Bloco,
   type Trecho,
 } from './peticaoLayout'
 
 /** 1 mm em twips. */
 const MM_TWIP = 1440 / 25.4
-
 /** 1 pt em twips. */
 const PT_TWIP = 20
 
@@ -45,12 +46,16 @@ const entrelinha = (v: number) => Math.round(v * 240)
 /**
  * A4 em PIXELS A 96 DPI — 794 x 1123.
  *
- * ⚠️ Não troque por pontos. O `transformation` do ImageRun mede em pixels de 96 DPI
- * (converte com 9525 EMU por pixel), não nos 72 DPI do PostScript. Passando os
- * 595x842 pontos do A4, a imagem sai a 75% do tamanho (72/96) — o timbrado
- * encolhia e o rodapé dele subia para o meio da página, por cima do texto.
+ * ⚠️ Não troque por pontos. O `transformation` do ImageRun mede em pixels de 96 DPI,
+ * não nos 72 DPI do PostScript. Passando os 595x842 pontos do A4, a imagem sai a
+ * 75% do tamanho — o timbrado encolhia e o rodapé dele subia para o meio da página.
  */
 const A4_PX = { largura: (210 / 25.4) * 96, altura: (297 / 25.4) * 96 }
+
+/** Largura da coluna do marcador nas listas. */
+const COLUNA_MARCADOR_MM = 8
+
+const LARGURA_TEXTO_MM = 210 - MARGENS_MM.esquerda - MARGENS_MM.direita
 
 /**
  * Monta o documento. Recebe o timbrado em bytes porque o `docx` embute a imagem no
@@ -71,9 +76,20 @@ export async function gerarDocxPeticao(
     Packer,
     Paragraph,
     ShadingType,
+    Table,
+    TableCell,
+    TableRow,
     TextRun,
     VerticalPositionRelativeFrom,
+    WidthType,
   } = await import('docx')
+
+  const SEM_BORDA = {
+    top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+    right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  }
 
   const ALINHA: Record<Alinhamento, (typeof AlignmentType)[keyof typeof AlignmentType]> =
     {
@@ -84,10 +100,10 @@ export async function gerarDocxPeticao(
 
   const runs = (trechos: Trecho[], extra?: { size?: number; color?: string }) =>
     trechos.flatMap((t) =>
-      // O \n dentro de um trecho vem do bloco de dados bancários, um dado por
-      // linha. No Word, quebra dentro do parágrafo é `break`, não outro parágrafo:
-      // como parágrafo separado, cada linha ganharia o espaçamento de 12pt e o
-      // cartão viraria uma lista espaçada.
+      // O \n dentro de um trecho vem do bloco de dados bancários, um dado por linha.
+      // No Word, quebra dentro do parágrafo é `break`, não outro parágrafo: como
+      // parágrafo separado, cada linha ganharia 12pt de espaçamento e o cartão
+      // viraria uma lista espaçada.
       t.texto.split('\n').map(
         (linha, i) =>
           new TextRun({
@@ -101,13 +117,80 @@ export async function gerarDocxPeticao(
       ),
     )
 
-  const blocos = lerModelo(md)
-  const paragrafos: InstanceType<typeof Paragraph>[] = []
+  /**
+   * Uma linha de lista: marcador numa célula estreita, texto na outra, sem borda.
+   *
+   * POR QUE TABELA, e não recuo pendurado com tabulação: o recuo pendurado depende de
+   * o editor criar uma parada de tabulação implícita na posição do recuo. O Word cria;
+   * o Google Docs não criou — o marcador saía colado no texto ("1.Haja") e as linhas
+   * seguintes voltavam à margem em vez de alinhar sob o texto. Com célula, o
+   * alinhamento é estrutural. É também a mesma forma que o PDF usa (duas colunas),
+   * então os dois formatos alinham igual.
+   */
+  const linhaDeItem = (marcador: string, trechos: Trecho[], ultimo: boolean) =>
+    new TableRow({
+      children: [
+        new TableCell({
+          width: { size: mm(COLUNA_MARCADOR_MM), type: WidthType.DXA },
+          margins: { top: 0, bottom: 0, left: mm(4), right: 0 },
+          borders: SEM_BORDA,
+          children: [
+            new Paragraph({
+              children: [new TextRun({ text: marcador, bold: true, color: COR.titulo })],
+              spacing: { after: 0 },
+            }),
+          ],
+        }),
+        new TableCell({
+          width: {
+            size: mm(LARGURA_TEXTO_MM - COLUNA_MARCADOR_MM - 4),
+            type: WidthType.DXA,
+          },
+          margins: { top: 0, bottom: 0, left: 0, right: 0 },
+          borders: SEM_BORDA,
+          children: [
+            new Paragraph({
+              children: runs(trechos),
+              alignment: AlignmentType.JUSTIFIED,
+              // Espaço entre itens, e o dobro depois do último, para a lista se
+              // separar do parágrafo seguinte.
+              spacing: { after: pt(ultimo ? DEPOIS_PT : DEPOIS_PT / 2) },
+            }),
+          ],
+        }),
+      ],
+    })
 
-  blocos.forEach((b, i) => {
+  const blocos = lerModelo(md)
+  const corpo: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = []
+
+  // Percorre com índice para poder CONSUMIR uma sequência de itens de uma vez:
+  // itens consecutivos viram UMA tabela. Uma tabela por item deixaria vão entre as
+  // linhas, porque o Word separa tabelas vizinhas.
+  let i = 0
+  while (i < blocos.length) {
+    const b = blocos[i]
+
+    if (b.tipo === 'item') {
+      const linhas: InstanceType<typeof TableRow>[] = []
+      while (i < blocos.length && blocos[i].tipo === 'item') {
+        const item = blocos[i] as Extract<Bloco, { tipo: 'item' }>
+        linhas.push(linhaDeItem(item.marcador, item.trechos, item.ultimo))
+        i++
+      }
+      corpo.push(
+        new Table({
+          width: { size: mm(LARGURA_TEXTO_MM), type: WidthType.DXA },
+          borders: SEM_BORDA,
+          rows: linhas,
+        }),
+      )
+      continue
+    }
+
     switch (b.tipo) {
       case 'citacao':
-        paragrafos.push(
+        corpo.push(
           new Paragraph({
             children: runs(b.trechos, { size: meioPt(CITACAO.fonte) }),
             alignment: AlignmentType.JUSTIFIED,
@@ -117,7 +200,6 @@ export async function gerarDocxPeticao(
               line: entrelinha(CITACAO.entrelinha),
               lineRule: 'auto',
             },
-            // Régua à esquerda, como no PDF: marca que a palavra é do tribunal.
             border: {
               left: { style: BorderStyle.SINGLE, size: 12, color: COR.regua, space: 6 },
             },
@@ -128,7 +210,7 @@ export async function gerarDocxPeticao(
       case 'dados':
         // Cartão com fundo e moldura, na largura toda e sem recuo: o juízo precisa
         // achar de relance ao expedir alvará.
-        paragrafos.push(
+        corpo.push(
           new Paragraph({
             children: runs(b.trechos),
             alignment: AlignmentType.LEFT,
@@ -144,32 +226,16 @@ export async function gerarDocxPeticao(
         )
         break
 
-      case 'item':
-        // Marcador como texto, e não lista automática do Word: a numeração é a do
-        // modelo, e o Word renumeraria por conta própria.
-        paragrafos.push(
-          new Paragraph({
-            children: [
-              new TextRun({ text: `${b.marcador}\t`, bold: true, color: COR.titulo }),
-              ...runs(b.trechos),
-            ],
-            alignment: AlignmentType.JUSTIFIED,
-            indent: { left: mm(12), hanging: mm(7) },
-            spacing: { after: pt(b.ultimo ? DEPOIS_PT : DEPOIS_PT / 2) },
-          }),
-        )
-        break
-
       case 'titulo':
-        paragrafos.push(
+        corpo.push(
           new Paragraph({
             children: runs(b.trechos, {
               color: b.cabecalho ? COR.cabecalho : COR.titulo,
             }),
             alignment: AlignmentType.LEFT,
             spacing: {
-              // Título de seção com o dobro de espaço acima; o primeiro bloco da
-              // peça sem nada, senão o texto desceria em relação ao timbrado.
+              // Título de seção com o dobro de espaço acima; o primeiro bloco da peça
+              // sem nada, senão o texto desceria em relação ao timbrado.
               before: b.cabecalho ? (i > 0 ? pt(DEPOIS_PT) : 0) : pt(DEPOIS_PT * 2),
               after: b.cabecalho ? pt(DEPOIS_PT * 2) : pt(DEPOIS_PT),
             },
@@ -189,7 +255,7 @@ export async function gerarDocxPeticao(
         break
 
       case 'paragrafo':
-        paragrafos.push(
+        corpo.push(
           new Paragraph({
             children: runs(b.trechos),
             alignment: ALINHA[b.alinhamento],
@@ -201,14 +267,15 @@ export async function gerarDocxPeticao(
         )
         break
     }
-  })
+    i++
+  }
 
   /**
    * O timbrado vai no CABEÇALHO, ancorado à página e atrás do texto.
    *
-   * É o equivalente do "fundo de página" do PDF: o Word repete o cabeçalho em todas
-   * as folhas, então a arte repete. Sem `behindDocument`, a imagem cobriria o texto;
-   * sem a âncora na PÁGINA, ela se deslocaria com a margem do cabeçalho.
+   * É o equivalente do "fundo de página" do PDF: o Word repete o cabeçalho em todas as
+   * folhas, então a arte repete. Sem `behindDocument`, a imagem cobriria o texto; sem
+   * a âncora na PÁGINA, ela se deslocaria com a margem do cabeçalho.
    */
   const cabecalho = timbrado
     ? new Header({
@@ -242,11 +309,7 @@ export async function gerarDocxPeticao(
     styles: {
       default: {
         document: {
-          run: {
-            font: 'Calibri',
-            size: meioPt(CORPO.fonte),
-            color: COR.corpo,
-          },
+          run: { font: 'Calibri', size: meioPt(CORPO.fonte), color: COR.corpo },
           paragraph: {
             spacing: { line: entrelinha(CORPO.entrelinha), lineRule: 'auto' },
           },
@@ -270,7 +333,7 @@ export async function gerarDocxPeticao(
           },
         },
         headers: cabecalho ? { default: cabecalho } : undefined,
-        children: paragrafos,
+        children: corpo,
       },
     ],
   })

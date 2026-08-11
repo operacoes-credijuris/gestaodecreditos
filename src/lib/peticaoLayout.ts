@@ -15,8 +15,15 @@
 // usa: Calibri 11, entrelinha 1,08, 12pt depois de cada parágrafo, margens
 // 25/34,9/25/33 mm e a paleta abaixo.
 
-/** Margens da página, em milímetros. */
-export const MARGENS_MM = { esquerda: 25, topo: 34.9, direita: 25, rodape: 33 }
+/**
+ * Margens da página, em milímetros.
+ *
+ * Laterais e topo saíram do CONTRATO_CREDIJURIS_MODELO. O RODAPÉ, não: o contrato
+ * usa 33 mm, e a arte do timbrado começa a 265,7 mm — sobravam 1,7 mm, e na prática
+ * o último item da lista encavalava no rodapé. Vale 40 mm, que dá ~9 mm de folga da
+ * arte. Custa 7 mm de área útil e evita texto por cima da marca.
+ */
+export const MARGENS_MM = { esquerda: 25, topo: 34.9, direita: 25, rodape: 40 }
 
 /** Corpo do texto. */
 export const CORPO = { fonte: 11, entrelinha: 1.08 }
