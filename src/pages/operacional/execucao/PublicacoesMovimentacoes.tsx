@@ -30,18 +30,44 @@ import {
   onlyDigits as dig,
 } from '@/lib/format'
 
-// Teto de linhas por consulta. Existe para a tela não puxar a tabela inteira,
-// mas bater no teto ESCONDE registro — e publicação escondida é intimação que
-// ninguém leu. Por isso o número mora aqui e a tela avisa quando chega nele, em
-// vez de cortar em silêncio.
+// Teto de linhas por consulta, para a tela não puxar a tabela inteira. Bater no
+// teto ESCONDE registro — e publicação escondida é intimação que ninguém leu —,
+// então a tela avisa quando isso acontece.
 //
-// 1000, e não 2000/5000: o PostgREST tem max-rows de 1000 e devolve no máximo
-// isso, independentemente do `.limit()` pedido (é o mesmo teto que
-// Movimentacoes.tsx já assume). Pedir 2000 não trazia 2000 — trazia 1000, e o
-// aviso de truncamento, que testava `>= 2000`, NUNCA disparava. O número aqui
-// tem de ser o teto real para o aviso valer de alguma coisa.
-const LIMITE_PUBLICACOES = 1000
-const LIMITE_MOVIMENTACOES = 1000
+// O AVISO NÃO COMPARA COM ESTE NÚMERO, e é de propósito: o PostgREST tem um
+// max-rows próprio e devolve no máximo ele, qualquer que seja o `.limit()`
+// pedido. Comparar com o limite pedido só funciona se os dois coincidirem — foi
+// assim que uma versão anterior deste aviso, testando `>= 2000` com o servidor
+// cortando em 1000, nunca disparou. O aviso compara com a CONTAGEM EXATA da
+// janela, que a tela já busca para a pílula: se veio menos linha do que existe,
+// truncou, e o número real aparece na mensagem.
+const LIMITE_LINHAS = 1000
+
+/**
+ * Quantos registros existem na janela (contagem leve: head:true não baixa
+ * linha). Serve a DOIS consumidores — a pílula da aba e o aviso de truncamento
+ * da lista — e é o MESMO queryKey nos dois, então o React Query deduplica: uma
+ * requisição, um número, sem chance de a pílula discordar do aviso.
+ *
+ * A chave começa com a mesma raiz da lista ('djen_publicacoes') de propósito:
+ * invalidateQueries casa por prefixo, então a sincronização, que invalida a
+ * raiz, atualiza a contagem junto. Com a chave antiga ('djen_publicacoes_count')
+ * nada invalidava esta consulta, e a pílula ficava com o número da abertura da
+ * página enquanto o cabeçalho da lista já mostrava outro.
+ */
+function useContagem(tabela: string, campoData: string, desde: string) {
+  return useQuery({
+    queryKey: [tabela, 'count', desde],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from(tabela)
+        .select('*', { count: 'exact', head: true })
+        .gte(campoData, desde)
+      if (error) throw new Error(error.message)
+      return count ?? 0
+    },
+  })
+}
 
 // Data-limite (YYYY-MM-DD, fuso local) de uma janela de N dias — usada em
 // dupla pela contagem da pílula e pela lista, que precisam andar juntas.
@@ -150,38 +176,10 @@ export default function PublicacoesMovimentacoes() {
   const [aba, setAba] = useState<'publicacoes' | 'movimentacoes'>('publicacoes')
   const [busca, setBusca] = useState('')
 
-  // Contagens leves (head:true não baixa linhas) para as pílulas — quem chega
-  // na tela vê que existem DUAS visões e quantos registros há em cada uma.
   const ini30 = useMemo(() => isoDiasAtras(30), [])
   const ini20 = useMemo(() => isoDiasAtras(20), [])
-  // A chave começa com a MESMA raiz da lista ('djen_publicacoes') de propósito:
-  // invalidateQueries casa por prefixo, então a sincronização, que invalida a
-  // raiz, agora atualiza a pílula junto. Com a chave antiga
-  // ('djen_publicacoes_count') nada invalidava esta consulta, e a pílula ficava
-  // com o número da abertura da página enquanto o cabeçalho da lista já mostrava
-  // outro — dois números discordando na mesma tela até alguém recarregar.
-  const nPub = useQuery({
-    queryKey: ['djen_publicacoes', 'count', ini30],
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from('djen_publicacoes')
-        .select('*', { count: 'exact', head: true })
-        .gte('data_disponibilizacao', ini30)
-      if (error) throw new Error(error.message)
-      return count ?? 0
-    },
-  })
-  const nMov = useQuery({
-    queryKey: ['advbox_movimentacoes', 'count', ini20],
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from('advbox_movimentacoes')
-        .select('*', { count: 'exact', head: true })
-        .gte('data', ini20)
-      if (error) throw new Error(error.message)
-      return count ?? 0
-    },
-  })
+  const nPub = useContagem('djen_publicacoes', 'data_disponibilizacao', ini30)
+  const nMov = useContagem('advbox_movimentacoes', 'data', ini20)
 
   return (
     <div>
@@ -229,6 +227,9 @@ function Publicacoes({ busca }: { busca: string }) {
 
   // Janela de 30 dias (data de disponibilização >= hoje - 30, horário local).
   const ini30 = useMemo(() => isoDiasAtras(30), [])
+  // Mesma chave da pílula: o React Query devolve o valor já em cache, sem
+  // segunda requisição. Serve para saber se a lista abaixo veio truncada.
+  const total = useContagem('djen_publicacoes', 'data_disponibilizacao', ini30)
 
   const lista = useQuery({
     queryKey: ['djen_publicacoes', ini30],
@@ -239,7 +240,7 @@ function Publicacoes({ busca }: { busca: string }) {
         .gte('data_disponibilizacao', ini30)
         .order('data_disponibilizacao', { ascending: false })
         .order('id', { ascending: false })
-        .limit(LIMITE_PUBLICACOES)
+        .limit(LIMITE_LINHAS)
       if (error) throw new Error(error.message)
       return (data ?? []) as DjenRow[]
     },
@@ -355,6 +356,10 @@ function Publicacoes({ busca }: { busca: string }) {
 
   const novas = filtradas.filter((p) => !p.tratada)
   const providenciadas = filtradas.filter((p) => p.tratada)
+  // Truncou = veio menos linha do que existe na janela. Comparar com a contagem
+  // real, e não com o limite pedido, é o que faz o aviso valer qualquer que seja
+  // o max-rows do servidor.
+  const truncou = total.data != null && (lista.data?.length ?? 0) < total.data
   const card = (p: DjenRow) => (
     <PublicacaoCard
       key={p.id}
@@ -379,11 +384,11 @@ function Publicacoes({ busca }: { busca: string }) {
         />
       </div>
 
-      {(lista.data?.length ?? 0) >= LIMITE_PUBLICACOES && (
+      {truncou && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Mostrando as {LIMITE_PUBLICACOES} publicações mais recentes da janela de
-          30 dias, que é o limite da consulta. As mais antigas do período ficaram
-          de fora — use a busca para encontrar uma publicação específica.
+          Mostrando as {lista.data?.length} publicações mais recentes de{' '}
+          {total.data} na janela de 30 dias. As mais antigas do período ficaram de
+          fora — use a busca para encontrar uma publicação específica.
         </p>
       )}
 
@@ -623,6 +628,7 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   // Janela de 20 dias (data do andamento >= hoje - 20, horário local).
   const ini20 = useMemo(() => isoDiasAtras(20), [])
+  const total = useContagem('advbox_movimentacoes', 'data', ini20)
 
   const lista = useQuery({
     queryKey: ['advbox_movimentacoes', ini20],
@@ -632,7 +638,7 @@ function Movimentacoes({ busca }: { busca: string }) {
         .select('*')
         .gte('data', ini20)
         .order('data', { ascending: false })
-        .limit(LIMITE_MOVIMENTACOES)
+        .limit(LIMITE_LINHAS)
       if (error) throw new Error(error.message)
       return (data ?? []) as MovRow[]
     },
@@ -767,11 +773,11 @@ function Movimentacoes({ busca }: { busca: string }) {
         />
       </div>
 
-      {(lista.data?.length ?? 0) >= LIMITE_MOVIMENTACOES && (
+      {total.data != null && (lista.data?.length ?? 0) < total.data && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Mostrando as {LIMITE_MOVIMENTACOES} movimentações mais recentes da
-          janela de 20 dias, que é o teto de uma consulta. Com o corte, um
-          processo pode aparecer em Paralisados sem estar.
+          Mostrando as {lista.data?.length} movimentações mais recentes de{' '}
+          {total.data} na janela de 20 dias. Com o corte, um processo pode
+          aparecer em Paralisados sem estar.
         </p>
       )}
 
