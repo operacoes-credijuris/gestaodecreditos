@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { normalizarBusca, onlyDigits } from '@/lib/format'
+import { nomeParecido, normalizarBusca, normalizarNome, onlyDigits } from '@/lib/format'
 import { Input } from './Field'
 
 export interface OpcaoCombo {
@@ -143,6 +143,12 @@ function useTeclado(
   abrir: () => void,
   fechar: () => void,
   escolherIndice: (i: number) => void,
+  /**
+   * Enter sem nada destacado escolhe o primeiro resultado. FALSO no campo de
+   * texto livre: lá o que foi digitado já é o valor, e trocá-lo pelo item mais
+   * parecido da lista transformaria "criar um nome novo" em "escolher outro".
+   */
+  enterEscolhePrimeiro = true,
 ) {
   const [destaque, setDestaque] = useState(-1)
   // `chave` junto de `qtd`: só a contagem não bastava. Com o corte em 50, digitar
@@ -169,7 +175,7 @@ function useTeclado(
       // escolha.
       e.preventDefault()
       if (qtd > 0 && destaque >= 0) escolherIndice(destaque)
-      else if (qtd > 0 && chave.trim()) escolherIndice(0)
+      else if (enterEscolhePrimeiro && qtd > 0 && chave.trim()) escolherIndice(0)
       else fechar()
     } else if (e.key === 'Escape') {
       // Lista FECHADA: o Escape é do modal, não daqui. Sem esta guarda o
@@ -275,6 +281,144 @@ export function Combobox({
           vazio={vazio}
           truncada={filtradas.length === limite}
         />
+      )}
+    </div>
+  )
+}
+
+/**
+ * TEXTO LIVRE com a lista do que já existe. O valor é a string digitada; a lista
+ * é atalho, não restrição — dá para escolher um nome já cadastrado ou digitar um
+ * que ainda não existe.
+ *
+ * É o contrário do Combobox acima, que só devolve id de opção. Serve aos campos
+ * em que o nome NASCE ali (Cessionário e Intermediador do crédito): fechar a
+ * lista impediria de lançar o primeiro crédito de alguém novo, e deixar só texto
+ * livre é o que produz "José da Silva" e "Jose Silva" como duas pessoas.
+ *
+ * O aviso abaixo do campo é a outra metade: ele torna visível que o que está ali
+ * é um nome NOVO, e aponta o parecido quando há um. Nunca corrige sozinho — só
+ * quem está cadastrando sabe se são a mesma pessoa.
+ */
+export function ComboboxTexto({
+  valor,
+  onChange,
+  opcoes,
+  placeholder,
+  vazio = 'Nenhum parecido. Vai entrar como novo.',
+  avisoNovo = true,
+  limite = 50,
+}: {
+  valor: string
+  onChange: (texto: string) => void
+  /** O que já existe, exatamente como deve ser gravado. */
+  opcoes: string[]
+  placeholder?: string
+  vazio?: string
+  /** Aviso de "não existe ainda" sob o campo. */
+  avisoNovo?: boolean
+  limite?: number
+}) {
+  const [aberto, setAberto] = useState(false)
+  // Ao FOCAR, a lista vem inteira, mesmo com o campo preenchido: quem abre quer
+  // ver quem já existe. Só passa a filtrar depois de digitar — filtrar pelo valor
+  // já gravado mostraria uma lista de um item só, o próprio.
+  const [digitando, setDigitando] = useState(false)
+
+  const todas = useMemo<OpcaoCombo[]>(
+    () => opcoes.map((titulo, id) => ({ id, titulo })),
+    [opcoes],
+  )
+  const consulta = digitando ? valor.trim() : ''
+  const filtradas = useMemo(
+    () => (consulta ? todas.filter((o) => casa(o, consulta)) : todas).slice(0, limite),
+    [todas, consulta, limite],
+  )
+
+  const escolher = (o: OpcaoCombo) => {
+    onChange(o.titulo)
+    setDigitando(false)
+    setAberto(false)
+  }
+  const { destaque, setDestaque, onKeyDown } = useTeclado(
+    filtradas.length,
+    consulta,
+    aberto,
+    () => setAberto(true),
+    () => setAberto(false),
+    (i) => filtradas[i] && escolher(filtradas[i]),
+    false,
+  )
+  const boxRef = useCliqueFora(aberto, () => setAberto(false))
+
+  // Só é "novo" o que não casa com nenhuma opção pela MESMA regra do banco
+  // (normalizarNome): diferença de acento ou de caixa não cria pessoa nova, então
+  // avisar nesse caso seria alarme falso.
+  const ehNovo = useMemo(() => {
+    const q = valor.trim()
+    if (!q || opcoes.length === 0) return false
+    const chave = normalizarNome(q)
+    return !opcoes.some((o) => normalizarNome(o) === chave)
+  }, [valor, opcoes])
+  const parecido = useMemo(
+    () => (ehNovo ? nomeParecido(valor.trim(), opcoes) : null),
+    [ehNovo, valor, opcoes],
+  )
+
+  return (
+    <div ref={boxRef} className="relative">
+      <Input
+        value={valor}
+        autoComplete="off"
+        placeholder={placeholder}
+        onChange={(e) => {
+          onChange(e.target.value)
+          setDigitando(true)
+          setAberto(true)
+        }}
+        onFocus={() => {
+          setDigitando(false)
+          setAberto(true)
+        }}
+        // Fecha ao SAIR do campo, e não só ao clicar fora: num formulário longo
+        // como o do crédito se anda de campo em campo pelo Tab, e a lista ficava
+        // aberta por cima dos campos de baixo. Escolher com o mouse continua
+        // funcionando porque a opção usa mousedown com preventDefault — o foco
+        // não sai do campo, então este blur não dispara antes da escolha.
+        onBlur={() => setAberto(false)}
+        onKeyDown={onKeyDown}
+      />
+      {aberto && (
+        <Lista
+          opcoes={filtradas}
+          destaque={destaque}
+          onDestacar={setDestaque}
+          onEscolher={escolher}
+          vazio={vazio}
+          truncada={filtradas.length === limite}
+        />
+      )}
+      {/* Escondido com a lista aberta: ela é absoluta e passa por cima. */}
+      {avisoNovo && !aberto && ehNovo && (
+        <p
+          className={cn('mt-1 text-xs', parecido ? 'text-amber-700' : 'text-slate-600')}
+        >
+          {parecido ? (
+            <>
+              Parecido com{' '}
+              <button
+                type="button"
+                onClick={() => onChange(parecido)}
+                className="font-medium underline decoration-dotted hover:no-underline"
+              >
+                {parecido}
+              </button>
+              . Se for o mesmo, use o nome que já está cadastrado.
+            </>
+          ) : (
+            'Ainda não existe na plataforma — vai entrar como novo.'
+          )}
+        </p>
       )}
     </div>
   )

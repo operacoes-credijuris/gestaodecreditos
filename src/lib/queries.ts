@@ -112,9 +112,10 @@ export interface InvestidorDados {
 /**
  * Dados pessoais e bancários, indexados por PAPEL + NOME NORMALIZADO.
  *
- * A lista de nomes não vem daqui: vem dos Créditos — cessionário para
- * investidor, intermediador para intermediador. Esta tabela só guarda os dados
- * de quem já existe lá.
+ * Uma linha aqui pode ter nascido de duas maneiras: preenchendo a ficha de quem
+ * já aparece num crédito, ou cadastrando a pessoa direto na aba — o comercial
+ * cadastra o investidor para fazer o contrato, antes de existir crédito. Quem
+ * monta a lista das duas origens é listarPessoas, em lib/pessoas.ts.
  */
 export function useInvestidorDados() {
   return useQuery({
@@ -146,14 +147,40 @@ export function useSalvarInvestidorDados() {
   return useMutation({
     mutationFn: async (d: Omit<InvestidorDados, 'atualizado_em'>) => {
       const { data: sessao } = await supabase.auth.getUser()
-      // upsert pela chave (tipo, nome_chave): a linha nasce no primeiro
-      // salvamento, e não há como criar pessoa por aqui — a lista sempre vem dos
-      // Créditos.
+      // upsert pela chave (tipo, nome_chave): a mesma chamada cria a linha e
+      // atualiza a que já existe. Quem chama é que decide se pode sobrescrever —
+      // a tela barra o cadastro de um nome cuja ficha já existe.
       const { error } = await supabase.from('investidor_dados').upsert({
         ...d,
         atualizado_em: new Date().toISOString(),
         atualizado_por: sessao.user?.id ?? null,
       })
+      if (error) throw new Error(error.message)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['investidor_dados'] }),
+  })
+}
+
+/**
+ * Apaga uma ficha. A tela só oferece isto para quem NÃO aparece em crédito
+ * nenhum: apagar a ficha de quem está num crédito não removeria a pessoa (o nome
+ * continua vindo de lá) — só perderia CPF, conta e endereço, sem parecer perda.
+ */
+export function useExcluirInvestidorDados() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      tipo,
+      nome_chave,
+    }: {
+      tipo: TipoPessoa
+      nome_chave: string
+    }) => {
+      const { error } = await supabase
+        .from('investidor_dados')
+        .delete()
+        .eq('tipo', tipo)
+        .eq('nome_chave', nome_chave)
       if (error) throw new Error(error.message)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['investidor_dados'] }),

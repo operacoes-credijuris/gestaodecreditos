@@ -4,8 +4,10 @@ import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
 import {
   processosCrud,
   apensosCrud,
+  useInvestidorDados,
   useUltimaMovimentacao,
 } from '@/lib/queries'
+import { listarPessoas } from '@/lib/pessoas'
 import { cn } from '@/lib/cn'
 import { useApensosManager } from '@/components/Apensos'
 import type {
@@ -20,6 +22,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select } from '@/components/ui/Field'
+import { ComboboxTexto } from '@/components/ui/Combobox'
 import { Segmented } from '@/components/ui/Segmented'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -214,6 +217,22 @@ export default function Processos() {
   const qc = useQueryClient()
   const apensos = useApensosManager('processo_id')
   const ultimaMov = useUltimaMovimentacao()
+
+  // Nomes que já existem, para os campos Cessionário e Intermediador oferecerem
+  // em lista. Vêm dos próprios créditos e das fichas da aba "Dados pessoais e
+  // bancários" — o comercial cadastra o investidor antes de haver crédito.
+  //
+  // Falha nesta consulta NÃO trava a página nem aparece em erro: sem ela os dois
+  // campos continuam aceitando texto livre, só sem a metade cadastrada da lista.
+  const fichas = useInvestidorDados()
+  const nomesCessionario = useMemo(
+    () => listarPessoas('investidor', data, fichas.data).map((p) => p.nome),
+    [data, fichas.data],
+  )
+  const nomesIntermediador = useMemo(
+    () => listarPessoas('intermediador', data, fichas.data).map((p) => p.nome),
+    [data, fichas.data],
+  )
 
   // Referências do semáforo da coluna Expectativa. Data local (sv-SE dá o
   // formato ISO), calculada no render: no dia seguinte a régua anda sozinha.
@@ -747,25 +766,26 @@ export default function Processos() {
                   }
                 />
               </Field>
-              <Field label="Cessionário">
-                <Input
-                  value={editing.cessionario ?? ''}
-                  onChange={(e) => setEditing({ ...editing, cessionario: e.target.value })}
+              {/* Os dois campos abaixo aceitam texto livre E oferecem quem já
+                  existe. A lista não é enfeite: é o nome digitado, normalizado,
+                  que identifica a pessoa na aba "Dados pessoais e bancários", e
+                  uma letra trocada aqui cria uma segunda pessoa com ficha
+                  bancária própria — sem erro na tela, porque as duas linhas
+                  parecem certas. */}
+              <Field label="Cessionário" hint="É o investidor do crédito.">
+                <ComboboxTexto
+                  valor={editing.cessionario ?? ''}
+                  onChange={(v) => setEditing({ ...editing, cessionario: v })}
+                  opcoes={nomesCessionario}
+                  placeholder="Escolha ou digite um nome novo"
                 />
               </Field>
-              {/* É daqui que sai a lista de intermediadores da aba "Dados
-                  pessoais e bancários", do mesmo jeito que o cessionário produz a
-                  lista de investidores: o nome nasce no crédito e a outra tela só
-                  guarda os dados de quem já existe aqui. */}
-              <Field
-                label="Intermediador"
-                hint="Quem intermediou a aquisição. Alimenta a aba Dados pessoais e bancários."
-              >
-                <Input
-                  value={editing.intermediador ?? ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, intermediador: e.target.value })
-                  }
+              <Field label="Intermediador" hint="Quem intermediou a aquisição.">
+                <ComboboxTexto
+                  valor={editing.intermediador ?? ''}
+                  onChange={(v) => setEditing({ ...editing, intermediador: v })}
+                  opcoes={nomesIntermediador}
+                  placeholder="Escolha ou digite um nome novo"
                 />
               </Field>
               <Field label="Entidade devedora">

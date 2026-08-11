@@ -2,24 +2,27 @@
 // INVESTIDORES (os cessionários dos Créditos) e INTERMEDIADORES (quem intermediou
 // a aquisição).
 //
-// NENHUMA DAS DUAS CRIA PESSOA. A lista de nomes vem sempre dos Créditos — do
-// campo Cessionário numa visão, do campo Intermediador na outra —, e esta tela só
-// guarda os dados de quem já existe lá. É por isso que não há botão de adicionar:
-// pessoa que não está em nenhum crédito não teria por que ter ficha bancária.
+// A lista tem duas origens (ver lib/pessoas.ts): os nomes que aparecem nos
+// Créditos e as pessoas cadastradas aqui. O cadastro existe porque o comercial vem
+// ANTES do operacional — o investidor é cadastrado para se fazer o contrato, e o
+// crédito só é lançado quando o negócio fecha. Quem foi cadastrado e ainda não
+// tem crédito aparece marcado, para a lista dizer em que pé cada um está.
 //
 // A tela vivia como terceira aba das Carteiras. Saiu de lá porque não é carteira:
 // não tem investidor selecionado, não tem mês de referência e não fala de
 // projeção. Ficar junto obrigava a passar pela carteira de alguém para chegar a
 // um cadastro.
 import { useMemo, useRef, useState } from 'react'
-import { Pencil } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import {
   chavePessoa,
   processosCrud,
+  useExcluirInvestidorDados,
   useInvestidorDados,
   useSalvarInvestidorDados,
   type TipoPessoa,
 } from '@/lib/queries'
+import { listarPessoas, type PessoaLista } from '@/lib/pessoas'
 import {
   compilarEndereco,
   cpfCnpjValido,
@@ -30,12 +33,18 @@ import {
   onlyDigits,
 } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { Segmented } from '@/components/ui/Segmented'
-import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
+import {
+  Combobox,
+  ComboboxTexto,
+  type OpcaoCombo,
+} from '@/components/ui/Combobox'
 import { IconButton } from '@/components/ui/IconButton'
 import {
   Table,
@@ -118,20 +127,17 @@ const VAZIO: Record<CampoPessoa, string> = {
   cep: '',
 }
 
-/** O que muda entre as duas visões: de onde vem o nome e como ele se chama. */
-const VISOES: Record<
-  TipoPessoa,
-  { rotulo: string; coluna: 'cessionario' | 'intermediador'; vazio: string }
-> = {
+/** O que muda entre as duas visões: só o rótulo e o texto de lista vazia. */
+const VISOES: Record<TipoPessoa, { rotulo: string; vazio: string }> = {
   investidor: {
     rotulo: 'Investidor',
-    coluna: 'cessionario',
-    vazio: 'Nenhum crédito tem cessionário cadastrado.',
+    vazio:
+      'Cadastre um investidor aqui, ou lance um crédito com o campo Cessionário preenchido.',
   },
   intermediador: {
     rotulo: 'Intermediador',
-    coluna: 'intermediador',
-    vazio: 'Nenhum crédito tem intermediador cadastrado.',
+    vazio:
+      'Cadastre um intermediador aqui, ou lance um crédito com o campo Intermediador preenchido.',
   },
 }
 
@@ -139,16 +145,24 @@ export default function DadosPessoaisBancarios() {
   const processos = processosCrud.useList()
   const dados = useInvestidorDados()
   const salvar = useSalvarInvestidorDados()
+  const excluir = useExcluirInvestidorDados()
   const toast = useToast()
 
   const [tipo, setTipo] = useState<TipoPessoa>('investidor')
   const visao = VISOES[tipo]
 
-  // Pessoa em edição: guarda a chave e o nome, e o formulário à parte.
-  const [editando, setEditando] = useState<{ chave: string; nome: string } | null>(
-    null,
-  )
+  // Pessoa na janela: o nome e o formulário à parte. `novo` libera a edição do
+  // nome — na ficha de quem já existe o nome é fixo.
+  const [editando, setEditando] = useState<{
+    /** Identifica ESTA abertura da janela. Ver preencherPorCep. */
+    id: number
+    chave: string
+    nome: string
+    novo: boolean
+  } | null>(null)
+  const seqJanela = useRef(0)
   const [form, setForm] = useState<Record<CampoPessoa, string>>(VAZIO)
+  const [aExcluir, setAExcluir] = useState<PessoaLista | null>(null)
 
   // Os 5.571 municípios entram por import DINÂMICO, e só quando alguém abre a
   // edição: são ~86 kB que não fazem sentido no bundle de quem nunca edita.
@@ -164,22 +178,14 @@ export default function DadosPessoaisBancarios() {
   const camposDoCep = useRef<Set<string>>(new Set())
   const [avisoCep, setAvisoCep] = useState<string | null>(null)
 
-  // Nomes distintos da coluna da visão atual, em ordem alfabética.
-  const pessoas = useMemo(() => {
-    const porChave = new Map<string, string>()
-    for (const p of processos.data ?? []) {
-      const nome = (p[visao.coluna] ?? '').trim()
-      if (!nome) continue
-      const chave = normalizarNome(nome)
-      if (!porChave.has(chave)) porChave.set(chave, nome)
-    }
-    return [...porChave.entries()]
-      .map(([chave, nome]) => ({ chave, nome }))
-      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
-  }, [processos.data, visao.coluna])
+  // Pessoas da visão atual, das duas origens, em ordem alfabética.
+  const pessoas = useMemo(
+    () => listarPessoas(tipo, processos.data, dados.data),
+    [tipo, processos.data, dados.data],
+  )
 
-  async function abrirEdicao(chave: string, nome: string) {
-    const d = dados.data?.get(chavePessoa(tipo, chave))
+  async function abrirJanela(chave: string, nome: string, novo: boolean) {
+    const d = novo ? undefined : dados.data?.get(chavePessoa(tipo, chave))
     setForm({
       cpf: d?.cpf ?? '',
       rg: d?.rg ?? '',
@@ -195,7 +201,7 @@ export default function DadosPessoaisBancarios() {
       uf: d?.uf ?? '',
       cep: d?.cep ?? '',
     })
-    setEditando({ chave, nome })
+    setEditando({ id: ++seqJanela.current, chave, nome, novo })
     setAvisoCep(null)
     camposDoCep.current = new Set()
     if (!municipios) {
@@ -220,16 +226,18 @@ export default function DadosPessoaisBancarios() {
     }
     // GUARDA DE OBSOLESCÊNCIA: digitar rápido dispara mais de uma busca e a rede
     // não responde na ordem em que foi chamada. Só a última escreve, e só se a
-    // ficha aberta ainda for a mesma — senão o endereço de um cai na ficha do
-    // outro.
+    // janela aberta ainda for a mesma — senão o endereço de um cai na ficha do
+    // outro. A comparação é pelo id da abertura, e não pela chave, porque o
+    // cadastro novo não tem chave até ser salvo: duas aberturas seguidas
+    // pareceriam a mesma ficha.
     const meuId = ++reqCepRef.current
-    const fichaNaChamada = editando?.chave
+    const janelaNaChamada = editando?.id
     setBuscandoCep(true)
     setAvisoCep(null)
     try {
       const { buscarCep } = await import('@/lib/cep')
       const e = await buscarCep(cepMascarado)
-      if (meuId !== reqCepRef.current || fichaNaChamada !== editando?.chave) return
+      if (meuId !== reqCepRef.current || janelaNaChamada !== editando?.id) return
       if (!e) {
         setAvisoCep('CEP não encontrado. Preencha à mão.')
         return
@@ -277,6 +285,23 @@ export default function DadosPessoaisBancarios() {
 
   async function handleSalvar() {
     if (!editando) return
+    const nome = editando.nome.trim()
+    if (!nome) {
+      toast.error(`Informe o nome do ${visao.rotulo.toLowerCase()}.`)
+      return
+    }
+    // A chave sai do NOME, não do que estava na janela: no cadastro novo o nome é
+    // digitado agora, e é ele que identifica a pessoa no banco.
+    const chave = normalizarNome(nome)
+    // Cadastro que cairia sobre uma ficha existente é barrado, não sobrescrito: o
+    // Salvar é upsert da linha inteira, e "cadastrar" alguém que já tem ficha
+    // apagaria CPF, conta e endereço de quem está lá.
+    if (editando.novo && dados.data?.has(chavePessoa(tipo, chave))) {
+      toast.error(
+        `Já existe ficha de "${nome}". Abra pelo lápis na tabela para editar.`,
+      )
+      return
+    }
     // O rótulo promete "CPF / CNPJ", e 12 ou 13 dígitos não são nem um nem outro.
     // Dígito trocado aqui é dado de pagamento errado, que só aparece quando a
     // transferência falha.
@@ -291,8 +316,8 @@ export default function DadosPessoaisBancarios() {
     try {
       await salvar.mutateAsync({
         tipo,
-        nome_chave: editando.chave,
-        nome_exibicao: editando.nome,
+        nome_chave: chave,
+        nome_exibicao: nome,
         cpf: vazioNull(form.cpf),
         rg: vazioNull(form.rg),
         banco: vazioNull(form.banco),
@@ -313,12 +338,21 @@ export default function DadosPessoaisBancarios() {
         // só tem o endereço antigo em texto corrido, mexe no Pix e salva, perderia
         // o endereço.
         endereco:
-          compilado ??
-          dados.data?.get(chavePessoa(tipo, editando.chave))?.endereco ??
-          null,
+          compilado ?? dados.data?.get(chavePessoa(tipo, chave))?.endereco ?? null,
       })
-      toast.success('Dados salvos.')
+      toast.success(editando.novo ? `${visao.rotulo} cadastrado.` : 'Dados salvos.')
       setEditando(null)
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  async function handleExcluir() {
+    if (!aExcluir) return
+    try {
+      await excluir.mutateAsync({ tipo, nome_chave: aExcluir.chave })
+      toast.success(`${aExcluir.nome} removido.`)
+      setAExcluir(null)
     } catch (e) {
       toast.error((e as Error).message)
     }
@@ -350,7 +384,18 @@ export default function DadosPessoaisBancarios() {
 
   return (
     <div>
-      <PageHeader title="Dados pessoais e bancários" />
+      <PageHeader
+        title="Dados pessoais e bancários"
+        actions={
+          <Button
+            icon={<Plus className="h-4 w-4" />}
+            disabled={!dados.data}
+            onClick={() => abrirJanela('', '', true)}
+          >
+            Cadastrar {visao.rotulo.toLowerCase()}
+          </Button>
+        }
+      />
 
       <Card className="mb-4 p-4">
         <Segmented
@@ -362,9 +407,10 @@ export default function DadosPessoaisBancarios() {
           value={tipo}
           onChange={(k) => {
             setTipo(k as TipoPessoa)
-            // Fecha a edição ao trocar de visão: a ficha aberta pertence ao papel
+            // Fecha a janela ao trocar de visão: a ficha aberta pertence ao papel
             // anterior, e salvar depois da troca gravaria no papel errado.
             setEditando(null)
+            setAExcluir(null)
           }}
         />
       </Card>
@@ -392,7 +438,18 @@ export default function DadosPessoaisBancarios() {
                   const d = dados.data?.get(chavePessoa(tipo, i.chave))
                   return (
                     <TR key={i.chave}>
-                      <TD className="font-medium text-slate-800">{i.nome}</TD>
+                      <TD className="font-medium text-slate-800">
+                        {i.nome}
+                        {/* Cadastrado e ainda sem crédito. Não é pendência: é o
+                            estado normal de quem o comercial acabou de cadastrar
+                            para fazer o contrato. Marcar evita a leitura de que
+                            faltou lançar algo. */}
+                        {!i.emCredito && (
+                          <Badge tone="gray" size="sm" className="ml-2 align-middle">
+                            sem crédito
+                          </Badge>
+                        )}
+                      </TD>
                       {COLUNAS_TABELA.map((c) => {
                         // Endereço em texto corrido, compilado das partes. Cai no
                         // texto legado enquanto um registro não tiver as partes.
@@ -409,15 +466,30 @@ export default function DadosPessoaisBancarios() {
                         )
                       })}
                       <TD className="w-[1%] whitespace-nowrap text-right">
-                        <IconButton
-                          label={`Editar dados de ${i.nome}`}
-                          icon={<Pencil className="h-4 w-4" />}
-                          // Cinto extra além do portão acima: abrir o formulário
-                          // sobre um mapa que não carregou é o que transforma erro
-                          // de leitura em apagamento de dado.
-                          disabled={!dados.data}
-                          onClick={() => abrirEdicao(i.chave, i.nome)}
-                        />
+                        <div className="flex justify-end gap-1">
+                          <IconButton
+                            label={`Editar dados de ${i.nome}`}
+                            icon={<Pencil className="h-4 w-4" />}
+                            // Cinto extra além do portão acima: abrir o formulário
+                            // sobre um mapa que não carregou é o que transforma erro
+                            // de leitura em apagamento de dado.
+                            disabled={!dados.data}
+                            onClick={() => abrirJanela(i.chave, i.nome, false)}
+                          />
+                          {/* Remover existe só para quem NÃO está em crédito
+                              nenhum, que é o caso do cadastro feito com o nome
+                              errado. Quem está num crédito não sairia da lista —
+                              o nome vem de lá —, então o botão só apagaria os
+                              dados bancários dando a impressão de remover. */}
+                          {!i.emCredito && (
+                            <IconButton
+                              label={`Remover ${i.nome}`}
+                              icon={<Trash2 className="h-4 w-4" />}
+                              variant="danger"
+                              onClick={() => setAExcluir(i)}
+                            />
+                          )}
+                        </div>
                       </TD>
                     </TR>
                   )
@@ -430,7 +502,11 @@ export default function DadosPessoaisBancarios() {
         <Modal
           open={!!editando}
           onClose={() => setEditando(null)}
-          title={`Dados do ${visao.rotulo.toLowerCase()}`}
+          title={
+            editando?.novo
+              ? `Cadastrar ${visao.rotulo.toLowerCase()}`
+              : `Dados do ${visao.rotulo.toLowerCase()}`
+          }
           size="lg"
           footer={
             <>
@@ -445,13 +521,32 @@ export default function DadosPessoaisBancarios() {
         >
           {editando && (
             <div className="space-y-4">
-              {/* O nome é FIXO: vem do crédito, e editar aqui criaria alguém que
-                  não existe em operação nenhuma. */}
-              <Field label={`Nome do ${visao.rotulo.toLowerCase()}`}>
-                <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                  {editando.nome}
-                </div>
-              </Field>
+              {/* No cadastro o nome é digitado, com a lista de quem já existe ao
+                  lado para não se criar uma segunda versão da mesma pessoa. Na
+                  ficha de quem já existe o nome é FIXO: ele é a chave da linha, e
+                  editar aqui não renomearia — criaria outra pessoa e deixaria a
+                  primeira com os dados. Renomear se faz onde o nome nasce (no
+                  crédito, para quem tem crédito). */}
+              {editando.novo ? (
+                <Field
+                  label={`Nome do ${visao.rotulo.toLowerCase()}`}
+                  hint="Como deve sair no contrato."
+                >
+                  <ComboboxTexto
+                    valor={editando.nome}
+                    onChange={(v) => setEditando({ ...editando, nome: v })}
+                    opcoes={pessoas.map((p) => p.nome)}
+                    placeholder="Nome completo ou razão social"
+                    vazio="Nenhum parecido. Vai entrar como novo."
+                  />
+                </Field>
+              ) : (
+                <Field label={`Nome do ${visao.rotulo.toLowerCase()}`}>
+                  <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                    {editando.nome}
+                  </div>
+                </Field>
+              )}
               <div className="grid gap-4 sm:grid-cols-2">
                 {CAMPOS_DOCUMENTO.map((c) => (
                   <Field
@@ -598,6 +693,23 @@ export default function DadosPessoaisBancarios() {
             </div>
           )}
         </Modal>
+
+        <ConfirmDialog
+          open={!!aExcluir}
+          title={`Remover ${visao.rotulo.toLowerCase()}`}
+          message={
+            <>
+              Remover <strong>{aExcluir?.nome}</strong> e os dados pessoais e
+              bancários dele? Como não há crédito com este nome, nada mais fica
+              apontando para ele.
+            </>
+          }
+          confirmLabel="Remover"
+          danger
+          loading={excluir.isPending}
+          onConfirm={handleExcluir}
+          onClose={() => setAExcluir(null)}
+        />
       </div>
     </div>
   )

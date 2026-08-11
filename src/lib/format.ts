@@ -218,6 +218,96 @@ export function normalizarNome(s: string | null | undefined): string {
     .toLowerCase()
 }
 
+/** Palavras que ligam um nome mas não distinguem duas pessoas. */
+const CONECTIVOS = new Set(['de', 'da', 'do', 'das', 'dos', 'e'])
+
+/**
+ * Palavras significativas de um nome, sem acento e sem conectivo.
+ *
+ * A pontuação vira separador, e não parte da palavra: "Silva, José" tem de casar
+ * com "José Silva", e "Credijuris Ltda." com "Credijuris Ltda". Depois de
+ * normalizarBusca só sobra ASCII (o cedilha também sai no NFD), então a classe
+ * [^a-z0-9] pega tudo o que não é letra nem dígito.
+ */
+function palavrasNome(s: string): string[] {
+  return normalizarBusca(s)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter((p) => p && !CONECTIVOS.has(p))
+}
+
+/** Distância de edição, abandonada assim que passa de `max`. */
+function distanciaEdicao(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1
+  let anterior = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const atual = [i]
+    for (let j = 1; j <= b.length; j++) {
+      atual[j] = Math.min(
+        anterior[j] + 1,
+        atual[j - 1] + 1,
+        anterior[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      )
+    }
+    if (Math.min(...atual) > max) return max + 1
+    anterior = atual
+  }
+  return anterior[b.length]
+}
+
+/**
+ * O nome da lista mais parecido com `consulta`, ou null. Serve para PERGUNTAR,
+ * nunca para corrigir sozinho: quem digita é que sabe se são a mesma pessoa.
+ *
+ * Existe porque investidor e intermediador são identificados pelo nome
+ * normalizado (ver normalizarNome). Uma letra trocada ou um sobrenome a menos
+ * produz OUTRA chave, e o efeito não é cosmético: a pessoa aparece duas vezes na
+ * aba de dados pessoais, cada metade com uma ficha bancária, e ninguém percebe
+ * porque as duas linhas parecem certas.
+ *
+ * Diferença de acento, de caixa ou de espaço NÃO chega aqui: normalizarNome já
+ * as trata como o mesmo nome. O que sobra são três casos:
+ *
+ *   1. mesmas palavras em outra ordem — "Silva, José" / "José Silva"
+ *   2. uma palavra a mais ou a menos — "José Silva" / "José Antônio Silva"
+ *   3. uma palavra quase igual — "José Silvaa" / "José Silva"
+ *
+ * Duas palavras erradas ao mesmo tempo ficam de fora de propósito: a partir daí
+ * a semelhança é fraca e o aviso passaria a apontar gente que não tem relação.
+ */
+export function nomeParecido(
+  consulta: string,
+  nomes: readonly string[],
+): string | null {
+  const q = palavrasNome(consulta)
+  if (q.length === 0) return null
+  const setQ = new Set(q)
+  let melhor: { nome: string; nota: number } | null = null
+  for (const nome of nomes) {
+    const setP = new Set(palavrasNome(nome))
+    if (setP.size === 0) continue
+    const comuns = [...setQ].filter((w) => setP.has(w)).length
+    let nota: number | null = null
+    if (comuns === setQ.size && comuns === setP.size) {
+      nota = 0 // caso 1
+    } else if (comuns > 0 && comuns === Math.min(setQ.size, setP.size)) {
+      nota = 1 // caso 2
+    } else {
+      const soQ = [...setQ].filter((w) => !setP.has(w))
+      const soP = [...setP].filter((w) => !setQ.has(w))
+      if (soQ.length === 1 && soP.length === 1) {
+        // Palavra curta admite só um erro: em "luz"/"cruz" a distância 2 já é
+        // outra palavra, não um deslize de digitação.
+        const limiar = Math.min(soQ[0].length, soP[0].length) <= 4 ? 1 : 2
+        const d = distanciaEdicao(soQ[0], soP[0], limiar)
+        if (d <= limiar) nota = 2 + d // caso 3
+      }
+    }
+    if (nota !== null && (!melhor || nota < melhor.nota)) melhor = { nome, nota }
+  }
+  return melhor?.nome ?? null
+}
+
 /** Data e hora local: "10/08/2026 às 16:21". Para carimbo de geração. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
