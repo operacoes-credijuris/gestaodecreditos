@@ -13,7 +13,7 @@
 //   3. O modelo não escreve SQL. Ele escolhe entre as consultas prontas abaixo
 //      e informa os filtros; a montagem da query é nossa.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { callerClient, getCaller, serviceClient } from '../_shared/auth.ts'
+import { callerClient, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 // Especificador npm: com versão fixa, pelo mesmo motivo do _shared/auth.ts:
 // "@latest" traria mudança de comportamento a produção sem ninguém mexer aqui.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
@@ -425,8 +425,8 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const caller = await getCaller(req)
-    if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
+    const caller = await getCallerAtivo(req, serviceClient())
+    if (!caller) return jsonResponse({ error: 'Acesso não autorizado. Faça login novamente; se o problema persistir, o acesso pode ter sido desativado.' }, 401)
 
     const apiKey = await chaveAnthropic()
     if (!apiKey) {

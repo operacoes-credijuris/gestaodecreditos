@@ -17,7 +17,7 @@
 // A página lê do banco; esta função roda em 2º plano (ao abrir a aba) e também
 // por cron (pg_cron), autenticada por JWT do usuário OU por x-cron-secret.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { getCaller, serviceClient } from '../_shared/auth.ts'
+import { getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 // Cliente compartilhado (throttle + retry/backoff contra o rate limit do
 // Cloudflare na frente da API do ADVBOX).
 import {
@@ -173,8 +173,8 @@ Deno.serve(async (req: Request) => {
     const headerSecret = req.headers.get('x-cron-secret')
     const autorizadoPorCron = !!cronSecret && headerSecret === cronSecret
     if (!autorizadoPorCron) {
-      const caller = await getCaller(req)
-      if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
+      const caller = await getCallerAtivo(req, serviceClient())
+      if (!caller) return jsonResponse({ error: 'Acesso não autorizado. Faça login novamente; se o problema persistir, o acesso pode ter sido desativado.' }, 401)
     }
 
     const body = await req.json().catch(() => ({}))

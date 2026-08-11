@@ -16,7 +16,7 @@
 //   - Não existe forma de suprimir as automações do Kommo num PATCH de lead:
 //     mover pelo app dispara o Digital Pipeline configurado no funil.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { getCaller, serviceClient } from '../_shared/auth.ts'
+import { getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 
 /** Rótulo exibido no selo da anotação, dentro do card. */
 const SERVICO = 'Operacional'
@@ -39,8 +39,8 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const caller = await getCaller(req)
-    if (!caller) return jsonResponse({ error: 'Não autenticado.' }, 401)
+    const caller = await getCallerAtivo(req, serviceClient())
+    if (!caller) return jsonResponse({ error: 'Acesso não autorizado. Faça login novamente; se o problema persistir, o acesso pode ter sido desativado.' }, 401)
 
     const body = (await req.json().catch(() => ({}))) as {
       leadId?: number

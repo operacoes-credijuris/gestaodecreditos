@@ -10,7 +10,7 @@
 // ============================================================================
 
 import { corsHeaders } from "../_shared/cors.ts";
-import { serviceClient, getCaller } from "../_shared/auth.ts";
+import { serviceClient, getCallerAtivo } from "../_shared/auth.ts";
 import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import ExcelJS from 'npm:exceljs@4.4.0';
@@ -875,8 +875,8 @@ Deno.serve(async (req) => {
 
   try {
     // 1. Auth (JWT do usuário)
-    const user = await getCaller(req);
-    if (!user) return errorResponse('Não autenticado / sessão inválida', 401);
+    const user = await getCallerAtivo(req, serviceClient());
+    if (!user) return errorResponse('Acesso não autorizado — faça login; se persistir, o acesso pode ter sido desativado', 401);
     const userId = user.id;
 
     const body = await req.json();
