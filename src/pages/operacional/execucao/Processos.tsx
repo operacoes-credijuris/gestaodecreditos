@@ -887,11 +887,7 @@ export default function Processos() {
                 </Select>
               </Field>
               {emLiquidacao(editing.status) && (
-                <Field
-                  label="Data de liquidação"
-                  error={erros.data_liquidacao}
-                  hint="Data em que o dinheiro caiu. É ela, e não o status, que diz à carteira que o crédito foi pago."
-                >
+                <Field label="Data de liquidação" error={erros.data_liquidacao}>
                   <Input
                     type="date"
                     value={editing.data_liquidacao ?? ''}
