@@ -1551,9 +1551,9 @@ function DadosPessoais() {
                 {COLUNAS_TABELA.map((c) => (
                   <TH key={c.chave}>{c.rotulo}</TH>
                 ))}
-                <TH className="w-[1%] whitespace-nowrap text-right">
-                  <span className="sr-only">Ações</span>
-                </TH>
+                {/* Mesmo cabeçalho das outras cinco tabelas da plataforma: havia
+                    três tratamentos diferentes para a mesma coluna. */}
+                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
               </tr>
             </THead>
             <TBody>

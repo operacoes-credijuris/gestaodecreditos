@@ -706,7 +706,7 @@ function UsuariosConfig() {
                 <TH>E-mail</TH>
                 <TH>Perfil</TH>
                 <TH>Situação</TH>
-                <TH className="text-right">Ações</TH>
+                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
               </tr>
             </THead>
             <TBody>

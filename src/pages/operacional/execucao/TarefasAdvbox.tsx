@@ -576,10 +576,14 @@ export function NovaTarefaModal({
     queryFn: () =>
       invokeFunction<Opcoes>('advbox-tarefas', { action: 'options' }),
     enabled: open,
-    // Carrega uma vez e mantém no cache pela sessão inteira: o modal só
-    // mostra "Carregando…" na primeira abertura. Depois reusa o cache;
-    // após 30 min, atualiza em 2º plano (sem tela de carregamento).
-    staleTime: 30 * 60 * 1000,
+    // Carrega uma vez e mantém no cache: o modal só mostra "Carregando…" na
+    // primeira abertura, e depois reusa.
+    //
+    // 2 min, e não 30: com 30 minutos, o crédito recém-cadastrado não aparecia na
+    // lista de processos do modal — e quem acabou de cadastrar vai justamente
+    // criar a primeira tarefa dele. O cache continua evitando a tela de
+    // carregamento; só o dado envelhece menos.
+    staleTime: 2 * 60 * 1000,
     gcTime: Infinity,
   })
 

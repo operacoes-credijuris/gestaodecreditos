@@ -254,7 +254,10 @@ export default function Requerimentos() {
                   </TD>
                   <TD>{r.classe_processual || '—'}</TD>
                   <TD>{r.materia || '—'}</TD>
-                  <TD className="whitespace-nowrap text-slate-600">
+                  {/* tabular-nums como em todas as outras colunas de data da
+                      plataforma: sem ele os dígitos têm largura variável e a
+                      coluna fica com as datas desalinhadas entre si. */}
+                  <TD className="whitespace-nowrap tabular-nums text-slate-600">
                     {formatDate(r.data_protocolo)}
                   </TD>
                   <TD>
