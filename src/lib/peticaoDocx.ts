@@ -27,7 +27,6 @@ import {
   MARGENS_MM,
   RECUO_CITACAO_MM,
   type Alinhamento,
-  type Bloco,
   type Trecho,
 } from './peticaoLayout'
 
@@ -52,10 +51,11 @@ const entrelinha = (v: number) => Math.round(v * 240)
  */
 const A4_PX = { largura: (210 / 25.4) * 96, altura: (297 / 25.4) * 96 }
 
-/** Largura da coluna do marcador nas listas. */
-const COLUNA_MARCADOR_MM = 8
-
-const LARGURA_TEXTO_MM = 210 - MARGENS_MM.esquerda - MARGENS_MM.direita
+/**
+ * Onde começa o texto dos itens de lista, em milímetros a partir da margem. O
+ * marcador entra 4 mm antes, e as linhas seguintes alinham aqui.
+ */
+const RECUO_LISTA_MM = 12
 
 /**
  * Monta o documento. Recebe o timbrado em bytes porque o `docx` embute a imagem no
@@ -76,20 +76,10 @@ export async function gerarDocxPeticao(
     Packer,
     Paragraph,
     ShadingType,
-    Table,
-    TableCell,
-    TableRow,
+    TabStopType,
     TextRun,
     VerticalPositionRelativeFrom,
-    WidthType,
   } = await import('docx')
-
-  const SEM_BORDA = {
-    top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-    bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-    left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-    right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-  }
 
   const ALINHA: Record<Alinhamento, (typeof AlignmentType)[keyof typeof AlignmentType]> =
     {
@@ -118,51 +108,38 @@ export async function gerarDocxPeticao(
     )
 
   /**
-   * Uma linha de lista: marcador numa célula estreita, texto na outra, sem borda.
+   * Um item de lista: marcador, tabulação, texto, com recuo pendurado.
    *
-   * POR QUE TABELA, e não recuo pendurado com tabulação: o recuo pendurado depende de
-   * o editor criar uma parada de tabulação implícita na posição do recuo. O Word cria;
-   * o Google Docs não criou — o marcador saía colado no texto ("1.Haja") e as linhas
-   * seguintes voltavam à margem em vez de alinhar sob o texto. Com célula, o
-   * alinhamento é estrutural. É também a mesma forma que o PDF usa (duas colunas),
-   * então os dois formatos alinham igual.
+   * ⚠️ A PARADA DE TABULAÇÃO EXPLÍCITA (`tabStops`) É OBRIGATÓRIA. Duas tentativas
+   * falharam antes:
+   *
+   *   1. Recuo pendurado SEM tabStops. O Word inventa uma parada na posição do
+   *      recuo, o Google Docs não — o marcador saía colado ("1.Haja") e as linhas
+   *      seguintes voltavam à margem.
+   *   2. Tabela de duas células. As células colapsaram sem `columnWidths` e o texto
+   *      saiu uma letra por linha.
+   *
+   * Com `w:tabs` gravado no XML, os dois editores levam o texto à posição certa, e o
+   * `hanging` alinha as linhas seguintes ali também.
    */
-  const linhaDeItem = (marcador: string, trechos: Trecho[], ultimo: boolean) =>
-    new TableRow({
+  const itemDeLista = (marcador: string, trechos: Trecho[], ultimo: boolean) =>
+    new Paragraph({
       children: [
-        new TableCell({
-          width: { size: mm(COLUNA_MARCADOR_MM), type: WidthType.DXA },
-          margins: { top: 0, bottom: 0, left: mm(4), right: 0 },
-          borders: SEM_BORDA,
-          children: [
-            new Paragraph({
-              children: [new TextRun({ text: marcador, bold: true, color: COR.titulo })],
-              spacing: { after: 0 },
-            }),
-          ],
-        }),
-        new TableCell({
-          width: {
-            size: mm(LARGURA_TEXTO_MM - COLUNA_MARCADOR_MM - 4),
-            type: WidthType.DXA,
-          },
-          margins: { top: 0, bottom: 0, left: 0, right: 0 },
-          borders: SEM_BORDA,
-          children: [
-            new Paragraph({
-              children: runs(trechos),
-              alignment: AlignmentType.JUSTIFIED,
-              // Espaço entre itens, e o dobro depois do último, para a lista se
-              // separar do parágrafo seguinte.
-              spacing: { after: pt(ultimo ? DEPOIS_PT : DEPOIS_PT / 2) },
-            }),
-          ],
-        }),
+        new TextRun({ text: marcador, bold: true, color: COR.titulo }),
+        new TextRun({ text: '\t' }),
+        ...runs(trechos),
       ],
+      alignment: AlignmentType.JUSTIFIED,
+      // Texto a partir de RECUO_LISTA; o marcador começa `pendura` antes dele.
+      indent: { left: mm(RECUO_LISTA_MM), hanging: mm(RECUO_LISTA_MM - 4) },
+      tabStops: [{ type: TabStopType.LEFT, position: mm(RECUO_LISTA_MM) }],
+      // Espaço entre itens, e o dobro depois do último, para a lista se separar do
+      // parágrafo seguinte.
+      spacing: { after: pt(ultimo ? DEPOIS_PT : DEPOIS_PT / 2) },
     })
 
   const blocos = lerModelo(md)
-  const corpo: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = []
+  const corpo: InstanceType<typeof Paragraph>[] = []
 
   // Percorre com índice para poder CONSUMIR uma sequência de itens de uma vez:
   // itens consecutivos viram UMA tabela. Uma tabela por item deixaria vão entre as
@@ -172,19 +149,8 @@ export async function gerarDocxPeticao(
     const b = blocos[i]
 
     if (b.tipo === 'item') {
-      const linhas: InstanceType<typeof TableRow>[] = []
-      while (i < blocos.length && blocos[i].tipo === 'item') {
-        const item = blocos[i] as Extract<Bloco, { tipo: 'item' }>
-        linhas.push(linhaDeItem(item.marcador, item.trechos, item.ultimo))
-        i++
-      }
-      corpo.push(
-        new Table({
-          width: { size: mm(LARGURA_TEXTO_MM), type: WidthType.DXA },
-          borders: SEM_BORDA,
-          rows: linhas,
-        }),
-      )
+      corpo.push(itemDeLista(b.marcador, b.trechos, b.ultimo))
+      i++
       continue
     }
 
