@@ -16,6 +16,7 @@ import type {
   Instrumento,
   TipoCredito,
   IndiceAtualizacao,
+  EspecieRequisitorio,
 } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -48,6 +49,7 @@ import {
   INSTRUMENTO,
   TIPO_CREDITO,
   INDICE_ATUALIZACAO,
+  ESPECIE_REQUISITORIO,
 } from '@/lib/labels'
 import {
   formatBRL,
@@ -131,6 +133,7 @@ const VAZIO: Partial<Processo> = {
   numero_rtdpj: '',
   status: 'ativo',
   data_liquidacao: '',
+  especie_requisitorio: null,
   tipo_credito: [],
   capital_investido: null,
   valor_face: null,
@@ -904,6 +907,33 @@ export default function Processos() {
             {/* Financeiro do crédito. Fica só aqui e na ficha lateral — de
                 propósito fora da tabela, que segue enxuta para escanear. */}
             <div>
+              {/* Antes do tipo de crédito de propósito: as duas são classificações
+                  do crédito, e a espécie é a que decide a pasta do Drive onde a
+                  petição gerada é salva. */}
+              <Field
+                label="Espécie do requisitório"
+                className="mb-4 sm:max-w-xs"
+                hint="Define em qual pasta do Drive a petição gerada é salva."
+              >
+                <Select
+                  value={editing.especie_requisitorio ?? ''}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      especie_requisitorio: (e.target.value ||
+                        null) as EspecieRequisitorio | null,
+                    })
+                  }
+                >
+                  <option value="">Não informado</option>
+                  {Object.entries(ESPECIE_REQUISITORIO).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
               <Field label="Tipo de crédito">
                 <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
                   {Object.entries(TIPO_CREDITO).map(([k, v]) => (
@@ -1069,6 +1099,19 @@ export default function Processos() {
                   {formatDate(detalhe.data_liquidacao)}
                 </DrawerField>
               )}
+              <DrawerField label="Espécie do requisitório">
+                {detalhe.especie_requisitorio ? (
+                  <Badge
+                    tone={
+                      getLabel(ESPECIE_REQUISITORIO, detalhe.especie_requisitorio).tone
+                    }
+                  >
+                    {getLabel(ESPECIE_REQUISITORIO, detalhe.especie_requisitorio).label}
+                  </Badge>
+                ) : (
+                  '—'
+                )}
+              </DrawerField>
               {/* Ocupa a linha inteira: são até três selos lado a lado. */}
               <div className="col-span-2">
                 <DrawerField label="Tipo de crédito">

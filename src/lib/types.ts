@@ -94,6 +94,8 @@ export type TipoCredito =
   | 'honorarios_contratuais'
   | 'honorarios_advocaticios'
 export type IndiceAtualizacao = 'selic' | 'ipca_2'
+/** Espécie do requisitório. Decide a pasta de topo do Drive nas petições. */
+export type EspecieRequisitorio = 'rpv' | 'precatorio'
 
 export interface Processo {
   id: UUID
@@ -116,6 +118,8 @@ export interface Processo {
   numero_rtdpj: string | null
   status: StatusProcesso
   data_liquidacao: string | null
+  /** RPV ou precatório. Nulo nos créditos cadastrados antes da migração 0032. */
+  especie_requisitorio: EspecieRequisitorio | null
   // Financeiro — só na ficha lateral ("Aquisição e liquidação"), fora da tabela.
   tipo_credito: TipoCredito[]
   capital_investido: number | null

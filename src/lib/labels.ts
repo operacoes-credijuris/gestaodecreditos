@@ -56,6 +56,16 @@ export const INDICE_ATUALIZACAO: Record<string, LabelDef> = {
   ipca_2: { label: 'IPCA + 2% a.a.', tone: 'purple' },
 }
 
+/**
+ * Espécie do requisitório. Decide, entre outras coisas, a pasta de topo do Drive
+ * onde a petição gerada é salva — daí as chaves seguirem exatamente o check da
+ * migração 0032.
+ */
+export const ESPECIE_REQUISITORIO: Record<string, LabelDef> = {
+  rpv: { label: 'RPV', tone: 'blue' },
+  precatorio: { label: 'Precatório', tone: 'purple' },
+}
+
 export const INSTRUMENTO: Record<string, LabelDef> = {
   particular: { label: 'Particular', tone: 'gray' },
   registro_publico: { label: 'Registro público', tone: 'blue' },
