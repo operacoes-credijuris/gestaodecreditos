@@ -11,6 +11,10 @@
 // Para atualizar, troque a versão aqui de propósito e rode `npm run check:functions`.
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
+// ⚠️ AS FUNCTIONS LEEM COM service_role — RLS NÃO VALE AQUI. E desativar alguém
+// em Configurações não mexe no Supabase Auth, então o desligado continua obtendo
+// JWT válido. Logo o portão de acesso é de CÓDIGO (getCallerAtivo/isAdmin
+// abaixo), não do banco. É o fato mais importante deste módulo.
 export const ADMIN_EMAIL = 'contato@credijuris.com'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -50,16 +54,11 @@ export function callerClient(req: Request): SupabaseClient {
 }
 
 /**
- * Verifica se o usuário é administrador E está com acesso liberado.
+ * Administrador E ativo. Sem o `ativo`, um admin desligado ainda chamava
+ * admin-create-user e abria conta nova para voltar por ela.
  *
- * O `ativo` entra aqui porque sem ele a desativação era furada num ponto que
- * anula o resto: um administrador desligado continuava passando por esta função
- * e podia chamar admin-create-user para abrir uma conta NOVA, ativa, e voltar
- * por ela. Bloquear as tabelas no banco (migração 0025) não fecha isso, porque
- * as Edge Functions usam service_role e não passam por RLS.
- *
- * ADMIN_EMAIL é escape deliberado: é a conta-mestra da casa, e se ela pudesse se
- * autotrancar ninguém teria como reativar ninguém.
+ * ADMIN_EMAIL é escape deliberado: a conta-mestra não pode se autotrancar, senão
+ * ninguém reativa ninguém.
  */
 export async function isAdmin(
   user: { id: string; email?: string } | null,
@@ -75,20 +74,17 @@ export async function isAdmin(
   return data?.role === 'admin' && data?.ativo !== false
 }
 
+/** Mensagem única do 401. Estava copiada em 10 functions, em duas redações. */
+export const ERRO_ACESSO =
+  'Acesso não autorizado. Faça login novamente; se o problema persistir, o acesso pode ter sido desativado.'
+
 /**
- * Usuário autenticado E com acesso liberado, ou null. É o portão de TODA function
- * que serve dado ao app.
+ * Usuário autenticado E ativo, ou null. Portão de TODA function que serve dado
+ * ao app — getCaller() sozinho só responde "o JWT é válido?".
  *
- * POR QUE EXISTE: getCaller() só responde "o JWT é válido?". Desativar alguém em
- * Configurações não mexe no Supabase Auth, então o desligado continua conseguindo
- * fazer login e obter JWT novo. As policies com is_ativo() barram o acesso direto
- * às tabelas, mas as functions leem com service_role, que ignora RLS — logo, sem
- * esta checagem, o desligado seguia obtendo tarefa, movimentacao, publicacao e
- * ainda podia disparar varredura de IA na conta da casa.
- *
- * Só nega com ativo = false EXPLÍCITO, pelo mesmo motivo do coalesce de
- * is_ativo() no banco: falta de linha em profiles é defeito de cadastro, não
- * desligamento, e trancar por causa disso é pior que o risco que evita.
+ * Só nega com `ativo = false` EXPLÍCITO: falta de linha em profiles é defeito de
+ * cadastro, não desligamento, e trancar por causa disso é pior que o risco que
+ * evita. (Não troque por `!== true`.)
  */
 export async function getCallerAtivo(req: Request, svc: SupabaseClient) {
   const user = await getCaller(req)

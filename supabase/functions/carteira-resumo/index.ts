@@ -18,7 +18,7 @@
 // estouraria o WORKER_RESOURCE_LIMIT (~150s) do edge function.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
 
 // Haiku dá conta desta tarefa: o texto é curto, o formato é fixo e o dossiê
@@ -411,7 +411,7 @@ Deno.serve(async (req: Request) => {
     const autorizadoPorCron = !!cronSecret && headerSecret === cronSecret
     if (!autorizadoPorCron) {
       const caller = await getCallerAtivo(req, serviceClient())
-      if (!caller) return jsonResponse({ error: 'Acesso não autorizado. Faça login novamente; se o problema persistir, o acesso pode ter sido desativado.' }, 401)
+      if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
     }
 
     const apiKey = await chaveAnthropic()

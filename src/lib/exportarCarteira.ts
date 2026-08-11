@@ -16,6 +16,7 @@ import type { Processo } from './types'
 import type { CarteiraResumo } from './queries'
 import {
   diasEmCarteira,
+  estaPago,
   MESES_ALERTA_LIQUIDACAO,
   statusLiquidacao,
   statusTir,
@@ -388,7 +389,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     // Status TIR segue a mesma convenção: pago em verde, projeção em cinza.
     linha.getCell(20).font = {
       size: 10,
-      color: { argb: p.data_liquidacao ? COR_STATUS.green : C.rotulo },
+      color: { argb: estaPago(p.data_liquidacao) ? COR_STATUS.green : C.rotulo },
     }
   })
 

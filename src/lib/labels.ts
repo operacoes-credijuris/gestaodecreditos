@@ -159,15 +159,14 @@ export function textosResumo(
  * carteira), NUNCA `expectativa_liquidacao` (coluna "Data est. recebimento"):
  * a expectativa é previsão, e usá-la contaria tempo que pode nunca ter
  * existido. É o mesmo campo que acende o verde em statusLiquidacao e o
- * "Efetivada" em statusTir — as três regras giram em torno de "está pago?" e
- * ficam juntas aqui para não poderem discordar.
+ * "Efetivada" em statusTir — as três regras giram em torno de estaPago().
  */
 export function diasEmCarteira(
   dataAquisicao: string | null | undefined,
   dataLiquidacao: string | null | undefined,
   hoje: string,
 ): number | null {
-  const fim = (dataLiquidacao ?? '').slice(0, 10) || hoje
+  const fim = estaPago(dataLiquidacao) ? dataLiquidacao!.slice(0, 10) : hoje
   const dias = diasEntre(dataAquisicao, fim)
   // Prazo negativo é dado inconsistente, não "zero dia": acontece com erro de
   // ano na data de liquidação (01/12/2025 no lugar de 01/12/2026), e a célula
@@ -176,6 +175,18 @@ export function diasEmCarteira(
   // origem; isto é a rede de baixo, para o que já está gravado.
   if (dias !== null && dias < 0) return null
   return dias
+}
+
+/**
+ * "Este crédito foi pago?" — a única resposta na plataforma.
+ *
+ * É a PRESENÇA da data efetiva de liquidação que decide, nunca o campo de status
+ * nem a expectativa. Quatro lugares dependiam disso (valorProjetado, statusTir,
+ * diasEmCarteira e aReceberEstimado) e o teste estava escrito em cinco grafias,
+ * uma delas sem o `slice` — o que já divergia no Excel entregue ao investidor.
+ */
+export function estaPago(dataLiquidacao: string | null | undefined): boolean {
+  return !!(dataLiquidacao ?? '').slice(0, 10)
 }
 
 /**
@@ -216,7 +227,7 @@ export function textoTipoCredito(tipos: string[] | null | undefined): string {
 export function statusTir(
   dataLiquidacao: string | null | undefined,
 ): 'Efetivada' | 'Estimada' {
-  return (dataLiquidacao ?? '').slice(0, 10) ? 'Efetivada' : 'Estimada'
+  return estaPago(dataLiquidacao) ? 'Efetivada' : 'Estimada'
 }
 
 // Antecedência que acende o âmbar no status da carteira: com menos de um mês
@@ -249,7 +260,7 @@ export function statusLiquidacao(
   hoje: string,
   limiteAlerta: string,
 ): LabelDef & { dica: string } {
-  if ((dataLiquidacao ?? '').slice(0, 10)) {
+  if (estaPago(dataLiquidacao)) {
     return { label: 'Verde', tone: 'green', dica: 'Crédito liquidado' }
   }
   const exp = (expectativa ?? '').slice(0, 10)

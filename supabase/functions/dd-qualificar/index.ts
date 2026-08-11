@@ -7,6 +7,7 @@
 // ============================================================================
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveJudit, chaveAnthropic } from "../_shared/segredos.ts";
 
 const CORS = corsHeaders;
@@ -96,6 +97,9 @@ Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois), e
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
+    // Mesmo portão de dd-credor: consome Judit e IA, então JWT válido não basta.
+    const usuario = await getCallerAtivo(req, serviceClient());
+    if (!usuario) return json({ erro: ERRO_ACESSO }, 401);
     const url = new URL(req.url);
     const numero = String(url.searchParams.get("numero") || "").trim();
     if (!numero) return json({ erro: "?numero= é obrigatório" }, 400);

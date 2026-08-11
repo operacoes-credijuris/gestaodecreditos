@@ -4,7 +4,7 @@
 // cadastradas em integracoes.djen. Janela: últimos `dias` (default 30).
 // A página lê do banco; esta função roda em 2º plano.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 
 const DJEN = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao'
 const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '')
@@ -73,7 +73,7 @@ Deno.serve(async (req: Request) => {
     const autorizadoPorCron = !!cronSecret && headerSecret === cronSecret
     if (!autorizadoPorCron) {
       const caller = await getCallerAtivo(req, serviceClient())
-      if (!caller) return jsonResponse({ error: 'Acesso não autorizado. Faça login novamente; se o problema persistir, o acesso pode ter sido desativado.' }, 401)
+      if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
     }
 
     const svc = serviceClient()

@@ -14,7 +14,7 @@
 // ============================================================================
 
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
-import { serviceClient, getCallerAtivo } from "../_shared/auth.ts";
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveJudit } from "../_shared/segredos.ts";
 
 const CORS = corsHeaders;
@@ -183,7 +183,7 @@ Deno.serve(async (req) => {
 
     // ---------- MODO PRODUÇÃO (site, com sessão) ----------
     const user = await getCallerAtivo(req, serviceClient());
-    if (!user) return json({ erro: "Acesso não autorizado — faça login; se persistir, o acesso pode ter sido desativado." }, 401);
+    if (!user) return json({ erro: ERRO_ACESSO }, 401);
     const userId = user.id;
 
     const body = await req.json().catch(() => ({}));

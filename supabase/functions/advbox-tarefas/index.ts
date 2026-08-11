@@ -14,7 +14,7 @@
 // então descobrir as tarefas de UM processo exige baixar todas e casar por
 // lawsuits_id. Uma passada alimenta a ficha de todos os processos de uma vez.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { getCaller, getCallerAtivo, isAdmin, serviceClient } from '../_shared/auth.ts'
+import { ERRO_ACESSO, getCaller, getCallerAtivo, isAdmin, serviceClient } from '../_shared/auth.ts'
 // Cliente compartilhado com throttle + retry/backoff: a API do ADVBOX responde
 // 429/503 sob carga e sem retry isso vira erro na tela do usuário.
 import {
@@ -237,7 +237,7 @@ Deno.serve(async (req: Request) => {
     let caller: Awaited<ReturnType<typeof getCaller>> = null
     if (!autorizadoPorCron) {
       caller = await getCallerAtivo(req, serviceClient())
-      if (!caller) return jsonResponse({ error: 'Acesso não autorizado. Faça login novamente; se o problema persistir, o acesso pode ter sido desativado.' }, 401)
+      if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
     }
 
     const ctx = await getAdvboxCtx()

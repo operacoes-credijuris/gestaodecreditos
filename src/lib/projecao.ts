@@ -7,6 +7,7 @@
 //                  data estimada de recebimento, pelo índice cadastrado no
 //                  crédito (SELIC ou IPCA + 2%).
 import { diasEntre, mesesEntre } from './format'
+import { estaPago } from './labels'
 
 export interface ParametrosAtualizacao {
   /** SELIC vigente em % ao ano, como digitado (15.00 = 15%). */
@@ -81,7 +82,7 @@ export function valorProjetado(
   hoje: string,
 ): Projecao {
   // Liquidado: o valor é o que entrou, não uma projeção.
-  const liq = (c.data_liquidacao ?? '').slice(0, 10)
+  const liq = estaPago(c.data_liquidacao) ? c.data_liquidacao!.slice(0, 10) : ''
   if (liq) {
     if (typeof c.ja_recebido !== 'number') {
       return { valor: null, motivo: 'Crédito liquidado sem valor recebido cadastrado.', realizado: true }
@@ -213,15 +214,16 @@ export function retornoProjetadoCarteira(
 }
 
 /**
- * "A receber estimado" da carteira. Soma DUAS parcelas, porque há dinheiro por
- * vir em dois estados diferentes:
+ * "A receber estimado" da carteira.
  *
- *   1. créditos ainda NÃO liquidados  -> o valor projetado inteiro;
- *   2. créditos JÁ liquidados que ainda têm complementar pendente -> só o
- *      complementar, já que o principal entrou.
+ * O complementar declarado SEMPRE conta, liquidado ou não — é dinheiro por vir
+ * nos dois casos, e é o mesmo número que entra no Ganho e no Retorno da linha.
+ * O valor projetado conta só nos não liquidados, porque no liquidado o principal
+ * já entrou.
  *
- * Sem a segunda parcela o card ignorava o complementar a receber dos créditos
- * liquidados — na base de 2026-08, R$ 93 mil que o investidor ainda vai receber.
+ * Crédito em aberto sem projeção calculável (falta índice ou parâmetro) conta em
+ * `incalculaveis`, e não em zero: "nada a receber" é conclusão, e aqui não se
+ * sabe.
  */
 export function aReceberEstimado(
   itens: {
@@ -243,30 +245,18 @@ export function aReceberEstimado(
   let complementares = 0
   let incalculaveis = 0
   for (const it of itens) {
-    const liquidado = !!(it.dataLiquidacao ?? '').slice(0, 10)
     const comp = it.valorComplementar
-    if (!liquidado) {
-      // Complementar declarado num crédito AINDA NÃO liquidado também é dinheiro
-      // a receber, e entrava no Ganho e no Retorno da linha mas ficava fora deste
-      // card — os dois números discordavam sobre o mesmo crédito.
-      if (typeof comp === 'number' && comp > 0) {
-        total += comp
-        complementares++
-      }
-      if (it.proj.valor === null) {
-        // Sem projeção calculável não se pode somar, mas também não se pode
-        // concluir "nada a receber": conta separado para o card poder dizer isso.
-        incalculaveis++
-        continue
-      }
-      total += it.proj.valor
-      emAberto++
-      continue
-    }
     if (typeof comp === 'number' && comp > 0) {
       total += comp
       complementares++
     }
+    if (estaPago(it.dataLiquidacao)) continue
+    if (it.proj.valor === null) {
+      incalculaveis++
+      continue
+    }
+    total += it.proj.valor
+    emAberto++
   }
   const nenhum = emAberto === 0 && complementares === 0
   return {

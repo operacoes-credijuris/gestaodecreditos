@@ -7,6 +7,7 @@
 // ============================================================================
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveJudit, chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 
@@ -240,6 +241,12 @@ async function gerarRelatorioPdf(dd: any): Promise<Uint8Array> {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
+    // PORTAO DE ACESSO. Esta function gasta cota da Judit e chamada de IA por
+    // processo, e escreve PDF no Drive da casa — deixá-la no verify_jwt padrão
+    // significava que qualquer JWT válido servia, inclusive de usuário que o
+    // administrador desativou (desativar não invalida o JWT).
+    const usuario = await getCallerAtivo(req, serviceClient());
+    if (!usuario) return json({ erro: ERRO_ACESSO }, 401);
     const url = new URL(req.url);
     let body: any = {};
     if (req.method === "POST") { try { body = await req.json(); } catch { body = {}; } }

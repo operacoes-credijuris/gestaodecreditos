@@ -6,7 +6,7 @@
 //   -> { pronto:true, download_url, nome_arquivo, mime }
 
 import { corsHeaders } from "../_shared/cors.ts";
-import { getCallerAtivo, serviceClient } from '../_shared/auth.ts';
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts';
 import { chaveKommo } from "../_shared/segredos.ts";
 
 const CORS = corsHeaders;
@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
     const user = await getCallerAtivo(req, serviceClient());
-    if (!user) return json({ erro: "Acesso não autorizado — faça login; se persistir, o acesso pode ter sido desativado." }, 401);
+    if (!user) return json({ erro: ERRO_ACESSO }, 401);
 
     const body = await req.json().catch(() => ({}));
     const leadId = String((body as any).lead_id ?? (body as any).kommo_lead_id ?? "").trim();

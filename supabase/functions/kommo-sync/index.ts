@@ -13,7 +13,7 @@
 //     Chamar .json() nesse caso estoura.
 //   - Leads não têm contagem total: paginação é seguir _links.next até acabar.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
-import { getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 
 // Funis que o operacional usa. O Precatório (13971995) entra na fase 2.
 const FUNIS = [13901939]
@@ -78,7 +78,7 @@ Deno.serve(async (req: Request) => {
     const autorizadoPorCron = !!cronSecret && headerSecret === cronSecret
     if (!autorizadoPorCron) {
       const caller = await getCallerAtivo(req, serviceClient())
-      if (!caller) return jsonResponse({ error: 'Acesso não autorizado. Faça login novamente; se o problema persistir, o acesso pode ter sido desativado.' }, 401)
+      if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
     }
 
     const svc = serviceClient()
