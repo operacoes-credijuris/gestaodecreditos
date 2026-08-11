@@ -46,7 +46,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                 <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-slate-500 sm:inline" />
               </>
             )}
-            <span className="truncate font-semibold text-slate-800">
+            <span className="font-display truncate font-bold tracking-tight text-slate-900">
               {nav.leaf.label}
             </span>
           </>

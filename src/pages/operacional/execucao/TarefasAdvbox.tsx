@@ -368,7 +368,7 @@ export default function TarefasAdvbox() {
           >
             {bloco ? (
               <>
-                <div className="text-2xl font-bold leading-none tracking-tight">
+                <div className="font-display text-2xl font-extrabold leading-none tracking-tight">
                   {bloco.dia}
                 </div>
                 <div className="mt-1 text-xs font-semibold uppercase leading-none tracking-wider">
@@ -384,7 +384,7 @@ export default function TarefasAdvbox() {
               a 52px. */}
           <div className="min-w-[11rem] flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-base font-semibold tracking-tight text-slate-800">
+              <span className="font-display text-base font-bold tracking-tight text-slate-900">
                 {t.tipo ? sentenceCase(t.tipo) : '—'}
               </span>
               {prazo?.rel && (
@@ -592,7 +592,7 @@ function Secao({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2.5 pt-1">
-        <span className="text-sm font-semibold uppercase tracking-wide text-brand-800">
+        <span className="font-display text-sm font-bold uppercase tracking-wide text-brand-800">
           {titulo}
         </span>
         <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-brand-800">

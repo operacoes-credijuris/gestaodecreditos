@@ -39,7 +39,18 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'Segoe UI', 'sans-serif'],
+        // Corpo, tabelas e formulários. Geométrica com altura-x generosa —
+        // aguenta os 13px das listagens densas sem fechar os contraformas.
+        sans: ['"Figtree Variable"', 'Figtree', 'system-ui', 'sans-serif'],
+        // Títulos, números grandes e a marca. É a que ecoa o desenho
+        // geométrico do wordmark "credijuris"; usar em texto corrido a
+        // desvaloriza (e cansa a leitura), então fica só no display.
+        display: [
+          '"Plus Jakarta Sans Variable"',
+          '"Plus Jakarta Sans"',
+          'system-ui',
+          'sans-serif',
+        ],
       },
       // Escala tipográfica com px explícitos, desacoplada do font-size do
       // <html> (que fica em 12px só para manter a densidade dos espaçamentos

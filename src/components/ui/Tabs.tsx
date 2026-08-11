@@ -49,10 +49,10 @@ export function Tabs({
             onClick={() => onChange(item.key)}
             onKeyDown={(e) => handleKeyDown(e, index)}
             className={cn(
-              'flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
+              'font-display flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors',
               active
-                ? 'border-brand-600 text-brand-700'
-                : 'border-transparent text-slate-600 hover:text-slate-700',
+                ? 'border-brand-500 text-brand-700'
+                : 'border-transparent text-slate-500 hover:border-brand-200 hover:text-slate-700',
             )}
           >
             {item.icon}

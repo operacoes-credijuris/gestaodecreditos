@@ -50,7 +50,7 @@ export function Segmented({
             disabled={item.disabled}
             onClick={() => onChange(item.key)}
             className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+              'font-display flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-semibold transition-all duration-150',
               item.disabled
                 ? 'cursor-not-allowed text-slate-400 opacity-60'
                 : active

@@ -1,5 +1,6 @@
-/* A fonte Inter é importada autoalojada em main.tsx (@fontsource) — nada de
-   @import externo aqui: ele falhava em silêncio e derrubava o app no Segoe UI. */
+/* As fontes são importadas autoalojadas em main.tsx (@fontsource-variable) —
+   nada de @import externo aqui: ele falhava em silêncio e derrubava o app no
+   Segoe UI. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

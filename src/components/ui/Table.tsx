@@ -33,7 +33,7 @@ export function THead({ children }: { children: ReactNode }) {
   return (
     // Tinta da marca no cabeçalho (e não cinza): é o toque que faz toda tabela
     // da plataforma "ser Credijuris" sem carregar a leitura.
-    <thead className="border-b border-brand-100 bg-brand-50/60 text-left text-xs font-semibold uppercase tracking-wide text-brand-800">
+    <thead className="font-display border-b border-brand-100 bg-brand-50/60 text-left text-xs font-bold uppercase tracking-wide text-brand-800">
       {children}
     </thead>
   )

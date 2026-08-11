@@ -55,7 +55,7 @@ export default function Login() {
         </div>
 
         <div className="rounded-2xl border border-brand-100 bg-white p-6 shadow-xl shadow-brand-950/[0.07] sm:p-8">
-          <h2 className="mb-6 text-lg font-semibold text-slate-800">
+          <h2 className="font-display mb-6 text-lg font-bold tracking-tight text-slate-900">
             Acessar o sistema
           </h2>
 

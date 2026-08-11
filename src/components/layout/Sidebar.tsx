@@ -97,7 +97,7 @@ export function Sidebar({
             <img src={marca} alt="" className="h-full w-full object-contain" />
           </div>
           <div>
-            <p className="text-base font-bold leading-tight tracking-tight">
+            <p className="font-display text-base font-extrabold leading-tight tracking-tight">
               Credijuris
             </p>
             <p className="text-xs text-brand-300">Gestão de Créditos</p>
@@ -124,7 +124,7 @@ export function Sidebar({
               {section.title && (
                 <p
                   className={cn(
-                    'px-3 pb-1 text-xs font-semibold uppercase tracking-wider',
+                    'font-display px-3 pb-1 text-xs font-bold uppercase tracking-wider',
                     sectionActive ? 'text-verde-400' : 'text-brand-300',
                   )}
                 >

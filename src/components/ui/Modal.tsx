@@ -80,7 +80,7 @@ export function Modal({
         ref={panelRef}
         tabIndex={-1}
         className={cn(
-          'animate-modal-in mt-6 w-full rounded-xl bg-white shadow-xl outline-none',
+          'animate-modal-in mt-6 w-full rounded-2xl bg-white shadow-xl outline-none',
           sizes[size],
         )}
         role="dialog"
@@ -89,7 +89,10 @@ export function Modal({
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
           <div>
-            <h2 id={titleId} className="text-lg font-semibold text-slate-800">
+            <h2
+              id={titleId}
+              className="font-display text-lg font-bold tracking-tight text-slate-900"
+            >
               {title}
             </h2>
             {description && (

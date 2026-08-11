@@ -12,7 +12,7 @@
 // não tem investidor selecionado, não tem mês de referência e não fala de
 // projeção. Ficar junto obrigava a passar pela carteira de alguém para chegar a
 // um cadastro.
-import { useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import {
   chavePessoa,
@@ -97,40 +97,39 @@ const CAMPOS_DOCUMENTO: {
 ]
 
 /**
- * Linha "rótulo: valor" dentro de uma célula agrupada. A tabela tinha uma
- * coluna por campo (9 colunas!) e cada célula quebrava em duas ou três linhas
- * de meia palavra; agrupar em Identificação / Dados bancários dá largura de
- * sobra para cada valor sair inteiro — e o mini-rótulo diz o que é cada linha.
+ * Célula agrupada: pares "rótulo → valor" empilhados. A tabela tinha uma coluna
+ * por campo (9 colunas!) e cada célula quebrava em duas ou três linhas de meia
+ * palavra; agrupar em Identificação / Dados bancários dá largura de sobra para
+ * cada valor sair inteiro — e o mini-rótulo diz o que é cada linha.
+ *
+ * GRID, e não flex com largura fixa no rótulo: `max-content` mede o rótulo mais
+ * largo da célula e reserva exatamente isso, então "BANCO" e "AG/CC" nunca
+ * transbordam por cima do valor (era o que colava "BANCOBanco do Brasil"), e as
+ * duas colunas ficam alinhadas entre as linhas sem número mágico nenhum.
  *
  * Campo vazio NÃO vira linha: uma coluna de traços é só espaço em branco com
- * moldura. Quando o grupo inteiro está vazio, a célula mostra um único "—"
- * (ver GrupoDados) — a ausência continua visível, sem ocupar três linhas.
+ * moldura. Grupo inteiro vazio mostra um único "—" — a ausência continua
+ * visível, sem ocupar três linhas.
  */
-function DadoMini({ rotulo, valor }: { rotulo: string; valor?: string | null }) {
-  if (!valor) return null
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="w-12 flex-none whitespace-nowrap text-xs font-medium uppercase tracking-wide text-slate-400">
-        {rotulo}
-      </span>
-      {/* break-words: chave Pix de e-mail não tem espaço e, com a tabela de
-          colunas fixas, vazaria por cima da coluna vizinha. */}
-      <span className="min-w-0 break-words text-slate-700">{valor}</span>
-    </div>
-  )
-}
-
-/** Célula agrupada: as linhas preenchidas, ou um único "—" se não há nenhuma. */
 function GrupoDados({
   linhas,
 }: {
   linhas: { rotulo: string; valor?: string | null }[]
 }) {
-  if (!linhas.some((l) => l.valor)) return <span className="text-slate-300">—</span>
+  const preenchidas = linhas.filter((l) => l.valor)
+  if (preenchidas.length === 0)
+    return <span className="text-slate-300">—</span>
   return (
-    <div className="space-y-1">
-      {linhas.map((l) => (
-        <DadoMini key={l.rotulo} rotulo={l.rotulo} valor={l.valor} />
+    <div className="grid grid-cols-[max-content_1fr] items-baseline gap-x-2.5 gap-y-1">
+      {preenchidas.map((l) => (
+        <Fragment key={l.rotulo}>
+          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            {l.rotulo}
+          </span>
+          {/* break-words: chave Pix de e-mail não tem espaço e, com a tabela de
+              colunas fixas, vazaria por cima da coluna vizinha. */}
+          <span className="min-w-0 break-words text-slate-700">{l.valor}</span>
+        </Fragment>
       ))}
     </div>
   )
@@ -480,10 +479,12 @@ export default function DadosPessoaisBancarios() {
               <THead>
                 <tr>
                   <TH className="w-[19%]">Nome do {visao.rotulo.toLowerCase()}</TH>
-                  <TH className="w-[17%]">Identificação</TH>
-                  <TH className="w-[24%]">Dados bancários</TH>
+                  <TH className="w-[16%]">Identificação</TH>
+                  <TH className="w-[23%]">Dados bancários</TH>
                   <TH>Endereço</TH>
-                  <TH className="w-16">Ações</TH>
+                  {/* w-32: dois botões de 32px + a palavra "Ações" no cabeçalho.
+                      Estava w-16 e o rótulo saía cortado ("AÇÕE"). */}
+                  <TH className="w-32 text-right">Ações</TH>
                 </tr>
               </THead>
               <TBody>
@@ -534,7 +535,7 @@ export default function DadosPessoaisBancarios() {
                       <TD>
                         {endereco || <span className="text-slate-300">—</span>}
                       </TD>
-                      <TD className="w-[1%] whitespace-nowrap text-right">
+                      <TD className="whitespace-nowrap text-right">
                         <div className="flex justify-end gap-1">
                           <IconButton
                             label={`Editar dados de ${i.nome}`}
