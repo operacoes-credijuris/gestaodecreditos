@@ -99,20 +99,39 @@ const CAMPOS_DOCUMENTO: {
 /**
  * Linha "rótulo: valor" dentro de uma célula agrupada. A tabela tinha uma
  * coluna por campo (9 colunas!) e cada célula quebrava em duas ou três linhas
- * de meia palavra; agrupar em Dados pessoais / Dados bancários dá largura de
+ * de meia palavra; agrupar em Identificação / Dados bancários dá largura de
  * sobra para cada valor sair inteiro — e o mini-rótulo diz o que é cada linha.
+ *
+ * Campo vazio NÃO vira linha: uma coluna de traços é só espaço em branco com
+ * moldura. Quando o grupo inteiro está vazio, a célula mostra um único "—"
+ * (ver GrupoDados) — a ausência continua visível, sem ocupar três linhas.
  */
 function DadoMini({ rotulo, valor }: { rotulo: string; valor?: string | null }) {
+  if (!valor) return null
   return (
-    <div className="flex items-baseline gap-1.5 whitespace-nowrap">
-      <span className="w-14 flex-none text-xs font-medium uppercase tracking-wide text-slate-400">
+    <div className="flex items-baseline gap-1.5">
+      <span className="w-12 flex-none whitespace-nowrap text-xs font-medium uppercase tracking-wide text-slate-400">
         {rotulo}
       </span>
-      {valor ? (
-        <span className="text-slate-700">{valor}</span>
-      ) : (
-        <span className="text-slate-300">—</span>
-      )}
+      {/* break-words: chave Pix de e-mail não tem espaço e, com a tabela de
+          colunas fixas, vazaria por cima da coluna vizinha. */}
+      <span className="min-w-0 break-words text-slate-700">{valor}</span>
+    </div>
+  )
+}
+
+/** Célula agrupada: as linhas preenchidas, ou um único "—" se não há nenhuma. */
+function GrupoDados({
+  linhas,
+}: {
+  linhas: { rotulo: string; valor?: string | null }[]
+}) {
+  if (!linhas.some((l) => l.valor)) return <span className="text-slate-300">—</span>
+  return (
+    <div className="space-y-1">
+      {linhas.map((l) => (
+        <DadoMini key={l.rotulo} rotulo={l.rotulo} valor={l.valor} />
+      ))}
     </div>
   )
 }
@@ -454,14 +473,17 @@ export default function DadosPessoaisBancarios() {
               description={visao.vazio}
             />
           ) : (
-            <Table className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:text-[13px]">
+            // Larguras fixadas por coluna: sem elas o navegador distribui a
+            // sobra por igual e cada coluna curta vira um vão em branco.
+            // py-2.5 adensa as linhas — cada célula agrupada já é alta.
+            <Table className="table-fixed [&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:py-2.5 [&_td]:text-[13px]">
               <THead>
                 <tr>
-                  <TH>Nome do {visao.rotulo.toLowerCase()}</TH>
-                  <TH>Dados pessoais</TH>
-                  <TH>Dados bancários</TH>
+                  <TH className="w-[19%]">Nome do {visao.rotulo.toLowerCase()}</TH>
+                  <TH className="w-[17%]">Identificação</TH>
+                  <TH className="w-[24%]">Dados bancários</TH>
                   <TH>Endereço</TH>
-                  <TH className="w-[1%] whitespace-nowrap">Ações</TH>
+                  <TH className="w-16">Ações</TH>
                 </tr>
               </THead>
               <TBody>
@@ -485,28 +507,31 @@ export default function DadosPessoaisBancarios() {
                         )}
                       </TD>
                       <TD>
-                        <div className="space-y-1">
-                          <DadoMini rotulo="CPF" valor={d?.cpf} />
-                          <DadoMini rotulo="RG" valor={d?.rg} />
-                        </div>
+                        <GrupoDados
+                          linhas={[
+                            { rotulo: 'CPF', valor: d?.cpf },
+                            { rotulo: 'RG', valor: d?.rg },
+                          ]}
+                        />
                       </TD>
                       <TD>
-                        <div className="space-y-1">
-                          <DadoMini rotulo="Banco" valor={d?.banco} />
-                          {/* Agência e conta na mesma linha, como se escreve
-                              dado bancário — são curtos e andam juntos. */}
-                          <DadoMini
-                            rotulo="Ag/CC"
-                            valor={
-                              d?.agencia && d?.conta
-                                ? `${d.agencia} · ${d.conta}`
-                                : d?.agencia || d?.conta
-                            }
-                          />
-                          <DadoMini rotulo="Pix" valor={d?.pix} />
-                        </div>
+                        <GrupoDados
+                          linhas={[
+                            { rotulo: 'Banco', valor: d?.banco },
+                            {
+                              // Agência e conta na mesma linha, como se escreve
+                              // dado bancário — são curtos e andam juntos.
+                              rotulo: 'Ag/CC',
+                              valor:
+                                d?.agencia && d?.conta
+                                  ? `${d.agencia} · ${d.conta}`
+                                  : d?.agencia || d?.conta,
+                            },
+                            { rotulo: 'Pix', valor: d?.pix },
+                          ]}
+                        />
                       </TD>
-                      <TD className="min-w-[16rem]">
+                      <TD>
                         {endereco || <span className="text-slate-300">—</span>}
                       </TD>
                       <TD className="w-[1%] whitespace-nowrap text-right">
@@ -595,7 +620,7 @@ export default function DadosPessoaisBancarios() {
                   quem lê a linha e abre a janela encontra a mesma ordem. */}
               {(
                 [
-                  { titulo: 'Dados pessoais', chaves: ['cpf', 'rg'] },
+                  { titulo: 'Identificação', chaves: ['cpf', 'rg'] },
                   {
                     titulo: 'Dados bancários',
                     chaves: ['banco', 'agencia', 'conta', 'pix'],

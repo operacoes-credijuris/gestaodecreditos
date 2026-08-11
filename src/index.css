@@ -1,5 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
+/* A fonte Inter é importada autoalojada em main.tsx (@fontsource) — nada de
+   @import externo aqui: ele falhava em silêncio e derrubava o app no Segoe UI. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
