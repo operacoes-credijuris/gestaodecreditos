@@ -910,11 +910,7 @@ export default function Processos() {
               {/* Antes do tipo de crédito de propósito: as duas são classificações
                   do crédito, e a espécie é a que decide a pasta do Drive onde a
                   petição gerada é salva. */}
-              <Field
-                label="Espécie do requisitório"
-                className="mb-4 sm:max-w-xs"
-                hint="Define em qual pasta do Drive a petição gerada é salva."
-              >
+              <Field label="Espécie do requisitório" className="mb-4 sm:max-w-xs">
                 <Select
                   value={editing.especie_requisitorio ?? ''}
                   onChange={(e) =>
