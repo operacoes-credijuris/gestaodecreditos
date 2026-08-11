@@ -26,12 +26,18 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm install
+      - run: npm ci
 
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # Em `vars`, não `secrets`: o ID do cliente OAuth é público por design —
+          # fica visível no código do site. Quem protege o acesso são as origens
+          # autorizadas no Google Cloud e o login de cada pessoa. Como variável, o
+          # valor aparece no log do build, o que ajuda a depurar quando o Drive
+          # recusa a autorização.
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
 
       - uses: actions/configure-pages@v5
