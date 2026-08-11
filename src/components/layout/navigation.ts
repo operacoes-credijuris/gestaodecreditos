@@ -10,6 +10,11 @@ import {
   ClipboardList,
   Phone,
   Settings,
+  Brain,
+  Gauge,
+  CalendarClock,
+  PieChart,
+  ShieldAlert,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -36,6 +41,16 @@ export const NAVIGATION: NavSection[] = [
         to: '/estrategica',
         icon: LayoutDashboard,
       },
+    ],
+  },
+  {
+    title: 'Inteligência Econômica',
+    items: [
+      { label: 'Visão Geral', to: '/inteligencia', icon: Brain },
+      { label: 'Performance', to: '/inteligencia/performance', icon: Gauge },
+      { label: 'Previsões', to: '/inteligencia/previsoes', icon: CalendarClock },
+      { label: 'Recortes', to: '/inteligencia/recortes', icon: PieChart },
+      { label: 'Revisão de Dados', to: '/inteligencia/anomalias', icon: ShieldAlert },
     ],
   },
   {

@@ -13,6 +13,7 @@
 //   3. O modelo não escreve SQL. Ele escolhe entre as consultas prontas abaixo
 //      e informa os filtros; a montagem da query é nossa.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
+import { montarPainel, type CreditoBruto } from '../_shared/nucleo/painel.ts'
 import { ERRO_ACESSO, callerClient, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 // Especificador npm: com versão fixa, pelo mesmo motivo do _shared/auth.ts:
 // "@latest" traria mudança de comportamento a produção sem ninguém mexer aqui.
@@ -164,13 +165,42 @@ const FERRAMENTAS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'resumo_cessoes',
+    name: 'panorama_economico',
     description:
-      'Totais financeiros das cessões (valor de face, aquisição, cessão) ' +
-      'agrupados por situação. Use para perguntas de valores da carteira.',
+      'Panorama econômico da carteira: capital investido, valor recebido, ganho, ' +
+      'rentabilidade (mediana, média e ponderada pelo capital), rentabilidade ' +
+      'anualizada, prazos, forecast de recebimentos por mês, previsões vencidas, ' +
+      'aderência das previsões e inconsistências. Use para QUALQUER pergunta de ' +
+      'valores, rentabilidade, prazo ou recebimentos da carteira. Os números vêm ' +
+      'da mesma camada de cálculo das telas — não refaça conta nenhuma sobre eles.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'recorte_economico',
+    description:
+      'Desempenho econômico agrupado por tribunal, ente devedor, investidor, ' +
+      'faixa de valor ou safra. Cada grupo vem com o tamanho da amostra e a classe ' +
+      'de representatividade, que diz se há base para comparar. Respeite essa ' +
+      'classificação: grupo marcado como insuficiente NÃO pode ser comparado nem ' +
+      'classificado como melhor ou pior.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        dimensao: {
+          type: 'string',
+          enum: ['tribunal', 'ente', 'investidor', 'faixa_valor', 'safra'],
+          description: 'Como agrupar as operações.',
+        },
+      },
+      required: ['dimensao'],
+    },
+  },
 ]
+
+/** Fração -> pontos percentuais, arredondado. Null continua null. */
+function pctOuNulo(f: number | null | undefined): number | null {
+  return typeof f === 'number' && Number.isFinite(f) ? Math.round(f * 10000) / 100 : null
+}
 
 function limite(valor: unknown): number {
   const n = typeof valor === 'number' ? valor : 20
@@ -413,29 +443,144 @@ async function executar(
       return JSON.stringify({ total: count ?? 0, filtros: args })
     }
 
-    case 'resumo_cessoes': {
-      const { data, error } = await svc
-        .from('cessoes')
-        .select('status, valor_face, valor_aquisicao, valor_cessao')
+    case 'panorama_economico':
+    case 'recorte_economico': {
+      // Lê os créditos e monta o painel com A MESMA função que as telas usam.
+      // Nada é recalculado aqui: se o número divergir da tela, é bug do núcleo,
+      // não de duas contas concorrentes.
+      const { data: creditos, error } = await svc
+        .from('processos')
+        .select(
+          'id, numero_cnj, tribunal, entidade_devedora, cessionario, status, ' +
+          'data_aquisicao, data_referencia, expectativa_liquidacao, data_liquidacao, ' +
+          'capital_investido, valor_face, ja_recebido, valor_estimado_complementar, ' +
+          'indice_atualizacao',
+        )
       if (error) return JSON.stringify({ erro: error.message })
-      const porStatus: Record<
-        string,
-        { quantidade: number; valor_face: number; valor_aquisicao: number; valor_cessao: number }
-      > = {}
-      for (const c of data ?? []) {
-        const k = c.status ?? 'sem_status'
-        porStatus[k] ??= {
-          quantidade: 0,
-          valor_face: 0,
-          valor_aquisicao: 0,
-          valor_cessao: 0,
+      const { data: par } = await svc
+        .from('parametros_atualizacao')
+        .select('selic_aa, ipca_12m_aa, data_referencia')
+        .eq('id', 1)
+        .maybeSingle()
+
+      const hoje = new Date().toISOString().slice(0, 10)
+      const painel = montarPainel((creditos ?? []) as unknown as CreditoBruto[], par ?? undefined, hoje)
+
+      const resumir = (g: typeof painel.carteira) => ({
+        grupo: g.nome,
+        operacoes_total: g.total,
+        encerradas_analisadas: g.n,
+        excluidas_por_falta_de_dado: g.excluidas,
+        capital_investido: g.capitalInvestido,
+        valor_recebido: g.valorRecebido,
+        ganho_nominal: g.ganhoNominal,
+        rentabilidade_ponderada_pct: pctOuNulo(g.retornoPonderado),
+        rentabilidade_mediana_pct: pctOuNulo(g.retorno.mediana),
+        rentabilidade_media_pct: pctOuNulo(g.retorno.media),
+        anualizada_mediana_pct: pctOuNulo(g.tir.mediana),
+        prazo_mediano_dias: g.prazo.mediana,
+        prazo_medio_dias: g.prazo.media,
+        representatividade: g.representatividade.rotulo,
+        pode_comparar: g.representatividade.permiteComparacao,
+        pode_entrar_em_ranking: g.representatividade.permiteRanking,
+        participacao_no_capital_pct: pctOuNulo(g.pesoCapital),
+      })
+
+      if (nome === 'recorte_economico') {
+        const dim = String(args.dimensao ?? 'tribunal')
+        const fonte =
+          dim === 'ente' ? painel.porEnte
+          : dim === 'investidor' ? painel.porInvestidor
+          : dim === 'faixa_valor' ? painel.faixas.grupos
+          : dim === 'safra' ? []
+          : painel.porTribunal
+        if (dim === 'safra') {
+          return JSON.stringify({
+            aviso:
+              'Safras NÃO devem ser comparadas por resultado final: maturidades diferentes ' +
+              'favorecem artificialmente a safra mais nova, onde só as operações rápidas ' +
+              'tiveram tempo de encerrar. Compare pela curva, na mesma idade.',
+            idade_maxima_comparavel_meses: painel.safras.tetoComparavel,
+            safras_com_amostra_insuficiente_no_teto: painel.safras.safrasFracasNoTeto,
+            curvas: painel.safras.curvas.map((c) => ({
+              safra: c.safra,
+              operacoes: c.totalOperacoes,
+              taxa_encerramento_pct: pctOuNulo(c.taxaEncerramento),
+              devolucao_por_idade: c.pontos
+                .filter((p) => p.idadeMeses <= painel.safras.tetoComparavel)
+                .map((p) => ({
+                  idade_meses: p.idadeMeses,
+                  capital_devolvido_pct: pctOuNulo(p.fracaoDevolvida),
+                  operacoes_disponiveis: p.nDisponivel,
+                })),
+            })),
+          })
         }
-        porStatus[k].quantidade += 1
-        porStatus[k].valor_face += Number(c.valor_face ?? 0)
-        porStatus[k].valor_aquisicao += Number(c.valor_aquisicao ?? 0)
-        porStatus[k].valor_cessao += Number(c.valor_cessao ?? 0)
+        return JSON.stringify({
+          moeda: 'BRL',
+          dimensao: dim,
+          concentracao: painel.concentracao,
+          aviso_metodologico:
+            'Grupo com pode_comparar = false não tem base estatística para ser comparado ' +
+            'com outro nem chamado de melhor ou pior. Exiba o número e diga isso.',
+          grupos: fonte.map(resumir),
+          faixa_homogenea: dim === 'faixa_valor' ? painel.faixas.homogenea : undefined,
+        })
       }
-      return JSON.stringify({ moeda: 'BRL', por_status: porStatus })
+
+      return JSON.stringify({
+        moeda: 'BRL',
+        data_base_parametros: painel.parametrosEm,
+        composicao: {
+          total: painel.operacoes.length,
+          encerradas_de_fato: painel.carteira.n,
+          realizacao_parcial_complementar: painel.operacoes.filter(
+            (o) => o.status === 'complementar',
+          ).length,
+          em_aberto: painel.operacoes.filter((o) => !o.dataLiquidacao).length,
+          nota:
+            'Operações em status complementar receberam o principal e aguardam um valor ' +
+            'complementar. NÃO entram em nenhuma métrica de performance: incluí-las ' +
+            'subestimaria a rentabilidade.',
+        },
+        performance: resumir(painel.carteira),
+        extremos_marcados: painel.carteira.extremosTir.length,
+        nota_extremos:
+          'Operações de prazo muito curto produzem rentabilidade anualizada altíssima. ' +
+          'Elas são marcadas mas nunca excluídas. Use a mediana e a rentabilidade ' +
+          'ponderada para falar da carteira, nunca a média da anualizada.',
+        forecast: {
+          por_mes: painel.forecast.meses.map((m) => ({
+            mes: m.mes, valor: m.valor, operacoes: m.operacoes,
+          })),
+          total_com_mes_definido: painel.forecast.totalFuturo,
+          blocos_sem_data: painel.forecast.blocos.map((b) => ({
+            bloco: b.rotulo, valor: b.valor, operacoes: b.operacoes, motivo: b.motivo,
+          })),
+          total_geral: painel.forecast.totalGeral,
+          fracao_em_previsao_vencida_pct: pctOuNulo(painel.forecast.fracaoVencida),
+        },
+        aderencia_das_previsoes: {
+          observacoes: painel.aderencia.n,
+          pagas_sem_previsao_registrada: painel.aderencia.semPrevisao,
+          desvio_mediano_dias: painel.aderencia.desvioDias.mediana,
+          desvio_medio_dias: painel.aderencia.desvioDias.media,
+          pagas_ate_a_previsao: painel.aderencia.pagasAteAPrevisao,
+          pagas_depois: painel.aderencia.pagasDepois,
+          representatividade: painel.aderencia.representatividade.rotulo,
+        },
+        estimativa_ajustada: painel.ajuste.disponivel
+          ? { disponivel: true, desvio_mediano_dias: painel.ajuste.desvioMediano }
+          : { disponivel: false, motivo: painel.ajuste.mensagem },
+        inconsistencias: {
+          operacoes_na_lista: painel.anomalias.operacoesComAchado,
+          achados: painel.anomalias.achados.map((a) => ({
+            titulo: a.titulo, natureza: a.natureza, gravidade: a.gravidade,
+            operacoes: a.refs.length,
+          })),
+        },
+        insights: painel.insights.map((i) => ({ texto: i.texto, base: i.base })),
+      })
     }
 
     default:
@@ -453,7 +598,7 @@ const SISTEMA = `Você é o assistente de dados do sistema de Gestão de Cessõe
 # O que existe no sistema
 - **Créditos (processos)**: precatórios e créditos judiciais adquiridos. Campos: número CNJ, tribunal, comarca, vara, cedente, entidade devedora, datas de aquisição e liquidação, expectativa de liquidação, e uma situação cadastral que é só uma de três — \`ativo\`, \`complementar\` ou \`encerrado\`.
 - **Movimentações e publicações**: andamentos vindos do ADVBOX e intimações do DJEN. São TEXTO CORRIDO, sem classificação estruturada.
-- **Cessões**: o inventário de créditos com valores de face, aquisição e cessão.
+- **Economia da carteira**: use \`panorama_economico\` para qualquer pergunta de dinheiro, rentabilidade, prazo ou recebimento futuro, e \`recorte_economico\` para desempenho por tribunal, ente, investidor, faixa de valor ou safra. Os números saem da mesma camada de cálculo das telas.
 - **Publicações pendentes**: a publicação do DJEN tem a marcação "tratada" (não
   existe "lida"). A janela de dias é contada pela data de disponibilização, no
   fuso de Brasília.
@@ -472,6 +617,12 @@ Não existe campo de fase processual no cadastro. "Concluso para decisão", "sen
 Não repita as mesmas ressalvas em toda resposta: diga cada uma uma vez, de forma curta. Um bloco de avisos maior que a resposta faz a pessoa parar de lê-los.
 
 Para perguntas que uma contagem responde direto (quantos encerrados, quanto foi cedido), aí sim o número é exato e você pode afirmá-lo sem ressalva.
+
+# Análise econômica: quatro regras
+1. **Nunca compare grupos marcados como \`pode_comparar: false\`.** Mostre os números de cada um e diga que não há base para dizer qual é melhor. Um grupo com duas operações não perde nem ganha de um com cinquenta — a comparação simplesmente não existe.
+2. **Nunca use a média da rentabilidade anualizada para descrever a carteira.** Uma operação liquidada em poucos dias produz taxa anual de milhares por cento, correta para ela e absurda como média. Use a mediana e a rentabilidade ponderada pelo capital, e diga qual você está usando.
+3. **Distinga as duas leituras.** A mediana descreve a operação típica; a rentabilidade ponderada descreve o dinheiro. Quando divergem, a divergência é a informação — apresente as duas.
+4. **Repasse as ressalvas que a ferramenta trouxer.** Se ela devolve \`aviso_metodologico\` ou diz que a estimativa ajustada não está disponível, isso vai na resposta. Não invente cenário, não projete valor que a ferramenta não deu, e não some blocos que ela separou.
 
 # Como escrever
 Vá direto ao ponto: a resposta primeiro, o detalhe depois. Valores em reais no formato brasileiro (R$ 1.234,56). Datas como dd/mm/aaaa. Tabela só quando houver vários itens comparáveis; para um número só, uma frase basta.
