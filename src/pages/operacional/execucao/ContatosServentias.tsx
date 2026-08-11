@@ -125,7 +125,7 @@ function LinhaValor({
   return (
     <div className="flex items-baseline gap-1">
       {/* Rótulo Serv./Gab. não encolhe nem quebra; o valor ao lado é que quebra. */}
-      {label && <span className="shrink-0 text-xs text-slate-500">{label}</span>}
+      {label && <span className="shrink-0 text-xs text-slate-600">{label}</span>}
       {whatsapp ? (
         <a
           href={waLink(value)}
@@ -160,10 +160,10 @@ function CelulaContato({
     return serventia ? (
       <LinhaValor value={serventia} whatsapp={whatsapp} />
     ) : (
-      <span className="text-slate-500">—</span>
+      <span className="text-slate-600">—</span>
     )
   }
-  if (!serventia && !gabinete) return <span className="text-slate-500">—</span>
+  if (!serventia && !gabinete) return <span className="text-slate-600">—</span>
   return (
     <div className="space-y-0.5">
       {serventia && <LinhaValor label="Serv." value={serventia} whatsapp={whatsapp} />}
@@ -471,7 +471,7 @@ export default function ContatosServentias() {
       <Card className="mb-3 p-4">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <Input
               className="pl-9"
               placeholder="Buscar por órgão, tribunal, telefone ou e-mail…"
@@ -497,7 +497,7 @@ export default function ContatosServentias() {
 
       {/* Legenda das bolinhas, no respiro entre a busca e a tabela. Derivada de
           DOT_TIPO justamente para não divergir das cores usadas nas linhas. */}
-      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-500">
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-600">
         {Object.entries(DOT_TIPO).map(([tipo, { cor, label }]) => (
           <span key={tipo} className="inline-flex items-center gap-1.5">
             <span

@@ -175,7 +175,7 @@ export default function Requerimentos() {
 
       <Card className="mb-4 p-4">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <Input
             className="pl-9"
             placeholder="Buscar por protocolo, órgão, matéria, classe processual…"
@@ -235,7 +235,7 @@ export default function Requerimentos() {
                           colado no número, não na coluna de ações. */}
                       {apensos.contador(r.id)}
                     </span>
-                    <div className="text-xs font-normal text-slate-500">
+                    <div className="text-xs font-normal text-slate-600">
                       {[r.tribunal_entidade, r.orgao].filter(Boolean).join(' · ') || '—'}
                     </div>
                   </TD>
@@ -371,7 +371,7 @@ export default function Requerimentos() {
               <h2 className="text-base font-bold tracking-tight text-slate-800">
                 {detalhe.numero_protocolo || '—'}
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-600">
                 {[detalhe.tribunal_entidade, detalhe.orgao].filter(Boolean).join(' · ') ||
                   '—'}
               </p>
@@ -405,7 +405,7 @@ export default function Requerimentos() {
 
             <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
               {apensosDoDetalhe.length === 0 ? (
-                <p className="col-span-2 text-sm text-slate-500">
+                <p className="col-span-2 text-sm text-slate-600">
                   Nenhum apenso vinculado.
                 </p>
               ) : (
@@ -415,7 +415,7 @@ export default function Requerimentos() {
                       <div className="text-sm font-medium text-slate-800">
                         {formatCNJ(a.numero)}
                       </div>
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-slate-600">
                         {[a.classe_processual, a.tribunal, a.comarca]
                           .filter(Boolean)
                           .join(' · ') || '—'}

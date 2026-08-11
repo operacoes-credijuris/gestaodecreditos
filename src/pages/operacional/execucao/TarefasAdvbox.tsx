@@ -92,7 +92,7 @@ function Observacao({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-0.5 text-sm font-normal text-slate-500">
+    <div className="mt-0.5 text-sm font-normal text-slate-600">
       <div
         ref={ref}
         className={cn('whitespace-normal break-words', !expanded && 'line-clamp-3')}
@@ -155,12 +155,12 @@ const TONE_BAR: Record<Urgencia, string> = {
 const TONE_BLOCK: Record<Urgencia, string> = {
   danger: 'bg-red-50 text-red-700',
   warning: 'bg-amber-50 text-amber-700',
-  neutral: 'bg-slate-100 text-slate-500',
+  neutral: 'bg-slate-100 text-slate-600',
 }
 const TONE_TEXT: Record<Urgencia, string> = {
   danger: 'text-red-600',
   warning: 'text-amber-700',
-  neutral: 'text-slate-500',
+  neutral: 'text-slate-600',
 }
 
 export default function TarefasAdvbox() {
@@ -351,7 +351,7 @@ export default function TarefasAdvbox() {
                 pela metade, e as PARTES do processo, que é o que identifica a
                 tarefa de relance, ficavam invisíveis. Quebrar em duas linhas
                 custa altura; esconder o nome da parte custa o entendimento. */}
-            <div className="mt-0.5 break-words text-sm text-slate-500">
+            <div className="mt-0.5 break-words text-sm text-slate-600">
               {formatCNJ(t.processo)}
               {partes && ` · ${partes}`}
             </div>
@@ -362,7 +362,7 @@ export default function TarefasAdvbox() {
               espaço — que sobra. O max-w é só teto para lista longa. */}
           {resp.length > 0 && (
             <div className="flex max-w-[20rem] flex-none items-start gap-1.5 text-sm text-slate-600">
-              <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-400" />
+              <Users className="mt-0.5 h-3.5 w-3.5 flex-none text-slate-500" />
               {/* Cada nome é uma unidade que não quebra: com vários
                   responsáveis a quebra cai ENTRE nomes, nunca no meio de um. */}
               <span className="flex flex-wrap gap-x-1.5">
@@ -412,7 +412,7 @@ export default function TarefasAdvbox() {
             onChange={(k) => setFiltroPrazo(k as typeof filtroPrazo)}
           />
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <Input
               className="pl-9"
               placeholder="Buscar por tipo, processo, responsável…"
@@ -468,14 +468,14 @@ export default function TarefasAdvbox() {
             {pendentes.length ? (
               <div className="space-y-2">{pendentes.map(card)}</div>
             ) : (
-              <p className="text-sm text-slate-500">Nenhuma tarefa pendente.</p>
+              <p className="text-sm text-slate-600">Nenhuma tarefa pendente.</p>
             )}
           </Secao>
           <Secao titulo="Vencidas" qtd={vencidas.length}>
             {vencidas.length ? (
               <div className="space-y-2">{vencidas.map(card)}</div>
             ) : (
-              <p className="text-sm text-slate-500">Nenhuma tarefa vencida.</p>
+              <p className="text-sm text-slate-600">Nenhuma tarefa vencida.</p>
             )}
           </Secao>
         </div>
@@ -507,10 +507,10 @@ function Secao({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3 pt-1">
-        <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <span className="text-sm font-semibold uppercase tracking-wide text-slate-600">
           {titulo}
         </span>
-        <span className="text-xs text-slate-500">({qtd})</span>
+        <span className="text-xs text-slate-600">({qtd})</span>
         <div className="h-px flex-1 bg-slate-200" />
       </div>
       {children}

@@ -158,7 +158,7 @@ function textoTipoCredito(tipos: string[] | null | undefined): string {
 /** Rótulo de seção fora do card, como abertura da tabela. */
 function TituloSecao({ children }: { children: string }) {
   return (
-    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-600">
       {children}
     </h3>
   )
@@ -214,7 +214,7 @@ const COR_STATUS: Record<string, string> = {
   blue: 'text-blue-600',
   yellow: 'text-amber-700',
   red: 'text-red-600',
-  gray: 'text-slate-500',
+  gray: 'text-slate-600',
 }
 
 /**
@@ -675,7 +675,7 @@ function Individual() {
                     Calculado automaticamente
                   </TH>
                 </tr>
-                <tr className="border-t border-slate-200 text-[11px] font-medium normal-case tracking-normal text-slate-400">
+                <tr className="border-t border-slate-200 text-[11px] font-medium normal-case tracking-normal text-slate-600">
                   <TH>Nº processo</TH>
                   <TH>Cedente</TH>
                   <TH>Advogado</TH>
@@ -783,7 +783,7 @@ function Individual() {
                           quem não distingue os tons. */}
                       <span
                         title={sl.dica}
-                        className={cn('font-medium', COR_STATUS[sl.tone] ?? 'text-slate-400')}
+                        className={cn('font-medium', COR_STATUS[sl.tone] ?? 'text-slate-600')}
                       >
                         {sl.label}
                       </span>
@@ -834,7 +834,7 @@ function Individual() {
                         vazio quando falta insumo, em vez de só mostrar "—". */}
                     <TD className={cn(SEP, 'text-right tabular-nums')}>
                       {proj.valor === null ? (
-                        <span className="text-slate-400" title={proj.motivo}>
+                        <span className="text-slate-600" title={proj.motivo}>
                           —
                         </span>
                       ) : (
@@ -861,7 +861,7 @@ function Individual() {
                       className={
                         p.data_liquidacao
                           ? 'font-medium text-emerald-700'
-                          : 'text-slate-500'
+                          : 'text-slate-600'
                       }
                     >
                       {statusTir(p.data_liquidacao)}
@@ -871,7 +871,7 @@ function Individual() {
                         quando a expectativa é futura. */}
                     <TD className="text-right tabular-nums">
                       {tirCred.anual === null ? (
-                        <span className="text-slate-400" title={tirCred.motivo}>
+                        <span className="text-slate-600" title={tirCred.motivo}>
                           —
                         </span>
                       ) : (
@@ -882,7 +882,7 @@ function Individual() {
                     </TD>
                     <TD className="text-right tabular-nums">
                       {tirCred.mensal === null ? (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-600">—</span>
                       ) : (
                         formatPercent(tirCred.mensal)
                       )}
@@ -897,7 +897,7 @@ function Individual() {
                         vermelho: prejuízo não pode passar batido. */}
                     <TD className="text-right tabular-nums">
                       {ganho === null ? (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-600">—</span>
                       ) : (
                         <span
                           className={ganho < 0 ? 'font-medium text-red-600' : undefined}
@@ -915,7 +915,7 @@ function Individual() {
                         o ganho que o origina. */}
                     <TD className="text-right tabular-nums">
                       {ret === null ? (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-600">—</span>
                       ) : (
                         <span
                           className={ret < 0 ? 'font-medium text-red-600' : undefined}
@@ -965,7 +965,7 @@ function Individual() {
       >
         {aberto && (
           <div className="space-y-3">
-            <div className="text-xs tabular-nums text-slate-500">
+            <div className="text-xs tabular-nums text-slate-600">
               {formatCNJ(aberto.cnj)}
             </div>
             {(() => {
@@ -983,7 +983,7 @@ function Individual() {
                         é de ontem ou de dois meses atrás. Não aparece na
                         mensagem fixa dos encerrados, que não é gerada. */}
                     {!t.fixo && r?.gerado_em && (
-                      <p className="border-t border-slate-100 pt-2 text-xs tabular-nums text-slate-400">
+                      <p className="border-t border-slate-100 pt-2 text-xs tabular-nums text-slate-600">
                         Gerado em {formatDateTime(r.gerado_em)}
                       </p>
                     )}
@@ -991,7 +991,7 @@ function Individual() {
                 )
               }
               return (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-600">
                   {r?.erro || 'Resumo ainda não gerado para este crédito.'}
                 </p>
               )

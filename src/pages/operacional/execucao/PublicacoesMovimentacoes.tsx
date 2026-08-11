@@ -193,7 +193,7 @@ export default function PublicacoesMovimentacoes() {
             onChange={(k) => setAba(k as typeof aba)}
           />
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <Input
               className="pl-9"
               placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
@@ -356,7 +356,7 @@ function Publicacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 text-sm text-slate-500">
+      <div className="flex items-center gap-3 text-sm text-slate-600">
         <span>
           <strong>{filtradas.length}</strong>{' '}
           {filtradas.length === 1 ? 'publicação' : 'publicações'}
@@ -391,14 +391,14 @@ function Publicacoes({ busca }: { busca: string }) {
             {novas.length ? (
               novas.map(card)
             ) : (
-              <p className="text-sm text-slate-500">Nenhuma publicação nova.</p>
+              <p className="text-sm text-slate-600">Nenhuma publicação nova.</p>
             )}
           </Secao>
           <Secao titulo="Tratadas" qtd={providenciadas.length}>
             {providenciadas.length ? (
               providenciadas.map(card)
             ) : (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-slate-600">
                 Nenhuma publicação tratada.
               </p>
             )}
@@ -432,10 +432,10 @@ function Secao({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3 pt-1">
-        <span className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <span className="text-sm font-semibold uppercase tracking-wide text-slate-600">
           {titulo}
         </span>
-        <span className="text-xs text-slate-500">({qtd})</span>
+        <span className="text-xs text-slate-600">({qtd})</span>
         <div className="h-px flex-1 bg-slate-200" />
       </div>
       {children}
@@ -477,7 +477,7 @@ function PublicacaoCard({
             </label>
           </div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-slate-600">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
@@ -500,7 +500,7 @@ function PublicacaoCard({
         </div>
       </div>
 
-      <div className="mt-3 text-xs text-slate-500">
+      <div className="mt-3 text-xs text-slate-600">
         Data de disponibilização: {formatDate(p.data_disponibilizacao)}
       </div>
 
@@ -739,7 +739,7 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 text-sm text-slate-500">
+      <div className="flex items-center gap-3 text-sm text-slate-600">
         <span>
           <strong>{totalMovs}</strong>{' '}
           {totalMovs === 1 ? 'movimentação' : 'movimentações'} nos últimos 20 dias
@@ -784,7 +784,7 @@ function Movimentacoes({ busca }: { busca: string }) {
                 />
               ))
             ) : (
-              <p className="text-sm text-slate-500">Nenhuma movimentação nova.</p>
+              <p className="text-sm text-slate-600">Nenhuma movimentação nova.</p>
             )}
           </Secao>
           <Secao titulo="Paralisados" qtd={paralisados.length}>
@@ -807,9 +807,9 @@ function Movimentacoes({ busca }: { busca: string }) {
                 {(status.error as Error).message}
               </p>
             ) : status.isLoading ? (
-              <p className="text-sm text-slate-500">Verificando…</p>
+              <p className="text-sm text-slate-600">Verificando…</p>
             ) : (
-              <p className="text-sm text-slate-500">Nenhum processo paralisado.</p>
+              <p className="text-sm text-slate-600">Nenhum processo paralisado.</p>
             )}
           </Secao>
         </>
@@ -845,7 +845,7 @@ function ProcessoMovimentacoes({
             {formatCNJ(numero)}
           </div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-slate-600">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
@@ -873,7 +873,7 @@ function ProcessoMovimentacoes({
             <li key={m.id} className="flex gap-3">
               <div className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-brand-400" />
               <div className="min-w-0">
-                <div className="text-xs font-medium text-slate-500">
+                <div className="text-xs font-medium text-slate-600">
                   {formatDate(m.data)}
                 </div>
                 {m.conteudo && (
@@ -913,11 +913,11 @@ function ProcessoParalisado({
         <div className="min-w-0">
           <div className="text-sm font-medium text-slate-800">{formatCNJ(numero)}</div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-slate-600">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-slate-600">
             {ultima
               ? `Última movimentação: ${formatDate(ultima)}`
               : 'Sem movimentação registrada no ADVBOX'}

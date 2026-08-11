@@ -38,7 +38,7 @@ export function IconButton({
         // p-1.5 dava 4,5px de cada lado e o botão media 21x21, abaixo do mínimo
         // de 24x24 para alvo de clique. Com p-2 fecha exatamente 24, sem mudar
         // a aparência do ícone.
-        'rounded-md p-2 text-slate-500 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
+        'rounded-md p-2 text-slate-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
         variants[variant],
         className,
       )}

@@ -36,7 +36,7 @@ export function StatCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="flex items-center gap-1 truncate text-sm font-medium text-slate-500">
+          <p className="flex items-center gap-1 truncate text-sm font-medium text-slate-600">
             {label}
             {/* A régua do indicador fica no tooltip do ⓘ — tela limpa,
                 informação a um hover de distância. */}

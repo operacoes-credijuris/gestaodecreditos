@@ -55,7 +55,7 @@ export function Segmented({
                 ? 'cursor-not-allowed text-slate-400 opacity-60'
                 : active
                   ? 'bg-white text-brand-700 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700',
+                  : 'text-slate-600 hover:text-slate-700',
             )}
           >
             {item.label}

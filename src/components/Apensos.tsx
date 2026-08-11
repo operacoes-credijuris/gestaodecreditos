@@ -145,7 +145,12 @@ export function useApensosManager(parentField: ParentField) {
         aria-expanded={aberto}
         aria-label={`${count} apenso${count > 1 ? 's' : ''} — ${aberto ? 'ocultar' : 'ver'}`}
         title={`${count} apenso${count > 1 ? 's' : ''}`}
-        className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-xs font-normal text-slate-500 transition-colors hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+        // py-1.5 em vez de py-0.5: com o html em 12px o botão media 19px de
+        // altura, abaixo do mínimo de 24 para alvo de clique, e ele é o único
+        // jeito de abrir a lista de apensos da linha. py-1 dava 22, ainda pouco
+        // — medido, não estimado. O -my-1.5 devolve o espaço para a célula da
+        // tabela não crescer.
+        className="-my-1.5 inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-1.5 text-xs font-normal text-slate-600 transition-colors hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
       >
         <span className="tabular-nums">{count}</span>
         <ChevronDown
@@ -173,7 +178,7 @@ export function useApensosManager(parentField: ParentField) {
       <tr className="bg-slate-50">
         <td colSpan={colSpan} className="px-4 py-3">
           {apensos.length === 0 ? (
-            <div className="flex items-center gap-3 text-sm text-slate-500">
+            <div className="flex items-center gap-3 text-sm text-slate-600">
               Nenhum apenso vinculado a este registro.
               <Button
                 size="sm"
@@ -186,7 +191,7 @@ export function useApensosManager(parentField: ParentField) {
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                 Apensos
               </div>
               {apensos.map((a) => (
@@ -201,16 +206,16 @@ export function useApensosManager(parentField: ParentField) {
                     <div className="font-medium text-slate-800">
                       {formatCNJ(a.numero)}
                       {a.classe_processual && (
-                        <span className="font-normal text-slate-500">
+                        <span className="font-normal text-slate-600">
                           {' '}
                           · {a.classe_processual}
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-slate-600">
                       {[a.tribunal, a.comarca, a.vara].filter(Boolean).join(' · ') || '—'}
                     </div>
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-slate-600">
                       Polo ativo: {a.polo_ativo || '—'} · Polo passivo:{' '}
                       {a.polo_passivo || '—'}
                     </div>
@@ -359,7 +364,7 @@ export function useApensosManager(parentField: ParentField) {
                     <Badge tone="blue">{ficha.classe_processual}</Badge>
                   )}
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-600">
                   Apenso vinculado a{' '}
                   {parentField === 'processo_id' ? 'um crédito' : 'um requerimento'}
                 </p>

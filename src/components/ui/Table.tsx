@@ -29,7 +29,7 @@ export function Table({
 
 export function THead({ children }: { children: ReactNode }) {
   return (
-    <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+    <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
       {children}
     </thead>
   )
@@ -108,13 +108,13 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
-      <div className="rounded-full bg-slate-100 p-3 text-slate-400">
+      <div className="rounded-full bg-slate-100 p-3 text-slate-500">
         <Inbox className="h-6 w-6" />
       </div>
       <div>
         <p className="font-medium text-slate-700">{title}</p>
         {description && (
-          <p className="mt-1 text-sm text-slate-500">{description}</p>
+          <p className="mt-1 text-sm text-slate-600">{description}</p>
         )}
       </div>
       {action}

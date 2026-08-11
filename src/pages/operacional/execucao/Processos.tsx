@@ -144,7 +144,7 @@ function CampoMoeda({
 }) {
   return (
     <div className="relative">
-      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-600">
         R$
       </span>
       <Input
@@ -364,7 +364,7 @@ export default function Processos() {
       <Card className="mb-4 p-4">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <Input
               className="pl-9"
               placeholder="Buscar por número, cedente, advogado, cessionário, devedora, comarca, tribunal, instrumento, RTDPJ…"
@@ -463,7 +463,7 @@ export default function Processos() {
                             {apensos.contador(p.id)}
                           </span>
                           {/* Nomes completos: quebram em linhas em vez de truncar. */}
-                          <div className="text-xs font-normal text-slate-500">
+                          <div className="text-xs font-normal text-slate-600">
                             {p.cedente || '—'} v. {p.cessionario || '—'}
                           </div>
                         </div>
@@ -472,7 +472,7 @@ export default function Processos() {
                     <TD>
                       {/* Devedora e comarca/vara em linhas próprias, texto completo. */}
                       <div>{p.entidade_devedora || '—'}</div>
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-slate-600">
                         {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
                       </div>
                     </TD>
@@ -505,7 +505,7 @@ export default function Processos() {
                         '—'
                       )}
                       {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
-                        <div className="mt-0.5 text-xs text-slate-500">
+                        <div className="mt-0.5 text-xs text-slate-600">
                           {splitRtdpj(p.numero_rtdpj).map((n, i) => (
                             <div key={i}>{n}</div>
                           ))}
@@ -838,7 +838,7 @@ export default function Processos() {
                   {getLabel(STATUS_PROCESSO, detalhe.status).label}
                 </Badge>
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-600">
                 {detalhe.cedente || '—'} v. {detalhe.cessionario || '—'}
               </p>
             </div>
@@ -939,7 +939,7 @@ export default function Processos() {
 
             <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
               {apensosDoDetalhe.length === 0 ? (
-                <p className="col-span-2 text-sm text-slate-500">
+                <p className="col-span-2 text-sm text-slate-600">
                   Nenhum apenso vinculado.
                 </p>
               ) : (
@@ -952,7 +952,7 @@ export default function Processos() {
                       <div className="text-sm font-medium text-slate-800">
                         {formatCNJ(a.numero || '')}
                       </div>
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-slate-600">
                         {[a.classe_processual, a.tribunal, a.comarca]
                           .filter(Boolean)
                           .join(' · ') || '—'}

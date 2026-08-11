@@ -42,7 +42,7 @@ function Lista({
 }) {
   if (opcoes.length === 0) {
     return (
-      <div className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg">
+      <div className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-lg">
         {vazio}
       </div>
     )
@@ -74,7 +74,7 @@ function Lista({
               {o.titulo}
             </div>
             {o.subtitulo && (
-              <div className="text-xs text-slate-500">{o.subtitulo}</div>
+              <div className="text-xs text-slate-600">{o.subtitulo}</div>
             )}
           </button>
         </li>
@@ -194,7 +194,7 @@ export function Combobox({
         onKeyDown={onKeyDown}
       />
       {selecionada?.subtitulo && !aberto && (
-        <p className="mt-1 text-xs text-slate-500">{selecionada.subtitulo}</p>
+        <p className="mt-1 text-xs text-slate-600">{selecionada.subtitulo}</p>
       )}
       {aberto && (
         <Lista

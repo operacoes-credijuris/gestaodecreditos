@@ -170,7 +170,7 @@ export default function Dashboard() {
 
       {/* Comercial */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">
           Comercial
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -211,7 +211,7 @@ export default function Dashboard() {
 
       {/* Operacional */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">
           Operacional
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -308,7 +308,7 @@ export default function Dashboard() {
         <CardHeader title="Próximas tarefas" />
         <CardBody>
           {proximasTarefas.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-500">
+            <p className="py-6 text-center text-sm text-slate-600">
               Nenhuma tarefa com prazo em aberto.
             </p>
           ) : (
@@ -324,7 +324,7 @@ export default function Dashboard() {
                       <p className="truncate font-medium text-slate-800">
                         {t.tipo || '—'}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-slate-600">
                         {t.responsaveis?.length
                           ? t.responsaveis.join(', ')
                           : 'Sem responsável'}
@@ -342,7 +342,7 @@ export default function Dashboard() {
                         className={
                           vencida
                             ? 'whitespace-nowrap text-sm font-semibold text-red-600'
-                            : 'whitespace-nowrap text-sm text-slate-500'
+                            : 'whitespace-nowrap text-sm text-slate-600'
                         }
                       >
                         {formatDate(t.date_deadline)}

@@ -52,7 +52,7 @@ export function Tabs({
               'flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
               active
                 ? 'border-brand-600 text-brand-700'
-                : 'border-transparent text-slate-500 hover:text-slate-700',
+                : 'border-transparent text-slate-600 hover:text-slate-700',
             )}
           >
             {item.icon}

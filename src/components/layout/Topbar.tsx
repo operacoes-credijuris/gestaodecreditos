@@ -38,10 +38,10 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           <>
             {nav.section && (
               <>
-                <span className="hidden shrink-0 text-slate-500 sm:inline">
+                <span className="hidden shrink-0 text-slate-600 sm:inline">
                   {nav.section}
                 </span>
-                <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-slate-400 sm:inline" />
+                <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-slate-500 sm:inline" />
               </>
             )}
             <span className="truncate font-semibold text-slate-800">
@@ -63,11 +63,11 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
             <p className="text-sm font-medium leading-tight text-slate-800">
               {nome}
             </p>
-            <p className="text-xs leading-tight text-slate-500">
+            <p className="text-xs leading-tight text-slate-600">
               {user?.email}
             </p>
           </div>
-          <ChevronDown className="h-4 w-4 text-slate-400" />
+          <ChevronDown className="h-4 w-4 text-slate-500" />
         </button>
 
         {menuOpen && (
@@ -79,7 +79,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
             <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
               <div className="px-2 py-2">
                 <p className="text-sm font-medium text-slate-800">{nome}</p>
-                <p className="truncate text-xs text-slate-500">{user?.email}</p>
+                <p className="truncate text-xs text-slate-600">{user?.email}</p>
                 <div className="mt-1">
                   <Badge tone={isAdmin ? 'purple' : 'gray'}>
                     {isAdmin ? 'Administrador' : 'Usuário'}

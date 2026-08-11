@@ -152,7 +152,7 @@ function TarefaItem({ t }: { t: TarefaLinha }) {
         )}
       </div>
       {(t.date_deadline || resp.length > 0) && (
-        <p className="mt-0.5 text-xs text-slate-500">
+        <p className="mt-0.5 text-xs text-slate-600">
           {t.date_deadline && <>Prazo: {formatDate(t.date_deadline)}</>}
           {t.date_deadline && resp.length > 0 && ' · '}
           {resp.length > 0 && resp.map((n) => formatNome(n)).join(', ')}
@@ -191,8 +191,8 @@ function ChipSituacao({
       className={cn(
         'inline-flex items-center gap-1 text-[11px] transition-colors',
         ativo
-          ? 'text-slate-500 hover:text-slate-700'
-          : 'text-slate-300 hover:text-slate-400',
+          ? 'text-slate-600 hover:text-slate-700'
+          : 'text-slate-300 hover:text-slate-600',
       )}
     >
       <span
@@ -331,7 +331,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
               'uppercase transition-colors',
               aba === 'movimentacoes'
                 ? 'text-brand-600'
-                : 'text-slate-400 hover:text-slate-600',
+                : 'text-slate-600 hover:text-slate-600',
             )}
           >
             Movimentações{movs.data ? ` (${listaMov.length})` : ''}
@@ -345,7 +345,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             aria-pressed={aba === 'tarefas'}
             className={cn(
               'uppercase transition-colors',
-              aba === 'tarefas' ? 'text-brand-600' : 'text-slate-400 hover:text-slate-600',
+              aba === 'tarefas' ? 'text-brand-600' : 'text-slate-600 hover:text-slate-600',
             )}
           >
             Tarefas{tarefas.data ? ` (${listaTar.length})` : ''}
@@ -390,14 +390,14 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
         ) : movs.isError ? (
           <p className="text-sm text-red-600">{(movs.error as Error).message}</p>
         ) : listaMov.length === 0 ? (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-600">
             Nenhuma movimentação sincronizada para este processo. O histórico é
             atualizado pelo cron e ao abrir a aba Movimentações.
           </p>
         ) : (
           <>
             {listaMov.length === LIMITE && (
-              <p className="mb-3 text-xs text-slate-500">
+              <p className="mb-3 text-xs text-slate-600">
                 Mostrando as {LIMITE} mais recentes.
               </p>
             )}
@@ -416,7 +416,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
       ) : (
         <>
           {sync.isPending && listaTar.length > 0 && (
-            <p className="mb-2 text-[11px] text-slate-400">atualizando do ADVBOX…</p>
+            <p className="mb-2 text-[11px] text-slate-600">atualizando do ADVBOX…</p>
           )}
 
           {tarefas.isLoading ? (
@@ -427,7 +427,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
           ) : tarefas.isError ? (
             <p className="text-sm text-red-600">{(tarefas.error as Error).message}</p>
           ) : tarFiltradas.length === 0 ? (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-600">
               {listaTar.length === 0
                 ? sync.isPending
                   ? 'Buscando as tarefas deste processo no ADVBOX…'

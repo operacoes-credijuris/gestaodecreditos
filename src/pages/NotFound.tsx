@@ -13,7 +13,7 @@ export default function NotFound() {
         <h1 className="text-2xl font-bold text-slate-800">
           Página não encontrada
         </h1>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-slate-600">
           O endereço acessado não existe ou foi movido. Confira o link ou volte
           para o início.
         </p>

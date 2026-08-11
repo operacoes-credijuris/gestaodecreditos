@@ -75,7 +75,7 @@ export function Drawer({
           <button
             onClick={onClose}
             aria-label="Fechar painel"
-            className="rounded-lg p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            className="rounded-lg p-1 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-600"
           >
             <X className="h-5 w-5" />
           </button>

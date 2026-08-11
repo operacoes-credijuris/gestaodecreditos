@@ -186,7 +186,7 @@ function ModelosPanel() {
                     <TD>
                       <Badge tone={tp.tone}>{tp.label}</Badge>
                     </TD>
-                    <TD className="text-xs text-slate-500">
+                    <TD className="text-xs text-slate-600">
                       {vars.length ? vars.join(', ') : '—'}
                     </TD>
                     <TD className="text-right">
@@ -657,7 +657,7 @@ function ContratosPanel() {
             </div>
 
             {!templateAtual ? (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-slate-600">
                 Selecione um modelo para preencher as variáveis.
               </p>
             ) : (
@@ -671,7 +671,7 @@ function ContratosPanel() {
                   </Button>
                 </div>
                 {placeholders.length === 0 ? (
-                  <p className="text-sm text-slate-500">
+                  <p className="text-sm text-slate-600">
                     Este modelo não possui variáveis.
                   </p>
                 ) : (
@@ -689,7 +689,7 @@ function ContratosPanel() {
                   </div>
                 )}
                 <div>
-                  <p className="mb-1 text-xs font-medium text-slate-500">Pré-visualização</p>
+                  <p className="mb-1 text-xs font-medium text-slate-600">Pré-visualização</p>
                   <div className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded bg-slate-50 p-3 font-serif text-xs text-slate-600 scrollbar-thin">
                     {renderizar(templateAtual.conteudo, dados)}
                   </div>

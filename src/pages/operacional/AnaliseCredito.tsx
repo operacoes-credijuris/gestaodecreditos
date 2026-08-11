@@ -321,7 +321,7 @@ function CardCredito({
           href={urlCard(lead.kommo_lead_id)}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
+          className="inline-flex items-center gap-1 text-xs text-slate-600 transition-colors hover:text-slate-600"
         >
           <ExternalLink className="h-3.5 w-3.5" /> Abrir no Kommo
         </a>
@@ -337,7 +337,7 @@ function CardCredito({
                   E sem autor: a equipe usa um login só e se identifica no próprio
                   texto da anotação; os nomes que aparecem são de antes disso.
                   O campo continua guardado em kommo_leads.notas. */}
-              <div className="mb-0.5 text-xs text-slate-400">
+              <div className="mb-0.5 text-xs text-slate-600">
                 {n.criado_em && formatDate(n.criado_em)}
               </div>
               <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
@@ -479,7 +479,7 @@ export default function AnaliseCredito() {
 
       <Card className="mb-4 p-4">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <Input
             className="pl-9"
             placeholder="Buscar por nome do card, processo, responsável ou conteúdo…"

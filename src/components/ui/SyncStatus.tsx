@@ -23,7 +23,7 @@ export function SyncStatus({
   const d = new Date(updatedAt)
   if (Number.isNaN(d.getTime())) return null
   return (
-    <span className="text-xs text-slate-500">
+    <span className="text-xs text-slate-600">
       Atualizado às{' '}
       {d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
     </span>

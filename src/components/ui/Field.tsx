@@ -36,7 +36,7 @@ export function Field({
         </label>
       )}
       {children}
-      {hint && !error && <p className="text-xs text-slate-500">{hint}</p>}
+      {hint && !error && <p className="text-xs text-slate-600">{hint}</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )

@@ -93,7 +93,7 @@ export default function Login() {
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-xs text-slate-500">
+          <p className="mt-6 text-center text-xs text-slate-600">
             Cadastro de usuários pelo administrador.
           </p>
         </div>
