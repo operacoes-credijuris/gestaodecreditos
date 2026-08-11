@@ -10,11 +10,11 @@
 // sequestro não é juntar planilha para fins de sequestro, e protocolar a peça
 // errada custa mais que um clique a mais.
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, FileText } from 'lucide-react'
+import { AlertTriangle, Download, FileText, Sparkles } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
-import { Field, Select } from '@/components/ui/Field'
+import { Select } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { Loading } from '@/components/ui/Table'
 import {
@@ -32,8 +32,8 @@ import { formatCNJ } from '@/lib/format'
 import type { Processo } from '@/lib/types'
 
 const ABAS = [
-  { key: 'modelo', label: 'A partir de um modelo' },
-  { key: 'zero', label: 'Do zero' },
+  { key: 'modelo', label: 'Modelo', icon: <FileText className="h-4 w-4" /> },
+  { key: 'zero', label: 'Geração por IA', icon: <Sparkles className="h-4 w-4" /> },
 ]
 
 export function PeticaoModal({
@@ -183,9 +183,14 @@ export function PeticaoModal({
       onClose={onClose}
       size="xl"
       title="Gerar petição"
+      // "Cedente v. Cessionário", a mesma forma que a lista de tarefas usa sob o
+      // número do processo — quem abre a janela vê a mesma identificação que viu
+      // no card, sem ter de reconciliar duas descrições do mesmo crédito.
       description={
         processo
-          ? `${formatCNJ(processo.numero_cnj)} · ${processo.cessionario ?? 'sem cessionário'}`
+          ? `${formatCNJ(processo.numero_cnj)} · ${processo.cedente || '—'} v. ${
+              processo.cessionario || '—'
+            }`
           : 'A tarefa não está vinculada a um crédito cadastrado.'
       }
       footer={
@@ -230,36 +235,30 @@ export function PeticaoModal({
               Nenhum modelo cadastrado. Rode a carga de modelos no Supabase.
             </Aviso>
           ) : (
-            <Field
-              label="Modelo"
-              hint={
-                sugeridos.length > 1
-                  ? `A descrição da tarefa casou com ${sugeridos.length} modelos. Confira qual é o certo.`
-                  : sugeridos.length === 1
-                    ? 'Sugerido pela descrição da tarefa. Pode trocar.'
-                    : 'A descrição da tarefa não casou com nenhum modelo. Escolha na lista.'
-              }
+            // Sem rótulo visível, por pedido — daí o aria-label, para quem usa
+            // leitor de tela continuar sabendo o que o campo é.
+            <Select
+              aria-label="Modelo de petição"
+              value={idEscolhido ?? ''}
+              onChange={(e) => setIdEscolhido(e.target.value || null)}
             >
-              <Select
-                value={idEscolhido ?? ''}
-                onChange={(e) => setIdEscolhido(e.target.value || null)}
-              >
-                {/* Sugeridos primeiro, e marcados: a ordem já é a resposta, sem
-                    esconder os outros. */}
-                {sugeridos.map((t) => (
+              {/* Os sugeridos vêm PRIMEIRO e em negrito. A ordem carrega o mesmo
+                  recado do negrito e não depende do navegador: estilo em <option>
+                  é respeitado no Chrome e no Firefox do desktop, mas alguns
+                  ignoram. Com as duas coisas, o sinal não se perde. */}
+              {sugeridos.map((t) => (
+                <option key={t.id} value={t.id} style={{ fontWeight: 700 }}>
+                  {t.nome}
+                </option>
+              ))}
+              {ativos
+                .filter((t) => !sugeridos.some((s) => s.id === t.id))
+                .map((t) => (
                   <option key={t.id} value={t.id}>
-                    ★ {t.nome}
+                    {t.nome}
                   </option>
                 ))}
-                {ativos
-                  .filter((t) => !sugeridos.some((s) => s.id === t.id))
-                  .map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.nome}
-                    </option>
-                  ))}
-              </Select>
-            </Field>
+            </Select>
           )}
 
           {erroMd && <Aviso tom="erro">{erroMd}</Aviso>}
@@ -301,18 +300,12 @@ export function PeticaoModal({
             <Loading />
           ) : (
             textoFinal && (
-              <div>
-                <p className="mb-1.5 text-sm font-medium text-slate-700">
-                  Como a petição vai sair
-                </p>
-                {/* Pré-visualização em texto, e não formatada: o que importa
-                    conferir aqui é o CONTEÚDO preenchido. A forma final está no
-                    PDF, e uma prévia parecida-mas-não-igual daria falsa
-                    segurança. */}
-                <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-sans text-xs leading-relaxed text-slate-700 scrollbar-thin">
-                  {textoFinal}
-                </pre>
-              </div>
+              // Pré-visualização em texto, e não formatada: o que importa conferir
+              // aqui é o CONTEÚDO preenchido. A forma final está no PDF, e uma
+              // prévia parecida-mas-não-igual daria falsa segurança.
+              <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-sans text-xs leading-relaxed text-slate-700 scrollbar-thin">
+                {textoFinal}
+              </pre>
             )
           )}
         </div>
