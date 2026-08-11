@@ -87,13 +87,34 @@ export function ModalParametrosAtualizacao({
           <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
-          <Button loading={salvar.isPending} onClick={handleSalvar}>
+          <Button
+            loading={salvar.isPending}
+            disabled={params.isLoading || params.isError}
+            onClick={handleSalvar}
+          >
             Salvar
           </Button>
         </>
       }
     >
       <div>
+        {/* Falha de leitura não pode virar formulário em branco: os campos
+            nasceriam vazios, idênticos a "nunca cadastrado", e o Salvar gravaria
+            nulo por cima da SELIC e do IPCA reais — parando a projeção de toda a
+            carteira. Por isso o aviso, e o Salvar desabilitado abaixo. */}
+        {params.isError && (
+          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Não foi possível ler os parâmetros atuais, então não é seguro salvar
+            por cima. Feche e abra novamente.{' '}
+            <button
+              type="button"
+              className="font-medium underline"
+              onClick={() => void params.refetch()}
+            >
+              Tentar de novo
+            </button>
+          </p>
+        )}
         {/* Máscara de duas casas: os dígitos entram pela direita, então "1550"
             vira 15,50 e o campo nunca fica sem as casas decimais. */}
         <LinhaParametro rotulo="SELIC vigente (% a.a.)">

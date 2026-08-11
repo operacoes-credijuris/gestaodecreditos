@@ -1438,13 +1438,25 @@ function DadosPessoais() {
     }
   }
 
-  if (processos.isLoading) return <Loading label="Carregando investidores…" />
-  if (processos.isError) {
+  // `dados` entra no portão junto com `processos`, e não é detalhe: esta tabela
+  // alimenta um formulário cujo Salvar é upsert da LINHA INTEIRA. Enquanto o mapa
+  // não tiver carregado, toda célula sairia "—" — igual a "nunca cadastrado" — e
+  // o lápis abriria formulário em branco sobre um investidor que tem CPF, banco e
+  // conta gravados. O primeiro Salvar apagaria os treze campos.
+  if (processos.isLoading || dados.isLoading)
+    return <Loading label="Carregando investidores…" />
+  if (processos.isError || dados.isError) {
     return (
       <Card>
         <ErrorState
-          message={(processos.error as Error)?.message}
-          onRetry={() => processos.refetch()}
+          message={
+            ((processos.error ?? dados.error) as Error)?.message ??
+            'Não foi possível carregar os dados dos investidores.'
+          }
+          onRetry={() => {
+            void processos.refetch()
+            void dados.refetch()
+          }}
         />
       </Card>
     )
@@ -1496,6 +1508,10 @@ function DadosPessoais() {
                       <IconButton
                         label={`Editar dados de ${i.nome}`}
                         icon={<Pencil className="h-4 w-4" />}
+                        // Cinto extra além do portão acima: abrir o formulário
+                        // sobre um mapa que não carregou é o que transforma erro
+                        // de leitura em apagamento de dado.
+                        disabled={!dados.data}
                         onClick={() => abrirEdicao(i.chave, i.nome)}
                       />
                     </TD>

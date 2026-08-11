@@ -3,10 +3,12 @@ import { useLocation } from 'react-router-dom'
 import { Menu, LogOut, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
+import { useToast } from '@/components/ui/Toast'
 import { findNavLocation } from './navigation'
 
 export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { user, profile, isAdmin, signOut } = useAuth()
+  const toast = useToast()
   const [menuOpen, setMenuOpen] = useState(false)
   const { pathname } = useLocation()
   const nav = findNavLocation(pathname)
@@ -88,9 +90,12 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
               </div>
               <div className="my-1 border-t border-slate-100" />
               <button
-                onClick={() => {
+                onClick={async () => {
                   setMenuOpen(false)
-                  void signOut()
+                  // Saída que falha no servidor tem de aparecer: em terminal
+                  // compartilhado, "achei que saí" é o cenário que expõe a conta.
+                  const { error } = await signOut()
+                  if (error) toast.error(error)
                 }}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-slate-700 hover:bg-slate-100"
               >

@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -26,7 +27,8 @@ interface AuthContextValue {
    */
   acessoDesativado: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
-  signOut: () => Promise<void>
+  /** Devolve mensagem quando o servidor não confirmou a saída (ver signOut). */
+  signOut: () => Promise<{ error: string | null }>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -36,13 +38,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const qc = useQueryClient()
+  /** Dono da sessão agora. Serve para descartar leitura de perfil em voo que
+   *  chegue depois de trocar (ou encerrar) o usuário. */
+  const usuarioCorrente = useRef<string | null>(null)
 
+  /**
+   * Carrega o perfil. Duas guardas, e as duas nasceram de defeito real:
+   *
+   * 1. FALHA DE LEITURA NÃO É "USUÁRIO SEM PERFIL". Antes, o `{ error }` era
+   *    descartado e o perfil ia a null. Como isto roda a cada SIGNED_IN — o que
+   *    inclui a volta para a aba depois do notebook acordar —, um 502 momentâneo
+   *    REBAIXAVA o administrador (isAdmin passa a false, Configurações
+   *    desaparece) e travava a criação de tarefa, que depende do nome do perfil.
+   *    Falhando, preserva o que já estava.
+   *
+   * 2. RESPOSTA DE OUTRO USUÁRIO NÃO PODE VENCER. A leitura é assíncrona: a de A
+   *    pode chegar depois do logout ou depois do login de B e repovoar o perfil
+   *    com quem já saiu. Só aplica se ainda for o usuário da sessão corrente.
+   */
   async function loadProfile(userId: string) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle()
+    if (error) {
+      console.error('Falha ao ler o perfil; mantendo o anterior.', error)
+      return
+    }
+    if (usuarioCorrente.current !== userId) return
     setProfile((data as Profile) ?? null)
   }
 
@@ -53,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!mounted) return
       setSession(data.session)
       if (data.session?.user) {
+        usuarioCorrente.current = data.session.user.id
         loadProfile(data.session.user.id).finally(() => {
           if (mounted) setLoading(false)
         })
@@ -63,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
+      usuarioCorrente.current = newSession?.user?.id ?? null
       if (newSession?.user) {
         loadProfile(newSession.user.id)
       } else {
@@ -90,10 +116,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null }
   }
 
-  async function signOut() {
-    await supabase.auth.signOut()
+  /**
+   * Sai da conta. Devolve mensagem quando o servidor não confirmou a saída.
+   *
+   * O `{ error }` era descartado, e o caso é grave em terminal compartilhado: se
+   * o /logout falha (rede, 429, 5xx), o auth-js NÃO remove a sessão, mas a tela
+   * limpava o cache e recarregava — parecia que "só piscou". O operador fechava
+   * o notebook achando que havia saído, e a sessão dele continuava válida para o
+   * próximo que abrisse. Pior ainda depois da tela de acesso desativado: o
+   * botão Sair dela não saía, e ela se desfazia sozinha no refetch seguinte.
+   *
+   * Falhando, derruba a sessão LOCALMENTE de todo jeito — quem clicou em Sair
+   * tem de ficar fora deste dispositivo — e avisa que a revogação no servidor não
+   * foi confirmada, porque só um novo login com conexão a completa.
+   */
+  async function signOut(): Promise<{ error: string | null }> {
+    const { error } = await supabase.auth.signOut()
     setProfile(null)
+    usuarioCorrente.current = null
     qc.clear()
+    if (error) {
+      console.error('Falha ao encerrar a sessão no servidor.', error)
+      // scope: 'local' remove o token deste navegador sem depender da rede.
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
+      setSession(null)
+      return {
+        error:
+          'Não foi possível confirmar a saída no servidor. A sessão foi encerrada neste dispositivo; entre novamente com conexão para revogar o acesso por completo.',
+      }
+    }
+    return { error: null }
   }
 
   const user = session?.user ?? null
@@ -130,5 +182,11 @@ function traduzErroAuth(msg: string): string {
   if (/invalid login credentials/i.test(msg)) return 'E-mail ou senha inválidos.'
   if (/email not confirmed/i.test(msg)) return 'E-mail ainda não confirmado.'
   if (/rate limit/i.test(msg)) return 'Muitas tentativas. Aguarde e tente novamente.'
-  return msg
+  // Falha de rede vazava crua e em inglês ("Failed to fetch") num produto todo
+  // em pt-BR, e quem lia concluía que a senha estava errada.
+  if (/failed to fetch|fetch failed|networkerror|load failed|network request failed/i.test(msg))
+    return 'Sem conexão com o servidor. Verifique a internet e tente novamente.'
+  // Resto: mensagem em português na tela, técnica só no console.
+  console.error('Erro de autenticação:', msg)
+  return 'Não foi possível entrar agora. Tente novamente em instantes.'
 }

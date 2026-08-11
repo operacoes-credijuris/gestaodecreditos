@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { Loader2, LogIn } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { isSupabaseConfigured } from '@/lib/supabase'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 
 export default function Login() {
   const { session, loading, signIn } = useAuth()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -20,7 +21,13 @@ export default function Login() {
       </div>
     )
   }
-  if (session) return <Navigate to="/estrategica" replace />
+  // Volta para a rota que a pessoa pediu antes de cair aqui (o ProtectedRoute
+  // guarda em state.from). Link direto de publicação ou de crédito compartilhado
+  // por colega chega ao destino em vez de largar no dashboard.
+  if (session) {
+    const de = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+    return <Navigate to={de && de !== '/login' ? de : '/estrategica'} replace />
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()

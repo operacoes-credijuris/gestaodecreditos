@@ -17,17 +17,18 @@ import type {
 } from './types'
 
 /**
- * Data da última movimentação por processo, vinda do cache que a Edge Function
- * advbox-movimentacoes mantém (sincronizado pelo cron de 2h e ao abrir a aba
- * Movimentações). Casa por DÍGITOS porque o número que o ADVBOX devolve tem
- * formatação própria, diferente do numero_cnj cadastrado aqui.
+ * ⚠️ REGRA DESTE ARQUIVO: o supabase-js NÃO LANÇA. Ele devolve `{ data, error }`,
+ * e ignorar o `error` faz a consulta terminar com SUCESSO devolvendo vazio — o
+ * React Query cacheia isso como dado bom, não retenta, não liga isError, e num
+ * refetch de fundo o vazio SUBSTITUI o dado que estava certo. A tela então não
+ * tem como distinguir "falhou" de "não existe". Onde esse vazio alimenta
+ * formulário, vira apagamento de dado; onde alimenta cálculo, vira número
+ * errado apresentado como certo.
  *
- * Falha em silêncio (mapa vazio): a coluna mostra "—" e o resto da tela segue
- * funcionando — nenhuma tela depende do ADVBOX estar de pé.
- *
- * Compartilhado entre a tabela de Créditos e a carteira do investidor: as duas
- * mostram a mesma data e devem concordar sempre.
+ * Então: `if (error) throw`, como em crud.ts. A única exceção deliberada está
+ * documentada em useUltimaMovimentacao.
  */
+
 /**
  * Parâmetros globais de atualização monetária (linha única, id = 1). Alimentam
  * a coluna "Valor projetado" da carteira.
@@ -36,11 +37,16 @@ export function useParametrosAtualizacao() {
   return useQuery({
     queryKey: ['parametros_atualizacao'],
     queryFn: async (): Promise<ParametrosAtualizacao> => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('parametros_atualizacao')
         .select('selic_aa, ipca_12m_aa, data_referencia')
         .eq('id', 1)
         .maybeSingle()
+      // Sem isto, falha de leitura devolvia um objeto de nulos idêntico a
+      // "parâmetro nunca cadastrado": a carteira inteira mostrava "Preencha em
+      // Parâmetros de atualização" e o modal gravava nulo por cima da SELIC e do
+      // IPCA reais no salvamento seguinte.
+      if (error) throw new Error(error.message)
       return {
         selic_aa: data?.selic_aa ?? null,
         ipca_12m_aa: data?.ipca_12m_aa ?? null,
@@ -109,11 +115,19 @@ export function useInvestidorDados() {
       // Lista de colunas em literal, e não numa constante: o supabase-js infere
       // o tipo do retorno lendo a string do select, e uma const widened para
       // `string` derruba a inferência.
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('investidor_dados')
         .select(
           'nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
         )
+      // O `throw` aqui não é zelo: este mapa alimenta o FORMULÁRIO de edição do
+      // investidor, e o salvamento é um upsert da linha inteira. Mapa vazio por
+      // falha de leitura fazia a tela mostrar sete "—" (igual a "nunca
+      // cadastrado"), o formulário abrir em branco e o Salvar seguinte gravar
+      // null em CPF, RG, banco, agência, conta, Pix e nas sete partes do
+      // endereço — dado de pagamento a terceiro, apagado com toast de sucesso.
+      // Lançando, o React Query preserva o último dado bom e liga isError.
+      if (error) throw new Error(error.message)
       const m = new Map<string, InvestidorDados>()
       for (const r of (data ?? []) as InvestidorDados[]) m.set(r.nome_chave, r)
       return m
@@ -157,9 +171,13 @@ export function useCarteiraResumos(poll = false) {
   return useQuery({
     queryKey: ['carteira_resumos', 'mapa'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('carteira_resumos')
         .select('processo_id, estagio_processual, providencias, erro, gerado_em')
+      // Resumo em branco por falha de leitura é indistinguível de "ainda não
+      // gerado", e levaria a mandar gerar de novo o que já existe — pagando
+      // chamada de IA à toa.
+      if (error) throw new Error(error.message)
       const m = new Map<string, CarteiraResumo>()
       for (const r of (data ?? []) as CarteiraResumo[]) m.set(r.processo_id, r)
       return m
@@ -172,6 +190,23 @@ export function useCarteiraResumos(poll = false) {
   })
 }
 
+/**
+ * Data da última movimentação por processo, vinda do cache que a Edge Function
+ * advbox-movimentacoes mantém (sincronizado pelo cron de 2h e ao abrir a aba
+ * Movimentações). Casa por DÍGITOS porque o número que o ADVBOX devolve tem
+ * formatação própria, diferente do numero_cnj cadastrado aqui.
+ *
+ * ÚNICA EXCEÇÃO À REGRA DO ARQUIVO, e é deliberada: falha em silêncio (mapa
+ * vazio), a coluna mostra "—" e o resto da tela segue funcionando. Vale aqui
+ * porque nenhuma tela DEPENDE do ADVBOX estar de pé, e porque este mapa é só
+ * exibição — não alimenta formulário nem cálculo, então o vazio não vira
+ * apagamento nem número errado. (O comentário estava órfão acima de
+ * useParametrosAtualizacao depois de um refactor, e por isso a exceção parecia
+ * valer para aquela função, que é justamente onde ela NÃO vale.)
+ *
+ * Compartilhado entre a tabela de Créditos e a carteira do investidor: as duas
+ * mostram a mesma data e devem concordar sempre.
+ */
 export function useUltimaMovimentacao() {
   return useQuery({
     queryKey: ['advbox_processo_status', 'mapa'],
