@@ -2,7 +2,10 @@
 
 Sistema interno da Credijuris reunindo os setores **Comercial** e **Operacional**,
 com uma camada de **Gestão Estratégica** consolidando os dois. Integra com
-**ADVBOX** (API) e **DJEN/Comunica PJe** (publicações).
+**ADVBOX** (tarefas e movimentações), **DJEN/Comunica PJe** (publicações),
+**Kommo** (funil de análise), **Judit** (due diligence), **Anthropic** (análise de
+crédito, resumo de carteira e redação de petições) e **Google Drive** (arquivo das
+análises e das petições geradas).
 
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS (SPA, `HashRouter`).
 - **Backend:** Supabase (Postgres + Auth + RLS + Storage + Edge Functions).
@@ -12,16 +15,29 @@ com uma camada de **Gestão Estratégica** consolidando os dois. Integra com
 
 - **Gestão Estratégica** — KPIs e gráficos dos dois setores.
 - **Comercial**
-  - Geração de Contratos (modelos com variáveis `{{...}}` + geração/impressão)
-  - Carteiras de Investidores (consolidado da operação + carteira individual; gestão de investidores e cessões)
+  - Carteiras de Investimento — consolidado da operação e carteira individual, com valor projetado
+  - Dados cadastrais — dados pessoais e bancários de **investidores** e **originadores**, nas duas visões
+  - Geração de Contratos — modelos com variáveis `{{...}}`
 - **Operacional**
-  - Análise de Crédito
-  - Execução Processual: Publicações e Movimentações · Tarefas ADVBOX · Processos · Serventias e Gabinetes
-- **Configurações** (somente administrador) — token ADVBOX, parâmetros DJEN, chave Anthropic, gestão de usuários.
+  - Análise de Crédito — cards do Kommo, análise automática do PDF e movimentação do funil
+  - Publicações e Movimentações · Tarefas · Créditos · Requerimentos administrativos · Contatos
+- **Configurações** (somente administrador) — token ADVBOX, parâmetros DJEN, chave Anthropic,
+  conta Kommo, gestão de usuários.
 
 Em qualquer tela, o botão no canto inferior direito abre o **assistente de
-dados**: responde perguntas sobre os créditos, publicações e cessões
-cadastrados. Só faz leitura, e sob as permissões de quem perguntou.
+dados**: responde perguntas sobre o que está cadastrado. Só faz leitura, e sob as
+permissões de quem perguntou.
+
+### Petições
+
+A partir de uma tarefa, em **Tarefas**, a plataforma gera a petição em `.docx`:
+sugere o modelo pelo tipo da tarefa, monta um panorama do caso por IA, preenche a
+qualificação das partes com os **Dados cadastrais** e salva o arquivo na pasta do
+crédito no Drive (ou baixa, quando o Drive não está configurado).
+
+Os modelos são arquivos `.md` no bucket `modelos-peticoes` do Storage; a tabela
+`peticao_templates` é só o índice. Trocar um modelo é subir um arquivo — não exige
+deploy.
 
 > **Acesso:** todo usuário autenticado vê o sistema inteiro. Apenas o
 > administrador (`contato@credijuris.com`) cadastra usuários e edita as
@@ -60,8 +76,10 @@ npm run dev
 
 ### 3.1. Aplicar o banco de dados
 
-**Opção A — pelo painel:** abra *SQL Editor*, cole o conteúdo de
-[`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql) e execute.
+**Opção A — pelo painel:** abra *SQL Editor* e execute os arquivos de
+[`supabase/migrations/`](supabase/migrations) **na ordem numérica**, de `0001` em
+diante. A `0001_init.sql` cria o essencial; as seguintes acrescentam tabelas e
+colunas, e cada uma explica no cabeçalho por que existe.
 
 **Opção B — pela CLI:**
 
@@ -69,6 +87,20 @@ npm run dev
 supabase link --project-ref <ref-do-seu-projeto>
 supabase db push
 ```
+
+Fora das migrações, há scripts que se rodam **à mão**, uma vez, direto no
+*SQL Editor* (não entram no `db push`):
+
+| Script                        | Para quê                                                 |
+| ----------------------------- | -------------------------------------------------------- |
+| `SEED_PETICAO_TEMPLATES.sql`  | Carga inicial do índice dos 10 modelos de petição         |
+| `CRON_DJEN_PUBLICACOES.sql`   | Agenda a sincronização das publicações                    |
+| `CRON_ADVBOX_TAREFAS.sql`     | Agenda a sincronização das tarefas                        |
+| `CRON_ADVBOX_MOVIMENTACOES.sql` | Agenda a sincronização das movimentações                |
+| `CRON_CARTEIRA_RESUMO.sql`    | Agenda o resumo semanal da carteira (IA)                  |
+
+> Os `CRON_*` levam um `__CRON_SECRET__` de marcador: troque pelo valor real ao
+> colar. O segredo não é versionado.
 
 ### 3.2. Criar o usuário administrador
 
@@ -111,9 +143,12 @@ supabase functions deploy
 ## 4. Publicar no GitHub Pages
 
 1. Suba o repositório para o GitHub (branch `main`).
-2. Em *Settings → Secrets and variables → Actions*, crie os secrets:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
+2. Em *Settings → Secrets and variables → Actions*, crie:
+   - **Secrets:** `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`
+   - **Variables:** `VITE_GOOGLE_CLIENT_ID` — é *variable*, não secret, porque é
+     público por design (fica visível no código do site; quem protege o acesso são
+     as origens autorizadas no Google Cloud e o login de cada pessoa). **Sem ele o
+     build passa**, e a petição gerada baixa em vez de subir para o Drive.
 3. Em *Settings → Pages*, em **Source** selecione **GitHub Actions**.
 4. A cada `push` na `main`, o workflow
    [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) compila e publica.
@@ -147,10 +182,16 @@ src/
   components/      UI custom + layout (sidebar, topbar)
   contexts/        AuthContext
   lib/             supabase, crud, queries, format, labels, functions
+                   pessoas    — investidores e originadores, das duas origens
+                   projecao   — atualização monetária da carteira
+                   peticao*   — modelo, layout, .docx e pasta de destino
+                   drive      — acesso ao Google Drive pelo navegador
   pages/           estrategica / comercial / operacional / configuracoes
 supabase/
-  migrations/      0001_init.sql (tabelas, RLS, triggers, storage)
-  functions/       Edge Functions (ADVBOX, DJEN, Kommo, gestão de usuários)
+  migrations/      0001 em diante, na ordem (tabelas, RLS, triggers, storage)
+  functions/       Edge Functions (ADVBOX, DJEN, Kommo, Judit, petição, IA,
+                   gestão de usuários)
+  *.sql            scripts de execução manual (seed e agendamentos)
 ```
 
 ## Segurança
