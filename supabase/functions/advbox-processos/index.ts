@@ -31,6 +31,27 @@ interface ConfigCriar {
 
 const onlyDigits = (s: unknown) => String(s ?? '').replace(/\D/g, '')
 
+/**
+ * Converte para número o id que chegou como texto — e só quando ele É um número.
+ *
+ * Os ids vêm de <select> na tela de Configurações, e valor de <select> é sempre
+ * string. A API aceita string ou inteiro em users_id, stages_id e
+ * type_lawsuits_id, MAS documenta customers_id como array de INTEIROS: [8795916]
+ * passa onde ["8795916"] pode ser recusado. O caso apareceria só quando alguém
+ * reescolhesse o cliente na lista — muito depois de a integração ter funcionado,
+ * e sem ninguém ligar uma coisa à outra.
+ *
+ * Devolve o valor original quando não é numérico, em vez de NaN: id que um dia
+ * venha com letra deve chegar à API como está e ser recusado por ela, não virar
+ * "NaN" no caminho.
+ */
+function idNumerico(v: number | string | undefined): number | string | undefined {
+  if (v == null || v === '') return undefined
+  const t = String(v).trim()
+  const n = Number(t)
+  return Number.isInteger(n) && String(n) === t ? n : v
+}
+
 async function lerConfig(): Promise<ConfigCriar> {
   const { data } = await serviceClient()
     .from('integracoes')
@@ -177,10 +198,10 @@ Deno.serve(async (req: Request) => {
     }
 
     const criado = await postJson(ctx, '/lawsuits', {
-      users_id: cfg.users_id,
-      customers_id: [cfg.customers_id],
-      stages_id: cfg.stages_id,
-      type_lawsuits_id: cfg.type_lawsuits_id,
+      users_id: idNumerico(cfg.users_id),
+      customers_id: [idNumerico(cfg.customers_id)],
+      stages_id: idNumerico(cfg.stages_id),
+      type_lawsuits_id: idNumerico(cfg.type_lawsuits_id),
       process_number: numero,
       // Pasta com o nome do cedente: é assim que o escritório reconhece o processo
       // na lista da ADVBOX. Limite de 30 caracteres é da API.
