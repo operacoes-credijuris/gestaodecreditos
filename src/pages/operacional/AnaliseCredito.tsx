@@ -521,7 +521,20 @@ export default function AnaliseCredito() {
         <Segmented
           ariaLabel="Tipo de crédito"
           items={[
-            { key: 'rpv', label: 'RPV', count: (leads.data ?? []).length },
+            {
+              key: 'rpv',
+              label: 'RPV',
+              // SOMA DAS ETAPAS, e não o total do espelho. O espelho guarda todos
+              // os cards do funil RPV, inclusive os das colunas do comercial, que
+              // esta aba não trata — daí 148 aqui contra 38 somando as etapas
+              // abaixo. Total que não fecha com a soma das partes ensina a
+              // desconfiar de todo número da tela, e o número certo é o do que
+              // está sob a responsabilidade de quem está olhando.
+              //
+              // Vem de `grupos`, que é montado ANTES da busca: assim o total não
+              // muda enquanto se digita no campo de pesquisa.
+              count: TELAS.reduce((n, t) => n + grupos[t.key].length, 0),
+            },
             { key: 'precatorio', label: 'Precatórios', disabled: true },
           ]}
           value="rpv"

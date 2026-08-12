@@ -12,18 +12,35 @@ export async function invokeFunction<T = unknown>(
     body: body ?? {},
   })
   if (error) {
-    // A mensagem detalhada costuma vir no corpo da resposta.
-    let detalhe = error.message
+    // O MOTIVO REAL VEM NO CORPO, e a mensagem do supabase-js é sempre a mesma
+    // ("Edge Function returned a non-2xx status code"). Sem cavar o corpo, todo
+    // erro de função chega à tela indistinguível de qualquer outro.
+    //
+    // Lê como TEXTO e só então tenta interpretar. A versão anterior chamava
+    // .json() direto e aceitava apenas a chave `error`: quando a função morre no
+    // nível da plataforma — estouro de tempo, de memória, erro de boot — o corpo
+    // não é esse JSON, o .json() lançava, o catch engolia e sobrava a mensagem
+    // genérica. Era o caso do botão Analisar.
+    const ctx = (error as unknown as { context?: Response }).context
+    const status = typeof ctx?.status === 'number' ? ` (HTTP ${ctx.status})` : ''
+    let detalhe = ''
     try {
-      const ctx = (error as unknown as { context?: Response }).context
-      if (ctx && typeof ctx.json === 'function') {
-        const j = await ctx.json()
-        if (j?.error) detalhe = j.error
+      const txt = ctx && typeof ctx.text === 'function' ? await ctx.text() : ''
+      if (txt) {
+        try {
+          const j = JSON.parse(txt) as Record<string, unknown>
+          // `erro` e `msg` entram porque as funções não falam uma língua só.
+          const achado = j.error ?? j.erro ?? j.message ?? j.msg
+          detalhe = achado ? String(achado) : txt.slice(0, 300)
+        } catch {
+          // Corpo que não é JSON ainda diz muito: HTML de gateway, rastro de pilha.
+          detalhe = txt.slice(0, 300)
+        }
       }
     } catch {
-      /* ignora */
+      /* corpo ilegível: sobra o status, que já separa 401 de 500 */
     }
-    throw new Error(detalhe)
+    throw new Error(`${detalhe || error.message}${status}`)
   }
   return data as T
 }
