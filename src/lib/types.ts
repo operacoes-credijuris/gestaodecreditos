@@ -100,6 +100,12 @@ export type EspecieRequisitorio = 'rpv' | 'precatorio'
 export interface Processo {
   id: UUID
   numero_cnj: string
+  /**
+   * Número do processo ADMINISTRATIVO do precatório no tribunal — o segundo número
+   * que um precatório tem, além do judicial, e por onde ele é acompanhado na fila
+   * de pagamento. Só se aplica a precatório; nulo em RPV (migração 0037).
+   */
+  numero_processo_administrativo: string | null
   tribunal: string | null
   comarca: string | null
   vara: string | null

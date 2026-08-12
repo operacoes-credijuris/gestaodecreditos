@@ -147,6 +147,7 @@ const VAZIO: Partial<Processo> = {
   comarca: '',
   vara: '',
   cedente: '',
+  numero_processo_administrativo: '',
   cedente_advogado: '',
   cessionario: '',
   originador: '',
@@ -389,6 +390,9 @@ export default function Processos() {
       l = l.filter((p) => {
         const achouTexto = [
           p.numero_cnj,
+          // Entra na busca porque NÃO está na tabela: é o único número do crédito
+          // que não se acha varrendo a lista com os olhos.
+          p.numero_processo_administrativo,
           p.cedente,
           p.cedente_advogado,
           p.cessionario,
@@ -404,7 +408,8 @@ export default function Processos() {
         return (
           qd.length >= 4 &&
           (onlyDigits(p.numero_cnj).includes(qd) ||
-            onlyDigits(p.numero_rtdpj).includes(qd))
+            onlyDigits(p.numero_rtdpj).includes(qd) ||
+            onlyDigits(p.numero_processo_administrativo).includes(qd))
         )
       })
     }
@@ -510,6 +515,15 @@ export default function Processos() {
         payload.instrumento === 'registro_publico'
           ? vazioNull(payload.numero_rtdpj)
           : null
+      // Nº do processo administrativo em branco vira null. Note que ele NÃO é
+      // zerado quando a espécie deixa de ser precatório, ao contrário do RTDPJ
+      // acima: aqui o valor foi digitado à mão ou lido de um ofício, e apagá-lo por
+      // efeito colateral de trocar a espécie seria perder dado sem avisar. Ele
+      // continua visível na ficha e no formulário justamente para poder ser
+      // corrigido — incoerência à vista é melhor que sumiço silencioso.
+      payload.numero_processo_administrativo = vazioNull(
+        payload.numero_processo_administrativo,
+      )
       // Originador em branco vira null: é ele que monta a lista de nomes da
       // aba Dados pessoais e bancários, e string vazia entraria como se fosse
       // alguém. (O cessionário não passa por aqui — mudar isso agora afetaria
@@ -890,6 +904,29 @@ export default function Processos() {
                 placeholder="0000000-00.0000.0.00.0000"
               />
             </Field>
+            {/* O SEGUNDO NÚMERO DO PRECATÓRIO. Precatório tramita em dois lugares:
+                o processo judicial, onde a dívida foi reconhecida, e um processo
+                administrativo no tribunal, por onde ele anda na fila de pagamento.
+                RPV não tem esse número, então o campo só existe em precatório — em
+                RPV seria um campo vazio permanente convidando a preencher errado.
+
+                A condição inclui "já tem valor" para o caso de a espécie ser
+                trocada depois: sem isso, mudar para RPV esconderia um número já
+                gravado, que continuaria no banco sem tela para editá-lo. */}
+            {(editing.especie_requisitorio === 'precatorio' ||
+              !!editing.numero_processo_administrativo) && (
+              <Field label="Número do processo administrativo (Precatório)">
+                <Input
+                  value={editing.numero_processo_administrativo ?? ''}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      numero_processo_administrativo: e.target.value,
+                    })
+                  }
+                />
+              </Field>
+            )}
             <div className="grid gap-4 sm:grid-cols-3">
               <Field label="Tribunal">
                 <Input
@@ -1225,6 +1262,14 @@ export default function Processos() {
               <DrawerField label="Tribunal">{detalhe.tribunal || '—'}</DrawerField>
               <DrawerField label="Comarca">{detalhe.comarca || '—'}</DrawerField>
               <DrawerField label="Vara">{detalhe.vara || '—'}</DrawerField>
+              {/* Só em precatório, como no formulário — RPV não tem processo
+                  administrativo, e um "—" fixo aqui afirmaria que falta o dado. */}
+              {(detalhe.especie_requisitorio === 'precatorio' ||
+                !!detalhe.numero_processo_administrativo) && (
+                <DrawerField label="Nº do processo administrativo">
+                  {detalhe.numero_processo_administrativo || '—'}
+                </DrawerField>
+              )}
             </DrawerSection>
 
             <DrawerSection title="Aquisição e liquidação">

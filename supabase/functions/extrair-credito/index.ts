@@ -50,7 +50,10 @@ const CAMPOS = {
   vara:
     'Só o juízo, SEM a comarca: "32ª Vara do Trabalho", nunca "32ª Vara do Trabalho de São Paulo". A comarca tem campo próprio, e repetida aqui aparece duas vezes na mesma linha da tabela.',
   cedente: 'Nome do credor original — quem cedeu o crédito.',
-  cedente_advogado: 'Nome do advogado que representa o cedente no processo.',
+  cedente_advogado:
+    'Quem representa o cedente no processo: pode ser o ADVOGADO pessoa física ou a SOCIEDADE DE ADVOGADOS (escritório, com CNPJ) que atua pelo cedente. Escritório é resposta válida — não deixe em branco por não ser pessoa física. Havendo advogado e escritório, escreva o que consta como representante nos autos.',
+  numero_processo_administrativo:
+    'Número do processo ADMINISTRATIVO do precatório no tribunal — o segundo número, além do judicial, por onde o precatório anda na fila de pagamento do ente devedor. Costuma aparecer na análise de crédito e nos ofícios do tribunal. Só existe em precatório: em RPV é null, e em precatório sem o número localizado também é null.',
   entidade_devedora:
     'Ente público devedor na forma padronizada, e nada além dela: "União" (nunca "União Federal", "Fazenda Nacional" ou "Fazenda Pública"); "Estado de X" ou "Estado do X" conforme o nome pede (Estado de Goiás, Estado de São Paulo, Estado do Rio Grande do Sul, Estado do Amapá); "Município de X" (Município de Jacarezinho, Município de Goiânia). Autarquia e fundação ficam na sigla pela qual são conhecidas: INSS, DNIT, IBAMA.',
   valor_face:

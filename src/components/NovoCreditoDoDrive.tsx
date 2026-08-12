@@ -52,6 +52,7 @@ interface RespostaExtracao {
  */
 const CAMPOS_ACEITOS = new Set([
   'tribunal',
+  'numero_processo_administrativo',
   'comarca',
   'vara',
   'cedente',
