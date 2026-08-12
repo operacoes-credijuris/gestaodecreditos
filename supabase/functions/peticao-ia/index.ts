@@ -26,9 +26,103 @@ import { chaveAnthropic } from '../_shared/segredos.ts'
 // Conferência da forma da peça. Em módulo próprio e SEM import nenhum, para o
 // mesmo código rodar aqui e num teste fora do Deno — foi assim que se verificou
 // que ela reprova peça torta e aprova peça conforme.
-import { problemasDaPeca } from '../_shared/peticaoForma.ts'
+import { fechoDe, problemasDaPeca } from '../_shared/peticaoForma.ts'
 
 const MODELO = 'claude-sonnet-5'
+
+/** Bucket dos modelos de petição — o mesmo de src/lib/peticao.ts. */
+const BUCKET_MODELOS = 'modelos-peticoes'
+
+/**
+ * Quantos modelos entram no guia de estilo.
+ *
+ * SEMPRE OS MESMOS, na mesma ordem, de propósito: o guia vai no bloco de sistema
+ * marcado para cache, e variar o conteúdo por pedido invalidaria o cache a cada
+ * chamada — pagaria-se o guia inteiro toda vez. Três peças bastam para o modelo
+ * pegar o padrão de endereçamento, de título de seção, de tom e de fecho.
+ */
+const MODELOS_NO_GUIA = 3
+
+/** Guia de estilo, memorizado por instância da função. */
+let guiaCache: { texto: string; em: number } | null = null
+const GUIA_TTL_MS = 30 * 60 * 1000
+
+/**
+ * Guia de estilo montado a partir dos modelos REAIS do bucket: as peças que a
+ * casa já protocola. É delas que saem o padrão de endereçamento, os títulos de
+ * seção, o tom e — o que mais importava — quem assina.
+ *
+ * Falha em silêncio de propósito: bucket fora do ar ou modelo apagado devolvem
+ * guia vazio, e a redação segue com as regras escritas no prompt. Melhor peça
+ * sem exemplar do que aba que não funciona.
+ */
+async function guiaDeEstilo(
+  svc: ReturnType<typeof serviceClient>,
+): Promise<string> {
+  if (guiaCache && Date.now() - guiaCache.em < GUIA_TTL_MS) return guiaCache.texto
+
+  const exemplares: { nome: string; texto: string }[] = []
+  let fecho: string | null = null
+  try {
+    const { data } = await svc
+      .from('peticao_templates')
+      .select('nome, arquivo')
+      .eq('ativo', true)
+      .not('arquivo', 'is', null)
+      // Ordem estável = bloco de sistema estável = cache de prompt aproveitado.
+      .order('nome')
+    for (const m of (data ?? []) as { nome: string; arquivo: string }[]) {
+      if (exemplares.length >= MODELOS_NO_GUIA && fecho) break
+      try {
+        const baixado = await svc.storage.from(BUCKET_MODELOS).download(m.arquivo)
+        const blob = baixado.data
+        if (!blob) continue
+        const texto = (await blob.text()).replace(/\r\n/g, '\n').trim()
+        if (!texto) continue
+        if (exemplares.length < MODELOS_NO_GUIA) {
+          exemplares.push({ nome: m.nome, texto })
+        }
+        // O fecho é o mesmo em todas as peças (é o mesmo advogado): o primeiro
+        // que aparecer serve.
+        if (!fecho) fecho = fechoDe(texto)
+      } catch {
+        /* modelo indisponível: o guia sai com os que deram */
+      }
+    }
+  } catch {
+    /* sem tabela ou sem bucket: guia vazio */
+  }
+
+  const partes: string[] = []
+  if (fecho) {
+    partes.push(
+      '## FECHO E ASSINATURA — COPIE EXATAMENTE ESTE BLOCO',
+      '',
+      'Quem assina a petição é o ADVOGADO da Credijuris. NUNCA o cessionário, nunca o cedente, nunca a empresa. Este é o fecho da casa, extraído dos modelos que ela protocola:',
+      '',
+      fecho,
+      '',
+      'Reproduza o nome e a inscrição na OAB exatamente como estão acima. Atualize apenas a data, para a data de hoje informada no pedido. Não acrescente nem troque signatário.',
+    )
+  }
+  if (exemplares.length) {
+    partes.push(
+      '',
+      `## COMO A CREDIJURIS ESCREVE — ${exemplares.length} peça(s) real(is) da casa`,
+      '',
+      'Leia para seguir o mesmo padrão de endereçamento, de numeração e título das seções, de tom e de estrutura. Imite a FORMA e o TOM; o conteúdo é o do caso que você vai escrever.',
+      '',
+      'ATENÇÃO: os trechos [ENTRE COLCHETES] nestes exemplares são campos que a plataforma substitui automaticamente. A SUA petição NÃO pode conter nenhum colchete — use os dados cadastrais fornecidos no pedido.',
+    )
+    for (const e of exemplares) {
+      partes.push('', `### Exemplar — ${e.nome}`, '', e.texto)
+    }
+  }
+
+  const texto = partes.join('\n')
+  guiaCache = { texto, em: Date.now() }
+  return texto
+}
 
 // Teto de insumo. O histórico é integral e alguns processos passam de duzentos
 // andamentos; os mais recentes é que dizem onde o processo está. Mais generoso
@@ -169,6 +263,9 @@ const SISTEMA_REDIGIR = `Você é advogado da Credijuris e redige petições em 
 ${CONTEXTO}
 
 O QUE VOCÊ FAZ: escreve a petição que o usuário pedir, pronta para protocolo, usando os fatos do histórico do processo e os dados cadastrais fornecidos.
+
+QUEM ASSINA
+A petição é assinada pelo ADVOGADO da Credijuris, com o nome e a inscrição na OAB que estão nos modelos da casa. NUNCA assine como o cessionário, como o cedente ou como a empresa: eles são parte, não procurador. Se houver um bloco de fecho e assinatura fornecido abaixo, copie-o.
 
 CONTEÚDO
 - Português jurídico formal, na primeira pessoa do plural. Sóbrio: petição não é peça de retórica.
@@ -590,6 +687,10 @@ Deno.serve(async (req: Request) => {
       const pedido = [
         'Redija a petição pedida abaixo.',
         '',
+        // A data entra explícita: o modelo não tem relógio, e o fecho copiado dos
+        // modelos traz a data em que AQUELA peça foi escrita.
+        `Hoje é ${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: 'long', year: 'numeric' })}.`,
+        '',
         '## O que o advogado pediu',
         instrucao,
         '',
@@ -603,6 +704,12 @@ Deno.serve(async (req: Request) => {
       ]
         .filter(Boolean)
         .join('\n')
+
+      // Os modelos reais da casa, lidos do bucket: é deles que saem o estilo e o
+      // bloco de assinatura. Vai no MESMO bloco de sistema marcado para cache, e
+      // por isso é sempre o mesmo conteúdo (ver MODELOS_NO_GUIA).
+      const guia = await guiaDeEstilo(svc)
+      const sistema = guia ? `${SISTEMA_REDIGIR}\n\n${guia}` : SISTEMA_REDIGIR
 
       const chamar = async (
         correcao: { anterior: string; problemas: string[] } | null,
@@ -619,7 +726,7 @@ Deno.serve(async (req: Request) => {
           model: MODELO,
           max_tokens: 16000,
           system: [
-            { type: 'text', text: SISTEMA_REDIGIR, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: sistema, cache_control: { type: 'ephemeral' } },
           ],
           tools: [FERRAMENTA_REDIGIR],
           // Ferramenta forçada, sem thinking — mesmo motivo do panorama acima. A

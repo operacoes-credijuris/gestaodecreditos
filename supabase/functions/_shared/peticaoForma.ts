@@ -31,6 +31,21 @@ export function blocosDe(texto: string): string[] {
 }
 
 /**
+ * O fecho de uma peça: do bloco que contém "pede deferimento" até o fim — local,
+ * data e ASSINATURA.
+ *
+ * Serve para extrair dos modelos reais quem assina, e entregar isso ao modelo
+ * como literal a copiar. Existe por causa de um defeito de verdade: a primeira
+ * versão assinou a petição como se fosse o CESSIONÁRIO. Quem assina é o advogado,
+ * e isso não pode depender de o modelo ter inferido certo a partir de exemplos.
+ */
+export function fechoDe(texto: string): string | null {
+  const blocos = blocosDe(texto)
+  const i = blocos.findIndex((b) => semAcento(b).includes('pede deferimento'))
+  return i < 0 ? null : blocos.slice(i).join('\n\n')
+}
+
+/**
  * O que a peça viola. Lista vazia = forma conforme.
  *
  * Cada mensagem é escrita para ser DEVOLVIDA AO MODELO como correção, então diz

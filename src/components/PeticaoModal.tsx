@@ -28,7 +28,7 @@ import {
   Send,
   Sparkles,
 } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
@@ -100,6 +100,7 @@ export function PeticaoModal({
   tarefaId: string | null
 }) {
   const toast = useToast()
+  const qc = useQueryClient()
   const [aba, setAba] = useState('modelo')
   const [idEscolhido, setIdEscolhido] = useState<string | null>(null)
   const [md, setMd] = useState<string | null>(null)
@@ -237,8 +238,9 @@ export function PeticaoModal({
    * cache de verdade é no servidor (peticao_panorama), então nem trocar de aba nem
    * recarregar a página custam chamada nova enquanto o processo não andar.
    */
+  const chavePanorama = ['peticao-panorama', tarefaId, processo?.id]
   const panorama = useQuery({
-    queryKey: ['peticao-panorama', tarefaId, processo?.id],
+    queryKey: chavePanorama,
     queryFn: () =>
       invokeFunction<RespostaPanorama>('peticao-ia', {
         action: 'panorama',
@@ -250,6 +252,35 @@ export function PeticaoModal({
     gcTime: 30 * 60 * 1000,
     retry: false,
   })
+
+  const [reanalisando, setReanalisando] = useState(false)
+
+  /**
+   * Nova análise, DE VERDADE.
+   *
+   * Por que não é `panorama.refetch()`: o refetch repete a mesma chamada, e a
+   * função devolve o panorama GUARDADO quando a impressão digital dos insumos não
+   * mudou — que é o caso normal. O texto voltava idêntico e o botão parecia
+   * quebrado. Aqui vai `forcar`, que manda a função ignorar o cache, e o
+   * resultado é escrito na chave da consulta para a tela reagir.
+   */
+  async function reanalisar() {
+    if (!processo || !tarefaId || reanalisando) return
+    setReanalisando(true)
+    try {
+      const r = await invokeFunction<RespostaPanorama>('peticao-ia', {
+        action: 'panorama',
+        tarefa_id: tarefaId,
+        processo_id: processo.id,
+        forcar: true,
+      })
+      qc.setQueryData(chavePanorama, r)
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setReanalisando(false)
+    }
+  }
 
   /** Os dados do crédito que a IA deve usar no texto, com os rótulos dos modelos. */
   const dadosParaIA = useMemo(() => {
@@ -514,14 +545,14 @@ export function PeticaoModal({
                   {panorama.data && (
                     <button
                       type="button"
-                      onClick={() => void panorama.refetch()}
-                      disabled={panorama.isFetching}
+                      onClick={() => void reanalisar()}
+                      disabled={reanalisando}
                       className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-brand-700 disabled:opacity-50"
                     >
                       <RefreshCw
-                        className={`h-3 w-3 ${panorama.isFetching ? 'animate-spin' : ''}`}
+                        className={`h-3 w-3 ${reanalisando ? 'animate-spin' : ''}`}
                       />
-                      Analisar de novo
+                      {reanalisando ? 'Analisando…' : 'Analisar de novo'}
                     </button>
                   )}
                 </div>
@@ -561,7 +592,7 @@ export function PeticaoModal({
                   htmlFor="peticao-instrucao"
                   className="mb-1.5 block text-sm font-medium text-slate-700"
                 >
-                  O que esta petição deve pedir?
+                  Objeto da petição
                 </label>
                 <Textarea
                   id="peticao-instrucao"
@@ -587,15 +618,16 @@ export function PeticaoModal({
               {/* ---------- A peça ---------- */}
               {redacao && (
                 <section>
+                  {/* O título que a IA devolveu NOMEIA O ARQUIVO, mas não aparece
+                      aqui: como é frase e não etiqueta, saía tomando a linha
+                      inteira em negrito e roubando a atenção do texto da peça, que
+                      é o que precisa ser lido. */}
                   <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                     <label
                       htmlFor="peticao-texto"
                       className="text-sm font-medium text-slate-700"
                     >
-                      {redacao.titulo || 'Petição'}{' '}
-                      <span className="font-normal text-slate-500">
-                        — revise antes de salvar
-                      </span>
+                      Revisar
                     </label>
                     {/* O escape quando a resposta não serve: leva o caso inteiro
                         para o app do Claude e o refinamento segue lá, fora da API. */}
