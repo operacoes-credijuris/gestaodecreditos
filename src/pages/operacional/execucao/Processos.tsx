@@ -728,7 +728,11 @@ export default function Processos() {
                   onToggle={() => toggleSort('expectativa_liquidacao')}
                 />
                 <SortableTH
-                  label="Últ. movimentação"
+                  // "Últ. mov." e não "Últ. movimentação": o rótulo longo é mais
+                  // largo que qualquer data da coluna, então era ELE que definia a
+                  // largura — espaço tirado das colunas de texto. Igual em
+                  // Requerimentos: a mesma coluna tem o mesmo nome nas duas telas.
+                  label="Últ. mov."
                   active={sortBy === 'ultima_movimentacao'}
                   dir={sortDir}
                   onToggle={() => toggleSort('ultima_movimentacao')}

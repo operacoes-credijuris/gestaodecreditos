@@ -284,19 +284,22 @@ export default function Requerimentos() {
                   com o que sobrar — e é ela que tem o texto mais longo. Por isso as
                   outras foram apertadas até o mínimo que o conteúdo aceita.
 
-                  As duas colunas de data têm w-[1%] e o cabeçalho SEM nowrap: era o
-                  cabeçalho, não a data, que definia a largura delas. "ÚLT.
-                  MOVIMENTAÇÃO" numa linha só ocupa quase o dobro de uma data, e essa
-                  diferença saía toda da Matéria. Quebrando o título em duas linhas, a
-                  coluna encolhe para a largura do conteúdo. As CÉLULAS seguem nowrap:
-                  data quebrada no meio é ilegível. */}
+                  As duas colunas de data têm w-[1%] e cabeçalho CURTO — e não
+                  cabeçalho quebrado em duas linhas, que foi a primeira tentativa e
+                  ficou pior: título em duas linhas engorda o cabeçalho da tabela
+                  inteira e desalinha visualmente da coluna vizinha. "Últ. mov."
+                  resolve as duas coisas de uma vez — cabe numa linha E é mais estreito
+                  que a versão quebrada, porque a maior palavra da versão longa
+                  ("MOVIMENTAÇÃO") já era mais larga do que o rótulo curto inteiro. */}
               <tr>
                 <TH className="w-[20%]">Protocolo</TH>
                 {/* Tribunal e órgão saíram do subtítulo do protocolo para uma coluna
                     própria: são a JURISDIÇÃO do requerimento, não parte da
                     identificação dele. Sob o número ficam as partes, que é o que
                     identifica a linha — igual "cedente v. cessionário" em Créditos. */}
-                <TH className="w-[13%]">Tribunal / órgão</TH>
+                {/* nowrap no único cabeçalho de duas palavras que poderia quebrar em
+                    tela estreita. Os outros são palavra única. */}
+                <TH className="w-[13%] whitespace-nowrap">Tribunal / órgão</TH>
                 <TH className="w-[12%]">Classe</TH>
                 <TH>Matéria</TH>
                 {/* "Protocolado", e não "Data de protocolo": metade da largura e a
@@ -308,9 +311,9 @@ export default function Requerimentos() {
                   active
                   dir={sortDir}
                   onToggle={toggleSort}
-                  className="w-[1%] leading-tight"
+                  className="w-[1%] whitespace-nowrap"
                 />
-                <TH className="w-[1%] leading-tight">Últ. movimentação</TH>
+                <TH className="w-[1%] whitespace-nowrap">Últ. mov.</TH>
                 <TH className="w-[1%] whitespace-nowrap">Ações</TH>
               </tr>
             </THead>
