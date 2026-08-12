@@ -94,13 +94,22 @@ Fora das migrações, há scripts que se rodam **à mão**, uma vez, direto no
 | Script                        | Para quê                                                 |
 | ----------------------------- | -------------------------------------------------------- |
 | `SEED_PETICAO_TEMPLATES.sql`  | Carga inicial do índice dos 10 modelos de petição         |
-| `CRON_DJEN_PUBLICACOES.sql`   | Agenda a sincronização das publicações                    |
-| `CRON_ADVBOX_TAREFAS.sql`     | Agenda a sincronização das tarefas                        |
-| `CRON_ADVBOX_MOVIMENTACOES.sql` | Agenda a sincronização das movimentações                |
+| `CRON_DJEN_PUBLICACOES.sql`   | Agenda as publicações — de 2 em 2 horas                   |
+| `CRON_ADVBOX_TAREFAS.sql`     | Agenda as tarefas — de 4 em 4 horas                       |
+| `CRON_ADVBOX_MOVIMENTACOES.sql` | Agenda as movimentações — de 4 em 4 horas               |
 | `CRON_CARTEIRA_RESUMO.sql`    | Agenda o resumo semanal da carteira (IA)                  |
+| `CRON_KOMMO_SYNC.sql`         | Agenda o espelho dos cards do Kommo — a cada 15 min       |
 
 > Os `CRON_*` levam um `__CRON_SECRET__` de marcador: troque pelo valor real ao
 > colar. O segredo não é versionado.
+
+> **Frequências não são arbitrárias.** As duas do ADVBOX custam uma (movimentações)
+> e duas (tarefas) chamadas de API **por processo, por ciclo** — é o único consumo
+> que cresce com o tamanho da carteira, e daí serem as menos frequentes. O DJEN
+> busca por OAB, então custa o mesmo com 90 ou com 2.000 créditos e pode ser
+> frequente. Ao trocar a frequência de um `CRON_*`, mude o NOME do job no arquivo
+> junto: o script remove o nome antigo antes de agendar, e dois nomes vivos ao
+> mesmo tempo dobram o consumo em vez de reduzi-lo.
 
 ### 3.2. Criar o usuário administrador
 

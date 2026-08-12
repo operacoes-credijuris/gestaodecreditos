@@ -150,6 +150,91 @@ function ultimaData(movs: Record<string, unknown>[]): string | null {
   return max
 }
 
+/**
+ * Restringe a fila aos processos cujo histórico MUDOU desde a última passagem.
+ *
+ * O PROBLEMA QUE ISSO RESOLVE: /movements não tem filtro de data, então buscar um
+ * processo significa baixar o histórico inteiro dele. Fazer isso com todos os
+ * processos, 12 vezes por dia, é uma chamada por processo por ciclo — cresce junto
+ * com a carteira e, na quase totalidade das vezes, para rebaixar exatamente o que
+ * já estava gravado.
+ *
+ * /last_movements devolve UMA linha por processo com o último andamento, paginada
+ * de 100 em 100. Comparando com a data que o nosso cache já tem, sobra só quem
+ * mudou. Numa carteira de 2.000 créditos, troca ~2.000 chamadas por ~20 mais os
+ * poucos que se moveram.
+ *
+ * FALHA PARA O LADO SEGURO, e isso é o mais importante daqui: qualquer problema —
+ * a consulta cair, vir vazia, o formato de data divergir — devolve a fila INTEIRA,
+ * que é o comportamento de antes. Perder a economia é aceitável; deixar de trazer
+ * movimentação, não.
+ *
+ * A comparação usa extrairData nas duas pontas, o mesmo caminho que gravou o cache,
+ * para não comparar formatos diferentes e concluir "mudou" sempre.
+ */
+async function filaQueMudou(
+  ctx: AdvboxCtx,
+  casaveis: Map<string, string>,
+): Promise<{
+  fila: { lid: string; numero: string }[]
+  pulados: number
+  aviso: string | null
+}> {
+  const todos = [...casaveis.entries()].map(([lid, numero]) => ({ lid, numero }))
+  const tudo = (aviso: string) => ({ fila: todos, pulados: 0, aviso })
+
+  // 1) Último andamento de cada processo, na visão do ADVBOX.
+  const ultimos = new Map<string, string>()
+  try {
+    for (const r of await fetchAll(ctx, '/last_movements')) {
+      const lid = str(r.lawsuit_id) ?? str(r.id)
+      const iso = extrairData(r)
+      if (lid && iso) ultimos.set(lid, iso.slice(0, 10))
+    }
+  } catch (e) {
+    return tudo(`/last_movements falhou (${(e as Error).message})`)
+  }
+  // Vazio é resposta SUSPEITA, não "nada se moveu": a conta tem processos com
+  // andamento. Tratar como "nada mudou" congelaria a sincronização em silêncio.
+  if (ultimos.size === 0) return tudo('/last_movements devolveu vazio')
+
+  // 2) O que o nosso cache já sabe. PAGINADO: uma linha por crédito, e o
+  //    PostgREST corta a resposta no teto dele sem avisar — carteira grande
+  //    voltaria incompleta, e cada linha faltando viraria um processo relido
+  //    à toa (ou, pior, tratado como novo).
+  const cache = new Map<string, string | null>()
+  try {
+    const svc = serviceClient()
+    const POR_PAGINA = 1000
+    for (let p = 0; p < 50; p++) {
+      const de = p * POR_PAGINA
+      const { data, error } = await svc
+        .from('advbox_processo_status')
+        .select('numero_processo, ultima_movimentacao')
+        .order('numero_processo')
+        .range(de, de + POR_PAGINA - 1)
+      if (error) throw new Error(error.message)
+      const lote = (data ?? []) as {
+        numero_processo: string
+        ultima_movimentacao: string | null
+      }[]
+      for (const r of lote) cache.set(r.numero_processo, r.ultima_movimentacao)
+      if (lote.length < POR_PAGINA) break
+    }
+  } catch (e) {
+    return tudo(`leitura do cache falhou (${(e as Error).message})`)
+  }
+
+  // 3) Entra na fila quem nunca foi sincronizado e quem divergiu — em qualquer
+  //    direção. Data nova, data que sumiu, data diferente: tudo é motivo para
+  //    reler o histórico daquele processo.
+  const fila = todos.filter(({ lid, numero }) => {
+    if (!cache.has(numero)) return true
+    return (ultimos.get(lid) ?? null) !== (cache.get(numero) ?? null)
+  })
+  return { fila, pulados: todos.length - fila.length, aviso: null }
+}
+
 // Extrai o texto de um andamento (defensivo).
 function extrairConteudo(m: Record<string, unknown>): string | null {
   const cands = [m.description, m.text, m.movement, m.content, m.title, m.name, m.description_movement]
@@ -201,9 +286,25 @@ Deno.serve(async (req: Request) => {
     // auto-encadeiam, para não estourar o limite de recursos do edge function.
     const primeira = !Array.isArray((body as { fila?: unknown }).fila)
     let fila: { lid: string; numero: string }[]
+    // Diagnóstico da seleção — só existe na primeira chamada da cadeia, e vai na
+    // resposta: sincronização que pula processos precisa dizer quantos pulou, senão
+    // "0 gravados" fica indistinguível de "quebrou".
+    let pulados = 0
+    let avisoSelecao: string | null = null
     if (primeira) {
       const casaveis = await processosCasaveis(ctx)
-      fila = [...casaveis.entries()].map(([lid, numero]) => ({ lid, numero }))
+      // tudo=true relê o histórico de TODOS, ignorando a detecção de mudança. É a
+      // saída para cache com data errada: sem ela, um registro corrompido faria a
+      // sincronização pular aquele processo para sempre, e nada na tela diria.
+      if ((body as { tudo?: boolean }).tudo === true) {
+        fila = [...casaveis.entries()].map(([lid, numero]) => ({ lid, numero }))
+        avisoSelecao = 'tudo=true: reli o histórico de todos'
+      } else {
+        const sel = await filaQueMudou(ctx, casaveis)
+        fila = sel.fila
+        pulados = sel.pulados
+        avisoSelecao = sel.aviso
+      }
       // Poda SÓ o que saiu do cadastro (histórico não expira por idade).
       // Movimentações: por lawsuit_id, que é estável; o número exibível pode
       // mudar de formato entre syncs. Só na primeira chamada da cadeia.
@@ -348,6 +449,9 @@ Deno.serve(async (req: Request) => {
       restante: resto.length,
       gravados,
       erros_no_lote: errosNoLote,
+      // Só na primeira chamada estes dois dizem algo: é ali que a fila é montada.
+      pulados_sem_mudanca: pulados,
+      selecao: avisoSelecao,
     })
   } catch (err) {
     return jsonResponse({ error: (err as Error).message }, 500)
