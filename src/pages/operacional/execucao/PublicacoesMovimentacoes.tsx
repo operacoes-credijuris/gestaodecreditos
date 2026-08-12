@@ -223,8 +223,6 @@ interface RespostaSync {
   diagnostico?: {
     oabs_ativas?: string[]
     oabs_ilegiveis?: string[]
-    /** Comunicações que o DJEN tem por OAB na janela. Zero = OAB provavelmente errada. */
-    comunicacoes_por_oab?: Record<string, number>
     buscas_falharam: number
   }
 }
@@ -277,9 +275,11 @@ function Publicacoes({ busca }: { busca: string }) {
       if (!d) return
       // Um aviso por vez, do mais grave ao menos: dois toques vermelhos juntos
       // viram ruído e ninguém lê o segundo.
-      const semNada = Object.entries(d.comunicacoes_por_oab ?? {})
-        .filter(([, n]) => n === 0)
-        .map(([oab]) => oab)
+      //
+      // OAB sem nenhuma comunicação na janela NÃO avisa mais. Era ruído: ou a OAB
+      // está errada — e aí é conserto de uma vez, não de todo dia — ou o advogado
+      // realmente não recebeu nada, que é normal. A contagem por OAB continua no
+      // `diagnostico` da função, para quem for investigar.
       if (d.buscas_falharam > 0) {
         toast.error(
           `DJEN: a busca falhou em ${d.buscas_falharam} das ${d.oabs_ativas?.length ?? '?'} OABs. ` +
@@ -289,14 +289,6 @@ function Publicacoes({ busca }: { busca: string }) {
         toast.error(
           `DJEN: ${d.oabs_ilegiveis.length} OAB cadastrada não pôde ser lida ` +
             `(${d.oabs_ilegiveis.join(', ')}). Intimação em nome dela é descartada.`,
-        )
-      } else if (semNada.length) {
-        // Não é erro: pode ser advogado que não recebeu nada no período. Mas OAB
-        // digitada errada dá exatamente este sintoma, e calada.
-        toast.toast(
-          `DJEN: nenhuma comunicação em 30 dias para ${semNada.join(', ')}. ` +
-            'Confira se a OAB está correta.',
-          'info',
         )
       }
     },
