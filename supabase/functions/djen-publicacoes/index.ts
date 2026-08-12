@@ -18,19 +18,38 @@ const DJEN = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao'
 const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '')
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** Uma página da API, com a contagem total que ela informa. */
+/**
+ * Uma página da API, com a contagem total que ela informa.
+ *
+ * INSISTE, E COM PACIÊNCIA DE SEGUNDOS. O DJEN responde 403 às requisições que
+ * vêm daqui — a Edge Function roda em datacenter (Oregon) e o IP é compartilhado
+ * com outros projetos da Supabase, então o limite por IP não é nem só nosso.
+ * Medido: da máquina de casa, dezenas de consultas seguidas sem um erro; do
+ * servidor, quatro em quatro barradas às 15:29 e as mesmas quatro passando às
+ * 15:08. É intermitente, não é proibição definitiva.
+ *
+ * Por isso a espera é em segundos e não em milissegundos: 600 ms não davam tempo
+ * de o bloqueio passar. E por isso 403 é tratado como erro TEMPORÁRIO, ao
+ * contrário do que a leitura literal do código diz — na prática, aqui, é.
+ *
+ * Custa pouco porque agora são 4 requisições, não 100: no pior caso são ~10 s de
+ * espera para uma OAB, e só quando ela está sendo barrada.
+ */
+const ESPERAS_MS = [1000, 3000, 6000]
+
 async function fetchPagina(
   url: string,
-  tries = 3,
 ): Promise<{ items: Record<string, unknown>[]; count: number }> {
-  for (let a = 1; a <= tries; a++) {
+  const tentativas = ESPERAS_MS.length + 1
+  for (let a = 1; a <= tentativas; a++) {
     try {
       const res = await fetch(url, {
-        headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'Mozilla/5.0',
+          'Accept-Language': 'pt-BR,pt;q=0.9',
+        },
       })
-      if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`)
-      // Erro que não é de tentar de novo (400, 403, 404): não há o que insistir,
-      // mas TAMBÉM não é vazio legítimo — lança, para o chamador contar a falha.
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const j = await res.json()
       return {
@@ -38,8 +57,8 @@ async function fetchPagina(
         count: Number(j?.count ?? 0),
       }
     } catch (e) {
-      if (a === tries) throw e
-      await sleep(600 * a)
+      if (a === tentativas) throw e
+      await sleep(ESPERAS_MS[a - 1])
     }
   }
   return { items: [], count: 0 }
@@ -252,21 +271,25 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Busca POR OAB, uma por vez em paralelo (são poucas). Ver buscarPorOab.
+    // Busca POR OAB, UMA DE CADA VEZ. Ver buscarPorOab.
+    //
+    // Em fila, e não em paralelo: quatro requisições simultâneas de um IP de
+    // datacenter compartilhado é exatamente o que dispara limite por IP, e o DJEN
+    // responde 403. Sendo 4 e não 100, esperar uma terminar para começar a outra
+    // custa segundos e evita a recusa que a gente mesmo provoca.
     const porId = new Map<string, Record<string, unknown>>()
     const falhas: { item: string; erro: string }[] = []
     const porOab: Record<string, number> = {}
-    await Promise.all(
-      [...oabSet].map(async (oab) => {
-        try {
-          const r = await buscarPorOab(oab, janela)
-          porOab[oab] = r.total
-          for (const it of r.items) if (it?.id != null) porId.set(String(it.id), it)
-        } catch (e) {
-          falhas.push({ item: oab, erro: String((e as Error)?.message ?? e) })
-        }
-      }),
-    )
+    for (const oab of oabSet) {
+      try {
+        const r = await buscarPorOab(oab, janela)
+        porOab[oab] = r.total
+        for (const it of r.items) if (it?.id != null) porId.set(String(it.id), it)
+      } catch (e) {
+        falhas.push({ item: oab, erro: String((e as Error)?.message ?? e) })
+      }
+      await sleep(400) // respiro entre OABs, pelo mesmo motivo
+    }
 
     // O RECORTE: intimação + processo cadastrado + em nome de OAB cadastrada.
     // Cada descarte é contado, para a resposta dizer POR QUE o número final é o
