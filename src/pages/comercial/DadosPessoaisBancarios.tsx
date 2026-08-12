@@ -158,7 +158,7 @@ function GrupoDados({
     <div className="grid grid-cols-[max-content_1fr] items-baseline gap-x-2.5 gap-y-1">
       {preenchidas.map((l) => (
         <Fragment key={l.rotulo}>
-          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-400">
             {l.rotulo}
           </span>
           {/* break-words: chave Pix de e-mail não tem espaço e, com a tabela de
@@ -518,7 +518,7 @@ export default function DadosPessoaisBancarios() {
             // Larguras fixadas por coluna: sem elas o navegador distribui a
             // sobra por igual e cada coluna curta vira um vão em branco.
             // py-2.5 adensa as linhas — cada célula agrupada já é alta.
-            <Table className="table-fixed [&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:py-2.5 [&_td]:text-[13px]">
+            <Table className="table-fixed [&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:py-2.5 [&_td]:text-sm">
               <THead>
                 <tr>
                   <TH className="w-[19%]">Nome do {visao.rotulo.toLowerCase()}</TH>

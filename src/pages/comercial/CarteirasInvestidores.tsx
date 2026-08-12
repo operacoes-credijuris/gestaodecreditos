@@ -156,7 +156,7 @@ const COR_GRUPO = {
 }
 
 // Caixa alta desligada nos títulos dos grupos (o <thead> aplica uppercase).
-const GRUPO = 'text-[13px] font-bold normal-case tracking-normal'
+const GRUPO = 'text-sm font-bold normal-case tracking-normal'
 
 /**
  * Altura dos botões da barra do investidor.
@@ -228,7 +228,7 @@ function CelulaResumo({
 // nowrap também nos <th>: com 25 colunas, um título como "Providências /
 // prox. passos" quebrava em quatro linhas e esticava o cabeçalho inteiro.
 const CLASSES_CARTEIRA =
-  '[&_th]:whitespace-nowrap [&_th]:px-2.5 [&_td]:whitespace-nowrap [&_td]:px-2.5 [&_td]:text-[13px]'
+  '[&_th]:whitespace-nowrap [&_th]:px-2.5 [&_td]:whitespace-nowrap [&_td]:px-2.5 [&_td]:text-sm'
 
 function Individual() {
   const processos = processosCrud.useList()
@@ -650,7 +650,7 @@ function Individual() {
                     Calculado automaticamente
                   </TH>
                 </tr>
-                <tr className="border-t border-slate-200 text-[11px] font-medium normal-case tracking-normal text-slate-600">
+                <tr className="border-t border-slate-200 text-xs font-medium normal-case tracking-normal text-slate-600">
                   <TH>Nº processo</TH>
                   <TH>Cedente</TH>
                   <TH>Advogado</TH>
@@ -1143,7 +1143,7 @@ function Consolidado() {
               />
             )
           ) : (
-            <Table className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:text-[13px]">
+            <Table className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:text-sm">
               <THead>
                 <tr>
                   <TH>Investidor</TH>

@@ -128,18 +128,42 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
 
 // ---------- Consultas ----------
 
-/** Cards do funil informado (espelho local). */
+/**
+ * Cards do funil informado (espelho local).
+ *
+ * PAGINADO, e não uma consulta só: o PostgREST tem um teto próprio de linhas por
+ * resposta, independente do que se pede, e ele não avisa que cortou — devolve
+ * menos linhas como se fossem todas. O espelho cresce com o CRM (só o funil de RPV
+ * já passa de 140 cards), e no dia em que passar do teto as etapas começariam a
+ * mostrar contagem menor do que a real, sem nenhum sinal na tela. É o mesmo defeito
+ * que escondeu intimações do DJEN até a gente instrumentar a sincronização.
+ *
+ * O laço para quando a página vem incompleta, que é o fim dos dados. O limite de
+ * páginas é rede de segurança contra laço infinito, não expectativa de volume.
+ */
+const POR_PAGINA = 1000
+const MAX_PAGINAS = 20
+
 export function useKommoLeads(pipelineId: number) {
   return useQuery({
     queryKey: ['kommo_leads', pipelineId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('kommo_leads')
-        .select('*')
-        .eq('pipeline_id', pipelineId)
-        .order('atualizado_em', { ascending: false })
-      if (error) throw new Error(error.message)
-      return (data ?? []) as KommoLead[]
+      const todos: KommoLead[] = []
+      for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
+        const de = pagina * POR_PAGINA
+        const { data, error } = await supabase
+          .from('kommo_leads')
+          .select('*')
+          .eq('pipeline_id', pipelineId)
+          .order('atualizado_em', { ascending: false })
+          .order('kommo_lead_id', { ascending: false })
+          .range(de, de + POR_PAGINA - 1)
+        if (error) throw new Error(error.message)
+        const lote = (data ?? []) as KommoLead[]
+        todos.push(...lote)
+        if (lote.length < POR_PAGINA) break
+      }
+      return todos
     },
   })
 }

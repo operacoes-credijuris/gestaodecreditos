@@ -353,11 +353,20 @@ export default function Processos() {
    * que já estava lá — campo que a pasta não informa fica como estava — e libera os
    * campos para edição, sem trocar de aba.
    */
-  function preencherDoDrive(dados: PreenchimentoDoDrive) {
+  function preencherDoDrive(
+    dados: PreenchimentoDoDrive,
+    opts?: { avisar?: boolean },
+  ) {
+    // MESCLA, não substitui: as ondas do preenchimento se completam, e trocar o
+    // estado apagaria o que o caminho da pasta já trouxe.
     setFormAuto((atual) => ({ ...(atual ?? {}), ...dados }))
     setErros({})
     setAutoPreenchido(true)
-    toast.success('Campos preenchidos pela pasta. Confira antes de salvar.')
+    // Só a onda final avisa. Avisar na primeira era pedir conferência de um
+    // formulário que ainda estava sendo preenchido.
+    if (opts?.avisar) {
+      toast.success('Campos preenchidos pela pasta. Confira antes de salvar.')
+    }
   }
 
   // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já

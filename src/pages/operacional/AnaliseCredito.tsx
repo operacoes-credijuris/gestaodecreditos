@@ -305,7 +305,11 @@ function CardCredito({
                 Reprovado no Portão 1: {(resultadoAnalise.motivos ?? []).join(' ')}
               </div>
             ) : (
-              <div className="text-green-700">
+              // emerald, não green: é o verde de "deu certo" em todo o resto da
+              // plataforma (Badge, Toast, StatCard, valores positivos). São dois
+              // verdes diferentes do Tailwind, e um só lugar fora do padrão é o
+              // bastante para a tela parecer remendada.
+              <div className="text-emerald-700">
                 ✅ Planilha gerada.{' '}
                 {typeof resultadoAnalise.drive_file_url === 'string' && (
                   <a
@@ -353,7 +357,11 @@ function CardCredito({
           href={urlCard(lead.kommo_lead_id)}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-slate-600 transition-colors hover:text-slate-600"
+          // hover:text-brand-700, e não o mesmo slate-600 de antes: o link
+          // anunciava transição de cor e mudava para a própria cor, então o
+          // ponteiro não recebia resposta nenhuma. brand-700 é o hover de link do
+          // resto da plataforma (ver NumeroProcessoDrive).
+          className="inline-flex items-center gap-1 text-xs text-slate-600 transition-colors hover:text-brand-700"
         >
           <ExternalLink className="h-3.5 w-3.5" /> Abrir no Kommo
         </a>

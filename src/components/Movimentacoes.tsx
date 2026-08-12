@@ -189,7 +189,7 @@ function ChipSituacao({
       aria-pressed={ativo}
       title={ativo ? `Ocultar ${rotulo}` : `Mostrar ${rotulo}`}
       className={cn(
-        'inline-flex items-center gap-1 text-[11px] transition-colors',
+        'inline-flex items-center gap-1 text-xs transition-colors',
         ativo
           ? 'text-slate-600 hover:text-slate-700'
           : 'text-slate-300 hover:text-slate-600',
@@ -416,7 +416,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
       ) : (
         <>
           {sync.isPending && listaTar.length > 0 && (
-            <p className="mb-2 text-[11px] text-slate-600">atualizando do ADVBOX…</p>
+            <p className="mb-2 text-xs text-slate-600">atualizando do ADVBOX…</p>
           )}
 
           {tarefas.isLoading ? (

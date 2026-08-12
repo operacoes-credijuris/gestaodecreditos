@@ -92,7 +92,13 @@ export function NovoCreditoDoDrive({
   onPreencher,
 }: {
   processos: Pick<Processo, 'numero_cnj' | 'cedente'>[] | undefined
-  onPreencher: (dados: PreenchimentoDoDrive) => void
+  /**
+   * `avisar` distingue a ONDA FINAL das intermediárias. O preenchimento acontece
+   * em duas ondas (ver usarPasta), e sem esta marca a tela avisava "confira antes
+   * de salvar" duas vezes por pasta escolhida — a primeira quando ainda faltava
+   * tudo o que a IA ia trazer, e é justamente o aviso que pede conferência.
+   */
+  onPreencher: (dados: PreenchimentoDoDrive, opts?: { avisar?: boolean }) => void
 }) {
   const [buscando, setBuscando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -160,7 +166,7 @@ export function NovoCreditoDoDrive({
         documentos: leitura.documentos,
         contexto,
       })
-      onPreencher(camposParaProcesso(r.campos ?? {}))
+      onPreencher(camposParaProcesso(r.campos ?? {}), { avisar: true })
       setExtracao({ ...r, ignorados: leitura.ignorados })
     } catch (e) {
       setErro((e as Error).message)
