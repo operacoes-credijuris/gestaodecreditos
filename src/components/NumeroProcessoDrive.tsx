@@ -21,6 +21,7 @@ export function NumeroProcessoDrive({
   processo,
   numero,
   className,
+  reservarIcone,
 }: {
   /**
    * O crédito, quando a tarefa/linha casou com um. Nulo em tarefa de processo que
@@ -30,6 +31,15 @@ export function NumeroProcessoDrive({
   /** O número a exibir. Vem separado porque em Tarefas ele é o da tarefa. */
   numero: string | null | undefined
   className?: string
+  /**
+   * Guarda o espaço do ícone da pasta mesmo quando não há pasta para abrir.
+   *
+   * Só quem tem ALGO DEPOIS do número na mesma linha precisa disto: sem a reserva,
+   * o que vem depois anda 14px para a esquerda nas linhas sem pasta, e numa lista
+   * inteira isso vira ziguezague. Fora desse caso a reserva seria um buraco à
+   * direita do número, então é opt-in.
+   */
+  reservarIcone?: boolean
 }) {
   const toast = useToast()
   const [abrindo, setAbrindo] = useState(false)
@@ -74,7 +84,16 @@ export function NumeroProcessoDrive({
     }
   }
 
-  if (!podeAbrir) return <span className={className}>{texto}</span>
+  if (!podeAbrir) {
+    return (
+      <span className={cn(reservarIcone && 'inline-flex items-center gap-1', className)}>
+        {texto}
+        {reservarIcone && (
+          <span className="inline-block h-3.5 w-3.5 flex-none" aria-hidden="true" />
+        )}
+      </span>
+    )
+  }
 
   return (
     <button

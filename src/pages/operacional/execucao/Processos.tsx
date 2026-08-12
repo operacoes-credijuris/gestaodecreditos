@@ -223,7 +223,7 @@ function CampoMoeda({
 // Atualizar ao adicionar/remover colunas para a linha continuar ocupando a largura toda.
 // A tabela mostra só o essencial para escanear; a ficha completa (advogado,
 // tribunal, datas de liquidação etc.) abre no Drawer ao clicar na linha.
-const N_COLUNAS = 8
+const N_COLUNAS = 7
 
 // Bolinha de status ao lado do nº do processo — o status por extenso é
 // redundante com o filtro de pílulas acima da tabela; a cor basta.
@@ -646,7 +646,6 @@ export default function Processos() {
             <THead>
               <tr>
                 <TH>Processo</TH>
-                <TH className="w-[1%] whitespace-nowrap">Espécie</TH>
                 <TH>Entidade devedora</TH>
                 <SortableTH
                   label="Aquisição"
@@ -690,51 +689,48 @@ export default function Processos() {
                           )}
                         />
                         <div className="min-w-0">
-                          {/* tabular-nums: a fonte do app tem dígitos de largura
-                              VARIÁVEL, então dois números CNJ de mesmo tamanho
-                              ocupavam larguras diferentes e tudo que vinha depois
-                              deles ziguezagueava de linha em linha. */}
-                          <NumeroProcessoDrive
-                            processo={p}
-                            numero={p.numero_cnj}
-                            className="whitespace-nowrap tabular-nums"
-                          />
+                          <span className="inline-flex items-center gap-1.5">
+                            {/* O SELO ALINHA ENTRE AS LINHAS sem precisar de coluna,
+                                e são duas coisas que fazem isso:
+                                  - tabular-nums, porque a fonte do app tem dígitos
+                                    de largura VARIÁVEL e dois números CNJ de mesmo
+                                    comprimento mediam diferente;
+                                  - reservarIcone, porque o ícone da pasta do Drive
+                                    só existe em crédito com pasta e a sua ausência
+                                    puxava tudo 14px para a esquerda.
+                                Com os dois, o número ocupa sempre a mesma largura e
+                                o que vem depois começa sempre no mesmo ponto. */}
+                            <NumeroProcessoDrive
+                              processo={p}
+                              numero={p.numero_cnj}
+                              className="whitespace-nowrap tabular-nums"
+                              reservarIcone
+                            />
+                            {/* Espécie colada no número: é natureza do requisitório,
+                                como o número — não é situação do crédito (isso é o
+                                status) nem valor. */}
+                            {p.especie_requisitorio && (
+                              <Badge
+                                size="sm"
+                                tone={
+                                  ESPECIE_REQUISITORIO[p.especie_requisitorio]?.tone ??
+                                  'gray'
+                                }
+                              >
+                                {ESPECIE_REQUISITORIO[p.especie_requisitorio]?.label ??
+                                  p.especie_requisitorio}
+                              </Badge>
+                            )}
+                            {/* Apensos à direita da espécie: número e espécie
+                                identificam o requisitório, e o contador é ação
+                                sobre ele. */}
+                            {apensos.contador(p.id)}
+                          </span>
                           {/* Nomes completos: quebram em linhas em vez de truncar. */}
                           <div className="text-xs font-normal text-slate-600">
                             {p.cedente || '—'} v. {p.cessionario || '—'}
                           </div>
                         </div>
-                      </div>
-                    </TD>
-                    {/* ESPÉCIE E APENSOS EM COLUNA PRÓPRIA — a tabulação do Word.
-                        Estavam colados no número, e ali a aresta esquerda do selo
-                        dependia de duas coisas que variam por linha: a largura do
-                        número e a presença do ícone da pasta do Drive (que só
-                        aparece em crédito com pasta). Coluna é o único jeito de
-                        alinhar entre linhas: célula da mesma coluna começa sempre
-                        no mesmo x. w-[1%] mantém a coluna no tamanho do conteúdo,
-                        sem roubar largura das outras. */}
-                    <TD className="w-[1%] whitespace-nowrap">
-                      {/* min-h de uma linha de texto (13/19px, escala do app) para
-                          o selo, que tem leading-none, centrar na altura do número
-                          em vez de encostar no topo da célula. */}
-                      <div className="flex min-h-[19px] items-center gap-1.5">
-                        {p.especie_requisitorio && (
-                          <Badge
-                            size="sm"
-                            tone={
-                              ESPECIE_REQUISITORIO[p.especie_requisitorio]?.tone ??
-                              'gray'
-                            }
-                          >
-                            {ESPECIE_REQUISITORIO[p.especie_requisitorio]?.label ??
-                              p.especie_requisitorio}
-                          </Badge>
-                        )}
-                        {/* Contador/expandir dos apensos à direita da espécie:
-                            número e espécie identificam o requisitório, e o
-                            contador é ação sobre ele. */}
-                        {apensos.contador(p.id)}
                       </div>
                     </TD>
                     <TD>
