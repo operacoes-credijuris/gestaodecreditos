@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Field'
-import { Segmented } from '@/components/ui/Segmented'
+import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
@@ -185,26 +185,31 @@ export default function PublicacoesMovimentacoes() {
     <div>
       <PageHeader title="Publicações e Movimentações" />
 
+      {/* Tabs, e não Segmented: Publicações/Movimentações são DUAS VISÕES da aba —
+          duas fontes de dados distintas (DJEN e ADVBOX) —, o mesmo papel de
+          RPV/Precatórios na Análise e de Investidores/Originadores nos Dados
+          cadastrais. A regra da plataforma: sublinhado para visões, pílula para
+          filtros dentro da visão. A busca fica no cartão, que é dela. */}
+      <div className="mb-4">
+        <Tabs
+          items={[
+            { key: 'publicacoes', label: 'Publicações', count: nPub.data },
+            { key: 'movimentacoes', label: 'Movimentações', count: nMov.data },
+          ]}
+          value={aba}
+          onChange={(k) => setAba(k as typeof aba)}
+        />
+      </div>
+
       <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <Segmented
-            ariaLabel="Alternar entre publicações e movimentações"
-            items={[
-              { key: 'publicacoes', label: 'Publicações', count: nPub.data },
-              { key: 'movimentacoes', label: 'Movimentações', count: nMov.data },
-            ]}
-            value={aba}
-            onChange={(k) => setAba(k as typeof aba)}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <Input
+            className="pl-9"
+            placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
           />
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
         </div>
       </Card>
 

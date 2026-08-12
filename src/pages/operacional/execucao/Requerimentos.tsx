@@ -252,7 +252,7 @@ export default function Requerimentos() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <Input
             className="pl-9"
-            placeholder="Buscar por protocolo, órgão, matéria, classe processual…"
+            placeholder="Buscar por protocolo, requerente, requerido, órgão, matéria…"
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
           />

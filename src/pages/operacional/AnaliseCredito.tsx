@@ -252,9 +252,14 @@ function CardCredito({
             diferença entre ver seis cards e ver dez. Vem antes das ações porque é
             o passo anterior a elas — analisa, depois encaminha. */}
         <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
+          {/* outline, e não secondary (preto): este botão repete em TODO card, e
+              numa lista de dezenas o preto vira o elemento mais pesado da tela —
+              além de ser a única cor fora da família da marca. Contido, ele deixa
+              as ações de decisão (azul/verde/laranja/vermelho) carregarem o
+              significado, que é o papel delas. */}
           <Button
             size="sm"
-            variant="secondary"
+            variant="outline"
             icon={<FileSearch className="h-4 w-4" />}
             onClick={() => onAnalisar(lead)}
             loading={analisando}
