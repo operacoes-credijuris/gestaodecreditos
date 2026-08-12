@@ -63,3 +63,9 @@ verify_jwt = false
 # antes de gastar uma chamada de IA.
 [functions.extrair-credito]
 verify_jwt = true
+
+# Cadastro do processo na ADVBOX ao salvar o crédito. Só é disparada por pessoa —
+# ao salvar um crédito, ou ao carregar as opções na tela de Configurações. Nunca
+# por cron, e ela ESCREVE no sistema do escritório: o JWT é exigido no portão.
+[functions.advbox-processos]
+verify_jwt = true

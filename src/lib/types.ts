@@ -335,6 +335,22 @@ export interface Integracao {
 
 export interface ConfigAdvbox {
   base_url?: string
+  /**
+   * Cadastro automático do processo na ADVBOX ao salvar um crédito.
+   *
+   * Os quatro IDs são exigidos pela API da ADVBOX e precisam existir na conta —
+   * por isso são ESCOLHIDOS na tela, a partir das listas da própria conta, e não
+   * digitados. Sem os quatro, ou com `ativo` falso, nada é criado.
+   */
+  criar_processo?: {
+    ativo?: boolean
+    users_id?: number | string
+    stages_id?: number | string
+    type_lawsuits_id?: number | string
+    customers_id?: number | string
+    /** Só para a tela mostrar o cliente escolhido sem consultar de novo. */
+    customer_nome?: string
+  }
 }
 
 export interface ConfigDjen {

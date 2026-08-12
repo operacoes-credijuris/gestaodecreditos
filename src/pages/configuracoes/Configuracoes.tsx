@@ -203,18 +203,65 @@ function AnthropicConfig() {
 }
 
 // ----------------------- ADVBOX -----------------------
+/** Listas da conta ADVBOX, para as escolhas do cadastro automático. */
+interface OpcoesAdvbox {
+  users: { id: number | string; name: string }[]
+  stages: { id: number | string; name: string }[]
+  lawsuit_types: { id: number | string; name: string }[]
+  customers: { id: number | string; name: string }[]
+}
+
+type CriarProcesso = NonNullable<ConfigAdvbox['criar_processo']>
+
 function AdvboxConfig() {
   const { data, isLoading, error } = useIntegracao('advbox')
   const qc = useQueryClient()
   const toast = useToast()
   const [baseUrl, setBaseUrl] = useState('')
+  // Cadastro automático do processo. Vive no mesmo registro de integração, e por
+  // isso é salvo pelo mesmo botão — dois botões de salvar no mesmo cartão levariam
+  // alguém a mexer num campo e clicar no outro.
+  const [cp, setCp] = useState<CriarProcesso>({})
+  const [opcoes, setOpcoes] = useState<OpcoesAdvbox | null>(null)
+  const [carregando, setCarregando] = useState(false)
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     const cfg = (data?.config as ConfigAdvbox) ?? {}
     setBaseUrl(cfg.base_url ?? '')
+    setCp(cfg.criar_processo ?? {})
   }, [data])
+
+  async function carregarOpcoes() {
+    setCarregando(true)
+    try {
+      const r = await invokeFunction<OpcoesAdvbox>('advbox-processos', {
+        action: 'options',
+        cliente_nome: 'credijuris',
+      })
+      setOpcoes(r)
+      // Cliente único encontrado e nada escolhido ainda: já seleciona. É o caso
+      // esperado ("o cliente é sempre a Credijuris") e poupar o clique evita o
+      // erro de salvar com o cliente em branco.
+      if (r.customers.length === 1 && cp.customers_id == null) {
+        setCp((a) => ({
+          ...a,
+          customers_id: r.customers[0].id,
+          customer_nome: r.customers[0].name,
+        }))
+      }
+      if (!r.customers.length) {
+        toast.error(
+          'Nenhum cliente com "credijuris" no nome foi encontrado na ADVBOX. Confira o cadastro do cliente lá.',
+        )
+      }
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setCarregando(false)
+    }
+  }
 
   const configurado = Boolean((data?.config as { configurado?: boolean })?.configurado)
 
@@ -236,6 +283,27 @@ function AdvboxConfig() {
       const cfg: Record<string, unknown> = { ...(data?.config as object) }
       if (url) cfg.base_url = url
       else delete cfg.base_url
+      // Ligar sem os quatro IDs gravaria uma configuração que a função recusa a
+      // cada crédito salvo, e o motivo ficaria só no retorno da chamada — invisível
+      // para quem clicou aqui. Barra no único momento em que dá para explicar.
+      if (cp.ativo) {
+        const falta = (
+          [
+            ['customers_id', 'o cliente'],
+            ['users_id', 'o responsável'],
+            ['stages_id', 'a fase'],
+            ['type_lawsuits_id', 'o tipo de processo'],
+          ] as const
+        ).filter(([k]) => cp[k] == null || cp[k] === '')
+        if (falta.length) {
+          toast.error(
+            `Para ligar o cadastro automático, escolha ${falta.map(([, r]) => r).join(', ')}.`,
+          )
+          setSaving(false)
+          return
+        }
+      }
+      cfg.criar_processo = cp
       const { error } = await supabase
         .from('integracoes')
         .upsert({ servico: 'advbox', config: cfg, ativo: true }, { onConflict: 'servico' })
@@ -304,6 +372,114 @@ function AdvboxConfig() {
                 autoComplete="off"
               />
             </Field>
+            {/* CADASTRO AUTOMÁTICO DO PROCESSO.
+                A ADVBOX só traz movimentações de processo cadastrado nela, e
+                crédito esquecido lá fica sem andamento sem que nada acuse: a aba
+                Movimentações apenas não mostra aquele processo, o que é igual a
+                "não houve movimentação". Daí automatizar em vez de confiar na
+                lembrança.
+
+                As quatro escolhas são exigência da API — ela recusa a criação sem
+                cliente, responsável, fase e tipo. Vêm em lista, da própria conta,
+                porque pedir ID digitado seria pedir para errar. */}
+            <div className="space-y-3 border-t border-slate-200 pt-4 sm:col-span-2">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-800">
+                <input
+                  type="checkbox"
+                  className="accent-brand-600"
+                  checked={!!cp.ativo}
+                  onChange={(e) => setCp({ ...cp, ativo: e.target.checked })}
+                />
+                Cadastrar o processo na ADVBOX ao salvar um crédito novo
+              </label>
+
+              {!opcoes ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button variant="outline" onClick={carregarOpcoes} loading={carregando}>
+                    Carregar opções da conta
+                  </Button>
+                  {!!cp.customers_id && (
+                    <span className="text-xs text-slate-600">
+                      Configurado: cliente {cp.customer_nome || cp.customers_id}.
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Cliente do processo"
+                    hint="Buscado na ADVBOX pelo nome “credijuris”."
+                  >
+                    <Select
+                      value={String(cp.customers_id ?? '')}
+                      onChange={(e) => {
+                        const achado = opcoes.customers.find(
+                          (c) => String(c.id) === e.target.value,
+                        )
+                        setCp({
+                          ...cp,
+                          customers_id: e.target.value || undefined,
+                          customer_nome: achado?.name,
+                        })
+                      }}
+                    >
+                      <option value="">Escolha…</option>
+                      {opcoes.customers.map((c) => (
+                        <option key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Responsável">
+                    <Select
+                      value={String(cp.users_id ?? '')}
+                      onChange={(e) =>
+                        setCp({ ...cp, users_id: e.target.value || undefined })
+                      }
+                    >
+                      <option value="">Escolha…</option>
+                      {opcoes.users.map((u) => (
+                        <option key={u.id} value={String(u.id)}>
+                          {u.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Fase processual">
+                    <Select
+                      value={String(cp.stages_id ?? '')}
+                      onChange={(e) =>
+                        setCp({ ...cp, stages_id: e.target.value || undefined })
+                      }
+                    >
+                      <option value="">Escolha…</option>
+                      {opcoes.stages.map((s) => (
+                        <option key={s.id} value={String(s.id)}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Tipo de processo">
+                    <Select
+                      value={String(cp.type_lawsuits_id ?? '')}
+                      onChange={(e) =>
+                        setCp({ ...cp, type_lawsuits_id: e.target.value || undefined })
+                      }
+                    >
+                      <option value="">Escolha…</option>
+                      {opcoes.lawsuit_types.map((t) => (
+                        <option key={t.id} value={String(t.id)}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+              )}
+            </div>
+
             <div className="sm:col-span-2">
               <Button onClick={salvar} loading={saving}>
                 Salvar

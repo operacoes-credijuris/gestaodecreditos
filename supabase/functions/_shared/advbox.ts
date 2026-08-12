@@ -129,6 +129,71 @@ export async function getJson(
   throw new Error(`${path} → ${ultimoErro} (após ${tries} tentativas)`)
 }
 
+/**
+ * POST com throttle e retry SÓ para requisição RECUSADA (429, 403 e corpo de erro
+ * do Cloudflare com HTTP 200).
+ *
+ * 5xx NÃO é repetido aqui, ao contrário do getJson, e a diferença é a única que
+ * importa: repetir um GET é inofensivo, mas num POST o servidor pode ter criado o
+ * recurso e falhado só ao responder — a segunda tentativa criaria o SEGUNDO
+ * processo, no sistema onde o escritório trabalha, e ninguém saberia de onde veio.
+ * Recusa é diferente: 429 e 403 significam que a requisição não foi processada, e
+ * aí repetir é seguro.
+ *
+ * Quem chama trata a falha como "não sei se criou" — e é por isso que a criação
+ * consulta antes de criar: a passagem seguinte encontra o que ficou pela metade.
+ */
+export async function postJson(
+  ctx: AdvboxCtx,
+  path: string,
+  body: unknown,
+  tries = 4,
+): Promise<unknown> {
+  let ultimoErro = 'desconhecido'
+  for (let a = 1; a <= tries; a++) {
+    await throttle()
+    const res = await fetch(`${ctx.base}${path}`, {
+      method: 'POST',
+      headers: { ...ctx.headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (res.status === 429 || res.status === 403) {
+      ultimoErro = `HTTP ${res.status}`
+      if (a < tries) {
+        const ra = Number(res.headers.get('retry-after'))
+        const espera =
+          Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 15000) : 700 * 2 ** (a - 1)
+        await sleep(espera + Math.floor(Math.random() * 300))
+      }
+      continue
+    }
+    // Corpo lido como texto primeiro: erro de validação do ADVBOX vem em JSON,
+    // mas erro de gateway vem em HTML, e um JSON.parse cru viraria "Unexpected
+    // token <" — mensagem que não ajuda ninguém a entender o que foi recusado.
+    const texto = await res.text()
+    let j: unknown = null
+    try {
+      j = texto ? JSON.parse(texto) : null
+    } catch {
+      j = null
+    }
+    if (isCloudflareError(j)) {
+      ultimoErro = 'cloudflare rate limit'
+      if (a < tries) await sleep(700 * 2 ** (a - 1) + Math.floor(Math.random() * 300))
+      continue
+    }
+    if (!res.ok) {
+      const detalhe =
+        (j as { message?: string; error?: string } | null)?.message ??
+        (j as { error?: string } | null)?.error ??
+        texto.slice(0, 300)
+      throw new Error(`HTTP ${res.status}${detalhe ? ` — ${detalhe}` : ''}`)
+    }
+    return j
+  }
+  throw new Error(`${path} → ${ultimoErro} (após ${tries} tentativas)`)
+}
+
 /** Paginação padrão do ADVBOX: { offset, limit, totalCount, data }. */
 export async function fetchAll(
   ctx: AdvboxCtx,

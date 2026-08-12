@@ -16,6 +16,7 @@ import {
   useUltimaMovimentacao,
 } from '@/lib/queries'
 import { listarPessoas } from '@/lib/pessoas'
+import { invokeFunction } from '@/lib/functions'
 import {
   NovoCreditoDoDrive,
   type PreenchimentoDoDrive,
@@ -540,12 +541,56 @@ export default function Processos() {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Crédito atualizado.')
       } else {
-        await create.mutateAsync(payload)
+        const criado = await create.mutateAsync(payload)
         toast.success('Crédito cadastrado.')
+        // FORA do await do salvamento, de propósito: o cadastro na ADVBOX é
+        // consequência, não condição. Se a ADVBOX estiver fora do ar, o crédito
+        // continua salvo aqui — travar o cadastro da plataforma por causa de um
+        // sistema externo seria trocar um problema pequeno por um grande.
+        if (criado?.id) void cadastrarNaAdvbox(criado.id)
       }
       fecharTudo()
     } catch (err) {
       toast.error((err as Error).message)
+    }
+  }
+
+  /**
+   * Cadastra o processo do crédito recém-criado na ADVBOX.
+   *
+   * A ADVBOX só traz movimentações de processo cadastrado nela, e o esquecimento
+   * não aparece em lugar nenhum: a aba Movimentações simplesmente não mostra aquele
+   * processo, o que é indistinguível de "não houve movimentação". Por isso é
+   * automático — e por isso avisa quando NÃO consegue.
+   *
+   * O silêncio é escolhido caso a caso. Integração desligada não é notícia; falha
+   * de verdade é, senão o esquecimento volta pela porta dos fundos.
+   */
+  async function cadastrarNaAdvbox(processoId: string) {
+    try {
+      const r = await invokeFunction<{
+        ok?: boolean
+        motivo?: string
+        criado?: boolean
+        ja_existia?: boolean
+        detalhe?: string
+        aviso?: string
+      }>('advbox-processos', { action: 'criar', processo_id: processoId })
+
+      if (r.ok && r.criado) toast.success('Processo cadastrado na ADVBOX.')
+      // Já existia: nada a dizer. É o caso de quem cadastrou o processo lá antes,
+      // e virou vínculo — informar aqui seria ruído sobre algo que deu certo.
+      else if (r.motivo === 'incompleto')
+        toast.error(
+          'Cadastro automático na ADVBOX está ligado, mas falta escolher responsável, fase, tipo ou cliente em Configurações.',
+        )
+      else if (r.motivo === 'numero_invalido')
+        toast.error(`Não cadastrei na ADVBOX: ${r.detalhe ?? 'número do processo inválido.'}`)
+      else if (r.aviso) toast.error(r.aviso)
+    } catch (err) {
+      // O crédito JÁ está salvo. Isto é aviso, não falha de cadastro — daí a
+      // mensagem dizer o que ficou pendente, e não parecer que nada funcionou.
+      toast.error(`Crédito salvo, mas não cadastrei na ADVBOX: ${(err as Error).message}`)
     }
   }
 
