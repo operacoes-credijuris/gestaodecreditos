@@ -3,6 +3,11 @@ import { RefreshCw } from 'lucide-react'
 // Indicador uniforme de sincronização em segundo plano: enquanto sincroniza,
 // mostra spinner + rótulo; depois, o horário da última atualização (HH:MM).
 // Sem sincronização em curso e sem updatedAt, não renderiza nada.
+//
+// TUDO EM MINÚSCULA, nos dois estados. O indicador nunca começa frase: ele vem
+// logo depois de uma contagem ("27 publicações · atualizado às 14:27"), e os
+// rótulos de "sincronizando" já eram minúsculos. Com "Atualizado" maiúsculo, a
+// mesma linha trocava de caixa sozinha ao terminar de carregar.
 export function SyncStatus({
   syncing,
   updatedAt,
@@ -24,7 +29,7 @@ export function SyncStatus({
   if (Number.isNaN(d.getTime())) return null
   return (
     <span className="text-xs text-slate-600">
-      Atualizado às{' '}
+      atualizado às{' '}
       {d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
     </span>
   )

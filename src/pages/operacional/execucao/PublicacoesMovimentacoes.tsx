@@ -233,8 +233,6 @@ interface RespostaSync {
 function Publicacoes({ busca }: { busca: string }) {
   const qc = useQueryClient()
   const toast = useToast()
-  /** Resumo da última sincronização desta sessão. Null antes da primeira. */
-  const [resumoSync, setResumoSync] = useState<string | null>(null)
 
   // Resolve cada publicação contra os cadastros (Crédito/Requerimento/Apenso).
   const resolve = useResolveProcesso()
@@ -262,17 +260,19 @@ function Publicacoes({ busca }: { busca: string }) {
 
   // Sincroniza com o DJEN em segundo plano ao abrir a página.
   //
-  // O `resumo` que a função devolve é MOSTRADO, não descartado. Ela já rodou dias
-  // devolvendo sucesso com um punhado de linhas, e ninguém tinha como saber que
-  // consultas estavam falhando — descobriu-se comparando com a plataforma antiga,
-  // seis dias depois. Agora: aviso na tela quando alguma consulta falha ou alguma
-  // OAB está ilegível, e silêncio quando está tudo certo.
+  // AVISA SÓ QUANDO HÁ O QUE AVISAR. A função devolve um `resumo` com a contagem
+  // de cada etapa, e ele NÃO vai para a tela — número que ninguém precisa ler todo
+  // dia é poluição. O que vai é o alarme: busca que falhou, OAB ilegível, OAB sem
+  // nenhuma comunicação. Em silêncio quando está tudo certo.
+  //
+  // O motivo de existir alarme: a sincronização já rodou dias devolvendo sucesso
+  // com um punhado de linhas, e a descoberta veio de comparar com a plataforma
+  // antiga, seis dias depois. O `resumo` completo continua na resposta da função,
+  // para quem for diagnosticar.
   const sync = useMutation({
-    mutationFn: () =>
-      invokeFunction<RespostaSync>('djen-publicacoes', {}),
+    mutationFn: () => invokeFunction<RespostaSync>('djen-publicacoes', {}),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['djen_publicacoes'] })
-      setResumoSync(r?.resumo ?? null)
       const d = r?.diagnostico
       if (!d) return
       // Um aviso por vez, do mais grave ao menos: dois toques vermelhos juntos
@@ -434,14 +434,6 @@ function Publicacoes({ busca }: { busca: string }) {
         />
       </div>
 
-      {/* Prestação de contas da sincronização, em uma linha. Fica visível de
-          propósito: o número de publicações sozinho não distingue "não havia
-          intimação nova" de "a consulta falhou na maioria dos processos". */}
-      {resumoSync && (
-        <p className="text-xs text-slate-600">
-          Última sincronização: {resumoSync}
-        </p>
-      )}
 
       {truncou && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
