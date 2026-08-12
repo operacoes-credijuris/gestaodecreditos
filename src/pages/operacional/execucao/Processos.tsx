@@ -1,6 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  ChevronRight,
+  PenLine,
+  Sparkles,
+} from 'lucide-react'
 import {
   processosCrud,
   apensosCrud,
@@ -30,6 +38,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { ComboboxTexto } from '@/components/ui/Combobox'
 import { Segmented } from '@/components/ui/Segmented'
+import { Tabs } from '@/components/ui/Tabs'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
@@ -68,6 +77,16 @@ import {
   parseBRLInput,
   vazioNull,
 } from '@/lib/format'
+
+/**
+ * Abas da janela de crédito novo. Mesmo componente e mesmo formato das abas da
+ * geração de petição — duas janelas que oferecem "faça à mão ou deixe a
+ * plataforma preencher" não têm por que parecer coisas diferentes.
+ */
+const ABAS_NOVO_CREDITO = [
+  { key: 'manual', label: 'Manual', icon: <PenLine className="h-4 w-4" /> },
+  { key: 'auto', label: 'Automatizado', icon: <Sparkles className="h-4 w-4" /> },
+]
 
 // Separa múltiplos nº RTDPJ (digitados com "e", vírgula, ";" ou quebra) para
 // exibir um por linha.
@@ -768,20 +787,19 @@ export default function Processos() {
             passar pela descoberta de pastas — a pasta dele já é conhecida. */}
         {editing && !editing.id && (
           <div className="mb-4">
-            <Segmented
-              ariaLabel="Como preencher o crédito"
-              items={[
-                { key: 'manual', label: 'Manual' },
-                { key: 'auto', label: 'Automatizado' },
-              ]}
+            <Tabs
+              items={ABAS_NOVO_CREDITO}
               value={abaForm}
               onChange={(k) => setAbaForm(k as typeof abaForm)}
             />
           </div>
         )}
 
+        {/* Linha divisória: separa a ESCOLHA da pasta do PREENCHIMENTO do crédito.
+            São dois momentos diferentes do trabalho, e sem a divisão o campo de
+            busca parecia o primeiro campo do formulário. */}
         {editing && abaForm === 'auto' && !editing.id && (
-          <div className="mb-4">
+          <div className="mb-4 border-b border-slate-200 pb-4">
             <NovoCreditoDoDrive processos={data} onPreencher={preencherDoDrive} />
           </div>
         )}

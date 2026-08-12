@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { nomeParecido, normalizarBusca, normalizarNome, onlyDigits } from '@/lib/format'
+import { normalizarBusca, onlyDigits } from '@/lib/format'
 import { Input } from './Field'
 
 export interface OpcaoCombo {
@@ -296,9 +296,11 @@ export function Combobox({
  * lista impediria de lançar o primeiro crédito de alguém novo, e deixar só texto
  * livre é o que produz "José da Silva" e "Jose Silva" como duas pessoas.
  *
- * A outra metade é o aviso abaixo do campo, que aparece SÓ quando o nome digitado
- * é novo e parecido com um que já existe. Nunca corrige sozinho — só quem está
- * cadastrando sabe se são a mesma pessoa.
+ * A defesa contra a segunda versão da mesma pessoa é a LISTA, e só ela. Houve aqui
+ * um aviso de "parecido com…" abaixo do campo; saiu por decisão do dono, por ser
+ * ruído no caminho de quem só quer digitar. O cotejo por semelhança continua vivo
+ * onde ele pesa mais: na janela de cadastrar investidor ou originador, em Dados
+ * cadastrais, onde criar duplicata custa uma ficha bancária órfã.
  */
 export function ComboboxTexto({
   valor,
@@ -348,17 +350,6 @@ export function ComboboxTexto({
   )
   const boxRef = useCliqueFora(aberto, () => setAberto(false))
 
-  // O aviso só vale para nome que gera OUTRA chave: diferença de acento ou de
-  // caixa não cria pessoa nova (é a mesma regra do banco, normalizarNome), então
-  // avisar nesse caso seria alarme falso.
-  const parecido = useMemo(() => {
-    const q = valor.trim()
-    if (!q || opcoes.length === 0) return null
-    const chave = normalizarNome(q)
-    if (opcoes.some((o) => normalizarNome(o) === chave)) return null
-    return nomeParecido(q, opcoes)
-  }, [valor, opcoes])
-
   return (
     <div ref={boxRef} className="relative">
       <Input
@@ -394,22 +385,6 @@ export function ComboboxTexto({
           vazio={vazio}
           truncada={filtradas.length === limite}
         />
-      )}
-      {/* Só aparece quando há mesmo um parecido — nome novo sem semelhante não
-          rende aviso nenhum, que é o caso comum. Escondido com a lista aberta:
-          ela é absoluta e passaria por cima. */}
-      {!aberto && parecido && (
-        <p className="mt-1 text-xs text-amber-700">
-          Parecido com{' '}
-          <button
-            type="button"
-            onClick={() => onChange(parecido)}
-            className="font-medium underline decoration-dotted hover:no-underline"
-          >
-            {parecido}
-          </button>
-          . Se for o mesmo, use o nome que já está cadastrado.
-        </p>
       )}
     </div>
   )

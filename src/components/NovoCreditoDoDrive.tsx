@@ -23,8 +23,8 @@ import {
 } from '@/lib/creditoDoDrive'
 import { formatCNJ } from '@/lib/format'
 import type { Processo } from '@/lib/types'
+import { Button } from '@/components/ui/Button'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
-import { IconButton } from '@/components/ui/IconButton'
 import { EmptyState, ErrorState } from '@/components/ui/Table'
 
 /** O que a pasta escolhida entrega ao formulário. */
@@ -132,11 +132,17 @@ export function NovoCreditoDoDrive({
           vazio="Nenhuma pasta sem cadastro no Drive."
         />
       </div>
-      <IconButton
-        label="Procurar novamente no Drive"
-        icon={<RefreshCw className={buscando ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />}
-        disabled={buscando}
+      {/* Button e não IconButton: o Button tem altura fixa (h-10), que é a do
+          campo ao lado — o IconButton só tem padding, e ficava mais baixo que o
+          campo. E o `loading` já troca o ícone pelo giro, de graça. */}
+      <Button
+        variant="outline"
+        icon={<RefreshCw className="h-4 w-4" />}
+        loading={buscando}
         onClick={procurar}
+        className="shrink-0 px-3"
+        aria-label="Procurar novamente no Drive"
+        title="Procurar novamente no Drive"
       />
     </div>
   )
