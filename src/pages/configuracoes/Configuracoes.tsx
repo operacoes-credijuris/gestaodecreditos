@@ -213,6 +213,28 @@ interface OpcoesAdvbox {
 
 type CriarProcesso = NonNullable<ConfigAdvbox['criar_processo']>
 
+/**
+ * ESCOLHAS FIXAS do cadastro de processo na ADVBOX.
+ *
+ * A API exige cliente, fase e tipo, mas na operação da Credijuris os três são
+ * sempre os mesmos — todo crédito é um cumprimento de sentença, do mesmo cliente,
+ * do mesmo tipo. Eram três listas para escolher sempre a mesma coisa, e lista com
+ * uma resposta certa é convite a errar por clique.
+ *
+ * Os ids são da conta da Credijuris, lidos de /settings e /customers. Não são
+ * segredo: sem o token da API não abrem nada, e quem tem o token já pode listá-los.
+ * Se a ADVBOX recriar uma fase ou um tipo, o id muda e a criação passa a falhar
+ * com o erro da API na tela — a correção é trocar o número aqui.
+ */
+const ADVBOX_FIXO = {
+  customers_id: 8795916,
+  customer_nome: 'CREDIJURIS',
+  stages_id: 2935559,
+  stage_nome: 'CUMPRIMENTO DE SENTENÇA',
+  type_lawsuits_id: 1562480,
+  type_nome: 'CREDJURIS',
+} as const
+
 function AdvboxConfig() {
   const { data, isLoading, error } = useIntegracao('advbox')
   const qc = useQueryClient()
@@ -241,21 +263,6 @@ function AdvboxConfig() {
         cliente_nome: 'credijuris',
       })
       setOpcoes(r)
-      // Cliente único encontrado e nada escolhido ainda: já seleciona. É o caso
-      // esperado ("o cliente é sempre a Credijuris") e poupar o clique evita o
-      // erro de salvar com o cliente em branco.
-      if (r.customers.length === 1 && cp.customers_id == null) {
-        setCp((a) => ({
-          ...a,
-          customers_id: r.customers[0].id,
-          customer_nome: r.customers[0].name,
-        }))
-      }
-      if (!r.customers.length) {
-        toast.error(
-          'Nenhum cliente com "credijuris" no nome foi encontrado na ADVBOX. Confira o cadastro do cliente lá.',
-        )
-      }
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
@@ -283,27 +290,19 @@ function AdvboxConfig() {
       const cfg: Record<string, unknown> = { ...(data?.config as object) }
       if (url) cfg.base_url = url
       else delete cfg.base_url
-      // Ligar sem os quatro IDs gravaria uma configuração que a função recusa a
-      // cada crédito salvo, e o motivo ficaria só no retorno da chamada — invisível
-      // para quem clicou aqui. Barra no único momento em que dá para explicar.
-      if (cp.ativo) {
-        const falta = (
-          [
-            ['customers_id', 'o cliente'],
-            ['users_id', 'o responsável'],
-            ['stages_id', 'a fase'],
-            ['type_lawsuits_id', 'o tipo de processo'],
-          ] as const
-        ).filter(([k]) => cp[k] == null || cp[k] === '')
-        if (falta.length) {
-          toast.error(
-            `Para ligar o cadastro automático, escolha ${falta.map(([, r]) => r).join(', ')}.`,
-          )
-          setSaving(false)
-          return
-        }
+      // Ligar sem responsável gravaria uma configuração que a função recusa a cada
+      // crédito salvo, e o motivo ficaria só no retorno da chamada — invisível para
+      // quem clicou aqui. Barra no único momento em que dá para explicar. Cliente,
+      // fase e tipo não são validados porque não são escolhidos: vêm fixos.
+      if (cp.ativo && (cp.users_id == null || cp.users_id === '')) {
+        toast.error('Para ligar o cadastro na ADVBOX, escolha o responsável.')
+        setSaving(false)
+        return
       }
-      cfg.criar_processo = cp
+      // Os três fixos são gravados SEMPRE, e não só quando faltam: se um dia o id
+      // mudar no código, o próximo salvamento corrige o que está no banco sem
+      // ninguém precisar saber que existe essa configuração.
+      cfg.criar_processo = { ...cp, ...ADVBOX_FIXO }
       const { error } = await supabase
         .from('integracoes')
         .upsert({ servico: 'advbox', config: cfg, ativo: true }, { onConflict: 'servico' })
@@ -390,53 +389,38 @@ function AdvboxConfig() {
                   checked={!!cp.ativo}
                   onChange={(e) => setCp({ ...cp, ativo: e.target.checked })}
                 />
-                Cadastrar o processo na ADVBOX ao salvar um crédito novo
+                Cadastro de créditos no ADVBOX
               </label>
 
-              {!opcoes ? (
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button variant="outline" onClick={carregarOpcoes} loading={carregando}>
-                    Carregar opções da conta
-                  </Button>
-                  {!!cp.customers_id && (
-                    <span className="text-xs text-slate-600">
-                      Configurado: cliente {cp.customer_nome || cp.customers_id}.
-                    </span>
-                  )}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Os três fixos aparecem como TEXTO, não como campo desabilitado:
+                    campo cinza sugere que existe um jeito de habilitá-lo, e aqui não
+                    existe — é assim e pronto. */}
+                <div className="text-sm text-slate-600 sm:col-span-2">
+                  <span className="font-medium text-slate-700">Cliente</span>{' '}
+                  {ADVBOX_FIXO.customer_nome}
+                  <span className="mx-2 text-slate-300">|</span>
+                  <span className="font-medium text-slate-700">Fase</span>{' '}
+                  {ADVBOX_FIXO.stage_nome}
+                  <span className="mx-2 text-slate-300">|</span>
+                  <span className="font-medium text-slate-700">Tipo</span>{' '}
+                  {ADVBOX_FIXO.type_nome}
                 </div>
-              ) : (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    label="Cliente do processo"
-                    hint="Buscado na ADVBOX pelo nome “credijuris”."
-                  >
-                    <Select
-                      value={String(cp.customers_id ?? '')}
-                      onChange={(e) => {
-                        const achado = opcoes.customers.find(
-                          (c) => String(c.id) === e.target.value,
-                        )
-                        setCp({
-                          ...cp,
-                          customers_id: e.target.value || undefined,
-                          customer_nome: achado?.name,
-                        })
-                      }}
-                    >
-                      <option value="">Escolha…</option>
-                      {opcoes.customers.map((c) => (
-                        <option key={c.id} value={String(c.id)}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
+
+                {opcoes ? (
                   <Field label="Responsável">
                     <Select
                       value={String(cp.users_id ?? '')}
-                      onChange={(e) =>
-                        setCp({ ...cp, users_id: e.target.value || undefined })
-                      }
+                      onChange={(e) => {
+                        const achado = opcoes.users.find(
+                          (u) => String(u.id) === e.target.value,
+                        )
+                        setCp({
+                          ...cp,
+                          users_id: e.target.value || undefined,
+                          user_nome: achado?.name,
+                        })
+                      }}
                     >
                       <option value="">Escolha…</option>
                       {opcoes.users.map((u) => (
@@ -446,38 +430,26 @@ function AdvboxConfig() {
                       ))}
                     </Select>
                   </Field>
-                  <Field label="Fase processual">
-                    <Select
-                      value={String(cp.stages_id ?? '')}
-                      onChange={(e) =>
-                        setCp({ ...cp, stages_id: e.target.value || undefined })
-                      }
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+                    <Button
+                      variant="outline"
+                      onClick={carregarOpcoes}
+                      loading={carregando}
                     >
-                      <option value="">Escolha…</option>
-                      {opcoes.stages.map((s) => (
-                        <option key={s.id} value={String(s.id)}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Tipo de processo">
-                    <Select
-                      value={String(cp.type_lawsuits_id ?? '')}
-                      onChange={(e) =>
-                        setCp({ ...cp, type_lawsuits_id: e.target.value || undefined })
-                      }
-                    >
-                      <option value="">Escolha…</option>
-                      {opcoes.lawsuit_types.map((t) => (
-                        <option key={t.id} value={String(t.id)}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                </div>
-              )}
+                      Trocar o responsável
+                    </Button>
+                    {/* Sem o nome, diz só que está configurado: mostrar o id cru
+                        ("Responsável: 170705") pareceria defeito. O nome passa a ser
+                        guardado a partir da próxima escolha. */}
+                    <span className="text-xs text-slate-600">
+                      {cp.users_id
+                        ? `Responsável já configurado${cp.user_nome ? `: ${cp.user_nome}` : ''}.`
+                        : 'Nenhum responsável escolhido ainda.'}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="sm:col-span-2">

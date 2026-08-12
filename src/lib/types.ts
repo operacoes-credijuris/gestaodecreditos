@@ -348,8 +348,9 @@ export interface ConfigAdvbox {
     stages_id?: number | string
     type_lawsuits_id?: number | string
     customers_id?: number | string
-    /** Só para a tela mostrar o cliente escolhido sem consultar de novo. */
+    /** Só para a tela mostrar os escolhidos sem consultar a ADVBOX de novo. */
     customer_nome?: string
+    user_nome?: string
   }
 }
 
