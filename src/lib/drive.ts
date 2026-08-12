@@ -71,14 +71,63 @@ declare global {
 }
 
 /**
- * Token guardado só em MEMÓRIA, com a validade.
+ * Token guardado em memória E no sessionStorage, com a validade.
  *
- * Não vai para localStorage de propósito: é credencial de acesso ao Drive da
- * empresa, e num computador compartilhado ficaria disponível para a próxima pessoa
- * que abrisse o navegador. Dura uma hora; recarregar a página pede de novo, o que é
- * um incômodo pequeno diante disso.
+ * NÃO VAI PARA localStorage, e isso não mudou: lá a credencial do Drive da empresa
+ * sobreviveria a fechar o navegador e ficaria à disposição da próxima pessoa que o
+ * abrisse. O sessionStorage é por ABA e morre quando a aba fecha.
+ *
+ * POR QUE SAIU DA MEMÓRIA PURA: em memória, recarregar a página perdia o token e a
+ * chamada seguinte pedia autorização de novo. Isso ficou insuportável quando a aba
+ * Automatizado passou a consultar o Drive só de ser aberta — o pedido de
+ * autorização virou a primeira coisa que acontecia, em toda página nova.
+ *
+ * O risco que sobra é a aba ficar aberta em máquina compartilhada, que é o mesmo
+ * risco de deixar a própria plataforma logada — e o Sair apaga este token junto
+ * (ver esquecerTokenDrive, chamado no signOut).
  */
-let token: { valor: string; expiraEm: number } | null = null
+const CHAVE_TOKEN = 'credijuris.drive.token'
+
+interface TokenDrive {
+  valor: string
+  expiraEm: number
+}
+
+let token: TokenDrive | null = null
+
+/** Token válido, de onde estiver. Uma folga de 60s: ver autorizarDrive. */
+function lerToken(): TokenDrive | null {
+  if (!token) {
+    try {
+      const cru = sessionStorage.getItem(CHAVE_TOKEN)
+      if (cru) token = JSON.parse(cru) as TokenDrive
+    } catch {
+      // sessionStorage indisponível (aba privada, política do navegador) ou JSON
+      // corrompido: segue só com a memória, que é o comportamento anterior.
+    }
+  }
+  if (token && token.expiraEm - 60_000 > Date.now()) return token
+  return null
+}
+
+function guardarToken(t: TokenDrive): void {
+  token = t
+  try {
+    sessionStorage.setItem(CHAVE_TOKEN, JSON.stringify(t))
+  } catch {
+    /* sem sessionStorage, vale a memória */
+  }
+}
+
+/** Apaga o token. Chamado no Sair, para não ficar acessível a quem vier depois. */
+export function esquecerTokenDrive(): void {
+  token = null
+  try {
+    sessionStorage.removeItem(CHAVE_TOKEN)
+  } catch {
+    /* nada a fazer */
+  }
+}
 
 let gisCarregado: Promise<void> | null = null
 
@@ -111,8 +160,9 @@ export async function autorizarDrive(): Promise<string> {
     )
   }
   // Uma folga de 60s: token que expira no meio da subida do arquivo falharia com
-  // uma mensagem que não diz nada.
-  if (token && token.expiraEm - 60_000 > Date.now()) return token.valor
+  // uma mensagem que não diz nada. A margem está em lerToken.
+  const guardado = lerToken()
+  if (guardado) return guardado.valor
 
   await carregarGis()
   const oauth2 = window.google?.accounts?.oauth2
@@ -133,10 +183,10 @@ export async function autorizarDrive(): Promise<string> {
           )
           return
         }
-        token = {
+        guardarToken({
           valor: r.access_token,
           expiraEm: Date.now() + (r.expires_in ?? 3600) * 1000,
-        }
+        })
         resolve(r.access_token)
       },
     })

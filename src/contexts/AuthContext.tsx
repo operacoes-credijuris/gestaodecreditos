@@ -10,6 +10,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { esquecerTokenDrive } from '@/lib/drive'
 import type { Profile } from '@/lib/types'
 
 export const ADMIN_EMAIL = 'contato@credijuris.com'
@@ -135,6 +136,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null)
     usuarioCorrente.current = null
     qc.clear()
+    // O token do Drive vive no sessionStorage da aba (ver lib/drive.ts). Sem isto,
+    // quem clicasse em Sair deixaria a credencial de acesso ao Drive da empresa
+    // disponível para o próximo que usasse a mesma aba.
+    esquecerTokenDrive()
     if (error) {
       console.error('Falha ao encerrar a sessão no servidor.', error)
       // scope: 'local' remove o token deste navegador sem depender da rede.
