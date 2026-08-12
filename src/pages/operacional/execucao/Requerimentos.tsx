@@ -280,23 +280,37 @@ export default function Requerimentos() {
               {/* Larguras explícitas: sem elas o layout automático dava quase
                   toda a tabela para Matéria e comprimia o protocolo. Data e
                   Ações usam w-[1%]+nowrap para encolher até o conteúdo. */}
+              {/* LARGURAS: Matéria é a coluna SEM largura declarada, então ela fica
+                  com o que sobrar — e é ela que tem o texto mais longo. Por isso as
+                  outras foram apertadas até o mínimo que o conteúdo aceita.
+
+                  As duas colunas de data têm w-[1%] e o cabeçalho SEM nowrap: era o
+                  cabeçalho, não a data, que definia a largura delas. "ÚLT.
+                  MOVIMENTAÇÃO" numa linha só ocupa quase o dobro de uma data, e essa
+                  diferença saía toda da Matéria. Quebrando o título em duas linhas, a
+                  coluna encolhe para a largura do conteúdo. As CÉLULAS seguem nowrap:
+                  data quebrada no meio é ilegível. */}
               <tr>
-                <TH className="w-[24%]">Protocolo</TH>
+                <TH className="w-[20%]">Protocolo</TH>
                 {/* Tribunal e órgão saíram do subtítulo do protocolo para uma coluna
                     própria: são a JURISDIÇÃO do requerimento, não parte da
                     identificação dele. Sob o número ficam as partes, que é o que
                     identifica a linha — igual "cedente v. cessionário" em Créditos. */}
-                <TH className="w-[18%]">Tribunal / órgão</TH>
-                <TH className="w-[16%]">Classe</TH>
+                <TH className="w-[13%]">Tribunal / órgão</TH>
+                <TH className="w-[12%]">Classe</TH>
                 <TH>Matéria</TH>
+                {/* "Protocolado", e não "Data de protocolo": metade da largura e a
+                    mesma informação. Não virou só "Protocolo" para não repetir o nome
+                    da primeira coluna, nem só "Data" porque a coluna vizinha também é
+                    uma data. */}
                 <SortableTH
-                  label="Data de protocolo"
+                  label="Protocolado"
                   active
                   dir={sortDir}
                   onToggle={toggleSort}
-                  className="w-[1%] whitespace-nowrap"
+                  className="w-[1%] leading-tight"
                 />
-                <TH className="w-[1%] whitespace-nowrap">Últ. movimentação</TH>
+                <TH className="w-[1%] leading-tight">Últ. movimentação</TH>
                 <TH className="w-[1%] whitespace-nowrap">Ações</TH>
               </tr>
             </THead>
