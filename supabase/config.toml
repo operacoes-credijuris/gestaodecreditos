@@ -56,3 +56,10 @@ verify_jwt = true
 # cron semanal (x-cron-secret); a própria função valida a autorização.
 [functions.carteira-resumo]
 verify_jwt = false
+
+# Extração dos campos do crédito a partir dos documentos da pasta no Drive.
+# Sempre disparada por uma pessoa, na aba Automatizado do novo crédito — nunca por
+# cron. Então o JWT é exigido no portão da plataforma, antes de a função rodar e
+# antes de gastar uma chamada de IA.
+[functions.extrair-credito]
+verify_jwt = true

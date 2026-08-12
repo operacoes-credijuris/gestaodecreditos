@@ -1,44 +1,85 @@
-// Aba "Automatizado" da janela de novo crédito: acha no Drive as pastas de
-// crédito que ainda não estão cadastradas e preenche o formulário a partir delas.
+// Aba "Automatizado" da janela de novo crédito.
 //
-// O QUE ESTA ETAPA FAZ, E O QUE NÃO FAZ. Aqui só entra o que o CAMINHO da pasta
-// garante — espécie, originador, número do processo e cedente. É dado estrutural:
-// a pasta está dentro de "Precatórios", logo a espécie é precatório; está dentro
-// de "Intermediador - X", logo o originador é X. Não há interpretação, e por isso
-// não há como estar errado de um jeito que ninguém veja.
+// Dois passos, e a diferença entre eles é a diferença entre certeza e leitura:
 //
-// A leitura dos documentos pela IA (valor de face, entidade devedora, cessionário,
-// capital investido) é a etapa seguinte, e vai entrar aqui mesmo.
+//   1. O CAMINHO DA PASTA dá espécie, originador, número do processo e cedente. A
+//      pasta está dentro de "Precatórios", logo a espécie é precatório. Não há
+//      interpretação, então não há como estar errado de um jeito que ninguém veja.
+//   2. OS DOCUMENTOS dão o resto — tribunal, comarca, vara, entidade devedora,
+//      valor de face, tipo de crédito, expectativa de liquidação, cessionário,
+//      data de aquisição e capital investido. Aí é leitura interpretada, e cada
+//      campo volta com o ARQUIVO de onde saiu, para conferência.
 //
-// E ELA NUNCA SALVA. Escolher uma pasta preenche a aba Manual e devolve a pessoa
-// para lá; quem confere e salva é ela. Extração é palpite educado, e gravar palpite
-// direto no banco é como se produz dado errado com cara de certo.
+// Ficam de fora, por decisão do dono: instrumento e nº RTDPJ (não constam dos
+// documentos) e índice de atualização (escolha de negócio).
+//
+// E ELA NUNCA SALVA. Preenche o formulário ao lado e espera a pessoa conferir.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, FileText, TriangleAlert } from 'lucide-react'
+import { cn } from '@/lib/cn'
 import { driveConfigurado } from '@/lib/drive'
 import {
   candidatasACadastro,
+  lerDocumentosDoCredito,
   listarPastasDeCredito,
   type PastaCredito,
 } from '@/lib/creditoDoDrive'
 import { formatCNJ } from '@/lib/format'
+import { invokeFunction } from '@/lib/functions'
 import type { Processo } from '@/lib/types'
-import { cn } from '@/lib/cn'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { IconButton } from '@/components/ui/IconButton'
-import { EmptyState, ErrorState } from '@/components/ui/Table'
+import { EmptyState, ErrorState, Loading } from '@/components/ui/Table'
 
-/** O que a pasta escolhida entrega ao formulário. */
-export type PreenchimentoDoDrive = Pick<
-  Processo,
-  'numero_cnj' | 'cedente' | 'originador' | 'especie_requisitorio'
->
+/** O que a extração devolve para o formulário. */
+export type PreenchimentoDoDrive = Partial<Processo>
+
+interface RespostaExtracao {
+  campos?: Record<string, unknown>
+  /** campo -> nome do arquivo de onde o valor saiu. */
+  procedencia?: Record<string, string>
+  observacoes?: string[]
+  lidos?: string[]
+}
+
+/** Rótulo de cada campo, para a lista de procedência ficar legível. */
+const ROTULO: Record<string, string> = {
+  tribunal: 'Tribunal',
+  comarca: 'Comarca',
+  vara: 'Vara',
+  cedente: 'Cedente',
+  cedente_advogado: 'Advogado do cedente',
+  entidade_devedora: 'Entidade devedora',
+  valor_face: 'Valor de face',
+  data_referencia: 'Data de referência',
+  expectativa_liquidacao: 'Expectativa de liquidação',
+  cessionario: 'Cessionário',
+  data_aquisicao: 'Data de aquisição',
+  capital_investido: 'Capital investido',
+  tipo_credito: 'Tipo de crédito',
+}
+
+/**
+ * Converte o que a IA devolveu em campos do cadastro.
+ *
+ * Descarta null e lista vazia em vez de gravá-los: campo que a IA não achou tem de
+ * ficar como estava no formulário, não ser zerado por cima.
+ */
+function camposParaProcesso(campos: Record<string, unknown>): Partial<Processo> {
+  const saida: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(campos)) {
+    if (v === null || v === undefined || v === '') continue
+    if (Array.isArray(v) && v.length === 0) continue
+    if (!(k in ROTULO)) continue // só os campos previstos entram
+    saida[k] = v
+  }
+  return saida as Partial<Processo>
+}
 
 export function NovoCreditoDoDrive({
   processos,
   onPreencher,
 }: {
-  /** Créditos já cadastrados, para saber o que é novidade. */
   processos: Pick<Processo, 'numero_cnj' | 'cedente'>[] | undefined
   onPreencher: (dados: PreenchimentoDoDrive) => void
 }) {
@@ -46,12 +87,14 @@ export function NovoCreditoDoDrive({
   const [erro, setErro] = useState<string | null>(null)
   /** null = ainda não procurou. Lista vazia = procurou e não achou nada. */
   const [candidatas, setCandidatas] = useState<PastaCredito[] | null>(null)
-  /**
-   * A pasta escolhida FICA marcada no campo. Os campos do crédito ficam logo
-   * abaixo, e some deles é que a pessoa vai trabalhar — o campo precisa continuar
-   * dizendo de qual pasta veio aquilo que está na tela.
-   */
   const [escolhida, setEscolhida] = useState<number | null>(null)
+
+  /** Passo da leitura, para a tela não ficar parada sem dizer nada. */
+  const [passo, setPasso] = useState<string | null>(null)
+  const [extracao, setExtracao] = useState<
+    | (RespostaExtracao & { ignorados: { nome: string; motivo: string }[] })
+    | null
+  >(null)
 
   async function procurar() {
     setBuscando(true)
@@ -67,8 +110,7 @@ export function NovoCreditoDoDrive({
   }
 
   // Procura só de ENTRADA na aba, uma vez. Quem escolheu "Automatizado" já disse
-  // o que quer; obrigar a clicar num botão depois disso é um passo a mais sem
-  // informação nenhuma. Reprocurar é decisão explícita, no botão ao lado.
+  // o que quer; reprocurar é decisão explícita, no botão ao lado.
   const jaProcurou = useRef(false)
   useEffect(() => {
     if (jaProcurou.current || !driveConfigurado) return
@@ -77,14 +119,50 @@ export function NovoCreditoDoDrive({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /**
+   * Escolher a pasta preenche em DUAS ondas.
+   *
+   * O que o caminho garante entra na hora, para a pessoa já ver o formulário
+   * respondendo. Só então começa a leitura dos documentos, que leva segundos —
+   * esperar tudo para mostrar qualquer coisa faria a escolha parecer sem efeito.
+   */
+  async function usarPasta(c: PastaCredito) {
+    const contexto: Partial<Processo> = {
+      numero_cnj: c.cnj ? formatCNJ(c.cnj) : '',
+      cedente: c.cedente,
+      originador: c.originador,
+      especie_requisitorio: c.especie,
+    }
+    onPreencher(contexto)
+
+    setExtracao(null)
+    setErro(null)
+    setPasso('Abrindo a pasta no Drive…')
+    try {
+      const leitura = await lerDocumentosDoCredito(c.id, setPasso)
+      if (leitura.documentos.length === 0) {
+        setExtracao({ ignorados: leitura.ignorados, observacoes: [], lidos: [] })
+        return
+      }
+      setPasso(`Lendo ${leitura.documentos.length} documento(s) com a IA…`)
+      const r = await invokeFunction<RespostaExtracao>('extrair-credito', {
+        documentos: leitura.documentos,
+        contexto,
+      })
+      onPreencher(camposParaProcesso(r.campos ?? {}))
+      setExtracao({ ...r, ignorados: leitura.ignorados })
+    } catch (e) {
+      setErro((e as Error).message)
+    } finally {
+      setPasso(null)
+    }
+  }
+
   const opcoes = useMemo<OpcaoCombo[]>(
     () =>
       (candidatas ?? []).map((c, i) => ({
         id: i,
         titulo: c.cnj ? formatCNJ(c.cnj) : (c.cedente ?? c.nome),
-        // O caminho diz de onde a pasta veio, e o aviso marca o caso frágil: sem
-        // número na pasta, o cotejo com o que já existe foi por nome, e "nova"
-        // pode não ser nova.
         subtitulo:
           [...c.caminho, c.cnj && c.cedente ? c.cedente : null]
             .filter(Boolean)
@@ -102,50 +180,90 @@ export function NovoCreditoDoDrive({
     )
   }
 
-  if (erro) return <ErrorState message={erro} onRetry={procurar} />
+  const procedencia = Object.entries(extracao?.procedencia ?? {}).filter(
+    ([campo]) => campo in ROTULO,
+  )
 
   return (
-    <div className="flex items-start gap-2">
-      <div className="min-w-0 flex-1">
-        {/* Sem rótulo: o campo é a primeira coisa da aba e o texto do próprio
-            campo já diz o que ele quer. */}
-        <Combobox
-          opcoes={opcoes}
-          valor={escolhida}
-          onChange={(id) => {
-            setEscolhida(id)
-            const c = id === null ? null : candidatas?.[id]
-            if (!c) return
-            onPreencher({
-              numero_cnj: c.cnj ? formatCNJ(c.cnj) : '',
-              cedente: c.cedente,
-              originador: c.originador,
-              especie_requisitorio: c.especie,
-            })
-          }}
-          placeholder={
-            buscando
-              ? 'Procurando no Drive…'
-              : candidatas?.length
-                ? 'Escolha a pasta do crédito'
-                : 'Nenhuma pasta sem cadastro'
-          }
-          vazio="Nenhuma pasta sem cadastro no Drive."
+    <div className="space-y-3">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <Combobox
+            opcoes={opcoes}
+            valor={escolhida}
+            onChange={(id) => {
+              setEscolhida(id)
+              const c = id === null ? null : candidatas?.[id]
+              if (c) void usarPasta(c)
+            }}
+            placeholder={
+              buscando
+                ? 'Procurando no Drive…'
+                : candidatas?.length
+                  ? 'Escolha a pasta do crédito'
+                  : 'Nenhuma pasta sem cadastro'
+            }
+            vazio="Nenhuma pasta sem cadastro no Drive."
+          />
+        </div>
+        <IconButton
+          label="Procurar novamente no Drive"
+          icon={<RefreshCw className={cn('h-4 w-4', buscando && 'animate-spin')} />}
+          disabled={buscando || !!passo}
+          onClick={procurar}
+          className="flex h-10 w-10 shrink-0 items-center justify-center p-0"
         />
       </div>
-      {/* Ícone puro, sem moldura. A altura fixa h-10 é a do campo ao lado, e o
-          flex centra o ícone dentro dela — sem isso o ícone encostava no topo, que
-          era o desalinhamento. w-10 mantém quadrado, então o alvo de clique é
-          confortável sem o botão ficar grande. */}
-      <IconButton
-        label="Procurar novamente no Drive"
-        icon={
-          <RefreshCw className={cn('h-4 w-4', buscando && 'animate-spin')} />
-        }
-        disabled={buscando}
-        onClick={procurar}
-        className="flex h-10 w-10 shrink-0 items-center justify-center p-0"
-      />
+
+      {passo && <Loading label={passo} />}
+
+      {erro && <ErrorState message={erro} />}
+
+      {/* PROCEDÊNCIA. Sem ela, o formulário aparece preenchido e ninguém sabe se
+          aquele valor de face saiu da análise, do contrato ou do nada. */}
+      {!!procedencia.length && (
+        <div className="rounded-lg bg-slate-50 p-3">
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            <FileText className="h-3.5 w-3.5" />
+            Preenchido a partir de
+          </p>
+          <ul className="grid gap-x-4 gap-y-0.5 text-xs text-slate-600 sm:grid-cols-2">
+            {procedencia.map(([campo, arquivo]) => (
+              <li key={campo} className="truncate">
+                <span className="font-medium text-slate-700">{ROTULO[campo]}</span>{' '}
+                <span className="text-slate-500">· {arquivo}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* O que a IA quer que a pessoa saiba antes de salvar. */}
+      {!!extracao?.observacoes?.length && (
+        <ul className="space-y-1 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
+          {extracao.observacoes.map((o, i) => (
+            <li key={i} className="flex gap-1.5">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {o}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Arquivo que não deu para ler NÃO desaparece: PDF escaneado e formato sem
+          texto são o caso em que falta campo, e é aqui que se descobre por quê. */}
+      {!!extracao?.ignorados?.length && (
+        <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+          <p className="mb-1 font-semibold uppercase tracking-wide">Não foi possível ler</p>
+          <ul className="space-y-0.5">
+            {extracao.ignorados.map((ig, i) => (
+              <li key={i} className="truncate">
+                {ig.nome} <span className="text-slate-500">· {ig.motivo}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

@@ -21,7 +21,8 @@
 //     cedente tinha mais de um crédito. Aí o cotejo é por nome, com a fragilidade
 //     de sempre — daí a tela falar em CANDIDATOS, e não em "créditos novos".
 import { onlyDigits, normalizarNome } from './format'
-import { listarSubpastas, PASTA_PROCESSOS } from './drive'
+import { baixarArquivo, listarArquivos, listarSubpastas, PASTA_PROCESSOS } from './drive'
+import { textoDeArquivo } from './textoDeArquivo'
 import { PASTA_DA_ESPECIE, nomeDePasta } from './peticaoPasta'
 import type { EspecieRequisitorio, Processo } from './types'
 
@@ -129,6 +130,87 @@ export async function listarPastasDeCredito(): Promise<PastaCredito[]> {
     }
   }
   return encontradas
+}
+
+/**
+ * As subpastas de dentro do crédito que valem a leitura, pelo número do prefixo.
+ *
+ *   1. Análise(s) de crédito       — a fonte mais rica: tribunal, valor de face,
+ *                                    entidade devedora, expectativa de liquidação
+ *   2. Contratos assinados         — cessionário, data de aquisição, capital
+ *   4. Documentos do cedente e advogado — qualificação do cedente
+ *
+ * As outras ficam de fora de propósito: comprovantes de pagamento (3), petições
+ * geradas (5), desempenho final (6) e RPV complementar (7) são consequência do
+ * crédito, não a origem dos dados dele — e mandá-las à IA custaria tokens para
+ * confundir a leitura com texto que fala do mesmo processo em outro momento.
+ */
+const PASTAS_COM_DADOS = [1, 2, 4]
+
+/** Teto do total mandado à IA, somando todos os arquivos. */
+const MAX_CHARS_TOTAL = 400_000
+
+export interface DocumentoLido {
+  /** Nome da subpasta, para a tela dizer de onde saiu cada campo. */
+  pasta: string
+  nome: string
+  texto: string
+}
+
+export interface LeituraDoCredito {
+  documentos: DocumentoLido[]
+  /** O que não deu para ler, com o motivo. Aparece na tela; não é engolido. */
+  ignorados: { nome: string; motivo: string }[]
+}
+
+/**
+ * Lê os documentos da pasta do crédito e devolve o texto de cada um.
+ *
+ * Sequencial, e não em paralelo: são poucos arquivos, o Drive é acessado com a
+ * conta de quem está usando, e rajada de requisições é o que irrita limite de taxa.
+ * O `progresso` existe porque isto leva alguns segundos e a tela precisa dizer o
+ * que está acontecendo — barra parada sem texto parece travada.
+ */
+export async function lerDocumentosDoCredito(
+  pastaCreditoId: string,
+  progresso?: (passo: string) => void,
+): Promise<LeituraDoCredito> {
+  const documentos: DocumentoLido[] = []
+  const ignorados: { nome: string; motivo: string }[] = []
+  let total = 0
+
+  const subpastas = await listarSubpastas(pastaCreditoId)
+  for (const numero of PASTAS_COM_DADOS) {
+    const pasta = subpastas.find((p) => p.nome.trim().startsWith(`${numero}.`))
+    if (!pasta) continue
+    progresso?.(`Lendo ${pasta.nome}…`)
+    const arquivos = await listarArquivos(pasta.id)
+    for (const arq of arquivos) {
+      if (total >= MAX_CHARS_TOTAL) {
+        ignorados.push({ nome: arq.nome, motivo: 'limite de tamanho da leitura' })
+        continue
+      }
+      try {
+        progresso?.(`Lendo ${arq.nome}…`)
+        const { bytes, mime } = await baixarArquivo(arq)
+        const texto = await textoDeArquivo(bytes, mime, arq.nome)
+        if (!texto) {
+          ignorados.push({ nome: arq.nome, motivo: 'formato sem texto (imagem?)' })
+          continue
+        }
+        if (!texto.trim()) {
+          // PDF de digitalização cai aqui: tem páginas, não tem texto.
+          ignorados.push({ nome: arq.nome, motivo: 'sem texto selecionável' })
+          continue
+        }
+        documentos.push({ pasta: pasta.nome, nome: arq.nome, texto })
+        total += texto.length
+      } catch (e) {
+        ignorados.push({ nome: arq.nome, motivo: (e as Error).message })
+      }
+    }
+  }
+  return { documentos, ignorados }
 }
 
 /**

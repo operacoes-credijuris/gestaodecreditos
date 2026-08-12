@@ -280,6 +280,63 @@ export async function acharArquivo(
   return dados.files?.[0] ?? null
 }
 
+export interface ArquivoDrive {
+  id: string
+  nome: string
+  mimeType: string
+}
+
+/** Os arquivos (não as pastas) de dentro de uma pasta. */
+export async function listarArquivos(paiId: string): Promise<ArquivoDrive[]> {
+  const filtro =
+    `'${paiId}' in parents and mimeType != 'application/vnd.google-apps.folder' ` +
+    `and trashed=false`
+  const dados = await api<{ files?: { id: string; name: string; mimeType: string }[] }>(
+    `https://www.googleapis.com/drive/v3/files?q=${q(filtro)}` +
+      `&fields=files(id,name,mimeType)&pageSize=200&orderBy=name`,
+  )
+  return (dados.files ?? []).map((f) => ({
+    id: f.id,
+    nome: f.name,
+    mimeType: f.mimeType,
+  }))
+}
+
+/**
+ * O conteúdo de um arquivo, em bytes.
+ *
+ * DOIS CAMINHOS, e confundi-los devolve um JSON de erro no lugar do arquivo:
+ * documento NATIVO do Google (Docs, Sheets) não tem bytes para baixar — precisa
+ * ser exportado num formato de verdade. O resto se baixa com alt=media.
+ *
+ * Docs nativo sai como texto puro, que é exatamente o que se quer aqui; Sheets
+ * nativo sai como xlsx, que o ExcelJS lê igual ao arquivo enviado à mão.
+ */
+export async function baixarArquivo(a: ArquivoDrive): Promise<{
+  bytes: ArrayBuffer
+  /** O tipo REAL do que veio, já considerando a exportação. */
+  mime: string
+}> {
+  const acesso = await autorizarDrive()
+  const nativo = a.mimeType.startsWith('application/vnd.google-apps.')
+  const exportarComo = nativo
+    ? a.mimeType === 'application/vnd.google-apps.spreadsheet'
+      ? MIME_XLSX
+      : 'text/plain'
+    : null
+
+  const url = exportarComo
+    ? `https://www.googleapis.com/drive/v3/files/${a.id}/export?mimeType=${q(exportarComo)}`
+    : `https://www.googleapis.com/drive/v3/files/${a.id}?alt=media`
+
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${acesso}` } })
+  if (!resp.ok) throw new Error(`Não foi possível baixar "${a.nome}" (HTTP ${resp.status}).`)
+  return { bytes: await resp.arrayBuffer(), mime: exportarComo ?? a.mimeType }
+}
+
+const MIME_XLSX =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
 const MIME_DOCX =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
