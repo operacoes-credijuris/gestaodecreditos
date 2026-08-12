@@ -43,7 +43,7 @@ import { Card } from '@/components/ui/Card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
-import { Segmented } from '@/components/ui/Segmented'
+import { Tabs } from '@/components/ui/Tabs'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { IconButton } from '@/components/ui/IconButton'
 import {
@@ -538,9 +538,12 @@ export default function DadosPessoaisBancarios() {
         }
       />
 
-      <Card className="mb-4 p-4">
-        <Segmented
-          ariaLabel="Alternar entre investidores e originadores"
+      {/* Tabs, e não Segmented dentro de Card: Investidores/Originadores são DUAS
+          VISÕES da aba — o mesmo papel de Relatórios individuais/Visão global nas
+          Carteiras — e visões irmãs têm a mesma cara em toda a plataforma. O
+          sublinhado dispensa o cartão em volta. */}
+      <div className="mb-4">
+        <Tabs
           items={[
             { key: 'investidor', label: 'Investidores' },
             { key: 'originador', label: 'Originadores' },
@@ -554,7 +557,7 @@ export default function DadosPessoaisBancarios() {
             setAExcluir(null)
           }}
         />
-      </Card>
+      </div>
 
       <div className="space-y-5">
         <Card>

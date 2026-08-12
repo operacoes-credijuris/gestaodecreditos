@@ -31,6 +31,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
+import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
@@ -524,10 +525,14 @@ export default function AnaliseCredito() {
       />
 
       {/* Precatórios entram na fase 2: o funil existe no Kommo, mas o sync
-          ainda só traz o de RPV. */}
+          ainda só traz o de RPV.
+
+          Tabs, e não Segmented: RPV/Precatórios divide a aba em DUAS VISÕES — o
+          mesmo papel de Relatórios individuais/Visão global nas Carteiras — e visões
+          irmãs devem ter a mesma cara em toda a plataforma. O Segmented fica para as
+          ETAPAS logo abaixo, que são um filtro dentro da visão. */}
       <div className="mb-4">
-        <Segmented
-          ariaLabel="Tipo de crédito"
+        <Tabs
           items={[
             {
               key: 'rpv',
