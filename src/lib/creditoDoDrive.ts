@@ -132,9 +132,26 @@ export async function listarPastasDeCredito(): Promise<PastaCredito[]> {
 }
 
 /**
- * Das pastas do Drive, as que não correspondem a crédito nenhum cadastrado.
+ * Processos que NÃO devem ser oferecidos, por decisão de negócio.
  *
- * Duas maneiras de reconhecer, na ordem da confiança:
+ * São dois negócios que não foram adiante. As pastas continuam no Drive de
+ * propósito — servem de lembrete de qual é qual —, mas não são candidatas a
+ * cadastro e não têm por que reaparecer na lista para sempre.
+ *
+ * LISTA ESPECÍFICA, e não uma regra geral: decisão do dono, em 12/08/2026. Não há
+ * tela para editá-la, então acrescentar um terceiro é mexer aqui — e este
+ * comentário existe justamente para quem chegar depois não achar que a ausência
+ * deles é defeito da varredura.
+ */
+const IGNORADAS_POR_DECISAO = new Set(
+  ['0019323-75.2001.8.09.0051', '5222044-59.2024.8.09.0168'].map(onlyDigits),
+)
+
+/**
+ * As pastas do Drive que valem como candidatas a cadastro.
+ *
+ * Fica de fora o que já está cadastrado, reconhecido de duas maneiras, na ordem
+ * da confiança:
  *   1. pelos DÍGITOS do número do processo, quando a pasta o tem — exato;
  *   2. pelo nome do cedente normalizado, para as pastas da convenção antiga.
  *
@@ -142,8 +159,10 @@ export async function listarPastasDeCredito(): Promise<PastaCredito[]> {
  * aparecendo como novidade para sempre. Ele erra para os dois lados (cedente com
  * dois créditos, grafia diferente), e é por isso que o resultado é apresentado
  * como candidato a confirmar, não como fato.
+ *
+ * E fica de fora, também, a lista de ignorados acima.
  */
-export function apenasNaoCadastradas(
+export function candidatasACadastro(
   pastas: PastaCredito[],
   processos: Pick<Processo, 'numero_cnj' | 'cedente'>[] | undefined,
 ): PastaCredito[] {
@@ -156,7 +175,10 @@ export function apenasNaoCadastradas(
     if (c) cedentes.add(c)
   }
   return pastas.filter((pasta) => {
-    if (pasta.cnj) return !cnjs.has(onlyDigits(pasta.cnj))
+    if (pasta.cnj) {
+      const d = onlyDigits(pasta.cnj)
+      return !IGNORADAS_POR_DECISAO.has(d) && !cnjs.has(d)
+    }
     const c = normalizarNome(pasta.cedente ?? '')
     return !c || !cedentes.has(c)
   })

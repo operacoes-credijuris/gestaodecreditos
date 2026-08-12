@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { driveConfigurado } from '@/lib/drive'
 import {
-  apenasNaoCadastradas,
+  candidatasACadastro,
   listarPastasDeCredito,
   type PastaCredito,
 } from '@/lib/creditoDoDrive'
@@ -52,7 +52,7 @@ export function NovoCreditoDoDrive({
     setErro(null)
     try {
       const todas = await listarPastasDeCredito()
-      setCandidatas(apenasNaoCadastradas(todas, processos))
+      setCandidatas(candidatasACadastro(todas, processos))
     } catch (e) {
       setErro((e as Error).message)
     } finally {
