@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkles, X, Send, AlertCircle } from 'lucide-react'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { invokeFunction } from '@/lib/functions'
 import { IconButton } from '@/components/ui/IconButton'
+import { TextoIA } from '@/components/ui/TextoIA'
 import { cn } from '@/lib/cn'
 
 interface Mensagem {
@@ -25,67 +24,6 @@ const SUGESTOES = [
   'Quantas publicações ainda não foram tratadas?',
   'Quanto já foi cedido, por situação?',
 ]
-
-/**
- * Renderiza a resposta do modelo, que vem em Markdown — negrito, listas e
- * tabelas de processos. Sem isto o usuário lê os asteriscos e os pipes crus.
- *
- * O estilo vai bloco a bloco em vez de via plugin de tipografia: o painel tem
- * 420px, e os tamanhos padrão de um artigo ficariam grandes demais aqui.
- */
-function RespostaMarkdown({ texto }: { texto: string }) {
-  return (
-    <Markdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-        strong: ({ children }) => (
-          <strong className="font-semibold text-slate-900">{children}</strong>
-        ),
-        em: ({ children }) => <em className="italic">{children}</em>,
-        ul: ({ children }) => (
-          <ul className="mb-2 list-disc space-y-0.5 pl-4 last:mb-0">{children}</ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="mb-2 list-decimal space-y-0.5 pl-4 last:mb-0">{children}</ol>
-        ),
-        // Tabela de processos é larga e o painel é estreito: rola dentro do
-        // próprio quadro, em vez de esticar a bolha da mensagem.
-        table: ({ children }) => (
-          <div className="mb-2 overflow-x-auto scrollbar-thin last:mb-0">
-            <table className="w-full border-collapse text-xs">{children}</table>
-          </div>
-        ),
-        th: ({ children }) => (
-          <th className="border-b border-slate-300 px-2 py-1 text-left font-semibold">
-            {children}
-          </th>
-        ),
-        td: ({ children }) => (
-          <td className="whitespace-nowrap border-b border-slate-200 px-2 py-1">
-            {children}
-          </td>
-        ),
-        code: ({ children }) => (
-          <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-xs">
-            {children}
-          </code>
-        ),
-        h1: ({ children }) => (
-          <p className="mb-1 font-semibold text-slate-900">{children}</p>
-        ),
-        h2: ({ children }) => (
-          <p className="mb-1 font-semibold text-slate-900">{children}</p>
-        ),
-        h3: ({ children }) => (
-          <p className="mb-1 font-semibold text-slate-900">{children}</p>
-        ),
-      }}
-    >
-      {texto}
-    </Markdown>
-  )
-}
 
 /**
  * Assistente flutuante de perguntas sobre os dados do sistema.
@@ -240,7 +178,7 @@ export function Assistente() {
               <p className="whitespace-pre-wrap break-words">{m.content}</p>
             ) : (
               <div className="break-words">
-                <RespostaMarkdown texto={m.content} />
+                <TextoIA texto={m.content} />
               </div>
             )}
           </div>

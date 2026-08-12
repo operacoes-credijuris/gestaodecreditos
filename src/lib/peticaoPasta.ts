@@ -201,11 +201,19 @@ export async function resolverPastaDoCredito(processo: Processo): Promise<Resolu
 export async function resolverPastaDaPeticao(
   processo: Processo,
   nomeDoModelo: string,
+  /**
+   * Força a pasta de destino, ignorando o nome. A GERAÇÃO POR IA passa 5 sempre:
+   * ali não existe "nome do modelo", e o título que a IA escreve não pode decidir
+   * pasta — um título contendo "RPV complementar" mandaria a peça para a 7 sem
+   * ninguém ter escolhido isso. Por decisão do produto, peça de IA vai toda para
+   * "5. Petições".
+   */
+  numeroForcado?: number,
 ): Promise<Resolucao> {
   const doCredito = await resolverPastaDoCredito(processo)
   if (doCredito.tipo !== 'pronto') return doCredito
 
-  const numero = numeroDaPastaDestino(nomeDoModelo)
+  const numero = numeroForcado ?? numeroDaPastaDestino(nomeDoModelo)
   const setePastas = await listarSubpastas(doCredito.pastaId)
   const destino = casarPorNumero(setePastas, numero)
   const nomeCredito = doCredito.caminho[doCredito.caminho.length - 1]

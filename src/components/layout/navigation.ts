@@ -78,7 +78,7 @@ export const NAVIGATION: NavSection[] = [
         icon: FolderKanban,
       },
       {
-        label: 'Requerimentos',
+        label: 'Requerimentos administrativos',
         to: '/operacional/execucao/requerimentos',
         icon: ClipboardList,
       },

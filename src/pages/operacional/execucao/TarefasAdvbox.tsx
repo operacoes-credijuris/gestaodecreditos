@@ -574,6 +574,9 @@ export default function TarefasAdvbox() {
         descricao={[peticaoDe?.tipo, peticaoDe?.notes].filter(Boolean).join(' — ')}
         processo={peticaoDe ? resolveCredito(peticaoDe.processo) : null}
         numeroTarefa={peticaoDe?.processo ?? ''}
+        // Chave do cache do panorama da IA: a análise é por TAREFA, não por
+        // crédito — cada tarefa se escreve com um recorte diferente do processo.
+        tarefaId={peticaoDe ? String(peticaoDe.id) : null}
       />
     </div>
   )

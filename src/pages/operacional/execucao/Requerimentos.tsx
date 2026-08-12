@@ -178,7 +178,7 @@ export default function Requerimentos() {
   return (
     <div>
       <PageHeader
-        title="Requerimentos"
+        title="Requerimentos administrativos"
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
             Novo requerimento

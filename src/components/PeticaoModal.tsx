@@ -1,22 +1,41 @@
 // Janela de geração de petição, aberta pelo botão de cada tarefa.
 //
-// Duas abas: a partir de um MODELO (esta, pronta) e DO ZERO (a próxima). A partir
-// do modelo, a janela sugere qual usar lendo a descrição da tarefa, mostra a peça
-// já preenchida com os dados do crédito e entrega o .docx.
+// Duas abas, para os dois casos que existem:
 //
-// A sugestão NUNCA decide sozinha: os dez modelos ficam sempre na lista, porque
+//   MODELO — o caso comum. Sugere qual dos dez modelos usar lendo a descrição da
+//     tarefa e mostra a peça já preenchida com os dados do crédito.
+//
+//   GERAÇÃO POR IA — a peça fora da curva, para a qual não há modelo. Ao abrir,
+//     analisa o histórico do processo e diz onde ele está e que peças cabem; o
+//     advogado então pede a peça em texto livre.
+//
+// As duas terminam no MESMO lugar: texto em markdown → peticaoLayout →
+// peticaoDocx → Drive. Uma formatação só, então a peça da IA sai idêntica à de
+// modelo — mesmo timbrado, mesmas cores, mesmo recuo de citação.
+//
+// A sugestão de modelo NUNCA decide sozinha: os dez ficam sempre na lista, porque
 // três pares deles colidem na mesma palavra ("sequestro", "registro público",
 // "RPV") e porque a descrição da tarefa é texto livre digitado por gente. Pedir
 // sequestro não é juntar planilha para fins de sequestro, e protocolar a peça
 // errada custa mais que um clique a mais.
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, FileText, Sparkles } from 'lucide-react'
+import {
+  AlertTriangle,
+  Copy,
+  Download,
+  FileText,
+  RefreshCw,
+  Send,
+  Sparkles,
+} from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
-import { Select } from '@/components/ui/Field'
+import { Select, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { Loading } from '@/components/ui/Table'
+import { TextoIA } from '@/components/ui/TextoIA'
 import {
   aplicarModelo,
   baixarModelo,
@@ -28,6 +47,7 @@ import {
   variaveisUsadas,
 } from '@/lib/peticao'
 import { driveConfigurado } from '@/lib/drive'
+import { invokeFunction } from '@/lib/functions'
 import { peticaoTemplatesCrud, useInvestidorDados } from '@/lib/queries'
 import { formatCNJ } from '@/lib/format'
 import type { Processo } from '@/lib/types'
@@ -37,12 +57,33 @@ const ABAS = [
   { key: 'zero', label: 'Geração por IA', icon: <Sparkles className="h-4 w-4" /> },
 ]
 
+/**
+ * Teto do texto que vai no link do app do Claude. A documentação do esquema
+ * `claude://` trunca o `q=` em ~14 mil caracteres; ficamos abaixo com folga para
+ * a codificação de URL não empurrar o corte para o meio de uma frase.
+ */
+const MAX_PASSAGEM = 13000
+
+interface RespostaPanorama {
+  panorama: string
+  gerado_em: string
+  do_cache: boolean
+}
+interface RespostaRedacao {
+  titulo: string
+  texto: string
+  truncada?: boolean
+  /** Regras de forma que o texto ainda viola — a peça sai, mas avisada. */
+  avisos?: string[]
+}
+
 export function PeticaoModal({
   open,
   onClose,
   descricao,
   processo,
   numeroTarefa,
+  tarefaId,
 }: {
   open: boolean
   onClose: () => void
@@ -51,6 +92,12 @@ export function PeticaoModal({
   /** O crédito da tarefa. Nulo quando a tarefa não casou com nenhum cadastrado. */
   processo: Processo | null
   numeroTarefa: string
+  /**
+   * Id da tarefa no ADVBOX. É a CHAVE DO CACHE do panorama: a mesma execução
+   * recebe várias tarefas ao longo do tempo, e cada uma se analisa com um recorte
+   * diferente do mesmo processo (ver migração 0035).
+   */
+  tarefaId: string | null
 }) {
   const toast = useToast()
   const [aba, setAba] = useState('modelo')
@@ -66,6 +113,18 @@ export function PeticaoModal({
     motivo: string
     caminho: string[]
   } | null>(null)
+
+  // ---------- Estado da aba de IA ----------
+  /** O comando do advogado ("peça o sequestro dos valores porque…"). */
+  const [instrucao, setInstrucao] = useState('')
+  const [redigindo, setRedigindo] = useState(false)
+  const [redacao, setRedacao] = useState<RespostaRedacao | null>(null)
+  /**
+   * O texto da peça, EDITÁVEL. Separado de `redacao` de propósito: a peça vai a
+   * protocolo, e obrigar a refazer o prompt por causa de uma vírgula seria
+   * absurdo. `redacao` guarda o que a IA devolveu; isto, o que vai ser salvo.
+   */
+  const [textoIA, setTextoIA] = useState('')
 
   const templates = peticaoTemplatesCrud.useList()
   const fichas = useInvestidorDados()
@@ -88,7 +147,8 @@ export function PeticaoModal({
   }, [open, sugeridos, ativos])
 
   // Ao fechar, esquece a escolha e o texto: reabrir noutra tarefa tem de partir da
-  // sugestão daquela tarefa, não da anterior.
+  // sugestão daquela tarefa, não da anterior. O mesmo vale para a redação da IA —
+  // peça escrita para uma tarefa não pode reaparecer na janela de outra.
   useEffect(() => {
     if (open) return
     setIdEscolhido(null)
@@ -96,6 +156,9 @@ export function PeticaoModal({
     setErroMd(null)
     setSemPasta(null)
     setAba('modelo')
+    setInstrucao('')
+    setRedacao(null)
+    setTextoIA('')
   }, [open])
 
   const escolhido = ativos.find((t) => t.id === idEscolhido) ?? null
@@ -166,6 +229,117 @@ export function PeticaoModal({
     [md, preenchimento],
   )
 
+  /**
+   * Panorama do caso, disparado ao ENTRAR na aba de IA — não ao abrir a janela:
+   * quem só quer o modelo não deve pagar análise nenhuma.
+   *
+   * `staleTime: Infinity` + a chave pela tarefa evitam refazer na mesma sessão; o
+   * cache de verdade é no servidor (peticao_panorama), então nem trocar de aba nem
+   * recarregar a página custam chamada nova enquanto o processo não andar.
+   */
+  const panorama = useQuery({
+    queryKey: ['peticao-panorama', tarefaId, processo?.id],
+    queryFn: () =>
+      invokeFunction<RespostaPanorama>('peticao-ia', {
+        action: 'panorama',
+        tarefa_id: tarefaId,
+        processo_id: processo?.id,
+      }),
+    enabled: open && aba === 'zero' && !!tarefaId && !!processo,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+    retry: false,
+  })
+
+  /** Os dados do crédito que a IA deve usar no texto, com os rótulos dos modelos. */
+  const dadosParaIA = useMemo(() => {
+    const v = preenchimento?.valores ?? {}
+    const saida: Record<string, string> = {}
+    for (const [chave, valor] of Object.entries(v)) {
+      if (!valor) continue
+      const nome = NOME_VARIAVEL[chave as keyof typeof NOME_VARIAVEL]
+      if (nome) saida[nome] = valor
+    }
+    return saida
+  }, [preenchimento])
+
+  async function redigir() {
+    if (!processo || !instrucao.trim()) return
+    setRedigindo(true)
+    try {
+      const r = await invokeFunction<RespostaRedacao>('peticao-ia', {
+        action: 'redigir',
+        processo_id: processo.id,
+        instrucao: instrucao.trim(),
+        panorama: panorama.data?.panorama,
+        dados: dadosParaIA,
+      })
+      setRedacao(r)
+      setTextoIA(r.texto)
+      if (r.truncada) {
+        toast.toast(
+          'A resposta atingiu o limite de tamanho e pode estar incompleta. Confira o fecho.',
+          'info',
+        )
+      }
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setRedigindo(false)
+    }
+  }
+
+  /**
+   * Passa o caso adiante para o app do Claude, onde o refinamento continua sem
+   * consumir a API.
+   *
+   * FAZ AS DUAS COISAS, e é de propósito: o esquema `claude://` só funciona com o
+   * app instalado — no navegador puro, clicar não faria nada. Copiando primeiro, a
+   * pessoa tem o texto na mão de qualquer jeito, e o texto completo, já que o
+   * link é truncado em ~14 mil caracteres.
+   */
+  async function abrirNoClaude() {
+    if (!processo) return
+    const passagem = [
+      'Estou redigindo uma petição num cumprimento de sentença contra a Fazenda Pública em que houve cessão de crédito.',
+      '',
+      `## O caso`,
+      `- Processo: ${formatCNJ(processo.numero_cnj)}`,
+      `- Cedente: ${processo.cedente || 'não informado'}`,
+      `- Cessionário: ${processo.cessionario || 'não informado'}`,
+      `- Ente devedor: ${processo.entidade_devedora || 'não informado'}`,
+      `- Juízo: ${[processo.tribunal, processo.comarca, processo.vara].filter(Boolean).join(' · ') || 'não informado'}`,
+      '',
+      panorama.data?.panorama
+        ? `## Panorama levantado do caso\n${panorama.data.panorama}\n`
+        : '',
+      `## O que eu pedi`,
+      instrucao.trim() || '(nada ainda)',
+      '',
+      textoIA ? `## O que veio como resposta\n\n${textoIA}\n` : '',
+      '---',
+      'Continue daqui comigo: quero ajustar esta petição.',
+    ]
+      .filter(Boolean)
+      .join('\n')
+
+    try {
+      await navigator.clipboard.writeText(passagem)
+      toast.success('Contexto copiado. Se o Claude não abrir, cole com Ctrl+V.')
+    } catch {
+      toast.toast(
+        'Não consegui copiar o contexto. Abrindo o Claude; refaça o pedido por lá.',
+        'info',
+      )
+    }
+    // Âncora em vez de location.href: sem app instalado, navegar direto para um
+    // esquema desconhecido deixa a página num estado de erro; o clique numa
+    // âncora simplesmente não faz nada.
+    const a = document.createElement('a')
+    a.href = `claude://claude.ai/new?q=${encodeURIComponent(passagem.slice(0, MAX_PASSAGEM))}`
+    a.click()
+  }
+
   const impedido =
     !processo ||
     !md ||
@@ -184,18 +358,36 @@ export function PeticaoModal({
     URL.revokeObjectURL(url)
   }
 
-  async function gerar() {
-    if (!textoFinal || !escolhido || !processo) return
+  /**
+   * Markdown → .docx → Drive. CAMINHO ÚNICO das duas abas.
+   *
+   * É aqui que a decisão de a IA "entregar só o texto" se paga: a peça escrita
+   * pelo modelo passa exatamente pelas mesmas etapas da peça de modelo, então sai
+   * com o mesmo timbrado, as mesmas margens, as mesmas cores e o mesmo recuo de
+   * citação. Não existe uma segunda formatação para divergir da primeira.
+   *
+   * @param nomeBase  nomeia o arquivo; nos modelos é o nome do modelo, na IA é o
+   *                  título curto que ela devolveu.
+   * @param pastaForcada  destino fixo dentro do crédito. A IA passa 5 sempre —
+   *                  ver resolverPastaDaPeticao.
+   */
+  async function salvarPeticao(
+    texto: string,
+    nomeBase: string,
+    pastaForcada?: number,
+  ) {
+    if (!processo) return
     setGerando(true)
     setPasso(null)
+    setSemPasta(null)
     try {
       // Sob demanda: a biblioteca de .docx só desce para quem realmente gera uma
       // petição, não para quem abre a lista de tarefas.
       const { gerarDocxPeticao } = await import('@/lib/peticaoDocx')
       const timbrado = await baixarTimbradoBytes()
-      const blob = await gerarDocxPeticao(textoFinal, timbrado)
+      const blob = await gerarDocxPeticao(texto, timbrado)
       const cnj = processo.numero_cnj ? formatCNJ(processo.numero_cnj) : numeroTarefa
-      const nome = `${escolhido.nome} - ${cnj}.docx`.replace(/[/\\?%*:|"<>]/g, '-')
+      const nome = `${nomeBase} - ${cnj}.docx`.replace(/[/\\?%*:|"<>]/g, '-')
 
       // O arquivo é gerado ANTES de procurar a pasta: se a pasta não resolver, o
       // trabalho não se perde — cai no download e a pessoa sobe à mão.
@@ -207,7 +399,7 @@ export function PeticaoModal({
 
       setPasso('Procurando a pasta no Drive…')
       const { resolverPastaDaPeticao } = await import('@/lib/peticaoPasta')
-      const alvo = await resolverPastaDaPeticao(processo, escolhido.nome)
+      const alvo = await resolverPastaDaPeticao(processo, nomeBase, pastaForcada)
 
       if (alvo.tipo !== 'pronto') {
         setSemPasta({ motivo: alvo.motivo, caminho: alvo.caminho })
@@ -249,6 +441,14 @@ export function PeticaoModal({
     }
   }
 
+  // ---------- O que o botão "Salvar" faz em cada aba ----------
+  const naIA = aba === 'zero'
+  /** Título curto da IA para nomear o arquivo; sem ele, um nome genérico. */
+  const nomeDaPecaIA = (redacao?.titulo || 'Petição').trim()
+  const impedidoSalvar = naIA
+    ? !processo || !textoIA.trim() || gerando
+    : impedido || gerando
+
   return (
     <Modal
       open={open}
@@ -271,8 +471,16 @@ export function PeticaoModal({
             Fechar
           </Button>
           <Button
-            onClick={gerar}
-            disabled={impedido || gerando}
+            onClick={() =>
+              naIA
+                ? // 5 sempre: por decisão do produto, peça de IA vai toda para
+                  // "5. Petições" — o título que a IA escreveu não decide pasta.
+                  salvarPeticao(textoIA, nomeDaPecaIA, 5)
+                : textoFinal && escolhido
+                  ? salvarPeticao(textoFinal, escolhido.nome)
+                  : undefined
+            }
+            disabled={impedidoSalvar}
             icon={<Download className="h-4 w-4" />}
           >
             {/* "Salvar", e não "Gerar petição": repetir o título da janela no
@@ -287,10 +495,152 @@ export function PeticaoModal({
         <Tabs items={ABAS} value={aba} onChange={setAba} />
       </div>
 
-      {aba === 'zero' ? (
-        <p className="py-8 text-center text-sm text-slate-600">
-          A redação livre entra depois. Por ora, a geração é a partir dos modelos.
-        </p>
+      {naIA ? (
+        <div className="space-y-4">
+          {!processo ? (
+            <Aviso tom="erro">
+              Esta tarefa não casou com nenhum crédito cadastrado. Sem crédito não há
+              processo para analisar. Confira se o número do processo da tarefa no
+              ADVBOX está cadastrado em Créditos.
+            </Aviso>
+          ) : (
+            <>
+              {/* ---------- Panorama ---------- */}
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h4 className="font-display text-xs font-bold uppercase tracking-wide text-brand-800">
+                    Panorama do caso
+                  </h4>
+                  {panorama.data && (
+                    <button
+                      type="button"
+                      onClick={() => void panorama.refetch()}
+                      disabled={panorama.isFetching}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-brand-700 disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`h-3 w-3 ${panorama.isFetching ? 'animate-spin' : ''}`}
+                      />
+                      Analisar de novo
+                    </button>
+                  )}
+                </div>
+
+                {panorama.isLoading ? (
+                  <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-4">
+                    <p className="text-sm text-brand-800">
+                      Lendo as movimentações e as tarefas deste processo…
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      <div className="skeleton h-3 w-full rounded" />
+                      <div className="skeleton h-3 w-11/12 rounded" />
+                      <div className="skeleton h-3 w-9/12 rounded" />
+                    </div>
+                  </div>
+                ) : panorama.isError ? (
+                  <Aviso tom="atencao">
+                    <p>{(panorama.error as Error).message}</p>
+                    <button
+                      type="button"
+                      onClick={() => void panorama.refetch()}
+                      className="mt-1 font-medium underline"
+                    >
+                      Tentar de novo
+                    </button>
+                  </Aviso>
+                ) : panorama.data ? (
+                  <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-4 text-sm leading-relaxed text-slate-700">
+                    <TextoIA texto={panorama.data.panorama} />
+                  </div>
+                ) : null}
+              </section>
+
+              {/* ---------- Comando do advogado ---------- */}
+              <section>
+                <label
+                  htmlFor="peticao-instrucao"
+                  className="mb-1.5 block text-sm font-medium text-slate-700"
+                >
+                  O que esta petição deve pedir?
+                </label>
+                <Textarea
+                  id="peticao-instrucao"
+                  rows={3}
+                  value={instrucao}
+                  placeholder="Ex.: peça o sequestro do valor do RPV, que venceu o prazo de 60 dias sem pagamento, e requeira a intimação do ente devedor."
+                  onChange={(e) => setInstrucao(e.target.value)}
+                />
+                <div className="mt-2 flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    icon={<Send className="h-4 w-4" />}
+                    loading={redigindo}
+                    disabled={!instrucao.trim() || redigindo}
+                    onClick={() => void redigir()}
+                  >
+                    {redigindo ? 'Redigindo…' : 'Enviar'}
+                  </Button>
+                </div>
+              </section>
+
+              {/* ---------- A peça ---------- */}
+              {redacao && (
+                <section>
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                    <label
+                      htmlFor="peticao-texto"
+                      className="text-sm font-medium text-slate-700"
+                    >
+                      {redacao.titulo || 'Petição'}{' '}
+                      <span className="font-normal text-slate-500">
+                        — revise antes de salvar
+                      </span>
+                    </label>
+                    {/* O escape quando a resposta não serve: leva o caso inteiro
+                        para o app do Claude e o refinamento segue lá, fora da API. */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<Copy className="h-4 w-4" />}
+                      onClick={() => void abrirNoClaude()}
+                    >
+                      Continuar no Claude
+                    </Button>
+                  </div>
+
+                  {redacao.avisos && redacao.avisos.length > 0 && (
+                    <div className="mb-2">
+                      <Aviso tom="atencao">
+                        <p className="font-medium">
+                          A peça saiu fora do padrão de formatação em{' '}
+                          {redacao.avisos.length === 1 ? 'um ponto' : 'alguns pontos'}.
+                          O arquivo sai, mas confira:
+                        </p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                          {redacao.avisos.map((a, i) => (
+                            <li key={i}>{a}</li>
+                          ))}
+                        </ul>
+                      </Aviso>
+                    </div>
+                  )}
+
+                  {/* Editável, e em fonte de largura fixa: o que se confere aqui é
+                      onde cada bloco começa e acaba, e é isso que a formatação do
+                      .docx lê. */}
+                  <Textarea
+                    id="peticao-texto"
+                    rows={16}
+                    value={textoIA}
+                    onChange={(e) => setTextoIA(e.target.value)}
+                    className="font-mono text-xs leading-relaxed"
+                  />
+                </section>
+              )}
+            </>
+          )}
+        </div>
       ) : (
         <div className="space-y-4">
           {/* Sem crédito não há de onde tirar juízo, processo, cessionário nem
