@@ -275,7 +275,10 @@ export function PeticaoModal({
             disabled={impedido || gerando}
             icon={<Download className="h-4 w-4" />}
           >
-            {gerando ? (passo ?? 'Gerando…') : 'Gerar petição'}
+            {/* "Salvar", e não "Gerar petição": repetir o título da janela no
+                botão não informa nada, e o que o clique faz é salvar a peça no
+                Drive. */}
+            {gerando ? (passo ?? 'Gerando…') : 'Salvar'}
           </Button>
         </>
       }
