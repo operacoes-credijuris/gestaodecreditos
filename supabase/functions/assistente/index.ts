@@ -597,7 +597,7 @@ async function executar(
         liquidados: 0,
       })
       const total = zero()
-      for (const l of (data ?? []) as Record<string, unknown>[]) {
+      for (const l of (data ?? []) as unknown as Record<string, unknown>[]) {
         soma(total, l)
         if (dimensao !== 'nenhum') {
           const k = String(l[dimensao] ?? 'não informado') || 'não informado'
@@ -968,7 +968,7 @@ async function executar(
       }
       const { data, error } = await q
       if (error) return JSON.stringify({ erro: error.message })
-      let tarefas = (data ?? []) as Record<string, unknown>[]
+      let tarefas = (data ?? []) as unknown as Record<string, unknown>[]
       // Responsável é jsonb (lista de nomes): filtra em memória, porque `ilike`
       // não entra dentro do array.
       if (args.responsavel) {
@@ -1009,7 +1009,15 @@ async function executar(
         })
       }
       const num = (v: unknown) => Number(v ?? 0)
-      const totais = creditos.reduce(
+      interface TotaisCarteira {
+        creditos: number
+        capital_investido: number
+        valor_face: number
+        ja_recebido: number
+        valor_estimado_complementar: number
+        liquidados: number
+      }
+      const totais = creditos.reduce<TotaisCarteira>(
         (t, c) => ({
           creditos: t.creditos + 1,
           capital_investido: t.capital_investido + num(c.capital_investido),
