@@ -69,3 +69,8 @@ verify_jwt = true
 # por cron, e ela ESCREVE no sistema do escritório: o JWT é exigido no portão.
 [functions.advbox-processos]
 verify_jwt = true
+
+# SELIC e IPCA do Banco Central. Chamada pelo cron semanal (x-cron-secret) e pelo
+# botão "Buscar no Banco Central" (JWT do usuário); a própria função valida os dois.
+[functions.parametros-bcb]
+verify_jwt = false

@@ -31,6 +31,7 @@ import {
   formatCpfCnpjInput,
   limparNumeroConta,
   nomeParecido,
+  normalizarBusca,
   normalizarNome,
   onlyDigits,
   rotuloDocumento,
@@ -232,6 +233,9 @@ export default function DadosPessoaisBancarios() {
   const [buscandoCep, setBuscandoCep] = useState(false)
   /** Id da última busca de CEP disparada — descarta resposta atrasada. */
   const reqCepRef = useRef(0)
+  // Mesmo par para a busca por CNPJ.
+  const [buscandoCnpj, setBuscandoCnpj] = useState(false)
+  const reqCnpjRef = useRef(0)
   /** Quais campos do endereço foram preenchidos pela ÚLTIMA busca de CEP. Só
    *  esses podem ser substituídos por uma busca nova; o que foi digitado à mão
    *  fica. */
@@ -355,6 +359,51 @@ export default function DadosPessoaisBancarios() {
       }
     } finally {
       setBuscandoCep(false)
+    }
+  }
+
+  /**
+   * CNPJ completo (14 dígitos) traz o endereço da empresa do cadastro da Receita.
+   *
+   * PREENCHE SÓ O QUE ESTÁ EM BRANCO, ao contrário da busca por CEP. Aqui não há um
+   * "endereço deste CNPJ" que substitua o anterior: o cadastro da Receita pode estar
+   * desatualizado, e a ficha pode ter o endereço que a pessoa confirmou por contrato.
+   * Sobrescrever silenciosamente trocaria o dado conferido pelo dado presumido.
+   *
+   * Não existe equivalente para CPF — nome ligado a CPF é dado pessoal protegido e as
+   * bases oficiais são pagas (ver lib/cnpj.ts).
+   */
+  async function preencherPorCnpj(docMascarado: string) {
+    if (onlyDigits(docMascarado).length !== 14) return
+    // Mesma guarda de obsolescência da busca por CEP: só a última resposta escreve,
+    // e só se a janela aberta ainda for a mesma.
+    const meuId = ++reqCnpjRef.current
+    const janelaNaChamada = editando?.id
+    setBuscandoCnpj(true)
+    try {
+      const { buscarCnpj } = await import('@/lib/cnpj')
+      const e = await buscarCnpj(docMascarado)
+      if (meuId !== reqCnpjRef.current || janelaNaChamada !== editando?.id) return
+      if (!e) return
+      const m = municipios ?? (await import('@/lib/municipios')).MUNICIPIOS_POR_UF
+      // A Receita devolve o município em caixa alta e sem acento; o combobox só
+      // reconhece o nome exato da lista do IBGE, então casa por forma normalizada.
+      const daUf = e.uf ? (m[e.uf] ?? []) : []
+      const cidadeIbge = daUf.find(
+        (n) => normalizarBusca(n) === normalizarBusca(e.cidade),
+      )
+      setForm((f) => ({
+        ...f,
+        logradouro: f.logradouro || e.logradouro,
+        numero: f.numero || e.numero,
+        complemento: f.complemento || e.complemento,
+        bairro: f.bairro || e.bairro,
+        uf: f.uf || e.uf,
+        cidade: f.cidade || cidadeIbge || '',
+        cep: f.cep || (e.cep ? formatCepInput(e.cep) : ''),
+      }))
+    } finally {
+      setBuscandoCnpj(false)
     }
   }
 
@@ -712,14 +761,19 @@ export default function DadosPessoaisBancarios() {
                         <Input
                           placeholder={dicaCampo(c.chave, c.dica, form.cpf)}
                           value={form[c.chave]}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              [c.chave]: c.mascara
-                                ? c.mascara(e.target.value)
-                                : e.target.value,
-                            }))
-                          }
+                          disabled={c.chave === 'cpf' && buscandoCnpj}
+                          onChange={(e) => {
+                            const valor = c.mascara
+                              ? c.mascara(e.target.value)
+                              : e.target.value
+                            setForm((f) => ({ ...f, [c.chave]: valor }))
+                            // CNPJ completo traz o endereço da empresa. Só no campo
+                            // do documento, e só com 14 dígitos: CPF não tem
+                            // equivalente público (ver lib/cnpj.ts).
+                            if (c.chave === 'cpf' && onlyDigits(valor).length === 14) {
+                              void preencherPorCnpj(valor)
+                            }
+                          }}
                         />
                       </Field>
                     ))}

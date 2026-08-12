@@ -1,9 +1,13 @@
 // Janela dos parâmetros de atualização monetária usados na projeção da carteira.
 //
-// Quatro linhas. SELIC e IPCA são digitados; IPCA + 2% é derivado na hora e não
-// tem campo — guardar um derivado abriria a chance de ele discordar da parcela
-// que o originou. A data de referência nasce como hoje e é editável.
+// Quatro linhas. SELIC e IPCA vêm do Banco Central — pelo cron semanal ou pelo botão
+// "Buscar no Banco Central" — e continuam editáveis à mão: automação que não deixa
+// corrigir vira automação que se contorna por fora. IPCA + 2% é derivado na hora e
+// não tem campo, porque guardar um derivado abriria a chance de ele discordar da
+// parcela que o originou. A data de referência nasce como hoje e é editável.
 import { useEffect, useState } from 'react'
+import { Download } from 'lucide-react'
+import { invokeFunction } from '@/lib/functions'
 import {
   useParametrosAtualizacao,
   useSalvarParametrosAtualizacao,
@@ -62,6 +66,36 @@ export function ModalParametrosAtualizacao({
   // Competência é sempre HOJE, sem campo para editar.
   const hoje = hojeISO()
 
+  const [buscando, setBuscando] = useState(false)
+
+  /**
+   * Busca os dois índices no Banco Central e traz para os campos — sem salvar.
+   *
+   * NÃO SALVA de propósito: o valor entra à vista, para ser conferido contra o
+   * boletim antes de virar a base da projeção de toda a carteira. O cron semanal
+   * grava direto porque lá não há ninguém para conferir; aqui há.
+   */
+  async function buscarNoBcb() {
+    setBuscando(true)
+    try {
+      const r = await invokeFunction<{
+        ok?: boolean
+        selic_aa?: number | null
+        ipca_12m_aa?: number | null
+        avisos?: string[]
+      }>('parametros-bcb', {})
+      // A função já gravou no banco; aqui só refletimos nos campos para conferência.
+      if (typeof r.selic_aa === 'number') setSelic(r.selic_aa)
+      if (typeof r.ipca_12m_aa === 'number') setIpca(r.ipca_12m_aa)
+      if (r.avisos?.length) r.avisos.forEach((a) => toast.error(a))
+      else toast.success('Índices atualizados pelo Banco Central. Confira e salve.')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBuscando(false)
+    }
+  }
+
   async function handleSalvar() {
     try {
       await salvar.mutateAsync({
@@ -84,6 +118,17 @@ export function ModalParametrosAtualizacao({
       size="md"
       footer={
         <>
+          {/* À esquerda dos botões de decisão: buscar não é confirmar nem cancelar.
+              O mr-auto empurra Cancelar e Salvar para a direita. */}
+          <Button
+            variant="outline"
+            className="mr-auto"
+            icon={<Download className="h-4 w-4" />}
+            loading={buscando}
+            onClick={buscarNoBcb}
+          >
+            Buscar no Banco Central
+          </Button>
           <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
