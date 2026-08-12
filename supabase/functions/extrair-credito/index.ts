@@ -51,7 +51,7 @@ const CAMPOS = {
     'Só o juízo, SEM a comarca: "32ª Vara do Trabalho", nunca "32ª Vara do Trabalho de São Paulo". A comarca tem campo próprio, e repetida aqui aparece duas vezes na mesma linha da tabela.',
   cedente: 'Nome do credor original — quem cedeu o crédito.',
   cedente_advogado:
-    'Quem representa o cedente no processo: pode ser o ADVOGADO pessoa física ou a SOCIEDADE DE ADVOGADOS (escritório, com CNPJ) que atua pelo cedente. Escritório é resposta válida — não deixe em branco por não ser pessoa física. Havendo advogado e escritório, escreva o que consta como representante nos autos.',
+    'Quem representa o cedente: o ADVOGADO pessoa física ou a SOCIEDADE DE ADVOGADOS (escritório) que atua por ele. Escritório é resposta válida — não deixe em branco por não ser pessoa física. ONDE ESTÁ: na planilha de análise de crédito, na aba de análise jurídica, na linha "Nome do advogado ou escritório de advocacia e CPF/CNPJ". Grave só o nome ou a razão social, sem o CPF/CNPJ que vem colado na mesma célula. Essa linha pode estar vazia quando a cessão é de honorários (aí o advogado é o próprio cedente) — nesse caso procure o representante nos documentos do processo.',
   numero_processo_administrativo:
     'Número do processo ADMINISTRATIVO do precatório no tribunal — o segundo número, além do judicial, por onde o precatório anda na fila de pagamento do ente devedor. Costuma aparecer na análise de crédito e nos ofícios do tribunal. Só existe em precatório: em RPV é null, e em precatório sem o número localizado também é null.',
   entidade_devedora:
@@ -171,6 +171,8 @@ REGRAS, em ordem de importância:
 10. CADA CAMPO DIZ UMA COISA SÓ e não repete o que já está em outro. Tribunal, comarca e vara descrevem o MESMO juízo em três níveis, então cada um fica com o seu nível: TRT-2 / São Paulo / 32ª Vara do Trabalho. O erro mais comum é a vara vir com a localidade colada, como está escrito na petição — corte a localidade, ela já está na comarca.
 
 11. Datas em AAAA-MM-DD. Dinheiro em número puro, sem "R$" e sem ponto de milhar: 120000.55.
+
+12. NOME É SÓ NOME. A planilha escreve o nome junto com o documento, na mesma célula: "Tatiana Hiiga - CPF: 292.686.098-60", "Tedeschi de Amorim Sociedade Individual de Advocacia - CNPJ nº 29.799.354/0001-20". Grave apenas o nome da pessoa ou a razão social, cortando CPF, CNPJ, OAB e tudo o que vier depois. Isso vale para cedente, advogado do cedente e cessionário. A plataforma não tem campo para documento, e número colado no nome quebra a busca e a ligação com as fichas de dados bancários, que se faz pelo nome.
 
 Responda apenas chamando a ferramenta.`
 
