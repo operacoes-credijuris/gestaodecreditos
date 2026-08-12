@@ -698,6 +698,25 @@ export default function Processos() {
                             {/* Contador de apensos colado no número: pertence ao
                                 processo, não à coluna de ações. */}
                             {apensos.contador(p.id)}
+                            {/* ESPÉCIE COLADA NO NÚMERO, e não em coluna nova.
+                                Ela é natureza do requisitório, como o número —
+                                não é situação do crédito (isso é o status, na
+                                coluna própria) nem valor. E é ela que muda como se
+                                lê o resto da linha: prazo e ordem de pagamento de
+                                RPV e de precatório não se comparam. Sem coluna, a
+                                tabela não perde largura. */}
+                            {p.especie_requisitorio && (
+                              <Badge
+                                size="sm"
+                                tone={
+                                  ESPECIE_REQUISITORIO[p.especie_requisitorio]?.tone ??
+                                  'gray'
+                                }
+                              >
+                                {ESPECIE_REQUISITORIO[p.especie_requisitorio]?.label ??
+                                  p.especie_requisitorio}
+                              </Badge>
+                            )}
                           </span>
                           {/* Nomes completos: quebram em linhas em vez de truncar. */}
                           <div className="text-xs font-normal text-slate-600">

@@ -438,7 +438,11 @@ export default function TarefasAdvbox() {
                   key={i}
                   className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-brand-900 ring-1 ring-inset ring-brand-100"
                 >
-                  <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">
+                  {/* text-[10px] e leading-none, não text-xs: o círculo tem 6
+                      (18px na densidade de 12px do html), e duas letras em text-xs
+                      com a entrelinha padrão ficavam mais altas que ele — a
+                      inicial vazava por cima da borda. */}
+                  <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold leading-none text-white">
                     {iniciais(r)}
                   </span>
                   {formatNome(r)}

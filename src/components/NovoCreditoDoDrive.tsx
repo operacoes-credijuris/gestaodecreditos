@@ -7,11 +7,10 @@
 //      interpretação, então não há como estar errado de um jeito que ninguém veja.
 //   2. OS DOCUMENTOS dão o resto — tribunal, comarca, vara, entidade devedora,
 //      valor de face, tipo de crédito, expectativa de liquidação, cessionário,
-//      data de aquisição e capital investido. Aí é leitura interpretada, e cada
-//      campo volta com o ARQUIVO de onde saiu, para conferência.
+//      data de aquisição, capital investido, instrumento e nº RTDPJ. Aí é leitura
+//      interpretada, e cada campo volta com o ARQUIVO de onde saiu.
 //
-// Ficam de fora, por decisão do dono: instrumento e nº RTDPJ (não constam dos
-// documentos) e índice de atualização (escolha de negócio).
+// Fica de fora só o índice de atualização, que é escolha de negócio.
 //
 // E ELA NUNCA SALVA. Preenche o formulário ao lado e espera a pessoa conferir.
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -57,6 +56,8 @@ const ROTULO: Record<string, string> = {
   data_aquisicao: 'Data de aquisição',
   capital_investido: 'Capital investido',
   tipo_credito: 'Tipo de crédito',
+  instrumento: 'Instrumento',
+  numero_rtdpj: 'Nº RTDPJ',
 }
 
 /**

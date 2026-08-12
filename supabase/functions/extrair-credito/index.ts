@@ -29,10 +29,16 @@ async function chaveAnthropic(): Promise<string | null> {
 /**
  * Os campos que a IA preenche — e SÓ eles.
  *
- * Ficam de fora, por decisão do dono: instrumento e nº RTDPJ (não constam dos
- * documentos) e índice de atualização (escolha de negócio). Também ficam de fora
- * espécie, originador, número do processo e cedente: esses vêm do CAMINHO da pasta
- * no Drive, com certeza total, e pedir à IA seria trocar certeza por palpite.
+ * Fica de fora só o índice de atualização, que é escolha de negócio e não consta de
+ * documento nenhum. Também ficam de fora espécie, originador, número do processo e
+ * cedente: esses vêm do CAMINHO da pasta no Drive, com certeza total, e pedir à IA
+ * seria trocar certeza por palpite.
+ *
+ * INSTRUMENTO e Nº RTDPJ entraram depois. Pareciam manuais até o dono explicar que
+ * a resposta está na pasta: escritura pública, ou comprovante de protocolo de
+ * registro no RTDPJ (que traz o número dentro), ou nada além do contrato
+ * particular. É decisão por PRESENÇA de documento, com ordem de precedência — está
+ * escrita na regra 7 do prompt.
  */
 const CAMPOS = {
   tribunal: 'Sigla ou nome do tribunal (ex.: TJGO, TRF1). Do processo, não do contrato.',
@@ -52,6 +58,8 @@ const CAMPOS = {
   data_aquisicao: 'Data da assinatura do contrato de cessão, em AAAA-MM-DD.',
   capital_investido:
     'Valor que a cessionária PAGOU pelo crédito, em reais, número puro. É o preço da cessão, sempre menor que o valor de face.',
+  numero_rtdpj:
+    'Número do registro no RTDPJ, como está no comprovante de protocolo. Havendo mais de um, separe por vírgula. Null se não houver comprovante na pasta.',
 } as const
 
 const FERRAMENTA = {
@@ -84,8 +92,14 @@ const FERRAMENTA = {
             description:
               'O que foi adquirido. Pode ser mais de um: "principal" é o crédito do credor; "honorarios_contratuais" são os do advogado por contrato; "honorarios_advocaticios" são os sucumbenciais. Lista vazia se não der para saber.',
           },
+          instrumento: {
+            type: ['string', 'null'],
+            enum: ['escritura_publica', 'registro_publico', 'particular', null],
+            description:
+              'Como a cessão foi formalizada. Decidido pelo que EXISTE na pasta, na ordem: escritura pública lavrada em notas -> "escritura_publica"; senão, comprovante de protocolo de registro no RTDPJ -> "registro_publico"; senão, só o contrato particular -> "particular". Null se não houver nem contrato.',
+          },
         },
-        required: [...Object.keys(CAMPOS), 'tipo_credito'],
+        required: [...Object.keys(CAMPOS), 'tipo_credito', 'instrumento'],
       },
       procedencia: {
         type: 'object',
@@ -119,6 +133,12 @@ REGRAS, em ordem de importância:
 5. O CONTRATO DE CESSÃO é a fonte para cessionário, data de aquisição e capital investido. Cuidado para não trocar cedente por cessionário: o cedente é quem tinha o crédito, o cessionário é quem comprou.
 
 6. VALOR DE FACE é o valor bruto do requisitório. CAPITAL INVESTIDO é o preço pago pela cessão, sempre menor. Se você só encontrar um número, decida qual dos dois é pelo contexto e explique em "observacoes".
+
+7. INSTRUMENTO se decide pelo que EXISTE NA PASTA, nesta ordem exata — é a primeira condição satisfeita que vale, não a mais recente nem a mais parecida:
+   a) há escritura pública lavrada em tabelionato de notas -> "escritura_publica";
+   b) não há escritura, mas há comprovante de protocolo de pedido de registro no RTDPJ (Registro de Títulos e Documentos / Pessoas Jurídicas) -> "registro_publico". O NÚMERO DO RTDPJ está dentro desse comprovante: transcreva-o em "numero_rtdpj";
+   c) só há o contrato particular de cessão, sem escritura e sem comprovante de registro -> "particular".
+   Contrato particular que MENCIONA a intenção de registrar não basta para (b): é preciso o comprovante do protocolo. Se você viu a menção mas não achou o comprovante, marque "particular" e escreva isso em "observacoes".
 
 7. Datas em AAAA-MM-DD. Dinheiro em número puro, sem "R$" e sem ponto de milhar: 120000.55.
 

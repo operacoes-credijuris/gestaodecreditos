@@ -414,12 +414,15 @@ function Publicacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 text-sm text-slate-600">
+      {/* gap-2, e não gap-3: o "·" do indicador tem 4,5px do próprio lado, e com
+          gap-3 ele ficava visivelmente mais perto do texto da direita. */}
+      <div className="flex items-center gap-2 text-sm text-slate-600">
         <span>
           <strong>{filtradas.length}</strong>{' '}
           {filtradas.length === 1 ? 'publicação' : 'publicações'}
         </span>
         <SyncStatus
+          separador
           syncing={sync.isPending}
           updatedAt={lista.dataUpdatedAt}
           label="atualizando do DJEN…"
@@ -820,12 +823,13 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 text-sm text-slate-600">
+      <div className="flex items-center gap-2 text-sm text-slate-600">
         <span>
           <strong>{totalMovs}</strong>{' '}
           {totalMovs === 1 ? 'movimentação' : 'movimentações'} nos últimos 20 dias
         </span>
         <SyncStatus
+          separador
           syncing={sync.isPending}
           updatedAt={lista.dataUpdatedAt}
           label="atualizando do ADVBOX…"
