@@ -223,7 +223,7 @@ function CampoMoeda({
 // Atualizar ao adicionar/remover colunas para a linha continuar ocupando a largura toda.
 // A tabela mostra só o essencial para escanear; a ficha completa (advogado,
 // tribunal, datas de liquidação etc.) abre no Drawer ao clicar na linha.
-const N_COLUNAS = 7
+const N_COLUNAS = 8
 
 // Bolinha de status ao lado do nº do processo — o status por extenso é
 // redundante com o filtro de pílulas acima da tabela; a cor basta.
@@ -646,6 +646,7 @@ export default function Processos() {
             <THead>
               <tr>
                 <TH>Processo</TH>
+                <TH className="w-[1%] whitespace-nowrap">Espécie</TH>
                 <TH>Entidade devedora</TH>
                 <SortableTH
                   label="Aquisição"
@@ -689,42 +690,51 @@ export default function Processos() {
                           )}
                         />
                         <div className="min-w-0">
-                          <span className="inline-flex items-center gap-1.5">
-                            <NumeroProcessoDrive
-                              processo={p}
-                              numero={p.numero_cnj}
-                              className="whitespace-nowrap"
-                            />
-                            {/* ESPÉCIE COLADA NO NÚMERO, e não em coluna nova.
-                                Ela é natureza do requisitório, como o número —
-                                não é situação do crédito (isso é o status, na
-                                coluna própria) nem valor. E é ela que muda como se
-                                lê o resto da linha: prazo e ordem de pagamento de
-                                RPV e de precatório não se comparam. Sem coluna, a
-                                tabela não perde largura. */}
-                            {p.especie_requisitorio && (
-                              <Badge
-                                size="sm"
-                                tone={
-                                  ESPECIE_REQUISITORIO[p.especie_requisitorio]?.tone ??
-                                  'gray'
-                                }
-                              >
-                                {ESPECIE_REQUISITORIO[p.especie_requisitorio]?.label ??
-                                  p.especie_requisitorio}
-                              </Badge>
-                            )}
-                            {/* Contador/expandir dos apensos DEPOIS da espécie:
-                                número e espécie identificam o requisitório, e o
-                                contador é uma ação sobre ele. Fora da coluna de
-                                ações porque pertence ao processo, não à linha. */}
-                            {apensos.contador(p.id)}
-                          </span>
+                          {/* tabular-nums: a fonte do app tem dígitos de largura
+                              VARIÁVEL, então dois números CNJ de mesmo tamanho
+                              ocupavam larguras diferentes e tudo que vinha depois
+                              deles ziguezagueava de linha em linha. */}
+                          <NumeroProcessoDrive
+                            processo={p}
+                            numero={p.numero_cnj}
+                            className="whitespace-nowrap tabular-nums"
+                          />
                           {/* Nomes completos: quebram em linhas em vez de truncar. */}
                           <div className="text-xs font-normal text-slate-600">
                             {p.cedente || '—'} v. {p.cessionario || '—'}
                           </div>
                         </div>
+                      </div>
+                    </TD>
+                    {/* ESPÉCIE E APENSOS EM COLUNA PRÓPRIA — a tabulação do Word.
+                        Estavam colados no número, e ali a aresta esquerda do selo
+                        dependia de duas coisas que variam por linha: a largura do
+                        número e a presença do ícone da pasta do Drive (que só
+                        aparece em crédito com pasta). Coluna é o único jeito de
+                        alinhar entre linhas: célula da mesma coluna começa sempre
+                        no mesmo x. w-[1%] mantém a coluna no tamanho do conteúdo,
+                        sem roubar largura das outras. */}
+                    <TD className="w-[1%] whitespace-nowrap">
+                      {/* min-h de uma linha de texto (13/19px, escala do app) para
+                          o selo, que tem leading-none, centrar na altura do número
+                          em vez de encostar no topo da célula. */}
+                      <div className="flex min-h-[19px] items-center gap-1.5">
+                        {p.especie_requisitorio && (
+                          <Badge
+                            size="sm"
+                            tone={
+                              ESPECIE_REQUISITORIO[p.especie_requisitorio]?.tone ??
+                              'gray'
+                            }
+                          >
+                            {ESPECIE_REQUISITORIO[p.especie_requisitorio]?.label ??
+                              p.especie_requisitorio}
+                          </Badge>
+                        )}
+                        {/* Contador/expandir dos apensos à direita da espécie:
+                            número e espécie identificam o requisitório, e o
+                            contador é ação sobre ele. */}
+                        {apensos.contador(p.id)}
                       </div>
                     </TD>
                     <TD>
