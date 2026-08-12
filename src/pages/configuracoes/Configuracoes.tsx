@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   KeyRound,
@@ -246,6 +246,7 @@ function AdvboxConfig() {
   const [cp, setCp] = useState<CriarProcesso>({})
   const [opcoes, setOpcoes] = useState<OpcoesAdvbox | null>(null)
   const [carregando, setCarregando] = useState(false)
+  const [erroOpcoes, setErroOpcoes] = useState(false)
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -255,7 +256,7 @@ function AdvboxConfig() {
     setCp(cfg.criar_processo ?? {})
   }, [data])
 
-  async function carregarOpcoes() {
+  async function carregarOpcoes(silencioso = false) {
     setCarregando(true)
     try {
       const r = await invokeFunction<OpcoesAdvbox>('advbox-processos', {
@@ -263,14 +264,31 @@ function AdvboxConfig() {
         cliente_nome: 'credijuris',
       })
       setOpcoes(r)
+      setErroOpcoes(false)
     } catch (err) {
-      toast.error((err as Error).message)
+      setErroOpcoes(true)
+      // Carga automática que falha não vira alerta: quem abriu Configurações pode
+      // ter vindo mexer no Kommo. A lista de responsáveis fica com o botão de
+      // tentar de novo, e é ali que o aviso pertence.
+      if (!silencioso) toast.error((err as Error).message)
     } finally {
       setCarregando(false)
     }
   }
 
   const configurado = Boolean((data?.config as { configurado?: boolean })?.configurado)
+
+  // Busca os responsáveis ao abrir a tela, uma vez, para as três caixas já
+  // aparecerem prontas — pedir um clique antes de mostrar o campo era o que fazia
+  // este bloco parecer diferente do resto das Configurações. Só com token
+  // configurado: sem token a chamada falharia sempre, a cada visita.
+  const buscou = useRef(false)
+  useEffect(() => {
+    if (buscou.current || !configurado) return
+    buscou.current = true
+    void carregarOpcoes(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configurado])
 
   async function salvar() {
     const url = baseUrl.trim()
@@ -392,23 +410,25 @@ function AdvboxConfig() {
                 Cadastro de créditos no ADVBOX
               </label>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                {/* Os três fixos aparecem como TEXTO, não como campo desabilitado:
-                    campo cinza sugere que existe um jeito de habilitá-lo, e aqui não
-                    existe — é assim e pronto. */}
-                <div className="text-sm text-slate-600 sm:col-span-2">
-                  <span className="font-medium text-slate-700">Cliente</span>{' '}
-                  {ADVBOX_FIXO.customer_nome}
-                  <span className="mx-2 text-slate-300">|</span>
-                  <span className="font-medium text-slate-700">Fase</span>{' '}
-                  {ADVBOX_FIXO.stage_nome}
-                  <span className="mx-2 text-slate-300">|</span>
-                  <span className="font-medium text-slate-700">Tipo</span>{' '}
-                  {ADVBOX_FIXO.type_nome}
-                </div>
-
-                {opcoes ? (
-                  <Field label="Responsável">
+              {/* TRÊS CAIXAS LADO A LADO, e as duas primeiras desabilitadas.
+                  Cliente e fase são sempre os mesmos, mas aparecem como campo e não
+                  como texto porque a linha das três caixas é o que faz este bloco
+                  parecer com o resto das Configurações. O tipo saiu da tela — ele
+                  continua sendo enviado à ADVBOX, fixo, só não ocupa espaço numa
+                  escolha que não existe. */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field label="Cliente">
+                  <Select value="fixo" disabled onChange={() => {}}>
+                    <option value="fixo">{ADVBOX_FIXO.customer_nome}</option>
+                  </Select>
+                </Field>
+                <Field label="Fase processual">
+                  <Select value="fixo" disabled onChange={() => {}}>
+                    <option value="fixo">{ADVBOX_FIXO.stage_nome}</option>
+                  </Select>
+                </Field>
+                <Field label="Responsável">
+                  {opcoes ? (
                     <Select
                       value={String(cp.users_id ?? '')}
                       onChange={(e) => {
@@ -429,27 +449,37 @@ function AdvboxConfig() {
                         </option>
                       ))}
                     </Select>
-                  </Field>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-                    <Button
-                      variant="outline"
-                      onClick={carregarOpcoes}
-                      loading={carregando}
-                    >
-                      Trocar o responsável
-                    </Button>
-                    {/* Sem o nome, diz só que está configurado: mostrar o id cru
-                        ("Responsável: 170705") pareceria defeito. O nome passa a ser
-                        guardado a partir da próxima escolha. */}
-                    <span className="text-xs text-slate-600">
-                      {cp.users_id
-                        ? `Responsável já configurado${cp.user_nome ? `: ${cp.user_nome}` : ''}.`
-                        : 'Nenhum responsável escolhido ainda.'}
-                    </span>
-                  </div>
-                )}
+                  ) : (
+                    // Lista ainda não veio: a caixa mostra o que está salvo e fica
+                    // travada. Select vazio e habilitado permitiria salvar por cima
+                    // do responsável configurado com "nenhum" — perder configuração
+                    // por causa de uma falha de rede seria o pior desfecho aqui.
+                    <Select value="atual" disabled onChange={() => {}}>
+                      <option value="atual">
+                        {carregando
+                          ? 'Carregando…'
+                          : cp.user_nome ||
+                            (cp.users_id ? 'Responsável configurado' : 'Não configurado')}
+                      </option>
+                    </Select>
+                  )}
+                </Field>
               </div>
+
+              {erroOpcoes && !opcoes && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => carregarOpcoes()}
+                    loading={carregando}
+                  >
+                    Carregar responsáveis
+                  </Button>
+                  <span className="text-xs text-slate-600">
+                    Não consegui buscar a lista de responsáveis na ADVBOX agora.
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="sm:col-span-2">
