@@ -46,11 +46,13 @@ async function chaveAnthropic(): Promise<string | null> {
 const CAMPOS = {
   tribunal:
     'Sigla CURTA do tribunal do processo — nunca o nome por extenso, nunca o tribunal citado no contrato. Padrão: estadual sem hífen (TJGO, TJMG, TJRS); regional com hífen e número (TRF-1, TRT-18); eleitoral regional com hífen e UF (TRE-MG); superior só a sigla (STF, STJ, TST, TSE, STM).',
-  comarca: 'Comarca ou seção judiciária.',
-  vara: 'Vara, juizado ou órgão julgador, como escrito no processo.',
+  comarca: 'Comarca ou seção judiciária — só a localidade: "São Paulo", "Goiânia".',
+  vara:
+    'Só o juízo, SEM a comarca: "32ª Vara do Trabalho", nunca "32ª Vara do Trabalho de São Paulo". A comarca tem campo próprio, e repetida aqui aparece duas vezes na mesma linha da tabela.',
   cedente: 'Nome do credor original — quem cedeu o crédito.',
   cedente_advogado: 'Nome do advogado que representa o cedente no processo.',
-  entidade_devedora: 'Ente público devedor (Estado, Município, União, autarquia).',
+  entidade_devedora:
+    'Ente público devedor na forma padronizada, e nada além dela: "União" (nunca "União Federal", "Fazenda Nacional" ou "Fazenda Pública"); "Estado de X" ou "Estado do X" conforme o nome pede (Estado de Goiás, Estado de São Paulo, Estado do Rio Grande do Sul, Estado do Amapá); "Município de X" (Município de Jacarezinho, Município de Goiânia). Autarquia e fundação ficam na sigla pela qual são conhecidas: INSS, DNIT, IBAMA.',
   valor_face:
     'Valor de face do crédito, em reais, NÚMERO puro (ex.: 120000.55). É o valor BRUTO do requisitório, não o que a Credijuris pagou.',
   data_referencia:
@@ -163,7 +165,9 @@ REGRAS, em ordem de importância:
 
 9. AVISO CURTO. "observacoes" tem no máximo três itens, um por assunto, até quinze palavras cada. Escreva o que a pessoa precisa CONFERIR ou DECIDIR, não o que você fez nem o que já está preenchido. "Valor de face: 120.000,55 no contrato, 118.300,00 na planilha" serve. "Analisei os documentos e identifiquei que o valor de face..." não serve.
 
-10. Datas em AAAA-MM-DD. Dinheiro em número puro, sem "R$" e sem ponto de milhar: 120000.55.
+10. CADA CAMPO DIZ UMA COISA SÓ e não repete o que já está em outro. Tribunal, comarca e vara descrevem o MESMO juízo em três níveis, então cada um fica com o seu nível: TRT-2 / São Paulo / 32ª Vara do Trabalho. O erro mais comum é a vara vir com a localidade colada, como está escrito na petição — corte a localidade, ela já está na comarca.
+
+11. Datas em AAAA-MM-DD. Dinheiro em número puro, sem "R$" e sem ponto de milhar: 120000.55.
 
 Responda apenas chamando a ferramenta.`
 
