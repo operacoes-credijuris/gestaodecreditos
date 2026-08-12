@@ -10,11 +10,11 @@
 // A leitura dos documentos pela IA (valor de face, entidade devedora, cessionário,
 // capital investido) é a etapa seguinte, e vai entrar aqui mesmo.
 //
-// E ELA NUNCA SALVA. Devolve os campos para a aba Manual, preenchidos, e quem
-// confere e salva é a pessoa. Extração é palpite educado; gravar palpite direto no
-// banco é como se produz dado errado com cara de certo.
-import { useState } from 'react'
-import { FolderSearch, Wand2 } from 'lucide-react'
+// E ELA NUNCA SALVA. Escolher uma pasta preenche a aba Manual e devolve a pessoa
+// para lá; quem confere e salva é ela. Extração é palpite educado, e gravar palpite
+// direto no banco é como se produz dado errado com cara de certo.
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import { driveConfigurado } from '@/lib/drive'
 import {
   apenasNaoCadastradas,
@@ -23,9 +23,10 @@ import {
 } from '@/lib/creditoDoDrive'
 import { formatCNJ } from '@/lib/format'
 import type { Processo } from '@/lib/types'
-import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
-import { EmptyState, ErrorState, Loading } from '@/components/ui/Table'
+import { Field } from '@/components/ui/Field'
+import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
+import { IconButton } from '@/components/ui/IconButton'
+import { EmptyState, ErrorState } from '@/components/ui/Table'
 
 /** O que a pasta escolhida entrega ao formulário. */
 export type PreenchimentoDoDrive = Pick<
@@ -59,6 +60,33 @@ export function NovoCreditoDoDrive({
     }
   }
 
+  // Procura só de ENTRADA na aba, uma vez. Quem escolheu "Automatizado" já disse
+  // o que quer; obrigar a clicar num botão depois disso é um passo a mais sem
+  // informação nenhuma. Reprocurar é decisão explícita, no botão ao lado.
+  const jaProcurou = useRef(false)
+  useEffect(() => {
+    if (jaProcurou.current || !driveConfigurado) return
+    jaProcurou.current = true
+    void procurar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const opcoes = useMemo<OpcaoCombo[]>(
+    () =>
+      (candidatas ?? []).map((c, i) => ({
+        id: i,
+        titulo: c.cnj ? formatCNJ(c.cnj) : (c.cedente ?? c.nome),
+        // O caminho diz de onde a pasta veio, e o aviso marca o caso frágil: sem
+        // número na pasta, o cotejo com o que já existe foi por nome, e "nova"
+        // pode não ser nova.
+        subtitulo:
+          [...c.caminho, c.cnj && c.cedente ? c.cedente : null]
+            .filter(Boolean)
+            .join(' › ') + (c.cnj ? '' : '  ·  sem número na pasta'),
+      })),
+    [candidatas],
+  )
+
   if (!driveConfigurado) {
     return (
       <EmptyState
@@ -68,85 +96,44 @@ export function NovoCreditoDoDrive({
     )
   }
 
+  if (erro) return <ErrorState message={erro} onRetry={procurar} />
+
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
-        Procura em <strong>B. Processos</strong> as pastas de crédito que ainda não
-        estão cadastradas aqui, e preenche o formulário com o que a pasta já
-        informa. Nada é salvo sem você conferir na aba Manual.
+    <div className="flex items-end gap-2">
+      <div className="min-w-0 flex-1">
+        <Field label="Pasta do crédito no Drive">
+          <Combobox
+            opcoes={opcoes}
+            // Nunca fica "selecionado": escolher já preenche e devolve para a aba
+            // Manual, então manter a escolha marcada aqui seria estado morto.
+            valor={null}
+            onChange={(id) => {
+              const c = candidatas?.[id as number]
+              if (!c) return
+              onPreencher({
+                numero_cnj: c.cnj ? formatCNJ(c.cnj) : '',
+                cedente: c.cedente,
+                originador: c.originador,
+                especie_requisitorio: c.especie,
+              })
+            }}
+            placeholder={
+              buscando
+                ? 'Procurando no Drive…'
+                : candidatas?.length
+                  ? 'Escolha a pasta do crédito'
+                  : 'Nenhuma pasta sem cadastro'
+            }
+            vazio="Nenhuma pasta sem cadastro no Drive."
+          />
+        </Field>
       </div>
-
-      <Button
-        icon={<FolderSearch className="h-4 w-4" />}
-        loading={buscando}
+      <IconButton
+        label="Procurar novamente no Drive"
+        icon={<RefreshCw className={buscando ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />}
+        disabled={buscando}
         onClick={procurar}
-      >
-        {candidatas ? 'Procurar de novo' : 'Procurar pastas no Drive'}
-      </Button>
-
-      {buscando && <Loading label="Percorrendo as pastas do Drive…" />}
-
-      {erro && <ErrorState message={erro} onRetry={procurar} />}
-
-      {candidatas?.length === 0 && (
-        <EmptyState
-          title="Nenhuma pasta sem cadastro"
-          description="Todas as pastas de crédito do Drive já têm crédito correspondente na plataforma."
-        />
-      )}
-
-      {!!candidatas?.length && (
-        <div className="space-y-2">
-          {/* CANDIDATOS, e não "créditos novos": a pasta que só tem o nome do
-              cedente (convenção antiga) pode ser um crédito já cadastrado cujo
-              nome foi escrito de outro jeito. Quem confirma é quem conhece. */}
-          <p className="text-xs text-slate-600">
-            {candidatas.length}{' '}
-            {candidatas.length === 1 ? 'candidata' : 'candidatas'} — confira antes de
-            usar.
-          </p>
-          <ul className="divide-y divide-slate-100 rounded-lg ring-1 ring-inset ring-slate-200">
-            {candidatas.map((c) => (
-              <li
-                key={c.id}
-                className="flex flex-wrap items-center justify-between gap-3 p-3"
-              >
-                <div className="min-w-0">
-                  <p className="flex flex-wrap items-center gap-2 font-medium text-slate-800">
-                    {c.cnj ? formatCNJ(c.cnj) : (c.cedente ?? c.nome)}
-                    {/* Sem número na pasta, o cotejo foi por nome — vale avisar,
-                        porque é o caso em que "novo" pode não ser novo. */}
-                    {!c.cnj && (
-                      <Badge tone="amber" size="sm">
-                        sem número na pasta
-                      </Badge>
-                    )}
-                  </p>
-                  <p className="text-xs text-slate-600">
-                    {c.caminho.join(' › ')}
-                    {c.cnj && c.cedente ? ` › ${c.cedente}` : ''}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  icon={<Wand2 className="h-4 w-4" />}
-                  onClick={() =>
-                    onPreencher({
-                      numero_cnj: c.cnj ? formatCNJ(c.cnj) : '',
-                      cedente: c.cedente,
-                      originador: c.originador,
-                      especie_requisitorio: c.especie,
-                    })
-                  }
-                >
-                  Usar esta pasta
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      />
     </div>
   )
 }
