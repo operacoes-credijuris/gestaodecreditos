@@ -29,19 +29,23 @@ async function chaveAnthropic(): Promise<string | null> {
 /**
  * Os campos que a IA preenche — e SÓ eles.
  *
- * Fica de fora só o índice de atualização, que é escolha de negócio e não consta de
- * documento nenhum. Também ficam de fora espécie, originador, número do processo e
- * cedente: esses vêm do CAMINHO da pasta no Drive, com certeza total, e pedir à IA
- * seria trocar certeza por palpite.
+ * Ficam de fora espécie, originador, número do processo e cedente: esses vêm do
+ * CAMINHO da pasta no Drive, com certeza total, e pedir à IA seria trocar certeza
+ * por palpite.
  *
  * INSTRUMENTO e Nº RTDPJ entraram depois. Pareciam manuais até o dono explicar que
  * a resposta está na pasta: escritura pública, ou comprovante de protocolo de
  * registro no RTDPJ (que traz o número dentro), ou nada além do contrato
  * particular. É decisão por PRESENÇA de documento, com ordem de precedência — está
  * escrita na regra 7 do prompt.
+ *
+ * ÍNDICE DE ATUALIZAÇÃO também deixou de ser manual, e por um motivo diferente:
+ * não se lê em documento nenhum, se CONCLUI da natureza do crédito. Tributário é
+ * SELIC, todo o resto é IPCA + 2%. Regra 8.
  */
 const CAMPOS = {
-  tribunal: 'Sigla ou nome do tribunal (ex.: TJGO, TRF1). Do processo, não do contrato.',
+  tribunal:
+    'Sigla CURTA do tribunal do processo — nunca o nome por extenso, nunca o tribunal citado no contrato. Padrão: estadual sem hífen (TJGO, TJMG, TJRS); regional com hífen e número (TRF-1, TRT-18); eleitoral regional com hífen e UF (TRE-MG); superior só a sigla (STF, STJ, TST, TSE, STM).',
   comarca: 'Comarca ou seção judiciária.',
   vara: 'Vara, juizado ou órgão julgador, como escrito no processo.',
   cedente: 'Nome do credor original — quem cedeu o crédito.',
@@ -98,8 +102,19 @@ const FERRAMENTA = {
             description:
               'Como a cessão foi formalizada. Decidido pelo que EXISTE na pasta, na ordem: escritura pública lavrada em notas -> "escritura_publica"; senão, comprovante de protocolo de registro no RTDPJ -> "registro_publico"; senão, só o contrato particular -> "particular". Null se não houver nem contrato.',
           },
+          indice_atualizacao: {
+            type: 'string',
+            enum: ['selic', 'ipca_2'],
+            description:
+              'Índice de correção. DERIVADO da natureza do crédito, não transcrito: natureza tributária -> "selic"; qualquer outra natureza -> "ipca_2". Nunca null — "não tributário" é o caso geral.',
+          },
         },
-        required: [...Object.keys(CAMPOS), 'tipo_credito', 'instrumento'],
+        required: [
+          ...Object.keys(CAMPOS),
+          'tipo_credito',
+          'instrumento',
+          'indice_atualizacao',
+        ],
       },
       procedencia: {
         type: 'object',
@@ -109,9 +124,10 @@ const FERRAMENTA = {
       },
       observacoes: {
         type: 'array',
+        maxItems: 3,
         items: { type: 'string' },
         description:
-          'O que a pessoa precisa saber antes de salvar: contradição entre documentos, valor que apareceu de duas formas, contrato que menciona mais de um cessionário. Vazio se não houver.',
+          'Só o que muda o que a pessoa vai fazer antes de salvar: contradição entre documentos, valor que apareceu de duas formas, mais de um cessionário. Uma linha curta por assunto, no máximo 15 palavras, no máximo 3 no total. Vazio se não houver nada a conferir.',
       },
     },
     required: ['campos', 'procedencia', 'observacoes'],
@@ -140,7 +156,14 @@ REGRAS, em ordem de importância:
    c) só há o contrato particular de cessão, sem escritura e sem comprovante de registro -> "particular".
    Contrato particular que MENCIONA a intenção de registrar não basta para (b): é preciso o comprovante do protocolo. Se você viu a menção mas não achou o comprovante, marque "particular" e escreva isso em "observacoes".
 
-8. Datas em AAAA-MM-DD. Dinheiro em número puro, sem "R$" e sem ponto de milhar: 120000.55.
+8. ÍNDICE DE ATUALIZAÇÃO não se lê, se conclui — e é a única exceção à regra 1, porque nunca vem null:
+   - crédito de natureza TRIBUTÁRIA (repetição de indébito, restituição ou compensação de tributo, exclusão de tributo da base de cálculo, execução fiscal invertida) -> "selic";
+   - qualquer outra natureza (servidor público, indenização, desapropriação, previdenciário, honorários, aluguel, fornecedor) -> "ipca_2".
+   Não havendo como identificar a natureza nos documentos, use "ipca_2", que é o caso geral, e diga em "observacoes" que a natureza não ficou clara.
+
+9. AVISO CURTO. "observacoes" tem no máximo três itens, um por assunto, até quinze palavras cada. Escreva o que a pessoa precisa CONFERIR ou DECIDIR, não o que você fez nem o que já está preenchido. "Valor de face: 120.000,55 no contrato, 118.300,00 na planilha" serve. "Analisei os documentos e identifiquei que o valor de face..." não serve.
+
+10. Datas em AAAA-MM-DD. Dinheiro em número puro, sem "R$" e sem ponto de milhar: 120000.55.
 
 Responda apenas chamando a ferramenta.`
 

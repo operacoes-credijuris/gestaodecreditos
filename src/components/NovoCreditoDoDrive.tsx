@@ -7,14 +7,12 @@
 //      interpretação, então não há como estar errado de um jeito que ninguém veja.
 //   2. OS DOCUMENTOS dão o resto — tribunal, comarca, vara, entidade devedora,
 //      valor de face, tipo de crédito, expectativa de liquidação, cessionário,
-//      data de aquisição, capital investido, instrumento e nº RTDPJ. Aí é leitura
-//      interpretada, e cada campo volta com o ARQUIVO de onde saiu.
-//
-// Fica de fora só o índice de atualização, que é escolha de negócio.
+//      data de aquisição, capital investido, instrumento, nº RTDPJ e o índice de
+//      atualização. Aí é leitura interpretada.
 //
 // E ELA NUNCA SALVA. Preenche o formulário ao lado e espera a pessoa conferir.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, FileText, TriangleAlert } from 'lucide-react'
+import { RefreshCw, TriangleAlert } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { driveConfigurado } from '@/lib/drive'
 import {
@@ -35,30 +33,41 @@ export type PreenchimentoDoDrive = Partial<Processo>
 
 interface RespostaExtracao {
   campos?: Record<string, unknown>
-  /** campo -> nome do arquivo de onde o valor saiu. */
-  procedencia?: Record<string, string>
   observacoes?: string[]
   lidos?: string[]
+  /**
+   * campo -> arquivo de onde o valor saiu. Não aparece mais na tela, mas continua
+   * sendo EXIGIDO da IA de propósito: obrigar cada campo a apontar um arquivo é o
+   * que a impede de completar lacuna com valor plausível.
+   */
+  procedencia?: Record<string, string>
 }
 
-/** Rótulo de cada campo, para a lista de procedência ficar legível. */
-const ROTULO: Record<string, string> = {
-  tribunal: 'Tribunal',
-  comarca: 'Comarca',
-  vara: 'Vara',
-  cedente: 'Cedente',
-  cedente_advogado: 'Advogado do cedente',
-  entidade_devedora: 'Entidade devedora',
-  valor_face: 'Valor de face',
-  data_referencia: 'Data de referência',
-  expectativa_liquidacao: 'Expectativa de liquidação',
-  cessionario: 'Cessionário',
-  data_aquisicao: 'Data de aquisição',
-  capital_investido: 'Capital investido',
-  tipo_credito: 'Tipo de crédito',
-  instrumento: 'Instrumento',
-  numero_rtdpj: 'Nº RTDPJ',
-}
+/**
+ * Os campos que podem vir da IA — e SÓ eles.
+ *
+ * Allowlist, não decoração: o que não estiver aqui é ignorado mesmo que a resposta
+ * traga, para uma mudança no prompt não conseguir escrever num campo que a tela
+ * nunca previu.
+ */
+const CAMPOS_ACEITOS = new Set([
+  'tribunal',
+  'comarca',
+  'vara',
+  'cedente',
+  'cedente_advogado',
+  'entidade_devedora',
+  'valor_face',
+  'data_referencia',
+  'expectativa_liquidacao',
+  'cessionario',
+  'data_aquisicao',
+  'capital_investido',
+  'tipo_credito',
+  'instrumento',
+  'numero_rtdpj',
+  'indice_atualizacao',
+])
 
 /**
  * Converte o que a IA devolveu em campos do cadastro.
@@ -71,7 +80,7 @@ function camposParaProcesso(campos: Record<string, unknown>): Partial<Processo> 
   for (const [k, v] of Object.entries(campos)) {
     if (v === null || v === undefined || v === '') continue
     if (Array.isArray(v) && v.length === 0) continue
-    if (!(k in ROTULO)) continue // só os campos previstos entram
+    if (!CAMPOS_ACEITOS.has(k)) continue
     saida[k] = v
   }
   return saida as Partial<Processo>
@@ -181,10 +190,6 @@ export function NovoCreditoDoDrive({
     )
   }
 
-  const procedencia = Object.entries(extracao?.procedencia ?? {}).filter(
-    ([campo]) => campo in ROTULO,
-  )
-
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2">
@@ -219,25 +224,6 @@ export function NovoCreditoDoDrive({
       {passo && <Loading label={passo} />}
 
       {erro && <ErrorState message={erro} />}
-
-      {/* PROCEDÊNCIA. Sem ela, o formulário aparece preenchido e ninguém sabe se
-          aquele valor de face saiu da análise, do contrato ou do nada. */}
-      {!!procedencia.length && (
-        <div className="rounded-lg bg-slate-50 p-3">
-          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
-            <FileText className="h-3.5 w-3.5" />
-            Preenchido a partir de
-          </p>
-          <ul className="grid gap-x-4 gap-y-0.5 text-xs text-slate-600 sm:grid-cols-2">
-            {procedencia.map(([campo, arquivo]) => (
-              <li key={campo} className="truncate">
-                <span className="font-medium text-slate-700">{ROTULO[campo]}</span>{' '}
-                <span className="text-slate-500">· {arquivo}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {/* O que a IA quer que a pessoa saiba antes de salvar. */}
       {!!extracao?.observacoes?.length && (

@@ -23,6 +23,9 @@ type BadgeTone =
   | 'blue'
   | 'purple'
   | 'orange'
+  // Preenchidos, em uso só pela espécie do requisitório. Ver Badge.tsx.
+  | 'tealSolid'
+  | 'indigoSolid'
 
 export interface LabelDef {
   label: string
@@ -60,10 +63,15 @@ export const INDICE_ATUALIZACAO: Record<string, LabelDef> = {
  * Espécie do requisitório. Decide, entre outras coisas, a pasta de topo do Drive
  * onde a petição gerada é salva — daí as chaves seguirem exatamente o check da
  * migração 0032.
+ *
+ * TONS PREENCHIDOS, e não azul/violeta como antes: instrumento usa exatamente esse
+ * par, e na tabela de Créditos os dois selos ficam na mesma linha — davam a
+ * impressão de ser o mesmo campo. Fundo cheio separa por forma, que sobrevive a
+ * qualquer vizinhança de matiz.
  */
 export const ESPECIE_REQUISITORIO: Record<string, LabelDef> = {
-  rpv: { label: 'RPV', tone: 'blue' },
-  precatorio: { label: 'Precatório', tone: 'purple' },
+  rpv: { label: 'RPV', tone: 'tealSolid' },
+  precatorio: { label: 'Precatório', tone: 'indigoSolid' },
 }
 
 export const INSTRUMENTO: Record<string, LabelDef> = {

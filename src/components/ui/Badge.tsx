@@ -11,6 +11,13 @@ type Tone =
   | 'orange'
   // Alias semântico (mesmas classes do tom original)
   | 'amber'
+  // PREENCHIDOS. Os sete tons acima são todos fundo pálido, e numa tela onde
+  // vários campos viram selo eles acabam se parecendo — foi o que aconteceu com
+  // espécie do requisitório e instrumento, os dois em azul e violeta. Estes dois
+  // se distinguem por FORMA, não por matiz: fundo cheio se separa de qualquer
+  // selo pálido mesmo em cor parecida. Reservados para a espécie.
+  | 'tealSolid'
+  | 'indigoSolid'
 
 type Size = 'md' | 'sm'
 
@@ -23,6 +30,8 @@ const tones: Record<Tone, string> = {
   purple: 'bg-violet-50 text-violet-700 ring-violet-200',
   orange: 'bg-orange-50 text-orange-700 ring-orange-200',
   amber: 'bg-amber-50 text-amber-700 ring-amber-200',
+  tealSolid: 'bg-teal-600 text-white ring-teal-600',
+  indigoSolid: 'bg-indigo-600 text-white ring-indigo-600',
 }
 
 const sizes: Record<Size, string> = {

@@ -695,9 +695,6 @@ export default function Processos() {
                               numero={p.numero_cnj}
                               className="whitespace-nowrap"
                             />
-                            {/* Contador de apensos colado no número: pertence ao
-                                processo, não à coluna de ações. */}
-                            {apensos.contador(p.id)}
                             {/* ESPÉCIE COLADA NO NÚMERO, e não em coluna nova.
                                 Ela é natureza do requisitório, como o número —
                                 não é situação do crédito (isso é o status, na
@@ -717,6 +714,11 @@ export default function Processos() {
                                   p.especie_requisitorio}
                               </Badge>
                             )}
+                            {/* Contador/expandir dos apensos DEPOIS da espécie:
+                                número e espécie identificam o requisitório, e o
+                                contador é uma ação sobre ele. Fora da coluna de
+                                ações porque pertence ao processo, não à linha. */}
+                            {apensos.contador(p.id)}
                           </span>
                           {/* Nomes completos: quebram em linhas em vez de truncar. */}
                           <div className="text-xs font-normal text-slate-600">
