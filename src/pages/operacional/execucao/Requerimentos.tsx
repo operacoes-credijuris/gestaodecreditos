@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
-import { requerimentosCrud, apensosCrud } from '@/lib/queries'
+import { requerimentosCrud, apensosCrud, useUltimaMovimentacao } from '@/lib/queries'
 import { invokeFunction } from '@/lib/functions'
 import { useApensosManager } from '@/components/Apensos'
 import type { Requerimento } from '@/lib/types'
@@ -38,20 +38,25 @@ const VAZIO: Partial<Requerimento> = {
   numero_protocolo: '',
   orgao: '',
   tribunal_entidade: '',
+  requerente: '',
+  requerido: '',
   materia: '',
   classe_processual: '',
   data_protocolo: '',
   observacoes: '',
 }
 
-// Total de colunas da tabela — usado no colSpan da linha de apensos.
-// Tribunal/órgão não têm coluna própria: viram subtítulo do protocolo.
-const N_COLUNAS = 5
-
+// Total de colunas da tabela — usado no colSpan da linha de apensos. Atualizar ao
+// adicionar/remover coluna, senão a linha expandida para antes do fim da tabela.
+// Protocolo | Tribunal/órgão | Classe | Matéria | Data | Últ. movimentação | Ações
+const N_COLUNAS = 7
 
 export default function Requerimentos() {
   const { useList, useCreate, useUpdate, useRemove } = requerimentosCrud
   const { data, isLoading, isError, error, refetch } = useList()
+  // Mesmo mapa que a tabela de Créditos usa, para as duas telas nunca discordarem
+  // da data da última movimentação.
+  const ultimaMov = useUltimaMovimentacao()
   const create = useCreate()
   const update = useUpdate()
   const remove = useRemove()
@@ -112,6 +117,10 @@ export default function Requerimentos() {
             r.numero_protocolo,
             r.orgao,
             r.tribunal_entidade,
+            // As partes entram na busca por serem o que identifica a linha: quem
+            // procura um requerimento costuma lembrar do nome, não do protocolo.
+            r.requerente,
+            r.requerido,
             r.materia,
             r.classe_processual,
             r.observacoes,
@@ -147,6 +156,8 @@ export default function Requerimentos() {
         numero_protocolo: vazioNull(editing.numero_protocolo),
         orgao: vazioNull(editing.orgao),
         tribunal_entidade: vazioNull(editing.tribunal_entidade),
+        requerente: vazioNull(editing.requerente),
+        requerido: vazioNull(editing.requerido),
         materia: vazioNull(editing.materia),
         classe_processual: vazioNull(editing.classe_processual),
         data_protocolo: vazioNull(editing.data_protocolo),
@@ -270,8 +281,13 @@ export default function Requerimentos() {
                   toda a tabela para Matéria e comprimia o protocolo. Data e
                   Ações usam w-[1%]+nowrap para encolher até o conteúdo. */}
               <tr>
-                <TH className="w-[26%]">Protocolo</TH>
-                <TH className="w-[18%]">Classe</TH>
+                <TH className="w-[24%]">Protocolo</TH>
+                {/* Tribunal e órgão saíram do subtítulo do protocolo para uma coluna
+                    própria: são a JURISDIÇÃO do requerimento, não parte da
+                    identificação dele. Sob o número ficam as partes, que é o que
+                    identifica a linha — igual "cedente v. cessionário" em Créditos. */}
+                <TH className="w-[18%]">Tribunal / órgão</TH>
+                <TH className="w-[16%]">Classe</TH>
                 <TH>Matéria</TH>
                 <SortableTH
                   label="Data de protocolo"
@@ -280,6 +296,7 @@ export default function Requerimentos() {
                   onToggle={toggleSort}
                   className="w-[1%] whitespace-nowrap"
                 />
+                <TH className="w-[1%] whitespace-nowrap">Últ. movimentação</TH>
                 <TH className="w-[1%] whitespace-nowrap">Ações</TH>
               </tr>
             </THead>
@@ -287,20 +304,30 @@ export default function Requerimentos() {
               {lista.map((r) => (
                 <Fragment key={r.id}>
                 <TR onClick={() => setDetalhe(r)}>
-                  {/* Sem nowrap na célula: o protocolo não quebra, mas o
-                      subtítulo tribunal · órgão pode. */}
+                  {/* Sem nowrap na célula: o número não quebra, mas os nomes das
+                      partes podem. */}
                   <TD className="font-medium text-slate-800">
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="whitespace-nowrap">
+                      <span className="whitespace-nowrap tabular-nums">
                         {r.numero_protocolo || '—'}
                       </span>
                       {/* Mesmo padrão de Créditos: o contador de apensos fica
                           colado no número, não na coluna de ações. */}
                       {apensos.contador(r.id)}
                     </span>
+                    {/* As PARTES sob o número, como em Créditos. É o que identifica
+                        a linha: protocolo sozinho não diz de quem é o requerimento.
+                        O travessão de cada lado aparece mesmo vazio, para a falta
+                        ficar à vista de quem cadastrou pela metade. */}
                     <div className="text-xs font-normal text-slate-600">
-                      {[r.tribunal_entidade, r.orgao].filter(Boolean).join(' · ') || '—'}
+                      {r.requerente || '—'} v. {r.requerido || '—'}
                     </div>
+                  </TD>
+                  {/* Tribunal em cima, na cor do corpo; órgão embaixo, menor e mais
+                      claro — a mesma hierarquia de devedora/comarca em Créditos. */}
+                  <TD>
+                    <div>{r.tribunal_entidade || '—'}</div>
+                    <div className="text-xs text-slate-600">{r.orgao || '—'}</div>
                   </TD>
                   <TD>{r.classe_processual || '—'}</TD>
                   <TD>{r.materia || '—'}</TD>
@@ -309,6 +336,19 @@ export default function Requerimentos() {
                       coluna fica com as datas desalinhadas entre si. */}
                   <TD className="whitespace-nowrap tabular-nums text-slate-600">
                     {formatDate(r.data_protocolo)}
+                  </TD>
+                  {/* Do cache do ADVBOX, como em Créditos — a mesma consulta e o
+                      mesmo mapa, então as duas telas nunca discordam da data. O
+                      requerimento entra nesse cache porque a sincronização casa
+                      também pelo número de protocolo. Enquanto o mapa carrega,
+                      mostra vazio em vez de "—", que afirmaria não haver
+                      movimentação. */}
+                  <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                    {ultimaMov.isLoading
+                      ? ''
+                      : formatDate(
+                          ultimaMov.data?.get(onlyDigits(r.numero_protocolo)) ?? null,
+                        )}
                   </TD>
                   <TD>
                     {/* stopPropagation: os botões não devem abrir a ficha da linha */}
@@ -394,6 +434,20 @@ export default function Requerimentos() {
                   onChange={(e) => setEditing({ ...editing, orgao: e.target.value })}
                 />
               </Field>
+              {/* As partes juntas e nesta ordem: é como elas aparecem na listagem
+                  ("requerente v. requerido") e como se lê um requerimento. */}
+              <Field label="Requerente">
+                <Input
+                  value={editing.requerente ?? ''}
+                  onChange={(e) => setEditing({ ...editing, requerente: e.target.value })}
+                />
+              </Field>
+              <Field label="Requerido">
+                <Input
+                  value={editing.requerido ?? ''}
+                  onChange={(e) => setEditing({ ...editing, requerido: e.target.value })}
+                />
+              </Field>
               <Field label="Tribunal / Entidade">
                 <Input
                   value={editing.tribunal_entidade ?? ''}
@@ -448,9 +502,11 @@ export default function Requerimentos() {
               <h2 className="text-base font-bold tracking-tight text-slate-800">
                 {detalhe.numero_protocolo || '—'}
               </h2>
+              {/* Subtítulo com as PARTES, e não com tribunal · órgão: é o mesmo
+                  cabeçalho da ficha de Créditos ("cedente v. cessionário"), e o
+                  tribunal agora tem seção própria logo abaixo. */}
               <p className="text-xs text-slate-600">
-                {[detalhe.tribunal_entidade, detalhe.orgao].filter(Boolean).join(' · ') ||
-                  '—'}
+                {detalhe.requerente || '—'} v. {detalhe.requerido || '—'}
               </p>
             </div>
           )
@@ -458,6 +514,14 @@ export default function Requerimentos() {
       >
         {detalhe && (
           <>
+            {/* Partes numa seção própria, antes do resto — mesma ordem da ficha de
+                Créditos, que abre por "Partes". Quem abre a ficha quer saber de quem
+                é o requerimento antes de saber onde ele tramita. */}
+            <DrawerSection title="Partes">
+              <DrawerField label="Requerente">{detalhe.requerente || '—'}</DrawerField>
+              <DrawerField label="Requerido">{detalhe.requerido || '—'}</DrawerField>
+            </DrawerSection>
+
             <DrawerSection title="Requerimento">
               <DrawerField label="Órgão">{detalhe.orgao || '—'}</DrawerField>
               <DrawerField label="Tribunal / Entidade">

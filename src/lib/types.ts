@@ -150,6 +150,13 @@ export interface Requerimento {
   numero_protocolo: string | null
   orgao: string | null
   tribunal_entidade: string | null
+  /**
+   * Partes do requerimento (migração 0039). Texto livre, como cedente e cessionário
+   * em `processos`: as partes de um requerimento administrativo não estão cadastradas
+   * em nenhuma tabela da plataforma.
+   */
+  requerente: string | null
+  requerido: string | null
   materia: string | null
   classe_processual: string | null
   data_protocolo: string | null
