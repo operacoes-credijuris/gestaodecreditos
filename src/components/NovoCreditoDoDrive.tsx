@@ -23,7 +23,6 @@ import {
 } from '@/lib/creditoDoDrive'
 import { formatCNJ } from '@/lib/format'
 import type { Processo } from '@/lib/types'
-import { Field } from '@/components/ui/Field'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { IconButton } from '@/components/ui/IconButton'
 import { EmptyState, ErrorState } from '@/components/ui/Table'
@@ -46,6 +45,12 @@ export function NovoCreditoDoDrive({
   const [erro, setErro] = useState<string | null>(null)
   /** null = ainda não procurou. Lista vazia = procurou e não achou nada. */
   const [candidatas, setCandidatas] = useState<PastaCredito[] | null>(null)
+  /**
+   * A pasta escolhida FICA marcada no campo. Os campos do crédito ficam logo
+   * abaixo, e some deles é que a pessoa vai trabalhar — o campo precisa continuar
+   * dizendo de qual pasta veio aquilo que está na tela.
+   */
+  const [escolhida, setEscolhida] = useState<number | null>(null)
 
   async function procurar() {
     setBuscando(true)
@@ -99,34 +104,33 @@ export function NovoCreditoDoDrive({
   if (erro) return <ErrorState message={erro} onRetry={procurar} />
 
   return (
-    <div className="flex items-end gap-2">
+    <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
-        <Field label="Pasta do crédito no Drive">
-          <Combobox
-            opcoes={opcoes}
-            // Nunca fica "selecionado": escolher já preenche e devolve para a aba
-            // Manual, então manter a escolha marcada aqui seria estado morto.
-            valor={null}
-            onChange={(id) => {
-              const c = candidatas?.[id as number]
-              if (!c) return
-              onPreencher({
-                numero_cnj: c.cnj ? formatCNJ(c.cnj) : '',
-                cedente: c.cedente,
-                originador: c.originador,
-                especie_requisitorio: c.especie,
-              })
-            }}
-            placeholder={
-              buscando
-                ? 'Procurando no Drive…'
-                : candidatas?.length
-                  ? 'Escolha a pasta do crédito'
-                  : 'Nenhuma pasta sem cadastro'
-            }
-            vazio="Nenhuma pasta sem cadastro no Drive."
-          />
-        </Field>
+        {/* Sem rótulo: o campo é a primeira coisa da aba e o texto do próprio
+            campo já diz o que ele quer. */}
+        <Combobox
+          opcoes={opcoes}
+          valor={escolhida}
+          onChange={(id) => {
+            setEscolhida(id)
+            const c = id === null ? null : candidatas?.[id]
+            if (!c) return
+            onPreencher({
+              numero_cnj: c.cnj ? formatCNJ(c.cnj) : '',
+              cedente: c.cedente,
+              originador: c.originador,
+              especie_requisitorio: c.especie,
+            })
+          }}
+          placeholder={
+            buscando
+              ? 'Procurando no Drive…'
+              : candidatas?.length
+                ? 'Escolha a pasta do crédito'
+                : 'Nenhuma pasta sem cadastro'
+          }
+          vazio="Nenhuma pasta sem cadastro no Drive."
+        />
       </div>
       <IconButton
         label="Procurar novamente no Drive"

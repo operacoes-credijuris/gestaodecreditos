@@ -263,6 +263,8 @@ export default function Processos() {
   const [editing, setEditing] = useState<Partial<Processo> | null>(null)
   /** Aba da janela de crédito novo. Na edição não aparece — ver o Modal. */
   const [abaForm, setAbaForm] = useState<'manual' | 'auto'>('manual')
+  /** Uma pasta do Drive já preencheu os campos: libera a edição e o Salvar. */
+  const [autoPreenchido, setAutoPreenchido] = useState(false)
   const [toDelete, setToDelete] = useState<Processo | null>(null)
   // Crédito com a ficha aberta no painel lateral (clique na linha).
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
@@ -289,18 +291,20 @@ export default function Processos() {
     // Sempre na Manual: quem clica em Editar quer o formulário, e quem cadastra
     // um crédito novo pode não ter pasta no Drive ainda.
     setAbaForm('manual')
+    setAutoPreenchido(false)
   }
 
   /**
-   * Preenchimento vindo da aba Automatizado. Ele SOMA ao que está no formulário e
-   * traz de volta para a Manual — a pessoa confere e salva. Campo que a pasta não
-   * informa fica como estava, em vez de ser sobrescrito com vazio.
+   * Preenchimento vindo da aba Automatizado. SOMA ao que está no formulário —
+   * campo que a pasta não informa fica como estava, em vez de ser sobrescrito com
+   * vazio — e libera os campos para edição, sem trocar de aba: a pessoa continua
+   * onde está, vendo de qual pasta veio o que está na tela.
    */
   function preencherDoDrive(dados: PreenchimentoDoDrive) {
     setEditing((atual) => ({ ...(atual ?? {}), ...dados }))
     setErros({})
-    setAbaForm('manual')
-    toast.success('Formulário preenchido. Confira antes de salvar.')
+    setAutoPreenchido(true)
+    toast.success('Campos preenchidos pela pasta. Confira antes de salvar.')
   }
 
   // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
@@ -745,9 +749,10 @@ export default function Processos() {
             <Button variant="outline" onClick={fecharForm}>
               Cancelar
             </Button>
-            {/* Salvar não aparece na aba Automatizado: lá não há formulário, e o
-                botão prometeria gravar algo que a pessoa ainda não conferiu. */}
-            {abaForm === 'manual' && (
+            {/* Na aba Automatizado o Salvar só aparece depois de uma pasta
+                preencher os campos: antes disso ele prometeria gravar um
+                formulário vazio e travado. */}
+            {(abaForm === 'manual' || !!editing?.id || autoPreenchido) && (
               <Button
                 type="submit"
                 form="form-processo"
@@ -776,11 +781,27 @@ export default function Processos() {
         )}
 
         {editing && abaForm === 'auto' && !editing.id && (
-          <NovoCreditoDoDrive processos={data} onPreencher={preencherDoDrive} />
+          <div className="mb-4">
+            <NovoCreditoDoDrive processos={data} onPreencher={preencherDoDrive} />
+          </div>
         )}
 
-        {editing && (abaForm === 'manual' || !!editing.id) && (
-          <form id="form-processo" onSubmit={handleSubmit} className="space-y-4">
+        {editing && (
+          <form id="form-processo" onSubmit={handleSubmit}>
+            {/* Os campos aparecem NAS DUAS abas, e na automatizada nascem
+                bloqueados: sem pasta escolhida não há o que editar, e um
+                formulário em branco e mexível ao lado de um campo de busca convida
+                a preencher à mão justamente onde a ideia era não precisar.
+                Escolher a pasta preenche e libera.
+
+                <fieldset disabled> em vez de `disabled` em cada campo: são
+                dezenas, e um esquecido seria um campo editável no meio de campos
+                travados — o tipo de inconsistência que ninguém reporta e todo
+                mundo estranha. O navegador propaga para tudo o que está dentro. */}
+            <fieldset
+              disabled={abaForm === 'auto' && !editing.id && !autoPreenchido}
+              className="m-0 min-w-0 space-y-4 border-0 p-0"
+            >
             <Field label="Número do processo" required error={erros.numero_cnj}>
               <Input
                 value={editing.numero_cnj ?? ''}
@@ -1076,6 +1097,7 @@ export default function Processos() {
                 )}
               </div>
             </div>
+            </fieldset>
           </form>
         )}
       </Modal>
