@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
 import { requerimentosCrud, apensosCrud } from '@/lib/queries'
+import { invokeFunction } from '@/lib/functions'
 import { useApensosManager } from '@/components/Apensos'
 import type { Requerimento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -155,12 +156,52 @@ export default function Requerimentos() {
         await update.mutateAsync({ id: editing.id, changes: payload })
         toast.success('Requerimento atualizado.')
       } else {
-        await create.mutateAsync(payload)
+        const criado = await create.mutateAsync(payload)
         toast.success('Requerimento cadastrado.')
+        // FORA do await do salvamento, como nos créditos: o cadastro na ADVBOX é
+        // consequência, não condição. ADVBOX fora do ar não impede o requerimento
+        // de existir aqui.
+        if (criado?.id) void cadastrarNaAdvbox(criado.id)
       }
       setEditing(null)
     } catch (err) {
       toast.error((err as Error).message)
+    }
+  }
+
+  /**
+   * Cadastra o requerimento na ADVBOX, com a mesma configuração dos créditos.
+   *
+   * Vai por PROTOCOL_NUMBER, e é a função que decide isso a partir do id: número de
+   * requerimento é protocolo do órgão, não CNJ, e a ADVBOX valida process_number
+   * contra as bases dos tribunais.
+   *
+   * O que isso NÃO traz: movimentação automática. Os robôs da ADVBOX se guiam pelo
+   * CNJ. O ganho é o requerimento existir lá — com tarefas, responsável e histórico —
+   * e passar a casar com a sincronização, que já procura pelos dois campos.
+   */
+  async function cadastrarNaAdvbox(requerimentoId: string) {
+    try {
+      const r = await invokeFunction<{
+        ok?: boolean
+        motivo?: string
+        criado?: boolean
+        detalhe?: string
+        aviso?: string
+      }>('advbox-processos', { action: 'criar', requerimento_id: requerimentoId })
+
+      if (r.ok && r.criado) toast.success('Requerimento cadastrado na ADVBOX.')
+      else if (r.motivo === 'incompleto')
+        toast.error(
+          'Cadastro automático na ADVBOX está ligado, mas falta escolher o responsável em Configurações.',
+        )
+      else if (r.motivo === 'numero_invalido')
+        toast.error(`Não cadastrei na ADVBOX: ${r.detalhe ?? 'número de protocolo ausente.'}`)
+      else if (r.aviso) toast.error(r.aviso)
+    } catch (err) {
+      toast.error(
+        `Requerimento salvo, mas não cadastrei na ADVBOX: ${(err as Error).message}`,
+      )
     }
   }
 

@@ -73,25 +73,100 @@ async function lerConfig(): Promise<ConfigCriar> {
 async function acharNaAdvbox(
   ctx: Awaited<ReturnType<typeof getAdvboxCtx>>,
   numero: string,
-): Promise<{ id: string; process_number?: string } | null> {
+  campo: CampoNumero,
+): Promise<{ id: string } | null> {
   const formas = [numero.trim(), onlyDigits(numero)].filter(
     (v, i, a) => v && a.indexOf(v) === i,
   )
   for (const forma of formas) {
-    const j = await getJson(ctx, `/lawsuits?process_number=${encodeURIComponent(forma)}`)
+    const j = await getJson(ctx, `/lawsuits?${campo}=${encodeURIComponent(forma)}`)
     const achados = pickArray(j)
     // Confere o número do que voltou em vez de confiar no filtro: se um dia ele
     // passar a casar parcialmente, aceitar o primeiro resultado vincularia o
-    // crédito ao processo errado — e vínculo errado é pior que vínculo ausente,
+    // registro ao processo errado — e vínculo errado é pior que vínculo ausente,
     // porque some do relatório de faltantes.
-    const casado = achados.find(
-      (l) => onlyDigits(l.process_number) === onlyDigits(numero),
-    )
-    if (casado?.id != null) {
-      return { id: String(casado.id), process_number: String(casado.process_number ?? '') }
-    }
+    const casado = achados.find((l) => onlyDigits(l[campo]) === onlyDigits(numero))
+    if (casado?.id != null) return { id: String(casado.id) }
   }
   return null
+}
+
+/**
+ * O que vai ser cadastrado — crédito ou requerimento administrativo.
+ *
+ * A DIFERENÇA QUE IMPORTA É O CAMPO DO NÚMERO. `process_number` é validado pela
+ * ADVBOX contra as bases dos tribunais e precisa ser um CNJ realmente distribuído;
+ * `protocol_number` é livre. Requerimento administrativo tem número de protocolo do
+ * órgão, não CNJ, então mandá-lo como process_number seria recusado — e o erro
+ * apareceria como falha do cadastro, não como campo errado.
+ *
+ * CONSEQUÊNCIA A SABER: são os robôs da ADVBOX que buscam andamento nos tribunais, e
+ * eles se guiam pelo CNJ. Requerimento entra por protocolo, então NÃO ganha
+ * movimentação automática — ganha lugar na ADVBOX, com tarefas e histórico manual, e
+ * passa a casar com a sincronização (que já procura pelos dois campos).
+ */
+type CampoNumero = 'process_number' | 'protocol_number'
+
+interface Alvo {
+  tabela: 'processos' | 'requerimentos'
+  id: string
+  numero: string
+  campo: CampoNumero
+  /** Nome que identifica o registro na lista da ADVBOX (máx. 30 pela API). */
+  pasta: string
+  jaVinculado: string | null
+}
+
+/** Carrega do BANCO o que vai ser cadastrado. Quem chama manda só o id. */
+async function lerAlvo(body: Record<string, unknown>): Promise<
+  { alvo: Alvo } | { erro: string; status: number }
+> {
+  const svc = serviceClient()
+  const requerimentoId = String(body.requerimento_id ?? '')
+  const processoId = String(body.processo_id ?? '')
+
+  if (requerimentoId) {
+    const { data, error } = await svc
+      .from('requerimentos')
+      .select('id, numero_protocolo, assunto, orgao, advbox_lawsuit_id')
+      .eq('id', requerimentoId)
+      .maybeSingle()
+    if (error) return { erro: error.message, status: 500 }
+    if (!data) return { erro: 'Requerimento não encontrado.', status: 404 }
+    return {
+      alvo: {
+        tabela: 'requerimentos',
+        id: String(data.id),
+        numero: String(data.numero_protocolo ?? '').trim(),
+        campo: 'protocol_number',
+        // Assunto antes do órgão: é o que distingue dois requerimentos do mesmo
+        // órgão na lista da ADVBOX.
+        pasta: String(data.assunto ?? data.orgao ?? '').slice(0, 30),
+        jaVinculado: data.advbox_lawsuit_id ? String(data.advbox_lawsuit_id) : null,
+      },
+    }
+  }
+
+  if (!processoId) {
+    return { erro: 'Informe processo_id ou requerimento_id.', status: 400 }
+  }
+  const { data, error } = await svc
+    .from('processos')
+    .select('id, numero_cnj, cedente, advbox_lawsuit_id')
+    .eq('id', processoId)
+    .maybeSingle()
+  if (error) return { erro: error.message, status: 500 }
+  if (!data) return { erro: 'Crédito não encontrado.', status: 404 }
+  return {
+    alvo: {
+      tabela: 'processos',
+      id: String(data.id),
+      numero: String(data.numero_cnj ?? '').trim(),
+      campo: 'process_number',
+      pasta: String(data.cedente ?? '').slice(0, 30),
+      jaVinculado: data.advbox_lawsuit_id ? String(data.advbox_lawsuit_id) : null,
+    },
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -154,30 +229,21 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: false, motivo: 'incompleto', faltando })
     }
 
-    const processoId = String(body.processo_id ?? '')
-    if (!processoId) return jsonResponse({ error: 'processo_id é obrigatório.' }, 400)
-
-    // O crédito é LIDO DO BANCO, não aceito do cliente: quem chama manda só o id.
+    // O registro é LIDO DO BANCO, não aceito do cliente: quem chama manda só o id.
     // Aceitar o número pelo corpo deixaria qualquer autenticado cadastrar na
-    // ADVBOX do escritório um processo que não existe na plataforma.
-    const { data: proc, error: erroProc } = await svc
-      .from('processos')
-      .select('id, numero_cnj, cedente, advbox_lawsuit_id')
-      .eq('id', processoId)
-      .maybeSingle()
-    if (erroProc) throw new Error(erroProc.message)
-    if (!proc) return jsonResponse({ error: 'Crédito não encontrado.' }, 404)
+    // ADVBOX do escritório algo que não existe na plataforma.
+    const lido = await lerAlvo(body as Record<string, unknown>)
+    if ('erro' in lido) return jsonResponse({ error: lido.erro }, lido.status)
+    const { alvo } = lido
 
-    if (proc.advbox_lawsuit_id) {
-      return jsonResponse({
-        ok: true,
-        ja_existia: true,
-        lawsuit_id: proc.advbox_lawsuit_id,
-      })
+    if (alvo.jaVinculado) {
+      return jsonResponse({ ok: true, ja_existia: true, lawsuit_id: alvo.jaVinculado })
     }
 
-    const numero = String(proc.numero_cnj ?? '').trim()
-    if (onlyDigits(numero).length < 15) {
+    // Crédito: exige CNJ, porque é assim que a ADVBOX valida e é o CNJ que liga o
+    // monitoramento. Requerimento: basta ter protocolo — o campo é livre, e cobrar
+    // formato de CNJ de um número administrativo barraria o cadastro legítimo.
+    if (alvo.campo === 'process_number' && onlyDigits(alvo.numero).length < 15) {
       return jsonResponse({
         ok: false,
         motivo: 'numero_invalido',
@@ -185,15 +251,23 @@ Deno.serve(async (req: Request) => {
           'A ADVBOX valida o número contra as bases dos tribunais, e este não parece um CNJ completo.',
       })
     }
+    if (!alvo.numero) {
+      return jsonResponse({
+        ok: false,
+        motivo: 'numero_invalido',
+        detalhe:
+          'Sem número de protocolo não há como cadastrar na ADVBOX nem como casar a sincronização depois.',
+      })
+    }
 
     // Já cadastrado lá por outra via (à mão, ou por um salvamento anterior que
     // falhou depois de criar)? Só vincula.
-    const existente = await acharNaAdvbox(ctx, numero)
+    const existente = await acharNaAdvbox(ctx, alvo.numero, alvo.campo)
     if (existente) {
       await svc
-        .from('processos')
+        .from(alvo.tabela)
         .update({ advbox_lawsuit_id: existente.id })
-        .eq('id', proc.id)
+        .eq('id', alvo.id)
       return jsonResponse({ ok: true, ja_existia: true, lawsuit_id: existente.id })
     }
 
@@ -202,10 +276,11 @@ Deno.serve(async (req: Request) => {
       customers_id: [idNumerico(cfg.customers_id)],
       stages_id: idNumerico(cfg.stages_id),
       type_lawsuits_id: idNumerico(cfg.type_lawsuits_id),
-      process_number: numero,
-      // Pasta com o nome do cedente: é assim que o escritório reconhece o processo
-      // na lista da ADVBOX. Limite de 30 caracteres é da API.
-      folder: String(proc.cedente ?? '').slice(0, 30) || undefined,
+      // O número vai no campo que corresponde à natureza do registro. Ver Alvo.
+      [alvo.campo]: alvo.numero,
+      // Pasta com o nome do cedente (ou o assunto do requerimento): é assim que o
+      // escritório reconhece o registro na lista da ADVBOX.
+      folder: alvo.pasta || undefined,
     })
     const criadoObj = (criado ?? {}) as Record<string, unknown>
     const novoId =
@@ -225,9 +300,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const { error: erroUp } = await svc
-      .from('processos')
+      .from(alvo.tabela)
       .update({ advbox_lawsuit_id: String(novoId) })
-      .eq('id', proc.id)
+      .eq('id', alvo.id)
     if (erroUp) throw new Error(erroUp.message)
 
     return jsonResponse({ ok: true, criado: true, lawsuit_id: String(novoId) })

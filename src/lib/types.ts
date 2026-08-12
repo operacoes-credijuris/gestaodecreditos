@@ -154,6 +154,12 @@ export interface Requerimento {
   classe_processual: string | null
   data_protocolo: string | null
   observacoes: string | null
+  /**
+   * Id do registro correspondente na ADVBOX (migração 0038). Criado por
+   * protocol_number, não process_number: o número é de protocolo do órgão, e a
+   * ADVBOX valida process_number contra as bases dos tribunais.
+   */
+  advbox_lawsuit_id: string | null
   created_at: string
   updated_at: string
 }
