@@ -140,7 +140,7 @@ REGRAS, em ordem de importância:
    c) só há o contrato particular de cessão, sem escritura e sem comprovante de registro -> "particular".
    Contrato particular que MENCIONA a intenção de registrar não basta para (b): é preciso o comprovante do protocolo. Se você viu a menção mas não achou o comprovante, marque "particular" e escreva isso em "observacoes".
 
-7. Datas em AAAA-MM-DD. Dinheiro em número puro, sem "R$" e sem ponto de milhar: 120000.55.
+8. Datas em AAAA-MM-DD. Dinheiro em número puro, sem "R$" e sem ponto de milhar: 120000.55.
 
 Responda apenas chamando a ferramenta.`
 
