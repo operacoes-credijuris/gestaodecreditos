@@ -66,6 +66,23 @@ export function formatDate(value: string | null | undefined): string {
 }
 
 /**
+ * O documento é de PESSOA JURÍDICA? Passar de 11 dígitos é o que decide.
+ *
+ * MESMA RÉGUA da máscara abaixo, de propósito: é o 12º dígito que troca o
+ * formato na tela, e seria incoerente ele mudar a máscara para CNPJ e a
+ * plataforma continuar chamando o campo de CPF. Daí este ser o único lugar que
+ * responde "é PJ?" — o rótulo do campo, o rótulo na tabela e o campo de
+ * representante legal todos consultam esta função.
+ */
+export function ehCnpj(v: string | null | undefined): boolean {
+  return onlyDigits(v).length > 11
+}
+
+/** "CNPJ" ou "CPF", conforme o que já foi digitado. Ver ehCnpj. */
+export const rotuloDocumento = (v: string | null | undefined): string =>
+  ehCnpj(v) ? 'CNPJ' : 'CPF'
+
+/**
  * Máscara de CPF/CNPJ que TROCA DE FORMATO sozinha no 12º dígito.
  *
  *   até 11 dígitos  000.000.000-00        (CPF)

@@ -26,12 +26,14 @@ import { listarPessoas, type PessoaLista } from '@/lib/pessoas'
 import {
   compilarEndereco,
   cpfCnpjValido,
+  ehCnpj,
   formatCepInput,
   formatCpfCnpjInput,
   limparNumeroConta,
   nomeParecido,
   normalizarNome,
   onlyDigits,
+  rotuloDocumento,
 } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Badge } from '@/components/ui/Badge'
@@ -59,6 +61,7 @@ import { useToast } from '@/components/ui/Toast'
 type CampoPessoa =
   | 'cpf'
   | 'rg'
+  | 'representante'
   | 'banco'
   | 'agencia'
   | 'conta'
@@ -82,19 +85,38 @@ const CAMPOS_DOCUMENTO: {
   rotulo: string
   mascara?: (v: string) => string
   dica?: string
+  /** Só aparece quando o documento é CNPJ. Ver ehCnpj em lib/format.ts. */
+  soPj?: boolean
 }[] = [
   {
     chave: 'cpf',
+    // Rótulo e dica são recalculados no render conforme o que foi digitado
+    // (ver rotuloCampo/dicaCampo): chamar de "CPF" o documento de uma empresa
+    // está errado, e a máscara já troca sozinha no 12º dígito.
     rotulo: 'CPF / CNPJ',
     mascara: formatCpfCnpjInput,
     dica: '000.000.000-00',
   },
   { chave: 'rg', rotulo: 'RG' },
+  {
+    chave: 'representante',
+    rotulo: 'Representante legal',
+    soPj: true,
+    dica: 'Quem assina pela empresa',
+  },
   { chave: 'banco', rotulo: 'Banco' },
   { chave: 'agencia', rotulo: 'Agência', mascara: limparNumeroConta },
   { chave: 'conta', rotulo: 'Conta', mascara: limparNumeroConta },
   { chave: 'pix', rotulo: 'Pix' },
 ]
+
+/** Rótulo do campo de documento: "CNPJ" quando é de empresa, senão os dois. */
+const rotuloCampo = (chave: CampoPessoa, rotulo: string, doc: string) =>
+  chave === 'cpf' && ehCnpj(doc) ? 'CNPJ' : rotulo
+
+/** A dica acompanha o formato que a máscara está aplicando. */
+const dicaCampo = (chave: CampoPessoa, dica: string | undefined, doc: string) =>
+  chave === 'cpf' && ehCnpj(doc) ? '00.000.000/0000-00' : dica
 
 /**
  * Célula agrupada: pares "rótulo → valor" empilhados. A tabela tinha uma coluna
@@ -138,6 +160,7 @@ function GrupoDados({
 const VAZIO: Record<CampoPessoa, string> = {
   cpf: '',
   rg: '',
+  representante: '',
   banco: '',
   agencia: '',
   conta: '',
@@ -238,6 +261,7 @@ export default function DadosPessoaisBancarios() {
     setForm({
       cpf: d?.cpf ?? '',
       rg: d?.rg ?? '',
+      representante: d?.representante ?? '',
       banco: d?.banco ?? '',
       agencia: d?.agencia ?? '',
       conta: d?.conta ?? '',
@@ -369,6 +393,12 @@ export default function DadosPessoaisBancarios() {
         nome_exibicao: nome,
         cpf: vazioNull(form.cpf),
         rg: vazioNull(form.rg),
+        // Representante só vale para pessoa jurídica. Se o documento não é CNPJ,
+        // grava null: mesmo padrão dos campos condicionais de Créditos — o campo
+        // saiu da tela, então o valor não pode ficar viajando escondido. Sem isso,
+        // corrigir um CNPJ digitado por engano deixaria a pessoa física com um
+        // "representante legal" invisível na ficha.
+        representante: ehCnpj(form.cpf) ? vazioNull(form.representante) : null,
         banco: vazioNull(form.banco),
         agencia: vazioNull(form.agencia),
         conta: vazioNull(form.conta),
@@ -506,11 +536,22 @@ export default function DadosPessoaisBancarios() {
                             sem crédito
                           </Badge>
                         )}
+                        {/* Representante legal sob a razão social — mesmo padrão de
+                            texto secundário das outras tabelas (Créditos, carteiras).
+                            O prefixo "Rep." diz o que é o nome: sem ele, dois nomes
+                            empilhados parecem duas pessoas cadastradas. */}
+                        {d?.representante && (
+                          <div className="mt-0.5 text-xs font-normal text-slate-600">
+                            Rep. {d.representante}
+                          </div>
+                        )}
                       </TD>
                       <TD>
                         <GrupoDados
                           linhas={[
-                            { rotulo: 'CPF', valor: d?.cpf },
+                            // CNPJ quando é empresa: o mesmo dígito que troca a
+                            // máscara troca o rótulo aqui.
+                            { rotulo: rotuloDocumento(d?.cpf), valor: d?.cpf },
                             { rotulo: 'RG', valor: d?.rg },
                           ]}
                         />
@@ -621,7 +662,10 @@ export default function DadosPessoaisBancarios() {
                   quem lê a linha e abre a janela encontra a mesma ordem. */}
               {(
                 [
-                  { titulo: 'Identificação', chaves: ['cpf', 'rg'] },
+                  {
+                    titulo: 'Identificação',
+                    chaves: ['cpf', 'rg', 'representante'],
+                  },
                   {
                     titulo: 'Dados bancários',
                     chaves: ['banco', 'agencia', 'conta', 'pix'],
@@ -633,12 +677,17 @@ export default function DadosPessoaisBancarios() {
                     {grupo.titulo}
                   </h4>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    {CAMPOS_DOCUMENTO.filter((c) =>
-                      (grupo.chaves as readonly string[]).includes(c.chave),
+                    {CAMPOS_DOCUMENTO.filter(
+                      (c) =>
+                        (grupo.chaves as readonly string[]).includes(c.chave) &&
+                        // Representante legal aparece no 12º dígito do documento,
+                        // junto com a troca do rótulo para CNPJ: é o momento em
+                        // que a ficha passa a ser de uma empresa.
+                        (!c.soPj || ehCnpj(form.cpf)),
                     ).map((c) => (
                       <Field
                         key={c.chave}
-                        label={c.rotulo}
+                        label={rotuloCampo(c.chave, c.rotulo, form.cpf)}
                         // Dígito verificador errado quase sempre é erro de digitação,
                         // e num campo desses o erro vira dinheiro no lugar errado.
                         error={
@@ -648,7 +697,7 @@ export default function DadosPessoaisBancarios() {
                         }
                       >
                         <Input
-                          placeholder={c.dica}
+                          placeholder={dicaCampo(c.chave, c.dica, form.cpf)}
                           value={form[c.chave]}
                           onChange={(e) =>
                             setForm((f) => ({

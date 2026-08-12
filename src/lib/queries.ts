@@ -92,6 +92,12 @@ export interface InvestidorDados {
   nome_exibicao: string | null
   cpf: string | null
   rg: string | null
+  /**
+   * Representante legal — só de pessoa jurídica (migração 0034). Null em pessoa
+   * física: a tela não exibe o campo e o salvamento descarta o valor quando o
+   * documento deixa de ter mais de 11 dígitos.
+   */
+  representante: string | null
   banco: string | null
   agencia: string | null
   conta: string | null
@@ -124,18 +130,38 @@ export function useInvestidorDados() {
       // Lista de colunas em literal, e não numa constante: o supabase-js infere
       // o tipo do retorno lendo a string do select, e uma const widened para
       // `string` derruba a inferência.
-      const { data, error } = await supabase
+      const comRepresentante = await supabase
         .from('investidor_dados')
         .select(
-          'tipo, nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
+          'tipo, nome_chave, nome_exibicao, cpf, rg, representante, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
         )
+      // 42703 = "column does not exist": banco ainda sem a migração 0034. Lê de
+      // novo sem o representante em vez de derrubar a aba inteira — pedir uma
+      // coluna que não existe faz o PostgREST recusar a consulta TODA, e Dados
+      // cadastrais ficaria inutilizável até alguém rodar o SQL. Assim o
+      // representante simplesmente aparece quando a migração rodar.
+      const resposta =
+        comRepresentante.error?.code === '42703'
+          ? await supabase
+              .from('investidor_dados')
+              .select(
+                'tipo, nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
+              )
+          : comRepresentante
       // Este mapa alimenta o formulário, e o Salvar é upsert da LINHA INTEIRA:
       // mapa vazio abriria o formulário em branco e apagaria CPF, banco, conta e
       // endereço no salvamento seguinte.
-      if (error) throw new Error(error.message)
+      if (resposta.error) throw new Error(resposta.error.message)
       const m = new Map<string, InvestidorDados>()
-      for (const r of (data ?? []) as InvestidorDados[])
+      for (const linha of resposta.data ?? []) {
+        // `representante` pode faltar no caminho de retrocompatibilidade acima;
+        // normalizar para null mantém a interface honesta (null = não informado).
+        const r = {
+          representante: null,
+          ...linha,
+        } as InvestidorDados
         m.set(chavePessoa(r.tipo, r.nome_chave), r)
+      }
       return m
     },
     staleTime: 60 * 1000,
@@ -150,11 +176,23 @@ export function useSalvarInvestidorDados() {
       // upsert pela chave (tipo, nome_chave): a mesma chamada cria a linha e
       // atualiza a que já existe. Quem chama é que decide se pode sobrescrever —
       // a tela barra o cadastro de um nome cuja ficha já existe.
-      const { error } = await supabase.from('investidor_dados').upsert({
+      const linha = {
         ...d,
         atualizado_em: new Date().toISOString(),
         atualizado_por: sessao.user?.id ?? null,
-      })
+      }
+      const { error } = await supabase.from('investidor_dados').upsert(linha)
+      // 42703 = coluna inexistente (banco ainda sem a migração 0034). Salva sem o
+      // representante: melhor gravar os doze campos que existem do que recusar a
+      // ficha inteira por causa do décimo terceiro. Mesmo raciocínio da leitura.
+      if (error?.code === '42703' && 'representante' in linha) {
+        const { representante: _ignorado, ...semRepresentante } = linha
+        const segunda = await supabase
+          .from('investidor_dados')
+          .upsert(semRepresentante)
+        if (segunda.error) throw new Error(segunda.error.message)
+        return
+      }
       if (error) throw new Error(error.message)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['investidor_dados'] }),
