@@ -29,6 +29,13 @@ interface ToastContextValue {
   toast: (message: string, type?: ToastType, opts?: ToastOptions) => void
   success: (message: string, opts?: ToastOptions) => void
   error: (message: string, opts?: ToastOptions) => void
+  /**
+   * Nem tudo que a tela precisa dizer é sucesso ou erro. O tipo 'info' já existia,
+   * com ícone e borda próprios, mas sem atalho: quem quisesse usá-lo tinha de
+   * chamar toast(msg, 'info') e, na prática, acabava marcando como erro um aviso
+   * que não é falha — o que treina a equipe a ignorar vermelho.
+   */
+  info: (message: string, opts?: ToastOptions) => void
 }
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined)
@@ -81,6 +88,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     toast,
     success: (m, opts) => toast(m, 'success', opts),
     error: (m, opts) => toast(m, 'error', opts),
+    info: (m, opts) => toast(m, 'info', opts),
   }
 
   const icons = {

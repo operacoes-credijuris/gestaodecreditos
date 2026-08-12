@@ -593,7 +593,7 @@ export default function Processos() {
         toast.error(
           'Cadastro automático na ADVBOX está ligado, mas falta escolher responsável, fase, tipo ou cliente em Configurações.',
         )
-      else if (r.motivo === 'numero_invalido')
+      else if (r.motivo === 'sem_cnj')
         toast.error(`Não cadastrei na ADVBOX: ${r.detalhe ?? 'número do processo inválido.'}`)
       else if (r.aviso) toast.error(r.aviso)
     } catch (err) {

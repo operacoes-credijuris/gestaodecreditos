@@ -1,23 +1,27 @@
-// Cadastra na ADVBOX o processo de um crédito recém-salvo.
+// Cadastra na ADVBOX o processo de um crédito ou de um requerimento recém-salvo.
 //
 // POR QUE ISTO EXISTE: a ADVBOX só traz movimentações de processo que está
-// cadastrado nela. Crédito cadastrado aqui e esquecido lá fica sem andamentos, e a
+// cadastrado nela. Registro cadastrado aqui e esquecido lá fica sem andamentos, e a
 // falta não aparece em lugar nenhum — a aba Movimentações simplesmente não mostra
 // aquele processo, o que é indistinguível de "não houve movimentação".
 //
 // DUAS AÇÕES:
 //   options — lê as listas da conta (usuários, fases, tipos, e o cliente por nome)
 //             para a tela de Configurações oferecer escolhas em vez de pedir IDs.
-//   criar   — cria o processo de UM crédito. É IDEMPOTENTE: consulta antes de
-//             criar, tanto no nosso banco quanto na ADVBOX.
+//   criar   — cadastra UM registro, crédito ou requerimento. É IDEMPOTENTE:
+//             consulta antes de criar, tanto no nosso banco quanto na ADVBOX.
 //
 // A IDEMPOTÊNCIA É O CORAÇÃO DISTO. Criar processo duplicado no sistema onde o
 // escritório trabalha é dano que só se desfaz à mão, e a chamada acontece a cada
-// salvamento de crédito — inclusive nos salvamentos repetidos de quem corrige um
-// campo e salva de novo.
+// salvamento — inclusive nos salvamentos repetidos de quem corrige um campo e salva
+// de novo.
+//
+// O FORMATO DO NÚMERO decide o campo (CNJ -> process_number, resto ->
+// protocol_number) e, no requerimento que é distribuído depois, o número é PROMOVIDO
+// no registro que já existe. Ver o comentário de Alvo.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
-import { getAdvboxCtx, getJson, pickArray, postJson } from '../_shared/advbox.ts'
+import { getAdvboxCtx, getJson, pickArray, enviarJson } from '../_shared/advbox.ts'
 
 /** Configuração gravada em integracoes.config->criar_processo. */
 interface ConfigCriar {
@@ -94,18 +98,31 @@ async function acharNaAdvbox(
 /**
  * O que vai ser cadastrado — crédito ou requerimento administrativo.
  *
- * A DIFERENÇA QUE IMPORTA É O CAMPO DO NÚMERO. `process_number` é validado pela
- * ADVBOX contra as bases dos tribunais e precisa ser um CNJ realmente distribuído;
- * `protocol_number` é livre. Requerimento administrativo tem número de protocolo do
- * órgão, não CNJ, então mandá-lo como process_number seria recusado — e o erro
- * apareceria como falha do cadastro, não como campo errado.
+ * O FORMATO DO NÚMERO ESCOLHE O CAMPO, e a escolha tem consequência:
  *
- * CONSEQUÊNCIA A SABER: são os robôs da ADVBOX que buscam andamento nos tribunais, e
- * eles se guiam pelo CNJ. Requerimento entra por protocolo, então NÃO ganha
- * movimentação automática — ganha lugar na ADVBOX, com tarefas e histórico manual, e
- * passa a casar com a sincronização (que já procura pelos dois campos).
+ *   20 dígitos (CNJ) -> `process_number`. É validado pela ADVBOX contra as bases dos
+ *                       tribunais, e é por ele que os robôs dela buscam os
+ *                       andamentos. Só assim vem movimentação automática.
+ *   qualquer outro    -> `protocol_number`. Campo livre, sem validação. O registro
+ *                       existe na ADVBOX, com responsável e tarefas, e casa com a
+ *                       sincronização (que procura pelos dois campos), mas NÃO ganha
+ *                       andamento automático.
+ *
+ * Crédito é exceção: é sempre processo judicial, então número que não seja CNJ ali é
+ * erro de cadastro, não outra natureza de registro.
+ *
+ * Requerimento distribuído GANHA o CNJ depois. Por isso o cadastro é tentado também
+ * ao editar, e não só ao criar.
  */
 type CampoNumero = 'process_number' | 'protocol_number'
+
+/**
+ * Número CNJ tem exatamente 20 dígitos (NNNNNNN-DD.AAAA.J.TR.OOOO). Teste estrito,
+ * e não "tem muitos dígitos": protocolo administrativo longo passaria por CNJ, a
+ * ADVBOX recusaria contra as bases dos tribunais, e o erro chegaria à tela como
+ * falha de cadastro em vez de "este número não é judicial".
+ */
+const pareceCNJ = (n: string) => onlyDigits(n).length === 20
 
 interface Alvo {
   tabela: 'processos' | 'requerimentos'
@@ -133,12 +150,15 @@ async function lerAlvo(body: Record<string, unknown>): Promise<
       .maybeSingle()
     if (error) return { erro: error.message, status: 500 }
     if (!data) return { erro: 'Requerimento não encontrado.', status: 404 }
+    const numeroReq = String(data.numero_protocolo ?? '').trim()
     return {
       alvo: {
         tabela: 'requerimentos',
         id: String(data.id),
-        numero: String(data.numero_protocolo ?? '').trim(),
-        campo: 'protocol_number',
+        numero: numeroReq,
+        // O formato decide: CNJ vai para o campo que liga o monitoramento, o resto
+        // entra como protocolo. Ver o comentário de Alvo.
+        campo: pareceCNJ(numeroReq) ? 'process_number' : 'protocol_number',
         // Assunto antes do órgão: é o que distingue dois requerimentos do mesmo
         // órgão na lista da ADVBOX.
         pasta: String(data.assunto ?? data.orgao ?? '').slice(0, 30),
@@ -237,26 +257,52 @@ Deno.serve(async (req: Request) => {
     const { alvo } = lido
 
     if (alvo.jaVinculado) {
+      // REQUERIMENTO QUE FOI DISTRIBUÍDO DEPOIS DE CADASTRADO. Ele entrou na ADVBOX
+      // com o protocolo do órgão; agora tem CNJ, e é o CNJ que liga o monitoramento.
+      // Sem promover o número aqui, o caso que motivou o pedido — requerimento que
+      // vira processo — ficaria para sempre sem andamento automático, com o registro
+      // existindo e ninguém entendendo por que nada chega.
+      //
+      // PUT parcial: só o campo do número vai no corpo, o resto do registro fica
+      // como está (confirmado na documentação da API).
+      if (alvo.tabela === 'requerimentos' && pareceCNJ(alvo.numero)) {
+        const atual = (await getJson(ctx, `/lawsuits/${alvo.jaVinculado}`)) as
+          | Record<string, unknown>
+          | null
+        const naAdvbox = (atual?.data as Record<string, unknown> | undefined) ?? atual
+        // Só escreve se estiver diferente: salvar um requerimento já promovido não
+        // precisa mandar PUT nenhum.
+        if (onlyDigits(naAdvbox?.process_number) !== onlyDigits(alvo.numero)) {
+          await enviarJson(ctx, 'PUT', `/lawsuits/${alvo.jaVinculado}`, {
+            process_number: alvo.numero,
+          })
+          return jsonResponse({
+            ok: true,
+            promovido: true,
+            lawsuit_id: alvo.jaVinculado,
+          })
+        }
+      }
       return jsonResponse({ ok: true, ja_existia: true, lawsuit_id: alvo.jaVinculado })
     }
 
-    // Crédito: exige CNJ, porque é assim que a ADVBOX valida e é o CNJ que liga o
-    // monitoramento. Requerimento: basta ter protocolo — o campo é livre, e cobrar
-    // formato de CNJ de um número administrativo barraria o cadastro legítimo.
-    if (alvo.campo === 'process_number' && onlyDigits(alvo.numero).length < 15) {
-      return jsonResponse({
-        ok: false,
-        motivo: 'numero_invalido',
-        detalhe:
-          'A ADVBOX valida o número contra as bases dos tribunais, e este não parece um CNJ completo.',
-      })
-    }
+    // Sem número não há nem o que cadastrar nem como casar a sincronização depois.
     if (!alvo.numero) {
       return jsonResponse({
         ok: false,
-        motivo: 'numero_invalido',
+        motivo: 'sem_numero',
+        detalhe: 'Sem número não há o que cadastrar na ADVBOX.',
+      })
+    }
+    // Crédito é sempre processo judicial: número que não seja CNJ ali é erro de
+    // cadastro, e a ADVBOX recusaria contra as bases dos tribunais. Requerimento não
+    // passa por aqui — para ele, não ser CNJ apenas muda o campo.
+    if (alvo.tabela === 'processos' && !pareceCNJ(alvo.numero)) {
+      return jsonResponse({
+        ok: false,
+        motivo: 'sem_cnj',
         detalhe:
-          'Sem número de protocolo não há como cadastrar na ADVBOX nem como casar a sincronização depois.',
+          'A ADVBOX valida o número contra as bases dos tribunais, e este não tem os 20 dígitos de um CNJ.',
       })
     }
 
@@ -271,7 +317,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, ja_existia: true, lawsuit_id: existente.id })
     }
 
-    const criado = await postJson(ctx, '/lawsuits', {
+    const criado = await enviarJson(ctx, 'POST', '/lawsuits', {
       users_id: idNumerico(cfg.users_id),
       customers_id: [idNumerico(cfg.customers_id)],
       stages_id: idNumerico(cfg.stages_id),

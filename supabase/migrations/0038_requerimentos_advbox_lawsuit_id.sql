@@ -6,17 +6,21 @@
 -- ADVBOX de novo — ou, pior, criaria um segundo registro no sistema onde o
 -- escritório trabalha.
 --
--- Requerimento entra na ADVBOX por PROTOCOL_NUMBER, não por process_number: o
--- número é de protocolo do órgão, não um CNJ, e a ADVBOX valida process_number
--- contra as bases dos tribunais. Consequência conhecida e aceita: os robôs de
--- andamento se guiam pelo CNJ, então requerimento não ganha movimentação
--- automática — ganha lugar na ADVBOX, com tarefas, e passa a casar com a
--- sincronização, que já procura pelos dois campos.
+-- SÓ REQUERIMENTO COM NÚMERO CNJ ENTRA NA ADVBOX. O cadastro existe para que os
+-- robôs dela busquem os andamentos nos tribunais, e eles se guiam pelo CNJ.
+-- Requerimento com apenas protocolo do órgão poderia ser cadastrado no campo livre
+-- protocol_number, mas não traria movimentação nenhuma — seria registro a mais na
+-- lista do escritório, sem nada em troca.
+--
+-- Como requerimento administrativo GANHA o CNJ quando é distribuído, o cadastro é
+-- tentado também na EDIÇÃO, e não só na criação: é no dia em que o número aparece
+-- que ele passa a valer a pena. Esta coluna é o que impede isso de criar um segundo
+-- registro a cada salvamento seguinte.
 alter table public.requerimentos
   add column if not exists advbox_lawsuit_id text;
 
 comment on column public.requerimentos.advbox_lawsuit_id is
-  'Id do registro correspondente na ADVBOX (criado por protocol_number). Nulo = ainda não cadastrado lá.';
+  'Id do registro correspondente na ADVBOX. Só é preenchido quando o requerimento tem número CNJ (é por ele que a ADVBOX busca andamentos). Nulo = ainda não cadastrado lá.';
 
 -- Sem índice: a coluna é lida junto com o requerimento, uma linha por vez.
 

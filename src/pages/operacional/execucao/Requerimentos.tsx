@@ -139,7 +139,7 @@ export default function Requerimentos() {
     if (!editing) return
     // Validação inline por campo — toast fica só para erro de rede/backend.
     if (!editing.numero_protocolo?.trim()) {
-      setErros({ numero_protocolo: 'Informe o número de protocolo' })
+      setErros({ numero_protocolo: 'Informe o número do processo ou do protocolo' })
       return
     }
     try {
@@ -155,6 +155,13 @@ export default function Requerimentos() {
       if (editing.id) {
         await update.mutateAsync({ id: editing.id, changes: payload })
         toast.success('Requerimento atualizado.')
+        // TAMBÉM NA EDIÇÃO, e não só na criação: requerimento nasce sem número e
+        // ganha o dele depois. Só quando ainda não está vinculado e já existe
+        // número — assim editar um requerimento já cadastrado, ou ainda sem número,
+        // não gasta chamada.
+        if (!editing.advbox_lawsuit_id && payload.numero_protocolo) {
+          void cadastrarNaAdvbox(editing.id)
+        }
       } else {
         const criado = await create.mutateAsync(payload)
         toast.success('Requerimento cadastrado.')
@@ -195,8 +202,10 @@ export default function Requerimentos() {
         toast.error(
           'Cadastro automático na ADVBOX está ligado, mas falta escolher o responsável em Configurações.',
         )
-      else if (r.motivo === 'numero_invalido')
-        toast.error(`Não cadastrei na ADVBOX: ${r.detalhe ?? 'número de protocolo ausente.'}`)
+      // sem_numero NÃO é falha: é o estado normal de um requerimento que ainda não
+      // tem número. Ao preencher e salvar, o cadastro acontece sozinho.
+      else if (r.motivo === 'sem_numero')
+        toast.info('Sem número, não cadastrei na ADVBOX. Ao preencher e salvar, cadastro.')
       else if (r.aviso) toast.error(r.aviso)
     } catch (err) {
       toast.error(
@@ -361,9 +370,17 @@ export default function Requerimentos() {
         {editing && (
           <form id="form-requerimento" onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Número de protocolo" required error={erros.numero_protocolo}>
+              {/* "Número do processo", e não "de protocolo": o mesmo campo recebe as
+                  duas coisas. Requerimento nasce com protocolo do órgão e, quando é
+                  distribuído, passa a ter CNJ — e é o formato do que está aqui que
+                  decide em qual campo da ADVBOX ele entra. O rótulo antigo sugeria
+                  que CNJ não caberia. A coluna do banco continua numero_protocolo:
+                  renomeá-la exigiria migração e tocaria busca, ordenação e a
+                  sincronização, sem ganho nenhum. */}
+              <Field label="Número do processo" required error={erros.numero_protocolo}>
                 <Input
                   value={editing.numero_protocolo ?? ''}
+                  placeholder="CNJ ou número de protocolo do órgão"
                   onChange={(e) => {
                     setEditing({ ...editing, numero_protocolo: e.target.value })
                     // Digitar no campo limpa o erro inline.

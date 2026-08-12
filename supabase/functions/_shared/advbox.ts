@@ -130,8 +130,8 @@ export async function getJson(
 }
 
 /**
- * POST com throttle e retry SÓ para requisição RECUSADA (429, 403 e corpo de erro
- * do Cloudflare com HTTP 200).
+ * POST/PUT com throttle e retry SÓ para requisição RECUSADA (429, 403 e corpo de
+ * erro do Cloudflare com HTTP 200).
  *
  * 5xx NÃO é repetido aqui, ao contrário do getJson, e a diferença é a única que
  * importa: repetir um GET é inofensivo, mas num POST o servidor pode ter criado o
@@ -140,11 +140,16 @@ export async function getJson(
  * Recusa é diferente: 429 e 403 significam que a requisição não foi processada, e
  * aí repetir é seguro.
  *
- * Quem chama trata a falha como "não sei se criou" — e é por isso que a criação
+ * O PUT seria idempotente e poderia repetir em 5xx, mas a regra fica uniforme de
+ * propósito: dois comportamentos na mesma função é o tipo de detalhe que se esquece
+ * na hora de adicionar a terceira chamada.
+ *
+ * Quem chama trata a falha como "não sei se gravou" — e é por isso que a criação
  * consulta antes de criar: a passagem seguinte encontra o que ficou pela metade.
  */
-export async function postJson(
+export async function enviarJson(
   ctx: AdvboxCtx,
+  metodo: 'POST' | 'PUT',
   path: string,
   body: unknown,
   tries = 4,
@@ -153,7 +158,7 @@ export async function postJson(
   for (let a = 1; a <= tries; a++) {
     await throttle()
     const res = await fetch(`${ctx.base}${path}`, {
-      method: 'POST',
+      method: metodo,
       headers: { ...ctx.headers, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
