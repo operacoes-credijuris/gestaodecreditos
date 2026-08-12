@@ -21,8 +21,15 @@ const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
  */
 const ESCOPO = 'https://www.googleapis.com/auth/drive'
 
-/** Raiz de "Petições" no Drive da Credijuris. */
-export const PASTA_PETICOES = '11zhEdPVBMQZxPSzLa-rHKtjBH6T4RhL7'
+/**
+ * Raiz de "B. Processos" no Drive da Credijuris — a árvore de TODOS os créditos.
+ *
+ * A constante se chamava PASTA_PETICOES e o comentário dizia "Raiz de Petições",
+ * o que era enganoso: as petições são uma das sete subpastas de dentro de cada
+ * crédito, bem no fundo desta árvore. O nome errado passou a doer quando um
+ * segundo consumidor apareceu (a descoberta de crédito novo, em creditoDoDrive).
+ */
+export const PASTA_PROCESSOS = '11zhEdPVBMQZxPSzLa-rHKtjBH6T4RhL7'
 
 export const driveConfigurado = Boolean(CLIENT_ID)
 

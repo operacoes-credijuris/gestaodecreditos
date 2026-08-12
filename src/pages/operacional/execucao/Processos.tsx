@@ -8,6 +8,10 @@ import {
   useUltimaMovimentacao,
 } from '@/lib/queries'
 import { listarPessoas } from '@/lib/pessoas'
+import {
+  NovoCreditoDoDrive,
+  type PreenchimentoDoDrive,
+} from '@/components/NovoCreditoDoDrive'
 import { cn } from '@/lib/cn'
 import { useApensosManager } from '@/components/Apensos'
 import { NumeroProcessoDrive } from '@/components/NumeroProcessoDrive'
@@ -257,6 +261,8 @@ export default function Processos() {
   >('data_aquisicao')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Partial<Processo> | null>(null)
+  /** Aba da janela de crédito novo. Na edição não aparece — ver o Modal. */
+  const [abaForm, setAbaForm] = useState<'manual' | 'auto'>('manual')
   const [toDelete, setToDelete] = useState<Processo | null>(null)
   // Crédito com a ficha aberta no painel lateral (clique na linha).
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
@@ -280,6 +286,21 @@ export default function Processos() {
     setErros({})
     snapshotRef.current = JSON.stringify(p)
     setEditing(p)
+    // Sempre na Manual: quem clica em Editar quer o formulário, e quem cadastra
+    // um crédito novo pode não ter pasta no Drive ainda.
+    setAbaForm('manual')
+  }
+
+  /**
+   * Preenchimento vindo da aba Automatizado. Ele SOMA ao que está no formulário e
+   * traz de volta para a Manual — a pessoa confere e salva. Campo que a pasta não
+   * informa fica como estava, em vez de ser sobrescrito com vazio.
+   */
+  function preencherDoDrive(dados: PreenchimentoDoDrive) {
+    setEditing((atual) => ({ ...(atual ?? {}), ...dados }))
+    setErros({})
+    setAbaForm('manual')
+    toast.success('Formulário preenchido. Confira antes de salvar.')
   }
 
   // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
@@ -724,17 +745,41 @@ export default function Processos() {
             <Button variant="outline" onClick={fecharForm}>
               Cancelar
             </Button>
-            <Button
-              type="submit"
-              form="form-processo"
-              loading={create.isPending || update.isPending}
-            >
-              Salvar
-            </Button>
+            {/* Salvar não aparece na aba Automatizado: lá não há formulário, e o
+                botão prometeria gravar algo que a pessoa ainda não conferiu. */}
+            {abaForm === 'manual' && (
+              <Button
+                type="submit"
+                form="form-processo"
+                loading={create.isPending || update.isPending}
+              >
+                Salvar
+              </Button>
+            )}
           </>
         }
       >
-        {editing && (
+        {/* Só no cadastro NOVO. Editar um crédito que já existe não tem por que
+            passar pela descoberta de pastas — a pasta dele já é conhecida. */}
+        {editing && !editing.id && (
+          <div className="mb-4">
+            <Segmented
+              ariaLabel="Como preencher o crédito"
+              items={[
+                { key: 'manual', label: 'Manual' },
+                { key: 'auto', label: 'Automatizado' },
+              ]}
+              value={abaForm}
+              onChange={(k) => setAbaForm(k as typeof abaForm)}
+            />
+          </div>
+        )}
+
+        {editing && abaForm === 'auto' && !editing.id && (
+          <NovoCreditoDoDrive processos={data} onPreencher={preencherDoDrive} />
+        )}
+
+        {editing && (abaForm === 'manual' || !!editing.id) && (
           <form id="form-processo" onSubmit={handleSubmit} className="space-y-4">
             <Field label="Número do processo" required error={erros.numero_cnj}>
               <Input

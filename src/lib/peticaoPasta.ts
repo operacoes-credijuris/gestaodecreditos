@@ -2,7 +2,7 @@
 //
 // O caminho tem quatro níveis:
 //
-//   Petições
+//   B. Processos
 //   └── Precatórios | Requisições de Pequeno Valor      (espécie do requisitório)
 //       └── Intermediador - NOME                        (originador do crédito)
 //           └── CNJ ou nome do cedente                  (o crédito)
@@ -15,11 +15,11 @@
 // Comparação por pedaço de nome acertaria nove vezes e na décima salvaria a petição
 // na pasta de outro originador — pior que não achar.
 import { normalizarBusca, onlyDigits } from './format'
-import { listarSubpastas, PASTA_PETICOES, type PastaDrive } from './drive'
+import { listarSubpastas, PASTA_PROCESSOS, type PastaDrive } from './drive'
 import type { EspecieRequisitorio, Processo } from './types'
 
 /** Nome da pasta de topo de cada espécie, como está no Drive. */
-const PASTA_DA_ESPECIE: Record<EspecieRequisitorio, string> = {
+export const PASTA_DA_ESPECIE: Record<EspecieRequisitorio, string> = {
   rpv: 'Requisições de Pequeno Valor',
   precatorio: 'Precatórios',
 }
@@ -35,7 +35,7 @@ const PASTA_DA_ESPECIE: Record<EspecieRequisitorio, string> = {
 const PREFIXOS = ['intermediador -', 'originador -']
 
 /** Nome da pasta sem o prefixo, sem acento, sem espaço sobrando, em minúsculas. */
-function nomeDePasta(bruto: string): string {
+export function nomeDePasta(bruto: string): string {
   const limpo = normalizarBusca(bruto)
   for (const p of PREFIXOS) {
     if (limpo.startsWith(p)) return limpo.slice(p.length).trim()
@@ -132,8 +132,8 @@ export async function resolverPastaDoCredito(processo: Processo): Promise<Resolu
       tipo: 'escolher',
       etapa: 'especie',
       procurado: '',
-      dentroDe: PASTA_PETICOES,
-      candidatas: await listarSubpastas(PASTA_PETICOES),
+      dentroDe: PASTA_PROCESSOS,
+      candidatas: await listarSubpastas(PASTA_PROCESSOS),
       caminho,
       motivo:
         'O crédito não tem a espécie do requisitório preenchida, então não há como saber se a petição vai em Precatórios ou em Requisições de Pequeno Valor.',
@@ -141,17 +141,17 @@ export async function resolverPastaDoCredito(processo: Processo): Promise<Resolu
   }
 
   const nomeEspecie = PASTA_DA_ESPECIE[processo.especie_requisitorio]
-  const naRaiz = await listarSubpastas(PASTA_PETICOES)
+  const naRaiz = await listarSubpastas(PASTA_PROCESSOS)
   const pastaEspecie = casarExato(naRaiz, nomeEspecie)
   if (!pastaEspecie) {
     return {
       tipo: 'escolher',
       etapa: 'especie',
       procurado: nomeEspecie,
-      dentroDe: PASTA_PETICOES,
+      dentroDe: PASTA_PROCESSOS,
       candidatas: naRaiz,
       caminho,
-      motivo: `Não achei a pasta "${nomeEspecie}" na raiz de Petições.`,
+      motivo: `Não achei a pasta "${nomeEspecie}" na raiz de B. Processos.`,
     }
   }
   caminho.push(pastaEspecie.nome)
