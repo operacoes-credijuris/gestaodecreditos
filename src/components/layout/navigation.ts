@@ -40,8 +40,10 @@ export const NAVIGATION: NavSection[] = [
   },
   {
     title: 'Comercial',
+    // ORDEM = a do trabalho: a carteira e o cadastro das pessoas vêm antes, e a
+    // geração de contratos fica por último, porque é o passo que CONSOME o que os
+    // dois anteriores produziram (não se gera contrato de quem ainda não tem ficha).
     items: [
-      { label: 'Geração de Contratos', to: '/comercial/contratos', icon: FileSignature },
       { label: 'Carteiras de Investimentos', to: '/comercial/carteiras', icon: Wallet },
       // Era a terceira aba das Carteiras. Virou item próprio, logo abaixo dela,
       // porque não é carteira — e passou a cobrir investidores E originadores.
@@ -50,6 +52,7 @@ export const NAVIGATION: NavSection[] = [
         to: '/comercial/dados-pessoais',
         icon: IdCard,
       },
+      { label: 'Geração de Contratos', to: '/comercial/contratos', icon: FileSignature },
     ],
   },
   {

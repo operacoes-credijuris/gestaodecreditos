@@ -97,22 +97,35 @@ const CAMPOS_DOCUMENTO: {
     mascara: formatCpfCnpjInput,
     dica: '000.000.000-00',
   },
-  { chave: 'rg', rotulo: 'RG' },
+  // ORDEM DELIBERADA: representante ANTES do RG. Em pessoa jurídica os campos
+  // saem "CNPJ | Representante legal" na primeira linha e o RG na segunda —
+  // porque aí o RG é o DO REPRESENTANTE, não da empresa (empresa não tem RG), e
+  // ele precisa vir depois de quem ele identifica. Em pessoa física o
+  // representante é filtrado e sobra "CPF | RG", como sempre foi.
   {
     chave: 'representante',
     rotulo: 'Representante legal',
     soPj: true,
     dica: 'Quem assina pela empresa',
   },
+  { chave: 'rg', rotulo: 'RG' },
   { chave: 'banco', rotulo: 'Banco' },
   { chave: 'agencia', rotulo: 'Agência', mascara: limparNumeroConta },
   { chave: 'conta', rotulo: 'Conta', mascara: limparNumeroConta },
   { chave: 'pix', rotulo: 'Pix' },
 ]
 
-/** Rótulo do campo de documento: "CNPJ" quando é de empresa, senão os dois. */
-const rotuloCampo = (chave: CampoPessoa, rotulo: string, doc: string) =>
-  chave === 'cpf' && ehCnpj(doc) ? 'CNPJ' : rotulo
+/**
+ * Rótulo do campo conforme o documento digitado:
+ *   • documento → "CNPJ" quando é de empresa, senão "CPF / CNPJ";
+ *   • RG → "RG do representante" quando é empresa, porque é dele que o RG é.
+ */
+const rotuloCampo = (chave: CampoPessoa, rotulo: string, doc: string) => {
+  if (!ehCnpj(doc)) return rotulo
+  if (chave === 'cpf') return 'CNPJ'
+  if (chave === 'rg') return 'RG do representante'
+  return rotulo
+}
 
 /** A dica acompanha o formato que a máscara está aplicando. */
 const dicaCampo = (chave: CampoPessoa, dica: string | undefined, doc: string) =>
