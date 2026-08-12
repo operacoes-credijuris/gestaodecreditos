@@ -18,7 +18,11 @@ const DJEN = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao'
 const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '')
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-async function fetchItems(url: string, tries = 3): Promise<Record<string, unknown>[]> {
+/** Uma página da API, com a contagem total que ela informa. */
+async function fetchPagina(
+  url: string,
+  tries = 3,
+): Promise<{ items: Record<string, unknown>[]; count: number }> {
   for (let a = 1; a <= tries; a++) {
     try {
       const res = await fetch(url, {
@@ -29,41 +33,63 @@ async function fetchItems(url: string, tries = 3): Promise<Record<string, unknow
       // mas TAMBÉM não é vazio legítimo — lança, para o chamador contar a falha.
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const j = await res.json()
-      return (j?.items ?? []) as Record<string, unknown>[]
+      return {
+        items: (j?.items ?? []) as Record<string, unknown>[],
+        count: Number(j?.count ?? 0),
+      }
     } catch (e) {
       if (a === tries) throw e
       await sleep(600 * a)
     }
   }
-  return []
+  return { items: [], count: 0 }
 }
 
+const POR_PAGINA = 100
+/** 30 páginas = 3.000 comunicações de uma OAB em 30 dias. Medido: 76 a 86. */
+const MAX_PAGINAS = 30
+
 /**
- * Roda `fn` sobre os itens com concorrência limitada, CONTANDO as falhas.
+ * Todas as comunicações de UMA OAB na janela, paginando até o fim.
  *
- * A versão anterior engolia a falha de um item em silêncio (`catch {}`). Com cem
- * processos, oitenta falhas produziam o mesmo retorno de sucesso que zero falhas.
+ * POR QUE A BUSCA É POR OAB, e não processo por processo como antes.
+ *
+ * O critério do produto é o mesmo dos dois jeitos — intimação de processo
+ * cadastrado E em nome de alguma OAB cadastrada —, mas o caminho para chegar nele
+ * muda tudo na prática:
+ *
+ *   • por processo: ~100 requisições, uma por crédito. Cada uma é um ponto de
+ *     falha, e a falha de uma some com as intimações daquele processo. Medido em
+ *     produção: o cache tinha 22 intimações de 17 processos, quando a busca por
+ *     OAB encontrava 140 na mesma janela. Quatro créditos confirmados no banco
+ *     não tinham nenhuma das suas intimações capturadas.
+ *   • por OAB: 5 requisições. Toda intimação endereçada à casa vem, por
+ *     construção — não há como uma escapar por falha de uma requisição entre cem.
+ *     O recorte para os processos cadastrados passa a ser feito aqui, com a lista
+ *     que já está em memória.
+ *
+ * O conjunto final é idêntico. O que deixa de existir é a chance de perder.
  */
-async function pmap<T>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<Record<string, unknown>[]>,
-): Promise<{ out: Record<string, unknown>[]; falhas: { item: string; erro: string }[] }> {
-  const out: Record<string, unknown>[] = []
-  const falhas: { item: string; erro: string }[] = []
-  let i = 0
-  const worker = async () => {
-    while (i < items.length) {
-      const idx = i++
-      try {
-        out.push(...(await fn(items[idx])))
-      } catch (e) {
-        falhas.push({ item: String(items[idx]), erro: String((e as Error)?.message ?? e) })
-      }
-    }
+async function buscarPorOab(
+  oab: string,
+  janela: string,
+): Promise<{ items: Record<string, unknown>[]; total: number }> {
+  const [numero, uf] = oab.split('/')
+  const items: Record<string, unknown>[] = []
+  let total = 0
+  for (let p = 1; p <= MAX_PAGINAS; p++) {
+    const r = await fetchPagina(
+      `${DJEN}?numeroOab=${numero}&ufOab=${uf}${janela}` +
+        `&itensPorPagina=${POR_PAGINA}&pagina=${p}`,
+    )
+    total = r.count
+    items.push(...r.items)
+    if (r.items.length < POR_PAGINA || items.length >= total) return { items, total }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
-  return { out, falhas }
+  // Teto batido: melhor falhar alto do que devolver metade parecendo completo.
+  throw new Error(
+    `OAB ${oab}: mais de ${MAX_PAGINAS * POR_PAGINA} comunicações na janela — não li até o fim.`,
+  )
 }
 
 /** As 27 UFs. Serve para não aceitar "OAB" como se fosse estado. */
@@ -216,21 +242,51 @@ Deno.serve(async (req: Request) => {
     const ini = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10)
     const janela = `&dataDisponibilizacaoInicio=${ini}&dataDisponibilizacaoFim=${fim}`
 
-    // Busca por número de processo (dos cadastros).
-    const porId = new Map<string, Record<string, unknown>>()
-    const { out: fetched, falhas } = await pmap([...numeros], 6, (n) =>
-      fetchItems(`${DJEN}?numeroProcesso=${n}${janela}&itensPorPagina=200&pagina=1`),
-    )
-    for (const it of fetched) if (it?.id != null) porId.set(String(it.id), it)
+    // Sem OAB cadastrada o critério não existe: é ela que define "em nome da
+    // casa". Antes isso caía num "não filtra por OAB" que, com a busca por OAB,
+    // não tem sequer o que consultar. Falha alto, com o que fazer na mensagem.
+    if (oabSet.size === 0) {
+      throw new Error(
+        'Nenhuma OAB legível cadastrada em Configurações → DJEN. ' +
+          'Sem ela não há como saber quais intimações são da casa.',
+      )
+    }
 
-    // Filtro: só intimações E em nome de uma OAB cadastrada. Cada descarte é
-    // contado, para a resposta dizer POR QUE o número final é o que é.
+    // Busca POR OAB, uma por vez em paralelo (são poucas). Ver buscarPorOab.
+    const porId = new Map<string, Record<string, unknown>>()
+    const falhas: { item: string; erro: string }[] = []
+    const porOab: Record<string, number> = {}
+    await Promise.all(
+      [...oabSet].map(async (oab) => {
+        try {
+          const r = await buscarPorOab(oab, janela)
+          porOab[oab] = r.total
+          for (const it of r.items) if (it?.id != null) porId.set(String(it.id), it)
+        } catch (e) {
+          falhas.push({ item: oab, erro: String((e as Error)?.message ?? e) })
+        }
+      }),
+    )
+
+    // O RECORTE: intimação + processo cadastrado + em nome de OAB cadastrada.
+    // Cada descarte é contado, para a resposta dizer POR QUE o número final é o
+    // que é. `foraDasOabs` deveria ser sempre zero agora — a busca já é por OAB —,
+    // e é justamente por isso que ele fica: se subir de zero, a API mudou de
+    // comportamento e é melhor saber.
     const items: Record<string, unknown>[] = []
     let naoIntimacao = 0
+    let processoNaoCadastrado = 0
     let foraDasOabs = 0
     for (const it of porId.values()) {
       if (!String(it.tipoComunicacao ?? '').toLowerCase().includes('intima')) {
         naoIntimacao++
+        continue
+      }
+      const numero = onlyDigits(
+        (it.numeroprocessocommascara as string) ?? (it.numero_processo as string),
+      )
+      if (!numeros.has(numero)) {
+        processoNaoCadastrado++
         continue
       }
       if (!temOabCadastrada(it, oabSet)) {
@@ -289,24 +345,28 @@ Deno.serve(async (req: Request) => {
       apensos_lidos: ap.valores.length,
       requerimentos_lidos: reqs.valores.length,
       numeros_curtos_ignorados: curtos,
-      numeros_consultados: numeros.size,
-      consultas_falharam: falhas.length,
-      // Só as 10 primeiras: o que importa é o padrão, não a lista inteira.
-      exemplos_de_falha: falhas.slice(0, 10),
-      comunicacoes_recebidas: porId.size,
-      descartadas_nao_intimacao: naoIntimacao,
-      descartadas_fora_das_oabs: foraDasOabs,
+      processos_cadastrados: numeros.size,
       oabs_ativas: [...oabSet],
       oabs_ilegiveis: oabsIlegiveis,
+      /** Quantas comunicações o DJEN tem por OAB na janela. Zero = OAB errada. */
+      comunicacoes_por_oab: porOab,
+      buscas_falharam: falhas.length,
+      exemplos_de_falha: falhas,
+      comunicacoes_recebidas: porId.size,
+      descartadas_nao_intimacao: naoIntimacao,
+      descartadas_processo_nao_cadastrado: processoNaoCadastrado,
+      descartadas_fora_das_oabs: foraDasOabs,
     }
     const resumo =
-      `${numeros.size} processos consultados` +
-      (falhas.length ? ` · ${falhas.length} FALHARAM` : '') +
+      `${oabSet.size} OABs` +
+      (falhas.length ? ` · ${falhas.length} BUSCA(S) FALHARAM` : '') +
       ` · ${porId.size} comunicações` +
-      ` · ${items.length} intimações` +
-      (foraDasOabs ? ` · ${foraDasOabs} fora das OABs` : '') +
-      (naoIntimacao ? ` · ${naoIntimacao} não são intimação` : '') +
+      ` · ${numeros.size} processos cadastrados` +
+      ` · ${items.length} intimações da casa` +
       ` · ${gravados} gravadas` +
+      (processoNaoCadastrado
+        ? ` · ${processoNaoCadastrado} de processos fora da plataforma`
+        : '') +
       (oabsIlegiveis.length ? ` · ${oabsIlegiveis.length} OAB ilegível` : '')
 
     return jsonResponse({ ok: true, total: items.length, gravados, resumo, diagnostico })

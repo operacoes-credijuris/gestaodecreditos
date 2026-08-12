@@ -221,9 +221,11 @@ export default function PublicacoesMovimentacoes() {
 interface RespostaSync {
   resumo?: string
   diagnostico?: {
-    numeros_consultados: number
-    consultas_falharam: number
+    oabs_ativas?: string[]
     oabs_ilegiveis?: string[]
+    /** Comunicações que o DJEN tem por OAB na janela. Zero = OAB provavelmente errada. */
+    comunicacoes_por_oab?: Record<string, number>
+    buscas_falharam: number
   }
 }
 
@@ -273,15 +275,28 @@ function Publicacoes({ busca }: { busca: string }) {
       setResumoSync(r?.resumo ?? null)
       const d = r?.diagnostico
       if (!d) return
-      if (d.consultas_falharam > 0) {
+      // Um aviso por vez, do mais grave ao menos: dois toques vermelhos juntos
+      // viram ruído e ninguém lê o segundo.
+      const semNada = Object.entries(d.comunicacoes_por_oab ?? {})
+        .filter(([, n]) => n === 0)
+        .map(([oab]) => oab)
+      if (d.buscas_falharam > 0) {
         toast.error(
-          `DJEN: a consulta falhou em ${d.consultas_falharam} de ${d.numeros_consultados} processos. ` +
+          `DJEN: a busca falhou em ${d.buscas_falharam} das ${d.oabs_ativas?.length ?? '?'} OABs. ` +
             'Pode haver intimação não capturada — sincronize de novo.',
         )
       } else if (d.oabs_ilegiveis?.length) {
         toast.error(
           `DJEN: ${d.oabs_ilegiveis.length} OAB cadastrada não pôde ser lida ` +
             `(${d.oabs_ilegiveis.join(', ')}). Intimação em nome dela é descartada.`,
+        )
+      } else if (semNada.length) {
+        // Não é erro: pode ser advogado que não recebeu nada no período. Mas OAB
+        // digitada errada dá exatamente este sintoma, e calada.
+        toast.toast(
+          `DJEN: nenhuma comunicação em 30 dias para ${semNada.join(', ')}. ` +
+            'Confira se a OAB está correta.',
+          'info',
         )
       }
     },
