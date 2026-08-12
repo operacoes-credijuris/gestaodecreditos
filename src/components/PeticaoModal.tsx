@@ -380,13 +380,31 @@ export function PeticaoModal({
     semRotuloNenhum
 
   /** Baixa no computador. É o caminho de escape quando o Drive não resolve. */
+  /**
+   * Baixa o arquivo. É a REDE DE SEGURANÇA da geração: só se chega aqui quando o
+   * Drive não resolve, e a peça já custou chamada de IA e revisão. Falhar aqui é
+   * perder o trabalho, sem erro na tela.
+   *
+   * Os dois cuidados são os mesmos de exportarCarteira.ts, e pelo mesmo motivo —
+   * lá os dois JÁ FALHARAM na prática, com downloads que não aconteciam de forma
+   * intermitente:
+   *   1. o <a> precisa estar NO documento — clique em elemento solto é ignorado
+   *      por parte dos navegadores;
+   *   2. revogar a URL logo depois do clique CANCELA a transferência, porque o
+   *      clique só a agenda. A revogação vai para depois.
+   */
   function baixar(blob: Blob, nome: string) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = nome
+    a.style.display = 'none'
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    window.setTimeout(() => {
+      a.remove()
+      URL.revokeObjectURL(url)
+    }, 60_000)
   }
 
   /**

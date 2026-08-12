@@ -167,20 +167,47 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 const q = (s: string) => encodeURIComponent(s)
 
 /**
- * As subpastas de uma pasta.
+ * Quantas páginas de 200 se aceita percorrer. 20 = 4.000 subpastas numa só pasta,
+ * que a árvore de petições não alcança nem de longe; passar disso é sinal de que
+ * algo está errado, e aí é melhor falhar com mensagem do que rodar sem fim.
+ */
+const MAX_PAGINAS = 20
+
+/**
+ * As subpastas de uma pasta, TODAS elas.
  *
- * `pageSize` alto de propósito: a árvore de petições tem 11 originadores e cada um
- * poucas dezenas de créditos, então uma página resolve. Paginar aqui traria a
- * complexidade de "e se vier meia lista" para um caso que não acontece — mas se um
- * dia a pasta passar de 200 itens, o corte é SILENCIOSO, e é por isso que este
- * comentário existe.
+ * Pagina de propósito. A versão anterior pedia 200 numa página só e ficava com o
+ * que viesse: bastava uma pasta passar de 200 itens para a busca não achar o nome
+ * que estava lá, e a tela dizer "não achei a pasta do Fulano" com a pasta
+ * existindo. O corte era silencioso — nada distinguia "não existe" de "não olhei
+ * até o fim".
+ *
+ * O caso não acontece hoje (são 11 originadores), então o laço roda uma volta só e
+ * o custo é zero. A segunda chamada só existe quando é realmente necessária.
  */
 export async function listarSubpastas(paiId: string): Promise<PastaDrive[]> {
   const filtro = `'${paiId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-  const dados = await api<{ files: { id: string; name: string }[] }>(
-    `https://www.googleapis.com/drive/v3/files?q=${q(filtro)}&fields=files(id,name)&pageSize=200&orderBy=name`,
+  const todas: PastaDrive[] = []
+  let pagina: string | undefined
+
+  for (let i = 0; i < MAX_PAGINAS; i++) {
+    const dados = await api<{
+      files?: { id: string; name: string }[]
+      nextPageToken?: string
+    }>(
+      `https://www.googleapis.com/drive/v3/files?q=${q(filtro)}` +
+        `&fields=nextPageToken,files(id,name)&pageSize=200&orderBy=name` +
+        (pagina ? `&pageToken=${q(pagina)}` : ''),
+    )
+    for (const f of dados.files ?? []) todas.push({ id: f.id, nome: f.name })
+    if (!dados.nextPageToken) return todas
+    pagina = dados.nextPageToken
+  }
+
+  throw new Error(
+    `Esta pasta do Drive tem mais de ${MAX_PAGINAS * 200} subpastas — parei de ler. ` +
+      'Confira se a pasta é a esperada.',
   )
-  return (dados.files ?? []).map((f) => ({ id: f.id, nome: f.name }))
 }
 
 /** Um arquivo com este nome exato dentro da pasta, se existir. */
