@@ -44,7 +44,7 @@ export const NAVIGATION: NavSection[] = [
     // geração de contratos fica por último, porque é o passo que CONSOME o que os
     // dois anteriores produziram (não se gera contrato de quem ainda não tem ficha).
     items: [
-      { label: 'Carteiras de Investimentos', to: '/comercial/carteiras', icon: Wallet },
+      { label: 'Carteiras de Investimento', to: '/comercial/carteiras', icon: Wallet },
       // Era a terceira aba das Carteiras. Virou item próprio, logo abaixo dela,
       // porque não é carteira — e passou a cobrir investidores E originadores.
       {

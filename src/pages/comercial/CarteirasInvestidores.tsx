@@ -91,7 +91,7 @@ export default function CarteirasInvestidores() {
 
   return (
     <div>
-      <PageHeader title="Carteiras de Investimentos" />
+      <PageHeader title="Carteiras de Investimento" />
       <div className="mb-5">
         <Tabs items={TABS} value={tab} onChange={setTab} />
       </div>
