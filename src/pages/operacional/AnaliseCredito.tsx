@@ -244,42 +244,46 @@ function CardCredito({
         </div>
 
         {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
-            em vez de três. flex-wrap para não estourar em tela estreita. */}
-        {acoes.length > 0 && (
-          <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
-            {acoes.map((a) => (
-              <Button
-                key={a.statusId}
-                size="sm"
-                variant={a.variant}
-                icon={ICONES[a.statusId]}
-                onClick={() => onAcao(lead, a)}
-                loading={statusEmAndamento === a.statusId}
-                // Trava as outras ações do card enquanto uma corre: duas
-                // movimentações simultâneas no mesmo card se atropelariam.
-                disabled={ocupado}
-              >
-                {a.label}
-              </Button>
-            ))}
-          </div>
-        )}
+            em vez de três. flex-wrap para não estourar em tela estreita.
+
+            O ANALISAR ENTRA AQUI, e não numa linha própria embaixo: ele ocupava
+            uma terceira linha em todo card, e numa lista de dezenas isso é a
+            diferença entre ver seis cards e ver dez. Vem antes das ações porque é
+            o passo anterior a elas — analisa, depois encaminha. */}
+        <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<FileSearch className="h-4 w-4" />}
+            onClick={() => onAnalisar(lead)}
+            loading={analisando}
+            disabled={ocupado || analisando}
+          >
+            {analisando ? 'Analisando…' : 'Analisar'}
+          </Button>
+          {acoes.map((a) => (
+            <Button
+              key={a.statusId}
+              size="sm"
+              variant={a.variant}
+              icon={ICONES[a.statusId]}
+              onClick={() => onAcao(lead, a)}
+              loading={statusEmAndamento === a.statusId}
+              // Trava as outras ações do card enquanto uma corre: duas
+              // movimentações simultâneas no mesmo card se atropelariam.
+              disabled={ocupado}
+            >
+              {a.label}
+            </Button>
+          ))}
+        </div>
       </div>
 
-      {/* Análise automática Credijuris: Judit -> due diligence -> planilha */}
-      <div className="mt-3">
-        <Button
-          size="sm"
-          variant="secondary"
-          icon={<FileSearch className="h-4 w-4" />}
-          onClick={() => onAnalisar(lead)}
-          loading={analisando}
-          disabled={ocupado || analisando}
-        >
-          {analisando ? 'Analisando…' : 'Analisar (PDF do card)'}
-        </Button>
-        {resultadoAnalise && (
-          <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+      {/* Resultado da análise automática (Judit -> due diligence -> planilha).
+          Continua em bloco próprio, largura toda: são links e motivo de reprovação,
+          texto que não cabe ao lado de um botão. */}
+      {resultadoAnalise && (
+        <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
             {resultadoAnalise.erro ? (
               <div className="text-red-700">Erro: {resultadoAnalise.erro}</div>
             ) : resultadoAnalise.reprovado && resultadoAnalise.motivo ? (
@@ -326,11 +330,10 @@ function CardCredito({
                 {resultadoAnalise.aviso && (
                   <div className="mt-1 text-amber-700">⚠️ {resultadoAnalise.aviso}</div>
                 )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-2 flex items-center gap-3">
         {/* As anotações vêm em texto livre e o formato varia entre cards, então
