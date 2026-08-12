@@ -273,8 +273,12 @@ function distanciaEdicao(a: string, b: string, max: number): number {
 }
 
 /**
- * O nome da lista mais parecido com `consulta`, ou null. Serve para PERGUNTAR,
- * nunca para corrigir sozinho: quem digita é que sabe se são a mesma pessoa.
+ * Os nomes da lista parecidos com `consulta`, do mais parecido ao menos.
+ *
+ * Serve para OFERECER, nunca para corrigir sozinho: quem digita é que sabe se são
+ * a mesma pessoa. Quem usa isto é o campo de texto livre (ComboboxTexto), que
+ * mostra os parecidos quando a busca ao pé da letra não achou nada — assim o nome
+ * certo aparece debaixo do cursor de quem digitou "Silvaa".
  *
  * Existe porque investidor e originador são identificados pelo nome
  * normalizado (ver normalizarNome). Uma letra trocada ou um sobrenome a menos
@@ -292,14 +296,15 @@ function distanciaEdicao(a: string, b: string, max: number): number {
  * Duas palavras erradas ao mesmo tempo ficam de fora de propósito: a partir daí
  * a semelhança é fraca e o aviso passaria a apontar gente que não tem relação.
  */
-export function nomeParecido(
+export function nomesParecidos(
   consulta: string,
   nomes: readonly string[],
-): string | null {
+  limite = 8,
+): string[] {
   const q = palavrasNome(consulta)
-  if (q.length === 0) return null
+  if (q.length === 0) return []
   const setQ = new Set(q)
-  let melhor: { nome: string; nota: number } | null = null
+  const notados: { nome: string; nota: number }[] = []
   for (const nome of nomes) {
     const setP = new Set(palavrasNome(nome))
     if (setP.size === 0) continue
@@ -320,9 +325,20 @@ export function nomeParecido(
         if (d <= limiar) nota = 2 + d // caso 3
       }
     }
-    if (nota !== null && (!melhor || nota < melhor.nota)) melhor = { nome, nota }
+    if (nota !== null) notados.push({ nome, nota })
   }
-  return melhor?.nome ?? null
+  return notados
+    .sort((a, b) => a.nota - b.nota)
+    .slice(0, limite)
+    .map((x) => x.nome)
+}
+
+/** O mais parecido de todos, ou null. Ver nomesParecidos. */
+export function nomeParecido(
+  consulta: string,
+  nomes: readonly string[],
+): string | null {
+  return nomesParecidos(consulta, nomes, 1)[0] ?? null
 }
 
 /** Data e hora local: "10/08/2026 às 16:21". Para carimbo de geração. */

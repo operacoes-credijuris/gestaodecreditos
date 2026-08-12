@@ -23,8 +23,9 @@ import {
 } from '@/lib/creditoDoDrive'
 import { formatCNJ } from '@/lib/format'
 import type { Processo } from '@/lib/types'
-import { Button } from '@/components/ui/Button'
+import { cn } from '@/lib/cn'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
+import { IconButton } from '@/components/ui/IconButton'
 import { EmptyState, ErrorState } from '@/components/ui/Table'
 
 /** O que a pasta escolhida entrega ao formulário. */
@@ -132,17 +133,18 @@ export function NovoCreditoDoDrive({
           vazio="Nenhuma pasta sem cadastro no Drive."
         />
       </div>
-      {/* Button e não IconButton: o Button tem altura fixa (h-10), que é a do
-          campo ao lado — o IconButton só tem padding, e ficava mais baixo que o
-          campo. E o `loading` já troca o ícone pelo giro, de graça. */}
-      <Button
-        variant="outline"
-        icon={<RefreshCw className="h-4 w-4" />}
-        loading={buscando}
+      {/* Ícone puro, sem moldura. A altura fixa h-10 é a do campo ao lado, e o
+          flex centra o ícone dentro dela — sem isso o ícone encostava no topo, que
+          era o desalinhamento. w-10 mantém quadrado, então o alvo de clique é
+          confortável sem o botão ficar grande. */}
+      <IconButton
+        label="Procurar novamente no Drive"
+        icon={
+          <RefreshCw className={cn('h-4 w-4', buscando && 'animate-spin')} />
+        }
+        disabled={buscando}
         onClick={procurar}
-        className="shrink-0 px-3"
-        aria-label="Procurar novamente no Drive"
-        title="Procurar novamente no Drive"
+        className="flex h-10 w-10 shrink-0 items-center justify-center p-0"
       />
     </div>
   )

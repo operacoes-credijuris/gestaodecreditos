@@ -279,7 +279,6 @@ export default function Processos() {
     'data_aquisicao' | 'expectativa_liquidacao' | 'ultima_movimentacao'
   >('data_aquisicao')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const [editing, setEditing] = useState<Partial<Processo> | null>(null)
   /** Aba da janela de crédito novo. Na edição não aparece — ver o Modal. */
   const [abaForm, setAbaForm] = useState<'manual' | 'auto'>('manual')
   /** Uma pasta do Drive já preencheu os campos: libera a edição e o Salvar. */
@@ -300,13 +299,47 @@ export default function Processos() {
   const [erros, setErros] = useState<Record<string, string>>({})
   // Snapshot do formulário ao abrir — base do cálculo de "dirty".
   const snapshotRef = useRef('')
-  const dirty = !!editing && JSON.stringify(editing) !== snapshotRef.current
+
+  /**
+   * CADA ABA TEM O SEU RASCUNHO. Preencher no Automatizado não aparece no Manual,
+   * e vice-versa.
+   *
+   * Era um formulário só, e a mesma pasta escolhida no Automatizado aparecia
+   * preenchida no Manual. Confunde: as duas abas são dois CAMINHOS para cadastrar,
+   * e quem começou à mão não quer ver o trabalho misturado com o que veio da pasta
+   * — nem correr o risco de salvar uma mistura dos dois sem perceber.
+   *
+   * `editing` e `setEditing` continuam existindo e apontam para o rascunho da aba
+   * ATIVA. É o que mantém os cerca de sessenta pontos do formulário abaixo
+   * inalterados: quem escreve num campo escreve no rascunho de quem está na tela.
+   */
+  const [formManual, setFormManual] = useState<Partial<Processo> | null>(null)
+  const [formAuto, setFormAuto] = useState<Partial<Processo> | null>(null)
+  const naAuto = abaForm === 'auto'
+  const editing = naAuto ? formAuto : formManual
+  const setEditing = naAuto ? setFormAuto : setFormManual
+
+  // Sujo se QUALQUER um dos dois rascunhos saiu do estado inicial: trocar de aba e
+  // fechar não pode descartar em silêncio o que ficou na outra.
+  const dirty =
+    (!!formManual && JSON.stringify(formManual) !== snapshotRef.current) ||
+    (!!formAuto && JSON.stringify(formAuto) !== snapshotRef.current)
+
+  /** Fecha a janela, descartando os dois rascunhos. */
+  function fecharTudo() {
+    setFormManual(null)
+    setFormAuto(null)
+    setAutoPreenchido(false)
+  }
 
   // Abre o formulário limpando erros e registrando o snapshot do estado inicial.
   function abrirForm(p: Partial<Processo>) {
     setErros({})
     snapshotRef.current = JSON.stringify(p)
-    setEditing(p)
+    // Os dois rascunhos nascem iguais e vazios; o que a pessoa fizer em cada aba
+    // fica em cada aba.
+    setFormManual(p)
+    setFormAuto(p)
     // Sempre na Manual: quem clica em Editar quer o formulário, e quem cadastra
     // um crédito novo pode não ter pasta no Drive ainda.
     setAbaForm('manual')
@@ -314,13 +347,12 @@ export default function Processos() {
   }
 
   /**
-   * Preenchimento vindo da aba Automatizado. SOMA ao que está no formulário —
-   * campo que a pasta não informa fica como estava, em vez de ser sobrescrito com
-   * vazio — e libera os campos para edição, sem trocar de aba: a pessoa continua
-   * onde está, vendo de qual pasta veio o que está na tela.
+   * Preenchimento vindo da aba Automatizado. Escreve SÓ no rascunho dela, soma ao
+   * que já estava lá — campo que a pasta não informa fica como estava — e libera os
+   * campos para edição, sem trocar de aba.
    */
   function preencherDoDrive(dados: PreenchimentoDoDrive) {
-    setEditing((atual) => ({ ...(atual ?? {}), ...dados }))
+    setFormAuto((atual) => ({ ...(atual ?? {}), ...dados }))
     setErros({})
     setAutoPreenchido(true)
     toast.success('Campos preenchidos pela pasta. Confira antes de salvar.')
@@ -330,7 +362,7 @@ export default function Processos() {
   // cobre X/overlay/Escape via prop dirty).
   function fecharForm() {
     if (dirty && !window.confirm('Descartar alterações não salvas?')) return
-    setEditing(null)
+    fecharTudo()
   }
 
   function toggleSort(
@@ -497,7 +529,7 @@ export default function Processos() {
         await create.mutateAsync(payload)
         toast.success('Crédito cadastrado.')
       }
-      setEditing(null)
+      fecharTudo()
     } catch (err) {
       toast.error((err as Error).message)
     }
@@ -759,7 +791,7 @@ export default function Processos() {
 
       <Modal
         open={!!editing}
-        onClose={() => setEditing(null)}
+        onClose={fecharTudo}
         title={editing?.id ? 'Editar crédito' : 'Novo crédito'}
         size="lg"
         dirty={dirty}

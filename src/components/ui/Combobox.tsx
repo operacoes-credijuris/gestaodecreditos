@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { normalizarBusca, onlyDigits } from '@/lib/format'
+import { nomesParecidos, normalizarBusca, normalizarNome, onlyDigits } from '@/lib/format'
 import { Input } from './Field'
 
 export interface OpcaoCombo {
@@ -296,11 +296,19 @@ export function Combobox({
  * lista impediria de lançar o primeiro crédito de alguém novo, e deixar só texto
  * livre é o que produz "José da Silva" e "Jose Silva" como duas pessoas.
  *
- * A defesa contra a segunda versão da mesma pessoa é a LISTA, e só ela. Houve aqui
- * um aviso de "parecido com…" abaixo do campo; saiu por decisão do dono, por ser
- * ruído no caminho de quem só quer digitar. O cotejo por semelhança continua vivo
- * onde ele pesa mais: na janela de cadastrar investidor ou originador, em Dados
- * cadastrais, onde criar duplicata custa uma ficha bancária órfã.
+ * A defesa contra a segunda versão da mesma pessoa é a LISTA, e ela age de duas
+ * maneiras, as duas sem uma linha de aviso na tela:
+ *
+ *   • ao DIGITAR, se a busca ao pé da letra não achar nada, a lista passa a
+ *     oferecer os nomes PARECIDOS — quem escreveu "Silvaa" vê "Silva" debaixo do
+ *     cursor, e escolher fica mais fácil que continuar digitando;
+ *   • ao SAIR do campo, se o que foi digitado é o mesmo nome para o banco (mesma
+ *     chave de normalizarNome), adota a grafia que já está gravada. "JOSÉ DA
+ *     SILVA" vira "José da Silva" sozinho, sem perguntar, porque não há o que
+ *     perguntar: para o banco já era a mesma pessoa.
+ *
+ * Houve aqui um aviso de "parecido com…" abaixo do campo; saiu por decisão do dono,
+ * por ser ruído. As duas mecânicas acima fazem o mesmo trabalho sem texto.
  */
 export function ComboboxTexto({
   valor,
@@ -329,10 +337,31 @@ export function ComboboxTexto({
     [opcoes],
   )
   const consulta = digitando ? valor.trim() : ''
-  const filtradas = useMemo(
-    () => (consulta ? todas.filter((o) => casa(o, consulta)) : todas).slice(0, limite),
-    [todas, consulta, limite],
-  )
+
+  /**
+   * A lista, com uma REDE DE SEGURANÇA contra a segunda versão da mesma pessoa.
+   *
+   * `casa` exige que cada palavra digitada seja pedaço do nome. Quem digita
+   * "José da Silvaa" não casa com "José da Silva" — a lista ficava vazia, a pessoa
+   * concluía que o nome não existia e digitava um cessionário novo. É assim que
+   * nasce a mesma pessoa duas vezes, cada uma com sua ficha bancária.
+   *
+   * Então: não achando nada ao pé da letra, oferece os PARECIDOS. O nome certo
+   * aparece debaixo do cursor, e escolher passa a ser mais fácil que digitar — que
+   * é o único jeito de "preferir o que já existe" sem encher a tela de aviso.
+   */
+  const filtradas = useMemo(() => {
+    if (!consulta) return todas.slice(0, limite)
+    const estritas = todas.filter((o) => casa(o, consulta))
+    if (estritas.length) return estritas.slice(0, limite)
+    const parecidos = new Set(nomesParecidos(consulta, opcoes))
+    return todas
+      .filter((o) => parecidos.has(o.titulo))
+      // O rótulo explica por que um nome que não casa com o que foi digitado está
+      // aparecendo. Sem ele a lista pareceria estar respondendo outra pergunta.
+      .map((o) => ({ ...o, subtitulo: 'parecido com o que você digitou' }))
+      .slice(0, limite)
+  }, [todas, opcoes, consulta, limite])
 
   const escolher = (o: OpcaoCombo) => {
     onChange(o.titulo)
@@ -370,7 +399,20 @@ export function ComboboxTexto({
         // aberta por cima dos campos de baixo. Escolher com o mouse continua
         // funcionando porque a opção usa mousedown com preventDefault — o foco
         // não sai do campo, então este blur não dispara antes da escolha.
-        onBlur={() => setAberto(false)}
+        onBlur={() => {
+          setAberto(false)
+          // ADOTA A GRAFIA QUE JÁ EXISTE quando o que foi digitado é o MESMO nome
+          // para o banco — normalizarNome é a chave, então "JOSÉ DA SILVA" e
+          // "josé da silva" são a mesma pessoa e uma delas está gravada assim.
+          // Trocar em silêncio não pode errar (a chave é idêntica) e mantém a
+          // grafia única em toda a plataforma, que é o que quebrava quando o mesmo
+          // cessionário aparecia de três jeitos em três créditos.
+          const q = valor.trim()
+          if (!q) return
+          const chave = normalizarNome(q)
+          const existente = opcoes.find((o) => normalizarNome(o) === chave)
+          if (existente && existente !== q) onChange(existente)
+        }}
         onKeyDown={onKeyDown}
       />
       {/* Sem nada digitado e sem nada a mostrar, não abre: no primeiro
