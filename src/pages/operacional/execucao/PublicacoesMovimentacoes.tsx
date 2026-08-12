@@ -217,10 +217,22 @@ export default function PublicacoesMovimentacoes() {
   )
 }
 
+/** O que a djen-publicacoes devolve. Só o que a tela usa. */
+interface RespostaSync {
+  resumo?: string
+  diagnostico?: {
+    numeros_consultados: number
+    consultas_falharam: number
+    oabs_ilegiveis?: string[]
+  }
+}
+
 // ----------------------- Publicações (DJEN) -----------------------
 function Publicacoes({ busca }: { busca: string }) {
   const qc = useQueryClient()
   const toast = useToast()
+  /** Resumo da última sincronização desta sessão. Null antes da primeira. */
+  const [resumoSync, setResumoSync] = useState<string | null>(null)
 
   // Resolve cada publicação contra os cadastros (Crédito/Requerimento/Apenso).
   const resolve = useResolveProcesso()
@@ -247,9 +259,32 @@ function Publicacoes({ busca }: { busca: string }) {
   })
 
   // Sincroniza com o DJEN em segundo plano ao abrir a página.
+  //
+  // O `resumo` que a função devolve é MOSTRADO, não descartado. Ela já rodou dias
+  // devolvendo sucesso com um punhado de linhas, e ninguém tinha como saber que
+  // consultas estavam falhando — descobriu-se comparando com a plataforma antiga,
+  // seis dias depois. Agora: aviso na tela quando alguma consulta falha ou alguma
+  // OAB está ilegível, e silêncio quando está tudo certo.
   const sync = useMutation({
-    mutationFn: () => invokeFunction('djen-publicacoes', {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['djen_publicacoes'] }),
+    mutationFn: () =>
+      invokeFunction<RespostaSync>('djen-publicacoes', {}),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['djen_publicacoes'] })
+      setResumoSync(r?.resumo ?? null)
+      const d = r?.diagnostico
+      if (!d) return
+      if (d.consultas_falharam > 0) {
+        toast.error(
+          `DJEN: a consulta falhou em ${d.consultas_falharam} de ${d.numeros_consultados} processos. ` +
+            'Pode haver intimação não capturada — sincronize de novo.',
+        )
+      } else if (d.oabs_ilegiveis?.length) {
+        toast.error(
+          `DJEN: ${d.oabs_ilegiveis.length} OAB cadastrada não pôde ser lida ` +
+            `(${d.oabs_ilegiveis.join(', ')}). Intimação em nome dela é descartada.`,
+        )
+      }
+    },
     onError: (e) =>
       toast.error(`Sincronização DJEN: ${(e as Error).message}`),
   })
@@ -383,6 +418,15 @@ function Publicacoes({ busca }: { busca: string }) {
           label="atualizando do DJEN…"
         />
       </div>
+
+      {/* Prestação de contas da sincronização, em uma linha. Fica visível de
+          propósito: o número de publicações sozinho não distingue "não havia
+          intimação nova" de "a consulta falhou na maioria dos processos". */}
+      {resumoSync && (
+        <p className="text-xs text-slate-600">
+          Última sincronização: {resumoSync}
+        </p>
+      )}
 
       {truncou && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
