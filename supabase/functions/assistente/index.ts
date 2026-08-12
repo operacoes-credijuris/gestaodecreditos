@@ -74,44 +74,135 @@ const PROCESSOS_POR_BUSCA = 60
 
 // ---------------------------------------------------------------- ferramentas
 
+/**
+ * Filtros do crédito, compartilhados por contar_processos, listar_processos e
+ * resumo_financeiro_creditos.
+ *
+ * Em constante porque as três ferramentas TÊM de filtrar igual: se `contar`
+ * aceitasse um filtro que `listar` não aceita, a mesma pergunta daria total e
+ * lista discordantes, e o modelo apresentaria as duas coisas como coerentes.
+ */
+const FILTROS_PROCESSO = {
+  status: {
+    type: 'string' as const,
+    enum: ['ativo', 'complementar', 'encerrado'],
+    description:
+      'Situação cadastral. `complementar` = já recebeu parte e há saldo a receber.',
+  },
+  tribunal: { type: 'string' as const, description: 'Trecho do nome do tribunal.' },
+  entidade_devedora: {
+    type: 'string' as const,
+    description: 'Trecho do nome do ente devedor (União, Estado, Município, autarquia).',
+  },
+  cedente: { type: 'string' as const, description: 'Trecho do nome do credor original.' },
+  cessionario: {
+    type: 'string' as const,
+    description: 'Trecho do nome do investidor que comprou o crédito.',
+  },
+  originador: {
+    type: 'string' as const,
+    description: 'Trecho do nome de quem originou a aquisição.',
+  },
+  especie_requisitorio: {
+    type: 'string' as const,
+    enum: ['rpv', 'precatorio'],
+    description: 'RPV (Requisição de Pequeno Valor) ou precatório.',
+  },
+  liquidado: {
+    type: 'boolean' as const,
+    description:
+      'true = já tem data de liquidação; false = ainda não foi pago. É a data que diz se o crédito foi pago, não o status.',
+  },
+  expectativa_ate: {
+    type: 'string' as const,
+    description:
+      'Só créditos com expectativa de liquidação até esta data (AAAA-MM-DD). Use para "o que vence nos próximos N meses".',
+  },
+  expectativa_desde: {
+    type: 'string' as const,
+    description: 'Só créditos com expectativa de liquidação a partir desta data (AAAA-MM-DD).',
+  },
+}
+
 const FERRAMENTAS: Anthropic.Tool[] = [
   {
     name: 'contar_processos',
     description:
       'Conta créditos/processos cadastrados, opcionalmente filtrando. ' +
       'Use para perguntas de "quantos". Devolve um número exato.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        status: {
-          type: 'string',
-          enum: ['ativo', 'complementar', 'encerrado'],
-          description: 'Situação cadastral do crédito.',
-        },
-        tribunal: { type: 'string', description: 'Trecho do nome do tribunal.' },
-        entidade_devedora: {
-          type: 'string',
-          description: 'Trecho do nome da entidade devedora.',
-        },
-      },
-    },
+    input_schema: { type: 'object', properties: { ...FILTROS_PROCESSO } },
   },
   {
     name: 'listar_processos',
     description:
-      'Lista créditos/processos com seus dados cadastrais. Use quando a ' +
-      'pergunta pedir quais são, não quantos são.',
+      'Lista créditos/processos com o cadastro COMPLETO, inclusive os campos ' +
+      'financeiros (capital investido, valor de face, já recebido, saldo ' +
+      'estimado complementar) e o tipo de crédito. Use quando a pergunta ' +
+      'pedir quais são, ou quando precisar dos valores de créditos ' +
+      'específicos.',
     input_schema: {
       type: 'object',
       properties: {
-        status: { type: 'string', enum: ['ativo', 'complementar', 'encerrado'] },
-        tribunal: { type: 'string' },
-        entidade_devedora: { type: 'string' },
+        ...FILTROS_PROCESSO,
         limite: {
           type: 'integer',
           description: `Máximo de linhas (teto ${LIMITE_MAX}).`,
         },
       },
+    },
+  },
+  {
+    name: 'resumo_financeiro_creditos',
+    description:
+      'Somas e contagens dos créditos, agrupadas pela dimensão que você ' +
+      'escolher. É a ferramenta para "quanto a Credijuris tem investido", ' +
+      '"qual o valor de face da carteira", "quanto já foi recebido", ' +
+      '"quanto falta receber nos complementares". Percorre TODOS os créditos ' +
+      'que casam com o filtro, então os totais são exatos — não é amostra.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        agrupar_por: {
+          type: 'string',
+          enum: [
+            'status',
+            'especie_requisitorio',
+            'originador',
+            'cessionario',
+            'tribunal',
+            'entidade_devedora',
+            'nenhum',
+          ],
+          description: 'Dimensão do agrupamento. `nenhum` devolve só o total geral.',
+        },
+        ...FILTROS_PROCESSO,
+      },
+      required: ['agrupar_por'],
+    },
+  },
+  {
+    name: 'ficha_do_credito',
+    description:
+      'TUDO sobre UM crédito: cadastro completo, apensos, o resumo de estágio ' +
+      'processual e providências, as tarefas internas, as últimas ' +
+      'movimentações e as últimas publicações. Use quando a pergunta for ' +
+      'sobre um processo específico ("o que está acontecendo no processo X", ' +
+      '"me explique a situação do crédito da Maria"). Uma chamada substitui ' +
+      'cinco.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        numero_processo: {
+          type: 'string',
+          description:
+            'Número do processo, com ou sem pontuação. Também aceita trecho do nome do cedente, se o número não for conhecido.',
+        },
+        movimentacoes: {
+          type: 'integer',
+          description: 'Quantas movimentações recentes trazer (padrão 15, teto 40).',
+        },
+      },
+      required: ['numero_processo'],
     },
   },
   {
@@ -164,17 +255,241 @@ const FERRAMENTAS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'listar_publicacoes',
+    description:
+      'Lista publicações do DJEN COM O TEXTO do comunicado. Use quando a ' +
+      'pergunta pedir o que diz uma intimação, quais são as pendências, ou ' +
+      'para ler as publicações de um processo. Diferente de ' +
+      'buscar_movimentacoes, que procura um termo no acervo todo: aqui você ' +
+      'lista por processo ou por período e lê o conteúdo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        numero_processo: { type: 'string', description: 'Número do processo (com ou sem pontuação).' },
+        tratada: {
+          type: 'boolean',
+          description: 'false = ainda não providenciada pela equipe.',
+        },
+        dias: { type: 'integer', description: 'Últimos N dias.' },
+        limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
+      },
+    },
+  },
+  {
+    name: 'listar_tarefas',
+    description:
+      'Tarefas internas da equipe, vindas do ADVBOX — com tipo, data, PRAZO ' +
+      'FATAL, responsáveis, observação e se já foram concluídas. É a ' +
+      'ferramenta para "o que vence esta semana", "quais tarefas estão ' +
+      'atrasadas", "o que a equipe está fazendo no processo X", "quantas ' +
+      'tarefas o Fulano tem". O histórico inclui as CONCLUÍDAS.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        numero_processo: { type: 'string' },
+        concluida: {
+          type: 'boolean',
+          description: 'false = em aberto; true = já concluídas; omita para as duas.',
+        },
+        responsavel: { type: 'string', description: 'Trecho do nome do responsável.' },
+        tipo: { type: 'string', description: 'Trecho do tipo da tarefa.' },
+        prazo_ate: {
+          type: 'string',
+          description: 'Só tarefas com prazo fatal até esta data (AAAA-MM-DD).',
+        },
+        vencidas: {
+          type: 'boolean',
+          description: 'true = só com prazo fatal já passado e ainda não concluídas.',
+        },
+        limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
+      },
+    },
+  },
+  {
     name: 'resumo_cessoes',
     description:
-      'Totais financeiros das cessões (valor de face, aquisição, cessão) ' +
-      'agrupados por situação. Use para perguntas de valores da carteira.',
+      'Totais das CESSÕES (o inventário comercial): valor de face, aquisição ' +
+      'e cessão, agrupados por situação. Atenção: cessão é o registro ' +
+      'comercial da operação; para os valores dos CRÉDITOS em si use ' +
+      'resumo_financeiro_creditos.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'carteira_do_investidor',
+    description:
+      'A carteira de um investidor: os créditos em que ele é o cessionário, ' +
+      'com os valores, as datas e o estágio de cada um. É a mesma fonte da ' +
+      'tela de Carteiras (o campo cessionário do crédito), então os números ' +
+      'batem com o que a pessoa vê lá. Use para "o que o Fulano tem", ' +
+      '"quanto o Fulano investiu", "como está a carteira dele".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nome: { type: 'string', description: 'Trecho do nome do investidor.' },
+      },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'listar_investidores',
+    description:
+      'Investidores e originadores cadastrados, com quantos créditos cada um ' +
+      'tem e se a ficha cadastral está completa. NÃO devolve CPF, RG, conta ' +
+      'nem Pix — só se estão preenchidos. Use para "quem são os ' +
+      'investidores", "quem está com ficha incompleta", "quantos ' +
+      'originadores temos".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        papel: {
+          type: 'string',
+          enum: ['investidor', 'originador'],
+          description: 'Omita para trazer os dois.',
+        },
+        nome: { type: 'string', description: 'Trecho do nome.' },
+        ficha_incompleta: {
+          type: 'boolean',
+          description: 'true = só quem tem algum campo essencial em branco.',
+        },
+        limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
+      },
+    },
+  },
+  {
+    name: 'listar_analises',
+    description:
+      'Análises de crédito — a fase PRÉ-CONTRATUAL, antes de o crédito ' +
+      'existir. Traz cedente, devedor, tribunal, valor de face, valor ' +
+      'avaliado, risco e situação da análise. Use para perguntas sobre o ' +
+      'funil de aquisição ("o que está em análise", "quantas foram ' +
+      'reprovadas"). Não confunda com Créditos, que é o que já foi adquirido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['pendente', 'em_analise', 'aprovada', 'reprovada'],
+        },
+        risco: { type: 'string', enum: ['baixo', 'medio', 'alto'] },
+        limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
+      },
+    },
+  },
+  {
+    name: 'listar_requerimentos',
+    description:
+      'Requerimentos administrativos: pedidos protocolados fora do processo ' +
+      'judicial, com órgão, matéria, classe e data de protocolo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        orgao: { type: 'string', description: 'Trecho do nome do órgão.' },
+        limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
+      },
+    },
+  },
+  {
+    name: 'listar_contatos',
+    description:
+      'Contatos das serventias e gabinetes: telefone, WhatsApp e e-mail por ' +
+      'órgão. Use para "como falo com a vara X".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        orgao: { type: 'string', description: 'Trecho do nome do órgão ou da vara.' },
+        tribunal: { type: 'string' },
+        limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
+      },
+    },
+  },
+  {
+    name: 'resumos_da_carteira',
+    description:
+      'O estágio processual e as providências de vários créditos de uma vez, ' +
+      'nos textos que a plataforma já mantém escritos para a carteira do ' +
+      'investidor. Use quando a pergunta pedir um retrato de MUITOS créditos ' +
+      '("resuma a situação dos créditos ativos", "onde estão os créditos do ' +
+      'Fulano") — evita ler o histórico de cada um.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cessionario: { type: 'string', description: 'Trecho do nome do investidor.' },
+        status: { type: 'string', enum: ['ativo', 'complementar', 'encerrado'] },
+        limite: { type: 'integer', description: `Teto ${LIMITE_MAX}.` },
+      },
+    },
   },
 ]
 
 function limite(valor: unknown): number {
   const n = typeof valor === 'number' ? valor : 20
   return Math.min(Math.max(n, 1), LIMITE_MAX)
+}
+
+/**
+ * Colunas do crédito que o assistente pode ver.
+ *
+ * `drive_pasta_id` fica DE FORA de propósito: é cache do id de uma pasta do
+ * Google, uso interno, e a decisão do produto é que ele não aparece em lugar
+ * nenhum (migração 0033). Um id opaco na resposta do assistente é exatamente
+ * "aparecer em algum lugar".
+ */
+const COLUNAS_PROCESSO =
+  'numero_cnj, tribunal, comarca, vara, cedente, cedente_advogado, cessionario, ' +
+  'originador, entidade_devedora, status, especie_requisitorio, instrumento, ' +
+  'numero_rtdpj, data_aquisicao, expectativa_liquidacao, data_liquidacao, ' +
+  'tipo_credito, capital_investido, valor_face, data_referencia, ' +
+  'indice_atualizacao, ja_recebido, valor_estimado_complementar'
+
+/** A ficha precisa do id para buscar apensos, resumo e tarefas do crédito. */
+const COLUNAS_PROCESSO_FICHA = `id, ${COLUNAS_PROCESSO}`
+
+/** Só o que o construtor de consulta precisa expor para os filtros abaixo. */
+interface Filtravel {
+  eq: (c: string, v: unknown) => unknown
+  ilike: (c: string, v: string) => unknown
+  is: (c: string, v: null) => unknown
+  not: (c: string, op: string, v: unknown) => unknown
+  lte: (c: string, v: string) => unknown
+  gte: (c: string, v: string) => unknown
+}
+
+/**
+ * Aplica os filtros de crédito a qualquer consulta sobre `processos`.
+ *
+ * Compartilhado por contar, listar e resumir — se cada um filtrasse do seu jeito,
+ * a mesma pergunta produziria total e lista que não fecham, e o modelo
+ * apresentaria os dois números como se conversassem.
+ */
+function aplicarFiltros<T>(q: T, args: Record<string, unknown>): T {
+  let r = q as unknown as Filtravel
+  const eq = (c: string, v: unknown) => {
+    r = r.eq(c, v) as Filtravel
+  }
+  const like = (c: string, v: unknown) => {
+    r = r.ilike(c, `%${String(v)}%`) as Filtravel
+  }
+  if (args.status) eq('status', args.status)
+  if (args.especie_requisitorio) eq('especie_requisitorio', args.especie_requisitorio)
+  if (args.tribunal) like('tribunal', args.tribunal)
+  if (args.entidade_devedora) like('entidade_devedora', args.entidade_devedora)
+  if (args.cedente) like('cedente', args.cedente)
+  if (args.cessionario) like('cessionario', args.cessionario)
+  if (args.originador) like('originador', args.originador)
+  // A DATA é que diz se o crédito foi pago, não o status — a plataforma inteira
+  // trata assim, e o assistente tem de concordar com as telas.
+  if (typeof args.liquidado === 'boolean') {
+    r = (
+      args.liquidado
+        ? r.not('data_liquidacao', 'is', null)
+        : r.is('data_liquidacao', null)
+    ) as Filtravel
+  }
+  if (typeof args.expectativa_ate === 'string')
+    r = r.lte('expectativa_liquidacao', args.expectativa_ate) as Filtravel
+  if (typeof args.expectativa_desde === 'string')
+    r = r.gte('expectativa_liquidacao', args.expectativa_desde) as Filtravel
+  return r as unknown as T
 }
 
 /**
@@ -217,32 +532,191 @@ async function executar(
 ): Promise<string> {
   switch (nome) {
     case 'contar_processos': {
-      let q = svc.from('processos').select('id', { count: 'exact', head: true })
-      if (args.status) q = q.eq('status', args.status)
-      if (args.tribunal) q = q.ilike('tribunal', `%${args.tribunal}%`)
-      if (args.entidade_devedora)
-        q = q.ilike('entidade_devedora', `%${args.entidade_devedora}%`)
-      const { count, error } = await q
+      const { count, error } = await aplicarFiltros(
+        svc.from('processos').select('id', { count: 'exact', head: true }),
+        args,
+      )
       if (error) return JSON.stringify({ erro: error.message })
       return JSON.stringify({ total: count ?? 0, filtros: args })
     }
 
     case 'listar_processos': {
-      let q = svc
-        .from('processos')
-        .select(
-          'numero_cnj, tribunal, comarca, vara, cedente, entidade_devedora, ' +
-            'status, data_aquisicao, expectativa_liquidacao, data_liquidacao',
-        )
-        .order('created_at', { ascending: false })
-        .limit(limite(args.limite))
-      if (args.status) q = q.eq('status', args.status)
-      if (args.tribunal) q = q.ilike('tribunal', `%${args.tribunal}%`)
-      if (args.entidade_devedora)
-        q = q.ilike('entidade_devedora', `%${args.entidade_devedora}%`)
-      const { data, error } = await q
+      const { data, error } = await aplicarFiltros(
+        svc
+          .from('processos')
+          .select(COLUNAS_PROCESSO)
+          .order('created_at', { ascending: false })
+          .limit(limite(args.limite)),
+        args,
+      )
       if (error) return JSON.stringify({ erro: error.message })
-      return JSON.stringify({ quantidade_retornada: data?.length ?? 0, processos: data })
+      return JSON.stringify({
+        moeda: 'BRL',
+        quantidade_retornada: data?.length ?? 0,
+        // Sem isto o modelo não sabe se a lista é tudo ou só o teto. Já respondeu
+        // "temos 20 créditos ativos" quando havia 40 e o limite era 20.
+        aviso_limite:
+          (data?.length ?? 0) >= limite(args.limite)
+            ? 'A lista bateu no limite pedido; use contar_processos para o total exato.'
+            : undefined,
+        processos: data,
+      })
+    }
+
+    case 'resumo_financeiro_creditos': {
+      // Sem limite: são somas, e amostra daria total errado apresentado como
+      // exato. O acervo é de centenas de linhas, não de milhões.
+      const { data, error } = await aplicarFiltros(
+        svc
+          .from('processos')
+          .select(
+            'status, especie_requisitorio, originador, cessionario, tribunal, ' +
+              'entidade_devedora, capital_investido, valor_face, ja_recebido, ' +
+              'valor_estimado_complementar, data_liquidacao',
+          ),
+        args,
+      )
+      if (error) return JSON.stringify({ erro: error.message })
+
+      const dimensao = String(args.agrupar_por ?? 'nenhum')
+      const grupos: Record<string, Record<string, number>> = {}
+      const soma = (alvo: Record<string, number>, l: Record<string, unknown>) => {
+        alvo.quantidade += 1
+        alvo.capital_investido += Number(l.capital_investido ?? 0)
+        alvo.valor_face += Number(l.valor_face ?? 0)
+        alvo.ja_recebido += Number(l.ja_recebido ?? 0)
+        alvo.valor_estimado_complementar += Number(l.valor_estimado_complementar ?? 0)
+        if (l.data_liquidacao) alvo.liquidados += 1
+      }
+      const zero = () => ({
+        quantidade: 0,
+        capital_investido: 0,
+        valor_face: 0,
+        ja_recebido: 0,
+        valor_estimado_complementar: 0,
+        liquidados: 0,
+      })
+      const total = zero()
+      for (const l of (data ?? []) as Record<string, unknown>[]) {
+        soma(total, l)
+        if (dimensao !== 'nenhum') {
+          const k = String(l[dimensao] ?? 'não informado') || 'não informado'
+          grupos[k] ??= zero()
+          soma(grupos[k], l)
+        }
+      }
+      return JSON.stringify({
+        moeda: 'BRL',
+        significado: {
+          capital_investido: 'quanto a Credijuris pagou pelo crédito',
+          valor_face: 'valor de face do crédito no processo',
+          ja_recebido: 'quanto já entrou (só nos complementares/encerrados)',
+          valor_estimado_complementar: 'saldo estimado a receber',
+          liquidados: 'quantos têm data de liquidação preenchida',
+        },
+        creditos_considerados: data?.length ?? 0,
+        total_geral: total,
+        agrupado_por: dimensao === 'nenhum' ? undefined : dimensao,
+        grupos: dimensao === 'nenhum' ? undefined : grupos,
+      })
+    }
+
+    case 'ficha_do_credito': {
+      const busca = String(args.numero_processo ?? '')
+      const digitos = busca.replace(/\D/g, '')
+      // Por número quando vier número; por nome do cedente quando vier nome.
+      let q = svc.from('processos').select(COLUNAS_PROCESSO_FICHA).limit(3)
+      q = digitos.length >= 6
+        ? q.ilike('numero_cnj', `%${digitos.slice(0, 7)}%`)
+        : q.ilike('cedente', `%${busca}%`)
+      const { data: achados, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      const lista = (achados ?? []) as Record<string, unknown>[]
+      if (lista.length === 0) {
+        return JSON.stringify({
+          encontrado: false,
+          aviso: `Nenhum crédito casou com "${busca}". Confira o número ou use listar_processos.`,
+        })
+      }
+      if (lista.length > 1) {
+        return JSON.stringify({
+          encontrado: false,
+          aviso: 'Mais de um crédito casou. Peça à pessoa qual, ou refine o número.',
+          candidatos: lista.map((p) => ({
+            numero_cnj: p.numero_cnj,
+            cedente: p.cedente,
+            cessionario: p.cessionario,
+          })),
+        })
+      }
+      const p = lista[0]
+      const idProc = String(p.id)
+      const dig = String(p.numero_cnj ?? '').replace(/\D/g, '')
+      const quantasMov = Math.min(
+        typeof args.movimentacoes === 'number' ? args.movimentacoes : 15,
+        40,
+      )
+
+      const [apensos, resumo, tarefas, movs, pubs] = await Promise.all([
+        svc.from('apensos').select('*').eq('processo_id', idProc).limit(20),
+        svc
+          .from('carteira_resumos')
+          .select('estagio_processual, providencias, gerado_em, erro')
+          .eq('processo_id', idProc)
+          .maybeSingle(),
+        dig
+          ? svc
+              .from('advbox_tarefas')
+              .select('tipo, data, date_deadline, notes, responsaveis, concluida')
+              .eq('numero_digits', dig)
+              .order('data', { ascending: false })
+              .limit(25)
+          : Promise.resolve({ data: [], error: null }),
+        dig
+          ? svc
+              .from('advbox_movimentacoes')
+              .select('data, conteudo')
+              .eq('numero_digits', dig)
+              .order('data', { ascending: false })
+              .order('data_ts', { ascending: false, nullsFirst: false })
+              .order('id', { ascending: false })
+              .limit(quantasMov)
+          : Promise.resolve({ data: [], error: null }),
+        dig
+          ? svc
+              .from('djen_publicacoes')
+              .select('data_disponibilizacao, tipo_comunicacao, tratada, raw')
+              .ilike('numero_processo', `%${dig.slice(0, 7)}%`)
+              .order('data_disponibilizacao', { ascending: false })
+              .limit(8)
+          : Promise.resolve({ data: [], error: null }),
+      ])
+
+      // Cronológico CRESCENTE: lida de trás para frente, a sequência causal se
+      // desfaz — dois ciclos de "alvará expedido / devolvido" viram três, com o
+      // último parecendo pendente. Mesma lição da carteira-resumo.
+      const movCrescente = [...((movs.data ?? []) as Record<string, unknown>[])].reverse()
+
+      return JSON.stringify({
+        encontrado: true,
+        moeda: 'BRL',
+        cadastro: p,
+        apensos: apensos.data ?? [],
+        resumo_da_carteira: resumo.data ?? null,
+        tarefas: tarefas.data ?? [],
+        movimentacoes_do_mais_antigo_ao_mais_recente: movCrescente,
+        publicacoes_recentes: ((pubs.data ?? []) as Record<string, unknown>[]).map(
+          (x) => ({
+            data: x.data_disponibilizacao,
+            tipo: x.tipo_comunicacao,
+            tratada: x.tratada,
+            texto: textoDjen(x.raw)?.slice(0, 1200) ?? null,
+          }),
+        ),
+        aviso:
+          'O andamento mais recente da lista descreve onde o processo está hoje; ' +
+          'nada da sua resposta pode contrariá-lo.',
+      })
     }
 
     case 'buscar_movimentacoes': {
@@ -438,6 +912,291 @@ async function executar(
       return JSON.stringify({ moeda: 'BRL', por_status: porStatus })
     }
 
+    case 'listar_publicacoes': {
+      let q = svc
+        .from('djen_publicacoes')
+        .select('numero_processo, data_disponibilizacao, sigla_tribunal, tipo_comunicacao, tratada, raw')
+        .order('data_disponibilizacao', { ascending: false })
+        .limit(limite(args.limite))
+      if (typeof args.tratada === 'boolean') q = q.eq('tratada', args.tratada)
+      if (typeof args.dias === 'number')
+        q = q.gte('data_disponibilizacao', desde(args.dias))
+      if (args.numero_processo) {
+        const d = String(args.numero_processo).replace(/\D/g, '')
+        // Casa pelo prefixo de dígitos: o DJEN grava o número em formatos
+        // variados e a coluna não é normalizada.
+        q = q.ilike('numero_processo', `%${(d || String(args.numero_processo)).slice(0, 7)}%`)
+      }
+      const { data, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      return JSON.stringify({
+        quantidade_retornada: data?.length ?? 0,
+        publicacoes: ((data ?? []) as Record<string, unknown>[]).map((p) => ({
+          numero_processo: p.numero_processo,
+          data: p.data_disponibilizacao,
+          tribunal: p.sigla_tribunal,
+          tipo: p.tipo_comunicacao,
+          tratada: p.tratada,
+          // Cortado: o comunicado inteiro pode ter milhares de caracteres, e o
+          // que decide a leitura está no começo.
+          texto: textoDjen(p.raw)?.slice(0, 1500) ?? null,
+        })),
+      })
+    }
+
+    case 'listar_tarefas': {
+      let q = svc
+        .from('advbox_tarefas')
+        .select(
+          'numero_processo, tipo, data, date_deadline, notes, responsaveis, ' +
+            'important, urgent, concluida',
+        )
+        .order('date_deadline', { ascending: true, nullsFirst: false })
+        .limit(limite(args.limite))
+      if (typeof args.concluida === 'boolean') q = q.eq('concluida', args.concluida)
+      if (args.tipo) q = q.ilike('tipo', `%${args.tipo}%`)
+      if (args.numero_processo) {
+        const d = String(args.numero_processo).replace(/\D/g, '')
+        if (d.length >= 6) q = q.eq('numero_digits', d)
+        else q = q.ilike('numero_processo', `%${args.numero_processo}%`)
+      }
+      if (typeof args.prazo_ate === 'string') q = q.lte('date_deadline', args.prazo_ate)
+      if (args.vencidas === true) {
+        // Vencida = prazo fatal no passado E ainda não concluída. Sem o segundo
+        // filtro, tarefa cumprida no prazo apareceria como atrasada.
+        q = q.lt('date_deadline', desde(0)).eq('concluida', false)
+      }
+      const { data, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      let tarefas = (data ?? []) as Record<string, unknown>[]
+      // Responsável é jsonb (lista de nomes): filtra em memória, porque `ilike`
+      // não entra dentro do array.
+      if (args.responsavel) {
+        const alvo = String(args.responsavel).toLowerCase()
+        tarefas = tarefas.filter((t) =>
+          (Array.isArray(t.responsaveis) ? (t.responsaveis as unknown[]) : [])
+            .some((r) => String(r).toLowerCase().includes(alvo)),
+        )
+      }
+      return JSON.stringify({
+        hoje: desde(0),
+        quantidade_retornada: tarefas.length,
+        legenda: {
+          date_deadline: 'prazo fatal; null = tarefa sem prazo',
+          concluida: 'true = já cumprida',
+        },
+        tarefas,
+      })
+    }
+
+    case 'carteira_do_investidor': {
+      const nome = String(args.nome ?? '')
+      if (!nome) return JSON.stringify({ erro: 'Informe o nome do investidor.' })
+      // MESMA FONTE DA TELA DE CARTEIRAS: o campo `cessionario` do crédito. A
+      // tabela `investimentos` é o registro comercial e pode não refletir a
+      // carteira real; responder por ela daria número diferente do que a pessoa
+      // vê em Carteiras de Investimento.
+      const { data, error } = await svc
+        .from('processos')
+        .select(`id, ${COLUNAS_PROCESSO}`)
+        .ilike('cessionario', `%${nome}%`)
+      if (error) return JSON.stringify({ erro: error.message })
+      const creditos = (data ?? []) as Record<string, unknown>[]
+      if (creditos.length === 0) {
+        return JSON.stringify({
+          encontrado: false,
+          aviso: `Nenhum crédito com cessionário casando "${nome}".`,
+        })
+      }
+      const num = (v: unknown) => Number(v ?? 0)
+      const totais = creditos.reduce(
+        (t, c) => ({
+          creditos: t.creditos + 1,
+          capital_investido: t.capital_investido + num(c.capital_investido),
+          valor_face: t.valor_face + num(c.valor_face),
+          ja_recebido: t.ja_recebido + num(c.ja_recebido),
+          valor_estimado_complementar:
+            t.valor_estimado_complementar + num(c.valor_estimado_complementar),
+          liquidados: t.liquidados + (c.data_liquidacao ? 1 : 0),
+        }),
+        {
+          creditos: 0,
+          capital_investido: 0,
+          valor_face: 0,
+          ja_recebido: 0,
+          valor_estimado_complementar: 0,
+          liquidados: 0,
+        },
+      )
+      const { data: resumos } = await svc
+        .from('carteira_resumos')
+        .select('processo_id, estagio_processual, providencias')
+        .in('processo_id', creditos.map((c) => String(c.id)))
+      const porId = new Map(
+        ((resumos ?? []) as Record<string, unknown>[]).map((r) => [
+          String(r.processo_id),
+          { estagio_processual: r.estagio_processual, providencias: r.providencias },
+        ]),
+      )
+      return JSON.stringify({
+        encontrado: true,
+        moeda: 'BRL',
+        fonte: 'campo cessionário dos créditos — a mesma da tela de Carteiras',
+        nomes_casados: [...new Set(creditos.map((c) => c.cessionario))],
+        totais,
+        creditos: creditos.map(({ id, ...resto }) => ({
+          ...resto,
+          situacao_atual: porId.get(String(id)) ?? null,
+        })),
+      })
+    }
+
+    case 'listar_investidores': {
+      let q = svc
+        .from('investidor_dados')
+        // SEM cpf, rg, conta, agência e Pix: nenhuma pergunta de análise precisa
+        // do valor desses campos, e mandá-los para fora do sistema seria expor
+        // dado bancário sem necessidade. O que vai é se estão PREENCHIDOS.
+        .select('tipo, nome_exibicao, nome_chave, cpf, rg, banco, agencia, conta, pix, cidade, uf, representante')
+        .limit(LIMITE_MAX)
+      if (args.papel) q = q.eq('tipo', args.papel)
+      if (args.nome) q = q.ilike('nome_exibicao', `%${args.nome}%`)
+      const { data, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+
+      // Quantos créditos cada pessoa tem, no papel dela.
+      const { data: procs } = await svc
+        .from('processos')
+        .select('cessionario, originador')
+      const conta = (campo: 'cessionario' | 'originador') => {
+        const m = new Map<string, number>()
+        for (const p of (procs ?? []) as Record<string, unknown>[]) {
+          const n = String(p[campo] ?? '').trim().toLowerCase()
+          if (n) m.set(n, (m.get(n) ?? 0) + 1)
+        }
+        return m
+      }
+      const porCessionario = conta('cessionario')
+      const porOriginador = conta('originador')
+
+      const cheio = (v: unknown) => !!String(v ?? '').trim()
+      let pessoas = ((data ?? []) as Record<string, unknown>[]).map((d) => {
+        const nome = String(d.nome_exibicao ?? d.nome_chave ?? '')
+        const chave = nome.trim().toLowerCase()
+        const faltando = [
+          cheio(d.cpf) ? null : 'documento',
+          cheio(d.banco) ? null : 'banco',
+          cheio(d.conta) ? null : 'conta',
+          cheio(d.pix) ? null : 'pix',
+          cheio(d.cidade) ? null : 'endereço',
+        ].filter(Boolean)
+        return {
+          nome,
+          papel: d.tipo,
+          cidade_uf: [d.cidade, d.uf].filter(Boolean).join('/') || null,
+          // Documento com mais de 11 dígitos é CNPJ — mesma régua da plataforma.
+          pessoa_juridica: String(d.cpf ?? '').replace(/\D/g, '').length > 11,
+          representante_legal: d.representante ?? null,
+          creditos_como_cessionario: porCessionario.get(chave) ?? 0,
+          creditos_como_originador: porOriginador.get(chave) ?? 0,
+          ficha_completa: faltando.length === 0,
+          campos_em_branco: faltando.length ? faltando : undefined,
+        }
+      })
+      if (args.ficha_incompleta === true)
+        pessoas = pessoas.filter((p) => !p.ficha_completa)
+      return JSON.stringify({
+        aviso:
+          'CPF/CNPJ, RG, agência, conta e Pix NÃO são expostos ao assistente — ' +
+          'só se estão preenchidos. Para ver os valores, use a tela Dados cadastrais.',
+        quantidade_retornada: pessoas.length,
+        pessoas: pessoas.slice(0, limite(args.limite)),
+      })
+    }
+
+    case 'listar_analises': {
+      let q = svc
+        .from('analises_credito')
+        .select('numero_processo, cedente, devedor, tribunal, valor_face, valor_avaliado, risco, status, observacoes, created_at')
+        .order('created_at', { ascending: false })
+        .limit(limite(args.limite))
+      if (args.status) q = q.eq('status', args.status)
+      if (args.risco) q = q.eq('risco', args.risco)
+      const { data, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      return JSON.stringify({
+        moeda: 'BRL',
+        contexto: 'Fase PRÉ-CONTRATUAL: candidato a aquisição, ainda não é crédito da carteira.',
+        quantidade_retornada: data?.length ?? 0,
+        analises: data,
+      })
+    }
+
+    case 'listar_requerimentos': {
+      // select('*') e não lista de colunas: esta tabela ganhou campos em seis
+      // migrações diferentes, e enumerar errado faz o PostgREST recusar a
+      // consulta TODA — o assistente diria "não há requerimentos" havendo.
+      let q = svc
+        .from('requerimentos')
+        .select('*')
+        .order('data_protocolo', { ascending: false, nullsFirst: false })
+        .limit(limite(args.limite))
+      if (args.orgao) q = q.ilike('orgao', `%${args.orgao}%`)
+      const { data, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      return JSON.stringify({ quantidade_retornada: data?.length ?? 0, requerimentos: data })
+    }
+
+    case 'listar_contatos': {
+      // Mesmo motivo do select('*') acima: a tabela foi remodelada em 0003/0004/0008.
+      let q = svc.from('contatos_serventias').select('*').limit(limite(args.limite))
+      if (args.orgao) q = q.ilike('orgao', `%${args.orgao}%`)
+      if (args.tribunal) q = q.ilike('tribunal', `%${args.tribunal}%`)
+      const { data, error } = await q
+      if (error) return JSON.stringify({ erro: error.message })
+      return JSON.stringify({ quantidade_retornada: data?.length ?? 0, contatos: data })
+    }
+
+    case 'resumos_da_carteira': {
+      // Os textos já escritos pela plataforma, juntados ao crédito. Duas
+      // consultas, e não um join: `carteira_resumos` referencia processo_id, e o
+      // filtro (cessionário, status) é do lado do crédito.
+      const alvo = aplicarFiltros(
+        svc.from('processos').select('id, numero_cnj, cedente, cessionario, status'),
+        args,
+      )
+      const { data: procs, error } = await alvo
+      if (error) return JSON.stringify({ erro: error.message })
+      const lista = ((procs ?? []) as Record<string, unknown>[]).slice(
+        0,
+        limite(args.limite),
+      )
+      if (lista.length === 0)
+        return JSON.stringify({ quantidade_retornada: 0, creditos: [] })
+      const { data: resumos } = await svc
+        .from('carteira_resumos')
+        .select('processo_id, estagio_processual, providencias, erro, gerado_em')
+        .in('processo_id', lista.map((p) => String(p.id)))
+      const porId = new Map(
+        ((resumos ?? []) as Record<string, unknown>[]).map((r) => [String(r.processo_id), r]),
+      )
+      return JSON.stringify({
+        aviso:
+          'Textos mantidos pela plataforma para a carteira do investidor, escritos ' +
+          'sem datas de propósito. Para a cronologia de um caso use ficha_do_credito.',
+        quantidade_retornada: lista.length,
+        creditos: lista.map(({ id, ...resto }) => {
+          const r = porId.get(String(id))
+          return {
+            ...resto,
+            estagio_processual: r?.estagio_processual ?? null,
+            providencias: r?.providencias ?? null,
+            sem_resumo_porque: r ? (r.erro ?? undefined) : 'ainda não foi gerado',
+          }
+        }),
+      })
+    }
+
     default:
       return JSON.stringify({ erro: `Ferramenta desconhecida: ${nome}` })
   }
@@ -450,13 +1209,26 @@ async function executar(
 // requisições. Nada de data de hoje ou nome de usuário aqui.
 const SISTEMA = `Você é o assistente de dados do sistema de Gestão de Cessões da Credijuris. Responde a perguntas da equipe sobre os dados do próprio sistema, em português do Brasil.
 
-# O que existe no sistema
-- **Créditos (processos)**: precatórios e créditos judiciais adquiridos. Campos: número CNJ, tribunal, comarca, vara, cedente, entidade devedora, datas de aquisição e liquidação, expectativa de liquidação, e uma situação cadastral que é só uma de três — \`ativo\`, \`complementar\` ou \`encerrado\`.
-- **Movimentações e publicações**: andamentos vindos do ADVBOX e intimações do DJEN. São TEXTO CORRIDO, sem classificação estruturada.
-- **Cessões**: o inventário de créditos com valores de face, aquisição e cessão.
-- **Publicações pendentes**: a publicação do DJEN tem a marcação "tratada" (não
-  existe "lida"). A janela de dias é contada pela data de disponibilização, no
-  fuso de Brasília.
+# O negócio
+A Credijuris compra créditos judiciais de credores originais (**cedentes**) e os cede a investidores (**cessionários**). Todo crédito é processo em cumprimento de sentença contra a Fazenda Pública. O caminho: cumprimento de sentença → impugnação ou concordância com os cálculos → homologação → expedição do requisitório (**RPV** ou **precatório**) → pagamento → levantamento pelo cessionário.
+
+# O que você alcança
+- **Créditos (processos)** — o cadastro inteiro, inclusive os campos financeiros: capital investido (o que a Credijuris pagou), valor de face, já recebido, saldo estimado complementar, espécie do requisitório, tipo de crédito, originador, cessionário. Situação cadastral é só uma de três: \`ativo\`, \`complementar\` (recebeu parte, há saldo) ou \`encerrado\`. **Quem diz se o crédito foi pago é a data de liquidação, não o status.**
+- **Ficha de um crédito** — \`ficha_do_credito\` junta cadastro, apensos, estágio processual, tarefas, movimentações e publicações de um processo só. Prefira-a a quatro chamadas separadas.
+- **Movimentações e publicações** — andamentos do ADVBOX e intimações do DJEN. TEXTO CORRIDO, sem classificação. A publicação tem a marcação "tratada" (não existe "lida"), e a janela de dias corre pela data de disponibilização, no fuso de Brasília.
+- **Tarefas** — o trabalho da equipe, com prazo fatal, responsáveis e se já foi concluída. O histórico inclui as concluídas.
+- **Carteiras** — os créditos de cada investidor, pela mesma fonte da tela (o campo cessionário do crédito).
+- **Análises de crédito** — a fase PRÉ-CONTRATUAL. Não é carteira: é candidato a aquisição.
+- **Cessões** — o inventário comercial da operação, com valores de face, aquisição e cessão.
+- **Investidores e originadores** — quem são, quantos créditos têm e se a ficha cadastral está completa.
+- **Requerimentos administrativos** e **contatos das serventias**.
+
+# O que você NÃO alcança
+CPF/CNPJ, RG, agência, conta e Pix das fichas cadastrais não são expostos a você — você só sabe se estão preenchidos. Se pedirem o número, diga onde encontrar (Comercial → Dados cadastrais) em vez de tentar consultar.
+
+# Duas confusões a evitar
+- **Análise de crédito ≠ crédito.** A análise é anterior à compra; o crédito já é da carteira. Perguntas sobre "o que estamos avaliando" são de análises; sobre "o que temos" são de créditos.
+- **Cessão ≠ crédito.** A tabela de cessões é o registro comercial da operação. Para "quanto a Credijuris tem investido" ou "qual o valor de face da carteira", use \`resumo_financeiro_creditos\`, que soma os próprios créditos.
 
 # Regra que não se negocia
 Todo número que você afirmar precisa vir de uma ferramenta executada nesta conversa. Você não tem conhecimento prévio dos dados da Credijuris. Se não deu para consultar, diga que não deu — nunca estime, arredonde de cabeça ou complete com um valor plausível.
@@ -471,7 +1243,12 @@ Não existe campo de fase processual no cadastro. "Concluso para decisão", "sen
 
 Não repita as mesmas ressalvas em toda resposta: diga cada uma uma vez, de forma curta. Um bloco de avisos maior que a resposta faz a pessoa parar de lê-los.
 
-Para perguntas que uma contagem responde direto (quantos encerrados, quanto foi cedido), aí sim o número é exato e você pode afirmá-lo sem ressalva.
+Para perguntas que uma contagem responde direto (quantos encerrados, quanto foi cedido), aí sim o número é exato e você pode afirmá-lo sem ressalva. O mesmo vale para \`resumo_financeiro_creditos\`: ele percorre todos os créditos que casam com o filtro, então os totais são exatos.
+
+Quando uma lista traz \`aviso_limite\`, ela bateu no teto e NÃO é o conjunto todo. Nesse caso, ou peça o total com a ferramenta de contagem, ou diga que está mostrando uma parte — nunca apresente o tamanho da lista como se fosse o total.
+
+# Você pode calcular
+Somar, subtrair, dividir e comparar o que as ferramentas devolveram é seu trabalho — deságio, percentual recebido, ticket médio, concentração por investidor. O que não vale é inventar o insumo. Mostre a conta quando ela não for óbvia, para a pessoa poder conferir.
 
 # Como escrever
 Vá direto ao ponto: a resposta primeiro, o detalhe depois. Valores em reais no formato brasileiro (R$ 1.234,56). Datas como dd/mm/aaaa. Tabela só quando houver vários itens comparáveis; para um número só, uma frase basta.

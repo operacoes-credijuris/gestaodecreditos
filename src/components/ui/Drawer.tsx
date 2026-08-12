@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
@@ -7,6 +8,11 @@ import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
  * Painel lateral (slide-over) para exibir detalhes de um registro sem sair da
  * listagem. Desliza da direita com overlay desfocado; fecha por X, overlay ou
  * Escape. Use para "ficha" de leitura — edição continua nos modais.
+ *
+ * Vai para o <body> por portal, pelo mesmo motivo do Modal: `fixed inset-0` deixa
+ * de se medir pela janela quando algum ancestral tem `transform`, e o
+ * `.animate-page` do AppLayout tem um a cada troca de rota. Ver o comentário em
+ * Modal.tsx para o defeito medido.
  */
 export function Drawer({
   open,
@@ -57,7 +63,7 @@ export function Drawer({
 
   if (!rendered) return null
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
       <div
         className={cn(
@@ -95,7 +101,8 @@ export function Drawer({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

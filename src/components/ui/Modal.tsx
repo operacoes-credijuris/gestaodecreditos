@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useId, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
@@ -14,6 +15,21 @@ import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
  * - `dirty`: quando true, QUALQUER tentativa de fechar (X, overlay, Escape)
  *   pede confirmação com `window.confirm('Descartar alterações não salvas?')`
  *   antes de chamar `onClose`. Útil em formulários com alterações pendentes.
+ *
+ * VAI PARA O <body> POR PORTAL, e isto não é preferência de organização — é o que
+ * faz o escurecimento cobrir a tela INTEIRA.
+ *
+ * O defeito que isso conserta: `position: fixed` não se mede pela janela quando
+ * algum ancestral tem `transform`; passa a se medir por esse ancestral. O
+ * AppLayout envolve toda página num `.animate-page`, que anima com
+ * `translateY(4px)` a cada troca de rota — e, renderizado ali dentro, o overlay
+ * saía com o tamanho do conteúdo e começando ABAIXO da barra do topo, deixando
+ * uma faixa clara em cima. Medido no navegador: com o transform ativo o overlay
+ * ficava 961x54 em top:52; no <body>, 961x910, a janela toda.
+ *
+ * Mesmo raciocínio vale para qualquer `hover:-translate-y` de cartão ou
+ * `active:scale` de botão que venha a envolver um modal no futuro: no <body>,
+ * nada disso alcança o overlay.
  */
 export function Modal({
   open,
@@ -68,7 +84,7 @@ export function Modal({
     xl: 'max-w-5xl',
   }
 
-  return (
+  return createPortal(
     <div
       className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-[2px] sm:p-6"
       onClick={(e) => {
@@ -116,6 +132,7 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
