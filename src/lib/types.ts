@@ -177,6 +177,12 @@ export interface Apenso {
   processo_id: UUID | null
   requerimento_id: UUID | null
   numero: string | null
+  /**
+   * Id do registro correspondente na ADVBOX (migração 0041). Apenso tem CNJ e
+   * andamento próprios, então é cadastrado lá como qualquer processo — é isso que
+   * faz a sincronização de movimentações encontrar o histórico dele.
+   */
+  advbox_lawsuit_id: string | null
   classe_processual: string | null
   tribunal: string | null
   comarca: string | null

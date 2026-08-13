@@ -125,13 +125,42 @@ type CampoNumero = 'process_number' | 'protocol_number'
 const pareceCNJ = (n: string) => onlyDigits(n).length === 20
 
 interface Alvo {
-  tabela: 'processos' | 'requerimentos'
+  tabela: 'processos' | 'requerimentos' | 'apensos'
   id: string
   numero: string
   campo: CampoNumero
   /** Nome que identifica o registro na lista da ADVBOX (máx. 30 pela API). */
   pasta: string
   jaVinculado: string | null
+}
+
+/**
+ * Pasta de um apenso: o nome do PAI, não a classe do incidente.
+ *
+ * "Agravo de instrumento" não identifica nada na lista da ADVBOX — o escritório tem
+ * vários. O que identifica é de quem é o processo principal, e é por isso que vale
+ * uma consulta a mais aqui. A classe entra como reserva quando o pai não tem nome.
+ */
+async function pastaDoApenso(
+  svc: ReturnType<typeof serviceClient>,
+  ap: { processo_id?: string | null; requerimento_id?: string | null; classe_processual?: string | null },
+): Promise<string> {
+  if (ap.processo_id) {
+    const { data } = await svc
+      .from('processos')
+      .select('cedente')
+      .eq('id', ap.processo_id)
+      .maybeSingle()
+    if (data?.cedente) return String(data.cedente).slice(0, 30)
+  } else if (ap.requerimento_id) {
+    const { data } = await svc
+      .from('requerimentos')
+      .select('assunto')
+      .eq('id', ap.requerimento_id)
+      .maybeSingle()
+    if (data?.assunto) return String(data.assunto).slice(0, 30)
+  }
+  return String(ap.classe_processual ?? '').slice(0, 30)
 }
 
 /** Carrega do BANCO o que vai ser cadastrado. Quem chama manda só o id. */
@@ -141,6 +170,32 @@ async function lerAlvo(body: Record<string, unknown>): Promise<
   const svc = serviceClient()
   const requerimentoId = String(body.requerimento_id ?? '')
   const processoId = String(body.processo_id ?? '')
+  const apensoId = String(body.apenso_id ?? '')
+
+  if (apensoId) {
+    const { data, error } = await svc
+      .from('apensos')
+      .select(
+        'id, numero, classe_processual, processo_id, requerimento_id, advbox_lawsuit_id',
+      )
+      .eq('id', apensoId)
+      .maybeSingle()
+    if (error) return { erro: error.message, status: 500 }
+    if (!data) return { erro: 'Apenso não encontrado.', status: 404 }
+    const numeroAp = String(data.numero ?? '').trim()
+    return {
+      alvo: {
+        tabela: 'apensos',
+        id: String(data.id),
+        numero: numeroAp,
+        // Apenso tem CNJ próprio (agravo, embargo, incidente), mas nem sempre: o
+        // formato decide, como no requerimento.
+        campo: pareceCNJ(numeroAp) ? 'process_number' : 'protocol_number',
+        pasta: await pastaDoApenso(svc, data),
+        jaVinculado: data.advbox_lawsuit_id ? String(data.advbox_lawsuit_id) : null,
+      },
+    }
+  }
 
   if (requerimentoId) {
     const { data, error } = await svc
@@ -168,7 +223,10 @@ async function lerAlvo(body: Record<string, unknown>): Promise<
   }
 
   if (!processoId) {
-    return { erro: 'Informe processo_id ou requerimento_id.', status: 400 }
+    return {
+      erro: 'Informe processo_id, requerimento_id ou apenso_id.',
+      status: 400,
+    }
   }
   const { data, error } = await svc
     .from('processos')
@@ -265,7 +323,7 @@ Deno.serve(async (req: Request) => {
       //
       // PUT parcial: só o campo do número vai no corpo, o resto do registro fica
       // como está (confirmado na documentação da API).
-      if (alvo.tabela === 'requerimentos' && pareceCNJ(alvo.numero)) {
+      if (alvo.tabela !== 'processos' && pareceCNJ(alvo.numero)) {
         const atual = (await getJson(ctx, `/lawsuits/${alvo.jaVinculado}`)) as
           | Record<string, unknown>
           | null

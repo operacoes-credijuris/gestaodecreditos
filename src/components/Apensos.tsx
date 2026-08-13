@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import { apensosCrud } from '@/lib/queries'
+import { invokeFunction } from '@/lib/functions'
 import type { Apenso } from '@/lib/types'
 import { cn } from '@/lib/cn'
 import { Button } from '@/components/ui/Button'
@@ -103,13 +104,53 @@ export function useApensosManager(parentField: ParentField) {
       if (editing.id) {
         await update.mutateAsync({ id: editing.id, changes: payload })
         toast.success('Apenso atualizado.')
+        // Também na edição: apenso pode ganhar o número depois de criado, e é o
+        // número que faz o cadastro na ADVBOX valer a pena. Só quando falta vínculo.
+        if (!editing.advbox_lawsuit_id && payload.numero) {
+          void cadastrarNaAdvbox(editing.id)
+        }
       } else {
-        await create.mutateAsync(payload)
+        const criado = await create.mutateAsync(payload)
         toast.success('Apenso adicionado.')
+        // FORA do await do salvamento: o cadastro na ADVBOX é consequência, não
+        // condição. ADVBOX fora do ar não impede o apenso de existir aqui.
+        if (criado?.id) void cadastrarNaAdvbox(criado.id)
       }
       setEditing(null)
     } catch (err) {
       toast.error((err as Error).message)
+    }
+  }
+
+  /**
+   * Cadastra o apenso na ADVBOX, com a mesma configuração dos créditos.
+   *
+   * POR QUE APENSO IMPORTA AQUI: agravo, embargo e incidente têm CNJ e andamento
+   * PRÓPRIOS. A sincronização de movimentações já procurava pelos números dos
+   * apensos, mas só acha o que existe na ADVBOX — e apenso nunca era cadastrado lá.
+   * A plataforma estava preparada para trazer esse andamento e não trazia, porque
+   * faltava a outra ponta.
+   */
+  async function cadastrarNaAdvbox(apensoId: string) {
+    try {
+      const r = await invokeFunction<{
+        ok?: boolean
+        motivo?: string
+        criado?: boolean
+        detalhe?: string
+        aviso?: string
+      }>('advbox-processos', { action: 'criar', apenso_id: apensoId })
+
+      if (r.ok && r.criado) toast.success('Apenso cadastrado na ADVBOX.')
+      else if (r.motivo === 'incompleto')
+        toast.error(
+          'Cadastro automático na ADVBOX está ligado, mas falta escolher o responsável em Configurações.',
+        )
+      else if (r.motivo === 'sem_numero')
+        toast.info('Sem número, não cadastrei na ADVBOX. Ao preencher e salvar, cadastro.')
+      else if (r.aviso) toast.error(r.aviso)
+    } catch (err) {
+      toast.error(`Apenso salvo, mas não cadastrei na ADVBOX: ${(err as Error).message}`)
     }
   }
 
@@ -278,8 +319,12 @@ export function useApensosManager(parentField: ParentField) {
           {editing && (
             <form id="form-apenso" onSubmit={handleSubmit} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Número" required error={erros.numero}>
+                {/* "Número do processo": o apenso tem CNJ próprio, e é por ele que a
+                    ADVBOX busca o andamento dele. O rótulo curto não dizia de que
+                    número se tratava. */}
+                <Field label="Número do processo" required error={erros.numero}>
                   <Input
+                    placeholder="0000000-00.0000.0.00.0000"
                     value={editing.numero ?? ''}
                     onChange={(e) => {
                       setEditing({ ...editing, numero: e.target.value })
