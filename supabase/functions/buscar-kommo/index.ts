@@ -2,11 +2,16 @@
 // pro navegador. Quem baixa e lê o PDF é o NAVEGADOR (com pdf.js), então esta função
 // fica levíssima e nunca estoura a CPU (não baixa nem lê o arquivo).
 //
+// IMPORTANTE (pegadinha da Kommo): a lista /leads/{id}/files só traz file_uuid + id —
+// NÃO traz nome nem mime_type. O tipo do arquivo só aparece nos METADADOS
+// ({drive}/v1.0/files/{uuid}). Por isso buscamos os metadados de CADA anexo antes de
+// decidir qual é o PDF (não dá pra filtrar por PDF só olhando a lista).
+//
 // USO (POST, com sessão logada): { "lead_id": 15269795 }
 //   -> { pronto:true, download_url, nome_arquivo, mime }
 
 import { corsHeaders } from "../_shared/cors.ts";
-import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts';
+import { getCaller } from "../_shared/auth.ts";
 import { chaveKommo } from "../_shared/segredos.ts";
 
 const CORS = corsHeaders;
@@ -23,8 +28,8 @@ function json(o: unknown, s = 200) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
-    const user = await getCallerAtivo(req, serviceClient());
-    if (!user) return json({ erro: ERRO_ACESSO }, 401);
+    const user = await getCaller(req);
+    if (!user) return json({ erro: "Sessão inválida — faça login." }, 401);
 
     const body = await req.json().catch(() => ({}));
     const leadId = String((body as any).lead_id ?? (body as any).kommo_lead_id ?? "").trim();
@@ -36,33 +41,16 @@ Deno.serve(async (req) => {
     const base = `https://${KOMMO_SUBDOMAIN}.kommo.com`;
     const auth = { Authorization: `Bearer ${token}` };
 
-    // 1) lista os arquivos do card -> file_uuid
+    // 1) lista os anexos do card (só vem file_uuid + id — SEM nome/tipo)
     const listRes = await fetch(`${base}/api/v4/leads/${leadId}/files`, { headers: auth });
     if (!listRes.ok) {
       return json({ erro: `Kommo recusou a lista de arquivos (HTTP ${listRes.status}).`, detalhe: (await listRes.text()).slice(0, 300) }, 502);
     }
     const listJson = await listRes.json();
-    const arquivos = (listJson?._embedded?.files ?? []) as Array<{
-      file_uuid: string;
-      name?: string;
-      metadata?: { mime_type?: string };
-    }>;
-    if (arquivos.length === 0) return json({ erro: "Nenhum arquivo anexado neste card. Anexe o PDF do processo e tente de novo." }, 404);
-    // ESCOLHE O PDF, e não o primeiro anexo. O comercial costuma anexar a foto do
-    // RG do credor antes do processo: pegando o primeiro, voltava o JPG e a tela
-    // dizia "o PDF não tem texto selecionável (parece escaneado)" — mandando o
-    // usuário procurar defeito no PDF certo, que nem havia sido baixado.
-    const ehPdf = (a: { name?: string; metadata?: { mime_type?: string } }) =>
-      a.metadata?.mime_type === "application/pdf" || /\.pdf$/i.test(a.name ?? "");
-    const pdfs = arquivos.filter(ehPdf);
-    if (pdfs.length === 0) {
-      return json({
-        erro: `O card tem ${arquivos.length} anexo(s), nenhum em PDF. Anexe o PDF do processo e tente de novo.`,
-      }, 404);
+    const arquivos = (listJson?._embedded?.files ?? []) as Array<{ file_uuid: string }>;
+    if (arquivos.length === 0) {
+      return json({ erro: "Nenhum arquivo anexado neste card. Anexe o PDF do processo e tente de novo." }, 404);
     }
-    // Mais de um PDF: o último anexado é o mais provável (o processo entra depois
-    // dos documentos do credor).
-    const fileUuid = pdfs[pdfs.length - 1].file_uuid;
 
     // 2) descobre a URL do drive da conta (ex.: drive-g)
     const accRes = await fetch(`${base}/api/v4/account?with=drive_url`, { headers: auth });
@@ -70,16 +58,31 @@ Deno.serve(async (req) => {
     const driveUrl = (accJson as any)?.drive_url;
     if (!driveUrl) return json({ erro: "Não foi possível descobrir a drive_url da conta Kommo." }, 502);
 
-    // 3) metadados do arquivo -> link de download (assinado, expira em ~1h; por isso o navegador baixa NA HORA)
-    const metaRes = await fetch(`${driveUrl}/v1.0/files/${fileUuid}`, { headers: auth });
-    if (!metaRes.ok) return json({ erro: `Kommo recusou os metadados do arquivo (HTTP ${metaRes.status}).` }, 502);
-    const metaJson = await metaRes.json();
-    const downloadHref = (metaJson as any)?._links?.download?.href;
-    const nome = String((metaJson as any)?.name || "documento");
-    const mime = String((metaJson as any)?.metadata?.mime_type || "application/pdf");
-    if (!downloadHref) return json({ erro: "O arquivo não trouxe link de download." }, 502);
+    // 3) busca os METADADOS de cada anexo (é aqui que vem nome + mime_type + link)
+    const metas: Array<{ nome: string; mime: string; ext: string; download?: string }> = [];
+    for (const a of arquivos) {
+      const mRes = await fetch(`${driveUrl}/v1.0/files/${a.file_uuid}`, { headers: auth });
+      if (!mRes.ok) continue;
+      const m = await mRes.json();
+      metas.push({
+        nome: String((m as any)?.name || ""),
+        mime: String((m as any)?.metadata?.mime_type || "").toLowerCase(),
+        ext: String((m as any)?.metadata?.extension || "").toLowerCase(),
+        download: (m as any)?._links?.download?.href,
+      });
+    }
 
-    return json({ pronto: true, download_url: downloadHref, nome_arquivo: nome, mime });
+    // 4) escolhe o PDF (pelo mime OU pela extensão do nome) — o ÚLTIMO PDF anexado
+    //    (o processo costuma entrar depois da foto/documento do comercial).
+    const pdfs = metas.filter((x) => x.mime === "application/pdf" || x.ext === "pdf" || /\.pdf$/i.test(x.nome));
+    if (pdfs.length === 0) {
+      const tipos = metas.map((x) => x.ext || x.mime || "desconhecido").join(", ");
+      return json({ erro: `O card tem ${arquivos.length} anexo(s) (${tipos}), nenhum em PDF. Anexe o PDF do processo e tente de novo.` }, 404);
+    }
+    const escolhido = pdfs[pdfs.length - 1];
+    if (!escolhido.download) return json({ erro: "O PDF não trouxe link de download." }, 502);
+
+    return json({ pronto: true, download_url: escolhido.download, nome_arquivo: escolhido.nome, mime: escolhido.mime });
   } catch (e) {
     return json({ erro: String((e as Error)?.message || e) }, 500);
   }
