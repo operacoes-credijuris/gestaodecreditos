@@ -137,15 +137,30 @@ export async function listarPastasDeCredito(): Promise<PastaCredito[]> {
  *
  *   1. Análise(s) de crédito       — a fonte mais rica: tribunal, valor de face,
  *                                    entidade devedora, expectativa de liquidação
- *   2. Contratos assinados         — cessionário, data de aquisição, capital
+ *                                    e o advogado do cedente, na análise jurídica
+ *   2. Contratos assinados         — cessionário, data de aquisição, preço da
+ *                                    cessão e as cláusulas de comissão/emolumentos
  *   4. Documentos do cedente e advogado — qualificação do cedente
+ *   3. Comprovantes de pagamento   — as transferências efetivamente feitas, onde
+ *                                    comissão e emolumento aparecem com valor
  *
- * As outras ficam de fora de propósito: comprovantes de pagamento (3), petições
- * geradas (5), desempenho final (6) e RPV complementar (7) são consequência do
- * crédito, não a origem dos dados dele — e mandá-las à IA custaria tokens para
- * confundir a leitura com texto que fala do mesmo processo em outro momento.
+ * A ORDEM AQUI É DE PRIORIDADE, não numérica, e isso importa: MAX_CHARS_TOTAL é
+ * gasto na ordem da leitura, então quem o teto corta é sempre o último. Os
+ * comprovantes ficam por último de propósito — são a fonte menos estruturada das
+ * quatro (comprovante bancário costuma ser digitalização sem texto) e a única cujo
+ * dado, o custo, já tem duas outras fontes antes dela.
+ *
+ * A PASTA 3 ESTEVE FORA até 13/08/2026, quando o capital investido deixou de ser
+ * "o preço da cessão" e passou a ser o custo total do investidor — preço mais
+ * comissões mais emolumentos. As parcelas que faltavam para compor esse total
+ * estão aqui, e sem lê-las a IA só podia entregar o preço, que é menor.
+ *
+ * Seguem de fora, por um motivo que não mudou: petições geradas (5), desempenho
+ * final (6) e RPV complementar (7) são CONSEQUÊNCIA do crédito, não a origem dos
+ * dados dele — e mandá-las à IA custaria tokens para confundir a leitura com texto
+ * que fala do mesmo processo em outro momento.
  */
-const PASTAS_COM_DADOS = [1, 2, 4]
+const PASTAS_COM_DADOS = [1, 2, 4, 3]
 
 /** Teto do total mandado à IA, somando todos os arquivos. */
 const MAX_CHARS_TOTAL = 400_000

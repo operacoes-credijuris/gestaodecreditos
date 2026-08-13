@@ -36,11 +36,56 @@ interface RespostaExtracao {
   observacoes?: string[]
   lidos?: string[]
   /**
-   * campo -> arquivo de onde o valor saiu. Não aparece mais na tela, mas continua
-   * sendo EXIGIDO da IA de propósito: obrigar cada campo a apontar um arquivo é o
-   * que a impede de completar lacuna com valor plausível.
+   * campo -> arquivo de onde o valor saiu. Exigido da IA por dois motivos: obrigar
+   * cada campo a apontar um arquivo é o que a impede de completar lacuna com valor
+   * plausível, e é o que permite à tela mostrar o que saiu de onde.
+   *
+   * Valor composto de vários arquivos vem com os nomes juntos por " + " — é o caso
+   * do capital investido, que soma preço, comissões e emolumentos.
    */
   procedencia?: Record<string, string>
+}
+
+/**
+ * Rótulo de cada campo, para a lista de procedência ser legível.
+ *
+ * Separado de CAMPOS_ACEITOS de propósito: aquele é a trava de segurança, este é
+ * texto de tela. Campo sem rótulo aqui cai no nome técnico, que é feio mas honesto.
+ */
+const ROTULO_CAMPO: Record<string, string> = {
+  tribunal: 'tribunal',
+  numero_processo_administrativo: 'nº administrativo',
+  comarca: 'comarca',
+  vara: 'vara',
+  cedente: 'cedente',
+  cedente_advogado: 'advogado do cedente',
+  entidade_devedora: 'entidade devedora',
+  valor_face: 'valor de face',
+  data_referencia: 'data de referência',
+  expectativa_liquidacao: 'expectativa de liquidação',
+  cessionario: 'cessionário',
+  data_aquisicao: 'data de aquisição',
+  capital_investido: 'capital investido',
+  tipo_credito: 'tipo de crédito',
+  instrumento: 'instrumento',
+  numero_rtdpj: 'nº RTDPJ',
+  indice_atualizacao: 'índice',
+}
+
+/**
+ * Os campos que saíram de um arquivo — `procedencia` invertida.
+ *
+ * A comparação é por CONTÉM, não por igualdade, porque valor composto traz os nomes
+ * de vários arquivos na mesma string. Assim o arquivo aparece em cada campo para o
+ * qual contribuiu, que é a leitura certa: quem somou três fontes precisa ver as três.
+ */
+function camposDoArquivo(
+  arquivo: string,
+  procedencia: Record<string, string> | undefined,
+): string[] {
+  return Object.entries(procedencia ?? {})
+    .filter(([, de]) => de.includes(arquivo))
+    .map(([campo]) => ROTULO_CAMPO[campo] ?? campo)
 }
 
 /**
@@ -242,6 +287,34 @@ export function NovoCreditoDoDrive({
             </li>
           ))}
         </ul>
+      )}
+
+      {/* "A IA CONSEGUIU LER?" — a pergunta que a tela não respondia, e sem a
+          resposta não há como separar "a IA errou" de "o arquivo não foi lido".
+          `lidos` diz o que entrou; a procedência ao lado diz o que saiu de cada um.
+          Arquivo lido que não rendeu campo nenhum aparece assim mesmo, dizendo isso:
+          é o sinal de que o dado esperado não estava onde se pensava. */}
+      {!!extracao?.lidos?.length && (
+        <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+          <p className="mb-1 font-semibold uppercase tracking-wide">
+            Lido pela IA · {extracao.lidos.length} arquivo(s)
+          </p>
+          <ul className="space-y-0.5">
+            {extracao.lidos.map((nome) => {
+              const campos = camposDoArquivo(nome, extracao.procedencia)
+              return (
+                <li key={nome}>
+                  <span className="text-slate-800">{nome}</span>
+                  {campos.length > 0 ? (
+                    <span className="text-slate-500"> · {campos.join(', ')}</span>
+                  ) : (
+                    <span className="text-slate-500"> · nenhum campo saiu daqui</span>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
       )}
 
       {/* Arquivo que não deu para ler NÃO desaparece: PDF escaneado e formato sem
