@@ -353,7 +353,7 @@ function calibrarDesagio(o: {
   //   Modelo 1: Y3 = L5+L7 ; cessão = (L5+L7)*(1-d)
   //   Modelo 2: Y3 = L5    ; cessão = L5*(1-d)
   const baseY3 = o.modelo === 1 ? L5 + L7 : L5;
-  const Y5 = (o.comissaoPct ?? 0.05) * baseY3;
+  const Y5 = (o.comissaoPct ?? 0.09) * baseY3;
 
   const avaliar = (d: number) => {
     const cessao = o.modelo === 1 ? (L5 + L7) * (1 - d) : L5 * (1 - d);
