@@ -280,16 +280,32 @@ export function useUltimaMovimentacao() {
   return useQuery({
     queryKey: ['advbox_processo_status', 'mapa'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('advbox_processo_status')
-        .select('numero_processo, ultima_movimentacao')
       const m = new Map<string, string>()
-      for (const r of (data ?? []) as {
-        numero_processo: string | null
-        ultima_movimentacao: string | null
-      }[]) {
-        const d = onlyDigits(r.numero_processo)
-        if (d.length >= 6 && r.ultima_movimentacao) m.set(d, r.ultima_movimentacao)
+      // PAGINADO, e não uma consulta só: o PostgREST tem teto próprio de linhas por
+      // resposta e NÃO avisa que cortou — devolve menos como se fossem todas. Aqui é
+      // uma linha por processo casado, então hoje cabe folgado; passando do teto, as
+      // datas da coluna "Últ. mov." simplesmente parariam de aparecer para parte dos
+      // créditos, sem erro nenhum. Mesmo defeito que escondeu intimações do DJEN e
+      // que foi corrigido no espelho do Kommo — este ficou para trás na mesma
+      // varredura.
+      const POR_PAGINA = 1000
+      for (let pagina = 0; pagina < 50; pagina++) {
+        const de = pagina * POR_PAGINA
+        const { data } = await supabase
+          .from('advbox_processo_status')
+          .select('numero_processo, ultima_movimentacao')
+          // Ordem estável: sem ela, duas páginas podem repetir ou pular linhas.
+          .order('numero_processo')
+          .range(de, de + POR_PAGINA - 1)
+        const lote = (data ?? []) as {
+          numero_processo: string | null
+          ultima_movimentacao: string | null
+        }[]
+        for (const r of lote) {
+          const d = onlyDigits(r.numero_processo)
+          if (d.length >= 6 && r.ultima_movimentacao) m.set(d, r.ultima_movimentacao)
+        }
+        if (lote.length < POR_PAGINA) break
       }
       return m
     },

@@ -549,6 +549,16 @@ export default function Processos() {
       if (id) {
         await update.mutateAsync({ id, changes: payload })
         toast.success('Crédito atualizado.')
+        // NÃO CADASTRE NA ADVBOX AQUI, e a regra vale para os TRÊS cadastros — este,
+        // requerimento e apenso. É DECISÃO DE NEGÓCIO do dono, não esquecimento:
+        // escrita em sistema externo acontece na CRIAÇÃO, nunca na edição.
+        //
+        // O que ela protege: editar um registro é rotina — corrigir um valor, ajustar
+        // uma data —, e disparar o cadastro em cada salvamento criaria na ADVBOX
+        // processo que alguém pode ter deliberadamente deixado de fora. A plataforma
+        // passaria por cima de uma decisão humana, em silêncio.
+        //
+        // Os registros antigos que precisavam entrar já foram cadastrados à mão.
       } else {
         const criado = await create.mutateAsync(payload)
         toast.success('Crédito cadastrado.')

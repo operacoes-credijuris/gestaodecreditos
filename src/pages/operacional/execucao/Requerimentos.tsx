@@ -166,13 +166,14 @@ export default function Requerimentos() {
       if (editing.id) {
         await update.mutateAsync({ id: editing.id, changes: payload })
         toast.success('Requerimento atualizado.')
-        // TAMBÉM NA EDIÇÃO, e não só na criação: requerimento nasce sem número e
-        // ganha o dele depois. Só quando ainda não está vinculado e já existe
-        // número — assim editar um requerimento já cadastrado, ou ainda sem número,
-        // não gasta chamada.
-        if (!editing.advbox_lawsuit_id && payload.numero_protocolo) {
-          void cadastrarNaAdvbox(editing.id)
-        }
+        // NÃO CADASTRE NA ADVBOX AQUI — vale para os três cadastros (crédito,
+        // requerimento e apenso), por decisão do dono: escrita em sistema externo
+        // acontece na CRIAÇÃO, nunca na edição. Houve um gatilho de edição aqui, para
+        // pegar o requerimento que ganha CNJ ao ser distribuído; foi retirado.
+        //
+        // Consequência conhecida e aceita: requerimento cadastrado por protocolo que
+        // depois vira judicial não passa a ser monitorado sozinho — isso se resolve
+        // na ADVBOX, à mão.
       } else {
         const criado = await create.mutateAsync(payload)
         toast.success('Requerimento cadastrado.')

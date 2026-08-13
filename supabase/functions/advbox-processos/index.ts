@@ -315,11 +315,15 @@ Deno.serve(async (req: Request) => {
     const { alvo } = lido
 
     if (alvo.jaVinculado) {
-      // REQUERIMENTO QUE FOI DISTRIBUÍDO DEPOIS DE CADASTRADO. Ele entrou na ADVBOX
-      // com o protocolo do órgão; agora tem CNJ, e é o CNJ que liga o monitoramento.
-      // Sem promover o número aqui, o caso que motivou o pedido — requerimento que
-      // vira processo — ficaria para sempre sem andamento automático, com o registro
-      // existindo e ninguém entendendo por que nada chega.
+      // REQUERIMENTO OU APENSO DISTRIBUÍDO DEPOIS DE CADASTRADO: entrou na ADVBOX com
+      // o protocolo do órgão e agora tem CNJ, que é o que liga o monitoramento.
+      //
+      // SEM GATILHO NA INTERFACE HOJE. O cadastro só acontece na criação, por decisão
+      // do dono, e na criação nunca existe vínculo — então este trecho não é
+      // alcançado pela tela. Fica porque é o comportamento CORRETO para qualquer
+      // chamada com registro já vinculado (um botão de reprocessar, uma rotina), e
+      // porque a alternativa seria a tela promover o número por conta própria, que é
+      // exatamente a escrita automática que se quis evitar.
       //
       // PUT parcial: só o campo do número vai no corpo, o resto do registro fica
       // como está (confirmado na documentação da API).

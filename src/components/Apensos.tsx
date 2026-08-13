@@ -104,11 +104,9 @@ export function useApensosManager(parentField: ParentField) {
       if (editing.id) {
         await update.mutateAsync({ id: editing.id, changes: payload })
         toast.success('Apenso atualizado.')
-        // Também na edição: apenso pode ganhar o número depois de criado, e é o
-        // número que faz o cadastro na ADVBOX valer a pena. Só quando falta vínculo.
-        if (!editing.advbox_lawsuit_id && payload.numero) {
-          void cadastrarNaAdvbox(editing.id)
-        }
+        // NÃO CADASTRE NA ADVBOX AQUI — mesma regra dos créditos e dos
+        // requerimentos, por decisão do dono: escrita em sistema externo acontece na
+        // CRIAÇÃO, nunca na edição. Havia um gatilho de edição aqui e foi retirado.
       } else {
         const criado = await create.mutateAsync(payload)
         toast.success('Apenso adicionado.')
