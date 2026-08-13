@@ -417,6 +417,7 @@ interface Insumos {
 async function colherInsumos(
   svc: ReturnType<typeof serviceClient>,
   processoId: string,
+  apensoId?: string | null,
 ): Promise<Insumos | null> {
   const { data: procData } = await svc
     .from('processos')
@@ -425,8 +426,39 @@ async function colherInsumos(
     )
     .eq('id', processoId)
     .maybeSingle()
-  const processo = procData as ProcessoRow | null
+  let processo = procData as ProcessoRow | null
   if (!processo) return null
+
+  // TAREFA DE APENSO: os AUTOS são os do apenso — número e juízo — e é por esse
+  // número que as movimentações têm de ser buscadas. Sem isto, o dossiê que a IA
+  // recebe descreve o processo principal, e a peça sai coerente com os autos
+  // errados. O CRÉDITO segue sendo o principal: cedente, cessionário, tipo e
+  // espécie não mudam por haver um agravo.
+  //
+  // Herda o juízo do principal quando o apenso não tem: melhor que endereçar a
+  // lugar nenhum.
+  if (apensoId) {
+    const { data: apData } = await svc
+      .from('apensos')
+      .select('numero, tribunal, comarca, vara')
+      .eq('id', apensoId)
+      .maybeSingle()
+    const ap = apData as {
+      numero: string | null
+      tribunal: string | null
+      comarca: string | null
+      vara: string | null
+    } | null
+    if (ap?.numero) {
+      processo = {
+        ...processo,
+        numero_cnj: ap.numero,
+        tribunal: ap.tribunal || processo.tribunal,
+        comarca: ap.comarca || processo.comarca,
+        vara: ap.vara || processo.vara,
+      }
+    }
+  }
 
   const digits = onlyDigits(processo.numero_cnj)
   const temNumero = digits.length >= 6
@@ -507,6 +539,12 @@ Deno.serve(async (req: Request) => {
       action?: string
       tarefa_id?: string
       processo_id?: string
+      /**
+       * Apenso da tarefa, quando ela é dos autos dele. Muda os AUTOS (número e
+       * juízo) e o número pelo qual as movimentações são buscadas — não muda o
+       * crédito. Ver colherInsumos.
+       */
+      apenso_id?: string | null
       instrucao?: string
       panorama?: string
       dados?: Record<string, string>
@@ -525,7 +563,7 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: 'Tarefa não informada.' }, 400)
       }
 
-      const insumos = await colherInsumos(svc, body.processo_id)
+      const insumos = await colherInsumos(svc, body.processo_id, body.apenso_id)
       if (!insumos) return jsonResponse({ error: 'Crédito não encontrado.' }, 404)
 
       // CACHE É SEMPRE MELHOR-ESFORÇO. Se a tabela ainda não existe (migração
@@ -670,7 +708,7 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: 'Escreva o que a petição deve pedir.' }, 400)
       }
 
-      const insumos = await colherInsumos(svc, body.processo_id)
+      const insumos = await colherInsumos(svc, body.processo_id, body.apenso_id)
       if (!insumos) return jsonResponse({ error: 'Crédito não encontrado.' }, 404)
 
       // Os dados vêm RESOLVIDOS da interface (lib/peticao.ts), e não recalculados

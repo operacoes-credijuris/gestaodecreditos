@@ -22,7 +22,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Combobox, MultiCombobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { PeticaoModal } from '@/components/PeticaoModal'
 import { NumeroProcessoDrive } from '@/components/NumeroProcessoDrive'
-import type { Processo } from '@/lib/types'
+import type { Apenso, Processo } from '@/lib/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
@@ -264,6 +264,33 @@ export default function TarefasAdvbox() {
       const parentId = apensoParent.get(d)
       return parentId ? porId.get(parentId) ?? null : null
     }
+  }, [processos.data, apensos.data])
+
+  /**
+   * O APENSO cujos autos são os da tarefa — quando é o caso.
+   *
+   * Existe por causa de um defeito relatado: a petição de uma tarefa de apenso saía
+   * com o número e o juízo do processo PRINCIPAL. É que resolveCredito devolve o
+   * crédito pai de propósito (é dele que saem as partes do card e os dados da
+   * cessão), e quem gera a peça precisa saber, além do crédito, EM QUAIS AUTOS ela
+   * vai ser protocolada.
+   *
+   * Número que casa direto com um crédito nunca é tratado como apenso: crédito é
+   * sempre o principal, e uma coincidência de número não pode reescrever os autos
+   * dele.
+   */
+  const resolveApenso = useMemo(() => {
+    const doCredito = new Set<string>()
+    for (const p of processos.data ?? []) {
+      const d = dig(p.numero_cnj)
+      if (d.length >= 6) doCredito.add(d)
+    }
+    const porNumero = new Map<string, Apenso>()
+    for (const a of apensos.data ?? []) {
+      const d = dig(a.numero)
+      if (d.length >= 6 && !doCredito.has(d)) porNumero.set(d, a)
+    }
+    return (numero: string): Apenso | null => porNumero.get(dig(numero)) ?? null
   }, [processos.data, apensos.data])
 
   // Tarefa cuja janela de petição está aberta. Guarda a tarefa toda, e não só o
@@ -577,6 +604,8 @@ export default function TarefasAdvbox() {
         // apareceu no primeiro teste.
         descricao={[peticaoDe?.tipo, peticaoDe?.notes].filter(Boolean).join(' — ')}
         processo={peticaoDe ? resolveCredito(peticaoDe.processo) : null}
+        // O crédito diz DE QUEM é a peça; o apenso, EM QUAIS AUTOS ela entra.
+        apenso={peticaoDe ? resolveApenso(peticaoDe.processo ?? '') : null}
         numeroTarefa={peticaoDe?.processo ?? ''}
         // Chave do cache do panorama da IA: a análise é por TAREFA, não por
         // crédito — cada tarefa se escreve com um recorte diferente do processo.

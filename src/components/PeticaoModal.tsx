@@ -50,7 +50,7 @@ import { driveConfigurado } from '@/lib/drive'
 import { invokeFunction } from '@/lib/functions'
 import { peticaoTemplatesCrud, useInvestidorDados } from '@/lib/queries'
 import { formatCNJ } from '@/lib/format'
-import type { Processo } from '@/lib/types'
+import type { Apenso, Processo } from '@/lib/types'
 
 const ABAS = [
   { key: 'modelo', label: 'Modelo', icon: <FileText className="h-4 w-4" /> },
@@ -82,6 +82,7 @@ export function PeticaoModal({
   onClose,
   descricao,
   processo,
+  apenso,
   numeroTarefa,
   tarefaId,
 }: {
@@ -91,6 +92,22 @@ export function PeticaoModal({
   descricao: string | null
   /** O crédito da tarefa. Nulo quando a tarefa não casou com nenhum cadastrado. */
   processo: Processo | null
+  /**
+   * O APENSO, quando a tarefa é dos autos dele e não do principal.
+   *
+   * DOIS PAPÉIS QUE NÃO SE MISTURAM, e confundi-los foi o defeito relatado — a
+   * petição de uma tarefa de apenso saía com o número e o juízo do processo
+   * principal, num documento que vai assinado para os autos:
+   *
+   *   AUTOS   (apenso, quando houver) → número e juízo que vão no texto da peça.
+   *   CRÉDITO (sempre o principal)    → cessionário, tipo, dados bancários, e a
+   *                                     PASTA no Drive.
+   *
+   * A pasta é o motivo de o crédito não poder ser sobrescrito: ela é encontrada
+   * pelo CNJ do principal ou pelo nome do cedente, e o número do apenso não casa
+   * com nenhuma pasta.
+   */
+  apenso?: Apenso | null
   numeroTarefa: string
   /**
    * Id da tarefa no ADVBOX. É a CHAVE DO CACHE do panorama: a mesma execução
@@ -201,9 +218,32 @@ export function PeticaoModal({
     }
   }, [open, escolhido?.arquivo])
 
+  /**
+   * O crédito com os AUTOS do apenso por cima — e só eles.
+   *
+   * É o que vai no TEXTO da peça: número do processo e juízo. Todo o resto continua
+   * vindo do principal, porque é dele que o crédito é (cessionário, tipo, dados
+   * bancários) e porque `id` e `cedente` são o que encontram a pasta no Drive.
+   *
+   * O juízo do apenso só substitui quando ele TEM juízo cadastrado: agravo em que
+   * ninguém preencheu o órgão herda o do principal, que é melhor que endereçar a
+   * peça a lugar nenhum.
+   */
+  const autos = useMemo(() => {
+    if (!processo) return null
+    if (!apenso) return processo
+    return {
+      ...processo,
+      numero_cnj: apenso.numero ?? processo.numero_cnj,
+      tribunal: apenso.tribunal || processo.tribunal,
+      comarca: apenso.comarca || processo.comarca,
+      vara: apenso.vara || processo.vara,
+    }
+  }, [processo, apenso])
+
   const preenchimento = useMemo(
-    () => (processo ? resolverVariaveis(processo, fichas.data) : null),
-    [processo, fichas.data],
+    () => (autos ? resolverVariaveis(autos, fichas.data) : null),
+    [autos, fichas.data],
   )
 
   /**
@@ -246,6 +286,9 @@ export function PeticaoModal({
         action: 'panorama',
         tarefa_id: tarefaId,
         processo_id: processo?.id,
+        // Sem isto o panorama leria as movimentações do PRINCIPAL para uma tarefa
+        // do apenso — e o dossiê que a IA usa para escrever descreveria outros autos.
+        apenso_id: apenso?.id ?? null,
       }),
     enabled: open && aba === 'zero' && !!tarefaId && !!processo,
     staleTime: Infinity,
@@ -272,6 +315,7 @@ export function PeticaoModal({
         action: 'panorama',
         tarefa_id: tarefaId,
         processo_id: processo.id,
+        apenso_id: apenso?.id ?? null,
         forcar: true,
       })
       qc.setQueryData(chavePanorama, r)
@@ -301,6 +345,7 @@ export function PeticaoModal({
       const r = await invokeFunction<RespostaRedacao>('peticao-ia', {
         action: 'redigir',
         processo_id: processo.id,
+        apenso_id: apenso?.id ?? null,
         instrucao: instrucao.trim(),
         panorama: panorama.data?.panorama,
         dados: dadosParaIA,
@@ -330,16 +375,20 @@ export function PeticaoModal({
    * link é truncado em ~14 mil caracteres.
    */
   async function abrirNoClaude() {
-    if (!processo) return
+    if (!processo || !autos) return
     const passagem = [
       'Estou redigindo uma petição num cumprimento de sentença contra a Fazenda Pública em que houve cessão de crédito.',
       '',
       `## O caso`,
-      `- Processo: ${formatCNJ(processo.numero_cnj)}`,
+      // AUTOS, e não o crédito: número e juízo são os do apenso quando a tarefa é
+      // dele. Mandar o Claude raciocinar sobre os autos errados produziria uma peça
+      // coerente e endereçada ao lugar errado — o pior desfecho possível aqui.
+      `- Processo: ${formatCNJ(autos.numero_cnj)}`,
+      apenso?.classe_processual ? `- Autos: ${apenso.classe_processual} (apenso)` : '',
       `- Cedente: ${processo.cedente || 'não informado'}`,
       `- Cessionário: ${processo.cessionario || 'não informado'}`,
       `- Ente devedor: ${processo.entidade_devedora || 'não informado'}`,
-      `- Juízo: ${[processo.tribunal, processo.comarca, processo.vara].filter(Boolean).join(' · ') || 'não informado'}`,
+      `- Juízo: ${[autos.tribunal, autos.comarca, autos.vara].filter(Boolean).join(' · ') || 'não informado'}`,
       '',
       panorama.data?.panorama
         ? `## Panorama levantado do caso\n${panorama.data.panorama}\n`
@@ -435,7 +484,10 @@ export function PeticaoModal({
       const { gerarDocxPeticao } = await import('@/lib/peticaoDocx')
       const timbrado = await baixarTimbradoBytes()
       const blob = await gerarDocxPeticao(texto, timbrado)
-      const cnj = processo.numero_cnj ? formatCNJ(processo.numero_cnj) : numeroTarefa
+      // Nome do arquivo pelos AUTOS: a peça de um agravo tem de se chamar pelo
+      // número do agravo, senão duas peças de autos diferentes disputam o mesmo
+      // nome dentro da pasta do crédito.
+      const cnj = autos?.numero_cnj ? formatCNJ(autos.numero_cnj) : numeroTarefa
       const nome = `${nomeBase} - ${cnj}.docx`.replace(/[/\\?%*:|"<>]/g, '-')
 
       // O arquivo é gerado ANTES de procurar a pasta: se a pasta não resolver, o
@@ -507,11 +559,14 @@ export function PeticaoModal({
       // "Cedente v. Cessionário", a mesma forma que a lista de tarefas usa sob o
       // número do processo — quem abre a janela vê a mesma identificação que viu
       // no card, sem ter de reconciliar duas descrições do mesmo crédito.
+      // O número é o dos AUTOS da tarefa, com o aviso de que são de apenso: é a
+      // única chance de a pessoa perceber, ANTES de gerar, que a peça vai para um
+      // agravo e não para o principal.
       description={
-        processo
-          ? `${formatCNJ(processo.numero_cnj)} · ${processo.cedente || '—'} v. ${
-              processo.cessionario || '—'
-            }`
+        processo && autos
+          ? `${formatCNJ(autos.numero_cnj)}${
+              apenso ? ` · apenso${apenso.classe_processual ? ` (${apenso.classe_processual})` : ''}` : ''
+            } · ${processo.cedente || '—'} v. ${processo.cessionario || '—'}`
           : 'A tarefa não está vinculada a um crédito cadastrado.'
       }
       footer={
