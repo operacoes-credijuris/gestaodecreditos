@@ -31,13 +31,13 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
-import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
+import { useAuth } from '@/contexts/AuthContext'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -69,7 +69,7 @@ function lerCardCredijuris(lead: KommoLead) {
   const categoria = /precat/i.test(tipo) ? 'Precatórios' : 'Requisições de Pequeno Valor'
 
   const partesTitulo = (lead.nome ?? '').split(' - ')
-  const originador = (partesTitulo[0] ?? '').trim()
+  const intermediador = (partesTitulo[0] ?? '').trim()
   const cedente =
     pegar(/CEDENTE:\s*(.+)/i) || (partesTitulo.length >= 2 ? partesTitulo[1].trim() : '')
 
@@ -84,38 +84,9 @@ function lerCardCredijuris(lead: KommoLead) {
           : 'auto'
 
   const honMatch = notas.match(/HONOR[ÁA]RIOS?\s*C\.?:\s*([\d.,]+)\s*%/i)
-  const honorarios_pct = percentualDaNota(honMatch?.[1])
+  const honorarios_pct = honMatch ? honMatch[1].replace(/\./g, '').replace(',', '.') : ''
 
-  return { numero, categoria, cedente, originador, tipo_aquisicao, honorarios_pct }
-}
-
-/**
- * Percentual de honorários escrito na anotação do card (texto livre).
- *
- * O `replace(/\./g, '')` que havia aqui apagava TODO ponto, e o ponto na anotação
- * pode ser decimal: "HONORÁRIOS C.: 33.33%" saía como "3333" e o motor de
- * precificação recebia 3333% de honorários. A planilha do cedente saía com valor
- * líquido completamente errado e nada na tela indicava isso.
- *
- * Mesma regra do parseNumeroFlex da gerar-analise-rpv: um único grupo de até 2
- * dígitos depois do ponto é decimal; mais que isso, o ponto é separador de
- * milhar. E percentual fora de 0 a 100 não é percentual — devolve vazio, para o
- * motor pedir o número em vez de precificar errado.
- */
-function percentualDaNota(bruto: string | undefined): string {
-  const t = (bruto ?? '').trim()
-  if (!t) return ''
-  let s: string
-  if (t.includes(',')) {
-    // Vírgula presente: ela é o decimal, e o ponto é milhar.
-    s = t.replace(/\./g, '').replace(',', '.')
-  } else {
-    const partes = t.split('.')
-    s = partes.length === 2 && partes[1].length <= 2 ? t : t.replace(/\./g, '')
-  }
-  const v = Number(s)
-  if (!Number.isFinite(v) || v < 0 || v > 100) return ''
-  return String(v)
+  return { numero, categoria, cedente, intermediador, tipo_aquisicao, honorarios_pct }
 }
 
 async function extrairTextoDoPdf(url: string): Promise<string> {
@@ -155,7 +126,7 @@ async function analisarLeadCredijuris(lead: KommoLead): Promise<ResultadoAnalise
     )
   }
   // corta se gigante (mantém início e final — cálculo/RPV costumam estar no fim)
-  const MAX = 600000
+  const MAX = 360000
   if (texto.length > MAX) {
     const iniCorte = Math.floor(MAX * 0.6)
     texto =
@@ -167,13 +138,36 @@ async function analisarLeadCredijuris(lead: KommoLead): Promise<ResultadoAnalise
   // 3) Análise + precificação — manda só o TEXTO (leve) pro motor
   const res = await invokeFunction<ResultadoAnalise>('gerar-analise-rpv', {
     texto,
-    originador: dados.originador,
+    intermediador: dados.intermediador,
     numero_processo: dados.numero,
     categoria: dados.categoria,
     tipo_aquisicao: dados.tipo_aquisicao,
     honorarios_pct: dados.honorarios_pct,
   })
   return res
+}
+
+// Escreve o resultado da análise no card do Kommo (motivo se recusado, link do Drive se aprovado).
+async function anotarResultadoNaKommo(leadId: number, r: ResultadoAnalise, analista: string) {
+  let texto = ''
+  if (r.reprovado) {
+    const motivo = r.motivo || (r.motivos ?? []).join(' ') || 'Crédito reprovado na análise.'
+    texto = `❌ RECUSADO na análise automática.\nMotivo: ${motivo}`
+  } else {
+    const link =
+      (typeof r.drive_folder_url === 'string' && r.drive_folder_url) ||
+      (typeof r.drive_file_url === 'string' && r.drive_file_url) ||
+      ''
+    texto = link
+      ? `✅ APROVADO na análise automática.\nPlanilha e análise no Drive: ${link}`
+      : '✅ APROVADO na análise automática. (Confira a pasta do Drive.)'
+  }
+  texto = `(${analista}) ${texto}`
+  try {
+    await invokeFunction('kommo-anotar', { lead_id: leadId, texto })
+  } catch {
+    /* a anotação é um extra: se falhar, não trava o resultado que já apareceu na tela */
+  }
 }
 
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
@@ -245,51 +239,42 @@ function CardCredito({
         </div>
 
         {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
-            em vez de três. flex-wrap para não estourar em tela estreita.
-
-            O ANALISAR ENTRA AQUI, e não numa linha própria embaixo: ele ocupava
-            uma terceira linha em todo card, e numa lista de dezenas isso é a
-            diferença entre ver seis cards e ver dez. Vem antes das ações porque é
-            o passo anterior a elas — analisa, depois encaminha. */}
-        <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
-          {/* outline, e não secondary (preto): este botão repete em TODO card, e
-              numa lista de dezenas o preto vira o elemento mais pesado da tela —
-              além de ser a única cor fora da família da marca. Contido, ele deixa
-              as ações de decisão (azul/verde/laranja/vermelho) carregarem o
-              significado, que é o papel delas. */}
-          <Button
-            size="sm"
-            variant="outline"
-            icon={<FileSearch className="h-4 w-4" />}
-            onClick={() => onAnalisar(lead)}
-            loading={analisando}
-            disabled={ocupado || analisando}
-          >
-            {analisando ? 'Analisando…' : 'Analisar'}
-          </Button>
-          {acoes.map((a) => (
-            <Button
-              key={a.statusId}
-              size="sm"
-              variant={a.variant}
-              icon={ICONES[a.statusId]}
-              onClick={() => onAcao(lead, a)}
-              loading={statusEmAndamento === a.statusId}
-              // Trava as outras ações do card enquanto uma corre: duas
-              // movimentações simultâneas no mesmo card se atropelariam.
-              disabled={ocupado}
-            >
-              {a.label}
-            </Button>
-          ))}
-        </div>
+            em vez de três. flex-wrap para não estourar em tela estreita. */}
+        {acoes.length > 0 && (
+          <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
+            {acoes.map((a) => (
+              <Button
+                key={a.statusId}
+                size="sm"
+                variant={a.variant}
+                icon={ICONES[a.statusId]}
+                onClick={() => onAcao(lead, a)}
+                loading={statusEmAndamento === a.statusId}
+                // Trava as outras ações do card enquanto uma corre: duas
+                // movimentações simultâneas no mesmo card se atropelariam.
+                disabled={ocupado}
+              >
+                {a.label}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Resultado da análise automática (Judit -> due diligence -> planilha).
-          Continua em bloco próprio, largura toda: são links e motivo de reprovação,
-          texto que não cabe ao lado de um botão. */}
-      {resultadoAnalise && (
-        <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+      {/* Análise automática Credijuris: Judit -> due diligence -> planilha */}
+      <div className="mt-3">
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<FileSearch className="h-4 w-4" />}
+          onClick={() => onAnalisar(lead)}
+          loading={analisando}
+          disabled={ocupado || analisando}
+        >
+          {analisando ? 'Analisando…' : 'Analisar (PDF do card)'}
+        </Button>
+        {resultadoAnalise && (
+          <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
             {resultadoAnalise.erro ? (
               <div className="text-red-700">Erro: {resultadoAnalise.erro}</div>
             ) : resultadoAnalise.reprovado && resultadoAnalise.motivo ? (
@@ -311,11 +296,7 @@ function CardCredito({
                 Reprovado no Portão 1: {(resultadoAnalise.motivos ?? []).join(' ')}
               </div>
             ) : (
-              // emerald, não green: é o verde de "deu certo" em todo o resto da
-              // plataforma (Badge, Toast, StatCard, valores positivos). São dois
-              // verdes diferentes do Tailwind, e um só lugar fora do padrão é o
-              // bastante para a tela parecer remendada.
-              <div className="text-emerald-700">
+              <div className="text-green-700">
                 ✅ Planilha gerada.{' '}
                 {typeof resultadoAnalise.drive_file_url === 'string' && (
                   <a
@@ -340,10 +321,11 @@ function CardCredito({
                 {resultadoAnalise.aviso && (
                   <div className="mt-1 text-amber-700">⚠️ {resultadoAnalise.aviso}</div>
                 )}
-            </div>
-          )}
-        </div>
-      )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="mt-2 flex items-center gap-3">
         {/* As anotações vêm em texto livre e o formato varia entre cards, então
@@ -363,11 +345,7 @@ function CardCredito({
           href={urlCard(lead.kommo_lead_id)}
           target="_blank"
           rel="noreferrer"
-          // hover:text-brand-700, e não o mesmo slate-600 de antes: o link
-          // anunciava transição de cor e mudava para a própria cor, então o
-          // ponteiro não recebia resposta nenhuma. brand-700 é o hover de link do
-          // resto da plataforma (ver NumeroProcessoDrive).
-          className="inline-flex items-center gap-1 text-xs text-slate-600 transition-colors hover:text-brand-700"
+          className="inline-flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
         >
           <ExternalLink className="h-3.5 w-3.5" /> Abrir no Kommo
         </a>
@@ -383,7 +361,7 @@ function CardCredito({
                   E sem autor: a equipe usa um login só e se identifica no próprio
                   texto da anotação; os nomes que aparecem são de antes disso.
                   O campo continua guardado em kommo_leads.notas. */}
-              <div className="mb-0.5 text-xs text-slate-600">
+              <div className="mb-0.5 text-xs text-slate-400">
                 {n.criado_em && formatDate(n.criado_em)}
               </div>
               <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
@@ -411,41 +389,24 @@ export default function AnaliseCredito() {
     statusId: number
   } | null>(null)
   // Análise automática (Judit + due diligence + planilha) por card.
-  /**
-   * Ids em análise AGORA, e não um id só.
-   *
-   * Com um id global, começar a segunda análise apagava o spinner da primeira e
-   * reabilitava o botão dela: o usuário achava que havia travado, clicava de
-   * novo, e o `finally` da corrida antiga limpava o estado da nova. O resultado
-   * de uma corrida vencida ainda sobrescrevia o da mais recente. Cada análise são
-   * duas chamadas ao modelo com o processo inteiro — repetir à toa é caro.
-   */
-  const [analisandoIds, setAnalisandoIds] = useState<ReadonlySet<number>>(
-    () => new Set(),
-  )
+  const { user: authUser, profile: authProfile } = useAuth()
+  const analistaNome = authProfile?.nome || authUser?.email || 'Usuário'
+  const [analisandoId, setAnalisandoId] = useState<number | null>(null)
   const [resultadoAnalise, setResultadoAnalise] = useState<Record<number, ResultadoAnalise>>({})
 
   async function onAnalisar(lead: KommoLead) {
-    const id = lead.kommo_lead_id
-    // Clique repetido no mesmo cartão não dispara segunda corrida.
-    if (analisandoIds.has(id)) return
-    setAnalisandoIds((s) => new Set(s).add(id))
+    setAnalisandoId(lead.kommo_lead_id)
     try {
       const r = await analisarLeadCredijuris(lead)
-      setResultadoAnalise((p) => ({ ...p, [id]: r }))
+      setResultadoAnalise((p) => ({ ...p, [lead.kommo_lead_id]: r }))
+      await anotarResultadoNaKommo(lead.kommo_lead_id, r, analistaNome)
     } catch (e) {
       setResultadoAnalise((p) => ({
         ...p,
-        [id]: { erro: (e as Error)?.message ?? String(e) },
+        [lead.kommo_lead_id]: { erro: (e as Error)?.message ?? String(e) },
       }))
     } finally {
-      // Remove SÓ este id: o `setAnalisandoId(null)` de antes liberava o cartão
-      // alheio junto.
-      setAnalisandoIds((s) => {
-        const n = new Set(s)
-        n.delete(id)
-        return n
-      })
+      setAnalisandoId(null)
     }
   }
 
@@ -530,29 +491,12 @@ export default function AnaliseCredito() {
       />
 
       {/* Precatórios entram na fase 2: o funil existe no Kommo, mas o sync
-          ainda só traz o de RPV.
-
-          Tabs, e não Segmented: RPV/Precatórios divide a aba em DUAS VISÕES — o
-          mesmo papel de Relatórios individuais/Visão global nas Carteiras — e visões
-          irmãs devem ter a mesma cara em toda a plataforma. O Segmented fica para as
-          ETAPAS logo abaixo, que são um filtro dentro da visão. */}
+          ainda só traz o de RPV. */}
       <div className="mb-4">
-        <Tabs
+        <Segmented
+          ariaLabel="Tipo de crédito"
           items={[
-            {
-              key: 'rpv',
-              label: 'RPV',
-              // SOMA DAS ETAPAS, e não o total do espelho. O espelho guarda todos
-              // os cards do funil RPV, inclusive os das colunas do comercial, que
-              // esta aba não trata — daí 148 aqui contra 38 somando as etapas
-              // abaixo. Total que não fecha com a soma das partes ensina a
-              // desconfiar de todo número da tela, e o número certo é o do que
-              // está sob a responsabilidade de quem está olhando.
-              //
-              // Vem de `grupos`, que é montado ANTES da busca: assim o total não
-              // muda enquanto se digita no campo de pesquisa.
-              count: TELAS.reduce((n, t) => n + grupos[t.key].length, 0),
-            },
+            { key: 'rpv', label: 'RPV', count: (leads.data ?? []).length },
             { key: 'precatorio', label: 'Precatórios', disabled: true },
           ]}
           value="rpv"
@@ -562,7 +506,7 @@ export default function AnaliseCredito() {
 
       <Card className="mb-4 p-4">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
             className="pl-9"
             placeholder="Buscar por nome do card, processo, responsável ou conteúdo…"
@@ -623,7 +567,7 @@ export default function AnaliseCredito() {
                     : null
                 }
                 onAnalisar={onAnalisar}
-                analisando={analisandoIds.has(l.kommo_lead_id)}
+                analisando={analisandoId === l.kommo_lead_id}
                 resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
               />
             ))}
