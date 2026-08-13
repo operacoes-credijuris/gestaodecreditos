@@ -211,16 +211,63 @@ function dadosBancarios(nome: string, d: InvestidorDados | undefined): string | 
 const maiusculo = (s: string) => s.toLocaleUpperCase('pt-BR')
 
 /**
- * Juízo endereçado: a vara, com a comarca quando as duas existem.
+ * Órgãos femininos cuja terminação não denuncia o gênero.
  *
- * Em CAIXA ALTA porque o endereçamento do modelo já está assim ("AO JUÍZO DE
- * DIREITO DO(A) ..."), e o cadastro guarda a vara como foi digitada — sem isso
- * saía "AO JUÍZO DE DIREITO DO(A) 1ª Vara Civil ... DA COMARCA DE Luziânia",
- * misturando as duas grafias na mesma linha.
+ * "Seção" e "comissão" terminam em -ão e são femininos ("a seção"); sem esta lista
+ * a regra do "termina em A" as trataria como masculinas e sairia "AO SEÇÃO".
+ */
+const ORGAOS_FEMININOS = new Set(['secao', 'subsecao', 'sessao', 'comissao'])
+
+/**
+ * "À" ou "AO", conforme o gênero do órgão endereçado.
+ *
+ * Heurística, e ela pode errar: ignora ordinal inicial ("2ª TURMA" olha TURMA), usa
+ * a lista de exceções acima e, no resto, decide pela terminação em A. Cobre o que a
+ * casa usa — presidência, vice-presidência, câmara, turma, relatoria, gabinete,
+ * plenário. Órgão de nome incomum pode sair com o artigo trocado, e é erro de
+ * concordância à vista de quem revisa, não dado errado.
+ */
+function artigo(orgao: string): 'À' | 'AO' {
+  const palavras = normalizarBusca(orgao)
+    .split(/\s+/)
+    // Fora ordinais e numerais: "2ª", "1o", "iii".
+    .filter((w) => w && !/^\d/.test(w) && !/^[ivx]+$/.test(w))
+  const nucleo = palavras[0] ?? ''
+  if (ORGAOS_FEMININOS.has(nucleo)) return 'À'
+  return nucleo.endsWith('a') ? 'À' : 'AO'
+}
+
+/**
+ * Juízo endereçado.
+ *
+ * PRIMEIRO GRAU (tem comarca): "1ª VARA DA FAZENDA PÚBLICA DA COMARCA DE GOIÂNIA".
+ * Devolve só o miolo, porque o modelo já traz o prefixo fixo "AO JUÍZO DE DIREITO
+ * DO(A)". Em CAIXA ALTA porque o prefixo está assim e o cadastro guarda a vara como
+ * foi digitada — sem isso saía "AO JUÍZO DE DIREITO DO(A) 1ª Vara Civil ... DA
+ * COMARCA DE Luziânia", misturando as duas grafias na mesma linha.
+ *
+ * SEGUNDO GRAU (SEM comarca): "À PRESIDÊNCIA DO TRF-6" — com o artigo, e é o artigo
+ * que sinaliza a aplicarModelo que o prefixo fixo do modelo tem de CAIR. Processo de
+ * segundo grau não tramita em comarca nem perante juízo de direito; o endereçamento
+ * de primeiro grau saía errado em duas palavras de uma vez, como neste caso real:
+ * "AO JUÍZO DE DIREITO DO(A) PRESIDÊNCIA DA COMARCA DE BELO HORIZONTE".
+ *
+ * A comarca vazia é o que denuncia o segundo grau, e não um campo novo, porque é
+ * assim que a casa já preenche: processo de tribunal fica sem comarca.
  */
 function juizo(p: Processo): string | null {
   const vara = (p.vara ?? '').trim()
   const comarca = (p.comarca ?? '').trim()
+  const tribunal = (p.tribunal ?? '').trim()
+
+  if (!comarca && tribunal) {
+    // "DO" serve para todas as siglas que a casa usa (TJGO, TRF-6, TRT-18, TST):
+    // tribunal é masculino. É o retorno da padronização das siglas.
+    const alvo = vara
+      ? `${maiusculo(vara)} DO ${maiusculo(tribunal)}`
+      : maiusculo(tribunal)
+    return `${artigo(vara || tribunal)} ${alvo}`
+  }
   if (vara && comarca) return maiusculo(`${vara} DA COMARCA DE ${comarca}`)
   return vara ? maiusculo(vara) : comarca ? maiusculo(comarca) : null
 }
@@ -313,10 +360,27 @@ export function aplicarModelo(
   conteudo: string,
   valores: Partial<Record<VariavelPeticao, string>>,
 ): string {
-  return conteudo.replace(RE_ROTULO, (inteiro, rotulo: string) => {
+  const substituido = conteudo.replace(RE_ROTULO, (inteiro, rotulo: string) => {
     const v = ROTULOS[chaveRotulo(rotulo)]
     return (v && valores[v]) || inteiro
   })
+  return semJuizoDeDireito(substituido)
+}
+
+/**
+ * Tira o "AO JUÍZO DE DIREITO DO(A)" quando o endereçamento já vem com artigo.
+ *
+ * ESSE PREFIXO ESTÁ DENTRO DOS DEZ MODELOS, no bucket — não é gerado por código, e
+ * por isso não há como resolver o segundo grau só mudando a variável. Sem esta
+ * limpeza saía "AO JUÍZO DE DIREITO DO(A) À PRESIDÊNCIA DO TRF-6".
+ *
+ * O GATILHO É O ARTIGO, não uma bandeira passada de fora: juizo() só devolve "À"/"AO"
+ * na frente quando conclui que é segundo grau, então o valor carrega a própria
+ * decisão. Em primeiro grau o miolo não tem artigo, nada casa, e o texto do modelo
+ * segue intacto — a mudança é inerte para o caminho que já funcionava.
+ */
+function semJuizoDeDireito(texto: string): string {
+  return texto.replace(/AO\s+JU[IÍ]ZO\s+DE\s+DIREITO\s+DO\(A\)\s+(?=À\s|AO\s)/gi, '')
 }
 
 /**

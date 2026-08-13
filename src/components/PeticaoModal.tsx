@@ -225,9 +225,15 @@ export function PeticaoModal({
    * vindo do principal, porque é dele que o crédito é (cessionário, tipo, dados
    * bancários) e porque `id` e `cedente` são o que encontram a pasta no Drive.
    *
-   * O juízo do apenso só substitui quando ele TEM juízo cadastrado: agravo em que
-   * ninguém preencheu o órgão herda o do principal, que é melhor que endereçar a
-   * peça a lugar nenhum.
+   * O JUÍZO DO APENSO É O DELE, SEM HERANÇA — e esta foi uma correção sobre a
+   * correção. Herdar a comarca do principal quando o apenso não tinha parecia
+   * prudente, e fabricava o pior endereçamento possível: apenso do TRF-6, que corre
+   * no tribunal e por isso não tem comarca, saiu como "AO JUÍZO DE DIREITO DO(A)
+   * PRESIDÊNCIA DA COMARCA DE BELO HORIZONTE" — a comarca herdada do principal.
+   *
+   * Comarca vazia é INFORMAÇÃO (é o que denuncia o segundo grau), não lacuna a
+   * preencher. Apenso sem juízo nenhum cadastrado agora cai em pendência, que é
+   * visível e acionável, em vez de sair com o juízo de outros autos.
    */
   const autos = useMemo(() => {
     if (!processo) return null
@@ -235,9 +241,9 @@ export function PeticaoModal({
     return {
       ...processo,
       numero_cnj: apenso.numero ?? processo.numero_cnj,
-      tribunal: apenso.tribunal || processo.tribunal,
-      comarca: apenso.comarca || processo.comarca,
-      vara: apenso.vara || processo.vara,
+      tribunal: apenso.tribunal,
+      comarca: apenso.comarca,
+      vara: apenso.vara,
     }
   }, [processo, apenso])
 

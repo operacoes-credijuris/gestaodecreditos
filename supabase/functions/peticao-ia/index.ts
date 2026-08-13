@@ -435,8 +435,9 @@ async function colherInsumos(
   // errados. O CRÉDITO segue sendo o principal: cedente, cessionário, tipo e
   // espécie não mudam por haver um agravo.
   //
-  // Herda o juízo do principal quando o apenso não tem: melhor que endereçar a
-  // lugar nenhum.
+  // SEM HERANÇA DE JUÍZO: o do apenso é o dele. Herdar a comarca do principal
+  // fabricava segundo grau com comarca — apenso do TRF-6 descrito como se
+  // tramitasse em Belo Horizonte. Comarca vazia é informação, não lacuna.
   if (apensoId) {
     const { data: apData } = await svc
       .from('apensos')
@@ -453,9 +454,9 @@ async function colherInsumos(
       processo = {
         ...processo,
         numero_cnj: ap.numero,
-        tribunal: ap.tribunal || processo.tribunal,
-        comarca: ap.comarca || processo.comarca,
-        vara: ap.vara || processo.vara,
+        tribunal: ap.tribunal,
+        comarca: ap.comarca,
+        vara: ap.vara,
       }
     }
   }
