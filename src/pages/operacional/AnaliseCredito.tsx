@@ -158,9 +158,11 @@ async function anotarResultadoNaKommo(leadId: number, r: ResultadoAnalise, anali
       (typeof r.drive_folder_url === 'string' && r.drive_folder_url) ||
       (typeof r.drive_file_url === 'string' && r.drive_file_url) ||
       ''
-    texto = link
+    const base = link
       ? `✅ APROVADO na análise automática.\nPlanilha e análise no Drive: ${link}`
       : '✅ APROVADO na análise automática. (Confira a pasta do Drive.)'
+    const avisoTxt = typeof r.aviso === 'string' && r.aviso.trim() ? `\n\n${r.aviso.trim()}` : ''
+    texto = base + avisoTxt
   }
   texto = `(${analista}) ${texto}`
   try {
