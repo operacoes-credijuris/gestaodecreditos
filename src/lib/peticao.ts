@@ -19,6 +19,7 @@ import {
   onlyDigits,
 } from './format'
 import { textoTipoCredito } from './labels'
+import { nomeTribunal } from './tribunais'
 import { chavePessoa, type InvestidorDados } from './queries'
 import { supabase } from './supabase'
 import type { Processo } from './types'
@@ -211,33 +212,6 @@ function dadosBancarios(nome: string, d: InvestidorDados | undefined): string | 
 const maiusculo = (s: string) => s.toLocaleUpperCase('pt-BR')
 
 /**
- * Órgãos femininos cuja terminação não denuncia o gênero.
- *
- * "Seção" e "comissão" terminam em -ão e são femininos ("a seção"); sem esta lista
- * a regra do "termina em A" as trataria como masculinas e sairia "AO SEÇÃO".
- */
-const ORGAOS_FEMININOS = new Set(['secao', 'subsecao', 'sessao', 'comissao'])
-
-/**
- * "À" ou "AO", conforme o gênero do órgão endereçado.
- *
- * Heurística, e ela pode errar: ignora ordinal inicial ("2ª TURMA" olha TURMA), usa
- * a lista de exceções acima e, no resto, decide pela terminação em A. Cobre o que a
- * casa usa — presidência, vice-presidência, câmara, turma, relatoria, gabinete,
- * plenário. Órgão de nome incomum pode sair com o artigo trocado, e é erro de
- * concordância à vista de quem revisa, não dado errado.
- */
-function artigo(orgao: string): 'À' | 'AO' {
-  const palavras = normalizarBusca(orgao)
-    .split(/\s+/)
-    // Fora ordinais e numerais: "2ª", "1o", "iii".
-    .filter((w) => w && !/^\d/.test(w) && !/^[ivx]+$/.test(w))
-  const nucleo = palavras[0] ?? ''
-  if (ORGAOS_FEMININOS.has(nucleo)) return 'À'
-  return nucleo.endsWith('a') ? 'À' : 'AO'
-}
-
-/**
  * Juízo endereçado.
  *
  * PRIMEIRO GRAU (tem comarca): "1ª VARA DA FAZENDA PÚBLICA DA COMARCA DE GOIÂNIA".
@@ -246,11 +220,20 @@ function artigo(orgao: string): 'À' | 'AO' {
  * foi digitada — sem isso saía "AO JUÍZO DE DIREITO DO(A) 1ª Vara Civil ... DA
  * COMARCA DE Luziânia", misturando as duas grafias na mesma linha.
  *
- * SEGUNDO GRAU (SEM comarca): "À PRESIDÊNCIA DO TRF-6" — com o artigo, e é o artigo
- * que sinaliza a aplicarModelo que o prefixo fixo do modelo tem de CAIR. Processo de
- * segundo grau não tramita em comarca nem perante juízo de direito; o endereçamento
- * de primeiro grau saía errado em duas palavras de uma vez, como neste caso real:
- * "AO JUÍZO DE DIREITO DO(A) PRESIDÊNCIA DA COMARCA DE BELO HORIZONTE".
+ * SEGUNDO GRAU (SEM comarca): "COLENDO(A) PRESIDÊNCIA DO TRIBUNAL REGIONAL FEDERAL
+ * DA SEXTA REGIÃO". Processo de segundo grau não tramita em comarca nem perante juízo
+ * de direito; o endereçamento de primeiro grau saía errado em duas palavras de uma
+ * vez, como neste caso real: "AO JUÍZO DE DIREITO DO(A) PRESIDÊNCIA DA COMARCA DE
+ * BELO HORIZONTE".
+ *
+ * O "COLENDO(A)" é a forma que a casa usa, e resolve de brinde a concordância: com o
+ * "(A)" no rótulo, não é preciso adivinhar o gênero do órgão para escolher entre "À"
+ * e "AO" — houve uma heurística para isso aqui, e ela saiu porque este formato a
+ * tornou desnecessária. É também ele que sinaliza a aplicarModelo que o prefixo fixo
+ * do modelo tem de CAIR.
+ *
+ * O TRIBUNAL SAI POR EXTENSO (ver lib/tribunais.ts): o cadastro guarda a sigla, mas
+ * "COLENDO(A) PRESIDÊNCIA DO TRF-6" é informal demais para uma peça protocolada.
  *
  * A comarca vazia é o que denuncia o segundo grau, e não um campo novo, porque é
  * assim que a casa já preenche: processo de tribunal fica sem comarca.
@@ -261,12 +244,11 @@ function juizo(p: Processo): string | null {
   const tribunal = (p.tribunal ?? '').trim()
 
   if (!comarca && tribunal) {
-    // "DO" serve para todas as siglas que a casa usa (TJGO, TRF-6, TRT-18, TST):
-    // tribunal é masculino. É o retorno da padronização das siglas.
-    const alvo = vara
-      ? `${maiusculo(vara)} DO ${maiusculo(tribunal)}`
-      : maiusculo(tribunal)
-    return `${artigo(vara || tribunal)} ${alvo}`
+    const nome = maiusculo(nomeTribunal(tribunal))
+    // Sem órgão cadastrado o endereçamento é o tribunal, sem o "DO" pendurado.
+    return vara
+      ? `COLENDO(A) ${maiusculo(vara)} DO ${nome}`
+      : `COLENDO(A) ${nome}`
   }
   if (vara && comarca) return maiusculo(`${vara} DA COMARCA DE ${comarca}`)
   return vara ? maiusculo(vara) : comarca ? maiusculo(comarca) : null
@@ -368,19 +350,33 @@ export function aplicarModelo(
 }
 
 /**
- * Tira o "AO JUÍZO DE DIREITO DO(A)" quando o endereçamento já vem com artigo.
+ * Tira o endereçamento de primeiro grau da linha que já traz "COLENDO(A)".
  *
- * ESSE PREFIXO ESTÁ DENTRO DOS DEZ MODELOS, no bucket — não é gerado por código, e
- * por isso não há como resolver o segundo grau só mudando a variável. Sem esta
- * limpeza saía "AO JUÍZO DE DIREITO DO(A) À PRESIDÊNCIA DO TRF-6".
+ * O PREFIXO "AO JUÍZO DE DIREITO DO(A)" ESTÁ DENTRO DOS DEZ MODELOS, no bucket — não
+ * é gerado por código, e por isso não havia como resolver o segundo grau só mudando a
+ * variável. Sem esta limpeza sairia "AO JUÍZO DE DIREITO DO(A) COLENDO(A) PRESIDÊNCIA
+ * DO TRIBUNAL...".
  *
- * O GATILHO É O ARTIGO, não uma bandeira passada de fora: juizo() só devolve "À"/"AO"
- * na frente quando conclui que é segundo grau, então o valor carrega a própria
- * decisão. Em primeiro grau o miolo não tem artigo, nada casa, e o texto do modelo
- * segue intacto — a mudança é inerte para o caminho que já funcionava.
+ * O GATILHO É O PRÓPRIO VALOR, não uma bandeira passada de fora: juizo() só devolve
+ * "COLENDO(A)" quando concluiu que é segundo grau, então o texto carrega a decisão
+ * consigo e não há dois lugares para desencontrar.
+ *
+ * LIMPA A LINHA, e não uma expressão exata: apaga o que houver ANTES do COLENDO(A) na
+ * linha que menciona juízo de direito, preservando a marcação de início (** ou #).
+ * Assim funciona mesmo que um dos dez modelos escreva o prefixo com outras palavras —
+ * eu não vi os dez arquivos. Só age em linha que tem as duas coisas, então em primeiro
+ * grau nada casa e o modelo segue intacto: a mudança é inerte no caminho que já
+ * funcionava.
  */
 function semJuizoDeDireito(texto: string): string {
-  return texto.replace(/AO\s+JU[IÍ]ZO\s+DE\s+DIREITO\s+DO\(A\)\s+(?=À\s|AO\s)/gi, '')
+  return texto
+    .split('\n')
+    .map((linha) => {
+      if (!/COLENDO\(A\)/i.test(linha)) return linha
+      if (!/JU[IÍ]ZO\s+DE\s+DIREITO/i.test(linha)) return linha
+      return linha.replace(/^([*#>\s]*).*?(COLENDO\(A\))/i, '$1$2')
+    })
+    .join('\n')
 }
 
 /**
