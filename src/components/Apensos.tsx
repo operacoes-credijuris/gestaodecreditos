@@ -353,13 +353,20 @@ export function useApensosManager(parentField: ParentField) {
                     onChange={(e) => setEditing({ ...editing, comarca: e.target.value })}
                   />
                 </Field>
-                <Field label="Vara" className="sm:col-span-2">
+                {/* "Órgão" e não "Vara": o apenso corre em turma, câmara, gabinete ou
+                    relatoria — chamar isso de vara está errado na maioria dos casos.
+                    A COLUNA do banco continua `vara`: renomeá-la exigiria migração e
+                    tocaria a ficha e a sincronização, sem ganho nenhum. */}
+                <Field label="Órgão" className="sm:col-span-2">
                   <Input
                     value={editing.vara ?? ''}
                     onChange={(e) => setEditing({ ...editing, vara: e.target.value })}
                   />
                 </Field>
-                <Field label="Polo ativo" className="sm:col-span-2">
+                {/* Os dois polos LADO A LADO: são um par, e um par lido em duas linhas
+                    de largura inteira gasta altura sem ganhar leitura — os nomes das
+                    partes raramente ocupam meia tela. Sobra uma linha no formulário. */}
+                <Field label="Polo ativo">
                   <Input
                     value={editing.polo_ativo ?? ''}
                     onChange={(e) =>
@@ -367,7 +374,7 @@ export function useApensosManager(parentField: ParentField) {
                     }
                   />
                 </Field>
-                <Field label="Polo passivo" className="sm:col-span-2">
+                <Field label="Polo passivo">
                   <Input
                     value={editing.polo_passivo ?? ''}
                     onChange={(e) =>
@@ -432,7 +439,9 @@ export function useApensosManager(parentField: ParentField) {
               <DrawerSection title="Processo">
                 <DrawerField label="Tribunal">{ficha.tribunal || '—'}</DrawerField>
                 <DrawerField label="Comarca">{ficha.comarca || '—'}</DrawerField>
-                <DrawerField label="Vara">{ficha.vara || '—'}</DrawerField>
+                {/* "Órgão", igual ao formulário: rótulo diferente para o mesmo campo
+                    entre a ficha e o cadastro faz parecer que são dois dados. */}
+                <DrawerField label="Órgão">{ficha.vara || '—'}</DrawerField>
                 <DrawerField label="Classe processual">
                   {ficha.classe_processual || '—'}
                 </DrawerField>
