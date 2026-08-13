@@ -869,6 +869,34 @@ function dataPagamento(meses: number): string {
 // Handler
 // ============================================================================
 
+
+/* ===== Teto da RPV por ente (tabela do jurídico). Alerta, NÃO impeditivo. ===== */
+const TETOS_RPV: Record<string, { est: number | null; mun: number | null }> = {"PE": {"est": 64840.0, "mun": 48630.0}, "PA": {"est": 48630.0, "mun": 48630.0}, "AM": {"est": 32420.0, "mun": 24315.0}, "DF": {"est": 32420.0, "mun": null}, "MA": {"est": 32420.0, "mun": 8475.55}, "RJ": {"est": 32420.0, "mun": 16210.0}, "RN": {"est": 32420.0, "mun": 16210.0}, "MS": {"est": 27655.5, "mun": 10099.18}, "RR": {"est": 27557.0, "mun": 24315.0}, "MG": {"est": 27345.69, "mun": 8475.55}, "MT": {"est": 26010.0, "mun": 8475.55}, "PR": {"est": 24782.81, "mun": 8537.55}, "ES": {"est": 21827.28, "mun": 48630.0}, "SP": {"est": 16913.0, "mun": 31667.41}, "AP": {"est": 16210.0, "mun": 48630.0}, "BA": {"est": 16210.0, "mun": 11010.97}, "GO": {"est": 16210.0, "mun": 48630.0}, "PB": {"est": 16210.0, "mun": 8475.55}, "RS": {"est": 16210.0, "mun": 48630.0}, "RO": {"est": 16210.0, "mun": 16210.0}, "SC": {"est": 16210.0, "mun": 8475.55}, "TO": {"est": 16210.0, "mun": 24315.0}, "CE": {"est": 15746.8, "mun": 8475.55}, "AC": {"est": 11347.0, "mun": 16210.0}, "AL": {"est": 8475.55, "mun": 21073.0}, "PI": {"est": 8475.55, "mun": 11347.0}, "SE": {"est": 8475.55, "mun": 8475.55}};
+function _brlTeto(n: number): string {
+  return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+// Compara o valor bruto com o teto da RPV do ente. Devolve o aviso (ou null se estiver dentro do teto).
+function checarTetoRPV(esfera: string | undefined, tribunal: string | undefined, bruto: number): string | null {
+  const SM = 1621; // salário mínimo usado na tabela de tetos (teto federal = 60 x SM)
+  const esf = String(esfera || '').toLowerCase();
+  const trib = String(tribunal || '').toUpperCase();
+  if (!bruto || bruto <= 0) return null;
+  let teto: number | null = null;
+  let ref = '';
+  if (esf.includes('federal') || /^TRF/.test(trib) || trib === 'STJ' || trib === 'STF') {
+    teto = 60 * SM; ref = 'federal (60 salários mínimos)';
+  } else {
+    const uf = trib.replace(/^TJ/, '').slice(0, 2);
+    const t = TETOS_RPV[uf];
+    if (!t) return null; // ente não localizado na tabela -> não arrisca um alerta errado
+    if (esf.includes('municipal')) { teto = t.mun; ref = `municipal (referência: capital de ${uf})`; }
+    else { teto = t.est; ref = `estadual (${uf})`; }
+  }
+  if (teto == null || bruto <= teto) return null;
+  return `⚠️ ATENÇÃO — TETO DA RPV: o valor bruto (${_brlTeto(bruto)}) EXCEDE o teto da RPV ${ref} (${_brlTeto(teto)}). Isso NÃO impede a operação, mas será necessária a RENÚNCIA ao valor que excede o teto para receber como RPV — o operacional deve avaliar.`;
+}
+
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
@@ -1042,6 +1070,8 @@ Deno.serve(async (req) => {
 
     // Avisos (alertas da qualificação + rentabilidade abaixo da meta e/ou documento cortado por tamanho)
     const avisos: string[] = [...avisosQualif];
+    const _avisoTeto = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0);
+    if (_avisoTeto) avisos.push(_avisoTeto);
     if (calc.atingiuAlvo === false)
       avisos.push(`Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
     if (houveCorte)
