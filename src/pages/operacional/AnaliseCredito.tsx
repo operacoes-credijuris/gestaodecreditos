@@ -7,7 +7,15 @@
 // já foi escrita em Pendentes (ver src/lib/kommo.ts).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, ExternalLink, ArrowRight, Check, FileSearch, X } from 'lucide-react'
+import {
+  Search,
+  ExternalLink,
+  ArrowRight,
+  Check,
+  FileSearch,
+  ClipboardCheck,
+  X,
+} from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
   FUNIL_RPV,
@@ -34,6 +42,7 @@ import { Segmented } from '@/components/ui/Segmented'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
+import { ChecklistCertidoes } from '@/components/ChecklistCertidoes'
 import { formatDate } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -103,9 +112,20 @@ async function extrairTextoDoPdf(url: string): Promise<string> {
   return texto
 }
 
-async function analisarLeadCredijuris(lead: KommoLead): Promise<ResultadoAnalise> {
-  const dados = lerCardCredijuris(lead)
-
+/**
+ * Texto do PDF anexado ao card.
+ *
+ * Separado de analisarLeadCredijuris porque agora DUAS coisas dependem dele: a
+ * análise (que manda o texto ao motor) e o checklist de certidões (que procura
+ * nele os CPFs candidatos). Baixar e extrair duas vezes o mesmo PDF de 200
+ * páginas seria desperdício visível na tela, então quem chama guarda o
+ * resultado — ver `textoCache` no componente.
+ *
+ * Devolve o texto INTEIRO. O corte por tamanho é do consumidor: o motor tem
+ * limite de contexto, a busca de CPF não tem e não pode perder o fim do
+ * documento.
+ */
+async function lerTextoDoCard(lead: KommoLead): Promise<string> {
   // 1) Kommo: pega o LINK de download do PDF anexado no card
   const bk = await invokeFunction<{
     pronto?: boolean
@@ -119,12 +139,23 @@ async function analisarLeadCredijuris(lead: KommoLead): Promise<ResultadoAnalise
 
   // 2) O NAVEGADOR baixa o PDF e extrai o texto (pdf.js) — o trabalho pesado fica aqui,
   //    não no servidor, então aguenta PDF de qualquer tamanho sem estourar a CPU.
-  let texto = (await extrairTextoDoPdf(bk.download_url)).trim()
+  const texto = (await extrairTextoDoPdf(bk.download_url)).trim()
   if (!texto) {
     throw new Error(
       'O PDF não tem texto selecionável (parece escaneado/imagem). Não foi possível ler o conteúdo.',
     )
   }
+  return texto
+}
+
+async function analisarLeadCredijuris(
+  lead: KommoLead,
+  textoJaLido?: string,
+): Promise<{ resultado: ResultadoAnalise; texto: string }> {
+  const dados = lerCardCredijuris(lead)
+
+  const completo = textoJaLido ?? (await lerTextoDoCard(lead))
+  let texto = completo
   // corta se gigante (mantém início e final — cálculo/RPV costumam estar no fim)
   const MAX = 360000
   if (texto.length > MAX) {
@@ -144,7 +175,7 @@ async function analisarLeadCredijuris(lead: KommoLead): Promise<ResultadoAnalise
     tipo_aquisicao: dados.tipo_aquisicao,
     honorarios_pct: dados.honorarios_pct,
   })
-  return res
+  return { resultado: res, texto: completo }
 }
 
 // Escreve o resultado da análise no card do Kommo (motivo se recusado, link do Drive se aprovado).
@@ -198,6 +229,7 @@ function CardCredito({
   onAnalisar,
   analisando,
   resultadoAnalise,
+  onCertidoes,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -209,6 +241,7 @@ function CardCredito({
   onAnalisar: (l: KommoLead) => void
   analisando: boolean
   resultadoAnalise?: ResultadoAnalise
+  onCertidoes: (l: KommoLead) => void
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -264,7 +297,7 @@ function CardCredito({
       </div>
 
       {/* Análise automática Credijuris: Judit -> due diligence -> planilha */}
-      <div className="mt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button
           size="sm"
           variant="secondary"
@@ -275,6 +308,20 @@ function CardCredito({
         >
           {analisando ? 'Analisando…' : 'Analisar (PDF do card)'}
         </Button>
+        {/* Botão separado, e nunca automático: o checklist depende de CPF e UF
+            que uma pessoa confere no processo. Rodar sozinho só produziria
+            checklist sobre dado adivinhado. */}
+        <Button
+          size="sm"
+          variant="outline"
+          icon={<ClipboardCheck className="h-4 w-4" />}
+          onClick={() => onCertidoes(lead)}
+          disabled={ocupado}
+        >
+          Certidões
+        </Button>
+      </div>
+      <div>
         {resultadoAnalise && (
           <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
             {resultadoAnalise.erro ? (
@@ -396,12 +443,36 @@ export default function AnaliseCredito() {
   const [analisandoId, setAnalisandoId] = useState<number | null>(null)
   const [resultadoAnalise, setResultadoAnalise] = useState<Record<number, ResultadoAnalise>>({})
 
+  // Texto do PDF por card, compartilhado entre a análise e o checklist de
+  // certidões: o mesmo PDF serve aos dois e baixar duas vezes seria espera à
+  // toa. Vive enquanto a página estiver aberta; o sync limpa (ver abaixo),
+  // porque o PDF do card pode ter sido substituído no Kommo.
+  const [textoCache, setTextoCache] = useState<Record<number, string>>({})
+  const [certidoesLead, setCertidoesLead] = useState<KommoLead | null>(null)
+  // CONJUNTO, não um id só. Com um id só, a leitura do card A terminando
+  // limpava o indicador do card B, e o modal de B — ainda sem texto — passava a
+  // afirmar "não achei nenhum CPF no PDF" sobre um PDF que nem tinha sido lido.
+  const [lendoPdf, setLendoPdf] = useState<Set<number>>(new Set())
+  const [avisoPdf, setAvisoPdf] = useState<Record<number, string>>({})
+
+  const marcarLendo = (id: number, lendo: boolean) =>
+    setLendoPdf((p) => {
+      const n = new Set(p)
+      if (lendo) n.add(id)
+      else n.delete(id)
+      return n
+    })
+
   async function onAnalisar(lead: KommoLead) {
     setAnalisandoId(lead.kommo_lead_id)
     try {
-      const r = await analisarLeadCredijuris(lead)
-      setResultadoAnalise((p) => ({ ...p, [lead.kommo_lead_id]: r }))
-      await anotarResultadoNaKommo(lead.kommo_lead_id, r, analistaNome)
+      const { resultado, texto } = await analisarLeadCredijuris(
+        lead,
+        textoCache[lead.kommo_lead_id],
+      )
+      setTextoCache((p) => ({ ...p, [lead.kommo_lead_id]: texto }))
+      setResultadoAnalise((p) => ({ ...p, [lead.kommo_lead_id]: resultado }))
+      await anotarResultadoNaKommo(lead.kommo_lead_id, resultado, analistaNome)
     } catch (e) {
       setResultadoAnalise((p) => ({
         ...p,
@@ -412,6 +483,31 @@ export default function AnaliseCredito() {
     }
   }
 
+  /**
+   * Abre o checklist. O modal aparece NA HORA e o PDF é lido em segundo plano:
+   * a sugestão de CPF é conveniência, não requisito. Se o PDF não existir ou for
+   * digitalizado, o formulário continua utilizável — quem confere digita.
+   */
+  function onCertidoes(lead: KommoLead) {
+    setCertidoesLead(lead)
+    const id = lead.kommo_lead_id
+    // Já tem o texto, já está lendo, ou o Analisar está lendo o mesmo PDF agora:
+    // em todos os casos, disparar de novo só baixaria o arquivo duas vezes.
+    if (textoCache[id] || lendoPdf.has(id) || analisandoId === id) return
+    marcarLendo(id, true)
+    void lerTextoDoCard(lead)
+      .then((t) => setTextoCache((p) => ({ ...p, [id]: t })))
+      .catch((e) =>
+        setAvisoPdf((p) => ({
+          ...p,
+          [id]:
+            `Não consegui ler o PDF do card (${(e as Error)?.message ?? e}). ` +
+            `Digite o CPF conferindo no processo.`,
+        })),
+      )
+      .finally(() => marcarLendo(id, false))
+  }
+
   // Sincroniza com o Kommo ao abrir a página, no mesmo padrão de Publicações e
   // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
   const sync = useMutation({
@@ -419,6 +515,13 @@ export default function AnaliseCredito() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['kommo_leads'] })
       qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
+      // O sync pode ter trazido um PDF novo no card — versão corrigida do
+      // processo é rotina. O texto guardado passa a ser de um documento
+      // superado, e é dele que sai a lista de CPFs candidatos: servir CPF de
+      // documento vencido é exatamente o erro que essa lista existe para
+      // evitar. Descarta.
+      setTextoCache({})
+      setAvisoPdf({})
     },
     onError: (e) => toast.error(`Sincronização Kommo: ${(e as Error).message}`),
   })
@@ -571,11 +674,30 @@ export default function AnaliseCredito() {
                 onAnalisar={onAnalisar}
                 analisando={analisandoId === l.kommo_lead_id}
                 resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
+                onCertidoes={onCertidoes}
               />
             ))}
           </div>
         )}
       </Card>
+
+      {certidoesLead && (
+        <ChecklistCertidoes
+          // key pelo card: trocar de card remonta o modal do zero, em vez de
+          // reaproveitar o formulário já preenchido com os dados do anterior.
+          key={certidoesLead.kommo_lead_id}
+          open
+          leadId={certidoesLead.kommo_lead_id}
+          cedenteDoCard={lerCardCredijuris(certidoesLead).cedente}
+          textoDoProcesso={textoCache[certidoesLead.kommo_lead_id] ?? ''}
+          lendoPdf={
+            lendoPdf.has(certidoesLead.kommo_lead_id) ||
+            analisandoId === certidoesLead.kommo_lead_id
+          }
+          avisoPdf={avisoPdf[certidoesLead.kommo_lead_id] ?? null}
+          onClose={() => setCertidoesLead(null)}
+        />
+      )}
     </div>
   )
 }
