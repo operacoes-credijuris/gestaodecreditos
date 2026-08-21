@@ -227,6 +227,39 @@ export function useKommoEtapas() {
   })
 }
 
+/**
+ * Curadoria das colunas: quais aparecem na tela e em qual grupo.
+ *
+ * Um funil do Kommo pode atender duas coisas diferentes — é o caso do de
+ * Precatórios — e aí a maioria das colunas não é de quem está olhando. Esta
+ * tabela (migration 0045) é editada na própria tela, e não no código, porque
+ * coluna nova, coluna renomeada e equipe que muda de ideia não deveriam virar
+ * pedido de deploy.
+ *
+ * `grupo` NULL significa OCULTA, e é diferente de não ter linha nenhuma, que
+ * significa NÃO CLASSIFICADA. Ver o comentário da 0045: é a distinção que
+ * permite ocultar em silêncio o que foi mandado ocultar e avisar sobre o que
+ * ninguém decidiu.
+ */
+export interface EtapaVisao {
+  pipeline_id: number
+  status_id: number
+  grupo: string | null
+}
+
+export function useEtapaVisao() {
+  return useQuery({
+    queryKey: ['etapa_visao'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('etapa_visao')
+        .select('pipeline_id, status_id, grupo')
+      if (error) throw new Error(error.message)
+      return (data ?? []) as EtapaVisao[]
+    },
+  })
+}
+
 /** Uma aba da tela: um rótulo, os status que ela cobre e as ações que oferece. */
 export interface Aba {
   key: string
@@ -234,6 +267,55 @@ export interface Aba {
   statusIds: number[]
   descricaoVazia: string
   acoes: AcaoTela[]
+}
+
+/**
+ * Os grupos de um funil, e as colunas que ninguém classificou.
+ *
+ * `configurado` é falso quando não existe UMA linha de curadoria para o funil, e
+ * nesse caso a tela volta ao comportamento da 0044 (todas as colunas, sem
+ * grupos). Isso é o que faz a 0045 não quebrar nada ao entrar: configurar é
+ * opção, não obrigação.
+ *
+ * `naoClassificadas` é a lista que merece aviso — coluna que apareceu no Kommo
+ * depois de alguém já ter configurado o funil. Sem esse aviso, coluna nova
+ * simplesmente não teria pílula, e não ter pílula é indistinguível de estar
+ * oculta de propósito.
+ *
+ * A ordem dos grupos sai do kanban: o grupo cuja primeira coluna vem antes no
+ * Kommo aparece antes. Ordem alfabética seria escolha nossa contando uma
+ * história diferente da do CRM que o comercial usa.
+ */
+export function gruposDoFunil(
+  pipelineId: number,
+  etapas: EtapaKommo[],
+  visoes: EtapaVisao[],
+): { grupos: string[]; naoClassificadas: EtapaKommo[]; configurado: boolean } {
+  if (pipelineId === FUNIL_RPV) {
+    return { grupos: [], naoClassificadas: [], configurado: false }
+  }
+  const doFunil = etapas.filter((e) => e.pipeline_id === pipelineId)
+  const conf = visoes.filter((v) => v.pipeline_id === pipelineId)
+  if (conf.length === 0) {
+    return { grupos: [], naoClassificadas: [], configurado: false }
+  }
+
+  const porStatus = new Map(conf.map((v) => [v.status_id, v.grupo]))
+  const primeiraOrdem = new Map<string, number>()
+  for (const e of doFunil) {
+    const g = porStatus.get(e.status_id)
+    if (!g) continue
+    const atual = primeiraOrdem.get(g)
+    if (atual === undefined || e.ordem < atual) primeiraOrdem.set(g, e.ordem)
+  }
+
+  return {
+    grupos: [...primeiraOrdem.entries()]
+      .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0], 'pt-BR'))
+      .map(([g]) => g),
+    naoClassificadas: doFunil.filter((e) => !porStatus.has(e.status_id)),
+    configurado: true,
+  }
 }
 
 /**
@@ -247,8 +329,17 @@ export interface Aba {
  * seria mover card de verdade com base em palpite. A kommo-mover, de todo modo,
  * só aceita os cinco status de RPV — um palpite aqui daria erro lá, o que é o
  * comportamento certo, mas o botão não devia existir.
+ *
+ * `grupo` filtra as colunas quando o funil está configurado. Coluna oculta e
+ * coluna não classificada ficam fora das abas — e por isso caem em "Outras
+ * etapas" (agruparPorAba), nunca no vazio.
  */
-export function abasDoFunil(pipelineId: number, etapas: EtapaKommo[]): Aba[] {
+export function abasDoFunil(
+  pipelineId: number,
+  etapas: EtapaKommo[],
+  visoes: EtapaVisao[] = [],
+  grupo: string | null = null,
+): Aba[] {
   if (pipelineId === FUNIL_RPV) {
     return TELAS.map((t) => ({
       key: t.key,
@@ -258,8 +349,16 @@ export function abasDoFunil(pipelineId: number, etapas: EtapaKommo[]): Aba[] {
       acoes: ACOES[t.key],
     }))
   }
+
+  const conf = visoes.filter((v) => v.pipeline_id === pipelineId)
+  const porStatus = new Map(conf.map((v) => [v.status_id, v.grupo]))
+
   return etapas
     .filter((e) => e.pipeline_id === pipelineId)
+    .filter((e) => {
+      if (conf.length === 0) return true // sem curadoria: mostra tudo
+      return grupo !== null && porStatus.get(e.status_id) === grupo
+    })
     .map((e) => ({
       key: `st${e.status_id}`,
       label: e.nome,
