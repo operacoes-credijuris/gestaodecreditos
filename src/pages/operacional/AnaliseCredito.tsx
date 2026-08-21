@@ -15,6 +15,7 @@ import {
   FileSearch,
   ClipboardCheck,
   RefreshCw,
+  SlidersHorizontal,
   X,
 } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
@@ -31,8 +32,10 @@ import {
   agruparPorAba,
   nomeDaEtapa,
   telasRpvDesalinhadas,
+  gruposDoFunil,
   useKommoLeads,
   useKommoEtapas,
+  useEtapaVisao,
   useAnalisesProntas,
   type AcaoTela,
 } from '@/lib/kommo'
@@ -47,6 +50,7 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { ChecklistCertidoes } from '@/components/ChecklistCertidoes'
+import { EtapasDoFunil } from '@/components/EtapasDoFunil'
 import { formatDate } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -484,9 +488,13 @@ export default function AnaliseCredito() {
   const [funil, setFunil] = useState<number>(FUNIL_RPV)
   const leads = useKommoLeads(funil)
   const etapas = useKommoEtapas()
+  const visoes = useEtapaVisao()
   const prontas = useAnalisesProntas()
 
   const [aba, setAba] = useState<string>('pendentes')
+  // Grupo de etapas escolhido. null = funil sem curadoria (mostra tudo).
+  const [grupo, setGrupo] = useState<string | null>(null)
+  const [configurando, setConfigurando] = useState(false)
   const [busca, setBusca] = useState('')
   // Ação em curso, para o botão certo do card certo mostrar o spinner.
   const [emAndamento, setEmAndamento] = useState<{
@@ -606,6 +614,7 @@ export default function AnaliseCredito() {
       // As colunas do kanban também vêm deste sync (migration 0044): sem
       // invalidar, uma coluna nova no Kommo só apareceria no próximo F5.
       qc.invalidateQueries({ queryKey: ['kommo_etapa'] })
+      qc.invalidateQueries({ queryKey: ['etapa_visao'] })
       // Aviso de sucesso PARCIAL: os cards vieram, a estrutura do kanban não.
       // Silenciar isto deixaria uma aba faltando sem explicação.
       if (r?.aviso) toast.error(r.aviso)
@@ -627,9 +636,19 @@ export default function AnaliseCredito() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const { grupos, naoClassificadas, configurado } = useMemo(
+    () => gruposDoFunil(funil, etapas.data ?? [], visoes.data ?? []),
+    [funil, etapas.data, visoes.data],
+  )
+
+  // O grupo guardado no estado pode não existir mais (funil trocado, grupo
+  // renomeado, configuração ainda carregando). Cai no primeiro.
+  const grupoAtual =
+    grupo && grupos.includes(grupo) ? grupo : (grupos[0] ?? null)
+
   const abas = useMemo(
-    () => abasDoFunil(funil, etapas.data ?? []),
-    [funil, etapas.data],
+    () => abasDoFunil(funil, etapas.data ?? [], visoes.data ?? [], grupoAtual),
+    [funil, etapas.data, visoes.data, grupoAtual],
   )
 
   const { porAba, outras } = useMemo(
@@ -749,7 +768,7 @@ export default function AnaliseCredito() {
       {/* Os dois funis do Kommo. A contagem sai do funil carregado, então o do
           outro lado fica sem número até ser aberto — melhor sem número que com
           número errado. */}
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Segmented
           ariaLabel="Tipo de crédito"
           items={[
@@ -774,9 +793,37 @@ export default function AnaliseCredito() {
             // A chave da aba não é comparável entre funis ('pendentes' vs
             // 'st123'). Limpar aqui evita a tela abrir vazia por casar nada.
             setAba('')
+            setGrupo(null)
             setBusca('')
           }}
         />
+
+        {/* Grupo de etapas. Aparece só quando o funil foi configurado — no funil
+            sem curadoria não existe grupo nenhum e uma pílula vazia seria ruído. */}
+        {grupos.length > 0 && (
+          <Segmented
+            ariaLabel="Grupo de etapas"
+            items={grupos.map((g) => ({ key: g, label: g }))}
+            value={grupoAtual ?? ''}
+            onChange={(v) => {
+              setGrupo(v)
+              setAba('')
+            }}
+          />
+        )}
+
+        {/* Configurar só onde a configuração existe. Em RPV as abas são curadas
+            no código (com os botões de mover), então não há o que escolher. */}
+        {funil !== FUNIL_RPV && (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<SlidersHorizontal className="h-4 w-4" />}
+            onClick={() => setConfigurando(true)}
+          >
+            {configurado ? 'Etapas' : 'Dividir etapas'}
+          </Button>
+        )}
       </div>
 
       <Card className="mb-4 p-4">
@@ -833,6 +880,32 @@ export default function AnaliseCredito() {
           )}
         </div>
       </Card>
+
+      {visoes.isError && funil !== FUNIL_RPV && (
+        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+          Não consegui ler a divisão de etapas: {(visoes.error as Error)?.message}. A
+          tela está mostrando TODAS as colunas do funil — não é que a configuração
+          tenha sido perdida, é que não deu para lê-la.{' '}
+          <button
+            type="button"
+            onClick={() => visoes.refetch()}
+            className="font-medium underline"
+          >
+            Tentar de novo
+          </button>
+        </div>
+      )}
+
+      {naoClassificadas.length > 0 && (
+        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
+          {naoClassificadas.length} coluna(s) do Kommo ainda sem grupo:{' '}
+          <strong>{naoClassificadas.map((e) => e.nome).join(', ')}</strong>. Os cards
+          delas aparecem em &quot;Outras etapas&quot; até alguém decidir — clique em{' '}
+          <strong>Etapas</strong>, no alto. Este aviso existe porque coluna nova no
+          Kommo sem pílula na tela seria indistinguível de coluna ocultada de
+          propósito.
+        </div>
+      )}
 
       {rpvDesalinhado.length > 0 && (
         <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
@@ -918,6 +991,20 @@ export default function AnaliseCredito() {
           </div>
         )}
       </Card>
+
+      <EtapasDoFunil
+        pipelineId={funil}
+        etapas={etapas.data ?? []}
+        visoes={visoes.data ?? []}
+        open={configurando}
+        onClose={() => setConfigurando(false)}
+        onSalvo={() => {
+          qc.invalidateQueries({ queryKey: ['etapa_visao'] })
+          // O grupo guardado pode ter deixado de existir na nova configuração.
+          setGrupo(null)
+          setAba('')
+        }}
+      />
 
       {certidoesLead && (
         <ChecklistCertidoes
