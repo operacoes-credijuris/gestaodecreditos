@@ -15,8 +15,21 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 
-// Funis que o operacional usa. O Precatório (13971995) entra na fase 2.
-const FUNIS = [13901939]
+// Funis que o operacional usa.
+//
+// O Precatório entrou junto com o checklist de certidões (migration 0042). Os
+// cards dele passam a ser espelhados em kommo_leads com o pipeline_id próprio,
+// e por isso NÃO aparecem em nenhuma aba ainda: as telas em src/lib/kommo.ts
+// filtram pelos status_id do funil de RPV, e os do Precatório são outros.
+//
+// Isso é deliberado, e a ordem importa: sincronizar primeiro deixa os cards no
+// espelho, e daí os status_id do funil se descobrem consultando o próprio banco
+// em vez de alguém ir catar id na interface do Kommo — que é onde se erra.
+//   select status_id, count(*) from kommo_leads
+//    where pipeline_id = 13971995 group by 1 order by 2 desc;
+const FUNIL_RPV = 13901939
+const FUNIL_PRECATORIO = 13971995
+const FUNIS = [FUNIL_RPV, FUNIL_PRECATORIO]
 
 // Margem confortável abaixo do teto de 7/s.
 const INTERVALO_MS = 160
