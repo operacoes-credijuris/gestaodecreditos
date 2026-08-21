@@ -196,22 +196,144 @@ export function useAnalisesProntas() {
   })
 }
 
-/** Separa os cards de um funil nas telas definidas em TELAS. */
-export function agruparPorTela(
-  leads: KommoLead[],
-): Record<TelaAnalise, KommoLead[]> {
-  const out = {
-    pendentes: [],
-    validacao: [],
-    aprovados: [],
-    diligencia: [],
-    reprovados: [],
-  } as Record<TelaAnalise, KommoLead[]>
+/**
+ * Colunas do kanban do Kommo, espelhadas em public.kommo_etapa pelo kommo-sync.
+ *
+ * É daqui que saem as abas do funil de Precatórios. O de RPV mantém as abas
+ * curadas em TELAS, com rótulo próprio e botões de ação; o Precatório não tem
+ * curadoria nenhuma ainda, então usa o kanban como ele é.
+ */
+export interface EtapaKommo {
+  pipeline_id: number
+  status_id: number
+  pipeline_nome: string | null
+  nome: string
+  ordem: number
+  tipo: number
+}
 
-  for (const tela of TELAS) {
-    for (const l of leads) {
-      if (l.status_id === tela.statusId) out[tela.key].push(l)
-    }
+export function useKommoEtapas() {
+  return useQuery({
+    queryKey: ['kommo_etapa'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('kommo_etapa')
+        .select('pipeline_id, status_id, pipeline_nome, nome, ordem, tipo')
+        .order('pipeline_id')
+        .order('ordem')
+      if (error) throw new Error(error.message)
+      return (data ?? []) as EtapaKommo[]
+    },
+  })
+}
+
+/** Uma aba da tela: um rótulo, os status que ela cobre e as ações que oferece. */
+export interface Aba {
+  key: string
+  label: string
+  statusIds: number[]
+  descricaoVazia: string
+  acoes: AcaoTela[]
+}
+
+/**
+ * As abas de um funil.
+ *
+ * RPV usa TELAS: rótulos no vocabulário da plataforma e as três saídas de
+ * Validação com um clique. Qualquer outro funil usa o kanban do Kommo como ele
+ * é, SEM botão de ação — e isso é decisão, não pendência: os botões de RPV
+ * carregam semântica ("Aprovar" = mover para Apresentação de Proposta) que
+ * ninguém definiu para o Precatório. Adivinhar qual coluna significa "aprovado"
+ * seria mover card de verdade com base em palpite. A kommo-mover, de todo modo,
+ * só aceita os cinco status de RPV — um palpite aqui daria erro lá, o que é o
+ * comportamento certo, mas o botão não devia existir.
+ */
+export function abasDoFunil(pipelineId: number, etapas: EtapaKommo[]): Aba[] {
+  if (pipelineId === FUNIL_RPV) {
+    return TELAS.map((t) => ({
+      key: t.key,
+      label: t.label,
+      statusIds: [t.statusId],
+      descricaoVazia: t.descricaoVazia,
+      acoes: ACOES[t.key],
+    }))
   }
-  return out
+  return etapas
+    .filter((e) => e.pipeline_id === pipelineId)
+    .map((e) => ({
+      key: `st${e.status_id}`,
+      label: e.nome,
+      statusIds: [e.status_id],
+      descricaoVazia: `Nenhum card em "${e.nome}" no Kommo.`,
+      acoes: [],
+    }))
+}
+
+/** A aba que existe só para nada desaparecer. Ver agruparPorAba. */
+export const ABA_OUTRAS = 'outras'
+
+/**
+ * Separa os cards nas abas — e devolve à parte os que não couberam em nenhuma.
+ *
+ * O SALDO EXISTE DE PROPÓSITO. A versão anterior filtrava card por card contra
+ * os cinco status de RPV e descartava o resto em silêncio: um card movido no
+ * Kommo para uma coluna fora dessas cinco sumia da tela, sem aparecer em aba
+ * nenhuma e sem entrar em contagem nenhuma. Ninguém tinha como notar — a
+ * ausência de um card não chama atenção. Agora ele cai em "Outras etapas", que
+ * só aparece quando tem algo dentro.
+ */
+export function agruparPorAba(
+  leads: KommoLead[],
+  abas: Aba[],
+): { porAba: Record<string, KommoLead[]>; outras: KommoLead[] } {
+  const porAba: Record<string, KommoLead[]> = {}
+  const daAba = new Map<number, string>()
+  for (const a of abas) {
+    porAba[a.key] = []
+    for (const s of a.statusIds) daAba.set(s, a.key)
+  }
+  const outras: KommoLead[] = []
+  for (const l of leads) {
+    const chave = daAba.get(l.status_id)
+    if (chave) porAba[chave].push(l)
+    else outras.push(l)
+  }
+  return { porAba, outras }
+}
+
+/**
+ * Nome da coluna do Kommo, para explicar de onde vem um card.
+ *
+ * PRECISA DO FUNIL, não só do status. É o mesmo motivo da chave composta na
+ * migration 0044: os estágios de sistema 142 ("Venda ganha") e 143 ("Venda
+ * perdida") existem em TODOS os funis com o MESMO status_id. Buscando só pelo
+ * status, um card de RPV em "Venda ganha" podia ser rotulado com o nome que
+ * aquela coluna tem no funil de Precatórios.
+ */
+export function nomeDaEtapa(
+  statusId: number,
+  pipelineId: number,
+  etapas: EtapaKommo[],
+): string {
+  const achada = etapas.find(
+    (e) => e.status_id === statusId && e.pipeline_id === pipelineId,
+  )
+  return achada?.nome ?? `coluna ${statusId}`
+}
+
+/**
+ * Os status de RPV escritos à mão que NÃO existem mais no kanban do Kommo.
+ *
+ * Existe porque a 0044 tornou a checagem possível e seria desperdício não fazer:
+ * as cinco constantes ST_* são números colados no código, e coluna recriada no
+ * Kommo ganha id novo. Quando isso acontece, a aba correspondente passa a mostrar
+ * zero card PARA SEMPRE, e o único vestígio é a pílula "Outras etapas" — que
+ * ninguém relaciona à causa. Devolve vazio quando o espelho de etapas ainda não
+ * chegou, para não acusar defeito por falta de dado.
+ */
+export function telasRpvDesalinhadas(etapas: EtapaKommo[]): DefTela[] {
+  const doRpv = etapas.filter((e) => e.pipeline_id === FUNIL_RPV)
+  if (doRpv.length === 0) return []
+  const existentes = new Set(doRpv.map((e) => e.status_id))
+  return TELAS.filter((t) => !existentes.has(t.statusId))
 }
