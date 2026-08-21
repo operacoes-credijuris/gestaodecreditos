@@ -14,22 +14,26 @@ import {
   Check,
   FileSearch,
   ClipboardCheck,
+  RefreshCw,
   X,
 } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
   FUNIL_RPV,
+  FUNIL_PRECATORIO,
   KOMMO_SUBDOMINIO,
-  TELAS,
-  ACOES,
   ST_DECISAO,
   ST_PROPOSTA,
   ST_DILIGENCIA,
   ST_REPROVADO,
-  agruparPorTela,
+  ABA_OUTRAS,
+  abasDoFunil,
+  agruparPorAba,
+  nomeDaEtapa,
+  telasRpvDesalinhadas,
   useKommoLeads,
+  useKommoEtapas,
   useAnalisesProntas,
-  type TelaAnalise,
   type AcaoTela,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
@@ -75,7 +79,30 @@ function lerCardCredijuris(lead: KommoLead) {
 
   const numero = (lead.processo_cnj ?? pegar(/PROCESSO:\s*([0-9.\-]+)/i)).trim()
   const tipo = pegar(/TIPO:\s*(.+)/i)
-  const categoria = /precat/i.test(tipo) ? 'Precatórios' : 'Requisições de Pequeno Valor'
+
+  // A CATEGORIA VEM DO FUNIL, não do texto da anotação.
+  //
+  // Antes saía de /precat/ na linha "TIPO:", com RPV como padrão. Isso funcionava
+  // por acidente: só cards de RPV chegavam a esta tela, então o padrão estava
+  // quase sempre certo. Com a aba de Precatórios ligada, um card de precatório
+  // cuja anotação não traga a linha TIPO cairia no padrão e seria analisado como
+  // RPV — e a categoria é o NOME DA PASTA no Drive (ver gerar-analise-rpv). O
+  // parecer e a planilha iriam para "Requisições de Pequeno Valor", sem erro
+  // nenhum na tela: o "✅ Planilha gerada" é idêntico nos dois casos.
+  //
+  // O funil é dado do CRM, não texto livre. É a fonte certa. A linha TIPO passa a
+  // servir só para DISCORDAR em voz alta.
+  const categoria =
+    lead.pipeline_id === FUNIL_PRECATORIO
+      ? 'Precatórios'
+      : 'Requisições de Pequeno Valor'
+  const divergenciaTipo =
+    tipo && /precat/i.test(tipo) !== (lead.pipeline_id === FUNIL_PRECATORIO)
+      ? `O card está no funil de ${
+          lead.pipeline_id === FUNIL_PRECATORIO ? 'Precatórios' : 'RPV'
+        }, mas a anotação diz "TIPO: ${tipo.trim()}". Analisei como ${categoria} ` +
+        `(o funil manda). Se estiver errado, mova o card no Kommo.`
+      : null
 
   const partesTitulo = (lead.nome ?? '').split(' - ')
   const intermediador = (partesTitulo[0] ?? '').trim()
@@ -95,7 +122,15 @@ function lerCardCredijuris(lead: KommoLead) {
   const honMatch = notas.match(/HONOR[ÁA]RIOS?\s*C\.?:\s*([\d.,]+)\s*%/i)
   const honorarios_pct = honMatch ? honMatch[1].replace(/\./g, '').replace(',', '.') : ''
 
-  return { numero, categoria, cedente, intermediador, tipo_aquisicao, honorarios_pct }
+  return {
+    numero,
+    categoria,
+    cedente,
+    intermediador,
+    tipo_aquisicao,
+    honorarios_pct,
+    divergenciaTipo,
+  }
 }
 
 async function extrairTextoDoPdf(url: string): Promise<string> {
@@ -175,7 +210,15 @@ async function analisarLeadCredijuris(
     tipo_aquisicao: dados.tipo_aquisicao,
     honorarios_pct: dados.honorarios_pct,
   })
-  return { resultado: res, texto: completo }
+  // Divergência entre o funil e a linha TIPO da anotação sobe junto do resultado,
+  // e não no lugar dele: a análise rodou, a categoria escolhida está dita.
+  const resultado: ResultadoAnalise = dados.divergenciaTipo
+    ? {
+        ...res,
+        aviso: [res.aviso, dados.divergenciaTipo].filter(Boolean).join(' '),
+      }
+    : res
+  return { resultado, texto: completo }
 }
 
 // Escreve o resultado da análise no card do Kommo (motivo se recusado, link do Drive se aprovado).
@@ -230,10 +273,13 @@ function CardCredito({
   analisando,
   resultadoAnalise,
   onCertidoes,
+  etapaOrigem,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
   onAcao: (l: KommoLead, a: AcaoTela) => void
+  /** Nome da coluna do Kommo, quando o card está fora das abas conhecidas. */
+  etapaOrigem: string | null
   /** null = não mostrar o selo (só faz sentido na etapa de revisão). */
   analisePronta: boolean | null
   /** Destino sendo processado neste card, ou null. */
@@ -264,6 +310,11 @@ function CardCredito({
             {analisePronta !== null && (
               <Badge size="sm" tone={analisePronta ? 'green' : 'yellow'}>
                 {analisePronta ? 'Finalizado' : 'Em curso'}
+              </Badge>
+            )}
+            {etapaOrigem && (
+              <Badge size="sm" tone="gray">
+                {etapaOrigem}
               </Badge>
             )}
           </div>
@@ -427,10 +478,15 @@ function CardCredito({
 export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
-  const leads = useKommoLeads(FUNIL_RPV)
+  // Funil escolhido no seletor de cima. Os dois funis têm cards de crédito e o
+  // mesmo trabalho de certidões; o que muda é a precificação e a análise do
+  // caderno processual.
+  const [funil, setFunil] = useState<number>(FUNIL_RPV)
+  const leads = useKommoLeads(funil)
+  const etapas = useKommoEtapas()
   const prontas = useAnalisesProntas()
 
-  const [tela, setTela] = useState<TelaAnalise>('pendentes')
+  const [aba, setAba] = useState<string>('pendentes')
   const [busca, setBusca] = useState('')
   // Ação em curso, para o botão certo do card certo mostrar o spinner.
   const [emAndamento, setEmAndamento] = useState<{
@@ -464,6 +520,7 @@ export default function AnaliseCredito() {
     })
 
   async function onAnalisar(lead: KommoLead) {
+    if (!confirmaForaDoFluxo(lead, 'Rodar a analise automatica')) return
     setAnalisandoId(lead.kommo_lead_id)
     try {
       const { resultado, texto } = await analisarLeadCredijuris(
@@ -488,12 +545,42 @@ export default function AnaliseCredito() {
    * a sugestão de CPF é conveniência, não requisito. Se o PDF não existir ou for
    * digitalizado, o formulário continua utilizável — quem confere digita.
    */
+  /**
+   * Confirmacao para card fora do fluxo.
+   *
+   * Analisar e Certidoes ESCREVEM: a analise grava anotacao no card do Kommo (que
+   * o comercial le) e arquivo no Drive; o checklist grava os sujeitos e o
+   * checklist no banco. Na aba "Outras etapas" o card pode estar em "Venda
+   * ganha" ou "Venda perdida" — estampar "APROVADO na analise automatica" num
+   * negocio fechado e pior que nao ter o botao. Nao escondo o botao: as vezes e
+   * exatamente o que se quer. Mas nao deixo acontecer sem querer.
+   */
+  function confirmaForaDoFluxo(lead: KommoLead, acao: string): boolean {
+    if (abaAtual?.key !== ABA_OUTRAS) return true
+    const coluna = nomeDaEtapa(lead.status_id, lead.pipeline_id, etapas.data ?? [])
+    return window.confirm(
+      `Este card esta na coluna "${coluna}" do Kommo, fora das etapas de analise.\n\n` +
+        `${acao} vai gravar no card e no Drive de todo jeito.\n\nConfirma?`,
+    )
+  }
+
   function onCertidoes(lead: KommoLead) {
+    if (!confirmaForaDoFluxo(lead, 'Montar o checklist de certidoes')) return
     setCertidoesLead(lead)
     const id = lead.kommo_lead_id
     // Já tem o texto, já está lendo, ou o Analisar está lendo o mesmo PDF agora:
     // em todos os casos, disparar de novo só baixaria o arquivo duas vezes.
     if (textoCache[id] || lendoPdf.has(id) || analisandoId === id) return
+    // Limpa o aviso da tentativa ANTERIOR antes de tentar de novo. Sem isto, uma
+    // releitura bem-sucedida ficava com o aviso velho grudado — e o modal mostra
+    // o aviso com PREFERENCIA sobre a lista de candidatos, entao ele afirmava
+    // "nao consegui ler o PDF" enquanto escondia os CPFs que acabara de achar.
+    setAvisoPdf((p) => {
+      if (!(id in p)) return p
+      const n = { ...p }
+      delete n[id]
+      return n
+    })
     marcarLendo(id, true)
     void lerTextoDoCard(lead)
       .then((t) => setTextoCache((p) => ({ ...p, [id]: t })))
@@ -511,10 +598,17 @@ export default function AnaliseCredito() {
   // Sincroniza com o Kommo ao abrir a página, no mesmo padrão de Publicações e
   // Tarefas. O cron cobre o intervalo; isto cobre o "acabei de sentar".
   const sync = useMutation({
-    mutationFn: () => invokeFunction('kommo-sync', {}),
-    onSuccess: () => {
+    mutationFn: () =>
+      invokeFunction<{ aviso?: string | null }>('kommo-sync', {}),
+    onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['kommo_leads'] })
       qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
+      // As colunas do kanban também vêm deste sync (migration 0044): sem
+      // invalidar, uma coluna nova no Kommo só apareceria no próximo F5.
+      qc.invalidateQueries({ queryKey: ['kommo_etapa'] })
+      // Aviso de sucesso PARCIAL: os cards vieram, a estrutura do kanban não.
+      // Silenciar isto deixaria uma aba faltando sem explicação.
+      if (r?.aviso) toast.error(r.aviso)
       // O sync pode ter trazido um PDF novo no card — versão corrigida do
       // processo é rotina. O texto guardado passa a ser de um documento
       // superado, e é dele que sai a lista de CPFs candidatos: servir CPF de
@@ -533,10 +627,53 @@ export default function AnaliseCredito() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const grupos = useMemo(() => agruparPorTela(leads.data ?? []), [leads.data])
+  const abas = useMemo(
+    () => abasDoFunil(funil, etapas.data ?? []),
+    [funil, etapas.data],
+  )
+
+  const { porAba, outras } = useMemo(
+    () => agruparPorAba(leads.data ?? [], abas),
+    [leads.data, abas],
+  )
+
+  // "Outras etapas" só existe quando tem card dentro. É a rede que impede um
+  // card de sumir: coluna do Kommo que a tela não conhece cai aqui, com o nome
+  // da coluna ao lado, em vez de desaparecer.
+  const abasVisiveis = useMemo(
+    () =>
+      outras.length > 0
+        ? [
+            ...abas,
+            {
+              key: ABA_OUTRAS,
+              label: 'Outras etapas',
+              statusIds: [],
+              descricaoVazia: '',
+              acoes: [] as AcaoTela[],
+            },
+          ]
+        : abas,
+    [abas, outras.length],
+  )
+
+  // Coluna de RPV que sumiu do Kommo: a aba dela mostraria zero card para sempre,
+  // e o único vestígio seria a pílula "Outras etapas" — que ninguém liga à causa.
+  const rpvDesalinhado = useMemo(
+    () => (funil === FUNIL_RPV ? telasRpvDesalinhadas(etapas.data ?? []) : []),
+    [funil, etapas.data],
+  )
+
+  // A aba escolhida pode não existir no funil recém-selecionado (as chaves de
+  // RPV são 'pendentes'…, as de Precatório são 'st<id>'). Cai na primeira.
+  const abaAtual = abasVisiveis.find((a) => a.key === aba) ?? abasVisiveis[0] ?? null
 
   const lista = useMemo(() => {
-    let l = grupos[tela]
+    let l = abaAtual
+      ? abaAtual.key === ABA_OUTRAS
+        ? outras
+        : (porAba[abaAtual.key] ?? [])
+      : []
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((x) =>
@@ -554,7 +691,7 @@ export default function AnaliseCredito() {
       )
     }
     return l
-  }, [grupos, tela, busca])
+  }, [porAba, outras, abaAtual, busca])
 
   const mover = useMutation({
     mutationFn: (args: { leadId: number; statusId: number; comentario: string }) =>
@@ -580,32 +717,65 @@ export default function AnaliseCredito() {
     mover.mutate({ leadId: lead.kommo_lead_id, statusId: acao.statusId, comentario: '' })
   }
 
-  const defTela = TELAS.find((t) => t.key === tela)!
-
   return (
     <div>
       <PageHeader
         title="Análise de Crédito"
         actions={
-          <SyncStatus
-            syncing={sync.isPending}
-            updatedAt={leads.dataUpdatedAt}
-            label="sincronizando com o Kommo…"
-          />
+          <div className="flex items-center gap-3">
+            <SyncStatus
+              syncing={sync.isPending}
+              updatedAt={leads.dataUpdatedAt}
+              label="sincronizando com o Kommo…"
+            />
+            {/* BOTÃO DE VERDADE. A sincronização só rodava uma vez, no efeito de
+                montagem, e não havia nada para clicar — então o aviso de sucesso
+                parcial só aparecia uma vez por carregamento de página, e
+                "sincronize de novo" era instrução impossível de seguir sem dar
+                F5. Card criado no Kommo agora também chega sem recarregar. */}
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<RefreshCw className="h-4 w-4" />}
+              onClick={() => sync.mutate()}
+              loading={sync.isPending}
+            >
+              Sincronizar
+            </Button>
+          </div>
         }
       />
 
-      {/* Precatórios entram na fase 2: o funil existe no Kommo, mas o sync
-          ainda só traz o de RPV. */}
+      {/* Os dois funis do Kommo. A contagem sai do funil carregado, então o do
+          outro lado fica sem número até ser aberto — melhor sem número que com
+          número errado. */}
       <div className="mb-4">
         <Segmented
           ariaLabel="Tipo de crédito"
           items={[
-            { key: 'rpv', label: 'RPV', count: (leads.data ?? []).length },
-            { key: 'precatorio', label: 'Precatórios', disabled: true },
+            {
+              key: String(FUNIL_RPV),
+              label: 'RPV',
+              // `leads.data?.length`, e nao `(leads.data ?? []).length`: o
+              // segundo renderiza um 0 DURO enquanto a consulta esta em voo e,
+              // pior, quando ela falhou. "Precatorios 0" ao lado de uma
+              // mensagem de erro afirma que o funil esta vazio.
+              count: funil === FUNIL_RPV ? leads.data?.length : undefined,
+            },
+            {
+              key: String(FUNIL_PRECATORIO),
+              label: 'Precatórios',
+              count: funil === FUNIL_PRECATORIO ? leads.data?.length : undefined,
+            },
           ]}
-          value="rpv"
-          onChange={() => {}}
+          value={String(funil)}
+          onChange={(v) => {
+            setFunil(Number(v))
+            // A chave da aba não é comparável entre funis ('pendentes' vs
+            // 'st123'). Limpar aqui evita a tela abrir vazia por casar nada.
+            setAba('')
+            setBusca('')
+          }}
         />
       </div>
 
@@ -620,18 +790,66 @@ export default function AnaliseCredito() {
           />
         </div>
         <div className="mt-3">
-          <Segmented
-            ariaLabel="Etapa da análise"
-            items={TELAS.map((t) => ({
-              key: t.key,
-              label: t.label,
-              count: grupos[t.key].length,
-            }))}
-            value={tela}
-            onChange={(v) => setTela(v as TelaAnalise)}
-          />
+          {abasVisiveis.length > 0 ? (
+            <Segmented
+              ariaLabel="Etapa da análise"
+              items={abasVisiveis.map((a) => ({
+                key: a.key,
+                label: a.label,
+                count:
+                  a.key === ABA_OUTRAS ? outras.length : (porAba[a.key]?.length ?? 0),
+              }))}
+              value={abaAtual?.key ?? ''}
+              onChange={(v) => setAba(v)}
+            />
+          ) : etapas.isLoading ? (
+            <p className="text-sm text-slate-500">Carregando as etapas do Kommo…</p>
+          ) : etapas.isError ? (
+            // A MENSAGEM REAL, não um palpite. A versão anterior descartava
+            // etapas.error e afirmava uma causa ("a sincronização não conseguiu
+            // ler o kanban") que podia estar errada — se o problema fosse
+            // permissão de leitura da tabela, sincronizar de novo não mudaria
+            // nada e a tela repetiria o mesmo diagnóstico falso para sempre.
+            <p className="text-sm text-red-700">
+              Não consegui ler as etapas deste funil: {(etapas.error as Error)?.message}{' '}
+              <button
+                type="button"
+                onClick={() => etapas.refetch()}
+                className="font-medium underline"
+              >
+                Tentar de novo
+              </button>
+            </p>
+          ) : (
+            // Espelho vazio: o kommo-sync não gravou a estrutura do kanban.
+            // Dizer isso é melhor que mostrar uma tela vazia, que se leria como
+            // "não tem crédito nenhum".
+            <p className="text-sm text-amber-700">
+              Ainda não sei as etapas deste funil. Elas vêm do próprio Kommo —
+              clique em <strong>Sincronizar</strong>, no alto da página. Se
+              continuar assim, a sincronização não conseguiu ler a estrutura do
+              kanban e o aviso dela vai aparecer aqui.
+            </p>
+          )}
         </div>
       </Card>
+
+      {rpvDesalinhado.length > 0 && (
+        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+          A coluna do Kommo de{' '}
+          <strong>{rpvDesalinhado.map((t) => t.label).join(', ')}</strong> não existe
+          mais neste funil. A aba vai mostrar zero card até alguém corrigir o número
+          da coluna em src/lib/kommo.ts — os cards que estariam nela aparecem em
+          &quot;Outras etapas&quot;.
+        </div>
+      )}
+
+      {abaAtual?.key === ABA_OUTRAS && (
+        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
+          Estes cards estão em colunas do Kommo que a tela não cobre. Antes eles
+          não apareciam em lugar nenhum — ficam aqui para nenhum crédito sumir.
+        </div>
+      )}
 
       <Card>
         {leads.isLoading ? (
@@ -643,11 +861,18 @@ export default function AnaliseCredito() {
           />
         ) : lista.length === 0 ? (
           <EmptyState
-            title={busca.trim() ? 'Nada encontrado' : `Nenhum card em ${defTela.label}`}
+            title={
+              busca.trim()
+                ? 'Nada encontrado'
+                : `Nenhum card em ${abaAtual?.label ?? 'nenhuma etapa'}`
+            }
             description={
               busca.trim()
-                ? 'Nenhum card corresponde à busca nesta etapa.'
-                : defTela.descricaoVazia
+                ? `Nenhum card corresponde à busca nesta etapa do funil de ${
+                    funil === FUNIL_PRECATORIO ? 'Precatórios' : 'RPV'
+                  }. O card pode estar em outra etapa, ou no outro funil.`
+                : (abaAtual?.descricaoVazia ??
+                  'Este funil ainda não tem card nenhum no Kommo. Quando o comercial criar um, ele aparece aqui na próxima sincronização.')
             }
           />
         ) : (
@@ -656,15 +881,28 @@ export default function AnaliseCredito() {
               <CardCredito
                 key={l.kommo_lead_id}
                 lead={l}
-                acoes={ACOES[tela]}
+                acoes={abaAtual?.acoes ?? []}
                 onAcao={acionar}
+                // Em "Outras etapas" o card vem de uma coluna que a tela não
+                // cobre. Dizer QUAL coluna é o que evita a pessoa achar que o
+                // card está fora do fluxo por defeito.
+                etapaOrigem={
+                  abaAtual?.key === ABA_OUTRAS
+                    ? nomeDaEtapa(l.status_id, l.pipeline_id, etapas.data ?? [])
+                    : null
+                }
                 // O selo só aparece em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, então dizer "finalizado"
                 // seria ruído.
+                // Em RPV o selo so aparece em Pendentes: nas etapas seguintes a
+                // analise ja passou pela revisao, e dizer "finalizado" seria
+                // ruido. No funil de Precatorios nao existe essa curadoria — sem
+                // o selo, card com analise pronta fica visualmente IDENTICO a
+                // card ainda na fila, em toda aba, para sempre.
                 analisePronta={
-                  tela === 'pendentes'
-                    ? (prontas.data?.has(l.kommo_lead_id) ?? false)
-                    : null
+                  funil === FUNIL_RPV && abaAtual?.key !== 'pendentes'
+                    ? null
+                    : (prontas.data?.has(l.kommo_lead_id) ?? false)
                 }
                 statusEmAndamento={
                   emAndamento?.leadId === l.kommo_lead_id
