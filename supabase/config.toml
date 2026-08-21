@@ -74,3 +74,9 @@ verify_jwt = true
 # botão "Buscar no Banco Central" (JWT do usuário); a própria função valida os dois.
 [functions.parametros-bcb]
 verify_jwt = false
+
+# Monta o checklist de certidões do crédito. Sempre disparada por uma pessoa, no
+# botão de análise — nunca por cron, porque quem pede a análise é o operacional,
+# na hora. E ela ESCREVE o checklist congelado: o JWT é exigido no portão.
+[functions.gerar-checklist-certidoes]
+verify_jwt = true
