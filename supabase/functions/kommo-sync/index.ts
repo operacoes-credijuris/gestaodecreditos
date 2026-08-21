@@ -17,16 +17,12 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 
 // Funis que o operacional usa.
 //
-// O Precatório entrou junto com o checklist de certidões (migration 0042). Os
-// cards dele passam a ser espelhados em kommo_leads com o pipeline_id próprio,
-// e por isso NÃO aparecem em nenhuma aba ainda: as telas em src/lib/kommo.ts
-// filtram pelos status_id do funil de RPV, e os do Precatório são outros.
-//
-// Isso é deliberado, e a ordem importa: sincronizar primeiro deixa os cards no
-// espelho, e daí os status_id do funil se descobrem consultando o próprio banco
-// em vez de alguém ir catar id na interface do Kommo — que é onde se erra.
-//   select status_id, count(*) from kommo_leads
-//    where pipeline_id = 13971995 group by 1 order by 2 desc;
+// Além dos CARDS, este sync espelha a ESTRUTURA do kanban (funis e colunas) em
+// public.kommo_etapa — ver migration 0044. É o que permitiu a aba de Precatórios
+// existir: os status_id dela não estavam escritos em lugar nenhum, e a
+// alternativa era alguém abrir o Kommo e copiar número de coluna à mão. Número
+// de coluna não tem cara de nada: um dígito trocado aponta para outra coluna que
+// também existe, e o card simplesmente não aparece na tela — sem erro nenhum.
 const FUNIL_RPV = 13901939
 const FUNIL_PRECATORIO = 13971995
 const FUNIS = [FUNIL_RPV, FUNIL_PRECATORIO]
@@ -141,18 +137,144 @@ Deno.serve(async (req: Request) => {
       if (u.name) usuarios.set(u.id, u.name)
     }
 
+    // Um instante só para toda esta passada: cards e colunas gravados com o
+    // mesmo `sincronizado_em` dizem "vieram do mesmo sync", que é o que se
+    // pergunta quando um deles parece defasado.
+    const agora = new Date().toISOString()
+
+    // ---------- Estrutura do kanban (funis e colunas) ----------
+    //
+    // GET /leads/pipelines devolve os funis com os estágios embutidos em
+    // _embedded.statuses de cada um (docs: developers.kommo.com/reference/
+    // pipelines-list e stages-list). Cada estágio traz id, name, sort, type e
+    // color; `sort` é a ordem no kanban e `type: 1` marca a coluna de entrada.
+    //
+    // Falha aqui NÃO derruba o sync dos cards: a estrutura muda raramente e a
+    // tabela guarda a última versão boa. Mas também não passa em silêncio — o
+    // aviso volta no resumo, porque coluna nova no Kommo que não chegou aqui é
+    // aba que não aparece na tela.
+    let etapasGravadas = 0
+    let avisoEtapas: string | null = null
+    try {
+      const rp = await kommo<{
+        _embedded?: {
+          pipelines?: {
+            id: number
+            name?: string
+            _embedded?: {
+              statuses?: {
+                id: number
+                name?: string
+                sort?: number
+                type?: number
+                color?: string
+              }[]
+            }
+          }[]
+        }
+      }>('/leads/pipelines')
+
+      const funis = rp?._embedded?.pipelines ?? []
+      if (funis.length === 0) {
+        avisoEtapas =
+          'A API não devolveu funil nenhum em /leads/pipelines. As abas da tela ' +
+          'continuam com a última estrutura gravada.'
+      } else {
+        const linhas = funis
+          .filter((p) => FUNIS.includes(p.id))
+          .flatMap((p) =>
+            (p._embedded?.statuses ?? []).map((s) => ({
+              pipeline_id: p.id,
+              status_id: s.id,
+              pipeline_nome: p.name ?? null,
+              // Nome é NOT NULL na tabela: coluna sem nome recebe o próprio id,
+              // porque aba sem rótulo é pior que aba com rótulo feio.
+              nome: s.name?.trim() || `Coluna ${s.id}`,
+              ordem: s.sort ?? 0,
+              tipo: s.type ?? 0,
+              cor: s.color ?? null,
+              sincronizado_em: agora,
+            })),
+          )
+
+        if (linhas.length === 0) {
+          avisoEtapas =
+            `Nenhuma coluna encontrada nos funis ${FUNIS.join(' e ')}. ` +
+            `Confira se os ids dos funis mudaram no Kommo.`
+        } else {
+          const { error } = await svc
+            .from('kommo_etapa')
+            .upsert(linhas, { onConflict: 'pipeline_id,status_id' })
+          if (error) throw new Error(error.message)
+          etapasGravadas = linhas.length
+
+          // Coluna apagada no Kommo sai do espelho — senão sobra uma aba
+          // fantasma, sempre vazia, sem ninguém saber de onde veio.
+          //
+          // UM DELETE POR FUNIL, e isto é o ponto. A chave é composta
+          // (pipeline_id, status_id), então apagar "todo status_id que não veio"
+          // varrendo os dois funis de uma vez tem um modo de falha grave: se a
+          // resposta da API não trouxer UM dos funis — id trocado no Kommo,
+          // permissão perdida, funil recriado — os status_id dele não entram na
+          // lista, e o delete apaga TODAS as colunas dele. A tela ficaria com a
+          // aba de Precatórios mostrando só "Venda ganha" e "Venda perdida"
+          // (que sobrevivem por existirem no outro funil), com cara de correto.
+          //
+          // Funil ausente da resposta não é funil sem coluna: é funil que não
+          // deu para ler. Avisa e não mexe.
+          const idsVindos = new Set(funis.map((p) => p.id))
+          const semResposta = FUNIS.filter((f) => !idsVindos.has(f))
+          if (semResposta.length) {
+            avisoEtapas =
+              `O Kommo não devolveu o(s) funil(is) ${semResposta.join(', ')} em ` +
+              `/leads/pipelines. Não apaguei as colunas dele(s) — a tela segue ` +
+              `com a última estrutura conhecida. Confira se o id do funil mudou.`
+          }
+
+          for (const p of funis.filter((x) => FUNIS.includes(x.id))) {
+            const ids = (p._embedded?.statuses ?? []).map((s) => s.id)
+            if (ids.length === 0) continue // idem: sem coluna = não deu para ler
+            const { error: erroDel } = await svc
+              .from('kommo_etapa')
+              .delete()
+              .eq('pipeline_id', p.id)
+              .not('status_id', 'in', `(${ids.join(',')})`)
+            // Delete que falha deixa aba fantasma. Não derruba o sync, mas avisa.
+            if (erroDel) {
+              avisoEtapas =
+                `Colunas do funil ${p.id} atualizadas, mas não consegui remover ` +
+                `as que saíram do Kommo: ${erroDel.message}`
+            }
+          }
+        }
+      }
+    } catch (e) {
+      avisoEtapas = `Não consegui sincronizar as colunas do kanban: ${
+        (e as Error)?.message ?? e
+      }`
+    }
+
     // ---------- Leads dos funis ----------
+    //
+    // Os ids são guardados POR FUNIL, e não numa lista só. O motivo está na
+    // limpeza do espelho, mais abaixo: com uma lista só, um funil que devolve
+    // vazio faz o delete apagar os cards do OUTRO.
     const leads: KommoLead[] = []
+    const idsPorFunil = new Map<number, number[]>()
     for (const funil of FUNIS) {
+      const idsDoFunil: number[] = []
       for (let pagina = 1; pagina <= 40; pagina++) {
         const r = await kommo<{
           _embedded?: { leads?: KommoLead[] }
           _links?: { next?: { href?: string } }
         }>(`/leads?filter[pipeline_id]=${funil}&limit=250&page=${pagina}`)
         if (!r) break
-        leads.push(...(r._embedded?.leads ?? []))
+        const lote = r._embedded?.leads ?? []
+        leads.push(...lote)
+        idsDoFunil.push(...lote.map((l) => l.id))
         if (!r._links?.next?.href) break
       }
+      idsPorFunil.set(funil, idsDoFunil)
     }
 
     // ---------- Notas ----------
@@ -203,7 +325,6 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---------- Grava o espelho ----------
-    const agora = new Date().toISOString()
     const registros = leads.map((l) => {
       const doLead = notasPorLead.get(l.id) ?? []
       const notas: NotaGravada[] = doLead.map((n) => ({
@@ -250,27 +371,71 @@ Deno.serve(async (req: Request) => {
       if (error) throw new Error(error.message)
     }
 
-    // Cards que saíram do funil (ou foram apagados no Kommo) somem do espelho.
-    // Restrito aos funis sincronizados para não apagar o que veio de outro.
-    const vistos = registros.map((r) => r.kommo_lead_id)
+    // ---------- Limpeza do espelho ----------
+    //
+    // Card que saiu do funil (ou foi apagado no Kommo) sai do espelho. UM DELETE
+    // POR FUNIL, escopado com `.eq('pipeline_id', ...)`.
+    //
+    // O QUE ISSO CONSERTA, e era grave: a versão anterior juntava os ids dos
+    // dois funis numa lista só e apagava `pipeline_id in (os dois) and
+    // kommo_lead_id not in (a lista)`. Enquanto o funil de Precatórios estava
+    // vazio isso passava, porque a lista era só de RPV. No dia em que o
+    // Precatório tivesse UM card e a leitura do RPV voltasse vazia, a lista
+    // ficaria com esse único id e o delete apagaria OS 150 CARDS DE RPV — com
+    // resposta `ok: true` e a tela mostrando "Nenhum card aguardando revisão".
+    // Exatamente "não consegui ler" virando "não tem nada".
+    //
+    // E FUNIL QUE VOLTOU VAZIO COM ESPELHO CHEIO NÃO É FUNIL QUE ESVAZIOU. O
+    // Kommo devolve 204 quando o filtro não casa nada — e um id de funil que
+    // deixou de existir casa nada do mesmo jeito que um funil de fato vazio.
+    // Nesse caso o certo é não apagar e avisar: 150 cards não somem de uma vez
+    // por decisão de ninguém.
     let removidos = 0
-    if (vistos.length) {
-      const { data: apagados } = await svc
+    const avisosEspelho: string[] = []
+    for (const [funil, ids] of idsPorFunil) {
+      if (ids.length === 0) {
+        const { count } = await svc
+          .from('kommo_leads')
+          .select('kommo_lead_id', { count: 'exact', head: true })
+          .eq('pipeline_id', funil)
+        if ((count ?? 0) > 0) {
+          avisosEspelho.push(
+            `O funil ${funil} não devolveu card nenhum, mas o espelho tem ` +
+            `${count}. NÃO apaguei nada: some tudo de uma vez é sinal de ` +
+            `leitura falhada, não de funil esvaziado. Confira o id do funil e ` +
+            `as permissões do token no Kommo.`,
+          )
+        }
+        continue
+      }
+      const { data: apagados, error: erroDel } = await svc
         .from('kommo_leads')
         .delete()
-        .in('pipeline_id', FUNIS)
-        .not('kommo_lead_id', 'in', `(${vistos.join(',')})`)
+        .eq('pipeline_id', funil)
+        .not('kommo_lead_id', 'in', `(${ids.join(',')})`)
         .select('kommo_lead_id')
-      removidos = apagados?.length ?? 0
+      if (erroDel) {
+        avisosEspelho.push(`Funil ${funil}: falha ao limpar o espelho — ${erroDel.message}`)
+      }
+      removidos += apagados?.length ?? 0
     }
 
-    // Marcações internas de cards que não existem mais no espelho ficariam
-    // órfãs — a UI as ignoraria, mas acumulariam sem limite.
-    if (vistos.length) {
+    // Marcações internas de cards que não existem mais ficariam órfãs — a UI as
+    // ignoraria, mas acumulariam sem limite.
+    //
+    // Derivado DO ESPELHO, não da lista que acabou de chegar da API: assim uma
+    // leitura vazia não apaga as marcações de 150 cards que continuam lá. Órfã é
+    // marcação sem card em kommo_leads, e é isso que a consulta pergunta.
+    const { data: noEspelho } = await svc
+      .from('kommo_leads')
+      .select('kommo_lead_id')
+      .in('pipeline_id', FUNIS)
+    const idsEspelho = (noEspelho ?? []).map((r) => r.kommo_lead_id)
+    if (idsEspelho.length) {
       await svc
         .from('kommo_analise_interna')
         .delete()
-        .not('kommo_lead_id', 'in', `(${vistos.join(',')})`)
+        .not('kommo_lead_id', 'in', `(${idsEspelho.join(',')})`)
     }
 
     const comCnj = registros.filter((r) => r.processo_cnj).length
@@ -281,11 +446,18 @@ Deno.serve(async (req: Request) => {
         com_nota: registros.filter((r) => r.nota_texto).length,
         com_cnj: comCnj,
         removidos,
+        etapas: etapasGravadas,
       },
+      // Sucesso PARCIAL volta como aviso, não como erro: os cards
+      // sincronizaram. Mas volta — coluna nova que não chegou aqui é aba que não
+      // aparece na tela, e funil que voltou vazio com espelho cheio é leitura
+      // falhada. Nenhum dos dois pode ser descoberto por acidente.
+      aviso: [avisoEtapas, ...avisosEspelho].filter(Boolean).join(' · ') || null,
       mensagem:
         `Kommo sincronizado — ${registros.length} card(s), ` +
         `${comCnj} com processo identificado` +
-        (removidos ? `, ${removidos} removido(s)` : '') + '.',
+        (removidos ? `, ${removidos} removido(s)` : '') +
+        (etapasGravadas ? `, ${etapasGravadas} coluna(s) de kanban` : '') + '.',
     })
   } catch (err) {
     return jsonResponse({ error: (err as Error).message }, 500)
