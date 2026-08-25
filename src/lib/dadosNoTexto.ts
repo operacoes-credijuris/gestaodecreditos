@@ -464,3 +464,161 @@ export function acharLocais(
     )
     .slice(0, limite)
 }
+
+// ------------------------------------------------------------------ estado civil
+
+export type EstadoCivil =
+  | 'solteiro'
+  | 'casado'
+  | 'divorciado'
+  | 'viuvo'
+  | 'separado'
+  | 'uniao_estavel'
+
+export interface EstadoCivilEncontrado {
+  estado: EstadoCivil
+  /** Nome do cônjuge, quando o texto traz ("casada com FULANO DE TAL"). */
+  conjuge: string | null
+  contexto: string
+  posicao: number
+  /** Apareceu na qualificação do CEDENTE, e não na de outra parte. */
+  doCedente: boolean
+}
+
+// O estado civil vem na QUALIFICAÇÃO DAS PARTES, sempre no mesmo lugar da frase:
+//
+//   TATIANA HIIGA, brasileira, casada, do lar, portadora do RG ..., CPF ...
+//                  ^^^^^^^^^^  ^^^^^^
+//
+// Então "brasileiro/brasileira" e "estado civil" são as âncoras que distinguem a
+// qualificação de uma menção qualquer. Sem elas, "separados" pega "em autos
+// separados" e "viúva" pega "pensão por morte à viúva" — duas coisas que não têm
+// nada a ver com o estado civil do cedente.
+const ANCORA_QUALIFICACAO = /(brasileir[oa]|estado\s+civil|nacionalidade)/i
+
+const TERMOS: [RegExp, EstadoCivil][] = [
+  [/\bsolteir[oa]s?\b/i, 'solteiro'],
+  [/\bcasad[oa]s?\b/i, 'casado'],
+  [/\bdivorciad[oa]s?\b/i, 'divorciado'],
+  [/\bvi[úu]v[oa]s?\b/i, 'viuvo'],
+  [/\b(separad[oa]s?\s+judicialmente|desquitad[oa]s?)\b/i, 'separado'],
+  [/\buni[ãa]o\s+est[áa]vel\b/i, 'uniao_estavel'],
+  [/\b(companheir[oa]|convivente)\b/i, 'uniao_estavel'],
+]
+
+// "casada com MARIA DA SILVA" — o nome do cônjuge vem de graça quando aparece, e
+// é dado que a tela pede logo em seguida.
+const CONJUGE_APOS =
+  /\b(?:casad[oa]s?|convivente|companheir[oa])\s+(?:com|de)\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ']*(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ý][A-Za-zÀ-ÿ']*){0,5})/
+
+/**
+ * Estado civil na qualificação das partes.
+ *
+ * POR QUE ISTO IMPORTA MAIS QUE PARECE: o estado civil DOBRA o checklist. Cedente
+ * casado tem bloco próprio de certidões para o cônjuge (planilha, linhas 52 a 67).
+ * Marcar "casado" errado exige certidões de um terceiro; deixar de marcar fecha o
+ * dossiê com um bloco inteiro faltando, e o placar não acusa nada.
+ *
+ * POR ISSO CONTINUA SENDO SUGESTÃO. Duas razões, e a segunda é a que decide:
+ *
+ *   1. A petição pode ser de 2005. "casada" naquela data não é "casada hoje", e o
+ *      cônjuge de então pode não ser o de agora.
+ *   2. Uma petição qualifica várias pessoas — autor, réu, advogado. `doCedente`
+ *      marca as que aparecem perto do nome ou do CPF do cedente, mas "perto" é
+ *      heurística, não prova.
+ *
+ * `ancoras` são o nome e/ou o CPF do cedente, em qualquer formato: a comparação
+ * ignora acento, caixa e pontuação.
+ */
+export function acharEstadoCivil(
+  texto: string,
+  ancoras: string[] = [],
+  limite = 6,
+): EstadoCivilEncontrado[] {
+  if (!texto) return []
+
+  // Onde o cedente é mencionado. Serve para separar a qualificação dele da das
+  // outras partes.
+  const posicoesDoCedente: number[] = []
+  const plano = semAcento(texto)
+  for (const a of ancoras) {
+    const alvo = semAcento(a).trim()
+    if (alvo.length < 4) continue
+    // CPF entra também só com os dígitos: no texto ele aparece mascarado.
+    const formas = /^\d[\d.\-]*$/.test(alvo)
+      ? [alvo, alvo.replace(/\D/g, '')]
+      : [alvo]
+    for (const f of formas) {
+      if (!f) continue
+      let de = 0
+      for (;;) {
+        const i = plano.indexOf(f, de)
+        if (i < 0) break
+        posicoesDoCedente.push(i)
+        de = i + 1
+      }
+      // Máscara do CPF: procura também a forma pontuada quando veio só dígitos.
+      if (/^\d{11}$/.test(f)) {
+        const mascarado = `${f.slice(0, 3)}.${f.slice(3, 6)}.${f.slice(6, 9)}-${f.slice(9)}`
+        let d2 = 0
+        for (;;) {
+          const i = plano.indexOf(mascarado, d2)
+          if (i < 0) break
+          posicoesDoCedente.push(i)
+          d2 = i + 1
+        }
+      }
+    }
+  }
+
+  const achados: EstadoCivilEncontrado[] = []
+  const vistos = new Set<string>()
+
+  for (const [re, estado] of TERMOS) {
+    const global = new RegExp(re.source, 'gi')
+    let m: RegExpExecArray | null
+    while ((m = global.exec(texto)) !== null) {
+      const i = m.index
+      // A âncora da qualificação tem de estar por perto, na mesma frase.
+      const janela = fraseEmVolta(texto, i, i + m[0].length)
+      if (!ANCORA_QUALIFICACAO.test(janela)) continue
+
+      // SÓ PARA TRÁS, e curto. A qualificação tem ordem fixa:
+      //
+      //   TATIANA HIIGA, brasileira, casada, do lar, RG ..., CPF ...
+      //   ^^^^^^^^^^^^^                ^^^^^^
+      //
+      // O estado civil pertence ao NOME QUE VEM ANTES DELE. Uma janela em volta,
+      // de qualquer tamanho, erra: numa petição o advogado é qualificado logo
+      // acima do autor, e o "solteiro, advogado" dele fica a poucos caracteres do
+      // nome do cedente. Testado: com janela de 400 nos dois sentidos, o estado
+      // civil do ADVOGADO era oferecido como o da cedente.
+      //
+      // Para trás e curto resolve, porque reproduz a estrutura do documento em
+      // vez de medir distância. O CPF não serve de âncora aqui: ele vem DEPOIS do
+      // estado civil na qualificação, não antes.
+      const doCedente = posicoesDoCedente.some((p) => p < i && i - p <= 150)
+
+      const depois = texto.slice(i, i + 120)
+      const mc = CONJUGE_APOS.exec(depois)
+      const conjuge = mc ? limpar(mc[1]) : null
+
+      const chave = `${estado}|${conjuge ?? ''}`
+      if (vistos.has(chave)) continue
+      vistos.add(chave)
+
+      achados.push({
+        estado,
+        conjuge,
+        contexto: limpar(texto.slice(Math.max(0, i - 110), i + m[0].length + 60)),
+        posicao: i,
+        doCedente,
+      })
+    }
+  }
+
+  // O do cedente primeiro; depois ordem no documento.
+  return achados
+    .sort((a, b) => Number(b.doCedente) - Number(a.doCedente) || a.posicao - b.posicao)
+    .slice(0, limite)
+}
