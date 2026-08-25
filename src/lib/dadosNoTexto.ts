@@ -508,8 +508,38 @@ const TERMOS: [RegExp, EstadoCivil][] = [
 
 // "casada com MARIA DA SILVA" — o nome do cônjuge vem de graça quando aparece, e
 // é dado que a tela pede logo em seguida.
+//
+// ============================================================
+// ANCORADO NO INÍCIO (`^`), E O MOTIVO É UM NOME TROCADO
+// ============================================================
+//
+// Isto é testado contra os 120 caracteres que começam EXATAMENTE no termo que
+// acabou de casar. Sem o `^`, a busca varria esses 120 caracteres inteiros e
+// pegava qualquer "casado com FULANO" que houvesse ali — inclusive o de OUTRA
+// PESSOA. Provado em teste:
+//
+//   "FULANO, brasileiro, casado, e CICRANO, brasileiro, casado com BETA."
+//                        ^^^^^^ este aqui recebia "BETA" como cônjuge
+//
+// Num processo isso é rotina: o cedente é qualificado como "casada," sem o nome
+// do marido, e poucas linhas abaixo aparece o executado "casado com MARIA". O
+// nome de MARIA entrava no cadastro do cônjuge do CEDENTE — e cônjuge é sujeito
+// de emissão: sairiam certidões em nome de uma pessoa que não tem relação
+// nenhuma com o crédito, e o dossiê fecharia completo.
+//
+// Ancorado, o nome só é aceito quando pertence ao termo que estamos lendo. Quando
+// a frase separa os dois ("casada, sob o regime de comunhão parcial, com JOÃO"),
+// o nome não é capturado e a pessoa digita — que é o desfecho certo: cônjuge em
+// branco dá trabalho, cônjuge errado dá certidão errada.
+//
+// O `i` é a segunda correção: petição em CAIXA ALTA é comum, e sem ele
+// "CASADA COM ROBERTO CARLOS" não casava nada. A inicial maiúscula continua
+// exigida no NOME, que é o que impede o padrão de engolir prosa minúscula.
+//
+// "união estável com RITA DIAS" entrou na lista porque `uniao_estavel` também
+// liga o bloco do cônjuge, e a forma por extenso é a mais comum das duas.
 const CONJUGE_APOS =
-  /\b(?:casad[oa]s?|convivente|companheir[oa])\s+(?:com|de)\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ']*(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ý][A-Za-zÀ-ÿ']*){0,5})/
+  /^(?:casad[oa]s?|convivente|companheir[oa]|uni[ãa]o\s+est[áa]vel)\s+(?:com|de)\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ']*(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ý][A-Za-zÀ-ÿ']*){0,5})/i
 
 /**
  * Estado civil na qualificação das partes.
@@ -572,7 +602,9 @@ export function acharEstadoCivil(
   }
 
   const achados: EstadoCivilEncontrado[] = []
-  const vistos = new Set<string>()
+  // chave -> posição em `achados`. É um Map, e não um Set de "já vi", porque a
+  // repetida pode ser MELHOR que a guardada. Ver o bloco da substituição abaixo.
+  const vistos = new Map<string, number>()
 
   for (const [re, estado] of TERMOS) {
     const global = new RegExp(re.source, 'gi')
@@ -604,8 +636,43 @@ export function acharEstadoCivil(
       const conjuge = mc ? limpar(mc[1]) : null
 
       const chave = `${estado}|${conjuge ?? ''}`
-      if (vistos.has(chave)) continue
-      vistos.add(chave)
+
+      // ============================================================
+      // A REPETIDA PODE SER A BOA — e a primeira é quase sempre a errada.
+      // ============================================================
+      //
+      // Antes isto era um `if (vistos.has(chave)) continue`: a PRIMEIRA ocorrência
+      // no documento vencia e as demais eram descartadas. Numa petição, quem se
+      // qualifica primeiro é o ADVOGADO, no cabeçalho, antes de apresentar o
+      // cliente. Então bastava cedente e advogado terem o MESMO estado civil —
+      // "solteiro" advogado e "solteira" cedente é combinação de todo dia — para o
+      // achado da cedente ser jogado fora como duplicata, e sobrar o do advogado,
+      // marcado (corretamente) como NÃO sendo do cedente.
+      //
+      // Efeito na tela: em vez de "o processo qualifica TATIANA HIIGA como
+      // solteira", saía "achei estado civil mas não consegui ligar ao cedente".
+      // Não é mentira — é pior de um jeito específico: a função falha justamente
+      // no caso mais comum, e falha em silêncio, parecendo que o documento é que
+      // estava ruim.
+      //
+      // Achado por teste, caso 3 de teste-placar.ts.
+      const jaEm = vistos.get(chave)
+      if (jaEm !== undefined) {
+        // Substitui só na direção que informa: o do cedente vence o de terceiro.
+        // O contrário nunca — um achado ancorado no cedente não pode ser
+        // rebaixado por uma repetição solta que apareça depois no documento.
+        if (doCedente && !achados[jaEm].doCedente) {
+          achados[jaEm] = {
+            estado,
+            conjuge,
+            contexto: limpar(texto.slice(Math.max(0, i - 110), i + m[0].length + 60)),
+            posicao: i,
+            doCedente: true,
+          }
+        }
+        continue
+      }
+      vistos.set(chave, achados.length)
 
       achados.push({
         estado,
