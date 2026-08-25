@@ -31,7 +31,11 @@ export interface NavSection {
 }
 
 // Hierarquia exatamente conforme o escopo:
-// Gestão Estratégica (topo) > Comercial > Operacional (com Execução Processual) > Configurações
+// Gestão Estratégica (topo) > Comercial > Operacional (com Execução Processual)
+// > Inteligência Econômica > Configurações
+//
+// Inteligência Econômica fica por ÚLTIMO entre os setores porque não é um setor:
+// é a leitura do que os outros três produziram. Vem depois do trabalho, não antes.
 export const NAVIGATION: NavSection[] = [
   {
     title: null,
@@ -41,16 +45,6 @@ export const NAVIGATION: NavSection[] = [
         to: '/estrategica',
         icon: LayoutDashboard,
       },
-    ],
-  },
-  {
-    title: 'Inteligência Econômica',
-    items: [
-      { label: 'Visão Geral', to: '/inteligencia', icon: Brain },
-      { label: 'Performance', to: '/inteligencia/performance', icon: Gauge },
-      { label: 'Previsões', to: '/inteligencia/previsoes', icon: CalendarClock },
-      { label: 'Recortes', to: '/inteligencia/recortes', icon: PieChart },
-      { label: 'Revisão de Dados', to: '/inteligencia/anomalias', icon: ShieldAlert },
     ],
   },
   {
@@ -102,6 +96,16 @@ export const NAVIGATION: NavSection[] = [
         to: '/operacional/execucao/contatos',
         icon: Phone,
       },
+    ],
+  },
+  {
+    title: 'Inteligência Econômica',
+    items: [
+      { label: 'Visão Geral', to: '/inteligencia', icon: Brain },
+      { label: 'Performance', to: '/inteligencia/performance', icon: Gauge },
+      { label: 'Previsões', to: '/inteligencia/previsoes', icon: CalendarClock },
+      { label: 'Recortes', to: '/inteligencia/recortes', icon: PieChart },
+      { label: 'Revisão de Dados', to: '/inteligencia/anomalias', icon: ShieldAlert },
     ],
   },
 ]
