@@ -4,6 +4,11 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import Login from '@/pages/Login'
 import NotFound from '@/pages/NotFound'
 import Dashboard from '@/pages/estrategica/Dashboard'
+import InteligenciaVisaoGeral from '@/pages/inteligencia/VisaoGeral'
+import InteligenciaPerformance from '@/pages/inteligencia/Performance'
+import InteligenciaPrevisoes from '@/pages/inteligencia/Previsoes'
+import InteligenciaRecortes from '@/pages/inteligencia/Recortes'
+import InteligenciaAnomalias from '@/pages/inteligencia/Anomalias'
 import GeracaoContratos from '@/pages/comercial/GeracaoContratos'
 import CarteirasInvestidores from '@/pages/comercial/CarteirasInvestidores'
 import DadosPessoaisBancarios from '@/pages/comercial/DadosPessoaisBancarios'
@@ -29,6 +34,13 @@ export default function App() {
       >
         <Route index element={<Navigate to="/estrategica" replace />} />
         <Route path="/estrategica" element={<Dashboard />} />
+
+        {/* Inteligência Econômica */}
+        <Route path="/inteligencia" element={<InteligenciaVisaoGeral />} />
+        <Route path="/inteligencia/performance" element={<InteligenciaPerformance />} />
+        <Route path="/inteligencia/previsoes" element={<InteligenciaPrevisoes />} />
+        <Route path="/inteligencia/recortes" element={<InteligenciaRecortes />} />
+        <Route path="/inteligencia/anomalias" element={<InteligenciaAnomalias />} />
 
         {/* Comercial */}
         <Route path="/comercial/contratos" element={<GeracaoContratos />} />

@@ -214,26 +214,7 @@ export function normalizarBusca(s: string | null | undefined): string {
     .toLowerCase()
 }
 
-/**
- * Nome normalizado: sem acento, sem espaço duplicado, minúsculo. Serve para
- * agrupar o mesmo investidor escrito de formas diferentes ("José da Silva" e
- * "jose da  silva" caem no mesmo lugar).
- *
- * ⚠️ É CHAVE PRIMÁRIA de public.investidor_dados. Mudar esta função órfã as
- * linhas já gravadas, porque a chave deixaria de casar. Se algum dia precisar
- * mudar, migre os dados junto.
- *
- * A faixa ̀-ͯ é a dos diacríticos combinantes, que é o que sobra
- * depois do normalize('NFD') separar letra e acento.
- */
-export function normalizarNome(s: string | null | undefined): string {
-  return (s ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-}
+
 
 /** Palavras que ligam um nome mas não distinguem duas pessoas. */
 const CONECTIVOS = new Set(['de', 'da', 'do', 'das', 'dos', 'e'])
@@ -361,55 +342,9 @@ export function hojeISO(): string {
   return new Date().toLocaleDateString('sv-SE')
 }
 
-/**
- * Dias corridos de `inicio` até `fim`, ambos ISO (YYYY-MM-DD). null quando a
- * data inicial não existe ou está malformada.
- *
- * A conta é feita em UTC de propósito: subtrair Dates locais erra em um dia
- * sempre que houver mudança de fuso no intervalo, e a diferença apareceria como
- * "364 dias" num crédito comprado há exatamente um ano.
- */
-export function diasEntre(
-  inicio: string | null | undefined,
-  fim: string,
-): number | null {
-  const a = (inicio ?? '').slice(0, 10)
-  const b = (fim ?? '').slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null
-  const [y1, m1, d1] = a.split('-').map(Number)
-  const [y2, m2, d2] = b.split('-').map(Number)
-  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000)
-}
 
-/**
- * Meses de `inicio` até `fim`, ambos ISO (YYYY-MM-DD), com fração no mês
- * incompleto. null quando alguma data falta ou está malformada.
- *
- * Meses de CALENDÁRIO, não dias/30: de 01/01 a 01/07 tem de dar exatamente 6, e
- * é assim que alguém confere a conta na mão. A sobra de dias entra como fração
- * do mês corrente (01/01 a 15/07 -> 6 + 14/31).
- *
- * Pode devolver negativo quando `fim` é anterior a `inicio`; quem usa decide o
- * que fazer com isso.
- */
-export function mesesEntre(
-  inicio: string | null | undefined,
-  fim: string | null | undefined,
-): number | null {
-  const a = (inicio ?? '').slice(0, 10)
-  const b = (fim ?? '').slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null
-  const [y1, m1, d1] = a.split('-').map(Number)
-  const [y2, m2, d2] = b.split('-').map(Number)
-  const inteiros = (y2 - y1) * 12 + (m2 - m1)
-  if (d2 === d1) return inteiros
-  // Fração do mês em curso, medida no mês onde a sobra cai.
-  const anterior = d2 < d1 ? inteiros - 1 : inteiros
-  const refMes = m2 - 1 + (d2 < d1 ? -1 : 0)
-  const diasNoMes = new Date(y2, refMes + 1, 0).getDate()
-  const sobra = d2 < d1 ? diasNoMes - d1 + d2 : d2 - d1
-  return anterior + sobra / diasNoMes
-}
+
+
 
 /**
  * Data de "daqui a N meses" a partir de um ISO local (YYYY-MM-DD). Meses de
@@ -471,3 +406,11 @@ export function sentenceCase(value: string | null | undefined): string {
   const s = value.toLocaleLowerCase('pt-BR')
   return s.charAt(0).toLocaleUpperCase('pt-BR') + s.slice(1)
 }
+
+// Cálculo de datas: fonte única no núcleo compartilhado com as Edge Functions.
+// Reexportado aqui para que nenhum import existente de '@/lib/format' quebre.
+export { diasEntre, mesesEntre } from '../../supabase/functions/_shared/nucleo/datas.ts'
+
+// Normalização de nome: fonte única no núcleo compartilhado. É chave primária
+// de investidor_dados — duas versões órfanariam os dados gravados.
+export { normalizarNome } from '../../supabase/functions/_shared/nucleo/texto.ts'
