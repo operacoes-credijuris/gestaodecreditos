@@ -790,6 +790,43 @@ export function ChecklistCertidoes({
     }
   }
 
+  /**
+   * O MESMO, mas partindo do PLACAR: aplica e já abre o formulário.
+   *
+   * Num crédito já cadastrado a janela abre no placar, e o formulário só existe
+   * para quem clicar em "Corrigir dados / cônjuge". Sem este atalho, a resposta
+   * que o processo dá exigiria: ler o aviso, decidir ir editar, achar a sugestão
+   * lá dentro, clicar. Quatro passos para registrar um dado que a tela já sabe.
+   */
+  function cadastrarConjugeCom(e: EstadoCivilEncontrado) {
+    usarEstadoCivil(e)
+    setEditando(true)
+  }
+
+  /**
+   * A RESPOSTA DO PROCESSO SOBRE O ESTADO CIVIL, para mostrar NO PLACAR.
+   *
+   * O aviso do placar diz "Nenhum cônjuge informado. Se o cedente for casado, o
+   * checklist está INCOMPLETO" — e esta tela tem o texto do processo na memória,
+   * capaz de responder exatamente isso. A detecção já existia; morava só dentro
+   * do formulário. Num crédito já cadastrado — que é todo crédito depois da
+   * primeira vez — a resposta nunca aparecia onde a pergunta é feita.
+   *
+   * `ancorado` é o que o parser conseguiu ligar ao NOME ou ao CPF do cedente.
+   * `solto` é estado civil que existe no processo mas ficou longe de qualquer
+   * âncora: numa petição isso costuma ser do advogado ou da parte contrária, e
+   * por isso aparece com aviso em vez de virar resposta.
+   */
+  const respostaEstadoCivil = useMemo(() => {
+    const ancorados = estadosCivis.filter((e) => e.doCedente)
+    const soltos = estadosCivis.filter((e) => !e.doCedente)
+    return {
+      ancorado: ancorados[0] ?? null,
+      soltos,
+      temConjugeCadastrado: sujeitos.some((s) => s.papel === 'CONJUGE'),
+    }
+  }, [estadosCivis, sujeitos])
+
   // Nascimento e cidade/UF, POR ARQUIVO. Custo zero: o texto já está lido.
   const doPdf = useMemo(() => {
     const nascimentos: (NascimentoEncontrado & { arquivo: string })[] = []
@@ -1844,6 +1881,183 @@ export function ChecklistCertidoes({
                   <span>{a}</span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/*
+            ---------------- o que o processo diz do estado civil ----------------
+
+            AQUI, no placar, e não só dentro do formulário.
+
+            O aviso logo acima pergunta, em letras maiúsculas, se o cedente é
+            casado — e esta tela tem o texto do processo em memória, capaz de
+            responder. Antes a resposta existia e morava atrás de "Corrigir dados
+            / cônjuge", que é uma tela que só se abre quem já decidiu ir editar.
+            Num crédito já cadastrado a janela abre no placar, então na prática a
+            resposta nunca aparecia para quem estava lendo a pergunta.
+
+            E este silêncio é o desfecho mais caro do sistema: falta o bloco
+            inteiro de certidões do cônjuge (planilha, linhas 52 a 67) e o placar
+            marca "completo" sem acusar nada, porque o que não foi exigido não
+            entra no denominador.
+
+            As três saídas abaixo são deliberadamente diferentes entre si, e
+            NENHUMA delas é silêncio — inclusive a de não ter achado.
+          */}
+          {sujeitos.length > 0 && !respostaEstadoCivil.temConjugeCadastrado && (
+            <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-700">
+                <FileText className="h-4 w-4" />
+                Estado civil, segundo os anexos do card
+                {arquivos.length > 0 && (
+                  <span className="font-normal text-slate-500">
+                    ({arquivos.length} arquivo{arquivos.length > 1 ? 's' : ''})
+                  </span>
+                )}
+              </div>
+
+              {lendoPdf ? (
+                <p className="text-xs text-slate-500">Lendo os anexos do card…</p>
+              ) : respostaEstadoCivil.ancorado ? (
+                <div className="space-y-2">
+                  <div className="text-sm text-slate-800">
+                    O processo qualifica{' '}
+                    <strong>
+                      {sujeitos.find((s) => s.papel === 'CEDENTE')?.nome ?? 'o cedente'}
+                    </strong>{' '}
+                    como{' '}
+                    <strong className="text-brand-700">
+                      {ROTULO_ESTADO_CIVIL[respostaEstadoCivil.ancorado.estado] ??
+                        respostaEstadoCivil.ancorado.estado}
+                    </strong>
+                    {respostaEstadoCivil.ancorado.conjuge && (
+                      <>
+                        , cônjuge{' '}
+                        <strong>{respostaEstadoCivil.ancorado.conjuge}</strong>
+                      </>
+                    )}
+                    .
+                  </div>
+                  <div className="rounded-md bg-white p-2 text-xs text-slate-500 ring-1 ring-inset ring-slate-200">
+                    …{respostaEstadoCivil.ancorado.contexto}…
+                    {respostaEstadoCivil.ancorado.arquivo && (
+                      <span className="mt-0.5 block text-slate-400">
+                        em {respostaEstadoCivil.ancorado.arquivo}
+                      </span>
+                    )}
+                  </div>
+
+                  {PEDE_CONJUGE.has(respostaEstadoCivil.ancorado.estado) ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 p-2 ring-1 ring-inset ring-amber-200">
+                      <span className="text-xs text-amber-900">
+                        Então faltam as certidões do cônjuge — o bloco das linhas 52 a
+                        67 da planilha. O placar acima <strong>não</strong> conta essa
+                        falta.
+                      </span>
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          cadastrarConjugeCom(respostaEstadoCivil.ancorado!)
+                        }
+                        disabled={salvando}
+                        icon={<Pencil className="h-4 w-4" />}
+                      >
+                        Cadastrar o cônjuge
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-600">
+                      Sem cônjuge, o bloco de certidões dele não se aplica — e o aviso
+                      acima está respondido. <strong>Confira mesmo assim</strong>: o
+                      documento pode ser de anos atrás, e estado civil muda.
+                    </p>
+                  )}
+                </div>
+              ) : respostaEstadoCivil.soltos.length > 0 ? (
+                <div className="space-y-2">
+                  {/*
+                    Achei estado civil, mas NÃO consegui prendê-lo ao cedente. Numa
+                    petição, a qualificação do advogado e a da parte contrária ficam
+                    a poucos caracteres da do autor — oferecer isso como resposta
+                    seria trocar "é do cedente" por "estava por perto". O trecho
+                    aparece para a pessoa julgar; o sistema não julga.
+                  */}
+                  <p className="text-xs text-amber-800">
+                    Achei estado civil no processo, mas{' '}
+                    <strong>não consegui ligar ao nome nem ao CPF do cedente</strong> —
+                    numa petição isso costuma ser do advogado ou da outra parte. Leia o
+                    trecho antes de usar:
+                  </p>
+                  <div className="space-y-1">
+                    {respostaEstadoCivil.soltos.slice(0, 3).map((e) => (
+                      <div
+                        key={`${e.estado}-${e.conjuge ?? ''}`}
+                        className="rounded-md bg-white p-2 text-xs ring-1 ring-inset ring-slate-200"
+                      >
+                        <span className="font-medium text-slate-800">
+                          {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
+                        </span>
+                        {e.arquivo && (
+                          <span className="ml-2 text-slate-400">em {e.arquivo}</span>
+                        )}
+                        <span className="mt-0.5 block text-slate-500">…{e.contexto}…</span>
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditando(true)}
+                    disabled={salvando}
+                    icon={<Pencil className="h-4 w-4" />}
+                  >
+                    Abrir o cadastro para decidir
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {/*
+                    NÃO ACHEI ≠ NÃO É CASADA. É a regra da casa desde o começo, e o
+                    lugar onde ela mais importa é justamente este: a leitura natural
+                    de uma tela calada é "então não tem cônjuge", que fecha o dossiê
+                    com um bloco inteiro faltando.
+                  */}
+                  <p className="text-xs text-amber-800">
+                    {arquivos.length === 0
+                      ? 'Não consegui abrir nenhum anexo deste card.'
+                      : temTexto
+                        ? `Li o texto d${arquivos.length > 1 ? 'os' : 'o'} ${
+                            arquivos.length
+                          } anexo${arquivos.length > 1 ? 's' : ''} e não achei ` +
+                          'estado civil na qualificação das partes.'
+                        : `Nenhum d${arquivos.length > 1 ? 'os' : 'o'} ${
+                            arquivos.length
+                          } anexo${arquivos.length > 1 ? 's' : ''} tem texto para ler.`}{' '}
+                    <strong>
+                      &quot;Não achei&quot; não é &quot;não é casada&quot;
+                    </strong>{' '}
+                    — confira a petição inicial e cadastre à mão.
+                  </p>
+                  {digitalizados.length > 0 && (
+                    <p className="text-xs text-amber-900">
+                      E {digitalizados.length} anexo(s) são digitalização ou não
+                      abriram:{' '}
+                      <strong>{digitalizados.map((a) => a.nome).join(', ')}</strong>. Se
+                      a qualificação estiver só aí, ela está em imagem — e imagem eu
+                      ainda não leio.
+                    </p>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditando(true)}
+                    disabled={salvando}
+                    icon={<Pencil className="h-4 w-4" />}
+                  >
+                    Cadastrar à mão
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
