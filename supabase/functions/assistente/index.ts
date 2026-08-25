@@ -13,6 +13,7 @@
 //   3. O modelo não escreve SQL. Ele escolhe entre as consultas prontas abaixo
 //      e informa os filtros; a montagem da query é nossa.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
+import { montarPainel, type CreditoBruto } from '../_shared/nucleo/painel.ts'
 import { ERRO_ACESSO, callerClient, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 // Especificador npm: com versão fixa, pelo mesmo motivo do _shared/auth.ts:
 // "@latest" traria mudança de comportamento a produção sem ninguém mexer aqui.
@@ -419,7 +420,44 @@ const FERRAMENTAS: Anthropic.Tool[] = [
       },
     },
   },
+  {
+    name: 'panorama_economico',
+    description:
+      'PERFORMANCE da carteira: rentabilidade (mediana, média e ponderada pelo ' +
+      'capital), rentabilidade anualizada, prazos, forecast de recebimentos por ' +
+      'mês, previsões vencidas, aderência das previsões e inconsistências de ' +
+      'cadastro. Não confunda com `resumo_financeiro_creditos`, que dá SOMAS; ' +
+      'esta dá DESEMPENHO — quanto rendeu, em quanto tempo, com que dispersão e ' +
+      'com quanta base estatística. Os números saem da mesma camada de cálculo ' +
+      'das telas de Inteligência Econômica; não refaça conta sobre eles.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'recorte_economico',
+    description:
+      'Desempenho econômico agrupado por tribunal, ente devedor, investidor, ' +
+      'faixa de valor ou safra de aquisição. Cada grupo vem com o tamanho da ' +
+      'amostra e a classe de representatividade, que diz se há base para ' +
+      'comparar. Respeite essa classificação: grupo marcado com ' +
+      '`pode_comparar: false` NÃO pode ser comparado com outro nem chamado de ' +
+      'melhor ou pior.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        dimensao: {
+          type: 'string',
+          enum: ['tribunal', 'ente', 'investidor', 'faixa_valor', 'safra'],
+          description: 'Como agrupar as operações.',
+        },
+      },
+      required: ['dimensao'],
+    },
+  },
 ]
+/** Fração -> pontos percentuais. Null continua null. */
+function pctOuNulo(f: number | null | undefined): number | null {
+  return typeof f === 'number' && Number.isFinite(f) ? Math.round(f * 10000) / 100 : null
+}
 
 function limite(valor: unknown): number {
   const n = typeof valor === 'number' ? valor : 20
@@ -1252,6 +1290,13 @@ Não existe campo de fase processual no cadastro. "Concluso para decisão", "sen
 Não repita as mesmas ressalvas em toda resposta: diga cada uma uma vez, de forma curta. Um bloco de avisos maior que a resposta faz a pessoa parar de lê-los.
 
 Para perguntas que uma contagem responde direto (quantos encerrados, quanto foi cedido), aí sim o número é exato e você pode afirmá-lo sem ressalva. O mesmo vale para \`resumo_financeiro_creditos\`: ele percorre todos os créditos que casam com o filtro, então os totais são exatos.
+
+# Análise econômica: quatro regras
+Somas são uma coisa, desempenho é outra. \`resumo_financeiro_creditos\` responde "quanto"; \`panorama_economico\` e \`recorte_economico\` respondem "quanto rendeu, em quanto tempo e com que base". Ao usar os dois últimos:
+1. **Nunca compare grupos marcados com \`pode_comparar: false\`.** Mostre os números de cada um e diga que não há base para dizer qual é melhor. Um grupo com duas operações não perde nem ganha de um com cinquenta — a comparação não existe.
+2. **Nunca use a média da rentabilidade anualizada para descrever a carteira.** Uma operação liquidada em poucos dias produz taxa anual de milhares por cento, correta para ela e absurda como média. Use a mediana e a rentabilidade ponderada pelo capital, e diga qual está usando.
+3. **Distinga as duas leituras.** A mediana descreve a operação típica; a ponderada descreve o dinheiro. Quando divergem, a divergência é a informação — apresente as duas.
+4. **Repasse as ressalvas que a ferramenta trouxer.** Se ela devolve \`aviso_metodologico\`, ou diz que a estimativa ajustada não está disponível, isso vai na resposta. Não invente cenário, não projete valor que a ferramenta não deu e não some blocos que ela separou.
 
 Quando uma lista traz \`aviso_limite\`, ela bateu no teto e NÃO é o conjunto todo. Nesse caso, ou peça o total com a ferramenta de contagem, ou diga que está mostrando uma parte — nunca apresente o tamanho da lista como se fosse o total.
 
