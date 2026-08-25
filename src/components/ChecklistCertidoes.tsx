@@ -25,7 +25,7 @@
 // em "Montar checklist": reabrir o card fazia o aviso "nenhum cônjuge informado"
 // desaparecer, e nada mais na tela dizia que o bloco do cônjuge nunca foi
 // considerado.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   ClipboardPaste,
@@ -41,8 +41,10 @@ import { cpfValido, formatCpfCnpjInput, onlyDigits } from '@/lib/format'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import { acharCpfs, type CpfEncontrado } from '@/lib/cpfNoTexto'
 import {
+  acharEstadoCivil,
   acharLocais,
   acharNascimentos,
+  type EstadoCivilEncontrado,
   type LocalEncontrado,
   type NascimentoEncontrado,
 } from '@/lib/dadosNoTexto'
@@ -149,6 +151,24 @@ const TOM_STATUS: Record<string, 'gray' | 'green' | 'yellow' | 'red' | 'blue'> =
   FALHA: 'red',
   NAO_APLICAVEL: 'blue',
 }
+
+const ROTULO_ESTADO_CIVIL: Record<string, string> = {
+  solteiro: 'solteiro(a)',
+  casado: 'casado(a)',
+  divorciado: 'divorciado(a)',
+  viuvo: 'viúvo(a)',
+  separado: 'separado(a) judicialmente',
+  uniao_estavel: 'união estável',
+}
+
+/**
+ * Estado civil que EXIGE o bloco de certidões do cônjuge.
+ *
+ * Casado e união estável, sim. Divorciado, viúvo e separado, não — o vínculo
+ * acabou. Solteiro, obviamente não. A planilha dá bloco próprio ao cônjuge nas
+ * linhas 52 a 67, e é este booleano que decide se ele entra.
+ */
+const PEDE_CONJUGE = new Set(['casado', 'uniao_estavel'])
 
 /** O que espera quem clicar no link. É o que decide se dá para emitir agora. */
 const BARREIRA_LOGIN: Record<string, string> = {
@@ -668,6 +688,9 @@ export function ChecklistCertidoes({
   // os campos que ela clicar — o resto do texto, que costuma vir cheio de dado
   // pessoal sem uso aqui, morre quando o modal fecha.
   const [colado, setColado] = useState('')
+  // O que foi preenchido sozinho a partir do processo. Fica VISÍVEL: campo que se
+  // preencheu sem ninguém mandar tem de dizer de onde veio.
+  const [preenchido, setPreenchido] = useState<string[]>([])
 
   const [ufs, setUfs] = useState<string[]>([])
   const [municipios, setMunicipios] = useState<Record<string, string[]>>({})
@@ -730,6 +753,43 @@ export function ChecklistCertidoes({
 
   const avisos = useMemo(() => derivarAvisos(sujeitos, itens), [sujeitos, itens])
 
+  /**
+   * Estado civil na qualificação das partes, ancorado no cedente.
+   *
+   * ANCORADO, e não "qualquer 'casada' do documento": uma petição qualifica o
+   * autor, o réu e o advogado, e cada um tem o seu. As âncoras são o CPF e o nome
+   * que já estão no formulário — então a lista melhora conforme a pessoa escolhe
+   * o CPF, que é a ordem natural de preenchimento.
+   */
+  const estadosCivis = useMemo(() => {
+    const ancoras = [onlyDigits(cedente.cpf), cedente.nome.trim()].filter(
+      (a) => a.length >= 4,
+    )
+    const fora: (EstadoCivilEncontrado & { arquivo: string })[] = []
+    for (const a of arquivos) {
+      if (!a.texto) continue
+      for (const e of acharEstadoCivil(a.texto, ancoras)) {
+        if (!fora.some((x) => x.estado === e.estado && x.conjuge === e.conjuge)) {
+          fora.push({ ...e, arquivo: a.nome })
+        }
+      }
+    }
+    return fora.sort((x, y) => Number(y.doCedente) - Number(x.doCedente))
+  }, [arquivos, cedente.cpf, cedente.nome])
+
+  /**
+   * Aplica o estado civil escolhido: liga ou desliga o bloco do cônjuge, e traz o
+   * nome dele quando o texto trouxe.
+   */
+  function usarEstadoCivil(e: EstadoCivilEncontrado) {
+    setMexeu(true)
+    const pede = PEDE_CONJUGE.has(e.estado)
+    setTemConjuge(pede)
+    if (pede && e.conjuge) {
+      setConjuge((f) => ({ ...f, nome: f.nome.trim() || e.conjuge! }))
+    }
+  }
+
   // Nascimento e cidade/UF, POR ARQUIVO. Custo zero: o texto já está lido.
   const doPdf = useMemo(() => {
     const nascimentos: (NascimentoEncontrado & { arquivo: string })[] = []
@@ -752,6 +812,66 @@ export function ChecklistCertidoes({
     locais.sort((x, y) => Number(y.residencial) - Number(x.residencial))
     return { nascimentos, locais }
   }, [arquivos, municipios])
+
+  /**
+   * ESCOLHEU O CPF, O RESTO VEM JUNTO.
+   *
+   * Preenche sozinho todo campo que tenha UMA ÚNICA resposta no processo, assim
+   * que o CPF do cedente é escolhido. Não é adivinhação: com um candidato só, não
+   * há entre o que escolher — e tudo continua editável, com o trecho do documento
+   * à vista logo acima.
+   *
+   * O CPF NUNCA É PREENCHIDO SOZINHO, e essa é a linha. Ele é o parâmetro de
+   * emissão de toda certidão do checklist: errar o CPF faz cada portal responder
+   * "nada consta", corretamente, e o dossiê fecha limpo sobre quem não é. Um
+   * processo traz o CPF do cedente, o do advogado e às vezes o de terceiros —
+   * essa escolha é de quem confere, sempre.
+   *
+   * Só toca em campo VAZIO: o que a pessoa digitou vence o que o documento diz.
+   */
+  const cpfAplicado = useRef<string>('')
+  useEffect(() => {
+    const doc = onlyDigits(cedente.cpf)
+    if (doc.length !== 11 || !cpfValido(cedente.cpf)) return
+    if (cpfAplicado.current === doc) return
+    cpfAplicado.current = doc
+
+    const feitos: string[] = []
+
+    const nasc = doPdf.nascimentos
+    if (nasc.length === 1 && !cedente.nascimento) {
+      setCedente((f) => ({ ...f, nascimento: nasc[0].iso }))
+      feitos.push(`nascimento ${nasc[0].iso.split('-').reverse().join('/')}`)
+    }
+
+    // Só o local marcado como RESIDENCIAL, e só se houver um. O processo traz o
+    // endereço do fórum e o do advogado, e os dois casam o mesmo padrão.
+    const resid = doPdf.locais.filter((l) => l.residencial)
+    if (resid.length === 1 && !cedente.uf) {
+      const l = resid[0]
+      setCedente((f) => ({ ...f, uf: l.uf, municipio: l.municipio }))
+      feitos.push(`${l.municipio}/${l.uf}`)
+    }
+
+    // Estado civil: só o que está perto do cedente, e só se houver um.
+    const ec = estadosCivis.filter((e) => e.doCedente)
+    if (ec.length === 1) {
+      const e = ec[0]
+      const pede = PEDE_CONJUGE.has(e.estado)
+      setTemConjuge(pede)
+      if (pede && e.conjuge) setConjuge((f) => ({ ...f, nome: f.nome.trim() || e.conjuge! }))
+      feitos.push(
+        `${ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}${e.conjuge ? ` (cônjuge ${e.conjuge})` : ''}`,
+      )
+    }
+
+    if (feitos.length > 0) {
+      setMexeu(true)
+      setPreenchido(feitos)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cedente.cpf, doPdf, estadosCivis])
+
 
   // O mesmo, do texto colado.
   const doColado = useMemo(
@@ -1219,6 +1339,7 @@ export function ChecklistCertidoes({
             ) : candidatos.length > 0 ||
               doPdf.nascimentos.length > 0 ||
               doPdf.locais.length > 0 ||
+              estadosCivis.length > 0 ||
               digitalizados.length > 0 ? (
               <>
                 {candidatos.length > 0 && (
@@ -1262,6 +1383,59 @@ export function ChecklistCertidoes({
                     </button>
                   ))}
                 </div>
+                {/*
+                  ESTADO CIVIL: é o que DOBRA o checklist.
+                  Cedente casado tem bloco próprio de certidões para o cônjuge
+                  (planilha, linhas 52 a 67). Deixar de marcar fecha o dossiê com
+                  esse bloco inteiro faltando, e o placar não acusa nada — por isso
+                  a sugestão fica aqui, do lado do CPF, e não escondida na caixinha
+                  lá embaixo.
+                */}
+                {estadosCivis.length > 0 && (
+                  <div className="mt-3 border-t border-slate-200 pt-3">
+                    <div className="mb-1 text-xs text-slate-600">
+                      Estado civil na qualificação das partes — clicar já liga ou
+                      desliga o bloco do cônjuge:
+                    </div>
+                    <div className="space-y-1">
+                      {estadosCivis.map((e) => (
+                        <button
+                          key={`${e.estado}-${e.conjuge ?? ''}`}
+                          type="button"
+                          onClick={() => usarEstadoCivil(e)}
+                          className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+                        >
+                          <span className="font-medium text-slate-800">
+                            {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
+                          </span>
+                          {e.conjuge && (
+                            <span className="ml-2 text-slate-700">
+                              — cônjuge: {e.conjuge}
+                            </span>
+                          )}
+                          {e.doCedente ? (
+                            <Badge size="sm" tone="blue" className="ml-2">
+                              perto do cedente
+                            </Badge>
+                          ) : (
+                            <Badge size="sm" tone="yellow" className="ml-2">
+                              pode ser de outra parte
+                            </Badge>
+                          )}
+                          <span className="ml-2 text-slate-400">em {e.arquivo}</span>
+                          <span className="mt-0.5 block truncate text-slate-500">
+                            …{e.contexto}…
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-amber-800">
+                      A petição pode ser antiga: &quot;casada&quot; naquela data não
+                      é &quot;casada hoje&quot;. Confirme antes de gerar o checklist.
+                    </p>
+                  </div>
+                )}
+
                 {(doPdf.nascimentos.length > 0 || doPdf.locais.length > 0) && (
                   <div
                     className={
@@ -1353,6 +1527,14 @@ export function ChecklistCertidoes({
               </p>
             </div>
           </details>
+
+          {preenchido.length > 0 && (
+            <div className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-900 ring-1 ring-inset ring-emerald-200">
+              Preenchi a partir do processo: <strong>{preenchido.join(' · ')}</strong>.
+              Confira antes de gerar — o trecho de onde saiu cada um está no painel
+              acima. O CPF eu nunca preencho sozinho.
+            </div>
+          )}
 
           {/* ---------------- cedente ---------------- */}
           <div className="space-y-3">
