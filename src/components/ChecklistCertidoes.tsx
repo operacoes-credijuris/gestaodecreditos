@@ -26,15 +26,30 @@
 // desaparecer, e nada mais na tela dizia que o bloco do cônjuge nunca foi
 // considerado.
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, FileText, Pencil, Plus, Sparkles } from 'lucide-react'
+import {
+  AlertTriangle,
+  ClipboardPaste,
+  ExternalLink,
+  FileText,
+  Pencil,
+  Plus,
+  Sparkles,
+} from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { cpfValido, formatCpfCnpjInput, onlyDigits } from '@/lib/format'
+import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import { acharCpfs, type CpfEncontrado } from '@/lib/cpfNoTexto'
+import {
+  acharLocais,
+  acharNascimentos,
+  type LocalEncontrado,
+  type NascimentoEncontrado,
+} from '@/lib/dadosNoTexto'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select } from '@/components/ui/Field'
+import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 
 // ------------------------------------------------------------------ tipos
@@ -78,7 +93,20 @@ interface ItemChecklist {
     captcha: string
     login: string
     url_oficial: string | null
+    dados_entrada: string[]
+    dados_entrada_pf: string[]
+    dados_entrada_pj: string[]
+    validade_dias: number | null
+    sla_horas: number | null
   } | null
+}
+
+/** Link de emissão por escopo (migration 0046). */
+interface UrlPorEscopo {
+  certidao_codigo: string
+  escopo_valor: string
+  url: string
+  informado_em: string
 }
 
 interface RespostaGeracao {
@@ -120,6 +148,56 @@ const TOM_STATUS: Record<string, 'gray' | 'green' | 'yellow' | 'red' | 'blue'> =
   PENDENTE_MANUAL: 'yellow',
   FALHA: 'red',
   NAO_APLICAVEL: 'blue',
+}
+
+/** O que espera quem clicar no link. É o que decide se dá para emitir agora. */
+const BARREIRA_LOGIN: Record<string, string> = {
+  govbr: 'exige login gov.br',
+  cadastro: 'exige cadastro no site',
+  certificado_digital: 'exige certificado digital',
+}
+
+const BARREIRA_CAPTCHA: Record<string, string> = {
+  imagem: 'CAPTCHA de imagem',
+  recaptcha: 'reCAPTCHA — só manual',
+  hcaptcha: 'hCaptcha — só manual',
+  desconhecido: 'CAPTCHA não verificado',
+}
+
+/** Nome legível dos insumos que cada portal pede. */
+const ROTULO_INSUMO: Record<string, string> = {
+  documento: 'CPF/CNPJ',
+  nome: 'Nome completo',
+  data_nascimento: 'Data de nascimento',
+  nome_mae: 'Nome da mãe',
+  uf: 'UF',
+  municipio: 'Município',
+  comarca: 'Comarca',
+  cnj: 'Número do processo',
+}
+
+/**
+ * O valor do escopo da certidão, para casar com certidao_url.escopo_valor.
+ *
+ * Tem de sair do MESMO lugar que gerou o parâmetro (dd_certidao.parametros),
+ * senão o link cadastrado para 'MG' não é achado por um item cujo parâmetro diz
+ * 'MG' — e a tela mostra "sem link" para um link que existe.
+ *
+ * `cnj` FICA DE FORA de propósito, e isto saiu de um teste. Com ele na lista, o
+ * Caderno Processual — cujo parâmetro é o número do processo — passaria a pedir
+ * "cole o link de 5001234-85.2021.8.13.0024". Link por número de processo não
+ * existe: o caderno se consulta no sistema do TRIBUNAL. Cada crédito criaria uma
+ * linha inútil na tabela, e nenhuma serviria ao crédito seguinte.
+ *
+ * Sem escopo, a linha diz que é emissão manual — que é a verdade enquanto não
+ * houver uma tabela de sistema por tribunal.
+ */
+function escopoDe(p: Record<string, unknown>): string | null {
+  for (const k of ['uf', 'municipio', 'comarca']) {
+    const v = p?.[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return null
 }
 
 function rotuloParametros(p: Record<string, unknown>): string {
@@ -196,12 +274,355 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
   return a
 }
 
+
+/**
+ * Uma linha do checklist — e, para as que não saem sozinhas, a FILA DE EMISSÃO.
+ *
+ * A pesquisa dos portais mudou o que esta tela tem de fazer. Das 19 certidões,
+ * exatamente UMA tem API oficial gratuita; 6 dos 10 portais federais nem
+ * respondem a um cliente automatizado, e a regra da casa é não burlar CAPTCHA,
+ * login nem controle de acesso de tribunal. Então o valor não está em emitir
+ * sozinho: está em quem emite abrir a lista e conseguir trabalhar sem procurar
+ * nada — o link, o que digitar lá, e o que vai barrar.
+ *
+ * O QUE ESPERA APARECE ANTES DO CLIQUE, de propósito. Saber que o portal exige
+ * gov.br evita a viagem: a pessoa junta as que dá para fazer agora e deixa as
+ * outras para quando tiver o acesso.
+ */
+function LinhaCertidao({
+  item,
+  sujeito,
+  cnj,
+  url,
+  onSalvarUrl,
+}: {
+  item: ItemChecklist
+  sujeito: Sujeito | undefined
+  cnj: string | null
+  /** Link já conhecido: do catálogo, ou cadastrado para este escopo. */
+  url: string | null
+  onSalvarUrl: (codigo: string, escopo: string, url: string) => Promise<void>
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [novaUrl, setNovaUrl] = useState('')
+  const [salvandoUrl, setSalvandoUrl] = useState(false)
+  const [erroUrl, setErroUrl] = useState<string | null>(null)
+  const [copiado, setCopiado] = useState<string | null>(null)
+
+  const cat = item.certidao_catalogo
+  const escopo = escopoDe(item.parametros)
+
+  const barreiras = [
+    BARREIRA_LOGIN[cat?.login ?? ''],
+    BARREIRA_CAPTCHA[cat?.captcha ?? ''],
+  ].filter(Boolean) as string[]
+
+  // O que o portal pede, com o valor que já temos. Campo sem valor aparece como
+  // FALTA — é a diferença entre "é só colar" e "não dá para emitir ainda".
+  const insumos = useMemo(() => {
+    const pedidos = new Set<string>([
+      ...(cat?.dados_entrada ?? []),
+      ...(sujeito?.tipo_pessoa === 'PJ'
+        ? (cat?.dados_entrada_pj ?? [])
+        : (cat?.dados_entrada_pf ?? [])),
+    ])
+    const valorDe = (k: string): string => {
+      if (k === 'documento') return formatCpfCnpjInput(sujeito?.documento ?? '')
+      if (k === 'nome') return sujeito?.nome ?? ''
+      if (k === 'data_nascimento') {
+        return sujeito?.data_nascimento
+          ? sujeito.data_nascimento.split('-').reverse().join('/')
+          : ''
+      }
+      if (k === 'cnj') return String(item.parametros?.cnj ?? cnj ?? '')
+      const p = item.parametros?.[k]
+      return typeof p === 'string' ? p : ''
+    }
+    return [...pedidos].map((k) => ({
+      chave: k,
+      rotulo: ROTULO_INSUMO[k] ?? k,
+      valor: valorDe(k),
+    }))
+  }, [cat, sujeito, item.parametros, cnj])
+
+  const faltando = insumos.filter((x) => !x.valor)
+
+  async function copiar(texto: string, chave: string) {
+    try {
+      await navigator.clipboard.writeText(texto)
+      setCopiado(chave)
+      window.setTimeout(() => setCopiado(null), 1500)
+    } catch {
+      // Área de transferência bloqueada pelo navegador: o valor está na tela
+      // do lado, então dá para selecionar à mão. Não vale virar erro.
+    }
+  }
+
+  async function salvarUrl() {
+    if (!escopo) return
+    setSalvandoUrl(true)
+    setErroUrl(null)
+    try {
+      await onSalvarUrl(item.certidao_codigo, escopo, novaUrl.trim())
+      setNovaUrl('')
+    } catch (e) {
+      setErroUrl((e as Error)?.message ?? String(e))
+    } finally {
+      setSalvandoUrl(false)
+    }
+  }
+
+  return (
+    <div className="border-b border-slate-100 text-xs last:border-b-0">
+      <div className="flex flex-wrap items-center gap-2 p-2.5">
+        <Badge size="sm" tone={TOM_STATUS[item.status] ?? 'gray'}>
+          {item.status}
+        </Badge>
+        <span className="font-medium text-slate-800">
+          {cat?.nome_curto ?? item.certidao_codigo}
+        </span>
+        <span className="text-slate-500">{cat?.orgao_emissor}</span>
+        {rotuloParametros(item.parametros) && (
+          <span className="text-slate-500">({rotuloParametros(item.parametros)})</span>
+        )}
+        {!item.obrigatoria && (
+          <Badge size="sm" tone="gray">
+            opcional
+          </Badge>
+        )}
+        {item.status === 'NAO_APLICAVEL' && (
+          <span className="text-blue-700">
+            dispensada
+            {item.dispensa_motivo ? `: ${item.dispensa_motivo}` : ' (sem motivo!)'}
+          </span>
+        )}
+        {item.erro_classe && (
+          <span className="text-amber-700">
+            {MOTIVO_MANUAL[item.erro_classe] ?? item.erro_classe}
+            {item.erro_detalhe ? `: ${item.erro_detalhe}` : ''}
+          </span>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAberto((v) => !v)}
+            className="font-medium text-slate-500 hover:text-slate-700 hover:underline"
+          >
+            {aberto ? 'Fechar' : 'Como emitir'}
+          </button>
+          {url ? (
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline"
+            >
+              Abrir portal <ExternalLink className="h-3 w-3" />
+            </a>
+          ) : (
+            <span className="text-amber-700">sem link</span>
+          )}
+        </div>
+      </div>
+
+      {aberto && (
+        <div className="space-y-2 border-t border-slate-100 bg-slate-50 p-3">
+          {barreiras.length > 0 ? (
+            <div className="text-amber-800">
+              ⚠️ {barreiras.join(' · ')}
+            </div>
+          ) : (
+            <div className="text-emerald-700">Sem login e sem CAPTCHA conhecidos.</div>
+          )}
+
+          <div>
+            <div className="mb-1 text-slate-600">O que o portal pede:</div>
+            <div className="space-y-1">
+              {insumos.map((x) => (
+                <div key={x.chave} className="flex items-center gap-2">
+                  <span className="w-36 flex-none text-slate-500">{x.rotulo}</span>
+                  {x.valor ? (
+                    <>
+                      <span className="font-mono text-slate-800">{x.valor}</span>
+                      <button
+                        type="button"
+                        onClick={() => copiar(x.valor, x.chave)}
+                        className="text-brand-600 hover:underline"
+                      >
+                        {copiado === x.chave ? 'copiado' : 'copiar'}
+                      </button>
+                    </>
+                  ) : (
+                    // Campo vazio é PENDÊNCIA, não detalhe: sem ele o portal não
+                    // emite, e descobrir isso só lá é viagem perdida.
+                    <span className="text-red-700">falta no cadastro</span>
+                  )}
+                </div>
+              ))}
+              {insumos.length === 0 && (
+                <div className="text-slate-500">Nada declarado no catálogo.</div>
+              )}
+            </div>
+          </div>
+
+          {faltando.length > 0 && (
+            <div className="text-red-700">
+              Não dá para emitir ainda: falta {faltando.map((x) => x.rotulo).join(', ')}.
+            </div>
+          )}
+
+          {cat?.validade_dias && (
+            <div className="text-slate-600">
+              Validade: {cat.validade_dias} dias
+              {cat.sla_horas ? ` · sai em até ${cat.sla_horas}h` : ''}
+            </div>
+          )}
+
+          {/* SEM LINK: o endereço desta certidão depende da UF, do município ou da
+              comarca, e cadastrar 54 links sem conferir cada um seria pior que não
+              ter — link errado manda a pessoa para o lugar errado. Então quem
+              precisa pela primeira vez cola aqui, e da segunda em diante aparece
+              pronto para todo mundo. */}
+          {!url && escopo && (
+            <div className="rounded-md bg-white p-2 ring-1 ring-inset ring-slate-200">
+              <div className="mb-1 text-slate-600">
+                O link desta certidão depende de <strong>{escopo}</strong>, e ainda
+                não está cadastrado. Cole o endereço oficial e ele passa a aparecer
+                aqui para todos os créditos deste escopo:
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  value={novaUrl}
+                  onChange={(e) => setNovaUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="min-w-0 flex-1"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={salvarUrl}
+                  loading={salvandoUrl}
+                  disabled={!/^https?:\/\/\S+$/.test(novaUrl.trim())}
+                >
+                  Salvar link
+                </Button>
+              </div>
+              {erroUrl && <div className="mt-1 text-red-700">{erroUrl}</div>}
+            </div>
+          )}
+
+          {!url && !escopo && (
+            <div className="text-amber-800">
+              Esta certidão não tem link no catálogo e não tem escopo (UF, município
+              ou comarca) para cadastrar um. Emissão manual, procurando o portal.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Candidatos de nascimento e cidade/UF achados num texto.
+ *
+ * O MESMO componente serve ao PDF do processo e ao texto colado de outra
+ * consulta, porque a origem não muda o que se faz com o achado: mostrar com o
+ * trecho em volta e deixar quem confere clicar. Ver lib/dadosNoTexto.ts.
+ */
+function Sugestoes({
+  nascimentos,
+  locais,
+  onNascimento,
+  onLocal,
+  vazio,
+}: {
+  nascimentos: (NascimentoEncontrado & { arquivo?: string })[]
+  locais: (LocalEncontrado & { arquivo?: string })[]
+  onNascimento: (iso: string) => void
+  onLocal: (l: LocalEncontrado) => void
+  vazio: string
+}) {
+  if (nascimentos.length === 0 && locais.length === 0) {
+    return <p className="text-xs text-slate-600">{vazio}</p>
+  }
+  return (
+    <div className="space-y-2">
+      {nascimentos.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs text-slate-600">
+            Data de nascimento <strong>do cedente</strong> — só datas rotuladas como
+            nascimento entram, senão a lista viria com toda data do processo:
+          </div>
+          <div className="space-y-1">
+            {nascimentos.map((n) => (
+              <button
+                key={n.iso}
+                type="button"
+                onClick={() => onNascimento(n.iso)}
+                className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+              >
+                <span className="font-mono font-medium text-slate-800">
+                  {n.iso.split('-').reverse().join('/')}
+                </span>
+                {n.arquivo && (
+                  <span className="ml-2 text-slate-400">em {n.arquivo}</span>
+                )}
+                <span className="mt-0.5 block truncate text-slate-500">
+                  …{n.contexto}…
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {locais.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs text-slate-600">
+            Cidade e UF <strong>do cedente</strong> — conferidas contra a lista do
+            IBGE. Clicar preenche as duas juntas:
+          </div>
+          <div className="space-y-1">
+            {locais.map((l) => (
+              <button
+                key={`${l.uf}-${l.municipio}`}
+                type="button"
+                onClick={() => onLocal(l)}
+                className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+              >
+                <span className="font-medium text-slate-800">
+                  {l.municipio}/{l.uf}
+                </span>
+                {l.residencial && (
+                  <Badge size="sm" tone="blue" className="ml-2">
+                    perto de &quot;residente&quot;
+                  </Badge>
+                )}
+                {l.arquivo && (
+                  <span className="ml-2 text-slate-400">em {l.arquivo}</span>
+                )}
+                {l.forma === 'rotulado' && (
+                  <span className="ml-2 text-slate-400">(campo CIDADE/UF)</span>
+                )}
+                <span className="mt-0.5 block truncate text-slate-500">
+                  …{l.contexto}…
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ componente
 
 export function ChecklistCertidoes({
   leadId,
   cedenteDoCard,
-  textoDoProcesso,
+  arquivos,
   lendoPdf,
   avisoPdf,
   open,
@@ -210,8 +631,14 @@ export function ChecklistCertidoes({
   leadId: number
   /** Nome do cedente lido do card. Sugestão: o campo continua editável. */
   cedenteDoCard: string
-  /** Texto do PDF do card, se já foi lido. Vazio = ainda não lido, ou falhou. */
-  textoDoProcesso: string
+  /**
+   * TODOS os PDFs do card, com o texto de cada um. Lista vazia = ainda não lidos.
+   *
+   * Era um texto só, do último PDF anexado. Processo de precatório vem em vários
+   * arquivos, e a petição inicial — que é onde está a qualificação das partes —
+   * podia ser justamente a que não estava sendo lida.
+   */
+  arquivos: ArquivoLido[]
   lendoPdf: boolean
   avisoPdf: string | null
   open: boolean
@@ -225,6 +652,9 @@ export function ChecklistCertidoes({
   const [sujeitos, setSujeitos] = useState<Sujeito[]>([])
   const [itens, setItens] = useState<ItemChecklist[]>([])
   const [completude, setCompletude] = useState<Completude | null>(null)
+  const [urls, setUrls] = useState<UrlPorEscopo[]>([])
+  const [erroLinks, setErroLinks] = useState<string | null>(null)
+  const [cnjDoCredito, setCnjDoCredito] = useState<string | null>(null)
 
   const [editando, setEditando] = useState(false)
   const [cedente, setCedente] = useState<FormPessoa>(VAZIO)
@@ -234,32 +664,151 @@ export function ChecklistCertidoes({
   const [ufsAnteriores, setUfsAnteriores] = useState('')
   const [municipiosAnteriores, setMunicipiosAnteriores] = useState('')
   const [mexeu, setMexeu] = useState(false)
+  // só na tela: NÃO é gravado em lugar nenhum. O que a pessoa aproveita dele são
+  // os campos que ela clicar — o resto do texto, que costuma vir cheio de dado
+  // pessoal sem uso aqui, morre quando o modal fecha.
+  const [colado, setColado] = useState('')
 
   const [ufs, setUfs] = useState<string[]>([])
   const [municipios, setMunicipios] = useState<Record<string, string[]>>({})
 
   // A lista do IBGE tem 5571 municípios: importada sob demanda, como em
   // DadosPessoaisBancarios, para não entrar no bundle de quem nunca abre isto.
+  const [erroMunicipios, setErroMunicipios] = useState<string | null>(null)
   useEffect(() => {
     if (!open || ufs.length > 0) return
-    void import('@/lib/municipios').then((m) => {
-      setUfs(m.UFS)
-      setMunicipios(m.MUNICIPIOS_POR_UF)
-    })
+    void import('@/lib/municipios')
+      .then((m) => {
+        setUfs(m.UFS)
+        setMunicipios(m.MUNICIPIOS_POR_UF)
+        setErroMunicipios(null)
+      })
+      // A lista é um chunk carregado sob demanda, e o nome do arquivo tem hash:
+      // uma aba deixada aberta durante um deploy dá 404 nele. Sem este catch a
+      // promessa era rejeitada em silêncio, `municipios` ficava vazio, e a tela
+      // dizia "não achei cidade/UF — cidade só entra se existir na lista do
+      // IBGE". A cidade estava na lista; a LISTA é que não tinha carregado.
+      .catch((e) =>
+        setErroMunicipios(
+          `Não consegui carregar a lista de municípios (${
+            (e as Error)?.message ?? e
+          }). Recarregue a página com Ctrl+Shift+R — sem ela eu não confiro cidade nenhuma.`,
+        ),
+      )
   }, [open, ufs.length])
 
-  const candidatos: CpfEncontrado[] = useMemo(
-    () => (textoDoProcesso ? acharCpfs(textoDoProcesso) : []),
-    [textoDoProcesso],
+  const temTexto = useMemo(() => arquivos.some((a) => a.texto.length > 0), [arquivos])
+
+  /**
+   * CPFs candidatos, buscados ARQUIVO POR ARQUIVO.
+   *
+   * NUNCA sobre a junção dos textos, e o motivo é um falso positivo que passa em
+   * toda validação: juntando os arquivos, os dígitos do fim de um encostam nos do
+   * começo do outro. "Protocolo 529982247" + "25 de agosto de 2026" viram
+   * 529.982.247-25 — CPF de dígito verificador VÁLIDO, oferecido na tela como
+   * conferido, e que não existe em documento nenhum. Um cálculo terminando em
+   * número de protocolo seguido de um contrato começando com data é rotina.
+   *
+   * Emitir certidão sobre CPF inventado é o pior desfecho do sistema: todo portal
+   * responde "nada consta", corretamente, e o dossiê fecha limpo sobre ninguém.
+   */
+  const candidatos: (CpfEncontrado & { arquivo: string })[] = useMemo(() => {
+    const fora: (CpfEncontrado & { arquivo: string })[] = []
+    for (const a of arquivos) {
+      if (!a.texto) continue
+      for (const c of acharCpfs(a.texto)) {
+        if (!fora.some((x) => x.cpf === c.cpf)) fora.push({ ...c, arquivo: a.nome })
+      }
+    }
+    return fora
+  }, [arquivos])
+
+  const digitalizados = useMemo(
+    () => arquivos.filter((a) => a.digitalizado || a.erro),
+    [arquivos],
   )
 
   const avisos = useMemo(() => derivarAvisos(sujeitos, itens), [sujeitos, itens])
+
+  // Nascimento e cidade/UF, POR ARQUIVO. Custo zero: o texto já está lido.
+  const doPdf = useMemo(() => {
+    const nascimentos: (NascimentoEncontrado & { arquivo: string })[] = []
+    const locais: (LocalEncontrado & { arquivo: string })[] = []
+    for (const a of arquivos) {
+      if (!a.texto) continue
+      for (const n of acharNascimentos(a.texto)) {
+        if (!nascimentos.some((x) => x.iso === n.iso)) {
+          nascimentos.push({ ...n, arquivo: a.nome })
+        }
+      }
+      for (const l of acharLocais(a.texto, municipios)) {
+        if (!locais.some((x) => x.uf === l.uf && x.municipio === l.municipio)) {
+          locais.push({ ...l, arquivo: a.nome })
+        }
+      }
+    }
+    // Residencial primeiro, igual ao parser: o processo traz o endereço do
+    // advogado e do fórum, e eles casam o mesmo padrão.
+    locais.sort((x, y) => Number(y.residencial) - Number(x.residencial))
+    return { nascimentos, locais }
+  }, [arquivos, municipios])
+
+  // O mesmo, do texto colado.
+  const doColado = useMemo(
+    () => ({
+      nascimentos: acharNascimentos(colado),
+      locais: acharLocais(colado, municipios),
+    }),
+    [colado, municipios],
+  )
+
+  /** Mapa (codigo|escopo) -> url, para a linha resolver sem varrer a lista. */
+  const urlPorEscopo = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const u of urls) m.set(`${u.certidao_codigo}|${u.escopo_valor}`, u.url)
+    return m
+  }, [urls])
+
+  /**
+   * Grava o link de um escopo. Global de propósito: cadastrar o TJ do Paraná uma
+   * vez vale para todo crédito do Paraná, agora e depois.
+   */
+  async function salvarUrlDoEscopo(codigo: string, escopo: string, url: string) {
+    const { data: sessao } = await supabase.auth.getUser()
+    const { error } = await supabase.from('certidao_url').upsert(
+      {
+        certidao_codigo: codigo,
+        // O escopo vai como veio do parâmetro da certidão. Normalizar aqui
+        // (minúsculo, sem acento) faria a gravação divergir da busca, e o link
+        // salvo nunca mais seria encontrado.
+        escopo_valor: escopo,
+        url: url.trim(),
+        informado_por: sessao?.user?.id ?? null,
+        informado_em: new Date().toISOString(),
+      },
+      { onConflict: 'certidao_codigo,escopo_valor' },
+    )
+    if (error) {
+      throw new Error(
+        /certidao_url_parece_url/.test(error.message)
+          ? 'O banco recusou: precisa ser um endereço começando com http:// ou https://.'
+          : error.message,
+      )
+    }
+    await recarregar()
+  }
+
+  /** Local escolhido preenche UF E MUNICÍPIO JUNTOS — nunca um sem o outro. */
+  function usarLocal(l: { uf: string; municipio: string }) {
+    setMexeu(true)
+    setCedente((f) => ({ ...f, uf: l.uf, municipio: l.municipio }))
+  }
 
   const recarregar = useCallback(async () => {
     setCarregando(true)
     setErro(null)
     try {
-      const [rs, ri, rc] = await Promise.all([
+      const [rs, ri, rc, ru, rl] = await Promise.all([
         supabase
           .from('dd_sujeito')
           .select(
@@ -274,12 +823,24 @@ export function ChecklistCertidoes({
           .select(
             'id, sujeito_id, certidao_codigo, parametros, obrigatoria, status,' +
               ' erro_classe, erro_detalhe, dispensa_motivo,' +
-              ' certidao_catalogo(nome_curto, orgao_emissor, metodo, captcha, login, url_oficial)',
+              ' certidao_catalogo(nome_curto, orgao_emissor, metodo, captcha, login,' +
+              ' url_oficial, dados_entrada, dados_entrada_pf, dados_entrada_pj,' +
+              ' validade_dias, sla_horas)',
           )
           .eq('kommo_lead_id', leadId),
         supabase
           .from('v_dd_completude')
           .select('*')
+          .eq('kommo_lead_id', leadId)
+          .maybeSingle(),
+        // Links por escopo (migration 0046). Tabela global: o link do TJ do
+        // Paraná serve a todo crédito do Paraná, não só a este.
+        supabase
+          .from('certidao_url')
+          .select('certidao_codigo, escopo_valor, url, informado_em'),
+        supabase
+          .from('kommo_leads')
+          .select('processo_cnj')
           .eq('kommo_lead_id', leadId)
           .maybeSingle(),
       ])
@@ -288,11 +849,26 @@ export function ChecklistCertidoes({
       // O erro da view era engolido: o placar simplesmente não aparecia, e
       // "falhou ao ler" ficava indistinguível de "não tem nada aqui ainda".
       if (rc.error) throw new Error(`Placar de completude: ${rc.error.message}`)
+      // Falha aqui não derruba a tela: sem os links a lista ainda serve, e cada
+      // linha mostra "sem link" com o campo para cadastrar. Mas o erro aparece,
+      // porque "não consegui ler os links" e "não há link" são coisas diferentes.
+      if (ru.error) {
+        setErroLinks(
+          `Não consegui ler os links de emissão: ${ru.error.message}. ` +
+            `A migration 0046 já rodou no SQL Editor?`,
+        )
+      } else {
+        setErroLinks(null)
+      }
 
       const listaS = (rs.data ?? []) as unknown as Sujeito[]
       setSujeitos(listaS)
       setItens((ri.data ?? []) as unknown as ItemChecklist[])
       setCompletude((rc.data ?? null) as Completude | null)
+      setUrls((ru.data ?? []) as unknown as UrlPorEscopo[])
+      setCnjDoCredito(
+        ((rl.data as { processo_cnj?: string } | null)?.processo_cnj ?? null),
+      )
 
       // Sem sujeito nenhum, a única coisa útil é o formulário. Com sujeito, o
       // padrão é ver o que já existe — corrigir é ação explícita.
@@ -586,6 +1162,18 @@ export function ChecklistCertidoes({
         </div>
       )}
 
+      {erroLinks && (
+        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
+          {erroLinks}
+        </div>
+      )}
+
+      {erroMunicipios && (
+        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 ring-1 ring-inset ring-red-200">
+          {erroMunicipios}
+        </div>
+      )}
+
       {carregando ? (
         <div className="py-8 text-center text-sm text-slate-500">Carregando…</div>
       ) : editando ? (
@@ -594,18 +1182,59 @@ export function ChecklistCertidoes({
           <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
             <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-700">
               <FileText className="h-4 w-4" />
-              CPFs encontrados no PDF do card
+              O que achei nos anexos do card
+              {arquivos.length > 0 && (
+                <span className="font-normal text-slate-500">
+                  ({arquivos.length} arquivo{arquivos.length > 1 ? 's' : ''})
+                </span>
+              )}
             </div>
+
+            {/*
+              ARQUIVO SEM TEXTO É DITO, não omitido.
+              Petição digitalizada, foto de RG, comprovante escaneado: são IMAGEM,
+              e o pdf.js extrai texto selecionável. Sem este aviso, o dado estaria
+              no processo, a tela não acharia nada, e a leitura natural seria "o
+              processo não tem" — que é falso. É a diferença entre "não consegui
+              ler" e "não existe".
+            */}
+            {digitalizados.length > 0 && (
+              <div className="mb-2 space-y-1 rounded-md bg-amber-50 p-2 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
+                {digitalizados.map((a, i) => (
+                  <div key={`${a.nome}-${i}`}>
+                    <strong>{a.nome || '(anexo sem nome)'}</strong>
+                    {a.erro
+                      ? ` — ${a.erro}`
+                      : ` — ${a.paginas} página(s) com só ${a.densidade} caractere(s) ` +
+                        `por página: é digitalização (o texto que tem é o rodapé de ` +
+                        `assinatura do tribunal). Se o nascimento ou o endereço ` +
+                        `estiverem só aí — foto de RG, comprovante de residência —, eu ` +
+                        `não leio: abra o arquivo e digite.`}
+                  </div>
+                ))}
+              </div>
+            )}
             {lendoPdf ? (
               <p className="text-xs text-slate-500">Lendo o PDF do card…</p>
-            ) : candidatos.length > 0 ? (
+            ) : candidatos.length > 0 ||
+              doPdf.nascimentos.length > 0 ||
+              doPdf.locais.length > 0 ||
+              digitalizados.length > 0 ? (
               <>
-                <p className="mb-2 text-xs text-slate-600">
-                  Dígito verificador conferido. <strong>Escolher é seu</strong>: um processo
-                  traz o CPF do cedente, do advogado e às vezes de terceiros — o sistema não
-                  tem como saber qual é qual. A lista pode estar incompleta: o PDF nem sempre
-                  entrega os números inteiros.
-                </p>
+                {candidatos.length > 0 && (
+                  <p className="mb-2 text-xs text-slate-600">
+                    Dígito verificador conferido. <strong>Escolher é seu</strong>: um
+                    processo traz o CPF do cedente, do advogado e às vezes de terceiros —
+                    o sistema não tem como saber qual é qual. A lista pode estar
+                    incompleta: o PDF nem sempre entrega os números inteiros.
+                  </p>
+                )}
+                {candidatos.length === 0 && (
+                  <p className="mb-2 text-xs text-amber-800">
+                    Nenhum CPF de dígito válido no texto — digite o do cedente abaixo,
+                    conferindo no processo. O que achei do resto está logo abaixo.
+                  </p>
+                )}
                 <div className="space-y-1.5">
                   {candidatos.map((c) => (
                     <button
@@ -624,16 +1253,39 @@ export function ChecklistCertidoes({
                           rotulado &quot;CPF&quot;
                         </Badge>
                       )}
+                      {c.arquivo && (
+                        <span className="ml-2 text-slate-400">em {c.arquivo}</span>
+                      )}
                       <span className="mt-0.5 block truncate text-slate-500">
                         …{c.contexto}…
                       </span>
                     </button>
                   ))}
                 </div>
+                {(doPdf.nascimentos.length > 0 || doPdf.locais.length > 0) && (
+                  <div
+                    className={
+                      candidatos.length > 0
+                        ? 'mt-3 border-t border-slate-200 pt-3'
+                        : 'mt-2'
+                    }
+                  >
+                    <Sugestoes
+                      nascimentos={doPdf.nascimentos}
+                      locais={doPdf.locais}
+                      onNascimento={(iso) => {
+                        setMexeu(true)
+                        setCedente((f) => ({ ...f, nascimento: iso }))
+                      }}
+                      onLocal={usarLocal}
+                      vazio=""
+                    />
+                  </div>
+                )}
               </>
             ) : avisoPdf ? (
               <p className="text-xs text-slate-600">{avisoPdf}</p>
-            ) : textoDoProcesso ? (
+            ) : temTexto ? (
               // Só se pode afirmar isto DEPOIS de ler o PDF. Sem texto, o certo é
               // dizer que não leu — não que o documento não tem CPF.
               <p className="text-xs text-slate-600">
@@ -647,6 +1299,60 @@ export function ChecklistCertidoes({
               </p>
             )}
           </div>
+
+          {/* ---------------- colar de outra consulta ---------------- */}
+          {/*
+            POR QUE UMA CAIXA DE COLAR, e não integração.
+
+            A Date Solutions é plataforma WEB: não publica API nem documentação de
+            integração. Automatizar contra ela seria robô preenchendo formulário de
+            terceiro — frágil e provavelmente contra os termos de uso. Mas o dado
+            que ela mostra na tela é o mesmo dado: copiar e colar aqui aproveita a
+            consulta que a pessoa JÁ fez, sem integração nenhuma, sem custo novo e
+            sem depender de fornecedor.
+
+            E vale para qualquer fonte, hoje e depois: o parser é o mesmo do PDF
+            (lib/dadosNoTexto.ts). Se um dia a Date Solutions tiver API, ligá-la é
+            trocar de onde vem o texto — o resto já está feito.
+          */}
+          <details className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
+            <summary className="cursor-pointer text-xs font-medium text-slate-700">
+              <ClipboardPaste className="mr-1 inline h-4 w-4" />
+              Colar resultado de outra consulta (Date Solutions, etc.)
+            </summary>
+            <div className="mt-2 space-y-2">
+              <Textarea
+                value={colado}
+                onChange={(e) => setColado(e.target.value)}
+                rows={4}
+                placeholder="Cole aqui o resultado da consulta do CEDENTE. Eu leio a data de nascimento e a cidade/UF; o resto do texto é ignorado e não fica guardado."
+              />
+              {colado.trim() && (
+                <Sugestoes
+                  nascimentos={doColado.nascimentos}
+                  locais={doColado.locais}
+                  onNascimento={(iso) => {
+                    setMexeu(true)
+                    setCedente((f) => ({ ...f, nascimento: iso }))
+                  }}
+                  onLocal={usarLocal}
+                  vazio={
+                    Object.keys(municipios).length === 0
+                      ? 'Ainda estou carregando a lista de municípios — sem ela não ' +
+                        'consigo conferir cidade. Aguarde um instante e cole de novo.'
+                      : 'Não achei nascimento nem cidade/UF neste texto. Data de ' +
+                        'nascimento só é reconhecida se vier rotulada ("nascimento", ' +
+                        '"nascido em"), e cidade só se existir na lista do IBGE junto ' +
+                        'com a UF.'
+                  }
+                />
+              )}
+              <p className="text-xs text-slate-500">
+                Este texto NÃO é gravado. Só os campos em que você clicar entram no
+                cadastro — o resto morre quando a janela fecha.
+              </p>
+            </div>
+          </details>
 
           {/* ---------------- cedente ---------------- */}
           <div className="space-y-3">
@@ -680,6 +1386,7 @@ export function ChecklistCertidoes({
                   placeholder="000.000.000-00"
                 />
               </Field>
+
               <Field
                 label="Data de nascimento"
                 hint="A CND Federal (Receita/PGFN) não sai sem ela — é o primeiro item do checklist."
@@ -991,56 +1698,20 @@ export function ChecklistCertidoes({
                     </div>
                   ) : (
                     lista.map((i) => (
-                      <div
+                      <LinhaCertidao
                         key={i.id}
-                        className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-2.5 text-xs last:border-b-0"
-                      >
-                        <Badge size="sm" tone={TOM_STATUS[i.status] ?? 'gray'}>
-                          {i.status}
-                        </Badge>
-                        <span className="font-medium text-slate-800">
-                          {i.certidao_catalogo?.nome_curto ?? i.certidao_codigo}
-                        </span>
-                        <span className="text-slate-500">
-                          {i.certidao_catalogo?.orgao_emissor}
-                        </span>
-                        {rotuloParametros(i.parametros) && (
-                          <span className="text-slate-500">
-                            ({rotuloParametros(i.parametros)})
-                          </span>
-                        )}
-                        {!i.obrigatoria && (
-                          <Badge size="sm" tone="gray">
-                            opcional
-                          </Badge>
-                        )}
-                        {/* A dispensa é o único caminho legítimo para tirar uma
-                            obrigatória da conta, e a 0042 exige motivo escrito.
-                            Mostrar o motivo aqui é o que torna esse registro
-                            auditável por quem lê a tela. */}
-                        {i.status === 'NAO_APLICAVEL' && (
-                          <span className="text-blue-700">
-                            dispensada
-                            {i.dispensa_motivo ? `: ${i.dispensa_motivo}` : ' (sem motivo!)'}
-                          </span>
-                        )}
-                        {i.erro_classe && (
-                          <span className="text-amber-700">
-                            {MOTIVO_MANUAL[i.erro_classe] ?? i.erro_classe}
-                            {i.erro_detalhe ? `: ${i.erro_detalhe}` : ''}
-                          </span>
-                        )}
-                        {i.certidao_catalogo?.url_oficial && (
-                          <a
-                            href={i.certidao_catalogo.url_oficial}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="ml-auto font-medium text-brand-600 hover:underline"
-                          >
-                            Abrir portal
-                          </a>
-                        )}
-                      </div>
+                        item={i}
+                        sujeito={s}
+                        cnj={cnjDoCredito}
+                        url={
+                          i.certidao_catalogo?.url_oficial ||
+                          urlPorEscopo.get(
+                            `${i.certidao_codigo}|${escopoDe(i.parametros) ?? ''}`,
+                          ) ||
+                          null
+                        }
+                        onSalvarUrl={salvarUrlDoEscopo}
+                      />
                     ))
                   )}
                 </div>
