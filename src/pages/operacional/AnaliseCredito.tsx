@@ -137,7 +137,28 @@ function lerCardCredijuris(lead: KommoLead) {
   }
 }
 
-async function extrairTextoDoPdf(url: string): Promise<string> {
+// RODAPÉ QUE O TRIBUNAL ESTAMPA EM TODA PÁGINA.
+//
+// Isto é o que quebrava a detecção de digitalização. PJe e e-SAJ imprimem em
+// CADA página um rodapé de assinatura digital com uns 200 caracteres — e esse
+// rodapé É texto selecionável. Num processo digitalizado de 200 páginas isso soma
+// 40 mil caracteres, o arquivo passava folgado por "tem texto", e a tela então
+// afirmava "li o PDF e não achei" sobre 200 páginas que nunca foram lidas.
+//
+// Nenhuma dessas linhas é conteúdo do processo, então saem da conta.
+const RODAPE_TRIBUNAL =
+  /^.*(documento\s+assinado\s+digitalmente|assinado\s+eletronicamente\s+por|este\s+documento\s+pode\s+ser\s+verificado|c[óo]digo\s+(de\s+)?verifica|conforme\s+MP\s*n?\.?\s*2\.?200-2|n[úu]mero\s+do\s+documento:|p[áa]gina\s+\d+\s+de\s+\d+).*$/gim
+
+/**
+ * Texto e número de páginas de um PDF.
+ *
+ * O número de páginas importa: é ele que permite medir DENSIDADE — caracteres por
+ * página —, e é a densidade, não o total, que separa "documento de texto" de
+ * "digitalização com rodapé de assinatura".
+ */
+async function extrairTextoDoPdf(
+  url: string,
+): Promise<{ texto: string; paginas: number }> {
   const resp = await fetch(url)
   if (!resp.ok) throw new Error(`Falha ao baixar o PDF da Kommo (HTTP ${resp.status}).`)
   const buf = await resp.arrayBuffer()
@@ -148,52 +169,170 @@ async function extrairTextoDoPdf(url: string): Promise<string> {
     const content = await page.getTextContent()
     texto += (content.items as Array<{ str?: string }>).map((it) => it.str ?? '').join(' ') + '\n'
   }
-  return texto
+  return { texto, paginas: pdf.numPages }
 }
 
+export interface ArquivoLido {
+  nome: string
+  texto: string
+  paginas: number
+  /** Caracteres de conteúdo por página, descontado o rodapé do tribunal. */
+  densidade: number
+  /** Densidade baixa: é digitalização. pdf.js lê texto, não imagem. */
+  digitalizado: boolean
+  erro?: string
+}
+
+// Uma página de petição tem 1500 a 3500 caracteres. Uma página digitalizada, sem
+// o rodapé, tem quase zero. 150 fica longe dos dois extremos, e o erro que ele
+// pode cometer é para o lado seguro: marcar como suspeito um documento curtíssimo
+// e de fato legível, o que faz a tela dizer "pode ser que eu não tenha lido" em
+// vez de afirmar que leu.
+const DENSIDADE_MINIMA = 150
+
 /**
- * Texto do PDF anexado ao card.
+ * TODOS os PDFs anexados ao card, com o texto de cada um.
  *
- * Separado de analisarLeadCredijuris porque agora DUAS coisas dependem dele: a
- * análise (que manda o texto ao motor) e o checklist de certidões (que procura
- * nele os CPFs candidatos). Baixar e extrair duas vezes o mesmo PDF de 200
- * páginas seria desperdício visível na tela, então quem chama guarda o
- * resultado — ver `textoCache` no componente.
+ * Era um PDF só — o último anexado — e isso escondia um defeito real: processo
+ * de precatório costuma vir em vários arquivos (petição inicial num, cálculo
+ * noutro), e se a petição fosse anexada antes do cálculo, a qualificação das
+ * partes nunca chegava à tela. O campo de nascimento aparecia vazio como se o
+ * dado não existisse no processo.
  *
- * Devolve o texto INTEIRO. O corte por tamanho é do consumidor: o motor tem
- * limite de contexto, a busca de CPF não tem e não pode perder o fim do
- * documento.
+ * ARQUIVO SEM TEXTO NÃO É ARQUIVO SEM DADO. Petição digitalizada, foto de RG,
+ * comprovante de residência escaneado: tudo isso é IMAGEM, e o pdf.js extrai
+ * texto selecionável, não imagem. Então o arquivo é marcado `digitalizado` e a
+ * tela DIZ isso — em vez de simplesmente não achar nada e deixar parecer que o
+ * processo não tem a informação.
+ *
+ * Falha em um arquivo não derruba os outros: cada um carrega seu próprio erro.
+ *
+ * NUNCA DEVOLVE LISTA VAZIA: se não há PDF, lança. Quem lê o cache trata "tem
+ * entrada" como "já leu", e uma lista vazia gravada ali significaria "já leu e não
+ * achou nada" — a leitura nunca mais seria tentada, e a tela ficaria em branco
+ * para sempre sem dizer por quê.
  */
-async function lerTextoDoCard(lead: KommoLead): Promise<string> {
-  // 1) Kommo: pega o LINK de download do PDF anexado no card
+async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
   const bk = await invokeFunction<{
     pronto?: boolean
     download_url?: string
     erro?: string
     nome_arquivo?: string
+    arquivos?: { nome: string; download: string; mime?: string }[]
+    nao_pdf?: string[]
+    sem_link?: string[]
   }>('buscar-kommo', { lead_id: lead.kommo_lead_id })
   if (bk.erro) throw new Error(bk.erro)
-  if (!bk.pronto || !bk.download_url)
-    throw new Error('Não achei o PDF no card. Confira se o PDF do processo está anexado.')
 
-  // 2) O NAVEGADOR baixa o PDF e extrai o texto (pdf.js) — o trabalho pesado fica aqui,
-  //    não no servidor, então aguenta PDF de qualquer tamanho sem estourar a CPU.
-  const texto = (await extrairTextoDoPdf(bk.download_url)).trim()
-  if (!texto) {
-    throw new Error(
-      'O PDF não tem texto selecionável (parece escaneado/imagem). Não foi possível ler o conteúdo.',
-    )
+  const lista =
+    bk.arquivos && bk.arquivos.length > 0
+      ? bk.arquivos
+      : bk.download_url
+        ? [{ nome: bk.nome_arquivo ?? 'processo.pdf', download: bk.download_url }]
+        : []
+  if (lista.length === 0) {
+    throw new Error('Não achei PDF no card. Confira se o PDF do processo está anexado.')
   }
-  return texto
+
+  const lidos: ArquivoLido[] = []
+  for (const a of lista) {
+    try {
+      const { texto, paginas } = await extrairTextoDoPdf(a.download)
+      const limpo = texto.trim()
+      const conteudo = limpo.replace(RODAPE_TRIBUNAL, '').replace(/\s+/g, ' ').trim()
+      const densidade = paginas > 0 ? Math.round(conteudo.length / paginas) : 0
+      lidos.push({
+        nome: a.nome,
+        // Guarda o texto ORIGINAL: o rodapé sai da CONTA, não do conteúdo. Um CPF
+        // ou uma data podem estar em qualquer parte, e recortar por precaução
+        // perderia dado de verdade.
+        texto: limpo,
+        paginas,
+        densidade,
+        digitalizado: paginas > 0 && densidade < DENSIDADE_MINIMA,
+      })
+    } catch (e) {
+      lidos.push({
+        nome: a.nome,
+        texto: '',
+        paginas: 0,
+        densidade: 0,
+        digitalizado: false,
+        erro: (e as Error)?.message ?? String(e),
+      })
+    }
+  }
+
+  // Anexo que não é PDF entra como aviso, não como silêncio: se o RG está em JPG,
+  // "não achei o RG" seria falso — ele está ali, só não é legível por aqui.
+  for (const nome of bk.nao_pdf ?? []) {
+    lidos.push({
+      nome,
+      texto: '',
+      paginas: 0,
+      densidade: 0,
+      digitalizado: false,
+      erro: 'Não é PDF — não consigo ler por aqui.',
+    })
+  }
+
+  // PDF que existe no card e não trouxe link de download. A função já reportava
+  // isso e o navegador ignorava — então o arquivo desaparecia da contagem e de
+  // todo aviso, que é o defeito exato que esta entrega veio consertar.
+  for (const nome of bk.sem_link ?? []) {
+    lidos.push({
+      nome,
+      texto: '',
+      paginas: 0,
+      densidade: 0,
+      digitalizado: false,
+      erro: 'A Kommo não deu link de download deste PDF — não consegui baixar.',
+    })
+  }
+
+  return lidos
 }
 
 async function analisarLeadCredijuris(
   lead: KommoLead,
-  textoJaLido?: string,
-): Promise<{ resultado: ResultadoAnalise; texto: string }> {
+  arquivosJaLidos?: ArquivoLido[],
+): Promise<{ resultado: ResultadoAnalise; arquivos: ArquivoLido[] }> {
   const dados = lerCardCredijuris(lead)
 
-  const completo = textoJaLido ?? (await lerTextoDoCard(lead))
+  const arquivos = arquivosJaLidos ?? (await lerArquivosDoCard(lead))
+
+  // O ÚLTIMO PDF DO CARD, e nada além dele. Esta análise precifica 150 cards de
+  // RPV que funcionam, e o último PDF é exatamente o que ela recebia antes desta
+  // mudança. Juntar a petição inicial ao cálculo mudaria o texto que a IA lê — e a
+  // petição traz o VALOR DA CAUSA, que NÃO é o valor do crédito. Ganhar contexto
+  // aqui é arriscar preço errado. Quem lê todos os arquivos é o checklist.
+  //
+  // ⚠️ "O ÚLTIMO", E NÃO "O ÚLTIMO COM TEXTO". A diferença não é sutil: com
+  // `filter(a => a.texto)`, um card em que o cálculo estivesse digitalizado
+  // passaria a precificar a PETIÇÃO INICIAL em silêncio — o valor da causa entraria
+  // como valor do crédito, e o card receberia "✅ APROVADO" ou "❌ RECUSADO" com
+  // base no número errado. Antes disso dar um erro na tela era o comportamento
+  // certo, e continua sendo.
+  const pdfs = arquivos.filter((a) => a.paginas > 0 || a.texto.length > 0 || !a.erro)
+  const alvo = pdfs[pdfs.length - 1] ?? arquivos[arquivos.length - 1]
+  if (!alvo || alvo.texto.length === 0) {
+    const porque = alvo?.erro
+      ? alvo.erro
+      : alvo?.digitalizado
+        ? `tem ${alvo.paginas} página(s) e praticamente nenhum texto (${alvo.densidade} ` +
+          `caracteres por página): parece digitalizado`
+        : 'não trouxe texto selecionável'
+    // Os erros de TODOS os arquivos entram na mensagem. Sem isso, "não consegui
+    // baixar (HTTP 403)" chegava à tela como "não tem texto".
+    const outros = arquivos
+      .filter((a) => a !== alvo && a.erro)
+      .map((a) => `${a.nome}: ${a.erro}`)
+    throw new Error(
+      `Não consegui analisar: o último PDF do card ("${alvo?.nome ?? '?'}") ${porque}.` +
+        (outros.length ? ` Outros anexos: ${outros.join('; ')}.` : ''),
+    )
+  }
+  const completo = alvo.texto
   let texto = completo
   // corta se gigante (mantém início e final — cálculo/RPV costumam estar no fim)
   const MAX = 360000
@@ -222,7 +361,7 @@ async function analisarLeadCredijuris(
         aviso: [res.aviso, dados.divergenciaTipo].filter(Boolean).join(' '),
       }
     : res
-  return { resultado, texto: completo }
+  return { resultado, arquivos }
 }
 
 // Escreve o resultado da análise no card do Kommo (motivo se recusado, link do Drive se aprovado).
@@ -511,7 +650,7 @@ export default function AnaliseCredito() {
   // certidões: o mesmo PDF serve aos dois e baixar duas vezes seria espera à
   // toa. Vive enquanto a página estiver aberta; o sync limpa (ver abaixo),
   // porque o PDF do card pode ter sido substituído no Kommo.
-  const [textoCache, setTextoCache] = useState<Record<number, string>>({})
+  const [arquivosCache, setArquivosCache] = useState<Record<number, ArquivoLido[]>>({})
   const [certidoesLead, setCertidoesLead] = useState<KommoLead | null>(null)
   // CONJUNTO, não um id só. Com um id só, a leitura do card A terminando
   // limpava o indicador do card B, e o modal de B — ainda sem texto — passava a
@@ -531,11 +670,14 @@ export default function AnaliseCredito() {
     if (!confirmaForaDoFluxo(lead, 'Rodar a analise automatica')) return
     setAnalisandoId(lead.kommo_lead_id)
     try {
-      const { resultado, texto } = await analisarLeadCredijuris(
-        lead,
-        textoCache[lead.kommo_lead_id],
-      )
-      setTextoCache((p) => ({ ...p, [lead.kommo_lead_id]: texto }))
+      // Lê PRIMEIRO e guarda no cache na hora. A versão anterior só guardava
+      // depois de a IA responder: se a análise falhasse, os PDFs recém-baixados —
+      // e os avisos de digitalização junto — eram jogados fora, e o checklist
+      // tinha de baixar tudo de novo.
+      const jaLidos =
+        arquivosCache[lead.kommo_lead_id] ?? (await lerArquivosDoCard(lead))
+      setArquivosCache((p) => ({ ...p, [lead.kommo_lead_id]: jaLidos }))
+      const { resultado } = await analisarLeadCredijuris(lead, jaLidos)
       setResultadoAnalise((p) => ({ ...p, [lead.kommo_lead_id]: resultado }))
       await anotarResultadoNaKommo(lead.kommo_lead_id, resultado, analistaNome)
     } catch (e) {
@@ -576,9 +718,14 @@ export default function AnaliseCredito() {
     if (!confirmaForaDoFluxo(lead, 'Montar o checklist de certidoes')) return
     setCertidoesLead(lead)
     const id = lead.kommo_lead_id
+    // Lê os anexos sempre, mesmo quando a janela vai abrir no placar e as
+    // sugestões não vão aparecer. É desperdício de rede conhecido, e uma escolha:
+    // evitá-lo exigiria a página saber de antemão quais créditos já têm sujeito
+    // cadastrado — consulta nova, estado novo, e uma chance nova de a janela abrir
+    // sem os dados por engano. Um download a mais é mais barato que isso.
     // Já tem o texto, já está lendo, ou o Analisar está lendo o mesmo PDF agora:
     // em todos os casos, disparar de novo só baixaria o arquivo duas vezes.
-    if (textoCache[id] || lendoPdf.has(id) || analisandoId === id) return
+    if (arquivosCache[id] || lendoPdf.has(id) || analisandoId === id) return
     // Limpa o aviso da tentativa ANTERIOR antes de tentar de novo. Sem isto, uma
     // releitura bem-sucedida ficava com o aviso velho grudado — e o modal mostra
     // o aviso com PREFERENCIA sobre a lista de candidatos, entao ele afirmava
@@ -590,8 +737,8 @@ export default function AnaliseCredito() {
       return n
     })
     marcarLendo(id, true)
-    void lerTextoDoCard(lead)
-      .then((t) => setTextoCache((p) => ({ ...p, [id]: t })))
+    void lerArquivosDoCard(lead)
+      .then((as) => setArquivosCache((p) => ({ ...p, [id]: as })))
       .catch((e) =>
         setAvisoPdf((p) => ({
           ...p,
@@ -619,12 +766,22 @@ export default function AnaliseCredito() {
       // Silenciar isto deixaria uma aba faltando sem explicação.
       if (r?.aviso) toast.error(r.aviso)
       // O sync pode ter trazido um PDF novo no card — versão corrigida do
-      // processo é rotina. O texto guardado passa a ser de um documento
-      // superado, e é dele que sai a lista de CPFs candidatos: servir CPF de
-      // documento vencido é exatamente o erro que essa lista existe para
-      // evitar. Descarta.
-      setTextoCache({})
-      setAvisoPdf({})
+      // processo é rotina —, e servir CPF de documento vencido é o erro que a
+      // lista de candidatos existe para evitar. Então descarta.
+      //
+      // MENOS O CARD ABERTO NA JANELA. O sync de abertura de página leva
+      // dezenas de segundos; quem clicava em Certidões antes de ele acabar via a
+      // janela esvaziar embaixo de si — candidatos, sugestões E o aviso de
+      // digitalização — e nada refazia a leitura, porque ela só dispara no
+      // clique. Perder o aviso é o pior dos três: a janela voltava a dizer que o
+      // PDF não tinha sido lido.
+      const aberto = certidoesLead?.kommo_lead_id
+      const manter = (antes: Record<number, unknown>) =>
+        aberto !== undefined && antes[aberto] !== undefined
+          ? { [aberto]: antes[aberto] }
+          : {}
+      setArquivosCache((antes) => manter(antes) as Record<number, ArquivoLido[]>)
+      setAvisoPdf((antes) => manter(antes) as Record<number, string>)
     },
     onError: (e) => toast.error(`Sincronização Kommo: ${(e as Error).message}`),
   })
@@ -1014,7 +1171,7 @@ export default function AnaliseCredito() {
           open
           leadId={certidoesLead.kommo_lead_id}
           cedenteDoCard={lerCardCredijuris(certidoesLead).cedente}
-          textoDoProcesso={textoCache[certidoesLead.kommo_lead_id] ?? ''}
+          arquivos={arquivosCache[certidoesLead.kommo_lead_id] ?? []}
           lendoPdf={
             lendoPdf.has(certidoesLead.kommo_lead_id) ||
             analisandoId === certidoesLead.kommo_lead_id
