@@ -480,6 +480,12 @@ export default function DadosPessoaisBancarios() {
         // o endereço.
         endereco:
           compilado ?? dados.data?.get(chavePessoa(tipo, chave))?.endereco ?? null,
+        // Sem campo próprio nesta tela ainda (usados só na geração de contratos,
+        // preenchidos direto no banco por enquanto) — preserva o que já estava
+        // na ficha, mesmo raciocínio do endereço legado acima.
+        genero: dados.data?.get(chavePessoa(tipo, chave))?.genero ?? null,
+        qualificacao_complemento:
+          dados.data?.get(chavePessoa(tipo, chave))?.qualificacao_complemento ?? null,
       })
       toast.success(editando.novo ? `${visao.rotulo} cadastrado.` : 'Dados salvos.')
       setEditando(null)

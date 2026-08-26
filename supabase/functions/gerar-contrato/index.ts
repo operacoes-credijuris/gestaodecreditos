@@ -1,0 +1,1871 @@
+// ============================================================================
+// Edge Function: gerar-contrato
+//
+// Portada de controledecessoes/supabase/functions/gerar-contrato (mesmo
+// pipeline, mesmas regras de negócio — texto jurídico dos contratos é
+// INTOCÁVEL, só {{VARIÁVEIS}} são preenchidas). O que mudou nesta versão é só
+// onde os dados moram, para bater com este banco:
+//   - investidor vem de `investidor_dados` (nome normalizado), não de uma
+//     tabela `investidores` com id — é onde CPF/RG/banco/endereço já vivem
+//     nesta plataforma (ver 0023_investidor_dados.sql e seguintes).
+//   - secrets vêm de `integracao_anthropic_secret` / `integracao_google_secret`
+//     via _shared/segredos.ts, não de uma tabela `configuracoes` solta.
+//   - autenticação e service_role client vêm de _shared/auth.ts
+//     (getCallerAtivo/serviceClient), como toda function deste repo.
+//   - helpers de Drive genéricos (refresh de token, listar/achar/criar pasta,
+//     upload) vêm de _shared/credijuris.ts, compartilhados com gerar-analise-rpv.
+//   - cada contrato gerado com sucesso vira uma linha em `public.contratos`
+//     (não existe uma tabela `contratos_jobs` aqui; sem acompanhamento
+//     assíncrono de status — a chamada é síncrona, então só se grava o que
+//     deu certo).
+//
+// Fluxo:
+//   1. Browser faz upload dos arquivos pro bucket 'contratos' em
+//      `{user_id}/{job_id}/{papel}/<arquivo>`  (papel: cedente|escritorio)
+//   2. Browser chama esta função com { job_id, investidor_nome, originador, tipos?, numero_processo, categoria, cedente_genero, socio_genero }
+//   3. Função: valida sessão → lê secrets → lê investidor → lê inputs do
+//      Storage → extrai variáveis via Claude → decide quais contratos gerar →
+//      preenche os .docx (JSZip + xmldom) → upload no Drive → grava em
+//      `contratos` → limpa o bucket temp.
+//   4. Retorna { drive_folder_url, tipos_gerados, pendentes, variaveis_extraidas }
+// ============================================================================
+
+import { corsHeaders } from '../_shared/cors.ts'
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+import { chaveAnthropic, segredoGoogle } from '../_shared/segredos.ts'
+import { normalizarNome } from '../_shared/nucleo/texto.ts'
+import {
+  type DriveFile,
+  FOLDER_MIME,
+  normalizar,
+  escapeDriveQuery,
+  storageGetBytes,
+  refreshGoogleAccessToken,
+  driveListFiles,
+  driveFindSharedDrive,
+  driveFindChild,
+  driveCreateFolder,
+  driveFindOrCreateFolder,
+  driveFindChildByTolerantName,
+  driveUploadBytes,
+} from '../_shared/credijuris.ts'
+import { type SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
+import JSZip from 'npm:jszip@3.10.1'
+import { DOMParser, XMLSerializer } from 'npm:@xmldom/xmldom@0.8.10'
+import { encodeBase64 as b64encode } from 'jsr:@std/encoding@1/base64'
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const CLAUDE_MODEL = 'claude-opus-4-5';
+const CLAUDE_MAX_TOKENS = 1500;
+
+const BUCKET_TEMPLATES = 'contratos-templates';
+// Bucket 'contratos' já existe (0001_init.sql) — reaproveitado como staging de
+// upload, mesma convenção de path {user_id}/{job_id}/{papel}/<arquivo> que a
+// policy de storage.objects já espera.
+const BUCKET_INPUT = 'contratos';
+
+const TEMPLATES: Record<string, string> = {
+  cessao_credito:                  'cessao_credito.docx',
+  cessao_honorarios_contratuais:   'cessao_honorarios_contratuais.docx',
+  cessao_honorarios_sucumbenciais: 'cessao_honorarios_sucumbenciais.docx',
+  intermediacao:                   'intermediacao.docx',
+  procuracao:                      'procuracao.docx',
+};
+
+const REQUIRED_PAPEIS: Record<string, string[]> = {
+  cessao_credito:                  ['cedente', 'apresentacao'],
+  cessao_honorarios_contratuais:   ['escritorio', 'apresentacao'],
+  cessao_honorarios_sucumbenciais: ['escritorio', 'apresentacao'],
+  intermediacao:                   ['cedente', 'apresentacao'],
+  procuracao:                      ['apresentacao'],
+};
+
+// Drive layout (do drive_uploader.py)
+const DRIVE_ROOT_NAME = 'Credijuris - Atualizado';
+const DRIVE_PROCESSOS_NAME = 'B. Processos';
+const DRIVE_CATEGORIA_PADRAO = 'Requisições de Pequeno Valor';
+const DRIVE_SUBPASTAS = [
+  '1. Análise(s) de crédito',
+  '2. Contratos assinados',
+  '3. Comprovantes de pagamento',
+  '4. Documentos do cedente e advogado',
+  '5. Petições',
+  '6. Desempenho final',
+  '7. RPV complementar',
+];
+const DRIVE_PASTA_CONTRATOS = '2. Contratos assinados';
+const DRIVE_PASTA_ANALISE = '1. Análise(s) de crédito';
+const DRIVE_PASTA_CEDENTE_DOCS = '4. Documentos do cedente e advogado';
+// Raiz das análises de crédito (irmã de "B. Processos" no shared drive).
+// Match tolerante (normalizar + includes) cobre sufixos como "RPV" no nome real.
+const DRIVE_ANALISES_NAME = 'A. Análises de crédito';
+// Tipos nativos do Google Workspace — não baixam com alt=media, precisam de export.
+const GOOGLE_SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+// Word XML namespace
+const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+const CORS = corsHeaders;
+
+// ============================================================================
+// Types & Schemas
+// ============================================================================
+
+type ClaudeContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } };
+
+type Vars = Record<string, string | null>;
+
+// Cliente Supabase com schema não-tipado (o projeto não roda `supabase gen types`):
+// trata as tabelas como `any` em vez de `never`, evitando ~13 erros de type-check
+// nos acessos a linhas/updates. Gerar os tipos do banco eliminaria esta gambiarra.
+type SB = SupabaseClient<any, any, any>;
+
+const SCHEMA_CEDENTE: Vars = {
+  CEDENTE_NOME: 'nome completo',
+  CEDENTE_CPF: 'CPF no formato XXX.XXX.XXX-XX ou null',
+  CEDENTE_RG: 'número do RG com órgão emissor ou null',
+  CEDENTE_ENDERECO: 'endereço completo com CEP',
+  CEDENTE_BANCO: 'nome do banco ou null',
+  CEDENTE_AGENCIA: 'número da agência ou null',
+  CEDENTE_CONTA: 'número da conta com dígito ou null',
+  CEDENTE_PIX: 'chave PIX ou null',
+};
+
+const SCHEMA_ESCRITORIO: Vars = {
+  ESCRITORIO_NOME: 'razão social',
+  ESCRITORIO_CNPJ: 'CNPJ no formato XX.XXX.XXX/XXXX-XX',
+  ESCRITORIO_ENDERECO: 'endereço completo com CEP',
+  ESCRITORIO_SOCIO_NOME: 'nome do sócio responsável',
+  ESCRITORIO_SOCIO_CPF: 'CPF do sócio no formato XXX.XXX.XXX-XX',
+  ESCRITORIO_SOCIO_ENDERECO: 'endereço do sócio ou null',
+  ESCRITORIO_BANCO: 'nome do banco ou null',
+  ESCRITORIO_AGENCIA: 'número da agência ou null',
+  ESCRITORIO_CONTA: 'número da conta com dígito ou null',
+  ESCRITORIO_PIX: 'chave PIX do escritório ou null',
+};
+
+const SCHEMA_APRESENTACAO_FIXOS: Vars = {
+  NUMERO_PROCESSO: 'número completo do processo judicial',
+  VALOR_CREDITO_TOTAL: 'valor total do crédito em R$ X.XXX,XX',
+  PERCENTUAL_HONORARIOS: 'percentual de honorários ex: 30% ou null',
+  VALOR_HONORARIOS: 'valor dos honorários em R$ X.XXX,XX ou null',
+  VALOR_CESSAO: 'valor a ser pago ao cedente em R$ X.XXX,XX',
+  // As NEGOCIAR_* (quadro "Vai ser negociado aqui quais créditos?") NÃO são pedidas à
+  // IA de propósito: vêm de detectCreditosNegociadosFromXlsx(), que lê a resposta
+  // direto do XML da planilha. Elas decidem quais contratos são gerados, e um chute
+  // errado aqui produz o conjunto errado de documentos jurídicos.
+  DATA_EXTENSO: 'data de hoje por extenso ex: 07 de maio de 2025',
+  // Campos do quadro "Dados da operação" do contrato de intermediação (modelo novo).
+  JUIZO_TRIBUNAL: 'juízo e tribunal do processo, no formato "<vara/juizado> - <tribunal>", ex: "1ª Vara Cível de Goiânia - TJGO" ou "3º Juizado Especial Federal de Belo Horizonte - TRF6". Se só houver um dos dois, retorne o que houver. Se não encontrar, null',
+  // Fallback: o valor normalmente usado vem de classeAtivo(), derivado da categoria e do
+  // que está sendo cedido. A IA só prevalece quando não dá pra determinar nenhum dos dois.
+  CLASSE_ATIVO: 'classe do ativo cedido. Responda EXATAMENTE uma destas cinco opções, sem variações: "Precatório", "Honorário em precatório", "RPV", "Honorário em RPV combinado", "Honorário em RPV isolado". Use "RPV" para crédito principal de requisição de pequeno valor; "Honorário em RPV combinado" quando os honorários são cedidos junto com o principal; "Honorário em RPV isolado" quando só os honorários são cedidos. NÃO use o campo "Qual o tipo de crédito?" da análise, que traz a natureza do crédito (ex: "Vencimentos/Proventos") e não a classe do ativo. Se não conseguir determinar, null',
+  // Sobrescrito deterministicamente por detectValorTotalOperacaoFromXlsx() quando a
+  // planilha traz o quadro — a IA fica só como fallback.
+  CAPITAL_INVESTIDO: 'valor da célula rotulada "Valor total da operação" (quanto o investidor pagará), em R$ X.XXX,XX. Em análise de precatório o quadro lista 4 cenários e só um está preenchido — pegue o não-zerado. Se não encontrar, null',
+};
+
+const CLAUDE_SYSTEM_PROMPT =
+  'Você é um assistente especializado em leitura de documentos jurídicos e ' +
+  'cadastrais brasileiros. Retorne APENAS JSON válido, sem explicações, sem ' +
+  'blocos de código markdown. Se uma informação não estiver presente, use null. ' +
+  'Formate CPF como XXX.XXX.XXX-XX e CNPJ como XX.XXX.XXX/XXXX-XX. ' +
+  'Formate valores monetários como R$ X.XXX,XX.';
+
+// ============================================================================
+// Utils
+// ============================================================================
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, 'Content-Type': 'application/json' },
+  });
+}
+
+function errorResponse(message: string, status = 400, extra?: Record<string, unknown>) {
+  return jsonResponse({ error: message, ...extra }, status);
+}
+
+function dataExtenso(): string {
+  const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${day} de ${meses[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+function dateStamp(): string {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Converte nome para title case respeitando preposições portuguesas
+function toTitleCasePT(s: string | null | undefined): string | null {
+  if (s == null) return null;
+  if (!s.trim()) return s;
+  const minusculas = new Set(['de', 'da', 'do', 'dos', 'das', 'e', 'em', 'a', 'o', 'os', 'as', 'um', 'uma']);
+  return s.toLowerCase().split(' ').map((word, i) => {
+    if (!word) return word;
+    if (i !== 0 && minusculas.has(word)) return word;
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }).join(' ');
+}
+
+// Tira caracteres que o Drive/Windows/Mac rejeitam em nomes de arquivo
+function sanitizeFilenamePart(s: string | null | undefined): string {
+  if (!s) return '';
+  return String(s).replace(/[\/\\:*?"<>|\r\n\t]/g, '_').replace(/\s+/g, ' ').trim();
+}
+
+// Gera o nome final do arquivo .docx no padrão pedido:
+//   "Contrato de Cessão de X - Cedente v. Cessionário - Processo.docx"
+// `dados` é o merge de apresentacao + cedente + escritorio + investidor.
+function nomeContratoArquivo(tipo: string, dados: Vars): string {
+  const cessionario = sanitizeFilenamePart(dados.INVESTIDOR_NOME) || 'Cessionario';
+  const processo    = sanitizeFilenamePart(dados.NUMERO_PROCESSO) || 'sem-processo';
+  // Em cessão de honorários o "cedente" do contrato é o escritório.
+  // Nos outros, é a pessoa física.
+  const cedentePF      = sanitizeFilenamePart(dados.CEDENTE_NOME) || 'Cedente';
+  const cedenteHonorar = sanitizeFilenamePart(dados.ESCRITORIO_NOME) || cedentePF;
+
+  switch (tipo) {
+    case 'cessao_credito':
+      return `Contrato de Cessão de Crédito Principal - ${cedentePF} v. ${cessionario} - ${processo}.docx`;
+    case 'cessao_honorarios_contratuais':
+      return `Contrato de Cessão de Honorários Contratuais - ${cedenteHonorar} v. ${cessionario} - ${processo}.docx`;
+    case 'cessao_honorarios_sucumbenciais':
+      return `Contrato de Cessão de Honorários Sucumbenciais - ${cedenteHonorar} v. ${cessionario} - ${processo}.docx`;
+    case 'intermediacao':
+      // Nome alinhado ao título do modelo novo ("Contrato de originação,
+      // intermediação e gestão de ativo"). O antigo era só "de Intermediação".
+      return `Contrato de Originação, Intermediação e Gestão de Ativo - ${cedentePF} v. ${cessionario} - ${processo}.docx`;
+    case 'procuracao':
+      return `Procuração - ${cedentePF} v. ${cessionario} - ${processo}.docx`;
+    default:
+      return `contrato_${tipo}_${dateStamp()}.docx`;
+  }
+}
+
+// Mapeia extensão pro MIME pra upload genérico no Drive
+function mimeForExtension(ext: string): string {
+  const e = ext.toLowerCase();
+  if (e === '.pdf')  return 'application/pdf';
+  if (e === '.docx') return DOCX_MIME;
+  if (e === '.doc')  return 'application/msword';
+  if (e === '.xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (e === '.xls')  return 'application/vnd.ms-excel';
+  if (e === '.png')  return 'image/png';
+  if (e === '.jpg' || e === '.jpeg') return 'image/jpeg';
+  if (e === '.webp') return 'image/webp';
+  if (e === '.txt')  return 'text/plain';
+  return 'application/octet-stream';
+}
+
+// ============================================================================
+// Document Reading — converte Storage path -> blocos de conteúdo do Claude
+// ============================================================================
+
+function extOf(path: string): string {
+  const i = path.lastIndexOf('.');
+  return i >= 0 ? path.slice(i).toLowerCase() : '';
+}
+
+const PDF_EXTS  = new Set(['.pdf']);
+const IMG_EXTS  = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+const DOCX_EXTS = new Set(['.docx', '.doc']);
+const XLSX_EXTS = new Set(['.xlsx', '.xls']);
+
+function mediaTypeForImage(ext: string): string {
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.png')  return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  return 'image/png';
+}
+
+async function extractDocxText(bytes: Uint8Array): Promise<string> {
+  const zip = await JSZip.loadAsync(bytes);
+  const xml = await zip.file('word/document.xml')?.async('string');
+  if (!xml) return '';
+  // Extrai texto entre <w:t ...>...</w:t> — suficiente pra Claude entender o conteúdo
+  const tags = xml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
+  return tags.map((t: string) => t.replace(/<w:t[^>]*>/, '').replace(/<\/w:t>/, '')).join(' ');
+}
+
+// Extrai a letra da coluna do atributo r="A12" → "A". Usado pra preservar a
+// posição relativa das células em cada linha (importante pra mapear o quadro
+// de checkboxes da análise de RPV, onde a coluna D tem TRUE/FALSE).
+function colLetterFromRef(ref: string): string {
+  const m = ref.match(/^([A-Z]+)/);
+  return m ? m[1] : '';
+}
+
+// Lê shared strings de um xlsx (helper compartilhado entre extração e detecção).
+async function readSharedStrings(zip: JSZip): Promise<string[]> {
+  const ssXml = await zip.file('xl/sharedStrings.xml')?.async('string') || '';
+  const ss: string[] = [];
+  const siRe = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+  let sm: RegExpExecArray | null;
+  while ((sm = siRe.exec(ssXml)) !== null) {
+    const inner = sm[1];
+    const parts: string[] = [];
+    const tRe = /<t[^>]*>([^<]*)<\/t>/g;
+    let tm: RegExpExecArray | null;
+    while ((tm = tRe.exec(inner)) !== null) parts.push(tm[1]);
+    ss.push(parts.join(''));
+  }
+  return ss;
+}
+
+// Decodifica entidades XML. JSZip devolve o XML cru, então "cr&#233;dito" chega
+// literal — e normalizar() transformaria isso em "cr233dito", que não casa com
+// nenhum rótulo. Foi um dos motivos da leitura do quadro falhar em silêncio.
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+// Rótulo do quadro de créditos negociados, no cabeçalho da análise (A3 na sheet1
+// do modelo de 2026-08). Comparado com normalizar(), sem acento nem pontuação.
+const ROTULO_CREDITOS_NEGOCIADOS = 'vaisernegociadoaquiquaiscreditos';
+
+// Respostas do dropdown do quadro (dataValidation em C3) → quais cessões.
+// O quadro fala em "honorários" sem separar contratuais de sucumbenciais, então as
+// duas cessões saem juntas (decisão do operador, 2026-08-11). Quando isso não
+// servir, o operador marca na mão os contratos na tela.
+const OPCOES_CREDITOS_NEGOCIADOS: Array<{ chave: string; rotulo: string; principal: boolean; honorarios: boolean }> = [
+  { chave: 'apenasocreditoprincipal',     rotulo: 'Apenas o crédito principal',     principal: true,  honorarios: false },
+  { chave: 'creditoprincipalehonorarios', rotulo: 'Crédito principal e honorários', principal: true,  honorarios: true  },
+  { chave: 'apenasoshonorarios',          rotulo: 'Apenas os honorários',           principal: false, honorarios: true  },
+];
+
+// Cenários de negociação da análise de PRECATÓRIO. Ela não tem o quadro do RPV: em vez
+// disso, o bloco de valores traz uma faixa de linhas por cenário e só a negociada tem
+// números. É o único sinal de "principal e/ou honorários" numa operação de precatório.
+const CENARIOS_NEGOCIACAO: Array<{ chave: string; rotulo: string; principal: boolean; honorarios: boolean }> = [
+  { chave: 'negociandoprincipalehonorarios', rotulo: 'principal e honorários', principal: true,  honorarios: true  },
+  { chave: 'negociandosohonorarios',         rotulo: 'só honorários',          principal: false, honorarios: true  },
+  { chave: 'negociandosooprincipal',         rotulo: 'só o principal',         principal: true,  honorarios: false },
+];
+
+// Rótulos do modelo anterior, que usava 3 checkboxes booleanas em linhas separadas.
+const ROTULOS_CHECKBOX_LEGADO: Array<{ needle: string; campo: string }> = [
+  { needle: 'creditoprincipal',        campo: 'NEGOCIAR_CREDITO_PRINCIPAL' },
+  { needle: 'honorarioscontratuais',   campo: 'NEGOCIAR_HONORARIOS_CONTRATUAIS' },
+  { needle: 'honorariossucumbenciais', campo: 'NEGOCIAR_HONORARIOS_SUCUMBENCIAIS' },
+];
+
+interface XlsxCell { ref: string; col: string; type: string; text: string; raw: string }
+
+// Compara colunas do Excel: "AA" > "Z" > "D". Comprimento primeiro, depois alfabética.
+function colDepois(a: string, b: string): boolean {
+  if (a.length !== b.length) return a.length > b.length;
+  return a > b;
+}
+
+// Parseia um worksheet em linhas de células com o texto já resolvido. Cobre os três
+// jeitos de guardar texto num xlsx:
+//   t="s"         → índice em sharedStrings.xml
+//   t="inlineStr" → <is><t>…</t></is> na própria célula. É o que o modelo novo da
+//                   análise usa: ele não tem sharedStrings.xml nenhum.
+//   t="str"/vazio → valor em <v> (fórmula ou número)
+function parseSheetCells(sx: string, ss: string[]): XlsxCell[][] {
+  const rows: XlsxCell[][] = [];
+  const rowRe = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+  let rm: RegExpExecArray | null;
+  while ((rm = rowRe.exec(sx)) !== null) {
+    const cells: XlsxCell[] = [];
+    const cRe = /<c\b([^>]*)\/>|<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+    let cm: RegExpExecArray | null;
+    while ((cm = cRe.exec(rm[1])) !== null) {
+      const attrs = (cm[1] ?? cm[2]) || '';
+      const inner = cm[3] ?? '';
+      const ref = (attrs.match(/\br="([A-Z]+\d+)"/) || [])[1] || '';
+      const type = (attrs.match(/\bt="([^"]+)"/) || [])[1] || '';
+      const raw = (inner.match(/<v>([\s\S]*?)<\/v>/) || [])[1] ?? '';
+      const isBlock = (inner.match(/<is>([\s\S]*?)<\/is>/) || [])[1] || '';
+      let text: string;
+      if (isBlock) {
+        // rich text: vários <t> no mesmo <is> — concatena
+        text = (isBlock.match(/<t[^>]*>([\s\S]*?)<\/t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join('');
+      } else if (type === 's') {
+        text = ss[parseInt(raw, 10)] ?? '';
+      } else {
+        text = raw;
+      }
+      cells.push({ ref, col: colLetterFromRef(ref), type, text: decodeXmlEntities(text), raw });
+    }
+    if (cells.length > 0) rows.push(cells);
+  }
+  return rows;
+}
+
+// Número da linha a partir da referência da célula: "C41" → 41.
+function linhaDaRef(ref: string): number {
+  return parseInt(ref.replace(/^[A-Z]+/, ''), 10) || 0;
+}
+
+// Célula com número de verdade (não texto que parece número, não booleano).
+function celulaNumerica(c: XlsxCell): number | null {
+  if (c.type === 'inlineStr' || c.type === 's' || c.type === 'b' || c.type === 'str') return null;
+  if (c.text.trim() === '') return null;
+  const n = parseFloat(c.text);
+  return isNaN(n) ? null : n;
+}
+
+// Descobre o cenário negociado na análise de PRECATÓRIO: acha os rótulos de cenário e
+// devolve o único que tem números na sua faixa de linhas. Alimenta o CLASSE_ATIVO.
+//
+// Devolve null quando não acha nenhum, ou quando MAIS DE UM tem números — nesse caso a
+// planilha está ambígua e é melhor deixar o valor da IA do que escolher por conta própria,
+// porque isso vai impresso no contrato.
+async function detectCenarioNegociadoFromXlsx(
+  bytes: Uint8Array,
+): Promise<{ principal: boolean; honorarios: boolean; rotulo: string } | null> {
+  const zip = await JSZip.loadAsync(bytes);
+  const ss = await readSharedStrings(zip);
+  const sheets = Object.keys(zip.files).filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort();
+
+  for (const name of sheets) {
+    const sx = await zip.file(name)?.async('string') || '';
+    const rows = parseSheetCells(sx, ss);
+
+    // Rótulos de cenário, com a linha onde cada um começa.
+    const marcos: Array<{ linha: number; cenario: typeof CENARIOS_NEGOCIACAO[number] }> = [];
+    for (const row of rows) {
+      for (const c of row) {
+        const n = normalizar(c.text);
+        const cenario = CENARIOS_NEGOCIACAO.find(x => n.includes(x.chave));
+        if (cenario && !marcos.some(m => m.cenario === cenario)) {
+          marcos.push({ linha: linhaDaRef(c.ref), cenario });
+        }
+      }
+    }
+    if (marcos.length === 0) continue;
+    marcos.sort((a, b) => a.linha - b.linha);
+
+    // Faixa de cada cenário: da linha dele até a do próximo (ou +12 no último).
+    const preenchidos = marcos.filter((m, i) => {
+      const fim = i + 1 < marcos.length ? marcos[i + 1].linha : m.linha + VTO_LINHAS_ABAIXO;
+      return rows.some(row => row.some(c => {
+        const l = linhaDaRef(c.ref);
+        if (l <= m.linha || l >= fim) return false;
+        const v = celulaNumerica(c);
+        return v !== null && v !== 0;
+      }));
+    });
+
+    if (preenchidos.length !== 1) {
+      console.warn('[gerar-contrato] cenário de negociação indefinido em', name,
+        JSON.stringify({ achados: marcos.map(m => m.cenario.rotulo), preenchidos: preenchidos.map(m => m.cenario.rotulo) }));
+      return null;
+    }
+    const { cenario } = preenchidos[0];
+    return { principal: cenario.principal, honorarios: cenario.honorarios, rotulo: cenario.rotulo };
+  }
+  return null;
+}
+
+// Classe do ativo cedido, uma das cinco que o contrato aceita. Era pedida à IA, que tinha
+// como distrair o campo "Qual o tipo de crédito?" da análise ("Vencimentos/Proventos…"),
+// que não é nenhuma das cinco. Aqui sai de categoria + o que está sendo cedido.
+//
+// Precatório não tem opção "combinado": principal + honorários cai em "Honorário em
+// precatório" (decisão do operador, 2026-08-11).
+function classeAtivo(categoria: string | null | undefined, principal: boolean, honorarios: boolean): string | null {
+  if (ehPrecatorio(categoria)) {
+    if (honorarios) return 'Honorário em precatório';
+    return principal ? 'Precatório' : null;
+  }
+  if (principal && honorarios) return 'Honorário em RPV combinado';
+  if (honorarios) return 'Honorário em RPV isolado';
+  if (principal) return 'RPV';
+  return null;
+}
+
+// Lê o quadro "Vai ser negociado aqui quais créditos?" DIRETO do XML da análise.
+//
+// Substitui a detecção de checkboxes anterior, que ficou cega quando o modelo da
+// análise mudou (2026-08): o quadro virou um dropdown de 3 opções em C3, a planilha
+// deixou de ter sharedStrings.xml e não sobrou nenhuma célula booleana. A versão
+// antiga varria TODAS as abas procurando os textos "Crédito Principal" e
+// "Honorários Contratuais", que também são rótulos das tabelas de precificação
+// (modelo verde / modelo azul) — lia célula de preço como se fosse marcação e
+// devolvia honorários = marcado, exigindo documento do escritório sem necessidade.
+//
+// Agora: só a aba que contém o quadro é lida, e a resposta é o texto à direita do
+// rótulo. Lança erro quando não consegue ler — a IA não é mais consultada pra isso,
+// porque um chute errado aqui gera o conjunto errado de contratos. Se a planilha
+// estiver ilegível, o operador escolhe os contratos na tela.
+async function detectCreditosNegociadosFromXlsx(
+  bytes: Uint8Array,
+): Promise<{ vars: Vars; debug: Record<string, unknown> }> {
+  const zip = await JSZip.loadAsync(bytes);
+  const ss = await readSharedStrings(zip);
+  const sheets = Object.keys(zip.files).filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort();
+  const debug: Record<string, unknown> = { abas: sheets.length, shared_strings: ss.length };
+
+  for (const name of sheets) {
+    const sx = await zip.file(name)?.async('string') || '';
+    const rows = parseSheetCells(sx, ss);
+
+    let rotulo: XlsxCell | null = null;
+    let linha: XlsxCell[] | null = null;
+    for (const row of rows) {
+      const hit = row.find(c => normalizar(c.text).startsWith(ROTULO_CREDITOS_NEGOCIADOS));
+      if (hit) { rotulo = hit; linha = row; break; }
+    }
+    if (!rotulo || !linha) continue;
+    debug.aba = name;
+    debug.celula_rotulo = rotulo.ref;
+
+    // Modelo 2026-08: dropdown na mesma linha, à direita do rótulo.
+    const resposta = linha.find(c => c !== rotulo && colDepois(c.col, rotulo!.col) && c.text.trim() !== '');
+    if (resposta) {
+      debug.celula_resposta = resposta.ref;
+      debug.resposta = resposta.text.trim();
+      const n = normalizar(resposta.text);
+      const opcao = OPCOES_CREDITOS_NEGOCIADOS.find(o => n.includes(o.chave));
+      if (!opcao) {
+        throw new Error(
+          `Não entendi a resposta do quadro "Vai ser negociado aqui quais créditos?" ` +
+          `(célula ${resposta.ref} = "${resposta.text.trim()}"). Esperado uma das opções: ` +
+          OPCOES_CREDITOS_NEGOCIADOS.map(o => `"${o.rotulo}"`).join(', ') + '. ' +
+          'Corrija a análise ou marque os contratos na mão na tela.',
+        );
+      }
+      debug.via = 'dropdown';
+      debug.opcao = opcao.rotulo;
+      return {
+        vars: {
+          NEGOCIAR_CREDITO_PRINCIPAL:        opcao.principal  ? 'true' : 'false',
+          NEGOCIAR_HONORARIOS_CONTRATUAIS:   opcao.honorarios ? 'true' : 'false',
+          NEGOCIAR_HONORARIOS_SUCUMBENCIAIS: opcao.honorarios ? 'true' : 'false',
+        },
+        debug,
+      };
+    }
+
+    // Modelo anterior: 3 checkboxes booleanas, uma por linha, na mesma aba do quadro.
+    const legado: Vars = {};
+    for (const row of rows) {
+      const alvo = ROTULOS_CHECKBOX_LEGADO.find(r => row.some(c => normalizar(c.text).startsWith(r.needle)));
+      if (!alvo) continue;
+      const idx = row.findIndex(c => normalizar(c.text).startsWith(alvo.needle));
+      const valor = row.find(c => c.col === 'D') ?? row[idx + 1];
+      let marcada = false;
+      if (valor) {
+        if (valor.type === 'b') marcada = valor.raw === '1';
+        else {
+          const t = valor.text.trim().toLowerCase();
+          marcada = t !== '' && t !== '0' && t !== 'false' && t !== 'nao' && t !== 'não' && t !== '-';
+        }
+      }
+      legado[alvo.campo] = marcada ? 'true' : 'false';
+    }
+    if (Object.keys(legado).length > 0) {
+      debug.via = 'checkbox-legado';
+      debug.resposta = legado;
+      return { vars: legado, debug };
+    }
+
+    throw new Error(
+      `O quadro "Vai ser negociado aqui quais créditos?" está em ${rotulo.ref} da análise, ` +
+      'mas sem resposta preenchida. Preencha o dropdown ao lado do rótulo ' +
+      'ou marque os contratos na mão na tela.',
+    );
+  }
+
+  throw new Error(
+    'Não achei o quadro "Vai ser negociado aqui quais créditos?" na análise ' +
+    `(${sheets.length} aba(s) lidas). Confirma que a planilha é o modelo atual — ` +
+    'ou marque os contratos na mão na tela.',
+  );
+}
+
+// Formata número cru do xlsx (63240.13) no padrão dos contratos (R$ 63.240,13).
+function formatBRL(n: number): string {
+  const [inteiro, dec] = Math.abs(n).toFixed(2).split('.');
+  const comMilhar = inteiro.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${n < 0 ? '-' : ''}R$ ${comMilhar},${dec}`;
+}
+
+// Coluna seguinte no alfabeto do Excel: X -> Y, Z -> AA, AZ -> BA.
+function nextCol(col: string): string {
+  const chars = col.split('');
+  let i = chars.length - 1;
+  while (i >= 0) {
+    if (chars[i] === 'Z') { chars[i] = 'A'; i--; }
+    else { chars[i] = String.fromCharCode(chars[i].charCodeAt(0) + 1); return chars.join(''); }
+  }
+  return 'A' + chars.join('');
+}
+
+// Quantas linhas abaixo do rótulo procurar o valor (cobre os 4 cenários do
+// precatório em linhas alternadas: rótulo em B5, valores em B6/B8/B10/B12).
+const VTO_LINHAS_ABAIXO = 12;
+
+// Lê o "Valor total da operação" (= Capital Investido da Cláusula 10.1 do contrato
+// de intermediação) DIRETO do XML, sem depender da IA. Mesma motivação do
+// detectCreditosNegociadosFromXlsx: a IA erra em planilha grande.
+//
+// O rótulo é o mesmo nas duas análises, mas a geometria muda:
+//   • RPV        → rótulo em X4 ("Valor total da operação **sem considerar…"),
+//                  valor na célula À DIREITA (Y4). Há um 2º bloco em X41/Y41
+//                  (modelo azul) — só um dos dois costuma estar preenchido.
+//   • Precatório → rótulo em B5 (cabeçalho da coluna), valores ABAIXO em
+//                  B6/B8/B10/B12, um por cenário de negociação. Só um é != 0.
+//
+// Regra única que cobre os dois: candidatos = célula à direita + N células abaixo,
+// na mesma coluna; vence o primeiro numérico diferente de zero.
+async function detectValorTotalOperacaoFromXlsx(bytes: Uint8Array): Promise<string | null> {
+  try {
+    const zip = await JSZip.loadAsync(bytes);
+    const ss = await readSharedStrings(zip);
+    const alvo = normalizar('valor total da operacao');
+
+    for (const name of Object.keys(zip.files)) {
+      if (!name.match(/^xl\/worksheets\/sheet\d+\.xml$/)) continue;
+      const sx = await zip.file(name)?.async('string') || '';
+
+      // Indexa a planilha inteira por referência (A1, B12, …)
+      const valores = new Map<string, number>();   // só células numéricas
+      const rotulos: string[] = [];                // refs cujo texto casa com o alvo
+      const rowRe = /<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/g;
+      let rm: RegExpExecArray | null;
+      while ((rm = rowRe.exec(sx)) !== null) {
+        const cRe = /<c\b([^>]*)\/>|<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+        let cm: RegExpExecArray | null;
+        while ((cm = cRe.exec(rm[2])) !== null) {
+          const attrs = (cm[1] ?? cm[2]) || '';
+          const inner = cm[3] ?? '';
+          const ref = (attrs.match(/\br="([A-Z]+\d+)"/) || [])[1];
+          if (!ref) continue;
+          const type = (attrs.match(/\bt="([^"]+)"/) || [])[1] || '';
+          const vMatch = inner.match(/<v>([^<]*)<\/v>/);
+          const isMatch = inner.match(/<is>[\s\S]*?<t[^>]*>([^<]*)<\/t>/);
+
+          let texto: string | null = null;
+          if (isMatch) texto = isMatch[1];
+          else if (type === 's' && vMatch) texto = ss[parseInt(vMatch[1], 10)] || '';
+
+          if (texto !== null) {
+            // startsWith, não includes: na análise de RPV existe o rótulo "Ganho de
+            // capital projetado … (Valor líquido com a atualização - valor total da
+            // operação)", que CONTÉM a frase mas cujo valor ao lado é outro número.
+            if (normalizar(texto).startsWith(alvo)) rotulos.push(ref);
+            continue;
+          }
+          // Célula numérica (inclui fórmula, que traz o valor em cache no <v>)
+          if (vMatch && type !== 'b') {
+            const n = parseFloat(vMatch[1]);
+            if (!isNaN(n)) valores.set(ref, n);
+          }
+        }
+      }
+      if (rotulos.length === 0) continue;
+
+      const achados: number[] = [];
+      for (const ref of rotulos) {
+        const [, col, linhaStr] = ref.match(/^([A-Z]+)(\d+)$/) || [];
+        if (!col) continue;
+        const linha = parseInt(linhaStr, 10);
+        const candidatos = [`${nextCol(col)}${linha}`];
+        for (let d = 1; d <= VTO_LINHAS_ABAIXO; d++) candidatos.push(`${col}${linha + d}`);
+        for (const c of candidatos) {
+          const v = valores.get(c);
+          if (v !== undefined && v !== 0) { achados.push(v); break; }
+        }
+      }
+      if (achados.length === 0) continue;
+      if (achados.length > 1) {
+        console.warn('[gerar-contrato] "Valor total da operação" ambíguo em', name, achados, '— usando o primeiro');
+      }
+      return formatBRL(achados[0]);
+    }
+  } catch (e) {
+    // Best-effort — se falhar, o valor da IA (se houver) permanece.
+    console.error('[gerar-contrato] detectValorTotalOperacaoFromXlsx falhou:', e);
+  }
+  return null;
+}
+
+async function extractXlsxText(bytes: Uint8Array): Promise<string> {
+  const zip = await JSZip.loadAsync(bytes);
+  const ss = await readSharedStrings(zip);
+  // Lê cada sheet
+  const lines: string[] = [];
+  for (const name of Object.keys(zip.files)) {
+    if (!name.match(/^xl\/worksheets\/sheet\d+\.xml$/)) continue;
+    const sx = await zip.file(name)?.async('string') || '';
+    const rowRe = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+    let rm: RegExpExecArray | null;
+    while ((rm = rowRe.exec(sx)) !== null) {
+      // Match cells: ou auto-fechadas (<c .../>) ou com conteúdo (<c ...>...</c>)
+      // A alternância garante que self-closing não engula a próxima célula.
+      const cRe = /<c\b([^>]*)\/>|<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+      const cells: string[] = [];
+      let cm: RegExpExecArray | null;
+      while ((cm = cRe.exec(rm[1])) !== null) {
+        const attrs = (cm[1] ?? cm[2]) || '';
+        const inner = cm[3] ?? '';
+        const refMatch = attrs.match(/\br="([A-Z]+\d+)"/);
+        const col = refMatch ? colLetterFromRef(refMatch[1]) : '';
+        const typeMatch = attrs.match(/\bt="([^"]+)"/);
+        const type = typeMatch ? typeMatch[1] : '';
+        const vMatch = inner.match(/<v>([^<]*)<\/v>/);
+        const isMatch = inner.match(/<is>[\s\S]*?<t[^>]*>([^<]*)<\/t>/);
+        let value = '';
+        if (isMatch) {
+          value = isMatch[1];
+        } else if (type === 's' && vMatch) {
+          value = ss[parseInt(vMatch[1], 10)] || '';
+        } else if (type === 'b' && vMatch) {
+          // Checkboxes do Google Sheets / Excel: 1 = TRUE, 0 = FALSE
+          value = vMatch[1] === '1' ? 'TRUE' : 'FALSE';
+        } else if (vMatch) {
+          value = vMatch[1];
+        } else {
+          // Célula vazia (auto-fechada sem valor) — pula
+          continue;
+        }
+        // Prefixa coluna pra Claude conseguir mapear "coluna D = TRUE" → checkbox marcada
+        cells.push(col ? `${col}=${value}` : value);
+      }
+      if (cells.length) lines.push(cells.join(' | '));
+    }
+  }
+  return lines.join('\n');
+}
+
+// Garante que blocos de texto enviados ao Claude nunca sejam vazios
+// (a API rejeita com 400 "text content blocks must be non-empty").
+function nonEmptyText(text: string, fallback: string): string {
+  return text && text.trim().length > 0 ? text : fallback;
+}
+
+// Converte bytes + nome de arquivo em blocos de conteúdo do Claude.
+// Compartilhado entre input do Storage (cedente/escritório) e arquivos
+// baixados do Drive (análise de crédito).
+async function bytesToContentBlocks(filename: string, bytes: Uint8Array): Promise<ClaudeContentBlock[]> {
+  const ext = extOf(filename);
+  const header: ClaudeContentBlock = { type: 'text', text: `[Documento: ${filename}]` };
+
+  if (PDF_EXTS.has(ext)) {
+    return [header, {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: b64encode(bytes as unknown as ArrayBuffer) },
+    }];
+  }
+  if (IMG_EXTS.has(ext)) {
+    return [header, {
+      type: 'image',
+      source: { type: 'base64', media_type: mediaTypeForImage(ext), data: b64encode(bytes as unknown as ArrayBuffer) },
+    }];
+  }
+  if (DOCX_EXTS.has(ext)) {
+    const text = await extractDocxText(bytes);
+    return [header, { type: 'text', text: nonEmptyText(text, `(arquivo .docx '${filename}' sem texto extraível — possivelmente só imagens)`) }];
+  }
+  if (XLSX_EXTS.has(ext)) {
+    const text = await extractXlsxText(bytes);
+    return [header, { type: 'text', text: nonEmptyText(text, `(planilha '${filename}' sem texto extraível — verificar formato)`) }];
+  }
+  // .txt/.md ou desconhecido — tenta decodificar como UTF-8
+  const text = new TextDecoder().decode(bytes);
+  return [header, { type: 'text', text: nonEmptyText(text, `(arquivo '${filename}' sem conteúdo de texto)`) }];
+}
+
+async function readFileAsContent(
+  sb: SB,
+  bucket: string,
+  path: string,
+): Promise<ClaudeContentBlock[]> {
+  const filename = path.split('/').pop() || path;
+  const bytes = await storageGetBytes(sb, bucket, path);
+  return bytesToContentBlocks(filename, bytes);
+}
+
+// ============================================================================
+// Claude Extraction
+// ============================================================================
+
+async function callClaude(apiKey: string, content: ClaudeContentBlock[], schema: Vars): Promise<Vars> {
+  const userContent: ClaudeContentBlock[] = [
+    ...content,
+    {
+      type: 'text',
+      text:
+        'Extraia as informações e retorne APENAS este JSON preenchido ' +
+        '(sem markdown, sem explicações):\n' + JSON.stringify(schema, null, 2),
+    },
+  ];
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: CLAUDE_MAX_TOKENS,
+      system: CLAUDE_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userContent }],
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Claude API ${res.status}: ${txt.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  const block = data.content?.find((c: { type: string }) => c.type === 'text');
+  if (!block) throw new Error('Claude retornou sem bloco de texto');
+  let raw: string = block.text.trim();
+  raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    // Tenta extrair o primeiro objeto JSON do texto
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error('Claude retornou JSON inválido: ' + raw.slice(0, 200));
+  }
+}
+
+async function buildContentFromPaths(
+  sb: SB,
+  paths: string[],
+): Promise<ClaudeContentBlock[]> {
+  const blocks: ClaudeContentBlock[] = [];
+  for (const p of paths) {
+    const chunks = await readFileAsContent(sb, BUCKET_INPUT, p);
+    blocks.push(...chunks);
+  }
+  return blocks;
+}
+
+async function extractParte(
+  sb: SB,
+  apiKey: string,
+  paths: string[],
+  schema: Vars,
+): Promise<Vars> {
+  const content = await buildContentFromPaths(sb, paths);
+  return callClaude(apiKey, content, schema);
+}
+
+async function extractApresentacao(
+  apiKey: string,
+  content: ClaudeContentBlock[],
+  templateVars: string[],
+): Promise<Vars> {
+  // Passo 1 — campos fixos
+  const fixos = await callClaude(apiKey, content, SCHEMA_APRESENTACAO_FIXOS);
+  // Passo 2 — campos extras que ainda estão no template
+  const conhecidos = new Set([
+    ...Object.keys(SCHEMA_CEDENTE),
+    ...Object.keys(SCHEMA_ESCRITORIO),
+    ...Object.keys(SCHEMA_APRESENTACAO_FIXOS),
+    'INVESTIDOR_NOME','INVESTIDOR_CPF','INVESTIDOR_RG','INVESTIDOR_ENDERECO',
+    'INVESTIDOR_BANCO','INVESTIDOR_AGENCIA','INVESTIDOR_CONTA','INVESTIDOR_PIX',
+  ]);
+  // exclui marcadores de gênero (C_/I_/S_ + I_QL) — preenchidos no código, não pela IA
+  const extras = templateVars.filter(v => !conhecidos.has(v) && !/^[CIS]_/.test(v));
+  if (extras.length === 0) return fixos;
+  const schemaExtras: Vars = {};
+  for (const v of extras) schemaExtras[v] = `valor de ${v} encontrado no documento ou null`;
+  const extrasOut = await callClaude(apiKey, content, schemaExtras);
+  for (const [k, v] of Object.entries(extrasOut)) {
+    if (v !== null && v !== undefined) fixos[k] = v;
+  }
+  return fixos;
+}
+
+// ============================================================================
+// DOCX Template Filling (port de filler.py)
+// ============================================================================
+
+function getTemplateVariablesFromXml(xml: string): string[] {
+  const set = new Set<string>();
+  const re = /\{\{([A-Z_]+)\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) set.add(m[1]);
+  return Array.from(set);
+}
+
+// Substitui por <w:t> preservando a formatacao de cada run (NOME em run bold
+// continua bold), com fallback de merge só pra placeholder fragmentado entre
+// runs. Implementação idêntica à de gerar-peticao/index.ts.
+function fillParagraph(para: Element, variables: Vars): number {
+  const runs = Array.from(para.getElementsByTagName('w:r'));
+  if (runs.length === 0) return 0;
+
+  // Lista plana de TODOS os <w:t> do paragrafo, em ordem
+  const tList: Element[] = [];
+  for (const r of runs) {
+    for (const t of Array.from(r.getElementsByTagName('w:t'))) tList.push(t as Element);
+  }
+  if (tList.length === 0) return 0;
+
+  // Tenta substituicao PER-<w:t> primeiro — preserva a formatacao
+  // individual de cada run (NOME em run bold continua bold apos substituir).
+  let count = 0;
+  let anyPlaceholderRemainingInFull = false;
+
+  const placeholderKeys = Object.keys(variables);
+  for (const t of tList) {
+    let text = t.textContent || '';
+    if (!text.includes('{{')) continue;
+    let touched = false;
+    for (const key of placeholderKeys) {
+      const ph = '{{' + key + '}}';
+      if (text.includes(ph)) {
+        const value = variables[key];
+        const replacement = value === null || value === undefined ? '' : String(value);
+        text = text.split(ph).join(replacement);
+        touched = true;
+      }
+    }
+    if (touched) {
+      t.textContent = text;
+      t.setAttribute('xml:space', 'preserve');
+      count++;
+    }
+  }
+
+  // Apos o per-<w:t>, ve se sobrou algum {{}} (significa fragmentacao
+  // entre runs — placeholder partido por spellcheck/rsid do Word).
+  const fullAfter = tList.map(t => t.textContent || '').join('');
+  for (const key of placeholderKeys) {
+    if (fullAfter.includes('{{' + key + '}}')) {
+      anyPlaceholderRemainingInFull = true;
+      break;
+    }
+  }
+  if (!anyPlaceholderRemainingInFull) return count;
+
+  // FALLBACK: existe pelo menos um placeholder fragmentado. Mescla o
+  // texto completo, substitui, e escreve no <w:t> com mais texto ja
+  // preenchido (geralmente o run "normal" da continuacao).
+  let merged = fullAfter;
+  for (const key of placeholderKeys) {
+    const ph = '{{' + key + '}}';
+    if (merged.includes(ph)) {
+      const value = variables[key];
+      const replacement = value === null || value === undefined ? '' : String(value);
+      merged = merged.split(ph).join(replacement);
+      count++;
+    }
+  }
+
+  // Escolhe o <w:t> alvo: o com mais texto atual
+  let targetIdx = 0;
+  let targetLen = -1;
+  for (let i = 0; i < tList.length; i++) {
+    const L = (tList[i].textContent || '').length;
+    if (L >= targetLen) {
+      targetIdx = i;
+      targetLen = L;
+    }
+  }
+  tList[targetIdx].textContent = merged;
+  tList[targetIdx].setAttribute('xml:space', 'preserve');
+  for (let i = 0; i < tList.length; i++) {
+    if (i === targetIdx) continue;
+    tList[i].textContent = '';
+  }
+  return count;
+}
+
+async function fillTemplate(templateBytes: Uint8Array, variables: Vars): Promise<{ bytes: Uint8Array; pendentes: string[] }> {
+  const zip = await JSZip.loadAsync(templateBytes);
+  const docFile = zip.file('word/document.xml');
+  if (!docFile) throw new Error('Template inválido: word/document.xml não encontrado');
+  const xml = await docFile.async('string');
+
+  // Normaliza variáveis (upper case, sem null)
+  const normalized: Vars = {};
+  for (const [k, v] of Object.entries(variables)) {
+    if (v !== null && v !== undefined) normalized[k.toUpperCase()] = String(v);
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, 'application/xml');
+  const paragraphs = Array.from(doc.getElementsByTagName('w:p'));
+  for (const p of paragraphs) fillParagraph(p as unknown as Element, normalized);
+
+  const serializer = new XMLSerializer();
+  let newXml = serializer.serializeToString(doc as unknown as Node);
+  // Garante declaração XML correta (xmldom às vezes omite)
+  if (!newXml.startsWith('<?xml')) {
+    newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + newXml;
+  }
+  zip.file('word/document.xml', newXml);
+  const out = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+
+  const pendentes = getTemplateVariablesFromXml(newXml);
+  return { bytes: out, pendentes };
+}
+
+// ============================================================================
+// Google Drive
+// ============================================================================
+
+async function driveEncontrarProcessosFolder(token: string): Promise<string> {
+  const drive = await driveFindSharedDrive(token, DRIVE_ROOT_NAME);
+  if (drive) {
+    const q = `name = '${escapeDriveQuery(DRIVE_PROCESSOS_NAME)}' and '${drive.id}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`;
+    const files = await driveListFiles(token, q, drive.id);
+    if (files[0]) return files[0].id;
+    throw new Error(`Shared Drive '${DRIVE_ROOT_NAME}' achado, mas pasta '${DRIVE_PROCESSOS_NAME}' não existe nele.`);
+  }
+  // Fallback: pasta normal
+  const roots = await driveListFiles(token, `name = '${escapeDriveQuery(DRIVE_ROOT_NAME)}' and trashed = false and mimeType = '${FOLDER_MIME}'`);
+  if (!roots[0]) throw new Error(`'${DRIVE_ROOT_NAME}' não encontrado no Drive. Confirma que a conta do refresh_token tem acesso.`);
+  const processos = await driveFindChild(token, DRIVE_PROCESSOS_NAME, roots[0].id, FOLDER_MIME);
+  if (!processos) throw new Error(`Pasta '${DRIVE_PROCESSOS_NAME}' não existe dentro de '${DRIVE_ROOT_NAME}'.`);
+  return processos.id;
+}
+
+async function driveListOriginadores(
+  token: string,
+  processosId: string,
+  categoria: string,
+): Promise<{ originadores: Array<{ id: string; name: string; categoria: string }>; debug: { categorias_em_processos: string[]; categoria_rpv_id: string | null } }> {
+  const cats = await driveListFiles(
+    token,
+    `'${processosId}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`,
+  );
+  const debug = {
+    categorias_em_processos: cats.map(c => c.name),
+    categoria_rpv_id: null as string | null,
+  };
+  const out: Array<{ id: string; name: string; categoria: string }> = [];
+  // Match tolerante a acentos/encoding — resiste a deploys que quebrem UTF-8 da constante
+  const alvoNorm = normalizar(categoria);
+  for (const cat of cats) {
+    if (normalizar(cat.name) !== alvoNorm) continue; // só a categoria escolhida (RPV ou Precatórios)
+    debug.categoria_rpv_id = cat.id;
+    const subs = await driveListFiles(
+      token,
+      `'${cat.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    );
+    for (const s of subs) out.push({ id: s.id, name: s.name, categoria: cat.name });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  return { originadores: out, debug };
+}
+
+// Acha a pasta "A. Análises de crédito" (irmã de "B. Processos") dentro do shared
+// drive "Credijuris - Atualizado", com fallback pra pasta normal.
+async function driveEncontrarAnalisesRoot(token: string): Promise<string> {
+  const drive = await driveFindSharedDrive(token, DRIVE_ROOT_NAME);
+  if (drive) {
+    const child = await driveFindChildByTolerantName(token, drive.id, DRIVE_ANALISES_NAME);
+    if (child) return child.id;
+    throw new Error(`Shared Drive '${DRIVE_ROOT_NAME}' achado, mas pasta '${DRIVE_ANALISES_NAME}' não existe nele.`);
+  }
+  const roots = await driveListFiles(token, `name = '${escapeDriveQuery(DRIVE_ROOT_NAME)}' and trashed = false and mimeType = '${FOLDER_MIME}'`);
+  if (!roots[0]) throw new Error(`'${DRIVE_ROOT_NAME}' não encontrado no Drive. Confirma que a conta do refresh_token tem acesso.`);
+  const child = await driveFindChildByTolerantName(token, roots[0].id, DRIVE_ANALISES_NAME);
+  if (!child) throw new Error(`Pasta '${DRIVE_ANALISES_NAME}' não existe dentro de '${DRIVE_ROOT_NAME}'.`);
+  return child.id;
+}
+
+// Lista os nomes das pastas de originador dentro de A. Análises de crédito / {categoria}.
+// Popula o dropdown de originador no front (browser não acessa o Drive direto).
+async function driveListarOriginadoresAnalise(token: string, categoria: string): Promise<string[]> {
+  const analisesRootId = await driveEncontrarAnalisesRoot(token);
+  const catFolder = await driveFindChildByTolerantName(token, analisesRootId, categoria);
+  if (!catFolder) return [];
+  const subs = await driveListFiles(token, `'${catFolder.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
+  return subs.map(s => s.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
+// Navega A. Análises de crédito / {categoria} / {originador} / {pasta do cedente}
+// e lista os arquivos de análise. Pasta do cedente casa pelo NOME do cedente
+// (fallback nº processo). Se o cedente tem múltiplos processos, há subpastas
+// nomeadas por nº de processo lá dentro — desce na que casa antes de listar.
+async function driveEncontrarAnaliseArquivos(
+  token: string,
+  categoria: string,
+  originadorNome: string,
+  cedenteNome: string,
+  escritorioNome: string,
+  numeroProcesso: string,
+): Promise<{ folderId: string; folderName: string; arquivos: DriveFile[]; debug: Record<string, unknown> }> {
+  const analisesRootId = await driveEncontrarAnalisesRoot(token);
+
+  const catFolder = await driveFindChildByTolerantName(token, analisesRootId, categoria);
+  if (!catFolder) throw new Error(`Categoria '${categoria}' não encontrada em '${DRIVE_ANALISES_NAME}'.`);
+
+  // Match exato — o nome vem do dropdown, populado da mesma listagem do Drive.
+  const inter = await driveFindChild(token, originadorNome, catFolder.id, FOLDER_MIME);
+  if (!inter) {
+    const disponiveis = await driveListFiles(token, `'${catFolder.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
+    throw new Error(`Originador '${originadorNome}' não encontrado em '${DRIVE_ANALISES_NAME}/${categoria}'. Disponíveis: ${disponiveis.map(d => d.name).join(', ') || '(nenhum)'}`);
+  }
+
+  // Pasta leaf = pasta da análise dentro do originador. O nome dela não segue uma
+  // regra única: costuma ser o do cedente, mas quando o que se negocia são honorários
+  // ela vem com o nome do escritório (ex.: 'Klemm & CIA Ltda.' para a cedente Tatiana).
+  // Por isso a busca tenta, em ordem, do mais específico ao palpite.
+  const subs = await driveListFiles(token, `'${inter.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
+  const procDigits = numeroProcesso.replace(/\D/g, '');
+  const porNome = (nome: string): DriveFile | null => {
+    const n = normalizar(nome || '');
+    if (!n) return null;
+    return subs.find(s => normalizar(s.name) === n) ?? subs.find(s => normalizar(s.name).includes(n)) ?? null;
+  };
+
+  let leaf: DriveFile | null = null;
+  let via = '';
+  if ((leaf = porNome(cedenteNome)))         via = 'nome do cedente';
+  else if ((leaf = porNome(escritorioNome))) via = 'nome do escritório';
+  else if (procDigits && (leaf = subs.find(s => s.name.replace(/\D/g, '').includes(procDigits)) ?? null)) {
+    via = 'nº do processo no nome da pasta';
+  } else if (procDigits) {
+    // Desce 1 nível: a pasta pode ser do cedente/escritório com uma subpasta por processo.
+    // O nº do processo é a chave única da operação, então é o critério mais confiável.
+    for (const s of subs) {
+      const filhos = await driveListFiles(token, `'${s.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
+      if (filhos.some(f => f.name.replace(/\D/g, '').includes(procDigits))) {
+        leaf = s;
+        via = 'nº do processo numa subpasta';
+        break;
+      }
+    }
+  }
+  if (!leaf && subs.length === 1) {
+    // Originador com uma única pasta: é um palpite, mas registrado no debug.
+    leaf = subs[0];
+    via = 'única pasta do originador (palpite)';
+  }
+  if (!leaf) {
+    throw new Error(
+      `Pasta da análise não encontrada em '${inter.name}'. Procurei por cedente ` +
+      `'${cedenteNome || '(sem nome)'}', escritório '${escritorioNome || '(sem nome)'}' e ` +
+      `processo '${numeroProcesso}' (inclusive em subpastas). Pastas disponíveis: ` +
+      `${subs.map(s => s.name).join(', ') || '(nenhuma)'}`,
+    );
+  }
+
+  // Cedente multi-processo: as análises ficam em subpastas nomeadas pelo nº de cada
+  // processo. Desce na que casa; senão (single) usa a própria pasta do cedente.
+  const leafChildren = await driveListFiles(token, `'${leaf.id}' in parents and trashed = false`);
+  const procFolder = procDigits
+    ? leafChildren.find(f => f.mimeType === FOLDER_MIME && f.name.replace(/\D/g, '').includes(procDigits)) ?? null
+    : null;
+  const alvo = procFolder ?? leaf;
+  const naoPastas = procFolder
+    ? (await driveListFiles(token, `'${procFolder.id}' in parents and trashed = false`)).filter(f => f.mimeType !== FOLDER_MIME)
+    : leafChildren.filter(f => f.mimeType !== FOLDER_MIME);
+
+  // Prefere a "Análise de ..." que casa com o processo; senão (ponytail) todos os arquivos da pasta.
+  const match = naoPastas.filter(f =>
+    normalizar(f.name).includes('analisede') && (!procDigits || f.name.replace(/\D/g, '').includes(procDigits))
+  );
+  const arquivos = match.length ? match : naoPastas;
+  return {
+    folderId: alvo.id,
+    folderName: procFolder ? `${leaf.name}/${procFolder.name}` : leaf.name,
+    arquivos,
+    debug: { categoria_id: catFolder.id, originador_id: inter.id, leaf_id: leaf.id, leaf_nome: leaf.name, leaf_casou_por: via, proc_folder: procFolder?.name ?? null, subpastas: subs.map(s => s.name), arquivos_na_pasta: naoPastas.map(f => f.name) },
+  };
+}
+
+function ensureExt(name: string, ext: string): string {
+  return name.toLowerCase().endsWith(ext) ? name : name + ext;
+}
+
+// Baixa um arquivo do Drive. Arquivos nativos do Google (Sheets/Docs) não saem
+// com alt=media — exporta pra xlsx/docx; outros nativos viram PDF.
+async function driveBaixarArquivo(token: string, file: DriveFile): Promise<{ filename: string; bytes: Uint8Array }> {
+  const mt = file.mimeType || '';
+  let url: string;
+  let filename = file.name;
+  if (mt === GOOGLE_SHEET_MIME) {
+    url = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(XLSX_MIME)}&supportsAllDrives=true`;
+    filename = ensureExt(file.name, '.xlsx');
+  } else if (mt === GOOGLE_DOC_MIME) {
+    url = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(DOCX_MIME)}&supportsAllDrives=true`;
+    filename = ensureExt(file.name, '.docx');
+  } else if (mt.startsWith('application/vnd.google-apps.')) {
+    url = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent('application/pdf')}&supportsAllDrives=true`;
+    filename = ensureExt(file.name, '.pdf');
+  } else {
+    url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`;
+  }
+  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Drive download '${file.name}' (${res.status}): ${txt.slice(0, 300)}`);
+  }
+  return { filename, bytes: new Uint8Array(await res.arrayBuffer()) };
+}
+
+async function driveGarantirEstruturaCedente(
+  token: string,
+  originadorId: string,
+  nomePasta: string,
+): Promise<{ contratosId: string; analiseId: string; cedenteDocsId: string }> {
+  const cedenteId = await driveFindOrCreateFolder(token, nomePasta, originadorId);
+  let contratosId = '';
+  let analiseId = '';
+  let cedenteDocsId = '';
+  for (const sub of DRIVE_SUBPASTAS) {
+    const id = await driveFindOrCreateFolder(token, sub, cedenteId);
+    if (sub === DRIVE_PASTA_CONTRATOS)    contratosId = id;
+    if (sub === DRIVE_PASTA_ANALISE)      analiseId = id;
+    if (sub === DRIVE_PASTA_CEDENTE_DOCS) cedenteDocsId = id;
+  }
+  if (!contratosId)   throw new Error(`Subpasta '${DRIVE_PASTA_CONTRATOS}' não pôde ser criada.`);
+  if (!analiseId)     throw new Error(`Subpasta '${DRIVE_PASTA_ANALISE}' não pôde ser criada.`);
+  if (!cedenteDocsId) throw new Error(`Subpasta '${DRIVE_PASTA_CEDENTE_DOCS}' não pôde ser criada.`);
+  return { contratosId, analiseId, cedenteDocsId };
+}
+
+// Wrapper compat — uploads de .docx (contratos gerados) usam o mime fixo
+function driveUploadDocx(token: string, name: string, parentId: string, bytes: Uint8Array, sobrescrever = true) {
+  return driveUploadBytes(token, name, parentId, bytes, DOCX_MIME, sobrescrever);
+}
+
+// ============================================================================
+// Pipeline helpers
+// ============================================================================
+
+function parseBool(v: string | null | undefined): boolean {
+  if (v == null) return false;
+  const s = String(v).toLowerCase().trim();
+  return s === 'true' || s === '1' || s === 'sim' || s === 'yes' || s === 'marcado';
+}
+
+// Vocabulário dos marcadores de gênero (tags curtas): codigo -> [masculino, feminino].
+// Template neutro: 1 por tipo, sem versões M/F duplicadas. Tag no .docx = {{PREFIXO_CODIGO}}
+// (ex.: {{C_IN}} = cedente inscrito/inscrita). Precisa de outra palavra? Adiciona linha.
+// Ver contratos final/_MARCADORES.md.
+const GENERO_PALAVRAS: Record<string, [string, string]> = {
+  O:   ['o', 'a'],
+  OM:  ['O', 'A'],
+  DO:  ['do', 'da'],
+  AO:  ['ao', 'à'],
+  PL:  ['pelo', 'pela'],
+  NO:  ['no', 'na'],
+  BR:  ['brasileiro', 'brasileira'],
+  IN:  ['inscrito', 'inscrita'],
+  PO:  ['portador', 'portadora'],
+  DM:  ['domiciliado', 'domiciliada'],
+  RD:  ['residente e domiciliado', 'residente e domiciliada'],
+  NA:  ['nascido', 'nascida'],
+  SR:  ['Sr.', 'Sra.'],
+  RP:  ['representado', 'representada'],
+  // Pronome oblíquo enclítico: "representá-lo" / "representá-la". CUIDADO ao usar —
+  // só vale quando o objeto é a PARTE. Na procuração, o "conduzi-lo" da mesma frase
+  // se refere ao PROCESSO e continua masculino.
+  LO:  ['lo', 'la'],
+  CE:  ['cessionário', 'cessionária'],
+  CM:  ['CESSIONÁRIO', 'CESSIONÁRIA'],
+  SO:  ['sócio', 'sócia'],
+  SEU: ['seu', 'sua'],
+};
+
+// Gera os marcadores {PREFIXO}_{CODIGO} (ex.: C_IN, I_CM, S_SO) pro gênero dado.
+// Prefixos: C=cedente, I=investidor, S=sócio do escritório.
+// 'F' = feminino; qualquer outro valor (incl. null/undefined) = masculino (default
+// gramatical) — radios vazios viram masculino.
+function marcadoresGenero(prefixo: string, genero: string | null | undefined): Vars {
+  const fem = String(genero ?? '').trim().toUpperCase().startsWith('F');
+  const out: Vars = {};
+  for (const [code, [masc, femi]] of Object.entries(GENERO_PALAVRAS)) {
+    out[`${prefixo}_${code}`] = fem ? femi : masc;
+  }
+  return out;
+}
+
+// Endereço em texto corrido a partir das partes de `investidor_dados`, com
+// fallback pro texto legado da coluna `endereco` — mesma regra de
+// compilarEndereco() em src/lib/format.ts. Duplicada aqui (não lá) porque essa
+// function não pode importar código do lado do browser; é só esta função, sem
+// motivo pra virar um _shared novo por uma peça isolada.
+function compilarEnderecoInvestidor(row: {
+  logradouro?: string | null; numero?: string | null; complemento?: string | null;
+  bairro?: string | null; cidade?: string | null; uf?: string | null; cep?: string | null;
+  endereco?: string | null;
+}): string {
+  const t = (v: string | null | undefined) => (v ?? '').trim();
+  const partes: string[] = [];
+  if (t(row.logradouro)) partes.push(t(row.logradouro));
+  if (t(row.numero)) partes.push(`nº ${t(row.numero)}`);
+  if (t(row.complemento)) partes.push(t(row.complemento));
+  if (t(row.bairro)) partes.push(`bairro ${t(row.bairro)}`);
+  const cidadeUf = t(row.cidade) ? (t(row.uf) ? `${t(row.cidade)}/${t(row.uf)}` : t(row.cidade)) : '';
+  if (cidadeUf) partes.push(cidadeUf);
+  if (t(row.cep)) partes.push(`CEP ${t(row.cep)}`);
+  const compilado = partes.join(', ');
+  return compilado || t(row.endereco);
+}
+
+// Monta a qualificação completa do investidor (cessionário) — vira o
+// placeholder {{INVESTIDOR_QUALIFICACAO}} no template. Detecta PJ pelo nº de
+// dígitos do campo cpf (14 = CNPJ); PF usa o gênero da coluna `genero`.
+// Mesmo padrão do _montarQualificacaoCessionario das petições. Não inclui o
+// nome (esse fica em {{INVESTIDOR_NOME}}).
+// `qualificacao_complemento` é texto livre da tabela `investidor_dados` (migration
+// 0047_contratos_geracao.sql, junto com `genero`),
+// para os dados que os modelos novos pedem e o cadastro não tem campo próprio:
+//   • PF → estado civil e profissão. Ex.: "casada, empresária"
+//          → "Fulana, brasileira, casada, empresária, inscrita no CPF…"
+//   • PJ → representante legal, com a frase inteira, porque entra no fim.
+//          Ex.: "neste ato representada por João da Silva, sócio-administrador"
+// O órgão expedidor do RG não precisa de campo novo: a coluna `rg` é texto livre,
+// basta cadastrar "MG-12.345.678 SSP/MG".
+function montarQualificacaoInvestidor(inv: { cpf?: string | null; rg?: string | null; endereco?: string | null; genero?: string | null; qualificacao_complemento?: string | null }): string {
+  const doc = String(inv.cpf ?? '').trim();
+  const digitos = doc.replace(/\D/g, '');
+  const endereco = String(inv.endereco ?? '').trim();
+  const rg = String(inv.rg ?? '').trim();
+  const complemento = String(inv.qualificacao_complemento ?? '').trim().replace(/^,\s*|,\s*$/g, '');
+  const fem = String(inv.genero ?? '').trim().toUpperCase().startsWith('F');
+  const partes: string[] = [];
+  if (digitos.length === 14) {
+    // PJ
+    partes.push('pessoa jurídica de direito privado');
+    partes.push(`inscrita no CNPJ sob o nº ${doc}`);
+    if (endereco) partes.push(`com sede em ${endereco}`);
+    if (complemento) partes.push(complemento);
+  } else {
+    // PF (11 dígitos ou desconhecido → trata como pessoa física)
+    partes.push(fem ? 'brasileira' : 'brasileiro');
+    if (complemento) partes.push(complemento);
+    partes.push(`${fem ? 'inscrita' : 'inscrito'} no CPF sob o nº ${doc}`);
+    if (rg) partes.push(`${fem ? 'portadora' : 'portador'} do RG nº ${rg}`);
+    if (endereco) partes.push(`residente e ${fem ? 'domiciliada' : 'domiciliado'} em ${endereco}`);
+  }
+  return partes.join(', ');
+}
+
+// Precatório não usa os mesmos contratos que RPV: sai só o contrato de originação/
+// intermediação/gestão de ativo (que já contempla a cessão onerosa no próprio corpo)
+// mais a procuração. Nenhuma cessão avulsa. Regra do jurídico, 2026-08.
+function ehPrecatorio(categoria: string | null | undefined): boolean {
+  return normalizar(String(categoria ?? '')).includes('precatorio');
+}
+
+// Quais contratos o sistema propõe para uma categoria. É o que o site pré-marca
+// quando o operador entra no modo manual sem ter uma análise legível.
+function tiposPadraoDaCategoria(categoria: string | null | undefined): string[] {
+  return ehPrecatorio(categoria)
+    ? ['intermediacao', 'procuracao']
+    : ['cessao_credito', 'intermediacao', 'procuracao'];
+}
+
+// Decide o conjunto de contratos a gerar, em ordem de precedência:
+//   1. tiposExplicitos — o operador marcou na tela. Vale exatamente o que ele marcou,
+//      sem acrescentar nada. Se ele quer só a procuração, sai só a procuração.
+//   2. tipoExplicito   — dropdown de tipo único (compatibilidade com a versão antiga
+//      do front, que forçava intermediação + procuração junto de qualquer cessão).
+//   3. categoria precatório → contrato de intermediação + procuração.
+//   4. resposta do quadro da análise (RPV).
+function determinarTipos(
+  tipoExplicito: string | null | undefined,
+  tiposExplicitos: string[] | null | undefined,
+  aprVars: Vars,
+  categoria: string | null | undefined,
+): string[] {
+  if (tiposExplicitos && tiposExplicitos.length > 0) {
+    const invalidos = tiposExplicitos.filter(t => !TEMPLATES[t]);
+    if (invalidos.length > 0) {
+      throw new Error(`Tipo de contrato desconhecido: ${invalidos.join(', ')}. Válidos: ${Object.keys(TEMPLATES).join(', ')}.`);
+    }
+    // Preserva a ordem canônica de TEMPLATES, não a ordem em que vieram os checkboxes.
+    return Object.keys(TEMPLATES).filter(t => tiposExplicitos.includes(t));
+  }
+
+  if (tipoExplicito && TEMPLATES[tipoExplicito]) {
+    const out = [tipoExplicito];
+    if (tipoExplicito.startsWith('cessao_')) out.push('intermediacao', 'procuracao');
+    return out;
+  }
+
+  if (ehPrecatorio(categoria)) return tiposPadraoDaCategoria(categoria);
+
+  // RPV: usa a resposta do quadro "Vai ser negociado aqui quais créditos?", lida
+  // deterministicamente do XML da planilha por detectCreditosNegociadosFromXlsx().
+  const cessoes: string[] = [];
+  if (parseBool(aprVars.NEGOCIAR_CREDITO_PRINCIPAL))        cessoes.push('cessao_credito');
+  if (parseBool(aprVars.NEGOCIAR_HONORARIOS_CONTRATUAIS))   cessoes.push('cessao_honorarios_contratuais');
+  if (parseBool(aprVars.NEGOCIAR_HONORARIOS_SUCUMBENCIAIS)) cessoes.push('cessao_honorarios_sucumbenciais');
+
+  if (cessoes.length === 0) {
+    throw new Error(
+      'O quadro "Vai ser negociado aqui quais créditos?" da análise não indicou nenhum ' +
+      'crédito a negociar. Preencha o dropdown na análise ou marque os contratos na mão na tela.',
+    );
+  }
+
+  return [...cessoes, 'intermediacao', 'procuracao'];
+}
+
+interface InputPaths { apresentacao: string[]; cedente: string[]; escritorio: string[] }
+
+async function listInputPaths(sb: SB, jobPrefix: string): Promise<InputPaths> {
+  const out: InputPaths = { apresentacao: [], cedente: [], escritorio: [] };
+  for (const papel of ['apresentacao','cedente','escritorio'] as const) {
+    const { data, error } = await sb.storage.from(BUCKET_INPUT).list(`${jobPrefix}/${papel}`, { limit: 100 });
+    if (error) continue; // pasta pode não existir
+    for (const f of (data || [])) {
+      if (f.name && f.name !== '.emptyFolderPlaceholder') {
+        out[papel].push(`${jobPrefix}/${papel}/${f.name}`);
+      }
+    }
+  }
+  return out;
+}
+
+async function cleanupInputs(sb: SB, paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  try { await sb.storage.from(BUCKET_INPUT).remove(paths); } catch (_) { /* best-effort */ }
+}
+
+// ============================================================================
+// HTTP Handler
+// ============================================================================
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
+
+  let inputPathsAll: string[] = [];
+
+  try {
+    // 1. Auth — usuário autenticado E ativo, no mesmo portão de toda function
+    // deste repo (ver _shared/auth.ts). Sempre disparada por pessoa, nunca cron.
+    const sbAdmin: SB = serviceClient();
+    const user = await getCallerAtivo(req, sbAdmin);
+    if (!user) return errorResponse(ERRO_ACESSO, 401);
+    const userId = user.id;
+
+    // 2. Parse body
+    const body = await req.json();
+    const jobId: string = body.job_id;
+    const investidorNome: string = (body.investidor_nome || '').trim();
+    const originadorNome: string = body.originador;
+    const tipoExplicito: string | null = body.tipo || null;
+    // Escolha manual dos contratos, marcada pelo operador na tela. Vale exatamente o
+    // que vier aqui — nada é acrescentado. Ausente/vazio = modo automático.
+    const tiposExplicitos: string[] | null = Array.isArray(body.tipos) && body.tipos.length > 0
+      ? body.tipos.map((t: unknown) => String(t))
+      : null;
+    const numeroProcesso: string = (body.numero_processo || '').trim();
+    const categoria: string = (body.categoria || DRIVE_CATEGORIA_PADRAO).trim();
+
+    // Ação leve: só lista os originadores da categoria (popular o dropdown do front).
+    // Não gera nada — auth já validada acima.
+    if (body.acao === 'listar_originadores') {
+      const g = await segredoGoogle();
+      if (!g) return errorResponse(`Secret 'integracao_google_secret' não configurado`, 500);
+      const token = await refreshGoogleAccessToken(g.client_id, g.client_secret, g.refresh_token);
+      const originadores = await driveListarOriginadoresAnalise(token, categoria);
+      return jsonResponse({ originadores });
+    }
+
+    if (!jobId || !investidorNome || !originadorNome) {
+      return errorResponse('Campos obrigatórios: job_id, investidor_nome, originador');
+    }
+    if (!numeroProcesso) {
+      return errorResponse('Campo obrigatório: numero_processo (usado pra localizar a análise no Drive)');
+    }
+
+    // 3. Secrets — Anthropic + Google, das tabelas integracao_*_secret (_shared/segredos.ts)
+    const anthropicKey = await chaveAnthropic();
+    const google = await segredoGoogle();
+    if (!anthropicKey) return errorResponse(`Secret 'integracao_anthropic_secret' não configurado`, 500);
+    if (!google) return errorResponse(`Secret 'integracao_google_secret' não configurado`, 500);
+    const cfg = {
+      anthropic_api_key: anthropicKey,
+      google_oauth_client_id: google.client_id,
+      google_oauth_client_secret: google.client_secret,
+      google_oauth_refresh_token: google.refresh_token,
+    };
+
+    // 4. Carrega investidor de `investidor_dados` (chave: nome normalizado + papel).
+    // Não é uma tabela `investidores` com id — é a mesma ficha de CPF/RG/banco que
+    // a aba "Dados pessoais e bancários" já mantém (0023_investidor_dados.sql).
+    const nomeChave = normalizarNome(investidorNome);
+    const { data: invRow, error: invErr } = await sbAdmin
+      .from('investidor_dados')
+      .select('*')
+      .eq('tipo', 'investidor')
+      .eq('nome_chave', nomeChave)
+      .maybeSingle();
+    if (invErr) throw new Error('Erro lendo investidor_dados: ' + invErr.message);
+    if (!invRow) {
+      return errorResponse(
+        `Investidor '${investidorNome}' não tem ficha em "Dados pessoais e bancários" — cadastre CPF/RG/endereço antes de gerar o contrato.`,
+        404,
+      );
+    }
+    const inv = {
+      nome: invRow.nome_exibicao || investidorNome,
+      cpf: invRow.documento,
+      rg: invRow.rg,
+      endereco: compilarEnderecoInvestidor(invRow),
+      banco: invRow.banco,
+      agencia: invRow.agencia,
+      conta: invRow.conta,
+      pix: invRow.pix,
+      genero: invRow.genero,
+      qualificacao_complemento: invRow.qualificacao_complemento,
+    };
+
+    // 5. Lista arquivos de input no Storage (cedente/escritório).
+    //    Apresentação (análise de crédito) não é mais upload — vem do Drive no passo 9b.
+    const jobPrefix = `${userId}/${jobId}`;
+    const inputPaths = await listInputPaths(sbAdmin, jobPrefix);
+    inputPathsAll = [...inputPaths.apresentacao, ...inputPaths.cedente, ...inputPaths.escritorio];
+
+    // 6. Lê templates do bucket → coleta união de variáveis
+    const templateBytes: Record<string, Uint8Array> = {};
+    const templateVarsByTipo: Record<string, string[]> = {};
+    const allTemplateVars = new Set<string>();
+    for (const [tipo, fname] of Object.entries(TEMPLATES)) {
+      const bytes = await storageGetBytes(sbAdmin, BUCKET_TEMPLATES, fname);
+      templateBytes[tipo] = bytes;
+      const zip = await JSZip.loadAsync(bytes);
+      const xml = await zip.file('word/document.xml')?.async('string') || '';
+      const vars = getTemplateVariablesFromXml(xml);
+      templateVarsByTipo[tipo] = vars;
+      for (const v of vars) allTemplateVars.add(v);
+    }
+
+    // 7. Extrai cedente + escritório primeiro — o nome do cedente define qual pasta
+    //    da análise buscar no Drive.
+    const cedenteP = inputPaths.cedente.length > 0
+      ? extractParte(sbAdmin, cfg.anthropic_api_key, inputPaths.cedente, SCHEMA_CEDENTE)
+      : Promise.resolve<Vars>({});
+    const escritorioP = inputPaths.escritorio.length > 0
+      ? extractParte(sbAdmin, cfg.anthropic_api_key, inputPaths.escritorio, SCHEMA_ESCRITORIO)
+      : Promise.resolve<Vars>({});
+    const [cedente, escritorio] = await Promise.all([cedenteP, escritorioP]);
+
+    // 9a. Refresh do token Google — usado pra buscar a análise no Drive e, depois, pro upload.
+    const accessToken = await refreshGoogleAccessToken(
+      cfg.google_oauth_client_id,
+      cfg.google_oauth_client_secret,
+      cfg.google_oauth_refresh_token,
+    );
+
+    // 9b. Localiza a análise de crédito no Drive:
+    //     A. Análises de crédito / {categoria} / {originador} / {cedente ou escritório - processo}
+    const cedenteNome = (cedente.CEDENTE_NOME as string) || '';
+    const escritorioNome = (escritorio.ESCRITORIO_NOME as string) || '';
+    let analiseFolderName = '';
+    let analiseArquivos: DriveFile[];
+    try {
+      const found = await driveEncontrarAnaliseArquivos(accessToken, categoria, originadorNome, cedenteNome, escritorioNome, numeroProcesso);
+      analiseArquivos = found.arquivos;
+      analiseFolderName = found.folderName;
+      console.log('[gerar-contrato] análise localizada:', JSON.stringify({ folder: found.folderName, debug: found.debug }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return errorResponse(`Não localizei a análise de crédito no Drive: ${msg}`, 404, {
+        originador: originadorNome, cedente: cedenteNome, escritorio: escritorioNome, numero_processo: numeroProcesso,
+      });
+    }
+    if (analiseArquivos.length === 0) {
+      return errorResponse(`Pasta da análise ('${analiseFolderName}') está vazia no Drive.`, 400);
+    }
+
+    // 9c. Baixa os arquivos da análise (export se forem Google Sheets/Docs nativos)
+    //     e monta o conteúdo pro Claude.
+    const analiseBaixados: Array<{ filename: string; bytes: Uint8Array }> = [];
+    const apresentacaoContent: ClaudeContentBlock[] = [];
+    for (const f of analiseArquivos) {
+      const baixado = await driveBaixarArquivo(accessToken, f);
+      analiseBaixados.push(baixado);
+      apresentacaoContent.push(...(await bytesToContentBlocks(baixado.filename, baixado.bytes)));
+    }
+
+    // 9d. Extrai a apresentação a partir do conteúdo baixado.
+    const apresentacao = await extractApresentacao(cfg.anthropic_api_key, apresentacaoContent, Array.from(allTemplateVars));
+
+    // 9e. Leituras determinísticas da planilha da análise. Dois blocos independentes,
+    //     um try cada — antes eles compartilhavam o mesmo try, e uma falha na leitura
+    //     do quadro cancelava silenciosamente a leitura do valor da operação.
+    //
+    //     • quadro de créditos negociados → decide quais contratos gerar. Falha alto:
+    //       a IA não é consultada, porque chute errado aqui gera o conjunto errado de
+    //       contratos (foi o que pediu documento de escritório sem cessão de honorários).
+    //       O erro só chega ao operador se o conjunto de contratos depender dele.
+    //     • "Valor total da operação" → CAPITAL_INVESTIDO. Best-effort, IA como fallback.
+    const analiseDebug: Record<string, unknown> = {
+      analise_folder: analiseFolderName,
+      analise_arquivos: analiseBaixados.map(a => a.filename),
+      xlsx_lido: null as string | null,
+    };
+    //
+    //     O quadro só é lido quando o conjunto de contratos depende dele. A análise de
+    //     PRECATÓRIO não tem esse quadro — ela é por crédito ("se mais de um crédito estiver
+    //     sendo negociado, realizar uma análise para cada um, em abas separadas"), e a
+    //     categoria já define os 2 documentos. Tentar ler ali daria erro em toda geração de
+    //     precatório. Mesma coisa quando o operador escolheu os contratos na mão.
+    let erroCreditos: Error | null = null;
+    const precisaDoQuadro = !tiposExplicitos && !tipoExplicito && !ehPrecatorio(categoria);
+    const xlsxAnalise = analiseBaixados.find(a => extOf(a.filename) === '.xlsx' || extOf(a.filename) === '.xls');
+    analiseDebug.leu_quadro = precisaDoQuadro;
+    if (xlsxAnalise) {
+      analiseDebug.xlsx_lido = xlsxAnalise.filename;
+      if (precisaDoQuadro) {
+        try {
+          const { vars, debug } = await detectCreditosNegociadosFromXlsx(xlsxAnalise.bytes);
+          analiseDebug.creditos = debug;
+          Object.assign(apresentacao, vars);
+        } catch (e) {
+          erroCreditos = e instanceof Error ? e : new Error(String(e));
+          analiseDebug.creditos_erro = erroCreditos.message;
+          console.error('[gerar-contrato] leitura do quadro de créditos falhou', xlsxAnalise.filename, e);
+        }
+      }
+      try {
+        const vto = await detectValorTotalOperacaoFromXlsx(xlsxAnalise.bytes);
+        analiseDebug.capital_investido_ia = apresentacao.CAPITAL_INVESTIDO;
+        analiseDebug.capital_investido_xlsx = vto;
+        if (vto) apresentacao.CAPITAL_INVESTIDO = vto;
+      } catch (e) {
+        analiseDebug.capital_investido_erro = e instanceof Error ? e.message : String(e);
+        console.error('[gerar-contrato] leitura do valor total da operação falhou', e);
+      }
+    } else if (precisaDoQuadro) {
+      erroCreditos = new Error(
+        'A pasta da análise no Drive não tem planilha (.xlsx) — sem ela não dá pra ler o ' +
+        'quadro "Vai ser negociado aqui quais créditos?". Marque os contratos na mão na tela.',
+      );
+      analiseDebug.creditos_erro = erroCreditos.message;
+    }
+    console.log('[gerar-contrato] leitura da análise:', JSON.stringify(analiseDebug));
+
+    // 10. Junta variáveis (precedência: apresentação > cedente/escritório > investidor)
+    const dados: Vars = {
+      INVESTIDOR_NOME: toTitleCasePT(inv.nome) ?? inv.nome,
+      INVESTIDOR_CPF: inv.cpf,
+      INVESTIDOR_RG: inv.rg,
+      INVESTIDOR_ENDERECO: inv.endereco,
+      INVESTIDOR_BANCO: inv.banco,
+      INVESTIDOR_AGENCIA: inv.agencia,
+      INVESTIDOR_CONTA: inv.conta,
+      INVESTIDOR_PIX: inv.pix,
+      DATA_EXTENSO: dataExtenso(),
+      ...cedente,
+      ...escritorio,
+      ...apresentacao,
+    };
+    for (const k of ['CEDENTE_NOME', 'ESCRITORIO_NOME', 'ESCRITORIO_SOCIO_NOME']) {
+      if (dados[k]) dados[k] = toTitleCasePT(dados[k]);
+    }
+
+    // Marcadores de gênero. Cedente (sempre PF) e sócio do escritório vêm dos radios
+    // do site. Investidor pode ser PJ → gênero efetivo é feminino se CNPJ (14 díg.) ou
+    // coluna genero='F'; além dos marcadores I_*, a qualificação inteira vai em I_QL.
+    const invFem = String(inv.cpf ?? '').replace(/\D/g, '').length === 14
+      || String(inv.genero ?? '').trim().toUpperCase().startsWith('F');
+    Object.assign(dados, marcadoresGenero('C', body.cedente_genero));
+    Object.assign(dados, marcadoresGenero('I', invFem ? 'F' : 'M'));
+    Object.assign(dados, marcadoresGenero('S', body.socio_genero));
+    // I_QL (tag nova) + INVESTIDOR_QUALIFICACAO (compat com templates antigos)
+    dados.I_QL = dados.INVESTIDOR_QUALIFICACAO = montarQualificacaoInvestidor(inv);
+
+    // 11. Decide tipos a gerar e valida papéis necessários
+    let tipos: string[];
+    try {
+      tipos = determinarTipos(tipoExplicito, tiposExplicitos, apresentacao, categoria);
+    } catch (e) {
+      // Quando o operador não escolheu na mão, a causa real de "não sei quais contratos
+      // gerar" quase sempre é a planilha ilegível — essa mensagem é a acionável.
+      // O JSON de debug fica no console.log do passo 9e, fora da tela do operador.
+      throw erroCreditos ?? (e instanceof Error ? e : new Error(String(e)));
+    }
+    // 11a. CLASSE_ATIVO determinístico, sobrescrevendo o palpite da IA.
+    //      O que está sendo cedido sai dos próprios tipos quando há cessão — cobre RPV
+    //      automático e escolha manual de uma vez. Precatório automático não gera cessão
+    //      avulsa, então aí o sinal vem do cenário preenchido na análise.
+    const cedePrincipal  = tipos.includes('cessao_credito');
+    const cedeHonorarios = tipos.some(t => t.startsWith('cessao_honorarios'));
+    let cenario: { principal: boolean; honorarios: boolean; rotulo: string } | null =
+      (cedePrincipal || cedeHonorarios)
+        ? { principal: cedePrincipal, honorarios: cedeHonorarios, rotulo: 'contratos escolhidos' }
+        : null;
+    if (!cenario && xlsxAnalise) {
+      try {
+        cenario = await detectCenarioNegociadoFromXlsx(xlsxAnalise.bytes);
+      } catch (e) {
+        console.error('[gerar-contrato] leitura do cenário negociado falhou', e);
+      }
+    }
+    const classe = cenario ? classeAtivo(categoria, cenario.principal, cenario.honorarios) : null;
+    console.log('[gerar-contrato] classe do ativo:', JSON.stringify({
+      cenario: cenario?.rotulo ?? null, derivada: classe, da_ia: dados.CLASSE_ATIVO,
+    }));
+    // Só sobrescreve quando conseguiu determinar; senão o valor da IA permanece.
+    if (classe) dados.CLASSE_ATIVO = classe;
+
+    const papeisNecessarios = new Set<string>();
+    for (const t of tipos) for (const p of REQUIRED_PAPEIS[t]) papeisNecessarios.add(p);
+    papeisNecessarios.delete('apresentacao');
+    const faltando: string[] = [];
+    for (const p of papeisNecessarios) {
+      if (p === 'cedente' && inputPaths.cedente.length === 0) faltando.push('cedente');
+      if (p === 'escritorio' && inputPaths.escritorio.length === 0) faltando.push('escritorio');
+    }
+    if (faltando.length > 0) {
+      return errorResponse(`Faltam documentos: ${faltando.join(', ')}`, 400, { tipos, faltando });
+    }
+
+    // 12. Preenche cada template e coleta pendentes
+    const arquivosGerados: Array<{ tipo: string; nome: string; bytes: Uint8Array; pendentes: string[] }> = [];
+    for (const tipo of tipos) {
+      const { bytes, pendentes } = await fillTemplate(templateBytes[tipo], dados);
+      arquivosGerados.push({
+        tipo,
+        nome: nomeContratoArquivo(tipo, dados),
+        bytes,
+        pendentes,
+      });
+    }
+
+    // 13. Drive: walk + create + upload (token já obtido no passo 9a)
+    //
+    // As duas árvores do Drive não andam juntas: o dropdown de originador é populado
+    // de 'A. Análises de crédito/{categoria}', mas o upload acontece em
+    // 'B. Processos/{categoria}'. Um originador que já tem análise mas ainda não tem
+    // processo existia só na primeira — e a geração morria aqui, com 404, DEPOIS de já
+    // ter gasto as chamadas de Claude. Agora a pasta é criada, mesma semântica de
+    // mkdir -p que já valia pra pasta do cedente e as 7 subpastas dela, logo abaixo.
+    const processosId = await driveEncontrarProcessosFolder(accessToken);
+    const { originadores, debug: driveDebug } = await driveListOriginadores(accessToken, processosId, categoria);
+    const interTermo = normalizar(originadorNome);
+    let interId = (originadores.find(i => normalizar(i.name) === interTermo)
+                ?? originadores.find(i => normalizar(i.name).includes(interTermo)))?.id ?? null;
+    let originadorCriado = false;
+    if (!interId) {
+      // A pasta da categoria é obrigatória: criar categoria seria inventar estrutura.
+      if (!driveDebug.categoria_rpv_id) {
+        return errorResponse(
+          `Categoria '${categoria}' não encontrada em '${DRIVE_PROCESSOS_NAME}' — sem ela não sei onde criar a pasta do originador.`,
+          404,
+          { categorias_em_processos: driveDebug.categorias_em_processos, processos_folder_id: processosId },
+        );
+      }
+      interId = await driveCreateFolder(accessToken, originadorNome, driveDebug.categoria_rpv_id);
+      originadorCriado = true;
+      console.log('[gerar-contrato] pasta de originador criada em B. Processos:', originadorNome, interId);
+    }
+    const nomeTitular = toTitleCasePT(escritorio.ESCRITORIO_NOME || cedente.CEDENTE_NOME || inv.nome) ?? 'sem-titular';
+    const processo = apresentacao.NUMERO_PROCESSO || 'sem-processo';
+    const nomePastaCedente = `${nomeTitular} - ${processo}`;
+    const { contratosId: contratosFolderId, analiseId: analiseFolderId, cedenteDocsId: cedenteDocsFolderId } =
+      await driveGarantirEstruturaCedente(accessToken, interId, nomePastaCedente);
+
+    // 13a. Upload dos contratos gerados pra "2. Contratos assinados"
+    const uploads: Array<{ tipo: string; nome: string; drive_id: string; webViewLink?: string; pendentes: string[] }> = [];
+    for (const a of arquivosGerados) {
+      // Não sobrescreve contrato já existente (pode estar assinado): se houver colisão de nome,
+      // sobe versão datada. Re-runs no mesmo dia regravam só a versão datada, nunca o original.
+      let nome = a.nome;
+      if (await driveFindChild(accessToken, nome, contratosFolderId)) {
+        nome = nome.replace(/\.docx$/i, '') + ` - ${dateStamp()}.docx`;
+      }
+      const r = await driveUploadDocx(accessToken, nome, contratosFolderId, a.bytes);
+      uploads.push({ tipo: a.tipo, nome, drive_id: r.id, webViewLink: r.webViewLink, pendentes: a.pendentes });
+    }
+
+    // 13b. Copia os arquivos da análise (baixados do Drive no passo 9c) pra
+    // "1. Análise(s) de crédito" do processo. Mantém uma cópia junto do processo.
+    const analiseUploads: Array<{ nome: string; drive_id: string }> = [];
+    for (const a of analiseBaixados) {
+      try {
+        const mime = mimeForExtension(extOf(a.filename));
+        const r = await driveUploadBytes(accessToken, a.filename, analiseFolderId, a.bytes, mime);
+        analiseUploads.push({ nome: a.filename, drive_id: r.id });
+      } catch (e) {
+        console.error('[gerar-contrato] falha upload análise', a.filename, e);
+        // Best-effort — não derruba a operação inteira por causa de 1 anexo
+      }
+    }
+
+    // 13c. Upload dos documentos do cedente (RG, comprovantes, etc.) pra "4. Documentos do cedente e advogado"
+    const cedenteUploads: Array<{ nome: string; drive_id: string }> = [];
+    for (const path of inputPaths.cedente) {
+      try {
+        const bytes = await storageGetBytes(sbAdmin, BUCKET_INPUT, path);
+        const nomeArquivo = path.split('/').pop() || 'arquivo';
+        const mime = mimeForExtension(extOf(path));
+        const r = await driveUploadBytes(accessToken, nomeArquivo, cedenteDocsFolderId, bytes, mime);
+        cedenteUploads.push({ nome: nomeArquivo, drive_id: r.id });
+      } catch (e) {
+        console.error('[gerar-contrato] falha upload doc cedente', path, e);
+        // Best-effort — não derruba a operação por causa de 1 anexo
+      }
+    }
+
+    // 14. Folder URL — aponta direto pros contratos (sem clique extra)
+    const folderUrl = `https://drive.google.com/drive/folders/${contratosFolderId}`;
+    const analiseFolderUrl = `https://drive.google.com/drive/folders/${analiseFolderId}`;
+
+    // 15. Grava uma linha em `contratos` por tipo gerado. Best-effort: os arquivos já
+    // estão no Drive nesse ponto — uma falha aqui não pode fazer a chamada inteira
+    // parecer que deu erro pro operador. Sem tabela de job: a chamada é síncrona e só
+    // se grava o que realmente terminou com sucesso.
+    const todasPendentes = Array.from(new Set(arquivosGerados.flatMap(a => a.pendentes)));
+    const contratosRows = uploads.map((u) => ({
+      job_id: jobId,
+      numero: numeroProcesso,
+      tipo: u.tipo,
+      investidor_nome: inv.nome,
+      status: 'gerado',
+      drive_folder_url: folderUrl,
+      arquivo_url: u.webViewLink ?? null,
+      dados: { ...dados, ORIGINADOR: originadorNome, CATEGORIA: categoria },
+    }))
+    const { error: insErr } = await sbAdmin.from('contratos').insert(contratosRows)
+    if (insErr) console.error('[gerar-contrato] falha ao gravar em contratos (best-effort):', insErr.message)
+
+    // 16. Limpa inputs do Storage
+    await cleanupInputs(sbAdmin, inputPathsAll);
+
+    return jsonResponse({
+      success: true,
+      job_id: jobId,
+      tipos_gerados: tipos,
+      drive_folder_url: folderUrl,
+      analise_folder_url: analiseFolderUrl,
+      analise_uploads: analiseUploads,
+      cedente_uploads: cedenteUploads,
+      // Sinaliza que a pasta do originador não existia em B. Processos e foi criada,
+      // pra o operador conferir se não é erro de digitação numa pasta nova e vazia.
+      originador_criado: originadorCriado ? originadorNome : null,
+      uploads,
+      variaveis_extraidas: dados,
+      pendentes: todasPendentes,
+    });
+
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[gerar-contrato] erro:', msg);
+    return errorResponse(msg, 500);
+  }
+});

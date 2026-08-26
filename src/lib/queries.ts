@@ -111,6 +111,16 @@ export interface InvestidorDados {
   cidade: string | null
   uf: string | null
   cep: string | null
+  /**
+   * Gênero (M/F) — concordância do texto nos contratos gerados (migração 0047).
+   * Null tratado como masculino.
+   */
+  genero: string | null
+  /**
+   * Complemento livre pra qualificação do contrato: estado civil e profissão
+   * (PF) ou o representante legal por extenso (PJ) — migração 0047.
+   */
+  qualificacao_complemento: string | null
   atualizado_em: string
 }
 
@@ -133,7 +143,7 @@ export function useInvestidorDados() {
       const comRepresentante = await supabase
         .from('investidor_dados')
         .select(
-          'tipo, nome_chave, nome_exibicao, cpf, rg, representante, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
+          'tipo, nome_chave, nome_exibicao, cpf, rg, representante, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, genero, qualificacao_complemento, atualizado_em',
         )
       // 42703 = "column does not exist": banco ainda sem a migração 0034. Lê de
       // novo sem o representante em vez de derrubar a aba inteira — pedir uma
@@ -145,7 +155,7 @@ export function useInvestidorDados() {
           ? await supabase
               .from('investidor_dados')
               .select(
-                'tipo, nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, atualizado_em',
+                'tipo, nome_chave, nome_exibicao, cpf, rg, banco, agencia, conta, pix, endereco, logradouro, numero, complemento, bairro, cidade, uf, cep, genero, qualificacao_complemento, atualizado_em',
               )
           : comRepresentante
       // Este mapa alimenta o formulário, e o Salvar é upsert da LINHA INTEIRA:

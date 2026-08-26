@@ -313,7 +313,18 @@ export interface Investimento {
 }
 
 // ---------- Comercial: Contratos ----------
-export type TipoContrato = 'cessao' | 'investimento' | 'outro'
+// 'cessao' | 'investimento' | 'outro' são do rascunho antigo ({{var}} em texto
+// livre, aba "Modelos"). Os outros 5 são os tipos reais que gerar-contrato
+// produz (.docx via Drive) — ver supabase/functions/gerar-contrato/index.ts.
+export type TipoContrato =
+  | 'cessao'
+  | 'investimento'
+  | 'outro'
+  | 'cessao_credito'
+  | 'cessao_honorarios_contratuais'
+  | 'cessao_honorarios_sucumbenciais'
+  | 'intermediacao'
+  | 'procuracao'
 export type StatusContrato = 'rascunho' | 'gerado' | 'assinado' | 'cancelado'
 
 export interface ContratoTemplate {
@@ -336,6 +347,12 @@ export interface Contrato {
   conteudo_final: string | null
   status: StatusContrato
   arquivo_url: string | null
+  /** Agrupa as linhas geradas numa mesma chamada de gerar-contrato (migração 0047). */
+  job_id: UUID | null
+  /** Nome do investidor vindo de investidor_dados — usado pela geração real (migração 0047). */
+  investidor_nome: string | null
+  /** Link da pasta "2. Contratos assinados" no Drive (migração 0047). */
+  drive_folder_url: string | null
   created_at: string
   updated_at: string
 }
