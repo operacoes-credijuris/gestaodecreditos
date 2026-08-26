@@ -80,3 +80,9 @@ verify_jwt = false
 # na hora. E ela ESCREVE o checklist congelado: o JWT é exigido no portão.
 [functions.gerar-checklist-certidoes]
 verify_jwt = true
+
+# Gera os contratos (.docx) e sobe no Drive. Sempre disparada por uma pessoa na
+# tela de Geração de Contratos — nunca por cron. Escreve em `contratos` e no
+# Drive do escritório: o JWT é exigido no portão.
+[functions.gerar-contrato]
+verify_jwt = true

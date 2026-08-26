@@ -108,6 +108,11 @@ export const TIPO_CONTRATO: Record<string, LabelDef> = {
   cessao: { label: 'Cessão', tone: 'blue' },
   investimento: { label: 'Investimento', tone: 'purple' },
   outro: { label: 'Outro', tone: 'gray' },
+  cessao_credito: { label: 'Cessão de crédito', tone: 'blue' },
+  cessao_honorarios_contratuais: { label: 'Cessão de honorários contratuais', tone: 'blue' },
+  cessao_honorarios_sucumbenciais: { label: 'Cessão de honorários sucumbenciais', tone: 'blue' },
+  intermediacao: { label: 'Intermediação', tone: 'purple' },
+  procuracao: { label: 'Procuração', tone: 'gray' },
 }
 
 export const STATUS_CONTRATO: Record<string, LabelDef> = {
