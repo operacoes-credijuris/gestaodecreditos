@@ -40,11 +40,18 @@ export default function App() {
         <Route path="/inteligencia/performance" element={<InteligenciaPerformance />} />
         <Route path="/inteligencia/previsoes" element={<InteligenciaPrevisoes />} />
         <Route path="/inteligencia/recortes" element={<InteligenciaRecortes />} />
+        {/* Saiu do Comercial: é relatório econômico por investidor, e consome o
+            mesmo núcleo de cálculo das demais telas de Inteligência. */}
+        <Route path="/inteligencia/carteiras" element={<CarteirasInvestidores />} />
         <Route path="/inteligencia/anomalias" element={<InteligenciaAnomalias />} />
 
         {/* Comercial */}
         <Route path="/comercial/contratos" element={<GeracaoContratos />} />
-        <Route path="/comercial/carteiras" element={<CarteirasInvestidores />} />
+        {/* Rota antiga preservada: links salvos continuam funcionando. */}
+        <Route
+          path="/comercial/carteiras"
+          element={<Navigate to="/inteligencia/carteiras" replace />}
+        />
         <Route
           path="/comercial/dados-pessoais"
           element={<DadosPessoaisBancarios />}
