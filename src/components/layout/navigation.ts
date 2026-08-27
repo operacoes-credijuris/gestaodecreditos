@@ -32,10 +32,14 @@ export interface NavSection {
 
 // Hierarquia exatamente conforme o escopo:
 // Gestão Estratégica (topo) > Comercial > Operacional (com Execução Processual)
-// > Inteligência Econômica > Configurações
+// > Quadro Econômico > Configurações
 //
-// Inteligência Econômica fica por ÚLTIMO entre os setores porque não é um setor:
-// é a leitura do que os outros três produziram. Vem depois do trabalho, não antes.
+// Quadro Econômico fica por ÚLTIMO entre os setores porque não é um setor: é a
+// leitura do que os outros três produziram. Vem depois do trabalho, não antes.
+//
+// O nome é deliberado. "Quadro" é palavra de observação: o módulo retrata a
+// carteira com os dados que existem e diz quando não dá para concluir. Não
+// aponta caminho, não decide, não prevê o andamento do processo.
 export const NAVIGATION: NavSection[] = [
   {
     title: null,
@@ -53,7 +57,7 @@ export const NAVIGATION: NavSection[] = [
     // contratos fica por último, porque é o passo que CONSOME o anterior
     // (não se gera contrato de quem ainda não tem ficha).
     items: [
-      // Carteiras de Investimento saiu daqui para Inteligência Econômica: não é
+      // Carteiras de Investimento saiu daqui para o Quadro Econômico: não é
       // cadastro nem venda, é relatório econômico por investidor.
       {
         label: 'Dados cadastrais',
@@ -98,7 +102,7 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
   {
-    title: 'Inteligência Econômica',
+    title: 'Quadro Econômico',
     items: [
       { label: 'Visão Geral', to: '/inteligencia', icon: Brain },
       { label: 'Performance', to: '/inteligencia/performance', icon: Gauge },
