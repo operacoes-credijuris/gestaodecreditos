@@ -1,4 +1,4 @@
-// Inteligência Econômica — Visão Geral.
+// Quadro Econômico — Visão Geral.
 //
 // A tela responde "como a carteira está performando economicamente?" sem
 // obrigar o usuário a saber qual pergunta fazer. Por isso os insights ficam
@@ -29,7 +29,7 @@ export default function VisaoGeral() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Inteligência Econômica"
+        title="Quadro Econômico"
         description={
           `${painel.operacoes.length} operações · ${carteira.n} encerradas de fato · ` +
           `parâmetros de correção com data-base ${formatDate(painel.parametrosEm)}`
