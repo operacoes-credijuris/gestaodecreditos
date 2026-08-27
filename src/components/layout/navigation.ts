@@ -49,13 +49,12 @@ export const NAVIGATION: NavSection[] = [
   },
   {
     title: 'Comercial',
-    // ORDEM = a do trabalho: a carteira e o cadastro das pessoas vêm antes, e a
-    // geração de contratos fica por último, porque é o passo que CONSOME o que os
-    // dois anteriores produziram (não se gera contrato de quem ainda não tem ficha).
+    // ORDEM = a do trabalho: o cadastro das pessoas vem antes e a geração de
+    // contratos fica por último, porque é o passo que CONSOME o anterior
+    // (não se gera contrato de quem ainda não tem ficha).
     items: [
-      { label: 'Carteiras de Investimento', to: '/comercial/carteiras', icon: Wallet },
-      // Era a terceira aba das Carteiras. Virou item próprio, logo abaixo dela,
-      // porque não é carteira — e passou a cobrir investidores E originadores.
+      // Carteiras de Investimento saiu daqui para Inteligência Econômica: não é
+      // cadastro nem venda, é relatório econômico por investidor.
       {
         label: 'Dados cadastrais',
         to: '/comercial/dados-pessoais',
@@ -105,6 +104,9 @@ export const NAVIGATION: NavSection[] = [
       { label: 'Performance', to: '/inteligencia/performance', icon: Gauge },
       { label: 'Previsões', to: '/inteligencia/previsoes', icon: CalendarClock },
       { label: 'Recortes', to: '/inteligencia/recortes', icon: PieChart },
+      // Logo depois de Recortes de propósito: Recortes COMPARA investidores em
+      // agregado, esta tela ABRE um investidor. É o mesmo corte, em profundidade.
+      { label: 'Carteiras de Investimento', to: '/inteligencia/carteiras', icon: Wallet },
       { label: 'Revisão de Dados', to: '/inteligencia/anomalias', icon: ShieldAlert },
     ],
   },
