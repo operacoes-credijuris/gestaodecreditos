@@ -429,7 +429,7 @@ const FERRAMENTAS: Anthropic.Tool[] = [
       'cadastro. Não confunda com `resumo_financeiro_creditos`, que dá SOMAS; ' +
       'esta dá DESEMPENHO — quanto rendeu, em quanto tempo, com que dispersão e ' +
       'com quanta base estatística. Os números saem da mesma camada de cálculo ' +
-      'das telas de Inteligência Econômica; não refaça conta sobre eles.',
+      'das telas do Quadro Econômico; não refaça conta sobre eles.',
     input_schema: { type: 'object', properties: {} },
   },
   {
