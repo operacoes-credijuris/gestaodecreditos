@@ -14,7 +14,6 @@ import {
   Gauge,
   CalendarClock,
   PieChart,
-  ShieldAlert,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -111,7 +110,6 @@ export const NAVIGATION: NavSection[] = [
       // Logo depois de Recortes de propósito: Recortes COMPARA investidores em
       // agregado, esta tela ABRE um investidor. É o mesmo corte, em profundidade.
       { label: 'Carteiras de Investimento', to: '/inteligencia/carteiras', icon: Wallet },
-      { label: 'Revisão de Dados', to: '/inteligencia/anomalias', icon: ShieldAlert },
     ],
   },
 ]
