@@ -102,14 +102,15 @@ export const NAVIGATION: NavSection[] = [
   },
   {
     title: 'Quadro Econômico',
+    // ORDEM ALFABÉTICA, ao contrário das outras seções, que seguem a ordem do
+    // trabalho. Aqui não há sequência: são cinco leituras independentes da
+    // mesma carteira, e quem procura uma delas procura pelo nome.
     items: [
-      { label: 'Visão Geral', to: '/inteligencia', icon: Brain },
+      { label: 'Carteiras de Investimento', to: '/inteligencia/carteiras', icon: Wallet },
       { label: 'Performance', to: '/inteligencia/performance', icon: Gauge },
       { label: 'Previsões', to: '/inteligencia/previsoes', icon: CalendarClock },
       { label: 'Recortes', to: '/inteligencia/recortes', icon: PieChart },
-      // Logo depois de Recortes de propósito: Recortes COMPARA investidores em
-      // agregado, esta tela ABRE um investidor. É o mesmo corte, em profundidade.
-      { label: 'Carteiras de Investimento', to: '/inteligencia/carteiras', icon: Wallet },
+      { label: 'Visão Geral', to: '/inteligencia', icon: Brain },
     ],
   },
 ]
@@ -120,20 +121,52 @@ export const NAV_CONFIG: NavLeaf = {
   icon: Settings,
 }
 
-/** Resolve a rota atual para (seção, página) — usado por breadcrumb e title. */
+/**
+ * Resolve a rota atual para (seção, página) — usado por breadcrumb e title.
+ *
+ * Vence o caminho MAIS ESPECÍFICO, não o primeiro que casa. A diferença não é
+ * teórica: `/inteligencia` é prefixo de `/inteligencia/performance`, e enquanto
+ * a busca devolvia o primeiro casamento, o cabeçalho e o título da aba diziam
+ * "Visão Geral" em todas as quatro subtelas do Quadro Econômico.
+ *
+ * Ordenar o menu resolveria por tabela, mas deixaria a correção do cabeçalho
+ * dependendo da ordem dos itens — qualquer reordenação futura traria o defeito
+ * de volta, e em silêncio. Escolher o mais longo é indiferente à ordem.
+ */
 export function findNavLocation(pathname: string): {
   section: string | null
   leaf: NavLeaf
 } | null {
-  for (const section of NAVIGATION) {
-    for (const leaf of section.items) {
-      if (pathname === leaf.to || pathname.startsWith(`${leaf.to}/`)) {
-        return { section: section.title, leaf }
-      }
-    }
-  }
-  if (pathname.startsWith(NAV_CONFIG.to)) {
+  const achado = resolverNav(NAVIGATION, pathname)
+  if (achado) return achado
+  if (pathname === NAV_CONFIG.to || pathname.startsWith(`${NAV_CONFIG.to}/`)) {
     return { section: null, leaf: NAV_CONFIG }
   }
   return null
+}
+
+/**
+ * O casamento em si, separado para poder ser testado contra um menu montado
+ * de propósito na pior ordem possível.
+ *
+ * Recebe as seções em vez de ler `NAVIGATION` porque, com o menu já em ordem
+ * alfabética, o defeito original não se manifesta mais — um teste que usasse
+ * o menu real passaria mesmo com a lógica errada de volta, e foi exatamente
+ * o que aconteceu na primeira tentativa de escrever esse teste.
+ */
+export function resolverNav(
+  secoes: readonly NavSection[],
+  pathname: string,
+): { section: string | null; leaf: NavLeaf } | null {
+  let melhor: { section: string | null; leaf: NavLeaf } | null = null
+  for (const section of secoes) {
+    for (const leaf of section.items) {
+      if (pathname === leaf.to || pathname.startsWith(`${leaf.to}/`)) {
+        if (!melhor || leaf.to.length > melhor.leaf.to.length) {
+          melhor = { section: section.title, leaf }
+        }
+      }
+    }
+  }
+  return melhor
 }
