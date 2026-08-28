@@ -195,19 +195,14 @@ export function gerarInsights(e: EntradaInsights): Insight[] {
     })
   }
 
-  // ---- 9. Inconsistências ----
-  const graves = e.anomalias.achados.filter((a) => a.gravidade === 'alta')
-  if (graves.length) {
-    add({
-      chave: 'anomalias',
-      tom: 'atencao',
-      prioridade: 9,
-      texto:
-        `${e.anomalias.operacoesComAchado} ${e.anomalias.operacoesComAchado === 1 ? 'operação aparece' : 'operações aparecem'} ` +
-        `na lista de revisão, sendo ${graves.length} ${graves.length === 1 ? 'tipo' : 'tipos'} de achado de gravidade alta.`,
-      base: graves.map((a) => a.titulo).join('; ') + '. Nenhum dado foi alterado.',
-    })
-  }
+  // ---- 9. (removido) Inconsistências ----
+  //
+  // O insight apontava para a tela de Revisão de Dados, que foi retirada do
+  // produto em 28/08/2026 a pedido do cliente. Insight que manda o usuário
+  // para uma tela que não existe é pior que insight nenhum.
+  //
+  // `e.anomalias` segue na entrada: a detecção continua correta e barata, e
+  // volta a ser útil se algum dia a revisão de dados voltar em outro formato.
 
   // ---- 10. Complementar: por que a carteira não é o que parece ----
   const parciais = e.operacoes.filter((o) => o.status === 'complementar')
