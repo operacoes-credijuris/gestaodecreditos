@@ -33,7 +33,7 @@ export default function VisaoGeral() {
   const parciais = painel.operacoes.filter((o) => o.status === 'complementar').length
   const semCapital = painel.operacoes.length - painel.operacoesComCapital
 
-    // As parcelas do "a receber" são LIDAS do forecast, não escritas à mão.
+  // As parcelas do "a receber" são LIDAS do forecast, não escritas à mão.
   //
   // A versão anterior listava os quatro blocos possíveis como se todos
   // existissem sempre. Na carteira real pode não haver operação em aberto sem
@@ -43,6 +43,7 @@ export default function VisaoGeral() {
     ...(forecast.totalFuturo > 0 ? ['operações em aberto com data prevista à frente'] : []),
     ...forecast.blocos.map((b) => b.rotulo.toLowerCase()),
   ]
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -82,7 +83,7 @@ export default function VisaoGeral() {
           to="/inteligencia/previsoes"
           icon={<CalendarClock className="h-5 w-5" />}
           hint={
-                        (parcelas.length
+            (parcelas.length
               ? `Tudo que a carteira ainda tem a receber, somando: ${parcelas.join(' + ')}. `
               : 'Nada a receber projetado no momento. ') +
             'É valor projetado, corrigido pelo índice de cada crédito.'
