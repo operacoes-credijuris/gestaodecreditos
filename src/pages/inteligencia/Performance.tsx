@@ -1,8 +1,14 @@
-// Inteligência Econômica — Performance das operações encerradas.
+// Quadro Econômico — Performance das operações encerradas.
 //
-// Uma regra visual manda nesta tela: a TIR NUNCA aparece sem o prazo ao lado.
-// Uma taxa de 40.426% ao ano é correta para um crédito liquidado em 12 dias e
-// desinformação sem o "12 dias" na mesma linha.
+// Duas regras visuais mandam nesta tela:
+//
+//   1. A TIR NUNCA aparece sem o prazo ao lado. Uma taxa de 40.426% ao ano é
+//      correta para um crédito liquidado em 12 dias e desinformação sem o
+//      "12 dias" na mesma linha.
+//
+//   2. Nenhum rótulo estatístico aparece cru. "p25 – p75" e "intervalo de
+//      confiança da mediana" são corretos e ilegíveis; quem lê a tela quer
+//      saber o que o número significa para a carteira, não o nome dele.
 
 import { useState } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -10,13 +16,39 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { Segmented } from '@/components/ui/Segmented'
 import { Badge } from '@/components/ui/Badge'
 import { Table, THead, TH, TBody, TR, TD, EmptyState, ErrorState } from '@/components/ui/Table'
-import { formatDate } from '@/lib/format'
+import { formatDate, formatCNJ } from '@/lib/format'
 import {
   usePainel, CarregandoPainel, Ressalva, LinhaMetrica, SeloAmostra, Explicacao,
   pct, brl, dias, EXPLICA,
 } from './compartilhado'
 
 type Visao = 'todas' | 'extremos'
+
+/** Explicações desta tela. Ficam aqui porque são específicas dela. */
+const DIZ = {
+  metadeCentral:
+    'Descarta o quarto pior e o quarto melhor. A metade do meio das operações ficou ' +
+    'dentro desta faixa. É a forma de mostrar dispersão sem que um caso extremo ' +
+    'estique a régua.',
+  piorMelhor:
+    'São duas operações reais da carteira, não estimativas. Na tabela abaixo, ordenada ' +
+    'por rentabilidade, a melhor é a primeira linha e a pior é a última.',
+  faixaMediana:
+    'A mediana foi medida nas operações encerradas até hoje, que são uma amostra. Esta ' +
+    'é a faixa onde a mediana verdadeira da carteira deve estar, com 95% de confiança. ' +
+    'Quanto menos operações encerradas, mais larga a faixa. Os dois limites também são ' +
+    'operações reais da carteira.',
+  metadeCentralPrazo:
+    'Descarta o quarto mais rápido e o quarto mais demorado. Metade das operações levou ' +
+    'um prazo dentro desta faixa.',
+  extremoSubconjunto:
+    'Não são operações a mais: já estão contadas no total. São as que ficaram fora do ' +
+    'intervalo interquartil ampliado da taxa ANUALIZADA — quase sempre por prazo muito ' +
+    'curto, não por ganho excepcional. Ficam marcadas e nunca removidas de nenhum cálculo.',
+  processo:
+    'Número do processo no padrão CNJ. Quando o crédito não tem CNJ cadastrado, aparece ' +
+    'o identificador interno do registro.',
+} as const
 
 export default function Performance() {
   const { painel, carregando, erro } = usePainel()
@@ -35,46 +67,84 @@ export default function Performance() {
     <div className="space-y-6">
       <PageHeader
         title="Performance"
-        description="Somente operações encerradas de fato. As de realização parcial ficam fora — o resultado final delas ainda não é conhecido."
+        description={
+          `${carteira.n} operações encerradas — status encerrado, com data de aquisição, ` +
+          'data de liquidação, capital investido e valor recebido preenchidos. As de ' +
+          'realização parcial (aguardando complementar) ficam de fora: o resultado final ' +
+          'delas ainda não é conhecido.'
+        }
       />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>
-          <CardHeader title="Rentabilidade total" />
+          <CardHeader
+            title="Rentabilidade total"
+            description="Quanto o capital rendeu, sem considerar o prazo."
+          />
           <CardBody>
             <LinhaMetrica rotulo="Mediana" valor={pct(carteira.retorno.mediana)} explicacao={EXPLICA.mediana} destaque />
             <LinhaMetrica rotulo="Média" valor={pct(carteira.retorno.media)} explicacao={EXPLICA.media} />
             <LinhaMetrica rotulo="Ponderada pelo capital" valor={pct(carteira.retornoPonderado)} explicacao={EXPLICA.ponderada} destaque />
-            <LinhaMetrica rotulo="p25 – p75" valor={`${pct(carteira.retorno.p25)} – ${pct(carteira.retorno.p75)}`} explicacao={EXPLICA.iqr} />
-            <LinhaMetrica rotulo="Mínimo – máximo" valor={`${pct(carteira.retorno.minimo)} – ${pct(carteira.retorno.maximo)}`} />
+            <LinhaMetrica
+              rotulo="Metade central das operações"
+              valor={`${pct(carteira.retorno.p25)} – ${pct(carteira.retorno.p75)}`}
+              explicacao={DIZ.metadeCentral}
+            />
+            <LinhaMetrica
+              rotulo="Pior – melhor operação"
+              valor={`${pct(carteira.retorno.minimo)} – ${pct(carteira.retorno.maximo)}`}
+              explicacao={DIZ.piorMelhor}
+            />
             {carteira.retornoIC && (
               <LinhaMetrica
-                rotulo="Intervalo de 95% da mediana"
+                rotulo="Onde a mediana verdadeira deve estar"
                 valor={`${pct(carteira.retornoIC.inferior)} – ${pct(carteira.retornoIC.superior)}`}
-                explicacao={EXPLICA.ic}
+                explicacao={DIZ.faixaMediana}
               />
             )}
           </CardBody>
         </Card>
 
         <Card>
-          <CardHeader title="Rentabilidade anualizada" />
+          <CardHeader
+            title="Rentabilidade anualizada"
+            description="A mesma rentabilidade convertida para taxa ao ano, considerando o prazo."
+          />
           <CardBody>
             <LinhaMetrica rotulo="Mediana" valor={pct(carteira.tir.mediana)} explicacao={EXPLICA.tir} destaque />
             <LinhaMetrica rotulo="Média" valor={pct(carteira.tir.media, 0)} explicacao={EXPLICA.media} />
-            <LinhaMetrica rotulo="p25 – p75" valor={`${pct(carteira.tir.p25)} – ${pct(carteira.tir.p75)}`} />
-            <LinhaMetrica rotulo="Máximo" valor={pct(carteira.tir.maximo, 0)} />
-            <LinhaMetrica rotulo="Marcadas como extremo" valor={carteira.extremosTir.length} explicacao={EXPLICA.extremos} />
+            <LinhaMetrica
+              rotulo="Metade central das operações"
+              valor={`${pct(carteira.tir.p25)} – ${pct(carteira.tir.p75)}`}
+              explicacao={DIZ.metadeCentral}
+            />
+            <LinhaMetrica rotulo="Maior taxa observada" valor={pct(carteira.tir.maximo, 0)} />
+            <LinhaMetrica
+              rotulo="Marcadas como extremo"
+              valor={`${carteira.extremosTir.length} das ${carteira.n}`}
+              explicacao={DIZ.extremoSubconjunto}
+            />
           </CardBody>
         </Card>
 
         <Card>
-          <CardHeader title="Prazo" />
+          <CardHeader
+            title="Prazo"
+            description="Dias entre a compra do crédito e o pagamento efetivo."
+          />
           <CardBody>
             <LinhaMetrica rotulo="Mediano" valor={dias(carteira.prazo.mediana)} destaque />
-            <LinhaMetrica rotulo="Médio" valor={dias(carteira.prazo.media)} />
-            <LinhaMetrica rotulo="p25 – p75" valor={`${dias(carteira.prazo.p25)} – ${dias(carteira.prazo.p75)}`} />
-            <LinhaMetrica rotulo="Mínimo – máximo" valor={`${dias(carteira.prazo.minimo)} – ${dias(carteira.prazo.maximo)}`} />
+            <LinhaMetrica rotulo="Médio" valor={dias(carteira.prazo.media)} explicacao={EXPLICA.media} />
+            <LinhaMetrica
+              rotulo="Metade central das operações"
+              valor={`${dias(carteira.prazo.p25)} – ${dias(carteira.prazo.p75)}`}
+              explicacao={DIZ.metadeCentralPrazo}
+            />
+            <LinhaMetrica
+              rotulo="Mais rápida – mais demorada"
+              valor={`${dias(carteira.prazo.minimo)} – ${dias(carteira.prazo.maximo)}`}
+              explicacao={DIZ.piorMelhor}
+            />
           </CardBody>
         </Card>
       </div>
@@ -93,7 +163,7 @@ export default function Performance() {
       <Card>
         <CardHeader
           title="Operações encerradas"
-          description="Ordenadas por rentabilidade total."
+          description="Ordenadas da maior para a menor rentabilidade. A primeira linha é a melhor operação da carteira e a última é a pior."
           action={
             <div className="flex items-center gap-3">
               <SeloAmostra
@@ -108,13 +178,24 @@ export default function Performance() {
                 onChange={(v) => setVisao(v as Visao)}
                 items={[
                   { key: 'todas', label: 'Todas', count: encerradas.length },
-                  { key: 'extremos', label: 'Extremos', count: carteira.extremosTir.length },
+                  { key: 'extremos', label: 'Só os extremos', count: carteira.extremosTir.length },
                 ]}
               />
             </div>
           }
         />
         <CardBody>
+          {visao === 'extremos' && (
+            <div className="mb-3">
+              <Ressalva>
+                Estas <strong>{carteira.extremosTir.length}</strong> operações{' '}
+                <strong>já estão contadas</strong> nas {carteira.n} do total — não são um grupo
+                à parte. Foram marcadas pela taxa <em>anualizada</em>, quase sempre por prazo
+                muito curto, e continuam dentro de todos os cálculos.
+              </Ressalva>
+            </div>
+          )}
+
           {lista.length === 0 ? (
             <EmptyState
               title="Nenhuma operação encerrada"
@@ -123,7 +204,9 @@ export default function Performance() {
           ) : (
             <Table dense>
               <THead>
-                <TH>Ref.</TH>
+                <TH>
+                  <Explicacao texto={DIZ.processo}>Processo</Explicacao>
+                </TH>
                 <TH>Tribunal</TH>
                 <TH>Aquisição</TH>
                 <TH>Liquidação</TH>
@@ -139,7 +222,9 @@ export default function Performance() {
               <TBody>
                 {lista.map((o) => (
                   <TR key={o.ref}>
-                    <TD className="font-mono text-xs text-slate-500">{o.ref}</TD>
+                    <TD className="whitespace-nowrap font-mono text-xs text-slate-600">
+                      {o.numeroCnj ? formatCNJ(o.numeroCnj) : o.ref}
+                    </TD>
                     <TD>{o.tribunal ?? '—'}</TD>
                     <TD>{formatDate(o.dataAquisicao)}</TD>
                     <TD>{formatDate(o.dataLiquidacao)}</TD>
