@@ -172,6 +172,10 @@ export function montarPainel(
     operacoes,
     (o) => (o.investidor ? normalizarNome(o.investidor) : null),
     '(sem investidor)',
+    // A chave agrupa; o rótulo exibe. `normalizarNome` tira acento e baixa a
+    // caixa — é chave primária de investidor_dados e não pode mudar —, então
+    // a grafia original vem por aqui.
+    (o) => o.investidor,
   )
   const forecast = forecastNominal(operacoes, hoje)
   const aderencia = aderenciaPrevisao(operacoes)
