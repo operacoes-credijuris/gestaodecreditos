@@ -425,8 +425,7 @@ const FERRAMENTAS: Anthropic.Tool[] = [
     description:
       'PERFORMANCE da carteira: rentabilidade (mediana, média e ponderada pelo ' +
       'capital), rentabilidade anualizada, prazos, forecast de recebimentos por ' +
-      'mês, previsões vencidas, aderência das previsões e inconsistências de ' +
-      'cadastro. Não confunda com `resumo_financeiro_creditos`, que dá SOMAS; ' +
+      'mês e previsões vencidas. Não confunda com `resumo_financeiro_creditos`, que dá SOMAS; ' +
       'esta dá DESEMPENHO — quanto rendeu, em quanto tempo, com que dispersão e ' +
       'com quanta base estatística. Os números saem da mesma camada de cálculo ' +
       'das telas do Quadro Econômico; não refaça conta sobre eles.',
@@ -435,10 +434,10 @@ const FERRAMENTAS: Anthropic.Tool[] = [
   {
     name: 'recorte_economico',
     description:
-      'Desempenho econômico agrupado por tribunal, ente devedor, investidor, ' +
-      'faixa de valor ou safra de aquisição. Cada grupo vem com o tamanho da ' +
-      'amostra e a classe de representatividade, que diz se há base para ' +
-      'comparar. Respeite essa classificação: grupo marcado com ' +
+      'Dinheiro e desempenho agrupados por tribunal, ente devedor ou investidor. ' +
+      'Cada grupo traz quanto já investiu, quanto já recebeu e quanto falta ' +
+      'receber, mais a rentabilidade das operações encerradas dele. Vem também ' +
+      'o tamanho da amostra e a classe de representatividade: grupo marcado com ' +
       '`pode_comparar: false` NÃO pode ser comparado com outro nem chamado de ' +
       'melhor ou pior.',
     input_schema: {
@@ -446,7 +445,7 @@ const FERRAMENTAS: Anthropic.Tool[] = [
       properties: {
         dimensao: {
           type: 'string',
-          enum: ['tribunal', 'ente', 'investidor', 'faixa_valor', 'safra'],
+          enum: ['tribunal', 'ente', 'investidor'],
           description: 'Como agrupar as operações.',
         },
       },
@@ -457,6 +456,41 @@ const FERRAMENTAS: Anthropic.Tool[] = [
 /** Fração -> pontos percentuais. Null continua null. */
 function pctOuNulo(f: number | null | undefined): number | null {
   return typeof f === 'number' && Number.isFinite(f) ? Math.round(f * 10000) / 100 : null
+}
+
+/** Colunas que `montarPainel` exige. Nada além delas. */
+const COLUNAS_PAINEL =
+  'id, numero_cnj, tribunal, entidade_devedora, cessionario, status, ' +
+  'data_aquisicao, data_referencia, expectativa_liquidacao, data_liquidacao, ' +
+  'capital_investido, valor_face, ja_recebido, valor_estimado_complementar, ' +
+  'indice_atualizacao'
+
+/**
+ * Monta o painel econômico com a MESMA função que as telas usam.
+ *
+ * É o que impede o assistente de divergir da tela: não há segunda conta em
+ * lugar nenhum. Se o número mudar em `_shared/nucleo`, muda nos dois.
+ */
+async function carregarPainel(
+  svc: SupabaseClient,
+): Promise<{ painel: ReturnType<typeof montarPainel> } | { erro: string }> {
+  const [creditos, parametros] = await Promise.all([
+    svc.from('processos').select(COLUNAS_PAINEL),
+    svc
+      .from('parametros_atualizacao')
+      .select('selic_aa, ipca_12m_aa, data_referencia')
+      .eq('id', 1)
+      .maybeSingle(),
+  ])
+  if (creditos.error) return { erro: creditos.error.message }
+  const hoje = new Date().toISOString().slice(0, 10)
+  return {
+    painel: montarPainel(
+      (creditos.data ?? []) as unknown as CreditoBruto[],
+      (parametros.data ?? undefined) as Parameters<typeof montarPainel>[1],
+      hoje,
+    ),
+  }
 }
 
 function limite(valor: unknown): number {
@@ -1240,6 +1274,113 @@ async function executar(
             sem_resumo_porque: r ? (r.erro ?? undefined) : 'ainda não foi gerado',
           }
         }),
+      })
+    }
+
+    // ---- Quadro Econômico ------------------------------------------------
+    //
+    // ATENÇÃO: estes dois `case` já sumiram uma vez, num rebase, e ficaram
+    // meses declarados ao modelo sem executor nenhum — o modelo chamava e
+    // recebia "Ferramenta desconhecida". `deno check` e os testes passam
+    // assim mesmo, porque import não usado e `case` faltando são TypeScript
+    // válido. Se for mexer neste arquivo, confirme que `montarPainel`
+    // continua sendo CHAMADO, e não só importado.
+    case 'panorama_economico': {
+      const r = await carregarPainel(svc)
+      if ('erro' in r) return JSON.stringify(r)
+      const { painel } = r
+      const c = painel.carteira
+      const vencidas = painel.forecast.blocos.find((b) => b.rotulo === 'Previsão vencida')
+      return JSON.stringify({
+        base_de_calculo: {
+          operacoes_na_carteira: painel.operacoes.length,
+          encerradas_consideradas: c.n,
+          regra:
+            'Performance só sobre operações com status encerrado E data de aquisição, ' +
+            'data de liquidação, capital e valor recebido preenchidos. As de realização ' +
+            'parcial (aguardando complementar) ficam de fora: o resultado final delas ' +
+            'ainda não é conhecido.',
+          classe_da_amostra: c.representatividade.classe,
+          pode_concluir: c.representatividade.permiteInsight,
+          parametros_data_base: painel.parametrosEm,
+        },
+        capital: {
+          investido_carteira_inteira: painel.capitalTotalInvestido,
+          investido_nas_encerradas: c.capitalInvestido,
+          recebido_nas_encerradas: c.valorRecebido,
+          ganho_nominal_nas_encerradas: c.ganhoNominal,
+        },
+        rentabilidade_pct: {
+          do_investidor_ponderada: pctOuNulo(c.retornoPonderado),
+          mediana: pctOuNulo(c.retorno.mediana),
+          media: pctOuNulo(c.retorno.media),
+          anualizada_mediana: pctOuNulo(c.tir.mediana),
+          anualizada_media: pctOuNulo(c.tir.media),
+          aviso:
+            'A taxa da Credijuris já está embutida no capital investido, então estes ' +
+            'números são o que ficou para o INVESTIDOR. A média anualizada é inflada ' +
+            'por operações de prazo muito curto — use a mediana e a ponderada.',
+          operacoes_marcadas_como_extremo: c.extremosTir.length,
+        },
+        prazo_dias: {
+          mediano: c.prazo.mediana,
+          medio: c.prazo.media,
+          mais_rapida: c.prazo.minimo,
+          mais_demorada: c.prazo.maximo,
+        },
+        a_receber: {
+          total: painel.forecast.totalGeral,
+          com_mes_definido: painel.forecast.totalFuturo,
+          em_previsao_vencida: vencidas?.valor ?? 0,
+          fracao_vencida_pct: pctOuNulo(painel.forecast.fracaoVencida),
+          blocos_sem_mes: painel.forecast.blocos.map((b) => ({
+            rotulo: b.rotulo,
+            valor: b.valor,
+            operacoes: b.operacoes,
+          })),
+          proximos_meses: painel.forecast.meses.slice(0, 12).map((m) => ({
+            mes: m.mes,
+            valor: m.valor,
+            operacoes: m.operacoes,
+          })),
+        },
+        concentracao: painel.concentracao,
+        leituras: painel.insights.map((i) => ({ texto: i.texto, base: i.base })),
+      })
+    }
+
+    case 'recorte_economico': {
+      const r = await carregarPainel(svc)
+      if ('erro' in r) return JSON.stringify(r)
+      const { painel } = r
+      const dim = String(args.dimensao ?? 'tribunal')
+      const grupos =
+        dim === 'ente' ? painel.porEnte
+        : dim === 'investidor' ? painel.porInvestidor
+        : painel.porTribunal
+      return JSON.stringify({
+        dimensao: dim,
+        aviso:
+          'Já investiu, já recebeu e falta receber contam TODAS as operações do grupo, ' +
+          'em qualquer status. A rentabilidade conta só as encerradas — por isso o `n` ' +
+          'de cada grupo vem junto.',
+        grupos: grupos.map((g) => ({
+          nome: g.rotulo,
+          operacoes: g.total,
+          encerradas: g.n,
+          ja_investiu: g.capitalTotal,
+          ja_recebeu: g.recebidoTotal,
+          falta_receber: g.aReceber,
+          rentabilidade_ponderada_pct: pctOuNulo(g.retornoPonderado),
+          rentabilidade_mediana_pct: pctOuNulo(g.retorno.mediana),
+          anualizada_mediana_pct: pctOuNulo(g.tir.mediana),
+          prazo_mediano_dias: g.prazo.mediana,
+          amostra: {
+            n: g.n,
+            classe: g.representatividade.classe,
+            pode_comparar: g.representatividade.permiteComparacao,
+          },
+        })),
       })
     }
 
