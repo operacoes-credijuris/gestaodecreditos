@@ -21,8 +21,8 @@ import { CHART } from '@/lib/chartColors'
 import { formatBRL, formatCNJ, formatDate } from '@/lib/format'
 import type { OperacaoAnalitica } from '../../../supabase/functions/_shared/nucleo/tipos.ts'
 import {
-  usePainel, CarregandoPainel, Ressalva, LinhaMetrica, SeloAmostra,
-  pct, brl, dias, EXPLICA,
+  usePainel, CarregandoPainel, LinhaMetrica, SeloAmostra,
+  brl, dias, EXPLICA,
 } from './compartilhado'
 
 function rotuloMes(iso: string): string {
@@ -137,11 +137,20 @@ export default function Previsoes() {
   // forecast.incalculaveis e não é recalculado aqui.
   const incalculaveis = painel.operacoes.filter((o) => !o.dataLiquidacao && o.valor === null)
 
+  // A descrição da página nomeia os blocos que EXISTEM, em vez de prometer
+  // categorias que a carteira pode não ter. A versão anterior falava em "o que
+  // não tem data atribuível" numa carteira em que toda operação tem data.
+  const parcelasSemMes = forecast.blocos.map((b) => b.rotulo.toLowerCase()).join(' e ')
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Previsões e recebimentos"
-        description="Valor nominal previsto por mês, mais o que não tem data atribuível."
+        description={
+          forecast.blocos.length
+            ? `Valor nominal previsto por mês, mais ${parcelasSemMes}.`
+            : 'Valor nominal previsto por mês.'
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -163,14 +172,6 @@ export default function Previsoes() {
           hint="Tudo somado: meses futuros, previsão vencida, sem previsão e complementar."
         />
       </div>
-
-      {forecast.fracaoVencida > 0.2 && (
-        <Ressalva>
-          <strong>{pct(forecast.fracaoVencida)}</strong> de tudo que a carteira tem a receber
-          está em operações cuja data prevista já passou. Enquanto não houver nova estimativa,
-          esse valor não entra em nenhum mês do cronograma de caixa.
-        </Ressalva>
-      )}
 
       <Card>
         <CardHeader
@@ -279,31 +280,30 @@ export default function Previsoes() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader
-          title="Estimativa ajustada pelo histórico"
-          description="Corrige as datas previstas pelo desvio que a carteira historicamente apresenta."
-        />
-        <CardBody>
-          {!ajuste.disponivel ? (
-            <div className="rounded-lg bg-slate-50 px-4 py-6 text-center">
-              <p className="text-sm font-medium text-slate-700">{ajuste.mensagem}</p>
-              <p className="mx-auto mt-2 max-w-xl text-xs text-slate-500">
-                Produzir uma estimativa ajustada com {ajuste.observacoes} observações seria
-                transferir incerteza de um lugar para outro fingindo que virou precisão. O
-                histórico de alterações de previsão começou a ser gravado agora e vai
-                alimentar esta seção conforme as operações forem sendo reprogramadas e pagas.
-              </p>
-            </div>
-          ) : (
-            <>
-              <LinhaMetrica rotulo="Desvio mediano observado" valor={dias(ajuste.desvioMediano)} destaque />
-              <LinhaMetrica rotulo="Percentil 75 do desvio" valor={dias(ajuste.desvioP75)} />
-              <p className="mt-3 text-xs text-slate-500">{ajuste.metodologia}</p>
-            </>
-          )}
-        </CardBody>
-      </Card>
+      {/* A estimativa ajustada só aparece quando existe de fato.
+          Antes havia aqui um card permanente que, sem dados, exibia apenas a
+          explicação de por que não havia dados. Bloco que só se desculpa ocupa
+          espaço e não informa nada.
+
+          Hoje ela nunca aparece, e o motivo não é falta de liquidações: quando
+          uma operação é liquidada, a expectativa_liquidacao não é preservada,
+          então não sobra contra o que comparar a data efetiva. O conserto está
+          em ler a última previsão de public.processos_historico, que o gatilho
+          instalado em 11/08 já grava. Enquanto isso não existir, o card não
+          tem por que ocupar a tela. */}
+      {ajuste.disponivel && (
+        <Card>
+          <CardHeader
+            title="Estimativa ajustada pelo histórico"
+            description="Corrige as datas previstas pelo desvio que a carteira historicamente apresenta."
+          />
+          <CardBody>
+            <LinhaMetrica rotulo="Desvio mediano observado" valor={dias(ajuste.desvioMediano)} destaque />
+            <LinhaMetrica rotulo="Percentil 75 do desvio" valor={dias(ajuste.desvioP75)} />
+            <p className="mt-3 text-xs text-slate-500">{ajuste.metodologia}</p>
+          </CardBody>
+        </Card>
+      )}
 
       {aderencia.n > 0 && (
         <Card>
