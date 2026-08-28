@@ -8,7 +8,6 @@ import InteligenciaVisaoGeral from '@/pages/inteligencia/VisaoGeral'
 import InteligenciaPerformance from '@/pages/inteligencia/Performance'
 import InteligenciaPrevisoes from '@/pages/inteligencia/Previsoes'
 import InteligenciaRecortes from '@/pages/inteligencia/Recortes'
-import InteligenciaAnomalias from '@/pages/inteligencia/Anomalias'
 import GeracaoContratos from '@/pages/comercial/GeracaoContratos'
 import CarteirasInvestidores from '@/pages/comercial/CarteirasInvestidores'
 import DadosPessoaisBancarios from '@/pages/comercial/DadosPessoaisBancarios'
@@ -43,7 +42,6 @@ export default function App() {
         {/* Saiu do Comercial: é relatório econômico por investidor, e consome o
             mesmo núcleo de cálculo das demais telas de Inteligência. */}
         <Route path="/inteligencia/carteiras" element={<CarteirasInvestidores />} />
-        <Route path="/inteligencia/anomalias" element={<InteligenciaAnomalias />} />
 
         {/* Comercial */}
         <Route path="/comercial/contratos" element={<GeracaoContratos />} />
