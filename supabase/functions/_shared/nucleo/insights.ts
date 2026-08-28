@@ -159,34 +159,24 @@ export function gerarInsights(e: EntradaInsights): Insight[] {
     })
   }
 
-  // ---- 7. Safras: só com o alerta de maturidade ----
-  const curvas = e.safras.curvas.filter((c) => c.totalOperacoes >= 6)
-  if (curvas.length >= 2) {
-    const taxas = curvas.map((c) => `${c.safra} está ${pct(c.taxaEncerramento)} encerrada`)
-    const noTeto = curvas.map((c) => ({
-      safra: c.safra,
-      p: [...c.pontos].reverse().find((x) => x.idadeMeses <= e.safras.tetoComparavel),
-    })).filter((x) => x.p)
-    const fracas = e.safras.safrasFracasNoTeto
-    if (noTeto.length >= 2) {
-      add({
-        chave: 'safras',
-        tom: 'metodologico',
-        prioridade: 7,
-        texto:
-          `${taxas.join(' e ')}. Comparar o resultado final das duas favoreceria ` +
-          'artificialmente a mais nova, onde só as operações mais rápidas tiveram tempo de ' +
-          `encerrar. Na mesma idade de ${e.safras.tetoComparavel} meses, ` +
-          noTeto.map((x) => `${x.safra} havia devolvido ${pct(x.p!.fracaoDevolvida)} do capital`).join(' e ') + '.',
-        base:
-          noTeto.map((x) => `${x.safra}: n=${x.p!.nDisponivel}`).join(', ') +
-          (fracas.length
-            ? `. Atenção: ${fracas.join(' e ')} ${fracas.length === 1 ? 'tem' : 'têm'} amostra ` +
-              'insuficiente nessa idade, então o sinal merece acompanhamento e não sustenta conclusão.'
-            : '.'),
-      })
-    }
-  }
+  // ---- 7. (removido) Safras ----
+  //
+  // Havia aqui um insight comparando safras na mesma idade. Foi retirado a
+  // pedido do cliente, em 28/08/2026, e a decisão é boa por dois motivos:
+  //
+  //   · O texto era um parágrafo de metodologia — explicava viés de
+  //     sobrevivência antes de dizer qualquer coisa útil. Insight que precisa
+  //     de aula não é insight.
+  //   · Tinha um defeito real: `safrasFracasNoTeto` não era filtrado pelas
+  //     safras efetivamente citadas, então a ressalva chegava a alertar sobre
+  //     uma safra que a frase nem mencionava (2024 num texto sobre 2025 e 2026).
+  //
+  // A comparação por curva de safra continua existindo em Recortes → Safra,
+  // onde a tabela mostra a maturidade de cada uma ao lado do número. Lá o
+  // contexto é escolhido por quem foi procurar; aqui era empurrado.
+  //
+  // `e.safras` segue na entrada de propósito: o dado continua correto e
+  // disponível caso um insight melhor apareça.
 
   // ---- 8. Recortes sem base, ditos em voz alta (item 7) ----
   const semBase = [...e.porTribunal, ...e.porEnte].filter(
