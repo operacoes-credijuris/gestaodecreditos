@@ -57,6 +57,7 @@ import { IconButton } from '@/components/ui/IconButton'
 import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
 import { DrawerHistorico } from '@/components/Movimentacoes'
+import { FaseProcessual, FaseDrawerSection } from './FaseProcessual'
 import { useToast } from '@/components/ui/Toast'
 import {
   getLabel,
@@ -270,6 +271,9 @@ export default function Processos() {
     () => mesesDepois(hoje, MESES_ALERTA_EXPECTATIVA),
     [hoje],
   )
+
+  // Visão Global (o que já existia) ou Fase Processual (aba nova).
+  const [abaPagina, setAbaPagina] = useState<'global' | 'fase'>('global')
 
   const [busca, setBusca] = useState('')
   // Padrão ao abrir a página: mostra apenas processos ativos.
@@ -642,6 +646,21 @@ export default function Processos() {
         }
       />
 
+      <div className="mb-4">
+        <Tabs
+          items={[
+            { key: 'global', label: 'Visão Global' },
+            { key: 'fase', label: 'Fase Processual' },
+          ]}
+          value={abaPagina}
+          onChange={(k) => setAbaPagina(k as 'global' | 'fase')}
+        />
+      </div>
+
+      {abaPagina === 'fase' ? (
+        <FaseProcessual processos={data ?? []} onAbrirDetalhe={setDetalhe} />
+      ) : (
+        <>
       <Card className="mb-4 p-4">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
@@ -897,6 +916,8 @@ export default function Processos() {
           </Table>
         )}
       </Card>
+        </>
+      )}
 
       <Modal
         open={!!editing}
@@ -1447,6 +1468,8 @@ export default function Processos() {
                 </div>
               )}
             </DrawerSection>
+
+            <FaseDrawerSection processo={detalhe} />
 
             {/* Histórico integral do ADVBOX — SÓ do principal. Andamento de
                 apenso fica na ficha do apenso (clique no card dele): autos

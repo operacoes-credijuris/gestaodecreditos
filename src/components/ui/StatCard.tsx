@@ -11,6 +11,8 @@ export function StatCard({
   hint,
   tone = 'brand',
   to,
+  onClick,
+  active,
 }: {
   label: ReactNode
   value: ReactNode
@@ -19,6 +21,10 @@ export function StatCard({
   tone?: 'brand' | 'green' | 'amber' | 'red' | 'slate'
   /** Rota de destino: torna o card um atalho clicável para a tela do número. */
   to?: string
+  /** Alternativa a `to` para quando o clique filtra em vez de navegar. */
+  onClick?: () => void
+  /** Realce visual de "selecionado" — só faz sentido junto de `onClick`. */
+  active?: boolean
 }) {
   const tones = {
     brand: 'bg-brand-50 text-brand-700',
@@ -27,11 +33,13 @@ export function StatCard({
     red: 'bg-red-50 text-red-700',
     slate: 'bg-slate-100 text-slate-600',
   }
+  const clicavel = !!to || !!onClick
   const card = (
     <Card
       className={cn(
         'h-full p-5',
-        to && 'transition hover:border-brand-300 hover:shadow-md',
+        clicavel && 'transition hover:border-brand-300 hover:shadow-md',
+        active && 'border-brand-400 ring-1 ring-brand-300',
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -56,11 +64,19 @@ export function StatCard({
       </div>
     </Card>
   )
-  return to ? (
-    <Link to={to} className="block h-full">
-      {card}
-    </Link>
-  ) : (
-    card
-  )
+  if (to) {
+    return (
+      <Link to={to} className="block h-full">
+        {card}
+      </Link>
+    )
+  }
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className="block h-full w-full text-left">
+        {card}
+      </button>
+    )
+  }
+  return card
 }

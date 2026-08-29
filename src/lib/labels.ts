@@ -61,6 +61,52 @@ export const INDICE_ATUALIZACAO: Record<string, LabelDef> = {
 }
 
 /**
+ * Fase processual (aba "Fase Processual" de Créditos). Taxonomia fixa,
+ * separada por trilha — ativo/complementar já vem de STATUS_PROCESSO, o
+ * classificador só escolhe a posição dentro da trilha do crédito.
+ *
+ * A ordem dos arrays FASE_ATIVO_ORDEM/FASE_COMPLEMENTAR_ORDEM é a ordem de
+ * exibição dos cards: as posições reais da escada primeiro, "Outros" por
+ * último. Concluso (ATV-07/CMP-09) NÃO entra aqui — é atributo cross-cutting
+ * (processos_fase.conclusao_pendente), não posição, e vira um card à parte na
+ * tela, filtrando por esse booleano em cima de qualquer fase.
+ */
+export const FASE_PROCESSUAL: Record<string, LabelDef> = {
+  'ATV-01': { label: 'Aguardando Homologação', tone: 'blue' },
+  'ATV-02': { label: 'Homologado / Aguardando Período de Graça', tone: 'blue' },
+  // Une o antigo par ATV-03 (pedido protocolado)/ATV-04 (já deferido, aguardando
+  // cumprimento) num só card, por pedido explícito — ver SISTEMA_ATIVO na
+  // Edge Function fase-processual.
+  'ATV-03': { label: 'Sequestro', tone: 'yellow' },
+  'ATV-05': { label: 'Penhora Efetivada', tone: 'orange' },
+  'ATV-06': { label: 'Alvará Expedido / Aguardando Pagamento', tone: 'green' },
+  'ATV-08': { label: 'Outros', tone: 'gray' },
+  'CMP-01': { label: 'RPV Complementar Peticionado', tone: 'blue' },
+  'CMP-02': { label: 'Deferido', tone: 'blue' },
+  'CMP-03': { label: 'Aguardando Cálculos', tone: 'blue' },
+  'CMP-04': { label: 'Aguardando Expedição da RPV', tone: 'blue' },
+  'CMP-05': { label: 'Aguardando Período de Graça', tone: 'blue' },
+  'CMP-06': { label: 'Sequestro', tone: 'yellow' },
+  'CMP-07': { label: 'Penhora', tone: 'yellow' },
+  'CMP-08': { label: 'Alvará Expedido / Aguardando Pagamento', tone: 'green' },
+  'CMP-10': { label: 'Outros', tone: 'gray' },
+}
+
+export const FASE_ATIVO_ORDEM = ['ATV-01', 'ATV-02', 'ATV-03', 'ATV-05', 'ATV-06', 'ATV-08']
+
+export const FASE_COMPLEMENTAR_ORDEM = [
+  'CMP-01',
+  'CMP-02',
+  'CMP-03',
+  'CMP-04',
+  'CMP-05',
+  'CMP-06',
+  'CMP-07',
+  'CMP-08',
+  'CMP-10',
+]
+
+/**
  * Espécie do requisitório. Decide, entre outras coisas, a pasta de topo do Drive
  * onde a petição gerada é salva — daí as chaves seguirem exatamente o check da
  * migração 0032.
