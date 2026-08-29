@@ -1,21 +1,28 @@
-// Inteligência Econômica — Previsões e forecast de recebimentos.
+// Quadro Econômico — Previsões e forecast de recebimentos.
 //
 // O gráfico mostra só o que tem mês. Previsão vencida, operação sem previsão e
 // complementar aparecem em blocos separados, fora do eixo do tempo: espalhar
 // esse dinheiro em meses futuros seria inventar uma data que ninguém estimou.
+//
+// Todo bloco abre a lista dos processos que o compõem. Um bloco que só informa
+// "3 operações" transfere o trabalho para quem lê: para agir sobre ele é
+// preciso saber QUAIS são, e isso não pode depender de rodar SQL no banco.
 
+import { useState, type ReactNode } from 'react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from 'recharts'
+import { ChevronDown } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Table, THead, TH, TBody, TR, TD, EmptyState, ErrorState } from '@/components/ui/Table'
 import { CHART } from '@/lib/chartColors'
-import { formatBRL } from '@/lib/format'
+import { formatBRL, formatCNJ, formatDate } from '@/lib/format'
+import type { OperacaoAnalitica } from '../../../supabase/functions/_shared/nucleo/tipos.ts'
 import {
-  usePainel, CarregandoPainel, Ressalva, LinhaMetrica, SeloAmostra,
-  pct, brl, dias, EXPLICA,
+  usePainel, CarregandoPainel, LinhaMetrica, SeloAmostra,
+  brl, dias, EXPLICA,
 } from './compartilhado'
 
 function rotuloMes(iso: string): string {
@@ -25,8 +32,94 @@ function rotuloMes(iso: string): string {
     .replace('.', '')
 }
 
+/** Chave do bloco de incalculáveis, que não vem do núcleo como os outros. */
+const INCALCULAVEIS = '__incalculaveis__'
+
+/** Número clicável que abre a lista. Sublinhado tracejado = "tem mais aqui". */
+function BotaoVer({
+  aberto, onClick, children,
+}: {
+  aberto: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={aberto}
+      className="rounded font-medium text-brand-700 underline decoration-dotted underline-offset-2 hover:text-brand-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+    >
+      {children}
+      <ChevronDown
+        className={`ml-0.5 inline h-3.5 w-3.5 transition-transform ${aberto ? 'rotate-180' : ''}`}
+        aria-hidden
+      />
+    </button>
+  )
+}
+
+/**
+ * Lista as operações de um bloco, pelo NÚMERO DO PROCESSO.
+ *
+ * Existe porque "3 operações sem data prevista" não é acionável: para tirar uma
+ * operação desse bloco alguém precisa abrir o processo, e para isso precisa
+ * saber qual é. O `ref` (8 caracteres do UUID) não serve para ninguém.
+ */
+function ListaOperacoes({
+  titulo, operacoes, complementar = false, mostrarAtraso = false, motivo = false,
+}: {
+  titulo: string
+  operacoes: readonly OperacaoAnalitica[]
+  complementar?: boolean
+  mostrarAtraso?: boolean
+  motivo?: boolean
+}) {
+  if (operacoes.length === 0) return null
+  return (
+    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+        {titulo} · {operacoes.length}{' '}
+        {operacoes.length === 1 ? 'operação' : 'operações'}
+      </p>
+      <Table dense>
+        <THead>
+          <TH>Processo</TH>
+          <TH>Tribunal</TH>
+          <TH>Ente devedor</TH>
+          <TH>Aquisição</TH>
+          <TH className="text-right">{complementar ? 'Complementar' : 'Valor'}</TH>
+          {mostrarAtraso && <TH className="text-right">Vencida há</TH>}
+          {motivo && <TH>O que falta</TH>}
+        </THead>
+        <TBody>
+          {operacoes.map((o) => (
+            <TR key={o.ref}>
+              <TD className="whitespace-nowrap font-mono text-xs text-slate-600">
+                {o.numeroCnj ? formatCNJ(o.numeroCnj) : o.ref}
+              </TD>
+              <TD>{o.tribunal ?? '—'}</TD>
+              <TD>{o.ente ?? '—'}</TD>
+              <TD>{formatDate(o.dataAquisicao)}</TD>
+              <TD className="text-right tabular-nums">
+                {brl(complementar ? o.valorComplementar : o.valor)}
+              </TD>
+              {mostrarAtraso && (
+                <TD className="text-right tabular-nums">{dias(o.diasVencida)}</TD>
+              )}
+              {motivo && <TD className="text-slate-600">{o.motivoSemValor ?? '—'}</TD>}
+            </TR>
+          ))}
+        </TBody>
+      </Table>
+    </div>
+  )
+}
+
 export default function Previsoes() {
   const { painel, carregando, erro } = usePainel()
+  const [aberto, setAberto] = useState<string | null>(null)
+
   if (carregando) return <CarregandoPainel />
   if (erro || !painel) return <ErrorState message="Não foi possível carregar a carteira." />
 
@@ -34,11 +127,30 @@ export default function Previsoes() {
   const dados = forecast.meses.map((m) => ({ mes: rotuloMes(m.mes), valor: m.valor, n: m.operacoes }))
   const vencidas = forecast.blocos.find((b) => b.rotulo === 'Previsão vencida')
 
+  // Os blocos já trazem os refs; aqui só resolvemos ref -> operação para poder
+  // mostrar o número do processo. Nenhuma conta é refeita.
+  const porRef = new Map(painel.operacoes.map((o) => [o.ref, o]))
+  const blocoAberto = forecast.blocos.find((b) => b.rotulo === aberto) ?? null
+
+  // Mesmo critério do núcleo (forecast.ts): aberta e sem valor projetável.
+  // É filtro de exibição, não cálculo — o total já veio pronto em
+  // forecast.incalculaveis e não é recalculado aqui.
+  const incalculaveis = painel.operacoes.filter((o) => !o.dataLiquidacao && o.valor === null)
+
+  // A descrição da página nomeia os blocos que EXISTEM, em vez de prometer
+  // categorias que a carteira pode não ter. A versão anterior falava em "o que
+  // não tem data atribuível" numa carteira em que toda operação tem data.
+  const parcelasSemMes = forecast.blocos.map((b) => b.rotulo.toLowerCase()).join(' e ')
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Previsões e recebimentos"
-        description="Valor nominal previsto por mês, mais o que não tem data atribuível."
+        description={
+          forecast.blocos.length
+            ? `Valor nominal previsto por mês, mais ${parcelasSemMes}.`
+            : 'Valor nominal previsto por mês.'
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -60,14 +172,6 @@ export default function Previsoes() {
           hint="Tudo somado: meses futuros, previsão vencida, sem previsão e complementar."
         />
       </div>
-
-      {forecast.fracaoVencida > 0.2 && (
-        <Ressalva>
-          <strong>{pct(forecast.fracaoVencida)}</strong> de tudo que a carteira tem a receber
-          está em operações cuja data prevista já passou. Enquanto não houver nova estimativa,
-          esse valor não entra em nenhum mês do cronograma de caixa.
-        </Ressalva>
-      )}
 
       <Card>
         <CardHeader
@@ -115,7 +219,7 @@ export default function Previsoes() {
         <Card>
           <CardHeader
             title="Valores sem mês atribuível"
-            description="Ficam fora do gráfico de propósito."
+            description="Ficam fora do gráfico de propósito. Clique no número de operações para ver quais são."
           />
           <CardBody>
             <Table>
@@ -129,51 +233,77 @@ export default function Previsoes() {
                 {forecast.blocos.map((b) => (
                   <TR key={b.rotulo}>
                     <TD className="font-medium text-slate-800">{b.rotulo}</TD>
-                    <TD className="text-right tabular-nums">{b.operacoes}</TD>
+                    <TD className="text-right tabular-nums">
+                      <BotaoVer
+                        aberto={aberto === b.rotulo}
+                        onClick={() => setAberto(aberto === b.rotulo ? null : b.rotulo)}
+                      >
+                        {b.operacoes}
+                      </BotaoVer>
+                    </TD>
                     <TD className="text-right tabular-nums">{brl(b.valor)}</TD>
                     <TD className="text-slate-600">{b.motivo}</TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
-            {forecast.incalculaveis > 0 && (
-              <p className="mt-3 text-xs text-slate-500">
-                {forecast.incalculaveis}{' '}
-                {forecast.incalculaveis === 1 ? 'operação aberta não teve' : 'operações abertas não tiveram'}{' '}
-                o valor projetado calculado, por falta de índice de atualização ou de parâmetro.
-                Não entram em nenhum total — contá-las como zero afirmaria que não há nada a
-                receber, quando o que falta é cadastro.
-              </p>
+
+            {blocoAberto && (
+              <ListaOperacoes
+                titulo={blocoAberto.rotulo}
+                operacoes={blocoAberto.refs.map((r) => porRef.get(r)).filter(Boolean) as OperacaoAnalitica[]}
+                complementar={blocoAberto.rotulo === 'Complementar a receber'}
+                mostrarAtraso={blocoAberto.rotulo === 'Previsão vencida'}
+              />
+            )}
+
+            {incalculaveis.length > 0 && (
+              <div className="mt-4 border-t border-slate-200 pt-3">
+                <p className="text-xs text-slate-500">
+                  <BotaoVer
+                    aberto={aberto === INCALCULAVEIS}
+                    onClick={() => setAberto(aberto === INCALCULAVEIS ? null : INCALCULAVEIS)}
+                  >
+                    {incalculaveis.length}
+                  </BotaoVer>{' '}
+                  {incalculaveis.length === 1 ? 'operação aberta não teve' : 'operações abertas não tiveram'}{' '}
+                  o valor projetado calculado, por falta de índice de atualização ou de parâmetro.
+                  Não entram em nenhum total — contá-las como zero afirmaria que não há nada a
+                  receber, quando o que falta é cadastro.
+                </p>
+                {aberto === INCALCULAVEIS && (
+                  <ListaOperacoes titulo="Sem valor projetado" operacoes={incalculaveis} motivo />
+                )}
+              </div>
             )}
           </CardBody>
         </Card>
       )}
 
-      <Card>
-        <CardHeader
-          title="Estimativa ajustada pelo histórico"
-          description="Corrige as datas previstas pelo desvio que a carteira historicamente apresenta."
-        />
-        <CardBody>
-          {!ajuste.disponivel ? (
-            <div className="rounded-lg bg-slate-50 px-4 py-6 text-center">
-              <p className="text-sm font-medium text-slate-700">{ajuste.mensagem}</p>
-              <p className="mx-auto mt-2 max-w-xl text-xs text-slate-500">
-                Produzir uma estimativa ajustada com {ajuste.observacoes} observações seria
-                transferir incerteza de um lugar para outro fingindo que virou precisão. O
-                histórico de alterações de previsão começou a ser gravado agora e vai
-                alimentar esta seção conforme as operações forem sendo reprogramadas e pagas.
-              </p>
-            </div>
-          ) : (
-            <>
-              <LinhaMetrica rotulo="Desvio mediano observado" valor={dias(ajuste.desvioMediano)} destaque />
-              <LinhaMetrica rotulo="Percentil 75 do desvio" valor={dias(ajuste.desvioP75)} />
-              <p className="mt-3 text-xs text-slate-500">{ajuste.metodologia}</p>
-            </>
-          )}
-        </CardBody>
-      </Card>
+      {/* A estimativa ajustada só aparece quando existe de fato.
+          Antes havia aqui um card permanente que, sem dados, exibia apenas a
+          explicação de por que não havia dados. Bloco que só se desculpa ocupa
+          espaço e não informa nada.
+
+          Hoje ela nunca aparece, e o motivo não é falta de liquidações: quando
+          uma operação é liquidada, a expectativa_liquidacao não é preservada,
+          então não sobra contra o que comparar a data efetiva. O conserto está
+          em ler a última previsão de public.processos_historico, que o gatilho
+          instalado em 11/08 já grava. Enquanto isso não existir, o card não
+          tem por que ocupar a tela. */}
+      {ajuste.disponivel && (
+        <Card>
+          <CardHeader
+            title="Estimativa ajustada pelo histórico"
+            description="Corrige as datas previstas pelo desvio que a carteira historicamente apresenta."
+          />
+          <CardBody>
+            <LinhaMetrica rotulo="Desvio mediano observado" valor={dias(ajuste.desvioMediano)} destaque />
+            <LinhaMetrica rotulo="Percentil 75 do desvio" valor={dias(ajuste.desvioP75)} />
+            <p className="mt-3 text-xs text-slate-500">{ajuste.metodologia}</p>
+          </CardBody>
+        </Card>
+      )}
 
       {aderencia.n > 0 && (
         <Card>

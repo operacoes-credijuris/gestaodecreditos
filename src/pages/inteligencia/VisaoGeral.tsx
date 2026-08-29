@@ -1,9 +1,15 @@
-// Inteligência Econômica — Visão Geral.
+// Quadro Econômico — Visão Geral.
 //
 // A tela responde "como a carteira está performando economicamente?" sem
 // obrigar o usuário a saber qual pergunta fazer. Por isso os insights ficam
 // aqui em cima, e não numa página própria: insight que exige navegação
 // dedicada não é insight.
+//
+// Regra que nasceu da revisão de 28/08: TODO número precisa dizer sobre QUE
+// população ele foi calculado. Um card de rentabilidade ao lado de um card de
+// "a receber" faz o leitor supor que um é o rendimento do outro — e não é.
+// Rentabilidade aqui é sempre sobre as encerradas; capital é sempre a carteira
+// inteira. Onde os dois se encontram, o rótulo diz qual é qual.
 
 import { Coins, TrendingUp, CalendarClock, AlertTriangle, Timer, Layers } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -21,15 +27,27 @@ export default function VisaoGeral() {
   if (carregando) return <CarregandoPainel />
   if (erro || !painel) return <ErrorState message="Não foi possível carregar a carteira." />
 
-  const { carteira, forecast, aderencia, anomalias, insights, concentracao: conc } = painel
+  const { carteira, forecast, aderencia, insights, concentracao: conc } = painel
   const vencidas = forecast.blocos.find((b) => b.rotulo === 'Previsão vencida')
   const abertas = painel.operacoes.filter((o) => !o.dataLiquidacao).length
   const parciais = painel.operacoes.filter((o) => o.status === 'complementar').length
+  const semCapital = painel.operacoes.length - painel.operacoesComCapital
+
+  // As parcelas do "a receber" são LIDAS do forecast, não escritas à mão.
+  //
+  // A versão anterior listava os quatro blocos possíveis como se todos
+  // existissem sempre. Na carteira real pode não haver operação em aberto sem
+  // data prevista — e a explicação afirmava que havia. Enumerar o que o núcleo
+  // de fato produziu é a única forma de o texto não poder mentir.
+  const parcelas = [
+    ...(forecast.totalFuturo > 0 ? ['operações em aberto com data prevista à frente'] : []),
+    ...forecast.blocos.map((b) => b.rotulo.toLowerCase()),
+  ]
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Inteligência Econômica"
+        title="Quadro Econômico"
         description={
           `${painel.operacoes.length} operações · ${carteira.n} encerradas de fato · ` +
           `parâmetros de correção com data-base ${formatDate(painel.parametrosEm)}`
@@ -47,38 +65,29 @@ export default function VisaoGeral() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard
-          label="Capital investido (encerradas)"
-          value={brl(carteira.capitalInvestido)}
+          label="Capital total investido"
+          value={brl(painel.capitalTotalInvestido)}
           icon={<Coins className="h-5 w-5" />}
-          hint={`Soma do capital das ${carteira.n} operações encerradas com dados completos.`}
-        />
-        <StatCard
-          label="Rentabilidade do capital"
-          value={pct(carteira.retornoPonderado)}
-          tone="green"
-          icon={<TrendingUp className="h-5 w-5" />}
-          hint={EXPLICA.ponderada}
-        />
-        <StatCard
-          label="Rentabilidade da operação típica"
-          value={pct(carteira.retorno.mediana)}
-          tone="green"
-          icon={<Layers className="h-5 w-5" />}
-          hint={EXPLICA.mediana}
-        />
-        <StatCard
-          label="Prazo mediano"
-          value={dias(carteira.prazo.mediana)}
-          tone="slate"
-          icon={<Timer className="h-5 w-5" />}
-          hint="Dias entre a compra do crédito e o pagamento efetivo, nas operações encerradas."
+          hint={
+            `Soma do capital de todas as ${painel.operacoesComCapital} operações com capital ` +
+            'cadastrado, sem filtro de status: encerradas, em complementar e em aberto. ' +
+            'É o dinheiro que já foi colocado na rua.' +
+            (semCapital > 0
+              ? ` Atenção: ${semCapital} ${semCapital === 1 ? 'operação está' : 'operações estão'} sem capital cadastrado e ficam fora desta soma.`
+              : '')
+          }
         />
         <StatCard
           label="A receber previsto"
           value={brl(forecast.totalGeral)}
           to="/inteligencia/previsoes"
           icon={<CalendarClock className="h-5 w-5" />}
-          hint="Valor projetado das operações em aberto, somado aos blocos sem data prevista."
+          hint={
+            (parcelas.length
+              ? `Tudo que a carteira ainda tem a receber, somando: ${parcelas.join(' + ')}. `
+              : 'Nada a receber projetado no momento. ') +
+            'É valor projetado, corrigido pelo índice de cada crédito.'
+          }
         />
         <StatCard
           label="Preso em previsão vencida"
@@ -87,6 +96,39 @@ export default function VisaoGeral() {
           to="/inteligencia/previsoes"
           icon={<AlertTriangle className="h-5 w-5" />}
           hint={EXPLICA.vencida}
+        />
+        <StatCard
+          label="Rentabilidade do investidor"
+          value={pct(carteira.retornoPonderado)}
+          tone="green"
+          icon={<TrendingUp className="h-5 w-5" />}
+          hint={
+            `Calculada SÓ sobre as ${carteira.n} operações já encerradas: soma dos ganhos ` +
+            'dividida pela soma dos capitais delas. Não inclui nada do que ainda está a ' +
+            'receber. A taxa da Credijuris já está embutida no capital investido, então ' +
+            'este número é o que ficou para o investidor.'
+          }
+        />
+        <StatCard
+          label="Rentabilidade típica (mediana)"
+          value={pct(carteira.retorno.mediana)}
+          tone="green"
+          icon={<Layers className="h-5 w-5" />}
+          hint={
+            `Das ${carteira.n} operações já encerradas, metade rendeu mais que isso e metade ` +
+            'rendeu menos. É uma descrição do que já aconteceu, NÃO uma previsão para ' +
+            'operações futuras — cada crédito é um processo e tem particularidades próprias.'
+          }
+        />
+        <StatCard
+          label="Prazo mediano"
+          value={dias(carteira.prazo.mediana)}
+          tone="slate"
+          icon={<Timer className="h-5 w-5" />}
+          hint={
+            `Dias entre a compra do crédito e o pagamento efetivo, nas ${carteira.n} operações ` +
+            'encerradas. Metade levou menos que isso, metade levou mais.'
+          }
         />
       </div>
 
@@ -140,12 +182,26 @@ export default function VisaoGeral() {
                 explicacao="Operação sem capital ou sem valor recebido fica fora do numerador e do denominador. Entrar com zero afirmaria resultado zero onde o que falta é cadastro."
               />
             )}
+            <div className="mt-3 border-t border-slate-200 pt-2">
+              <LinhaMetrica
+                rotulo="Capital investido — carteira inteira"
+                valor={brl(painel.capitalTotalInvestido)}
+                explicacao="Todas as operações com capital cadastrado, em qualquer status."
+                destaque
+              />
+              <LinhaMetrica
+                rotulo="Capital investido — só nas encerradas"
+                valor={brl(carteira.capitalInvestido)}
+                explicacao="É sobre este capital, e só sobre ele, que a rentabilidade realizada é calculada."
+              />
+            </div>
           </CardBody>
         </Card>
 
         <Card>
           <CardHeader
             title="Resultado das encerradas"
+            description="Nada aqui inclui o que ainda está a receber."
             action={
               <SeloAmostra
                 n={carteira.n}
@@ -160,7 +216,7 @@ export default function VisaoGeral() {
             <LinhaMetrica rotulo="Valor recebido" valor={brl(carteira.valorRecebido)} />
             <LinhaMetrica rotulo="Ganho nominal" valor={brl(carteira.ganhoNominal)} destaque />
             <LinhaMetrica
-              rotulo="Rentabilidade ponderada"
+              rotulo="Rentabilidade do investidor"
               valor={pct(carteira.retornoPonderado)}
               explicacao={EXPLICA.ponderada}
               destaque
@@ -175,18 +231,6 @@ export default function VisaoGeral() {
           </CardBody>
         </Card>
       </div>
-
-      {anomalias.operacoesComAchado > 0 && (
-        <Ressalva>
-          <strong>{anomalias.operacoesComAchado}</strong>{' '}
-          {anomalias.operacoesComAchado === 1 ? 'operação aparece' : 'operações aparecem'} na
-          lista de revisão de dados. Nenhum dado foi alterado —{' '}
-          <a className="font-medium underline" href="/inteligencia/anomalias">
-            ver a lista
-          </a>
-          .
-        </Ressalva>
-      )}
 
       {aderencia.n > 0 && (
         <Card>

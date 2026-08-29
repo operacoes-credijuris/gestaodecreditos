@@ -8,7 +8,6 @@ import InteligenciaVisaoGeral from '@/pages/inteligencia/VisaoGeral'
 import InteligenciaPerformance from '@/pages/inteligencia/Performance'
 import InteligenciaPrevisoes from '@/pages/inteligencia/Previsoes'
 import InteligenciaRecortes from '@/pages/inteligencia/Recortes'
-import InteligenciaAnomalias from '@/pages/inteligencia/Anomalias'
 import GeracaoContratos from '@/pages/comercial/GeracaoContratos'
 import CarteirasInvestidores from '@/pages/comercial/CarteirasInvestidores'
 import DadosPessoaisBancarios from '@/pages/comercial/DadosPessoaisBancarios'
@@ -40,11 +39,17 @@ export default function App() {
         <Route path="/inteligencia/performance" element={<InteligenciaPerformance />} />
         <Route path="/inteligencia/previsoes" element={<InteligenciaPrevisoes />} />
         <Route path="/inteligencia/recortes" element={<InteligenciaRecortes />} />
-        <Route path="/inteligencia/anomalias" element={<InteligenciaAnomalias />} />
+        {/* Saiu do Comercial: é relatório econômico por investidor, e consome o
+            mesmo núcleo de cálculo das demais telas de Inteligência. */}
+        <Route path="/inteligencia/carteiras" element={<CarteirasInvestidores />} />
 
         {/* Comercial */}
         <Route path="/comercial/contratos" element={<GeracaoContratos />} />
-        <Route path="/comercial/carteiras" element={<CarteirasInvestidores />} />
+        {/* Rota antiga preservada: links salvos continuam funcionando. */}
+        <Route
+          path="/comercial/carteiras"
+          element={<Navigate to="/inteligencia/carteiras" replace />}
+        />
         <Route
           path="/comercial/dados-pessoais"
           element={<DadosPessoaisBancarios />}

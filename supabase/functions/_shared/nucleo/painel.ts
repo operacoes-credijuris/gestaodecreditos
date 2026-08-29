@@ -110,6 +110,22 @@ export interface PainelEconomico {
   /** Só as encerradas de fato, com dados completos. */
   encerradas: OperacaoAnalitica[]
   carteira: ResumoGrupo
+  /**
+   * Capital investido em TODA a carteira, independente do status: encerradas,
+   * em complementar e em aberto somadas.
+   *
+   * Existe separado de `carteira.capitalInvestido` — que só conta as encerradas
+   * elegíveis — porque são perguntas diferentes. "Quanto a casa já colocou de
+   * dinheiro na rua" é a primeira; "sobre quanto capital a performance realizada
+   * foi medida" é a segunda. Misturar as duas foi confusão real na Visão Geral.
+   */
+  capitalTotalInvestido: number
+  /**
+   * Quantas das operações têm capital cadastrado. Se for menor que o total, o
+   * capital acima está subestimado por falta de cadastro — e a tela precisa
+   * dizer isso em vez de apresentar o número como completo.
+   */
+  operacoesComCapital: number
   porTribunal: ResumoGrupo[]
   porEnte: ResumoGrupo[]
   porInvestidor: ResumoGrupo[]
@@ -139,6 +155,14 @@ export function montarPainel(
   const encerradas = operacoes.filter(elegivelPerformance)
   const capitalTotal = encerradas.reduce((s, o) => s + (o.capitalInvestido ?? 0), 0)
 
+  // Capital de TODA a carteira, sem filtro de status. Operação sem capital
+  // cadastrado não entra como zero: fica fora da soma e é contada à parte,
+  // para a tela poder dizer que o total está incompleto em vez de fingir.
+  const comCapital = operacoes.filter(
+    (o) => typeof o.capitalInvestido === 'number' && Number.isFinite(o.capitalInvestido),
+  )
+  const capitalTotalInvestido = comCapital.reduce((s, o) => s + (o.capitalInvestido ?? 0), 0)
+
   const carteira = resumoGrupo('Carteira', operacoes, capitalTotal)
   const porTribunal = agruparPor(operacoes, (o) => o.tribunal, '(sem tribunal)')
   const porEnte = agruparPor(operacoes, (o) => o.ente, '(sem ente devedor)')
@@ -148,6 +172,10 @@ export function montarPainel(
     operacoes,
     (o) => (o.investidor ? normalizarNome(o.investidor) : null),
     '(sem investidor)',
+    // A chave agrupa; o rótulo exibe. `normalizarNome` tira acento e baixa a
+    // caixa — é chave primária de investidor_dados e não pode mudar —, então
+    // a grafia original vem por aqui.
+    (o) => o.investidor,
   )
   const forecast = forecastNominal(operacoes, hoje)
   const aderencia = aderenciaPrevisao(operacoes)
@@ -158,6 +186,8 @@ export function montarPainel(
     operacoes,
     encerradas,
     carteira,
+    capitalTotalInvestido,
+    operacoesComCapital: comCapital.length,
     porTribunal,
     porEnte,
     porInvestidor,

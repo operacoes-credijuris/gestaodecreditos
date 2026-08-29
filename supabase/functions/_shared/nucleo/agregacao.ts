@@ -19,7 +19,15 @@ import { elegivelPerformance, type OperacaoAnalitica } from './tipos.ts'
 import { diasEntre } from './datas.ts'
 
 export interface ResumoGrupo {
+  /** Chave do agrupamento. Para investidor é o nome normalizado. */
   nome: string
+  /**
+   * Como o grupo deve ser EXIBIDO. Existe separado de `nome` porque a chave de
+   * investidor passa por `normalizarNome`, que tira acento e baixa a caixa —
+   * ótimo para agrupar "José da Silva" com "jose da  silva", péssimo para ler.
+   * Aqui fica a grafia original, com acento, do primeiro registro do grupo.
+   */
+  rotulo: string
   /** Operações no grupo, de qualquer população. */
   total: number
   /** Elegíveis para performance (encerradas com dados completos). */
@@ -27,10 +35,24 @@ export interface ResumoGrupo {
   /** Elegíveis descartadas por falta de dado, com o motivo agregado. */
   excluidas: number
 
+  /** Capital das ELEGÍVEIS. É o denominador da performance realizada. */
   capitalInvestido: number
   valorRecebido: number
   complementar: number
   ganhoNominal: number
+
+  /**
+   * As três respostas que o usuário faz sobre um investidor — e que valem
+   * igual para tribunal e ente. Contam TODAS as operações do grupo, em
+   * qualquer status, porque a pergunta "quanto ele já colocou" não tem nada a
+   * ver com elegibilidade para cálculo de performance.
+   */
+  /** Tudo que já foi investido no grupo, liquidado ou não. */
+  capitalTotal: number
+  /** Tudo que já foi efetivamente recebido no grupo. */
+  recebidoTotal: number
+  /** O que ainda falta receber: projeção das em aberto + complementares. */
+  aReceber: number
 
   /** Σganho / Σcapital — o comportamento do capital. Fração. */
   retornoPonderado: number | null
@@ -57,6 +79,7 @@ export function resumoGrupo(
   nome: string,
   operacoes: readonly OperacaoAnalitica[],
   capitalTotalCarteira?: number | null,
+  rotulo?: string,
 ): ResumoGrupo {
   const elegiveis = operacoes.filter(elegivelPerformance)
   const encerradas = operacoes.filter((o) => o.status === 'encerrado')
@@ -64,6 +87,15 @@ export function resumoGrupo(
   const capitalInvestido = soma(elegiveis.map((o) => o.capitalInvestido))
   const valorRecebido = soma(elegiveis.map((o) => o.jaRecebido))
   const complementar = soma(elegiveis.map((o) => o.valorComplementar))
+
+  // Totais sobre TODAS as operações do grupo, sem filtro de elegibilidade.
+  const capitalTotal = soma(operacoes.map((o) => o.capitalInvestido))
+  const recebidoTotal = soma(operacoes.map((o) => o.jaRecebido))
+  // Mesmo critério do forecast: projeção das em aberto + complementar das
+  // parciais. Operação sem valor projetável não entra como zero, fica fora.
+  const aReceber =
+    soma(operacoes.filter((o) => !o.dataLiquidacao).map((o) => o.valor)) +
+    soma(operacoes.filter((o) => o.status === 'complementar').map((o) => o.valorComplementar))
 
   const ponderado = mediaPonderada(
     elegiveis.map((o) => ({ valor: o.retorno, peso: o.capitalInvestido })),
@@ -74,6 +106,7 @@ export function resumoGrupo(
 
   return {
     nome,
+    rotulo: rotulo?.trim() || nome,
     total: operacoes.length,
     n: elegiveis.length,
     excluidas: encerradas.length - elegiveis.length,
@@ -81,6 +114,9 @@ export function resumoGrupo(
     valorRecebido,
     complementar,
     ganhoNominal: valorRecebido + complementar - capitalInvestido,
+    capitalTotal,
+    recebidoTotal,
+    aReceber,
     retornoPonderado: ponderado.valor,
     retorno: distribuicao(retornos),
     retornoIC: ic
@@ -116,18 +152,30 @@ export function agruparPor(
   operacoes: readonly OperacaoAnalitica[],
   chave: (op: OperacaoAnalitica) => string | null | undefined,
   rotuloVazio = '(não informado)',
+  /**
+   * Grafia a exibir para o grupo. Quando a chave é normalizada — o caso do
+   * investidor, agrupado por `normalizarNome` — a chave perde acento e caixa,
+   * e mostrá-la ao usuário produz "ercilio martins da costa junior". Aqui se
+   * recupera a grafia original do primeiro registro do grupo.
+   */
+  rotuloDe?: (op: OperacaoAnalitica) => string | null | undefined,
 ): ResumoGrupo[] {
   const capitalTotal = soma(operacoes.filter(elegivelPerformance).map((o) => o.capitalInvestido))
   const mapa = new Map<string, OperacaoAnalitica[]>()
+  const rotulos = new Map<string, string>()
   for (const op of operacoes) {
     const bruto = chave(op)
     const k = typeof bruto === 'string' && bruto.trim() ? bruto.trim() : rotuloVazio
     const lista = mapa.get(k)
     if (lista) lista.push(op)
     else mapa.set(k, [op])
+    if (rotuloDe && !rotulos.has(k)) {
+      const r = rotuloDe(op)
+      if (typeof r === 'string' && r.trim()) rotulos.set(k, r.trim())
+    }
   }
   return [...mapa.entries()]
-    .map(([nome, ops]) => resumoGrupo(nome, ops, capitalTotal))
+    .map(([nome, ops]) => resumoGrupo(nome, ops, capitalTotal, rotulos.get(nome)))
     .sort((a, b) => b.total - a.total)
 }
 
