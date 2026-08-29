@@ -28,14 +28,22 @@ const declaradas = [...src.matchAll(/^\s*name: '([a-z_]+)',\s*$/gm)].map((m) => 
 /** `case 'x': {` — a forma como o executor as atende. */
 const executadas = [...src.matchAll(/^\s*case '([a-z_]+)': \{/gm)].map((m) => m[1])
 
+// Ferramentas nativas da Anthropic: o próprio modelo as executa em sandbox
+// dela (ex.: code_execution, usada pelas Skills), não passam pelo executar()
+// local — declaradas sem case é o desenho certo, não o bug que este arquivo
+// guarda.
+const EXECUTADAS_PELA_ANTHROPIC = ['code_execution']
+
 describe('assistente: ferramentas declaradas × executadas', () => {
   it('encontra as duas listas no fonte (senão o teste não está testando nada)', () => {
     expect(declaradas.length).toBeGreaterThan(10)
     expect(executadas.length).toBeGreaterThan(10)
   })
 
-  it('toda ferramenta declarada ao modelo tem executor', () => {
-    const semExecutor = declaradas.filter((n) => !executadas.includes(n))
+  it('toda ferramenta declarada ao modelo tem executor (ou é nativa da Anthropic)', () => {
+    const semExecutor = declaradas.filter(
+      (n) => !executadas.includes(n) && !EXECUTADAS_PELA_ANTHROPIC.includes(n),
+    )
     expect(semExecutor).toEqual([])
   })
 
