@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, CheckCircle2, ChevronRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
 import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
@@ -10,7 +11,7 @@ import { Segmented } from '@/components/ui/Segmented'
 import { StatCard } from '@/components/ui/StatCard'
 import { IconButton } from '@/components/ui/IconButton'
 import { Select } from '@/components/ui/Field'
-import { DrawerField, DrawerSection } from '@/components/ui/Drawer'
+import { DrawerSection } from '@/components/ui/Drawer'
 import { EmptyState, Loading } from '@/components/ui/Table'
 import { getLabel, FASE_PROCESSUAL, FASE_ATIVO_ORDEM, FASE_COMPLEMENTAR_ORDEM } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
@@ -26,17 +27,14 @@ interface FaseRow {
   conclusao_desde: string | null
   data_limite_pagamento: string | null
   erro: string | null
+  tratado: boolean
+  tratado_movimentacao_data: string | null
 }
 
-interface MudancaRow {
-  id: string
-  processo_id: string
-  fase_anterior: string | null
-  fase_nova: string
-  origem: 'auto' | 'manual'
-  movimentacao_ancora_data: string | null
-  movimentacao_ancora_texto: string | null
-  criado_em: string
+interface MovRecenteRow {
+  numero_processo: string | null
+  data: string | null
+  conteudo: string | null
 }
 
 // Dias corridos desde uma data AAAA-MM-DD. Mesma lógica de
@@ -47,6 +45,8 @@ function diasDesde(dateStr: string | null): number | null {
   const d = new Date(dateStr.length <= 10 ? `${dateStr}T00:00:00` : dateStr)
   return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000))
 }
+
+const dig = (v: unknown): string => String(v ?? '').replace(/\D/g, '')
 
 function useFaseData() {
   return useQuery({
@@ -59,25 +59,60 @@ function useFaseData() {
   })
 }
 
-// Últimos 7 dias da MOVIMENTAÇÃO em si (movimentacao_ancora_data), não de
-// quando a classificação rodou (criado_em) — um crédito processado hoje pela
-// primeira vez pode ter sua movimentação mais recente de meses atrás, e isso
-// não é "recente" nenhum, mesmo saindo daqui agora.
-function useMudancas() {
-  return useQuery({
-    queryKey: ['processos_fase_mudancas'],
+/**
+ * Últimos 7 dias de movimentação, resolvidos ao crédito pela MESMA fonte e
+ * MESMA lógica da aba Publicações e Movimentações (advbox_movimentacoes +
+ * apensos, casamento por dígito) — não um recorte independente. É a aba que
+ * já funciona e está atualizada; aqui só se decide, para cada crédito que
+ * aparece nela, se a fase mudou ou permaneceu.
+ */
+function useMovimentacoesRecentes(processos: Processo[]) {
+  const apensos = useQuery({
+    queryKey: ['apensos_fase_processual'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('apensos').select('processo_id, numero').limit(5000)
+      if (error) throw new Error(error.message)
+      return (data ?? []) as { processo_id: string | null; numero: string | null }[]
+    },
+  })
+
+  const movs = useQuery({
+    queryKey: ['advbox_movimentacoes_recentes'],
     queryFn: async () => {
       const desde = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10)
       const { data, error } = await supabase
-        .from('processos_fase_mudancas')
-        .select('*')
-        .gte('movimentacao_ancora_data', desde)
-        .order('movimentacao_ancora_data', { ascending: false })
-        .limit(200)
+        .from('advbox_movimentacoes')
+        .select('numero_processo, data, conteudo')
+        .gte('data', desde)
+        .order('data', { ascending: false })
+        .limit(3000)
       if (error) throw new Error(error.message)
-      return (data ?? []) as MudancaRow[]
+      return (data ?? []) as MovRecenteRow[]
     },
   })
+
+  const porCredito = useMemo(() => {
+    const processoPorDigitos = new Map<string, string>()
+    for (const p of processos) {
+      const d = dig(p.numero_cnj)
+      if (d.length >= 6) processoPorDigitos.set(d, p.id)
+    }
+    for (const a of apensos.data ?? []) {
+      if (!a.processo_id) continue
+      const d = dig(a.numero)
+      if (d.length >= 6 && !processoPorDigitos.has(d)) processoPorDigitos.set(d, a.processo_id)
+    }
+    const m = new Map<string, MovRecenteRow>()
+    for (const mov of movs.data ?? []) {
+      const credId = processoPorDigitos.get(dig(mov.numero_processo))
+      if (!credId) continue
+      const atual = m.get(credId)
+      if (!atual || (mov.data ?? '') > (atual.data ?? '')) m.set(credId, mov)
+    }
+    return m
+  }, [processos, apensos.data, movs.data])
+
+  return { isLoading: apensos.isLoading || movs.isLoading, porCredito }
 }
 
 export function FaseProcessual({
@@ -93,7 +128,6 @@ export function FaseProcessual({
   const [filtro, setFiltro] = useState<{ tipo: 'fase'; codigo: string } | { tipo: 'concluso' } | null>(null)
 
   const fase = useFaseData()
-  const mudancas = useMudancas()
 
   const faseDe = useMemo(() => {
     const m = new Map<string, FaseRow>()
@@ -101,16 +135,12 @@ export function FaseProcessual({
     return m
   }, [fase.data])
 
-  const processoDe = useMemo(() => {
-    const m = new Map<string, Processo>()
-    for (const p of processos) m.set(p.id, p)
-    return m
-  }, [processos])
-
   const daTrilha = useMemo(
     () => processos.filter((p) => p.status === trilha),
     [processos, trilha],
   )
+
+  const recentes = useMovimentacoesRecentes(daTrilha)
   const contagemTrilha = useMemo(() => {
     let ativo = 0
     let complementar = 0
@@ -159,6 +189,13 @@ export function FaseProcessual({
       qc.invalidateQueries({ queryKey: ['processos_fase_mudancas'] })
       toast.success('Classificação atualizada.')
     },
+    onError: (e) => toast.error((e as Error).message),
+  })
+
+  const marcarTratado = useMutation({
+    mutationFn: (vars: { processo_id: string; tratado: boolean; movimentacao_data: string }) =>
+      invokeFunction('fase-processual', { acao: 'marcar_tratado', ...vars }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['processos_fase'] }),
     onError: (e) => toast.error((e as Error).message),
   })
 
@@ -255,45 +292,79 @@ export function FaseProcessual({
 
           <Card className="p-4">
             <h3 className="mb-3 text-sm font-semibold text-slate-700">Movimentações recentes</h3>
-            {mudancas.isLoading ? (
+            {recentes.isLoading ? (
               <Loading />
-            ) : (mudancas.data ?? []).length === 0 ? (
-              <p className="text-sm text-slate-500">Nenhuma movimentação nova nas últimas 48h.</p>
+            ) : recentes.porCredito.size === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma movimentação nos últimos 7 dias.</p>
             ) : (
               <ul className="space-y-2">
-                {(mudancas.data ?? []).map((m) => {
-                  const p = processoDe.get(m.processo_id)
-                  const mudouDeFase = m.fase_anterior !== null && m.fase_anterior !== m.fase_nova
-                  return (
-                    <li key={m.id} className="rounded-lg border border-slate-200 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="text-sm font-medium text-slate-800">
-                          {p ? formatCNJ(p.numero_cnj) : m.processo_id}
-                        </span>
-                        <span className="shrink-0 text-xs text-slate-400">
-                          {formatDate(m.movimentacao_ancora_data)}
-                        </span>
-                      </div>
-                      {m.movimentacao_ancora_texto && (
-                        <p className="mt-1 line-clamp-2 text-xs italic text-slate-500">
-                          "{m.movimentacao_ancora_texto}"
-                        </p>
-                      )}
-                      <div className="mt-2 flex items-center gap-2">
-                        {mudouDeFase ? (
-                          <Badge tone="blue">
-                            {getLabel(FASE_PROCESSUAL, m.fase_anterior!).label}
-                            {' → '}
-                            {getLabel(FASE_PROCESSUAL, m.fase_nova).label}
-                          </Badge>
-                        ) : (
-                          <Badge tone="gray">Permaneceu em {getLabel(FASE_PROCESSUAL, m.fase_nova).label}</Badge>
+                {daTrilha
+                  .map((p) => ({ p, mov: recentes.porCredito.get(p.id), r: faseDe.get(p.id) }))
+                  .filter((x): x is { p: Processo; mov: MovRecenteRow; r: FaseRow | undefined } => !!x.mov)
+                  .map((x) => ({
+                    ...x,
+                    tratado: !!x.r?.tratado && x.r.tratado_movimentacao_data === x.mov.data,
+                  }))
+                  // Não tratados primeiro; dentro de cada grupo, mais recente primeiro.
+                  .sort((a, b) => {
+                    if (a.tratado !== b.tratado) return a.tratado ? 1 : -1
+                    return (b.mov.data ?? '').localeCompare(a.mov.data ?? '')
+                  })
+                  .map(({ p, mov, r, tratado }) => {
+                    // A fase entrou na MESMA data desta movimentação = foi ela
+                    // que empurrou; caso contrário, o crédito só permaneceu.
+                    const mudouDeFase = !!r && !!mov.data && r.data_entrada_fase === mov.data
+                    return (
+                      <li
+                        key={p.id}
+                        className={cn(
+                          'cursor-pointer rounded-lg border border-slate-200 p-3 hover:bg-slate-50',
+                          tratado && 'opacity-50',
                         )}
-                        {m.origem === 'manual' && <Badge tone="purple">Manual</Badge>}
-                      </div>
-                    </li>
-                  )
-                })}
+                        onClick={() => onAbrirDetalhe(p)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <label
+                            className="flex shrink-0 items-center pt-0.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300"
+                              checked={tratado}
+                              disabled={!mov.data}
+                              onChange={(e) =>
+                                mov.data &&
+                                marcarTratado.mutate({
+                                  processo_id: p.id,
+                                  tratado: e.target.checked,
+                                  movimentacao_data: mov.data,
+                                })
+                              }
+                            />
+                          </label>
+                          <span className="min-w-0 flex-1 text-sm font-medium text-slate-800">
+                            {formatCNJ(p.numero_cnj)}
+                          </span>
+                          <span className="shrink-0 text-xs text-slate-400">{formatDate(mov.data)}</span>
+                        </div>
+                        {mov.conteudo && (
+                          <p className="mt-1 line-clamp-2 text-xs italic text-slate-500">"{mov.conteudo}"</p>
+                        )}
+                        <div className="mt-2">
+                          {r ? (
+                            mudouDeFase ? (
+                              <Badge tone="blue">Avançou para {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}</Badge>
+                            ) : (
+                              <Badge tone="gray">Permaneceu em {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}</Badge>
+                            )
+                          ) : (
+                            <Badge tone="gray">Ainda não classificado</Badge>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
               </ul>
             )}
           </Card>
@@ -349,25 +420,16 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
 
   return (
     <DrawerSection title="Fase processual">
-      <DrawerField label="Fase atual">
-        {query.isLoading ? (
-          '…'
-        ) : r ? (
-          <Badge tone={getLabel(FASE_PROCESSUAL, r.fase_codigo).tone}>
-            {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}
-          </Badge>
-        ) : (
-          'Ainda não classificado'
-        )}
-      </DrawerField>
-      <DrawerField label="Reclassificar manualmente">
+      <div className="col-span-2 flex items-center gap-3">
+        <span className="text-sm font-medium text-slate-700">Fase processual</span>
         <Select
+          className="w-auto border-blue-300 bg-blue-50 text-blue-700 focus:border-blue-500 focus:ring-blue-500"
           value={r?.fase_codigo ?? ''}
-          disabled={override.isPending}
+          disabled={query.isLoading || override.isPending}
           onChange={(e) => e.target.value && override.mutate(e.target.value)}
         >
           <option value="" disabled>
-            Escolher fase…
+            {query.isLoading ? 'Carregando…' : 'Escolher fase…'}
           </option>
           {ordem.map((codigo) => (
             <option key={codigo} value={codigo}>
@@ -375,27 +437,7 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
             </option>
           ))}
         </Select>
-      </DrawerField>
-      {r && (
-        <>
-          <DrawerField label="Desde">{formatDate(r.data_entrada_fase)}</DrawerField>
-          <DrawerField label="Movimentação-âncora">
-            {r.movimentacao_ancora_data ? `${formatDate(r.movimentacao_ancora_data)} — ` : ''}
-            {r.movimentacao_ancora_texto || '—'}
-          </DrawerField>
-          {r.conclusao_pendente && (
-            <DrawerField label="Concluso desde">{formatDate(r.conclusao_desde)}</DrawerField>
-          )}
-          {r.data_limite_pagamento && (
-            <DrawerField label="Prazo de pagamento (calculado)">
-              {formatDate(r.data_limite_pagamento)}
-            </DrawerField>
-          )}
-          {r.erro && (
-            <div className="col-span-2 text-xs text-red-600">Erro na última classificação: {r.erro}</div>
-          )}
-        </>
-      )}
+      </div>
     </DrawerSection>
   )
 }

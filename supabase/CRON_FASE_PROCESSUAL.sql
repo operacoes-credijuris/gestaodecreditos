@@ -6,10 +6,12 @@
 -- Escolha do horário: depois do CRON_CARTEIRA_RESUMO (06:00 BRT), para não
 -- disputar o mesmo minuto — são jobs independentes, mas não custa espaçar.
 --
--- A função só reclassifica créditos com movimentação nova desde a última vez
--- (compara fonte_hash) e faz, à parte e sem gastar chamada ao modelo, a única
--- transição por calendário da taxonomia (ATV-02 -> ATV-03 quando o prazo de
--- pagamento vence sem nenhuma movimentação nova).
+-- A função só reclassifica: (1) créditos nunca classificados (primeira fase) e
+-- (2) créditos (ou um de seus apensos) com andamento dentro da janela recente
+-- — mesma resolução usada na tela "Movimentações recentes", pra nunca haver
+-- duas ideias de "quem mudou" divergentes. Faz também, à parte e sem gastar
+-- chamada ao modelo, a única transição por calendário da taxonomia (ATV-02 ->
+-- ATV-03 quando o prazo de pagamento vence sem nenhuma movimentação nova).
 --
 -- Rodar 1x no SQL Editor do Supabase (projeto dnxqajfxmdayqljyiqps).
 -- Requer pg_cron e pg_net (já habilitados pelo CRON_CARTEIRA_RESUMO).
