@@ -17,6 +17,7 @@ import {
 import { detectarAnomalias } from '../../../supabase/functions/_shared/nucleo/anomalias.ts'
 import { gerarInsights } from '../../../supabase/functions/_shared/nucleo/insights.ts'
 import { concentracao } from '../../../supabase/functions/_shared/nucleo/amostra.ts'
+import { normalizarNome } from '../../../supabase/functions/_shared/nucleo/texto.ts'
 
 const HOJE = '2026-08-11'
 
@@ -144,6 +145,45 @@ describe('resumoGrupo', () => {
     expect(resumoGrupo('pequeno', [op(), op()]).retornoIC).toBeNull()
   })
 
+  it('os três totais do grupo contam TODAS as operações, não só as elegíveis', () => {
+    // Uma encerrada, uma em aberto e uma em complementar. As duas últimas
+    // ficam fora da performance, mas o dinheiro delas é do investidor do mesmo
+    // jeito — é isso que "já investiu / já recebeu / falta receber" responde.
+    const r = resumoGrupo('X', [
+      op({ status: 'encerrado', capitalInvestido: 10000, jaRecebido: 13000, dataLiquidacao: '2025-11-15' }),
+      op({
+        status: 'ativo', capitalInvestido: 5000, jaRecebido: null,
+        dataLiquidacao: null, valor: 6500, valorComplementar: null,
+      }),
+      op({
+        status: 'complementar', capitalInvestido: 4000, jaRecebido: 4200,
+        dataLiquidacao: '2026-01-20', valorComplementar: 900,
+      }),
+    ])
+
+    expect(r.capitalTotal).toBe(19000)    // 10.000 + 5.000 + 4.000
+    expect(r.recebidoTotal).toBe(17200)   // 13.000 + 4.200
+    expect(r.aReceber).toBe(7400)         // 6.500 projetados + 900 complementar
+
+    // O denominador da performance segue sendo só o da encerrada.
+    expect(r.n).toBe(1)
+    expect(r.capitalInvestido).toBe(10000)
+  })
+
+  it('em aberto sem valor projetável não vira zero no a receber', () => {
+    // Entrar com zero afirmaria "não há nada a receber" onde o que falta é
+    // cadastro de índice. Ela sai do total em vez de rebaixá-lo.
+    const r = resumoGrupo('X', [
+      op({ status: 'ativo', capitalInvestido: 5000, jaRecebido: null, dataLiquidacao: null, valor: 6000 }),
+      op({
+        status: 'ativo', capitalInvestido: 5000, jaRecebido: null,
+        dataLiquidacao: null, valor: null, motivoSemValor: 'sem índice',
+      }),
+    ])
+    expect(r.aReceber).toBe(6000)
+    expect(r.capitalTotal).toBe(10000)
+  })
+
   it('grupo vazio não quebra e devolve nulos, não zeros', () => {
     const r = resumoGrupo('vazio', [])
     expect(r.n).toBe(0)
@@ -161,6 +201,25 @@ describe('agrupamento', () => {
     )
     expect(grupos).toHaveLength(1)
     expect(grupos[0].total).toBe(2)
+  })
+
+  it('exibe a grafia original mesmo agrupando pela chave normalizada', () => {
+    // O caso real: a chave de investidor passa por normalizarNome, que tira
+    // acento e baixa a caixa. Sem `rotulo`, a tela mostrava "ercilio martins".
+    const grupos = agruparPor(
+      [op({ investidor: 'Ercílio Martins' }), op({ investidor: 'ercilio  martins' })],
+      (o) => (o.investidor ? normalizarNome(o.investidor) : null),
+      '(sem investidor)',
+      (o) => o.investidor,
+    )
+    expect(grupos).toHaveLength(1)
+    expect(grupos[0].nome).toBe('ercilio martins')
+    expect(grupos[0].rotulo).toBe('Ercílio Martins')
+  })
+
+  it('sem resolvedor de rótulo, o rótulo é a própria chave', () => {
+    const grupos = agruparPor([op({ tribunal: 'TJGO' })], (o) => o.tribunal)
+    expect(grupos[0].rotulo).toBe('TJGO')
   })
 
   it('rotula o vazio em vez de descartar a operação', () => {
