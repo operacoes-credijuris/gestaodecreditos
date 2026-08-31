@@ -44,3 +44,37 @@ export async function invokeFunction<T = unknown>(
   }
   return data as T
 }
+
+/**
+ * Mesma invocação de invokeFunction, mas com corpo `FormData` — para upload de
+ * arquivo (ex: subir uma Skill). Função separada porque invokeFunction sempre
+ * serializa o corpo como JSON; passar FormData por ali sairia com Content-Type
+ * errado.
+ */
+export async function invokeFunctionForm<T = unknown>(
+  name: string,
+  form: FormData,
+): Promise<T> {
+  const { data, error } = await supabase.functions.invoke<T>(name, { body: form })
+  if (error) {
+    const ctx = (error as unknown as { context?: Response }).context
+    const status = typeof ctx?.status === 'number' ? ` (HTTP ${ctx.status})` : ''
+    let detalhe = ''
+    try {
+      const txt = ctx && typeof ctx.text === 'function' ? await ctx.text() : ''
+      if (txt) {
+        try {
+          const j = JSON.parse(txt) as Record<string, unknown>
+          const achado = j.error ?? j.erro ?? j.message ?? j.msg
+          detalhe = achado ? String(achado) : txt.slice(0, 300)
+        } catch {
+          detalhe = txt.slice(0, 300)
+        }
+      }
+    } catch {
+      /* corpo ilegível: sobra o status */
+    }
+    throw new Error(`${detalhe || error.message}${status}`)
+  }
+  return data as T
+}

@@ -14,6 +14,7 @@ import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
 import { NovaTarefaModal } from '@/pages/operacional/execucao/TarefasAdvbox'
+import { FaseProcessual, FaseDrawerSection } from '@/pages/operacional/execucao/FaseProcessual'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -23,6 +24,9 @@ import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
+import { Drawer } from '@/components/ui/Drawer'
+import { DrawerHistorico } from '@/components/Movimentacoes'
+import type { Processo } from '@/lib/types'
 import {
   formatCNJ,
   formatDate,
@@ -173,7 +177,7 @@ function textoLimpo(html: unknown): string {
 }
 
 export default function PublicacoesMovimentacoes() {
-  const [aba, setAba] = useState<'publicacoes' | 'movimentacoes'>('publicacoes')
+  const [aba, setAba] = useState<'publicacoes' | 'movimentacoes' | 'fase'>('publicacoes')
   const [busca, setBusca] = useState('')
 
   const ini30 = useMemo(() => isoDiasAtras(30), [])
@@ -195,30 +199,81 @@ export default function PublicacoesMovimentacoes() {
           items={[
             { key: 'publicacoes', label: 'Publicações', count: nPub.data },
             { key: 'movimentacoes', label: 'Movimentações', count: nMov.data },
+            { key: 'fase', label: 'Fase Processual' },
           ]}
           value={aba}
           onChange={(k) => setAba(k as typeof aba)}
         />
       </div>
 
-      <Card className="mb-4 p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
-        </div>
-      </Card>
+      {/* A busca é da Publicações/Movimentações — a Fase Processual tem o
+          próprio recorte (trilha + fase), sem relação com este campo. */}
+      {aba !== 'fase' && (
+        <Card className="mb-4 p-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <Input
+              className="pl-9"
+              placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
+          </div>
+        </Card>
+      )}
 
       {aba === 'publicacoes' ? (
         <Publicacoes busca={busca} />
-      ) : (
+      ) : aba === 'movimentacoes' ? (
         <Movimentacoes busca={busca} />
+      ) : (
+        <FaseProcessualTab />
       )}
     </div>
+  )
+}
+
+/**
+ * Aba Fase Processual, dentro de Publicações e Movimentações — mesma fonte
+ * de dados da aba Movimentações (créditos, apensos, advbox_movimentacoes),
+ * por isso mora aqui. Tem gaveta própria, mais enxuta que a de Créditos: só
+ * o essencial pra identificar o crédito, a fase e o histórico.
+ */
+function FaseProcessualTab() {
+  const { data } = processosCrud.useList()
+  const [detalhe, setDetalhe] = useState<Processo | null>(null)
+  return (
+    <>
+      <FaseProcessual processos={data ?? []} onAbrirDetalhe={setDetalhe} />
+      <Drawer
+        open={!!detalhe}
+        onClose={() => setDetalhe(null)}
+        title={
+          detalhe && (
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold tracking-tight text-slate-800">
+                  {formatCNJ(detalhe.numero_cnj)}
+                </h2>
+                <Badge tone={getLabel(STATUS_PROCESSO, detalhe.status).tone}>
+                  {getLabel(STATUS_PROCESSO, detalhe.status).label}
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-600">
+                {detalhe.cedente || '—'} v. {detalhe.cessionario || '—'}
+              </p>
+            </div>
+          )
+        }
+      >
+        {detalhe && (
+          <>
+            <FaseDrawerSection processo={detalhe} />
+            <DrawerHistorico numero={detalhe.numero_cnj} />
+          </>
+        )}
+      </Drawer>
+    </>
   )
 }
 

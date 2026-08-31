@@ -12,9 +12,10 @@ import {
   ShieldCheck,
   Pencil,
   Sparkles,
+  Puzzle,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { invokeFunction } from '@/lib/functions'
+import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
 import { KOMMO_SUBDOMINIO as SUBDOMINIO_PADRAO } from '@/lib/kommo'
 import type {
   Integracao,
@@ -52,6 +53,7 @@ export default function Configuracoes() {
         <AdvboxConfig />
         <KommoConfig />
         <AnthropicConfig />
+        <SkillsConfig />
         <DjenConfig />
         <UsuariosConfig />
       </div>
@@ -196,6 +198,181 @@ function AnthropicConfig() {
               </Button>
             </div>
           </div>
+        )}
+      </CardBody>
+    </Card>
+  )
+}
+
+// ----------------------- Skills do assistente -----------------------
+
+interface SkillAssistente {
+  id: string
+  skill_id: string
+  nome: string
+  descricao: string | null
+  ativo: boolean
+  criado_em: string
+}
+
+/**
+ * Pacotes de Agent Skills da Anthropic (feitos no Claude) que o assistente
+ * pode usar. O pacote em si fica hospedado na Anthropic — aqui só se decide
+ * QUAIS estão ativas; a Edge Function `assistente` lê essa lista a cada
+ * pergunta. Uma skill ativa vale para todo mundo que usa o assistente.
+ */
+function SkillsConfig() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['assistente_skills'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('assistente_skills')
+        .select('*')
+        .order('criado_em', { ascending: false })
+      if (error) throw new Error(error.message)
+      return (data ?? []) as SkillAssistente[]
+    },
+  })
+
+  const [nome, setNome] = useState('')
+  const [descricao, setDescricao] = useState('')
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [enviando, setEnviando] = useState(false)
+  const inputArquivo = useRef<HTMLInputElement>(null)
+
+  async function enviar() {
+    if (!nome.trim()) {
+      toast.error('Dê um nome para a Skill.')
+      return
+    }
+    if (!arquivo) {
+      toast.error('Selecione o arquivo .zip da Skill.')
+      return
+    }
+    setEnviando(true)
+    try {
+      const form = new FormData()
+      form.append('nome', nome.trim())
+      if (descricao.trim()) form.append('descricao', descricao.trim())
+      form.append('arquivo', arquivo)
+      await invokeFunctionForm('assistente-skills', form)
+      setNome('')
+      setDescricao('')
+      setArquivo(null)
+      if (inputArquivo.current) inputArquivo.current.value = ''
+      await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
+      toast.success('Skill enviada. O assistente já pode usá-la.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  async function alternar(id: string) {
+    try {
+      await invokeFunction('assistente-skills', { acao: 'alternar', id })
+      await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  async function remover(id: string) {
+    try {
+      await invokeFunction('assistente-skills', { acao: 'remover', id })
+      await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
+      toast.success('Skill removida.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <Puzzle className="h-5 w-5 text-brand-600" /> Skills do assistente
+          </span>
+        }
+      />
+      <CardBody>
+        <p className="mb-4 text-sm text-slate-600">
+          Pacotes de habilidade da Anthropic (feitos no Claude, subidos como .zip) que o
+          assistente passa a usar. Uma skill ativa vale para todo mundo que usa o assistente.
+        </p>
+        {isLoading ? (
+          <Loading />
+        ) : (
+          <>
+            <AvisoLeitura error={error} />
+            {data && data.length > 0 && (
+              <Table className="mb-4">
+                <THead>
+                  <TR>
+                    <TH>Nome</TH>
+                    <TH>Status</TH>
+                    <TH />
+                  </TR>
+                </THead>
+                <TBody>
+                  {data.map((s) => (
+                    <TR key={s.id}>
+                      <TD>
+                        <p className="font-medium text-slate-800">{s.nome}</p>
+                        {s.descricao && (
+                          <p className="text-xs text-slate-500">{s.descricao}</p>
+                        )}
+                      </TD>
+                      <TD>
+                        <button type="button" onClick={() => alternar(s.id)}>
+                          <Badge tone={s.ativo ? 'green' : 'gray'}>
+                            {s.ativo ? 'Ativa' : 'Desativada'}
+                          </Badge>
+                        </button>
+                      </TD>
+                      <TD className="text-right">
+                        <IconButton
+                          label="Remover skill"
+                          icon={<Trash2 className="h-4 w-4" />}
+                          onClick={() => remover(s.id)}
+                        />
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Nome">
+                <Input
+                  value={nome}
+                  onChange={(e) => setNome(e.target.value)}
+                  placeholder="Ex: Análise de precatório"
+                />
+              </Field>
+              <Field label="Descrição (opcional)">
+                <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} />
+              </Field>
+              <Field label="Arquivo .zip da Skill" className="sm:col-span-2">
+                <input
+                  ref={inputArquivo}
+                  type="file"
+                  accept=".zip"
+                  onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
+                  className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
+                />
+              </Field>
+              <div className="sm:col-span-2">
+                <Button onClick={enviar} loading={enviando}>
+                  Enviar Skill
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </CardBody>
     </Card>

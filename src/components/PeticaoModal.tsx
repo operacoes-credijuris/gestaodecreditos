@@ -85,6 +85,7 @@ export function PeticaoModal({
   apenso,
   numeroTarefa,
   tarefaId,
+  instrucaoInicial,
 }: {
   open: boolean
   onClose: () => void
@@ -112,9 +113,16 @@ export function PeticaoModal({
   /**
    * Id da tarefa no ADVBOX. É a CHAVE DO CACHE do panorama: a mesma execução
    * recebe várias tarefas ao longo do tempo, e cada uma se analisa com um recorte
-   * diferente do mesmo processo (ver migração 0035).
+   * diferente do mesmo processo (ver migração 0035). `null` quando não há tarefa
+   * (ex: aberto a partir do assistente) — só o cache do panorama fica sem efeito.
    */
   tarefaId: string | null
+  /**
+   * Semeia o campo de instrução já preenchido — caso de uso: o assistente
+   * resolveu o crédito e a pessoa confirmou a proposta, então não faz sentido
+   * pedir para digitar de novo o que ela já pediu no chat.
+   */
+  instrucaoInicial?: string
 }) {
   const toast = useToast()
   const qc = useQueryClient()
@@ -134,7 +142,7 @@ export function PeticaoModal({
 
   // ---------- Estado da aba de IA ----------
   /** O comando do advogado ("peça o sequestro dos valores porque…"). */
-  const [instrucao, setInstrucao] = useState('')
+  const [instrucao, setInstrucao] = useState(instrucaoInicial ?? '')
   const [redigindo, setRedigindo] = useState(false)
   const [redacao, setRedacao] = useState<RespostaRedacao | null>(null)
   /**
