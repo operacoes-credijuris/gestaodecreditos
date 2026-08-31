@@ -3,11 +3,15 @@
 // Tribunal, ente devedor e investidor. Três recortes, três abas, uma tabela só.
 //
 // Toda linha responde as três perguntas de dinheiro na ordem em que se pensa
-// nelas: quanto já foi investido, quanto já voltou, quanto ainda falta voltar.
+// nelas: quanto capital está ali, quanto já voltou, quanto ainda falta voltar.
 // Os totais são sobre TODAS as operações do grupo — a pergunta "quanto esse
 // investidor já colocou" não tem nada a ver com elegibilidade para cálculo de
 // performance. As colunas de rentabilidade, essas sim, são só das encerradas,
 // e o selo de amostra ao lado diz sobre quantas.
+//
+// Os RÓTULOS dessas três colunas mudam conforme o recorte, porque a relação com
+// o dinheiro é diferente em cada um: o investidor investe e recebe, o ente deve
+// e paga, e o tribunal não faz nem uma coisa nem outra. Ver `COLUNAS`.
 
 import { useState } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -75,7 +79,7 @@ export default function Recortes() {
     <div className="space-y-6">
       <PageHeader
         title="Recortes"
-        description="Quanto cada grupo já recebeu de investimento, quanto já devolveu e quanto ainda deve."
+        description="Onde o capital está, quanto dele já voltou e quanto ainda falta voltar."
       />
 
       <Tabs
@@ -91,17 +95,74 @@ export default function Recortes() {
       <TabelaGrupos
         grupos={grupos[aba]}
         contexto={contexto[aba]}
+        colunas={COLUNAS[aba]}
         concentracao={aba === 'tribunal' ? painel.concentracao : null}
       />
     </div>
   )
 }
 
+/**
+ * Os nomes das três colunas de dinheiro mudam com o recorte, e não é firula.
+ *
+ * Só o INVESTIDOR investe e recebe — ele é o dono do dinheiro. Tribunal e ente
+ * devedor não investem coisa nenhuma: o capital apenas está aplicado em créditos
+ * que tramitam naquele tribunal, ou que aquele ente deve. Escrever "já investiu"
+ * na linha do TJGO afirma uma relação que não existe.
+ *
+ * Por isso o investidor fala na voz ativa e os outros dois na voz do dinheiro.
+ * Exceção proposital: o ente devedor É quem paga, então "já pagou" descreve o
+ * que de fato aconteceu e é mais claro que "já foi recebido".
+ */
+export const COLUNAS: Record<Aba, {
+  investido: string
+  recebido: string
+  aReceber: string
+  expInvestido: string
+  expRecebido: string
+  expAReceber: string
+}> = {
+  tribunal: {
+    investido: 'Capital aplicado',
+    recebido: 'Já retornou',
+    aReceber: 'A receber',
+    expInvestido:
+      'Capital investido em créditos que tramitam neste tribunal, em qualquer ' +
+      'status. O tribunal não recebe investimento — o dinheiro é dos investidores ' +
+      'e está nos créditos; o tribunal é onde eles correm.',
+    expRecebido: 'Quanto desse capital já voltou, somando tudo que foi pago nos créditos deste tribunal.',
+    expAReceber: 'Valor projetado das operações em aberto mais os complementares a receber.',
+  },
+  ente: {
+    investido: 'Capital aplicado',
+    recebido: 'Já pagou',
+    aReceber: 'Ainda deve',
+    expInvestido:
+      'Capital investido em créditos devidos por este ente, em qualquer status. ' +
+      'O ente não recebe investimento — ele é o devedor.',
+    expRecebido: 'Quanto este ente já pagou, somando todos os créditos dele na carteira.',
+    expAReceber:
+      'Valor projetado do que ainda falta este ente pagar: operações em aberto mais ' +
+      'os complementares.',
+  },
+  investidor: {
+    investido: 'Já investiu',
+    recebido: 'Já recebeu',
+    aReceber: 'Falta receber',
+    expInvestido:
+      'Tudo que este investidor já colocou, em qualquer status: liquidadas, em ' +
+      'complementar e em aberto.',
+    expRecebido: 'Tudo que já voltou para ele, somando todas as operações.',
+    expAReceber: 'Valor projetado das operações em aberto mais os complementares a receber.',
+  },
+}
+
 function TabelaGrupos({
-  grupos, contexto, concentracao,
+  grupos, contexto, colunas, concentracao,
 }: {
   grupos: ResumoGrupo[]
   contexto: string
+  colunas: (typeof COLUNAS)[Aba]
   concentracao: { maior: string; fracaoOperacoes: number; fracaoCapital: number; concentrada: boolean } | null
 }) {
   return (
@@ -129,19 +190,13 @@ function TabelaGrupos({
                 <TH className="text-right">Operações</TH>
                 <TH className="text-right">Encerradas</TH>
                 <TH className="text-right">
-                  <Explicacao texto="Tudo que já foi investido no grupo, em qualquer status: liquidadas, em complementar e em aberto.">
-                    Já investiu
-                  </Explicacao>
+                  <Explicacao texto={colunas.expInvestido}>{colunas.investido}</Explicacao>
                 </TH>
                 <TH className="text-right">
-                  <Explicacao texto="Tudo que já entrou de fato, somando todas as operações do grupo.">
-                    Já recebeu
-                  </Explicacao>
+                  <Explicacao texto={colunas.expRecebido}>{colunas.recebido}</Explicacao>
                 </TH>
                 <TH className="text-right">
-                  <Explicacao texto="Valor projetado das operações em aberto mais os complementares a receber.">
-                    Falta receber
-                  </Explicacao>
+                  <Explicacao texto={colunas.expAReceber}>{colunas.aReceber}</Explicacao>
                 </TH>
                 <TH className="text-right">
                   <Explicacao texto={EXPLICA.ponderada}>Retorno ponderado</Explicacao>
