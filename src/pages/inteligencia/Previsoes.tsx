@@ -10,7 +10,7 @@
 
 import { useState, type ReactNode } from 'react'
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LabelList,
 } from 'recharts'
 import { ChevronDown } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -30,6 +30,21 @@ function rotuloMes(iso: string): string {
   return new Date(ano, mes - 1, 1)
     .toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })
     .replace('.', '')
+}
+
+/**
+ * Valor em forma curta, para caber acima da barra: "R$ 120 mil", "R$ 1,3 mi".
+ *
+ * O valor exato fica no tooltip. Aqui a função é dar a ordem de grandeza sem
+ * que os rótulos colidam quando o cronograma tem muitos meses.
+ */
+function brlCurto(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  if (Math.abs(v) >= 1_000_000) {
+    return `R$ ${(v / 1_000_000).toFixed(1).replace('.', ',')} mi`
+  }
+  if (Math.abs(v) >= 1_000) return `R$ ${Math.round(v / 1000)} mil`
+  return `R$ ${Math.round(v)}`
 }
 
 /** Chave do bloco de incalculáveis, que não vem do núcleo como os outros. */
@@ -175,8 +190,8 @@ export default function Previsoes() {
 
       <Card>
         <CardHeader
-          title="Recebimentos previstos por mês"
-          description="Valor nominal. Não inclui os blocos sem data — eles aparecem abaixo."
+          title="Operações a receber por mês"
+          description="A altura é o número de operações. Acima de cada barra, o valor previsto para o mês."
         />
         <CardBody>
           {dados.length === 0 ? (
@@ -185,28 +200,57 @@ export default function Previsoes() {
               description="Nenhuma operação em aberto tem data prevista à frente de hoje."
             />
           ) : (
-            <div className="h-64">
+            <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dados} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+                <BarChart
+                  data={dados}
+                  margin={{ top: 24, right: 8, bottom: 4, left: 8 }}
+                  barCategoryGap="18%"
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} vertical={false} />
-                  <XAxis dataKey="mes" tick={{ fontSize: 12, fill: CHART.label }} tickLine={false} axisLine={false} />
+                  <XAxis
+                    dataKey="mes"
+                    tick={{ fontSize: 12, fill: CHART.label }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={0}
+                  />
+                  {/* Contagem: só inteiros. Meia operação não existe, e o eixo
+                      não deve sugerir que exista. */}
                   <YAxis
                     tick={{ fontSize: 12, fill: CHART.label }}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={(v: number) => `${Math.round(v / 1000)}k`}
+                    allowDecimals={false}
                   />
                   <Tooltip
+                    cursor={{ fill: CHART.grid, fillOpacity: 0.4 }}
                     labelStyle={{ color: CHART.ink }}
-                    formatter={(v: number, _n, p) => [
-                      `${formatBRL(v)} · ${(p?.payload as { n: number })?.n ?? 0} op.`,
-                      'Previsto',
-                    ]}
+                    formatter={(v: number, _n, p) => {
+                      const valor = (p?.payload as { valor: number })?.valor ?? 0
+                      return [
+                        `${v} ${v === 1 ? 'operação' : 'operações'} · ${formatBRL(valor)}`,
+                        'Previsto',
+                      ]
+                    }}
                   />
-                  <Bar dataKey="valor" radius={[4, 4, 0, 0]}>
-                    {dados.map((_, i) => (
-                      <Cell key={i} fill={CHART.series[i % CHART.series.length]} />
-                    ))}
+                  {/* Altura = número de operações; o valor vem como rótulo.
+                      Uma variável, uma codificação: a cor é a mesma em todas as
+                      barras e não disputa leitura com a altura.
+
+                      A contagem na altura compara melhor que o dinheiro: são
+                      inteiros pequenos, e a diferença entre 2 e 5 operações se
+                      enxerga de longe. Já o valor varia em ordens de grandeza,
+                      e é mais útil lido exato do que estimado numa régua. */}
+                  <Bar dataKey="n" radius={[4, 4, 0, 0]} fill={CHART.primary}>
+                    <LabelList
+                      dataKey="valor"
+                      position="top"
+                      offset={8}
+                      fontSize={11}
+                      fill={CHART.label}
+                      formatter={(v: number) => brlCurto(v)}
+                    />
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
