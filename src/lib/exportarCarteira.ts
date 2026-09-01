@@ -12,31 +12,13 @@
 // O ExcelJS entra por import dinâmico: são ~900 kB que só fazem sentido quando
 // alguém clica em baixar, e o pacote inteiro no bundle inicial atrasaria a
 // abertura de todas as outras telas.
-import type { Processo } from './types'
-import type { CarteiraResumo } from './queries'
-import {
-  diasEmCarteira,
-  estaPago,
-  MESES_ALERTA_LIQUIDACAO,
-  statusLiquidacao,
-  statusTir,
-  textoTipoCredito,
-  textosResumo,
-} from './labels'
 // Sem hojeISO de propósito: a data vem da tela (DadosExportacao.hoje) para o
 // arquivo ser o retrato exato do que estava na tela no momento do clique.
-import { formatCNJ, mesesDepois, onlyDigits, sentenceCase } from './format'
-import {
-  aReceberEstimado,
-  ganhoProjetado,
-  ipcaMais2,
-  retorno,
-  retornoProjetadoCarteira,
-  tir,
-  tirAgregada,
-  valorProjetado,
-  type ParametrosAtualizacao,
-} from './projecao'
+import { formatCNJ } from './format'
+import { ipcaMais2 } from './projecao'
+// As contas NÃO acontecem aqui: vêm prontas do módulo compartilhado, o mesmo
+// que alimenta a tela e o relatório em HTML. Ver carteiraInvestidor.ts.
+import { montarCarteiraDoInvestidor, type DadosCarteira } from './carteiraInvestidor'
 
 const MOEDA = 'R$ #,##0.00'
 const DATA = 'dd/mm/yyyy'
@@ -133,26 +115,11 @@ function centavos(v: number | null): number | null {
   return v === null ? null : Math.round(v * 100) / 100
 }
 
-export interface DadosExportacao {
-  investidor: string
-  mesRef: string
-  carteira: Processo[]
-  resumos: Map<string, CarteiraResumo> | undefined
-  ultimaMov: Map<string, string> | undefined
-  /** Totais dos cards que já têm valor; null = ainda não cadastrado. */
-  capitalTotal: number | null
-  jaRecebidoTotal: number | null
-  /** SELIC/IPCA da projeção do valor. */
-  parametros: ParametrosAtualizacao | undefined
-  /**
-   * O "hoje" QUE A TELA ESTÁ USANDO. Vem de fora de propósito: a tela congela a
-   * data na montagem, e o exportador chamava hojeISO() na hora do clique. Com a
-   * aba aberta atravessando a meia-noite, o arquivo era calculado com uma data e
-   * a tela com outra — dias em carteira e valor projetado saíam diferentes do que
-   * está na frente de quem baixou, e a planilha vai para o investidor.
-   */
-  hoje: string
-}
+/**
+ * O contrato de entrada é o do módulo compartilhado — mesma forma, mesmo `hoje`
+ * congelado pela tela. O alias fica para que nenhum import existente mude.
+ */
+export type DadosExportacao = DadosCarteira
 
 export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   const { default: ExcelJS } = await import('exceljs')
@@ -160,10 +127,12 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   wb.creator = 'Credijuris — Gestão de Cessões'
   const ws = wb.addWorksheet('Carteira')
 
-  // A data vem da TELA (ver DadosExportacao.hoje), não de hojeISO() aqui: com a
+  // Toda a conta da carteira, de uma vez só, pelas funções do núcleo.
+  const c = montarCarteiraDoInvestidor(d)
+
+  // A data vem da TELA (ver DadosCarteira.hoje), não de hojeISO() aqui: com a
   // aba aberta atravessando a meia-noite, arquivo e tela discordavam.
   const hoje = d.hoje
-  const limite = mesesDepois(hoje, MESES_ALERTA_LIQUIDACAO)
 
   COLUNAS.forEach((c, i) => {
     ws.getColumn(i + 1).width = c.largura
@@ -207,42 +176,13 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   // como zero por quem consome a planilha, e a tela também mostra "—".
   const SEM = '—'
 
-  // TIR média e A receber estimado saem calculados AQUI, com as mesmas funções
-  // da tela, em vez de vir por parâmetro: recomputar da mesma fonte é mais
-  // seguro que plumbing, que poderia entregar no arquivo um número diferente do
-  // exibido.
-  const porCredito = d.carteira.map((p) => {
-    const proj = valorProjetado(p, d.parametros, hoje)
-    return { p, proj, t: tir(p.capital_investido, p.data_aquisicao, proj) }
-  })
-  const tirMedia = tirAgregada(
-    porCredito.map(({ p, proj, t }) => ({
-      capital: p.capital_investido,
-      valor: proj.valor,
-      dias: t.dias,
-    })),
-  )
-  const aReceber = aReceberEstimado(
-    porCredito.map(({ p, proj }) => ({
-      proj,
-      dataLiquidacao: p.data_liquidacao,
-      valorComplementar: p.valor_estimado_complementar,
-    })),
-  )
-  const retornoCarteira = retornoProjetadoCarteira(
-    porCredito.map(({ p, proj }) => ({
-      ganho: ganhoProjetado(proj, p.capital_investido, p.valor_estimado_complementar),
-      capital: p.capital_investido,
-    })),
-  )
-
   // Mesma ordem dos cards na tela.
   const indicadores: [string, number | string | Date | null, string | undefined][] = [
     ['Capital total', centavos(d.capitalTotal) ?? SEM, MOEDA],
-    ['TIR média', tirMedia.valor ?? SEM, PCT],
-    ['Retorno projetado', retornoCarteira.valor ?? SEM, PCT],
+    ['TIR média', c.tirMedia.valor ?? SEM, PCT],
+    ['Retorno projetado', c.retornoCarteira.valor ?? SEM, PCT],
     ['Já recebido', centavos(d.jaRecebidoTotal) ?? SEM, MOEDA],
-    ['A receber estimado', centavos(aReceber.total) ?? SEM, MOEDA],
+    ['A receber estimado', centavos(c.aReceber.total) ?? SEM, MOEDA],
     ['Nº de operações', d.carteira.length, undefined],
   ]
   // Bloco rótulo/valor com moldura, usado por indicadores e parâmetros.
@@ -325,17 +265,8 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
   cab.height = 28
 
   // ---------- Linhas da carteira ----------
-  d.carteira.forEach((p, idx) => {
-    const sl = statusLiquidacao(p.data_liquidacao, p.expectativa_liquidacao, hoje, limite)
-    // Encerrado sai com a mensagem fixa, igual à tela.
-    const textos = textosResumo(p.status, d.resumos?.get(p.id))
-    const proj = valorProjetado(p, d.parametros, hoje)
-    const t = tir(p.capital_investido, p.data_aquisicao, proj)
-    const ganho = ganhoProjetado(
-      proj,
-      p.capital_investido,
-      p.valor_estimado_complementar,
-    )
+  c.linhas.forEach((l, idx) => {
+    const { p, status: sl, textos, proj, tir: t, ganho } = l
     const linha = ws.getRow(PRIMEIRA_DADO + idx)
     const valores: (string | number | Date | null)[] = [
       formatCNJ(p.numero_cnj),
@@ -343,7 +274,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       p.cedente_advogado ?? '',
       // Mesma função da tela (labels.ts), com o mesmo sentenceCase: planilha e
       // tela têm de dizer a mesma coisa sobre o mesmo crédito.
-      sentenceCase(textoTipoCredito(p.tipo_credito)),
+      l.tipoCredito,
       p.tribunal ?? '',
       p.capital_investido ?? null,
       paraData(p.data_aquisicao),
@@ -357,14 +288,14 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
       sl.label,
       textos.estagio ?? '',
       textos.providencias ?? '',
-      paraData(d.ultimaMov?.get(onlyDigits(p.numero_cnj)) ?? null),
+      paraData(l.ultimaMovimentacao),
       proj.valor,
-      statusTir(p.data_liquidacao),
+      l.statusTir,
       t.anual,
       t.mensal,
-      diasEmCarteira(p.data_aquisicao, p.data_liquidacao, hoje),
+      l.dias,
       ganho,
-      retorno(ganho, p.capital_investido),
+      l.retorno,
     ]
     const zebrar = idx % 2 === 1
     valores.forEach((v, i) => {
@@ -389,7 +320,7 @@ export async function exportarCarteiraXlsx(d: DadosExportacao): Promise<void> {
     // Status TIR segue a mesma convenção: pago em verde, projeção em cinza.
     linha.getCell(20).font = {
       size: 10,
-      color: { argb: estaPago(p.data_liquidacao) ? COR_STATUS.green : C.rotulo },
+      color: { argb: l.pago ? COR_STATUS.green : C.rotulo },
     }
   })
 
