@@ -11,7 +11,6 @@ import {
 } from 'lucide-react'
 import {
   processosCrud,
-  apensosCrud,
   useInvestidorDados,
   useUltimaMovimentacao,
 } from '@/lib/queries'
@@ -55,8 +54,7 @@ import {
 } from '@/components/ui/Table'
 import { IconButton } from '@/components/ui/IconButton'
 import { SortableTH } from '@/components/ui/SortableTH'
-import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
-import { DrawerHistorico } from '@/components/Movimentacoes'
+import { CreditoDrawer } from '@/components/CreditoDrawer'
 import { useToast } from '@/components/ui/Toast'
 import {
   getLabel,
@@ -67,7 +65,6 @@ import {
   ESPECIE_REQUISITORIO,
 } from '@/lib/labels'
 import {
-  formatBRL,
   formatBRLInput,
   formatCNJ,
   formatDate,
@@ -288,15 +285,6 @@ export default function Processos() {
   const [toDelete, setToDelete] = useState<Processo | null>(null)
   // Crédito com a ficha aberta no painel lateral (clique na linha).
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
-  // Apensos do crédito em detalhe (lista de leitura na ficha).
-  const todosApensos = apensosCrud.useList()
-  const apensosDoDetalhe = useMemo(
-    () =>
-      detalhe
-        ? (todosApensos.data ?? []).filter((a) => a.processo_id === detalhe.id)
-        : [],
-    [todosApensos.data, detalhe],
-  )
   // Erros de validação por campo, exibidos inline nos <Field>.
   const [erros, setErros] = useState<Record<string, string>>({})
   // Snapshot do formulário ao abrir — base do cálculo de "dirty".
@@ -1285,176 +1273,7 @@ export default function Processos() {
       </Modal>
 
       {/* Ficha completa do crédito — abre ao clicar na linha da tabela. */}
-      <Drawer
-        open={!!detalhe}
-        onClose={() => setDetalhe(null)}
-        title={
-          detalhe && (
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold tracking-tight text-slate-800">
-                  {formatCNJ(detalhe.numero_cnj)}
-                </h2>
-                <Badge tone={getLabel(STATUS_PROCESSO, detalhe.status).tone}>
-                  {getLabel(STATUS_PROCESSO, detalhe.status).label}
-                </Badge>
-              </div>
-              <p className="text-xs text-slate-600">
-                {detalhe.cedente || '—'} v. {detalhe.cessionario || '—'}
-              </p>
-            </div>
-          )
-        }
-        // Sem footer: a ficha é só leitura. Editar e excluir ficam nos botões
-        // da própria linha da tabela.
-      >
-        {detalhe && (
-          <>
-            <DrawerSection title="Partes">
-              <DrawerField label="Cedente">{detalhe.cedente || '—'}</DrawerField>
-              <DrawerField label="Advogado do cedente">
-                {detalhe.cedente_advogado || '—'}
-              </DrawerField>
-              <DrawerField label="Cessionário">
-                {detalhe.cessionario || '—'}
-              </DrawerField>
-              <DrawerField label="Originador">
-                {detalhe.originador || '—'}
-              </DrawerField>
-              <DrawerField label="Entidade devedora">
-                {detalhe.entidade_devedora || '—'}
-              </DrawerField>
-            </DrawerSection>
-
-            <DrawerSection title="Processo">
-              <DrawerField label="Tribunal">{detalhe.tribunal || '—'}</DrawerField>
-              <DrawerField label="Comarca">{detalhe.comarca || '—'}</DrawerField>
-              <DrawerField label="Vara">{detalhe.vara || '—'}</DrawerField>
-              {/* Só em precatório, como no formulário — RPV não tem processo
-                  administrativo, e um "—" fixo aqui afirmaria que falta o dado. */}
-              {(detalhe.especie_requisitorio === 'precatorio' ||
-                !!detalhe.numero_processo_administrativo) && (
-                <DrawerField label="Nº do processo administrativo">
-                  {detalhe.numero_processo_administrativo || '—'}
-                </DrawerField>
-              )}
-            </DrawerSection>
-
-            <DrawerSection title="Aquisição e liquidação">
-              <DrawerField label="Instrumento">
-                {detalhe.instrumento
-                  ? getLabel(INSTRUMENTO, detalhe.instrumento).label
-                  : '—'}
-              </DrawerField>
-              <DrawerField label="Nº RTDPJ">
-                {detalhe.instrumento === 'registro_publico' && detalhe.numero_rtdpj
-                  ? splitRtdpj(detalhe.numero_rtdpj).map((n, i) => (
-                      <div key={i}>{n}</div>
-                    ))
-                  : '—'}
-              </DrawerField>
-              <DrawerField label="Data de aquisição">
-                {formatDate(detalhe.data_aquisicao)}
-              </DrawerField>
-              <DrawerField label="Expectativa de liquidação">
-                {formatDate(detalhe.expectativa_liquidacao)}
-              </DrawerField>
-              {emLiquidacao(detalhe.status) && (
-                <DrawerField label="Data de liquidação">
-                  {formatDate(detalhe.data_liquidacao)}
-                </DrawerField>
-              )}
-              <DrawerField label="Espécie do requisitório">
-                {detalhe.especie_requisitorio ? (
-                  <Badge
-                    tone={
-                      getLabel(ESPECIE_REQUISITORIO, detalhe.especie_requisitorio).tone
-                    }
-                  >
-                    {getLabel(ESPECIE_REQUISITORIO, detalhe.especie_requisitorio).label}
-                  </Badge>
-                ) : (
-                  '—'
-                )}
-              </DrawerField>
-              {/* Ocupa a linha inteira: são até três selos lado a lado. */}
-              <div className="col-span-2">
-                <DrawerField label="Tipo de crédito">
-                  {detalhe.tipo_credito?.length ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {detalhe.tipo_credito.map((t) => {
-                        const l = getLabel(TIPO_CREDITO, t)
-                        return (
-                          <Badge key={t} tone={l.tone}>
-                            {l.label}
-                          </Badge>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    '—'
-                  )}
-                </DrawerField>
-              </div>
-              <DrawerField label="Capital investido">
-                {formatBRL(detalhe.capital_investido)}
-              </DrawerField>
-              <DrawerField label="Valor de face">
-                {formatBRL(detalhe.valor_face)}
-              </DrawerField>
-              <DrawerField label="Data de referência">
-                {formatDate(detalhe.data_referencia)}
-              </DrawerField>
-              <DrawerField label="Índice de atualização">
-                {detalhe.indice_atualizacao
-                  ? getLabel(INDICE_ATUALIZACAO, detalhe.indice_atualizacao).label
-                  : '—'}
-              </DrawerField>
-              {emLiquidacao(detalhe.status) && (
-                <>
-                  <DrawerField label="Já recebido">
-                    {formatBRL(detalhe.ja_recebido)}
-                  </DrawerField>
-                  <DrawerField label="Valor estimado complementar">
-                    {formatBRL(detalhe.valor_estimado_complementar)}
-                  </DrawerField>
-                </>
-              )}
-            </DrawerSection>
-
-            <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
-              {apensosDoDetalhe.length === 0 ? (
-                <p className="col-span-2 text-sm text-slate-600">
-                  Nenhum apenso vinculado.
-                </p>
-              ) : (
-                <div className="col-span-2 space-y-2">
-                  {apensosDoDetalhe.map((a) => (
-                    <div
-                      key={a.id}
-                      className="rounded-lg border border-slate-200 p-2.5"
-                    >
-                      <div className="text-sm font-medium text-slate-800">
-                        {formatCNJ(a.numero || '')}
-                      </div>
-                      <div className="text-xs text-slate-600">
-                        {[a.classe_processual, a.tribunal, a.comarca]
-                          .filter(Boolean)
-                          .join(' · ') || '—'}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </DrawerSection>
-
-            {/* Histórico integral do ADVBOX — SÓ do principal. Andamento de
-                apenso fica na ficha do apenso (clique no card dele): autos
-                próprios, sem mistura. */}
-            <DrawerHistorico numero={detalhe.numero_cnj} />
-          </>
-        )}
-      </Drawer>
+      <CreditoDrawer processo={detalhe} onClose={() => setDetalhe(null)} />
 
       <ConfirmDialog
         open={!!toDelete}

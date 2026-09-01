@@ -415,6 +415,8 @@ Deno.serve(async (req: Request) => {
       fase_codigo?: string
       tratado?: boolean
       movimentacao_data?: string
+      situacao_id?: string | null
+      situacao_data?: string | null
     }
 
     const svc = serviceClient()
@@ -430,6 +432,21 @@ Deno.serve(async (req: Request) => {
           tratado: body.tratado === true,
           tratado_em: body.tratado === true ? new Date().toISOString() : null,
           tratado_movimentacao_data: body.tratado === true ? (body.movimentacao_data ?? null) : null,
+        })
+        .eq('processo_id', body.processo_id)
+      return jsonResponse({ ok: true })
+    }
+
+    // ----- "Situação" e "Data da Situação" (anotação manual, por fase) -----
+    if (body.acao === 'definir_situacao') {
+      const caller = await getCallerAtivo(req, svc)
+      if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
+      if (!body.processo_id) return jsonResponse({ error: 'Informe processo_id.' }, 400)
+      await svc
+        .from('processos_fase')
+        .update({
+          situacao_id: body.situacao_id ?? null,
+          situacao_data: body.situacao_data ?? null,
         })
         .eq('processo_id', body.processo_id)
       return jsonResponse({ ok: true })
