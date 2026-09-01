@@ -10,6 +10,8 @@ import {
   Sparkles,
   RefreshCw,
   Download,
+  FileText,
+  MessageSquareText,
   SlidersHorizontal,
 } from 'lucide-react'
 import {
@@ -19,10 +21,11 @@ import {
   useUltimaMovimentacao,
 } from '@/lib/queries'
 import type { Processo } from '@/lib/types'
+// Usadas só na aba Visão global, que agrega por investidor e não por carteira.
+// A aba Individual não chama nada disto: ver `calc`, mais abaixo.
 import {
   aReceberEstimado,
   ganhoProjetado,
-  retorno,
   retornoProjetadoCarteira,
   tir,
   tirAgregada,
@@ -30,17 +33,12 @@ import {
 } from '@/lib/projecao'
 import { invokeFunction } from '@/lib/functions'
 import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
-import { ModalParametrosAtualizacao } from '@/components/ParametrosAtualizacao'
 import {
-  diasEmCarteira,
-  getLabel,
-  INDICE_ATUALIZACAO,
-  MESES_ALERTA_LIQUIDACAO,
-  statusLiquidacao,
-  statusTir,
-  textoTipoCredito,
-  textosResumo,
-} from '@/lib/labels'
+  montarCarteiraDoInvestidor,
+  type DadosCarteira,
+} from '@/lib/carteiraInvestidor'
+import { ModalParametrosAtualizacao } from '@/components/ParametrosAtualizacao'
+import { getLabel, INDICE_ATUALIZACAO, textosResumo } from '@/lib/labels'
 import { cn } from '@/lib/cn'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -69,9 +67,7 @@ import {
   formatDateTime,
   formatPercent,
   hojeISO,
-  mesesDepois,
   normalizarNome,
-  onlyDigits,
   sentenceCase,
 } from '@/lib/format'
 
@@ -287,10 +283,6 @@ function Individual() {
   // Réguas do semáforo da coluna Status. Calculadas no render: na virada do dia
   // a cor anda sozinha, sem ninguém reabrir a tela.
   const hoje = useMemo(() => hojeISO(), [])
-  const limiteAlerta = useMemo(
-    () => mesesDepois(hoje, MESES_ALERTA_LIQUIDACAO),
-    [hoje],
-  )
 
   // Cessionários distintos, em ordem alfabética.
   const investidores = useMemo(() => {
@@ -359,36 +351,39 @@ function Individual() {
   }, [carteira])
 
   /**
-   * Cards que dependem da projeção. Ficam num memo próprio porque recalculam
-   * quando os parâmetros mudam, e não só quando a carteira muda.
+   * A CARTEIRA CALCULADA — ponto único.
+   *
+   * Os cards, a tabela, o Excel e o relatório em HTML leem daqui. Antes, cada
+   * um refazia o mesmo `valorProjetado -> tir -> tirAgregada` por conta própria;
+   * bastava alguém ajustar a conta num só lugar para a plataforma publicar dois
+   * números diferentes da mesma carteira. Ver lib/carteiraInvestidor.ts.
    */
-  const derivados = useMemo(() => {
-    const itens = carteira.map((p) => {
-      const proj = valorProjetado(p, parametros.data, hoje)
-      return { p, proj, t: tir(p.capital_investido, p.data_aquisicao, proj) }
-    })
-    const media = tirAgregada(
-      itens.map(({ p, proj, t }) => ({
-        capital: p.capital_investido,
-        valor: proj.valor,
-        dias: t.dias,
-      })),
-    )
-    const aReceber = aReceberEstimado(
-      itens.map(({ p, proj }) => ({
-        proj,
-        dataLiquidacao: p.data_liquidacao,
-        valorComplementar: p.valor_estimado_complementar,
-      })),
-    )
-    const retornoCarteira = retornoProjetadoCarteira(
-      itens.map(({ p, proj }) => ({
-        ganho: ganhoProjetado(proj, p.capital_investido, p.valor_estimado_complementar),
-        capital: p.capital_investido,
-      })),
-    )
-    return { tirMedia: media, aReceber, retorno: retornoCarteira }
-  }, [carteira, parametros.data, hoje])
+  const dadosCarteira = useMemo<DadosCarteira>(
+    () => ({
+      investidor: investidor ?? '',
+      mesRef,
+      carteira,
+      resumos: resumos.data,
+      ultimaMov: ultimaMov.data,
+      capitalTotal: totais.capital.total,
+      jaRecebidoTotal: totais.recebido.total,
+      parametros: parametros.data,
+      // O mesmo `hoje` congelado na montagem, para tela e arquivos coincidirem.
+      hoje,
+    }),
+    [
+      investidor,
+      mesRef,
+      carteira,
+      resumos.data,
+      ultimaMov.data,
+      totais.capital.total,
+      totais.recebido.total,
+      parametros.data,
+      hoje,
+    ],
+  )
+  const calc = useMemo(() => montarCarteiraDoInvestidor(dadosCarteira), [dadosCarteira])
 
   // "3 de 7 créditos" quando falta cadastro; some quando está tudo lá.
   const cobertura = (n: number) =>
@@ -398,31 +393,54 @@ function Individual() {
         ? 'soma dos créditos deste investidor'
         : `soma de ${n} de ${carteira.length} créditos — os demais sem valor cadastrado`
 
-  // Download do xlsx com o conteúdo da tela. O ExcelJS entra por import
-  // dinâmico dentro de exportarCarteiraXlsx: quem clica é que paga o pacote.
-  // Declarado antes do primeiro return condicional, senão o hook desapareceria
-  // do render enquanto a lista estivesse carregando.
+  // Downloads. Os dois pacotes pesados — ExcelJS e a marca em base64 — entram
+  // por import dinâmico lá dentro: quem clica é que paga.
+  // Declarados antes do primeiro return condicional, senão os hooks
+  // desapareceriam do render enquanto a lista estivesse carregando.
   const [baixando, setBaixando] = useState(false)
+  const [gerandoHtml, setGerandoHtml] = useState(false)
+
   async function baixarXlsx() {
     if (!investidor) return
     setBaixando(true)
     try {
-      await exportarCarteiraXlsx({
-        investidor,
-        mesRef,
-        carteira,
-        resumos: resumos.data,
-        ultimaMov: ultimaMov.data,
-        capitalTotal: totais.capital.total,
-        jaRecebidoTotal: totais.recebido.total,
-        parametros: parametros.data,
-        // O mesmo `hoje` da tela, para o arquivo ser o retrato do que está nela.
-        hoje,
-      })
+      await exportarCarteiraXlsx(dadosCarteira)
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
       setBaixando(false)
+    }
+  }
+
+  /**
+   * Relatório do investidor em HTML: baixa o arquivo e abre uma aba para
+   * conferência antes do envio. É o documento que hoje é montado à mão fora da
+   * plataforma; aqui todo número dele vem do mesmo `calc` que pinta a tela.
+   */
+  async function gerarRelatorio() {
+    if (!investidor) return
+    setGerandoHtml(true)
+    try {
+      const { baixarRelatorioCarteira } = await import('@/lib/relatorioCarteira')
+      await baixarRelatorioCarteira(calc)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setGerandoHtml(false)
+    }
+  }
+
+  /** Texto de acompanhamento, para colar no WhatsApp junto com o arquivo. */
+  async function copiarMensagem() {
+    if (!investidor) return
+    try {
+      const { mensagemWhatsapp } = await import('@/lib/relatorioCarteira')
+      await navigator.clipboard.writeText(mensagemWhatsapp(calc))
+      toast.success('Mensagem copiada. É só colar no WhatsApp junto com o relatório.')
+    } catch {
+      // Área de transferência bloqueada acontece: contexto não seguro, permissão
+      // negada, navegador antigo. Dizer o que houve é melhor que falhar calado.
+      toast.error('O navegador não liberou a área de transferência. Gere o relatório e copie o texto de lá.')
     }
   }
 
@@ -504,6 +522,28 @@ function Individual() {
           >
             Baixar Excel
           </Button>
+          {/* O documento que vai ao investidor. Ação primária desta barra: é o
+              fim do trabalho do mês, e os outros três botões existem para
+              preparar este. */}
+          <Button
+            className={ALTURA_CONTROLE}
+            icon={<FileText className="h-4 w-4" />}
+            loading={gerandoHtml}
+            disabled={!investidor || carteira.length === 0}
+            onClick={gerarRelatorio}
+          >
+            Relatório do investidor
+          </Button>
+          <Button
+            variant="outline"
+            className={ALTURA_CONTROLE}
+            icon={<MessageSquareText className="h-4 w-4" />}
+            disabled={!investidor || carteira.length === 0}
+            onClick={copiarMensagem}
+            title="Copia o texto de acompanhamento para colar no WhatsApp junto com o relatório"
+          >
+            Mensagem
+          </Button>
         </div>
       </div>
 
@@ -524,16 +564,16 @@ function Individual() {
         <StatCard
           label="TIR média"
           value={
-            investidor && derivados.tirMedia.valor !== null
-              ? formatPercent(derivados.tirMedia.valor)
+            investidor && calc.tirMedia.valor !== null
+              ? formatPercent(calc.tirMedia.valor)
               : '—'
           }
           hint={
             !investidor
               ? 'selecione um investidor'
-              : derivados.tirMedia.valor === null
+              : calc.tirMedia.valor === null
                 ? 'nenhum crédito com TIR calculável'
-                : `carteira como fluxo único, prazo médio de ${derivados.tirMedia.prazoMedioDias} dias, ${derivados.tirMedia.considerados} de ${carteira.length} créditos`
+                : `carteira como fluxo único, prazo médio de ${calc.tirMedia.prazoMedioDias} dias, ${calc.tirMedia.considerados} de ${carteira.length} créditos`
           }
           icon={<Percent className="h-5 w-5" />}
           tone="green"
@@ -541,16 +581,16 @@ function Individual() {
         <StatCard
           label="Retorno projetado"
           value={
-            investidor && derivados.retorno.valor !== null
-              ? formatPercent(derivados.retorno.valor)
+            investidor && calc.retornoCarteira.valor !== null
+              ? formatPercent(calc.retornoCarteira.valor)
               : '—'
           }
           hint={
             !investidor
               ? 'selecione um investidor'
-              : derivados.retorno.valor === null
+              : calc.retornoCarteira.valor === null
                 ? 'nenhum crédito com ganho calculável'
-                : `soma dos ganhos sobre a soma do capital, de ${derivados.retorno.considerados} de ${carteira.length} créditos`
+                : `soma dos ganhos sobre a soma do capital, de ${calc.retornoCarteira.considerados} de ${carteira.length} créditos`
           }
           icon={<Target className="h-5 w-5" />}
           tone="amber"
@@ -573,27 +613,27 @@ function Individual() {
         <StatCard
           label="A receber estimado"
           value={
-            investidor && derivados.aReceber.total !== null
-              ? formatBRL(derivados.aReceber.total)
+            investidor && calc.aReceber.total !== null
+              ? formatBRL(calc.aReceber.total)
               : '—'
           }
           hint={
             !investidor
               ? 'selecione um investidor'
-              : derivados.aReceber.total === null
+              : calc.aReceber.total === null
                 ? // "Nada a receber" é conclusão, e só vale quando não há crédito
                   // em aberto. Com crédito aberto e projeção incalculável (índice
                   // do crédito ou parâmetro de atualização em falta), o card
                   // afirmava que o investidor não tem nada a receber — o oposto
                   // da verdade.
-                  derivados.aReceber.incalculaveis > 0
-                  ? `sem projeção calculável em ${derivados.aReceber.incalculaveis} crédito(s) — confira o índice e os Parâmetros de atualização`
+                  calc.aReceber.incalculaveis > 0
+                  ? `sem projeção calculável em ${calc.aReceber.incalculaveis} crédito(s) — confira o índice e os Parâmetros de atualização`
                   : 'nada a receber nesta carteira'
                 : [
-                    derivados.aReceber.emAberto > 0 &&
-                      `${derivados.aReceber.emAberto} crédito(s) em aberto`,
-                    derivados.aReceber.complementares > 0 &&
-                      `${derivados.aReceber.complementares} complementar(es) pendente(s)`,
+                    calc.aReceber.emAberto > 0 &&
+                      `${calc.aReceber.emAberto} crédito(s) em aberto`,
+                    calc.aReceber.complementares > 0 &&
+                      `${calc.aReceber.complementares} complementar(es) pendente(s)`,
                   ]
                     .filter(Boolean)
                     .join(' + ')
@@ -685,24 +725,12 @@ function Individual() {
                 </tr>
               </THead>
               <TBody>
-                {carteira.map((p) => {
-                  const sl = statusLiquidacao(
-                    p.data_liquidacao,
-                    p.expectativa_liquidacao,
-                    hoje,
-                    limiteAlerta,
-                  )
+                {calc.linhas.map((l) => {
+                  // Tudo já veio calculado do módulo compartilhado; aqui só se
+                  // formata. `resumo` continua sendo lido direto porque a célula
+                  // precisa do campo `erro`, que não é conteúdo do relatório.
+                  const { p, status: sl, textos, proj, tir: tirCred, ganho, retorno: ret } = l
                   const resumo = resumos.data?.get(p.id)
-                  // Encerrado usa mensagem fixa; o resto vem da IA.
-                  const textos = textosResumo(p.status, resumo)
-                  const proj = valorProjetado(p, parametros.data, hoje)
-                  const tirCred = tir(p.capital_investido, p.data_aquisicao, proj)
-                  const ganho = ganhoProjetado(
-                    proj,
-                    p.capital_investido,
-                    p.valor_estimado_complementar,
-                  )
-                  const ret = retorno(ganho, p.capital_investido)
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
@@ -714,7 +742,7 @@ function Individual() {
                     {/* Numa linha só: a coluna se alarga conforme o texto (a
                         tabela já rola na horizontal) em vez de esticar a altura
                         da linha. Inicial maiúscula, resto minúsculo. */}
-                    <TD>{sentenceCase(textoTipoCredito(p.tipo_credito))}</TD>
+                    <TD>{l.tipoCredito}</TD>
                     <TD>{p.tribunal || '—'}</TD>
 
                     {/* TIR obrigatório */}
@@ -796,11 +824,7 @@ function Individual() {
                     {/* Do cache do ADVBOX, casado por dígitos. Enquanto o mapa
                         carrega mostra vazio em vez de "—", que seria mentira. */}
                     <TD className="tabular-nums">
-                      {ultimaMov.isLoading
-                        ? ''
-                        : formatDate(
-                            ultimaMov.data?.get(onlyDigits(p.numero_cnj)) ?? null,
-                          )}
+                      {ultimaMov.isLoading ? '' : formatDate(l.ultimaMovimentacao)}
                     </TD>
 
                     {/* Calculado automaticamente */}
@@ -834,12 +858,10 @@ function Individual() {
                         mesma convenção da coluna Status. */}
                     <TD
                       className={
-                        p.data_liquidacao
-                          ? 'font-medium text-emerald-700'
-                          : 'text-slate-600'
+                        l.pago ? 'font-medium text-emerald-700' : 'text-slate-600'
                       }
                     >
-                      {statusTir(p.data_liquidacao)}
+                      {l.statusTir}
                     </TD>
                     {/* Taxa equivalente do fluxo cessão -> data do valor. O
                         title mostra o prazo usado, que NÃO é "Dias em carteira"
@@ -865,9 +887,7 @@ function Individual() {
                     {/* Da cessão até hoje enquanto não liquida; liquidado, para
                         na data de recebimento efetivo. Recalculado no render, o
                         número anda sozinho na virada do dia. */}
-                    <TD className="text-right tabular-nums">
-                      {diasEmCarteira(p.data_aquisicao, p.data_liquidacao, hoje) ?? '—'}
-                    </TD>
+                    <TD className="text-right tabular-nums">{l.dias ?? '—'}</TD>
                     {/* (projetado + complementar) − capital. Negativo em
                         vermelho: prejuízo não pode passar batido. */}
                     <TD className="text-right tabular-nums">
