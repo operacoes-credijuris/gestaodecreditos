@@ -14,7 +14,7 @@ import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { getLabel, STATUS_PROCESSO } from '@/lib/labels'
 import { NovaTarefaModal } from '@/pages/operacional/execucao/TarefasAdvbox'
-import { FaseProcessual, FaseDrawerSection } from '@/pages/operacional/execucao/FaseProcessual'
+import { FaseProcessual } from '@/pages/operacional/execucao/FaseProcessual'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -24,8 +24,7 @@ import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { Drawer } from '@/components/ui/Drawer'
-import { DrawerHistorico } from '@/components/Movimentacoes'
+import { CreditoDrawer } from '@/components/CreditoDrawer'
 import type { Processo } from '@/lib/types'
 import {
   formatCNJ,
@@ -236,8 +235,9 @@ export default function PublicacoesMovimentacoes() {
 /**
  * Aba Fase Processual, dentro de Publicações e Movimentações — mesma fonte
  * de dados da aba Movimentações (créditos, apensos, advbox_movimentacoes),
- * por isso mora aqui. Tem gaveta própria, mais enxuta que a de Créditos: só
- * o essencial pra identificar o crédito, a fase e o histórico.
+ * por isso mora aqui. A gaveta é a MESMA ficha completa de Créditos (não uma
+ * versão enxuta à parte) — um componente só, pra não ter duas fichas
+ * divergindo aos poucos.
  */
 function FaseProcessualTab() {
   const { data } = processosCrud.useList()
@@ -245,34 +245,7 @@ function FaseProcessualTab() {
   return (
     <>
       <FaseProcessual processos={data ?? []} onAbrirDetalhe={setDetalhe} />
-      <Drawer
-        open={!!detalhe}
-        onClose={() => setDetalhe(null)}
-        title={
-          detalhe && (
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold tracking-tight text-slate-800">
-                  {formatCNJ(detalhe.numero_cnj)}
-                </h2>
-                <Badge tone={getLabel(STATUS_PROCESSO, detalhe.status).tone}>
-                  {getLabel(STATUS_PROCESSO, detalhe.status).label}
-                </Badge>
-              </div>
-              <p className="text-xs text-slate-600">
-                {detalhe.cedente || '—'} v. {detalhe.cessionario || '—'}
-              </p>
-            </div>
-          )
-        }
-      >
-        {detalhe && (
-          <>
-            <FaseDrawerSection processo={detalhe} />
-            <DrawerHistorico numero={detalhe.numero_cnj} />
-          </>
-        )}
-      </Drawer>
+      <CreditoDrawer processo={detalhe} onClose={() => setDetalhe(null)} />
     </>
   )
 }
