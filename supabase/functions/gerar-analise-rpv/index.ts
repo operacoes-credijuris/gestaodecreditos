@@ -418,40 +418,40 @@ function aplicarCoresJuridica(ws: any) {
     });
 
   // Sim/Não — aplica em toda a faixa de respostas (só pinta onde o texto casa)
-  add('B9:B40', [
+  add('B12:B43', [
     { f: '$B9="Sim"', cor: COR.verde },
     { f: '$B9="Não"', cor: COR.vermelho },
   ]);
   // B20 — tipo de sentença
-  add('B20', [
-    { f: '$B20="Procedência"', cor: COR.verde },
-    { f: '$B20="Improcedência"', cor: COR.vermelho },
-    { f: '$B20="Procedência parcial"', cor: COR.azul },
-    { f: '$B20="Homologatória de acordo"', cor: COR.roxo },
+  add('B23', [
+    { f: '$B23="Procedência"', cor: COR.verde },
+    { f: '$B23="Improcedência"', cor: COR.vermelho },
+    { f: '$B23="Procedência parcial"', cor: COR.azul },
+    { f: '$B23="Homologatória de acordo"', cor: COR.roxo },
   ]);
   // B21 — líquida/ilíquida
-  add('B21', [
-    { f: '$B21="Líquida"', cor: COR.verde },
-    { f: '$B21="Iliquída"', cor: COR.vermelho },
+  add('B24', [
+    { f: '$B24="Líquida"', cor: COR.verde },
+    { f: '$B24="Iliquída"', cor: COR.vermelho },
   ]);
   // B25 — valor apresentado / execução invertida
-  add('B25', [
-    { f: '$B25="Valor apresentado no CS"', cor: COR.roxo },
-    { f: '$B25="Execução invertida"', cor: COR.azul },
+  add('B28', [
+    { f: '$B28="Valor apresentado no CS"', cor: COR.roxo },
+    { f: '$B28="Execução invertida"', cor: COR.azul },
   ]);
   // B27 — cenários de execução invertida (cinza p/ qualquer preenchimento)
-  add('B27', [{ f: '$B27<>""', cor: COR.cinza }]);
+  add('B30', [{ f: '$B30<>""', cor: COR.cinza }]);
   // B39 — expedição
-  add('B39', [
-    { f: '$B39="Minuta de RPV"', cor: COR.laranja },
-    { f: '$B39="RPV"', cor: COR.verde },
-    { f: '$B39="Alvará de pagamento"', cor: COR.azul },
-    { f: '$B39="Sem expedição"', cor: COR.roxo },
+  add('B42', [
+    { f: '$B42="Minuta de RPV"', cor: COR.laranja },
+    { f: '$B42="RPV"', cor: COR.verde },
+    { f: '$B42="Alvará de pagamento"', cor: COR.azul },
+    { f: '$B42="Sem expedição"', cor: COR.roxo },
   ]);
   // B40 — necessidade de alvará
-  add('B40', [
-    { f: '$B40="Não precisa de alvará"', cor: COR.azul },
-    { f: '$B40="Precisa de alvará"', cor: COR.roxo },
+  add('B43', [
+    { f: '$B43="Não precisa de alvará"', cor: COR.azul },
+    { f: '$B43="Precisa de alvará"', cor: COR.roxo },
   ]);
 }
 
@@ -485,15 +485,15 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // ---------------- Aba jurídica: cabeçalho ----------------
   aj.getCell('C1').value = dados.numero_processo ?? '';
   aj.getCell('C2').value = dados.originador ?? '';
-  aj.getCell('C3').value = dados.tipo_credito ?? '';          // dropdown: tipo de crédito
-  aj.getCell('C4').value = dados.cedente_cpf ?? '';
-  aj.getCell('C5').value = dados.advogado_oab ?? '';
-  aj.getCell('C6').value = dados.tribunal ?? '';
+  // C3/C4/C5 agora são sub-rótulos (Crédito principal / Honorários contratuais / Honorários sucumbenciais) na planilha nova — NÃO sobrescrever.
+  aj.getCell('C6').value = dados.cedente_cpf ?? '';
+  aj.getCell('C7').value = dados.advogado_oab ?? '';
+  aj.getCell('C8').value = dados.tribunal ?? '';
 
   // ---------------- Aba jurídica: respostas M2 (col B) + complementos (col D) ----------------
-  // dados.m2 = { "9": {resposta, complemento}, "10": {...}, ... } indexado pela LINHA da planilha
-  const PULAR_LINHA = new Set([26]);       // 26 = bloco fixo "CUIDADO" (mesclado A26:D26) — nunca escrever
-  const SEM_COMPLEMENTO = new Set([29]);   // 29: C29:D29 já é mesclado (instrução) — não gravar D29
+  // dados.m2 = { "12": {resposta, complemento}, ... } indexado pela LINHA da planilha (perguntas 12..43)
+  const PULAR_LINHA = new Set([29]);       // 26 = bloco fixo "CUIDADO" (mesclado A26:D26) — nunca escrever
+  const SEM_COMPLEMENTO = new Set([32]);   // 29: C29:D29 já é mesclado (instrução) — não gravar D29
   for (const [linha, item] of Object.entries<any>(dados.m2 || {})) {
     const r = Number(linha);
     if (PULAR_LINHA.has(r)) continue;
@@ -503,7 +503,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   }
 
   // bloco do valor final (B41) — espelha D37/B43 da metodologia
-  aj.getCell('B41').value =
+  aj.getCell('B44').value =
     `VALOR TOTAL BRUTO: ${brl(dados.bruto_total)}\n` +
     `Valor principal líquido: ${brl(calc.L5)}\n` +
     `Valor dos honorários contratuais: ${brl(calc.L7)}`;
@@ -600,8 +600,8 @@ const SCHEMA_ANALISE = {
   gabinete_dias: 'tempo médio do gabinete em dias (média dos pares conclusão→decisão)',
   m4_pares: 'lista de pares {de, ate, dias, tipo:"serventia"|"gabinete"} usados na média',
 
-  // M2 — 25 respostas. Chave = nº da linha na aba jurídica (9..40).
-  m2: 'objeto { "9": {"resposta":"Sim/Não/...", "complemento":"data DD/MM/AAAA ou valor R$ ou vazio"}, ... } cobrindo as linhas 9 a 40',
+  // M2 — 25 respostas. Chave = nº da linha na aba jurídica (12..43).
+  m2: 'objeto { "9": {"resposta":"Sim/Não/...", "complemento":"data DD/MM/AAAA ou valor R$ ou vazio"}, ... } cobrindo as linhas 12 a 43',
 
   // M1 + riscos (vão no .md, não na planilha)
   m1_sintese: 'Síntese do processo em UM parágrafo corrido, começando com "Trata-se", no máximo 10 linhas, SEM tópicos/bullets. ' +
@@ -665,40 +665,40 @@ const SYSTEM_ANALISE =
   'Use SEMPRE os valores EXATOS das listas suspensas quando indicado — a coluna B só aceita esses valores. ' +
   'Datas em DD/MM/AAAA. Valores monetários SEMPRE em Real no padrão brasileiro: VÍRGULA como separador decimal e PONTO como separador de milhar, com prefixo R$ (ex.: R$ 1.234,56). NUNCA use ponto como separador decimal. Se a resposta for "Não", deixe o complemento vazio. ' +
   'Se o dado não estiver claro, deixe vazio (NUNCA escreva "não encontrado"/"verificar" no complemento). ' +
-  '9: "Histórico do cedente: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
-  '10: "Histórico do advogado: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
-  '11: "Nesse tribunal, precisa de registro público?" -> Sim/Não; complemento: se Sim, link da jurisprudência. ' +
-  '12: "Qual é o tipo da ação?" -> TEXTO livre (ex.: "ação de cobrança de horas extras de piso de magistério"); sem complemento. ' +
-  '13: "Esse tipo de crédito pode ser negociado pela jurisprudência?" -> Sim/Não; complemento: se Sim, link. ' +
-  '14: "Quem é o polo ativo?" -> TEXTO (nome); sem complemento. ' +
-  '15: "O polo ativo é maior de idade?" -> Sim/Não. ' +
-  '16: "O polo ativo possui prioridade legal (60+/doença grave/PCD)?" -> Sim/Não; complemento: qual(is). ' +
-  '17: "Possui curatela ou tutela?" -> Sim/Não; complemento: nome do curador/tutor. ' +
-  '18: "Quem está sendo processado?" -> TEXTO (ente); sem complemento. ' +
-  '19: "Houve sentença?" -> Sim/Não; complemento: data. ' +
-  '20: "Tipo da sentença" -> um EXATO de: Improcedência | Procedência | Procedência parcial | Homologatória de acordo. ' +
-  '21: "A sentença é líquida ou ilíquida?" -> um EXATO de: Líquida | Iliquída; complemento: se Líquida, o valor. ' +
-  '22: "Houve recurso?" -> Sim/Não; complemento: resultado e data do julgamento. ' +
-  '23: "Houve trânsito em julgado?" -> Sim/Não; complemento: data. ' +
-  '24: "Iniciou o cumprimento de sentença?" -> Sim/Não; complemento: data do peticionamento. ' +
-  '25: "Foi apresentado valor no CS ou solicitado execução invertida?" -> um EXATO de: Valor apresentado no CS | Execução invertida. ' +
-  '26: BLOCO FIXO "CUIDADO" — NÃO é pergunta. NÃO inclua a chave "26" no m2. ' +
-  '27: "Em caso de execução invertida, qual cenário?" (só se foi execução invertida; senão vazio) -> um EXATO de: ' +
+  '12: "Histórico do cedente: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
+  '13: "Histórico do advogado: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
+  '14: "Nesse tribunal, precisa de registro público?" -> Sim/Não; complemento: se Sim, link da jurisprudência. ' +
+  '15: "Qual é o tipo da ação?" -> TEXTO livre (ex.: "ação de cobrança de horas extras de piso de magistério"); sem complemento. ' +
+  '16: "Esse tipo de crédito pode ser negociado pela jurisprudência?" -> Sim/Não; complemento: se Sim, link. ' +
+  '17: "Quem é o polo ativo?" -> TEXTO (nome); sem complemento. ' +
+  '18: "O polo ativo é maior de idade?" -> Sim/Não. ' +
+  '19: "O polo ativo possui prioridade legal (60+/doença grave/PCD)?" -> Sim/Não; complemento: qual(is). ' +
+  '20: "Possui curatela ou tutela?" -> Sim/Não; complemento: nome do curador/tutor. ' +
+  '21: "Quem está sendo processado?" -> TEXTO (ente); sem complemento. ' +
+  '22: "Houve sentença?" -> Sim/Não; complemento: data. ' +
+  '23: "Tipo da sentença" -> um EXATO de: Improcedência | Procedência | Procedência parcial | Homologatória de acordo. ' +
+  '24: "A sentença é líquida ou ilíquida?" -> um EXATO de: Líquida | Iliquída; complemento: se Líquida, o valor. ' +
+  '25: "Houve recurso?" -> Sim/Não; complemento: resultado e data do julgamento. ' +
+  '26: "Houve trânsito em julgado?" -> Sim/Não; complemento: data. ' +
+  '27: "Iniciou o cumprimento de sentença?" -> Sim/Não; complemento: data do peticionamento. ' +
+  '28: "Foi apresentado valor no CS ou solicitado execução invertida?" -> um EXATO de: Valor apresentado no CS | Execução invertida. ' +
+  '29: BLOCO FIXO "CUIDADO" — NÃO é pergunta. NÃO inclua a chave "29" no m2. ' +
+  '30: "Em caso de execução invertida, qual cenário?" (só se foi execução invertida; senão vazio) -> um EXATO de: ' +
   '"Executado não apresentou valores e prazo ainda em curso" | "Executado não apresentou valores, prazo decorrido, sem manifestação da parte exequente" | ' +
   '"Executado não apresentou valores, prazo decorrido, já houve manifestação da parte exequente" | "Executado apresentou valores". ' +
-  '28: "Em CS ordinário, a parte apresentou valor?" -> Sim/Não; complemento: valor total. ' +
-  '29: "Houve impugnação ao valor?" -> Sim/Não; NÃO preencha complemento aqui (a data vai na linha 30). ' +
-  '30: datas da impugnação -> resposta: se houve, a data da impugnação; complemento: se NÃO houve, a data do decurso do prazo. ' +
-  '31: "Data da manifestação de concordância" -> resposta: a data (se houve concordância); sem complemento. ' +
-  '32: "Houve homologação do valor (e impugnação resolvida)?" -> Sim/Não; complemento: data da homologação. ' +
-  '33: "Existe contrato de honorários contratuais nos autos?" -> Sim/Não; complemento: data do contrato. ' +
-  '34: "Contadoria judicial se manifestou?" -> Sim/Não; complemento: data da juntada dos cálculos. ' +
-  '35: "Houve pedido de destaque de honorários contratuais?" -> Sim/Não; complemento: valor dos honorários destacados e o valor principal. ' +
-  '36: "A manifestação da contadoria foi homologada/precluiu o prazo?" -> Sim/Não; complemento: data. ' +
-  '37: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
-  '38: "Nesse tribunal, é a serventia que expede ou outro órgão?" -> TEXTO (ex.: "Serventia" ou o órgão); complemento: números dos processos usados. ' +
-  '39: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
-  '40: "Nesse tribunal, precisa emitir alvará ou só a RPV?" -> um EXATO de: Não precisa de alvará | Precisa de alvará; complemento: números dos processos usados.';
+  '31: "Em CS ordinário, a parte apresentou valor?" -> Sim/Não; complemento: valor total. ' +
+  '32: "Houve impugnação ao valor?" -> Sim/Não; NÃO preencha complemento aqui (a data vai na linha 33). ' +
+  '33: datas da impugnação -> resposta: se houve, a data da impugnação; complemento: se NÃO houve, a data do decurso do prazo. ' +
+  '34: "Data da manifestação de concordância" -> resposta: a data (se houve concordância); sem complemento. ' +
+  '35: "Houve homologação do valor (e impugnação resolvida)?" -> Sim/Não; complemento: data da homologação. ' +
+  '36: "Existe contrato de honorários contratuais nos autos?" -> Sim/Não; complemento: data do contrato. ' +
+  '37: "Contadoria judicial se manifestou?" -> Sim/Não; complemento: data da juntada dos cálculos. ' +
+  '38: "Houve pedido de destaque de honorários contratuais?" -> Sim/Não; complemento: valor dos honorários destacados e o valor principal. ' +
+  '39: "A manifestação da contadoria foi homologada/precluiu o prazo?" -> Sim/Não; complemento: data. ' +
+  '40: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
+  '41: "Nesse tribunal, é a serventia que expede ou outro órgão?" -> TEXTO (ex.: "Serventia" ou o órgão); complemento: números dos processos usados. ' +
+  '42: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
+  '43: "Nesse tribunal, precisa emitir alvará ou só a RPV?" -> um EXATO de: Não precisa de alvará | Precisa de alvará; complemento: números dos processos usados.';
 
 async function extrairAnalise(apiKey: string, contentBlocks: any[]): Promise<any> {
   const userContent = [
