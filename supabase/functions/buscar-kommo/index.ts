@@ -8,21 +8,7 @@
 // decidir qual é o PDF (não dá pra filtrar por PDF só olhando a lista).
 //
 // USO (POST, com sessão logada): { "lead_id": 15269795 }
-//   -> { pronto:true, download_url, nome_arquivo, mime, arquivos:[{nome,download,mime}] }
-//
-// DEVOLVE TODOS OS PDFs, e não só um. O motivo: um processo de precatório vem
-// com frequência em vários arquivos — petição inicial num, cálculo noutro,
-// ofício noutro. A versão anterior devolvia só `pdfs[pdfs.length - 1]`, o último
-// anexado, e isso escondia um problema real: se a petição inicial fosse anexada
-// ANTES do cálculo, o sistema lia o cálculo e a qualificação das partes — nome,
-// nascimento, endereço do cedente — simplesmente não chegava à tela. Ninguém
-// tinha como notar: o campo aparecia vazio como se o dado não existisse.
-//
-// `download_url` continua apontando para o último PDF, para não quebrar nenhum
-// chamador antigo. Mas ele NÃO é mais o que protege o fluxo de precificação: o
-// navegador usa `arquivos` e escolhe ali o último item — ver
-// analisarLeadCredijuris. A garantia de que a análise lê o mesmo documento de
-// antes está naquela função, não neste campo.
+//   -> { pronto:true, download_url, nome_arquivo, mime }
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { getCaller } from "../_shared/auth.ts";
@@ -60,7 +46,8 @@ Deno.serve(async (req) => {
     if (!listRes.ok) {
       return json({ erro: `Kommo recusou a lista de arquivos (HTTP ${listRes.status}).`, detalhe: (await listRes.text()).slice(0, 300) }, 502);
     }
-    const listJson = await listRes.json();
+    const listJson = await listRes.json().catch(() => null);
+    if (!listJson) return json({ erro: "A Kommo devolveu uma resposta vazia/inválida na lista de arquivos do card." }, 502);
     const arquivos = (listJson?._embedded?.files ?? []) as Array<{ file_uuid: string }>;
     if (arquivos.length === 0) {
       return json({ erro: "Nenhum arquivo anexado neste card. Anexe o PDF do processo e tente de novo." }, 404);
@@ -77,7 +64,8 @@ Deno.serve(async (req) => {
     for (const a of arquivos) {
       const mRes = await fetch(`${driveUrl}/v1.0/files/${a.file_uuid}`, { headers: auth });
       if (!mRes.ok) continue;
-      const m = await mRes.json();
+      const m = await mRes.json().catch(() => null);
+      if (!m) continue;
       metas.push({
         nome: String((m as any)?.name || ""),
         mime: String((m as any)?.metadata?.mime_type || "").toLowerCase(),
@@ -86,49 +74,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 4) todos os PDFs do card (pelo mime OU pela extensão do nome)
+    // 4) escolhe o PDF (pelo mime OU pela extensão do nome) — o ÚLTIMO PDF anexado
+    //    (o processo costuma entrar depois da foto/documento do comercial).
     const pdfs = metas.filter((x) => x.mime === "application/pdf" || x.ext === "pdf" || /\.pdf$/i.test(x.nome));
     if (pdfs.length === 0) {
-      // O NOME dos anexos, não só o tipo. Quando o processo está anexado como JPG
-      // ou DOCX, "nenhum em PDF" sozinho não diz o que fazer; com o nome do
-      // arquivo na frente, quem lê sabe exatamente o que reanexar.
-      const lista = metas
-        .map((x) => `${x.nome || "(sem nome)"}${x.ext ? ` (.${x.ext})` : ""}`)
-        .join(", ");
-      return json({
-        erro:
-          `O card tem ${arquivos.length} anexo(s) e nenhum em PDF: ${lista}. ` +
-          `Só consigo ler PDF — anexe o processo em PDF e tente de novo.`,
-        nao_pdf: metas.map((x) => x.nome || x.ext || x.mime || "(desconhecido)"),
-      }, 404);
+      const tipos = metas.map((x) => x.ext || x.mime || "desconhecido").join(", ");
+      return json({ erro: `O card tem ${arquivos.length} anexo(s) (${tipos}), nenhum em PDF. Anexe o PDF do processo e tente de novo.` }, 404);
     }
+    const escolhido = pdfs[pdfs.length - 1];
+    if (!escolhido.download) return json({ erro: "O PDF não trouxe link de download." }, 502);
 
-    // PDF sem link de download não serve para nada, mas também não invalida os
-    // outros: sai da lista e é REPORTADO. Sumir em silêncio seria o mesmo defeito
-    // de antes, num tamanho menor.
-    const comLink = pdfs.filter((p) => !!p.download);
-    const semLink = pdfs.filter((p) => !p.download).map((p) => p.nome || "(sem nome)");
-    if (comLink.length === 0) {
-      return json({ erro: "Nenhum dos PDFs do card trouxe link de download." }, 502);
-    }
-
-    // O último continua sendo o `download_url` — ver o cabeçalho do arquivo.
-    const escolhido = comLink[comLink.length - 1];
-
-    return json({
-      pronto: true,
-      download_url: escolhido.download,
-      nome_arquivo: escolhido.nome,
-      mime: escolhido.mime,
-      arquivos: comLink.map((p) => ({ nome: p.nome, download: p.download, mime: p.mime })),
-      // Anexos que não são PDF (foto do documento em JPG, por exemplo) não são
-      // lidos aqui — o pdf.js só abre PDF. Reportar o nome deles é o que evita
-      // "o sistema não achou o RG" quando o RG está ali, em JPG.
-      nao_pdf: metas
-        .filter((x) => !pdfs.includes(x))
-        .map((x) => x.nome || x.ext || x.mime || "(desconhecido)"),
-      sem_link: semLink,
-    });
+    return json({ pronto: true, download_url: escolhido.download, nome_arquivo: escolhido.nome, mime: escolhido.mime });
   } catch (e) {
     return json({ erro: String((e as Error)?.message || e) }, 500);
   }
