@@ -249,7 +249,7 @@ async function driveUploadBytes(
 // Constantes
 // ============================================================================
 const CLAUDE_MODEL = 'claude-opus-4-5';
-const CLAUDE_MAX_TOKENS = 8000;                 // extração da análise é grande (M1+M2+M4)
+const CLAUDE_MAX_TOKENS = 16000;                 // extração da análise é grande (M1+M2+M4)
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const BUCKET_INPUT = 'analises-input';            // bucket novo (criar no painel)
 const BUCKET_TEMPLATES = 'contratos-templates';  // MESMO bucket de templates da gerar-contrato
@@ -716,7 +716,11 @@ async function extrairAnalise(apiKey: string, contentBlocks: any[]): Promise<any
   if (!block) throw new Error('Claude retornou sem bloco de texto');
   let raw: string = block.text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
   try { return JSON.parse(raw); }
-  catch { const m = raw.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('JSON inválido da IA: ' + raw.slice(0, 200)); }
+  catch {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) { try { return JSON.parse(m[0]); } catch { /* ainda incompleto */ } }
+    throw new Error('A IA retornou um JSON INCOMPLETO (provável corte por tamanho da resposta). Início da resposta: ' + raw.slice(0, 200));
+  }
 }
 
 // ---- PORTÃO 1: chamada de IA + decisão ----
@@ -736,7 +740,11 @@ async function extrairQualificacao(apiKey: string, contentBlocks: any[]): Promis
   if (!block) throw new Error('Claude retornou sem bloco de texto (qualificação)');
   let raw: string = block.text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
   try { return JSON.parse(raw); }
-  catch { const m = raw.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('JSON inválido da IA (qualificação): ' + raw.slice(0, 200)); }
+  catch {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) { try { return JSON.parse(m[0]); } catch { /* ainda incompleto */ } }
+    throw new Error('A IA (qualificação) retornou um JSON INCOMPLETO (provável corte por tamanho). Início: ' + raw.slice(0, 200));
+  }
 }
 
 // "DD/MM/AAAA" -> Date (ou null se inválido)
@@ -910,7 +918,8 @@ Deno.serve(async (req) => {
     if (!user) return errorResponse(ERRO_ACESSO, 401);
     const userId = user.id;
 
-    const body = await req.json();
+    let body: any;
+    try { body = await req.json(); } catch { return errorResponse('Corpo da requisição inválido/incompleto (o texto do processo pode ter chegado cortado).', 400); }
     const categoria: string = resolverCategoria(body.categoria);  // "RPV" -> "Requisições de Pequeno Valor"
 
     // service-role: lê secrets de configuracoes
