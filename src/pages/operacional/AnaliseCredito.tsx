@@ -114,16 +114,18 @@ function lerCardCredijuris(lead: KommoLead) {
     pegar(/CEDENTE:\s*(.+)/i) || (partesTitulo.length >= 2 ? partesTitulo[1].trim() : '')
 
   const parcela = pegar(/PARCELA CEDIDA:\s*(.+)/i).toLowerCase()
+  const temPrincipal = /principal/.test(parcela)
+  const temHonorarios = /honor|contratu|sucumb/.test(parcela)
   const tipo_aquisicao =
-    parcela.includes('principal') && parcela.includes('honor')
+    temPrincipal && temHonorarios
       ? 'ambos'
-      : parcela.includes('honor')
+      : temHonorarios
         ? 'honorarios'
-        : parcela.includes('principal')
+        : temPrincipal
           ? 'principal'
           : 'auto'
 
-  const honMatch = notas.match(/HONOR[ÁA]RIOS?\s*C\.?:\s*([\d.,]+)\s*%/i)
+  const honMatch = notas.match(/HONOR[ÁA]RIOS?[^:\n]*:\s*([\d.,]+)\s*%/i)
   const honorarios_pct = honMatch ? honMatch[1].replace(/\./g, '').replace(',', '.') : ''
 
   return {
