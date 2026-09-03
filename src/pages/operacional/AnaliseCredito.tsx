@@ -36,6 +36,7 @@ import {
   Receipt,
   X,
 } from 'lucide-react'
+import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
 import {
   FUNIL_RPV,
@@ -631,6 +632,64 @@ function CardCredito({
   )
 }
 
+/**
+ * Alternador Interno | Fundos, ao lado das abas de tipo de crédito.
+ *
+ * NÃO É UM Segmented, ainda que a mecânica seja a mesma, e a diferença é o
+ * ponto: a pílula cinza do Segmented tem o mesmo peso visual das abas, e dois
+ * controles de peso igual lado a lado não dizem qual manda. Aqui o contorno é
+ * fino e o escolhido é azul CHEIO — a forma redonda o separa das abas
+ * sublinhadas, e o preenchimento deixa óbvio que ali se escolhe uma das duas.
+ *
+ * Fonte no tamanho do resto da tela. A tentativa anterior encolhia a letra para
+ * subordinar o controle, e encolher letra para hierarquizar só piora a leitura:
+ * quem subordina aqui é a forma, não o tamanho.
+ *
+ * Vive nesta tela, e não em components/ui, porque tem um consumidor só. Se
+ * aparecer um segundo, promove.
+ */
+function SeletorDestinacao({
+  valor,
+  onChange,
+}: {
+  valor: SubdivisaoPrecatorio
+  onChange: (v: SubdivisaoPrecatorio) => void
+}) {
+  return (
+    <div
+      role="group"
+      // O ÚNICO rótulo do controle: não há texto visível dizendo o que ele
+      // decide, então sem isto o leitor de tela anuncia dois botões soltos.
+      aria-label="Destinação do precatório"
+      className="inline-flex items-center rounded-full bg-white p-0.5 ring-1 ring-inset ring-slate-200"
+    >
+      {SUBDIVISOES_PRECATORIO.map((s) => {
+        const ativo = s.key === valor
+        return (
+          <button
+            key={s.key}
+            type="button"
+            aria-pressed={ativo}
+            onClick={() => onChange(s.key)}
+            className={cn(
+              'font-display rounded-full px-3 py-1 text-sm transition-colors',
+              // Contraste medido: brand-600 com branco dá 6,56:1 e slate-500 no
+              // branco 4,76:1. Os dois passam o AA de texto normal (4,5:1), que
+              // a plataforma toda já cumpre — o inativo com pouca folga, então
+              // não clarear esse cinza sem medir de novo.
+              ativo
+                ? 'bg-brand-600 font-semibold text-white'
+                : 'font-medium text-slate-500 hover:text-slate-700',
+            )}
+          >
+            {s.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
@@ -947,19 +1006,10 @@ export default function AnaliseCredito() {
           }}
           trailing={
             funil === FUNIL_PRECATORIO ? (
-              <Segmented
-                // Menor que o padrão: no tamanho normal a pílula ficava mais
-                // alta que as abas ao lado, e o que é maior parece mandar mais.
-                // Aqui quem manda é o tipo de crédito.
-                size="sm"
-                ariaLabel="Destinação do precatório"
-                items={SUBDIVISOES_PRECATORIO.map((s) => ({
-                  key: s.key,
-                  label: s.label,
-                }))}
-                value={subdivisao}
+              <SeletorDestinacao
+                valor={subdivisao}
                 onChange={(v) => {
-                  setSubdivisao(v as SubdivisaoPrecatorio)
+                  setSubdivisao(v)
                   // As chaves das abas são próprias de cada trilha ('int-…' e
                   // 'fun-…'): sem limpar, a tela cairia na primeira por acidente
                   // em vez de por decisão.
