@@ -9,9 +9,9 @@
 // TRÊS EIXOS, e a tela dá uma forma visual a cada um, porque dois seletores
 // iguais lado a lado se leem como a mesma pergunta feita duas vezes:
 //
-//   tipo de crédito   RPV | Precatórios          abas sublinhadas, à esquerda
-//   destinação        Interno | Fundos           pílulas à direita, na mesma
-//                     (só no Precatório)         linha das abas
+//   tipo de crédito   RPV | Precatórios          abas sublinhadas, com ícone
+//   destinação        Interno | Fundos           pílulas na mesma linha,
+//                     (só no Precatório)         encostadas na aba
 //   etapa             as colunas daquela trilha  pílulas dentro do cartão
 //
 // As colunas de CADA trilha são fixas no código (src/lib/kommo.ts). Já foram
@@ -915,8 +915,8 @@ export default function AnaliseCredito() {
           mesmo componente, um do lado do outro: liam-se como a mesma pergunta
           feita duas vezes. A distinção agora é de forma e de posição —
 
-            tipo de crédito   abas sublinhadas, com ícone, à esquerda
-            destinação        pílulas na mesma linha, à direita
+            tipo de crédito   abas sublinhadas, com ícone
+            destinação        pílulas encostadas na aba de Precatórios
             etapa             pílulas dentro do cartão, sob a busca
 
           A contagem sai do funil CARREGADO, então o outro fica sem número até
@@ -945,7 +945,7 @@ export default function AnaliseCredito() {
             setAba('')
             setBusca('')
           }}
-          right={
+          trailing={
             funil === FUNIL_PRECATORIO ? (
               <Segmented
                 ariaLabel="Destinação do precatório"

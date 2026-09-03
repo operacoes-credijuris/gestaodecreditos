@@ -22,21 +22,25 @@ export function Tabs({
   items,
   value,
   onChange,
-  right,
+  trailing,
 }: {
   items: TabItem[]
   value: string
   onChange: (key: string) => void
   /**
-   * Conteúdo alinhado à DIREITA, na mesma linha das abas — um filtro que só faz
-   * sentido junto delas, por exemplo.
+   * Conteúdo na mesma linha das abas, LOGO DEPOIS da última — um filtro que só
+   * faz sentido junto delas, por exemplo.
+   *
+   * Colado nas abas, e não jogado na borda da página: o que está perto se lê
+   * como pertencente ao que está perto. Na extremidade oposta pareceria um
+   * controle da tela toda, e não daquelas abas.
    *
    * Fica FORA do `role="tablist"` de propósito: leitor de tela anuncia "aba 3 de
    * 5" contando os filhos da tablist, e um controle estranho ali entraria na
    * contagem como se fosse aba. A borda de baixo passou para o contêiner externo
-   * para as duas metades dividirem a mesma linha.
+   * para as duas partes dividirem a mesma linha.
    */
-  right?: ReactNode
+  trailing?: ReactNode
 }) {
   // Refs dos botões para mover o foco na navegação por setas.
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -60,11 +64,12 @@ export function Tabs({
   }
 
   return (
-    <div className="flex items-end justify-between gap-3 border-b border-slate-200">
-      <div
-        role="tablist"
-        className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-thin"
-      >
+    <div className="flex items-end gap-3 border-b border-slate-200">
+      {/* Sem `flex-1`: a régua de abas fica com a largura do conteúdo, para o
+          `trailing` encostar nela. Com flex-1 ela esticaria e empurraria o
+          conteúdo para a borda da página. `min-w-0` mantém o scroll horizontal
+          funcionando quando as abas não couberem. */}
+      <div role="tablist" className="flex min-w-0 gap-1 overflow-x-auto scrollbar-thin">
         {items.map((item, index) => {
           const active = item.key === value
           return (
@@ -105,7 +110,7 @@ export function Tabs({
           )
         })}
       </div>
-      {right && <div className="shrink-0 pb-1.5">{right}</div>}
+      {trailing && <div className="shrink-0 pb-1.5">{trailing}</div>}
     </div>
   )
 }
