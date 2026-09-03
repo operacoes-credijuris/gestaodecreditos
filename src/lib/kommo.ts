@@ -89,8 +89,6 @@ export interface DefAbaPrecatorio {
 export interface DefSubdivisao {
   key: SubdivisaoPrecatorio
   label: string
-  /** Uma linha dizendo o que a subdivisão é, exibida sob o seletor. */
-  descricao: string
   abas: DefAbaPrecatorio[]
 }
 
@@ -110,7 +108,6 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
   {
     key: 'interno',
     label: 'Interno',
-    descricao: 'Precatórios destinados à base de investidores da Credijuris.',
     abas: [
       {
         key: 'int-due-diligence',
@@ -153,7 +150,6 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
   {
     key: 'fundos',
     label: 'Fundos',
-    descricao: 'Precatórios encaminhados a fundos, com defesa técnica própria.',
     abas: [
       {
         key: 'fun-qualificacao',
@@ -169,7 +165,7 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
       },
       {
         key: 'fun-defesa',
-        label: 'Elaboração da Defesa Técnica',
+        label: 'Defesa Técnica',
         colunaKommo: 'Defesa Técnica (TIER 2+)',
         descricaoVazia: 'Nenhuma defesa técnica em elaboração.',
       },
@@ -353,9 +349,10 @@ export function useAnalisesProntas() {
  * Colunas do kanban do Kommo, espelhadas em public.kommo_etapa pelo kommo-sync.
  *
  * As abas dos dois funis são fixas no código (TELAS para RPV,
- * SUBDIVISOES_PRECATORIO para Precatório). O espelho serve a duas coisas:
- * resolver o status_id da coluna que o Precatório fixa pelo NOME, e dar o nome
- * da coluna de origem de um card (nomeDaEtapa).
+ * SUBDIVISOES_PRECATORIO para Precatório). O espelho existe por causa do
+ * Precatório, que fixa a coluna pelo NOME: é aqui que o nome vira status_id.
+ * Sem ele, RPV funcionaria (os ids estão nas constantes ST_*) e o Precatório
+ * abriria com as seis abas vazias.
  */
 export interface EtapaKommo {
   pipeline_id: number
@@ -404,6 +401,34 @@ function porNomeDeColuna(pipelineId: number, etapas: EtapaKommo[]): Map<string, 
     m.set(normalizarBusca(e.nome), e.status_id)
   }
   return m
+}
+
+/**
+ * Os status_id que um funil EXIBE — a união de todas as suas abas.
+ *
+ * É o que dá sentido ao número ao lado de "RPV" e "Precatórios": não o tamanho
+ * do funil no Kommo, mas o tamanho do que está na tela. O funil do comercial tem
+ * colunas que não são do operacional (nutrição, venda ganha, venda perdida), e
+ * contá-las fazia o número de cima nunca fechar com a soma das pílulas de baixo
+ * — dois totais discordando na mesma tela, sem nada explicando a diferença.
+ *
+ * NO PRECATÓRIO É A UNIÃO DAS DUAS TRILHAS, não a trilha aberta. O número
+ * descreve o FUNIL, e trocar de destinação não muda quantos precatórios existem;
+ * um número que mudasse ao alternar Interno/Fundos se leria como dado mudando.
+ * Set, então "Apresentação de Proposta" — que serve às duas — entra uma vez só.
+ */
+export function statusExibidos(pipelineId: number, etapas: EtapaKommo[]): Set<number> {
+  if (pipelineId === FUNIL_RPV) return new Set(TELAS.map((t) => t.statusId))
+  if (pipelineId !== FUNIL_PRECATORIO) return new Set()
+  const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
+  const ids = new Set<number>()
+  for (const s of SUBDIVISOES_PRECATORIO) {
+    for (const a of s.abas) {
+      const id = nomes.get(normalizarBusca(a.colunaKommo))
+      if (id !== undefined) ids.add(id)
+    }
+  }
+  return ids
 }
 
 /**
@@ -490,9 +515,12 @@ export function abasDoFunil(
  * nenhuma e sem entrar em contagem nenhuma. Ninguém tinha como notar — a
  * ausência de um card não chama atenção.
  *
- * O saldo já teve aba própria ("Outras etapas"), removida por decisão do dono.
- * Hoje ele vira UMA LINHA de contagem sob as abas: continua impossível um card
- * desaparecer sem deixar rastro, sem custar uma pílula na régua de etapas.
+ * O saldo já teve aba própria ("Outras etapas") e depois uma linha de contagem
+ * sob as abas; as duas foram removidas por decisão do dono. HOJE NADA O EXIBE, e
+ * o efeito é assumido: card em coluna que a tela não lista não aparece em lugar
+ * nenhum. Ele continua sendo devolvido aqui porque é assim que a função mantém
+ * card estranho FORA das abas em vez de misturá-lo na primeira — e é o que o
+ * teste de particionamento verifica.
  */
 export function agruparPorAba(
   leads: KommoLead[],
@@ -513,25 +541,12 @@ export function agruparPorAba(
   return { porAba, outras }
 }
 
-/**
- * Nome da coluna do Kommo, para explicar de onde vem um card.
- *
- * PRECISA DO FUNIL, não só do status. É o mesmo motivo da chave composta na
- * migration 0044: os estágios de sistema 142 ("Venda ganha") e 143 ("Venda
- * perdida") existem em TODOS os funis com o MESMO status_id. Buscando só pelo
- * status, um card de RPV em "Venda ganha" podia ser rotulado com o nome que
- * aquela coluna tem no funil de Precatórios.
- */
-export function nomeDaEtapa(
-  statusId: number,
-  pipelineId: number,
-  etapas: EtapaKommo[],
-): string {
-  const achada = etapas.find(
-    (e) => e.status_id === statusId && e.pipeline_id === pipelineId,
-  )
-  return achada?.nome ?? `coluna ${statusId}`
-}
+// nomeDaEtapa (nome da coluna de origem de um card) saiu junto com os dois
+// lugares que a usavam: o selo cinza no card e a linha de contagem do saldo.
+// Se ela voltar, o cuidado que o comentário dela guardava era este: a busca
+// precisa do FUNIL e não só do status, porque os estágios de sistema 142 ("Venda
+// ganha") e 143 ("Venda perdida") existem em TODOS os funis com o MESMO
+// status_id — é o motivo da chave composta na migration 0044.
 
 /**
  * Os status de RPV escritos à mão que NÃO existem mais no kanban do Kommo.

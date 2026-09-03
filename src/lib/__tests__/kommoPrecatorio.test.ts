@@ -15,9 +15,15 @@ import {
   FUNIL_PRECATORIO,
   FUNIL_RPV,
   SUBDIVISOES_PRECATORIO,
+  ST_ANALISE,
+  ST_DECISAO,
+  ST_DILIGENCIA,
+  ST_PROPOSTA,
+  ST_REPROVADO,
   abasDoFunil,
   agruparPorAba,
   colunasPrecatorioDesalinhadas,
+  statusExibidos,
   type EtapaKommo,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
@@ -123,7 +129,7 @@ describe('abas dos Fundos', () => {
     expect(abas.map((a) => a.label)).toEqual([
       'Qualificação Preliminar',
       'Encaminhar',
-      'Elaboração da Defesa Técnica',
+      'Defesa Técnica',
       'Validação',
       'Apresentação',
     ])
@@ -135,9 +141,7 @@ describe('abas dos Fundos', () => {
       idDe('Qualificação Jurídica Preliminar'),
     )
     expect(porLabel.get('Encaminhar')).toBe(idDe('Encaminhar ao Fundo'))
-    expect(porLabel.get('Elaboração da Defesa Técnica')).toBe(
-      idDe('Defesa Técnica (TIER 2+)'),
-    )
+    expect(porLabel.get('Defesa Técnica')).toBe(idDe('Defesa Técnica (TIER 2+)'))
     expect(porLabel.get('Validação')).toBe(idDe('Revisão da Defesa Técnica (TIER 2+)'))
     expect(porLabel.get('Apresentação')).toBe(idDe('Apresentação de Proposta'))
   })
@@ -193,10 +197,11 @@ describe('acento, caixa e espaço não quebram o casamento', () => {
   })
 })
 
-describe('saldo de cards fora das trilhas', () => {
-  it('cards de coluna não listada ficam de fora das abas, e são contados', () => {
-    // A rede que substituiu a aba "Outras etapas": o card não entra em aba
-    // nenhuma, mas também não desaparece da contagem.
+describe('cards fora das trilhas', () => {
+  it('não entram em aba nenhuma, e nem se misturam na primeira', () => {
+    // A tela não exibe mais esse saldo (nem aba, nem linha de contagem). O que
+    // este teste garante é o particionamento: card de coluna que não é do
+    // operacional fica FORA das abas, e não encostado na primeira delas.
     const etapas = espelho()
     const abas = abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno')
     const { porAba, outras } = agruparPorAba(
@@ -209,6 +214,69 @@ describe('saldo de cards fora das trilhas', () => {
     )
     expect(porAba['int-due-diligence'].map((l) => l.kommo_lead_id)).toEqual([1])
     expect(outras.map((l) => l.kommo_lead_id)).toEqual([2, 3])
+  })
+})
+
+describe('statusExibidos — o número ao lado do tipo de crédito', () => {
+  it('no Precatório, é a UNIÃO das duas trilhas, não a trilha aberta', () => {
+    // O número descreve o FUNIL: trocar de destinação não muda quantos
+    // precatórios existem. Se mudasse, se leria como dado mudando.
+    const etapas = espelho()
+    const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
+    // 10 colunas listadas, mas Apresentação de Proposta serve às duas trilhas:
+    // 6 do Interno + 5 dos Fundos = 11 abas sobre 10 colunas distintas.
+    expect(ids.size).toBe(10)
+    for (const nome of COLUNAS_KOMMO.slice(0, 10)) {
+      expect(ids.has(idDe(nome, etapas))).toBe(true)
+    }
+  })
+
+  it('não inclui coluna do kanban que não é do operacional', () => {
+    // É o defeito que o número antigo tinha: contava o funil inteiro, então o
+    // total de cima nunca fechava com a soma das pílulas de baixo.
+    const etapas = espelho()
+    const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
+    expect(ids.has(idDe('Nutrição', etapas))).toBe(false)
+    expect(ids.has(idDe('Venda ganha', etapas))).toBe(false)
+  })
+
+  it('a soma das pílulas fecha com o número do tipo de crédito', () => {
+    // A invariante que o usuário vê: o número de cima é a soma dos de baixo.
+    // Vale por trilha porque cada card só cai numa aba de cada trilha.
+    const etapas = espelho()
+    const leads = [
+      lead(idDe('Análise Jurídica (TIER 1)', etapas), 1),
+      lead(idDe('Revisão (TIER 1)', etapas), 2),
+      lead(idDe('Apresentação de Proposta', etapas), 3),
+      lead(idDe('Defesa Técnica (TIER 2+)', etapas), 4),
+      lead(idDe('Nutrição', etapas), 5), // fora das trilhas: não conta
+    ]
+    const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
+    const doTipo = leads.filter((l) => ids.has(l.status_id)).length
+    expect(doTipo).toBe(4)
+
+    const somaDe = (sub: 'interno' | 'fundos') => {
+      const { porAba } = agruparPorAba(
+        leads,
+        abasDoFunil(FUNIL_PRECATORIO, etapas, sub),
+      )
+      return Object.values(porAba).reduce((t, l) => t + l.length, 0)
+    }
+    // Interno vê 3 (jurídica, revisão, proposta); Fundos vê 2 (defesa,
+    // proposta). A proposta entra nas duas, e é por isso que a soma por trilha
+    // não bate isolada — só a união bate, que é o que o número de cima usa.
+    expect(somaDe('interno')).toBe(3)
+    expect(somaDe('fundos')).toBe(2)
+  })
+
+  it('em RPV, são os cinco status curados', () => {
+    expect(statusExibidos(FUNIL_RPV, espelho())).toEqual(
+      new Set([ST_ANALISE, ST_DECISAO, ST_PROPOSTA, ST_DILIGENCIA, ST_REPROVADO]),
+    )
+  })
+
+  it('devolve vazio para funil desconhecido', () => {
+    expect(statusExibidos(999, espelho()).size).toBe(0)
   })
 })
 

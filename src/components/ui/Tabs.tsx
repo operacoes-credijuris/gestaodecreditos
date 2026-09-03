@@ -22,10 +22,21 @@ export function Tabs({
   items,
   value,
   onChange,
+  right,
 }: {
   items: TabItem[]
   value: string
   onChange: (key: string) => void
+  /**
+   * Conteúdo alinhado à DIREITA, na mesma linha das abas — um filtro que só faz
+   * sentido junto delas, por exemplo.
+   *
+   * Fica FORA do `role="tablist"` de propósito: leitor de tela anuncia "aba 3 de
+   * 5" contando os filhos da tablist, e um controle estranho ali entraria na
+   * contagem como se fosse aba. A borda de baixo passou para o contêiner externo
+   * para as duas metades dividirem a mesma linha.
+   */
+  right?: ReactNode
 }) {
   // Refs dos botões para mover o foco na navegação por setas.
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -49,49 +60,52 @@ export function Tabs({
   }
 
   return (
-    <div
-      role="tablist"
-      className="flex gap-1 overflow-x-auto border-b border-slate-200 scrollbar-thin"
-    >
-      {items.map((item, index) => {
-        const active = item.key === value
-        return (
-          <button
-            key={item.key}
-            ref={(el) => {
-              tabRefs.current[index] = el
-            }}
-            role="tab"
-            aria-selected={active}
-            // Roving tabindex: só a aba ativa entra na ordem de tabulação.
-            tabIndex={active ? 0 : -1}
-            disabled={item.disabled}
-            onClick={() => onChange(item.key)}
-            onKeyDown={(e) => handleKeyDown(e, index)}
-            className={cn(
-              'font-display flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors',
-              item.disabled
-                ? 'cursor-not-allowed border-transparent text-slate-400'
-                : active
-                  ? 'border-brand-500 text-brand-700'
-                  : 'border-transparent text-slate-500 hover:border-brand-200 hover:text-slate-700',
-            )}
-          >
-            {item.icon}
-            {item.label}
-            {item.count !== undefined && (
-              <span
-                className={cn(
-                  'rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums',
-                  active ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-600',
-                )}
-              >
-                {item.count}
-              </span>
-            )}
-          </button>
-        )
-      })}
+    <div className="flex items-end justify-between gap-3 border-b border-slate-200">
+      <div
+        role="tablist"
+        className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-thin"
+      >
+        {items.map((item, index) => {
+          const active = item.key === value
+          return (
+            <button
+              key={item.key}
+              ref={(el) => {
+                tabRefs.current[index] = el
+              }}
+              role="tab"
+              aria-selected={active}
+              // Roving tabindex: só a aba ativa entra na ordem de tabulação.
+              tabIndex={active ? 0 : -1}
+              disabled={item.disabled}
+              onClick={() => onChange(item.key)}
+              onKeyDown={(e) => handleKeyDown(e, index)}
+              className={cn(
+                'font-display flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors',
+                item.disabled
+                  ? 'cursor-not-allowed border-transparent text-slate-400'
+                  : active
+                    ? 'border-brand-500 text-brand-700'
+                    : 'border-transparent text-slate-500 hover:border-brand-200 hover:text-slate-700',
+              )}
+            >
+              {item.icon}
+              {item.label}
+              {item.count !== undefined && (
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums',
+                    active ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-600',
+                  )}
+                >
+                  {item.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+      {right && <div className="shrink-0 pb-1.5">{right}</div>}
     </div>
   )
 }

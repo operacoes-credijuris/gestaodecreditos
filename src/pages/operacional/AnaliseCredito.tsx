@@ -9,14 +9,19 @@
 // TRÊS EIXOS, e a tela dá uma forma visual a cada um, porque dois seletores
 // iguais lado a lado se leem como a mesma pergunta feita duas vezes:
 //
-//   tipo de crédito   RPV | Precatórios          abas sublinhadas, no topo
-//   destinação        Interno | Fundos           pílulas rotuladas, recuadas
-//                     (só no Precatório)
+//   tipo de crédito   RPV | Precatórios          abas sublinhadas, à esquerda
+//   destinação        Interno | Fundos           pílulas à direita, na mesma
+//                     (só no Precatório)         linha das abas
 //   etapa             as colunas daquela trilha  pílulas dentro do cartão
 //
 // As colunas de CADA trilha são fixas no código (src/lib/kommo.ts). Já foram
 // configuráveis na própria tela — tabela etapa_visao, migration 0045 —, e
 // deixaram de ser por decisão do dono: o mesmo caminho do RPV.
+//
+// O NÚMERO AO LADO DO TIPO conta só o que a tela exibe (statusExibidos), não o
+// funil inteiro do Kommo: o kanban do comercial tem colunas que não são do
+// operacional, e contá-las fazia o total de cima nunca fechar com a soma das
+// pílulas de baixo.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -44,7 +49,7 @@ import {
   SUBDIVISAO_PADRAO,
   abasDoFunil,
   agruparPorAba,
-  nomeDaEtapa,
+  statusExibidos,
   telasRpvDesalinhadas,
   colunasPrecatorioDesalinhadas,
   useKommoLeads,
@@ -790,25 +795,27 @@ export default function AnaliseCredito() {
     [funil, etapas.data, subdivisao],
   )
 
-  const { porAba, outras } = useMemo(
+  const { porAba } = useMemo(
     () => agruparPorAba(leads.data ?? [], abas),
     [leads.data, abas],
   )
 
   /**
-   * As colunas do Kommo onde está o saldo de cards, por nome.
+   * Quantos cards o funil aberto EXIBE — o número ao lado de RPV/Precatórios.
    *
-   * Substitui a aba "Outras etapas": em vez de uma pílula na régua de etapas,
-   * uma linha de texto sob ela. O essencial não se perde — nenhum card
-   * desaparece sem rastro — e o rastro melhora: DIZ ONDE O CARD ESTÁ, que é a
-   * única informação capaz de fazer alguém agir (abrir o Kommo e mover).
+   * Não é o tamanho do funil no Kommo: o kanban do comercial tem colunas que não
+   * são do operacional, e contá-las fazia o número de cima nunca fechar com a
+   * soma das pílulas de baixo. Dois totais discordando na mesma tela, sem nada
+   * explicando a diferença, é pior que um total a menos.
+   *
+   * `undefined` enquanto a consulta está em voo ou falhou, nunca 0: "Precatórios
+   * 0" ao lado de uma mensagem de erro afirma que o funil está vazio.
    */
-  const colunasDoSaldo = useMemo(() => {
-    const nomes = new Set(
-      outras.map((l) => nomeDaEtapa(l.status_id, l.pipeline_id, etapas.data ?? [])),
-    )
-    return [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'))
-  }, [outras, etapas.data])
+  const totalExibido = useMemo(() => {
+    if (!leads.data) return undefined
+    const ids = statusExibidos(funil, etapas.data ?? [])
+    return leads.data.filter((l) => ids.has(l.status_id)).length
+  }, [leads.data, funil, etapas.data])
 
   // Coluna que a tela fixa e o kanban não tem. Em RPV o vínculo é por id (quebra
   // se a coluna for recriada); em Precatório é por nome (quebra se for
@@ -904,16 +911,16 @@ export default function AnaliseCredito() {
         }
       />
 
-      {/* TRÊS EIXOS, TRÊS FORMAS. Antes o tipo de crédito e a subdivisão eram o
+      {/* TRÊS EIXOS, TRÊS FORMAS. O tipo de crédito e a destinação já foram o
           mesmo componente, um do lado do outro: liam-se como a mesma pergunta
-          feita duas vezes. Agora a hierarquia é visual —
+          feita duas vezes. A distinção agora é de forma e de posição —
 
-            tipo de crédito   abas sublinhadas, largura da página (topo)
-            destinação        pílulas rotuladas, recuadas sob as abas
+            tipo de crédito   abas sublinhadas, com ícone, à esquerda
+            destinação        pílulas na mesma linha, à direita
             etapa             pílulas dentro do cartão, sob a busca
 
-          A contagem do tipo sai do funil CARREGADO, então o outro fica sem
-          número até ser aberto: melhor sem número que com número errado. */}
+          A contagem sai do funil CARREGADO, então o outro fica sem número até
+          ser aberto: melhor sem número que com número errado. */}
       <div className="mb-4">
         <Tabs
           items={[
@@ -921,17 +928,13 @@ export default function AnaliseCredito() {
               key: String(FUNIL_RPV),
               label: 'RPV',
               icon: <Receipt className="h-4 w-4" />,
-              // `leads.data?.length`, e nao `(leads.data ?? []).length`: o
-              // segundo renderiza um 0 DURO enquanto a consulta esta em voo e,
-              // pior, quando ela falhou. "Precatorios 0" ao lado de uma
-              // mensagem de erro afirma que o funil esta vazio.
-              count: funil === FUNIL_RPV ? leads.data?.length : undefined,
+              count: funil === FUNIL_RPV ? totalExibido : undefined,
             },
             {
               key: String(FUNIL_PRECATORIO),
               label: 'Precatórios',
               icon: <Landmark className="h-4 w-4" />,
-              count: funil === FUNIL_PRECATORIO ? leads.data?.length : undefined,
+              count: funil === FUNIL_PRECATORIO ? totalExibido : undefined,
             },
           ]}
           value={String(funil)}
@@ -942,19 +945,8 @@ export default function AnaliseCredito() {
             setAba('')
             setBusca('')
           }}
-        />
-
-        {/* A DESTINAÇÃO DO PRECATÓRIO, subordinada às abas acima.
-            O rótulo "Destinação" é o que desfaz a ambiguidade: nomeia o eixo, e
-            um eixo nomeado não se confunde com outra escolha de tipo de crédito.
-            A descrição embaixo diz o que a trilha ativa significa — Interno e
-            Fundos não se explicam pelo nome a quem chega novo na tela. */}
-        {funil === FUNIL_PRECATORIO && (
-          <div className="mt-3 border-l-2 border-slate-200 pl-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="font-display text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Destinação
-              </span>
+          right={
+            funil === FUNIL_PRECATORIO ? (
               <Segmented
                 ariaLabel="Destinação do precatório"
                 items={SUBDIVISOES_PRECATORIO.map((s) => ({
@@ -970,12 +962,9 @@ export default function AnaliseCredito() {
                   setAba('')
                 }}
               />
-            </div>
-            <p className="mt-1.5 text-xs text-slate-500">
-              {SUBDIVISOES_PRECATORIO.find((s) => s.key === subdivisao)?.descricao}
-            </p>
-          </div>
-        )}
+            ) : undefined
+          }
+        />
       </div>
 
       <Card className="mb-4 p-4">
@@ -1027,19 +1016,6 @@ export default function AnaliseCredito() {
               clique em <strong>Sincronizar</strong>, no alto da página. Se
               continuar assim, a sincronização não conseguiu ler a estrutura do
               kanban e o aviso dela vai aparecer aqui.
-            </p>
-          )}
-
-          {/* O SALDO, EM UMA LINHA. Herdeira da aba "Outras etapas", removida:
-              card em coluna que a tela não lista continua sendo contado e agora
-              tem endereço — o nome da coluna diz para onde ir no Kommo. Discreta
-              de propósito: não é defeito, é o kanban tendo mais colunas que o
-              nosso fluxo, o que é normal. */}
-          {outras.length > 0 && (
-            <p className="mt-2 text-xs text-slate-500">
-              {outras.length} card(s) deste funil estão em outras colunas do Kommo
-              {colunasDoSaldo.length > 0 && <> ({colunasDoSaldo.join(', ')})</>} e não
-              aparecem nas etapas acima.
             </p>
           )}
         </div>
