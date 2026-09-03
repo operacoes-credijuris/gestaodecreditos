@@ -948,6 +948,10 @@ export default function AnaliseCredito() {
           trailing={
             funil === FUNIL_PRECATORIO ? (
               <Segmented
+                // Menor que o padrão: no tamanho normal a pílula ficava mais
+                // alta que as abas ao lado, e o que é maior parece mandar mais.
+                // Aqui quem manda é o tipo de crédito.
+                size="sm"
                 ariaLabel="Destinação do precatório"
                 items={SUBDIVISOES_PRECATORIO.map((s) => ({
                   key: s.key,

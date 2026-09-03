@@ -63,8 +63,12 @@ export function Tabs({
     tabRefs.current[next]?.focus()
   }
 
+  // `items-center`, e não `items-end`: o conteúdo do `trailing` é mais baixo que
+  // as abas, e alinhado pela base ficava pendurado na borda. A régua de abas é o
+  // item mais alto, então ela continua definindo a altura da linha e o
+  // sublinhado da aba ativa segue encostado na borda de baixo.
   return (
-    <div className="flex items-end gap-3 border-b border-slate-200">
+    <div className="flex items-center gap-3 border-b border-slate-200">
       {/* Sem `flex-1`: a régua de abas fica com a largura do conteúdo, para o
           `trailing` encostar nela. Com flex-1 ela esticaria e empurraria o
           conteúdo para a borda da página. `min-w-0` mantém o scroll horizontal
@@ -110,7 +114,7 @@ export function Tabs({
           )
         })}
       </div>
-      {trailing && <div className="shrink-0 pb-1.5">{trailing}</div>}
+      {trailing && <div className="shrink-0">{trailing}</div>}
     </div>
   )
 }
