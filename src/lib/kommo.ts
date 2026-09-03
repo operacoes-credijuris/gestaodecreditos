@@ -19,8 +19,15 @@
 //
 // Toda tela corresponde a exatamente uma coluna do Kommo. Não há estado que
 // exista só na nossa base — o kanban é a fonte de verdade.
+//
+// PRECATÓRIOS seguem a mesma ideia, com uma diferença: o funil deles atende
+// DUAS destinações (Interno e Fundos), então as colunas estão divididas em duas
+// listas fixas — ver SUBDIVISOES_PRECATORIO. Antes isso era configurável na
+// própria tela (tabela etapa_visao, migration 0045); passou a ser fixo no
+// código, como RPV sempre foi.
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from './supabase'
+import { normalizarBusca } from './format'
 import type { KommoLead, KommoAnaliseInterna } from './types'
 
 // Conta do Kommo. O subdomínio não é segredo — é o que aparece na URL.
@@ -38,6 +45,152 @@ export const ST_DECISAO = 107272807 // Revisão e Decisão do Pedro
 export const ST_DILIGENCIA = 107830027 // Diligência
 export const ST_PROPOSTA = 107830035 // Apresentação de Proposta
 export const ST_REPROVADO = 107830031 // Reprovados Operacional
+
+// ---------- Precatórios: as duas destinações, fixas ----------
+
+/**
+ * O destino do precatório, que decide por qual trilha ele anda no funil.
+ *
+ * NÃO é tipo de crédito (isso é o funil: RPV ou Precatório) e NÃO é etapa (isso
+ * são as abas). É um terceiro eixo, e é justamente por serem três que a tela
+ * precisa dar formas diferentes a cada um — dois seletores idênticos lado a
+ * lado se leem como a mesma pergunta feita duas vezes.
+ */
+export type SubdivisaoPrecatorio = 'interno' | 'fundos'
+
+/**
+ * Uma aba do Precatório: o rótulo da plataforma e a coluna do Kommo por trás.
+ *
+ * A LIGAÇÃO É PELO NOME DA COLUNA, e não pelo status_id como em RPV. Não é
+ * preferência de estilo: os ids do funil de Precatórios não existem em lugar
+ * nenhum do código e só se leem com sessão aberta no banco (kommo_etapa exige
+ * `authenticated`). O nome é o que se lê no kanban, então é o que dá para fixar
+ * aqui — e a tela resolve o id sozinha, no navegador de quem já está logado.
+ *
+ * A troca de risco é explícita: id fixo quebra quando a coluna é RECRIADA no
+ * Kommo (ganha id novo); nome fixo quebra quando ela é RENOMEADA. Nos dois
+ * casos a aba mostraria zero card para sempre — e é por isso que existe
+ * `colunasPrecatorioDesalinhadas`: a tela diz qual nome não encontrou, em vez
+ * de ficar vazia em silêncio.
+ *
+ * A comparação passa por normalizarBusca, então acento, caixa e espaço a mais
+ * não quebram nada: "Análise Jurídica (TIER 1)" casa com "ANALISE JURIDICA
+ * (TIER 1)".
+ */
+export interface DefAbaPrecatorio {
+  key: string
+  /** Rótulo na plataforma — vocabulário nosso, não o do CRM do comercial. */
+  label: string
+  /** Nome da coluna no kanban do Kommo, como está escrito lá. */
+  colunaKommo: string
+  descricaoVazia: string
+}
+
+export interface DefSubdivisao {
+  key: SubdivisaoPrecatorio
+  label: string
+  /** Uma linha dizendo o que a subdivisão é, exibida sob o seletor. */
+  descricao: string
+  abas: DefAbaPrecatorio[]
+}
+
+/**
+ * As colunas de cada destinação, e só elas. Do "Funil Geral Precatório".
+ *
+ * "APRESENTAÇÃO DE PROPOSTA" APARECE NAS DUAS, de propósito: é a MESMA coluna
+ * do Kommo, com rótulo diferente em cada trilha ("Aprovados" no Interno,
+ * "Apresentação" nos Fundos). Consequência assumida: um card ali é contado nas
+ * duas subdivisões. Confirmado pelo dono — não é descuido de cópia.
+ *
+ * A ordem das abas é a DO TRABALHO, não a do kanban: no Interno, Aprovados vem
+ * antes de Diligência porque é o desfecho que se busca, e a diligência é o
+ * desvio. Mudar a ordem aqui muda a ordem na tela, nada mais.
+ */
+export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
+  {
+    key: 'interno',
+    label: 'Interno',
+    descricao: 'Precatórios destinados à base de investidores da Credijuris.',
+    abas: [
+      {
+        key: 'int-due-diligence',
+        label: 'Due diligence + Análise Jurídica',
+        colunaKommo: 'Análise Jurídica (TIER 1)',
+        descricaoVazia: 'Nenhum precatório em due diligence.',
+      },
+      {
+        key: 'int-precificacao',
+        label: 'Precificação',
+        colunaKommo: 'Análise Econômico-Financeira (TIER 1)',
+        descricaoVazia: 'Nenhum precatório em precificação.',
+      },
+      {
+        key: 'int-validacao',
+        label: 'Validação',
+        colunaKommo: 'Revisão (TIER 1)',
+        descricaoVazia: 'Nenhum precatório aguardando validação.',
+      },
+      {
+        key: 'int-aprovados',
+        label: 'Aprovados',
+        colunaKommo: 'Apresentação de Proposta',
+        descricaoVazia: 'Nenhum precatório aprovado.',
+      },
+      {
+        key: 'int-diligencia',
+        label: 'Diligência',
+        colunaKommo: 'Diligência',
+        descricaoVazia: 'Nenhum precatório em diligência.',
+      },
+      {
+        key: 'int-reprovados',
+        label: 'Reprovados',
+        colunaKommo: 'Reprovados Operacional',
+        descricaoVazia: 'Nenhum precatório reprovado.',
+      },
+    ],
+  },
+  {
+    key: 'fundos',
+    label: 'Fundos',
+    descricao: 'Precatórios encaminhados a fundos, com defesa técnica própria.',
+    abas: [
+      {
+        key: 'fun-qualificacao',
+        label: 'Qualificação Preliminar',
+        colunaKommo: 'Qualificação Jurídica Preliminar',
+        descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
+      },
+      {
+        key: 'fun-encaminhar',
+        label: 'Encaminhar',
+        colunaKommo: 'Encaminhar ao Fundo',
+        descricaoVazia: 'Nenhum precatório a encaminhar.',
+      },
+      {
+        key: 'fun-defesa',
+        label: 'Elaboração da Defesa Técnica',
+        colunaKommo: 'Defesa Técnica (TIER 2+)',
+        descricaoVazia: 'Nenhuma defesa técnica em elaboração.',
+      },
+      {
+        key: 'fun-validacao',
+        label: 'Validação',
+        colunaKommo: 'Revisão da Defesa Técnica (TIER 2+)',
+        descricaoVazia: 'Nenhuma defesa técnica aguardando validação.',
+      },
+      {
+        key: 'fun-apresentacao',
+        label: 'Apresentação',
+        colunaKommo: 'Apresentação de Proposta',
+        descricaoVazia: 'Nenhum precatório em apresentação.',
+      },
+    ],
+  },
+]
+
+/** A subdivisão que a tela abre por padrão. */
+export const SUBDIVISAO_PADRAO: SubdivisaoPrecatorio = 'interno'
 
 export type TelaAnalise =
   | 'pendentes'
@@ -199,9 +352,10 @@ export function useAnalisesProntas() {
 /**
  * Colunas do kanban do Kommo, espelhadas em public.kommo_etapa pelo kommo-sync.
  *
- * É daqui que saem as abas do funil de Precatórios. O de RPV mantém as abas
- * curadas em TELAS, com rótulo próprio e botões de ação; o Precatório não tem
- * curadoria nenhuma ainda, então usa o kanban como ele é.
+ * As abas dos dois funis são fixas no código (TELAS para RPV,
+ * SUBDIVISOES_PRECATORIO para Precatório). O espelho serve a duas coisas:
+ * resolver o status_id da coluna que o Precatório fixa pelo NOME, e dar o nome
+ * da coluna de origem de um card (nomeDaEtapa).
  */
 export interface EtapaKommo {
   pipeline_id: number
@@ -227,39 +381,6 @@ export function useKommoEtapas() {
   })
 }
 
-/**
- * Curadoria das colunas: quais aparecem na tela e em qual grupo.
- *
- * Um funil do Kommo pode atender duas coisas diferentes — é o caso do de
- * Precatórios — e aí a maioria das colunas não é de quem está olhando. Esta
- * tabela (migration 0045) é editada na própria tela, e não no código, porque
- * coluna nova, coluna renomeada e equipe que muda de ideia não deveriam virar
- * pedido de deploy.
- *
- * `grupo` NULL significa OCULTA, e é diferente de não ter linha nenhuma, que
- * significa NÃO CLASSIFICADA. Ver o comentário da 0045: é a distinção que
- * permite ocultar em silêncio o que foi mandado ocultar e avisar sobre o que
- * ninguém decidiu.
- */
-export interface EtapaVisao {
-  pipeline_id: number
-  status_id: number
-  grupo: string | null
-}
-
-export function useEtapaVisao() {
-  return useQuery({
-    queryKey: ['etapa_visao'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('etapa_visao')
-        .select('pipeline_id, status_id, grupo')
-      if (error) throw new Error(error.message)
-      return (data ?? []) as EtapaVisao[]
-    },
-  })
-}
-
 /** Uma aba da tela: um rótulo, os status que ela cobre e as ações que oferece. */
 export interface Aba {
   key: string
@@ -270,75 +391,62 @@ export interface Aba {
 }
 
 /**
- * Os grupos de um funil, e as colunas que ninguém classificou.
+ * Índice nome-da-coluna -> status_id, para um funil.
  *
- * `configurado` é falso quando não existe UMA linha de curadoria para o funil, e
- * nesse caso a tela volta ao comportamento da 0044 (todas as colunas, sem
- * grupos). Isso é o que faz a 0045 não quebrar nada ao entrar: configurar é
- * opção, não obrigação.
- *
- * `naoClassificadas` é a lista que merece aviso — coluna que apareceu no Kommo
- * depois de alguém já ter configurado o funil. Sem esse aviso, coluna nova
- * simplesmente não teria pílula, e não ter pílula é indistinguível de estar
- * oculta de propósito.
- *
- * A ordem dos grupos sai do kanban: o grupo cuja primeira coluna vem antes no
- * Kommo aparece antes. Ordem alfabética seria escolha nossa contando uma
- * história diferente da do CRM que o comercial usa.
+ * A chave passa por normalizarBusca porque o nome vem digitado em dois lugares
+ * diferentes: no kanban do Kommo e em SUBDIVISOES_PRECATORIO. Exigir igualdade
+ * byte a byte faria um acento ou um espaço a mais esvaziar uma aba.
  */
-export function gruposDoFunil(
-  pipelineId: number,
+function porNomeDeColuna(pipelineId: number, etapas: EtapaKommo[]): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const e of etapas) {
+    if (e.pipeline_id !== pipelineId) continue
+    m.set(normalizarBusca(e.nome), e.status_id)
+  }
+  return m
+}
+
+/**
+ * As colunas que o Precatório fixa pelo nome e que o kanban do Kommo não tem.
+ *
+ * O equivalente de telasRpvDesalinhadas para o outro funil, e por que ele
+ * existe é o mesmo motivo: aba ligada a uma coluna inexistente mostra zero card
+ * PARA SEMPRE, e zero card se lê como "não tem trabalho aqui". Coluna renomeada
+ * no Kommo é a causa provável — daí o aviso citar o nome que se esperava.
+ *
+ * Devolve vazio quando o espelho ainda não chegou, para não acusar defeito por
+ * falta de dado.
+ */
+export function colunasPrecatorioDesalinhadas(
   etapas: EtapaKommo[],
-  visoes: EtapaVisao[],
-): { grupos: string[]; naoClassificadas: EtapaKommo[]; configurado: boolean } {
-  if (pipelineId === FUNIL_RPV) {
-    return { grupos: [], naoClassificadas: [], configurado: false }
-  }
-  const doFunil = etapas.filter((e) => e.pipeline_id === pipelineId)
-  const conf = visoes.filter((v) => v.pipeline_id === pipelineId)
-  if (conf.length === 0) {
-    return { grupos: [], naoClassificadas: [], configurado: false }
-  }
-
-  const porStatus = new Map(conf.map((v) => [v.status_id, v.grupo]))
-  const primeiraOrdem = new Map<string, number>()
-  for (const e of doFunil) {
-    const g = porStatus.get(e.status_id)
-    if (!g) continue
-    const atual = primeiraOrdem.get(g)
-    if (atual === undefined || e.ordem < atual) primeiraOrdem.set(g, e.ordem)
-  }
-
-  return {
-    grupos: [...primeiraOrdem.entries()]
-      .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0], 'pt-BR'))
-      .map(([g]) => g),
-    naoClassificadas: doFunil.filter((e) => !porStatus.has(e.status_id)),
-    configurado: true,
-  }
+  subdivisao: SubdivisaoPrecatorio | null = null,
+): DefAbaPrecatorio[] {
+  const doFunil = etapas.filter((e) => e.pipeline_id === FUNIL_PRECATORIO)
+  if (doFunil.length === 0) return []
+  const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
+  const defs = subdivisao
+    ? (SUBDIVISOES_PRECATORIO.find((s) => s.key === subdivisao)?.abas ?? [])
+    : SUBDIVISOES_PRECATORIO.flatMap((s) => s.abas)
+  return defs.filter((a) => !nomes.has(normalizarBusca(a.colunaKommo)))
 }
 
 /**
  * As abas de um funil.
  *
- * RPV usa TELAS: rótulos no vocabulário da plataforma e as três saídas de
- * Validação com um clique. Qualquer outro funil usa o kanban do Kommo como ele
- * é, SEM botão de ação — e isso é decisão, não pendência: os botões de RPV
- * carregam semântica ("Aprovar" = mover para Apresentação de Proposta) que
+ * OS DOIS FUNIS TÊM ABAS FIXAS, cada um do seu jeito: RPV amarra o status_id
+ * (TELAS) e o Precatório amarra o nome da coluna (SUBDIVISOES_PRECATORIO, ver
+ * lá o porquê). Nenhum dos dois lê mais o kanban como ele é.
+ *
+ * SEM BOTÃO DE AÇÃO no Precatório, e isso é decisão, não pendência: os botões de
+ * RPV carregam semântica ("Aprovar" = mover para Apresentação de Proposta) que
  * ninguém definiu para o Precatório. Adivinhar qual coluna significa "aprovado"
  * seria mover card de verdade com base em palpite. A kommo-mover, de todo modo,
- * só aceita os cinco status de RPV — um palpite aqui daria erro lá, o que é o
- * comportamento certo, mas o botão não devia existir.
- *
- * `grupo` filtra as colunas quando o funil está configurado. Coluna oculta e
- * coluna não classificada ficam fora das abas — e por isso caem em "Outras
- * etapas" (agruparPorAba), nunca no vazio.
+ * só aceita os cinco status de RPV — um palpite aqui daria erro lá.
  */
 export function abasDoFunil(
   pipelineId: number,
   etapas: EtapaKommo[],
-  visoes: EtapaVisao[] = [],
-  grupo: string | null = null,
+  subdivisao: SubdivisaoPrecatorio | null = null,
 ): Aba[] {
   if (pipelineId === FUNIL_RPV) {
     return TELAS.map((t) => ({
@@ -349,37 +457,42 @@ export function abasDoFunil(
       acoes: ACOES[t.key],
     }))
   }
+  if (pipelineId !== FUNIL_PRECATORIO) return []
 
-  const conf = visoes.filter((v) => v.pipeline_id === pipelineId)
-  const porStatus = new Map(conf.map((v) => [v.status_id, v.grupo]))
+  const def = SUBDIVISOES_PRECATORIO.find(
+    (s) => s.key === (subdivisao ?? SUBDIVISAO_PADRAO),
+  )
+  if (!def) return []
+  const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
 
-  return etapas
-    .filter((e) => e.pipeline_id === pipelineId)
-    .filter((e) => {
-      if (conf.length === 0) return true // sem curadoria: mostra tudo
-      return grupo !== null && porStatus.get(e.status_id) === grupo
-    })
-    .map((e) => ({
-      key: `st${e.status_id}`,
-      label: e.nome,
-      statusIds: [e.status_id],
-      descricaoVazia: `Nenhum card em "${e.nome}" no Kommo.`,
-      acoes: [],
-    }))
+  return def.abas.map((a) => {
+    const statusId = nomes.get(normalizarBusca(a.colunaKommo))
+    return {
+      key: a.key,
+      label: a.label,
+      // ABA SEM COLUNA CASADA CONTINUA EXISTINDO, com zero card. Sumir com ela
+      // esconderia o defeito: a pessoa veria cinco abas onde a regra diz seis e
+      // não teria como saber qual faltou. Quem nomeia a que faltou é
+      // colunasPrecatorioDesalinhadas, no topo da tela.
+      statusIds: statusId === undefined ? [] : [statusId],
+      descricaoVazia: a.descricaoVazia,
+      acoes: [] as AcaoTela[],
+    }
+  })
 }
-
-/** A aba que existe só para nada desaparecer. Ver agruparPorAba. */
-export const ABA_OUTRAS = 'outras'
 
 /**
  * Separa os cards nas abas — e devolve à parte os que não couberam em nenhuma.
  *
- * O SALDO EXISTE DE PROPÓSITO. A versão anterior filtrava card por card contra
+ * O SALDO EXISTE DE PROPÓSITO. Uma versão antiga filtrava card por card contra
  * os cinco status de RPV e descartava o resto em silêncio: um card movido no
  * Kommo para uma coluna fora dessas cinco sumia da tela, sem aparecer em aba
  * nenhuma e sem entrar em contagem nenhuma. Ninguém tinha como notar — a
- * ausência de um card não chama atenção. Agora ele cai em "Outras etapas", que
- * só aparece quando tem algo dentro.
+ * ausência de um card não chama atenção.
+ *
+ * O saldo já teve aba própria ("Outras etapas"), removida por decisão do dono.
+ * Hoje ele vira UMA LINHA de contagem sob as abas: continua impossível um card
+ * desaparecer sem deixar rastro, sem custar uma pílula na régua de etapas.
  */
 export function agruparPorAba(
   leads: KommoLead[],

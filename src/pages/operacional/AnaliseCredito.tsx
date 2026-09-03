@@ -1,10 +1,22 @@
 // Análise de Crédito: as etapas do fluxo do operacional, alimentadas pelos cards
 // do kanban do Kommo (espelho local em public.kommo_leads).
 //
-// Cada tela corresponde a exatamente uma coluna do Kommo, e as ações de cada
+// Cada aba corresponde a exatamente uma coluna do Kommo, e as ações de cada
 // etapa aparecem como botões no próprio card, com um clique — nenhuma etapa
 // pede justificativa: a análise, inclusive o motivo de uma eventual reprovação,
 // já foi escrita em Pendentes (ver src/lib/kommo.ts).
+//
+// TRÊS EIXOS, e a tela dá uma forma visual a cada um, porque dois seletores
+// iguais lado a lado se leem como a mesma pergunta feita duas vezes:
+//
+//   tipo de crédito   RPV | Precatórios          abas sublinhadas, no topo
+//   destinação        Interno | Fundos           pílulas rotuladas, recuadas
+//                     (só no Precatório)
+//   etapa             as colunas daquela trilha  pílulas dentro do cartão
+//
+// As colunas de CADA trilha são fixas no código (src/lib/kommo.ts). Já foram
+// configuráveis na própria tela — tabela etapa_visao, migration 0045 —, e
+// deixaram de ser por decisão do dono: o mesmo caminho do RPV.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -15,7 +27,8 @@ import {
   FileSearch,
   ClipboardCheck,
   RefreshCw,
-  SlidersHorizontal,
+  Landmark,
+  Receipt,
   X,
 } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
@@ -27,17 +40,18 @@ import {
   ST_PROPOSTA,
   ST_DILIGENCIA,
   ST_REPROVADO,
-  ABA_OUTRAS,
+  SUBDIVISOES_PRECATORIO,
+  SUBDIVISAO_PADRAO,
   abasDoFunil,
   agruparPorAba,
   nomeDaEtapa,
   telasRpvDesalinhadas,
-  gruposDoFunil,
+  colunasPrecatorioDesalinhadas,
   useKommoLeads,
   useKommoEtapas,
-  useEtapaVisao,
   useAnalisesProntas,
   type AcaoTela,
+  type SubdivisaoPrecatorio,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -46,11 +60,11 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
+import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { ChecklistCertidoes } from '@/components/ChecklistCertidoes'
-import { EtapasDoFunil } from '@/components/EtapasDoFunil'
 import { formatDate } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -418,13 +432,10 @@ function CardCredito({
   analisando,
   resultadoAnalise,
   onCertidoes,
-  etapaOrigem,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
   onAcao: (l: KommoLead, a: AcaoTela) => void
-  /** Nome da coluna do Kommo, quando o card está fora das abas conhecidas. */
-  etapaOrigem: string | null
   /** null = não mostrar o selo (só faz sentido na etapa de revisão). */
   analisePronta: boolean | null
   /** Destino sendo processado neste card, ou null. */
@@ -455,11 +466,6 @@ function CardCredito({
             {analisePronta !== null && (
               <Badge size="sm" tone={analisePronta ? 'green' : 'yellow'}>
                 {analisePronta ? 'Finalizado' : 'Em curso'}
-              </Badge>
-            )}
-            {etapaOrigem && (
-              <Badge size="sm" tone="gray">
-                {etapaOrigem}
               </Badge>
             )}
           </div>
@@ -629,13 +635,13 @@ export default function AnaliseCredito() {
   const [funil, setFunil] = useState<number>(FUNIL_RPV)
   const leads = useKommoLeads(funil)
   const etapas = useKommoEtapas()
-  const visoes = useEtapaVisao()
   const prontas = useAnalisesProntas()
 
   const [aba, setAba] = useState<string>('pendentes')
-  // Grupo de etapas escolhido. null = funil sem curadoria (mostra tudo).
-  const [grupo, setGrupo] = useState<string | null>(null)
-  const [configurando, setConfigurando] = useState(false)
+  // Destinação do precatório. Só tem efeito no funil de Precatórios; em RPV o
+  // valor fica guardado e ignorado, para voltar ao mesmo lugar na troca de funil.
+  const [subdivisao, setSubdivisao] =
+    useState<SubdivisaoPrecatorio>(SUBDIVISAO_PADRAO)
   const [busca, setBusca] = useState('')
   // Ação em curso, para o botão certo do card certo mostrar o spinner.
   const [emAndamento, setEmAndamento] = useState<{
@@ -669,7 +675,6 @@ export default function AnaliseCredito() {
     })
 
   async function onAnalisar(lead: KommoLead) {
-    if (!confirmaForaDoFluxo(lead, 'Rodar a analise automatica')) return
     setAnalisandoId(lead.kommo_lead_id)
     try {
       // Lê PRIMEIRO e guarda no cache na hora. A versão anterior só guardava
@@ -692,32 +697,17 @@ export default function AnaliseCredito() {
     }
   }
 
+  // Analisar e Certidões escreviam atrás de um window.confirm quando o card
+  // estava fora do fluxo. A confirmação morreu com a aba "Outras etapas": ela só
+  // disparava lá, e sem aquela aba não há como abrir na tela um card que esteja
+  // fora das colunas listadas — logo, nada a confirmar.
+
   /**
    * Abre o checklist. O modal aparece NA HORA e o PDF é lido em segundo plano:
    * a sugestão de CPF é conveniência, não requisito. Se o PDF não existir ou for
    * digitalizado, o formulário continua utilizável — quem confere digita.
    */
-  /**
-   * Confirmacao para card fora do fluxo.
-   *
-   * Analisar e Certidoes ESCREVEM: a analise grava anotacao no card do Kommo (que
-   * o comercial le) e arquivo no Drive; o checklist grava os sujeitos e o
-   * checklist no banco. Na aba "Outras etapas" o card pode estar em "Venda
-   * ganha" ou "Venda perdida" — estampar "APROVADO na analise automatica" num
-   * negocio fechado e pior que nao ter o botao. Nao escondo o botao: as vezes e
-   * exatamente o que se quer. Mas nao deixo acontecer sem querer.
-   */
-  function confirmaForaDoFluxo(lead: KommoLead, acao: string): boolean {
-    if (abaAtual?.key !== ABA_OUTRAS) return true
-    const coluna = nomeDaEtapa(lead.status_id, lead.pipeline_id, etapas.data ?? [])
-    return window.confirm(
-      `Este card esta na coluna "${coluna}" do Kommo, fora das etapas de analise.\n\n` +
-        `${acao} vai gravar no card e no Drive de todo jeito.\n\nConfirma?`,
-    )
-  }
-
   function onCertidoes(lead: KommoLead) {
-    if (!confirmaForaDoFluxo(lead, 'Montar o checklist de certidoes')) return
     setCertidoesLead(lead)
     const id = lead.kommo_lead_id
     // Lê os anexos sempre, mesmo quando a janela vai abrir no placar e as
@@ -761,9 +751,9 @@ export default function AnaliseCredito() {
       qc.invalidateQueries({ queryKey: ['kommo_leads'] })
       qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
       // As colunas do kanban também vêm deste sync (migration 0044): sem
-      // invalidar, uma coluna nova no Kommo só apareceria no próximo F5.
+      // invalidar, coluna renomeada no Kommo continuaria com o nome antigo aqui
+      // até o próximo F5 — e é pelo nome que o Precatório acha as dele.
       qc.invalidateQueries({ queryKey: ['kommo_etapa'] })
-      qc.invalidateQueries({ queryKey: ['etapa_visao'] })
       // Aviso de sucesso PARCIAL: os cards vieram, a estrutura do kanban não.
       // Silenciar isto deixaria uma aba faltando sem explicação.
       if (r?.aviso) toast.error(r.aviso)
@@ -795,19 +785,9 @@ export default function AnaliseCredito() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const { grupos, naoClassificadas, configurado } = useMemo(
-    () => gruposDoFunil(funil, etapas.data ?? [], visoes.data ?? []),
-    [funil, etapas.data, visoes.data],
-  )
-
-  // O grupo guardado no estado pode não existir mais (funil trocado, grupo
-  // renomeado, configuração ainda carregando). Cai no primeiro.
-  const grupoAtual =
-    grupo && grupos.includes(grupo) ? grupo : (grupos[0] ?? null)
-
   const abas = useMemo(
-    () => abasDoFunil(funil, etapas.data ?? [], visoes.data ?? [], grupoAtual),
-    [funil, etapas.data, visoes.data, grupoAtual],
+    () => abasDoFunil(funil, etapas.data ?? [], subdivisao),
+    [funil, etapas.data, subdivisao],
   )
 
   const { porAba, outras } = useMemo(
@@ -815,43 +795,43 @@ export default function AnaliseCredito() {
     [leads.data, abas],
   )
 
-  // "Outras etapas" só existe quando tem card dentro. É a rede que impede um
-  // card de sumir: coluna do Kommo que a tela não conhece cai aqui, com o nome
-  // da coluna ao lado, em vez de desaparecer.
-  const abasVisiveis = useMemo(
-    () =>
-      outras.length > 0
-        ? [
-            ...abas,
-            {
-              key: ABA_OUTRAS,
-              label: 'Outras etapas',
-              statusIds: [],
-              descricaoVazia: '',
-              acoes: [] as AcaoTela[],
-            },
-          ]
-        : abas,
-    [abas, outras.length],
-  )
+  /**
+   * As colunas do Kommo onde está o saldo de cards, por nome.
+   *
+   * Substitui a aba "Outras etapas": em vez de uma pílula na régua de etapas,
+   * uma linha de texto sob ela. O essencial não se perde — nenhum card
+   * desaparece sem rastro — e o rastro melhora: DIZ ONDE O CARD ESTÁ, que é a
+   * única informação capaz de fazer alguém agir (abrir o Kommo e mover).
+   */
+  const colunasDoSaldo = useMemo(() => {
+    const nomes = new Set(
+      outras.map((l) => nomeDaEtapa(l.status_id, l.pipeline_id, etapas.data ?? [])),
+    )
+    return [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [outras, etapas.data])
 
-  // Coluna de RPV que sumiu do Kommo: a aba dela mostraria zero card para sempre,
-  // e o único vestígio seria a pílula "Outras etapas" — que ninguém liga à causa.
+  // Coluna que a tela fixa e o kanban não tem. Em RPV o vínculo é por id (quebra
+  // se a coluna for recriada); em Precatório é por nome (quebra se for
+  // renomeada). O sintoma é o mesmo — aba com zero card para sempre — e sem
+  // aviso ninguém liga o sintoma à causa.
   const rpvDesalinhado = useMemo(
     () => (funil === FUNIL_RPV ? telasRpvDesalinhadas(etapas.data ?? []) : []),
     [funil, etapas.data],
   )
+  const precatorioDesalinhado = useMemo(
+    () =>
+      funil === FUNIL_PRECATORIO
+        ? colunasPrecatorioDesalinhadas(etapas.data ?? [], subdivisao)
+        : [],
+    [funil, etapas.data, subdivisao],
+  )
 
   // A aba escolhida pode não existir no funil recém-selecionado (as chaves de
-  // RPV são 'pendentes'…, as de Precatório são 'st<id>'). Cai na primeira.
-  const abaAtual = abasVisiveis.find((a) => a.key === aba) ?? abasVisiveis[0] ?? null
+  // RPV são 'pendentes'…, as de Precatório são 'int-…'/'fun-…'). Cai na primeira.
+  const abaAtual = abas.find((a) => a.key === aba) ?? abas[0] ?? null
 
   const lista = useMemo(() => {
-    let l = abaAtual
-      ? abaAtual.key === ABA_OUTRAS
-        ? outras
-        : (porAba[abaAtual.key] ?? [])
-      : []
+    let l = abaAtual ? (porAba[abaAtual.key] ?? []) : []
     if (busca.trim()) {
       const q = busca.toLowerCase()
       l = l.filter((x) =>
@@ -869,7 +849,7 @@ export default function AnaliseCredito() {
       )
     }
     return l
-  }, [porAba, outras, abaAtual, busca])
+  }, [porAba, abaAtual, busca])
 
   const mover = useMutation({
     mutationFn: (args: { leadId: number; statusId: number; comentario: string }) =>
@@ -924,16 +904,23 @@ export default function AnaliseCredito() {
         }
       />
 
-      {/* Os dois funis do Kommo. A contagem sai do funil carregado, então o do
-          outro lado fica sem número até ser aberto — melhor sem número que com
-          número errado. */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Segmented
-          ariaLabel="Tipo de crédito"
+      {/* TRÊS EIXOS, TRÊS FORMAS. Antes o tipo de crédito e a subdivisão eram o
+          mesmo componente, um do lado do outro: liam-se como a mesma pergunta
+          feita duas vezes. Agora a hierarquia é visual —
+
+            tipo de crédito   abas sublinhadas, largura da página (topo)
+            destinação        pílulas rotuladas, recuadas sob as abas
+            etapa             pílulas dentro do cartão, sob a busca
+
+          A contagem do tipo sai do funil CARREGADO, então o outro fica sem
+          número até ser aberto: melhor sem número que com número errado. */}
+      <div className="mb-4">
+        <Tabs
           items={[
             {
               key: String(FUNIL_RPV),
               label: 'RPV',
+              icon: <Receipt className="h-4 w-4" />,
               // `leads.data?.length`, e nao `(leads.data ?? []).length`: o
               // segundo renderiza um 0 DURO enquanto a consulta esta em voo e,
               // pior, quando ela falhou. "Precatorios 0" ao lado de uma
@@ -943,6 +930,7 @@ export default function AnaliseCredito() {
             {
               key: String(FUNIL_PRECATORIO),
               label: 'Precatórios',
+              icon: <Landmark className="h-4 w-4" />,
               count: funil === FUNIL_PRECATORIO ? leads.data?.length : undefined,
             },
           ]}
@@ -950,38 +938,43 @@ export default function AnaliseCredito() {
           onChange={(v) => {
             setFunil(Number(v))
             // A chave da aba não é comparável entre funis ('pendentes' vs
-            // 'st123'). Limpar aqui evita a tela abrir vazia por casar nada.
+            // 'int-…'). Limpar aqui evita a tela abrir vazia por casar nada.
             setAba('')
-            setGrupo(null)
             setBusca('')
           }}
         />
 
-        {/* Grupo de etapas. Aparece só quando o funil foi configurado — no funil
-            sem curadoria não existe grupo nenhum e uma pílula vazia seria ruído. */}
-        {grupos.length > 0 && (
-          <Segmented
-            ariaLabel="Grupo de etapas"
-            items={grupos.map((g) => ({ key: g, label: g }))}
-            value={grupoAtual ?? ''}
-            onChange={(v) => {
-              setGrupo(v)
-              setAba('')
-            }}
-          />
-        )}
-
-        {/* Configurar só onde a configuração existe. Em RPV as abas são curadas
-            no código (com os botões de mover), então não há o que escolher. */}
-        {funil !== FUNIL_RPV && (
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<SlidersHorizontal className="h-4 w-4" />}
-            onClick={() => setConfigurando(true)}
-          >
-            {configurado ? 'Etapas' : 'Dividir etapas'}
-          </Button>
+        {/* A DESTINAÇÃO DO PRECATÓRIO, subordinada às abas acima.
+            O rótulo "Destinação" é o que desfaz a ambiguidade: nomeia o eixo, e
+            um eixo nomeado não se confunde com outra escolha de tipo de crédito.
+            A descrição embaixo diz o que a trilha ativa significa — Interno e
+            Fundos não se explicam pelo nome a quem chega novo na tela. */}
+        {funil === FUNIL_PRECATORIO && (
+          <div className="mt-3 border-l-2 border-slate-200 pl-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-display text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Destinação
+              </span>
+              <Segmented
+                ariaLabel="Destinação do precatório"
+                items={SUBDIVISOES_PRECATORIO.map((s) => ({
+                  key: s.key,
+                  label: s.label,
+                }))}
+                value={subdivisao}
+                onChange={(v) => {
+                  setSubdivisao(v as SubdivisaoPrecatorio)
+                  // As chaves das abas são próprias de cada trilha ('int-…' e
+                  // 'fun-…'): sem limpar, a tela cairia na primeira por acidente
+                  // em vez de por decisão.
+                  setAba('')
+                }}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-slate-500">
+              {SUBDIVISOES_PRECATORIO.find((s) => s.key === subdivisao)?.descricao}
+            </p>
+          </div>
         )}
       </div>
 
@@ -996,14 +989,13 @@ export default function AnaliseCredito() {
           />
         </div>
         <div className="mt-3">
-          {abasVisiveis.length > 0 ? (
+          {abas.length > 0 ? (
             <Segmented
               ariaLabel="Etapa da análise"
-              items={abasVisiveis.map((a) => ({
+              items={abas.map((a) => ({
                 key: a.key,
                 label: a.label,
-                count:
-                  a.key === ABA_OUTRAS ? outras.length : (porAba[a.key]?.length ?? 0),
+                count: porAba[a.key]?.length ?? 0,
               }))}
               value={abaAtual?.key ?? ''}
               onChange={(v) => setAba(v)}
@@ -1037,49 +1029,42 @@ export default function AnaliseCredito() {
               kanban e o aviso dela vai aparecer aqui.
             </p>
           )}
+
+          {/* O SALDO, EM UMA LINHA. Herdeira da aba "Outras etapas", removida:
+              card em coluna que a tela não lista continua sendo contado e agora
+              tem endereço — o nome da coluna diz para onde ir no Kommo. Discreta
+              de propósito: não é defeito, é o kanban tendo mais colunas que o
+              nosso fluxo, o que é normal. */}
+          {outras.length > 0 && (
+            <p className="mt-2 text-xs text-slate-500">
+              {outras.length} card(s) deste funil estão em outras colunas do Kommo
+              {colunasDoSaldo.length > 0 && <> ({colunasDoSaldo.join(', ')})</>} e não
+              aparecem nas etapas acima.
+            </p>
+          )}
         </div>
       </Card>
 
-      {visoes.isError && funil !== FUNIL_RPV && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
-          Não consegui ler a divisão de etapas: {(visoes.error as Error)?.message}. A
-          tela está mostrando TODAS as colunas do funil — não é que a configuração
-          tenha sido perdida, é que não deu para lê-la.{' '}
-          <button
-            type="button"
-            onClick={() => visoes.refetch()}
-            className="font-medium underline"
-          >
-            Tentar de novo
-          </button>
-        </div>
-      )}
-
-      {naoClassificadas.length > 0 && (
-        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
-          {naoClassificadas.length} coluna(s) do Kommo ainda sem grupo:{' '}
-          <strong>{naoClassificadas.map((e) => e.nome).join(', ')}</strong>. Os cards
-          delas aparecem em &quot;Outras etapas&quot; até alguém decidir — clique em{' '}
-          <strong>Etapas</strong>, no alto. Este aviso existe porque coluna nova no
-          Kommo sem pílula na tela seria indistinguível de coluna ocultada de
-          propósito.
-        </div>
-      )}
-
+      {/* Coluna fixada que o kanban não tem. Vermelho, e não amarelo: aqui a aba
+          fica vazia PARA SEMPRE, e é defeito de configuração, não recado. */}
       {rpvDesalinhado.length > 0 && (
         <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
           A coluna do Kommo de{' '}
           <strong>{rpvDesalinhado.map((t) => t.label).join(', ')}</strong> não existe
           mais neste funil. A aba vai mostrar zero card até alguém corrigir o número
-          da coluna em src/lib/kommo.ts — os cards que estariam nela aparecem em
-          &quot;Outras etapas&quot;.
+          da coluna em src/lib/kommo.ts.
         </div>
       )}
 
-      {abaAtual?.key === ABA_OUTRAS && (
-        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
-          Estes cards estão em colunas do Kommo que a tela não cobre. Antes eles
-          não apareciam em lugar nenhum — ficam aqui para nenhum crédito sumir.
+      {precatorioDesalinhado.length > 0 && (
+        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+          Não achei no Kommo a coluna{' '}
+          <strong>
+            {precatorioDesalinhado.map((a) => `"${a.colunaKommo}"`).join(', ')}
+          </strong>
+          . A aba correspondente ({precatorioDesalinhado.map((a) => a.label).join(', ')}
+          ) fica com zero card até o nome bater. Causa provável: a coluna foi
+          renomeada no Kommo — é só alinhar o nome lá ou em src/lib/kommo.ts.
         </div>
       )}
 
@@ -1115,22 +1100,12 @@ export default function AnaliseCredito() {
                 lead={l}
                 acoes={abaAtual?.acoes ?? []}
                 onAcao={acionar}
-                // Em "Outras etapas" o card vem de uma coluna que a tela não
-                // cobre. Dizer QUAL coluna é o que evita a pessoa achar que o
-                // card está fora do fluxo por defeito.
-                etapaOrigem={
-                  abaAtual?.key === ABA_OUTRAS
-                    ? nomeDaEtapa(l.status_id, l.pipeline_id, etapas.data ?? [])
-                    : null
-                }
-                // O selo só aparece em Pendentes: nas etapas seguintes a
-                // análise já passou pela revisão, então dizer "finalizado"
-                // seria ruído.
-                // Em RPV o selo so aparece em Pendentes: nas etapas seguintes a
-                // analise ja passou pela revisao, e dizer "finalizado" seria
-                // ruido. No funil de Precatorios nao existe essa curadoria — sem
-                // o selo, card com analise pronta fica visualmente IDENTICO a
-                // card ainda na fila, em toda aba, para sempre.
+                // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
+                // análise já passou pela revisão, e dizer "finalizado" ali seria
+                // ruído. NO PRECATÓRIO ele aparece em toda aba, porque o fluxo
+                // de análise automática ainda não tem uma etapa definida como "a
+                // fila" — e sem o selo, card com análise pronta ficaria
+                // visualmente idêntico a card que ninguém tocou.
                 analisePronta={
                   funil === FUNIL_RPV && abaAtual?.key !== 'pendentes'
                     ? null
@@ -1150,20 +1125,6 @@ export default function AnaliseCredito() {
           </div>
         )}
       </Card>
-
-      <EtapasDoFunil
-        pipelineId={funil}
-        etapas={etapas.data ?? []}
-        visoes={visoes.data ?? []}
-        open={configurando}
-        onClose={() => setConfigurando(false)}
-        onSalvo={() => {
-          qc.invalidateQueries({ queryKey: ['etapa_visao'] })
-          // O grupo guardado pode ter deixado de existir na nova configuração.
-          setGrupo(null)
-          setAba('')
-        }}
-      />
 
       {certidoesLead && (
         <ChecklistCertidoes
