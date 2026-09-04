@@ -538,18 +538,23 @@ function CardCredito({
             </Button>
           )}
 
-          {/* Nunca automático: o checklist depende de CPF e UF que uma pessoa
-              confere no processo. Rodar sozinho só produziria checklist sobre
-              dado adivinhado. */}
-          <Button
-            size="sm"
-            variant="outline"
-            icon={<ClipboardCheck className="h-4 w-4" />}
-            onClick={() => onDueDiligence(lead)}
-            disabled={ocupado}
-          >
-            Due diligence
-          </Button>
+          {/* DUE DILIGENCE É SÓ DE PRECATÓRIO. Em RPV não se faz diligência de
+              certidões — decisão do dono. O botão existiu em RPV por herança: o
+              checklist nasceu aqui, na única tela que havia, antes de o funil de
+              precatórios entrar. Nunca automático: o checklist depende de CPF e
+              UF que uma pessoa confere no processo, e rodar sozinho só produziria
+              checklist sobre dado adivinhado. */}
+          {botoes === 'precatorio' && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<ClipboardCheck className="h-4 w-4" />}
+              onClick={() => onDueDiligence(lead)}
+              disabled={ocupado}
+            >
+              Due diligence
+            </Button>
+          )}
 
           {botoes === 'precatorio' && (
             <Button
