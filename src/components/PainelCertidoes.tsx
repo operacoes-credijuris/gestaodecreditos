@@ -1,6 +1,14 @@
 // Checklist de certidões do crédito: cadastro dos sujeitos e o placar de
 // completude, no card do Kommo.
 //
+// É A ABA "CERTIDÕES" DA JANELA DE DUE DILIGENCE (components/DueDiligence.tsx).
+// Já foi um modal inteiro, com título e rodapé próprios; virou painel quando a
+// due diligence passou a ter duas frentes — certidões e processos judiciais. Daí
+// as ações ("Gravar e montar checklist", "Corrigir dados") ficarem no fim do
+// PAINEL e não no rodapé da janela: ali embaixo pareceriam valer para as duas
+// abas. Daí também `ativo` no lugar de `open`, e `onDirtyChange` — só a janela
+// pede confirmação de descarte, e só o painel sabe que há o que descartar.
+//
 // A REGRA QUE ESTA TELA SERVE, e que é a razão de o sistema existir: "não
 // consegui emitir" não é "não precisa emitir". O checklist é montado ANTES de
 // qualquer emissão, congelado no banco, e a etapa documental só fecha quando
@@ -48,7 +56,6 @@ import {
   type LocalEncontrado,
   type NascimentoEncontrado,
 } from '@/lib/dadosNoTexto'
-import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
@@ -639,14 +646,14 @@ function Sugestoes({
 
 // ------------------------------------------------------------------ componente
 
-export function ChecklistCertidoes({
+export function PainelCertidoes({
   leadId,
   cedenteDoCard,
   arquivos,
   lendoPdf,
   avisoPdf,
-  open,
-  onClose,
+  ativo,
+  onDirtyChange,
 }: {
   leadId: number
   /** Nome do cedente lido do card. Sugestão: o campo continua editável. */
@@ -661,8 +668,21 @@ export function ChecklistCertidoes({
   arquivos: ArquivoLido[]
   lendoPdf: boolean
   avisoPdf: string | null
-  open: boolean
-  onClose: () => void
+  /**
+   * A aba deste painel está à vista.
+   *
+   * Antes era `open`, do modal que este componente era. Agora quem abre e fecha
+   * a janela é o DueDiligence; aqui só interessa se a ABA está visível, porque é
+   * isso que decide se vale carregar UFs e recarregar o checklist. O painel NÃO
+   * é desmontado ao trocar de aba, de propósito: um formulário meio preenchido
+   * não pode se perder porque alguém foi olhar Processos Judiciais.
+   */
+  ativo: boolean
+  /**
+   * Avisa a janela quando há alteração não salva, para ela pedir confirmação
+   * antes de fechar. O painel sabe disso; o modal, não.
+   */
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const toast = useToast()
   const [carregando, setCarregando] = useState(true)
@@ -699,7 +719,7 @@ export function ChecklistCertidoes({
   // DadosPessoaisBancarios, para não entrar no bundle de quem nunca abre isto.
   const [erroMunicipios, setErroMunicipios] = useState<string | null>(null)
   useEffect(() => {
-    if (!open || ufs.length > 0) return
+    if (!ativo || ufs.length > 0) return
     void import('@/lib/municipios')
       .then((m) => {
         setUfs(m.UFS)
@@ -718,7 +738,7 @@ export function ChecklistCertidoes({
           }). Recarregue a página com Ctrl+Shift+R — sem ela eu não confiro cidade nenhuma.`,
         ),
       )
-  }, [open, ufs.length])
+  }, [ativo, ufs.length])
 
   const temTexto = useMemo(() => arquivos.some((a) => a.texto.length > 0), [arquivos])
 
@@ -1057,8 +1077,8 @@ export function ChecklistCertidoes({
   }, [leadId, cedenteDoCard])
 
   useEffect(() => {
-    if (open) void recarregar()
-  }, [open, recarregar])
+    if (ativo) void recarregar()
+  }, [ativo, recarregar])
 
   // ---------------------------------------------------------------- validação
 
@@ -1258,6 +1278,19 @@ export function ChecklistCertidoes({
     return mapa
   }, [itens])
 
+  /**
+   * Publica o "tem alteração não salva" para a janela.
+   *
+   * Era o `dirty` do modal que este componente foi. Quem pede a confirmação de
+   * descarte é a janela, e ela não tem como saber de `editando` e `mexeu` — que
+   * são estado interno do formulário. Daí subir por callback em vez de a janela
+   * adivinhar.
+   */
+  const sujo = editando && mexeu
+  useEffect(() => {
+    onDirtyChange?.(sujo)
+  }, [sujo, onDirtyChange])
+
   const municipiosDaUf = (uf: string) => (uf ? (municipios[uf] ?? []) : [])
   const alterar = <T,>(set: (v: T) => void) => (v: T) => {
     setMexeu(true)
@@ -1265,54 +1298,16 @@ export function ChecklistCertidoes({
   }
 
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      size="xl"
-      dirty={editando && mexeu}
-      title="Certidões do crédito"
-      description={
-        editando
+    <div>
+      {/* A descrição era do modal e desceu para cá com ele: o painel divide a
+          janela com outra aba, então o cabeçalho da janela não pode falar só de
+          certidões. */}
+      <p className="mb-4 text-sm text-slate-600">
+        {editando
           ? 'O checklist é montado por sujeito. Sem CPF e UF não há como saber quais certidões são exigidas.'
-          : 'Checklist congelado no banco. A etapa documental só fecha com todas as obrigatórias em arquivo.'
-      }
-      footer={
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={salvando}>
-            Fechar
-          </Button>
-          {editando ? (
-            <Button
-              onClick={salvarEGerar}
-              loading={salvando}
-              disabled={problemas.length > 0}
-              icon={<Sparkles className="h-4 w-4" />}
-            >
-              Gravar e montar checklist
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="secondary"
-                onClick={() => setEditando(true)}
-                disabled={salvando}
-                icon={<Pencil className="h-4 w-4" />}
-              >
-                Corrigir dados / cônjuge
-              </Button>
-              <Button
-                variant="outline"
-                onClick={gerarFaltantes}
-                loading={salvando}
-                icon={<Plus className="h-4 w-4" />}
-              >
-                Gerar itens faltantes
-              </Button>
-            </>
-          )}
-        </div>
-      }
-    >
+          : 'Checklist congelado no banco. A etapa documental só fecha com todas as obrigatórias em arquivo.'}
+      </p>
+
       {erro && (
         <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 ring-1 ring-inset ring-red-200">
           {erro}
@@ -2123,6 +2118,41 @@ export function ChecklistCertidoes({
           )}
         </div>
       )}
-    </Modal>
+
+      {/* AS AÇÕES FICAM NO PAINEL, não no rodapé da janela. Eram do modal, e o
+          rodapé agora é dividido com a aba de Processos Judiciais: "Gravar e
+          montar checklist" ali embaixo pareceria valer para a janela toda. */}
+      <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4">
+        {editando ? (
+          <Button
+            onClick={salvarEGerar}
+            loading={salvando}
+            disabled={problemas.length > 0}
+            icon={<Sparkles className="h-4 w-4" />}
+          >
+            Gravar e montar checklist
+          </Button>
+        ) : (
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setEditando(true)}
+              disabled={salvando}
+              icon={<Pencil className="h-4 w-4" />}
+            >
+              Corrigir dados / cônjuge
+            </Button>
+            <Button
+              variant="outline"
+              onClick={gerarFaltantes}
+              loading={salvando}
+              icon={<Plus className="h-4 w-4" />}
+            >
+              Gerar itens faltantes
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
   )
 }

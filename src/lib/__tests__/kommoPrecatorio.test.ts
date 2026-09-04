@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  ABA_JURIDICO,
   FUNIL_PRECATORIO,
   FUNIL_RPV,
   SUBDIVISOES_PRECATORIO,
@@ -93,7 +94,7 @@ describe('abas do Interno', () => {
     // A ordem é a DO TRABALHO, não a do kanban: Aprovados é o desfecho que se
     // busca e Diligência é o desvio.
     expect(abas.map((a) => a.label)).toEqual([
-      'Due diligence + Análise Jurídica',
+      'Jurídico',
       'Precificação',
       'Validação',
       'Aprovados',
@@ -104,9 +105,7 @@ describe('abas do Interno', () => {
 
   it('cada rótulo resolve para a coluna certa do Kommo', () => {
     const porLabel = new Map(abas.map((a) => [a.label, a.statusIds[0]]))
-    expect(porLabel.get('Due diligence + Análise Jurídica')).toBe(
-      idDe('Análise Jurídica (TIER 1)'),
-    )
+    expect(porLabel.get('Jurídico')).toBe(idDe('Análise Jurídica (TIER 1)'))
     expect(porLabel.get('Precificação')).toBe(
       idDe('Análise Econômico-Financeira (TIER 1)'),
     )
@@ -212,7 +211,7 @@ describe('cards fora das trilhas', () => {
       ],
       abas,
     )
-    expect(porAba['int-due-diligence'].map((l) => l.kommo_lead_id)).toEqual([1])
+    expect(porAba[ABA_JURIDICO].map((l) => l.kommo_lead_id)).toEqual([1])
     expect(outras.map((l) => l.kommo_lead_id)).toEqual([2, 3])
   })
 })

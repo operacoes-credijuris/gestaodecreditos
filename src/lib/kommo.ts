@@ -93,6 +93,16 @@ export interface DefSubdivisao {
 }
 
 /**
+ * A aba do Interno onde a análise do precatório acontece.
+ *
+ * Exportada porque a TELA precisa reconhecê-la: é a única aba do precatório cujos
+ * cards oferecem Due Diligence e Análise Jurídica. Comparar com uma string solta
+ * espalharia a regra por dois arquivos, e renomear a chave aqui deixaria os
+ * botões desaparecerem sem nenhum erro.
+ */
+export const ABA_JURIDICO = 'int-juridico'
+
+/**
  * As colunas de cada destinação, e só elas. Do "Funil Geral Precatório".
  *
  * "APRESENTAÇÃO DE PROPOSTA" APARECE NAS DUAS, de propósito: é a MESMA coluna
@@ -110,10 +120,10 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
     label: 'Interno',
     abas: [
       {
-        key: 'int-due-diligence',
-        label: 'Due diligence + Análise Jurídica',
+        key: ABA_JURIDICO,
+        label: 'Jurídico',
         colunaKommo: 'Análise Jurídica (TIER 1)',
-        descricaoVazia: 'Nenhum precatório em due diligence.',
+        descricaoVazia: 'Nenhum precatório no jurídico.',
       },
       {
         key: 'int-precificacao',

@@ -34,6 +34,7 @@ import {
   RefreshCw,
   Landmark,
   Receipt,
+  Scale,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
@@ -48,6 +49,7 @@ import {
   ST_REPROVADO,
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
+  ABA_JURIDICO,
   abasDoFunil,
   agruparPorAba,
   statusExibidos,
@@ -70,7 +72,7 @@ import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { ChecklistCertidoes } from '@/components/ChecklistCertidoes'
+import { DueDiligence } from '@/components/DueDiligence'
 import { formatDate } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -428,6 +430,15 @@ function tituloCard(lead: KommoLead): string {
   return lead.nome?.trim() || `Card ${lead.kommo_lead_id}`
 }
 
+/**
+ * Que botões de trabalho o card oferece.
+ *
+ *   'rpv'         a análise de RPV que já existia, mais a due diligence
+ *   'precatorio'  due diligence + análise jurídica (só na aba Jurídico)
+ *   'nenhum'      etapa em que não se analisa: aprovados, diligência, reprovados
+ */
+type BotoesDoCard = 'rpv' | 'precatorio' | 'nenhum'
+
 function CardCredito({
   lead,
   acoes,
@@ -437,7 +448,8 @@ function CardCredito({
   onAnalisar,
   analisando,
   resultadoAnalise,
-  onCertidoes,
+  onDueDiligence,
+  botoes,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -449,7 +461,8 @@ function CardCredito({
   onAnalisar: (l: KommoLead) => void
   analisando: boolean
   resultadoAnalise?: ResultadoAnalise
-  onCertidoes: (l: KommoLead) => void
+  onDueDiligence: (l: KommoLead) => void
+  botoes: BotoesDoCard
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -504,31 +517,57 @@ function CardCredito({
         )}
       </div>
 
-      {/* Análise automática Credijuris: Judit -> due diligence -> planilha */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant="secondary"
-          icon={<FileSearch className="h-4 w-4" />}
-          onClick={() => onAnalisar(lead)}
-          loading={analisando}
-          disabled={ocupado || analisando}
-        >
-          {analisando ? 'Analisando…' : 'Analisar (PDF do card)'}
-        </Button>
-        {/* Botão separado, e nunca automático: o checklist depende de CPF e UF
-            que uma pessoa confere no processo. Rodar sozinho só produziria
-            checklist sobre dado adivinhado. */}
-        <Button
-          size="sm"
-          variant="outline"
-          icon={<ClipboardCheck className="h-4 w-4" />}
-          onClick={() => onCertidoes(lead)}
-          disabled={ocupado}
-        >
-          Certidões
-        </Button>
-      </div>
+      {/* OS BOTÕES DE TRABALHO DEPENDEM DA ETAPA, e por dois motivos distintos.
+          Em RPV segue o de sempre, que precifica 150 cards que funcionam. No
+          precatório, só a aba Jurídico os oferece — analisar um card já aprovado
+          ou reprovado não é trabalho, é retrabalho — e "Analisar" NÃO aparece: o
+          motor dele é o de RPV (template, cenários e prazo de RPV), e rodá-lo num
+          precatório produzia parecer errado com cara de conferido. */}
+      {botoes !== 'nenhum' && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {botoes === 'rpv' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<FileSearch className="h-4 w-4" />}
+              onClick={() => onAnalisar(lead)}
+              loading={analisando}
+              disabled={ocupado || analisando}
+            >
+              {analisando ? 'Analisando…' : 'Analisar (PDF do card)'}
+            </Button>
+          )}
+
+          {/* Nunca automático: o checklist depende de CPF e UF que uma pessoa
+              confere no processo. Rodar sozinho só produziria checklist sobre
+              dado adivinhado. */}
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<ClipboardCheck className="h-4 w-4" />}
+            onClick={() => onDueDiligence(lead)}
+            disabled={ocupado}
+          >
+            Due diligence
+          </Button>
+
+          {botoes === 'precatorio' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Scale className="h-4 w-4" />}
+              disabled
+              // DESABILITADO COM O MOTIVO NO title, e não escondido: o botão faz
+              // parte do fluxo combinado, e esconder deixaria a etapa parecendo
+              // ter só metade do trabalho. Habilitar sem o motor seria pior — era
+              // exatamente o defeito que trouxe esta entrega.
+              title="A análise jurídica de precatório ainda não está implantada. O modelo (Modelo - Análise de Precatórios.xlsx) tem blocos que não saem do PDF do processo — saúde financeira do ente, prazo de resgate — e o motor está sendo construído."
+            >
+              Análise jurídica
+            </Button>
+          )}
+        </div>
+      )}
       <div>
         {resultadoAnalise && (
           <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
@@ -723,7 +762,7 @@ export default function AnaliseCredito() {
   // toa. Vive enquanto a página estiver aberta; o sync limpa (ver abaixo),
   // porque o PDF do card pode ter sido substituído no Kommo.
   const [arquivosCache, setArquivosCache] = useState<Record<number, ArquivoLido[]>>({})
-  const [certidoesLead, setCertidoesLead] = useState<KommoLead | null>(null)
+  const [ddLead, setDdLead] = useState<KommoLead | null>(null)
   // CONJUNTO, não um id só. Com um id só, a leitura do card A terminando
   // limpava o indicador do card B, e o modal de B — ainda sem texto — passava a
   // afirmar "não achei nenhum CPF no PDF" sobre um PDF que nem tinha sido lido.
@@ -771,8 +810,8 @@ export default function AnaliseCredito() {
    * a sugestão de CPF é conveniência, não requisito. Se o PDF não existir ou for
    * digitalizado, o formulário continua utilizável — quem confere digita.
    */
-  function onCertidoes(lead: KommoLead) {
-    setCertidoesLead(lead)
+  function onDueDiligence(lead: KommoLead) {
+    setDdLead(lead)
     const id = lead.kommo_lead_id
     // Lê os anexos sempre, mesmo quando a janela vai abrir no placar e as
     // sugestões não vão aparecer. É desperdício de rede conhecido, e uma escolha:
@@ -831,7 +870,7 @@ export default function AnaliseCredito() {
       // digitalização — e nada refazia a leitura, porque ela só dispara no
       // clique. Perder o aviso é o pior dos três: a janela voltava a dizer que o
       // PDF não tinha sido lido.
-      const aberto = certidoesLead?.kommo_lead_id
+      const aberto = ddLead?.kommo_lead_id
       const manter = (antes: Record<number, unknown>) =>
         aberto !== undefined && antes[aberto] !== undefined
           ? { [aberto]: antes[aberto] }
@@ -895,6 +934,25 @@ export default function AnaliseCredito() {
   // A aba escolhida pode não existir no funil recém-selecionado (as chaves de
   // RPV são 'pendentes'…, as de Precatório são 'int-…'/'fun-…'). Cai na primeira.
   const abaAtual = abas.find((a) => a.key === aba) ?? abas[0] ?? null
+
+  /**
+   * Os botões de trabalho da etapa aberta.
+   *
+   * RPV segue como era em toda aba. No PRECATÓRIO só a aba Jurídico oferece
+   * trabalho: é lá que a due diligence e a análise jurídica acontecem, e oferecer
+   * "analisar" num card já aprovado ou reprovado convida ao retrabalho.
+   *
+   * E o "Analisar" de RPV não aparece em precatório NENHUM — nem na aba Jurídico.
+   * Era o defeito relatado: o motor por trás dele é o `gerar-analise-rpv`, com
+   * template, cenários (RPV expedida ou não) e cálculo de prazo de RPV, e num
+   * precatório ele entregava parecer e planilha errados sem nenhum sinal na tela.
+   */
+  const botoesDoCard: BotoesDoCard =
+    funil === FUNIL_RPV
+      ? 'rpv'
+      : abaAtual?.key === ABA_JURIDICO
+        ? 'precatorio'
+        : 'nenhum'
 
   const lista = useMemo(() => {
     let l = abaAtual ? (porAba[abaAtual.key] ?? []) : []
@@ -1149,28 +1207,29 @@ export default function AnaliseCredito() {
                 onAnalisar={onAnalisar}
                 analisando={analisandoId === l.kommo_lead_id}
                 resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
-                onCertidoes={onCertidoes}
+                onDueDiligence={onDueDiligence}
+                botoes={botoesDoCard}
               />
             ))}
           </div>
         )}
       </Card>
 
-      {certidoesLead && (
-        <ChecklistCertidoes
-          // key pelo card: trocar de card remonta o modal do zero, em vez de
+      {ddLead && (
+        <DueDiligence
+          // key pelo card: trocar de card remonta a janela do zero, em vez de
           // reaproveitar o formulário já preenchido com os dados do anterior.
-          key={certidoesLead.kommo_lead_id}
+          key={ddLead.kommo_lead_id}
           open
-          leadId={certidoesLead.kommo_lead_id}
-          cedenteDoCard={lerCardCredijuris(certidoesLead).cedente}
-          arquivos={arquivosCache[certidoesLead.kommo_lead_id] ?? []}
+          leadId={ddLead.kommo_lead_id}
+          cedenteDoCard={lerCardCredijuris(ddLead).cedente}
+          arquivos={arquivosCache[ddLead.kommo_lead_id] ?? []}
           lendoPdf={
-            lendoPdf.has(certidoesLead.kommo_lead_id) ||
-            analisandoId === certidoesLead.kommo_lead_id
+            lendoPdf.has(ddLead.kommo_lead_id) ||
+            analisandoId === ddLead.kommo_lead_id
           }
-          avisoPdf={avisoPdf[certidoesLead.kommo_lead_id] ?? null}
-          onClose={() => setCertidoesLead(null)}
+          avisoPdf={avisoPdf[ddLead.kommo_lead_id] ?? null}
+          onClose={() => setDdLead(null)}
         />
       )}
     </div>
