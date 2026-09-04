@@ -15,6 +15,7 @@ import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import { emolumentoDaTabela, normalizarUf, obterEmolumentos, type TabelaEmolumentos } from "../_shared/emolumentos.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import ExcelJS from 'npm:exceljs@4.4.0';
+import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
 
 // ----------------------------------------------------------------------------
@@ -306,29 +307,124 @@ function reformatarMoeda(s: any): any {
 // A tabela agora é a do estado onde o crédito tramita, achada pela IA na fonte
 // oficial e guardada em cache por UF/ano (migração 0053). Ver ufDoCredito.
 
-// Prazo em meses (linhas 21–33 do template). Cenário A = RPV não expedida; B = já expedida.
-// Piso de 6 meses. T5/T42 SEMPRE vêm daqui — nunca de prazos de convênio inventados.
+// ============================================================================
+// PRAZO ATÉ O PAGAMENTO, POR ESFERA DO ENTE DEVEDOR
+// ============================================================================
+//
+// Até aqui havia UM modelo de prazo — o das linhas 21-33 do template, que é o
+// fluxo do TJGO: convênio com data-limite para expedir, período de graça, alvará
+// de 21 dias. Aplicado a um RPV federal, estimava 7 meses para um crédito que a
+// União paga em 60 dias direto na conta. Como o prazo manda no deságio, isso não
+// é detalhe: é preço errado.
+//
+// Agora cada esfera tem a sua regra, numa tabela editável. Decisão do dono:
+// "prazos legais por esfera". A ESFERA VEM DO ENTE DEVEDOR, não do tribunal —
+// um TRT pode executar a União (federal) ou um município (estadual).
+//
+// O que continua igual em todas: os CICLOS do próprio processo (tempo médio de
+// serventia e de gabinete, medidos dos pares de datas dos autos — M4). Esses não
+// são de tribunal nenhum; são do processo em análise.
+type Esfera = 'federal' | 'estadual' | 'goias';
+
+interface RegraPrazo {
+  /** Dias que o ente tem para pagar depois da requisição. */
+  pagamentoDias: number;
+  /** Dias de alvará: número fixo, 0 (sem alvará), ou 'se_exigir' (só quando os autos dizem que o tribunal exige). */
+  alvaraDias: number | 'se_exigir';
+  /** O tribunal tem convênio com data-limite para expedir (TJGO)? */
+  convenio: boolean;
+  /** Piso em meses — proteção contra extração otimista dos ciclos. */
+  pisoMeses: number;
+  descricao: string;
+}
+
+// PISOS: 6 no TJGO é o do template original. 3 nas demais é ESCOLHA MINHA, não do
+// jurídico — um ciclo de serventia curto nos autos não pode fazer o motor
+// prometer pagamento em 45 dias. Ajustar aqui quando a equipe tiver o número.
+const REGRAS_PRAZO: Record<Esfera, RegraPrazo> = {
+  federal: {
+    pagamentoDias: 60, alvaraDias: 0, convenio: false, pisoMeses: 3,
+    descricao: 'RPV federal: pagamento em 60 dias da requisição (Lei 10.259/2001, art. 17), depósito direto ao credor, sem alvará',
+  },
+  estadual: {
+    pagamentoDias: 60, alvaraDias: 'se_exigir', convenio: false, pisoMeses: 3,
+    descricao: 'RPV estadual/municipal: pagamento em 2 meses da requisição (CPC, art. 535, §3º); alvará só onde os autos mostram que o tribunal exige',
+  },
+  goias: {
+    pagamentoDias: 60, alvaraDias: 21, convenio: true, pisoMeses: 6,
+    descricao: 'TJGO: convênio com data-limite de expedição (60 dias) quando consta dos autos, período de graça e alvará de 21 dias — o fluxo do template original',
+  },
+};
+
+/**
+ * A esfera do ente devedor, para escolher a regra de prazo.
+ *
+ * Ordem: Estado de Goiás (regra própria) > federal (União, autarquias e
+ * fundações federais, ou tribunal TRF — em TRF o ente é sempre federal) >
+ * estadual (o resto: estados e municípios). esferaLida é o que a IA
+ * classificou nos autos e desempata.
+ */
+function esferaDoEnte(ente: unknown, esferaLida: unknown, tribunal: unknown): Esfera {
+  if (ehEstadoDeGoias(ente)) return 'goias';
+  const e = String(ente ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const lida = String(esferaLida ?? '').toLowerCase();
+  const trib = String(tribunal ?? '').toUpperCase().trim();
+  const federalPorNome =
+    /\buniao\b|fazenda nacional|\binss\b|\bibama\b|\bdnit\b|\bincra\b|\bfunasa\b|\bfnde\b|\bibge\b|\bufg\b|universidade federal|instituto federal|autarquia federal|fundacao.*federal|\bcaixa economica\b/.test(e);
+  if (federalPorNome || lida.includes('federal') || /^TRF/.test(trib)) return 'federal';
+  return 'estadual';
+}
+
+/**
+ * Prazo até o pagamento, em meses.
+ *
+ * ciclos = os tempos do processo (M4): dois ciclos de serventia+gabinete mais
+ * meio ciclo de serventia — a mesma conta do template, porque ela mede o
+ * processo, não o tribunal.
+ *
+ * A (não expedida): ciclos + [convênio ou nada] + pagamento + alvará.
+ *   Goiás: como sempre foi (convênio ou 60 de graça, depois 60 de pagamento).
+ *   Demais: ciclos + 60 + alvará quando cabe. NÃO soma "graça" duas vezes — era
+ *   isso que inflava o prazo fora de Goiás (120 dias de espera inventada).
+ * B (já expedida): o que resta do prazo de pagamento (desconta o já decorrido
+ *   desde a expedição, quando a data consta) + alvará + UM ciclo para a
+ *   liberação. Goiás mantém o template (ciclos + 21 + 60).
+ */
 function prazoMeses(o: {
-  serventiaDias: number; gabineteDias: number; scenario: 'A' | 'B';
-  dataAquisicao: Date; dataFatalConvenio?: Date; diasAlvaraFixo?: number; periodoGraca?: number;
-}): number {
-  const sg = o.serventiaDias + o.gabineteDias;       // A17 + C17
-  const c21 = sg, c22 = sg, c25 = sg, c26 = sg;
-  const c27 = o.serventiaDias * 1.5;
-  const c24 = o.periodoGraca ?? 60;
+  esfera: Esfera; serventiaDias: number; gabineteDias: number; scenario: 'A' | 'B';
+  dataAquisicao: Date; dataFatalConvenio?: Date; dataExpedicao?: Date; exigeAlvara: boolean;
+}): { meses: number; regra: RegraPrazo; detalhe: string } {
+  const regra = REGRAS_PRAZO[o.esfera];
+  const sg = o.serventiaDias + o.gabineteDias;
+  const ciclos = sg * 2 + o.serventiaDias * 1.5;
+  const alvara = regra.alvaraDias === 'se_exigir' ? (o.exigeAlvara ? 21 : 0) : regra.alvaraDias;
+  const diasDesde = (d?: Date) => (d ? Math.max(0, Math.round((o.dataAquisicao.getTime() - d.getTime()) / 86400000)) : null);
+  const diasAte = (d?: Date) => (d ? Math.round((d.getTime() - o.dataAquisicao.getTime()) / 86400000) : null);
+
   let dias: number;
-  if (o.scenario === 'A') {
-    // e23 = dias até a expedição/pagamento da RPV. Quando o tribunal tem convênio com
-    // data-limite para expedir (o TJGO tem, com 60 dias), usa essa data; a maioria dos
-    // tribunais não tem -> estima pelo período de graça padrão, e a resposta avisa.
-    const e23 = o.dataFatalConvenio
-      ? Math.round((o.dataFatalConvenio.getTime() - o.dataAquisicao.getTime()) / 86400000)
-      : (o.periodoGraca ?? 60);
-    dias = c21 + c22 + e23 + c24 + c25 + c26 + c27;
+  let detalhe: string;
+  if (o.esfera === 'goias') {
+    // Fiel ao template do TJGO.
+    if (o.scenario === 'A') {
+      const e23 = diasAte(o.dataFatalConvenio) ?? 60;
+      dias = ciclos + e23 + regra.pagamentoDias;
+      detalhe = `ciclos do processo ${Math.round(ciclos)}d + até a expedição ${e23}d${o.dataFatalConvenio ? ' (convênio)' : ' (estimado)'} + pagamento ${regra.pagamentoDias}d`;
+    } else {
+      dias = ciclos + alvara + regra.pagamentoDias;
+      detalhe = `ciclos do processo ${Math.round(ciclos)}d + alvará ${alvara}d + pagamento ${regra.pagamentoDias}d`;
+    }
+  } else if (o.scenario === 'A') {
+    dias = ciclos + regra.pagamentoDias + alvara;
+    detalhe = `ciclos do processo ${Math.round(ciclos)}d + pagamento ${regra.pagamentoDias}d${alvara ? ` + alvará ${alvara}d` : ''}`;
   } else {
-    dias = c21 + c22 + (o.diasAlvaraFixo ?? 21) + c24 + c25 + c26 + c27;
+    const decorridos = diasDesde(o.dataExpedicao) ?? 0;
+    const restante = Math.max(0, regra.pagamentoDias - decorridos);
+    dias = restante + alvara + sg;
+    detalhe = `pagamento restante ${restante}d${o.dataExpedicao ? ` (${decorridos}d já decorridos)` : ''}${alvara ? ` + alvará ${alvara}d` : ''} + um ciclo de liberação ${Math.round(sg)}d`;
   }
-  return Math.max(6, dias / 30);
+  const meses = Math.max(regra.pisoMeses, dias / 30);
+  if (meses > dias / 30) detalhe += ` — piso de ${regra.pisoMeses} meses aplicado`;
+  return { meses, regra, detalhe };
 }
 
 // Modelo 1 (verde) se há honorários contratuais a destacar; senão Modelo 2 (azul).
@@ -607,7 +703,9 @@ const SCHEMA_ANALISE = {
   eh_horas_extras: 'true/false — se o crédito é de horas extras',
 
   // prazo / cenário
+  esfera: 'Federal | Estadual | Municipal — a do ENTE DEVEDOR (quem paga), não a do tribunal',
   rpv_ja_expedida: 'true se a RPV já foi expedida (cenário B); false se ainda não (cenário A)',
+  data_expedicao_rpv: 'se já expedida: DD/MM/AAAA da expedição do ofício requisitório/RPV, ou null',
   data_fatal_convenio: 'se cenário A E o tribunal tem convênio com data-limite para expedir a RPV (o TJGO tem): a data (DD/MM/AAAA); null nos demais tribunais — não invente uma',
 
   // M4 — médias de tempo (em DIAS). Devolver também os pares para auditoria.
@@ -762,6 +860,84 @@ async function extrairQualificacao(apiKey: string, contentBlocks: any[]): Promis
     if (m) { try { return JSON.parse(m[0]); } catch { /* ainda incompleto */ } }
     throw new Error('A IA (qualificação) retornou um JSON INCOMPLETO (provável corte por tamanho). Início: ' + raw.slice(0, 200));
   }
+}
+
+// ============================================================================
+// REFINAMENTO — o chat da análise
+// ============================================================================
+//
+// O usuário vê a análise preliminar e pede mudanças em linguagem natural
+// ("o valor bruto está errado, é 84.320,10", "suprima o risco 3", "considere
+// que a RPV já foi expedida em 12/03"). A IA aplica o pedido sobre o JSON da
+// análise e devolve o JSON inteiro revisado; a precificação é RECALCULADA em
+// código a partir dele — a IA nunca escreve deságio nem prazo.
+//
+// O TEXTO DO PROCESSO VAI NO SYSTEM, COM CACHE. Cada turno do chat precisa dos
+// autos para poder responder "confira X" sem inventar, e mandá-los de novo a
+// cada pergunta custaria o processo inteiro por mensagem. Como bloco de system
+// com cache_control, o segundo turno em diante lê do cache.
+const FERRAMENTA_REVISAO = {
+  name: 'revisar_analise',
+  description: 'Devolve a análise revisada conforme o pedido do usuário, e um resumo curto do que mudou.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      dados: { type: 'object', description: 'A análise INTEIRA, no mesmo formato recebido, já com as alterações pedidas. Campos não citados pelo usuário permanecem como estavam.' },
+      resposta: { type: 'string', description: 'Para o usuário: o que você mudou e por quê, em até 6 linhas. Se não pôde atender, diga o que faltou. Sem preâmbulo.' },
+    },
+    required: ['dados', 'resposta'],
+  },
+};
+
+const SISTEMA_REVISAO =
+  'Você é analista jurídico-financeiro da Credijuris e está REVISANDO uma análise de RPV a pedido de quem a conferiu. Recebe a análise atual (JSON), o histórico da conversa e um pedido. ' +
+  'REGRAS: (1) aplique SÓ o que foi pedido; o resto do JSON volta igual. (2) Confira o pedido contra o texto do processo, que está abaixo: se o usuário afirma um valor ou uma data que os autos contradizem, aplique o pedido MAS diga a divergência em "resposta". (3) Não invente: se o pedido depende de dado que não está nos autos, pergunte em "resposta" e não mude o campo. (4) Você NÃO escreve deságio, prazo, preço de cessão nem rentabilidade — isso é calculado a partir dos seus campos; se o usuário pedir para "baixar o deságio", explique que ele sai do cálculo e pergunte qual dado de entrada ele quer alterar. (5) Mantenha o formato de cada campo: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) "Suprimir"/"excluir" um risco ou uma resposta do m2 = remover do JSON; "acrescentar" = incluir no mesmo formato. ' +
+  'Responda chamando a ferramenta revisar_analise uma única vez.';
+
+async function refinarDados(
+  apiKey: string,
+  textoProcesso: string,
+  notasKommo: string,
+  dadosAtuais: any,
+  instrucao: string,
+  historico: Array<{ papel: 'usuario' | 'ia'; texto: string }>,
+): Promise<{ dados: any; resposta: string }> {
+  const anthropic = new Anthropic({ apiKey });
+  const mensagens: Anthropic.MessageParam[] = [];
+  for (const h of historico.slice(-12)) {
+    mensagens.push({ role: h.papel === 'usuario' ? 'user' : 'assistant', content: h.texto || '…' });
+  }
+  // A API exige alternância e começo em 'user'; um histórico que comece pela IA
+  // ganha um marcador de abertura.
+  if (mensagens.length && mensagens[0].role !== 'user') mensagens.unshift({ role: 'user', content: '(início da revisão)' });
+  mensagens.push({
+    role: 'user',
+    content: `ANÁLISE ATUAL (JSON):\n${JSON.stringify(dadosAtuais)}\n\nPEDIDO:\n${instrucao}`,
+  });
+  const resp = await anthropic.messages
+    .stream({
+      model: 'claude-opus-5',
+      max_tokens: 16000,
+      system: [
+        { type: 'text', text: SISTEMA_REVISAO, cache_control: { type: 'ephemeral' } },
+        {
+          type: 'text',
+          text: `TEXTO DO PROCESSO:\n${textoProcesso}${notasKommo ? `\n\nANOTAÇÕES DO CARD NO KOMMO:\n${notasKommo}` : ''}`,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+      tools: [FERRAMENTA_REVISAO],
+      messages: mensagens,
+    })
+    .finalMessage();
+  const uso = resp.content.find((c) => c.type === 'tool_use' && c.name === FERRAMENTA_REVISAO.name);
+  if (!uso || uso.type !== 'tool_use') {
+    const txt = resp.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join(' ').trim();
+    throw new Error('A IA não devolveu a análise revisada.' + (txt ? ` Ela disse: "${txt.slice(0, 300)}"` : ''));
+  }
+  const entrada = uso.input as { dados?: unknown; resposta?: unknown };
+  if (!entrada.dados || typeof entrada.dados !== 'object') throw new Error('A IA devolveu a revisão sem os dados.');
+  return { dados: entrada.dados, resposta: String(entrada.resposta ?? '').trim() || 'Alteração aplicada.' };
 }
 
 // "DD/MM/AAAA" -> Date (ou null se inválido)
@@ -986,6 +1162,16 @@ Deno.serve(async (req) => {
     }
 
     // 3. Job principal
+    //
+    // AÇÕES. Sem `acao` é o fluxo antigo, inteiro num clique (mantido para não
+    // quebrar chamada externa). Com `acao`, o fluxo é o do chat:
+    //   'analisar'  lê, qualifica, extrai e precifica — devolve a PRELIMINAR,
+    //               sem planilha, sem Drive, sem anotação no Kommo
+    //   'refinar'   aplica um pedido do usuário sobre a análise e reprecifica
+    //   'salvar'    recebe a análise final, gera a planilha e sobe no Drive
+    const acao: 'analisar' | 'refinar' | 'salvar' | null =
+      body.acao === 'analisar' || body.acao === 'refinar' || body.acao === 'salvar' ? body.acao : null;
+    const notasKommo: string = String(body.notas_kommo ?? '').trim();
     const jobId: string = body.job_id;
     const originador: string = body.originador ?? body.intermediador;
     const numeroProcesso: string = (body.numero_processo || '').trim();
@@ -1005,6 +1191,11 @@ Deno.serve(async (req) => {
     const textoDireto = String(body.texto ?? body.texto_processo ?? '').trim();
     if (textoDireto) {
       contentBlocks = [{ type: 'text', text: `[Documento do processo]\n\n${textoDireto}` }];
+      // AS ANOTAÇÕES DO CARD ENTRAM NA LEITURA. Antes só um regex do navegador as
+      // lia, para três campos. Elas trazem o que o comercial já apurou — parcela
+      // cedida, percentual de honorários, o que o cedente disse — e a IA precisa
+      // disso tanto quanto dos autos. Decisão do dono.
+      if (notasKommo) contentBlocks.push({ type: 'text', text: `[Anotações do card no Kommo, do comercial]\n\n${notasKommo}` });
     } else {
       if (!jobId) return errorResponse('Faltou o texto do processo (ou o job_id).');
       prefix = `${userId}/${jobId}/processo`;
@@ -1019,7 +1210,24 @@ Deno.serve(async (req) => {
     }
     const houveCorte = contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
 
-    // 3b. PORTÃO 1 — QUALIFICAÇÃO (roda ANTES de tudo)
+    // 3b. PORTÃO 1 — QUALIFICAÇÃO (roda ANTES de tudo). Só quando se está LENDO
+    // o processo: refinar e salvar trabalham sobre análise que já passou por ele.
+    let dados: any;
+    let avisosQualif: string[] = [];
+    let respostaRevisao: string | null = null;
+    if (acao === 'refinar' || acao === 'salvar') {
+      if (!body.dados || typeof body.dados !== 'object') return errorResponse('Faltou a análise atual (dados) para ' + acao + '.');
+      if (acao === 'refinar') {
+        const instrucao = String(body.instrucao ?? '').trim();
+        if (!instrucao) return errorResponse('Faltou o pedido de alteração (instrucao).');
+        const revisao = await refinarDados(cfg.anthropic_api_key, textoDireto, notasKommo, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : []);
+        dados = revisao.dados;
+        respostaRevisao = revisao.resposta;
+      } else {
+        dados = body.dados;
+      }
+      avisosQualif = Array.isArray(body.avisos_qualificacao) ? body.avisos_qualificacao.map(String) : [];
+    } else {
     const qualif = await extrairQualificacao(cfg.anthropic_api_key, contentBlocks);
     if (numeroProcesso) qualif.numero_processo = numeroProcesso;
     const veredito = avaliarQualificacao(qualif);
@@ -1034,10 +1242,12 @@ Deno.serve(async (req) => {
         qualificacao: qualif,
       });
     }
-    const avisosQualif = veredito.avisos;  // alertas da qualificação (seguem para a resposta final)
+    avisosQualif = veredito.avisos;  // alertas da qualificação (seguem para a resposta final)
 
     // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
-    const dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
+    dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
+    dados._houveCorte = houveCorte;
+    }
     dados.originador = originador;
     if (numeroProcesso) dados.numero_processo = numeroProcesso;
     // Garante que os valores financeiros sejam NÚMERO (não texto) — assim o formato de moeda (R$) da planilha funciona
@@ -1076,16 +1286,26 @@ Deno.serve(async (req) => {
     dados._soHonorarios = soHonorarios;
     dados._honPctInformado = honorariosPct != null;
 
-    // 3c. Prazo (T5) + datas
-    const scenario: 'A' | 'B' = dados.rpv_ja_expedida ? 'B' : 'A';
-    const _prazoEstimado = scenario === 'A' && !dados.data_fatal_convenio;
-    const T5 = prazoMeses({
+    // 3c. Prazo (T5) + datas — pela ESFERA DO ENTE DEVEDOR
+    const scenario: 'A' | 'B' = (dados.rpv_ja_expedida === true || String(dados.rpv_ja_expedida) === 'true') ? 'B' : 'A';
+    const esfera = esferaDoEnte(dados.ente_devedor, dados.esfera, dados.tribunal);
+    const exigeAlvara = /precisa de alvar/i.test(String(dados.m2?.['43']?.resposta ?? ''));
+    const dataExpedicao = dados.data_expedicao_rpv ? parseDataBR(dados.data_expedicao_rpv) : null;
+    const _prazoEstimado = esfera === 'goias' && scenario === 'A' && !dados.data_fatal_convenio;
+    const prazo = prazoMeses({
+      esfera,
       serventiaDias: Number(dados.serventia_dias) || 0,
       gabineteDias: Number(dados.gabinete_dias) || 0,
       scenario,
       dataAquisicao: new Date(),
       dataFatalConvenio: dados.data_fatal_convenio ? parseBR(dados.data_fatal_convenio) : undefined,
+      dataExpedicao: dataExpedicao ?? undefined,
+      exigeAlvara,
     });
+    const T5 = prazo.meses;
+    dados._esfera = esfera;
+    dados._regra_prazo = prazo.regra.descricao;
+    dados._prazo_detalhe = prazo.detalhe;
     dados.data_aquisicao = hojeDDMMAAAA();
     dados.data_pagamento = dataPagamento(T5);
 
@@ -1104,11 +1324,82 @@ Deno.serve(async (req) => {
       : calc.faixaCartorio;
     calc.IR = Number(dados.ir) || 0; calc.INSS = Number(dados.inss) || 0;
 
-    // 3e. Gera a planilha colorida
     // Nome do credor em Title Case (usado na pasta do Drive, no nome do arquivo e na aba de precificação)
     const credorBruto = (dados.credor_nome || (dados.cedente_cpf || '').split(/\bCPF\b/i)[0] || numeroProcesso || 'cedente');
     const credorTitulo = (tituloNome(credorBruto).slice(0, 80)) || 'Cedente';
     dados._credor_titulo = credorTitulo;
+
+    // Avisos que valem para a preliminar e para a final.
+    const avisosBase: string[] = [...avisosQualif];
+    const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0);
+    if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
+    if (!emolumentos.tabela)
+      avisosBase.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: não achei a tabela de emolumentos${emolumentos.uf ? ` de ${emolumentos.uf}` : ''} (${emolumentos.motivo ?? 'sem detalhe'}). O deságio foi calibrado SEM escritura e registro — some o custo de cartório à mão antes de fechar a proposta.`);
+    else if (calc.Y10 == null)
+      avisosBase.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: o preço de cessão ficou fora das faixas da tabela de ${emolumentos.uf}/${emolumentos.ano}. Confirme o emolumento com o cartório e some à mão.`);
+    else if (calc.emolumentos && (calc.emolumentos.escritura == null || calc.emolumentos.registro == null))
+      avisosBase.push(`⚠️ CARTÓRIO PARCIAL: achei só ${calc.emolumentos.escritura == null ? 'o registro' : 'a escritura'} na tabela de ${emolumentos.uf}/${emolumentos.ano}. O preço inclui essa parte; some ${calc.emolumentos.escritura == null ? 'a escritura' : 'o registro'} à mão.`);
+    else if (emolumentos.origem === 'busca')
+      avisosBase.push(`Emolumentos de cartório de ${emolumentos.uf}/${emolumentos.ano} achados agora por busca web (${emolumentos.fontes[0] ?? 'fonte não informada'}). Vale conferir a tabela uma vez; as próximas análises desta UF usam o mesmo valor.`);
+    if (_prazoEstimado) avisosBase.push('⚠️ PRAZO ESTIMADO — TJGO sem data-limite de convênio nos autos: a espera até a expedição foi estimada em 60 dias. Confira o prazo e a rentabilidade à mão.');
+    if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && !dados._soHonorarios && !ehEstadoDeGoias(dados.ente_devedor))
+      avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
+    if (calc.atingiuAlvo === false)
+      avisosBase.push(`Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
+    if (dados._houveCorte)
+      avisosBase.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.');
+    if (dados._soHonorarios)
+      avisosBase.push('Cálculo de APENAS os honorários: confira se há descontos (como IR) sobre o valor dos honorários, pois isso varia conforme o processo.');
+
+    const valores = {
+      bruto: Number(dados.bruto_total) || 0,
+      liquido_base: Number(calc.Y3) || 0,
+      desagio: Number(calc.desagio) || 0,
+      preco_cessao: Number(calc.cessao) || 0,
+      comissao: Number(calc.Y5) || 0,
+      cartorio: calc.Y10 == null ? null : Number(calc.Y10),
+      custo_total: Number(calc.Y4) || 0,
+      rentabilidade_mensal: Number(calc.Y9) || 0,
+      prazo_meses: Number(T5.toFixed(1)),
+      data_pagamento: dados.data_pagamento ?? null,
+    };
+    const cartorioResp = {
+      valor: calc.Y10 == null ? '—' : brl(calc.Y10),
+      escritura: calc.emolumentos?.escritura == null ? '—' : brl(calc.emolumentos.escritura),
+      registro: calc.emolumentos?.registro == null ? '—' : brl(calc.emolumentos.registro),
+      faixa: calc.faixaCartorio,
+      uf: emolumentos.uf || null,
+      origem: emolumentos.origem,
+      fontes: emolumentos.fontes,
+    };
+
+    // A PRELIMINAR: tudo calculado, nada gravado. A pessoa lê, pede mudanças no
+    // chat, e só o 'salvar' gera planilha, Drive e anotação.
+    if (acao === 'analisar' || acao === 'refinar') {
+      return jsonResponse({
+        ok: true,
+        preliminar: true,
+        cedente: credorTitulo,
+        modelo: dados.modelo === 1 ? 'Modelo 1 (verde)' : 'Modelo 2 (azul)',
+        esfera,
+        regra_prazo: prazo.regra.descricao,
+        prazo_detalhe: prazo.detalhe,
+        valores,
+        cartorio: cartorioResp,
+        atingiu_alvo: calc.atingiuAlvo !== false,
+        avisos: avisosBase,
+        aviso: avisosBase.length ? avisosBase.join(' ') : null,
+        m1_sintese: dados.m1_sintese ?? null,
+        riscos: dados.bloco_g_riscos ?? [],
+        m2: dados.m2 ?? {},
+        resposta: respostaRevisao,
+        // A análise inteira, para a tela devolver no próximo turno. Opaco para ela.
+        dados,
+        avisos_qualificacao: avisosQualif,
+      });
+    }
+
+    // 3e. Gera a planilha colorida
     const templateBytes = await storageGetBytes(sbAdmin, BUCKET_TEMPLATES, TEMPLATE_NOME);
     const xlsx = await gerarPlanilha(templateBytes, dados, calc, T5);
 
@@ -1129,29 +1420,8 @@ Deno.serve(async (req) => {
     // limpeza best-effort dos uploads
     if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
 
-    // Avisos (alertas da qualificação + rentabilidade abaixo da meta e/ou documento cortado por tamanho)
-    const avisos: string[] = [...avisosQualif];
-    const _avisoTeto = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0);
-    if (_avisoTeto) avisos.push(_avisoTeto);
-    // CARTÓRIO. Sem tabela, o preço saiu SEM o custo de cartório — e isso tem de
-    // ser dito, porque um preço sem esse custo parece melhor do que é.
-    if (!emolumentos.tabela)
-      avisos.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: não achei a tabela de emolumentos${emolumentos.uf ? ` de ${emolumentos.uf}` : ''} (${emolumentos.motivo ?? 'sem detalhe'}). O deságio foi calibrado SEM escritura e registro — some o custo de cartório à mão antes de fechar a proposta.`);
-    else if (calc.Y10 == null)
-      avisos.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: o preço de cessão ficou fora das faixas da tabela de ${emolumentos.uf}/${emolumentos.ano}. Confirme o emolumento com o cartório e some à mão.`);
-    else if (emolumentos.origem === 'busca')
-      avisos.push(`Emolumentos de cartório de ${emolumentos.uf}/${emolumentos.ano} achados agora por busca web (${emolumentos.fontes[0] ?? 'fonte não informada'}). Vale conferir a tabela uma vez; as próximas análises desta UF usam o mesmo valor.`);
-    if (_prazoEstimado) avisos.push('⚠️ PRAZO ESTIMADO — não há nos autos data-limite de convênio para expedição da RPV (existe no TJGO; a maioria dos tribunais não tem). O prazo até o pagamento foi ESTIMADO pelo período de graça padrão; confira o prazo e a rentabilidade à mão, pois a precificação pode precisar de ajuste para este tribunal.');
-    // INSS ZERADO EM HORAS EXTRAS FORA DE GOIÁS: a reserva de 14,25% é a alíquota da
-    // GOIASPREV e não foi aplicada. A alíquota do ente é decisão da equipe, não do motor.
-    if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && !dados._soHonorarios && !ehEstadoDeGoias(dados.ente_devedor))
-      avisos.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
-    if (calc.atingiuAlvo === false)
-      avisos.push(`Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
-    if (houveCorte)
-      avisos.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas; se possível, gere de novo enviando um PDF menor só com os documentos essenciais (cálculos da contadoria, sentença e a decisão de expedição da RPV).');
-    if (dados._soHonorarios)
-      avisos.push('Cálculo de APENAS os honorários: confira se há descontos (como IR) sobre o valor dos honorários, pois isso varia conforme o processo.');
+    // Avisos: os mesmos da preliminar (avisosBase), montados antes do retorno antecipado.
+    const avisos: string[] = [...avisosBase];
     const avisoFinal = avisos.length ? avisos.join(' ') + ' A planilha foi gerada assim mesmo para você conferir à mão.' : null;
 
     return jsonResponse({
@@ -1161,31 +1431,10 @@ Deno.serve(async (req) => {
       desagio: pct(calc.desagio),
       rentabilidade_mensal: pct(calc.Y9),
       cessao: brl(calc.cessao),
-      // OS VALORES FINAIS, para a tela pôr na mesa: a planilha já os tinha, mas
-      // quem clica em Analisar via só "planilha gerada" e um link. Preço, deságio,
-      // rentabilidade, prazo e cartório são a resposta da análise — não podem
-      // exigir abrir o Excel para serem lidos.
-      valores: {
-        bruto: Number(dados.bruto_total) || 0,
-        liquido_base: Number(calc.Y3) || 0,           // base sobre a qual o deságio incide (L5 ou L5+L7)
-        desagio: Number(calc.desagio) || 0,           // fração (0.35 = 35%)
-        preco_cessao: Number(calc.cessao) || 0,
-        comissao: Number(calc.Y5) || 0,
-        cartorio: calc.Y10 == null ? null : Number(calc.Y10),
-        custo_total: Number(calc.Y4) || 0,            // cessão + comissão + cartório + diligência
-        rentabilidade_mensal: Number(calc.Y9) || 0,   // fração
-        prazo_meses: Number(T5.toFixed(1)),
-        data_pagamento: dados.data_pagamento ?? null,
-      },
-      cartorio: {
-        valor: calc.Y10 == null ? '—' : brl(calc.Y10),
-        escritura: calc.emolumentos?.escritura == null ? '—' : brl(calc.emolumentos.escritura),
-        registro: calc.emolumentos?.registro == null ? '—' : brl(calc.emolumentos.registro),
-        faixa: calc.faixaCartorio,
-        uf: emolumentos.uf || null,
-        origem: emolumentos.origem,
-        fontes: emolumentos.fontes,
-      },
+      esfera,
+      regra_prazo: prazo.regra.descricao,
+      valores,
+      cartorio: cartorioResp,
       atingiu_alvo: calc.atingiuAlvo !== false,
       aviso: avisoFinal,
       drive_folder_url: `https://drive.google.com/drive/folders/${cedenteId}`,

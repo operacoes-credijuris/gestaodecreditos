@@ -72,8 +72,16 @@ import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { DueDiligence } from '@/components/DueDiligence'
-import { formatBRL, formatDate, formatPercent } from '@/lib/format'
+import { DueDiligence } from '@/components/DueDiligence'
+import {
+  AnaliseRpvModal,
+  GradeValoresRpv,
+  type CartorioRpv,
+  type DadosDoCardRpv,
+  type RespostaAnaliseRpv,
+  type ValoresRpv,
+} from '@/components/AnaliseRpvModal'
+import { formatDate } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { useAuth } from '@/contexts/AuthContext'
@@ -98,27 +106,8 @@ type ResultadoAnalise = {
    * Os números finais da precificação, em NÚMERO (frações para percentuais).
    * A planilha sempre os teve; a tela é que só mostrava "planilha gerada".
    */
-  valores?: {
-    bruto: number
-    liquido_base: number
-    desagio: number
-    preco_cessao: number
-    comissao: number
-    cartorio: number | null
-    custo_total: number
-    rentabilidade_mensal: number
-    prazo_meses: number
-    data_pagamento: string | null
-  }
-  cartorio?: {
-    valor: string
-    escritura: string
-    registro: string
-    faixa: string
-    uf: string | null
-    origem: 'cache' | 'busca' | 'nenhuma'
-    fontes: string[]
-  }
+  valores?: ValoresRpv
+  cartorio?: CartorioRpv
   [k: string]: unknown
 }
 
@@ -354,77 +343,6 @@ async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
   return lidos
 }
 
-async function analisarLeadCredijuris(
-  lead: KommoLead,
-  arquivosJaLidos?: ArquivoLido[],
-): Promise<{ resultado: ResultadoAnalise; arquivos: ArquivoLido[] }> {
-  const dados = lerCardCredijuris(lead)
-
-  const arquivos = arquivosJaLidos ?? (await lerArquivosDoCard(lead))
-
-  // O ÚLTIMO PDF DO CARD, e nada além dele. Esta análise precifica 150 cards de
-  // RPV que funcionam, e o último PDF é exatamente o que ela recebia antes desta
-  // mudança. Juntar a petição inicial ao cálculo mudaria o texto que a IA lê — e a
-  // petição traz o VALOR DA CAUSA, que NÃO é o valor do crédito. Ganhar contexto
-  // aqui é arriscar preço errado. Quem lê todos os arquivos é o checklist.
-  //
-  // ⚠️ "O ÚLTIMO", E NÃO "O ÚLTIMO COM TEXTO". A diferença não é sutil: com
-  // `filter(a => a.texto)`, um card em que o cálculo estivesse digitalizado
-  // passaria a precificar a PETIÇÃO INICIAL em silêncio — o valor da causa entraria
-  // como valor do crédito, e o card receberia "✅ APROVADO" ou "❌ RECUSADO" com
-  // base no número errado. Antes disso dar um erro na tela era o comportamento
-  // certo, e continua sendo.
-  const pdfs = arquivos.filter((a) => a.paginas > 0 || a.texto.length > 0 || !a.erro)
-  const alvo = pdfs[pdfs.length - 1] ?? arquivos[arquivos.length - 1]
-  if (!alvo || alvo.texto.length === 0) {
-    const porque = alvo?.erro
-      ? alvo.erro
-      : alvo?.digitalizado
-        ? `tem ${alvo.paginas} página(s) e praticamente nenhum texto (${alvo.densidade} ` +
-          `caracteres por página): parece digitalizado`
-        : 'não trouxe texto selecionável'
-    // Os erros de TODOS os arquivos entram na mensagem. Sem isso, "não consegui
-    // baixar (HTTP 403)" chegava à tela como "não tem texto".
-    const outros = arquivos
-      .filter((a) => a !== alvo && a.erro)
-      .map((a) => `${a.nome}: ${a.erro}`)
-    throw new Error(
-      `Não consegui analisar: o último PDF do card ("${alvo?.nome ?? '?'}") ${porque}.` +
-        (outros.length ? ` Outros anexos: ${outros.join('; ')}.` : ''),
-    )
-  }
-  const completo = alvo.texto
-  let texto = completo
-  // corta se gigante (mantém início e final — cálculo/RPV costumam estar no fim)
-  const MAX = 360000
-  if (texto.length > MAX) {
-    const iniCorte = Math.floor(MAX * 0.6)
-    texto =
-      texto.slice(0, iniCorte) +
-      '\n\n[...TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO...]\n\n' +
-      texto.slice(texto.length - (MAX - iniCorte))
-  }
-
-  // 3) Análise + precificação — manda só o TEXTO (leve) pro motor
-  const res = await invokeFunction<ResultadoAnalise>('gerar-analise-rpv', {
-    texto,
-    intermediador: dados.intermediador,
-    numero_processo: dados.numero,
-    categoria: dados.categoria,
-    tipo_aquisicao: dados.tipo_aquisicao,
-    honorarios_pct: dados.honorarios_pct,
-  })
-  // Divergência entre o funil e a linha TIPO da anotação sobe junto do resultado,
-  // e não no lugar dele: a análise rodou, a categoria escolhida está dita.
-  const resultado: ResultadoAnalise = dados.divergenciaTipo
-    ? {
-        ...res,
-        aviso: [res.aviso, dados.divergenciaTipo].filter(Boolean).join(' '),
-      }
-    : res
-  return { resultado, arquivos }
-}
-
 // Escreve o resultado da análise no card do Kommo (motivo se recusado, link do Drive se aprovado).
 async function anotarResultadoNaKommo(leadId: number, r: ResultadoAnalise, analista: string) {
   let texto = ''
@@ -457,13 +375,6 @@ const ICONES: Record<number, ReactNode> = {
   [ST_DILIGENCIA]: <FileSearch className="h-4 w-4" />,
   [ST_REPROVADO]: <X className="h-4 w-4" />,
 }
-
-/**
- * Fração -> "35,20%". A função devolve deságio e rentabilidade como FRAÇÃO
- * (0,352), e formatPercent espera o número já em pontos percentuais; a conversão
- * mora aqui para não se repetir em cada célula da grade de valores.
- */
-const pctBR = (fracao: number) => formatPercent(fracao * 100)
 
 /** Link para o card no Kommo — o operacional às vezes precisa do original. */
 function urlCard(leadId: number): string {
@@ -708,79 +619,15 @@ function CardCredito({
                   </a>
                 )}
 
-                {/* OS NÚMEROS NA MESA. A planilha sempre os teve, mas quem clicava
-                    em Analisar via só "planilha gerada" e um link — e tinha de
-                    abrir o Excel para saber o preço. Preço, deságio,
-                    rentabilidade, prazo e cartório SÃO a resposta da análise. */}
-                {resultadoAnalise.valores && (
-                  <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-slate-700 sm:grid-cols-3">
-                    <div>
-                      <dt className="text-slate-500">Preço da cessão</dt>
-                      <dd className="font-display text-sm font-semibold text-slate-900 tabular-nums">
-                        {formatBRL(resultadoAnalise.valores.preco_cessao)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Deságio</dt>
-                      <dd className="font-semibold tabular-nums">
-                        {pctBR(resultadoAnalise.valores.desagio)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Rentabilidade</dt>
-                      <dd
-                        className={cn(
-                          'font-semibold tabular-nums',
-                          resultadoAnalise.atingiu_alvo === false && 'text-amber-700',
-                        )}
-                      >
-                        {pctBR(resultadoAnalise.valores.rentabilidade_mensal)} ao mês
-                        {resultadoAnalise.atingiu_alvo === false && ' (abaixo da meta)'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Prazo</dt>
-                      <dd className="tabular-nums">
-                        {resultadoAnalise.valores.prazo_meses} meses
-                        {resultadoAnalise.valores.data_pagamento &&
-                          ` · pagamento ${resultadoAnalise.valores.data_pagamento}`}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Cartório</dt>
-                      <dd className="tabular-nums">
-                        {resultadoAnalise.valores.cartorio == null ? (
-                          // Ausente é dito como ausente: um preço sem cartório
-                          // parece melhor do que é, e o traço sozinho não avisa.
-                          <span className="text-amber-700">não incluído — confirmar</span>
-                        ) : (
-                          <>
-                            {formatBRL(resultadoAnalise.valores.cartorio)}
-                            {resultadoAnalise.cartorio && (
-                              <span className="text-slate-500">
-                                {' '}
-                                (escritura {resultadoAnalise.cartorio.escritura} + registro{' '}
-                                {resultadoAnalise.cartorio.registro}
-                                {resultadoAnalise.cartorio.uf && `, ${resultadoAnalise.cartorio.uf}`})
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Custo total da operação</dt>
-                      <dd className="tabular-nums">
-                        {formatBRL(resultadoAnalise.valores.custo_total)}
-                        <span className="text-slate-500">
-                          {' '}
-                          (comissão {formatBRL(resultadoAnalise.valores.comissao)})
-                        </span>
-                      </dd>
-                    </div>
-                  </dl>
-                )}
-
+                {resultadoAnalise.valores && (
+                  <div className="mt-2">
+                    <GradeValoresRpv
+                      valores={resultadoAnalise.valores}
+                      cartorio={resultadoAnalise.cartorio}
+                      atingiuAlvo={resultadoAnalise.atingiu_alvo}
+                    />
+                  </div>
+                )}
                 {resultadoAnalise.aviso && (
                   <div className="mt-1 text-amber-700">⚠️ {resultadoAnalise.aviso}</div>
                 )}
@@ -921,7 +768,9 @@ export default function AnaliseCredito() {
   // Análise automática (Judit + due diligence + planilha) por card.
   const { user: authUser, profile: authProfile } = useAuth()
   const analistaNome = authProfile?.nome || authUser?.email || 'Usuário'
-  const [analisandoId, setAnalisandoId] = useState<number | null>(null)
+  // A análise de RPV abre uma JANELA (AnaliseRpvModal): preliminar, conversa e
+  // só então o salvamento. `rpvLead` é o card cuja janela está aberta.
+  const [rpvLead, setRpvLead] = useState<KommoLead | null>(null)
   const [analisandoJurId, setAnalisandoJurId] = useState<number | null>(null)
   const [resultadoJuridico, setResultadoJuridico] = useState<
     Record<number, ResultadoJuridico>
@@ -948,29 +797,36 @@ export default function AnaliseCredito() {
       return n
     })
 
-  async function onAnalisar(lead: KommoLead) {
-    setAnalisandoId(lead.kommo_lead_id)
-    try {
-      // Lê PRIMEIRO e guarda no cache na hora. A versão anterior só guardava
-      // depois de a IA responder: se a análise falhasse, os PDFs recém-baixados —
-      // e os avisos de digitalização junto — eram jogados fora, e o checklist
-      // tinha de baixar tudo de novo.
-      const jaLidos =
-        arquivosCache[lead.kommo_lead_id] ?? (await lerArquivosDoCard(lead))
-      setArquivosCache((p) => ({ ...p, [lead.kommo_lead_id]: jaLidos }))
-      const { resultado } = await analisarLeadCredijuris(lead, jaLidos)
-      setResultadoAnalise((p) => ({ ...p, [lead.kommo_lead_id]: resultado }))
-      await anotarResultadoNaKommo(lead.kommo_lead_id, resultado, analistaNome)
-    } catch (e) {
-      setResultadoAnalise((p) => ({
-        ...p,
-        [lead.kommo_lead_id]: { erro: (e as Error)?.message ?? String(e) },
-      }))
-    } finally {
-      setAnalisandoId(null)
-    }
-  }
-
+  function onAnalisar(lead: KommoLead) {
+    setRpvLead(lead)
+  }
+
+  /** Lê os anexos do card, guardando no cache na hora — a janela e a due diligence dividem o mesmo PDF. */
+  async function lerArquivosComCache(lead: KommoLead): Promise<ArquivoLido[]> {
+    const id = lead.kommo_lead_id
+    const lidos = arquivosCache[id] ?? (await lerArquivosDoCard(lead))
+    setArquivosCache((p) => ({ ...p, [id]: lidos }))
+    return lidos
+  }
+
+  /** O que a função de RPV precisa saber do card, em toda chamada da janela. */
+  function dadosParaRpv(lead: KommoLead): DadosDoCardRpv {
+    const d = lerCardCredijuris(lead)
+    return {
+      numero_processo: d.numero,
+      categoria: d.categoria,
+      intermediador: d.intermediador,
+      tipo_aquisicao: d.tipo_aquisicao,
+      honorarios_pct: d.honorarios_pct,
+    }
+  }
+
+  /** Todas as anotações do card, da mais antiga à mais nova: a IA lê junto com os autos. */
+  function notasDoCard(lead: KommoLead): string {
+    const lista = lead.notas && lead.notas.length > 0 ? lead.notas.map((n) => n.texto) : [lead.nota_texto ?? '']
+    return lista.filter(Boolean).join('\n---\n')
+  }
+
   /**
    * Análise jurídica do precatório: manda o caderno inteiro para o modelo.
    *
@@ -1056,7 +912,7 @@ export default function AnaliseCredito() {
     // sem os dados por engano. Um download a mais é mais barato que isso.
     // Já tem o texto, já está lendo, ou o Analisar está lendo o mesmo PDF agora:
     // em todos os casos, disparar de novo só baixaria o arquivo duas vezes.
-    if (arquivosCache[id] || lendoPdf.has(id) || analisandoId === id) return
+    if (arquivosCache[id] || lendoPdf.has(id) || rpvLead?.kommo_lead_id === id) return
     // Limpa o aviso da tentativa ANTERIOR antes de tentar de novo. Sem isto, uma
     // releitura bem-sucedida ficava com o aviso velho grudado — e o modal mostra
     // o aviso com PREFERENCIA sobre a lista de candidatos, entao ele afirmava
@@ -1441,7 +1297,7 @@ export default function AnaliseCredito() {
                     : null
                 }
                 onAnalisar={onAnalisar}
-                analisando={analisandoId === l.kommo_lead_id}
+                analisando={rpvLead?.kommo_lead_id === l.kommo_lead_id}
                 resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
                 onDueDiligence={onDueDiligence}
                 onAnaliseJuridica={onAnaliseJuridica}
@@ -1454,7 +1310,28 @@ export default function AnaliseCredito() {
         )}
       </Card>
 
-      {ddLead && (
+      {rpvLead && (
+        <AnaliseRpvModal
+          // key pelo card: trocar de card recomeça a análise do zero.
+          key={rpvLead.kommo_lead_id}
+          open
+          leadId={rpvLead.kommo_lead_id}
+          titulo={tituloCard(rpvLead)}
+          dadosDoCard={dadosParaRpv(rpvLead)}
+          notasKommo={notasDoCard(rpvLead)}
+          lerArquivos={() => lerArquivosComCache(rpvLead)}
+          onSalvo={(r: RespostaAnaliseRpv) => {
+            // Só depois de salvar o card ganha o resultado e a anotação no Kommo —
+            // era isso que a versão de um clique fazia cedo demais.
+            const final = r as unknown as ResultadoAnalise
+            setResultadoAnalise((p) => ({ ...p, [rpvLead.kommo_lead_id]: final }))
+            void anotarResultadoNaKommo(rpvLead.kommo_lead_id, final, analistaNome)
+          }}
+          onClose={() => setRpvLead(null)}
+        />
+      )}
+
+      {ddLead && (
         <DueDiligence
           // key pelo card: trocar de card remonta a janela do zero, em vez de
           // reaproveitar o formulário já preenchido com os dados do anterior.
@@ -1465,7 +1342,7 @@ export default function AnaliseCredito() {
           arquivos={arquivosCache[ddLead.kommo_lead_id] ?? []}
           lendoPdf={
             lendoPdf.has(ddLead.kommo_lead_id) ||
-            analisandoId === ddLead.kommo_lead_id
+            rpvLead?.kommo_lead_id === ddLead.kommo_lead_id
           }
           avisoPdf={avisoPdf[ddLead.kommo_lead_id] ?? null}
           // Certidões só no precatório. Lido do CARD, não do funil aberto: o
