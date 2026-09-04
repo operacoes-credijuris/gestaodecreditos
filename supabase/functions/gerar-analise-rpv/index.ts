@@ -1279,7 +1279,15 @@ Deno.serve(async (req) => {
     let arquivos: Array<{ name: string }> = [];
     let prefix = '';
     const textoDireto = String(body.texto ?? body.texto_processo ?? '').trim();
-    if (textoDireto) {
+    // SÓ QUEM LÊ O PROCESSO PRECISA DELE. 'refinar', 'reprecificar' e 'salvar'
+    // trabalham sobre a análise que já veio pronta do navegador — exigir o texto
+    // aqui era o HTTP 400 "Faltou o texto do processo": eu tirei o reenvio do
+    // texto (que estourava o tempo da requisição) e esqueci esta guarda.
+    const precisaDoProcesso = acao === 'analisar' || acao === null;
+    if (!precisaDoProcesso) {
+      // Nada a ler. O corte de conteúdo foi registrado na análise original e
+      // viaja dentro de `dados`, então o aviso não se perde nas rodadas seguintes.
+    } else if (textoDireto) {
       contentBlocks = [{ type: 'text', text: `[Documento do processo]\n\n${textoDireto}` }];
       // AS ANOTAÇÕES DO CARD ENTRAM NA LEITURA. Antes só um regex do navegador as
       // lia, para três campos. Elas trazem o que o comercial já apurou — parcela

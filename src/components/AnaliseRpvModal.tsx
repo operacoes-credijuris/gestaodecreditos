@@ -217,6 +217,8 @@ export function AnaliseRpvModal({
   // análise e descartado. Guardá-lo era o que permitia reenviá-lo a cada pedido
   // do chat — e era isso que estourava o tempo da requisição.
   const [atual, setAtual] = useState<RespostaAnaliseRpv | null>(null)
+  /** Por que o cartório não entrou no preço, quando a busca da tabela falhou. */
+  const [falhaCartorio, setFalhaCartorio] = useState<string | null>(null)
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [pedido, setPedido] = useState('')
   const [salvo, setSalvo] = useState<RespostaAnaliseRpv | null>(null)
@@ -271,11 +273,16 @@ export function AnaliseRpvModal({
         if (!r.reprovado && uf && r.cartorio?.origem === 'nenhuma') {
           setPasso(`Buscando a tabela de emolumentos de ${uf}…`)
           try {
-            const e = await invokeFunction<{ emolumentos?: unknown }>('gerar-analise-rpv', {
-              acao: 'emolumentos',
-              uf,
-            })
-            if (e?.emolumentos) {
+            const e = await invokeFunction<{ emolumentos?: unknown; motivo?: string }>(
+              'gerar-analise-rpv',
+              { acao: 'emolumentos', uf },
+            )
+            // EXIGE A TABELA, não só o objeto. A busca devolve
+            // `{tabela: null, motivo}` quando não acha nada — verificar só
+            // `e.emolumentos` daria verdadeiro nesse caso, reprecificaria com a
+            // mesma ausência de cartório e a tela nunca diria que a busca falhou.
+            const achou = (e?.emolumentos as { tabela?: unknown } | null)?.tabela
+            if (achou) {
               setPasso('Refazendo o preço com o cartório…')
               // Sem IA: só recalcula. Por isso é uma ação própria, e não 'refinar'.
               const r2 = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
@@ -287,10 +294,28 @@ export function AnaliseRpvModal({
                 ...dadosDoCard,
               })
               setAtual(r2)
+            } else {
+              // A busca rodou e não achou tabela para esta UF. O aviso da análise
+              // já diz "cartório não incluído", mas dizia que a tela pediria a
+              // tabela "em seguida" — precisa dizer que pediu e não veio.
+              const porque =
+                (e?.emolumentos as { motivo?: string } | null)?.motivo ?? e?.motivo
+              setFalhaCartorio(
+                `Procurei a tabela de emolumentos de ${uf} e não encontrei${
+                  porque ? `: ${porque}` : '.'
+                } O preço está sem escritura e registro — some o custo à mão.`,
+              )
             }
-          } catch {
-            // Falhar aqui não invalida a análise: ela já está na tela, e o aviso
-            // de "cartório não incluído" continua dizendo o que falta.
+          } catch (e) {
+            // FALHA DITA, NÃO ENGOLIDA. A análise segue válida — está na tela e o
+            // aviso de "cartório não incluído" continua de pé —, mas um catch
+            // vazio aqui fazia a tela prometer que o preço se refaria e nunca
+            // explicar por que não refez.
+            setFalhaCartorio(
+              `Não consegui buscar a tabela de emolumentos de ${uf}: ${
+                (e as Error)?.message ?? String(e)
+              }. O preço está sem escritura e registro.`,
+            )
           }
         }
       } catch (e) {
@@ -485,6 +510,15 @@ export function AnaliseRpvModal({
                 <li key={i}>{a}</li>
               ))}
             </ul>
+          )}
+
+          {/* A busca da tabela de cartório falhou. Em vermelho, e separado dos
+              avisos: o aviso da análise diz que a tela pediria a tabela em
+              seguida — sem isto, a promessa fica sem desfecho. */}
+          {falhaCartorio && (
+            <p className="rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+              {falhaCartorio}
+            </p>
           )}
 
           {salvo ? (
