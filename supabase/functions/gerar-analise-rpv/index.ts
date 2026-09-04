@@ -1,7 +1,7 @@
 // ============================================================================
 // Edge Function: gerar-analise-rpv
 // ----------------------------------------------------------------------------
-// Gêmea da `gerar-contrato`. Recebe o PDF do processo (com a CUC dentro),
+// Gêmea da `gerar-contrato`. Recebe o PDF do processo (com os cálculos da contadoria dentro),
 // extrai os dados pela IA, calcula a precificação (deságio calibrado p/ >=2,80%),
 // gera a planilha de Análise de RPV colorida (ExcelJS) e sobe no Drive em
 // A. Análises de crédito / {categoria} / {originador} / {cedente}.
@@ -322,8 +322,9 @@ function prazoMeses(o: {
   const c24 = o.periodoGraca ?? 60;
   let dias: number;
   if (o.scenario === 'A') {
-    // e23 = dias até a expedição/pagamento da RPV. No TJGO vem da data do convênio (60 dias);
-    // fora do TJGO (ex.: Federal, outros estados) não há esse convênio -> estima pelo período de graça padrão.
+    // e23 = dias até a expedição/pagamento da RPV. Quando o tribunal tem convênio com
+    // data-limite para expedir (o TJGO tem, com 60 dias), usa essa data; a maioria dos
+    // tribunais não tem -> estima pelo período de graça padrão, e a resposta avisa.
     const e23 = o.dataFatalConvenio
       ? Math.round((o.dataFatalConvenio.getTime() - o.dataAquisicao.getTime()) / 86400000)
       : (o.periodoGraca ?? 60);
@@ -342,7 +343,8 @@ function escolherModelo(honorariosContratuais: number): 1 | 2 {
 // Calibra o MENOR deságio (mesmo % no principal e nos honorários) p/ rentab. mensal >= alvo.
 // NUNCA lança erro: se nem no deságio máximo (95%) der pra atingir o alvo, devolve o MELHOR
 // caso (maior rentabilidade) com atingiuAlvo=false, pra a planilha sempre ser gerada.
-// Regra INSS: para horas extras com INSS zerado na CUC, aplicar reserva de 14,25% (feito no extrator).
+// Regra INSS (SÓ Estado de Goiás): horas extras com INSS zerado pela contadoria levam reserva de 14,25%,
+// a alíquota da GOIASPREV (feito no extrator; ver ehEstadoDeGoias). Outros entes: sem reserva, com aviso.
 function calibrarDesagio(o: {
   brutoTotal: number; honorarios: number; ir: number; inss: number;
   T5: number; modelo: 1 | 2; comissaoPct?: number; diligencia?: number; alvo?: number;
@@ -519,7 +521,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
     m.getCell('L7').value = 0;                          // adquirindo só honorários: sem sub-honorários
     m.getCell('G5').value = 'Honorários Contratuais';   // natureza do que está sendo adquirido
   } else if (dados.modelo === 1) {
-    m.getCell('L7').value = dados.honorarios;           // M1: honorários adquiridos (CUC ou % informado)
+    m.getCell('L7').value = dados.honorarios;           // M1: honorários adquiridos (contadoria ou % informado)
     m.getCell('R7').value = calc.desagio;               // mesmo deságio no principal e honorários
   } else if (dados._honPctInformado) {
     m.getCell('L7').value = dados.honorarios;           // M2 com % informado: aplica a dedução de honorários calculada
@@ -574,26 +576,26 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
 // Esquema do que a IA deve devolver. Linhas em m2 = nº da linha na aba jurídica.
 const SCHEMA_ANALISE = {
   numero_processo: 'número do processo',
-  tribunal: 'tribunal (sigla, ex.: TJGO)',
+  tribunal: 'tribunal (sigla, ex.: TJGO, TJSP, TJMG, TRF1, TRT18)',
   cedente_cpf: 'nome do cedente e CPF',
   advogado_oab: 'nome do advogado/escritório e OAB/CNPJ',
   credor_nome: 'nome completo do credor/cedente SEM o CPF (ex.: "Vanderlan Gomes de Morais")',
   advogado_nome: 'nome do advogado ou escritório SEM OAB/CNPJ',
-  ente_devedor: 'ente devedor (quem vai pagar o crédito), ex.: "Estado de Goiás", "Município de Goiânia", "União", "Fazenda Pública do Estado de Goiás"',
+  ente_devedor: 'ente devedor (quem vai pagar o crédito), ex.: "Estado de Goiás", "Estado de São Paulo", "Município de Belo Horizonte", "União", "INSS", "Fazenda Pública do Estado do Paraná"',
   fase_processual: 'fase processual atual resumida em poucas palavras, ex.: "Cumprimento de sentença", "Aguardando expedição de RPV", "RPV expedida", "Trânsito em julgado"',
   tipo_credito: 'um de: "Apenas o crédito principal" | "Crédito principal e honorários" | "Apenas os honorários"',
 
-  // financeiro (da CUC dentro do PDF)
+  // financeiro (dos cálculos da contadoria dentro do PDF)
   bruto_total: 'valor bruto total (principal + juros + Selic), número sem R$',
   principal_liquido: 'valor principal líquido após IR/INSS, número',
   honorarios: 'HONORÁRIOS CONTRATUAIS A DESTACAR (0 se não houver), número',
   ir: 'IR retido, número (0 se isento)',
-  inss: 'INSS retido conforme CUC, número (0 se zerado)',
+  inss: 'INSS/contribuição previdenciária retida conforme os cálculos da contadoria, número (0 se zerado)',
   eh_horas_extras: 'true/false — se o crédito é de horas extras',
 
   // prazo / cenário
   rpv_ja_expedida: 'true se a RPV já foi expedida (cenário B); false se ainda não (cenário A)',
-  data_fatal_convenio: 'se cenário A: data limite do convênio p/ expedir RPV (DD/MM/AAAA) ou null',
+  data_fatal_convenio: 'se cenário A E o tribunal tem convênio com data-limite para expedir a RPV (o TJGO tem): a data (DD/MM/AAAA); null nos demais tribunais — não invente uma',
 
   // M4 — médias de tempo (em DIAS). Devolver também os pares para auditoria.
   serventia_dias: 'tempo médio da serventia em dias (média dos pares petição→conclusão)',
@@ -618,7 +620,7 @@ const SCHEMA_QUALIFICACAO = {
   titular_nome: 'nome completo do titular do crédito',
   cpf: 'CPF do titular',
   esfera: 'Federal | Estadual | Municipal',
-  ente_devedor: 'qual Estado/Município/Órgão (ex.: "Estado de Goiás", "União")',
+  ente_devedor: 'qual Estado/Município/Órgão (ex.: "Estado de Goiás", "Estado do Paraná", "Município de Campinas", "União")',
   entidade_devedora: 'nome completo da entidade devedora',
   valor_credito: 'valor total atualizado do crédito como número (ex.: 124500.00), ou "NÃO LOCALIZADO"',
   data_planilha_calculo: 'DD/MM/AAAA da planilha MAIS ATUALIZADA (maior data / última homologada), ou "NÃO LOCALIZADO"',
@@ -635,7 +637,7 @@ const SCHEMA_QUALIFICACAO = {
   prazo_pagamento_vencido: 'SIM | NÃO | NÃO HÁ MENÇÃO — há decisão informando que o prazo de pagamento (60 dias) já venceu?',
   reserva_financeira: 'SIM | NÃO | NÃO HÁ MENÇÃO — há decisão informando reserva/sequestro/depósito de verba para o pagamento?',
   reserva_localizacao: 'ID/página, ou null',
-  prazo_pagamento_iniciado: 'SIM | NÃO | NÃO HÁ MENÇÃO — a FASE DE PAGAMENTO já começou? Ex.: RPV expedida seguida de certidão/movimentação de "início do prazo de 60 dias para pagamento", certidão da CCARPV, ou intimação do ente público para pagar. (Diferente de "vencido": aqui o prazo apenas COMEÇOU, ainda não passou.)',
+  prazo_pagamento_iniciado: 'SIM | NÃO | NÃO HÁ MENÇÃO — a FASE DE PAGAMENTO já começou? Ex.: RPV expedida seguida de certidão/movimentação de "início do prazo de 60 dias para pagamento", certidão do setor de precatórios/RPVs do tribunal, ou intimação do ente público para pagar. (Diferente de "vencido": aqui o prazo apenas COMEÇOU, ainda não passou.)',
   prazo_pagamento_iniciado_localizacao: 'ID/página/data da movimentação, ou null',
   evidencias_referencias: 'breve indicação de onde cada informação aparece no processo',
   comentarios_analise: 'observações úteis para a análise (sem recomendação de investimento)',
@@ -649,16 +651,18 @@ const SYSTEM_QUALIFICACAO =
   'DEFINIÇÕES IMPORTANTES: ' +
   '(a) "trânsito em julgado da FASE DE CONHECIMENTO" é a data em que a decisão de MÉRITO se tornou definitiva — NÃO confunda com o trânsito da fase de execução/cumprimento de sentença; ' +
   '(b) "prazo de pagamento (60 dias) vencido" e "reserva financeira": procure decisão/despacho informando que o prazo de pagamento já passou e/ou que já existe reserva, sequestro ou depósito de verba destinada ao pagamento; ' +
-  '(b2) "prazo de pagamento iniciado": marque SIM se a FASE DE PAGAMENTO já começou — RPV expedida seguida de certidão/movimentação de "início do prazo de 60 dias para pagamento", certidão da CCARPV, ou intimação do ente para pagar — mesmo que o prazo ainda NÃO tenha vencido; se marcar SIM, informe a data/ID em prazo_pagamento_iniciado_localizacao; ' +
+  '(b2) "prazo de pagamento iniciado": marque SIM se a FASE DE PAGAMENTO já começou — RPV expedida seguida de certidão/movimentação de "início do prazo de 60 dias para pagamento", certidão do setor de precatórios/RPVs do tribunal, ou intimação do ente para pagar — mesmo que o prazo ainda NÃO tenha vencido; se marcar SIM, informe a data/ID em prazo_pagamento_iniciado_localizacao; ' +
   '(c) "requisitório expedido": SIM se já foi expedido o ofício de RPV ou de precatório; se só há cálculo homologado nos autos, é NÃO (e tipo_requisitorio = null); ' +
   '(d) "credor menor/curatelado": indique se o TITULAR do crédito é menor de idade ou curatelado/interditado; NÃO confunda com o advogado.';
 
 const SYSTEM_ANALISE =
-  'Você é analista jurídico-financeiro da Credijuris especializado em créditos RPV (TJGO/TJSP/TRF1). ' +
+  'Você é analista jurídico-financeiro da Credijuris especializado em créditos RPV de qualquer tribunal do país — estaduais, federais e trabalhistas. NÃO presuma as regras, os órgãos nem os prazos do TJGO para os demais tribunais. ' +
   'Trabalha com a metodologia Prompt Mestre v1.0 (módulos M1–M4). Seja preciso e conservador: ' +
   'quando um dado não estiver claro no documento, devolva null (NUNCA invente datas, valores ou nomes). ' +
-  'Regra do INSS: se o crédito é de horas extras e a CUC zerou o INSS, calcule uma reserva preventiva ' +
-  'de 14,25% sobre o valor sem correção e devolva esse valor em "inss". Para os demais créditos, siga a CUC. ' +
+  'Regra do INSS, VÁLIDA SÓ QUANDO O ENTE DEVEDOR É O ESTADO DE GOIÁS: se o crédito é de horas extras e a contadoria zerou o INSS, calcule uma reserva preventiva ' +
+  'de 14,25% (alíquota previdenciária do servidor goiano) sobre o valor sem correção e devolva esse valor em "inss". ' +
+  'Para QUALQUER OUTRO ente devedor, NÃO aplique reserva nenhuma: devolva o INSS exatamente como a contadoria calculou (0 se zerado) — a alíquota varia por ente e quem decide a reserva é a equipe. ' +
+  'Para os demais créditos, siga os cálculos da contadoria. ' +
   'O valor bruto = principal + juros + Selic. Os tempos do M4 são médias de pares de datas reais do andamento processual. ' +
   '=== MAPA EXATO DO M2 (objeto "m2"; a chave é o NÚMERO DA LINHA na aba jurídica) === ' +
   'Para cada linha, "resposta" vai na coluna B e "complemento" (quando o item pedir) vai na coluna D. ' +
@@ -757,6 +761,26 @@ function parseDataBR(s: any): Date | null {
 }
 const ehSim = (v: any) => typeof v === 'string' && v.trim().toUpperCase().startsWith('SIM');
 
+/**
+ * O ente devedor é o Estado de Goiás?
+ *
+ * Existe porque duas regras deste motor são ESTADUAIS de Goiás e estavam sendo
+ * aplicadas a todo ente: o teto de 10 salários mínimos para RPV com trânsito da
+ * fase de conhecimento posterior a 15/11/2025, e a reserva de INSS de 14,25%
+ * (alíquota da GOIASPREV). Aplicadas a São Paulo ou à União, reprovavam crédito
+ * bom ou descontavam contribuição por lei que não vale lá.
+ *
+ * Casa "Estado de Goiás" e "Fazenda Pública do Estado de Goiás", sem acento e
+ * sem caixa. NÃO casa município goiano de propósito: a lei é do Estado, e cada
+ * município legisla o próprio teto.
+ */
+function ehEstadoDeGoias(...candidatos: unknown[]): boolean {
+  return candidatos.some((c) => {
+    const t = String(c ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return /estado\s+d[eo]\s+goias/.test(t) || /fazenda\s+(publica\s+)?d[eo]\s+estado\s+d[eo]\s+goias/.test(t);
+  });
+}
+
 // Aplica a ÁRVORE DE DECISÃO do Portão 1 sobre o JSON da IA.
 // Retorna aprovado + motivos de recusa (se houver) + avisos (não reprovam).
 function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; avisos: string[] } {
@@ -795,15 +819,18 @@ function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; av
     avisos.push('Valor do crédito não identificado no processo — confira o valor manualmente.');
   }
 
-  // 3b) RPV já expedida: trânsito da fase de conhecimento posterior a 15/11/2025 derruba o teto para 10 SM
-  if (expedido && isRPV) {
+  // 3b) ESTADO DE GOIÁS, E SÓ ELE: RPV já expedida com trânsito da fase de conhecimento
+  // posterior a 15/11/2025 derruba o teto para 10 SM. É lei estadual goiana. Antes
+  // valia para todo ente — e reprovava crédito paulista ou federal por regra que
+  // não existe lá.
+  if (expedido && isRPV && ehEstadoDeGoias(q.ente_devedor, q.entidade_devedora)) {
     const d = parseDataBR(q.transito_conhecimento_data);
     const corte = new Date(2025, 10, 15); // 15/11/2025 (mês 10 = novembro)
     if (d) {
       if (d.getTime() > corte.getTime())
-        motivos.push('Trânsito em julgado da fase de conhecimento posterior a 15/11/2025 — o teto da RPV cai para 10 salários mínimos, ficando abaixo de ~R$ 20 mil.');
+        motivos.push('Estado de Goiás: trânsito em julgado da fase de conhecimento posterior a 15/11/2025 — o teto da RPV goiana cai para 10 salários mínimos, ficando abaixo de ~R$ 20 mil.');
     } else {
-      avisos.push('Data do trânsito da fase de conhecimento não localizada — confira manualmente se é posterior a 15/11/2025.');
+      avisos.push('Estado de Goiás: data do trânsito da fase de conhecimento não localizada — confira manualmente se é posterior a 15/11/2025 (teto de 10 SM).');
     }
   }
 
@@ -815,7 +842,7 @@ function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; av
 const MAX_DOC_CHARS = 420000; // ~150-160k tokens (texto jurídico pt-BR é denso); deixa folga p/ o system prompt + a saída (Opus = 200k)
 const MARCA_CORTE = 'TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO';
 
-// Corta textos muito grandes mantendo INÍCIO e FINAL (a inicial fica no começo; CUC/expedição costumam ficar no fim).
+// Corta textos muito grandes mantendo INÍCIO e FINAL (a inicial fica no começo; cálculos da contadoria e expedição costumam ficar no fim).
 function capTextoDoc(txt: string): string {
   if (txt.length <= MAX_DOC_CHARS) return txt;
   const head = Math.floor(MAX_DOC_CHARS * 0.5);
@@ -1007,12 +1034,12 @@ Deno.serve(async (req) => {
     dados.honorarios = Number(dados.honorarios) || 0;
 
     // 3b.1 O que está sendo cedido (escolha manual sobrepõe a detecção automática) + % de honorários
-    const honAI = Number(dados.honorarios) || 0;          // honorários destacados na CUC (0 = sem destaque)
+    const honAI = Number(dados.honorarios) || 0;          // honorários destacados pela contadoria (0 = sem destaque)
     const houveDestaque = honAI > 0;
     const brutoNum = Number(dados.bruto_total) || 0;
     const irNum = Number(dados.ir) || 0;
     const inssNum = Number(dados.inss) || 0;
-    // honorários a usar: se o usuário informou %, aplica a regra (com destaque→bruto; sem destaque→líquido); senão, usa o da CUC
+    // honorários a usar: se o usuário informou %, aplica a regra (com destaque→bruto; sem destaque→líquido); senão, usa o da contadoria
     let honorariosCalc = honAI;
     if (honorariosPct != null) {
       const base = houveDestaque ? brutoNum : (brutoNum - irNum - inssNum);
@@ -1022,12 +1049,12 @@ Deno.serve(async (req) => {
     if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Apenas o crédito principal'; }
     else if (tipoAquisicao === 'ambos')      { dados.modelo = 1; dados.tipo_credito = 'Crédito principal e honorários'; }
     else if (tipoAquisicao === 'honorarios') { dados.modelo = 2; soHonorarios = true; dados.tipo_credito = 'Apenas os honorários'; }
-    else                                     { dados.modelo = escolherModelo(honAI); }  // automático (como hoje), pela CUC
+    else                                     { dados.modelo = escolherModelo(honAI); }  // automático (como hoje), pelo destaque da contadoria
 
     if (soHonorarios) {
       const valorHon = honorariosPct != null ? brutoNum * (honorariosPct / 100) : honAI;
       if (!(valorHon > 0))
-        return errorResponse('Para calcular APENAS os honorários, informe o percentual de honorários no formulário (ou use um processo com honorários destacados na CUC).');
+        return errorResponse('Para calcular APENAS os honorários, informe o percentual de honorários no formulário (ou use um processo com honorários destacados nos cálculos da contadoria).');
       dados.bruto_total = valorHon;                          // o "bruto" do cálculo passa a ser o honorário
       dados.ir = 0; dados.inss = 0; dados.honorarios = 0;    // sem deduções do principal; cessão sobre o honorário
     } else {
@@ -1085,11 +1112,15 @@ Deno.serve(async (req) => {
     const avisos: string[] = [...avisosQualif];
     const _avisoTeto = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0);
     if (_avisoTeto) avisos.push(_avisoTeto);
-    if (_prazoEstimado) avisos.push('⚠️ PRAZO ESTIMADO — este processo não parece ser do TJGO (não há a data do convênio de 60 dias). O prazo até o pagamento foi ESTIMADO; confira o prazo e a rentabilidade à mão, pois a precificação pode precisar de ajuste para este tribunal.');
+    if (_prazoEstimado) avisos.push('⚠️ PRAZO ESTIMADO — não há nos autos data-limite de convênio para expedição da RPV (existe no TJGO; a maioria dos tribunais não tem). O prazo até o pagamento foi ESTIMADO pelo período de graça padrão; confira o prazo e a rentabilidade à mão, pois a precificação pode precisar de ajuste para este tribunal.');
+    // INSS ZERADO EM HORAS EXTRAS FORA DE GOIÁS: a reserva de 14,25% é a alíquota da
+    // GOIASPREV e não foi aplicada. A alíquota do ente é decisão da equipe, não do motor.
+    if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && !dados._soHonorarios && !ehEstadoDeGoias(dados.ente_devedor))
+      avisos.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
     if (calc.atingiuAlvo === false)
       avisos.push(`Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
     if (houveCorte)
-      avisos.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas; se possível, gere de novo enviando um PDF menor só com os documentos essenciais (cálculo/CUC, sentença e a decisão de expedição da RPV).');
+      avisos.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas; se possível, gere de novo enviando um PDF menor só com os documentos essenciais (cálculos da contadoria, sentença e a decisão de expedição da RPV).');
     if (dados._soHonorarios)
       avisos.push('Cálculo de APENAS os honorários: confira se há descontos (como IR) sobre o valor dos honorários, pois isso varia conforme o processo.');
     const avisoFinal = avisos.length ? avisos.join(' ') + ' A planilha foi gerada assim mesmo para você conferir à mão.' : null;

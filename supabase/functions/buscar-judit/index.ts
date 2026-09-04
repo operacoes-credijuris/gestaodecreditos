@@ -93,7 +93,7 @@ async function montarTextoProcesso(juditKey: string, numero: string, soLista = f
     `Tribunal: ${base.tribunal_acronym || ""} | Comarca: ${base.county || ""} | UF: ${base.state || ""}\n` +
     `Classe/Assunto: ${(base.classifications || []).map((c: any) => c.name).join(", ")} | ${(base.subjects || []).map((s: any) => s.name).join(", ")}\n` +
     `Situação: ${base.situation || ""} | Fase: ${base.phase || ""}\n` +
-    `Valor da causa (inicial): ${base.amount ?? "?"} (ATENÇÃO: valor da causa, NÃO o valor atual do crédito — use o cálculo/CUC dos documentos abaixo)\n` +
+    `Valor da causa (inicial): ${base.amount ?? "?"} (ATENÇÃO: valor da causa, NÃO o valor atual do crédito — use os cálculos da contadoria nos documentos abaixo)\n` +
     `Justiça gratuita: ${base.free_justice}\n` +
     `PARTES:\n${partesTxt}\n\n` +
     `==================== MOVIMENTAÇÕES (${movs.length}) ====================\n` +
