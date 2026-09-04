@@ -541,6 +541,10 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   m.getCell('A17').value = dados.serventia_dias;       // M4
   m.getCell('C17').value = dados.gabinete_dias;        // M4
   m.getCell('W10').value = calc.Y10;                   // emolumento cartório (coluna W, após remover as colunas U e V)
+  // A decomposição vai em NOTA da célula, não em célula vizinha: o layout do
+  // template é fixo e uma célula a mais empurraria o que vem depois. Quem passa
+  // o mouse vê "Escritura R$ X + registro R$ Y (tabela UF/ano)".
+  if (calc.faixaCartorio) m.getCell('W10').note = String(calc.faixaCartorio);
 
   // Processo e Resumo (M1) no bloco de cima (B4 mesclado B4:B7, C4 mesclado C4:C7)
   m.getCell('B4').value = dados.numero_processo ?? '';
@@ -1157,6 +1161,22 @@ Deno.serve(async (req) => {
       desagio: pct(calc.desagio),
       rentabilidade_mensal: pct(calc.Y9),
       cessao: brl(calc.cessao),
+      // OS VALORES FINAIS, para a tela pôr na mesa: a planilha já os tinha, mas
+      // quem clica em Analisar via só "planilha gerada" e um link. Preço, deságio,
+      // rentabilidade, prazo e cartório são a resposta da análise — não podem
+      // exigir abrir o Excel para serem lidos.
+      valores: {
+        bruto: Number(dados.bruto_total) || 0,
+        liquido_base: Number(calc.Y3) || 0,           // base sobre a qual o deságio incide (L5 ou L5+L7)
+        desagio: Number(calc.desagio) || 0,           // fração (0.35 = 35%)
+        preco_cessao: Number(calc.cessao) || 0,
+        comissao: Number(calc.Y5) || 0,
+        cartorio: calc.Y10 == null ? null : Number(calc.Y10),
+        custo_total: Number(calc.Y4) || 0,            // cessão + comissão + cartório + diligência
+        rentabilidade_mensal: Number(calc.Y9) || 0,   // fração
+        prazo_meses: Number(T5.toFixed(1)),
+        data_pagamento: dados.data_pagamento ?? null,
+      },
       cartorio: {
         valor: calc.Y10 == null ? '—' : brl(calc.Y10),
         escritura: calc.emolumentos?.escritura == null ? '—' : brl(calc.emolumentos.escritura),

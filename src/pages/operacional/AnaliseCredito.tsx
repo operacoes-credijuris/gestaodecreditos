@@ -73,7 +73,7 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { DueDiligence } from '@/components/DueDiligence'
-import { formatDate } from '@/lib/format'
+import { formatBRL, formatDate, formatPercent } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { useAuth } from '@/contexts/AuthContext'
@@ -93,6 +93,32 @@ type ResultadoAnalise = {
   erro?: string
   motivos?: string[]
   avisos?: string[]
+  atingiu_alvo?: boolean
+  /**
+   * Os números finais da precificação, em NÚMERO (frações para percentuais).
+   * A planilha sempre os teve; a tela é que só mostrava "planilha gerada".
+   */
+  valores?: {
+    bruto: number
+    liquido_base: number
+    desagio: number
+    preco_cessao: number
+    comissao: number
+    cartorio: number | null
+    custo_total: number
+    rentabilidade_mensal: number
+    prazo_meses: number
+    data_pagamento: string | null
+  }
+  cartorio?: {
+    valor: string
+    escritura: string
+    registro: string
+    faixa: string
+    uf: string | null
+    origem: 'cache' | 'busca' | 'nenhuma'
+    fontes: string[]
+  }
   [k: string]: unknown
 }
 
@@ -432,6 +458,13 @@ const ICONES: Record<number, ReactNode> = {
   [ST_REPROVADO]: <X className="h-4 w-4" />,
 }
 
+/**
+ * Fração -> "35,20%". A função devolve deságio e rentabilidade como FRAÇÃO
+ * (0,352), e formatPercent espera o número já em pontos percentuais; a conversão
+ * mora aqui para não se repetir em cada célula da grade de valores.
+ */
+const pctBR = (fracao: number) => formatPercent(fracao * 100)
+
 /** Link para o card no Kommo — o operacional às vezes precisa do original. */
 function urlCard(leadId: number): string {
   return `https://${KOMMO_SUBDOMINIO}.kommo.com/leads/detail/${leadId}`
@@ -674,6 +707,80 @@ function CardCredito({
                     Relatório de due diligence
                   </a>
                 )}
+
+                {/* OS NÚMEROS NA MESA. A planilha sempre os teve, mas quem clicava
+                    em Analisar via só "planilha gerada" e um link — e tinha de
+                    abrir o Excel para saber o preço. Preço, deságio,
+                    rentabilidade, prazo e cartório SÃO a resposta da análise. */}
+                {resultadoAnalise.valores && (
+                  <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-slate-700 sm:grid-cols-3">
+                    <div>
+                      <dt className="text-slate-500">Preço da cessão</dt>
+                      <dd className="font-display text-sm font-semibold text-slate-900 tabular-nums">
+                        {formatBRL(resultadoAnalise.valores.preco_cessao)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Deságio</dt>
+                      <dd className="font-semibold tabular-nums">
+                        {pctBR(resultadoAnalise.valores.desagio)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Rentabilidade</dt>
+                      <dd
+                        className={cn(
+                          'font-semibold tabular-nums',
+                          resultadoAnalise.atingiu_alvo === false && 'text-amber-700',
+                        )}
+                      >
+                        {pctBR(resultadoAnalise.valores.rentabilidade_mensal)} ao mês
+                        {resultadoAnalise.atingiu_alvo === false && ' (abaixo da meta)'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Prazo</dt>
+                      <dd className="tabular-nums">
+                        {resultadoAnalise.valores.prazo_meses} meses
+                        {resultadoAnalise.valores.data_pagamento &&
+                          ` · pagamento ${resultadoAnalise.valores.data_pagamento}`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Cartório</dt>
+                      <dd className="tabular-nums">
+                        {resultadoAnalise.valores.cartorio == null ? (
+                          // Ausente é dito como ausente: um preço sem cartório
+                          // parece melhor do que é, e o traço sozinho não avisa.
+                          <span className="text-amber-700">não incluído — confirmar</span>
+                        ) : (
+                          <>
+                            {formatBRL(resultadoAnalise.valores.cartorio)}
+                            {resultadoAnalise.cartorio && (
+                              <span className="text-slate-500">
+                                {' '}
+                                (escritura {resultadoAnalise.cartorio.escritura} + registro{' '}
+                                {resultadoAnalise.cartorio.registro}
+                                {resultadoAnalise.cartorio.uf && `, ${resultadoAnalise.cartorio.uf}`})
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Custo total da operação</dt>
+                      <dd className="tabular-nums">
+                        {formatBRL(resultadoAnalise.valores.custo_total)}
+                        <span className="text-slate-500">
+                          {' '}
+                          (comissão {formatBRL(resultadoAnalise.valores.comissao)})
+                        </span>
+                      </dd>
+                    </div>
+                  </dl>
+                )}
+
                 {resultadoAnalise.aviso && (
                   <div className="mt-1 text-amber-700">⚠️ {resultadoAnalise.aviso}</div>
                 )}
