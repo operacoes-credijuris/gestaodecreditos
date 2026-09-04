@@ -538,23 +538,20 @@ function CardCredito({
             </Button>
           )}
 
-          {/* DUE DILIGENCE É SÓ DE PRECATÓRIO. Em RPV não se faz diligência de
-              certidões — decisão do dono. O botão existiu em RPV por herança: o
-              checklist nasceu aqui, na única tela que havia, antes de o funil de
-              precatórios entrar. Nunca automático: o checklist depende de CPF e
-              UF que uma pessoa confere no processo, e rodar sozinho só produziria
-              checklist sobre dado adivinhado. */}
-          {botoes === 'precatorio' && (
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<ClipboardCheck className="h-4 w-4" />}
-              onClick={() => onDueDiligence(lead)}
-              disabled={ocupado}
-            >
-              Due diligence
-            </Button>
-          )}
+          {/* DUE DILIGENCE NOS DOIS, com frentes diferentes: em RPV não se faz
+              diligência de CERTIDÕES, só de processos judiciais, então a janela
+              abre sem a aba de certidões (ver `comCertidoes`). Nunca automático:
+              o checklist depende de CPF e UF que uma pessoa confere no processo,
+              e rodar sozinho só produziria checklist sobre dado adivinhado. */}
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<ClipboardCheck className="h-4 w-4" />}
+            onClick={() => onDueDiligence(lead)}
+            disabled={ocupado}
+          >
+            Due diligence
+          </Button>
 
           {botoes === 'precatorio' && (
             <Button
@@ -1234,6 +1231,10 @@ export default function AnaliseCredito() {
             analisandoId === ddLead.kommo_lead_id
           }
           avisoPdf={avisoPdf[ddLead.kommo_lead_id] ?? null}
+          // Certidões só no precatório. Lido do CARD, não do funil aberto: o
+          // card guardado no estado é quem manda, e trocar de funil com a janela
+          // aberta não pode mudar as frentes da diligência em curso.
+          comCertidoes={ddLead.pipeline_id === FUNIL_PRECATORIO}
           onClose={() => setDdLead(null)}
         />
       )}

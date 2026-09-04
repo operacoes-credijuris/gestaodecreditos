@@ -34,6 +34,7 @@ export function DueDiligence({
   avisoPdf,
   open,
   onClose,
+  comCertidoes,
 }: {
   leadId: number
   cedenteDoCard: string
@@ -42,8 +43,20 @@ export function DueDiligence({
   avisoPdf: string | null
   open: boolean
   onClose: () => void
+  /**
+   * A frente de certidões faz parte desta diligência.
+   *
+   * Falso em RPV: lá não se faz diligência de certidões, só de processos
+   * judiciais. Com uma frente só, a régua de abas some — uma aba solitária não
+   * é uma escolha, e mostrar a régua sugeriria que existe outra a explorar.
+   *
+   * O painel de certidões nem é montado quando isto é falso: ele consulta o
+   * banco (sujeitos, checklist, completude) e montá-lo para nada seria consulta
+   * jogada fora.
+   */
+  comCertidoes: boolean
 }) {
-  const [aba, setAba] = useState<Aba>('certidoes')
+  const [aba, setAba] = useState<Aba>(comCertidoes ? 'certidoes' : 'processos')
   // Reportado PELO painel: só ele sabe que há formulário mexido e não salvo, e
   // só a janela pode pedir a confirmação de descarte. `setSujo` é setState, cuja
   // identidade é estável — passar uma arrow inline aqui faria o efeito do painel
@@ -65,27 +78,31 @@ export function DueDiligence({
         </div>
       }
     >
-      <Tabs
-        items={[
-          { key: 'certidoes', label: 'Certidões' },
-          { key: 'processos', label: 'Processos judiciais' },
-        ]}
-        value={aba}
-        onChange={(v) => setAba(v as Aba)}
-      />
+      {comCertidoes && (
+        <Tabs
+          items={[
+            { key: 'certidoes', label: 'Certidões' },
+            { key: 'processos', label: 'Processos judiciais' },
+          ]}
+          value={aba}
+          onChange={(v) => setAba(v as Aba)}
+        />
+      )}
 
-      <div className="mt-4">
-        <div hidden={aba !== 'certidoes'}>
-          <PainelCertidoes
-            leadId={leadId}
-            cedenteDoCard={cedenteDoCard}
-            arquivos={arquivos}
-            lendoPdf={lendoPdf}
-            avisoPdf={avisoPdf}
-            ativo={aba === 'certidoes'}
-            onDirtyChange={setSujo}
-          />
-        </div>
+      <div className={comCertidoes ? 'mt-4' : undefined}>
+        {comCertidoes && (
+          <div hidden={aba !== 'certidoes'}>
+            <PainelCertidoes
+              leadId={leadId}
+              cedenteDoCard={cedenteDoCard}
+              arquivos={arquivos}
+              lendoPdf={lendoPdf}
+              avisoPdf={avisoPdf}
+              ativo={aba === 'certidoes'}
+              onDirtyChange={setSujo}
+            />
+          </div>
+        )}
 
         <div hidden={aba !== 'processos'}>
           {/* Vazia de propósito, e DIZENDO o que vem — uma aba em branco sem
