@@ -83,6 +83,15 @@ export interface RespostaAnaliseRpv {
   resposta?: string | null
   /** A análise inteira, opaca para a tela: volta para a função no próximo turno. */
   dados?: unknown
+  /**
+   * A tabela de emolumentos que a função usou, também opaca aqui.
+   *
+   * Dá a volta pelo navegador pelo mesmo motivo de `dados`: achá-la custa uma
+   * busca web de 10 a 30 s, e repetir isso a cada pedido do chat estourava o
+   * teto de 150 s da requisição. Devolvendo-a, a função só busca de novo se a
+   * UF do tribunal mudar.
+   */
+  emolumentos?: unknown
   avisos_qualificacao?: string[]
   drive_file_url?: string | null
   drive_folder_url?: string | null
@@ -204,7 +213,9 @@ export function AnaliseRpvModal({
 }) {
   const [passo, setPasso] = useState<string | null>('Lendo os anexos do card…')
   const [erro, setErro] = useState<string | null>(null)
-  const [texto, setTexto] = useState<string>('')
+  // O texto do processo NÃO fica em estado: ele é lido, mandado uma vez na
+  // análise e descartado. Guardá-lo era o que permitia reenviá-lo a cada pedido
+  // do chat — e era isso que estourava o tempo da requisição.
   const [atual, setAtual] = useState<RespostaAnaliseRpv | null>(null)
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [pedido, setPedido] = useState('')
@@ -242,7 +253,6 @@ export function AnaliseRpvModal({
           const ini = Math.floor(MAX * 0.6)
           t = t.slice(0, ini) + '\n\n[...TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO...]\n\n' + t.slice(t.length - (MAX - ini))
         }
-        setTexto(t)
         setPasso('Qualificando e precificando…')
         const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
           acao: 'analisar',
@@ -272,11 +282,16 @@ export function AnaliseRpvModal({
     setMensagens(historico)
     setPasso('Revisando a análise…')
     try {
+      // SEM `texto` E COM `emolumentos`, e as duas coisas pela mesma razão: a
+      // revisão estourava o teto de 150 s da requisição (erros 504 e 546). O
+      // processo inteiro reenviado a cada pedido e uma busca web de emolumentos
+      // por rodada eram o custo. A revisão trabalha sobre o JSON já extraído, e
+      // a tabela de cartório vem de volta em vez de ser procurada de novo.
       const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
         acao: 'refinar',
-        texto,
         notas_kommo: notasKommo,
         dados: atual.dados,
+        emolumentos: atual.emolumentos ?? null,
         instrucao,
         historico: historico.slice(-12),
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
@@ -301,9 +316,9 @@ export function AnaliseRpvModal({
     try {
       const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
         acao: 'salvar',
-        texto,
         notas_kommo: notasKommo,
         dados: atual.dados,
+        emolumentos: atual.emolumentos ?? null,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
         ...dadosDoCard,
       })

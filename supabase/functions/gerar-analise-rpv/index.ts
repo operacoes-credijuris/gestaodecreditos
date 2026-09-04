@@ -334,24 +334,29 @@ interface RegraPrazo {
   /** O tribunal tem convênio com data-limite para expedir (TJGO)? */
   convenio: boolean;
   /** Piso em meses — proteção contra extração otimista dos ciclos. */
-  pisoMeses: number;
   descricao: string;
 }
 
-// PISOS: 6 no TJGO é o do template original. 3 nas demais é ESCOLHA MINHA, não do
-// jurídico — um ciclo de serventia curto nos autos não pode fazer o motor
-// prometer pagamento em 45 dias. Ajustar aqui quando a equipe tiver o número.
+// PISO ÚNICO DE 8 MESES, decisão do dono, e vale para TODA esfera: o que o
+// cálculo achar abaixo disso vira 8. Substituiu os pisos por esfera (6 no TJGO,
+// vindo do template; 3 nas demais, chute meu) — a experiência da equipe é que
+// requisitório não paga antes disso, e prometer menos contamina o deságio, que
+// é calibrado sobre o prazo.
+//
+// O piso NÃO se aplica a prazo digitado à mão no chat de revisão: ali é uma
+// pessoa dizendo o que sabe daquele caso, e o motor avisa em vez de sobrepor.
+const PISO_MESES = 8;
 const REGRAS_PRAZO: Record<Esfera, RegraPrazo> = {
   federal: {
-    pagamentoDias: 60, alvaraDias: 0, convenio: false, pisoMeses: 3,
+    pagamentoDias: 60, alvaraDias: 0, convenio: false,
     descricao: 'RPV federal: pagamento em 60 dias da requisição (Lei 10.259/2001, art. 17), depósito direto ao credor, sem alvará',
   },
   estadual: {
-    pagamentoDias: 60, alvaraDias: 'se_exigir', convenio: false, pisoMeses: 3,
+    pagamentoDias: 60, alvaraDias: 'se_exigir', convenio: false,
     descricao: 'RPV estadual/municipal: pagamento em 2 meses da requisição (CPC, art. 535, §3º); alvará só onde os autos mostram que o tribunal exige',
   },
   goias: {
-    pagamentoDias: 60, alvaraDias: 21, convenio: true, pisoMeses: 6,
+    pagamentoDias: 60, alvaraDias: 21, convenio: true,
     descricao: 'TJGO: convênio com data-limite de expedição (60 dias) quando consta dos autos, período de graça e alvará de 21 dias — o fluxo do template original',
   },
 };
@@ -422,8 +427,8 @@ function prazoMeses(o: {
     dias = restante + alvara + sg;
     detalhe = `pagamento restante ${restante}d${o.dataExpedicao ? ` (${decorridos}d já decorridos)` : ''}${alvara ? ` + alvará ${alvara}d` : ''} + um ciclo de liberação ${Math.round(sg)}d`;
   }
-  const meses = Math.max(regra.pisoMeses, dias / 30);
-  if (meses > dias / 30) detalhe += ` — piso de ${regra.pisoMeses} meses aplicado`;
+  const meses = Math.max(PISO_MESES, dias / 30);
+  if (meses > dias / 30) detalhe += ` — piso de ${PISO_MESES} meses aplicado (o cálculo deu ${(dias / 30).toFixed(1)})`;
   return { meses, regra, detalhe };
 }
 
@@ -882,26 +887,71 @@ const FERRAMENTA_REVISAO = {
   input_schema: {
     type: 'object' as const,
     properties: {
-      dados: { type: 'object', description: 'A análise INTEIRA, no mesmo formato recebido, já com as alterações pedidas. Campos não citados pelo usuário permanecem como estavam.' },
+      // SÓ O QUE MUDOU. Devolver a análise inteira fazia o modelo gerar milhares
+      // de tokens a cada pedido — lento, caro, e com risco de perder campo no
+      // caminho. O merge é feito aqui no servidor.
+      alteracoes: {
+        type: 'object',
+        description: 'APENAS os campos que mudam, no mesmo formato do JSON recebido. Não repita o que fica igual. Para mexer numa linha do questionário, mande só {"m2": {"37": {...}}}.',
+      },
+      remover: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Caminhos a APAGAR, quando o pedido é suprimir algo: "m2.37" para uma linha do questionário, "riscos.2" para o terceiro risco (índice base zero). Vazio quando não há o que remover.',
+      },
+      prazo_meses_manual: {
+        type: ['number', 'null'],
+        description: 'Só quando o usuário DITAR o prazo até o pagamento ("o prazo é 10 meses"). O motor passa a usar este número em vez do calculado. Null em qualquer outro caso — NUNCA preencha por conta própria.',
+      },
       resposta: { type: 'string', description: 'Para o usuário: o que você mudou e por quê, em até 6 linhas. Se não pôde atender, diga o que faltou. Sem preâmbulo.' },
     },
-    required: ['dados', 'resposta'],
+    required: ['alteracoes', 'resposta'],
   },
 };
 
 const SISTEMA_REVISAO =
   'Você é analista jurídico-financeiro da Credijuris e está REVISANDO uma análise de RPV a pedido de quem a conferiu. Recebe a análise atual (JSON), o histórico da conversa e um pedido. ' +
-  'REGRAS: (1) aplique SÓ o que foi pedido; o resto do JSON volta igual. (2) Confira o pedido contra o texto do processo, que está abaixo: se o usuário afirma um valor ou uma data que os autos contradizem, aplique o pedido MAS diga a divergência em "resposta". (3) Não invente: se o pedido depende de dado que não está nos autos, pergunte em "resposta" e não mude o campo. (4) Você NÃO escreve deságio, prazo, preço de cessão nem rentabilidade — isso é calculado a partir dos seus campos; se o usuário pedir para "baixar o deságio", explique que ele sai do cálculo e pergunte qual dado de entrada ele quer alterar. (5) Mantenha o formato de cada campo: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) "Suprimir"/"excluir" um risco ou uma resposta do m2 = remover do JSON; "acrescentar" = incluir no mesmo formato. ' +
+  'VOCÊ NÃO TEM OS AUTOS EM MÃOS — só a análise já extraída deles. Isso é de propósito: reenviar o processo inteiro a cada pedido fazia a revisão estourar o tempo da requisição. ' +
+  'REGRAS: (1) devolva em "alteracoes" SÓ os campos que mudam; o que fica igual não se repete. (2) Quem afirma o dado é o usuário: ele está com o processo aberto. Aplique o que ele disser. Se o valor contrariar o que está no JSON, aplique mesmo assim e registre a troca em "resposta" ("bruto de X para Y, conforme você indicou"). (3) Se o pedido depende de um dado que NÃO está no JSON e o usuário não informou, peça o número em "resposta" e não altere nada — você não tem como consultar os autos. (4) Você NÃO escreve deságio, preço de cessão nem rentabilidade: são calculados a partir dos seus campos. Se pedirem "baixe o deságio", explique isso e pergunte qual dado de entrada mudar. O PRAZO é a única exceção: quando o usuário DITAR o prazo até o pagamento, ponha o número em "prazo_meses_manual". (5) Mantenha o formato: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) Para SUPRIMIR, use "remover" com o caminho ("m2.37", "riscos.2") — não mande o campo vazio em "alteracoes". ' +
   'Responda chamando a ferramenta revisar_analise uma única vez.';
+
+/**
+ * Aplica o patch da IA sobre a análise atual.
+ *
+ * Merge raso, com m2 tratado à parte porque é o único objeto aninhado que o
+ * usuário edita linha a linha — sem isso, mexer na linha 37 apagaria as outras
+ * 24. `remover` apaga caminhos ("m2.37", "riscos.2"); riscos é lista, então a
+ * remoção é por índice e de trás para frente, para um índice não deslocar o
+ * seguinte.
+ */
+function aplicarPatch(atual: any, alteracoes: any, remover: string[]): any {
+  const novo: any = { ...atual, ...alteracoes };
+  if (alteracoes?.m2 && typeof alteracoes.m2 === 'object') {
+    novo.m2 = { ...(atual?.m2 ?? {}), ...alteracoes.m2 };
+  }
+  const idxRiscos: number[] = [];
+  for (const caminho of remover) {
+    const [raiz, chave] = String(caminho).split('.');
+    if (raiz === 'm2' && chave && novo.m2) { const m = { ...novo.m2 }; delete m[chave]; novo.m2 = m; }
+    else if ((raiz === 'riscos' || raiz === 'bloco_g_riscos') && chave != null) {
+      const i = Number(chave);
+      if (Number.isInteger(i) && i >= 0) idxRiscos.push(i);
+    } else if (raiz && chave === undefined) delete novo[raiz];
+  }
+  if (idxRiscos.length && Array.isArray(novo.bloco_g_riscos)) {
+    const lista = [...novo.bloco_g_riscos];
+    for (const i of idxRiscos.sort((a, b) => b - a)) if (i < lista.length) lista.splice(i, 1);
+    novo.bloco_g_riscos = lista;
+  }
+  return novo;
+}
 
 async function refinarDados(
   apiKey: string,
-  textoProcesso: string,
-  notasKommo: string,
   dadosAtuais: any,
   instrucao: string,
   historico: Array<{ papel: 'usuario' | 'ia'; texto: string }>,
-): Promise<{ dados: any; resposta: string }> {
+): Promise<{ dados: any; resposta: string; prazoManual: number | null }> {
   const anthropic = new Anthropic({ apiKey });
   const mensagens: Anthropic.MessageParam[] = [];
   for (const h of historico.slice(-12)) {
@@ -914,18 +964,13 @@ async function refinarDados(
     role: 'user',
     content: `ANÁLISE ATUAL (JSON):\n${JSON.stringify(dadosAtuais)}\n\nPEDIDO:\n${instrucao}`,
   });
+  // max_tokens curto de propósito: a saída agora é um patch de poucos campos, e
+  // um teto alto só dá margem para a resposta demorar.
   const resp = await anthropic.messages
     .stream({
       model: 'claude-opus-5',
-      max_tokens: 16000,
-      system: [
-        { type: 'text', text: SISTEMA_REVISAO, cache_control: { type: 'ephemeral' } },
-        {
-          type: 'text',
-          text: `TEXTO DO PROCESSO:\n${textoProcesso}${notasKommo ? `\n\nANOTAÇÕES DO CARD NO KOMMO:\n${notasKommo}` : ''}`,
-          cache_control: { type: 'ephemeral' },
-        },
-      ],
+      max_tokens: 4000,
+      system: [{ type: 'text', text: SISTEMA_REVISAO, cache_control: { type: 'ephemeral' } }],
       tools: [FERRAMENTA_REVISAO],
       messages: mensagens,
     })
@@ -935,9 +980,15 @@ async function refinarDados(
     const txt = resp.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join(' ').trim();
     throw new Error('A IA não devolveu a análise revisada.' + (txt ? ` Ela disse: "${txt.slice(0, 300)}"` : ''));
   }
-  const entrada = uso.input as { dados?: unknown; resposta?: unknown };
-  if (!entrada.dados || typeof entrada.dados !== 'object') throw new Error('A IA devolveu a revisão sem os dados.');
-  return { dados: entrada.dados, resposta: String(entrada.resposta ?? '').trim() || 'Alteração aplicada.' };
+  const entrada = uso.input as { alteracoes?: unknown; remover?: unknown; prazo_meses_manual?: unknown; resposta?: unknown };
+  const alteracoes = entrada.alteracoes && typeof entrada.alteracoes === 'object' ? entrada.alteracoes : {};
+  const remover = Array.isArray(entrada.remover) ? (entrada.remover as unknown[]).map(String) : [];
+  const pm = Number(entrada.prazo_meses_manual);
+  return {
+    dados: aplicarPatch(dadosAtuais, alteracoes, remover),
+    resposta: String(entrada.resposta ?? '').trim() || 'Alteração aplicada.',
+    prazoManual: Number.isFinite(pm) && pm > 0 ? pm : null,
+  };
 }
 
 // "DD/MM/AAAA" -> Date (ou null se inválido)
@@ -1220,9 +1271,12 @@ Deno.serve(async (req) => {
       if (acao === 'refinar') {
         const instrucao = String(body.instrucao ?? '').trim();
         if (!instrucao) return errorResponse('Faltou o pedido de alteração (instrucao).');
-        const revisao = await refinarDados(cfg.anthropic_api_key, textoDireto, notasKommo, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : []);
+        const revisao = await refinarDados(cfg.anthropic_api_key, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : []);
         dados = revisao.dados;
         respostaRevisao = revisao.resposta;
+        // Prazo ditado no chat sobrevive aos pedidos seguintes: fica no próprio
+        // JSON, que dá a volta pelo navegador a cada rodada.
+        if (revisao.prazoManual != null) dados._prazo_manual = revisao.prazoManual;
       } else {
         dados = body.dados;
       }
@@ -1302,16 +1356,33 @@ Deno.serve(async (req) => {
       dataExpedicao: dataExpedicao ?? undefined,
       exigeAlvara,
     });
-    const T5 = prazo.meses;
+    // PRAZO DITADO NO CHAT vence o calculado — inclusive abaixo do piso de 8
+    // meses: ali é uma pessoa dizendo o que sabe daquele caso, e o motor avisa
+    // em vez de sobrepor em silêncio.
+    const prazoManual = Number(dados._prazo_manual);
+    const usaManual = Number.isFinite(prazoManual) && prazoManual > 0;
+    const T5 = usaManual ? prazoManual : prazo.meses;
     dados._esfera = esfera;
     dados._regra_prazo = prazo.regra.descricao;
-    dados._prazo_detalhe = prazo.detalhe;
+    dados._prazo_detalhe = usaManual
+      ? `prazo definido à mão: ${prazoManual} meses (o cálculo daria ${prazo.meses.toFixed(1)})`
+      : prazo.detalhe;
     dados.data_aquisicao = hojeDDMMAAAA();
     dados.data_pagamento = dataPagamento(T5);
 
-    // 3c.1 Emolumentos de cartório da UF do tribunal (cache por UF/ano; busca web na primeira vez)
+    // 3c.1 Emolumentos de cartório da UF do tribunal.
+    //
+    // REAPROVEITA O QUE JÁ VEIO. A busca web custa 10 a 30 s; refazê-la a cada
+    // pedido do chat estourava o teto de 150 s da requisição — era a causa dos
+    // erros 504 e 546 na janela de revisão. O navegador devolve o que recebeu na
+    // análise, e só se busca de novo quando a UF muda (o usuário corrigiu o
+    // tribunal) ou quando a rodada anterior não achou nada.
     const ufCredito = ufDoCredito(dados);
-    const emolumentos = await obterEmolumentos(ufCredito, cfg.anthropic_api_key, sbAdmin);
+    const anterior = body.emolumentos as { uf?: string; tabela?: unknown } | undefined;
+    const emolumentos =
+      anterior?.tabela && (!ufCredito || anterior.uf === ufCredito)
+        ? (anterior as any)
+        : await obterEmolumentos(ufCredito, cfg.anthropic_api_key, sbAdmin);
 
     // 3d. Calibragem do deságio
     const calc: any = calibrarDesagio({
@@ -1387,6 +1458,9 @@ Deno.serve(async (req) => {
         valores,
         cartorio: cartorioResp,
         atingiu_alvo: calc.atingiuAlvo !== false,
+      // Devolvido para o navegador mandar de volta no próximo pedido do chat, e
+      // a função não repetir a busca web. É preço público — não há sigilo aqui.
+      emolumentos,
         avisos: avisosBase,
         aviso: avisosBase.length ? avisosBase.join(' ') : null,
         m1_sintese: dados.m1_sintese ?? null,
