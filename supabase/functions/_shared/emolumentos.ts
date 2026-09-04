@@ -99,15 +99,32 @@ function valorDaFaixa(f: Faixa, preco: number): number | null {
   return null
 }
 
-function valorNoAto(ato: TabelaAto | null, preco: number): number | null {
-  if (!ato || ato.faixas.length === 0) return null
-  // Ordena por teto, com a faixa aberta por último: a primeira que couber é a certa.
+/**
+ * Faixas ordenadas por teto, com a aberta por último — memorizadas POR TABELA.
+ *
+ * A ordenação acontecia dentro de valorNoAto, ou seja, a cada consulta. A
+ * calibragem do deságio consulta milhares de vezes por análise, e isso viravam
+ * dezenas de milhares de cópias de array e ordenações por requisição — CPU pura,
+ * no worker que devolveu HTTP 546 (estouro de recurso). Agora ordena uma vez por
+ * tabela. WeakMap: a entrada some junto com a tabela, sem cache a administrar.
+ */
+const ordenadas = new WeakMap<TabelaAto, Faixa[]>()
+
+function faixasOrdenadas(ato: TabelaAto): Faixa[] {
+  const memo = ordenadas.get(ato)
+  if (memo) return memo
   const faixas = [...ato.faixas].sort((a, b) => {
     if (a.ate === null) return 1
     if (b.ate === null) return -1
     return a.ate - b.ate
   })
-  const f = faixas.find((x) => x.ate === null || preco <= x.ate)
+  ordenadas.set(ato, faixas)
+  return faixas
+}
+
+function valorNoAto(ato: TabelaAto | null, preco: number): number | null {
+  if (!ato || ato.faixas.length === 0) return null
+  const f = faixasOrdenadas(ato).find((x) => x.ate === null || preco <= x.ate)
   return f ? valorDaFaixa(f, preco) : null
 }
 

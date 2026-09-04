@@ -261,6 +261,38 @@ export function AnaliseRpvModal({
           ...dadosDoCard,
         })
         setAtual(r)
+
+        // O CARTÓRIO CHEGA DEPOIS, e de propósito. A tabela de emolumentos da UF
+        // sai de uma busca web de 10 a 30 s; fazê-la dentro da análise estourava
+        // o worker (HTTP 546). Então a análise volta primeiro, sem cartório, e a
+        // tabela vem numa requisição própria — a pessoa já lê os números
+        // enquanto isso, e o preço se refaz sozinho quando ela chega.
+        const uf = r.cartorio?.uf
+        if (!r.reprovado && uf && r.cartorio?.origem === 'nenhuma') {
+          setPasso(`Buscando a tabela de emolumentos de ${uf}…`)
+          try {
+            const e = await invokeFunction<{ emolumentos?: unknown }>('gerar-analise-rpv', {
+              acao: 'emolumentos',
+              uf,
+            })
+            if (e?.emolumentos) {
+              setPasso('Refazendo o preço com o cartório…')
+              // Sem IA: só recalcula. Por isso é uma ação própria, e não 'refinar'.
+              const r2 = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
+                acao: 'reprecificar',
+                notas_kommo: notasKommo,
+                dados: r.dados,
+                emolumentos: e.emolumentos,
+                avisos_qualificacao: r.avisos_qualificacao ?? [],
+                ...dadosDoCard,
+              })
+              setAtual(r2)
+            }
+          } catch {
+            // Falhar aqui não invalida a análise: ela já está na tela, e o aviso
+            // de "cartório não incluído" continua dizendo o que falta.
+          }
+        }
       } catch (e) {
         setErro((e as Error)?.message ?? String(e))
       } finally {

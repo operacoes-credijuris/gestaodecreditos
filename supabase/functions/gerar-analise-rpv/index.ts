@@ -483,13 +483,34 @@ function calibrarDesagio(o: {
     desagioEfetivo: 1 - r.cessao / baseY3, atingiuAlvo,
   });
 
-  let melhor: any = null;                          // maior rentabilidade (fallback quando nada bate o alvo)
-  for (let d = 0; d <= 0.95 + 1e-9; d += 0.0001) {
-    const r = avaliar(d);
-    if (r.Y9 >= alvo) return montar(r, true);      // 1º deságio que bate o alvo = menor deságio
-    if (!melhor || r.Y9 > melhor.Y9) melhor = r;
+  // BUSCA BINÁRIA, e não varredura. A resposta é a mesma — o resultado é
+  // verificado contra a varredura em teste —, mas passa de 9.501 avaliações por
+  // análise para 14. Era CPU pura dentro do worker, e foi o que sobrou de
+  // pesado depois que a busca web saiu daqui: o HTTP 546 é estouro de recurso,
+  // não de tempo de rede.
+  //
+  // POR QUE A BINÁRIA VALE: a rentabilidade Y9 é monotonicamente não-decrescente
+  // no deságio. Mais deságio -> cessão menor -> Y4 (custo total) menor -> Y9
+  // maior. O emolumento também só cai quando a cessão cai, então as faixas da
+  // tabela criam degraus, nunca uma subida seguida de descida. Procurar "o menor
+  // d que bate o alvo" numa função monótona é exatamente o caso da binária.
+  //
+  // A busca é sobre o ÍNDICE da mesma grade de 0,01% da varredura (k de 0 a
+  // 9500), e não sobre o real — assim o d devolvido é idêntico ao que a
+  // varredura devolveria, sem depender de tolerância.
+  const PASSOS = 9500;                             // 0 a 0,95 em degraus de 0,0001
+  const dDe = (k: number) => k * 0.0001;
+  const bate = (k: number) => avaliar(dDe(k)).Y9 >= alvo;
+
+  if (!bate(PASSOS)) return montar(avaliar(dDe(PASSOS)), false);  // nem no teto: melhor caso + flag
+  if (bate(0)) return montar(avaliar(0), true);                   // já bate sem deságio nenhum
+
+  let baixo = 0, alto = PASSOS;                    // bate(baixo)=false, bate(alto)=true
+  while (alto - baixo > 1) {
+    const meio = (baixo + alto) >> 1;
+    if (bate(meio)) alto = meio; else baixo = meio;
   }
-  return montar(melhor, false);                    // não bateu o alvo nem a 95%: melhor caso + flag
+  return montar(avaliar(dDe(alto)), true);
 }
 
 /**
@@ -1206,6 +1227,20 @@ Deno.serve(async (req) => {
     // repositório, se alguma automação de fora ainda manda o nome velho. Sem a
     // tolerância, a falha seria silenciosa — o arquivamento no Drive
     // simplesmente deixaria de acontecer.
+    // 2b. Ação leve: só a tabela de emolumentos de uma UF.
+    //
+    // SEPARADA DA ANÁLISE de propósito. A busca web custa 10 a 30 s e memória, e
+    // rodá-la dentro da mesma requisição que faz duas extrações de IA sobre um
+    // processo inteiro era o que estourava o worker (HTTP 546). Agora o navegador
+    // pede a tabela ANTES, numa requisição própria, e entrega pronta para a
+    // análise. Cada requisição faz uma coisa pesada, não três.
+    if (body.acao === 'emolumentos') {
+      const uf = normalizarUf(body.uf);
+      if (!uf) return jsonResponse({ ok: true, emolumentos: null, motivo: 'UF não informada' });
+      const e = await obterEmolumentos(uf, cfg.anthropic_api_key, sbAdmin);
+      return jsonResponse({ ok: true, emolumentos: e });
+    }
+
     if (body.acao === 'listar_originadores' || body.acao === 'listar_intermediadores') {
       const token = await refreshGoogleAccessToken(cfg.google_oauth_client_id, cfg.google_oauth_client_secret, cfg.google_oauth_refresh_token);
       const originadores = await driveListarOriginadoresAnalise(token, categoria);
@@ -1219,9 +1254,13 @@ Deno.serve(async (req) => {
     //   'analisar'  lê, qualifica, extrai e precifica — devolve a PRELIMINAR,
     //               sem planilha, sem Drive, sem anotação no Kommo
     //   'refinar'   aplica um pedido do usuário sobre a análise e reprecifica
+    //   'reprecificar' refaz as contas com a tabela de emolumentos que chegou
+    //               depois, SEM chamar a IA — custa milissegundos
     //   'salvar'    recebe a análise final, gera a planilha e sobe no Drive
-    const acao: 'analisar' | 'refinar' | 'salvar' | null =
-      body.acao === 'analisar' || body.acao === 'refinar' || body.acao === 'salvar' ? body.acao : null;
+    const acao: 'analisar' | 'refinar' | 'reprecificar' | 'salvar' | null =
+      body.acao === 'analisar' || body.acao === 'refinar' || body.acao === 'reprecificar' || body.acao === 'salvar'
+        ? body.acao
+        : null;
     const notasKommo: string = String(body.notas_kommo ?? '').trim();
     const jobId: string = body.job_id;
     const originador: string = body.originador ?? body.intermediador;
@@ -1266,7 +1305,7 @@ Deno.serve(async (req) => {
     let dados: any;
     let avisosQualif: string[] = [];
     let respostaRevisao: string | null = null;
-    if (acao === 'refinar' || acao === 'salvar') {
+    if (acao === 'refinar' || acao === 'reprecificar' || acao === 'salvar') {
       if (!body.dados || typeof body.dados !== 'object') return errorResponse('Faltou a análise atual (dados) para ' + acao + '.');
       if (acao === 'refinar') {
         const instrucao = String(body.instrucao ?? '').trim();
@@ -1379,10 +1418,17 @@ Deno.serve(async (req) => {
     // tribunal) ou quando a rodada anterior não achou nada.
     const ufCredito = ufDoCredito(dados);
     const anterior = body.emolumentos as { uf?: string; tabela?: unknown } | undefined;
-    const emolumentos =
+    // NUNCA busca aqui. Ou veio pronto do navegador (ação 'emolumentos'), ou o
+    // preço sai sem cartório e avisando — que já é o comportamento previsto para
+    // tabela desconhecida. Buscar neste ponto foi o que derrubou o worker.
+    const emolumentos: any =
       anterior?.tabela && (!ufCredito || anterior.uf === ufCredito)
-        ? (anterior as any)
-        : await obterEmolumentos(ufCredito, cfg.anthropic_api_key, sbAdmin);
+        ? anterior
+        : { uf: ufCredito ?? '', ano: new Date().getFullYear(), tabela: null, fontes: [], vigencia: null,
+            origem: 'nenhuma',
+            motivo: ufCredito
+              ? `tabela de ${ufCredito} ainda não levantada — a tela pede em seguida e o preço se refaz`
+              : 'UF do tribunal não identificada nos autos' };
 
     // 3d. Calibragem do deságio
     const calc: any = calibrarDesagio({
@@ -1446,7 +1492,9 @@ Deno.serve(async (req) => {
 
     // A PRELIMINAR: tudo calculado, nada gravado. A pessoa lê, pede mudanças no
     // chat, e só o 'salvar' gera planilha, Drive e anotação.
-    if (acao === 'analisar' || acao === 'refinar') {
+    // 'reprecificar' entra aqui: é a rodada que refaz as contas depois que a
+    // tabela de emolumentos chega, sem tocar na IA — custa milissegundos.
+    if (acao === 'analisar' || acao === 'refinar' || acao === 'reprecificar') {
       return jsonResponse({
         ok: true,
         preliminar: true,
