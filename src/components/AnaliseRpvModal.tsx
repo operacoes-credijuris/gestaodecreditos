@@ -55,6 +55,13 @@ export interface CartorioRpv {
   uf: string | null
   origem: 'cache' | 'busca' | 'nenhuma'
   fontes: string[]
+  /**
+   * O preço de cessão para o qual a tela deve consultar o cartório — presente
+   * só enquanto o custo não veio. É o que torna a consulta uma pergunta
+   * concreta ("quanto custa uma cessão de R$ 52.500 em PE?") em vez de um
+   * pedido para transcrever a tabela inteira do estado, que foi o que falhou.
+   */
+  preco_consulta?: number | null
 }
 interface Risco {
   risco: string
@@ -84,14 +91,15 @@ export interface RespostaAnaliseRpv {
   /** A análise inteira, opaca para a tela: volta para a função no próximo turno. */
   dados?: unknown
   /**
-   * A tabela de emolumentos que a função usou, também opaca aqui.
+   * O custo de cartório que a função usou — escritura + registro em reais —,
+   * opaco aqui.
    *
-   * Dá a volta pelo navegador pelo mesmo motivo de `dados`: achá-la custa uma
-   * busca web de 10 a 30 s, e repetir isso a cada pedido do chat estourava o
-   * teto de 150 s da requisição. Devolvendo-a, a função só busca de novo se a
-   * UF do tribunal mudar.
+   * Dá a volta pelo navegador pelo mesmo motivo de `dados`: consultá-lo custa
+   * uma busca web de 10 a 30 s, e repetir isso a cada pedido do chat estourava
+   * o teto de 150 s da requisição. Devolvendo-o, a função só consulta de novo
+   * se a UF do tribunal mudar.
    */
-  emolumentos?: unknown
+  custo_cartorio?: unknown
   avisos_qualificacao?: string[]
   drive_file_url?: string | null
   drive_folder_url?: string | null
@@ -264,44 +272,41 @@ export function AnaliseRpvModal({
         })
         setAtual(r)
 
-        // O CARTÓRIO CHEGA DEPOIS, e de propósito. A tabela de emolumentos da UF
-        // sai de uma busca web de 10 a 30 s; fazê-la dentro da análise estourava
-        // o worker (HTTP 546). Então a análise volta primeiro, sem cartório, e a
-        // tabela vem numa requisição própria — a pessoa já lê os números
-        // enquanto isso, e o preço se refaz sozinho quando ela chega.
+        // O CARTÓRIO CHEGA DEPOIS, e de propósito, em DUAS etapas — que é o
+        // jeito como se pergunta a um cartório: "quanto custa uma cessão DESTE
+        // valor?". A análise calibra primeiro sem cartório e devolve o preço; a
+        // consulta pergunta o custo PARA ESSE PREÇO; a reprecificação soma. A
+        // consulta é requisição própria porque a busca web leva 10 a 30 s e,
+        // dentro da análise, derrubava o worker (HTTP 546).
         const uf = r.cartorio?.uf
-        if (!r.reprovado && uf && r.cartorio?.origem === 'nenhuma') {
-          setPasso(`Buscando a tabela de emolumentos de ${uf}…`)
+        const preco = r.cartorio?.preco_consulta
+        if (!r.reprovado && uf && preco) {
+          setPasso(`Consultando o cartório de ${uf} para ${formatBRL(preco)}…`)
           try {
-            const e = await invokeFunction<{ emolumentos?: unknown; motivo?: string }>(
-              'gerar-analise-rpv',
-              { acao: 'emolumentos', uf },
-            )
-            // EXIGE A TABELA, não só o objeto. A busca devolve
-            // `{tabela: null, motivo}` quando não acha nada — verificar só
-            // `e.emolumentos` daria verdadeiro nesse caso, reprecificaria com a
-            // mesma ausência de cartório e a tela nunca diria que a busca falhou.
-            const achou = (e?.emolumentos as { tabela?: unknown } | null)?.tabela
-            if (achou) {
+            const e = await invokeFunction<{
+              custo?: { total?: number | null; motivo?: string } | null
+              motivo?: string
+            }>('gerar-analise-rpv', { acao: 'emolumentos', uf, preco })
+            // EXIGE O VALOR, não só o objeto. A consulta devolve
+            // `{total: null, motivo}` quando não acha nada — verificar só
+            // `e.custo` daria verdadeiro nesse caso, reprecificaria com a mesma
+            // ausência de cartório e a tela nunca diria que a consulta falhou.
+            if (e?.custo?.total != null) {
               setPasso('Refazendo o preço com o cartório…')
               // Sem IA: só recalcula. Por isso é uma ação própria, e não 'refinar'.
               const r2 = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
                 acao: 'reprecificar',
                 notas_kommo: notasKommo,
                 dados: r.dados,
-                emolumentos: e.emolumentos,
+                custo_cartorio: e.custo,
                 avisos_qualificacao: r.avisos_qualificacao ?? [],
                 ...dadosDoCard,
               })
               setAtual(r2)
             } else {
-              // A busca rodou e não achou tabela para esta UF. O aviso da análise
-              // já diz "cartório não incluído", mas dizia que a tela pediria a
-              // tabela "em seguida" — precisa dizer que pediu e não veio.
-              const porque =
-                (e?.emolumentos as { motivo?: string } | null)?.motivo ?? e?.motivo
+              const porque = e?.custo?.motivo ?? e?.motivo
               setFalhaCartorio(
-                `Procurei a tabela de emolumentos de ${uf} e não encontrei${
+                `Consultei o custo de cartório de ${uf} para ${formatBRL(preco)} e não obtive resposta${
                   porque ? `: ${porque}` : '.'
                 } O preço está sem escritura e registro — some o custo à mão.`,
               )
@@ -312,7 +317,7 @@ export function AnaliseRpvModal({
             // vazio aqui fazia a tela prometer que o preço se refaria e nunca
             // explicar por que não refez.
             setFalhaCartorio(
-              `Não consegui buscar a tabela de emolumentos de ${uf}: ${
+              `Não consegui consultar o cartório de ${uf}: ${
                 (e as Error)?.message ?? String(e)
               }. O preço está sem escritura e registro.`,
             )
@@ -339,16 +344,16 @@ export function AnaliseRpvModal({
     setMensagens(historico)
     setPasso('Revisando a análise…')
     try {
-      // SEM `texto` E COM `emolumentos`, e as duas coisas pela mesma razão: a
+      // SEM `texto` E COM `custo_cartorio`, e as duas coisas pela mesma razão: a
       // revisão estourava o teto de 150 s da requisição (erros 504 e 546). O
-      // processo inteiro reenviado a cada pedido e uma busca web de emolumentos
+      // processo inteiro reenviado a cada pedido e uma consulta web de cartório
       // por rodada eram o custo. A revisão trabalha sobre o JSON já extraído, e
-      // a tabela de cartório vem de volta em vez de ser procurada de novo.
+      // o custo de cartório vem de volta em vez de ser consultado de novo.
       const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
         acao: 'refinar',
         notas_kommo: notasKommo,
         dados: atual.dados,
-        emolumentos: atual.emolumentos ?? null,
+        custo_cartorio: atual.custo_cartorio ?? null,
         instrucao,
         historico: historico.slice(-12),
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
@@ -375,7 +380,7 @@ export function AnaliseRpvModal({
         acao: 'salvar',
         notas_kommo: notasKommo,
         dados: atual.dados,
-        emolumentos: atual.emolumentos ?? null,
+        custo_cartorio: atual.custo_cartorio ?? null,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
         ...dadosDoCard,
       })

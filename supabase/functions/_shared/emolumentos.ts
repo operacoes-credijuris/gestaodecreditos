@@ -1,72 +1,74 @@
-// Emolumentos de cartório por UF: escritura pública de cessão + registro em
-// títulos e documentos.
+// Custo de cartório por UF: escritura pública de cessão + registro em títulos e
+// documentos, PARA UM PREÇO DE CESSÃO.
 //
-// ATÉ AQUI O MOTOR DE RPV USAVA UMA TABELA SÓ — a de Virginópolis-MG — para
-// crédito de qualquer estado. Emolumento é preço público fixado por cada
-// Tribunal de Justiça, e a diferença entre estados não é arredondamento: a
-// mesma escritura custa o dobro num e metade noutro. Decisão do dono: a tabela
-// passa a ser a DO ESTADO DO TRIBUNAL onde o crédito tramita, e quem a encontra
-// é a IA, por busca web na fonte oficial.
+// A PERGUNTA MUDOU, e é isso que faz esta versão funcionar. A primeira tentativa
+// pedia à IA a TABELA INTEIRA de emolumentos do estado, em faixas, para o motor
+// consultar quantas vezes quisesse. Falhou em Pernambuco: a tabela de lá cobra
+// percentual sobre o valor, com piso e teto, e nem o formato de faixas dava
+// conta, nem o modelo conseguia transcrever a estrutura toda com confiança —
+// devolvia "sem faixas" e o preço saía sem cartório.
 //
-// O QUE ESTE MÓDULO DEVOLVE É UMA TABELA DE FAIXAS, não um número — e o número
-// sai dela. A calibragem do deságio testa milhares de preços de cessão em
-// sequência, e o emolumento depende do preço; o motor precisa da função
-// preço->custo. `emolumentoDaTabela` é essa função, e o custo em reais que ela
-// devolve para o preço calibrado é o que vai para a planilha e para a tela.
+// Agora a pergunta é a que uma pessoa faria ao cartório: "uma escritura de
+// cessão de R$ 52.500 em PE custa quanto, e o registro em RTD custa quanto?".
+// Uma consulta pontual, sobre um valor concreto. O modelo lê a tabela oficial e
+// aplica a regra dela — percentual, faixa fixa, piso, teto, o que for — em vez
+// de traduzi-la para um formato nosso.
 //
-// FAIXA POR VALOR FIXO OU POR PERCENTUAL. A primeira versão só aceitava valor
-// fixo por faixa e por isso FALHOU em Pernambuco: lá (e em boa parte dos
-// estados) a escritura com conteúdo econômico cobra percentual sobre o valor,
-// com piso e teto, e a IA devolveu "sem faixas para escritura" porque não
-// tinha como expressar a regra. Agora uma faixa é `valor` fixo OU
-// `percentual` sobre o preço (mais `fixo` opcional, entre `minimo` e `maximo`).
+// COMO ISSO CONVIVE COM A CALIBRAGEM. O motor calibra o deságio testando vários
+// preços de cessão, e o custo de cartório depende do preço — daí a ideia
+// original da tabela. A saída é em duas etapas: calibra primeiro SEM cartório,
+// pergunta o custo para o preço que saiu, e recalibra com esse custo fixo. O
+// cartório é ~2% da cessão, então a segunda calibragem move o preço pouco; e
+// a consulta devolve A FAIXA em que aquele custo vale, para o motor saber se o
+// preço novo saiu dela e avisar.
 //
-// UM ATO PODE FALTAR. Se a IA achou o registro e não a escritura, o cartório sai
-// PARCIAL — com a parte conhecida somada e a que falta dita pelo nome. Antes,
-// faltar um ato descartava os dois e o preço saía sem cartório nenhum.
+// O CACHE ACUMULA FAIXAS RESOLVIDAS, não a tabela do estado. Cada consulta
+// guarda "em PE, entre R$ 50 mil e R$ 100 mil, escritura X + registro Y". A
+// próxima cessão de PE nessa faixa não busca nada. É o mesmo cache da migração
+// 0053 (coluna `tabela` jsonb) — só o formato de dentro mudou, e ele nunca
+// chegou a ser preenchido.
 //
 // COMPARTILHADO (_shared) de propósito: a etapa de Precificação do precatório
-// vai precisar exatamente da mesma coisa, e duas cópias desta busca achariam
-// duas tabelas diferentes para o mesmo estado.
+// vai precisar exatamente disto.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
 const MODELO = 'claude-opus-5'
-/** Teto de buscas e de retomadas — ambos pelo teto de tempo da Edge Function. */
-const MAX_BUSCAS = 8
+/** Tetos da busca — ambos pelo limite de recursos da Edge Function. */
+const MAX_BUSCAS = 6
 const MAX_RETOMADAS = 2
 
-export interface Faixa {
-  /** Limite superior da faixa em reais; null = faixa aberta ("acima de X"). */
+/** Uma faixa de preço já resolvida: dentro dela, o custo é este. */
+export interface FaixaResolvida {
+  de: number
+  /** null = faixa aberta ("deste valor para cima"). */
   ate: number | null
-  /** Emolumento fixo da faixa, em reais. Exclusivo com `percentual`. */
-  valor?: number | null
-  /** Percentual sobre o preço, como FRAÇÃO (0.005 = 0,5%). Exclusivo com `valor`. */
-  percentual?: number | null
-  /** Parcela fixa somada ao percentual, em reais. */
-  fixo?: number | null
-  /** Piso e teto do resultado quando a faixa é percentual. */
-  minimo?: number | null
-  maximo?: number | null
-}
-export interface TabelaAto {
-  faixas: Faixa[]
+  escritura: number | null
+  registro: number | null
   observacao?: string | null
+  fontes?: string[]
+  vigencia?: string | null
 }
-export interface TabelaEmolumentos {
-  /** Ato ausente = a IA não achou tabela confiável para ele. */
-  escritura: TabelaAto | null
-  registro: TabelaAto | null
-}
-export interface Emolumentos {
+
+export interface CustoCartorio {
   uf: string
   ano: number
-  tabela: TabelaEmolumentos | null
+  /** O preço de cessão consultado. */
+  preco: number
+  escritura: number | null
+  registro: number | null
+  /** Soma do que se conhece; null quando nenhum dos dois foi achado. */
+  total: number | null
+  /** Os DOIS atos entraram. Falso = custo parcial, e a descrição diz o que faltou. */
+  completo: boolean
+  /** Faixa de preços em que este mesmo custo vale — para detectar troca de faixa. */
+  de: number | null
+  ate: number | null
+  descricao: string
   fontes: string[]
   vigencia: string | null
-  /** De onde veio: 'cache' (banco), 'busca' (web, agora) ou 'nenhuma' (não achou). */
+  observacao: string | null
   origem: 'cache' | 'busca' | 'nenhuma'
-  /** Por que não achou, quando `tabela` é null. */
   motivo?: string
 }
 
@@ -81,246 +83,116 @@ export function normalizarUf(s: unknown): string | null {
   return UFS.has(t) ? t : null
 }
 
-// ---------------------------------------------------------------------------
-// A função preço -> custo
-// ---------------------------------------------------------------------------
-
 const brl = (n: number) =>
   'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-function valorDaFaixa(f: Faixa, preco: number): number | null {
-  if (f.valor != null) return f.valor
-  if (f.percentual != null) {
-    let v = preco * f.percentual + (f.fixo ?? 0)
-    if (f.minimo != null) v = Math.max(v, f.minimo)
-    if (f.maximo != null) v = Math.min(v, f.maximo)
-    return v
-  }
-  return null
+/** O preço cai nesta faixa? */
+function cobre(f: FaixaResolvida, preco: number): boolean {
+  return preco >= f.de && (f.ate === null || preco <= f.ate)
 }
 
-/**
- * Faixas ordenadas por teto, com a aberta por último — memorizadas POR TABELA.
- *
- * A ordenação acontecia dentro de valorNoAto, ou seja, a cada consulta. A
- * calibragem do deságio consulta milhares de vezes por análise, e isso viravam
- * dezenas de milhares de cópias de array e ordenações por requisição — CPU pura,
- * no worker que devolveu HTTP 546 (estouro de recurso). Agora ordena uma vez por
- * tabela. WeakMap: a entrada some junto com a tabela, sem cache a administrar.
- */
-const ordenadas = new WeakMap<TabelaAto, Faixa[]>()
-
-function faixasOrdenadas(ato: TabelaAto): Faixa[] {
-  const memo = ordenadas.get(ato)
-  if (memo) return memo
-  const faixas = [...ato.faixas].sort((a, b) => {
-    if (a.ate === null) return 1
-    if (b.ate === null) return -1
-    return a.ate - b.ate
-  })
-  ordenadas.set(ato, faixas)
-  return faixas
-}
-
-function valorNoAto(ato: TabelaAto | null, preco: number): number | null {
-  if (!ato || ato.faixas.length === 0) return null
-  const f = faixasOrdenadas(ato).find((x) => x.ate === null || preco <= x.ate)
-  return f ? valorDaFaixa(f, preco) : null
-}
-
-/**
- * Custo de cartório para um preço de cessão: escritura + registro.
- *
- * `total` soma o que se conhece. `completo` diz se os DOIS atos entraram; quando
- * um faltou, `descricao` nomeia qual — e quem chama avisa que o preço saiu com
- * cartório parcial. `total` null só quando nenhum ato foi achado.
- */
-export function emolumentoDaTabela(
-  tabela: TabelaEmolumentos | null,
-  preco: number,
-  rotulo?: string,
-): {
-  total: number | null
-  escritura: number | null
-  registro: number | null
-  completo: boolean
-  descricao: string
-} {
-  const sufixo = rotulo ? ` (${rotulo})` : ''
-  if (!tabela || (!tabela.escritura && !tabela.registro)) {
-    return {
-      total: null,
-      escritura: null,
-      registro: null,
-      completo: false,
-      descricao: 'Confirmar com cartório — tabela de emolumentos não encontrada',
-    }
-  }
-  const escritura = valorNoAto(tabela.escritura, preco)
-  const registro = valorNoAto(tabela.registro, preco)
-  if (escritura === null && registro === null) {
-    return {
-      total: null,
-      escritura,
-      registro,
-      completo: false,
-      descricao: `Confirmar com cartório — ${brl(preco)} fora das faixas da tabela${sufixo}`,
-    }
-  }
+function descrever(escritura: number | null, registro: number | null, sufixo: string): string {
   const partes = [
     escritura === null ? 'escritura NÃO ENCONTRADA' : `Escritura ${brl(escritura)}`,
     registro === null ? 'registro NÃO ENCONTRADO' : `registro ${brl(registro)}`,
   ]
-  return {
-    total: (escritura ?? 0) + (registro ?? 0),
-    escritura,
-    registro,
-    completo: escritura !== null && registro !== null,
-    descricao: `${partes.join(' + ')}${sufixo}`,
-  }
+  return partes.join(' + ') + sufixo
 }
 
 // ---------------------------------------------------------------------------
-// Validação do que a IA devolve
+// A consulta à IA
 // ---------------------------------------------------------------------------
-
-function validarAto(bruto: unknown, nome: string): TabelaAto | null | string {
-  const a = bruto as { faixas?: unknown; observacao?: unknown } | null | undefined
-  const lista = a?.faixas
-  if (!Array.isArray(lista) || lista.length === 0) return null // ato não achado: aceito, vira parcial
-  const faixas: Faixa[] = []
-  let abertas = 0
-  for (const f of lista as Array<Record<string, unknown>>) {
-    const ate = f.ate === null || f.ate === undefined ? null : Number(f.ate)
-    if (ate !== null && !(ate > 0)) return `teto inválido em ${nome}: ${String(f.ate)}`
-    const valor = f.valor === null || f.valor === undefined ? null : Number(f.valor)
-    const percentual =
-      f.percentual === null || f.percentual === undefined ? null : Number(f.percentual)
-    if (valor === null && percentual === null) return `faixa de ${nome} sem valor nem percentual`
-    if (valor !== null && !(valor > 0)) return `valor inválido em ${nome}: ${String(f.valor)}`
-    if (percentual !== null && !(percentual > 0 && percentual < 0.2)) {
-      // Acima de 20% do preço não é emolumento, é erro de leitura (percentual
-      // veio em pontos, não em fração).
-      return `percentual fora do razoável em ${nome}: ${String(f.percentual)}`
-    }
-    const num = (k: string) => (f[k] === null || f[k] === undefined ? null : Number(f[k]))
-    if (ate === null) abertas++
-    faixas.push({ ate, valor, percentual, fixo: num('fixo'), minimo: num('minimo'), maximo: num('maximo') })
-  }
-  if (abertas > 1) return `mais de uma faixa aberta em ${nome}`
-  return {
-    faixas,
-    observacao: typeof a?.observacao === 'string' ? a.observacao : null,
-  }
-}
-
-/**
- * Aceita a tabela que sirva ao cálculo. Ato sem faixas é ACEITO como ausente —
- * vira cartório parcial, dito na tela. O que não passa: valores inválidos,
- * percentual fora do razoável, mais de uma faixa aberta, e tabela SEM FONTE —
- * regra do dono: é preço público, e número sem procedência num deságio é pior
- * que célula vazia.
- */
-function validar(bruto: unknown, fontes: string[]): TabelaEmolumentos | string {
-  if (fontes.length === 0) return 'a IA não informou a fonte da tabela'
-  const t = bruto as { escritura?: unknown; registro?: unknown }
-  const escritura = validarAto(t?.escritura, 'escritura')
-  if (typeof escritura === 'string') return escritura
-  const registro = validarAto(t?.registro, 'registro')
-  if (typeof registro === 'string') return registro
-  if (!escritura && !registro) return 'sem faixas para escritura nem para registro'
-  return { escritura, registro }
-}
-
-// ---------------------------------------------------------------------------
-// A busca
-// ---------------------------------------------------------------------------
-
-const FAIXA_SCHEMA = {
-  type: 'object',
-  properties: {
-    ate: { type: ['number', 'null'], description: 'Teto da faixa em reais; null na última faixa quando ela é "acima de X".' },
-    valor: { type: ['number', 'null'], description: 'Emolumento FIXO da faixa, em reais, quando a tabela cobra valor fixo. Deixe null se a faixa é percentual.' },
-    percentual: { type: ['number', 'null'], description: 'Quando a tabela cobra PERCENTUAL sobre o valor do ato: a fração (0,5% = 0.005). Deixe null se a faixa é de valor fixo.' },
-    fixo: { type: ['number', 'null'], description: 'Parcela fixa somada ao percentual, em reais, se houver.' },
-    minimo: { type: ['number', 'null'], description: 'Piso do emolumento na faixa percentual, em reais, se houver.' },
-    maximo: { type: ['number', 'null'], description: 'Teto do emolumento na faixa percentual, em reais, se houver.' },
-  },
-  required: ['ate'],
-}
 
 const FERRAMENTA = {
-  name: 'registrar_tabela_emolumentos',
+  name: 'registrar_custo_cartorio',
   description:
-    'Registra a tabela de emolumentos de cartório de uma UF, em faixas de valor (fixas ou percentuais), para escritura pública e para registro em títulos e documentos.',
+    'Registra quanto custam, em reais, a escritura pública de cessão de crédito e o registro do instrumento em Títulos e Documentos, para um valor específico, num estado específico.',
   input_schema: {
     type: 'object' as const,
     properties: {
       escritura: {
-        type: 'object',
+        type: ['number', 'null'],
         description:
-          'ESCRITURA PÚBLICA COM CONTEÚDO ECONÔMICO (a tabela também chama de "com valor declarado" ou "com valor econômico"), no Tabelionato de Notas. É o ato da cessão de crédito. Faixas pelo valor do ato. Se não achou, devolva faixas VAZIAS.',
-        properties: {
-          faixas: { type: 'array', items: FAIXA_SCHEMA },
-          observacao: { type: ['string', 'null'], description: 'O que somou (fundos, selo, taxa) ou o que a tabela cobra à parte. Curto.' },
-        },
-        required: ['faixas'],
+          'Custo TOTAL da escritura pública com conteúdo financeiro para o valor consultado, em reais — já somados emolumento, fundos, selo e taxa de fiscalização, quando a tabela os discrimina. null se não conseguiu determinar.',
       },
       registro: {
-        type: 'object',
+        type: ['number', 'null'],
         description:
-          'REGISTRO DO INSTRUMENTO no Registro de Títulos e Documentos (RTD) — a tabela costuma chamar de "registro de título com conteúdo econômico" ou "registro integral". Faixas pelo valor do título; se a tabela cobra por documento mais por página, converta para UM instrumento de 2 a 6 páginas e diga em observacao. Se não achou, devolva faixas VAZIAS.',
-        properties: {
-          faixas: { type: 'array', items: FAIXA_SCHEMA },
-          observacao: { type: ['string', 'null'] },
-        },
-        required: ['faixas'],
+          'Custo TOTAL do registro do instrumento no Registro de Títulos e Documentos para o valor consultado, em reais, considerando um instrumento de cessão típico (2 a 6 páginas). null se não conseguiu determinar.',
+      },
+      faixa_de: {
+        type: ['number', 'null'],
+        description:
+          'Piso da faixa de valores em que ESTES MESMOS custos valem, em reais. Se a tabela cobra percentual (o custo muda a cada real), devolva o próprio valor consultado aqui e em faixa_ate.',
+      },
+      faixa_ate: {
+        type: ['number', 'null'],
+        description: 'Teto da mesma faixa; null se a faixa é aberta ("acima de X").',
+      },
+      observacao: {
+        type: ['string', 'null'],
+        description:
+          'Como o valor foi obtido: a faixa da tabela, o percentual aplicado, o que foi somado. Uma ou duas frases. Diga aqui se algum dos dois ficou null e por quê.',
+      },
+      vigencia: {
+        type: ['string', 'null'],
+        description: 'Período da tabela usada, como a fonte descreve ("2026", "a partir de 01/01/2026").',
       },
       fontes: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Os endereços EXATOS das páginas de onde saíram os valores. Obrigatório. Sem fonte a tabela é descartada.',
-      },
-      vigencia: {
-        type: ['string', 'null'],
-        description: 'O período a que a tabela se refere, como a fonte descreve ("2026", "a partir de 01/01/2026").',
+        description: 'Endereços EXATOS das páginas de onde saíram os valores. Obrigatório.',
       },
     },
-    required: ['escritura', 'registro', 'fontes', 'vigencia'],
+    required: ['escritura', 'registro', 'faixa_de', 'faixa_ate', 'observacao', 'vigencia', 'fontes'],
   },
 }
 
-function sistema(uf: string, ano: number): string {
-  return `Você levanta a tabela de emolumentos de cartório do estado ${uf} para o exercício de ${ano}, para dois atos: (1) ESCRITURA PÚBLICA COM CONTEÚDO ECONÔMICO no Tabelionato de Notas — é o ato da cessão de crédito; as tabelas a chamam de "escritura com valor declarado", "com valor econômico" ou "com conteúdo financeiro"; (2) REGISTRO DO INSTRUMENTO no Registro de Títulos e Documentos — "registro de título com conteúdo econômico" ou "registro integral".
+function sistema(uf: string, preco: number, ano: number): string {
+  return `Você consulta a tabela de emolumentos de cartório do estado ${uf} e responde uma pergunta concreta: uma cessão de crédito no valor de ${brl(preco)} vai custar quanto de cartório, hoje (${ano})?
 
-ONDE PROCURAR, nesta ordem: o Tribunal de Justiça de ${uf} ou sua Corregedoria-Geral de Justiça (a tabela sai como provimento, portaria, ato normativo ou anexo de lei estadual de custas, e costuma ter um anexo por especialidade — procure o anexo de "Tabelionato de Notas" e o de "Registro de Títulos e Documentos"); o sindicato ou colégio de notários e registradores do estado; a ANOREG. Prefira a página oficial com a tabela inteira à notícia que a resume.
+São dois atos, e você responde os dois:
+1. ESCRITURA PÚBLICA com conteúdo financeiro, no Tabelionato de Notas — é o ato da cessão. A base de cálculo é o valor da cessão, ${brl(preco)}.
+2. REGISTRO do instrumento no Registro de Títulos e Documentos (RTD).
 
-REGRAS:
-1. NÃO INVENTE FAIXA NEM VALOR. Se não achou a tabela de ${ano}, use a mais recente em vigor e diga a vigência real. Se não achou um dos atos, devolva esse ato com "faixas" VAZIAS e explique em "observacao" — o outro ato entra sozinho. Se não achou nenhum, os dois vazios. Melhor incompleto que plausível: isto entra num cálculo de deságio.
-2. FIXO OU PERCENTUAL, como a tabela cobra. Faixa de valor fixo -> "valor". Faixa que cobra percentual sobre o valor do ato -> "percentual" como FRAÇÃO (0,5% = 0.005), com "minimo"/"maximo" quando a tabela os fixa e "fixo" quando há parcela fixa somada. Muitas tabelas misturam: faixas baixas fixas e a última percentual — devolva cada faixa do jeito dela.
-3. VALOR TOTAL. As tabelas separam emolumento, fundos estaduais, selo e taxa de fiscalização. Quando a fonte discrimina, some tudo e devolva o que o usuário paga; diga em "observacao" o que somou.
-4. FAIXA ABERTA. A última costuma ser "acima de R$ X": devolva-a com "ate": null.
-5. FONTE OBRIGATÓRIA. Todo valor precisa do endereço exato da página em "fontes". Tabela sem fonte é descartada por quem te chamou.
-6. Responda chamando a ferramenta registrar_tabela_emolumentos uma única vez, ao final.`
+ONDE PROCURAR, nesta ordem: o Tribunal de Justiça de ${uf} ou a Corregedoria-Geral de Justiça (a tabela é publicada por eles, como provimento, portaria ou anexo de lei estadual); depois o sindicato ou colégio de notários e registradores do estado; depois a ANOREG.
+
+COMO RESPONDER:
+1. APLIQUE A REGRA DA TABELA, não a transcreva. Se a tabela de ${uf} cobra por faixa de valor, ache a faixa em que ${brl(preco)} cai e devolva o valor dela. Se cobra percentual sobre o valor, calcule o percentual sobre ${brl(preco)} e respeite piso e teto. Se soma emolumento + fundos + selo + taxa de fiscalização, some tudo e devolva o total que se paga no balcão. O que eu preciso é o NÚMERO em reais para este valor.
+2. MOSTRE A CONTA em "observacao": qual faixa, qual percentual, o que foi somado. É o que permite conferir.
+3. A FAIXA DE VALIDADE. Em "faixa_de" e "faixa_ate", diga entre que valores esse mesmo custo continua valendo — normalmente os limites da faixa da tabela. Se o custo é percentual e muda a cada real, devolva ${preco} nos dois campos.
+4. FONTE OBRIGATÓRIA. Todo valor precisa do endereço da página em "fontes". Sem fonte o resultado é descartado: emolumento é preço público e este número entra num cálculo de deságio.
+5. UM ATO PODE FALTAR. Se achou a escritura e não o registro (ou o contrário), devolva o que achou e null no outro, explicando em "observacao". Meio custo com a origem clara é útil; não devolva null nos dois só por insegurança — se achou a tabela oficial, aplique-a.
+6. Responda chamando a ferramenta registrar_custo_cartorio uma única vez, ao final.`
 }
 
-async function buscarNaWeb(
+async function consultarNaWeb(
   uf: string,
+  preco: number,
   ano: number,
   apiKey: string,
-): Promise<{ tabela: TabelaEmolumentos | null; fontes: string[]; vigencia: string | null; motivo?: string }> {
+): Promise<{
+  escritura: number | null
+  registro: number | null
+  de: number | null
+  ate: number | null
+  fontes: string[]
+  vigencia: string | null
+  observacao: string | null
+  motivo?: string
+}> {
   const anthropic = new Anthropic({ apiKey })
   const mensagens: Anthropic.MessageParam[] = [
-    { role: 'user', content: `Levante a tabela de emolumentos de ${uf} para ${ano}.` },
+    { role: 'user', content: `Quanto custa de cartório uma cessão de crédito de ${brl(preco)} em ${uf}?` },
   ]
   const pedir = () =>
     anthropic.messages
       .stream({
         model: MODELO,
-        max_tokens: 8000,
-        system: sistema(uf, ano),
-        // `tool_choice` em 'auto' de propósito: forçar a ferramenta impediria a
-        // busca, e sem busca não há tabela.
+        max_tokens: 4000,
+        system: sistema(uf, preco, ano),
+        // 'auto', e não ferramenta forçada: forçar impediria a busca, e sem
+        // busca não há tabela.
         tools: [
           FERRAMENTA,
           { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
@@ -331,113 +203,219 @@ async function buscarNaWeb(
 
   let resposta = await pedir()
   // O laço de amostragem do servidor tem teto próprio e devolve 'pause_turn' ao
-  // bater nele; reenviar o turno pausado retoma de onde parou, sem mensagem nova.
+  // batê-lo; reenviar o turno pausado retoma de onde parou, sem mensagem nova.
   for (let i = 0; i < MAX_RETOMADAS && resposta.stop_reason === 'pause_turn'; i++) {
     mensagens.push({ role: 'assistant', content: resposta.content })
     resposta = await pedir()
   }
 
+  const vazio = { escritura: null, registro: null, de: null, ate: null, fontes: [], vigencia: null, observacao: null }
   const uso = resposta.content.find((c) => c.type === 'tool_use' && c.name === FERRAMENTA.name)
   if (!uso || uso.type !== 'tool_use') {
     return {
-      tabela: null,
-      fontes: [],
-      vigencia: null,
+      ...vazio,
       motivo:
         resposta.stop_reason === 'pause_turn'
           ? 'a busca não terminou dentro do limite de retomadas'
-          : 'a IA não devolveu a tabela',
+          : 'a IA não devolveu o custo',
     }
   }
-  const entrada = uso.input as { fontes?: unknown; vigencia?: unknown }
-  const fontes = Array.isArray(entrada.fontes)
-    ? (entrada.fontes as unknown[]).map(String).filter((f) => /^https?:\/\//i.test(f))
+
+  const e = uso.input as Record<string, unknown>
+  const fontes = Array.isArray(e.fontes)
+    ? (e.fontes as unknown[]).map(String).filter((f) => /^https?:\/\//i.test(f))
     : []
-  const vigencia = typeof entrada.vigencia === 'string' ? entrada.vigencia : null
-  const v = validar(uso.input, fontes)
-  if (typeof v === 'string') return { tabela: null, fontes, vigencia, motivo: v }
-  return { tabela: v, fontes, vigencia }
+  if (fontes.length === 0) return { ...vazio, motivo: 'a IA não informou a fonte' }
+
+  // Positivo e plausível. O teto de 30% do preço existe porque emolumento é
+  // ordem de grandeza de centenas ou poucos milhares — um número dessa escala
+  // acima disso é erro de leitura (percentual aplicado errado, valor da causa
+  // no lugar do emolumento), e ele entraria direto no deságio.
+  const num = (v: unknown): number | null => {
+    const n = v === null || v === undefined ? null : Number(v)
+    if (n === null || !isFinite(n) || n <= 0) return null
+    return n > preco * 0.3 ? null : n
+  }
+  const escritura = num(e.escritura)
+  const registro = num(e.registro)
+  if (escritura === null && registro === null) {
+    return {
+      ...vazio,
+      fontes,
+      motivo:
+        typeof e.observacao === 'string' && e.observacao
+          ? `a IA não determinou os valores (${e.observacao})`
+          : 'a IA não determinou nenhum dos dois valores',
+    }
+  }
+
+  const faixa = (v: unknown): number | null => {
+    const n = v === null || v === undefined ? null : Number(v)
+    return n !== null && isFinite(n) && n >= 0 ? n : null
+  }
+  return {
+    escritura,
+    registro,
+    de: faixa(e.faixa_de),
+    ate: faixa(e.faixa_ate),
+    fontes,
+    vigencia: typeof e.vigencia === 'string' ? e.vigencia : null,
+    observacao: typeof e.observacao === 'string' ? e.observacao : null,
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Cache + busca
+// Cache + consulta
 // ---------------------------------------------------------------------------
 
+async function lerCache(svc: SupabaseClient, uf: string, ano: number): Promise<FaixaResolvida[]> {
+  try {
+    const { data } = await svc
+      .from('emolumentos_uf')
+      .select('tabela')
+      .eq('uf', uf)
+      .eq('ano', ano)
+      .maybeSingle()
+    const faixas = (data?.tabela as { faixas?: unknown } | null)?.faixas
+    return Array.isArray(faixas) ? (faixas as FaixaResolvida[]) : []
+  } catch {
+    return [] // migração 0053 não rodou: segue sem cache
+  }
+}
+
+async function gravarCache(
+  svc: SupabaseClient,
+  uf: string,
+  ano: number,
+  nova: FaixaResolvida,
+  existentes: FaixaResolvida[],
+): Promise<void> {
+  try {
+    // Descarta faixas que a nova cobre, para o cache não acumular respostas
+    // contraditórias para o mesmo intervalo — a última consulta é a que vale.
+    const mantidas = existentes.filter((f) => !(f.de >= nova.de && (nova.ate === null || (f.ate !== null && f.ate <= nova.ate))))
+    await svc.from('emolumentos_uf').upsert(
+      {
+        uf,
+        ano,
+        tabela: { faixas: [...mantidas, nova] },
+        fontes: nova.fontes ?? [],
+        vigencia: nova.vigencia ?? null,
+        atualizado_por: 'gerar-analise-rpv',
+      },
+      { onConflict: 'uf,ano' },
+    )
+  } catch {
+    /* sem cache: a próxima consulta desta faixa busca de novo */
+  }
+}
+
 /**
- * A tabela de emolumentos de uma UF para o ano corrente.
+ * Quanto custa o cartório para uma cessão de `preco` em `uf`.
  *
- * Cache primeiro (public.emolumentos_uf, migração 0053), busca web depois. As
- * duas operações de cache estão em try/catch de propósito: se a migração não
- * rodou, cada análise busca na web e segue — mais lenta, mas nunca barrada por
- * um passo manual que ficou para trás.
- *
- * TABELA PARCIAL NÃO VAI PARA O CACHE. Se só um ato foi achado, a próxima
- * análise da UF busca de novo — a chance de achar o que faltou vale mais que
- * os segundos poupados. O completo é gravado.
+ * Cache primeiro (faixa já resolvida que cubra o preço), consulta web depois. O
+ * cache está em try/catch: sem a migração 0053, cada consulta busca e segue.
  */
-export async function obterEmolumentos(
+export async function custoDeCartorio(
   ufBruta: unknown,
+  preco: number,
   apiKey: string,
   svc: SupabaseClient,
-): Promise<Emolumentos> {
+): Promise<CustoCartorio> {
   const ano = new Date().getFullYear()
+  const base = {
+    uf: normalizarUf(ufBruta) ?? String(ufBruta ?? ''),
+    ano,
+    preco,
+    escritura: null,
+    registro: null,
+    total: null,
+    completo: false,
+    de: null,
+    ate: null,
+    fontes: [] as string[],
+    vigencia: null,
+    observacao: null,
+  }
+
   const uf = normalizarUf(ufBruta)
   if (!uf) {
     return {
-      uf: String(ufBruta ?? ''),
-      ano,
-      tabela: null,
-      fontes: [],
-      vigencia: null,
+      ...base,
+      descricao: 'Confirmar com cartório — UF do tribunal não identificada',
       origem: 'nenhuma',
       motivo: 'UF do tribunal não identificada nos autos',
     }
   }
-
-  try {
-    const { data } = await svc
-      .from('emolumentos_uf')
-      .select('tabela, fontes, vigencia')
-      .eq('uf', uf)
-      .eq('ano', ano)
-      .maybeSingle()
-    if (data?.tabela) {
-      return {
-        uf,
-        ano,
-        tabela: data.tabela as TabelaEmolumentos,
-        fontes: (data.fontes as string[]) ?? [],
-        vigencia: (data.vigencia as string | null) ?? null,
-        origem: 'cache',
-      }
-    }
-  } catch {
-    /* cache indisponível (migração não rodou?): segue para a busca */
-  }
-
-  const achado = await buscarNaWeb(uf, ano, apiKey)
-  if (!achado.tabela) {
-    return { uf, ano, tabela: null, fontes: achado.fontes, vigencia: achado.vigencia, origem: 'nenhuma', motivo: achado.motivo }
-  }
-
-  const completa = !!achado.tabela.escritura && !!achado.tabela.registro
-  if (completa) {
-    try {
-      await svc.from('emolumentos_uf').upsert(
-        {
-          uf,
-          ano,
-          tabela: achado.tabela,
-          fontes: achado.fontes,
-          vigencia: achado.vigencia,
-          atualizado_por: 'gerar-analise-rpv',
-        },
-        { onConflict: 'uf,ano' },
-      )
-    } catch {
-      /* sem cache: a próxima análise desta UF busca de novo */
+  if (!(preco > 0)) {
+    return {
+      ...base,
+      uf,
+      descricao: 'Confirmar com cartório — preço de cessão indefinido',
+      origem: 'nenhuma',
+      motivo: 'preço de cessão ainda não calculado',
     }
   }
 
-  return { uf, ano, tabela: achado.tabela, fontes: achado.fontes, vigencia: achado.vigencia, origem: 'busca' }
+  const existentes = await lerCache(svc, uf, ano)
+  const doCache = existentes.find((f) => cobre(f, preco))
+  if (doCache && (doCache.escritura !== null || doCache.registro !== null)) {
+    const total = (doCache.escritura ?? 0) + (doCache.registro ?? 0)
+    return {
+      ...base,
+      uf,
+      escritura: doCache.escritura,
+      registro: doCache.registro,
+      total,
+      completo: doCache.escritura !== null && doCache.registro !== null,
+      de: doCache.de,
+      ate: doCache.ate,
+      descricao: descrever(doCache.escritura, doCache.registro, ` (tabela ${uf}/${ano})`),
+      fontes: doCache.fontes ?? [],
+      vigencia: doCache.vigencia ?? null,
+      observacao: doCache.observacao ?? null,
+      origem: 'cache',
+    }
+  }
+
+  const achado = await consultarNaWeb(uf, preco, ano, apiKey)
+  if (achado.escritura === null && achado.registro === null) {
+    return {
+      ...base,
+      uf,
+      fontes: achado.fontes,
+      descricao: 'Confirmar com cartório — custo não encontrado',
+      origem: 'nenhuma',
+      motivo: achado.motivo,
+    }
+  }
+
+  const total = (achado.escritura ?? 0) + (achado.registro ?? 0)
+  // Faixa ausente ou incoerente vira faixa do próprio preço: o cache guarda
+  // pouco, mas nunca guarda um custo válido para um intervalo que não é o dele.
+  const de = achado.de !== null && achado.de <= preco ? achado.de : preco
+  const ate = achado.ate !== null && achado.ate >= preco ? achado.ate : preco
+  await gravarCache(
+    svc,
+    uf,
+    ano,
+    { de, ate, escritura: achado.escritura, registro: achado.registro, observacao: achado.observacao, fontes: achado.fontes, vigencia: achado.vigencia },
+    existentes,
+  )
+
+  return {
+    ...base,
+    uf,
+    escritura: achado.escritura,
+    registro: achado.registro,
+    total,
+    completo: achado.escritura !== null && achado.registro !== null,
+    de,
+    ate,
+    descricao: descrever(achado.escritura, achado.registro, ` (tabela ${uf}/${ano})`),
+    fontes: achado.fontes,
+    vigencia: achado.vigencia,
+    observacao: achado.observacao,
+    origem: 'busca',
+  }
 }
