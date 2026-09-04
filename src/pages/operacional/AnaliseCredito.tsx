@@ -96,6 +96,17 @@ type ResultadoAnalise = {
   [k: string]: unknown
 }
 
+/** O que a analise-precatorio devolve. */
+type ResultadoJuridico = {
+  resumo?: string | null
+  linhas_no_questionario?: number
+  linhas_preenchidas?: number
+  avisos?: string[]
+  drive_file_url?: string | null
+  drive_folder_url?: string | null
+  erro?: string
+}
+
 function lerCardCredijuris(lead: KommoLead) {
   const notas =
     lead.notas && lead.notas.length > 0
@@ -449,6 +460,9 @@ function CardCredito({
   analisando,
   resultadoAnalise,
   onDueDiligence,
+  onAnaliseJuridica,
+  analisandoJuridico,
+  resultadoJuridico,
   botoes,
 }: {
   lead: KommoLead
@@ -462,6 +476,9 @@ function CardCredito({
   analisando: boolean
   resultadoAnalise?: ResultadoAnalise
   onDueDiligence: (l: KommoLead) => void
+  onAnaliseJuridica: (l: KommoLead) => void
+  analisandoJuridico: boolean
+  resultadoJuridico?: ResultadoJuridico
   botoes: BotoesDoCard
 }) {
   const [aberto, setAberto] = useState(false)
@@ -558,18 +575,59 @@ function CardCredito({
               size="sm"
               variant="secondary"
               icon={<Scale className="h-4 w-4" />}
-              disabled
-              // DESABILITADO COM O MOTIVO NO title, e não escondido: o botão faz
-              // parte do fluxo combinado, e esconder deixaria a etapa parecendo
-              // ter só metade do trabalho. Habilitar sem o motor seria pior — era
-              // exatamente o defeito que trouxe esta entrega.
-              title="A análise jurídica de precatório ainda não está implantada. O modelo (Modelo - Análise de Precatórios.xlsx) tem blocos que não saem do PDF do processo — saúde financeira do ente, prazo de resgate — e o motor está sendo construído."
+              onClick={() => onAnaliseJuridica(lead)}
+              loading={analisandoJuridico}
+              disabled={ocupado || analisandoJuridico}
             >
-              Análise jurídica
+              {analisandoJuridico ? 'Analisando…' : 'Análise jurídica'}
             </Button>
           )}
         </div>
       )}
+      {resultadoJuridico && (
+        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+          {resultadoJuridico.erro ? (
+            <div className="text-red-700">Erro: {resultadoJuridico.erro}</div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="text-green-700">
+                ✅ Análise jurídica preenchida —{' '}
+                <strong>
+                  {resultadoJuridico.linhas_preenchidas} de{' '}
+                  {resultadoJuridico.linhas_no_questionario}
+                </strong>{' '}
+                linhas do modelo.{' '}
+                {typeof resultadoJuridico.drive_file_url === 'string' && (
+                  <a
+                    className="font-medium underline"
+                    href={resultadoJuridico.drive_file_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Abrir planilha
+                  </a>
+                )}
+              </div>
+              {/* A CONTAGEM VEM PRIMEIRO, e é a informação mais honesta da tela:
+                  "62 de 85" diz de cara que 23 linhas ficaram para uma pessoa.
+                  Sem ela, "análise preenchida" se leria como análise completa. */}
+              {resultadoJuridico.resumo && (
+                <p className="whitespace-pre-line text-slate-700">
+                  {resultadoJuridico.resumo}
+                </p>
+              )}
+              {!!resultadoJuridico.avisos?.length && (
+                <ul className="space-y-1 text-amber-800">
+                  {resultadoJuridico.avisos.map((a, i) => (
+                    <li key={i}>⚠️ {a}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div>
         {resultadoAnalise && (
           <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
@@ -757,6 +815,10 @@ export default function AnaliseCredito() {
   const { user: authUser, profile: authProfile } = useAuth()
   const analistaNome = authProfile?.nome || authUser?.email || 'Usuário'
   const [analisandoId, setAnalisandoId] = useState<number | null>(null)
+  const [analisandoJurId, setAnalisandoJurId] = useState<number | null>(null)
+  const [resultadoJuridico, setResultadoJuridico] = useState<
+    Record<number, ResultadoJuridico>
+  >({})
   const [resultadoAnalise, setResultadoAnalise] = useState<Record<number, ResultadoAnalise>>({})
 
   // Texto do PDF por card, compartilhado entre a análise e o checklist de
@@ -799,6 +861,71 @@ export default function AnaliseCredito() {
       }))
     } finally {
       setAnalisandoId(null)
+    }
+  }
+
+  /**
+   * Análise jurídica do precatório: manda o caderno inteiro para o modelo.
+   *
+   * TODOS OS PDFs, e não o último como na análise de RPV. A diferença tem razão:
+   * lá o motor PRECIFICA, e juntar a petição inicial ao cálculo faria o valor da
+   * causa entrar como valor do crédito. Aqui não se precifica nada — o
+   * questionário pergunta por sentença, recursos, trânsito, cumprimento,
+   * manifestação da contadoria e expedição, que estão espalhados por documentos
+   * diferentes. Ler só o último deixaria a maior parte das linhas em branco.
+   *
+   * Arquivo sem texto entra como aviso no corpo, não é omitido: "não consegui
+   * ler" e "não existe nos autos" são respostas diferentes, e o modelo precisa
+   * saber qual das duas está diante dele.
+   */
+  async function onAnaliseJuridica(lead: KommoLead) {
+    const id = lead.kommo_lead_id
+    setAnalisandoJurId(id)
+    try {
+      const lidos = arquivosCache[id] ?? (await lerArquivosDoCard(lead))
+      setArquivosCache((p) => ({ ...p, [id]: lidos }))
+
+      const comTexto = lidos.filter((a) => a.texto.trim().length > 0)
+      if (comTexto.length === 0) {
+        const motivos = lidos
+          .map(
+            (a) =>
+              `${a.nome}: ${
+                a.erro ??
+                (a.digitalizado
+                  ? `${a.paginas} página(s) com ${a.densidade} caractere(s) por página — digitalizado`
+                  : 'sem texto selecionável')
+              }`,
+          )
+          .join('; ')
+        throw new Error(`Nenhum anexo do card tem texto para ler. ${motivos}`)
+      }
+      const corpo = comTexto
+        .map((a) => `\n===== ARQUIVO: ${a.nome} (${a.paginas} pág.) =====\n${a.texto}`)
+        .join('\n')
+      const ilegiveis = lidos
+        .filter((a) => a.texto.trim().length === 0)
+        .map((a) => `${a.nome} (${a.erro ?? 'digitalizado, sem texto'})`)
+      const aviso = ilegiveis.length
+        ? `\n\nANEXOS QUE NÃO DEU PARA LER (o dado pode estar neles): ${ilegiveis.join('; ')}`
+        : ''
+
+      const dados = lerCardCredijuris(lead)
+      const r = await invokeFunction<ResultadoJuridico>('analise-precatorio', {
+        kommo_lead_id: id,
+        texto: corpo + aviso,
+        numero_processo: dados.numero,
+        cedente: dados.cedente,
+        originador: dados.intermediador,
+      })
+      setResultadoJuridico((p) => ({ ...p, [id]: r }))
+    } catch (e) {
+      setResultadoJuridico((p) => ({
+        ...p,
+        [id]: { erro: (e as Error)?.message ?? String(e) },
+      }))
+    } finally {
+      setAnalisandoJurId(null)
     }
   }
 
@@ -1210,6 +1337,9 @@ export default function AnaliseCredito() {
                 analisando={analisandoId === l.kommo_lead_id}
                 resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
                 onDueDiligence={onDueDiligence}
+                onAnaliseJuridica={onAnaliseJuridica}
+                analisandoJuridico={analisandoJurId === l.kommo_lead_id}
+                resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
                 botoes={botoesDoCard}
               />
             ))}
