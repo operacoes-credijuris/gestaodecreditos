@@ -12,6 +12,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
+import { emolumentoDaTabela, normalizarUf, obterEmolumentos, type TabelaEmolumentos } from "../_shared/emolumentos.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import ExcelJS from 'npm:exceljs@4.4.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
@@ -297,18 +298,13 @@ function reformatarMoeda(s: any): any {
 // MOTOR DE PRECIFICAÇÃO  (porte fiel das fórmulas do template)
 // ============================================================================
 
-// Tabela TJMG / Cartório de Virginópolis-MG — escritura com conteúdo financeiro,
-// base = preço da cessão. Portaria 8.664/CGJ/2025. Reconferir anualmente.
-function emolumentoCartorio(precoCessao: number): { valor: number | null; faixa: string } {
-  const p = precoCessao;
-  if (p <= 1400)   return { valor: 220.55,  faixa: 'até R$ 1.400,00' };
-  if (p <= 2720)   return { valor: 359.76,  faixa: 'R$ 1.400,01 a R$ 2.720,00' };
-  if (p <= 5440)   return { valor: 521.35,  faixa: 'R$ 2.720,01 a R$ 5.440,00' };
-  if (p <= 7000)   return { valor: 721.75,  faixa: 'R$ 5.440,01 a R$ 7.000,00' };
-  if (p <= 14000)  return { valor: 962.47,  faixa: 'R$ 7.000,01 a R$ 14.000,00' };
-  if (p <= 28000)  return { valor: 1243.47, faixa: 'R$ 14.000,01 a R$ 28.000,00' };
-  return { valor: null, faixa: 'acima de R$ 28.000,00 — CONFIRMAR COM O CARTÓRIO' };
-}
+// EMOLUMENTOS DE CARTÓRIO: vêm de _shared/emolumentos.ts, por UF do tribunal.
+//
+// Aqui havia uma tabela fixa — a de Virginópolis-MG (Portaria 8.664/CGJ/2025) —
+// aplicada a crédito de qualquer estado. Emolumento é preço público fixado por
+// cada Tribunal de Justiça, e a diferença entre estados não é arredondamento.
+// A tabela agora é a do estado onde o crédito tramita, achada pela IA na fonte
+// oficial e guardada em cache por UF/ano (migração 0053). Ver ufDoCredito.
 
 // Prazo em meses (linhas 21–33 do template). Cenário A = RPV não expedida; B = já expedida.
 // Piso de 6 meses. T5/T42 SEMPRE vêm daqui — nunca de prazos de convênio inventados.
@@ -348,6 +344,8 @@ function escolherModelo(honorariosContratuais: number): 1 | 2 {
 function calibrarDesagio(o: {
   brutoTotal: number; honorarios: number; ir: number; inss: number;
   T5: number; modelo: 1 | 2; comissaoPct?: number; diligencia?: number; alvo?: number;
+  /** Tabela de emolumentos da UF do tribunal; null = desconhecida (precifica sem cartório, e avisa). */
+  tabela: TabelaEmolumentos | null;
 }) {
   const alvo = o.alvo ?? 0.028;
   const dilig = o.diligencia ?? 250;
@@ -360,11 +358,17 @@ function calibrarDesagio(o: {
   const baseY3 = o.modelo === 1 ? L5 + L7 : L5;
   const Y5 = (o.comissaoPct ?? 0.09) * baseY3;
 
+  // CARTÓRIO DESCONHECIDO ENTRA COMO ZERO, E MARCADO. Antes, deságio cuja cessão
+  // caía fora da tabela era simplesmente pulado — e se TODOS caíssem fora, o
+  // motor devolvia 95% de deságio, que é preço nenhum. Agora a calibragem sempre
+  // fecha: sem tabela, precifica sem o cartório e diz isso em Y10 (null) e no
+  // aviso. É a convenção que já valia para "acima de R$ 28 mil": confirmar com
+  // o cartório. O preço sai um pouco otimista e a pessoa soma o custo à mão —
+  // melhor que nenhum preço, e muito melhor que um preço com cartório inventado.
   const avaliar = (d: number) => {
     const cessao = o.modelo === 1 ? (L5 + L7) * (1 - d) : L5 * (1 - d);
-    const emol = emolumentoCartorio(cessao);
-    if (emol.valor === null) return null;          // cessão > 28k: cartório indefinido, ignora esse d
-    const Y4 = cessao + Y5 + emol.valor + dilig;
+    const emol = emolumentoDaTabela(o.tabela, cessao);
+    const Y4 = cessao + Y5 + (emol.total ?? 0) + dilig;
     const Y9 = Math.pow(baseY3 / Y4, 1 / o.T5) - 1;
     return { d, cessao, emol, Y4, Y9 };
   };
@@ -372,30 +376,34 @@ function calibrarDesagio(o: {
     desagio: r.d, L5, L7, Y3: baseY3, Y5,
     S5: L5 * (1 - r.d),
     S7: o.modelo === 1 ? L7 * (1 - r.d) : 0,
-    cessao: r.cessao, Y10: r.emol.valor, faixaCartorio: r.emol.faixa, Y4: r.Y4, Y9: r.Y9,
+    cessao: r.cessao, Y10: r.emol.total, faixaCartorio: r.emol.descricao,
+    emolumentos: { escritura: r.emol.escritura, registro: r.emol.registro },
+    Y4: r.Y4, Y9: r.Y9,
     desagioEfetivo: 1 - r.cessao / baseY3, atingiuAlvo,
   });
 
-  let melhor: any = null;                          // maior rentabilidade entre os d válidos (fallback)
+  let melhor: any = null;                          // maior rentabilidade (fallback quando nada bate o alvo)
   for (let d = 0; d <= 0.95 + 1e-9; d += 0.0001) {
     const r = avaliar(d);
-    if (!r) continue;
     if (r.Y9 >= alvo) return montar(r, true);      // 1º deságio que bate o alvo = menor deságio
     if (!melhor || r.Y9 > melhor.Y9) melhor = r;
   }
-  if (melhor) return montar(melhor, false);        // não bateu o alvo: melhor caso possível + flag
+  return montar(melhor, false);                    // não bateu o alvo nem a 95%: melhor caso + flag
+}
 
-  // Caso extremo: nenhum deságio válido (cessão sempre > R$28k). Usa 95% com cartório a confirmar.
-  const dMax = 0.95;
-  const cessao = o.modelo === 1 ? (L5 + L7) * (1 - dMax) : L5 * (1 - dMax);
-  const Y4 = cessao + Y5 + dilig;
-  const Y9 = Math.pow(baseY3 / Y4, 1 / o.T5) - 1;
-  return {
-    desagio: dMax, L5, L7, Y3: baseY3, Y5,
-    S5: L5 * (1 - dMax), S7: o.modelo === 1 ? L7 * (1 - dMax) : 0,
-    cessao, Y10: null, faixaCartorio: 'Confirmar com cartório (cessão acima de R$28.000)',
-    Y4, Y9, desagioEfetivo: 1 - cessao / baseY3, atingiuAlvo: false,
-  };
+/**
+ * A UF do tribunal onde o crédito tramita — é a tabela de emolumentos dela que vale.
+ *
+ * Primeiro o que a IA leu dos autos (uf_tramitacao: a comarca ou a seção
+ * judiciária está sempre no cabeçalho); senão, a sigla do tribunal quando é
+ * estadual (TJGO -> GO). TRF e TRT cobrem vários estados, então sem a UF dos
+ * autos não há como saber — e aí a resposta é null, com aviso, não um chute.
+ */
+function ufDoCredito(dados: any): string | null {
+  const lida = normalizarUf(dados?.uf_tramitacao);
+  if (lida) return lida;
+  const m = /^TJ([A-Z]{2})$/.exec(String(dados?.tribunal || '').toUpperCase().trim());
+  return m ? normalizarUf(m[1]) : null;
 }
 
 // ============================================================================
@@ -577,6 +585,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
 const SCHEMA_ANALISE = {
   numero_processo: 'número do processo',
   tribunal: 'tribunal (sigla, ex.: TJGO, TJSP, TJMG, TRF1, TRT18)',
+  uf_tramitacao: 'UF (sigla de 2 letras) onde o processo tramita — a da comarca, vara ou seção judiciária do cabeçalho, ex.: "GO", "SP". Indispensável em TRF e TRT, que cobrem vários estados',
   cedente_cpf: 'nome do cedente e CPF',
   advogado_oab: 'nome do advogado/escritório e OAB/CNPJ',
   credor_nome: 'nome completo do credor/cedente SEM o CPF (ex.: "Vanderlan Gomes de Morais")',
@@ -1076,11 +1085,19 @@ Deno.serve(async (req) => {
     dados.data_aquisicao = hojeDDMMAAAA();
     dados.data_pagamento = dataPagamento(T5);
 
+    // 3c.1 Emolumentos de cartório da UF do tribunal (cache por UF/ano; busca web na primeira vez)
+    const ufCredito = ufDoCredito(dados);
+    const emolumentos = await obterEmolumentos(ufCredito, cfg.anthropic_api_key, sbAdmin);
+
     // 3d. Calibragem do deságio
     const calc: any = calibrarDesagio({
       brutoTotal: Number(dados.bruto_total), honorarios: Number(dados.honorarios) || 0,
       ir: Number(dados.ir) || 0, inss: Number(dados.inss) || 0, T5, modelo: dados.modelo,
+      tabela: emolumentos.tabela,
     });
+    calc.faixaCartorio = emolumentos.tabela
+      ? `${calc.faixaCartorio} — tabela ${emolumentos.uf}/${emolumentos.ano}${emolumentos.vigencia ? `, ${emolumentos.vigencia}` : ''}`
+      : calc.faixaCartorio;
     calc.IR = Number(dados.ir) || 0; calc.INSS = Number(dados.inss) || 0;
 
     // 3e. Gera a planilha colorida
@@ -1112,6 +1129,14 @@ Deno.serve(async (req) => {
     const avisos: string[] = [...avisosQualif];
     const _avisoTeto = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0);
     if (_avisoTeto) avisos.push(_avisoTeto);
+    // CARTÓRIO. Sem tabela, o preço saiu SEM o custo de cartório — e isso tem de
+    // ser dito, porque um preço sem esse custo parece melhor do que é.
+    if (!emolumentos.tabela)
+      avisos.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: não achei a tabela de emolumentos${emolumentos.uf ? ` de ${emolumentos.uf}` : ''} (${emolumentos.motivo ?? 'sem detalhe'}). O deságio foi calibrado SEM escritura e registro — some o custo de cartório à mão antes de fechar a proposta.`);
+    else if (calc.Y10 == null)
+      avisos.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: o preço de cessão ficou fora das faixas da tabela de ${emolumentos.uf}/${emolumentos.ano}. Confirme o emolumento com o cartório e some à mão.`);
+    else if (emolumentos.origem === 'busca')
+      avisos.push(`Emolumentos de cartório de ${emolumentos.uf}/${emolumentos.ano} achados agora por busca web (${emolumentos.fontes[0] ?? 'fonte não informada'}). Vale conferir a tabela uma vez; as próximas análises desta UF usam o mesmo valor.`);
     if (_prazoEstimado) avisos.push('⚠️ PRAZO ESTIMADO — não há nos autos data-limite de convênio para expedição da RPV (existe no TJGO; a maioria dos tribunais não tem). O prazo até o pagamento foi ESTIMADO pelo período de graça padrão; confira o prazo e a rentabilidade à mão, pois a precificação pode precisar de ajuste para este tribunal.');
     // INSS ZERADO EM HORAS EXTRAS FORA DE GOIÁS: a reserva de 14,25% é a alíquota da
     // GOIASPREV e não foi aplicada. A alíquota do ente é decisão da equipe, não do motor.
@@ -1132,7 +1157,15 @@ Deno.serve(async (req) => {
       desagio: pct(calc.desagio),
       rentabilidade_mensal: pct(calc.Y9),
       cessao: brl(calc.cessao),
-      cartorio: { valor: calc.Y10 == null ? '—' : brl(calc.Y10), faixa: calc.faixaCartorio },
+      cartorio: {
+        valor: calc.Y10 == null ? '—' : brl(calc.Y10),
+        escritura: calc.emolumentos?.escritura == null ? '—' : brl(calc.emolumentos.escritura),
+        registro: calc.emolumentos?.registro == null ? '—' : brl(calc.emolumentos.registro),
+        faixa: calc.faixaCartorio,
+        uf: emolumentos.uf || null,
+        origem: emolumentos.origem,
+        fontes: emolumentos.fontes,
+      },
       atingiu_alvo: calc.atingiuAlvo !== false,
       aviso: avisoFinal,
       drive_folder_url: `https://drive.google.com/drive/folders/${cedenteId}`,
