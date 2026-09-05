@@ -253,12 +253,32 @@ function conferirLista(ws, endereco, textoQueManda) {
   return problemas
 }
 
+/**
+ * O mapa do m2, lido do próprio prompt no código-fonte.
+ *
+ * As entradas longas ocupam VÁRIAS linhas de fonte — a da 26 lista quatro
+ * cenários e quebra em três. Ler só a primeira linha fazia a conferência
+ * reclamar de opções que estavam lá, duas linhas abaixo. Por isso as
+ * continuações são coladas na entrada aberta, até a próxima entrada numerada
+ * ou o fim do mapa.
+ */
 function mapaDoPrompt() {
   const src = require('node:fs').readFileSync(FONTE, 'utf8')
   const mapa = new Map()
+  let atual = null
   for (const linha of src.split(/\r?\n/)) {
-    const m = /^\s*'(\d+):\s([\s\S]*?)'\s*\+\s*$/.exec(linha)
-    if (m) mapa.set(Number(m[1]), m[2])
+    const inicio = /^\s*'(\d+):\s([\s\S]*?)'\s*\+\s*$/.exec(linha)
+    if (inicio) {
+      atual = Number(inicio[1])
+      mapa.set(atual, inicio[2])
+      continue
+    }
+    if (atual === null) continue
+    // O mapa acaba num cabeçalho de seção ou na nota das linhas que não existem.
+    if (/^\s*'(===|NÃO EXISTEM)/.test(linha)) { atual = null; continue }
+    const cont = /^\s*'([\s\S]*?)'\s*\+\s*$/.exec(linha)
+    if (cont) mapa.set(atual, mapa.get(atual) + cont[1])
+    else atual = null
   }
   return mapa
 }

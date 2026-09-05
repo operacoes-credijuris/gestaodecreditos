@@ -1063,7 +1063,7 @@ const SCHEMA_ANALISE = {
   advogado_nome: 'nome do advogado ou escritório SEM OAB/CNPJ',
   ente_devedor: 'ente devedor (quem vai pagar o crédito), ex.: "Estado de Goiás", "Estado de São Paulo", "Município de Belo Horizonte", "União", "INSS", "Fazenda Pública do Estado do Paraná"',
   fase_processual: 'fase processual atual resumida em poucas palavras, ex.: "Cumprimento de sentença", "Aguardando expedição de RPV", "RPV expedida", "Trânsito em julgado"',
-  tipo_credito: 'um de, EXATAMENTE: "Crédito principal, apenas" | "Crédito principal + Honorários" | "Honorários contratuais + sucumbenciais" | "Honorários sucumbenciais, apenas" — são os valores da lista suspensa da célula C3 da aba jurídica, e texto fora dela entra marcado como inválido',
+  tipo_credito: 'um de, EXATAMENTE: "Crédito principal — apenas" | "Crédito principal + Honorários" | "Honorários contratuais + sucumbenciais" | "Honorários sucumbenciais — apenas" — são os valores da lista suspensa da célula C3 da aba jurídica, e texto fora dela entra marcado como inválido',
 
   // financeiro (dos cálculos da contadoria dentro do PDF)
   bruto_total: 'valor bruto total (principal + juros + Selic), número sem R$',
@@ -1179,8 +1179,8 @@ const SYSTEM_ANALISE =
   '26 E 27 SÃO EXCLUSIVAS: responda UMA e deixe a outra vazia. Execução invertida (linha 24) -> preencha a 26 e deixe a 27 vazia; cumprimento de sentença iniciado pela exequente -> preencha a 27 e deixe a 26 vazia. Em qualquer dos dois casos siga normalmente da 28 em diante. ' +
   '(O bloco CUIDADO da linha 25 diz o mesmo, mas cita os itens 27/28/29 — a numeração dele ficou defasada de uma linha quando o questionário mudou. Vale o que está escrito aqui.) ' +
   '26: "Em caso de execução invertida, qual cenário?" (só se foi execução invertida; senão vazio) -> um EXATO de: ' +
-  '"Executado não apresentou valores e prazo ainda em curso" | "Executado não apresentou valores, prazo decorrido, sem manifestação da parte exequente" | ' +
-  '"Executado não apresentou valores, prazo decorrido, já houve manifestação da parte exequente" | "Executado apresentou valores". ' +
+  '"Executado não apresentou valores e prazo ainda em curso" | "Executado não apresentou valores — prazo decorrido — sem manifestação da parte exequente" | ' +
+  '"Executado não apresentou valores — prazo decorrido — já houve manifestação da parte exequente" | "Executado apresentou valores". ' +
   '27: "Em CS ordinário, a parte apresentou valor?" -> Sim/Não; complemento: valor total. ' +
   '28: "Houve impugnação ao valor?" -> Sim/Não; NÃO preencha complemento aqui (a data vai na linha 29). ' +
   '29: datas da impugnação -> resposta: se houve, a data da impugnação; complemento: se NÃO houve, a data do decurso do prazo. ' +
@@ -1806,10 +1806,10 @@ Deno.serve(async (req) => {
     }
     let soHonorarios = false;
     let soSucumbenciais = false;
-    if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Crédito principal, apenas'; }
+    if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Crédito principal — apenas'; }
     else if (tipoAquisicao === 'ambos')      { dados.modelo = 1; dados.tipo_credito = 'Crédito principal + Honorários'; }
     else if (tipoAquisicao === 'honorarios') { dados.modelo = 2; soHonorarios = true; dados.tipo_credito = 'Honorários contratuais + sucumbenciais'; }
-    else if (tipoAquisicao === 'sucumbenciais') { dados.modelo = 2; soHonorarios = true; soSucumbenciais = true; dados.tipo_credito = 'Honorários sucumbenciais, apenas'; }
+    else if (tipoAquisicao === 'sucumbenciais') { dados.modelo = 2; soHonorarios = true; soSucumbenciais = true; dados.tipo_credito = 'Honorários sucumbenciais — apenas'; }
     else                                     { dados.modelo = escolherModelo(honAI); }  // automático (como hoje), pelo destaque da contadoria
 
     if (soHonorarios) {
