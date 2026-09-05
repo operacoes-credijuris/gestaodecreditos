@@ -22,7 +22,6 @@ import {
 } from "../_shared/emolumentos.ts";
 import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
-import ExcelJS from 'npm:exceljs@4.4.0';
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
 
@@ -719,6 +718,12 @@ function limparNomeArquivo(s: string): string {
 
 // dados = saída do extrator. Estrutura em SCHEMA_ANALISE (abaixo).
 async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T5: number): Promise<Uint8Array> {
+  // CARREGADO AQUI, não no topo do arquivo. O ExcelJS é de longe a dependência
+  // mais pesada desta função, e no topo ela entrava na partida de TODA
+  // invocação — inclusive das leves, que nem planilha geram: a consulta de
+  // emolumentos e cada etapa do levantamento. Numa partida a frio isso passava
+  // dos 20 s e a tela dizia "o servidor não respondeu à consulta".
+  const { default: ExcelJS } = await import('npm:exceljs@4.4.0');
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(templateBytes as any);
 
@@ -1458,6 +1463,28 @@ Deno.serve(async (req) => {
 
     // service-role: lê secrets de configuracoes
     const sbAdmin = serviceClient();
+    // 2a. A CONSULTA DO LEVANTAMENTO DE EMOLUMENTOS.
+    //
+    // SEPARADA DA ANÁLISE de propósito, por dois motivos que se somam.
+    // Primeiro, rodá-la dentro da mesma requisição que faz duas extrações de IA
+    // sobre um processo inteiro derrubava o worker (HTTP 546): cada requisição
+    // faz uma coisa pesada, não três. Segundo, e maior: o levantamento é uma
+    // PESQUISA — achar o provimento do estado e ler o PDF anexo leva minutos.
+    //
+    // Por isso esta ação NÃO ESPERA A PESQUISA. Ela responde na hora com o
+    // estado ('pronta' | 'levantando' | 'falhou' | 'sem_uf') e, quando é o caso,
+    // dispara a etapa que falta. O navegador volta a perguntar a cada oito
+    // segundos, e cada pergunta é só uma leitura de linha.
+    //
+    // VEM ANTES DO BLOCO DE SEGREDOS de propósito: numa pergunta que se repete
+    // a cada oito segundos, ler o segredo do Google e a chave da Anthropic são
+    // duas idas ao banco que não servem para nada aqui — a chave é usada pelas
+    // ETAPAS do levantamento (ação 'emolumentos_passo'), não pela consulta.
+    if (body.acao === 'emolumentos') {
+      const r = await consultarRegra(body.uf, sbAdmin);
+      return jsonResponse({ ok: true, ...r });
+    }
+
     const _google = await segredoGoogle();
     const cfg: Record<string, string> = {
       anthropic_api_key: (await chaveAnthropic()) ?? '',
@@ -1466,30 +1493,6 @@ Deno.serve(async (req) => {
       google_oauth_refresh_token: _google?.refresh_token ?? '',
     };
 
-    // 2. Ação leve: listar originadores (popular dropdown do front)
-    //
-    // O nome antigo do papel ('intermediador') segue aceito aqui e no campo
-    // abaixo: esta função é chamada por HTTP e não há como saber, de dentro do
-    // repositório, se alguma automação de fora ainda manda o nome velho. Sem a
-    // tolerância, a falha seria silenciosa — o arquivamento no Drive
-    // simplesmente deixaria de acontecer.
-    // 2b. Ação leve: só a tabela de emolumentos de uma UF.
-    //
-    // SEPARADA DA ANÁLISE de propósito, por dois motivos que se somam. Primeiro,
-    // rodá-la dentro da mesma requisição que faz duas extrações de IA sobre um
-    // processo inteiro derrubava o worker (HTTP 546): cada requisição faz uma
-    // coisa pesada, não três. Segundo, e maior: o levantamento é uma PESQUISA —
-    // achar o provimento do estado e ler o PDF anexo leva minutos, não segundos.
-    //
-    // Por isso esta ação NÃO ESPERA A PESQUISA. Ela responde na hora com o
-    // estado ('pronta' | 'levantando' | 'falhou' | 'sem_uf') e, quando é o caso,
-    // dispara o trabalho em segundo plano. O navegador volta a perguntar a cada
-    // poucos segundos, e cada pergunta é só uma leitura de tabela. Uma vez por
-    // UF e ano: depois disso todo preço se calcula localmente, sem consulta.
-    if (body.acao === 'emolumentos') {
-      const r = await consultarRegra(body.uf, cfg.anthropic_api_key, sbAdmin);
-      return jsonResponse({ ok: true, ...r });
-    }
 
     if (body.acao === 'listar_originadores' || body.acao === 'listar_intermediadores') {
       const token = await refreshGoogleAccessToken(cfg.google_oauth_client_id, cfg.google_oauth_client_secret, cfg.google_oauth_refresh_token);

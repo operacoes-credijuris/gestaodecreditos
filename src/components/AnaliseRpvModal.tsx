@@ -54,7 +54,7 @@ const pctBR = (fracao: number) => formatPercent(fracao * 100)
  * Aumentar o prazo não resolvia: o teto da requisição é 150 s, e a pesquisa é
  * mais lenta que isso por natureza.
  */
-const PRAZO_PERGUNTA = 20_000
+const PRAZO_PERGUNTA = 45_000
 /**
  * Quanto tempo no total vale a pena ficar esperando a pesquisa terminar.
  *
@@ -66,6 +66,14 @@ const PRAZO_PERGUNTA = 20_000
 const PRAZO_LEVANTAMENTO = 10 * 60_000
 /** Intervalo entre uma pergunta e a seguinte. */
 const INTERVALO_PERGUNTA = 8_000
+/**
+ * Quantas perguntas seguidas podem falhar antes de desistir.
+ *
+ * Uma sozinha não quer dizer nada: a função é pesada para subir e a primeira
+ * pergunta depois de um tempo parada pega a partida a frio. Três seguidas já
+ * são sinal de que o servidor não está atendendo.
+ */
+const MAX_FALHAS_SEGUIDAS = 3
 
 /**
  * Uma promessa que desiste no prazo.
@@ -450,12 +458,27 @@ export function AnaliseRpvModal({
       // durar mais que a pesquisa inteira, e nunca durava.
       const ate = Date.now() + PRAZO_LEVANTAMENTO
       let e: RespostaConsultaEmolumentos | null = null
+      let falhasSeguidas = 0
       for (let volta = 0; ; volta++) {
-        e = await comPrazo(
-          invokeFunction<RespostaConsultaEmolumentos>('gerar-analise-rpv', { acao: 'emolumentos', uf }),
-          PRAZO_PERGUNTA,
-          'o servidor não respondeu à consulta',
-        )
+        try {
+          e = await comPrazo(
+            invokeFunction<RespostaConsultaEmolumentos>('gerar-analise-rpv', { acao: 'emolumentos', uf }),
+            PRAZO_PERGUNTA,
+            'o servidor não respondeu à consulta',
+          )
+          falhasSeguidas = 0
+        } catch (erroDaVolta) {
+          // UMA CONSULTA LENTA NÃO MATA O LEVANTAMENTO. A pesquisa corre no
+          // servidor e não sabe nada desta tela; desistir dela porque uma
+          // pergunta demorou é jogar fora um trabalho que está indo bem. Falha
+          // isolada (partida a frio, rede oscilando) é só mais uma volta.
+          falhasSeguidas++
+          if (falhasSeguidas > MAX_FALHAS_SEGUIDAS || Date.now() >= ate) throw erroDaVolta
+          if (revisao.current !== naEpoca) return
+          setPassoCartorio(`Emolumentos de ${uf}: aguardando o servidor responder…`)
+          await espera(INTERVALO_PERGUNTA)
+          continue
+        }
         if (e?.estado !== 'levantando') break
         if (Date.now() >= ate) break
         // A janela pode ter sido fechada, ou a pessoa já ter salvado: parar de

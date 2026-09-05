@@ -688,7 +688,6 @@ function rotuloDaEtapa(bruto: unknown): string {
  */
 export async function consultarRegra(
   ufBruta: unknown,
-  _apiKey: string,
   svc: SupabaseClient,
 ): Promise<RespostaEmolumentos> {
   const ano = new Date().getFullYear()
