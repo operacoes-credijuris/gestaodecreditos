@@ -839,18 +839,21 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   if (dados._soHonorarios) {
     cel('G', 5).value = 'Honorários Contratuais';   // natureza do que está sendo adquirido
   }
-  // OS SUCUMBENCIAIS FICAM COM O PERCENTUAL DO MODELO, e o código não os toca.
+  // OS SUCUMBENCIAIS, LIDOS DO PROCESSO — e zero quando não houver.
   //
-  // Eu os havia zerado, e estava errado: o modelo ganhou duas colunas de
-  // cenário dedicadas a eles ("apenas Honorários" e "apenas Honorários
-  // Sucumbenciais"), e com o percentual em zero a segunda dividia por zero —
-  // #DIV/0! na cara de quem abrisse o arquivo.
+  // Os 10% que o modelo traz são um padrão de planilha, não um dado: num
+  // processo sem sucumbenciais eles inventavam milhares de reais, e as duas
+  // colunas de cenário que se apoiam nesta linha eram feitas inteiramente
+  // desse valor imaginário. Agora a IA extrai a verba dos anexos do card
+  // (dispositivo da sentença, conta da contadoria, o próprio requisitório) e
+  // zero vira zero.
   //
-  // Segue valendo que o MOTOR não os modela: não há entrada para o percentual
-  // de sucumbenciais e o deságio não é calibrado sobre eles. Os 10% são o
-  // padrão do modelo, não um dado do processo. As colunas Z e AC são, portanto,
-  // COMPARAÇÃO — servem para ver a ordem de grandeza —, e não o preço calibrado.
-  // Quem decide o preço é a coluna do cenário escolhido na tela.
+  // A base é o BRUTO nos dois modelos, como as fórmulas L8 e L20 do modelo.
+  const _brutoSucumb = Number(dados.bruto_total) || 0;
+  const _pctSucumb = _brutoSucumb > 0
+    ? (Number(dados.honorarios_sucumbenciais) || 0) / _brutoSucumb
+    : 0;
+  cel('K', 8).value = Number(_pctSucumb.toFixed(6));
   cel('O', 5).value = calc.desagio;
   // O MESMO DESÁGIO NAS TRÊS LINHAS, nos dois modelos.
   //
@@ -951,6 +954,7 @@ const SCHEMA_ANALISE = {
   bruto_total: 'valor bruto total (principal + juros + Selic), número sem R$',
   principal_liquido: 'valor principal líquido após IR/INSS, número',
   honorarios: 'HONORÁRIOS CONTRATUAIS A DESTACAR (0 se não houver), número',
+  honorarios_sucumbenciais: 'HONORÁRIOS SUCUMBENCIAIS fixados na sentença ou no acórdão, em reais — o valor que o ENTE DEVEDOR paga ao advogado por ter perdido, separado do que o cliente paga por contrato. Procure na parte dispositiva da sentença/acórdão, na conta da contadoria e no próprio requisitório: costuma vir como verba própria, às vezes em requisitório separado. Se a condenação fixar PERCENTUAL sobre o valor da causa ou da condenação, calcule o valor em reais. ZERO se a sentença não os fixou, se foram compensados, se a Fazenda não foi condenada neles, ou se você não achou — não estime por praxe: um percentual arbitrado por hábito vira dinheiro inventado na precificação',
   ir: 'IR retido, número (0 se isento)',
   inss: 'INSS/contribuição previdenciária retida conforme os cálculos da contadoria, número (0 se zerado)',
   eh_horas_extras: 'true/false — se o crédito é de horas extras',
@@ -1668,6 +1672,7 @@ Deno.serve(async (req) => {
     dados.ir = Number(dados.ir) || 0;
     dados.inss = Number(dados.inss) || 0;
     dados.honorarios = Number(dados.honorarios) || 0;
+    dados.honorarios_sucumbenciais = Number(dados.honorarios_sucumbenciais) || 0;
 
     // 3b.1 O que está sendo cedido (escolha manual sobrepõe a detecção automática) + % de honorários
     const honAI = Number(dados.honorarios) || 0;          // honorários destacados pela contadoria (0 = sem destaque)
