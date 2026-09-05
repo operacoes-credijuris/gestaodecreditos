@@ -598,42 +598,45 @@ function aplicarCoresJuridica(ws: any) {
       rules: rules.map((r, i) => ({ type: 'expression', formulae: [r.f], priority: i + 1, style: { fill: fill(r.cor) } })),
     });
 
-  // Sim/Não — aplica em toda a faixa de respostas (só pinta onde o texto casa)
-  add('B12:B43', [
-    { f: '$B9="Sim"', cor: COR.verde },
-    { f: '$B9="Não"', cor: COR.vermelho },
+  // AS LINHAS ANDARAM no modelo simplificado: o questionário saiu de 12..43 para
+  // 10..37. Regra pintando a linha errada não dá erro — só colore a resposta
+  // errada, que é pior que não colorir.
+
+  // Sim/Não — em toda a faixa de respostas (só pinta onde o texto casa).
+  // A fórmula é relativa à primeira célula da faixa: $B10 para a faixa que
+  // começa em B10.
+  add('B10:B37', [
+    { f: '$B10="Sim"', cor: COR.verde },
+    { f: '$B10="Não"', cor: COR.vermelho },
   ]);
-  // B20 — tipo de sentença
-  add('B23', [
-    { f: '$B23="Procedência"', cor: COR.verde },
-    { f: '$B23="Improcedência"', cor: COR.vermelho },
-    { f: '$B23="Procedência parcial"', cor: COR.azul },
-    { f: '$B23="Homologatória de acordo"', cor: COR.roxo },
+  // B19 — tipo de sentença
+  add('B19', [
+    { f: '$B19="Procedência"', cor: COR.verde },
+    { f: '$B19="Improcedência"', cor: COR.vermelho },
+    { f: '$B19="Procedência parcial"', cor: COR.azul },
+    { f: '$B19="Homologatória de acordo"', cor: COR.roxo },
   ]);
-  // B21 — líquida/ilíquida
+  // B20 — líquida/ilíquida
+  add('B20', [
+    { f: '$B20="Líquida"', cor: COR.verde },
+    { f: '$B20="Iliquída"', cor: COR.vermelho },
+  ]);
+  // B24 — valor apresentado / execução invertida
   add('B24', [
-    { f: '$B24="Líquida"', cor: COR.verde },
-    { f: '$B24="Iliquída"', cor: COR.vermelho },
+    { f: '$B24="Valor apresentado no CS"', cor: COR.roxo },
+    { f: '$B24="Execução invertida"', cor: COR.azul },
   ]);
-  // B25 — valor apresentado / execução invertida
-  add('B28', [
-    { f: '$B28="Valor apresentado no CS"', cor: COR.roxo },
-    { f: '$B28="Execução invertida"', cor: COR.azul },
+  // B26 — cenários de execução invertida (cinza p/ qualquer preenchimento)
+  add('B26', [{ f: '$B26<>""', cor: COR.cinza }]);
+  // B37 — expedição
+  add('B37', [
+    { f: '$B37="Minuta de RPV"', cor: COR.laranja },
+    { f: '$B37="RPV"', cor: COR.verde },
+    { f: '$B37="Alvará de pagamento"', cor: COR.azul },
+    { f: '$B37="Sem expedição"', cor: COR.roxo },
   ]);
-  // B27 — cenários de execução invertida (cinza p/ qualquer preenchimento)
-  add('B30', [{ f: '$B30<>""', cor: COR.cinza }]);
-  // B39 — expedição
-  add('B42', [
-    { f: '$B42="Minuta de RPV"', cor: COR.laranja },
-    { f: '$B42="RPV"', cor: COR.verde },
-    { f: '$B42="Alvará de pagamento"', cor: COR.azul },
-    { f: '$B42="Sem expedição"', cor: COR.roxo },
-  ]);
-  // B40 — necessidade de alvará
-  add('B43', [
-    { f: '$B43="Não precisa de alvará"', cor: COR.azul },
-    { f: '$B43="Precisa de alvará"', cor: COR.roxo },
-  ]);
+  // A regra da necessidade de alvará saiu junto com a pergunta (linha 43 do
+  // modelo antigo), que o dono removeu ao simplificar.
 }
 
 // Title Case para nomes: 1ª letra de cada palavra maiúscula, resto minúsculo
@@ -660,21 +663,32 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   await wb.xlsx.load(templateBytes as any);
 
   const aj = wb.getWorksheet('Análise jurídica')!;
-  const MODELO1 = 'Quando o principal e honorários';
-  const MODELO2 = 'Quando apenas o crédito princip';
+  // AS DUAS ABAS DE MODELO VIRARAM UMA. O modelo simplificado tem "Análise
+  // jurídica" e "Precificação"; os dois modelos, que eram abas irmãs, agora são
+  // dois BLOCOS empilhados na mesma aba — Modelo 1 (verde) nas linhas 1-11 e
+  // Modelo 2 (azul) nas 13-23, com a mesma estrutura deslocada em 12 linhas.
+  const prec = wb.getWorksheet('Precificação')!;
+  /** Deslocamento do bloco em uso: 0 no Modelo 1, 12 no Modelo 2. */
+  const off = dados.modelo === 1 ? 0 : 12;
+  /** Célula do bloco em uso: cel('K', 5) -> K5 no Modelo 1, K17 no Modelo 2. */
+  const cel = (col: string, linha: number) => prec.getCell(`${col}${linha + off}`);
 
   // ---------------- Aba jurídica: cabeçalho ----------------
+  // O cabeçalho encurtou e as linhas andaram: cedente saiu de C6 para C4,
+  // advogado de C7 para C5, tribunal de C8 para C6. C3 e C7 são novas.
   aj.getCell('C1').value = dados.numero_processo ?? '';
   aj.getCell('C2').value = dados.originador ?? '';
-  // C3/C4/C5 agora são sub-rótulos (Crédito principal / Honorários contratuais / Honorários sucumbenciais) na planilha nova — NÃO sobrescrever.
-  aj.getCell('C6').value = dados.cedente_cpf ?? '';
-  aj.getCell('C7').value = dados.advogado_oab ?? '';
-  aj.getCell('C8').value = dados.tribunal ?? '';
+  aj.getCell('C3').value = dados.tipo_credito ?? '';   // "Quais créditos vão ser negociados?"
+  aj.getCell('C4').value = dados.cedente_cpf ?? '';
+  aj.getCell('C5').value = dados.advogado_oab ?? '';
+  aj.getCell('C6').value = dados.tribunal ?? '';
+  aj.getCell('C7').value = dados.juizo ?? '';          // "Juízo" — campo novo
 
   // ---------------- Aba jurídica: respostas M2 (col B) + complementos (col D) ----------------
   // dados.m2 = { "12": {resposta, complemento}, ... } indexado pela LINHA da planilha (perguntas 12..43)
-  const PULAR_LINHA = new Set([29]);       // 26 = bloco fixo "CUIDADO" (mesclado A26:D26) — nunca escrever
-  const SEM_COMPLEMENTO = new Set([32]);   // 29: C29:D29 já é mesclado (instrução) — não gravar D29
+  // As duas linhas que não recebem escrita, no modelo simplificado:
+  const PULAR_LINHA = new Set([25]);       // 25 = bloco fixo "CUIDADO" (A25:D25 mesclado)
+  const SEM_COMPLEMENTO = new Set([28]);   // 28 = C28:D28 mesclado ("Responder na linha abaixo")
   for (const [linha, item] of Object.entries<any>(dados.m2 || {})) {
     const r = Number(linha);
     if (PULAR_LINHA.has(r)) continue;
@@ -683,70 +697,109 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
     if (!SEM_COMPLEMENTO.has(r) && item?.complemento != null && item.complemento !== '') aj.getCell(`D${r}`).value = reformatarMoeda(item.complemento);
   }
 
-  // bloco do valor final (B41) — espelha D37/B43 da metodologia
-  aj.getCell('B44').value =
+  // Linha 38: "Qual o valor final do crédito?" (B38:D38 mesclado). O modelo traz
+  // o gabarito do texto; aqui ele sai preenchido.
+  aj.getCell('B38').value =
     `VALOR TOTAL BRUTO: ${brl(dados.bruto_total)}\n` +
     `Valor principal líquido: ${brl(calc.L5)}\n` +
     `Valor dos honorários contratuais: ${brl(calc.L7)}`;
 
+  // Linha 39: "Alguma observação importante para acrescentar nesse caso?"
+  // (B39:D39 mesclado). Recebe os riscos que a IA levantou — é onde eles cabem
+  // dentro da planilha. Antes existiam só na resposta da função e não chegavam
+  // ao arquivo que fica no Drive.
+  const riscos: any[] = Array.isArray(dados.bloco_g_riscos) ? dados.bloco_g_riscos : [];
+  if (riscos.length)
+    aj.getCell('B39').value = riscos
+      .map((r) => `• ${r?.grau ? `[${r.grau}] ` : ''}${r?.risco ?? ''}${r?.fundamento ? ` — ${r.fundamento}` : ''}`)
+      .join('\n');
+
   aplicarCoresJuridica(aj);
 
-  // ---------------- Aba do modelo escolhido: precificação ----------------
-  const m = wb.getWorksheet(dados.modelo === 1 ? MODELO1 : MODELO2)!;
-  m.getCell('K5').value = dados.bruto_total;
-  m.getCell('M5').value = dados.ir;
-  m.getCell('N5').value = dados.inss;
+  // ---------------- Precificação: o bloco do modelo escolhido ----------------
+  //
+  // ONDE CADA COISA VAI (linhas do Modelo 1; o Modelo 2 é o mesmo +12):
+  //   B4  processo        C4  resumo do processo
+  //   D5  credor          D7  advogado          F5/F7 ente
+  //   G5  natureza        H5/H7 fase            I5 data aquisição   J5 data pagamento
+  //   K5  bruto           M5  IR                N5  INSS
+  //   O5  deságio         Q5  prazo             L7  honorários contratuais
+  //   T10/W10 cartório    T11/W11 diligência
+  //
+  // Três células trocaram de lugar em relação ao modelo antigo, e é o tipo de
+  // mudança que não dá erro — só grava no lugar errado: deságio saiu de R5 para
+  // O5, prazo de T5 para Q5, e o cartório deixou de ter uma célula só.
+  //
+  // As colunas S/T e V/W são dois CENÁRIOS lado a lado — "só principal" e
+  // "principal + honorários" —, calculados por fórmula a partir das entradas.
+  cel('K', 5).value = dados.bruto_total;
+  cel('M', 5).value = dados.ir;
+  cel('N', 5).value = dados.inss;
   if (dados._soHonorarios) {
-    m.getCell('L7').value = 0;                          // adquirindo só honorários: sem sub-honorários
-    m.getCell('G5').value = 'Honorários Contratuais';   // natureza do que está sendo adquirido
-  } else if (dados.modelo === 1) {
-    m.getCell('L7').value = dados.honorarios;           // M1: honorários adquiridos (contadoria ou % informado)
-    m.getCell('R7').value = calc.desagio;               // mesmo deságio no principal e honorários
-  } else if (dados._honPctInformado) {
-    m.getCell('L7').value = dados.honorarios;           // M2 com % informado: aplica a dedução de honorários calculada
+    cel('L', 7).value = 0;                          // adquirindo só honorários: sem sub-honorários
+    cel('G', 5).value = 'Honorários Contratuais';   // natureza do que está sendo adquirido
+  } else if (dados.modelo === 1 || dados._honPctInformado) {
+    cel('L', 7).value = dados.honorarios;           // honorários adquiridos (contadoria ou % informado)
   }
-  m.getCell('R5').value = calc.desagio;
-  m.getCell('T5').value = Number(T5.toFixed(4));
-  m.getCell('I5').value = dados.data_aquisicao;        // DD/MM/AAAA (hoje)
-  m.getCell('J5').value = dados.data_pagamento;        // hoje + T5 meses (último dia do mês)
-  m.getCell('A17').value = dados.serventia_dias;       // M4
-  m.getCell('C17').value = dados.gabinete_dias;        // M4
-  m.getCell('W10').value = calc.Y10;                   // emolumento cartório (coluna W, após remover as colunas U e V)
-  // A decomposição vai em NOTA da célula, não em célula vizinha: o layout do
-  // template é fixo e uma célula a mais empurraria o que vem depois. Quem passa
-  // o mouse vê "Escritura R$ X + registro R$ Y (tabela UF/ano)".
-  if (calc.faixaCartorio) m.getCell('W10').note = String(calc.faixaCartorio);
+  cel('O', 5).value = calc.desagio;
+  if (dados.modelo === 1) cel('O', 7).value = calc.desagio;  // mesmo deságio nos honorários
+  cel('Q', 5).value = Number(T5.toFixed(4));
+  cel('I', 5).value = dados.data_aquisicao;
+  cel('J', 5).value = dados.data_pagamento;
 
-  // Processo e Resumo (M1) no bloco de cima (B4 mesclado B4:B7, C4 mesclado C4:C7)
-  m.getCell('B4').value = dados.numero_processo ?? '';
-  m.getCell('C4').value = dados.m1_sintese ?? '';
+  // CARTÓRIO NOS DOIS CENÁRIOS. O modelo antigo tinha uma célula; aqui a coluna
+  // T é "só principal" e a W é "principal + honorários", e o custo de escritura
+  // e registro é o mesmo nas duas — deixar uma vazia faria aquele cenário exibir
+  // custo total menor que o real, que é o erro que mais engana numa comparação
+  // lado a lado.
+  for (const col of ['T', 'W']) {
+    const c = cel(col, 10);
+    c.value = calc.Y10;
+    // A decomposição vai em NOTA, não em célula vizinha: o layout é fixo e uma
+    // célula a mais empurraria o que vem depois.
+    if (calc.faixaCartorio) c.note = String(calc.faixaCartorio);
+  }
 
-  // Credor / Advogado / Ente / Fase processual (bloco de cima: linha 5 = principal, linha 7 = honorários)
-  m.getCell('D5').value = dados._credor_titulo ?? dados.credor_nome ?? '';  // REQUERENTE (credor)
-  m.getCell('D7').value = dados.advogado_nome ?? '';                        // ADVOGADO(A)
-  m.getCell('F5').value = dados.ente_devedor ?? '';                        // Ente devedor
-  m.getCell('F7').value = dados.ente_devedor ?? '';
-  m.getCell('H5').value = dados.fase_processual ?? '';                     // Fase processual
-  m.getCell('H7').value = dados.fase_processual ?? '';
+  cel('B', 4).value = dados.numero_processo ?? '';
+  cel('C', 4).value = dados.m1_sintese ?? '';
+  cel('D', 5).value = dados._credor_titulo ?? dados.credor_nome ?? '';
+  cel('D', 7).value = dados.advogado_nome ?? '';
+  cel('F', 5).value = dados.ente_devedor ?? '';
+  cel('H', 5).value = dados.fase_processual ?? '';
+  // F7 e H7 NÃO SÃO ESCRITAS, e isso não é esquecimento: no modelo simplificado
+  // a linha dos honorários espelha a do principal por fórmula (F7 = =F5,
+  // H7 = =H5), então escrever repetiria o valor à toa — e, no caso de H7, com
+  // dano: I7 e J7 são clones de fórmula compartilhada cujo MESTRE é H7.
+  // Sobrescrever H7 deixa os clones órfãos e o ExcelJS recusa gravar o arquivo
+  // inteiro ("Shared Formula master must exist above and or left of clone for
+  // cell I7"). Ou seja: a análise rodava, custava as duas chamadas de IA, e
+  // morria na hora de montar a planilha.
 
-  // Rótulo correto do bloco mantido (o bloco de cima fica para ambos os modelos)
-  m.getCell('A1').value = dados.modelo === 1
-    ? 'MODELO 1 (VERDE): USADO PARA QUANDO OS HONORÁRIOS FORAM DESTACADOS NA RPV OU NOS CÁLCULOS DA CONTADORIA JUDICIAL'
-    : 'MODELO 2 (AZUL): USADO PARA QUANDO OS HONORÁRIOS NÃO FORAM DESTACADOS NA RPV OU NOS CÁLCULOS DA CONTADORIA JUDICIAL';
-
-  // Apaga o bloco de baixo (sempre não usado: linhas 38-73). Desmescla primeiro p/ não corromper.
-  try {
-    const merges: string[] = ((m as any).model?.merges || []).slice();
-    for (const rng of merges) {
-      const mm = /[A-Z]+(\d+):[A-Z]+(\d+)/.exec(String(rng));
-      if (mm && Number(mm[1]) >= 38) { try { (m as any).unMergeCells(rng); } catch (_) { /* ok */ } }
+  // O BLOCO NÃO USADO É ESVAZIADO, e não removido.
+  //
+  // Remover as linhas seria mais limpo de ler, e é o que a versão anterior
+  // fazia — mas ali os modelos eram ABAS separadas. Aqui são blocos da mesma
+  // aba, e o de baixo tem fórmulas que apontam para as próprias linhas (=L17,
+  // =Q17, =T15…). O spliceRows do ExcelJS apaga a linha e NÃO reescreve as
+  // referências: remover o bloco de cima faria o de baixo subir com as fórmulas
+  // apontando para o lugar errado, e a planilha sairia com números plausíveis e
+  // errados. Esvaziar não mexe em referência nenhuma.
+  const inicioOutro = dados.modelo === 1 ? 13 : 1;
+  const fimOutro = dados.modelo === 1 ? 23 : 11;
+  for (let r = inicioOutro; r <= fimOutro; r++) {
+    const row = prec.getRow(r);
+    for (let c = 1; c <= prec.columnCount; c++) {
+      const cell = row.getCell(c);
+      // Só a célula-mestre de uma mesclagem aceita escrita; nas outras, o
+      // ExcelJS lança.
+      if (cell.isMerged && cell.master !== cell) continue;
+      cell.value = null;
     }
-  } catch (_) { /* ok */ }
-  // spliceRows em bloco falha quando há mescladas; remove uma linha por vez, de baixo p/ cima (funciona)
-  for (let r = m.rowCount; r >= 38; r--) m.spliceRows(r, 1);
-
-  // Apaga a aba do outro modelo (não usada)
-  wb.removeWorksheet(wb.getWorksheet(dados.modelo === 1 ? MODELO2 : MODELO1)!.id);
+  }
+  prec.getCell(`A${inicioOutro}`).value =
+    dados.modelo === 1
+      ? 'MODELO 2 (AZUL) — não utilizado nesta análise: os honorários foram destacados.'
+      : 'MODELO 1 (VERDE) — não utilizado nesta análise: os honorários não foram destacados.';
 
   const out = await wb.xlsx.writeBuffer();
   return new Uint8Array(out as ArrayBuffer);
@@ -760,6 +813,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
 const SCHEMA_ANALISE = {
   numero_processo: 'número do processo',
   tribunal: 'tribunal (sigla, ex.: TJGO, TJSP, TJMG, TRF1, TRT18)',
+  juizo: 'o juízo onde o processo tramita, como está no cabeçalho (ex.: "3ª Vara da Fazenda Pública de Recife", "17ª Vara Federal de PE")',
   uf_tramitacao: 'UF (sigla de 2 letras) onde o processo tramita — a da comarca, vara ou seção judiciária do cabeçalho, ex.: "GO", "SP". Indispensável em TRF e TRT, que cobrem vários estados',
   cedente_cpf: 'nome do cedente e CPF',
   advogado_oab: 'nome do advogado/escritório e OAB/CNPJ',
@@ -797,7 +851,7 @@ const SCHEMA_ANALISE = {
   m4_pares: 'lista de pares {de, ate, dias, tipo:"serventia"|"gabinete"} usados na média',
 
   // M2 — 25 respostas. Chave = nº da linha na aba jurídica (12..43).
-  m2: 'objeto { "9": {"resposta":"Sim/Não/...", "complemento":"data DD/MM/AAAA ou valor R$ ou vazio"}, ... } cobrindo as linhas 12 a 43',
+  m2: 'objeto { "10": {"resposta":"Sim/Não/...", "complemento":"data DD/MM/AAAA ou valor R$ ou vazio"}, ... } cobrindo as linhas 10 a 37 (a 25 é bloco fixo e fica de fora)',
 
   // M1 + riscos (vão no .md, não na planilha)
   m1_sintese: 'Síntese do processo em UM parágrafo corrido, começando com "Trata-se", no máximo 10 linhas, SEM tópicos/bullets. ' +
@@ -863,40 +917,37 @@ const SYSTEM_ANALISE =
   'Use SEMPRE os valores EXATOS das listas suspensas quando indicado — a coluna B só aceita esses valores. ' +
   'Datas em DD/MM/AAAA. Valores monetários SEMPRE em Real no padrão brasileiro: VÍRGULA como separador decimal e PONTO como separador de milhar, com prefixo R$ (ex.: R$ 1.234,56). NUNCA use ponto como separador decimal. Se a resposta for "Não", deixe o complemento vazio. ' +
   'Se o dado não estiver claro, deixe vazio (NUNCA escreva "não encontrado"/"verificar" no complemento). ' +
-  '12: "Histórico do cedente: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
-  '13: "Histórico do advogado: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
-  '14: "Nesse tribunal, precisa de registro público?" -> Sim/Não; complemento: se Sim, link da jurisprudência. ' +
-  '15: "Qual é o tipo da ação?" -> TEXTO livre (ex.: "ação de cobrança de horas extras de piso de magistério"); sem complemento. ' +
-  '16: "Esse tipo de crédito pode ser negociado pela jurisprudência?" -> Sim/Não; complemento: se Sim, link. ' +
-  '17: "Quem é o polo ativo?" -> TEXTO (nome); sem complemento. ' +
-  '18: "O polo ativo é maior de idade?" -> Sim/Não. ' +
-  '19: "O polo ativo possui prioridade legal (60+/doença grave/PCD)?" -> Sim/Não; complemento: qual(is). ' +
-  '20: "Possui curatela ou tutela?" -> Sim/Não; complemento: nome do curador/tutor. ' +
-  '21: "Quem está sendo processado?" -> TEXTO (ente); sem complemento. ' +
-  '22: "Houve sentença?" -> Sim/Não; complemento: data. ' +
-  '23: "Tipo da sentença" -> um EXATO de: Improcedência | Procedência | Procedência parcial | Homologatória de acordo. ' +
-  '24: "A sentença é líquida ou ilíquida?" -> um EXATO de: Líquida | Iliquída; complemento: se Líquida, o valor. ' +
-  '25: "Houve recurso?" -> Sim/Não; complemento: resultado e data do julgamento. ' +
-  '26: "Houve trânsito em julgado?" -> Sim/Não; complemento: data. ' +
-  '27: "Iniciou o cumprimento de sentença?" -> Sim/Não; complemento: data do peticionamento. ' +
-  '28: "Foi apresentado valor no CS ou solicitado execução invertida?" -> um EXATO de: Valor apresentado no CS | Execução invertida. ' +
-  '29: BLOCO FIXO "CUIDADO" — NÃO é pergunta. NÃO inclua a chave "29" no m2. ' +
-  '30: "Em caso de execução invertida, qual cenário?" (só se foi execução invertida; senão vazio) -> um EXATO de: ' +
+  '10: "Histórico do cedente: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
+  '11: "Histórico do advogado: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
+  '12: "Qual é o tipo da ação?" -> TEXTO livre (ex.: "ação de cobrança de horas extras de piso de magistério"); sem complemento. ' +
+  '13: "Quem é o polo ativo?" -> TEXTO (nome); sem complemento. ' +
+  '14: "O polo ativo é maior de idade?" -> Sim/Não. ' +
+  '15: "O polo ativo possui prioridade legal (60+/doença grave/PCD)?" -> Sim/Não; complemento: qual(is). ' +
+  '16: "Possui curatela ou tutela?" -> Sim/Não; complemento: nome do curador/tutor. ' +
+  '17: "Quem está sendo processado?" -> TEXTO (o ente devedor); sem complemento. ' +
+  '18: "Houve sentença?" -> Sim/Não; complemento: data. ' +
+  '19: "Tipo da sentença" -> um EXATO de: Improcedência | Procedência | Procedência parcial | Homologatória de acordo. ' +
+  '20: "A sentença é líquida ou ilíquida?" -> um EXATO de: Líquida | Iliquída; complemento: se Líquida, o valor. ' +
+  '21: "Houve recurso?" -> Sim/Não; complemento: resultado e data do julgamento. ' +
+  '22: "Houve trânsito em julgado?" -> Sim/Não; complemento: data. ' +
+  '23: "Iniciou o cumprimento de sentença?" -> Sim/Não; complemento: data do peticionamento. ' +
+  '24: "Foi apresentado valor no CS ou solicitado execução invertida?" -> um EXATO de: Valor apresentado no CS | Execução invertida. ' +
+  '25: BLOCO FIXO "CUIDADO" — NÃO é pergunta. NÃO inclua a chave "25" no m2. ' +
+  '26: "Em caso de execução invertida, qual cenário?" (só se foi execução invertida; senão vazio) -> um EXATO de: ' +
   '"Executado não apresentou valores e prazo ainda em curso" | "Executado não apresentou valores, prazo decorrido, sem manifestação da parte exequente" | ' +
   '"Executado não apresentou valores, prazo decorrido, já houve manifestação da parte exequente" | "Executado apresentou valores". ' +
-  '31: "Em CS ordinário, a parte apresentou valor?" -> Sim/Não; complemento: valor total. ' +
-  '32: "Houve impugnação ao valor?" -> Sim/Não; NÃO preencha complemento aqui (a data vai na linha 33). ' +
-  '33: datas da impugnação -> resposta: se houve, a data da impugnação; complemento: se NÃO houve, a data do decurso do prazo. ' +
-  '34: "Data da manifestação de concordância" -> resposta: a data (se houve concordância); sem complemento. ' +
-  '35: "Houve homologação do valor (e impugnação resolvida)?" -> Sim/Não; complemento: data da homologação. ' +
-  '36: "Existe contrato de honorários contratuais nos autos?" -> Sim/Não; complemento: data do contrato. ' +
-  '37: "Contadoria judicial se manifestou?" -> Sim/Não; complemento: data da juntada dos cálculos. ' +
-  '38: "Houve pedido de destaque de honorários contratuais?" -> Sim/Não; complemento: valor dos honorários destacados e o valor principal. ' +
-  '39: "A manifestação da contadoria foi homologada/precluiu o prazo?" -> Sim/Não; complemento: data. ' +
-  '40: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
-  '41: "Nesse tribunal, é a serventia que expede ou outro órgão?" -> TEXTO (ex.: "Serventia" ou o órgão); complemento: números dos processos usados. ' +
-  '42: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
-  '43: "Nesse tribunal, precisa emitir alvará ou só a RPV?" -> um EXATO de: Não precisa de alvará | Precisa de alvará; complemento: números dos processos usados. ' +
+  '27: "Em CS ordinário, a parte apresentou valor?" -> Sim/Não; complemento: valor total. ' +
+  '28: "Houve impugnação ao valor?" -> Sim/Não; NÃO preencha complemento aqui (a data vai na linha 29). ' +
+  '29: datas da impugnação -> resposta: se houve, a data da impugnação; complemento: se NÃO houve, a data do decurso do prazo. ' +
+  '30: "Data da manifestação de concordância" -> resposta: a data (se houve concordância); sem complemento. ' +
+  '31: "Houve homologação do valor (e impugnação resolvida)?" -> Sim/Não; complemento: data da homologação. ' +
+  '32: "Existe contrato de honorários contratuais nos autos?" -> Sim/Não; complemento: data do contrato. ' +
+  '33: "Contadoria judicial se manifestou?" -> Sim/Não; complemento: data da juntada dos cálculos. ' +
+  '34: "Houve pedido de destaque de honorários contratuais?" -> Sim/Não; complemento: valor dos honorários destacados e o valor principal. ' +
+  '35: "A manifestação da contadoria foi homologada/precluiu o prazo?" -> Sim/Não; complemento: data. ' +
+  '36: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
+  '37: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
+  'NÃO EXISTEM as linhas 38 e 39 no m2: são o valor final e as observações, e quem as preenche sou eu, com o cálculo pronto. ' +
   '=== REGRA 13 — O ROTEIRO ATÉ A LIQUIDAÇÃO (campo "roteiro_prazo") === ' +
   'É daqui que sai o prazo de resgate, e o prazo manda no preço: superestimar joga o preço para baixo e perde o negócio; subestimar compra um crédito que rende menos do que parece. Não chute um número redondo — MONTE O CAMINHO. ' +
   'PASSO 1: diga em "etapa_atual" onde o processo está HOJE, lendo o último andamento real. ' +
@@ -1462,7 +1513,15 @@ Deno.serve(async (req) => {
     // 3c. Prazo (T5) + datas — pela ESFERA DO ENTE DEVEDOR
     const scenario: 'A' | 'B' = (dados.rpv_ja_expedida === true || String(dados.rpv_ja_expedida) === 'true') ? 'B' : 'A';
     const esfera = esferaDoEnte(dados.ente_devedor, dados.esfera, dados.tribunal);
-    const exigeAlvara = /precisa de alvar/i.test(String(dados.m2?.['43']?.resposta ?? ''));
+    // ALVARÁ, agora lido do roteiro. A pergunta "nesse tribunal precisa emitir
+    // alvará?" saiu do modelo simplificado (era a linha 43), e com ela a fonte
+    // deste campo. Continua importando só na fórmula de reserva — quando o
+    // roteiro vale, o alvará já é um ato dele, com os dias próprios. Ler o
+    // roteiro mantém as duas leituras coerentes em vez de deixar isto sempre
+    // falso e a fórmula subestimar o prazo em três semanas.
+    const exigeAlvara = (Array.isArray(dados.roteiro_prazo) ? dados.roteiro_prazo : []).some(
+      (a: any) => /alvar/i.test(String(a?.ato ?? '')),
+    );
     const dataExpedicao = dados.data_expedicao_rpv ? parseDataBR(dados.data_expedicao_rpv) : null;
     const _prazoEstimado = esfera === 'goias' && scenario === 'A' && !dados.data_fatal_convenio;
     const prazo = prazoMeses({
