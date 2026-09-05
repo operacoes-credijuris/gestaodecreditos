@@ -103,3 +103,36 @@ alter table public.emolumentos_uf enable row level security;
 drop policy if exists "emolumentos_uf_select" on public.emolumentos_uf;
 create policy "emolumentos_uf_select" on public.emolumentos_uf
   for select to authenticated using (true);
+
+-- ---------------------------------------------------------------------------
+-- Se a versão ANTERIOR desta migração já rodou, o `create table if not exists`
+-- acima não faz nada e a tabela fica sem `status` nem `motivo` — e aí a função
+-- volta a pesquisar dentro da requisição e a estourar o tempo, sem dizer por
+-- quê. Estes comandos são idempotentes e acertam os dois casos.
+-- ---------------------------------------------------------------------------
+alter table public.emolumentos_uf
+  add column if not exists status text not null default 'pronta',
+  add column if not exists motivo text;
+
+-- `tabela` nasceu NOT NULL na versão anterior; uma linha 'levantando' ainda não
+-- tem tabela nenhuma.
+alter table public.emolumentos_uf alter column tabela drop not null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.emolumentos_uf'::regclass and conname = 'emolumentos_uf_status'
+  ) then
+    alter table public.emolumentos_uf
+      add constraint emolumentos_uf_status check (status in ('levantando', 'pronta', 'falhou'));
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.emolumentos_uf'::regclass and conname = 'emolumentos_uf_pronta_tem_tabela'
+  ) then
+    alter table public.emolumentos_uf
+      add constraint emolumentos_uf_pronta_tem_tabela check (status <> 'pronta' or tabela is not null);
+  end if;
+end $$;
