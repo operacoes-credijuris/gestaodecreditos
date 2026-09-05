@@ -586,23 +586,38 @@ export function telasRpvDesalinhadas(etapas: EtapaKommo[]): DefTela[] {
  * 'auto' = o card não disse; quem decide passa a ser o destaque dos honorários
  * nos cálculos da contadoria.
  */
-export type ParcelaCedida = 'principal' | 'ambos' | 'honorarios' | 'sucumbenciais' | 'auto'
+export type ParcelaCedida =
+  | 'principal'      // só o crédito principal
+  | 'ambos'          // principal + honorários
+  | 'honorarios'     // honorários contratuais E sucumbenciais
+  | 'contratuais'    // só os honorários contratuais
+  | 'sucumbenciais'  // só os honorários sucumbenciais
+  | 'indefinido'     // diz "honorários" e não diz quais — cadastro pela metade
+  | 'auto'           // o card não disse nada
 
 export function classificarParcelaCedida(texto: unknown): ParcelaCedida {
   const t = String(texto ?? '').toLowerCase()
   const principal = /principal/.test(t)
   const sucumbenciais = /sucumb/.test(t)
   const contratuais = /contratu/.test(t)
-  // "honorários" sozinho, sem dizer de que tipo, conta como honorários.
   const honorarios = /honor/.test(t) || sucumbenciais || contratuais
 
   if (principal && honorarios) return 'ambos'
-  // SUCUMBENCIAIS SOZINHOS são caso próprio: a verba é do advogado, paga pelo
-  // vencido, e pode ser cedida sem o principal — que às vezes nem é RPV (vira
-  // precatório). Só vale quando o texto NÃO menciona contratuais nem principal:
-  // "contratuais + sucumbenciais" é cessão dos honorários, não deste caso.
-  if (sucumbenciais && !contratuais && !principal) return 'sucumbenciais'
-  if (honorarios) return 'honorarios'
   if (principal) return 'principal'
+
+  // Daqui para baixo é cessão só de honorários, e QUAL verba muda o preço:
+  // contratuais saem do bolo do principal, sucumbenciais vêm por fora, pagos
+  // pelo vencido. Somar as duas quando só uma foi cedida é comprar crédito que
+  // não vem junto.
+  if (contratuais && sucumbenciais) return 'honorarios'      // as duas verbas
+  if (sucumbenciais) return 'sucumbenciais'                  // só a do vencido
+  if (contratuais) return 'contratuais'                      // só a do contrato
+
+  // "HONORÁRIOS", SEM DIZER QUAIS, NÃO É PEDIDO — É CADASTRO PELA METADE. Não
+  // dá para adivinhar: chutar contratuais precifica a menos e perde o negócio;
+  // chutar as duas precifica a mais e paga por verba que fica com o advogado.
+  // Decisão do dono: nesse caso a análise nem roda, e o comercial corrige o
+  // card. Melhor não entregar nada do que entregar um preço sobre um palpite.
+  if (honorarios) return 'indefinido'
   return 'auto'
 }

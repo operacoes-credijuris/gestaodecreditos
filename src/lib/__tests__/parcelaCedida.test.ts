@@ -21,12 +21,20 @@ describe('classificarParcelaCedida', () => {
     expect(classificarParcelaCedida('principal + sucumbenciais')).toBe('ambos')
   })
 
-  it('honorários sem dizer o tipo', () => {
-    expect(classificarParcelaCedida('Honorários')).toBe('honorarios')
-    expect(classificarParcelaCedida('honorários contratuais')).toBe('honorarios')
+  it('honorários SEM dizer quais nao é pedido, é cadastro pela metade', () => {
+    // Não dá para adivinhar: chutar contratuais precifica a menos e perde o
+    // negócio; chutar as duas paga por verba que fica com o advogado. A análise
+    // não roda e o comercial corrige o card.
+    expect(classificarParcelaCedida('Honorários')).toBe('indefinido')
+    expect(classificarParcelaCedida('honorarios do advogado')).toBe('indefinido')
   })
 
-  it('contratuais E sucumbenciais é cessão de honorários, não o caso próprio', () => {
+  it('só os contratuais', () => {
+    expect(classificarParcelaCedida('honorários contratuais')).toBe('contratuais')
+    expect(classificarParcelaCedida('apenas os contratuais')).toBe('contratuais')
+  })
+
+  it('contratuais E sucumbenciais: as duas verbas, e o preço cobre as duas', () => {
     // Este é o par que a coluna Z da planilha representa.
     expect(classificarParcelaCedida('Honorários contratuais + sucumbenciais')).toBe('honorarios')
     expect(classificarParcelaCedida('contratuais e sucumbenciais')).toBe('honorarios')
