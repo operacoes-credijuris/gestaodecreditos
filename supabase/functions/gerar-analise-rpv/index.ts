@@ -1827,11 +1827,10 @@ Deno.serve(async (req) => {
     let somarSucumbenciais = false;
     if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Crédito principal — apenas'; }
     else if (tipoAquisicao === 'ambos')      { dados.modelo = 1; dados.tipo_credito = 'Crédito principal + Honorários'; }
-    else if (tipoAquisicao === 'honorarios') { dados.modelo = 2; soHonorarios = true; somarSucumbenciais = true; dados.tipo_credito = 'Honorários contratuais + sucumbenciais'; }
-    // Só os contratuais. O modelo não tem opção própria para este caso — as
-    // quatro da C3 não preveem contratuais sozinhos —, então fica no rótulo
-    // mais próximo e um aviso conta o que foi de fato precificado.
-    else if (tipoAquisicao === 'contratuais') { dados.modelo = 2; soHonorarios = true; dados.tipo_credito = 'Honorários contratuais + sucumbenciais'; }
+    else if (tipoAquisicao === 'honorarios' || tipoAquisicao === 'contratuais') {
+      dados.modelo = 2; soHonorarios = true; somarSucumbenciais = true;
+      dados.tipo_credito = 'Honorários contratuais + sucumbenciais';
+    }
     else if (tipoAquisicao === 'sucumbenciais') { dados.modelo = 2; soHonorarios = true; soSucumbenciais = true; dados.tipo_credito = 'Honorários sucumbenciais — apenas'; }
     else                                     { dados.modelo = escolherModelo(honAI); }  // automático (como hoje), pelo destaque da contadoria
 
@@ -1853,8 +1852,12 @@ Deno.serve(async (req) => {
           ? 'A cessão é de honorários sucumbenciais, apenas, mas não localizei o valor deles nos documentos do card. Junte a sentença ou o acórdão que os fixou, ou a conta da contadoria que os discrimina.'
           : 'Para calcular APENAS os honorários, informe o percentual de honorários no formulário (ou use um processo com honorários destacados nos cálculos da contadoria).');
       dados._verbas_cedidas = soSucumbenciais ? 'sucumbenciais'
-        : somarSucumbenciais ? `contratuais (${brl(contratuaisNum)}) + sucumbenciais (${brl(sucumbNum)})`
-        : 'contratuais';
+        : sucumbNum > 0 ? `contratuais (${brl(contratuaisNum)}) + sucumbenciais (${brl(sucumbNum)})`
+        : 'contratuais (o processo não tem sucumbenciais)';
+      // O card disse só "contratuais" e o processo TEM sucumbenciais: entraram
+      // no preço, porque cede-se o honorário que existe — mas é o caso raro, e
+      // quem fecha precisa saber que está comprando as duas verbas.
+      if (tipoAquisicao === 'contratuais' && sucumbNum > 0) dados._sucumbNaoPrevistos = sucumbNum;
       dados.bruto_total = valorHon;
       // O IR INCIDE AQUI TAMBÉM, e antes não incidia.
       //
@@ -2001,6 +2004,11 @@ Deno.serve(async (req) => {
         `Cessão de honorários — verba(s) precificada(s): ${dados._verbas_cedidas ?? 'contratuais'}, conforme o "PARCELA CEDIDA" do card. ` +
         `O IR foi descontado pela tabela progressiva (${brl(Number(dados.ir) || 0)}). ` +
         'Se a verba for rendimento recebido acumuladamente, o imposto real é menor — confira o regime antes de fechar.',
+      );
+    if (Number(dados._sucumbNaoPrevistos) > 0)
+      avisosBase.push(
+        `⚠️ O card diz "honorários contratuais" e o processo TEM sucumbenciais (${brl(Number(dados._sucumbNaoPrevistos))}), ` +
+        'que entraram no preço. Se a cessão for só dos contratuais, o preço está alto nesse valor — ajuste o "PARCELA CEDIDA" do card e rode de novo.',
       );
 
     const valores = {

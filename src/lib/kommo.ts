@@ -611,6 +611,10 @@ export function classificarParcelaCedida(texto: unknown): ParcelaCedida {
   // não vem junto.
   if (contratuais && sucumbenciais) return 'honorarios'      // as duas verbas
   if (sucumbenciais) return 'sucumbenciais'                  // só a do vencido
+  // Card que diz só "contratuais" é, quase sempre, processo SEM sucumbenciais —
+  // não cessão que os deixa de fora. Por isso o preço trata este caso igual ao
+  // de cima (cede-se o honorário que existe); a distinção sobrevive aqui só
+  // para o motor poder avisar quando o processo tiver a outra verba.
   if (contratuais) return 'contratuais'                      // só a do contrato
 
   // "HONORÁRIOS", SEM DIZER QUAIS, NÃO É PEDIDO — É CADASTRO PELA METADE. Não
