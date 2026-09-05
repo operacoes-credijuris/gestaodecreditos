@@ -1391,17 +1391,25 @@ function _brlTeto(n: number): string {
   return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 // Compara o valor bruto com o teto da RPV do ente. Devolve o aviso (ou null se estiver dentro do teto).
-function checarTetoRPV(esfera: string | undefined, tribunal: string | undefined, bruto: number): string | null {
+//
+// `ufLida` é a UF que a IA achou no cabeçalho dos autos (ver ufDoCredito) e tem
+// precedência sobre a sigla do tribunal: TRT e TRF não carregam estado nenhum na
+// sigla, e a condenação de um estado ou de um município nessas justiças segue o
+// teto do ENTE devedor. Sem ela, esses casos passavam sem verificação de teto —
+// em silêncio, que é o pior jeito de errar num alerta.
+function checarTetoRPV(esfera: string | undefined, tribunal: string | undefined, bruto: number, ufLida?: string | null): string | null {
   const SM = 1621; // salário mínimo usado na tabela de tetos (teto federal = 60 x SM)
   const esf = String(esfera || '').toLowerCase();
   const trib = String(tribunal || '').toUpperCase();
   if (!bruto || bruto <= 0) return null;
   let teto: number | null = null;
   let ref = '';
-  if (esf.includes('federal') || /^TRF/.test(trib) || trib === 'STJ' || trib === 'STF') {
+  // A esfera do ENTE manda. O tribunal só decide quando ela não veio: um
+  // município executado na Justiça Federal continua com o teto municipal dele.
+  if (esf.includes('federal') || (!esf && (/^TRF/.test(trib) || trib === 'STJ' || trib === 'STF'))) {
     teto = 60 * SM; ref = 'federal (60 salários mínimos)';
   } else {
-    const uf = trib.replace(/^TJ/, '').slice(0, 2);
+    const uf = normalizarUf(ufLida) ?? (/^TJ([A-Z]{2})$/.exec(trib)?.[1] ?? '');
     const t = TETOS_RPV[uf];
     if (!t) return null; // ente não localizado na tabela -> não arrisca um alerta errado
     if (esf.includes('municipal')) { teto = t.mun; ref = `municipal (referência: capital de ${uf})`; }
@@ -1682,7 +1690,7 @@ Deno.serve(async (req) => {
 
     // Avisos que valem para a preliminar e para a final.
     const avisosBase: string[] = [...avisosQualif];
-    const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0);
+    const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0, ufCredito);
     if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
     if (!emolumentos)
       avisosBase.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO${ufCredito ? ` (${ufCredito})` : ''}: o deságio foi calibrado SEM escritura e registro — some o custo de cartório à mão antes de fechar a proposta.`);
