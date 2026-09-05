@@ -256,6 +256,50 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 const BUCKET_INPUT = 'analises-input';            // bucket novo (criar no painel)
 const BUCKET_TEMPLATES = 'contratos-templates';  // MESMO bucket de templates da gerar-contrato
 const TEMPLATE_NOME = 'Modelo_Analise_de_RPV.xlsx';  // sem acento — Supabase rejeita acento no nome
+
+/**
+ * Baixa o template de RPV do Storage, tolerando o nome do arquivo.
+ *
+ * O nome exato acima é o combinado, mas quem sobe o arquivo é uma pessoa, pelo
+ * painel, e o arquivo nasce no Drive como "Modelo - Análise de RPV.xlsx". Um
+ * hífen, um espaço ou um acento a mais faziam a análise morrer NO FIM — depois
+ * das duas chamadas de IA e da consulta de cartório — com "Storage download
+ * falhou", mensagem que não diz a quem lê que o problema é o nome do arquivo.
+ *
+ * Então: tenta o nome exato; não achando, lista o bucket e procura o modelo de
+ * RPV comparando sem acento, sem caixa e sem pontuação. Havendo mais de um, usa
+ * o mais recente — é o que a pessoa acabou de subir. Não havendo nenhum, o erro
+ * LISTA o que existe no bucket, para o conserto ser evidente.
+ */
+async function baixarTemplateRpv(sb: any): Promise<Uint8Array> {
+  try {
+    return await storageGetBytes(sb, BUCKET_TEMPLATES, TEMPLATE_NOME);
+  } catch (_) { /* nome exato não está lá: procura pelo conteúdo do nome */ }
+
+  const chave = (t: string) =>
+    // REUSA normalizar(), que ja faz sem-acento + sem-pontuacao + minuscula e
+    // documenta por que o range de marcas combinantes vai escapado. Duplicar a
+    // regex aqui foi o que me fez colar os caracteres literais duas vezes.
+    normalizar(t).replace(/[^a-z0-9]/g, '');
+
+  const { data: arquivos, error } = await sb.storage
+    .from(BUCKET_TEMPLATES)
+    .list('', { limit: 200, sortBy: { column: 'updated_at', order: 'desc' } });
+  if (error) throw new Error(`Não consegui ler o bucket ${BUCKET_TEMPLATES}: ${error.message}`);
+
+  const candidatos = (arquivos ?? []).filter((a: any) => {
+    const k = chave(a?.name ?? '');
+    return k.endsWith('xlsx') && k.includes('rpv') && (k.includes('modelo') || k.includes('analise'));
+  });
+  if (candidatos.length === 0) {
+    const havia = (arquivos ?? []).map((a: any) => a?.name).filter(Boolean).join(', ') || '(bucket vazio)';
+    throw new Error(
+      `Não achei o modelo de RPV no bucket ${BUCKET_TEMPLATES}. Esperado "${TEMPLATE_NOME}". ` +
+        `O que há lá: ${havia}. Suba o arquivo com esse nome exato, sem acento.`,
+    );
+  }
+  return await storageGetBytes(sb, BUCKET_TEMPLATES, candidatos[0].name);
+}
 const DRIVE_CATEGORIA_PADRAO = 'Requisições de Pequeno Valor';
 // A tela manda rótulo curto ("RPV"); o Drive usa o nome completo da pasta.
 const CATEGORIA_MAP: Record<string, string> = {
@@ -1683,7 +1727,7 @@ Deno.serve(async (req) => {
     }
 
     // 3e. Gera a planilha colorida
-    const templateBytes = await storageGetBytes(sbAdmin, BUCKET_TEMPLATES, TEMPLATE_NOME);
+    const templateBytes = await baixarTemplateRpv(sbAdmin);
     const xlsx = await gerarPlanilha(templateBytes, dados, calc, T5);
 
     // 3f. Sobe no Drive: A. Análises de crédito / {categoria} / {originador} / {credor (Title Case)}
