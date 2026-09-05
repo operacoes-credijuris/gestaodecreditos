@@ -19,6 +19,7 @@ import {
   type Emolumentos,
   type RegraEmolumentos,
 } from "../_shared/emolumentos.ts";
+import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import ExcelJS from 'npm:exceljs@4.4.0';
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
@@ -620,18 +621,19 @@ function calibrarDesagio(o: {
 }
 
 /**
- * A UF do tribunal onde o crédito tramita — é a tabela de emolumentos dela que vale.
+ * A UF do tribunal onde o crédito tramita — é a tabela de emolumentos dela que
+ * vale, e o teto de RPV dela que se aplica.
  *
- * Primeiro o que a IA leu dos autos (uf_tramitacao: a comarca ou a seção
- * judiciária está sempre no cabeçalho); senão, a sigla do tribunal quando é
- * estadual (TJGO -> GO). TRF e TRT cobrem vários estados, então sem a UF dos
- * autos não há como saber — e aí a resposta é null, com aviso, não um chute.
+ * A lógica mora em _shared/tribunais.ts, com os mapas de região do TRT e do TRF
+ * e a leitura do número CNJ. Aqui fica só a chamada, porque a etapa de
+ * Precificação do precatório vai precisar da mesma resposta.
  */
-function ufDoCredito(dados: any): string | null {
-  const lida = normalizarUf(dados?.uf_tramitacao);
-  if (lida) return lida;
-  const m = /^TJ([A-Z]{2})$/.exec(String(dados?.tribunal || '').toUpperCase().trim());
-  return m ? normalizarUf(m[1]) : null;
+function origemDoCredito(dados: any): OrigemUf {
+  return resolverUf({
+    uf_tramitacao: dados?.uf_tramitacao,
+    tribunal: dados?.tribunal,
+    numero_processo: dados?.numero_processo,
+  });
 }
 
 // ============================================================================
@@ -871,7 +873,7 @@ const SCHEMA_ANALISE = {
   numero_processo: 'número do processo',
   tribunal: 'tribunal (sigla, ex.: TJGO, TJSP, TJMG, TRF1, TRT18)',
   juizo: 'o juízo onde o processo tramita, como está no cabeçalho (ex.: "3ª Vara da Fazenda Pública de Recife", "17ª Vara Federal de PE")',
-  uf_tramitacao: 'UF (sigla de 2 letras) onde o processo tramita — a da comarca, vara ou seção judiciária do cabeçalho, ex.: "GO", "SP". Indispensável em TRF e TRT, que cobrem vários estados',
+  uf_tramitacao: 'UF (sigla de 2 letras) onde o processo tramita. ONDE ACHAR, em ordem: (1) a SEÇÃO ou SUBSEÇÃO JUDICIÁRIA do cabeçalho, na Justiça Federal — "Seção Judiciária de Pernambuco" é PE, "Subseção Judiciária de Campinas/SP" é SP, "SJ/MG" é MG; (2) a COMARCA, na Justiça Estadual — "Comarca de Anápolis" é GO; (3) a cidade da VARA DO TRABALHO — "2ª Vara do Trabalho de Caruaru" é PE; (4) o endereço do fórum, o carimbo, o rodapé do documento ou a OAB do procurador do ente. É O CAMPO MAIS IMPORTANTE DEPOIS DOS VALORES: é ele que escolhe a tabela de emolumentos de cartório que entra no preço e o teto de RPV. Num TRF a sigla do tribunal NÃO diz o estado (o TRF1 cobre treze), então sem este campo o preço sai sem cartório — procure o cabeçalho em todas as peças anexadas antes de desistir. Só devolva null se realmente não houver nenhuma indicação de lugar em documento nenhum',
   cedente_cpf: 'nome do cedente e CPF',
   advogado_oab: 'nome do advogado/escritório e OAB/CNPJ',
   credor_nome: 'nome completo do credor/cedente SEM o CPF (ex.: "Vanderlan Gomes de Morais")',
@@ -1661,7 +1663,8 @@ Deno.serve(async (req) => {
     //
     // Só vale se for DA MESMA UF: se a pessoa corrigiu o tribunal no chat, a
     // regra de antes é de outro estado e tem de ser descartada.
-    const ufCredito = ufDoCredito(dados);
+    const origemUf = origemDoCredito(dados);
+    const ufCredito = origemUf.uf;
     const recebida = body.emolumentos as Emolumentos | undefined;
     const emolumentos: Emolumentos | null =
       recebida && recebida.regra && (!ufCredito || recebida.uf === ufCredito) ? recebida : null;
@@ -1692,6 +1695,10 @@ Deno.serve(async (req) => {
     const avisosBase: string[] = [...avisosQualif];
     const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0, ufCredito);
     if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
+    // Região que cobre vários estados sem seção judiciária nos autos, ou UF que
+    // contradiz a região: some sem isto, e o efeito visível seria só o cartório
+    // faltando, sem dizer que a causa é não se saber de que estado é o crédito.
+    if (origemUf.aviso) avisosBase.push(`⚠️ ${origemUf.aviso}`);
     if (!emolumentos)
       avisosBase.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO${ufCredito ? ` (${ufCredito})` : ''}: o deságio foi calibrado SEM escritura e registro — some o custo de cartório à mão antes de fechar a proposta.`);
     else if (calc.Y10 == null)
