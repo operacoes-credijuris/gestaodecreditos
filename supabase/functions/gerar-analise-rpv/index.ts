@@ -12,7 +12,13 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
-import { custoDeCartorio, normalizarUf, type CustoCartorio } from "../_shared/emolumentos.ts";
+import {
+  custoParaPreco,
+  normalizarUf,
+  obterRegra,
+  type Emolumentos,
+  type RegraEmolumentos,
+} from "../_shared/emolumentos.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import ExcelJS from 'npm:exceljs@4.4.0';
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
@@ -343,7 +349,8 @@ function reformatarMoeda(s: any): any {
 // MOTOR DE PRECIFICAÇÃO  (porte fiel das fórmulas do template)
 // ============================================================================
 
-// CUSTO DE CARTÓRIO: vem de _shared/emolumentos.ts, consultado por UF e PREÇO.
+// CUSTO DE CARTÓRIO: a REGRA do estado vem de _shared/emolumentos.ts, extraída
+// uma vez por UF; daqui em diante o custo de qualquer preço sai localmente.
 //
 // Aqui havia uma tabela fixa — a de Virginópolis-MG (Portaria 8.664/CGJ/2025) —
 // aplicada a crédito de qualquer estado. Emolumento é preço público fixado por
@@ -535,15 +542,15 @@ function calibrarDesagio(o: {
   brutoTotal: number; honorarios: number; ir: number; inss: number;
   T5: number; modelo: 1 | 2; comissaoPct?: number; diligencia?: number; alvo?: number;
   /**
-   * Custo de cartório em reais — escritura + registro —, CONSTANTE nesta rodada.
+   * A REGRA de emolumentos do estado — faixas e acréscimos —, não um valor.
    *
-   * Era uma tabela de faixas, consultada a cada avaliação. Virou um número
-   * porque a pergunta à IA mudou: em vez de transcrever a tabela do estado,
-   * ela responde quanto custa para UM preço (ver _shared/emolumentos.ts). O
-   * fluxo é: calibra sem cartório, pergunta o custo do preço que saiu,
-   * recalibra com ele. null = ainda não se sabe; precifica sem, e avisa.
+   * É o que permite calcular o cartório DE CADA PREÇO CANDIDATO dentro do laço,
+   * em vez de fixar um custo apurado para outro preço. Sem isto o motor
+   * precisava de rodadas de convergência e ainda assim podia parar com o
+   * emolumento de uma faixa vizinha (ver o cabeçalho de _shared/emolumentos.ts).
+   * null = tabela desconhecida; precifica sem cartório, e avisa.
    */
-  custoCartorio: number | null;
+  regra: RegraEmolumentos | null;
 }) {
   const alvo = o.alvo ?? 0.028;
   const dilig = o.diligencia ?? 250;
@@ -560,18 +567,24 @@ function calibrarDesagio(o: {
   // fica null e o aviso diz que o preço saiu sem escritura e registro. Preço um
   // pouco otimista que a pessoa completa à mão é melhor que nenhum preço, e
   // muito melhor que um preço com cartório inventado.
-  const cartorio = o.custoCartorio ?? 0;
+  //
+  // O CUSTO É RECALCULADO A CADA PREÇO CANDIDATO. custoParaPreco é pura e
+  // instantânea, então cabe dentro do laço — e é isso que faz o preço sair com
+  // o emolumento da SUA faixa já na primeira passada.
   const avaliar = (d: number) => {
     const cessao = o.modelo === 1 ? (L5 + L7) * (1 - d) : L5 * (1 - d);
-    const Y4 = cessao + Y5 + cartorio + dilig;
+    const emol = custoParaPreco(o.regra, cessao);
+    const Y4 = cessao + Y5 + (emol.total ?? 0) + dilig;
     const Y9 = Math.pow(baseY3 / Y4, 1 / o.T5) - 1;
-    return { d, cessao, Y4, Y9 };
+    return { d, cessao, emol, Y4, Y9 };
   };
   const montar = (r: any, atingiuAlvo: boolean) => ({
     desagio: r.d, L5, L7, Y3: baseY3, Y5,
     S5: L5 * (1 - r.d),
     S7: o.modelo === 1 ? L7 * (1 - r.d) : 0,
-    cessao: r.cessao, Y10: o.custoCartorio,
+    cessao: r.cessao, Y10: r.emol.total,
+    emolumentos: { escritura: r.emol.escritura, registro: r.emol.registro, completo: r.emol.completo },
+    descricaoCartorio: r.emol.descricao,
     Y4: r.Y4, Y9: r.Y9,
     desagioEfetivo: 1 - r.cessao / baseY3, atingiuAlvo,
   });
@@ -1437,15 +1450,15 @@ Deno.serve(async (req) => {
     // processo inteiro era o que estourava o worker (HTTP 546). Agora o navegador
     // pede a tabela ANTES, numa requisição própria, e entrega pronta para a
     // análise. Cada requisição faz uma coisa pesada, não três.
-    // CUSTO DE CARTÓRIO para um preço concreto. Ação própria porque envolve
-    // busca web (10 a 30 s) — dentro da análise, derrubava o worker.
+    // A REGRA DE EMOLUMENTOS do estado. Ação própria porque envolve busca e
+    // leitura de documento (dezenas de segundos) — dentro da análise, derrubava
+    // o worker. Uma vez por UF e ano: depois o cache responde, e todo preço se
+    // calcula localmente.
     if (body.acao === 'emolumentos') {
       const uf = normalizarUf(body.uf);
-      const preco = Number(body.preco);
-      if (!uf) return jsonResponse({ ok: true, custo: null, motivo: 'UF não informada' });
-      if (!(preco > 0)) return jsonResponse({ ok: true, custo: null, motivo: 'preço de cessão não informado' });
-      const c = await custoDeCartorio(uf, preco, cfg.anthropic_api_key, sbAdmin);
-      return jsonResponse({ ok: true, custo: c });
+      if (!uf) return jsonResponse({ ok: true, emolumentos: null, motivo: 'UF não informada' });
+      const e = await obterRegra(uf, cfg.anthropic_api_key, sbAdmin);
+      return jsonResponse({ ok: true, emolumentos: e });
     }
 
     if (body.acao === 'listar_originadores' || body.acao === 'listar_intermediadores') {
@@ -1632,64 +1645,35 @@ Deno.serve(async (req) => {
     dados.data_aquisicao = hojeDDMMAAAA();
     dados.data_pagamento = dataPagamento(T5);
 
-    // 3c.1 Custo de cartório.
+    // 3c.1 A regra de emolumentos do estado.
     //
-    // NUNCA BUSCA AQUI. Ou veio pronto do navegador (ação 'emolumentos', que faz
-    // a busca web em requisição própria), ou o preço sai sem cartório e avisando.
-    // Buscar neste ponto foi o que derrubou o worker com HTTP 546.
+    // NUNCA EXTRAI AQUI. Ou veio pronta do navegador (ação 'emolumentos', que
+    // faz a busca em requisição própria), ou o preço sai sem cartório e
+    // avisando. Extrair neste ponto foi o que derrubou o worker com HTTP 546.
     //
-    // O custo só vale se for DA MESMA UF: se a pessoa corrigiu o tribunal no
-    // chat, o custo de antes é de outro estado e tem de ser descartado.
+    // Só vale se for DA MESMA UF: se a pessoa corrigiu o tribunal no chat, a
+    // regra de antes é de outro estado e tem de ser descartada.
     const ufCredito = ufDoCredito(dados);
-    const recebido = body.custo_cartorio as CustoCartorio | undefined;
-    const cartorio: CustoCartorio | null =
-      recebido && recebido.total != null && (!ufCredito || recebido.uf === ufCredito)
-        ? recebido
-        : null;
+    const recebida = body.emolumentos as Emolumentos | undefined;
+    const emolumentos: Emolumentos | null =
+      recebida && recebida.regra && (!ufCredito || recebida.uf === ufCredito) ? recebida : null;
 
-    // 3d. Calibragem do deságio
+    // 3d. Calibragem do deságio — o cartório entra DENTRO dela, por preço.
     const calc: any = calibrarDesagio({
       brutoTotal: Number(dados.bruto_total), honorarios: Number(dados.honorarios) || 0,
       ir: Number(dados.ir) || 0, inss: Number(dados.inss) || 0, T5, modelo: dados.modelo,
-      custoCartorio: cartorio?.total ?? null,
+      regra: emolumentos?.regra ?? null,
     });
-    calc.faixaCartorio = cartorio
-      ? `${cartorio.descricao}${cartorio.vigencia ? `, ${cartorio.vigencia}` : ''}`
-      : `Confirmar com cartório${ufCredito ? ` — tabela de ${ufCredito} ainda não consultada` : ' — UF do tribunal não identificada'}`;
-    calc.emolumentos = { escritura: cartorio?.escritura ?? null, registro: cartorio?.registro ?? null };
+    calc.faixaCartorio = emolumentos
+      ? `${calc.descricaoCartorio} — tabela ${emolumentos.uf}/${emolumentos.ano}${emolumentos.vigencia ? `, ${emolumentos.vigencia}` : ''}`
+      : `Confirmar com cartório${ufCredito ? ` — tabela de ${ufCredito} ainda não levantada` : ' — UF do tribunal não identificada'}`;
     calc.IR = Number(dados.ir) || 0; calc.INSS = Number(dados.inss) || 0;
 
-    // O PREÇO SAIU DE FAIXA? O custo foi consultado para o preço da rodada
-    // anterior; a rodada nova, já com o cartório somado, dá um preço MENOR — e o
-    // cartório empurra bem mais que o próprio valor dele, porque o preço se
-    // ajusta para manter a meta de rentabilidade. Quando o preço final cai numa
-    // faixa abaixo da consultada, o emolumento embutido é o da faixa de cima:
-    // maior que o devido. Erra para o lado conservador, mas erra — e a tela
-    // pede uma nova consulta antes de aceitar.
-    const trocouDeFaixa =
-      cartorio != null &&
-      cartorio.de != null &&
-      cartorio.ate != null &&
-      (calc.cessao < cartorio.de || calc.cessao > cartorio.ate);
-    // MUDANÇA MATERIAL, e não "faixa de verdade", é o que autoriza reconsultar.
-    //
-    // Antes, faixa colapsada num ponto (de == ate) DESLIGAVA a reconsulta, para
-    // não entrar em laço — com um ponto, todo preço cai fora. O efeito prático
-    // foi pior que o laço: num caso real de PE a IA devolveu a faixa colapsada
-    // em R$ 51.129,43, o preço final caiu para R$ 44.791,49 — duas faixas
-    // abaixo na tabela verdadeira — e o motor manteve o emolumento de
-    // R$ 1.935,19 quando o devido era R$ 1.611,88, sem se corrigir nunca. O
-    // aviso aparecia e mandava a pessoa fazer à mão.
-    //
-    // Agora o critério é o quanto o preço ANDOU desde o valor consultado. Meio
-    // por cento filtra ruído de arredondamento e deixa passar qualquer mudança
-    // capaz de trocar de faixa. O laço não volta porque quem limita é a tela:
-    // duas consultas por rodada, no máximo.
-    const LIMIAR_RECONSULTA = 0.005;
-    const andouMaterialmente =
-      cartorio != null &&
-      cartorio.preco > 0 &&
-      Math.abs(calc.cessao - cartorio.preco) / cartorio.preco > LIMIAR_RECONSULTA;
+    // NÃO HÁ MAIS "TROCOU DE FAIXA". Com a regra dentro da calibragem, o preço
+    // final e o emolumento vêm da MESMA faixa por construção — o custo foi
+    // calculado para aquele preço, não herdado de outro. Some com isso toda a
+    // convergência: reconsulta, limiar de mudança material e o aviso que mandava
+    // a pessoa conferir à mão.
 
     // Nome do credor em Title Case (usado na pasta do Drive, no nome do arquivo e na aba de precificação)
     const credorBruto = (dados.credor_nome || (dados.cedente_cpf || '').split(/\bCPF\b/i)[0] || numeroProcesso || 'cedente');
@@ -1700,14 +1684,14 @@ Deno.serve(async (req) => {
     const avisosBase: string[] = [...avisosQualif];
     const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0);
     if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
-    if (!cartorio)
+    if (!emolumentos)
       avisosBase.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO${ufCredito ? ` (${ufCredito})` : ''}: o deságio foi calibrado SEM escritura e registro — some o custo de cartório à mão antes de fechar a proposta.`);
-    else if (!cartorio.completo)
-      avisosBase.push(`⚠️ CARTÓRIO PARCIAL: em ${cartorio.uf} achei só ${cartorio.escritura == null ? 'o registro' : 'a escritura'}. O preço inclui essa parte; some ${cartorio.escritura == null ? 'a escritura' : 'o registro'} à mão. ${cartorio.observacao ?? ''}`.trim());
-    else if (cartorio.origem === 'busca')
-      avisosBase.push(`Custo de cartório de ${cartorio.uf} consultado agora (${cartorio.observacao ?? 'sem detalhe'}). Fonte: ${cartorio.fontes[0] ?? 'não informada'}. Vale conferir uma vez; as próximas cessões desta faixa usam o mesmo valor.`);
-    if (trocouDeFaixa)
-      avisosBase.push(`⚠️ O custo de cartório foi consultado para ${brl(cartorio!.preco)}, faixa de ${brl(cartorio!.de!)} a ${brl(cartorio!.ate!)} — mas o preço final ficou em ${brl(calc.cessao)}, ${calc.cessao < cartorio!.de! ? 'ABAIXO' : 'ACIMA'} dessa faixa. O emolumento embutido é o da faixa consultada, não o da faixa do preço final. Consulte de novo para o valor final, ou confira o emolumento à mão.`);
+    else if (calc.Y10 == null)
+      avisosBase.push(`⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: o preço de cessão (${brl(calc.cessao)}) ficou fora das faixas da tabela de ${emolumentos.uf}. Confirme o emolumento com o cartório e some à mão.`);
+    else if (calc.emolumentos && !calc.emolumentos.completo)
+      avisosBase.push(`⚠️ CARTÓRIO PARCIAL: na tabela de ${emolumentos.uf} achei só ${calc.emolumentos.escritura == null ? 'o registro' : 'a escritura'}. O preço inclui essa parte; some ${calc.emolumentos.escritura == null ? 'a escritura' : 'o registro'} à mão. ${emolumentos.observacao ?? ''}`.trim());
+    else if (emolumentos.origem === 'busca')
+      avisosBase.push(`Tabela de emolumentos de ${emolumentos.uf}/${emolumentos.ano} levantada agora (${emolumentos.observacao ?? 'sem detalhe'}). Fonte: ${emolumentos.fontes[0] ?? 'não informada'}. Vale conferir uma vez; daqui em diante ela vale para qualquer valor de cessão, sem nova consulta.`);
     if (_prazoEstimado) avisosBase.push('⚠️ PRAZO ESTIMADO — TJGO sem data-limite de convênio nos autos: a espera até a expedição foi estimada em 60 dias. Confira o prazo e a rentabilidade à mão.');
     if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && !dados._soHonorarios && !ehEstadoDeGoias(dados.ente_devedor))
       avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
@@ -1732,14 +1716,15 @@ Deno.serve(async (req) => {
     };
     const cartorioResp = {
       valor: calc.Y10 == null ? '—' : brl(calc.Y10),
-      escritura: cartorio?.escritura == null ? '—' : brl(cartorio.escritura),
-      registro: cartorio?.registro == null ? '—' : brl(cartorio.registro),
+      escritura: calc.emolumentos?.escritura == null ? '—' : brl(calc.emolumentos.escritura),
+      registro: calc.emolumentos?.registro == null ? '—' : brl(calc.emolumentos.registro),
       faixa: calc.faixaCartorio,
-      uf: cartorio?.uf ?? ufCredito ?? null,
-      origem: cartorio?.origem ?? 'nenhuma',
-      fontes: cartorio?.fontes ?? [],
-      // O preço para o qual a tela deve pedir o custo, quando ele ainda não veio.
-      preco_consulta: cartorio ? null : Number(calc.cessao) || null,
+      uf: emolumentos?.uf ?? ufCredito ?? null,
+      origem: emolumentos?.origem ?? 'nenhuma',
+      fontes: emolumentos?.fontes ?? [],
+      // A tela levanta a tabela quando isto vem verdadeiro. Não manda preço:
+      // o que se pede é a REGRA do estado, que serve para qualquer valor.
+      falta_regra: !emolumentos,
     };
 
     // A PRELIMINAR: tudo calculado, nada gravado. A pessoa lê, pede mudanças no
@@ -1766,7 +1751,7 @@ Deno.serve(async (req) => {
         atingiu_alvo: calc.atingiuAlvo !== false,
       // Devolvido para o navegador mandar de volta no próximo pedido do chat, e
       // a função não repetir a busca web. É preço público — não há sigilo aqui.
-      custo_cartorio: cartorio,
+      emolumentos,
         avisos: avisosBase,
         aviso: avisosBase.length ? avisosBase.join(' ') : null,
         m1_sintese: dados.m1_sintese ?? null,
@@ -1815,8 +1800,6 @@ Deno.serve(async (req) => {
       regra_prazo: prazo.regra.descricao,
       valores,
       cartorio: cartorioResp,
-      // A tela reconsulta o cartório quando isto vem verdadeiro (uma vez só).
-      reconsultar_cartorio: trocouDeFaixa && andouMaterialmente,
       atingiu_alvo: calc.atingiuAlvo !== false,
       aviso: avisoFinal,
       drive_folder_url: `https://drive.google.com/drive/folders/${cedenteId}`,

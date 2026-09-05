@@ -94,12 +94,14 @@ export interface CartorioRpv {
   origem: 'cache' | 'busca' | 'nenhuma'
   fontes: string[]
   /**
-   * O preço de cessão para o qual a tela deve consultar o cartório — presente
-   * só enquanto o custo não veio. É o que torna a consulta uma pergunta
-   * concreta ("quanto custa uma cessão de R$ 52.500 em PE?") em vez de um
-   * pedido para transcrever a tabela inteira do estado, que foi o que falhou.
+   * A tabela do estado ainda não foi levantada — a tela levanta e reprecifica.
+   *
+   * Não há preço aqui de propósito: o que se pede é a REGRA do estado (faixas e
+   * acréscimos), que serve para QUALQUER valor de cessão. Perguntar "quanto
+   * custa para este preço" foi a versão anterior, e ela exigia uma consulta nova
+   * a cada mudança de preço.
    */
-  preco_consulta?: number | null
+  falta_regra?: boolean
 }
 interface Risco {
   risco: string
@@ -129,13 +131,6 @@ export interface RespostaAnaliseRpv {
   roteiro?: { ato: string; dias: number; base: string }[] | null
   valores?: ValoresRpv
   cartorio?: CartorioRpv
-  /**
-   * O preço final saiu da faixa da tabela consultada — vale perguntar de novo,
-   * agora para o preço certo. A função só marca quando a faixa é real: com
-   * tabela puramente percentual a faixa é um ponto, o preço sempre cai fora, e
-   * reconsultar entraria em laço.
-   */
-  reconsultar_cartorio?: boolean
   atingiu_alvo?: boolean
   m1_sintese?: string | null
   riscos?: Risco[]
@@ -144,15 +139,14 @@ export interface RespostaAnaliseRpv {
   /** A análise inteira, opaca para a tela: volta para a função no próximo turno. */
   dados?: unknown
   /**
-   * O custo de cartório que a função usou — escritura + registro em reais —,
-   * opaco aqui.
+   * A REGRA de emolumentos do estado — faixas e acréscimos —, opaca aqui.
    *
-   * Dá a volta pelo navegador pelo mesmo motivo de `dados`: consultá-lo custa
-   * uma busca web de 10 a 30 s, e repetir isso a cada pedido do chat estourava
-   * o teto de 150 s da requisição. Devolvendo-o, a função só consulta de novo
-   * se a UF do tribunal mudar.
+   * Dá a volta pelo navegador pelo mesmo motivo de `dados`: levantá-la custa
+   * busca e leitura de documento, e repetir isso a cada pedido do chat
+   * estourava o teto de 150 s da requisição. Devolvendo-a, o motor recalcula o
+   * cartório de qualquer preço novo sem consultar nada.
    */
-  custo_cartorio?: unknown
+  emolumentos?: unknown
   avisos_qualificacao?: string[]
   drive_file_url?: string | null
   drive_folder_url?: string | null
@@ -301,7 +295,7 @@ export function AnaliseRpvModal({
    * reprecificação apagaria a revisão — então o custo fica aqui e entra na
    * PRÓXIMA rodada do chat (refinar e salvar já o mandam).
    */
-  const [custoCartorio, setCustoCartorio] = useState<unknown>(null)
+  const [regraCartorio, setRegraCartorio] = useState<unknown>(null)
   /**
    * Custo de cartório digitado à mão, quando a consulta não resolve.
    *
@@ -376,7 +370,7 @@ export function AnaliseRpvModal({
 
         // O CARTÓRIO CHEGA DEPOIS, e de propósito: a busca web leva dezenas de
         // segundos e, dentro da análise, derrubava o worker (HTTP 546).
-        await resolverCartorio(r)
+        await levantarRegraCartorio(r)
       } catch (e) {
         setErro((e as Error)?.message ?? String(e))
       } finally {
@@ -390,102 +384,78 @@ export function AnaliseRpvModal({
   }, [mensagens.length])
 
   /**
-   * Resolve o custo de cartório para a análise `r` e reprecifica com ele.
+   * Levanta a REGRA de emolumentos do estado e reprecifica com ela.
    *
-   * CHAMADA DEPOIS DE TODA RODADA QUE MEXE NO PREÇO — a análise inicial e cada
-   * pedido do chat. Era essa a falha: a consulta só acontecia na abertura, então
-   * pedir "aumente o prazo para 10 meses" movia o preço da cessão e o cartório
-   * seguia sendo o consultado para o preço antigo, de outra faixa da tabela. E a
-   * IA respondia, com razão, que não tinha campo de cartório para mexer — o
-   * campo não é dela, é do motor, e quem tem de reagir é esta tela.
+   * UMA VEZ POR ANÁLISE, e só quando a função pede (`falta_regra`). Antes isto
+   * era uma consulta por PREÇO: cada mudança no chat exigia perguntar de novo
+   * "quanto custa para este valor", com 140 s de espera, e o preço ainda podia
+   * assentar com o emolumento de uma faixa vizinha. Agora o que volta é a
+   * tabela do estado — faixas e acréscimos —, e o motor calcula o cartório de
+   * qualquer preço sozinho, dentro da própria calibragem.
    *
-   * DOIS MOTIVOS PARA CONSULTAR, e o laço cobre os dois:
-   *   (a) ainda não há custo nenhum — a função manda `preco_consulta`;
-   *   (b) já há, mas o preço saiu da faixa — a função manda `reconsultar_cartorio`.
-   *
-   * DUAS CONSULTAS NO MÁXIMO por chamada. O cartório empurra o preço bem mais
-   * que o próprio valor dele (o preço se reajusta para manter a meta), então a
-   * primeira rodada costuma trocar de faixa; a segunda parte de um preço já
-   * quase certo. Uma terceira raramente mudaria algo e custaria mais meio minuto.
+   * Por isso não há mais rodadas de convergência, nem reconsulta quando o preço
+   * muda, nem aviso de "saiu da faixa": o preço e o emolumento vêm da mesma
+   * faixa por construção.
    */
-  async function resolverCartorio(r: RespostaAnaliseRpv): Promise<void> {
+  async function levantarRegraCartorio(r: RespostaAnaliseRpv): Promise<void> {
     const uf = r.cartorio?.uf
-    if (r.reprovado || !uf) return
-    // Já falhou e não é caso de troca de faixa: não insiste.
-    if (cartorioFalhou.current && !r.reconsultar_cartorio) return
-    // Foto do contador: se a pessoa revisar no meio, o custo é guardado mas a
-    // reprecificação não sobrescreve o que ela acabou de pedir.
+    if (r.reprovado || !uf || !r.cartorio?.falta_regra) return
+    // Já falhou nesta janela: não insiste a cada mensagem do chat. Quem quer
+    // tentar de novo reabre a janela; quem quer resolver agora usa os campos
+    // manuais.
+    if (cartorioFalhou.current) return
+    // Foto do contador: se a pessoa revisar no meio, a reprecificação não
+    // sobrescreve o que ela acabou de pedir — a regra fica guardada e entra na
+    // rodada seguinte, que já a manda.
     const naEpoca = revisao.current
-    let corrente = r
 
+    setPassoCartorio(`Levantando a tabela de emolumentos de ${uf}…`)
     try {
-      for (let rodada = 0; rodada < 2; rodada++) {
-        const preco =
-          corrente.cartorio?.preco_consulta ??
-          (corrente.reconsultar_cartorio ? corrente.valores?.preco_cessao : null)
-        if (!preco) break
-
-        setPassoCartorio(
-          rodada === 0
-            ? `Consultando o cartório de ${uf} para ${formatBRL(preco)}…`
-            : `Preço mudou de faixa — reconsultando para ${formatBRL(preco)}…`,
+      const e = await comPrazo(
+        invokeFunction<{ emolumentos?: { regra?: unknown; motivo?: string } | null; motivo?: string }>(
+          'gerar-analise-rpv',
+          { acao: 'emolumentos', uf },
+        ),
+        PRAZO_CARTORIO,
+        `o levantamento passou de ${PRAZO_CARTORIO / 1000}s`,
+      )
+      // EXIGE A REGRA, não só o objeto: a função devolve `{regra: null, motivo}`
+      // quando não acha, e verificar só `e.emolumentos` daria verdadeiro —
+      // reprecificaria com a mesma ausência e a tela nunca diria que falhou.
+      if (!e?.emolumentos?.regra) {
+        cartorioFalhou.current = true
+        const porque = e?.emolumentos?.motivo ?? e?.motivo
+        setFalhaCartorio(
+          `Procurei a tabela de emolumentos de ${uf} e não consegui levantar${
+            porque ? `: ${porque}` : '.'
+          } O preço está sem escritura e registro — informe o custo à mão abaixo.`,
         )
-        const e = await comPrazo(
-          invokeFunction<{
-            custo?: { total?: number | null; motivo?: string } | null
-            motivo?: string
-          }>('gerar-analise-rpv', { acao: 'emolumentos', uf, preco }),
-          PRAZO_CARTORIO,
-          `a consulta passou de ${PRAZO_CARTORIO / 1000}s`,
-        )
-
-        // EXIGE O VALOR, não só o objeto: a consulta devolve `{total: null,
-        // motivo}` quando não acha nada, e verificar só `e.custo` daria
-        // verdadeiro — reprecificaria com a mesma ausência de cartório e a tela
-        // nunca diria que a consulta falhou.
-        if (e?.custo?.total == null) {
-          // Só reclama na primeira rodada: na segunda já existe um custo
-          // aplicado, e o aviso de faixa que a função põe na resposta já cobre
-          // a imprecisão que sobra.
-          if (rodada === 0) {
-            cartorioFalhou.current = true
-            const porque = e?.custo?.motivo ?? e?.motivo
-            setFalhaCartorio(
-              `Consultei o custo de cartório de ${uf} para ${formatBRL(preco)} e não obtive resposta${
-                porque ? `: ${porque}` : '.'
-              } O preço está sem escritura e registro — some o custo à mão.`,
-            )
-          }
-          break
-        }
-
-        // Guardado SEMPRE, aplicado só se ninguém revisou no meio. Assim o custo
-        // nunca se perde: refinar e salvar o mandam de todo jeito.
-        setCustoCartorio(e.custo)
-        if (revisao.current !== naEpoca) break
-
-        setPassoCartorio('Refazendo o preço com o cartório…')
-        // Sem IA: só recalcula. Por isso é ação própria, e não 'refinar'.
-        corrente = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
-          acao: 'reprecificar',
-          notas_kommo: notasKommo,
-          dados: r.dados,
-          custo_cartorio: e.custo,
-          avisos_qualificacao: r.avisos_qualificacao ?? [],
-          ...dadosDoCard,
-        })
-        if (revisao.current !== naEpoca) break
-        setFalhaCartorio(null)
-        setAtual(corrente)
+        return
       }
+
+      setRegraCartorio(e.emolumentos)
+      if (revisao.current !== naEpoca) return
+
+      setPassoCartorio('Refazendo o preço com o cartório…')
+      // Sem IA: só recalcula. Por isso é ação própria, e não 'refinar'.
+      const r2 = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
+        acao: 'reprecificar',
+        notas_kommo: notasKommo,
+        dados: r.dados,
+        emolumentos: e.emolumentos,
+        avisos_qualificacao: r.avisos_qualificacao ?? [],
+        ...dadosDoCard,
+      })
+      if (revisao.current !== naEpoca) return
+      setFalhaCartorio(null)
+      setAtual(r2)
     } catch (e) {
       cartorioFalhou.current = true
       // FALHA DITA, NÃO ENGOLIDA. A análise segue válida — está na tela, e o
       // aviso de "cartório não incluído" continua de pé —, mas um catch vazio
-      // aqui fazia a tela prometer que o preço se refaria e nunca explicar por
-      // que não refez.
+      // fazia a tela prometer que o preço se refaria e nunca explicar por quê.
       setFalhaCartorio(
-        `Não consegui consultar o cartório de ${uf}: ${
+        `Não consegui levantar a tabela de emolumentos de ${uf}: ${
           (e as Error)?.message ?? String(e)
         }. O preço está sem escritura e registro.`,
       )
@@ -507,16 +477,17 @@ export function AnaliseRpvModal({
     revisao.current += 1
     setPasso('Revisando a análise…')
     try {
-      // SEM `texto` E COM `custo_cartorio`, e as duas coisas pela mesma razão: a
+      // SEM `texto` E COM `emolumentos`, e as duas coisas pela mesma razão: a
       // revisão estourava o teto de 150 s da requisição (erros 504 e 546). O
-      // processo inteiro reenviado a cada pedido e uma consulta web de cartório
-      // por rodada eram o custo. A revisão trabalha sobre o JSON já extraído, e
-      // o custo de cartório vem de volta em vez de ser consultado de novo.
+      // processo inteiro reenviado a cada pedido e uma consulta de cartório por
+      // rodada eram o custo. A revisão trabalha sobre o JSON já extraído, e a
+      // TABELA do estado vem de volta — com ela o motor recalcula o cartório do
+      // preço novo sem consultar nada.
       const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
         acao: 'refinar',
         notas_kommo: notasKommo,
         dados: atual.dados,
-        custo_cartorio: custoCartorio ?? atual.custo_cartorio ?? null,
+        emolumentos: regraCartorio ?? atual.emolumentos ?? null,
         instrucao,
         historico: historico.slice(-12),
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
@@ -524,12 +495,11 @@ export function AnaliseRpvModal({
       })
       setAtual(r)
       setMensagens((m) => [...m, { papel: 'ia', texto: r.resposta || 'Alteração aplicada.' }])
-      // TODA REVISÃO PODE TER MEXIDO NO PREÇO, e o cartório depende do preço.
-      // Sem esta chamada, pedir "aumente o prazo para 10 meses" movia a cessão
-      // para outra faixa da tabela e o custo continuava o da faixa anterior —
-      // e não havia como a IA consertar, porque cartório não é campo dela.
-      // Roda depois do `finally` liberar o chat: é enriquecimento de fundo.
-      void resolverCartorio(r)
+      // A REVISÃO NÃO PRECISA MAIS RECONSULTAR NADA quando o preço muda: a
+      // regra do estado já viajou junto e o motor recalculou o cartório do preço
+      // novo sozinho. Isto aqui só cobre o caso de a regra ainda não existir —
+      // primeira análise que falhou, ou UF corrigida no chat.
+      void levantarRegraCartorio(r)
     } catch (e) {
       setMensagens((m) => [
         ...m,
@@ -558,28 +528,26 @@ export function AnaliseRpvModal({
     const registro = positivo(parseBRLInput(manual.registro))
     if (escritura === null && registro === null) return
     const uf = atual.cartorio?.uf ?? null
-    const custo = {
+    // O VALOR DIGITADO VIRA UMA REGRA DE UMA FAIXA SÓ, aberta (`ate: null`).
+    //
+    // Assim o motor trata o custo informado exatamente como trataria o de uma
+    // tabela — mesma função, mesmo caminho — e o valor continua valendo quando o
+    // preço muda no chat. Um custo digitado é, por definição, um custo fixo:
+    // quem o informou não deu uma tabela, deu um número.
+    const emolumentos = {
       uf: uf ?? '',
       ano: new Date().getFullYear(),
-      preco: atual.valores?.preco_cessao ?? 0,
-      escritura,
-      registro,
-      total: (escritura ?? 0) + (registro ?? 0),
-      completo: escritura !== null && registro !== null,
-      // Sem faixa: o valor foi dado para ESTE preço e não se sabe até onde vale.
-      // Assim o motor não avisa "saiu de faixa" sobre uma faixa que não existe.
-      de: null,
-      ate: null,
-      descricao: `Escritura ${escritura === null ? '—' : formatBRL(escritura)} + registro ${
-        registro === null ? '—' : formatBRL(registro)
-      } (informado à mão)`,
+      regra: {
+        escritura: escritura === null ? null : { faixas: [{ ate: null, valor: escritura }] },
+        registro: registro === null ? null : { faixas: [{ ate: null, valor: registro }] },
+      },
       fontes: [],
       vigencia: null,
-      observacao: 'Custo informado à mão pelo operador, não consultado em tabela.',
+      observacao: 'Custo informado à mão pelo operador, não levantado em tabela.',
       origem: 'nenhuma' as const,
     }
     revisao.current += 1
-    setCustoCartorio(custo)
+    setRegraCartorio(emolumentos)
     setFalhaCartorio(null)
     setPasso('Refazendo o preço com o cartório informado…')
     try {
@@ -587,7 +555,7 @@ export function AnaliseRpvModal({
         acao: 'reprecificar',
         notas_kommo: notasKommo,
         dados: atual.dados,
-        custo_cartorio: custo,
+        emolumentos,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
         ...dadosDoCard,
       })
@@ -608,7 +576,7 @@ export function AnaliseRpvModal({
         acao: 'salvar',
         notas_kommo: notasKommo,
         dados: atual.dados,
-        custo_cartorio: custoCartorio ?? atual.custo_cartorio ?? null,
+        emolumentos: regraCartorio ?? atual.emolumentos ?? null,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
         ...dadosDoCard,
       })
