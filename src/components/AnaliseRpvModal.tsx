@@ -173,6 +173,8 @@ export interface RespostaAnaliseRpv {
    */
   roteiro?: { ato: string; dias: number; base: string }[] | null
   valores?: ValoresRpv
+  /** De onde a IA tirou os números: documento, ID/página e data de atualização. */
+  origem_valores?: string | null
   cartorio?: CartorioRpv
   atingiu_alvo?: boolean
   m1_sintese?: string | null
@@ -215,10 +217,13 @@ export function GradeValoresRpv({
   valores,
   cartorio,
   atingiuAlvo,
+  origemValores,
 }: {
   valores: ValoresRpv
   cartorio?: CartorioRpv
   atingiuAlvo?: boolean
+  /** De onde a IA tirou os números: documento, ID/página e data de atualização. */
+  origemValores?: string | null
 }) {
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-700 sm:grid-cols-3">
@@ -288,6 +293,19 @@ export function GradeValoresRpv({
           </span>
         </dd>
       </div>
+      {/* DE ONDE VIERAM OS NÚMEROS.
+          Fica aqui, embaixo da base, porque a conferência útil acontece ANTES de
+          salvar — com o processo aberto ao lado. Depois vira auditoria, que é
+          mais cara e mais rara. Um crédito tem meia dúzia de valores nos autos
+          (o da causa, o da condenação, o da contadoria, o homologado, o
+          requisitado) e o erro de escolher o errado não aparece em número
+          nenhum: aparece só aqui, na procedência. */}
+      {origemValores && (
+        <div className="col-span-2 sm:col-span-3">
+          <dt className="text-slate-500">De onde vieram os valores</dt>
+          <dd className="text-slate-600">{origemValores}</dd>
+        </div>
+      )}
     </dl>
   )
 }
@@ -737,7 +755,7 @@ export function AnaliseRpvModal({
         <div className="space-y-4">
           {/* Os números primeiro: são a resposta. */}
           <div className="rounded-lg bg-slate-50 p-4 ring-1 ring-inset ring-slate-200">
-            <GradeValoresRpv
+            <GradeValoresRpv origemValores={atual?.origem_valores}
               valores={atual.valores}
               cartorio={atual.cartorio}
               atingiuAlvo={atual.atingiu_alvo}

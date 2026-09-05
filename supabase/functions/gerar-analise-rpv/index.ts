@@ -875,7 +875,15 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   //
   // As colunas S/T e V/W são dois CENÁRIOS lado a lado — "só principal" e
   // "principal + honorários" —, calculados por fórmula a partir das entradas.
-  cel('K', 5).value = dados.bruto_total;
+  {
+    // A ORIGEM VAI EM NOTA NA CÉLULA DO BRUTO. É de lá que descende todo o
+    // resto — líquido, deságio, preço —, e é o número que alguém vai querer
+    // conferir contra os autos. Em nota, e não em célula vizinha: o layout é
+    // fixo e uma célula a mais empurraria o que vem depois.
+    const k5 = cel('K', 5);
+    k5.value = dados.bruto_total;
+    if (dados.origem_valores) k5.note = String(dados.origem_valores).slice(0, 800);
+  }
   cel('M', 5).value = dados.ir;
   cel('N', 5).value = dados.inss;
   // O PERCENTUAL, E NÃO O VALOR. O modelo passou a ter o percentual de
@@ -1065,13 +1073,14 @@ const SCHEMA_ANALISE = {
   fase_processual: 'fase processual atual resumida em poucas palavras, ex.: "Cumprimento de sentença", "Aguardando expedição de RPV", "RPV expedida", "Trânsito em julgado"',
   tipo_credito: 'um de, EXATAMENTE: "Crédito principal — apenas" | "Crédito principal + Honorários" | "Honorários contratuais + sucumbenciais" | "Honorários sucumbenciais — apenas" — são os valores da lista suspensa da célula C3 da aba jurídica, e texto fora dela entra marcado como inválido',
 
-  // financeiro (dos cálculos da contadoria dentro do PDF)
-  bruto_total: 'valor bruto total (principal + juros + Selic), número sem R$',
-  principal_liquido: 'valor principal líquido após IR/INSS, número',
-  honorarios: 'HONORÁRIOS CONTRATUAIS A DESTACAR (0 se não houver), número',
+  // financeiro — ver a seção "DE ONDE SAEM OS VALORES" no prompt do sistema
+  bruto_total: 'VALOR BRUTO TOTAL do crédito que está sendo cedido, número sem R$: o total ANTES de qualquer retenção, já com principal + juros + correção. INCLUI os honorários contratuais destacados, porque eles saem de dentro dele. NÃO inclui os honorários sucumbenciais, que são verba própria e têm campo separado. NÃO é o valor da causa, nem o da condenação na sentença, nem o principal histórico sem atualização',
+  principal_liquido: 'o que sobra PARA O CREDOR depois do IR, do INSS e dos honorários contratuais destacados, número. Tem de ser igual a bruto_total menos ir menos inss menos honorarios — se não fechar, algum dos números foi lido errado',
+  honorarios: 'HONORÁRIOS CONTRATUAIS A DESTACAR (0 se não houver), número: o pedaço do bruto que vai para o advogado por contrato, quando há pedido de destaque ou reserva nos autos. NÃO confundir com os sucumbenciais (campo próprio), que o vencido paga por fora',
+  origem_valores: 'DE ONDE SAIU CADA NÚMERO, em uma ou duas frases: qual documento (conta da contadoria, decisão homologatória, RPV expedida), o ID ou a página, e até que data os valores estão atualizados. Ex.: "conta da contadoria de 12/03/2026 homologada em 20/04/2026, ID 3f21a90, fls. 412-415; valores atualizados até 03/2026". É o que permite conferir a escolha em dez segundos — não deixe vazio',
   honorarios_sucumbenciais: 'HONORÁRIOS SUCUMBENCIAIS fixados na sentença ou no acórdão, em reais — o valor que o ENTE DEVEDOR paga ao advogado por ter perdido, separado do que o cliente paga por contrato. Procure na parte dispositiva da sentença/acórdão, na conta da contadoria e no próprio requisitório: costuma vir como verba própria, às vezes em requisitório separado. Se a condenação fixar PERCENTUAL sobre o valor da causa ou da condenação, calcule o valor em reais. ZERO se a sentença não os fixou, se foram compensados, se a Fazenda não foi condenada neles, ou se você não achou — não estime por praxe: um percentual arbitrado por hábito vira dinheiro inventado na precificação',
-  ir: 'IR retido, número (0 se isento)',
-  inss: 'INSS/contribuição previdenciária retida conforme os cálculos da contadoria, número (0 se zerado)',
+  ir: 'IR retido SOBRE O PRINCIPAL, como a conta que vale calculou, número (0 se isento). NÃO some aqui o IR sobre os honorários — esse o sistema calcula sozinho pela tabela progressiva',
+  inss: 'INSS/contribuição previdenciária retida SOBRE O PRINCIPAL, conforme os cálculos da contadoria, número (0 se zerado)',
   eh_horas_extras: 'true/false — se o crédito é de horas extras',
 
   // prazo / cenário
@@ -1153,8 +1162,25 @@ const SYSTEM_ANALISE =
   'Regra do INSS, VÁLIDA SÓ QUANDO O ENTE DEVEDOR É O ESTADO DE GOIÁS: se o crédito é de horas extras e a contadoria zerou o INSS, calcule uma reserva preventiva ' +
   'de 14,25% (alíquota previdenciária do servidor goiano) sobre o valor sem correção e devolva esse valor em "inss". ' +
   'Para QUALQUER OUTRO ente devedor, NÃO aplique reserva nenhuma: devolva o INSS exatamente como a contadoria calculou (0 se zerado) — a alíquota varia por ente e quem decide a reserva é a equipe. ' +
-  'Para os demais créditos, siga os cálculos da contadoria. ' +
-  'O valor bruto = principal + juros + Selic. Os tempos do M4 são médias de pares de datas reais do andamento processual. ' +
+  'Os tempos do M4 são médias de pares de datas reais do andamento processual. ' +
+  '=== DE ONDE SAEM OS VALORES === ' +
+  'O MESMO crédito aparece nos autos com vários valores diferentes, e escolher o errado não produz erro nenhum — produz um preço errado, com a mesma cara de um preço certo. Antes de preencher qualquer número, decida QUAL DOCUMENTO MANDA. ' +
+  'ORDEM DE AUTORIDADE, use o primeiro que existir: ' +
+  '(1) o REQUISITÓRIO EXPEDIDO (RPV ou ofício requisitório) — se já saiu, o valor requisitado é o que o ente vai pagar, e acabou a discussão; ' +
+  '(2) o CÁLCULO HOMOLOGADO por decisão judicial — o valor homologado, não o que a parte pediu; ' +
+  '(3) a CONTA DA CONTADORIA judicial, quando as partes foram intimadas e o prazo correu sem impugnação, ou a impugnação foi rejeitada; ' +
+  '(4) o valor apresentado pelo EXECUTADO em execução invertida, quando o exequente concordou ou não impugnou no prazo; ' +
+  '(5) o valor apresentado pelo EXEQUENTE, quando não houve impugnação e o prazo passou. ' +
+  'Se NENHUM desses existir, devolva null nos valores. Não monte a conta você mesmo, não some parcelas soltas e não use o valor da petição inicial. ' +
+  'OS ENGANOS MAIS COMUNS, que valem por lista de conferência: ' +
+  '(a) o VALOR DA CAUSA e o valor da condenação na sentença — são de antes da atualização e quase nunca é o que se paga; ' +
+  '(b) o principal HISTÓRICO, quando a conta separa "principal" de "atualizado" — o bruto é o atualizado; ' +
+  '(c) o valor de OUTRO CREDOR: conta de ação coletiva traz dezenas de nomes, e a soma da tabela inteira não é o crédito. Use SÓ a linha do cedente identificado no card, e registre em comentarios_analise que havia outros; ' +
+  '(d) a SOMA de vários requisitórios quando só um está sendo cedido; ' +
+  '(e) o valor JÁ LÍQUIDO apresentado como se fosse o total; ' +
+  '(f) valores de DATAS DIFERENTES somados entre si — se a conta é de março e há atualização de agosto, use UMA delas inteira e diga qual. ' +
+  'CONFIRA ANTES DE DEVOLVER: bruto_total menos ir menos inss menos honorarios tem de dar principal_liquido. Se não fechar, você leu algum número errado ou misturou documentos — reveja. Se ainda assim não fechar, devolva o que leu e explique a divergência em comentarios_analise, em vez de forçar um número para a conta bater. ' +
+  'E DIGA DE ONDE VEIO, em "origem_valores": documento, ID ou página, e a data de atualização. ' +
   '=== MAPA EXATO DO M2 (objeto "m2"; a chave é o NÚMERO DA LINHA na aba jurídica) === ' +
   'Para cada linha, "resposta" vai na coluna B e "complemento" (quando o item pedir) vai na coluna D. ' +
   'Use SEMPRE os valores EXATOS das listas suspensas quando indicado — a coluna B só aceita esses valores. ' +
@@ -1940,6 +1966,23 @@ Deno.serve(async (req) => {
       daTela ?? (ufCredito ? await regraDoCache(ufCredito, sbAdmin) : null);
 
     // 3d. Calibragem do deságio — o cartório entra DENTRO dela, por preço.
+    // AS PARCELAS FECHAM? Conferência de código, não de prompt.
+    //
+    // Pedir à IA que confira a própria conta ajuda e não basta: ela pode ler o
+    // bruto de um documento e as retenções de outro, e a soma denuncia isso —
+    // sem que nada mais denuncie. A tolerância é de um real ou 0,1% do bruto (o
+    // que for maior), que cobre arredondamento de centavo sem deixar passar
+    // troca de documento.
+    const _liqDeclarado = Number(dados.principal_liquido) || 0;
+    if (_liqDeclarado > 0) {
+      const _liqCalculado = (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) -
+        (Number(dados.inss) || 0) - (Number(dados.honorarios) || 0);
+      const _folga = Math.max(1, (Number(dados.bruto_total) || 0) * 0.001);
+      if (Math.abs(_liqCalculado - _liqDeclarado) > _folga) dados._parcelasNaoFecham = {
+        declarado: _liqDeclarado, calculado: _liqCalculado,
+      };
+    }
+
     // O IRRF SOBRE OS HONORÁRIOS, pela tabela progressiva.
     //
     // Conta, não estimativa: a célula do modelo trazia o texto "[ESTIMAR
@@ -2005,6 +2048,15 @@ Deno.serve(async (req) => {
         `O IR foi descontado pela tabela progressiva (${brl(Number(dados.ir) || 0)}). ` +
         'Se a verba for rendimento recebido acumuladamente, o imposto real é menor — confira o regime antes de fechar.',
       );
+    if (dados._parcelasNaoFecham)
+      avisosBase.push(
+        `⚠️ AS PARCELAS NÃO FECHAM: bruto ${brl(Number(dados.bruto_total) || 0)} menos IR ${brl(Number(dados.ir) || 0)}, ` +
+        `INSS ${brl(Number(dados.inss) || 0)} e honorários ${brl(Number(dados.honorarios) || 0)} dá ` +
+        `${brl(dados._parcelasNaoFecham.calculado)}, mas o líquido lido dos autos é ${brl(dados._parcelasNaoFecham.declarado)} ` +
+        `(diferença de ${brl(Math.abs(dados._parcelasNaoFecham.calculado - dados._parcelasNaoFecham.declarado))}). ` +
+        'Algum valor veio de documento diferente dos outros. Confira antes de fechar — o preço foi calibrado sobre o bruto.' +
+        (dados.origem_valores ? ` De onde a IA disse que tirou: ${String(dados.origem_valores).slice(0, 300)}` : ''),
+      );
     if (Number(dados._sucumbNaoPrevistos) > 0)
       avisosBase.push(
         `⚠️ O card diz "honorários contratuais" e o processo TEM sucumbenciais (${brl(Number(dados._sucumbNaoPrevistos))}), ` +
@@ -2028,6 +2080,11 @@ Deno.serve(async (req) => {
       prazo_meses: Number(T5.toFixed(1)),
       data_pagamento: dados.data_pagamento ?? null,
     };
+    // De onde a IA disse que tirou os números. Vai para a tela porque a
+    // conferência útil acontece ANTES de salvar, com o processo ainda aberto ao
+    // lado — depois vira auditoria, que é mais cara e mais rara.
+    const origemValores = dados.origem_valores ? String(dados.origem_valores) : null;
+
     const cartorioResp = {
       valor: calc.Y10 == null ? '—' : brl(calc.Y10),
       escritura: calc.emolumentos?.escritura == null ? '—' : brl(calc.emolumentos.escritura),
@@ -2062,6 +2119,7 @@ Deno.serve(async (req) => {
         roteiro: prazo.roteiro,
         valores,
         cartorio: cartorioResp,
+        origem_valores: origemValores,
         atingiu_alvo: calc.atingiuAlvo !== false,
       // Devolvido para o navegador mandar de volta no próximo pedido do chat, e
       // a função não repetir a busca web. É preço público — não há sigilo aqui.
@@ -2114,6 +2172,7 @@ Deno.serve(async (req) => {
       regra_prazo: prazo.regra.descricao,
       valores,
       cartorio: cartorioResp,
+      origem_valores: origemValores,
       atingiu_alvo: calc.atingiuAlvo !== false,
       aviso: avisoFinal,
       drive_folder_url: `https://drive.google.com/drive/folders/${cedenteId}`,
