@@ -84,26 +84,6 @@ create table if not exists public.emolumentos_uf (
   constraint emolumentos_uf_pronta_tem_tabela check (status <> 'pronta' or tabela is not null)
 );
 
-comment on table public.emolumentos_uf is
-  'Regra de cálculo dos emolumentos de cartório (escritura + registro) por UF/ano, usada na precificação de RPV. Levantada em segundo plano pela IA por busca web; pode ser corrigida à mão. `status` controla o levantamento e evita pesquisas duplicadas.';
-comment on column public.emolumentos_uf.status is
-  'levantando = pesquisa rodando agora (linha criada antes de começar, serve de trava); pronta = regra em `tabela`; falhou = ver `motivo`.';
-comment on column public.emolumentos_uf.atualizado_em is
-  'Também é o relógio da trava: uma linha "levantando" parada há mais de alguns minutos é considerada abandonada (worker morto) e a próxima consulta reinicia a pesquisa.';
-
--- ---------------------------------------------------------------------------
--- RLS: qualquer autenticado LÊ (a tela mostra de onde veio o custo e em que pé
--- está o levantamento); só a Edge Function ESCREVE (service_role ignora RLS).
--- Não há policy de insert/update de propósito — a tabela alimenta um cálculo de
--- dinheiro, e deixar o navegador gravá-la abriria caminho para um valor errado
--- entrar no deságio sem passar pela função que exige fonte.
--- ---------------------------------------------------------------------------
-alter table public.emolumentos_uf enable row level security;
-
-drop policy if exists "emolumentos_uf_select" on public.emolumentos_uf;
-create policy "emolumentos_uf_select" on public.emolumentos_uf
-  for select to authenticated using (true);
-
 -- ---------------------------------------------------------------------------
 -- Se a versão ANTERIOR desta migração já rodou, o `create table if not exists`
 -- acima não faz nada e a tabela fica sem `status` nem `motivo` — e aí a função
@@ -117,6 +97,19 @@ alter table public.emolumentos_uf
 -- `tabela` nasceu NOT NULL na versão anterior; uma linha 'levantando' ainda não
 -- tem tabela nenhuma.
 alter table public.emolumentos_uf alter column tabela drop not null;
+
+-- O QUE JÁ ESTÁ GRAVADO pode estar no formato ANTIGO. A versão anterior punha a
+-- tabela solta em `tabela` ({"escritura":..., "registro":...}); a de agora põe
+-- a regra dentro de `tabela->'regra'`, porque o que se guarda deixou de ser uma
+-- lista de faixas e passou a ser a regra de cálculo com acréscimos.
+--
+-- Uma linha velha marcada 'pronta' seria lida como regra vazia e o cache
+-- responderia "pronta, sem regra" para sempre: a tela diria que não conseguiu
+-- levantar, sem motivo, e nada pesquisaria de novo. Apagar é o certo — a linha
+-- não tem dado aproveitável, e a próxima análise daquele estado refaz a
+-- pesquisa sozinha.
+delete from public.emolumentos_uf
+ where tabela is null or not jsonb_exists(tabela, 'regra');
 
 do $$
 begin
@@ -136,3 +129,23 @@ begin
       add constraint emolumentos_uf_pronta_tem_tabela check (status <> 'pronta' or tabela is not null);
   end if;
 end $$;
+
+comment on table public.emolumentos_uf is
+  'Regra de cálculo dos emolumentos de cartório (escritura + registro) por UF/ano, usada na precificação de RPV. Levantada em segundo plano pela IA por busca web; pode ser corrigida à mão. `status` controla o levantamento e evita pesquisas duplicadas.';
+comment on column public.emolumentos_uf.status is
+  'levantando = pesquisa rodando agora (linha criada antes de começar, serve de trava); pronta = regra em `tabela`; falhou = ver `motivo`.';
+comment on column public.emolumentos_uf.atualizado_em is
+  'Também é o relógio da trava: uma linha "levantando" parada há mais de alguns minutos é considerada abandonada (worker morto) e a próxima consulta reinicia a pesquisa.';
+
+-- ---------------------------------------------------------------------------
+-- RLS: qualquer autenticado LÊ (a tela mostra de onde veio o custo e em que pé
+-- está o levantamento); só a Edge Function ESCREVE (service_role ignora RLS).
+-- Não há policy de insert/update de propósito — a tabela alimenta um cálculo de
+-- dinheiro, e deixar o navegador gravá-la abriria caminho para um valor errado
+-- entrar no deságio sem passar pela função que exige fonte.
+-- ---------------------------------------------------------------------------
+alter table public.emolumentos_uf enable row level security;
+
+drop policy if exists "emolumentos_uf_select" on public.emolumentos_uf;
+create policy "emolumentos_uf_select" on public.emolumentos_uf
+  for select to authenticated using (true);

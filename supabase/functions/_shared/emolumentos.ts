@@ -447,7 +447,13 @@ export async function consultarRegra(
   if (linha) {
     const status = String(linha.status ?? '')
     const idade = minutosDesde(linha.atualizado_em)
-    if (status === 'pronta') return { estado: 'pronta', emolumentos: daLinha(uf, ano, linha) }
+    // 'pronta' NÃO BASTA: a linha tem de ter a regra dentro. Uma gravada em
+    // formato antigo, ou truncada, devolveria `regra: null` para sempre — a
+    // tela diria "não consegui levantar" sem motivo e nada jamais pesquisaria
+    // de novo, porque o cache estaria "pronto". Cache envenenado é pior que
+    // cache vazio: some sozinho e nunca se corrige.
+    const guardada = daLinha(uf, ano, linha)
+    if (status === 'pronta' && guardada.regra) return { estado: 'pronta', emolumentos: guardada }
     if (status === 'levantando' && idade < TRAVA_MINUTOS) {
       return { estado: 'levantando', emolumentos: null, reconsultar_em: 8 }
     }
