@@ -516,10 +516,11 @@ function CardCredito({
               loading={analisando}
               disabled={ocupado || analisando}
             >
-              {/* Sem o "(PDF do card)": o parentesco com "Análise jurídica" do
-                  precatório vale mais que a dica de onde vem o texto, que a
-                  janela já diz ao listar o arquivo que leu. */}
-              {analisando ? 'Analisando…' : 'Analisar'}
+              {/* "Executar análise", e não "Análise jurídica" como no precatório:
+                  aqui a análise não é só jurídica — ela qualifica, extrai e
+                  PRECIFICA (deságio, prazo, preço de cessão). Dar o mesmo nome
+                  esconderia que este botão mexe em dinheiro e o outro não. */}
+              {analisando ? 'Analisando…' : 'Executar análise'}
             </Button>
           )}
 
