@@ -38,12 +38,6 @@
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
-const MODELO = 'claude-opus-5'
-/** Tetos das ferramentas de servidor: achar a norma custa buscas, ler o anexo custa fetches. */
-const MAX_BUSCAS = 10
-const MAX_FETCHES = 6
-const MAX_RETOMADAS = 3
-
 // ---------------------------------------------------------------------------
 // O formato da regra e o cálculo — em arquivo próprio, sem dependências, para
 // os testes poderem alcançá-los. Reexportados aqui para não mexer em quem
@@ -99,6 +93,8 @@ export interface RespostaEmolumentos {
   emolumentos: Emolumentos | null
   /** Segundos sugeridos até a próxima pergunta, quando `levantando`. */
   reconsultar_em?: number
+  /** Em que etapa está, em português — a tela mostra em vez de só "aguarde". */
+  etapa?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -166,13 +162,12 @@ function validarAto(bruto: unknown, nome: string): RegraAto | null | string {
 }
 
 // ---------------------------------------------------------------------------
-// A extração
+// O que a IA devolve, por etapa
 // ---------------------------------------------------------------------------
 
 const FAIXA_SCHEMA = {
   type: 'array',
-  description:
-    'As linhas da tabela, na ordem. Copie TODAS as faixas que cubram valores de R$ 1.000 a R$ 500.000 — é a janela em que as cessões caem.',
+  description: 'As linhas da tabela na janela de valores que interessa (R$ 1.000 a R$ 500.000).',
   items: {
     type: 'object',
     properties: {
@@ -191,8 +186,7 @@ const FAIXA_SCHEMA = {
 
 const ACRESCIMO_SCHEMA = {
   type: 'array',
-  description:
-    'Taxas que incidem POR CIMA do emolumento e que o balcão soma: TSNR, taxa de fiscalização, selo, fundos estaduais. Lista vazia se a tabela já traz tudo embutido no valor da faixa.',
+  description: 'Taxas que incidem POR CIMA do emolumento (fiscalização, selo, fundo estadual). Lista vazia se a tabela já traz tudo embutido.',
   items: {
     type: 'object',
     properties: {
@@ -208,77 +202,135 @@ const ACRESCIMO_SCHEMA = {
   },
 }
 
-const FERRAMENTA = {
-  name: 'registrar_regra_emolumentos',
-  description:
-    'Registra a REGRA de cálculo dos emolumentos de um estado: as faixas de valor e os acréscimos, para escritura pública e para registro em títulos e documentos.',
+/** Etapa 1: só ACHAR o documento. Nada de faixas ainda. */
+const FERRAMENTA_ACHAR = {
+  name: 'registrar_documentos',
+  description: 'Registra onde está a tabela oficial de emolumentos do estado.',
   input_schema: {
     type: 'object' as const,
     properties: {
-      escritura: {
-        type: 'object',
-        description: 'Escritura pública COM conteúdo financeiro (é o ato da cessão de crédito), no Tabelionato de Notas.',
-        properties: { faixas: FAIXA_SCHEMA, acrescimos: ACRESCIMO_SCHEMA, observacao: { type: ['string', 'null'] } },
-        required: ['faixas'],
-      },
-      registro: {
-        type: 'object',
-        description: 'Registro do instrumento no Registro de Títulos e Documentos (RTD), para um instrumento de cessão típico (2 a 6 páginas).',
-        properties: { faixas: FAIXA_SCHEMA, acrescimos: ACRESCIMO_SCHEMA, observacao: { type: ['string', 'null'] } },
-        required: ['faixas'],
+      documentos: {
+        type: 'array',
+        description: 'De um a três endereços, do mais provável para o menos. Prefira o arquivo com as LINHAS NUMÉRICAS (em geral um PDF anexo), não a página que fala dele.',
+        items: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'Endereço completo, começando com http.' },
+            descricao: { type: 'string', description: 'Que documento é (provimento, portaria, anexo da lei) e por que você acha que é o certo.' },
+          },
+          required: ['url', 'descricao'],
+        },
       },
       vigencia: { type: ['string', 'null'], description: 'Período da tabela, como a fonte descreve ("2026", "a partir de 01/01/2026").' },
-      observacao: { type: ['string', 'null'], description: 'Como você leu a tabela e o que ficou de fora. Duas ou três frases.' },
-      fontes: { type: 'array', items: { type: 'string' }, description: 'Endereços EXATOS de onde saiu cada coisa. Obrigatório.' },
+      observacao: { type: ['string', 'null'], description: 'Onde procurou e o que encontrou. Duas ou três frases.' },
     },
-    required: ['escritura', 'registro', 'vigencia', 'observacao', 'fontes'],
+    required: ['documentos'],
   },
 }
 
-function sistema(uf: string, ano: number): string {
-  return `Você levanta a REGRA DE CÁLCULO dos emolumentos de cartório do estado ${uf}, vigente em ${ano}, para dois atos: (1) ESCRITURA PÚBLICA com conteúdo financeiro, no Tabelionato de Notas — é o ato de uma cessão de crédito; (2) REGISTRO do instrumento no Registro de Títulos e Documentos.
+/** Etapas 2 e 3: extrair UM ato do documento já localizado. */
+const FERRAMENTA_ATO = {
+  name: 'registrar_ato',
+  description: 'Registra a regra de cálculo de um ato de cartório.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      faixas: FAIXA_SCHEMA,
+      acrescimos: ACRESCIMO_SCHEMA,
+      vigencia: { type: ['string', 'null'], description: 'Período da tabela, como o documento descreve.' },
+      observacao: { type: ['string', 'null'], description: 'Qual documento, qual tabela dentro dele, o que somou e o que deixou de fora.' },
+      fontes: { type: 'array', items: { type: 'string' }, description: 'Endereços EXATOS de onde saiu cada coisa. Obrigatório.' },
+    },
+    required: ['faixas', 'fontes'],
+  },
+}
 
-Quem te chama vai aplicar essa regra a MUITOS valores diferentes, sem te consultar de novo. Por isso o que se pede não é um valor: é a TABELA e as taxas que incidem sobre ela.
+// ---------------------------------------------------------------------------
+// Os prompts, um por etapa
+// ---------------------------------------------------------------------------
+//
+// SEPARADOS PORQUE O TEMPO É CURTO. Ver o comentário de `executarPasso`: cada
+// etapa roda numa invocação própria, com um teto de tempo próprio, e um prompt
+// que pede tudo de uma vez leva o modelo a gastar o orçamento inteiro de buscas
+// e downloads antes de escrever qualquer coisa.
+
+function promptAchar(uf: string, ano: number): string {
+  return `Ache O DOCUMENTO OFICIAL com a tabela de emolumentos de cartório do estado ${uf}, vigente em ${ano}.
+
+NÃO extraia valores agora. Sua única tarefa é dizer ONDE está a tabela. Outra chamada vai abrir o documento e ler as linhas.
 
 ONDE PROCURAR, nesta ordem: o Tribunal de Justiça de ${uf} ou a Corregedoria-Geral de Justiça — a tabela é publicada por eles, como provimento, portaria, ato normativo ou anexo de lei estadual; depois o sindicato ou colégio de notários e registradores; depois a ANOREG.
 
-ABRA O DOCUMENTO. A busca devolve o cabeçalho e as notas explicativas; as LINHAS NUMÉRICAS da tabela estão dentro do arquivo, em geral um PDF anexo. Use web_fetch para abrir o anexo e ler as linhas. Não desista na busca: a tabela existe e é pública.
+O QUE INTERESSA: a tabela precisa cobrir dois atos — ESCRITURA PÚBLICA com conteúdo financeiro (Tabelionato de Notas) e REGISTRO em Títulos e Documentos. Em geral os dois estão no mesmo provimento, em tabelas diferentes.
+
+PREFIRA O ARQUIVO, NÃO A PÁGINA. A página costuma trazer só o cabeçalho e as notas; as linhas numéricas estão dentro de um PDF anexo. Se a busca mostrar o endereço do anexo, é ele que você registra.
+
+Devolva de um a três endereços, do mais provável para o menos, chamando registrar_documentos uma única vez. Seja rápido: poucas buscas, sem abrir arquivos.`
+}
+
+function promptAto(uf: string, ano: number, ato: 'escritura' | 'registro', docs: string[]): string {
+  const qual = ato === 'escritura'
+    ? 'ESCRITURA PÚBLICA com conteúdo financeiro, lavrada no Tabelionato de Notas — é o ato de uma cessão de crédito'
+    : 'REGISTRO de instrumento no Registro de Títulos e Documentos (RTD)'
+
+  return `Abra o documento abaixo e extraia a REGRA DE CÁLCULO do emolumento de ${qual}, no estado ${uf}, vigente em ${ano}.
+
+DOCUMENTO(S) JÁ LOCALIZADO(S):
+${docs.map((d, i) => `${i + 1}. ${d}`).join('\n')}
+
+Use web_fetch para abrir o primeiro. Se ele não tiver a tabela (for uma página de apresentação, por exemplo), tente o próximo, ou faça UMA busca para achar o anexo — mas não gaste tempo: o documento certo provavelmente está na lista.
+
+Quem te chama vai aplicar essa regra a MUITOS valores diferentes, sem te consultar de novo. Por isso o que se pede não é um valor: é a TABELA e as taxas que incidem sobre ela.
 
 O QUE DEVOLVER:
-1. AS FAIXAS. Copie as linhas da tabela na janela de valores que interessa — de R$ 1.000 a R$ 500.000, que é onde as cessões caem. Cada linha vira uma entrada com "de" e "ate" (os limites impressos) e "valor" (o emolumento). As tabelas brasileiras aparecem em três formas, e o formato aceita as três:
+1. AS FAIXAS, na janela de R$ 1.000 a R$ 500.000, que é onde as cessões caem. Cada linha da tabela vira uma entrada com "de" e "ate" (os limites impressos). As tabelas brasileiras aparecem em três formas, e o formato aceita as três:
    (a) VALOR FIXO por faixa — o caso mais comum. Preencha "valor".
    (b) PERCENTUAL sobre o valor do ato. Preencha "percentual" como fração, com "minimo" e "maximo" se a tabela declarar piso e teto.
    (c) PARCELA FIXA MAIS PERCENTUAL SOBRE O EXCEDENTE — "R$ 500,00 acrescidos de 0,5% sobre o que exceder R$ 50.000,00". Preencha "fixo" (500), "percentual" (0.005), "de" (50000) e marque "sobre_excedente": true. NÃO marque sobre_excedente quando o percentual incidir sobre o valor inteiro — a diferença entre as duas leituras chega a 45% do emolumento.
-2. OS ACRÉSCIMOS. Muitas tabelas cobram, por cima do emolumento, uma taxa de fiscalização, selo ou fundo estadual — e é isso que o balcão soma. Devolva cada uma em "acrescimos". Pode ser PERCENTUAL (campo "percentual", dizendo em "base" se incide sobre o valor do ato ou sobre o emolumento) ou VALOR FIXO por ato (campo "valor") — o selo digital de vários estados é fixo. Se a lei disser que a taxa não pode superar o próprio emolumento do ato, marque "teto_emolumento". Se a tabela já traz tudo embutido no valor da faixa, devolva lista vazia e diga isso em "observacao".
+2. OS ACRÉSCIMOS. Muitas tabelas cobram, por cima do emolumento, uma taxa de fiscalização, selo ou fundo estadual — e é isso que o balcão soma. Pode ser PERCENTUAL (campo "percentual", dizendo em "base" se incide sobre o valor do ato ou sobre o emolumento) ou VALOR FIXO por ato (campo "valor") — o selo digital de vários estados é fixo. Se a lei disser que a taxa não pode superar o próprio emolumento do ato, marque "teto_emolumento". Se a tabela já traz tudo embutido no valor da faixa, devolva lista vazia e diga isso em "observacao".
 3. MOSTRE COMO LEU, em "observacao": qual documento, qual tabela dentro dele, o que somou e o que deixou de fora.
-4. FONTE OBRIGATÓRIA. Sem o endereço da página, o resultado é descartado: emolumento é preço público e estes números entram num cálculo de deságio.
+4. FONTE OBRIGATÓRIA. Sem o endereço, o resultado é descartado: emolumento é preço público e estes números entram num cálculo de deságio.
 
-NÃO INVENTE FAIXA NEM PERCENTUAL. Se a tabela de ${ano} não estiver disponível, use a mais recente vigente e diga a vigência real. Se conseguiu ler um dos dois atos e não o outro, devolva o que leu e explique o que faltou — meio custo com origem clara é útil. Só devolva faixas vazias nos DOIS atos se realmente não achou a tabela do estado; e nesse caso diga em "observacao" onde procurou.
+NÃO INVENTE FAIXA NEM PERCENTUAL. Se a tabela de ${ano} não estiver disponível, use a mais recente vigente e diga a vigência real. Se este ato não estiver neste documento, devolva faixas vazias e explique — a outra chamada cuida do outro ato.
 
-Responda chamando a ferramenta registrar_regra_emolumentos uma única vez, ao final.`
+Responda chamando registrar_ato uma única vez, ao final.`
 }
 
-async function extrairRegra(
-  uf: string,
-  ano: number,
+// ---------------------------------------------------------------------------
+// Chamadas à IA, curtas e com orçamento apertado
+// ---------------------------------------------------------------------------
+
+const MODELO = 'claude-opus-5'
+
+/**
+ * Uma rodada de conversa com as ferramentas de servidor.
+ *
+ * Os tetos de `buscas` e `fetches` são o principal controle de tempo que existe
+ * aqui: o modelo tende a gastar o orçamento que recebe, e cada busca custa
+ * segundos, cada download de PDF custa dezenas. Antes eram 10 e 6 numa única
+ * chamada que fazia tudo — e ela não terminava dentro do limite da função.
+ */
+async function conversar(
   apiKey: string,
-): Promise<{ regra: RegraEmolumentos | null; fontes: string[]; vigencia: string | null; observacao: string | null; motivo?: string }> {
+  sistema: string,
+  ferramenta: { name: string; description: string; input_schema: Record<string, unknown> },
+  buscas: number,
+  fetches: number,
+  maxTokens: number,
+): Promise<Record<string, unknown> | null> {
   const anthropic = new Anthropic({ apiKey })
-  const mensagens: Anthropic.MessageParam[] = [
-    { role: 'user', content: `Levante a regra de emolumentos de ${uf} para ${ano}: as faixas da escritura pública com conteúdo financeiro, as do registro em RTD, e os acréscimos.` },
-  ]
+  const mensagens: Anthropic.MessageParam[] = [{ role: 'user', content: sistema }]
+  const ferramentas: unknown[] = [ferramenta]
+  if (buscas > 0) ferramentas.push({ type: 'web_search_20260209', name: 'web_search', max_uses: buscas })
+  if (fetches > 0) ferramentas.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: fetches })
+
   const pedir = () =>
     anthropic.messages
       .stream({
         model: MODELO,
-        max_tokens: 12000,
-        system: sistema(uf, ano),
+        max_tokens: maxTokens,
         // 'auto': forçar a ferramenta impediria a busca, e sem busca não há tabela.
-        tools: [
-          FERRAMENTA,
-          { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
-          { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_FETCHES },
-        ],
+        tools: ferramentas as Anthropic.Tool[],
         messages: mensagens,
       })
       .finalMessage()
@@ -286,64 +338,84 @@ async function extrairRegra(
   let resposta = await pedir()
   // O laço de amostragem do servidor tem teto próprio e devolve 'pause_turn' ao
   // batê-lo; reenviar o turno pausado retoma de onde parou, sem mensagem nova.
-  for (let i = 0; i < MAX_RETOMADAS && resposta.stop_reason === 'pause_turn'; i++) {
+  // UMA retomada só: cada uma reenvia todo o contexto acumulado, então a
+  // terceira custa muito mais que a primeira. Com a etapa pequena, uma basta.
+  for (let i = 0; i < 1 && resposta.stop_reason === 'pause_turn'; i++) {
     mensagens.push({ role: 'assistant', content: resposta.content })
     resposta = await pedir()
   }
 
-  const vazio = { regra: null, fontes: [] as string[], vigencia: null, observacao: null }
-  const uso = resposta.content.find((c) => c.type === 'tool_use' && c.name === FERRAMENTA.name)
-  if (!uso || uso.type !== 'tool_use') {
-    return {
-      ...vazio,
-      motivo: resposta.stop_reason === 'pause_turn'
-        ? 'a busca não terminou dentro do limite de retomadas'
-        : 'a IA não devolveu a regra',
-    }
-  }
-
-  const e = uso.input as Record<string, unknown>
-  const fontes = Array.isArray(e.fontes)
-    ? (e.fontes as unknown[]).map(String).filter((f) => /^https?:\/\//i.test(f))
-    : []
-  const observacao = typeof e.observacao === 'string' ? e.observacao : null
-  const vigencia = typeof e.vigencia === 'string' ? e.vigencia : null
-  if (fontes.length === 0) return { ...vazio, observacao, motivo: 'a IA não informou a fonte' }
-
-  const escritura = validarAto(e.escritura, 'escritura')
-  if (typeof escritura === 'string') return { ...vazio, fontes, observacao, motivo: escritura }
-  const registro = validarAto(e.registro, 'registro')
-  if (typeof registro === 'string') return { ...vazio, fontes, observacao, motivo: registro }
-  if (!escritura && !registro) {
-    return {
-      ...vazio, fontes, observacao,
-      motivo: observacao ? `a IA não achou as tabelas (${observacao})` : 'a IA não achou as tabelas do estado',
-    }
-  }
-  return { regra: { escritura, registro }, fontes, vigencia, observacao }
+  const uso = resposta.content.find((c) => c.type === 'tool_use' && c.name === ferramenta.name)
+  return uso && uso.type === 'tool_use' ? (uso.input as Record<string, unknown>) : null
 }
 
-
 // ---------------------------------------------------------------------------
-// Levantamento em segundo plano + cache
+// O levantamento, em etapas curtas encadeadas
 // ---------------------------------------------------------------------------
 //
-// POR QUE ISTO NÃO É UMA CHAMADA SÍNCRONA. Achar o provimento do estado, abrir
-// o PDF anexo e ler as linhas numéricas leva de dois a cinco minutos — é uma
-// pesquisa de verdade, com até dez buscas e seis downloads. A primeira versão
-// esperava esse tempo dentro da requisição, e a tela mostrava "o levantamento
-// passou de 140s". Nenhum ajuste de timeout resolve isso: o problema é a
-// pesquisa estar no caminho crítico de quem está olhando a tela.
+// POR QUE EM ETAPAS, e não numa pesquisa só.
 //
-// Agora a requisição só CONSULTA e, se for o caso, DISPARA. O trabalho corre em
-// segundo plano (EdgeRuntime.waitUntil) e deposita o resultado na tabela; a
-// tela volta a perguntar a cada poucos segundos. E como o que se guarda é a
-// REGRA, e não um custo para um preço, isso acontece uma vez por estado no ano.
+// A Edge Function tem um TETO DE TEMPO DE PAREDE que nada contorna: 400 s no
+// plano pago, 150 s no gratuito. EdgeRuntime.waitUntil deixa o trabalho
+// continuar depois da resposta, mas NÃO ESTENDE esse teto — foi o que eu não
+// tinha conferido na versão anterior. Uma pesquisa com dez buscas, seis
+// downloads de PDF e três retomadas passa dos 400 s com folga: o worker era
+// morto no meio, a linha ficava 'levantando', a trava de 8 minutos expirava e a
+// tentativa seguinte recomeçava do zero. Um laço que nunca fechava.
+//
+// Agora cada etapa é uma INVOCAÇÃO NOVA, com o relógio zerado, e faz uma coisa
+// pequena:
+//
+//   achar     -> só busca, sem abrir arquivo: onde está o documento oficial
+//   escritura -> abre o documento e lê a tabela da escritura
+//   registro  -> lê a tabela do registro
+//
+// Entre uma etapa e outra só viajam os endereços e o que já foi extraído,
+// gravados na linha do estado. É o mesmo encadeamento de invocações que
+// advbox-movimentacoes usa para não estourar o limite.
 
 /** Uma linha 'levantando' parada mais que isto é worker morto — pode reiniciar. */
 const TRAVA_MINUTOS = 8
 /** Não repete uma pesquisa que acabou de falhar; dá tempo de a fonte voltar do ar. */
 const REPOUSO_FALHA_MINUTOS = 30
+/** Corta laço: 'achar' + dois atos + folga para uma repetição de cada. */
+const MAX_PASSOS = 6
+
+type Etapa = 'achar' | 'escritura' | 'registro'
+
+/** O que sobrevive de uma etapa para a seguinte. Mora em emolumentos_uf.progresso. */
+interface Progresso {
+  etapa: Etapa
+  documentos: string[]
+  escritura: RegraAto | null
+  registro: RegraAto | null
+  fontes: string[]
+  vigencia: string | null
+  observacoes: string[]
+  passos: number
+}
+
+function progressoInicial(): Progresso {
+  return {
+    etapa: 'achar', documentos: [], escritura: null, registro: null,
+    fontes: [], vigencia: null, observacoes: [], passos: 0,
+  }
+}
+
+function lerProgresso(bruto: unknown): Progresso {
+  const p = (bruto ?? {}) as Partial<Progresso>
+  const etapa = p.etapa === 'escritura' || p.etapa === 'registro' ? p.etapa : 'achar'
+  return {
+    etapa,
+    documentos: Array.isArray(p.documentos) ? p.documentos.map(String) : [],
+    escritura: p.escritura ?? null,
+    registro: p.registro ?? null,
+    fontes: Array.isArray(p.fontes) ? p.fontes.map(String) : [],
+    vigencia: p.vigencia ?? null,
+    observacoes: Array.isArray(p.observacoes) ? p.observacoes.map(String) : [],
+    passos: Number(p.passos) || 0,
+  }
+}
 
 function vazio(uf: string, ano: number, motivo: string): Emolumentos {
   return { uf, ano, regra: null, fontes: [], vigencia: null, observacao: null, origem: 'nenhuma', motivo }
@@ -359,36 +431,139 @@ function emSegundoPlano(p: Promise<unknown>): void {
 const minutosDesde = (iso: unknown): number =>
   (Date.now() - new Date(String(iso ?? 0)).getTime()) / 60000
 
-/** A pesquisa em si, já gravando o desfecho. Roda fora da requisição. */
-async function levantarEGravar(uf: string, ano: number, apiKey: string, svc: SupabaseClient): Promise<void> {
-  let campos: Record<string, unknown>
-  try {
-    const achado = await extrairRegra(uf, ano, apiKey)
-    campos = achado.regra
-      ? {
-          status: 'pronta',
-          motivo: null,
-          tabela: { regra: achado.regra, observacao: achado.observacao },
-          fontes: achado.fontes,
-          vigencia: achado.vigencia,
-        }
-      : {
-          status: 'falhou',
-          tabela: null,
-          motivo: achado.motivo ?? 'a pesquisa terminou sem achar a tabela',
-          fontes: achado.fontes,
-          vigencia: achado.vigencia,
-        }
-  } catch (e) {
-    // O erro TEM de ser gravado. Sem isto a linha fica 'levantando' para sempre,
-    // e a tela roda em círculo até bater a trava de 8 minutos sem dizer por quê.
-    campos = { status: 'falhou', tabela: null, motivo: `a pesquisa falhou: ${(e as Error)?.message ?? String(e)}` }
+/**
+ * Chama a própria função para rodar a próxima etapa, numa invocação NOVA.
+ *
+ * É isso que zera o relógio. A chamada leva a service_role no Authorization
+ * (para passar pelo verify_jwt do gateway) e o segredo de cron no cabeçalho; a
+ * função reconhece qualquer um dos dois como chamada interna. Fire-and-forget:
+ * o resultado desta invocação não interessa a quem disparou.
+ */
+function dispararProximaEtapa(uf: string): void {
+  const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/gerar-analise-rpv`
+  const p = fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
+      'x-cron-secret': Deno.env.get('CRON_SECRET') ?? '',
+    },
+    body: JSON.stringify({ acao: 'emolumentos_passo', uf }),
+  }).catch(() => {})
+  emSegundoPlano(p)
+}
+
+async function gravar(svc: SupabaseClient, uf: string, ano: number, campos: Record<string, unknown>): Promise<void> {
+  await svc.from('emolumentos_uf')
+    .update({ ...campos, atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv' })
+    .eq('uf', uf).eq('ano', ano)
+}
+
+/**
+ * Roda UMA etapa do levantamento e agenda a seguinte.
+ *
+ * Chamada pela própria função, numa invocação dedicada. Nunca lança: qualquer
+ * erro vira status 'falhou' com motivo, porque uma exceção aqui deixaria a
+ * linha em 'levantando' e a tela girando até a trava de 8 minutos, sem dizer
+ * nada a ninguém.
+ */
+export async function executarPasso(
+  ufBruta: unknown,
+  apiKey: string,
+  svc: SupabaseClient,
+): Promise<{ etapa: string; proxima: string | null }> {
+  const ano = new Date().getFullYear()
+  const uf = normalizarUf(ufBruta)
+  if (!uf) return { etapa: 'nenhuma', proxima: null }
+
+  const { data } = await svc.from('emolumentos_uf')
+    .select('status, progresso').eq('uf', uf).eq('ano', ano).maybeSingle()
+  if (!data || String((data as Record<string, unknown>).status) !== 'levantando') {
+    // Alguém já terminou (ou cancelou) enquanto esta invocação subia.
+    return { etapa: 'nenhuma', proxima: null }
   }
+
+  const p = lerProgresso((data as Record<string, unknown>).progresso)
+  p.passos++
+  if (p.passos > MAX_PASSOS) {
+    await gravar(svc, uf, ano, {
+      status: 'falhou', tabela: null, progresso: p,
+      motivo: 'o levantamento deu voltas demais sem completar — provavelmente a tabela deste estado não está publicada em formato legível',
+    })
+    return { etapa: p.etapa, proxima: null }
+  }
+
   try {
-    await svc.from('emolumentos_uf')
-      .update({ ...campos, atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv' })
-      .eq('uf', uf).eq('ano', ano)
-  } catch { /* worker morrendo; a trava de 8 min libera a próxima tentativa */ }
+    if (p.etapa === 'achar') {
+      const r = await conversar(apiKey, promptAchar(uf, ano), FERRAMENTA_ACHAR, 5, 0, 2000)
+      const docs = Array.isArray(r?.documentos) ? (r!.documentos as Array<Record<string, unknown>>) : []
+      p.documentos = docs.map((d) => String(d?.url ?? '')).filter((u) => /^https?:\/\//i.test(u)).slice(0, 3)
+      if (typeof r?.vigencia === 'string') p.vigencia = r.vigencia
+      if (typeof r?.observacao === 'string') p.observacoes.push(r.observacao)
+
+      if (p.documentos.length === 0) {
+        await gravar(svc, uf, ano, {
+          status: 'falhou', tabela: null, progresso: p,
+          motivo: `não achei o documento oficial com a tabela de emolumentos de ${uf}${p.observacoes[0] ? ` (${p.observacoes[0]})` : ''}`,
+        })
+        return { etapa: 'achar', proxima: null }
+      }
+      p.etapa = 'escritura'
+      await gravar(svc, uf, ano, { progresso: p })
+      dispararProximaEtapa(uf)
+      return { etapa: 'achar', proxima: 'escritura' }
+    }
+
+    // Etapas de extração: escritura e depois registro, do mesmo documento.
+    const ato = p.etapa
+    const r = await conversar(apiKey, promptAto(uf, ano, ato, p.documentos), FERRAMENTA_ATO, 1, 3, 12000)
+    const fontes = Array.isArray(r?.fontes)
+      ? (r!.fontes as unknown[]).map(String).filter((f) => /^https?:\/\//i.test(f))
+      : []
+    // Sem fonte o resultado não entra — emolumento é preço público, e número sem
+    // procedência num cálculo de deságio é pior que célula vazia.
+    const validado = fontes.length > 0 ? validarAto(r, ato) : null
+    if (typeof validado !== 'string' && validado) {
+      p[ato] = validado
+      p.fontes = [...new Set([...p.fontes, ...fontes])]
+    }
+    if (typeof r?.vigencia === 'string' && !p.vigencia) p.vigencia = r.vigencia
+    if (typeof r?.observacao === 'string') p.observacoes.push(`${ato}: ${r.observacao}`)
+    if (typeof validado === 'string') p.observacoes.push(`${ato}: descartado (${validado})`)
+
+    if (ato === 'escritura') {
+      p.etapa = 'registro'
+      await gravar(svc, uf, ano, { progresso: p })
+      dispararProximaEtapa(uf)
+      return { etapa: 'escritura', proxima: 'registro' }
+    }
+
+    // Fim da linha: consolida. Meio custo com origem clara é útil — o motor
+    // avisa que falta a outra metade —, mas nenhum dos dois atos é fracasso.
+    if (!p.escritura && !p.registro) {
+      await gravar(svc, uf, ano, {
+        status: 'falhou', tabela: null, progresso: p,
+        motivo: `abri o documento de ${uf} e não consegui ler as tabelas${p.observacoes.length ? ` (${p.observacoes.join('; ')})` : ''}`,
+      })
+      return { etapa: 'registro', proxima: null }
+    }
+    await gravar(svc, uf, ano, {
+      status: 'pronta', motivo: null, progresso: p,
+      tabela: {
+        regra: { escritura: p.escritura, registro: p.registro },
+        observacao: p.observacoes.join(' • ') || null,
+      },
+      fontes: p.fontes,
+      vigencia: p.vigencia,
+    })
+    return { etapa: 'registro', proxima: null }
+  } catch (e) {
+    await gravar(svc, uf, ano, {
+      status: 'falhou', tabela: null, progresso: p,
+      motivo: `a etapa "${p.etapa}" falhou: ${(e as Error)?.message ?? String(e)}`,
+    })
+    return { etapa: p.etapa, proxima: null }
+  }
 }
 
 function daLinha(uf: string, ano: number, d: Record<string, unknown>): Emolumentos {
@@ -405,20 +580,28 @@ function daLinha(uf: string, ano: number, d: Record<string, unknown>): Emolument
   }
 }
 
+/** Em que etapa está, em português, para a tela dizer algo melhor que "aguarde". */
+function rotuloDaEtapa(bruto: unknown): string {
+  const p = lerProgresso(bruto)
+  if (p.etapa === 'achar') return 'procurando a tabela oficial do estado'
+  if (p.etapa === 'escritura') return 'lendo a tabela da escritura no documento'
+  return 'lendo a tabela do registro'
+}
+
 /**
  * Consulta o estado do levantamento de uma UF e, se ninguém estiver cuidando
- * dela, dispara a pesquisa em segundo plano.
+ * dela, dispara a primeira etapa.
  *
  * Devolve na hora, sempre. Quem chama volta a perguntar enquanto for
  * 'levantando'.
  *
- * SEM A TABELA (migração 0053 não rodou) cai no modo antigo: pesquisa dentro da
- * própria requisição, com tudo que isso tem de ruim. O motivo diz isso em
- * português, para a falha ser diagnosticável em vez de virar "passou de 140s".
+ * SEM A TABELA (migração 0053 não rodou) não há levantamento possível: as
+ * etapas se comunicam por ela. O motivo diz isso em português, para a falha ser
+ * diagnosticável em vez de virar um tempo esgotado sem explicação.
  */
 export async function consultarRegra(
   ufBruta: unknown,
-  apiKey: string,
+  _apiKey: string,
   svc: SupabaseClient,
 ): Promise<RespostaEmolumentos> {
   const ano = new Date().getFullYear()
@@ -434,14 +617,18 @@ export async function consultarRegra(
   try {
     const { data, error } = await svc
       .from('emolumentos_uf')
-      .select('status, motivo, tabela, fontes, vigencia, atualizado_em')
+      .select('status, motivo, tabela, fontes, vigencia, atualizado_em, progresso')
       .eq('uf', uf).eq('ano', ano).maybeSingle()
     if (error) throw new Error(error.message)
     linha = (data as Record<string, unknown> | null) ?? null
-  } catch {
-    // Modo degradado: sem onde depositar o resultado não há segundo plano
-    // possível. Pesquisa aqui mesmo, e provavelmente estoura o tempo.
-    return await semCache(uf, ano, apiKey)
+  } catch (e) {
+    return {
+      estado: 'falhou',
+      emolumentos: vazio(
+        uf, ano,
+        `o cache de emolumentos não respondeu, e é por ele que as etapas do levantamento conversam (as migrações 0053 e 0054 rodaram?): ${(e as Error)?.message ?? String(e)}`,
+      ),
+    }
   }
 
   if (linha) {
@@ -455,10 +642,10 @@ export async function consultarRegra(
     const guardada = daLinha(uf, ano, linha)
     if (status === 'pronta' && guardada.regra) return { estado: 'pronta', emolumentos: guardada }
     if (status === 'levantando' && idade < TRAVA_MINUTOS) {
-      return { estado: 'levantando', emolumentos: null, reconsultar_em: 8 }
+      return { estado: 'levantando', emolumentos: null, reconsultar_em: 8, etapa: rotuloDaEtapa(linha.progresso) }
     }
     if (status === 'falhou' && idade < REPOUSO_FALHA_MINUTOS) {
-      return { estado: 'falhou', emolumentos: daLinha(uf, ano, linha) }
+      return { estado: 'falhou', emolumentos: guardada }
     }
     // 'levantando' velha (worker morreu) ou 'falhou' já descansada: recomeça.
   }
@@ -469,46 +656,19 @@ export async function consultarRegra(
     const { error } = await svc.from('emolumentos_uf').upsert(
       {
         uf, ano, status: 'levantando', tabela: null, motivo: null,
+        progresso: progressoInicial(),
         atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv',
       },
       { onConflict: 'uf,ano' },
     )
     if (error) throw new Error(error.message)
-  } catch {
-    return await semCache(uf, ano, apiKey)
-  }
-
-  emSegundoPlano(levantarEGravar(uf, ano, apiKey, svc))
-  return { estado: 'levantando', emolumentos: null, reconsultar_em: 8 }
-}
-
-/** Modo degradado, sem a migração 0053: pesquisa dentro da requisição. */
-async function semCache(uf: string, ano: number, apiKey: string): Promise<RespostaEmolumentos> {
-  try {
-    const achado = await extrairRegra(uf, ano, apiKey)
-    if (!achado.regra) {
-      return {
-        estado: 'falhou',
-        emolumentos: {
-          uf, ano, regra: null, fontes: achado.fontes, vigencia: achado.vigencia,
-          observacao: achado.observacao, origem: 'nenhuma', motivo: achado.motivo,
-        },
-      }
-    }
-    return {
-      estado: 'pronta',
-      emolumentos: {
-        uf, ano, regra: achado.regra, fontes: achado.fontes, vigencia: achado.vigencia,
-        observacao: achado.observacao, origem: 'busca',
-      },
-    }
   } catch (e) {
     return {
       estado: 'falhou',
-      emolumentos: vazio(
-        uf, ano,
-        `o cache de emolumentos não respondeu (a migração 0053 rodou?), então a pesquisa teve de ser feita dentro da requisição e não coube no tempo: ${(e as Error)?.message ?? String(e)}`,
-      ),
+      emolumentos: vazio(uf, ano, `não consegui abrir o levantamento de ${uf}: ${(e as Error)?.message ?? String(e)}`),
     }
   }
+
+  dispararProximaEtapa(uf)
+  return { estado: 'levantando', emolumentos: null, reconsultar_em: 8, etapa: 'procurando a tabela oficial do estado' }
 }

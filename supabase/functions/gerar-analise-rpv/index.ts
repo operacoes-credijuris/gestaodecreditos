@@ -15,6 +15,7 @@ import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import {
   consultarRegra,
   custoParaPreco,
+  executarPasso,
   normalizarUf,
   type Emolumentos,
   type RegraEmolumentos,
@@ -1427,13 +1428,32 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
 
   try {
+    let body: any;
+    try { body = await req.json(); } catch { return errorResponse('Corpo da requisição inválido/incompleto (o texto do processo pode ter chegado cortado).', 400); }
+
+    // 0. UMA ETAPA DO LEVANTAMENTO DE EMOLUMENTOS.
+    //
+    // Vem da PRÓPRIA função, numa invocação nova — é assim que o relógio de
+    // tempo de parede zera entre as etapas (ver executarPasso). Não há usuário
+    // por trás, então esta ação é atendida antes da autenticação de usuário,
+    // com uma checagem própria: só passa quem traz a service_role ou o segredo
+    // de cron, e nenhum dos dois chega ao navegador.
+    if (body.acao === 'emolumentos_passo') {
+      const cronSecret = Deno.env.get('CRON_SECRET');
+      const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      const interna =
+        (!!cronSecret && req.headers.get('x-cron-secret') === cronSecret) ||
+        (!!svcKey && req.headers.get('Authorization') === `Bearer ${svcKey}`);
+      if (!interna) return errorResponse(ERRO_ACESSO, 401);
+      const sb = serviceClient();
+      const r = await executarPasso(body.uf, (await chaveAnthropic()) ?? '', sb);
+      return jsonResponse({ ok: true, ...r });
+    }
+
     // 1. Auth (JWT do usuário)
     const user = await getCallerAtivo(req, serviceClient());
     if (!user) return errorResponse(ERRO_ACESSO, 401);
     const userId = user.id;
-
-    let body: any;
-    try { body = await req.json(); } catch { return errorResponse('Corpo da requisição inválido/incompleto (o texto do processo pode ter chegado cortado).', 400); }
     const categoria: string = resolverCategoria(body.categoria);  // "RPV" -> "Requisições de Pequeno Valor"
 
     // service-role: lê secrets de configuracoes

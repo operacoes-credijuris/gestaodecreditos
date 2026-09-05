@@ -55,8 +55,15 @@ const pctBR = (fracao: number) => formatPercent(fracao * 100)
  * mais lenta que isso por natureza.
  */
 const PRAZO_PERGUNTA = 20_000
-/** Quanto tempo no total vale a pena ficar esperando a pesquisa terminar. */
-const PRAZO_LEVANTAMENTO = 6 * 60_000
+/**
+ * Quanto tempo no total vale a pena ficar esperando a pesquisa terminar.
+ *
+ * São TRÊS etapas encadeadas no servidor (achar o documento, ler a escritura,
+ * ler o registro), cada uma numa invocação própria. Dez minutos cobrem as três
+ * com folga. Passar disso não perde o trabalho: a pesquisa continua no
+ * servidor e a próxima abertura da janela encontra a tabela pronta.
+ */
+const PRAZO_LEVANTAMENTO = 10 * 60_000
 /** Intervalo entre uma pergunta e a seguinte. */
 const INTERVALO_PERGUNTA = 8_000
 
@@ -84,6 +91,8 @@ interface RespostaConsultaEmolumentos {
   estado?: 'pronta' | 'levantando' | 'falhou' | 'sem_uf'
   emolumentos?: { regra?: unknown; motivo?: string } | null
   reconsultar_em?: number
+  /** Em que pé está a pesquisa, em português. */
+  etapa?: string
   motivo?: string
 }
 
@@ -453,9 +462,13 @@ export function AnaliseRpvModal({
         // perguntar. A pesquisa continua no servidor e a próxima análise deste
         // estado já a encontra pronta.
         if (revisao.current !== naEpoca) return
-        const s = Math.round((ate - Date.now()) / 1000)
+        // A etapa vem do servidor. Dizer "lendo a tabela da escritura no
+        // documento" é uma informação; "aguarde" com um cronômetro não é, e foi
+        // o que deixou a espera parecendo travamento.
         setPassoCartorio(
-          `Levantando a tabela de emolumentos de ${uf}… primeira vez neste estado, leva alguns minutos (até ${s}s).`,
+          e.etapa
+            ? `Emolumentos de ${uf}: ${e.etapa}… primeira vez neste estado, leva alguns minutos.`
+            : `Levantando a tabela de emolumentos de ${uf}… primeira vez neste estado, leva alguns minutos.`,
         )
         await espera(Math.max(1000, e.reconsultar_em ? e.reconsultar_em * 1000 : INTERVALO_PERGUNTA))
       }
@@ -466,7 +479,7 @@ export function AnaliseRpvModal({
       if (!e?.emolumentos?.regra) {
         cartorioFalhou.current = true
         const porque = e?.estado === 'levantando'
-          ? `a pesquisa passou de ${PRAZO_LEVANTAMENTO / 60_000} minutos e continua rodando no servidor — reabra a janela em alguns minutos e ela já deve estar pronta`
+          ? `a pesquisa passou de ${PRAZO_LEVANTAMENTO / 60_000} minutos e continua rodando no servidor (${e.etapa ?? 'em andamento'}) — o trabalho não se perde: reabra a janela em alguns minutos e a tabela já deve estar pronta`
           : (e?.emolumentos?.motivo ?? e?.motivo)
         setFalhaCartorio(
           `Procurei a tabela de emolumentos de ${uf} e não consegui levantar${
