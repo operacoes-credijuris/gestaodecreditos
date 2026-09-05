@@ -1631,12 +1631,25 @@ Deno.serve(async (req) => {
       cartorio.de != null &&
       cartorio.ate != null &&
       (calc.cessao < cartorio.de || calc.cessao > cartorio.ate);
-    // Devolvido para a tela decidir se vale outra consulta. Só faz sentido
-    // reconsultar quando a faixa é de verdade: com faixa colapsada num ponto
-    // (tabela puramente percentual), o preço final SEMPRE cai fora e reconsultar
-    // entraria em laço.
-    const faixaColapsada =
-      cartorio != null && cartorio.de != null && cartorio.ate != null && cartorio.de >= cartorio.ate;
+    // MUDANÇA MATERIAL, e não "faixa de verdade", é o que autoriza reconsultar.
+    //
+    // Antes, faixa colapsada num ponto (de == ate) DESLIGAVA a reconsulta, para
+    // não entrar em laço — com um ponto, todo preço cai fora. O efeito prático
+    // foi pior que o laço: num caso real de PE a IA devolveu a faixa colapsada
+    // em R$ 51.129,43, o preço final caiu para R$ 44.791,49 — duas faixas
+    // abaixo na tabela verdadeira — e o motor manteve o emolumento de
+    // R$ 1.935,19 quando o devido era R$ 1.611,88, sem se corrigir nunca. O
+    // aviso aparecia e mandava a pessoa fazer à mão.
+    //
+    // Agora o critério é o quanto o preço ANDOU desde o valor consultado. Meio
+    // por cento filtra ruído de arredondamento e deixa passar qualquer mudança
+    // capaz de trocar de faixa. O laço não volta porque quem limita é a tela:
+    // duas consultas por rodada, no máximo.
+    const LIMIAR_RECONSULTA = 0.005;
+    const andouMaterialmente =
+      cartorio != null &&
+      cartorio.preco > 0 &&
+      Math.abs(calc.cessao - cartorio.preco) / cartorio.preco > LIMIAR_RECONSULTA;
 
     // Nome do credor em Title Case (usado na pasta do Drive, no nome do arquivo e na aba de precificação)
     const credorBruto = (dados.credor_nome || (dados.cedente_cpf || '').split(/\bCPF\b/i)[0] || numeroProcesso || 'cedente');
@@ -1763,7 +1776,7 @@ Deno.serve(async (req) => {
       valores,
       cartorio: cartorioResp,
       // A tela reconsulta o cartório quando isto vem verdadeiro (uma vez só).
-      reconsultar_cartorio: trocouDeFaixa && !faixaColapsada,
+      reconsultar_cartorio: trocouDeFaixa && andouMaterialmente,
       atingiu_alvo: calc.atingiuAlvo !== false,
       aviso: avisoFinal,
       drive_folder_url: `https://drive.google.com/drive/folders/${cedenteId}`,
