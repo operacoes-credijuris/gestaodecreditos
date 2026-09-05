@@ -26,7 +26,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Save, SendHorizontal, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
-import { formatBRL, formatPercent } from '@/lib/format'
+import {
+  formatBRL,
+  formatBRLInput,
+  formatPercent,
+  onlyDigits,
+  parseBRLInput,
+} from '@/lib/format'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Loading } from '@/components/ui/Table'
@@ -34,6 +40,33 @@ import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 
 /** Fração -> "35,20%": formatPercent espera pontos percentuais. */
 const pctBR = (fracao: number) => formatPercent(fracao * 100)
+
+/**
+ * Prazo da consulta ao cartório. A busca web leva 10 a 30 s no caso normal; 100 s
+ * é folga generosa sobre isso e ainda cabe no teto de 150 s da requisição.
+ */
+const PRAZO_CARTORIO = 100_000
+
+/**
+ * Uma promessa que desiste no prazo.
+ *
+ * Existe porque `invokeFunction` espera para sempre, e uma consulta pendurada
+ * deixava a janela em silêncio — sem valor, sem erro, sem nada a fazer. Falhar
+ * dizendo "passou de 100s" é uma resposta; esperar sem fim não é.
+ *
+ * A requisição em si não é cancelada (não há como, daqui) — só deixa de ser
+ * esperada. É aceitável: ela não grava nada, e se chegar depois o resultado é
+ * descartado.
+ */
+function comPrazo<T>(p: Promise<T>, ms: number, mensagem: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(mensagem)), ms)
+    p.then(
+      (v) => { clearTimeout(t); resolve(v) },
+      (e) => { clearTimeout(t); reject(e) },
+    )
+  })
+}
 
 export interface ValoresRpv {
   bruto: number
@@ -225,14 +258,53 @@ export function AnaliseRpvModal({
   // análise e descartado. Guardá-lo era o que permitia reenviá-lo a cada pedido
   // do chat — e era isso que estourava o tempo da requisição.
   const [atual, setAtual] = useState<RespostaAnaliseRpv | null>(null)
-  /** Por que o cartório não entrou no preço, quando a busca da tabela falhou. */
+  /** Por que o cartório não entrou no preço, quando a consulta falhou. */
   const [falhaCartorio, setFalhaCartorio] = useState<string | null>(null)
+  /**
+   * O passo do CARTÓRIO, separado de `passo` — e é o conserto de um travamento.
+   *
+   * A consulta do cartório usava `passo`, e `ocupado` (que desabilita o campo do
+   * chat) é `passo !== null`. Só que o rótulo de progresso só aparece ENQUANTO
+   * NÃO HÁ ANÁLISE na tela: assim que os números chegavam, o texto sumia e o
+   * campo continuava desabilitado, sem nada explicando. Consulta demorada ou
+   * pendurada = campo morto.
+   *
+   * Agora o cartório é enriquecimento de fundo: não bloqueia o chat e mostra o
+   * próprio progresso ao lado do valor.
+   */
+  const [passoCartorio, setPassoCartorio] = useState<string | null>(null)
+  /**
+   * O custo consultado, guardado à parte do `atual`.
+   *
+   * Existe pela corrida: a consulta leva dezenas de segundos e a pessoa pode
+   * revisar a análise no meio. Se ela revisou, sobrescrever `atual` com a
+   * reprecificação apagaria a revisão — então o custo fica aqui e entra na
+   * PRÓXIMA rodada do chat (refinar e salvar já o mandam).
+   */
+  const [custoCartorio, setCustoCartorio] = useState<unknown>(null)
+  /**
+   * Custo de cartório digitado à mão, quando a consulta não resolve.
+   *
+   * Guarda SÓ DÍGITOS, e eles são centavos — a mesma máscara de dinheiro do
+   * cadastro de créditos (ver parseBRLInput). Aceitar texto livre trazia uma
+   * ambiguidade cara: em pt-BR o ponto é separador de milhar, então "1234.56"
+   * digitado por quem pensa em inglês viraria R$ 123.456,00. Num campo que entra
+   * no preço, é um erro de 100x que ninguém vê.
+   */
+  const [manual, setManual] = useState({ escritura: '', registro: '' })
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [pedido, setPedido] = useState('')
   const [salvo, setSalvo] = useState<RespostaAnaliseRpv | null>(null)
   const fimDoChat = useRef<HTMLDivElement>(null)
 
   const ocupado = passo !== null
+  /**
+   * Quantas vezes a análise foi substituída (revisão ou salvamento).
+   *
+   * A consulta do cartório tira uma foto deste número antes de começar; ao
+   * voltar, só aplica a reprecificação se ninguém mexeu no meio.
+   */
+  const revisao = useRef(0)
 
   // Uma análise só, ao abrir. Reabrir a janela do mesmo card recomeça do zero
   // (a página monta a janela com `key` pelo card) — é o comportamento que se
@@ -281,18 +353,31 @@ export function AnaliseRpvModal({
         const uf = r.cartorio?.uf
         const preco = r.cartorio?.preco_consulta
         if (!r.reprovado && uf && preco) {
-          setPasso(`Consultando o cartório de ${uf} para ${formatBRL(preco)}…`)
+          // FORA DO `passo`: enriquecimento de fundo não pode travar o chat.
+          setPassoCartorio(`Consultando o cartório de ${uf} para ${formatBRL(preco)}…`)
+          const naEpoca = revisao.current
           try {
-            const e = await invokeFunction<{
-              custo?: { total?: number | null; motivo?: string } | null
-              motivo?: string
-            }>('gerar-analise-rpv', { acao: 'emolumentos', uf, preco })
+            const e = await comPrazo(
+              invokeFunction<{
+                custo?: { total?: number | null; motivo?: string } | null
+                motivo?: string
+              }>('gerar-analise-rpv', { acao: 'emolumentos', uf, preco }),
+              PRAZO_CARTORIO,
+              `a consulta passou de ${PRAZO_CARTORIO / 1000}s`,
+            )
             // EXIGE O VALOR, não só o objeto. A consulta devolve
             // `{total: null, motivo}` quando não acha nada — verificar só
             // `e.custo` daria verdadeiro nesse caso, reprecificaria com a mesma
             // ausência de cartório e a tela nunca diria que a consulta falhou.
             if (e?.custo?.total != null) {
-              setPasso('Refazendo o preço com o cartório…')
+              // Guardado SEMPRE, aplicado só se ninguém revisou no meio. Assim o
+              // custo nunca se perde: refinar e salvar o mandam de todo jeito.
+              setCustoCartorio(e.custo)
+              if (revisao.current !== naEpoca) {
+                setPassoCartorio(null)
+                return
+              }
+              setPassoCartorio('Refazendo o preço com o cartório…')
               // Sem IA: só recalcula. Por isso é uma ação própria, e não 'refinar'.
               const r2 = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
                 acao: 'reprecificar',
@@ -302,7 +387,7 @@ export function AnaliseRpvModal({
                 avisos_qualificacao: r.avisos_qualificacao ?? [],
                 ...dadosDoCard,
               })
-              setAtual(r2)
+              if (revisao.current === naEpoca) setAtual(r2)
             } else {
               const porque = e?.custo?.motivo ?? e?.motivo
               setFalhaCartorio(
@@ -321,6 +406,8 @@ export function AnaliseRpvModal({
                 (e as Error)?.message ?? String(e)
               }. O preço está sem escritura e registro.`,
             )
+          } finally {
+            setPassoCartorio(null)
           }
         }
       } catch (e) {
@@ -342,6 +429,9 @@ export function AnaliseRpvModal({
     setErro(null)
     const historico = [...mensagens, { papel: 'usuario' as const, texto: instrucao }]
     setMensagens(historico)
+    // A análise vai ser substituída: a consulta de cartório em voo, se houver,
+    // guarda o custo e não sobrescreve o que sair daqui.
+    revisao.current += 1
     setPasso('Revisando a análise…')
     try {
       // SEM `texto` E COM `custo_cartorio`, e as duas coisas pela mesma razão: a
@@ -353,7 +443,7 @@ export function AnaliseRpvModal({
         acao: 'refinar',
         notas_kommo: notasKommo,
         dados: atual.dados,
-        custo_cartorio: atual.custo_cartorio ?? null,
+        custo_cartorio: custoCartorio ?? atual.custo_cartorio ?? null,
         instrucao,
         historico: historico.slice(-12),
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
@@ -371,6 +461,65 @@ export function AnaliseRpvModal({
     }
   }
 
+  /**
+   * Aplica um custo de cartório DIGITADO, sem passar pela IA.
+   *
+   * A consulta automática depende de uma busca web que pode não achar a tabela
+   * do estado — e aí o preço fica sem cartório e a pessoa não tem o que fazer
+   * dentro da janela. Quem opera sabe quanto custa a escritura no cartório onde
+   * lavra. Isto é a saída manual: mesma reprecificação, custo vindo do teclado.
+   *
+   * Marcado com origem 'nenhuma' e fonte "informado à mão", para a planilha e o
+   * histórico nunca confundirem valor digitado com valor de tabela oficial.
+   */
+  async function aplicarCartorioManual() {
+    if (!atual?.dados) return
+    const positivo = (v: number | null) => (v !== null && v > 0 ? v : null)
+    const escritura = positivo(parseBRLInput(manual.escritura))
+    const registro = positivo(parseBRLInput(manual.registro))
+    if (escritura === null && registro === null) return
+    const uf = atual.cartorio?.uf ?? null
+    const custo = {
+      uf: uf ?? '',
+      ano: new Date().getFullYear(),
+      preco: atual.valores?.preco_cessao ?? 0,
+      escritura,
+      registro,
+      total: (escritura ?? 0) + (registro ?? 0),
+      completo: escritura !== null && registro !== null,
+      // Sem faixa: o valor foi dado para ESTE preço e não se sabe até onde vale.
+      // Assim o motor não avisa "saiu de faixa" sobre uma faixa que não existe.
+      de: null,
+      ate: null,
+      descricao: `Escritura ${escritura === null ? '—' : formatBRL(escritura)} + registro ${
+        registro === null ? '—' : formatBRL(registro)
+      } (informado à mão)`,
+      fontes: [],
+      vigencia: null,
+      observacao: 'Custo informado à mão pelo operador, não consultado em tabela.',
+      origem: 'nenhuma' as const,
+    }
+    revisao.current += 1
+    setCustoCartorio(custo)
+    setFalhaCartorio(null)
+    setPasso('Refazendo o preço com o cartório informado…')
+    try {
+      const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
+        acao: 'reprecificar',
+        notas_kommo: notasKommo,
+        dados: atual.dados,
+        custo_cartorio: custo,
+        avisos_qualificacao: atual.avisos_qualificacao ?? [],
+        ...dadosDoCard,
+      })
+      setAtual(r)
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setPasso(null)
+    }
+  }
+
   async function salvar() {
     if (!atual?.dados) return
     setErro(null)
@@ -380,7 +529,7 @@ export function AnaliseRpvModal({
         acao: 'salvar',
         notas_kommo: notasKommo,
         dados: atual.dados,
-        custo_cartorio: atual.custo_cartorio ?? null,
+        custo_cartorio: custoCartorio ?? atual.custo_cartorio ?? null,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
         ...dadosDoCard,
       })
@@ -517,13 +666,77 @@ export function AnaliseRpvModal({
             </ul>
           )}
 
-          {/* A busca da tabela de cartório falhou. Em vermelho, e separado dos
-              avisos: o aviso da análise diz que a tela pediria a tabela em
-              seguida — sem isto, a promessa fica sem desfecho. */}
+          {/* A CONSULTA DO CARTÓRIO EM ANDAMENTO, visível e sem travar nada.
+              O passo dela usava o mesmo estado do resto, que desabilita o campo
+              do chat — e o rótulo só aparecia antes de a análise existir. Dava
+              campo morto sem explicação. Agora ela tem linha própria, some
+              sozinha e o chat segue utilizável enquanto isso. */}
+          {passoCartorio && (
+            <p className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 ring-1 ring-inset ring-slate-200">
+              <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+              {passoCartorio} Você já pode pedir alterações — o preço se refaz quando
+              o custo chegar.
+            </p>
+          )}
+
+          {/* A consulta do cartório falhou. Em vermelho, e separado dos avisos:
+              o aviso da análise diz que a tela pediria o custo em seguida — sem
+              isto, a promessa fica sem desfecho. */}
           {falhaCartorio && (
             <p className="rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
               {falhaCartorio}
             </p>
+          )}
+
+          {/* SAÍDA MANUAL. Aparece quando o preço está sem cartório e não há
+              consulta em andamento. Quem opera sabe quanto custa a escritura no
+              cartório onde lavra — sem isto, a busca falhando deixa a pessoa sem
+              nada a fazer dentro da janela. */}
+          {atual?.valores && atual.valores.cartorio == null && !passoCartorio && (
+            <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
+              <p className="mb-2 text-xs text-slate-600">
+                Informe o custo de cartório à mão e o preço se refaz. Digite só os
+                números — os dois últimos dígitos são os centavos. Deixe em branco o
+                que não souber.
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="text-xs text-slate-500">
+                  Escritura
+                  <input
+                    className="mt-0.5 block w-32 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    inputMode="numeric"
+                    placeholder="0,00"
+                    value={manual.escritura ? formatBRLInput(parseBRLInput(manual.escritura)) : ''}
+                    disabled={ocupado}
+                    onChange={(e) =>
+                      setManual((m) => ({ ...m, escritura: onlyDigits(e.target.value) }))
+                    }
+                  />
+                </label>
+                <label className="text-xs text-slate-500">
+                  Registro
+                  <input
+                    className="mt-0.5 block w-32 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    inputMode="numeric"
+                    placeholder="0,00"
+                    value={manual.registro ? formatBRLInput(parseBRLInput(manual.registro)) : ''}
+                    disabled={ocupado}
+                    onChange={(e) =>
+                      setManual((m) => ({ ...m, registro: onlyDigits(e.target.value) }))
+                    }
+                  />
+                </label>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={aplicarCartorioManual}
+                  disabled={ocupado || (!manual.escritura.trim() && !manual.registro.trim())}
+                  loading={passo === 'Refazendo o preço com o cartório informado…'}
+                >
+                  Aplicar
+                </Button>
+              </div>
+            </div>
           )}
 
           {salvo ? (
