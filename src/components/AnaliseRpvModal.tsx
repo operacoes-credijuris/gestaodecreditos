@@ -42,10 +42,15 @@ import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 const pctBR = (fracao: number) => formatPercent(fracao * 100)
 
 /**
- * Prazo da consulta ao cartório. A busca web leva 10 a 30 s no caso normal; 100 s
- * é folga generosa sobre isso e ainda cabe no teto de 150 s da requisição.
+ * Prazo da consulta ao cartório.
+ *
+ * Subiu de 100 s quando a consulta passou a ABRIR os documentos (web_fetch) além
+ * de buscá-los: ler o anexo de uma tabela de emolumentos é mais lento que ler o
+ * resumo da busca, e era justamente não abrir o arquivo que fazia a consulta
+ * voltar vazia. 140 s ainda fica abaixo do teto de 150 s da requisição — passar
+ * disso só trocaria este aviso pelo erro cru da função.
  */
-const PRAZO_CARTORIO = 100_000
+const PRAZO_CARTORIO = 140_000
 
 /**
  * Uma promessa que desiste no prazo.

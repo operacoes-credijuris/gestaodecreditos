@@ -34,9 +34,22 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
 const MODELO = 'claude-opus-5'
-/** Tetos da busca — ambos pelo limite de recursos da Edge Function. */
-const MAX_BUSCAS = 6
-const MAX_RETOMADAS = 2
+/**
+ * Tetos das ferramentas de servidor.
+ *
+ * BUSCAR NÃO BASTA, E FOI ESSA A FALHA EM PE. A busca devolve trechos: cabeçalho
+ * e notas explicativas do PDF, não o corpo da tabela. O modelo localizou a norma
+ * certa (Ato TJPE 1556/2025, tabela 2026) e mesmo assim devolveu null nos dois
+ * atos — as linhas numéricas das faixas estavam dentro do arquivo, que ele não
+ * tinha como abrir, e o orçamento de buscas acabou antes. web_fetch abre o
+ * documento; é a ferramenta que faltava.
+ *
+ * O orçamento subiu junto: achar a norma custa 2 ou 3 buscas, e abrir o Anexo
+ * Único mais as duas tabelas (Notas e RTD) custa alguns fetches.
+ */
+const MAX_BUSCAS = 10
+const MAX_FETCHES = 6
+const MAX_RETOMADAS = 3
 
 /** Uma faixa de preço já resolvida: dentro dela, o custo é este. */
 export interface FaixaResolvida {
@@ -155,15 +168,18 @@ São dois atos, e você responde os dois:
 1. ESCRITURA PÚBLICA com conteúdo financeiro, no Tabelionato de Notas — é o ato da cessão. A base de cálculo é o valor da cessão, ${brl(preco)}.
 2. REGISTRO do instrumento no Registro de Títulos e Documentos (RTD).
 
-ONDE PROCURAR, nesta ordem: o Tribunal de Justiça de ${uf} ou a Corregedoria-Geral de Justiça (a tabela é publicada por eles, como provimento, portaria ou anexo de lei estadual); depois o sindicato ou colégio de notários e registradores do estado; depois a ANOREG.
+ONDE PROCURAR, nesta ordem: o Tribunal de Justiça de ${uf} ou a Corregedoria-Geral de Justiça (a tabela é publicada por eles, como provimento, ato, portaria ou anexo de lei estadual); depois o sindicato ou colégio de notários e registradores do estado; depois a ANOREG.
+
+ABRA O DOCUMENTO — NÃO SE CONTENTE COM O RESULTADO DA BUSCA. A tabela mora dentro de um anexo (PDF, quase sempre), e a busca devolve só o cabeçalho e as notas explicativas. Use web_fetch no endereço do anexo para ler as linhas numéricas das faixas. Localizar a norma e não abri-la é o modo típico de falhar aqui: dá a impressão de ter achado, e não se leu número nenhum. Gaste as buscas para CHEGAR ao arquivo, e o fetch para lê-lo.
 
 COMO RESPONDER:
 1. APLIQUE A REGRA DA TABELA, não a transcreva. Se a tabela de ${uf} cobra por faixa de valor, ache a faixa em que ${brl(preco)} cai e devolva o valor dela. Se cobra percentual sobre o valor, calcule o percentual sobre ${brl(preco)} e respeite piso e teto. Se soma emolumento + fundos + selo + taxa de fiscalização, some tudo e devolva o total que se paga no balcão. O que eu preciso é o NÚMERO em reais para este valor.
-2. MOSTRE A CONTA em "observacao": qual faixa, qual percentual, o que foi somado. É o que permite conferir.
-3. A FAIXA DE VALIDADE. Em "faixa_de" e "faixa_ate", diga entre que valores esse mesmo custo continua valendo — normalmente os limites da faixa da tabela. Se o custo é percentual e muda a cada real, devolva ${preco} nos dois campos.
-4. FONTE OBRIGATÓRIA. Todo valor precisa do endereço da página em "fontes". Sem fonte o resultado é descartado: emolumento é preço público e este número entra num cálculo de deságio.
-5. UM ATO PODE FALTAR. Se achou a escritura e não o registro (ou o contrário), devolva o que achou e null no outro, explicando em "observacao". Meio custo com a origem clara é útil; não devolva null nos dois só por insegurança — se achou a tabela oficial, aplique-a.
-6. Responda chamando a ferramenta registrar_custo_cartorio uma única vez, ao final.`
+2. SOME O QUE A TABELA MANDA SOMAR. Vários estados cobram, além do emolumento da faixa, uma taxa obrigatória de serviço (nomes variam: TSNR, TFJ, taxa de fiscalização, selo, fundos), com regra própria de teto e piso. O que eu preciso é o valor de BALCÃO: emolumento + tudo o que é obrigatório naquele ato. Se a regra da taxa estiver na lei e não na tabela, leia as duas.
+3. MOSTRE A CONTA em "observacao": qual faixa, qual percentual, que taxas somou e por qual regra. É o que permite conferir.
+4. A FAIXA DE VALIDADE. Em "faixa_de" e "faixa_ate", diga entre que valores esse mesmo custo continua valendo — normalmente os limites da faixa da tabela. Se o custo é percentual e muda a cada real, devolva ${preco} nos dois campos.
+5. FONTE OBRIGATÓRIA. Todo valor precisa do endereço da página em "fontes". Sem fonte o resultado é descartado: emolumento é preço público e este número entra num cálculo de deságio.
+6. UM ATO PODE FALTAR. Se achou a escritura e não o registro (ou o contrário), devolva o que achou e null no outro, explicando em "observacao". Meio custo com a origem clara é útil; não devolva null nos dois só por insegurança — se achou a tabela oficial, aplique-a.
+7. Responda chamando a ferramenta registrar_custo_cartorio uma única vez, ao final.`
 }
 
 async function consultarNaWeb(
@@ -193,9 +209,17 @@ async function consultarNaWeb(
         system: sistema(uf, preco, ano),
         // 'auto', e não ferramenta forçada: forçar impediria a busca, e sem
         // busca não há tabela.
+        // web_search ACHA o documento, web_fetch ABRE. Sem o segundo, o modelo
+        // lê só o resumo da página de busca — foi o que produziu "localizei a
+        // norma mas não consegui extrair as linhas numéricas".
+        //
+        // Sem code_execution junto, de propósito: a filtragem dinâmica já vem
+        // embutida nesta versão das duas ferramentas, e declarar o executor
+        // à parte cria um segundo ambiente que confunde o modelo.
         tools: [
           FERRAMENTA,
           { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
+          { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_FETCHES },
         ],
         messages: mensagens,
       })
