@@ -374,12 +374,25 @@ async function conversar(
 // gravados na linha do estado. É o mesmo encadeamento de invocações que
 // advbox-movimentacoes usa para não estourar o limite.
 
-/** Uma linha 'levantando' parada mais que isto é worker morto — pode reiniciar. */
-const TRAVA_MINUTOS = 8
+/**
+ * Uma linha 'levantando' parada mais que isto é worker morto.
+ *
+ * Pouco acima do teto de tempo de parede da função (400 s ≈ 6,7 min): assim a
+ * morte é notada logo depois de acontecer, e não seis minutos depois.
+ */
+const TRAVA_MINUTOS = 7
 /** Não repete uma pesquisa que acabou de falhar; dá tempo de a fonte voltar do ar. */
 const REPOUSO_FALHA_MINUTOS = 30
-/** Corta laço: 'achar' + dois atos + folga para uma repetição de cada. */
-const MAX_PASSOS = 6
+/** Corta laço: 'achar' + dois atos + folga para tentar outro documento em cada. */
+const MAX_PASSOS = 8
+/**
+ * Quantas etapas podem MORRER (começar e nunca escrever) antes de desistir.
+ *
+ * Morte é o sintoma de documento que não se lê no tempo disponível — PDF de
+ * centenas de páginas, ou digitalizado. Duas mortes na mesma etapa e a resposta
+ * honesta é dizer isso, não tentar para sempre.
+ */
+const MAX_MORTES = 3
 
 type Etapa = 'achar' | 'escritura' | 'registro'
 
@@ -387,33 +400,51 @@ type Etapa = 'achar' | 'escritura' | 'registro'
 interface Progresso {
   etapa: Etapa
   documentos: string[]
+  /** Qual documento da lista está sendo tentado. Avança quando um não serve. */
+  doc: number
   escritura: RegraAto | null
   registro: RegraAto | null
   fontes: string[]
   vigencia: string | null
   observacoes: string[]
   passos: number
+  /**
+   * A etapa que começou e ainda não escreveu o resultado.
+   *
+   * É o único jeito de saber, de fora, que um worker foi morto no meio: se a
+   * invocação seguinte encontra esta marca ainda posta para a MESMA etapa, a
+   * anterior não chegou ao fim. Sem ela, uma etapa que sempre morre é
+   * indistinguível de uma que nunca começou, e o levantamento gira para sempre.
+   */
+  em_curso: { etapa: Etapa; desde: string } | null
+  mortes: number
 }
 
 function progressoInicial(): Progresso {
   return {
-    etapa: 'achar', documentos: [], escritura: null, registro: null,
-    fontes: [], vigencia: null, observacoes: [], passos: 0,
+    etapa: 'achar', documentos: [], doc: 0, escritura: null, registro: null,
+    fontes: [], vigencia: null, observacoes: [], passos: 0, em_curso: null, mortes: 0,
   }
 }
 
 function lerProgresso(bruto: unknown): Progresso {
   const p = (bruto ?? {}) as Partial<Progresso>
   const etapa = p.etapa === 'escritura' || p.etapa === 'registro' ? p.etapa : 'achar'
+  const emCurso = p.em_curso && typeof p.em_curso === 'object'
+    ? { etapa: (p.em_curso as { etapa: Etapa }).etapa, desde: String((p.em_curso as { desde: unknown }).desde ?? '') }
+    : null
   return {
     etapa,
     documentos: Array.isArray(p.documentos) ? p.documentos.map(String) : [],
+    doc: Number(p.doc) || 0,
     escritura: p.escritura ?? null,
     registro: p.registro ?? null,
     fontes: Array.isArray(p.fontes) ? p.fontes.map(String) : [],
     vigencia: p.vigencia ?? null,
     observacoes: Array.isArray(p.observacoes) ? p.observacoes.map(String) : [],
     passos: Number(p.passos) || 0,
+    em_curso: emCurso,
+    mortes: Number(p.mortes) || 0,
   }
 }
 
@@ -459,13 +490,34 @@ async function gravar(svc: SupabaseClient, uf: string, ano: number, campos: Reco
     .eq('uf', uf).eq('ano', ano)
 }
 
+/** Desiste, com um motivo que diz o que aconteceu. */
+async function desistir(svc: SupabaseClient, uf: string, ano: number, p: Progresso, motivo: string) {
+  await gravar(svc, uf, ano, { status: 'falhou', tabela: null, progresso: { ...p, em_curso: null }, motivo })
+}
+
+/** Fecha o levantamento com o que se conseguiu. Meio custo é útil; nada não é. */
+async function consolidar(svc: SupabaseClient, uf: string, ano: number, p: Progresso) {
+  if (!p.escritura && !p.registro) {
+    await desistir(svc, uf, ano, p, `abri os documentos de ${uf} e não consegui ler as tabelas${p.observacoes.length ? ` (${p.observacoes.join('; ')})` : ''}`)
+    return
+  }
+  await gravar(svc, uf, ano, {
+    status: 'pronta', motivo: null, progresso: { ...p, em_curso: null },
+    tabela: {
+      regra: { escritura: p.escritura, registro: p.registro },
+      observacao: p.observacoes.join(' • ') || null,
+    },
+    fontes: p.fontes,
+    vigencia: p.vigencia,
+  })
+}
+
 /**
  * Roda UMA etapa do levantamento e agenda a seguinte.
  *
  * Chamada pela própria função, numa invocação dedicada. Nunca lança: qualquer
  * erro vira status 'falhou' com motivo, porque uma exceção aqui deixaria a
- * linha em 'levantando' e a tela girando até a trava de 8 minutos, sem dizer
- * nada a ninguém.
+ * linha em 'levantando' e a tela girando até a trava vencer, sem dizer nada.
  */
 export async function executarPasso(
   ufBruta: unknown,
@@ -485,38 +537,80 @@ export async function executarPasso(
 
   const p = lerProgresso((data as Record<string, unknown>).progresso)
   p.passos++
-  if (p.passos > MAX_PASSOS) {
-    await gravar(svc, uf, ano, {
-      status: 'falhou', tabela: null, progresso: p,
-      motivo: 'o levantamento deu voltas demais sem completar — provavelmente a tabela deste estado não está publicada em formato legível',
-    })
+
+  // A ETAPA ANTERIOR MORREU? A marca de "em curso" ficou posta para esta mesma
+  // etapa, então a invocação passada não chegou ao fim — quase sempre porque o
+  // documento não se lê dentro do teto de tempo. Passa para o próximo
+  // documento da lista: o primeiro costuma ser o provimento inteiro, com
+  // centenas de páginas, e o seguinte às vezes é só o anexo da tabela.
+  if (p.em_curso && p.em_curso.etapa === p.etapa) {
+    p.mortes++
+    p.observacoes.push(
+      `${p.etapa}: a leitura do documento ${p.doc + 1} não terminou dentro do limite de tempo da função`,
+    )
+    p.doc++
+    p.em_curso = null
+  }
+
+  if (p.passos > MAX_PASSOS || p.mortes >= MAX_MORTES) {
+    await desistir(svc, uf, ano, p,
+      p.mortes >= MAX_MORTES
+        ? `a tabela de ${uf} está num documento que não consigo ler dentro do limite de tempo (tentei ${p.mortes} vezes, em documentos diferentes). Informe o custo à mão, ou me passe o endereço do anexo com a tabela.`
+        : `o levantamento de ${uf} deu voltas demais sem completar`)
     return { etapa: p.etapa, proxima: null }
   }
 
   try {
     if (p.etapa === 'achar') {
+      await gravar(svc, uf, ano, { progresso: { ...p, em_curso: { etapa: 'achar', desde: new Date().toISOString() } } })
       const r = await conversar(apiKey, promptAchar(uf, ano), FERRAMENTA_ACHAR, 5, 0, 2000)
       const docs = Array.isArray(r?.documentos) ? (r!.documentos as Array<Record<string, unknown>>) : []
       p.documentos = docs.map((d) => String(d?.url ?? '')).filter((u) => /^https?:\/\//i.test(u)).slice(0, 3)
+      p.doc = 0
       if (typeof r?.vigencia === 'string') p.vigencia = r.vigencia
       if (typeof r?.observacao === 'string') p.observacoes.push(r.observacao)
 
       if (p.documentos.length === 0) {
-        await gravar(svc, uf, ano, {
-          status: 'falhou', tabela: null, progresso: p,
-          motivo: `não achei o documento oficial com a tabela de emolumentos de ${uf}${p.observacoes[0] ? ` (${p.observacoes[0]})` : ''}`,
-        })
+        await desistir(svc, uf, ano, p,
+          `não achei o documento oficial com a tabela de emolumentos de ${uf}${p.observacoes[0] ? ` (${p.observacoes[0]})` : ''}`)
         return { etapa: 'achar', proxima: null }
       }
       p.etapa = 'escritura'
+      p.em_curso = null
       await gravar(svc, uf, ano, { progresso: p })
       dispararProximaEtapa(uf)
       return { etapa: 'achar', proxima: 'escritura' }
     }
 
-    // Etapas de extração: escritura e depois registro, do mesmo documento.
+    // --- Etapas de extração: escritura, depois registro ---------------------
     const ato = p.etapa
-    const r = await conversar(apiKey, promptAto(uf, ano, ato, p.documentos), FERRAMENTA_ATO, 1, 3, 12000)
+
+    // Documentos esgotados para este ato: segue em frente com o que houver.
+    if (p.doc >= p.documentos.length) {
+      p.observacoes.push(`${ato}: nenhum dos documentos encontrados serviu`)
+      if (ato === 'escritura') {
+        p.etapa = 'registro'
+        p.doc = 0
+        p.em_curso = null
+        await gravar(svc, uf, ano, { progresso: p })
+        dispararProximaEtapa(uf)
+        return { etapa: 'escritura', proxima: 'registro' }
+      }
+      await consolidar(svc, uf, ano, p)
+      return { etapa: 'registro', proxima: null }
+    }
+
+    // A MARCA VAI ANTES DA CHAMADA. Se o worker morrer no meio da leitura, é ela
+    // que conta a história para a invocação seguinte.
+    await gravar(svc, uf, ano, {
+      progresso: { ...p, em_curso: { etapa: ato, desde: new Date().toISOString() } },
+    })
+
+    // UM DOCUMENTO POR INVOCAÇÃO, sem busca e sem retomada. É o orçamento que
+    // caber no teto de tempo — dar três documentos e deixar o modelo tentar
+    // todos na mesma invocação era o que estourava.
+    const r = await conversar(apiKey, promptAto(uf, ano, ato, [p.documentos[p.doc]]), FERRAMENTA_ATO, 0, 1, 8000)
+
     const fontes = Array.isArray(r?.fontes)
       ? (r!.fontes as unknown[]).map(String).filter((f) => /^https?:\/\//i.test(f))
       : []
@@ -531,37 +625,29 @@ export async function executarPasso(
     if (typeof r?.observacao === 'string') p.observacoes.push(`${ato}: ${r.observacao}`)
     if (typeof validado === 'string') p.observacoes.push(`${ato}: descartado (${validado})`)
 
+    p.em_curso = null
+
+    // Não achou neste documento: tenta o próximo, na invocação seguinte.
+    if (!p[ato] && p.doc + 1 < p.documentos.length) {
+      p.doc++
+      await gravar(svc, uf, ano, { progresso: p })
+      dispararProximaEtapa(uf)
+      return { etapa: ato, proxima: `${ato} (documento ${p.doc + 1})` }
+    }
+
     if (ato === 'escritura') {
       p.etapa = 'registro'
+      // O registro costuma estar no MESMO documento em que a escritura foi
+      // achada, então começa por ele em vez de voltar ao primeiro da lista.
       await gravar(svc, uf, ano, { progresso: p })
       dispararProximaEtapa(uf)
       return { etapa: 'escritura', proxima: 'registro' }
     }
 
-    // Fim da linha: consolida. Meio custo com origem clara é útil — o motor
-    // avisa que falta a outra metade —, mas nenhum dos dois atos é fracasso.
-    if (!p.escritura && !p.registro) {
-      await gravar(svc, uf, ano, {
-        status: 'falhou', tabela: null, progresso: p,
-        motivo: `abri o documento de ${uf} e não consegui ler as tabelas${p.observacoes.length ? ` (${p.observacoes.join('; ')})` : ''}`,
-      })
-      return { etapa: 'registro', proxima: null }
-    }
-    await gravar(svc, uf, ano, {
-      status: 'pronta', motivo: null, progresso: p,
-      tabela: {
-        regra: { escritura: p.escritura, registro: p.registro },
-        observacao: p.observacoes.join(' • ') || null,
-      },
-      fontes: p.fontes,
-      vigencia: p.vigencia,
-    })
+    await consolidar(svc, uf, ano, p)
     return { etapa: 'registro', proxima: null }
   } catch (e) {
-    await gravar(svc, uf, ano, {
-      status: 'falhou', tabela: null, progresso: p,
-      motivo: `a etapa "${p.etapa}" falhou: ${(e as Error)?.message ?? String(e)}`,
-    })
+    await desistir(svc, uf, ano, p, `a etapa "${p.etapa}" falhou: ${(e as Error)?.message ?? String(e)}`)
     return { etapa: p.etapa, proxima: null }
   }
 }
@@ -583,20 +669,21 @@ function daLinha(uf: string, ano: number, d: Record<string, unknown>): Emolument
 /** Em que etapa está, em português, para a tela dizer algo melhor que "aguarde". */
 function rotuloDaEtapa(bruto: unknown): string {
   const p = lerProgresso(bruto)
+  const doc = p.documentos.length > 1 ? ` (documento ${p.doc + 1} de ${p.documentos.length})` : ''
   if (p.etapa === 'achar') return 'procurando a tabela oficial do estado'
-  if (p.etapa === 'escritura') return 'lendo a tabela da escritura no documento'
-  return 'lendo a tabela do registro'
+  if (p.etapa === 'escritura') return `lendo a tabela da escritura${doc}`
+  return `lendo a tabela do registro${doc}`
 }
 
 /**
  * Consulta o estado do levantamento de uma UF e, se ninguém estiver cuidando
- * dela, dispara a primeira etapa.
+ * dela, dispara a etapa que falta.
  *
  * Devolve na hora, sempre. Quem chama volta a perguntar enquanto for
  * 'levantando'.
  *
- * SEM A TABELA (migração 0053 não rodou) não há levantamento possível: as
- * etapas se comunicam por ela. O motivo diz isso em português, para a falha ser
+ * SEM A TABELA (migrações 0053 e 0054) não há levantamento possível: as etapas
+ * se comunicam por ela. O motivo diz isso em português, para a falha ser
  * diagnosticável em vez de virar um tempo esgotado sem explicação.
  */
 export async function consultarRegra(
@@ -641,13 +728,32 @@ export async function consultarRegra(
     // cache vazio: some sozinho e nunca se corrige.
     const guardada = daLinha(uf, ano, linha)
     if (status === 'pronta' && guardada.regra) return { estado: 'pronta', emolumentos: guardada }
-    if (status === 'levantando' && idade < TRAVA_MINUTOS) {
-      return { estado: 'levantando', emolumentos: null, reconsultar_em: 8, etapa: rotuloDaEtapa(linha.progresso) }
-    }
     if (status === 'falhou' && idade < REPOUSO_FALHA_MINUTOS) {
       return { estado: 'falhou', emolumentos: guardada }
     }
-    // 'levantando' velha (worker morreu) ou 'falhou' já descansada: recomeça.
+
+    if (status === 'levantando') {
+      const etapa = rotuloDaEtapa(linha.progresso)
+      // Trabalho vivo: só informa.
+      if (idade < TRAVA_MINUTOS) {
+        return { estado: 'levantando', emolumentos: null, reconsultar_em: 8, etapa }
+      }
+      // TRAVA VENCIDA: o worker morreu. RETOMA DE ONDE PAROU — não recomeça.
+      //
+      // Recomeçar era o defeito que fazia isto girar para sempre: a etapa
+      // 'achar' funcionava, a de leitura morria no teto de tempo, o reinício
+      // jogava fora os documentos achados e voltava para 'achar'. Achava,
+      // morria, esquecia, achava de novo. Nunca acumulava nada, nunca desistia,
+      // e a tela repetia a mesma etapa a cada volta.
+      //
+      // Retomando, a marca `em_curso` deixada pelo worker morto conta a
+      // história para a próxima invocação: ela conta a morte, passa ao
+      // documento seguinte e, depois de algumas, desiste dizendo o que houve.
+      await gravar(svc, uf, ano, { progresso: lerProgresso(linha.progresso) })
+      dispararProximaEtapa(uf)
+      return { estado: 'levantando', emolumentos: null, reconsultar_em: 8, etapa }
+    }
+    // 'falhou' já descansada: recomeça limpo, abaixo.
   }
 
   // A LINHA NASCE ANTES DA PESQUISA, e é ela que serve de trava: duas abas
