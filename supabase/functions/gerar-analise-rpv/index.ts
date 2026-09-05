@@ -682,7 +682,7 @@ function aplicarCoresJuridica(ws: any) {
   // Sim/Não — em toda a faixa de respostas (só pinta onde o texto casa).
   // A fórmula é relativa à primeira célula da faixa: $B10 para a faixa que
   // começa em B10.
-  add('B10:B37', [
+  add('B10:B38', [
     { f: '$B10="Sim"', cor: COR.verde },
     { f: '$B10="Não"', cor: COR.vermelho },
   ]);
@@ -705,12 +705,12 @@ function aplicarCoresJuridica(ws: any) {
   ]);
   // B26 — cenários de execução invertida (cinza p/ qualquer preenchimento)
   add('B26', [{ f: '$B26<>""', cor: COR.cinza }]);
-  // B37 — expedição
-  add('B37', [
-    { f: '$B37="Minuta de RPV"', cor: COR.laranja },
-    { f: '$B37="RPV"', cor: COR.verde },
-    { f: '$B37="Alvará de pagamento"', cor: COR.azul },
-    { f: '$B37="Sem expedição"', cor: COR.roxo },
+  // B38 — expedição
+  add('B38', [
+    { f: '$B38="Minuta de RPV"', cor: COR.laranja },
+    { f: '$B38="RPV"', cor: COR.verde },
+    { f: '$B38="Alvará de pagamento"', cor: COR.azul },
+    { f: '$B38="Sem expedição"', cor: COR.roxo },
   ]);
   // A regra da necessidade de alvará saiu junto com a pergunta (linha 43 do
   // modelo antigo), que o dono removeu ao simplificar.
@@ -767,8 +767,61 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   aj.getCell('C6').value = dados.tribunal ?? '';
   aj.getCell('C7').value = dados.juizo ?? '';          // "Juízo" — campo novo
 
+  // ---------------- O modelo ainda é o que o código pensa que é? ----------------
+  //
+  // O questionário é escrito POR NÚMERO DE LINHA: a IA devolve { "19": {...} } e
+  // isso vai para B19. Quando alguém insere uma pergunta no meio do modelo, tudo
+  // abaixo dela desce — e as respostas passam a cair nas perguntas erradas SEM
+  // ERRO NENHUM, porque "Sim" numa célula que espera "Sim" é aceito. O arquivo
+  // sai bonito e mentindo.
+  //
+  // Já aconteceu duas vezes: o questionário saiu de 12..43 para 10..37, e depois
+  // ganhou "Há honorários sucumbenciais?" na 36, empurrando a expedição para a
+  // 38 e o valor final para a 39.
+  //
+  // Daí esta conferência. Ela não conserta nada — só troca uma planilha
+  // silenciosamente errada por uma falha que diz onde olhar. Falhar aqui é o
+  // desfecho bom: o documento errado seria assinado.
+  const ANCORAS: Array<[number, string, string]> = [
+    [19, 'tipo da sentenca', 'tipo da sentença'],
+    [24, 'foi apresentado valor', 'valor apresentado no CS / execução invertida'],
+    [25, 'cuidado', 'bloco fixo CUIDADO (não é pergunta)'],
+    [26, 'execucao invertida', 'cenários da execução invertida'],
+    [28, 'impugnacao', 'houve impugnação ao valor'],
+    [36, 'sucumbenciais', 'há honorários sucumbenciais'],
+    [38, 'expedicao de algum documento', 'houve expedição de documento'],
+    [39, 'valor total final', 'valor final do crédito (escrito por mim)'],
+    [40, 'observacao importante', 'observações e riscos (escrito por mim)'],
+  ];
+  // O texto de uma célula pode vir como string OU como richText (pedaços com
+  // formatação própria) — e várias destas perguntas vêm assim, com trechos em
+  // negrito. Ler direto com String() devolveria "[object Object]", e a
+  // conferência acusaria deslocamento em toda linha formatada.
+  const textoDaCelula = (v: unknown): string => {
+    if (v == null) return '';
+    const rt = (v as { richText?: Array<{ text?: unknown }> })?.richText;
+    if (Array.isArray(rt)) return rt.map((p) => String(p?.text ?? '')).join('');
+    return String(v);
+  };
+  // `normalizar` (no topo do arquivo) tira acento, pontuação E espaço. Os dois
+  // lados passam por ela, então "tipo da sentenca" casa com "Tipo da sentença:".
+  // Reusar em vez de escrever outra: uma cópia desta normalização já entrou
+  // errada aqui antes, com as combining marks coladas como caracteres literais
+  // em lugar dos escapes Unicode.
+  const fora = ANCORAS.filter(
+    ([linha, trecho]) => !normalizar(textoDaCelula(aj.getCell(`A${linha}`).value)).includes(normalizar(trecho)),
+  );
+  if (fora.length) {
+    throw new Error(
+      'O modelo de Análise de RPV mudou de lugar e o código ainda escreve nas linhas antigas — ' +
+      'as respostas cairiam nas perguntas erradas, sem erro visível. ' +
+      fora.map(([linha, , oque]) => `A linha ${linha} devia ser "${oque}" e está com "${(textoDaCelula(aj.getCell(`A${linha}`).value) || '(vazia)').slice(0, 60)}"`).join('; ') +
+      '. Rode scripts/conferir-planilha.cjs com o modelo novo e ajuste o mapa do m2.',
+    );
+  }
+
   // ---------------- Aba jurídica: respostas M2 (col B) + complementos (col D) ----------------
-  // dados.m2 = { "12": {resposta, complemento}, ... } indexado pela LINHA da planilha (perguntas 12..43)
+  // dados.m2 = { "10": {resposta, complemento}, ... } indexado pela LINHA da planilha (perguntas 10..38)
   // As duas linhas que não recebem escrita, no modelo simplificado:
   const PULAR_LINHA = new Set([25]);       // 25 = bloco fixo "CUIDADO" (A25:D25 mesclado)
   const SEM_COMPLEMENTO = new Set([28]);   // 28 = C28:D28 mesclado ("Responder na linha abaixo")
@@ -780,20 +833,20 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
     if (!SEM_COMPLEMENTO.has(r) && item?.complemento != null && item.complemento !== '') aj.getCell(`D${r}`).value = reformatarMoeda(item.complemento);
   }
 
-  // Linha 38: "Qual o valor final do crédito?" (B38:D38 mesclado). O modelo traz
-  // o gabarito do texto; aqui ele sai preenchido.
-  aj.getCell('B38').value =
+  // Linha 39: "Qual o valor final do crédito?" (mesclado). O modelo traz o
+  // gabarito do texto; aqui ele sai preenchido.
+  aj.getCell('B39').value =
     `VALOR TOTAL BRUTO: ${brl(dados.bruto_total)}\n` +
     `Valor principal líquido: ${brl(calc.L5)}\n` +
     `Valor dos honorários contratuais: ${brl(calc.L7)}`;
 
-  // Linha 39: "Alguma observação importante para acrescentar nesse caso?"
-  // (B39:D39 mesclado). Recebe os riscos que a IA levantou — é onde eles cabem
-  // dentro da planilha. Antes existiam só na resposta da função e não chegavam
-  // ao arquivo que fica no Drive.
+  // Linha 40: "Alguma observação importante para acrescentar nesse caso?"
+  // (mesclado). Recebe os riscos que a IA levantou — é onde eles cabem dentro
+  // da planilha. Antes existiam só na resposta da função e não chegavam ao
+  // arquivo que fica no Drive.
   const riscos: any[] = Array.isArray(dados.bloco_g_riscos) ? dados.bloco_g_riscos : [];
   if (riscos.length)
-    aj.getCell('B39').value = riscos
+    aj.getCell('B40').value = riscos
       .map((r) => `• ${r?.grau ? `[${r.grau}] ` : ''}${r?.risco ?? ''}${r?.fundamento ? ` — ${r.fundamento}` : ''}`)
       .join('\n');
 
@@ -1034,7 +1087,7 @@ const SCHEMA_ANALISE = {
   m4_pares: 'lista de pares {de, ate, dias, tipo:"serventia"|"gabinete"} usados na média',
 
   // M2 — 25 respostas. Chave = nº da linha na aba jurídica (12..43).
-  m2: 'objeto { "10": {"resposta":"Sim/Não/...", "complemento":"data DD/MM/AAAA ou valor R$ ou vazio"}, ... } cobrindo as linhas 10 a 37 (a 25 é bloco fixo e fica de fora)',
+  m2: 'objeto { "10": {"resposta":"Sim/Não/...", "complemento":"data DD/MM/AAAA ou valor R$ ou vazio"}, ... } cobrindo as linhas 10 a 38 (a 25 é bloco fixo e fica de fora)',
 
   // M1 + riscos (vão no .md, não na planilha)
   m1_sintese: 'Síntese do processo em UM parágrafo corrido, começando com "Trata-se", no máximo 10 linhas, SEM tópicos/bullets. ' +
@@ -1128,9 +1181,10 @@ const SYSTEM_ANALISE =
   '33: "Contadoria judicial se manifestou?" -> Sim/Não; complemento: data da juntada dos cálculos. ' +
   '34: "Houve pedido de destaque de honorários contratuais?" -> Sim/Não; complemento: valor dos honorários destacados e o valor principal. ' +
   '35: "A manifestação da contadoria foi homologada/precluiu o prazo?" -> Sim/Não; complemento: data. ' +
-  '36: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
-  '37: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
-  'NÃO EXISTEM as linhas 38 e 39 no m2: são o valor final e as observações, e quem as preenche sou eu, com o cálculo pronto. ' +
+  '36: "Há honorários sucumbenciais neste processo?" -> Sim/Não; complemento: o valor fixado. Responda em COERÊNCIA com o campo "honorarios_sucumbenciais": se lá você pôs um valor, aqui é Sim; se pôs zero, aqui é Não. ' +
+  '37: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
+  '38: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
+  'NÃO EXISTEM as linhas 39 e 40 no m2: são o valor final e as observações, e quem as preenche sou eu, com o cálculo pronto. ' +
   '=== REGRA 13 — O ROTEIRO ATÉ A LIQUIDAÇÃO (campo "roteiro_prazo") === ' +
   'É daqui que sai o prazo de resgate, e o prazo manda no preço: superestimar joga o preço para baixo e perde o negócio; subestimar compra um crédito que rende menos do que parece. Não chute um número redondo — MONTE O CAMINHO. ' +
   'PASSO 1: diga em "etapa_atual" onde o processo está HOJE, lendo o último andamento real. ' +

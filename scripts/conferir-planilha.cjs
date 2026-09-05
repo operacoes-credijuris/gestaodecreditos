@@ -143,8 +143,66 @@ const CASOS = [
   { nome: 'so sucumbenciais', tipo: 'sucumbenciais', sucumbenciais: 15000, honorarios: 0 },
 ]
 
+// ---------------------------------------------------------------------------
+// As âncoras da aba jurídica
+// ---------------------------------------------------------------------------
+//
+// O questionário é escrito POR NÚMERO DE LINHA, então inserir uma pergunta no
+// meio do modelo faz as respostas caírem nas perguntas erradas — sem erro, que
+// é o pior jeito de quebrar. gerarPlanilha confere isto antes de escrever; aqui
+// se confere a mesma coisa, e de quebra que a conferência DISPARA quando deve.
+const ANCORAS = [
+  [19, 'tipo da sentenca', 'tipo da sentença'],
+  [24, 'foi apresentado valor', 'valor apresentado no CS / execução invertida'],
+  [25, 'cuidado', 'bloco fixo CUIDADO'],
+  [26, 'execucao invertida', 'cenários da execução invertida'],
+  [28, 'impugnacao', 'houve impugnação ao valor'],
+  [36, 'sucumbenciais', 'há honorários sucumbenciais'],
+  [38, 'expedicao de algum documento', 'houve expedição de documento'],
+  [39, 'valor total final', 'valor final do crédito'],
+  [40, 'observacao importante', 'observações e riscos'],
+]
+/** A mesma normalizar() do index.ts: sem acento, sem pontuação, sem espaço. */
+const normalizar = (s) => String(s).toLowerCase().normalize('NFD')
+  .replace(/[̀-ͯ]/g, '').replace(/[.\-/() ]/g, '')
+const textoDaCelula = (v) => {
+  if (v == null) return ''
+  return Array.isArray(v.richText) ? v.richText.map((p) => String(p?.text ?? '')).join('') : String(v)
+}
+const conferirAncoras = (aj) =>
+  ANCORAS.filter(([l, t]) => !normalizar(textoDaCelula(aj.getCell('A' + l).value)).includes(normalizar(t)))
+
+async function checarAncoras() {
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(MODELO)
+  const fora = conferirAncoras(wb.getWorksheet('Análise jurídica'))
+  if (fora.length) {
+    console.log('  FALHA  ancoras da aba juridica: ' +
+      fora.map(([l, , o]) => `linha ${l} devia ser "${o}"`).join('; '))
+    return false
+  }
+  console.log(`  ok     ancoras da aba juridica (${ANCORAS.length} conferidas)`)
+
+  // E a conferência precisa DISPARAR quando o modelo anda: uma guarda que nunca
+  // acusa nada é indistinguível de guarda nenhuma.
+  const wb2 = new ExcelJS.Workbook()
+  await wb2.xlsx.readFile(MODELO)
+  wb2.getWorksheet('Análise jurídica').spliceRows(30, 0, ['linha inserida de propósito'])
+  await wb2.xlsx.writeFile(SAIDA)
+  const wb3 = new ExcelJS.Workbook()
+  await wb3.xlsx.readFile(SAIDA)
+  const fora2 = conferirAncoras(wb3.getWorksheet('Análise jurídica'))
+  if (!fora2.length) {
+    console.log('  FALHA  a guarda nao disparou num modelo deslocado de proposito')
+    return false
+  }
+  console.log(`  ok     a guarda dispara quando o modelo anda (${fora2.length} ancoras)`)
+  return true
+}
+
 ;(async () => {
   let ok = 0
+  const ancorasOk = await checarAncoras()
   for (const c of CASOS) {
     const d = motor(c)
     const wb = new ExcelJS.Workbook()
@@ -200,6 +258,6 @@ const CASOS = [
       usado.padEnd(12) + 'base ' + brl(p[usado].base).padStart(14) + '   rent ' + (p[usado].rent * 100).toFixed(2) + '%/mes')
     erros.forEach((e) => console.log('           - ' + e))
   }
-  console.log(`${ok}/${CASOS.length}`)
-  process.exit(ok === CASOS.length ? 0 : 1)
+  console.log(`${ok}/${CASOS.length} cenarios` + (ancorasOk ? '' : '   + ancoras REPROVADAS'))
+  process.exit(ok === CASOS.length && ancorasOk ? 0 : 1)
 })()
