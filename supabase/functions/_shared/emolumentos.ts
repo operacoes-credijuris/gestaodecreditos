@@ -136,11 +136,11 @@ const FERRAMENTA = {
       faixa_de: {
         type: ['number', 'null'],
         description:
-          'Piso da faixa de valores em que ESTES MESMOS custos valem, em reais. Se a tabela cobra percentual (o custo muda a cada real), devolva o próprio valor consultado aqui e em faixa_ate.',
+          'Piso, em reais, da FAIXA DA TABELA em que o valor consultado caiu — a faixa do emolumento, mesmo que alguma taxa somada por cima seja percentual e varie dentro dela. Ex.: consultei R$ 51.129 e a tabela cobra a mesma coisa de R$ 50.000,01 a R$ 55.000,00 -> 50000.01. Só devolva o próprio valor consultado se a tabela NÃO tiver faixas e o custo inteiro for percentual.',
       },
       faixa_ate: {
         type: ['number', 'null'],
-        description: 'Teto da mesma faixa; null se a faixa é aberta ("acima de X").',
+        description: 'Teto da mesma faixa da tabela; null se a faixa é aberta ("acima de X").',
       },
       observacao: {
         type: ['string', 'null'],
@@ -176,7 +176,7 @@ COMO RESPONDER:
 1. APLIQUE A REGRA DA TABELA, não a transcreva. Se a tabela de ${uf} cobra por faixa de valor, ache a faixa em que ${brl(preco)} cai e devolva o valor dela. Se cobra percentual sobre o valor, calcule o percentual sobre ${brl(preco)} e respeite piso e teto. Se soma emolumento + fundos + selo + taxa de fiscalização, some tudo e devolva o total que se paga no balcão. O que eu preciso é o NÚMERO em reais para este valor.
 2. SOME O QUE A TABELA MANDA SOMAR. Vários estados cobram, além do emolumento da faixa, uma taxa obrigatória de serviço (nomes variam: TSNR, TFJ, taxa de fiscalização, selo, fundos), com regra própria de teto e piso. O que eu preciso é o valor de BALCÃO: emolumento + tudo o que é obrigatório naquele ato. Se a regra da taxa estiver na lei e não na tabela, leia as duas.
 3. MOSTRE A CONTA em "observacao": qual faixa, qual percentual, que taxas somou e por qual regra. É o que permite conferir.
-4. A FAIXA DE VALIDADE. Em "faixa_de" e "faixa_ate", diga entre que valores esse mesmo custo continua valendo — normalmente os limites da faixa da tabela. Se o custo é percentual e muda a cada real, devolva ${preco} nos dois campos.
+4. A FAIXA DA TABELA. Em "faixa_de" e "faixa_ate", devolva os limites da FAIXA DA TABELA em que ${brl(preco)} caiu — os mesmos que você leu no anexo. Se sobre o emolumento incide uma taxa percentual que varia a cada real, isso NÃO encolhe a faixa: informe a faixa do emolumento assim mesmo e explique a taxa em "observacao". Quem me chama usa esses limites para saber se o preço final continua na mesma faixa; uma faixa colapsada num ponto só faz o aviso disparar à toa. Devolva ${preco} nos dois campos apenas se a tabela do estado não tiver faixas e o custo inteiro for percentual.
 5. FONTE OBRIGATÓRIA. Todo valor precisa do endereço da página em "fontes". Sem fonte o resultado é descartado: emolumento é preço público e este número entra num cálculo de deságio.
 6. UM ATO PODE FALTAR. Se achou a escritura e não o registro (ou o contrário), devolva o que achou e null no outro, explicando em "observacao". Meio custo com a origem clara é útil; não devolva null nos dois só por insegurança — se achou a tabela oficial, aplique-a.
 7. Responda chamando a ferramenta registrar_custo_cartorio uma única vez, ao final.`

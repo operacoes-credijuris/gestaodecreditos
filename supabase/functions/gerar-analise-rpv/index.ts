@@ -1453,14 +1453,23 @@ Deno.serve(async (req) => {
     calc.IR = Number(dados.ir) || 0; calc.INSS = Number(dados.inss) || 0;
 
     // O PREÇO SAIU DE FAIXA? O custo foi consultado para o preço da rodada
-    // anterior; a rodada nova, já com o cartório somado, dá um preço um pouco
-    // menor. Quase sempre continua na mesma faixa da tabela — quando não
-    // continua, o valor usado é o da faixa vizinha e isso precisa ser dito.
+    // anterior; a rodada nova, já com o cartório somado, dá um preço MENOR — e o
+    // cartório empurra bem mais que o próprio valor dele, porque o preço se
+    // ajusta para manter a meta de rentabilidade. Quando o preço final cai numa
+    // faixa abaixo da consultada, o emolumento embutido é o da faixa de cima:
+    // maior que o devido. Erra para o lado conservador, mas erra — e a tela
+    // pede uma nova consulta antes de aceitar.
     const trocouDeFaixa =
       cartorio != null &&
       cartorio.de != null &&
       cartorio.ate != null &&
       (calc.cessao < cartorio.de || calc.cessao > cartorio.ate);
+    // Devolvido para a tela decidir se vale outra consulta. Só faz sentido
+    // reconsultar quando a faixa é de verdade: com faixa colapsada num ponto
+    // (tabela puramente percentual), o preço final SEMPRE cai fora e reconsultar
+    // entraria em laço.
+    const faixaColapsada =
+      cartorio != null && cartorio.de != null && cartorio.ate != null && cartorio.de >= cartorio.ate;
 
     // Nome do credor em Title Case (usado na pasta do Drive, no nome do arquivo e na aba de precificação)
     const credorBruto = (dados.credor_nome || (dados.cedente_cpf || '').split(/\bCPF\b/i)[0] || numeroProcesso || 'cedente');
@@ -1478,7 +1487,7 @@ Deno.serve(async (req) => {
     else if (cartorio.origem === 'busca')
       avisosBase.push(`Custo de cartório de ${cartorio.uf} consultado agora (${cartorio.observacao ?? 'sem detalhe'}). Fonte: ${cartorio.fontes[0] ?? 'não informada'}. Vale conferir uma vez; as próximas cessões desta faixa usam o mesmo valor.`);
     if (trocouDeFaixa)
-      avisosBase.push(`⚠️ O preço final (${brl(calc.cessao)}) ficou fora da faixa consultada no cartório (${brl(cartorio!.de!)} a ${brl(cartorio!.ate!)}). O custo usado é o da faixa vizinha — confira o emolumento para o valor final.`);
+      avisosBase.push(`⚠️ O custo de cartório foi consultado para ${brl(cartorio!.preco)}, faixa de ${brl(cartorio!.de!)} a ${brl(cartorio!.ate!)} — mas o preço final ficou em ${brl(calc.cessao)}, ${calc.cessao < cartorio!.de! ? 'ABAIXO' : 'ACIMA'} dessa faixa. O emolumento embutido é o da faixa consultada, não o da faixa do preço final. Consulte de novo para o valor final, ou confira o emolumento à mão.`);
     if (_prazoEstimado) avisosBase.push('⚠️ PRAZO ESTIMADO — TJGO sem data-limite de convênio nos autos: a espera até a expedição foi estimada em 60 dias. Confira o prazo e a rentabilidade à mão.');
     if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && !dados._soHonorarios && !ehEstadoDeGoias(dados.ente_devedor))
       avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
@@ -1580,6 +1589,8 @@ Deno.serve(async (req) => {
       regra_prazo: prazo.regra.descricao,
       valores,
       cartorio: cartorioResp,
+      // A tela reconsulta o cartório quando isto vem verdadeiro (uma vez só).
+      reconsultar_cartorio: trocouDeFaixa && !faixaColapsada,
       atingiu_alvo: calc.atingiuAlvo !== false,
       aviso: avisoFinal,
       drive_folder_url: `https://drive.google.com/drive/folders/${cedenteId}`,

@@ -121,6 +121,13 @@ export interface RespostaAnaliseRpv {
   prazo_detalhe?: string
   valores?: ValoresRpv
   cartorio?: CartorioRpv
+  /**
+   * O preço final saiu da faixa da tabela consultada — vale perguntar de novo,
+   * agora para o preço certo. A função só marca quando a faixa é real: com
+   * tabela puramente percentual a faixa é um ponto, o preço sempre cai fora, e
+   * reconsultar entraria em laço.
+   */
+  reconsultar_cartorio?: boolean
   atingiu_alvo?: boolean
   m1_sintese?: string | null
   riscos?: Risco[]
@@ -384,7 +391,7 @@ export function AnaliseRpvModal({
               }
               setPassoCartorio('Refazendo o preço com o cartório…')
               // Sem IA: só recalcula. Por isso é uma ação própria, e não 'refinar'.
-              const r2 = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
+              let r2 = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
                 acao: 'reprecificar',
                 notas_kommo: notasKommo,
                 dados: r.dados,
@@ -392,6 +399,48 @@ export function AnaliseRpvModal({
                 avisos_qualificacao: r.avisos_qualificacao ?? [],
                 ...dadosDoCard,
               })
+
+              // SEGUNDA CONSULTA, quando o preço mudou de faixa.
+              //
+              // O cartório empurra o preço bem mais que o próprio valor dele — o
+              // preço se reajusta para manter a meta de rentabilidade. Num caso
+              // real: consulta a R$ 51.129 (faixa 50.000,01–55.000,00), preço
+              // final R$ 47.902 — faixa de baixo. O emolumento embutido virava o
+              // da faixa de cima, maior que o devido.
+              //
+              // UMA VEZ SÓ, e não um laço até convergir: a segunda consulta parte
+              // de um preço já quase certo, então a terceira quase nunca mudaria
+              // de faixa — e cada rodada custa dezenas de segundos. Se ainda
+              // assim sobrar diferença, o aviso da função diz, com os dois
+              // valores, e os campos manuais resolvem.
+              const preco2 = r2.cartorio?.preco_consulta ?? r2.valores?.preco_cessao
+              if (r2.reconsultar_cartorio && preco2 && revisao.current === naEpoca) {
+                setPassoCartorio(`Preço mudou de faixa — reconsultando para ${formatBRL(preco2)}…`)
+                const e2 = await comPrazo(
+                  invokeFunction<{ custo?: { total?: number | null } | null }>(
+                    'gerar-analise-rpv',
+                    { acao: 'emolumentos', uf, preco: preco2 },
+                  ),
+                  PRAZO_CARTORIO,
+                  `a reconsulta passou de ${PRAZO_CARTORIO / 1000}s`,
+                )
+                if (e2?.custo?.total != null) {
+                  setCustoCartorio(e2.custo)
+                  const r3 = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
+                    acao: 'reprecificar',
+                    notas_kommo: notasKommo,
+                    dados: r.dados,
+                    custo_cartorio: e2.custo,
+                    avisos_qualificacao: r.avisos_qualificacao ?? [],
+                    ...dadosDoCard,
+                  })
+                  r2 = r3
+                }
+                // e2 sem valor: fica o r2 da primeira consulta, com o aviso de
+                // faixa que a função já pôs nele. Preço com cartório aproximado
+                // é melhor que preço sem cartório nenhum.
+              }
+
               if (revisao.current === naEpoca) setAtual(r2)
             } else {
               const porque = e?.custo?.motivo ?? e?.motivo
