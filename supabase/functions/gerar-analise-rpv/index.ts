@@ -837,7 +837,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   const _pctHon = _baseHon > 0 ? (Number(dados.honorarios) || 0) / _baseHon : 0;
   cel('K', 7).value = Number(_pctHon.toFixed(6));
   if (dados._soHonorarios) {
-    cel('G', 5).value = 'Honorários Contratuais';   // natureza do que está sendo adquirido
+    cel('G', 5).value = dados._soSucumbenciais ? 'Honorários Sucumbenciais' : 'Honorários Contratuais';
   }
   // OS SUCUMBENCIAIS, LIDOS DO PROCESSO — e zero quando não houver.
   //
@@ -849,10 +849,15 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // zero vira zero.
   //
   // A base é o BRUTO nos dois modelos, como as fórmulas L8 e L20 do modelo.
+  //
+  // EM "SÓ HONORÁRIOS" O PERCENTUAL É ZERO, e não o que se extraiu. Naquele modo
+  // a verba cedida VIRA o bruto e ocupa a linha do principal; deixar a linha de
+  // sucumbenciais também preenchida contaria a MESMA verba duas vezes — numa
+  // cessão de R$ 15.000 a planilha somaria R$ 30.000.
   const _brutoSucumb = Number(dados.bruto_total) || 0;
-  const _pctSucumb = _brutoSucumb > 0
-    ? (Number(dados.honorarios_sucumbenciais) || 0) / _brutoSucumb
-    : 0;
+  const _pctSucumb = dados._soHonorarios || !(_brutoSucumb > 0)
+    ? 0
+    : (Number(dados.honorarios_sucumbenciais) || 0) / _brutoSucumb;
   cel('K', 8).value = Number(_pctSucumb.toFixed(6));
   cel('O', 5).value = calc.desagio;
   // O MESMO DESÁGIO NAS TRÊS LINHAS, nos dois modelos.
@@ -975,7 +980,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   if (dados._soHonorarios) {
     const linhaRot = dados.modelo === 1 ? 2 : 14;
     prec.getCell(`${CENARIOS.principal.rot}${linhaRot}`).value =
-      'Negociando apenas Honorários';
+      dados._soSucumbenciais ? 'Negociando apenas Honorários Sucumbenciais' : 'Negociando apenas Honorários';
   }
 
   const out = await wb.xlsx.writeBuffer();
@@ -1737,21 +1742,41 @@ Deno.serve(async (req) => {
       honorariosCalc = base * (honorariosPct / 100);
     }
     let soHonorarios = false;
+    let soSucumbenciais = false;
     if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Crédito principal, apenas'; }
     else if (tipoAquisicao === 'ambos')      { dados.modelo = 1; dados.tipo_credito = 'Crédito principal + Honorários'; }
     else if (tipoAquisicao === 'honorarios') { dados.modelo = 2; soHonorarios = true; dados.tipo_credito = 'Honorários contratuais + sucumbenciais'; }
+    else if (tipoAquisicao === 'sucumbenciais') { dados.modelo = 2; soHonorarios = true; soSucumbenciais = true; dados.tipo_credito = 'Honorários sucumbenciais, apenas'; }
     else                                     { dados.modelo = escolherModelo(honAI); }  // automático (como hoje), pelo destaque da contadoria
 
     if (soHonorarios) {
-      const valorHon = honorariosPct != null ? brutoNum * (honorariosPct / 100) : honAI;
+      // A VERBA VIRA O BRUTO. Cedendo só honorários não há principal na
+      // operação, então o valor cedido ocupa a linha do principal e as linhas
+      // de honorários ficam zeradas — é o que faz as fórmulas do modelo
+      // fecharem sem um bloco próprio para este caso.
+      const sucumbNum = Number(dados.honorarios_sucumbenciais) || 0;
+      const valorHon = soSucumbenciais
+        ? sucumbNum
+        : (honorariosPct != null ? brutoNum * (honorariosPct / 100) : honAI);
       if (!(valorHon > 0))
-        return errorResponse('Para calcular APENAS os honorários, informe o percentual de honorários no formulário (ou use um processo com honorários destacados nos cálculos da contadoria).');
-      dados.bruto_total = valorHon;                          // o "bruto" do cálculo passa a ser o honorário
-      dados.ir = 0; dados.inss = 0; dados.honorarios = 0;    // sem deduções do principal; cessão sobre o honorário
+        return errorResponse(soSucumbenciais
+          ? 'A cessão é de honorários sucumbenciais, apenas, mas não localizei o valor deles nos documentos do card. Junte a sentença ou o acórdão que os fixou, ou a conta da contadoria que os discrimina.'
+          : 'Para calcular APENAS os honorários, informe o percentual de honorários no formulário (ou use um processo com honorários destacados nos cálculos da contadoria).');
+      dados.bruto_total = valorHon;
+      // O IR INCIDE AQUI TAMBÉM, e antes não incidia.
+      //
+      // Ficava zerado com um aviso pedindo para conferir à mão — o que era
+      // coerente enquanto o motor não sabia calcular imposto nenhum. Agora
+      // sabe, e deixar só este caminho sem desconto seria uma inconsistência
+      // cara: o preço sairia calibrado sobre um valor que o advogado não
+      // recebe. Ver _shared/irpf.ts.
+      dados.ir = irProgressivo(valorHon).imposto;
+      dados.inss = 0; dados.honorarios = 0;
     } else {
       dados.honorarios = honorariosCalc;                     // dedução do líquido (L5) e, no Modelo 1, valor adquirido (L7)
     }
     dados._soHonorarios = soHonorarios;
+    dados._soSucumbenciais = soSucumbenciais;
     dados._honPctInformado = honorariosPct != null;
 
     // 3c. Prazo (T5) + datas — pela ESFERA DO ENTE DEVEDOR
@@ -1879,7 +1904,9 @@ Deno.serve(async (req) => {
     if (dados._houveCorte)
       avisosBase.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.');
     if (dados._soHonorarios)
-      avisosBase.push('Cálculo de APENAS os honorários: confira se há descontos (como IR) sobre o valor dos honorários, pois isso varia conforme o processo.');
+      avisosBase.push(
+        `Cessão de ${dados._soSucumbenciais ? 'honorários SUCUMBENCIAIS, apenas' : 'APENAS os honorários'}: o IR foi descontado pela tabela progressiva (${brl(Number(dados.ir) || 0)}). Se a verba for rendimento recebido acumuladamente, o imposto real é menor — confira o regime antes de fechar.`,
+      );
 
     const valores = {
       bruto: Number(dados.bruto_total) || 0,

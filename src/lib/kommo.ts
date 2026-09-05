@@ -574,3 +574,35 @@ export function telasRpvDesalinhadas(etapas: EtapaKommo[]): DefTela[] {
   const existentes = new Set(doRpv.map((e) => e.status_id))
   return TELAS.filter((t) => !existentes.has(t.statusId))
 }
+
+/**
+ * O que está sendo cedido, lido do "PARCELA CEDIDA" das anotações do card.
+ *
+ * Os quatro valores correspondem, um a um, aos quatro cenários da planilha de
+ * precificação e à lista suspensa da célula C3 da aba jurídica. É esta
+ * classificação que decide qual coluna sobra no arquivo entregue e sobre o que
+ * o deságio é calibrado — errar aqui precifica a coisa errada, em silêncio.
+ *
+ * 'auto' = o card não disse; quem decide passa a ser o destaque dos honorários
+ * nos cálculos da contadoria.
+ */
+export type ParcelaCedida = 'principal' | 'ambos' | 'honorarios' | 'sucumbenciais' | 'auto'
+
+export function classificarParcelaCedida(texto: unknown): ParcelaCedida {
+  const t = String(texto ?? '').toLowerCase()
+  const principal = /principal/.test(t)
+  const sucumbenciais = /sucumb/.test(t)
+  const contratuais = /contratu/.test(t)
+  // "honorários" sozinho, sem dizer de que tipo, conta como honorários.
+  const honorarios = /honor/.test(t) || sucumbenciais || contratuais
+
+  if (principal && honorarios) return 'ambos'
+  // SUCUMBENCIAIS SOZINHOS são caso próprio: a verba é do advogado, paga pelo
+  // vencido, e pode ser cedida sem o principal — que às vezes nem é RPV (vira
+  // precatório). Só vale quando o texto NÃO menciona contratuais nem principal:
+  // "contratuais + sucumbenciais" é cessão dos honorários, não deste caso.
+  if (sucumbenciais && !contratuais && !principal) return 'sucumbenciais'
+  if (honorarios) return 'honorarios'
+  if (principal) return 'principal'
+  return 'auto'
+}

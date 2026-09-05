@@ -60,6 +60,7 @@ import {
   useAnalisesProntas,
   type AcaoTela,
   type SubdivisaoPrecatorio,
+  classificarParcelaCedida,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -161,17 +162,7 @@ function lerCardCredijuris(lead: KommoLead) {
   const cedente =
     pegar(/CEDENTE:\s*(.+)/i) || (partesTitulo.length >= 2 ? partesTitulo[1].trim() : '')
 
-  const parcela = pegar(/PARCELA CEDIDA:\s*(.+)/i).toLowerCase()
-  const temPrincipal = /principal/.test(parcela)
-  const temHonorarios = /honor|contratu|sucumb/.test(parcela)
-  const tipo_aquisicao =
-    temPrincipal && temHonorarios
-      ? 'ambos'
-      : temHonorarios
-        ? 'honorarios'
-        : temPrincipal
-          ? 'principal'
-          : 'auto'
+  const tipo_aquisicao = classificarParcelaCedida(pegar(/PARCELA CEDIDA:\s*(.+)/i))
 
   const honMatch = notas.match(/HONOR[ÁA]RIOS?[^:\n]*:\s*([\d.,]+)\s*%/i)
   const honorarios_pct = honMatch ? honMatch[1].replace(/\./g, '').replace(',', '.') : ''
