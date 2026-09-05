@@ -16,6 +16,7 @@ import {
   consultarRegra,
   custoParaPreco,
   executarPasso,
+  regraDoCache,
   normalizarUf,
   type Emolumentos,
   type RegraEmolumentos,
@@ -1689,8 +1690,20 @@ Deno.serve(async (req) => {
     const origemUf = origemDoCredito(dados);
     const ufCredito = origemUf.uf;
     const recebida = body.emolumentos as Emolumentos | undefined;
-    const emolumentos: Emolumentos | null =
+    const daTela: Emolumentos | null =
       recebida && recebida.regra && (!ufCredito || recebida.uf === ufCredito) ? recebida : null;
+    // SEGUNDO CRÉDITO DO MESMO ESTADO. Se a tabela já foi levantada alguma vez
+    // este ano, ela está a uma consulta de distância — e aí o preço já sai com
+    // escritura e registro na PRIMEIRA resposta. Sem isto, mesmo com a regra
+    // pronta no banco, a análise saía "sem cartório", a tela pedia a regra e
+    // mandava reprecificar: duas idas e voltas a mais e um piscar de "cartório
+    // não incluído" que assustava à toa.
+    //
+    // regraDoCache SÓ LÊ. Disparar o levantamento daqui de dentro é o que
+    // derrubava o worker; quando não há tabela, `falta_regra` continua indo
+    // para a tela e é ela que pede, na requisição separada de sempre.
+    const emolumentos: Emolumentos | null =
+      daTela ?? (ufCredito ? await regraDoCache(ufCredito, sbAdmin) : null);
 
     // 3d. Calibragem do deságio — o cartório entra DENTRO dela, por preço.
     const calc: any = calibrarDesagio({

@@ -676,6 +676,44 @@ function rotuloDaEtapa(bruto: unknown): string {
 }
 
 /**
+ * A regra JÁ LEVANTADA deste estado, ou null. Nunca pesquisa, nunca escreve.
+ *
+ * É o caminho do segundo crédito em diante de um mesmo estado — o caso comum,
+ * depois que a tabela existe. Custa uma consulta e responde em milissegundos,
+ * então pode entrar dentro da própria análise: o preço já sai com escritura e
+ * registro, sem a tela precisar pedir a regra e mandar reprecificar.
+ *
+ * SEPARADA de consultarRegra de propósito. Aquela dispara o levantamento quando
+ * não acha, e disparar coisa de dentro da requisição de análise é justamente o
+ * que derrubava o worker. Esta só lê.
+ */
+export async function regraDoCache(
+  ufBruta: unknown,
+  svc: SupabaseClient,
+): Promise<Emolumentos | null> {
+  const ano = new Date().getFullYear()
+  const uf = normalizarUf(ufBruta)
+  if (!uf) return null
+  try {
+    const { data, error } = await svc
+      .from('emolumentos_uf')
+      .select('status, motivo, tabela, fontes, vigencia')
+      .eq('uf', uf).eq('ano', ano).maybeSingle()
+    if (error || !data) return null
+    const d = data as Record<string, unknown>
+    if (String(d.status) !== 'pronta') return null
+    // 'pronta' sem regra dentro é linha estragada: trata como ausente, para a
+    // análise pedir o levantamento em vez de precificar com um vazio.
+    const e = daLinha(uf, ano, d)
+    return e.regra ? e : null
+  } catch {
+    // Cache indisponível não pode impedir uma análise de sair: segue sem
+    // cartório, com o aviso de sempre.
+    return null
+  }
+}
+
+/**
  * Consulta o estado do levantamento de uma UF e, se ninguém estiver cuidando
  * dela, dispara a etapa que falta.
  *
