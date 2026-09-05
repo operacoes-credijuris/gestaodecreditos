@@ -200,9 +200,122 @@ async function checarAncoras() {
   return true
 }
 
+// ---------------------------------------------------------------------------
+// O que o modelo PEDE x o que o prompt MANDA a IA responder
+// ---------------------------------------------------------------------------
+//
+// O mapa do m2 é escrito à mão dentro do prompt, e o modelo muda. Quando os dois
+// se afastam, a IA responde certo a uma pergunta que não é a que está lá — e o
+// arquivo sai preenchido, plausível e errado. Já aconteceu: o modelo pedia o
+// PERCENTUAL dos honorários e o prompt mandava o VALOR em reais.
+//
+// Confere três coisas objetivas:
+//   1. toda pergunta respondível tem entrada no mapa, e o mapa não inventa linha;
+//   2. onde há lista suspensa, o prompt repete as opções EXATAS (a coluna B só
+//      aceita essas, e valor fora dela entra marcado como inválido);
+//   3. onde a coluna do complemento pede "percentual", o prompt não pede valor.
+const FONTE = 'supabase/functions/gerar-analise-rpv/index.ts'
+const PRIMEIRA = 10, ULTIMA = 38, BANNER = 25
+
+/**
+ * Confere uma lista suspensa contra o texto que manda preenchê-la.
+ *
+ * A ARMADILHA DO FORMATO: no .xlsx a lista é UMA string separada por vírgula, e
+ * vírgula dentro de uma opção não tem como ser escapada — ela vira separador. O
+ * Google Sheets guarda a lista direito na tela dele, mas ao exportar achata
+ * tudo nessa string, e quem abrir o arquivo vê a opção partida em duas. Aí o
+ * valor que a IA escreve (a opção inteira) não pertence mais à lista e a célula
+ * abre marcada como inválida.
+ */
+function conferirLista(ws, endereco, textoQueManda) {
+  const dv = ws.getCell(endereco).dataValidation
+  if (!dv || dv.type !== 'list') return []
+  // A fórmula pode vir concatenada com & quando passa de 255 caracteres.
+  const bruto = String(dv.formulae[0]).replace(/"\s*&\s*"/g, '').replace(/^"|"$/g, '')
+  const opcoes = bruto.split(',').map((o) => o.trim()).filter(Boolean)
+  const problemas = []
+
+  // (a) O defeito de formato: alguma opção que o texto manda usar tem vírgula?
+  const comVirgula = opcoes.filter((o) => textoQueManda && !textoQueManda.includes(o) && o.length < 18)
+  if (comVirgula.length) {
+    problemas.push(
+      `a lista tem opção com VÍRGULA dentro, e no .xlsx a vírgula é o separador — ` +
+      `ela chega partida (${opcoes.length} pedaços: ${opcoes.map((o) => `"${o}"`).join(', ').slice(0, 160)}...). ` +
+      `Troque as vírgulas por travessão no modelo, senão a resposta entra marcada como inválida.`,
+    )
+    return problemas
+  }
+  // (b) Sem defeito de formato: cada opção tem de aparecer em quem manda preencher.
+  for (const o of opcoes) {
+    if (o === 'Sim' || o === 'Não') continue   // o prompt escreve "Sim/Não"
+    if (textoQueManda && !textoQueManda.includes(o)) problemas.push(`a opção "${o}" da lista não aparece no prompt`)
+  }
+  return problemas
+}
+
+function mapaDoPrompt() {
+  const src = require('node:fs').readFileSync(FONTE, 'utf8')
+  const mapa = new Map()
+  for (const linha of src.split(/\r?\n/)) {
+    const m = /^\s*'(\d+):\s([\s\S]*?)'\s*\+\s*$/.exec(linha)
+    if (m) mapa.set(Number(m[1]), m[2])
+  }
+  return mapa
+}
+
+async function checarMapa() {
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(MODELO)
+  const aj = wb.getWorksheet('Análise jurídica')
+  const mapa = mapaDoPrompt()
+  const problemas = []
+
+  for (let r = PRIMEIRA; r <= ULTIMA; r++) {
+    const entrada = mapa.get(r)
+    if (r === BANNER) {
+      if (entrada && !/BLOCO FIXO/i.test(entrada)) problemas.push(`linha ${r} e o bloco CUIDADO, mas o mapa a trata como pergunta`)
+      continue
+    }
+    if (!entrada) { problemas.push(`linha ${r} ("${textoDaCelula(aj.getCell('A' + r).value).slice(0, 40)}") nao esta no mapa do prompt`); continue }
+
+    // 2. As opções da lista suspensa têm de aparecer no prompt, letra por letra.
+    for (const p of conferirLista(aj, 'B' + r, entrada)) problemas.push(`linha ${r}: ${p}`)
+
+    // 3. Percentual não é valor.
+    const dica = textoDaCelula(aj.getCell('C' + r).value).toLowerCase()
+    if (dica.includes('percentual') && !entrada.toLowerCase().includes('percentual')) {
+      problemas.push(`linha ${r}: o modelo pede o PERCENTUAL no complemento e o prompt nao menciona percentual`)
+    }
+  }
+  // O mapa não pode citar linha que não é pergunta.
+  for (const r of mapa.keys()) {
+    if (r < PRIMEIRA || r > ULTIMA) problemas.push(`o mapa cita a linha ${r}, fora da faixa de perguntas (${PRIMEIRA}..${ULTIMA})`)
+  }
+
+  // A C3 não vem do m2 — quem a escreve é o código, com tipo_credito. Mesma
+  // conferência: os quatro textos têm de ser opções inteiras da lista.
+  const TIPOS = require('node:fs').readFileSync(FONTE, 'utf8')
+    .match(/dados\.tipo_credito = '([^']+)'/g)?.map((m) => m.replace(/.*'([^']+)'.*/, '$1')) ?? []
+  for (const p of conferirLista(aj, 'C3', TIPOS.join(' | '))) problemas.push(`C3 (o que está sendo negociado): ${p}`)
+  for (const tipo of TIPOS) {
+    const dv = aj.getCell('C3').dataValidation
+    const opcoes = dv ? String(dv.formulae[0]).replace(/^"|"$/g, '').split(',').map((o) => o.trim()) : []
+    if (opcoes.length && !opcoes.includes(tipo)) problemas.push(`C3: o código escreve "${tipo}", que não é uma opção inteira da lista`)
+  }
+
+  if (problemas.length) {
+    console.log('  FALHA  mapa do m2 x modelo:')
+    problemas.forEach((p) => console.log('           - ' + p))
+    return false
+  }
+  console.log(`  ok     mapa do m2 bate com o modelo (linhas ${PRIMEIRA}..${ULTIMA})`)
+  return true
+}
+
 ;(async () => {
   let ok = 0
   const ancorasOk = await checarAncoras()
+  const mapaOk = await checarMapa()
   for (const c of CASOS) {
     const d = motor(c)
     const wb = new ExcelJS.Workbook()
@@ -258,6 +371,7 @@ async function checarAncoras() {
       usado.padEnd(12) + 'base ' + brl(p[usado].base).padStart(14) + '   rent ' + (p[usado].rent * 100).toFixed(2) + '%/mes')
     erros.forEach((e) => console.log('           - ' + e))
   }
-  console.log(`${ok}/${CASOS.length} cenarios` + (ancorasOk ? '' : '   + ancoras REPROVADAS'))
-  process.exit(ok === CASOS.length && ancorasOk ? 0 : 1)
+  const extras = [ancorasOk ? null : 'ancoras', mapaOk ? null : 'mapa do m2'].filter(Boolean)
+  console.log(`${ok}/${CASOS.length} cenarios` + (extras.length ? `   + REPROVADO em: ${extras.join(', ')}` : ''))
+  process.exit(ok === CASOS.length && ancorasOk && mapaOk ? 0 : 1)
 })()

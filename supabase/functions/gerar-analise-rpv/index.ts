@@ -835,10 +835,17 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
 
   // Linha 39: "Qual o valor final do crédito?" (mesclado). O modelo traz o
   // gabarito do texto; aqui ele sai preenchido.
+  // A PERGUNTA É "qual o valor total final líquido do(s) crédito(s) SENDO
+  // NEGOCIADO(S)?", e a resposta é a base sobre a qual o deságio foi calibrado
+  // — não o bruto. O texto antigo começava pelo VALOR TOTAL BRUTO e nunca
+  // chegava a dizer o total líquido negociado, que é justamente o que se
+  // perguntou. A decomposição fica embaixo, onde ajuda em vez de confundir.
   aj.getCell('B39').value =
-    `VALOR TOTAL BRUTO: ${brl(dados.bruto_total)}\n` +
-    `Valor principal líquido: ${brl(calc.L5)}\n` +
-    `Valor dos honorários contratuais: ${brl(calc.L7)}`;
+    `VALOR TOTAL LÍQUIDO NEGOCIADO: ${brl(calc.Y3)}\n` +
+    `(bruto ${brl(dados.bruto_total)}; principal líquido ${brl(calc.L5)}` +
+    (calc.L7 > 0 ? `; honorários líquidos ${brl(calc.L7)}` : '') +
+    (Number(dados._ir_honorarios) > 0 ? `; IR sobre honorários ${brl(Number(dados._ir_honorarios))}` : '') +
+    ')';
 
   // Linha 40: "Alguma observação importante para acrescentar nesse caso?"
   // (mesclado). Recebe os riscos que a IA levantou — é onde eles cabem dentro
@@ -1169,6 +1176,8 @@ const SYSTEM_ANALISE =
   '23: "Iniciou o cumprimento de sentença?" -> Sim/Não; complemento: data do peticionamento. ' +
   '24: "Foi apresentado valor no CS ou solicitado execução invertida?" -> um EXATO de: Valor apresentado no CS | Execução invertida. ' +
   '25: BLOCO FIXO "CUIDADO" — NÃO é pergunta. NÃO inclua a chave "25" no m2. ' +
+  '26 E 27 SÃO EXCLUSIVAS: responda UMA e deixe a outra vazia. Execução invertida (linha 24) -> preencha a 26 e deixe a 27 vazia; cumprimento de sentença iniciado pela exequente -> preencha a 27 e deixe a 26 vazia. Em qualquer dos dois casos siga normalmente da 28 em diante. ' +
+  '(O bloco CUIDADO da linha 25 diz o mesmo, mas cita os itens 27/28/29 — a numeração dele ficou defasada de uma linha quando o questionário mudou. Vale o que está escrito aqui.) ' +
   '26: "Em caso de execução invertida, qual cenário?" (só se foi execução invertida; senão vazio) -> um EXATO de: ' +
   '"Executado não apresentou valores e prazo ainda em curso" | "Executado não apresentou valores, prazo decorrido, sem manifestação da parte exequente" | ' +
   '"Executado não apresentou valores, prazo decorrido, já houve manifestação da parte exequente" | "Executado apresentou valores". ' +
@@ -1179,9 +1188,9 @@ const SYSTEM_ANALISE =
   '31: "Houve homologação do valor (e impugnação resolvida)?" -> Sim/Não; complemento: data da homologação. ' +
   '32: "Existe contrato de honorários contratuais nos autos?" -> Sim/Não; complemento: data do contrato. ' +
   '33: "Contadoria judicial se manifestou?" -> Sim/Não; complemento: data da juntada dos cálculos. ' +
-  '34: "Houve pedido de destaque de honorários contratuais?" -> Sim/Não; complemento: valor dos honorários destacados e o valor principal. ' +
+  '34: "Houve pedido de destaque de honorários contratuais nos valores apresentados pela contadoria? E, se a contadoria não se manifestou, houve pedido de reserva pelo patrono?" -> Sim/Não; complemento: o PERCENTUAL dos honorários contratuais (ex.: "30%") — é o que a coluna do modelo pede, não o valor em reais. ' +
   '35: "A manifestação da contadoria foi homologada/precluiu o prazo?" -> Sim/Não; complemento: data. ' +
-  '36: "Há honorários sucumbenciais neste processo?" -> Sim/Não; complemento: o valor fixado. Responda em COERÊNCIA com o campo "honorarios_sucumbenciais": se lá você pôs um valor, aqui é Sim; se pôs zero, aqui é Não. ' +
+  '36: "Há honorários sucumbenciais neste processo?" -> Sim/Não; complemento: o PERCENTUAL dos honorários sucumbenciais (ex.: "10%") — é o que a coluna do modelo pede, não o valor em reais. Responda em COERÊNCIA com o campo "honorarios_sucumbenciais": se lá você pôs um valor, aqui é Sim; se pôs zero, aqui é Não. ' +
   '37: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
   '38: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
   'NÃO EXISTEM as linhas 39 e 40 no m2: são o valor final e as observações, e quem as preenche sou eu, com o cálculo pronto. ' +
