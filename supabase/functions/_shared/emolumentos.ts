@@ -56,6 +56,8 @@ const MAX_RETOMADAS = 3
  * foi o que quebrou a primeira tentativa em Pernambuco.
  */
 export interface Faixa {
+  /** Piso da faixa em reais, como impresso na tabela ("De X a Y"). */
+  de?: number | null
   /** Teto da faixa em reais; null = faixa aberta ("acima de X"). */
   ate: number | null
   /** Emolumento fixo da faixa. */
@@ -64,6 +66,14 @@ export interface Faixa {
   percentual?: number | null
   /** Parcela fixa somada ao percentual. */
   fixo?: number | null
+  /**
+   * O percentual incide só sobre o que EXCEDE o piso da faixa.
+   *
+   * É a forma "R$ 500 mais 0,5% sobre o que exceder R$ 50.000", comum nas
+   * tabelas progressivas. Sem esta distinção o percentual caía sobre o valor
+   * inteiro: no exemplo, R$ 800 em vez de R$ 550 — 45% a mais.
+   */
+  sobre_excedente?: boolean | null
   /** Piso e teto do resultado, quando a faixa é percentual. */
   minimo?: number | null
   maximo?: number | null
@@ -79,9 +89,17 @@ export interface Faixa {
  */
 export interface Acrescimo {
   nome: string
-  /** Fração. 0.002 = 0,2%. */
-  percentual: number
-  /** Sobre o que incide: o valor do ato, ou o emolumento já calculado. */
+  /**
+   * Fração. 0.002 = 0,2%. Exclusivo com `valor`.
+   *
+   * Nem todo acréscimo é percentual: o selo digital de vários estados (BA, PB,
+   * RN, SE e outros) é um valor fixo por ato. Aceitar só percentual fazia esses
+   * selos sumirem do custo em silêncio.
+   */
+  percentual?: number | null
+  /** Ou um valor fixo em reais, por ato. */
+  valor?: number | null
+  /** Sobre o que incide o percentual: o valor do ato, ou o emolumento. */
   base: 'valor' | 'emolumento'
   minimo?: number | null
   maximo?: number | null
@@ -160,14 +178,21 @@ function custoDoAto(ato: RegraAto | null, valor: number): number | null {
   let emolumento: number
   if (f.valor != null) emolumento = f.valor
   else if (f.percentual != null) {
-    emolumento = valor * f.percentual + (f.fixo ?? 0)
+    // "sobre o excedente": o percentual cai só sobre o que passa do piso da
+    // faixa. Sem o piso declarado não há excedente a calcular, e a base volta a
+    // ser o valor inteiro — errar para cima aqui é melhor que inventar um piso.
+    const base = f.sobre_excedente && f.de != null ? Math.max(0, valor - f.de) : valor
+    emolumento = base * f.percentual + (f.fixo ?? 0)
     if (f.minimo != null) emolumento = Math.max(emolumento, f.minimo)
     if (f.maximo != null) emolumento = Math.min(emolumento, f.maximo)
   } else return null
 
   let total = emolumento
   for (const a of ato.acrescimos ?? []) {
-    let v = (a.base === 'emolumento' ? emolumento : valor) * a.percentual
+    let v: number
+    if (a.valor != null) v = a.valor
+    else if (a.percentual != null) v = (a.base === 'emolumento' ? emolumento : valor) * a.percentual
+    else continue
     if (a.minimo != null) v = Math.max(v, a.minimo)
     if (a.maximo != null) v = Math.min(v, a.maximo)
     // "nunca superior ao próprio emolumento do ato" — regra da TSNR em PE.
@@ -254,8 +279,10 @@ function validarAto(bruto: unknown, nome: string): RegraAto | null | string {
     }
     if (ate === null) abertas++
     faixas.push({
+      de: f.de == null ? null : Number(f.de),
       ate, valor, percentual,
       fixo: f.fixo == null ? null : Number(f.fixo),
+      sobre_excedente: f.sobre_excedente === true,
       minimo: f.minimo == null ? null : Number(f.minimo),
       maximo: f.maximo == null ? null : Number(f.maximo),
     })
@@ -264,14 +291,19 @@ function validarAto(bruto: unknown, nome: string): RegraAto | null | string {
 
   const acrescimos: Acrescimo[] = []
   for (const x of Array.isArray(a?.acrescimos) ? (a!.acrescimos as Array<Record<string, unknown>>) : []) {
-    const percentual = Number(x?.percentual)
+    const percentual = x?.percentual == null ? null : Number(x.percentual)
+    const valorFixo = x?.valor == null ? null : Number(x.valor)
     // Acréscimo implausível é DESCARTADO, não invalida a regra: perder uma taxa
     // acessória custa alguns reais no preço; perder a tabela inteira custa o
-    // cartório todo.
-    if (!(percentual > 0 && percentual < 0.2)) continue
+    // cartório todo. Teto de 20% no percentual e de R$ 5.000 no valor fixo —
+    // selo é ordem de reais a dezenas de reais.
+    const pctOk = percentual !== null && percentual > 0 && percentual < 0.2
+    const valOk = valorFixo !== null && valorFixo > 0 && valorFixo < 5000
+    if (!pctOk && !valOk) continue
     acrescimos.push({
       nome: String(x?.nome ?? 'acréscimo'),
-      percentual,
+      percentual: pctOk ? percentual : null,
+      valor: valOk ? valorFixo : null,
       base: x?.base === 'emolumento' ? 'emolumento' : 'valor',
       minimo: x?.minimo == null ? null : Number(x.minimo),
       maximo: x?.maximo == null ? null : Number(x.maximo),
@@ -297,14 +329,16 @@ const FAIXA_SCHEMA = {
   items: {
     type: 'object',
     properties: {
+      de: { type: ['number', 'null'], description: 'Piso da faixa em reais, como impresso na tabela ("De R$ 50.000,01 a ..." -> 50000.01). Obrigatório quando o percentual incide sobre o excedente.' },
       ate: { type: ['number', 'null'], description: 'Teto da faixa em reais; null na última quando ela é "acima de X".' },
       valor: { type: ['number', 'null'], description: 'Emolumento FIXO da faixa, em reais. Use este quando a tabela dá um valor pronto.' },
       percentual: { type: ['number', 'null'], description: 'Ou o percentual sobre o valor do ato, como FRAÇÃO (0,5% = 0.005). Use quando a tabela cobra percentual em vez de valor fixo.' },
-      fixo: { type: ['number', 'null'], description: 'Parcela fixa somada ao percentual, se houver.' },
+      fixo: { type: ['number', 'null'], description: 'Parcela fixa somada ao percentual, se houver ("R$ 500 mais 0,5% sobre...").' },
+      sobre_excedente: { type: ['boolean', 'null'], description: 'True quando o percentual incide só sobre o que EXCEDE o piso da faixa ("mais 0,5% sobre o que exceder R$ 50.000"). Nesse caso preencha "de" também. False ou ausente = o percentual incide sobre o valor inteiro.' },
       minimo: { type: ['number', 'null'], description: 'Piso do resultado, se a tabela declarar.' },
       maximo: { type: ['number', 'null'], description: 'Teto do resultado, se a tabela declarar.' },
     },
-    required: ['ate', 'valor', 'percentual'],
+    required: ['de', 'ate', 'valor', 'percentual'],
   },
 }
 
@@ -316,13 +350,14 @@ const ACRESCIMO_SCHEMA = {
     type: 'object',
     properties: {
       nome: { type: 'string' },
-      percentual: { type: 'number', description: 'Fração. 0,2% = 0.002.' },
-      base: { type: 'string', enum: ['valor', 'emolumento'], description: 'Incide sobre o valor do ato ou sobre o emolumento já calculado.' },
+      percentual: { type: ['number', 'null'], description: 'Fração, quando a taxa é percentual. 0,2% = 0.002.' },
+      valor: { type: ['number', 'null'], description: 'Ou um VALOR FIXO em reais por ato — é o caso do selo digital de vários estados. Preencha um ou outro, não os dois.' },
+      base: { type: 'string', enum: ['valor', 'emolumento'], description: 'Para o percentual: incide sobre o valor do ato ou sobre o emolumento já calculado.' },
       minimo: { type: ['number', 'null'] },
       maximo: { type: ['number', 'null'], description: 'Teto em reais, se houver.' },
       teto_emolumento: { type: ['boolean', 'null'], description: 'True quando a lei diz que a taxa não pode superar o próprio emolumento do ato.' },
     },
-    required: ['nome', 'percentual', 'base'],
+    required: ['nome', 'base'],
   },
 }
 
@@ -363,8 +398,11 @@ ONDE PROCURAR, nesta ordem: o Tribunal de Justiça de ${uf} ou a Corregedoria-Ge
 ABRA O DOCUMENTO. A busca devolve o cabeçalho e as notas explicativas; as LINHAS NUMÉRICAS da tabela estão dentro do arquivo, em geral um PDF anexo. Use web_fetch para abrir o anexo e ler as linhas. Não desista na busca: a tabela existe e é pública.
 
 O QUE DEVOLVER:
-1. AS FAIXAS. Copie as linhas da tabela na janela de valores que interessa — de R$ 1.000 a R$ 500.000, que é onde as cessões caem. Cada linha vira uma entrada com "ate" (o teto daquela linha) e "valor" (o emolumento). Se a tabela cobra PERCENTUAL em vez de valor fixo, use "percentual" (como fração) com "minimo" e "maximo" quando ela declarar piso e teto.
-2. OS ACRÉSCIMOS. Muitas tabelas cobram, por cima do emolumento, uma taxa de fiscalização, selo ou fundo estadual — e é isso que o balcão soma. Devolva cada uma em "acrescimos", com o percentual, sobre o que incide, e os limites. Se a lei disser que a taxa não pode superar o próprio emolumento do ato, marque "teto_emolumento". Se a tabela já traz tudo embutido no valor da faixa, devolva lista vazia e diga isso em "observacao".
+1. AS FAIXAS. Copie as linhas da tabela na janela de valores que interessa — de R$ 1.000 a R$ 500.000, que é onde as cessões caem. Cada linha vira uma entrada com "de" e "ate" (os limites impressos) e "valor" (o emolumento). As tabelas brasileiras aparecem em três formas, e o formato aceita as três:
+   (a) VALOR FIXO por faixa — o caso mais comum. Preencha "valor".
+   (b) PERCENTUAL sobre o valor do ato. Preencha "percentual" como fração, com "minimo" e "maximo" se a tabela declarar piso e teto.
+   (c) PARCELA FIXA MAIS PERCENTUAL SOBRE O EXCEDENTE — "R$ 500,00 acrescidos de 0,5% sobre o que exceder R$ 50.000,00". Preencha "fixo" (500), "percentual" (0.005), "de" (50000) e marque "sobre_excedente": true. NÃO marque sobre_excedente quando o percentual incidir sobre o valor inteiro — a diferença entre as duas leituras chega a 45% do emolumento.
+2. OS ACRÉSCIMOS. Muitas tabelas cobram, por cima do emolumento, uma taxa de fiscalização, selo ou fundo estadual — e é isso que o balcão soma. Devolva cada uma em "acrescimos". Pode ser PERCENTUAL (campo "percentual", dizendo em "base" se incide sobre o valor do ato ou sobre o emolumento) ou VALOR FIXO por ato (campo "valor") — o selo digital de vários estados é fixo. Se a lei disser que a taxa não pode superar o próprio emolumento do ato, marque "teto_emolumento". Se a tabela já traz tudo embutido no valor da faixa, devolva lista vazia e diga isso em "observacao".
 3. MOSTRE COMO LEU, em "observacao": qual documento, qual tabela dentro dele, o que somou e o que deixou de fora.
 4. FONTE OBRIGATÓRIA. Sem o endereço da página, o resultado é descartado: emolumento é preço público e estes números entram num cálculo de deságio.
 
