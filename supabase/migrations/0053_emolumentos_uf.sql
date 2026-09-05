@@ -8,15 +8,23 @@
 -- a encontra é a IA, por busca web na fonte oficial (Tribunal de Justiça,
 -- Corregedoria, sindicato de notários).
 --
--- ESTA TABELA É CACHE, e existe por dois motivos que não são "economizar":
+-- ESTA TABELA NÃO É SÓ CACHE: É O QUE TORNA O LEVANTAMENTO POSSÍVEL.
 --
---   1. TEMPO. A gerar-analise-rpv já faz duas chamadas grandes de IA por
---      análise e roda dentro do teto de tempo de parede da Edge Function.
---      Uma busca web a cada análise (10 a 30 s) é o que faltava para estourar
---      esse teto — e o usuário receberia "erro de rede" no lugar do parecer.
---      Com o cache, só a PRIMEIRA análise de cada UF no ano paga a busca.
+--   1. O LEVANTAMENTO É LENTO E SEMPRE SERÁ. Achar o provimento do estado,
+--      abrir o PDF anexo e ler as linhas numéricas é uma pesquisa de verdade:
+--      leva de dois a cinco minutos. Isso não cabe numa requisição que a
+--      pessoa espera na tela — a primeira versão estourava em 140 s e a
+--      análise saía sem cartório. Agora a busca roda em SEGUNDO PLANO no
+--      servidor (EdgeRuntime.waitUntil) e grava aqui; a tela pergunta a cada
+--      poucos segundos se já chegou. Sem esta tabela não há onde o trabalho de
+--      fundo depositar o resultado, e a única saída é esperar na requisição.
 --
---   2. CONSISTÊNCIA. Dois créditos de São Paulo analisados no mesmo mês têm de
+--   2. UMA VEZ POR ESTADO, PARA SEMPRE. São 27 tabelas no país inteiro. Paga-se
+--      a pesquisa uma vez por UF no ano e todo preço seguinte sai em
+--      microssegundos, porque o que se guarda aqui é a REGRA DE CÁLCULO — as
+--      faixas e os acréscimos —, não um valor para um preço específico.
+--
+--   3. CONSISTÊNCIA. Dois créditos de São Paulo analisados no mesmo mês têm de
 --      usar a MESMA tabela. Sem cache, duas buscas podem achar fontes
 --      diferentes e precificar cartório diferente para o mesmo estado.
 --
@@ -24,23 +32,41 @@
 -- Virou o ano, a chave muda e a próxima análise busca de novo — não há rotina
 -- de expiração para manter.
 --
--- O CÓDIGO FUNCIONA SEM ESTA TABELA. Leitura e escrita estão em try/catch na
--- função: se a migração não rodou, cada análise busca na web e segue. Só fica
--- mais lenta. Isto está aqui de propósito, porque migração é passo manual e
--- não pode ser o que impede uma análise de sair.
+-- O CÓDIGO NÃO QUEBRA SEM ESTA TABELA. Leitura e escrita estão em try/catch: se
+-- a migração não rodou, a função cai no modo antigo (busca dentro da própria
+-- requisição) e avisa na tela que é isso que está acontecendo. Mas nesse modo o
+-- levantamento provavelmente vai estourar o tempo, e o preço sai sem cartório.
 
 create table if not exists public.emolumentos_uf (
   uf              char(2) not null,
   ano             int     not null,
 
-  -- A tabela em si, no formato que o motor consome:
+  -- Em que pé está o levantamento deste estado. A linha nasce 'levantando'
+  -- ANTES da pesquisa começar, e é isso que impede duas abas (ou duas análises
+  -- do mesmo estado ao mesmo tempo) de dispararem a mesma pesquisa em paralelo.
+  --   levantando -> a pesquisa está rodando agora, em segundo plano
+  --   pronta     -> `tabela` tem a regra
+  --   falhou     -> a pesquisa terminou sem achar; `motivo` diz o quê
+  status          text    not null default 'pronta'
+                  constraint emolumentos_uf_status check (status in ('levantando', 'pronta', 'falhou')),
+  motivo          text,   -- por que falhou, em português, para aparecer na tela
+
+  -- A REGRA DE CÁLCULO no formato que o motor consome. Null enquanto
+  -- 'levantando' ou 'falhou'.
   --   {
-  --     "escritura": { "faixas": [{"ate": 5000, "valor": 210.55}, ..., {"ate": null, "valor": 1890.00}],
-  --                    "observacao": "..." },
-  --     "registro":  { "faixas": [...], "observacao": "..." }
+  --     "regra": {
+  --       "escritura": { "faixas":     [{"de":0,"ate":5000,"valor":210.55}, ...,
+  --                                     {"de":50000,"ate":null,"fixo":500,"percentual":0.005,"sobre_excedente":true}],
+  --                      "acrescimos": [{"nome":"TSNR","percentual":0.002,"base":"valor","teto_emolumento":true},
+  --                                     {"nome":"Selo digital","valor":3.50,"base":"valor"}] },
+  --       "registro":  { "faixas": [...] }
+  --     },
+  --     "observacao": "de onde saiu e o que ficou de fora"
   --   }
-  -- `ate` null = faixa aberta ("acima de X"). Valores em reais.
-  tabela          jsonb   not null,
+  -- `ate` null = faixa aberta ("acima de X"). Valores em reais, percentual em
+  -- fração. As três formas de tabela do país cabem aqui: valor fixo por faixa,
+  -- percentual sobre o valor, e parcela fixa mais percentual sobre o excedente.
+  tabela          jsonb,
 
   -- Onde a IA achou cada parte. Sem fonte, a tabela não entra (regra da função,
   -- não do banco): emolumento é preço público, e número sem procedência num
@@ -52,18 +78,25 @@ create table if not exists public.emolumentos_uf (
   atualizado_por  text,                      -- 'gerar-analise-rpv' ou o e-mail de quem corrigiu à mão
 
   primary key (uf, ano),
-  constraint emolumentos_uf_uf_maiuscula check (uf = upper(uf))
+  constraint emolumentos_uf_uf_maiuscula check (uf = upper(uf)),
+  -- 'pronta' sem tabela seria um cache que devolve vazio para sempre, e o
+  -- estado só sai de 'levantando' quando a pesquisa termina.
+  constraint emolumentos_uf_pronta_tem_tabela check (status <> 'pronta' or tabela is not null)
 );
 
 comment on table public.emolumentos_uf is
-  'Cache por UF/ano da tabela de emolumentos de cartório (escritura + registro) usada na precificação de RPV. Preenchida pela IA via busca web; pode ser corrigida à mão.';
+  'Regra de cálculo dos emolumentos de cartório (escritura + registro) por UF/ano, usada na precificação de RPV. Levantada em segundo plano pela IA por busca web; pode ser corrigida à mão. `status` controla o levantamento e evita pesquisas duplicadas.';
+comment on column public.emolumentos_uf.status is
+  'levantando = pesquisa rodando agora (linha criada antes de começar, serve de trava); pronta = regra em `tabela`; falhou = ver `motivo`.';
+comment on column public.emolumentos_uf.atualizado_em is
+  'Também é o relógio da trava: uma linha "levantando" parada há mais de alguns minutos é considerada abandonada (worker morto) e a próxima consulta reinicia a pesquisa.';
 
 -- ---------------------------------------------------------------------------
--- RLS: qualquer autenticado LÊ (a tela pode um dia mostrar de onde veio o
--- custo); só a Edge Function ESCREVE (service_role ignora RLS). Não há policy
--- de insert/update de propósito — a tabela alimenta um cálculo de dinheiro, e
--- deixar o navegador gravá-la abriria caminho para um valor errado entrar no
--- deságio sem passar pela função que exige fonte.
+-- RLS: qualquer autenticado LÊ (a tela mostra de onde veio o custo e em que pé
+-- está o levantamento); só a Edge Function ESCREVE (service_role ignora RLS).
+-- Não há policy de insert/update de propósito — a tabela alimenta um cálculo de
+-- dinheiro, e deixar o navegador gravá-la abriria caminho para um valor errado
+-- entrar no deságio sem passar pela função que exige fonte.
 -- ---------------------------------------------------------------------------
 alter table public.emolumentos_uf enable row level security;
 

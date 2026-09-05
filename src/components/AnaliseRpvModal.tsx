@@ -42,15 +42,23 @@ import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 const pctBR = (fracao: number) => formatPercent(fracao * 100)
 
 /**
- * Prazo da consulta ao cartório.
+ * Prazo de UMA pergunta ao servidor sobre o cartório — não da pesquisa inteira.
  *
- * Subiu de 100 s quando a consulta passou a ABRIR os documentos (web_fetch) além
- * de buscá-los: ler o anexo de uma tabela de emolumentos é mais lento que ler o
- * resumo da busca, e era justamente não abrir o arquivo que fazia a consulta
- * voltar vazia. 140 s ainda fica abaixo do teto de 150 s da requisição — passar
- * disso só trocaria este aviso pelo erro cru da função.
+ * A pesquisa da tabela de emolumentos (achar o provimento do estado, abrir o PDF
+ * anexo, ler as linhas) leva minutos e agora roda em SEGUNDO PLANO no servidor.
+ * O que acontece aqui é só perguntar "já chegou?", que é uma leitura de tabela e
+ * responde em menos de um segundo.
+ *
+ * A versão anterior esperava a pesquisa inteira dentro de uma requisição, com
+ * 140 s de prazo, e o que a tela mostrava era "o levantamento passou de 140s".
+ * Aumentar o prazo não resolvia: o teto da requisição é 150 s, e a pesquisa é
+ * mais lenta que isso por natureza.
  */
-const PRAZO_CARTORIO = 140_000
+const PRAZO_PERGUNTA = 20_000
+/** Quanto tempo no total vale a pena ficar esperando a pesquisa terminar. */
+const PRAZO_LEVANTAMENTO = 6 * 60_000
+/** Intervalo entre uma pergunta e a seguinte. */
+const INTERVALO_PERGUNTA = 8_000
 
 /**
  * Uma promessa que desiste no prazo.
@@ -63,6 +71,22 @@ const PRAZO_CARTORIO = 140_000
  * esperada. É aceitável: ela não grava nada, e se chegar depois o resultado é
  * descartado.
  */
+const espera = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/**
+ * O que a ação 'emolumentos' devolve.
+ *
+ * `estado` é o que manda: 'levantando' não é erro nem sucesso — é "volte a
+ * perguntar". Antes a resposta era só `{emolumentos}` e não havia como
+ * distinguir "não achei" de "ainda procurando".
+ */
+interface RespostaConsultaEmolumentos {
+  estado?: 'pronta' | 'levantando' | 'falhou' | 'sem_uf'
+  emolumentos?: { regra?: unknown; motivo?: string } | null
+  reconsultar_em?: number
+  motivo?: string
+}
+
 function comPrazo<T>(p: Promise<T>, ms: number, mensagem: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(mensagem)), ms)
@@ -411,20 +435,39 @@ export function AnaliseRpvModal({
 
     setPassoCartorio(`Levantando a tabela de emolumentos de ${uf}…`)
     try {
-      const e = await comPrazo(
-        invokeFunction<{ emolumentos?: { regra?: unknown; motivo?: string } | null; motivo?: string }>(
-          'gerar-analise-rpv',
-          { acao: 'emolumentos', uf },
-        ),
-        PRAZO_CARTORIO,
-        `o levantamento passou de ${PRAZO_CARTORIO / 1000}s`,
-      )
+      // PERGUNTA E REPETE, em vez de esperar. Cada volta é uma leitura de tabela
+      // no servidor; a pesquisa corre em segundo plano lá. É isto que tira a
+      // pesquisa do caminho crítico da tela — antes, uma requisição só tinha de
+      // durar mais que a pesquisa inteira, e nunca durava.
+      const ate = Date.now() + PRAZO_LEVANTAMENTO
+      let e: RespostaConsultaEmolumentos | null = null
+      for (let volta = 0; ; volta++) {
+        e = await comPrazo(
+          invokeFunction<RespostaConsultaEmolumentos>('gerar-analise-rpv', { acao: 'emolumentos', uf }),
+          PRAZO_PERGUNTA,
+          'o servidor não respondeu à consulta',
+        )
+        if (e?.estado !== 'levantando') break
+        if (Date.now() >= ate) break
+        // A janela pode ter sido fechada, ou a pessoa já ter salvado: parar de
+        // perguntar. A pesquisa continua no servidor e a próxima análise deste
+        // estado já a encontra pronta.
+        if (revisao.current !== naEpoca) return
+        const s = Math.round((ate - Date.now()) / 1000)
+        setPassoCartorio(
+          `Levantando a tabela de emolumentos de ${uf}… primeira vez neste estado, leva alguns minutos (até ${s}s).`,
+        )
+        await espera(Math.max(1000, e.reconsultar_em ? e.reconsultar_em * 1000 : INTERVALO_PERGUNTA))
+      }
+
       // EXIGE A REGRA, não só o objeto: a função devolve `{regra: null, motivo}`
       // quando não acha, e verificar só `e.emolumentos` daria verdadeiro —
       // reprecificaria com a mesma ausência e a tela nunca diria que falhou.
       if (!e?.emolumentos?.regra) {
         cartorioFalhou.current = true
-        const porque = e?.emolumentos?.motivo ?? e?.motivo
+        const porque = e?.estado === 'levantando'
+          ? `a pesquisa passou de ${PRAZO_LEVANTAMENTO / 60_000} minutos e continua rodando no servidor — reabra a janela em alguns minutos e ela já deve estar pronta`
+          : (e?.emolumentos?.motivo ?? e?.motivo)
         setFalhaCartorio(
           `Procurei a tabela de emolumentos de ${uf} e não consegui levantar${
             porque ? `: ${porque}` : '.'

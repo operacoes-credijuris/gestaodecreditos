@@ -45,78 +45,33 @@ const MAX_FETCHES = 6
 const MAX_RETOMADAS = 3
 
 // ---------------------------------------------------------------------------
-// O formato da regra
+// O formato da regra e o cálculo — em arquivo próprio, sem dependências, para
+// os testes poderem alcançá-los. Reexportados aqui para não mexer em quem
+// importa deste módulo.
 // ---------------------------------------------------------------------------
+import {
+  custoParaPreco,
+  normalizarUf,
+  type Acrescimo,
+  type CustoCartorio,
+  type Faixa,
+  type RegraAto,
+  type RegraEmolumentos,
+} from './emolumentos-calculo.ts'
 
-/**
- * Uma faixa da tabela: até tal valor, o emolumento é este.
- *
- * `valor` OU `percentual` — as tabelas estaduais usam as duas formas, e algumas
- * misturam (percentual sobre o valor, com piso e teto). Aceitar só valor fixo
- * foi o que quebrou a primeira tentativa em Pernambuco.
- */
-export interface Faixa {
-  /** Piso da faixa em reais, como impresso na tabela ("De X a Y"). */
-  de?: number | null
-  /** Teto da faixa em reais; null = faixa aberta ("acima de X"). */
-  ate: number | null
-  /** Emolumento fixo da faixa. */
-  valor?: number | null
-  /** Ou percentual sobre o valor do ato, como FRAÇÃO (0.005 = 0,5%). */
-  percentual?: number | null
-  /** Parcela fixa somada ao percentual. */
-  fixo?: number | null
-  /**
-   * O percentual incide só sobre o que EXCEDE o piso da faixa.
-   *
-   * É a forma "R$ 500 mais 0,5% sobre o que exceder R$ 50.000", comum nas
-   * tabelas progressivas. Sem esta distinção o percentual caía sobre o valor
-   * inteiro: no exemplo, R$ 800 em vez de R$ 550 — 45% a mais.
-   */
-  sobre_excedente?: boolean | null
-  /** Piso e teto do resultado, quando a faixa é percentual. */
-  minimo?: number | null
-  maximo?: number | null
+export {
+  custoParaPreco,
+  normalizarUf,
+  type Acrescimo,
+  type CustoCartorio,
+  type Faixa,
+  type RegraAto,
+  type RegraEmolumentos,
 }
 
-/**
- * Uma taxa que incide POR CIMA do emolumento — TSNR, selo, fundo, taxa de
- * fiscalização. Vários estados as cobram à parte, e o balcão soma tudo.
- *
- * `teto_emolumento` existe por causa de PE: a TSNR "nunca pode ser superior ao
- * próprio emolumento do ato" (art. 27, Lei 11.404/96). Sem esse campo, o custo
- * sairia maior que o devido nas faixas baixas.
- */
-export interface Acrescimo {
-  nome: string
-  /**
-   * Fração. 0.002 = 0,2%. Exclusivo com `valor`.
-   *
-   * Nem todo acréscimo é percentual: o selo digital de vários estados (BA, PB,
-   * RN, SE e outros) é um valor fixo por ato. Aceitar só percentual fazia esses
-   * selos sumirem do custo em silêncio.
-   */
-  percentual?: number | null
-  /** Ou um valor fixo em reais, por ato. */
-  valor?: number | null
-  /** Sobre o que incide o percentual: o valor do ato, ou o emolumento. */
-  base: 'valor' | 'emolumento'
-  minimo?: number | null
-  maximo?: number | null
-  teto_emolumento?: boolean | null
-}
-
-export interface RegraAto {
-  faixas: Faixa[]
-  acrescimos?: Acrescimo[]
-  observacao?: string | null
-}
-
-/** A regra completa do estado. Ato ausente = a IA não achou tabela confiável para ele. */
-export interface RegraEmolumentos {
-  escritura: RegraAto | null
-  registro: RegraAto | null
-}
+// ---------------------------------------------------------------------------
+// O estado do levantamento
+// ---------------------------------------------------------------------------
 
 export interface Emolumentos {
   uf: string
@@ -129,129 +84,21 @@ export interface Emolumentos {
   motivo?: string
 }
 
-const UFS = new Set([
-  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR',
-  'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
-])
-
-/** "sp", " SP " -> "SP"; qualquer coisa que não seja UF -> null. */
-export function normalizarUf(s: unknown): string | null {
-  const t = String(s ?? '').trim().toUpperCase()
-  return UFS.has(t) ? t : null
-}
-
-const brl = (n: number) =>
-  'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-// ---------------------------------------------------------------------------
-// Aplicar a regra — a função que a calibragem chama milhares de vezes
-// ---------------------------------------------------------------------------
-
 /**
- * Faixas ordenadas por teto, com a aberta por último — memorizadas POR ATO.
+ * Em que pé está o levantamento de uma UF — o que a tela precisa saber.
  *
- * A calibragem consulta milhares de vezes por análise. Ordenar a cada consulta
- * eram dezenas de milhares de cópias de array por requisição — CPU pura, no
- * worker que já devolveu HTTP 546 uma vez. WeakMap: a entrada some junto com a
- * regra, sem cache a administrar.
+ *   pronta     -> `emolumentos.regra` tem a regra; pode precificar
+ *   levantando -> a pesquisa roda AGORA em segundo plano; volte a perguntar
+ *   falhou     -> acabou sem achar; `emolumentos.motivo` diz o quê
+ *   sem_uf     -> não dá para saber de que estado é o crédito
  */
-const ordenadas = new WeakMap<RegraAto, Faixa[]>()
+export type EstadoLevantamento = 'pronta' | 'levantando' | 'falhou' | 'sem_uf'
 
-function faixasOrdenadas(ato: RegraAto): Faixa[] {
-  const memo = ordenadas.get(ato)
-  if (memo) return memo
-  const f = [...ato.faixas].sort((a, b) => {
-    if (a.ate === null) return 1
-    if (b.ate === null) return -1
-    return a.ate - b.ate
-  })
-  ordenadas.set(ato, f)
-  return f
-}
-
-/** O emolumento de um ato para um valor, já com os acréscimos. */
-function custoDoAto(ato: RegraAto | null, valor: number): number | null {
-  if (!ato || ato.faixas.length === 0) return null
-  const f = faixasOrdenadas(ato).find((x) => x.ate === null || valor <= x.ate)
-  if (!f) return null
-
-  let emolumento: number
-  if (f.valor != null) emolumento = f.valor
-  else if (f.percentual != null) {
-    // "sobre o excedente": o percentual cai só sobre o que passa do piso da
-    // faixa. Sem o piso declarado não há excedente a calcular, e a base volta a
-    // ser o valor inteiro — errar para cima aqui é melhor que inventar um piso.
-    const base = f.sobre_excedente && f.de != null ? Math.max(0, valor - f.de) : valor
-    emolumento = base * f.percentual + (f.fixo ?? 0)
-    if (f.minimo != null) emolumento = Math.max(emolumento, f.minimo)
-    if (f.maximo != null) emolumento = Math.min(emolumento, f.maximo)
-  } else return null
-
-  let total = emolumento
-  for (const a of ato.acrescimos ?? []) {
-    let v: number
-    if (a.valor != null) v = a.valor
-    else if (a.percentual != null) v = (a.base === 'emolumento' ? emolumento : valor) * a.percentual
-    else continue
-    if (a.minimo != null) v = Math.max(v, a.minimo)
-    if (a.maximo != null) v = Math.min(v, a.maximo)
-    // "nunca superior ao próprio emolumento do ato" — regra da TSNR em PE.
-    if (a.teto_emolumento) v = Math.min(v, emolumento)
-    total += v
-  }
-  return total
-}
-
-export interface CustoCartorio {
-  total: number | null
-  escritura: number | null
-  registro: number | null
-  /** Os DOIS atos entraram. Falso = parcial, e a descrição diz o que faltou. */
-  completo: boolean
-  descricao: string
-}
-
-/**
- * Custo de cartório para um preço de cessão: escritura + registro.
- *
- * Pura e instantânea — é o que permite chamá-la de dentro do laço de calibragem
- * e ter o preço certo já na primeira passada, sem consulta nenhuma.
- *
- * `total` soma o que se conhece; null só quando nenhum dos dois atos foi achado.
- * Ato faltando vira custo PARCIAL: somar metade avisando é melhor que sumir com
- * o custo do preço.
- */
-export function custoParaPreco(
-  regra: RegraEmolumentos | null,
-  preco: number,
-  rotulo?: string,
-): CustoCartorio {
-  const sufixo = rotulo ? ` (${rotulo})` : ''
-  if (!regra || (!regra.escritura && !regra.registro)) {
-    return {
-      total: null, escritura: null, registro: null, completo: false,
-      descricao: 'Confirmar com cartório — tabela de emolumentos não encontrada',
-    }
-  }
-  const escritura = custoDoAto(regra.escritura, preco)
-  const registro = custoDoAto(regra.registro, preco)
-  if (escritura === null && registro === null) {
-    return {
-      total: null, escritura, registro, completo: false,
-      descricao: `Confirmar com cartório — ${brl(preco)} fora das faixas da tabela${sufixo}`,
-    }
-  }
-  const partes = [
-    escritura === null ? 'escritura NÃO ENCONTRADA' : `Escritura ${brl(escritura)}`,
-    registro === null ? 'registro NÃO ENCONTRADO' : `registro ${brl(registro)}`,
-  ]
-  return {
-    total: (escritura ?? 0) + (registro ?? 0),
-    escritura,
-    registro,
-    completo: escritura !== null && registro !== null,
-    descricao: `${partes.join(' + ')}${sufixo}`,
-  }
+export interface RespostaEmolumentos {
+  estado: EstadoLevantamento
+  emolumentos: Emolumentos | null
+  /** Segundos sugeridos até a próxima pergunta, quando `levantando`. */
+  reconsultar_em?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -476,75 +323,186 @@ async function extrairRegra(
   return { regra: { escritura, registro }, fontes, vigencia, observacao }
 }
 
+
 // ---------------------------------------------------------------------------
-// Cache + extração
+// Levantamento em segundo plano + cache
 // ---------------------------------------------------------------------------
+//
+// POR QUE ISTO NÃO É UMA CHAMADA SÍNCRONA. Achar o provimento do estado, abrir
+// o PDF anexo e ler as linhas numéricas leva de dois a cinco minutos — é uma
+// pesquisa de verdade, com até dez buscas e seis downloads. A primeira versão
+// esperava esse tempo dentro da requisição, e a tela mostrava "o levantamento
+// passou de 140s". Nenhum ajuste de timeout resolve isso: o problema é a
+// pesquisa estar no caminho crítico de quem está olhando a tela.
+//
+// Agora a requisição só CONSULTA e, se for o caso, DISPARA. O trabalho corre em
+// segundo plano (EdgeRuntime.waitUntil) e deposita o resultado na tabela; a
+// tela volta a perguntar a cada poucos segundos. E como o que se guarda é a
+// REGRA, e não um custo para um preço, isso acontece uma vez por estado no ano.
+
+/** Uma linha 'levantando' parada mais que isto é worker morto — pode reiniciar. */
+const TRAVA_MINUTOS = 8
+/** Não repete uma pesquisa que acabou de falhar; dá tempo de a fonte voltar do ar. */
+const REPOUSO_FALHA_MINUTOS = 30
+
+function vazio(uf: string, ano: number, motivo: string): Emolumentos {
+  return { uf, ano, regra: null, fontes: [], vigencia: null, observacao: null, origem: 'nenhuma', motivo }
+}
+
+function emSegundoPlano(p: Promise<unknown>): void {
+  const rt = (globalThis as unknown as {
+    EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void }
+  }).EdgeRuntime
+  if (rt?.waitUntil) rt.waitUntil(p)
+}
+
+const minutosDesde = (iso: unknown): number =>
+  (Date.now() - new Date(String(iso ?? 0)).getTime()) / 60000
+
+/** A pesquisa em si, já gravando o desfecho. Roda fora da requisição. */
+async function levantarEGravar(uf: string, ano: number, apiKey: string, svc: SupabaseClient): Promise<void> {
+  let campos: Record<string, unknown>
+  try {
+    const achado = await extrairRegra(uf, ano, apiKey)
+    campos = achado.regra
+      ? {
+          status: 'pronta',
+          motivo: null,
+          tabela: { regra: achado.regra, observacao: achado.observacao },
+          fontes: achado.fontes,
+          vigencia: achado.vigencia,
+        }
+      : {
+          status: 'falhou',
+          tabela: null,
+          motivo: achado.motivo ?? 'a pesquisa terminou sem achar a tabela',
+          fontes: achado.fontes,
+          vigencia: achado.vigencia,
+        }
+  } catch (e) {
+    // O erro TEM de ser gravado. Sem isto a linha fica 'levantando' para sempre,
+    // e a tela roda em círculo até bater a trava de 8 minutos sem dizer por quê.
+    campos = { status: 'falhou', tabela: null, motivo: `a pesquisa falhou: ${(e as Error)?.message ?? String(e)}` }
+  }
+  try {
+    await svc.from('emolumentos_uf')
+      .update({ ...campos, atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv' })
+      .eq('uf', uf).eq('ano', ano)
+  } catch { /* worker morrendo; a trava de 8 min libera a próxima tentativa */ }
+}
+
+function daLinha(uf: string, ano: number, d: Record<string, unknown>): Emolumentos {
+  const guardada = (d.tabela as { regra?: RegraEmolumentos; observacao?: string } | null) ?? null
+  return {
+    uf,
+    ano,
+    regra: guardada?.regra ?? null,
+    fontes: (d.fontes as string[]) ?? [],
+    vigencia: (d.vigencia as string | null) ?? null,
+    observacao: guardada?.observacao ?? null,
+    origem: guardada?.regra ? 'cache' : 'nenhuma',
+    motivo: (d.motivo as string | null) ?? undefined,
+  }
+}
 
 /**
- * A regra de emolumentos de uma UF, do cache ou da web.
+ * Consulta o estado do levantamento de uma UF e, se ninguém estiver cuidando
+ * dela, dispara a pesquisa em segundo plano.
  *
- * UMA EXTRAÇÃO POR UF E ANO, e só. Depois disso todo preço se calcula
- * localmente. O cache está em try/catch: sem a migração 0053, extrai toda vez e
- * segue — mais lento, nunca barrado por um passo manual que ficou para trás.
+ * Devolve na hora, sempre. Quem chama volta a perguntar enquanto for
+ * 'levantando'.
+ *
+ * SEM A TABELA (migração 0053 não rodou) cai no modo antigo: pesquisa dentro da
+ * própria requisição, com tudo que isso tem de ruim. O motivo diz isso em
+ * português, para a falha ser diagnosticável em vez de virar "passou de 140s".
  */
-export async function obterRegra(
+export async function consultarRegra(
   ufBruta: unknown,
   apiKey: string,
   svc: SupabaseClient,
-): Promise<Emolumentos> {
+): Promise<RespostaEmolumentos> {
   const ano = new Date().getFullYear()
   const uf = normalizarUf(ufBruta)
   if (!uf) {
     return {
-      uf: String(ufBruta ?? ''), ano, regra: null, fontes: [], vigencia: null, observacao: null,
-      origem: 'nenhuma', motivo: 'UF do tribunal não identificada nos autos',
+      estado: 'sem_uf',
+      emolumentos: vazio(String(ufBruta ?? ''), ano, 'UF do tribunal não identificada nos autos'),
     }
   }
 
+  let linha: Record<string, unknown> | null
   try {
-    const { data } = await svc
+    const { data, error } = await svc
       .from('emolumentos_uf')
-      .select('tabela, fontes, vigencia')
+      .select('status, motivo, tabela, fontes, vigencia, atualizado_em')
       .eq('uf', uf).eq('ano', ano).maybeSingle()
-    const guardada = (data?.tabela as { regra?: RegraEmolumentos; observacao?: string } | null) ?? null
-    if (guardada?.regra) {
-      return {
-        uf, ano, regra: guardada.regra,
-        fontes: (data?.fontes as string[]) ?? [],
-        vigencia: (data?.vigencia as string | null) ?? null,
-        observacao: guardada.observacao ?? null,
-        origem: 'cache',
-      }
-    }
+    if (error) throw new Error(error.message)
+    linha = (data as Record<string, unknown> | null) ?? null
   } catch {
-    /* cache indisponível (migração não rodou?): segue para a extração */
+    // Modo degradado: sem onde depositar o resultado não há segundo plano
+    // possível. Pesquisa aqui mesmo, e provavelmente estoura o tempo.
+    return await semCache(uf, ano, apiKey)
   }
 
-  const achado = await extrairRegra(uf, ano, apiKey)
-  if (!achado.regra) {
-    return {
-      uf, ano, regra: null, fontes: achado.fontes, vigencia: achado.vigencia,
-      observacao: achado.observacao, origem: 'nenhuma', motivo: achado.motivo,
+  if (linha) {
+    const status = String(linha.status ?? '')
+    const idade = minutosDesde(linha.atualizado_em)
+    if (status === 'pronta') return { estado: 'pronta', emolumentos: daLinha(uf, ano, linha) }
+    if (status === 'levantando' && idade < TRAVA_MINUTOS) {
+      return { estado: 'levantando', emolumentos: null, reconsultar_em: 8 }
     }
+    if (status === 'falhou' && idade < REPOUSO_FALHA_MINUTOS) {
+      return { estado: 'falhou', emolumentos: daLinha(uf, ano, linha) }
+    }
+    // 'levantando' velha (worker morreu) ou 'falhou' já descansada: recomeça.
   }
 
+  // A LINHA NASCE ANTES DA PESQUISA, e é ela que serve de trava: duas abas
+  // pedindo o mesmo estado ao mesmo tempo não disparam duas pesquisas.
   try {
-    await svc.from('emolumentos_uf').upsert(
+    const { error } = await svc.from('emolumentos_uf').upsert(
       {
-        uf, ano,
-        tabela: { regra: achado.regra, observacao: achado.observacao },
-        fontes: achado.fontes,
-        vigencia: achado.vigencia,
-        atualizado_por: 'gerar-analise-rpv',
+        uf, ano, status: 'levantando', tabela: null, motivo: null,
+        atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv',
       },
       { onConflict: 'uf,ano' },
     )
+    if (error) throw new Error(error.message)
   } catch {
-    /* sem cache: a próxima análise desta UF extrai de novo */
+    return await semCache(uf, ano, apiKey)
   }
 
-  return {
-    uf, ano, regra: achado.regra, fontes: achado.fontes, vigencia: achado.vigencia,
-    observacao: achado.observacao, origem: 'busca',
+  emSegundoPlano(levantarEGravar(uf, ano, apiKey, svc))
+  return { estado: 'levantando', emolumentos: null, reconsultar_em: 8 }
+}
+
+/** Modo degradado, sem a migração 0053: pesquisa dentro da requisição. */
+async function semCache(uf: string, ano: number, apiKey: string): Promise<RespostaEmolumentos> {
+  try {
+    const achado = await extrairRegra(uf, ano, apiKey)
+    if (!achado.regra) {
+      return {
+        estado: 'falhou',
+        emolumentos: {
+          uf, ano, regra: null, fontes: achado.fontes, vigencia: achado.vigencia,
+          observacao: achado.observacao, origem: 'nenhuma', motivo: achado.motivo,
+        },
+      }
+    }
+    return {
+      estado: 'pronta',
+      emolumentos: {
+        uf, ano, regra: achado.regra, fontes: achado.fontes, vigencia: achado.vigencia,
+        observacao: achado.observacao, origem: 'busca',
+      },
+    }
+  } catch (e) {
+    return {
+      estado: 'falhou',
+      emolumentos: vazio(
+        uf, ano,
+        `o cache de emolumentos não respondeu (a migração 0053 rodou?), então a pesquisa teve de ser feita dentro da requisição e não coube no tempo: ${(e as Error)?.message ?? String(e)}`,
+      ),
+    }
   }
 }

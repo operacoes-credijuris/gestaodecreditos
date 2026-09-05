@@ -13,9 +13,9 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import {
+  consultarRegra,
   custoParaPreco,
   normalizarUf,
-  obterRegra,
   type Emolumentos,
   type RegraEmolumentos,
 } from "../_shared/emolumentos.ts";
@@ -1453,20 +1453,20 @@ Deno.serve(async (req) => {
     // simplesmente deixaria de acontecer.
     // 2b. Ação leve: só a tabela de emolumentos de uma UF.
     //
-    // SEPARADA DA ANÁLISE de propósito. A busca web custa 10 a 30 s e memória, e
+    // SEPARADA DA ANÁLISE de propósito, por dois motivos que se somam. Primeiro,
     // rodá-la dentro da mesma requisição que faz duas extrações de IA sobre um
-    // processo inteiro era o que estourava o worker (HTTP 546). Agora o navegador
-    // pede a tabela ANTES, numa requisição própria, e entrega pronta para a
-    // análise. Cada requisição faz uma coisa pesada, não três.
-    // A REGRA DE EMOLUMENTOS do estado. Ação própria porque envolve busca e
-    // leitura de documento (dezenas de segundos) — dentro da análise, derrubava
-    // o worker. Uma vez por UF e ano: depois o cache responde, e todo preço se
-    // calcula localmente.
+    // processo inteiro derrubava o worker (HTTP 546): cada requisição faz uma
+    // coisa pesada, não três. Segundo, e maior: o levantamento é uma PESQUISA —
+    // achar o provimento do estado e ler o PDF anexo leva minutos, não segundos.
+    //
+    // Por isso esta ação NÃO ESPERA A PESQUISA. Ela responde na hora com o
+    // estado ('pronta' | 'levantando' | 'falhou' | 'sem_uf') e, quando é o caso,
+    // dispara o trabalho em segundo plano. O navegador volta a perguntar a cada
+    // poucos segundos, e cada pergunta é só uma leitura de tabela. Uma vez por
+    // UF e ano: depois disso todo preço se calcula localmente, sem consulta.
     if (body.acao === 'emolumentos') {
-      const uf = normalizarUf(body.uf);
-      if (!uf) return jsonResponse({ ok: true, emolumentos: null, motivo: 'UF não informada' });
-      const e = await obterRegra(uf, cfg.anthropic_api_key, sbAdmin);
-      return jsonResponse({ ok: true, emolumentos: e });
+      const r = await consultarRegra(body.uf, cfg.anthropic_api_key, sbAdmin);
+      return jsonResponse({ ok: true, ...r });
     }
 
     if (body.acao === 'listar_originadores' || body.acao === 'listar_intermediadores') {
