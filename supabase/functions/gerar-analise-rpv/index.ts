@@ -1135,6 +1135,7 @@ async function refinarDados(
   dadosAtuais: any,
   instrucao: string,
   historico: Array<{ papel: 'usuario' | 'ia'; texto: string }>,
+  notasKommo: string,
 ): Promise<{ dados: any; resposta: string; prazoManual: number | null }> {
   const anthropic = new Anthropic({ apiKey });
   const mensagens: Anthropic.MessageParam[] = [];
@@ -1144,9 +1145,17 @@ async function refinarDados(
   // A API exige alternância e começo em 'user'; um histórico que comece pela IA
   // ganha um marcador de abertura.
   if (mensagens.length && mensagens[0].role !== 'user') mensagens.unshift({ role: 'user', content: '(início da revisão)' });
+  // AS ANOTAÇÕES VÃO JUNTO NA REVISÃO, e não só na leitura inicial.
+  //
+  // A revisão não tem os autos — isso é de propósito, reenviar o processo a cada
+  // pedido estourava o tempo da requisição. Mas as anotações são pequenas perto
+  // do processo e são justamente onde está o combinado do negócio. Sem elas, um
+  // pedido como "confira a parcela cedida na anotação" só podia ser respondido
+  // com "não tenho essa informação", quando ela estava a um bloco de distância.
+  const notas = notasKommo.trim() ? `\n\nANOTAÇÕES DO CARD NO KOMMO (do comercial):\n${capNotas(notasKommo)}` : '';
   mensagens.push({
     role: 'user',
-    content: `ANÁLISE ATUAL (JSON):\n${JSON.stringify(dadosAtuais)}\n\nPEDIDO:\n${instrucao}`,
+    content: `ANÁLISE ATUAL (JSON):\n${JSON.stringify(dadosAtuais)}${notas}\n\nPEDIDO:\n${instrucao}`,
   });
   // max_tokens curto de propósito: a saída agora é um patch de poucos campos, e
   // um teto alto só dá margem para a resposta demorar.
@@ -1265,6 +1274,37 @@ function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; av
 // PDF: extrai TEXTO (sem limite de páginas). Imagem: envia como imagem. Texto: inline.
 const MAX_DOC_CHARS = 420000; // ~150-160k tokens (texto jurídico pt-BR é denso); deixa folga p/ o system prompt + a saída (Opus = 200k)
 const MARCA_CORTE = 'TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO';
+
+/**
+ * Teto das anotações do card. Sem ele, o histórico do Kommo entrava inteiro.
+ *
+ * O texto do processo tem teto (MAX_DOC_CHARS) desde sempre; as anotações não
+ * tinham nenhum, e vão no MESMO pedido. Um card com dezenas de anotações longas
+ * — e existem, é onde o comercial conversa — somava-se aos 360 mil caracteres do
+ * processo e podia estourar a janela do modelo, o que não falha de forma limpa.
+ *
+ * 40 mil caracteres cobrem com folga o histórico de um card real.
+ */
+const MAX_NOTAS_CHARS = 40000;
+
+/**
+ * Corta as anotações mantendo O INÍCIO E O FIM.
+ *
+ * As duas pontas importam, e por motivos diferentes: a PRIMEIRA anotação é onde
+ * o comercial registra os parâmetros do negócio (parcela cedida, percentual de
+ * honorários, o que o cedente disse) — decisão do dono, de quando as notas
+ * entraram na leitura —, e as ÚLTIMAS dizem em que pé a conversa está hoje.
+ * Cortar só o fim perderia o estado atual; cortar só o começo perderia o
+ * combinado.
+ */
+function capNotas(txt: string): string {
+  if (txt.length <= MAX_NOTAS_CHARS) return txt;
+  const head = Math.floor(MAX_NOTAS_CHARS * 0.5);
+  const tail = MAX_NOTAS_CHARS - head;
+  return txt.slice(0, head) +
+    `\n\n[...${MARCA_CORTE} — histórico de anotações muito longo; exibindo as primeiras e as últimas...]\n\n` +
+    txt.slice(txt.length - tail);
+}
 
 // Corta textos muito grandes mantendo INÍCIO e FINAL (a inicial fica no começo; cálculos da contadoria e expedição costumam ficar no fim).
 function capTextoDoc(txt: string): string {
@@ -1460,7 +1500,7 @@ Deno.serve(async (req) => {
       // lia, para três campos. Elas trazem o que o comercial já apurou — parcela
       // cedida, percentual de honorários, o que o cedente disse — e a IA precisa
       // disso tanto quanto dos autos. Decisão do dono.
-      if (notasKommo) contentBlocks.push({ type: 'text', text: `[Anotações do card no Kommo, do comercial]\n\n${notasKommo}` });
+      if (notasKommo) contentBlocks.push({ type: 'text', text: `[Anotações do card no Kommo, do comercial]\n\n${capNotas(notasKommo)}` });
     } else {
       if (!jobId) return errorResponse('Faltou o texto do processo (ou o job_id).');
       prefix = `${userId}/${jobId}/processo`;
@@ -1485,7 +1525,7 @@ Deno.serve(async (req) => {
       if (acao === 'refinar') {
         const instrucao = String(body.instrucao ?? '').trim();
         if (!instrucao) return errorResponse('Faltou o pedido de alteração (instrucao).');
-        const revisao = await refinarDados(cfg.anthropic_api_key, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : []);
+        const revisao = await refinarDados(cfg.anthropic_api_key, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : [], notasKommo);
         dados = revisao.dados;
         respostaRevisao = revisao.resposta;
         // Prazo ditado no chat sobrevive aos pedidos seguintes: fica no próprio
