@@ -839,23 +839,44 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   if (dados._soHonorarios) {
     cel('G', 5).value = 'Honorários Contratuais';   // natureza do que está sendo adquirido
   }
-  // SUCUMBENCIAIS ZERADOS. O motor não os modela — não há entrada para eles e o
-  // deságio nunca foi calibrado sobre eles. Deixar o percentual do modelo (10%)
-  // faria a coluna "Principal + Honorários" somar dinheiro que o preço não
-  // considerou, e a rentabilidade exibida ali seria maior que a real.
-  cel('K', 8).value = 0;
+  // OS SUCUMBENCIAIS FICAM COM O PERCENTUAL DO MODELO, e o código não os toca.
+  //
+  // Eu os havia zerado, e estava errado: o modelo ganhou duas colunas de
+  // cenário dedicadas a eles ("apenas Honorários" e "apenas Honorários
+  // Sucumbenciais"), e com o percentual em zero a segunda dividia por zero —
+  // #DIV/0! na cara de quem abrisse o arquivo.
+  //
+  // Segue valendo que o MOTOR não os modela: não há entrada para o percentual
+  // de sucumbenciais e o deságio não é calibrado sobre eles. Os 10% são o
+  // padrão do modelo, não um dado do processo. As colunas Z e AC são, portanto,
+  // COMPARAÇÃO — servem para ver a ordem de grandeza —, e não o preço calibrado.
+  // Quem decide o preço é a coluna do cenário escolhido na tela.
   cel('O', 5).value = calc.desagio;
-  if (dados.modelo === 1) cel('O', 7).value = calc.desagio;  // mesmo deságio nos honorários
+  // O MESMO DESÁGIO NAS TRÊS LINHAS, nos dois modelos.
+  //
+  // Sem isto as linhas de honorários ficavam com deságio zero, e as colunas que
+  // as somam mostravam uma compra pelo valor de face: deságio efetivo 0% e
+  // rentabilidade NEGATIVA depois da comissão, do cartório e da diligência —
+  // um número que parece um alerta e é só uma célula em branco.
+  //
+  // Era condicionado ao Modelo 1 porque só ele adquiria honorários. O modelo
+  // agora tem cenários de honorários nos dois.
+  cel('O', 7).value = calc.desagio;
+  cel('O', 8).value = calc.desagio;
   cel('Q', 5).value = Number(T5.toFixed(4));
   cel('I', 5).value = dados.data_aquisicao;
   cel('J', 5).value = dados.data_pagamento;
 
-  // CARTÓRIO NOS DOIS CENÁRIOS. O modelo antigo tinha uma célula; aqui a coluna
-  // T é "só principal" e a W é "principal + honorários", e o custo de escritura
-  // e registro é o mesmo nas duas — deixar uma vazia faria aquele cenário exibir
-  // custo total menor que o real, que é o erro que mais engana numa comparação
-  // lado a lado.
-  for (const col of ['T', 'W']) {
+  // CARTÓRIO NOS QUATRO CENÁRIOS. O modelo antigo tinha uma célula só; hoje são
+  // quatro colunas lado a lado — T "só principal", W "principal + honorários",
+  // Z "só honorários" e AC "só sucumbenciais" —, e a escritura e o registro
+  // custam o mesmo em todas: o ato de cessão é um só.
+  //
+  // Deixar qualquer uma vazia faz aquele cenário exibir custo total MENOR que o
+  // real e, portanto, rentabilidade maior — o erro que mais engana numa
+  // comparação lado a lado, porque o número inflado aparece justamente na
+  // coluna que se quer escolher.
+  for (const col of ['T', 'W', 'Z', 'AC']) {
     const c = cel(col, 10);
     c.value = calc.Y10;
     // A decomposição vai em NOTA, não em célula vizinha: o layout é fixo e uma
