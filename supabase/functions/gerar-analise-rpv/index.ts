@@ -395,11 +395,56 @@ function esferaDoEnte(ente: unknown, esferaLida: unknown, tribunal: unknown): Es
  *   desde a expedição, quando a data consta) + alvará + UM ciclo para a
  *   liberação. Goiás mantém o template (ciclos + 21 + 60).
  */
+/** Um ato do roteiro, já validado. */
+interface AtoRoteiro { ato: string; dias: number; base: string }
+
+/**
+ * O roteiro que a IA montou, se ele serve para somar.
+ *
+ * Teto de 1.100 dias no ato e 40 itens: número solto de uma leitura ruim não
+ * pode virar prazo de três anos num campo que manda no preço. Ato sem nome ou
+ * com dias inválido é descartado; o roteiro inteiro só vale se sobrar pelo menos
+ * um ato e a soma for plausível (até 60 meses).
+ */
+function roteiroValido(bruto: unknown): AtoRoteiro[] | null {
+  if (!Array.isArray(bruto) || bruto.length === 0 || bruto.length > 40) return null;
+  const atos: AtoRoteiro[] = [];
+  for (const x of bruto as Array<Record<string, unknown>>) {
+    const ato = String(x?.ato ?? '').trim();
+    const dias = Number(x?.dias);
+    if (!ato || !isFinite(dias) || dias < 0 || dias > 1100) continue;
+    atos.push({ ato, dias, base: String(x?.base ?? '').trim() });
+  }
+  if (atos.length === 0) return null;
+  const total = atos.reduce((t, a) => t + a.dias, 0);
+  if (!(total > 0) || total / 30 > 60) return null;
+  return atos;
+}
+
 function prazoMeses(o: {
   esfera: Esfera; serventiaDias: number; gabineteDias: number; scenario: 'A' | 'B';
   dataAquisicao: Date; dataFatalConvenio?: Date; dataExpedicao?: Date; exigeAlvara: boolean;
-}): { meses: number; regra: RegraPrazo; detalhe: string } {
+  /** O caminho que a IA montou até a liquidação. Quando serve, é ele que vale. */
+  roteiro?: unknown;
+}): { meses: number; regra: RegraPrazo; detalhe: string; roteiro: AtoRoteiro[] | null } {
   const regra = REGRAS_PRAZO[o.esfera];
+
+  // O ROTEIRO VEM PRIMEIRO, e a fórmula fica de rede.
+  //
+  // A fórmula é (serventia+gabinete)*2 + serventia*1,5: dois ciclos e meio,
+  // sempre, para qualquer processo. Ela não sabe em que etapa o processo está,
+  // quantos atos faltam, nem que a CESSÃO tem atos próprios — habilitação,
+  // intimação da Fazenda, homologação, substituição — que só acontecem depois
+  // da compra e que ela nunca contou. O roteiro conta o caminho que falta, ato a
+  // ato, com a velocidade medida neste juízo.
+  const atos = roteiroValido(o.roteiro);
+  if (atos) {
+    const dias = atos.reduce((t, a) => t + a.dias, 0);
+    const meses = Math.max(PISO_MESES, dias / 30);
+    let detalhe = `${atos.length} ato(s) até a liquidação, somando ${Math.round(dias)}d`;
+    if (meses > dias / 30) detalhe += ` — piso de ${PISO_MESES} meses aplicado (o roteiro deu ${(dias / 30).toFixed(1)})`;
+    return { meses, regra, detalhe, roteiro: atos };
+  }
   const sg = o.serventiaDias + o.gabineteDias;
   const ciclos = sg * 2 + o.serventiaDias * 1.5;
   const alvara = regra.alvaraDias === 'se_exigir' ? (o.exigeAlvara ? 21 : 0) : regra.alvaraDias;
@@ -429,7 +474,7 @@ function prazoMeses(o: {
   }
   const meses = Math.max(PISO_MESES, dias / 30);
   if (meses > dias / 30) detalhe += ` — piso de ${PISO_MESES} meses aplicado (o cálculo deu ${(dias / 30).toFixed(1)})`;
-  return { meses, regra, detalhe };
+  return { meses, regra, detalhe, roteiro: null };
 }
 
 // Modelo 1 (verde) se há honorários contratuais a destacar; senão Modelo 2 (azul).
@@ -738,6 +783,14 @@ const SCHEMA_ANALISE = {
   data_expedicao_rpv: 'se já expedida: DD/MM/AAAA da expedição do ofício requisitório/RPV, ou null',
   data_fatal_convenio: 'se cenário A E o tribunal tem convênio com data-limite para expedir a RPV (o TJGO tem): a data (DD/MM/AAAA); null nos demais tribunais — não invente uma',
 
+  // ROTEIRO ATÉ A LIQUIDAÇÃO — o que decide o prazo (ver regra 13).
+  etapa_atual: 'em que ponto do cumprimento de sentença o processo está HOJE, em uma frase (ex.: "cálculos homologados, aguardando decisão que determina a expedição da RPV")',
+  roteiro_prazo:
+    'lista ORDENADA dos atos que ainda faltam até o dinheiro na conta, cada um {ato, dias, base}: ' +
+    '"ato" = o que precisa acontecer, em poucas palavras; "dias" = quantos dias corridos esse ato leva NESTE processo, número; ' +
+    '"base" = de onde saiu o número (média medida neste processo, prazo legal com o artigo, ou prática do tribunal). ' +
+    'Inclua os atos da CESSÃO. Ver regra 13 para a montagem.',
+
   // M4 — médias de tempo (em DIAS). Devolver também os pares para auditoria.
   serventia_dias: 'tempo médio da serventia em dias (média dos pares petição→conclusão)',
   gabinete_dias: 'tempo médio do gabinete em dias (média dos pares conclusão→decisão)',
@@ -843,7 +896,18 @@ const SYSTEM_ANALISE =
   '40: "RPV foi mandada para expedição?" -> Sim/Não; complemento: data da decisão. ' +
   '41: "Nesse tribunal, é a serventia que expede ou outro órgão?" -> TEXTO (ex.: "Serventia" ou o órgão); complemento: números dos processos usados. ' +
   '42: "Houve expedição de documento?" -> um EXATO de: Minuta de RPV | RPV | Alvará de pagamento | Sem expedição; complemento: data do documento. ' +
-  '43: "Nesse tribunal, precisa emitir alvará ou só a RPV?" -> um EXATO de: Não precisa de alvará | Precisa de alvará; complemento: números dos processos usados.';
+  '43: "Nesse tribunal, precisa emitir alvará ou só a RPV?" -> um EXATO de: Não precisa de alvará | Precisa de alvará; complemento: números dos processos usados. ' +
+  '=== REGRA 13 — O ROTEIRO ATÉ A LIQUIDAÇÃO (campo "roteiro_prazo") === ' +
+  'É daqui que sai o prazo de resgate, e o prazo manda no preço: superestimar joga o preço para baixo e perde o negócio; subestimar compra um crédito que rende menos do que parece. Não chute um número redondo — MONTE O CAMINHO. ' +
+  'PASSO 1: diga em "etapa_atual" onde o processo está HOJE, lendo o último andamento real. ' +
+  'PASSO 2: liste, em ordem, SÓ OS ATOS QUE AINDA FALTAM daquele ponto até o dinheiro na conta do credor. Ato já praticado não entra. Um item por ato. ' +
+  'PASSO 3: para cada ato, estime os dias corridos e diga em "base" de onde tirou o número, nesta ordem de preferência: ' +
+  '(a) A VELOCIDADE MEDIDA NESTE PROCESSO — você já calculou serventia_dias e gabinete_dias a partir de pares de datas reais do andamento. Ato de cartório/serventia (juntada, intimação, expedição, remessa) usa serventia_dias; ato de decisão do juiz (despacho, homologação, deferimento) usa gabinete_dias. É a melhor evidência que existe: mede ESTE juízo, não uma média nacional. ' +
+  '(b) PRAZO LEGAL, quando o ato tem um — cite o artigo. Ex.: impugnação/manifestação da Fazenda em 30 dias úteis (CPC 535); pagamento da RPV em 60 dias da requisição (Lei 10.259/2001 art. 17 no federal; CPC 535 §3º, II nos estaduais e municipais). Prazo em dias ÚTEIS: converta para corridos multiplicando por 1,4. ' +
+  '(c) PRÁTICA DO TRIBUNAL, quando você conhece a peculiaridade daquele tribunal ou daquela espécie de processo, e diga qual é. ' +
+  'PASSO 4 — OS ATOS DA CESSÃO, QUE NÃO PODEM FALTAR. O crédito está sendo comprado agora, então o caminho inclui o que a própria cessão exige, e isso acontece DEPOIS da aquisição: (i) protocolo da petição de habilitação do cessionário com o contrato de cessão; (ii) intimação da Fazenda executada para se manifestar sobre a cessão (contraditório — some o prazo dela); (iii) decisão que homologa a cessão e defere a substituição/sub-rogação no polo ativo; (iv) anotação da substituição e, onde o tribunal exigir, retificação ou reexpedição do requisitório em nome do cessionário. Se o requisitório JÁ foi expedido em nome do cedente, a retificação costuma ser o passo mais lento e às vezes recoloca o crédito na fila — considere isso. Se pela prática do tribunal algum desses atos não existe ou é dispensado, não invente: omita e explique em "base" do ato seguinte. ' +
+  'PASSO 5: se algum ato depende de evento incerto (ordem cronológica de pagamento, dotação orçamentária, fila do ente), inclua o ato com a estimativa e diga a incerteza em "base". ' +
+  'NÃO SOME NADA: devolva os atos e os dias de cada um. Quem soma sou eu.';
 
 async function extrairAnalise(apiKey: string, contentBlocks: any[]): Promise<any> {
   const userContent = [
@@ -1535,6 +1599,12 @@ Deno.serve(async (req) => {
         esfera,
         regra_prazo: prazo.regra.descricao,
         prazo_detalhe: prazo.detalhe,
+        // O CAMINHO, e não só o número. Prazo é a variável que mais mexe no
+        // preço, e sem os atos à vista ele é um número para acreditar ou não.
+        // Com eles, a pessoa discorda de um item — "homologação da cessão aqui
+        // leva 90 dias" — e pede a correção no chat.
+        etapa_atual: dados.etapa_atual ?? null,
+        roteiro: prazo.roteiro,
         valores,
         cartorio: cartorioResp,
         atingiu_alvo: calc.atingiuAlvo !== false,

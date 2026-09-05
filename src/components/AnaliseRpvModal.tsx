@@ -119,6 +119,14 @@ export interface RespostaAnaliseRpv {
   esfera?: string
   regra_prazo?: string
   prazo_detalhe?: string
+  /** Onde o processo está hoje, lido do último andamento. */
+  etapa_atual?: string | null
+  /**
+   * Os atos que faltam até a liquidação, com os dias de cada um — é a soma
+   * deles que vira o prazo. Null quando a IA não montou um roteiro utilizável e
+   * o motor caiu na fórmula antiga.
+   */
+  roteiro?: { ato: string; dias: number; base: string }[] | null
   valores?: ValoresRpv
   cartorio?: CartorioRpv
   /**
@@ -672,6 +680,45 @@ export function AnaliseRpvModal({
               </p>
             )}
           </div>
+
+          {/* O CAMINHO ATÉ O DINHEIRO. Prazo é a variável que mais mexe no
+              preço — 8 meses ou 14 mudam o deságio inteiro —, e antes ele era um
+              número saído de uma fórmula fixa, sem como conferir. Aqui estão os
+              atos que faltam, com os dias de cada um e de onde o número veio.
+              Discordar de um item é uma frase no chat abaixo. */}
+          {!!atual.roteiro?.length && (
+            <section>
+              <h3 className="font-display text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Caminho até a liquidação
+              </h3>
+              {atual.etapa_atual && (
+                <p className="mt-1 text-xs text-slate-600">
+                  <span className="text-slate-500">Hoje:</span> {atual.etapa_atual}
+                </p>
+              )}
+              <ol className="mt-2 space-y-1">
+                {atual.roteiro.map((a, i) => (
+                  <li key={i} className="flex gap-2 text-xs">
+                    <span className="w-14 shrink-0 text-right font-semibold tabular-nums text-slate-700">
+                      {a.dias}d
+                    </span>
+                    <span className="min-w-0">
+                      <span className="text-slate-800">{a.ato}</span>
+                      {a.base && <span className="text-slate-500"> · {a.base}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-1.5 border-t border-slate-200 pt-1.5 text-xs text-slate-600">
+                <span className="w-14 inline-block text-right font-semibold tabular-nums">
+                  {atual.roteiro.reduce((t, a) => t + a.dias, 0)}d
+                </span>{' '}
+                somados
+                {atual.valores &&
+                  ` · prazo usado no preço: ${atual.valores.prazo_meses} meses`}
+              </p>
+            </section>
+          )}
 
           {atual.m1_sintese && (
             <section>
