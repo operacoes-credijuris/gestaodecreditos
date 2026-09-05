@@ -72,14 +72,14 @@ import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { DueDiligence } from '@/components/DueDiligence'
-import {
-  AnaliseRpvModal,
-  GradeValoresRpv,
-  type CartorioRpv,
-  type DadosDoCardRpv,
-  type RespostaAnaliseRpv,
-  type ValoresRpv,
+import { DueDiligence } from '@/components/DueDiligence'
+import {
+  AnaliseRpvModal,
+  GradeValoresRpv,
+  type CartorioRpv,
+  type DadosDoCardRpv,
+  type RespostaAnaliseRpv,
+  type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
 import { formatDate } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -106,8 +106,8 @@ type ResultadoAnalise = {
    * Os números finais da precificação, em NÚMERO (frações para percentuais).
    * A planilha sempre os teve; a tela é que só mostrava "planilha gerada".
    */
-  valores?: ValoresRpv
-  cartorio?: CartorioRpv
+  valores?: ValoresRpv
+  cartorio?: CartorioRpv
   [k: string]: unknown
 }
 
@@ -486,20 +486,13 @@ function CardCredito({
           precatório produzia parecer errado com cara de conferido. */}
       {botoes !== 'nenhum' && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          {botoes === 'rpv' && (
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<FileSearch className="h-4 w-4" />}
-              onClick={() => onAnalisar(lead)}
-              loading={analisando}
-              disabled={ocupado || analisando}
-            >
-              {analisando ? 'Analisando…' : 'Analisar (PDF do card)'}
-            </Button>
-          )}
+          {/* A MESMA ORDEM NOS DOIS FUNIS: due diligence primeiro, análise
+              depois. Em RPV estava invertida — o botão escuro vinha antes —, e
+              duas telas irmãs com a ordem trocada fazem a mão errar: quem opera
+              alterna entre elas o dia inteiro e clica pela POSIÇÃO, não pelo
+              rótulo. A ordem também é a do trabalho: apura-se antes de analisar.
 
-          {/* DUE DILIGENCE NOS DOIS, com frentes diferentes: em RPV não se faz
+              DUE DILIGENCE NOS DOIS, com frentes diferentes: em RPV não se faz
               diligência de CERTIDÕES, só de processos judiciais, então a janela
               abre sem a aba de certidões (ver `comCertidoes`). Nunca automático:
               o checklist depende de CPF e UF que uma pessoa confere no processo,
@@ -513,6 +506,22 @@ function CardCredito({
           >
             Due diligence
           </Button>
+
+          {botoes === 'rpv' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<FileSearch className="h-4 w-4" />}
+              onClick={() => onAnalisar(lead)}
+              loading={analisando}
+              disabled={ocupado || analisando}
+            >
+              {/* Sem o "(PDF do card)": o parentesco com "Análise jurídica" do
+                  precatório vale mais que a dica de onde vem o texto, que a
+                  janela já diz ao listar o arquivo que leu. */}
+              {analisando ? 'Analisando…' : 'Analisar'}
+            </Button>
+          )}
 
           {botoes === 'precatorio' && (
             <Button
@@ -619,15 +628,15 @@ function CardCredito({
                   </a>
                 )}
 
-                {resultadoAnalise.valores && (
-                  <div className="mt-2">
-                    <GradeValoresRpv
-                      valores={resultadoAnalise.valores}
-                      cartorio={resultadoAnalise.cartorio}
-                      atingiuAlvo={resultadoAnalise.atingiu_alvo}
-                    />
-                  </div>
-                )}
+                {resultadoAnalise.valores && (
+                  <div className="mt-2">
+                    <GradeValoresRpv
+                      valores={resultadoAnalise.valores}
+                      cartorio={resultadoAnalise.cartorio}
+                      atingiuAlvo={resultadoAnalise.atingiu_alvo}
+                    />
+                  </div>
+                )}
                 {resultadoAnalise.aviso && (
                   <div className="mt-1 text-amber-700">⚠️ {resultadoAnalise.aviso}</div>
                 )}
@@ -768,8 +777,8 @@ export default function AnaliseCredito() {
   // Análise automática (Judit + due diligence + planilha) por card.
   const { user: authUser, profile: authProfile } = useAuth()
   const analistaNome = authProfile?.nome || authUser?.email || 'Usuário'
-  // A análise de RPV abre uma JANELA (AnaliseRpvModal): preliminar, conversa e
-  // só então o salvamento. `rpvLead` é o card cuja janela está aberta.
+  // A análise de RPV abre uma JANELA (AnaliseRpvModal): preliminar, conversa e
+  // só então o salvamento. `rpvLead` é o card cuja janela está aberta.
   const [rpvLead, setRpvLead] = useState<KommoLead | null>(null)
   const [analisandoJurId, setAnalisandoJurId] = useState<number | null>(null)
   const [resultadoJuridico, setResultadoJuridico] = useState<
@@ -797,36 +806,36 @@ export default function AnaliseCredito() {
       return n
     })
 
-  function onAnalisar(lead: KommoLead) {
-    setRpvLead(lead)
-  }
-
-  /** Lê os anexos do card, guardando no cache na hora — a janela e a due diligence dividem o mesmo PDF. */
-  async function lerArquivosComCache(lead: KommoLead): Promise<ArquivoLido[]> {
-    const id = lead.kommo_lead_id
-    const lidos = arquivosCache[id] ?? (await lerArquivosDoCard(lead))
-    setArquivosCache((p) => ({ ...p, [id]: lidos }))
-    return lidos
-  }
-
-  /** O que a função de RPV precisa saber do card, em toda chamada da janela. */
-  function dadosParaRpv(lead: KommoLead): DadosDoCardRpv {
-    const d = lerCardCredijuris(lead)
-    return {
-      numero_processo: d.numero,
-      categoria: d.categoria,
-      intermediador: d.intermediador,
-      tipo_aquisicao: d.tipo_aquisicao,
-      honorarios_pct: d.honorarios_pct,
-    }
-  }
-
-  /** Todas as anotações do card, da mais antiga à mais nova: a IA lê junto com os autos. */
-  function notasDoCard(lead: KommoLead): string {
-    const lista = lead.notas && lead.notas.length > 0 ? lead.notas.map((n) => n.texto) : [lead.nota_texto ?? '']
-    return lista.filter(Boolean).join('\n---\n')
-  }
-
+  function onAnalisar(lead: KommoLead) {
+    setRpvLead(lead)
+  }
+
+  /** Lê os anexos do card, guardando no cache na hora — a janela e a due diligence dividem o mesmo PDF. */
+  async function lerArquivosComCache(lead: KommoLead): Promise<ArquivoLido[]> {
+    const id = lead.kommo_lead_id
+    const lidos = arquivosCache[id] ?? (await lerArquivosDoCard(lead))
+    setArquivosCache((p) => ({ ...p, [id]: lidos }))
+    return lidos
+  }
+
+  /** O que a função de RPV precisa saber do card, em toda chamada da janela. */
+  function dadosParaRpv(lead: KommoLead): DadosDoCardRpv {
+    const d = lerCardCredijuris(lead)
+    return {
+      numero_processo: d.numero,
+      categoria: d.categoria,
+      intermediador: d.intermediador,
+      tipo_aquisicao: d.tipo_aquisicao,
+      honorarios_pct: d.honorarios_pct,
+    }
+  }
+
+  /** Todas as anotações do card, da mais antiga à mais nova: a IA lê junto com os autos. */
+  function notasDoCard(lead: KommoLead): string {
+    const lista = lead.notas && lead.notas.length > 0 ? lead.notas.map((n) => n.texto) : [lead.nota_texto ?? '']
+    return lista.filter(Boolean).join('\n---\n')
+  }
+
   /**
    * Análise jurídica do precatório: manda o caderno inteiro para o modelo.
    *
@@ -1310,28 +1319,28 @@ export default function AnaliseCredito() {
         )}
       </Card>
 
-      {rpvLead && (
-        <AnaliseRpvModal
-          // key pelo card: trocar de card recomeça a análise do zero.
-          key={rpvLead.kommo_lead_id}
-          open
-          leadId={rpvLead.kommo_lead_id}
-          titulo={tituloCard(rpvLead)}
-          dadosDoCard={dadosParaRpv(rpvLead)}
-          notasKommo={notasDoCard(rpvLead)}
-          lerArquivos={() => lerArquivosComCache(rpvLead)}
-          onSalvo={(r: RespostaAnaliseRpv) => {
-            // Só depois de salvar o card ganha o resultado e a anotação no Kommo —
-            // era isso que a versão de um clique fazia cedo demais.
-            const final = r as unknown as ResultadoAnalise
-            setResultadoAnalise((p) => ({ ...p, [rpvLead.kommo_lead_id]: final }))
-            void anotarResultadoNaKommo(rpvLead.kommo_lead_id, final, analistaNome)
-          }}
-          onClose={() => setRpvLead(null)}
-        />
-      )}
-
-      {ddLead && (
+      {rpvLead && (
+        <AnaliseRpvModal
+          // key pelo card: trocar de card recomeça a análise do zero.
+          key={rpvLead.kommo_lead_id}
+          open
+          leadId={rpvLead.kommo_lead_id}
+          titulo={tituloCard(rpvLead)}
+          dadosDoCard={dadosParaRpv(rpvLead)}
+          notasKommo={notasDoCard(rpvLead)}
+          lerArquivos={() => lerArquivosComCache(rpvLead)}
+          onSalvo={(r: RespostaAnaliseRpv) => {
+            // Só depois de salvar o card ganha o resultado e a anotação no Kommo —
+            // era isso que a versão de um clique fazia cedo demais.
+            const final = r as unknown as ResultadoAnalise
+            setResultadoAnalise((p) => ({ ...p, [rpvLead.kommo_lead_id]: final }))
+            void anotarResultadoNaKommo(rpvLead.kommo_lead_id, final, analistaNome)
+          }}
+          onClose={() => setRpvLead(null)}
+        />
+      )}
+
+      {ddLead && (
         <DueDiligence
           // key pelo card: trocar de card remonta a janela do zero, em vez de
           // reaproveitar o formulário já preenchido com os dados do anterior.
