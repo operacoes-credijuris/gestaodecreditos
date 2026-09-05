@@ -121,6 +121,8 @@ export interface ValoresRpv {
   preco_cessao: number
   comissao: number
   cartorio: number | null
+  /** IRRF retido sobre os honorários, pela tabela progressiva. 0 quando não há. */
+  ir_honorarios?: number
   custo_total: number
   rentabilidade_mensal: number
   prazo_meses: number
@@ -278,7 +280,12 @@ export function GradeValoresRpv({
         <dt className="text-slate-500">Base do deságio</dt>
         <dd className="tabular-nums">
           {formatBRL(valores.liquido_base)}
-          <span className="text-slate-500"> (bruto {formatBRL(valores.bruto)})</span>
+          <span className="text-slate-500">
+            {' '}(bruto {formatBRL(valores.bruto)}
+            {/* Só aparece quando há: numa cessão sem honorários a menção
+                confundiria mais do que informa. */}
+            {!!valores.ir_honorarios && `, IR dos honorários ${formatBRL(valores.ir_honorarios)}`})
+          </span>
         </dd>
       </div>
     </dl>

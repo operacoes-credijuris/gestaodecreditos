@@ -22,6 +22,7 @@ import {
   type RegraEmolumentos,
 } from "../_shared/emolumentos.ts";
 import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
+import { irProgressivo } from "../_shared/irpf.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
@@ -542,6 +543,17 @@ function escolherModelo(honorariosContratuais: number): 1 | 2 {
 // a alíquota da GOIASPREV (feito no extrator; ver ehEstadoDeGoias). Outros entes: sem reserva, com aviso.
 function calibrarDesagio(o: {
   brutoTotal: number; honorarios: number; ir: number; inss: number;
+  /**
+   * O IRRF retido sobre os honorários (tabela progressiva).
+   *
+   * Ele NÃO se soma às deduções do principal: o honorário sai do bolo pelo
+   * BRUTO, e é sobre esse bruto que o imposto incide. O que muda é o que se
+   * ADQUIRE — o advogado cede o que vai receber, e o que ele recebe é o
+   * líquido. Sem isto, o preço era calculado como se a Receita não retivesse
+   * nada, e a planilha (que agora calcula o IR na própria célula) passaria a
+   * mostrar um líquido menor do que a base que gerou o preço.
+   */
+  irHonorarios?: number;
   T5: number; modelo: 1 | 2; comissaoPct?: number; diligencia?: number; alvo?: number;
   /**
    * A REGRA de emolumentos do estado — faixas e acréscimos —, não um valor.
@@ -557,8 +569,13 @@ function calibrarDesagio(o: {
   const alvo = o.alvo ?? 0.028;
   const dilig = o.diligencia ?? 250;
   // L5 = principal líquido; L7 = honorários (no Modelo 2, L7 é deduzido mas não adquirido)
+  //
+  // A ASSIMETRIA É PROPOSITAL e espelha a planilha: L5 desconta o honorário
+  // BRUTO (é o que deixa o bolo do principal), enquanto L7 é o LÍQUIDO (é o que
+  // o advogado recebe, e portanto o que se compra dele). A diferença entre os
+  // dois é exatamente o IR retido, que não fica com ninguém dos dois.
   const L5 = o.brutoTotal - (o.ir + o.inss + o.honorarios);
-  const L7 = o.honorarios;
+  const L7 = Math.max(0, o.honorarios - (o.irHonorarios ?? 0));
   // Base e cessão dependem do modelo:
   //   Modelo 1: Y3 = L5+L7 ; cessão = (L5+L7)*(1-d)
   //   Modelo 2: Y3 = L5    ; cessão = L5*(1-d)
@@ -801,12 +818,32 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   cel('K', 5).value = dados.bruto_total;
   cel('M', 5).value = dados.ir;
   cel('N', 5).value = dados.inss;
+  // O PERCENTUAL, E NÃO O VALOR. O modelo passou a ter o percentual de
+  // honorários em célula própria (K7/K19), e as linhas de honorários se
+  // calculam a partir dele: o bruto sai do percentual, o IR sai do bruto pela
+  // tabela progressiva, e o líquido é a diferença. Escrever o VALOR em L7,
+  // como se fazia, destruía essa fórmula — e com ela o desconto de IR que o
+  // dono acabou de pôr na planilha.
+  //
+  // O percentual é DERIVADO do valor que o motor usou, dividido pela mesma base
+  // que a fórmula da planilha usa. Assim a planilha reproduz o número do motor
+  // por construção, venha ele do destaque da contadoria ou de um percentual
+  // digitado na tela — em vez de os dois calcularem por caminhos que podem
+  // divergir. As bases diferem entre os modelos, como as fórmulas do modelo:
+  // no Modelo 1 o honorário é percentual do BRUTO; no Modelo 2, do LÍQUIDO.
+  const _baseHon = dados.modelo === 1
+    ? Number(dados.bruto_total) || 0
+    : (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) - (Number(dados.inss) || 0);
+  const _pctHon = _baseHon > 0 ? (Number(dados.honorarios) || 0) / _baseHon : 0;
+  cel('K', 7).value = Number(_pctHon.toFixed(6));
   if (dados._soHonorarios) {
-    cel('L', 7).value = 0;                          // adquirindo só honorários: sem sub-honorários
     cel('G', 5).value = 'Honorários Contratuais';   // natureza do que está sendo adquirido
-  } else if (dados.modelo === 1 || dados._honPctInformado) {
-    cel('L', 7).value = dados.honorarios;           // honorários adquiridos (contadoria ou % informado)
   }
+  // SUCUMBENCIAIS ZERADOS. O motor não os modela — não há entrada para eles e o
+  // deságio nunca foi calibrado sobre eles. Deixar o percentual do modelo (10%)
+  // faria a coluna "Principal + Honorários" somar dinheiro que o preço não
+  // considerou, e a rentabilidade exibida ali seria maior que a real.
+  cel('K', 8).value = 0;
   cel('O', 5).value = calc.desagio;
   if (dados.modelo === 1) cel('O', 7).value = calc.desagio;  // mesmo deságio nos honorários
   cel('Q', 5).value = Number(T5.toFixed(4));
@@ -1706,9 +1743,24 @@ Deno.serve(async (req) => {
       daTela ?? (ufCredito ? await regraDoCache(ufCredito, sbAdmin) : null);
 
     // 3d. Calibragem do deságio — o cartório entra DENTRO dela, por preço.
+    // O IRRF SOBRE OS HONORÁRIOS, pela tabela progressiva.
+    //
+    // Conta, não estimativa: a célula do modelo trazia o texto "[ESTIMAR
+    // CONFORME TABELA PROGRESSIVA DE IR]" à espera de que a IA pusesse um
+    // número, e como ela não punha, a fórmula que subtraía a célula devolvia
+    // #VALUE! e contaminava líquido, total e rentabilidade. Ver _shared/irpf.ts.
+    //
+    // Pagamento único (meses = 1), que é o mais pesado: se os honorários forem
+    // rendimento recebido acumuladamente, o imposto real é menor, e errar para
+    // mais deixa o preço conservador em vez de prometer um líquido que não vem.
+    const _irHon = irProgressivo(Number(dados.honorarios) || 0);
+    dados._ir_honorarios = _irHon.imposto;
+    dados._ir_honorarios_memoria = _irHon.memoria;
+
     const calc: any = calibrarDesagio({
       brutoTotal: Number(dados.bruto_total), honorarios: Number(dados.honorarios) || 0,
       ir: Number(dados.ir) || 0, inss: Number(dados.inss) || 0, T5, modelo: dados.modelo,
+      irHonorarios: _irHon.imposto,
       regra: emolumentos?.regra ?? null,
     });
     calc.faixaCartorio = emolumentos
@@ -1760,6 +1812,11 @@ Deno.serve(async (req) => {
       preco_cessao: Number(calc.cessao) || 0,
       comissao: Number(calc.Y5) || 0,
       cartorio: calc.Y10 == null ? null : Number(calc.Y10),
+      // O IR retido sobre os honorários. Vai para a tela porque é a diferença
+      // entre o honorário que aparece nos autos e o que de fato se compra do
+      // advogado — sem mostrá-lo, a base do deságio parece menor do que
+      // deveria, sem explicação visível.
+      ir_honorarios: Number(dados._ir_honorarios) || 0,
       custo_total: Number(calc.Y4) || 0,
       rentabilidade_mensal: Number(calc.Y9) || 0,
       prazo_meses: Number(T5.toFixed(1)),
