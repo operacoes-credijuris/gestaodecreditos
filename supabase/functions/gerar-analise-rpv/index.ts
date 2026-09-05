@@ -902,15 +902,29 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // cell I7"). Ou seja: a análise rodava, custava as duas chamadas de IA, e
   // morria na hora de montar a planilha.
 
-  // O BLOCO NÃO USADO É ESVAZIADO, e não removido.
+  // ======================================================================
+  // O ARQUIVO ENTREGUE MOSTRA SÓ O CASO
+  // ======================================================================
   //
-  // Remover as linhas seria mais limpo de ler, e é o que a versão anterior
-  // fazia — mas ali os modelos eram ABAS separadas. Aqui são blocos da mesma
-  // aba, e o de baixo tem fórmulas que apontam para as próprias linhas (=L17,
-  // =Q17, =T15…). O spliceRows do ExcelJS apaga a linha e NÃO reescreve as
-  // referências: remover o bloco de cima faria o de baixo subir com as fórmulas
-  // apontando para o lugar errado, e a planilha sairia com números plausíveis e
-  // errados. Esvaziar não mexe em referência nenhuma.
+  // A planilha de trabalho traz dois modelos (honorários destacados ou não) e
+  // quatro cenários de negociação lado a lado. O arquivo que vai para o Drive
+  // não precisa de nada disso: o modelo já foi escolhido pelo destaque, e o
+  // cenário já foi escolhido pelo "PARCELA CEDIDA" das anotações do card. O que
+  // sobra na tela é ruído — e pior que ruído, porque um número de cenário que
+  // não é o negociado convida a ser lido como se fosse.
+
+  // ESVAZIAR + OCULTAR, e não remover.
+  //
+  // Remover as linhas seria mais limpo, mas os blocos são da MESMA aba e o de
+  // baixo tem fórmulas que apontam para as próprias linhas (=L17, =Q17, =T15…).
+  // O spliceRows do ExcelJS apaga a linha e NÃO reescreve as referências:
+  // remover o bloco de cima faria o de baixo subir com as fórmulas apontando
+  // para o lugar errado, e a planilha sairia com números plausíveis e errados —
+  // o pior desfecho possível num documento de preço. Ocultar não mexe em
+  // referência nenhuma, e para quem abre o arquivo o efeito é o mesmo.
+  //
+  // Esvaziar TAMBÉM, e não só ocultar: se alguém reexibir as linhas, tem de
+  // encontrar vazio, e não os números de exemplo do modelo (K17 = 20000).
   const inicioOutro = dados.modelo === 1 ? 13 : 1;
   const fimOutro = dados.modelo === 1 ? 23 : 11;
   for (let r = inicioOutro; r <= fimOutro; r++) {
@@ -927,6 +941,42 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
     dados.modelo === 1
       ? 'MODELO 2 (AZUL) — não utilizado nesta análise: os honorários foram destacados.'
       : 'MODELO 1 (VERDE) — não utilizado nesta análise: os honorários não foram destacados.';
+  // A linha em branco entre os blocos vai junto, senão sobra uma faixa colorida
+  // solta onde havia um modelo inteiro.
+  for (let r = inicioOutro; r <= fimOutro; r++) prec.getRow(r).hidden = true;
+  prec.getRow(12).hidden = true;   // a linha vazia entre os dois blocos
+
+  // OS CENÁRIOS: fica só o que está sendo negociado.
+  //
+  // Qual é vem do "PARCELA CEDIDA" das anotações do card (ver tipo_aquisicao) e
+  // é o mesmo texto que aparece na C3 da aba jurídica.
+  //
+  // A coluna de cada cenário é onde o NÚMERO está, e no caso de "apenas
+  // honorários" isso não é a coluna Y/Z: naquele modo o motor põe o honorário
+  // na linha do principal (o honorário VIRA o bruto), então o número sai em
+  // S/T. Manter Y/Z ali entregaria uma coluna vazia.
+  const CENARIOS = {
+    principal:    { sep: 'R', rot: 'S',  val: 'T'  },
+    ambos:        { sep: 'U', rot: 'V',  val: 'W'  },
+    honorarios:   { sep: 'X', rot: 'Y',  val: 'Z'  },
+    sucumbenciais:{ sep: 'AA', rot: 'AB', val: 'AC' },
+  } as const;
+  const cenarioUsado: keyof typeof CENARIOS =
+    dados._soHonorarios ? 'principal'          // o honorário está na linha do principal
+    : dados.modelo === 1 ? 'ambos'             // Modelo 1 adquire principal + honorários
+    : 'principal';                             // Modelo 2 adquire só o principal
+  for (const [nome, c] of Object.entries(CENARIOS)) {
+    if (nome === cenarioUsado) continue;
+    for (const col of [c.sep, c.rot, c.val]) prec.getColumn(col).hidden = true;
+  }
+  // O RÓTULO TEM DE DIZER A VERDADE. Em "apenas honorários" o número está na
+  // coluna cujo rótulo diz "Negociando apenas Crédito Principal" — que naquele
+  // caso é falso, porque não há principal nenhum na operação.
+  if (dados._soHonorarios) {
+    const linhaRot = dados.modelo === 1 ? 2 : 14;
+    prec.getCell(`${CENARIOS.principal.rot}${linhaRot}`).value =
+      'Negociando apenas Honorários';
+  }
 
   const out = await wb.xlsx.writeBuffer();
   return new Uint8Array(out as ArrayBuffer);
@@ -948,7 +998,7 @@ const SCHEMA_ANALISE = {
   advogado_nome: 'nome do advogado ou escritório SEM OAB/CNPJ',
   ente_devedor: 'ente devedor (quem vai pagar o crédito), ex.: "Estado de Goiás", "Estado de São Paulo", "Município de Belo Horizonte", "União", "INSS", "Fazenda Pública do Estado do Paraná"',
   fase_processual: 'fase processual atual resumida em poucas palavras, ex.: "Cumprimento de sentença", "Aguardando expedição de RPV", "RPV expedida", "Trânsito em julgado"',
-  tipo_credito: 'um de: "Apenas o crédito principal" | "Crédito principal e honorários" | "Apenas os honorários"',
+  tipo_credito: 'um de, EXATAMENTE: "Crédito principal, apenas" | "Crédito principal + Honorários" | "Honorários contratuais + sucumbenciais" | "Honorários sucumbenciais, apenas" — são os valores da lista suspensa da célula C3 da aba jurídica, e texto fora dela entra marcado como inválido',
 
   // financeiro (dos cálculos da contadoria dentro do PDF)
   bruto_total: 'valor bruto total (principal + juros + Selic), número sem R$',
@@ -1687,9 +1737,9 @@ Deno.serve(async (req) => {
       honorariosCalc = base * (honorariosPct / 100);
     }
     let soHonorarios = false;
-    if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Apenas o crédito principal'; }
-    else if (tipoAquisicao === 'ambos')      { dados.modelo = 1; dados.tipo_credito = 'Crédito principal e honorários'; }
-    else if (tipoAquisicao === 'honorarios') { dados.modelo = 2; soHonorarios = true; dados.tipo_credito = 'Apenas os honorários'; }
+    if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Crédito principal, apenas'; }
+    else if (tipoAquisicao === 'ambos')      { dados.modelo = 1; dados.tipo_credito = 'Crédito principal + Honorários'; }
+    else if (tipoAquisicao === 'honorarios') { dados.modelo = 2; soHonorarios = true; dados.tipo_credito = 'Honorários contratuais + sucumbenciais'; }
     else                                     { dados.modelo = escolherModelo(honAI); }  // automático (como hoje), pelo destaque da contadoria
 
     if (soHonorarios) {
