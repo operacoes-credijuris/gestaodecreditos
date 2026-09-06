@@ -637,6 +637,26 @@ function limparNomeArquivo(s: string): string {
 
 // dados = saída do extrator. Estrutura em SCHEMA_ANALISE (abaixo).
 async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T5: number): Promise<Uint8Array> {
+  // OS VALORES QUE DE FATO PRECIFICARAM, e não os dos autos.
+  //
+  // Quando a auditoria acha divergência que pode derrubar o crédito, o motor
+  // calibra o deságio sobre a base REVISADA. Escrever o bruto dos autos e o
+  // deságio revisado junta duas bases diferentes: a planilha recalcula por
+  // dentro e o preço sai MAIOR que o autorizado — num corte de 10% sobre um
+  // crédito de R$ 72 mil, R$ 4.315 a mais oferecidos ao cedente, com a
+  // rentabilidade impressa calculada sobre um valor que a própria auditoria
+  // disse que pode não existir.
+  //
+  // Declarado aqui em cima porque a aba jurídica também o usa, e ela é escrita
+  // antes da precificação.
+  const _vp = dados._valores_precificados ?? {
+    brutoTotal: Number(dados.bruto_total) || 0,
+    ir: Number(dados.ir) || 0,
+    inss: Number(dados.inss) || 0,
+    contratuaisBrutos: Number(dados.honorarios) || 0,
+    sucumbenciaisBrutos: Number(dados.honorarios_sucumbenciais) || 0,
+  };
+
   // CARREGADO AQUI, não no topo do arquivo. O ExcelJS é de longe a dependência
   // mais pesada desta função, e no topo ela entrava na partida de TODA
   // invocação — inclusive das leves, que nem planilha geram: a consulta de
@@ -743,7 +763,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // perguntou. A decomposição fica embaixo, onde ajuda em vez de confundir.
   aj.getCell('B39').value =
     `VALOR TOTAL LÍQUIDO NEGOCIADO: ${brl(calc.Y3)}\n` +
-    `(bruto ${brl(dados.bruto_total)}; principal líquido ${brl(calc.L5)}` +
+    `(bruto ${brl(_vp.brutoTotal)}${dados._auditoria_aplicada ? ` — revisado pela auditoria; nos autos, ${brl(Number(dados.bruto_total) || 0)}` : ''}; principal líquido ${brl(calc.L5)}` +
     (calc.L7 > 0 ? `; honorários líquidos ${brl(calc.L7)}` : '') +
     (Number(dados._ir_honorarios) > 0 ? `; IR sobre honorários ${brl(Number(dados._ir_honorarios))}` : '') +
     ')';
@@ -776,17 +796,38 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   //
   // As colunas S/T e V/W são dois CENÁRIOS lado a lado — "só principal" e
   // "principal + honorários" —, calculados por fórmula a partir das entradas.
+  // O QUE A PLANILHA ESCREVE É O QUE PRECIFICOU, não o que está nos autos.
+  //
+  // Quando a auditoria acha divergência que pode derrubar o crédito, o motor
+  // calibra o deságio sobre a base REVISADA. Escrever aqui o bruto dos autos e
+  // o deságio revisado junta duas bases diferentes: a planilha recalcula tudo
+  // por dentro e o preço sai MAIOR que o autorizado — num corte de 10% sobre um
+  // crédito de R$ 72 mil, R$ 4.315 a mais oferecidos ao cedente, com a
+  // rentabilidade impressa calculada sobre um valor que a própria auditoria
+  // disse que pode não existir.
   {
     // A ORIGEM VAI EM NOTA NA CÉLULA DO BRUTO. É de lá que descende todo o
     // resto — líquido, deságio, preço —, e é o número que alguém vai querer
     // conferir contra os autos. Em nota, e não em célula vizinha: o layout é
     // fixo e uma célula a mais empurraria o que vem depois.
+    //
+    // Havendo corte de auditoria, a nota abre por ele: quem confere a célula
+    // contra os autos precisa saber, ali, por que os números não batem.
     const k5 = cel('K', 5);
-    k5.value = dados.bruto_total;
-    if (dados.origem_valores) k5.note = String(dados.origem_valores).slice(0, 800);
+    k5.value = _vp.brutoTotal;
+    const partes: string[] = [];
+    if (dados._auditoria_aplicada) {
+      partes.push(
+        `CENÁRIO CONSERVADOR: o bruto dos autos é ${brl(Number(dados.bruto_total) || 0)} e foi reduzido ` +
+        `em ${brl(Number(dados._auditoria_corte) || 0)} pela auditoria dos cálculos. ` +
+        `${String(dados.auditoria_justificativa ?? '')}`.trim(),
+      );
+    }
+    if (dados.origem_valores) partes.push(String(dados.origem_valores));
+    if (partes.length) k5.note = partes.join('\n\n').slice(0, 1200);
   }
-  cel('M', 5).value = dados.ir;
-  cel('N', 5).value = dados.inss;
+  cel('M', 5).value = _vp.ir;
+  cel('N', 5).value = _vp.inss;
   // O PERCENTUAL, E NÃO O VALOR. O modelo passou a ter o percentual de
   // honorários em célula própria (K7/K19), e as linhas de honorários se
   // calculam a partir dele: o bruto sai do percentual, o IR sai do bruto pela
@@ -801,9 +842,9 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // divergir. As bases diferem entre os modelos, como as fórmulas do modelo:
   // no Modelo 1 o honorário é percentual do BRUTO; no Modelo 2, do LÍQUIDO.
   const _baseHon = dados.modelo === 1
-    ? Number(dados.bruto_total) || 0
-    : (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) - (Number(dados.inss) || 0);
-  const _pctHon = _baseHon > 0 ? (Number(dados.honorarios) || 0) / _baseHon : 0;
+    ? _vp.brutoTotal
+    : _vp.brutoTotal - _vp.ir - _vp.inss;
+  const _pctHon = _baseHon > 0 ? _vp.contratuaisBrutos / _baseHon : 0;
   cel('K', 7).value = Number(_pctHon.toFixed(6));
   // OS SUCUMBENCIAIS, LIDOS DO PROCESSO — e zero quando não houver.
   //
@@ -820,8 +861,8 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // a verba cedida VIRA o bruto e ocupa a linha do principal; deixar a linha de
   // sucumbenciais também preenchida contaria a MESMA verba duas vezes — numa
   // cessão de R$ 15.000 a planilha somaria R$ 30.000.
-  const _brutoSucumb = Number(dados.bruto_total) || 0;
-  const _pctSucumb = _brutoSucumb > 0 ? (Number(dados.honorarios_sucumbenciais) || 0) / _brutoSucumb : 0;
+  const _brutoSucumb = _vp.brutoTotal;
+  const _pctSucumb = _brutoSucumb > 0 ? _vp.sucumbenciaisBrutos / _brutoSucumb : 0;
   cel('K', 8).value = Number(_pctSucumb.toFixed(6));
   // O DESÁGIO VAI ONDE ELE INCIDE, linha por linha.
   //
@@ -2022,6 +2063,10 @@ Deno.serve(async (req) => {
       },
       dados.auditoria_bruto_conservador,
     );
+    // OS VALORES QUE DE FATO PRECIFICARAM. A planilha tem de escrever ESTES, e
+    // não os dos autos: o deságio é calibrado sobre esta base, e aplicá-lo à
+    // base cheia no documento oferece mais do que a auditoria autorizou.
+    dados._valores_precificados = _auditoria.valores;
     dados._auditoria_aplicada = _auditoria.aplicada;
     dados._auditoria_corte = _auditoria.corte;
     dados._auditoria_motivo = _auditoria.motivo ?? null;
@@ -2169,7 +2214,12 @@ Deno.serve(async (req) => {
       );
 
     const valores = {
-      bruto: Number(dados.bruto_total) || 0,
+      // O bruto QUE PRECIFICOU. Sem isto a tela mostrava o dos autos ao lado de
+      // uma base calculada sobre outro valor, e a conta não fechava para quem
+      // conferia.
+      bruto: Number(dados._valores_precificados?.brutoTotal ?? dados.bruto_total) || 0,
+      bruto_autos: Number(dados.bruto_total) || 0,
+      auditoria_corte: Number(dados._auditoria_corte) || 0,
       liquido_base: Number(calc.Y3) || 0,
       desagio: Number(calc.desagio) || 0,
       preco_cessao: Number(calc.cessao) || 0,
