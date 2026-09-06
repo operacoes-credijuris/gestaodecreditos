@@ -227,6 +227,15 @@ export function calibrarDesagio(o: {
    * desconhecida; precifica sem cartório, e quem chama avisa.
    */
   regra: RegraEmolumentos | null
+  /**
+   * O deságio DITADO, quando quem decide o preço já sabe onde quer fechar.
+   *
+   * Fecha o negócio no número pedido em vez de procurar o que bate a meta — e a
+   * rentabilidade resultante sai calculada, para a decisão ser informada. Sem
+   * isto, "quero fechar a 30%" só se conseguia mexendo em dados de entrada até
+   * a calibragem cair perto, o que é adivinhação com passos extras.
+   */
+  desagioFixo?: number | null
 }): Precificacao {
   const alvo = o.alvo ?? 0.028
   const dilig = o.diligencia ?? 250
@@ -283,6 +292,15 @@ export function calibrarDesagio(o: {
   const bate = (k: number) => avaliar(dDe(k)).Y9 >= alvo
 
   if (!o.parcelas.length) return montar(avaliar(0), false)
+
+  // DESÁGIO DITADO: não há o que procurar. `atingiuAlvo` diz se o número
+  // escolhido bate a meta — é a informação que interessa a quem ditou.
+  if (o.desagioFixo != null && Number.isFinite(o.desagioFixo)) {
+    const d = Math.min(0.95, Math.max(0, o.desagioFixo))
+    const r = avaliar(d)
+    return montar(r, r.Y9 >= alvo)
+  }
+
   if (!bate(PASSOS)) return montar(avaliar(dDe(PASSOS)), false)  // nem no teto
   if (bate(0)) return montar(avaliar(0), true)                   // bate sem deságio
 

@@ -24,6 +24,7 @@ import {
 import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import { irProgressivo } from "../_shared/irpf.ts";
 import { aplicarAuditoria, calibrarDesagio, montarParcelas, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { aplicarPatch } from "../_shared/revisao.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
@@ -992,12 +993,12 @@ const SCHEMA_ANALISE = {
   auditoria_criterio_titulo: 'o que o TÍTULO EXECUTIVO mandou aplicar, como está escrito nele: período de apuração, verbas deferidas, base de cálculo, índices de correção e juros, termo inicial de cada um. Cite o trecho e onde está. Se o título for silente em algum ponto, diga que é silente — não preencha com a praxe',
   auditoria_criterio_aplicado: 'o que a conta que vale EFETIVAMENTE aplicou, nos mesmos itens. Se a conta não explicita o índice, diga isso: conta sem memória é, por si, um achado',
   auditoria_divergencias:
-    'lista das divergências entre o título e a conta, cada uma {item, esperado, encontrado, efeito, gravidade, fundamento}: ' +
+    'lista das divergências entre o título e a conta, cada uma {item, esperado, encontrado, efeito_se_corrigida, gravidade, fundamento}: ' +
     '"item" = do que se trata (ex.: "índice de correção de 01/2015 a 12/2021"); ' +
     '"esperado" = o que o título ou a lei mandam; "encontrado" = o que a conta fez; ' +
-    '"efeito" = "reduz" se a correção derrubaria o valor do crédito, "aumenta" se o elevaria, "indefinido" se não dá para dizer sem refazer a conta; ' +
-    '"gravidade" = "alta" quando há jurisprudência consolidada contra o que a conta fez, "media" quando a questão é controvertida, "baixa" quando é imprecisão sem efeito relevante; ' +
-    '"fundamento" = a norma, o tema ou a decisão que sustenta o "esperado". Lista vazia quando a conta está fiel ao título',
+    '"efeito_se_corrigida" = O QUE ACONTECE COM O CRÉDITO SE A DIVERGÊNCIA FOR CORRIGIDA — "reduz" quando a conta está inflada e a correção derruba o valor, "aumenta" quando a conta subestimou, "indefinido" quando não dá para dizer sem refazer a conta. NÃO é o efeito do erro: é o efeito do CONSERTO; ' +
+    '"gravidade" = pela força do fundamento contra o que a conta fez, e SÓ por isso: "alta" com súmula, tema repetitivo ou jurisprudência consolidada; "media" com questão controvertida; "baixa" com imprecisão sem efeito no valor. NUNCA classifique por quem a divergência favorece; ' +
+    '"fundamento" = a norma, a súmula, o tema ou a decisão que sustenta o "esperado". Lista vazia quando a conta está fiel ao título',
   auditoria_risco_revisao: '"alto" | "medio" | "baixo" | "nenhum" — a chance de a conta ser revista para MENOS, mesmo já homologada',
   auditoria_bruto_conservador:
     'o valor bruto no CENÁRIO CONSERVADOR, número, ou null quando não há divergência que reduza. ' +
@@ -1096,7 +1097,11 @@ const SYSTEM_ANALISE =
   '• TRABALHISTA contra a Fazenda: o regime tem particularidades próprias e mudou com a ADC 58 do STF — se for o caso, diga qual índice a conta usou e sinalize a controvérsia em vez de afirmar o correto. ' +
   'SE A CONTA APLICOU SELIC A TODO O PERÍODO, incluindo o anterior a 09/12/2021, isso é divergência de gravidade MÉDIA: a leitura prospectiva é a predominante, mas há decisões em sentido contrário — e o que interessa é que uma revisão nesse ponto derruba o valor. ' +
   '(3) A ARITMÉTICA. Confira se as parcelas somam o total, se não há duplicidade entre verbas, e se o período de apuração não excede o que o título deferiu. ' +
-  'O CENÁRIO CONSERVADOR É O QUE VALE. Havendo divergência que possa REDUZIR o crédito, estime o bruto revisado em "auditoria_bruto_conservador" — é ele que vai precificar. Auditoria NUNCA AUMENTA crédito: se a conta subestimou em favor da Fazenda, isso é ganho eventual do cessionário, não entra no preço, e vai só como observação. Se não der para estimar o valor revisado com o que há nos autos, devolva null e descreva o risco — preço com risco descrito é melhor que preço com risco embutido em número inventado. ' +
+'DE QUEM É O RISCO: DE QUEM COMPRA. Este é o ponto em que o raciocínio se inverte, e errar aqui esvazia a auditoria inteira. Quem lê esta análise NÃO é o credor — é o investidor que vai PAGAR pelo crédito hoje e receber do ente depois. Então: ' +
+  'CONTA INFLADA É O PERIGO. Se a conta cobra MAIS do que o título mandava, o crédito está inchado, a Fazenda pode impugnar e a revisão DERRUBA o valor — e quem pagou pelo valor inchado perde a diferença. É a divergência mais grave que existe aqui, mesmo que ela "favoreça o credor". ' +
+  'CONTA SUBESTIMADA É INDIFERENTE ao preço. Se a conta cobra MENOS do que era devido, o risco de revisão é para cima, o que só faria o cessionário receber mais do que pagou. Isso não entra no preço: registre como observação e siga. ' +
+  'NÃO RACIOCINE ASSIM: "a conta aplicou índice mais generoso, isso favorece o credor, logo não há risco". Favorecer o credor é exatamente o que faz a Fazenda impugnar, e é exatamente o que se perde na revisão. Um exemplo real: correção de dano moral contada desde o evento danoso em vez de desde o arbitramento (Súmula 362/STJ) infla o crédito em todo o período intermediário — isso é gravidade ALTA e pede cenário conservador, não "baixa". ' +
+  'O CENÁRIO CONSERVADOR É O QUE VALE. Havendo divergência cujo CONSERTO reduziria o crédito, estime o bruto revisado em "auditoria_bruto_conservador" — é ele que vai precificar. Auditoria NUNCA AUMENTA crédito. Se não der para estimar o valor revisado com o que há nos autos, devolva null e descreva o risco — preço com risco descrito é melhor que preço com risco embutido em número inventado. ' +
   '=== DE ONDE SAEM OS VALORES === ' +
   'O MESMO crédito aparece nos autos com vários valores diferentes, e escolher o errado não produz erro nenhum — produz um preço errado, com a mesma cara de um preço certo. Antes de preencher qualquer número, decida QUAL DOCUMENTO MANDA. ' +
   'ORDEM DE AUTORIDADE, use o primeiro que existir: ' +
@@ -1227,6 +1232,22 @@ async function extrairQualificacao(apiKey: string, contentBlocks: any[]): Promis
 // autos para poder responder "confira X" sem inventar, e mandá-los de novo a
 // cada pergunta custaria o processo inteiro por mensagem. Como bloco de system
 // com cache_control, o segundo turno em diante lê do cache.
+/**
+ * Os campos que o chat de revisão pode mexer, e quais deles são listas.
+ *
+ * Derivados do próprio SCHEMA_ANALISE: campo que não está no formato é
+ * RECUSADO pelo patch e aparece na resposta como não aplicado. Antes qualquer
+ * nome entrava — "valor_bruto" em vez de "bruto_total" era gravado, ignorado
+ * pelo resto do motor, e o chat respondia que estava feito.
+ *
+ * Os campos internos (com "_" na frente) ficam de fora de propósito: são
+ * decisões do motor, não dados da análise.
+ */
+const CAMPOS_EDITAVEIS: ReadonlySet<string> = new Set(Object.keys(SCHEMA_ANALISE));
+const CAMPOS_LISTA: ReadonlySet<string> = new Set([
+  'roteiro_prazo', 'bloco_g_riscos', 'm4_pares', 'auditoria_divergencias',
+]);
+
 const FERRAMENTA_REVISAO = {
   name: 'revisar_analise',
   description: 'Devolve a análise revisada conforme o pedido do usuário, e um resumo curto do que mudou.',
@@ -1249,6 +1270,25 @@ const FERRAMENTA_REVISAO = {
         type: ['number', 'null'],
         description: 'Só quando o usuário DITAR o prazo até o pagamento ("o prazo é 10 meses"). O motor passa a usar este número em vez do calculado. Null em qualquer outro caso — NUNCA preencha por conta própria.',
       },
+      // OS PARÂMETROS DO NEGÓCIO, que antes eram fixos no código. Sem eles, um
+      // pedido comercial legítimo ("fecha a 30%", "essa operação é sem
+      // diligência") só se atendia mexendo em dado de entrada até a calibragem
+      // cair perto — adivinhação com passos extras.
+      parametros: {
+        type: 'object',
+        description:
+          'Os parâmetros do negócio, só quando o usuário os DITAR. Preencha apenas o que ele pediu; o resto fica de fora. ' +
+          '{"desagio": fração (0.30 para 30%) quando ele disser onde quer fechar — o motor para de procurar e usa este número, e a resposta diz a rentabilidade que sobrou; ' +
+          '"alvo_mensal": fração, quando ele mudar a meta de rentabilidade (padrão 0.028); ' +
+          '"comissao_pct": fração, quando a comissão for diferente dos 9% (4% originação + 5% intermediação); ' +
+          '"diligencia": reais, quando o custo de correspondente for outro, ou 0 quando não houver}',
+      },
+      verbas: {
+        type: 'object',
+        description:
+          'O que está sendo comprado, só quando o usuário MUDAR isso ("tira os sucumbenciais", "passa a ser só o principal"). ' +
+          '{"principal": bool, "contratuais": bool, "sucumbenciais": bool}. Omita quando o pedido não for sobre isso.',
+      },
       resposta: { type: 'string', description: 'Para o usuário: o que você mudou e por quê, em até 6 linhas. Se não pôde atender, diga o que faltou. Sem preâmbulo.' },
     },
     required: ['alteracoes', 'resposta'],
@@ -1258,39 +1298,13 @@ const FERRAMENTA_REVISAO = {
 const SISTEMA_REVISAO =
   'Você é analista jurídico-financeiro da Credijuris e está REVISANDO uma análise de RPV a pedido de quem a conferiu. Recebe a análise atual (JSON), o histórico da conversa e um pedido. ' +
   'VOCÊ NÃO TEM OS AUTOS EM MÃOS — só a análise já extraída deles. Isso é de propósito: reenviar o processo inteiro a cada pedido fazia a revisão estourar o tempo da requisição. ' +
-  'REGRAS: (1) devolva em "alteracoes" SÓ os campos que mudam; o que fica igual não se repete. (2) Quem afirma o dado é o usuário: ele está com o processo aberto. Aplique o que ele disser. Se o valor contrariar o que está no JSON, aplique mesmo assim e registre a troca em "resposta" ("bruto de X para Y, conforme você indicou"). (3) Se o pedido depende de um dado que NÃO está no JSON e o usuário não informou, peça o número em "resposta" e não altere nada — você não tem como consultar os autos. (4) Você NÃO escreve deságio, preço de cessão nem rentabilidade: são calculados a partir dos seus campos. Se pedirem "baixe o deságio", explique isso e pergunte qual dado de entrada mudar. O PRAZO é a única exceção: quando o usuário DITAR o prazo até o pagamento, ponha o número em "prazo_meses_manual". (4b) O CUSTO DE CARTÓRIO também não é seu, e não precisa ser pedido: escritura e registro são consultados na tabela do estado a partir do preço da cessão, e a tela REFAZ essa consulta sozinha sempre que o preço muda. Se pedirem para reajustar o cartório, responda que ele se recalcula automaticamente com o novo preço e não peça número nenhum — pedir o valor ao usuário é trabalho que a máquina já faz. Só peça se ele disser que a consulta automática falhou. (5) Mantenha o formato: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) Para SUPRIMIR, use "remover" com o caminho ("m2.37", "riscos.2") — não mande o campo vazio em "alteracoes". ' +
+  'REGRAS: (1) devolva em "alteracoes" SÓ os campos que mudam; o que fica igual não se repete. (2) Quem afirma o dado é o usuário: ele está com o processo aberto. Aplique o que ele disser. Se o valor contrariar o que está no JSON, aplique mesmo assim e registre a troca em "resposta" ("bruto de X para Y, conforme você indicou"). (3) Se o pedido depende de um dado que NÃO está no JSON e o usuário não informou, peça o número em "resposta" e não altere nada — você não tem como consultar os autos. (4) Preço de cessão e rentabilidade você NÃO escreve: saem calculados dos seus campos. O DESÁGIO agora você pode ditar — mas só em "parametros", e só quando o usuário pedir um número (ver regra 9). Prazo ditado vai em "prazo_meses_manual". (4b) O CUSTO DE CARTÓRIO também não é seu, e não precisa ser pedido: escritura e registro são consultados na tabela do estado a partir do preço da cessão, e a tela REFAZ essa consulta sozinha sempre que o preço muda. Se pedirem para reajustar o cartório, responda que ele se recalcula automaticamente com o novo preço e não peça número nenhum — pedir o valor ao usuário é trabalho que a máquina já faz. Só peça se ele disser que a consulta automática falhou. (5) Mantenha o formato: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) Para SUPRIMIR, use "remover" com o caminho ("m2.37", "riscos.2") — não mande o campo vazio em "alteracoes". ' +
+  '(7) LISTAS se editam POR ÍNDICE, e não reenviando a lista inteira: para mudar o segundo ato do roteiro mande {"roteiro_prazo": {"1": {"dias": 90}}}; para acrescentar um, {"roteiro_prazo": {"+": {"ato": "...", "dias": 21}}}. Mandar a lista inteira SUBSTITUI o que havia — só faça isso quando for essa a intenção. Vale para roteiro_prazo, bloco_g_riscos, auditoria_divergencias e m4_pares. ' +
+  '(8) USE O NOME EXATO DO CAMPO. Nome que não existe no formato é RECUSADO e aparece na resposta como não aplicado — não há como inventar um campo novo e esperar efeito. Na dúvida, olhe as chaves do JSON que você recebeu. ' +
+  '(9) OS PARÂMETROS DO NEGÓCIO são seus, quando o usuário os ditar: deságio ("fecha a 30%"), meta de rentabilidade, comissão e diligência vão em "parametros"; o que está sendo comprado vai em "verbas". Isto substitui a regra antiga de recusar mexer no deságio: agora dá, desde que o usuário DITE. O que você continua NÃO fazendo é escolher esses números sozinho — sem pedido explícito, deixe fora. ' +
+  '(10) O SERVIDOR CONFERE o que você mandou e devolve ao usuário a lista do que mudou de fato. Prometer na "resposta" uma alteração que você não pôs em "alteracoes" aparece como divergência. Descreva o que fez, não o que pretendia. ' +
   'Responda chamando a ferramenta revisar_analise uma única vez.';
 
-/**
- * Aplica o patch da IA sobre a análise atual.
- *
- * Merge raso, com m2 tratado à parte porque é o único objeto aninhado que o
- * usuário edita linha a linha — sem isso, mexer na linha 37 apagaria as outras
- * 24. `remover` apaga caminhos ("m2.37", "riscos.2"); riscos é lista, então a
- * remoção é por índice e de trás para frente, para um índice não deslocar o
- * seguinte.
- */
-function aplicarPatch(atual: any, alteracoes: any, remover: string[]): any {
-  const novo: any = { ...atual, ...alteracoes };
-  if (alteracoes?.m2 && typeof alteracoes.m2 === 'object') {
-    novo.m2 = { ...(atual?.m2 ?? {}), ...alteracoes.m2 };
-  }
-  const idxRiscos: number[] = [];
-  for (const caminho of remover) {
-    const [raiz, chave] = String(caminho).split('.');
-    if (raiz === 'm2' && chave && novo.m2) { const m = { ...novo.m2 }; delete m[chave]; novo.m2 = m; }
-    else if ((raiz === 'riscos' || raiz === 'bloco_g_riscos') && chave != null) {
-      const i = Number(chave);
-      if (Number.isInteger(i) && i >= 0) idxRiscos.push(i);
-    } else if (raiz && chave === undefined) delete novo[raiz];
-  }
-  if (idxRiscos.length && Array.isArray(novo.bloco_g_riscos)) {
-    const lista = [...novo.bloco_g_riscos];
-    for (const i of idxRiscos.sort((a, b) => b - a)) if (i < lista.length) lista.splice(i, 1);
-    novo.bloco_g_riscos = lista;
-  }
-  return novo;
-}
 
 async function refinarDados(
   apiKey: string,
@@ -1335,13 +1349,63 @@ async function refinarDados(
     const txt = resp.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join(' ').trim();
     throw new Error('A IA não devolveu a análise revisada.' + (txt ? ` Ela disse: "${txt.slice(0, 300)}"` : ''));
   }
-  const entrada = uso.input as { alteracoes?: unknown; remover?: unknown; prazo_meses_manual?: unknown; resposta?: unknown };
-  const alteracoes = entrada.alteracoes && typeof entrada.alteracoes === 'object' ? entrada.alteracoes : {};
+  const entrada = uso.input as {
+    alteracoes?: unknown; remover?: unknown; prazo_meses_manual?: unknown;
+    parametros?: unknown; verbas?: unknown; resposta?: unknown;
+  };
+  const alteracoes = (entrada.alteracoes && typeof entrada.alteracoes === 'object' ? entrada.alteracoes : {}) as Record<string, unknown>;
   const remover = Array.isArray(entrada.remover) ? (entrada.remover as unknown[]).map(String) : [];
   const pm = Number(entrada.prazo_meses_manual);
+
+  const r = aplicarPatch(dadosAtuais, alteracoes, remover, CAMPOS_EDITAVEIS, CAMPOS_LISTA);
+
+  // OS PARÂMETROS DO NEGÓCIO viajam com a análise, não à parte: assim
+  // sobrevivem à rodada seguinte do chat e ao salvamento, que dão a volta pelo
+  // navegador. Fração fora de faixa é ignorada — deságio de 300% é erro de
+  // digitação, não pedido.
+  const par = (entrada.parametros ?? {}) as Record<string, unknown>;
+  const fracao = (v: unknown, teto: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= teto ? n : null;
+  };
+  const _desagio = fracao(par.desagio, 0.95);
+  const _alvo = fracao(par.alvo_mensal, 1);
+  const _comissao = fracao(par.comissao_pct, 1);
+  const _dilig = Number(par.diligencia);
+  if (_desagio != null) { r.dados._desagio_manual = _desagio; r.mudancas.push(`deságio ditado: ${(_desagio * 100).toFixed(2)}%`); }
+  if (_alvo != null) { r.dados._alvo_manual = _alvo; r.mudancas.push(`meta de rentabilidade: ${(_alvo * 100).toFixed(2)}% ao mês`); }
+  if (_comissao != null) { r.dados._comissao_manual = _comissao; r.mudancas.push(`comissão: ${(_comissao * 100).toFixed(2)}%`); }
+  if (Number.isFinite(_dilig) && _dilig >= 0) { r.dados._diligencia_manual = _dilig; r.mudancas.push(`diligência: ${brl(_dilig)}`); }
+
+  const vb = (entrada.verbas ?? null) as Record<string, unknown> | null;
+  if (vb && typeof vb === 'object') {
+    const escolhidas = {
+      principal: vb.principal === true,
+      contratuais: vb.contratuais === true,
+      sucumbenciais: vb.sucumbenciais === true,
+    };
+    if (escolhidas.principal || escolhidas.contratuais || escolhidas.sucumbenciais) {
+      r.dados._verbas_manuais = escolhidas;
+      r.mudancas.push(
+        'verbas negociadas: ' +
+        Object.entries(escolhidas).filter(([, v]) => v).map(([k]) => k).join(' + '),
+      );
+    }
+  }
+
+  // O RELATÓRIO VAI JUNTO DA RESPOSTA, e é do servidor, não da IA. Prometer uma
+  // alteração e não fazê-la era invisível: os dois textos vinham da mesma fonte.
+  const partes = [String(entrada.resposta ?? '').trim() || 'Pedido processado.'];
+  if (r.mudancas.length) partes.push('Aplicado: ' + r.mudancas.join('; ') + '.');
+  else partes.push('⚠️ NADA foi alterado na análise por este pedido.');
+  if (r.desconhecidos.length)
+    partes.push(`⚠️ Campo(s) que não existem no formato e por isso NÃO foram aplicados: ${r.desconhecidos.join(', ')}.`);
+  if (r.remocoesVazias.length)
+    partes.push(`⚠️ Não achei o que remover em: ${r.remocoesVazias.join(', ')}.`);
+
   return {
-    dados: aplicarPatch(dadosAtuais, alteracoes, remover),
-    resposta: String(entrada.resposta ?? '').trim() || 'Alteração aplicada.',
+    dados: r.dados,
+    resposta: partes.join('\n'),
     prazoManual: Number.isFinite(pm) && pm > 0 ? pm : null,
   };
 }
@@ -2070,11 +2134,19 @@ Deno.serve(async (req) => {
         );
       }
       for (const d of _divs.slice(0, 6)) {
-        const efeito = String(d?.efeito ?? '');
+        // "aumenta o crédito" era ambíguo: aumenta por causa do erro, ou depois
+        // de corrigido? A frase agora diz o que interessa a quem paga — o que
+        // acontece com o valor SE a divergência for corrigida.
+        const ef = String(d?.efeito_se_corrigida ?? d?.efeito ?? '');
+        const consequencia = ef === 'reduz'
+          ? ' — corrigida, DERRUBA o crédito: é risco de quem compra'
+          : ef === 'aumenta'
+            ? ' — corrigida, elevaria o crédito: não entra no preço'
+            : ef ? ' — efeito indefinido sem refazer a conta' : '';
         avisosBase.push(
           `   • [${String(d?.gravidade ?? '?')}] ${String(d?.item ?? '')}: o título/lei pede "${String(d?.esperado ?? '')}", ` +
-          `a conta fez "${String(d?.encontrado ?? '')}"${efeito ? ` (${efeito} o crédito)` : ''}` +
-          `${d?.fundamento ? ` — ${String(d.fundamento)}` : ''}`,
+          `a conta fez "${String(d?.encontrado ?? '')}"${consequencia}` +
+          `${d?.fundamento ? ` (${String(d.fundamento)})` : ''}`,
         );
       }
       if (dados._auditoria_motivo && !dados._auditoria_aplicada && _divs.length)

@@ -276,3 +276,36 @@ describe('aplicarAuditoria — o cenário conservador', () => {
     expect(base(comAuditoria)).toBeLessThan(base(semAuditoria))
   })
 })
+
+describe('deságio ditado', () => {
+  const parcelas: Parcela[] = [
+    { nome: 'principal', liquido: 60000, desagiavel: true },
+    { nome: 'contratuais', liquido: 27000, desagiavel: false },
+  ]
+
+  it('fecha no número pedido, em vez de procurar o que bate a meta', () => {
+    const r = calibrarDesagio({ parcelas, T5: 12, regra: REGRA, desagioFixo: 0.30 })
+    expect(r.desagio).toBeCloseTo(0.30, 6)
+    expect(r.parcelas.find((p) => p.nome === 'principal')!.preco).toBeCloseTo(60000 * 0.7, 2)
+  })
+
+  it('e diz se o número pedido bate a meta ou não', () => {
+    // É a informação que interessa a quem ditou: fechou onde quis, e a que custo.
+    const generoso = calibrarDesagio({ parcelas, T5: 12, alvo: 0.028, regra: REGRA, desagioFixo: 0.02 })
+    expect(generoso.atingiuAlvo).toBe(false)
+    expect(generoso.Y9).toBeLessThan(0.028)
+    const apertado = calibrarDesagio({ parcelas, T5: 12, alvo: 0.028, regra: REGRA, desagioFixo: 0.60 })
+    expect(apertado.atingiuAlvo).toBe(true)
+  })
+
+  it('respeita o teto de 95% e o piso de zero', () => {
+    expect(calibrarDesagio({ parcelas, T5: 12, regra: REGRA, desagioFixo: 2 }).desagio).toBeCloseTo(0.95, 6)
+    expect(calibrarDesagio({ parcelas, T5: 12, regra: REGRA, desagioFixo: -1 }).desagio).toBe(0)
+  })
+
+  it('sem ditar, volta a calibrar sozinho', () => {
+    const r = calibrarDesagio({ parcelas, T5: 12, alvo: 0.028, regra: REGRA, desagioFixo: null })
+    expect(r.atingiuAlvo).toBe(true)
+    expect(r.Y9).toBeGreaterThanOrEqual(0.028)
+  })
+})
