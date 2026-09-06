@@ -534,7 +534,26 @@ function prazoMeses(o: {
 }
 
 // Modelo 1 (verde) se há honorários contratuais a destacar; senão Modelo 2 (azul).
-function escolherModelo(honorariosContratuais: number): 1 | 2 {
+/**
+ * Qual bloco da planilha vale: o verde (1) ou o azul (2).
+ *
+ * A PERGUNTA É SOBRE OS AUTOS, NÃO SOBRE O NEGÓCIO. O verde é "os honorários
+ * FORAM DESTACADOS na RPV ou nos cálculos da contadoria"; o azul, "não foram".
+ * É fato do processo, e independe de estarmos comprando o principal, os
+ * honorários ou os dois.
+ *
+ * Confundir as duas coisas punha metade dos casos no bloco errado: crédito com
+ * destaque cuja cessão é só do principal caía no azul, e crédito sem destaque
+ * cuja cessão inclui honorários caía no verde. Além de o documento afirmar algo
+ * falso sobre o processo, os dois blocos calculam o honorário sobre bases
+ * diferentes — o verde sobre o bruto, o azul sobre o líquido.
+ *
+ * Sem o campo (análise de antes desta versão), cai no valor destacado, que era
+ * o critério anterior.
+ */
+function escolherModelo(destacados: unknown, honorariosContratuais: number): 1 | 2 {
+  if (destacados === true) return 1;
+  if (destacados === false) return 2;
   return honorariosContratuais > 0 ? 1 : 2;
 }
 
@@ -1022,6 +1041,10 @@ const SCHEMA_ANALISE = {
   // financeiro — ver a seção "DE ONDE SAEM OS VALORES" no prompt do sistema
   bruto_total: 'VALOR BRUTO TOTAL do crédito que está sendo cedido, número sem R$: o total ANTES de qualquer retenção, já com principal + juros + correção. INCLUI os honorários contratuais destacados, porque eles saem de dentro dele. NÃO inclui os honorários sucumbenciais, que são verba própria e têm campo separado. NÃO é o valor da causa, nem o da condenação na sentença, nem o principal histórico sem atualização',
   principal_liquido: 'o que sobra PARA O CREDOR depois do IR, do INSS e dos honorários contratuais destacados, número. Tem de ser igual a bruto_total menos ir menos inss menos honorarios — se não fechar, algum dos números foi lido errado',
+  honorarios_destacados:
+    'true/false — os honorários contratuais foram DESTACADOS do crédito principal? É destaque quando o advogado pediu a reserva do art. 22, §4º, da Lei 8.906/94 e ela foi deferida, OU quando a conta da contadoria / o próprio requisitório já separam a verba dele da do credor, OU quando há requisitório em nome do advogado. ' +
+    'NÃO É DESTAQUE a mera existência de contrato de honorários nos autos, nem a previsão de percentual no contrato: sem pedido deferido ou separação na conta, o advogado recebe do cliente, não do ente. ' +
+    'É o que decide QUAL BLOCO da planilha vale — o verde (destacados) ou o azul (não destacados) —, e os dois calculam o honorário sobre bases diferentes: o verde sobre o BRUTO, o azul sobre o LÍQUIDO. Responder errado põe a análise no bloco errado e muda o valor do honorário',
   honorarios: 'HONORÁRIOS CONTRATUAIS A DESTACAR (0 se não houver), número: o pedaço do bruto que vai para o advogado por contrato, quando há pedido de destaque ou reserva nos autos. NÃO confundir com os sucumbenciais (campo próprio), que o vencido paga por fora',
   origem_valores: 'DE ONDE SAIU CADA NÚMERO, em uma ou duas frases: qual documento (conta da contadoria, decisão homologatória, RPV expedida), o ID ou a página, e até que data os valores estão atualizados. Ex.: "conta da contadoria de 12/03/2026 homologada em 20/04/2026, ID 3f21a90, fls. 412-415; valores atualizados até 03/2026". É o que permite conferir a escolha em dez segundos — não deixe vazio',
   honorarios_sucumbenciais: 'HONORÁRIOS SUCUMBENCIAIS fixados na sentença ou no acórdão, em reais — o valor que o ENTE DEVEDOR paga ao advogado por ter perdido, separado do que o cliente paga por contrato. Procure na parte dispositiva da sentença/acórdão, na conta da contadoria e no próprio requisitório: costuma vir como verba própria, às vezes em requisitório separado. Se a condenação fixar PERCENTUAL sobre o valor da causa ou da condenação, calcule o valor em reais. ZERO se a sentença não os fixou, se foram compensados, se a Fazenda não foi condenada neles, ou se você não achou — não estime por praxe: um percentual arbitrado por hábito vira dinheiro inventado na precificação',
@@ -1876,7 +1899,11 @@ Deno.serve(async (req) => {
 
     // 3b.1 O que está sendo cedido (escolha manual sobrepõe a detecção automática) + % de honorários
     const honAI = Number(dados.honorarios) || 0;          // honorários destacados pela contadoria (0 = sem destaque)
-    const houveDestaque = honAI > 0;
+    // A base do percentual acompanha o BLOCO: o verde calcula o honorário sobre
+    // o bruto, o azul sobre o líquido. É a mesma pergunta do bloco, então tem de
+    // ser a mesma resposta — usar o valor destacado aqui e o fato lá em cima
+    // deixava os dois discordando.
+    const houveDestaque = escolherModelo(dados.honorarios_destacados, honAI) === 1;
     const brutoNum = Number(dados.bruto_total) || 0;
     const irNum = Number(dados.ir) || 0;
     const inssNum = Number(dados.inss) || 0;
@@ -1901,28 +1928,31 @@ Deno.serve(async (req) => {
     // entram na conta. Ver _shared/precificacao.ts.
     const _sucumbBrutosAutos = Number(dados.honorarios_sucumbenciais) || 0;
     let verbas: VerbasNegociadas;
+    // O BLOCO DA PLANILHA SAI DOS AUTOS; as verbas, do negócio. Duas perguntas
+    // diferentes, e amarrá-las punha metade dos casos no bloco errado.
+    dados.modelo = escolherModelo(dados.honorarios_destacados, honAI);
+
     if (tipoAquisicao === 'principal') {
       verbas = { principal: true, contratuais: false, sucumbenciais: false };
-      dados.modelo = 2; dados.tipo_credito = 'Crédito principal — apenas';
+      dados.tipo_credito = 'Crédito principal — apenas';
     } else if (tipoAquisicao === 'ambos') {
       // "Principal + honorários" leva o honorário que existir, dos dois tipos.
       verbas = { principal: true, contratuais: true, sucumbenciais: true };
-      dados.modelo = 1; dados.tipo_credito = 'Crédito principal + Honorários';
+      dados.tipo_credito = 'Crédito principal + Honorários';
     } else if (tipoAquisicao === 'honorarios' || tipoAquisicao === 'contratuais') {
       verbas = { principal: false, contratuais: true, sucumbenciais: true };
-      dados.modelo = 2; dados.tipo_credito = 'Honorários contratuais + sucumbenciais';
+      dados.tipo_credito = 'Honorários contratuais + sucumbenciais';
       // Card diz só "contratuais" e o processo TEM sucumbenciais: entram no
       // preço, porque cede-se o honorário que existe — mas é o caso raro, e
       // quem fecha precisa saber que está comprando as duas verbas.
       if (tipoAquisicao === 'contratuais' && _sucumbBrutosAutos > 0) dados._sucumbNaoPrevistos = _sucumbBrutosAutos;
     } else if (tipoAquisicao === 'sucumbenciais') {
       verbas = { principal: false, contratuais: false, sucumbenciais: true };
-      dados.modelo = 2; dados.tipo_credito = 'Honorários sucumbenciais — apenas';
+      dados.tipo_credito = 'Honorários sucumbenciais — apenas';
     } else {
       // Automático: o destaque da contadoria decide se há honorários a comprar.
       const comHonorarios = honAI > 0 || honorariosPct != null;
       verbas = { principal: true, contratuais: comHonorarios, sucumbenciais: comHonorarios };
-      dados.modelo = escolherModelo(honAI);
       dados.tipo_credito = comHonorarios ? 'Crédito principal + Honorários' : 'Crédito principal — apenas';
     }
 
@@ -2196,6 +2226,26 @@ Deno.serve(async (req) => {
       }
       if (dados._auditoria_motivo && !dados._auditoria_aplicada && _divs.length)
         avisosBase.push(`   • sobre o cenário conservador: ${dados._auditoria_motivo}`);
+    }
+
+    // DOIS OLHOS NO MESMO FATO. A linha 34 do questionário pergunta se houve
+    // pedido de destaque, e o campo honorarios_destacados decide o bloco. Foram
+    // extraídos pela mesma passada, mas de leituras diferentes — quando
+    // discordam, um dos dois está errado, e o bloco pode ser o errado.
+    {
+      const _l34 = String((dados.m2 ?? {})['34']?.resposta ?? '').trim().toLowerCase();
+      const _destacados = dados.honorarios_destacados;
+      if (_l34 && typeof _destacados === 'boolean') {
+        const _l34Sim = _l34.startsWith('sim');
+        if (_l34Sim !== _destacados) {
+          avisosBase.push(
+            `⚠️ LEITURAS EM CONFLITO sobre o destaque dos honorários: a linha 34 do questionário diz "${_l34}" ` +
+            `e o campo que escolhe o bloco da planilha diz "${_destacados ? 'destacados' : 'não destacados'}". ` +
+            `A análise foi montada no bloco ${dados.modelo === 1 ? 'VERDE (destacados)' : 'AZUL (não destacados)'} — ` +
+            'confira, porque os dois blocos calculam o honorário sobre bases diferentes (bruto no verde, líquido no azul).',
+          );
+        }
+      }
     }
 
     if (dados._parcelasNaoFecham)
