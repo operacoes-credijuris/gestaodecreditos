@@ -41,6 +41,70 @@ export interface VerbasNegociadas {
   sucumbenciais: boolean
 }
 
+/** Os valores do crédito, como saem dos autos ou como a auditoria os revisa. */
+export interface ValoresCredito {
+  brutoTotal: number
+  ir: number
+  inss: number
+  contratuaisBrutos: number
+  sucumbenciaisBrutos: number
+}
+
+export interface Auditoria {
+  valores: ValoresCredito
+  /** A auditoria mudou os valores? */
+  aplicada: boolean
+  /** Quanto do bruto ela cortou, em reais. */
+  corte: number
+  /** Por que não foi aplicada, quando não foi. */
+  motivo?: string
+}
+
+/**
+ * O CENÁRIO CONSERVADOR sobre os valores dos autos.
+ *
+ * Cálculo homologado não é cálculo definitivo: critério contrário ao título
+ * executivo ou à lei se revisa mesmo depois do trânsito, e quem compra o
+ * crédito é quem perde se a revisão vier. Quando a auditoria estima um bruto
+ * revisado menor, é ele que precifica.
+ *
+ * AUDITORIA NUNCA AUMENTA CRÉDITO. Se a conta subestimou em favor da Fazenda,
+ * isso é ganho eventual do cessionário e não entra no preço — comprar contando
+ * com uma revisão favorável é apostar, não precificar. Por isso um bruto
+ * conservador maior que o dos autos é recusado, e não simplesmente ignorado: o
+ * motivo aparece na tela.
+ *
+ * As deduções acompanham o bruto pelo MESMO FATOR. Revisada a conta, IR, INSS e
+ * honorários se recalculam sobre a base nova; escalar tudo junto mantém a
+ * proporção sem fingir uma precisão que a estimativa não tem.
+ */
+export function aplicarAuditoria(autos: ValoresCredito, brutoConservador: number | null | undefined): Auditoria {
+  const bruto = autos.brutoTotal
+  const alvo = Number(brutoConservador)
+  if (!Number.isFinite(alvo) || alvo <= 0) return { valores: autos, aplicada: false, corte: 0 }
+  if (!(bruto > 0)) return { valores: autos, aplicada: false, corte: 0, motivo: 'sem bruto nos autos para comparar' }
+  if (alvo >= bruto) {
+    return {
+      valores: autos, aplicada: false, corte: 0,
+      motivo: alvo > bruto
+        ? 'a auditoria estimou um crédito MAIOR que o dos autos, e isso não entra no preço: ganho eventual do cessionário não se compra'
+        : 'a auditoria não achou divergência que reduza o crédito',
+    }
+  }
+  const fator = alvo / bruto
+  return {
+    aplicada: true,
+    corte: bruto - alvo,
+    valores: {
+      brutoTotal: alvo,
+      ir: autos.ir * fator,
+      inss: autos.inss * fator,
+      contratuaisBrutos: autos.contratuaisBrutos * fator,
+      sucumbenciaisBrutos: autos.sucumbenciaisBrutos * fator,
+    },
+  }
+}
+
 /**
  * As parcelas de um negócio, montadas a partir dos valores dos autos.
  *

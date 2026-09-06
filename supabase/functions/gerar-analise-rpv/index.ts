@@ -23,7 +23,7 @@ import {
 } from "../_shared/emolumentos.ts";
 import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import { irProgressivo } from "../_shared/irpf.ts";
-import { calibrarDesagio, montarParcelas, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { aplicarAuditoria, calibrarDesagio, montarParcelas, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
@@ -987,6 +987,24 @@ const SCHEMA_ANALISE = {
   inss: 'INSS/contribuição previdenciária retida SOBRE O PRINCIPAL, conforme os cálculos da contadoria, número (0 se zerado)',
   eh_horas_extras: 'true/false — se o crédito é de horas extras',
 
+  // AUDITORIA DOS CÁLCULOS — ver a seção "AUDITORIA" no prompt do sistema.
+  auditoria_natureza: 'a natureza do crédito para fins de correção: "tributária" | "não tributária" | "trabalhista" | "indefinida". É o que decide o regime de índices, e errar aqui contamina toda a auditoria',
+  auditoria_criterio_titulo: 'o que o TÍTULO EXECUTIVO mandou aplicar, como está escrito nele: período de apuração, verbas deferidas, base de cálculo, índices de correção e juros, termo inicial de cada um. Cite o trecho e onde está. Se o título for silente em algum ponto, diga que é silente — não preencha com a praxe',
+  auditoria_criterio_aplicado: 'o que a conta que vale EFETIVAMENTE aplicou, nos mesmos itens. Se a conta não explicita o índice, diga isso: conta sem memória é, por si, um achado',
+  auditoria_divergencias:
+    'lista das divergências entre o título e a conta, cada uma {item, esperado, encontrado, efeito, gravidade, fundamento}: ' +
+    '"item" = do que se trata (ex.: "índice de correção de 01/2015 a 12/2021"); ' +
+    '"esperado" = o que o título ou a lei mandam; "encontrado" = o que a conta fez; ' +
+    '"efeito" = "reduz" se a correção derrubaria o valor do crédito, "aumenta" se o elevaria, "indefinido" se não dá para dizer sem refazer a conta; ' +
+    '"gravidade" = "alta" quando há jurisprudência consolidada contra o que a conta fez, "media" quando a questão é controvertida, "baixa" quando é imprecisão sem efeito relevante; ' +
+    '"fundamento" = a norma, o tema ou a decisão que sustenta o "esperado". Lista vazia quando a conta está fiel ao título',
+  auditoria_risco_revisao: '"alto" | "medio" | "baixo" | "nenhum" — a chance de a conta ser revista para MENOS, mesmo já homologada',
+  auditoria_bruto_conservador:
+    'o valor bruto no CENÁRIO CONSERVADOR, número, ou null quando não há divergência que reduza. ' +
+    'Só pode ser MENOR que o bruto apurado — auditoria não aumenta crédito. ' +
+    'Estime pelo efeito das divergências de gravidade alta e média que reduzem; se não der para estimar com base nos autos, devolva null e explique',
+  auditoria_justificativa: 'em duas ou três frases: o que sustenta o cenário conservador, ou por que a conta foi considerada fiel',
+
   // prazo / cenário
   esfera: 'Federal | Estadual | Municipal — a do ENTE DEVEDOR (quem paga), não a do tribunal',
   rpv_ja_expedida: 'true se a RPV já foi expedida (cenário B); false se ainda não (cenário A)',
@@ -1067,6 +1085,18 @@ const SYSTEM_ANALISE =
   'de 14,25% (alíquota previdenciária do servidor goiano) sobre o valor sem correção e devolva esse valor em "inss". ' +
   'Para QUALQUER OUTRO ente devedor, NÃO aplique reserva nenhuma: devolva o INSS exatamente como a contadoria calculou (0 se zerado) — a alíquota varia por ente e quem decide a reserva é a equipe. ' +
   'Os tempos do M4 são médias de pares de datas reais do andamento processual. ' +
+  '=== AUDITORIA DOS CÁLCULOS === ' +
+  'ANTES de dar o crédito por bom, AUDITE a conta. Cálculo homologado NÃO é cálculo definitivo: erro material e critério contrário a título executivo ou a lei se revisam mesmo depois do trânsito, e quem compra o crédito é quem perde se a revisão vier. A auditoria não existe para achar defeito — existe para que o preço embuta o risco que ela achar. ' +
+  'O QUE CONFERIR, nesta ordem: ' +
+  '(1) FIDELIDADE AO TÍTULO. Compare a conta com o que a sentença ou o acórdão mandaram: período de apuração, verbas deferidas (nem uma a mais, nem uma a menos), base de cálculo, percentuais, termo inicial de juros e de correção. Divergência aqui é a mais grave, porque a conta não pode inovar sobre o título. ' +
+  '(2) OS ÍNDICES, pela natureza do crédito e pela data. Os marcos que valem para condenações da FAZENDA PÚBLICA (União, estados, DF e municípios): ' +
+  '• ATÉ 08/12/2021, condenação NÃO TRIBUTÁRIA: correção pelo IPCA-E e juros pela remuneração da caderneta de poupança (STF, Tema 810, RE 870.947; STJ, Tema 905). A TR foi declarada inconstitucional como índice de correção — conta que ainda a use tem vício conhecido. ' +
+  '• A PARTIR DE 09/12/2021: SELIC ÚNICA, cobrindo correção e juros ao mesmo tempo (EC 113/2021, art. 3º). Aplicação PROSPECTIVA sobre o valor já consolidado até 08/12/2021 — não se aplica SELIC retroativa ao período anterior, e não se soma SELIC a juros de mora do mesmo período, o que seria bis in idem. ' +
+  '• CONDENAÇÃO TRIBUTÁRIA (repetição de indébito): SELIC desde o recolhimento indevido, sem cumulação com outro índice. ' +
+  '• TRABALHISTA contra a Fazenda: o regime tem particularidades próprias e mudou com a ADC 58 do STF — se for o caso, diga qual índice a conta usou e sinalize a controvérsia em vez de afirmar o correto. ' +
+  'SE A CONTA APLICOU SELIC A TODO O PERÍODO, incluindo o anterior a 09/12/2021, isso é divergência de gravidade MÉDIA: a leitura prospectiva é a predominante, mas há decisões em sentido contrário — e o que interessa é que uma revisão nesse ponto derruba o valor. ' +
+  '(3) A ARITMÉTICA. Confira se as parcelas somam o total, se não há duplicidade entre verbas, e se o período de apuração não excede o que o título deferiu. ' +
+  'O CENÁRIO CONSERVADOR É O QUE VALE. Havendo divergência que possa REDUZIR o crédito, estime o bruto revisado em "auditoria_bruto_conservador" — é ele que vai precificar. Auditoria NUNCA AUMENTA crédito: se a conta subestimou em favor da Fazenda, isso é ganho eventual do cessionário, não entra no preço, e vai só como observação. Se não der para estimar o valor revisado com o que há nos autos, devolva null e descreva o risco — preço com risco descrito é melhor que preço com risco embutido em número inventado. ' +
   '=== DE ONDE SAEM OS VALORES === ' +
   'O MESMO crédito aparece nos autos com vários valores diferentes, e escolher o errado não produz erro nenhum — produz um preço errado, com a mesma cara de um preço certo. Antes de preencher qualquer número, decida QUAL DOCUMENTO MANDA. ' +
   'ORDEM DE AUTORIDADE, use o primeiro que existir: ' +
@@ -1914,8 +1944,26 @@ Deno.serve(async (req) => {
       contratuais: dados._verbas_negociadas?.contratuais ?? false,
       sucumbenciais: dados._verbas_negociadas?.sucumbenciais ?? false,
     };
-    const _contratuaisBrutos = Number(dados.honorarios) || 0;
-    const _sucumbBrutos = Number(dados.honorarios_sucumbenciais) || 0;
+    // A AUDITORIA ENTRA AQUI, antes de tudo: é ela que decide sobre QUAIS
+    // valores o preço se forma. Cálculo homologado não é cálculo definitivo, e
+    // quem compra o crédito é quem perde se a revisão vier — então o cenário
+    // conservador é o que precifica. Ver _shared/precificacao.ts.
+    const _auditoria = aplicarAuditoria(
+      {
+        brutoTotal: Number(dados.bruto_total) || 0,
+        ir: Number(dados.ir) || 0,
+        inss: Number(dados.inss) || 0,
+        contratuaisBrutos: Number(dados.honorarios) || 0,
+        sucumbenciaisBrutos: Number(dados.honorarios_sucumbenciais) || 0,
+      },
+      dados.auditoria_bruto_conservador,
+    );
+    dados._auditoria_aplicada = _auditoria.aplicada;
+    dados._auditoria_corte = _auditoria.corte;
+    dados._auditoria_motivo = _auditoria.motivo ?? null;
+
+    const _contratuaisBrutos = _auditoria.valores.contratuaisBrutos;
+    const _sucumbBrutos = _auditoria.valores.sucumbenciaisBrutos;
     // O IR de CADA verba, em separado — é o que as fórmulas M7 e M8 do modelo
     // fazem, e o que a realidade costuma ser: contratuais e sucumbenciais vêm em
     // requisitórios distintos. Ver _shared/precificacao.ts.
@@ -1924,14 +1972,7 @@ Deno.serve(async (req) => {
       (_verbas.sucumbenciais ? irProgressivo(_sucumbBrutos).imposto : 0);
     dados._ir_honorarios = _irHon;
 
-    const _parcelas = montarParcelas({
-      brutoTotal: Number(dados.bruto_total) || 0,
-      ir: Number(dados.ir) || 0,
-      inss: Number(dados.inss) || 0,
-      contratuaisBrutos: _contratuaisBrutos,
-      sucumbenciaisBrutos: _sucumbBrutos,
-      verbas: _verbas,
-    });
+    const _parcelas = montarParcelas({ ..._auditoria.valores, verbas: _verbas });
     dados._parcelas = _parcelas;
 
     const calc: any = calibrarDesagio({
@@ -2004,6 +2045,42 @@ Deno.serve(async (req) => {
         );
       }
     }
+    // A AUDITORIA, sempre — inclusive quando não achou nada. Silêncio aqui
+    // seria lido como "não auditado", e a diferença entre "conferi e está fiel"
+    // e "não conferi" é toda a diferença para quem assina.
+    {
+      const _divs: any[] = Array.isArray(dados.auditoria_divergencias) ? dados.auditoria_divergencias : [];
+      const _risco = String(dados.auditoria_risco_revisao ?? '').toLowerCase();
+      if (dados._auditoria_aplicada) {
+        avisosBase.push(
+          `⚠️ AUDITORIA: o preço foi calculado no CENÁRIO CONSERVADOR. O bruto dos autos (${brl(Number(dados.bruto_total) || 0)}) ` +
+          `foi reduzido em ${brl(Number(dados._auditoria_corte) || 0)} por divergências que podem levar à revisão do cálculo, ` +
+          `mesmo homologado. ${String(dados.auditoria_justificativa ?? '').slice(0, 400)}`,
+        );
+      } else if (_divs.length) {
+        avisosBase.push(
+          `⚠️ AUDITORIA: achei ${_divs.length} divergência(s) na conta, mas não deu para estimar o crédito revisado com o que há nos autos — ` +
+          `o preço está no valor dos autos e o risco NÃO está embutido nele. Risco de revisão: ${_risco || 'não classificado'}. ` +
+          String(dados.auditoria_justificativa ?? '').slice(0, 300),
+        );
+      } else if (dados.auditoria_criterio_aplicado) {
+        avisosBase.push(
+          `Auditoria: a conta foi conferida contra o título executivo e os índices da Fazenda Pública, e está fiel. ` +
+          `Risco de revisão: ${_risco || 'baixo'}.`,
+        );
+      }
+      for (const d of _divs.slice(0, 6)) {
+        const efeito = String(d?.efeito ?? '');
+        avisosBase.push(
+          `   • [${String(d?.gravidade ?? '?')}] ${String(d?.item ?? '')}: o título/lei pede "${String(d?.esperado ?? '')}", ` +
+          `a conta fez "${String(d?.encontrado ?? '')}"${efeito ? ` (${efeito} o crédito)` : ''}` +
+          `${d?.fundamento ? ` — ${String(d.fundamento)}` : ''}`,
+        );
+      }
+      if (dados._auditoria_motivo && !dados._auditoria_aplicada && _divs.length)
+        avisosBase.push(`   • sobre o cenário conservador: ${dados._auditoria_motivo}`);
+    }
+
     if (dados._parcelasNaoFecham)
       avisosBase.push(
         `⚠️ AS PARCELAS NÃO FECHAM: bruto ${brl(Number(dados.bruto_total) || 0)} menos IR ${brl(Number(dados.ir) || 0)}, ` +

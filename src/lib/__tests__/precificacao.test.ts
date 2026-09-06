@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   montarParcelas,
   calibrarDesagio,
+  aplicarAuditoria,
   type Parcela,
 } from '../../../supabase/functions/_shared/precificacao.ts'
 import type { RegraEmolumentos } from '../../../supabase/functions/_shared/emolumentos-calculo.ts'
@@ -224,5 +225,54 @@ describe('calibrarDesagio — casos de borda', () => {
     expect(umPassoAbaixo.desagio).toBe(r.desagio)
     // A rentabilidade no deságio escolhido bate; no anterior, não.
     expect(r.Y9).toBeGreaterThanOrEqual(0.028)
+  })
+})
+
+describe('aplicarAuditoria — o cenário conservador', () => {
+  const autos = {
+    brutoTotal: 100000, ir: 10000, inss: 2000,
+    contratuaisBrutos: 30000, sucumbenciaisBrutos: 8000,
+  }
+
+  it('um bruto revisado menor precifica, e as deduções acompanham pelo mesmo fator', () => {
+    const a = aplicarAuditoria(autos, 80000)
+    expect(a.aplicada).toBe(true)
+    expect(a.corte).toBe(20000)
+    expect(a.valores.brutoTotal).toBe(80000)
+    expect(a.valores.ir).toBeCloseTo(8000, 2)          // 0,8 do original
+    expect(a.valores.inss).toBeCloseTo(1600, 2)
+    expect(a.valores.contratuaisBrutos).toBeCloseTo(24000, 2)
+    expect(a.valores.sucumbenciaisBrutos).toBeCloseTo(6400, 2)
+  })
+
+  it('AUDITORIA NÃO AUMENTA CRÉDITO', () => {
+    // Conta que subestimou em favor da Fazenda é ganho eventual do cessionário.
+    // Comprar contando com revisão favorável é apostar, não precificar.
+    const a = aplicarAuditoria(autos, 130000)
+    expect(a.aplicada).toBe(false)
+    expect(a.valores.brutoTotal).toBe(100000)
+    expect(a.motivo).toMatch(/MAIOR/)
+  })
+
+  it('sem estimativa, os valores dos autos seguem intactos', () => {
+    for (const v of [null, undefined, 0, -5, NaN]) {
+      const a = aplicarAuditoria(autos, v as number | null)
+      expect(a.aplicada).toBe(false)
+      expect(a.valores).toEqual(autos)
+    }
+  })
+
+  it('igual ao dos autos não é corte', () => {
+    const a = aplicarAuditoria(autos, 100000)
+    expect(a.aplicada).toBe(false)
+    expect(a.corte).toBe(0)
+  })
+
+  it('o corte chega no preço: base menor, cessão menor', () => {
+    const semAuditoria = montarParcelas({ ...autos, verbas: { principal: true, contratuais: true, sucumbenciais: false } })
+    const a = aplicarAuditoria(autos, 80000)
+    const comAuditoria = montarParcelas({ ...a.valores, verbas: { principal: true, contratuais: true, sucumbenciais: false } })
+    const base = (ps: Parcela[]) => ps.reduce((s, p) => s + p.liquido, 0)
+    expect(base(comAuditoria)).toBeLessThan(base(semAuditoria))
   })
 })
