@@ -400,6 +400,21 @@ export function AnaliseRpvModal({
    */
   const [cenario, setCenario] = useState<string>(dadosDoCard.tipo_aquisicao)
   const [trocandoCenario, setTrocandoCenario] = useState(false)
+
+  /**
+   * Os dados do card, JÁ COM O CENÁRIO EM VIGOR.
+   *
+   * Existe porque espalhar `...dadosDoCard` em cada chamada mandava sempre o
+   * cenário que o card trazia, e não o que o operador escolheu. O seletor
+   * sobrepunha na hora da troca, então os números na tela mudavam — mas a
+   * mensagem seguinte do chat, a chegada da tabela de cartório e o SALVAR
+   * voltavam ao cenário do card, em silêncio. O arquivo no Drive saía do
+   * cenário errado, com o nome errado, e nada na tela dizia isso.
+   */
+  const corpoCard = useMemo(
+    () => ({ ...dadosDoCard, tipo_aquisicao: cenario }),
+    [dadosDoCard, cenario],
+  )
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [pedido, setPedido] = useState('')
   const [salvo, setSalvo] = useState<RespostaAnaliseRpv | null>(null)
@@ -458,9 +473,22 @@ export function AnaliseRpvModal({
           acao: 'analisar',
           texto: t,
           notas_kommo: notasKommo,
-          ...dadosDoCard,
+          ...corpoCard,
         })
         setAtual(r)
+        // O SELETOR MOSTRA O QUE O MOTOR DECIDIU. Com "auto" — card que não diz
+        // a parcela cedida —, quem escolhe é o destaque da contadoria, e sem
+        // isto nenhum botão ficava marcado: a tela não dizia o que estava
+        // sendo precificado.
+        const vb = (r as { dados?: { _verbas_negociadas?: Record<string, boolean> } })?.dados?._verbas_negociadas
+        if (vb) {
+          setCenario(
+            vb.principal && (vb.contratuais || vb.sucumbenciais) ? 'ambos'
+            : vb.principal ? 'principal'
+            : vb.contratuais ? 'honorarios'
+            : 'sucumbenciais',
+          )
+        }
 
         // O CARTÓRIO CHEGA DEPOIS, e de propósito: a busca web leva dezenas de
         // segundos e, dentro da análise, derrubava o worker (HTTP 546).
@@ -576,7 +604,7 @@ export function AnaliseRpvModal({
         dados: r.dados,
         emolumentos: e.emolumentos,
         avisos_qualificacao: r.avisos_qualificacao ?? [],
-        ...dadosDoCard,
+        ...corpoCard,
       })
       if (revisao.current !== naEpoca) return
       setFalhaCartorio(null)
@@ -618,7 +646,8 @@ export function AnaliseRpvModal({
         dados: atual.dados,
         emolumentos: regraCartorio ?? atual.emolumentos ?? null,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
-        ...dadosDoCard,
+        ...corpoCard,
+        // O estado do React ainda não mudou quando esta chamada sai.
         tipo_aquisicao: novo,
       })
       if (revisao.current !== naEpoca) return
@@ -656,7 +685,7 @@ export function AnaliseRpvModal({
         instrucao,
         historico: historico.slice(-12),
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
-        ...dadosDoCard,
+        ...corpoCard,
       })
       setAtual(r)
       setMensagens((m) => [...m, { papel: 'ia', texto: r.resposta || 'Alteração aplicada.' }])
@@ -722,7 +751,7 @@ export function AnaliseRpvModal({
         dados: atual.dados,
         emolumentos,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
-        ...dadosDoCard,
+        ...corpoCard,
       })
       setAtual(r)
     } catch (e) {
@@ -743,7 +772,7 @@ export function AnaliseRpvModal({
         dados: atual.dados,
         emolumentos: regraCartorio ?? atual.emolumentos ?? null,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
-        ...dadosDoCard,
+        ...corpoCard,
       })
       setSalvo(r)
       onSalvo(r)
