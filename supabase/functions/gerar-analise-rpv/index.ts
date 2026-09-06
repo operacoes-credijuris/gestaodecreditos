@@ -23,6 +23,7 @@ import {
 } from "../_shared/emolumentos.ts";
 import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import { irProgressivo } from "../_shared/irpf.ts";
+import { calibrarDesagio, montarParcelas, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
@@ -536,107 +537,6 @@ function escolherModelo(honorariosContratuais: number): 1 | 2 {
   return honorariosContratuais > 0 ? 1 : 2;
 }
 
-// Calibra o MENOR deságio (mesmo % no principal e nos honorários) p/ rentab. mensal >= alvo.
-// NUNCA lança erro: se nem no deságio máximo (95%) der pra atingir o alvo, devolve o MELHOR
-// caso (maior rentabilidade) com atingiuAlvo=false, pra a planilha sempre ser gerada.
-// Regra INSS (SÓ Estado de Goiás): horas extras com INSS zerado pela contadoria levam reserva de 14,25%,
-// a alíquota da GOIASPREV (feito no extrator; ver ehEstadoDeGoias). Outros entes: sem reserva, com aviso.
-function calibrarDesagio(o: {
-  brutoTotal: number; honorarios: number; ir: number; inss: number;
-  /**
-   * O IRRF retido sobre os honorários (tabela progressiva).
-   *
-   * Ele NÃO se soma às deduções do principal: o honorário sai do bolo pelo
-   * BRUTO, e é sobre esse bruto que o imposto incide. O que muda é o que se
-   * ADQUIRE — o advogado cede o que vai receber, e o que ele recebe é o
-   * líquido. Sem isto, o preço era calculado como se a Receita não retivesse
-   * nada, e a planilha (que agora calcula o IR na própria célula) passaria a
-   * mostrar um líquido menor do que a base que gerou o preço.
-   */
-  irHonorarios?: number;
-  T5: number; modelo: 1 | 2; comissaoPct?: number; diligencia?: number; alvo?: number;
-  /**
-   * A REGRA de emolumentos do estado — faixas e acréscimos —, não um valor.
-   *
-   * É o que permite calcular o cartório DE CADA PREÇO CANDIDATO dentro do laço,
-   * em vez de fixar um custo apurado para outro preço. Sem isto o motor
-   * precisava de rodadas de convergência e ainda assim podia parar com o
-   * emolumento de uma faixa vizinha (ver o cabeçalho de _shared/emolumentos.ts).
-   * null = tabela desconhecida; precifica sem cartório, e avisa.
-   */
-  regra: RegraEmolumentos | null;
-}) {
-  const alvo = o.alvo ?? 0.028;
-  const dilig = o.diligencia ?? 250;
-  // L5 = principal líquido; L7 = honorários (no Modelo 2, L7 é deduzido mas não adquirido)
-  //
-  // A ASSIMETRIA É PROPOSITAL e espelha a planilha: L5 desconta o honorário
-  // BRUTO (é o que deixa o bolo do principal), enquanto L7 é o LÍQUIDO (é o que
-  // o advogado recebe, e portanto o que se compra dele). A diferença entre os
-  // dois é exatamente o IR retido, que não fica com ninguém dos dois.
-  const L5 = o.brutoTotal - (o.ir + o.inss + o.honorarios);
-  const L7 = Math.max(0, o.honorarios - (o.irHonorarios ?? 0));
-  // Base e cessão dependem do modelo:
-  //   Modelo 1: Y3 = L5+L7 ; cessão = (L5+L7)*(1-d)
-  //   Modelo 2: Y3 = L5    ; cessão = L5*(1-d)
-  const baseY3 = o.modelo === 1 ? L5 + L7 : L5;
-  const Y5 = (o.comissaoPct ?? 0.09) * baseY3;
-
-  // CARTÓRIO DESCONHECIDO ENTRA COMO ZERO, E MARCADO: precifica sem ele, Y10
-  // fica null e o aviso diz que o preço saiu sem escritura e registro. Preço um
-  // pouco otimista que a pessoa completa à mão é melhor que nenhum preço, e
-  // muito melhor que um preço com cartório inventado.
-  //
-  // O CUSTO É RECALCULADO A CADA PREÇO CANDIDATO. custoParaPreco é pura e
-  // instantânea, então cabe dentro do laço — e é isso que faz o preço sair com
-  // o emolumento da SUA faixa já na primeira passada.
-  const avaliar = (d: number) => {
-    const cessao = o.modelo === 1 ? (L5 + L7) * (1 - d) : L5 * (1 - d);
-    const emol = custoParaPreco(o.regra, cessao);
-    const Y4 = cessao + Y5 + (emol.total ?? 0) + dilig;
-    const Y9 = Math.pow(baseY3 / Y4, 1 / o.T5) - 1;
-    return { d, cessao, emol, Y4, Y9 };
-  };
-  const montar = (r: any, atingiuAlvo: boolean) => ({
-    desagio: r.d, L5, L7, Y3: baseY3, Y5,
-    S5: L5 * (1 - r.d),
-    S7: o.modelo === 1 ? L7 * (1 - r.d) : 0,
-    cessao: r.cessao, Y10: r.emol.total,
-    emolumentos: { escritura: r.emol.escritura, registro: r.emol.registro, completo: r.emol.completo },
-    descricaoCartorio: r.emol.descricao,
-    Y4: r.Y4, Y9: r.Y9,
-    desagioEfetivo: 1 - r.cessao / baseY3, atingiuAlvo,
-  });
-
-  // BUSCA BINÁRIA, e não varredura. A resposta é a mesma — o resultado é
-  // verificado contra a varredura em teste —, mas passa de 9.501 avaliações por
-  // análise para 14. Era CPU pura dentro do worker, e foi o que sobrou de
-  // pesado depois que a busca web saiu daqui: o HTTP 546 é estouro de recurso,
-  // não de tempo de rede.
-  //
-  // POR QUE A BINÁRIA VALE: a rentabilidade Y9 é monotonicamente CRESCENTE no
-  // deságio. Mais deságio -> cessão menor -> Y4 (custo total) menor -> Y9 maior.
-  // Com o cartório constante nesta rodada, nem os degraus de faixa existem mais:
-  // Y9 é estritamente crescente. Procurar "o menor d que bate o alvo" numa
-  // função monótona é exatamente o caso da binária.
-  //
-  // A busca é sobre o ÍNDICE da mesma grade de 0,01% da varredura (k de 0 a
-  // 9500), e não sobre o real — assim o d devolvido é idêntico ao que a
-  // varredura devolveria, sem depender de tolerância.
-  const PASSOS = 9500;                             // 0 a 0,95 em degraus de 0,0001
-  const dDe = (k: number) => k * 0.0001;
-  const bate = (k: number) => avaliar(dDe(k)).Y9 >= alvo;
-
-  if (!bate(PASSOS)) return montar(avaliar(dDe(PASSOS)), false);  // nem no teto: melhor caso + flag
-  if (bate(0)) return montar(avaliar(0), true);                   // já bate sem deságio nenhum
-
-  let baixo = 0, alto = PASSOS;                    // bate(baixo)=false, bate(alto)=true
-  while (alto - baixo > 1) {
-    const meio = (baixo + alto) >> 1;
-    if (bate(meio)) alto = meio; else baixo = meio;
-  }
-  return montar(avaliar(dDe(alto)), true);
-}
 
 /**
  * A UF do tribunal onde o crédito tramita — é a tabela de emolumentos dela que
@@ -904,9 +804,6 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
     : (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) - (Number(dados.inss) || 0);
   const _pctHon = _baseHon > 0 ? (Number(dados.honorarios) || 0) / _baseHon : 0;
   cel('K', 7).value = Number(_pctHon.toFixed(6));
-  if (dados._soHonorarios) {
-    cel('G', 5).value = dados._soSucumbenciais ? 'Honorários Sucumbenciais' : 'Honorários Contratuais';
-  }
   // OS SUCUMBENCIAIS, LIDOS DO PROCESSO — e zero quando não houver.
   //
   // Os 10% que o modelo traz são um padrão de planilha, não um dado: num
@@ -923,22 +820,25 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // sucumbenciais também preenchida contaria a MESMA verba duas vezes — numa
   // cessão de R$ 15.000 a planilha somaria R$ 30.000.
   const _brutoSucumb = Number(dados.bruto_total) || 0;
-  const _pctSucumb = dados._soHonorarios || !(_brutoSucumb > 0)
-    ? 0
-    : (Number(dados.honorarios_sucumbenciais) || 0) / _brutoSucumb;
+  const _pctSucumb = _brutoSucumb > 0 ? (Number(dados.honorarios_sucumbenciais) || 0) / _brutoSucumb : 0;
   cel('K', 8).value = Number(_pctSucumb.toFixed(6));
-  cel('O', 5).value = calc.desagio;
-  // O MESMO DESÁGIO NAS TRÊS LINHAS, nos dois modelos.
+  // O DESÁGIO VAI ONDE ELE INCIDE, linha por linha.
   //
-  // Sem isto as linhas de honorários ficavam com deságio zero, e as colunas que
-  // as somam mostravam uma compra pelo valor de face: deságio efetivo 0% e
-  // rentabilidade NEGATIVA depois da comissão, do cartório e da diligência —
-  // um número que parece um alerta e é só uma célula em branco.
+  // Havendo principal no negócio, os honorários são comprados pelo valor de
+  // face e todo o deságio cai sobre o principal — prática da Credijuris, ver
+  // _shared/precificacao.ts. Numa cessão só de honorários não há onde jogá-lo,
+  // e ele volta a incidir sobre eles.
   //
-  // Era condicionado ao Modelo 1 porque só ele adquiria honorários. O modelo
-  // agora tem cenários de honorários nos dois.
-  cel('O', 7).value = calc.desagio;
-  cel('O', 8).value = calc.desagio;
+  // Cada linha recebe o deságio da SUA parcela, e zero quando a parcela não
+  // está no negócio: um deságio numa linha que não se compra não muda o preço,
+  // mas muda o que as colunas de cenário exibem.
+  const _desagioDe = (nome: string) => {
+    const p = (dados._parcelas ?? []).find((x: any) => x.nome === nome);
+    return p ? (p.desagiavel ? calc.desagio : 0) : 0;
+  };
+  cel('O', 5).value = _desagioDe('principal');
+  cel('O', 7).value = _desagioDe('contratuais');
+  cel('O', 8).value = _desagioDe('sucumbenciais');
   cel('Q', 5).value = Number(T5.toFixed(4));
   cel('I', 5).value = dados.data_aquisicao;
   cel('J', 5).value = dados.data_pagamento;
@@ -1034,10 +934,15 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
     honorarios:   { sep: 'X', rot: 'Y',  val: 'Z'  },
     sucumbenciais:{ sep: 'AA', rot: 'AB', val: 'AC' },
   } as const;
+  // A COLUNA É A DAS VERBAS COMPRADAS, e agora bate uma a uma com as quatro do
+  // modelo — antes o cenário de honorários caía na coluna do principal, porque
+  // era lá que o truque punha a verba.
+  const _v = dados._verbas_negociadas ?? { principal: true, contratuais: false, sucumbenciais: false };
   const cenarioUsado: keyof typeof CENARIOS =
-    dados._soHonorarios ? 'principal'          // o honorário está na linha do principal
-    : dados.modelo === 1 ? 'ambos'             // Modelo 1 adquire principal + honorários
-    : 'principal';                             // Modelo 2 adquire só o principal
+    _v.principal && (_v.contratuais || _v.sucumbenciais) ? 'ambos'
+    : _v.principal ? 'principal'
+    : _v.contratuais ? 'honorarios'
+    : 'sucumbenciais';
   for (const [nome, c] of Object.entries(CENARIOS)) {
     if (nome === cenarioUsado) continue;
     for (const col of [c.sep, c.rot, c.val]) prec.getColumn(col).hidden = true;
@@ -1045,11 +950,10 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // O RÓTULO TEM DE DIZER A VERDADE. Em "apenas honorários" o número está na
   // coluna cujo rótulo diz "Negociando apenas Crédito Principal" — que naquele
   // caso é falso, porque não há principal nenhum na operação.
-  if (dados._soHonorarios) {
-    const linhaRot = dados.modelo === 1 ? 2 : 14;
-    prec.getCell(`${CENARIOS.principal.rot}${linhaRot}`).value =
-      dados._soSucumbenciais ? 'Negociando apenas Honorários Sucumbenciais' : 'Negociando apenas Honorários';
-  }
+  // O rótulo de cada coluna já descreve o seu cenário no próprio modelo, e
+  // agora a coluna escolhida é a que corresponde às verbas — então não há mais
+  // rótulo a corrigir. Enquanto o cenário de honorários era exibido na coluna
+  // do principal, o texto tinha de ser reescrito para não mentir.
 
   const out = await wb.xlsx.writeBuffer();
   return new Uint8Array(out as ArrayBuffer);
@@ -1847,59 +1751,65 @@ Deno.serve(async (req) => {
       const base = houveDestaque ? brutoNum : (brutoNum - irNum - inssNum);
       honorariosCalc = base * (honorariosPct / 100);
     }
-    let soHonorarios = false;
-    let soSucumbenciais = false;
-    /** Cessão das DUAS verbas de honorário: o preço tem de cobrir as duas. */
-    let somarSucumbenciais = false;
-    if (tipoAquisicao === 'principal')       { dados.modelo = 2; dados.tipo_credito = 'Crédito principal — apenas'; }
-    else if (tipoAquisicao === 'ambos')      { dados.modelo = 1; dados.tipo_credito = 'Crédito principal + Honorários'; }
-    else if (tipoAquisicao === 'honorarios' || tipoAquisicao === 'contratuais') {
-      dados.modelo = 2; soHonorarios = true; somarSucumbenciais = true;
-      dados.tipo_credito = 'Honorários contratuais + sucumbenciais';
-    }
-    else if (tipoAquisicao === 'sucumbenciais') { dados.modelo = 2; soHonorarios = true; soSucumbenciais = true; dados.tipo_credito = 'Honorários sucumbenciais — apenas'; }
-    else                                     { dados.modelo = escolherModelo(honAI); }  // automático (como hoje), pelo destaque da contadoria
-
-    if (soHonorarios) {
-      // A VERBA VIRA O BRUTO. Cedendo só honorários não há principal na
-      // operação, então o valor cedido ocupa a linha do principal e as linhas
-      // de honorários ficam zeradas — é o que faz as fórmulas do modelo
-      // fecharem sem um bloco próprio para este caso.
-      const sucumbNum = Number(dados.honorarios_sucumbenciais) || 0;
-      const contratuaisNum = honorariosPct != null ? brutoNum * (honorariosPct / 100) : honAI;
-      // A SOMA SÓ QUANDO O CARD DIZ AS DUAS. "contratuais + sucumbenciais" é
-      // uma cessão das duas verbas, e precificar só os contratuais compraria
-      // mais crédito do que o preço cobre.
-      const valorHon = soSucumbenciais ? sucumbNum
-        : somarSucumbenciais ? contratuaisNum + sucumbNum
-        : contratuaisNum;
-      if (!(valorHon > 0))
-        return errorResponse(soSucumbenciais
-          ? 'A cessão é de honorários sucumbenciais, apenas, mas não localizei o valor deles nos documentos do card. Junte a sentença ou o acórdão que os fixou, ou a conta da contadoria que os discrimina.'
-          : 'Para calcular APENAS os honorários, informe o percentual de honorários no formulário (ou use um processo com honorários destacados nos cálculos da contadoria).');
-      dados._verbas_cedidas = soSucumbenciais ? 'sucumbenciais'
-        : sucumbNum > 0 ? `contratuais (${brl(contratuaisNum)}) + sucumbenciais (${brl(sucumbNum)})`
-        : 'contratuais (o processo não tem sucumbenciais)';
-      // O card disse só "contratuais" e o processo TEM sucumbenciais: entraram
-      // no preço, porque cede-se o honorário que existe — mas é o caso raro, e
+    // ================================================================
+    // QUAIS VERBAS ESTÃO SENDO COMPRADAS
+    // ================================================================
+    //
+    // Antes, cessão só de honorários fazia a verba VIRAR o bruto e ocupar a
+    // linha do principal — um truque para as fórmulas do modelo fecharem sem um
+    // bloco próprio. Ele custava caro: destruía os valores dos autos (não dava
+    // para trocar de cenário depois sem reextrair), somava contratuais e
+    // sucumbenciais num lump só (uma escritura onde são duas) e deixava a
+    // coluna de cenário certa vazia.
+    //
+    // Agora os valores dos autos ficam intactos e o que muda é só QUAIS VERBAS
+    // entram na conta. Ver _shared/precificacao.ts.
+    const _sucumbBrutosAutos = Number(dados.honorarios_sucumbenciais) || 0;
+    let verbas: VerbasNegociadas;
+    if (tipoAquisicao === 'principal') {
+      verbas = { principal: true, contratuais: false, sucumbenciais: false };
+      dados.modelo = 2; dados.tipo_credito = 'Crédito principal — apenas';
+    } else if (tipoAquisicao === 'ambos') {
+      // "Principal + honorários" leva o honorário que existir, dos dois tipos.
+      verbas = { principal: true, contratuais: true, sucumbenciais: true };
+      dados.modelo = 1; dados.tipo_credito = 'Crédito principal + Honorários';
+    } else if (tipoAquisicao === 'honorarios' || tipoAquisicao === 'contratuais') {
+      verbas = { principal: false, contratuais: true, sucumbenciais: true };
+      dados.modelo = 2; dados.tipo_credito = 'Honorários contratuais + sucumbenciais';
+      // Card diz só "contratuais" e o processo TEM sucumbenciais: entram no
+      // preço, porque cede-se o honorário que existe — mas é o caso raro, e
       // quem fecha precisa saber que está comprando as duas verbas.
-      if (tipoAquisicao === 'contratuais' && sucumbNum > 0) dados._sucumbNaoPrevistos = sucumbNum;
-      dados.bruto_total = valorHon;
-      // O IR INCIDE AQUI TAMBÉM, e antes não incidia.
-      //
-      // Ficava zerado com um aviso pedindo para conferir à mão — o que era
-      // coerente enquanto o motor não sabia calcular imposto nenhum. Agora
-      // sabe, e deixar só este caminho sem desconto seria uma inconsistência
-      // cara: o preço sairia calibrado sobre um valor que o advogado não
-      // recebe. Ver _shared/irpf.ts.
-      dados.ir = irProgressivo(valorHon).imposto;
-      dados.inss = 0; dados.honorarios = 0;
+      if (tipoAquisicao === 'contratuais' && _sucumbBrutosAutos > 0) dados._sucumbNaoPrevistos = _sucumbBrutosAutos;
+    } else if (tipoAquisicao === 'sucumbenciais') {
+      verbas = { principal: false, contratuais: false, sucumbenciais: true };
+      dados.modelo = 2; dados.tipo_credito = 'Honorários sucumbenciais — apenas';
     } else {
-      dados.honorarios = honorariosCalc;                     // dedução do líquido (L5) e, no Modelo 1, valor adquirido (L7)
+      // Automático: o destaque da contadoria decide se há honorários a comprar.
+      const comHonorarios = honAI > 0 || honorariosPct != null;
+      verbas = { principal: true, contratuais: comHonorarios, sucumbenciais: comHonorarios };
+      dados.modelo = escolherModelo(honAI);
+      dados.tipo_credito = comHonorarios ? 'Crédito principal + Honorários' : 'Crédito principal — apenas';
     }
-    dados._soHonorarios = soHonorarios;
-    dados._soSucumbenciais = soSucumbenciais;
+
+    dados.honorarios = honorariosCalc;   // contratuais, valor BRUTO destacado
+    dados._verbas_negociadas = verbas;
     dados._honPctInformado = honorariosPct != null;
+
+    // SEM VERBA NENHUMA NÃO HÁ NEGÓCIO. Acontece quando o card manda comprar
+    // honorários e o processo não tem nenhum: melhor dizer isso do que devolver
+    // uma análise de valor zero, que parece um resultado.
+    {
+      const temAlgo =
+        (verbas.principal && (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) - (Number(dados.inss) || 0) - honorariosCalc > 0) ||
+        (verbas.contratuais && honorariosCalc > 0) ||
+        (verbas.sucumbenciais && _sucumbBrutosAutos > 0);
+      if (!temAlgo) return errorResponse(
+        `O card manda negociar ${dados.tipo_credito}, mas não localizei valor para nenhuma dessas verbas nos documentos. ` +
+        (verbas.principal
+          ? 'Confira os cálculos anexados ao card.'
+          : 'Junte a peça que fixa os honorários (sentença, acórdão ou conta da contadoria), ou informe o percentual no formulário.'),
+      );
+    }
 
     // 3c. Prazo (T5) + datas — pela ESFERA DO ENTE DEVEDOR
     const scenario: 'A' | 'B' = (dados.rpv_ja_expedida === true || String(dados.rpv_ja_expedida) === 'true') ? 'B' : 'A';
@@ -1993,16 +1903,48 @@ Deno.serve(async (req) => {
     // Pagamento único (meses = 1), que é o mais pesado: se os honorários forem
     // rendimento recebido acumuladamente, o imposto real é menor, e errar para
     // mais deixa o preço conservador em vez de prometer um líquido que não vem.
-    const _irHon = irProgressivo(Number(dados.honorarios) || 0);
-    dados._ir_honorarios = _irHon.imposto;
-    dados._ir_honorarios_memoria = _irHon.memoria;
+    // AS VERBAS DO NEGÓCIO, e não mais um "modelo" que decidia tudo.
+    //
+    // O preço passou a ser a soma de até três parcelas, cada uma com o seu
+    // líquido, o seu deságio e a sua escritura. Ver _shared/precificacao.ts: é
+    // lá que moram as duas regras da casa — deságio só no principal quando ele
+    // está no negócio, e um par de escritura e registro POR VERBA.
+    const _verbas: VerbasNegociadas = {
+      principal: dados._verbas_negociadas?.principal ?? true,
+      contratuais: dados._verbas_negociadas?.contratuais ?? false,
+      sucumbenciais: dados._verbas_negociadas?.sucumbenciais ?? false,
+    };
+    const _contratuaisBrutos = Number(dados.honorarios) || 0;
+    const _sucumbBrutos = Number(dados.honorarios_sucumbenciais) || 0;
+    // O IR de CADA verba, em separado — é o que as fórmulas M7 e M8 do modelo
+    // fazem, e o que a realidade costuma ser: contratuais e sucumbenciais vêm em
+    // requisitórios distintos. Ver _shared/precificacao.ts.
+    const _irHon =
+      (_verbas.contratuais ? irProgressivo(_contratuaisBrutos).imposto : 0) +
+      (_verbas.sucumbenciais ? irProgressivo(_sucumbBrutos).imposto : 0);
+    dados._ir_honorarios = _irHon;
+
+    const _parcelas = montarParcelas({
+      brutoTotal: Number(dados.bruto_total) || 0,
+      ir: Number(dados.ir) || 0,
+      inss: Number(dados.inss) || 0,
+      contratuaisBrutos: _contratuaisBrutos,
+      sucumbenciaisBrutos: _sucumbBrutos,
+      verbas: _verbas,
+    });
+    dados._parcelas = _parcelas;
 
     const calc: any = calibrarDesagio({
-      brutoTotal: Number(dados.bruto_total), honorarios: Number(dados.honorarios) || 0,
-      ir: Number(dados.ir) || 0, inss: Number(dados.inss) || 0, T5, modelo: dados.modelo,
-      irHonorarios: _irHon.imposto,
+      parcelas: _parcelas, T5,
       regra: emolumentos?.regra ?? null,
     });
+    // Compatibilidade com quem lê o resultado pelo nome das células do modelo.
+    calc.L5 = _parcelas.find((p) => p.nome === 'principal')?.liquido ?? 0;
+    calc.L7 = _parcelas.find((p) => p.nome === 'contratuais')?.liquido ?? 0;
+    calc.L8 = _parcelas.find((p) => p.nome === 'sucumbenciais')?.liquido ?? 0;
+    calc.emolumentos = {
+      escritura: calc.escrituraTotal, registro: calc.registroTotal, completo: calc.cartorioCompleto,
+    };
     calc.faixaCartorio = emolumentos
       ? `${calc.descricaoCartorio} — tabela ${emolumentos.uf}/${emolumentos.ano}${emolumentos.vigencia ? `, ${emolumentos.vigencia}` : ''}`
       : `Confirmar com cartório${ufCredito ? ` — tabela de ${ufCredito} ainda não levantada` : ' — UF do tribunal não identificada'}`;
@@ -2036,18 +1978,32 @@ Deno.serve(async (req) => {
     else if (emolumentos.origem === 'busca')
       avisosBase.push(`Tabela de emolumentos de ${emolumentos.uf}/${emolumentos.ano} levantada agora (${emolumentos.observacao ?? 'sem detalhe'}). Fonte: ${emolumentos.fontes[0] ?? 'não informada'}. Vale conferir uma vez; daqui em diante ela vale para qualquer valor de cessão, sem nova consulta.`);
     if (_prazoEstimado) avisosBase.push('⚠️ PRAZO ESTIMADO — TJGO sem data-limite de convênio nos autos: a espera até a expedição foi estimada em 60 dias. Confira o prazo e a rentabilidade à mão.');
-    if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && !dados._soHonorarios && !ehEstadoDeGoias(dados.ente_devedor))
+    if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && dados._verbas_negociadas?.principal && !ehEstadoDeGoias(dados.ente_devedor))
       avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
     if (calc.atingiuAlvo === false)
       avisosBase.push(`Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
     if (dados._houveCorte)
       avisosBase.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.');
-    if (dados._soHonorarios)
-      avisosBase.push(
-        `Cessão de honorários — verba(s) precificada(s): ${dados._verbas_cedidas ?? 'contratuais'}, conforme o "PARCELA CEDIDA" do card. ` +
-        `O IR foi descontado pela tabela progressiva (${brl(Number(dados.ir) || 0)}). ` +
-        'Se a verba for rendimento recebido acumuladamente, o imposto real é menor — confira o regime antes de fechar.',
-      );
+    // O QUE ENTROU NO PREÇO, verba a verba, com o deságio de cada uma. É o aviso
+    // que responde à pergunta que o número sozinho não responde: 30% de deságio
+    // sobre o quê. Havendo principal, os honorários vão pelo valor de face e o
+    // deságio efetivo sobre o negócio é bem menor que o nominal.
+    {
+      const _ps: any[] = Array.isArray(dados._parcelas) ? dados._parcelas : [];
+      if (_ps.length) {
+        const NOMES: Record<string, string> = {
+          principal: 'principal', contratuais: 'honorários contratuais', sucumbenciais: 'honorários sucumbenciais',
+        };
+        avisosBase.push(
+          'Verbas negociadas — ' +
+          _ps.map((p) => `${NOMES[p.nome] ?? p.nome} ${brl(p.liquido)} (deságio ${p.desagiavel ? pct(calc.desagio) : 'zero, comprado pelo valor de face'})`).join('; ') +
+          `. Deságio efetivo sobre o negócio: ${pct(calc.desagioEfetivo)}.` +
+          (_ps.some((p) => p.nome !== 'principal')
+            ? ` O IR dos honorários (${brl(Number(dados._ir_honorarios) || 0)}) foi descontado pela tabela progressiva; se a verba for rendimento recebido acumuladamente, o imposto real é menor.`
+            : ''),
+        );
+      }
+    }
     if (dados._parcelasNaoFecham)
       avisosBase.push(
         `⚠️ AS PARCELAS NÃO FECHAM: bruto ${brl(Number(dados.bruto_total) || 0)} menos IR ${brl(Number(dados.ir) || 0)}, ` +
@@ -2147,10 +2103,25 @@ Deno.serve(async (req) => {
     const catId = catFolder?.id ?? await driveFindOrCreateFolder(token, categoria, analisesRoot);
     const interId = await driveFindOrCreateFolder(token, originador, catId);
     const cedenteId = await driveFindOrCreateFolder(token, credorTitulo, interId);
-    // Nome do arquivo: "Análise de RPV - CREDOR v. ENTE DEVEDOR - NÚMERO DO PROCESSO"
+    // Nome do arquivo: "Análise de RPV [VERBAS] - CREDOR v. ENTE - NÚMERO"
+    //
+    // AS VERBAS ENTRAM NO NOME por pedido do dono: o comercial escolhe o arquivo
+    // na hora de montar a proposta, e do nome dependia adivinhar se aquela
+    // análise era do principal, dos honorários ou dos dois. Duas análises do
+    // mesmo processo com cenários diferentes ficavam indistinguíveis na pasta.
+    //
+    // Fica logo depois de "Análise de RPV", e não no fim: nome de arquivo é
+    // truncado pela direita em toda lista, e o que se precisa ler é justamente
+    // isto.
+    const SIGLA_VERBA: Record<string, string> = {
+      principal: 'Principal', contratuais: 'Contratuais', sucumbenciais: 'Sucumbenciais',
+    };
+    const _verbasNome = (Array.isArray(dados._parcelas) ? dados._parcelas : [])
+      .map((p: any) => SIGLA_VERBA[p.nome] ?? p.nome).join(' + ');
     const enteDevedor = String(dados.ente_devedor || '').trim();
     const nomeArquivo = limparNomeArquivo(
-      `Análise de RPV - ${credorTitulo}${enteDevedor ? ` v. ${enteDevedor}` : ''} - ${numeroProcesso}`,
+      `Análise de RPV${_verbasNome ? ` [${_verbasNome}]` : ''} - ${credorTitulo}` +
+      `${enteDevedor ? ` v. ${enteDevedor}` : ''} - ${numeroProcesso}`,
     ) + '.xlsx';
     const up = await driveUploadBytes(token, nomeArquivo, cedenteId, xlsx, XLSX_MIME, true);
 

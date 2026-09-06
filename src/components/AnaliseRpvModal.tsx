@@ -209,6 +209,25 @@ export interface DadosDoCardRpv {
 type Mensagem = { papel: 'usuario' | 'ia'; texto: string }
 
 /**
+ * O que está sendo comprado.
+ *
+ * Vem lido do "PARCELA CEDIDA" do card, e é EDITÁVEL: o cadastro do comercial
+ * erra, e até agora a única saída era corrigir no Kommo e refazer a análise
+ * inteira — duas chamadas de IA para trocar uma escolha. Mudar aqui só refaz as
+ * contas, porque os valores dos autos ficam intactos e o que muda é quais
+ * verbas entram.
+ *
+ * Os rótulos são os mesmos da lista suspensa da aba jurídica, para o que se lê
+ * na tela ser o que sai no arquivo.
+ */
+const CENARIOS_RPV = [
+  { valor: 'principal', label: 'Principal, apenas' },
+  { valor: 'ambos', label: 'Principal + Honorários' },
+  { valor: 'honorarios', label: 'Honorários (contratuais + sucumbenciais)' },
+  { valor: 'sucumbenciais', label: 'Sucumbenciais, apenas' },
+] as const
+
+/**
  * A grade dos números finais. Exportada porque o card também a mostra depois de
  * salvar — a mesma grade nos dois lugares, para o número que a pessoa aprovou na
  * janela ser o mesmo que ela reencontra no card.
@@ -372,6 +391,15 @@ export function AnaliseRpvModal({
    * no preço, é um erro de 100x que ninguém vê.
    */
   const [manual, setManual] = useState({ escritura: '', registro: '' })
+  /**
+   * O cenário em vigor. Nasce do card e o operador pode trocar.
+   *
+   * 'indefinido' e 'auto' não são opções da lista — o primeiro é cadastro pela
+   * metade (a análise nem roda) e o segundo é "o card não disse". Nos dois
+   * casos o seletor abre sem seleção, e escolher é o que destrava.
+   */
+  const [cenario, setCenario] = useState<string>(dadosDoCard.tipo_aquisicao)
+  const [trocandoCenario, setTrocandoCenario] = useState(false)
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [pedido, setPedido] = useState('')
   const [salvo, setSalvo] = useState<RespostaAnaliseRpv | null>(null)
@@ -569,6 +597,39 @@ export function AnaliseRpvModal({
   }
 
 
+  /**
+   * Troca as verbas negociadas e refaz as contas.
+   *
+   * NÃO chama a IA: os valores dos autos já estão em `dados` e não foram
+   * mutilados pela escolha anterior — o que muda é quais verbas entram na base,
+   * onde o deságio incide e quantas escrituras o cartório cobra. É a mesma ação
+   * 'reprecificar' que a chegada da tabela de emolumentos usa.
+   */
+  async function trocarCenario(novo: string) {
+    if (novo === cenario || !atual?.dados) return
+    const naEpoca = revisao.current
+    setCenario(novo)
+    setTrocandoCenario(true)
+    setErro(null)
+    try {
+      const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
+        acao: 'reprecificar',
+        notas_kommo: notasKommo,
+        dados: atual.dados,
+        emolumentos: regraCartorio ?? atual.emolumentos ?? null,
+        avisos_qualificacao: atual.avisos_qualificacao ?? [],
+        ...dadosDoCard,
+        tipo_aquisicao: novo,
+      })
+      if (revisao.current !== naEpoca) return
+      setAtual(r)
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setTrocandoCenario(false)
+    }
+  }
+
   async function pedirAlteracao() {
     const instrucao = pedido.trim()
     if (!instrucao || !atual?.dados) return
@@ -753,7 +814,37 @@ export function AnaliseRpvModal({
 
       {atual && !atual.reprovado && atual.valores && (
         <div className="space-y-4">
-          {/* Os números primeiro: são a resposta. */}
+          {/* O QUE ESTÁ SENDO COMPRADO, acima dos números — porque é a premissa
+              deles. Vem do "PARCELA CEDIDA" do card e é editável: o cadastro do
+              comercial erra, e até agora a única saída era corrigir no Kommo e
+              refazer a análise inteira. Trocar aqui só refaz as contas. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Negociando
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {CENARIOS_RPV.map((c) => (
+                <button
+                  key={c.valor}
+                  type="button"
+                  disabled={trocandoCenario || ocupado}
+                  onClick={() => void trocarCenario(c.valor)}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-xs ring-1 ring-inset transition',
+                    cenario === c.valor
+                      ? 'bg-brand-600 font-semibold text-white ring-brand-600'
+                      : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50',
+                    (trocandoCenario || ocupado) && 'cursor-not-allowed opacity-60',
+                  )}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            {trocandoCenario && <span className="text-xs text-slate-500">refazendo as contas…</span>}
+          </div>
+
+          {/* Os números: são a resposta. */}
           <div className="rounded-lg bg-slate-50 p-4 ring-1 ring-inset ring-slate-200">
             <GradeValoresRpv origemValores={atual?.origem_valores}
               valores={atual.valores}
