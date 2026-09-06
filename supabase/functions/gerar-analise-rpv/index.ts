@@ -654,6 +654,38 @@ function limparNomeArquivo(s: string): string {
   return String(s || '').replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Os riscos da análise, com as divergências da auditoria na frente.
+ *
+ * AS DIVERGÊNCIAS SÃO RISCOS, e é onde elas cabem: têm grau, fundamento e
+ * consequência, que é exatamente a forma de um risco. Antes saíam por extenso
+ * nos avisos e a IA ainda as repetia na lista de riscos — o mesmo achado duas
+ * vezes, e a versão dos avisos com meia tela de fundamentação. A janela ficava
+ * ilegível, e o painel do card, que junta todos os avisos num parágrafo só,
+ * virava uma parede de texto.
+ *
+ * Vêm PRIMEIRO porque são o achado que muda o preço.
+ */
+function riscosComAuditoria(dados: any): any[] {
+  const divs = Array.isArray(dados?.auditoria_divergencias) ? dados.auditoria_divergencias : [];
+  const grau = (g: unknown) => {
+    const x = String(g ?? '').toLowerCase();
+    return x === 'alta' ? 'ALTO' : x === 'media' ? 'MODERADO' : 'PONTO DE ATENÇÃO';
+  };
+  return [
+    ...divs.map((d: any) => {
+      const ef = String(d?.efeito_se_corrigida ?? d?.efeito ?? '');
+      return {
+        grau: grau(d?.gravidade),
+        risco: `Cálculo: ${String(d?.item ?? 'divergência')}` +
+          (ef === 'reduz' ? ' — corrigida, derruba o crédito' : ef === 'aumenta' ? ' — corrigida, elevaria o crédito' : ''),
+        fundamento: `O título/lei pede "${String(d?.esperado ?? '')}"; a conta fez "${String(d?.encontrado ?? '')}". ${String(d?.fundamento ?? '')}`.trim(),
+      };
+    }),
+    ...(Array.isArray(dados?.bloco_g_riscos) ? dados.bloco_g_riscos : []),
+  ];
+}
+
 // dados = saída do extrator. Estrutura em SCHEMA_ANALISE (abaixo).
 async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T5: number): Promise<Uint8Array> {
   // OS VALORES QUE DE FATO PRECIFICARAM, e não os dos autos.
@@ -791,7 +823,7 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // (mesclado). Recebe os riscos que a IA levantou — é onde eles cabem dentro
   // da planilha. Antes existiam só na resposta da função e não chegavam ao
   // arquivo que fica no Drive.
-  const riscos: any[] = Array.isArray(dados.bloco_g_riscos) ? dados.bloco_g_riscos : [];
+  const riscos: any[] = riscosComAuditoria(dados);
   if (riscos.length)
     aj.getCell('B40').value = riscos
       .map((r) => `• ${r?.grau ? `[${r.grau}] ` : ''}${r?.risco ?? ''}${r?.fundamento ? ` — ${r.fundamento}` : ''}`)
@@ -2170,17 +2202,9 @@ Deno.serve(async (req) => {
     // deságio efetivo sobre o negócio é bem menor que o nominal.
     {
       const _ps: any[] = Array.isArray(dados._parcelas) ? dados._parcelas : [];
-      if (_ps.length) {
-        const NOMES: Record<string, string> = {
-          principal: 'principal', contratuais: 'honorários contratuais', sucumbenciais: 'honorários sucumbenciais',
-        };
+      if (_ps.some((p) => !p.desagiavel)) {
         avisosBase.push(
-          'Verbas negociadas — ' +
-          _ps.map((p) => `${NOMES[p.nome] ?? p.nome} ${brl(p.liquido)} (deságio ${p.desagiavel ? pct(calc.desagio) : 'zero, comprado pelo valor de face'})`).join('; ') +
-          `. Deságio efetivo sobre o negócio: ${pct(calc.desagioEfetivo)}.` +
-          (_ps.some((p) => p.nome !== 'principal')
-            ? ` O IR dos honorários (${brl(Number(dados._ir_honorarios) || 0)}) foi descontado pela tabela progressiva; se a verba for rendimento recebido acumuladamente, o imposto real é menor.`
-            : ''),
+          `Honorários comprados pelo valor de face; o deságio de ${pct(calc.desagio)} caiu todo sobre o principal. Efetivo sobre o negócio: ${pct(calc.desagioEfetivo)}.`,
         );
       }
     }
@@ -2192,40 +2216,18 @@ Deno.serve(async (req) => {
       const _risco = String(dados.auditoria_risco_revisao ?? '').toLowerCase();
       if (dados._auditoria_aplicada) {
         avisosBase.push(
-          `⚠️ AUDITORIA: o preço foi calculado no CENÁRIO CONSERVADOR. O bruto dos autos (${brl(Number(dados.bruto_total) || 0)}) ` +
-          `foi reduzido em ${brl(Number(dados._auditoria_corte) || 0)} por divergências que podem levar à revisão do cálculo, ` +
-          `mesmo homologado. ${String(dados.auditoria_justificativa ?? '').slice(0, 400)}`,
+          `⚠️ Preço no CENÁRIO CONSERVADOR: o bruto dos autos foi reduzido em ${brl(Number(dados._auditoria_corte) || 0)} ` +
+          `pela auditoria dos cálculos. Motivo detalhado nos riscos.`,
         );
       } else if (_divs.length) {
+        const _reduzem = _divs.filter((d: any) => String(d?.efeito_se_corrigida ?? d?.efeito ?? '') === 'reduz').length;
         avisosBase.push(
-          `⚠️ AUDITORIA: achei ${_divs.length} divergência(s) na conta, mas não deu para estimar o crédito revisado com o que há nos autos — ` +
-          `o preço está no valor dos autos e o risco NÃO está embutido nele. Risco de revisão: ${_risco || 'não classificado'}. ` +
-          String(dados.auditoria_justificativa ?? '').slice(0, 300),
+          `⚠️ Auditoria: ${_divs.length} divergência(s) na conta${_reduzem ? `, ${_reduzem} que derruba(m) o crédito se corrigida(s)` : ''} — ` +
+          `o preço NÃO embute esse risco. Risco de revisão: ${_risco || 'não classificado'}. Detalhe nos riscos.`,
         );
       } else if (dados.auditoria_criterio_aplicado) {
-        avisosBase.push(
-          `Auditoria: a conta foi conferida contra o título executivo e os índices da Fazenda Pública, e está fiel. ` +
-          `Risco de revisão: ${_risco || 'baixo'}.`,
-        );
+        avisosBase.push(`Auditoria: conta conferida contra o título e os índices da Fazenda, e fiel. Risco de revisão: ${_risco || 'baixo'}.`);
       }
-      for (const d of _divs.slice(0, 6)) {
-        // "aumenta o crédito" era ambíguo: aumenta por causa do erro, ou depois
-        // de corrigido? A frase agora diz o que interessa a quem paga — o que
-        // acontece com o valor SE a divergência for corrigida.
-        const ef = String(d?.efeito_se_corrigida ?? d?.efeito ?? '');
-        const consequencia = ef === 'reduz'
-          ? ' — corrigida, DERRUBA o crédito: é risco de quem compra'
-          : ef === 'aumenta'
-            ? ' — corrigida, elevaria o crédito: não entra no preço'
-            : ef ? ' — efeito indefinido sem refazer a conta' : '';
-        avisosBase.push(
-          `   • [${String(d?.gravidade ?? '?')}] ${String(d?.item ?? '')}: o título/lei pede "${String(d?.esperado ?? '')}", ` +
-          `a conta fez "${String(d?.encontrado ?? '')}"${consequencia}` +
-          `${d?.fundamento ? ` (${String(d.fundamento)})` : ''}`,
-        );
-      }
-      if (dados._auditoria_motivo && !dados._auditoria_aplicada && _divs.length)
-        avisosBase.push(`   • sobre o cenário conservador: ${dados._auditoria_motivo}`);
     }
 
     // DOIS OLHOS NO MESMO FATO. A linha 34 do questionário pergunta se houve
@@ -2332,7 +2334,7 @@ Deno.serve(async (req) => {
         avisos: avisosBase,
         aviso: avisosBase.length ? avisosBase.join(' ') : null,
         m1_sintese: dados.m1_sintese ?? null,
-        riscos: dados.bloco_g_riscos ?? [],
+        riscos: riscosComAuditoria(dados),
         m2: dados.m2 ?? {},
         resposta: respostaRevisao,
         // A análise inteira, para a tela devolver no próximo turno. Opaco para ela.
@@ -2399,7 +2401,7 @@ Deno.serve(async (req) => {
       drive_file_url: up.webViewLink ?? null,
       // dados úteis pro .md/.csv (gerados no front ou em passo futuro)
       m1_sintese: dados.m1_sintese ?? null,
-      riscos: dados.bloco_g_riscos ?? [],
+      riscos: riscosComAuditoria(dados),
     });
   } catch (e) {
     return errorResponse('Falha ao gerar análise: ' + (e instanceof Error ? e.message : String(e)), 500);

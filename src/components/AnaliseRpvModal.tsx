@@ -228,6 +228,59 @@ const CENARIOS_RPV = [
 ] as const
 
 /**
+ * Os avisos da análise, separados pelo que exige decisão.
+ *
+ * ANTES ERAM UMA LISTA CHAPADA de parágrafos de mesmo peso, dentro de um bloco
+ * âmbar só. Com quinze linhas de texto — metade informação boa, metade alerta —
+ * o operador lia tudo procurando o que importava, ou não lia nada. E no painel
+ * do card os mesmos avisos vinham juntos num parágrafo único: uma parede.
+ *
+ * A separação é por marcador explícito, não por adivinhação de conteúdo: o
+ * servidor prefixa com "⚠️" o que exige decisão. O resto é contexto, fica
+ * recolhido, e some do caminho de quem só quer o número.
+ */
+function Avisos({ itens }: { itens?: string[] }) {
+  const [abrirContexto, setAbrirContexto] = useState(false)
+  const lista = itens ?? []
+  if (!lista.length) return null
+
+  const alertas = lista.filter((a) => a.trim().startsWith('⚠️')).map((a) => a.replace(/^\s*⚠️\s*/, ''))
+  const contexto = lista.filter((a) => !a.trim().startsWith('⚠️'))
+
+  return (
+    <div className="space-y-2">
+      {alertas.map((a, i) => (
+        <p
+          key={i}
+          className="flex gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 ring-1 ring-inset ring-amber-200"
+        >
+          <span aria-hidden className="shrink-0 select-none">⚠️</span>
+          <span>{a}</span>
+        </p>
+      ))}
+      {contexto.length > 0 && (
+        <div className="text-xs text-slate-500">
+          <button
+            type="button"
+            onClick={() => setAbrirContexto((v) => !v)}
+            className="font-medium text-slate-600 hover:underline"
+          >
+            {abrirContexto ? 'Ocultar' : `Notas da análise (${contexto.length})`}
+          </button>
+          {abrirContexto && (
+            <ul className="mt-1.5 space-y-1 border-l-2 border-slate-200 pl-3 leading-relaxed">
+              {contexto.map((a, i) => (
+                <li key={i}>{a}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * A grade dos números finais. Exportada porque o card também a mostra depois de
  * salvar — a mesma grade nos dois lugares, para o número que a pessoa aprovou na
  * janela ser o mesmo que ela reencontra no card.
@@ -237,95 +290,130 @@ export function GradeValoresRpv({
   cartorio,
   atingiuAlvo,
   origemValores,
+  compacta = false,
 }: {
   valores: ValoresRpv
   cartorio?: CartorioRpv
   atingiuAlvo?: boolean
   /** De onde a IA tirou os números: documento, ID/página e data de atualização. */
   origemValores?: string | null
+  /**
+   * No card, só os três números que decidem.
+   *
+   * O card é um item de lista, lido de relance entre dezenas de outros. Prazo,
+   * cartório, custo, base e procedência são conferência — e conferência se faz
+   * na janela, com o processo aberto ao lado.
+   */
+  compacta?: boolean
 }) {
+  const [detalhes, setDetalhes] = useState(false)
+
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-700 sm:grid-cols-3">
-      <div>
-        <dt className="text-slate-500">Preço da cessão</dt>
-        <dd className="font-display text-base font-semibold text-slate-900 tabular-nums">
-          {formatBRL(valores.preco_cessao)}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-slate-500">Deságio</dt>
-        <dd className="font-semibold tabular-nums">{pctBR(valores.desagio)}</dd>
-      </div>
-      <div>
-        <dt className="text-slate-500">Rentabilidade</dt>
-        <dd
-          className={cn('font-semibold tabular-nums', atingiuAlvo === false && 'text-amber-700')}
-        >
-          {pctBR(valores.rentabilidade_mensal)} ao mês
-          {atingiuAlvo === false && ' (abaixo da meta)'}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-slate-500">Prazo</dt>
-        <dd className="tabular-nums">
-          {valores.prazo_meses} meses
-          {valores.data_pagamento && ` · pagamento ${valores.data_pagamento}`}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-slate-500">Cartório</dt>
-        <dd className="tabular-nums">
-          {valores.cartorio == null ? (
-            // Ausente é dito como ausente: um preço sem cartório parece melhor do
-            // que é, e um traço sozinho não avisa.
-            <span className="text-amber-700">não incluído — confirmar</span>
-          ) : (
-            <>
-              {formatBRL(valores.cartorio)}
-              {cartorio && (
-                <span className="text-slate-500">
-                  {' '}
-                  (escritura {cartorio.escritura} + registro {cartorio.registro}
-                  {cartorio.uf && `, ${cartorio.uf}`})
-                </span>
-              )}
-            </>
-          )}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-slate-500">Custo total da operação</dt>
-        <dd className="tabular-nums">
-          {formatBRL(valores.custo_total)}
-          <span className="text-slate-500"> (comissão {formatBRL(valores.comissao)})</span>
-        </dd>
-      </div>
-      <div className="col-span-2 sm:col-span-3">
-        <dt className="text-slate-500">Base do deságio</dt>
-        <dd className="tabular-nums">
-          {formatBRL(valores.liquido_base)}
-          <span className="text-slate-500">
-            {' '}(bruto {formatBRL(valores.bruto)}
-            {/* Só aparece quando há: numa cessão sem honorários a menção
-                confundiria mais do que informa. */}
-            {!!valores.ir_honorarios && `, IR dos honorários ${formatBRL(valores.ir_honorarios)}`})
+    <div className="text-xs text-slate-700">
+      {/* OS TRÊS QUE DECIDEM, com peso de destaque.
+          A grade antiga dava o mesmo peso a seis números e a duas linhas de
+          texto corrido: o preço, que é a resposta, disputava atenção com a
+          decomposição do cartório. */}
+      <dl className="grid grid-cols-3 gap-x-4">
+        <div>
+          <dt className="text-slate-500">Preço da cessão</dt>
+          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-slate-900 tabular-nums">
+            {formatBRL(valores.preco_cessao)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Deságio</dt>
+          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-slate-900 tabular-nums">
+            {pctBR(valores.desagio)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Rentabilidade</dt>
+          <dd
+            className={cn(
+              'font-display text-base font-semibold leading-tight sm:text-lg tabular-nums',
+              atingiuAlvo === false ? 'text-amber-700' : 'text-slate-900',
+            )}
+          >
+            {pctBR(valores.rentabilidade_mensal)}
+            <span className="text-xs font-normal text-slate-500"> ao mês</span>
+          </dd>
+        </div>
+      </dl>
+
+      {atingiuAlvo === false && (
+        <p className="mt-1 text-amber-700">Abaixo da meta de 2,80% ao mês.</p>
+      )}
+
+      {/* A SEGUNDA LINHA é conferência, e se lê como conferência: uma frase
+          corrida, sem rótulo por cima de cada número. Rótulo repetido em célula
+          pequena vira ruído — o que se quer aqui é a ordem de grandeza. */}
+      {!compacta && (
+        <p className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-slate-500">
+          <span className="tabular-nums">
+            {valores.prazo_meses} meses
+            {valores.data_pagamento && ` · ${valores.data_pagamento}`}
           </span>
-        </dd>
-      </div>
-      {/* DE ONDE VIERAM OS NÚMEROS.
-          Fica aqui, embaixo da base, porque a conferência útil acontece ANTES de
-          salvar — com o processo aberto ao lado. Depois vira auditoria, que é
-          mais cara e mais rara. Um crédito tem meia dúzia de valores nos autos
-          (o da causa, o da condenação, o da contadoria, o homologado, o
-          requisitado) e o erro de escolher o errado não aparece em número
-          nenhum: aparece só aqui, na procedência. */}
-      {origemValores && (
-        <div className="col-span-2 sm:col-span-3">
-          <dt className="text-slate-500">De onde vieram os valores</dt>
-          <dd className="text-slate-600">{origemValores}</dd>
+          <span aria-hidden>·</span>
+          <span className="tabular-nums">
+            cartório{' '}
+            {valores.cartorio == null ? (
+              // Ausente é dito como ausente: um preço sem cartório parece melhor
+              // do que é, e um traço sozinho não avisa.
+              <span className="text-amber-700">não incluído</span>
+            ) : (
+              formatBRL(valores.cartorio)
+            )}
+          </span>
+          <span aria-hidden>·</span>
+          <span className="tabular-nums">custo total {formatBRL(valores.custo_total)}</span>
+          <span aria-hidden>·</span>
+          <span className="tabular-nums">base {formatBRL(valores.liquido_base)}</span>
+        </p>
+      )}
+
+      {/* O RESTO ATRÁS DE UM CLIQUE.
+          A procedência dos valores é o que evita o erro mais caro — escolher o
+          número errado entre os cinco que um crédito tem nos autos —, mas é
+          leitura de conferência, não de decisão. Fica a um clique, e não no
+          meio dos números. */}
+      {!compacta && (origemValores || cartorio || !!valores.ir_honorarios) && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setDetalhes((v) => !v)}
+            className="font-medium text-slate-600 hover:underline"
+          >
+            {detalhes ? 'Ocultar detalhes' : 'Detalhes dos valores'}
+          </button>
+          {detalhes && (
+            <dl className="mt-1.5 space-y-1 border-l-2 border-slate-200 pl-3 leading-relaxed">
+              <div>
+                <dt className="inline text-slate-500">Base do deságio: </dt>
+                <dd className="inline tabular-nums">
+                  {formatBRL(valores.liquido_base)} — bruto {formatBRL(valores.bruto)}
+                  {!!valores.ir_honorarios && `, IR dos honorários ${formatBRL(valores.ir_honorarios)}`}
+                </dd>
+              </div>
+              <div>
+                <dt className="inline text-slate-500">Custo total: </dt>
+                <dd className="inline tabular-nums">
+                  {formatBRL(valores.custo_total)} — comissão {formatBRL(valores.comissao)}
+                  {valores.cartorio != null && cartorio &&
+                    `, escritura ${cartorio.escritura} + registro ${cartorio.registro}${cartorio.uf ? ` (${cartorio.uf})` : ''}`}
+                </dd>
+              </div>
+              {origemValores && (
+                <div>
+                  <dt className="inline text-slate-500">De onde vieram: </dt>
+                  <dd className="inline text-slate-600">{origemValores}</dd>
+                </div>
+              )}
+            </dl>
+          )}
         </div>
       )}
-    </dl>
+    </div>
   )
 }
 
@@ -880,12 +968,17 @@ export function AnaliseRpvModal({
               cartorio={atual.cartorio}
               atingiuAlvo={atual.atingiu_alvo}
             />
-            {(atual.regra_prazo || atual.modelo) && (
-              <p className="mt-3 text-xs text-slate-500">
+            {/* O REGIME, EM UMA LINHA. Antes vinham o modelo, a regra de prazo
+                e o detalhe do cálculo emendados num parágrafo de três linhas,
+                logo abaixo dos números — a informação mais técnica da tela no
+                lugar de maior destaque depois do preço. O detalhe do prazo tem
+                lugar próprio logo abaixo, no caminho até a liquidação. */}
+            {atual.modelo && (
+              <p className="mt-3 truncate text-xs text-slate-400" title={
+                [atual.modelo, atual.regra_prazo, atual.prazo_detalhe].filter(Boolean).join(' · ')
+              }>
                 {atual.modelo}
-                {atual.modelo && atual.regra_prazo && ' · '}
-                {atual.regra_prazo}
-                {atual.prazo_detalhe && ` — ${atual.prazo_detalhe}`}
+                {atual.regra_prazo && ` · ${String(atual.regra_prazo).split(':')[0]}`}
               </p>
             )}
           </div>
@@ -968,13 +1061,7 @@ export function AnaliseRpvModal({
             </section>
           )}
 
-          {!!atual.avisos?.length && (
-            <ul className="space-y-1 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
-              {atual.avisos.map((a, i) => (
-                <li key={i}>{a}</li>
-              ))}
-            </ul>
-          )}
+          <Avisos itens={atual.avisos} />
 
           {/* A CONSULTA DO CARTÓRIO EM ANDAMENTO, visível e sem travar nada.
               O passo dela usava o mesmo estado do resto, que desabilita o campo

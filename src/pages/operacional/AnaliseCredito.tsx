@@ -597,28 +597,36 @@ function CardCredito({
                 Reprovado no Portão 1: {(resultadoAnalise.motivos ?? []).join(' ')}
               </div>
             ) : (
-              <div className="text-green-700">
-                ✅ Planilha gerada.{' '}
-                {typeof resultadoAnalise.drive_file_url === 'string' && (
-                  <a
-                    className="font-medium underline"
-                    href={resultadoAnalise.drive_file_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Abrir planilha
-                  </a>
-                )}{' '}
-                {typeof resultadoAnalise.due_diligence_url === 'string' && (
-                  <a
-                    className="font-medium underline"
-                    href={resultadoAnalise.due_diligence_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Relatório de due diligence
-                  </a>
-                )}
+              // O PAINEL DO CARD É UM RESUMO, e o card é um item de lista lido
+              // de relance entre dezenas. Antes ele trazia a grade inteira mais
+              // TODOS os avisos juntos num parágrafo só — quinze linhas de
+              // âmbar, com o preço perdido no meio. Agora: os três números, os
+              // links, e a contagem de alertas. O detalhe está na janela, que é
+              // onde se confere.
+              <div>
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="font-medium text-green-700">Planilha gerada</span>
+                  {typeof resultadoAnalise.drive_file_url === 'string' && (
+                    <a
+                      className="font-medium text-brand-600 hover:underline"
+                      href={resultadoAnalise.drive_file_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Abrir planilha
+                    </a>
+                  )}
+                  {typeof resultadoAnalise.due_diligence_url === 'string' && (
+                    <a
+                      className="font-medium text-brand-600 hover:underline"
+                      href={resultadoAnalise.due_diligence_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Due diligence
+                    </a>
+                  )}
+                </div>
 
                 {resultadoAnalise.valores && (
                   <div className="mt-2">
@@ -626,12 +634,27 @@ function CardCredito({
                       valores={resultadoAnalise.valores}
                       cartorio={resultadoAnalise.cartorio}
                       atingiuAlvo={resultadoAnalise.atingiu_alvo}
+                      compacta
                     />
                   </div>
                 )}
-                {resultadoAnalise.aviso && (
-                  <div className="mt-1 text-amber-700">⚠️ {resultadoAnalise.aviso}</div>
-                )}
+
+                {/* A CONTAGEM, e não o texto. Um número de alertas é lido de
+                    relance e leva a abrir a janela; quinze linhas de aviso na
+                    lista não são lidas por ninguém. */}
+                {(() => {
+                  const alertas = (resultadoAnalise.avisos ?? []).filter((a) =>
+                    String(a).trim().startsWith('⚠️'),
+                  ).length
+                  if (!alertas) return null
+                  return (
+                    <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+                      <span aria-hidden>⚠️</span>
+                      {alertas === 1 ? '1 ponto de atenção' : `${alertas} pontos de atenção`}
+                      <span className="text-amber-700/70">· abra a análise para ver</span>
+                    </p>
+                  )
+                })()}
               </div>
             )}
           </div>
