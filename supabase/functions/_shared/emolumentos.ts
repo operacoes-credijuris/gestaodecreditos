@@ -170,9 +170,39 @@ function validarAto(bruto: unknown, nome: string): RegraAto | null | string {
 // O que a IA devolve, por etapa
 // ---------------------------------------------------------------------------
 
+/**
+ * A JANELA DE VALORES que a extração transcreve da tabela do estado.
+ *
+ * Decisão do dono: R$ 10 mil a R$ 150 mil. Fora dela a tabela não é lida, e o
+ * motivo é tempo: a etapa de extração é a mais demorada do levantamento, o
+ * custo dela é o que a IA tem de ESCREVER, e uma tabela de emolumentos tem
+ * dezenas de faixas — as mais numerosas e miúdas no pé, que nenhuma cessão
+ * nossa alcança.
+ *
+ * POR QUE 150 MIL E NÃO 80. O teto da RPV federal são 60 salários mínimos —
+ * R$ 97.260 em 2026 —, e a tabela de vários estados cobra o ato sobre o VALOR
+ * DO CRÉDITO, não sobre o preço da cessão (ver base_calculo). Com a janela em
+ * 80 mil, um RPV federal cheio nesses estados cairia fora e sairia sem
+ * cartório. 150 mil cobre o teto federal com folga e ainda absorve a correção
+ * do salário mínimo por alguns anos.
+ *
+ * O QUE AINDA NÃO CABE: precatório grande. O piso do precatório é R$ 100 mil,
+ * então a faixa de 100 a 150 mil está coberta, mas acima disso não. Quando a
+ * etapa de Precificação do precatório existir, esta janela terá de ser revista
+ * — e o cache, que é UMA LINHA POR UF E ANO compartilhada por quem vier,
+ * precisa saber para qual janela foi levantado. É por isso que ela é GRAVADA
+ * junto da tabela, e não só usada e esquecida.
+ *
+ * Num lugar só para os dois textos que a mencionam — o esquema e o prompt —
+ * não poderem divergir.
+ */
+const JANELA_DE = 10_000
+const JANELA_ATE = 150_000
+const janelaEmReais = () =>
+  `R$ ${JANELA_DE.toLocaleString('pt-BR')} a R$ ${JANELA_ATE.toLocaleString('pt-BR')}`
 const FAIXA_SCHEMA = {
   type: 'array',
-  description: 'As linhas da tabela na janela de valores que interessa (R$ 5.000 a R$ 500.000). Ignore o que estiver abaixo disso.',
+  description: `As linhas da tabela na janela de valores que interessa (${janelaEmReais()}). Ignore o que estiver fora dela.`,
   items: {
     type: 'object',
     properties: {
@@ -328,7 +358,7 @@ Quem te chama vai aplicar essa regra a MUITOS valores diferentes, sem te consult
 UM ATO SÓ, E NADA MAIS. O documento traz dezenas de atos — procuração, autenticação, reconhecimento de firma, escrituras sem valor declarado, averbações. NÃO transcreva nenhum deles: só a tabela do ato pedido acima. Cada linha a mais é tempo que esta chamada não tem.
 
 O QUE DEVOLVER:
-1. AS FAIXAS, na janela de R$ 5.000 a R$ 500.000, que é onde as cessões caem. NÃO transcreva as faixas abaixo de R$ 5.000: nenhuma cessão nossa chega lá, e é no pé da tabela que as faixas são mais numerosas e miúdas. Cada linha da tabela vira uma entrada com "de" e "ate" (os limites impressos). As tabelas brasileiras aparecem em três formas, e o formato aceita as três:
+1. AS FAIXAS, e SÓ as que caem na janela de ${janelaEmReais()} — é onde as cessões acontecem. NÃO transcreva nada fora dela, nem abaixo nem acima: a tabela tem dezenas de faixas, as mais miúdas no pé, e cada linha a mais é tempo que esta chamada não tem. Se um limite da janela cair no meio de uma faixa, inclua essa faixa inteira, com os valores como estão impressos. Cada linha da tabela vira uma entrada com "de" e "ate" (os limites impressos). As tabelas brasileiras aparecem em três formas, e o formato aceita as três:
    (a) VALOR FIXO por faixa — o caso mais comum. Preencha "valor".
    (b) PERCENTUAL sobre o valor do ato. Preencha "percentual" como fração, com "minimo" e "maximo" se a tabela declarar piso e teto.
    (c) PARCELA FIXA MAIS PERCENTUAL SOBRE O EXCEDENTE — "R$ 500,00 acrescidos de 0,5% sobre o que exceder R$ 50.000,00". Preencha "fixo" (500), "percentual" (0.005), "de" (50000) e marque "sobre_excedente": true. NÃO marque sobre_excedente quando o percentual incidir sobre o valor inteiro — a diferença entre as duas leituras chega a 45% do emolumento.
@@ -613,6 +643,11 @@ async function consolidar(svc: SupabaseClient, uf: string, ano: number, p: Progr
     tabela: {
       regra: { escritura: p.escritura, registro: p.registro },
       observacao: p.observacoes.join(' • ') || null,
+      // PARA QUE JANELA esta tabela foi levantada. O cache é uma linha por UF e
+      // ano, compartilhada por quem vier: sem isto, a precificação de precatório
+      // leria faixas de RPV como se cobrissem a faixa dela, e sairia sem
+      // cartório sem que ninguém soubesse por quê.
+      janela: { de: JANELA_DE, ate: JANELA_ATE },
     },
     fontes: p.fontes,
     vigencia: p.vigencia,
