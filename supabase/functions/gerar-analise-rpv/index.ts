@@ -1115,10 +1115,16 @@ const SCHEMA_ANALISE = {
     '"base" = de onde saiu o número (média medida neste processo, prazo legal com o artigo, ou prática do tribunal). ' +
     'Inclua os atos da CESSÃO. Ver regra 13 para a montagem.',
 
-  // M4 — médias de tempo (em DIAS). Devolver também os pares para auditoria.
+  // M4 — médias de tempo (em DIAS).
+  //
+  // SÓ AS MÉDIAS. Havia um `m4_pares` aqui pedindo a lista de todos os pares de
+  // datas usados no cálculo, e ela nunca foi lida por ninguém — nem pela
+  // planilha, nem pela tela, nem pelo chat. O modelo continua tendo de achar os
+  // pares para tirar a média; o que sai é a obrigação de ESCREVER todos eles, e
+  // escrever é o que custa tempo de parede: token de saída é gerado um a um, em
+  // série, e é onde esta análise gasta a maior parte do relógio.
   serventia_dias: 'tempo médio da serventia em dias (média dos pares petição→conclusão)',
   gabinete_dias: 'tempo médio do gabinete em dias (média dos pares conclusão→decisão)',
-  m4_pares: 'lista de pares {de, ate, dias, tipo:"serventia"|"gabinete"} usados na média',
 
   // M2 — 25 respostas. Chave = nº da linha na aba jurídica (12..43).
   m2: 'objeto { "10": {"resposta":"Sim/Não/...", "complemento":"data DD/MM/AAAA ou valor R$ ou vazio"}, ... } cobrindo as linhas 10 a 38 (a 25 é bloco fixo e fica de fora)',
@@ -1134,7 +1140,6 @@ const SCHEMA_ANALISE = {
 // ---- PORTÃO 1: QUALIFICAÇÃO (roda ANTES da análise) ----
 const SCHEMA_QUALIFICACAO = {
   numero_processo: 'número no padrão CNJ ou "NÃO LOCALIZADO"',
-  numero_credito_anexo: 'número do precatório/crédito anexo, ou null',
   titular_nome: 'nome completo do titular do crédito',
   cpf: 'CPF do titular',
   esfera: 'Federal | Estadual | Municipal',
@@ -1145,9 +1150,7 @@ const SCHEMA_QUALIFICACAO = {
   requisitorio_expedido: 'SIM | NÃO — o ofício requisitório (RPV/precatório) já foi expedido?',
   tipo_requisitorio: 'RPV | Precatório | null (se ainda não expedido, só há cálculo homologado)',
   oficio_localizacao: 'ID e páginas do ofício requisitório, ou null',
-  planilha_localizacao: 'ID, data e páginas da planilha mais atualizada, ou null',
   honorarios_destacados: 'SIM | NÃO',
-  honorarios_detalhe: 'se SIM: tipo (contratuais/sucumbenciais) e valor de cada; senão null',
   parcela_preferencial: 'PAGA | NÃO PAGA | NÃO HÁ MENÇÃO',
   credor_menor_ou_curatelado: 'SIM - Menor | SIM - Curatelado | NÃO HÁ INDICAÇÃO | INFORMAÇÃO INCERTA (não confundir com o advogado)',
   transito_conhecimento_data: 'DD/MM/AAAA do trânsito em julgado da FASE DE CONHECIMENTO (mérito), ou "NÃO LOCALIZADO"',
@@ -1157,7 +1160,6 @@ const SCHEMA_QUALIFICACAO = {
   reserva_localizacao: 'ID/página, ou null',
   prazo_pagamento_iniciado: 'SIM | NÃO | NÃO HÁ MENÇÃO — a FASE DE PAGAMENTO já começou? Ex.: RPV expedida seguida de certidão/movimentação de "início do prazo de 60 dias para pagamento", certidão do setor de precatórios/RPVs do tribunal, ou intimação do ente público para pagar. (Diferente de "vencido": aqui o prazo apenas COMEÇOU, ainda não passou.)',
   prazo_pagamento_iniciado_localizacao: 'ID/página/data da movimentação, ou null',
-  evidencias_referencias: 'breve indicação de onde cada informação aparece no processo',
   comentarios_analise: 'observações úteis para a análise (sem recomendação de investimento)',
 };
 
@@ -1475,7 +1477,7 @@ const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
  */
 const CAMPOS_EDITAVEIS: ReadonlySet<string> = new Set(Object.keys(SCHEMA_ANALISE));
 const CAMPOS_LISTA: ReadonlySet<string> = new Set([
-  'roteiro_prazo', 'bloco_g_riscos', 'm4_pares', 'auditoria_divergencias',
+  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias',
 ]);
 
 const FERRAMENTA_REVISAO = {
@@ -1531,7 +1533,7 @@ const SISTEMA_REVISAO =
   'Você é analista jurídico-financeiro da Credijuris e está REVISANDO uma análise de RPV a pedido de quem a conferiu. Recebe a análise atual (JSON), o histórico da conversa e um pedido. ' +
   'VOCÊ NÃO TEM OS AUTOS EM MÃOS — só a análise já extraída deles. Isso é de propósito: reenviar o processo inteiro a cada pedido fazia a revisão estourar o tempo da requisição. ' +
   'REGRAS: (1) devolva em "alteracoes" SÓ os campos que mudam; o que fica igual não se repete. (2) Quem afirma o dado é o usuário: ele está com o processo aberto. Aplique o que ele disser. Se o valor contrariar o que está no JSON, aplique mesmo assim e registre a troca em "resposta" ("bruto de X para Y, conforme você indicou"). (3) Se o pedido depende de um dado que NÃO está no JSON e o usuário não informou, peça o número em "resposta" e não altere nada — você não tem como consultar os autos. (4) Preço de cessão e rentabilidade você NÃO escreve: saem calculados dos seus campos. O DESÁGIO agora você pode ditar — mas só em "parametros", e só quando o usuário pedir um número (ver regra 9). Prazo ditado vai em "prazo_meses_manual". (4b) O CUSTO DE CARTÓRIO também não é seu, e não precisa ser pedido: escritura e registro são consultados na tabela do estado a partir do preço da cessão, e a tela REFAZ essa consulta sozinha sempre que o preço muda. Se pedirem para reajustar o cartório, responda que ele se recalcula automaticamente com o novo preço e não peça número nenhum — pedir o valor ao usuário é trabalho que a máquina já faz. Só peça se ele disser que a consulta automática falhou. (5) Mantenha o formato: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) Para SUPRIMIR, use "remover" com o caminho ("m2.37", "riscos.2") — não mande o campo vazio em "alteracoes". ' +
-  '(7) LISTAS se editam POR ÍNDICE, e não reenviando a lista inteira: para mudar o segundo ato do roteiro mande {"roteiro_prazo": {"1": {"dias": 90}}}; para acrescentar um, {"roteiro_prazo": {"+": {"ato": "...", "dias": 21}}}. Mandar a lista inteira SUBSTITUI o que havia — só faça isso quando for essa a intenção. Vale para roteiro_prazo, bloco_g_riscos, auditoria_divergencias e m4_pares. ' +
+  '(7) LISTAS se editam POR ÍNDICE, e não reenviando a lista inteira: para mudar o segundo ato do roteiro mande {"roteiro_prazo": {"1": {"dias": 90}}}; para acrescentar um, {"roteiro_prazo": {"+": {"ato": "...", "dias": 21}}}. Mandar a lista inteira SUBSTITUI o que havia — só faça isso quando for essa a intenção. Vale para roteiro_prazo, bloco_g_riscos e auditoria_divergencias. ' +
   '(8) USE O NOME EXATO DO CAMPO. Nome que não existe no formato é RECUSADO e aparece na resposta como não aplicado — não há como inventar um campo novo e esperar efeito. Na dúvida, olhe as chaves do JSON que você recebeu. ' +
   '(9) OS PARÂMETROS DO NEGÓCIO são seus, quando o usuário os ditar: deságio ("fecha a 30%"), meta de rentabilidade, comissão e diligência vão em "parametros"; o que está sendo comprado vai em "verbas". Isto substitui a regra antiga de recusar mexer no deságio: agora dá, desde que o usuário DITE. O que você continua NÃO fazendo é escolher esses números sozinho — sem pedido explícito, deixe fora. Para DESFAZER um parâmetro ditado numa rodada anterior, mande a chave com null (ou "auto" no prazo): o motor volta a calcular. ' +
   '(10) O SERVIDOR CONFERE o que você mandou e devolve ao usuário a lista do que mudou de fato. Prometer na "resposta" uma alteração que você não pôs em "alteracoes" aparece como divergência. Descreva o que fez, não o que pretendia. ' +
@@ -2002,6 +2004,27 @@ Deno.serve(async (req) => {
    */
   let limparUploads: (() => Promise<void>) | null = null;
 
+  /**
+   * O CRONÔMETRO DAS FASES. Existe porque eu passei uma tarde adivinhando.
+   *
+   * A análise estourou o teto de 150 s e eu tentei três explicações diferentes
+   * antes de acertar, cada uma custando um deploy e uma rodada perdida do
+   * operador. Nada no `deno check`, no `tsc` ou nos 488 testes alcança tempo de
+   * parede — ele só existe rodando, e ninguém estava medindo.
+   *
+   * Agora cada fase se marca, e o total aparece nos avisos quando passa de um
+   * minuto. Some sozinho quando a análise é rápida, então não vira ruído: quem
+   * lê só vê o número quando o número é o problema.
+   */
+  const _t0 = Date.now();
+  const _fases: Array<[string, number]> = [];
+  let _ultimo = _t0;
+  const marcar = (nome: string) => {
+    const agora = Date.now();
+    _fases.push([nome, agora - _ultimo]);
+    _ultimo = agora;
+  };
+
   try {
     let body: any;
     try { body = await req.json(); } catch { return errorResponse('Corpo da requisição inválido/incompleto (o texto do processo pode ter chegado cortado).', 400); }
@@ -2163,6 +2186,7 @@ Deno.serve(async (req) => {
 
     // A DUE DILIGENCE DE PROCESSOS DOS SUJEITOS, se já houver.
     const diligencia = await lerDiligencia(sbAdmin, leadId);
+    marcar('preparo (login, segredos, diligência)');
 
     // 3a. Fonte do texto do processo:
     //   (A) texto já extraído no NAVEGADOR (pdf.js) e enviado no corpo -> caminho leve, sem estourar CPU;
@@ -2305,6 +2329,7 @@ Deno.serve(async (req) => {
         }
       }
     }
+    marcar('montar o material (texto, imagens do Storage, anotações)');
     const houveCorte = contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
 
     // 3b. PORTÃO 1 — QUALIFICAÇÃO (roda ANTES de tudo). Só quando se está LENDO
@@ -2385,6 +2410,7 @@ Deno.serve(async (req) => {
       );
     }
 
+    marcar('portão de qualificação (leitura da IA)');
     if (numeroProcesso) qualif.numero_processo = numeroProcesso;
     const veredito = avaliarQualificacao(qualif);
     if (!veredito.aprovado) {
@@ -2433,6 +2459,7 @@ Deno.serve(async (req) => {
 
     // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
     dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
+    marcar('extração da análise (leitura da IA)');
     dados._houveCorte = houveCorte;
     dados._paginas_imagem = paginasImagem;
     dados._imagens_cortadas = cortouImagens;
@@ -2886,6 +2913,20 @@ Deno.serve(async (req) => {
 
     // Avisos que valem para a preliminar e para a final.
     const avisosBase: string[] = [...avisosQualif];
+    // ONDE O TEMPO FOI, quando ele foi muito. Aparece só acima de um minuto —
+    // abaixo disso ninguém precisa saber, e o aviso viraria ruído. Acima, é a
+    // única informação que diz o que otimizar sem chutar.
+    {
+      const _total = Date.now() - _t0;
+      if (_total > 60_000) {
+        marcar('precificação');
+        const _detalhe = _fases
+          .filter(([, ms]) => ms >= 1000)
+          .map(([nome, ms]) => `${nome} ${(ms / 1000).toFixed(0)}s`)
+          .join('; ');
+        avisosBase.push(`Esta análise levou ${(_total / 1000).toFixed(0)}s no servidor — ${_detalhe}.`);
+      }
+    }
     // Abaixo do piso depois de uma revisão: fica em primeiro lugar, porque
     // nenhum outro aviso importa se o negócio não pode ser feito.
     if (dados._abaixo_do_piso) avisosBase.unshift(`⚠️ ABAIXO DO MÍNIMO — NÃO DÁ PARA FECHAR: ${dados._abaixo_do_piso}`);
