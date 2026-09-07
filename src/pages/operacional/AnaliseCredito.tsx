@@ -84,7 +84,7 @@ import {
   type RespostaAnaliseRpv,
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
-import { formatDate } from '@/lib/format'
+import { formatCNJ, formatDate } from '@/lib/format'
 import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -438,6 +438,53 @@ function tituloCard(lead: KommoLead): string {
  */
 type BotoesDoCard = 'rpv' | 'precatorio' | 'nenhum'
 
+/** Os rótulos do cenário, encurtados: o card é item de lista. */
+const CENARIO_CURTO: Record<string, string> = {
+  principal: 'principal',
+  ambos: 'principal + honorários',
+  honorarios: 'honorários contratuais + sucumbenciais',
+  contratuais: 'honorários contratuais',
+  sucumbenciais: 'honorários sucumbenciais',
+  indefinido: 'honorários (sem dizer quais)',
+}
+
+/**
+ * O que o título do card diz, em uma linha.
+ *
+ * Para as etapas SEM análise: as quatro outras abas do Interno e as cinco do
+ * Fundo. A leitura do título sempre valeu ali, mas nada a consumia — o comercial
+ * escrevia a parcela cedida e o percentual e eles não apareciam em lugar nenhum.
+ *
+ * Campo ausente é omitido, não vai como travessão: rótulo vazio ocupa espaço e
+ * não informa. A exceção é o NÚMERO, cuja falta é defeito de cadastro e é dita —
+ * sem ele o card sai da busca por processo e o checklist de certidões não acha o
+ * CNJ, e nenhuma outra etapa destas abas checaria isso.
+ */
+function ResumoDoTitulo({ lead }: { lead: KommoLead }) {
+  // Memoizado porque lerCardCredijuris junta TODAS as anotações do card numa
+  // string, e há cards com histórico longo. Refazer isso a cada render de cada
+  // card de uma lista de centenas é desperdício sem contrapartida.
+  const d = useMemo(() => lerCardCredijuris(lead), [lead])
+  const cenario = CENARIO_CURTO[d.tipo_aquisicao]
+  const partes = [
+    d.categoria === 'Precatórios' ? 'Precatório' : 'RPV',
+    d.numero ? formatCNJ(d.numero) : null,
+    cenario,
+    d.honorarios_pct ? `hon. ${d.honorarios_pct.replace('.', ',')}%` : null,
+  ].filter(Boolean)
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+      <span className="tabular-nums">{partes.join(' · ')}</span>
+      {!d.numero && (
+        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800 ring-1 ring-inset ring-amber-200">
+          sem número de processo no card
+        </span>
+      )}
+    </div>
+  )
+}
+
 function CardCredito({
   lead,
   acoes,
@@ -521,6 +568,26 @@ function CardCredito({
           </div>
         )}
       </div>
+
+      {/* O QUE O TÍTULO DIZ, onde não há análise para dizer.
+
+          Nas etapas sem botão de trabalho — as quatro outras abas do Interno e
+          as CINCO DO FUNDO — o card mostrava só o título cru. A leitura do
+          título sempre valeu ali (lerTituloCard não tem porta por funil nem por
+          subdivisão), mas nada a consumia: o comercial escrevia a parcela cedida
+          e o percentual, e eles não apareciam em lugar nenhum.
+
+          UMA LINHA, e não a ficha de sete: o card é item de lista, lido de
+          relance. Campo que o título não trouxe é omitido — a ausência se lê
+          por comparação com os cards vizinhos.
+
+          Sem número em parte nenhuma é DEFEITO, e é dito: sem ele o card fica
+          fora da busca por processo e o checklist de certidões não acha o CNJ.
+          É a única checagem daqui, porque é a única que nenhuma outra etapa faz
+          nestas abas. */}
+      {botoes === 'nenhum' && (
+        <ResumoDoTitulo lead={lead} />
+      )}
 
       {/* OS BOTÕES DE TRABALHO DEPENDEM DA ETAPA, e por dois motivos distintos.
           Em RPV segue o de sempre, que precifica 150 cards que funcionam. No
