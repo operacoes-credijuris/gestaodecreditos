@@ -728,6 +728,60 @@ function riscosComAuditoria(dados: any): any[] {
   ];
 }
 
+/**
+ * As listas suspensas da aba jurídica, linha a linha. Texto fora delas a célula
+ * aceita e o Excel só reclama quando alguém edita — o arquivo sai "preenchido" e
+ * a cor condicional não pinta. O prompt promete "marcado como inválido"; isto é
+ * o que marca.
+ */
+const SIM_NAO = ['Sim', 'Não'];
+const LISTAS_M2: Record<string, string[]> = {
+  '10': SIM_NAO, '11': SIM_NAO, '14': SIM_NAO, '15': SIM_NAO, '16': SIM_NAO, '18': SIM_NAO,
+  '21': SIM_NAO, '22': SIM_NAO, '23': SIM_NAO, '27': SIM_NAO, '28': SIM_NAO, '31': SIM_NAO,
+  '32': SIM_NAO, '33': SIM_NAO, '34': SIM_NAO, '35': SIM_NAO, '37': SIM_NAO,
+  '19': ['Improcedência', 'Procedência', 'Procedência parcial', 'Homologatória de acordo'],
+  // "Iliquída" é a grafia da lista do modelo; a correção ortográfica tem de vir do modelo, não daqui.
+  '20': ['Líquida', 'Iliquída'],
+  '24': ['Valor apresentado no CS', 'Execução invertida'],
+  '26': [
+    'Executado não apresentou valores e prazo ainda em curso',
+    'Executado não apresentou valores — prazo decorrido — sem manifestação da parte exequente',
+    'Executado não apresentou valores — prazo decorrido — já houve manifestação da parte exequente',
+    'Executado apresentou valores',
+  ],
+  '38': ['Minuta de RPV', 'RPV', 'Alvará de pagamento', 'Sem expedição'],
+};
+
+/**
+ * Traz cada resposta para o valor EXATO da lista da sua linha, quando dá.
+ *
+ * "sim", "SIM", "Sim, em 12/03/2026" viram "Sim"; "procedencia parcial" vira
+ * "Procedência parcial"; "Executado apresentou valores (fls. 300)" casa pela
+ * opção mais longa contida. O que não casa fica como veio e é devolvido em
+ * `foraDaLista`, para a análise avisar — corrigir sem saber o que a IA quis
+ * dizer seria inventar resposta.
+ */
+function normalizarM2(m2: unknown): { m2: Record<string, any>; foraDaLista: string[] } {
+  const saida: Record<string, any> = {};
+  const fora: string[] = [];
+  const entrada = (m2 && typeof m2 === 'object') ? (m2 as Record<string, any>) : {};
+  for (const [linha, item] of Object.entries(entrada)) {
+    const lista = LISTAS_M2[linha];
+    const resposta = item?.resposta;
+    if (!lista || typeof resposta !== 'string' || !resposta.trim()) { saida[linha] = item; continue; }
+    const r = normalizar(resposta);
+    let canon: string | null = lista.find((op) => normalizar(op) === r) ?? null;
+    if (!canon && lista === SIM_NAO) canon = r.startsWith('sim') ? 'Sim' : r.startsWith('nao') ? 'Não' : null;
+    if (!canon) {
+      // A opção mais longa que a resposta contém: "Procedência parcial" antes de "Procedência".
+      canon = [...lista].sort((a, b) => b.length - a.length).find((op) => r.includes(normalizar(op))) ?? null;
+    }
+    if (canon) saida[linha] = { ...item, resposta: canon };
+    else { saida[linha] = item; fora.push(`linha ${linha}: "${resposta.slice(0, 60)}"`); }
+  }
+  return { m2: saida, foraDaLista: fora };
+}
+
 // dados = saída do extrator. Estrutura em SCHEMA_ANALISE (abaixo).
 async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T5: number): Promise<Uint8Array> {
   // OS VALORES QUE DE FATO PRECIFICARAM, e não os dos autos.
@@ -1732,10 +1786,13 @@ function hojeDDMMAAAA(): string {
   const d = new Date();
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
-// hoje + meses, ajustado pro ÚLTIMO dia do mês resultante
+// hoje + o prazo, em dias — a MESMA grandeza que a fórmula do preço usa.
+//
+// Era "último dia do mês, meses arredondados para baixo": 8,4 meses viravam o
+// fim do 8º mês. A planilha (J5) e a tela mostravam uma data que não era a do
+// cálculo, e quem conferia via o prazo de um jeito e a data de outro.
 function dataPagamento(meses: number): string {
-  const d = new Date();
-  const alvo = new Date(d.getFullYear(), d.getMonth() + Math.floor(meses) + 1, 0); // dia 0 do mês seguinte = último dia
+  const alvo = new Date(Date.now() + Math.round(Math.max(0, meses) * 30) * 86400000);
   return `${String(alvo.getDate()).padStart(2, '0')}/${String(alvo.getMonth() + 1).padStart(2, '0')}/${alvo.getFullYear()}`;
 }
 
@@ -1975,6 +2032,25 @@ Deno.serve(async (req) => {
         const revisao = await refinarDados(cfg.anthropic_api_key, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : [], notasKommo);
         dados = revisao.dados;
         respostaRevisao = revisao.resposta;
+        // A AUDITORIA ACOMPANHA O BRUTO CORRIGIDO. O cenário conservador foi
+        // estimado sobre o bruto que a IA leu; se a pessoa corrige o bruto no
+        // chat e o conservador fica como estava, o corte passa a ser de outra
+        // leitura — grande demais ou pequeno demais, sem relação com a conta
+        // nova. Escala na mesma proporção: mantém o risco embutido (o lado
+        // conservador) sem fingir que a estimativa antiga vale para a base nova.
+        {
+          const _n = (v: unknown): number =>
+            typeof v === 'number' ? (Number.isFinite(v) ? v : 0)
+            : typeof v === 'string' ? (parseNumeroFlex(v.replace(/[^\d.,\-]/g, '')) ?? 0) : 0;
+          const _antes = _n(body.dados?.bruto_total), _depois = _n(dados.bruto_total);
+          const _consAntes = _n(body.dados?.auditoria_bruto_conservador), _consDepois = _n(dados.auditoria_bruto_conservador);
+          if (_antes > 0 && _depois > 0 && Math.abs(_depois - _antes) > 0.005 && _consAntes > 0 && Math.abs(_consDepois - _consAntes) < 0.005) {
+            dados.auditoria_bruto_conservador = Number((_consAntes * (_depois / _antes)).toFixed(2));
+            respostaRevisao +=
+              `\nA auditoria acompanhou o bruto: o cenário conservador foi de ${brl(_consAntes)} para ${brl(dados.auditoria_bruto_conservador)}, na mesma proporção. ` +
+              'Se a divergência era um valor fixo, e não proporcional, corrija "auditoria_bruto_conservador" aqui no chat.';
+          }
+        }
       } else {
         dados = body.dados;
       }
@@ -2049,6 +2125,13 @@ Deno.serve(async (req) => {
     }
     dados.originador = originador;
     if (numeroProcesso) dados.numero_processo = numeroProcesso;
+    // As respostas do questionário nas listas do modelo — vale para a extração e
+    // para o que o chat escreveu, que também não passava por lista nenhuma.
+    {
+      const _m2 = normalizarM2(dados.m2);
+      dados.m2 = _m2.m2;
+      dados._m2_fora_da_lista = _m2.foraDaLista;
+    }
     // NÚMERO DE VERDADE, venha como vier. A IA — e o chat, que aceita texto — às
     // vezes devolvem "84.320,10" ou "R$ 84.320,10" onde se pediu número.
     // `Number("84.320,10")` é NaN, que virava ZERO: o bruto zerado dava "não
@@ -2468,6 +2551,23 @@ Deno.serve(async (req) => {
       avisosBase.push(`⚠️ CARTÓRIO PARCIAL: na tabela de ${emolumentos.uf} achei só ${calc.emolumentos.escritura == null ? 'o registro' : 'a escritura'}. O preço inclui essa parte; some ${calc.emolumentos.escritura == null ? 'a escritura' : 'o registro'} à mão. ${emolumentos.observacao ?? ''}`.trim());
     else if (emolumentos.origem === 'busca')
       avisosBase.push(`Tabela de emolumentos de ${emolumentos.uf}/${emolumentos.ano} levantada agora (${emolumentos.observacao ?? 'sem detalhe'}). Fonte: ${emolumentos.fontes[0] ?? 'não informada'}. Vale conferir uma vez; daqui em diante ela vale para qualquer valor de cessão, sem nova consulta.`);
+    // SOBRE O QUE O CARTÓRIO COBRA. A tabela de cada estado diz se o ato incide
+    // sobre o preço da cessão ou sobre o valor do crédito; a IA passou a ler
+    // isso ao levantar a tabela. Tabela levantada antes disso (ou que não diz)
+    // vale pelo preço — e quem confere precisa saber que foi suposição.
+    if (emolumentos?.regra) {
+      const _atos = [emolumentos.regra.escritura, emolumentos.regra.registro].filter(Boolean) as Array<{ base_calculo?: string | null }>;
+      if (_atos.length && _atos.some((a) => !a.base_calculo))
+        avisosBase.push(
+          `A tabela de ${emolumentos.uf} não diz sobre que valor cobra o ato (preço da cessão ou valor do crédito); calculei sobre o PREÇO. ` +
+          'Se o cartório de lá cobrar sobre o crédito, o custo está subestimado — confira com o cartório onde vai lavrar.',
+        );
+    }
+    if (Array.isArray(dados._m2_fora_da_lista) && dados._m2_fora_da_lista.length)
+      avisosBase.push(
+        `⚠️ RESPOSTA FORA DA LISTA no questionário (${dados._m2_fora_da_lista.join('; ')}): a planilha só aceita os valores da lista suspensa nessas linhas, ` +
+        'e o Excel não avisa ao abrir. Corrija no chat ("na linha 19 a resposta é Procedência parcial").',
+      );
     if (_prazoEstimado) avisosBase.push('⚠️ PRAZO ESTIMADO — TJGO sem data-limite de convênio nos autos: a espera até a expedição foi estimada em 60 dias. Confira o prazo e a rentabilidade à mão.');
     if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && dados._verbas_negociadas?.principal && !ehEstadoDeGoias(dados.ente_devedor))
       avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
