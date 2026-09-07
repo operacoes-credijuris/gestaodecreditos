@@ -162,3 +162,196 @@ export function aplicarPatch(
 
   return { dados: novo, mudancas, desconhecidos, remocoesVazias }
 }
+
+// ---------------------------------------------------------------------------
+// Os parâmetros do negócio ditados no chat
+// ---------------------------------------------------------------------------
+//
+// ESTAVAM SENDO GRAVADOS E NUNCA LIDOS. O chat escrevia `_desagio_manual`,
+// `_alvo_manual`, `_comissao_manual`, `_diligencia_manual` e `_verbas_manuais`
+// na análise, respondia "Aplicado: deságio ditado: 30,00%" — e o motor
+// calibrava como se nada tivesse sido dito. O operador salvava acreditando
+// ter fechado a 30%. É o pior defeito que um chat pode ter: afirmar uma coisa
+// e fazer outra sobre o preço.
+//
+// Agora a leitura mora aqui, pura e testada, e o motor a consome (ver
+// `parametrosParaCalibragem`). Três regras:
+//
+//   1. CHAVE AUSENTE NÃO MEXE. O modelo só manda o que o usuário pediu.
+//   2. NULL (ou "auto") VOLTA AO AUTOMÁTICO. Era o caminho que não existia:
+//      um parâmetro ditado ficava para sempre, e `Number(null)` virava ZERO —
+//      "volta ao automático" fixaria o deságio em 0%.
+//   3. FORA DE FAIXA É IGNORADO E DITO. Deságio de 300% é erro de digitação,
+//      não pedido; entra como aviso, não como número.
+
+/** Os campos internos que o chat pode fixar, e a faixa que cada um aceita. */
+const PARAMETROS: Array<{
+  chave: string
+  campo: string
+  rotulo: string
+  /** Aceita e normaliza, ou null quando fora de faixa. */
+  valida: (n: number) => number | null
+  formata: (n: number) => string
+}> = [
+  {
+    chave: 'desagio', campo: '_desagio_manual', rotulo: 'deságio',
+    valida: (n) => (n >= 0 && n <= 0.95 ? n : null),
+    formata: (n) => `${(n * 100).toFixed(2)}%`,
+  },
+  {
+    chave: 'alvo_mensal', campo: '_alvo_manual', rotulo: 'meta de rentabilidade',
+    valida: (n) => (n > 0 && n <= 1 ? n : null),
+    formata: (n) => `${(n * 100).toFixed(2)}% ao mês`,
+  },
+  {
+    chave: 'comissao_pct', campo: '_comissao_manual', rotulo: 'comissão',
+    valida: (n) => (n >= 0 && n <= 1 ? n : null),
+    formata: (n) => `${(n * 100).toFixed(2)}%`,
+  },
+  {
+    chave: 'diligencia', campo: '_diligencia_manual', rotulo: 'diligência',
+    // Teto de R$ 50 mil: correspondente não custa mais que o crédito.
+    valida: (n) => (n >= 0 && n <= 50000 ? n : null),
+    formata: (n) => 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  },
+]
+
+const ehAutomatico = (v: unknown) =>
+  v === null || (typeof v === 'string' && /^\s*(auto|autom[aá]tico|padr[aã]o)\s*$/i.test(v))
+
+/**
+ * Número de verdade, ou null. `Number(null)` é 0 e `Number('')` é 0 — os dois
+ * passariam por "zero pedido", e nenhum dos dois é um pedido.
+ */
+function numero(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v.replace(',', '.'))
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+export interface ResultadoParametros {
+  dados: Record<string, unknown>
+  mudancas: string[]
+  /** O que foi pedido e não pôde entrar, em português. */
+  avisos: string[]
+}
+
+/**
+ * Aplica os parâmetros ditados sobre a análise.
+ *
+ * `parametros` é o objeto que a ferramenta devolve ({desagio, alvo_mensal,
+ * comissao_pct, diligencia}); `verbas` é {principal, contratuais,
+ * sucumbenciais}; `prazoMeses` é o prazo ditado. Qualquer um pode ser null
+ * ("volta ao automático") ou ausente ("não mexa").
+ */
+export function aplicarParametrosManuais(
+  atual: Record<string, unknown>,
+  entrada: { parametros?: unknown; verbas?: unknown; prazo_meses_manual?: unknown },
+): ResultadoParametros {
+  const dados: Record<string, unknown> = { ...atual }
+  const mudancas: string[] = []
+  const avisos: string[] = []
+
+  const par = ehObjeto(entrada.parametros) ? entrada.parametros : {}
+  for (const p of PARAMETROS) {
+    if (!(p.chave in par)) continue
+    const v = par[p.chave]
+    if (ehAutomatico(v)) {
+      if (p.campo in dados) { delete dados[p.campo]; mudancas.push(`${p.rotulo}: de volta ao automático`) }
+      continue
+    }
+    const n = numero(v)
+    const ok = n == null ? null : p.valida(n)
+    if (ok == null) { avisos.push(`${p.rotulo}: "${String(v)}" está fora de faixa e foi ignorado`); continue }
+    dados[p.campo] = ok
+    mudancas.push(`${p.rotulo} ditado: ${p.formata(ok)}`)
+  }
+
+  // As verbas: o que está sendo comprado.
+  if ('verbas' in entrada) {
+    const vb = entrada.verbas
+    if (ehAutomatico(vb)) {
+      if ('_verbas_manuais' in dados) { delete dados._verbas_manuais; mudancas.push('verbas negociadas: de volta ao que o card diz') }
+    } else if (ehObjeto(vb)) {
+      const escolhidas = {
+        principal: vb.principal === true,
+        contratuais: vb.contratuais === true,
+        sucumbenciais: vb.sucumbenciais === true,
+      }
+      if (escolhidas.principal || escolhidas.contratuais || escolhidas.sucumbenciais) {
+        dados._verbas_manuais = escolhidas
+        mudancas.push(
+          'verbas negociadas: ' +
+          Object.entries(escolhidas).filter(([, v]) => v).map(([k]) => k).join(' + '),
+        )
+      } else {
+        avisos.push('verbas negociadas: nenhuma verba marcada, então não mexi — um negócio precisa de pelo menos uma')
+      }
+    }
+  }
+
+  // O prazo. Zero e "auto" voltam ao cálculo; null não mexe (é o padrão da
+  // ferramenta quando o usuário não falou de prazo).
+  if ('prazo_meses_manual' in entrada) {
+    const v = entrada.prazo_meses_manual
+    if (v === 0 || (typeof v === 'string' && ehAutomatico(v))) {
+      if ('_prazo_manual' in dados) { delete dados._prazo_manual; mudancas.push('prazo: de volta ao calculado') }
+    } else if (v !== null && v !== undefined) {
+      const n = numero(v)
+      if (n != null && n > 0 && n <= 120) { dados._prazo_manual = n; mudancas.push(`prazo ditado: ${n} meses`) }
+      else avisos.push(`prazo: "${String(v)}" não é um número de meses válido (1 a 120) e foi ignorado`)
+    }
+  }
+
+  return { dados, mudancas, avisos }
+}
+
+/** Como o motor deve calibrar, lidos da análise. Ausente = automático. */
+export interface ParametrosCalibragem {
+  desagioFixo: number | null
+  alvo: number | undefined
+  comissaoPct: number | undefined
+  diligencia: number | undefined
+  verbas: { principal: boolean; contratuais: boolean; sucumbenciais: boolean } | null
+  /** Para a tela dizer o que está fixado. */
+  descricao: string[]
+}
+
+/**
+ * O que a análise carrega de parâmetro ditado, no formato que calibrarDesagio
+ * recebe. Só devolve o que for número válido — um campo corrompido volta ao
+ * automático em vez de virar zero.
+ */
+export function parametrosParaCalibragem(dados: Record<string, unknown>): ParametrosCalibragem {
+  const desc: string[] = []
+  const pega = (campo: string, valida: (n: number) => number | null): number | null => {
+    const n = numero(dados[campo])
+    return n == null ? null : valida(n)
+  }
+  const desagio = pega('_desagio_manual', PARAMETROS[0].valida)
+  const alvo = pega('_alvo_manual', PARAMETROS[1].valida)
+  const comissao = pega('_comissao_manual', PARAMETROS[2].valida)
+  const dilig = pega('_diligencia_manual', PARAMETROS[3].valida)
+  if (desagio != null) desc.push(`deságio ditado no chat: ${PARAMETROS[0].formata(desagio)}`)
+  if (alvo != null) desc.push(`meta ditada no chat: ${PARAMETROS[1].formata(alvo)}`)
+  if (comissao != null) desc.push(`comissão ditada no chat: ${PARAMETROS[2].formata(comissao)}`)
+  if (dilig != null) desc.push(`diligência ditada no chat: ${PARAMETROS[3].formata(dilig)}`)
+
+  const vb = dados._verbas_manuais
+  const verbas = ehObjeto(vb) && (vb.principal === true || vb.contratuais === true || vb.sucumbenciais === true)
+    ? { principal: vb.principal === true, contratuais: vb.contratuais === true, sucumbenciais: vb.sucumbenciais === true }
+    : null
+  if (verbas) desc.push('verbas negociadas ditadas no chat: ' + Object.entries(verbas).filter(([, v]) => v).map(([k]) => k).join(' + '))
+
+  return {
+    desagioFixo: desagio,
+    alvo: alvo ?? undefined,
+    comissaoPct: comissao ?? undefined,
+    diligencia: dilig ?? undefined,
+    verbas,
+    descricao: desc,
+  }
+}

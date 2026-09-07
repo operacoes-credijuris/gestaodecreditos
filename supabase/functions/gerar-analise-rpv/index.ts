@@ -23,8 +23,8 @@ import {
 } from "../_shared/emolumentos.ts";
 import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import { irProgressivo } from "../_shared/irpf.ts";
-import { aplicarAuditoria, calibrarDesagio, montarParcelas, type VerbasNegociadas } from "../_shared/precificacao.ts";
-import { aplicarPatch } from "../_shared/revisao.ts";
+import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
@@ -1371,8 +1371,8 @@ const FERRAMENTA_REVISAO = {
         description: 'Caminhos a APAGAR, quando o pedido é suprimir algo: "m2.37" para uma linha do questionário, "riscos.2" para o terceiro risco (índice base zero). Vazio quando não há o que remover.',
       },
       prazo_meses_manual: {
-        type: ['number', 'null'],
-        description: 'Só quando o usuário DITAR o prazo até o pagamento ("o prazo é 10 meses"). O motor passa a usar este número em vez do calculado. Null em qualquer outro caso — NUNCA preencha por conta própria.',
+        type: ['number', 'string', 'null'],
+        description: 'Só quando o usuário DITAR o prazo até o pagamento ("o prazo é 10 meses"). O motor passa a usar este número em vez do calculado. Para VOLTAR ao prazo calculado ("tira o prazo manual", "usa o prazo do roteiro"), mande "auto". Null em qualquer outro caso — NUNCA preencha por conta própria.',
       },
       // OS PARÂMETROS DO NEGÓCIO, que antes eram fixos no código. Sem eles, um
       // pedido comercial legítimo ("fecha a 30%", "essa operação é sem
@@ -1385,13 +1385,15 @@ const FERRAMENTA_REVISAO = {
           '{"desagio": fração (0.30 para 30%) quando ele disser onde quer fechar — o motor para de procurar e usa este número, e a resposta diz a rentabilidade que sobrou; ' +
           '"alvo_mensal": fração, quando ele mudar a meta de rentabilidade (padrão 0.028); ' +
           '"comissao_pct": fração, quando a comissão for diferente dos 9% (4% originação + 5% intermediação); ' +
-          '"diligencia": reais, quando o custo de correspondente for outro, ou 0 quando não houver}',
+          '"diligencia": reais, quando o custo de correspondente for outro, ou 0 quando não houver}. ' +
+          'Para DESFAZER um parâmetro ditado antes ("volta o deságio ao automático", "deixa a comissão padrão"), mande a chave com valor null.',
       },
       verbas: {
         type: 'object',
         description:
           'O que está sendo comprado, só quando o usuário MUDAR isso ("tira os sucumbenciais", "passa a ser só o principal"). ' +
-          '{"principal": bool, "contratuais": bool, "sucumbenciais": bool}. Omita quando o pedido não for sobre isso.',
+          '{"principal": bool, "contratuais": bool, "sucumbenciais": bool}. Omita quando o pedido não for sobre isso. ' +
+          'Para voltar ao que o card diz, mande null.',
       },
       resposta: { type: 'string', description: 'Para o usuário: o que você mudou e por quê, em até 6 linhas. Se não pôde atender, diga o que faltou. Sem preâmbulo.' },
     },
@@ -1405,7 +1407,7 @@ const SISTEMA_REVISAO =
   'REGRAS: (1) devolva em "alteracoes" SÓ os campos que mudam; o que fica igual não se repete. (2) Quem afirma o dado é o usuário: ele está com o processo aberto. Aplique o que ele disser. Se o valor contrariar o que está no JSON, aplique mesmo assim e registre a troca em "resposta" ("bruto de X para Y, conforme você indicou"). (3) Se o pedido depende de um dado que NÃO está no JSON e o usuário não informou, peça o número em "resposta" e não altere nada — você não tem como consultar os autos. (4) Preço de cessão e rentabilidade você NÃO escreve: saem calculados dos seus campos. O DESÁGIO agora você pode ditar — mas só em "parametros", e só quando o usuário pedir um número (ver regra 9). Prazo ditado vai em "prazo_meses_manual". (4b) O CUSTO DE CARTÓRIO também não é seu, e não precisa ser pedido: escritura e registro são consultados na tabela do estado a partir do preço da cessão, e a tela REFAZ essa consulta sozinha sempre que o preço muda. Se pedirem para reajustar o cartório, responda que ele se recalcula automaticamente com o novo preço e não peça número nenhum — pedir o valor ao usuário é trabalho que a máquina já faz. Só peça se ele disser que a consulta automática falhou. (5) Mantenha o formato: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) Para SUPRIMIR, use "remover" com o caminho ("m2.37", "riscos.2") — não mande o campo vazio em "alteracoes". ' +
   '(7) LISTAS se editam POR ÍNDICE, e não reenviando a lista inteira: para mudar o segundo ato do roteiro mande {"roteiro_prazo": {"1": {"dias": 90}}}; para acrescentar um, {"roteiro_prazo": {"+": {"ato": "...", "dias": 21}}}. Mandar a lista inteira SUBSTITUI o que havia — só faça isso quando for essa a intenção. Vale para roteiro_prazo, bloco_g_riscos, auditoria_divergencias e m4_pares. ' +
   '(8) USE O NOME EXATO DO CAMPO. Nome que não existe no formato é RECUSADO e aparece na resposta como não aplicado — não há como inventar um campo novo e esperar efeito. Na dúvida, olhe as chaves do JSON que você recebeu. ' +
-  '(9) OS PARÂMETROS DO NEGÓCIO são seus, quando o usuário os ditar: deságio ("fecha a 30%"), meta de rentabilidade, comissão e diligência vão em "parametros"; o que está sendo comprado vai em "verbas". Isto substitui a regra antiga de recusar mexer no deságio: agora dá, desde que o usuário DITE. O que você continua NÃO fazendo é escolher esses números sozinho — sem pedido explícito, deixe fora. ' +
+  '(9) OS PARÂMETROS DO NEGÓCIO são seus, quando o usuário os ditar: deságio ("fecha a 30%"), meta de rentabilidade, comissão e diligência vão em "parametros"; o que está sendo comprado vai em "verbas". Isto substitui a regra antiga de recusar mexer no deságio: agora dá, desde que o usuário DITE. O que você continua NÃO fazendo é escolher esses números sozinho — sem pedido explícito, deixe fora. Para DESFAZER um parâmetro ditado numa rodada anterior, mande a chave com null (ou "auto" no prazo): o motor volta a calcular. ' +
   '(10) O SERVIDOR CONFERE o que você mandou e devolve ao usuário a lista do que mudou de fato. Prometer na "resposta" uma alteração que você não pôs em "alteracoes" aparece como divergência. Descreva o que fez, não o que pretendia. ' +
   'Responda chamando a ferramenta revisar_analise uma única vez.';
 
@@ -1416,7 +1418,7 @@ async function refinarDados(
   instrucao: string,
   historico: Array<{ papel: 'usuario' | 'ia'; texto: string }>,
   notasKommo: string,
-): Promise<{ dados: any; resposta: string; prazoManual: number | null }> {
+): Promise<{ dados: any; resposta: string }> {
   const anthropic = new Anthropic({ apiKey });
   const mensagens: Anthropic.MessageParam[] = [];
   for (const h of historico.slice(-12)) {
@@ -1459,43 +1461,20 @@ async function refinarDados(
   };
   const alteracoes = (entrada.alteracoes && typeof entrada.alteracoes === 'object' ? entrada.alteracoes : {}) as Record<string, unknown>;
   const remover = Array.isArray(entrada.remover) ? (entrada.remover as unknown[]).map(String) : [];
-  const pm = Number(entrada.prazo_meses_manual);
-
   const r = aplicarPatch(dadosAtuais, alteracoes, remover, CAMPOS_EDITAVEIS, CAMPOS_LISTA);
 
   // OS PARÂMETROS DO NEGÓCIO viajam com a análise, não à parte: assim
   // sobrevivem à rodada seguinte do chat e ao salvamento, que dão a volta pelo
-  // navegador. Fração fora de faixa é ignorada — deságio de 300% é erro de
-  // digitação, não pedido.
-  const par = (entrada.parametros ?? {}) as Record<string, unknown>;
-  const fracao = (v: unknown, teto: number) => {
-    const n = Number(v);
-    return Number.isFinite(n) && n >= 0 && n <= teto ? n : null;
-  };
-  const _desagio = fracao(par.desagio, 0.95);
-  const _alvo = fracao(par.alvo_mensal, 1);
-  const _comissao = fracao(par.comissao_pct, 1);
-  const _dilig = Number(par.diligencia);
-  if (_desagio != null) { r.dados._desagio_manual = _desagio; r.mudancas.push(`deságio ditado: ${(_desagio * 100).toFixed(2)}%`); }
-  if (_alvo != null) { r.dados._alvo_manual = _alvo; r.mudancas.push(`meta de rentabilidade: ${(_alvo * 100).toFixed(2)}% ao mês`); }
-  if (_comissao != null) { r.dados._comissao_manual = _comissao; r.mudancas.push(`comissão: ${(_comissao * 100).toFixed(2)}%`); }
-  if (Number.isFinite(_dilig) && _dilig >= 0) { r.dados._diligencia_manual = _dilig; r.mudancas.push(`diligência: ${brl(_dilig)}`); }
-
-  const vb = (entrada.verbas ?? null) as Record<string, unknown> | null;
-  if (vb && typeof vb === 'object') {
-    const escolhidas = {
-      principal: vb.principal === true,
-      contratuais: vb.contratuais === true,
-      sucumbenciais: vb.sucumbenciais === true,
-    };
-    if (escolhidas.principal || escolhidas.contratuais || escolhidas.sucumbenciais) {
-      r.dados._verbas_manuais = escolhidas;
-      r.mudancas.push(
-        'verbas negociadas: ' +
-        Object.entries(escolhidas).filter(([, v]) => v).map(([k]) => k).join(' + '),
-      );
-    }
-  }
+  // navegador. A leitura mora em _shared/revisao.ts, testada: null volta ao
+  // automático, fora de faixa é ignorado e dito. Ver lá por que isto importa —
+  // estes campos eram gravados e NUNCA lidos pelo motor.
+  const pm = aplicarParametrosManuais(r.dados, {
+    parametros: entrada.parametros,
+    verbas: entrada.verbas,
+    prazo_meses_manual: entrada.prazo_meses_manual,
+  });
+  r.dados = pm.dados;
+  r.mudancas.push(...pm.mudancas);
 
   // O RELATÓRIO VAI JUNTO DA RESPOSTA, e é do servidor, não da IA. Prometer uma
   // alteração e não fazê-la era invisível: os dois textos vinham da mesma fonte.
@@ -1506,12 +1485,9 @@ async function refinarDados(
     partes.push(`⚠️ Campo(s) que não existem no formato e por isso NÃO foram aplicados: ${r.desconhecidos.join(', ')}.`);
   if (r.remocoesVazias.length)
     partes.push(`⚠️ Não achei o que remover em: ${r.remocoesVazias.join(', ')}.`);
+  for (const a of pm.avisos) partes.push(`⚠️ ${a}.`);
 
-  return {
-    dados: r.dados,
-    resposta: partes.join('\n'),
-    prazoManual: Number.isFinite(pm) && pm > 0 ? pm : null,
-  };
+  return { dados: r.dados, resposta: partes.join('\n') };
 }
 
 // "DD/MM/AAAA" -> Date (ou null se inválido)
@@ -1890,9 +1866,6 @@ Deno.serve(async (req) => {
         const revisao = await refinarDados(cfg.anthropic_api_key, body.dados, instrucao, Array.isArray(body.historico) ? body.historico : [], notasKommo);
         dados = revisao.dados;
         respostaRevisao = revisao.resposta;
-        // Prazo ditado no chat sobrevive aos pedidos seguintes: fica no próprio
-        // JSON, que dá a volta pelo navegador a cada rodada.
-        if (revisao.prazoManual != null) dados._prazo_manual = revisao.prazoManual;
       } else {
         dados = body.dados;
       }
@@ -2052,6 +2025,16 @@ Deno.serve(async (req) => {
       dados.tipo_credito = comHonorarios ? 'Crédito principal + Honorários' : 'Crédito principal — apenas';
     }
 
+    // O QUE O CHAT DITOU vence o que o card diz — até a pessoa trocar o
+    // cenário no seletor da janela, que apaga a escolha do chat (ver
+    // trocarCenario no modal). Sem isto, "tira os sucumbenciais" era gravado,
+    // reportado como aplicado, e o preço saía com os sucumbenciais dentro.
+    const _manual = parametrosParaCalibragem(dados);
+    if (_manual.verbas) {
+      verbas = _manual.verbas;
+      dados.tipo_credito = rotuloDoCenario(verbas) || dados.tipo_credito;
+      dados._parcela_nao_informada = false;
+    }
     dados.honorarios = honorariosCalc;   // contratuais, valor BRUTO destacado
     dados._verbas_negociadas = verbas;
     dados._honPctInformado = honorariosPct != null;
@@ -2210,9 +2193,17 @@ Deno.serve(async (req) => {
     const _parcelas = montarParcelas({ ..._auditoria.valores, verbas: _verbas });
     dados._parcelas = _parcelas;
 
+    // OS PARÂMETROS DITADOS NO CHAT ENTRAM AQUI. Era o elo que faltava: o chat
+    // gravava deságio, meta, comissão e diligência na análise e esta chamada
+    // não os recebia — calibrava sempre no automático e o operador via
+    // "Aplicado" numa mudança que não tinha acontecido.
     const calc: any = calibrarDesagio({
       parcelas: _parcelas, T5,
       regra: emolumentos?.regra ?? null,
+      desagioFixo: _manual.desagioFixo,
+      alvo: _manual.alvo,
+      comissaoPct: _manual.comissaoPct,
+      diligencia: _manual.diligencia,
     });
     // Compatibilidade com quem lê o resultado pelo nome das células do modelo.
     calc.L5 = _parcelas.find((p) => p.nome === 'principal')?.liquido ?? 0;
@@ -2297,8 +2288,17 @@ Deno.serve(async (req) => {
     if (_prazoEstimado) avisosBase.push('⚠️ PRAZO ESTIMADO — TJGO sem data-limite de convênio nos autos: a espera até a expedição foi estimada em 60 dias. Confira o prazo e a rentabilidade à mão.');
     if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && dados._verbas_negociadas?.principal && !ehEstadoDeGoias(dados.ente_devedor))
       avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
-    if (calc.atingiuAlvo === false)
-      avisosBase.push(`⚠️ Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
+    // O QUE ESTÁ FIXADO À MÃO aparece como nota: quem abre a análise depois
+    // precisa saber que aquele deságio não é o calibrado, e como voltar.
+    for (const d of _manual.descricao) avisosBase.push(`${d} — para voltar ao automático, peça no chat.`);
+    if (calc.atingiuAlvo === false) {
+      const _meta = _manual.alvo ?? 0.028;
+      avisosBase.push(
+        _manual.desagioFixo != null
+          ? `⚠️ O deságio ditado (${pct(calc.desagio)}) NÃO atinge a meta de ${pct(_meta)} ao mês: a rentabilidade fica em ${pct(calc.Y9)} ao mês.`
+          : `⚠️ Não foi possível atingir a meta de ${pct(_meta)} ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`,
+      );
+    }
     if (dados._houveCorte)
       avisosBase.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.');
     // O QUE ENTROU NO PREÇO, verba a verba, com o deságio de cada uma. É o aviso

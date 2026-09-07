@@ -228,6 +228,24 @@ const CENARIOS_RPV = [
 ] as const
 
 /**
+ * O cenário do seletor que corresponde às verbas que o motor precificou.
+ *
+ * O SELETOR MOSTRA O QUE O MOTOR DECIDIU, e não só o que o card disse: com
+ * "auto" quem escolhe é o destaque da contadoria; com "honorários" sem dizer
+ * quais, os autos; e no chat a pessoa pode ditar as verbas. Em todos esses
+ * casos o botão marcado tem de ser o que está sendo precificado, senão a tela
+ * mostra um cenário e o preço é de outro.
+ */
+function cenarioDasVerbas(r: RespostaAnaliseRpv | null | undefined): string | null {
+  const vb = (r as { dados?: { _verbas_negociadas?: Record<string, boolean> } } | null)?.dados?._verbas_negociadas
+  if (!vb) return null
+  return vb.principal && (vb.contratuais || vb.sucumbenciais) ? 'ambos'
+    : vb.principal ? 'principal'
+    : vb.contratuais ? 'honorarios'
+    : 'sucumbenciais'
+}
+
+/**
  * Os avisos da análise, separados pelo que exige decisão.
  *
  * ANTES ERAM UMA LISTA CHAPADA de parágrafos de mesmo peso, dentro de um bloco
@@ -569,15 +587,8 @@ export function AnaliseRpvModal({
         // a parcela cedida —, quem escolhe é o destaque da contadoria, e sem
         // isto nenhum botão ficava marcado: a tela não dizia o que estava
         // sendo precificado.
-        const vb = (r as { dados?: { _verbas_negociadas?: Record<string, boolean> } })?.dados?._verbas_negociadas
-        if (vb) {
-          setCenario(
-            vb.principal && (vb.contratuais || vb.sucumbenciais) ? 'ambos'
-            : vb.principal ? 'principal'
-            : vb.contratuais ? 'honorarios'
-            : 'sucumbenciais',
-          )
-        }
+        const c = cenarioDasVerbas(r)
+        if (c) setCenario(c)
 
         // O CARTÓRIO CHEGA DEPOIS, e de propósito: a busca web leva dezenas de
         // segundos e, dentro da análise, derrubava o worker (HTTP 546).
@@ -729,10 +740,19 @@ export function AnaliseRpvModal({
     setTrocandoCenario(true)
     setErro(null)
     try {
+      // O SELETOR VENCE O CHAT. Se a pessoa ditou as verbas no chat ("tira os
+      // sucumbenciais") e depois clicou noutro cenário aqui, o clique é a
+      // decisão mais recente — então a escolha do chat sai da análise antes de
+      // ir. Sem isto o servidor, que dá precedência ao que o chat ditou,
+      // ignoraria o clique em silêncio. É a única chave interna que a tela
+      // toca, e só para apagá-la.
+      const { _verbas_manuais: _descartada, ...semVerbasDoChat } =
+        atual.dados as Record<string, unknown>
+      void _descartada
       const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
         acao: 'reprecificar',
         notas_kommo: notasKommo,
-        dados: atual.dados,
+        dados: semVerbasDoChat,
         emolumentos: regraCartorio ?? atual.emolumentos ?? null,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
         ...corpoCard,
@@ -777,6 +797,9 @@ export function AnaliseRpvModal({
         ...corpoCard,
       })
       setAtual(r)
+      // Se o chat ditou as verbas, o botão marcado tem de acompanhar.
+      const c = cenarioDasVerbas(r)
+      if (c) setCenario(c)
       setMensagens((m) => [...m, { papel: 'ia', texto: r.resposta || 'Alteração aplicada.' }])
       // A REVISÃO NÃO PRECISA MAIS RECONSULTAR NADA quando o preço muda: a
       // regra do estado já viajou junto e o motor recalculou o cartório do preço
