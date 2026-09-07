@@ -6,7 +6,7 @@
 // gera a planilha de Análise de RPV colorida (ExcelJS) e sobe no Drive em
 // A. Análises de crédito / {categoria} / {originador} / {cedente}.
 //
-// REAPROVEITA helpers idênticos da gerar-contrato (ver bloco "_shared" abaixo).
+// Helpers do Drive/Storage: importados de _shared/credijuris.ts (fonte única).
 // ============================================================================
 
 import { corsHeaders } from "../_shared/cors.ts";
@@ -25,243 +25,24 @@ import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import { ANO_TABELA_IRRF, irProgressivo } from "../_shared/irpf.ts";
 import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
-import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
+import {
+  driveEncontrarAnalisesRoot,
+  driveFindChildByTolerantName,
+  driveFindOrCreateFolder,
+  driveListarOriginadoresAnalise,
+  driveUploadBytes,
+  normalizar,
+  refreshGoogleAccessToken,
+  storageGetBytes,
+} from "../_shared/credijuris.ts";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
 
-// ----------------------------------------------------------------------------
-// Helpers compartilhados — em supabase/functions/_shared/credijuris.ts
-// (extraídos VERBATIM da gerar-contrato; ver arquivo _shared/credijuris.ts).
-// ----------------------------------------------------------------------------
+// Helpers do Drive e do Storage: _shared/credijuris.ts, fonte única para esta
+// função, a análise de precatório e a geração de contrato. Já viveram
+// copiados aqui "verbatim" — e a correção do upload teve de ser feita duas
+// vezes por causa disso.
 
-// ======================= HELPERS (extraídos da gerar-contrato) =======================
-// ============================================================================
-// _shared/credijuris.ts
-// Helpers compartilhados, EXTRAÍDOS VERBATIM da função gerar-contrato (testados).
-// Importados por gerar-analise-rpv. Não reescrever — fonte única de verdade.
-// ============================================================================
-
-// ---- constantes ----
-const DRIVE_ROOT_NAME = 'Credijuris - Atualizado';
-const DRIVE_ANALISES_NAME = 'A. Análises de crédito';
-const FOLDER_MIME = 'application/vnd.google-apps.folder';
-
-// ---- tipos ----
-type SB = SupabaseClient<any, any, any>;
-interface DriveFile { id: string; name: string; mimeType?: string; parents?: string[] }
-
-// ---- helpers ----
-
-function normalizar(s: string): string {
-  // Lowercase, sem acento, sem pontuação — pra busca.
-  // O range ̀-ͯ cobre as combining marks (NFD separa "á" em "a"+◌́);
-  // usar escapes Unicode em vez de caracteres literais sobrevive a deploys que
-  // corrompam encoding (cmd → CP1252 → Deno UTF-8 invalidaria chars literais).
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036F]/g, '')
-    .replace(/[.\-/() ]/g, '');
-}
-
-function escapeDriveQuery(s: string): string {
-  return s.replace(/'/g, "\\'");
-}
-
-async function storageGetBytes(sb: SB, bucket: string, path: string): Promise<Uint8Array> {
-  const { data, error } = await sb.storage.from(bucket).download(path);
-  if (error) throw new Error(`Storage download falhou (${bucket}/${path}): ${error.message}`);
-  const buf = await data.arrayBuffer();
-  return new Uint8Array(buf);
-}
-
-async function refreshGoogleAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<string> {
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-    }),
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Google OAuth refresh falhou (${res.status}): ${txt.slice(0, 300)}`);
-  }
-  const data = await res.json();
-  if (!data.access_token) throw new Error('Google OAuth: sem access_token na resposta');
-  return data.access_token as string;
-}
-
-async function driveListFiles(
-  token: string,
-  query: string,
-  driveId?: string,
-): Promise<DriveFile[]> {
-  const params = new URLSearchParams({
-    q: query,
-    fields: 'files(id,name,mimeType,parents)',
-    includeItemsFromAllDrives: 'true',
-    supportsAllDrives: 'true',
-    pageSize: '1000',
-  });
-  if (driveId) {
-    params.set('corpora', 'drive');
-    params.set('driveId', driveId);
-  } else {
-    params.set('corpora', 'allDrives');
-  }
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
-    headers: { Authorization: 'Bearer ' + token },
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Drive list (${res.status}): ${txt.slice(0, 300)} | query=${query}`);
-  }
-  const data = await res.json();
-  return data.files || [];
-}
-
-async function driveFindSharedDrive(token: string, name: string): Promise<{ id: string; name: string } | null> {
-  let pageToken: string | undefined;
-  while (true) {
-    const params = new URLSearchParams({ fields: 'nextPageToken,drives(id,name)' });
-    if (pageToken) params.set('pageToken', pageToken);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/drives?${params}`, {
-      headers: { Authorization: 'Bearer ' + token },
-    });
-    if (!res.ok) {
-      // pode não ter permissão de listar drives — não é fatal, segue pra busca normal
-      return null;
-    }
-    const data = await res.json();
-    for (const d of (data.drives || [])) if (d.name === name) return d;
-    pageToken = data.nextPageToken;
-    if (!pageToken) return null;
-  }
-}
-
-async function driveFindChild(token: string, name: string, parentId: string, mime?: string): Promise<DriveFile | null> {
-  let q = `name = '${escapeDriveQuery(name)}' and '${parentId}' in parents and trashed = false`;
-  if (mime) q += ` and mimeType = '${mime}'`;
-  const files = await driveListFiles(token, q);
-  return files[0] || null;
-}
-
-async function driveCreateFolder(token: string, name: string, parentId: string): Promise<string> {
-  const res = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' },
-    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parentId] }),
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Drive criar pasta '${name}' (${res.status}): ${txt.slice(0, 300)}`);
-  }
-  const data = await res.json();
-  return data.id;
-}
-
-async function driveFindOrCreateFolder(token: string, name: string, parentId: string): Promise<string> {
-  const existing = await driveFindChild(token, name, parentId, FOLDER_MIME);
-  if (existing) return existing.id;
-  return driveCreateFolder(token, name, parentId);
-}
-
-async function driveFindChildByTolerantName(
-  token: string,
-  parentId: string,
-  needle: string,
-  mustBeFolder = true,
-): Promise<DriveFile | null> {
-  let q = `'${parentId}' in parents and trashed = false`;
-  if (mustBeFolder) q += ` and mimeType = '${FOLDER_MIME}'`;
-  const files = await driveListFiles(token, q);
-  const n = normalizar(needle);
-  return files.find(f => normalizar(f.name) === n)
-      ?? files.find(f => normalizar(f.name).includes(n))
-      ?? null;
-}
-
-async function driveEncontrarAnalisesRoot(token: string): Promise<string> {
-  const drive = await driveFindSharedDrive(token, DRIVE_ROOT_NAME);
-  if (drive) {
-    const child = await driveFindChildByTolerantName(token, drive.id, DRIVE_ANALISES_NAME);
-    if (child) return child.id;
-    throw new Error(`Shared Drive '${DRIVE_ROOT_NAME}' achado, mas pasta '${DRIVE_ANALISES_NAME}' não existe nele.`);
-  }
-  const roots = await driveListFiles(token, `name = '${escapeDriveQuery(DRIVE_ROOT_NAME)}' and trashed = false and mimeType = '${FOLDER_MIME}'`);
-  if (!roots[0]) throw new Error(`'${DRIVE_ROOT_NAME}' não encontrado no Drive. Confirma que a conta do refresh_token tem acesso.`);
-  const child = await driveFindChildByTolerantName(token, roots[0].id, DRIVE_ANALISES_NAME);
-  if (!child) throw new Error(`Pasta '${DRIVE_ANALISES_NAME}' não existe dentro de '${DRIVE_ROOT_NAME}'.`);
-  return child.id;
-}
-
-async function driveListarOriginadoresAnalise(token: string, categoria: string): Promise<string[]> {
-  const analisesRootId = await driveEncontrarAnalisesRoot(token);
-  const catFolder = await driveFindChildByTolerantName(token, analisesRootId, categoria);
-  if (!catFolder) return [];
-  const subs = await driveListFiles(token, `'${catFolder.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
-  return subs.map(s => s.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-}
-
-async function driveUploadBytes(
-  token: string,
-  name: string,
-  parentId: string,
-  bytes: Uint8Array,
-  mime: string,
-  sobrescrever = true,
-): Promise<{ id: string; webViewLink?: string }> {
-  // SUBSTITUI O CONTEÚDO, NÃO APAGA O ARQUIVO.
-  //
-  // A versão anterior fazia DELETE no arquivo de mesmo nome e criava outro. Na
-  // API v3 o DELETE é definitivo — não passa pela lixeira —, então refazer uma
-  // análise apagava a anterior sem recuperação. E a resposta do DELETE não era
-  // conferida: falhando por permissão (drive compartilhado), o upload seguia e
-  // criava DUPLICATA com o mesmo nome. Agora o arquivo existente recebe o
-  // conteúdo novo como REVISÃO: mesmo id, mesmo link, e o Drive guarda as
-  // versões anteriores para quem precisar voltar.
-  const existing = sobrescrever ? await driveFindChild(token, name, parentId) : null;
-
-  // Multipart upload (mais simples que resumable pra arquivos pequenos). Na
-  // atualização os metadados não levam `parents`: o arquivo já está na pasta.
-  const boundary = '-------cred' + Math.random().toString(36).slice(2);
-  const metadata = JSON.stringify(existing ? { name } : { name, parents: [parentId] });
-  const enc = new TextEncoder();
-  const head = enc.encode(
-    `--${boundary}\r\n` +
-    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
-    `${metadata}\r\n` +
-    `--${boundary}\r\n` +
-    `Content-Type: ${mime}\r\n\r\n`,
-  );
-  const tail = enc.encode(`\r\n--${boundary}--\r\n`);
-  const body = new Uint8Array(head.length + bytes.length + tail.length);
-  body.set(head, 0);
-  body.set(bytes, head.length);
-  body.set(tail, head.length + bytes.length);
-
-  const url = existing
-    ? `https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink`
-    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink';
-  const res = await fetch(url, {
-    method: existing ? 'PATCH' : 'POST',
-    headers: {
-      Authorization: 'Bearer ' + token,
-      'Content-Type': `multipart/related; boundary=${boundary}`,
-    },
-    body,
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Drive ${existing ? 'atualizar' : 'upload'} '${name}' (${res.status}): ${txt.slice(0, 300)}`);
-  }
-  return await res.json();
-}
-// ===================== FIM DOS HELPERS COMPARTILHADOS =====================
 
 
 // ============================================================================

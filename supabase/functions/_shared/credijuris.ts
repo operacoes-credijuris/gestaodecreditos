@@ -1,14 +1,19 @@
 // _shared/credijuris.ts
-// Helpers de Google Drive genéricos, EXTRAÍDOS VERBATIM de gerar-contrato (a
-// função que os introduziu, portada de credijuris-contratos/Python). Também
-// usados por gerar-analise-rpv — antes desta extração eles viviam duplicados
-// nas duas functions; o comentário de topo de gerar-analise-rpv já prometia
-// este arquivo, sem ele existir. Fonte única agora.
+// Helpers de Google Drive, FONTE ÚNICA para gerar-contrato, gerar-analise-rpv e
+// analise-precatorio.
 //
-// O que NÃO está aqui: qualquer coisa específica de UMA function (leitura de
-// XLSX de análise, preenchimento de .docx, extração via Claude, a árvore de
-// pastas "B. Processos" vs "A. Análises de crédito" — cada function sabe o seu
-// caminho). Só o que as duas literalmente repetiam.
+// A HISTÓRIA IMPORTA PARA NÃO SE REPETIR. Estes helpers nasceram em
+// gerar-contrato, foram copiados "verbatim" para gerar-analise-rpv, e depois
+// extraídos para aqui — mas a cópia da RPV ficou lá, e a análise de precatório
+// ainda escreveu uma terceira versão de "achar a raiz das análises". Três
+// cópias do mesmo código, e no dia em que o upload passou a substituir em vez de
+// apagar (DELETE definitivo, sem lixeira), a correção teve de ser feita duas
+// vezes — e a terceira cópia não estava errada só por sorte. Agora todas as
+// functions importam daqui, e mudança aqui vale para todas.
+//
+// O que NÃO está aqui: o que é de UMA function só (leitura de XLSX, .docx,
+// extração via Claude, a árvore "B. Processos" dos contratos). A árvore "A.
+// Análises de crédito" ESTÁ, porque duas functions a percorrem do mesmo jeito.
 
 import { type SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
@@ -21,12 +26,21 @@ export interface DriveFile {
   parents?: string[]
 }
 
-/** Lowercase, sem acento, sem pontuação — pra comparar nomes de pasta/pessoa por busca tolerante. */
+/**
+ * Lowercase, sem acento, sem pontuação — pra comparar nomes de pasta/pessoa por
+ * busca tolerante.
+ *
+ * O range U+0300–U+036F cobre as marcas combinantes (NFD separa "á" em "a" +
+ * acento). Escrito com ESCAPES UNICODE, e não com os caracteres literais: um
+ * deploy que corrompa o encoding do arquivo (cmd → CP1252 → UTF-8) invalidaria
+ * os literais, e a busca tolerante passaria a não achar pasta nenhuma. A cópia
+ * que vivia em gerar-analise-rpv já trazia esse cuidado; esta não.
+ */
 export function normalizar(s: string): string {
   return s
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[.\-/() ]/g, '')
 }
 
@@ -181,8 +195,9 @@ export async function driveUploadBytes(
   // análise apagava a anterior sem recuperação. E a resposta do DELETE não era
   // conferida: falhando por permissão, o upload seguia e criava DUPLICATA com o
   // mesmo nome. Agora o arquivo existente recebe o conteúdo novo como REVISÃO:
-  // mesmo id, mesmo link, e o Drive guarda as versões anteriores. (Mesma
-  // correção da cópia local em gerar-analise-rpv — as duas têm de andar juntas.)
+  // mesmo id, mesmo link, e o Drive guarda as versões anteriores. Esta é a única
+  // implementação: a cópia que vivia em gerar-analise-rpv saiu, e é daqui que
+  // as três functions fazem upload.
   const existing = sobrescrever ? await driveFindChild(token, name, parentId) : null
 
   // Multipart upload (mais simples que resumable pra arquivos pequenos). Na
@@ -219,4 +234,51 @@ export async function driveUploadBytes(
     throw new Error(`Drive ${existing ? 'atualizar' : 'upload'} '${name}' (${res.status}): ${txt.slice(0, 300)}`)
   }
   return await res.json()
+}
+
+// ---------------------------------------------------------------------------
+// A árvore das análises de crédito
+//   {Shared Drive "Credijuris - Atualizado"} / A. Análises de crédito / {categoria} / {originador} / {cedente}
+// Percorrida por gerar-analise-rpv e analise-precatorio do mesmo jeito.
+// ---------------------------------------------------------------------------
+
+export const DRIVE_ROOT_NAME = 'Credijuris - Atualizado'
+export const DRIVE_ANALISES_NAME = 'A. Análises de crédito'
+
+/**
+ * A pasta "A. Análises de crédito", dentro do Drive compartilhado.
+ *
+ * Tenta o Shared Drive pelo nome; sem permissão de listar drives, cai na busca
+ * por pasta com esse nome em qualquer drive. Falha com mensagem que diz o que
+ * não foi achado — a conta do refresh_token pode simplesmente não ter acesso.
+ */
+export async function driveEncontrarAnalisesRoot(token: string): Promise<string> {
+  const drive = await driveFindSharedDrive(token, DRIVE_ROOT_NAME)
+  if (drive) {
+    const child = await driveFindChildByTolerantName(token, drive.id, DRIVE_ANALISES_NAME)
+    if (child) return child.id
+    throw new Error(`Shared Drive '${DRIVE_ROOT_NAME}' achado, mas pasta '${DRIVE_ANALISES_NAME}' não existe nele.`)
+  }
+  const roots = await driveListFiles(
+    token,
+    `name = '${escapeDriveQuery(DRIVE_ROOT_NAME)}' and trashed = false and mimeType = '${FOLDER_MIME}'`,
+  )
+  if (!roots[0]) {
+    throw new Error(`'${DRIVE_ROOT_NAME}' não encontrado no Drive. Confirme se a conta do refresh_token tem acesso.`)
+  }
+  const child = await driveFindChildByTolerantName(token, roots[0].id, DRIVE_ANALISES_NAME)
+  if (!child) throw new Error(`Pasta '${DRIVE_ANALISES_NAME}' não existe dentro de '${DRIVE_ROOT_NAME}'.`)
+  return child.id
+}
+
+/** Os originadores (intermediadores) que já têm pasta numa categoria, em ordem alfabética. */
+export async function driveListarOriginadoresAnalise(token: string, categoria: string): Promise<string[]> {
+  const analisesRootId = await driveEncontrarAnalisesRoot(token)
+  const catFolder = await driveFindChildByTolerantName(token, analisesRootId, categoria)
+  if (!catFolder) return []
+  const subs = await driveListFiles(
+    token,
+    `'${catFolder.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`,
+  )
+  return subs.map((s) => s.name).sort((a, b) => a.localeCompare(b, 'pt-BR'))
 }

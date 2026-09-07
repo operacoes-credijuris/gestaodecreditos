@@ -43,13 +43,10 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, segredoGoogle } from '../_shared/segredos.ts'
 import {
-  FOLDER_MIME,
+  driveEncontrarAnalisesRoot,
   driveFindChildByTolerantName,
   driveFindOrCreateFolder,
-  driveFindSharedDrive,
-  driveListFiles,
   driveUploadBytes,
-  escapeDriveQuery,
   refreshGoogleAccessToken,
   storageGetBytes,
 } from '../_shared/credijuris.ts'
@@ -71,8 +68,6 @@ const ABA = 'Análise Jurídica'
 const BUCKET_TEMPLATES = 'contratos-templates'
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-const DRIVE_ROOT_NAME = 'Credijuris - Atualizado'
-const DRIVE_ANALISES_NAME = 'A. Análises de crédito'
 const CATEGORIA = 'Precatórios'
 
 /** Teto do texto do processo mandado ao modelo. Corta o MEIO, mantendo pontas. */
@@ -468,30 +463,10 @@ function cortarTexto(t: string): { texto: string; cortou: boolean } {
 }
 
 // ---------------------------------------------------------------------------
-// Drive
+// Drive — a árvore "A. Análises de crédito" mora em _shared/credijuris.ts
+// (driveEncontrarAnalisesRoot), a mesma que a análise de RPV percorre. Havia
+// aqui uma terceira cópia dela; saiu.
 // ---------------------------------------------------------------------------
-
-async function acharRaizAnalises(token: string): Promise<string> {
-  const drive = await driveFindSharedDrive(token, DRIVE_ROOT_NAME)
-  const raizId = drive
-    ? drive.id
-    : (
-        await driveListFiles(
-          token,
-          `name = '${escapeDriveQuery(DRIVE_ROOT_NAME)}' and trashed = false and mimeType = '${FOLDER_MIME}'`,
-        )
-      )[0]?.id
-  if (!raizId) {
-    throw new Error(
-      `'${DRIVE_ROOT_NAME}' não encontrado no Drive. Confirme se a conta do refresh_token tem acesso.`,
-    )
-  }
-  const filha = await driveFindChildByTolerantName(token, raizId, DRIVE_ANALISES_NAME)
-  if (!filha) {
-    throw new Error(`Pasta '${DRIVE_ANALISES_NAME}' não existe dentro de '${DRIVE_ROOT_NAME}'.`)
-  }
-  return filha.id
-}
 
 const limparNomeArquivo = (s: string) =>
   s.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 180)
@@ -862,7 +837,7 @@ Deno.serve(async (req: Request) => {
       google.client_secret,
       google.refresh_token,
     )
-    const raiz = await acharRaizAnalises(token)
+    const raiz = await driveEncontrarAnalisesRoot(token)
     const catFolder = await driveFindChildByTolerantName(token, raiz, CATEGORIA)
     const catId = catFolder?.id ?? (await driveFindOrCreateFolder(token, CATEGORIA, raiz))
     const originador = (body.originador || 'Sem originador').trim()
