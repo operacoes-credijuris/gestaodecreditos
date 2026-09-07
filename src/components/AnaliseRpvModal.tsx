@@ -38,6 +38,9 @@ import { Button } from '@/components/ui/Button'
 import { Loading } from '@/components/ui/Table'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import { montarTextoDoProcesso, type PaginaLida } from '@/lib/textoDoProcesso'
+import { descreverSelecao, escolherPaginasParaImagem } from '@/lib/paginasDigitalizadas'
+import { renderizarPaginas } from '@/lib/renderizarPaginas'
+import { supabase } from '@/lib/supabase'
 
 /** Fração -> "35,20%": formatPercent espera pontos percentuais. */
 const pctBR = (fracao: number) => formatPercent(fracao * 100)
@@ -573,12 +576,18 @@ export function AnaliseRpvModal({
         // de conta, homologação, requisitório e sentença — não mais 60% do
         // início, que é petição inicial e documento pessoal.
         const legiveis = arquivos.filter((a) => a.texto.trim().length > 0)
-        const ilegiveis = arquivos.filter((a) => a.texto.trim().length === 0)
-        if (legiveis.length === 0) {
+        // PÁGINAS DIGITALIZADAS VÃO COMO IMAGEM (lib/paginasDigitalizadas.ts):
+        // arquivo inteiro escaneado, ou as páginas escaneadas dentro de um
+        // arquivo com texto — o caso híbrido da conta da contadoria em imagem.
+        const selecao = escolherPaginasParaImagem(arquivos)
+        const emImagem = new Set(selecao.map((x) => x.arquivo))
+        // "Ilegível" é só o que não tem texto E não vai como imagem.
+        const ilegiveis = arquivos.filter((a) => a.texto.trim().length === 0 && !emImagem.has(a.nome))
+        if (legiveis.length === 0 && selecao.length === 0) {
           const porque = arquivos
             .map((a) => `"${a.nome}": ${a.erro ?? (a.digitalizado ? `${a.paginas} página(s), ${a.densidade} caractere(s) por página — digitalizado` : 'sem texto selecionável')}`)
             .join('; ')
-          throw new Error(`Nenhum anexo do card tem texto para ler. ${porque || 'Nenhum PDF encontrado.'}`)
+          throw new Error(`Nenhum anexo do card tem texto para ler nem página para enviar como imagem. ${porque || 'Nenhum PDF encontrado.'}`)
         }
         const paginas: PaginaLida[] = legiveis.flatMap((a) =>
           (a.paginasTexto ?? [a.texto]).map((texto, i) => ({ arquivo: a.nome, numero: i + 1, texto })),
@@ -589,19 +598,54 @@ export function AnaliseRpvModal({
           t += '\n\nANEXOS DO CARD QUE NÃO DEU PARA LER (o dado pode estar neles — NÃO conclua que a informação não existe nos autos): ' +
             ilegiveis.map((a) => `"${a.nome}" (${a.erro ?? (a.digitalizado ? `${a.paginas} páginas digitalizadas` : 'sem texto')})`).join('; ')
         }
-        // Páginas de imagem dentro de arquivos legíveis (o caso híbrido: a
-        // conta escaneada no meio do processo digital) — dito à IA pelo número.
-        const hibridas = legiveis
-          .filter((a) => (a.paginasImagem?.length ?? 0) > 0)
-          .map((a) => `"${a.nome}": páginas ${a.paginasImagem!.slice(0, 40).join(', ')}${a.paginasImagem!.length > 40 ? '…' : ''}`)
-        if (hibridas.length) {
-          t += '\n\nPÁGINAS DIGITALIZADAS (sem texto) DENTRO DOS ARQUIVOS ACIMA: ' + hibridas.join('; ') +
-            '. Se a conta ou o requisitório estiverem nelas, devolva null nos valores e diga isso em origem_valores.'
+        // RENDERIZA E SOBE AS PÁGINAS DIGITALIZADAS. A função lê
+        // {userId}/{jobId}/processo/ e manda as imagens à IA junto com o texto.
+        // Falha em uma página não derruba as outras; falha em todas, com texto
+        // disponível, segue só com o texto e avisa.
+        let jobId: string | undefined
+        if (selecao.length) {
+          const totalSel = selecao.reduce((n, x) => n + x.numeros.length, 0)
+          setPasso(`Preparando ${totalSel} página(s) digitalizada(s) para leitura por imagem…`)
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) throw new Error('Sessão expirada — faça login de novo.')
+          jobId = crypto.randomUUID()
+          let enviadas = 0
+          const falhas: string[] = []
+          for (const sel of selecao) {
+            const { imagens, falhas: f } = await renderizarPaginas(sel.bytes, sel.numeros, (feitas) => {
+              setPasso(`Renderizando "${sel.arquivo}" (${feitas}/${sel.numeros.length} página(s))…`)
+            })
+            if (f.length) falhas.push(`"${sel.arquivo}" p. ${f.join(', ')}: não renderizou`)
+            const base = sel.arquivo.replace(/\.pdf$/i, '').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'arquivo'
+            for (const img of imagens) {
+              const caminho = `${user.id}/${jobId}/processo/${base}-p${String(img.numero).padStart(4, '0')}.jpg`
+              const { error } = await supabase.storage
+                .from('analises-input')
+                .upload(caminho, img.blob, { contentType: 'image/jpeg', upsert: true })
+              if (error) { falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${error.message}`); continue }
+              enviadas++
+              setPasso(`Enviando páginas digitalizadas (${enviadas}/${totalSel})…`)
+            }
+          }
+          if (enviadas === 0) {
+            jobId = undefined
+            if (legiveis.length === 0) {
+              throw new Error(
+                `Não consegui enviar as páginas digitalizadas para leitura por imagem: ${falhas.slice(0, 3).join('; ')}. ` +
+                'Se a mensagem falar de permissão (policy/RLS), a migração 0055 ainda não rodou.',
+              )
+            }
+            t += `\n\nHAVIA PÁGINAS DIGITALIZADAS (${descreverSelecao(selecao)}) e NÃO foi possível enviá-las como imagem: ${falhas.slice(0, 3).join('; ')}. Se a conta ou o requisitório estiverem nelas, devolva null nos valores e diga isso em origem_valores.`
+          } else {
+            t += `\n\nPÁGINAS DIGITALIZADAS ENVIADAS COMO IMAGEM (${enviadas}): ${descreverSelecao(selecao)}. Leia-as como parte dos autos.`
+            if (falhas.length) t += ` Não foi possível enviar: ${falhas.slice(0, 5).join('; ')}.`
+          }
         }
         setPasso('Qualificando e precificando…')
         const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
           acao: 'analisar',
           texto: t,
+          job_id: jobId,
           notas_kommo: notasKommo,
           ...corpoCard,
         })

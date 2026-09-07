@@ -1829,6 +1829,8 @@ Deno.serve(async (req) => {
     let contentBlocks: any[] = [];
     let arquivos: Array<{ name: string }> = [];
     let prefix = '';
+    /** Quantas páginas digitalizadas foram à IA como imagem. */
+    let paginasImagem = 0;
     const textoDireto = String(body.texto ?? body.texto_processo ?? '').trim();
     // SÓ QUEM LÊ O PROCESSO PRECISA DELE. 'refinar', 'reprecificar' e 'salvar'
     // trabalham sobre a análise que já veio pronta do navegador — exigir o texto
@@ -1838,24 +1840,53 @@ Deno.serve(async (req) => {
     if (!precisaDoProcesso) {
       // Nada a ler. O corte de conteúdo foi registrado na análise original e
       // viaja dentro de `dados`, então o aviso não se perde nas rodadas seguintes.
-    } else if (textoDireto) {
-      contentBlocks = [{ type: 'text', text: `[Documento do processo]\n\n${textoDireto}` }];
+    } else {
+      if (!textoDireto && !jobId) return errorResponse('Faltou o texto do processo (ou o job_id).');
+      if (textoDireto) contentBlocks.push({ type: 'text', text: `[Documento do processo]\n\n${textoDireto}` });
+
+      // TEXTO E IMAGEM JUNTOS, e não um OU outro. Era "ou": texto do navegador
+      // OU arquivos do Storage. Processo digitalizado, que não tem texto, era
+      // recusado na porta; e a conta da contadoria escaneada dentro de um
+      // processo digital simplesmente não era lida — a IA concluía "não há
+      // conta". Agora o navegador renderiza as páginas sem texto (pdf.js) e as
+      // sobe em {userId}/{jobId}/processo/; elas entram aqui como imagem, ao
+      // lado do texto das outras páginas. A IA lê tabela numérica em imagem
+      // muito melhor que um OCR local, e é a tabela que decide o preço.
+      if (jobId) {
+        prefix = `${userId}/${jobId}/processo`;
+        const { data: arqs, error: listErr } = await sbAdmin.storage.from(BUCKET_INPUT).list(prefix, { limit: 200 });
+        if (listErr) throw new Error('Erro listando uploads: ' + listErr.message);
+        if (!arqs?.length && !textoDireto) return errorResponse('Nenhum arquivo encontrado para esse job. Faça o upload do processo antes de gerar.');
+        arquivos = (arqs ?? []).filter((a: { name?: string }) => !!a.name && !a.name.startsWith('.'));
+        // Pelo nome: o navegador nomeia por arquivo e página (…-p0042.jpg), então
+        // a ordem alfabética é a ordem do processo.
+        arquivos.sort((a, b) => a.name.localeCompare(b.name));
+        const ehImagem = (n: string) => /\.(png|jpe?g|webp|gif)$/i.test(n);
+        const imagens = arquivos.filter((a) => ehImagem(a.name));
+        const outros = arquivos.filter((a) => !ehImagem(a.name));
+        // Teto por pedido (a API aceita 100; 60 deixa folga para o texto). Se
+        // ainda assim sobrar, ficam as ÚLTIMAS: o navegador já escolheu fim e
+        // começo, e entre os dois o fim é onde estão a conta e o requisitório.
+        const MAX_IMAGENS = 60;
+        const imagensEnviadas = imagens.slice(-MAX_IMAGENS);
+        if (imagensEnviadas.length) {
+          contentBlocks.push({
+            type: 'text',
+            text: `[PÁGINAS DIGITALIZADAS DOS AUTOS, enviadas como imagem: ${imagensEnviadas.length}. São páginas do MESMO processo do texto acima — leia-as como parte dos autos. A conta da contadoria, a homologação e o requisitório podem estar SÓ nelas. O nome de cada imagem diz o arquivo e a página de origem.]`,
+          });
+        }
+        for (const a of [...outros, ...imagensEnviadas]) {
+          const bytes = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${a.name}`);
+          contentBlocks.push(...await arquivoToContentBlocks(a.name, bytes));
+        }
+        paginasImagem = imagensEnviadas.length;
+      }
+
       // AS ANOTAÇÕES DO CARD ENTRAM NA LEITURA. Antes só um regex do navegador as
       // lia, para três campos. Elas trazem o que o comercial já apurou — parcela
       // cedida, percentual de honorários, o que o cedente disse — e a IA precisa
       // disso tanto quanto dos autos. Decisão do dono.
       if (notasKommo) contentBlocks.push({ type: 'text', text: `[Anotações do card no Kommo, do comercial]\n\n${capNotas(notasKommo)}` });
-    } else {
-      if (!jobId) return errorResponse('Faltou o texto do processo (ou o job_id).');
-      prefix = `${userId}/${jobId}/processo`;
-      const { data: arqs, error: listErr } = await sbAdmin.storage.from(BUCKET_INPUT).list(prefix, { limit: 50 });
-      if (listErr) throw new Error('Erro listando uploads: ' + listErr.message);
-      if (!arqs?.length) return errorResponse('Nenhum PDF encontrado para esse job. Faça o upload do processo antes de gerar.');
-      arquivos = arqs;
-      for (const a of arquivos) {
-        const bytes = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${a.name}`);
-        contentBlocks.push(...await arquivoToContentBlocks(a.name, bytes));
-      }
     }
     const houveCorte = contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
 
@@ -1896,6 +1927,14 @@ Deno.serve(async (req) => {
     // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
     dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
     dados._houveCorte = houveCorte;
+    dados._paginas_imagem = paginasImagem;
+    // AS PÁGINAS SUBIDAS SÓ SERVEM À LEITURA, que acabou: saem já. Antes a
+    // limpeza ficava para o 'salvar', que não sabe quais arquivos são — e a
+    // preliminar que nunca é salva deixava tudo no bucket.
+    if (arquivos.length) {
+      try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ }
+      arquivos = [];
+    }
     }
     dados.originador = originador;
     if (numeroProcesso) dados.numero_processo = numeroProcesso;
@@ -2307,6 +2346,11 @@ Deno.serve(async (req) => {
     }
     if (dados._houveCorte)
       avisosBase.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.');
+    if (Number(dados._paginas_imagem) > 0)
+      avisosBase.push(
+        `⚠️ ${Number(dados._paginas_imagem)} página(s) digitalizada(s) foram lidas POR IMAGEM, não por texto. A leitura é boa mas não é infalível — ` +
+        'confira os valores (bruto, IR, INSS, honorários) contra a conta da contadoria antes de fechar.',
+      );
     // O QUE ENTROU NO PREÇO, verba a verba, com o deságio de cada uma. É o aviso
     // que responde à pergunta que o número sozinho não responde: 30% de deságio
     // sobre o quê. Havendo principal, os honorários vão pelo valor de face e o
