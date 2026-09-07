@@ -277,6 +277,11 @@ O QUE INTERESSA: a tabela precisa cobrir dois atos — ESCRITURA PÚBLICA com co
 
 PREFIRA O ARQUIVO, NÃO A PÁGINA. A página costuma trazer só o cabeçalho e as notas; as linhas numéricas estão dentro de um PDF anexo. Se a busca mostrar o endereço do anexo, é ele que você registra.
 
+DUAS EXCEÇÕES A ISSO, E ELAS VALEM MUITO. Abrir um PDF custa caro: ele é processado página a página, e provimento de tribunal tem dezenas de páginas para duas tabelas que ocupam duas delas.
+(a) Se existir uma página HTML que traga A TABELA INTEIRA com as linhas numéricas — vários tribunais e sindicatos publicam assim —, registre ELA em primeiro lugar. Só a tabela, não um resumo.
+(b) Se o PDF certo for um ato normativo grande e existir o ANEXO SOLTO com só as tabelas, registre o anexo, não o ato inteiro.
+Diga em "descricao" se o endereço é HTML com a tabela ou PDF, e quantas páginas o PDF tem, se a busca disser.
+
 Devolva de um a três endereços, do mais provável para o menos, chamando registrar_documentos uma única vez. Seja rápido: poucas buscas, sem abrir arquivos.`
 }
 
@@ -335,7 +340,28 @@ async function conversar(
   const mensagens: Anthropic.MessageParam[] = [{ role: 'user', content: sistema }]
   const ferramentas: unknown[] = [ferramenta]
   if (buscas > 0) ferramentas.push({ type: 'web_search_20260209', name: 'web_search', max_uses: buscas })
-  if (fetches > 0) ferramentas.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: fetches })
+  if (fetches > 0) {
+    ferramentas.push({
+      type: 'web_fetch_20260209',
+      name: 'web_fetch',
+      max_uses: fetches,
+      // TETO NO TAMANHO DO DOCUMENTO ABERTO, e é ele que segurava o relógio.
+      //
+      // O que se abre aqui é provimento de tribunal, e provimento de tribunal
+      // tem oitenta, cento e vinte páginas — a tabela de emolumentos é um anexo
+      // no meio de um ato normativo inteiro. Sem teto, o documento entra
+      // COMPLETO no pedido; e PDF não entra só como texto: o modelo processa
+      // cada página TAMBÉM como imagem, ao custo de uns 2.300 tokens por página.
+      // Um anexo de cem páginas são mais de duzentos mil tokens de entrada para
+      // ler duas tabelas — e é tempo de parede, que é o que faltava.
+      //
+      // 40 mil tokens cobrem com folga o trecho que interessa. Cortando cedo
+      // demais o modelo diz que não achou a tabela e a etapa tenta o próximo
+      // documento da lista, que é um desfecho previsto e barato; sem teto, a
+      // etapa morre por tempo e o estado inteiro entra em repouso.
+      max_content_tokens: 40000,
+    })
+  }
 
   const pedir = () =>
     anthropic.messages
