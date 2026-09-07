@@ -125,6 +125,8 @@ type ResultadoJuridico = {
   avisos?: string[]
   drive_file_url?: string | null
   drive_folder_url?: string | null
+  /** Os campos do cadastro do comercial, preenchidos com o que a análise leu dos autos. */
+  ficha?: FichaDoCredito
   erro?: string
 }
 
@@ -360,10 +362,28 @@ async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
   return lidos
 }
 
+/**
+ * A primeira linha da anotação da ANÁLISE JURÍDICA do precatório.
+ *
+ * NÃO É "APROVADO", e a diferença não é de estilo. Esta etapa preenche um
+ * questionário e para ali: o bloco "Critérios de Aceitação e Recusa" do modelo
+ * é régua que uma PESSOA aplica, e aprovar ou reprovar é clique de gente —
+ * decisão do dono, e o oposto do RPV, que tem portão automático. Escrever
+ * "APROVADO" no card afirmaria uma decisão que ninguém tomou, e o comercial age
+ * sobre o que está escrito ali.
+ */
+const VEREDITO_JURIDICO = '✅ ANÁLISE JURÍDICA CONCLUÍDA.'
+
 // Escreve o resultado da análise no card do Kommo. Os TEXTOS moram em
 // lib/anotacaoKommo.ts — é o único pedaço da análise que o comercial lê, então
 // o formato é regra de negócio e fica onde dá para testar.
-async function anotarResultadoNaKommo(leadId: number, r: ResultadoAnalise, analista: string) {
+async function anotarResultadoNaKommo(
+  leadId: number,
+  r: ResultadoAnalise,
+  analista: string,
+  /** A primeira linha do veredito. Omitido = aprovado na análise automática. */
+  veredito?: string,
+) {
   const textos = anotacoesDaAnalise({
     reprovado: r.reprovado,
     motivo: r.motivo,
@@ -375,6 +395,7 @@ async function anotarResultadoNaKommo(leadId: number, r: ResultadoAnalise, anali
     ficha: r.ficha,
     avisos: r.avisos,
     analista,
+    veredito,
   })
   // UMA POR VEZ, e não em paralelo: o feed do Kommo ordena pela chegada, e duas
   // chamadas simultâneas trocariam a ficha com o veredito na tela do comercial.
@@ -936,8 +957,17 @@ export default function AnaliseCredito() {
         numero_processo: dados.numero,
         cedente: dados.cedente,
         originador: dados.intermediador,
+        // O QUE ESTÁ SENDO CEDIDO, do título do card — as mesmas regras da RPV.
+        // Sem isto a ficha do precatório não saberia sobre que verbas é o
+        // negócio, e o VALOR CEDIDO sairia do crédito inteiro.
+        tipo_aquisicao: dados.tipo_aquisicao,
+        honorarios_pct: dados.honorarios_pct,
       })
       setResultadoJuridico((p) => ({ ...p, [id]: r }))
+      // A ANOTAÇÃO NO CARD, como na RPV: a ficha do crédito e o veredito.
+      // Antes esta etapa não escrevia nada no Kommo — quem rodava a análise via
+      // o resultado na tela, e o comercial não via nada.
+      void anotarResultadoNaKommo(id, r as unknown as ResultadoAnalise, analistaNome, VEREDITO_JURIDICO)
     } catch (e) {
       setResultadoJuridico((p) => ({
         ...p,

@@ -3,6 +3,7 @@ import {
   montarParcelas,
   calibrarDesagio,
   aplicarAuditoria,
+  rotuloDoCenario,
   type Parcela,
 } from '../../../supabase/functions/_shared/precificacao.ts'
 import type { RegraEmolumentos } from '../../../supabase/functions/_shared/emolumentos-calculo.ts'
@@ -307,5 +308,46 @@ describe('deságio ditado', () => {
     const r = calibrarDesagio({ parcelas, T5: 12, alvo: 0.028, regra: REGRA, desagioFixo: null })
     expect(r.atingiuAlvo).toBe(true)
     expect(r.Y9).toBeGreaterThanOrEqual(0.028)
+  })
+})
+
+/**
+ * O nome do cenário, escrito nos dois fluxos.
+ *
+ * Testado porque agora tem DOIS leitores em lugares diferentes: a célula C3 da
+ * aba jurídica da RPV (onde os quatro valores são uma lista suspensa, e texto
+ * fora dela entra marcado como inválido) e a ficha que a análise do precatório
+ * escreve no card do Kommo. Divergirem faz o comercial ler dois vocabulários
+ * para a mesma coisa, e faz a planilha recusar o valor.
+ */
+describe('rotuloDoCenario', () => {
+  it('os quatro valores da lista suspensa da C3', () => {
+    expect(rotuloDoCenario({ principal: true, contratuais: false, sucumbenciais: false }))
+      .toBe('Crédito principal — apenas')
+    expect(rotuloDoCenario({ principal: true, contratuais: true, sucumbenciais: true }))
+      .toBe('Crédito principal + Honorários')
+    expect(rotuloDoCenario({ principal: false, contratuais: true, sucumbenciais: true }))
+      .toBe('Honorários contratuais + sucumbenciais')
+    expect(rotuloDoCenario({ principal: false, contratuais: false, sucumbenciais: true }))
+      .toBe('Honorários sucumbenciais — apenas')
+  })
+
+  it('principal com UMA verba de honorário ainda é "principal + honorários"', () => {
+    expect(rotuloDoCenario({ principal: true, contratuais: true, sucumbenciais: false }))
+      .toBe('Crédito principal + Honorários')
+    expect(rotuloDoCenario({ principal: true, contratuais: false, sucumbenciais: true }))
+      .toBe('Crédito principal + Honorários')
+  })
+
+  it('contratuais sem sucumbenciais usa o rótulo das duas, porque a lista não tem outro', () => {
+    // Ceder os contratuais deixando os sucumbenciais de fora é o caso raro:
+    // quase sempre o card que diz "contratuais" é processo SEM sucumbenciais.
+    expect(rotuloDoCenario({ principal: false, contratuais: true, sucumbenciais: false }))
+      .toBe('Honorários contratuais + sucumbenciais')
+  })
+
+  it('sem verba nenhuma não inventa rótulo', () => {
+    // Vazio some da ficha em vez de virar uma linha "PARCELA CEDIDA: —".
+    expect(rotuloDoCenario({ principal: false, contratuais: false, sucumbenciais: false })).toBe('')
   })
 })

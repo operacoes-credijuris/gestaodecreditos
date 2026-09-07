@@ -49,6 +49,18 @@ export interface EntradaAnotacao {
   avisos?: unknown
   /** Quem rodou a análise. Assina o veredito; a ficha não leva assinatura. */
   analista?: string
+  /**
+   * A primeira linha da segunda anotação. Padrão: aprovado na análise
+   * automática.
+   *
+   * Existe porque NÃO TODO FLUXO APROVA. A análise jurídica do precatório
+   * preenche um questionário e para ali: o bloco "Critérios de Aceitação e
+   * Recusa" do modelo é régua que uma PESSOA aplica, e aprovar ou reprovar é
+   * clique de gente — decisão do dono, e o oposto do RPV, que tem portão
+   * automático. Escrever "APROVADO" ali afirmaria uma decisão que ninguém
+   * tomou, e o comercial age sobre o que está escrito no card.
+   */
+  veredito?: string
 }
 
 /**
@@ -123,10 +135,9 @@ export function anotacoesDaAnalise(e: EntradaAnotacao): string[] {
   }
 
   const ficha = linhasDaFicha(e.ficha).join('\n')
+  const cabeca = e.veredito?.trim() || '✅ APROVADO na análise automática.'
   const veredito = [
-    e.link
-      ? `✅ APROVADO na análise automática.\nPlanilha e análise no Drive: ${e.link}`
-      : '✅ APROVADO na análise automática. (Confira a pasta do Drive.)',
+    e.link ? `${cabeca}\nPlanilha e análise no Drive: ${e.link}` : `${cabeca} (Confira a pasta do Drive.)`,
     alertasDaAnotacao(e.avisos).join('\n'),
   ]
     .filter((b) => b.trim())

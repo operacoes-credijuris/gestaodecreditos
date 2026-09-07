@@ -41,6 +41,34 @@ export interface VerbasNegociadas {
   sucumbenciais: boolean
 }
 
+/**
+ * Como o cenário se chama — os quatro valores da lista suspensa da C3.
+ *
+ * Mora aqui porque DOIS FLUXOS o escrevem: a análise de RPV, na célula C3 da aba
+ * jurídica, e a análise jurídica do precatório, na ficha que volta ao card do
+ * Kommo. O comercial lê os dois no mesmo lugar, e não deve ter de aprender dois
+ * vocabulários por causa de uma diferença que só existe do nosso lado.
+ *
+ * Não há rótulo para "contratuais apenas": a lista da planilha não tem, e a
+ * razão é que ceder os contratuais sem os sucumbenciais é o caso raro — quase
+ * sempre o card que diz "contratuais" é um processo SEM sucumbenciais.
+ *
+ * A gerar-analise-rpv atribui o rótulo ramo por ramo em vez de chamar isto num
+ * ponto só, e de propósito: quando o card diz "honorários" sem dizer quais e os
+ * autos têm uma verba só, ela ESTREITA o rótulo para a verba que existe. Aqui,
+ * que recebe só as verbas pedidas, não haveria como saber disso.
+ */
+export function rotuloDoCenario(v: VerbasNegociadas): string {
+  if (v.principal) {
+    return v.contratuais || v.sucumbenciais
+      ? 'Crédito principal + Honorários'
+      : 'Crédito principal — apenas'
+  }
+  if (v.contratuais) return 'Honorários contratuais + sucumbenciais'
+  if (v.sucumbenciais) return 'Honorários sucumbenciais — apenas'
+  return ''
+}
+
 /** Os valores do crédito, como saem dos autos ou como a auditoria os revisa. */
 export interface ValoresCredito {
   brutoTotal: number

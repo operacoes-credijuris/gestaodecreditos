@@ -53,6 +53,7 @@ import {
   refreshGoogleAccessToken,
   storageGetBytes,
 } from '../_shared/credijuris.ts'
+import { montarParcelas, rotuloDoCenario, type VerbasNegociadas } from '../_shared/precificacao.ts'
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import ExcelJS from 'npm:exceljs@4.4.0'
 
@@ -361,8 +362,37 @@ const FERRAMENTA = {
         description:
           'Três a cinco linhas sobre o crédito: o que é, em que fase está, e o que mais pesa no risco.',
       },
+      ficha: {
+        type: 'object',
+        description:
+          'OS DADOS DO CRÉDITO EM CAMPOS, para a anotação que volta ao card do Kommo. ' +
+          'É a mesma leitura que você já fez para o questionário, agora em campos separados — o comercial lê ISTO no card, não a planilha. ' +
+          'Número que você não achou nos autos vai como null; não estime, porque ele aparece no card como se fosse lido.',
+        properties: {
+          tribunal: { type: ['string', 'null'], description: 'sigla do tribunal onde tramita, ex.: "TJSP", "TRF3", "TRT2"' },
+          entidade_devedora: { type: ['string', 'null'], description: 'quem vai pagar, ex.: "Estado de São Paulo", "Município de Campinas", "União"' },
+          cedente_nome: { type: ['string', 'null'], description: 'nome completo do titular do crédito, SEM o CPF' },
+          bruto_total: { type: ['number', 'null'], description: 'valor BRUTO atualizado do precatório, número sem R$: o total antes de qualquer retenção. INCLUI os honorários contratuais destacados, porque saem de dentro dele; NÃO inclui os sucumbenciais, que têm campo próprio' },
+          ir: { type: ['number', 'null'], description: 'IR retido sobre o principal, número. 0 quando não há' },
+          inss: { type: ['number', 'null'], description: 'contribuição previdenciária retida, número. 0 quando não há' },
+          honorarios_contratuais: { type: ['number', 'null'], description: 'honorários contratuais DESTACADOS, número. 0 quando não houve destaque (art. 22 §4º da Lei 8.906/94)' },
+          honorarios_sucumbenciais: { type: ['number', 'null'], description: 'honorários sucumbenciais, número. 0 quando não há. Verba própria, paga pelo vencido, por fora do crédito do credor' },
+          honorarios_contratuais_pct: {
+            type: ['number', 'null'],
+            description:
+              'A PORCENTAGEM dos honorários contratuais sobre o crédito, em pontos (30 = 30%). ' +
+              'PROCURE A PORCENTAGEM ESCRITA, primeiro: contrato de honorários juntado aos autos, petição que pede o destaque do art. 22 §4º, despacho que o defere, e muitas vezes a própria conta da contadoria. ' +
+              'SÓ SE NÃO HOUVER EM PARTE NENHUMA, calcule: o valor dos honorários dividido pelo valor do crédito, os dois DO MESMO DOCUMENTO — de preferência a conta da contadoria, que é onde as duas linhas convivem e a base é a que valeu de verdade. Não monte uma base de outra peça',
+          },
+          honorarios_contratuais_pct_origem: {
+            type: ['string', 'null'],
+            description: 'de onde saiu a porcentagem, em uma linha: a peça que a traz escrita ("contrato de honorários, fl. 12"), ou a divisão que você fez com os dois números ("R$ 12.400 / R$ 41.333 da conta da contadoria")',
+          },
+        },
+        required: ['tribunal', 'entidade_devedora', 'cedente_nome', 'bruto_total'],
+      },
     },
-    required: ['respostas', 'avisos', 'resumo'],
+    required: ['respostas', 'avisos', 'resumo', 'ficha'],
   },
 }
 
@@ -481,6 +511,10 @@ Deno.serve(async (req: Request) => {
       numero_processo?: string
       cedente?: string
       originador?: string
+      /** O que está sendo cedido, do título do card. Ver lerTituloCard/classificarParcelaCedida. */
+      tipo_aquisicao?: string
+      /** % dos honorários contratuais que o comercial cadastrou, em pontos. */
+      honorarios_pct?: string | number | null
     }
     const leadId = Number(body.kommo_lead_id)
     const bruto = String(body.texto ?? '')
@@ -640,6 +674,18 @@ Deno.serve(async (req: Request) => {
       }[]
       avisos?: string[]
       resumo?: string
+      ficha?: {
+        tribunal?: string | null
+        entidade_devedora?: string | null
+        cedente_nome?: string | null
+        bruto_total?: number | null
+        ir?: number | null
+        inss?: number | null
+        honorarios_contratuais?: number | null
+        honorarios_sucumbenciais?: number | null
+        honorarios_contratuais_pct?: number | null
+        honorarios_contratuais_pct_origem?: string | null
+      }
     }
 
     // 4. Preenchimento, com os guards.
@@ -709,6 +755,107 @@ Deno.serve(async (req: Request) => {
       )
     }
 
+    // 4b. A FICHA QUE VOLTA PARA O CARD DO KOMMO.
+    //
+    // Mesmos rótulos e mesmo significado da análise de RPV, de propósito: é o
+    // comercial lendo o card, e ele não deve ter de aprender dois formatos por
+    // causa de uma diferença que só existe do nosso lado.
+    //
+    // O QUE ESTÁ SENDO CEDIDO VEM DO TÍTULO DO CARD, com as mesmas regras da
+    // RPV (ver lerTituloCard e classificarParcelaCedida no navegador).
+    const _pc = String(body.tipo_aquisicao ?? 'auto')
+    const _f = saida.ficha ?? {}
+    const _n = (v: unknown) => Number(v) || 0
+    const _honPctRaw = (body.honorarios_pct === '' || body.honorarios_pct == null) ? null : Number(body.honorarios_pct)
+    const _honPctCard = (_honPctRaw != null && !isNaN(_honPctRaw) && _honPctRaw >= 0) ? _honPctRaw : null
+
+    const _brutoAutos = _n(_f.bruto_total)
+    const _contratuaisAutos = _n(_f.honorarios_contratuais)
+    const _sucumbAutos = _n(_f.honorarios_sucumbenciais)
+    // O % do card manda no valor do contratual, como na RPV: aqui a base é o
+    // bruto quando houve destaque e o líquido quando não — e sem destaque não
+    // há contratual nos autos, então o bruto é a base só se ele existir.
+    const _baseHon = _contratuaisAutos > 0 ? _brutoAutos : (_brutoAutos - _n(_f.ir) - _n(_f.inss))
+    const _contratuais = _honPctCard != null ? _baseHon * (_honPctCard / 100) : _contratuaisAutos
+
+    // AS VERBAS DO NEGÓCIO, na mesma tabela de decisão da RPV. 'indefinido' —
+    // o card diz "honorários" e não diz quais — é resolvido contra os autos:
+    // a maioria dos precatórios de Juizado não tem sucumbência (art. 55 da Lei
+    // 9.099/95), e ali "honorários" é o contratual, o único que existe.
+    const _temCon = _contratuais > 0
+    const _temSuc = _sucumbAutos > 0
+    const _verbas: VerbasNegociadas =
+      _pc === 'principal' ? { principal: true, contratuais: false, sucumbenciais: false }
+      : _pc === 'sucumbenciais' ? { principal: false, contratuais: false, sucumbenciais: true }
+      : (_pc === 'honorarios' || _pc === 'contratuais' || _pc === 'indefinido')
+        ? { principal: false, contratuais: true, sucumbenciais: true }
+        : { principal: true, contratuais: true, sucumbenciais: true }
+
+    if (_pc === 'indefinido' && _temCon && _temSuc)
+      avisos.unshift(
+        '⚠️ O card diz apenas "honorários" e este processo tem OS DOIS: contratuais e sucumbenciais. ' +
+        'Escreva no card qual verba está sendo cedida — disso depende o valor do negócio.',
+      )
+    else if (_pc === 'indefinido' && (_temCon || _temSuc))
+      avisos.push(
+        `O card diz apenas "honorários"; o processo tem só os ${_temSuc ? 'sucumbenciais' : 'contratuais'}, ` +
+        'então é essa a verba da ficha.',
+      )
+    if (_pc === 'auto')
+      avisos.unshift(
+        '⚠️ PARCELA CEDIDA NÃO INFORMADA no card: a ficha assume principal + honorários. ' +
+        'Se a cessão for só de honorários, o VALOR CEDIDO está muito alto — escreva a parcela cedida no título do card.',
+      )
+
+    // A PORCENTAGEM CONFERIDA EM PONTOS, e não em reais: o mesmo percentual
+    // sobre bases diferentes dá reais diferentes, e é a base que costuma
+    // divergir. Um ponto de tolerância cobre arredondamento de divisão.
+    const _pctLido = Number(_f.honorarios_contratuais_pct)
+    const _pctDoProcesso = Number.isFinite(_pctLido) && _pctLido > 0
+    const _pctAutos = _pctDoProcesso
+      ? _pctLido
+      : (_baseHon > 0 && _contratuaisAutos > 0 ? (_contratuaisAutos / _baseHon) * 100 : null)
+    if (_honPctCard != null && _pctAutos != null && Math.abs(_honPctCard - _pctAutos) > 1)
+      avisos.unshift(
+        `⚠️ HONORÁRIOS CONTRATUAIS DIVERGENTES: o card diz ${_honPctCard.toFixed(2)}% e o processo indica ` +
+        `${_pctAutos.toFixed(2)}% (${_pctDoProcesso ? String(_f.honorarios_contratuais_pct_origem ?? 'lida no processo') : 'estimada aqui, porque o processo não traz a porcentagem escrita'}). ` +
+        'Confira o contrato de honorários.',
+      )
+
+    // VALOR CEDIDO = a soma dos líquidos das verbas negociadas, pelo MESMO
+    // módulo que a RPV usa (_shared/precificacao.ts). Mesmo rótulo no card tem
+    // de querer dizer a mesma coisa nos dois fluxos; reimplementar a conta aqui
+    // é como os dois divergiriam. Verba de valor zero é descartada lá dentro.
+    //
+    // NÃO É PREÇO: a etapa jurídica do precatório não precifica (deságio e prazo
+    // de resgate são digitados na aba Precificação). É o valor do crédito.
+    const _parcelas = montarParcelas({
+      brutoTotal: _brutoAutos,
+      ir: _n(_f.ir),
+      inss: _n(_f.inss),
+      contratuaisBrutos: _contratuais,
+      sucumbenciaisBrutos: _sucumbAutos,
+      verbas: _verbas,
+    })
+    const _valorCedido = _parcelas.reduce((t, p) => t + p.liquido, 0)
+    const SIGLA_VERBA: Record<string, string> = {
+      principal: 'Principal', contratuais: 'Contratuais', sucumbenciais: 'Sucumbenciais',
+    }
+    const _verbasNome = _parcelas.map((p) => SIGLA_VERBA[p.nome] ?? p.nome).join(' + ')
+
+    const ficha = {
+      tipo: 'Precatório',
+      processo: String(body.numero_processo ?? ''),
+      tribunal: String(_f.tribunal ?? '').trim(),
+      // O nome LIDO DOS AUTOS, e não o do título do card: é o mesmo que nomeia
+      // a pasta no Drive, então ficha e arquivo não divergem.
+      cedente: String(_f.cedente_nome ?? body.cedente ?? '').trim(),
+      entidade_devedora: String(_f.entidade_devedora ?? '').trim(),
+      parcela_cedida: rotuloDoCenario(_verbas),
+      valor_cedido: _valorCedido,
+      honorarios_pct: _honPctCard ?? _pctAutos,
+    }
+
     // 5. Drive: A. Análises de crédito / Precatórios / {originador} / {cedente}
     const token = await refreshGoogleAccessToken(
       google.client_id,
@@ -724,9 +871,20 @@ Deno.serve(async (req: Request) => {
     const cedId = await driveFindOrCreateFolder(token, cedente, origId)
 
     const saidaBytes = new Uint8Array(await wb.xlsx.writeBuffer())
+    // AS VERBAS NO NOME DO ARQUIVO, como na análise de RPV.
+    //
+    // Duas análises do mesmo precatório com cenários diferentes ficavam
+    // indistinguíveis na pasta — e, pior, a segunda SOBRESCREVIA a primeira,
+    // porque o upload substitui por nome. Com as verbas no nome, cenário
+    // diferente é arquivo diferente, e refazer o MESMO cenário continua
+    // substituindo, que é o que se quer.
+    //
+    // Fica logo depois de "Análise Jurídica", e não no fim: nome de arquivo é
+    // truncado pela direita em toda lista.
     const nomeArquivo =
       limparNomeArquivo(
-        `Análise Jurídica - ${cedente}${body.numero_processo ? ` - ${body.numero_processo}` : ''}`,
+        `Análise Jurídica${_verbasNome ? ` [${_verbasNome}]` : ''} - ${cedente}` +
+        `${body.numero_processo ? ` - ${body.numero_processo}` : ''}`,
       ) + '.xlsx'
     const up = await driveUploadBytes(token, nomeArquivo, cedId, saidaBytes, XLSX_MIME, true)
 
@@ -736,6 +894,7 @@ Deno.serve(async (req: Request) => {
       linhas_no_questionario: linhas.length,
       linhas_preenchidas: escritas,
       avisos,
+      ficha,
       template: templatePath,
       drive_file_url: up.webViewLink ?? null,
       drive_folder_url: `https://drive.google.com/drive/folders/${cedId}`,

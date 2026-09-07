@@ -170,3 +170,52 @@ describe('anotacoesDaAnalise', () => {
     expect(anotacoesDaAnalise({ reprovado: true })[0]).toContain('Crédito reprovado na análise.')
   })
 })
+
+/**
+ * O veredito trocado: a análise jurídica do precatório NÃO aprova.
+ *
+ * Ela preenche um questionário e para ali — o bloco "Critérios de Aceitação e
+ * Recusa" do modelo é régua que uma pessoa aplica, e aprovar ou reprovar é
+ * clique de gente. Escrever "APROVADO" no card afirmaria uma decisão que
+ * ninguém tomou, e o comercial age sobre o que está escrito ali.
+ */
+describe('veredito próprio de outro fluxo', () => {
+  it('substitui a primeira linha e mantém o resto da forma', () => {
+    const t = anotacoesDaAnalise({
+      link: 'https://drive.google.com/y',
+      ficha: { tipo: 'Precatório', tribunal: 'TJSP' },
+      avisos: ['⚠️ um alerta'],
+      analista: 'Pedro',
+      veredito: '✅ ANÁLISE JURÍDICA CONCLUÍDA.',
+    })
+    expect(t[0]).toBe('TIPO: Precatório\nTRIBUNAL: TJSP')
+    expect(t[1]).toBe(
+      '(Pedro) ✅ ANÁLISE JURÍDICA CONCLUÍDA.\n' +
+        'Planilha e análise no Drive: https://drive.google.com/y\n' +
+        '\n' +
+        '⚠️ um alerta',
+    )
+  })
+
+  it('sem link, o veredito trocado também ganha a ressalva da pasta', () => {
+    const [, v] = anotacoesDaAnalise({
+      ficha: { tipo: 'Precatório' },
+      veredito: '✅ ANÁLISE JURÍDICA CONCLUÍDA.',
+    })
+    expect(v).toBe('✅ ANÁLISE JURÍDICA CONCLUÍDA. (Confira a pasta do Drive.)')
+  })
+
+  it('veredito vazio cai no padrão em vez de deixar a linha em branco', () => {
+    const [, v] = anotacoesDaAnalise({ ficha: { tipo: 'RPV' }, veredito: '   ' })
+    expect(v.startsWith('✅ APROVADO na análise automática.')).toBe(true)
+  })
+
+  it('recusado ignora o veredito trocado — o motivo é o recado', () => {
+    const t = anotacoesDaAnalise({
+      reprovado: true,
+      motivo: 'Valor abaixo do mínimo.',
+      veredito: '✅ ANÁLISE JURÍDICA CONCLUÍDA.',
+    })
+    expect(t).toEqual(['❌ RECUSADO na análise automática.\nMotivo: Valor abaixo do mínimo.'])
+  })
+})
