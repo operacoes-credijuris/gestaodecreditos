@@ -174,18 +174,21 @@ export async function driveUploadBytes(
   mime: string,
   sobrescrever = true,
 ): Promise<{ id: string; webViewLink?: string }> {
-  if (sobrescrever) {
-    const existing = await driveFindChild(token, name, parentId)
-    if (existing) {
-      await fetch(`https://www.googleapis.com/drive/v3/files/${existing.id}?supportsAllDrives=true`, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + token },
-      })
-    }
-  }
-  // Multipart upload (mais simples que resumable pra arquivos pequenos)
+  // SUBSTITUI O CONTEÚDO, NÃO APAGA O ARQUIVO.
+  //
+  // A versão anterior fazia DELETE no arquivo de mesmo nome e criava outro. Na
+  // API v3 o DELETE é definitivo — não passa pela lixeira —, então refazer uma
+  // análise apagava a anterior sem recuperação. E a resposta do DELETE não era
+  // conferida: falhando por permissão, o upload seguia e criava DUPLICATA com o
+  // mesmo nome. Agora o arquivo existente recebe o conteúdo novo como REVISÃO:
+  // mesmo id, mesmo link, e o Drive guarda as versões anteriores. (Mesma
+  // correção da cópia local em gerar-analise-rpv — as duas têm de andar juntas.)
+  const existing = sobrescrever ? await driveFindChild(token, name, parentId) : null
+
+  // Multipart upload (mais simples que resumable pra arquivos pequenos). Na
+  // atualização os metadados não levam `parents`: o arquivo já está na pasta.
   const boundary = '-------cred' + Math.random().toString(36).slice(2)
-  const metadata = JSON.stringify({ name, parents: [parentId] })
+  const metadata = JSON.stringify(existing ? { name } : { name, parents: [parentId] })
   const enc = new TextEncoder()
   const head = enc.encode(
     `--${boundary}\r\n` +
@@ -200,20 +203,20 @@ export async function driveUploadBytes(
   body.set(bytes, head.length)
   body.set(tail, head.length + bytes.length)
 
-  const res = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + token,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-      },
-      body,
+  const url = existing
+    ? `https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink`
+    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink'
+  const res = await fetch(url, {
+    method: existing ? 'PATCH' : 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': `multipart/related; boundary=${boundary}`,
     },
-  )
+    body,
+  })
   if (!res.ok) {
     const txt = await res.text()
-    throw new Error(`Drive upload '${name}' (${res.status}): ${txt.slice(0, 300)}`)
+    throw new Error(`Drive ${existing ? 'atualizar' : 'upload'} '${name}' (${res.status}): ${txt.slice(0, 300)}`)
   }
   return await res.json()
 }
