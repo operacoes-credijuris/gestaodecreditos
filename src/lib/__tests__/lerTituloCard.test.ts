@@ -146,6 +146,23 @@ describe('lerTituloCard', () => {
     expect(t.honorariosPct).toBe('')
   })
 
+  it('verbas separadas pelo hífen contam as duas', () => {
+    // "principal - honorários" é escrita provável, porque o hífen é o que o
+    // comercial já usa para tudo no título. Pegando só a primeira parte, isso
+    // virava cessão SÓ DO PRINCIPAL e o honorário caía fora do negócio.
+    const t = lerTituloCard(
+      'ACME - Maria - 0001234-56.2023.8.17.0001 - principal - honorários contratuais - 30%',
+    )
+    expect(classificarParcelaCedida(t.parcelaCedida)).toBe('ambos')
+    expect(t.honorariosPct).toBe('30')
+  })
+
+  it('uma verba só continua sendo uma verba só', () => {
+    // A guarda do teste de cima: juntar as partes não pode inventar verba.
+    const t = lerTituloCard('ACME - Maria - 0001234-56.2023.8.17.0001 - honorários sucumbenciais')
+    expect(classificarParcelaCedida(t.parcelaCedida)).toBe('sucumbenciais')
+  })
+
   it('separador diferente do combinado falha ALTO, não em silêncio', () => {
     // Barra, ponto-e-vírgula, hífen sem espaço: o título vira uma parte só. O
     // número ainda sai (é achado por conteúdo), mas o intermediador fica vazio

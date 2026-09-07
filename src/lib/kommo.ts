@@ -680,27 +680,34 @@ export function lerTituloCard(titulo: unknown): DadosDoTitulo {
     }
   }
 
-  let parcelaCedida = ''
+  // TODAS as partes de verba, juntadas — não a primeira.
+  //
+  // "principal - honorários" é uma parcela cedida escrita com o separador entre
+  // as verbas, e é escrita provável: o hífen é o que o comercial já usa para
+  // tudo no título. Pegando só a primeira, isso virava cessão SÓ DO PRINCIPAL —
+  // o honorário caía fora do negócio sem nada acusar. Juntadas, a classificação
+  // vê as duas verbas e responde "ambos", que é o que estava escrito.
+  const verbas: string[] = []
   for (const p of partes.slice(iCnj + 1)) {
-    if (parcelaCedida || !RE_VERBA.test(p)) continue
+    if (!RE_VERBA.test(p)) continue
     // "principal + honorários 30%" numa parte só, sem separar: a verba fica e a
     // porcentagem colada nela é aproveitada. AQUI O SINAL DE % É EXIGIDO —
     // número solto no meio de uma frase pode ser qualquer coisa, e adivinhar
     // seria pior que perder.
     const m = p.match(RE_PORCENTAGEM_NO_FIM)
     if (!m) {
-      parcelaCedida = p
+      verbas.push(p)
       continue
     }
     if (!honorariosPct) honorariosPct = m[1].replace(',', '.')
-    parcelaCedida = p.slice(0, m.index).replace(/[\s,;:]+$/, '')
+    verbas.push(p.slice(0, m.index).replace(/[\s,;:]+$/, ''))
   }
 
   return {
     intermediador: iCnj > 0 ? partes[0] : '',
     cedente: iCnj > 1 ? partes.slice(1, iCnj).join(SEP_TITULO) : '',
     numero: cnjNoTexto(partes[iCnj]),
-    parcelaCedida,
+    parcelaCedida: verbas.join(SEP_TITULO),
     honorariosPct,
   }
 }
