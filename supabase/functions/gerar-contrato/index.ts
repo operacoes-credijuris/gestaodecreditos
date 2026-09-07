@@ -58,7 +58,7 @@ import { encodeBase64 as b64encode } from 'jsr:@std/encoding@1/base64'
 // Constants
 // ============================================================================
 
-const CLAUDE_MODEL = 'claude-opus-4-5';
+const CLAUDE_MODEL = 'claude-opus-5';
 const CLAUDE_MAX_TOKENS = 1500;
 
 const BUCKET_TEMPLATES = 'contratos-templates';

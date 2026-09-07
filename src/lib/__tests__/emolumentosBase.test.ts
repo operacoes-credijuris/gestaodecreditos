@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { custoParaPreco, type RegraAto } from '../../../supabase/functions/_shared/emolumentos-calculo.ts'
-import { calibrarDesagio, type Parcela } from '../../../supabase/functions/_shared/precificacao.ts'
+import { calibrarDesagio, montarParcelas, type Parcela } from '../../../supabase/functions/_shared/precificacao.ts'
 
 /**
  * Sobre QUAL VALOR a tabela do estado cobra o ato numa cessão.
@@ -59,7 +59,7 @@ describe('base de cálculo do emolumento', () => {
 })
 
 describe('a calibragem passa o líquido da verba como valor do crédito', () => {
-  const parcelas: Parcela[] = [{ nome: 'principal', liquido: 100_000, desagiavel: true }]
+  const parcelas: Parcela[] = [{ nome: 'principal', liquido: 100_000, bruto: 100_000, desagiavel: true }]
 
   it('com base no crédito, o cartório é o mesmo em qualquer deságio — incide sobre o que se compra, não sobre o que se paga', () => {
     const regra = { escritura: porcentual('valor_credito'), registro: null }
@@ -75,5 +75,47 @@ describe('a calibragem passa o líquido da verba como valor do crédito', () => 
     const b = calibrarDesagio({ parcelas, T5: 8, regra, desagioFixo: 0.5 })
     expect(a.Y10).toBe(800)
     expect(b.Y10).toBe(500)
+  })
+})
+
+describe('a base é o VALOR DE FACE da verba, não o líquido', () => {
+  /**
+   * Onde o estado cobra o ato sobre o valor do crédito, o que se declara na
+   * escritura é o crédito cedido pelo seu valor de face: IR e INSS são retenção
+   * na fonte de quem paga, não abatimento do crédito. Passar o líquido
+   * subestimava o emolumento — e de forma invisível, porque o número saía
+   * plausível.
+   */
+  it('o emolumento sai sobre o bruto da verba, e não sobre o líquido', () => {
+    const parcelas: Parcela[] = [
+      { nome: 'principal', liquido: 80_000, bruto: 100_000, desagiavel: true },
+    ]
+    const regra = { escritura: porcentual('valor_credito'), registro: null }
+    const r = calibrarDesagio({ parcelas, T5: 8, regra, desagioFixo: 0.2 })
+    expect(r.Y10).toBe(1_000)   // 1% de 100.000, não de 80.000
+  })
+
+  it('montarParcelas preenche o bruto de cada verba', () => {
+    const ps = montarParcelas({
+      brutoTotal: 100_000, ir: 12_000, inss: 3_000,
+      contratuaisBrutos: 30_000, sucumbenciaisBrutos: 10_000,
+      verbas: { principal: true, contratuais: true, sucumbenciais: true },
+    })
+    const por = (n: string) => ps.find((p) => p.nome === n)!
+    // O principal de face é o bruto MENOS a parte que já é do advogado.
+    expect(por('principal').bruto).toBe(70_000)
+    expect(por('contratuais').bruto).toBe(30_000)
+    expect(por('sucumbenciais').bruto).toBe(10_000)
+    // E o líquido continua descontando as retenções, como sempre.
+    expect(por('principal').liquido).toBe(55_000)
+  })
+
+  it('sem base declarada nada muda: o preço continua mandando', () => {
+    const parcelas: Parcela[] = [
+      { nome: 'principal', liquido: 80_000, bruto: 100_000, desagiavel: true },
+    ]
+    const regra = { escritura: porcentual(), registro: null }
+    const r = calibrarDesagio({ parcelas, T5: 8, regra, desagioFixo: 0.5 })
+    expect(r.Y10).toBe(400)     // 1% de 40.000 (o preço), não do bruto
   })
 })

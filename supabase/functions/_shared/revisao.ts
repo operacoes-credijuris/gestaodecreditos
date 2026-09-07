@@ -24,6 +24,16 @@ export interface ResultadoPatch {
   desconhecidos: string[]
   /** Caminhos de remoção que não acharam nada. */
   remocoesVazias: string[]
+  /**
+   * As linhas do questionário que o PEDIDO tocou nesta rodada.
+   *
+   * Existe por causa das linhas 10 e 11 (histórico do cedente e do advogado),
+   * que a due diligence escreve depois. Sem saber quais linhas vieram de uma
+   * ordem explícita de quem confere, a diligência revertia a correção em
+   * silêncio: a pessoa mandava "linha 10 é Não", o motor gravava, e a apuração
+   * punha "Sim" de volta sem que nada na tela ligasse uma coisa à outra.
+   */
+  m2Tocadas: string[]
 }
 
 const ehLista = (v: unknown): v is unknown[] => Array.isArray(v)
@@ -95,6 +105,7 @@ export function aplicarPatch(
   const mudancas: string[] = []
   const desconhecidos: string[] = []
   const remocoesVazias: string[] = []
+  const m2Tocadas: string[] = []
 
   for (const [campo, valor] of Object.entries(alteracoes ?? {})) {
     if (!camposValidos.has(campo)) { desconhecidos.push(campo); continue }
@@ -103,6 +114,7 @@ export function aplicarPatch(
     if (campo === 'm2' && ehObjeto(valor)) {
       const antes = ehObjeto(atual.m2) ? atual.m2 : {}
       novo.m2 = { ...antes, ...valor }
+      m2Tocadas.push(...Object.keys(valor))
       mudancas.push(`questionário: linha(s) ${Object.keys(valor).join(', ')}`)
       continue
     }
@@ -129,6 +141,16 @@ export function aplicarPatch(
 
     if (chave === undefined) {
       if (!camposValidos.has(campo)) { desconhecidos.push(campo); continue }
+      // "m2" SEM ÍNDICE apagaria o QUESTIONÁRIO INTEIRO — as 29 linhas —, e o
+      // pedido que produz isso ("tira o questionário") quase nunca quer dizer
+      // isso. Um campo escalar removido a pessoa vê sumir na tela; o
+      // questionário só reaparece vazio na planilha, depois de salvo. Para
+      // apagar uma linha existe "m2.37".
+      if (campo === 'm2') {
+        remocoesVazias.push(caminho)
+        mudancas.push('questionário: NÃO apaguei o m2 inteiro — para remover uma linha, use "m2.<número>"')
+        continue
+      }
       if (!(campo in novo)) { remocoesVazias.push(caminho); continue }
       delete novo[campo]
       mudancas.push(`${campo}: removido`)
@@ -139,6 +161,7 @@ export function aplicarPatch(
       if (!(chave in m)) { remocoesVazias.push(caminho); continue }
       delete m[chave]
       novo.m2 = m
+      m2Tocadas.push(chave)
       mudancas.push(`questionário: linha ${chave} apagada`)
       continue
     }
@@ -160,7 +183,7 @@ export function aplicarPatch(
     if (apagados) mudancas.push(`${campo}: ${apagados} item(ns) removido(s)`)
   }
 
-  return { dados: novo, mudancas, desconhecidos, remocoesVazias }
+  return { dados: novo, mudancas, desconhecidos, remocoesVazias, m2Tocadas: [...new Set(m2Tocadas)] }
 }
 
 // ---------------------------------------------------------------------------

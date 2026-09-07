@@ -126,3 +126,37 @@ describe('o relatório do que mudou', () => {
     expect(r.desconhecidos).toEqual([])
   })
 })
+
+describe('o questionário inteiro não se apaga por acidente', () => {
+  it('"m2" sem índice é RECUSADO, e a recusa é dita', () => {
+    // Um pedido como "tira o questionário" quase nunca quer dizer apagar as 29
+    // linhas — e o estrago só apareceria na planilha, depois de salva.
+    const r = patch({}, ['m2'])
+    expect(r.dados.m2).toEqual({ '10': { resposta: 'Sim' }, '11': { resposta: 'Não' } })
+    expect(r.remocoesVazias).toContain('m2')
+    expect(r.mudancas.join(' ')).toMatch(/NÃO apaguei o m2 inteiro/)
+  })
+
+  it('"m2.10" continua apagando UMA linha', () => {
+    const r = patch({}, ['m2.10'])
+    expect(r.dados.m2).toEqual({ '11': { resposta: 'Não' } })
+    expect(r.m2Tocadas).toEqual(['10'])
+  })
+})
+
+describe('quais linhas do questionário vieram de ordem do chat', () => {
+  it('escrever numa linha marca ela', () => {
+    const r = patch({ m2: { '10': { resposta: 'Não' } } })
+    expect(r.m2Tocadas).toEqual(['10'])
+  })
+
+  it('escrever em várias marca todas, sem repetir', () => {
+    const r = patch({ m2: { '10': { resposta: 'Não' }, '19': { resposta: 'Procedência' } } }, ['m2.10'])
+    expect(r.m2Tocadas.sort()).toEqual(['10', '19'])
+  })
+
+  it('pedido que não toca no questionário não marca nada', () => {
+    const r = patch({ bruto_total: 80000 })
+    expect(r.m2Tocadas).toEqual([])
+  })
+})

@@ -31,6 +31,17 @@ export interface Parcela {
   nome: 'principal' | 'contratuais' | 'sucumbenciais'
   /** O que se compra desta verba, já líquido de IR e INSS. */
   liquido: number
+  /**
+   * O VALOR DE FACE da verba cedida, antes das retenções.
+   *
+   * Serve a UMA coisa: as tabelas de emolumentos que cobram o ato sobre o valor
+   * do crédito, e não sobre o preço da cessão (ver BaseCalculo). O que se
+   * declara na escritura é o crédito cedido pelo seu valor de face — o IR e o
+   * INSS são retenção na fonte de quem paga, não abatimento do crédito. Passar o
+   * líquido, como se fazia, subestimava o emolumento nesses estados; e o erro
+   * era invisível, porque o cartório saía plausível.
+   */
+  bruto: number
   /** O deságio incide sobre ela? */
   desagiavel: boolean
 }
@@ -167,10 +178,23 @@ export function montarParcelas(o: {
       // Os contratuais saem de DENTRO do principal (por isso descontados aqui,
       // pelo bruto); os sucumbenciais não, porque quem os paga é o vencido.
       liquido: o.brutoTotal - o.ir - o.inss - o.contratuaisBrutos,
+      // De face: o crédito do credor é o bruto menos a parte que já é do
+      // advogado. IR e INSS não saem daqui — são retenção de quem paga.
+      bruto: o.brutoTotal - o.contratuaisBrutos,
       desagiavel: true,
     },
-    { nome: 'contratuais', liquido: o.contratuaisBrutos - irProgressivo(o.contratuaisBrutos).imposto, desagiavel: false },
-    { nome: 'sucumbenciais', liquido: o.sucumbenciaisBrutos - irProgressivo(o.sucumbenciaisBrutos).imposto, desagiavel: false },
+    {
+      nome: 'contratuais',
+      liquido: o.contratuaisBrutos - irProgressivo(o.contratuaisBrutos).imposto,
+      bruto: o.contratuaisBrutos,
+      desagiavel: false,
+    },
+    {
+      nome: 'sucumbenciais',
+      liquido: o.sucumbenciaisBrutos - irProgressivo(o.sucumbenciaisBrutos).imposto,
+      bruto: o.sucumbenciaisBrutos,
+      desagiavel: false,
+    },
   ]
 
   const dentro = candidatas.filter((p) => o.verbas[p.nome] && p.liquido > 0)
@@ -281,10 +305,12 @@ export function calibrarDesagio(o: {
   const avaliar = (d: number) => {
     const parcelas: ParcelaPrecificada[] = o.parcelas.map((p) => {
       const preco = p.liquido * (1 - (p.desagiavel ? d : 0))
-      // O líquido da verba vai junto: é o "valor do crédito cedido" para as
-      // tabelas que cobram o ato sobre ele, e não sobre o preço (ver
-      // BaseCalculo em emolumentos-calculo.ts).
-      return { ...p, preco, cartorio: custoParaPreco(o.regra, preco, p.nome, p.liquido) }
+      // O VALOR DE FACE da verba vai junto: é o "valor do crédito cedido" para
+      // as tabelas que cobram o ato sobre ele, e não sobre o preço (ver
+      // BaseCalculo em emolumentos-calculo.ts). Era o líquido, e o líquido é o
+      // crédito já descontado de retenções que não são abatimento do crédito —
+      // nesses estados o emolumento saía subestimado.
+      return { ...p, preco, cartorio: custoParaPreco(o.regra, preco, p.nome, p.bruto || p.liquido) }
     })
     const cessao = parcelas.reduce((s, p) => s + p.preco, 0)
     const comCartorio = parcelas.filter((p) => p.cartorio.total != null)

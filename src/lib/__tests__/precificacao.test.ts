@@ -100,8 +100,8 @@ describe('montarParcelas', () => {
 
 describe('calibrarDesagio — o deságio cai só no principal', () => {
   const parcelas: Parcela[] = [
-    { nome: 'principal', liquido: 60000, desagiavel: true },
-    { nome: 'contratuais', liquido: 27000, desagiavel: false },
+    { nome: 'principal', liquido: 60000, bruto: 60000, desagiavel: true },
+    { nome: 'contratuais', liquido: 27000, bruto: 27000, desagiavel: false },
   ]
 
   it('os honorários são comprados pelo valor de face', () => {
@@ -133,7 +133,7 @@ describe('calibrarDesagio — o deságio cai só no principal', () => {
   })
 
   it('sem principal, o deságio incide sobre os honorários', () => {
-    const so: Parcela[] = [{ nome: 'contratuais', liquido: 27000, desagiavel: true }]
+    const so: Parcela[] = [{ nome: 'contratuais', liquido: 27000, bruto: 27000, desagiavel: true }]
     const r = calibrarDesagio({ parcelas: so, T5: 12, regra: REGRA })
     expect(r.parcelas[0].preco).toBeCloseTo(27000 * (1 - r.desagio), 2)
     expect(r.desagio).toBeGreaterThan(0)
@@ -143,12 +143,12 @@ describe('calibrarDesagio — o deságio cai só no principal', () => {
 describe('calibrarDesagio — uma escritura por verba', () => {
   it('duas verbas custam dois pares de escritura e registro', () => {
     const uma = calibrarDesagio({
-      parcelas: [{ nome: 'principal', liquido: 60000, desagiavel: true }], T5: 12, regra: REGRA,
+      parcelas: [{ nome: 'principal', liquido: 60000, bruto: 60000, desagiavel: true }], T5: 12, regra: REGRA,
     })
     const duas = calibrarDesagio({
       parcelas: [
-        { nome: 'principal', liquido: 60000, desagiavel: true },
-        { nome: 'contratuais', liquido: 27000, desagiavel: false },
+        { nome: 'principal', liquido: 60000, bruto: 60000, desagiavel: true },
+        { nome: 'contratuais', liquido: 27000, bruto: 27000, desagiavel: false },
       ], T5: 12, regra: REGRA,
     })
     expect(uma.parcelas).toHaveLength(1)
@@ -162,9 +162,9 @@ describe('calibrarDesagio — uma escritura por verba', () => {
   it('três verbas, três pares', () => {
     const r = calibrarDesagio({
       parcelas: [
-        { nome: 'principal', liquido: 60000, desagiavel: true },
-        { nome: 'contratuais', liquido: 27000, desagiavel: false },
-        { nome: 'sucumbenciais', liquido: 9000, desagiavel: false },
+        { nome: 'principal', liquido: 60000, bruto: 60000, desagiavel: true },
+        { nome: 'contratuais', liquido: 27000, bruto: 27000, desagiavel: false },
+        { nome: 'sucumbenciais', liquido: 9000, bruto: 9000, desagiavel: false },
       ], T5: 12, regra: REGRA,
     })
     expect(r.parcelas).toHaveLength(3)
@@ -178,19 +178,19 @@ describe('calibrarDesagio — uma escritura por verba', () => {
     // mas menos que dois pares em faixas próprias.
     const porVerba = calibrarDesagio({
       parcelas: [
-        { nome: 'principal', liquido: 30000, desagiavel: true },
-        { nome: 'contratuais', liquido: 30000, desagiavel: false },
+        { nome: 'principal', liquido: 30000, bruto: 30000, desagiavel: true },
+        { nome: 'contratuais', liquido: 30000, bruto: 30000, desagiavel: false },
       ], T5: 12, regra: REGRA,
     })
     const somado = calibrarDesagio({
-      parcelas: [{ nome: 'principal', liquido: 60000, desagiavel: true }], T5: 12, regra: REGRA,
+      parcelas: [{ nome: 'principal', liquido: 60000, bruto: 60000, desagiavel: true }], T5: 12, regra: REGRA,
     })
     expect(porVerba.Y10!).toBeGreaterThan(somado.Y10!)
   })
 
   it('sem tabela do estado, o cartório é null e o preço sai assim mesmo', () => {
     const r = calibrarDesagio({
-      parcelas: [{ nome: 'principal', liquido: 60000, desagiavel: true }], T5: 12, regra: null,
+      parcelas: [{ nome: 'principal', liquido: 60000, bruto: 60000, desagiavel: true }], T5: 12, regra: null,
     })
     expect(r.Y10).toBeNull()
     expect(r.cartorioCompleto).toBe(false)
@@ -208,7 +208,7 @@ describe('calibrarDesagio — casos de borda', () => {
   it('quando nem o teto de 95% atinge o alvo, devolve o melhor caso marcado', () => {
     // Crédito pequeno com custo fixo alto: não há deságio que salve.
     const r = calibrarDesagio({
-      parcelas: [{ nome: 'principal', liquido: 900, desagiavel: true }],
+      parcelas: [{ nome: 'principal', liquido: 900, bruto: 900, desagiavel: true }],
       T5: 12, alvo: 0.028, regra: REGRA,
     })
     expect(r.atingiuAlvo).toBe(false)
@@ -217,7 +217,7 @@ describe('calibrarDesagio — casos de borda', () => {
 
   it('a binária acha o MENOR deságio que serve', () => {
     // Um passo abaixo do escolhido já não pode bater o alvo.
-    const parcelas: Parcela[] = [{ nome: 'principal', liquido: 80000, desagiavel: true }]
+    const parcelas: Parcela[] = [{ nome: 'principal', liquido: 80000, bruto: 80000, desagiavel: true }]
     const r = calibrarDesagio({ parcelas, T5: 12, alvo: 0.028, regra: REGRA })
     expect(r.atingiuAlvo).toBe(true)
     const umPassoAbaixo = calibrarDesagio({
@@ -280,8 +280,8 @@ describe('aplicarAuditoria — o cenário conservador', () => {
 
 describe('deságio ditado', () => {
   const parcelas: Parcela[] = [
-    { nome: 'principal', liquido: 60000, desagiavel: true },
-    { nome: 'contratuais', liquido: 27000, desagiavel: false },
+    { nome: 'principal', liquido: 60000, bruto: 60000, desagiavel: true },
+    { nome: 'contratuais', liquido: 27000, bruto: 27000, desagiavel: false },
   ]
 
   it('fecha no número pedido, em vez de procurar o que bate a meta', () => {

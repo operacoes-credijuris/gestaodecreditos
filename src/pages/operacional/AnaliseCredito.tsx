@@ -22,7 +22,7 @@
 // funil inteiro do Kommo: o kanban do comercial tem colunas que não são do
 // operacional, e contá-las fazia o total de cima nunca fechar com a soma das
 // pílulas de baixo.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Search,
@@ -238,16 +238,44 @@ async function extrairTextoDoPdf(
   // O pdf.js toma posse do buffer que recebe; a cópia é para o chamador poder
   // renderizar páginas depois (processo digitalizado vira imagem para a IA).
   const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise
-  // POR PÁGINA, e não colado: é o que permite escolher o que vai para a IA
-  // quando o processo não cabe inteiro (ver lib/textoDoProcesso.ts), e medir
-  // página a página o que é imagem e o que é texto.
-  const paginasTexto: string[] = []
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p)
-    const content = await page.getTextContent()
-    paginasTexto.push((content.items as Array<{ str?: string }>).map((it) => it.str ?? '').join(' '))
+  try {
+    // POR PÁGINA, e não colado: é o que permite escolher o que vai para a IA
+    // quando o processo não cabe inteiro (ver lib/textoDoProcesso.ts), e medir
+    // página a página o que é imagem e o que é texto.
+    //
+    // EM BLOCOS, e não uma de cada vez. Eram dois `await` em fila por página —
+    // num processo de 300 páginas, 600 idas e voltas em série, e é o tempo que a
+    // janela leva antes de mostrar qualquer coisa. O pdf.js atende pedidos
+    // concorrentes; oito por vez é o que aproveita isso sem encher a memória de
+    // conteúdo de página, que é o que faz a aba travar.
+    const BLOCO = 8
+    const paginasTexto: string[] = new Array(pdf.numPages).fill('')
+    for (let inicio = 1; inicio <= pdf.numPages; inicio += BLOCO) {
+      const fim = Math.min(inicio + BLOCO - 1, pdf.numPages)
+      const nums: number[] = []
+      for (let p = inicio; p <= fim; p++) nums.push(p)
+      await Promise.all(
+        nums.map(async (p) => {
+          const page = await pdf.getPage(p)
+          try {
+            const content = await page.getTextContent()
+            paginasTexto[p - 1] = (content.items as Array<{ str?: string }>).map((it) => it.str ?? '').join(' ')
+          } finally {
+            // Sem isto, o conteúdo de cada página fica retido no documento até
+            // a aba fechar — e um processo digitalizado de 300 páginas são
+            // centenas de MB.
+            page.cleanup()
+          }
+        }),
+      )
+    }
+    return { texto: paginasTexto.join('\n'), paginas: pdf.numPages, paginasTexto, bytes: buf }
+  } finally {
+    // O documento do pdf.js NUNCA era destruído aqui (renderizarPaginas destrói,
+    // este não): cada PDF lido deixava um worker e o cache de páginas vivos pelo
+    // resto da sessão.
+    await pdf.destroy()
   }
-  return { texto: paginasTexto.join('\n'), paginas: pdf.numPages, paginasTexto, bytes: buf }
 }
 
 export interface ArquivoLido {
@@ -958,6 +986,47 @@ export default function AnaliseCredito() {
   // toa. Vive enquanto a página estiver aberta; o sync limpa (ver abaixo),
   // porque o PDF do card pode ter sido substituído no Kommo.
   const [arquivosCache, setArquivosCache] = useState<Record<number, ArquivoLido[]>>({})
+  /**
+   * Quantos cards ficam com os anexos na memória.
+   *
+   * Cada `ArquivoLido` carrega `bytes` — o PDF inteiro. Processo digitalizado
+   * tem 50 a 150 MB, e o cache guardava TODO card aberto até o próximo sync:
+   * quatro cards e a aba começava a engasgar. Dois cobrem o uso real (o card em
+   * que se está e o anterior, para quem alterna entre Analisar e Certidões).
+   */
+  const MAX_CARDS_EM_CACHE = 2
+  /** A ordem em que os cards entraram no cache — objeto não guarda ordem de chave numérica. */
+  const ordemCache = useRef<number[]>([])
+  /**
+   * Leituras em voo, por card.
+   *
+   * Sem isto, clicar em Certidões e Analisar no mesmo card em sequência rápida
+   * baixava e reprocessava os mesmos PDFs duas vezes — o cache só existe DEPOIS
+   * que a primeira leitura termina.
+   */
+  const leiturasEmVoo = useRef<Map<number, Promise<ArquivoLido[]>>>(new Map())
+
+  /** Guarda no cache e descarta os cards mais antigos, liberando os bytes deles. */
+  const guardarNoCache = useCallback((id: number, lidos: ArquivoLido[]) => {
+    ordemCache.current = [...ordemCache.current.filter((x) => x !== id), id]
+    const manter = new Set(ordemCache.current.slice(-MAX_CARDS_EM_CACHE))
+    ordemCache.current = [...manter]
+    setArquivosCache((p) => {
+      const novo: Record<number, ArquivoLido[]> = { [id]: lidos }
+      for (const [k, v] of Object.entries(p)) if (manter.has(Number(k))) novo[Number(k)] = v
+      return novo
+    })
+  }, [])
+
+  /** Lê uma vez só, ainda que dois lugares peçam ao mesmo tempo. */
+  const lerUmaVezSo = useCallback((lead: KommoLead): Promise<ArquivoLido[]> => {
+    const id = lead.kommo_lead_id
+    const emVoo = leiturasEmVoo.current.get(id)
+    if (emVoo) return emVoo
+    const p = lerArquivosDoCard(lead).finally(() => leiturasEmVoo.current.delete(id))
+    leiturasEmVoo.current.set(id, p)
+    return p
+  }, [])
   const [ddLead, setDdLead] = useState<KommoLead | null>(null)
   // CONJUNTO, não um id só. Com um id só, a leitura do card A terminando
   // limpava o indicador do card B, e o modal de B — ainda sem texto — passava a
@@ -990,8 +1059,8 @@ export default function AnaliseCredito() {
   /** Lê os anexos do card, guardando no cache na hora — a janela e a due diligence dividem o mesmo PDF. */
   async function lerArquivosComCache(lead: KommoLead): Promise<ArquivoLido[]> {
     const id = lead.kommo_lead_id
-    const lidos = arquivosCache[id] ?? (await lerArquivosDoCard(lead))
-    setArquivosCache((p) => ({ ...p, [id]: lidos }))
+    const lidos = arquivosCache[id] ?? (await lerUmaVezSo(lead))
+    guardarNoCache(id, lidos)
     return lidos
   }
 
@@ -1031,8 +1100,8 @@ export default function AnaliseCredito() {
     const id = lead.kommo_lead_id
     setAnalisandoJurId(id)
     try {
-      const lidos = arquivosCache[id] ?? (await lerArquivosDoCard(lead))
-      setArquivosCache((p) => ({ ...p, [id]: lidos }))
+      const lidos = arquivosCache[id] ?? (await lerUmaVezSo(lead))
+      guardarNoCache(id, lidos)
 
       const comTexto = lidos.filter((a) => a.texto.trim().length > 0)
       if (comTexto.length === 0) {
@@ -1119,8 +1188,8 @@ export default function AnaliseCredito() {
       return n
     })
     marcarLendo(id, true)
-    void lerArquivosDoCard(lead)
-      .then((as) => setArquivosCache((p) => ({ ...p, [id]: as })))
+    void lerUmaVezSo(lead)
+      .then((as) => guardarNoCache(id, as))
       .catch((e) =>
         setAvisoPdf((p) => ({
           ...p,
@@ -1522,7 +1591,19 @@ export default function AnaliseCredito() {
             setResultadoAnalise((p) => ({ ...p, [rpvLead.kommo_lead_id]: final }))
             void anotarResultadoNaKommo(rpvLead.kommo_lead_id, final, analistaNome)
           }}
-          onClose={() => setRpvLead(null)}
+          onClose={() => {
+            // OS BYTES DOS PDFs SAEM DA MEMÓRIA AO FECHAR. Eles serviam a uma
+            // coisa só — renderizar as páginas digitalizadas —, e isso já
+            // aconteceu. O TEXTO fica, porque a aba de Certidões ainda o usa
+            // para sugerir CPF; os megabytes, não.
+            const id = rpvLead.kommo_lead_id
+            setArquivosCache((p) => {
+              const atual = p[id]
+              if (!atual) return p
+              return { ...p, [id]: atual.map((a) => (a.bytes ? { ...a, bytes: undefined } : a)) }
+            })
+            setRpvLead(null)
+          }}
         />
       )}
 

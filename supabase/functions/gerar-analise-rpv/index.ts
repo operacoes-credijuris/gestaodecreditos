@@ -21,10 +21,30 @@ import {
   type Emolumentos,
   type RegraEmolumentos,
 } from "../_shared/emolumentos.ts";
-import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
+import { municipioDoEnte, resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
+import {
+  capNotas,
+  MAX_IMAGENS as MAX_IMAGENS_ABS,
+  MAX_TEXTO_CHARS,
+  planoDeLeitura,
+} from "../_shared/orcamentoLeitura.ts";
+import {
+  consultarTeto,
+  executarPesquisaTeto,
+  type EsferaTeto,
+  type TetoConsultado,
+} from "../_shared/tetosRpv.ts";
 import { ANO_TABELA_IRRF, irProgressivo } from "../_shared/irpf.ts";
 import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
+import {
+  aplicarDiligenciaNoM2,
+  historicoDoCredito,
+  textoDaDiligencia,
+  type ApuracaoDD,
+  type HistoricoDePapel,
+  type ProcessoDD,
+} from "../_shared/dueDiligencia.ts";
 import {
   driveEncontrarAnalisesRoot,
   driveFindChildByTolerantName,
@@ -48,7 +68,17 @@ import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
 // ============================================================================
 // Constantes
 // ============================================================================
-const CLAUDE_MODEL = 'claude-opus-4-5';
+/**
+ * O modelo de TODAS as chamadas desta função — qualificação, análise e revisão.
+ *
+ * UM SÓ, e por dois motivos que se somam. O primeiro é consistência: a revisão
+ * subiu para o Opus 5 e a leitura que PRECIFICA ficou no 4.5, porque o nome do
+ * modelo estava escrito em dois lugares. O segundo é o CACHE DE PROMPT: o modelo
+ * faz parte da chave, então a qualificação e a análise só reaproveitam o
+ * processo lido (~170 mil tokens) se rodarem no mesmo. Trocar uma delas por um
+ * modelo mais leve economiza numa ponta e paga o dobro na outra.
+ */
+const CLAUDE_MODEL = 'claude-opus-5';
 const CLAUDE_MAX_TOKENS = 16000;                 // extração da análise é grande (M1+M2+M4)
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const BUCKET_INPUT = 'analises-input';            // bucket novo (criar no painel)
@@ -69,9 +99,22 @@ const TEMPLATE_NOME = 'Modelo_Analise_de_RPV.xlsx';  // sem acento — Supabase 
  * o mais recente — é o que a pessoa acabou de subir. Não havendo nenhum, o erro
  * LISTA o que existe no bucket, para o conserto ser evidente.
  */
+/**
+ * O template baixado, guardado enquanto o worker viver.
+ *
+ * Ele é baixado a CADA salvamento, e é o mesmo arquivo sempre — um .xlsx de
+ * algumas dezenas de KB, imutável entre deploys do modelo. Numa invocação quente
+ * o download é uma ida ao Storage que não muda nada. O cache vive no escopo do
+ * módulo: some quando o worker recicla, que é exatamente quando faz sentido
+ * conferir de novo se o dono trocou o modelo.
+ */
+let _templateCache: Uint8Array | null = null;
+
 async function baixarTemplateRpv(sb: any): Promise<Uint8Array> {
+  if (_templateCache) return _templateCache;
+  const guardar = (b: Uint8Array) => { _templateCache = b; return b; };
   try {
-    return await storageGetBytes(sb, BUCKET_TEMPLATES, TEMPLATE_NOME);
+    return guardar(await storageGetBytes(sb, BUCKET_TEMPLATES, TEMPLATE_NOME));
   } catch (_) { /* nome exato não está lá: procura pelo conteúdo do nome */ }
 
   const chave = (t: string) =>
@@ -96,7 +139,31 @@ async function baixarTemplateRpv(sb: any): Promise<Uint8Array> {
         `O que há lá: ${havia}. Suba o arquivo com esse nome exato, sem acento.`,
     );
   }
-  return await storageGetBytes(sb, BUCKET_TEMPLATES, candidatos[0].name);
+  return guardar(await storageGetBytes(sb, BUCKET_TEMPLATES, candidatos[0].name));
+}
+
+/**
+ * A pasta da categoria dentro de "A. Análises de crédito", memorizada.
+ *
+ * Todo salvamento fazia SETE idas ao Drive: renovar o token, achar o Shared
+ * Drive, achar "A. Análises de crédito", achar a categoria, achar/criar o
+ * originador, achar/criar o cedente, e então subir. As três primeiras respondem
+ * sempre a mesma coisa — a raiz e a categoria não mudam — e agora respondem uma
+ * vez por worker. As duas seguintes continuam consultando: originador e cedente
+ * são criados o tempo todo.
+ *
+ * A chave inclui a categoria porque RPV e Precatórios são pastas diferentes.
+ */
+const _pastaDaCategoria = new Map<string, string>();
+
+async function acharPastaDaCategoria(token: string, categoria: string): Promise<string> {
+  const memo = _pastaDaCategoria.get(categoria);
+  if (memo) return memo;
+  const analisesRoot = await driveEncontrarAnalisesRoot(token);
+  const cat = await driveFindChildByTolerantName(token, analisesRoot, categoria);
+  const id = cat?.id ?? await driveFindOrCreateFolder(token, categoria, analisesRoot);
+  _pastaDaCategoria.set(categoria, id);
+  return id;
 }
 const DRIVE_CATEGORIA_PADRAO = 'Requisições de Pequeno Valor';
 // A tela manda rótulo curto ("RPV"); o Drive usa o nome completo da pasta.
@@ -120,7 +187,7 @@ const pct = (n: any) => ((Number(n) || 0) * 100).toLocaleString('pt-BR', { minim
  * fetch que tenta de novo quando a falha foi RÁPIDA.
  *
  * As duas chamadas de IA da extração usavam fetch cru: um 529 (overloaded), um
- * 429 ou uma conexão derrubada matava a análise na hora, e o operador via um
+ * 429 ou uma conexão derr뫚 matava a análise na hora, e o operador via um
  * erro técnico e recomeçava do zero — duas leituras do processo perdidas. Com
  * mais análises por dia isso vira rotina. O SDK, usado na revisão e nos
  * emolumentos, já tentava de novo; estas não.
@@ -248,15 +315,50 @@ const REGRAS_PRAZO: Record<Esfera, RegraPrazo> = {
  * estadual (o resto: estados e municípios). esferaLida é o que a IA
  * classificou nos autos e desempata.
  */
-function esferaDoEnte(ente: unknown, esferaLida: unknown, tribunal: unknown): Esfera {
-  if (ehEstadoDeGoias(ente)) return 'goias';
+/**
+ * O ente devedor, classificado UMA VEZ para todo o motor.
+ *
+ * HAVIA DUAS CLASSIFICAÇÕES CONVIVENDO, e elas podiam discordar. O prazo saía de
+ * `esferaDoEnte`, que deriva do nome do ente com uma lista de padrões; o teto da
+ * RPV saía de `dados.esfera`, o texto que a IA classificou. Um ente que os
+ * padrões reconhecem como federal mas que a IA marcou "Estadual" recebia prazo
+ * federal e teto estadual — duas respostas para a mesma pergunta, nenhuma
+ * conferida contra a outra.
+ *
+ * Agora é uma função só, e ela devolve as duas coisas que o motor precisa:
+ * a ESFERA (que manda no teto) e se é GOIÁS (que tem regra de prazo própria).
+ * A leitura da IA entra como desempate, não como fonte concorrente.
+ */
+interface EnteClassificado {
+  /** A esfera do ente devedor — quem paga, não onde tramita. */
+  esfera: EsferaTeto;
+  /** Estado de Goiás, suas autarquias e fundações: regra de prazo própria. */
+  goias: boolean;
+  /** A esfera no vocabulário da tabela de prazos. */
+  prazo: Esfera;
+}
+
+function classificarEnte(ente: unknown, esferaLida: unknown, tribunal: unknown): EnteClassificado {
   const e = String(ente ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const lida = String(esferaLida ?? '').toLowerCase();
-  const trib = String(tribunal ?? '').toUpperCase().trim();
+  const trib = String(tribunal ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const goias = ehEstadoDeGoias(ente);
+
   const federalPorNome =
     /\buniao\b|fazenda nacional|\binss\b|\bibama\b|\bdnit\b|\bincra\b|\bfunasa\b|\bfnde\b|\bibge\b|\bufg\b|universidade federal|instituto federal|autarquia federal|fundacao.*federal|\bcaixa economica\b/.test(e);
-  if (federalPorNome || lida.includes('federal') || /^TRF/.test(trib)) return 'federal';
-  return 'estadual';
+  const municipalPorNome = /\bmunicipio\b|prefeitura|camara municipal|\bmunicipal\b/.test(e);
+
+  // Ordem: Goiás (que é estadual por definição) > município pelo nome >
+  // federal pelo nome ou pelo tribunal > o que a IA leu > estadual.
+  let esfera: EsferaTeto;
+  if (goias) esfera = 'estadual';
+  else if (municipalPorNome) esfera = 'municipal';
+  else if (federalPorNome || /^TRF/.test(trib)) esfera = 'federal';
+  else if (lida.includes('federal')) esfera = 'federal';
+  else if (lida.includes('municipal')) esfera = 'municipal';
+  else esfera = 'estadual';
+
+  return { esfera, goias, prazo: goias ? 'goias' : esfera === 'federal' ? 'federal' : 'estadual' };
 }
 
 /**
@@ -632,6 +734,18 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // silenciosamente errada por uma falha que diz onde olhar. Falhar aqui é o
   // desfecho bom: o documento errado seria assinado.
   const ANCORAS: Array<[number, string, string]> = [
+    // As duas primeiras entraram quando a due diligence passou a ESCREVER nelas
+    // (ver aplicarDiligenciaNoM2). Deslocamento de linha as outras âncoras já
+    // pegam; o que só estas pegam é a 10 e a 11 TROCAREM ENTRE SI — e aí a
+    // dívida do cedente sairia impressa como sendo do advogado, nas duas
+    // células que a diligência acabou de garantir que estavam certas.
+    //
+    // A AGULHA É CURTA de propósito: uma palavra que qualquer redação daquelas
+    // duas perguntas tem. O texto exato do modelo não está no repositório (ele
+    // mora no Storage), e âncora escrita de memória derruba TODA análise se o
+    // dono tiver reescrito a pergunta.
+    [10, 'cedente', 'a pergunta sobre o histórico do cedente'],
+    [11, 'advogado', 'a pergunta sobre o histórico do advogado'],
     [19, 'tipo da sentenca', 'tipo da sentença'],
     [24, 'foi apresentado valor', 'valor apresentado no CS / execução invertida'],
     [25, 'cuidado', 'bloco fixo CUIDADO (não é pergunta)'],
@@ -1047,6 +1161,22 @@ const SCHEMA_QUALIFICACAO = {
   comentarios_analise: 'observações úteis para a análise (sem recomendação de investimento)',
 };
 
+/**
+ * O system das DUAS chamadas — e é curto de propósito.
+ *
+ * Ele precisa ser IDÊNTICO nas duas para o cache de prompt casar (ver
+ * extrairComFerramenta): o prefixo cacheado é ferramentas + system + material, e
+ * qualquer diferença aqui derruba o reaproveitamento dos ~170 mil tokens do
+ * processo na segunda chamada. O que é específico de cada tarefa desceu para o
+ * fim do turno do usuário, depois do documento.
+ */
+const SYSTEM_BASE =
+  'Você é analista jurídico-financeiro da Credijuris, trabalhando sobre processos judiciais de créditos RPV e precatórios de qualquer tribunal do país. ' +
+  'Duas regras valem para tudo o que você faz aqui, e elas vêm antes de qualquer instrução específica: ' +
+  '(1) SEJA CONSERVADOR — dado que não estiver claro no documento devolve null ou "NÃO LOCALIZADO", nunca uma suposição; NUNCA invente datas, valores ou nomes. ' +
+  '(2) DIGA DE ONDE VEIO — para cada dado, indique a localização nesta ordem: numeração impressa ("fls.", "Pág. X de Y"), ID do documento, ou a passagem. ' +
+  'O material do processo vem primeiro; a tarefa exata vem no fim da mensagem, junto com a ferramenta a chamar.';
+
 const SYSTEM_QUALIFICACAO =
   'Você é um analista jurídico especializado em precatórios e RPVs, fazendo a QUALIFICAÇÃO (pré-análise) de um crédito para a Credijuris. ' +
   'A fonte é um processo judicial completo. Analise-o página por página com rigor e seja conservador: quando um dado não estiver claro, use "NÃO LOCALIZADO" (NUNCA invente datas, valores ou nomes). ' +
@@ -1108,6 +1238,9 @@ const SYSTEM_ANALISE =
   'Se o dado não estiver claro, deixe vazio (NUNCA escreva "não encontrado"/"verificar" no complemento). ' +
   '10: "Histórico do cedente: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
   '11: "Histórico do advogado: tem dívida?" -> Sim/Não; complemento: se Sim, números dos processos. ' +
+  'SOBRE A 10 E A 11: elas perguntam por dívidas DE FORA deste processo, e você só tem os autos da cessão — responda "Sim" apenas com o que estiver NELES ' +
+  '(penhora no rosto dos autos, ofício de outro juízo, execução noticiada aqui), e "Não" quando os autos nada disserem. Não deduza da profissão, do valor ou do perfil de ninguém. ' +
+  'Quando vier no material um bloco "DUE DILIGENCE DE PROCESSOS DOS SUJEITOS", essas duas linhas passam a ser escritas pelo sistema a partir dele, e o que você puser aqui é somado ao que foi apurado — nunca substituído. ' +
   '12: "Qual é o tipo da ação?" -> TEXTO livre (ex.: "ação de cobrança de horas extras de piso de magistério"); sem complemento. ' +
   '13: "Quem é o polo ativo?" -> TEXTO (nome); sem complemento. ' +
   '14: "O polo ativo é maior de idade?" -> Sim/Não. ' +
@@ -1152,52 +1285,147 @@ const SYSTEM_ANALISE =
   'PASSO 5: se algum ato depende de evento incerto (ordem cronológica de pagamento, dotação orçamentária, fila do ente), inclua o ato com a estimativa e diga a incerteza em "base". ' +
   'NÃO SOME NADA: devolva os atos e os dias de cada um. Quem soma sou eu.';
 
-async function extrairAnalise(apiKey: string, contentBlocks: any[]): Promise<any> {
-  const userContent = [
-    ...contentBlocks,
-    { type: 'text', text: 'Extraia os dados e retorne APENAS este JSON preenchido (sem markdown, sem comentários):\n' + JSON.stringify(SCHEMA_ANALISE, null, 2) },
-  ];
-  const res = await fetchComRetry('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: CLAUDE_MAX_TOKENS, system: SYSTEM_ANALISE, messages: [{ role: 'user', content: userContent }] }),
-  });
-  if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 500)}`);
-  const data = await res.json();
-  const block = data.content?.find((c: { type: string }) => c.type === 'text');
-  if (!block) throw new Error('Claude retornou sem bloco de texto');
-  let raw: string = block.text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
-  try { return JSON.parse(raw); }
-  catch {
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) { try { return JSON.parse(m[0]); } catch { /* ainda incompleto */ } }
-    throw new Error('A IA retornou um JSON INCOMPLETO (provável corte por tamanho da resposta). Início da resposta: ' + raw.slice(0, 200));
-  }
+/**
+ * O esquema de descrições vira uma ferramenta.
+ *
+ * As propriedades vão SEM `type` de propósito: os campos do esquema são de tudo
+ * — número, booleano, texto, lista, objeto indexado por linha — e a descrição já
+ * diz qual é. Declarar um tipo errado seria pior que não declarar nenhum: o
+ * modelo obedeceria ao tipo e devolveria "0" onde a resposta é null.
+ */
+function ferramentaDoEsquema(nome: string, descricao: string, esquema: Record<string, string>) {
+  const properties: Record<string, { description: string }> = {};
+  for (const [k, v] of Object.entries(esquema)) properties[k] = { description: v };
+  return { name: nome, description: descricao, input_schema: { type: 'object' as const, properties } };
 }
 
-// ---- PORTÃO 1: chamada de IA + decisão ----
-async function extrairQualificacao(apiKey: string, contentBlocks: any[]): Promise<any> {
-  const userContent = [
-    ...contentBlocks,
-    { type: 'text', text: 'Faça a QUALIFICAÇÃO e retorne APENAS este JSON preenchido (sem markdown, sem comentários):\n' + JSON.stringify(SCHEMA_QUALIFICACAO, null, 2) },
-  ];
-  const res = await fetchComRetry('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 4000, system: SYSTEM_QUALIFICACAO, messages: [{ role: 'user', content: userContent }] }),
-  });
-  if (!res.ok) throw new Error(`Claude API (qualificação) ${res.status}: ${(await res.text()).slice(0, 500)}`);
-  const data = await res.json();
-  const block = data.content?.find((c: { type: string }) => c.type === 'text');
-  if (!block) throw new Error('Claude retornou sem bloco de texto (qualificação)');
-  let raw: string = block.text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
-  try { return JSON.parse(raw); }
-  catch {
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) { try { return JSON.parse(m[0]); } catch { /* ainda incompleto */ } }
-    throw new Error('A IA (qualificação) retornou um JSON INCOMPLETO (provável corte por tamanho). Início: ' + raw.slice(0, 200));
+const FERRAMENTA_ANALISE = ferramentaDoEsquema(
+  'registrar_analise', 'Registra a análise completa do crédito RPV.', SCHEMA_ANALISE,
+);
+const FERRAMENTA_QUALIFICACAO = ferramentaDoEsquema(
+  'registrar_qualificacao', 'Registra a qualificação (pré-análise) do crédito.', SCHEMA_QUALIFICACAO,
+);
+
+/**
+ * Uma extração, pedida por FERRAMENTA em vez de "devolva APENAS este JSON".
+ *
+ * O QUE ISTO CONSERTA. O formato antigo era texto livre: a resposta vinha com
+ * cerca de markdown, às vezes com um parágrafo antes, e — o caso caro — cortada
+ * ao bater `max_tokens`. Cortada, o JSON.parse falhava, o regex de recuperação
+ * também, e a função lançava DEPOIS de ter lido o processo inteiro. As duas
+ * chamadas de IA iam para o lixo e o operador via "JSON INCOMPLETO".
+ *
+ * Três defesas, nesta ordem:
+ *   1. FERRAMENTA. O modelo devolve um bloco tool_use — sem cerca, sem preâmbulo.
+ *   2. `stop_reason` CONFERIDO. Cortou por tamanho, tenta de novo com teto maior
+ *      em vez de morrer. É uma chamada a mais, contra perder duas.
+ *   3. TEXTO LIVRE COMO REDE. Se o modelo responder em prosa mesmo assim, o
+ *      caminho antigo ainda lê — nada do que funcionava deixou de funcionar.
+ *
+ * `temperature: 0` porque isto é extração, não redação: duas leituras do mesmo
+ * processo têm de dar os mesmos números. O padrão da API é 1.
+ */
+async function extrairComFerramenta(
+  apiKey: string,
+  o: {
+    rotulo: string;
+    /** As instruções DA TAREFA. Vão depois do processo, fora do cache. */
+    instrucoes: string;
+    ferramenta: ReturnType<typeof ferramentaDoEsquema>;
+    conteudo: any[];
+    maxTokens: number;
+    /** Teto da segunda tentativa, quando a primeira cortar. 0 = não tenta. */
+    maxTokensRetentativa?: number;
+  },
+): Promise<any> {
+  // O PROCESSO É LIDO DUAS VEZES — QUALIFICAÇÃO E ANÁLISE — E ERA COBRADO DUAS.
+  //
+  // As duas chamadas mandam exatamente o mesmo material: o texto dos autos, as
+  // páginas em imagem e as anotações do card. Isso são até 170 mil tokens de
+  // entrada, pagos e reprocessados na íntegra na segunda chamada, que só começa
+  // a responder depois de o servidor ter lido tudo de novo.
+  //
+  // O cache de prompt resolve — mas ele casa por PREFIXO EXATO, na ordem
+  // ferramentas → system → mensagens. Por isso três coisas mudaram de lugar:
+  //
+  //   1. AS DUAS FERRAMENTAS VÃO NAS DUAS CHAMADAS. Ferramenta diferente é
+  //      prefixo diferente, e prefixo diferente não casa. Os nomes são
+  //      distantes (registrar_qualificacao / registrar_analise) e a instrução
+  //      final diz qual chamar.
+  //   2. O SYSTEM É UM SÓ, curto e comum. As instruções específicas de cada
+  //      tarefa desceram para o fim do turno do usuário — que é onde a
+  //      documentação da Anthropic recomenda pôr instrução quando o documento é
+  //      longo, porque ela fica em posição de recência.
+  //   3. A MARCA DO CACHE fica no ÚLTIMO bloco compartilhado. Tudo até ali é
+  //      reaproveitado; o que vem depois (a instrução da tarefa) é barato.
+  const conteudo = o.conteudo.map((b, i) =>
+    i === o.conteudo.length - 1 ? { ...b, cache_control: { type: 'ephemeral' } } : b,
+  );
+
+  const pedir = async (maxTokens: number) => {
+    const res = await fetchComRetry('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: maxTokens,
+        temperature: 0,
+        system: SYSTEM_BASE,
+        tools: [FERRAMENTA_QUALIFICACAO, FERRAMENTA_ANALISE],
+        // 'auto', e não forçado: forçar a ferramenta tira do modelo a chance de
+        // raciocinar em texto antes de responder, e a auditoria dos cálculos
+        // depende disso. A instrução no fim do turno já basta na prática.
+        messages: [{
+          role: 'user',
+          content: [
+            ...conteudo,
+            { type: 'text', text: `${o.instrucoes}\n\n=== O QUE FAZER AGORA ===\nFaça o trabalho descrito acima e registre o resultado chamando a ferramenta ${o.ferramenta.name} UMA única vez. Não use a outra ferramenta e não escreva o JSON no texto da resposta.` },
+          ],
+        }],
+      }),
+    });
+    if (!res.ok) throw new Error(`Claude API (${o.rotulo}) ${res.status}: ${(await res.text()).slice(0, 500)}`);
+    return await res.json();
+  };
+
+  let data = await pedir(o.maxTokens);
+  const retentativa = o.maxTokensRetentativa ?? 0;
+  if (data?.stop_reason === 'max_tokens' && retentativa > o.maxTokens) {
+    data = await pedir(retentativa);
   }
+
+  const uso = data.content?.find((c: { type: string; name?: string }) => c.type === 'tool_use' && c.name === o.ferramenta.name);
+  if (uso?.input && typeof uso.input === 'object') return uso.input;
+
+  // Rede: o caminho antigo, para o modelo que responder em prosa.
+  const texto = (data.content ?? [])
+    .filter((c: { type: string }) => c.type === 'text')
+    .map((c: { text?: string }) => String(c.text ?? '')).join('\n').trim();
+  const raw = texto.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+  if (raw) {
+    try { return JSON.parse(raw); } catch { /* tenta o recorte */ }
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) { try { return JSON.parse(m[0]); } catch { /* incompleto */ } }
+  }
+  throw new Error(
+    data?.stop_reason === 'max_tokens'
+      ? `A leitura (${o.rotulo}) foi CORTADA por tamanho mesmo na segunda tentativa. O processo pode estar grande demais para uma passada só — tente reduzir os anexos do card.`
+      : `A IA não registrou o resultado da ${o.rotulo}.${raw ? ` Ela disse: "${raw.slice(0, 200)}"` : ''}`,
+  );
 }
+
+const extrairAnalise = (apiKey: string, contentBlocks: any[]) =>
+  extrairComFerramenta(apiKey, {
+    rotulo: 'análise', instrucoes: SYSTEM_ANALISE, ferramenta: FERRAMENTA_ANALISE,
+    conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS, maxTokensRetentativa: 26000,
+  });
+
+// ---- PORTÃO 1: chamada de IA + decisão ----
+const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
+  extrairComFerramenta(apiKey, {
+    rotulo: 'qualificação', instrucoes: SYSTEM_QUALIFICACAO, ferramenta: FERRAMENTA_QUALIFICACAO,
+    conteudo: contentBlocks, maxTokens: 4000, maxTokensRetentativa: 8000,
+  });
 
 // ============================================================================
 // REFINAMENTO — o chat da análise
@@ -1320,7 +1548,11 @@ async function refinarDados(
   // um teto alto só dá margem para a resposta demorar.
   const resp = await anthropic.messages
     .stream({
-      model: 'claude-opus-5',
+      // A MESMA constante das extrações, e não um literal solto. Foi assim que
+      // o motor de RPV ficou uma geração atrás sem ninguém ver: a revisão subiu
+      // para o Opus 5 escrevendo o nome aqui, e a leitura que PRECIFICA ficou no
+      // 4.5 lá em cima. Um nome só, um lugar só.
+      model: CLAUDE_MODEL,
       max_tokens: 4000,
       system: [{ type: 'text', text: SISTEMA_REVISAO, cache_control: { type: 'ephemeral' } }],
       tools: [FERRAMENTA_REVISAO],
@@ -1339,6 +1571,17 @@ async function refinarDados(
   const alteracoes = (entrada.alteracoes && typeof entrada.alteracoes === 'object' ? entrada.alteracoes : {}) as Record<string, unknown>;
   const remover = Array.isArray(entrada.remover) ? (entrada.remover as unknown[]).map(String) : [];
   const r = aplicarPatch(dadosAtuais, alteracoes, remover, CAMPOS_EDITAVEIS, CAMPOS_LISTA);
+
+  // AS LINHAS DO QUESTIONÁRIO QUE O CHAT MANDOU ESCREVER ficam marcadas, e a
+  // marca ACUMULA entre rodadas — quem corrigiu a linha 10 na terceira mensagem
+  // não deveria vê-la revertida na quarta. Serve às linhas 10 e 11, que a due
+  // diligence escreve depois: nelas, ordem explícita de quem confere manda na
+  // resposta, e a diligência passa a aparecer na coluna D em vez de sobrepor em
+  // silêncio (ver aplicarDiligenciaNoM2).
+  {
+    const antes = Array.isArray(dadosAtuais?._m2_do_chat) ? dadosAtuais._m2_do_chat.map(String) : [];
+    r.dados._m2_do_chat = [...new Set([...antes, ...r.m2Tocadas])];
+  }
 
   // OS PARÂMETROS DO NEGÓCIO viajam com a análise, não à parte: assim
   // sobrevivem à rodada seguinte do chat e ao salvamento, que dão a volta pelo
@@ -1390,13 +1633,13 @@ const ehSim = (v: any) => typeof v === 'string' && v.trim().toUpperCase().starts
  * sem caixa. NÃO casa município goiano de propósito: a lei é do Estado, e cada
  * município legisla o próprio teto.
  */
-// E AS AUTARQUIAS E FUNDA\u00c7\u00d5ES ESTADUAIS GOIANAS \u2014 GOIASPREV, IPASGO, DETRAN-GO,
-// AGR, Agehab, Agrodefesa, Goinfra, UEG, PGE-GO. Elas eram o furo: s\u00e3o as
+// E AS AUTARQUIAS E FUNDAÇÕES ESTADUAIS GOIANAS — GOIASPREV, IPASGO, DETRAN-GO,
+// AGR, Agehab, Agrodefesa, Goinfra, UEG, PGE-GO. Elas eram o furo: são as
 // devedoras mais comuns em RPV de servidor goiano e escapavam do teto de 10
-// sal\u00e1rios m\u00ednimos, da reserva de INSS e do prazo do conv\u00eanio, porque o nome
-// n\u00e3o traz "Estado de Goi\u00e1s". A lei estadual alcan\u00e7a o Estado, suas autarquias
-// e funda\u00e7\u00f5es; a regra aqui alcan\u00e7a o mesmo. Munic\u00edpio continua fora \u2014 "Munic\u00edpio
-// de Goi\u00e2nia" e "Prefeitura de An\u00e1polis" n\u00e3o entram mesmo com "Goi\u00e1s" por perto.
+// salários mínimos, da reserva de INSS e do prazo do convênio, porque o nome
+// não traz "Estado de Goiás". A lei estadual alcança o Estado, suas autarquias
+// e fundações; a regra aqui alcança o mesmo. Município continua fora — "Município
+// de Goiânia" e "Prefeitura de Anápolis" não entram mesmo com "Goiás" por perto.
 function ehEstadoDeGoias(...candidatos: unknown[]): boolean {
   return candidatos.some((c) => {
     const t = String(c ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -1436,7 +1679,15 @@ function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; av
     motivos.push('Credor menor de idade ou curatelado — a cessão exige autorização judicial (alvará).');
 
   // 3) Valor / tipo do crédito
-  const valor = Number(q.valor_credito);
+  // parseNumeroFlex, e não Number(). A IA às vezes devolve "R$ 124.500,00" onde
+  // o esquema pede número puro, e `Number()` disso é NaN: o portão concluía
+  // "valor não identificado", PULAVA a verificação de piso e deixava passar com
+  // um aviso brando. Ausência de dado saindo como aprovação — a mesma classe de
+  // defeito que já se corrigiu nos campos da análise, e que tinha sobrevivido
+  // aqui, justamente no lugar que decide se o crédito entra.
+  const valor = typeof q.valor_credito === 'number'
+    ? q.valor_credito
+    : (parseNumeroFlex(String(q.valor_credito ?? '').replace(/[^\d.,\-]/g, '')) ?? NaN);
   const temValor = !isNaN(valor) && valor > 0;
   const tipo = String(q.tipo_requisitorio || '').toLowerCase();
   const isPrecatorio = tipo.includes('precat');
@@ -1446,8 +1697,18 @@ function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; av
     if (isPrecatorio) {
       if (valor <= 100000) motivos.push('Valor do precatório igual ou abaixo de R$ 100 mil (mínimo exigido para precatório).');
     } else {
-      // RPV, ou ainda não expedido (só cálculo homologado) -> piso de R$ 20 mil
-      if (valor < 20000) motivos.push('Valor abaixo de R$ 20 mil (mínimo exigido para RPV).');
+      // RPV, ou ainda não expedido (só cálculo homologado) -> piso de R$ 20 mil.
+      //
+      // ESTE É O PORTÃO BARATO, e ele olha o BRUTO. A régua de verdade é o valor
+      // TOTAL LÍQUIDO NEGOCIADO (a linha 39 da planilha), que só existe depois da
+      // extração e da calibragem — ver PISO_NEGOCIO lá adiante. Reprovar aqui é
+      // seguro por construção: o líquido nunca é maior que o bruto, então bruto
+      // abaixo do piso já garante líquido abaixo do piso, e poupa a leitura
+      // completa de um crédito que não serve.
+      if (valor < PISO_NEGOCIO) motivos.push(
+        `O crédito inteiro, ainda BRUTO, é de ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — abaixo do mínimo de R$ 20 mil. ` +
+        'Líquido será menos ainda, então não há o que negociar nem somando todas as verbas.',
+      );
     }
   } else {
     avisos.push('Valor do crédito não identificado no processo — confira o valor manualmente.');
@@ -1473,39 +1734,15 @@ function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; av
 
 // Arquivo -> blocos de conteúdo p/ a IA.
 // PDF: extrai TEXTO (sem limite de páginas). Imagem: envia como imagem. Texto: inline.
-const MAX_DOC_CHARS = 420000; // ~150-160k tokens (texto jurídico pt-BR é denso); deixa folga p/ o system prompt + a saída (Opus = 200k)
+// OS TETOS DE TAMANHO MORAM EM _shared/orcamentoLeitura.ts, e não aqui.
+//
+// Eram três números soltos que ninguém somava: 420 mil caracteres de processo
+// deste lado, 360 mil do lado do navegador (o que valia), 40 mil de anotações, e
+// até 60 imagens. Somados, ~294 mil tokens numa janela de 200 mil — o pedido
+// voltava HTTP 400 depois de minutos de renderização. Agora há UM orçamento, e
+// ele é conjunto: ver planoDeLeitura.
+const MAX_DOC_CHARS = MAX_TEXTO_CHARS;
 const MARCA_CORTE = 'TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO';
-
-/**
- * Teto das anotações do card. Sem ele, o histórico do Kommo entrava inteiro.
- *
- * O texto do processo tem teto (MAX_DOC_CHARS) desde sempre; as anotações não
- * tinham nenhum, e vão no MESMO pedido. Um card com dezenas de anotações longas
- * — e existem, é onde o comercial conversa — somava-se aos 360 mil caracteres do
- * processo e podia estourar a janela do modelo, o que não falha de forma limpa.
- *
- * 40 mil caracteres cobrem com folga o histórico de um card real.
- */
-const MAX_NOTAS_CHARS = 40000;
-
-/**
- * Corta as anotações mantendo O INÍCIO E O FIM.
- *
- * As duas pontas importam, e por motivos diferentes: a PRIMEIRA anotação é onde
- * o comercial registra os parâmetros do negócio (parcela cedida, percentual de
- * honorários, o que o cedente disse) — decisão do dono, de quando as notas
- * entraram na leitura —, e as ÚLTIMAS dizem em que pé a conversa está hoje.
- * Cortar só o fim perderia o estado atual; cortar só o começo perderia o
- * combinado.
- */
-function capNotas(txt: string): string {
-  if (txt.length <= MAX_NOTAS_CHARS) return txt;
-  const head = Math.floor(MAX_NOTAS_CHARS * 0.5);
-  const tail = MAX_NOTAS_CHARS - head;
-  return txt.slice(0, head) +
-    `\n\n[...${MARCA_CORTE} — histórico de anotações muito longo; exibindo as primeiras e as últimas...]\n\n` +
-    txt.slice(txt.length - tail);
-}
 
 // Corta textos muito grandes mantendo INÍCIO e FINAL.
 //
@@ -1582,56 +1819,167 @@ function dataPagamento(meses: number): string {
 // ============================================================================
 
 
-/* ===== Teto da RPV por ente (tabela do jurídico). Alerta, NÃO impeditivo. ===== */
-/**
- * O ANO DA TABELA DE TETOS E DO SALÁRIO MÍNIMO ABAIXO.
- *
- * Os dois são fixos no código e mudam todo janeiro. Sem data, viraria o ano e
- * o alerta de teto sairia calculado com valor defasado sem ninguém saber. Com
- * ela, o motor compara com o ano corrente e AVISA em toda análise até alguém
- * atualizar — chato de propósito.
- */
-const ANO_TETOS_RPV = 2026;
-/** Salário mínimo do ano acima (teto federal = 60 × SM). */
-const SALARIO_MINIMO = 1621;
-const TETOS_RPV: Record<string, { est: number | null; mun: number | null }> = {"PE": {"est": 64840.0, "mun": 48630.0}, "PA": {"est": 48630.0, "mun": 48630.0}, "AM": {"est": 32420.0, "mun": 24315.0}, "DF": {"est": 32420.0, "mun": null}, "MA": {"est": 32420.0, "mun": 8475.55}, "RJ": {"est": 32420.0, "mun": 16210.0}, "RN": {"est": 32420.0, "mun": 16210.0}, "MS": {"est": 27655.5, "mun": 10099.18}, "RR": {"est": 27557.0, "mun": 24315.0}, "MG": {"est": 27345.69, "mun": 8475.55}, "MT": {"est": 26010.0, "mun": 8475.55}, "PR": {"est": 24782.81, "mun": 8537.55}, "ES": {"est": 21827.28, "mun": 48630.0}, "SP": {"est": 16913.0, "mun": 31667.41}, "AP": {"est": 16210.0, "mun": 48630.0}, "BA": {"est": 16210.0, "mun": 11010.97}, "GO": {"est": 16210.0, "mun": 48630.0}, "PB": {"est": 16210.0, "mun": 8475.55}, "RS": {"est": 16210.0, "mun": 48630.0}, "RO": {"est": 16210.0, "mun": 16210.0}, "SC": {"est": 16210.0, "mun": 8475.55}, "TO": {"est": 16210.0, "mun": 24315.0}, "CE": {"est": 15746.8, "mun": 8475.55}, "AC": {"est": 11347.0, "mun": 16210.0}, "AL": {"est": 8475.55, "mun": 21073.0}, "PI": {"est": 8475.55, "mun": 11347.0}, "SE": {"est": 8475.55, "mun": 8475.55}};
-function _brlTeto(n: number): string {
-  return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-// Compara o valor bruto com o teto da RPV do ente. Devolve o aviso (ou null se estiver dentro do teto).
+/* ===== Teto da RPV do ente devedor. Alerta, NÃO impeditivo. ===== */
 //
-// `ufLida` é a UF que a IA achou no cabeçalho dos autos (ver ufDoCredito) e tem
-// precedência sobre a sigla do tribunal: TRT e TRF não carregam estado nenhum na
-// sigla, e a condenação de um estado ou de um município nessas justiças segue o
-// teto do ENTE devedor. Sem ela, esses casos passavam sem verificação de teto —
-// em silêncio, que é o pior jeito de errar num alerta.
-function checarTetoRPV(esfera: string | undefined, tribunal: string | undefined, bruto: number, ufLida?: string | null): string | null {
-  const esf = String(esfera || '').toLowerCase();
-  // Sem pontuação: "TJ-GO" e "TJ/GO" são o mesmo tribunal que "TJGO", e a IA
-  // escreve dos três jeitos.
-  const trib = String(tribunal || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (!bruto || bruto <= 0) return null;
-  let teto: number | null = null;
-  let ref = '';
-  // A esfera do ENTE manda. O tribunal só decide quando ela não veio: um
-  // município executado na Justiça Federal continua com o teto municipal dele.
-  if (esf.includes('federal') || (!esf && (/^TRF/.test(trib) || trib === 'STJ' || trib === 'STF'))) {
-    teto = 60 * SALARIO_MINIMO; ref = 'federal (60 salários mínimos)';
-  } else {
-    const uf = normalizarUf(ufLida) ?? (/^TJ([A-Z]{2})$/.exec(trib)?.[1] ?? '');
-    const t = TETOS_RPV[uf];
-    if (!t) return null; // ente não localizado na tabela -> não arrisca um alerta errado
-    if (esf.includes('municipal')) { teto = t.mun; ref = `municipal (referência: capital de ${uf})`; }
-    else { teto = t.est; ref = `estadual (${uf})`; }
+// A TABELA SAIU DO CÓDIGO E FOI PARA O BANCO (migração 0057, _shared/tetosRpv.ts).
+// Eram 27 estados e suas capitais escritos numa constante, mais um salário
+// mínimo ao lado, e dois defeitos que vinham juntos:
+//
+//   1. Mudam todo janeiro e o código não muda junto. O motor sabia e avisava
+//      "TABELA DEFASADA" em TODA análise depois da virada — aviso que ninguém
+//      pode resolver na hora, repetido até alguém editar e fazer deploy. Aviso
+//      sem ação vira ruído, e ruído se ignora junto com os que importam.
+//   2. O que faltava, faltava em silêncio. UF fora do mapa devolvia null, e null
+//      era lido como "está dentro do teto". Ausência de dado saía como aprovação.
+//
+// Agora a tabela é cache com pesquisa: falta a linha, a IA procura a norma em
+// segundo plano e a próxima análise daquele estado já sai conferida. Esta
+// análise não espera — ela DIZ que o teto ainda não foi verificado.
+const _brlTeto = (n: number): string =>
+  'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * Compara o bruto com o teto do ente e devolve o aviso — ou null se está dentro.
+ *
+ * `esfera` vem de classificarEnte, fonte única do motor. `uf` é a do crédito
+ * (resolverUf), que tem precedência sobre a sigla do tribunal: TRT e TRF não
+ * carregam estado nenhum, e a condenação de um estado ou município nessas
+ * justiças segue o teto do ENTE devedor.
+ */
+function avisoDeTeto(
+  teto: TetoConsultado, esfera: EsferaTeto, uf: string | null, bruto: number, municipio: string | null,
+): string | null {
+  // O QUE O RÓTULO DIZ É DE QUEM É O TETO, e num município isso não é detalhe:
+  // cada um fixa o seu (CF, art. 100, §4º), e o número que herdamos é o da
+  // CAPITAL. Chamar o teto de Goiânia de "municipal (GO)" ao analisar um crédito
+  // contra Anápolis afirma como apurado o que é palpite informado.
+  const ondeMunicipal = municipio ? `municipal — ${municipio}/${uf ?? '?'}` : `municipal (${uf ?? '?'})`;
+  const onde = esfera === 'federal' ? 'federal'
+    : esfera === 'municipal' ? ondeMunicipal
+    : `estadual (${uf ?? '?'})`;
+
+  if (teto.estado === 'pesquisando') {
+    return `⚠️ TETO DA RPV NÃO CONFERIDO: estou levantando o teto ${onde} de ${teto.ano} na fonte oficial — ` +
+      'é a primeira análise deste ente neste ano. Confira o teto à mão antes de fechar; ' +
+      'a próxima análise deste ente já sai com ele.';
   }
-  if (teto == null || bruto <= teto) return null;
-  return `⚠️ ATENÇÃO — TETO DA RPV: o valor bruto (${_brlTeto(bruto)}) EXCEDE o teto da RPV ${ref} (${_brlTeto(teto)}). Isso NÃO impede a operação, mas será necessária a RENÚNCIA ao valor que excede o teto para receber como RPV — o operacional deve avaliar.`;
+  if (teto.estado === 'sem_uf') {
+    return '⚠️ TETO DA RPV NÃO CONFERIDO: não identifiquei a UF do crédito, e o teto é fixado por lei de cada ente. Confira à mão.';
+  }
+  if (teto.estado === 'falhou') {
+    return `⚠️ TETO DA RPV NÃO CONFERIDO (${onde}): ${teto.motivo ?? 'não consegui achar a norma'}. ` +
+      'Confira o teto à mão antes de fechar — sem ele não dá para dizer se cabe renúncia.';
+  }
+  if (teto.valor == null) {
+    return `⚠️ TETO DA RPV NÃO APLICÁVEL (${onde}): ${teto.motivo ?? 'a pesquisa não achou teto próprio para este ente'}. Confira à mão.`;
+  }
+  // REFERÊNCIA DA CAPITAL: o número não é do município do crédito.
+  //
+  // Ele serve de régua enquanto a pesquisa do município corre, e é melhor que
+  // campo vazio — mas dizer "excede o teto" ou "está dentro" com base nele seria
+  // afirmar o que não se apurou. Então o aviso sai NOS DOIS SENTIDOS: acima da
+  // referência ou abaixo dela, o texto é o mesmo pedido de conferência, mudando
+  // só o que a comparação sugere.
+  if (teto.escopo === 'capital') {
+    const capital = _brlTeto(teto.valor);
+    const acima = bruto > teto.valor;
+    return `⚠️ TETO MUNICIPAL NÃO CONFERIDO — ${municipio ?? 'município'}/${uf ?? '?'}: cada município fixa o próprio teto de RPV ` +
+      '(CF, art. 100, §4º; sem lei local, vale o piso de 30 salários mínimos do ADCT, art. 87). ' +
+      `O que tenho é a referência da CAPITAL de ${uf ?? '?'} (${capital}), e o bruto é ${_brlTeto(bruto)} — ` +
+      (acima
+        ? 'por essa régua HAVERIA excedente e renúncia. '
+        : 'por essa régua caberia sem renúncia. ') +
+      `Estou levantando o teto de ${municipio ?? 'do município'} na fonte oficial; confira à mão antes de fechar.`;
+  }
+
+  if (!bruto || bruto <= 0 || bruto <= teto.valor) return null;
+
+  const fonte = [teto.vigencia, teto.fonte].filter(Boolean).join(' — ');
+  return `⚠️ ATENÇÃO — TETO DA RPV: o valor bruto (${_brlTeto(bruto)}) EXCEDE o teto da RPV ${onde} de ${teto.ano} (${_brlTeto(teto.valor)}` +
+    `${fonte ? `, ${fonte}` : ''}). Isso NÃO impede a operação, mas será necessária a RENÚNCIA ao valor que excede o teto para receber como RPV — o operacional deve avaliar.` +
+    (teto.origem === 'semente' ? ' (Valor herdado do mapa antigo: a migração 0057 ainda não rodou, então ele não foi conferido este ano.)' : '');
 }
 
+/**
+ * O PISO DE R$ 20 MIL, decisão do dono.
+ *
+ * ONDE ELE INCIDE MUDOU, e a mudança é o conserto. Ele era aplicado no portão de
+ * qualificação, sobre `valor_credito` — o valor BRUTO total que a IA leu dos
+ * autos, antes de IR, INSS e honorários, e sem relação com o que está sendo
+ * comprado. Errava dos dois lados: uma cessão só de honorários de R$ 15 mil
+ * passava porque o crédito inteiro tinha R$ 100 mil, e um crédito bruto de
+ * R$ 25 mil que líquido dá R$ 17 mil também passava.
+ *
+ * Agora incide sobre o VALOR TOTAL LÍQUIDO NEGOCIADO — a linha 39 da aba
+ * jurídica, que é o Y3 da calibragem: a soma dos líquidos das verbas que entram
+ * no negócio. É o número que a planilha imprime como resposta à pergunta "qual o
+ * valor total final líquido do(s) crédito(s) sendo negociado(s)?".
+ *
+ * O portão continua reprovando cedo quando o BRUTO já está abaixo do piso —
+ * isso é seguro por construção, porque o líquido nunca é maior que o bruto, e
+ * poupa a leitura completa de um crédito que não serve.
+ */
+const PISO_NEGOCIO = 20000;
+
+/**
+ * A due diligence de processos judiciais deste crédito, quando existe.
+ *
+ * Alimenta as linhas 10 e 11 da aba jurídica ("Histórico do cedente / do
+ * advogado: tem dívida?"), que até aqui eram respondidas pela IA lendo o
+ * processo DA CESSÃO — o único documento que ela tem, e o único que não fala
+ * das outras dívidas de ninguém. Ver _shared/dueDiligencia.ts.
+ *
+ * NÃO DERRUBA A ANÁLISE, EM HIPÓTESE NENHUMA. A tabela pode nem existir (a
+ * migration 0056 é recente e roda à mão, no editor do Supabase), e a tela de
+ * onde a apuração vai sair ainda está por fazer. Falta de diligência é o estado
+ * NORMAL hoje: quando a consulta não responde, a análise segue como sempre
+ * seguiu, e só uma falha INESPERADA vira aviso — tabela ausente, não.
+ */
+async function lerDiligencia(
+  sb: ReturnType<typeof serviceClient>,
+  leadId: number | null,
+): Promise<{ hs: HistoricoDePapel[]; falha: string | null }> {
+  if (!leadId) return { hs: [], falha: null };
+  const semTabela = (m: string) =>
+    /does not exist|schema cache|PGRST205|relation .* does not exist/i.test(m);
+  try {
+    const { data: apuracoes, error: e1 } = await sb
+      .from('dd_historico')
+      .select('id, papel, nome, documento, oab, status, fonte, apurado_em, observacao')
+      .eq('kommo_lead_id', leadId);
+    if (e1) throw new Error(e1.message);
+    const lista = (apuracoes ?? []) as ApuracaoDD[];
+    if (lista.length === 0) return { hs: [], falha: null };
+
+    const { data: processos, error: e2 } = await sb
+      .from('dd_processo')
+      .select(
+        'historico_id, numero_processo, tribunal, objeto, polo, ha_cobranca, valor_cobrado, estagio, risco, risco_motivo',
+      )
+      .eq('kommo_lead_id', leadId);
+    if (e2) throw new Error(e2.message);
+
+    return { hs: historicoDoCredito(lista, (processos ?? []) as ProcessoDD[]), falha: null };
+  } catch (e) {
+    const msg = (e as Error)?.message ?? String(e);
+    return { hs: [], falha: semTabela(msg) ? null : msg };
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
+
+  /**
+   * As páginas subidas para esta leitura, para apagar SE ALGO DER ERRADO.
+   *
+   * A limpeza existia em três pontos, todos DEPOIS de a IA ter respondido. Se a
+   * leitura lançasse — tempo esgotado, 400 da API, JSON cortado —, as imagens
+   * ficavam no bucket para sempre: não há lifecycle em `analises-input`, e
+   * ninguém mais sabe a que job elas pertenciam. Fechar a janela no meio dava no
+   * mesmo. Declarado FORA do try porque é no catch que ele precisa existir.
+   */
+  let limparUploads: (() => Promise<void>) | null = null;
 
   try {
     let body: any;
@@ -1654,6 +2002,30 @@ Deno.serve(async (req) => {
       const sb = serviceClient();
       const r = await executarPasso(body.uf, (await chaveAnthropic()) ?? '', sb);
       return jsonResponse({ ok: true, ...r });
+    }
+
+    // 0b. A PESQUISA DO TETO DA RPV de um ente, em invocação própria.
+    //
+    // Mesmo desenho da etapa de emolumentos acima, e pelo mesmo motivo: a busca
+    // web leva dezenas de segundos e não pode rodar dentro da análise que a
+    // pessoa espera. Uma invocação nova zera o relógio de parede. Sem usuário
+    // por trás, então a mesma checagem própria — service_role ou segredo de cron.
+    if (body.acao === 'teto_passo') {
+      const cronSecret = Deno.env.get('CRON_SECRET');
+      const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      const interna =
+        (!!cronSecret && req.headers.get('x-cron-secret') === cronSecret) ||
+        (!!svcKey && req.headers.get('Authorization') === `Bearer ${svcKey}`);
+      if (!interna) return errorResponse(ERRO_ACESSO, 401);
+      const r = await executarPesquisaTeto(
+        String(body.uf ?? ''),
+        String(body.esfera ?? ''),
+        Number(body.ano) || new Date().getFullYear(),
+        (await chaveAnthropic()) ?? '',
+        serviceClient(),
+        String(body.municipio ?? ''),
+      );
+      return jsonResponse({ ok: r.ok, motivo: r.motivo ?? null });
     }
 
     // 1. Auth (JWT do usuário)
@@ -1716,6 +2088,16 @@ Deno.serve(async (req) => {
         ? body.acao
         : null;
     const notasKommo: string = String(body.notas_kommo ?? '').trim();
+    /**
+     * O card. Chega em TODAS as ações (vai no `corpoCard` do navegador) porque a
+     * due diligence é lida em todas: a apuração costuma ser feita DEPOIS da
+     * primeira análise, e é no 'salvar' — que gera a planilha — que ela precisa
+     * estar nas linhas 10 e 11. Opcional: chamada antiga, sem lead_id, apenas
+     * não tem diligência.
+     */
+    const leadId: number | null = Number.isFinite(Number(body.lead_id)) && Number(body.lead_id) > 0
+      ? Number(body.lead_id)
+      : null;
     const jobId: string = body.job_id;
     const originador: string = body.originador ?? body.intermediador;
     const numeroProcesso: string = (body.numero_processo || '').trim();
@@ -1733,6 +2115,9 @@ Deno.serve(async (req) => {
     for (const k of ['anthropic_api_key', 'google_oauth_client_id', 'google_oauth_client_secret', 'google_oauth_refresh_token'])
       if (!cfg[k]) return errorResponse(`Secret '${k}' não configurado (Anthropic/Google — ver integracao_*_secret)`, 500);
 
+    // A DUE DILIGENCE DE PROCESSOS DOS SUJEITOS, se já houver.
+    const diligencia = await lerDiligencia(sbAdmin, leadId);
+
     // 3a. Fonte do texto do processo:
     //   (A) texto já extraído no NAVEGADOR (pdf.js) e enviado no corpo -> caminho leve, sem estourar CPU;
     //   (B) fallback: lê o(s) arquivo(s) do storage analises-input/{userId}/{jobId}/processo/* (fluxo antigo).
@@ -1741,6 +2126,8 @@ Deno.serve(async (req) => {
     let prefix = '';
     /** Quantas páginas digitalizadas foram à IA como imagem. */
     let paginasImagem = 0;
+    /** Quantas ficaram de fora por não caberem na janela do modelo. */
+    let cortouImagens = 0;
     const textoDireto = String(body.texto ?? body.texto_processo ?? '').trim();
     // SÓ QUEM LÊ O PROCESSO PRECISA DELE. 'refinar', 'reprecificar' e 'salvar'
     // trabalham sobre a análise que já veio pronta do navegador — exigir o texto
@@ -1768,26 +2155,70 @@ Deno.serve(async (req) => {
         if (listErr) throw new Error('Erro listando uploads: ' + listErr.message);
         if (!arqs?.length && !textoDireto) return errorResponse('Nenhum arquivo encontrado para esse job. Faça o upload do processo antes de gerar.');
         arquivos = (arqs ?? []).filter((a: { name?: string }) => !!a.name && !a.name.startsWith('.'));
+        // A partir daqui há o que limpar, aconteça o que acontecer.
+        limparUploads = async () => {
+          if (!arquivos.length) return;
+          try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map((a) => `${prefix}/${a.name}`)); } catch (_) { /* ok */ }
+          arquivos = [];
+        };
         // Pelo nome: o navegador nomeia por arquivo e página (…-p0042.jpg), então
         // a ordem alfabética é a ordem do processo.
         arquivos.sort((a, b) => a.name.localeCompare(b.name));
         const ehImagem = (n: string) => /\.(png|jpe?g|webp|gif)$/i.test(n);
         const imagens = arquivos.filter((a) => ehImagem(a.name));
         const outros = arquivos.filter((a) => !ehImagem(a.name));
-        // Teto por pedido (a API aceita 100; 60 deixa folga para o texto). Se
-        // ainda assim sobrar, ficam as ÚLTIMAS: o navegador já escolheu fim e
-        // começo, e entre os dois o fim é onde estão a conta e o requisitório.
-        const MAX_IMAGENS = 60;
-        const imagensEnviadas = imagens.slice(-MAX_IMAGENS);
+        // O TETO É O ORÇAMENTO CONJUNTO, não um número fixo.
+        //
+        // Era 60 imagens sempre, ao lado de um texto de até 360 mil caracteres,
+        // sem ninguém somar os dois — e a soma estourava a janela do modelo (ver
+        // _shared/orcamentoLeitura.ts). O navegador já decide isto antes de
+        // renderizar; aqui é a REDE, para o caso de um cliente desatualizado
+        // mandar mais do que cabe. Sobrando, ficam as ÚLTIMAS: o navegador já
+        // escolheu fim e começo, e entre os dois o fim é onde estão a conta e o
+        // requisitório.
+        const _plano = planoDeLeitura({
+          charsTexto: textoDireto.length,
+          imagensPedidas: imagens.length,
+          charsNotas: notasKommo.length,
+        });
+        const imagensEnviadas = imagens.slice(-Math.min(_plano.maxImagens, MAX_IMAGENS_ABS));
+        if (imagensEnviadas.length < imagens.length) {
+          cortouImagens = imagens.length - imagensEnviadas.length;
+        }
         if (imagensEnviadas.length) {
           contentBlocks.push({
             type: 'text',
             text: `[PÁGINAS DIGITALIZADAS DOS AUTOS, enviadas como imagem: ${imagensEnviadas.length}. São páginas do MESMO processo do texto acima — leia-as como parte dos autos. A conta da contadoria, a homologação e o requisitório podem estar SÓ nelas. O nome de cada imagem diz o arquivo e a página de origem.]`,
           });
         }
-        for (const a of [...outros, ...imagensEnviadas]) {
-          const bytes = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${a.name}`);
-          contentBlocks.push(...await arquivoToContentBlocks(a.name, bytes));
+        // DOWNLOAD EM PARALELO, montagem EM ORDEM.
+        //
+        // Era um `await` por arquivo, em fila: sessenta páginas baixadas uma a
+        // uma do Storage, dentro do relógio de parede da função. Seis de cada
+        // vez usam a banda que estava ociosa entre elas. A ORDEM continua sendo
+        // a do processo — os bytes vão para um vetor indexado e os blocos são
+        // montados depois, na sequência: página fora de ordem confundiria a
+        // leitura tanto quanto página faltando.
+        const aBaixar = [...outros, ...imagensEnviadas];
+        const bytesPorIndice: (Uint8Array | null)[] = new Array(aBaixar.length).fill(null);
+        {
+          const CONCORRENCIA = 6;
+          let proximo = 0;
+          const trabalhador = async () => {
+            for (;;) {
+              const i = proximo++;
+              if (i >= aBaixar.length) return;
+              bytesPorIndice[i] = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${aBaixar[i].name}`);
+            }
+          };
+          await Promise.all(
+            Array.from({ length: Math.min(CONCORRENCIA, aBaixar.length) }, trabalhador),
+          );
+        }
+        for (let i = 0; i < aBaixar.length; i++) {
+          const bytes = bytesPorIndice[i];
+          if (!bytes) continue;
+          contentBlocks.push(...await arquivoToContentBlocks(aBaixar[i].name, bytes));
         }
         paginasImagem = imagensEnviadas.length;
       }
@@ -1797,6 +2228,28 @@ Deno.serve(async (req) => {
       // cedida, percentual de honorários, o que o cedente disse — e a IA precisa
       // disso tanto quanto dos autos. Decisão do dono.
       if (notasKommo) contentBlocks.push({ type: 'text', text: `[Anotações do card no Kommo, do comercial]\n\n${capNotas(notasKommo)}` });
+
+      // A DILIGÊNCIA ENTRA NA LEITURA, mas NÃO decide as linhas 10 e 11 — quem
+      // as escreve é o código, depois (aplicarDiligenciaNoM2). Ela vem aqui para
+      // que o RESTO da análise fique coerente com elas: a IA levanta fraude à
+      // execução em "riscos" e comenta a penhora sabendo o que foi apurado. Sem
+      // isto, a planilha diria "Sim, tem dívida" na linha 10 e o parecer ao lado
+      // ignoraria o assunto.
+      if (diligencia.hs.length) {
+        const t = textoDaDiligencia(diligencia.hs);
+        if (t) {
+          contentBlocks.push({
+            type: 'text',
+            text:
+              '[DUE DILIGENCE DE PROCESSOS DOS SUJEITOS, apurada na plataforma por CPF/CNPJ/OAB]\n\n' + t +
+              '\n\nIsto NÃO está nos autos que você recebeu: é busca por documento, feita fora deste processo. ' +
+              'As linhas 10 e 11 do m2 serão escritas a partir daqui pelo sistema — não tente reproduzi-las nem contradizê-las. ' +
+              'O que você tem a fazer com esta informação é OUTRA coisa: se houver processo com cobrança contra o cedente, ' +
+              'avalie em "riscos" o risco de FRAUDE À EXECUÇÃO sobre o crédito que estamos comprando (CPC art. 792; CTN art. 185 nas dívidas fiscais) ' +
+              'e diga em "comentarios_analise" o que isso significa para a cessão. Se a diligência não achou nada, não invente risco.',
+          });
+        }
+      }
     }
     const houveCorte = contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
 
@@ -1838,9 +2291,6 @@ Deno.serve(async (req) => {
       avisosQualif = Array.isArray(body.avisos_qualificacao) ? body.avisos_qualificacao.map(String) : [];
     } else {
     const qualif = await extrairQualificacao(cfg.anthropic_api_key, contentBlocks);
-    const _limparUploads = async () => {
-      if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
-    };
 
     // O PDF É DESTE PROCESSO? O número do card sobrepõe o que a IA leu nos
     // autos — e sobrepunha em silêncio: anexo trocado de card produzia a
@@ -1852,7 +2302,7 @@ Deno.serve(async (req) => {
     const _cnjCard = _soDigitos(numeroProcesso);
     const _cnjAutos = _soDigitos(qualif.numero_processo);
     if (_cnjCard.length === 20 && _cnjAutos.length === 20 && _cnjCard !== _cnjAutos) {
-      await _limparUploads();
+      await limparUploads?.();
       return errorResponse(
         `O PDF anexado é do processo ${_mascara(_cnjAutos)}, mas o card é do processo ${_mascara(_cnjCard)}. ` +
         'Anexo trocado de card? Confira o arquivo e o título do card antes de rodar de novo.',
@@ -1869,7 +2319,7 @@ Deno.serve(async (req) => {
       /precat/i.test(String(qualif.tipo_requisitorio ?? '')) &&
       ehSim(qualif.requisitorio_expedido)
     ) {
-      await _limparUploads();
+      await limparUploads?.();
       return errorResponse(
         `Este processo tem PRECATÓRIO expedido${qualif.oficio_localizacao ? ` (${String(qualif.oficio_localizacao)})` : ''}, não RPV. ` +
         'O motor de RPV precificaria com prazo de meses um crédito que a Fazenda paga em anos. ' +
@@ -1881,7 +2331,7 @@ Deno.serve(async (req) => {
     const veredito = avaliarQualificacao(qualif);
     if (!veredito.aprovado) {
       // Reprovado: não monta tabela jurídica nem precificação. Limpa os uploads e devolve o motivo.
-      if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
+      await limparUploads?.();
       return jsonResponse({
         ok: true,
         reprovado: true,
@@ -1896,13 +2346,11 @@ Deno.serve(async (req) => {
     dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
     dados._houveCorte = houveCorte;
     dados._paginas_imagem = paginasImagem;
+    dados._imagens_cortadas = cortouImagens;
     // AS PÁGINAS SUBIDAS SÓ SERVEM À LEITURA, que acabou: saem já. Antes a
     // limpeza ficava para o 'salvar', que não sabe quais arquivos são — e a
     // preliminar que nunca é salva deixava tudo no bucket.
-    if (arquivos.length) {
-      try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ }
-      arquivos = [];
-    }
+    await limparUploads?.();
     }
     dados.originador = originador;
     if (numeroProcesso) dados.numero_processo = numeroProcesso;
@@ -1912,6 +2360,33 @@ Deno.serve(async (req) => {
       const _m2 = normalizarM2(dados.m2);
       dados.m2 = _m2.m2;
       dados._m2_fora_da_lista = _m2.foraDaLista;
+    }
+    // LINHAS 10 E 11 — HISTÓRICO DO CEDENTE E DO ADVOGADO.
+    //
+    // Escritas AQUI, e não pela IA, porque a IA não tem como saber: ela lê o
+    // processo da cessão, que não fala das outras dívidas de ninguém. O "Não"
+    // que saía impresso queria dizer "não achei nos autos" e era lido como
+    // "diligência feita". Com apuração no banco, a resposta vem dela — unida ao
+    // que a IA tenha achado nos próprios autos, sem apagar nem um nem outro.
+    //
+    // RODA EM TODAS AS AÇÕES, de propósito: a apuração costuma vir DEPOIS da
+    // primeira análise, e é o 'salvar' que gera a planilha. Sem apuração
+    // concluída, nada é tocado — a análise sai exatamente como saía.
+    {
+      const _dd = aplicarDiligenciaNoM2(
+        dados.m2,
+        diligencia.hs,
+        Array.isArray(dados._m2_do_chat) ? dados._m2_do_chat.map(String) : [],
+      );
+      dados.m2 = _dd.m2;
+      dados._dd_notas = _dd.notas;
+      dados._dd_linhas = _dd.escritas;
+      if (diligencia.falha) {
+        dados._dd_notas = [
+          ...(_dd.notas ?? []),
+          `⚠️ Não consegui ler a due diligence deste card: ${diligencia.falha}. As linhas 10 e 11 ficaram com o que a IA leu nos autos.`,
+        ];
+      }
     }
     // NÚMERO DE VERDADE, venha como vier. A IA — e o chat, que aceita texto — às
     // vezes devolvem "84.320,10" ou "R$ 84.320,10" onde se pediu número.
@@ -2093,7 +2568,10 @@ Deno.serve(async (req) => {
 
     // 3c. Prazo (T5) + datas — pela ESFERA DO ENTE DEVEDOR
     const scenario: 'A' | 'B' = (dados.rpv_ja_expedida === true || String(dados.rpv_ja_expedida) === 'true') ? 'B' : 'A';
-    const esfera = esferaDoEnte(dados.ente_devedor, dados.esfera, dados.tribunal);
+    // UMA classificação do ente para o motor inteiro: o prazo e o teto da RPV
+    // liam o ente por caminhos diferentes e podiam discordar.
+    const ente = classificarEnte(dados.ente_devedor, dados.esfera, dados.tribunal);
+    const esfera = ente.prazo;
     // ALVARÁ, agora lido do roteiro. A pergunta "nesse tribunal precisa emitir
     // alvará?" saiu do modelo simplificado (era a linha 43), e com ela a fonte
     // deste campo. Continua importando só na fórmula de reserva — quando o
@@ -2111,7 +2589,13 @@ Deno.serve(async (req) => {
       gabineteDias: Number(dados.gabinete_dias) || 0,
       scenario,
       dataAquisicao: new Date(),
-      dataFatalConvenio: dados.data_fatal_convenio ? parseBR(dados.data_fatal_convenio) : undefined,
+      // parseDataBR, e NÃO a parseBR ingênua que morava no fim deste arquivo.
+      // Ela devolvia `Invalid Date` para "NÃO LOCALIZADO" ou para uma data em
+      // outro formato, e daí saía NaN: `Math.max(8, NaN)` é NaN, a calibragem
+      // nunca batia a meta com NaN e devolvia o TETO DE 95% DE DESÁGIO, com o
+      // prazo em branco na tela e "rentabilidade 0,00%" no aviso. Um preço
+      // absurdo, com uma explicação errada ao lado.
+      dataFatalConvenio: parseDataBR(dados.data_fatal_convenio) ?? undefined,
       dataExpedicao: dataExpedicao ?? undefined,
       exigeAlvara,
     });
@@ -2253,6 +2737,53 @@ Deno.serve(async (req) => {
       : `Confirmar com cartório${ufCredito ? ` — tabela de ${ufCredito} ainda não levantada` : ' — UF do tribunal não identificada'}`;
     calc.IR = Number(dados.ir) || 0; calc.INSS = Number(dados.inss) || 0;
 
+    // ================================================================
+    // O PISO DE R$ 20 MIL, sobre o VALOR TOTAL LÍQUIDO NEGOCIADO
+    // ================================================================
+    //
+    // É a linha 39 da aba jurídica — "qual o valor total final líquido do(s)
+    // crédito(s) sendo negociado(s)?" —, que é o Y3 da calibragem. Decisão do
+    // dono: abaixo disso não se transaciona, ainda que somando todos os créditos
+    // disponíveis no processo.
+    //
+    // POR QUE NÃO NO PORTÃO. Lá o número é o BRUTO que a IA leu, e ele errava
+    // dos dois lados: uma cessão só de honorários de R$ 15 mil passava porque o
+    // crédito inteiro tinha R$ 100 mil, e um bruto de R$ 25 mil que líquido dá
+    // R$ 17 mil também passava. O portão continua reprovando quando o bruto já
+    // está abaixo — isso é barato e seguro —, e a régua de verdade é aqui.
+    //
+    // A MENSAGEM SEPARA DOIS CASOS, porque a ação é diferente: se o processo TEM
+    // R$ 20 mil somando todas as verbas e o que falta é a parcela cedida estar
+    // estreita, quem lê pode alargar o negócio; se nem tudo somado chega lá, o
+    // crédito não serve e não há o que ajustar.
+    // Zerado a cada rodada: `dados` dá a volta pelo navegador, e um aviso de
+    // piso que sobrevivesse à correção que o resolveu seria mentira.
+    dados._abaixo_do_piso = null;
+    if (Number(calc.Y3) > 0 && Number(calc.Y3) < PISO_NEGOCIO) {
+      const _tudo = montarParcelas({
+        ..._auditoria.valores,
+        verbas: { principal: true, contratuais: true, sucumbenciais: true },
+      }).reduce((s, p) => s + p.liquido, 0);
+      const _cabe = _tudo >= PISO_NEGOCIO;
+      const _motivo =
+        `O valor total líquido negociado é ${brl(calc.Y3)}, abaixo do mínimo de ${brl(PISO_NEGOCIO)} ` +
+        `(${String(dados.tipo_credito ?? 'verbas do negócio')}). ` +
+        (_cabe
+          ? `Somando TODAS as verbas do processo dá ${brl(_tudo)} — se a cessão puder incluir as demais, ` +
+            'corrija o "PARCELA CEDIDA" do card (ou troque o cenário aqui na janela) e rode de novo.'
+          : `Nem somando todas as verbas do processo se chega ao mínimo: o total líquido disponível é ${brl(_tudo)}.`);
+
+      if (acao === 'analisar' || acao === null) {
+        return jsonResponse({ ok: true, reprovado: true, motivos: [_motivo], avisos: avisosQualif, qualificacao: null });
+      }
+      if (acao === 'salvar') {
+        return errorResponse(_motivo + ' Não gerei a planilha.');
+      }
+      // 'refinar' e 'reprecificar': não derruba o que está na tela — o operador
+      // está no meio de uma conversa e pode estar justamente corrigindo isto.
+      dados._abaixo_do_piso = _motivo;
+    }
+
     // NÃO HÁ MAIS "TROCOU DE FAIXA". Com a regra dentro da calibragem, o preço
     // final e o emolumento vêm da MESMA faixa por construção — o custo foi
     // calculado para aquele preço, não herdado de outro. Some com isso toda a
@@ -2266,16 +2797,24 @@ Deno.serve(async (req) => {
 
     // Avisos que valem para a preliminar e para a final.
     const avisosBase: string[] = [...avisosQualif];
-    const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0, ufCredito);
+    // Abaixo do piso depois de uma revisão: fica em primeiro lugar, porque
+    // nenhum outro aviso importa se o negócio não pode ser feito.
+    if (dados._abaixo_do_piso) avisosBase.unshift(`⚠️ ABAIXO DO MÍNIMO — NÃO DÁ PARA FECHAR: ${dados._abaixo_do_piso}`);
+    // O TETO DO ENTE, do cache (e pesquisado em segundo plano quando falta).
+    // Não espera pela pesquisa: quando ela está em curso, o aviso diz que o teto
+    // ainda não foi conferido, em vez de calar — calar se lê como "está dentro".
+    // O MUNICÍPIO DEVEDOR, quando há um. É por ele que o teto é procurado: o
+    // número guardado por UF é o da capital, e cada município tem o seu.
+    const _municipio = ente.esfera === 'municipal' ? municipioDoEnte(dados.ente_devedor) : null;
+    const _teto = await consultarTeto(sbAdmin, ufCredito, ente.esfera, undefined, _municipio);
+    const _avisoTetoBase = avisoDeTeto(_teto, ente.esfera, ufCredito, Number(dados.bruto_total) || 0, _municipio);
     if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
-    // TABELAS COM DATA. Tetos de RPV, salário mínimo e tabela do IRRF são fixos
-    // no código e mudam todo janeiro. Virou o ano, o motor diz em toda análise
-    // que está calculando com valor do ano anterior — chato de propósito, até
-    // alguém atualizar. Sem isto o defasado saía com a mesma cara do certo.
+    // A TABELA DO IRRF ainda é fixa no código e muda todo janeiro. A dos tetos
+    // saiu daqui (migração 0057): ela agora se pesquisa sozinha quando vira o
+    // ano, e por isso não precisa mais deste aviso — que ninguém podia resolver
+    // na hora e se repetia em toda análise até alguém fazer deploy.
     {
       const _anoAgora = new Date().getFullYear();
-      if (_anoAgora !== ANO_TETOS_RPV)
-        avisosBase.push(`⚠️ TABELA DEFASADA: os tetos de RPV e o salário mínimo do sistema são de ${ANO_TETOS_RPV}, e estamos em ${_anoAgora}. O alerta de teto pode estar errado — peça a atualização da tabela.`);
       if (_anoAgora !== ANO_TABELA_IRRF)
         avisosBase.push(`⚠️ TABELA DEFASADA: a tabela do IRRF do sistema é de ${ANO_TABELA_IRRF}, e estamos em ${_anoAgora}. O IR dos honorários pode estar errado — peça a atualização da tabela.`);
     }
@@ -2349,6 +2888,10 @@ Deno.serve(async (req) => {
         `⚠️ RESPOSTA FORA DA LISTA no questionário (${dados._m2_fora_da_lista.join('; ')}): a planilha só aceita os valores da lista suspensa nessas linhas, ` +
         'e o Excel não avisa ao abrir. Corrija no chat ("na linha 19 a resposta é Procedência parcial").',
       );
+    // O QUE A DUE DILIGENCE ACHOU. Vai para os avisos porque dívida do cedente
+    // não muda o preço — muda a decisão de comprar: penhora que alcance este
+    // crédito é fraude à execução, e isso é assunto de gente, não de fórmula.
+    if (Array.isArray(dados._dd_notas)) for (const n of dados._dd_notas) avisosBase.push(String(n));
     if (_prazoEstimado) avisosBase.push('⚠️ PRAZO ESTIMADO — TJGO sem data-limite de convênio nos autos: a espera até a expedição foi estimada em 60 dias. Confira o prazo e a rentabilidade à mão.');
     if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && dados._verbas_negociadas?.principal && !ehEstadoDeGoias(dados.ente_devedor))
       avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
@@ -2365,6 +2908,12 @@ Deno.serve(async (req) => {
     }
     if (dados._houveCorte)
       avisosBase.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.');
+    if (Number(dados._imagens_cortadas) > 0)
+      avisosBase.push(
+        `⚠️ ${Number(dados._imagens_cortadas)} página(s) digitalizada(s) NÃO couberam no pedido e ficaram de fora da leitura ` +
+        '(o processo tem texto e imagem demais para uma passada só). Foram cortadas as do COMEÇO — o fim, onde ficam a conta e o requisitório, foi preservado. ' +
+        'Se a peça que decide o valor estiver nas páginas iniciais, confira à mão.',
+      );
     if (Number(dados._paginas_imagem) > 0)
       avisosBase.push(
         `⚠️ ${Number(dados._paginas_imagem)} página(s) digitalizada(s) foram lidas POR IMAGEM, não por texto. A leitura é boa mas não é infalível — ` +
@@ -2523,9 +3072,7 @@ Deno.serve(async (req) => {
 
     // 3f. Sobe no Drive: A. Análises de crédito / {categoria} / {originador} / {credor (Title Case)}
     const token = await refreshGoogleAccessToken(cfg.google_oauth_client_id, cfg.google_oauth_client_secret, cfg.google_oauth_refresh_token);
-    const analisesRoot = await driveEncontrarAnalisesRoot(token);
-    const catFolder = await driveFindChildByTolerantName(token, analisesRoot, categoria);
-    const catId = catFolder?.id ?? await driveFindOrCreateFolder(token, categoria, analisesRoot);
+    const catId = await acharPastaDaCategoria(token, categoria);
     const interId = await driveFindOrCreateFolder(token, originador, catId);
     const cedenteId = await driveFindOrCreateFolder(token, credorTitulo, interId);
     // Nome do arquivo: "Análise de RPV [VERBAS] - CREDOR v. ENTE - NÚMERO"
@@ -2551,7 +3098,7 @@ Deno.serve(async (req) => {
     const up = await driveUploadBytes(token, nomeArquivo, cedenteId, xlsx, XLSX_MIME, true);
 
     // limpeza best-effort dos uploads
-    if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
+    await limparUploads?.();
 
     // Avisos: os mesmos da preliminar (avisosBase), montados antes do retorno antecipado.
     const avisos: string[] = [...avisosBase];
@@ -2607,12 +3154,15 @@ Deno.serve(async (req) => {
       riscos: riscosComAuditoria(dados),
     });
   } catch (e) {
+    // As páginas subidas não servem a mais nada: a leitura que as pediu morreu.
+    // Sem isto elas ficavam no bucket para sempre — e é justamente no caminho de
+    // erro que ninguém olha.
+    if (limparUploads) { try { await limparUploads(); } catch (_) { /* ok */ } }
     return errorResponse('Falha ao gerar análise: ' + (e instanceof Error ? e.message : String(e)), 500);
   }
 });
 
-// DD/MM/AAAA -> Date
-function parseBR(s: string): Date {
-  const [d, m, y] = s.split('/').map(Number);
-  return new Date(y, m - 1, d);
-}
+// A parseBR ingênua que vivia aqui SAIU. Ela devolvia `Invalid Date` em vez de
+// null, e o único lugar que a usava — a data-limite do convênio do TJGO —
+// transformava isso num NaN que atravessava o motor inteiro e saía como deságio
+// de 95%. Só existe parseDataBR, que devolve null e obriga quem chama a decidir.

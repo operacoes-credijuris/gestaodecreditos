@@ -38,7 +38,8 @@ import { Button } from '@/components/ui/Button'
 import { Loading } from '@/components/ui/Table'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import { montarTextoDoProcesso, type PaginaLida } from '@/lib/textoDoProcesso'
-import { descreverSelecao, escolherPaginasParaImagem } from '@/lib/paginasDigitalizadas'
+import { descreverSelecao, escolherPaginasParaImagem, LIMITES_PADRAO } from '@/lib/paginasDigitalizadas'
+import { planoDeLeitura } from '../../supabase/functions/_shared/orcamentoLeitura.ts'
 import { renderizarPaginas } from '@/lib/renderizarPaginas'
 import { supabase } from '@/lib/supabase'
 
@@ -523,8 +524,13 @@ export function AnaliseRpvModal({
    * cenário errado, com o nome errado, e nada na tela dizia isso.
    */
   const corpoCard = useMemo(
-    () => ({ ...dadosDoCard, tipo_aquisicao: cenario }),
-    [dadosDoCard, cenario],
+    // `lead_id` vai em TODAS as chamadas, e não só na primeira: é por ele que a
+    // função acha a due diligence dos sujeitos (dd_historico/dd_processo) e
+    // preenche as linhas 10 e 11 da aba jurídica. A apuração costuma ser feita
+    // DEPOIS da primeira análise, e é o 'salvar' que gera a planilha — mandá-lo
+    // só no 'analisar' deixaria de fora justamente a chamada que importa.
+    () => ({ ...dadosDoCard, tipo_aquisicao: cenario, lead_id: leadId }),
+    [dadosDoCard, cenario, leadId],
   )
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [pedido, setPedido] = useState('')
@@ -579,7 +585,26 @@ export function AnaliseRpvModal({
         // PÁGINAS DIGITALIZADAS VÃO COMO IMAGEM (lib/paginasDigitalizadas.ts):
         // arquivo inteiro escaneado, ou as páginas escaneadas dentro de um
         // arquivo com texto — o caso híbrido da conta da contadoria em imagem.
-        const selecao = escolherPaginasParaImagem(arquivos)
+        //
+        // O ORÇAMENTO É CONJUNTO, e é por isso que a escolha acontece em duas
+        // etapas. Texto e imagem vão no MESMO pedido e disputam a mesma janela
+        // de 200 mil tokens: 360 mil caracteres com 60 páginas somavam ~294 mil
+        // e o pedido voltava HTTP 400 — depois de o navegador ter passado
+        // minutos renderizando e subindo tudo. Ver _shared/orcamentoLeitura.ts.
+        const paginas: PaginaLida[] = legiveis.flatMap((a) =>
+          (a.paginasTexto ?? [a.texto]).map((texto, i) => ({ arquivo: a.nome, numero: i + 1, texto })),
+        )
+        const charsDisponiveis = paginas.reduce((n, p) => n + p.texto.length, 0)
+        // 1ª passada: quantas páginas a seleção QUERIA mandar.
+        const desejadas = escolherPaginasParaImagem(arquivos)
+          .reduce((n, x) => n + x.numeros.length, 0)
+        const plano = planoDeLeitura({
+          charsTexto: charsDisponiveis,
+          imagensPedidas: desejadas,
+          charsNotas: notasKommo.length,
+        })
+        // 2ª passada: agora com o teto que cabe de verdade.
+        const selecao = escolherPaginasParaImagem(arquivos, { ...LIMITES_PADRAO, max: plano.maxImagens })
         const emImagem = new Set(selecao.map((x) => x.arquivo))
         // "Ilegível" é só o que não tem texto E não vai como imagem.
         const ilegiveis = arquivos.filter((a) => a.texto.trim().length === 0 && !emImagem.has(a.nome))
@@ -589,11 +614,12 @@ export function AnaliseRpvModal({
             .join('; ')
           throw new Error(`Nenhum anexo do card tem texto para ler nem página para enviar como imagem. ${porque || 'Nenhum PDF encontrado.'}`)
         }
-        const paginas: PaginaLida[] = legiveis.flatMap((a) =>
-          (a.paginasTexto ?? [a.texto]).map((texto, i) => ({ arquivo: a.nome, numero: i + 1, texto })),
-        )
-        const montado = montarTextoDoProcesso(paginas, 360000)
+        const montado = montarTextoDoProcesso(paginas, plano.maxCharsTexto)
         let t = montado.texto
+        if (desejadas > plano.maxImagens) {
+          t += `\n\nDAS ${desejadas} PÁGINAS DIGITALIZADAS DESTE PROCESSO, só ${plano.maxImagens} couberam neste pedido (o processo tem texto e imagem demais para uma passada só). ` +
+            'As enviadas são as do FIM e as híbridas, que é onde ficam a conta e o requisitório. Se um valor parecer faltar, diga isso em origem_valores em vez de deduzi-lo.'
+        }
         if (ilegiveis.length) {
           t += '\n\nANEXOS DO CARD QUE NÃO DEU PARA LER (o dado pode estar neles — NÃO conclua que a informação não existe nos autos): ' +
             ilegiveis.map((a) => `"${a.nome}" (${a.erro ?? (a.digitalizado ? `${a.paginas} páginas digitalizadas` : 'sem texto')})`).join('; ')
@@ -617,15 +643,30 @@ export function AnaliseRpvModal({
             })
             if (f.length) falhas.push(`"${sel.arquivo}" p. ${f.join(', ')}: não renderizou`)
             const base = sel.arquivo.replace(/\.pdf$/i, '').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'arquivo'
-            for (const img of imagens) {
-              const caminho = `${user.id}/${jobId}/processo/${base}-p${String(img.numero).padStart(4, '0')}.jpg`
-              const { error } = await supabase.storage
-                .from('analises-input')
-                .upload(caminho, img.blob, { contentType: 'image/jpeg', upsert: true })
-              if (error) { falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${error.message}`); continue }
-              enviadas++
-              setPasso(`Enviando páginas digitalizadas (${enviadas}/${totalSel})…`)
+            // EM PARALELO, com fila curta. Era um upload de cada vez: sessenta
+            // páginas de 100 a 200 KB, uma após a outra, e o rótulo contando
+            // devagar enquanto a rede ficava ociosa entre elas. Seis de cada vez
+            // aproveitam a banda sem abrir conexões demais — o Storage responde
+            // 429 quando se exagera, e aí a "otimização" custaria uma página.
+            const CONCORRENCIA = 6
+            const fila = [...imagens]
+            const trabalhador = async () => {
+              for (;;) {
+                const img = fila.shift()
+                if (!img) return
+                const caminho = `${user.id}/${jobId}/processo/${base}-p${String(img.numero).padStart(4, '0')}.jpg`
+                const { error } = await supabase.storage
+                  .from('analises-input')
+                  .upload(caminho, img.blob, { contentType: 'image/jpeg', upsert: true })
+                if (error) { falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${error.message}`); continue }
+                enviadas++
+                setPasso(`Enviando páginas digitalizadas (${enviadas}/${totalSel})…`)
+              }
             }
+            await Promise.all(Array.from({ length: Math.min(CONCORRENCIA, imagens.length) }, trabalhador))
+            // Os blobs já subiram: soltar a referência agora evita segurar
+            // dezenas de MB até o fim da análise.
+            imagens.length = 0
           }
           if (enviadas === 0) {
             jobId = undefined
@@ -741,7 +782,15 @@ export function AnaliseRpvModal({
             ? `Emolumentos de ${uf}: ${e.etapa}… primeira vez neste estado, leva alguns minutos.`
             : `Levantando a tabela de emolumentos de ${uf}… primeira vez neste estado, leva alguns minutos.`,
         )
-        await espera(Math.max(1000, e.reconsultar_em ? e.reconsultar_em * 1000 : INTERVALO_PERGUNTA))
+        // BACKOFF. Eram 8 s fixos, e cada volta custa ao servidor o par
+        // getUser + profiles da autenticação mais a leitura da linha: numa
+        // pesquisa de dez minutos, 75 voltas e mais de 200 consultas para
+        // descobrir 74 vezes que ainda não acabou. As primeiras voltas seguem
+        // rápidas (estado do cache costuma responder já na primeira), depois
+        // afrouxa. O operador não nota 30 s numa espera de minutos.
+        const base = e.reconsultar_em ? e.reconsultar_em * 1000 : INTERVALO_PERGUNTA
+        const fator = volta < 8 ? 1 : volta < 20 ? 2 : 4
+        await espera(Math.max(1000, base * fator))
       }
 
       // EXIGE A REGRA, não só o objeto: a função devolve `{regra: null, motivo}`
