@@ -102,7 +102,7 @@ export interface RespostaEmolumentos {
 // ---------------------------------------------------------------------------
 
 function validarAto(bruto: unknown, nome: string): RegraAto | null | string {
-  const a = bruto as { faixas?: unknown; acrescimos?: unknown; observacao?: unknown } | null | undefined
+  const a = bruto as { faixas?: unknown; acrescimos?: unknown; observacao?: unknown; base_calculo?: unknown } | null | undefined
   const lista = a?.faixas
   if (!Array.isArray(lista) || lista.length === 0) return null // ato não achado: vira parcial
 
@@ -154,10 +154,15 @@ function validarAto(bruto: unknown, nome: string): RegraAto | null | string {
     })
   }
 
+  // A base: só os três valores conhecidos; qualquer outra coisa é "não disse".
+  const b = String(a?.base_calculo ?? '').trim().toLowerCase()
+  const base_calculo = b === 'preco' || b === 'valor_credito' || b === 'maior' ? b : null
+
   return {
     faixas,
     acrescimos,
     observacao: typeof a?.observacao === 'string' ? a.observacao : null,
+    base_calculo,
   }
 }
 
@@ -237,6 +242,13 @@ const FERRAMENTA_ATO = {
     properties: {
       faixas: FAIXA_SCHEMA,
       acrescimos: ACRESCIMO_SCHEMA,
+      base_calculo: {
+        type: ['string', 'null'],
+        description:
+          'Sobre QUAL VALOR a tabela cobra este ato numa CESSÃO DE CRÉDITO onerosa. Um de: "preco" (o preço pago pela cessão, o valor declarado do negócio), ' +
+          '"valor_credito" (o valor do crédito cedido, o valor de face) ou "maior" (o que for maior entre os dois). ' +
+          'Leia a nota da tabela ou a lei de emolumentos do estado sobre atos com conteúdo financeiro / cessão de direitos; se não disser, null.',
+      },
       vigencia: { type: ['string', 'null'], description: 'Período da tabela, como o documento descreve.' },
       observacao: { type: ['string', 'null'], description: 'Qual documento, qual tabela dentro dele, o que somou e o que deixou de fora.' },
       fontes: { type: 'array', items: { type: 'string' }, description: 'Endereços EXATOS de onde saiu cada coisa. Obrigatório.' },
@@ -290,6 +302,7 @@ O QUE DEVOLVER:
 2. OS ACRÉSCIMOS. Muitas tabelas cobram, por cima do emolumento, uma taxa de fiscalização, selo ou fundo estadual — e é isso que o balcão soma. Pode ser PERCENTUAL (campo "percentual", dizendo em "base" se incide sobre o valor do ato ou sobre o emolumento) ou VALOR FIXO por ato (campo "valor") — o selo digital de vários estados é fixo. Se a lei disser que a taxa não pode superar o próprio emolumento do ato, marque "teto_emolumento". Se a tabela já traz tudo embutido no valor da faixa, devolva lista vazia e diga isso em "observacao".
 3. MOSTRE COMO LEU, em "observacao": qual documento, qual tabela dentro dele, o que somou e o que deixou de fora.
 4. FONTE OBRIGATÓRIA. Sem o endereço, o resultado é descartado: emolumento é preço público e estes números entram num cálculo de deságio.
+5. A BASE DE CÁLCULO, em "base_calculo". Numa cessão de crédito onerosa, sobre qual valor a tabela cobra este ato: o PREÇO pago pela cessão (o valor declarado do negócio), o VALOR DO CRÉDITO cedido (o valor de face), ou o MAIOR dos dois? Está na lei de emolumentos do estado ou nas notas da tabela, em geral no capítulo dos atos "com conteúdo financeiro" ou de "cessão de direitos". Responda "preco", "valor_credito" ou "maior" — e null se o documento não disser, sem chutar. A diferença muda o custo do cartório que entra no preço.
 
 NÃO INVENTE FAIXA NEM PERCENTUAL. Se a tabela de ${ano} não estiver disponível, use a mais recente vigente e diga a vigência real. Se este ato não estiver neste documento, devolva faixas vazias e explique — a outra chamada cuida do outro ato.
 
@@ -381,8 +394,19 @@ async function conversar(
  * morte é notada logo depois de acontecer, e não seis minutos depois.
  */
 const TRAVA_MINUTOS = 7
-/** Não repete uma pesquisa que acabou de falhar; dá tempo de a fonte voltar do ar. */
-const REPOUSO_FALHA_MINUTOS = 30
+/**
+ * Quanto esperar depois de uma falha antes de pesquisar de novo, pelo número de
+ * falhas SEGUIDAS daquele estado: 30 min, 2 h, 12 h, e daí um dia.
+ *
+ * Era 30 minutos fixos, para sempre. Estado cuja tabela é um PDF que não se lê
+ * — digitalizado, ou de centenas de páginas — era pesquisado de novo a cada meia
+ * hora, a cada card daquele estado que alguém abrisse, gastando busca web e
+ * download sem nenhuma chance de resultado diferente. O repouso cresce porque a
+ * probabilidade de a fonte ter mudado não cresce com a insistência.
+ */
+const REPOUSO_POR_FALHAS_MINUTOS = [30, 120, 720, 1440]
+const repousoAposFalhas = (falhas: number): number =>
+  REPOUSO_POR_FALHAS_MINUTOS[Math.min(Math.max(falhas, 1) - 1, REPOUSO_POR_FALHAS_MINUTOS.length - 1)]
 /** Corta laço: 'achar' + dois atos + folga para tentar outro documento em cada. */
 const MAX_PASSOS = 8
 /**
@@ -418,12 +442,14 @@ interface Progresso {
    */
   em_curso: { etapa: Etapa; desde: string } | null
   mortes: number
+  /** Levantamentos deste estado que terminaram em 'falhou', seguidos. Zera quando um dá certo. */
+  falhas: number
 }
 
 function progressoInicial(): Progresso {
   return {
     etapa: 'achar', documentos: [], doc: 0, escritura: null, registro: null,
-    fontes: [], vigencia: null, observacoes: [], passos: 0, em_curso: null, mortes: 0,
+    fontes: [], vigencia: null, observacoes: [], passos: 0, em_curso: null, mortes: 0, falhas: 0,
   }
 }
 
@@ -445,6 +471,7 @@ function lerProgresso(bruto: unknown): Progresso {
     passos: Number(p.passos) || 0,
     em_curso: emCurso,
     mortes: Number(p.mortes) || 0,
+    falhas: Number(p.falhas) || 0,
   }
 }
 
@@ -492,7 +519,10 @@ async function gravar(svc: SupabaseClient, uf: string, ano: number, campos: Reco
 
 /** Desiste, com um motivo que diz o que aconteceu. */
 async function desistir(svc: SupabaseClient, uf: string, ano: number, p: Progresso, motivo: string) {
-  await gravar(svc, uf, ano, { status: 'falhou', tabela: null, progresso: { ...p, em_curso: null }, motivo })
+  await gravar(svc, uf, ano, {
+    status: 'falhou', tabela: null, motivo,
+    progresso: { ...p, em_curso: null, falhas: (p.falhas || 0) + 1 },
+  })
 }
 
 /** Fecha o levantamento com o que se conseguiu. Meio custo é útil; nada não é. */
@@ -544,6 +574,12 @@ export async function executarPasso(
   // documento da lista: o primeiro costuma ser o provimento inteiro, com
   // centenas de páginas, e o seguinte às vezes é só o anexo da tabela.
   if (p.em_curso && p.em_curso.etapa === p.etapa) {
+    // AINDA VIVA? Uma invocação duplicada (duas abas, um reenvio) chega
+    // segundos depois da que está trabalhando e encontra a marca dela. Isso
+    // não é morte — é concorrência. Morte é marca VELHA, além do tempo de
+    // parede da função. Contar concorrência como morte fazia o levantamento
+    // desistir na terceira aba aberta.
+    if (minutosDesde(p.em_curso.desde) < TRAVA_MINUTOS) return { etapa: p.etapa, proxima: null }
     p.mortes++
     p.observacoes.push(
       `${p.etapa}: a leitura do documento ${p.doc + 1} não terminou dentro do limite de tempo da função`,
@@ -765,7 +801,7 @@ export async function consultarRegra(
     // cache vazio: some sozinho e nunca se corrige.
     const guardada = daLinha(uf, ano, linha)
     if (status === 'pronta' && guardada.regra) return { estado: 'pronta', emolumentos: guardada }
-    if (status === 'falhou' && idade < REPOUSO_FALHA_MINUTOS) {
+    if (status === 'falhou' && idade < repousoAposFalhas(lerProgresso(linha.progresso).falhas)) {
       return { estado: 'falhou', emolumentos: guardada }
     }
 
@@ -795,16 +831,34 @@ export async function consultarRegra(
 
   // A LINHA NASCE ANTES DA PESQUISA, e é ela que serve de trava: duas abas
   // pedindo o mesmo estado ao mesmo tempo não disparam duas pesquisas.
+  //
+  // ATÔMICA, agora. O upsert simples deixava as duas abas passarem: ambas viam
+  // "não há linha", ambas gravavam, ambas disparavam a etapa — e a segunda
+  // invocação encontrava a marca em_curso da primeira, contava uma MORTE falsa
+  // e, na terceira, desistia. Aqui só dispara quem de fato criou a linha (ou
+  // quem de fato reabriu a 'falhou' descansada); quem perdeu a corrida só
+  // informa que está levantando.
+  const inicio = {
+    uf, ano, status: 'levantando', tabela: null, motivo: null,
+    // A contagem de falhas sobrevive ao reinício: é ela que estica o repouso.
+    progresso: { ...progressoInicial(), falhas: linha ? lerProgresso(linha.progresso).falhas : 0 },
+    atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv',
+  }
+  let criou = false
   try {
-    const { error } = await svc.from('emolumentos_uf').upsert(
-      {
-        uf, ano, status: 'levantando', tabela: null, motivo: null,
-        progresso: progressoInicial(),
-        atualizado_em: new Date().toISOString(), atualizado_por: 'gerar-analise-rpv',
-      },
-      { onConflict: 'uf,ano' },
-    )
-    if (error) throw new Error(error.message)
+    if (linha) {
+      // Reabrindo uma 'falhou' descansada: só se ela AINDA estiver 'falhou'.
+      const { data, error } = await svc.from('emolumentos_uf')
+        .update(inicio).eq('uf', uf).eq('ano', ano).eq('status', 'falhou').select('uf')
+      if (error) throw new Error(error.message)
+      criou = (data?.length ?? 0) > 0
+    } else {
+      // Linha nova: se já existir, ignoreDuplicates devolve vazio — outra aba chegou antes.
+      const { data, error } = await svc.from('emolumentos_uf')
+        .upsert(inicio, { onConflict: 'uf,ano', ignoreDuplicates: true }).select('uf')
+      if (error) throw new Error(error.message)
+      criou = (data?.length ?? 0) > 0
+    }
   } catch (e) {
     return {
       estado: 'falhou',
@@ -812,6 +866,6 @@ export async function consultarRegra(
     }
   }
 
-  dispararProximaEtapa(uf)
+  if (criou) dispararProximaEtapa(uf)
   return { estado: 'levantando', emolumentos: null, reconsultar_em: 8, etapa: 'procurando a tabela oficial do estado' }
 }

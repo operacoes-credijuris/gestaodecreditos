@@ -281,7 +281,10 @@ export function calibrarDesagio(o: {
   const avaliar = (d: number) => {
     const parcelas: ParcelaPrecificada[] = o.parcelas.map((p) => {
       const preco = p.liquido * (1 - (p.desagiavel ? d : 0))
-      return { ...p, preco, cartorio: custoParaPreco(o.regra, preco, p.nome) }
+      // O líquido da verba vai junto: é o "valor do crédito cedido" para as
+      // tabelas que cobram o ato sobre ele, e não sobre o preço (ver
+      // BaseCalculo em emolumentos-calculo.ts).
+      return { ...p, preco, cartorio: custoParaPreco(o.regra, preco, p.nome, p.liquido) }
     })
     const cessao = parcelas.reduce((s, p) => s + p.preco, 0)
     const comCartorio = parcelas.filter((p) => p.cartorio.total != null)

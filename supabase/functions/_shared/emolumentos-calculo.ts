@@ -77,10 +77,27 @@ export interface Acrescimo {
   teto_emolumento?: boolean | null
 }
 
+/**
+ * Sobre QUAL VALOR a tabela do estado cobra o ato, numa cessão de crédito.
+ *
+ *   preco          o preço pago pela cessão (o que a escritura declara como
+ *                  valor do negócio)
+ *   valor_credito  o valor do crédito cedido (o valor de face)
+ *   maior          o que for maior entre os dois
+ *
+ * NÃO É DETALHE: era fixo em "preço" para todo estado, e a lei de cada um diz
+ * uma coisa. Onde a base é o crédito, o cartório saía subestimado — e o preço,
+ * otimista. Agora a IA responde isto lendo a tabela do estado, caso a caso.
+ * Ausente = a tabela foi levantada antes desta versão, ou não diz; vale o preço,
+ * e a análise avisa.
+ */
+export type BaseCalculo = 'preco' | 'valor_credito' | 'maior'
+
 export interface RegraAto {
   faixas: Faixa[]
   acrescimos?: Acrescimo[]
   observacao?: string | null
+  base_calculo?: BaseCalculo | null
 }
 
 /** A regra completa do estado. Ato ausente = a IA não achou tabela confiável para ele. */
@@ -129,9 +146,22 @@ function faixasOrdenadas(ato: RegraAto): Faixa[] {
   return f
 }
 
+/**
+ * O valor sobre o qual a tabela do ato incide — ver BaseCalculo. Sem o valor do
+ * crédito informado, só há o preço para usar.
+ */
+function baseDoAto(ato: RegraAto, preco: number, valorCredito?: number): number {
+  const b = ato.base_calculo ?? 'preco'
+  if (valorCredito == null || !(valorCredito > 0)) return preco
+  if (b === 'valor_credito') return valorCredito
+  if (b === 'maior') return Math.max(preco, valorCredito)
+  return preco
+}
+
 /** O emolumento de um ato para um valor, já com os acréscimos. */
-function custoDoAto(ato: RegraAto | null, valor: number): number | null {
+function custoDoAto(ato: RegraAto | null, preco: number, valorCredito?: number): number | null {
   if (!ato || ato.faixas.length === 0) return null
+  const valor = baseDoAto(ato, preco, valorCredito)
   const f = faixasOrdenadas(ato).find((x) => x.ate === null || valor <= x.ate)
   if (!f) return null
 
@@ -181,10 +211,23 @@ export interface CustoCartorio {
  * Ato faltando vira custo PARCIAL: somar metade avisando é melhor que sumir com
  * o custo do preço.
  */
+/** Como a base entra na descrição, para quem confere saber sobre o que o ato foi cobrado. */
+function rotuloDaBase(ato: RegraAto | null): string {
+  const b = ato?.base_calculo
+  if (b === 'valor_credito') return ' sobre o valor do crédito'
+  if (b === 'maior') return ' sobre o maior entre preço e crédito'
+  return ''
+}
+
 export function custoParaPreco(
   regra: RegraEmolumentos | null,
   preco: number,
   rotulo?: string,
+  /**
+   * O valor do crédito cedido (o líquido da verba), para as tabelas que cobram
+   * sobre ele em vez de sobre o preço — ver BaseCalculo. Omitido = só o preço.
+   */
+  valorCredito?: number,
 ): CustoCartorio {
   const sufixo = rotulo ? ` (${rotulo})` : ''
   if (!regra || (!regra.escritura && !regra.registro)) {
@@ -193,8 +236,8 @@ export function custoParaPreco(
       descricao: 'Confirmar com cartório — tabela de emolumentos não encontrada',
     }
   }
-  const escritura = custoDoAto(regra.escritura, preco)
-  const registro = custoDoAto(regra.registro, preco)
+  const escritura = custoDoAto(regra.escritura, preco, valorCredito)
+  const registro = custoDoAto(regra.registro, preco, valorCredito)
   if (escritura === null && registro === null) {
     return {
       total: null, escritura, registro, completo: false,
@@ -202,8 +245,8 @@ export function custoParaPreco(
     }
   }
   const partes = [
-    escritura === null ? 'escritura NÃO ENCONTRADA' : `Escritura ${brl(escritura)}`,
-    registro === null ? 'registro NÃO ENCONTRADO' : `registro ${brl(registro)}`,
+    escritura === null ? 'escritura NÃO ENCONTRADA' : `Escritura ${brl(escritura)}${rotuloDaBase(regra.escritura)}`,
+    registro === null ? 'registro NÃO ENCONTRADO' : `registro ${brl(registro)}${rotuloDaBase(regra.registro)}`,
   ]
   return {
     total: (escritura ?? 0) + (registro ?? 0),
