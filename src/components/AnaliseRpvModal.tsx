@@ -167,6 +167,10 @@ export interface RespostaAnaliseRpv {
   cedente?: string
   modelo?: string
   esfera?: string
+  /** A esfera do ENTE devedor (federal/estadual/municipal), para a pesquisa do teto. */
+  ente_esfera?: string
+  /** O município devedor, quando há um: o teto da RPV municipal é de cada município. */
+  ente_municipio?: string | null
   regra_prazo?: string
   prazo_detalhe?: string
   /** Onde o processo está hoje, lido do último andamento. */
@@ -697,6 +701,25 @@ export function AnaliseRpvModal({
         // sendo precificado.
         const c = cenarioDasVerbas(r)
         if (c) setCenario(c)
+
+        // MANDA APURAR O TETO DO ENTE, se ainda não foi.
+        //
+        // Numa requisição PRÓPRIA e leve, e não dentro da análise: o disparo da
+        // pesquisa é segurado por waitUntil no servidor, que mantém o worker
+        // vivo com toda a memória dele até a pesquisa acabar — dentro da
+        // análise, que carrega o processo inteiro, isso derruba o worker.
+        //
+        // Não espera e não mostra nada: esta análise já saiu com o aviso de
+        // "teto não conferido", e quem se beneficia é a próxima deste ente.
+        // Falhar aqui não pode atrapalhar nada, daí o catch vazio.
+        if (r.ente_esfera && r.cartorio?.uf) {
+          void invokeFunction('gerar-analise-rpv', {
+            acao: 'teto',
+            uf: r.cartorio.uf,
+            esfera_ente: r.ente_esfera,
+            municipio_ente: r.ente_municipio ?? null,
+          }).catch(() => {})
+        }
 
         // O CARTÓRIO CHEGA DEPOIS, e de propósito: a busca web leva dezenas de
         // segundos e, dentro da análise, derrubava o worker (HTTP 546).

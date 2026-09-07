@@ -1347,8 +1347,6 @@ async function extrairComFerramenta(
     ferramenta: ReturnType<typeof ferramentaDoEsquema>;
     conteudo: any[];
     maxTokens: number;
-    /** Teto da segunda tentativa, quando a primeira cortar. 0 = não tenta. */
-    maxTokensRetentativa?: number;
   },
 ): Promise<any> {
   // O PROCESSO É LIDO DUAS VEZES — QUALIFICAÇÃO E ANÁLISE — E ERA COBRADO DUAS.
@@ -1384,9 +1382,18 @@ async function extrairComFerramenta(
         max_tokens: maxTokens,
         system: SYSTEM_BASE,
         tools: [FERRAMENTA_QUALIFICACAO, FERRAMENTA_ANALISE],
-        // 'auto', e não forçado: forçar a ferramenta tira do modelo a chance de
-        // raciocinar em texto antes de responder, e a auditoria dos cálculos
-        // depende disso. A instrução no fim do turno já basta na prática.
+        // FORÇADA, e não 'auto'. Eu deixei em 'auto' argumentando que forçar
+        // tiraria do modelo a chance de raciocinar em texto antes de responder.
+        // Em produção isso custou a análise inteira: em 'auto' o Opus 5 escreve
+        // a prosa ANTES de chamar a ferramenta, o que estoura tanto o tempo de
+        // parede (HTTP 504, teto de 150 s) quanto os recursos do worker (546).
+        //
+        // E o argumento estava errado de raiz: o formato ANTIGO era "devolva
+        // APENAS este JSON, sem markdown" — que também não deixava espaço para
+        // prosa nenhuma. Forçar a ferramenta não tira liberdade que existia;
+        // devolve o comportamento que já funcionava, agora sem o risco de o JSON
+        // vir cortado ou embrulhado em cerca de markdown.
+        tool_choice: { type: 'tool', name: o.ferramenta.name },
         messages: [{
           role: 'user',
           content: [
@@ -1400,11 +1407,13 @@ async function extrairComFerramenta(
     return await res.json();
   };
 
-  let data = await pedir(o.maxTokens);
-  const retentativa = o.maxTokensRetentativa ?? 0;
-  if (data?.stop_reason === 'max_tokens' && retentativa > o.maxTokens) {
-    data = await pedir(retentativa);
-  }
+  // UMA CHAMADA, E SÓ. A retentativa com teto maior estava aqui e foi retirada:
+  // ela reenvia o PROCESSO INTEIRO e refaz a leitura toda, o que num pedido que
+  // já vive perto do teto de 150 s de tempo de parede significa estourar com
+  // certeza em vez de falhar com aviso. Trocar uma falha explicada por um
+  // timeout é piorar. O teto de saída já é generoso; se cortar, quem lê recebe
+  // a mensagem dizendo exatamente isso e o que fazer.
+  const data = await pedir(o.maxTokens);
 
   const uso = data.content?.find((c: { type: string; name?: string }) => c.type === 'tool_use' && c.name === o.ferramenta.name);
   if (uso?.input && typeof uso.input === 'object') return uso.input;
@@ -1421,7 +1430,7 @@ async function extrairComFerramenta(
   }
   throw new Error(
     data?.stop_reason === 'max_tokens'
-      ? `A leitura (${o.rotulo}) foi CORTADA por tamanho mesmo na segunda tentativa. O processo pode estar grande demais para uma passada só — tente reduzir os anexos do card.`
+      ? `A leitura (${o.rotulo}) foi CORTADA por tamanho: a resposta bateu no teto e veio incompleta. O processo pode estar grande demais para uma passada só — reduza os anexos do card e rode de novo.`
       : `A IA não registrou o resultado da ${o.rotulo}.${raw ? ` Ela disse: "${raw.slice(0, 200)}"` : ''}`,
   );
 }
@@ -1429,14 +1438,14 @@ async function extrairComFerramenta(
 const extrairAnalise = (apiKey: string, contentBlocks: any[]) =>
   extrairComFerramenta(apiKey, {
     rotulo: 'análise', instrucoes: SYSTEM_ANALISE, ferramenta: FERRAMENTA_ANALISE,
-    conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS, maxTokensRetentativa: 26000,
+    conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS,
   });
 
 // ---- PORTÃO 1: chamada de IA + decisão ----
 const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
   extrairComFerramenta(apiKey, {
     rotulo: 'qualificação', instrucoes: SYSTEM_QUALIFICACAO, ferramenta: FERRAMENTA_QUALIFICACAO,
-    conteudo: contentBlocks, maxTokens: 4000, maxTokensRetentativa: 8000,
+    conteudo: contentBlocks, maxTokens: 4000,
   });
 
 // ============================================================================
@@ -2070,6 +2079,30 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, ...r });
     }
 
+    // 2b. O PEDIDO DE PESQUISA DO TETO, em requisição leve e própria.
+    //
+    // POR QUE NÃO DENTRO DA ANÁLISE. Disparar uma pesquisa custa o worker de
+    // quem dispara: o fetch para a invocação nova é segurado por
+    // `EdgeRuntime.waitUntil`, que mantém o worker vivo — com toda a memória
+    // dele — até o outro lado terminar. Numa requisição leve isso é de graça;
+    // dentro da análise, que carrega o processo inteiro e duas leituras de IA,
+    // é o que derruba o worker com HTTP 546. É o mesmo motivo pelo qual o
+    // levantamento de emolumentos nunca rodou de lá.
+    //
+    // POR QUE NÃO DE CARONA NA CONSULTA DE EMOLUMENTOS. Ela só é chamada quando
+    // falta a tabela do estado; com a tabela conhecida — o caso comum depois de
+    // algumas análises — o navegador nem pergunta, e o teto nunca seria
+    // pesquisado.
+    //
+    // A análise LÊ o cache e diz "não conferido" quando não há; esta ação é a
+    // que manda apurar. Responde na hora, sem esperar a pesquisa.
+    if (body.acao === 'teto') {
+      const esferaEnte = (['federal', 'estadual', 'municipal'] as const).find((e) => e === body.esfera_ente);
+      if (!esferaEnte) return jsonResponse({ ok: true, estado: 'sem_esfera' });
+      const t = await consultarTeto(sbAdmin, body.uf, esferaEnte, undefined, body.municipio_ente, true);
+      return jsonResponse({ ok: true, estado: t.estado, escopo: t.escopo, valor: t.valor });
+    }
+
     const _google = await segredoGoogle();
     const cfg: Record<string, string> = {
       anthropic_api_key: (await chaveAnthropic()) ?? '',
@@ -2211,27 +2244,35 @@ Deno.serve(async (req) => {
         // a do processo — os bytes vão para um vetor indexado e os blocos são
         // montados depois, na sequência: página fora de ordem confundiria a
         // leitura tanto quanto página faltando.
+        // OS BYTES CRUS SÃO SOLTOS ASSIM QUE VIRAM BLOCO.
+        //
+        // A primeira versão em paralelo guardava TODOS os Uint8Array num vetor e
+        // só depois convertia — ou seja, o pico de memória passava a ser todos os
+        // bytes crus MAIS todos os base64, num worker que ja carrega o processo
+        // inteiro. O laço serial de antes retinha um cru de cada vez, e nisso
+        // era melhor. Agora cada download converte na hora e larga o cru: o pico
+        // volta a ser o de antes (os blocos) mais os poucos em voo.
+        //
+        // Os BLOCOS ficam indexados para a montagem sair na ordem do processo —
+        // página fora de ordem confunde a leitura tanto quanto página faltando.
         const aBaixar = [...outros, ...imagensEnviadas];
-        const bytesPorIndice: (Uint8Array | null)[] = new Array(aBaixar.length).fill(null);
+        const blocosPorIndice: (any[] | null)[] = new Array(aBaixar.length).fill(null);
         {
-          const CONCORRENCIA = 6;
+          const CONCORRENCIA = 4;
           let proximo = 0;
           const trabalhador = async () => {
             for (;;) {
               const i = proximo++;
               if (i >= aBaixar.length) return;
-              bytesPorIndice[i] = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${aBaixar[i].name}`);
+              const bytes = await storageGetBytes(sbAdmin, BUCKET_INPUT, `${prefix}/${aBaixar[i].name}`);
+              blocosPorIndice[i] = await arquivoToContentBlocks(aBaixar[i].name, bytes);
             }
           };
           await Promise.all(
             Array.from({ length: Math.min(CONCORRENCIA, aBaixar.length) }, trabalhador),
           );
         }
-        for (let i = 0; i < aBaixar.length; i++) {
-          const bytes = bytesPorIndice[i];
-          if (!bytes) continue;
-          contentBlocks.push(...await arquivoToContentBlocks(aBaixar[i].name, bytes));
-        }
+        for (const blocos of blocosPorIndice) if (blocos) contentBlocks.push(...blocos);
         paginasImagem = imagensEnviadas.length;
       }
 
@@ -2818,7 +2859,11 @@ Deno.serve(async (req) => {
     // O MUNICÍPIO DEVEDOR, quando há um. É por ele que o teto é procurado: o
     // número guardado por UF é o da capital, e cada município tem o seu.
     const _municipio = ente.esfera === 'municipal' ? municipioDoEnte(dados.ente_devedor) : null;
-    const _teto = await consultarTeto(sbAdmin, ufCredito, ente.esfera, undefined, _municipio);
+    // SÓ LEITURA (o `false` no fim). Disparar a pesquisa daqui segura este
+    // worker vivo até a invocação chamada terminar — e este worker é o que
+    // carrega o processo inteiro e as duas leituras de IA. Quem dispara é a
+    // consulta leve de emolumentos, que o navegador já repete a cada análise.
+    const _teto = await consultarTeto(sbAdmin, ufCredito, ente.esfera, undefined, _municipio, false);
     const _avisoTetoBase = avisoDeTeto(_teto, ente.esfera, ufCredito, Number(dados.bruto_total) || 0, _municipio);
     if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
     // A TABELA DO IRRF ainda é fixa no código e muda todo janeiro. A dos tetos
@@ -3051,6 +3096,11 @@ Deno.serve(async (req) => {
         cedente: credorTitulo,
         modelo: dados.modelo === 1 ? 'Modelo 1 (verde)' : 'Modelo 2 (azul)',
         esfera,
+        // O ENTE, para o navegador repassar na consulta de emolumentos — é lá
+        // que a pesquisa do teto é disparada, porque disparar daqui seguraria
+        // este worker vivo (ver o `false` em consultarTeto).
+        ente_esfera: ente.esfera,
+        ente_municipio: _municipio,
         regra_prazo: prazo.regra.descricao,
         prazo_detalhe: prazo.detalhe,
         // O CAMINHO, e não só o número. Prazo é a variável que mais mexe no

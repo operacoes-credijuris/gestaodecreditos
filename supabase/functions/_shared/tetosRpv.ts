@@ -179,6 +179,21 @@ export async function consultarTeto(
   ano: number = new Date().getFullYear(),
   /** O município devedor, quando a esfera é municipal. Ver municipioDoEnte. */
   municipio?: string | null,
+  /**
+   * Pode DISPARAR a pesquisa, ou é só leitura?
+   *
+   * ISTO EXISTE PORQUE DISPARAR CUSTA O WORKER DE QUEM DISPARA. O disparo é um
+   * fetch para uma invocação nova, e ele é segurado por `EdgeRuntime.waitUntil`
+   * — que mantém ESTE worker vivo, com toda a memória dele, até a invocação
+   * chamada terminar. Numa requisição leve isso é de graça. Dentro da análise,
+   * que já carrega o processo inteiro e duas leituras de IA, é o que derruba o
+   * worker com HTTP 546 — o mesmo motivo pelo qual o levantamento de emolumentos
+   * nunca rodou de dentro dela.
+   *
+   * Então a análise LÊ (false) e a consulta leve de emolumentos, que o navegador
+   * repete de qualquer jeito, é quem DISPARA (true).
+   */
+  disparar = true,
 ): Promise<TetoConsultado> {
   const chave = chaveUf(uf, esfera)
   if (!chave || chave.length !== 2) return vazio(ano, 'sem_uf', 'UF do crédito não identificada')
@@ -186,6 +201,16 @@ export async function consultarTeto(
   const mun = esfera === 'municipal' ? (String(municipio ?? '').trim() || '') : ''
 
   try {
+    // Modo leitura: nada de criar linha, reabrir travada nem disparar pesquisa.
+    // Só responde o que já está no cache — e a referência da capital, quando é
+    // municipal e o município ainda não foi apurado.
+    if (!disparar) {
+      const l = await lerLinha(svc, chave, esfera, ano, mun)
+      if (l?.status === 'pronto') return montar(l, ano, mun || null, 'proprio')
+      const ref = await referenciaDaCapital(svc, chave, esfera, ano, mun)
+      return ref ?? vazio(ano, 'pesquisando')
+    }
+
     const proprio = await lerLinha(svc, chave, esfera, ano, mun)
 
     if (proprio?.status === 'pronto') return montar(proprio, ano, mun || null, 'proprio')
