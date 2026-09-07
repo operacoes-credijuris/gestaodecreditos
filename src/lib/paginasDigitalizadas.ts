@@ -49,9 +49,17 @@ export interface LimitesImagem {
 }
 
 /**
- * 60 no total: a API aceita até 100 imagens por pedido, e cada página custa
- * perto de 1.500 tokens — 60 páginas cabem duas vezes (qualificação e análise)
- * dentro do orçamento da requisição com folga para o texto.
+ * 60 é o TETO ABSOLUTO, não o número de todo dia.
+ *
+ * Quanto cabe de verdade sai do orçamento conjunto com o texto — ver
+ * _shared/orcamentoLeitura.ts, e quem chama passa o `max` calculado de lá. Este
+ * valor é só o limite que nunca se ultrapassa.
+ *
+ * O COMENTÁRIO ANTIGO ERRAVA A CONTA e foi o que deixou o defeito passar: dizia
+ * "cada página custa perto de 1.500 tokens". A conta da API é largura × altura /
+ * 750, com a aresta maior reduzida a 1.568 — uma A4 custa ~2.300. Com 360 mil
+ * caracteres de texto ao lado, 60 páginas estouravam a janela do modelo e o
+ * pedido voltava HTTP 400 depois de minutos de renderização.
  */
 export const LIMITES_PADRAO: LimitesImagem = { max: 60, inicio: 6, fim: 40 }
 

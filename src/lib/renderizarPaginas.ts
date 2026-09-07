@@ -4,10 +4,18 @@
 // arquivo próprio porque importa o pdf.js, que o vitest não carrega — e a
 // escolha, que é a regra, precisa ser testada.
 //
-// LARGURA-ALVO DE 1.400 PX. É o que faz uma tabela de contadoria digitalizada
-// sair legível para a IA sem estourar o tamanho: a 0,72 de qualidade, uma
-// página A4 fica entre 120 e 300 KB. Menos que isso e os dígitos de uma coluna
-// de centavos viram borrão; mais e o upload de 60 páginas passa de 20 MB.
+// 1.568 PX NA ARESTA MAIOR, e não 1.400 de largura. A diferença não é estética.
+//
+// A API reduz toda imagem cuja aresta maior passe de 1.568 px ANTES de contar
+// tokens. Uma A4 renderizada a 1400×1980 chegava ao modelo como 1108×1568 — ou
+// seja, renderizávamos, comprimíamos, subíamos ao Storage e baixávamos na Edge
+// Function 60% mais pixels do que o modelo ia olhar, e pagávamos exatamente os
+// mesmos tokens. Rasterizar direto no tamanho final é ~37% menos bytes em cada
+// perna do trajeto e uma imagem um pouco MAIS nítida, porque não passa por JPEG
+// e depois por reamostragem.
+//
+// A 0,72 de qualidade, uma página A4 fica entre 80 e 190 KB. Menos que isso e os
+// dígitos de uma coluna de centavos viram borrão.
 import * as pdfjsLib from 'pdfjs-dist'
 
 export interface PaginaRenderizada {
@@ -15,7 +23,8 @@ export interface PaginaRenderizada {
   blob: Blob
 }
 
-const LARGURA_ALVO = 1400
+/** O teto da API: acima disto ela reduz por conta própria, e o excedente é lixo. */
+const ARESTA_MAIOR_ALVO = 1568
 const ESCALA_MAXIMA = 2.5
 const QUALIDADE_JPEG = 0.72
 
@@ -39,7 +48,10 @@ export async function renderizarPaginas(
       if (numero < 1 || numero > pdf.numPages) throw new Error('fora da faixa')
       const page = await pdf.getPage(numero)
       const base = page.getViewport({ scale: 1 })
-      const escala = Math.min(ESCALA_MAXIMA, LARGURA_ALVO / Math.max(1, base.width))
+      // Pela aresta MAIOR, não pela largura: uma página em paisagem — e conta de
+      // contadoria em paisagem é comum — tinha a altura livre para passar do
+      // teto e ser reduzida pela API do mesmo jeito.
+      const escala = Math.min(ESCALA_MAXIMA, ARESTA_MAIOR_ALVO / Math.max(1, base.width, base.height))
       const viewport = page.getViewport({ scale: escala })
       const canvas = document.createElement('canvas')
       canvas.width = Math.ceil(viewport.width)
