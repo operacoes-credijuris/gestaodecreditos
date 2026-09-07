@@ -482,9 +482,10 @@ export function AnaliseRpvModal({
   /**
    * O cenário em vigor. Nasce do card e o operador pode trocar.
    *
-   * 'indefinido' e 'auto' não são opções da lista — o primeiro é cadastro pela
-   * metade (a análise nem roda) e o segundo é "o card não disse". Nos dois
-   * casos o seletor abre sem seleção, e escolher é o que destrava.
+   * 'indefinido' e 'auto' não são opções da lista — o primeiro é "honorários,
+   * sem dizer quais" (o motor resolve contra os autos, e só para quando o
+   * processo tem as duas verbas) e o segundo é "o card não disse". Nos dois
+   * casos o seletor abre sem seleção, e escolher aqui dispensa a dedução.
    */
   const [cenario, setCenario] = useState<string>(dadosDoCard.tipo_aquisicao)
   const [trocandoCenario, setTrocandoCenario] = useState(false)

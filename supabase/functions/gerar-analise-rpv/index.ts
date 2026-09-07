@@ -1823,20 +1823,10 @@ Deno.serve(async (req) => {
     // 'auto' | 'principal' | 'ambos' | 'honorarios' (contratuais E sucumbenciais)
     // | 'contratuais' | 'sucumbenciais' | 'indefinido'
     //
-    // CADASTRO PELA METADE NÃO VIRA ANÁLISE. Quando o card diz "honorários" sem
-    // dizer quais, não há o que adivinhar: chutar contratuais precifica a menos
-    // e perde o negócio; chutar as duas verbas precifica a mais e paga por uma
-    // que fica com o advogado. Decisão do dono — o comercial corrige o card, e
-    // a análise não roda. Melhor não entregar nada do que entregar um preço
-    // sobre um palpite, porque o palpite não aparece no resultado.
-    if (tipoAquisicao === 'indefinido') {
-      return errorResponse(
-        'O card diz que a cessão é de HONORÁRIOS mas não diz quais, e disso depende o preço: ' +
-        'os contratuais saem do bolo do principal, os sucumbenciais vêm por fora, pagos pelo vencido. ' +
-        'Corrija o "PARCELA CEDIDA" no Kommo para uma destas formas e rode de novo: ' +
-        '"honorários contratuais + sucumbenciais", "honorários contratuais" ou "honorários sucumbenciais".',
-      );
-    }
+    // 'indefinido' — o card diz "honorários" e não diz quais — é resolvido LÁ
+    // NA FRENTE, contra os autos, e não aqui. Aqui a análise ainda não leu
+    // nada, e a pergunta quase sempre tem resposta no processo: ver o ramo
+    // 'indefinido' no bloco das verbas.
     const honPctRaw = (body.honorarios_pct === '' || body.honorarios_pct == null) ? null : Number(body.honorarios_pct);
     const honorariosPct = (honPctRaw != null && !isNaN(honPctRaw) && honPctRaw >= 0) ? honPctRaw : null;
     if (!originador) return errorResponse('Campo obrigatório: originador');
@@ -1986,6 +1976,40 @@ Deno.serve(async (req) => {
     } else if (tipoAquisicao === 'sucumbenciais') {
       verbas = { principal: false, contratuais: false, sucumbenciais: true };
       dados.tipo_credito = 'Honorários sucumbenciais — apenas';
+    } else if (tipoAquisicao === 'indefinido') {
+      // "HONORÁRIOS", SEM DIZER QUAIS — E OS AUTOS COSTUMAM DIZER POR ELE.
+      //
+      // A maioria das RPVs vem do JUIZADO ESPECIAL, onde não há sucumbência em
+      // primeiro grau (art. 55 da Lei 9.099/95). Ali existe UM honorário só, o
+      // contratual, e "honorários" não é ambíguo: é o único que existe.
+      //
+      // Isto já bloqueou a análise inteira, e o raciocínio estava certo pela
+      // metade: chutar entre duas verbas é caro, mas só HÁ escolha quando as
+      // duas existem. Bloquear antes de ler os autos recusava a maioria dos
+      // casos por uma ambiguidade que não havia — e o comercial não tinha o que
+      // corrigir no card, porque o card estava certo.
+      const _temContratuais = honAI > 0 || honorariosPct != null;
+      const _temSucumbenciais = _sucumbBrutosAutos > 0;
+      // AS DUAS EXISTEM: aí sim a escolha é real e muda o preço — os
+      // contratuais saem de dentro do principal, os sucumbenciais vêm por fora,
+      // pagos pelo vencido. Não há como adivinhar qual foi cedida, e o palpite
+      // não aparece no resultado.
+      if (_temContratuais && _temSucumbenciais) {
+        return errorResponse(
+          `O card diz que a cessão é de HONORÁRIOS mas não diz quais, e este processo tem OS DOIS: ` +
+          `contratuais de ${brl(honorariosCalc)} e sucumbenciais de ${brl(_sucumbBrutosAutos)}. ` +
+          'Disso depende o preço: os contratuais saem do bolo do principal, os sucumbenciais vêm por fora, pagos pelo vencido. ' +
+          'Escreva no card qual é — "honorários contratuais", "honorários sucumbenciais" ou "honorários contratuais + sucumbenciais" — e rode de novo.',
+        );
+      }
+      // Uma só: é ela, e o motor diz de qual se trata em vez de deixar o
+      // operador supor. Verba de valor zero é descartada na montagem das
+      // parcelas, então marcar as duas aqui não inventa escritura de cartório.
+      verbas = { principal: false, contratuais: true, sucumbenciais: true };
+      dados.tipo_credito = _temSucumbenciais
+        ? 'Honorários sucumbenciais — apenas'
+        : 'Honorários contratuais + sucumbenciais';
+      dados._honorarios_resolvido = _temSucumbenciais ? 'sucumbenciais' : 'contratuais';
     } else {
       // Automático: o destaque da contadoria decide se há honorários a comprar.
       //
@@ -2199,6 +2223,14 @@ Deno.serve(async (req) => {
         `⚠️ HONORÁRIOS CONTRATUAIS DE ${pct(honorariosPct / 100)} — baixo demais para um contrato. ` +
         `Se a intenção era ${pct(honorariosPct)}, escreva a porcentagem em pontos no card ` +
         '(30, e não 0,30) e rode de novo.',
+      );
+    // O CARD FOI VAGO E OS AUTOS RESPONDERAM. Não é alerta — não há decisão a
+    // tomar —, mas quem confere precisa saber que a verba foi deduzida do
+    // processo e não lida do cadastro.
+    if (dados._honorarios_resolvido)
+      avisosBase.push(
+        `O card diz apenas "honorários"; o processo tem só os ${dados._honorarios_resolvido}, ` +
+        'então é essa a verba precificada.',
       );
     if (dados._parcela_nao_informada)
       avisosBase.push(

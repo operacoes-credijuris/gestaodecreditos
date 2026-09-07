@@ -754,7 +754,7 @@ export type ParcelaCedida =
   | 'honorarios'     // honorários contratuais E sucumbenciais
   | 'contratuais'    // só os honorários contratuais
   | 'sucumbenciais'  // só os honorários sucumbenciais
-  | 'indefinido'     // diz "honorários" e não diz quais — cadastro pela metade
+  | 'indefinido'     // diz "honorários" e não diz quais — resolva contra os autos
   | 'auto'           // o card não disse nada
 
 export function classificarParcelaCedida(texto: unknown): ParcelaCedida {
@@ -779,11 +779,17 @@ export function classificarParcelaCedida(texto: unknown): ParcelaCedida {
   // para o motor poder avisar quando o processo tiver a outra verba.
   if (contratuais) return 'contratuais'                      // só a do contrato
 
-  // "HONORÁRIOS", SEM DIZER QUAIS, NÃO É PEDIDO — É CADASTRO PELA METADE. Não
-  // dá para adivinhar: chutar contratuais precifica a menos e perde o negócio;
-  // chutar as duas precifica a mais e paga por verba que fica com o advogado.
-  // Decisão do dono: nesse caso a análise nem roda, e o comercial corrige o
-  // card. Melhor não entregar nada do que entregar um preço sobre um palpite.
+  // "HONORÁRIOS", SEM DIZER QUAIS: A PERGUNTA VAI PARA OS AUTOS.
+  //
+  // Quem responde é o motor, e só ele pode: a maioria das RPVs vem do JUIZADO
+  // ESPECIAL, onde não há sucumbência em primeiro grau (art. 55 da Lei
+  // 9.099/95) — existe um honorário só, o contratual, e "honorários" não é
+  // ambíguo ali. Havendo as DUAS verbas no processo, aí sim a escolha é real
+  // (contratuais saem de dentro do principal, sucumbenciais vêm por fora,
+  // pagos pelo vencido) e a análise para, pedindo que o card diga qual.
+  //
+  // Esta função não sabe o que há nos autos, então não decide: devolve
+  // 'indefinido', que quer dizer "resolva contra o processo".
   if (honorarios) return 'indefinido'
   return 'auto'
 }

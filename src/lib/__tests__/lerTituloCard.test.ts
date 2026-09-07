@@ -201,9 +201,10 @@ describe('a parcela cedida do título chega classificada', () => {
     ['honorários contratuais + sucumbenciais', 'honorarios'],
     ['honorários sucumbenciais', 'sucumbenciais'],
     ['honorários contratuais', 'contratuais'],
-    // Cadastro pela metade continua bloqueando a análise, no título como na
-    // anotação: chutar contratuais perde o negócio, chutar as duas paga verba
-    // que fica com o advogado.
+    // "Honorários" sem dizer quais manda a pergunta para os autos: no Juizado
+    // Especial não há sucumbência em primeiro grau, então quase sempre existe um
+    // honorário só e não há ambiguidade. O motor só para quando o processo tem
+    // as duas verbas.
     ['honorários', 'indefinido'],
   ]
 

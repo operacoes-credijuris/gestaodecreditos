@@ -21,10 +21,12 @@ describe('classificarParcelaCedida', () => {
     expect(classificarParcelaCedida('principal + sucumbenciais')).toBe('ambos')
   })
 
-  it('honorários SEM dizer quais nao é pedido, é cadastro pela metade', () => {
-    // Não dá para adivinhar: chutar contratuais precifica a menos e perde o
-    // negócio; chutar as duas paga por verba que fica com o advogado. A análise
-    // não roda e o comercial corrige o card.
+  it('honorários SEM dizer quais manda a pergunta para os autos', () => {
+    // 'indefinido' NÃO É RECUSA — é "resolva contra o processo". A maioria das
+    // RPVs vem do Juizado Especial, onde não há sucumbência em primeiro grau
+    // (art. 55 da Lei 9.099/95): existe um honorário só, o contratual, e
+    // "honorários" não é ambíguo ali. Quem decide é o motor, que leu os autos;
+    // ele só para quando as DUAS verbas existem e a escolha muda o preço.
     expect(classificarParcelaCedida('Honorários')).toBe('indefinido')
     expect(classificarParcelaCedida('honorarios do advogado')).toBe('indefinido')
   })
