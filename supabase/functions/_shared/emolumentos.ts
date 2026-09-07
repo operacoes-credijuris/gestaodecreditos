@@ -301,13 +301,13 @@ function promptAto(uf: string, ano: number, ato: 'escritura' | 'registro', docs:
 DOCUMENTO(S) JÁ LOCALIZADO(S):
 ${docs.map((d, i) => `${i + 1}. ${d}`).join('\n')}
 
-SEU ORÇAMENTO: TRÊS aberturas de documento e UMA busca. Gaste-o assim, e diga em "observacao" o que usou.
-1ª abertura: o endereço acima. Se ele for a tabela, acabou.
-2ª: se o primeiro for uma PÁGINA DE APRESENTAÇÃO — só diz "confira a tabela vigente" e traz um link —, abra o ARQUIVO que ela indica. É o caso mais comum de falha, e é para ele que a segunda existe.
-3ª: um documento alternativo, se o segundo também não servir.
-A busca é o último recurso, para achar o anexo quando nenhum endereço serviu.
+SEU ORÇAMENTO: DUAS aberturas, e elas servem a UM documento só — este.
+1ª: o endereço acima.
+2ª: SÓ se o primeiro for uma PÁGINA DE APRESENTAÇÃO (daquelas que só dizem "confira a tabela vigente" e trazem um link), abra o ARQUIVO que ela indica. É para isso que a segunda existe, e para nada mais.
 
-NÃO REPITA UMA ABERTURA QUE FALHOU. Tentar o mesmo endereço de novo consome a cota e devolve o mesmo erro; passe para o próximo passo da lista acima.
+NÃO PROCURE ALTERNATIVAS AQUI. Não abra um terceiro endereço, não busque na web, não tente o mesmo link duas vezes. Se este documento não trouxer a tabela, devolva faixas vazias dizendo por quê: OUTRA CHAMADA, com o relógio zerado, vai tentar o próximo documento da lista. Insistir aqui não dá mais chances — gasta o tempo desta chamada e mata as duas tentativas, a sua e a seguinte.
+
+VÁ DIRETO À TABELA. O documento é grande e você não precisa lê-lo inteiro: procure o capítulo do ${ato === 'escritura' ? 'Tabelionato de Notas, atos com conteúdo financeiro / valor declarado' : 'Registro de Títulos e Documentos, registro de instrumento com valor declarado'} e as notas gerais sobre acréscimos e base de cálculo.
 
 Quem te chama vai aplicar essa regra a MUITOS valores diferentes, sem te consultar de novo. Por isso o que se pede não é um valor: é a TABELA e as taxas que incidem sobre ela.
 
@@ -710,19 +710,20 @@ export async function executarPasso(
     // UM DOCUMENTO POR INVOCAÇÃO, sem busca e sem retomada. É o orçamento que
     // caber no teto de tempo — dar três documentos e deixar o modelo tentar
     // todos na mesma invocação era o que estourava.
-    // TRÊS aberturas e uma busca, e não uma abertura e nenhuma busca.
+    // DUAS aberturas e nenhuma busca — e o "duas" e o numero exato.
     //
-    // Com uma só, qualquer endereço que fosse página de apresentação condenava
-    // o estado: a etapa abria a página, enxergava ali o link do PDF de verdade
-    // e recebia "Server tool use limit exceeded" em toda tentativa seguinte.
-    // Foi o que aconteceu em PE — o Ato 1556/2025 localizado e nunca aberto.
-    // O prompt já prometia "tente o próximo, ou faça UMA busca", e o orçamento
-    // proibia as duas coisas: promessa que o código não cumpre é defeito.
+    // Uma so condenava qualquer endereco que fosse pagina de apresentacao: a
+    // etapa abria a pagina, via ali o link do PDF e nao tinha mais cota. Tres,
+    // que foi minha correcao seguinte, condenava de outro jeito — a invocacao
+    // tentava tres documentos dentro dos mesmos 150 s e morria antes de
+    // escrever, tres vezes seguidas, ate bater em MAX_MORTES. Foi o que
+    // aconteceu em PE nas duas rodadas.
     //
-    // Três aberturas agora custam menos que uma antes: cada uma vem capada em
-    // 40 mil tokens (ver max_content_tokens), e antes uma só trazia o ato
-    // normativo inteiro, página a página, sem teto nenhum.
-    const r = await conversar(apiKey, promptAto(uf, ano, ato, [p.documentos[p.doc]]), FERRAMENTA_ATO, 1, 3, 8000)
+    // Duas e o que a arquitetura ja pedia e eu nao li: alternativa NAO se tenta
+    // aqui, tenta-se na PROXIMA INVOCACAO, que e o que `p.doc++` faz e o que da
+    // a ela um relogio zerado. As duas aberturas servem a um documento so — o
+    // endereco, e o arquivo que ele linka quando for pagina de apresentacao.
+    const r = await conversar(apiKey, promptAto(uf, ano, ato, [p.documentos[p.doc]]), FERRAMENTA_ATO, 0, 2, 8000)
 
     const fontes = Array.isArray(r?.fontes)
       ? (r!.fontes as unknown[]).map(String).filter((f) => /^https?:\/\//i.test(f))
