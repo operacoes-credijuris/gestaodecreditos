@@ -1940,11 +1940,16 @@ Deno.serve(async (req) => {
     const irNum = Number(dados.ir) || 0;
     const inssNum = Number(dados.inss) || 0;
     // honorários a usar: se o usuário informou %, aplica a regra (com destaque→bruto; sem destaque→líquido); senão, usa o da contadoria
+    const _honBase = houveDestaque ? brutoNum : (brutoNum - irNum - inssNum);
     let honorariosCalc = honAI;
-    if (honorariosPct != null) {
-      const base = houveDestaque ? brutoNum : (brutoNum - irNum - inssNum);
-      honorariosCalc = base * (honorariosPct / 100);
-    }
+    if (honorariosPct != null) honorariosCalc = _honBase * (honorariosPct / 100);
+    // A PORCENTAGEM DOS CONTRATUAIS, guardada para a ficha que volta ao card.
+    // Informada pelo comercial, é a dele; sem ela, é a que a contadoria
+    // praticou — o valor destacado sobre a mesma base do bloco, para a
+    // porcentagem não discordar do honorário que entrou no preço.
+    dados._hon_pct = honorariosPct != null
+      ? honorariosPct
+      : (_honBase > 0 && honorariosCalc > 0 ? (honorariosCalc / _honBase) * 100 : null);
     // ================================================================
     // QUAIS VERBAS ESTÃO SENDO COMPRADAS
     // ================================================================
@@ -2193,7 +2198,7 @@ Deno.serve(async (req) => {
     if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && dados._verbas_negociadas?.principal && !ehEstadoDeGoias(dados.ente_devedor))
       avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
     if (calc.atingiuAlvo === false)
-      avisosBase.push(`Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
+      avisosBase.push(`⚠️ Não foi possível atingir a meta de 2,80% ao mês: mesmo no deságio máximo (95%), a rentabilidade fica em ${pct(calc.Y9)} ao mês — pode ser um crédito que não compensa nesse prazo, ou algum dado lido errado do PDF.`);
     if (dados._houveCorte)
       avisosBase.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.');
     // O QUE ENTROU NO PREÇO, verba a verba, com o deságio de cada uma. É o aviso
@@ -2399,6 +2404,32 @@ Deno.serve(async (req) => {
       aviso: avisoFinal,
       drive_folder_url: `https://drive.google.com/drive/folders/${cedenteId}`,
       drive_file_url: up.webViewLink ?? null,
+      // A LISTA, e não só a frase juntada.
+      //
+      // `aviso` é os avisos colados num parágrafo — serve para o toast e para
+      // nada mais. Quem precisa deles um a um é a anotação do Kommo (leva só
+      // os marcados com ⚠️) e a contagem de alertas no painel do card, que
+      // lia `avisos` numa resposta que nunca os mandava e por isso nunca
+      // aparecia.
+      avisos,
+      // A FICHA QUE VOLTA PARA O CARD DO KOMMO.
+      //
+      // O comercial não abre a planilha: ele lê a anotação. Ela dizia só
+      // "aprovado" e o link, então saber SOBRE QUE CRÉDITO era a aprovação
+      // exigia abrir o Drive. São os campos do cadastro dele, preenchidos com
+      // o que a análise leu dos autos — é assim que ele confere o card.
+      ficha: {
+        tipo: categoria === 'Precatórios' ? 'Precatório' : 'RPV',
+        processo: numeroProcesso || String(dados.numero_processo ?? ''),
+        tribunal: String(dados.tribunal ?? '').trim(),
+        entidade_devedora: enteDevedor,
+        parcela_cedida: String(dados.tipo_credito ?? '').trim(),
+        // O VALOR DO CRÉDITO NEGOCIADO, e não o preço: a soma dos líquidos
+        // das verbas que entraram no negócio. O preço fica na planilha, que
+        // é onde a proposta se monta.
+        valor_cedido: Number(calc.Y3) || 0,
+        honorarios_pct: dados._hon_pct == null ? null : Number(dados._hon_pct),
+      },
       // dados úteis pro .md/.csv (gerados no front ou em passo futuro)
       m1_sintese: dados.m1_sintese ?? null,
       riscos: riscosComAuditoria(dados),

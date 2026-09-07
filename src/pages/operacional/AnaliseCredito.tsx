@@ -84,6 +84,7 @@ import {
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
 import { formatCNJ, formatDate } from '@/lib/format'
+import { anotacaoDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { useAuth } from '@/contexts/AuthContext'
@@ -110,6 +111,8 @@ type ResultadoAnalise = {
    */
   valores?: ValoresRpv
   cartorio?: CartorioRpv
+  /** Os campos do cadastro do comercial, preenchidos com o que a análise leu dos autos. */
+  ficha?: FichaDoCredito
   [k: string]: unknown
 }
 
@@ -350,24 +353,21 @@ async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
   return lidos
 }
 
-// Escreve o resultado da análise no card do Kommo (motivo se recusado, link do Drive se aprovado).
+// Escreve o resultado da análise no card do Kommo. O TEXTO mora em
+// lib/anotacaoKommo.ts — é o único pedaço da análise que o comercial lê, então
+// o formato é regra de negócio e fica onde dá para testar.
 async function anotarResultadoNaKommo(leadId: number, r: ResultadoAnalise, analista: string) {
-  let texto = ''
-  if (r.reprovado) {
-    const motivo = r.motivo || (r.motivos ?? []).join(' ') || 'Crédito reprovado na análise.'
-    texto = `❌ RECUSADO na análise automática.\nMotivo: ${motivo}`
-  } else {
-    const link =
+  const texto = `(${analista}) ` + anotacaoDaAnalise({
+    reprovado: r.reprovado,
+    motivo: r.motivo,
+    motivos: r.motivos,
+    link:
       (typeof r.drive_folder_url === 'string' && r.drive_folder_url) ||
       (typeof r.drive_file_url === 'string' && r.drive_file_url) ||
-      ''
-    const base = link
-      ? `✅ APROVADO na análise automática.\nPlanilha e análise no Drive: ${link}`
-      : '✅ APROVADO na análise automática. (Confira a pasta do Drive.)'
-    const avisoTxt = typeof r.aviso === 'string' && r.aviso.trim() ? `\n\n${r.aviso.trim()}` : ''
-    texto = base + avisoTxt
-  }
-  texto = `(${analista}) ${texto}`
+      '',
+    ficha: r.ficha,
+    avisos: r.avisos,
+  })
   try {
     await invokeFunction('kommo-anotar', { lead_id: leadId, texto })
   } catch {
