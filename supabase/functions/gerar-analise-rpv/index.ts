@@ -1078,6 +1078,14 @@ const SCHEMA_ANALISE = {
     'NÃO É DESTAQUE a mera existência de contrato de honorários nos autos, nem a previsão de percentual no contrato: sem pedido deferido ou separação na conta, o advogado recebe do cliente, não do ente. ' +
     'É o que decide QUAL BLOCO da planilha vale — o verde (destacados) ou o azul (não destacados) —, e os dois calculam o honorário sobre bases diferentes: o verde sobre o BRUTO, o azul sobre o LÍQUIDO. Responder errado põe a análise no bloco errado e muda o valor do honorário',
   honorarios: 'HONORÁRIOS CONTRATUAIS A DESTACAR (0 se não houver), número: o pedaço do bruto que vai para o advogado por contrato, quando há pedido de destaque ou reserva nos autos. NÃO confundir com os sucumbenciais (campo próprio), que o vencido paga por fora',
+  honorarios_contratuais_pct:
+    'A PORCENTAGEM DOS HONORÁRIOS CONTRATUAIS SOBRE O CRÉDITO, número em pontos (30 = 30%), ou null. ' +
+    'PROCURE A PORCENTAGEM ESCRITA, primeiro: ela aparece no contrato de honorários juntado aos autos, na petição que pede o destaque do art. 22 §4º, no despacho que o defere, e muitas vezes na própria conta da contadoria ("honorários contratuais — 30%"). ' +
+    'SÓ SE NÃO HOUVER EM PARTE NENHUMA, calcule: o valor dos honorários dividido pelo valor do crédito, os dois DO MESMO DOCUMENTO — de preferência a conta da contadoria, que é onde as duas linhas convivem e a base é a que valeu de verdade. ' +
+    'NÃO invente uma base: se você dividir, use o total que o próprio documento usou como base do honorário, não o bruto que você montou de outra peça. ' +
+    'Serve para CONFERIR o percentual que o comercial cadastrou. Comparar valores em reais não serve, porque o mesmo percentual sobre bases diferentes dá reais diferentes — e é a base que costuma divergir, não o percentual',
+  honorarios_contratuais_pct_origem:
+    'de onde saiu o campo acima, em uma linha: ou a peça que traz a porcentagem escrita ("contrato de honorários, fl. 12", "conta da contadoria"), ou a divisão que você fez, dizendo os dois números ("R$ 12.400 / R$ 41.333 da conta da contadoria"). null quando não houve nem uma coisa nem outra',
   origem_valores: 'DE ONDE SAIU CADA NÚMERO, em uma ou duas frases: qual documento (conta da contadoria, decisão homologatória, RPV expedida), o ID ou a página, e até que data os valores estão atualizados. Ex.: "conta da contadoria de 12/03/2026 homologada em 20/04/2026, ID 3f21a90, fls. 412-415; valores atualizados até 03/2026". É o que permite conferir a escolha em dez segundos — não deixe vazio',
   honorarios_sucumbenciais: 'HONORÁRIOS SUCUMBENCIAIS fixados na sentença ou no acórdão, em reais — o valor que o ENTE DEVEDOR paga ao advogado por ter perdido, separado do que o cliente paga por contrato. Procure na parte dispositiva da sentença/acórdão, na conta da contadoria e no próprio requisitório: costuma vir como verba própria, às vezes em requisitório separado. Se a condenação fixar PERCENTUAL sobre o valor da causa ou da condenação, calcule o valor em reais. ZERO se a sentença não os fixou, se foram compensados, se a Fazenda não foi condenada neles, ou se você não achou — não estime por praxe: um percentual arbitrado por hábito vira dinheiro inventado na precificação',
   ir: 'IR retido SOBRE O PRINCIPAL, como a conta que vale calculou, número (0 se isento). NÃO some aqui o IR sobre os honorários — esse o sistema calcula sozinho pela tabela progressiva',
@@ -1933,13 +1941,32 @@ Deno.serve(async (req) => {
     const _honBase = houveDestaque ? brutoNum : (brutoNum - irNum - inssNum);
     let honorariosCalc = honAI;
     if (honorariosPct != null) honorariosCalc = _honBase * (honorariosPct / 100);
-    // A PORCENTAGEM DOS CONTRATUAIS, guardada para a ficha que volta ao card.
-    // Informada pelo comercial, é a dele; sem ela, é a que a contadoria
-    // praticou — o valor destacado sobre a mesma base do bloco, para a
-    // porcentagem não discordar do honorário que entrou no preço.
-    dados._hon_pct = honorariosPct != null
-      ? honorariosPct
-      : (_honBase > 0 && honorariosCalc > 0 ? (honorariosCalc / _honBase) * 100 : null);
+    // A PORCENTAGEM DOS CONTRATUAIS SEGUNDO OS AUTOS.
+    //
+    // Lida do processo, não derivada aqui — e a diferença é o ponto. Derivar
+    // exige escolher uma base, e a base é justamente o que costuma divergir: o
+    // destaque pode ter saído sobre o bruto, sobre o líquido de INSS ou sobre o
+    // valor atualizado de outra data. Percentual igual sobre bases diferentes dá
+    // reais diferentes, e comparar reais acusaria divergência onde não há.
+    //
+    // A divisão em código fica como último recurso, para quando a IA não achou
+    // a porcentagem escrita nem conseguiu dividir dentro de um documento só.
+    const _pctAutosLido = Number(dados.honorarios_contratuais_pct);
+    const _pctDoProcesso = Number.isFinite(_pctAutosLido) && _pctAutosLido > 0;
+    const _pctAutos = _pctDoProcesso
+      ? _pctAutosLido
+      : (_honBase > 0 && honAI > 0 ? (honAI / _honBase) * 100 : null);
+    // DE ONDE ELA VEIO, porque muda o peso de uma divergência: percentual lido
+    // no contrato contradiz o card de verdade; percentual que eu estimei sobre
+    // uma base escolhida por mim pode estar divergindo pela base, não pelo
+    // negócio. Quem confere precisa saber qual dos dois está lendo.
+    const _pctOrigem = _pctDoProcesso
+      ? String(dados.honorarios_contratuais_pct_origem ?? 'lida no processo')
+      : 'estimada aqui: honorário destacado ÷ base do bloco, porque o processo não traz a porcentagem escrita';
+
+    // A PORCENTAGEM DA FICHA que volta ao card: a do comercial quando ele a
+    // informou (é a dele que precificou), a dos autos quando não.
+    dados._hon_pct = honorariosPct != null ? honorariosPct : _pctAutos;
     // ================================================================
     // QUAIS VERBAS ESTÃO SENDO COMPRADAS
     // ================================================================
@@ -2227,21 +2254,22 @@ Deno.serve(async (req) => {
     // O CARD FOI VAGO E OS AUTOS RESPONDERAM. Não é alerta — não há decisão a
     // tomar —, mas quem confere precisa saber que a verba foi deduzida do
     // processo e não lida do cadastro.
-    // O % DO CARD E O DESTACADO DOS AUTOS DISCORDANDO.
+    // O % DO CARD CONFERIDO CONTRA O % DOS AUTOS — em pontos percentuais.
     //
-    // A contadoria costuma destacar o contratual (art. 22 §4º da Lei 8.906/94),
-    // então os dois números existem quase sempre — e o do card VENCE, o que era
-    // uma troca silenciosa de um valor dos autos por um valor de cadastro.
+    // EM REAIS NÃO SERVE, e essa era a versão anterior: converter o percentual
+    // do card numa base escolhida por mim e comparar com o valor destacado
+    // acusava divergência sempre que a base fosse outra, ainda que o percentual
+    // fosse exatamente o mesmo. Base é o que divergia, não o negócio.
     //
-    // Os dois podem estar certos: o destacado é o que o requisitório vai pagar
-    // ao advogado, o percentual é o que o contrato diz. Divergirem quer dizer
-    // que o destaque saiu sobre outra base, que o contrato mudou, ou que alguém
-    // digitou errado. Não dá para escolher por conta — dá para não silenciar.
-    if (honorariosPct != null && honAI > 0 && Math.abs(honorariosCalc - honAI) > Math.max(100, honAI * 0.02))
+    // Um ponto percentual de tolerância: contrato de honorário é número redondo
+    // (20, 30, 33), e a folga cobre o arredondamento de quando o percentual foi
+    // obtido por divisão em vez de lido escrito.
+    if (honorariosPct != null && _pctAutos != null && Math.abs(honorariosPct - _pctAutos) > 1)
       avisosBase.push(
-        `⚠️ HONORÁRIOS CONTRATUAIS DIVERGENTES: o card diz ${pct(honorariosPct / 100)} (= ${brl(honorariosCalc)}) ` +
-        `e a contadoria destacou ${brl(honAI)} nos autos. PRECIFIQUEI PELO CARD. ` +
-        'Confira qual vale: o destacado é o que o requisitório paga ao advogado; o percentual é o do contrato.',
+        `⚠️ HONORÁRIOS CONTRATUAIS DIVERGENTES: o card diz ${pct(honorariosPct / 100)} e o processo indica ` +
+        `${pct(_pctAutos / 100)} (${_pctOrigem}). ` +
+        `PRECIFIQUEI PELO CARD, com ${brl(honorariosCalc)} de honorário — a contadoria destacou ${brl(honAI)}. ` +
+        'Confira o contrato de honorários antes de fechar.',
       );
     if (dados._honorarios_resolvido)
       avisosBase.push(
