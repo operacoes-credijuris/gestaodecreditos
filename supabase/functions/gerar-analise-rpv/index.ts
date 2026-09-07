@@ -1322,8 +1322,21 @@ const FERRAMENTA_QUALIFICACAO = ferramentaDoEsquema(
  *   3. TEXTO LIVRE COMO REDE. Se o modelo responder em prosa mesmo assim, o
  *      caminho antigo ainda lê — nada do que funcionava deixou de funcionar.
  *
- * `temperature: 0` porque isto é extração, não redação: duas leituras do mesmo
- * processo têm de dar os mesmos números. O padrão da API é 1.
+ * SEM `temperature`. Ela estava aqui — extração não é redação, e duas leituras
+ * do mesmo processo deveriam dar os mesmos números —, mas o Opus 5 NÃO ACEITA
+ * MAIS o parâmetro: a API responde 400 "`temperature` is deprecated for this
+ * model" e a análise morre no portão de qualificação, antes de ler qualquer
+ * coisa. Foi o que aconteceu na primeira análise depois da subida: eu pus o
+ * `temperature: 0` e troquei o modelo para Opus 5 na mesma leva, e as duas
+ * mudanças se anularam em produção.
+ *
+ * A reprodutibilidade que ela buscava não se resolve por parâmetro neste modelo.
+ * O que segura os números aqui é outra coisa, e já existe: o esquema descreve
+ * campo a campo o que se espera, a conferência de soma (bruto − IR − INSS −
+ * honorários = líquido) acusa leitura misturada, e a auditoria compara a conta
+ * com o título. Se a variação entre leituras virar problema real, o caminho é
+ * medir duas passadas do mesmo processo e apertar o esquema — não voltar o
+ * parâmetro.
  */
 async function extrairComFerramenta(
   apiKey: string,
@@ -1369,7 +1382,6 @@ async function extrairComFerramenta(
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: maxTokens,
-        temperature: 0,
         system: SYSTEM_BASE,
         tools: [FERRAMENTA_QUALIFICACAO, FERRAMENTA_ANALISE],
         // 'auto', e não forçado: forçar a ferramenta tira do modelo a chance de
