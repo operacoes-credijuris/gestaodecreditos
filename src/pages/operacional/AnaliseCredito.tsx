@@ -149,11 +149,15 @@ function lerCardCredijuris(lead: KommoLead) {
   // de sucumbenciais era precificada como principal + honorários, em silêncio.
   const doTitulo = lerTituloCard(lead.nome)
 
-  // `processo_cnj` vem da kommo-sync, que só reconhece o formato pontuado;
-  // lerTituloCard aceita também os vinte dígitos crus e formata.
+  // O TÍTULO PRIMEIRO. É o cadastro do card; o espelho (`processo_cnj`) vinha
+  // da sync procurando primeiro nas ANOTAÇÕES, e qualquer CNJ citado numa nota
+  // (processo conexo, "ver também") vencia o do título — e este número
+  // sobrepõe o que a IA lê nos autos. Espelho e nota "PROCESSO:" continuam
+  // como reserva para o card antigo sem número no título.
   const numero = (
-    lead.processo_cnj ??
-    (pegar(/PROCESSO:\s*([0-9.\-]+)/i) || doTitulo.numero)
+    doTitulo.numero ||
+    (lead.processo_cnj ?? '') ||
+    pegar(/PROCESSO:\s*([0-9.\-]+)/i)
   ).trim()
   const tipo = pegar(/TIPO:\s*(.+)/i)
 

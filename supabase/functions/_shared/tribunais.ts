@@ -26,13 +26,13 @@
 // Por isso ele é consultado antes da sigla: a sigla é a IA transcrevendo, o
 // número é o número.
 //
-// NÃO HÁ MAPA DE TR PARA A JUSTIÇA ESTADUAL aqui de propósito. O código do TJ
-// no número CNJ segue a ordem alfabética dos estados quase toda, mas não toda
-// (São Paulo é 26, e a ordem alfabética daria 25), e eu não consegui confirmar
-// a lista oficial inteira. Como a sigla TJxx já resolve o caso estadual sem
-// ambiguidade, encodar uma tabela que eu não sei conferir só criaria uma
-// chance de errar o estado em silêncio. Se um dia a lista for confirmada,
-// entra aqui.
+// A JUSTIÇA ESTADUAL TAMBÉM TEM MAPA (TJ_UF, abaixo), pela tabela do Anexo I da
+// Resolução CNJ 65/2008: um código por tribunal, de 01 (AC) a 27 (TO). A ordem é
+// alfabética com uma inversão conhecida — Sergipe é 25 e São Paulo é 26 —, e
+// cada código confere com o formato que se vê em qualquer processo do estado
+// (…8.26.… é TJSP, …8.19.… é TJRJ, …8.09.… é TJGO, …8.17.… é TJPE). Com ele, o
+// estado de um processo estadual sai do NÚMERO, sem depender da IA transcrever a
+// sigla certa — e a sigla, quando vem, é conferida contra o número.
 
 /** Região do TRT -> estados de jurisdição. Fonte: CSJT. */
 const TRT_UF: Record<number, string[]> = {
@@ -57,6 +57,17 @@ const TRF_UF: Record<number, string[]> = {
   4: ['RS', 'SC', 'PR'],
   5: ['AL', 'CE', 'PB', 'PE', 'RN', 'SE'],
   6: ['MG'],
+}
+
+/**
+ * Código do Tribunal de Justiça no número CNJ -> estado. Fonte: Anexo I da
+ * Resolução CNJ 65/2008. Cada tribunal cobre um estado só, então aqui a
+ * resposta é sempre uma — e sai do número, não da sigla que a IA transcreveu.
+ */
+const TJ_UF: Record<number, string> = {
+  1: 'AC', 2: 'AL', 3: 'AP', 4: 'AM', 5: 'BA', 6: 'CE', 7: 'DF', 8: 'ES', 9: 'GO',
+  10: 'MA', 11: 'MT', 12: 'MS', 13: 'MG', 14: 'PA', 15: 'PB', 16: 'PR', 17: 'PE', 18: 'PI',
+  19: 'RJ', 20: 'RN', 21: 'RS', 22: 'RO', 23: 'RR', 24: 'SC', 25: 'SE', 26: 'SP', 27: 'TO',
 }
 
 const UFS = new Set([
@@ -100,6 +111,7 @@ export function lerNumeroCnj(numero: unknown): RegiaoDoProcesso | null {
 function estadosDaRegiao(segmento: string, regiao: number): string[] {
   if (segmento === 'trabalho') return TRT_UF[regiao] ?? []
   if (segmento === 'federal') return TRF_UF[regiao] ?? []
+  if (segmento === 'estadual') return TJ_UF[regiao] ? [TJ_UF[regiao]] : []
   return []
 }
 
@@ -148,6 +160,7 @@ export function resolverUf(dados: {
   const estados = regiao ? estadosDaRegiao(regiao.segmento, regiao.tribunal) : []
   const nome = regiao?.segmento === 'trabalho' ? `TRT${regiao.tribunal}`
     : regiao?.segmento === 'federal' ? `TRF${regiao.tribunal}`
+    : regiao?.segmento === 'estadual' ? `TJ${TJ_UF[regiao.tribunal] ?? regiao.tribunal}`
     : null
 
   const lida = uf2(dados.uf_tramitacao)
@@ -175,7 +188,10 @@ export function resolverUf(dados: {
     }
   }
 
-  const m = /^TJ([A-Z]{2})$/.exec(String(dados.tribunal ?? '').toUpperCase().trim())
+  // Sem pontuação: "TJ-GO", "TJ/GO" e "TJ GO" são o mesmo tribunal que "TJGO",
+  // e a IA escreve dos quatro jeitos. Antes só o último casava, e os outros
+  // deixavam a UF vazia — sem cartório e sem teto, em silêncio.
+  const m = /^TJ([A-Z]{2})$/.exec(String(dados.tribunal ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''))
   const daSigla = m ? uf2(m[1]) : null
   if (daSigla) return { uf: daSigla, fonte: 'sigla' }
 

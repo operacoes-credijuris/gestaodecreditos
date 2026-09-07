@@ -22,7 +22,7 @@ import {
   type RegraEmolumentos,
 } from "../_shared/emolumentos.ts";
 import { resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
-import { irProgressivo } from "../_shared/irpf.ts";
+import { ANO_TABELA_IRRF, irProgressivo } from "../_shared/irpf.ts";
 import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
 import { type SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
@@ -215,18 +215,21 @@ async function driveUploadBytes(
   mime: string,
   sobrescrever = true,
 ): Promise<{ id: string; webViewLink?: string }> {
-  if (sobrescrever) {
-    const existing = await driveFindChild(token, name, parentId);
-    if (existing) {
-      await fetch(`https://www.googleapis.com/drive/v3/files/${existing.id}?supportsAllDrives=true`, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + token },
-      });
-    }
-  }
-  // Multipart upload (mais simples que resumable pra arquivos pequenos)
+  // SUBSTITUI O CONTEÚDO, NÃO APAGA O ARQUIVO.
+  //
+  // A versão anterior fazia DELETE no arquivo de mesmo nome e criava outro. Na
+  // API v3 o DELETE é definitivo — não passa pela lixeira —, então refazer uma
+  // análise apagava a anterior sem recuperação. E a resposta do DELETE não era
+  // conferida: falhando por permissão (drive compartilhado), o upload seguia e
+  // criava DUPLICATA com o mesmo nome. Agora o arquivo existente recebe o
+  // conteúdo novo como REVISÃO: mesmo id, mesmo link, e o Drive guarda as
+  // versões anteriores para quem precisar voltar.
+  const existing = sobrescrever ? await driveFindChild(token, name, parentId) : null;
+
+  // Multipart upload (mais simples que resumable pra arquivos pequenos). Na
+  // atualização os metadados não levam `parents`: o arquivo já está na pasta.
   const boundary = '-------cred' + Math.random().toString(36).slice(2);
-  const metadata = JSON.stringify({ name, parents: [parentId] });
+  const metadata = JSON.stringify(existing ? { name } : { name, parents: [parentId] });
   const enc = new TextEncoder();
   const head = enc.encode(
     `--${boundary}\r\n` +
@@ -241,8 +244,11 @@ async function driveUploadBytes(
   body.set(bytes, head.length);
   body.set(tail, head.length + bytes.length);
 
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink', {
-    method: 'POST',
+  const url = existing
+    ? `https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink`
+    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink';
+  const res = await fetch(url, {
+    method: existing ? 'PATCH' : 'POST',
     headers: {
       Authorization: 'Bearer ' + token,
       'Content-Type': `multipart/related; boundary=${boundary}`,
@@ -251,7 +257,7 @@ async function driveUploadBytes(
   });
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`Drive upload '${name}' (${res.status}): ${txt.slice(0, 300)}`);
+    throw new Error(`Drive ${existing ? 'atualizar' : 'upload'} '${name}' (${res.status}): ${txt.slice(0, 300)}`);
   }
   return await res.json();
 }
@@ -328,6 +334,42 @@ const errorResponse = (message: string, status = 400, extra?: Record<string, unk
 
 const brl = (n: any) => 'R$ ' + (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pct = (n: any) => ((Number(n) || 0) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+
+/**
+ * fetch que tenta de novo quando a falha foi RÁPIDA.
+ *
+ * As duas chamadas de IA da extração usavam fetch cru: um 529 (overloaded), um
+ * 429 ou uma conexão derrubada matava a análise na hora, e o operador via um
+ * erro técnico e recomeçava do zero — duas leituras do processo perdidas. Com
+ * mais análises por dia isso vira rotina. O SDK, usado na revisão e nos
+ * emolumentos, já tentava de novo; estas não.
+ *
+ * SÓ REPETE O QUE FALHOU DEPRESSA. Uma resposta 5xx que chegou em segundos é
+ * soluço do servidor e vale tentar de novo; uma que levou dois minutos é a
+ * leitura inteira que não terminou, e repetir estouraria o tempo de parede da
+ * função (400 s) com a segunda chamada ainda por fazer. Trinta segundos é a
+ * linha entre as duas coisas.
+ */
+const STATUS_REPETIVEIS = new Set([408, 409, 425, 429, 500, 502, 503, 504, 529]);
+async function fetchComRetry(url: string, init: RequestInit, tentativas = 3): Promise<Response> {
+  let ultimo: unknown = null;
+  for (let i = 0; i < tentativas; i++) {
+    const inicio = Date.now();
+    try {
+      const r = await fetch(url, init);
+      if (r.ok || !STATUS_REPETIVEIS.has(r.status) || i === tentativas - 1) return r;
+      if (Date.now() - inicio > 30_000) return r;
+      await r.text().catch(() => '');
+      ultimo = new Error(`Claude API ${r.status}`);
+    } catch (e) {
+      if (i === tentativas - 1 || Date.now() - inicio > 30_000) throw e;
+      ultimo = e;
+    }
+    await new Promise((res) => setTimeout(res, 1500 * (i + 1) + Math.floor(Math.random() * 500)));
+  }
+  throw ultimo instanceof Error ? ultimo : new Error(String(ultimo));
+}
+
 // Converte um número escrito como texto (US "1234.56", BR "1.234,56", "1234,56"...) para Number. null se não der.
 function parseNumeroFlex(num: string): number | null {
   const t = String(num).trim().replace(/\s/g, '');
@@ -1280,7 +1322,7 @@ async function extrairAnalise(apiKey: string, contentBlocks: any[]): Promise<any
     ...contentBlocks,
     { type: 'text', text: 'Extraia os dados e retorne APENAS este JSON preenchido (sem markdown, sem comentários):\n' + JSON.stringify(SCHEMA_ANALISE, null, 2) },
   ];
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetchComRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: CLAUDE_MAX_TOKENS, system: SYSTEM_ANALISE, messages: [{ role: 'user', content: userContent }] }),
@@ -1304,7 +1346,7 @@ async function extrairQualificacao(apiKey: string, contentBlocks: any[]): Promis
     ...contentBlocks,
     { type: 'text', text: 'Faça a QUALIFICAÇÃO e retorne APENAS este JSON preenchido (sem markdown, sem comentários):\n' + JSON.stringify(SCHEMA_QUALIFICACAO, null, 2) },
   ];
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetchComRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 4000, system: SYSTEM_QUALIFICACAO, messages: [{ role: 'user', content: userContent }] }),
@@ -1513,10 +1555,28 @@ const ehSim = (v: any) => typeof v === 'string' && v.trim().toUpperCase().starts
  * sem caixa. NÃO casa município goiano de propósito: a lei é do Estado, e cada
  * município legisla o próprio teto.
  */
+// E AS AUTARQUIAS E FUNDA\u00c7\u00d5ES ESTADUAIS GOIANAS \u2014 GOIASPREV, IPASGO, DETRAN-GO,
+// AGR, Agehab, Agrodefesa, Goinfra, UEG, PGE-GO. Elas eram o furo: s\u00e3o as
+// devedoras mais comuns em RPV de servidor goiano e escapavam do teto de 10
+// sal\u00e1rios m\u00ednimos, da reserva de INSS e do prazo do conv\u00eanio, porque o nome
+// n\u00e3o traz "Estado de Goi\u00e1s". A lei estadual alcan\u00e7a o Estado, suas autarquias
+// e funda\u00e7\u00f5es; a regra aqui alcan\u00e7a o mesmo. Munic\u00edpio continua fora \u2014 "Munic\u00edpio
+// de Goi\u00e2nia" e "Prefeitura de An\u00e1polis" n\u00e3o entram mesmo com "Goi\u00e1s" por perto.
 function ehEstadoDeGoias(...candidatos: unknown[]): boolean {
   return candidatos.some((c) => {
     const t = String(c ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    return /estado\s+d[eo]\s+goias/.test(t) || /fazenda\s+(publica\s+)?d[eo]\s+estado\s+d[eo]\s+goias/.test(t);
+    if (/municip|prefeitura|camara\s+municipal/.test(t)) return false;
+    return (
+      /estado\s+d[eo]\s+goias/.test(t) ||
+      /fazenda\s+(publica\s+)?(d[eo]\s+estado\s+d[eo]\s+)?goias/.test(t) ||
+      /goiasprev|goias\s+previd/.test(t) ||
+      /\bipasgo\b/.test(t) ||
+      /detran[\s\-\/]*go\b|departamento\s+estadual\s+de\s+transito\s+de\s+goias/.test(t) ||
+      /\bagr\b.*goi|agencia\s+goiana/.test(t) ||
+      /\bagehab\b|agrodefesa|\bgoinfra\b/.test(t) ||
+      /\bueg\b|universidade\s+estadual\s+de\s+goias/.test(t) ||
+      /procuradoria[\s-]*geral\s+d[eo]\s+estado\s+d[eo]\s+goias|\bpge[\s\-\/]*go\b/.test(t)
+    );
   });
 }
 
@@ -1685,6 +1745,17 @@ function dataPagamento(meses: number): string {
 
 
 /* ===== Teto da RPV por ente (tabela do jurídico). Alerta, NÃO impeditivo. ===== */
+/**
+ * O ANO DA TABELA DE TETOS E DO SALÁRIO MÍNIMO ABAIXO.
+ *
+ * Os dois são fixos no código e mudam todo janeiro. Sem data, viraria o ano e
+ * o alerta de teto sairia calculado com valor defasado sem ninguém saber. Com
+ * ela, o motor compara com o ano corrente e AVISA em toda análise até alguém
+ * atualizar — chato de propósito.
+ */
+const ANO_TETOS_RPV = 2026;
+/** Salário mínimo do ano acima (teto federal = 60 × SM). */
+const SALARIO_MINIMO = 1621;
 const TETOS_RPV: Record<string, { est: number | null; mun: number | null }> = {"PE": {"est": 64840.0, "mun": 48630.0}, "PA": {"est": 48630.0, "mun": 48630.0}, "AM": {"est": 32420.0, "mun": 24315.0}, "DF": {"est": 32420.0, "mun": null}, "MA": {"est": 32420.0, "mun": 8475.55}, "RJ": {"est": 32420.0, "mun": 16210.0}, "RN": {"est": 32420.0, "mun": 16210.0}, "MS": {"est": 27655.5, "mun": 10099.18}, "RR": {"est": 27557.0, "mun": 24315.0}, "MG": {"est": 27345.69, "mun": 8475.55}, "MT": {"est": 26010.0, "mun": 8475.55}, "PR": {"est": 24782.81, "mun": 8537.55}, "ES": {"est": 21827.28, "mun": 48630.0}, "SP": {"est": 16913.0, "mun": 31667.41}, "AP": {"est": 16210.0, "mun": 48630.0}, "BA": {"est": 16210.0, "mun": 11010.97}, "GO": {"est": 16210.0, "mun": 48630.0}, "PB": {"est": 16210.0, "mun": 8475.55}, "RS": {"est": 16210.0, "mun": 48630.0}, "RO": {"est": 16210.0, "mun": 16210.0}, "SC": {"est": 16210.0, "mun": 8475.55}, "TO": {"est": 16210.0, "mun": 24315.0}, "CE": {"est": 15746.8, "mun": 8475.55}, "AC": {"est": 11347.0, "mun": 16210.0}, "AL": {"est": 8475.55, "mun": 21073.0}, "PI": {"est": 8475.55, "mun": 11347.0}, "SE": {"est": 8475.55, "mun": 8475.55}};
 function _brlTeto(n: number): string {
   return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1697,16 +1768,17 @@ function _brlTeto(n: number): string {
 // teto do ENTE devedor. Sem ela, esses casos passavam sem verificação de teto —
 // em silêncio, que é o pior jeito de errar num alerta.
 function checarTetoRPV(esfera: string | undefined, tribunal: string | undefined, bruto: number, ufLida?: string | null): string | null {
-  const SM = 1621; // salário mínimo usado na tabela de tetos (teto federal = 60 x SM)
   const esf = String(esfera || '').toLowerCase();
-  const trib = String(tribunal || '').toUpperCase();
+  // Sem pontuação: "TJ-GO" e "TJ/GO" são o mesmo tribunal que "TJGO", e a IA
+  // escreve dos três jeitos.
+  const trib = String(tribunal || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!bruto || bruto <= 0) return null;
   let teto: number | null = null;
   let ref = '';
   // A esfera do ENTE manda. O tribunal só decide quando ela não veio: um
   // município executado na Justiça Federal continua com o teto municipal dele.
   if (esf.includes('federal') || (!esf && (/^TRF/.test(trib) || trib === 'STJ' || trib === 'STF'))) {
-    teto = 60 * SM; ref = 'federal (60 salários mínimos)';
+    teto = 60 * SALARIO_MINIMO; ref = 'federal (60 salários mínimos)';
   } else {
     const uf = normalizarUf(ufLida) ?? (/^TJ([A-Z]{2})$/.exec(trib)?.[1] ?? '');
     const t = TETOS_RPV[uf];
@@ -1909,6 +1981,45 @@ Deno.serve(async (req) => {
       avisosQualif = Array.isArray(body.avisos_qualificacao) ? body.avisos_qualificacao.map(String) : [];
     } else {
     const qualif = await extrairQualificacao(cfg.anthropic_api_key, contentBlocks);
+    const _limparUploads = async () => {
+      if (arquivos.length) { try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map(a => `${prefix}/${a.name}`)); } catch (_) { /* ok */ } }
+    };
+
+    // O PDF É DESTE PROCESSO? O número do card sobrepõe o que a IA leu nos
+    // autos — e sobrepunha em silêncio: anexo trocado de card produzia a
+    // análise completa do processo errado, com o número certo no nome do
+    // arquivo. Só compara quando os dois são CNJ inteiros (20 dígitos); "NÃO
+    // LOCALIZADO" e número parcial não acusam nada.
+    const _soDigitos = (v: unknown) => String(v ?? '').replace(/\D/g, '');
+    const _mascara = (d: string) => d.replace(/^(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})$/, '$1-$2.$3.$4.$5.$6');
+    const _cnjCard = _soDigitos(numeroProcesso);
+    const _cnjAutos = _soDigitos(qualif.numero_processo);
+    if (_cnjCard.length === 20 && _cnjAutos.length === 20 && _cnjCard !== _cnjAutos) {
+      await _limparUploads();
+      return errorResponse(
+        `O PDF anexado é do processo ${_mascara(_cnjAutos)}, mas o card é do processo ${_mascara(_cnjCard)}. ` +
+        'Anexo trocado de card? Confira o arquivo e o título do card antes de rodar de novo.',
+      );
+    }
+
+    // PRECATÓRIO NO FUNIL DE RPV. A qualificação já lia o tipo do requisitório,
+    // mas só para o piso de valor: um precatório expedido de R$ 300 mil seguia
+    // e era precificado com prazo de RPV — 8 meses para um crédito que a
+    // Fazenda paga em anos. Com o comercial triando mais volume, o erro de
+    // funil é esperado, e o preço errado não tem cara de erro.
+    if (
+      categoria !== 'Precatórios' &&
+      /precat/i.test(String(qualif.tipo_requisitorio ?? '')) &&
+      ehSim(qualif.requisitorio_expedido)
+    ) {
+      await _limparUploads();
+      return errorResponse(
+        `Este processo tem PRECATÓRIO expedido${qualif.oficio_localizacao ? ` (${String(qualif.oficio_localizacao)})` : ''}, não RPV. ` +
+        'O motor de RPV precificaria com prazo de meses um crédito que a Fazenda paga em anos. ' +
+        'Mova o card para o funil de Precatórios e analise lá.',
+      );
+    }
+
     if (numeroProcesso) qualif.numero_processo = numeroProcesso;
     const veredito = avaliarQualificacao(qualif);
     if (!veredito.aprovado) {
@@ -1938,12 +2049,28 @@ Deno.serve(async (req) => {
     }
     dados.originador = originador;
     if (numeroProcesso) dados.numero_processo = numeroProcesso;
-    // Garante que os valores financeiros sejam NÚMERO (não texto) — assim o formato de moeda (R$) da planilha funciona
-    dados.bruto_total = Number(dados.bruto_total) || 0;
-    dados.ir = Number(dados.ir) || 0;
-    dados.inss = Number(dados.inss) || 0;
-    dados.honorarios = Number(dados.honorarios) || 0;
-    dados.honorarios_sucumbenciais = Number(dados.honorarios_sucumbenciais) || 0;
+    // NÚMERO DE VERDADE, venha como vier. A IA — e o chat, que aceita texto — às
+    // vezes devolvem "84.320,10" ou "R$ 84.320,10" onde se pediu número.
+    // `Number("84.320,10")` é NaN, que virava ZERO: o bruto zerado dava "não
+    // localizei valor" (mensagem enganosa, o valor estava lá), e IR/INSS
+    // zerados faziam o líquido SUBIR em silêncio. parseNumeroFlex já existia
+    // para isto e não era usado aqui.
+    const numeroDoCampo = (v: unknown): number => {
+      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+      if (typeof v === 'string') return parseNumeroFlex(v.replace(/[^\d.,\-]/g, '')) ?? 0;
+      return 0;
+    };
+    const numeroOuNulo = (v: unknown): number | null => (v == null || v === '' ? null : numeroDoCampo(v));
+    dados.bruto_total = numeroDoCampo(dados.bruto_total);
+    dados.ir = numeroDoCampo(dados.ir);
+    dados.inss = numeroDoCampo(dados.inss);
+    dados.honorarios = numeroDoCampo(dados.honorarios);
+    dados.honorarios_sucumbenciais = numeroDoCampo(dados.honorarios_sucumbenciais);
+    dados.principal_liquido = numeroDoCampo(dados.principal_liquido);
+    dados.serventia_dias = numeroDoCampo(dados.serventia_dias);
+    dados.gabinete_dias = numeroDoCampo(dados.gabinete_dias);
+    dados.auditoria_bruto_conservador = numeroOuNulo(dados.auditoria_bruto_conservador);
+    dados.honorarios_contratuais_pct = numeroOuNulo(dados.honorarios_contratuais_pct);
 
     // 3b.1 O que está sendo cedido (escolha manual sobrepõe a detecção automática) + % de honorários
     const honAI = Number(dados.honorarios) || 0;          // honorários destacados pela contadoria (0 = sem destaque)
@@ -2277,6 +2404,17 @@ Deno.serve(async (req) => {
     const avisosBase: string[] = [...avisosQualif];
     const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0, ufCredito);
     if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
+    // TABELAS COM DATA. Tetos de RPV, salário mínimo e tabela do IRRF são fixos
+    // no código e mudam todo janeiro. Virou o ano, o motor diz em toda análise
+    // que está calculando com valor do ano anterior — chato de propósito, até
+    // alguém atualizar. Sem isto o defasado saía com a mesma cara do certo.
+    {
+      const _anoAgora = new Date().getFullYear();
+      if (_anoAgora !== ANO_TETOS_RPV)
+        avisosBase.push(`⚠️ TABELA DEFASADA: os tetos de RPV e o salário mínimo do sistema são de ${ANO_TETOS_RPV}, e estamos em ${_anoAgora}. O alerta de teto pode estar errado — peça a atualização da tabela.`);
+      if (_anoAgora !== ANO_TABELA_IRRF)
+        avisosBase.push(`⚠️ TABELA DEFASADA: a tabela do IRRF do sistema é de ${ANO_TABELA_IRRF}, e estamos em ${_anoAgora}. O IR dos honorários pode estar errado — peça a atualização da tabela.`);
+    }
     // PORCENTAGEM ESCRITA COMO FRAÇÃO é o erro de digitação provável: "0,30"
     // querendo dizer 30%. Não dá para corrigir sozinho — 0,30% é um número
     // legítimo, só improvável num contrato —, mas dá para dizer em voz alta,

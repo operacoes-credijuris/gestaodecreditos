@@ -349,9 +349,14 @@ Deno.serve(async (req: Request) => {
           : null,
         nota_texto: nota,
         notas,
-        // Procura em TODAS as anotações, não só na primeira: o bloco com o
-        // processo às vezes está numa nota posterior.
-        processo_cnj: extrairCnj(...notas.map((n) => n.texto), l.name),
+        // O TÍTULO PRIMEIRO, depois as anotações. O título é o cadastro do
+        // card — "[intermediador] - [cedente] - [nº] - …" —, e qualquer CNJ
+        // citado numa anotação (processo conexo, outro do mesmo cedente, um
+        // "ver também") vencia o dele. Como esse número sobrepõe o que a IA lê
+        // nos autos, o processo errado ia para o nome do arquivo e para a UF
+        // do cartório. As anotações continuam valendo, para o card antigo sem
+        // número no título.
+        processo_cnj: extrairCnj(l.name, ...notas.map((n) => n.texto)),
         // filter(Boolean) não estreita o tipo em TS, então o predicado é
         // explícito — a coluna é text[] not null e não aceita nulo no meio.
         tags: (l._embedded?.tags ?? [])
