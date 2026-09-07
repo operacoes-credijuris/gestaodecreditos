@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { lerNumeroCnj, resolverUf } from '../../../supabase/functions/_shared/tribunais.ts'
+import { lerNumeroCnj, resolverUf, municipioDoEnte } from '../../../supabase/functions/_shared/tribunais.ts'
 
 /**
  * O estado de um processo ESTADUAL, tirado do número CNJ.
@@ -61,5 +61,49 @@ describe('Justiça Estadual pelo número CNJ', () => {
   it('código de TJ que não existe não inventa estado', () => {
     // 8.28 não é tribunal nenhum.
     expect(resolverUf({ numero_processo: '0001234-56.2023.8.28.0001' })).toEqual({ uf: null, fonte: 'nenhuma' })
+  })
+})
+
+describe('qual município é o devedor', () => {
+  /**
+   * O teto da RPV municipal é de CADA município (CF, art. 100, §4º), e o número
+   * que o sistema herdou é o da CAPITAL. Sem isolar o nome, um crédito contra
+   * Anápolis era comparado com o teto de Goiânia — e o erro anda para os dois
+   * lados: passa sem alerta o que precisa de renúncia, ou alerta o que não
+   * precisa.
+   */
+  it('as redações que o ente costuma ter', () => {
+    expect(municipioDoEnte('Município de Anápolis')).toBe('Anápolis')
+    expect(municipioDoEnte('MUNICÍPIO DE SÃO PAULO')).toBe('SÃO PAULO')
+    expect(municipioDoEnte('Prefeitura Municipal de Caruaru')).toBe('Caruaru')
+    expect(municipioDoEnte('Prefeitura de Belo Horizonte')).toBe('Belo Horizonte')
+    expect(municipioDoEnte('Câmara Municipal de Goiânia')).toBe('Goiânia')
+    expect(municipioDoEnte('Fazenda Pública do Município de Recife')).toBe('Recife')
+  })
+
+  it('a UF colada no fim sai fora — o que se pesquisa é a cidade', () => {
+    expect(municipioDoEnte('Município de São Paulo/SP')).toBe('São Paulo')
+    expect(municipioDoEnte('Município de Campinas - SP')).toBe('Campinas')
+    expect(municipioDoEnte('Município de Anápolis (GO)')).toBe('Anápolis')
+  })
+
+  it('nomes com "dos" e "da" continuam inteiros', () => {
+    expect(municipioDoEnte('Município dos Barreiros')).toBe('Barreiros')
+    expect(municipioDoEnte('Município de Aparecida de Goiânia')).toBe('Aparecida de Goiânia')
+  })
+
+  it('ente que não é municipal devolve null', () => {
+    expect(municipioDoEnte('Estado de Goiás')).toBeNull()
+    expect(municipioDoEnte('União')).toBeNull()
+    expect(municipioDoEnte('GOIASPREV')).toBeNull()
+    expect(municipioDoEnte('')).toBeNull()
+    expect(municipioDoEnte(null)).toBeNull()
+  })
+
+  it('NÃO ADIVINHA: municipal sem cidade nomeada devolve null', () => {
+    // Devolver a capital aqui gravaria no cache o teto de um município que não
+    // é o do crédito, com cara de apurado.
+    expect(municipioDoEnte('Fazenda Pública Municipal')).toBeNull()
+    expect(municipioDoEnte('Prefeitura Municipal')).toBeNull()
   })
 })

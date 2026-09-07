@@ -197,3 +197,71 @@ export function resolverUf(dados: {
 
   return { uf: null, fonte: 'nenhuma' }
 }
+
+/**
+ * QUAL município é o devedor, quando o ente é municipal.
+ *
+ * Existe porque o teto da RPV municipal é de CADA MUNICÍPIO, por lei sua (CF,
+ * art. 100, §4º) — e o que estava guardado por estado era o número da CAPITAL.
+ * Comparar um crédito contra o Município de Anápolis com o teto de Goiânia é
+ * comparar com a lei errada, e o erro anda para os dois lados: passa sem alerta
+ * um crédito que precisa de renúncia, ou alerta um que não precisa.
+ *
+ * Devolve o nome LIMPO do município, ou null quando o ente não é municipal ou
+ * quando o nome não dá para isolar. Null não é falha: significa "use a
+ * referência da capital e diga que é referência".
+ *
+ * NÃO ADIVINHA. "Fazenda Pública Municipal" sem cidade nenhuma devolve null, e
+ * não a capital do estado — inventar o nome aqui produziria uma pesquisa de teto
+ * de um município que não é o do crédito, gravada no cache como se fosse.
+ */
+export function municipioDoEnte(ente: unknown): string | null {
+  const bruto = String(ente ?? '').replace(/\s+/g, ' ').trim()
+  if (!bruto) return null
+
+  const semAcento = (s: string) =>
+    s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const t = semAcento(bruto)
+  if (!/\bmunicip|prefeitura|camara municipal/.test(t)) return null
+
+  // Os prefixos que vêm antes do nome, do mais longo para o mais curto — senão
+  // "Prefeitura Municipal de X" casaria só o "Prefeitura" e sobraria
+  // "Municipal de X".
+  const PREFIXOS = [
+    /^(?:a\s+)?prefeitura\s+municipal\s+d[eoa]s?\s+/i,
+    /^(?:a\s+)?camara\s+municipal\s+d[eoa]s?\s+/i,
+    /^(?:o\s+)?municipio\s+d[eoa]s?\s+/i,
+    /^(?:a\s+)?fazenda\s+publica\s+d[oe]\s+municipio\s+d[eoa]s?\s+/i,
+    /^(?:a\s+)?prefeitura\s+d[eoa]s?\s+/i,
+  ]
+  // Comparado sem acento, recortado NO ORIGINAL: o nome tem de sair com os
+  // acentos que tem, porque é ele que vai para a busca web e para o aviso.
+  for (const re of PREFIXOS) {
+    const m = re.exec(t)
+    if (m) {
+      const nome = bruto.slice(m[0].length).trim()
+      return limparNomeMunicipio(nome)
+    }
+  }
+
+  // "Município de São Paulo/SP" com outra redação, ou "Fazenda Pública
+  // Municipal de Caruaru": pega o que vem depois do último "de" que segue a
+  // palavra municipal.
+  const m2 = /municip\w*\s+(?:d[eoa]s?\s+)?([^,;()]+)/i.exec(bruto)
+  if (m2) return limparNomeMunicipio(m2[1])
+  return null
+}
+
+/** Tira a UF colada, artigos soltos e pontuação de sobra do nome recortado. */
+function limparNomeMunicipio(s: string): string | null {
+  const nome = String(s ?? '')
+    // "São Paulo/SP", "Campinas - SP", "Anápolis (GO)" -> só a cidade.
+    .replace(/\s*[\/\-–—(]\s*[A-Za-z]{2}\s*\)?\s*$/, '')
+    .replace(/[.,;]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  // Uma palavra genérica sozinha não é nome de cidade.
+  if (!nome || nome.length < 2) return null
+  if (/^(municipal|municipio|prefeitura|publica|fazenda)$/i.test(nome)) return null
+  return nome
+}
