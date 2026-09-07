@@ -445,8 +445,31 @@ const TRAVA_MINUTOS = 7
 const REPOUSO_POR_FALHAS_MINUTOS = [30, 120, 720, 1440]
 const repousoAposFalhas = (falhas: number): number =>
   REPOUSO_POR_FALHAS_MINUTOS[Math.min(Math.max(falhas, 1) - 1, REPOUSO_POR_FALHAS_MINUTOS.length - 1)]
-/** Corta laço: 'achar' + dois atos + folga para tentar outro documento em cada. */
-const MAX_PASSOS = 8
+/**
+ * Corta laço: quantas invocações o levantamento de um estado pode gastar.
+ *
+ * A CONTA TEM DE CABER A LISTA DE DOCUMENTOS, e ela não cabia. A etapa 'achar'
+ * registra até TRÊS endereços, e cada ato tenta um por invocação; o pior caminho
+ * legítimo é:
+ *
+ *   achar                                        1
+ *   escritura: 3 documentos + a transição        4
+ *   registro:  3 documentos + a consolidação     4
+ *   ----------------------------------------------
+ *                                                9
+ *
+ * Com o teto em 8, um estado que precisasse dos três documentos trabalhava
+ * quinze minutos e desistia na etapa do REGISTRO, com a mensagem inútil "deu
+ * voltas demais sem completar" — depois de já ter lido a escritura. O 8 estava
+ * dimensionado para quando a extração tinha uma abertura só e raramente trocava
+ * de documento; ao dar três aberturas por etapa, eu tornei o teto alcançável e
+ * não o acompanhei.
+ *
+ * 12 dá folga de três para as mortes por tempo, que consomem passo sem avançar.
+ * Quem corta o caso perdido continua sendo MAX_MORTES, que é o sintoma certo:
+ * documento que não se lê. Passo demais só gasta invocação barata.
+ */
+const MAX_PASSOS = 12
 /**
  * Quantas etapas podem MORRER (começar e nunca escrever) antes de desistir.
  *
