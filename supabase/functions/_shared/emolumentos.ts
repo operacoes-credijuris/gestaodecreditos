@@ -282,7 +282,13 @@ DUAS EXCEÇÕES A ISSO, E ELAS VALEM MUITO. Abrir um PDF custa caro: ele é proc
 (b) Se o PDF certo for um ato normativo grande e existir o ANEXO SOLTO com só as tabelas, registre o anexo, não o ato inteiro.
 Diga em "descricao" se o endereço é HTML com a tabela ou PDF, e quantas páginas o PDF tem, se a busca disser.
 
-Devolva de um a três endereços, do mais provável para o menos, chamando registrar_documentos uma única vez. Seja rápido: poucas buscas, sem abrir arquivos.`
+VOCÊ TEM UMA (1) ABERTURA DE DOCUMENTO, E ELA SERVE A UMA COISA SÓ: transformar página em arquivo. Se o melhor endereço que a busca deu for uma página de apresentação — daquelas que só dizem "confira a tabela vigente" e trazem um link —, ABRA ESSA PÁGINA e registre o endereço do ARQUIVO que está dentro dela, não o da página.
+
+Isto é o que mais importa aqui, e o motivo é concreto: quem vai extrair as faixas tem orçamento curto de aberturas. Se você registrar a página de apresentação, ele gasta a vez dele descobrindo o link que você já tinha na mão, e o levantamento do estado inteiro falha por falta de cota.
+
+PREFIRA O ANO CORRENTE. Tribunal costuma manter no ar a tabela do ano passado ao lado da nova; registre a de ${ano} e, se só existir a anterior, diga isso em "descricao".
+
+Devolva de um a três endereços, do mais provável para o menos, chamando registrar_documentos uma única vez. Seja rápido: poucas buscas, e no máximo uma abertura.`
 }
 
 function promptAto(uf: string, ano: number, ato: 'escritura' | 'registro', docs: string[]): string {
@@ -295,7 +301,13 @@ function promptAto(uf: string, ano: number, ato: 'escritura' | 'registro', docs:
 DOCUMENTO(S) JÁ LOCALIZADO(S):
 ${docs.map((d, i) => `${i + 1}. ${d}`).join('\n')}
 
-Use web_fetch para abrir o primeiro. Se ele não tiver a tabela (for uma página de apresentação, por exemplo), tente o próximo, ou faça UMA busca para achar o anexo — mas não gaste tempo: o documento certo provavelmente está na lista.
+SEU ORÇAMENTO: TRÊS aberturas de documento e UMA busca. Gaste-o assim, e diga em "observacao" o que usou.
+1ª abertura: o endereço acima. Se ele for a tabela, acabou.
+2ª: se o primeiro for uma PÁGINA DE APRESENTAÇÃO — só diz "confira a tabela vigente" e traz um link —, abra o ARQUIVO que ela indica. É o caso mais comum de falha, e é para ele que a segunda existe.
+3ª: um documento alternativo, se o segundo também não servir.
+A busca é o último recurso, para achar o anexo quando nenhum endereço serviu.
+
+NÃO REPITA UMA ABERTURA QUE FALHOU. Tentar o mesmo endereço de novo consome a cota e devolve o mesmo erro; passe para o próximo passo da lista acima.
 
 Quem te chama vai aplicar essa regra a MUITOS valores diferentes, sem te consultar de novo. Por isso o que se pede não é um valor: é a TABELA e as taxas que incidem sobre ela.
 
@@ -625,7 +637,11 @@ export async function executarPasso(
   try {
     if (p.etapa === 'achar') {
       await gravar(svc, uf, ano, { progresso: { ...p, em_curso: { etapa: 'achar', desde: new Date().toISOString() } } })
-      const r = await conversar(apiKey, promptAchar(uf, ano), FERRAMENTA_ACHAR, 5, 0, 2000)
+      // 5 buscas e UMA abertura. A abertura entrou porque sem ela esta etapa
+      // registra o que a busca mostrar — e o que a busca mostra, num tribunal,
+      // é a página de apresentação, não o anexo. Registrada a página, a etapa
+      // seguinte gasta a cota dela descobrindo o link que esta já tinha à mão.
+      const r = await conversar(apiKey, promptAchar(uf, ano), FERRAMENTA_ACHAR, 5, 1, 2000)
       const docs = Array.isArray(r?.documentos) ? (r!.documentos as Array<Record<string, unknown>>) : []
       p.documentos = docs.map((d) => String(d?.url ?? '')).filter((u) => /^https?:\/\//i.test(u)).slice(0, 3)
       p.doc = 0
@@ -671,7 +687,19 @@ export async function executarPasso(
     // UM DOCUMENTO POR INVOCAÇÃO, sem busca e sem retomada. É o orçamento que
     // caber no teto de tempo — dar três documentos e deixar o modelo tentar
     // todos na mesma invocação era o que estourava.
-    const r = await conversar(apiKey, promptAto(uf, ano, ato, [p.documentos[p.doc]]), FERRAMENTA_ATO, 0, 1, 8000)
+    // TRÊS aberturas e uma busca, e não uma abertura e nenhuma busca.
+    //
+    // Com uma só, qualquer endereço que fosse página de apresentação condenava
+    // o estado: a etapa abria a página, enxergava ali o link do PDF de verdade
+    // e recebia "Server tool use limit exceeded" em toda tentativa seguinte.
+    // Foi o que aconteceu em PE — o Ato 1556/2025 localizado e nunca aberto.
+    // O prompt já prometia "tente o próximo, ou faça UMA busca", e o orçamento
+    // proibia as duas coisas: promessa que o código não cumpre é defeito.
+    //
+    // Três aberturas agora custam menos que uma antes: cada uma vem capada em
+    // 40 mil tokens (ver max_content_tokens), e antes uma só trazia o ato
+    // normativo inteiro, página a página, sem teto nenhum.
+    const r = await conversar(apiKey, promptAto(uf, ano, ato, [p.documentos[p.doc]]), FERRAMENTA_ATO, 1, 3, 8000)
 
     const fontes = Array.isArray(r?.fontes)
       ? (r!.fontes as unknown[]).map(String).filter((f) => /^https?:\/\//i.test(f))
