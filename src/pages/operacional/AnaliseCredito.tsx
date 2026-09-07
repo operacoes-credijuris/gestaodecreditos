@@ -227,30 +227,52 @@ const RODAPE_TRIBUNAL =
  */
 async function extrairTextoDoPdf(
   url: string,
-): Promise<{ texto: string; paginas: number }> {
+): Promise<{ texto: string; paginas: number; paginasTexto: string[]; bytes: ArrayBuffer }> {
   const resp = await fetch(url)
   if (!resp.ok) throw new Error(`Falha ao baixar o PDF da Kommo (HTTP ${resp.status}).`)
   const buf = await resp.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise
-  let texto = ''
+  // O pdf.js toma posse do buffer que recebe; a cópia é para o chamador poder
+  // renderizar páginas depois (processo digitalizado vira imagem para a IA).
+  const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise
+  // POR PÁGINA, e não colado: é o que permite escolher o que vai para a IA
+  // quando o processo não cabe inteiro (ver lib/textoDoProcesso.ts), e medir
+  // página a página o que é imagem e o que é texto.
+  const paginasTexto: string[] = []
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p)
     const content = await page.getTextContent()
-    texto += (content.items as Array<{ str?: string }>).map((it) => it.str ?? '').join(' ') + '\n'
+    paginasTexto.push((content.items as Array<{ str?: string }>).map((it) => it.str ?? '').join(' '))
   }
-  return { texto, paginas: pdf.numPages }
+  return { texto: paginasTexto.join('\n'), paginas: pdf.numPages, paginasTexto, bytes: buf }
 }
 
 export interface ArquivoLido {
   nome: string
   texto: string
   paginas: number
+  /** O texto de cada página, na ordem. Vazio quando o arquivo não é PDF legível. */
+  paginasTexto?: string[]
+  /**
+   * As páginas SEM texto útil (1-based): digitalizadas, dentro de um arquivo
+   * que tem texto no resto. É o caso híbrido — processo digital com a conta da
+   * contadoria escaneada —, que a densidade média não vê.
+   */
+  paginasImagem?: number[]
+  /** Os bytes do PDF, para renderizar páginas digitalizadas como imagem. */
+  bytes?: ArrayBuffer
   /** Caracteres de conteúdo por página, descontado o rodapé do tribunal. */
   densidade: number
   /** Densidade baixa: é digitalização. pdf.js lê texto, não imagem. */
   digitalizado: boolean
   erro?: string
 }
+
+/**
+ * Uma página com menos que isto de conteúdo (sem o rodapé do tribunal) é
+ * imagem. Página de texto real tem centenas de caracteres; página digitalizada
+ * tem o rodapé e nada.
+ */
+const CONTEUDO_MINIMO_PAGINA = 80
 
 // Uma página de petição tem 1500 a 3500 caracteres. Uma página digitalizada, sem
 // o rodapé, tem quase zero. 150 fica longe dos dois extremos, e o erro que ele
@@ -306,10 +328,13 @@ async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
   const lidos: ArquivoLido[] = []
   for (const a of lista) {
     try {
-      const { texto, paginas } = await extrairTextoDoPdf(a.download)
+      const { texto, paginas, paginasTexto, bytes } = await extrairTextoDoPdf(a.download)
       const limpo = texto.trim()
       const conteudo = limpo.replace(RODAPE_TRIBUNAL, '').replace(/\s+/g, ' ').trim()
       const densidade = paginas > 0 ? Math.round(conteudo.length / paginas) : 0
+      const paginasImagem = paginasTexto
+        .map((t, i) => (t.replace(RODAPE_TRIBUNAL, '').replace(/\s+/g, ' ').trim().length < CONTEUDO_MINIMO_PAGINA ? i + 1 : 0))
+        .filter((n) => n > 0)
       lidos.push({
         nome: a.nome,
         // Guarda o texto ORIGINAL: o rodapé sai da CONTA, não do conteúdo. Um CPF
@@ -317,6 +342,9 @@ async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
         // perderia dado de verdade.
         texto: limpo,
         paginas,
+        paginasTexto,
+        paginasImagem,
+        bytes,
         densidade,
         digitalizado: paginas > 0 && densidade < DENSIDADE_MINIMA,
       })
@@ -942,6 +970,16 @@ export default function AnaliseCredito() {
     })
 
   function onAnalisar(lead: KommoLead) {
+    // O CACHE DE ANEXOS CAI ao abrir a análise. Ele existe para a due diligence
+    // e a análise dividirem o mesmo download; mas o comercial anexa o cálculo
+    // corrigido e o operador reabre a janela sem sincronizar — e a análise lia
+    // o anexo antigo, sem nada dizer. Abrir a análise é o momento em que ler
+    // fresco vale mais que economizar um download.
+    setArquivosCache((p) => {
+      const { [lead.kommo_lead_id]: _descartado, ...resto } = p
+      void _descartado
+      return resto
+    })
     setRpvLead(lead)
   }
 

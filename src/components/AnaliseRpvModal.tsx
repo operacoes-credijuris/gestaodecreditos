@@ -37,6 +37,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Loading } from '@/components/ui/Table'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
+import { montarTextoDoProcesso, type PaginaLida } from '@/lib/textoDoProcesso'
 
 /** Fração -> "35,20%": formatPercent espera pontos percentuais. */
 const pctBR = (fracao: number) => formatPercent(fracao * 100)
@@ -556,24 +557,46 @@ export function AnaliseRpvModal({
     void (async () => {
       try {
         const arquivos = await lerArquivos()
-        // O ÚLTIMO PDF, como a análise de RPV sempre fez — e não "o último com
-        // texto": com o cálculo digitalizado, o filtro faria a IA precificar a
-        // petição inicial em silêncio, valor da causa no lugar do crédito.
-        const pdfs = arquivos.filter((a) => a.paginas > 0 || a.texto.length > 0 || !a.erro)
-        const alvo = pdfs[pdfs.length - 1] ?? arquivos[arquivos.length - 1]
-        if (!alvo || alvo.texto.length === 0) {
-          const porque = alvo?.erro
-            ? alvo.erro
-            : alvo?.digitalizado
-              ? `tem ${alvo.paginas} página(s) e ${alvo.densidade} caractere(s) por página: parece digitalizado`
-              : 'não trouxe texto selecionável'
-          throw new Error(`O último PDF do card ("${alvo?.nome ?? '?'}") ${porque}.`)
+        // TODOS OS PDFs COM TEXTO, e não só o último.
+        //
+        // Era um PDF só — o último que a Kommo listasse —, e isso errava de
+        // três jeitos: processo em dois arquivos analisava um; RG anexado por
+        // último fazia a análise nem começar ("parece digitalizado"); petição
+        // inicial por último fazia a IA precificar o valor da causa. Agora vai
+        // tudo o que tem texto, cada arquivo com cabeçalho e cada página com
+        // marcador, e o que NÃO deu para ler é dito à IA pelo nome — para ela
+        // saber que a conta existe e está numa peça que não veio, em vez de
+        // concluir que não há conta.
+        //
+        // Quando não cabe, a escolha é por PÁGINA (lib/textoDoProcesso.ts):
+        // identificação no começo, andamento atual no fim, e no meio o que fala
+        // de conta, homologação, requisitório e sentença — não mais 60% do
+        // início, que é petição inicial e documento pessoal.
+        const legiveis = arquivos.filter((a) => a.texto.trim().length > 0)
+        const ilegiveis = arquivos.filter((a) => a.texto.trim().length === 0)
+        if (legiveis.length === 0) {
+          const porque = arquivos
+            .map((a) => `"${a.nome}": ${a.erro ?? (a.digitalizado ? `${a.paginas} página(s), ${a.densidade} caractere(s) por página — digitalizado` : 'sem texto selecionável')}`)
+            .join('; ')
+          throw new Error(`Nenhum anexo do card tem texto para ler. ${porque || 'Nenhum PDF encontrado.'}`)
         }
-        let t = alvo.texto
-        const MAX = 360000
-        if (t.length > MAX) {
-          const ini = Math.floor(MAX * 0.6)
-          t = t.slice(0, ini) + '\n\n[...TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO...]\n\n' + t.slice(t.length - (MAX - ini))
+        const paginas: PaginaLida[] = legiveis.flatMap((a) =>
+          (a.paginasTexto ?? [a.texto]).map((texto, i) => ({ arquivo: a.nome, numero: i + 1, texto })),
+        )
+        const montado = montarTextoDoProcesso(paginas, 360000)
+        let t = montado.texto
+        if (ilegiveis.length) {
+          t += '\n\nANEXOS DO CARD QUE NÃO DEU PARA LER (o dado pode estar neles — NÃO conclua que a informação não existe nos autos): ' +
+            ilegiveis.map((a) => `"${a.nome}" (${a.erro ?? (a.digitalizado ? `${a.paginas} páginas digitalizadas` : 'sem texto')})`).join('; ')
+        }
+        // Páginas de imagem dentro de arquivos legíveis (o caso híbrido: a
+        // conta escaneada no meio do processo digital) — dito à IA pelo número.
+        const hibridas = legiveis
+          .filter((a) => (a.paginasImagem?.length ?? 0) > 0)
+          .map((a) => `"${a.nome}": páginas ${a.paginasImagem!.slice(0, 40).join(', ')}${a.paginasImagem!.length > 40 ? '…' : ''}`)
+        if (hibridas.length) {
+          t += '\n\nPÁGINAS DIGITALIZADAS (sem texto) DENTRO DOS ARQUIVOS ACIMA: ' + hibridas.join('; ') +
+            '. Se a conta ou o requisitório estiverem nelas, devolva null nos valores e diga isso em origem_valores.'
         }
         setPasso('Qualificando e precificando…')
         const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {

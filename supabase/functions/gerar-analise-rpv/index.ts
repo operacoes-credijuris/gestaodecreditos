@@ -1612,10 +1612,16 @@ function capNotas(txt: string): string {
     txt.slice(txt.length - tail);
 }
 
-// Corta textos muito grandes mantendo INÍCIO e FINAL (a inicial fica no começo; cálculos da contadoria e expedição costumam ficar no fim).
+// Corta textos muito grandes mantendo INÍCIO e FINAL.
+//
+// REDE DE SEGURANÇA, não a regra: quem escolhe o que vai é o navegador, página
+// a página (src/lib/textoDoProcesso.ts), e o texto chega aqui já dentro do
+// teto. Este corte só pega quem chamar a função por fora. Por isso a divisão é
+// 30/70 e não 50/50: o começo é petição inicial e documento pessoal, e o que
+// precifica — conta da contadoria, homologação, requisitório — está no fim.
 function capTextoDoc(txt: string): string {
   if (txt.length <= MAX_DOC_CHARS) return txt;
-  const head = Math.floor(MAX_DOC_CHARS * 0.5);
+  const head = Math.floor(MAX_DOC_CHARS * 0.3);
   const tail = MAX_DOC_CHARS - head;
   return txt.slice(0, head) +
     `\n\n[...${MARCA_CORTE} — documento muito grande; exibindo apenas o início e o final...]\n\n` +
