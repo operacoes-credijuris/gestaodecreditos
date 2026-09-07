@@ -167,6 +167,14 @@ export interface RespostaAnaliseRpv {
   cedente?: string
   modelo?: string
   esfera?: string
+  /**
+   * O resultado do Portão 1, devolvido pela ação 'qualificar'.
+   *
+   * Viaja de volta na chamada de 'analisar' para o servidor NÃO refazer a
+   * leitura do processo: são duas requisições justamente porque as duas
+   * leituras não cabiam no mesmo relógio de 150 s. Opaco para a tela.
+   */
+  qualificacao?: unknown
   /** A esfera do ENTE devedor (federal/estadual/municipal), para a pesquisa do teto. */
   ente_esfera?: string
   /** O município devedor, quando há um: o teto da RPV municipal é de cada município. */
@@ -686,12 +694,35 @@ export function AnaliseRpvModal({
             if (falhas.length) t += ` Não foi possível enviar: ${falhas.slice(0, 5).join('; ')}.`
           }
         }
-        setPasso('Qualificando e precificando…')
+        // DUAS REQUISIÇÕES, UMA POR LEITURA — e não é capricho.
+        //
+        // O servidor lê o processo duas vezes: o portão de qualificação e a
+        // análise. As duas numa requisição só deixaram de caber no teto de
+        // 150 s de tempo de parede, e o pedido passou a voltar HTTP 504 antes de
+        // terminar. Separadas, cada uma tem o próprio relógio.
+        //
+        // Não custa o dobro: o cache de prompt da Anthropic vive do lado dela,
+        // então a segunda chamada — que sai em seguida — lê o processo do cache
+        // em vez de reprocessá-lo. E a qualificação vai pronta no corpo, para o
+        // servidor não refazer o portão.
+        setPasso('Qualificando o crédito…')
+        const q = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
+          acao: 'qualificar',
+          texto: t,
+          job_id: jobId,
+          notas_kommo: notasKommo,
+          ...corpoCard,
+        })
+        // Reprovado no portão: não há segunda etapa, e a janela mostra o motivo.
+        if (q.reprovado) { setAtual(q); return }
+
+        setPasso('Lendo os valores e precificando…')
         const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
           acao: 'analisar',
           texto: t,
           job_id: jobId,
           notas_kommo: notasKommo,
+          qualificacao: q.qualificacao,
           ...corpoCard,
         })
         setAtual(r)

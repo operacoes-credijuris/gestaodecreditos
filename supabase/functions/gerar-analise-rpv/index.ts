@@ -2128,8 +2128,9 @@ Deno.serve(async (req) => {
     //   'reprecificar' refaz as contas com a tabela de emolumentos que chegou
     //               depois, SEM chamar a IA — custa milissegundos
     //   'salvar'    recebe a análise final, gera a planilha e sobe no Drive
-    const acao: 'analisar' | 'refinar' | 'reprecificar' | 'salvar' | null =
-      body.acao === 'analisar' || body.acao === 'refinar' || body.acao === 'reprecificar' || body.acao === 'salvar'
+    //   'qualificar' le o processo e roda SO o Portao 1 — ver a nota em 3b
+    const acao: 'qualificar' | 'analisar' | 'refinar' | 'reprecificar' | 'salvar' | null =
+      body.acao === 'qualificar' || body.acao === 'analisar' || body.acao === 'refinar' || body.acao === 'reprecificar' || body.acao === 'salvar'
         ? body.acao
         : null;
     const notasKommo: string = String(body.notas_kommo ?? '').trim();
@@ -2178,7 +2179,7 @@ Deno.serve(async (req) => {
     // trabalham sobre a análise que já veio pronta do navegador — exigir o texto
     // aqui era o HTTP 400 "Faltou o texto do processo": eu tirei o reenvio do
     // texto (que estourava o tempo da requisição) e esqueci esta guarda.
-    const precisaDoProcesso = acao === 'analisar' || acao === null;
+    const precisaDoProcesso = acao === 'qualificar' || acao === 'analisar' || acao === null;
     if (!precisaDoProcesso) {
       // Nada a ler. O corte de conteúdo foi registrado na análise original e
       // viaja dentro de `dados`, então o aviso não se perde nas rodadas seguintes.
@@ -2343,7 +2344,11 @@ Deno.serve(async (req) => {
       }
       avisosQualif = Array.isArray(body.avisos_qualificacao) ? body.avisos_qualificacao.map(String) : [];
     } else {
-    const qualif = await extrairQualificacao(cfg.anthropic_api_key, contentBlocks);
+    // O PORTAO JA PODE TER RODADO, numa requisicao anterior — ver a nota logo
+    // acima do bloco 3b. Vindo pronto, nao se le de novo.
+    const qualif = (body.qualificacao && typeof body.qualificacao === 'object')
+      ? body.qualificacao
+      : await extrairQualificacao(cfg.anthropic_api_key, contentBlocks);
 
     // O PDF É DESTE PROCESSO? O número do card sobrepõe o que a IA leu nos
     // autos — e sobrepunha em silêncio: anexo trocado de card produzia a
@@ -2394,6 +2399,37 @@ Deno.serve(async (req) => {
       });
     }
     avisosQualif = veredito.avisos;  // alertas da qualificação (seguem para a resposta final)
+
+    // ================================================================
+    // AQUI TERMINA A PRIMEIRA REQUISIÇÃO — e é por isso que ela existe.
+    // ================================================================
+    //
+    // Ler o processo inteiro duas vezes (qualificação e análise) numa
+    // requisição só deixou de caber: o teto de tempo de parede é de 150 s no
+    // plano gratuito, e o pedido passou a voltar HTTP 504 antes de terminar.
+    // Antes cabia, o que quer dizer que cada leitura custava menos de 75 s;
+    // uma leitura mais lenta derruba a soma sem derrubar a parcela.
+    //
+    // Afinar o prompt não resolve isso, só adia. Cada leitura passa a ter o
+    // PRÓPRIO relógio: o navegador chama 'qualificar', recebe o veredito e só
+    // então chama 'analisar' mandando a qualificação pronta — que não se refaz.
+    // É o mesmo remédio que a consulta de cartório e o levantamento de
+    // emolumentos já tomaram, pelo mesmo motivo.
+    //
+    // NÃO CUSTA O DOBRO DE TOKENS: o material é idêntico e o cache de prompt da
+    // Anthropic vive do lado dela, não do nosso, então a segunda requisição —
+    // que chega em segundos — lê o processo do cache.
+    //
+    // OS UPLOADS FICAM. Quem limpa é a segunda etapa, que ainda precisa das
+    // imagens. Reprovado no portão, a limpeza acontece acima e nada continua.
+    if (acao === 'qualificar') {
+      return jsonResponse({
+        ok: true,
+        qualificacao: qualif,
+        avisos_qualificacao: veredito.avisos,
+        avisos: veredito.avisos,
+      });
+    }
 
     // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
     dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
