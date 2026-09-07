@@ -1,0 +1,150 @@
+import { describe, it, expect } from 'vitest'
+import { classificarParcelaCedida, lerTituloCard } from '../kommo'
+
+/**
+ * Os campos do crédito escritos no TÍTULO do card.
+ *
+ * Testado porque o título vai virar a única fonte. O comercial vem encurtando o
+ * cadastro, e o destino é o título carregar tudo — intermediador, cedente,
+ * número, parcela cedida e percentual de honorários —, sem anotação nenhuma.
+ *
+ * O que faz isto perigoso é que erro aqui NÃO FALHA: a análise sai completa e
+ * plausível, precificando a verba errada. Ler por posição bastaria se nenhum
+ * nome de empresa tivesse " - " dentro; como têm, o que ancora a leitura é o
+ * número CNJ.
+ */
+
+const FORMATO_NOVO = 'ACME Cessões - Maria da Silva - 0001234-56.2023.8.17.0001 - principal - 30%'
+
+describe('lerTituloCard', () => {
+  it('lê os cinco campos do formato novo', () => {
+    expect(lerTituloCard(FORMATO_NOVO)).toEqual({
+      intermediador: 'ACME Cessões',
+      cedente: 'Maria da Silva',
+      numero: '0001234-56.2023.8.17.0001',
+      parcelaCedida: 'principal',
+      honorariosPct: '30',
+    })
+  })
+
+  it('nome com " - " dentro sobrevive inteiro, e não desloca os campos', () => {
+    // O caso que a leitura posicional erra em silêncio: "SILVA - ADVOGADOS"
+    // empurraria a parcela cedida para o lugar do número, e a análise sairia
+    // precificando outra verba.
+    const t = lerTituloCard(
+      'ACME - SILVA - ADVOGADOS ASSOCIADOS - 0001234-56.2023.8.17.0001 - honorários sucumbenciais - 20%',
+    )
+    expect(t.intermediador).toBe('ACME')
+    expect(t.cedente).toBe('SILVA - ADVOGADOS ASSOCIADOS')
+    expect(t.parcelaCedida).toBe('honorários sucumbenciais')
+    expect(t.honorariosPct).toBe('20')
+  })
+
+  it('aceita o número sem máscara e devolve pontuado', () => {
+    const t = lerTituloCard('ACME - Maria da Silva - 00012345620238170001 - principal')
+    expect(t.numero).toBe('0001234-56.2023.8.17.0001')
+    expect(t.cedente).toBe('Maria da Silva')
+  })
+
+  it('parcela e porcentagem em qualquer ordem', () => {
+    const a = lerTituloCard('ACME - Maria - 0001234-56.2023.8.17.0001 - 30% - principal')
+    const b = lerTituloCard('ACME - Maria - 0001234-56.2023.8.17.0001 - principal - 30%')
+    expect(a.parcelaCedida).toBe('principal')
+    expect(a.honorariosPct).toBe('30')
+    expect(a.honorariosPct).toBe(b.honorariosPct)
+  })
+
+  it('porcentagem com decimal, com vírgula ou com ponto', () => {
+    const v = lerTituloCard('A - B - 0001234-56.2023.8.17.0001 - principal - 12,5%')
+    const p = lerTituloCard('A - B - 0001234-56.2023.8.17.0001 - principal - 12.5%')
+    // Prontas para Number(): porcentagem não tem separador de milhar, então o
+    // ponto é decimal e não há o que descartar.
+    expect(v.honorariosPct).toBe('12.5')
+    expect(p.honorariosPct).toBe('12.5')
+    expect(Number(v.honorariosPct)).toBe(12.5)
+  })
+
+  it('porcentagem sem o sinal também vale', () => {
+    expect(lerTituloCard('A - B - 0001234-56.2023.8.17.0001 - principal - 30').honorariosPct).toBe('30')
+  })
+
+  it('cedente chamado "Principal" não vira parcela cedida', () => {
+    // As palavras de verba só são procuradas DEPOIS do número.
+    const t = lerTituloCard('ACME - Principal Logística Ltda - 0001234-56.2023.8.17.0001')
+    expect(t.cedente).toBe('Principal Logística Ltda')
+    expect(t.parcelaCedida).toBe('')
+  })
+
+  it('o formato antigo, de três partes, continua lido', () => {
+    // Cards de hoje: intermediador, cedente e número. Sem parcela nem
+    // porcentagem no título — quem os traz é a anotação.
+    expect(lerTituloCard('ACME - Maria da Silva - 0001234-56.2023.8.17.0001')).toEqual({
+      intermediador: 'ACME',
+      cedente: 'Maria da Silva',
+      numero: '0001234-56.2023.8.17.0001',
+      parcelaCedida: '',
+      honorariosPct: '',
+    })
+  })
+
+  it('título sem número cai na leitura posicional das duas primeiras partes', () => {
+    // Sem a âncora não há como saber onde o nome termina, então não se adivinha:
+    // devolve o que é seguro e deixa o resto vazio.
+    expect(lerTituloCard('ACME - Maria da Silva - alguma coisa')).toEqual({
+      intermediador: 'ACME',
+      cedente: 'Maria da Silva',
+      numero: '',
+      parcelaCedida: '',
+      honorariosPct: '',
+    })
+  })
+
+  it('título só com o número não inventa intermediador', () => {
+    const t = lerTituloCard('0001234-56.2023.8.17.0001')
+    expect(t.intermediador).toBe('')
+    expect(t.cedente).toBe('')
+    expect(t.numero).toBe('0001234-56.2023.8.17.0001')
+  })
+
+  it('tolera vazio, nulo e espaço sobrando', () => {
+    expect(lerTituloCard('')).toEqual({
+      intermediador: '', cedente: '', numero: '', parcelaCedida: '', honorariosPct: '',
+    })
+    expect(lerTituloCard(null).intermediador).toBe('')
+    expect(lerTituloCard('  ACME  -  Maria  - 0001234-56.2023.8.17.0001 ').cedente).toBe('Maria')
+  })
+})
+
+/**
+ * O par que decide o preço: a parcela lida do título tem de chegar classificada.
+ *
+ * Sem isto tudo caía em 'auto', e 'auto' assume que o principal está no negócio
+ * — uma cessão só de sucumbenciais era precificada como principal + honorários.
+ */
+describe('a parcela cedida do título chega classificada', () => {
+  const CASOS: Array<[string, string]> = [
+    ['principal', 'principal'],
+    ['crédito principal', 'principal'],
+    ['principal + honorários', 'ambos'],
+    ['honorários contratuais + sucumbenciais', 'honorarios'],
+    ['honorários sucumbenciais', 'sucumbenciais'],
+    ['honorários contratuais', 'contratuais'],
+    // Cadastro pela metade continua bloqueando a análise, no título como na
+    // anotação: chutar contratuais perde o negócio, chutar as duas paga verba
+    // que fica com o advogado.
+    ['honorários', 'indefinido'],
+  ]
+
+  for (const [escrito, esperado] of CASOS) {
+    it(`"${escrito}" -> ${esperado}`, () => {
+      const t = lerTituloCard(`ACME - Maria - 0001234-56.2023.8.17.0001 - ${escrito} - 30%`)
+      expect(t.parcelaCedida).toBe(escrito)
+      expect(classificarParcelaCedida(t.parcelaCedida)).toBe(esperado)
+    })
+  }
+
+  it('título sem parcela nenhuma devolve "auto" — e aí quem decide é a contadoria', () => {
+    const t = lerTituloCard('ACME - Maria - 0001234-56.2023.8.17.0001')
+    expect(classificarParcelaCedida(t.parcelaCedida)).toBe('auto')
+  })
+})

@@ -27,7 +27,7 @@
 // código, como RPV sempre foi.
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from './supabase'
-import { normalizarBusca } from './format'
+import { formatCNJ, normalizarBusca } from './format'
 import type { KommoLead, KommoAnaliseInterna } from './types'
 
 // Conta do Kommo. O subdomínio não é segredo — é o que aparece na URL.
@@ -573,6 +573,92 @@ export function telasRpvDesalinhadas(etapas: EtapaKommo[]): DefTela[] {
   if (doRpv.length === 0) return []
   const existentes = new Set(doRpv.map((e) => e.status_id))
   return TELAS.filter((t) => !existentes.has(t.statusId))
+}
+
+// ---------- O título do card ----------
+
+/** O separador dos campos no título, como o comercial escreve. */
+const SEP_TITULO = ' - '
+
+/** CNJ pontuado: NNNNNNN-DD.AAAA.J.TR.OOOO. */
+const RE_CNJ_MASCARA = /\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/
+/** Vinte dígitos seguidos: o mesmo número, digitado sem máscara. */
+const RE_CNJ_CRU = /\b\d{20}\b/
+/** Uma porcentagem e nada mais: "30", "30%", "12,5%". */
+const RE_SO_PORCENTAGEM = /^(\d{1,3}(?:[.,]\d+)?)\s*%?$/
+/** Palavra que só aparece em nome de verba, nunca em nome de pessoa ou empresa. */
+const RE_VERBA = /principal|honor|sucumb|contratu/i
+
+/** O CNJ que houver num pedaço de texto, sempre pontuado. '' quando não há. */
+function cnjNoTexto(t: string): string {
+  const m = t.match(RE_CNJ_MASCARA)
+  if (m) return m[0]
+  const cru = t.match(RE_CNJ_CRU)
+  return cru ? formatCNJ(cru[0]) : ''
+}
+
+/** O que o título do card diz. Campo ausente vem como ''. */
+export interface DadosDoTitulo {
+  intermediador: string
+  cedente: string
+  /** CNJ pontuado. */
+  numero: string
+  /** O texto cru da parcela cedida — quem classifica é classificarParcelaCedida. */
+  parcelaCedida: string
+  /** Porcentagem pronta para Number(): "30", "12.5". */
+  honorariosPct: string
+}
+
+const TITULO_VAZIO: DadosDoTitulo = {
+  intermediador: '', cedente: '', numero: '', parcelaCedida: '', honorariosPct: '',
+}
+
+/**
+ * Os campos do crédito escritos no título do card.
+ *
+ * O comercial vem encurtando o cadastro, e o destino disso é o título carregar
+ * tudo: "[intermediador] - [cedente] - [nº] - [parcela cedida] - [% honorários]".
+ *
+ * LIDO POR CONTEÚDO, NÃO POR POSIÇÃO, e a diferença importa. Ler por posição
+ * significa que um nome com " - " dentro — "SILVA - ADVOGADOS ASSOCIADOS" —
+ * empurra todos os campos seguintes uma casa, e a parcela cedida passa a ser
+ * lida do lugar do número. Isso não dá erro: precifica a verba errada e a
+ * análise sai completa.
+ *
+ * Então o que ancora tudo é o NÚMERO CNJ, que é inconfundível. Antes dele estão
+ * o intermediador (a primeira parte) e o cedente (o que sobra até o número,
+ * remontado com o separador, o que devolve o nome inteiro); depois dele estão a
+ * parcela cedida e a porcentagem, cada uma reconhecida pelo que é e em qualquer
+ * ordem. As palavras de verba só são procuradas DEPOIS do número, para um
+ * cedente chamado "Principal Logística" não virar parcela cedida.
+ *
+ * Título sem número reconhecível cai na leitura posicional antiga — as duas
+ * primeiras partes —, porque sem a âncora não há como saber onde o nome termina.
+ */
+export function lerTituloCard(titulo: unknown): DadosDoTitulo {
+  const partes = String(titulo ?? '').split(SEP_TITULO).map((p) => p.trim())
+  const iCnj = partes.findIndex((p) => cnjNoTexto(p))
+  if (iCnj < 0) {
+    return { ...TITULO_VAZIO, intermediador: partes[0] ?? '', cedente: partes[1] ?? '' }
+  }
+
+  let parcelaCedida = ''
+  let honorariosPct = ''
+  for (const p of partes.slice(iCnj + 1)) {
+    const m = p.match(RE_SO_PORCENTAGEM)
+    // Vírgula é o decimal aqui, e ponto também: porcentagem não tem separador
+    // de milhar, então não há o que descartar.
+    if (m && !honorariosPct) honorariosPct = m[1].replace(',', '.')
+    else if (RE_VERBA.test(p) && !parcelaCedida) parcelaCedida = p
+  }
+
+  return {
+    intermediador: iCnj > 0 ? partes[0] : '',
+    cedente: iCnj > 1 ? partes.slice(1, iCnj).join(SEP_TITULO) : '',
+    numero: cnjNoTexto(partes[iCnj]),
+    parcelaCedida,
+    honorariosPct,
+  }
 }
 
 // ---------- A anotação do comercial ----------

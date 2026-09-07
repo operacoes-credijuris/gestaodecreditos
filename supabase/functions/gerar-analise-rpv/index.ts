@@ -1988,6 +1988,14 @@ Deno.serve(async (req) => {
       dados.tipo_credito = 'Honorários sucumbenciais — apenas';
     } else {
       // Automático: o destaque da contadoria decide se há honorários a comprar.
+      //
+      // NADA DITO NÃO É "PRINCIPAL" — é campo em branco. O automático assume o
+      // principal porque é o caso comum, mas assumir em silêncio custa caro:
+      // uma cessão só de honorários sai precificada com o crédito principal
+      // dentro, e a análise não tem como saber que errou. Agora que a parcela
+      // cedida também pode vir no TÍTULO do card, campo em branco é
+      // esquecimento provável — então ele avisa.
+      dados._parcela_nao_informada = true;
       const comHonorarios = honAI > 0 || honorariosPct != null;
       verbas = { principal: true, contratuais: comHonorarios, sucumbenciais: comHonorarios };
       dados.tipo_credito = comHonorarios ? 'Crédito principal + Honorários' : 'Crédito principal — apenas';
@@ -2182,6 +2190,12 @@ Deno.serve(async (req) => {
     const avisosBase: string[] = [...avisosQualif];
     const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0, ufCredito);
     if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
+    if (dados._parcela_nao_informada)
+      avisosBase.push(
+        `⚠️ PARCELA CEDIDA NÃO INFORMADA no card: precifiquei ${String(dados.tipo_credito ?? '')}, ` +
+        'que é a suposição do automático. Se a cessão for só de honorários, o preço inclui o crédito principal ' +
+        'e está muito alto — escreva a parcela cedida no card e rode de novo.',
+      );
     // Região que cobre vários estados sem seção judiciária nos autos, ou UF que
     // contradiz a região: some sem isto, e o efeito visível seria só o cartório
     // faltando, sem dizer que a causa é não se saber de que estado é o crédito.

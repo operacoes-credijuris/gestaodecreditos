@@ -61,6 +61,7 @@ import {
   type AcaoTela,
   type SubdivisaoPrecatorio,
   classificarParcelaCedida,
+  lerTituloCard,
   valorDoCampo,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
@@ -83,7 +84,7 @@ import {
   type RespostaAnaliseRpv,
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
-import { formatCNJ, formatDate } from '@/lib/format'
+import { formatDate } from '@/lib/format'
 import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -127,9 +128,6 @@ type ResultadoJuridico = {
   erro?: string
 }
 
-/** Vinte dígitos seguidos: o número CNJ escrito sem a máscara. */
-const RE_CNJ_CRU = /\b\d{20}\b/
-
 function lerCardCredijuris(lead: KommoLead) {
   const notas =
     lead.notas && lead.notas.length > 0
@@ -137,18 +135,23 @@ function lerCardCredijuris(lead: KommoLead) {
       : (lead.nota_texto ?? '')
   const pegar = (re: RegExp) => valorDoCampo(notas.match(re)?.[1] ?? '')
 
-  // O NÚMERO TAMBÉM SE LÊ DO TÍTULO, e sem depender da máscara.
+  // O TÍTULO É A OUTRA FONTE DE TUDO, e não só do nome.
   //
-  // `processo_cnj` vem da kommo-sync, que só reconhece o formato pontuado
-  // (NNNNNNN-DD.AAAA.J.TR.OOOO) e procura nas anotações e no título. Com o
-  // número no título e a linha "PROCESSO:" fora da anotação, um número
-  // digitado sem máscara deixava a tela sem número nenhum — e a análise caía
-  // na leitura da IA, que pode divergir. Vinte dígitos seguidos são
-  // inequívocos: aceita e formata.
-  const cruNoTitulo = (lead.nome ?? '').match(RE_CNJ_CRU)?.[0] ?? ''
+  // O comercial vem encurtando o cadastro, e o destino é o título carregar os
+  // campos que a anotação carregava: número, parcela cedida e percentual de
+  // honorários. A ANOTAÇÃO CONTINUA VENCENDO onde existe — é a declaração mais
+  // explícita, e os cards antigos a têm —, mas onde ela falta o título responde.
+  //
+  // Sem isto, título com a parcela cedida e nenhuma anotação classificava tudo
+  // como "auto", e "auto" assume que o principal está no negócio: uma cessão só
+  // de sucumbenciais era precificada como principal + honorários, em silêncio.
+  const doTitulo = lerTituloCard(lead.nome)
+
+  // `processo_cnj` vem da kommo-sync, que só reconhece o formato pontuado;
+  // lerTituloCard aceita também os vinte dígitos crus e formata.
   const numero = (
     lead.processo_cnj ??
-    (pegar(/PROCESSO:\s*([0-9.\-]+)/i) || (cruNoTitulo ? formatCNJ(cruNoTitulo) : ''))
+    (pegar(/PROCESSO:\s*([0-9.\-]+)/i) || doTitulo.numero)
   ).trim()
   const tipo = pegar(/TIPO:\s*(.+)/i)
 
@@ -176,15 +179,19 @@ function lerCardCredijuris(lead: KommoLead) {
         `(o funil manda). Se estiver errado, mova o card no Kommo.`
       : null
 
-  const partesTitulo = (lead.nome ?? '').split(' - ')
-  const intermediador = (partesTitulo[0] ?? '').trim()
-  const cedente =
-    pegar(/CEDENTE:\s*(.+)/i) || (partesTitulo.length >= 2 ? partesTitulo[1].trim() : '')
+  const intermediador = doTitulo.intermediador
+  const cedente = pegar(/CEDENTE:\s*(.+)/i) || doTitulo.cedente
 
-  const tipo_aquisicao = classificarParcelaCedida(pegar(/PARCELA CEDIDA:\s*(.+)/i))
+  const tipo_aquisicao = classificarParcelaCedida(
+    pegar(/PARCELA CEDIDA:\s*(.+)/i) || doTitulo.parcelaCedida,
+  )
 
   const honMatch = notas.match(/HONOR[ÁA]RIOS?[^:\n]*:\s*([\d.,]+)\s*%/i)
-  const honorarios_pct = honMatch ? honMatch[1].replace(/\./g, '').replace(',', '.') : ''
+  // Na anotação o ponto é separador de milhar (o resto do cadastro é assim);
+  // no título, lerTituloCard já normalizou — porcentagem não tem milhar.
+  const honorarios_pct = honMatch
+    ? honMatch[1].replace(/\./g, '').replace(',', '.')
+    : doTitulo.honorariosPct
 
   return {
     numero,
