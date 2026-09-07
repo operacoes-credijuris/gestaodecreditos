@@ -1,21 +1,27 @@
-// A anotação que a análise escreve de volta no card do Kommo.
+// As anotações que a análise escreve de volta no card do Kommo.
 //
 // É O ÚNICO PEDAÇO DA ANÁLISE QUE O COMERCIAL LÊ. Ele não abre a planilha nem a
 // janela de análise: vê o card, e o que estiver escrito ali é o resultado. Por
 // isso o texto tem forma fixa e curta, e por isso ele mora aqui, num módulo puro
 // que o vitest alcança — o formato é regra de negócio, não detalhe de tela.
 //
-// Três blocos, separados por linha em branco (o Kommo não formata nada, então a
-// linha em branco é o que dá estrutura):
+// DUAS ANOTAÇÕES SEPARADAS, e não uma com duas partes:
 //
-//   1. o veredito e o link do Drive
-//   2. a FICHA DO CRÉDITO, nos mesmos rótulos que o comercial usa no cadastro
-//   3. os ALERTAS, e só eles
+//   1. a FICHA DO CRÉDITO — o que foi negociado, nos rótulos do cadastro
+//   2. o VEREDITO — aprovado, o link do Drive e os alertas
 //
-// A ficha repetir os rótulos do cadastro é de propósito: a anotação vira a
-// conferência do card. Se ele escreveu "PARCELA CEDIDA: principal" e a ficha
-// volta "Crédito principal + Honorários", o cadastro estava errado — e isso se
-// lê sem abrir nada.
+// Separadas porque duram coisas diferentes. A ficha é o retrato do crédito e
+// serve de referência para o resto da conversa no card; o veredito é um evento,
+// e cada nova análise gera outro. Numa anotação só, reanalisar o mesmo crédito
+// repetia a ficha inteira a cada vez.
+//
+// A ficha repetir os rótulos do cadastro é de propósito: ela vira a conferência
+// do card. Se o comercial escreveu "PARCELA CEDIDA: principal" e a ficha volta
+// "Crédito principal + Honorários", o cadastro estava errado — e isso se lê sem
+// abrir nada.
+//
+// A ASSINATURA VAI SÓ NO VEREDITO. Quem analisou é atributo do ato, não do
+// crédito: a ficha do mesmo processo é a mesma independentemente de quem rodou.
 import { formatBRL, formatPercent } from './format'
 
 /** Os campos do cadastro do comercial, preenchidos com o que a análise leu dos autos. */
@@ -41,6 +47,8 @@ export interface EntradaAnotacao {
   link?: string
   ficha?: FichaDoCredito
   avisos?: unknown
+  /** Quem rodou a análise. Assina o veredito; a ficha não leva assinatura. */
+  analista?: string
 }
 
 /**
@@ -95,19 +103,36 @@ export function linhasDaFicha(ficha: FichaDoCredito | undefined): string[] {
   return pares.filter(([, v]) => v.trim()).map(([k, v]) => `${k}: ${v}`)
 }
 
-/** O texto inteiro da anotação, pronto para o card. */
-export function anotacaoDaAnalise(e: EntradaAnotacao): string {
+/** Prefixo de autoria, quando se sabe quem rodou. */
+const assinado = (analista: string | undefined, texto: string) =>
+  analista?.trim() ? `(${analista.trim()}) ${texto}` : texto
+
+/**
+ * As anotações a escrever no card, NA ORDEM em que devem ser postadas.
+ *
+ * Uma lista, e não um par, porque o número de anotações depende do caso:
+ * crédito recusado gera SÓ o motivo — não há ficha de um crédito que não foi
+ * precificado, e "VALOR CEDIDO" de uma recusa não quer dizer nada. Quem chama
+ * percorre a lista e posta uma por uma, sem saber quantas são.
+ */
+export function anotacoesDaAnalise(e: EntradaAnotacao): string[] {
   if (e.reprovado) {
     const motivo =
       e.motivo || (e.motivos ?? []).join(' ') || 'Crédito reprovado na análise.'
-    return `❌ RECUSADO na análise automática.\nMotivo: ${motivo}`
+    return [assinado(e.analista, `❌ RECUSADO na análise automática.\nMotivo: ${motivo}`)]
   }
-  const blocos = [
+
+  const ficha = linhasDaFicha(e.ficha).join('\n')
+  const veredito = [
     e.link
       ? `✅ APROVADO na análise automática.\nPlanilha e análise no Drive: ${e.link}`
       : '✅ APROVADO na análise automática. (Confira a pasta do Drive.)',
-    linhasDaFicha(e.ficha).join('\n'),
     alertasDaAnotacao(e.avisos).join('\n'),
   ]
-  return blocos.filter((b) => b.trim()).join('\n\n')
+    .filter((b) => b.trim())
+    .join('\n\n')
+
+  // Ficha primeiro: no feed do Kommo ela fica acima do veredito, que é a ordem
+  // de leitura — o que é o crédito, e depois o que se decidiu sobre ele.
+  return [ficha, assinado(e.analista, veredito)].filter((t) => t.trim())
 }

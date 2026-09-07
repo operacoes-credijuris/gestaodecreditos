@@ -84,7 +84,7 @@ import {
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
 import { formatCNJ, formatDate } from '@/lib/format'
-import { anotacaoDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
+import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { useAuth } from '@/contexts/AuthContext'
@@ -353,11 +353,11 @@ async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
   return lidos
 }
 
-// Escreve o resultado da análise no card do Kommo. O TEXTO mora em
+// Escreve o resultado da análise no card do Kommo. Os TEXTOS moram em
 // lib/anotacaoKommo.ts — é o único pedaço da análise que o comercial lê, então
 // o formato é regra de negócio e fica onde dá para testar.
 async function anotarResultadoNaKommo(leadId: number, r: ResultadoAnalise, analista: string) {
-  const texto = `(${analista}) ` + anotacaoDaAnalise({
+  const textos = anotacoesDaAnalise({
     reprovado: r.reprovado,
     motivo: r.motivo,
     motivos: r.motivos,
@@ -367,11 +367,20 @@ async function anotarResultadoNaKommo(leadId: number, r: ResultadoAnalise, anali
       '',
     ficha: r.ficha,
     avisos: r.avisos,
+    analista,
   })
-  try {
-    await invokeFunction('kommo-anotar', { lead_id: leadId, texto })
-  } catch {
-    /* a anotação é um extra: se falhar, não trava o resultado que já apareceu na tela */
+  // UMA POR VEZ, e não em paralelo: o feed do Kommo ordena pela chegada, e duas
+  // chamadas simultâneas trocariam a ficha com o veredito na tela do comercial.
+  //
+  // Cada uma no seu try: a anotação é um extra e não trava o resultado que já
+  // apareceu na tela — mas falhar na ficha não é motivo para o veredito, que é
+  // o que carrega o link do Drive, também deixar de ser escrito.
+  for (const texto of textos) {
+    try {
+      await invokeFunction('kommo-anotar', { lead_id: leadId, texto })
+    } catch {
+      /* segue para a próxima */
+    }
   }
 }
 

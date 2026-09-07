@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   alertasDaAnotacao,
-  anotacaoDaAnalise,
+  anotacoesDaAnalise,
   linhasDaFicha,
   MAX_ALERTAS,
 } from '../anotacaoKommo'
@@ -87,56 +87,86 @@ describe('alertasDaAnotacao', () => {
   })
 })
 
-describe('anotacaoDaAnalise', () => {
-  it('monta os três blocos, separados por linha em branco', () => {
-    const t = anotacaoDaAnalise({
-      link: 'https://drive.google.com/x',
-      ficha: FICHA_CHEIA,
-      avisos: ['⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: some à mão.', 'uma nota qualquer'],
-    })
-    expect(t).toBe(
-      '✅ APROVADO na análise automática.\n' +
-        'Planilha e análise no Drive: https://drive.google.com/x\n' +
-        '\n' +
-        'TIPO: RPV\n' +
+describe('anotacoesDaAnalise', () => {
+  const APROVADA = {
+    link: 'https://drive.google.com/x',
+    ficha: FICHA_CHEIA,
+    avisos: ['⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: some à mão.', 'uma nota qualquer'],
+    analista: 'Pedro',
+  }
+
+  it('são DUAS anotações: a ficha e depois o veredito', () => {
+    const t = anotacoesDaAnalise(APROVADA)
+    expect(t).toHaveLength(2)
+    expect(t[0]).toBe(
+      'TIPO: RPV\n' +
         'PROCESSO: 0001234-56.2023.8.17.0001\n' +
         'TRIBUNAL: TJPE\n' +
         'CEDENTE: Maria Aparecida da Silva\n' +
         'ENTIDADE DEVEDORA: Estado de Pernambuco\n' +
         'PARCELA CEDIDA: Crédito principal + Honorários\n' +
         'VALOR CEDIDO: R$ 45.000,00\n' +
-        'HONORÁRIOS C.: 30,00%\n' +
+        'HONORÁRIOS C.: 30,00%',
+    )
+    expect(t[1]).toBe(
+      '(Pedro) ✅ APROVADO na análise automática.\n' +
+        'Planilha e análise no Drive: https://drive.google.com/x\n' +
         '\n' +
         '⚠️ CARTÓRIO NÃO INCLUÍDO NO PREÇO: some à mão.',
     )
   })
 
-  it('sem alerta, não sobra linha em branco no fim', () => {
-    const t = anotacaoDaAnalise({ link: 'https://x', ficha: { tipo: 'RPV' }, avisos: [] })
-    expect(t).toBe(
-      '✅ APROVADO na análise automática.\nPlanilha e análise no Drive: https://x\n\nTIPO: RPV',
-    )
-    expect(t.endsWith('\n')).toBe(false)
+  it('a assinatura vai só no veredito', () => {
+    // Quem analisou é atributo do ato, não do crédito: a ficha do mesmo
+    // processo é a mesma independentemente de quem rodou.
+    const [ficha, veredito] = anotacoesDaAnalise(APROVADA)
+    expect(ficha.startsWith('(')).toBe(false)
+    expect(veredito.startsWith('(Pedro) ')).toBe(true)
+  })
+
+  it('sem analista, o veredito sai sem prefixo — e não com um vazio', () => {
+    const [, veredito] = anotacoesDaAnalise({ ...APROVADA, analista: undefined })
+    expect(veredito.startsWith('✅')).toBe(true)
+  })
+
+  it('sem alerta, o veredito termina no link', () => {
+    const t = anotacoesDaAnalise({ link: 'https://x', ficha: { tipo: 'RPV' }, avisos: [] })
+    expect(t).toEqual([
+      'TIPO: RPV',
+      '✅ APROVADO na análise automática.\nPlanilha e análise no Drive: https://x',
+    ])
   })
 
   it('sem link, diz para conferir a pasta em vez de deixar link vazio', () => {
-    expect(anotacaoDaAnalise({ ficha: { tipo: 'RPV' } })).toContain('(Confira a pasta do Drive.)')
+    const [, veredito] = anotacoesDaAnalise({ ficha: { tipo: 'RPV' } })
+    expect(veredito).toContain('(Confira a pasta do Drive.)')
   })
 
-  it('reprovado é só o motivo — não tem ficha nem alerta', () => {
-    const t = anotacaoDaAnalise({
+  it('ficha vazia não gera anotação em branco', () => {
+    // Análise que não achou nada nos autos não deve escrever uma nota muda no
+    // card — o veredito sai sozinho.
+    const t = anotacoesDaAnalise({ link: 'https://x', ficha: {} })
+    expect(t).toHaveLength(1)
+    expect(t[0]).toContain('APROVADO')
+  })
+
+  it('recusado é UMA anotação só, e é o motivo', () => {
+    // Não há ficha de um crédito que não foi precificado: "VALOR CEDIDO" de
+    // uma recusa não quer dizer nada.
+    const t = anotacoesDaAnalise({
       reprovado: true,
       motivos: ['Valor abaixo de R$ 20 mil (mínimo exigido para RPV).'],
       ficha: FICHA_CHEIA,
       avisos: ['⚠️ nem deveria aparecer'],
+      analista: 'Pedro',
     })
-    expect(t).toBe(
-      '❌ RECUSADO na análise automática.\n' +
+    expect(t).toEqual([
+      '(Pedro) ❌ RECUSADO na análise automática.\n' +
         'Motivo: Valor abaixo de R$ 20 mil (mínimo exigido para RPV).',
-    )
+    ])
   })
 
-  it('reprovado sem motivo declarado ainda diz alguma coisa', () => {
-    expect(anotacaoDaAnalise({ reprovado: true })).toContain('Crédito reprovado na análise.')
+  it('recusado sem motivo declarado ainda diz alguma coisa', () => {
+    expect(anotacoesDaAnalise({ reprovado: true })[0]).toContain('Crédito reprovado na análise.')
   })
 })
