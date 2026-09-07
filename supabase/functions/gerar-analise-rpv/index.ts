@@ -2227,6 +2227,22 @@ Deno.serve(async (req) => {
     // O CARD FOI VAGO E OS AUTOS RESPONDERAM. Não é alerta — não há decisão a
     // tomar —, mas quem confere precisa saber que a verba foi deduzida do
     // processo e não lida do cadastro.
+    // O % DO CARD E O DESTACADO DOS AUTOS DISCORDANDO.
+    //
+    // A contadoria costuma destacar o contratual (art. 22 §4º da Lei 8.906/94),
+    // então os dois números existem quase sempre — e o do card VENCE, o que era
+    // uma troca silenciosa de um valor dos autos por um valor de cadastro.
+    //
+    // Os dois podem estar certos: o destacado é o que o requisitório vai pagar
+    // ao advogado, o percentual é o que o contrato diz. Divergirem quer dizer
+    // que o destaque saiu sobre outra base, que o contrato mudou, ou que alguém
+    // digitou errado. Não dá para escolher por conta — dá para não silenciar.
+    if (honorariosPct != null && honAI > 0 && Math.abs(honorariosCalc - honAI) > Math.max(100, honAI * 0.02))
+      avisosBase.push(
+        `⚠️ HONORÁRIOS CONTRATUAIS DIVERGENTES: o card diz ${pct(honorariosPct / 100)} (= ${brl(honorariosCalc)}) ` +
+        `e a contadoria destacou ${brl(honAI)} nos autos. PRECIFIQUEI PELO CARD. ` +
+        'Confira qual vale: o destacado é o que o requisitório paga ao advogado; o percentual é o do contrato.',
+      );
     if (dados._honorarios_resolvido)
       avisosBase.push(
         `O card diz apenas "honorários"; o processo tem só os ${dados._honorarios_resolvido}, ` +
