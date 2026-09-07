@@ -61,6 +61,7 @@ import {
   type AcaoTela,
   type SubdivisaoPrecatorio,
   classificarParcelaCedida,
+  valorDoCampo,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -82,7 +83,7 @@ import {
   type RespostaAnaliseRpv,
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
-import { formatDate } from '@/lib/format'
+import { formatCNJ, formatDate } from '@/lib/format'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { useAuth } from '@/contexts/AuthContext'
@@ -123,14 +124,29 @@ type ResultadoJuridico = {
   erro?: string
 }
 
+/** Vinte dígitos seguidos: o número CNJ escrito sem a máscara. */
+const RE_CNJ_CRU = /\b\d{20}\b/
+
 function lerCardCredijuris(lead: KommoLead) {
   const notas =
     lead.notas && lead.notas.length > 0
       ? lead.notas.map((n) => n.texto).join('\n')
       : (lead.nota_texto ?? '')
-  const pegar = (re: RegExp) => (notas.match(re)?.[1] ?? '').trim()
+  const pegar = (re: RegExp) => valorDoCampo(notas.match(re)?.[1] ?? '')
 
-  const numero = (lead.processo_cnj ?? pegar(/PROCESSO:\s*([0-9.\-]+)/i)).trim()
+  // O NÚMERO TAMBÉM SE LÊ DO TÍTULO, e sem depender da máscara.
+  //
+  // `processo_cnj` vem da kommo-sync, que só reconhece o formato pontuado
+  // (NNNNNNN-DD.AAAA.J.TR.OOOO) e procura nas anotações e no título. Com o
+  // número no título e a linha "PROCESSO:" fora da anotação, um número
+  // digitado sem máscara deixava a tela sem número nenhum — e a análise caía
+  // na leitura da IA, que pode divergir. Vinte dígitos seguidos são
+  // inequívocos: aceita e formata.
+  const cruNoTitulo = (lead.nome ?? '').match(RE_CNJ_CRU)?.[0] ?? ''
+  const numero = (
+    lead.processo_cnj ??
+    (pegar(/PROCESSO:\s*([0-9.\-]+)/i) || (cruNoTitulo ? formatCNJ(cruNoTitulo) : ''))
+  ).trim()
   const tipo = pegar(/TIPO:\s*(.+)/i)
 
   // A CATEGORIA VEM DO FUNIL, não do texto da anotação.

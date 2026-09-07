@@ -575,6 +575,31 @@ export function telasRpvDesalinhadas(etapas: EtapaKommo[]): DefTela[] {
   return TELAS.filter((t) => !existentes.has(t.statusId))
 }
 
+// ---------- A anotação do comercial ----------
+
+/**
+ * Um ponto-e-vírgula seguido de outro rótulo — "; HONORÁRIOS C.:".
+ *
+ * A anotação é texto livre, e o comercial escreve os campos NUMA LINHA SÓ.
+ * Capturar do rótulo até o fim da linha fazia "PARCELA CEDIDA: principal;
+ * HONORÁRIOS C.: 30%" valer "principal; HONORÁRIOS C.: 30%" — e a palavra
+ * "honorários" ali dentro classificava uma cessão de PRINCIPAL como PRINCIPAL
+ * + HONORÁRIOS. O erro não aparece em lugar nenhum: a análise sai completa,
+ * com uma verba a mais no preço — justamente a que fica com o advogado.
+ *
+ * O PONTO-E-VÍRGULA SOZINHO NÃO CORTA: "honorários contratuais +
+ * sucumbenciais; sem principal" é um valor só. O que corta é o rótulo depois
+ * dele — dois-pontos precedidos de poucas palavras.
+ */
+const RE_PROXIMO_ROTULO = /;\s*[^:;\n]{1,40}:/
+
+/** O valor de um campo da anotação: do rótulo até o fim da linha ou até o próximo rótulo. */
+export function valorDoCampo(bruto: unknown): string {
+  const t = String(bruto ?? '')
+  const m = t.match(RE_PROXIMO_ROTULO)
+  return (m ? t.slice(0, m.index) : t).trim()
+}
+
 /**
  * O que está sendo cedido, lido do "PARCELA CEDIDA" das anotações do card.
  *
