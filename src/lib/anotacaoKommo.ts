@@ -23,6 +23,8 @@ export interface FichaDoCredito {
   tipo?: string
   processo?: string
   tribunal?: string
+  /** O titular do crédito, lido dos autos. */
+  cedente?: string
   entidade_devedora?: string
   parcela_cedida?: string
   /** O valor do crédito NEGOCIADO — a soma dos líquidos das verbas do negócio, não o preço. */
@@ -84,6 +86,7 @@ export function linhasDaFicha(ficha: FichaDoCredito | undefined): string[] {
     ['TIPO', f.tipo ?? ''],
     ['PROCESSO', f.processo ?? ''],
     ['TRIBUNAL', f.tribunal ?? ''],
+    ['CEDENTE', f.cedente ?? ''],
     ['ENTIDADE DEVEDORA', f.entidade_devedora ?? ''],
     ['PARCELA CEDIDA', f.parcela_cedida ?? ''],
     ['VALOR CEDIDO', f.valor_cedido ? formatBRL(f.valor_cedido) : ''],

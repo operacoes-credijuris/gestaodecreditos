@@ -18,6 +18,7 @@ const FICHA_CHEIA = {
   tipo: 'RPV',
   processo: '0001234-56.2023.8.17.0001',
   tribunal: 'TJPE',
+  cedente: 'Maria Aparecida da Silva',
   entidade_devedora: 'Estado de Pernambuco',
   parcela_cedida: 'Crédito principal + Honorários',
   valor_cedido: 45000,
@@ -30,6 +31,7 @@ describe('linhasDaFicha', () => {
       'TIPO',
       'PROCESSO',
       'TRIBUNAL',
+      'CEDENTE',
       'ENTIDADE DEVEDORA',
       'PARCELA CEDIDA',
       'VALOR CEDIDO',
@@ -99,6 +101,7 @@ describe('anotacaoDaAnalise', () => {
         'TIPO: RPV\n' +
         'PROCESSO: 0001234-56.2023.8.17.0001\n' +
         'TRIBUNAL: TJPE\n' +
+        'CEDENTE: Maria Aparecida da Silva\n' +
         'ENTIDADE DEVEDORA: Estado de Pernambuco\n' +
         'PARCELA CEDIDA: Crédito principal + Honorários\n' +
         'VALOR CEDIDO: R$ 45.000,00\n' +

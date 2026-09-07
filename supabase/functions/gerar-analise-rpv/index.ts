@@ -2422,6 +2422,9 @@ Deno.serve(async (req) => {
         tipo: categoria === 'Precatórios' ? 'Precatório' : 'RPV',
         processo: numeroProcesso || String(dados.numero_processo ?? ''),
         tribunal: String(dados.tribunal ?? '').trim(),
+        // O TITULAR DO CRÉDITO LIDO DOS AUTOS, e não o do card: é o mesmo nome
+        // que nomeia a pasta no Drive, então a ficha e o arquivo não divergem.
+        cedente: credorTitulo,
         entidade_devedora: enteDevedor,
         parcela_cedida: String(dados.tipo_credito ?? '').trim(),
         // O VALOR DO CRÉDITO NEGOCIADO, e não o preço: a soma dos líquidos
