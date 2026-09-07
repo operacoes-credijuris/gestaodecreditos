@@ -580,6 +580,22 @@ export function telasRpvDesalinhadas(etapas: EtapaKommo[]): DefTela[] {
 /** O separador dos campos no título, como o comercial escreve. */
 const SEP_TITULO = ' - '
 
+/**
+ * O separador na leitura: o hífen entre espaços, e as variantes tipográficas.
+ *
+ * O TRAVESSÃO ENTRA porque não é outro formato — é o mesmo caractere depois de
+ * passar pela correção automática do teclado ou de um colar do Word. Exigir o
+ * hífen exato fazia o título inteiro virar uma parte só, e daí não se lê nem o
+ * intermediador (que é obrigatório): a análise nem começava.
+ *
+ * OS ESPAÇOS EM VOLTA SÃO OBRIGATÓRIOS, e é isso que salva o número: o CNJ tem
+ * um hífen dentro ("0001234-56"), e sem exigir espaço ele seria separador.
+ */
+const RE_SEPARADOR = /\s+[-–—]\s+/
+
+/** Uma porcentagem colada no fim de uma frase: "principal + honorários 30%". */
+const RE_PORCENTAGEM_NO_FIM = /(\d{1,3}(?:[.,]\d+)?)\s*%\s*$/
+
 /** CNJ pontuado: NNNNNNN-DD.AAAA.J.TR.OOOO. */
 const RE_CNJ_MASCARA = /\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/
 /** Vinte dígitos seguidos: o mesmo número, digitado sem máscara. */
@@ -636,20 +652,48 @@ const TITULO_VAZIO: DadosDoTitulo = {
  * primeiras partes —, porque sem a âncora não há como saber onde o nome termina.
  */
 export function lerTituloCard(titulo: unknown): DadosDoTitulo {
-  const partes = String(titulo ?? '').split(SEP_TITULO).map((p) => p.trim())
+  const cru = String(titulo ?? '').split(RE_SEPARADOR).map((p) => p.trim())
+
+  // A PORCENTAGEM É INCONFUNDÍVEL EM QUALQUER POSIÇÃO: nenhum nome de pessoa ou
+  // de empresa é um número solto de até três dígitos. Então ela é colhida antes
+  // de tudo e RETIRADA da lista — escrita fora do lugar combinado, ela deixa de
+  // entrar no nome do cedente, que era o efeito de lê-la pela posição. Até três
+  // dígitos, de propósito: assim um ano ("2023") não é confundido com ela.
+  //
+  // Vírgula é o decimal, e ponto também: porcentagem não tem separador de
+  // milhar, então não há o que descartar.
+  let honorariosPct = ''
+  const partes: string[] = []
+  cru.forEach((p, i) => {
+    const m = i > 0 && !honorariosPct ? p.match(RE_SO_PORCENTAGEM) : null
+    if (m) honorariosPct = m[1].replace(',', '.')
+    else partes.push(p)
+  })
+
   const iCnj = partes.findIndex((p) => cnjNoTexto(p))
   if (iCnj < 0) {
-    return { ...TITULO_VAZIO, intermediador: partes[0] ?? '', cedente: partes[1] ?? '' }
+    return {
+      ...TITULO_VAZIO,
+      honorariosPct,
+      intermediador: partes[0] ?? '',
+      cedente: partes[1] ?? '',
+    }
   }
 
   let parcelaCedida = ''
-  let honorariosPct = ''
   for (const p of partes.slice(iCnj + 1)) {
-    const m = p.match(RE_SO_PORCENTAGEM)
-    // Vírgula é o decimal aqui, e ponto também: porcentagem não tem separador
-    // de milhar, então não há o que descartar.
-    if (m && !honorariosPct) honorariosPct = m[1].replace(',', '.')
-    else if (RE_VERBA.test(p) && !parcelaCedida) parcelaCedida = p
+    if (parcelaCedida || !RE_VERBA.test(p)) continue
+    // "principal + honorários 30%" numa parte só, sem separar: a verba fica e a
+    // porcentagem colada nela é aproveitada. AQUI O SINAL DE % É EXIGIDO —
+    // número solto no meio de uma frase pode ser qualquer coisa, e adivinhar
+    // seria pior que perder.
+    const m = p.match(RE_PORCENTAGEM_NO_FIM)
+    if (!m) {
+      parcelaCedida = p
+      continue
+    }
+    if (!honorariosPct) honorariosPct = m[1].replace(',', '.')
+    parcelaCedida = p.slice(0, m.index).replace(/[\s,;:]+$/, '')
   }
 
   return {

@@ -2190,6 +2190,16 @@ Deno.serve(async (req) => {
     const avisosBase: string[] = [...avisosQualif];
     const _avisoTetoBase = checarTetoRPV(dados.esfera, dados.tribunal, Number(dados.bruto_total) || 0, ufCredito);
     if (_avisoTetoBase) avisosBase.push(_avisoTetoBase);
+    // PORCENTAGEM ESCRITA COMO FRAÇÃO é o erro de digitação provável: "0,30"
+    // querendo dizer 30%. Não dá para corrigir sozinho — 0,30% é um número
+    // legítimo, só improvável num contrato —, mas dá para dizer em voz alta,
+    // porque errar aqui faz o honorário praticamente desaparecer do negócio.
+    if (honorariosPct != null && honorariosPct > 0 && honorariosPct < 1)
+      avisosBase.push(
+        `⚠️ HONORÁRIOS CONTRATUAIS DE ${pct(honorariosPct / 100)} — baixo demais para um contrato. ` +
+        `Se a intenção era ${pct(honorariosPct)}, escreva a porcentagem em pontos no card ` +
+        '(30, e não 0,30) e rode de novo.',
+      );
     if (dados._parcela_nao_informada)
       avisosBase.push(
         `⚠️ PARCELA CEDIDA NÃO INFORMADA no card: precifiquei ${String(dados.tipo_credito ?? '')}, ` +

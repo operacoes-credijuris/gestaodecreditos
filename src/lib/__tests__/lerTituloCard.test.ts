@@ -106,6 +106,61 @@ describe('lerTituloCard', () => {
     expect(t.numero).toBe('0001234-56.2023.8.17.0001')
   })
 
+  it('aceita o travessão, que é o hífen depois da correção automática', () => {
+    // Não é outro formato: é o mesmo caractere vindo do teclado ou de um colar
+    // do Word. Exigir o hífen exato fazia o título virar uma parte só, e daí
+    // nem o intermediador se lê — a análise não começava.
+    const t = lerTituloCard('ACME – Maria da Silva – 0001234-56.2023.8.17.0001 – principal – 30%')
+    expect(t.intermediador).toBe('ACME')
+    expect(t.cedente).toBe('Maria da Silva')
+    expect(t.honorariosPct).toBe('30')
+  })
+
+  it('o hífen do número não é separador, porque separador exige espaço em volta', () => {
+    // Se o hífen sem espaços separasse, "0001234-56.2023..." se partiria em
+    // dois e o número deixaria de ser reconhecido.
+    expect(lerTituloCard('ACME - Maria - 0001234-56.2023.8.17.0001').numero).toBe(
+      '0001234-56.2023.8.17.0001',
+    )
+  })
+
+  it('porcentagem colada na verba, sem separar, é aproveitada', () => {
+    const t = lerTituloCard('ACME - Maria - 0001234-56.2023.8.17.0001 - principal + honorários 30%')
+    expect(t.parcelaCedida).toBe('principal + honorários')
+    expect(t.honorariosPct).toBe('30')
+    expect(classificarParcelaCedida(t.parcelaCedida)).toBe('ambos')
+  })
+
+  it('porcentagem escrita fora de lugar não entra no nome do cedente', () => {
+    // Nenhum nome é um número solto, então ela é colhida onde estiver e
+    // retirada antes de o resto ser interpretado.
+    const t = lerTituloCard('ACME - Maria da Silva - 30% - 0001234-56.2023.8.17.0001 - principal')
+    expect(t.cedente).toBe('Maria da Silva')
+    expect(t.honorariosPct).toBe('30')
+  })
+
+  it('um ano solto não é confundido com porcentagem', () => {
+    // O limite de três dígitos é o que garante isto.
+    const t = lerTituloCard('ACME - Maria 2023 - 0001234-56.2023.8.17.0001 - principal')
+    expect(t.cedente).toBe('Maria 2023')
+    expect(t.honorariosPct).toBe('')
+  })
+
+  it('separador diferente do combinado falha ALTO, não em silêncio', () => {
+    // Barra, ponto-e-vírgula, hífen sem espaço: o título vira uma parte só. O
+    // número ainda sai (é achado por conteúdo), mas o intermediador fica vazio
+    // — e ele é obrigatório na função de análise, que recusa dizendo isso. É a
+    // falha que se quer: visível, e não um preço sobre campos em branco.
+    for (const t of [
+      'ACME / Maria / 0001234-56.2023.8.17.0001 / principal / 30%',
+      'ACME-Maria-0001234-56.2023.8.17.0001-principal-30%',
+    ]) {
+      const lido = lerTituloCard(t)
+      expect(lido.intermediador).toBe('')
+      expect(lido.numero).toBe('0001234-56.2023.8.17.0001')
+    }
+  })
+
   it('tolera vazio, nulo e espaço sobrando', () => {
     expect(lerTituloCard('')).toEqual({
       intermediador: '', cedente: '', numero: '', parcelaCedida: '', honorariosPct: '',
