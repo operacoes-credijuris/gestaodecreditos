@@ -19,8 +19,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # v4 -> v7: o runner avisou que a v4 foi publicada para Node 20, que está
+      # sendo aposentado, e estava sendo forçada a rodar em Node 24. Ver o
+      # comentário em deploy-functions.yml — nenhuma das viradas mexe no que
+      # usamos aqui, que é um checkout sem parâmetro nenhum.
+      - uses: actions/checkout@v7
 
+      # `node-version: 20` é OUTRA coisa, e fica como está de propósito: é o Node
+      # que COMPILA o site, não o runtime da action, e não entra na
+      # aposentadoria. Trocá-lo muda o que sai no bundle, então é mudança
+      # separada, com o site conferido depois.
       - uses: actions/setup-node@v4
         with:
           node-version: 20

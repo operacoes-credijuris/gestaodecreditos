@@ -16,9 +16,22 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      # AS VERSÕES SOBEM PORQUE O NODE 20 ESTÁ SENDO APOSENTADO.
+      #
+      # O runner passou a avisar que checkout@v4 e setup-cli@v1 foram publicados
+      # para Node 20 e estavam sendo FORÇADOS a rodar em Node 24. Enquanto ele
+      # força, tudo funciona; no dia em que parar, o deploy quebra sozinho, sem
+      # ninguém ter tocado no projeto — e é o passo que publica as functions.
+      #
+      # checkout: v4 -> v7. As três viradas de versão maior não mexem em nada
+      # que usamos: v5 só troca o runtime, v6 guarda as credenciais em arquivo
+      # separado (não empurramos nada daqui) e v7 bloqueia checkout de fork em
+      # pull_request_target/workflow_run (só temos push e disparo manual).
+      # setup-cli: v1 -> v3, e ele virou action de shell em vez de Node — é por
+      # isso que sai do aviso. O input `version` continua o mesmo.
+      - uses: actions/checkout@v7
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: latest
 
