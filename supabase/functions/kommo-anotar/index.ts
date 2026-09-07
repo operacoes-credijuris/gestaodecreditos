@@ -3,13 +3,23 @@
 //   - reprovado  -> o motivo da recusa
 //   - aprovado   -> o link da pasta do Drive
 //
-// Mesmo formato de nota que a kommo-mover do Pedro já usa (note_type service_message),
-// que aparece no histórico do card e o kommo-sync ignora (não polui as notas do card).
+// Mesmo formato de nota que a kommo-mover já usa: note_type service_message,
+// que aparece no histórico do card e o kommo-sync IGNORA (ele só traz `common`).
+//
+// ISSO NÃO É DETALHE. Esta função escrevia `common`, e o cabeçalho dizia
+// `service_message`. Consequência: a sincronização trazia a ficha e o veredito
+// da análise de volta para kommo_leads.notas, e dali eles eram lidos como
+// "anotações do comercial" — pela leitura do card (PARCELA CEDIDA:, HONORÁRIOS
+// C.:) e pelo prompt da IA. Na segunda análise do mesmo card, o sistema lia a
+// própria ficha achando que o comercial a tinha escrito: a escolha do operador
+// no seletor virava o cadastro do card, o aviso de "parcela cedida não
+// informada" nunca mais disparava, e um percentual que veio dos autos passava a
+// ser "o que o card diz". O sistema confirmava a si mesmo.
 //
 // USO (POST, com sessão logada): { "lead_id": 15269795, "texto": "..." }
 
 import { corsHeaders } from "../_shared/cors.ts";
-import { getCaller } from "../_shared/auth.ts";
+import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveKommo } from "../_shared/segredos.ts";
 
 const CORS = corsHeaders;
@@ -26,8 +36,10 @@ function json(o: unknown, s = 200) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
-    const user = await getCaller(req);
-    if (!user) return json({ erro: "Sessão inválida — faça login." }, 401);
+    // ATIVO, e não só autenticado: desativar alguém em Configurações não
+    // revoga o JWT dele, e esta função escreve no card que o comercial lê.
+    const user = await getCallerAtivo(req, serviceClient());
+    if (!user) return json({ erro: ERRO_ACESSO }, 401);
 
     const body = await req.json().catch(() => ({}));
     const leadId = Number((body as any).lead_id ?? (body as any).kommo_lead_id ?? 0);
@@ -44,8 +56,14 @@ Deno.serve(async (req) => {
       body: JSON.stringify([
         {
           entity_id: leadId,
-          note_type: "common",
-          params: { text: texto },
+          // service_message, e não common: o kommo-sync filtra note_type=common,
+          // então esta nota aparece no feed do card e NÃO volta para o espelho
+          // — que é o que impede a análise de ler o próprio resultado como se
+          // fosse cadastro do comercial. Ver o cabeçalho.
+          note_type: "service_message",
+          params: { service: SERVICO, text: texto },
+          // Registro de resultado não é evento de pipeline: não dispara gatilho.
+          is_need_to_trigger_digital_pipeline: false,
         },
       ]),
     });
