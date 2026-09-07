@@ -172,7 +172,7 @@ function validarAto(bruto: unknown, nome: string): RegraAto | null | string {
 
 const FAIXA_SCHEMA = {
   type: 'array',
-  description: 'As linhas da tabela na janela de valores que interessa (R$ 1.000 a R$ 500.000).',
+  description: 'As linhas da tabela na janela de valores que interessa (R$ 5.000 a R$ 500.000). Ignore o que estiver abaixo disso.',
   items: {
     type: 'object',
     properties: {
@@ -185,7 +185,15 @@ const FAIXA_SCHEMA = {
       minimo: { type: ['number', 'null'], description: 'Piso do resultado, se a tabela declarar.' },
       maximo: { type: ['number', 'null'], description: 'Teto do resultado, se a tabela declarar.' },
     },
-    required: ['de', 'ate', 'valor', 'percentual'],
+    // SÓ 'ate' É OBRIGATÓRIO — e a economia aqui é de TEMPO, não de bytes.
+    //
+    // Exigir os quatro fazia o modelo escrever "de": null, "valor": null e
+    // "percentual": null em TODA faixa que não os tem. Numa tabela de quarenta
+    // faixas são mais de cem pares de chave e valor digitados para nada — e
+    // token de saída sai um a um, em série, então isso é relógio de parede,
+    // que é exatamente o que falta nesta etapa. O que não vier é lido como
+    // null pelo validador, então nada se perde.
+    required: ['ate'],
   },
 }
 
@@ -250,7 +258,13 @@ const FERRAMENTA_ATO = {
           'Leia a nota da tabela ou a lei de emolumentos do estado sobre atos com conteúdo financeiro / cessão de direitos; se não disser, null.',
       },
       vigencia: { type: ['string', 'null'], description: 'Período da tabela, como o documento descreve.' },
-      observacao: { type: ['string', 'null'], description: 'Qual documento, qual tabela dentro dele, o que somou e o que deixou de fora.' },
+      observacao: {
+        type: ['string', 'null'],
+        // UMA LINHA, e o teto é para valer. Sem ele isto virava redação de dois
+        // parágrafos — o registro de uma falha em PE saiu com mais de
+        // quatrocentas palavras. Quem lê é o operador, num aviso de uma linha.
+        description: 'UMA FRASE, no máximo 200 caracteres: qual tabela dentro do documento, e o que ficou de fora. Não explique o seu raciocínio nem repita o que já está nos outros campos.',
+      },
       fontes: { type: 'array', items: { type: 'string' }, description: 'Endereços EXATOS de onde saiu cada coisa. Obrigatório.' },
     },
     required: ['faixas', 'fontes'],
@@ -311,8 +325,10 @@ VÁ DIRETO À TABELA. O documento é grande e você não precisa lê-lo inteiro:
 
 Quem te chama vai aplicar essa regra a MUITOS valores diferentes, sem te consultar de novo. Por isso o que se pede não é um valor: é a TABELA e as taxas que incidem sobre ela.
 
+UM ATO SÓ, E NADA MAIS. O documento traz dezenas de atos — procuração, autenticação, reconhecimento de firma, escrituras sem valor declarado, averbações. NÃO transcreva nenhum deles: só a tabela do ato pedido acima. Cada linha a mais é tempo que esta chamada não tem.
+
 O QUE DEVOLVER:
-1. AS FAIXAS, na janela de R$ 1.000 a R$ 500.000, que é onde as cessões caem. Cada linha da tabela vira uma entrada com "de" e "ate" (os limites impressos). As tabelas brasileiras aparecem em três formas, e o formato aceita as três:
+1. AS FAIXAS, na janela de R$ 5.000 a R$ 500.000, que é onde as cessões caem. NÃO transcreva as faixas abaixo de R$ 5.000: nenhuma cessão nossa chega lá, e é no pé da tabela que as faixas são mais numerosas e miúdas. Cada linha da tabela vira uma entrada com "de" e "ate" (os limites impressos). As tabelas brasileiras aparecem em três formas, e o formato aceita as três:
    (a) VALOR FIXO por faixa — o caso mais comum. Preencha "valor".
    (b) PERCENTUAL sobre o valor do ato. Preencha "percentual" como fração, com "minimo" e "maximo" se a tabela declarar piso e teto.
    (c) PARCELA FIXA MAIS PERCENTUAL SOBRE O EXCEDENTE — "R$ 500,00 acrescidos de 0,5% sobre o que exceder R$ 50.000,00". Preencha "fixo" (500), "percentual" (0.005), "de" (50000) e marque "sobre_excedente": true. NÃO marque sobre_excedente quando o percentual incidir sobre o valor inteiro — a diferença entre as duas leituras chega a 45% do emolumento.
