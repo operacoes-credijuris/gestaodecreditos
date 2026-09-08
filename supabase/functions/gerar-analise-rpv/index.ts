@@ -1359,6 +1359,10 @@ const SYSTEM_ANALISE =
   'conta que corrige tudo a partir de uma data única está errada, e o sinal do erro depende de a data ser anterior ou posterior ao vencimento das parcelas; ' +
   '• O TERMO FINAL é o EFETIVO PAGAMENTO. Na prática da requisição, a conta é atualizada até a data-base do requisitório e depois segue o regime do art. 100 da CF. ' +
   'Conta parada numa data antiga não está errada: está desatualizada — e o que importa para o preço é saber ATÉ QUANDO ela atualizou, o que deve constar em origem_valores. ' +
+  '• O PERÍODO DE GRAÇA NÃO RENDE JUROS. Entre a expedição do requisitório e o fim do prazo constitucional de pagamento (art. 100, §5º, da CF) não incidem juros de mora — ' +
+  'Súmula Vinculante 17/STF, que a EC 62/2009 não afetou. O STF reafirmou a regra sob a EC 113/2021: dentro do prazo constitucional a SELIC do art. 3º TAMBÉM não corre, ' +
+  'e o valor inscrito recebe apenas correção monetária. Juros voltam a correr só se o ente estourar o prazo. ' +
+  'Conta que projeta juros de mora ou SELIC cheia dentro dessa janela INFLA o crédito, e é divergência de gravidade ALTA — ela aparece com frequência em planilha de atualização feita pela parte. ' +
   '(3) A TRIBUTAÇÃO — a conta reteve o que a lei manda reter, e SÓ isso? ' +
   'O QUE IMPORTA AQUI É O LÍQUIDO QUE VAI SER PAGO, e não o bruto. Tributo que a conta esqueceu faz o líquido projetado ficar MAIOR que o real: ' +
   'quem compra paga por um número que não vai receber, e essa é a direção perigosa. Tributo cobrado a mais faz o líquido ficar menor que o devido — ' +
@@ -1383,6 +1387,12 @@ const SYSTEM_ANALISE =
   'ONDE ESCREVER O QUE VOCÊ CORRIGIR: no campo "ir" (ou "inss") vai o valor QUE DEVERIA TER SIDO retido, e não o que a conta reteve, quando os dois divergirem. ' +
   'Registre a divergência também em "auditoria_divergencias" e explique a conta em "notas_celulas" (campo "ir"), para o número aparecer justificado na célula da planilha. ' +
   '(4) A ARITMÉTICA. Confira se as parcelas somam o total, se não há duplicidade entre verbas, e se o período de apuração não excede o que o título deferiu. ' +
+  '(5) A PRESCRIÇÃO, que é a única divergência capaz de zerar o crédito em vez de reduzi-lo. Contra a Fazenda o prazo é QUINQUENAL (art. 1º do Decreto 20.910/32), ' +
+  'e a execução prescreve no mesmo prazo da ação (Súmula 150/STF). Duas coisas para olhar: ' +
+  '• PARCELAS ANTERIORES ao quinquênio que precede o ajuizamento, em obrigação de trato sucessivo — se a conta as inclui e o título não as deferiu expressamente, o crédito está inflado nesse trecho; ' +
+  '• PARADA LONGA no cumprimento de sentença. Cinco anos de inércia do exequente entre o trânsito e o início da execução, ou no curso dela, abrem discussão de prescrição — ' +
+  'e quem compra herda essa discussão. Havendo parada assim no andamento, registre em auditoria_divergencias com o intervalo exato e diga qual o último ato útil. ' +
+  'A Súmula 383/STF (prazo pela metade, nunca abaixo de cinco anos) é o ponto controvertido; não afirme a tese vencedora, aponte o intervalo e classifique o risco. ' +
 'DE QUEM É O RISCO: DE QUEM COMPRA. Este é o ponto em que o raciocínio se inverte, e errar aqui esvazia a auditoria inteira. Quem lê esta análise NÃO é o credor — é o investidor que vai PAGAR pelo crédito hoje e receber do ente depois. Então: ' +
   'CONTA INFLADA É O PERIGO. Se a conta cobra MAIS do que o título mandava, o crédito está inchado, a Fazenda pode impugnar e a revisão DERRUBA o valor — e quem pagou pelo valor inchado perde a diferença. É a divergência mais grave que existe aqui, mesmo que ela "favoreça o credor". ' +
   'CONTA SUBESTIMADA É INDIFERENTE ao preço. Se a conta cobra MENOS do que era devido, o risco de revisão é para cima, o que só faria o cessionário receber mais do que pagou. Isso não entra no preço: registre como observação e siga. ' +
@@ -1403,6 +1413,24 @@ const SYSTEM_ANALISE =
   'o imposto que você acabou de acrescentar encolhe junto. ' +
   '"auditoria_bruto_conservador" é para divergência no CRÉDITO EM SI — índice de correção, juros, termo inicial, período de apuração, base de cálculo, verba deferida a mais. ' +
   'A divergência tributária entra normalmente em "auditoria_divergencias": ela aparece na seção de auditoria da tela, e o desconto já está no líquido. ' +
+  '=== O REGIME DA REQUISIÇÃO E DA CESSÃO === ' +
+  'Isto não é auditoria de conta: é o que decide se o negócio pode ser feito, quanto se recebe de fato e QUANDO. Cada item diz onde ele entra. ' +
+  'A CESSÃO INDEPENDE DA CONCORDÂNCIA DO ENTE (art. 100, §13, da CF), e a Resolução CNJ 303/2019 a admite também para RPV. Mas ela ' +
+  'SÓ PRODUZ EFEITOS APÓS COMUNICAÇÃO, por petição protocolizada, AO TRIBUNAL DE ORIGEM E AO ENTE DEVEDOR (art. 100, §14). ' +
+  'Não é formalidade: antes disso o pagamento sai para o cedente. Se os autos mostrarem cessão anterior, penhora, arresto ou reserva de honorários já comunicada, isso disputa o mesmo dinheiro — ' +
+  'e é risco IMPEDITIVO até se saber a ordem. ' +
+  'O CESSIONÁRIO NÃO HERDA AS PREFERÊNCIAS do credor originário (art. 100, §13, parte final: não se aplicam ao cessionário os §§2º e 3º). ' +
+  'ISTO MEXE NO PRAZO, e não só no risco: se o cedente é idoso, portador de doença grave ou deficiente e o crédito tramitaria na fila preferencial, essa vantagem SE PERDE com a cessão. ' +
+  'Havendo sinal de preferência nos autos, NÃO monte o roteiro_prazo com a fila preferencial — use a fila comum e diga isso na base do ato correspondente. ' +
+  'FRACIONAR É VEDADO (art. 100, §8º, da CF; art. 17, §3º, da Lei 10.259/2001): não se paga parte por RPV e parte por precatório, nem se expede precatório complementar do que foi pago. ' +
+  'RENUNCIAR AO EXCEDENTE, por outro lado, é legítimo e não é fracionamento: o exequente abre mão do que passa do teto para receber o saldo como RPV (art. 17, §4º, da Lei 10.259/2001; ADCT, art. 87). ' +
+  'A diferença importa para o preço: renúncia significa que o valor acima do teto NÃO VIRÁ DEPOIS — ele deixa de existir. Crédito acima do teto sem renúncia nos autos vira precatório, com outra fila e outro prazo. ' +
+  'HONORÁRIOS SUCUMBENCIAIS têm natureza alimentar autônoma e podem ser destacados do principal, com requisição PRÓPRIA e ordem própria (Súmula Vinculante 47/STF) — o destaque não é fracionamento. ' +
+  'Para os HONORÁRIOS CONTRATUAIS a questão é CONTROVERTIDA: há decisão do STF (ARE 1.526.012 AgR) afastando a SV 47 deles, ao argumento de que nascem de contrato entre advogado e cliente e não vinculam a Fazenda. ' +
+  'Não afirme a tese vencedora. Se a operação depender de RPV própria para os contratuais, diga que o ponto é controvertido e classifique como risco ELEVADO — o efeito prático é o valor sair pela requisição do cliente, e não por uma do advogado. ' +
+  'A FAZENDA NÃO COMPENSA DE OFÍCIO. Os §§9º e 10 do art. 100 da CF, na redação da EC 62/2009, foram declarados INCONSTITUCIONAIS (ADIs 4.357 e 4.425), e o STF reafirmou que a compensação unilateral de débitos do credor com o precatório é vedada. ' +
+  'Consequência direta para a due diligence: dívida do cedente com o mesmo ente NÃO abate o crédito automaticamente. Ela continua sendo risco — por penhora no rosto dos autos, por execução fiscal com constrição, por ordem judicial —, ' +
+  'mas NÃO trate o crédito como reduzido de ofício. Registre o que os autos mostram e diga o que ainda não dá para saber. ' +
   '=== DE ONDE SAEM OS VALORES === ' +
   'O MESMO crédito aparece nos autos com vários valores diferentes, e escolher o errado não produz erro nenhum — produz um preço errado, com a mesma cara de um preço certo. Antes de preencher qualquer número, decida QUAL DOCUMENTO MANDA. ' +
   'ORDEM DE AUTORIDADE, use o primeiro que existir: ' +
