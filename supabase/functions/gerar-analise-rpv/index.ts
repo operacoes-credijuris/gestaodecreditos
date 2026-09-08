@@ -2111,6 +2111,9 @@ async function refinarDados(
     if (_tocados.includes('bruto_total')) {
       delete r.dados._ir_lido;
       delete r.dados._liquido_lido;
+      // Bruto ditado a mao encerra o remanejamento do honorario: o aviso
+      // contaria uma origem que o numero de agora nao tem mais.
+      delete r.dados._honorarioEraOPrincipal;
     }
   }
 
@@ -3328,6 +3331,34 @@ Deno.serve(async (req) => {
     dados._verbas_negociadas = verbas;
     dados._honPctInformado = honorariosPct != null;
 
+    // O HONORÁRIO QUE É O PRÓPRIO CRÉDITO, quando ele caiu no campo errado.
+    //
+    // Numa execução cujo OBJETO é a verba honorária — defensoria dativa/UHD,
+    // curador especial, perito, advogado em causa própria — aquele honorário É
+    // a condenação principal. O prompt diz isso, mas dizer não garante: se a
+    // leitura pôs a quantia em `honorarios_sucumbenciais` e o negócio é o
+    // principal, o bruto fica vazio e a análise morria com "não localizei valor
+    // para nenhuma dessas verbas" — segurando, no campo ao lado, justamente o
+    // número que dizia não ter achado.
+    //
+    // ESTREITO DE PROPÓSITO: só quando se compra o principal, os sucumbenciais
+    // estão FORA do negócio, e não há bruto nenhum. Havendo bruto, nada se
+    // move: aí os sucumbenciais são o que dizem ser.
+    //
+    // E VAI COM AVISO, porque a hipótese contrária existe — card pedindo
+    // principal num crédito que é sucumbencial de outra ação. Mover calado
+    // faria o preço recair sobre uma condenação principal que ninguém viu.
+    if (
+      verbas.principal &&
+      !verbas.sucumbenciais &&
+      (Number(dados.bruto_total) || 0) <= 0 &&
+      _sucumbBrutosAutos > 0
+    ) {
+      dados.bruto_total = _sucumbBrutosAutos;
+      dados.honorarios_sucumbenciais = 0;
+      dados._honorarioEraOPrincipal = _sucumbBrutosAutos;
+    }
+
     // SEM VERBA NENHUMA NÃO HÁ NEGÓCIO. Acontece quando o card manda comprar
     // honorários e o processo não tem nenhum: melhor dizer isso do que devolver
     // uma análise de valor zero, que parece um resultado.
@@ -3338,8 +3369,11 @@ Deno.serve(async (req) => {
         (verbas.sucumbenciais && _sucumbBrutosAutos > 0);
       if (!temAlgo) return errorResponse(
         `O card manda negociar ${dados.tipo_credito}, mas não localizei valor para nenhuma dessas verbas nos documentos. ` +
+        `O que a leitura trouxe: bruto ${brl(Number(dados.bruto_total) || 0)}, IR ${brl(Number(dados.ir) || 0)}, ` +
+        `INSS ${brl(Number(dados.inss) || 0)}, honorários contratuais ${brl(honorariosCalc)}, ` +
+        `sucumbenciais ${brl(_sucumbBrutosAutos)}. ` +
         (verbas.principal
-          ? 'Confira os cálculos anexados ao card.'
+          ? 'Confira os cálculos anexados ao card: se a quantia estiver numa dessas outras verbas, é ela que está no campo errado.'
           : 'Junte a peça que fixa os honorários (sentença, acórdão ou conta da contadoria), ou informe o percentual no formulário.'),
       );
     }
@@ -4166,6 +4200,16 @@ Deno.serve(async (req) => {
         `(diferença de ${brl(Math.abs(dados._parcelasNaoFecham.calculado - dados._parcelasNaoFecham.declarado))}). ` +
         'Algum valor veio de documento diferente dos outros. Confira antes de fechar — o preço foi calibrado sobre o bruto.' +
         (dados.origem_valores ? ` De onde a IA disse que tirou: ${String(dados.origem_valores).slice(0, 300)}` : ''),
+      );
+    // O REMANEJAMENTO APARECE NO RESULTADO, e no topo: o preço inteiro recai
+    // sobre um valor que a leitura havia posto em outra verba, e quem fecha tem
+    // de poder discordar disso em dez segundos.
+    if (Number(dados._honorarioEraOPrincipal) > 0)
+      avisosBase.unshift(
+        `⚠️ A única quantia dos autos veio como honorários sucumbenciais (${brl(Number(dados._honorarioEraOPrincipal))}), ` +
+        'e o negócio é o crédito principal: entendi que a verba honorária É o objeto desta execução — defensoria dativa/UHD, ' +
+        'curador, perito ou advogado em causa própria — e a precifiquei como condenação principal. ' +
+        'SE ELA FOR sucumbência de outra ação, o card está pedindo a verba errada: corrija o "PARCELA CEDIDA" e rode de novo.',
       );
     if (Number(dados._sucumbNaoPrevistos) > 0)
       avisosBase.push(
