@@ -277,10 +277,15 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   //
   // APROVAR NÃO ENTRA AQUI de propósito: aprovar direto de Pendentes pularia a
   // revisão, que é a razão de a coluna de Validação existir.
+  // OS RÓTULOS DIZEM O ATO INTEIRO. "Enviar para validação" também gera a
+  // planilha e a sobe no Drive — sem isso o card chegaria à revisão sem o
+  // arquivo que se vai revisar —, e o nome do botão precisa dizê-lo antes do
+  // clique, não depois. "Diligência" e "Reprovar" viram verbo pelo mesmo
+  // motivo: o que se lê num botão é o que ele faz.
   pendentes: [
-    { statusId: ST_DECISAO, label: 'Enviar para validação', variant: 'primary' },
-    { statusId: ST_DILIGENCIA, label: 'Diligência', variant: 'warning' },
-    { statusId: ST_REPROVADO, label: 'Reprovar', variant: 'danger' },
+    { statusId: ST_DECISAO, label: 'Salvar no Drive e enviar p/ validação', variant: 'primary' },
+    { statusId: ST_DILIGENCIA, label: 'Exigir diligência', variant: 'warning' },
+    { statusId: ST_REPROVADO, label: 'Reprovar crédito', variant: 'danger' },
   ],
   // Cores em vez de hierarquia: as três são alternativas legítimas, e
   // verde/laranja/vermelho se lê mais rápido que o rótulo numa tela onde a mesma

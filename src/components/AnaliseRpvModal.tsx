@@ -27,7 +27,7 @@ import { Save, SendHorizontal, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
 import { ST_DECISAO, ST_DILIGENCIA, ST_REPROVADO, type AcaoTela } from '@/lib/kommo'
-import { resumoDaOportunidade, type FichaDoCredito } from '@/lib/anotacaoKommo'
+import type { FichaDoCredito } from '@/lib/anotacaoKommo'
 import {
   formatBRL,
   formatBRLInput,
@@ -655,6 +655,15 @@ function fundirRiscosEAvisos(
     .sort((a, b) => ORDEM_GRAU[a.grau] - ORDEM_GRAU[b.grau])
 }
 
+/**
+ * O desfecho que não abre painel: mandar para a revisão.
+ *
+ * Um só, e nomeado: o que distingue este dos outros dois é não haver o que
+ * justificar — a diligência e a reprovação mudam o rumo do crédito e quem lê o
+ * card do outro lado precisa saber por quê.
+ */
+const DESFECHOS_DIRETOS: ReadonlySet<number> = new Set([ST_DECISAO])
+
 interface ItemDeRisco {
   grau: GrauRisco
   texto: string
@@ -1126,6 +1135,8 @@ function DesfechoDaAnalise({
   onMover,
   ocupado,
   achados,
+  diretos,
+  aoConfirmarDireto,
   onRedigir,
   motivoSugerido,
 }: {
@@ -1134,6 +1145,17 @@ function DesfechoDaAnalise({
   ocupado: boolean
   /** Os achados da análise, para marcar em vez de redigitar. */
   achados: ItemDeRisco[]
+  /**
+   * Desfechos que dispensam mensagem: um clique, sem painel.
+   *
+   * Existe porque nem todo desfecho pede explicação. Mandar para a revisão é
+   * seguir o caminho normal — o que houver a dizer já está na análise, na
+   * planilha e na anotação. Abrir campo de texto ali é pedir que alguém
+   * escreva "ok" para poder clicar.
+   */
+  diretos?: ReadonlySet<number>
+  /** O clique de um desfecho direto, que pode fazer trabalho antes de mover. */
+  aoConfirmarDireto?: (acao: AcaoTela) => Promise<void>
   /** Manda a IA reescrever o motivo para quem vai ler no card. */
   onRedigir: (desfecho: string, itens: string[], texto: string) => Promise<string>
   /**
@@ -1154,6 +1176,8 @@ function DesfechoDaAnalise({
   const [marcados, setMarcados] = useState<Set<number>>(new Set())
   const [enviando, setEnviando] = useState(false)
   const [redigindo, setRedigindo] = useState(false)
+  /** O desfecho direto em curso, para o botão dele mostrar o trabalho. */
+  const [emCurso, setEmCurso] = useState<number | null>(null)
   /**
    * O texto no campo já incorpora os achados marcados, pela mão da IA.
    *
@@ -1241,8 +1265,23 @@ function DesfechoDaAnalise({
             key={a.statusId}
             size="sm"
             variant={escolhida?.statusId === a.statusId ? a.variant : 'outline'}
-            disabled={ocupado || enviando}
-            onClick={() => {
+            disabled={ocupado || enviando || emCurso !== null}
+            loading={emCurso === a.statusId}
+            onClick={async () => {
+              // DESFECHO DIRETO: faz e pronto, sem abrir painel.
+              if (diretos?.has(a.statusId) && aoConfirmarDireto) {
+                setEscolhida(null)
+                setErro(null)
+                setEmCurso(a.statusId)
+                try {
+                  await aoConfirmarDireto(a)
+                } catch (e) {
+                  setErro((e as Error)?.message ?? String(e))
+                } finally {
+                  setEmCurso(null)
+                }
+                return
+              }
               // Trocar de desfecho limpa o motivo: "faltou a certidão de
               // débitos" escrito para uma diligência não serve como razão de
               // reprovação, e reaproveitá-lo em silêncio mandaria ao comercial
@@ -1259,6 +1298,9 @@ function DesfechoDaAnalise({
           </Button>
         ))}
       </div>
+
+      {/* O ERRO DO DESFECHO DIRETO, que não tem painel onde aparecer. */}
+      {!escolhida && erro && <p className="mt-2 text-xs text-red-700">{erro}</p>}
 
       {escolhida && (
         <div className="mt-3 space-y-3 rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
@@ -2138,8 +2180,16 @@ export function AnaliseRpvModal({
     }
   }
 
-  async function salvar() {
-    if (!atual?.dados) return
+  /**
+   * Gera a planilha, sobe no Drive e anota no card.
+   *
+   * DEVOLVE SE DEU CERTO porque agora há quem dependa da resposta: o desfecho
+   * "salvar e enviar para validação" não pode mover o card quando a planilha
+   * não subiu — o card chegaria à revisão sem o arquivo que se vai revisar, e o
+   * erro ficaria numa tela que já fechou.
+   */
+  async function salvar(): Promise<boolean> {
+    if (!atual?.dados) return false
     setErro(null)
     setPasso('Gerando a planilha e salvando no Drive…')
     try {
@@ -2154,11 +2204,36 @@ export function AnaliseRpvModal({
       setSalvo(r)
       setSalvoComoEstava(atual)
       onSalvo(r)
+      return true
     } catch (e) {
       setErro((e as Error)?.message ?? String(e))
+      return false
     } finally {
       setPasso(null)
     }
+  }
+
+  /**
+   * O desfecho que não pede mensagem: salva no Drive e manda para a revisão.
+   *
+   * SEM PAINEL E SEM TEXTO, ao contrário da diligência e da reprovação. Aqui
+   * não há o que justificar — a análise inteira está na janela, na planilha e
+   * na anotação que o salvar acabou de escrever no card. Pedir uma frase seria
+   * pedir que alguém resumisse o que já está escrito em três lugares.
+   *
+   * SÓ SALVA SE PRECISA: análise já salva e não tocada desde então não gera
+   * planilha de novo — seria outro arquivo no Drive e outra anotação no card,
+   * dizendo o mesmo.
+   */
+  async function salvarEEnviar(acao: AcaoTela) {
+    if (!salvo || mudouDesdeSalvar) {
+      const deuCerto = await salvar()
+      // NÃO MOVE SE NÃO SALVOU. O erro já está na tela, e mover agora mandaria
+      // à revisão um card sem planilha, com a mensagem de erro fechada junto
+      // com a janela.
+      if (!deuCerto) return
+    }
+    await onMover(acao.statusId, '')
   }
 
   const riscos = useMemo(() => atual?.riscos ?? [], [atual])
@@ -2293,7 +2368,12 @@ export function AnaliseRpvModal({
               fechava a janela, achava o card na lista e clicava em Reprovar sem
               motivo — perdendo o texto que estava na tela. */}
           <DesfechoDaAnalise
-            acoes={acoes}
+            // REPROVADO NO PORTÃO 1 NÃO TEM PLANILHA PARA SALVAR: o botão não
+            // promete o que não vai fazer, e continua abrindo o painel — mandar
+            // à revisão um crédito barrado pede uma linha dizendo por quê.
+            acoes={acoes.map((a) =>
+              a.statusId === ST_DECISAO ? { ...a, label: 'Enviar para validação' } : a,
+            )}
             onMover={onMover}
             ocupado={ocupado}
             achados={achadosDoDesfecho}
@@ -2593,21 +2673,8 @@ export function AnaliseRpvModal({
             ocupado={ocupado}
             achados={achadosDoDesfecho}
             onRedigir={redigirDesfecho}
-            // O RESUMO DA OPORTUNIDADE JÁ PREENCHIDO na passagem a Validação:
-            // quem decide abre o card e precisa do link da pasta e do crédito
-            // numa tela. Vai no campo, e não escondido no envio, porque a nota
-            // sai sob o nome de quem confirma — e porque a linha da cessão
-            // pede complemento à mão.
-            motivoSugerido={(statusId) =>
-              statusId === ST_DECISAO
-                ? resumoDaOportunidade({
-                    ficha: atual.ficha,
-                    link: atual.drive_folder_url ?? atual.drive_file_url ?? '',
-                    prazoMeses: atual.valores?.prazo_meses,
-                    dataPagamento: atual.valores?.data_pagamento,
-                  })
-                : undefined
-            }
+            diretos={DESFECHOS_DIRETOS}
+            aoConfirmarDireto={salvarEEnviar}
           />
         </div>
       )}
