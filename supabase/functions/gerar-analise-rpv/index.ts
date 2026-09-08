@@ -1249,6 +1249,20 @@ const SCHEMA_ANALISE = {
     'NÃO REPITA ENTRE ITENS: índice errado e termo errado do MESMO consectário são UMA divergência, não duas. E não reescreva aqui o que já está no confronto — ' +
     'aqui vai o PORQUÊ e o EFEITO; o que cada lado diz está lá',
   auditoria_risco_revisao: '"alto" | "medio" | "baixo" | "nenhum" — a chance de a conta ser revista para MENOS, mesmo já homologada',
+  auditoria_ir_faltante:
+    'O TRIBUTO QUE A CONTA NÃO RETEVE, para o sistema calcular. Lista, até 6 itens, ou vazia quando a retenção está correta. ' +
+    'Cada item {verba, base, meses, motivo}: "verba" = sobre o que incide ("lucros cessantes", "horas extras", "diferenças salariais"); ' +
+    '"base" = o valor TRIBUTÁVEL daquela verba, em reais, número — e tem de ser parte do bruto_total; ' +
+    '"meses" = a quantas COMPETÊNCIAS o pagamento se refere, quando a memória de cálculo disser; OMITA quando não souber; ' +
+    '"motivo" = por que é tributável, em uma frase com a norma (art. 43 do CTN, Súmula 463/STJ). ' +
+    'VOCÊ NÃO APURA ALÍQUOTA. A tabela progressiva e o regime dos rendimentos recebidos acumuladamente (art. 12-A da Lei 7.713/88) estão no sistema, ' +
+    'e é a MESMA função que já calcula o IR dos honorários — fazer a sua conta em paralelo faria a tela e a planilha divergirem no mesmo processo. ' +
+    'NÃO SABENDO AS COMPETÊNCIAS, NÃO PARE: omita "meses" e o sistema aplica a tabela como PAGAMENTO ÚNICO, que é a tributação mais pesada e portanto a leitura conservadora. ' +
+    'Dizer "sem memória de competências não é possível apurar a alíquota exata" e não devolver base nenhuma deixa o preço contando com um líquido que não vai ser pago: ' +
+    'achado sem número não desconta nada. ' +
+    'A BASE É O VALOR TRIBUTÁVEL, e não a verba inteira: fora dela ficam o dano moral (Súmula 498/STJ), os danos emergentes, e — em verba remuneratória — ' +
+    'os JUROS DE MORA (Tema 808/STF), que em condenação antiga são boa parte do valor atualizado. Havendo valor atualizado e nominal, diga no "motivo" qual você usou e por quê. ' +
+    'NÃO INCLUA AQUI o IR dos honorários contratuais ou sucumbenciais: esse o sistema já calcula sozinho, verba a verba',
   auditoria_recalculo:
     'OS RECÁLCULOS POR ÍNDICE OFICIAL, quando a divergência for de ÍNDICE ou de TERMO (inicial ou final) de correção ou de juros. ' +
     'LISTA, até 6 itens, ou lista vazia quando não houver divergência dessa natureza. VOCÊ NÃO FAZ ESTA CONTA: o sistema busca as séries no Banco Central (SGS) ' +
@@ -1473,7 +1487,12 @@ const SYSTEM_ANALISE =
   'A CONTRIBUIÇÃO PREVIDENCIÁRIA ENTRA NESTA MESMA CONFERÊNCIA, e não só o IR: verba remuneratória em atraso — diferenças salariais, horas extras, gratificações, adicionais — ' +
   'sofre desconto do regime próprio do ente, e conta que o zerou infla o líquido exatamente como o IR esquecido. Veja a REGRA DA CONTRIBUIÇÃO PREVIDENCIÁRIA acima para quando calcular e quando só registrar. ' +
   'Verba indenizatória, essa não sofre: férias indenizadas e o terço, licença-prêmio em pecúnia, dano moral e danos emergentes ficam fora da base previdenciária pela mesma razão que ficam fora da do IR. ' +
-  'ONDE ESCREVER O QUE VOCÊ CORRIGIR: no campo "ir" (ou "inss") vai o valor QUE DEVERIA TER SIDO retido, e não o que a conta reteve, quando os dois divergirem. ' +
+  'ONDE ESCREVER O QUE VOCÊ CORRIGIR. Achando tributo que a conta NÃO RETEVE, o caminho é "auditoria_ir_faltante": você declara a VERBA e a BASE TRIBUTÁVEL, ' +
+  'e o sistema aplica a tabela progressiva — a mesma que já calcula o IR dos honorários, com o regime dos rendimentos acumulados. ' +
+  'NÃO APURE ALÍQUOTA E NÃO PARE POR NÃO SABER AS COMPETÊNCIAS: sem elas o sistema usa pagamento único, que é a tributação mais pesada e a leitura conservadora. ' +
+  'Achado sem número não desconta nada, e o preço segue contando com um líquido que não vai ser pago. ' +
+  'Tendo você o valor certo do tributo (a conta reteve MENOS e a memória permite refazer), pode escrever direto em "ir" ou "inss" o valor QUE DEVERIA TER SIDO retido. ' +
+  'OS DOIS CAMINHOS SOMAM: use UM por verba — ou declara a base e deixa o sistema calcular, ou escreve o valor final. Fazer os dois cobra o imposto duas vezes. ' +
   'Registre a divergência também em "auditoria_divergencias" e explique a conta em "notas_celulas" (campo "ir"), para o número aparecer justificado na célula da planilha. ' +
   '(4) A ARITMÉTICA. Confira se as parcelas somam o total, se não há duplicidade entre verbas, e se o período de apuração não excede o que o título deferiu. ' +
   '(5) A PRESCRIÇÃO, que é a única divergência capaz de zerar o crédito em vez de reduzi-lo. Contra a Fazenda o prazo é QUINQUENAL (art. 1º do Decreto 20.910/32), ' +
@@ -1922,7 +1941,7 @@ const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
  */
 const CAMPOS_EDITAVEIS: ReadonlySet<string> = new Set(Object.keys(SCHEMA_ANALISE));
 const CAMPOS_LISTA: ReadonlySet<string> = new Set([
-  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias', 'auditoria_confronto', 'auditoria_recalculo', 'notas_celulas',
+  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias', 'auditoria_confronto', 'auditoria_recalculo', 'auditoria_ir_faltante', 'notas_celulas',
 ]);
 
 const FERRAMENTA_REVISAO = {
@@ -3255,6 +3274,95 @@ Deno.serve(async (req) => {
     // sem que nada mais denuncie. A tolerância é de um real ou 0,1% do bruto (o
     // que for maior), que cobre arredondamento de centavo sem deixar passar
     // troca de documento.
+    /**
+     * Os avisos das contas que rodam ANTES dos arrays de aviso existirem.
+     *
+     * O IR faltante e o recálculo por índice mexem no valor sobre o qual o
+     * preço se forma, então rodam antes de aplicarAuditoria — que por sua vez
+     * roda antes de avisosBase e avisosAuditoria nascerem. Mover os blocos para
+     * depois deles inverteria a ordem do cálculo; guardar os avisos aqui e
+     * entregá-los onde os arrays nascem não muda nada e é uma linha.
+     */
+    const _avisosDaConta: string[] = [];
+    /** O que essas contas escreveram na seção de auditoria, e não nos alertas gerais. */
+    const _avisosDaContaAuditoria: string[] = [];
+
+    // ---- O IR QUE A CONTA NÃO RETEVE ----
+    //
+    // POR QUE ISTO EXISTE, e é um caso real. A auditoria achou, corretamente,
+    // que não houve retenção de IR sobre a parcela de lucros cessantes — que é
+    // tributável (art. 43 do CTN: substituem renda que teria sido tributada) —
+    // e então PAROU, escrevendo "sem memória de competências nos autos, não é
+    // possível apurar a alíquota exata". Achado certo, número nenhum. E número
+    // nenhum não desconta nada: o preço seguiu contando com um líquido que não
+    // vai ser pago.
+    //
+    // A ALÍQUOTA EXATA NÃO É PROBLEMA DELA. A tabela progressiva já está aqui,
+    // em _shared/irpf.ts, com o regime dos rendimentos recebidos acumuladamente
+    // (art. 12-A da Lei 7.713/88) e com a convenção da casa para quando as
+    // competências não se sabem: PAGAMENTO ÚNICO, a tributação mais pesada.
+    // Errar para mais deixa o preço conservador; errar para menos é prometer um
+    // líquido que não vem.
+    //
+    // É A MESMA FUNÇÃO E A MESMA CONVENÇÃO já usadas no IR dos honorários — e
+    // isso importa mais que a economia de trabalho: dois caminhos calculando o
+    // mesmo imposto de jeitos diferentes fariam a tela e a planilha divergirem
+    // no mesmo processo.
+    //
+    // A IA DECLARA, O CÓDIGO CALCULA, como no recálculo por índice. Ela diz
+    // sobre QUE valor o imposto incide — que é a leitura, o trabalho dela — e,
+    // quando os autos derem, em quantas competências. O resto é tabela.
+    {
+      const _itensIr = Array.isArray(dados.auditoria_ir_faltante)
+        ? dados.auditoria_ir_faltante.slice(0, 6)
+        : [];
+      const _brutoAqui = Number(dados.bruto_total) || 0;
+      const _memoriasIr: string[] = [];
+      let _somaIr = 0;
+      for (const it of _itensIr) {
+        const _base = Number(it?.base);
+        if (!Number.isFinite(_base) || _base <= 0) continue;
+        // Base maior que o bruto é valor lido errado — o total de outro credor,
+        // a soma de requisitórios. Tributar sobre ela devolveria um imposto que
+        // engoliria o crédito, e a precificação aceitaria sem reclamar.
+        if (_brutoAqui > 0 && _base > _brutoAqui) {
+          _avisosDaConta.push(
+            `A auditoria apontou IR faltante sobre uma base de ${brl(_base)}, maior que o bruto (${brl(_brutoAqui)}). ` +
+            'O item foi ignorado — confira de onde saiu essa base.',
+          );
+          continue;
+        }
+        const _m = Number(it?.meses);
+        const _calc = irProgressivo(_base, Number.isFinite(_m) && _m >= 1 ? _m : 1);
+        if (!(_calc.imposto > 0)) continue;
+        _somaIr += _calc.imposto;
+        _memoriasIr.push(`${String(it?.verba ?? 'verba tributável').slice(0, 60)} — ${_calc.memoria}`);
+      }
+      if (_somaIr > 0) {
+        _somaIr = Number(_somaIr.toFixed(2));
+        const _irAntes = Number(dados.ir) || 0;
+        dados.ir = Number((_irAntes + _somaIr).toFixed(2));
+        // O LÍQUIDO ACOMPANHA, e não é detalhe: sem isto a conferência de soma
+        // (bruto − IR − INSS − honorários = líquido) acusa "as parcelas não
+        // fecham" apontando para a nossa própria correção, e quem lê desfaz o
+        // acerto achando que é erro de leitura.
+        const _liqAntes = Number(dados.principal_liquido) || 0;
+        if (_liqAntes > 0) dados.principal_liquido = Number(Math.max(0, _liqAntes - _somaIr).toFixed(2));
+        const _memoriaIr =
+          `IR NÃO RETIDO PELA CONTA, calculado pela tabela progressiva ${ANO_TABELA_IRRF}: ` +
+          `${_memoriasIr.join(' | ')}. Total acrescentado ao IR: ${brl(_somaIr)} (de ${brl(_irAntes)} para ${brl(dados.ir)}).`;
+        const _notasIr = Array.isArray(dados.notas_celulas) ? dados.notas_celulas : [];
+        _notasIr.push({ campo: 'ir', nota: _memoriaIr.slice(0, 350) });
+        dados.notas_celulas = _notasIr;
+        _avisosDaContaAuditoria.push(
+          `Tributo que a conta não reteve, calculado aqui: ${brl(_somaIr)} de IR acrescentados ` +
+          `(${_memoriasIr.length} ${_memoriasIr.length === 1 ? 'verba' : 'verbas'}, tabela progressiva ${ANO_TABELA_IRRF}). ` +
+          'Sem memória de competências nos autos, a tabela vale como PAGAMENTO ÚNICO — a tributação mais pesada, que é a leitura conservadora.',
+        );
+        dados.auditoria_justificativa = `${_memoriaIr} ${String(dados.auditoria_justificativa ?? '').trim()}`.trim();
+      }
+    }
+
     const _liqDeclarado = Number(dados.principal_liquido) || 0;
 
     // OS SUCUMBENCIAIS ESTAVAM DENTRO DO BRUTO? A conta denuncia.
@@ -3325,19 +3433,6 @@ Deno.serve(async (req) => {
       contratuais: dados._verbas_negociadas?.contratuais ?? false,
       sucumbenciais: dados._verbas_negociadas?.sucumbenciais ?? false,
     };
-    /**
-     * Os avisos do recálculo por índice, à espera dos arrays de aviso.
-     *
-     * O recálculo roda ANTES de aplicarAuditoria — é ele que decide sobre qual
-     * valor o preço se forma —, e aplicarAuditoria roda antes de avisosBase e
-     * avisosAuditoria existirem. Mover o bloco para depois deles inverteria a
-     * ordem do cálculo; guardar os avisos aqui e entregá-los onde os arrays
-     * nascem não muda nada e é uma linha.
-     */
-    const _avisosDoIndice: string[] = [];
-    /** O que o recálculo escreveu na tela de auditoria, e não nos alertas gerais. */
-    const _avisosDoIndiceAuditoria: string[] = [];
-
     // ---- OS RECÁLCULOS COM ÍNDICE OFICIAL DO BANCO CENTRAL ----
     //
     // A IA DECLARA, O CÓDIGO CALCULA. Ela diz, por consectário errado, qual
@@ -3393,7 +3488,7 @@ Deno.serve(async (req) => {
         // (o de outro credor, a soma de requisitórios), e o resultado sairia
         // sem sentido — aceito pela precificação sem uma reclamação.
         if (base > _brutoAutos * 1.01) {
-          _avisosDoIndice.push(
+          _avisosDaConta.push(
             `A auditoria pediu recálculo de ${nat} sobre uma base de ${brl(base)}, maior que o bruto dos autos (${brl(_brutoAutos)}). ` +
             'O item foi ignorado — confira de onde saiu essa base.',
           );
@@ -3469,14 +3564,14 @@ Deno.serve(async (req) => {
           const _notas = Array.isArray(dados.notas_celulas) ? dados.notas_celulas : [];
           _notas.push({ campo: 'bruto_total', nota: _memorias });
           dados.notas_celulas = _notas;
-          _avisosDoIndiceAuditoria.push(
+          _avisosDaContaAuditoria.push(
             `${_feitos.length} ${_feitos.length === 1 ? 'consectário' : 'consectários'} conferido(s) na fonte oficial (Banco Central/SGS): ` +
             _feitos.map((r) => `${r.natureza} ${r.delta < 0 ? '−' : '+'}${brl(Math.abs(r.delta))}`).join(', ') +
             `. Bruto revisado para ${brl(_revisado)}.`,
           );
-          for (const r of _feitos) if (r.aviso) _avisosDoIndiceAuditoria.push(`⚠️ ${r.aviso}`);
+          for (const r of _feitos) if (r.aviso) _avisosDaContaAuditoria.push(`⚠️ ${r.aviso}`);
         } catch (e) {
-          _avisosDoIndiceAuditoria.push(
+          _avisosDaContaAuditoria.push(
             `⚠️ ÍNDICE NÃO CONFIRMADO na fonte oficial: ${(e as Error)?.message ?? String(e)}. ` +
             'O cenário conservador ficou com a estimativa da própria auditoria — confira a atualização à mão antes de fechar.',
           );
@@ -3602,7 +3697,7 @@ Deno.serve(async (req) => {
     dados._credor_titulo = credorTitulo;
 
     // Avisos que valem para a preliminar e para a final.
-    const avisosBase: string[] = [...avisosQualif, ..._avisosDoIndice];
+    const avisosBase: string[] = [...avisosQualif, ..._avisosDaConta];
     // O TEMPO FECHA AQUI. Ele saía como aviso acima de 60 s e ia parar na lista
     // de riscos da janela; agora vai em `tempo`, e a tela o junta ao relógio
     // dela. Ver _relogio, no topo do handler.
@@ -3755,7 +3850,7 @@ Deno.serve(async (req) => {
     // repetir a mesma frase na lista de alertas era o terceiro lugar dizendo o
     // que a seção já diz. Ele continua em avisosBase; a tela é que sabe
     // descontá-lo, comparando com esta lista, em vez de caçar texto.
-    const avisosAuditoria: string[] = [..._avisosDoIndiceAuditoria];
+    const avisosAuditoria: string[] = [..._avisosDaContaAuditoria];
     {
       const _divs: any[] = Array.isArray(dados.auditoria_divergencias) ? dados.auditoria_divergencias : [];
       const _risco = String(dados.auditoria_risco_revisao ?? '').toLowerCase();
