@@ -45,6 +45,7 @@ import {
   ehRegime,
   INDICE_FIXO,
   janelaSgs,
+  mesesEntre,
   pontosMensais,
   recalcularItem,
   regimePadrao,
@@ -1253,13 +1254,16 @@ const SCHEMA_ANALISE = {
     'O TRIBUTO QUE A CONTA NÃO RETEVE, para o sistema calcular. Lista, até 6 itens, ou vazia quando a retenção está correta. ' +
     'Cada item {verba, base, meses, motivo}: "verba" = sobre o que incide ("lucros cessantes", "horas extras", "diferenças salariais"); ' +
     '"base" = o valor TRIBUTÁVEL daquela verba, em reais, número — e tem de ser parte do bruto_total; ' +
-    '"meses" = a quantas COMPETÊNCIAS o pagamento se refere, quando a memória de cálculo disser; OMITA quando não souber; ' +
+    '"meses" = a quantas COMPETÊNCIAS o pagamento se refere; OU, em vez dele, "de" e "ate" com o período de apuração em MM/AAAA, e o sistema conta os meses. ' +
+    'UM DOS DOIS É OBRIGATÓRIO — sem ele o item é IGNORADO e o preço não embute o imposto. O período de apuração você já leu para o confronto com o título; é o mesmo. ' +
+    'Pagamento de UMA competência só (indenização de evento único) vai como "meses": 1, e aí a tabela mensal sobre o total é o certo. ' +
     '"motivo" = por que é tributável, em uma frase com a norma (art. 43 do CTN, Súmula 463/STJ). ' +
     'VOCÊ NÃO APURA ALÍQUOTA. A tabela progressiva e o regime dos rendimentos recebidos acumuladamente (art. 12-A da Lei 7.713/88) estão no sistema, ' +
     'e é a MESMA função que já calcula o IR dos honorários — fazer a sua conta em paralelo faria a tela e a planilha divergirem no mesmo processo. ' +
-    'NÃO SABENDO AS COMPETÊNCIAS, NÃO PARE: omita "meses" e o sistema aplica a tabela como PAGAMENTO ÚNICO, que é a tributação mais pesada e portanto a leitura conservadora. ' +
-    'Dizer "sem memória de competências não é possível apurar a alíquota exata" e não devolver base nenhuma deixa o preço contando com um líquido que não vai ser pago: ' +
-    'achado sem número não desconta nada. ' +
+    'NÃO INVENTE O NÚMERO DE MESES e não deixe o sistema adivinhar: o art. 12-A da Lei 7.713/88 tributa rendimento acumulado pela tabela do MÊS sobre a MÉDIA MENSAL, ' +
+    'com a parcela a deduzir multiplicada de volta pelos meses. Jogar a tabela mensal sobre o total de sete anos não é aproximação conservadora: é OUTRO REGIME, ' +
+    'e produz um imposto de dezenas de por cento do crédito ao lado de um texto seu dizendo que o certo é o regime de competência. Análise incoerente consigo mesma é pior que análise incompleta. ' +
+    'Não achando o período em lugar nenhum dos autos, registre a divergência normalmente em auditoria_divergencias e diga o que falta: quem lê pede o período e o preço se refaz. ' +
     'A BASE É O VALOR TRIBUTÁVEL, e não a verba inteira: fora dela ficam o dano moral (Súmula 498/STJ), os danos emergentes, e — em verba remuneratória — ' +
     'os JUROS DE MORA (Tema 808/STF), que em condenação antiga são boa parte do valor atualizado. Havendo valor atualizado e nominal, diga no "motivo" qual você usou e por quê. ' +
     'NÃO INCLUA AQUI o IR dos honorários contratuais ou sucumbenciais: esse o sistema já calcula sozinho, verba a verba',
@@ -1489,8 +1493,9 @@ const SYSTEM_ANALISE =
   'Verba indenizatória, essa não sofre: férias indenizadas e o terço, licença-prêmio em pecúnia, dano moral e danos emergentes ficam fora da base previdenciária pela mesma razão que ficam fora da do IR. ' +
   'ONDE ESCREVER O QUE VOCÊ CORRIGIR. Achando tributo que a conta NÃO RETEVE, o caminho é "auditoria_ir_faltante": você declara a VERBA e a BASE TRIBUTÁVEL, ' +
   'e o sistema aplica a tabela progressiva — a mesma que já calcula o IR dos honorários, com o regime dos rendimentos acumulados. ' +
-  'NÃO APURE ALÍQUOTA E NÃO PARE POR NÃO SABER AS COMPETÊNCIAS: sem elas o sistema usa pagamento único, que é a tributação mais pesada e a leitura conservadora. ' +
-  'Achado sem número não desconta nada, e o preço segue contando com um líquido que não vai ser pago. ' +
+  'NÃO APURE ALÍQUOTA — mas DIGA O PERÍODO. A tabela é nossa; o número de competências é leitura sua, e sem ele não há regime nenhum a aplicar. ' +
+  'Ponha "de" e "ate" (MM/AAAA) do período de apuração, que você já leu para o confronto, ou "meses" quando souber o número direto. ' +
+  'Pagamento de uma competência só vai como "meses": 1. Sem nenhum dos dois o item é ignorado e o imposto NÃO entra no preço — com aviso dizendo isso. ' +
   'Tendo você o valor certo do tributo (a conta reteve MENOS e a memória permite refazer), pode escrever direto em "ir" ou "inss" o valor QUE DEVERIA TER SIDO retido. ' +
   'OS DOIS CAMINHOS SOMAM: use UM por verba — ou declara a base e deixa o sistema calcular, ou escreve o valor final. Fazer os dois cobra o imposto duas vezes. ' +
   'Registre a divergência também em "auditoria_divergencias" e explique a conta em "notas_celulas" (campo "ir"), para o número aparecer justificado na célula da planilha. ' +
@@ -2058,6 +2063,39 @@ async function refinarDados(
   const alteracoes = (entrada.alteracoes && typeof entrada.alteracoes === 'object' ? entrada.alteracoes : {}) as Record<string, unknown>;
   const remover = Array.isArray(entrada.remover) ? (entrada.remover as unknown[]).map(String) : [];
   const r = aplicarPatch(dadosAtuais, alteracoes, remover, CAMPOS_EDITAVEIS, CAMPOS_LISTA);
+
+  // QUEM DITA O NÚMERO NO CHAT MANDA, e a conta automática do imposto sai da
+  // frente.
+  //
+  // O bloco do IR faltante é idempotente porque guarda o valor LIDO e
+  // reconstrói a partir dele em toda ação. Isso conserta a soma repetida, e
+  // criaria outro problema se ficasse sozinho: quem escrevesse "o IR é
+  // R$ 5.000" no chat veria o número voltar ao lido na passada seguinte,
+  // porque a linha de base ficou congelada na primeira.
+  //
+  // Mexendo o chat num destes campos, a linha de base se REFAZ a partir do que
+  // ele escreveu — e "auditoria_ir_faltante" sai, porque o usuário está com o
+  // processo aberto e acabou de dizer o total. Somar a nossa estimativa por
+  // cima de um número afirmado seria cobrar o imposto duas vezes, e desta vez
+  // contra quem tem razão.
+  {
+    const _tocados = Object.keys(alteracoes ?? {});
+    if (_tocados.includes('ir')) {
+      delete r.dados._ir_lido;
+      if (Array.isArray(r.dados.auditoria_ir_faltante) && r.dados.auditoria_ir_faltante.length) {
+        delete r.dados.auditoria_ir_faltante;
+        r.mudancas.push('IR ditado no chat: a estimativa automática do imposto foi descartada');
+      }
+    }
+    if (_tocados.includes('principal_liquido')) delete r.dados._liquido_lido;
+    if (_tocados.includes('auditoria_justificativa')) delete r.dados._auditoria_justificativa_lida;
+    // Bruto novo muda a base de tudo: a estimativa antiga do imposto foi feita
+    // sobre outro número e não vale mais.
+    if (_tocados.includes('bruto_total')) {
+      delete r.dados._ir_lido;
+      delete r.dados._liquido_lido;
+    }
+  }
 
   // AS LINHAS DO QUESTIONÁRIO QUE O CHAT MANDOU ESCREVER ficam marcadas, e a
   // marca ACUMULA entre rodadas — quem corrigiu a linha 10 na terceira mensagem
@@ -3275,6 +3313,34 @@ Deno.serve(async (req) => {
     // que for maior), que cobre arredondamento de centavo sem deixar passar
     // troca de documento.
     /**
+     * O que a IA LEU, guardado antes de qualquer conta nossa.
+     *
+     * ESTE BLOCO RODA EM TODA AÇÃO — analisar, a consolidação, cada rodada do
+     * chat, o salvar —, e o `dados` viaja inteiro entre elas com
+     * `auditoria_ir_faltante` ainda dentro. Incrementar `dados.ir` fazia o
+     * imposto SOMAR A CADA PASSADA: a análise que aparece na tela já vem depois
+     * da consolidação, então ela saía com o IR dobrado, e cada mensagem no chat
+     * somava mais uma vez.
+     *
+     * Guardando o valor lido e reconstruindo a partir dele, a conta fica
+     * idempotente por construção: rodar dez vezes dá o mesmo que rodar uma.
+     */
+    if (dados._ir_lido == null) dados._ir_lido = Number(dados.ir) || 0;
+    if (dados._liquido_lido == null) dados._liquido_lido = Number(dados.principal_liquido) || 0;
+    if (dados._auditoria_justificativa_lida == null) {
+      dados._auditoria_justificativa_lida = String(dados.auditoria_justificativa ?? '');
+    }
+    // As notas que NÓS escrevemos saem da lista antes de serem reescritas — as
+    // da IA e as do chat ficam. Sem isto, a mesma memória de cálculo se
+    // duplicava na célula a cada ação.
+    if (Array.isArray(dados.notas_celulas)) {
+      dados.notas_celulas = dados.notas_celulas.filter((n: any) => n?.origem !== 'sistema');
+    }
+    dados.ir = dados._ir_lido;
+    dados.principal_liquido = dados._liquido_lido;
+    dados.auditoria_justificativa = dados._auditoria_justificativa_lida;
+
+    /**
      * Os avisos das contas que rodam ANTES dos arrays de aviso existirem.
      *
      * O IR faltante e o recálculo por índice mexem no valor sobre o qual o
@@ -3291,27 +3357,33 @@ Deno.serve(async (req) => {
     //
     // POR QUE ISTO EXISTE, e é um caso real. A auditoria achou, corretamente,
     // que não houve retenção de IR sobre a parcela de lucros cessantes — que é
-    // tributável (art. 43 do CTN: substituem renda que teria sido tributada) —
-    // e então PAROU, escrevendo "sem memória de competências nos autos, não é
-    // possível apurar a alíquota exata". Achado certo, número nenhum. E número
-    // nenhum não desconta nada: o preço seguiu contando com um líquido que não
-    // vai ser pago.
-    //
-    // A ALÍQUOTA EXATA NÃO É PROBLEMA DELA. A tabela progressiva já está aqui,
-    // em _shared/irpf.ts, com o regime dos rendimentos recebidos acumuladamente
-    // (art. 12-A da Lei 7.713/88) e com a convenção da casa para quando as
-    // competências não se sabem: PAGAMENTO ÚNICO, a tributação mais pesada.
-    // Errar para mais deixa o preço conservador; errar para menos é prometer um
-    // líquido que não vem.
-    //
-    // É A MESMA FUNÇÃO E A MESMA CONVENÇÃO já usadas no IR dos honorários — e
-    // isso importa mais que a economia de trabalho: dois caminhos calculando o
-    // mesmo imposto de jeitos diferentes fariam a tela e a planilha divergirem
-    // no mesmo processo.
+    // tributável (art. 43 do CTN) — e então PAROU, escrevendo "sem memória de
+    // competências nos autos, não é possível apurar a alíquota exata". Leitura
+    // impecável, número nenhum. E número nenhum não desconta nada: o preço
+    // seguia contando com um líquido que não vai ser pago.
     //
     // A IA DECLARA, O CÓDIGO CALCULA, como no recálculo por índice. Ela diz
-    // sobre QUE valor o imposto incide — que é a leitura, o trabalho dela — e,
-    // quando os autos derem, em quantas competências. O resto é tabela.
+    // sobre QUE valor o imposto incide e EM QUANTAS COMPETÊNCIAS; a tabela é
+    // nossa, em _shared/irpf.ts, e é a MESMA que calcula o IR dos honorários —
+    // dois caminhos calculando o mesmo imposto fariam a tela e a planilha
+    // divergirem no mesmo processo.
+    //
+    // O NÚMERO DE COMPETÊNCIAS É OBRIGATÓRIO, e a primeira versão errou aqui.
+    // Ela assumia PAGAMENTO ÚNICO quando não sabia, chamando isso de
+    // conservador. Não é conservador: é OUTRO REGIME. O art. 12-A da Lei
+    // 7.713/88 manda tributar rendimento recebido acumuladamente pela tabela do
+    // mês aplicada à média mensal, com a parcela a deduzir multiplicada de
+    // volta pelos meses — e num crédito de sete anos a diferença entre isso e a
+    // tabela mensal jogada sobre o total é de dezenas de por cento do crédito.
+    // Pior que o número: a análise ficava INCOERENTE consigo mesma, dizendo no
+    // texto que o critério certo é o regime de competência e entregando embaixo
+    // uma conta de pagamento único.
+    //
+    // Sem competências e sem período, o item é IGNORADO com aviso. É a resposta
+    // honesta: registra-se a divergência, diz-se o que falta, e uma frase no
+    // chat ("o período de apuração é 01/2015 a 12/2021") resolve. Número sob o
+    // regime que a própria análise diz que não se aplica não é meia resposta —
+    // é resposta errada com cara de exata.
     {
       const _itensIr = Array.isArray(dados.auditoria_ir_faltante)
         ? dados.auditoria_ir_faltante.slice(0, 6)
@@ -3320,6 +3392,7 @@ Deno.serve(async (req) => {
       const _memoriasIr: string[] = [];
       let _somaIr = 0;
       for (const it of _itensIr) {
+        const _verba = String(it?.verba ?? 'verba tributável').slice(0, 60);
         const _base = Number(it?.base);
         if (!Number.isFinite(_base) || _base <= 0) continue;
         // Base maior que o bruto é valor lido errado — o total de outro credor,
@@ -3327,16 +3400,38 @@ Deno.serve(async (req) => {
         // engoliria o crédito, e a precificação aceitaria sem reclamar.
         if (_brutoAqui > 0 && _base > _brutoAqui) {
           _avisosDaConta.push(
-            `A auditoria apontou IR faltante sobre uma base de ${brl(_base)}, maior que o bruto (${brl(_brutoAqui)}). ` +
+            `A auditoria apontou IR faltante sobre uma base de ${brl(_base)} em ${_verba}, maior que o bruto (${brl(_brutoAqui)}). ` +
             'O item foi ignorado — confira de onde saiu essa base.',
           );
           continue;
         }
-        const _m = Number(it?.meses);
-        const _calc = irProgressivo(_base, Number.isFinite(_m) && _m >= 1 ? _m : 1);
-        if (!(_calc.imposto > 0)) continue;
+        // AS COMPETÊNCIAS: declaradas, ou contadas do período de apuração.
+        // Contar do período é o caminho normal — a auditoria já leu o termo
+        // inicial e o final para o confronto com o título.
+        const _mDito = Number(it?.meses);
+        const _de = competencia(it?.de);
+        const _ate = competencia(it?.ate);
+        const _meses = Number.isFinite(_mDito) && _mDito >= 1
+          ? Math.floor(_mDito)
+          : (_de && _ate ? mesesEntre(_de, _ate) : null);
+        if (_meses == null || _meses < 1) {
+          _avisosDaContaAuditoria.push(
+            `⚠️ IR NÃO CALCULADO em ${_verba}: a auditoria achou a base tributável (${brl(_base)}) mas não disse em quantas competências ` +
+            'o pagamento se refere, nem o período de apuração. O art. 12-A da Lei 7.713/88 tributa rendimento acumulado pela tabela do MÊS sobre a média mensal, ' +
+            'e sem os meses não há como aplicá-la — jogar a tabela mensal sobre o total inteiro seria outro regime, não uma aproximação. ' +
+            'O preço NÃO embute este imposto. Diga o período no chat ("o período de apuração desta verba é 01/2015 a 12/2021") e o preço se refaz.',
+          );
+          continue;
+        }
+        const _calc = irProgressivo(_base, _meses);
+        if (!(_calc.imposto > 0)) {
+          _avisosDaContaAuditoria.push(
+            `IR de ${_verba}: nada a reter — ${_calc.memoria}.`,
+          );
+          continue;
+        }
         _somaIr += _calc.imposto;
-        _memoriasIr.push(`${String(it?.verba ?? 'verba tributável').slice(0, 60)} — ${_calc.memoria}`);
+        _memoriasIr.push(`${_verba} — ${_calc.memoria}`);
       }
       if (_somaIr > 0) {
         _somaIr = Number(_somaIr.toFixed(2));
@@ -3352,12 +3447,11 @@ Deno.serve(async (req) => {
           `IR NÃO RETIDO PELA CONTA, calculado pela tabela progressiva ${ANO_TABELA_IRRF}: ` +
           `${_memoriasIr.join(' | ')}. Total acrescentado ao IR: ${brl(_somaIr)} (de ${brl(_irAntes)} para ${brl(dados.ir)}).`;
         const _notasIr = Array.isArray(dados.notas_celulas) ? dados.notas_celulas : [];
-        _notasIr.push({ campo: 'ir', nota: _memoriaIr.slice(0, 350) });
+        _notasIr.push({ campo: 'ir', nota: _memoriaIr.slice(0, 350), origem: 'sistema' });
         dados.notas_celulas = _notasIr;
         _avisosDaContaAuditoria.push(
           `Tributo que a conta não reteve, calculado aqui: ${brl(_somaIr)} de IR acrescentados ` +
-          `(${_memoriasIr.length} ${_memoriasIr.length === 1 ? 'verba' : 'verbas'}, tabela progressiva ${ANO_TABELA_IRRF}). ` +
-          'Sem memória de competências nos autos, a tabela vale como PAGAMENTO ÚNICO — a tributação mais pesada, que é a leitura conservadora.',
+          `(${_memoriasIr.length} ${_memoriasIr.length === 1 ? 'verba' : 'verbas'}, tabela progressiva ${ANO_TABELA_IRRF}).`,
         );
         dados.auditoria_justificativa = `${_memoriaIr} ${String(dados.auditoria_justificativa ?? '').trim()}`.trim();
       }
@@ -3562,7 +3656,7 @@ Deno.serve(async (req) => {
           // dos valores — é lá que alguém vai conferir o número seis meses
           // depois, sem esta análise à mão.
           const _notas = Array.isArray(dados.notas_celulas) ? dados.notas_celulas : [];
-          _notas.push({ campo: 'bruto_total', nota: _memorias });
+          _notas.push({ campo: 'bruto_total', nota: _memorias, origem: 'sistema' });
           dados.notas_celulas = _notas;
           _avisosDaContaAuditoria.push(
             `${_feitos.length} ${_feitos.length === 1 ? 'consectário' : 'consectários'} conferido(s) na fonte oficial (Banco Central/SGS): ` +
