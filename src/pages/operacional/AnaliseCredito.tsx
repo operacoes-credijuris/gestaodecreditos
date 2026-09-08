@@ -65,6 +65,8 @@ import {
   valorDoCampo,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
+import { resumoDaOportunidade } from '@/lib/anotacaoKommo'
+import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -511,6 +513,98 @@ type BotoesDoCard = 'rpv' | 'precatorio' | 'nenhum'
  * errado no dia em que uma aba terminal ganhasse uma saída — que é justamente o
  * que acabou de acontecer com Pendentes na direção contrária.
  */
+/**
+ * A mensagem que acompanha o desfecho decidido PELO CARD.
+ *
+ * Existe porque mover um card é um ato que alguém vai ler depois, do outro lado
+ * do funil, sem a análise à frente. Em Pendentes essa mensagem é escrita dentro
+ * da janela de análise, com os achados para marcar; aqui não há análise aberta
+ * — quem aprova em Validação está lendo o card, não rodando a leitura dos autos
+ * (que custa minutos) —, então a janela é só o campo.
+ *
+ * APROVAR CHEGA PREENCHIDO com o resumo da oportunidade, que a análise gravou
+ * no card quando foi salva. Preenchido no CAMPO, e não escondido no envio: a
+ * nota sai sob o nome de quem confirma, e a linha da cessão pede complemento à
+ * mão.
+ */
+function JanelaDeMensagem({
+  lead,
+  acao,
+  sugestao,
+  exigeMotivo,
+  ocupado,
+  onConfirmar,
+  onFechar,
+}: {
+  lead: KommoLead
+  acao: AcaoTela
+  sugestao: string
+  exigeMotivo: boolean
+  ocupado: boolean
+  onConfirmar: (mensagem: string) => Promise<void>
+  onFechar: () => void
+}) {
+  const [mensagem, setMensagem] = useState(sugestao)
+  const [erro, setErro] = useState<string | null>(null)
+  const podeEnviar = !ocupado && (!exigeMotivo || mensagem.trim().length >= 10)
+
+  return (
+    <Modal
+      open
+      onClose={onFechar}
+      title={`${acao.label}: ${tituloCard(lead)}`}
+      description="A mensagem vai como nota no card do Kommo, junto do registro da movimentação."
+      size="lg"
+      dirty={mensagem.trim() !== sugestao.trim()}
+      footer={
+        <div className="flex items-center gap-2">
+          <Button
+            variant={acao.variant}
+            onClick={async () => {
+              setErro(null)
+              try {
+                await onConfirmar(mensagem.trim())
+              } catch (e) {
+                setErro((e as Error)?.message ?? String(e))
+              }
+            }}
+            disabled={!podeEnviar}
+            loading={ocupado}
+          >
+            Confirmar: {acao.label}
+          </Button>
+          <button
+            type="button"
+            onClick={onFechar}
+            disabled={ocupado}
+            className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
+          >
+            cancelar
+          </button>
+        </div>
+      }
+    >
+      <textarea
+        className="min-h-[220px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 font-mono text-[13px] leading-relaxed placeholder:font-sans placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        value={mensagem}
+        disabled={ocupado}
+        placeholder={
+          exigeMotivo
+            ? 'Por que o card está sendo movido. Quem lê não tem a análise à mão.'
+            : 'Opcional — o que o próximo a pegar este card precisa saber.'
+        }
+        onChange={(e) => setMensagem(e.target.value)}
+      />
+      {exigeMotivo && mensagem.trim().length > 0 && mensagem.trim().length < 10 && (
+        <p className="mt-1.5 text-xs text-amber-700">
+          Escreva a razão por extenso — ela fica no card como registro da decisão.
+        </p>
+      )}
+      {erro && <p className="mt-1.5 text-xs text-red-700">{erro}</p>}
+    </Modal>
+  )
+}
+
 const ABAS_RPV_TERMINAIS: ReadonlySet<string> = new Set(['aprovados', 'diligencia', 'reprovados'])
 
 /**
@@ -1372,6 +1466,11 @@ export default function AnaliseCredito() {
     return l
   }, [porAba, abaAtual, busca])
 
+  /** O card e o desfecho aguardando a mensagem, quando a decisão vem do card. */
+  const [mensagemDoCard, setMensagemDoCard] = useState<{ lead: KommoLead; acao: AcaoTela } | null>(
+    null,
+  )
+
   const mover = useMutation({
     mutationFn: (args: { leadId: number; statusId: number; comentario: string }) =>
       invokeFunction<{ mensagem: string; aviso: string | null }>('kommo-mover', args),
@@ -1391,16 +1490,43 @@ export default function AnaliseCredito() {
   })
 
   /**
-   * O desfecho pelo CARD: um clique, sem justificativa.
+   * Mover o card e deixar a mensagem como NOTA — o único caminho, para os dois
+   * lugares em que se decide um desfecho (a janela de análise, em Pendentes, e
+   * a janela do card, em Validação).
    *
-   * Continua assim onde ele existe — a aba de Validação —, porque ali a decisão
-   * é do dono sobre uma análise que ele acabou de ler, e a anotação da análise
-   * já está no card. O caminho COM motivo é o da janela, na aba de Pendentes:
-   * ver DesfechoDaAnalise em AnaliseRpvModal.
+   * A MENSAGEM NÃO VAI NA LINHA DE AUDITORIA DO MOVIMENTO. Colada nela, o feed
+   * do Kommo a renderiza como continuação do "Movido de X para Y por admin.":
+   * bloco corrido, sem as quebras, atrás de um "mais". A nota do kommo-anotar
+   * aparece como nota de verdade, com autor e parágrafos preservados.
+   *
+   * O MOVIMENTO PRIMEIRO, a nota depois: o feed ordena pela chegada, e a ordem
+   * de leitura é o que aconteceu e então por quê.
+   */
+  async function moverComNota(leadId: number, statusId: number, mensagem: string) {
+    await mover.mutateAsync({ leadId, statusId, comentario: '' })
+    const texto = mensagem.trim()
+    if (!texto) return
+    try {
+      await invokeFunction('kommo-anotar', { lead_id: leadId, texto })
+    } catch (e) {
+      throw new Error(
+        'O card foi movido, mas a nota com a mensagem não subiu (' +
+          ((e as Error)?.message ?? String(e)) +
+          '). O texto continua aqui.',
+      )
+    }
+  }
+
+  /**
+   * O desfecho pelo CARD: abre a janela da mensagem.
+   *
+   * ANTES ERA UM CLIQUE SECO, e o card mudava de coluna sem uma linha de
+   * explicação. Quem pega o card do outro lado — para apresentar a proposta,
+   * para refazer a diligência — não tem a análise à frente, e a movimentação
+   * sozinha não diz por quê.
    */
   function acionar(lead: KommoLead, acao: AcaoTela) {
-    setEmAndamento({ leadId: lead.kommo_lead_id, statusId: acao.statusId })
-    mover.mutate({ leadId: lead.kommo_lead_id, statusId: acao.statusId, comentario: '' })
+    setMensagemDoCard({ lead, acao })
   }
 
   return (
@@ -1623,6 +1749,40 @@ export default function AnaliseCredito() {
         )}
       </Card>
 
+      {mensagemDoCard && (
+        <JanelaDeMensagem
+          key={`${mensagemDoCard.lead.kommo_lead_id}-${mensagemDoCard.acao.statusId}`}
+          lead={mensagemDoCard.lead}
+          acao={mensagemDoCard.acao}
+          // O RESUMO DA OPORTUNIDADE SÓ NA APROVAÇÃO: é o que a coluna seguinte
+          // precisa para montar a proposta. Numa diligência ou reprovação ele
+          // seria a ficha de um crédito que não vai adiante.
+          sugestao={
+            mensagemDoCard.acao.statusId === ST_PROPOSTA && mensagemDoCard.lead.oportunidade
+              ? resumoDaOportunidade(mensagemDoCard.lead.oportunidade)
+              : ''
+          }
+          exigeMotivo={
+            mensagemDoCard.acao.statusId === ST_DILIGENCIA ||
+            mensagemDoCard.acao.statusId === ST_REPROVADO
+          }
+          ocupado={mover.isPending}
+          onConfirmar={async (mensagem) => {
+            setEmAndamento({
+              leadId: mensagemDoCard.lead.kommo_lead_id,
+              statusId: mensagemDoCard.acao.statusId,
+            })
+            await moverComNota(
+              mensagemDoCard.lead.kommo_lead_id,
+              mensagemDoCard.acao.statusId,
+              mensagem,
+            )
+            setMensagemDoCard(null)
+          }}
+          onFechar={() => setMensagemDoCard(null)}
+        />
+      )}
+
       {rpvLead && (
         <AnaliseRpvModal
           // key pelo card: trocar de card recomeça a análise do zero.
@@ -1635,36 +1795,7 @@ export default function AnaliseCredito() {
           // lugares daria duas portas para a mesma decisão.
           acoes={abaAtual?.key === ABA_RPV_DESFECHO_NA_JANELA ? (abaAtual?.acoes ?? []) : []}
           onMover={async (statusId, comentario) => {
-            // O MOTIVO VAI COMO NOTA, e não na linha de auditoria do movimento.
-            //
-            // Colado nela, o feed do Kommo o renderiza como continuação do
-            // "Movido de X para Y por admin.": bloco corrido, sem as quebras,
-            // atrás de um "mais" — inclusive as linhas em branco somem. A nota
-            // que o kommo-anotar escreve aparece como nota de verdade no feed,
-            // com autor e parágrafos preservados; é o caminho que funciona
-            // neste mesmo card, ao lado das anotações da análise.
-            //
-            // `comentario: ''` no movimento de propósito: a linha de auditoria
-            // fica só com o que ela é — quem moveu, de onde para onde.
-            //
-            // O MOVIMENTO PRIMEIRO, a nota depois: o feed ordena pela chegada,
-            // e a ordem de leitura é o que aconteceu e então por quê.
-            await mover.mutateAsync({ leadId: rpvLead.kommo_lead_id, statusId, comentario: '' })
-            const motivo = comentario.trim()
-            if (motivo) {
-              try {
-                await invokeFunction('kommo-anotar', { lead_id: rpvLead.kommo_lead_id, texto: motivo })
-              } catch (e) {
-                // ESTOURA PARA A JANELA, e não um toast: o texto está no campo
-                // dela, e fechar aqui o perderia. O card já moveu — a pessoa lê
-                // o que faltou com o motivo ainda na tela, e decide.
-                throw new Error(
-                  'O card foi movido, mas a nota com o motivo não subiu (' +
-                    ((e as Error)?.message ?? String(e)) +
-                    '). O texto continua aqui.',
-                )
-              }
-            }
+            await moverComNota(rpvLead.kommo_lead_id, statusId, comentario)
             // A janela fecha porque o card saiu desta aba: manter aberta uma
             // análise de um card que já foi movido é oferecer botões que não
             // valem mais.

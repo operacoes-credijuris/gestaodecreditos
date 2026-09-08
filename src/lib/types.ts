@@ -1,3 +1,5 @@
+import type { EntradaOportunidade } from './anotacaoKommo'
+
 // Tipos de domínio do sistema Credijuris.
 // Espelham as tabelas da migração 0001_init.sql. Para tipagem 100% gerada
 // pelo banco, opcionalmente rode: supabase gen types typescript --linked
@@ -71,6 +73,14 @@ export interface KommoLead {
    * migração 0059, que nascem sem ele.
    */
   drive_pasta_id: string | null
+  /**
+   * A entrada do resumo da oportunidade, gravada pelo salvar da análise.
+   *
+   * Existe porque a análise NÃO É PERSISTIDA: ela vive na memória do navegador
+   * de quem a rodou. Quem aprova está em Validação, em outra sessão — e sem
+   * isto o resumo no clique de "Aprovar" exigiria rodar a análise de novo.
+   */
+  oportunidade: EntradaOportunidade | null
   tags: string[]
   criado_em: string | null
   atualizado_em: string | null

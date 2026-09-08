@@ -4316,9 +4316,54 @@ Deno.serve(async (req) => {
     // BEST-EFFORT, e num try próprio: a planilha já subiu e o link já vai na
     // resposta. Falhar em gravar um atalho não pode custar a análise que acabou
     // de levar minutos.
+    // A FICHA QUE VOLTA PARA O CARD DO KOMMO.
+    //
+    // O comercial não abre a planilha: ele lê a anotação. Ela dizia só
+    // "aprovado" e o link, então saber SOBRE QUE CRÉDITO era a aprovação exigia
+    // abrir o Drive. São os campos do cadastro dele, preenchidos com o que a
+    // análise leu dos autos — é assim que ele confere o card.
+    const fichaDoCard = {
+      tipo: categoria === 'Precatórios' ? 'Precatório' : 'RPV',
+      processo: numeroProcesso || String(dados.numero_processo ?? ''),
+      tribunal: String(dados.tribunal ?? '').trim(),
+      // O TITULAR DO CRÉDITO LIDO DOS AUTOS, e não o do card: é o mesmo nome
+      // que nomeia a pasta no Drive, então a ficha e o arquivo não divergem.
+      cedente: credorTitulo,
+      entidade_devedora: enteDevedor,
+      parcela_cedida: String(dados.tipo_credito ?? '').trim(),
+      // OS TRÊS CAMPOS DO RESUMO DA OPORTUNIDADE, que a ficha não tinha: o
+      // resumo é montado no navegador, num módulo puro, e só chega ali o que a
+      // ficha carrega.
+      uf: String(dados.uf_tramitacao ?? '').trim(),
+      fase: String(dados.fase_processual ?? '').trim(),
+      honorarios_destacados:
+        dados.honorarios_destacados == null ? null : !!dados.honorarios_destacados,
+      // O VALOR DO CRÉDITO NEGOCIADO, e não o preço: a soma dos líquidos das
+      // verbas que entraram no negócio. O preço fica na planilha, que é onde a
+      // proposta se monta.
+      valor_cedido: Number(calc.Y3) || 0,
+      honorarios_pct: dados._hon_pct == null ? null : Number(dados._hon_pct),
+    };
+
     if (leadId) {
       try {
-        await sbAdmin.from('kommo_leads').update({ drive_pasta_id: cedenteId }).eq('kommo_lead_id', leadId);
+        await sbAdmin.from('kommo_leads').update({
+          drive_pasta_id: cedenteId,
+          // O RESUMO DA OPORTUNIDADE GUARDADO NO CARD, porque quem aprova não
+          // tem a análise: ela vive na memória do navegador de quem a rodou, e
+          // a aprovação acontece na coluna de Validação, em outra sessão e
+          // muitas vezes por outra pessoa. Sem isto, montar o resumo no clique
+          // de "Aprovar" exigiria reler o processo inteiro.
+          //
+          // A ENTRADA, e não o texto pronto: o formato mora no código, com
+          // teste, e mudá-lo passa a valer para os cards antigos.
+          oportunidade: {
+            ficha: fichaDoCard,
+            link: `https://drive.google.com/drive/folders/${cedenteId}`,
+            prazoMeses: Number(T5.toFixed(1)),
+            dataPagamento: dados.data_pagamento ?? null,
+          },
+        }).eq('kommo_lead_id', leadId);
       } catch { /* atalho é atalho */ }
     }
 
@@ -4353,34 +4398,7 @@ Deno.serve(async (req) => {
       // lia `avisos` numa resposta que nunca os mandava e por isso nunca
       // aparecia.
       avisos,
-      // A FICHA QUE VOLTA PARA O CARD DO KOMMO.
-      //
-      // O comercial não abre a planilha: ele lê a anotação. Ela dizia só
-      // "aprovado" e o link, então saber SOBRE QUE CRÉDITO era a aprovação
-      // exigia abrir o Drive. São os campos do cadastro dele, preenchidos com
-      // o que a análise leu dos autos — é assim que ele confere o card.
-      ficha: {
-        tipo: categoria === 'Precatórios' ? 'Precatório' : 'RPV',
-        processo: numeroProcesso || String(dados.numero_processo ?? ''),
-        tribunal: String(dados.tribunal ?? '').trim(),
-        // O TITULAR DO CRÉDITO LIDO DOS AUTOS, e não o do card: é o mesmo nome
-        // que nomeia a pasta no Drive, então a ficha e o arquivo não divergem.
-        cedente: credorTitulo,
-        entidade_devedora: enteDevedor,
-        parcela_cedida: String(dados.tipo_credito ?? '').trim(),
-        // OS TRÊS CAMPOS DO RESUMO DA OPORTUNIDADE, que a ficha não tinha: o
-        // resumo é montado no navegador, num módulo puro, e só chega ali o que
-        // a ficha carrega.
-        uf: String(dados.uf_tramitacao ?? '').trim(),
-        fase: String(dados.fase_processual ?? '').trim(),
-        honorarios_destacados:
-          dados.honorarios_destacados == null ? null : !!dados.honorarios_destacados,
-        // O VALOR DO CRÉDITO NEGOCIADO, e não o preço: a soma dos líquidos
-        // das verbas que entraram no negócio. O preço fica na planilha, que
-        // é onde a proposta se monta.
-        valor_cedido: Number(calc.Y3) || 0,
-        honorarios_pct: dados._hon_pct == null ? null : Number(dados._hon_pct),
-      },
+      ficha: fichaDoCard,
       // dados úteis pro .md/.csv (gerados no front ou em passo futuro)
       m1_sintese: dados.m1_sintese ?? null,
       riscos: riscosComAuditoria(dados),
