@@ -182,8 +182,23 @@ export interface AuditoriaRpv {
   bruto_autos: number | null
   bruto_conservador: number | null
   justificativa: string | null
-  criterio_titulo: string | null
-  criterio_aplicado: string | null
+  /**
+   * O confronto item a item entre o título e a conta.
+   *
+   * Eram dois blocos de prosa — "o título manda" e "a conta aplicou" — e prosa
+   * deixa passar: quem resume "a conta seguiu o título, com divergência no
+   * índice" não conferiu o termo inicial dos juros de cada verba, e não tem
+   * como saber que não conferiu. Uma linha por par verba × critério obriga a
+   * percorrer, e mostra na tela o que foi olhado além do que foi achado.
+   */
+  confronto: Array<{
+    verba: string
+    criterio: string
+    titulo: string
+    conta: string
+    /** 'sim' | 'nao' | 'titulo_silente' | 'conta_sem_memoria' */
+    confere: string
+  }>
   divergencias: Array<{
     item: string
     esperado: string
@@ -577,6 +592,21 @@ const COR_GRAU: Record<GrauRisco, string> = {
   NOTA: 'bg-slate-50 text-slate-400 ring-slate-200/60',
 }
 
+/**
+ * O que cada veredito do confronto quer dizer, na tela.
+ *
+ * "conta_sem_memoria" NÃO é "confere". A planilha que traz só o total, sem
+ * dizer qual índice e qual termo aplicou, não foi conferida — foi lida. A
+ * distinção existe porque marcá-la como "sim" transformaria "não deu para
+ * verificar" em "está certo", que é o oposto.
+ */
+const VEREDITO_CONFRONTO: Record<string, { texto: string; cor: string }> = {
+  sim: { texto: 'confere', cor: 'text-slate-500' },
+  nao: { texto: 'fora do título', cor: 'text-amber-700' },
+  titulo_silente: { texto: 'título silente', cor: 'text-slate-400' },
+  conta_sem_memoria: { texto: 'sem memória', cor: 'text-amber-700' },
+}
+
 /** O selo do grau, inline no parágrafo. */
 function Selo({ grau }: { grau: GrauRisco }) {
   return (
@@ -755,6 +785,17 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
   const [criterios, setCriterios] = useState(false)
 
   const divs = auditoria.divergencias ?? []
+  const confronto = auditoria.confronto ?? []
+  // O RÓTULO DO BOTÃO CONTA O QUE FOI OLHADO. "Ver o confronto" não diz se a
+  // auditoria percorreu três itens ou vinte, e essa é a diferença entre uma
+  // conferência e uma passada de olho.
+  const naoConferem = confronto.filter((c) => c.confere === 'nao').length
+  const semMemoria = confronto.filter((c) => c.confere === 'conta_sem_memoria').length
+  const rotuloConfronto = confronto.length
+    ? `Confronto com o título: ${confronto.length} ${confronto.length === 1 ? 'item conferido' : 'itens conferidos'}` +
+      (naoConferem ? `, ${naoConferem} fora do título` : '') +
+      (semMemoria ? `, ${semMemoria} sem memória de cálculo` : '')
+    : 'Natureza do crédito'
   // O risco de revisão vem em "alto" | "medio" | "baixo" | "nenhum"; o selo é o
   // mesmo vocabulário dos riscos, para os dois blocos não terem escalas
   // paralelas. "baixo" e "nenhum" caem em NOTA, que é o grau mais fraco.
@@ -818,39 +859,59 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
           </ul>
         )}
 
-        {/* OS DOIS CRITÉRIOS, atrás de um clique. São dois parágrafos longos —
-            o que o título mandou e o que a conta aplicou —, e é a leitura de
-            quem vai refazer a conta, não de quem está decidindo o preço. */}
-        {(auditoria.criterio_titulo || auditoria.criterio_aplicado) && (
+{/* O CONFRONTO, atrás de um clique — é a leitura de quem vai refazer a
+            conta, não de quem está decidindo o preço. Mas o CONTADOR fica à
+            vista: saber que 18 itens foram conferidos e 2 não bateram é
+            informação de decisão; qual foi o índice do terceiro item não é. */}
+        {(confronto.length > 0 || auditoria.natureza) && (
           <div className="border-t border-slate-200/80 pt-2.5">
             <button
               type="button"
               onClick={() => setCriterios((v) => !v)}
               className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
             >
-              {criterios ? 'Esconder os critérios' : 'O que o título manda e o que a conta fez'}
+              {criterios ? 'Esconder o confronto' : rotuloConfronto}
             </button>
             {criterios && (
-              <dl className="mt-2 space-y-2 text-xs leading-relaxed">
+              <div className="mt-2 space-y-2 text-xs leading-relaxed">
                 {auditoria.natureza && (
-                  <div>
-                    <dt className="font-medium text-slate-600">Natureza do crédito</dt>
-                    <dd className="text-slate-500">{auditoria.natureza}</dd>
+                  <p>
+                    <span className="font-medium text-slate-600">Natureza do crédito: </span>
+                    <span className="text-slate-500">{auditoria.natureza}</span>
+                  </p>
+                )}
+                {confronto.length > 0 && (
+                  // A tabela rola por dentro: são quatro colunas de texto, e a
+                  // janela não pode rolar de lado por causa de uma delas.
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[34rem] border-collapse">
+                      <thead>
+                        <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                          <th className="py-1 pr-3 text-left font-medium">Verba</th>
+                          <th className="py-1 pr-3 text-left font-medium">Critério</th>
+                          <th className="py-1 pr-3 text-left font-medium">O título manda</th>
+                          <th className="py-1 pr-3 text-left font-medium">A conta fez</th>
+                          <th className="py-1 text-left font-medium">Confere</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {confronto.map((c, i) => {
+                          const v = VEREDITO_CONFRONTO[c.confere] ?? { texto: c.confere, cor: 'text-slate-400' }
+                          return (
+                            <tr key={i} className="border-t border-slate-200/70 align-top">
+                              <td className="py-1 pr-3 text-slate-600">{c.verba}</td>
+                              <td className="py-1 pr-3 text-slate-600">{c.criterio}</td>
+                              <td className="py-1 pr-3 text-slate-500">{c.titulo}</td>
+                              <td className="py-1 pr-3 text-slate-500">{c.conta}</td>
+                              <td className={cn('py-1 whitespace-nowrap font-medium', v.cor)}>{v.texto}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
-                {auditoria.criterio_titulo && (
-                  <div>
-                    <dt className="font-medium text-slate-600">O título executivo manda</dt>
-                    <dd className="text-slate-500">{auditoria.criterio_titulo}</dd>
-                  </div>
-                )}
-                {auditoria.criterio_aplicado && (
-                  <div>
-                    <dt className="font-medium text-slate-600">A conta aplicou</dt>
-                    <dd className="text-slate-500">{auditoria.criterio_aplicado}</dd>
-                  </div>
-                )}
-              </dl>
+              </div>
             )}
           </div>
         )}

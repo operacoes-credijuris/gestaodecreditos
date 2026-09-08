@@ -607,9 +607,10 @@ function limparNomeArquivo(s: string): string {
  */
 function auditoriaParaTela(dados: any, avisos: string[]): any {
   const divs = Array.isArray(dados?.auditoria_divergencias) ? dados.auditoria_divergencias : [];
-  // `auditoria_criterio_aplicado` preenchido é o sinal de que a IA de fato leu a
-  // conta: é o campo em que ela descreve o que a memória de cálculo aplicou.
-  if (!divs.length && !dados?.auditoria_criterio_aplicado && !dados?._auditoria_aplicada) return null;
+  const conf = Array.isArray(dados?.auditoria_confronto) ? dados.auditoria_confronto : [];
+  // O CONFRONTO PREENCHIDO é o sinal de que a IA de fato leu a conta contra o
+  // título: é a tabela em que ela diz, item a item, o que cada um manda.
+  if (!divs.length && !conf.length && !dados?._auditoria_aplicada) return null;
   const n = (v: unknown) => (v == null || v === '' ? null : Number(v) || 0);
   return {
     natureza: dados.auditoria_natureza ? String(dados.auditoria_natureza) : null,
@@ -621,8 +622,13 @@ function auditoriaParaTela(dados: any, avisos: string[]): any {
     bruto_autos: n(dados.bruto_total),
     bruto_conservador: n(dados.auditoria_bruto_conservador),
     justificativa: dados.auditoria_justificativa ? String(dados.auditoria_justificativa) : null,
-    criterio_titulo: dados.auditoria_criterio_titulo ? String(dados.auditoria_criterio_titulo) : null,
-    criterio_aplicado: dados.auditoria_criterio_aplicado ? String(dados.auditoria_criterio_aplicado) : null,
+    confronto: conf.map((c: any) => ({
+      verba: String(c?.verba ?? ''),
+      criterio: String(c?.criterio ?? ''),
+      titulo: String(c?.titulo ?? ''),
+      conta: String(c?.conta ?? ''),
+      confere: String(c?.confere ?? ''),
+    })),
     divergencias: divs.map((d: any) => ({
       item: String(d?.item ?? 'divergência'),
       esperado: String(d?.esperado ?? ''),
@@ -1199,8 +1205,18 @@ const SCHEMA_ANALISE = {
 
   // AUDITORIA DOS CÁLCULOS — ver a seção "AUDITORIA" no prompt do sistema.
   auditoria_natureza: 'a natureza do crédito para fins de correção: "tributária" | "não tributária" | "trabalhista" | "indefinida". É o que decide o regime de índices, e errar aqui contamina toda a auditoria',
-  auditoria_criterio_titulo: 'o que o TÍTULO EXECUTIVO mandou aplicar, como está escrito nele: período de apuração, verbas deferidas, base de cálculo, índices de correção e juros, termo inicial de cada um. Cite o trecho e onde está. Se o título for silente em algum ponto, diga que é silente — não preencha com a praxe',
-  auditoria_criterio_aplicado: 'o que a conta que vale EFETIVAMENTE aplicou, nos mesmos itens. Se a conta não explicita o índice, diga isso: conta sem memória é, por si, um achado',
+  auditoria_confronto:
+    'O CONFRONTO ITEM A ITEM entre o que o TÍTULO mandou e o que a CONTA fez. Lista, uma linha por par VERBA × CRITÉRIO, cada uma {verba, criterio, titulo, conta, confere}. ' +
+    'ERA UM RESUMO EM PROSA E VIROU TABELA porque resumo deixa passar: quem narra "a conta seguiu o título, com divergência no índice" não olhou o termo inicial dos juros de cada verba. Linha a linha, olha. ' +
+    '"verba" = a que o item se refere ("principal", "danos emergentes", "lucros cessantes", "dano moral", "honorários sucumbenciais", "todas" quando o critério for único para o crédito inteiro). ' +
+    'UMA LINHA POR VERBA, e não uma para o conjunto, sempre que o título tratar as verbas de modo diferente — é o erro mais comum e o mais caro: a sentença fixa juros do evento danoso para uma verba e da citação para outra, ' +
+    'e a conta aplica um marco só a tudo. Se você escrever "todas" sem ter conferido verba por verba, a divergência passa. ' +
+    '"criterio" = um destes, e percorra TODOS os que se aplicarem: "verba deferida", "período de apuração", "base de cálculo", "percentual/fração", ' +
+    '"índice de correção", "termo inicial da correção", "taxa de juros", "termo inicial dos juros", "termo final", "dedução/compensação determinada", "tributação", "honorários — percentual e base". ' +
+    '"titulo" = o que a sentença ou o acórdão determinam NAQUELE item, com o trecho e a localização (ID/página) quando houver — no máximo 140 caracteres. ' +
+    '"conta" = o que a conta que vale efetivamente aplicou naquele item, também em até 140 caracteres. ' +
+    '"confere" = "sim" | "nao" | "titulo_silente" (o título não trata do item e a conta usou a praxe — diga na coluna "conta" qual praxe) | "conta_sem_memoria" (a conta não explicita o critério; isso é achado, não é "sim"). ' +
+    'TODA linha com confere="nao" tem de ter a divergência correspondente em auditoria_divergencias, e nenhuma divergência pode existir sem a sua linha aqui. As duas listas se conferem uma à outra',
   auditoria_divergencias:
     'lista das divergências entre o título e a conta, cada uma {item, esperado, encontrado, efeito_se_corrigida, gravidade, fundamento}: ' +
     '"item" = do que se trata (ex.: "índice de correção de 01/2015 a 12/2021"); ' +
@@ -1341,7 +1357,24 @@ const SYSTEM_ANALISE =
   '=== AUDITORIA DOS CÁLCULOS === ' +
   'ANTES de dar o crédito por bom, AUDITE a conta. Cálculo homologado NÃO é cálculo definitivo: erro material e critério contrário a título executivo ou a lei se revisam mesmo depois do trânsito, e quem compra o crédito é quem perde se a revisão vier. A auditoria não existe para achar defeito — existe para que o preço embuta o risco que ela achar. ' +
   'O QUE CONFERIR, nesta ordem: ' +
-  '(1) FIDELIDADE AO TÍTULO. Compare a conta com o que a sentença ou o acórdão mandaram: período de apuração, verbas deferidas (nem uma a mais, nem uma a menos), base de cálculo, percentuais, termo inicial de juros e de correção. Divergência aqui é a mais grave, porque a conta não pode inovar sobre o título. ' +
+  '(1) FIDELIDADE AO TÍTULO — a checagem mais importante das cinco, e a que mais escapa. A conta NÃO PODE INOVAR sobre o título: o que a sentença ou o acórdão determinaram é o teto e o piso do que se pode cobrar, ' +
+  'e divergência aqui se revisa mesmo depois do trânsito, porque é a coisa julgada que está sendo descumprida. ' +
+  'FAÇA ISSO COMO CONFRONTO, e não como leitura. Preencha "auditoria_confronto" com UMA LINHA por par verba × critério, dizendo o que o título manda e o que a conta fez em cada um. ' +
+  'A tabela existe para te obrigar a percorrer todos os itens: em prosa, quem resume "a conta seguiu o título" não conferiu o termo inicial dos juros de cada verba, e não tem como saber que não conferiu. ' +
+  'CADA VERBA PODE TER REGRA PRÓPRIA, e este é o erro que mais passa. Numa condenação de parcelas mistas o título costuma fixar marcos DIFERENTES: ' +
+  'juros do dano moral desde o evento danoso e correção desde o arbitramento; juros dos danos emergentes desde a citação, quando a relação é contratual ou quando a sentença assim determinou; ' +
+  'lucros cessantes com termo próprio, ligado ao período em que a renda deixou de existir. A conta, feita numa planilha só, aplica um marco a TODAS as verbas — e ninguém percebe, porque o total parece razoável. ' +
+  'Confira verba por verba. Se você marcar "todas" numa linha do confronto sem ter olhado cada uma, a divergência passa e o crédito sai inflado. ' +
+  'O QUE PERCORRER, em cada verba: (a) ela foi DEFERIDA no título? Verba cobrada e não deferida é a divergência mais grave que existe; ' +
+  '(b) o PERÍODO de apuração cabe no que o título deferiu, e não o excede por um mês sequer; ' +
+  '(c) a BASE DE CÁLCULO é a que o título mandou (vencimento-base, remuneração integral, valor da parcela) — trocar a base infla tudo o que vem depois; ' +
+  '(d) o PERCENTUAL ou a fração conferem; ' +
+  '(e) o ÍNDICE de correção e o seu TERMO INICIAL; (f) a TAXA de juros e o seu TERMO INICIAL, que quase nunca é o mesmo da correção; ' +
+  '(g) DEDUÇÕES E COMPENSAÇÕES que o título determinou (valores já pagos administrativamente, abatimento de parcelas recebidas) — se a conta não as fez, o crédito está inflado; ' +
+  '(h) os HONORÁRIOS: o percentual fixado e SOBRE O QUE ele incide (valor da condenação, valor atualizado, proveito econômico). ' +
+  'SILÊNCIO DO TÍTULO NÃO É AUTORIZAÇÃO. Se o título não trata de um item e a conta usou a praxe, marque "titulo_silente" e diga qual praxe foi usada — é aí que entram as súmulas do bloco (2b), como regra supletiva. ' +
+  'CONTA SEM MEMÓRIA É ACHADO. Planilha que traz só o total, sem dizer qual índice e qual termo aplicou, não pode ser marcada como conferida: marque "conta_sem_memoria". ' +
+  'Não é acusação de erro — é a constatação de que não dá para verificar, e quem compra assume isso. ' +
   '(2) OS ÍNDICES, pela natureza do crédito e pela data. Os marcos que valem para condenações da FAZENDA PÚBLICA (União, estados, DF e municípios): ' +
   '• ATÉ 08/12/2021, condenação NÃO TRIBUTÁRIA: correção pelo IPCA-E e juros pela remuneração da caderneta de poupança (STF, Tema 810, RE 870.947; STJ, Tema 905). A TR foi declarada inconstitucional como índice de correção — conta que ainda a use tem vício conhecido. ' +
   '• A PARTIR DE 09/12/2021: SELIC ÚNICA, cobrindo correção e juros ao mesmo tempo (EC 113/2021, art. 3º). Aplicação PROSPECTIVA sobre o valor já consolidado até 08/12/2021 — não se aplica SELIC retroativa ao período anterior, e não se soma SELIC a juros de mora do mesmo período, o que seria bis in idem. ' +
@@ -1787,7 +1820,7 @@ const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
  */
 const CAMPOS_EDITAVEIS: ReadonlySet<string> = new Set(Object.keys(SCHEMA_ANALISE));
 const CAMPOS_LISTA: ReadonlySet<string> = new Set([
-  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias', 'notas_celulas',
+  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias', 'auditoria_confronto', 'notas_celulas',
 ]);
 
 const FERRAMENTA_REVISAO = {
@@ -3437,7 +3470,7 @@ Deno.serve(async (req) => {
           `⚠️ Auditoria: ${_divs.length} divergência(s) na conta${_reduzem ? `, ${_reduzem} que derruba(m) o crédito se corrigida(s)` : ''} — ` +
           `o preço NÃO embute esse risco. Risco de revisão: ${_risco || 'não classificado'}.`,
         );
-      } else if (dados.auditoria_criterio_aplicado) {
+      } else if (Array.isArray(dados.auditoria_confronto) && dados.auditoria_confronto.length) {
         avisosAuditoria.push(`Auditoria: conta conferida contra o título e os índices da Fazenda, e fiel. Risco de revisão: ${_risco || 'baixo'}.`);
       }
       for (const a of avisosAuditoria) avisosBase.push(a);
