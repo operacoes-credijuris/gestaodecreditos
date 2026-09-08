@@ -35,6 +35,18 @@ import {
   type TetoConsultado,
 } from "../_shared/tetosRpv.ts";
 import { ANO_TABELA_IRRF, irProgressivo } from "../_shared/irpf.ts";
+import {
+  competencia,
+  ehIndiceConhecido,
+  fatorAcumulado,
+  janelaSgs,
+  pontosMensais,
+  recalcularPorIndice,
+  SERIE_DO_INDICE,
+  urlSgs,
+  type FatorAcumulado,
+  type NomeDeIndice,
+} from "../_shared/indicesBcb.ts";
 import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
 import {
@@ -1225,6 +1237,19 @@ const SCHEMA_ANALISE = {
     '"gravidade" = pela força do fundamento contra o que a conta fez, e SÓ por isso: "alta" com súmula, tema repetitivo ou jurisprudência consolidada; "media" com questão controvertida; "baixa" com imprecisão sem efeito no valor. NUNCA classifique por quem a divergência favorece; ' +
     '"fundamento" = a norma, a súmula, o tema ou a decisão que sustenta o "esperado". Lista vazia quando a conta está fiel ao título',
   auditoria_risco_revisao: '"alto" | "medio" | "baixo" | "nenhum" — a chance de a conta ser revista para MENOS, mesmo já homologada',
+  auditoria_recalculo:
+    'O PEDIDO DE RECÁLCULO POR ÍNDICE OFICIAL, quando a divergência que você achou for de ÍNDICE ou de TERMO (inicial ou final) da correção. ' +
+    'Objeto {base, de, ate, indice_titulo, indice_conta}, ou null quando não houver divergência dessa natureza. ' +
+    'VOCÊ NÃO FAZ ESTA CONTA: o sistema busca as duas séries no Banco Central (SGS) e refaz o valor por proporção, com a memória. ' +
+    'Você não tem série histórica de índice, e uma variação acumulada de sete anos "lembrada" sai errada com cara de exata — por isso o campo existe. ' +
+    '"base" = o valor ATUALIZADO que a conta produziu para o trecho em questão, número. Ele tem de ser uma PARTE do bruto_total (ou igual a ele): ' +
+    'o sistema calcula o bruto revisado como bruto_total − base + valor recalculado. Sendo a divergência sobre o crédito inteiro, base = bruto_total. ' +
+    '"de" e "ate" = as competências do período de correção, em MM/AAAA. Use o TERMO QUE O TÍTULO MANDA, não o que a conta usou — o erro de termo se conserta aqui, ' +
+    'pedindo o índice certo pelo período certo. ' +
+    '"indice_titulo" = o índice que o título ou a lei mandam; "indice_conta" = o que a conta aplicou. Um destes, EXATAMENTE: ' +
+    '"IPCA-E" (o IPCA-15 dos Temas 810/STF e 905/STJ), "IPCA", "INPC", "IGP-M", "SELIC", "TR", "POUPANCA". Índice fora da lista faz o recálculo ser ignorado. ' +
+    'SENDO O MESMO ÍNDICE nos dois campos e a divergência só de TERMO, é isso mesmo: o período pedido é o do título, e a proporção corrige a diferença. ' +
+    'PREENCHA TAMBÉM "auditoria_bruto_conservador" com a sua melhor estimativa: se o Banco Central não responder, é ela que vale',
   auditoria_bruto_conservador:
     'o valor bruto no CENÁRIO CONSERVADOR, número. null SÓ quando não houver nenhuma divergência que reduza o crédito. ' +
     'Só pode ser MENOR que o bruto apurado — auditoria não aumenta crédito. ' +
@@ -1478,7 +1503,10 @@ const SYSTEM_ANALISE =
   'porque a série do índice não está nos autos, porque a conta não tem memória, porque falta uma data. Estimando, diga O QUE FALTOU e QUAL SUBSTITUTO usou. ' +
   'Número apresentado como exato quando é aproximado é pior que aproximado declarado: quem lê para de conferir. ' +
   'NÃO INVENTE PRECISÃO QUE VOCÊ NÃO TEM. Você não dispõe de série histórica de índice nem de calculadora: uma variação acumulada de IPCA-E de sete anos "lembrada" sai errada e sai com cara de exata. ' +
-  'A ordem de preferência é: (1) refazer por proporção a partir da memória da conta; (2) calcular sobre o período e a base que os autos permitem, dizendo o que faltou; ' +
+  'DIVERGÊNCIA DE ÍNDICE OU DE TERMO DA CORREÇÃO NÃO SE CALCULA DE CABEÇA: PEÇA. Preencha "auditoria_recalculo" com a base, o período pelo TERMO DO TÍTULO, o índice que o título manda e o que a conta aplicou, ' +
+  'e o sistema busca as duas séries no Banco Central e refaz o valor por proporção, com a memória e a fonte. É a mesma aritmética que você faria, com o dado oficial em vez da sua lembrança. ' +
+  'Preencha "auditoria_bruto_conservador" com a sua estimativa de todo modo: ela é a rede se o Banco Central não responder. ' +
+  'PARA O RESTO, a ordem de preferência é: (1) refazer por proporção a partir da memória da conta; (2) calcular sobre o período e a base que os autos permitem, dizendo o que faltou; ' +
   '(3) não havendo nem isso, entregar o número como ESTIMATIVA declarada, com o método e a ordem de grandeza, e o efeito em direção. O que não se faz é devolver null por insegurança — ' +
   'null continua reservado ao caso em que não há divergência que reduza o crédito. ' +
   '=== O REGIME DA REQUISIÇÃO E DA CESSÃO === ' +
@@ -3219,6 +3247,112 @@ Deno.serve(async (req) => {
       contratuais: dados._verbas_negociadas?.contratuais ?? false,
       sucumbenciais: dados._verbas_negociadas?.sucumbenciais ?? false,
     };
+    /**
+     * Os avisos do recálculo por índice, à espera dos arrays de aviso.
+     *
+     * O recálculo roda ANTES de aplicarAuditoria — é ele que decide sobre qual
+     * valor o preço se forma —, e aplicarAuditoria roda antes de avisosBase e
+     * avisosAuditoria existirem. Mover o bloco para depois deles inverteria a
+     * ordem do cálculo; guardar os avisos aqui e entregá-los onde os arrays
+     * nascem não muda nada e é uma linha.
+     */
+    const _avisosDoIndice: string[] = [];
+    /** O que o recálculo escreveu na tela de auditoria, e não nos alertas gerais. */
+    const _avisosDoIndiceAuditoria: string[] = [];
+
+    // ---- O RECÁLCULO COM ÍNDICE OFICIAL DO BANCO CENTRAL ----
+    //
+    // A IA DECLARA, O CÓDIGO CALCULA. Ela diz qual índice o título manda, qual a
+    // conta aplicou, o período pelo termo do título e a base; daqui saem as duas
+    // séries do SGS e a proporção. O motivo é o que já está no prompt: o modelo
+    // não tem série histórica, e uma variação acumulada de sete anos lembrada
+    // sai errada com cara de exata.
+    //
+    // NÃO É FERRAMENTA NO LAÇO DA IA de propósito. A extração roda com
+    // tool_choice forçado numa ferramenta só; abrir turnos para consulta custaria
+    // o tempo de parede que a divisão da leitura acabou de recuperar.
+    //
+    // O CUSTO FOI MEDIDO antes de existir: séries MENSAIS respondem em 230 a
+    // 540 ms para sete anos (84 pontos). As diárias de TR e poupança — 226 e
+    // 195, as que se acham primeiro — levam de 17 a 21 SEGUNDOS e trazem 2.600
+    // pontos. Por isso o mapa aponta para 7811 e 196, que dão o mesmo valor.
+    // Ver _shared/indicesBcb.ts.
+    //
+    // FALHA AQUI NÃO DERRUBA NADA: sem resposta do Banco Central vale a
+    // estimativa que a IA já escreveu em auditoria_bruto_conservador, e o aviso
+    // diz que o índice não foi confirmado.
+    {
+      const _rec = dados.auditoria_recalculo;
+      const _base = Number(_rec?.base);
+      const _de = competencia(_rec?.de);
+      const _ate = competencia(_rec?.ate);
+      const _iTit = _rec?.indice_titulo;
+      const _iCon = _rec?.indice_conta;
+      const _brutoAutos = Number(dados.bruto_total) || 0;
+      if (
+        _rec && typeof _rec === 'object' &&
+        Number.isFinite(_base) && _base > 0 && _de && _ate &&
+        ehIndiceConhecido(_iTit) && ehIndiceConhecido(_iCon)
+      ) {
+        // A BASE TEM DE SER PARTE DO BRUTO. O bruto revisado sai de
+        // bruto − base + recalculado; base maior que o bruto significa que a IA
+        // leu outro valor (o de outro credor, a soma de requisitórios), e a
+        // subtração devolveria negativo — número que a precificação aceitaria
+        // sem reclamar. 1% de folga cobre arredondamento.
+        if (_base > _brutoAutos * 1.01) {
+          _avisosDoIndice.push(
+            `A auditoria pediu recálculo por índice sobre uma base de ${brl(_base)}, que é maior que o bruto dos autos (${brl(_brutoAutos)}). ` +
+            'O recálculo foi ignorado e vale a estimativa da própria auditoria — confira de onde saiu essa base.',
+          );
+        } else {
+          try {
+            const _janela = janelaSgs(_de, _ate);
+            const _buscar = async (nome: NomeDeIndice): Promise<FatorAcumulado> => {
+              const res = await fetch(urlSgs(SERIE_DO_INDICE[nome], _janela), {
+                headers: { Accept: 'application/json' },
+                // Teto curto de propósito: a conta é um enriquecimento, não a
+                // análise. Não vale segurar a requisição por uma série que
+                // demora — a estimativa da IA cobre o caso.
+                signal: AbortSignal.timeout(20_000),
+              });
+              if (!res.ok) throw new Error(`série ${SERIE_DO_INDICE[nome]} (${nome}) → HTTP ${res.status}`);
+              return fatorAcumulado(pontosMensais(await res.json()), _de, _ate);
+            };
+            // EM PARALELO: são duas leituras independentes de 300 ms cada.
+            const [_fTit, _fCon] = await Promise.all([_buscar(_iTit), _buscar(_iCon)]);
+            const _r = recalcularPorIndice({
+              base: _base, indiceTitulo: _iTit, indiceConta: _iCon, fatorTitulo: _fTit, fatorConta: _fCon,
+            });
+            const _revisado = Number((_brutoAutos - _base + _r.valor).toFixed(2));
+            // O NÚMERO OFICIAL SOBREPÕE A ESTIMATIVA. Quem decide se ele entra
+            // no preço é aplicarAuditoria, que recusa conservador MAIOR que o
+            // bruto dos autos — auditoria não aumenta crédito.
+            dados.auditoria_bruto_conservador = _revisado;
+            dados.auditoria_justificativa =
+              `${_r.memoria}${_base < _brutoAutos ? ` A base recalculada é parte do bruto: ${brl(_brutoAutos)} − ${brl(_base)} + ${brl(_r.valor)} = ${brl(_revisado)}.` : ''} ` +
+              String(dados.auditoria_justificativa ?? '').trim();
+            // A MEMÓRIA VAI PARA A CÉLULA DO BRUTO na planilha, junto da origem
+            // dos valores — é lá que alguém vai conferir o número seis meses
+            // depois, sem esta análise à mão.
+            const _notas = Array.isArray(dados.notas_celulas) ? dados.notas_celulas : [];
+            _notas.push({ campo: 'bruto_total', nota: _r.memoria });
+            dados.notas_celulas = _notas;
+            _avisosDoIndiceAuditoria.push(
+              `Índice conferido na fonte oficial: ${_iTit} ${((_fTit.fator - 1) * 100).toFixed(2).replace('.', ',')}% ` +
+              `contra ${_iCon} ${((_fCon.fator - 1) * 100).toFixed(2).replace('.', ',')}% (${_fTit.de} a ${_fTit.ate}, Banco Central/SGS). ` +
+              `Bruto revisado para ${brl(_revisado)}.`,
+            );
+            if (_r.aviso) _avisosDoIndiceAuditoria.push(`⚠️ ${_r.aviso}`);
+          } catch (e) {
+            _avisosDoIndiceAuditoria.push(
+              `⚠️ ÍNDICE NÃO CONFIRMADO na fonte oficial: ${(e as Error)?.message ?? String(e)}. ` +
+              'O cenário conservador ficou com a estimativa da própria auditoria — confira a atualização à mão antes de fechar.',
+            );
+          }
+        }
+      }
+    }
+
     // A AUDITORIA ENTRA AQUI, antes de tudo: é ela que decide sobre QUAIS
     // valores o preço se forma. Cálculo homologado não é cálculo definitivo, e
     // quem compra o crédito é quem perde se a revisão vier — então o cenário
@@ -3337,7 +3471,7 @@ Deno.serve(async (req) => {
     dados._credor_titulo = credorTitulo;
 
     // Avisos que valem para a preliminar e para a final.
-    const avisosBase: string[] = [...avisosQualif];
+    const avisosBase: string[] = [...avisosQualif, ..._avisosDoIndice];
     // O TEMPO FECHA AQUI. Ele saía como aviso acima de 60 s e ia parar na lista
     // de riscos da janela; agora vai em `tempo`, e a tela o junta ao relógio
     // dela. Ver _relogio, no topo do handler.
@@ -3490,7 +3624,7 @@ Deno.serve(async (req) => {
     // repetir a mesma frase na lista de alertas era o terceiro lugar dizendo o
     // que a seção já diz. Ele continua em avisosBase; a tela é que sabe
     // descontá-lo, comparando com esta lista, em vez de caçar texto.
-    const avisosAuditoria: string[] = [];
+    const avisosAuditoria: string[] = [..._avisosDoIndiceAuditoria];
     {
       const _divs: any[] = Array.isArray(dados.auditoria_divergencias) ? dados.auditoria_divergencias : [];
       const _risco = String(dados.auditoria_risco_revisao ?? '').toLowerCase();
