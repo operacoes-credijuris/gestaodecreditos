@@ -1350,9 +1350,14 @@ const SYSTEM_ANALISE =
   'Você é analista jurídico-financeiro da Credijuris especializado em créditos RPV de qualquer tribunal do país — estaduais, federais e trabalhistas. NÃO presuma as regras, os órgãos nem os prazos do TJGO para os demais tribunais. ' +
   'Trabalha com a metodologia Prompt Mestre v1.0 (módulos M1–M4). Seja preciso e conservador: ' +
   'quando um dado não estiver claro no documento, devolva null (NUNCA invente datas, valores ou nomes). ' +
-  'Regra do INSS, VÁLIDA SÓ QUANDO O ENTE DEVEDOR É O ESTADO DE GOIÁS: se o crédito é de horas extras e a contadoria zerou o INSS, calcule uma reserva preventiva ' +
-  'de 14,25% (alíquota previdenciária do servidor goiano) sobre o valor sem correção e devolva esse valor em "inss". ' +
-  'Para QUALQUER OUTRO ente devedor, NÃO aplique reserva nenhuma: devolva o INSS exatamente como a contadoria calculou (0 se zerado) — a alíquota varia por ente e quem decide a reserva é a equipe. ' +
+  'REGRA DA CONTRIBUIÇÃO PREVIDENCIÁRIA (campo "inss"). Verba remuneratória paga em atraso sofre desconto previdenciário, e conta que o zerou sem dizer por quê deixa o líquido MAIOR do que o que vai ser pago — ' +
+  'o erro na direção que prejudica quem compra. Três casos, nesta ordem: ' +
+  '(a) ENTE GOIANO (Estado de Goiás, suas autarquias e fundações) com crédito de horas extras e INSS zerado: calcule reserva preventiva de 14,25% — alíquota do servidor goiano — sobre o valor sem correção, e devolva em "inss". ' +
+  '(b) OUTRO ENTE, COM A ALÍQUOTA DETERMINÁVEL a partir dos autos: a lei do regime próprio citada no processo, um contracheque juntado, outra verba do MESMO processo em que a contribuição foi descontada, ' +
+  'ou a memória de cálculo de outro período. Havendo de onde tirar o percentual, CALCULE e devolva em "inss", e diga em notas_celulas (campo "inss") de onde veio a alíquota e sobre que base você a aplicou. ' +
+  'ISTO MUDOU: a regra anterior mandava devolver zero para qualquer ente fora de Goiás, e com ela um crédito de horas extras de outro estado saía com o líquido inflado mesmo quando os autos diziam a alíquota. ' +
+  '(c) OUTRO ENTE, SEM BASE NOS AUTOS para a alíquota: NÃO INVENTE percentual. Devolva o INSS como a contadoria calculou, registre em auditoria_divergencias que há verba remuneratória sem desconto previdenciário ' +
+  'e que a alíquota do ente não consta dos autos, e classifique a gravidade pelo tamanho da verba. Aqui o preço não embute o desconto de propósito: palpite de alíquota erra o preço, e quem decide a reserva é a equipe. ' +
   'Os tempos do M4 são médias de pares de datas reais do andamento processual. ' +
   '=== AUDITORIA DOS CÁLCULOS === ' +
   'ANTES de dar o crédito por bom, AUDITE a conta. Cálculo homologado NÃO é cálculo definitivo: erro material e critério contrário a título executivo ou a lei se revisam mesmo depois do trânsito, e quem compra o crédito é quem perde se a revisão vier. A auditoria não existe para achar defeito — existe para que o preço embuta o risco que ela achar. ' +
@@ -1417,6 +1422,9 @@ const SYSTEM_ANALISE =
   'e não a do total recebido de uma vez (Tema 368/STF, RE 614.406). Desde o ano-base 2010, o art. 12-A da Lei 7.713/88 dá tributação exclusiva na fonte com a tabela do mês ' +
   'multiplicada pelo número de meses a que o pagamento se refere. Conta que aplicou a tabela cheia sobre o montante único retém IR A MAIOR: o líquido projetado fica menor que o real, ' +
   'o que é seguro para quem compra — registre a divergência e não mexa no preço por ela. ' +
+  'A CONTRIBUIÇÃO PREVIDENCIÁRIA ENTRA NESTA MESMA CONFERÊNCIA, e não só o IR: verba remuneratória em atraso — diferenças salariais, horas extras, gratificações, adicionais — ' +
+  'sofre desconto do regime próprio do ente, e conta que o zerou infla o líquido exatamente como o IR esquecido. Veja a REGRA DA CONTRIBUIÇÃO PREVIDENCIÁRIA acima para quando calcular e quando só registrar. ' +
+  'Verba indenizatória, essa não sofre: férias indenizadas e o terço, licença-prêmio em pecúnia, dano moral e danos emergentes ficam fora da base previdenciária pela mesma razão que ficam fora da do IR. ' +
   'ONDE ESCREVER O QUE VOCÊ CORRIGIR: no campo "ir" (ou "inss") vai o valor QUE DEVERIA TER SIDO retido, e não o que a conta reteve, quando os dois divergirem. ' +
   'Registre a divergência também em "auditoria_divergencias" e explique a conta em "notas_celulas" (campo "ir"), para o número aparecer justificado na célula da planilha. ' +
   '(4) A ARITMÉTICA. Confira se as parcelas somam o total, se não há duplicidade entre verbas, e se o período de apuração não excede o que o título deferiu. ' +
@@ -3408,7 +3416,7 @@ Deno.serve(async (req) => {
     if (Array.isArray(dados._dd_notas)) for (const n of dados._dd_notas) avisosBase.push(String(n));
     if (_prazoEstimado) avisosBase.push('⚠️ PRAZO ESTIMADO — TJGO sem data-limite de convênio nos autos: a espera até a expedição foi estimada em 60 dias. Confira o prazo e a rentabilidade à mão.');
     if (String(dados.eh_horas_extras) === 'true' && !(Number(dados.inss) > 0) && dados._verbas_negociadas?.principal && !ehEstadoDeGoias(dados.ente_devedor))
-      avisosBase.push('⚠️ INSS ZERADO EM HORAS EXTRAS fora do Estado de Goiás: a reserva preventiva de 14,25% é a alíquota da GOIASPREV e NÃO foi aplicada a este ente. Confira a alíquota previdenciária do ente devedor; se couber reserva, refaça a precificação com ela.');
+      avisosBase.push('⚠️ SEM DESCONTO PREVIDENCIÁRIO EM HORAS EXTRAS, fora de Goiás: a IA não achou nos autos a alíquota do regime próprio deste ente, então nada foi reservado e o líquido pode estar alto. Os 14,25% do sistema são da GOIASPREV e NÃO valem aqui. Se você souber a alíquota, diga no chat ("o INSS deste ente é X%") que o preço se refaz.');
     // O QUE ESTÁ FIXADO À MÃO aparece como nota: quem abre a análise depois
     // precisa saber que aquele deságio não é o calibrado, e como voltar.
     for (const d of _manual.descricao) avisosBase.push(`${d} — para voltar ao automático, peça no chat.`);
