@@ -2191,6 +2191,11 @@ export function AnaliseRpvModal({
       itens,
       texto,
       cedente: atual?.cedente ?? null,
+      // A SÍNTESE VAI JUNTO porque a anotação abre com o objeto do processo, e
+      // esta ação não lê os autos. Sem ela a IA não teria de onde tirar o
+      // resumo — e inventaria quem litiga contra quem, num registro que o
+      // comercial vai repetir ao cedente.
+      sintese: atual?.m1_sintese ?? null,
       ...corpoCard,
     })
     const m = String(r?.mensagem ?? '').trim()

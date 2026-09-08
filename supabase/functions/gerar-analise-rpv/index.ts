@@ -2691,6 +2691,15 @@ Deno.serve(async (req) => {
         : _tipo === 'reprovado'
           ? 'REPROVAÇÃO'
           : 'ENVIO PARA VALIDAÇÃO';
+      // O TÍTULO EXATO com que a anotação abre. Fixo, e não a critério do
+      // modelo: é o que faz a coluna do CRM ficar legível de cima a baixo, com
+      // todo card do mesmo desfecho abrindo igual.
+      const _titulo = _tipo === 'diligencia'
+        ? 'Diligência Solicitada'
+        : _tipo === 'reprovado'
+          ? 'Crédito Reprovado'
+          : 'Análise Concluída — Enviada para Validação';
+      const _sintese = String(body.sintese ?? '').trim().slice(0, 2000);
       const _itens: string[] = (Array.isArray(body.itens) ? body.itens : [])
         .map((i: unknown) => String(i ?? '').trim())
         .filter(Boolean)
@@ -2707,25 +2716,30 @@ Deno.serve(async (req) => {
       const anthropic = new Anthropic({ apiKey: cfg.anthropic_api_key });
       const resp = await anthropic.messages.create({
         model: CLAUDE_MODEL,
-        // Teto curto: a saída é um parágrafo, e teto alto só dá margem para o
-        // modelo escrever mais do que alguém vai ler.
+        // Teto curto: a saída são três blocos curtos, e teto alto só dá
+        // margem para o modelo escrever mais do que alguém vai ler.
         max_tokens: 900,
         system:
           'Você redige a anotação que registra, no CRM, por que um crédito foi enviado para diligência, reprovado ou encaminhado para validação. ' +
           'QUEM LÊ é o comercial que vai falar com o cedente e com o advogado. Ele NÃO tem a análise à frente, não fez a conta, e vai agir a partir do que você escrever. ' +
           'MANTENHA OS TERMOS TÉCNICOS — "termo inicial dos juros", "cenário conservador", "honorários sucumbenciais", "teto da RPV" —, porque trocá-los por linguagem coloquial tira precisão de um registro que pode ser cobrado depois. ' +
           'MAS EXPLIQUE: ao lado do termo, a consequência em uma oração curta. "O título fixou os juros da citação e a conta os contou do evento danoso, o que infla o crédito em cerca de R$ 2.700." ' +
-          'FORMA: um parágrafo de abertura dizendo o desfecho e a razão principal e, depois, UM ACHADO POR PARÁGRAFO, cada um começando com hífen. ' +
-          'SEPARE OS PARÁGRAFOS COM LINHA EM BRANCO: o feed do CRM ignora a quebra de linha simples e cola tudo num bloco corrido — é a diferença entre uma anotação que se lê e um parágrafo único de duzentas palavras. ' +
+          'FORMA — três blocos, nesta ordem, e nada antes nem depois deles. ' +
+          `(1) A primeira linha é só o título — copie exatamente estes caracteres, sem ponto final e sem negrito: ${_titulo} — e nada mais nela. ` +
+          '(2) O objeto do processo em NO MÁXIMO 4 LINHAS: quem é o credor, contra quem, que ação, em que juízo e a que se refere o crédito. ' +
+          'ELE SAI DA SÍNTESE que vem na entrada, condensada — e se não vier síntese, PULE este bloco em vez de inventar o objeto do processo. ' +
+          '(3) Os itens, um por achado, cada um começando com "* " e terminando em ponto e vírgula: na reprovação são os impeditivos; na diligência, o que precisa ser providenciado. ' +
+          'Não repita no item o que o objeto já disse, e quando o obstáculo for removível diga no próprio item o que teria de mudar. ' +
+          'SEPARE OS BLOCOS — E TAMBÉM UM ITEM DO OUTRO — COM LINHA EM BRANCO. O feed do CRM ignora a quebra de linha simples: sem a linha em branco os itens chegam colados num parágrafo corrido, que é exatamente o que esta estrutura existe para evitar. ' +
           'Sem saudação, sem despedida, sem assinatura — o CRM já registra quem escreveu. ' +
           'No máximo 200 palavras. Não invente achado nenhum: use SÓ o que vier na entrada, e o que a pessoa escreveu livremente tem precedência sobre a sua redação — ela está com o processo aberto. ' +
-          'Em diligência, feche dizendo o que precisa ser providenciado. Em reprovação, feche dizendo o que teria de mudar para o crédito voltar a ser analisável, quando isso for possível. ' +
           'Responda com o texto da anotação e nada mais.',
         messages: [{
           role: 'user',
           content:
             `DESFECHO: ${_rotulo}\n` +
             (_cabeca ? `${_cabeca}\n` : '') +
+            (_sintese ? `\nSÍNTESE DO PROCESSO (condense em até 4 linhas no bloco 2):\n${_sintese}\n` : '') +
             (_itens.length ? `\nACHADOS MARCADOS NA ANÁLISE:\n${_itens.map((i) => `- ${i}`).join('\n')}\n` : '') +
             (_livre ? `\nO QUE QUEM ANALISOU ESCREVEU:\n${_livre}\n` : '') +
             '\nRedija a anotação.',
@@ -2736,7 +2750,17 @@ Deno.serve(async (req) => {
         .join('\n')
         .trim();
       if (!_texto) return errorResponse('A IA não devolveu texto para a anotação.');
-      return jsonResponse({ ok: true, mensagem: _texto });
+      // O TÍTULO É GARANTIDO AQUI, e não só pedido no prompt. A estrutura foi
+      // especificada para o feed inteiro: um modelo que parafraseia ("Crédito
+      // recusado", "Reprovação do crédito") quebraria o padrão da coluna, e
+      // ninguém revisa anotação de card a card para descobrir isso.
+      const _cabecaLida = (_texto.split('\n').find((l) => l.trim()) ?? '')
+        .replace(/[*#_]/g, '')
+        .replace(/[.:;]+$/, '')
+        .trim();
+      const _mesmoTitulo =
+        _cabecaLida.toLocaleLowerCase('pt-BR') === _titulo.toLocaleLowerCase('pt-BR');
+      return jsonResponse({ ok: true, mensagem: _mesmoTitulo ? _texto : `${_titulo}\n\n${_texto}` });
     }
 
     if (body.acao === 'listar_originadores' || body.acao === 'listar_intermediadores') {
