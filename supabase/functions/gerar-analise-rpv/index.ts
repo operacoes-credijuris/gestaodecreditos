@@ -1231,7 +1231,10 @@ const SCHEMA_ANALISE = {
     'Havendo divergência que reduza, este campo é OBRIGATÓRIO: estime pelo efeito das de gravidade alta e média, e também das baixas quando somarem valor relevante. ' +
     'Sem memória de cálculo para refazer a conta exata, ESTIME POR BAIXO sobre o período e a base que os autos permitem identificar, arredondando contra o crédito, ' +
     'e explique a estimativa em auditoria_justificativa. Não devolver número é deixar o preço cheio com uma ressalva ao lado — e ressalva não desconta nada',
-  auditoria_justificativa: 'em duas ou três frases: o que sustenta o cenário conservador, ou por que a conta foi considerada fiel',
+  auditoria_justificativa:
+    'o que sustenta o cenário conservador, ou por que a conta foi considerada fiel. ' +
+    'HAVENDO NÚMERO RECALCULADO, traga a MEMÓRIA: o parâmetro adotado e de onde ele veio, a base, o período, a operação, e se o resultado é CALCULADO (parâmetro real) ou ESTIMADO (substituto, dizendo qual e por quê). ' +
+    'Quem lê precisa poder repetir a sua conta com os autos abertos; sem isso o número não é conferível. Curto, mas completo — não cabe "estimativa conservadora" sem dizer sobre o quê',
 
   // prazo / cenário
   esfera: 'Federal | Estadual | Municipal — a do ENTE DEVEDOR (quem paga), não a do tribunal',
@@ -1443,10 +1446,9 @@ const SYSTEM_ANALISE =
   'ENTRE DUAS LEITURAS DEFENSÁVEIS DE UM MESMO CRITÉRIO, ADOTE SEMPRE A QUE PRODUZ O MENOR CRÉDITO. Vale para índice de correção, termo inicial de correção e de juros, ' +
   'período de apuração, base de cálculo, incidência e alíquota de tributo, e para qualquer ponto em que a norma comporte mais de uma interpretação razoável. ' +
   'Você não está escolhendo a tese que venceria: está escolhendo o valor que sobra se a Fazenda impugnar e ganhar. Quem paga hoje é quem perde a diferença. ' +
-  'NÃO DEVOLVA null POR NÃO CONSEGUIR CALCULAR COM PRECISÃO. Se a memória de cálculo não permitir refazer a conta exata, ESTIME POR BAIXO — ' +
-  'aplique o efeito da divergência ao período e à base que os autos permitem identificar, arredonde contra o crédito, e diga na "auditoria_justificativa" que é estimativa, ' +
-  'de que forma você chegou nela e o que faltou para calcular com exatidão. Uma estimativa conservadora declarada é melhor que um preço cheio com uma ressalva ao lado: ' +
-  'a ressalva não desconta nada, e o dinheiro sai do caixa pelo número, não pelo texto. ' +
+  'NÃO DEVOLVA null POR NÃO CONSEGUIR CALCULAR COM PRECISÃO. Não permitindo a memória de cálculo refazer a conta exata, CALCULE COM O QUE OS AUTOS DÃO ' +
+  '— o período e a base que se pode identificar — e diga na "auditoria_justificativa" como você chegou ao número e o que faltou para fechá-lo com exatidão. ' +
+  'Uma estimativa declarada e com memória é melhor que um preço cheio com uma ressalva ao lado: a ressalva não desconta nada, e o dinheiro sai do caixa pelo número, não pelo texto. ' +
   'null fica reservado a UM caso: não há divergência nenhuma que reduza o crédito. ' +
   'TRIBUTO QUE FALTOU NÃO É REDUÇÃO DE BRUTO, e confundir os dois estraga a conta. O bruto continua o mesmo: o que muda é a RETENÇÃO. ' +
   'Corrija o campo "ir" (ou "inss") e NÃO mexa em "auditoria_bruto_conservador" por causa disso — o líquido já cai pela subtração. ' +
@@ -1454,6 +1456,31 @@ const SYSTEM_ANALISE =
   'o imposto que você acabou de acrescentar encolhe junto. ' +
   '"auditoria_bruto_conservador" é para divergência no CRÉDITO EM SI — índice de correção, juros, termo inicial, período de apuração, base de cálculo, verba deferida a mais. ' +
   'A divergência tributária entra normalmente em "auditoria_divergencias": ela aparece na seção de auditoria da tela, e o desconto já está no líquido. ' +
+  '=== COMO CALCULAR, QUANDO PRECISAR CALCULAR === ' +
+  'Achando inconformidade, você vai ter de refazer conta: recompor um valor com o índice certo, calcular um tributo que faltou, encurtar um período, trocar uma base. ' +
+  'Duas regras que NÃO SE CONFUNDEM, e confundi-las estraga o número: ' +
+  'CONSERVADOR É A ESCOLHA; EXATO É A CONTA. A postura conservadora se aplica à PREMISSA — qual índice, qual termo inicial, qual tese, quando a norma admite mais de uma leitura defensável: ' +
+  'aí adote a que produz o menor crédito. ESCOLHIDA A PREMISSA, a conta se faz com os PARÂMETROS REAIS, e não se arredonda para baixo "por segurança". ' +
+  'Arredondar contra o crédito depois de já ter escolhido a premissa conservadora desconta DUAS VEZES, e o resultado não é conservador: é errado, e ninguém sabe de quanto. ' +
+  'Preço com margem invisível é tão ruim quanto preço sem margem — o operacional não tem como negociar o que não sabe que está lá. ' +
+  'OS PARÂMETROS REAIS, item por item: ' +
+  '• IMPOSTO DE RENDA: a tabela progressiva DA COMPETÊNCIA, e não a de hoje. Em rendimento recebido acumuladamente, a tabela do mês multiplicada pelo NÚMERO DE MESES a que o pagamento se refere ' +
+  '(art. 12-A da Lei 7.713/88) — conte os meses entre as datas dos autos, não estime "cerca de". Use faixa, alíquota E parcela a deduzir: imposto de renda não é percentual único sobre o total. ' +
+  '• CONTRIBUIÇÃO PREVIDENCIÁRIA: a alíquota do ente e o TETO de contribuição do regime, aplicados verba por verba, com as indenizatórias fora da base. ' +
+  '• ÍNDICES: a variação acumulada real no período, e não uma média anual aplicada em bloco. ' +
+  'O CAMINHO MAIS PRECISO É REFAZER POR PROPORÇÃO A PARTIR DA PRÓPRIA CONTA: tendo ela memória mês a mês, você tem o fator que ela aplicou e a base sobre a qual aplicou — ' +
+  'troque o fator errado pelo certo e refaça a razão. Isso usa os números do próprio processo em vez da sua memória, e é por isso que é mais confiável. ' +
+  '• PERÍODOS: conte os meses entre as DATAS REAIS que estão nos autos. Não escreva "aproximadamente dois anos" quando as duas datas estão escritas na página. ' +
+  '• BASES: a base de CADA verba, e não o total, quando o título deu bases diferentes. ' +
+  'MOSTRE A CONTA. Todo número que você recalcular vem com a memória: o parâmetro usado, DE ONDE ele veio, a base, o período e a operação. ' +
+  'Vai em "auditoria_justificativa" e, quando o número entra numa célula da planilha, em "notas_celulas". Estimativa sem memória não é conferível, e o que não se confere não se usa para pagar. ' +
+  'DIGA SE É CÁLCULO OU ESTIMATIVA, e não misture os dois. "Calculado" é o que você fez com o parâmetro real. "Estimado" é o que você fez com um substituto — ' +
+  'porque a série do índice não está nos autos, porque a conta não tem memória, porque falta uma data. Estimando, diga O QUE FALTOU e QUAL SUBSTITUTO usou. ' +
+  'Número apresentado como exato quando é aproximado é pior que aproximado declarado: quem lê para de conferir. ' +
+  'NÃO INVENTE PRECISÃO QUE VOCÊ NÃO TEM. Você não dispõe de série histórica de índice nem de calculadora: uma variação acumulada de IPCA-E de sete anos "lembrada" sai errada e sai com cara de exata. ' +
+  'A ordem de preferência é: (1) refazer por proporção a partir da memória da conta; (2) calcular sobre o período e a base que os autos permitem, dizendo o que faltou; ' +
+  '(3) não havendo nem isso, entregar o número como ESTIMATIVA declarada, com o método e a ordem de grandeza, e o efeito em direção. O que não se faz é devolver null por insegurança — ' +
+  'null continua reservado ao caso em que não há divergência que reduza o crédito. ' +
   '=== O REGIME DA REQUISIÇÃO E DA CESSÃO === ' +
   'Isto não é auditoria de conta: é o que decide se o negócio pode ser feito, quanto se recebe de fato e QUANDO. Cada item diz onde ele entra. ' +
   'A CESSÃO INDEPENDE DA CONCORDÂNCIA DO ENTE (art. 100, §13, da CF), e a Resolução CNJ 303/2019 a admite também para RPV. Mas ela ' +
