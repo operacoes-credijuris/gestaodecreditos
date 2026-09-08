@@ -84,7 +84,7 @@ import {
   type RespostaAnaliseRpv,
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
-import { formatCNJ, formatDate } from '@/lib/format'
+import { formatDate } from '@/lib/format'
 import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -498,49 +498,46 @@ function tituloCard(lead: KommoLead): string {
  */
 type BotoesDoCard = 'rpv' | 'precatorio' | 'nenhum'
 
-/** Os rótulos do cenário, encurtados: o card é item de lista. */
-const CENARIO_CURTO: Record<string, string> = {
-  principal: 'principal',
-  ambos: 'principal + honorários',
-  honorarios: 'honorários contratuais + sucumbenciais',
-  contratuais: 'honorários contratuais',
-  sucumbenciais: 'honorários sucumbenciais',
-  indefinido: 'honorários (sem dizer quais)',
-}
+/**
+ * As abas de RPV em que a análise JÁ ACABOU.
+ *
+ * Due diligence e "Executar análise" apareciam em todas as abas do funil de
+ * RPV, inclusive nestas três. O raciocínio que já valia para o precatório —
+ * "analisar um card já aprovado ou reprovado não é trabalho, é retrabalho" —
+ * nunca foi aplicado aqui, e o botão escuro de análise ficava oferecendo, num
+ * card reprovado, os dois minutos de leitura do processo.
+ *
+ * EXPLÍCITO, e não derivado de ACOES estar vazio. Dava na mesma hoje, e daria
+ * errado no dia em que uma aba terminal ganhasse uma saída — que é justamente o
+ * que acabou de acontecer com Pendentes na direção contrária.
+ */
+const ABAS_RPV_TERMINAIS: ReadonlySet<string> = new Set(['aprovados', 'diligencia', 'reprovados'])
 
 /**
- * O que o título do card diz, em uma linha.
+ * O card não tem número de processo — e isso é defeito, não ausência.
  *
- * Para as etapas SEM análise: as quatro outras abas do Interno e as cinco do
- * Fundo. A leitura do título sempre valeu ali, mas nada a consumia — o comercial
- * escrevia a parcela cedida e o percentual e eles não apareciam em lugar nenhum.
+ * ISTO ERA UMA LINHA DE METADADOS: "Precatório · 1057424-52.2022.8.26.0053 ·
+ * principal + honorários · hon. 30%", abaixo do título, nas abas sem botão de
+ * trabalho. Saiu por decisão do dono, e ela se sustenta: o número já está no
+ * título do card, a espécie está na aba em que a pessoa acabou de clicar, e a
+ * parcela cedida aparece na janela de análise, onde ela decide algo.
  *
- * Campo ausente é omitido, não vai como travessão: rótulo vazio ocupa espaço e
- * não informa. A exceção é o NÚMERO, cuja falta é defeito de cadastro e é dita —
- * sem ele o card sai da busca por processo e o checklist de certidões não acha o
- * CNJ, e nenhuma outra etapa destas abas checaria isso.
+ * O QUE NÃO SAIU É O AVISO. A falta do número não é um campo vazio a mais: sem
+ * ele o card fica fora da busca por processo e o checklist de certidões não acha
+ * o CNJ. Nenhuma outra etapa destas abas checa isso, então some com a linha e o
+ * defeito passa a não ter onde aparecer.
  */
-function ResumoDoTitulo({ lead }: { lead: KommoLead }) {
+function AvisoSemNumero({ lead }: { lead: KommoLead }) {
   // Memoizado porque lerCardCredijuris junta TODAS as anotações do card numa
   // string, e há cards com histórico longo. Refazer isso a cada render de cada
   // card de uma lista de centenas é desperdício sem contrapartida.
   const d = useMemo(() => lerCardCredijuris(lead), [lead])
-  const cenario = CENARIO_CURTO[d.tipo_aquisicao]
-  const partes = [
-    d.categoria === 'Precatórios' ? 'Precatório' : 'RPV',
-    d.numero ? formatCNJ(d.numero) : null,
-    cenario,
-    d.honorarios_pct ? `hon. ${d.honorarios_pct.replace('.', ',')}%` : null,
-  ].filter(Boolean)
-
+  if (d.numero) return null
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-      <span className="tabular-nums">{partes.join(' · ')}</span>
-      {!d.numero && (
-        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800 ring-1 ring-inset ring-amber-200">
-          sem número de processo no card
-        </span>
-      )}
+    <div className="mt-1.5">
+      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+        sem número de processo no card
+      </span>
     </div>
   )
 }
@@ -668,7 +665,7 @@ function CardCredito({
           É a única checagem daqui, porque é a única que nenhuma outra etapa faz
           nestas abas. */}
       {botoes === 'nenhum' && (
-        <ResumoDoTitulo lead={lead} />
+        <AvisoSemNumero lead={lead} />
       )}
 
       {/* OS BOTÕES DE TRABALHO DEPENDEM DA ETAPA, e por dois motivos distintos.
@@ -1327,7 +1324,7 @@ export default function AnaliseCredito() {
    */
   const botoesDoCard: BotoesDoCard =
     funil === FUNIL_RPV
-      ? 'rpv'
+      ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
       : abaAtual?.key === ABA_JURIDICO
         ? 'precatorio'
         : 'nenhum'

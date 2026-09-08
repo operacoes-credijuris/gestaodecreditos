@@ -269,8 +269,18 @@ export interface AcaoTela {
  * de volta para análise no Kommo e o sync o traz de novo para Pendentes.
  */
 export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
+  // PENDENTES TEM TRÊS SAÍDAS, e não uma. Enviar para validação continua sendo
+  // o caminho normal, mas há dois desfechos que se decidem já na primeira
+  // leitura: o crédito que precisa de diligência antes de valer análise, e o que
+  // não passa de jeito nenhum. Para esses dois, passar por Validação era um
+  // clique a mais numa fila que existe para decidir o que ficou em dúvida.
+  //
+  // APROVAR NÃO ENTRA AQUI de propósito: aprovar direto de Pendentes pularia a
+  // revisão, que é a razão de a coluna de Validação existir.
   pendentes: [
     { statusId: ST_DECISAO, label: 'Enviar para validação', variant: 'primary' },
+    { statusId: ST_DILIGENCIA, label: 'Diligência', variant: 'warning' },
+    { statusId: ST_REPROVADO, label: 'Reprovar', variant: 'danger' },
   ],
   // Cores em vez de hierarquia: as três são alternativas legítimas, e
   // verde/laranja/vermelho se lê mais rápido que o rótulo numa tela onde a mesma
