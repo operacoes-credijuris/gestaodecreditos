@@ -1212,6 +1212,14 @@ const SCHEMA_ANALISE = {
     'de onde saiu o campo acima, em uma linha: ou a peça que traz a porcentagem escrita ("contrato de honorários, fl. 12", "conta da contadoria"), ou a divisão que você fez, dizendo os dois números ("R$ 12.400 / R$ 41.333 da conta da contadoria"). null quando não houve nem uma coisa nem outra',
   origem_valores: 'DE ONDE SAIU CADA NÚMERO, em uma ou duas frases: qual documento (conta da contadoria, decisão homologatória, RPV expedida), o ID ou a página, e até que data os valores estão atualizados. Ex.: "conta da contadoria de 12/03/2026 homologada em 20/04/2026, ID 3f21a90, fls. 412-415; valores atualizados até 03/2026". É o que permite conferir a escolha em dez segundos — não deixe vazio',
   honorarios_sucumbenciais: 'HONORÁRIOS SUCUMBENCIAIS fixados na sentença ou no acórdão, em reais — o valor que o ENTE DEVEDOR paga ao advogado por ter perdido, separado do que o cliente paga por contrato. Procure na parte dispositiva da sentença/acórdão, na conta da contadoria e no próprio requisitório: costuma vir como verba própria, às vezes em requisitório separado. Se a condenação fixar PERCENTUAL sobre o valor da causa ou da condenação, calcule o valor em reais. ZERO se a sentença não os fixou, se foram compensados, se a Fazenda não foi condenada neles, ou se você não achou — não estime por praxe: um percentual arbitrado por hábito vira dinheiro inventado na precificação',
+  ir_origem:
+    'DE ONDE SAIU O IR, em uma linha, sempre que ele for diferente de zero. Duas respostas possíveis, e nenhuma outra: ' +
+    'ou a PEÇA que traz o valor retido ("conta da contadoria, fls. 412", "RPV expedida, ID 3f21a90", "informe de rendimentos"), ' +
+    'ou a CONTA que você fez, com os números ("R$ 33.000 em 6 competências pela tabela do art. 12-A"). ' +
+    'POR QUE ISTO É OBRIGATÓRIO: apareceu na tela um IR de R$ 3.712,55 num processo em que a sua própria auditoria dizia que a conta NÃO RETEVE NADA, ' +
+    'e não havia como saber de onde o número veio — a tabela progressiva não o reproduzia sobre nenhuma base do caso. ' +
+    'Número de imposto entra direto no líquido, e líquido é o que se paga. Sem origem declarada, a análise avisa que o número não é conferível. ' +
+    'Sendo zero o IR, deixe null',
   ir: 'IR SOBRE O PRINCIPAL, número (0 se isento). Em regra é o que a conta que vale calculou. ' +
     'MAS, se a auditoria da tributação achar que a conta reteve MENOS do que a lei manda — o caso clássico é lucros cessantes sem retenção numa condenação de parcelas mistas —, ' +
     'escreva aqui o valor QUE DEVERIA SER retido, e não o que está na conta: é este número que vai virar o líquido pelo qual se paga. ' +
@@ -1491,6 +1499,9 @@ const SYSTEM_ANALISE =
   'A CONTRIBUIÇÃO PREVIDENCIÁRIA ENTRA NESTA MESMA CONFERÊNCIA, e não só o IR: verba remuneratória em atraso — diferenças salariais, horas extras, gratificações, adicionais — ' +
   'sofre desconto do regime próprio do ente, e conta que o zerou infla o líquido exatamente como o IR esquecido. Veja a REGRA DA CONTRIBUIÇÃO PREVIDENCIÁRIA acima para quando calcular e quando só registrar. ' +
   'Verba indenizatória, essa não sofre: férias indenizadas e o terço, licença-prêmio em pecúnia, dano moral e danos emergentes ficam fora da base previdenciária pela mesma razão que ficam fora da do IR. ' +
+  'TODO IR DIFERENTE DE ZERO VEM COM "ir_origem" — a peça que o traz, ou a conta que você fez, em uma linha. Sem isso a análise avisa que o número não é conferível, ' +
+  'e com razão: já apareceu na tela um IR que a sua própria auditoria contradizia, sem nada dizendo de onde ele veio. ' +
+  'DIZER "A CONTA NÃO RETEVE" E DEVOLVER ir MAIOR QUE ZERO É CONTRADIÇÃO: não reteve nada é ir = 0, e o que falta vai em "auditoria_ir_faltante". ' +
   'ONDE ESCREVER O QUE VOCÊ CORRIGIR. Achando tributo que a conta NÃO RETEVE, o caminho é "auditoria_ir_faltante": você declara a VERBA e a BASE TRIBUTÁVEL, ' +
   'e o sistema aplica a tabela progressiva — a mesma que já calcula o IR dos honorários, com o regime dos rendimentos acumulados. ' +
   'NÃO APURE ALÍQUOTA — mas DIGA O PERÍODO. A tabela é nossa; o número de competências é leitura sua, e sem ele não há regime nenhum a aplicar. ' +
@@ -3454,6 +3465,12 @@ Deno.serve(async (req) => {
           `(${_memoriasIr.length} ${_memoriasIr.length === 1 ? 'verba' : 'verbas'}, tabela progressiva ${ANO_TABELA_IRRF}).`,
         );
         dados.auditoria_justificativa = `${_memoriaIr} ${String(dados.auditoria_justificativa ?? '').trim()}`.trim();
+        // QUANTO DESTE IR É NOSSO, para a redução proporcional do cenário
+        // conservador não passar por cima dele. Ver a chamada de
+        // aplicarAuditoria.
+        dados._ir_do_sistema = _somaIr;
+      } else {
+        delete dados._ir_do_sistema;
       }
     }
 
@@ -3677,16 +3694,38 @@ Deno.serve(async (req) => {
     // valores o preço se forma. Cálculo homologado não é cálculo definitivo, e
     // quem compra o crédito é quem perde se a revisão vier — então o cenário
     // conservador é o que precifica. Ver _shared/precificacao.ts.
+    // O IR QUE NÓS CALCULAMOS NÃO ENTRA NA REDUÇÃO PROPORCIONAL.
+    //
+    // aplicarAuditoria reduz o bruto ao cenário conservador e reescala IR,
+    // INSS e honorários no mesmo fator. Para o que veio DA CONTA isso é certo:
+    // encolhendo o crédito 5%, a retenção sobre ele encolhe 5%.
+    //
+    // Para o IR que ESTE código calculou, não. Ele incide sobre uma base
+    // DECLARADA e específica — os lucros cessantes de um valor dito, por
+    // exemplo —, e o corte do conservador quase nunca é sobre essa base: num
+    // caso real ele veio da correção do dano moral e dos danos emergentes,
+    // enquanto a própria auditoria dizia ter mantido os lucros cessantes como a
+    // conta fez. A base do imposto não encolheu, e o imposto encolhia 5,2%.
+    //
+    // O DANO É SEMPRE NA MESMA DIREÇÃO: menos IR, líquido maior, preço maior.
+    // E não escalar também é o lado conservador — mais imposto, líquido menor.
+    // Mudando a base pelo cenário conservador, é a IA que tem de declarar a
+    // base nova; adivinhar aqui por proporção é o que estava errado.
+    const _irDoSistema = Number(dados._ir_do_sistema) || 0;
     const _auditoria = aplicarAuditoria(
       {
         brutoTotal: Number(dados.bruto_total) || 0,
-        ir: Number(dados.ir) || 0,
+        ir: Math.max(0, (Number(dados.ir) || 0) - _irDoSistema),
         inss: Number(dados.inss) || 0,
         contratuaisBrutos: Number(dados.honorarios) || 0,
         sucumbenciaisBrutos: Number(dados.honorarios_sucumbenciais) || 0,
       },
       dados.auditoria_bruto_conservador,
     );
+    // De volta, inteiro. Fica DEPOIS da reescala de propósito.
+    if (_irDoSistema > 0) {
+      _auditoria.valores = { ..._auditoria.valores, ir: _auditoria.valores.ir + _irDoSistema };
+    }
     // OS VALORES QUE DE FATO PRECIFICARAM. A planilha tem de escrever ESTES, e
     // não os dos autos: o deságio é calibrado sobre esta base, e aplicá-lo à
     // base cheia no documento oferece mais do que a auditoria autorizou.
@@ -3982,6 +4021,30 @@ Deno.serve(async (req) => {
             'confira, porque os dois blocos calculam o honorário sobre bases diferentes (bruto no verde, líquido no azul).',
           );
         }
+      }
+    }
+
+    // IMPOSTO SEM ORIGEM NÃO É CONFERÍVEL, e o caso que motivou isto é real:
+    // um IR de R$ 3.712,55 na tela, num processo cuja própria auditoria dizia
+    // que a conta não reteve nada, e sem nada dizendo de onde saiu — nem a
+    // tabela progressiva sobre qualquer base do caso o reproduzia.
+    //
+    // O QUE ENTRA NO LÍQUIDO É O QUE SE PAGA. Um número de retenção sem
+    // procedência muda o preço tanto quanto um número lido dos autos, e não dá
+    // para conferir nem para discutir. Aqui ele não é rejeitado — pode estar
+    // certo —, mas passa a vir com a etiqueta de que ninguém sabe de onde veio.
+    //
+    // O IR QUE ESTE CÓDIGO CALCULOU tem memória por construção e não conta:
+    // por isso a comparação é com o que a IA escreveu, e não com o total.
+    {
+      const _irDaIa = Number(dados._ir_lido) || 0;
+      const _temOrigem = String(dados.ir_origem ?? '').trim().length > 3;
+      if (_irDaIa > 0 && !_temOrigem) {
+        avisosBase.push(
+          `⚠️ O IR DE ${brl(_irDaIa)} ENTROU SEM ORIGEM DECLARADA: a IA não disse de que peça ele saiu nem que conta o produziu. ` +
+          'Ele reduz o líquido e portanto o preço, e não há como conferi-lo. Confira contra a conta da contadoria ou o requisitório; ' +
+          'se o valor estiver errado, diga o certo no chat ("o IR retido é R$ X") e o preço se refaz.',
+        );
       }
     }
 
