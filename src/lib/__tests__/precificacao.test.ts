@@ -4,6 +4,7 @@ import {
   calibrarDesagio,
   aplicarAuditoria,
   rotuloDoCenario,
+  sucumbenciaisNoBruto,
   type Parcela,
 } from '../../../supabase/functions/_shared/precificacao.ts'
 import type { RegraEmolumentos } from '../../../supabase/functions/_shared/emolumentos-calculo.ts'
@@ -391,5 +392,83 @@ describe('a decomposição do custo fecha', () => {
     // Zero seria um custo que não existe: todo negócio paga correspondente.
     const c = calibrarDesagio({ parcelas, T5: 8, regra: REGRA })
     expect(c.diligencia).toBe(250)
+  })
+})
+
+/**
+ * OS SUCUMBENCIAIS SOMADOS DENTRO DO BRUTO.
+ *
+ * O caso real: a petição pede "homologação dos cálculos em R$ 72.000,00" e esse
+ * total soma principal, honorários contratuais E sucumbenciais. A leitura levou
+ * o total inteiro para o bruto e ainda devolveu os sucumbenciais no campo deles
+ * — que os faz entrar duas vezes no preço, uma dentro da parcela do principal e
+ * outra como parcela própria. O crédito infla e a oferta ao cedente sai maior
+ * que a autorizada.
+ *
+ * A conferência é aritmética e vive aqui, testada, e não dentro do handler: o
+ * que muda o preço sem teste é o que já custou caro neste módulo.
+ */
+describe('sucumbenciais somados dentro do bruto', () => {
+  // Um caso limpo: principal 50.000, contratuais 12.000, sucumbenciais 10.000.
+  // O bruto CERTO é 62.000 (principal + contratuais); o líquido do credor é
+  // 62.000 − 2.000 de IR − 0 de INSS − 12.000 de contratuais = 48.000.
+  const certo = {
+    brutoTotal: 62_000, ir: 2_000, inss: 0, contratuais: 12_000,
+    sucumbenciais: 10_000, liquidoDeclarado: 48_000,
+  }
+
+  it('acha o número somado onde não devia, e devolve o bruto sem ele', () => {
+    // O bruto veio com os sucumbenciais dentro: 72.000 em vez de 62.000.
+    const r = sucumbenciaisNoBruto({ ...certo, brutoTotal: 72_000 })
+    expect(r).not.toBeNull()
+    expect(r!.brutoCorrigido).toBe(62_000)
+    expect(r!.sucumbenciais).toBe(10_000)
+  })
+
+  it('não mexe quando a conta já fecha', () => {
+    // O caso normal, que é a maioria: nada a corrigir, e corrigir aqui seria
+    // derrubar o preço de um crédito que estava certo.
+    expect(sucumbenciaisNoBruto(certo)).toBeNull()
+  })
+
+  it('não mexe quando NENHUMA das duas contas fecha', () => {
+    // Aí o problema é outro — documento trocado, valor mal lido — e a
+    // conferência de parcelas é que avisa. Subtrair por suspeita trocaria um
+    // erro conhecido por um palpite.
+    expect(sucumbenciaisNoBruto({ ...certo, brutoTotal: 90_000 })).toBeNull()
+  })
+
+  it('não mexe sem sucumbenciais: não há o que tirar', () => {
+    expect(sucumbenciaisNoBruto({ ...certo, brutoTotal: 72_000, sucumbenciais: 0 })).toBeNull()
+  })
+
+  it('não mexe sem líquido declarado: sem confronto não há assinatura', () => {
+    // Falta de sinal não é sinal. Sem o líquido dos autos não há como saber
+    // qual das duas contas fecha.
+    expect(sucumbenciaisNoBruto({ ...certo, brutoTotal: 72_000, liquidoDeclarado: 0 })).toBeNull()
+  })
+
+  it('tolera arredondamento de centavo, e não confunde com o erro', () => {
+    // A folga é 1 real ou 0,1% do bruto — cobre centavo sem deixar passar
+    // troca de documento.
+    expect(sucumbenciaisNoBruto({ ...certo, liquidoDeclarado: 48_000.4 })).toBeNull()
+    const r = sucumbenciaisNoBruto({ ...certo, brutoTotal: 72_000, liquidoDeclarado: 47_999.7 })
+    expect(r!.brutoCorrigido).toBe(62_000)
+  })
+
+  it('o conserto derruba o preço, e é essa a direção', () => {
+    // O ponto do conserto: com os sucumbenciais contados duas vezes a base do
+    // deságio fica maior, e base maior significa oferta maior ao cedente.
+    const verbas = { principal: true, contratuais: true, sucumbenciais: true }
+    const inflado = montarParcelas({
+      brutoTotal: 72_000, ir: 2_000, inss: 0,
+      contratuaisBrutos: 12_000, sucumbenciaisBrutos: 10_000, verbas,
+    })
+    const correto = montarParcelas({
+      brutoTotal: 62_000, ir: 2_000, inss: 0,
+      contratuaisBrutos: 12_000, sucumbenciaisBrutos: 10_000, verbas,
+    })
+    const base = (ps: typeof inflado) => ps.reduce((t, p) => t + p.liquido, 0)
+    expect(base(inflado) - base(correto)).toBeCloseTo(10_000, 6)
   })
 })

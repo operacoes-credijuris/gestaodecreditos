@@ -54,7 +54,7 @@ import {
   type IndiceDeclarado,
   type Regime,
 } from "../_shared/indicesBcb.ts";
-import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
 import {
   aplicarDiligenciaNoM2,
@@ -1576,7 +1576,12 @@ const SYSTEM_ANALISE =
   '(c) o valor de OUTRO CREDOR: conta de ação coletiva traz dezenas de nomes, e a soma da tabela inteira não é o crédito. Use SÓ a linha do cedente identificado no card, e diga em origem_valores que havia outros; ' +
   '(d) a SOMA de vários requisitórios quando só um está sendo cedido; ' +
   '(e) o valor JÁ LÍQUIDO apresentado como se fosse o total; ' +
-  '(f) valores de DATAS DIFERENTES somados entre si — se a conta é de março e há atualização de agosto, use UMA delas inteira e diga qual. ' +
+  '(f) valores de DATAS DIFERENTES somados entre si — se a conta é de março e há atualização de agosto, use UMA delas inteira e diga qual; ' +
+  '(g) O TOTAL DO PEDIDO DE HOMOLOGAÇÃO, que costuma somar TRÊS COISAS. A petição pede "homologação dos cálculos em R$ 72.000,00" e esse total é principal + honorários contratuais + honorários SUCUMBENCIAIS. ' +
+  'Em "bruto_total" vai só a CONDENAÇÃO PRINCIPAL — principal mais contratuais, porque estes saem de dentro dele. Os sucumbenciais são CONDENAÇÃO À PARTE, ' +
+  'com verba própria, requisitório muitas vezes próprio, e campo próprio aqui. Somá-los no bruto E devolvê-los no campo deles faz o preço contá-los DUAS VEZES. ' +
+  'ANTES DE ESCREVER O BRUTO, DECOMPONHA O TOTAL: abra a conta da contadoria e veja as linhas. Não achando a decomposição, diga isso em origem_valores em vez de partir o total por estimativa. ' +
+  'A conferência que fecha é bruto_total − IR − INSS − honorários contratuais = principal_liquido, COM os sucumbenciais fora dos dois lados. ' +
   'CONFIRA ANTES DE DEVOLVER: bruto_total menos ir menos inss menos honorarios tem de dar principal_liquido. Se não fechar, você leu algum número errado ou misturou documentos — reveja. Se ainda assim não fechar, devolva o que leu e explique a divergência em origem_valores, em vez de forçar um número para a conta bater. ' +
   'E DIGA DE ONDE VEIO, em "origem_valores": documento, ID ou página, e a data de atualização. ' +
   'E ONDE VOCÊ ESCOLHEU, DIGA POR QUÊ — em "notas_celulas". Ler o número do requisitório não é escolha; adotar um índice que a conta não explicita, ' +
@@ -3251,6 +3256,45 @@ Deno.serve(async (req) => {
     // que for maior), que cobre arredondamento de centavo sem deixar passar
     // troca de documento.
     const _liqDeclarado = Number(dados.principal_liquido) || 0;
+
+    // OS SUCUMBENCIAIS ESTAVAM DENTRO DO BRUTO? A conta denuncia.
+    //
+    // O ERRO, QUE JÁ ACONTECEU: o advogado pede a homologação dos cálculos por
+    // UM total — R$ 72 mil — e esse total soma principal, honorários
+    // contratuais E sucumbenciais. A IA leva o número inteiro para bruto_total e
+    // ainda devolve os sucumbenciais no campo próprio deles. Aí eles entram
+    // DUAS VEZES no preço: dentro do bruto (que forma a parcela do principal) e
+    // como parcela própria. O crédito infla, e a oferta ao cedente sai maior que
+    // a autorizada — o erro mais caro que esta função pode cometer.
+    //
+    // O prompt já diz que bruto_total NÃO inclui sucumbenciais, e ainda assim
+    // passou: petição pedindo homologação de um total só é uma armadilha de
+    // leitura, não de instrução. Daí a conferência ser de código.
+    //
+    // A ASSINATURA É ARITMÉTICA, e ela mora em _shared/precificacao.ts — com
+    // teste. Conta que muda o preço dentro do handler é conta que nenhum teste
+    // alcança, e é o que já custou caro aqui.
+    //
+    // CORRIGE, e não só avisa. A correção vai na direção que PROTEGE quem
+    // compra — reduz o bruto, reduz o preço —, e deixar o aviso sem conserto
+    // seria manter na tela um preço que já se sabe alto. O aviso sai junto e
+    // diz exatamente o que foi feito.
+    {
+      const _antes = Number(dados.bruto_total) || 0;
+      const _fora = sucumbenciaisNoBruto({
+        brutoTotal: _antes,
+        ir: Number(dados.ir) || 0,
+        inss: Number(dados.inss) || 0,
+        contratuais: Number(dados.honorarios) || 0,
+        sucumbenciais: Number(dados.honorarios_sucumbenciais) || 0,
+        liquidoDeclarado: _liqDeclarado,
+      });
+      if (_fora) {
+        dados.bruto_total = _fora.brutoCorrigido;
+        dados._sucumbDentroDoBruto = { antes: _antes, depois: _fora.brutoCorrigido, sucumbenciais: _fora.sucumbenciais };
+      }
+    }
+
     if (_liqDeclarado > 0) {
       const _liqCalculado = (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) -
         (Number(dados.inss) || 0) - (Number(dados.honorarios) || 0);
@@ -3752,6 +3796,14 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (dados._sucumbDentroDoBruto)
+      avisosBase.unshift(
+        `⚠️ OS SUCUMBENCIAIS ESTAVAM SOMADOS NO BRUTO, e eu os tirei: o valor lido era ${brl(dados._sucumbDentroDoBruto.antes)}, ` +
+        `que inclui os ${brl(dados._sucumbDentroDoBruto.sucumbenciais)} de honorários sucumbenciais. O bruto passou a ${brl(dados._sucumbDentroDoBruto.depois)}. ` +
+        'A coluna K da precificação só admite a CONDENAÇÃO PRINCIPAL (crédito principal + honorários contratuais); os sucumbenciais são condenação à parte e entram na linha própria deles. ' +
+        'Sem esse conserto eles seriam contados duas vezes e o preço sairia alto. Isso acontece quando a petição pede a homologação de um total só — ' +
+        'confira contra a conta da contadoria antes de fechar.',
+      );
     if (dados._parcelasNaoFecham)
       avisosBase.push(
         `⚠️ AS PARCELAS NÃO FECHAM: bruto ${brl(Number(dados.bruto_total) || 0)} menos IR ${brl(Number(dados.ir) || 0)}, ` +

@@ -379,3 +379,47 @@ export function calibrarDesagio(o: {
   }
   return montar(avaliar(dDe(alto)), true)
 }
+
+/**
+ * Os honorários sucumbenciais foram somados dentro do bruto?
+ *
+ * O ERRO, QUE JÁ ACONTECEU: o advogado pede a homologação dos cálculos por UM
+ * total — R$ 72 mil — e esse total soma principal, honorários contratuais E
+ * sucumbenciais. A leitura leva o número inteiro para `bruto_total` e ainda
+ * devolve os sucumbenciais no campo próprio. Aí eles entram DUAS VEZES no preço:
+ * dentro do bruto, que forma a parcela do principal, e como parcela própria. O
+ * crédito infla e a oferta ao cedente sai maior que a autorizada — o erro mais
+ * caro que este motor pode cometer.
+ *
+ * A ASSINATURA É ARITMÉTICA E NÃO AMBÍGUA. Com os sucumbenciais FORA, vale
+ * `bruto − IR − INSS − contratuais = líquido`. Estando eles DENTRO, o que fecha
+ * é a mesma conta menos os sucumbenciais. Fechando a segunda e não a primeira,
+ * com sucumbenciais maiores que zero, não é coincidência: é o número somado onde
+ * não devia. A tolerância é de um real ou 0,1% do bruto, a mesma da conferência
+ * de parcelas.
+ *
+ * DEVOLVE null quando não há sinal — inclusive quando FALTA sinal: sem líquido
+ * declarado não há como confrontar, e mexer no bruto por suspeita seria trocar
+ * um erro conhecido por um palpite.
+ */
+export function sucumbenciaisNoBruto(o: {
+  brutoTotal: number
+  ir: number
+  inss: number
+  /** Honorários contratuais destacados. */
+  contratuais: number
+  sucumbenciais: number
+  /** O principal líquido lido dos autos. */
+  liquidoDeclarado: number
+}): { brutoCorrigido: number; sucumbenciais: number } | null {
+  if (!(o.liquidoDeclarado > 0) || !(o.brutoTotal > 0) || !(o.sucumbenciais > 0)) return null
+  const semRetencoes = o.brutoTotal - o.ir - o.inss - o.contratuais
+  const folga = Math.max(1, o.brutoTotal * 0.001)
+  const fechaComoEsta = Math.abs(semRetencoes - o.liquidoDeclarado) <= folga
+  const fechaSemSucumb = Math.abs(semRetencoes - o.sucumbenciais - o.liquidoDeclarado) <= folga
+  if (fechaComoEsta || !fechaSemSucumb) return null
+  return {
+    brutoCorrigido: Number((o.brutoTotal - o.sucumbenciais).toFixed(2)),
+    sucumbenciais: o.sucumbenciais,
+  }
+}
