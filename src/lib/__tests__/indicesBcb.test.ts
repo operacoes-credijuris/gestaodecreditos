@@ -1,27 +1,38 @@
 import { describe, it, expect } from 'vitest'
 import {
-  SERIE_DO_INDICE,
+  acumular,
+  acumularFixo,
+  chaveDaBusca,
   competencia,
-  ehIndiceConhecido,
-  fatorAcumulado,
+  ehIndiceDeclarado,
+  ehIndiceDeSerie,
+  ehRegime,
   fatorPlausivel,
+  INDICE_FIXO,
   janelaSgs,
+  mesesEntre,
   pontosMensais,
-  recalcularPorIndice,
+  recalcularItem,
+  regimePadrao,
+  SERIE_DO_INDICE,
   urlSgs,
+  type Acumulado,
 } from '../../../supabase/functions/_shared/indicesBcb.ts'
 
 /**
- * Os índices oficiais, e a armadilha que este arquivo existe para travar.
+ * Os índices oficiais, e as três armadilhas que este arquivo existe para travar.
  *
- * TR e poupança têm série DIÁRIA por aniversário (226 e 195) — a que se acha
- * primeiro procurando no SGS. Sete anos dela dão 2.604 pontos, a requisição leva
- * de 17 a 21 segundos, e compor os 2.604 como se fossem taxas mensais dá um
- * número absurdo com cara de plausível. As séries mensais (7811 e 196) devolvem
- * o mesmo valor em 300 ms.
+ *   1. SÉRIE DIÁRIA. TR e poupança têm série por aniversário (226 e 195) — a que
+ *      se acha primeiro no SGS. Sete anos dela dão 2.604 pontos, a requisição
+ *      leva de 17 a 21 segundos, e compor os 2.604 como taxas mensais dá um
+ *      número absurdo com cara de plausível.
+ *   2. REGIME. Correção capitaliza; juros de mora contra a Fazenda, não. Trocar
+ *      um pelo outro erra sempre para o lado de inflar o crédito.
+ *   3. VAZIO NÃO É ZERO. `Number('')` é 0, e o BCB devolve valor "" em mês não
+ *      publicado.
  *
- * O erro seria SILENCIOSO: ninguém refaz uma variação acumulada à mão para
- * conferir, e um fator grande é tão crível quanto um pequeno. Daí o teste.
+ * Os três erros seriam SILENCIOSOS: ninguém refaz uma variação acumulada à mão
+ * para conferir, e um fator grande é tão crível quanto um pequeno.
  */
 describe('índices do BCB', () => {
   /** Resposta real do SGS para a série 7478 (IPCA-15), formato preservado. */
@@ -38,6 +49,8 @@ describe('índices do BCB', () => {
     { data: '03/01/2015', dataFim: '03/02/2015', valor: '0.1005' },
   ]
 
+  const c = (mes: number, ano: number) => ({ ano, mes })
+
   describe('a leitura da resposta', () => {
     it('lê competência e variação de uma série mensal', () => {
       const p = pontosMensais(IPCA15_2015)
@@ -46,10 +59,9 @@ describe('índices do BCB', () => {
       expect(p[2]).toEqual({ ano: 2015, mes: 3, pct: 1.24 })
     })
 
-    it('RECUSA série diária em vez de compor errado', () => {
-      // O ponto do teste: falhar aqui é o desfecho bom. Composta como mensal,
-      // uma série diária de sete anos multiplica ~2.600 taxas e devolve um
-      // número que ninguém tem como desconfiar.
+    it('RECUSA série diária em vez de acumular errado', () => {
+      // Falhar aqui é o desfecho bom: o outro é um número de ordem de grandeza
+      // errada que ninguém tem como desconfiar.
       expect(() => pontosMensais(TR_DIARIA)).toThrow(/DIÁRIA/)
       expect(() => pontosMensais(TR_DIARIA)).toThrow(/7811/)
     })
@@ -67,13 +79,18 @@ describe('índices do BCB', () => {
       expect(p.map((x) => `${x.mes}/${x.ano}`)).toEqual(['12/2014', '1/2015', '3/2015'])
     })
 
-    it('descarta ponto sem valor numérico em vez de virar NaN na composição', () => {
+    it('VAZIO NÃO É ZERO: mês sem valor publicado não entra como "não variou"', () => {
+      // Number('') é 0 e passa por Number.isFinite. Entrando como ponto, o mês
+      // vira 0% E a conferência de meses faltantes não acusa nada — um mês de
+      // inflação desaparece sem rastro.
       const p = pontosMensais([
         { data: '01/01/2015', valor: '0.89' },
         { data: '01/02/2015', valor: '' },
         { data: '01/03/2015', valor: '1.24' },
       ])
       expect(p).toHaveLength(2)
+      // E o buraco aparece como aviso, que é o ponto de descartar em vez de zerar.
+      expect(acumular(p, c(1, 2015), c(3, 2015), 'composto').incompleto).toMatch(/faltam 1 mês/)
     })
 
     it('resposta que não é lista falha em vez de devolver vazio', () => {
@@ -81,33 +98,51 @@ describe('índices do BCB', () => {
     })
   })
 
-  describe('a composição', () => {
-    it('COMPÕE e não soma', () => {
-      // 0,89% + 1,33% + 1,24% = 3,46% somados. Compostos dão mais, e a
-      // diferença cresce com o número de meses.
-      const f = fatorAcumulado(pontosMensais(IPCA15_2015), { ano: 2015, mes: 1 }, { ano: 2015, mes: 3 })
+  describe('os dois regimes', () => {
+    it('COMPOSTO compõe: correção monetária capitaliza', () => {
+      const f = acumular(pontosMensais(IPCA15_2015), c(1, 2015), c(3, 2015), 'composto')
       expect(f.fator).toBeCloseTo(1.0089 * 1.0133 * 1.0124, 10)
-      expect((f.fator - 1) * 100).toBeGreaterThan(3.46)
-      expect(f.meses).toBe(3)
+      expect(f.regime).toBe('composto')
     })
 
-    it('reproduz o acumulado real do IPCA-15 de 2015 a 2021', () => {
-      // Conferido contra a API: 84 pontos, 50,87% acumulados de 01/2015 a
-      // 12/2021. Aqui vai uma amostra fechada com o mesmo método; o valor
-      // exato depende da série inteira, então o que se fixa é a ORDEM DE
-      // GRANDEZA da composição sobre sete anos de inflação de dois dígitos
-      // acumulados.
-      const doze = Array.from({ length: 12 }, (_, i) => ({
-        data: `01/${String(i + 1).padStart(2, '0')}/2015`,
-        valor: '0.85',
+    it('SIMPLES soma: juros de mora contra a Fazenda não capitalizam', () => {
+      const f = acumular(pontosMensais(IPCA15_2015), c(1, 2015), c(3, 2015), 'simples')
+      expect(f.fator).toBeCloseTo(1 + (0.89 + 1.33 + 1.24) / 100, 10)
+      expect(f.regime).toBe('simples')
+    })
+
+    it('composto é sempre MAIOR que simples, e a diferença cresce com o prazo', () => {
+      // É por isso que trocar um pelo outro erra sempre para o lado de inflar.
+      const doze = Array.from({ length: 84 }, (_, i) => ({
+        data: `01/${String((i % 12) + 1).padStart(2, '0')}/${2015 + Math.floor(i / 12)}`,
+        valor: '0.60',
       }))
-      const f = fatorAcumulado(pontosMensais(doze), { ano: 2015, mes: 1 }, { ano: 2015, mes: 12 })
-      expect(f.meses).toBe(12)
-      expect((f.fator - 1) * 100).toBeCloseTo(10.7, 1) // 0,85% ao mês por 12 meses
+      const p = pontosMensais(doze)
+      const comp = acumular(p, c(1, 2015), c(12, 2021), 'composto')
+      const simp = acumular(p, c(1, 2015), c(12, 2021), 'simples')
+      expect(comp.meses).toBe(84)
+      expect(comp.fator).toBeGreaterThan(simp.fator)
+      // 0,6% ao mês por 84 meses: 50,4% simples, ~65% composto.
+      expect((simp.fator - 1) * 100).toBeCloseTo(50.4, 1)
+      expect((comp.fator - 1) * 100).toBeGreaterThan(64)
     })
 
+    it('o padrão da natureza segue a prática judicial, não a conveniência', () => {
+      expect(regimePadrao('correcao')).toBe('composto')
+      expect(regimePadrao('juros')).toBe('simples')
+    })
+
+    it('só os dois regimes são aceitos', () => {
+      expect(ehRegime('composto')).toBe(true)
+      expect(ehRegime('simples')).toBe(true)
+      expect(ehRegime('linear')).toBe(false)
+      expect(ehRegime(undefined)).toBe(false)
+    })
+  })
+
+  describe('a acumulação', () => {
     it('corta pelo período pedido, ignorando o que a série trouxe a mais', () => {
-      const f = fatorAcumulado(pontosMensais(IPCA15_2015), { ano: 2015, mes: 2 }, { ano: 2015, mes: 2 })
+      const f = acumular(pontosMensais(IPCA15_2015), c(2, 2015), c(2, 2015), 'composto')
       expect(f.meses).toBe(1)
       expect(f.fator).toBeCloseTo(1.0133, 10)
       expect(f.de).toBe('02/2015')
@@ -115,122 +150,164 @@ describe('índices do BCB', () => {
     })
 
     it('avisa quando a série não cobre o período inteiro, em vez de calar', () => {
-      // O caso real: índice que só começa depois do termo inicial do título.
-      const f = fatorAcumulado(pontosMensais(IPCA15_2015), { ano: 2014, mes: 1 }, { ano: 2015, mes: 3 })
+      const f = acumular(pontosMensais(IPCA15_2015), c(1, 2014), c(3, 2015), 'composto')
       expect(f.incompleto).toMatch(/começa em 01\/2015/)
       expect(f.meses).toBe(3)
     })
 
-    it('avisa quando falta mês NO MEIO do período', () => {
-      const f = fatorAcumulado(
-        pontosMensais([
-          { data: '01/01/2015', valor: '0.89' },
-          { data: '01/03/2015', valor: '1.24' },
-        ]),
-        { ano: 2015, mes: 1 },
-        { ano: 2015, mes: 3 },
-      )
-      expect(f.incompleto).toMatch(/faltam 1 mês/)
-    })
-
     it('período invertido falha', () => {
-      expect(() =>
-        fatorAcumulado(pontosMensais(IPCA15_2015), { ano: 2015, mes: 3 }, { ano: 2015, mes: 1 }),
-      ).toThrow(/anterior ao inicial/)
+      expect(() => acumular(pontosMensais(IPCA15_2015), c(3, 2015), c(1, 2015), 'composto'))
+        .toThrow(/anterior ao inicial/)
     })
 
     it('período sem nenhum mês na série falha em vez de devolver fator 1', () => {
       // Fator 1 seria "o índice não variou", que é uma afirmação; o certo é
       // dizer que não se sabe.
-      expect(() =>
-        fatorAcumulado(pontosMensais(IPCA15_2015), { ano: 2030, mes: 1 }, { ano: 2030, mes: 6 }),
-      ).toThrow(/nenhum mês no período/)
+      expect(() => acumular(pontosMensais(IPCA15_2015), c(1, 2030), c(6, 2030), 'composto'))
+        .toThrow(/nenhum mês no período/)
+    })
+
+    it('conta os meses do período, inclusive as duas pontas', () => {
+      expect(mesesEntre(c(1, 2015), c(12, 2021))).toBe(84)
+      expect(mesesEntre(c(3, 2015), c(3, 2015))).toBe(1)
     })
   })
 
-  describe('o recálculo por proporção', () => {
-    const fator = (pct: number, meses = 84): ReturnType<typeof fatorAcumulado> => ({
-      fator: 1 + pct / 100,
-      meses,
-      de: '01/2015',
-      ate: '12/2021',
-      incompleto: null,
+  describe('a taxa fixa', () => {
+    it('1% ao mês simples por 24 meses dá 24%', () => {
+      // O caso do art. 406 do Código Civil, o mais comum em condenação antiga.
+      const f = acumularFixo(1, c(1, 2015), c(12, 2016), 'simples')
+      expect(f.meses).toBe(24)
+      expect(f.fator).toBeCloseTo(1.24, 10)
     })
 
-    it('troca o índice da conta pelo do título', () => {
-      // O caso do Tema 810: a conta usou TR (declarada inconstitucional) e o
-      // título/lei pedem IPCA-E. TR de sete anos rende quase nada; IPCA-E rende
-      // 50%. O crédito da conta está SUBESTIMADO nesse caso.
-      const r = recalcularPorIndice({
-        base: 100_000,
-        indiceTitulo: 'IPCA-E',
-        indiceConta: 'TR',
-        fatorTitulo: fator(50.87),
-        fatorConta: fator(3.4),
-      })
-      expect(r.valor).toBeCloseTo((100_000 * 1.5087) / 1.034, 6)
-      expect(r.aviso).toBeNull()
+    it('1% ao mês composto por 24 meses dá mais que 24%', () => {
+      const f = acumularFixo(1, c(1, 2015), c(12, 2016), 'composto')
+      expect(f.fator).toBeCloseTo(Math.pow(1.01, 24), 10)
+      expect(f.fator).toBeGreaterThan(1.26)
     })
 
-    it('a memória traz os dois índices, as séries, os meses e a operação', () => {
-      const r = recalcularPorIndice({
-        base: 84_320.1,
-        indiceTitulo: 'IPCA-E',
-        indiceConta: 'SELIC',
-        fatorTitulo: fator(50.87),
-        fatorConta: fator(68.2),
+    it('taxa fora do razoável falha', () => {
+      // 50% ao mês num título é erro de leitura (percentual anual lido como
+      // mensal, ou vírgula fora de lugar), e multiplicaria o crédito.
+      expect(() => acumularFixo(50, c(1, 2015), c(12, 2016), 'simples')).toThrow(/fora do razoável/)
+      expect(() => acumularFixo(-1, c(1, 2015), c(12, 2016), 'simples')).toThrow(/fora do razoável/)
+    })
+
+    it('não precisa de série nenhuma, e por isso não avisa incompleto', () => {
+      expect(acumularFixo(0.5, c(1, 2015), c(6, 2015), 'simples').incompleto).toBeNull()
+    })
+  })
+
+  describe('o recálculo de um item', () => {
+    const ac = (pct: number, regime: 'composto' | 'simples' = 'composto', meses = 84): Acumulado => ({
+      fator: 1 + pct / 100, regime, meses, de: '01/2015', ate: '12/2021', incompleto: null,
+    })
+
+    it('troca o índice da conta pelo do título, na correção', () => {
+      // Tema 810: a conta usou TR (declarada inconstitucional) e o título pede
+      // IPCA-E. A TR de sete anos rende quase nada; o crédito está SUBESTIMADO,
+      // e o delta sai positivo.
+      const r = recalcularItem({
+        natureza: 'correcao', base: 100_000,
+        titulo: { indice: 'IPCA-E', acumulado: ac(50.87) },
+        conta: { indice: 'TR', acumulado: ac(3.4) },
       })
-      // Sem a memória o número não é conferível, e o que não se confere não se
-      // usa para pagar — daí ela ser parte do contrato desta função.
+      expect(r.valorTitulo).toBeCloseTo(150_870, 6)
+      expect(r.valorConta).toBeCloseTo(103_400, 6)
+      expect(r.delta).toBeGreaterThan(0)
+      expect(r.memoria).toContain('a conta subestimou')
+    })
+
+    it('delta NEGATIVO quando a conta inflou — e é o que mexe no preço', () => {
+      // SELIC aplicada onde cabia IPCA-E: a conta cobra mais do que o título
+      // mandava, e corrigir DERRUBA o valor.
+      const r = recalcularItem({
+        natureza: 'correcao', base: 84_320.1,
+        titulo: { indice: 'IPCA-E', acumulado: ac(50.87) },
+        conta: { indice: 'SELIC', acumulado: ac(68.2) },
+      })
+      expect(r.delta).toBeLessThan(0)
+      expect(r.memoria).toContain('a conta inflou o crédito')
+    })
+
+    it('MESMO ÍNDICE, PERÍODOS DIFERENTES: é assim que o erro de TERMO se conserta', () => {
+      // O caso que motivou o módulo: juros do dano emergente contados do evento
+      // danoso quando o título os fixou da citação. Mesma taxa, período maior —
+      // e o delta é exatamente o efeito do termo errado.
+      const r = recalcularItem({
+        natureza: 'juros', base: 40_000,
+        titulo: { indice: 'POUPANCA', acumulado: { ...ac(18, 'simples', 36), de: '05/2019', ate: '04/2022' } },
+        conta: { indice: 'POUPANCA', acumulado: { ...ac(30, 'simples', 60), de: '05/2017', ate: '04/2022' } },
+      })
+      expect(r.natureza).toBe('juros')
+      expect(r.delta).toBeCloseTo(40_000 * 0.18 - 40_000 * 0.3, 6)
+      expect(r.delta).toBeLessThan(0)
+      expect(r.memoria).toContain('JUROS')
+      expect(r.memoria).toContain('05/2019')
+      expect(r.memoria).toContain('05/2017')
+    })
+
+    it('a memória diz o regime, porque ele muda o número', () => {
+      const r = recalcularItem({
+        natureza: 'juros', base: 10_000,
+        titulo: { indice: 'POUPANCA', acumulado: ac(20, 'simples') },
+        conta: { indice: 'POUPANCA', acumulado: ac(25, 'composto') },
+      })
+      expect(r.memoria).toContain('simples, sem capitalização')
+      expect(r.memoria).toContain('capitalizada')
+    })
+
+    it('a memória traz as séries do SGS, para o número ser conferível na fonte', () => {
+      const r = recalcularItem({
+        natureza: 'correcao', base: 50_000,
+        titulo: { indice: 'INPC', acumulado: ac(40) },
+        conta: { indice: 'IGP-M', acumulado: ac(55) },
+      })
       expect(r.memoria).toContain('Banco Central')
-      expect(r.memoria).toContain('IPCA-E')
-      expect(r.memoria).toContain(String(SERIE_DO_INDICE['IPCA-E']))
-      expect(r.memoria).toContain(String(SERIE_DO_INDICE.SELIC))
+      expect(r.memoria).toContain(String(SERIE_DO_INDICE.INPC))
+      expect(r.memoria).toContain(String(SERIE_DO_INDICE['IGP-M']))
       expect(r.memoria).toContain('84 meses')
-      expect(r.memoria).toContain('50,87%')
-      // Aplicando SELIC (mais alta) onde cabia IPCA-E, a conta inflou: o
-      // revisado tem de ser MENOR que a base.
-      expect(r.valor).toBeLessThan(84_320.1)
+    })
+
+    it('taxa fixa aparece na memória como taxa fixa, e não como série', () => {
+      const r = recalcularItem({
+        natureza: 'juros', base: 20_000,
+        titulo: { indice: INDICE_FIXO, acumulado: ac(12, 'simples', 12) },
+        conta: { indice: 'SELIC', acumulado: ac(18, 'simples', 12) },
+      })
+      expect(r.memoria).toContain('taxa fixa')
     })
 
     it('carrega o aviso de série incompleta para quem chama', () => {
-      const r = recalcularPorIndice({
-        base: 50_000,
-        indiceTitulo: 'INPC',
-        indiceConta: 'TR',
-        fatorTitulo: { ...fator(30), incompleto: 'a série começa em 06/2016, depois do termo inicial pedido' },
-        fatorConta: fator(3),
+      const r = recalcularItem({
+        natureza: 'correcao', base: 50_000,
+        titulo: { indice: 'INPC', acumulado: { ...ac(30), incompleto: 'a série começa em 06/2016, depois do termo inicial pedido' } },
+        conta: { indice: 'TR', acumulado: ac(3) },
       })
       expect(r.aviso).toMatch(/não cobre o período inteiro/)
       expect(r.aviso).toMatch(/06\/2016/)
     })
 
     it('base não positiva falha', () => {
-      expect(() =>
-        recalcularPorIndice({
-          base: 0, indiceTitulo: 'IPCA', indiceConta: 'TR',
-          fatorTitulo: fator(10), fatorConta: fator(1),
-        }),
-      ).toThrow(/positiva/)
+      expect(() => recalcularItem({
+        natureza: 'correcao', base: 0,
+        titulo: { indice: 'IPCA', acumulado: ac(10) }, conta: { indice: 'TR', acumulado: ac(1) },
+      })).toThrow(/positiva/)
     })
 
     it('fator absurdo falha em vez de entrar no preço', () => {
-      // Série trocada ou valores em outra base dariam fator de milhares. Este
-      // número multiplica o crédito: absurdo aqui não estraga um campo,
-      // estraga o preço.
-      expect(() =>
-        recalcularPorIndice({
-          base: 10_000, indiceTitulo: 'IPCA', indiceConta: 'TR',
-          fatorTitulo: fator(999_900), fatorConta: fator(1),
-        }),
-      ).toThrow(/fora da faixa plausível/)
+      expect(() => recalcularItem({
+        natureza: 'correcao', base: 10_000,
+        titulo: { indice: 'IPCA', acumulado: ac(999_900) }, conta: { indice: 'TR', acumulado: ac(1) },
+      })).toThrow(/fora da faixa plausível/)
       expect(fatorPlausivel(1.5087)).toBe(true)
       expect(fatorPlausivel(80)).toBe(false)
       expect(fatorPlausivel(NaN)).toBe(false)
     })
   })
 
-  describe('as competências e a URL', () => {
+  describe('as competências, a URL e a deduplicação', () => {
     it('lê MM/AAAA e AAAA-MM', () => {
       expect(competencia('01/2015')).toEqual({ ano: 2015, mes: 1 })
       expect(competencia('1/2015')).toEqual({ ano: 2015, mes: 1 })
@@ -248,34 +325,37 @@ describe('índices do BCB', () => {
     })
 
     it('a janela vai do dia 1 ao ÚLTIMO dia do mês final', () => {
-      // Fevereiro é o teste: 28 em ano comum, 29 em bissexto. Fixar 30 ou 31
-      // devolveria erro do SGS, e fixar 28 perderia o dia 29.
-      expect(janelaSgs({ ano: 2015, mes: 1 }, { ano: 2015, mes: 2 })).toEqual({
-        dataInicial: '01/01/2015', dataFinal: '28/02/2015',
-      })
-      expect(janelaSgs({ ano: 2020, mes: 1 }, { ano: 2020, mes: 2 })).toEqual({
-        dataInicial: '01/01/2020', dataFinal: '29/02/2020',
-      })
-      expect(janelaSgs({ ano: 2021, mes: 12 }, { ano: 2021, mes: 12 })).toEqual({
-        dataInicial: '01/12/2021', dataFinal: '31/12/2021',
-      })
+      // Fevereiro é o teste: 28 em ano comum, 29 em bissexto.
+      expect(janelaSgs(c(1, 2015), c(2, 2015))).toEqual({ dataInicial: '01/01/2015', dataFinal: '28/02/2015' })
+      expect(janelaSgs(c(1, 2020), c(2, 2020))).toEqual({ dataInicial: '01/01/2020', dataFinal: '29/02/2020' })
+      expect(janelaSgs(c(12, 2021), c(12, 2021))).toEqual({ dataInicial: '01/12/2021', dataFinal: '31/12/2021' })
     })
 
     it('monta a URL do SGS', () => {
-      const u = urlSgs(7478, janelaSgs({ ano: 2015, mes: 1 }, { ano: 2021, mes: 12 }))
+      const u = urlSgs(7478, janelaSgs(c(1, 2015), c(12, 2021)))
       expect(u).toContain('bcdata.sgs.7478')
       expect(u).toContain('dataInicial=01/01/2015')
       expect(u).toContain('dataFinal=31/12/2021')
     })
 
-    it('só os índices da lista são aceitos', () => {
-      expect(ehIndiceConhecido('IPCA-E')).toBe(true)
-      expect(ehIndiceConhecido('POUPANCA')).toBe(true)
+    it('a mesma série no mesmo período tem a mesma chave, e se busca uma vez', () => {
+      // Correção e juros pelo mesmo índice no mesmo período são dois itens e uma
+      // requisição — o recálculo pode ter até seis itens.
+      const j = janelaSgs(c(1, 2015), c(12, 2021))
+      expect(chaveDaBusca(196, j)).toBe(chaveDaBusca(196, j))
+      expect(chaveDaBusca(196, j)).not.toBe(chaveDaBusca(7811, j))
+      expect(chaveDaBusca(196, j)).not.toBe(chaveDaBusca(196, janelaSgs(c(1, 2016), c(12, 2021))))
+    })
+
+    it('só os índices da lista são aceitos, e FIXO não é série', () => {
+      expect(ehIndiceDeSerie('IPCA-E')).toBe(true)
+      expect(ehIndiceDeSerie(INDICE_FIXO)).toBe(false)
+      expect(ehIndiceDeclarado(INDICE_FIXO)).toBe(true)
       // Nomes que a IA poderia inventar não podem virar série nenhuma.
-      expect(ehIndiceConhecido('IPCA-15')).toBe(false)
-      expect(ehIndiceConhecido('CDI')).toBe(false)
-      expect(ehIndiceConhecido('')).toBe(false)
-      expect(ehIndiceConhecido(undefined)).toBe(false)
+      expect(ehIndiceDeclarado('IPCA-15')).toBe(false)
+      expect(ehIndiceDeclarado('CDI')).toBe(false)
+      expect(ehIndiceDeclarado('')).toBe(false)
+      expect(ehIndiceDeclarado(undefined)).toBe(false)
     })
 
     it('TR e poupança apontam para as séries MENSAIS', () => {

@@ -36,16 +36,23 @@ import {
 } from "../_shared/tetosRpv.ts";
 import { ANO_TABELA_IRRF, irProgressivo } from "../_shared/irpf.ts";
 import {
+  acumular,
+  acumularFixo,
+  chaveDaBusca,
   competencia,
-  ehIndiceConhecido,
-  fatorAcumulado,
+  ehIndiceDeclarado,
+  ehIndiceDeSerie,
+  ehRegime,
+  INDICE_FIXO,
   janelaSgs,
   pontosMensais,
-  recalcularPorIndice,
+  recalcularItem,
+  regimePadrao,
   SERIE_DO_INDICE,
   urlSgs,
-  type FatorAcumulado,
-  type NomeDeIndice,
+  type Acumulado,
+  type IndiceDeclarado,
+  type Regime,
 } from "../_shared/indicesBcb.ts";
 import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
@@ -1238,17 +1245,21 @@ const SCHEMA_ANALISE = {
     '"fundamento" = a norma, a súmula, o tema ou a decisão que sustenta o "esperado". Lista vazia quando a conta está fiel ao título',
   auditoria_risco_revisao: '"alto" | "medio" | "baixo" | "nenhum" — a chance de a conta ser revista para MENOS, mesmo já homologada',
   auditoria_recalculo:
-    'O PEDIDO DE RECÁLCULO POR ÍNDICE OFICIAL, quando a divergência que você achou for de ÍNDICE ou de TERMO (inicial ou final) da correção. ' +
-    'Objeto {base, de, ate, indice_titulo, indice_conta}, ou null quando não houver divergência dessa natureza. ' +
-    'VOCÊ NÃO FAZ ESTA CONTA: o sistema busca as duas séries no Banco Central (SGS) e refaz o valor por proporção, com a memória. ' +
-    'Você não tem série histórica de índice, e uma variação acumulada de sete anos "lembrada" sai errada com cara de exata — por isso o campo existe. ' +
-    '"base" = o valor ATUALIZADO que a conta produziu para o trecho em questão, número. Ele tem de ser uma PARTE do bruto_total (ou igual a ele): ' +
-    'o sistema calcula o bruto revisado como bruto_total − base + valor recalculado. Sendo a divergência sobre o crédito inteiro, base = bruto_total. ' +
-    '"de" e "ate" = as competências do período de correção, em MM/AAAA. Use o TERMO QUE O TÍTULO MANDA, não o que a conta usou — o erro de termo se conserta aqui, ' +
-    'pedindo o índice certo pelo período certo. ' +
-    '"indice_titulo" = o índice que o título ou a lei mandam; "indice_conta" = o que a conta aplicou. Um destes, EXATAMENTE: ' +
-    '"IPCA-E" (o IPCA-15 dos Temas 810/STF e 905/STJ), "IPCA", "INPC", "IGP-M", "SELIC", "TR", "POUPANCA". Índice fora da lista faz o recálculo ser ignorado. ' +
-    'SENDO O MESMO ÍNDICE nos dois campos e a divergência só de TERMO, é isso mesmo: o período pedido é o do título, e a proporção corrige a diferença. ' +
+    'OS RECÁLCULOS POR ÍNDICE OFICIAL, quando a divergência for de ÍNDICE ou de TERMO (inicial ou final) de correção ou de juros. ' +
+    'LISTA, até 6 itens, ou lista vazia quando não houver divergência dessa natureza. VOCÊ NÃO FAZ ESTA CONTA: o sistema busca as séries no Banco Central (SGS) ' +
+    'e refaz cada item, com a memória e a fonte. Você não tem série histórica, e uma variação acumulada de sete anos "lembrada" sai errada com cara de exata. ' +
+    'Cada item é {natureza, base, regime, titulo:{indice, de, ate, taxa_mensal}, conta:{indice, de, ate, taxa_mensal}}: ' +
+    '"natureza" = "correcao" ou "juros". UM ITEM PARA CADA: no regime dos Temas 810/STF e 905/STJ correção e juros são consectários SEPARADOS, ' +
+    'e a conta pode acertar um e errar o outro. Errando os dois, mande dois itens. ' +
+    '"base" = o valor sobre o qual aquela taxa incide, número. Para correção, o valor histórico ou o valor da parcela; para juros, o valor JÁ CORRIGIDO. ' +
+    'Cada base tem de ser uma parte do bruto_total (ou igual a ele): o sistema soma as diferenças de todos os itens ao bruto dos autos. ' +
+    '"regime" = "composto" ou "simples". Omitindo, o sistema usa composto para correção e SIMPLES para juros, que é a prática judicial — ' +
+    'juros de mora contra a Fazenda não capitalizam, e tratá-los como compostos infla o crédito. Só mande "composto" em juros se o título mandar capitalizar. ' +
+    'OS DOIS LADOS TÊM PERÍODO PRÓPRIO, e é assim que o erro de TERMO se conserta: mesmo índice nos dois lados, "de"/"ate" diferentes, ' +
+    'e a diferença é exatamente o efeito do termo errado. É o caso de juros contados do evento danoso quando o título os fixou da citação. ' +
+    'Em "titulo" vão o índice e o período que o TÍTULO manda; em "conta", os que a conta usou. Competências em MM/AAAA. ' +
+    '"indice" = um destes, EXATAMENTE: "IPCA-E" (o IPCA-15 dos Temas 810/905), "IPCA", "INPC", "IGP-M", "SELIC", "TR", "POUPANCA", ou "FIXO" para taxa fixada — ' +
+    'e aí "taxa_mensal" traz o percentual ao mês (1 para o 1% do art. 406 do Código Civil, 0.5 para meio por cento). Índice fora da lista faz o item ser ignorado. ' +
     'PREENCHA TAMBÉM "auditoria_bruto_conservador" com a sua melhor estimativa: se o Banco Central não responder, é ela que vale',
   auditoria_bruto_conservador:
     'o valor bruto no CENÁRIO CONSERVADOR, número. null SÓ quando não houver nenhuma divergência que reduza o crédito. ' +
@@ -1503,8 +1514,11 @@ const SYSTEM_ANALISE =
   'porque a série do índice não está nos autos, porque a conta não tem memória, porque falta uma data. Estimando, diga O QUE FALTOU e QUAL SUBSTITUTO usou. ' +
   'Número apresentado como exato quando é aproximado é pior que aproximado declarado: quem lê para de conferir. ' +
   'NÃO INVENTE PRECISÃO QUE VOCÊ NÃO TEM. Você não dispõe de série histórica de índice nem de calculadora: uma variação acumulada de IPCA-E de sete anos "lembrada" sai errada e sai com cara de exata. ' +
-  'DIVERGÊNCIA DE ÍNDICE OU DE TERMO DA CORREÇÃO NÃO SE CALCULA DE CABEÇA: PEÇA. Preencha "auditoria_recalculo" com a base, o período pelo TERMO DO TÍTULO, o índice que o título manda e o que a conta aplicou, ' +
-  'e o sistema busca as duas séries no Banco Central e refaz o valor por proporção, com a memória e a fonte. É a mesma aritmética que você faria, com o dado oficial em vez da sua lembrança. ' +
+  'DIVERGÊNCIA DE ÍNDICE OU DE TERMO — DE CORREÇÃO OU DE JUROS — NÃO SE CALCULA DE CABEÇA: PEÇA. Preencha "auditoria_recalculo" com um item por consectário errado, ' +
+  'dizendo a base, o índice e o período de cada lado (o que o título manda e o que a conta aplicou), e o sistema busca as séries no Banco Central e refaz, com a memória e a fonte. ' +
+  'É a mesma aritmética que você faria, com o dado oficial em vez da sua lembrança. ' +
+  'CORREÇÃO E JUROS SÃO ITENS SEPARADOS, e não se acumulam do mesmo jeito: correção capitaliza, juros de mora contra a Fazenda são simples. ' +
+  'E o ERRO DE TERMO se conserta por aqui também — mesmo índice nos dois lados, períodos diferentes: a diferença é o efeito do termo. ' +
   'Preencha "auditoria_bruto_conservador" com a sua estimativa de todo modo: ela é a rede se o Banco Central não responder. ' +
   'PARA O RESTO, a ordem de preferência é: (1) refazer por proporção a partir da memória da conta; (2) calcular sobre o período e a base que os autos permitem, dizendo o que faltou; ' +
   '(3) não havendo nem isso, entregar o número como ESTIMATIVA declarada, com o método e a ordem de grandeza, e o efeito em direção. O que não se faz é devolver null por insegurança — ' +
@@ -1883,7 +1897,7 @@ const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
  */
 const CAMPOS_EDITAVEIS: ReadonlySet<string> = new Set(Object.keys(SCHEMA_ANALISE));
 const CAMPOS_LISTA: ReadonlySet<string> = new Set([
-  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias', 'auditoria_confronto', 'notas_celulas',
+  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias', 'auditoria_confronto', 'auditoria_recalculo', 'notas_celulas',
 ]);
 
 const FERRAMENTA_REVISAO = {
@@ -3260,17 +3274,17 @@ Deno.serve(async (req) => {
     /** O que o recálculo escreveu na tela de auditoria, e não nos alertas gerais. */
     const _avisosDoIndiceAuditoria: string[] = [];
 
-    // ---- O RECÁLCULO COM ÍNDICE OFICIAL DO BANCO CENTRAL ----
+    // ---- OS RECÁLCULOS COM ÍNDICE OFICIAL DO BANCO CENTRAL ----
     //
-    // A IA DECLARA, O CÓDIGO CALCULA. Ela diz qual índice o título manda, qual a
-    // conta aplicou, o período pelo termo do título e a base; daqui saem as duas
-    // séries do SGS e a proporção. O motivo é o que já está no prompt: o modelo
-    // não tem série histórica, e uma variação acumulada de sete anos lembrada
-    // sai errada com cara de exata.
+    // A IA DECLARA, O CÓDIGO CALCULA. Ela diz, por consectário errado, qual
+    // índice o título manda, qual a conta aplicou, o período de cada lado e a
+    // base; daqui saem as séries do SGS e a aritmética. O motivo está no
+    // prompt: o modelo não tem série histórica, e uma variação acumulada de
+    // sete anos lembrada sai errada com cara de exata.
     //
     // NÃO É FERRAMENTA NO LAÇO DA IA de propósito. A extração roda com
-    // tool_choice forçado numa ferramenta só; abrir turnos para consulta custaria
-    // o tempo de parede que a divisão da leitura acabou de recuperar.
+    // tool_choice forçado numa ferramenta só; abrir turnos para consulta
+    // custaria o tempo de parede que a divisão da leitura acabou de recuperar.
     //
     // O CUSTO FOI MEDIDO antes de existir: séries MENSAIS respondem em 230 a
     // 540 ms para sete anos (84 pontos). As diárias de TR e poupança — 226 e
@@ -3278,77 +3292,130 @@ Deno.serve(async (req) => {
     // pontos. Por isso o mapa aponta para 7811 e 196, que dão o mesmo valor.
     // Ver _shared/indicesBcb.ts.
     //
+    // UMA LISTA, e não um item: no regime dos Temas 810/905 correção e juros são
+    // consectários separados, e a conta pode acertar um e errar o outro. As
+    // buscas são DEDUPLICADAS por série e janela — correção e juros pelo mesmo
+    // índice no mesmo período são dois itens e uma requisição.
+    //
     // FALHA AQUI NÃO DERRUBA NADA: sem resposta do Banco Central vale a
     // estimativa que a IA já escreveu em auditoria_bruto_conservador, e o aviso
     // diz que o índice não foi confirmado.
     {
-      const _rec = dados.auditoria_recalculo;
-      const _base = Number(_rec?.base);
-      const _de = competencia(_rec?.de);
-      const _ate = competencia(_rec?.ate);
-      const _iTit = _rec?.indice_titulo;
-      const _iCon = _rec?.indice_conta;
+      const _itens = Array.isArray(dados.auditoria_recalculo)
+        ? dados.auditoria_recalculo.slice(0, 6)
+        : [];
       const _brutoAutos = Number(dados.bruto_total) || 0;
-      if (
-        _rec && typeof _rec === 'object' &&
-        Number.isFinite(_base) && _base > 0 && _de && _ate &&
-        ehIndiceConhecido(_iTit) && ehIndiceConhecido(_iCon)
-      ) {
-        // A BASE TEM DE SER PARTE DO BRUTO. O bruto revisado sai de
-        // bruto − base + recalculado; base maior que o bruto significa que a IA
-        // leu outro valor (o de outro credor, a soma de requisitórios), e a
-        // subtração devolveria negativo — número que a precificação aceitaria
-        // sem reclamar. 1% de folga cobre arredondamento.
-        if (_base > _brutoAutos * 1.01) {
+
+      /** Um lado do item, já validado. */
+      type Lado = { indice: IndiceDeclarado; de: {ano:number;mes:number}; ate: {ano:number;mes:number}; taxa: number | null };
+      const _lado = (v: any): Lado | null => {
+        const de = competencia(v?.de), ate = competencia(v?.ate);
+        if (!de || !ate || !ehIndiceDeclarado(v?.indice)) return null;
+        const taxa = Number(v?.taxa_mensal);
+        // FIXO sem taxa não é nada: não há série para consultar e não há
+        // percentual para aplicar. Descartar é melhor que assumir 1%.
+        if (v.indice === INDICE_FIXO && !(Number.isFinite(taxa) && taxa > 0)) return null;
+        return { indice: v.indice, de, ate, taxa: Number.isFinite(taxa) ? taxa : null };
+      };
+
+      const _validos: Array<{ natureza: 'correcao' | 'juros'; base: number; regime: Regime; titulo: Lado; conta: Lado }> = [];
+      for (const it of _itens) {
+        const nat = it?.natureza === 'juros' ? 'juros' : it?.natureza === 'correcao' ? 'correcao' : null;
+        const base = Number(it?.base);
+        const tit = _lado(it?.titulo), con = _lado(it?.conta);
+        if (!nat || !tit || !con || !Number.isFinite(base) || base <= 0) continue;
+        // A BASE TEM DE SER PARTE DO BRUTO. As diferenças são somadas ao bruto
+        // dos autos; base maior que o bruto significa que a IA leu outro valor
+        // (o de outro credor, a soma de requisitórios), e o resultado sairia
+        // sem sentido — aceito pela precificação sem uma reclamação.
+        if (base > _brutoAutos * 1.01) {
           _avisosDoIndice.push(
-            `A auditoria pediu recálculo por índice sobre uma base de ${brl(_base)}, que é maior que o bruto dos autos (${brl(_brutoAutos)}). ` +
-            'O recálculo foi ignorado e vale a estimativa da própria auditoria — confira de onde saiu essa base.',
+            `A auditoria pediu recálculo de ${nat} sobre uma base de ${brl(base)}, maior que o bruto dos autos (${brl(_brutoAutos)}). ` +
+            'O item foi ignorado — confira de onde saiu essa base.',
           );
-        } else {
-          try {
-            const _janela = janelaSgs(_de, _ate);
-            const _buscar = async (nome: NomeDeIndice): Promise<FatorAcumulado> => {
-              const res = await fetch(urlSgs(SERIE_DO_INDICE[nome], _janela), {
-                headers: { Accept: 'application/json' },
-                // Teto curto de propósito: a conta é um enriquecimento, não a
-                // análise. Não vale segurar a requisição por uma série que
-                // demora — a estimativa da IA cobre o caso.
-                signal: AbortSignal.timeout(20_000),
-              });
-              if (!res.ok) throw new Error(`série ${SERIE_DO_INDICE[nome]} (${nome}) → HTTP ${res.status}`);
-              return fatorAcumulado(pontosMensais(await res.json()), _de, _ate);
-            };
-            // EM PARALELO: são duas leituras independentes de 300 ms cada.
-            const [_fTit, _fCon] = await Promise.all([_buscar(_iTit), _buscar(_iCon)]);
-            const _r = recalcularPorIndice({
-              base: _base, indiceTitulo: _iTit, indiceConta: _iCon, fatorTitulo: _fTit, fatorConta: _fCon,
+          continue;
+        }
+        _validos.push({
+          natureza: nat, base,
+          regime: ehRegime(it?.regime) ? it.regime : regimePadrao(nat),
+          titulo: tit, conta: con,
+        });
+      }
+
+      if (_validos.length) {
+        try {
+          // UMA BUSCA POR (SÉRIE, JANELA). Sem isto, um recálculo de correção e
+          // juros pela poupança no mesmo período faria duas requisições
+          // idênticas.
+          const _cache = new Map<string, Promise<unknown>>();
+          const _pedir = (serie: number, janela: { dataInicial: string; dataFinal: string }) => {
+            const k = chaveDaBusca(serie, janela);
+            if (!_cache.has(k)) {
+              _cache.set(k, (async () => {
+                const res = await fetch(urlSgs(serie, janela), {
+                  headers: { Accept: 'application/json' },
+                  // Teto curto de propósito: a conta é um enriquecimento, não a
+                  // análise. Não vale segurar a requisição por uma série que
+                  // demora — a estimativa da IA cobre o caso.
+                  signal: AbortSignal.timeout(20_000),
+                });
+                if (!res.ok) throw new Error(`série ${serie} → HTTP ${res.status}`);
+                return await res.json();
+              })());
+            }
+            return _cache.get(k)!;
+          };
+          const _acumuladoDe = async (l: Lado, regime: Regime): Promise<Acumulado> => {
+            if (!ehIndiceDeSerie(l.indice)) return acumularFixo(l.taxa ?? 0, l.de, l.ate, regime);
+            const janela = janelaSgs(l.de, l.ate);
+            return acumular(pontosMensais(await _pedir(SERIE_DO_INDICE[l.indice], janela)), l.de, l.ate, regime);
+          };
+
+          // TODOS OS LADOS DE TODOS OS ITENS DE UMA VEZ. São leituras
+          // independentes de ~300 ms; em série, seis itens seriam quatro
+          // segundos por nada.
+          const _feitos = await Promise.all(_validos.map(async (v) => {
+            const [_t, _c] = await Promise.all([
+              _acumuladoDe(v.titulo, v.regime),
+              _acumuladoDe(v.conta, v.regime),
+            ]);
+            return recalcularItem({
+              natureza: v.natureza, base: v.base,
+              titulo: { indice: v.titulo.indice, acumulado: _t },
+              conta: { indice: v.conta.indice, acumulado: _c },
             });
-            const _revisado = Number((_brutoAutos - _base + _r.valor).toFixed(2));
-            // O NÚMERO OFICIAL SOBREPÕE A ESTIMATIVA. Quem decide se ele entra
-            // no preço é aplicarAuditoria, que recusa conservador MAIOR que o
-            // bruto dos autos — auditoria não aumenta crédito.
-            dados.auditoria_bruto_conservador = _revisado;
-            dados.auditoria_justificativa =
-              `${_r.memoria}${_base < _brutoAutos ? ` A base recalculada é parte do bruto: ${brl(_brutoAutos)} − ${brl(_base)} + ${brl(_r.valor)} = ${brl(_revisado)}.` : ''} ` +
-              String(dados.auditoria_justificativa ?? '').trim();
-            // A MEMÓRIA VAI PARA A CÉLULA DO BRUTO na planilha, junto da origem
-            // dos valores — é lá que alguém vai conferir o número seis meses
-            // depois, sem esta análise à mão.
-            const _notas = Array.isArray(dados.notas_celulas) ? dados.notas_celulas : [];
-            _notas.push({ campo: 'bruto_total', nota: _r.memoria });
-            dados.notas_celulas = _notas;
-            _avisosDoIndiceAuditoria.push(
-              `Índice conferido na fonte oficial: ${_iTit} ${((_fTit.fator - 1) * 100).toFixed(2).replace('.', ',')}% ` +
-              `contra ${_iCon} ${((_fCon.fator - 1) * 100).toFixed(2).replace('.', ',')}% (${_fTit.de} a ${_fTit.ate}, Banco Central/SGS). ` +
-              `Bruto revisado para ${brl(_revisado)}.`,
-            );
-            if (_r.aviso) _avisosDoIndiceAuditoria.push(`⚠️ ${_r.aviso}`);
-          } catch (e) {
-            _avisosDoIndiceAuditoria.push(
-              `⚠️ ÍNDICE NÃO CONFIRMADO na fonte oficial: ${(e as Error)?.message ?? String(e)}. ` +
-              'O cenário conservador ficou com a estimativa da própria auditoria — confira a atualização à mão antes de fechar.',
-            );
-          }
+          }));
+
+          const _delta = _feitos.reduce((soma, r) => soma + r.delta, 0);
+          const _revisado = Number((_brutoAutos + _delta).toFixed(2));
+          if (!(_revisado > 0)) throw new Error('o recálculo devolveu bruto revisado não positivo');
+
+          // O NÚMERO OFICIAL SOBREPÕE A ESTIMATIVA. Quem decide se ele entra no
+          // preço é aplicarAuditoria, que recusa conservador MAIOR que o bruto
+          // dos autos — auditoria não aumenta crédito, e delta positivo é
+          // exatamente o caso da conta que subestimou.
+          dados.auditoria_bruto_conservador = _revisado;
+          const _memorias = _feitos.map((r) => r.memoria).join(' ');
+          dados.auditoria_justificativa =
+            `${_memorias} Bruto dos autos ${brl(_brutoAutos)} ${_delta < 0 ? 'menos' : 'mais'} ${brl(Math.abs(_delta))} = ${brl(_revisado)}. ` +
+            String(dados.auditoria_justificativa ?? '').trim();
+          // A MEMÓRIA VAI PARA A CÉLULA DO BRUTO na planilha, junto da origem
+          // dos valores — é lá que alguém vai conferir o número seis meses
+          // depois, sem esta análise à mão.
+          const _notas = Array.isArray(dados.notas_celulas) ? dados.notas_celulas : [];
+          _notas.push({ campo: 'bruto_total', nota: _memorias });
+          dados.notas_celulas = _notas;
+          _avisosDoIndiceAuditoria.push(
+            `${_feitos.length} ${_feitos.length === 1 ? 'consectário' : 'consectários'} conferido(s) na fonte oficial (Banco Central/SGS): ` +
+            _feitos.map((r) => `${r.natureza} ${r.delta < 0 ? '−' : '+'}${brl(Math.abs(r.delta))}`).join(', ') +
+            `. Bruto revisado para ${brl(_revisado)}.`,
+          );
+          for (const r of _feitos) if (r.aviso) _avisosDoIndiceAuditoria.push(`⚠️ ${r.aviso}`);
+        } catch (e) {
+          _avisosDoIndiceAuditoria.push(
+            `⚠️ ÍNDICE NÃO CONFIRMADO na fonte oficial: ${(e as Error)?.message ?? String(e)}. ` +
+            'O cenário conservador ficou com a estimativa da própria auditoria — confira a atualização à mão antes de fechar.',
+          );
         }
       }
     }
