@@ -23,6 +23,25 @@ export interface PaginaRenderizada {
   blob: Blob
 }
 
+/**
+ * Onde o tempo desta etapa foi, medido por dentro.
+ *
+ * Existe porque a etapa de imagens variou de 7s a 2m46s entre processos e eu
+ * não tinha como dizer o que dominava: a rasterização (pdf.js decodificando a
+ * imagem embutida e desenhando no canvas, na thread principal) ou a rede. São
+ * consertos opostos — Web Worker de um lado, concorrência ou compressão do
+ * outro —, e escolher sem medir foi o que já me custou três tentativas erradas
+ * neste projeto.
+ */
+export interface TempoDaRenderizacao {
+  /** Páginas que saíram prontas. */
+  paginas: number
+  /** Milissegundos dentro da rasterização: decodificar, desenhar, comprimir. */
+  rasterizacao: number
+  /** Milissegundos parados esperando o consumidor — na prática, a fila de upload. */
+  consumidor: number
+}
+
 /** O teto da API: acima disto ela reduz por conta própria, e o excedente é lixo. */
 const ARESTA_MAIOR_ALVO = 1568
 const ESCALA_MAXIMA = 2.5
@@ -54,13 +73,16 @@ export async function renderizarPaginas(
   numeros: number[],
   onProgresso?: (feitas: number, total: number) => void,
   onPagina?: (pagina: PaginaRenderizada) => void | Promise<void>,
-): Promise<{ imagens: PaginaRenderizada[]; falhas: number[] }> {
+): Promise<{ imagens: PaginaRenderizada[]; falhas: number[]; tempo: TempoDaRenderizacao }> {
   const imagens: PaginaRenderizada[] = []
   const falhas: number[] = []
+  const tempo: TempoDaRenderizacao = { paginas: 0, rasterizacao: 0, consumidor: 0 }
+  const agora = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
   // O pdf.js toma posse do buffer: cópia, para o chamador poder reutilizá-lo.
   const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise
   let feitas = 0
   for (const numero of numeros) {
+    const t0 = agora()
     try {
       if (numero < 1 || numero > pdf.numPages) throw new Error('fora da faixa')
       const page = await pdf.getPage(numero)
@@ -81,21 +103,29 @@ export async function renderizarPaginas(
       await page.render({ canvasContext: ctx, viewport }).promise
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', QUALIDADE_JPEG))
       if (!blob) throw new Error('toBlob devolveu vazio')
+      // A CONTA DOS DOIS TEMPOS SE FECHA AQUI: o que veio antes é rasterização,
+      // o que o consumidor segurar é rede. Sem esta linha os dois viriam
+      // somados, e somados eles não dizem o que consertar.
+      tempo.rasterizacao += agora() - t0
+      tempo.paginas++
+      const tCons = agora()
       // Com consumidor, a página vai embora agora e não fica na memória; sem
       // consumidor, o comportamento antigo continua valendo.
       if (onPagina) await onPagina({ numero, blob })
       else imagens.push({ numero, blob })
+      tempo.consumidor += agora() - tCons
       // Libera a memória do canvas: 60 páginas de 1400×2000 são muitos MB.
       canvas.width = 0
       canvas.height = 0
       page.cleanup()
     } catch {
       falhas.push(numero)
+      tempo.rasterizacao += agora() - t0
     } finally {
       feitas++
       onProgresso?.(feitas, numeros.length)
     }
   }
   await pdf.destroy()
-  return { imagens, falhas }
+  return { imagens, falhas, tempo }
 }

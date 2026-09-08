@@ -710,6 +710,15 @@ export interface FaseMedida {
    * duas, em paralelo; somá-las daria um número que ninguém esperou.
    */
   servidor?: Array<{ rotulo: string } & RelogioServidor>
+  /**
+   * O detalhe de uma etapa que roda AQUI, e não no servidor.
+   *
+   * A etapa das imagens variou de 7s a 2m46s entre processos, e o total sozinho
+   * não diz o que consertar: rasterização pede Web Worker, rede pede
+   * concorrência ou compressão. São consertos opostos, e escolher sem medir foi
+   * o que já custou três tentativas erradas neste projeto.
+   */
+  detalhe?: string
 }
 
 /**
@@ -738,7 +747,8 @@ function LinhaDoTempo({ fases }: { fases: FaseMedida[] }) {
   if (!fases.length) return null
   const total = fases.reduce((t, f) => t + f.ms, 0)
   const dentro = (f: FaseMedida) =>
-    f.servidor?.length
+    f.detalhe ??
+    (f.servidor?.length
       ? f.servidor
           .map(
             (r) =>
@@ -746,7 +756,7 @@ function LinhaDoTempo({ fases }: { fases: FaseMedida[] }) {
               (r.fases.length ? ' — ' + r.fases.map(([n, ms]) => `${n} ${duracao(ms)}`).join('; ') : ''),
           )
           .join('\n')
-      : undefined
+      : undefined)
 
   return (
     <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
@@ -1224,6 +1234,13 @@ export function AnaliseRpvModal({
         marco = agora
         setFases([...medidas])
       }
+      /** A mesma marca, para etapa que roda aqui e tem decomposição própria. */
+      const marcarLocal = (nome: string, detalhe: string) => {
+        const agora = performance.now()
+        medidas.push({ nome, ms: agora - marco, detalhe })
+        marco = agora
+        setFases([...medidas])
+      }
       try {
         const arquivos = await lerArquivos()
         // TODOS OS PDFs COM TEXTO, e não só o último.
@@ -1290,6 +1307,14 @@ export function AnaliseRpvModal({
         // disponível, segue só com o texto e avisa.
         marcar('anexos')
         let jobId: string | undefined
+        /**
+         * A decomposição da etapa das imagens, montada onde ela acontece.
+         *
+         * A conta é feita DENTRO do bloco que renderiza; a MARCA acontece
+         * fora, junto das outras etapas. Daí a variável aqui em cima em vez de
+         * um cálculo repetido nos dois lugares.
+         */
+        let detalheImagens = ''
         if (selecao.length) {
           const totalSel = selecao.reduce((n, x) => n + x.numeros.length, 0)
           setPasso(`Preparando ${totalSel} página(s) digitalizada(s) para leitura por imagem…`)
@@ -1316,9 +1341,13 @@ export function AnaliseRpvModal({
           // empilhar sessenta blobs de 80 a 190 KB na memória.
           const CONCORRENCIA = 6
           const emVoo = new Set<Promise<void>>()
+          // A DECOMPOSIÇÃO DESTA ETAPA. Ela variou de 7s a 2m46s entre
+          // processos, e o total sozinho não diz o que atacar: rasterização
+          // pede Web Worker, rede pede concorrência ou compressão.
+          const conta = { paginas: 0, rasterizacao: 0, consumidor: 0 }
           for (const sel of selecao) {
             const base = sel.arquivo.replace(/\.pdf$/i, '').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'arquivo'
-            const { falhas: f } = await renderizarPaginas(
+            const { falhas: f, tempo: tR } = await renderizarPaginas(
               sel.bytes,
               sel.numeros,
               (feitas) => {
@@ -1354,6 +1383,9 @@ export function AnaliseRpvModal({
               },
             )
             if (f.length) falhas.push(`"${sel.arquivo}" p. ${f.join(', ')}: não renderizou`)
+            conta.paginas += tR.paginas
+            conta.rasterizacao += tR.rasterizacao
+            conta.consumidor += tR.consumidor
           }
           // O que ainda estava em voo quando a última página saiu do forno.
           await Promise.all(emVoo)
@@ -1370,6 +1402,12 @@ export function AnaliseRpvModal({
             t += `\n\nPÁGINAS DIGITALIZADAS ENVIADAS COMO IMAGEM (${enviadas}): ${descreverSelecao(selecao)}. Leia-as como parte dos autos.`
             if (falhas.length) t += ` Não foi possível enviar: ${falhas.slice(0, 5).join('; ')}.`
           }
+          {
+            const seg = (ms: number) => `${(ms / 1000).toFixed(0)}s`
+            detalheImagens =
+              `${conta.paginas} página(s) · rasterização (pdf.js, thread principal) ${seg(conta.rasterizacao)} · ` +
+              `espera da fila de upload ${seg(conta.consumidor)} · ${enviadas} de ${totalSel} enviada(s)`
+          }
         }
         // DUAS REQUISIÇÕES, UMA POR LEITURA — e não é capricho.
         //
@@ -1384,7 +1422,7 @@ export function AnaliseRpvModal({
         // servidor não refazer o portão.
         // A etapa das imagens só existe quando houve imagem: linha com
         // "imagens 0s" em processo nato-digital é ruído.
-        if (selecao.length) marcar('imagens')
+        if (selecao.length) marcarLocal('imagens', detalheImagens)
         setPasso('Qualificando o crédito…')
         const q = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
           acao: 'qualificar',
