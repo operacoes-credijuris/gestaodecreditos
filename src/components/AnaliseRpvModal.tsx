@@ -897,12 +897,29 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
                       <tbody>
                         {confronto.map((c, i) => {
                           const v = VEREDITO_CONFRONTO[c.confere] ?? { texto: c.confere, cor: 'text-slate-400' }
+                          const bate = c.confere === 'sim'
                           return (
                             <tr key={i} className="border-t border-slate-200/70 align-top">
                               <td className="py-1 pr-3 text-slate-600">{c.verba}</td>
                               <td className="py-1 pr-3 text-slate-600">{c.criterio}</td>
-                              <td className="py-1 pr-3 text-slate-500">{c.titulo}</td>
-                              <td className="py-1 pr-3 text-slate-500">{c.conta}</td>
+                              {/* Item que bateu ocupa uma célula só, mesclada: a
+                                  linha existe para provar que foi olhado, e
+                                  duas colunas vazias leriam como preenchimento
+                                  faltando em vez de nada a dizer. */}
+                              {bate ? (
+                                <td className="py-1 pr-3 text-slate-300" colSpan={2}>
+                                  {c.titulo || c.conta ? (
+                                    <span className="text-slate-500">{[c.titulo, c.conta].filter(Boolean).join(' · ')}</span>
+                                  ) : (
+                                    '—'
+                                  )}
+                                </td>
+                              ) : (
+                                <>
+                                  <td className="py-1 pr-3 text-slate-500">{c.titulo || '—'}</td>
+                                  <td className="py-1 pr-3 text-slate-500">{c.conta || '—'}</td>
+                                </>
+                              )}
                               <td className={cn('py-1 whitespace-nowrap font-medium', v.cor)}>{v.texto}</td>
                             </tr>
                           )

@@ -1226,15 +1226,17 @@ const SCHEMA_ANALISE = {
   auditoria_natureza: 'a natureza do crédito para fins de correção: "tributária" | "não tributária" | "trabalhista" | "indefinida". É o que decide o regime de índices, e errar aqui contamina toda a auditoria',
   auditoria_confronto:
     'O CONFRONTO ITEM A ITEM entre o que o TÍTULO mandou e o que a CONTA fez. Lista, uma linha por par VERBA × CRITÉRIO, cada uma {verba, criterio, titulo, conta, confere}. ' +
-    'ERA UM RESUMO EM PROSA E VIROU TABELA porque resumo deixa passar: quem narra "a conta seguiu o título, com divergência no índice" não olhou o termo inicial dos juros de cada verba. Linha a linha, olha. ' +
+    'É TABELA e não prosa porque resumo deixa passar: quem narra "a conta seguiu o título, com divergência no índice" não olhou o termo inicial dos juros de cada verba. Linha a linha, olha. ' +
     '"verba" = a que o item se refere ("principal", "danos emergentes", "lucros cessantes", "dano moral", "honorários sucumbenciais", "todas" quando o critério for único para o crédito inteiro). ' +
-    'UMA LINHA POR VERBA, e não uma para o conjunto, sempre que o título tratar as verbas de modo diferente — é o erro mais comum e o mais caro: a sentença fixa juros do evento danoso para uma verba e da citação para outra, ' +
-    'e a conta aplica um marco só a tudo. Se você escrever "todas" sem ter conferido verba por verba, a divergência passa. ' +
-    '"criterio" = um destes, e percorra TODOS os que se aplicarem: "verba deferida", "período de apuração", "base de cálculo", "percentual/fração", ' +
+    'UMA LINHA POR VERBA sempre que o título tratar as verbas de modo diferente — é o erro mais comum e o mais caro: a sentença fixa juros do evento danoso para uma e da citação para outra, ' +
+    'e a conta aplica um marco só a tudo. Escrevendo "todas" sem ter conferido verba por verba, a divergência passa. ' +
+    '"criterio" = um destes, percorrendo TODOS os que se aplicarem: "verba deferida", "período de apuração", "base de cálculo", "percentual/fração", ' +
     '"índice de correção", "termo inicial da correção", "taxa de juros", "termo inicial dos juros", "termo final", "dedução/compensação determinada", "tributação", "honorários — percentual e base". ' +
-    '"titulo" = o que a sentença ou o acórdão determinam NAQUELE item, com o trecho e a localização (ID/página) quando houver — no máximo 140 caracteres. ' +
-    '"conta" = o que a conta que vale efetivamente aplicou naquele item, também em até 140 caracteres. ' +
-    '"confere" = "sim" | "nao" | "titulo_silente" (o título não trata do item e a conta usou a praxe — diga na coluna "conta" qual praxe) | "conta_sem_memoria" (a conta não explicita o critério; isso é achado, não é "sim"). ' +
+    '"confere" = "sim" | "nao" | "titulo_silente" (o título não trata do item e a conta usou a praxe) | "conta_sem_memoria" (a conta não explicita o critério; isso é achado, não é "sim"). ' +
+    'AS CÉLULAS "titulo" E "conta" SÓ SE PREENCHEM QUANDO NÃO CONFERE. Confirmado o item, deixe as duas VAZIAS: a linha já diz o que foi olhado e que bateu, ' +
+    'e escrever "o título manda IPCA-E / a conta aplicou IPCA-E" em vinte linhas é meia tela de repetição para o leitor e um minuto de relógio para você. ' +
+    'Nas linhas "nao", "titulo_silente" e "conta_sem_memoria": "titulo" = o que a sentença determina naquele item, com a localização quando houver, em ATÉ 90 CARACTERES; ' +
+    '"conta" = o que a conta aplicou, também em até 90. Telegráfico e técnico: "IPCA-E desde 03/2015 (fls. 412)", "TR desde o ajuizamento". Não escreva frase completa. ' +
     'TODA linha com confere="nao" tem de ter a divergência correspondente em auditoria_divergencias, e nenhuma divergência pode existir sem a sua linha aqui. As duas listas se conferem uma à outra',
   auditoria_divergencias:
     'lista das divergências entre o título e a conta, cada uma {item, esperado, encontrado, efeito_se_corrigida, gravidade, fundamento}: ' +
@@ -1242,7 +1244,10 @@ const SCHEMA_ANALISE = {
     '"esperado" = o que o título ou a lei mandam; "encontrado" = o que a conta fez; ' +
     '"efeito_se_corrigida" = O QUE ACONTECE COM O CRÉDITO SE A DIVERGÊNCIA FOR CORRIGIDA — "reduz" quando a conta está inflada e a correção derruba o valor, "aumenta" quando a conta subestimou, "indefinido" quando não dá para dizer sem refazer a conta. NÃO é o efeito do erro: é o efeito do CONSERTO; ' +
     '"gravidade" = pela força do fundamento contra o que a conta fez, e SÓ por isso: "alta" com súmula, tema repetitivo ou jurisprudência consolidada; "media" com questão controvertida; "baixa" com imprecisão sem efeito no valor. NUNCA classifique por quem a divergência favorece; ' +
-    '"fundamento" = a norma, a súmula, o tema ou a decisão que sustenta o "esperado". Lista vazia quando a conta está fiel ao título',
+    '"fundamento" = a norma, a súmula, o tema ou a decisão que sustenta o "esperado", em ATÉ 300 CARACTERES — a citação e o efeito, sem reconstruir o raciocínio. ' +
+    'Lista vazia quando a conta está fiel ao título. ' +
+    'NÃO REPITA ENTRE ITENS: índice errado e termo errado do MESMO consectário são UMA divergência, não duas. E não reescreva aqui o que já está no confronto — ' +
+    'aqui vai o PORQUÊ e o EFEITO; o que cada lado diz está lá',
   auditoria_risco_revisao: '"alto" | "medio" | "baixo" | "nenhum" — a chance de a conta ser revista para MENOS, mesmo já homologada',
   auditoria_recalculo:
     'OS RECÁLCULOS POR ÍNDICE OFICIAL, quando a divergência for de ÍNDICE ou de TERMO (inicial ou final) de correção ou de juros. ' +
@@ -1270,7 +1275,9 @@ const SCHEMA_ANALISE = {
   auditoria_justificativa:
     'o que sustenta o cenário conservador, ou por que a conta foi considerada fiel. ' +
     'HAVENDO NÚMERO RECALCULADO, traga a MEMÓRIA: o parâmetro adotado e de onde ele veio, a base, o período, a operação, e se o resultado é CALCULADO (parâmetro real) ou ESTIMADO (substituto, dizendo qual e por quê). ' +
-    'Quem lê precisa poder repetir a sua conta com os autos abertos; sem isso o número não é conferível. Curto, mas completo — não cabe "estimativa conservadora" sem dizer sobre o quê',
+    'Quem lê precisa poder repetir a sua conta com os autos abertos; sem isso o número não é conferível. ' +
+    'ATÉ 700 CARACTERES no total. Havendo recálculo por índice oficial, o sistema escreve a memória dele por você — não a repita: diga só o que ele não sabe, ' +
+    'que é de onde saiu a base e por que aquele é o critério do título',
 
   // prazo / cenário
   esfera: 'Federal | Estadual | Municipal — a do ENTE DEVEDOR (quem paga), não a do tribunal',
@@ -1315,7 +1322,8 @@ const SCHEMA_ANALISE = {
     'NÃO LISTE O QUE É INERENTE A QUALQUER CESSÃO DE CRÉDITO PÚBLICO. "O ente pode atrasar o pagamento", "cessão exige formalização", "há risco de precatório virar RPV" ' +
     'valem para todos os negócios e não ajudam a decidir ESTE. Só entra o que é característica deste processo: um vício, uma pendência, uma particularidade do título, ' +
     'uma decisão que pode ser revista, uma parte com problema. ' +
-    'O "fundamento" é a norma, a súmula, o tema ou o trecho dos autos que sustenta o risco, com a localização quando houver — ele aparece na tela junto do risco, sempre. ' +
+    'TAMANHO: o "risco" em ATÉ 200 CARACTERES, uma frase; o "fundamento" em ATÉ 400, com a norma, a súmula ou o trecho dos autos e a localização quando houver. ' +
+    'Os dois aparecem juntos na tela, sempre — então não repita no fundamento o que o risco já disse. ' +
     'Lista vazia é uma resposta válida: processo sem defeito não ganha risco inventado',
 
   // O PORQUÊ DE CADA NÚMERO QUE VOCÊ ESCOLHEU, na célula onde ele está.
@@ -1324,7 +1332,8 @@ const SCHEMA_ANALISE = {
     'Vira COMENTÁRIO na célula correspondente da planilha, do mesmo jeito que a origem dos valores já vira comentário na célula do bruto. ' +
     'CAMPO é um destes, e só destes: "bruto_total" (célula do bruto), "ir", "inss", "honorarios", "honorarios_sucumbenciais", ' +
     '"data_aquisicao", "data_pagamento", "prazo", "valor_final" (a linha do valor total líquido negociado, na aba jurídica). ' +
-    'NOTA é o porquê em duas ou três frases: o que os autos traziam, o que você adotou, e o que sustenta a sua escolha (artigo, súmula, tema, ou o trecho do título). ' +
+    'NOTA é o porquê em ATÉ 350 CARACTERES: o que os autos traziam, o que você adotou, e o que sustenta a escolha (artigo, súmula, tema, ou o trecho do título). ' +
+    'Ela vira balão de comentário na planilha, que se lê num quadro pequeno — texto longo ali é rolado, não lido. Duas ou três frases telegráficas. ' +
     'QUANDO PREENCHER: sempre que houver ESCOLHA sua no meio — divergência de atualização, índice de correção ou de juros, termo inicial de qualquer um deles, ' +
     'incidência ou valor de tributação (IR, INSS, alíquota, isenção, tabela), base de cálculo, percentual de honorários que você derivou em vez de ler. ' +
     'QUANDO NÃO PREENCHER: valor lido direto do documento, sem escolha nenhuma. Copiar o requisitório NÃO gera nota. ' +
@@ -1354,7 +1363,7 @@ const SCHEMA_QUALIFICACAO = {
   reserva_localizacao: 'ID/página, ou null',
   prazo_pagamento_iniciado: 'SIM | NÃO | NÃO HÁ MENÇÃO — a FASE DE PAGAMENTO já começou? Ex.: RPV expedida seguida de certidão/movimentação de "início do prazo de 60 dias para pagamento", certidão do setor de precatórios/RPVs do tribunal, ou intimação do ente público para pagar. (Diferente de "vencido": aqui o prazo apenas COMEÇOU, ainda não passou.)',
   prazo_pagamento_iniciado_localizacao: 'ID/página/data da movimentação, ou null',
-  comentarios_analise: 'observações úteis para a análise (sem recomendação de investimento)',
+
 };
 
 /**
@@ -1377,7 +1386,7 @@ const SYSTEM_QUALIFICACAO =
   'Você é um analista jurídico especializado em precatórios e RPVs, fazendo a QUALIFICAÇÃO (pré-análise) de um crédito para a Credijuris. ' +
   'A fonte é um processo judicial completo. Analise-o página por página com rigor e seja conservador: quando um dado não estiver claro, use "NÃO LOCALIZADO" (NUNCA invente datas, valores ou nomes). ' +
   'REGRA DE LOCALIZAÇÃO: indique onde cada dado está nesta ordem de prioridade: (1) numeração impressa ("fls.", "Pág. X de Y", numeração do PJe); (2) ID do documento (ex.: ID 295ff54); (3) a passagem. Informe o intervalo de páginas quando possível. ' +
-  'REGRAS: datas em DD/MM/AAAA; valores como número puro (ex.: 124500.00); uma linha por credor (se houver mais de um, use o principal e cite os demais em comentarios_analise); baseie-se somente no documento enviado. ' +
+  'REGRAS: datas em DD/MM/AAAA; valores como número puro (ex.: 124500.00); uma linha por credor (se houver mais de um, use o principal e diga isso em origem_valores); baseie-se somente no documento enviado. ' +
   'DEFINIÇÕES IMPORTANTES: ' +
   '(a) "trânsito em julgado da FASE DE CONHECIMENTO" é a data em que a decisão de MÉRITO se tornou definitiva — NÃO confunda com o trânsito da fase de execução/cumprimento de sentença; ' +
   '(b) "prazo de pagamento (60 dias) vencido" e "reserva financeira": procure decisão/despacho informando que o prazo de pagamento já passou e/ou que já existe reserva, sequestro ou depósito de verba destinada ao pagamento; ' +
@@ -1492,6 +1501,17 @@ const SYSTEM_ANALISE =
   'o imposto que você acabou de acrescentar encolhe junto. ' +
   '"auditoria_bruto_conservador" é para divergência no CRÉDITO EM SI — índice de correção, juros, termo inicial, período de apuração, base de cálculo, verba deferida a mais. ' +
   'A divergência tributária entra normalmente em "auditoria_divergencias": ela aparece na seção de auditoria da tela, e o desconto já está no líquido. ' +
+  '=== COMO ESCREVER === ' +
+  'Quem lê esta análise decide em minutos, com o processo aberto do lado, e volta a ela meses depois para conferir um número. Escreva para essa pessoa. ' +
+  'FORMAL E TÉCNICO, SIM — os termos são os do direito e da contabilidade judicial, e trocá-los por linguagem coloquial tira precisão. ' +
+  'MAS LEGÍVEL: frase curta, uma ideia por frase, voz ativa, e a CONCLUSÃO PRIMEIRO. "A conta aplicou TR onde o título pede IPCA-E, e isso infla o crédito em R$ 8.120" ' +
+  'lê-se de uma vez; a mesma informação em três orações subordinadas, começando pelo histórico do processo, precisa ser lida duas. ' +
+  'NÃO REPITA O NÚMERO EM PALAVRAS. A tela já mostra bruto, líquido, preço, deságio, prazo e rentabilidade. Texto que os reescreve gasta a atenção de quem lê num dado que ele acabou de ver. ' +
+  'UM ASSUNTO, UM ITEM. Três observações sobre a mesma coisa são uma observação com três frases, e não três itens que o leitor tem de reunir de cabeça. ' +
+  'SEM PREÂMBULO E SEM FÓRMULA DE CORTESIA: nada de "cumpre destacar que", "importante mencionar", "da análise dos autos verifica-se que". Vá ao fato. ' +
+  'SEM HEDGE VAZIO: "possivelmente", "aparentemente", "em tese" só entram quando a incerteza é REAL e você diz de onde ela vem. Incerteza sem origem não informa, só protege quem escreve. ' +
+  'OS TETOS DE TAMANHO ESTÃO EM CADA CAMPO, e eles não são sugestão. Texto mais curto não é análise mais pobre: é a mesma análise sem o que o leitor já sabia. ' +
+  'E TEM PREÇO DE RELÓGIO — cada palavra que você escreve é gerada uma a uma, em série, e é o que faz esta análise levar minutos em vez de segundos. ' +
   '=== COMO CALCULAR, QUANDO PRECISAR CALCULAR === ' +
   'Achando inconformidade, você vai ter de refazer conta: recompor um valor com o índice certo, calcular um tributo que faltou, encurtar um período, trocar uma base. ' +
   'Duas regras que NÃO SE CONFUNDEM, e confundi-las estraga o número: ' +
@@ -1553,11 +1573,11 @@ const SYSTEM_ANALISE =
   'OS ENGANOS MAIS COMUNS, que valem por lista de conferência: ' +
   '(a) o VALOR DA CAUSA e o valor da condenação na sentença — são de antes da atualização e quase nunca é o que se paga; ' +
   '(b) o principal HISTÓRICO, quando a conta separa "principal" de "atualizado" — o bruto é o atualizado; ' +
-  '(c) o valor de OUTRO CREDOR: conta de ação coletiva traz dezenas de nomes, e a soma da tabela inteira não é o crédito. Use SÓ a linha do cedente identificado no card, e registre em comentarios_analise que havia outros; ' +
+  '(c) o valor de OUTRO CREDOR: conta de ação coletiva traz dezenas de nomes, e a soma da tabela inteira não é o crédito. Use SÓ a linha do cedente identificado no card, e diga em origem_valores que havia outros; ' +
   '(d) a SOMA de vários requisitórios quando só um está sendo cedido; ' +
   '(e) o valor JÁ LÍQUIDO apresentado como se fosse o total; ' +
   '(f) valores de DATAS DIFERENTES somados entre si — se a conta é de março e há atualização de agosto, use UMA delas inteira e diga qual. ' +
-  'CONFIRA ANTES DE DEVOLVER: bruto_total menos ir menos inss menos honorarios tem de dar principal_liquido. Se não fechar, você leu algum número errado ou misturou documentos — reveja. Se ainda assim não fechar, devolva o que leu e explique a divergência em comentarios_analise, em vez de forçar um número para a conta bater. ' +
+  'CONFIRA ANTES DE DEVOLVER: bruto_total menos ir menos inss menos honorarios tem de dar principal_liquido. Se não fechar, você leu algum número errado ou misturou documentos — reveja. Se ainda assim não fechar, devolva o que leu e explique a divergência em origem_valores, em vez de forçar um número para a conta bater. ' +
   'E DIGA DE ONDE VEIO, em "origem_valores": documento, ID ou página, e a data de atualização. ' +
   'E ONDE VOCÊ ESCOLHEU, DIGA POR QUÊ — em "notas_celulas". Ler o número do requisitório não é escolha; adotar um índice que a conta não explicita, ' +
   'mover um termo inicial, decidir que uma verba é ou não tributável, arbitrar a alíquota ou a base — isso é escolha, e é o que faz o valor final ' +
@@ -2763,7 +2783,7 @@ Deno.serve(async (req) => {
               'As linhas 10 e 11 do m2 serão escritas a partir daqui pelo sistema — não tente reproduzi-las nem contradizê-las. ' +
               'O que você tem a fazer com esta informação é OUTRA coisa: se houver processo com cobrança contra o cedente, ' +
               'avalie em "riscos" o risco de FRAUDE À EXECUÇÃO sobre o crédito que estamos comprando (CPC art. 792; CTN art. 185 nas dívidas fiscais) ' +
-              'e diga em "comentarios_analise" o que isso significa para a cessão. Se a diligência não achou nada, não invente risco.',
+              'e diga em "bloco_g_riscos" o que isso significa para a cessão. Se a diligência não achou nada, não invente risco.',
           });
         }
       }
