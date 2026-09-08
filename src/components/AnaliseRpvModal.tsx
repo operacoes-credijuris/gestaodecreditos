@@ -205,6 +205,8 @@ export interface RespostaAnaliseRpv {
   avisos?: string[]
   /** A auditoria dos cálculos. Null quando a conta não foi auditada. */
   auditoria?: AuditoriaRpv | null
+  /** Quanto ESTA invocação levou dentro do servidor, e em quê. */
+  tempo?: { ms: number; fases: Array<[string, number]> }
   aviso?: string | null
   cedente?: string
   modelo?: string
@@ -657,6 +659,69 @@ function ListaDeRiscos({
   )
 }
 
+/** Duração em palavras curtas: "48s", "2m13s". */
+function duracao(ms: number): string {
+  const seg = Math.round(ms / 1000)
+  if (seg < 60) return `${seg}s`
+  const m = Math.floor(seg / 60)
+  const r = seg % 60
+  return r ? `${m}m${String(r).padStart(2, '0')}s` : `${m}m`
+}
+
+/** Uma etapa medida no navegador, com o que o servidor disse da sua parte. */
+export interface FaseMedida {
+  nome: string
+  ms: number
+  /** O relógio de dentro do servidor, quando a etapa foi uma requisição. */
+  servidor?: { ms: number; fases: Array<[string, number]> }
+}
+
+/**
+ * ONDE O TEMPO FOI, medido de fora.
+ *
+ * O SERVIDOR NÃO CONSEGUE RESPONDER ESSA PERGUNTA, e foi o que atrapalhou por
+ * várias rodadas. Ele mede uma invocação; a espera de quem clica é a soma de
+ * cinco coisas — extrair o texto dos PDFs no próprio navegador, renderizar e
+ * subir as páginas digitalizadas, a requisição de qualificação, a da análise, e
+ * o levantamento da tabela de emolumentos. Desde que as duas leituras da IA
+ * viraram requisições separadas, nenhum relógio do servidor via mais de um
+ * pedaço, e o número que aparecia na tela era menor que a espera real.
+ *
+ * ERA UM AVISO, E AVISO É RISCO NESTA JANELA: caía na lista categorizada, com
+ * selo, entre "teto da RPV excedido" e "cartório fora do preço". Diagnóstico de
+ * desempenho não é risco da operação. Aqui embaixo, em corpo miúdo, quem
+ * procura acha e quem não procura não tropeça.
+ *
+ * O DETALHE DE DENTRO DO SERVIDOR VAI NO title, e não na tela: são até quatro
+ * sub-etapas por requisição, e elas só interessam depois que a linha de cima
+ * aponta qual requisição é a lenta. A diferença entre o número do navegador e o
+ * do servidor é rede mais partida a frio do worker — que é uma resposta
+ * diferente de "a leitura da IA está lenta", e pede conserto diferente.
+ */
+function LinhaDoTempo({ fases }: { fases: FaseMedida[] }) {
+  if (!fases.length) return null
+  const total = fases.reduce((t, f) => t + f.ms, 0)
+  const dentro = (f: FaseMedida) =>
+    f.servidor
+      ? `no servidor ${duracao(f.servidor.ms)}` +
+        (f.servidor.fases.length
+          ? ': ' + f.servidor.fases.map(([n, ms]) => `${n} ${duracao(ms)}`).join('; ')
+          : '')
+      : undefined
+
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
+      {fases.map((f) => (
+        <span key={f.nome} title={dentro(f)} className={cn(f.servidor && 'cursor-help')}>
+          {f.nome} <span className="tabular-nums text-slate-500">{duracao(f.ms)}</span>
+        </span>
+      ))}
+      <span aria-hidden>·</span>
+      <span className="tabular-nums">{duracao(total)} no total</span>
+    </p>
+  )
+}
+
 /**
  * A auditoria dos cálculos, em seção própria.
  *
@@ -1034,6 +1099,8 @@ export function AnaliseRpvModal({
   )
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [pedido, setPedido] = useState('')
+  /** O relógio da análise que abriu a janela. Ver LinhaDoTempo. */
+  const [fases, setFases] = useState<FaseMedida[]>([])
   const [salvo, setSalvo] = useState<RespostaAnaliseRpv | null>(null)
   /**
    * A análise EXATA que virou planilha, para saber se a de agora ainda é ela.
@@ -1074,6 +1141,20 @@ export function AnaliseRpvModal({
     if (!open || rodou.current) return
     rodou.current = true
     void (async () => {
+      // O CRONÔMETRO. `performance.now()` e não `Date.now()`: é monotônico, e
+      // não anda se o relógio do sistema for ajustado no meio de uma espera de
+      // minutos. Cada marca fecha a etapa anterior e abre a seguinte, e o
+      // estado é atualizado a cada uma — a linha aparece já com o preparo
+      // medido, e cresce conforme as etapas terminam, em vez de só existir no
+      // fim de tudo.
+      let marco = performance.now()
+      const medidas: FaseMedida[] = []
+      const marcar = (nome: string, servidor?: RespostaAnaliseRpv['tempo']) => {
+        const agora = performance.now()
+        medidas.push({ nome, ms: agora - marco, servidor: servidor ?? undefined })
+        marco = agora
+        setFases([...medidas])
+      }
       try {
         const arquivos = await lerArquivos()
         // TODOS OS PDFs COM TEXTO, e não só o último.
@@ -1138,6 +1219,7 @@ export function AnaliseRpvModal({
         // {userId}/{jobId}/processo/ e manda as imagens à IA junto com o texto.
         // Falha em uma página não derruba as outras; falha em todas, com texto
         // disponível, segue só com o texto e avisa.
+        marcar('anexos')
         let jobId: string | undefined
         if (selecao.length) {
           const totalSel = selecao.reduce((n, x) => n + x.numeros.length, 0)
@@ -1203,6 +1285,9 @@ export function AnaliseRpvModal({
         // então a segunda chamada — que sai em seguida — lê o processo do cache
         // em vez de reprocessá-lo. E a qualificação vai pronta no corpo, para o
         // servidor não refazer o portão.
+        // A etapa das imagens só existe quando houve imagem: linha com
+        // "imagens 0s" em processo nato-digital é ruído.
+        if (selecao.length) marcar('imagens')
         setPasso('Qualificando o crédito…')
         const q = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
           acao: 'qualificar',
@@ -1211,6 +1296,7 @@ export function AnaliseRpvModal({
           notas_kommo: notasKommo,
           ...corpoCard,
         })
+        marcar('qualificação', q.tempo)
         // Reprovado no portão: não há segunda etapa, e a janela mostra o motivo.
         if (q.reprovado) { setAtual(q); return }
 
@@ -1223,6 +1309,7 @@ export function AnaliseRpvModal({
           qualificacao: q.qualificacao,
           ...corpoCard,
         })
+        marcar('análise', r.tempo)
         setAtual(r)
         // O SELETOR MOSTRA O QUE O MOTOR DECIDIU. Com "auto" — card que não diz
         // a parcela cedida —, quem escolhe é o destaque da contadoria, e sem
@@ -1253,6 +1340,11 @@ export function AnaliseRpvModal({
         // O CARTÓRIO CHEGA DEPOIS, e de propósito: a busca web leva dezenas de
         // segundos e, dentro da análise, derrubava o worker (HTTP 546).
         await levantarRegraCartorio(r)
+        // MEDIDO MESMO QUANDO NÃO CUSTA NADA: zero aqui é a informação de que a
+        // tabela do estado já estava em cache, e é o contraste com os minutos
+        // de um estado novo que explica por que uma análise demorou e a
+        // seguinte, não.
+        marcar('cartório')
       } catch (e) {
         setErro((e as Error)?.message ?? String(e))
       } finally {
@@ -1848,6 +1940,8 @@ export function AnaliseRpvModal({
               )}
             </div>
           )}
+
+          <LinhaDoTempo fases={fases} />
 
           <section className="border-t border-slate-200/80 pt-5">
             {/* A explicação saiu: ela ensinava o que o campo abaixo já ensina

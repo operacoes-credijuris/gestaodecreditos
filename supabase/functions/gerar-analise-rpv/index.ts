@@ -2140,6 +2140,25 @@ Deno.serve(async (req) => {
   const _t0 = Date.now();
   const _fases: Array<[string, number]> = [];
   let _ultimo = _t0;
+  /**
+   * O relógio desta invocação, para a tela juntar ao dela.
+   *
+   * ELE ERA UM AVISO, e avisos viram item da lista de riscos na janela — um
+   * diagnóstico de desempenho no meio de "teto da RPV excedido". Pior: só era
+   * escrito acima de 60 s, então a informação sumia justamente quando dava para
+   * comparar uma análise rápida com uma lenta. Agora sai sempre, em campo
+   * próprio, e quem decide o que mostrar é a tela.
+   *
+   * O NAVEGADOR MEDE OUTRA COISA, e as duas se somam: ele vê a ida e a volta da
+   * rede, a partida a frio do worker e as DUAS requisições; daqui sai o que
+   * aconteceu dentro de UMA. A diferença entre os dois números é exatamente o
+   * que não é processamento, e é a única forma de saber se o custo está na
+   * leitura da IA ou no caminho até ela.
+   */
+  const _relogio = () => ({
+    ms: Date.now() - _t0,
+    fases: _fases.filter(([, ms]) => ms >= 250),
+  });
   const marcar = (nome: string) => {
     const agora = Date.now();
     _fases.push([nome, agora - _ultimo]);
@@ -2575,6 +2594,7 @@ Deno.serve(async (req) => {
         qualificacao: qualif,
         avisos_qualificacao: veredito.avisos,
         avisos: veredito.avisos,
+        tempo: _relogio(),
       });
     }
 
@@ -3034,20 +3054,10 @@ Deno.serve(async (req) => {
 
     // Avisos que valem para a preliminar e para a final.
     const avisosBase: string[] = [...avisosQualif];
-    // ONDE O TEMPO FOI, quando ele foi muito. Aparece só acima de um minuto —
-    // abaixo disso ninguém precisa saber, e o aviso viraria ruído. Acima, é a
-    // única informação que diz o que otimizar sem chutar.
-    {
-      const _total = Date.now() - _t0;
-      if (_total > 60_000) {
-        marcar('precificação');
-        const _detalhe = _fases
-          .filter(([, ms]) => ms >= 1000)
-          .map(([nome, ms]) => `${nome} ${(ms / 1000).toFixed(0)}s`)
-          .join('; ');
-        avisosBase.push(`Esta análise levou ${(_total / 1000).toFixed(0)}s no servidor — ${_detalhe}.`);
-      }
-    }
+    // O TEMPO FECHA AQUI. Ele saía como aviso acima de 60 s e ia parar na lista
+    // de riscos da janela; agora vai em `tempo`, e a tela o junta ao relógio
+    // dela. Ver _relogio, no topo do handler.
+    marcar('precificação');
     // Abaixo do piso depois de uma revisão: fica em primeiro lugar, porque
     // nenhum outro aviso importa se o negócio não pode ser feito.
     if (dados._abaixo_do_piso) avisosBase.unshift(`⚠️ ABAIXO DO MÍNIMO — NÃO DÁ PARA FECHAR: ${dados._abaixo_do_piso}`);
@@ -3348,6 +3358,7 @@ Deno.serve(async (req) => {
         // A análise inteira, para a tela devolver no próximo turno. Opaco para ela.
         dados,
         avisos_qualificacao: avisosQualif,
+        tempo: _relogio(),
       });
     }
 
