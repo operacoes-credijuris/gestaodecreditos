@@ -35,6 +35,7 @@ import {
 } from '@/lib/format'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Field'
 import { Loading } from '@/components/ui/Table'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import { montarTextoDoProcesso, type PaginaLida } from '@/lib/textoDoProcesso'
@@ -129,6 +130,15 @@ export interface ValoresRpv {
   /** IRRF retido sobre os honorários, pela tabela progressiva. 0 quando não há. */
   ir_honorarios?: number
   custo_total: number
+  /**
+   * O que se recebe e o que se paga por CADA verba comprada.
+   *
+   * Existe porque total esconde a regra da casa: havendo principal no negócio,
+   * os honorários são comprados pelo valor de face e todo o deságio cai sobre o
+   * principal. Quem lê "deságio de 54%" sem ver as linhas supõe 54% em tudo — e
+   * é outra conversa com o cedente. O deságio de cada uma sai da divisão.
+   */
+  parcelas?: Array<{ nome: string; liquido: number; preco: number }>
   rentabilidade_mensal: number
   prazo_meses: number
   data_pagamento: string | null
@@ -274,44 +284,269 @@ function cenarioDasVerbas(r: RespostaAnaliseRpv | null | undefined): string | nu
  * servidor prefixa com "⚠️" o que exige decisão. O resto é contexto, fica
  * recolhido, e some do caminho de quem só quer o número.
  */
-function Avisos({ itens }: { itens?: string[] }) {
-  const [abrirContexto, setAbrirContexto] = useState(false)
-  const lista = itens ?? []
-  if (!lista.length) return null
+/** O nome de cada verba na tela — 'principal' não é rótulo, é chave. */
+const NOME_DA_VERBA: Record<string, string> = {
+  principal: 'Crédito principal',
+  contratuais: 'Honorários contratuais',
+  sucumbenciais: 'Honorários sucumbenciais',
+}
 
-  const alertas = lista.filter((a) => a.trim().startsWith('⚠️')).map((a) => a.replace(/^\s*⚠️\s*/, ''))
-  const contexto = lista.filter((a) => !a.trim().startsWith('⚠️'))
+/**
+ * O preço, verba a verba — o painel da janela de análise.
+ *
+ * SUBSTITUI UM BLOCO QUE MISTURAVA RESPOSTA E CONFERÊNCIA. Ali conviviam os três
+ * números que decidem, a decomposição da base, o custo total, a procedência dos
+ * valores em texto corrido e o nome do modelo da planilha — tudo com o mesmo
+ * peso, num parágrafo que ninguém lia inteiro.
+ *
+ * O QUE FICOU, e por que nesta ordem: as VERBAS primeiro, porque é a pergunta
+ * que o comercial responde ao cedente ("quanto vocês pagam pelo quê"); os TOTAIS
+ * depois, porque são a soma delas; e o prazo, a rentabilidade e o cartório por
+ * último, que é conferência de quem fecha.
+ *
+ * A LINHA POR VERBA EXISTE POR UMA REGRA DA CASA. Havendo principal no negócio,
+ * os honorários são comprados PELO VALOR DE FACE e todo o deságio cai sobre o
+ * principal. O total dizia "54,69%" e quem lesse suporia 54,69% em tudo — o
+ * deságio efetivo sobre o negócio é bem menor, e é outra conversa. Agora as duas
+ * coisas estão à vista, e o zero na linha dos honorários explica a diferença.
+ */
+function PainelPreco({
+  valores,
+  cartorio,
+  atingiuAlvo,
+}: {
+  valores: ValoresRpv
+  cartorio?: CartorioRpv
+  atingiuAlvo?: boolean
+}) {
+  const parcelas = valores.parcelas ?? []
+  const receber = valores.liquido_base
+  const pagar = valores.preco_cessao
+  // O deságio TOTAL é o efetivo — o que se paga sobre o que se recebe —, e não o
+  // nominal do principal. São números diferentes quando há honorários no meio.
+  const desagioTotal = receber > 0 ? 1 - pagar / receber : 0
+  const desagioDe = (p: { liquido: number; preco: number }) =>
+    p.liquido > 0 ? 1 - p.preco / p.liquido : 0
+
+  const celula = 'py-1.5 text-right tabular-nums'
 
   return (
-    <div className="space-y-2">
-      {alertas.map((a, i) => (
-        <p
-          key={i}
-          className="flex gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 ring-1 ring-inset ring-amber-200"
-        >
-          <span aria-hidden className="shrink-0 select-none">⚠️</span>
-          <span>{a}</span>
-        </p>
-      ))}
-      {contexto.length > 0 && (
-        <div className="text-xs text-slate-500">
-          <button
-            type="button"
-            onClick={() => setAbrirContexto((v) => !v)}
-            className="font-medium text-slate-600 hover:underline"
-          >
-            {abrirContexto ? 'Ocultar' : `Notas da análise (${contexto.length})`}
-          </button>
-          {abrirContexto && (
-            <ul className="mt-1.5 space-y-1 border-l-2 border-slate-200 pl-3 leading-relaxed">
-              {contexto.map((a, i) => (
-                <li key={i}>{a}</li>
-              ))}
-            </ul>
-          )}
+    <div className="overflow-hidden rounded-xl bg-white ring-1 ring-inset ring-slate-200/80">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-[11px] uppercase tracking-wide text-slate-400">
+            <th className="px-4 py-2 text-left font-medium">Verba</th>
+            <th className="px-3 py-2 text-right font-medium">A receber</th>
+            <th className="px-3 py-2 text-right font-medium">A pagar</th>
+            <th className="px-4 py-2 text-right font-medium">Deságio</th>
+          </tr>
+        </thead>
+        <tbody className="text-slate-700">
+          {parcelas.map((p) => (
+            <tr key={p.nome} className="border-t border-slate-100">
+              <td className="px-4 py-1.5 text-left">{NOME_DA_VERBA[p.nome] ?? p.nome}</td>
+              <td className={cn(celula, 'px-3')}>{formatBRL(p.liquido)}</td>
+              <td className={cn(celula, 'px-3')}>{formatBRL(p.preco)}</td>
+              <td className={cn(celula, 'px-4 text-slate-500')}>
+                {/* Zero é "comprado pelo valor de face", e um traço diz isso
+                    melhor que "0,00%" — que se lê como número calculado. */}
+                {desagioDe(p) < 0.0001 ? '—' : pctBR(desagioDe(p))}
+              </td>
+            </tr>
+          ))}
+          <tr className="border-t border-slate-200 bg-slate-50/70 font-semibold text-slate-900">
+            <td className="px-4 py-2 text-left">Total</td>
+            <td className={cn(celula, 'px-3 py-2')}>{formatBRL(receber)}</td>
+            <td className={cn(celula, 'px-3 py-2')}>{formatBRL(pagar)}</td>
+            <td className={cn(celula, 'px-4 py-2')}>{pctBR(desagioTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <dl className="grid grid-cols-3 gap-px border-t border-slate-200 bg-slate-200/70 text-xs">
+        <div className="bg-white px-4 py-2.5">
+          <dt className="text-slate-400">Prazo de resgate</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-slate-800">
+            {valores.prazo_meses} meses
+            {valores.data_pagamento && (
+              <span className="font-normal text-slate-400"> · {valores.data_pagamento}</span>
+            )}
+          </dd>
         </div>
-      )}
+        <div className="bg-white px-4 py-2.5">
+          <dt className="text-slate-400">Rentabilidade</dt>
+          <dd
+            className={cn(
+              'mt-0.5 font-medium tabular-nums',
+              atingiuAlvo === false ? 'text-amber-700' : 'text-slate-800',
+            )}
+          >
+            {pctBR(valores.rentabilidade_mensal)}
+            <span className="font-normal text-slate-400"> ao mês</span>
+          </dd>
+        </div>
+        <div className="bg-white px-4 py-2.5">
+          <dt className="text-slate-400">Cartório</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-slate-800">
+            {valores.cartorio == null ? (
+              // Ausente é dito como ausente: um preço sem cartório parece melhor
+              // do que é, e um traço sozinho não avisa.
+              <span className="text-amber-700">não incluído</span>
+            ) : (
+              <>
+                {formatBRL(valores.cartorio)}
+                {cartorio?.uf && <span className="font-normal text-slate-400"> · {cartorio.uf}</span>}
+              </>
+            )}
+          </dd>
+        </div>
+      </dl>
     </div>
+  )
+}
+
+/**
+ * Os riscos e os alertas, numa lista só e categorizada.
+ *
+ * TRÊS PROBLEMAS QUE ISTO RESOLVE, e o primeiro é de leitura. A lista vinha com
+ * o selo de grau numa coluna à esquerda e o texto na outra: selo curto ao lado
+ * de parágrafo longo deixa uma faixa vazia embaixo dele em todo item, e doze
+ * itens viravam duas telas de rolagem. Agora o selo é um pedaço do próprio
+ * parágrafo, e o texto ocupa a linha inteira.
+ *
+ * O SEGUNDO É TAMANHO. Cada risco trazia o fundamento por extenso — a norma, o
+ * trecho do título, a conta refeita —, e é leitura de quem já decidiu olhar
+ * aquele item. Fica atrás de um clique: a lista mostra o QUE é, e o PORQUÊ abre
+ * quando se pede.
+ *
+ * O TERCEIRO É QUE HAVIA DUAS LISTAS. Os avisos da análise moravam em dois
+ * blocos separados — as caixas amarelas e um "Notas da análise" recolhido —,
+ * dizendo coisas da mesma natureza dos riscos: teto de RPV excedido, cartório
+ * fora do preço, preço no cenário conservador. Três lugares para o mesmo tipo
+ * de informação é três lugares para esquecer de olhar. Agora é um.
+ *
+ * NADA FOI JOGADO FORA no caminho: os avisos sem ⚠️, que são nota e não alerta,
+ * continuam aqui embaixo, no grau mais fraco.
+ */
+type GrauRisco = 'IMPEDITIVO' | 'ALTO' | 'MODERADO' | 'ATENÇÃO' | 'NOTA'
+
+/**
+ * Cinco vocabulários viravam um.
+ *
+ * A auditoria dos cálculos classifica em ALTO/MODERADO/PONTO DE ATENÇÃO; o bloco
+ * de riscos da IA usa Impeditivo/Elevado/Moderado/Ponto de atenção. "Elevado" e
+ * "Alto" são a mesma coisa dita de dois jeitos, e a tela mostrava os dois selos
+ * lado a lado como se fossem graus diferentes.
+ */
+function normalizarGrau(bruto: unknown): GrauRisco {
+  const g = String(bruto ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+  if (g.includes('impeditiv')) return 'IMPEDITIVO'
+  if (g.includes('alto') || g.includes('elevad')) return 'ALTO'
+  if (g.includes('moderad')) return 'MODERADO'
+  if (g.includes('nota')) return 'NOTA'
+  return 'ATENÇÃO'
+}
+
+const ORDEM_GRAU: Record<GrauRisco, number> = {
+  IMPEDITIVO: 0, ALTO: 1, MODERADO: 2, 'ATENÇÃO': 3, NOTA: 4,
+}
+const COR_GRAU: Record<GrauRisco, string> = {
+  IMPEDITIVO: 'bg-red-50 text-red-700 ring-red-200/70',
+  ALTO: 'bg-amber-50 text-amber-800 ring-amber-200/70',
+  MODERADO: 'bg-slate-100 text-slate-600 ring-slate-200/70',
+  'ATENÇÃO': 'bg-slate-50 text-slate-500 ring-slate-200/70',
+  NOTA: 'bg-slate-50 text-slate-400 ring-slate-200/60',
+}
+
+interface ItemDeRisco {
+  grau: GrauRisco
+  texto: string
+  fundamento?: string
+}
+
+function ListaDeRiscos({
+  riscos,
+  avisos,
+}: {
+  riscos: Array<{ grau?: string; risco?: string; fundamento?: string }>
+  avisos?: string[]
+}) {
+  const [abertos, setAbertos] = useState<Set<number>>(new Set())
+
+  const itens = useMemo<ItemDeRisco[]>(() => {
+    const dosRiscos: ItemDeRisco[] = riscos.map((r) => ({
+      grau: normalizarGrau(r.grau),
+      texto: String(r.risco ?? '').trim(),
+      fundamento: String(r.fundamento ?? '').trim() || undefined,
+    }))
+    // O ⚠️ é o que separa alerta de nota nos avisos do motor — a mesma marca que
+    // a anotação do Kommo usa para decidir o que vai para o card.
+    const dosAvisos: ItemDeRisco[] = (avisos ?? []).map((a) => {
+      const alerta = a.trim().startsWith('⚠️')
+      const texto = a.replace(/^\s*⚠️\s*/, '').trim()
+      const bloqueia = /ABAIXO DO M[ÍI]NIMO|N[ÃA]O D[ÁA] PARA FECHAR/i.test(texto)
+      return { grau: bloqueia ? 'IMPEDITIVO' : alerta ? 'ATENÇÃO' : 'NOTA', texto }
+    })
+    return [...dosRiscos, ...dosAvisos]
+      .filter((i) => i.texto.length > 0)
+      .sort((a, b) => ORDEM_GRAU[a.grau] - ORDEM_GRAU[b.grau])
+  }, [riscos, avisos])
+
+  if (itens.length === 0) return null
+
+  return (
+    <section>
+      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        Riscos e alertas
+      </h3>
+      <ul className="mt-2 space-y-1.5">
+        {itens.map((it, i) => {
+          const aberto = abertos.has(i)
+          return (
+            <li key={i} className="text-sm leading-relaxed text-slate-700">
+              {/* O selo é INLINE, dentro do parágrafo: fora dele, cada item
+                  deixava uma faixa vazia embaixo do selo. */}
+              <span
+                className={cn(
+                  'mr-2 inline-block rounded px-1.5 align-[2px] text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
+                  COR_GRAU[it.grau],
+                )}
+              >
+                {it.grau}
+              </span>
+              {it.texto}
+              {it.fundamento && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAbertos((s) => {
+                        const n = new Set(s)
+                        if (n.has(i)) n.delete(i)
+                        else n.add(i)
+                        return n
+                      })
+                    }
+                    className="whitespace-nowrap text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+                  >
+                    {aberto ? 'menos' : 'por quê'}
+                  </button>
+                  {aberto && (
+                    <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
+                      {it.fundamento}
+                    </span>
+                  )}
+                </>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
@@ -894,7 +1129,6 @@ export function AnaliseRpvModal({
     }
   }
 
-
   /**
    * Troca as verbas negociadas e refaz as contas.
    *
@@ -1075,37 +1309,37 @@ export function AnaliseRpvModal({
       size="xl"
       // Preliminar sem salvar é trabalho que se perde ao fechar — daí a confirmação.
       dirty={!!atual && !atual.reprovado && !salvo}
-      title={`Análise de RPV — ${titulo}`}
-      description={
-        salvo
-          ? 'Planilha salva no Drive e card anotado no Kommo.'
-          : atual?.reprovado
-            ? 'Reprovado na qualificação. Nada foi gravado.'
-            : 'Preliminar: nada foi gravado. Peça alterações à IA até a análise estar boa; então salve.'
-      }
+      // O TÍTULO DO CARD DESCEU PARA A LINHA DE BAIXO. Ele traz intermediador,
+      // cedente e número do processo — três dados que somados passam de oitenta
+      // caracteres e faziam o título quebrar em duas linhas de corpo grande, no
+      // lugar de maior peso da janela. Em cima fica o que a janela É; embaixo,
+      // em corpo pequeno, de qual crédito ela trata.
+      //
+      // A descrição que estava aqui ("Preliminar: nada foi gravado…") saiu: ela
+      // explicava um estado que a própria janela mostra — enquanto houver o
+      // botão Salvar, nada foi salvo.
+      title="Análise de RPV"
+      description={titulo}
       footer={
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-slate-500">{leadId ? `Card ${leadId}` : ''}</span>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={onClose} disabled={ocupado}>
-              {salvo ? 'Fechar' : 'Fechar sem salvar'}
+        salvo ? undefined : (
+          <div className="flex items-center justify-end">
+            {/* Só o Salvar. O "Fechar sem salvar" duplicava o X do canto, e o
+                número do card ocupava o rodapé com um dado que ninguém usa
+                dentro da janela. */}
+            <Button
+              onClick={salvar}
+              disabled={!podeSalvar}
+              loading={passo === 'Gerando a planilha e salvando no Drive…'}
+              icon={<Save className="h-4 w-4" />}
+            >
+              Salvar no Drive
             </Button>
-            {!salvo && (
-              <Button
-                onClick={salvar}
-                disabled={!podeSalvar}
-                loading={passo === 'Gerando a planilha e salvando no Drive…'}
-                icon={<Save className="h-4 w-4" />}
-              >
-                Salvar no Drive
-              </Button>
-            )}
           </div>
-        </div>
+        )
       }
     >
       {erro && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 ring-1 ring-inset ring-red-200">
+        <div className="mb-4 rounded-xl bg-red-50/70 px-3.5 py-3 text-sm text-red-700 ring-1 ring-inset ring-red-200/70">
           {erro}
         </div>
       )}
@@ -1113,7 +1347,7 @@ export function AnaliseRpvModal({
       {!atual && passo && <Loading label={passo} />}
 
       {atual?.reprovado && (
-        <div className="rounded-lg bg-red-50 p-4 text-sm text-red-800 ring-1 ring-inset ring-red-200">
+        <div className="rounded-xl bg-red-50/70 p-4 text-sm text-red-800 ring-1 ring-inset ring-red-200/70">
           <p className="font-semibold">Reprovado no Portão 1</p>
           <ul className="mt-1 list-inside list-disc space-y-0.5">
             {(atual.motivos ?? []).map((m, i) => (
@@ -1124,58 +1358,47 @@ export function AnaliseRpvModal({
       )}
 
       {atual && !atual.reprovado && atual.valores && (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {/* O QUE ESTÁ SENDO COMPRADO, acima dos números — porque é a premissa
               deles. Vem do "PARCELA CEDIDA" do card e é editável: o cadastro do
               comercial erra, e até agora a única saída era corrigir no Kommo e
-              refazer a análise inteira. Trocar aqui só refaz as contas. */}
+              refazer a análise inteira. Trocar aqui só refaz as contas.
+
+              LISTA, e não fileira de botões. Eram quatro pílulas, uma delas com
+              quarenta caracteres, quebrando em duas linhas e ocupando a largura
+              da janela para exibir três opções que não estão em uso. A lista
+              mostra o que está valendo e guarda o resto. */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <label htmlFor="cenario-rpv" className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Negociando
-            </span>
-            <div className="flex flex-wrap gap-1">
+            </label>
+            <Select
+              id="cenario-rpv"
+              className="w-auto min-w-[16rem] py-1.5 text-sm"
+              value={CENARIOS_RPV.some((c) => c.valor === cenario) ? cenario : ''}
+              disabled={trocandoCenario || ocupado}
+              onChange={(e) => void trocarCenario(e.target.value)}
+            >
+              {/* Sem opção marcada quando o card não disse a parcela cedida: a
+                  lista não pode fingir uma escolha que ninguém fez. */}
+              {!CENARIOS_RPV.some((c) => c.valor === cenario) && (
+                <option value="">Selecione o que está sendo cedido…</option>
+              )}
               {CENARIOS_RPV.map((c) => (
-                <button
-                  key={c.valor}
-                  type="button"
-                  disabled={trocandoCenario || ocupado}
-                  onClick={() => void trocarCenario(c.valor)}
-                  className={cn(
-                    'rounded-full px-3 py-1 text-xs ring-1 ring-inset transition',
-                    cenario === c.valor
-                      ? 'bg-brand-600 font-semibold text-white ring-brand-600'
-                      : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50',
-                    (trocandoCenario || ocupado) && 'cursor-not-allowed opacity-60',
-                  )}
-                >
+                <option key={c.valor} value={c.valor}>
                   {c.label}
-                </button>
+                </option>
               ))}
-            </div>
-            {trocandoCenario && <span className="text-xs text-slate-500">refazendo as contas…</span>}
+            </Select>
+            {trocandoCenario && <span className="text-xs text-slate-400">refazendo as contas…</span>}
           </div>
 
-          {/* Os números: são a resposta. */}
-          <div className="rounded-lg bg-slate-50 p-4 ring-1 ring-inset ring-slate-200">
-            <GradeValoresRpv origemValores={atual?.origem_valores}
-              valores={atual.valores}
-              cartorio={atual.cartorio}
-              atingiuAlvo={atual.atingiu_alvo}
-            />
-            {/* O REGIME, EM UMA LINHA. Antes vinham o modelo, a regra de prazo
-                e o detalhe do cálculo emendados num parágrafo de três linhas,
-                logo abaixo dos números — a informação mais técnica da tela no
-                lugar de maior destaque depois do preço. O detalhe do prazo tem
-                lugar próprio logo abaixo, no caminho até a liquidação. */}
-            {atual.modelo && (
-              <p className="mt-3 truncate text-xs text-slate-400" title={
-                [atual.modelo, atual.regra_prazo, atual.prazo_detalhe].filter(Boolean).join(' · ')
-              }>
-                {atual.modelo}
-                {atual.regra_prazo && ` · ${String(atual.regra_prazo).split(':')[0]}`}
-              </p>
-            )}
-          </div>
+          {/* O preço, verba a verba. */}
+          <PainelPreco
+            valores={atual.valores}
+            cartorio={atual.cartorio}
+            atingiuAlvo={atual.atingiu_alvo}
+          />
 
           {/* O CAMINHO ATÉ O DINHEIRO. Prazo é a variável que mais mexe no
               preço — 8 meses ou 14 mudam o deságio inteiro —, e antes ele era um
@@ -1184,7 +1407,7 @@ export function AnaliseRpvModal({
               Discordar de um item é uma frase no chat abaixo. */}
           {!!atual.roteiro?.length && (
             <section>
-              <h3 className="font-display text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                 Caminho até a liquidação
               </h3>
               {atual.etapa_atual && (
@@ -1218,44 +1441,14 @@ export function AnaliseRpvModal({
 
           {atual.m1_sintese && (
             <section>
-              <h3 className="font-display text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                 Síntese
               </h3>
               <p className="mt-1 text-sm text-slate-800">{atual.m1_sintese}</p>
             </section>
           )}
 
-          {riscos.length > 0 && (
-            <section>
-              <h3 className="font-display text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Riscos
-              </h3>
-              <ul className="mt-1 space-y-1 text-sm">
-                {riscos.map((r, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span
-                      className={cn(
-                        'mt-0.5 shrink-0 rounded px-1.5 text-[11px] font-semibold uppercase leading-5',
-                        /impeditivo/i.test(r.grau ?? '')
-                          ? 'bg-red-100 text-red-800'
-                          : /elevado/i.test(r.grau ?? '')
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-slate-100 text-slate-700',
-                      )}
-                    >
-                      {r.grau ?? 'risco'}
-                    </span>
-                    <span className="text-slate-800">
-                      {r.risco}
-                      {r.fundamento && <span className="text-slate-500"> — {r.fundamento}</span>}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <Avisos itens={atual.avisos} />
+          <ListaDeRiscos riscos={riscos} avisos={atual.avisos} />
 
           {/* A CONSULTA DO CARTÓRIO EM ANDAMENTO, visível e sem travar nada.
               O passo dela usava o mesmo estado do resto, que desabilita o campo
@@ -1263,7 +1456,7 @@ export function AnaliseRpvModal({
               campo morto sem explicação. Agora ela tem linha própria, some
               sozinha e o chat segue utilizável enquanto isso. */}
           {passoCartorio && (
-            <p className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 ring-1 ring-inset ring-slate-200">
+            <p className="flex items-center gap-2 rounded-xl px-3.5 py-3 text-xs text-slate-500 ring-1 ring-inset ring-slate-200/80">
               <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
               {passoCartorio} Você já pode pedir alterações — o preço se refaz quando
               o custo chegar.
@@ -1274,7 +1467,7 @@ export function AnaliseRpvModal({
               o aviso da análise diz que a tela pediria o custo em seguida — sem
               isto, a promessa fica sem desfecho. */}
           {falhaCartorio && (
-            <p className="rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+            <p className="rounded-xl bg-red-50/70 px-3.5 py-3 text-xs text-red-800 ring-1 ring-inset ring-red-200/70">
               {falhaCartorio}
             </p>
           )}
@@ -1284,7 +1477,7 @@ export function AnaliseRpvModal({
               cartório onde lavra — sem isto, a busca falhando deixa a pessoa sem
               nada a fazer dentro da janela. */}
           {atual?.valores && atual.valores.cartorio == null && !passoCartorio && (
-            <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
+            <div className="rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
               <p className="mb-2 text-xs text-slate-600">
                 Informe o custo de cartório à mão e o preço se refaz. Digite só os
                 números — os dois últimos dígitos são os centavos. Deixe em branco o
@@ -1331,7 +1524,7 @@ export function AnaliseRpvModal({
           )}
 
           {salvo ? (
-            <div className="rounded-lg bg-green-50 p-3 text-sm text-green-800 ring-1 ring-inset ring-green-200">
+            <div className="rounded-xl bg-emerald-50/70 px-3.5 py-3 text-sm text-emerald-800 ring-1 ring-inset ring-emerald-200/70">
               ✅ Planilha salva.{' '}
               {salvo.drive_file_url && (
                 <a className="font-medium underline" href={salvo.drive_file_url} target="_blank" rel="noreferrer">
@@ -1340,14 +1533,13 @@ export function AnaliseRpvModal({
               )}
             </div>
           ) : (
-            <section className="border-t border-slate-200 pt-4">
-              <h3 className="font-display flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <Sparkles className="h-3.5 w-3.5" /> Pedir alterações à IA
+            <section className="border-t border-slate-200/80 pt-5">
+              {/* A explicação saiu: ela ensinava o que o campo abaixo já ensina
+                  pelo exemplo do placeholder, e ocupava duas linhas em toda
+                  análise, inclusive na décima do dia. */}
+              <h3 className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <Sparkles className="h-3.5 w-3.5" /> Pedir alterações
               </h3>
-              <p className="mt-1 text-xs text-slate-500">
-                Em linguagem natural: corrija um valor ou uma data, suprima um risco, mude uma
-                resposta do questionário. O preço é recalculado a cada alteração.
-              </p>
 
               {mensagens.length > 0 && (
                 <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
@@ -1355,10 +1547,10 @@ export function AnaliseRpvModal({
                     <div
                       key={i}
                       className={cn(
-                        'max-w-[85%] whitespace-pre-line rounded-lg px-3 py-2 text-sm',
+                        'max-w-[85%] whitespace-pre-line rounded-xl px-3.5 py-2 text-sm leading-relaxed',
                         m.papel === 'usuario'
                           ? 'ml-auto bg-brand-600 text-white'
-                          : 'bg-slate-100 text-slate-800',
+                          : 'bg-slate-50 text-slate-700 ring-1 ring-inset ring-slate-200/70',
                       )}
                     >
                       {m.texto}
@@ -1370,7 +1562,7 @@ export function AnaliseRpvModal({
 
               <div className="mt-3 flex items-end gap-2">
                 <textarea
-                  className="min-h-[44px] flex-1 resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className="min-h-[44px] flex-1 resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
                   rows={2}
                   placeholder='Ex.: "o valor bruto homologado é R$ 84.320,10" · "suprima o risco 2" · "a RPV foi expedida em 12/03/2026"'
                   value={pedido}
@@ -1384,14 +1576,29 @@ export function AnaliseRpvModal({
                     }
                   }}
                 />
-                <Button
+                {/* SÓ O ÍCONE. Um botão sólido escrito "Enviar" ao lado do
+                    campo pesava mais que o próprio campo, num gesto que na
+                    prática se faz pelo Enter. Discreto, mas com alvo de clique
+                    inteiro e rótulo acessível. */}
+                <button
+                  type="button"
                   onClick={pedirAlteracao}
                   disabled={ocupado || !pedido.trim()}
-                  loading={passo === 'Revisando a análise…'}
-                  icon={<SendHorizontal className="h-4 w-4" />}
+                  aria-label="Enviar pedido de alteração"
+                  title="Enviar (Enter)"
+                  className={cn(
+                    'mb-0.5 shrink-0 rounded-lg p-2.5 text-slate-400 transition-colors',
+                    'hover:bg-slate-100 hover:text-brand-700',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1',
+                    'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400',
+                  )}
                 >
-                  Enviar
-                </Button>
+                  {passo === 'Revisando a análise…' ? (
+                    <span className="block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+                  ) : (
+                    <SendHorizontal className="h-4 w-4" />
+                  )}
+                </button>
               </div>
             </section>
           )}

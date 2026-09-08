@@ -3140,6 +3140,18 @@ Deno.serve(async (req) => {
       // deveria, sem explicação visível.
       ir_honorarios: Number(dados._ir_honorarios) || 0,
       custo_total: Number(calc.Y4) || 0,
+      // VERBA A VERBA: o que se recebe e o que se paga por cada uma.
+      //
+      // A tela mostrava só os totais, e total esconde a regra da casa: havendo
+      // principal no negócio, os honorários são comprados PELO VALOR DE FACE e
+      // todo o deságio cai sobre o principal. Quem lê "deságio de 54%" sem ver
+      // as linhas supõe 54% em tudo — e é outra conversa com o cedente.
+      // O deságio de cada uma sai da divisão, na tela: preço ÷ líquido.
+      parcelas: (Array.isArray(calc.parcelas) ? calc.parcelas : []).map((p: any) => ({
+        nome: String(p?.nome ?? ''),
+        liquido: Number(p?.liquido) || 0,
+        preco: Number(p?.preco) || 0,
+      })),
       rentabilidade_mensal: Number(calc.Y9) || 0,
       prazo_meses: Number(T5.toFixed(1)),
       data_pagamento: dados.data_pagamento ?? null,
