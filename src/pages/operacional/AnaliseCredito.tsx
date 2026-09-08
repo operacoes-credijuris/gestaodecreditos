@@ -1635,7 +1635,36 @@ export default function AnaliseCredito() {
           // lugares daria duas portas para a mesma decisão.
           acoes={abaAtual?.key === ABA_RPV_DESFECHO_NA_JANELA ? (abaAtual?.acoes ?? []) : []}
           onMover={async (statusId, comentario) => {
-            await mover.mutateAsync({ leadId: rpvLead.kommo_lead_id, statusId, comentario })
+            // O MOTIVO VAI COMO NOTA, e não na linha de auditoria do movimento.
+            //
+            // Colado nela, o feed do Kommo o renderiza como continuação do
+            // "Movido de X para Y por admin.": bloco corrido, sem as quebras,
+            // atrás de um "mais" — inclusive as linhas em branco somem. A nota
+            // que o kommo-anotar escreve aparece como nota de verdade no feed,
+            // com autor e parágrafos preservados; é o caminho que funciona
+            // neste mesmo card, ao lado das anotações da análise.
+            //
+            // `comentario: ''` no movimento de propósito: a linha de auditoria
+            // fica só com o que ela é — quem moveu, de onde para onde.
+            //
+            // O MOVIMENTO PRIMEIRO, a nota depois: o feed ordena pela chegada,
+            // e a ordem de leitura é o que aconteceu e então por quê.
+            await mover.mutateAsync({ leadId: rpvLead.kommo_lead_id, statusId, comentario: '' })
+            const motivo = comentario.trim()
+            if (motivo) {
+              try {
+                await invokeFunction('kommo-anotar', { lead_id: rpvLead.kommo_lead_id, texto: motivo })
+              } catch (e) {
+                // ESTOURA PARA A JANELA, e não um toast: o texto está no campo
+                // dela, e fechar aqui o perderia. O card já moveu — a pessoa lê
+                // o que faltou com o motivo ainda na tela, e decide.
+                throw new Error(
+                  'O card foi movido, mas a nota com o motivo não subiu (' +
+                    ((e as Error)?.message ?? String(e)) +
+                    '). O texto continua aqui.',
+                )
+              }
+            }
             // A janela fecha porque o card saiu desta aba: manter aberta uma
             // análise de um card que já foi movido é oferecer botões que não
             // valem mais.
