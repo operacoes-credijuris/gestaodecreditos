@@ -32,11 +32,28 @@ const QUALIDADE_JPEG = 0.72
  * Renderiza as páginas pedidas (1-based). Página que falhar é pulada, e o erro
  * vai no retorno em vez de derrubar as outras — uma página corrompida não pode
  * custar a análise inteira.
+ *
+ * ENTREGA PÁGINA A PÁGINA quando `onPagina` é passado, e aí NÃO acumula os
+ * blobs. Isto existe por um número medido: num processo com dezenas de páginas
+ * digitalizadas, esta etapa levou 2m04s no navegador. A rasterização é serial e
+ * na thread principal (é o pdf.js decodificando a imagem embutida e desenhando
+ * no canvas), e o upload — que era uma SEGUNDA fila, depois de todas as páginas
+ * prontas — somava o seu tempo inteiro por cima.
+ *
+ * Entregando cada página assim que ela sai, quem chama já começa a subir, e o
+ * upload passa a acontecer DENTRO do tempo de renderização em vez de depois
+ * dele. De brinde, o pico de memória cai: eram sessenta blobs de 80 a 190 KB
+ * vivos ao mesmo tempo; agora são os poucos em voo.
+ *
+ * `onPagina` pode devolver promessa, e ela é AGUARDADA — é o que dá
+ * contrapressão: quem chama segura a esteira enquanto a fila de upload está
+ * cheia, em vez de renderizar tudo na frente e empilhar bytes.
  */
 export async function renderizarPaginas(
   bytes: ArrayBuffer,
   numeros: number[],
   onProgresso?: (feitas: number, total: number) => void,
+  onPagina?: (pagina: PaginaRenderizada) => void | Promise<void>,
 ): Promise<{ imagens: PaginaRenderizada[]; falhas: number[] }> {
   const imagens: PaginaRenderizada[] = []
   const falhas: number[] = []
@@ -64,7 +81,10 @@ export async function renderizarPaginas(
       await page.render({ canvasContext: ctx, viewport }).promise
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', QUALIDADE_JPEG))
       if (!blob) throw new Error('toBlob devolveu vazio')
-      imagens.push({ numero, blob })
+      // Com consumidor, a página vai embora agora e não fica na memória; sem
+      // consumidor, o comportamento antigo continua valendo.
+      if (onPagina) await onPagina({ numero, blob })
+      else imagens.push({ numero, blob })
       // Libera a memória do canvas: 60 páginas de 1400×2000 são muitos MB.
       canvas.width = 0
       canvas.height = 0

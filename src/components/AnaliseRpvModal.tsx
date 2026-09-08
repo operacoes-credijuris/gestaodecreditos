@@ -1298,37 +1298,65 @@ export function AnaliseRpvModal({
           jobId = crypto.randomUUID()
           let enviadas = 0
           const falhas: string[] = []
+          // UMA ESTEIRA, E NÃO DUAS FILAS. Era renderizar TODAS as páginas do
+          // arquivo e só então subir todas — duas etapas em série, com o tempo
+          // de upload somado inteiro ao de renderização. Num processo com
+          // dezenas de páginas digitalizadas isso deu 2m04s de espera medidos
+          // no navegador, contra 7s de um processo quase todo nato-digital.
+          //
+          // Agora cada página sai da renderização direto para a fila de upload:
+          // a rede trabalha durante a rasterização em vez de esperar por ela. A
+          // rasterização em si continua serial — é o pdf.js decodificando a
+          // imagem embutida e desenhando no canvas, na thread principal —, e é
+          // ela que sobra como custo real desta etapa.
+          //
+          // SEIS DE CADA VEZ, e a esteira PARA quando as seis estão ocupadas.
+          // Não é só cortesia com o Storage (que responde 429 quando se
+          // exagera): é o que impede a renderização de correr na frente e
+          // empilhar sessenta blobs de 80 a 190 KB na memória.
+          const CONCORRENCIA = 6
+          const emVoo = new Set<Promise<void>>()
           for (const sel of selecao) {
-            const { imagens, falhas: f } = await renderizarPaginas(sel.bytes, sel.numeros, (feitas) => {
-              setPasso(`Renderizando "${sel.arquivo}" (${feitas}/${sel.numeros.length} página(s))…`)
-            })
-            if (f.length) falhas.push(`"${sel.arquivo}" p. ${f.join(', ')}: não renderizou`)
             const base = sel.arquivo.replace(/\.pdf$/i, '').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'arquivo'
-            // EM PARALELO, com fila curta. Era um upload de cada vez: sessenta
-            // páginas de 100 a 200 KB, uma após a outra, e o rótulo contando
-            // devagar enquanto a rede ficava ociosa entre elas. Seis de cada vez
-            // aproveitam a banda sem abrir conexões demais — o Storage responde
-            // 429 quando se exagera, e aí a "otimização" custaria uma página.
-            const CONCORRENCIA = 6
-            const fila = [...imagens]
-            const trabalhador = async () => {
-              for (;;) {
-                const img = fila.shift()
-                if (!img) return
+            const { falhas: f } = await renderizarPaginas(
+              sel.bytes,
+              sel.numeros,
+              (feitas) => {
+                setPasso(
+                  `Preparando páginas digitalizadas: ${feitas}/${sel.numeros.length} de "${sel.arquivo}" ` +
+                  `(${enviadas}/${totalSel} enviadas)…`,
+                )
+              },
+              async (img) => {
                 const caminho = `${user.id}/${jobId}/processo/${base}-p${String(img.numero).padStart(4, '0')}.jpg`
-                const { error } = await supabase.storage
-                  .from('analises-input')
-                  .upload(caminho, img.blob, { contentType: 'image/jpeg', upsert: true })
-                if (error) { falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${error.message}`); continue }
-                enviadas++
-                setPasso(`Enviando páginas digitalizadas (${enviadas}/${totalSel})…`)
-              }
-            }
-            await Promise.all(Array.from({ length: Math.min(CONCORRENCIA, imagens.length) }, trabalhador))
-            // Os blobs já subiram: soltar a referência agora evita segurar
-            // dezenas de MB até o fim da análise.
-            imagens.length = 0
+                // A TAREFA NUNCA REJEITA, e não é zelo excessivo: ela entra
+                // num Promise.race e num Promise.all, e rejeição ali sobe pela
+                // esteira até derrubar a análise inteira — por uma página. O
+                // Storage devolve erro em `error` na maioria dos casos, mas
+                // queda de rede LANÇA. Falha de página vira aviso, como já era
+                // antes da esteira.
+                const tarefa = (async () => {
+                  try {
+                    const { error } = await supabase.storage
+                      .from('analises-input')
+                      .upload(caminho, img.blob, { contentType: 'image/jpeg', upsert: true })
+                    if (error) falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${error.message}`)
+                    else enviadas++
+                  } catch (e) {
+                    falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${(e as Error)?.message ?? String(e)}`)
+                  }
+                })().finally(() => emVoo.delete(tarefa))
+                emVoo.add(tarefa)
+                // A CONTRAPRESSÃO: cheia a fila, espera a PRIMEIRA que
+                // terminar, e não todas — esperar todas esvaziaria a rede a
+                // cada rodada de seis.
+                if (emVoo.size >= CONCORRENCIA) await Promise.race(emVoo)
+              },
+            )
+            if (f.length) falhas.push(`"${sel.arquivo}" p. ${f.join(', ')}: não renderizou`)
           }
+          // O que ainda estava em voo quando a última página saiu do forno.
+          await Promise.all(emVoo)
           if (enviadas === 0) {
             jobId = undefined
             if (legiveis.length === 0) {
