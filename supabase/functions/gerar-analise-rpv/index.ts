@@ -1200,9 +1200,11 @@ const SCHEMA_ANALISE = {
     '"fundamento" = a norma, a súmula, o tema ou a decisão que sustenta o "esperado". Lista vazia quando a conta está fiel ao título',
   auditoria_risco_revisao: '"alto" | "medio" | "baixo" | "nenhum" — a chance de a conta ser revista para MENOS, mesmo já homologada',
   auditoria_bruto_conservador:
-    'o valor bruto no CENÁRIO CONSERVADOR, número, ou null quando não há divergência que reduza. ' +
+    'o valor bruto no CENÁRIO CONSERVADOR, número. null SÓ quando não houver nenhuma divergência que reduza o crédito. ' +
     'Só pode ser MENOR que o bruto apurado — auditoria não aumenta crédito. ' +
-    'Estime pelo efeito das divergências de gravidade alta e média que reduzem; se não der para estimar com base nos autos, devolva null e explique',
+    'Havendo divergência que reduza, este campo é OBRIGATÓRIO: estime pelo efeito das de gravidade alta e média, e também das baixas quando somarem valor relevante. ' +
+    'Sem memória de cálculo para refazer a conta exata, ESTIME POR BAIXO sobre o período e a base que os autos permitem identificar, arredondando contra o crédito, ' +
+    'e explique a estimativa em auditoria_justificativa. Não devolver número é deixar o preço cheio com uma ressalva ao lado — e ressalva não desconta nada',
   auditoria_justificativa: 'em duas ou três frases: o que sustenta o cenário conservador, ou por que a conta foi considerada fiel',
 
   // prazo / cenário
@@ -1238,7 +1240,18 @@ const SCHEMA_ANALISE = {
     'Deve citar: (a) tipo da ação e natureza do crédito; (b) autor (cedente) e réu (ente devedor); (c) pedido e causa de pedir; ' +
     '(d) principais eventos processuais COM DATAS (sentença, recurso, trânsito em julgado, início do cumprimento de sentença, ' +
     'manifestação da contadoria, decisão que determinou a expedição); (e) tipo de requisitório (RPV/minuta/alvará); (f) fase atual do processo.',
-  bloco_g_riscos: 'lista de riscos {risco, fundamento, grau:"Impeditivo|Elevado|Moderado|Ponto de atenção"}',
+  bloco_g_riscos:
+    'lista de riscos {risco, fundamento, grau:"Impeditivo|Elevado|Moderado|Ponto de atenção"}. ' +
+    'UM ITEM POR ASSUNTO, e não um por observação. Se você tem três coisas a dizer sobre a cessão (anuência do ente, forma do instrumento, prazo de homologação), ' +
+    'isso é UM risco chamado "cessão", com as três no fundamento — e não três itens que quem lê tem de reunir de cabeça. Antes de escrever um item, ' +
+    'procure na lista se já existe um do mesmo tema e some ali. ' +
+    'NADA DA CONTA ENTRA AQUI. Divergência de cálculo, índice, termo inicial, base, tributação, memória ausente e risco de revisão pertencem à auditoria ' +
+    '(campos auditoria_*) e são mostrados em seção separada — repeti-los aqui faz a mesma informação aparecer duas vezes na tela, em dois lugares que se contradizem quando um muda. ' +
+    'NÃO LISTE O QUE É INERENTE A QUALQUER CESSÃO DE CRÉDITO PÚBLICO. "O ente pode atrasar o pagamento", "cessão exige formalização", "há risco de precatório virar RPV" ' +
+    'valem para todos os negócios e não ajudam a decidir ESTE. Só entra o que é característica deste processo: um vício, uma pendência, uma particularidade do título, ' +
+    'uma decisão que pode ser revista, uma parte com problema. ' +
+    'O "fundamento" é a norma, a súmula, o tema ou o trecho dos autos que sustenta o risco, com a localização quando houver — ele aparece na tela junto do risco, sempre. ' +
+    'Lista vazia é uma resposta válida: processo sem defeito não ganha risco inventado',
 
   // O PORQUÊ DE CADA NÚMERO QUE VOCÊ ESCOLHEU, na célula onde ele está.
   notas_celulas:
@@ -1330,7 +1343,16 @@ const SYSTEM_ANALISE =
   'CONTA INFLADA É O PERIGO. Se a conta cobra MAIS do que o título mandava, o crédito está inchado, a Fazenda pode impugnar e a revisão DERRUBA o valor — e quem pagou pelo valor inchado perde a diferença. É a divergência mais grave que existe aqui, mesmo que ela "favoreça o credor". ' +
   'CONTA SUBESTIMADA É INDIFERENTE ao preço. Se a conta cobra MENOS do que era devido, o risco de revisão é para cima, o que só faria o cessionário receber mais do que pagou. Isso não entra no preço: registre como observação e siga. ' +
   'NÃO RACIOCINE ASSIM: "a conta aplicou índice mais generoso, isso favorece o credor, logo não há risco". Favorecer o credor é exatamente o que faz a Fazenda impugnar, e é exatamente o que se perde na revisão. Um exemplo real: correção de dano moral contada desde o evento danoso em vez de desde o arbitramento (Súmula 362/STJ) infla o crédito em todo o período intermediário — isso é gravidade ALTA e pede cenário conservador, não "baixa". ' +
-  'O CENÁRIO CONSERVADOR É O QUE VALE. Havendo divergência cujo CONSERTO reduziria o crédito, estime o bruto revisado em "auditoria_bruto_conservador" — é ele que vai precificar. Auditoria NUNCA AUMENTA crédito. Se não der para estimar o valor revisado com o que há nos autos, devolva null e descreva o risco — preço com risco descrito é melhor que preço com risco embutido em número inventado. ' +
+  'O CENÁRIO CONSERVADOR É O QUE VALE, E ELE NÃO É OPCIONAL. Havendo QUALQUER divergência, inconsistência ou irregularidade cujo conserto reduziria o crédito, ' +
+  'estime o bruto revisado em "auditoria_bruto_conservador" — é ele que vai precificar. Auditoria NUNCA AUMENTA crédito. ' +
+  'ENTRE DUAS LEITURAS DEFENSÁVEIS DE UM MESMO CRITÉRIO, ADOTE SEMPRE A QUE PRODUZ O MENOR CRÉDITO. Vale para índice de correção, termo inicial de correção e de juros, ' +
+  'período de apuração, base de cálculo, incidência e alíquota de tributo, e para qualquer ponto em que a norma comporte mais de uma interpretação razoável. ' +
+  'Você não está escolhendo a tese que venceria: está escolhendo o valor que sobra se a Fazenda impugnar e ganhar. Quem paga hoje é quem perde a diferença. ' +
+  'NÃO DEVOLVA null POR NÃO CONSEGUIR CALCULAR COM PRECISÃO. Se a memória de cálculo não permitir refazer a conta exata, ESTIME POR BAIXO — ' +
+  'aplique o efeito da divergência ao período e à base que os autos permitem identificar, arredonde contra o crédito, e diga na "auditoria_justificativa" que é estimativa, ' +
+  'de que forma você chegou nela e o que faltou para calcular com exatidão. Uma estimativa conservadora declarada é melhor que um preço cheio com uma ressalva ao lado: ' +
+  'a ressalva não desconta nada, e o dinheiro sai do caixa pelo número, não pelo texto. ' +
+  'null fica reservado a UM caso: não há divergência nenhuma que reduza o crédito. ' +
   '=== DE ONDE SAEM OS VALORES === ' +
   'O MESMO crédito aparece nos autos com vários valores diferentes, e escolher o errado não produz erro nenhum — produz um preço errado, com a mesma cara de um preço certo. Antes de preencher qualquer número, decida QUAL DOCUMENTO MANDA. ' +
   'ORDEM DE AUTORIDADE, use o primeiro que existir: ' +
@@ -1422,8 +1444,61 @@ function ferramentaDoEsquema(nome: string, descricao: string, esquema: Record<st
   return { name: nome, description: descricao, input_schema: { type: 'object' as const, properties } };
 }
 
-const FERRAMENTA_ANALISE = ferramentaDoEsquema(
-  'registrar_analise', 'Registra a análise completa do crédito RPV.', SCHEMA_ANALISE,
+/**
+ * A ANÁLISE VIRA DUAS LEITURAS, e elas saem AO MESMO TEMPO.
+ *
+ * O QUE ISTO CONSERTA, medido e não suposto: a extração levava 2m02s de uma
+ * requisição de 2m13s, contra um teto de 150 s de tempo de parede. Vinte
+ * segundos de folga — um processo 15% maior devolvia HTTP 504.
+ *
+ * E O CUSTO ERA DE SAÍDA, não de entrada. A qualificação, segundos antes, já
+ * deixou o processo no cache de prompt da Anthropic, então esta leitura não
+ * reprocessa nada; o que ela faz em dois minutos é ESCREVER — 29 linhas de
+ * questionário com resposta e complemento, a síntese, os dois critérios da
+ * auditoria por extenso, as divergências, os riscos com fundamento, o roteiro
+ * de atos. Token de saída sai um a um, em série, e é aí que o relógio mora.
+ *
+ * Saída não se acelera; ela se DIVIDE. Os dois conjuntos de campos não dependem
+ * um do outro — o questionário se responde lendo os autos, e os valores também
+ * —, então as duas chamadas saem em paralelo, cada uma escrevendo metade, e o
+ * relógio passa a ser o MAIOR dos dois em vez da soma.
+ *
+ * EM DUAS REQUISIÇÕES HTTP, e não em duas chamadas dentro de uma. Duas
+ * serializações do mesmo corpo — que carrega até 60 páginas em base64 — vivendo
+ * ao mesmo tempo na memória de um worker é exatamente o que produziu o HTTP 546
+ * antes. Separadas, cada worker guarda uma cópia e cada requisição tem o seu
+ * próprio teto de 150 s.
+ *
+ * OS TRÊS ESQUEMAS SÃO DERIVADOS DE UM SÓ, por lista de exclusão: assim não
+ * existe o modo de falha em que um campo cai fora dos dois e some da análise
+ * sem erro nenhum — a planilha sairia com a célula vazia e ninguém saberia por
+ * quê. Acrescentar campo em SCHEMA_ANALISE o põe automaticamente no de valores;
+ * para mandá-lo ao outro, basta nomeá-lo aqui.
+ */
+const CAMPOS_DOCUMENTO = ['m2', 'm1_sintese', 'bloco_g_riscos'] as const;
+type CampoDocumento = typeof CAMPOS_DOCUMENTO[number];
+
+const SCHEMA_DOCUMENTO: Record<string, string> = Object.fromEntries(
+  CAMPOS_DOCUMENTO.map((k) => [k, (SCHEMA_ANALISE as Record<string, string>)[k]]),
+);
+const SCHEMA_PRECO: Record<string, string> = Object.fromEntries(
+  Object.entries(SCHEMA_ANALISE).filter(([k]) => !(CAMPOS_DOCUMENTO as readonly string[]).includes(k)),
+);
+// Um campo renomeado em SCHEMA_ANALISE sem renomear aqui deixaria SCHEMA_DOCUMENTO
+// com uma descrição undefined — a ferramenta iria para a API com uma propriedade
+// sem descrição, e o modelo preencheria no escuro. Falha na partida é o desfecho
+// bom: o outro é uma análise pior sem sinal nenhum.
+for (const k of CAMPOS_DOCUMENTO) {
+  if (typeof (SCHEMA_ANALISE as Record<string, unknown>)[k] !== 'string') {
+    throw new Error(`CAMPOS_DOCUMENTO cita "${k}", que não existe em SCHEMA_ANALISE.`);
+  }
+}
+
+const FERRAMENTA_PRECO = ferramentaDoEsquema(
+  'registrar_valores', 'Registra os valores, as datas, a auditoria da conta e o prazo do crédito RPV.', SCHEMA_PRECO,
+);
+const FERRAMENTA_DOCUMENTO = ferramentaDoEsquema(
+  'registrar_documento', 'Registra o questionário jurídico, a síntese do processo e os riscos.', SCHEMA_DOCUMENTO,
 );
 const FERRAMENTA_QUALIFICACAO = ferramentaDoEsquema(
   'registrar_qualificacao', 'Registra a qualificação (pré-análise) do crédito.', SCHEMA_QUALIFICACAO,
@@ -1482,10 +1557,10 @@ async function extrairComFerramenta(
   // O cache de prompt resolve — mas ele casa por PREFIXO EXATO, na ordem
   // ferramentas → system → mensagens. Por isso três coisas mudaram de lugar:
   //
-  //   1. AS DUAS FERRAMENTAS VÃO NAS DUAS CHAMADAS. Ferramenta diferente é
+  //   1. AS TRÊS FERRAMENTAS VÃO NAS TRÊS CHAMADAS. Ferramenta diferente é
   //      prefixo diferente, e prefixo diferente não casa. Os nomes são
-  //      distantes (registrar_qualificacao / registrar_analise) e a instrução
-  //      final diz qual chamar.
+  //      distantes (registrar_qualificacao / registrar_valores /
+  //      registrar_documento) e a instrução final diz qual chamar.
   //   2. O SYSTEM É UM SÓ, curto e comum. As instruções específicas de cada
   //      tarefa desceram para o fim do turno do usuário — que é onde a
   //      documentação da Anthropic recomenda pôr instrução quando o documento é
@@ -1504,7 +1579,7 @@ async function extrairComFerramenta(
         model: CLAUDE_MODEL,
         max_tokens: maxTokens,
         system: SYSTEM_BASE,
-        tools: [FERRAMENTA_QUALIFICACAO, FERRAMENTA_ANALISE],
+        tools: [FERRAMENTA_QUALIFICACAO, FERRAMENTA_PRECO, FERRAMENTA_DOCUMENTO],
         // FORÇADA, e não 'auto'. Eu deixei em 'auto' argumentando que forçar
         // tiraria do modelo a chance de raciocinar em texto antes de responder.
         // Em produção isso custou a análise inteira: em 'auto' o Opus 5 escreve
@@ -1558,9 +1633,45 @@ async function extrairComFerramenta(
   );
 }
 
-const extrairAnalise = (apiKey: string, contentBlocks: any[]) =>
+/**
+ * A INSTRUÇÃO DA TAREFA é a única coisa que separa as duas leituras.
+ *
+ * O corpo das instruções vai inteiro nas duas, e de propósito: ele é INPUT
+ * depois da marca de cache, e input não é onde o relógio está. Separar o texto
+ * em dois seria uma economia de segundos comprada com o risco de uma regra
+ * cair no lado errado — a conferência "bruto − IR − INSS − honorários =
+ * líquido" e a ordem de autoridade dos documentos valem para quem lê valores,
+ * mas o mapa do questionário cita valores o tempo todo.
+ *
+ * O que muda é o fecho, e ele é explícito sobre o que NÃO fazer: sem isso o
+ * modelo tenta preencher o que a ferramenta não tem, e gasta relógio escrevendo
+ * para o vazio.
+ */
+const FECHO_PRECO =
+  'DESTA VEZ VOCÊ LÊ SÓ OS VALORES, AS DATAS, A AUDITORIA DA CONTA E O PRAZO. ' +
+  'NÃO preencha o questionário jurídico (m2), NÃO escreva a síntese do processo e NÃO liste riscos: ' +
+  'outra leitura deste mesmo processo está rodando AGORA, em paralelo com esta, e é ela que faz essas três coisas. ' +
+  'Escrever aqui o que é dela não adianta — a ferramenta desta chamada não tem esses campos — e atrasa o resultado.';
+
+const FECHO_DOCUMENTO =
+  'DESTA VEZ VOCÊ LÊ SÓ O QUESTIONÁRIO JURÍDICO, A SÍNTESE E OS RISCOS. ' +
+  'NÃO devolva valores, datas, auditoria de cálculo nem roteiro de prazo: outra leitura deste mesmo processo está rodando ' +
+  'AGORA, em paralelo com esta, e é ela que cuida disso. A ferramenta desta chamada não tem esses campos. ' +
+  'O mapa exato das linhas do questionário está acima; siga-o linha por linha. ' +
+  'NOS RISCOS, AGRUPE POR ASSUNTO e não repita: um item por tema, com tudo o que você tem a dizer sobre ele no fundamento. ' +
+  'E não escreva risco de cálculo — divergência de conta, índice, termo inicial, base ou tributação é da outra leitura, que roda em paralelo e tem os campos para isso. ' +
+  'Os VALORES continuam sendo lidos por você quando uma linha do questionário pedir um valor no complemento — ' +
+  'o que não se escreve aqui são os campos de precificação, não os números que a pergunta faz parte.';
+
+const extrairPreco = (apiKey: string, contentBlocks: any[]) =>
   extrairComFerramenta(apiKey, {
-    rotulo: 'análise', instrucoes: SYSTEM_ANALISE, ferramenta: FERRAMENTA_ANALISE,
+    rotulo: 'valores', instrucoes: `${SYSTEM_ANALISE}\n\n${FECHO_PRECO}`, ferramenta: FERRAMENTA_PRECO,
+    conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS,
+  });
+
+const extrairDocumento = (apiKey: string, contentBlocks: any[]) =>
+  extrairComFerramenta(apiKey, {
+    rotulo: 'questionário', instrucoes: `${SYSTEM_ANALISE}\n\n${FECHO_DOCUMENTO}`, ferramenta: FERRAMENTA_DOCUMENTO,
     conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS,
   });
 
@@ -2292,8 +2403,8 @@ Deno.serve(async (req) => {
     //               depois, SEM chamar a IA — custa milissegundos
     //   'salvar'    recebe a análise final, gera a planilha e sobe no Drive
     //   'qualificar' le o processo e roda SO o Portao 1 — ver a nota em 3b
-    const acao: 'qualificar' | 'analisar' | 'refinar' | 'reprecificar' | 'salvar' | null =
-      body.acao === 'qualificar' || body.acao === 'analisar' || body.acao === 'refinar' || body.acao === 'reprecificar' || body.acao === 'salvar'
+    const acao: 'qualificar' | 'analisar' | 'documento' | 'refinar' | 'reprecificar' | 'salvar' | null =
+      body.acao === 'qualificar' || body.acao === 'analisar' || body.acao === 'documento' || body.acao === 'refinar' || body.acao === 'reprecificar' || body.acao === 'salvar'
         ? body.acao
         : null;
     const notasKommo: string = String(body.notas_kommo ?? '').trim();
@@ -2343,7 +2454,7 @@ Deno.serve(async (req) => {
     // trabalham sobre a análise que já veio pronta do navegador — exigir o texto
     // aqui era o HTTP 400 "Faltou o texto do processo": eu tirei o reenvio do
     // texto (que estourava o tempo da requisição) e esqueci esta guarda.
-    const precisaDoProcesso = acao === 'qualificar' || acao === 'analisar' || acao === null;
+    const precisaDoProcesso = acao === 'qualificar' || acao === 'analisar' || acao === 'documento' || acao === null;
     if (!precisaDoProcesso) {
       // Nada a ler. O corte de conteúdo foi registrado na análise original e
       // viaja dentro de `dados`, então o aviso não se perde nas rodadas seguintes.
@@ -2470,6 +2581,33 @@ Deno.serve(async (req) => {
       }
     }
     marcar('montar o material (texto, imagens do Storage, anotações)');
+
+    // ---- A LEITURA DO DOCUMENTO, que corre em paralelo com a dos valores ----
+    //
+    // Sai daqui e não continua: nada abaixo lhe serve. Ela não passa pelo
+    // portão (já passou, na requisição de qualificação), não precifica e não
+    // monta planilha — devolve os três campos e pronto.
+    //
+    // NÃO LIMPA OS UPLOADS. Quem apaga as páginas do Storage é a leitura dos
+    // valores, e é de propósito: as duas requisições são disparadas juntas e
+    // cada uma baixa as imagens nos primeiros segundos, muito antes de a outra
+    // terminar. Apagar aqui abriria a chance de a irmã encontrar o bucket vazio
+    // e analisar um processo sem as páginas digitalizadas — que é onde a conta
+    // costuma estar — sem erro nenhum, só com números errados.
+    if (acao === 'documento') {
+      const doc = await extrairDocumento(cfg.anthropic_api_key, contentBlocks);
+      marcar('leitura do questionário e dos riscos (IA)');
+      return jsonResponse({
+        ok: true,
+        // Os campos crus, para o navegador juntar aos da outra leitura e mandar
+        // o conjunto de volta. Ele não interpreta nada disto: é opaco para a
+        // tela, como `dados` sempre foi.
+        dados_documento: Object.fromEntries(
+          CAMPOS_DOCUMENTO.map((k) => [k, (doc as Record<string, unknown>)?.[k]]).filter(([, v]) => v !== undefined),
+        ),
+        tempo: _relogio(),
+      });
+    }
     const houveCorte = contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
 
     // 3b. PORTÃO 1 — QUALIFICAÇÃO (roda ANTES de tudo). Só quando se está LENDO
@@ -2599,8 +2737,8 @@ Deno.serve(async (req) => {
     }
 
     // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
-    dados = await extrairAnalise(cfg.anthropic_api_key, contentBlocks);
-    marcar('extração da análise (leitura da IA)');
+    dados = await extrairPreco(cfg.anthropic_api_key, contentBlocks);
+    marcar('leitura dos valores e da auditoria (IA)');
     dados._houveCorte = houveCorte;
     dados._paginas_imagem = paginasImagem;
     dados._imagens_cortadas = cortouImagens;

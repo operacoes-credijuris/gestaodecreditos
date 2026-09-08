@@ -206,7 +206,14 @@ export interface RespostaAnaliseRpv {
   /** A auditoria dos cálculos. Null quando a conta não foi auditada. */
   auditoria?: AuditoriaRpv | null
   /** Quanto ESTA invocação levou dentro do servidor, e em quê. */
-  tempo?: { ms: number; fases: Array<[string, number]> }
+  tempo?: RelogioServidor
+  /**
+   * A metade "documento" da análise: questionário, síntese e riscos, crus.
+   *
+   * Só a ação 'documento' devolve isto, e a tela não interpreta nada — junta ao
+   * `dados` da outra leitura e manda o conjunto de volta para consolidar.
+   */
+  dados_documento?: Record<string, unknown>
   aviso?: string | null
   cedente?: string
   modelo?: string
@@ -363,10 +370,13 @@ function PainelPreco({ valores }: { valores: ValoresRpv }) {
           <tr className="text-[11px] uppercase tracking-wide text-slate-400">
             <th className="px-4 py-2 text-left font-medium">Verba</th>
             {/* "A receber" e "A pagar" diziam a direção do dinheiro e não o que
-                o número é. Aqui um lado é o CRÉDITO e o outro é o PREÇO, e
-                confundir os dois é o erro caro desta tela. */}
-            <th className="px-3 py-2 text-right font-medium leading-tight">Valor(es) do(s) crédito(s)</th>
-            <th className="px-3 py-2 text-right font-medium leading-tight">Preço da cessão</th>
+                o número é. Aqui um lado é o CRÉDITO e o outro é o que se
+                OFERECE por ele, e confundir os dois é o erro caro desta tela.
+                "Proposta" porque é isso que a coluna vira na conversa com o
+                cedente — e porque "preço da cessão" agora é o nome da linha
+                equivalente na tabela de baixo, onde ele é um custo. */}
+            <th className="px-3 py-2 text-right font-medium leading-tight">Valor do crédito</th>
+            <th className="px-3 py-2 text-right font-medium leading-tight">Proposta</th>
             <th className="px-4 py-2 text-right font-medium">Deságio</th>
           </tr>
         </thead>
@@ -428,7 +438,7 @@ function ResumoInvestimento({
   atingiuAlvo?: boolean
 }) {
   const linha = (rotulo: ReactNode, valor: ReactNode, chave: string) => (
-    <div key={chave} className="flex items-baseline justify-between gap-4 px-4 py-1.5">
+    <div key={chave} className="flex items-baseline justify-between gap-4 px-4 py-2 first:pt-2.5 last:pb-2.5">
       <dt className="text-slate-600">{rotulo}</dt>
       <dd className="tabular-nums text-slate-700">{valor}</dd>
     </div>
@@ -441,7 +451,7 @@ function ResumoInvestimento({
       </h3>
       <div className="mt-2 overflow-hidden rounded-xl bg-white text-sm ring-1 ring-inset ring-slate-200/80">
         <dl>
-          {linha('Preço da cessão', formatBRL(valores.preco_cessao), 'cessao')}
+          {linha('Preço total da cessão', formatBRL(valores.preco_cessao), 'cessao')}
           {linha('Comissão', formatBRL(valores.comissao), 'comissao')}
           {linha(
             <>
@@ -468,58 +478,62 @@ function ResumoInvestimento({
               <dd className="tabular-nums">{formatBRL(valores.liquido_base)}</dd>
             </div>
           </div>
-        </dl>
 
-        <div className="grid grid-cols-2 gap-px border-t border-slate-200 bg-slate-200/70 text-xs">
-          <div className="bg-white px-4 py-2.5">
-            <p className="text-slate-400">Prazo de resgate</p>
-            <p className="mt-0.5 font-medium tabular-nums text-slate-800">
-              {valores.prazo_meses} meses
-              {valores.data_pagamento && (
-                <span className="font-normal text-slate-400"> · {valores.data_pagamento}</span>
-              )}
-            </p>
+          {/* PRAZO E RENTABILIDADE COMO LINHAS, e não numa faixa de cartões
+              embaixo. Eles respondem à mesma pergunta das linhas de cima —
+              quanto sai, quanto volta, em quanto tempo, a que taxa — e estavam
+              num formato diferente, o que os fazia ler como rodapé decorativo
+              em vez de parte da conta. */}
+          <div className="border-t border-slate-200">
+            {linha(
+              'Prazo de resgate',
+              <>
+                {valores.prazo_meses} meses
+                {valores.data_pagamento && (
+                  <span className="text-slate-400"> · {valores.data_pagamento}</span>
+                )}
+              </>,
+              'prazo',
+            )}
+            {linha(
+              'Rentabilidade',
+              <span className={cn(atingiuAlvo === false && 'text-amber-700')}>
+                {pctBR(valores.rentabilidade_mensal)}
+                <span className="text-slate-400"> ao mês</span>
+              </span>,
+              'rentabilidade',
+            )}
           </div>
-          <div className="bg-white px-4 py-2.5">
-            <p className="text-slate-400">Rentabilidade</p>
-            <p
-              className={cn(
-                'mt-0.5 font-medium tabular-nums',
-                atingiuAlvo === false ? 'text-amber-700' : 'text-slate-800',
-              )}
-            >
-              {pctBR(valores.rentabilidade_mensal)}
-              <span className="font-normal text-slate-400"> ao mês</span>
-            </p>
-          </div>
-        </div>
+        </dl>
       </div>
     </section>
   )
 }
 
 /**
- * Os riscos e os alertas, numa lista só e categorizada.
+ * Os riscos, numa lista só e categorizada.
  *
- * TRÊS PROBLEMAS QUE ISTO RESOLVE, e o primeiro é de leitura. A lista vinha com
- * o selo de grau numa coluna à esquerda e o texto na outra: selo curto ao lado
- * de parágrafo longo deixa uma faixa vazia embaixo dele em todo item, e doze
- * itens viravam duas telas de rolagem. Agora o selo é um pedaço do próprio
- * parágrafo, e o texto ocupa a linha inteira.
+ * O SELO É INLINE. Ele vinha numa coluna à esquerda, e selo curto ao lado de
+ * parágrafo longo deixa uma faixa vazia embaixo dele em todo item — doze itens
+ * viravam duas telas de rolagem. Agora ele é um pedaço do próprio parágrafo.
  *
- * O SEGUNDO É TAMANHO. Cada risco trazia o fundamento por extenso — a norma, o
- * trecho do título, a conta refeita —, e é leitura de quem já decidiu olhar
- * aquele item. Fica atrás de um clique: a lista mostra o QUE é, e o PORQUÊ abre
- * quando se pede.
- *
- * O TERCEIRO É QUE HAVIA DUAS LISTAS. Os avisos da análise moravam em dois
- * blocos separados — as caixas amarelas e um "Notas da análise" recolhido —,
- * dizendo coisas da mesma natureza dos riscos: teto de RPV excedido, cartório
+ * HAVIA TRÊS LISTAS DIZENDO A MESMA COISA: os riscos, as caixas amarelas e um
+ * "Notas da análise" recolhido, todos falando de teto de RPV excedido, cartório
  * fora do preço, preço no cenário conservador. Três lugares para o mesmo tipo
- * de informação é três lugares para esquecer de olhar. Agora é um.
+ * de informação é três lugares para esquecer de olhar. Agora é um — e os avisos
+ * sem ⚠️, que são nota e não alerta, ficam no fim, no grau mais fraco.
  *
- * NADA FOI JOGADO FORA no caminho: os avisos sem ⚠️, que são nota e não alerta,
- * continuam aqui embaixo, no grau mais fraco.
+ * O FUNDAMENTO FICA À VISTA. Ele já esteve atrás de um "por quê", quando a
+ * lista era longa; ela encolheu por dois motivos — o que era da conta foi para
+ * a seção de Auditoria, e o prompt passou a mandar UM item por assunto em vez
+ * de um por observação —, e num risco de duas ou três linhas o fundamento é a
+ * metade que sustenta a outra. Quem lê "a cessão precisa de anuência do ente"
+ * sem a norma ao lado não tem como discordar.
+ *
+ * O QUE NÃO ESTÁ AQUI: divergência de cálculo. Índice, termo inicial, base,
+ * tributação e memória ausente são da auditoria, e aparecem na seção dela. A
+ * regra é do prompt, não daqui: filtrar por texto acertaria hoje e erraria na
+ * primeira frase reescrita.
  */
 type GrauRisco = 'IMPEDITIVO' | 'ALTO' | 'MODERADO' | 'ATENÇÃO' | 'NOTA'
 
@@ -590,8 +604,6 @@ function ListaDeRiscos({
   riscos: Array<{ grau?: string; risco?: string; fundamento?: string }>
   avisos?: string[]
 }) {
-  const [abertos, setAbertos] = useState<Set<number>>(new Set())
-
   const itens = useMemo<ItemDeRisco[]>(() => {
     const dosRiscos: ItemDeRisco[] = riscos.map((r) => ({
       grau: normalizarGrau(r.grau),
@@ -616,44 +628,28 @@ function ListaDeRiscos({
   return (
     <section>
       <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        Riscos e alertas
+        Riscos
       </h3>
-      <ul className="mt-2 space-y-1.5">
-        {itens.map((it, i) => {
-          const aberto = abertos.has(i)
-          return (
-            <li key={i} className="text-sm leading-relaxed text-slate-700">
-              {/* O selo é INLINE, dentro do parágrafo: fora dele, cada item
-                  deixava uma faixa vazia embaixo do selo. */}
-              <Selo grau={it.grau} />
-              {it.texto}
-              {it.fundamento && (
-                <>
-                  {' '}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAbertos((s) => {
-                        const n = new Set(s)
-                        if (n.has(i)) n.delete(i)
-                        else n.add(i)
-                        return n
-                      })
-                    }
-                    className="whitespace-nowrap text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
-                  >
-                    {aberto ? 'menos' : 'por quê'}
-                  </button>
-                  {aberto && (
-                    <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
-                      {it.fundamento}
-                    </span>
-                  )}
-                </>
-              )}
-            </li>
-          )
-        })}
+      {/* O FUNDAMENTO FICA À VISTA, e não atrás de um clique. Escondê-lo tinha
+          uma premissa que se mostrou falsa: a de que a lista seria longa. Ela
+          encolheu — o que era da conta foi para a Auditoria, e o prompt agora
+          manda agrupar em vez de repetir —, e num risco de duas ou três linhas
+          o "por quê" é a metade que sustenta a outra. Quem lê "cessão precisa
+          de anuência do ente" sem a norma ao lado não tem como discordar. */}
+      <ul className="mt-2 space-y-2.5">
+        {itens.map((it, i) => (
+          <li key={i} className="text-sm leading-relaxed text-slate-700">
+            {/* O selo é INLINE, dentro do parágrafo: fora dele, cada item
+                deixava uma faixa vazia embaixo do selo. */}
+            <Selo grau={it.grau} />
+            {it.texto}
+            {it.fundamento && (
+              <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
+                {it.fundamento}
+              </span>
+            )}
+          </li>
+        ))}
       </ul>
     </section>
   )
@@ -668,12 +664,22 @@ function duracao(ms: number): string {
   return r ? `${m}m${String(r).padStart(2, '0')}s` : `${m}m`
 }
 
+/** O relógio de dentro de UMA requisição. */
+export interface RelogioServidor {
+  ms: number
+  fases: Array<[string, number]>
+}
+
 /** Uma etapa medida no navegador, com o que o servidor disse da sua parte. */
 export interface FaseMedida {
   nome: string
   ms: number
-  /** O relógio de dentro do servidor, quando a etapa foi uma requisição. */
-  servidor?: { ms: number; fases: Array<[string, number]> }
+  /**
+   * Os relógios de dentro do servidor — plural porque uma etapa do navegador
+   * pode ser mais de uma requisição CORRENDO JUNTA. A leitura da análise são
+   * duas, em paralelo; somá-las daria um número que ninguém esperou.
+   */
+  servidor?: Array<{ rotulo: string } & RelogioServidor>
 }
 
 /**
@@ -702,11 +708,14 @@ function LinhaDoTempo({ fases }: { fases: FaseMedida[] }) {
   if (!fases.length) return null
   const total = fases.reduce((t, f) => t + f.ms, 0)
   const dentro = (f: FaseMedida) =>
-    f.servidor
-      ? `no servidor ${duracao(f.servidor.ms)}` +
-        (f.servidor.fases.length
-          ? ': ' + f.servidor.fases.map(([n, ms]) => `${n} ${duracao(ms)}`).join('; ')
-          : '')
+    f.servidor?.length
+      ? f.servidor
+          .map(
+            (r) =>
+              `${r.rotulo}: no servidor ${duracao(r.ms)}` +
+              (r.fases.length ? ' — ' + r.fases.map(([n, ms]) => `${n} ${duracao(ms)}`).join('; ') : ''),
+          )
+          .join('\n')
       : undefined
 
   return (
@@ -743,7 +752,6 @@ function LinhaDoTempo({ fases }: { fases: FaseMedida[] }) {
  * quem assina.
  */
 function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
-  const [abertos, setAbertos] = useState<Set<number>>(new Set())
   const [criterios, setCriterios] = useState(false)
 
   const divs = auditoria.divergencias ?? []
@@ -791,36 +799,19 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
         )}
 
         {divs.length > 0 && (
-          <ul className="space-y-1.5 border-t border-slate-200/80 pt-2.5">
+          <ul className="space-y-2.5 border-t border-slate-200/80 pt-2.5">
             {divs.map((d, i) => {
-              const aberto = abertos.has(i)
               const efeito = efeitoEmPalavras(d.efeito)
               return (
                 <li key={i} className="text-sm leading-relaxed text-slate-700">
                   <Selo grau={normalizarGrau(d.gravidade)} />
                   {d.item}
-                  {efeito && <span className="text-slate-500"> — {efeito}</span>}{' '}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAbertos((st) => {
-                        const n = new Set(st)
-                        if (n.has(i)) n.delete(i)
-                        else n.add(i)
-                        return n
-                      })
-                    }
-                    className="whitespace-nowrap text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
-                  >
-                    {aberto ? 'menos' : 'por quê'}
-                  </button>
-                  {aberto && (
-                    <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
-                      O título/lei pede <span className="text-slate-700">"{d.esperado}"</span>; a conta fez{' '}
-                      <span className="text-slate-700">"{d.encontrado}"</span>.
-                      {d.fundamento && <> {d.fundamento}</>}
-                    </span>
-                  )}
+                  {efeito && <span className="text-slate-500"> — {efeito}</span>}
+                  <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
+                    O título/lei pede <span className="text-slate-700">"{d.esperado}"</span>; a conta fez{' '}
+                    <span className="text-slate-700">"{d.encontrado}"</span>.
+                    {d.fundamento && <> {d.fundamento}</>}
+                  </span>
                 </li>
               )
             })}
@@ -1149,9 +1140,9 @@ export function AnaliseRpvModal({
       // fim de tudo.
       let marco = performance.now()
       const medidas: FaseMedida[] = []
-      const marcar = (nome: string, servidor?: RespostaAnaliseRpv['tempo']) => {
+      const marcar = (nome: string, ...servidor: Array<{ rotulo: string } & RelogioServidor>) => {
         const agora = performance.now()
-        medidas.push({ nome, ms: agora - marco, servidor: servidor ?? undefined })
+        medidas.push({ nome, ms: agora - marco, servidor: servidor.length ? servidor : undefined })
         marco = agora
         setFases([...medidas])
       }
@@ -1296,20 +1287,59 @@ export function AnaliseRpvModal({
           notas_kommo: notasKommo,
           ...corpoCard,
         })
-        marcar('qualificação', q.tempo)
+        marcar('qualificação', ...(q.tempo ? [{ rotulo: 'qualificação', ...q.tempo }] : []))
         // Reprovado no portão: não há segunda etapa, e a janela mostra o motivo.
         if (q.reprovado) { setAtual(q); return }
 
-        setPasso('Lendo os valores e precificando…')
+        // AS DUAS LEITURAS SAEM JUNTAS, e é a razão de existir a ação
+        // 'documento'. A análise inteira numa chamada só levava 2m02s de uma
+        // requisição de 2m13s, contra um teto de 150 s: vinte segundos de
+        // folga. E o custo era de SAÍDA — o processo já estava no cache de
+        // prompt desde a qualificação, e o que levava dois minutos era
+        // escrever 29 linhas de questionário, a síntese, os critérios da
+        // auditoria e os riscos, um token por vez.
+        //
+        // Saída não acelera; divide-se. Uma leitura escreve os valores, a
+        // auditoria e o prazo; a outra, o questionário, a síntese e os riscos.
+        // Nenhuma depende da outra, então o relógio passa a ser o MAIOR dos
+        // dois em vez da soma — e cada requisição tem o seu próprio teto.
+        //
+        // EM DUAS REQUISIÇÕES, e não em duas chamadas dentro de uma: o corpo
+        // carrega até 60 páginas em base64, e duas cópias vivas na memória do
+        // mesmo worker é o que produziu o HTTP 546 antes.
+        setPasso('Lendo os valores e o questionário (duas leituras ao mesmo tempo)…')
+        const comum = { texto: t, job_id: jobId, notas_kommo: notasKommo, qualificacao: q.qualificacao, ...corpoCard }
+        // Promise.all e não allSettled: sem o questionário a planilha sairia
+        // com a aba jurídica em branco, e um documento assim é pior que
+        // nenhum. Falhando uma, falha a análise, com a mensagem da que falhou.
+        const [preco, doc] = await Promise.all([
+          invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', { acao: 'analisar', ...comum }),
+          invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', { acao: 'documento', ...comum }),
+        ])
+        marcar(
+          'análise',
+          ...(preco.tempo ? [{ rotulo: 'valores', ...preco.tempo }] : []),
+          ...(doc.tempo ? [{ rotulo: 'questionário', ...doc.tempo }] : []),
+        )
+
+        // A CONSOLIDAÇÃO É DO SERVIDOR, e não daqui. Juntar os dois `dados` é
+        // um spread de chaves que não se cruzam; o que NÃO é trivial é tudo o
+        // que se deriva do conjunto — normalizar as respostas contra as listas
+        // do modelo, escrever as linhas 10 e 11 com a due diligence, conferir a
+        // linha 34 contra o campo que escolhe o bloco da planilha, checar o
+        // piso de R$ 20 mil. Nada disso pôde acontecer nas duas leituras: cada
+        // uma tinha metade. 'reprecificar' já faz exatamente isso a partir de
+        // um `dados` pronto, sem IA e sem reler o processo — custa segundos.
+        setPasso('Juntando as duas leituras…')
         const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
-          acao: 'analisar',
-          texto: t,
-          job_id: jobId,
+          acao: 'reprecificar',
           notas_kommo: notasKommo,
-          qualificacao: q.qualificacao,
+          dados: { ...(preco.dados as Record<string, unknown>), ...(doc.dados_documento ?? {}) },
+          emolumentos: null,
+          avisos_qualificacao: preco.avisos_qualificacao ?? [],
           ...corpoCard,
         })
-        marcar('análise', r.tempo)
+        marcar('consolidação', ...(r.tempo ? [{ rotulo: 'consolidação', ...r.tempo }] : []))
         setAtual(r)
         // O SELETOR MOSTRA O QUE O MOTOR DECIDIU. Com "auto" — card que não diz
         // a parcela cedida —, quem escolhe é o destaque da contadoria, e sem
