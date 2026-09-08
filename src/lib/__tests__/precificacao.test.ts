@@ -351,3 +351,45 @@ describe('rotuloDoCenario', () => {
     expect(rotuloDoCenario({ principal: false, contratuais: false, sucumbenciais: false })).toBe('')
   })
 })
+
+/**
+ * O CUSTO TOTAL É A SOMA DO QUE A TELA MOSTRA.
+ *
+ * A janela da análise decompõe o custo em quatro linhas — preço da cessão,
+ * comissão, cartório e diligência — e imprime Y4 embaixo como o total delas.
+ * Enquanto a diligência não saía do motor, a tela mostrava três linhas e um
+ * total maior que a soma: quem conferisse encontrava R$ 250 a mais sem
+ * explicação na tela. Este teste é o que impede a quarta parcela de sumir de
+ * novo, ou uma quinta de entrar em Y4 sem aparecer em lugar nenhum.
+ */
+describe('a decomposição do custo fecha', () => {
+  const parcelas: Parcela[] = [
+    { nome: 'principal', bruto: 80000, liquido: 60000, desagiavel: true },
+    { nome: 'contratuais', bruto: 12000, liquido: 10000, desagiavel: false },
+  ]
+
+  it('cessão + comissão + cartório + diligência dá exatamente Y4', () => {
+    const c = calibrarDesagio({ parcelas, T5: 8, regra: REGRA })
+    expect(c.cessao + c.Y5 + (c.Y10 ?? 0) + c.diligencia).toBeCloseTo(c.Y4, 6)
+  })
+
+  it('a diligência devolvida é a que entrou na conta', () => {
+    const c = calibrarDesagio({ parcelas, T5: 8, regra: REGRA, diligencia: 900 })
+    expect(c.diligencia).toBe(900)
+    expect(c.cessao + c.Y5 + (c.Y10 ?? 0) + c.diligencia).toBeCloseTo(c.Y4, 6)
+  })
+
+  it('sem tabela de cartório, o total continua fechando com Y10 nulo', () => {
+    // Cartório desconhecido entra como zero e marcado: a tela diz "não
+    // incluído" na linha, e o total tem de continuar sendo a soma das outras.
+    const c = calibrarDesagio({ parcelas, T5: 8, regra: null })
+    expect(c.Y10).toBeNull()
+    expect(c.cessao + c.Y5 + c.diligencia).toBeCloseTo(c.Y4, 6)
+  })
+
+  it('a diligência padrão é 250 e não zero', () => {
+    // Zero seria um custo que não existe: todo negócio paga correspondente.
+    const c = calibrarDesagio({ parcelas, T5: 8, regra: REGRA })
+    expect(c.diligencia).toBe(250)
+  })
+})

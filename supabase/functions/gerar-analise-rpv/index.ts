@@ -591,6 +591,53 @@ function limparNomeArquivo(s: string): string {
  *
  * Vêm PRIMEIRO porque são o achado que muda o preço.
  */
+/**
+ * A auditoria dos cálculos, inteira, num objeto só para a tela.
+ *
+ * ELA VIVIA ESPALHADA EM TRÊS LUGARES: as divergências iam para a frente da
+ * lista de riscos, o veredito ia para os avisos, e o corte do cenário
+ * conservador aparecia numa nota da planilha que a tela não mostra. Quem lia a
+ * janela via "Cálculo: índice de correção" no meio de doze riscos, um aviso
+ * dizendo "detalhe nos riscos", e nenhum lugar que respondesse à pergunta que
+ * de fato se faz: a conta foi conferida, e no que ela não se sustenta?
+ *
+ * Null quando não houve auditoria nenhuma — e aí a tela não desenha a seção.
+ * "Auditei e está fiel" é diferente de "não auditei", e as duas coisas têm de
+ * poder ser ditas: a primeira devolve objeto com divergências vazias.
+ */
+function auditoriaParaTela(dados: any, avisos: string[]): any {
+  const divs = Array.isArray(dados?.auditoria_divergencias) ? dados.auditoria_divergencias : [];
+  // `auditoria_criterio_aplicado` preenchido é o sinal de que a IA de fato leu a
+  // conta: é o campo em que ela descreve o que a memória de cálculo aplicou.
+  if (!divs.length && !dados?.auditoria_criterio_aplicado && !dados?._auditoria_aplicada) return null;
+  const n = (v: unknown) => (v == null || v === '' ? null : Number(v) || 0);
+  return {
+    natureza: dados.auditoria_natureza ? String(dados.auditoria_natureza) : null,
+    risco_revisao: dados.auditoria_risco_revisao ? String(dados.auditoria_risco_revisao) : null,
+    // O cenário conservador FOI APLICADO ao preço, ou só descrito? É a
+    // diferença entre "o preço já embute o risco" e "o preço não embute".
+    aplicada: !!dados._auditoria_aplicada,
+    corte: Number(dados._auditoria_corte) || 0,
+    bruto_autos: n(dados.bruto_total),
+    bruto_conservador: n(dados.auditoria_bruto_conservador),
+    justificativa: dados.auditoria_justificativa ? String(dados.auditoria_justificativa) : null,
+    criterio_titulo: dados.auditoria_criterio_titulo ? String(dados.auditoria_criterio_titulo) : null,
+    criterio_aplicado: dados.auditoria_criterio_aplicado ? String(dados.auditoria_criterio_aplicado) : null,
+    divergencias: divs.map((d: any) => ({
+      item: String(d?.item ?? 'divergência'),
+      esperado: String(d?.esperado ?? ''),
+      encontrado: String(d?.encontrado ?? ''),
+      fundamento: String(d?.fundamento ?? ''),
+      gravidade: String(d?.gravidade ?? ''),
+      efeito: String(d?.efeito_se_corrigida ?? d?.efeito ?? ''),
+    })),
+    // O veredito em uma frase, já redigido. Vai daqui em vez de a tela
+    // reescrevê-lo: é o MESMO texto que a anotação do Kommo e a planilha
+    // recebem, e duas redações do mesmo veredito divergem na primeira mudança.
+    avisos,
+  };
+}
+
 function riscosComAuditoria(dados: any): any[] {
   const divs = Array.isArray(dados?.auditoria_divergencias) ? dados.auditoria_divergencias : [];
   const grau = (g: unknown) => {
@@ -1039,6 +1086,63 @@ async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T
   // rótulo a corrigir. Enquanto o cenário de honorários era exibido na coluna
   // do principal, o texto tinha de ser reescrito para não mentir.
 
+  // ---------------- Os comentários dos parâmetros adotados ----------------
+  //
+  // POR QUE NA CÉLULA, e não numa aba de observações. O arquivo do Drive é o
+  // que sobrevive à análise: seis meses depois, quem abre a planilha para
+  // conferir o preço tem o número na frente e não tem esta conversa. Um bruto
+  // atualizado por índice que a conta não explicitava, uma verba que se decidiu
+  // tributável, um termo inicial movido — tudo isso aparece na planilha como um
+  // número qualquer, indistinguível de um valor copiado do requisitório. O
+  // comentário é o que separa "li isto nos autos" de "decidi isto, e eis o
+  // porquê".
+  //
+  // O CAMINHO JÁ EXISTIA para dois casos — a origem dos valores na célula do
+  // bruto e a faixa de emolumentos na do cartório. Isto é o mesmo mecanismo,
+  // aberto para a IA escolher a célula.
+  {
+    type Alvo = { aba: 'prec' | 'juridica'; col: string; linha: number };
+    // SÓ AS CÉLULAS QUE EXISTEM, e por nome fixo: a IA escolhe de uma lista, e
+    // não escreve endereço. Endereço vindo do modelo cairia em qualquer lugar
+    // da planilha no dia em que ele errasse uma letra — inclusive por cima de
+    // uma fórmula, sem erro nenhum na hora.
+    const ALVOS: Record<string, Alvo> = {
+      bruto_total:              { aba: 'prec', col: 'K', linha: 5 },
+      ir:                       { aba: 'prec', col: 'M', linha: 5 },
+      inss:                     { aba: 'prec', col: 'N', linha: 5 },
+      honorarios:               { aba: 'prec', col: 'K', linha: 7 },
+      honorarios_sucumbenciais: { aba: 'prec', col: 'K', linha: 8 },
+      data_aquisicao:           { aba: 'prec', col: 'I', linha: 5 },
+      data_pagamento:           { aba: 'prec', col: 'J', linha: 5 },
+      prazo:                    { aba: 'prec', col: 'Q', linha: 5 },
+      // A linha 39 da aba jurídica: "Qual o valor total final líquido do(s)
+      // crédito(s)". Fora do bloco de modelo, então sem deslocamento.
+      valor_final:              { aba: 'juridica', col: 'B', linha: 39 },
+    };
+    // O ExcelJS devolve a nota como string ou como { texts: [...] }, conforme
+    // ela tenha vindo do modelo ou tenha sido escrita aqui.
+    const notaAtual = (c: any): string => {
+      const n = c?.note;
+      if (!n) return '';
+      if (typeof n === 'string') return n;
+      if (Array.isArray(n?.texts)) return n.texts.map((t: any) => String(t?.text ?? '')).join('');
+      return '';
+    };
+    const lista: any[] = Array.isArray(dados?.notas_celulas) ? dados.notas_celulas : [];
+    for (const item of lista) {
+      const alvo = ALVOS[String(item?.campo ?? '')];
+      const nota = String(item?.nota ?? '').trim();
+      if (!alvo || !nota) continue;   // campo fora da lista é ignorado, não inventado
+      const c = alvo.aba === 'prec' ? cel(alvo.col, alvo.linha) : aj.getCell(`${alvo.col}${alvo.linha}`);
+      // ACUMULA em vez de sobrescrever: a K5 já traz a origem dos valores e o
+      // corte da auditoria, e a nota do parâmetro é mais uma camada da mesma
+      // explicação — trocar uma pela outra perderia justamente a que veio antes.
+      const antes = notaAtual(c);
+      c.note = (antes ? antes + '\n\n' : '') + 'PARÂMETRO ADOTADO: ' + nota;
+      if (typeof c.note === 'string' && c.note.length > 1800) c.note = c.note.slice(0, 1800) + '…';
+    }
+  }
+
   const out = await wb.xlsx.writeBuffer();
   return new Uint8Array(out as ArrayBuffer);
 }
@@ -1135,6 +1239,18 @@ const SCHEMA_ANALISE = {
     '(d) principais eventos processuais COM DATAS (sentença, recurso, trânsito em julgado, início do cumprimento de sentença, ' +
     'manifestação da contadoria, decisão que determinou a expedição); (e) tipo de requisitório (RPV/minuta/alvará); (f) fase atual do processo.',
   bloco_g_riscos: 'lista de riscos {risco, fundamento, grau:"Impeditivo|Elevado|Moderado|Ponto de atenção"}',
+
+  // O PORQUÊ DE CADA NÚMERO QUE VOCÊ ESCOLHEU, na célula onde ele está.
+  notas_celulas:
+    'lista das ESCOLHAS SUAS que mudaram o valor do crédito em relação ao que os autos trazem, cada uma {campo, nota}. ' +
+    'Vira COMENTÁRIO na célula correspondente da planilha, do mesmo jeito que a origem dos valores já vira comentário na célula do bruto. ' +
+    'CAMPO é um destes, e só destes: "bruto_total" (célula do bruto), "ir", "inss", "honorarios", "honorarios_sucumbenciais", ' +
+    '"data_aquisicao", "data_pagamento", "prazo", "valor_final" (a linha do valor total líquido negociado, na aba jurídica). ' +
+    'NOTA é o porquê em duas ou três frases: o que os autos traziam, o que você adotou, e o que sustenta a sua escolha (artigo, súmula, tema, ou o trecho do título). ' +
+    'QUANDO PREENCHER: sempre que houver ESCOLHA sua no meio — divergência de atualização, índice de correção ou de juros, termo inicial de qualquer um deles, ' +
+    'incidência ou valor de tributação (IR, INSS, alíquota, isenção, tabela), base de cálculo, percentual de honorários que você derivou em vez de ler. ' +
+    'QUANDO NÃO PREENCHER: valor lido direto do documento, sem escolha nenhuma. Copiar o requisitório NÃO gera nota. ' +
+    'Lista vazia é a resposta normal e esperada.',
 };
 
 // ---- PORTÃO 1: QUALIFICAÇÃO (roda ANTES da análise) ----
@@ -1233,6 +1349,11 @@ const SYSTEM_ANALISE =
   '(f) valores de DATAS DIFERENTES somados entre si — se a conta é de março e há atualização de agosto, use UMA delas inteira e diga qual. ' +
   'CONFIRA ANTES DE DEVOLVER: bruto_total menos ir menos inss menos honorarios tem de dar principal_liquido. Se não fechar, você leu algum número errado ou misturou documentos — reveja. Se ainda assim não fechar, devolva o que leu e explique a divergência em comentarios_analise, em vez de forçar um número para a conta bater. ' +
   'E DIGA DE ONDE VEIO, em "origem_valores": documento, ID ou página, e a data de atualização. ' +
+  'E ONDE VOCÊ ESCOLHEU, DIGA POR QUÊ — em "notas_celulas". Ler o número do requisitório não é escolha; adotar um índice que a conta não explicita, ' +
+  'mover um termo inicial, decidir que uma verba é ou não tributável, arbitrar a alíquota ou a base — isso é escolha, e é o que faz o valor final ' +
+  'divergir do que os autos mostram. Cada uma dessas vira um comentário NA PRÓPRIA CÉLULA da planilha, ao lado do número, onde quem confere o arquivo ' +
+  'meses depois vai encontrá-la sem ter esta análise à mão. Sem a nota, o número aparece lá como se tivesse sido copiado dos autos. ' +
+  'Não repita em "notas_celulas" o que já está em "auditoria_divergencias": aquilo é o que a CONTA fez de errado; isto é o que VOCÊ decidiu. ' +
   '=== MAPA EXATO DO M2 (objeto "m2"; a chave é o NÚMERO DA LINHA na aba jurídica) === ' +
   'Para cada linha, "resposta" vai na coluna B e "complemento" (quando o item pedir) vai na coluna D. ' +
   'Use SEMPRE os valores EXATOS das listas suspensas quando indicado — a coluna B só aceita esses valores. ' +
@@ -1477,7 +1598,7 @@ const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
  */
 const CAMPOS_EDITAVEIS: ReadonlySet<string> = new Set(Object.keys(SCHEMA_ANALISE));
 const CAMPOS_LISTA: ReadonlySet<string> = new Set([
-  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias',
+  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias', 'notas_celulas',
 ]);
 
 const FERRAMENTA_REVISAO = {
@@ -1532,7 +1653,7 @@ const FERRAMENTA_REVISAO = {
 const SISTEMA_REVISAO =
   'Você é analista jurídico-financeiro da Credijuris e está REVISANDO uma análise de RPV a pedido de quem a conferiu. Recebe a análise atual (JSON), o histórico da conversa e um pedido. ' +
   'VOCÊ NÃO TEM OS AUTOS EM MÃOS — só a análise já extraída deles. Isso é de propósito: reenviar o processo inteiro a cada pedido fazia a revisão estourar o tempo da requisição. ' +
-  'REGRAS: (1) devolva em "alteracoes" SÓ os campos que mudam; o que fica igual não se repete. (2) Quem afirma o dado é o usuário: ele está com o processo aberto. Aplique o que ele disser. Se o valor contrariar o que está no JSON, aplique mesmo assim e registre a troca em "resposta" ("bruto de X para Y, conforme você indicou"). (3) Se o pedido depende de um dado que NÃO está no JSON e o usuário não informou, peça o número em "resposta" e não altere nada — você não tem como consultar os autos. (4) Preço de cessão e rentabilidade você NÃO escreve: saem calculados dos seus campos. O DESÁGIO agora você pode ditar — mas só em "parametros", e só quando o usuário pedir um número (ver regra 9). Prazo ditado vai em "prazo_meses_manual". (4b) O CUSTO DE CARTÓRIO também não é seu, e não precisa ser pedido: escritura e registro são consultados na tabela do estado a partir do preço da cessão, e a tela REFAZ essa consulta sozinha sempre que o preço muda. Se pedirem para reajustar o cartório, responda que ele se recalcula automaticamente com o novo preço e não peça número nenhum — pedir o valor ao usuário é trabalho que a máquina já faz. Só peça se ele disser que a consulta automática falhou. (5) Mantenha o formato: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) Para SUPRIMIR, use "remover" com o caminho ("m2.37", "riscos.2") — não mande o campo vazio em "alteracoes". ' +
+  'REGRAS: (1) devolva em "alteracoes" SÓ os campos que mudam; o que fica igual não se repete. (2) Quem afirma o dado é o usuário: ele está com o processo aberto. Aplique o que ele disser. Se o valor contrariar o que está no JSON, aplique mesmo assim e registre a troca em "resposta" ("bruto de X para Y, conforme você indicou"). E QUANDO A TROCA MUDA O VALOR DO CRÉDITO — bruto, IR, INSS, honorários, datas, prazo —, acrescente também um item em "notas_celulas" ({campo, nota}, campos válidos no esquema), dizendo o que estava, o que passou a estar e que veio de quem revisou. Isso vira comentário na própria célula da planilha: sem ele, o número novo aparece no arquivo do Drive como se tivesse sido lido dos autos. (3) Se o pedido depende de um dado que NÃO está no JSON e o usuário não informou, peça o número em "resposta" e não altere nada — você não tem como consultar os autos. (4) Preço de cessão e rentabilidade você NÃO escreve: saem calculados dos seus campos. O DESÁGIO agora você pode ditar — mas só em "parametros", e só quando o usuário pedir um número (ver regra 9). Prazo ditado vai em "prazo_meses_manual". (4b) O CUSTO DE CARTÓRIO também não é seu, e não precisa ser pedido: escritura e registro são consultados na tabela do estado a partir do preço da cessão, e a tela REFAZ essa consulta sozinha sempre que o preço muda. Se pedirem para reajustar o cartório, responda que ele se recalcula automaticamente com o novo preço e não peça número nenhum — pedir o valor ao usuário é trabalho que a máquina já faz. Só peça se ele disser que a consulta automática falhou. (5) Mantenha o formato: números como número, datas DD/MM/AAAA, m2 indexado pela linha. (6) Para SUPRIMIR, use "remover" com o caminho ("m2.37", "riscos.2") — não mande o campo vazio em "alteracoes". ' +
   '(7) LISTAS se editam POR ÍNDICE, e não reenviando a lista inteira: para mudar o segundo ato do roteiro mande {"roteiro_prazo": {"1": {"dias": 90}}}; para acrescentar um, {"roteiro_prazo": {"+": {"ato": "...", "dias": 21}}}. Mandar a lista inteira SUBSTITUI o que havia — só faça isso quando for essa a intenção. Vale para roteiro_prazo, bloco_g_riscos e auditoria_divergencias. ' +
   '(8) USE O NOME EXATO DO CAMPO. Nome que não existe no formato é RECUSADO e aparece na resposta como não aplicado — não há como inventar um campo novo e esperar efeito. Na dúvida, olhe as chaves do JSON que você recebeu. ' +
   '(9) OS PARÂMETROS DO NEGÓCIO são seus, quando o usuário os ditar: deságio ("fecha a 30%"), meta de rentabilidade, comissão e diligência vão em "parametros"; o que está sendo comprado vai em "verbas". Isto substitui a regra antiga de recusar mexer no deságio: agora dá, desde que o usuário DITE. O que você continua NÃO fazendo é escolher esses números sozinho — sem pedido explícito, deixe fora. Para DESFAZER um parâmetro ditado numa rodada anterior, mande a chave com null (ou "auto" no prazo): o motor volta a calcular. ' +
@@ -3068,23 +3189,32 @@ Deno.serve(async (req) => {
     // A AUDITORIA, sempre — inclusive quando não achou nada. Silêncio aqui
     // seria lido como "não auditado", e a diferença entre "conferi e está fiel"
     // e "não conferi" é toda a diferença para quem assina.
+    //
+    // O VEREDITO VAI PARA DOIS DESTINOS, e por isso mora num array próprio: a
+    // anotação do Kommo e a planilha juntam TODOS os avisos num parágrafo só —
+    // ali ele tem de estar —, enquanto a janela ganhou uma seção de auditoria e
+    // repetir a mesma frase na lista de alertas era o terceiro lugar dizendo o
+    // que a seção já diz. Ele continua em avisosBase; a tela é que sabe
+    // descontá-lo, comparando com esta lista, em vez de caçar texto.
+    const avisosAuditoria: string[] = [];
     {
       const _divs: any[] = Array.isArray(dados.auditoria_divergencias) ? dados.auditoria_divergencias : [];
       const _risco = String(dados.auditoria_risco_revisao ?? '').toLowerCase();
       if (dados._auditoria_aplicada) {
-        avisosBase.push(
+        avisosAuditoria.push(
           `⚠️ Preço no CENÁRIO CONSERVADOR: o bruto dos autos foi reduzido em ${brl(Number(dados._auditoria_corte) || 0)} ` +
-          `pela auditoria dos cálculos. Motivo detalhado nos riscos.`,
+          `pela auditoria dos cálculos.`,
         );
       } else if (_divs.length) {
         const _reduzem = _divs.filter((d: any) => String(d?.efeito_se_corrigida ?? d?.efeito ?? '') === 'reduz').length;
-        avisosBase.push(
+        avisosAuditoria.push(
           `⚠️ Auditoria: ${_divs.length} divergência(s) na conta${_reduzem ? `, ${_reduzem} que derruba(m) o crédito se corrigida(s)` : ''} — ` +
-          `o preço NÃO embute esse risco. Risco de revisão: ${_risco || 'não classificado'}. Detalhe nos riscos.`,
+          `o preço NÃO embute esse risco. Risco de revisão: ${_risco || 'não classificado'}.`,
         );
       } else if (dados.auditoria_criterio_aplicado) {
-        avisosBase.push(`Auditoria: conta conferida contra o título e os índices da Fazenda, e fiel. Risco de revisão: ${_risco || 'baixo'}.`);
+        avisosAuditoria.push(`Auditoria: conta conferida contra o título e os índices da Fazenda, e fiel. Risco de revisão: ${_risco || 'baixo'}.`);
       }
+      for (const a of avisosAuditoria) avisosBase.push(a);
     }
 
     // DOIS OLHOS NO MESMO FATO. A linha 34 do questionário pergunta se houve
@@ -3208,7 +3338,11 @@ Deno.serve(async (req) => {
         avisos: avisosBase,
         aviso: avisosBase.length ? avisosBase.join(' ') : null,
         m1_sintese: dados.m1_sintese ?? null,
-        riscos: riscosComAuditoria(dados),
+        // SEM AS DIVERGÊNCIAS DA AUDITORIA: elas vão em `auditoria`, que a
+        // janela desenha em seção própria. Na planilha continuam junto com os
+        // riscos — num documento que se imprime, uma lista só é o certo.
+        riscos: Array.isArray(dados.bloco_g_riscos) ? dados.bloco_g_riscos : [],
+        auditoria: auditoriaParaTela(dados, avisosAuditoria),
         m2: dados.m2 ?? {},
         resposta: respostaRevisao,
         // A análise inteira, para a tela devolver no próximo turno. Opaco para ela.

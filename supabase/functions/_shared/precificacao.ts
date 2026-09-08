@@ -227,6 +227,16 @@ export interface Precificacao {
   Y10: number | null
   /** Custo total da operação. */
   Y4: number
+  /**
+   * O correspondente/diligência que entrou no custo.
+   *
+   * A TELA NÃO O MOSTRA — decisão do dono —, e é justamente por isso que ele
+   * sai daqui: Y4 é a soma de quatro coisas e a janela exibe três, então a
+   * única forma de provar que o total continua fechando é o teste somar as
+   * quatro. Sem este campo, uma quinta parcela poderia entrar em Y4 e nada
+   * acusaria.
+   */
+  diligencia: number
   /** Rentabilidade mensal. */
   Y9: number
   desagioEfetivo: number
@@ -324,6 +334,7 @@ export function calibrarDesagio(o: {
     desagio: r.d,
     parcelas: r.parcelas,
     Y3, Y5,
+    diligencia: dilig,
     cessao: r.cessao,
     Y10: r.Y10,
     Y4: r.Y4,
