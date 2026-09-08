@@ -622,6 +622,36 @@ function Selo({ grau }: { grau: GrauRisco }) {
   )
 }
 
+/**
+ * Riscos e avisos numa lista só, ordenada por gravidade.
+ *
+ * FORA DO COMPONENTE porque dois lugares precisam da MESMA lista: a seção de
+ * Riscos e a de Desfecho, onde se marca o que motivou a decisão. Duas fusões
+ * com a mesma intenção divergiriam na primeira mudança de uma delas — e o
+ * efeito seria a pessoa marcar um achado que não é o que está escrito acima.
+ */
+function fundirRiscosEAvisos(
+  riscos: Array<{ grau?: string; risco?: string; fundamento?: string }>,
+  avisos?: string[],
+): ItemDeRisco[] {
+  const dosRiscos: ItemDeRisco[] = riscos.map((r) => ({
+    grau: normalizarGrau(r.grau),
+    texto: String(r.risco ?? '').trim(),
+    fundamento: String(r.fundamento ?? '').trim() || undefined,
+  }))
+  // O ⚠️ é o que separa alerta de nota nos avisos do motor — a mesma marca que
+  // a anotação do Kommo usa para decidir o que vai para o card.
+  const dosAvisos: ItemDeRisco[] = (avisos ?? []).map((a) => {
+    const alerta = a.trim().startsWith('⚠️')
+    const texto = a.replace(/^\s*⚠️\s*/, '').trim()
+    const bloqueia = /ABAIXO DO M[ÍI]NIMO|N[ÃA]O D[ÁA] PARA FECHAR/i.test(texto)
+    return { grau: bloqueia ? 'IMPEDITIVO' : alerta ? 'ATENÇÃO' : 'NOTA', texto }
+  })
+  return [...dosRiscos, ...dosAvisos]
+    .filter((i) => i.texto.length > 0)
+    .sort((a, b) => ORDEM_GRAU[a.grau] - ORDEM_GRAU[b.grau])
+}
+
 interface ItemDeRisco {
   grau: GrauRisco
   texto: string
@@ -635,24 +665,7 @@ function ListaDeRiscos({
   riscos: Array<{ grau?: string; risco?: string; fundamento?: string }>
   avisos?: string[]
 }) {
-  const itens = useMemo<ItemDeRisco[]>(() => {
-    const dosRiscos: ItemDeRisco[] = riscos.map((r) => ({
-      grau: normalizarGrau(r.grau),
-      texto: String(r.risco ?? '').trim(),
-      fundamento: String(r.fundamento ?? '').trim() || undefined,
-    }))
-    // O ⚠️ é o que separa alerta de nota nos avisos do motor — a mesma marca que
-    // a anotação do Kommo usa para decidir o que vai para o card.
-    const dosAvisos: ItemDeRisco[] = (avisos ?? []).map((a) => {
-      const alerta = a.trim().startsWith('⚠️')
-      const texto = a.replace(/^\s*⚠️\s*/, '').trim()
-      const bloqueia = /ABAIXO DO M[ÍI]NIMO|N[ÃA]O D[ÁA] PARA FECHAR/i.test(texto)
-      return { grau: bloqueia ? 'IMPEDITIVO' : alerta ? 'ATENÇÃO' : 'NOTA', texto }
-    })
-    return [...dosRiscos, ...dosAvisos]
-      .filter((i) => i.texto.length > 0)
-      .sort((a, b) => ORDEM_GRAU[a.grau] - ORDEM_GRAU[b.grau])
-  }, [riscos, avisos])
+  const itens = useMemo(() => fundirRiscosEAvisos(riscos, avisos), [riscos, avisos])
 
   if (itens.length === 0) return null
 
@@ -1109,11 +1122,17 @@ function DesfechoDaAnalise({
   acoes,
   onMover,
   ocupado,
+  achados,
+  onRedigir,
   motivoSugerido,
 }: {
   acoes: AcaoTela[]
   onMover: (statusId: number, comentario: string) => Promise<void>
   ocupado: boolean
+  /** Os achados da análise, para marcar em vez de redigitar. */
+  achados: ItemDeRisco[]
+  /** Manda a IA reescrever o motivo para quem vai ler no card. */
+  onRedigir: (desfecho: string, itens: string[], texto: string) => Promise<string>
   /**
    * Texto que já entra no campo do motivo, quando existe um pronto.
    *
@@ -1126,21 +1145,65 @@ function DesfechoDaAnalise({
 }) {
   const [escolhida, setEscolhida] = useState<AcaoTela | null>(null)
   const [motivo, setMotivo] = useState('')
+  const [marcados, setMarcados] = useState<Set<number>>(new Set())
   const [enviando, setEnviando] = useState(false)
+  const [redigindo, setRedigindo] = useState(false)
+  /** O texto no campo já passou pela IA? Só muda o rótulo do botão e a nota. */
+  const [revisado, setRevisado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
   if (!acoes.length) return null
 
   const exigeMotivo =
     escolhida != null && (escolhida.statusId === ST_DILIGENCIA || escolhida.statusId === ST_REPROVADO)
-  const podeEnviar = escolhida != null && !enviando && (!exigeMotivo || motivo.trim().length >= 10)
+  // MARCAR ACHADO CONTA COMO MOTIVO. Quem marcou dois riscos e não escreveu
+  // nada disse por que — e travar o botão ali seria exigir que ela reescrevesse
+  // à mão o que acabou de apontar com o dedo.
+  const podeEnviar =
+    escolhida != null && !enviando && !redigindo &&
+    (!exigeMotivo || motivo.trim().length >= 10 || marcados.size > 0)
+
+  /** O rótulo curto do desfecho, que o servidor usa para escolher o tom. */
+  const tipoDoDesfecho = (a: AcaoTela) =>
+    a.statusId === ST_DILIGENCIA ? 'diligencia' : a.statusId === ST_REPROVADO ? 'reprovado' : 'validacao'
+
+  const itensMarcados = () =>
+    [...marcados].sort((a, b) => a - b).map((i) => {
+      const it = achados[i]
+      // O FUNDAMENTO VAI JUNTO. É onde estão a norma e a conta, e é isso que
+      // faz a anotação sustentar a decisão em vez de só afirmá-la.
+      return it.fundamento ? `[${it.grau}] ${it.texto} — ${it.fundamento}` : `[${it.grau}] ${it.texto}`
+    })
+
+  async function redigir() {
+    if (!escolhida) return
+    setErro(null)
+    setRedigindo(true)
+    try {
+      const texto = await onRedigir(tipoDoDesfecho(escolhida), itensMarcados(), motivo.trim())
+      // SUBSTITUI o campo, e é o comportamento certo: a redação da IA JÁ INCLUI
+      // o que a pessoa escreveu (vai na entrada dela, com precedência). Somar
+      // os dois deixaria o mesmo argumento duas vezes na anotação.
+      setMotivo(texto)
+      setRevisado(true)
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setRedigindo(false)
+    }
+  }
 
   async function confirmar() {
     if (!escolhida) return
     setErro(null)
     setEnviando(true)
     try {
-      await onMover(escolhida.statusId, motivo.trim())
+      // OS ACHADOS MARCADOS VÃO JUNTO quando a pessoa não passou pela IA: sem
+      // isso, marcar três riscos e confirmar direto mandaria ao card só o texto
+      // livre, e o que ela marcou se perderia sem aviso.
+      const marcadosTexto = revisado ? '' : itensMarcados().map((i) => `- ${i}`).join('\n')
+      const comentario = [motivo.trim(), marcadosTexto].filter(Boolean).join('\n\n')
+      await onMover(escolhida.statusId, comentario)
     } catch (e) {
       setErro((e as Error)?.message ?? String(e))
     } finally {
@@ -1169,6 +1232,8 @@ function DesfechoDaAnalise({
               const fecha = escolhida?.statusId === a.statusId
               setEscolhida(fecha ? null : a)
               setMotivo(fecha ? '' : (motivoSugerido ?? ''))
+              setMarcados(new Set())
+              setRevisado(false)
               setErro(null)
             }}
           >
@@ -1178,48 +1243,124 @@ function DesfechoDaAnalise({
       </div>
 
       {escolhida && (
-        <div className="mt-3 rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
-          <label className="block text-xs text-slate-500" htmlFor="motivo-desfecho">
-            {exigeMotivo ? (
-              <>
-                Por quê? <span className="text-slate-400">(vai como anotação no card do Kommo)</span>
-              </>
-            ) : (
-              <>
-                Quer dizer algo ao comercial?{' '}
-                <span className="text-slate-400">(opcional — vai como anotação no card)</span>
-              </>
+        <div className="mt-3 space-y-3 rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
+          {/* OS ACHADOS DA PRÓPRIA ANÁLISE, para marcar em vez de redigitar.
+              Eles estão na tela acima, já graduados e fundamentados; obrigar a
+              pessoa a copiá-los à mão para o campo do motivo é pedir que ela
+              reescreva o que a máquina acabou de escrever — e o que se
+              reescreve à mão sai encurtado e sem a norma.
+
+              NÃO É VINCULANTE: marcar é atalho, não formulário. Dá para
+              confirmar sem marcar nada, escrevendo do zero, e dá para marcar
+              três e escrever uma ressalva que contradiz uma delas. */}
+          {achados.length > 0 && (
+            <div>
+              <p className="text-xs text-slate-500">
+                O que motivou{' '}
+                <span className="text-slate-400">(marque os achados; o texto abaixo continua seu)</span>
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {achados.map((a, i) => (
+                  <li key={i}>
+                    <label className="flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                        checked={marcados.has(i)}
+                        disabled={enviando || redigindo}
+                        onChange={() =>
+                          setMarcados((s) => {
+                            const n = new Set(s)
+                            if (n.has(i)) n.delete(i)
+                            else n.add(i)
+                            return n
+                          })
+                        }
+                      />
+                      <span>
+                        <Selo grau={a.grau} />
+                        {a.texto}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs text-slate-500" htmlFor="motivo-desfecho">
+              {exigeMotivo ? (
+                <>
+                  Por quê? <span className="text-slate-400">(vai como anotação no card do Kommo)</span>
+                </>
+              ) : (
+                <>
+                  Quer dizer algo ao comercial?{' '}
+                  <span className="text-slate-400">(opcional — vai como anotação no card)</span>
+                </>
+              )}
+            </label>
+            <textarea
+              id="motivo-desfecho"
+              className="mt-1.5 min-h-[80px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+              rows={4}
+              placeholder={
+                escolhida.statusId === ST_DILIGENCIA
+                  ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
+                  : escolhida.statusId === ST_REPROVADO
+                    ? 'Por que não passa. Ex.: "precatório expedido, não RPV" · "crédito de R$ 12 mil, abaixo do mínimo".'
+                    : 'Ex.: "conta confere; deságio calibrado em 37% pela rentabilidade-alvo".'
+              }
+              value={motivo}
+              disabled={enviando || redigindo}
+              onChange={(e) => { setMotivo(e.target.value); setRevisado(false) }}
+            />
+          </div>
+
+          {/* A REDAÇÃO PELA IA, e num botão — não no confirmar.
+              Quem escreve a razão é quem acabou de auditar, e escreve como quem
+              auditou: "SELIC de 02/2024 sobre parcela com termo inicial em
+              09/2024". Quem lê é o comercial, que vai falar com o cedente e não
+              tem a análise à frente. A IA reescreve mantendo os termos técnicos
+              e explicando a consequência ao lado de cada um.
+
+              EXPLÍCITO, e não automático no confirmar: o texto vai para o card
+              sob o nome de quem clicou, e ninguém deve assinar um parágrafo que
+              não leu. Aqui ela vê o resultado, edita e só então confirma. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<Sparkles className="h-3.5 w-3.5" />}
+              onClick={redigir}
+              disabled={enviando || redigindo || (marcados.size === 0 && !motivo.trim())}
+              loading={redigindo}
+            >
+              {revisado ? 'Redigir de novo' : 'Redigir com a IA'}
+            </Button>
+            {revisado && (
+              <span className="text-xs text-slate-400">
+                Texto reescrito pela IA — confira e edite antes de confirmar.
+              </span>
             )}
-          </label>
-          <textarea
-            id="motivo-desfecho"
-            className="mt-1.5 min-h-[64px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
-            rows={3}
-            placeholder={
-              escolhida.statusId === ST_DILIGENCIA
-                ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
-                : escolhida.statusId === ST_REPROVADO
-                  ? 'Por que não passa. Ex.: "precatório expedido, não RPV" · "crédito de R$ 12 mil, abaixo do mínimo".'
-                  : 'Ex.: "conta confere; deságio calibrado em 37% pela rentabilidade-alvo".'
-            }
-            value={motivo}
-            disabled={enviando}
-            onChange={(e) => setMotivo(e.target.value)}
-          />
+          </div>
+
           {exigeMotivo && motivo.trim().length > 0 && motivo.trim().length < 10 && (
-            <p className="mt-1 text-xs text-amber-700">
+            <p className="text-xs text-amber-700">
               Escreva a razão por extenso — o comercial lê isso sem ter a análise à mão.
             </p>
           )}
-          {erro && <p className="mt-1.5 text-xs text-red-700">{erro}</p>}
-          <div className="mt-2 flex items-center gap-2">
+          {erro && <p className="text-xs text-red-700">{erro}</p>}
+
+          <div className="flex items-center gap-2 border-t border-slate-200/70 pt-3">
             <Button size="sm" variant={escolhida.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
               Confirmar: {escolhida.label}
             </Button>
             <button
               type="button"
-              onClick={() => { setEscolhida(null); setMotivo(''); setErro(null) }}
-              disabled={enviando}
+              onClick={() => { setEscolhida(null); setMotivo(''); setMarcados(new Set()); setRevisado(false); setErro(null) }}
+              disabled={enviando || redigindo}
               className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
             >
               cancelar
@@ -1990,6 +2131,47 @@ export function AnaliseRpvModal({
 
   const riscos = useMemo(() => atual?.riscos ?? [], [atual])
   /**
+   * Os achados que o desfecho oferece para marcar.
+   *
+   * A MESMA FUSÃO da seção de Riscos, pela mesma função — a lista que se marca
+   * tem de ser exatamente a que está escrita acima, senão a pessoa marca um
+   * item que ninguém leu.
+   *
+   * AS DIVERGÊNCIAS DA AUDITORIA ENTRAM JUNTO, e não estão em `riscos`: elas
+   * moram em `auditoria.divergencias` desde que a auditoria ganhou seção
+   * própria. São o motivo mais frequente de diligência e de reprovação — conta
+   * que não se sustenta —, e ficariam de fora justamente por terem sido bem
+   * organizadas.
+   */
+  const achadosDoDesfecho = useMemo<ItemDeRisco[]>(() => {
+    const daAuditoria = (atual?.auditoria?.divergencias ?? []).map((d) => ({
+      grau: normalizarGrau(d.gravidade),
+      texto: `Cálculo: ${d.item}`,
+      fundamento: [
+        d.esperado || d.encontrado
+          ? `O título/lei pede "${d.esperado}"; a conta fez "${d.encontrado}".`
+          : '',
+        d.fundamento,
+      ].filter(Boolean).join(' ') || undefined,
+    }))
+    return [...daAuditoria, ...fundirRiscosEAvisos(riscos, atual?.avisos)]
+  }, [atual, riscos])
+
+  /** Manda a IA reescrever o motivo para quem vai ler no card do Kommo. */
+  async function redigirDesfecho(desfecho: string, itens: string[], texto: string): Promise<string> {
+    const r = await invokeFunction<{ mensagem?: string }>('gerar-analise-rpv', {
+      acao: 'redigir_desfecho',
+      desfecho,
+      itens,
+      texto,
+      cedente: atual?.cedente ?? null,
+      ...corpoCard,
+    })
+    const m = String(r?.mensagem ?? '').trim()
+    if (!m) throw new Error('A IA não devolveu texto para a anotação.')
+    return m
+  }
+  /**
    * A análise na tela já não é a que foi salva.
    *
    * SALVAR DEIXOU DE SER O FIM DA JANELA. Antes, gravada a planilha, o chat e o
@@ -2077,6 +2259,8 @@ export function AnaliseRpvModal({
             acoes={acoes}
             onMover={onMover}
             ocupado={ocupado}
+            achados={achadosDoDesfecho}
+            onRedigir={redigirDesfecho}
             motivoSugerido={
               (atual.motivos ?? []).length
                 ? `Reprovado no Portão 1: ${(atual.motivos ?? []).join('; ')}`
@@ -2366,7 +2550,13 @@ export function AnaliseRpvModal({
           {/* O DESFECHO POR ÚLTIMO, que é a ordem do trabalho: os números, a
               auditoria, os riscos, o que se quis corrigir — e só então o que
               fazer com isso. */}
-          <DesfechoDaAnalise acoes={acoes} onMover={onMover} ocupado={ocupado} />
+          <DesfechoDaAnalise
+            acoes={acoes}
+            onMover={onMover}
+            ocupado={ocupado}
+            achados={achadosDoDesfecho}
+            onRedigir={redigirDesfecho}
+          />
         </div>
       )}
     </Modal>

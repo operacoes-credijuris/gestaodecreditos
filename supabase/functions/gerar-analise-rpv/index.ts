@@ -2667,6 +2667,76 @@ Deno.serve(async (req) => {
     };
 
 
+    // ---- A REDAÇÃO DO DESFECHO, para a anotação do card ----
+    //
+    // AÇÃO LEVE E SEM OS AUTOS: entra o que a pessoa marcou na tela — riscos e
+    // divergências que a análise já produziu — mais o que ela escreveu, e sai
+    // um texto para o comercial ler. Nenhum documento é lido aqui; são poucas
+    // centenas de tokens de cada lado, e responde em segundos.
+    //
+    // POR QUE PASSAR PELA IA. Quem escreve a razão é quem acabou de auditar, e
+    // escreve como quem auditou: "SELIC de 02/2024 sobre parcela com termo
+    // inicial em 09/2024, divergência de -R$ 650". Quem lê é o comercial, que
+    // vai falar com o cedente e não tem a análise à frente. O texto precisa
+    // continuar TÉCNICO — trocar "termo inicial" por "data de começo" tira
+    // precisão de um documento que pode ser cobrado depois — e ficar legível
+    // para quem não fez a conta.
+    //
+    // NÃO ESCREVE SOZINHA: devolve a redação, a tela mostra, a pessoa edita e só
+    // então confirma. O texto vai para o card sob o nome dela.
+    if (body.acao === 'redigir_desfecho') {
+      const _tipo = String(body.desfecho ?? '').toLowerCase();
+      const _rotulo = _tipo === 'diligencia'
+        ? 'ENVIO PARA DILIGÊNCIA'
+        : _tipo === 'reprovado'
+          ? 'REPROVAÇÃO'
+          : 'ENVIO PARA VALIDAÇÃO';
+      const _itens: string[] = (Array.isArray(body.itens) ? body.itens : [])
+        .map((i: unknown) => String(i ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 20);
+      const _livre = String(body.texto ?? '').trim().slice(0, 2000);
+      if (!_itens.length && !_livre) {
+        return errorResponse('Nada para redigir: marque ao menos um achado ou escreva o motivo.');
+      }
+      const _cabeca = [
+        body.cedente ? `Cedente: ${String(body.cedente).slice(0, 120)}` : null,
+        body.numero_processo ? `Processo: ${String(body.numero_processo).slice(0, 40)}` : null,
+      ].filter(Boolean).join(' · ');
+
+      const anthropic = new Anthropic({ apiKey: cfg.anthropic_api_key });
+      const resp = await anthropic.messages.create({
+        model: CLAUDE_MODEL,
+        // Teto curto: a saída é um parágrafo, e teto alto só dá margem para o
+        // modelo escrever mais do que alguém vai ler.
+        max_tokens: 900,
+        system:
+          'Você redige a anotação que registra, no CRM, por que um crédito foi enviado para diligência, reprovado ou encaminhado para validação. ' +
+          'QUEM LÊ é o comercial que vai falar com o cedente e com o advogado. Ele NÃO tem a análise à frente, não fez a conta, e vai agir a partir do que você escrever. ' +
+          'MANTENHA OS TERMOS TÉCNICOS — "termo inicial dos juros", "cenário conservador", "honorários sucumbenciais", "teto da RPV" —, porque trocá-los por linguagem coloquial tira precisão de um registro que pode ser cobrado depois. ' +
+          'MAS EXPLIQUE: ao lado do termo, a consequência em uma oração curta. "O título fixou os juros da citação e a conta os contou do evento danoso, o que infla o crédito em cerca de R$ 2.700." ' +
+          'FORMA: um parágrafo de abertura dizendo o desfecho e a razão principal, e depois uma lista curta com os achados, um por linha, começando com hífen. Sem saudação, sem despedida, sem assinatura — o CRM já registra quem escreveu. ' +
+          'No máximo 200 palavras. Não invente achado nenhum: use SÓ o que vier na entrada, e o que a pessoa escreveu livremente tem precedência sobre a sua redação — ela está com o processo aberto. ' +
+          'Em diligência, feche dizendo o que precisa ser providenciado. Em reprovação, feche dizendo o que teria de mudar para o crédito voltar a ser analisável, quando isso for possível. ' +
+          'Responda com o texto da anotação e nada mais.',
+        messages: [{
+          role: 'user',
+          content:
+            `DESFECHO: ${_rotulo}\n` +
+            (_cabeca ? `${_cabeca}\n` : '') +
+            (_itens.length ? `\nACHADOS MARCADOS NA ANÁLISE:\n${_itens.map((i) => `- ${i}`).join('\n')}\n` : '') +
+            (_livre ? `\nO QUE QUEM ANALISOU ESCREVEU:\n${_livre}\n` : '') +
+            '\nRedija a anotação.',
+        }],
+      });
+      const _texto = (resp.content ?? [])
+        .map((c) => (c.type === 'text' ? c.text : ''))
+        .join('\n')
+        .trim();
+      if (!_texto) return errorResponse('A IA não devolveu texto para a anotação.');
+      return jsonResponse({ ok: true, mensagem: _texto });
+    }
+
     if (body.acao === 'listar_originadores' || body.acao === 'listar_intermediadores') {
       const token = await refreshGoogleAccessToken(cfg.google_oauth_client_id, cfg.google_oauth_client_secret, cfg.google_oauth_refresh_token);
       const originadores = await driveListarOriginadoresAnalise(token, categoria);
