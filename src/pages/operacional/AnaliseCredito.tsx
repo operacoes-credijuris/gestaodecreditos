@@ -514,6 +514,16 @@ type BotoesDoCard = 'rpv' | 'precatorio' | 'nenhum'
 const ABAS_RPV_TERMINAIS: ReadonlySet<string> = new Set(['aprovados', 'diligencia', 'reprovados'])
 
 /**
+ * A aba em que o desfecho se decide DENTRO da janela da análise.
+ *
+ * Em Pendentes o trabalho é ler a análise e decidir, e as duas coisas passaram
+ * a acontecer no mesmo lugar. Em Validação não: ali a análise já foi feita e
+ * salva, quem revisa lê a anotação e a planilha, e obrigá-lo a abrir a janela
+ * custaria dois minutos de releitura do processo para mover um card.
+ */
+const ABA_RPV_DESFECHO_NA_JANELA = 'pendentes'
+
+/**
  * O card não tem número de processo — e isso é defeito, não ausência.
  *
  * ISTO ERA UMA LINHA DE METADADOS: "Precatório · 1057424-52.2022.8.26.0053 ·
@@ -556,6 +566,7 @@ function CardCredito({
   analisandoJuridico,
   resultadoJuridico,
   botoes,
+  desfechoNoCard,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -572,6 +583,8 @@ function CardCredito({
   analisandoJuridico: boolean
   resultadoJuridico?: ResultadoJuridico
   botoes: BotoesDoCard
+  /** Os desfechos ficam no card, ou na janela da análise? */
+  desfechoNoCard: boolean
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -627,7 +640,16 @@ function CardCredito({
 
         {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
             em vez de três. flex-wrap para não estourar em tela estreita. */}
-        {acoes.length > 0 && (
+        {/* OS DESFECHOS SAÍRAM DO CARD NA ABA DE PENDENTES e vivem na janela da
+            análise: aprovar, diligenciar ou reprovar são decisões que se tomam
+            DEPOIS de ler a análise, e ali ficavam a um clique de qualquer
+            leitura, ao lado do botão que ainda ia gerá-la.
+
+            EM VALIDAÇÃO ELES FICAM. Naquela aba a análise já foi feita e salva
+            — quem revisa lê a anotação e a planilha, não roda de novo —, e tirar
+            os botões de lá obrigaria a abrir a janela e pagar dois minutos de
+            leitura do processo para mover um card. */}
+        {acoes.length > 0 && desfechoNoCard && (
           <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
             {acoes.map((a) => (
               <Button
@@ -1368,7 +1390,14 @@ export default function AnaliseCredito() {
     },
   })
 
-  /** Toda ação é um clique: nenhuma etapa pede justificativa. */
+  /**
+   * O desfecho pelo CARD: um clique, sem justificativa.
+   *
+   * Continua assim onde ele existe — a aba de Validação —, porque ali a decisão
+   * é do dono sobre uma análise que ele acabou de ler, e a anotação da análise
+   * já está no card. O caminho COM motivo é o da janela, na aba de Pendentes:
+   * ver DesfechoDaAnalise em AnaliseRpvModal.
+   */
   function acionar(lead: KommoLead, acao: AcaoTela) {
     setEmAndamento({ leadId: lead.kommo_lead_id, statusId: acao.statusId })
     mover.mutate({ leadId: lead.kommo_lead_id, statusId: acao.statusId, comentario: '' })
@@ -1562,6 +1591,7 @@ export default function AnaliseCredito() {
                 key={l.kommo_lead_id}
                 lead={l}
                 acoes={abaAtual?.acoes ?? []}
+                desfechoNoCard={abaAtual?.key !== ABA_RPV_DESFECHO_NA_JANELA}
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria
@@ -1600,6 +1630,17 @@ export default function AnaliseCredito() {
           open
           leadId={rpvLead.kommo_lead_id}
           titulo={tituloCard(rpvLead)}
+          // SÓ NA ABA EM QUE O DESFECHO MORA AQUI. Nas outras a seção não
+          // aparece — os botões continuam no card, e mostrá-los nos dois
+          // lugares daria duas portas para a mesma decisão.
+          acoes={abaAtual?.key === ABA_RPV_DESFECHO_NA_JANELA ? (abaAtual?.acoes ?? []) : []}
+          onMover={async (statusId, comentario) => {
+            await mover.mutateAsync({ leadId: rpvLead.kommo_lead_id, statusId, comentario })
+            // A janela fecha porque o card saiu desta aba: manter aberta uma
+            // análise de um card que já foi movido é oferecer botões que não
+            // valem mais.
+            setRpvLead(null)
+          }}
           dadosDoCard={dadosParaRpv(rpvLead)}
           notasKommo={notasDoCard(rpvLead)}
           lerArquivos={() => lerArquivosComCache(rpvLead)}

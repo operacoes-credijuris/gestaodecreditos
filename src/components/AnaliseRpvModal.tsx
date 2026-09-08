@@ -26,6 +26,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Save, SendHorizontal, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
+import { ST_DILIGENCIA, ST_REPROVADO, type AcaoTela } from '@/lib/kommo'
 import {
   formatBRL,
   formatBRLInput,
@@ -1084,6 +1085,152 @@ export function GradeValoresRpv({
   )
 }
 
+/**
+ * O DESFECHO DA ANÁLISE, com o motivo indo para o card.
+ *
+ * POR QUE AQUI E NÃO NO CARD. Aprovar, mandar para diligência ou reprovar são
+ * decisões que se tomam DEPOIS de ler a análise — e no card elas ficavam a um
+ * clique de distância de qualquer leitura, ao lado do botão que ainda ia gerar
+ * a análise. Movidas para cá, a ordem da tela é a ordem do trabalho: os
+ * números, a auditoria, os riscos, e só então o que fazer com isso.
+ *
+ * O MOTIVO É OBRIGATÓRIO nos dois desfechos que interrompem o negócio.
+ * "Diligência" sem dizer o que falta transfere ao comercial a tarefa de
+ * adivinhar o que apurar, e "Reprovar" sem motivo apaga o trabalho de quem
+ * analisou: seis meses depois o card diz que foi reprovado e ninguém sabe por
+ * quê — nem para não repetir o mesmo cedente, nem para reabrir se a razão
+ * deixou de valer. Avançar para validação não pede motivo: é o caminho normal.
+ *
+ * O TEXTO VAI PARA A ANOTAÇÃO DO KOMMO, que é onde o comercial lê. A função
+ * kommo-mover já o aceitava e a tela mandava string vazia — o campo existia e
+ * ninguém o preenchia.
+ */
+function DesfechoDaAnalise({
+  acoes,
+  onMover,
+  ocupado,
+  motivoSugerido,
+}: {
+  acoes: AcaoTela[]
+  onMover: (statusId: number, comentario: string) => Promise<void>
+  ocupado: boolean
+  /**
+   * Texto que já entra no campo do motivo, quando existe um pronto.
+   *
+   * O caso é o card reprovado no Portão 1: os motivos da reprovação estão na
+   * tela, redigidos, e fazer a pessoa copiá-los à mão para o campo é pedir que
+   * ela redigite o que a máquina acabou de escrever. Vem como sugestão e não
+   * como texto fixo — ela edita antes de confirmar.
+   */
+  motivoSugerido?: string
+}) {
+  const [escolhida, setEscolhida] = useState<AcaoTela | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+
+  if (!acoes.length) return null
+
+  const exigeMotivo =
+    escolhida != null && (escolhida.statusId === ST_DILIGENCIA || escolhida.statusId === ST_REPROVADO)
+  const podeEnviar = escolhida != null && !enviando && (!exigeMotivo || motivo.trim().length >= 10)
+
+  async function confirmar() {
+    if (!escolhida) return
+    setErro(null)
+    setEnviando(true)
+    try {
+      await onMover(escolhida.statusId, motivo.trim())
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <section className="border-t border-slate-200/80 pt-5">
+      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        Desfecho
+      </h3>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {acoes.map((a) => (
+          <Button
+            key={a.statusId}
+            size="sm"
+            variant={escolhida?.statusId === a.statusId ? a.variant : 'outline'}
+            disabled={ocupado || enviando}
+            onClick={() => {
+              // Trocar de desfecho limpa o motivo: "faltou a certidão de
+              // débitos" escrito para uma diligência não serve como razão de
+              // reprovação, e reaproveitá-lo em silêncio mandaria ao comercial
+              // um texto que ninguém escreveu para aquilo.
+              const fecha = escolhida?.statusId === a.statusId
+              setEscolhida(fecha ? null : a)
+              setMotivo(fecha ? '' : (motivoSugerido ?? ''))
+              setErro(null)
+            }}
+          >
+            {a.label}
+          </Button>
+        ))}
+      </div>
+
+      {escolhida && (
+        <div className="mt-3 rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
+          <label className="block text-xs text-slate-500" htmlFor="motivo-desfecho">
+            {exigeMotivo ? (
+              <>
+                Por quê? <span className="text-slate-400">(vai como anotação no card do Kommo)</span>
+              </>
+            ) : (
+              <>
+                Quer dizer algo ao comercial?{' '}
+                <span className="text-slate-400">(opcional — vai como anotação no card)</span>
+              </>
+            )}
+          </label>
+          <textarea
+            id="motivo-desfecho"
+            className="mt-1.5 min-h-[64px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            rows={3}
+            placeholder={
+              escolhida.statusId === ST_DILIGENCIA
+                ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
+                : escolhida.statusId === ST_REPROVADO
+                  ? 'Por que não passa. Ex.: "precatório expedido, não RPV" · "crédito de R$ 12 mil, abaixo do mínimo".'
+                  : 'Ex.: "conta confere; deságio calibrado em 37% pela rentabilidade-alvo".'
+            }
+            value={motivo}
+            disabled={enviando}
+            onChange={(e) => setMotivo(e.target.value)}
+          />
+          {exigeMotivo && motivo.trim().length > 0 && motivo.trim().length < 10 && (
+            <p className="mt-1 text-xs text-amber-700">
+              Escreva a razão por extenso — o comercial lê isso sem ter a análise à mão.
+            </p>
+          )}
+          {erro && <p className="mt-1.5 text-xs text-red-700">{erro}</p>}
+          <div className="mt-2 flex items-center gap-2">
+            <Button size="sm" variant={escolhida.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
+              Confirmar: {escolhida.label}
+            </Button>
+            <button
+              type="button"
+              onClick={() => { setEscolhida(null); setMotivo(''); setErro(null) }}
+              disabled={enviando}
+              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
+            >
+              cancelar
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function AnaliseRpvModal({
   open,
   onClose,
@@ -1093,6 +1240,8 @@ export function AnaliseRpvModal({
   notasKommo,
   lerArquivos,
   onSalvo,
+  acoes,
+  onMover,
 }: {
   open: boolean
   onClose: () => void
@@ -1105,6 +1254,16 @@ export function AnaliseRpvModal({
   lerArquivos: () => Promise<ArquivoLido[]>
   /** Chamado depois de salvar, com a resposta final — a página anota no Kommo e atualiza o card. */
   onSalvo: (r: RespostaAnaliseRpv) => void
+  /**
+   * Os desfechos que a etapa deste card oferece.
+   *
+   * Vêm da página porque é ela que sabe em que aba o card está — e são os
+   * MESMOS que o card mostrava. Vazio = etapa sem desfecho, e a seção não
+   * aparece.
+   */
+  acoes: AcaoTela[]
+  /** Move o card e anota o motivo. Resolve quando o Kommo confirmou. */
+  onMover: (statusId: number, comentario: string) => Promise<void>
 }) {
   const [passo, setPasso] = useState<string | null>('Lendo os anexos do card…')
   const [erro, setErro] = useState<string | null>(null)
@@ -1899,13 +2058,31 @@ export function AnaliseRpvModal({
       {!atual && passo && <Loading label={passo} />}
 
       {atual?.reprovado && (
-        <div className="rounded-xl bg-red-50/70 p-4 text-sm text-red-800 ring-1 ring-inset ring-red-200/70">
-          <p className="font-semibold">Reprovado no Portão 1</p>
-          <ul className="mt-1 list-inside list-disc space-y-0.5">
-            {(atual.motivos ?? []).map((m, i) => (
-              <li key={i}>{m}</li>
-            ))}
-          </ul>
+        <div className="space-y-5">
+          <div className="rounded-xl bg-red-50/70 p-4 text-sm text-red-800 ring-1 ring-inset ring-red-200/70">
+            <p className="font-semibold">Reprovado no Portão 1</p>
+            <ul className="mt-1 list-inside list-disc space-y-0.5">
+              {(atual.motivos ?? []).map((m, i) => (
+                <li key={i}>{m}</li>
+              ))}
+            </ul>
+          </div>
+
+          {/* O DESFECHO TAMBÉM AQUI, e este é o caso em que ele mais serve: o
+              portão acabou de dizer por que o crédito não passa, e o passo
+              seguinte é mover o card com essa razão. Sem a seção, a pessoa
+              fechava a janela, achava o card na lista e clicava em Reprovar sem
+              motivo — perdendo o texto que estava na tela. */}
+          <DesfechoDaAnalise
+            acoes={acoes}
+            onMover={onMover}
+            ocupado={ocupado}
+            motivoSugerido={
+              (atual.motivos ?? []).length
+                ? `Reprovado no Portão 1: ${(atual.motivos ?? []).join('; ')}`
+                : undefined
+            }
+          />
         </div>
       )}
 
@@ -2185,6 +2362,11 @@ export function AnaliseRpvModal({
               </button>
             </div>
           </section>
+
+          {/* O DESFECHO POR ÚLTIMO, que é a ordem do trabalho: os números, a
+              auditoria, os riscos, o que se quis corrigir — e só então o que
+              fazer com isso. */}
+          <DesfechoDaAnalise acoes={acoes} onMover={onMover} ocupado={ocupado} />
         </div>
       )}
     </Modal>
