@@ -4202,6 +4202,24 @@ Deno.serve(async (req) => {
     ) + '.xlsx';
     const up = await driveUploadBytes(token, nomeArquivo, cedenteId, xlsx, XLSX_MIME, true);
 
+    // A PASTA DO CEDENTE FICA GUARDADA NO CARD, e é o que torna o título dele um
+    // link direto para o Drive (ver migração 0059).
+    //
+    // GRAVADA AQUI porque é aqui que o id existe: ele sai de três chamadas em
+    // sequência ao Drive (a pasta da categoria, a do originador, a do cedente),
+    // e refazê-las depois, a partir do card, esbarraria no nome — a pasta tem o
+    // nome do credor COMO A IA O LEU nos autos, em Title Case, e o card guarda o
+    // que o comercial digitou.
+    //
+    // BEST-EFFORT, e num try próprio: a planilha já subiu e o link já vai na
+    // resposta. Falhar em gravar um atalho não pode custar a análise que acabou
+    // de levar minutos.
+    if (leadId) {
+      try {
+        await sbAdmin.from('kommo_leads').update({ drive_pasta_id: cedenteId }).eq('kommo_lead_id', leadId);
+      } catch { /* atalho é atalho */ }
+    }
+
     // limpeza best-effort dos uploads
     await limparUploads?.();
 

@@ -593,7 +593,29 @@ function CardCredito({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
+            {/* O TÍTULO VIRA LINK PARA A PASTA DO CEDENTE no Drive, quando ela
+                já existe — e é onde estão as planilhas daquele processo.
+                Chegar até ela era abrir o Drive e navegar três níveis, ou caçar
+                o link numa anotação antiga do Kommo.
+
+                LINK DE VERDADE, e não um clique que resolve a pasta na hora: o
+                id vem gravado no card (ver migração 0059), então o destino é
+                instantâneo e não há chance de falhar. Sem id — card nunca
+                analisado, ou analisado antes da 0059 — fica texto, porque
+                título que parece link e não leva a nada é pior que título. */}
+            {lead.drive_pasta_id ? (
+              <a
+                href={`https://drive.google.com/drive/folders/${lead.drive_pasta_id}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Abrir a pasta deste cedente no Drive"
+                className="font-medium text-slate-800 underline decoration-slate-300 decoration-1 underline-offset-2 hover:text-brand-700 hover:decoration-brand-400"
+              >
+                {tituloCard(lead)}
+              </a>
+            ) : (
+              <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
+            )}
             {analisePronta !== null && (
               <Badge size="sm" tone={analisePronta ? 'green' : 'yellow'}>
                 {analisePronta ? 'Finalizado' : 'Em curso'}

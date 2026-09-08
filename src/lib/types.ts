@@ -63,6 +63,14 @@ export interface KommoLead {
   /** Todas as anotações do card, da mais antiga para a mais recente. */
   notas: KommoNota[]
   processo_cnj: string | null
+  /**
+   * Id da pasta do cedente no Drive, gravado ao salvar a análise.
+   *
+   * ATALHO, não informação: só decide se o título do card é um link. Null nos
+   * cards que nunca tiveram análise salva — e nos que tiveram antes da
+   * migração 0059, que nascem sem ele.
+   */
+  drive_pasta_id: string | null
   tags: string[]
   criado_em: string | null
   atualizado_em: string | null
