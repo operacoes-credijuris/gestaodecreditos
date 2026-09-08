@@ -2715,7 +2715,9 @@ Deno.serve(async (req) => {
           'QUEM LÊ é o comercial que vai falar com o cedente e com o advogado. Ele NÃO tem a análise à frente, não fez a conta, e vai agir a partir do que você escrever. ' +
           'MANTENHA OS TERMOS TÉCNICOS — "termo inicial dos juros", "cenário conservador", "honorários sucumbenciais", "teto da RPV" —, porque trocá-los por linguagem coloquial tira precisão de um registro que pode ser cobrado depois. ' +
           'MAS EXPLIQUE: ao lado do termo, a consequência em uma oração curta. "O título fixou os juros da citação e a conta os contou do evento danoso, o que infla o crédito em cerca de R$ 2.700." ' +
-          'FORMA: um parágrafo de abertura dizendo o desfecho e a razão principal, e depois uma lista curta com os achados, um por linha, começando com hífen. Sem saudação, sem despedida, sem assinatura — o CRM já registra quem escreveu. ' +
+          'FORMA: um parágrafo de abertura dizendo o desfecho e a razão principal e, depois, UM ACHADO POR PARÁGRAFO, cada um começando com hífen. ' +
+          'SEPARE OS PARÁGRAFOS COM LINHA EM BRANCO: o feed do CRM ignora a quebra de linha simples e cola tudo num bloco corrido — é a diferença entre uma anotação que se lê e um parágrafo único de duzentas palavras. ' +
+          'Sem saudação, sem despedida, sem assinatura — o CRM já registra quem escreveu. ' +
           'No máximo 200 palavras. Não invente achado nenhum: use SÓ o que vier na entrada, e o que a pessoa escreveu livremente tem precedência sobre a sua redação — ela está com o processo aberto. ' +
           'Em diligência, feche dizendo o que precisa ser providenciado. Em reprovação, feche dizendo o que teria de mudar para o crédito voltar a ser analisável, quando isso for possível. ' +
           'Responda com o texto da anotação e nada mais.',

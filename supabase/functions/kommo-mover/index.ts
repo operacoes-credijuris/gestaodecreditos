@@ -129,7 +129,11 @@ Deno.serve(async (req: Request) => {
         {
           entity_id: leadId,
           note_type: 'service_message',
-          params: { service: SERVICO, text: linhas.join('\n') },
+          // LINHA EM BRANCO entre os blocos, e não quebra simples: o feed do
+          // Kommo ignora o \n sozinho e cola a linha de auditoria no motivo,
+          // num parágrafo corrido. Verificado no card — a anotação da análise,
+          // que usa \n\n, mantém a quebra; esta, que usava \n, não mantinha.
+          params: { service: SERVICO, text: linhas.join('\n\n') },
           // Não dispara os gatilhos do Digital Pipeline por causa do registro
           // de auditoria — o PATCH acima já disparou o que havia para disparar.
           is_need_to_trigger_digital_pipeline: false,

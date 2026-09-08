@@ -1148,7 +1148,14 @@ function DesfechoDaAnalise({
   const [marcados, setMarcados] = useState<Set<number>>(new Set())
   const [enviando, setEnviando] = useState(false)
   const [redigindo, setRedigindo] = useState(false)
-  /** O texto no campo já passou pela IA? Só muda o rótulo do botão e a nota. */
+  /**
+   * O texto no campo já incorpora os achados marcados, pela mão da IA.
+   *
+   * NÃO É COSMÉTICO: é o que libera o Confirmar quando há achado marcado. Sem
+   * ele, marcar dois riscos e confirmar mandava ao card o despejo cru —
+   * "- [IMPEDITIVO] ... - [ALTO] ..." numa linha só —, que é exatamente o que
+   * a redação pela IA existe para evitar.
+   */
   const [revisado, setRevisado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -1156,12 +1163,18 @@ function DesfechoDaAnalise({
 
   const exigeMotivo =
     escolhida != null && (escolhida.statusId === ST_DILIGENCIA || escolhida.statusId === ST_REPROVADO)
-  // MARCAR ACHADO CONTA COMO MOTIVO. Quem marcou dois riscos e não escreveu
-  // nada disse por que — e travar o botão ali seria exigir que ela reescrevesse
-  // à mão o que acabou de apontar com o dedo.
+  // ACHADO MARCADO SÓ CHEGA AO CARD PELA REDAÇÃO DA IA.
+  //
+  // Marcar é atalho de conteúdo, não de forma: o que se aponta com o dedo vira
+  // frase no texto da IA, nunca a lista de rótulos entre colchetes. Antes,
+  // marcar bastava para liberar o Confirmar — e o card recebia o despejo cru.
+  //
+  // Quem não quer a IA desmarca tudo e escreve à mão: sem achado marcado não há
+  // nada para incorporar, e o botão libera com o texto de sempre.
   const podeEnviar =
     escolhida != null && !enviando && !redigindo &&
-    (!exigeMotivo || motivo.trim().length >= 10 || marcados.size > 0)
+    (!exigeMotivo || motivo.trim().length >= 10) &&
+    (marcados.size === 0 || revisado)
 
   /** O rótulo curto do desfecho, que o servidor usa para escolher o tom. */
   const tipoDoDesfecho = (a: AcaoTela) =>
@@ -1198,12 +1211,11 @@ function DesfechoDaAnalise({
     setErro(null)
     setEnviando(true)
     try {
-      // OS ACHADOS MARCADOS VÃO JUNTO quando a pessoa não passou pela IA: sem
-      // isso, marcar três riscos e confirmar direto mandaria ao card só o texto
-      // livre, e o que ela marcou se perderia sem aviso.
-      const marcadosTexto = revisado ? '' : itensMarcados().map((i) => `- ${i}`).join('\n')
-      const comentario = [motivo.trim(), marcadosTexto].filter(Boolean).join('\n\n')
-      await onMover(escolhida.statusId, comentario)
+      // VAI SÓ O TEXTO DO CAMPO. Os achados marcados já estão nele, escritos
+      // pela IA e lidos por quem confirma — `podeEnviar` não libera o botão de
+      // outro jeito. Anexar a lista crua aqui era o que enchia o card de
+      // "- [IMPEDITIVO] ..." em vez da mensagem.
+      await onMover(escolhida.statusId, motivo.trim())
     } catch (e) {
       setErro((e as Error)?.message ?? String(e))
     } finally {
@@ -1268,14 +1280,17 @@ function DesfechoDaAnalise({
                         className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                         checked={marcados.has(i)}
                         disabled={enviando || redigindo}
-                        onChange={() =>
+                        onChange={() => {
                           setMarcados((s) => {
                             const n = new Set(s)
                             if (n.has(i)) n.delete(i)
                             else n.add(i)
                             return n
                           })
-                        }
+                          // MUDOU A MARCAÇÃO, a redação anterior não vale mais:
+                          // o texto no campo fala de achados que não são estes.
+                          setRevisado(false)
+                        }}
                       />
                       <span>
                         <Selo grau={a.grau} />
@@ -1314,7 +1329,11 @@ function DesfechoDaAnalise({
               }
               value={motivo}
               disabled={enviando || redigindo}
-              onChange={(e) => { setMotivo(e.target.value); setRevisado(false) }}
+              // EDITAR NÃO DESFAZ A REVISÃO: os achados continuam dentro do
+              // texto, e quem edita acabou de ler a redação. Zerar aqui
+              // travaria o Confirmar e obrigaria a redigir de novo, jogando
+              // fora o ajuste que a pessoa acabou de fazer.
+              onChange={(e) => setMotivo(e.target.value)}
             />
           </div>
 
@@ -1339,11 +1358,18 @@ function DesfechoDaAnalise({
             >
               {revisado ? 'Redigir de novo' : 'Redigir com a IA'}
             </Button>
-            {revisado && (
+            {revisado ? (
               <span className="text-xs text-slate-400">
                 Texto reescrito pela IA — confira e edite antes de confirmar.
               </span>
-            )}
+            ) : marcados.size > 0 ? (
+              /* Dizer o que falta, e não apenas desligar o botão: um Confirmar
+                 apagado sem explicação é um beco. */
+              <span className="text-xs text-amber-700">
+                {marcados.size === 1 ? '1 achado marcado' : `${marcados.size} achados marcados`} — a IA
+                precisa redigir antes de confirmar, porque é o texto dela que vai para o card.
+              </span>
+            ) : null}
           </div>
 
           {exigeMotivo && motivo.trim().length > 0 && motivo.trim().length < 10 && (
