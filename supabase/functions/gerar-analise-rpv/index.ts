@@ -1167,7 +1167,10 @@ const SCHEMA_ANALISE = {
 
   // financeiro — ver a seção "DE ONDE SAEM OS VALORES" no prompt do sistema
   bruto_total: 'VALOR BRUTO TOTAL do crédito que está sendo cedido, número sem R$: o total ANTES de qualquer retenção, já com principal + juros + correção. INCLUI os honorários contratuais destacados, porque eles saem de dentro dele. NÃO inclui os honorários sucumbenciais, que são verba própria e têm campo separado. NÃO é o valor da causa, nem o da condenação na sentença, nem o principal histórico sem atualização',
-  principal_liquido: 'o que sobra PARA O CREDOR depois do IR, do INSS e dos honorários contratuais destacados, número. Tem de ser igual a bruto_total menos ir menos inss menos honorarios — se não fechar, algum dos números foi lido errado',
+  principal_liquido: 'o que sobra PARA O CREDOR depois do IR, do INSS e dos honorários contratuais destacados, número. ' +
+    'Tem de ser igual a bruto_total menos ir menos inss menos honorarios — se não fechar, algum dos números foi lido errado. ' +
+    'ESTA CONTA VALE COM OS SEUS NÚMEROS, e não com os da contadoria: tendo você corrigido o IR ou o INSS na auditoria da tributação, é o líquido CORRIGIDO que vai aqui, ' +
+    'e não o que está impresso nos autos',
   honorarios_destacados:
     'true/false — os honorários contratuais foram DESTACADOS do crédito principal? É destaque quando o advogado pediu a reserva do art. 22, §4º, da Lei 8.906/94 e ela foi deferida, OU quando a conta da contadoria / o próprio requisitório já separam a verba dele da do credor, OU quando há requisitório em nome do advogado. ' +
     'NÃO É DESTAQUE a mera existência de contrato de honorários nos autos, nem a previsão de percentual no contrato: sem pedido deferido ou separação na conta, o advogado recebe do cliente, não do ente. ' +
@@ -1183,7 +1186,14 @@ const SCHEMA_ANALISE = {
     'de onde saiu o campo acima, em uma linha: ou a peça que traz a porcentagem escrita ("contrato de honorários, fl. 12", "conta da contadoria"), ou a divisão que você fez, dizendo os dois números ("R$ 12.400 / R$ 41.333 da conta da contadoria"). null quando não houve nem uma coisa nem outra',
   origem_valores: 'DE ONDE SAIU CADA NÚMERO, em uma ou duas frases: qual documento (conta da contadoria, decisão homologatória, RPV expedida), o ID ou a página, e até que data os valores estão atualizados. Ex.: "conta da contadoria de 12/03/2026 homologada em 20/04/2026, ID 3f21a90, fls. 412-415; valores atualizados até 03/2026". É o que permite conferir a escolha em dez segundos — não deixe vazio',
   honorarios_sucumbenciais: 'HONORÁRIOS SUCUMBENCIAIS fixados na sentença ou no acórdão, em reais — o valor que o ENTE DEVEDOR paga ao advogado por ter perdido, separado do que o cliente paga por contrato. Procure na parte dispositiva da sentença/acórdão, na conta da contadoria e no próprio requisitório: costuma vir como verba própria, às vezes em requisitório separado. Se a condenação fixar PERCENTUAL sobre o valor da causa ou da condenação, calcule o valor em reais. ZERO se a sentença não os fixou, se foram compensados, se a Fazenda não foi condenada neles, ou se você não achou — não estime por praxe: um percentual arbitrado por hábito vira dinheiro inventado na precificação',
-  ir: 'IR retido SOBRE O PRINCIPAL, como a conta que vale calculou, número (0 se isento). NÃO some aqui o IR sobre os honorários — esse o sistema calcula sozinho pela tabela progressiva',
+  ir: 'IR SOBRE O PRINCIPAL, número (0 se isento). Em regra é o que a conta que vale calculou. ' +
+    'MAS, se a auditoria da tributação achar que a conta reteve MENOS do que a lei manda — o caso clássico é lucros cessantes sem retenção numa condenação de parcelas mistas —, ' +
+    'escreva aqui o valor QUE DEVERIA SER retido, e não o que está na conta: é este número que vai virar o líquido pelo qual se paga. ' +
+    'Refaça a conta do tributo que faltou e registre a divergência em auditoria_divergencias e a memória em notas_celulas. ' +
+    'Se a conta reteve DEMAIS, mantenha o que ela reteve: retenção a maior deixa o líquido menor, e conservador não se corrige para cima. ' +
+    'CORRIGIU O IR? AJUSTE principal_liquido junto, para continuar valendo bruto_total − ir − inss − honorarios. ' +
+    'Sem isso o sistema acusa "as parcelas não fecham" — um alerta vermelho apontando para a sua própria correção, e quem lê desfaz o acerto achando que é erro de leitura. ' +
+    'NÃO some aqui o IR sobre os honorários — esse o sistema calcula sozinho pela tabela progressiva',
   inss: 'INSS/contribuição previdenciária retida SOBRE O PRINCIPAL, conforme os cálculos da contadoria, número (0 se zerado)',
   eh_horas_extras: 'true/false — se o crédito é de horas extras',
 
@@ -1338,7 +1348,41 @@ const SYSTEM_ANALISE =
   '• CONDENAÇÃO TRIBUTÁRIA (repetição de indébito): SELIC desde o recolhimento indevido, sem cumulação com outro índice. ' +
   '• TRABALHISTA contra a Fazenda: o regime tem particularidades próprias e mudou com a ADC 58 do STF — se for o caso, diga qual índice a conta usou e sinalize a controvérsia em vez de afirmar o correto. ' +
   'SE A CONTA APLICOU SELIC A TODO O PERÍODO, incluindo o anterior a 09/12/2021, isso é divergência de gravidade MÉDIA: a leitura prospectiva é a predominante, mas há decisões em sentido contrário — e o que interessa é que uma revisão nesse ponto derruba o valor. ' +
-  '(3) A ARITMÉTICA. Confira se as parcelas somam o total, se não há duplicidade entre verbas, e se o período de apuração não excede o que o título deferiu. ' +
+  '(2b) OS TERMOS INICIAL E FINAL de cada consectário. Errar um termo não muda o índice: muda o PERÍODO em que ele corre, e em conta de dez anos isso é dinheiro. ' +
+  'A regra do título vem primeiro — se a sentença fixou o termo, é ele que vale, ainda que contrarie a súmula, porque a conta não pode inovar sobre a coisa julgada. ' +
+  'Silente o título, os marcos são: ' +
+  '• RESPONSABILIDADE EXTRACONTRATUAL: correção monetária desde o EFETIVO PREJUÍZO (Súmula 43/STJ) e juros de mora desde o EVENTO DANOSO (Súmula 54/STJ), mesmo na responsabilidade objetiva; ' +
+  '• DANO MORAL: correção monetária desde o ARBITRAMENTO (Súmula 362/STJ) — não desde o evento. Contá-la desde o evento infla o crédito em todo o período intermediário, ' +
+  'e é dos erros que mais aparecem. Os juros de mora, esses continuam do evento danoso quando a responsabilidade é extracontratual; ' +
+  '• RELAÇÃO CONTRATUAL com termo certo: juros da data do vencimento; sem termo certo, da citação (art. 405 do CC); ' +
+  '• VERBAS REMUNERATÓRIAS EM ATRASO (servidor, aposentadoria, diferenças salariais): correção de cada parcela desde o mês em que era devida, e não do ajuizamento — ' +
+  'conta que corrige tudo a partir de uma data única está errada, e o sinal do erro depende de a data ser anterior ou posterior ao vencimento das parcelas; ' +
+  '• O TERMO FINAL é o EFETIVO PAGAMENTO. Na prática da requisição, a conta é atualizada até a data-base do requisitório e depois segue o regime do art. 100 da CF. ' +
+  'Conta parada numa data antiga não está errada: está desatualizada — e o que importa para o preço é saber ATÉ QUANDO ela atualizou, o que deve constar em origem_valores. ' +
+  '(3) A TRIBUTAÇÃO — a conta reteve o que a lei manda reter, e SÓ isso? ' +
+  'O QUE IMPORTA AQUI É O LÍQUIDO QUE VAI SER PAGO, e não o bruto. Tributo que a conta esqueceu faz o líquido projetado ficar MAIOR que o real: ' +
+  'quem compra paga por um número que não vai receber, e essa é a direção perigosa. Tributo cobrado a mais faz o líquido ficar menor que o devido — ' +
+  'não prejudica quem compra, então registre e siga. ' +
+  'NÃO INCIDE IMPOSTO DE RENDA: ' +
+  '• sobre indenização por DANO MORAL (Súmula 498/STJ) — não é acréscimo patrimonial; ' +
+  '• sobre DANOS EMERGENTES, que repõem patrimônio em vez de acrescentá-lo; ' +
+  '• sobre FÉRIAS PROPORCIONAIS INDENIZADAS e o respectivo terço, e sobre licença-prêmio convertida em pecúnia (Súmula 386/STJ) — o caráter é indenizatório; ' +
+  '• sobre JUROS DE MORA pelo atraso no pagamento de remuneração de emprego, cargo ou função (Tema 808/STF, RE 855.091) — eles recompõem prejuízo, não geram renda. ' +
+  'O STJ estendeu a verbas previdenciárias e alimentares. Em condenação contra a Fazenda isto é grande: boa parte do valor atualizado É juros de mora. ' +
+  'INCIDE IMPOSTO DE RENDA: ' +
+  '• sobre LUCROS CESSANTES (art. 43 do CTN): eles substituem renda que teria sido tributada, e são acréscimo patrimonial. ' +
+  'ESTE É O ESQUECIMENTO MAIS COMUM em condenação com parcelas mistas — a contadoria tributa o principal e deixa os lucros cessantes passarem sem retenção. Procure por ele; ' +
+  '• sobre HORAS EXTRAS, ainda que pagas por acordo coletivo (Súmula 463/STJ), e sobre verbas remuneratórias pagas em atraso em geral; ' +
+  '• sobre a diferença de vencimentos, gratificações e adicionais de natureza salarial. ' +
+  'ISENÇÃO POR DOENÇA GRAVE (Lei 7.713/88, art. 6º, XIV): alcança proventos de APOSENTADORIA, reforma e pensão de portador de moléstia da lista legal. ' +
+  'O STJ não exige contemporaneidade dos sintomas nem recidiva (Súmula 627/STJ). NÃO alcança rendimento de quem está na ativa — verifique se o crédito é de proventos ou de remuneração. ' +
+  'RENDIMENTOS RECEBIDOS ACUMULADAMENTE (RRA): a alíquota é a do REGIME DE COMPETÊNCIA — a tabela vigente à época em que cada parcela deveria ter sido paga, mês a mês, ' +
+  'e não a do total recebido de uma vez (Tema 368/STF, RE 614.406). Desde o ano-base 2010, o art. 12-A da Lei 7.713/88 dá tributação exclusiva na fonte com a tabela do mês ' +
+  'multiplicada pelo número de meses a que o pagamento se refere. Conta que aplicou a tabela cheia sobre o montante único retém IR A MAIOR: o líquido projetado fica menor que o real, ' +
+  'o que é seguro para quem compra — registre a divergência e não mexa no preço por ela. ' +
+  'ONDE ESCREVER O QUE VOCÊ CORRIGIR: no campo "ir" (ou "inss") vai o valor QUE DEVERIA TER SIDO retido, e não o que a conta reteve, quando os dois divergirem. ' +
+  'Registre a divergência também em "auditoria_divergencias" e explique a conta em "notas_celulas" (campo "ir"), para o número aparecer justificado na célula da planilha. ' +
+  '(4) A ARITMÉTICA. Confira se as parcelas somam o total, se não há duplicidade entre verbas, e se o período de apuração não excede o que o título deferiu. ' +
 'DE QUEM É O RISCO: DE QUEM COMPRA. Este é o ponto em que o raciocínio se inverte, e errar aqui esvazia a auditoria inteira. Quem lê esta análise NÃO é o credor — é o investidor que vai PAGAR pelo crédito hoje e receber do ente depois. Então: ' +
   'CONTA INFLADA É O PERIGO. Se a conta cobra MAIS do que o título mandava, o crédito está inchado, a Fazenda pode impugnar e a revisão DERRUBA o valor — e quem pagou pelo valor inchado perde a diferença. É a divergência mais grave que existe aqui, mesmo que ela "favoreça o credor". ' +
   'CONTA SUBESTIMADA É INDIFERENTE ao preço. Se a conta cobra MENOS do que era devido, o risco de revisão é para cima, o que só faria o cessionário receber mais do que pagou. Isso não entra no preço: registre como observação e siga. ' +
@@ -1353,6 +1397,12 @@ const SYSTEM_ANALISE =
   'de que forma você chegou nela e o que faltou para calcular com exatidão. Uma estimativa conservadora declarada é melhor que um preço cheio com uma ressalva ao lado: ' +
   'a ressalva não desconta nada, e o dinheiro sai do caixa pelo número, não pelo texto. ' +
   'null fica reservado a UM caso: não há divergência nenhuma que reduza o crédito. ' +
+  'TRIBUTO QUE FALTOU NÃO É REDUÇÃO DE BRUTO, e confundir os dois estraga a conta. O bruto continua o mesmo: o que muda é a RETENÇÃO. ' +
+  'Corrija o campo "ir" (ou "inss") e NÃO mexa em "auditoria_bruto_conservador" por causa disso — o líquido já cai pela subtração. ' +
+  'Mexer nos dois desconta duas vezes E AINDA DILUI a correção, porque o cenário conservador reescala IR, INSS e honorários na mesma proporção em que reduz o bruto: ' +
+  'o imposto que você acabou de acrescentar encolhe junto. ' +
+  '"auditoria_bruto_conservador" é para divergência no CRÉDITO EM SI — índice de correção, juros, termo inicial, período de apuração, base de cálculo, verba deferida a mais. ' +
+  'A divergência tributária entra normalmente em "auditoria_divergencias": ela aparece na seção de auditoria da tela, e o desconto já está no líquido. ' +
   '=== DE ONDE SAEM OS VALORES === ' +
   'O MESMO crédito aparece nos autos com vários valores diferentes, e escolher o errado não produz erro nenhum — produz um preço errado, com a mesma cara de um preço certo. Antes de preencher qualquer número, decida QUAL DOCUMENTO MANDA. ' +
   'ORDEM DE AUTORIDADE, use o primeiro que existir: ' +
