@@ -33,6 +33,12 @@ export interface FichaDoCredito {
   cedente?: string
   entidade_devedora?: string
   parcela_cedida?: string
+  /** UF de tramitação, que junto do tribunal diz onde o crédito vive. */
+  uf?: string
+  /** Fase processual de hoje, em poucas palavras. */
+  fase?: string
+  /** Os honorários contratuais foram destacados do principal? Null = não apurado. */
+  honorarios_destacados?: boolean | null
   /** O valor do crédito NEGOCIADO — a soma dos líquidos das verbas do negócio, não o preço. */
   valor_cedido?: number
   /** Porcentagem dos honorários contratuais, em pontos (30 = 30%). */
@@ -113,6 +119,78 @@ export function linhasDaFicha(ficha: FichaDoCredito | undefined): string[] {
     ['HONORÁRIOS C.', pct == null ? '' : formatPercent(pct)],
   ]
   return pares.filter(([, v]) => v.trim()).map(([k, v]) => `${k}: ${v}`)
+}
+
+/** O que o resumo da oportunidade precisa além da ficha do crédito. */
+export interface EntradaOportunidade {
+  ficha?: FichaDoCredito
+  /** Pasta ou arquivo no Drive. Vazio antes de a análise ser salva. */
+  link?: string
+  /** Meses até o pagamento, do prazo aferido pela análise. */
+  prazoMeses?: number | null
+  /** Mês/ano projetado do pagamento. */
+  dataPagamento?: string | null
+}
+
+/**
+ * O RESUMO DA OPORTUNIDADE — a passagem de Pendentes para Validação.
+ *
+ * Quem lê é quem decide, e decide sem abrir a planilha: precisa do link da
+ * pasta e, numa tela, do que está comprando. A forma é fixa de propósito, para
+ * a coluna do CRM ficar comparável de cima a baixo.
+ *
+ * MONTADO EM CÓDIGO, e não redigido pela IA. São valores que a análise já
+ * apurou; mandar o modelo transcrevê-los é convidar paráfrase em cima de
+ * número — e é o número que decide a compra.
+ *
+ * LINHA SEM VALOR SAI FORA, como na ficha. A DA CESSÃO É A EXCEÇÃO: a extensão
+ * da cessão (integral ou parcial, e em que porcentagem) não é campo da análise
+ * — ela não olha para isso em lugar nenhum. Omitir a linha daria a entender que
+ * foi verificada e não havia nada; "a confirmar" diz a verdade, e o campo em
+ * que este texto nasce é editável justamente para quem sabe a resposta.
+ */
+export function resumoDaOportunidade(e: EntradaOportunidade): string {
+  const f = e.ficha ?? {}
+  const tribunalUf = [f.tribunal?.trim(), f.uf?.trim()].filter(Boolean).join('/')
+  const cabeca = ['Oportunidade Credijuris', [f.tipo?.trim(), tribunalUf].filter(Boolean).join(' · ')]
+    .filter((p) => p.trim())
+    .join(' — ')
+
+  const meses = e.prazoMeses
+  const recebimento = [
+    meses != null && meses > 0 ? `${meses} ${meses === 1 ? 'mês' : 'meses'}` : '',
+    e.dataPagamento?.trim() ? `previsão ${e.dataPagamento.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  const pares: Array<[string, string]> = [
+    [
+      'Cedente',
+      [f.cedente?.trim(), f.processo?.trim() ? `Proc. nº ${f.processo.trim()}` : '']
+        .filter(Boolean)
+        .join(' · '),
+    ],
+    ['Ente devedor', f.entidade_devedora?.trim() ?? ''],
+    // A CESSÃO PENDE DO OBJETO: "a confirmar" é constante, então esta linha
+    // nunca seria filtrada por falta de valor. Sem objeto lido, ela sobraria
+    // sozinha afirmando algo sobre um crédito que a análise não leu.
+    [
+      'Cessão',
+      f.parcela_cedida?.trim() ? `a confirmar · Objeto: ${f.parcela_cedida.trim()}` : '',
+    ],
+    [
+      'Honorários destacados',
+      f.honorarios_destacados == null ? '' : f.honorarios_destacados ? 'sim' : 'não',
+    ],
+    ['Valor líquido validado', f.valor_cedido ? formatBRL(f.valor_cedido) : ''],
+    ['Fase processual', f.fase?.trim() ?? ''],
+    ['Recebimento', recebimento],
+  ]
+
+  const corpo = pares.filter(([, v]) => v.trim()).map(([k, v]) => `${k}: ${v}`)
+  const link = e.link?.trim() ? `Planilha e análise no Drive: ${e.link.trim()}` : ''
+  return [link, [cabeca, ...corpo].join('\n')].filter(Boolean).join('\n\n')
 }
 
 /** Prefixo de autoria, quando se sabe quem rodou. */

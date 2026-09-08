@@ -4368,6 +4368,13 @@ Deno.serve(async (req) => {
         cedente: credorTitulo,
         entidade_devedora: enteDevedor,
         parcela_cedida: String(dados.tipo_credito ?? '').trim(),
+        // OS TRÊS CAMPOS DO RESUMO DA OPORTUNIDADE, que a ficha não tinha: o
+        // resumo é montado no navegador, num módulo puro, e só chega ali o que
+        // a ficha carrega.
+        uf: String(dados.uf_tramitacao ?? '').trim(),
+        fase: String(dados.fase_processual ?? '').trim(),
+        honorarios_destacados:
+          dados.honorarios_destacados == null ? null : !!dados.honorarios_destacados,
         // O VALOR DO CRÉDITO NEGOCIADO, e não o preço: a soma dos líquidos
         // das verbas que entraram no negócio. O preço fica na planilha, que
         // é onde a proposta se monta.

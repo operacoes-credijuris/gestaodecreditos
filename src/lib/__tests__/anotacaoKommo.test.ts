@@ -4,7 +4,9 @@ import {
   anotacoesDaAnalise,
   linhasDaFicha,
   MAX_ALERTAS,
+  resumoDaOportunidade,
 } from '../anotacaoKommo'
+import { formatBRL } from '../format'
 
 /**
  * A anotação que a análise escreve no card do Kommo.
@@ -217,5 +219,88 @@ describe('veredito próprio de outro fluxo', () => {
       veredito: '✅ ANÁLISE JURÍDICA CONCLUÍDA.',
     })
     expect(t).toEqual(['❌ RECUSADO na análise automática.\nMotivo: Valor abaixo do mínimo.'])
+  })
+})
+
+/**
+ * O resumo da oportunidade, que passa o crédito de Pendentes para Validação.
+ *
+ * Testado porque é a única coisa que quem decide lê antes de decidir: se um
+ * rótulo trocar de lugar ou um valor sair sem formato, a decisão é tomada sobre
+ * o texto errado — e o texto vai para o CRM assinado por quem confirmou.
+ */
+describe('resumoDaOportunidade', () => {
+  const completa = {
+    ficha: {
+      tipo: 'RPV',
+      processo: '5383506-30.2026.8.09.0079',
+      tribunal: 'TJGO',
+      uf: 'GO',
+      cedente: 'Nazareno Santana Florambel Filho',
+      entidade_devedora: 'Estado de Goiás',
+      parcela_cedida: 'Crédito principal — apenas',
+      fase: 'RPV expedida',
+      honorarios_destacados: false,
+      valor_cedido: 23588.37,
+    },
+    link: 'https://drive.google.com/drive/folders/abc123',
+    prazoMeses: 14,
+    dataPagamento: '12/2027',
+  }
+
+  it('monta os blocos na ordem, com o link antes do resumo', () => {
+    const t = resumoDaOportunidade(completa)
+    expect(t.split('\n\n')[0]).toBe(
+      'Planilha e análise no Drive: https://drive.google.com/drive/folders/abc123',
+    )
+    const linhas = t.split('\n\n')[1].split('\n')
+    expect(linhas[0]).toBe('Oportunidade Credijuris — RPV · TJGO/GO')
+    expect(linhas[1]).toBe('Cedente: Nazareno Santana Florambel Filho · Proc. nº 5383506-30.2026.8.09.0079')
+    expect(linhas[2]).toBe('Ente devedor: Estado de Goiás')
+    expect(linhas[3]).toBe('Cessão: a confirmar · Objeto: Crédito principal — apenas')
+    expect(linhas[4]).toBe('Honorários destacados: não')
+    expect(linhas[5]).toBe(`Valor líquido validado: ${formatBRL(23588.37)}`)
+    expect(linhas[6]).toBe('Fase processual: RPV expedida')
+    expect(linhas[7]).toBe('Recebimento: 14 meses · previsão 12/2027')
+    expect(linhas).toHaveLength(8)
+  })
+
+  // A EXTENSÃO DA CESSÃO NÃO É CAMPO DA ANÁLISE. A linha fica com "a
+  // confirmar" em vez de sair fora: omiti-la daria a entender que foi
+  // verificada e não havia nada a dizer.
+  it('marca a cessão como a confirmar mesmo com a ficha inteira preenchida', () => {
+    expect(resumoDaOportunidade(completa)).toContain('Cessão: a confirmar')
+  })
+
+  it('destacados true vira sim, e null tira a linha', () => {
+    const sim = resumoDaOportunidade({ ficha: { ...completa.ficha, honorarios_destacados: true } })
+    expect(sim).toContain('Honorários destacados: sim')
+    const semInfo = resumoDaOportunidade({ ficha: { ...completa.ficha, honorarios_destacados: null } })
+    expect(semInfo).not.toContain('Honorários destacados')
+  })
+
+  it('sem link, o resumo começa pelo título', () => {
+    const t = resumoDaOportunidade({ ...completa, link: '' })
+    expect(t.startsWith('Oportunidade Credijuris — RPV · TJGO/GO')).toBe(true)
+    expect(t).not.toContain('Drive')
+  })
+
+  it('um mês no singular, e sem prazo a linha sai fora', () => {
+    expect(resumoDaOportunidade({ ...completa, prazoMeses: 1, dataPagamento: null })).toContain(
+      'Recebimento: 1 mês',
+    )
+    const sem = resumoDaOportunidade({ ...completa, prazoMeses: 0, dataPagamento: null })
+    expect(sem).not.toContain('Recebimento')
+  })
+
+  it('só o tribunal, sem UF, não deixa barra solta', () => {
+    const t = resumoDaOportunidade({ ficha: { tipo: 'Precatório', tribunal: 'TRF1' } })
+    expect(t).toBe('Oportunidade Credijuris — Precatório · TRF1')
+  })
+
+  // Ficha vazia é análise que não leu nada: o título tem de sobreviver sozinho,
+  // sem rótulos pendurados em nada.
+  it('ficha vazia devolve só o título', () => {
+    expect(resumoDaOportunidade({})).toBe('Oportunidade Credijuris')
   })
 })

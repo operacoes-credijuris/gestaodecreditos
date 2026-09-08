@@ -26,7 +26,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Save, SendHorizontal, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
-import { ST_DILIGENCIA, ST_REPROVADO, type AcaoTela } from '@/lib/kommo'
+import { ST_DECISAO, ST_DILIGENCIA, ST_REPROVADO, type AcaoTela } from '@/lib/kommo'
+import { resumoDaOportunidade, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import {
   formatBRL,
   formatBRLInput,
@@ -279,6 +280,8 @@ export interface RespostaAnaliseRpv {
   avisos_qualificacao?: string[]
   drive_file_url?: string | null
   drive_folder_url?: string | null
+  /** A ficha do crédito, nos rótulos do cadastro. Só volta no 'salvar'. */
+  ficha?: FichaDoCredito
 }
 
 /** O que a página já sabe do card e a função precisa em toda chamada. */
@@ -1134,14 +1137,17 @@ function DesfechoDaAnalise({
   /** Manda a IA reescrever o motivo para quem vai ler no card. */
   onRedigir: (desfecho: string, itens: string[], texto: string) => Promise<string>
   /**
-   * Texto que já entra no campo do motivo, quando existe um pronto.
+   * Texto que já entra no campo do motivo, quando existe um pronto PARA AQUELE
+   * desfecho — daí ser função do statusId, e não uma string só. O resumo da
+   * oportunidade vale na passagem a Validação; a razão do Portão 1, na
+   * reprovação. Oferecer um no lugar do outro é pior que não oferecer nada.
    *
    * O caso é o card reprovado no Portão 1: os motivos da reprovação estão na
    * tela, redigidos, e fazer a pessoa copiá-los à mão para o campo é pedir que
    * ela redigite o que a máquina acabou de escrever. Vem como sugestão e não
    * como texto fixo — ela edita antes de confirmar.
    */
-  motivoSugerido?: string
+  motivoSugerido?: (statusId: number) => string | undefined
 }) {
   const [escolhida, setEscolhida] = useState<AcaoTela | null>(null)
   const [motivo, setMotivo] = useState('')
@@ -1243,7 +1249,7 @@ function DesfechoDaAnalise({
               // um texto que ninguém escreveu para aquilo.
               const fecha = escolhida?.statusId === a.statusId
               setEscolhida(fecha ? null : a)
-              setMotivo(fecha ? '' : (motivoSugerido ?? ''))
+              setMotivo(fecha ? '' : (motivoSugerido?.(a.statusId) ?? ''))
               setMarcados(new Set())
               setRevisado(false)
               setErro(null)
@@ -2292,7 +2298,7 @@ export function AnaliseRpvModal({
             ocupado={ocupado}
             achados={achadosDoDesfecho}
             onRedigir={redigirDesfecho}
-            motivoSugerido={
+            motivoSugerido={() =>
               (atual.motivos ?? []).length
                 ? `Reprovado no Portão 1: ${(atual.motivos ?? []).join('; ')}`
                 : undefined
@@ -2587,6 +2593,21 @@ export function AnaliseRpvModal({
             ocupado={ocupado}
             achados={achadosDoDesfecho}
             onRedigir={redigirDesfecho}
+            // O RESUMO DA OPORTUNIDADE JÁ PREENCHIDO na passagem a Validação:
+            // quem decide abre o card e precisa do link da pasta e do crédito
+            // numa tela. Vai no campo, e não escondido no envio, porque a nota
+            // sai sob o nome de quem confirma — e porque a linha da cessão
+            // pede complemento à mão.
+            motivoSugerido={(statusId) =>
+              statusId === ST_DECISAO
+                ? resumoDaOportunidade({
+                    ficha: atual.ficha,
+                    link: atual.drive_folder_url ?? atual.drive_file_url ?? '',
+                    prazoMeses: atual.valores?.prazo_meses,
+                    dataPagamento: atual.valores?.data_pagamento,
+                  })
+                : undefined
+            }
           />
         </div>
       )}
