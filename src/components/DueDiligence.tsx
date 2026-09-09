@@ -23,6 +23,7 @@ import { Tabs } from '@/components/ui/Tabs'
 import { PainelCertidoes } from '@/components/PainelCertidoes'
 import { PainelProcessosJudiciais } from '@/components/PainelProcessosJudiciais'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
+import type { AcaoTela } from '@/lib/kommo'
 
 type Aba = 'certidoes' | 'processos'
 
@@ -36,6 +37,8 @@ export function DueDiligence({
   open,
   onClose,
   comCertidoes,
+  acaoRecusar,
+  onMover,
 }: {
   leadId: number
   /** O título do card: é dele que sai QUAIS verbas estão sendo cedidas. */
@@ -58,6 +61,9 @@ export function DueDiligence({
    * jogada fora.
    */
   comCertidoes: boolean
+  /** A recusa da etapa aberta, quando ela existe. Ver o painel de processos. */
+  acaoRecusar?: AcaoTela | null
+  onMover?: (statusId: number, comentario: string) => Promise<void>
 }) {
   const [aba, setAba] = useState<Aba>(comCertidoes ? 'certidoes' : 'processos')
   // Reportado PELO painel: só ele sabe que há formulário mexido e não salvo, e
@@ -119,6 +125,8 @@ export function DueDiligence({
             cedenteDoCard={cedenteDoCard}
             arquivos={arquivos}
             ativo={aba === 'processos'}
+            acaoRecusar={acaoRecusar}
+            onMover={onMover}
           />
         </div>
       </div>

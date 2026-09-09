@@ -21,13 +21,13 @@
 // A APURAÇÃO CUSTA DINHEIRO — a API do Escavador é paga por requisição — então
 // o botão é explícito, nunca automático, e o custo da chamada volta na tela.
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ExternalLink, RefreshCw, ScanText, Search } from 'lucide-react'
+import { AlertTriangle, Ban, ExternalLink, RefreshCw, ScanText, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { formatCpfCnpjInput, formatDate, onlyDigits } from '@/lib/format'
 import { acharCpfs } from '@/lib/cpfNoTexto'
 import { acharOabs } from '@/lib/dadosNoTexto'
-import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
+import { classificarParcelaCedida, lerTituloCard, type AcaoTela } from '@/lib/kommo'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import {
   historicoDoCredito,
@@ -43,6 +43,10 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { EmptyState, Loading, Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
+// A MESMA JANELA DA ANÁLISE. Marcar o que motivou, escrever, deixar a IA redigir
+// para quem lê no card: a recusa por diligência não é um segundo jeito de
+// reprovar, é o mesmo jeito com outros itens para marcar.
+import { JanelaDeDesfecho, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
 
 /** O que vem do banco, além do que o motor de RPV precisa. */
 interface ProcessoNaTela extends ProcessoDD {
@@ -71,6 +75,8 @@ export function PainelProcessosJudiciais({
   cedenteDoCard,
   arquivos,
   ativo,
+  acaoRecusar,
+  onMover,
 }: {
   leadId: number
   /** O título do card — é dele que sai QUAIS verbas estão sendo cedidas. */
@@ -79,6 +85,16 @@ export function PainelProcessosJudiciais({
   /** Os PDFs já lidos na tela: é deles que saem os CPFs e as OABs sugeridos. */
   arquivos: ArquivoLido[]
   ativo: boolean
+  /**
+   * A recusa, quando a etapa aberta a oferece.
+   *
+   * VEM DE FORA porque a coluna de destino é do FUNIL, e não desta janela: RPV e
+   * Precatório numeram a mesma coluna com ids diferentes, e quem sabe em que
+   * etapa o card está é a tela que o listou. Sem a ação, o painel mostra a
+   * apuração e não oferece desfecho — que é o certo nas abas terminais.
+   */
+  acaoRecusar?: AcaoTela | null
+  onMover?: (statusId: number, comentario: string) => Promise<void>
 }) {
   const toast = useToast()
   const [carregando, setCarregando] = useState(true)
@@ -94,6 +110,7 @@ export function PainelProcessosJudiciais({
   const [advOab, setAdvOab] = useState('')
   const [advCpf, setAdvCpf] = useState('')
   const [lendoTitulares, setLendoTitulares] = useState(false)
+  const [recusando, setRecusando] = useState(false)
   const [avisosDaLeitura, setAvisosDaLeitura] = useState<string[]>([])
 
   // ------------------------------------------------- de quem é o que compramos
@@ -321,6 +338,59 @@ export function PainelProcessosJudiciais({
   )
 
   const porApuracao = (id: string) => processos.filter((p) => p.historico_id === id)
+
+  /**
+   * Os processos apurados, no formato que a janela do desfecho marca.
+   *
+   * O GRAU É O DA DILIGÊNCIA, sem tradução criativa: risco alto continua "ALTO"
+   * e atenção continua "ATENÇÃO". Promovê-lo a IMPEDITIVO aqui faria a janela
+   * afirmar, sobre um processo, algo que a apuração não afirmou.
+   *
+   * ORDENADOS PELO QUE PESA. Quem abre a janela para recusar procura a execução
+   * em curso, não o inventário de 2014 — e ela tem de estar na primeira linha.
+   */
+  const itensParaRecusa: ItemDeRisco[] = useMemo(() => {
+    const peso = (r: unknown) => (r === 'ALTO' ? 0 : r === 'ATENCAO' ? 1 : 2)
+    const quem = new Map(apuracoes.map((a) => [a.id, a.papel === 'ADVOGADO' ? 'advogado' : 'cedente']))
+    return processos
+      .slice()
+      .sort((a, b) => peso(a.risco) - peso(b.risco))
+      .map((p) => {
+        const partes = [
+          p.objeto,
+          Number(p.valor_cobrado) > 0 ? brl(p.valor_cobrado) : null,
+          p.estagio,
+          p.polo === 'PASSIVO' ? 'contra o ' + (quem.get(p.historico_id) ?? 'cedente') : null,
+        ].filter(Boolean)
+        return {
+          grau: p.risco === 'ALTO' ? 'ALTO' : p.risco === 'ATENCAO' ? 'ATENÇÃO' : 'NOTA',
+          texto: p.numero_processo + (partes.length ? ' — ' + partes.join(', ') : ''),
+          fundamento: p.risco_motivo ?? undefined,
+        } as ItemDeRisco
+      })
+  }, [processos, apuracoes])
+
+  /**
+   * A IA redige a recusa a partir dos processos marcados.
+   *
+   * `origem: 'diligencia'` não é etiqueta: é o que faz o texto explicar COMO um
+   * processo de terceiro alcança esta operação — penhora do crédito cedido,
+   * fraude à execução, massa falida. Sem isso a anotação listaria números de
+   * processo e deixaria a conclusão por conta de quem lê.
+   */
+  async function redigirRecusa(desfecho: string, itens: string[], texto: string) {
+    const r = await invokeFunction<{ mensagem?: string }>('redigir-desfecho', {
+      desfecho,
+      itens,
+      texto,
+      origem: 'diligencia',
+      cedente: cedenteDoCard || null,
+      numero_processo: lerTituloCard(tituloDoCard).numero || null,
+    })
+    const m = String(r?.mensagem ?? '').trim()
+    if (!m) throw new Error('A IA não devolveu texto para a anotação.')
+    return m
+  }
 
   if (carregando) return <Loading label="Lendo a diligência…" />
 
@@ -643,6 +713,42 @@ export function PainelProcessosJudiciais({
             </section>
           )
         })
+      )}
+
+      {/* A DECISÃO FICA DEPOIS DA LEITURA, e é essa a razão de ela estar no fim
+          do painel e não no rodapé da janela: no rodapé pareceria valer para a
+          aba de certidões também, e ficaria a um clique de quem só abriu para
+          conferir. Aqui ela vem depois da lista que a fundamenta.
+
+          SÓ COM APURAÇÃO. Recusar por processos que ninguém procurou seria
+          assinar uma razão que não existe — e o botão sumido é mais honesto que
+          um botão que abre uma janela sem nada para marcar. */}
+      {acaoRecusar && onMover && apuracoes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
+          <Button
+            variant="danger"
+            icon={<Ban className="h-4 w-4" />}
+            onClick={() => setRecusando(true)}
+            disabled={apurando}
+          >
+            {acaoRecusar.label}
+          </Button>
+          <span className="text-xs text-slate-500">
+            {processos.length === 0
+              ? 'Nenhum processo apurado: a recusa terá de ser escrita à mão.'
+              : `Marque quais dos ${processos.length} processo(s) motivam a recusa.`}
+          </span>
+        </div>
+      )}
+
+      {recusando && acaoRecusar && onMover && (
+        <JanelaDeDesfecho
+          acao={acaoRecusar}
+          achados={itensParaRecusa}
+          onRedigir={redigirRecusa}
+          onMover={onMover}
+          onFechar={() => setRecusando(false)}
+        />
       )}
     </div>
   )
