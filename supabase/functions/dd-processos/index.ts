@@ -70,6 +70,25 @@ interface Apuracao {
 }
 
 /**
+ * UMA BUSCA POR DOCUMENTO, por mais papéis que aquele documento tenha.
+ *
+ * Numa cessão de honorários o cedente É o advogado: o mesmo CPF chega aqui duas
+ * vezes, como CEDENTE e como ADVOGADO. Sem esta memória, a mesma pessoa era
+ * procurada duas vezes e cobrada duas vezes — e a tela abria duas abas com a
+ * mesma lista.
+ *
+ * PROMESSA, e não resultado: os alvos correm em paralelo, e guardar o valor
+ * pronto só evitaria a segunda busca se a primeira já tivesse voltado. Guardando
+ * a promessa, o segundo papel espera a busca do primeiro em vez de abrir outra.
+ *
+ * As duas apurações continuam existindo no banco, e isso é de propósito: as
+ * linhas 10 e 11 do questionário perguntam por pessoas diferentes, e quando são
+ * a mesma pessoa as duas respondem — com o mesmo achado, não com silêncio numa
+ * delas.
+ */
+type MemoriaDeBusca = Map<string, ReturnType<typeof processosDoEnvolvido>>
+
+/**
  * Um alvo, do documento à lista de processos.
  *
  * O ADVOGADO ENTRA POR OUTRA PORTA: sem CPF, a OAB vai primeiro a
@@ -78,7 +97,12 @@ interface Apuracao {
  * errada — neles ele é procurador, nunca parte, e a linha 11 sairia "Não" em
  * todos por construção.
  */
-async function apurarAlvo(chave: string, alvo: Alvo, cnjDoCredito: string): Promise<Apuracao> {
+async function apurarAlvo(
+  chave: string,
+  alvo: Alvo,
+  cnjDoCredito: string,
+  memoria: MemoriaDeBusca,
+): Promise<Apuracao> {
   const base = {
     papel: alvo.papel,
     nome: alvo.nome,
@@ -116,16 +140,28 @@ async function apurarAlvo(chave: string, alvo: Alvo, cnjDoCredito: string): Prom
 
     if (!documento && !nome) throw new ErroEscavador(400, 'Alvo sem documento e sem nome.')
 
-    const busca = await processosDoEnvolvido(chave, { documento, nome })
-    centavos += busca.centavos
-    requisicoes += busca.paginas
+    // SÓ QUEM ESTÁ NO POLO PASSIVO. A pergunta é "que dívida esta pessoa tem", e
+    // dívida se cobra de réu; o filtro vai à API para que as causas que ela
+    // patrocina e as que ela move não cheguem a ser trazidas — página não
+    // trazida é página não cobrada.
+    const chaveDaBusca = documento || 'nome:' + nome.toLowerCase()
+    const jaPedida = memoria.get(chaveDaBusca)
+    const reusada = Boolean(jaPedida)
+    const promessa = jaPedida ?? processosDoEnvolvido(chave, { documento, nome, polo: 'PASSIVO' })
+    memoria.set(chaveDaBusca, promessa)
+    const busca = await promessa
+    if (reusada) {
+      notas.push('Mesma pessoa de outro papel neste crédito: a busca foi feita uma vez só')
+    } else {
+      centavos += busca.centavos
+      requisicoes += busca.paginas
+    }
 
-    const processos = apurarProcessos(busca.items, {
-      documento,
-      nome,
-      oab: base.oab,
-      cnjDoCredito,
-    })
+    const processos = apurarProcessos(
+      busca.items,
+      { documento, nome, oab: base.oab, cnjDoCredito },
+      { buscaSoDeReu: true },
+    )
 
     if (!documento) {
       notas.push('Busca feita PELO NOME (sem CPF): confirme que os processos são da mesma pessoa')
@@ -136,8 +172,15 @@ async function apurarAlvo(chave: string, alvo: Alvo, cnjDoCredito: string): Prom
           'a lista abaixo não é exaustiva',
       )
     }
-    const doCredito = busca.items.length - processos.length
-    if (cnjDoCredito && doCredito > 0) {
+    // POR DÍGITO, e não pela diferença de tamanho das listas: desde que o
+    // filtro de polo entrou, a lista encolhe em quase toda busca (as causas
+    // patrocinadas saem), e comparar os tamanhos avisaria que o crédito foi
+    // excluído em cards onde ele nem apareceu.
+    const digitos = (v: string) => v.replace(/[^0-9]/g, '')
+    if (
+      cnjDoCredito &&
+      busca.items.some((i) => digitos(String(i.numero_cnj ?? '')) === digitos(cnjDoCredito))
+    ) {
       notas.push('O processo do próprio crédito foi excluído da lista')
     }
 
@@ -245,7 +288,10 @@ Deno.serve(async (req: Request) => {
 
     // Em paralelo: são chamadas de rede independentes, e a Edge Function tem
     // 150 s de teto de relógio.
-    const apuracoes = await Promise.all(alvos.map((a) => apurarAlvo(chave, a, cnjDoCredito)))
+    const memoria: MemoriaDeBusca = new Map()
+    const apuracoes = await Promise.all(
+      alvos.map((a) => apurarAlvo(chave, a, cnjDoCredito, memoria)),
+    )
 
     // ---------------------------------------------------------------------
     // Gravação: uma apuração por alvo, e a foto dos processos daquele alvo.

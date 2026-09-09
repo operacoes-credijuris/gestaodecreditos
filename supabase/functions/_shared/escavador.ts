@@ -364,18 +364,29 @@ function valorDaCausa(f: FonteEscavador): number | null {
  *
  * Devolve `null` para o próprio crédito em análise: ele volta na busca como
  * qualquer outro processo do cedente e não é dívida dele.
+ *
+ * `buscaSoDeReu` diz que a BUSCA já foi feita com `polo=PASSIVO`. Muda uma
+ * coisa só, e é a que evita um buraco: quando não dá para achar a pessoa entre
+ * os envolvidos — tribunal que não publica CPF —, o polo sai DESCONHECIDO e o
+ * processo seria descartado pelo filtro, embora a própria API tenha afirmado que
+ * ela é ré ali. Nesse caso vale a palavra da API. Quando a leitura local acha a
+ * pessoa e diz outra coisa (ela é a autora, ela é a advogada), vale a leitura
+ * local: é a evidência mais específica das duas.
  */
 export function traduzirProcesso(
   item: ProcessoEscavador,
   alvo: AlvoDaBusca,
+  o: { buscaSoDeReu?: boolean } = {},
 ): ProcessoApurado | null {
   const numero = String(item.numero_cnj ?? '').trim()
   if (!/\d/.test(numero)) return null
   if (alvo.cnjDoCredito && digitosDoCnj(numero) === digitosDoCnj(alvo.cnjDoCredito)) return null
 
   const f = fontePrincipal(item)
-  const { polo, porDocumento } = poloDoAlvo(item, alvo)
-  const { risco, motivo } = avaliarRisco(item, polo, porDocumento)
+  const lido = poloDoAlvo(item, alvo)
+  const polo =
+    o.buscaSoDeReu && lido.polo === 'DESCONHECIDO' ? ('PASSIVO' as const) : lido.polo
+  const { risco, motivo } = avaliarRisco(item, polo, lido.porDocumento)
   const capa = f.capa || {}
 
   // HA_COBRANCA: só se afirma o que se sabe.
@@ -406,16 +417,25 @@ export function traduzirProcesso(
 }
 
 /**
- * A lista inteira: sem repetir processo, e sem os que não são dele.
+ * A lista: só os processos em que a pessoa É RÉ, sem repetir.
  *
- * QUEM APARECE COMO TERCEIRO NÃO RESPONDE POR NADA ALI, e é por isso que esses
- * processos saem em vez de entrarem com risco "nenhum". Terceiro aqui é o
- * advogado da causa e o "outros" do Escavador — interessado, perito, quem foi
- * intimado uma vez. Um advogado tem centenas de processos nessa condição: com
- * eles dentro, a tabela da diligência vira o extrato de trabalho dele e a
- * execução que de fato pesa fica na página três. Manter a linha para dizer "não
- * é risco" não é honestidade, é ruído — a pergunta da diligência é "que dívida
- * esta pessoa tem", e patrocinar uma causa não é dívida.
+ * A DILIGÊNCIA PERGUNTA "QUE DÍVIDA ESTA PESSOA TEM", e dívida se cobra de quem
+ * está no polo passivo. Tudo o mais que a busca traz responde outra pergunta:
+ *
+ *   como ADVOGADO   são as causas que ela patrocina. Um advogado tem centenas —
+ *                   com elas dentro, a tabela vira o extrato de trabalho dele e
+ *                   a execução que de fato pesa fica na página três.
+ *   como AUTORA     é crédito dela, não dívida. Pode até ser bom sinal, e não é
+ *                   o que ameaça a cessão.
+ *   como TERCEIRA   interessada, perita, intimada uma vez: não responde por nada.
+ *
+ * Manter essas linhas para dizer "não é risco" não é honestidade, é ruído: quem
+ * abre a tabela procura o que pesa, e cada linha que não pesa empurra o que pesa
+ * para baixo.
+ *
+ * O FILTRO É O SEGUNDO, não o primeiro: a busca já vai à API com `polo=PASSIVO`,
+ * e é lá que ele economiza — página não trazida é página não cobrada. Aqui ele
+ * confere contra os envolvidos, que é a leitura mais específica.
  *
  * De-duplicado por DÍGITO: o mesmo processo aparece mascarado num lugar e cru
  * noutro, e a chave única de dd_processo usa a mesma normalização.
@@ -423,13 +443,14 @@ export function traduzirProcesso(
 export function apurarProcessos(
   items: ProcessoEscavador[],
   alvo: AlvoDaBusca,
+  o: { buscaSoDeReu?: boolean } = {},
 ): ProcessoApurado[] {
   const vistos = new Set<string>()
   const saida: ProcessoApurado[] = []
   for (const item of items || []) {
-    const linha = traduzirProcesso(item, alvo)
+    const linha = traduzirProcesso(item, alvo, o)
     if (!linha) continue
-    if (linha.polo === 'TERCEIRO') continue
+    if (linha.polo !== 'PASSIVO') continue
     const chave = digitosDoCnj(linha.numero_processo)
     if (vistos.has(chave)) continue
     vistos.add(chave)
@@ -551,10 +572,22 @@ async function paginar(
   return { items, encontrado, centavos, paginas, truncado: Boolean(url) }
 }
 
-/** Os processos de uma pessoa ou empresa, por CPF/CNPJ (ou, na falta, nome). */
+/**
+ * Os processos de uma pessoa ou empresa, por CPF/CNPJ (ou, na falta, nome).
+ *
+ * `polo` VAI À API, e não é só higiene: a diligência quer os processos em que a
+ * pessoa é RÉ, e filtrar aqui significa páginas que não são trazidas — e página
+ * não trazida é página não cobrada. Um advogado com quinhentas causas
+ * patrocinadas custaria cinco páginas para depois jogá-las fora.
+ */
 export function processosDoEnvolvido(
   chave: string,
-  alvo: { documento?: string | null; nome?: string | null; tribunais?: string[] },
+  alvo: {
+    documento?: string | null
+    nome?: string | null
+    tribunais?: string[]
+    polo?: 'ATIVO' | 'PASSIVO' | 'ADVOGADO' | 'OUTROS'
+  },
 ): Promise<BuscaEscavador> {
   const doc = soDigitos(alvo.documento)
   const q = new URLSearchParams()
@@ -564,6 +597,7 @@ export function processosDoEnvolvido(
   q.set('limit', String(POR_PAGINA))
   q.set('ordena_por', 'data_inicio')
   q.set('ordem', 'desc')
+  if (alvo.polo) q.set('polo', alvo.polo)
   for (const t of alvo.tribunais ?? []) q.append('tribunais[]', t)
   return paginar(chave, `${BASE_ESCAVADOR}/envolvido/processos?${q}`, 'envolvido_encontrado')
 }

@@ -14,12 +14,17 @@
 // (_shared/dueDiligencia.ts) passa a escrever as duas linhas a partir daqui.
 //
 // A TELA É OS CAMPOS DO TITULAR E A TABELA, e nada mais. Ela já teve um placar
-// do que a planilha ia imprimir, as sugestões de CPF dos anexos sempre à mostra,
-// dois botões de leitura e uma seção por titular apurado — moldura maior que o
-// conteúdo num crédito com um titular só, que é o caso normal. O que sobrou é o
-// que se olha: de quem estamos falando, e o que existe em nome dele. Os
-// desfechos ficam no rodapé da janela (ver DueDiligence), porque são o que se
-// faz depois de ler isto.
+// do que a planilha ia imprimir, dois botões de leitura, uma seção por titular
+// apurado e as listas de CPFs e OABs achados nos anexos. Essas últimas eram o
+// erro mais fácil de defender e o pior de manter: seis CPFs e cinco OABs de
+// pessoas que aparecem nos autos — o procurador do Estado, o advogado da outra
+// parte, o sócio citado numa procuração — oferecidos como se algum deles fosse a
+// resposta. Quem identifica o titular é a leitura dos autos, que sabe QUAL papel
+// procura; o que ela não achar se digita.
+//
+// O que sobrou é o que se olha: de quem estamos falando, e o que existe em nome
+// dele. Os desfechos ficam no rodapé da janela (ver DueDiligence), porque são o
+// que se faz depois de ler isto.
 //
 // ABRIR ESTA ABA JÁ É PEDIR A DILIGÊNCIA. Os três passos — ler no título quais
 // verbas o card cede, achar nos autos quem são os titulares delas, procurar as
@@ -41,8 +46,6 @@ import { AlertTriangle, ExternalLink, Info, RefreshCw, Search } from 'lucide-rea
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { formatCpfCnpjInput, onlyDigits } from '@/lib/format'
-import { acharCpfs } from '@/lib/cpfNoTexto'
-import { acharOabs } from '@/lib/dadosNoTexto'
 import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import type {
@@ -209,30 +212,6 @@ export function PainelProcessosJudiciais({
       setAdvCpf((v) => v || formatCpfCnpjInput(advogado.documento ?? ''))
     }
   }, [apuracoes])
-
-  // ------------------------------------------------- sugestões vindas do PDF
-  //
-  // POR ARQUIVO, e nunca sobre a junção de vários: juntar textos cria vizinhança
-  // que não existe em documento nenhum, e vizinhança falsa é achado falso. É a
-  // regra do cabeçalho de cpfNoTexto.ts.
-  const cpfsSugeridos = useMemo(() => {
-    const vistos = new Set<string>()
-    return arquivos
-      .flatMap((a) => acharCpfs(a.texto ?? ''))
-      .filter((c) => (vistos.has(c.cpf) ? false : (vistos.add(c.cpf), true)))
-      .slice(0, 6)
-  }, [arquivos])
-
-  const oabsSugeridas = useMemo(() => {
-    const vistos = new Set<string>()
-    return arquivos
-      .flatMap((a) => acharOabs(a.texto ?? ''))
-      .filter((o) => {
-        const k = o.uf + o.numero
-        return vistos.has(k) ? false : (vistos.add(k), true)
-      })
-      .slice(0, 6)
-  }, [arquivos])
 
   // -------------------------------------------------- ler os autos com IA
 
@@ -435,6 +414,33 @@ export function PainelProcessosJudiciais({
 
   // ------------------------------------------------------------- a tabela
 
+  /**
+   * AS ABAS DA TABELA: uma por PESSOA, não uma por papel.
+   *
+   * Numa cessão de honorários o cedente É o advogado, e o mesmo CPF vira duas
+   * apurações — as linhas 10 e 11 do questionário perguntam por pessoas
+   * diferentes, e quando são a mesma as duas têm de responder. Na tela, porém,
+   * duas abas com a mesma lista são duas abas erradas: quem clica na segunda
+   * procura outra coisa e encontra a primeira de novo.
+   */
+  const abasDeTitular = useMemo(() => {
+    const porPessoa = new Map<string, { ids: string[]; papeis: string[] }>()
+    for (const a of apuracoes) {
+      const chave = a.documento || a.oab || a.nome || a.id
+      const atual = porPessoa.get(chave) ?? { ids: [], papeis: [] }
+      atual.ids.push(a.id)
+      const papel = a.papel === 'ADVOGADO' ? 'Advogado' : a.papel === 'CEDENTE' ? 'Cedente' : String(a.papel)
+      if (!atual.papeis.includes(papel)) atual.papeis.push(papel)
+      porPessoa.set(chave, atual)
+    }
+    return [...porPessoa.values()].map((v) => ({
+      key: v.ids[0],
+      ids: v.ids,
+      // "Cedente e advogado" numa aba só, que é o que aquela pessoa é.
+      label: v.papeis.join(' e '),
+    }))
+  }, [apuracoes])
+
   /** O que pesa primeiro: quem abre a tabela procura a execução em curso. */
   const processosOrdenados = useMemo(() => {
     const peso = (r: unknown) => (r === 'ALTO' ? 0 : r === 'ATENCAO' ? 1 : 2)
@@ -449,10 +455,10 @@ export function PainelProcessosJudiciais({
    * lista cheia. Reapurar também troca os ids: a apuração é reescrita.
    */
   useEffect(() => {
-    if (apuracoes.length === 0) return
-    if (apuracoes.some((a) => a.id === abaDoTitular)) return
-    setAbaDoTitular(apuracoes[0].id)
-  }, [apuracoes, abaDoTitular])
+    if (abasDeTitular.length === 0) return
+    if (abasDeTitular.some((a) => a.key === abaDoTitular)) return
+    setAbaDoTitular(abasDeTitular[0].key)
+  }, [abasDeTitular, abaDoTitular])
 
 
 
@@ -544,7 +550,14 @@ export function PainelProcessosJudiciais({
     </div>
   )
 
-  const daAba = processosOrdenados.filter((x) => x.historico_id === abaDoTitular)
+  const idsDaAba = abasDeTitular.find((a) => a.key === abaDoTitular)?.ids ?? []
+  // De-duplicado por processo: com o mesmo CPF em dois papéis, as duas apurações
+  // guardam a mesma lista, e sem isto cada linha apareceria duas vezes.
+  const daAba = processosOrdenados.filter(
+    (x, i, todos) =>
+      idsDaAba.includes(x.historico_id) &&
+      todos.findIndex((y) => y.numero_processo === x.numero_processo) === i,
+  )
 
   return (
     <div className="space-y-4">
@@ -606,64 +619,20 @@ export function PainelProcessosJudiciais({
         )}
       </div>
 
-      {/* AS SUGESTÕES SÓ APARECEM COM O CAMPO VAZIO — ou seja, quando a leitura
-          dos autos não achou o documento. No caminho normal a janela não as
-          mostra; elas são a saída para quando a leitura falha. */}
-      {pedeCedente && !onlyDigits(cedenteCpf) && cpfsSugeridos.length > 0 && (
-        <div>
-          <p className="text-xs text-slate-500">
-            Não achei o CPF nos autos. Estes aparecem nos anexos:
-          </p>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {cpfsSugeridos.map((c) => (
-              <button
-                key={c.cpf}
-                type="button"
-                title={c.contexto}
-                onClick={() => setCedenteCpf(formatCpfCnpjInput(c.cpf))}
-                className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-brand-300"
-              >
-                {formatCpfCnpjInput(c.cpf)}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {pedeAdvogado && !advOab.trim() && !onlyDigits(advCpf) && oabsSugeridas.length > 0 && (
-        <div>
-          <p className="text-xs text-slate-500">Não achei a OAB nos autos. Estas aparecem nos anexos:</p>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {oabsSugeridas.map((o) => (
-              <button
-                key={o.uf + o.numero}
-                type="button"
-                title={o.contexto}
-                onClick={() => {
-                  setAdvOab(o.uf + ' ' + o.numero)
-                  if (o.nome) setAdvNome(o.nome)
-                }}
-                className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-brand-300"
-              >
-                {o.uf} {o.numero}
-                {o.nome && <span className="text-slate-400"> · {o.nome}</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* UMA TABELA POR TITULAR, em abas.
           A coluna "de quem" repetia "cedente" em vinte linhas seguidas para
           dizer o que o cabeçalho diz uma vez — e, com os dois titulares, misturava
           na mesma lista duas perguntas diferentes: a dívida do cedente e a do
           advogado respondem linhas distintas do questionário. Com um titular só
           a régua de abas não aparece: uma aba solitária não é uma escolha. */}
-      {apuracoes.length > 1 && (
+      {abasDeTitular.length > 1 && (
         <Tabs
-          items={apuracoes.map((a) => ({
-            key: a.id,
-            label: a.papel === 'ADVOGADO' ? 'Advogado' : a.papel === 'CEDENTE' ? 'Cedente' : a.papel,
-            count: processos.filter((x) => x.historico_id === a.id).length,
+          items={abasDeTitular.map((a) => ({
+            key: a.key,
+            label: a.label,
+            count: new Set(
+              processos.filter((x) => a.ids.includes(x.historico_id)).map((x) => x.numero_processo),
+            ).size,
           }))}
           value={abaDoTitular}
           onChange={setAbaDoTitular}
@@ -673,13 +642,13 @@ export function PainelProcessosJudiciais({
       {daAba.length === 0 ? (
         <EmptyState
           title={
-            apuracoes.some((a) => a.id === abaDoTitular && a.status === 'APURADO')
-              ? 'Nenhum processo em nome dele'
+            apuracoes.some((a) => idsDaAba.includes(a.id) && a.status === 'APURADO')
+              ? 'Nenhum processo contra ele'
               : 'Nada apurado ainda'
           }
           description={
-            apuracoes.some((a) => a.id === abaDoTitular && a.status === 'APURADO')
-              ? 'A busca correu e não achou processo nenhum além do próprio crédito.'
+            apuracoes.some((a) => idsDaAba.includes(a.id) && a.status === 'APURADO')
+              ? 'A busca correu e não achou nenhum processo em que ele seja réu.'
               : 'Confira os campos acima e clique em Apurar.'
           }
         />

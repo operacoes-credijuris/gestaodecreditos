@@ -436,3 +436,66 @@ describe('identidadeDoAdvogado', () => {
     expect((await identidadeDoAdvogado('tok', { uf: 'GO', numero: '1' })).cpf).toBeNull()
   })
 })
+
+describe('só quem é réu', () => {
+  /**
+   * A DILIGÊNCIA PERGUNTA "QUE DÍVIDA ESTA PESSOA TEM", e dívida se cobra de
+   * quem está no polo passivo. O que ela move como autora é crédito dela; o que
+   * ela patrocina é trabalho dela; onde é terceira, não responde por nada. Cada
+   * linha dessas empurra para baixo a execução que de fato pesa.
+   */
+  it('o que ele move como autor não é dívida dele', () => {
+    const comoAutor = processo({
+      classe: 'EXECUCAO DE TITULO EXTRAJUDICIAL',
+      envolvidos: [parte({ cpf: CPF_CEDENTE, polo: 'ATIVO' })],
+    })
+    expect(apurarProcessos([comoAutor], { documento: CPF_CEDENTE })).toEqual([])
+  })
+
+  // O TRIBUNAL QUE NÃO PUBLICA CPF deixaria a diligência cega: o polo sai
+  // DESCONHECIDO e o processo cairia no filtro, embora a API tenha sido
+  // consultada justamente com polo=PASSIVO e o tenha devolvido.
+  it('sem achar a pessoa nos envolvidos, vale a palavra da API', () => {
+    const semCpfPublicado = processo({
+      classe: 'EXECUCAO FISCAL',
+      envolvidos: [parte({ nome: 'FAZENDA PUBLICA', polo: 'ATIVO' })],
+    })
+    const alvo = { documento: CPF_CEDENTE }
+    expect(apurarProcessos([semCpfPublicado], alvo)).toEqual([])
+    const comFiltro = apurarProcessos([semCpfPublicado], alvo, { buscaSoDeReu: true })
+    expect(comFiltro).toHaveLength(1)
+    expect(comFiltro[0].polo).toBe('PASSIVO')
+    expect(comFiltro[0].risco).toBe('ALTO')
+  })
+
+  // A LEITURA LOCAL É MAIS ESPECÍFICA QUE O FILTRO DA API: achei o CPF dele
+  // dentro de `advogados`, então ali ele é o procurador, e a palavra da API não
+  // desfaz isso.
+  it('o filtro da API não promove quem a leitura achou como advogado', () => {
+    const comoAdvogado = processo({
+      envolvidos: [
+        parte({
+          cpf: CPF_OUTRO,
+          polo: 'ATIVO',
+          advogados: [{ nome: 'Dra. Beltrana', polo: 'ADVOGADO', cpf: CPF_CEDENTE }],
+        }),
+      ],
+    })
+    expect(apurarProcessos([comoAdvogado], { documento: CPF_CEDENTE }, { buscaSoDeReu: true }))
+      .toEqual([])
+  })
+
+  // O FILTRO VAI À API, e é lá que ele economiza: página não trazida é página
+  // não cobrada.
+  it('a busca pede o polo passivo ao Escavador', async () => {
+    const chamadas = fingirApi([{ corpo: { items: [] } }])
+    await processosDoEnvolvido('tok', { documento: CPF_CEDENTE, polo: 'PASSIVO' })
+    expect(chamadas[0]).toContain('polo=PASSIVO')
+  })
+
+  it('sem polo pedido, a URL não o inventa', async () => {
+    const chamadas = fingirApi([{ corpo: { items: [] } }])
+    await processosDoEnvolvido('tok', { documento: CPF_CEDENTE })
+    expect(chamadas[0]).not.toContain('polo=')
+  })
+})
