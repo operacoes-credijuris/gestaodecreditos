@@ -1195,7 +1195,7 @@ const SCHEMA_ANALISE = {
     'NÃO CLASSIFIQUE PELO NOME DA VERBA: a palavra "honorários" no objeto não a torna acessória. Pergunte QUEM titulariza o título e DE QUE ele é credor — se o crédito não pende de nenhuma condenação principal de terceiro, ele é o principal',
 
   // financeiro — ver a seção "DE ONDE SAEM OS VALORES" no prompt do sistema
-  bruto_total: 'VALOR BRUTO TOTAL do crédito que está sendo cedido, número sem R$: o total ANTES de qualquer retenção, já com principal + juros + correção. INCLUI os honorários contratuais destacados, porque eles saem de dentro dele. NÃO inclui os honorários sucumbenciais, que são verba própria e têm campo separado. NÃO é o valor da causa, nem o da condenação na sentença, nem o principal histórico sem atualização',
+  bruto_total: 'VALOR BRUTO TOTAL do crédito que está sendo cedido, número sem R$: o total ANTES de qualquer retenção, já com principal + juros + correção. INCLUI os honorários contratuais destacados, porque eles saem de dentro dele. NÃO inclui os honorários sucumbenciais, que são verba própria e têm campo separado. NÃO é o valor da causa DA AÇÃO DE CONHECIMENTO, nem o da condenação na sentença, nem o principal histórico sem atualização — mas o valor atribuído à causa da EXECUÇÃO é o próprio valor executado (art. 291 do CPC) e serve',
   principal_liquido: 'o que sobra PARA O CREDOR depois do IR, do INSS e dos honorários contratuais destacados, número. ' +
     'Tem de ser igual a bruto_total menos ir menos inss menos honorarios — se não fechar, algum dos números foi lido errado. ' +
     'ESTA CONTA VALE COM OS SEUS NÚMEROS, e não com os da contadoria: tendo você corrigido o IR ou o INSS na auditoria da tributação, é o líquido CORRIGIDO que vai aqui, ' +
@@ -1609,8 +1609,13 @@ const SYSTEM_ANALISE =
   '(4) o valor apresentado pelo EXECUTADO em execução invertida, quando o exequente concordou ou não impugnou no prazo; ' +
   '(5) o valor apresentado pelo EXEQUENTE, quando não houve impugnação e o prazo passou. ' +
   'Se NENHUM desses existir, devolva null nos valores. Não monte a conta você mesmo, não some parcelas soltas e não use o valor da petição inicial. ' +
+  'EXECUÇÃO DE HONORÁRIOS — defensoria dativa/UHD, curador especial, perito, advogado em causa própria. ' +
+  'A MESMA ordem de autoridade vale, e as peças têm outros nomes: a certidão de honorários ou o ato que os ARBITRA, a memória que instrui a execução, a decisão que a homologa e a RPV expedida em nome do advogado. ' +
+  'NÃO DEVOLVA ZERO POR NÃO RECONHECER O NOME DA PEÇA: o valor está lá, e é o que se executa. ' +
+  'O VALOR ATRIBUÍDO À CAUSA DA EXECUÇÃO É O PRÓPRIO VALOR EXECUTADO (art. 291 do CPC) — é a soma da memória que instrui a inicial, e serve. Isso não contradiz o engano (a) abaixo, que fala do valor da causa da ação de CONHECIMENTO, estimativa processual sem relação com a condenação. ' +
+  'ARBITRADO EM UNIDADES (UHD, URH, salário mínimo): o crédito é a quantidade multiplicada pelo valor da unidade, e esse valor você procura NOS PRÓPRIOS AUTOS — na memória de cálculo, na homologação ou no requisitório, que trazem a conversão feita. NUNCA invente o valor da unidade nem o traga de memória: ele muda por estado e por ano. Não achando a conversão em documento nenhum, devolva null e diga isso em origem_valores, para virar diligência em vez de número inventado. ' +
   'OS ENGANOS MAIS COMUNS, que valem por lista de conferência: ' +
-  '(a) o VALOR DA CAUSA e o valor da condenação na sentença — são de antes da atualização e quase nunca é o que se paga; ' +
+  '(a) o VALOR DA CAUSA DA AÇÃO DE CONHECIMENTO e o valor da condenação na sentença — são de antes da atualização e quase nunca é o que se paga. Na EXECUÇÃO é diferente: ali o valor da causa é o próprio valor executado, e serve (ver a regra da execução acima); ' +
   '(b) o principal HISTÓRICO, quando a conta separa "principal" de "atualizado" — o bruto é o atualizado; ' +
   '(c) o valor de OUTRO CREDOR: conta de ação coletiva traz dezenas de nomes, e a soma da tabela inteira não é o crédito. Use SÓ a linha do cedente identificado no card, e diga em origem_valores que havia outros; ' +
   '(d) a SOMA de vários requisitórios quando só um está sendo cedido; ' +
@@ -3372,6 +3377,9 @@ Deno.serve(async (req) => {
         `O que a leitura trouxe: bruto ${brl(Number(dados.bruto_total) || 0)}, IR ${brl(Number(dados.ir) || 0)}, ` +
         `INSS ${brl(Number(dados.inss) || 0)}, honorários contratuais ${brl(honorariosCalc)}, ` +
         `sucumbenciais ${brl(_sucumbBrutosAutos)}. ` +
+        (dados.origem_valores
+          ? `A IA disse ter tirado os números de: ${String(dados.origem_valores).slice(0, 300)} `
+          : 'A IA não apontou documento nenhum como origem dos valores — não achou a peça, ou não a reconheceu. ') +
         (verbas.principal
           ? 'Confira os cálculos anexados ao card: se a quantia estiver numa dessas outras verbas, é ela que está no campo errado.'
           : 'Junte a peça que fixa os honorários (sentença, acórdão ou conta da contadoria), ou informe o percentual no formulário.'),

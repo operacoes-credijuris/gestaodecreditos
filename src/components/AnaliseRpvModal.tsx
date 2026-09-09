@@ -1211,12 +1211,11 @@ function JanelaDeDesfecho({
       onClose={onFechar}
       size="lg"
       title={acao.label}
-      description="O texto vai como nota no card do Kommo — é o que o comercial lê."
       dirty={motivo.trim().length > 0}
       footer={
         <div className="flex items-center gap-2">
           <Button variant={acao.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
-            Confirmar: {acao.label}
+            Confirmar
           </Button>
           <button
             type="button"
@@ -1241,10 +1240,7 @@ function JanelaDeDesfecho({
             escrever uma ressalva que contradiz uma delas. */}
         {achados.length > 0 && (
           <div>
-            <p className="text-xs text-slate-500">
-              O que motivou{' '}
-              <span className="text-slate-400">(marque os achados; o texto abaixo continua seu)</span>
-            </p>
+            <p className="text-xs text-slate-500">O que motivou</p>
             <ul className="mt-1.5 max-h-64 space-y-1 overflow-y-auto pr-1">
               {achados.map((a, i) => (
                 <li key={i}>
@@ -1279,7 +1275,7 @@ function JanelaDeDesfecho({
 
         <div>
           <label className="block text-xs text-slate-500" htmlFor="motivo-desfecho">
-            Por quê? <span className="text-slate-400">(vai como anotação no card do Kommo)</span>
+            Anotação no card
           </label>
           <textarea
             id="motivo-desfecho"
@@ -1348,7 +1344,6 @@ export function AnaliseRpvModal({
   open,
   onClose,
   leadId,
-  drivePastaId,
   titulo,
   dadosDoCard,
   notasKommo,
@@ -1360,14 +1355,6 @@ export function AnaliseRpvModal({
   open: boolean
   onClose: () => void
   leadId: number
-  /**
-   * A pasta do cedente no Drive, quando já existe.
-   *
-   * É o que responde "há planilha para revisar?" sem gastar uma chamada ao
-   * Drive: o id só é gravado no card DEPOIS de um upload que deu certo (ver a
-   * migração 0059), então tê-lo é ter arquivo lá.
-   */
-  drivePastaId?: string | null
   titulo: string
   dadosDoCard: DadosDoCardRpv
   /** Todas as anotações do card, do comercial: a IA lê junto com os autos. */
@@ -2226,22 +2213,22 @@ export function AnaliseRpvModal({
   const acaoReprovar = acoes.find((a) => a.statusId === ST_REPROVADO)
   const acaoValidacao = acoes.find((a) => a.statusId === ST_DECISAO)
   /**
-   * Há planilha na pasta do cedente?
+   * QUEM REVISA ABRE A PLANILHA DESTA análise — daí depender de `salvo`.
    *
-   * PELO ID DA PASTA, e não por uma chamada ao Drive: ele só é gravado no card
-   * DEPOIS de um upload que deu certo (migração 0059), então tê-lo é ter
-   * arquivo lá. Uma consulta de verdade custaria um refresh de token e uma
-   * listagem a cada abertura da janela para responder o que o card já sabe — e
-   * só ganharia o caso em que alguém apagou o arquivo no Drive à mão.
-   */
-  const temPlanilhaNoDrive = !!salvo || !!drivePastaId
-  /**
-   * QUEM REVISA ABRE A PLANILHA. Mandar para a revisão sem ela é mandar alguém
-   * conferir uma conta que não está em lugar nenhum — e mandar com ela
-   * desatualizada é pior: a planilha existe, parece a análise, e não é.
+   * NÃO DO `drive_pasta_id` DO CARD, que era o critério anterior e respondia
+   * outra pergunta: ele diz que a pasta do cedente já existiu alguma vez, não
+   * que há planilha do que está na tela. E a janela SEMPRE roda uma leitura
+   * nova ao abrir — nunca reabre uma análise salva —, então o que está na tela
+   * é sempre inédito, e o arquivo de uma análise anterior não o valida. Card
+   * com pasta antiga acendia o botão sem nada novo no Drive.
+   *
+   * `salvo` responde a pergunta certa e não custa chamada nenhuma: ele existe
+   * porque ESTA análise subiu. E `mudouDesdeSalvar` cobre o resto — planilha
+   * desatualizada é pior que planilha nenhuma, porque existe, parece a análise,
+   * e não é.
    */
   const podeEnviarParaValidacao =
-    !!acaoValidacao && temPlanilhaNoDrive && !mudouDesdeSalvar && !ocupado && !enviandoValidacao
+    !!acaoValidacao && !!salvo && !mudouDesdeSalvar && !ocupado && !enviandoValidacao
 
   return (
     <Modal
@@ -2313,11 +2300,11 @@ export function AnaliseRpvModal({
               // desligado sem explicação é um beco: a pessoa fica sem saber se
               // falta algo dela ou se o sistema é que não deixa.
               title={
-                temPlanilhaNoDrive
-                  ? mudouDesdeSalvar
+                !salvo
+                  ? 'Salve a análise no Drive antes: quem revisa abre a planilha da pasta do cedente.'
+                  : mudouDesdeSalvar
                     ? 'A análise mudou desde o último salvamento: grave no Drive antes de enviar.'
                     : undefined
-                  : 'Salve a análise no Drive antes: quem revisa abre a planilha da pasta do cedente.'
               }
             >
               {acaoValidacao.label}
