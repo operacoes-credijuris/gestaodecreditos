@@ -27,7 +27,8 @@
 // código, como RPV sempre foi.
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from './supabase'
-import { formatCNJ, normalizarBusca } from './format'
+import { normalizarBusca } from './format'
+import { primeiroCnj } from '../../supabase/functions/_shared/nucleo/cnj.ts'
 import type { KommoLead, KommoAnaliseInterna } from './types'
 
 // Conta do Kommo. O subdomínio não é segredo — é o que aparece na URL.
@@ -610,22 +611,16 @@ const RE_SEPARADOR = /\s+[-–—]\s+/
 /** Uma porcentagem colada no fim de uma frase: "principal + honorários 30%". */
 const RE_PORCENTAGEM_NO_FIM = /(\d{1,3}(?:[.,]\d+)?)\s*%\s*$/
 
-/** CNJ pontuado: NNNNNNN-DD.AAAA.J.TR.OOOO. */
-const RE_CNJ_MASCARA = /\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/
-/** Vinte dígitos seguidos: o mesmo número, digitado sem máscara. */
-const RE_CNJ_CRU = /\b\d{20}\b/
 /** Uma porcentagem e nada mais: "30", "30%", "12,5%". */
 const RE_SO_PORCENTAGEM = /^(\d{1,3}(?:[.,]\d+)?)\s*%?$/
 /** Palavra que só aparece em nome de verba, nunca em nome de pessoa ou empresa. */
 const RE_VERBA = /principal|honor|sucumb|contratu/i
 
-/** O CNJ que houver num pedaço de texto, sempre pontuado. '' quando não há. */
-function cnjNoTexto(t: string): string {
-  const m = t.match(RE_CNJ_MASCARA)
-  if (m) return m[0]
-  const cru = t.match(RE_CNJ_CRU)
-  return cru ? formatCNJ(cru[0]) : ''
-}
+// O CNJ que houver num pedaço de texto, sempre pontuado. A leitura mora em
+// _shared/nucleo/cnj.ts, com o resto: eram três implementações da mesma coisa, e
+// a do kommo-sync — que não reconhecia o número cru — gravava no espelho o
+// processo citado numa ANOTAÇÃO em vez do do título.
+const cnjNoTexto = primeiroCnj
 
 /** O que o título do card diz. Campo ausente vem como ''. */
 export interface DadosDoTitulo {

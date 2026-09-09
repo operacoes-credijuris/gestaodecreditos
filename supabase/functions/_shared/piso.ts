@@ -5,13 +5,25 @@
 // salvar, liberar à mão, apenas avisar —, cada um com consequência distinta para
 // quem está com o card aberto, e nenhum com um caso escrito.
 //
-// ONDE ELE INCIDE JÁ MUDOU UMA VEZ, e a mudança foi o conserto: era aplicado no
-// portão, sobre o BRUTO que a leitura viu, e errava dos dois lados — uma cessão
-// só de honorários de R$ 15 mil passava porque o crédito inteiro tinha R$ 100
-// mil, e um bruto de R$ 25 mil que líquido dá R$ 17 mil também passava. Agora
-// incide sobre o VALOR TOTAL LÍQUIDO NEGOCIADO (o Y3 da calibragem). O portão
-// continua reprovando quando o bruto já está abaixo: é barato e seguro por
-// construção, porque o líquido nunca é maior que o bruto.
+// ONDE ELE INCIDE JÁ MUDOU DUAS VEZES, e as duas foram conserto.
+//
+// Era no portão, sobre o BRUTO que a leitura viu, e errava dos dois lados: uma
+// cessão só de honorários de R$ 15 mil passava porque o crédito inteiro tinha
+// R$ 100 mil, e um bruto de R$ 25 mil que líquido dá R$ 17 mil também passava.
+// Passou então a incidir sobre o VALOR TOTAL LÍQUIDO NEGOCIADO.
+//
+// E O LÍQUIDO DE QUEM? O DOS AUTOS. A segunda versão media o líquido já
+// REDUZIDO ao cenário conservador, e aí o mínimo da casa passava a barrar
+// crédito por causa de uma conclusão NOSSA: um crédito de R$ 22 mil nos autos
+// que a auditoria estima em R$ 17 mil não é um crédito abaixo do mínimo — é um
+// crédito acima do mínimo com uma divergência apontada. Quem analisa pode não
+// concordar com o corte, e discordar é justamente o que o chat existe para
+// permitir; barrar antes disso fecha a porta antes de a conversa começar. O
+// corte continua decidindo o PREÇO, que é o que ele decide; não decide mais se
+// o negócio pode existir.
+//
+// O portão continua reprovando quando o bruto já está abaixo do mínimo: é
+// barato e seguro por construção, porque o líquido nunca é maior que o bruto.
 
 /** O mínimo, em reais. Decisão do dono. */
 export const PISO_NEGOCIO = 20000
@@ -42,9 +54,12 @@ export type DesfechoDoPiso =
  * "pode" dado sobre outros números.
  */
 export function avaliarPiso(o: {
-  /** O valor total líquido negociado — o Y3 da calibragem. */
+  /**
+   * O líquido das verbas negociadas COMO OS AUTOS O INDICAM — antes do corte da
+   * auditoria. Passar aqui o líquido já reduzido é o defeito descrito no topo.
+   */
   negociado: number
-  /** O líquido de TODAS as verbas do processo, comprando tudo. */
+  /** O líquido de TODAS as verbas do processo, comprando tudo, também dos autos. */
   tudoSomado: number
   /** O rótulo do que está sendo comprado, para a mensagem. */
   tipoCredito?: string | null
@@ -60,7 +75,7 @@ export function avaliarPiso(o: {
   const tudo = Number(o.tudoSomado) || 0
   const cabe = tudo >= PISO_NEGOCIO
   const motivo =
-    `O valor total líquido negociado é ${o.brl(negociado)}, abaixo do mínimo de ${o.brl(PISO_NEGOCIO)} ` +
+    `O valor total líquido negociado, como os autos o indicam, é ${o.brl(negociado)}, abaixo do mínimo de ${o.brl(PISO_NEGOCIO)} ` +
     `(${String(o.tipoCredito ?? 'verbas do negócio')}). ` +
     (cabe
       ? `Somando TODAS as verbas do processo dá ${o.brl(tudo)} — se a cessão puder incluir as demais, ` +

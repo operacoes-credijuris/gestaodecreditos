@@ -24,6 +24,8 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 // alternativa era alguém abrir o Kommo e copiar número de coluna à mão. Número
 // de coluna não tem cara de nada: um dígito trocado aponta para outra coluna que
 // também existe, e o card simplesmente não aparece na tela — sem erro nenhum.
+import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
+
 const FUNIL_RPV = 13901939
 const FUNIL_PRECATORIO = 13971995
 const FUNIS = [FUNIL_RPV, FUNIL_PRECATORIO]
@@ -33,18 +35,19 @@ const INTERVALO_MS = 160
 
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-// CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO. Formato rígido, então o regex é seguro —
-// diferente do resto dos dados do crédito, que vêm em texto livre e variam de
-// card para card (por isso a nota é guardada crua, sem parser).
-const RE_CNJ = /\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/
-
-function extrairCnj(...textos: (string | null | undefined)[]): string | null {
-  for (const t of textos) {
-    const m = t?.match(RE_CNJ)
-    if (m) return m[0]
-  }
-  return null
-}
+// O CNJ, EM QUALQUER FORMA DE ESCREVER, e a ordem das fontes: ver
+// _shared/nucleo/cnj.ts.
+//
+// AQUI ESTAVA A CAUSA de um card carregar o número de outro processo. O regex
+// daqui exigia o formato PONTUADO, e o título que o comercial digita costuma
+// trazer os VINTE DÍGITOS CRUS — "Dr. Alex Dornelas Loures -
+// 10063770820204013814". Não achando o número no título, a busca seguia para as
+// ANOTAÇÕES e gravava o primeiro CNJ pontuado que houvesse ali: um processo
+// CITADO numa nota, das dívidas que a diligência apurou sobre o titular. O card
+// passava a se chamar por um processo que não é o dele — no nome do arquivo do
+// Drive, na conferência do anexo, na busca por processo.
+const extrairCnj = (...textos: (string | null | undefined)[]): string | null =>
+  cnjDoCard(textos[0], ...textos.slice(1)) || null
 
 const iso = (unix: unknown): string | null =>
   typeof unix === 'number' && unix > 0 ? new Date(unix * 1000).toISOString() : null

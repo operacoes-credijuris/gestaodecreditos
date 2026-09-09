@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { avaliarPiso, PISO_NEGOCIO } from '../../../supabase/functions/_shared/piso.ts'
+import {
+  aplicarAuditoria,
+  montarParcelas,
+} from '../../../supabase/functions/_shared/precificacao.ts'
 
 /**
  * O PISO DO NEGÓCIO, e os quatro desfechos dele.
@@ -76,6 +80,51 @@ describe('avaliarPiso', () => {
       expect(r.desfecho).toBe('aviso')
       expect(r.desfecho === 'aviso' && r.liberado).toBe(false)
     }
+  })
+
+  // A RÉGUA É O LÍQUIDO DOS AUTOS, NÃO O DEPOIS DA AUDITORIA.
+  //
+  // A versão anterior media o Y3 da calibragem, que é o líquido JÁ REDUZIDO ao
+  // cenário conservador — e aí o mínimo da casa barrava crédito por causa de uma
+  // conclusão NOSSA. Um crédito de R$ 22 mil nos autos que a auditoria estima em
+  // R$ 17 mil não é um crédito abaixo do mínimo: é um crédito acima do mínimo com
+  // uma divergência apontada, e quem analisa pode não concordar com o corte.
+  //
+  // Este teste monta os dois números com as funções de verdade e fixa a regra: o
+  // dos autos decide se o negócio pode existir; o reduzido decide o preço.
+  describe('a régua é o líquido dos autos', () => {
+    const VERBAS = { principal: true, contratuais: false, sucumbenciais: false }
+    const AUTOS = {
+      brutoTotal: 26_000, ir: 3_000, inss: 0, contratuaisBrutos: 0, sucumbenciaisBrutos: 0,
+    }
+    const liquido = (v: typeof AUTOS) =>
+      montarParcelas({ ...v, verbas: VERBAS }).reduce((s, p) => s + p.liquido, 0)
+
+    it('os autos acima do mínimo passam, mesmo com a auditoria derrubando', () => {
+      const dosAutos = liquido(AUTOS)
+      // A auditoria estima o bruto conservador em R$ 18 mil: o líquido cai abaixo.
+      const auditado = liquido(aplicarAuditoria(AUTOS, 18_000).valores)
+      expect(dosAutos).toBeGreaterThan(PISO_NEGOCIO)
+      expect(auditado).toBeLessThan(PISO_NEGOCIO)
+      // A régua olha os autos: passa.
+      expect(avaliarPiso({ ...base, negociado: dosAutos, acao: 'salvar' }).desfecho).toBe('ok')
+      // E fica registrado o que a régua antiga fazia: barrava o salvar.
+      expect(avaliarPiso({ ...base, negociado: auditado, acao: 'salvar' }).desfecho).toBe('erro')
+    })
+
+    it('os autos abaixo do mínimo continuam barrando', () => {
+      const magro = { ...AUTOS, brutoTotal: 19_000 }
+      expect(liquido(magro)).toBeLessThan(PISO_NEGOCIO)
+      expect(avaliarPiso({
+        ...base, negociado: liquido(magro), tudoSomado: liquido(magro), acao: 'analisar',
+      }).desfecho).toBe('reprovado')
+    })
+
+    it('auditoria sem corte não muda a régua', () => {
+      const semCorte = aplicarAuditoria(AUTOS, null)
+      expect(semCorte.aplicada).toBe(false)
+      expect(liquido(semCorte.valores)).toBe(liquido(AUTOS))
+    })
   })
 
   it('a mensagem cita o que está sendo comprado', () => {

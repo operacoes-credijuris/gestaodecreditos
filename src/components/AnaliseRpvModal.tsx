@@ -1438,8 +1438,16 @@ export function AnaliseRpvModal({
     // preenche as linhas 10 e 11 da aba jurídica. A apuração costuma ser feita
     // DEPOIS da primeira análise, e é o 'salvar' que gera a planilha — mandá-lo
     // só no 'analisar' deixaria de fora justamente a chamada que importa.
-    () => ({ ...dadosDoCard, tipo_aquisicao: cenario, lead_id: leadId }),
-    [dadosDoCard, cenario, leadId],
+    // O TÍTULO VAI INTEIRO, e não só o número que dele se extraiu.
+    //
+    // É do título que sai a identidade do processo na conferência do anexo (ver
+    // _shared/confrontoDoAnexo.ts): o `numero_processo` do cadastro tem uma
+    // cadeia de reservas que termina na linha "PROCESSO:" de uma ANOTAÇÃO, e
+    // anotação cita outros processos do titular. Mandando o título, a
+    // conferência lê a mesma coisa que o operador tem à vista no cabeçalho
+    // desta janela — e a mensagem de erro deixa de contradizê-lo.
+    () => ({ ...dadosDoCard, titulo_card: titulo, tipo_aquisicao: cenario, lead_id: leadId }),
+    [dadosDoCard, titulo, cenario, leadId],
   )
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [pedido, setPedido] = useState('')

@@ -2984,9 +2984,11 @@ Deno.serve(async (req) => {
     // por que ela olha os ARQUIVOS e não o que a leitura devolveu.
     {
       const _c = confrontarAnexoComCard({
-        numeroDoCard: numeroProcesso,
-        // O TEXTO DOS ARQUIVOS, e só ele: as anotações do Kommo citam outros
-        // processos do titular, e passá-las aqui é o defeito que isto conserta.
+        // O TÍTULO DO CARD, e só ele: é a identidade do card, e é o que o
+        // operador tem à vista. O `numero_processo` do cadastro tem reservas que
+        // terminam numa ANOTAÇÃO, e anotação cita outros processos do titular.
+        tituloDoCard: body.titulo_card,
+        // E O TEXTO DOS ARQUIVOS, também só ele.
         textoDosAnexos: textoDireto,
         numeroLidoPelaLeitura: qualif.numero_processo,
       });
@@ -4002,16 +4004,25 @@ Deno.serve(async (req) => {
     // Mudando a base pelo cenário conservador, é a IA que tem de declarar a
     // base nova; adivinhar aqui por proporção é o que estava errado.
     const _irDoSistema = Number(dados._ir_do_sistema) || 0;
-    const _auditoria = aplicarAuditoria(
-      {
-        brutoTotal: Number(dados.bruto_total) || 0,
-        ir: Math.max(0, (Number(dados.ir) || 0) - _irDoSistema),
-        inss: Number(dados.inss) || 0,
-        contratuaisBrutos: Number(dados.honorarios) || 0,
-        sucumbenciaisBrutos: Number(dados.honorarios_sucumbenciais) || 0,
-      },
-      dados.auditoria_bruto_conservador,
-    );
+    /**
+     * O QUE OS AUTOS INDICAM, antes de qualquer coisa que a auditoria conclua.
+     *
+     * O IR aqui é o que a CONTA reteve: `dados.ir` viaja somado à nossa
+     * estimativa do imposto faltante, e essa estimativa é conclusão nossa, não
+     * número do processo. Tirá-la é o que faz deste objeto o retrato do que está
+     * escrito nos autos.
+     *
+     * Serve a duas coisas: é a entrada da auditoria e é a RÉGUA DO PISO — ver o
+     * bloco do mínimo, adiante.
+     */
+    const _valoresDosAutos = {
+      brutoTotal: Number(dados.bruto_total) || 0,
+      ir: Math.max(0, (Number(dados.ir) || 0) - _irDoSistema),
+      inss: Number(dados.inss) || 0,
+      contratuaisBrutos: Number(dados.honorarios) || 0,
+      sucumbenciaisBrutos: Number(dados.honorarios_sucumbenciais) || 0,
+    };
+    const _auditoria = aplicarAuditoria(_valoresDosAutos, dados.auditoria_bruto_conservador);
     // De volta, inteiro. Fica DEPOIS da reescala de propósito.
     if (_irDoSistema > 0) {
       _auditoria.valores = { ..._auditoria.valores, ir: _auditoria.valores.ir + _irDoSistema };
@@ -4095,12 +4106,23 @@ Deno.serve(async (req) => {
     // A DECISÃO MORA EM _shared/piso.ts — pura e com teste. São quatro desfechos
     // sobre uma regra da casa, e cada um muda o que quem está com o card aberto
     // pode fazer em seguida.
+    // A RÉGUA É O LÍQUIDO DOS AUTOS, NÃO O DEPOIS DA AUDITORIA.
+    //
+    // Ela media `calc.Y3`, que é o líquido JÁ REDUZIDO ao cenário conservador —
+    // e aí o mínimo da casa passava a barrar crédito por causa de uma conclusão
+    // NOSSA. Um crédito de R$ 22 mil nos autos que a auditoria estima em R$ 17
+    // mil não é um crédito abaixo do mínimo: é um crédito acima do mínimo com uma
+    // divergência apontada, e quem analisa pode não concordar com o corte —
+    // discordar é o que o chat existe para permitir, e a análise tem de chegar
+    // até ele.
+    //
+    // O corte continua valendo para o PREÇO, que é o que ele decide. O que ele
+    // não decide mais é se o negócio pode existir.
+    const _liquidoDeVerbas = (v: typeof _valoresDosAutos, verbas: VerbasNegociadas) =>
+      montarParcelas({ ...v, verbas }).reduce((s, p) => s + p.liquido, 0);
     const _piso = avaliarPiso({
-      negociado: Number(calc.Y3) || 0,
-      tudoSomado: montarParcelas({
-        ..._auditoria.valores,
-        verbas: { principal: true, contratuais: true, sucumbenciais: true },
-      }).reduce((s, p) => s + p.liquido, 0),
+      negociado: _liquidoDeVerbas(_valoresDosAutos, _verbas),
+      tudoSomado: _liquidoDeVerbas(_valoresDosAutos, { principal: true, contratuais: true, sucumbenciais: true }),
       tipoCredito: dados.tipo_credito,
       acao,
       liberado: _pisoLiberado,
@@ -4181,6 +4203,21 @@ Deno.serve(async (req) => {
           ? `⚠️ ABAIXO DO MÍNIMO — LIBERADO À MÃO: ${dados._abaixo_do_piso} A planilha foi gerada assim mesmo, por decisão de quem analisou.`
           : `⚠️ ABAIXO DO MÍNIMO — NÃO DÁ PARA FECHAR: ${dados._abaixo_do_piso}`,
       );
+    // OS AUTOS PASSAM E A AUDITORIA DERRUBA: isto não barra mais, e por isso
+    // precisa ser DITO. O preço saiu sobre o número reduzido — é ele que
+    // precifica —, mas quem lê tem de saber que o negócio só está abaixo do
+    // mínimo da casa por causa de uma conclusão nossa, e que discordar dela é um
+    // caminho aberto.
+    if (_piso.desfecho === 'ok' && Number(calc.Y3) > 0 && Number(calc.Y3) < PISO_NEGOCIO) {
+      avisosBase.unshift(
+        `⚠️ ABAIXO DO MÍNIMO DEPOIS DA AUDITORIA: nos autos o líquido negociado é ${brl(_liquidoDeVerbas(_valoresDosAutos, _verbas))}, ` +
+        `acima do mínimo de ${brl(PISO_NEGOCIO)}; com o corte da auditoria ele cai para ${brl(Number(calc.Y3))}. ` +
+        'A ANÁLISE SEGUIU porque o mínimo da casa é sobre o que o processo indica, não sobre o que a auditoria conclui. ' +
+        'O preço, este sim, saiu sobre o número reduzido. Discordando do corte, dite o cenário conservador no chat ' +
+        '("o cenário conservador é R$ X") — o que você escrever fica.',
+      );
+    }
+
     // O TETO DO ENTE, do cache (e pesquisado em segundo plano quando falta).
     // Não espera pela pesquisa: quando ela está em curso, o aviso diz que o teto
     // ainda não foi conferido, em vez de calar — calar se lê como "está dentro".
