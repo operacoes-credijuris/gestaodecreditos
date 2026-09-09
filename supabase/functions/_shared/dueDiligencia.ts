@@ -248,6 +248,46 @@ export interface ResultadoDiligenciaM2 {
 }
 
 /**
+ * As marcas que aplicarDiligenciaNoM2 deixa na coluna D — e que ela mesma
+ * precisa reconhecer na passada seguinte.
+ *
+ * O m2 não nasce limpo a cada ação: o que 'analisar' escreveu volta do
+ * navegador e reentra em 'reprecificar', em cada rodada do chat e no 'salvar',
+ * e a função roda em todas elas sobre a célula que ela própria produziu. Quando
+ * tratava essa célula inteira como "texto da IA", embrulhava o próprio
+ * resultado de novo — "Due diligence: B; nos autos: Due diligence: B; nos
+ * autos: A" — e a planilha saía com a frase repetida uma vez por ação. Montar e
+ * desmontar têm de usar a MESMA grafia, daí as constantes.
+ */
+const MARCA_DILIGENCIA = 'Due diligence: '
+const MARCA_CONFLITO =
+  '⚠️ A DUE DILIGENCE ENCONTROU DÍVIDA (resposta "Não" mantida a pedido de quem revisou) — '
+const MARCA_AUTOS = 'nos autos: '
+
+/**
+ * O que a IA (ou o chat) escreveu na célula, sem o que a diligência já colou
+ * por cima numa passada anterior. É a linha de base de que o complemento é
+ * RECONSTRUÍDO, em vez de crescer: aplicar duas vezes tem de dar o mesmo que
+ * aplicar uma.
+ *
+ * A parte da diligência é descartada de propósito — ela é reescrita a partir de
+ * `h.complemento`, que é a fonte e pode ter mudado desde a passada anterior
+ * (apuração refeita). O texto livre da IA que por acaso comece com uma dessas
+ * marcas também é descartado; é o preço de não guardar baseline à parte, e a
+ * diligência é reescrita na mesma passada de qualquer jeito.
+ */
+export function textoDosAutos(complemento: unknown): string {
+  const s = String(complemento ?? '').trim()
+  if (s.startsWith(MARCA_AUTOS)) return s.slice(MARCA_AUTOS.length).trim()
+  if (s.startsWith(MARCA_DILIGENCIA) || s.startsWith(MARCA_CONFLITO)) {
+    const separador = '; ' + MARCA_AUTOS
+    const i = s.indexOf(separador)
+    return i < 0 ? '' : s.slice(i + separador.length).trim()
+  }
+  return s
+}
+
+/**
  * Escreve as linhas 10 e 11 a partir da apuração, preservando o que a IA achou.
  *
  * NÃO É SUBSTITUIÇÃO CEGA, é união. A diligência procura por CPF/OAB e enxerga o
@@ -300,17 +340,17 @@ export function aplicarDiligenciaNoM2(
       : (h.temDivida || iaDisseSim ? 'Sim' : 'Não')
     const contradiz = travada && !iaDisseSim && h.temDivida
 
-    // O que a IA escreveu na célula, menos os processos que a diligência já
-    // lista. Comparado por dígito: máscara diferente é o mesmo processo.
+    // O que a IA escreveu na célula — SEM o que esta função já colou por cima
+    // numa passada anterior (ver textoDosAutos) — menos os processos que a
+    // diligência já lista. Comparado por dígito: máscara diferente é o mesmo
+    // processo.
+    const dosAutos = textoDosAutos(atual.complemento)
     const jaListados = new Set(cnjsDoTexto(h.complemento))
-    const doTextoDaIA = cnjsDoTexto(atual.complemento)
-    const novosDaIA = doTextoDaIA.filter((d) => !jaListados.has(d))
+    const novosDaIA = cnjsDoTexto(dosAutos).filter((d) => !jaListados.has(d))
     const complementoIA =
-      novosDaIA.length > 0
-        ? `nos autos: ${String(atual.complemento ?? '').trim()}`
-        : iaDisseSim && !h.temDivida && String(atual.complemento ?? '').trim()
-          ? `nos autos: ${String(atual.complemento).trim()}`
-          : ''
+      dosAutos && (novosDaIA.length > 0 || (iaDisseSim && !h.temDivida))
+        ? `${MARCA_AUTOS}${dosAutos}`
+        : ''
 
     // A COLUNA D SEMPRE DIZ O QUE A DILIGÊNCIA ACHOU, e diz de onde veio.
     //
@@ -321,8 +361,8 @@ export function aplicarDiligenciaNoM2(
     // documento, em vez de resolvê-la em silêncio para um dos lados.
     const daDiligencia = h.complemento
       ? (contradiz
-          ? `⚠️ A DUE DILIGENCE ENCONTROU DÍVIDA (resposta "Não" mantida a pedido de quem revisou) — ${h.complemento}`
-          : `Due diligence: ${h.complemento}`)
+          ? `${MARCA_CONFLITO}${h.complemento}`
+          : `${MARCA_DILIGENCIA}${h.complemento}`)
       : ''
 
     const complemento = daDiligencia

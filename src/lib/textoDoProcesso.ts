@@ -64,6 +64,81 @@ const cabecalho = (arquivo: string, total: number) => `\n===== ARQUIVO: ${arquiv
  * Cabendo tudo, vai tudo, na ordem, com cabeçalho por arquivo e marcador por
  * página. Não cabendo, seleciona pelas regras acima e marca os buracos.
  */
+/**
+ * Tira do texto de uma página o rodapé de assinatura digital do tribunal.
+ *
+ * SERVE À CONTA, NÃO AO CONTEÚDO: o que se mede com isto é a densidade de
+ * texto por página — quantos caracteres sobram quando o carimbo sai —, para
+ * separar documento de texto de digitalização em que só o carimbo é
+ * selecionável. O texto que vai ao modelo é o original.
+ *
+ * O QUE ESTAVA ERRADO. A versão anterior era `/^.*(frase).*$/gim` aplicada a um
+ * texto em que CADA PÁGINA É UMA LINHA SÓ (o pdf.js junta os itens com espaço).
+ * Com a flag m, `^.*frase.*$` casa a linha inteira — a página inteira. Toda
+ * página que trouxesse "assinado eletronicamente por" em qualquer ponto era
+ * zerada na conta: um processo de texto com carimbo em todas as páginas media
+ * zero, era tratado como digitalização, e todas as páginas iam para a esteira
+ * de imagens — explodindo o tempo de rasterização e disputando com o texto o
+ * orçamento da leitura.
+ *
+ * POR AGRUPAMENTO, E NÃO POR JANELA. Um carimbo de verdade traz duas ou mais
+ * das frases em sequência ("Documento assinado digitalmente conforme MP
+ * 2.200-2 … pode ser verificado … código de verificação … Página 3 de 120");
+ * frases próximas formam um grupo, e o grupo sai inteiro, com até três
+ * palavras de cauda (o código verificador que vem depois da última frase). Uma
+ * frase SOZINHA é conteúdo — "assinado eletronicamente por Fulano" no corpo de
+ * uma petição — e sai só ela, sem levar o parágrafo junto. Uma janela fixa de
+ * palavras errava nos dois sentidos: comia o fim de uma decisão curta e o
+ * resto de um parágrafo que citasse a assinatura.
+ *
+ * Trabalha LINHA A LINHA porque as páginas vêm separadas por quebra de linha:
+ * o carimbo do fim de uma página e o do começo da seguinte não podem virar um
+ * grupo só, ou o que houver entre eles — o começo da página seguinte — sairia
+ * junto.
+ */
+const FRASES_DE_CARIMBO =
+  /documento\s+assinado\s+digitalmente|assinado\s+eletronicamente\s+por|este\s+documento\s+pode\s+ser\s+verificado|c[óo]digo\s+(?:de\s+)?verifica|conforme\s+MP\s*n?\.?\s*2\.?200-2|n[úu]mero\s+do\s+documento:|p[áa]gina\s+\d+\s+de\s+\d+/gi
+
+/** Frases a menos de tantos caracteres uma da outra pertencem ao mesmo carimbo. */
+const DISTANCIA_NO_CARIMBO = 250
+
+function semCarimboNaLinha(linha: string): string {
+  const marcas: Array<{ ini: number; fim: number }> = []
+  for (const m of linha.matchAll(FRASES_DE_CARIMBO)) {
+    marcas.push({ ini: m.index ?? 0, fim: (m.index ?? 0) + m[0].length })
+  }
+  if (marcas.length === 0) return linha
+  const grupos: Array<{ ini: number; fim: number; n: number }> = []
+  for (const m of marcas) {
+    const g = grupos[grupos.length - 1]
+    if (g && m.ini - g.fim <= DISTANCIA_NO_CARIMBO) {
+      g.fim = m.fim
+      g.n += 1
+    } else {
+      grupos.push({ ini: m.ini, fim: m.fim, n: 1 })
+    }
+  }
+  let saida = ''
+  let cursor = 0
+  for (const g of grupos) {
+    // Carimbo (duas ou mais frases): leva a cauda — o código verificador que
+    // vem depois da última frase, até três palavras. Frase solta: só ela.
+    const cauda = g.n >= 2 ? (linha.slice(g.fim).match(/^(?:\s+\S+){0,3}/)?.[0].length ?? 0) : 0
+    saida += linha.slice(cursor, g.ini) + ' '
+    cursor = g.fim + cauda
+  }
+  return saida + linha.slice(cursor)
+}
+
+export function semRodapeDeAssinatura(texto: string): string {
+  return texto
+    .split('\n')
+    .map(semCarimboNaLinha)
+    .join('\n')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function montarTextoDoProcesso(paginas: PaginaLida[], max: number): TextoMontado {
   const validas = paginas.filter((p) => p.texto.trim().length > 0)
   if (validas.length === 0) return { texto: '', incluidas: 0, omitidas: 0, cortou: false }

@@ -65,6 +65,7 @@ import {
   valorDoCampo,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
+import { semRodapeDeAssinatura } from '@/lib/textoDoProcesso'
 import { resumoDaOportunidade } from '@/lib/anotacaoKommo'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -220,9 +221,10 @@ function lerCardCredijuris(lead: KommoLead) {
 // 40 mil caracteres, o arquivo passava folgado por "tem texto", e a tela então
 // afirmava "li o PDF e não achei" sobre 200 páginas que nunca foram lidas.
 //
-// Nenhuma dessas linhas é conteúdo do processo, então saem da conta.
-const RODAPE_TRIBUNAL =
-  /^.*(documento\s+assinado\s+digitalmente|assinado\s+eletronicamente\s+por|este\s+documento\s+pode\s+ser\s+verificado|c[óo]digo\s+(de\s+)?verifica|conforme\s+MP\s*n?\.?\s*2\.?200-2|n[úu]mero\s+do\s+documento:|p[áa]gina\s+\d+\s+de\s+\d+).*$/gim
+// Nenhuma dessas linhas é conteúdo do processo, então saem da conta — pela
+// função semRodapeDeAssinatura (lib/textoDoProcesso), que tira o carimbo e NÃO
+// a página: a versão que vivia aqui casava a linha inteira, e cada página é uma
+// linha só.
 
 /**
  * Texto e número de páginas de um PDF.
@@ -364,10 +366,10 @@ async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
     try {
       const { texto, paginas, paginasTexto, bytes } = await extrairTextoDoPdf(a.download)
       const limpo = texto.trim()
-      const conteudo = limpo.replace(RODAPE_TRIBUNAL, '').replace(/\s+/g, ' ').trim()
+      const conteudo = semRodapeDeAssinatura(limpo)
       const densidade = paginas > 0 ? Math.round(conteudo.length / paginas) : 0
       const paginasImagem = paginasTexto
-        .map((t, i) => (t.replace(RODAPE_TRIBUNAL, '').replace(/\s+/g, ' ').trim().length < CONTEUDO_MINIMO_PAGINA ? i + 1 : 0))
+        .map((t, i) => (semRodapeDeAssinatura(t).length < CONTEUDO_MINIMO_PAGINA ? i + 1 : 0))
         .filter((n) => n > 0)
       lidos.push({
         nome: a.nome,

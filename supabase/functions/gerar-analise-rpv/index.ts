@@ -14,12 +14,9 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import {
   consultarRegra,
-  custoParaPreco,
   executarPasso,
   regraDoCache,
-  normalizarUf,
   type Emolumentos,
-  type RegraEmolumentos,
 } from "../_shared/emolumentos.ts";
 import { municipioDoEnte, resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import {
@@ -202,6 +199,20 @@ const errorResponse = (message: string, status = 400, extra?: Record<string, unk
 
 const brl = (n: any) => 'R$ ' + (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pct = (n: any) => ((Number(n) || 0) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+
+// NÚMERO DE VERDADE, venha como vier. NO ESCOPO DE MÓDULO porque dois pontos
+// do handler precisam dele — o gatilho da segunda leitura, dentro do ramo que
+// lê o processo, e a normalização dos campos, no caminho compartilhado. A IA — e o chat, que aceita texto — às
+// vezes devolvem "84.320,10" ou "R$ 84.320,10" onde se pediu número.
+// `Number("84.320,10")` é NaN, que virava ZERO: o bruto zerado dava "não
+// localizei valor" (mensagem enganosa, o valor estava lá), e IR/INSS
+// zerados faziam o líquido SUBIR em silêncio. parseNumeroFlex já existia
+// para isto e não era usado aqui.
+const numeroDoCampo = (v: unknown): number => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (typeof v === 'string') return parseNumeroFlex(v.replace(/[^\d.,\-]/g, '')) ?? 0;
+  return 0;
+};
 
 /**
  * fetch que tenta de novo quando a falha foi RÁPIDA.
@@ -529,9 +540,6 @@ const COR = {
   laranja: 'FFFCE5CD', cinza: 'FFEFEFEF',
 };
 const fill = (argb: string) => ({ type: 'pattern' as const, pattern: 'solid' as const, bgColor: { argb }, fgColor: { argb } });
-const regra = (ref: string, formula: string, cor: string, priority: number) =>
-  ({ ref, formula, cor, priority });
-
 // Aplica todas as regras de cor da aba jurídica (texto = valor do dropdown).
 function aplicarCoresJuridica(ws: any) {
   const add = (ref: string, rules: Array<{ f: string; cor: string }>) =>
@@ -1735,7 +1743,6 @@ function ferramentaDoEsquema(nome: string, descricao: string, esquema: Record<st
  * para mandá-lo ao outro, basta nomeá-lo aqui.
  */
 const CAMPOS_DOCUMENTO = ['m2', 'm1_sintese', 'bloco_g_riscos'] as const;
-type CampoDocumento = typeof CAMPOS_DOCUMENTO[number];
 
 const SCHEMA_DOCUMENTO: Record<string, string> = Object.fromEntries(
   CAMPOS_DOCUMENTO.map((k) => [k, (SCHEMA_ANALISE as Record<string, string>)[k]]),
@@ -1861,7 +1868,12 @@ async function extrairComFerramenta(
         model: CLAUDE_MODEL,
         max_tokens: maxTokens,
         system: SYSTEM_BASE,
-        tools: [FERRAMENTA_QUALIFICACAO, FERRAMENTA_PRECO, FERRAMENTA_DOCUMENTO],
+        // AS QUATRO, SEMPRE — inclusive a do resgate. A lista era fixa em três e a
+        // segunda leitura forçava tool_choice numa quarta que não estava aqui: a
+        // API recusa (400), o catch do resgate engolia, e a segunda leitura
+        // nunca chegou a rodar. Todas em todas as chamadas por causa do cache:
+        // o prefixo (tools → system → messages) tem de ser idêntico entre elas.
+        tools: [FERRAMENTA_QUALIFICACAO, FERRAMENTA_PRECO, FERRAMENTA_DOCUMENTO, FERRAMENTA_RESGATE],
         // FORÇADA, e não 'auto'. Eu deixei em 'auto' argumentando que forçar
         // tiraria do modelo a chance de raciocinar em texto antes de responder.
         // Em produção isso custou a análise inteira: em 'auto' o Opus 5 escreve
@@ -1878,7 +1890,7 @@ async function extrairComFerramenta(
           role: 'user',
           content: [
             ...conteudo,
-            { type: 'text', text: `${o.instrucoes}\n\n=== O QUE FAZER AGORA ===\nFaça o trabalho descrito acima e registre o resultado chamando a ferramenta ${o.ferramenta.name} UMA única vez. Não use a outra ferramenta e não escreva o JSON no texto da resposta.` },
+            { type: 'text', text: `${o.instrucoes}\n\n=== O QUE FAZER AGORA ===\nFaça o trabalho descrito acima e registre o resultado chamando a ferramenta ${o.ferramenta.name} UMA única vez. Não use as outras ferramentas e não escreva o JSON no texto da resposta.` },
           ],
         }],
       }),
@@ -1894,6 +1906,16 @@ async function extrairComFerramenta(
   // timeout é piorar. O teto de saída já é generoso; se cortar, quem lê recebe
   // a mensagem dizendo exatamente isso e o que fazer.
   const data = await pedir(o.maxTokens);
+
+  // CORTADA É CORTADA, com ou sem tool_use. A checagem de max_tokens só corria
+  // quando não havia bloco de ferramenta; havendo, o input parcial era aceito
+  // como se inteiro — e um JSON de valores truncado vira análise com campos
+  // faltando e cara de resultado.
+  if (data?.stop_reason === 'max_tokens') {
+    throw new Error(
+      `A leitura (${o.rotulo}) foi CORTADA por tamanho: a resposta bateu no teto e veio incompleta. O processo pode estar grande demais para uma passada só — reduza os anexos do card e rode de novo.`,
+    );
+  }
 
   const uso = data.content?.find((c: { type: string; name?: string }) => c.type === 'tool_use' && c.name === o.ferramenta.name);
   if (uso?.input && typeof uso.input === 'object') return uso.input;
@@ -3211,11 +3233,15 @@ Deno.serve(async (req) => {
     marcar('leitura dos valores e da auditoria (IA)');
     dados._valor_qualificacao = valorDaTriagem;
 
+
     // A PRIMEIRA PASSADA VOLTOU MUDA? Pergunta menor, uma vez só.
+    // Lido como o resto do código lê (numeroDoCampo aceita "84.320,10"): com
+    // Number() cru, texto brasileiro virava NaN e disparava a segunda leitura
+    // sobre uma análise que tinha valor.
     if (
-      !(Number(dados.bruto_total) > 0) &&
-      !(Number(dados.honorarios) > 0) &&
-      !(Number(dados.honorarios_sucumbenciais) > 0)
+      !(numeroDoCampo(dados.bruto_total) > 0) &&
+      !(numeroDoCampo(dados.honorarios) > 0) &&
+      !(numeroDoCampo(dados.honorarios_sucumbenciais) > 0)
     ) {
       try {
         const resgate = await extrairValoresDeResgate(cfg.anthropic_api_key, contentBlocks) as Record<string, unknown>;
@@ -3223,7 +3249,7 @@ Deno.serve(async (req) => {
           const v = resgate?.[campo];
           if (v != null && v !== '') dados[campo] = v;
         }
-        if (Number(dados.bruto_total) > 0) dados._bruto_da_segunda_leitura = Number(dados.bruto_total);
+        if (numeroDoCampo(dados.bruto_total) > 0) dados._bruto_da_segunda_leitura = numeroDoCampo(dados.bruto_total);
       } catch {
         // O RESGATE É EXTRA: falhar nele não pode custar a análise que a
         // primeira passada já produziu de resto. O erro do valor ausente é
@@ -3276,17 +3302,6 @@ Deno.serve(async (req) => {
         ];
       }
     }
-    // NÚMERO DE VERDADE, venha como vier. A IA — e o chat, que aceita texto — às
-    // vezes devolvem "84.320,10" ou "R$ 84.320,10" onde se pediu número.
-    // `Number("84.320,10")` é NaN, que virava ZERO: o bruto zerado dava "não
-    // localizei valor" (mensagem enganosa, o valor estava lá), e IR/INSS
-    // zerados faziam o líquido SUBIR em silêncio. parseNumeroFlex já existia
-    // para isto e não era usado aqui.
-    const numeroDoCampo = (v: unknown): number => {
-      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
-      if (typeof v === 'string') return parseNumeroFlex(v.replace(/[^\d.,\-]/g, '')) ?? 0;
-      return 0;
-    };
     const numeroOuNulo = (v: unknown): number | null => (v == null || v === '' ? null : numeroDoCampo(v));
     dados.bruto_total = numeroDoCampo(dados.bruto_total);
     dados.ir = numeroDoCampo(dados.ir);
@@ -4577,7 +4592,10 @@ Deno.serve(async (req) => {
 
     if (leadId) {
       try {
-        await sbAdmin.from('kommo_leads').update({
+        // supabase-js NÃO LANÇA: devolve { error }. Sem ler, a falha de gravar o
+        // atalho da pasta e o resumo da oportunidade era invisível — e o card
+        // seguia sem link e com o Aprovar de Validação abrindo vazio.
+        const { error: _erroCard } = await sbAdmin.from('kommo_leads').update({
           drive_pasta_id: cedenteId,
           // O RESUMO DA OPORTUNIDADE GUARDADO NO CARD, porque quem aprova não
           // tem a análise: ela vive na memória do navegador de quem a rodou, e
@@ -4594,7 +4612,17 @@ Deno.serve(async (req) => {
             dataPagamento: dados.data_pagamento ?? null,
           },
         }).eq('kommo_lead_id', leadId);
-      } catch { /* atalho é atalho */ }
+        if (_erroCard) {
+          avisosBase.push(
+            `⚠️ A planilha subiu, mas não consegui gravar no card o atalho da pasta e o resumo da oportunidade (${String(_erroCard.message ?? _erroCard).slice(0, 120)}). O título do card fica sem link e o Aprovar em Validação abre sem o resumo até a próxima análise salva.`,
+          );
+        }
+      } catch (e) {
+        // Rede ou exceção de verdade: mesmo tratamento, pelo mesmo motivo.
+        avisosBase.push(
+          `⚠️ A planilha subiu, mas não consegui gravar no card o atalho da pasta e o resumo da oportunidade (${String((e as Error)?.message ?? e).slice(0, 120)}).`,
+        );
+      }
     }
 
     // limpeza best-effort dos uploads

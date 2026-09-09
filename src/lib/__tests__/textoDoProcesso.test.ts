@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { montarTextoDoProcesso, type PaginaLida } from '../textoDoProcesso'
+import { montarTextoDoProcesso, semRodapeDeAssinatura, type PaginaLida } from '../textoDoProcesso'
 
 /**
  * O texto do processo que a IA recebe, quando ele não cabe inteiro.
@@ -91,5 +91,65 @@ describe('montarTextoDoProcesso', () => {
     const ordem = [...r.texto.matchAll(/\[p\.(\d+)\]/g)].map((m) => Number(m[1]))
     expect(ordem).toEqual([...ordem].sort((a, b) => a - b))
     expect(ordem).toContain(15)
+  })
+})
+
+/**
+ * O rodapé de assinatura sai da CONTA de densidade — e só ele.
+ *
+ * A regressão que isto fixa: cada página do PDF chega como UMA linha, e a
+ * versão anterior do filtro (`^.*frase.*$` com flag m) casava a linha inteira.
+ * Página de petição com carimbo no pé media zero, o processo virava
+ * "digitalização" e todas as páginas iam para a esteira de imagens.
+ */
+describe('semRodapeDeAssinatura', () => {
+  const carimbo =
+    'Documento assinado digitalmente conforme MP nº 2.200-2/2001 de 24/08/2001. ' +
+    'Este documento pode ser verificado no endereço eletrônico http://www.tjgo.jus.br/verificar ' +
+    'código de verificação 3F2A-91BC-77D0. Página 12 de 140'
+  const peticao =
+    'EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO. NAZARENO SANTANA FLORAMBEL FILHO requer a ' +
+    'execução dos honorários arbitrados em 117 UHDs, no valor atualizado de R$ 23.588,37, conforme memória de cálculo anexa.'
+
+  it('mantém o conteúdo da página quando o carimbo está no fim', () => {
+    const t = semRodapeDeAssinatura(`${peticao} ${carimbo}`)
+    expect(t).toContain('R$ 23.588,37')
+    expect(t).toContain('117 UHDs')
+    expect(t).not.toContain('2.200-2')
+    expect(t).not.toContain('3F2A-91BC-77D0')
+  })
+
+  it('mantém o conteúdo quando o carimbo está no começo ou no meio', () => {
+    expect(semRodapeDeAssinatura(`${carimbo} ${peticao}`)).toContain('R$ 23.588,37')
+    const meio = `${peticao.slice(0, 60)} assinado eletronicamente por JOÃO DA SILVA ${peticao.slice(60)}`
+    const t = semRodapeDeAssinatura(meio)
+    expect(t).toContain('EXCELENTÍSSIMO')
+    expect(t).toContain('memória de cálculo anexa')
+  })
+
+  // A propriedade que a versão antiga violava: página com conteúdo de verdade
+  // nunca mede abaixo do mínimo só por ter carimbo.
+  it('página de petição com carimbo continua acima do mínimo de 80 caracteres', () => {
+    expect(semRodapeDeAssinatura(`${peticao} ${carimbo}`).length).toBeGreaterThan(80)
+  })
+
+  // E a digitalização continua sendo reconhecida: sobrando só o carimbo,
+  // sobra quase nada.
+  it('página só com carimbo fica abaixo do mínimo', () => {
+    expect(semRodapeDeAssinatura(carimbo).length).toBeLessThan(80)
+    expect(semRodapeDeAssinatura(`${carimbo} ${carimbo}`).length).toBeLessThan(80)
+  })
+
+  it('funciona no texto inteiro, com páginas separadas por quebra de linha', () => {
+    const doc = [`${peticao} ${carimbo}`, `Decisão: homologo os cálculos. ${carimbo}`, carimbo].join('\n')
+    const t = semRodapeDeAssinatura(doc)
+    expect(t).toContain('R$ 23.588,37')
+    expect(t).toContain('homologo os cálculos')
+    expect(t).not.toContain('Página 12 de 140')
+  })
+
+  it('texto sem carimbo passa intacto (a menos do espaço normalizado)', () => {
+    expect(semRodapeDeAssinatura('  a   b  ')).toBe('a b')
+    expect(semRodapeDeAssinatura('')).toBe('')
   })
 })
