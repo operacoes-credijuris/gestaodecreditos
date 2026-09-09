@@ -1759,6 +1759,29 @@ const FERRAMENTA_PRECO = ferramentaDoEsquema(
 const FERRAMENTA_DOCUMENTO = ferramentaDoEsquema(
   'registrar_documento', 'Registra o questionário jurídico, a síntese do processo e os riscos.', SCHEMA_DOCUMENTO,
 );
+/**
+ * O ESQUEMA DO RESGATE: só o dinheiro, e de onde ele saiu.
+ *
+ * Os MESMOS campos do esquema grande, escolhidos por nome — as descrições são
+ * onde mora a ordem de autoridade das peças e a conferência "bruto − IR − INSS
+ * − honorários = líquido", e reescrevê-las aqui criaria uma segunda versão da
+ * regra para divergir da primeira na próxima mudança.
+ */
+const CAMPOS_RESGATE = [
+  'bruto_total', 'ir', 'inss', 'honorarios', 'honorarios_sucumbenciais', 'origem_valores',
+] as const;
+const SCHEMA_RESGATE: Record<string, string> = Object.fromEntries(
+  CAMPOS_RESGATE.map((c) => {
+    const d = (SCHEMA_ANALISE as Record<string, string>)[c];
+    // Erro de CARGA, e não em produção: renomeado o campo lá, esta lista para
+    // de casar, e o resgate silenciosamente deixaria de trazer o valor.
+    if (!d) throw new Error(`SCHEMA_RESGATE: campo inexistente em SCHEMA_ANALISE: "${c}"`);
+    return [c, d];
+  }),
+);
+const FERRAMENTA_RESGATE = ferramentaDoEsquema(
+  'registrar_valores_minimos', 'Registra apenas os valores do crédito e de onde eles saíram.', SCHEMA_RESGATE,
+);
 const FERRAMENTA_QUALIFICACAO = ferramentaDoEsquema(
   'registrar_qualificacao', 'Registra a qualificação (pré-análise) do crédito.', SCHEMA_QUALIFICACAO,
 );
@@ -1932,6 +1955,41 @@ const extrairDocumento = (apiKey: string, contentBlocks: any[]) =>
   extrairComFerramenta(apiKey, {
     rotulo: 'questionário', instrucoes: `${SYSTEM_ANALISE}\n\n${FECHO_DOCUMENTO}`, ferramenta: FERRAMENTA_DOCUMENTO,
     conteudo: contentBlocks, maxTokens: CLAUDE_MAX_TOKENS,
+  });
+
+/**
+ * A SEGUNDA PASSADA, quando a primeira volta sem dinheiro nenhum.
+ *
+ * POR QUE ELA EXISTE. O mesmo processo, no mesmo código, devolveu R$ 16.778,83
+ * numa execução e nada em outra: a leitura dos valores é exigente — de qual
+ * peça sai cada número, em que ordem de autoridade, com que atualização — e num
+ * caso de borda o modelo às vezes prefere o silêncio à escolha. O silêncio
+ * custa a análise INTEIRA: a síntese, a auditoria e os riscos já estão prontos
+ * e não chegam a ninguém porque faltou um número.
+ *
+ * NÃO É "PERGUNTAR ATÉ GOSTAR DA RESPOSTA". A pergunta é outra e menor — só o
+ * dinheiro, sem auditoria, sem prazo —, e ela admite explicitamente o "não
+ * achei", desde que dito: um null com o motivo escrito vira diligência, que é
+ * uma resposta útil. O que não serve é a devolução muda.
+ *
+ * SÓ NO CAMINHO QUE JÁ FALHOU: o custo de relógio não recai sobre a análise que
+ * deu certo, e a alternativa nesse caminho não é uma análise mais rápida — é
+ * nenhuma.
+ */
+const RESGATE_INSTRUCOES =
+  'Você lê processos de RPV e extrai os valores do crédito. ' +
+  'ESTA É UMA SEGUNDA PASSADA: a primeira leitura deste mesmo processo voltou SEM VALOR NENHUM — nem bruto, nem imposto, nem honorário. ' +
+  'Sem um valor a análise inteira se perde: a síntese, a auditoria e os riscos já estão prontos e não chegam a quem os pediu. ' +
+  'LEIA DE NOVO, E SÓ O DINHEIRO. Percorra a ordem de autoridade das peças — requisitório expedido, cálculo homologado, conta da contadoria, valor do executado não impugnado, valor do exequente não impugnado — e devolva o melhor valor que os autos sustentam. ' +
+  'Em execução cujo OBJETO é a verba honorária (defensoria dativa/UHD, curador, perito, causa própria), aquele honorário É o crédito principal e vai em bruto_total; ali o valor atribuído à causa da execução é o próprio valor executado (art. 291 do CPC) e serve. ' +
+  'Arbitrado em UNIDADES (UHD, URH, salário mínimo), a conversão em reais está nos autos — na memória, na homologação ou no requisitório. Nunca invente o valor da unidade. ' +
+  'DIGA SEMPRE, em origem_valores, de qual documento e de que página o número saiu. ' +
+  'E SE MESMO ASSIM NÃO HOUVER VALOR em documento nenhum, devolva null e escreva em origem_valores o que você procurou e não encontrou — isso vira diligência, e é uma resposta útil. O que não serve é devolver nada sem dizer por quê.';
+
+const extrairValoresDeResgate = (apiKey: string, contentBlocks: any[]) =>
+  extrairComFerramenta(apiKey, {
+    rotulo: 'segunda leitura dos valores', instrucoes: RESGATE_INSTRUCOES, ferramenta: FERRAMENTA_RESGATE,
+    conteudo: contentBlocks, maxTokens: 2000,
   });
 
 // ---- PORTÃO 1: chamada de IA + decisão ----
@@ -2120,6 +2178,7 @@ async function refinarDados(
       // triagem: os avisos contariam uma origem que o numero de agora nao tem.
       delete r.dados._honorarioEraOPrincipal;
       delete r.dados._bruto_do_portao;
+      delete r.dados._bruto_da_segunda_leitura;
     }
   }
 
@@ -3151,6 +3210,27 @@ Deno.serve(async (req) => {
     dados = await extrairPreco(cfg.anthropic_api_key, contentBlocks);
     marcar('leitura dos valores e da auditoria (IA)');
     dados._valor_qualificacao = valorDaTriagem;
+
+    // A PRIMEIRA PASSADA VOLTOU MUDA? Pergunta menor, uma vez só.
+    if (
+      !(Number(dados.bruto_total) > 0) &&
+      !(Number(dados.honorarios) > 0) &&
+      !(Number(dados.honorarios_sucumbenciais) > 0)
+    ) {
+      try {
+        const resgate = await extrairValoresDeResgate(cfg.anthropic_api_key, contentBlocks) as Record<string, unknown>;
+        for (const campo of CAMPOS_RESGATE) {
+          const v = resgate?.[campo];
+          if (v != null && v !== '') dados[campo] = v;
+        }
+        if (Number(dados.bruto_total) > 0) dados._bruto_da_segunda_leitura = Number(dados.bruto_total);
+      } catch {
+        // O RESGATE É EXTRA: falhar nele não pode custar a análise que a
+        // primeira passada já produziu de resto. O erro do valor ausente é
+        // dado adiante pela guarda de sempre, que diz o que a leitura trouxe.
+      }
+      marcar('segunda leitura dos valores (IA)');
+    }
     dados._houveCorte = houveCorte;
     dados._paginas_imagem = paginasImagem;
     dados._imagens_cortadas = cortouImagens;
@@ -4272,6 +4352,12 @@ Deno.serve(async (req) => {
         `(diferença de ${brl(Math.abs(dados._parcelasNaoFecham.calculado - dados._parcelasNaoFecham.declarado))}). ` +
         'Algum valor veio de documento diferente dos outros. Confira antes de fechar — o preço foi calibrado sobre o bruto.' +
         (dados.origem_valores ? ` De onde a IA disse que tirou: ${String(dados.origem_valores).slice(0, 300)}` : ''),
+      );
+    if (Number(dados._bruto_da_segunda_leitura) > 0)
+      avisosBase.unshift(
+        `⚠️ VALOR VINDO DE UMA SEGUNDA LEITURA (${brl(Number(dados._bruto_da_segunda_leitura))}). ` +
+        'A primeira passada não devolveu valor nenhum, e a segunda — pedida só para o dinheiro — encontrou este. ' +
+        'CONFIRA A ORIGEM antes de fechar: o preço inteiro foi calibrado sobre ele.',
       );
     if (Number(dados._bruto_do_portao) > 0)
       avisosBase.unshift(
