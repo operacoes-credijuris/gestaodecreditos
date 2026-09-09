@@ -552,8 +552,11 @@ function JanelaDeMensagem({
     <Modal
       open
       onClose={onFechar}
-      title={`${acao.label}: ${tituloCard(lead)}`}
-      description="A mensagem vai como nota no card do Kommo, junto do registro da movimentação."
+      title={acao.label}
+      // O CARD EMBAIXO, e não colado no título: são duas informações de peso
+      // diferente — o que se vai fazer, e sobre qual crédito. Juntas numa linha
+      // só passavam de oitenta caracteres e quebravam o título em duas.
+      description={tituloCard(lead)}
       size="lg"
       dirty={mensagem.trim() !== sugestao.trim()}
       footer={
@@ -571,7 +574,7 @@ function JanelaDeMensagem({
             disabled={!podeEnviar}
             loading={ocupado}
           >
-            Confirmar: {acao.label}
+            Confirmar
           </Button>
           <button
             type="button"
@@ -1737,7 +1740,11 @@ export default function AnaliseCredito() {
                 }
                 onAnalisar={onAnalisar}
                 analisando={rpvLead?.kommo_lead_id === l.kommo_lead_id}
-                resultadoAnalise={resultadoAnalise[l.kommo_lead_id]}
+                resultadoAnalise={
+                  funil === FUNIL_RPV && abaAtual?.key !== 'pendentes'
+                    ? undefined
+                    : resultadoAnalise[l.kommo_lead_id]
+                }
                 onDueDiligence={onDueDiligence}
                 onAnaliseJuridica={onAnaliseJuridica}
                 analisandoJuridico={analisandoJurId === l.kommo_lead_id}

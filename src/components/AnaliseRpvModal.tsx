@@ -1240,7 +1240,7 @@ function JanelaDeDesfecho({
             escrever uma ressalva que contradiz uma delas. */}
         {achados.length > 0 && (
           <div>
-            <p className="text-xs text-slate-500">O que motivou</p>
+            <p className="text-xs text-slate-500">Selecionar motivos</p>
             <ul className="mt-1.5 max-h-64 space-y-1 overflow-y-auto pr-1">
               {achados.map((a, i) => (
                 <li key={i}>
@@ -2166,7 +2166,11 @@ export function AnaliseRpvModal({
         d.fundamento,
       ].filter(Boolean).join(' ') || undefined,
     }))
-    return [...daAuditoria, ...fundirRiscosEAvisos(riscos, atual?.avisos)]
+    const porGravidade = (a: ItemDeRisco, b: ItemDeRisco) => ORDEM_GRAU[a.grau] - ORDEM_GRAU[b.grau]
+    return [
+      ...daAuditoria.sort(porGravidade),
+      ...fundirRiscosEAvisos(riscos, atual?.avisos),
+    ]
   }, [atual, riscos])
 
   /** Manda a IA reescrever o motivo para quem vai ler no card do Kommo. */
@@ -2258,11 +2262,6 @@ export function AnaliseRpvModal({
            estão lado a lado, e a ordem é a da gravidade: os que interrompem, o
            que grava, o que segue. */
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {salvo && !mudouDesdeSalvar && (
-            <span className="mr-auto text-xs text-slate-400">
-              Nada mudou desde o último salvamento.
-            </span>
-          )}
           {acaoDiligencia && (
             <Button
               variant={acaoDiligencia.variant}
