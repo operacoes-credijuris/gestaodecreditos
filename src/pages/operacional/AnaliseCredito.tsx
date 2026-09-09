@@ -555,7 +555,12 @@ function JanelaDeMensagem({
 }) {
   const [mensagem, setMensagem] = useState(sugestao)
   const [erro, setErro] = useState<string | null>(null)
-  const podeEnviar = !ocupado && (!exigeMotivo || mensagem.trim().length >= 10)
+  // `ocupado` é o `isPending` da MOVIMENTAÇÃO, e ela é só a primeira metade: a
+  // nota vem depois, noutra requisição. Nessa fresta o Confirmar voltava a
+  // ficar habilitado e sem spinner, e um segundo clique disparava tudo de novo.
+  const [enviando, setEnviando] = useState(false)
+  const trabalhando = ocupado || enviando
+  const podeEnviar = !trabalhando && (!exigeMotivo || mensagem.trim().length >= 10)
 
   return (
     <Modal
@@ -574,21 +579,24 @@ function JanelaDeMensagem({
             variant={acao.variant}
             onClick={async () => {
               setErro(null)
+              setEnviando(true)
               try {
                 await onConfirmar(mensagem.trim())
               } catch (e) {
                 setErro((e as Error)?.message ?? String(e))
+              } finally {
+                setEnviando(false)
               }
             }}
             disabled={!podeEnviar}
-            loading={ocupado}
+            loading={trabalhando}
           >
             Confirmar
           </Button>
           <button
             type="button"
             onClick={onFechar}
-            disabled={ocupado}
+            disabled={trabalhando}
             className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
           >
             cancelar
@@ -599,7 +607,7 @@ function JanelaDeMensagem({
       <textarea
         className="min-h-[220px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 font-mono text-[13px] leading-relaxed placeholder:font-sans placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
         value={mensagem}
-        disabled={ocupado}
+        disabled={trabalhando}
         placeholder={
           exigeMotivo
             ? 'Por que o card está sendo movido. Quem lê não tem a análise à mão.'
@@ -1104,6 +1112,13 @@ export default function AnaliseCredito() {
   const leads = useKommoLeads(funil)
   const etapas = useKommoEtapas()
   const prontas = useAnalisesProntas()
+  /**
+   * Os pares (card, coluna) já movidos nesta sessão.
+   *
+   * Serve a `moverComNota`, que tem duas fases — mover e anotar — e só a
+   * segunda é segura de repetir. Ver lá.
+   */
+  const jaMovidos = useRef<Set<string>>(new Set())
 
   const [aba, setAba] = useState<string>('pendentes')
   // Destinação do precatório. Só tem efeito no funil de Precatórios; em RPV o
@@ -1519,16 +1534,31 @@ export default function AnaliseCredito() {
    * de leitura é o que aconteceu e então por quê.
    */
   async function moverComNota(leadId: number, statusId: number, mensagem: string) {
-    await mover.mutateAsync({ leadId, statusId, comentario: '' })
+    // MOVER UMA VEZ, ANOTAR QUANTAS PRECISAR.
+    //
+    // Falhando a nota DEPOIS de o card já ter mudado de coluna, a janela fica
+    // aberta com "o texto continua aqui" convidando a tentar de novo — e o novo
+    // Confirmar movia o card OUTRA VEZ para o mesmo status, deixando duas
+    // movimentações no histórico por causa de uma nota. A memória por
+    // (card, coluna) sobrevive ao retry porque mora num ref da página.
+    const chave = `${leadId}:${statusId}`
+    if (!jaMovidos.current.has(chave)) {
+      await mover.mutateAsync({ leadId, statusId, comentario: '' })
+      jaMovidos.current.add(chave)
+    }
     const texto = mensagem.trim()
     if (!texto) return
     try {
-      await invokeFunction('kommo-anotar', { lead_id: leadId, texto })
+      // DE PESSOA: o texto é dela, e é o que a análise seguinte precisa ler no
+      // card. Ver marcarComoDePessoa, em _shared/notaCredijuris.ts.
+      await invokeFunction('kommo-anotar', {
+        lead_id: leadId, texto, origem: 'pessoa', autor: analistaNome,
+      })
     } catch (e) {
       throw new Error(
         'O card foi movido, mas a nota com a mensagem não subiu (' +
           ((e as Error)?.message ?? String(e)) +
-          '). O texto continua aqui.',
+          '). O texto continua aqui — confirmar de novo tenta só a nota.',
       )
     }
   }
@@ -1829,6 +1859,10 @@ export default function AnaliseCredito() {
             // era isso que a versão de um clique fazia cedo demais.
             const final = r as unknown as ResultadoAnalise
             setResultadoAnalise((p) => ({ ...p, [rpvLead.kommo_lead_id]: final }))
+            // O SELO "FINALIZADO" da lista: o 'salvar' acabou de gravar a linha
+            // em kommo_analise_interna, e sem invalidar o cache ele só apareceria
+            // na próxima visita à tela.
+            qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
             void anotarResultadoNaKommo(rpvLead.kommo_lead_id, final, analistaNome).then((falhas) => {
               if (falhas.length) toast.error('A análise foi salva no Drive, mas a anotação no card do Kommo não subiu: ' + falhas.join('; '))
             })

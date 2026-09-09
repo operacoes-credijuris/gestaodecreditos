@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   assinarNota,
   ehNotaNossa,
+  marcarComoDePessoa,
   MARCA_NOTA,
 } from '../../../supabase/functions/_shared/notaCredijuris.ts'
 import { anotacoesDaAnalise, resumoDaOportunidade } from '../anotacaoKommo.ts'
@@ -94,6 +95,28 @@ describe('notaCredijuris', () => {
   // E A MARCA CONTINUA SENDO POSTA nas notas novas: assinarNota olha a
   // assinatura, não o reconhecimento largo, senão uma nota nova no formato de
   // sempre sairia sem marca — e o legado voltaria a se criar sozinho.
+  // A NOTA DE GENTE NÃO É NOSSA. O motivo da diligência, da reprovação e da
+  // aprovação é escrito por quem decide — a IA no máximo rascunha. Assinada como
+  // "nota automática", ela mentia a autoria E era excluída do espelho, então a
+  // justificativa não chegava à análise seguinte, que é quem mais precisa dela.
+  it('a nota registrada por pessoa não é filtrada', () => {
+    const t = marcarComoDePessoa('Crédito Reprovado\n\n* falta a homologação;', 'Pedro')
+    expect(t).toContain('registrado por Pedro pela plataforma Credijuris')
+    expect(t).not.toContain(MARCA_NOTA)
+    expect(ehNotaNossa(t)).toBe(false)
+  })
+
+  it('sem autor, o rodapé diz só a plataforma', () => {
+    expect(marcarComoDePessoa('Motivo qualquer.')).toContain('— registrado pela plataforma Credijuris')
+    expect(marcarComoDePessoa('Motivo qualquer.', '   ')).toContain('— registrado pela plataforma Credijuris')
+  })
+
+  it('não marca duas vezes nem marca o vazio', () => {
+    const uma = marcarComoDePessoa('Motivo.', 'Pedro')
+    expect(marcarComoDePessoa(uma, 'Pedro')).toBe(uma)
+    expect(marcarComoDePessoa('   ', 'Pedro')).toBe('')
+  })
+
   it('assina a nota nova mesmo quando a forma é a legada', () => {
     const [ficha] = anotacoesDaAnalise({ ficha: { tipo: 'RPV', processo: '5001234-56' } })
     expect(assinarNota(ficha)).toBe(`${ficha}\n\n${MARCA_NOTA}`)

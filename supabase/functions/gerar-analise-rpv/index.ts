@@ -52,7 +52,7 @@ import {
   type IndiceDeclarado,
   type Regime,
 } from "../_shared/indicesBcb.ts";
-import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, escolherModelo, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, escolherModelo, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type Precificacao, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
 import {
   aplicarDiligenciaNoM2,
@@ -208,6 +208,25 @@ const pct = (n: any) => ((Number(n) || 0) * 100).toLocaleString('pt-BR', { minim
 // localizei valor" (mensagem enganosa, o valor estava lá), e IR/INSS
 // zerados faziam o líquido SUBIR em silêncio. parseNumeroFlex já existia
 // para isto e não era usado aqui.
+/**
+ * "true"/"sim" → true, "false"/"não" → false, o resto → null.
+ *
+ * A ferramenta é gerada por `ferramentaDoEsquema`, que declara as propriedades
+ * SEM `type` — só a descrição em português. O modelo às vezes devolve o
+ * booleano como texto, e `!!dados.honorarios_destacados` transformava a string
+ * "false" em true: a ficha do card afirmava que houve destaque, e a conferência
+ * contra a linha 34 do questionário (`typeof === 'boolean'`) era pulada em
+ * silêncio. `escolherModelo` também só reconhece booleano de verdade, então o
+ * bloco da planilha caía no critério do valor destacado sem ninguém saber.
+ */
+const lerBooleano = (v: unknown): boolean | null => {
+  if (v === true || v === false) return v;
+  const t = String(v ?? '').trim().toLowerCase();
+  if (/^(true|sim|s|1)$/.test(t)) return true;
+  if (/^(false|n[aã]o|n|0)$/.test(t)) return false;
+  return null;
+};
+
 const numeroDoCampo = (v: unknown): number => {
   if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
   if (typeof v === 'string') return parseNumeroFlex(v.replace(/[^\d.,\-]/g, '')) ?? 0;
@@ -1885,7 +1904,18 @@ async function extrairComFerramenta(
   // certeza em vez de falhar com aviso. Trocar uma falha explicada por um
   // timeout é piorar. O teto de saída já é generoso; se cortar, quem lê recebe
   // a mensagem dizendo exatamente isso e o que fazer.
+  const _tAntes = Date.now();
   const data = await pedir(o.maxTokens);
+  // O ÚNICO REGISTRO QUE ESTA FUNÇÃO DEIXA. Ela tinha zero `console` em 4.700
+  // linhas, e três defeitos desta auditoria eram invisíveis exatamente por
+  // isso: a segunda leitura que nunca rodou, o input cortado aceito como
+  // inteiro e o cache de prompt sem hit. `cache_read_input_tokens` em zero é a
+  // única forma de ver que o prefixo quebrou — e ele quebra por qualquer
+  // diferença em tools/system.
+  console.log(JSON.stringify({
+    fn: 'gerar-analise-rpv', rotulo: o.rotulo, stop_reason: data?.stop_reason,
+    usage: data?.usage, blocos: o.conteudo.length, ms: Date.now() - _tAntes,
+  }));
 
   // CORTADA É CORTADA, com ou sem tool_use. A checagem de max_tokens só corria
   // quando não havia bloco de ferramenta; havendo, o input parcial era aceito
@@ -2171,9 +2201,19 @@ async function refinarDados(
     }
     if (_tocados.includes('principal_liquido')) delete r.dados._liquido_lido;
     if (_tocados.includes('auditoria_justificativa')) delete r.dados._auditoria_justificativa_lida;
-    // Honorário ditado no chat vira a nova linha de base — quem tem o processo
-    // aberto acabou de dizer quanto a contadoria destacou.
-    if (_tocados.includes('honorarios')) delete r.dados._honorarios_lido;
+    // HONORÁRIO DITADO NO CHAT VENCE O PERCENTUAL DO CARD.
+    //
+    // Ele é campo editável, o SISTEMA_REVISAO promete que "quem afirma o dado é
+    // o usuário", e a resposta dizia "Aplicado: honorarios: X → Y" — mas a
+    // passada seguinte recalculava `pct × base` e descartava o número em
+    // silêncio. Agora a marca desliga o percentual do card, com aviso na tela
+    // para ninguém achar que o card foi ignorado por acaso. Ela sai quando o
+    // chat mexe no próprio percentual.
+    if (_tocados.includes('honorarios')) {
+      delete r.dados._honorarios_lido;
+      r.dados._honorarios_ditado = true;
+    }
+    if (_tocados.includes('honorarios_contratuais_pct')) delete r.dados._honorarios_ditado;
     // O CENÁRIO CONSERVADOR DITADO NO CHAT FICA.
     //
     // O convite a corrigi-lo está na própria resposta da análise ("corrija
@@ -2621,6 +2661,16 @@ Deno.serve(async (req) => {
    * mesmo. Declarado FORA do try porque é no catch que ele precisa existir.
    */
   let limparUploads: (() => Promise<void>) | null = null;
+  /**
+   * A ação, visível ao catch geral.
+   *
+   * `acao` é declarada dentro do try, e o catch precisa dela: 'documento' NÃO
+   * pode apagar as páginas subidas, porque a irmã 'analisar' roda em PARALELO e
+   * baixa do mesmo prefixo. Uma falha rápida de 'documento' (400 por tamanho,
+   * 529 depois das tentativas curtas) esvaziava o bucket enquanto a outra ainda
+   * estava lendo — e a análise que sobrava perdia as imagens no meio.
+   */
+  let _acaoDaVez: string | null = null;
 
   /**
    * O CRONÔMETRO DAS FASES. Existe porque eu passei uma tarde adivinhando.
@@ -2889,6 +2939,20 @@ Deno.serve(async (req) => {
       body.acao === 'qualificar' || body.acao === 'analisar' || body.acao === 'documento' || body.acao === 'refinar' || body.acao === 'reprecificar' || body.acao === 'salvar'
         ? body.acao
         : null;
+    // AÇÃO É OBRIGATÓRIA. O caminho nulo era o fluxo antigo "tudo num clique",
+    // e desde a divisão em duas leituras ele NUNCA chama extrairDocumento: m2,
+    // síntese e riscos ficavam vazios, e a planilha saía com a aba jurídica em
+    // branco e a linha 40 sem riscos — sem erro nenhum, com cara de completa.
+    // Nenhum chamador do navegador usa esse caminho; o que sobrava era a
+    // armadilha.
+    if (acao === null) {
+      return errorResponse(
+        'Informe a ação: qualificar, analisar, documento, refinar, reprecificar ou salvar. ' +
+        'O fluxo antigo de uma chamada só foi retirado — ele não lia o questionário jurídico e produzia planilha incompleta.',
+        400,
+      );
+    }
+    _acaoDaVez = acao;
     const notasKommo: string = String(body.notas_kommo ?? '').trim();
     /**
      * O card. Chega em TODAS as ações (vai no `corpoCard` do navegador) porque a
@@ -3189,7 +3253,14 @@ Deno.serve(async (req) => {
     // A segunda é a certa — e por ser mais exigente ela devolve null onde a
     // primeira arriscou um valor. Guardar aqui é o que permite dizer, depois,
     // se o crédito não tem valor nos autos ou se foi a exigência que o barrou.
-    const _valorPortao = Number(qualif.valor_credito);
+    // O MESMO PARSER DO PORTÃO. `avaliarQualificacao` lê este campo com
+    // parseNumeroFlex justamente porque a leitura devolve "R$ 124.500,00"; com
+    // Number() cru o portão aprovava com valor e `_valor_qualificacao` ficava
+    // 0 — o último recurso do bruto nunca disparava e a mensagem de reprovação
+    // afirmava "na triagem o valor saiu como R$ 0,00", que é falso.
+    const _valorPortao = typeof qualif.valor_credito === 'number'
+      ? qualif.valor_credito
+      : (parseNumeroFlex(String(qualif.valor_credito ?? '').replace(/[^\d.,\-]/g, '')) ?? NaN);
     valorDaTriagem = Number.isFinite(_valorPortao) && _valorPortao > 0 ? _valorPortao : 0;
     const veredito = avaliarQualificacao(qualif);
     if (!veredito.aprovado) {
@@ -3259,10 +3330,14 @@ Deno.serve(async (req) => {
           if (v != null && v !== '') dados[campo] = v;
         }
         if (numeroDoCampo(dados.bruto_total) > 0) dados._bruto_da_segunda_leitura = numeroDoCampo(dados.bruto_total);
-      } catch {
+      } catch (e) {
         // O RESGATE É EXTRA: falhar nele não pode custar a análise que a
-        // primeira passada já produziu de resto. O erro do valor ausente é
-        // dado adiante pela guarda de sempre, que diz o que a leitura trouxe.
+        // primeira passada já produziu de resto. Mas MUDO ele não fica: a
+        // guarda adiante dizia "não localizei valor" sem contar que a segunda
+        // passada rodou e caiu, e a diferença muda o que fazer — reler o card
+        // ou juntar a peça que falta.
+        dados._segunda_leitura_falhou = (e as Error)?.message ?? String(e);
+        console.error('[gerar-analise-rpv] resgate falhou', dados._segunda_leitura_falhou);
       }
       marcar('segunda leitura dos valores (IA)');
     }
@@ -3334,6 +3409,9 @@ Deno.serve(async (req) => {
     // sempre a SEGUNDA passada, então era justamente o aviso que não chegava a
     // quem confere.
     if (dados._honorarios_lido == null) dados._honorarios_lido = Number(dados.honorarios) || 0;
+    // Junto dos números, pelo mesmo motivo: o que a ferramenta não tipa, o
+    // código normaliza uma vez, aqui, e o resto do motor confia.
+    dados.honorarios_destacados = lerBooleano(dados.honorarios_destacados);
 
     // 3b.1 O que está sendo cedido (escolha manual sobrepõe a detecção automática) + % de honorários
     //
@@ -3351,7 +3429,7 @@ Deno.serve(async (req) => {
       bruto: Number(dados.bruto_total) || 0,
       ir: Number(dados._ir_lido ?? dados.ir) || 0,
       inss: Number(dados.inss) || 0,
-      pctCard: honorariosPct,
+      pctCard: dados._honorarios_ditado ? null : honorariosPct,
       pctAutosLido: dados.honorarios_contratuais_pct,
     });
     let _hon = _refazerHonorario();
@@ -3384,6 +3462,16 @@ Deno.serve(async (req) => {
     // Agora os valores dos autos ficam intactos e o que muda é só QUAIS VERBAS
     // entram na conta. Ver _shared/precificacao.ts.
     const _sucumbBrutosAutos = Number(dados.honorarios_sucumbenciais) || 0;
+    // OS AVISOS DA ESCOLHA ANTERIOR SAEM AQUI.
+    //
+    // Os três são escritos só no ramo de `tipoAquisicao` que os gera e viajam
+    // em `dados`: trocado o cenário no seletor da janela, a tela continuava
+    // mostrando "o card não diz a parcela cedida" ou "o card diz contratuais e
+    // o processo tem sucumbenciais" sobre uma escolha que já não é a atual. O
+    // próprio bloco os reescreve quando ainda couberem.
+    delete dados._parcela_nao_informada;
+    delete dados._honorarios_resolvido;
+    delete dados._sucumbNaoPrevistos;
     let verbas: VerbasNegociadas;
     // O BLOCO DA PLANILHA SAI DOS AUTOS; as verbas, do negócio. Duas perguntas
     // diferentes, e amarrá-las punha metade dos casos no bloco errado.
@@ -3539,6 +3627,9 @@ Deno.serve(async (req) => {
           : 'A IA não apontou documento nenhum como origem dos valores — não achou a peça, ou não a reconheceu. ') +
         `Na triagem, o valor do crédito saiu como ${brl(Number(dados._valor_qualificacao) || 0)}. ` +
         `A leitura recebeu ${Number(dados._tamanho_texto) || 0} caracteres de texto e ${Number(dados._paginas_imagem) || 0} página(s) como imagem. ` +
+        (dados._segunda_leitura_falhou
+          ? `A segunda leitura (só pelo dinheiro) FALHOU: ${String(dados._segunda_leitura_falhou).slice(0, 200)} — rode de novo antes de concluir que não há valor. `
+          : 'A segunda leitura, só pelo dinheiro, também não achou valor. ') +
         (verbas.principal
           ? 'Confira os cálculos anexados ao card: se a quantia estiver numa dessas outras verbas, é ela que está no campo errado.'
           : 'Junte a peça que fixa os honorários (sentença, acórdão ou conta da contadoria), ou informe o percentual no formulário.');
@@ -3866,6 +3957,10 @@ Deno.serve(async (req) => {
     dados.honorarios = honorariosCalc;
     dados._hon_pct = honorariosPct != null ? honorariosPct : _pctAutos;
 
+    // SÓ ESCREVIA, NUNCA APAGAVA — e a marca viaja em `dados`. Uma correção no
+    // chat que fizesse as parcelas fecharem deixava o aviso "AS PARCELAS NÃO
+    // FECHAM" na tela e no card, com os números de antes da correção.
+    delete dados._parcelasNaoFecham;
     if (_liqDeclarado > 0) {
       const _liqCalculado = (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) -
         (Number(dados.inss) || 0) - (Number(dados.honorarios) || 0);
@@ -4124,7 +4219,11 @@ Deno.serve(async (req) => {
     // gravava deságio, meta, comissão e diligência na análise e esta chamada
     // não os recebia — calibrava sempre no automático e o operador via
     // "Aplicado" numa mudança que não tinha acontecido.
-    const calc: any = calibrarDesagio({
+    // TIPADO, e não `any`: daqui para baixo Y3, Y4, Y5, Y9, Y10, cessao,
+    // atingiuAlvo e parcelas são lidos sem o compilador olhar, e um campo
+    // renomeado em _shared/precificacao.ts viraria `undefined` silencioso no
+    // meio do preço. O intersect declara os extras que o motor acrescenta.
+    const calc: Precificacao & Record<string, any> = calibrarDesagio({
       parcelas: _parcelas, T5,
       regra: emolumentos?.regra ?? null,
       desagioFixo: _manual.desagioFixo,
@@ -4298,6 +4397,11 @@ Deno.serve(async (req) => {
         `PRECIFIQUEI PELO CARD, com ${brl(honorariosCalc)} de honorário — a contadoria destacou ${brl(honAI)}. ` +
         'Confira o contrato de honorários antes de fechar.',
       );
+    if (dados._honorarios_ditado && honorariosPct != null)
+      avisosBase.push(
+        `O honorário contratual foi DITADO no chat (${brl(Number(dados._honorarios_lido ?? dados.honorarios) || 0)}) e é ele que precificou — ` +
+        `o percentual de ${pct(honorariosPct / 100)} do card não foi aplicado. Para voltar ao percentual, diga no chat qual é o "honorarios_contratuais_pct".`,
+      );
     if (dados._honorarios_resolvido)
       avisosBase.push(
         `O card diz apenas "honorários"; o processo tem só os ${dados._honorarios_resolvido}, ` +
@@ -4456,6 +4560,29 @@ Deno.serve(async (req) => {
       }
     }
 
+    // VERBA PEDIDA QUE NÃO ENTROU NO PREÇO.
+    //
+    // `montarParcelas` descarta a parcela cujo líquido sai ≤ 0 (contratuais
+    // maiores que bruto − IR − INSS, o que acontece com conta mal lida) e, sem
+    // principal, joga todo o deságio nos honorários. O rótulo continuava
+    // "Crédito principal + Honorários" e o preço saía de outra composição, sem
+    // um sinal na tela.
+    {
+      const _pedidas: Array<[boolean, string]> = [
+        [!!_verbas.principal, 'principal'],
+        [!!_verbas.contratuais, 'contratuais'],
+        [!!_verbas.sucumbenciais, 'sucumbenciais'],
+      ];
+      const _faltando = _pedidas
+        .filter(([pedida, nome]) => pedida && !(calc.parcelas ?? []).some((p: { nome?: string }) => p?.nome === nome))
+        .map(([, nome]) => nome);
+      if (_faltando.length)
+        avisosBase.unshift(
+          `⚠️ VERBA SEM LÍQUIDO, FORA DO PREÇO: ${_faltando.join(' e ')}. ` +
+          `A conta de bruto ${brl(Number(dados.bruto_total) || 0)} menos IR, INSS e honorários não sobrou nada para ela, ` +
+          'então ela saiu da composição e o deságio recaiu no que restou. Confira os valores lidos antes de fechar.',
+        );
+    }
     if (dados._sucumbDentroDoBruto)
       avisosBase.unshift(
         `⚠️ OS SUCUMBENCIAIS ESTAVAM SOMADOS NO BRUTO, e eu os tirei: o valor lido era ${brl(dados._sucumbDentroDoBruto.antes)}, ` +
@@ -4696,6 +4823,31 @@ Deno.serve(async (req) => {
             dataPagamento: dados.data_pagamento ?? null,
           },
         }).eq('kommo_lead_id', leadId);
+        // O SELO "FINALIZADO" DA LISTA DE PENDENTES, que nunca acendia.
+        //
+        // `useAnalisesProntas` lê a presença da linha em kommo_analise_interna,
+        // e NADA no repositório a escrevia: só a kommo-mover e o kommo-sync
+        // APAGAVAM. O revisor via "Em curso" em todo card, inclusive nos que já
+        // tinham análise salva no Drive — o selo existe justamente para ele não
+        // abrir no escuro. Escrito aqui, no 'salvar', que é o momento em que a
+        // análise passa a existir fora da memória do navegador.
+        //
+        // Best-effort como o resto do bloco: falhar aqui não desfaz a planilha.
+        {
+          const { data: _cardLido } = await sbAdmin.from('kommo_leads')
+            .select('status_id').eq('kommo_lead_id', leadId).maybeSingle();
+          const _statusDoCard = (_cardLido as { status_id?: number } | null)?.status_id ?? 0;
+          const { error: _erroSelo } = await sbAdmin.from('kommo_analise_interna').upsert({
+            kommo_lead_id: leadId,
+            etapa_interna: 'em_revisao',
+            status_id_quando_marcado: Number(_statusDoCard) || 0,
+            marcado_por: userId,
+            marcado_em: new Date().toISOString(),
+          }, { onConflict: 'kommo_lead_id' });
+          if (_erroSelo) {
+            console.error('[gerar-analise-rpv] kommo_analise_interna', leadId, _erroSelo);
+          }
+        }
         if (_erroCard) {
           avisosBase.push(
             `⚠️ A planilha subiu, mas não consegui gravar no card o atalho da pasta e o resumo da oportunidade (${String(_erroCard.message ?? _erroCard).slice(0, 120)}). O título do card fica sem link e o Aprovar em Validação abre sem o resumo até a próxima análise salva.`,
@@ -4746,10 +4898,18 @@ Deno.serve(async (req) => {
       riscos: riscosComAuditoria(dados),
     });
   } catch (e) {
+    // O ÚNICO REGISTRO DA FALHA. A mensagem ia ao cliente e mais nada ficava:
+    // reconstruir o que aconteceu numa análise que morreu dependia de o
+    // operador repetir a frase de cor.
+    console.error('[gerar-analise-rpv] falhou', JSON.stringify({ acao: _acaoDaVez, ms: Date.now() - _t0 }), e);
     // As páginas subidas não servem a mais nada: a leitura que as pediu morreu.
     // Sem isto elas ficavam no bucket para sempre — e é justamente no caminho de
     // erro que ninguém olha.
-    if (limparUploads) { try { await limparUploads(); } catch (_) { /* ok */ } }
+    //
+    // MENOS EM 'documento', que lê o MESMO prefixo que a irmã 'analisar' está
+    // lendo agora: apagar ali derruba a leitura que ainda podia dar certo. Ela
+    // limpa no caminho normal, ou no próprio catch dela.
+    if (limparUploads && _acaoDaVez !== 'documento') { try { await limparUploads(); } catch (_) { /* ok */ } }
     return errorResponse('Falha ao gerar análise: ' + (e instanceof Error ? e.message : String(e)), 500);
   }
 });

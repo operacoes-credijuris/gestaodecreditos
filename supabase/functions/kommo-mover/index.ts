@@ -149,15 +149,24 @@ Deno.serve(async (req: Request) => {
 
     // 3. Espelho local: atualiza o status e descarta a marcação interna, que só
     // vale enquanto o card está na coluna de análise. Sem isso a UI mostraria a
-    // coluna antiga até o próximo sync.
-    await svc
+    // coluna antiga até o próximo sync — e era exatamente o que acontecia em
+    // SILÊNCIO quando o update falhava: supabase-js não lança, devolve
+    // { error }, e o retorno era descartado sem ninguém ler. A coluna ficava
+    // errada na tela até alguém sincronizar, sem explicação.
+    const { error: eEspelho } = await svc
       .from('kommo_leads')
       .update({ status_id: statusId })
       .eq('kommo_lead_id', leadId)
-    await svc
+    const { error: eSelo } = await svc
       .from('kommo_analise_interna')
       .delete()
       .eq('kommo_lead_id', leadId)
+    if (eEspelho || eSelo) {
+      console.error('[kommo-mover] espelho', leadId, eEspelho ?? eSelo)
+      const _falha = 'O card foi movido no Kommo, mas o espelho local não atualizou (' +
+        String((eEspelho ?? eSelo)?.message ?? '').slice(0, 120) + '); a coluna corrige no próximo sync.'
+      avisoNota = avisoNota ? avisoNota + ' ' + _falha : _falha
+    }
 
     return jsonResponse({
       ok: true,

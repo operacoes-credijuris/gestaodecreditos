@@ -86,6 +86,31 @@ function ehFormatoLegado(t: string): boolean {
   return (t.match(ROTULOS_DA_FICHA) ?? []).length >= 2
 }
 
+/**
+ * A MARCA DA NOTA ESCRITA POR GENTE E POSTADA PELA PLATAFORMA.
+ *
+ * Duas coisas diferentes passam pelo kommo-anotar: a ficha e o veredito, que o
+ * sistema redige, e o motivo da diligência, da reprovação ou da aprovação, que
+ * uma PESSOA escreve na janela (a IA pode rascunhar, ela edita e confirma).
+ * Assinar as duas com "nota automática da análise" fazia duas coisas erradas de
+ * uma vez: mentia ao comercial sobre a autoria e, pior, fazia o kommo-sync
+ * excluir do espelho a decisão escrita por gente — a justificativa nunca entrava
+ * em `kommo_leads.notas` e não chegava à análise seguinte, que é justamente
+ * quem mais precisa dela.
+ *
+ * Esta marca diz o que houve — o texto é de alguém, o carimbo de horário e o
+ * autor no feed são do token da plataforma — e `ehNotaNossa` NÃO a reconhece.
+ */
+export function marcarComoDePessoa(texto: string, autor?: string | null): string {
+  const t = String(texto ?? '').trim()
+  if (!t) return t
+  const quem = String(autor ?? '').trim()
+  const rodape = quem
+    ? `— registrado por ${quem} pela plataforma Credijuris`
+    : '— registrado pela plataforma Credijuris'
+  return t.includes('pela plataforma Credijuris') ? t : `${t}\n\n${rodape}`
+}
+
 /** A nota foi escrita pelo sistema? É o que mantém o espelho livre dela. */
 export function ehNotaNossa(texto: string | null | undefined): boolean {
   const t = String(texto ?? '')

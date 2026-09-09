@@ -18,7 +18,7 @@
 //
 // USO (POST, com sessão logada): { "lead_id": 15269795, "texto": "..." }
 
-import { assinarNota } from "../_shared/notaCredijuris.ts";
+import { assinarNota, marcarComoDePessoa } from "../_shared/notaCredijuris.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveKommo } from "../_shared/segredos.ts";
@@ -45,6 +45,11 @@ Deno.serve(async (req) => {
     const leadId = Number((body as any).lead_id ?? (body as any).kommo_lead_id ?? 0);
     const texto = String((body as any).texto ?? "").trim();
     if (!leadId || !texto) return json({ erro: "lead_id e texto são obrigatórios." }, 400);
+    // QUEM ESCREVEU O TEXTO decide o rodapé — e, com ele, se o espelho fica com
+    // a nota ou a descarta. 'analise' é o padrão para não mudar o que os
+    // chamadores antigos fazem; 'pessoa' é o desfecho digitado na janela.
+    const dePessoa = String((body as any).origem ?? "analise") === "pessoa";
+    const autor = String((body as any).autor ?? "").trim() || null;
 
     const token = await chaveKommo();
     if (!token) return json({ erro: "Token da Kommo não configurado (integracao_kommo_secret)." }, 500);
@@ -68,7 +73,7 @@ Deno.serve(async (req) => {
           // _shared/notaCredijuris.ts). Duas perguntas diferentes — como se lê
           // e de quem é — que estavam presas na mesma resposta.
           note_type: "common",
-          params: { text: assinarNota(texto) },
+          params: { text: dePessoa ? marcarComoDePessoa(texto, autor) : assinarNota(texto) },
           // Registro de resultado não é evento de pipeline: não dispara gatilho.
           is_need_to_trigger_digital_pipeline: false,
         },

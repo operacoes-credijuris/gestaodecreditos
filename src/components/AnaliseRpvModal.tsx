@@ -1489,6 +1489,42 @@ export function AnaliseRpvModal({
   // (a página monta a janela com `key` pelo card) — é o comportamento que se
   // quer: a preliminar não é rascunho salvo, é leitura fresca.
   const rodou = useRef(false)
+  /**
+   * A JANELA AINDA ESTÁ ABERTA?
+   *
+   * A abertura é uma cadeia longa: renderizar as páginas, subir as imagens,
+   * 'qualificar', 'analisar' e 'documento' em paralelo, 'reprecificar', e o
+   * levantamento do cartório que vai a dez minutos. Fechar no meio não pedia
+   * confirmação (sem `atual` a janela não está suja) e NADA parava: as
+   * requisições seguintes saíam uma a uma para uma tela que já não existe,
+   * cada uma custando uma leitura de IA e um lugar na fila do worker.
+   *
+   * Não cancela a que já está em voo — para isso precisaria de AbortController
+   * em invokeFunction —, mas impede as SEGUINTES, que são as caras.
+   */
+  const vivo = useRef(true)
+  /**
+   * O que subiu para o Storage nesta janela.
+   *
+   * A única limpeza de `analises-input` mora dentro da Edge Function, e ela só
+   * roda se a função chegar ao fim ou ao catch dela. Morrendo a requisição
+   * antes disso — 504 do gateway aos 150 s, 546 por memória, queda de rede,
+   * aba fechada no meio da qualificação — ninguém apagava: o bucket não tem
+   * lifecycle e nem se sabe mais a que job as páginas pertenciam.
+   */
+  const subidos = useRef<string[]>([])
+  useEffect(() => () => {
+    vivo.current = false
+    // BEST-EFFORT, ao fechar: o que sobrou é lixo de uma leitura que não
+    // terminou. Falhar aqui não pode gerar erro em tela nenhuma — a janela está
+    // desmontando. O que a função já apagou volta como "não existe", que para
+    // o Storage não é erro.
+    const caminhos = subidos.current
+    subidos.current = []
+    if (caminhos.length) {
+      void supabase.storage.from('analises-input').remove(caminhos).then(() => {}, () => {})
+    }
+  }, [])
   useEffect(() => {
     if (!open || rodou.current) return
     rodou.current = true
@@ -1657,7 +1693,13 @@ export function AnaliseRpvModal({
                       .from('analises-input')
                       .upload(caminho, img.blob, { contentType: 'image/jpeg', upsert: true })
                     if (error) falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${error.message}`)
-                    else enviadas++
+                    else {
+                      // O CAMINHO FICA GUARDADO para a limpeza do fechamento
+                      // (ver `subidos`): a Edge Function só apaga se chegar ao
+                      // fim ou ao catch dela.
+                      subidos.current.push(caminho)
+                      enviadas++
+                    }
                   } catch (e) {
                     falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${(e as Error)?.message ?? String(e)}`)
                   }
@@ -1710,6 +1752,7 @@ export function AnaliseRpvModal({
         // A etapa das imagens só existe quando houve imagem: linha com
         // "imagens 0s" em processo nato-digital é ruído.
         if (selecao.length) marcarLocal('imagens', detalheImagens)
+        if (!vivo.current) return
         setPasso('Qualificando o crédito…')
         const q = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
           acao: 'qualificar',
@@ -1721,6 +1764,9 @@ export function AnaliseRpvModal({
         marcar('qualificação', ...(q.tempo ? [{ rotulo: 'qualificação', ...q.tempo }] : []))
         // Reprovado no portão: não há segunda etapa, e a janela mostra o motivo.
         if (q.reprovado) { setAtual(q); return }
+        // Janela fechada durante a qualificação: as duas leituras que vêm agora
+        // são as caras da cadeia, e não têm mais para quem responder.
+        if (!vivo.current) return
 
         // AS DUAS LEITURAS SAEM JUNTAS, e é a razão de existir a ação
         // 'documento'. A análise inteira numa chamada só levava 2m02s de uma
@@ -1775,6 +1821,7 @@ export function AnaliseRpvModal({
         // piso de R$ 20 mil. Nada disso pôde acontecer nas duas leituras: cada
         // uma tinha metade. 'reprecificar' já faz exatamente isso a partir de
         // um `dados` pronto, sem IA e sem reler o processo — custa segundos.
+        if (!vivo.current) return
         setPasso('Juntando as duas leituras…')
         const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
           acao: 'reprecificar',
@@ -1827,6 +1874,7 @@ export function AnaliseRpvModal({
         // `marcar('cartório')`, e a guarda de `revisao.current` lá dentro é o que
         // impede o resultado atrasado de sobrepor o que a pessoa fizer nesse meio.
         setPasso(null)
+        if (!vivo.current) return
         // O CARTÓRIO CHEGA DEPOIS, e de propósito: a busca web leva dezenas de
         // segundos e, dentro da análise, derrubava o worker (HTTP 546).
         await levantarRegraCartorio(r)
@@ -2002,6 +2050,7 @@ export function AnaliseRpvModal({
     setCenario(novo)
     setTrocandoCenario(true)
     setErro(null)
+    setPisoBloqueou(false)
     try {
       // O SELETOR VENCE O CHAT. Se a pessoa ditou as verbas no chat ("tira os
       // sucumbenciais") e depois clicou noutro cenário aqui, o clique é a
@@ -2036,6 +2085,7 @@ export function AnaliseRpvModal({
     if (!instrucao || !atual?.dados) return
     setPedido('')
     setErro(null)
+    setPisoBloqueou(false)
     const historico = [...mensagens, { papel: 'usuario' as const, texto: instrucao }]
     setMensagens(historico)
     // A análise vai ser substituída: a consulta de cartório em voo, se houver,
@@ -2118,6 +2168,7 @@ export function AnaliseRpvModal({
     revisao.current += 1
     setRegraCartorio(emolumentos)
     setFalhaCartorio(null)
+    setPisoBloqueou(false)
     setPasso('Refazendo o preço com o cartório informado…')
     try {
       const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
@@ -2188,6 +2239,7 @@ export function AnaliseRpvModal({
    */
   async function enviarParaValidacao(acao: AcaoTela) {
     setErro(null)
+    setPisoBloqueou(false)
     setEnviandoValidacao(true)
     try {
       await onMover(acao.statusId, '')
