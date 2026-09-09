@@ -2116,9 +2116,10 @@ async function refinarDados(
     if (_tocados.includes('bruto_total')) {
       delete r.dados._ir_lido;
       delete r.dados._liquido_lido;
-      // Bruto ditado a mao encerra o remanejamento do honorario: o aviso
-      // contaria uma origem que o numero de agora nao tem mais.
+      // Bruto ditado a mao encerra o remanejamento do honorario e o valor da
+      // triagem: os avisos contariam uma origem que o numero de agora nao tem.
       delete r.dados._honorarioEraOPrincipal;
+      delete r.dados._bruto_do_portao;
     }
   }
 
@@ -3081,6 +3082,18 @@ Deno.serve(async (req) => {
 
     marcar('portão de qualificação (leitura da IA)');
     if (numeroProcesso) qualif.numero_processo = numeroProcesso;
+
+    // O VALOR QUE O PORTÃO 1 VIU, guardado para o caso de a leitura detalhada
+    // voltar sem nenhum.
+    //
+    // São DUAS LEITURAS DOS MESMOS AUTOS com perguntas de tamanho diferente: o
+    // portão pergunta "quanto vale este crédito", e a análise pergunta de qual
+    // peça sai cada número, em que ordem de autoridade, com que atualização.
+    // A segunda é a certa — e por ser mais exigente ela devolve null onde a
+    // primeira arriscou um valor. Guardar aqui é o que permite dizer, depois,
+    // se o crédito não tem valor nos autos ou se foi a exigência que o barrou.
+    const _valorPortao = Number(qualif.valor_credito);
+    dados._valor_qualificacao = Number.isFinite(_valorPortao) && _valorPortao > 0 ? _valorPortao : 0;
     const veredito = avaliarQualificacao(qualif);
     if (!veredito.aprovado) {
       // Reprovado: não monta tabela jurídica nem precificação. Limpa os uploads e devolve o motivo.
@@ -3364,6 +3377,30 @@ Deno.serve(async (req) => {
       dados._honorarioEraOPrincipal = _sucumbBrutosAutos;
     }
 
+    // ÚLTIMO RECURSO: o valor que o Portão 1 leu.
+    //
+    // Chega aqui quando a leitura detalhada não achou NENHUM valor — nem bruto,
+    // nem honorário, nem sucumbencial — e o portão, lendo os mesmos autos, viu
+    // um. Sem isto a análise morre inteira: minutos de leitura, a síntese
+    // pronta, os riscos levantados, e nada disso chega à tela porque faltou o
+    // número.
+    //
+    // COM AVISO NO TOPO, e nada discreto: o portão NÃO segue a ordem de
+    // autoridade das peças (requisitório, homologação, contadoria) nem confere
+    // atualização — ele responde "quanto vale isto" numa passada. O número
+    // serve para a análise existir e ser conferida, não para fechar negócio sem
+    // olhar.
+    if (
+      verbas.principal &&
+      (Number(dados.bruto_total) || 0) <= 0 &&
+      honorariosCalc <= 0 &&
+      _sucumbBrutosAutos <= 0 &&
+      Number(dados._valor_qualificacao) > 0
+    ) {
+      dados.bruto_total = Number(dados._valor_qualificacao);
+      dados._bruto_do_portao = dados.bruto_total;
+    }
+
     // SEM VERBA NENHUMA NÃO HÁ NEGÓCIO. Acontece quando o card manda comprar
     // honorários e o processo não tem nenhum: melhor dizer isso do que devolver
     // uma análise de valor zero, que parece um resultado.
@@ -3380,6 +3417,7 @@ Deno.serve(async (req) => {
         (dados.origem_valores
           ? `A IA disse ter tirado os números de: ${String(dados.origem_valores).slice(0, 300)} `
           : 'A IA não apontou documento nenhum como origem dos valores — não achou a peça, ou não a reconheceu. ') +
+        `Na triagem, o valor do crédito saiu como ${brl(Number(dados._valor_qualificacao) || 0)}. ` +
         (verbas.principal
           ? 'Confira os cálculos anexados ao card: se a quantia estiver numa dessas outras verbas, é ela que está no campo errado.'
           : 'Junte a peça que fixa os honorários (sentença, acórdão ou conta da contadoria), ou informe o percentual no formulário.'),
@@ -4226,6 +4264,13 @@ Deno.serve(async (req) => {
         `(diferença de ${brl(Math.abs(dados._parcelasNaoFecham.calculado - dados._parcelasNaoFecham.declarado))}). ` +
         'Algum valor veio de documento diferente dos outros. Confira antes de fechar — o preço foi calibrado sobre o bruto.' +
         (dados.origem_valores ? ` De onde a IA disse que tirou: ${String(dados.origem_valores).slice(0, 300)}` : ''),
+      );
+    if (Number(dados._bruto_do_portao) > 0)
+      avisosBase.unshift(
+        `⚠️ VALOR VINDO DA TRIAGEM, NÃO DA LEITURA DETALHADA (${brl(Number(dados._bruto_do_portao))}). ` +
+        'A leitura que escolhe a peça — requisitório, cálculo homologado, conta da contadoria — não devolveu valor nenhum, ' +
+        'e este veio da passada de triagem, que não segue essa ordem nem confere a atualização. ' +
+        'CONFIRA CONTRA OS AUTOS antes de fechar: o preço inteiro foi calibrado sobre ele.',
       );
     // O REMANEJAMENTO APARECE NO RESULTADO, e no topo: o preço inteiro recai
     // sobre um valor que a leitura havia posto em outra verba, e quem fecha tem
