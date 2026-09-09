@@ -18,13 +18,13 @@
 //
 // USO (POST, com sessão logada): { "lead_id": 15269795, "texto": "..." }
 
+import { assinarNota } from "../_shared/notaCredijuris.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveKommo } from "../_shared/segredos.ts";
 
 const CORS = corsHeaders;
 const KOMMO_SUBDOMAIN = "contatocredijuriscom";
-const SERVICO = "Análise Credijuris";
 
 function json(o: unknown, s = 200) {
   return new Response(JSON.stringify(o), {
@@ -56,12 +56,19 @@ Deno.serve(async (req) => {
       body: JSON.stringify([
         {
           entity_id: leadId,
-          // service_message, e não common: o kommo-sync filtra note_type=common,
-          // então esta nota aparece no feed do card e NÃO volta para o espelho
-          // — que é o que impede a análise de ler o próprio resultado como se
-          // fosse cadastro do comercial. Ver o cabeçalho.
-          note_type: "service_message",
-          params: { service: SERVICO, text: texto },
+          // NOTA DE VERDADE, e não service_message.
+          //
+          // O service_message é renderizado como LINHA DO HISTÓRICO: nome do
+          // serviço na frente e os parágrafos colados num bloco corrido atrás
+          // de um "mais". A ficha do crédito e o resumo da oportunidade
+          // chegavam ilegíveis — oito rótulos numa linha só.
+          //
+          // O que impede a análise de reler a própria anotação não é mais o
+          // tipo: é a marca no rodapé, que o kommo-sync descarta (ver
+          // _shared/notaCredijuris.ts). Duas perguntas diferentes — como se lê
+          // e de quem é — que estavam presas na mesma resposta.
+          note_type: "common",
+          params: { text: assinarNota(texto) },
           // Registro de resultado não é evento de pipeline: não dispara gatilho.
           is_need_to_trigger_digital_pipeline: false,
         },

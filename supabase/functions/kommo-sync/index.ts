@@ -12,6 +12,7 @@
 //   - GET /leads devolve 204 COM CORPO VAZIO quando o filtro não casa nada.
 //     Chamar .json() nesse caso estoura.
 //   - Leads não têm contagem total: paginação é seguir _links.next até acabar.
+import { ehNotaNossa } from '../_shared/notaCredijuris.ts'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 
@@ -292,10 +293,16 @@ Deno.serve(async (req: Request) => {
     // dezenas de cards custa MENOS requisições que as 40 páginas anteriores.
     // Também não gasta orçamento com notas de outros funis nem de cards fechados.
     //
-    // O filtro note_type=common é o que mantém as anotações da própria integração
-    // (service_message) fora daqui — sem isso, nosso registro de auditoria seria
-    // confundido com dado do crédito. Acumula TODAS as notas de cada card, não só
-    // a mais antiga: comentários posteriores do comercial também interessam.
+    // O filtro note_type=common tira o registro de movimentação (que é
+    // service_message). O QUE ELE NÃO TIRA MAIS é a anotação da análise, que
+    // voltou a ser `common` para o feed preservar as quebras de linha — dessa
+    // cuida `ehNotaNossa`, pela marca no rodapé.
+    //
+    // ISSO NÃO É DETALHE. Deixar a nossa anotação entrar aqui é a análise ler o
+    // próprio resultado como cadastro do comercial: a ficha que ela escreveu
+    // vira "o que o card diz" na análise seguinte, e o sistema confirma a si
+    // mesmo. Acumula TODAS as notas de cada card, não só a mais antiga:
+    // comentários posteriores do comercial também interessam.
     const notasPorLead = new Map<number, KommoNote[]>()
     // 100 ids por requisição: 250 caberiam no limite da API, mas a URL passaria
     // de 2.500 caracteres e servidor intermediário costuma cortar antes disso.
@@ -311,6 +318,8 @@ Deno.serve(async (req: Request) => {
         if (!r) break
         for (const n of r._embedded?.notes ?? []) {
           if (!n.params?.text?.trim()) continue
+          // A NOSSA PRÓPRIA ANOTAÇÃO NÃO É DADO DO CARD.
+          if (ehNotaNossa(n.params.text)) continue
           const lista = notasPorLead.get(n.entity_id)
           if (lista) lista.push(n)
           else notasPorLead.set(n.entity_id, [n])
