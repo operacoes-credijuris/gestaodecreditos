@@ -43,6 +43,7 @@ import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import { montarTextoDoProcesso, type PaginaLida } from '@/lib/textoDoProcesso'
 import { descreverSelecao, escolherPaginasParaImagem, LIMITES_PADRAO } from '@/lib/paginasDigitalizadas'
 import { planoDeLeitura } from '../../supabase/functions/_shared/orcamentoLeitura.ts'
+import { normalizarGrau, ORDEM_GRAU, type GrauRisco as GrauDoModulo } from '../../supabase/functions/_shared/graus.ts'
 import { renderizarPaginas } from '@/lib/renderizarPaginas'
 import { supabase } from '@/lib/supabase'
 
@@ -554,7 +555,7 @@ function ResumoInvestimento({
  * regra é do prompt, não daqui: filtrar por texto acertaria hoje e erraria na
  * primeira frase reescrita.
  */
-type GrauRisco = 'IMPEDITIVO' | 'ALTO' | 'MODERADO' | 'ATENÇÃO' | 'NOTA'
+type GrauRisco = GrauDoModulo
 
 /**
  * Cinco vocabulários viravam um.
@@ -573,21 +574,9 @@ type GrauRisco = 'IMPEDITIVO' | 'ALTO' | 'MODERADO' | 'ATENÇÃO' | 'NOTA'
  * Enquanto as divergências vinham pré-classificadas do servidor isso não
  * aparecia; agora elas chegam cruas, e a tradução é toda daqui.
  */
-function normalizarGrau(bruto: unknown): GrauRisco {
-  const g = String(bruto ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-  if (g.includes('impeditiv')) return 'IMPEDITIVO'
-  if (g.includes('alt') || g.includes('elevad')) return 'ALTO'
-  if (g.includes('moderad') || g.includes('medi')) return 'MODERADO'
-  if (g.includes('nota') || g.includes('nenhum')) return 'NOTA'
-  return 'ATENÇÃO'
-}
-
-const ORDEM_GRAU: Record<GrauRisco, number> = {
-  IMPEDITIVO: 0, ALTO: 1, MODERADO: 2, 'ATENÇÃO': 3, NOTA: 4,
-}
+// A tradução mora em _shared/graus.ts desde que o SERVIDOR passou a precisar
+// dela: a cópia dele casava por igualdade exata e rebaixava toda divergência de
+// gravidade "alta" na coluna de riscos da planilha. Um vocabulário, um lugar.
 const COR_GRAU: Record<GrauRisco, string> = {
   IMPEDITIVO: 'bg-red-50 text-red-700 ring-red-200/70',
   ALTO: 'bg-amber-50 text-amber-800 ring-amber-200/70',

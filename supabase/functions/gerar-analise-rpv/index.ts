@@ -54,6 +54,14 @@ import {
   type Regime,
 } from "../_shared/indicesBcb.ts";
 import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, escolherModelo, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type Precificacao, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { grauDaPlanilha } from "../_shared/graus.ts";
+// O PORTÃO 1 É PURO E TEM TESTE. Ver _shared/portao.ts: é a árvore que decide se
+// o crédito entra, e vivia aqui sem um caso escrito — com um defeito registrado
+// em comentário que já tinha voltado uma vez.
+import { avaliarQualificacao, ehEstadoDeGoias, ehSim, parseDataBR, parseNumeroFlex, PISO_NEGOCIO } from "../_shared/portao.ts";
+// O PRAZO É PURO E TEM TESTE. Ver _shared/prazo.ts: ele decide T5, que é a
+// variável que mais mexe no deságio, e vivia aqui sem um caso escrito.
+import { PISO_MESES, prazoMeses, REGRAS_PRAZO, roteiroValido, type AtoRoteiro, type Esfera, type RegraPrazo } from "../_shared/prazo.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
 import {
   aplicarDiligenciaNoM2,
@@ -269,18 +277,6 @@ async function fetchComRetry(url: string, init: RequestInit, tentativas = 3): Pr
   throw ultimo instanceof Error ? ultimo : new Error(String(ultimo));
 }
 
-// Converte um número escrito como texto (US "1234.56", BR "1.234,56", "1234,56"...) para Number. null se não der.
-function parseNumeroFlex(num: string): number | null {
-  const t = String(num).trim().replace(/\s/g, '');
-  if (!/\d/.test(t)) return null;
-  const temP = t.includes('.'), temV = t.includes(',');
-  let s = t;
-  if (temP && temV) s = (t.lastIndexOf(',') > t.lastIndexOf('.')) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
-  else if (temV) s = t.replace(/\./g, '').replace(',', '.');
-  else if (temP) { const p = t.split('.'); s = (p.length === 2 && p[1].length <= 2) ? t : t.replace(/\./g, ''); }
-  const v = Number(s);
-  return isNaN(v) ? null : v;
-}
 // Reescreve valores em Real dentro de um texto para o padrão brasileiro (R$ 1.234,56).
 // Só mexe em trechos "R$ <número>" — NÃO toca em datas (10/01/2024) nem números de processo.
 function reformatarMoeda(s: any): any {
@@ -321,42 +317,6 @@ function reformatarMoeda(s: any): any {
 // O que continua igual em todas: os CICLOS do próprio processo (tempo médio de
 // serventia e de gabinete, medidos dos pares de datas dos autos — M4). Esses não
 // são de tribunal nenhum; são do processo em análise.
-type Esfera = 'federal' | 'estadual' | 'goias';
-
-interface RegraPrazo {
-  /** Dias que o ente tem para pagar depois da requisição. */
-  pagamentoDias: number;
-  /** Dias de alvará: número fixo, 0 (sem alvará), ou 'se_exigir' (só quando os autos dizem que o tribunal exige). */
-  alvaraDias: number | 'se_exigir';
-  /** O tribunal tem convênio com data-limite para expedir (TJGO)? */
-  convenio: boolean;
-  /** Piso em meses — proteção contra extração otimista dos ciclos. */
-  descricao: string;
-}
-
-// PISO ÚNICO DE 8 MESES, decisão do dono, e vale para TODA esfera: o que o
-// cálculo achar abaixo disso vira 8. Substituiu os pisos por esfera (6 no TJGO,
-// vindo do template; 3 nas demais, chute meu) — a experiência da equipe é que
-// requisitório não paga antes disso, e prometer menos contamina o deságio, que
-// é calibrado sobre o prazo.
-//
-// O piso NÃO se aplica a prazo digitado à mão no chat de revisão: ali é uma
-// pessoa dizendo o que sabe daquele caso, e o motor avisa em vez de sobrepor.
-const PISO_MESES = 8;
-const REGRAS_PRAZO: Record<Esfera, RegraPrazo> = {
-  federal: {
-    pagamentoDias: 60, alvaraDias: 0, convenio: false,
-    descricao: 'RPV federal: pagamento em 60 dias da requisição (Lei 10.259/2001, art. 17), depósito direto ao credor, sem alvará',
-  },
-  estadual: {
-    pagamentoDias: 60, alvaraDias: 'se_exigir', convenio: false,
-    descricao: 'RPV estadual/municipal: pagamento em 2 meses da requisição (CPC, art. 535, §3º); alvará só onde os autos mostram que o tribunal exige',
-  },
-  goias: {
-    pagamentoDias: 60, alvaraDias: 21, convenio: true,
-    descricao: 'TJGO: convênio com data-limite de expedição (60 dias) quando consta dos autos, período de graça e alvará de 21 dias — o fluxo do template original',
-  },
-};
 
 /**
  * A esfera do ente devedor, para escolher a regra de prazo.
@@ -427,88 +387,6 @@ function classificarEnte(ente: unknown, esferaLida: unknown, tribunal: unknown):
  *   desde a expedição, quando a data consta) + alvará + UM ciclo para a
  *   liberação. Goiás mantém o template (ciclos + 21 + 60).
  */
-/** Um ato do roteiro, já validado. */
-interface AtoRoteiro { ato: string; dias: number; base: string }
-
-/**
- * O roteiro que a IA montou, se ele serve para somar.
- *
- * Teto de 1.100 dias no ato e 40 itens: número solto de uma leitura ruim não
- * pode virar prazo de três anos num campo que manda no preço. Ato sem nome ou
- * com dias inválido é descartado; o roteiro inteiro só vale se sobrar pelo menos
- * um ato e a soma for plausível (até 60 meses).
- */
-function roteiroValido(bruto: unknown): AtoRoteiro[] | null {
-  if (!Array.isArray(bruto) || bruto.length === 0 || bruto.length > 40) return null;
-  const atos: AtoRoteiro[] = [];
-  for (const x of bruto as Array<Record<string, unknown>>) {
-    const ato = String(x?.ato ?? '').trim();
-    const dias = Number(x?.dias);
-    if (!ato || !isFinite(dias) || dias < 0 || dias > 1100) continue;
-    atos.push({ ato, dias, base: String(x?.base ?? '').trim() });
-  }
-  if (atos.length === 0) return null;
-  const total = atos.reduce((t, a) => t + a.dias, 0);
-  if (!(total > 0) || total / 30 > 60) return null;
-  return atos;
-}
-
-function prazoMeses(o: {
-  esfera: Esfera; serventiaDias: number; gabineteDias: number; scenario: 'A' | 'B';
-  dataAquisicao: Date; dataFatalConvenio?: Date; dataExpedicao?: Date; exigeAlvara: boolean;
-  /** O caminho que a IA montou até a liquidação. Quando serve, é ele que vale. */
-  roteiro?: unknown;
-}): { meses: number; regra: RegraPrazo; detalhe: string; roteiro: AtoRoteiro[] | null } {
-  const regra = REGRAS_PRAZO[o.esfera];
-
-  // O ROTEIRO VEM PRIMEIRO, e a fórmula fica de rede.
-  //
-  // A fórmula é (serventia+gabinete)*2 + serventia*1,5: dois ciclos e meio,
-  // sempre, para qualquer processo. Ela não sabe em que etapa o processo está,
-  // quantos atos faltam, nem que a CESSÃO tem atos próprios — habilitação,
-  // intimação da Fazenda, homologação, substituição — que só acontecem depois
-  // da compra e que ela nunca contou. O roteiro conta o caminho que falta, ato a
-  // ato, com a velocidade medida neste juízo.
-  const atos = roteiroValido(o.roteiro);
-  if (atos) {
-    const dias = atos.reduce((t, a) => t + a.dias, 0);
-    const meses = Math.max(PISO_MESES, dias / 30);
-    let detalhe = `${atos.length} ato(s) até a liquidação, somando ${Math.round(dias)}d`;
-    if (meses > dias / 30) detalhe += ` — piso de ${PISO_MESES} meses aplicado (o roteiro deu ${(dias / 30).toFixed(1)})`;
-    return { meses, regra, detalhe, roteiro: atos };
-  }
-  const sg = o.serventiaDias + o.gabineteDias;
-  const ciclos = sg * 2 + o.serventiaDias * 1.5;
-  const alvara = regra.alvaraDias === 'se_exigir' ? (o.exigeAlvara ? 21 : 0) : regra.alvaraDias;
-  const diasDesde = (d?: Date) => (d ? Math.max(0, Math.round((o.dataAquisicao.getTime() - d.getTime()) / 86400000)) : null);
-  const diasAte = (d?: Date) => (d ? Math.round((d.getTime() - o.dataAquisicao.getTime()) / 86400000) : null);
-
-  let dias: number;
-  let detalhe: string;
-  if (o.esfera === 'goias') {
-    // Fiel ao template do TJGO.
-    if (o.scenario === 'A') {
-      const e23 = diasAte(o.dataFatalConvenio) ?? 60;
-      dias = ciclos + e23 + regra.pagamentoDias;
-      detalhe = `ciclos do processo ${Math.round(ciclos)}d + até a expedição ${e23}d${o.dataFatalConvenio ? ' (convênio)' : ' (estimado)'} + pagamento ${regra.pagamentoDias}d`;
-    } else {
-      dias = ciclos + alvara + regra.pagamentoDias;
-      detalhe = `ciclos do processo ${Math.round(ciclos)}d + alvará ${alvara}d + pagamento ${regra.pagamentoDias}d`;
-    }
-  } else if (o.scenario === 'A') {
-    dias = ciclos + regra.pagamentoDias + alvara;
-    detalhe = `ciclos do processo ${Math.round(ciclos)}d + pagamento ${regra.pagamentoDias}d${alvara ? ` + alvará ${alvara}d` : ''}`;
-  } else {
-    const decorridos = diasDesde(o.dataExpedicao) ?? 0;
-    const restante = Math.max(0, regra.pagamentoDias - decorridos);
-    dias = restante + alvara + sg;
-    detalhe = `pagamento restante ${restante}d${o.dataExpedicao ? ` (${decorridos}d já decorridos)` : ''}${alvara ? ` + alvará ${alvara}d` : ''} + um ciclo de liberação ${Math.round(sg)}d`;
-  }
-  const meses = Math.max(PISO_MESES, dias / 30);
-  if (meses > dias / 30) detalhe += ` — piso de ${PISO_MESES} meses aplicado (o cálculo deu ${(dias / 30).toFixed(1)})`;
-  return { meses, regra, detalhe, roteiro: null };
-}
-
 
 
 /**
@@ -671,15 +549,17 @@ function auditoriaParaTela(dados: any, avisos: string[]): any {
 
 function riscosComAuditoria(dados: any): any[] {
   const divs = Array.isArray(dados?.auditoria_divergencias) ? dados.auditoria_divergencias : [];
-  const grau = (g: unknown) => {
-    const x = String(g ?? '').toLowerCase();
-    return x === 'alta' ? 'ALTO' : x === 'media' ? 'MODERADO' : 'PONTO DE ATENÇÃO';
-  };
+  // O GRAU SAI DE _shared/graus.ts, e não de uma comparação exata aqui.
+  //
+  // Era `x === 'alta'`: "média", "Alta " e "ALTA." caíam no degrau mais fraco, e
+  // esta cópia é a que escreve a COLUNA DE RISCOS DA PLANILHA e o `riscos` do
+  // 'salvar' — o que alguém lê seis meses depois, sem a análise à mão. A tela já
+  // havia consertado o mesmo defeito ("alta" não contém "alto") na cópia dela.
   return [
     ...divs.map((d: any) => {
       const ef = String(d?.efeito_se_corrigida ?? d?.efeito ?? '');
       return {
-        grau: grau(d?.gravidade),
+        grau: grauDaPlanilha(d?.gravidade),
         risco: `Cálculo: ${String(d?.item ?? 'divergência')}` +
           (ef === 'reduz' ? ' — corrigida, derruba o crédito' : ef === 'aumenta' ? ' — corrigida, elevaria o crédito' : ''),
         fundamento: `O título/lei pede "${String(d?.esperado ?? '')}"; a conta fez "${String(d?.encontrado ?? '')}". ${String(d?.fundamento ?? '')}`.trim(),
@@ -2338,127 +2218,6 @@ async function refinarDados(
 }
 
 // "DD/MM/AAAA" -> Date (ou null se inválido)
-function parseDataBR(s: any): Date | null {
-  if (typeof s !== 'string') return null;
-  const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!m) return null;
-  const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
-  return isNaN(d.getTime()) ? null : d;
-}
-const ehSim = (v: any) => typeof v === 'string' && v.trim().toUpperCase().startsWith('SIM');
-
-/**
- * O ente devedor é o Estado de Goiás?
- *
- * Existe porque duas regras deste motor são ESTADUAIS de Goiás e estavam sendo
- * aplicadas a todo ente: o teto de 10 salários mínimos para RPV com trânsito da
- * fase de conhecimento posterior a 15/11/2025, e a reserva de INSS de 14,25%
- * (alíquota da GOIASPREV). Aplicadas a São Paulo ou à União, reprovavam crédito
- * bom ou descontavam contribuição por lei que não vale lá.
- *
- * Casa "Estado de Goiás" e "Fazenda Pública do Estado de Goiás", sem acento e
- * sem caixa. NÃO casa município goiano de propósito: a lei é do Estado, e cada
- * município legisla o próprio teto.
- */
-// E AS AUTARQUIAS E FUNDAÇÕES ESTADUAIS GOIANAS — GOIASPREV, IPASGO, DETRAN-GO,
-// AGR, Agehab, Agrodefesa, Goinfra, UEG, PGE-GO. Elas eram o furo: são as
-// devedoras mais comuns em RPV de servidor goiano e escapavam do teto de 10
-// salários mínimos, da reserva de INSS e do prazo do convênio, porque o nome
-// não traz "Estado de Goiás". A lei estadual alcança o Estado, suas autarquias
-// e fundações; a regra aqui alcança o mesmo. Município continua fora — "Município
-// de Goiânia" e "Prefeitura de Anápolis" não entram mesmo com "Goiás" por perto.
-function ehEstadoDeGoias(...candidatos: unknown[]): boolean {
-  return candidatos.some((c) => {
-    const t = String(c ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    if (/municip|prefeitura|camara\s+municipal/.test(t)) return false;
-    return (
-      /estado\s+d[eo]\s+goias/.test(t) ||
-      /fazenda\s+(publica\s+)?(d[eo]\s+estado\s+d[eo]\s+)?goias/.test(t) ||
-      /goiasprev|goias\s+previd/.test(t) ||
-      /\bipasgo\b/.test(t) ||
-      /detran[\s\-\/]*go\b|departamento\s+estadual\s+de\s+transito\s+de\s+goias/.test(t) ||
-      /\bagr\b.*goi|agencia\s+goiana/.test(t) ||
-      /\bagehab\b|agrodefesa|\bgoinfra\b/.test(t) ||
-      /\bueg\b|universidade\s+estadual\s+de\s+goias/.test(t) ||
-      /procuradoria[\s-]*geral\s+d[eo]\s+estado\s+d[eo]\s+goias|\bpge[\s\-\/]*go\b/.test(t)
-    );
-  });
-}
-
-// Aplica a ÁRVORE DE DECISÃO do Portão 1 sobre o JSON da IA.
-// Retorna aprovado + motivos de recusa (se houver) + avisos (não reprovam).
-function avaliarQualificacao(q: any): { aprovado: boolean; motivos: string[]; avisos: string[] } {
-  const motivos: string[] = [];
-  const avisos: string[] = [];
-
-  // 1) Dinheiro já reservado / prazo de pagamento vencido -> REPROVA
-  if (ehSim(q.reserva_financeira) || ehSim(q.prazo_pagamento_vencido))
-    motivos.push('Já há decisão de reserva financeira ou o prazo de pagamento (60 dias) já venceu — o valor já está designado para a conta do credor, então não é possível adquirir o crédito.');
-
-  // 1b) Prazo de pagamento apenas INICIADO (RPV em fase de pagamento) -> ALERTA FORTE (revisão humana), NÃO reprova
-  else if (ehSim(q.prazo_pagamento_iniciado))
-    avisos.unshift('⚠️ ATENÇÃO — RPV JÁ EM FASE DE PAGAMENTO: a movimentação indica que o prazo de 60 dias para o ente público pagar JÁ COMEÇOU' +
-      (q.prazo_pagamento_iniciado_localizacao ? ` (${q.prazo_pagamento_iniciado_localizacao})` : '') +
-      '. RISCO: o pagamento pode ocorrer ANTES de a cessão ser habilitada nos autos — se isso acontecer, o valor cai na conta do credor original e não na de vocês. AVALIE COM A EQUIPE JURÍDICA se há tempo hábil para habilitar a cessão antes do pagamento ANTES de fechar este crédito.');
-
-  // 2) Credor menor de idade ou curatelado
-  if (ehSim(q.credor_menor_ou_curatelado))
-    motivos.push('Credor menor de idade ou curatelado — a cessão exige autorização judicial (alvará).');
-
-  // 3) Valor / tipo do crédito
-  // parseNumeroFlex, e não Number(). A IA às vezes devolve "R$ 124.500,00" onde
-  // o esquema pede número puro, e `Number()` disso é NaN: o portão concluía
-  // "valor não identificado", PULAVA a verificação de piso e deixava passar com
-  // um aviso brando. Ausência de dado saindo como aprovação — a mesma classe de
-  // defeito que já se corrigiu nos campos da análise, e que tinha sobrevivido
-  // aqui, justamente no lugar que decide se o crédito entra.
-  const valor = typeof q.valor_credito === 'number'
-    ? q.valor_credito
-    : (parseNumeroFlex(String(q.valor_credito ?? '').replace(/[^\d.,\-]/g, '')) ?? NaN);
-  const temValor = !isNaN(valor) && valor > 0;
-  const tipo = String(q.tipo_requisitorio || '').toLowerCase();
-  const isPrecatorio = tipo.includes('precat');
-  const isRPV = tipo === 'rpv' || tipo.includes('rpv');
-  const expedido = ehSim(q.requisitorio_expedido);
-  if (temValor) {
-    if (isPrecatorio) {
-      if (valor <= 100000) motivos.push('Valor do precatório igual ou abaixo de R$ 100 mil (mínimo exigido para precatório).');
-    } else {
-      // RPV, ou ainda não expedido (só cálculo homologado) -> piso de R$ 20 mil.
-      //
-      // ESTE É O PORTÃO BARATO, e ele olha o BRUTO. A régua de verdade é o valor
-      // TOTAL LÍQUIDO NEGOCIADO (a linha 39 da planilha), que só existe depois da
-      // extração e da calibragem — ver PISO_NEGOCIO lá adiante. Reprovar aqui é
-      // seguro por construção: o líquido nunca é maior que o bruto, então bruto
-      // abaixo do piso já garante líquido abaixo do piso, e poupa a leitura
-      // completa de um crédito que não serve.
-      if (valor < PISO_NEGOCIO) motivos.push(
-        `O crédito inteiro, ainda BRUTO, é de ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — abaixo do mínimo de R$ 20 mil. ` +
-        'Líquido será menos ainda, então não há o que negociar nem somando todas as verbas.',
-      );
-    }
-  } else {
-    avisos.push('Valor do crédito não identificado no processo — confira o valor manualmente.');
-  }
-
-  // 3b) ESTADO DE GOIÁS, E SÓ ELE: RPV já expedida com trânsito da fase de conhecimento
-  // posterior a 15/11/2025 derruba o teto para 10 SM. É lei estadual goiana. Antes
-  // valia para todo ente — e reprovava crédito paulista ou federal por regra que
-  // não existe lá.
-  if (expedido && isRPV && ehEstadoDeGoias(q.ente_devedor, q.entidade_devedora)) {
-    const d = parseDataBR(q.transito_conhecimento_data);
-    const corte = new Date(2025, 10, 15); // 15/11/2025 (mês 10 = novembro)
-    if (d) {
-      if (d.getTime() > corte.getTime())
-        motivos.push('Estado de Goiás: trânsito em julgado da fase de conhecimento posterior a 15/11/2025 — o teto da RPV goiana cai para 10 salários mínimos, ficando abaixo de ~R$ 20 mil.');
-    } else {
-      avisos.push('Estado de Goiás: data do trânsito da fase de conhecimento não localizada — confira manualmente se é posterior a 15/11/2025 (teto de 10 SM).');
-    }
-  }
-
-  return { aprovado: motivos.length === 0, motivos, avisos };
-}
-
 // Arquivo -> blocos de conteúdo p/ a IA.
 // PDF: extrai TEXTO (sem limite de páginas). Imagem: envia como imagem. Texto: inline.
 // OS TETOS DE TAMANHO MORAM EM _shared/orcamentoLeitura.ts, e não aqui.
@@ -2626,27 +2385,6 @@ function avisoDeTeto(
     `${fonte ? `, ${fonte}` : ''}). Isso NÃO impede a operação, mas será necessária a RENÚNCIA ao valor que excede o teto para receber como RPV — o operacional deve avaliar.` +
     (teto.origem === 'semente' ? ' (Valor herdado do mapa antigo: a migração 0057 ainda não rodou, então ele não foi conferido este ano.)' : '');
 }
-
-/**
- * O PISO DE R$ 20 MIL, decisão do dono.
- *
- * ONDE ELE INCIDE MUDOU, e a mudança é o conserto. Ele era aplicado no portão de
- * qualificação, sobre `valor_credito` — o valor BRUTO total que a IA leu dos
- * autos, antes de IR, INSS e honorários, e sem relação com o que está sendo
- * comprado. Errava dos dois lados: uma cessão só de honorários de R$ 15 mil
- * passava porque o crédito inteiro tinha R$ 100 mil, e um crédito bruto de
- * R$ 25 mil que líquido dá R$ 17 mil também passava.
- *
- * Agora incide sobre o VALOR TOTAL LÍQUIDO NEGOCIADO — a linha 39 da aba
- * jurídica, que é o Y3 da calibragem: a soma dos líquidos das verbas que entram
- * no negócio. É o número que a planilha imprime como resposta à pergunta "qual o
- * valor total final líquido do(s) crédito(s) sendo negociado(s)?".
- *
- * O portão continua reprovando cedo quando o BRUTO já está abaixo do piso —
- * isso é seguro por construção, porque o líquido nunca é maior que o bruto, e
- * poupa a leitura completa de um crédito que não serve.
- */
-const PISO_NEGOCIO = 20000;
 
 /**
  * A due diligence de processos judiciais deste crédito, quando existe.

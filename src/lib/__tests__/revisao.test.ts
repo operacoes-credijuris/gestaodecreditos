@@ -159,4 +159,40 @@ describe('quais linhas do questionário vieram de ordem do chat', () => {
     const r = patch({ bruto_total: 80000 })
     expect(r.m2Tocadas).toEqual([])
   })
+
+  // O QUESTIONÁRIO NÃO SE APAGA POR ESCALAR.
+  //
+  // A guarda existia só no caminho `remover`: `{"m2": null}`, `{"m2": []}` e
+  // `{"m2": ""}` em `alteracoes` caíam no ramo escalar e substituíam as 29
+  // linhas de uma vez. O estrago só reaparece na planilha, depois de salva.
+  it('m2 que não é objeto é recusado, não aplicado', () => {
+    const atual = { m2: { '10': { resposta: 'Não' }, '11': { resposta: 'Sim' } } }
+    for (const valor of [null, [], "", 0, "x"]) {
+      const r = aplicarPatch(atual, { m2: valor }, [], new Set(['m2']), new Set())
+      expect(Object.keys(r.dados.m2 as object).sort()).toEqual(['10', '11'])
+      expect(r.remocoesVazias).toContain('m2')
+      expect(r.mudancas.join(' ')).toMatch(/NÃO apaguei o m2 inteiro/)
+    }
+  })
+
+  it('m2 objeto continua mesclando linha a linha', () => {
+    const atual = { m2: { '10': { resposta: 'Não' }, '11': { resposta: 'Sim' } } }
+    const r = aplicarPatch(atual, { m2: { '10': { resposta: 'Sim' } } }, [], new Set(['m2']), new Set())
+    expect(r.dados.m2).toEqual({ '10': { resposta: 'Sim' }, '11': { resposta: 'Sim' } })
+  })
+
+  // CHAVE VAZIA EDITAVA O ITEM 0: `Number("")` é 0 e passa em isInteger.
+  it('chave de lista sem dígito não edita o primeiro item', () => {
+    const atual = { riscos: [{ risco: 'a' }, { risco: 'b' }] }
+    for (const chave of ["", " ", "x", "-1", "1.5"]) {
+      const r = aplicarPatch(atual, { riscos: { [chave]: { risco: 'INVADIU' } } }, [], new Set(['riscos']), new Set(['riscos']))
+      expect(r.dados.riscos).toEqual([{ risco: 'a' }, { risco: 'b' }])
+    }
+  })
+
+  it('índice numérico continua editando por posição', () => {
+    const atual = { riscos: [{ risco: 'a' }, { risco: 'b' }] }
+    const r = aplicarPatch(atual, { riscos: { '1': { risco: 'c' } } }, [], new Set(['riscos']), new Set(['riscos']))
+    expect(r.dados.riscos).toEqual([{ risco: 'a' }, { risco: 'c' }])
+  })
 })

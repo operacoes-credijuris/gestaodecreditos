@@ -62,6 +62,9 @@ function resumir(v: unknown): string {
  * modelo precise repetir a lista inteira — repetição que é justamente onde ele
  * perdia itens.
  */
+/** Índice de lista aceito no patch: só dígitos, e "+" para acrescentar. */
+const ehIndice = (k: string) => /^[0-9]+$/.test(k)
+
 function aplicarNaLista(atual: unknown[], patch: unknown): { lista: unknown[]; nota: string } {
   if (ehLista(patch)) return { lista: patch, nota: `lista inteira substituída (${patch.length} item(ns))` }
   if (!ehObjeto(patch)) return { lista: atual, nota: '' }
@@ -75,8 +78,11 @@ function aplicarNaLista(atual: unknown[], patch: unknown): { lista: unknown[]; n
       partes.push(`${ehLista(valor) ? valor.length : 1} acrescentado(s)`)
       continue
     }
+    // SÓ DÍGITOS. `Number('')` e `Number(' ')` são 0, e passavam em
+    // `Number.isInteger`: uma chave vazia no patch editava o item 0 da lista em
+    // silêncio — o primeiro risco, o primeiro ato do roteiro.
+    if (!ehIndice(chave)) continue
     const i = Number(chave)
-    if (!Number.isInteger(i) || i < 0) continue
     if (i >= lista.length) { lista.push(valor); partes.push(`item ${i} acrescentado`); continue }
     // Objeto sobre objeto: mescla, para "mude só os dias" não zerar o "ato".
     lista[i] = ehObjeto(valor) && ehObjeto(lista[i])
@@ -116,6 +122,18 @@ export function aplicarPatch(
       novo.m2 = { ...antes, ...valor }
       m2Tocadas.push(...Object.keys(valor))
       mudancas.push(`questionário: linha(s) ${Object.keys(valor).join(', ')}`)
+      continue
+    }
+    // E m2 QUE NÃO É OBJETO É RECUSA, não substituição.
+    //
+    // A guarda de não apagar o questionário inteiro existia só no caminho
+    // `remover`: `{"m2": null}`, `{"m2": []}` ou `{"m2": ""}` em `alteracoes`
+    // caíam no ramo escalar mais abaixo e SUBSTITUÍAM as 29 linhas de uma vez.
+    // O pedido que produz isso ("tira o questionário", "limpa o m2") quase nunca
+    // quer dizer isso, e o estrago só reaparece na planilha, depois de salva.
+    if (campo === 'm2') {
+      remocoesVazias.push('m2')
+      mudancas.push('questionário: NÃO apaguei o m2 inteiro — para remover uma linha, use "m2.<número>"')
       continue
     }
 
