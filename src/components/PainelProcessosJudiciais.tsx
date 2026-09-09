@@ -18,9 +18,22 @@
 // diligência que não mostra sua própria consequência convida a apurar e não
 // olhar.
 //
-// A APURAÇÃO CUSTA DINHEIRO — a API do Escavador é paga por requisição — então
-// o botão é explícito, nunca automático, e o custo da chamada volta na tela.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// ABRIR ESTA ABA JÁ É PEDIR A DILIGÊNCIA. Os três passos — ler no título quais
+// verbas o card cede, achar nos autos quem são os titulares delas, procurar as
+// dívidas em nome deles — correm sozinhos, em sequência, quando a aba abre. Não
+// há decisão humana entre um e outro: o segundo não muda o que o primeiro
+// concluiu, e o terceiro não muda o que o segundo achou. O que havia antes eram
+// dois botões e um formulário em branco no meio deles, o que convidava a
+// digitar à mão o que a leitura ia trazer melhor.
+//
+// A APURAÇÃO CUSTA DINHEIRO — a API do Escavador é paga por requisição —, e é
+// disso que saem as três travas da corrente: ela não roda em crédito que já tem
+// apuração (reabrir para conferir não pode cobrar de novo), não roda antes de os
+// anexos terminarem de ser lidos, e não roda sem documento. Buscar por nome traz
+// o homônimo junto e cada página é cobrada: sem CPF, CNPJ ou OAB a corrente para
+// com os campos preenchidos e diz o que falta. O custo de cada chamada volta na
+// tela.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Ban, ExternalLink, RefreshCw, ScanText, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
@@ -74,6 +87,7 @@ export function PainelProcessosJudiciais({
   tituloDoCard,
   cedenteDoCard,
   arquivos,
+  lendoPdf,
   ativo,
   acaoRecusar,
   onMover,
@@ -82,8 +96,16 @@ export function PainelProcessosJudiciais({
   /** O título do card — é dele que sai QUAIS verbas estão sendo cedidas. */
   tituloDoCard: string
   cedenteDoCard: string
-  /** Os PDFs já lidos na tela: é deles que saem os CPFs e as OABs sugeridos. */
+  /** Os PDFs já lidos na tela: é deles que a leitura dos titulares sai. */
   arquivos: ArquivoLido[]
+  /**
+   * Os anexos ainda estão sendo baixados e lidos.
+   *
+   * A CADEIA AUTOMÁTICA ESPERA POR ISTO. Sem saber que a leitura do PDF está em
+   * curso, o painel abriria, veria `arquivos` vazio e concluiria "não há texto
+   * nos autos" — sobre um card cujo processo está chegando naquele segundo.
+   */
+  lendoPdf?: boolean
   ativo: boolean
   /**
    * A recusa, quando a etapa aberta a oferece.
@@ -111,6 +133,15 @@ export function PainelProcessosJudiciais({
   const [advCpf, setAdvCpf] = useState('')
   const [lendoTitulares, setLendoTitulares] = useState(false)
   const [recusando, setRecusando] = useState(false)
+  /**
+   * A cadeia já rodou para ESTE card.
+   *
+   * Ref, e não estado: ela não desenha nada, e como estado o próprio render que
+   * ela dispara reentraria no efeito. Guardar o id do lead — em vez de um
+   * booleano — faz a trava acompanhar o card, que é o que ela protege: abrir o
+   * card seguinte tem de apurar de novo, e o mesmo card não.
+   */
+  const jaEncadeou = useRef<number | null>(null)
   const [avisosDaLeitura, setAvisosDaLeitura] = useState<string[]>([])
 
   // ------------------------------------------------- de quem é o que compramos
@@ -215,20 +246,22 @@ export function PainelProcessosJudiciais({
    * o card foi aberto, e uma segunda leitura custaria uma consulta à Judit para
    * obter o que já temos.
    *
-   * PREENCHE, NÃO DECIDE. O resultado cai nos campos e quem confere olha a
-   * evidência antes de gastar consulta paga — um processo tem o CPF do cedente,
-   * o do advogado, o do ente devedor e o de cada terceiro.
+   * DEVOLVE ALÉM DE PREENCHER. Os campos são para quem confere; o retorno é
+   * para a cadeia automática, que precisa dos documentos no mesmo tique — estado
+   * de React não está atualizado na linha seguinte ao setState, e apurar lendo
+   * os campos apuraria os valores anteriores.
    */
-  async function lerTitulares() {
+  async function lerTitulares(): Promise<TitularLido[]> {
     const texto = arquivos
       .map((a) => a.texto ?? '')
       .filter((t) => t.trim())
       .join('\n\n===== PRÓXIMO ARQUIVO =====\n\n')
     if (!texto.trim()) {
-      toast.error(
-        'Os anexos deste card não têm texto para ler — processo digitalizado só tem imagem.',
-      )
-      return
+      setAvisosDaLeitura([
+        'Os anexos deste card não têm texto para ler — processo digitalizado só tem imagem. ' +
+          'Preencha os titulares à mão.',
+      ])
+      return []
     }
     setLendoTitulares(true)
     setErro(null)
@@ -255,12 +288,11 @@ export function PainelProcessosJudiciais({
         if (doAdvogado.documento) setAdvCpf(formatCpfCnpjInput(doAdvogado.documento))
       }
       setAvisosDaLeitura(r.avisos ?? [])
-      const quantos = achados.filter((t) => t.nome).length
-      if (quantos === 0) toast.error('Não identifiquei os titulares nos autos.')
-      else toast.success(`${quantos} titular(es) identificado(s) — confira antes de apurar.`)
+      return achados
     } catch (e) {
       setErro((e as Error).message)
       toast.error((e as Error).message)
+      return []
     } finally {
       setLendoTitulares(false)
     }
@@ -268,23 +300,31 @@ export function PainelProcessosJudiciais({
 
   // ------------------------------------------------------------------ ação
 
-  async function apurar() {
-    // SÓ OS TITULARES DA VERBA CEDIDA. Mandar os dois sempre gastaria consulta
-    // paga com quem não é parte do negócio — e devolveria alerta sobre dívida
-    // que não alcança o crédito, que é pior do que não apurar.
-    const alvosParaApurar: Record<string, string>[] = []
+  /**
+   * Os alvos a partir do que está NOS CAMPOS — o caminho do botão.
+   *
+   * SÓ OS TITULARES DA VERBA CEDIDA. Mandar os dois sempre gastaria consulta
+   * paga com quem não é parte do negócio, e devolveria alerta sobre dívida que
+   * não alcança o crédito, que é pior do que não apurar.
+   */
+  function alvosDosCampos(): Record<string, string>[] {
+    const saida: Record<string, string>[] = []
     const cpf = onlyDigits(cedenteCpf)
     if (pedeCedente && (cedenteNome.trim() || cpf)) {
-      alvosParaApurar.push({ papel: 'CEDENTE', nome: cedenteNome.trim(), documento: cpf })
+      saida.push({ papel: 'CEDENTE', nome: cedenteNome.trim(), documento: cpf })
     }
     if (pedeAdvogado && (advOab.trim() || onlyDigits(advCpf))) {
-      alvosParaApurar.push({
+      saida.push({
         papel: 'ADVOGADO',
         nome: advNome.trim(),
         oab: advOab.trim(),
         documento: onlyDigits(advCpf),
       })
     }
+    return saida
+  }
+
+  async function apurar(alvosParaApurar = alvosDosCampos()) {
     if (alvosParaApurar.length === 0) {
       toast.error(
         pedeCedente
@@ -327,6 +367,70 @@ export function PainelProcessosJudiciais({
       setApurando(false)
     }
   }
+
+  // ------------------------------------------------- a cadeia, sem clique
+  //
+  // ABRIR A DILIGÊNCIA JÁ É PEDI-LA. Os três passos — ler as verbas no título,
+  // achar os titulares nos autos, procurar as dívidas deles — não têm decisão
+  // humana no meio: a segunda etapa não muda o que a primeira concluiu, e a
+  // terceira não muda o que a segunda achou. Pedir dois cliques para executar
+  // uma sequência determinística é transferir trabalho de máquina para pessoa, e
+  // o campo em branco entre um clique e outro convida a preencher à mão o que a
+  // leitura ia trazer melhor.
+  //
+  // O QUE AINDA SEGURA A CORRENTE, e por que cada um:
+  //
+  //   já apurado       a consulta é PAGA. Reabrir o card para conferir não pode
+  //                    cobrar de novo; refazer a apuração é o botão Reapurar.
+  //   PDF em leitura   os anexos chegam depois da janela. Rodar antes de eles
+  //                    existirem concluiria "não há texto nos autos" sobre um
+  //                    processo que está chegando naquele segundo.
+  //   sem documento    buscar por nome traz o homônimo junto, e cada página é
+  //                    cobrada. Sem CPF/CNPJ (ou OAB), a cadeia PARA com os
+  //                    campos preenchidos e diz o que falta — quem confere
+  //                    decide se manda buscar pelo nome mesmo assim.
+  const [passo, setPasso] = useState<'lendo' | 'apurando' | null>(null)
+
+  useEffect(() => {
+    if (!ativo || carregando || erro) return
+    // Já existe apuração para este crédito: a foto está na tela, e refazê-la
+    // custa dinheiro.
+    if (apuracoes.length > 0) return
+    if (lendoPdf) return
+    if (jaEncadeou.current === leadId) return
+    jaEncadeou.current = leadId
+
+    void (async () => {
+      setPasso('lendo')
+      const titulares = await lerTitulares()
+      const paraApurar: Record<string, string>[] = []
+      for (const papel of alvos.papeis) {
+        const t = titulares.find((x) => x.papel === papel)
+        // A IDENTIDADE É O QUE AUTORIZA A BUSCA AUTOMÁTICA. Documento para
+        // qualquer um; OAB serve para o advogado, porque é dela que o Escavador
+        // devolve o CPF dele.
+        const temIdentidade = Boolean(t?.documento) || (papel === 'ADVOGADO' && Boolean(t?.oab))
+        if (t && temIdentidade) {
+          paraApurar.push({
+            papel,
+            nome: t.nome,
+            documento: t.documento,
+            oab: t.oab,
+          })
+        }
+      }
+      if (paraApurar.length === 0) {
+        setPasso(null)
+        return
+      }
+      setPasso('apurando')
+      await apurar(paraApurar)
+      setPasso(null)
+    })()
+    // As funções são recriadas a cada render e entrariam aqui como dependência
+    // instável; a trava por `leadId` é o que garante uma execução por card.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ativo, carregando, erro, lendoPdf, apuracoes.length, leadId])
 
   // -------------------------------------------------- o que a planilha dirá
   //
@@ -419,17 +523,37 @@ export function PainelProcessosJudiciais({
           procurar dívida em seu nome.
         </p>
 
-        <div className="mt-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={lerTitulares}
-            loading={lendoTitulares}
-            icon={<ScanText className="h-4 w-4" />}
-          >
-            Identificar titulares nos autos
-          </Button>
-        </div>
+        {/* A CORRENTE EM CURSO, dita passo a passo. Uma janela que abre e fica
+            parada por vinte segundos se lê como travada — e quem não sabe que a
+            máquina está trabalhando começa a preencher os campos à mão. */}
+        {(lendoPdf || passo) && (
+          <p className="mt-3 flex items-center gap-2 text-sm text-brand-700">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            {lendoPdf
+              ? 'Lendo os anexos do card…'
+              : passo === 'lendo'
+                ? 'Identificando os titulares nos autos…'
+                : 'Procurando processos no Escavador…'}
+          </p>
+        )}
+
+        {/* O BOTÃO É REFAZER, não fazer: a leitura já aconteceu ao abrir. Fica
+            para o caso de o card ganhar anexo novo, ou de a primeira leitura ter
+            achado a pessoa errada. */}
+        {!passo && !lendoPdf && (
+          <div className="mt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void lerTitulares()}
+              loading={lendoTitulares}
+              disabled={apurando}
+              icon={<ScanText className="h-4 w-4" />}
+            >
+              Ler os titulares nos autos de novo
+            </Button>
+          </div>
+        )}
 
         {avisosDaLeitura.length > 0 && (
           <ul className="mt-2 space-y-1">
@@ -557,7 +681,12 @@ export function PainelProcessosJudiciais({
         )}
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button onClick={apurar} loading={apurando} icon={<Search className="h-4 w-4" />}>
+          <Button
+            onClick={() => void apurar()}
+            loading={apurando}
+            disabled={Boolean(passo) || lendoTitulares}
+            icon={<Search className="h-4 w-4" />}
+          >
             {apuracoes.length > 0 ? 'Reapurar no Escavador' : 'Apurar no Escavador'}
           </Button>
           <Button variant="ghost" onClick={() => void carregar()} icon={<RefreshCw className="h-4 w-4" />}>

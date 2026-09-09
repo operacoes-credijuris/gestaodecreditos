@@ -124,6 +124,7 @@ export function DueDiligence({
             tituloDoCard={tituloDoCard}
             cedenteDoCard={cedenteDoCard}
             arquivos={arquivos}
+            lendoPdf={lendoPdf}
             ativo={aba === 'processos'}
             acaoRecusar={acaoRecusar}
             onMover={onMover}
