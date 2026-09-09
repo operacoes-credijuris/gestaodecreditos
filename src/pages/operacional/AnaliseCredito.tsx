@@ -1979,15 +1979,15 @@ export default function AnaliseCredito() {
             ddLead.pipeline_id === FUNIL_PRECATORIO &&
             !ehCardDeFundos(ddLead.status_id, etapas.data ?? [])
           }
-          // A RECUSA A PARTIR DA DILIGÊNCIA, quando a etapa aberta a oferece.
+          // OS DESFECHOS DA ETAPA, no rodapé da janela.
           //
-          // NÃO É UMA SEGUNDA PORTA para a mesma decisão. A janela da análise
-          // recusa pelos ACHADOS deste processo; aqui se recusa pelos PROCESSOS
+          // NÃO SÃO UMA SEGUNDA PORTA para a mesma decisão. A janela da análise
+          // decide pelos ACHADOS deste processo; aqui se decide pelos PROCESSOS
           // DE TERCEIRO que a apuração achou — evidência que a análise não tem e
           // que só existe depois que alguém apurou. Obrigar a fechar a
-          // diligência, abrir a análise e reescrever à mão o que está na tela
-          // seria pedir para copiar o que a máquina acabou de levantar.
-          acaoRecusar={abaAtual?.acoes.find((a) => a.papel === 'reprovar') ?? null}
+          // diligência, achar o card na lista e abrir outra coisa seria pedir
+          // para decidir com a lista de processos fora da vista.
+          acoes={abaAtual?.acoes ?? []}
           onMover={async (statusId, comentario) => {
             await moverComNota(ddLead.kommo_lead_id, statusId, comentario)
             // O card saiu desta aba: manter a diligência aberta seria oferecer

@@ -13,10 +13,13 @@
 // lido como "diligência feita, nada consta". Quando esta tela apura, o motor
 // (_shared/dueDiligencia.ts) passa a escrever as duas linhas a partir daqui.
 //
-// POR ISSO O PLACAR NO TOPO. Ele mostra, com as mesmas funções que o servidor
-// usa, exatamente o que vai sair impresso nas duas células. Uma tela de
-// diligência que não mostra sua própria consequência convida a apurar e não
-// olhar.
+// A TELA É OS CAMPOS DO TITULAR E A TABELA, e nada mais. Ela já teve um placar
+// do que a planilha ia imprimir, as sugestões de CPF dos anexos sempre à mostra,
+// dois botões de leitura e uma seção por titular apurado — moldura maior que o
+// conteúdo num crédito com um titular só, que é o caso normal. O que sobrou é o
+// que se olha: de quem estamos falando, e o que existe em nome dele. Os
+// desfechos ficam no rodapé da janela (ver DueDiligence), porque são o que se
+// faz depois de ler isto.
 //
 // ABRIR ESTA ABA JÁ É PEDIR A DILIGÊNCIA. Os três passos — ler no título quais
 // verbas o card cede, achar nos autos quem são os titulares delas, procurar as
@@ -34,18 +37,17 @@
 // com os campos preenchidos e diz o que falta. O custo de cada chamada volta na
 // tela.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Ban, ExternalLink, RefreshCw, ScanText, Search } from 'lucide-react'
+import { AlertTriangle, ExternalLink, RefreshCw, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
-import { formatCpfCnpjInput, formatDate, onlyDigits } from '@/lib/format'
+import { formatCpfCnpjInput, onlyDigits } from '@/lib/format'
 import { acharCpfs } from '@/lib/cpfNoTexto'
 import { acharOabs } from '@/lib/dadosNoTexto'
-import { classificarParcelaCedida, lerTituloCard, type AcaoTela } from '@/lib/kommo'
+import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
-import {
-  historicoDoCredito,
-  type ApuracaoDD,
-  type ProcessoDD,
+import type {
+  ApuracaoDD,
+  ProcessoDD,
 } from '../../supabase/functions/_shared/dueDiligencia.ts'
 import {
   alvosDaCessao,
@@ -56,10 +58,7 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { EmptyState, Loading, Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-// A MESMA JANELA DA ANÁLISE. Marcar o que motivou, escrever, deixar a IA redigir
-// para quem lê no card: a recusa por diligência não é um segundo jeito de
-// reprovar, é o mesmo jeito com outros itens para marcar.
-import { JanelaDeDesfecho, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
+import type { ItemDeRisco } from '@/components/JanelaDeDesfecho'
 
 /** O que vem do banco, além do que o motor de RPV precisa. */
 interface ProcessoNaTela extends ProcessoDD {
@@ -89,8 +88,7 @@ export function PainelProcessosJudiciais({
   arquivos,
   lendoPdf,
   ativo,
-  acaoRecusar,
-  onMover,
+  onItensDeRisco,
 }: {
   leadId: number
   /** O título do card — é dele que sai QUAIS verbas estão sendo cedidas. */
@@ -108,15 +106,13 @@ export function PainelProcessosJudiciais({
   lendoPdf?: boolean
   ativo: boolean
   /**
-   * A recusa, quando a etapa aberta a oferece.
+   * Os processos apurados, no formato que a janela do desfecho marca.
    *
-   * VEM DE FORA porque a coluna de destino é do FUNIL, e não desta janela: RPV e
-   * Precatório numeram a mesma coluna com ids diferentes, e quem sabe em que
-   * etapa o card está é a tela que o listou. Sem a ação, o painel mostra a
-   * apuração e não oferece desfecho — que é o certo nas abas terminais.
+   * SOBEM PARA A JANELA porque é lá que a decisão fica: reprovar e seguir são
+   * botões do rodapé, ao lado de Fechar, e não do meio do painel. O painel
+   * mostra a evidência; a janela decide com ela.
    */
-  acaoRecusar?: AcaoTela | null
-  onMover?: (statusId: number, comentario: string) => Promise<void>
+  onItensDeRisco?: (itens: ItemDeRisco[]) => void
 }) {
   const toast = useToast()
   const [carregando, setCarregando] = useState(true)
@@ -132,7 +128,6 @@ export function PainelProcessosJudiciais({
   const [advOab, setAdvOab] = useState('')
   const [advCpf, setAdvCpf] = useState('')
   const [lendoTitulares, setLendoTitulares] = useState(false)
-  const [recusando, setRecusando] = useState(false)
   /**
    * A cadeia já rodou para ESTE card.
    *
@@ -432,16 +427,43 @@ export function PainelProcessosJudiciais({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ativo, carregando, erro, lendoPdf, apuracoes.length, leadId])
 
-  // -------------------------------------------------- o que a planilha dirá
-  //
-  // Calculado com A MESMA FUNÇÃO que o servidor usa para escrever as células.
-  // Reimplementar a regra aqui só criaria uma segunda verdade.
-  const linhas = useMemo(
-    () => historicoDoCredito(apuracoes, processos),
-    [apuracoes, processos],
-  )
+  // ------------------------------------------------------------- a tabela
 
-  const porApuracao = (id: string) => processos.filter((p) => p.historico_id === id)
+  /** De quem é cada processo — só interessa quando há mais de um titular. */
+  const deQuem = useMemo(
+    () =>
+      new Map(
+        apuracoes.map((a) => [a.id, a.papel === 'ADVOGADO' ? 'advogado' : 'cedente'] as const),
+      ),
+    [apuracoes],
+  )
+  const maisDeUmTitular = apuracoes.length > 1
+
+  /** O que pesa primeiro: quem abre a tabela procura a execução em curso. */
+  const processosOrdenados = useMemo(() => {
+    const peso = (r: unknown) => (r === 'ALTO' ? 0 : r === 'ATENCAO' ? 1 : 2)
+    return processos.slice().sort((a, b) => peso(a.risco) - peso(b.risco))
+  }, [processos])
+
+  /**
+   * O QUE A APURAÇÃO NÃO CONSEGUIU, num lugar só.
+   *
+   * A lacuna é a diferença entre "procurei e não achei" e "não procurei", e
+   * some da tela se ninguém a escrever. Vem de dois lugares — o que a leitura
+   * dos autos não achou e o que a busca ressalvou (nome sem CPF, lista
+   * truncada) — e não faz sentido separá-los para quem lê.
+   */
+  const avisos = useMemo(() => {
+    const dasApuracoes = apuracoes
+      .flatMap((a) => [
+        a.status === 'FALHA'
+          ? `Não apurei ${a.papel === 'ADVOGADO' ? 'o advogado' : 'o cedente'}: ${a.observacao ?? 'falha na consulta'}`
+          : null,
+        a.status === 'APURADO' ? a.observacao : null,
+      ])
+      .filter((x): x is string => Boolean(x))
+    return [...new Set([...avisosDaLeitura, ...dasApuracoes])]
+  }, [apuracoes, avisosDaLeitura])
 
   /**
    * Os processos apurados, no formato que a janela do desfecho marca.
@@ -474,32 +496,33 @@ export function PainelProcessosJudiciais({
       })
   }, [processos, apuracoes])
 
-  /**
-   * A IA redige a recusa a partir dos processos marcados.
-   *
-   * `origem: 'diligencia'` não é etiqueta: é o que faz o texto explicar COMO um
-   * processo de terceiro alcança esta operação — penhora do crédito cedido,
-   * fraude à execução, massa falida. Sem isso a anotação listaria números de
-   * processo e deixaria a conclusão por conta de quem lê.
-   */
-  async function redigirRecusa(desfecho: string, itens: string[], texto: string) {
-    const r = await invokeFunction<{ mensagem?: string }>('redigir-desfecho', {
-      desfecho,
-      itens,
-      texto,
-      origem: 'diligencia',
-      cedente: cedenteDoCard || null,
-      numero_processo: lerTituloCard(tituloDoCard).numero || null,
-    })
-    const m = String(r?.mensagem ?? '').trim()
-    if (!m) throw new Error('A IA não devolveu texto para a anotação.')
-    return m
-  }
+  // Os itens sobem para a janela, que é onde ficam os botões de desfecho.
+  useEffect(() => {
+    onItensDeRisco?.(itensParaRecusa)
+  }, [itensParaRecusa, onItensDeRisco])
 
   if (carregando) return <Loading label="Lendo a diligência…" />
 
+  /** Um campo de identidade, que é tudo o que esta tela pede de entrada. */
+  const campo = (
+    rotulo: string,
+    valor: string,
+    onChange: (v: string) => void,
+    dica?: string,
+    documento = false,
+  ) => (
+    <Field label={rotulo} hint={dica}>
+      <Input
+        value={valor}
+        disabled={apurando || lendoTitulares}
+        inputMode={documento ? 'numeric' : undefined}
+        onChange={(e) => onChange(documento ? formatCpfCnpjInput(e.target.value) : e.target.value)}
+      />
+    </Field>
+  )
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {erro && (
         <div className="flex items-start gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-700 ring-1 ring-red-200">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -507,377 +530,198 @@ export function PainelProcessosJudiciais({
         </div>
       )}
 
-      {/* ------------------------------------------------ quem vamos procurar */}
-      <section className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-        <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-700">
-          Apurar processos
-        </h3>
-
-        {/* QUEM SERÁ APURADO, E POR QUÊ — dito antes dos campos, porque é a
-            decisão que os campos executam. A verba cedida sai do título do card;
-            o titular dela é quem responde por dívida que alcança este crédito. */}
-        <p className="mt-1 text-sm text-slate-600">{alvos.porque}</p>
-        <p className="mt-1 text-xs text-slate-500">
-          Verbas no título: <span className="font-medium">{alvos.verbas}</span>. A busca é por
-          CPF no Escavador; o advogado entra pela OAB, de onde o CPF dele é obtido antes de
-          procurar dívida em seu nome.
+      {/* A CORRENTE EM CURSO, dita passo a passo. Uma janela que abre e fica
+          parada por vinte segundos se lê como travada — e quem não sabe que a
+          máquina está trabalhando começa a preencher os campos à mão. */}
+      {(lendoPdf || passo) && (
+        <p className="flex items-center gap-2 text-sm text-brand-700">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+          {lendoPdf
+            ? 'Lendo os anexos do card…'
+            : passo === 'lendo'
+              ? 'Identificando os titulares nos autos…'
+              : 'Procurando processos no Escavador…'}
         </p>
+      )}
 
-        {/* A CORRENTE EM CURSO, dita passo a passo. Uma janela que abre e fica
-            parada por vinte segundos se lê como travada — e quem não sabe que a
-            máquina está trabalhando começa a preencher os campos à mão. */}
-        {(lendoPdf || passo) && (
-          <p className="mt-3 flex items-center gap-2 text-sm text-brand-700">
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-            {lendoPdf
-              ? 'Lendo os anexos do card…'
-              : passo === 'lendo'
-                ? 'Identificando os titulares nos autos…'
-                : 'Procurando processos no Escavador…'}
+      {/* OS CAMPOS DO TITULAR, e só eles.
+          Eles chegam preenchidos pela leitura dos autos; ficam editáveis porque
+          é aqui que se corrige um homônimo ou um CPF que o PDF trouxe cortado —
+          e porque, corrigido o campo, o Reapurar é o que refaz a busca. Quais
+          campos aparecem depende da verba cedida: numa cessão só de honorários
+          não há cedente a apurar, e um campo de cedente ali seria um convite a
+          apurar quem não é parte do negócio. */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {pedeCedente && (
+          <>
+            {campo('Cedente', cedenteNome, setCedenteNome)}
+            {campo(
+              'CPF do cedente',
+              cedenteCpf,
+              setCedenteCpf,
+              'Sem CPF a busca vai pelo nome, e homônimo entra.',
+              true,
+            )}
+          </>
+        )}
+        {pedeAdvogado && (
+          <>
+            {campo(alvos.cedenteEhOAdvogado ? 'Advogado (é quem cede)' : 'Advogado', advNome, setAdvNome)}
+            {campo('OAB', advOab, setAdvOab, 'Como nos autos: "GO 12345".')}
+            {campo('CPF do advogado', advCpf, setAdvCpf, undefined, true)}
+          </>
+        )}
+      </div>
+
+      {/* AS SUGESTÕES SÓ APARECEM QUANDO O CAMPO ESTÁ VAZIO — ou seja, quando a
+          leitura dos autos não achou o documento. No caminho normal a janela
+          não as mostra; elas são a saída para quando a leitura falha, e não uma
+          lista para conferir de rotina. */}
+      {pedeCedente && !onlyDigits(cedenteCpf) && cpfsSugeridos.length > 0 && (
+        <div>
+          <p className="text-xs text-slate-500">
+            Não achei o CPF nos autos. Estes aparecem nos anexos:
           </p>
-        )}
-
-        {/* O BOTÃO É REFAZER, não fazer: a leitura já aconteceu ao abrir. Fica
-            para o caso de o card ganhar anexo novo, ou de a primeira leitura ter
-            achado a pessoa errada. */}
-        {!passo && !lendoPdf && (
-          <div className="mt-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void lerTitulares()}
-              loading={lendoTitulares}
-              disabled={apurando}
-              icon={<ScanText className="h-4 w-4" />}
-            >
-              Ler os titulares nos autos de novo
-            </Button>
-          </div>
-        )}
-
-        {avisosDaLeitura.length > 0 && (
-          <ul className="mt-2 space-y-1">
-            {avisosDaLeitura.map((a) => (
-              <li key={a} className="text-xs text-amber-700">
-                {a}
-              </li>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {cpfsSugeridos.map((c) => (
+              <button
+                key={c.cpf}
+                type="button"
+                title={c.contexto}
+                onClick={() => setCedenteCpf(formatCpfCnpjInput(c.cpf))}
+                className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-brand-300"
+              >
+                {formatCpfCnpjInput(c.cpf)}
+              </button>
             ))}
-          </ul>
-        )}
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {pedeCedente && (
-            <>
-              <Field label="Cedente">
-                <Input
-                  value={cedenteNome}
-                  onChange={(e) => setCedenteNome(e.target.value)}
-                  placeholder="Nome do cedente"
-                />
-              </Field>
-              <Field
-                label="CPF do cedente"
-                hint="Sem CPF a busca vai pelo nome, e homônimo entra."
-              >
-                <Input
-                  value={cedenteCpf}
-                  onChange={(e) => setCedenteCpf(formatCpfCnpjInput(e.target.value))}
-                  placeholder="000.000.000-00"
-                  inputMode="numeric"
-                />
-              </Field>
-            </>
-          )}
-          {pedeAdvogado && (
-            <>
-              <Field label={alvos.cedenteEhOAdvogado ? 'Advogado (é quem cede)' : 'Advogado'}>
-                <Input
-                  value={advNome}
-                  onChange={(e) => setAdvNome(e.target.value)}
-                  placeholder="Nome do advogado"
-                />
-              </Field>
-              <Field
-                label="OAB do advogado"
-                hint={
-                  onlyDigits(advCpf).length === 11
-                    ? 'O CPF já veio dos autos — a OAB fica como conferência.'
-                    : 'Como nos autos: "GO 12345".'
-                }
-              >
-                <Input
-                  value={advOab}
-                  onChange={(e) => setAdvOab(e.target.value)}
-                  placeholder="GO 12345"
-                />
-              </Field>
-              {/* O CPF DO ADVOGADO, QUANDO OS AUTOS O TRAZEM, poupa uma consulta:
-                  sem ele a apuração pergunta a OAB ao Escavador só para descobrir
-                  o CPF antes de procurar dívida. */}
-              <Field label="CPF do advogado" hint="Opcional: se vier, dispensa a busca pela OAB.">
-                <Input
-                  value={advCpf}
-                  onChange={(e) => setAdvCpf(formatCpfCnpjInput(e.target.value))}
-                  placeholder="000.000.000-00"
-                  inputMode="numeric"
-                />
-              </Field>
-            </>
-          )}
+          </div>
         </div>
-
-        {/* Sugestões do PDF: candidatos com o trecho ao lado, nunca escolha
-            automática. Um processo tem o CPF do cedente, o do advogado e o de
-            cada terceiro — adivinhar aqui é diligenciar a pessoa errada. */}
-        {cpfsSugeridos.length > 0 && (
-          <div className="mt-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              CPFs nos anexos
-            </p>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {cpfsSugeridos.map((c) => (
-                <button
-                  key={c.cpf}
-                  type="button"
-                  title={c.contexto}
-                  onClick={() =>
-                    // Para o campo que esta cessão de fato pede: numa cessão só
-                    // de honorários não há campo de cedente para preencher.
-                    pedeCedente
-                      ? setCedenteCpf(formatCpfCnpjInput(c.cpf))
-                      : setAdvCpf(formatCpfCnpjInput(c.cpf))
-                  }
-                  className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-brand-300"
-                >
-                  {formatCpfCnpjInput(c.cpf)}
-                </button>
-              ))}
-            </div>
+      )}
+      {pedeAdvogado && !advOab.trim() && !onlyDigits(advCpf) && oabsSugeridas.length > 0 && (
+        <div>
+          <p className="text-xs text-slate-500">Não achei a OAB nos autos. Estas aparecem nos anexos:</p>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {oabsSugeridas.map((o) => (
+              <button
+                key={o.uf + o.numero}
+                type="button"
+                title={o.contexto}
+                onClick={() => {
+                  setAdvOab(o.uf + ' ' + o.numero)
+                  if (o.nome) setAdvNome(o.nome)
+                }}
+                className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-brand-300"
+              >
+                {o.uf} {o.numero}
+                {o.nome && <span className="text-slate-400"> · {o.nome}</span>}
+              </button>
+            ))}
           </div>
-        )}
-        {pedeAdvogado && oabsSugeridas.length > 0 && (
-          <div className="mt-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              OABs nos anexos
-            </p>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {oabsSugeridas.map((o) => (
-                <button
-                  key={o.uf + o.numero}
-                  type="button"
-                  title={o.contexto}
-                  onClick={() => {
-                    setAdvOab(`${o.uf} ${o.numero}`)
-                    if (o.nome) setAdvNome(o.nome)
-                  }}
-                  className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-brand-300"
-                >
-                  {o.uf} {o.numero}
-                  {o.nome && <span className="text-slate-400"> · {o.nome}</span>}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        </div>
+      )}
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+      {/* O QUE A APURAÇÃO NÃO CONSEGUIU, dito em voz alta: busca pelo nome,
+          lista truncada, titular não identificado. A lacuna é a diferença entre
+          "procurei e não achei" e "não procurei", e some da tela se ninguém a
+          escrever. */}
+      {avisos.length > 0 && (
+        <ul className="space-y-1 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+          {avisos.map((a) => (
+            <li key={a} className="text-xs text-amber-800">
+              {a}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!passo && !lendoPdf && (
+        <div className="flex flex-wrap items-center gap-3">
           <Button
+            size="sm"
+            variant="outline"
             onClick={() => void apurar()}
             loading={apurando}
-            disabled={Boolean(passo) || lendoTitulares}
+            disabled={lendoTitulares}
             icon={<Search className="h-4 w-4" />}
           >
-            {apuracoes.length > 0 ? 'Reapurar no Escavador' : 'Apurar no Escavador'}
-          </Button>
-          <Button variant="ghost" onClick={() => void carregar()} icon={<RefreshCw className="h-4 w-4" />}>
-            Recarregar
+            {apuracoes.length > 0 ? 'Reapurar' : 'Apurar no Escavador'}
           </Button>
           {custo && <span className="text-xs text-slate-500">Custo desta consulta: {custo}</span>}
         </div>
-        <p className="mt-2 text-xs text-slate-500">
-          Reapurar substitui a foto anterior: os processos achados pelo Escavador são
-          trocados pelos de agora.
-        </p>
-      </section>
-
-      {/* --------------------------------------- o que vai sair na planilha */}
-      {linhas.length > 0 && (
-        <section className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-          <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-700">
-            O que a análise vai imprimir
-          </h3>
-          <div className="mt-3 space-y-2">
-            {linhas.map((l) => (
-              <div key={l.papel} className="text-sm">
-                <span className="font-medium text-slate-700">
-                  Linha {l.linha} — histórico {l.papel === 'CEDENTE' ? 'do cedente' : 'do advogado'}:
-                </span>{' '}
-                {!l.apurada ? (
-                  <Badge tone="gray">
-                    {l.falhou ? 'apuração falhou' : 'não apurada'} — a IA responde
-                  </Badge>
-                ) : (
-                  <Badge tone={l.temDivida ? 'red' : 'green'}>
-                    {l.temDivida ? 'Sim, tem dívida' : 'Não'}
-                  </Badge>
-                )}
-                {l.complemento && (
-                  <p className="mt-0.5 text-xs text-slate-600">{l.complemento}</p>
-                )}
-                {l.indeterminados > 0 && (
-                  <p className="mt-0.5 text-xs text-amber-700">
-                    {l.indeterminados} processo(s) sem dizer se há valor cobrado — não contam
-                    como dívida.
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
       )}
 
-      {/* ---------------------------------------------- a apuração, por alvo */}
-      {apuracoes.length === 0 ? (
+      {/* A TABELA, UMA SÓ. Antes eram uma por titular apurado, com cabeçalho de
+          seção cada uma; com um titular — que é o caso normal — a moldura era
+          maior que o conteúdo. A coluna "de quem" só aparece quando há mais de
+          um, que é quando a pergunta existe. */}
+      {processos.length === 0 ? (
         <EmptyState
-          title="Nenhuma apuração ainda"
-          description="Informe o CPF do cedente (e a OAB do advogado, se houver) e clique em Apurar. Enquanto ninguém apurar, as linhas 10 e 11 da análise continuam sendo respondidas pela leitura dos autos — que não enxerga dívida fora deste processo."
+          title={
+            apuracoes.some((a) => a.status === 'APURADO')
+              ? 'Nenhum processo em nome dos titulares'
+              : 'Nada apurado ainda'
+          }
+          description={
+            apuracoes.some((a) => a.status === 'APURADO')
+              ? 'A busca correu e não achou processo nenhum além do próprio crédito.'
+              : 'Confira os campos acima e clique em Apurar no Escavador.'
+          }
         />
       ) : (
-        apuracoes.map((a) => {
-          const meus = porApuracao(a.id)
-          return (
-            <section key={a.id} className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-              <header className="flex flex-wrap items-baseline justify-between gap-2">
-                <div>
-                  <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-700">
-                    {a.papel === 'CEDENTE' ? 'Cedente' : a.papel === 'ADVOGADO' ? 'Advogado' : a.papel}
-                    {' — '}
-                    {a.nome}
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {a.documento ? formatCpfCnpjInput(a.documento) : a.oab ? `OAB ${a.oab}` : '—'}
-                    {a.apurado_em && ` · apurado em ${formatDate(a.apurado_em)}`}
-                    {a.fonte && ` · fonte: ${a.fonte}`}
-                  </p>
-                </div>
-                <Badge tone={a.status === 'APURADO' ? 'green' : a.status === 'FALHA' ? 'red' : 'gray'}>
-                  {a.status === 'APURADO' ? 'apurado' : a.status === 'FALHA' ? 'falhou' : 'pendente'}
-                </Badge>
-              </header>
-
-              {a.observacao && (
-                <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800 ring-1 ring-amber-200">
-                  {a.observacao}
-                </p>
-              )}
-
-              {meus.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-600">
-                  {a.status === 'APURADO'
-                    ? 'Nenhum processo em nome desta pessoa.'
-                    : 'Nada a mostrar: a apuração não foi concluída.'}
-                </p>
-              ) : (
-                <div className="mt-3">
-                  <Table dense>
-                    <THead>
-                      <TR>
-                        <TH>Processo</TH>
-                        <TH>Objeto</TH>
-                        <TH>Polo</TH>
-                        <TH className="text-right">Valor da causa</TH>
-                        <TH>Estágio</TH>
-                        <TH>Risco para a cessão</TH>
-                      </TR>
-                    </THead>
-                    <TBody>
-                      {meus
-                        .slice()
-                        .sort((x, y) =>
-                          Number(y.risco === 'ALTO') - Number(x.risco === 'ALTO') ||
-                          Number(y.risco === 'ATENCAO') - Number(x.risco === 'ATENCAO'),
-                        )
-                        .map((p) => (
-                          <TR key={p.id}>
-                            <TD className="whitespace-nowrap font-mono text-xs">
-                              {p.url_fonte ? (
-                                <a
-                                  href={p.url_fonte}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 text-brand-700 hover:underline"
-                                >
-                                  {p.numero_processo}
-                                  <ExternalLink className="h-3 w-3" />
-                                </a>
-                              ) : (
-                                p.numero_processo
-                              )}
-                              {p.tribunal && (
-                                <span className="block text-slate-400">{p.tribunal}</span>
-                              )}
-                            </TD>
-                            <TD>{p.objeto ?? '—'}</TD>
-                            <TD>
-                              <Badge tone={p.polo === 'PASSIVO' ? 'orange' : 'gray'} size="sm">
-                                {p.polo === 'PASSIVO' ? 'réu' : p.polo === 'ATIVO' ? 'autor' : 'terceiro'}
-                              </Badge>
-                            </TD>
-                            <TD className="text-right tabular-nums">{brl(p.valor_cobrado)}</TD>
-                            <TD className="text-xs">{p.estagio ?? '—'}</TD>
-                            <TD>
-                              <Badge tone={TOM_DO_RISCO[String(p.risco)] ?? 'gray'} size="sm">
-                                {p.risco === 'NENHUM' ? 'sem risco' : String(p.risco).toLowerCase()}
-                              </Badge>
-                              {p.risco_motivo && (
-                                <p className="mt-1 text-xs text-slate-600">{p.risco_motivo}</p>
-                              )}
-                            </TD>
-                          </TR>
-                        ))}
-                    </TBody>
-                  </Table>
-                </div>
-              )}
-            </section>
-          )
-        })
-      )}
-
-      {/* A DECISÃO FICA DEPOIS DA LEITURA, e é essa a razão de ela estar no fim
-          do painel e não no rodapé da janela: no rodapé pareceria valer para a
-          aba de certidões também, e ficaria a um clique de quem só abriu para
-          conferir. Aqui ela vem depois da lista que a fundamenta.
-
-          SÓ COM APURAÇÃO. Recusar por processos que ninguém procurou seria
-          assinar uma razão que não existe — e o botão sumido é mais honesto que
-          um botão que abre uma janela sem nada para marcar. */}
-      {acaoRecusar && onMover && apuracoes.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
-          <Button
-            variant="danger"
-            icon={<Ban className="h-4 w-4" />}
-            onClick={() => setRecusando(true)}
-            disabled={apurando}
-          >
-            {acaoRecusar.label}
-          </Button>
-          <span className="text-xs text-slate-500">
-            {processos.length === 0
-              ? 'Nenhum processo apurado: a recusa terá de ser escrita à mão.'
-              : `Marque quais dos ${processos.length} processo(s) motivam a recusa.`}
-          </span>
-        </div>
-      )}
-
-      {recusando && acaoRecusar && onMover && (
-        <JanelaDeDesfecho
-          acao={acaoRecusar}
-          achados={itensParaRecusa}
-          onRedigir={redigirRecusa}
-          onMover={onMover}
-          onFechar={() => setRecusando(false)}
-        />
+        <Table dense>
+          <THead>
+            <TR>
+              <TH>Processo</TH>
+              <TH>Objeto</TH>
+              {maisDeUmTitular && <TH>De quem</TH>}
+              <TH>Polo</TH>
+              <TH className="text-right">Valor da causa</TH>
+              <TH>Estágio</TH>
+              <TH>Risco para a cessão</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {processosOrdenados.map((p) => (
+              <TR key={p.id}>
+                <TD className="whitespace-nowrap font-mono text-xs">
+                  {p.url_fonte ? (
+                    <a
+                      href={p.url_fonte}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+                    >
+                      {p.numero_processo}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    p.numero_processo
+                  )}
+                  {p.tribunal && <span className="block text-slate-400">{p.tribunal}</span>}
+                </TD>
+                <TD>{p.objeto ?? '—'}</TD>
+                {maisDeUmTitular && (
+                  <TD className="text-xs">{deQuem.get(p.historico_id) ?? '—'}</TD>
+                )}
+                <TD>
+                  <Badge tone={p.polo === 'PASSIVO' ? 'orange' : 'gray'} size="sm">
+                    {p.polo === 'PASSIVO' ? 'réu' : p.polo === 'ATIVO' ? 'autor' : 'terceiro'}
+                  </Badge>
+                </TD>
+                <TD className="text-right tabular-nums">{brl(p.valor_cobrado)}</TD>
+                <TD className="text-xs">{p.estagio ?? '—'}</TD>
+                <TD>
+                  <Badge tone={TOM_DO_RISCO[String(p.risco)] ?? 'gray'} size="sm">
+                    {p.risco === 'NENHUM' ? 'sem risco' : String(p.risco).toLowerCase()}
+                  </Badge>
+                  {p.risco_motivo && (
+                    <p className="mt-1 text-xs text-slate-600">{p.risco_motivo}</p>
+                  )}
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
       )}
     </div>
   )

@@ -159,8 +159,26 @@ export function JanelaDeDesfecho({
   // Marcar é atalho de conteúdo, não de forma: o que se aponta com o dedo vira
   // frase no texto da IA, nunca a lista de rótulos entre colchetes. Quem não
   // quer a IA desmarca tudo e escreve à mão.
+  /**
+   * O MOTIVO É OBRIGATÓRIO NO QUE INTERROMPE, e no que aprova.
+   *
+   * Diligência sem dizer o que falta transfere ao comercial a tarefa de
+   * adivinhar o que apurar; recusa sem motivo apaga o trabalho de quem analisou
+   * — seis meses depois o card diz que não passou e ninguém sabe por quê.
+   * Aprovar entra na mesma régua por outro motivo: é o que a coluna seguinte lê
+   * para montar a proposta, e um card que sobe sem uma linha sobre o que se está
+   * comprando chega vazio do outro lado.
+   *
+   * ENVIAR PARA VALIDAÇÃO é o caminho normal e fica de fora: quem valida tem a
+   * análise inteira à frente, e exigir um parágrafo para seguir o fluxo previsto
+   * é pedágio.
+   */
+  const motivoObrigatorio = acao.papel !== 'validar'
   const podeEnviar =
-    !enviando && !redigindo && motivo.trim().length >= 10 && (marcados.size === 0 || revisado)
+    !enviando &&
+    !redigindo &&
+    (!motivoObrigatorio || motivo.trim().length >= 10) &&
+    (marcados.size === 0 || revisado)
 
   return (
     <Modal
@@ -240,7 +258,11 @@ export function JanelaDeDesfecho({
             placeholder={
               acao.papel === 'diligenciar'
                 ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
-                : 'Por que não passa. Ex.: "precatório expedido, não RPV" · "crédito de R$ 12 mil, abaixo do mínimo".'
+                : acao.papel === 'reprovar'
+                  ? 'Por que não passa. Ex.: "precatório expedido, não RPV" · "crédito de R$ 12 mil, abaixo do mínimo".'
+                  : acao.papel === 'aprovar'
+                    ? 'O que a proposta precisa saber: o que se está comprando, por quanto, e o que ficou de ressalva.'
+                    : 'Opcional — o que o próximo a pegar este card precisa saber.'
             }
             value={motivo}
             disabled={enviando || redigindo}
@@ -286,7 +308,7 @@ export function JanelaDeDesfecho({
           ) : null}
         </div>
 
-        {motivo.trim().length > 0 && motivo.trim().length < 10 && (
+        {motivoObrigatorio && motivo.trim().length > 0 && motivo.trim().length < 10 && (
           <p className="text-xs text-amber-700">
             Escreva a razão por extenso — o comercial lê isso sem ter a análise à mão.
           </p>

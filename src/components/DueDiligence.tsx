@@ -9,9 +9,14 @@
 // a cessão. São perguntas diferentes, e por isso duas abas.
 //
 // O PAINEL DE CERTIDÕES ERA UM MODAL e virou aba (ver PainelCertidoes): as ações
-// dele ficam no fim do próprio painel, e o rodapé daqui tem só "Fechar" — um
-// "Gravar e montar checklist" no rodapé da janela pareceria valer para as duas
-// abas.
+// dele ficam no fim do próprio painel — um "Gravar e montar checklist" no rodapé
+// da janela pareceria valer para as duas abas.
+//
+// O DESFECHO, ESSE FICA NO RODAPÉ, e é a exceção com razão. Ele não pertence a
+// uma aba: é o que se faz DEPOIS de ler a diligência inteira, e a evidência que
+// o sustenta está aqui dentro — os processos que a apuração acabou de achar. Sem
+// os botões aqui, decidir exigia fechar a janela, achar o card na lista e abrir
+// outra coisa, com a lista de processos já fora da vista.
 //
 // AS DUAS ABAS FICAM MONTADAS, e a inativa apenas oculta. Trocar de aba não pode
 // perder um formulário meio preenchido, e `display:none` também tira os campos
@@ -22,6 +27,8 @@ import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
 import { PainelCertidoes } from '@/components/PainelCertidoes'
 import { PainelProcessosJudiciais } from '@/components/PainelProcessosJudiciais'
+import { JanelaDeDesfecho, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
+import { invokeFunction } from '@/lib/functions'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import type { AcaoTela } from '@/lib/kommo'
 
@@ -37,7 +44,7 @@ export function DueDiligence({
   open,
   onClose,
   comCertidoes,
-  acaoRecusar,
+  acoes,
   onMover,
 }: {
   leadId: number
@@ -61,8 +68,15 @@ export function DueDiligence({
    * jogada fora.
    */
   comCertidoes: boolean
-  /** A recusa da etapa aberta, quando ela existe. Ver o painel de processos. */
-  acaoRecusar?: AcaoTela | null
+  /**
+   * Os desfechos da etapa em que o card está.
+   *
+   * VÊM DE FORA porque a coluna de destino é do FUNIL: RPV e Precatório numeram
+   * as mesmas colunas com ids diferentes, e quem sabe em que etapa o card está é
+   * a tela que o listou. Etapa terminal manda lista vazia e o rodapé fica só com
+   * Fechar — que é o certo: de Aprovados e Reprovados o card não sai por aqui.
+   */
+  acoes?: AcaoTela[]
   onMover?: (statusId: number, comentario: string) => Promise<void>
 }) {
   const [aba, setAba] = useState<Aba>(comCertidoes ? 'certidoes' : 'processos')
@@ -71,6 +85,37 @@ export function DueDiligence({
   // identidade é estável — passar uma arrow inline aqui faria o efeito do painel
   // disparar a cada render.
   const [sujo, setSujo] = useState(false)
+  const [desfecho, setDesfecho] = useState<AcaoTela | null>(null)
+  /**
+   * Os processos apurados, que sobem do painel para virar itens marcáveis.
+   *
+   * A JANELA NÃO OS BUSCA: quem consulta o banco é o painel, e uma segunda
+   * consulta aqui criaria duas listas que divergem enquanto uma apuração corre.
+   * `setItens` é setState — identidade estável, então o efeito que reporta lá
+   * dentro não dispara a cada render.
+   */
+  const [itens, setItens] = useState<ItemDeRisco[]>([])
+
+  /**
+   * A IA redige o desfecho a partir dos processos marcados.
+   *
+   * `origem: 'diligencia'` não é etiqueta: é o que faz o texto explicar COMO um
+   * processo de terceiro alcança esta operação — penhora do crédito cedido,
+   * fraude à execução, massa falida. Sem isso a anotação listaria números de
+   * processo e deixaria a conclusão por conta de quem lê.
+   */
+  async function redigir(tipo: string, marcados: string[], texto: string) {
+    const r = await invokeFunction<{ mensagem?: string }>('redigir-desfecho', {
+      desfecho: tipo,
+      itens: marcados,
+      texto,
+      origem: 'diligencia',
+      cedente: cedenteDoCard || null,
+    })
+    const m = String(r?.mensagem ?? '').trim()
+    if (!m) throw new Error('A IA não devolveu texto para a anotação.')
+    return m
+  }
 
   return (
     <Modal
@@ -80,7 +125,23 @@ export function DueDiligence({
       dirty={sujo}
       title="Due diligence do crédito"
       footer={
-        <div className="flex items-center justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* Os desfechos à esquerda, o Fechar à direita: são atos de peso
+              diferente, e enfileirá-los juntos faria "Fechar" parecer a quarta
+              opção de uma decisão. */}
+          <div className="flex flex-wrap items-center gap-2">
+            {(acoes ?? []).map((a) => (
+              <Button
+                key={a.statusId}
+                size="sm"
+                variant={a.variant}
+                onClick={() => setDesfecho(a)}
+                disabled={!onMover}
+              >
+                {a.label}
+              </Button>
+            ))}
+          </div>
           <Button variant="ghost" onClick={onClose}>
             Fechar
           </Button>
@@ -126,11 +187,23 @@ export function DueDiligence({
             arquivos={arquivos}
             lendoPdf={lendoPdf}
             ativo={aba === 'processos'}
-            acaoRecusar={acaoRecusar}
-            onMover={onMover}
+            onItensDeRisco={setItens}
           />
         </div>
       </div>
+
+      {desfecho && onMover && (
+        <JanelaDeDesfecho
+          acao={desfecho}
+          achados={itens}
+          onRedigir={redigir}
+          onMover={async (statusId, comentario) => {
+            await onMover(statusId, comentario)
+            setDesfecho(null)
+          }}
+          onFechar={() => setDesfecho(null)}
+        />
+      )}
     </Modal>
   )
 }
