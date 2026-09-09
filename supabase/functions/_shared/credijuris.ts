@@ -36,13 +36,11 @@ export interface DriveFile {
  * os literais, e a busca tolerante passaria a não achar pasta nenhuma. A cópia
  * que vivia em gerar-analise-rpv já trazia esse cuidado; esta não.
  */
-export function normalizar(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[.\-/() ]/g, '')
-}
+// A implementação mora em nucleo/texto.ts, que não importa nada: assim quem
+// depende dela — as listas suspensas da planilha, entre outros — fica alcançável
+// pelos testes. Este arquivo importa o SDK do Supabase e barrava todos eles.
+import { normalizarParaComparar as normalizar } from './nucleo/texto.ts'
+export { normalizar }
 
 export function escapeDriveQuery(s: string): string {
   return s.replace(/'/g, "\\'")

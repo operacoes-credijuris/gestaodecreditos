@@ -24,3 +24,22 @@ export function normalizarNome(s: string | null | undefined): string {
     .trim()
     .toLowerCase()
 }
+
+/**
+ * A forma de comparar dois nomes que deveriam ser o mesmo.
+ *
+ * Sem caixa, sem acento e sem os separadores que ninguém digita igual — ponto,
+ * hífen, barra, parêntese e espaço. É o que faz "Procedência parcial" casar com
+ * "procedencia parcial" e o nome de uma pasta do Drive casar com o do card.
+ *
+ * MORAVA EM credijuris.ts, que importa o SDK do Supabase — então nada que
+ * dependesse dela era alcançável pelos testes, incluindo a normalização das
+ * listas suspensas da planilha, que decide se a célula sai válida ou não.
+ */
+export function normalizarParaComparar(s: string): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.\-/() ]/g, '')
+}

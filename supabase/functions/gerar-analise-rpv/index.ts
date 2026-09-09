@@ -56,6 +56,10 @@ import {
 } from "../_shared/indicesBcb.ts";
 import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, escolherModelo, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type Precificacao, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { grauDaPlanilha } from "../_shared/graus.ts";
+// AS LISTAS SUSPENSAS DA PLANILHA são puras e têm teste. Ver _shared/m2.ts: é o
+// que decide se a resposta sai válida na célula ou vira aviso.
+import { LISTAS_M2, normalizarM2, SIM_NAO } from "../_shared/m2.ts";
+import { decidirVerbas, temVerbaNegociavel, verbasDitadasNoChat } from "../_shared/verbas.ts";
 import { calcularIrFaltante, memoriaDoIrFaltante } from "../_shared/irFaltante.ts";
 // O PISO É PURO E TEM TESTE. Ver _shared/piso.ts: quatro desfechos sobre uma
 // regra da casa, cada um mudando o que dá para fazer em seguida.
@@ -577,59 +581,6 @@ function riscosComAuditoria(dados: any): any[] {
   ];
 }
 
-/**
- * As listas suspensas da aba jurídica, linha a linha. Texto fora delas a célula
- * aceita e o Excel só reclama quando alguém edita — o arquivo sai "preenchido" e
- * a cor condicional não pinta. O prompt promete "marcado como inválido"; isto é
- * o que marca.
- */
-const SIM_NAO = ['Sim', 'Não'];
-const LISTAS_M2: Record<string, string[]> = {
-  '10': SIM_NAO, '11': SIM_NAO, '14': SIM_NAO, '15': SIM_NAO, '16': SIM_NAO, '18': SIM_NAO,
-  '21': SIM_NAO, '22': SIM_NAO, '23': SIM_NAO, '27': SIM_NAO, '28': SIM_NAO, '31': SIM_NAO,
-  '32': SIM_NAO, '33': SIM_NAO, '34': SIM_NAO, '35': SIM_NAO, '37': SIM_NAO,
-  '19': ['Improcedência', 'Procedência', 'Procedência parcial', 'Homologatória de acordo'],
-  // "Iliquída" é a grafia da lista do modelo; a correção ortográfica tem de vir do modelo, não daqui.
-  '20': ['Líquida', 'Iliquída'],
-  '24': ['Valor apresentado no CS', 'Execução invertida'],
-  '26': [
-    'Executado não apresentou valores e prazo ainda em curso',
-    'Executado não apresentou valores — prazo decorrido — sem manifestação da parte exequente',
-    'Executado não apresentou valores — prazo decorrido — já houve manifestação da parte exequente',
-    'Executado apresentou valores',
-  ],
-  '38': ['Minuta de RPV', 'RPV', 'Alvará de pagamento', 'Sem expedição'],
-};
-
-/**
- * Traz cada resposta para o valor EXATO da lista da sua linha, quando dá.
- *
- * "sim", "SIM", "Sim, em 12/03/2026" viram "Sim"; "procedencia parcial" vira
- * "Procedência parcial"; "Executado apresentou valores (fls. 300)" casa pela
- * opção mais longa contida. O que não casa fica como veio e é devolvido em
- * `foraDaLista`, para a análise avisar — corrigir sem saber o que a IA quis
- * dizer seria inventar resposta.
- */
-function normalizarM2(m2: unknown): { m2: Record<string, any>; foraDaLista: string[] } {
-  const saida: Record<string, any> = {};
-  const fora: string[] = [];
-  const entrada = (m2 && typeof m2 === 'object') ? (m2 as Record<string, any>) : {};
-  for (const [linha, item] of Object.entries(entrada)) {
-    const lista = LISTAS_M2[linha];
-    const resposta = item?.resposta;
-    if (!lista || typeof resposta !== 'string' || !resposta.trim()) { saida[linha] = item; continue; }
-    const r = normalizar(resposta);
-    let canon: string | null = lista.find((op) => normalizar(op) === r) ?? null;
-    if (!canon && lista === SIM_NAO) canon = r.startsWith('sim') ? 'Sim' : r.startsWith('nao') ? 'Não' : null;
-    if (!canon) {
-      // A opção mais longa que a resposta contém: "Procedência parcial" antes de "Procedência".
-      canon = [...lista].sort((a, b) => b.length - a.length).find((op) => r.includes(normalizar(op))) ?? null;
-    }
-    if (canon) saida[linha] = { ...item, resposta: canon };
-    else { saida[linha] = item; fora.push(`linha ${linha}: "${resposta.slice(0, 60)}"`); }
-  }
-  return { m2: saida, foraDaLista: fora };
-}
 
 // dados = saída do extrator. Estrutura em SCHEMA_ANALISE (abaixo).
 async function gerarPlanilha(templateBytes: Uint8Array, dados: any, calc: any, T5: number): Promise<Uint8Array> {
@@ -3304,81 +3255,39 @@ Deno.serve(async (req) => {
     // diferentes, e amarrá-las punha metade dos casos no bloco errado.
     dados.modelo = _hon.modelo;
 
-    if (tipoAquisicao === 'principal') {
-      verbas = { principal: true, contratuais: false, sucumbenciais: false };
-      dados.tipo_credito = 'Crédito principal — apenas';
-    } else if (tipoAquisicao === 'ambos') {
-      // "Principal + honorários" leva o honorário que existir, dos dois tipos.
-      verbas = { principal: true, contratuais: true, sucumbenciais: true };
-      dados.tipo_credito = 'Crédito principal + Honorários';
-    } else if (tipoAquisicao === 'honorarios' || tipoAquisicao === 'contratuais') {
-      verbas = { principal: false, contratuais: true, sucumbenciais: true };
-      dados.tipo_credito = 'Honorários contratuais + sucumbenciais';
-      // Card diz só "contratuais" e o processo TEM sucumbenciais: entram no
-      // preço, porque cede-se o honorário que existe — mas é o caso raro, e
-      // quem fecha precisa saber que está comprando as duas verbas.
-      if (tipoAquisicao === 'contratuais' && _sucumbBrutosAutos > 0) dados._sucumbNaoPrevistos = _sucumbBrutosAutos;
-    } else if (tipoAquisicao === 'sucumbenciais') {
-      verbas = { principal: false, contratuais: false, sucumbenciais: true };
-      dados.tipo_credito = 'Honorários sucumbenciais — apenas';
-    } else if (tipoAquisicao === 'indefinido') {
-      // "HONORÁRIOS", SEM DIZER QUAIS — E OS AUTOS COSTUMAM DIZER POR ELE.
-      //
-      // A maioria das RPVs vem do JUIZADO ESPECIAL, onde não há sucumbência em
-      // primeiro grau (art. 55 da Lei 9.099/95). Ali existe UM honorário só, o
-      // contratual, e "honorários" não é ambíguo: é o único que existe.
-      //
-      // Isto já bloqueou a análise inteira, e o raciocínio estava certo pela
-      // metade: chutar entre duas verbas é caro, mas só HÁ escolha quando as
-      // duas existem. Bloquear antes de ler os autos recusava a maioria dos
-      // casos por uma ambiguidade que não havia — e o comercial não tinha o que
-      // corrigir no card, porque o card estava certo.
-      const _temContratuais = honAI > 0 || honorariosPct != null;
-      const _temSucumbenciais = _sucumbBrutosAutos > 0;
-      // AS DUAS EXISTEM: aí sim a escolha é real e muda o preço — os
-      // contratuais saem de dentro do principal, os sucumbenciais vêm por fora,
-      // pagos pelo vencido. Não há como adivinhar qual foi cedida, e o palpite
-      // não aparece no resultado.
-      if (_temContratuais && _temSucumbenciais) {
+    // OS PARÂMETROS DITADOS NO CHAT, lidos uma vez e usados em dois lugares: as
+    // verbas aqui, e o deságio/comissão/diligência na calibragem.
+    const _manual = parametrosParaCalibragem(dados);
+    // A DECISÃO MORA EM _shared/verbas.ts — pura e com teste. Um dos ramos dela
+    // RECUSA a análise ("honorários" sem dizer quais, num processo que tem os
+    // dois), e nenhum tinha caso escrito. As marcas de aviso saem na entrada da
+    // função, porque eram gravadas só no ramo que as produz e nunca zeradas nos
+    // outros: trocado o cenário no seletor, a tela continuava mostrando o aviso
+    // da escolha que o clique desmentiu.
+    {
+      const _d = decidirVerbas(tipoAquisicao, {
+        contratuais: honorariosCalc,
+        sucumbenciais: _sucumbBrutosAutos,
+        pctCard: honorariosPct,
+      });
+      if ('erro' in _d) {
         return errorResponse(
-          `O card diz que a cessão é de HONORÁRIOS mas não diz quais, e este processo tem OS DOIS: ` +
-          `contratuais de ${brl(honorariosCalc)} e sucumbenciais de ${brl(_sucumbBrutosAutos)}. ` +
+          'O card diz que a cessão é de HONORÁRIOS mas não diz quais, e este processo tem OS DOIS: ' +
+          `contratuais de ${brl(_d.contratuais)} e sucumbenciais de ${brl(_d.sucumbenciais)}. ` +
           'Disso depende o preço: os contratuais saem do bolo do principal, os sucumbenciais vêm por fora, pagos pelo vencido. ' +
           'Escreva no card qual é — "honorários contratuais", "honorários sucumbenciais" ou "honorários contratuais + sucumbenciais" — e rode de novo.',
         );
       }
-      // Uma só: é ela, e o motor diz de qual se trata em vez de deixar o
-      // operador supor. Verba de valor zero é descartada na montagem das
-      // parcelas, então marcar as duas aqui não inventa escritura de cartório.
-      verbas = { principal: false, contratuais: true, sucumbenciais: true };
-      dados.tipo_credito = _temSucumbenciais
-        ? 'Honorários sucumbenciais — apenas'
-        : 'Honorários contratuais + sucumbenciais';
-      dados._honorarios_resolvido = _temSucumbenciais ? 'sucumbenciais' : 'contratuais';
-    } else {
-      // Automático: o destaque da contadoria decide se há honorários a comprar.
-      //
-      // NADA DITO NÃO É "PRINCIPAL" — é campo em branco. O automático assume o
-      // principal porque é o caso comum, mas assumir em silêncio custa caro:
-      // uma cessão só de honorários sai precificada com o crédito principal
-      // dentro, e a análise não tem como saber que errou. Agora que a parcela
-      // cedida também pode vir no TÍTULO do card, campo em branco é
-      // esquecimento provável — então ele avisa.
-      dados._parcela_nao_informada = true;
-      const comHonorarios = honAI > 0 || honorariosPct != null;
-      verbas = { principal: true, contratuais: comHonorarios, sucumbenciais: comHonorarios };
-      dados.tipo_credito = comHonorarios ? 'Crédito principal + Honorários' : 'Crédito principal — apenas';
-    }
-
-    // O QUE O CHAT DITOU vence o que o card diz — até a pessoa trocar o
-    // cenário no seletor da janela, que apaga a escolha do chat (ver
-    // trocarCenario no modal). Sem isto, "tira os sucumbenciais" era gravado,
-    // reportado como aplicado, e o preço saía com os sucumbenciais dentro.
-    const _manual = parametrosParaCalibragem(dados);
-    if (_manual.verbas) {
-      verbas = _manual.verbas;
-      dados.tipo_credito = rotuloDoCenario(verbas) || dados.tipo_credito;
-      dados._parcela_nao_informada = false;
+      // O QUE O CHAT DITOU vence o que o card diz — até a pessoa trocar o
+      // cenário no seletor da janela, que apaga a escolha do chat (ver
+      // trocarCenario no modal). Sem isto, "tira os sucumbenciais" era gravado,
+      // reportado como aplicado, e o preço saía com os sucumbenciais dentro.
+      const _final = verbasDitadasNoChat(_d, _manual.verbas);
+      verbas = _final.verbas;
+      dados.tipo_credito = _final.tipoCredito;
+      if (_final.sucumbNaoPrevistos) dados._sucumbNaoPrevistos = _final.sucumbNaoPrevistos;
+      if (_final.honorariosResolvido) dados._honorarios_resolvido = _final.honorariosResolvido;
+      if (_final.parcelaNaoInformada) dados._parcela_nao_informada = true;
     }
     dados.honorarios = honorariosCalc;   // contratuais, valor BRUTO destacado
     dados._verbas_negociadas = verbas;
@@ -3440,10 +3349,16 @@ Deno.serve(async (req) => {
     // honorários e o processo não tem nenhum: melhor dizer isso do que devolver
     // uma análise de valor zero, que parece um resultado.
     {
-      const temAlgo =
-        (verbas.principal && (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) - (Number(dados.inss) || 0) - honorariosCalc > 0) ||
-        (verbas.contratuais && honorariosCalc > 0) ||
-        (verbas.sucumbenciais && _sucumbBrutosAutos > 0);
+      // A GUARDA MORA EM _shared/verbas.ts — é a única coisa entre "o processo
+      // não tem o que este card manda comprar" e uma planilha afirmando zero,
+      // que tem cara de resultado.
+      const temAlgo = temVerbaNegociavel(verbas, {
+        bruto: Number(dados.bruto_total) || 0,
+        ir: Number(dados.ir) || 0,
+        inss: Number(dados.inss) || 0,
+        contratuais: honorariosCalc,
+        sucumbenciais: _sucumbBrutosAutos,
+      });
       const _semValor =
         `O card manda negociar ${dados.tipo_credito}, mas não localizei valor para nenhuma dessas verbas nos documentos. ` +
         `O que a leitura trouxe: bruto ${brl(Number(dados.bruto_total) || 0)}, IR ${brl(Number(dados.ir) || 0)}, ` +

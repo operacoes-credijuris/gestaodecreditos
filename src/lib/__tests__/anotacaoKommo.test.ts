@@ -303,4 +303,18 @@ describe('resumoDaOportunidade', () => {
   it('ficha vazia devolve só o título', () => {
     expect(resumoDaOportunidade({})).toBe('Oportunidade Credijuris')
   })
+
+  // O PRAZO CHEGA FRACIONADO: o produtor grava `Number(T5.toFixed(1))`, e o
+  // texto do CRM saía "Recebimento: 14.3 meses" — com ponto decimal, num
+  // resumo em português que o comercial lê.
+  it('prazo com fração sai com vírgula', () => {
+    const r = resumoDaOportunidade({ ficha: { tipo: 'RPV' }, prazoMeses: 14.3 })
+    expect(r).toContain('14,3 meses')
+    expect(r).not.toContain('14.3')
+  })
+
+  it('um mês continua no singular, e zero não aparece', () => {
+    expect(resumoDaOportunidade({ ficha: { tipo: 'RPV' }, prazoMeses: 1 })).toContain('1 mês')
+    expect(resumoDaOportunidade({ ficha: { tipo: 'RPV' }, prazoMeses: 0 })).not.toContain('Recebimento')
+  })
 })
