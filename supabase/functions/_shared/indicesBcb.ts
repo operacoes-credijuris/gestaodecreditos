@@ -134,12 +134,31 @@ export function pontosMensais(json: unknown): PontoMensal[] {
 /** Competência como número comparável: 2015-01 -> 24181. */
 const chave = (ano: number, mes: number) => ano * 12 + mes
 
-/** 'MM/AAAA' -> {ano, mes}, ou null. Aceita 'M/AAAA' e 'AAAA-MM'. */
+/**
+ * 'MM/AAAA' -> {ano, mes}, ou null. Aceita 'M/AAAA', 'AAAA-MM', 'AAAA-MM-DD' e
+ * 'DD/MM/AAAA'.
+ *
+ * AS DUAS ÚLTIMAS PORQUE O RESTO DO ESQUEMA USA DATA COMPLETA. O modelo devolve
+ * "12/05/2019" no termo inicial de um consectário com a mesma naturalidade com
+ * que devolve "05/2019", e o item era descartado — em silêncio, porque só a
+ * base maior que o bruto gerava aviso. O dia não interessa: a série do SGS é
+ * MENSAL, e a competência é o mês.
+ */
 export function competencia(txt: unknown): { ano: number; mes: number } | null {
   const s = String(txt ?? '').trim()
   let m = s.match(/^(\d{1,2})\/(\d{4})$/)
   if (m) {
     const mes = Number(m[1]), ano = Number(m[2])
+    return mes >= 1 && mes <= 12 && ano >= 1980 && ano <= 2100 ? { ano, mes } : null
+  }
+  m = s.match(/^\d{1,2}\/(\d{1,2})\/(\d{4})$/)
+  if (m) {
+    const mes = Number(m[1]), ano = Number(m[2])
+    return mes >= 1 && mes <= 12 && ano >= 1980 && ano <= 2100 ? { ano, mes } : null
+  }
+  m = s.match(/^(\d{4})-(\d{1,2})-\d{1,2}$/)
+  if (m) {
+    const ano = Number(m[1]), mes = Number(m[2])
     return mes >= 1 && mes <= 12 && ano >= 1980 && ano <= 2100 ? { ano, mes } : null
   }
   m = s.match(/^(\d{4})-(\d{1,2})$/)

@@ -155,6 +155,21 @@ describe('índices do BCB', () => {
       expect(f.meses).toBe(3)
     })
 
+    // O RESTO DO ESQUEMA USA DATA COMPLETA, e o modelo devolve "12/05/2019"
+    // num termo de consectário com a mesma naturalidade com que devolve
+    // "05/2019". O item era descartado — e em silêncio, o que era pior.
+    it('aceita a data completa, nos dois formatos', () => {
+      expect(competencia('12/05/2019')).toEqual({ ano: 2019, mes: 5 })
+      expect(competencia('1/5/2019')).toEqual({ ano: 2019, mes: 5 })
+      expect(competencia('2019-05-12')).toEqual({ ano: 2019, mes: 5 })
+    })
+
+    it('data completa com mês impossível continua sendo null', () => {
+      expect(competencia('12/13/2019')).toBe(null)
+      expect(competencia('2019-13-12')).toBe(null)
+      expect(competencia('12/05/1899')).toBe(null)
+    })
+
     it('período invertido falha', () => {
       expect(() => acumular(pontosMensais(IPCA15_2015), c(3, 2015), c(1, 2015), 'composto'))
         .toThrow(/anterior ao inicial/)
