@@ -25,7 +25,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Save, SendHorizontal, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { invokeFunction } from '@/lib/functions'
+import { codigoDoErro, invokeFunction } from '@/lib/functions'
 import { ST_DECISAO, ST_DILIGENCIA, ST_REPROVADO, type AcaoTela } from '@/lib/kommo'
 import type { FichaDoCredito } from '@/lib/anotacaoKommo'
 import {
@@ -1554,6 +1554,15 @@ export function AnaliseRpvModal({
   const [pedido, setPedido] = useState('')
   /** O relógio da análise que abriu a janela. Ver LinhaDoTempo. */
   const [fases, setFases] = useState<FaseMedida[]>([])
+  /**
+   * O piso mínimo barrou o salvar, e o que refazer se a pessoa liberar.
+   *
+   * `enviar` guarda o desfecho que estava em curso: liberar tem de refazer o
+   * ato inteiro que a pessoa pediu — salvar E mandar para a revisão —, senão
+   * ela clica em "salvar mesmo assim", a planilha sobe, o card não anda, e não
+   * há nada na tela dizendo que faltou a metade.
+   */
+  const [pisoBloqueou, setPisoBloqueou] = useState<{ enviar: AcaoTela | null } | null>(null)
   const [salvo, setSalvo] = useState<RespostaAnaliseRpv | null>(null)
   /**
    * A análise EXATA que virou planilha, para saber se a de agora ainda é ela.
@@ -2188,9 +2197,15 @@ export function AnaliseRpvModal({
    * não subiu — o card chegaria à revisão sem o arquivo que se vai revisar, e o
    * erro ficaria numa tela que já fechou.
    */
-  async function salvar(): Promise<boolean> {
+  async function salvar(opcoes?: {
+    /** Segue mesmo abaixo do mínimo da casa, deixando registro no aviso. */
+    ignorarMinimo?: boolean
+    /** O desfecho que pediu este salvar, para a liberação refazer o ato inteiro. */
+    desfechoEmCurso?: AcaoTela | null
+  }): Promise<boolean> {
     if (!atual?.dados) return false
     setErro(null)
+    setPisoBloqueou(null)
     setPasso('Gerando a planilha e salvando no Drive…')
     try {
       const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
@@ -2199,6 +2214,7 @@ export function AnaliseRpvModal({
         dados: atual.dados,
         emolumentos: regraCartorio ?? atual.emolumentos ?? null,
         avisos_qualificacao: atual.avisos_qualificacao ?? [],
+        abaixo_do_minimo_ok: opcoes?.ignorarMinimo === true,
         ...corpoCard,
       })
       setSalvo(r)
@@ -2207,6 +2223,12 @@ export function AnaliseRpvModal({
       return true
     } catch (e) {
       setErro((e as Error)?.message ?? String(e))
+      // O PISO É BARREIRA DA CASA, e quem analisa pode ter razão para passar
+      // por ela. Guardar o desfecho em curso é o que faz a liberação refazer o
+      // ato inteiro — salvar E enviar —, e não só a metade que falhou.
+      if (codigoDoErro(e) === 'ABAIXO_DO_MINIMO') {
+        setPisoBloqueou({ enviar: opcoes?.desfechoEmCurso ?? null })
+      }
       return false
     } finally {
       setPasso(null)
@@ -2225,9 +2247,9 @@ export function AnaliseRpvModal({
    * planilha de novo — seria outro arquivo no Drive e outra anotação no card,
    * dizendo o mesmo.
    */
-  async function salvarEEnviar(acao: AcaoTela) {
+  async function salvarEEnviar(acao: AcaoTela, ignorarMinimo = false) {
     if (!salvo || mudouDesdeSalvar) {
-      const deuCerto = await salvar()
+      const deuCerto = await salvar({ ignorarMinimo, desfechoEmCurso: acao })
       // NÃO MOVE SE NÃO SALVOU. O erro já está na tela, e mover agora mandaria
       // à revisão um card sem planilha, com a mensagem de erro fechada junto
       // com a janela.
@@ -2333,7 +2355,7 @@ export function AnaliseRpvModal({
             <span className="text-xs text-slate-400">Nada mudou desde o último salvamento.</span>
           )}
           <Button
-            onClick={salvar}
+            onClick={() => salvar()}
             disabled={!podeSalvar}
             loading={passo === 'Gerando a planilha e salvando no Drive…'}
             icon={<Save className="h-4 w-4" />}
@@ -2346,6 +2368,32 @@ export function AnaliseRpvModal({
       {erro && (
         <div className="mb-4 rounded-xl bg-red-50/70 px-3.5 py-3 text-sm text-red-700 ring-1 ring-inset ring-red-200/70">
           {erro}
+          {/* A SAÍDA, junto do erro que a pediu. O mínimo de R$ 20 mil é regra
+              da casa, e quem analisa enxerga o que ela não enxerga: carteira do
+              mesmo cedente, crédito que fecha junto com outro, prazo curto que
+              compensa o valor. Passar fica registrado no aviso, que sobe para o
+              card com a análise. */}
+          {pisoBloqueou && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-red-200/70 pt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  pisoBloqueou.enviar
+                    ? salvarEEnviar(pisoBloqueou.enviar, true)
+                    : salvar({ ignorarMinimo: true })
+                }
+                disabled={ocupado}
+              >
+                {pisoBloqueou.enviar
+                  ? `Seguir mesmo assim: ${pisoBloqueou.enviar.label}`
+                  : 'Salvar mesmo assim'}
+              </Button>
+              <span className="text-xs text-red-600/80">
+                Fica registrado na análise e na anotação do card.
+              </span>
+            </div>
+          )}
         </div>
       )}
 

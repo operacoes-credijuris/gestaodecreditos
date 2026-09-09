@@ -3929,6 +3929,11 @@ Deno.serve(async (req) => {
     // Zerado a cada rodada: `dados` dá a volta pelo navegador, e um aviso de
     // piso que sobrevivesse à correção que o resolveu seria mentira.
     dados._abaixo_do_piso = null;
+    // A liberação vale para ESTA chamada, e não fica grudada na análise: ela
+    // viaja no corpo da requisição, não em `dados`. Assim o próximo salvar de
+    // uma análise que mudou volta a esbarrar no piso, em vez de herdar um
+    // "pode" dado sobre outros números.
+    const _pisoLiberado = body.abaixo_do_minimo_ok === true;
     if (Number(calc.Y3) > 0 && Number(calc.Y3) < PISO_NEGOCIO) {
       const _tudo = montarParcelas({
         ..._auditoria.valores,
@@ -3946,9 +3951,17 @@ Deno.serve(async (req) => {
       if (acao === 'analisar' || acao === null) {
         return jsonResponse({ ok: true, reprovado: true, motivos: [_motivo], avisos: avisosQualif, qualificacao: null });
       }
-      if (acao === 'salvar') {
-        return errorResponse(_motivo + ' Não gerei a planilha.');
+      // LIBERADO À MÃO: a barreira do piso é da CASA, não da lei, e quem
+      // analisa vê coisas que a regra não vê — carteira do mesmo cedente,
+      // crédito que fecha junto com outro, prazo curto que compensa o valor. O
+      // que não pode é passar em silêncio: liberar deixa registro no aviso, que
+      // sobe para o card com a análise.
+      if (acao === 'salvar' && !_pisoLiberado) {
+        return errorResponse(_motivo + ' Não gerei a planilha.', 400, {
+          codigo: 'ABAIXO_DO_MINIMO',
+        });
       }
+      if (acao === 'salvar') dados._piso_liberado = true;
       // 'refinar' e 'reprecificar': não derruba o que está na tela — o operador
       // está no meio de uma conversa e pode estar justamente corrigindo isto.
       dados._abaixo_do_piso = _motivo;
@@ -3973,7 +3986,12 @@ Deno.serve(async (req) => {
     marcar('precificação');
     // Abaixo do piso depois de uma revisão: fica em primeiro lugar, porque
     // nenhum outro aviso importa se o negócio não pode ser feito.
-    if (dados._abaixo_do_piso) avisosBase.unshift(`⚠️ ABAIXO DO MÍNIMO — NÃO DÁ PARA FECHAR: ${dados._abaixo_do_piso}`);
+    if (dados._abaixo_do_piso)
+      avisosBase.unshift(
+        dados._piso_liberado
+          ? `⚠️ ABAIXO DO MÍNIMO — LIBERADO À MÃO: ${dados._abaixo_do_piso} A planilha foi gerada assim mesmo, por decisão de quem analisou.`
+          : `⚠️ ABAIXO DO MÍNIMO — NÃO DÁ PARA FECHAR: ${dados._abaixo_do_piso}`,
+      );
     // O TETO DO ENTE, do cache (e pesquisado em segundo plano quando falta).
     // Não espera pela pesquisa: quando ela está em curso, o aviso diz que o teto
     // ainda não foi conferido, em vez de calar — calar se lê como "está dentro".
