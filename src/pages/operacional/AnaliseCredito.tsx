@@ -1789,6 +1789,7 @@ export default function AnaliseCredito() {
           key={rpvLead.kommo_lead_id}
           open
           leadId={rpvLead.kommo_lead_id}
+          drivePastaId={rpvLead.drive_pasta_id}
           titulo={tituloCard(rpvLead)}
           // SÓ NA ABA EM QUE O DESFECHO MORA AQUI. Nas outras a seção não
           // aparece — os botões continuam no card, e mostrá-los nos dois

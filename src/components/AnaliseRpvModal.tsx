@@ -655,15 +655,6 @@ function fundirRiscosEAvisos(
     .sort((a, b) => ORDEM_GRAU[a.grau] - ORDEM_GRAU[b.grau])
 }
 
-/**
- * O desfecho que não abre painel: mandar para a revisão.
- *
- * Um só, e nomeado: o que distingue este dos outros dois é não haver o que
- * justificar — a diligência e a reprovação mudam o rumo do crédito e quem lê o
- * card do outro lado precisa saber por quê.
- */
-const DESFECHOS_DIRETOS: ReadonlySet<number> = new Set([ST_DECISAO])
-
 interface ItemDeRisco {
   grau: GrauRisco
   texto: string
@@ -1111,104 +1102,58 @@ export function GradeValoresRpv({
 }
 
 /**
- * O DESFECHO DA ANÁLISE, com o motivo indo para o card.
+ * A JANELA DO DESFECHO que interrompe o negócio: diligência e reprovação.
  *
- * POR QUE AQUI E NÃO NO CARD. Aprovar, mandar para diligência ou reprovar são
- * decisões que se tomam DEPOIS de ler a análise — e no card elas ficavam a um
- * clique de distância de qualquer leitura, ao lado do botão que ainda ia gerar
- * a análise. Movidas para cá, a ordem da tela é a ordem do trabalho: os
- * números, a auditoria, os riscos, e só então o que fazer com isso.
+ * JANELA, E NÃO UMA SEÇÃO QUE CRESCE EMBAIXO. O painel inline empurrava o
+ * conteúdo e ficava fora da vista justamente quando havia muito o que marcar —
+ * a lista de achados de uma análise ruim é longa, e ela é o motivo pelo qual a
+ * janela existe. Aqui ela tem a tela inteira.
  *
- * O MOTIVO É OBRIGATÓRIO nos dois desfechos que interrompem o negócio.
- * "Diligência" sem dizer o que falta transfere ao comercial a tarefa de
- * adivinhar o que apurar, e "Reprovar" sem motivo apaga o trabalho de quem
- * analisou: seis meses depois o card diz que foi reprovado e ninguém sabe por
- * quê — nem para não repetir o mesmo cedente, nem para reabrir se a razão
- * deixou de valer. Avançar para validação não pede motivo: é o caminho normal.
+ * O MOTIVO É OBRIGATÓRIO nos dois desfechos. "Diligência" sem dizer o que falta
+ * transfere ao comercial a tarefa de adivinhar o que apurar, e "Reprovar" sem
+ * motivo apaga o trabalho de quem analisou: seis meses depois o card diz que
+ * foi reprovado e ninguém sabe por quê — nem para não repetir o mesmo cedente,
+ * nem para reabrir se a razão deixou de valer.
  *
- * O TEXTO VAI PARA A ANOTAÇÃO DO KOMMO, que é onde o comercial lê. A função
- * kommo-mover já o aceitava e a tela mandava string vazia — o campo existia e
- * ninguém o preenchia.
+ * Mandar para validação não passa por aqui: é o caminho normal, não pede
+ * justificativa, e está no rodapé como um clique só.
  */
-function DesfechoDaAnalise({
-  acoes,
-  onMover,
-  ocupado,
+function JanelaDeDesfecho({
+  acao,
   achados,
-  diretos,
-  aoConfirmarDireto,
   onRedigir,
+  onMover,
+  onFechar,
   motivoSugerido,
 }: {
-  acoes: AcaoTela[]
-  onMover: (statusId: number, comentario: string) => Promise<void>
-  ocupado: boolean
+  acao: AcaoTela
   /** Os achados da análise, para marcar em vez de redigitar. */
   achados: ItemDeRisco[]
-  /**
-   * Desfechos que dispensam mensagem: um clique, sem painel.
-   *
-   * Existe porque nem todo desfecho pede explicação. Mandar para a revisão é
-   * seguir o caminho normal — o que houver a dizer já está na análise, na
-   * planilha e na anotação. Abrir campo de texto ali é pedir que alguém
-   * escreva "ok" para poder clicar.
-   */
-  diretos?: ReadonlySet<number>
-  /** O clique de um desfecho direto, que pode fazer trabalho antes de mover. */
-  aoConfirmarDireto?: (acao: AcaoTela) => Promise<void>
   /** Manda a IA reescrever o motivo para quem vai ler no card. */
   onRedigir: (desfecho: string, itens: string[], texto: string) => Promise<string>
-  /**
-   * Texto que já entra no campo do motivo, quando existe um pronto PARA AQUELE
-   * desfecho — daí ser função do statusId, e não uma string só. O resumo da
-   * oportunidade vale na passagem a Validação; a razão do Portão 1, na
-   * reprovação. Oferecer um no lugar do outro é pior que não oferecer nada.
-   *
-   * O caso é o card reprovado no Portão 1: os motivos da reprovação estão na
-   * tela, redigidos, e fazer a pessoa copiá-los à mão para o campo é pedir que
-   * ela redigite o que a máquina acabou de escrever. Vem como sugestão e não
-   * como texto fixo — ela edita antes de confirmar.
-   */
-  motivoSugerido?: (statusId: number) => string | undefined
+  onMover: (statusId: number, comentario: string) => Promise<void>
+  onFechar: () => void
+  /** Texto que já entra no campo, quando existe um pronto. */
+  motivoSugerido?: string
 }) {
-  const [escolhida, setEscolhida] = useState<AcaoTela | null>(null)
-  const [motivo, setMotivo] = useState('')
+  const [motivo, setMotivo] = useState(motivoSugerido ?? '')
   const [marcados, setMarcados] = useState<Set<number>>(new Set())
   const [enviando, setEnviando] = useState(false)
   const [redigindo, setRedigindo] = useState(false)
-  /** O desfecho direto em curso, para o botão dele mostrar o trabalho. */
-  const [emCurso, setEmCurso] = useState<number | null>(null)
   /**
    * O texto no campo já incorpora os achados marcados, pela mão da IA.
    *
    * NÃO É COSMÉTICO: é o que libera o Confirmar quando há achado marcado. Sem
    * ele, marcar dois riscos e confirmar mandava ao card o despejo cru —
-   * "- [IMPEDITIVO] ... - [ALTO] ..." numa linha só —, que é exatamente o que
-   * a redação pela IA existe para evitar.
+   * "- [IMPEDITIVO] ... - [ALTO] ..." numa linha só —, que é exatamente o que a
+   * redação pela IA existe para evitar.
    */
   const [revisado, setRevisado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
-  if (!acoes.length) return null
-
-  const exigeMotivo =
-    escolhida != null && (escolhida.statusId === ST_DILIGENCIA || escolhida.statusId === ST_REPROVADO)
-  // ACHADO MARCADO SÓ CHEGA AO CARD PELA REDAÇÃO DA IA.
-  //
-  // Marcar é atalho de conteúdo, não de forma: o que se aponta com o dedo vira
-  // frase no texto da IA, nunca a lista de rótulos entre colchetes. Antes,
-  // marcar bastava para liberar o Confirmar — e o card recebia o despejo cru.
-  //
-  // Quem não quer a IA desmarca tudo e escreve à mão: sem achado marcado não há
-  // nada para incorporar, e o botão libera com o texto de sempre.
-  const podeEnviar =
-    escolhida != null && !enviando && !redigindo &&
-    (!exigeMotivo || motivo.trim().length >= 10) &&
-    (marcados.size === 0 || revisado)
-
   /** O rótulo curto do desfecho, que o servidor usa para escolher o tom. */
-  const tipoDoDesfecho = (a: AcaoTela) =>
-    a.statusId === ST_DILIGENCIA ? 'diligencia' : a.statusId === ST_REPROVADO ? 'reprovado' : 'validacao'
+  const tipoDoDesfecho =
+    acao.statusId === ST_DILIGENCIA ? 'diligencia' : acao.statusId === ST_REPROVADO ? 'reprovado' : 'validacao'
 
   const itensMarcados = () =>
     [...marcados].sort((a, b) => a - b).map((i) => {
@@ -1219,11 +1164,10 @@ function DesfechoDaAnalise({
     })
 
   async function redigir() {
-    if (!escolhida) return
     setErro(null)
     setRedigindo(true)
     try {
-      const texto = await onRedigir(tipoDoDesfecho(escolhida), itensMarcados(), motivo.trim())
+      const texto = await onRedigir(tipoDoDesfecho, itensMarcados(), motivo.trim())
       // SUBSTITUI o campo, e é o comportamento certo: a redação da IA JÁ INCLUI
       // o que a pessoa escreveu (vai na entrada dela, com precedência). Somar
       // os dois deixaria o mesmo argumento duas vezes na anotação.
@@ -1237,7 +1181,6 @@ function DesfechoDaAnalise({
   }
 
   async function confirmar() {
-    if (!escolhida) return
     setErro(null)
     setEnviando(true)
     try {
@@ -1245,7 +1188,8 @@ function DesfechoDaAnalise({
       // pela IA e lidos por quem confirma — `podeEnviar` não libera o botão de
       // outro jeito. Anexar a lista crua aqui era o que enchia o card de
       // "- [IMPEDITIVO] ..." em vez da mensagem.
-      await onMover(escolhida.statusId, motivo.trim())
+      await onMover(acao.statusId, motivo.trim())
+      onFechar()
     } catch (e) {
       setErro((e as Error)?.message ?? String(e))
     } finally {
@@ -1253,196 +1197,150 @@ function DesfechoDaAnalise({
     }
   }
 
+  // ACHADO MARCADO SÓ CHEGA AO CARD PELA REDAÇÃO DA IA.
+  //
+  // Marcar é atalho de conteúdo, não de forma: o que se aponta com o dedo vira
+  // frase no texto da IA, nunca a lista de rótulos entre colchetes. Quem não
+  // quer a IA desmarca tudo e escreve à mão.
+  const podeEnviar =
+    !enviando && !redigindo && motivo.trim().length >= 10 && (marcados.size === 0 || revisado)
+
   return (
-    <section className="border-t border-slate-200/80 pt-5">
-      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        Desfecho
-      </h3>
-
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {acoes.map((a) => (
-          <Button
-            key={a.statusId}
-            size="sm"
-            variant={escolhida?.statusId === a.statusId ? a.variant : 'outline'}
-            disabled={ocupado || enviando || emCurso !== null}
-            loading={emCurso === a.statusId}
-            onClick={async () => {
-              // DESFECHO DIRETO: faz e pronto, sem abrir painel.
-              if (diretos?.has(a.statusId) && aoConfirmarDireto) {
-                setEscolhida(null)
-                setErro(null)
-                setEmCurso(a.statusId)
-                try {
-                  await aoConfirmarDireto(a)
-                } catch (e) {
-                  setErro((e as Error)?.message ?? String(e))
-                } finally {
-                  setEmCurso(null)
-                }
-                return
-              }
-              // Trocar de desfecho limpa o motivo: "faltou a certidão de
-              // débitos" escrito para uma diligência não serve como razão de
-              // reprovação, e reaproveitá-lo em silêncio mandaria ao comercial
-              // um texto que ninguém escreveu para aquilo.
-              const fecha = escolhida?.statusId === a.statusId
-              setEscolhida(fecha ? null : a)
-              setMotivo(fecha ? '' : (motivoSugerido?.(a.statusId) ?? ''))
-              setMarcados(new Set())
-              setRevisado(false)
-              setErro(null)
-            }}
-          >
-            {a.label}
+    <Modal
+      open
+      onClose={onFechar}
+      size="lg"
+      title={acao.label}
+      description="O texto vai como nota no card do Kommo — é o que o comercial lê."
+      dirty={motivo.trim().length > 0}
+      footer={
+        <div className="flex items-center gap-2">
+          <Button variant={acao.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
+            Confirmar: {acao.label}
           </Button>
-        ))}
-      </div>
-
-      {/* O ERRO DO DESFECHO DIRETO, que não tem painel onde aparecer. */}
-      {!escolhida && erro && <p className="mt-2 text-xs text-red-700">{erro}</p>}
-
-      {escolhida && (
-        <div className="mt-3 space-y-3 rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
-          {/* OS ACHADOS DA PRÓPRIA ANÁLISE, para marcar em vez de redigitar.
-              Eles estão na tela acima, já graduados e fundamentados; obrigar a
-              pessoa a copiá-los à mão para o campo do motivo é pedir que ela
-              reescreva o que a máquina acabou de escrever — e o que se
-              reescreve à mão sai encurtado e sem a norma.
-
-              NÃO É VINCULANTE: marcar é atalho, não formulário. Dá para
-              confirmar sem marcar nada, escrevendo do zero, e dá para marcar
-              três e escrever uma ressalva que contradiz uma delas. */}
-          {achados.length > 0 && (
-            <div>
-              <p className="text-xs text-slate-500">
-                O que motivou{' '}
-                <span className="text-slate-400">(marque os achados; o texto abaixo continua seu)</span>
-              </p>
-              <ul className="mt-1.5 space-y-1">
-                {achados.map((a, i) => (
-                  <li key={i}>
-                    <label className="flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-slate-700">
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                        checked={marcados.has(i)}
-                        disabled={enviando || redigindo}
-                        onChange={() => {
-                          setMarcados((s) => {
-                            const n = new Set(s)
-                            if (n.has(i)) n.delete(i)
-                            else n.add(i)
-                            return n
-                          })
-                          // MUDOU A MARCAÇÃO, a redação anterior não vale mais:
-                          // o texto no campo fala de achados que não são estes.
-                          setRevisado(false)
-                        }}
-                      />
-                      <span>
-                        <Selo grau={a.grau} />
-                        {a.texto}
-                      </span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs text-slate-500" htmlFor="motivo-desfecho">
-              {exigeMotivo ? (
-                <>
-                  Por quê? <span className="text-slate-400">(vai como anotação no card do Kommo)</span>
-                </>
-              ) : (
-                <>
-                  Quer dizer algo ao comercial?{' '}
-                  <span className="text-slate-400">(opcional — vai como anotação no card)</span>
-                </>
-              )}
-            </label>
-            <textarea
-              id="motivo-desfecho"
-              className="mt-1.5 min-h-[80px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
-              rows={4}
-              placeholder={
-                escolhida.statusId === ST_DILIGENCIA
-                  ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
-                  : escolhida.statusId === ST_REPROVADO
-                    ? 'Por que não passa. Ex.: "precatório expedido, não RPV" · "crédito de R$ 12 mil, abaixo do mínimo".'
-                    : 'Ex.: "conta confere; deságio calibrado em 37% pela rentabilidade-alvo".'
-              }
-              value={motivo}
-              disabled={enviando || redigindo}
-              // EDITAR NÃO DESFAZ A REVISÃO: os achados continuam dentro do
-              // texto, e quem edita acabou de ler a redação. Zerar aqui
-              // travaria o Confirmar e obrigaria a redigir de novo, jogando
-              // fora o ajuste que a pessoa acabou de fazer.
-              onChange={(e) => setMotivo(e.target.value)}
-            />
-          </div>
-
-          {/* A REDAÇÃO PELA IA, e num botão — não no confirmar.
-              Quem escreve a razão é quem acabou de auditar, e escreve como quem
-              auditou: "SELIC de 02/2024 sobre parcela com termo inicial em
-              09/2024". Quem lê é o comercial, que vai falar com o cedente e não
-              tem a análise à frente. A IA reescreve mantendo os termos técnicos
-              e explicando a consequência ao lado de cada um.
-
-              EXPLÍCITO, e não automático no confirmar: o texto vai para o card
-              sob o nome de quem clicou, e ninguém deve assinar um parágrafo que
-              não leu. Aqui ela vê o resultado, edita e só então confirma. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<Sparkles className="h-3.5 w-3.5" />}
-              onClick={redigir}
-              disabled={enviando || redigindo || (marcados.size === 0 && !motivo.trim())}
-              loading={redigindo}
-            >
-              {revisado ? 'Redigir de novo' : 'Redigir com a IA'}
-            </Button>
-            {revisado ? (
-              <span className="text-xs text-slate-400">
-                Texto reescrito pela IA — confira e edite antes de confirmar.
-              </span>
-            ) : marcados.size > 0 ? (
-              /* Dizer o que falta, e não apenas desligar o botão: um Confirmar
-                 apagado sem explicação é um beco. */
-              <span className="text-xs text-amber-700">
-                {marcados.size === 1 ? '1 achado marcado' : `${marcados.size} achados marcados`} — a IA
-                precisa redigir antes de confirmar, porque é o texto dela que vai para o card.
-              </span>
-            ) : null}
-          </div>
-
-          {exigeMotivo && motivo.trim().length > 0 && motivo.trim().length < 10 && (
-            <p className="text-xs text-amber-700">
-              Escreva a razão por extenso — o comercial lê isso sem ter a análise à mão.
-            </p>
-          )}
-          {erro && <p className="text-xs text-red-700">{erro}</p>}
-
-          <div className="flex items-center gap-2 border-t border-slate-200/70 pt-3">
-            <Button size="sm" variant={escolhida.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
-              Confirmar: {escolhida.label}
-            </Button>
-            <button
-              type="button"
-              onClick={() => { setEscolhida(null); setMotivo(''); setMarcados(new Set()); setRevisado(false); setErro(null) }}
-              disabled={enviando || redigindo}
-              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
-            >
-              cancelar
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onFechar}
+            disabled={enviando || redigindo}
+            className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
+          >
+            cancelar
+          </button>
         </div>
-      )}
-    </section>
+      }
+    >
+      <div className="space-y-3">
+        {/* OS ACHADOS DA PRÓPRIA ANÁLISE, para marcar em vez de redigitar.
+            Eles estão na tela de trás, já graduados e fundamentados; obrigar a
+            pessoa a copiá-los à mão é pedir que reescreva o que a máquina
+            acabou de escrever — e o que se reescreve à mão sai encurtado e sem
+            a norma.
+
+            NÃO É VINCULANTE: marcar é atalho, não formulário. Dá para confirmar
+            sem marcar nada, escrevendo do zero, e dá para marcar três e
+            escrever uma ressalva que contradiz uma delas. */}
+        {achados.length > 0 && (
+          <div>
+            <p className="text-xs text-slate-500">
+              O que motivou{' '}
+              <span className="text-slate-400">(marque os achados; o texto abaixo continua seu)</span>
+            </p>
+            <ul className="mt-1.5 max-h-64 space-y-1 overflow-y-auto pr-1">
+              {achados.map((a, i) => (
+                <li key={i}>
+                  <label className="flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                      checked={marcados.has(i)}
+                      disabled={enviando || redigindo}
+                      onChange={() => {
+                        setMarcados((s) => {
+                          const n = new Set(s)
+                          if (n.has(i)) n.delete(i)
+                          else n.add(i)
+                          return n
+                        })
+                        // MUDOU A MARCAÇÃO, a redação anterior não vale mais: o
+                        // texto no campo fala de achados que não são estes.
+                        setRevisado(false)
+                      }}
+                    />
+                    <span>
+                      <Selo grau={a.grau} />
+                      {a.texto}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-xs text-slate-500" htmlFor="motivo-desfecho">
+            Por quê? <span className="text-slate-400">(vai como anotação no card do Kommo)</span>
+          </label>
+          <textarea
+            id="motivo-desfecho"
+            className="mt-1.5 min-h-[140px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            placeholder={
+              acao.statusId === ST_DILIGENCIA
+                ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
+                : 'Por que não passa. Ex.: "precatório expedido, não RPV" · "crédito de R$ 12 mil, abaixo do mínimo".'
+            }
+            value={motivo}
+            disabled={enviando || redigindo}
+            // EDITAR NÃO DESFAZ A REVISÃO: os achados continuam dentro do
+            // texto, e quem edita acabou de ler a redação. Zerar aqui travaria
+            // o Confirmar e obrigaria a redigir de novo, jogando fora o ajuste.
+            onChange={(e) => setMotivo(e.target.value)}
+          />
+        </div>
+
+        {/* A REDAÇÃO PELA IA, e num botão — não no confirmar.
+            Quem escreve a razão é quem acabou de auditar, e escreve como quem
+            auditou: "SELIC de 02/2024 sobre parcela com termo inicial em
+            09/2024". Quem lê é o comercial, que vai falar com o cedente e não
+            tem a análise à frente. A IA reescreve mantendo os termos técnicos e
+            explicando a consequência ao lado de cada um.
+
+            EXPLÍCITO, e não automático no confirmar: o texto vai para o card
+            sob o nome de quem clicou, e ninguém deve assinar um parágrafo que
+            não leu. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<Sparkles className="h-3.5 w-3.5" />}
+            onClick={redigir}
+            disabled={enviando || redigindo || (marcados.size === 0 && !motivo.trim())}
+            loading={redigindo}
+          >
+            {revisado ? 'Redigir de novo' : 'Redigir com a IA'}
+          </Button>
+          {revisado ? (
+            <span className="text-xs text-slate-400">
+              Texto reescrito pela IA — confira e edite antes de confirmar.
+            </span>
+          ) : marcados.size > 0 ? (
+            /* Dizer o que falta, e não apenas desligar o botão: um Confirmar
+               apagado sem explicação é um beco. */
+            <span className="text-xs text-amber-700">
+              {marcados.size === 1 ? '1 achado marcado' : `${marcados.size} achados marcados`} — a IA
+              precisa redigir antes de confirmar, porque é o texto dela que vai para o card.
+            </span>
+          ) : null}
+        </div>
+
+        {motivo.trim().length > 0 && motivo.trim().length < 10 && (
+          <p className="text-xs text-amber-700">
+            Escreva a razão por extenso — o comercial lê isso sem ter a análise à mão.
+          </p>
+        )}
+        {erro && <p className="text-xs text-red-700">{erro}</p>}
+      </div>
+    </Modal>
   )
 }
 
@@ -1450,6 +1348,7 @@ export function AnaliseRpvModal({
   open,
   onClose,
   leadId,
+  drivePastaId,
   titulo,
   dadosDoCard,
   notasKommo,
@@ -1461,6 +1360,14 @@ export function AnaliseRpvModal({
   open: boolean
   onClose: () => void
   leadId: number
+  /**
+   * A pasta do cedente no Drive, quando já existe.
+   *
+   * É o que responde "há planilha para revisar?" sem gastar uma chamada ao
+   * Drive: o id só é gravado no card DEPOIS de um upload que deu certo (ver a
+   * migração 0059), então tê-lo é ter arquivo lá.
+   */
+  drivePastaId?: string | null
   titulo: string
   dadosDoCard: DadosDoCardRpv
   /** Todas as anotações do card, do comercial: a IA lê junto com os autos. */
@@ -1554,15 +1461,11 @@ export function AnaliseRpvModal({
   const [pedido, setPedido] = useState('')
   /** O relógio da análise que abriu a janela. Ver LinhaDoTempo. */
   const [fases, setFases] = useState<FaseMedida[]>([])
-  /**
-   * O piso mínimo barrou o salvar, e o que refazer se a pessoa liberar.
-   *
-   * `enviar` guarda o desfecho que estava em curso: liberar tem de refazer o
-   * ato inteiro que a pessoa pediu — salvar E mandar para a revisão —, senão
-   * ela clica em "salvar mesmo assim", a planilha sobe, o card não anda, e não
-   * há nada na tela dizendo que faltou a metade.
-   */
-  const [pisoBloqueou, setPisoBloqueou] = useState<{ enviar: AcaoTela | null } | null>(null)
+/** O piso mínimo barrou o salvar; a tela oferece passar por cima. */
+  const [pisoBloqueou, setPisoBloqueou] = useState(false)
+  /** O desfecho cuja janela está aberta: diligência ou reprovação. */
+  const [desfechoAberto, setDesfechoAberto] = useState<AcaoTela | null>(null)
+  const [enviandoValidacao, setEnviandoValidacao] = useState(false)
   const [salvo, setSalvo] = useState<RespostaAnaliseRpv | null>(null)
   /**
    * A análise EXATA que virou planilha, para saber se a de agora ainda é ela.
@@ -2200,12 +2103,10 @@ export function AnaliseRpvModal({
   async function salvar(opcoes?: {
     /** Segue mesmo abaixo do mínimo da casa, deixando registro no aviso. */
     ignorarMinimo?: boolean
-    /** O desfecho que pediu este salvar, para a liberação refazer o ato inteiro. */
-    desfechoEmCurso?: AcaoTela | null
   }): Promise<boolean> {
     if (!atual?.dados) return false
     setErro(null)
-    setPisoBloqueou(null)
+    setPisoBloqueou(false)
     setPasso('Gerando a planilha e salvando no Drive…')
     try {
       const r = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
@@ -2226,9 +2127,7 @@ export function AnaliseRpvModal({
       // O PISO É BARREIRA DA CASA, e quem analisa pode ter razão para passar
       // por ela. Guardar o desfecho em curso é o que faz a liberação refazer o
       // ato inteiro — salvar E enviar —, e não só a metade que falhou.
-      if (codigoDoErro(e) === 'ABAIXO_DO_MINIMO') {
-        setPisoBloqueou({ enviar: opcoes?.desfechoEmCurso ?? null })
-      }
+      if (codigoDoErro(e) === 'ABAIXO_DO_MINIMO') setPisoBloqueou(true)
       return false
     } finally {
       setPasso(null)
@@ -2236,26 +2135,23 @@ export function AnaliseRpvModal({
   }
 
   /**
-   * O desfecho que não pede mensagem: salva no Drive e manda para a revisão.
+   * Manda para a revisão: um clique, sem mensagem.
    *
-   * SEM PAINEL E SEM TEXTO, ao contrário da diligência e da reprovação. Aqui
-   * não há o que justificar — a análise inteira está na janela, na planilha e
-   * na anotação que o salvar acabou de escrever no card. Pedir uma frase seria
-   * pedir que alguém resumisse o que já está escrito em três lugares.
-   *
-   * SÓ SALVA SE PRECISA: análise já salva e não tocada desde então não gera
-   * planilha de novo — seria outro arquivo no Drive e outra anotação no card,
-   * dizendo o mesmo.
+   * NÃO PEDE JUSTIFICATIVA porque é o caminho normal — o que houver a dizer já
+   * está na análise, na planilha e na anotação que o salvar escreveu no card.
+   * Abrir campo de texto aqui é pedir que alguém escreva "ok" para poder
+   * clicar.
    */
-  async function salvarEEnviar(acao: AcaoTela, ignorarMinimo = false) {
-    if (!salvo || mudouDesdeSalvar) {
-      const deuCerto = await salvar({ ignorarMinimo, desfechoEmCurso: acao })
-      // NÃO MOVE SE NÃO SALVOU. O erro já está na tela, e mover agora mandaria
-      // à revisão um card sem planilha, com a mensagem de erro fechada junto
-      // com a janela.
-      if (!deuCerto) return
+  async function enviarParaValidacao(acao: AcaoTela) {
+    setErro(null)
+    setEnviandoValidacao(true)
+    try {
+      await onMover(acao.statusId, '')
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setEnviandoValidacao(false)
     }
-    await onMover(acao.statusId, '')
   }
 
   const riscos = useMemo(() => atual?.riscos ?? [], [atual])
@@ -2326,6 +2222,27 @@ export function AnaliseRpvModal({
   const podeSalvar =
     !!atual && !atual.reprovado && !!atual.dados && !ocupado && (!salvo || mudouDesdeSalvar)
 
+  const acaoDiligencia = acoes.find((a) => a.statusId === ST_DILIGENCIA)
+  const acaoReprovar = acoes.find((a) => a.statusId === ST_REPROVADO)
+  const acaoValidacao = acoes.find((a) => a.statusId === ST_DECISAO)
+  /**
+   * Há planilha na pasta do cedente?
+   *
+   * PELO ID DA PASTA, e não por uma chamada ao Drive: ele só é gravado no card
+   * DEPOIS de um upload que deu certo (migração 0059), então tê-lo é ter
+   * arquivo lá. Uma consulta de verdade custaria um refresh de token e uma
+   * listagem a cada abertura da janela para responder o que o card já sabe — e
+   * só ganharia o caso em que alguém apagou o arquivo no Drive à mão.
+   */
+  const temPlanilhaNoDrive = !!salvo || !!drivePastaId
+  /**
+   * QUEM REVISA ABRE A PLANILHA. Mandar para a revisão sem ela é mandar alguém
+   * conferir uma conta que não está em lugar nenhum — e mandar com ela
+   * desatualizada é pior: a planilha existe, parece a análise, e não é.
+   */
+  const podeEnviarParaValidacao =
+    !!acaoValidacao && temPlanilhaNoDrive && !mudouDesdeSalvar && !ocupado && !enviandoValidacao
+
   return (
     <Modal
       open={open}
@@ -2347,14 +2264,38 @@ export function AnaliseRpvModal({
       title="Análise de RPV"
       description={titulo}
       footer={
-        <div className="flex items-center justify-end gap-3">
-          {/* Só o Salvar. O "Fechar sem salvar" duplicava o X do canto, e o
-              número do card ocupava o rodapé com um dado que ninguém usa
-              dentro da janela. */}
+        /* AS DECISÕES NUMA FILEIRA SÓ, no rodapé.
+           A seção que ficava no fim do corpo obrigava a rolar a análise inteira
+           para decidir, e o desfecho aparecia longe do botão de salvar, que é o
+           outro ato da mesma pessoa no mesmo momento. Aqui os quatro caminhos
+           estão lado a lado, e a ordem é a da gravidade: os que interrompem, o
+           que grava, o que segue. */
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {salvo && !mudouDesdeSalvar && (
-            <span className="text-xs text-slate-400">Nada mudou desde o último salvamento.</span>
+            <span className="mr-auto text-xs text-slate-400">
+              Nada mudou desde o último salvamento.
+            </span>
+          )}
+          {acaoDiligencia && (
+            <Button
+              variant={acaoDiligencia.variant}
+              onClick={() => setDesfechoAberto(acaoDiligencia)}
+              disabled={ocupado}
+            >
+              {acaoDiligencia.label}
+            </Button>
+          )}
+          {acaoReprovar && (
+            <Button
+              variant={acaoReprovar.variant}
+              onClick={() => setDesfechoAberto(acaoReprovar)}
+              disabled={ocupado}
+            >
+              {acaoReprovar.label}
+            </Button>
           )}
           <Button
+            variant="outline"
             onClick={() => salvar()}
             disabled={!podeSalvar}
             loading={passo === 'Gerando a planilha e salvando no Drive…'}
@@ -2362,9 +2303,47 @@ export function AnaliseRpvModal({
           >
             Salvar no Drive
           </Button>
+          {acaoValidacao && (
+            <Button
+              variant={acaoValidacao.variant}
+              onClick={() => enviarParaValidacao(acaoValidacao)}
+              disabled={!podeEnviarParaValidacao}
+              loading={enviandoValidacao}
+              // O PORQUÊ DE ESTAR APAGADO, no lugar onde se clica. Botão
+              // desligado sem explicação é um beco: a pessoa fica sem saber se
+              // falta algo dela ou se o sistema é que não deixa.
+              title={
+                temPlanilhaNoDrive
+                  ? mudouDesdeSalvar
+                    ? 'A análise mudou desde o último salvamento: grave no Drive antes de enviar.'
+                    : undefined
+                  : 'Salve a análise no Drive antes: quem revisa abre a planilha da pasta do cedente.'
+              }
+            >
+              {acaoValidacao.label}
+            </Button>
+          )}
         </div>
       }
     >
+      {desfechoAberto && (
+        <JanelaDeDesfecho
+          key={desfechoAberto.statusId}
+          acao={desfechoAberto}
+          achados={achadosDoDesfecho}
+          onRedigir={redigirDesfecho}
+          onMover={onMover}
+          onFechar={() => setDesfechoAberto(null)}
+          // A RAZÃO DO PORTÃO 1 JÁ NO CAMPO: ela é o motivo, e redigitá-la
+          // seria copiar o que está escrito acima na mesma tela.
+          motivoSugerido={
+            atual?.reprovado && (atual.motivos ?? []).length
+              ? `Reprovado no Portão 1: ${(atual.motivos ?? []).join('; ')}`
+              : undefined
+          }
+        />
+      )}
+
       {erro && (
         <div className="mb-4 rounded-xl bg-red-50/70 px-3.5 py-3 text-sm text-red-700 ring-1 ring-inset ring-red-200/70">
           {erro}
@@ -2374,24 +2353,15 @@ export function AnaliseRpvModal({
               compensa o valor. Passar fica registrado no aviso, que sobe para o
               card com a análise. */}
           {pisoBloqueou && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-red-200/70 pt-3">
+            <div className="mt-3 border-t border-red-200/70 pt-3">
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() =>
-                  pisoBloqueou.enviar
-                    ? salvarEEnviar(pisoBloqueou.enviar, true)
-                    : salvar({ ignorarMinimo: true })
-                }
+                onClick={() => salvar({ ignorarMinimo: true })}
                 disabled={ocupado}
               >
-                {pisoBloqueou.enviar
-                  ? `Seguir mesmo assim: ${pisoBloqueou.enviar.label}`
-                  : 'Salvar mesmo assim'}
+                Seguir mesmo assim
               </Button>
-              <span className="text-xs text-red-600/80">
-                Fica registrado na análise e na anotação do card.
-              </span>
             </div>
           )}
         </div>
@@ -2415,23 +2385,6 @@ export function AnaliseRpvModal({
               seguinte é mover o card com essa razão. Sem a seção, a pessoa
               fechava a janela, achava o card na lista e clicava em Reprovar sem
               motivo — perdendo o texto que estava na tela. */}
-          <DesfechoDaAnalise
-            // REPROVADO NO PORTÃO 1 NÃO TEM PLANILHA PARA SALVAR: o botão não
-            // promete o que não vai fazer, e continua abrindo o painel — mandar
-            // à revisão um crédito barrado pede uma linha dizendo por quê.
-            acoes={acoes.map((a) =>
-              a.statusId === ST_DECISAO ? { ...a, label: 'Enviar para validação' } : a,
-            )}
-            onMover={onMover}
-            ocupado={ocupado}
-            achados={achadosDoDesfecho}
-            onRedigir={redigirDesfecho}
-            motivoSugerido={() =>
-              (atual.motivos ?? []).length
-                ? `Reprovado no Portão 1: ${(atual.motivos ?? []).join('; ')}`
-                : undefined
-            }
-          />
         </div>
       )}
 
@@ -2715,15 +2668,6 @@ export function AnaliseRpvModal({
           {/* O DESFECHO POR ÚLTIMO, que é a ordem do trabalho: os números, a
               auditoria, os riscos, o que se quis corrigir — e só então o que
               fazer com isso. */}
-          <DesfechoDaAnalise
-            acoes={acoes}
-            onMover={onMover}
-            ocupado={ocupado}
-            achados={achadosDoDesfecho}
-            onRedigir={redigirDesfecho}
-            diretos={DESFECHOS_DIRETOS}
-            aoConfirmarDireto={salvarEEnviar}
-          />
         </div>
       )}
     </Modal>

@@ -277,13 +277,12 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   //
   // APROVAR NÃO ENTRA AQUI de propósito: aprovar direto de Pendentes pularia a
   // revisão, que é a razão de a coluna de Validação existir.
-  // OS RÓTULOS DIZEM O ATO INTEIRO. "Enviar para validação" também gera a
-  // planilha e a sobe no Drive — sem isso o card chegaria à revisão sem o
-  // arquivo que se vai revisar —, e o nome do botão precisa dizê-lo antes do
-  // clique, não depois. "Diligência" e "Reprovar" viram verbo pelo mesmo
-  // motivo: o que se lê num botão é o que ele faz.
+  // OS RÓTULOS DIZEM O ATO. "Diligência" e "Reprovar" viram verbo porque o
+  // que se lê num botão é o que ele faz. Salvar deixou de andar junto do envio:
+  // são dois botões no rodapé da janela, e o envio só acende quando existe
+  // planilha na pasta do Drive.
   pendentes: [
-    { statusId: ST_DECISAO, label: 'Salvar no Drive e enviar p/ validação', variant: 'primary' },
+    { statusId: ST_DECISAO, label: 'Enviar para validação', variant: 'primary' },
     { statusId: ST_DILIGENCIA, label: 'Exigir diligência', variant: 'warning' },
     { statusId: ST_REPROVADO, label: 'Reprovar crédito', variant: 'danger' },
   ],
