@@ -28,6 +28,7 @@ type Aba = 'certidoes' | 'processos'
 
 export function DueDiligence({
   leadId,
+  tituloDoCard,
   cedenteDoCard,
   arquivos,
   lendoPdf,
@@ -37,6 +38,8 @@ export function DueDiligence({
   comCertidoes,
 }: {
   leadId: number
+  /** O título do card: é dele que sai QUAIS verbas estão sendo cedidas. */
+  tituloDoCard: string
   cedenteDoCard: string
   arquivos: ArquivoLido[]
   lendoPdf: boolean
@@ -112,6 +115,7 @@ export function DueDiligence({
         <div hidden={aba !== 'processos'}>
           <PainelProcessosJudiciais
             leadId={leadId}
+            tituloDoCard={tituloDoCard}
             cedenteDoCard={cedenteDoCard}
             arquivos={arquivos}
             ativo={aba === 'processos'}

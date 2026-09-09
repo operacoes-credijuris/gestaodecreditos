@@ -1957,6 +1957,7 @@ export default function AnaliseCredito() {
           key={ddLead.kommo_lead_id}
           open
           leadId={ddLead.kommo_lead_id}
+          tituloDoCard={tituloCard(ddLead)}
           cedenteDoCard={lerCardCredijuris(ddLead).cedente}
           arquivos={arquivosCache[ddLead.kommo_lead_id] ?? []}
           lendoPdf={

@@ -21,18 +21,23 @@
 // A APURAÇÃO CUSTA DINHEIRO — a API do Escavador é paga por requisição — então
 // o botão é explícito, nunca automático, e o custo da chamada volta na tela.
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ExternalLink, RefreshCw, Search } from 'lucide-react'
+import { AlertTriangle, ExternalLink, RefreshCw, ScanText, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { formatCpfCnpjInput, formatDate, onlyDigits } from '@/lib/format'
 import { acharCpfs } from '@/lib/cpfNoTexto'
 import { acharOabs } from '@/lib/dadosNoTexto'
+import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import {
   historicoDoCredito,
   type ApuracaoDD,
   type ProcessoDD,
 } from '../../supabase/functions/_shared/dueDiligencia.ts'
+import {
+  alvosDaCessao,
+  type TitularLido,
+} from '../../supabase/functions/_shared/titularesDaCessao.ts'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
@@ -62,11 +67,14 @@ const brl = (v: unknown): string => {
 
 export function PainelProcessosJudiciais({
   leadId,
+  tituloDoCard,
   cedenteDoCard,
   arquivos,
   ativo,
 }: {
   leadId: number
+  /** O título do card — é dele que sai QUAIS verbas estão sendo cedidas. */
+  tituloDoCard: string
   cedenteDoCard: string
   /** Os PDFs já lidos na tela: é deles que saem os CPFs e as OABs sugeridos. */
   arquivos: ArquivoLido[]
@@ -84,6 +92,24 @@ export function PainelProcessosJudiciais({
   const [cedenteCpf, setCedenteCpf] = useState('')
   const [advNome, setAdvNome] = useState('')
   const [advOab, setAdvOab] = useState('')
+  const [advCpf, setAdvCpf] = useState('')
+  const [lendoTitulares, setLendoTitulares] = useState(false)
+  const [avisosDaLeitura, setAvisosDaLeitura] = useState<string[]>([])
+
+  // ------------------------------------------------- de quem é o que compramos
+  //
+  // A DILIGÊNCIA É DO TITULAR DA VERBA, e o título do card já diz qual verba é.
+  // Perguntar sempre pelo cedente E pelo advogado, como esta tela fazia, apura
+  // quem não é parte do negócio: numa cessão só de honorários as dívidas do
+  // exequente não alcançam nada, e numa cessão só do principal as do advogado
+  // também não. Cada consulta a mais é paga, e cada alerta a mais sobre quem não
+  // importa ensina quem lê a ignorar o alerta.
+  const alvos = useMemo(
+    () => alvosDaCessao(classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida)),
+    [tituloDoCard],
+  )
+  const pedeCedente = alvos.papeis.includes('CEDENTE')
+  const pedeAdvogado = alvos.papeis.includes('ADVOGADO')
 
   // ------------------------------------------------------------------ banco
 
@@ -135,6 +161,7 @@ export function PainelProcessosJudiciais({
     if (advogado) {
       setAdvNome((v) => v || advogado.nome || '')
       setAdvOab((v) => v || advogado.oab || '')
+      setAdvCpf((v) => v || formatCpfCnpjInput(advogado.documento ?? ''))
     }
   }, [apuracoes])
 
@@ -162,19 +189,91 @@ export function PainelProcessosJudiciais({
       .slice(0, 6)
   }, [arquivos])
 
+  // -------------------------------------------------- ler os autos com IA
+
+  /**
+   * Quem são os titulares, lidos dos autos que a tela já carregou.
+   *
+   * O TEXTO VEM DAQUI, e não de uma nova busca: o PDF está na memória desde que
+   * o card foi aberto, e uma segunda leitura custaria uma consulta à Judit para
+   * obter o que já temos.
+   *
+   * PREENCHE, NÃO DECIDE. O resultado cai nos campos e quem confere olha a
+   * evidência antes de gastar consulta paga — um processo tem o CPF do cedente,
+   * o do advogado, o do ente devedor e o de cada terceiro.
+   */
+  async function lerTitulares() {
+    const texto = arquivos
+      .map((a) => a.texto ?? '')
+      .filter((t) => t.trim())
+      .join('\n\n===== PRÓXIMO ARQUIVO =====\n\n')
+    if (!texto.trim()) {
+      toast.error(
+        'Os anexos deste card não têm texto para ler — processo digitalizado só tem imagem.',
+      )
+      return
+    }
+    setLendoTitulares(true)
+    setErro(null)
+    try {
+      const r = await invokeFunction<{ titulares?: TitularLido[]; avisos?: string[] }>(
+        'dd-titulares',
+        {
+          lead_id: leadId,
+          titulo: tituloDoCard,
+          texto,
+          parcela: classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida),
+        },
+      )
+      const achados = r.titulares ?? []
+      const doCedente = achados.find((t) => t.papel === 'CEDENTE')
+      const doAdvogado = achados.find((t) => t.papel === 'ADVOGADO')
+      if (doCedente) {
+        if (doCedente.nome) setCedenteNome(doCedente.nome)
+        if (doCedente.documento) setCedenteCpf(formatCpfCnpjInput(doCedente.documento))
+      }
+      if (doAdvogado) {
+        if (doAdvogado.nome) setAdvNome(doAdvogado.nome)
+        if (doAdvogado.oab) setAdvOab(doAdvogado.oab)
+        if (doAdvogado.documento) setAdvCpf(formatCpfCnpjInput(doAdvogado.documento))
+      }
+      setAvisosDaLeitura(r.avisos ?? [])
+      const quantos = achados.filter((t) => t.nome).length
+      if (quantos === 0) toast.error('Não identifiquei os titulares nos autos.')
+      else toast.success(`${quantos} titular(es) identificado(s) — confira antes de apurar.`)
+    } catch (e) {
+      setErro((e as Error).message)
+      toast.error((e as Error).message)
+    } finally {
+      setLendoTitulares(false)
+    }
+  }
+
   // ------------------------------------------------------------------ ação
 
   async function apurar() {
-    const alvos: Record<string, string>[] = []
+    // SÓ OS TITULARES DA VERBA CEDIDA. Mandar os dois sempre gastaria consulta
+    // paga com quem não é parte do negócio — e devolveria alerta sobre dívida
+    // que não alcança o crédito, que é pior do que não apurar.
+    const alvosParaApurar: Record<string, string>[] = []
     const cpf = onlyDigits(cedenteCpf)
-    if (cedenteNome.trim() || cpf) {
-      alvos.push({ papel: 'CEDENTE', nome: cedenteNome.trim(), documento: cpf })
+    if (pedeCedente && (cedenteNome.trim() || cpf)) {
+      alvosParaApurar.push({ papel: 'CEDENTE', nome: cedenteNome.trim(), documento: cpf })
     }
-    if (advOab.trim()) {
-      alvos.push({ papel: 'ADVOGADO', nome: advNome.trim(), oab: advOab.trim() })
+    if (pedeAdvogado && (advOab.trim() || onlyDigits(advCpf))) {
+      alvosParaApurar.push({
+        papel: 'ADVOGADO',
+        nome: advNome.trim(),
+        oab: advOab.trim(),
+        documento: onlyDigits(advCpf),
+      })
     }
-    if (alvos.length === 0) {
-      toast.error('Informe ao menos o CPF do cedente ou a OAB do advogado.')
+    if (alvosParaApurar.length === 0) {
+      toast.error(
+        pedeCedente
+          ? 'Informe ao menos o CPF do cedente ou a OAB do advogado.'
+          : 'Informe a OAB (ou o CPF) do advogado, que é quem cede esta verba.',
+      )
       return
     }
 
@@ -184,7 +283,7 @@ export function PainelProcessosJudiciais({
       const r = await invokeFunction<{
         custo?: string
         apuracoes?: { papel: string; status: string; total: number; observacao?: string | null }[]
-      }>('dd-processos', { lead_id: leadId, alvos })
+      }>('dd-processos', { lead_id: leadId, alvos: alvosParaApurar })
       setCusto(r.custo ?? null)
       const falhas = (r.apuracoes ?? []).filter((a) => a.status === 'FALHA')
       if (falhas.length > 0) {
@@ -239,41 +338,98 @@ export function PainelProcessosJudiciais({
         <h3 className="font-display text-sm font-bold uppercase tracking-wide text-slate-700">
           Apurar processos
         </h3>
-        <p className="mt-1 text-sm text-slate-600">
-          A busca é por CPF no Escavador. O advogado entra pela OAB — nos autos ele não tem
-          CPF, e é dela que o CPF dele é obtido antes de procurar dívida em seu nome.
+
+        {/* QUEM SERÁ APURADO, E POR QUÊ — dito antes dos campos, porque é a
+            decisão que os campos executam. A verba cedida sai do título do card;
+            o titular dela é quem responde por dívida que alcança este crédito. */}
+        <p className="mt-1 text-sm text-slate-600">{alvos.porque}</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Verbas no título: <span className="font-medium">{alvos.verbas}</span>. A busca é por
+          CPF no Escavador; o advogado entra pela OAB, de onde o CPF dele é obtido antes de
+          procurar dívida em seu nome.
         </p>
 
+        <div className="mt-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={lerTitulares}
+            loading={lendoTitulares}
+            icon={<ScanText className="h-4 w-4" />}
+          >
+            Identificar titulares nos autos
+          </Button>
+        </div>
+
+        {avisosDaLeitura.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {avisosDaLeitura.map((a) => (
+              <li key={a} className="text-xs text-amber-700">
+                {a}
+              </li>
+            ))}
+          </ul>
+        )}
+
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <Field label="Cedente">
-            <Input
-              value={cedenteNome}
-              onChange={(e) => setCedenteNome(e.target.value)}
-              placeholder="Nome do cedente"
-            />
-          </Field>
-          <Field label="CPF do cedente" hint="Sem CPF a busca vai pelo nome, e homônimo entra.">
-            <Input
-              value={cedenteCpf}
-              onChange={(e) => setCedenteCpf(formatCpfCnpjInput(e.target.value))}
-              placeholder="000.000.000-00"
-              inputMode="numeric"
-            />
-          </Field>
-          <Field label="Advogado">
-            <Input
-              value={advNome}
-              onChange={(e) => setAdvNome(e.target.value)}
-              placeholder="Nome do advogado (opcional)"
-            />
-          </Field>
-          <Field label="OAB do advogado" hint='Como nos autos: "GO 12345".'>
-            <Input
-              value={advOab}
-              onChange={(e) => setAdvOab(e.target.value)}
-              placeholder="GO 12345"
-            />
-          </Field>
+          {pedeCedente && (
+            <>
+              <Field label="Cedente">
+                <Input
+                  value={cedenteNome}
+                  onChange={(e) => setCedenteNome(e.target.value)}
+                  placeholder="Nome do cedente"
+                />
+              </Field>
+              <Field
+                label="CPF do cedente"
+                hint="Sem CPF a busca vai pelo nome, e homônimo entra."
+              >
+                <Input
+                  value={cedenteCpf}
+                  onChange={(e) => setCedenteCpf(formatCpfCnpjInput(e.target.value))}
+                  placeholder="000.000.000-00"
+                  inputMode="numeric"
+                />
+              </Field>
+            </>
+          )}
+          {pedeAdvogado && (
+            <>
+              <Field label={alvos.cedenteEhOAdvogado ? 'Advogado (é quem cede)' : 'Advogado'}>
+                <Input
+                  value={advNome}
+                  onChange={(e) => setAdvNome(e.target.value)}
+                  placeholder="Nome do advogado"
+                />
+              </Field>
+              <Field
+                label="OAB do advogado"
+                hint={
+                  onlyDigits(advCpf).length === 11
+                    ? 'O CPF já veio dos autos — a OAB fica como conferência.'
+                    : 'Como nos autos: "GO 12345".'
+                }
+              >
+                <Input
+                  value={advOab}
+                  onChange={(e) => setAdvOab(e.target.value)}
+                  placeholder="GO 12345"
+                />
+              </Field>
+              {/* O CPF DO ADVOGADO, QUANDO OS AUTOS O TRAZEM, poupa uma consulta:
+                  sem ele a apuração pergunta a OAB ao Escavador só para descobrir
+                  o CPF antes de procurar dívida. */}
+              <Field label="CPF do advogado" hint="Opcional: se vier, dispensa a busca pela OAB.">
+                <Input
+                  value={advCpf}
+                  onChange={(e) => setAdvCpf(formatCpfCnpjInput(e.target.value))}
+                  placeholder="000.000.000-00"
+                  inputMode="numeric"
+                />
+              </Field>
+            </>
+          )}
         </div>
 
         {/* Sugestões do PDF: candidatos com o trecho ao lado, nunca escolha
@@ -290,7 +446,13 @@ export function PainelProcessosJudiciais({
                   key={c.cpf}
                   type="button"
                   title={c.contexto}
-                  onClick={() => setCedenteCpf(formatCpfCnpjInput(c.cpf))}
+                  onClick={() =>
+                    // Para o campo que esta cessão de fato pede: numa cessão só
+                    // de honorários não há campo de cedente para preencher.
+                    pedeCedente
+                      ? setCedenteCpf(formatCpfCnpjInput(c.cpf))
+                      : setAdvCpf(formatCpfCnpjInput(c.cpf))
+                  }
                   className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 ring-1 ring-slate-200 hover:ring-brand-300"
                 >
                   {formatCpfCnpjInput(c.cpf)}
@@ -299,7 +461,7 @@ export function PainelProcessosJudiciais({
             </div>
           </div>
         )}
-        {oabsSugeridas.length > 0 && (
+        {pedeAdvogado && oabsSugeridas.length > 0 && (
           <div className="mt-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               OABs nos anexos
