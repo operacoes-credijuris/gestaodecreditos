@@ -26,7 +26,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Save, SendHorizontal, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { codigoDoErro, invokeFunction } from '@/lib/functions'
-import { ST_DECISAO, ST_DILIGENCIA, ST_REPROVADO, type AcaoTela } from '@/lib/kommo'
+import { type AcaoTela } from '@/lib/kommo'
 import type { FichaDoCredito } from '@/lib/anotacaoKommo'
 import {
   formatBRL,
@@ -1150,7 +1150,7 @@ function JanelaDeDesfecho({
 
   /** O rótulo curto do desfecho, que o servidor usa para escolher o tom. */
   const tipoDoDesfecho =
-    acao.statusId === ST_DILIGENCIA ? 'diligencia' : acao.statusId === ST_REPROVADO ? 'reprovado' : 'validacao'
+    acao.papel === 'diligenciar' ? 'diligencia' : acao.papel === 'reprovar' ? 'reprovado' : 'validacao'
 
   const itensMarcados = () =>
     [...marcados].sort((a, b) => a - b).map((i) => {
@@ -1278,7 +1278,7 @@ function JanelaDeDesfecho({
             id="motivo-desfecho"
             className="mt-1.5 min-h-[140px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
             placeholder={
-              acao.statusId === ST_DILIGENCIA
+              acao.papel === 'diligenciar'
                 ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
                 : 'Por que não passa. Ex.: "precatório expedido, não RPV" · "crédito de R$ 12 mil, abaixo do mínimo".'
             }
@@ -2368,9 +2368,9 @@ export function AnaliseRpvModal({
    */
   const tituloDaReprovacao = atual?.qualificacao ? 'Reprovado no Portão 1' : 'Reprovado na análise'
 
-  const acaoDiligencia = acoes.find((a) => a.statusId === ST_DILIGENCIA)
-  const acaoReprovar = acoes.find((a) => a.statusId === ST_REPROVADO)
-  const acaoValidacao = acoes.find((a) => a.statusId === ST_DECISAO)
+  const acaoDiligencia = acoes.find((a) => a.papel === 'diligenciar')
+  const acaoReprovar = acoes.find((a) => a.papel === 'reprovar')
+  const acaoValidacao = acoes.find((a) => a.papel === 'validar')
   /**
    * QUEM REVISA ABRE A PLANILHA DESTA análise — daí depender de `salvo`.
    *

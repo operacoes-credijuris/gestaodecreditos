@@ -30,6 +30,32 @@ const COLUNAS: Record<number, string> = {
   107830031: 'Reprovados Operacional',
 }
 
+/**
+ * Os destinos do funil de PRECATÓRIOS, pelo NOME da coluna.
+ *
+ * Por nome porque os ids desse funil não existem em lugar nenhum do código: são
+ * lidos do espelho (kommo_etapa), como a tela faz para montar as abas. Colar
+ * aqui números copiados da URL do Kommo é o erro que a migration 0044 existe
+ * para evitar — um dígito trocado aponta para outra coluna existente, e o card
+ * vai parar nela sem erro nenhum.
+ *
+ * SÓ OS DOIS QUE INTERROMPEM. "Apresentação de Proposta" fica de fora: qual
+ * coluna significa "aprovado" no Precatório ninguém definiu, e a lista aqui
+ * precisa espelhar exatamente o que a tela oferece — um destino a mais é uma
+ * porta que só se descobre pelo card que passou por ela.
+ */
+const DESTINOS_PRECATORIO = ['Diligência', 'Reprovados Operacional']
+
+const FUNIL_PRECATORIO = 13971995
+
+/** Acento, caixa e espaço a mais não podem decidir se o card move. */
+const normalizar = (s: unknown) =>
+  String(s ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+
 // Nenhum destino exige justificativa. A análise — inclusive o motivo de uma
 // eventual reprovação — é produzida na etapa de Pendentes; a de Validação apenas
 // ratifica o que já foi escrito. Pedir o motivo aqui seria perguntar à pessoa
@@ -54,13 +80,32 @@ Deno.serve(async (req: Request) => {
     if (!leadId || !statusId) {
       return jsonResponse({ error: 'Informe leadId e statusId.' }, 400)
     }
-    if (!COLUNAS[statusId]) {
-      return jsonResponse(
-        { error: 'Coluna de destino não reconhecida.' },
-        400,
-      )
-    }
     const svc = serviceClient()
+
+    // O DESTINO PRECISA SER UM DOS QUE O APP OFERECE, e não qualquer coluna do
+    // CRM: um statusId solto no corpo da requisição moveria o card para
+    // 'Nutrição' ou 'Venda perdida', que são colunas do comercial.
+    //
+    // DUAS LISTAS porque os dois funis se identificam de formas diferentes. RPV
+    // tem os ids escritos aqui desde sempre e continua respondendo sem tocar no
+    // banco. O Precatório numera as MESMAS colunas com outros ids, que só o
+    // espelho conhece (migration 0044) — é por nome que se pergunta, como a tela
+    // faz para montar as abas.
+    const { data: destino } = await svc
+      .from('kommo_etapa')
+      .select('pipeline_id, nome')
+      .eq('status_id', statusId)
+      .limit(20)
+    const nomeDoDestino =
+      COLUNAS[statusId] ??
+      (destino ?? []).find(
+        (e) =>
+          Number(e.pipeline_id) === FUNIL_PRECATORIO &&
+          DESTINOS_PRECATORIO.some((d) => normalizar(d) === normalizar(e.nome)),
+      )?.nome
+    if (!nomeDoDestino) {
+      return jsonResponse({ error: 'Coluna de destino não reconhecida.' }, 400)
+    }
 
     const { data: secret } = await svc
       .from('integracao_kommo_secret')
@@ -79,7 +124,18 @@ Deno.serve(async (req: Request) => {
       .select('status_id')
       .eq('kommo_lead_id', leadId)
       .maybeSingle()
-    const origem = espelho?.status_id ? COLUNAS[espelho.status_id] : null
+    const origem = espelho?.status_id
+      ? (COLUNAS[espelho.status_id] ??
+        (
+          await svc
+            .from('kommo_etapa')
+            .select('nome')
+            .eq('status_id', espelho.status_id)
+            .limit(1)
+            .maybeSingle()
+        ).data?.nome ??
+        null)
+      : null
 
     // Nome de quem está movendo — é a informação que o Kommo não registra.
     const { data: perfil } = await svc
@@ -116,8 +172,8 @@ Deno.serve(async (req: Request) => {
     // 2. Registra no card quem moveu e por quê.
     const linhas = [
       origem
-        ? `Movido de "${origem}" para "${COLUNAS[statusId]}" por ${autor}.`
-        : `Movido para "${COLUNAS[statusId]}" por ${autor}.`,
+        ? `Movido de "${origem}" para "${nomeDoDestino}" por ${autor}.`
+        : `Movido para "${nomeDoDestino}" por ${autor}.`,
     ]
     if (comentario) linhas.push(comentario)
 

@@ -104,6 +104,24 @@ export interface DefSubdivisao {
 export const ABA_JURIDICO = 'int-juridico'
 
 /**
+ * As abas do Interno de onde um precatório PODE SAIR por decisão nossa.
+ *
+ * São as três de trabalho — jurídico, precificação e validação. As terminais
+ * ficam de fora pelo motivo de sempre: de Aprovados e Reprovados o card não
+ * volta pelo app, e a diligência é encargo do comercial, que devolve o card pelo
+ * Kommo quando a cumpre.
+ */
+const ABAS_INTERNO_COM_DESFECHO: ReadonlySet<string> = new Set([
+  ABA_JURIDICO,
+  'int-precificacao',
+  'int-validacao',
+])
+
+/** As colunas de desfecho do Interno, pelo nome — os ids são de cada funil. */
+const COLUNA_DILIGENCIA = 'Diligência'
+const COLUNA_REPROVADOS = 'Reprovados Operacional'
+
+/**
  * As colunas de cada destinação, e só elas. Do "Funil Geral Precatório".
  *
  * "APRESENTAÇÃO DE PROPOSTA" APARECE NAS DUAS, de propósito: é a MESMA coluna
@@ -255,10 +273,24 @@ export const TELAS: DefTela[] = [
   },
 ]
 
+/**
+ * O QUE A AÇÃO FAZ, independente de para qual coluna ela move.
+ *
+ * Existe porque o `statusId` deixou de identificar o ato. Enquanto só RPV tinha
+ * desfechos, comparar com ST_REPROVADO respondia "isto é uma reprovação?" — e a
+ * tela toda foi escrita assim: o ícone, a exigência de motivo, o tom que a IA
+ * usa ao redigir a anotação. No funil de Precatórios as MESMAS colunas têm
+ * outros ids (o Kommo numera por funil), então essas comparações passariam a
+ * responder "não" para todas: reprovar um precatório não pediria motivo e a
+ * anotação sairia com o tom de validação. Silenciosamente, nos dois casos.
+ */
+export type PapelDaAcao = 'validar' | 'aprovar' | 'diligenciar' | 'reprovar'
+
 export interface AcaoTela {
   statusId: number
   label: string
   variant: 'primary' | 'success' | 'warning' | 'danger'
+  papel: PapelDaAcao
 }
 
 /**
@@ -283,17 +315,17 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   // são dois botões no rodapé da janela, e o envio só acende quando existe
   // planilha na pasta do Drive.
   pendentes: [
-    { statusId: ST_DECISAO, label: 'Enviar para validação', variant: 'primary' },
-    { statusId: ST_DILIGENCIA, label: 'Exigir diligência', variant: 'warning' },
-    { statusId: ST_REPROVADO, label: 'Reprovar crédito', variant: 'danger' },
+    { statusId: ST_DECISAO, label: 'Enviar para validação', variant: 'primary', papel: 'validar' },
+    { statusId: ST_DILIGENCIA, label: 'Exigir diligência', variant: 'warning', papel: 'diligenciar' },
+    { statusId: ST_REPROVADO, label: 'Reprovar crédito', variant: 'danger', papel: 'reprovar' },
   ],
   // Cores em vez de hierarquia: as três são alternativas legítimas, e
   // verde/laranja/vermelho se lê mais rápido que o rótulo numa tela onde a mesma
   // decisão é tomada dezenas de vezes.
   validacao: [
-    { statusId: ST_PROPOSTA, label: 'Aprovar', variant: 'success' },
-    { statusId: ST_DILIGENCIA, label: 'Diligência', variant: 'warning' },
-    { statusId: ST_REPROVADO, label: 'Reprovar', variant: 'danger' },
+    { statusId: ST_PROPOSTA, label: 'Aprovar', variant: 'success', papel: 'aprovar' },
+    { statusId: ST_DILIGENCIA, label: 'Diligência', variant: 'warning', papel: 'diligenciar' },
+    { statusId: ST_REPROVADO, label: 'Reprovar', variant: 'danger', papel: 'reprovar' },
   ],
   aprovados: [],
   diligencia: [],
@@ -523,11 +555,17 @@ export function ehCardDeFundos(statusId: number, etapas: EtapaKommo[]): boolean 
  * (TELAS) e o Precatório amarra o nome da coluna (SUBDIVISOES_PRECATORIO, ver
  * lá o porquê). Nenhum dos dois lê mais o kanban como ele é.
  *
- * SEM BOTÃO DE AÇÃO no Precatório, e isso é decisão, não pendência: os botões de
- * RPV carregam semântica ("Aprovar" = mover para Apresentação de Proposta) que
- * ninguém definiu para o Precatório. Adivinhar qual coluna significa "aprovado"
- * seria mover card de verdade com base em palpite. A kommo-mover, de todo modo,
- * só aceita os cinco status de RPV — um palpite aqui daria erro lá.
+ * NO PRECATÓRIO SÓ OS DOIS DESFECHOS QUE INTERROMPEM, e só na trilha Interna.
+ * Diligência e Reprovação são atos cujo significado o dono definiu; "Aprovar"
+ * continua fora, porque qual coluna significa aprovado no Precatório ninguém
+ * disse, e adivinhar seria mover card de verdade com base em palpite. Nos Fundos
+ * também não há desfecho: o parecer de lá é do fundo, e quem move o card depois
+ * de encaminhar é ele.
+ *
+ * O ID SAI DO ESPELHO, pelo nome da coluna, como todo o resto do Precatório — os
+ * ST_* são do funil de RPV e apontariam para coluna de outro funil. Coluna que o
+ * espelho não tem não vira botão: melhor a aba sem desfecho do que um botão que
+ * move para lugar nenhum.
  */
 export function abasDoFunil(
   pipelineId: number,
@@ -551,6 +589,30 @@ export function abasDoFunil(
   if (!def) return []
   const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
 
+  const desfechos = (abaKey: string): AcaoTela[] => {
+    if (def.key !== 'interno' || !ABAS_INTERNO_COM_DESFECHO.has(abaKey)) return []
+    const idDiligencia = nomes.get(normalizarBusca(COLUNA_DILIGENCIA))
+    const idReprovados = nomes.get(normalizarBusca(COLUNA_REPROVADOS))
+    const saida: AcaoTela[] = []
+    if (idDiligencia !== undefined) {
+      saida.push({
+        statusId: idDiligencia,
+        label: 'Exigir diligência',
+        variant: 'warning',
+        papel: 'diligenciar',
+      })
+    }
+    if (idReprovados !== undefined) {
+      saida.push({
+        statusId: idReprovados,
+        label: 'Reprovar crédito',
+        variant: 'danger',
+        papel: 'reprovar',
+      })
+    }
+    return saida
+  }
+
   return def.abas.map((a) => {
     const statusId = nomes.get(normalizarBusca(a.colunaKommo))
     return {
@@ -562,7 +624,7 @@ export function abasDoFunil(
       // colunasPrecatorioDesalinhadas, no topo da tela.
       statusIds: statusId === undefined ? [] : [statusId],
       descricaoVazia: a.descricaoVazia,
-      acoes: [] as AcaoTela[],
+      acoes: desfechos(a.key),
     }
   })
 }

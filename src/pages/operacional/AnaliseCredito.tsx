@@ -43,10 +43,7 @@ import {
   FUNIL_RPV,
   FUNIL_PRECATORIO,
   KOMMO_SUBDOMINIO,
-  ST_DECISAO,
-  ST_PROPOSTA,
-  ST_DILIGENCIA,
-  ST_REPROVADO,
+  type PapelDaAcao,
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABA_JURIDICO,
@@ -485,11 +482,13 @@ async function anotarResultadoNaKommo(
 }
 
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
-const ICONES: Record<number, ReactNode> = {
-  [ST_DECISAO]: <ArrowRight className="h-4 w-4" />,
-  [ST_PROPOSTA]: <Check className="h-4 w-4" />,
-  [ST_DILIGENCIA]: <FileSearch className="h-4 w-4" />,
-  [ST_REPROVADO]: <X className="h-4 w-4" />,
+// PELO PAPEL, e não pelo status_id: as mesmas colunas têm ids diferentes em
+// cada funil, e um mapa por id deixaria os botões do Precatório sem ícone.
+const ICONES: Record<PapelDaAcao, ReactNode> = {
+  validar: <ArrowRight className="h-4 w-4" />,
+  aprovar: <Check className="h-4 w-4" />,
+  diligenciar: <FileSearch className="h-4 w-4" />,
+  reprovar: <X className="h-4 w-4" />,
 }
 
 /** Link para o card no Kommo — o operacional às vezes precisa do original. */
@@ -569,7 +568,7 @@ function JanelaDeMensagem({
   // ele, a janela de Aprovar abria com o campo VAZIO e o placeholder "Opcional",
   // e o Confirmar liberado: o card subia para Proposta sem uma linha sobre o que
   // se está comprando — que é justamente o que quem recebe precisa ler.
-  const semResumo = acao.statusId === ST_PROPOSTA && !lead.oportunidade
+  const semResumo = acao.papel === 'aprovar' && !lead.oportunidade
   // `ocupado` é o `isPending` da MOVIMENTAÇÃO, e ela é só a primeira metade: a
   // nota vem depois, noutra requisição. Nessa fresta o Confirmar voltava a
   // ficar habilitado e sem spinner, e um segundo clique disparava tudo de novo.
@@ -818,7 +817,7 @@ function CardCredito({
                 key={a.statusId}
                 size="sm"
                 variant={a.variant}
-                icon={ICONES[a.statusId]}
+                icon={ICONES[a.papel]}
                 onClick={() => onAcao(lead, a)}
                 loading={statusEmAndamento === a.statusId}
                 // Trava as outras ações do card enquanto uma corre: duas
@@ -1878,13 +1877,13 @@ export default function AnaliseCredito() {
           // precisa para montar a proposta. Numa diligência ou reprovação ele
           // seria a ficha de um crédito que não vai adiante.
           sugestao={
-            mensagemDoCard.acao.statusId === ST_PROPOSTA && mensagemDoCard.lead.oportunidade
+            mensagemDoCard.acao.papel === 'aprovar' && mensagemDoCard.lead.oportunidade
               ? resumoDaOportunidade(mensagemDoCard.lead.oportunidade)
               : ''
           }
           exigeMotivo={
-            mensagemDoCard.acao.statusId === ST_DILIGENCIA ||
-            mensagemDoCard.acao.statusId === ST_REPROVADO
+            mensagemDoCard.acao.papel === 'diligenciar' ||
+            mensagemDoCard.acao.papel === 'reprovar'
           }
           ocupado={mover.isPending}
           onConfirmar={async (mensagem) => {

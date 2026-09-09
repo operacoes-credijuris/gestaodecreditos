@@ -117,9 +117,38 @@ describe('abas do Interno', () => {
     expect(porLabel.get('Reprovados')).toBe(idDe('Reprovados Operacional'))
   })
 
-  it('não oferece botão de mover', () => {
-    // A kommo-mover só aceita os cinco status de RPV: botão aqui daria erro lá.
-    expect(abas.every((a) => a.acoes.length === 0)).toBe(true)
+  // OS DOIS DESFECHOS QUE INTERROMPEM, e só eles. "Aprovar" continua fora: qual
+  // coluna significa aprovado no Precatório ninguém definiu, e adivinhar seria
+  // mover card de verdade com base em palpite.
+  it('as abas de trabalho oferecem diligência e reprovação', () => {
+    for (const label of ['Jurídico', 'Precificação', 'Validação']) {
+      const aba = abas.find((a) => a.label === label)!
+      expect(aba.acoes.map((x) => x.papel), label).toEqual(['diligenciar', 'reprovar'])
+      expect(aba.acoes.find((x) => x.papel === 'reprovar')!.statusId, label).toBe(
+        idDe('Reprovados Operacional'),
+      )
+      expect(aba.acoes.find((x) => x.papel === 'diligenciar')!.statusId, label).toBe(
+        idDe('Diligência'),
+      )
+    }
+  })
+
+  // Das terminais o card não volta pelo app: de Aprovados e Reprovados não se
+  // sai, e a diligência quem devolve é o comercial, pelo Kommo.
+  it('as abas terminais não oferecem desfecho', () => {
+    for (const label of ['Aprovados', 'Diligência', 'Reprovados']) {
+      expect(abas.find((a) => a.label === label)!.acoes, label).toEqual([])
+    }
+  })
+
+  // O ID VEM DO ESPELHO, e coluna que ele não tem não vira botão: melhor a aba
+  // sem desfecho do que um botão que move o card para lugar nenhum.
+  it('sem a coluna no kanban, o botão não aparece', () => {
+    const semReprovados = espelho(COLUNAS_KOMMO.filter((n) => n !== 'Reprovados Operacional'))
+    const juridico = abasDoFunil(FUNIL_PRECATORIO, semReprovados, 'interno').find(
+      (a) => a.label === 'Jurídico',
+    )!
+    expect(juridico.acoes.map((x) => x.papel)).toEqual(['diligenciar'])
   })
 })
 
