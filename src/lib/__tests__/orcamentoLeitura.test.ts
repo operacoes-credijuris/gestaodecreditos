@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   planoDeLeitura,
   capNotas,
+  MARCA_CORTE_NOTAS,
   JANELA_TOKENS,
   MAX_IMAGENS,
   MAX_NOTAS_CHARS,
@@ -114,7 +115,13 @@ describe('as anotações do card', () => {
     expect(r.length).toBeLessThan(t.length)
     expect(r.startsWith(inicio)).toBe(true)
     expect(r.endsWith(fim)).toBe(true)
-    expect(r).toContain('OMITIDO POR TAMANHO')
+    // A MARCA É PRÓPRIA, e não a do corte do processo: era a mesma frase, e o
+    // servidor procurava essa frase nos blocos para acender o aviso "o processo é
+    // muito grande e PARTE do conteúdo foi omitida" — que passava a falar do
+    // processo por causa do histórico de anotações do card.
+    expect(r).toContain(MARCA_CORTE_NOTAS)
+    expect(r).toContain('ANOTAÇÕES DO CARD OMITIDAS POR TAMANHO')
+    expect(r).not.toContain('TRECHO INTERMEDIÁRIO')
   })
 
   it('anotação enorme não come a janela: entra capada na conta', () => {

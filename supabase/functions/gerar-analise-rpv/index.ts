@@ -23,6 +23,7 @@ import {
   capNotas,
   MAX_IMAGENS as MAX_IMAGENS_ABS,
   MAX_TEXTO_CHARS,
+  JANELA_TOKENS,
   planoDeLeitura,
 } from "../_shared/orcamentoLeitura.ts";
 import {
@@ -2842,12 +2843,30 @@ Deno.serve(async (req) => {
         // mandar mais do que cabe. Sobrando, ficam as ÚLTIMAS: o navegador já
         // escolheu fim e começo, e entre os dois o fim é onde estão a conta e o
         // requisitório.
-        const _plano = planoDeLeitura({
+        // REDE, E NÃO UM SEGUNDO PLANEJAMENTO.
+        //
+        // O navegador calcula o plano com o texto CRU das páginas; o que chega
+        // aqui é o texto MONTADO — cabeçalhos "===== ARQUIVO", marcadores
+        // "[p.N]", marcadores de buraco e os parágrafos que a tela acrescenta.
+        // Sempre maior. Recalculando o plano exato com a medida maior, o teto de
+        // imagens caía (às vezes para 1) e `imagens.slice(-n)` DESCARTAVA as
+        // páginas iniciais — as que o navegador tinha escolhido de propósito
+        // (partes, número, juízo). Duas medidas diferentes da mesma coisa
+        // brigando pelo mesmo orçamento.
+        //
+        // Agora só corta quando o conjunto REALMENTE não cabe na janela, que é
+        // o que uma rede tem de fazer: proteger contra o cliente desatualizado,
+        // não redecidir o que ele decidiu com mais informação.
+        const _cabe = planoDeLeitura({
           charsTexto: textoDireto.length,
           imagensPedidas: imagens.length,
           charsNotas: notasKommo.length,
         });
-        const imagensEnviadas = imagens.slice(-Math.min(_plano.maxImagens, MAX_IMAGENS_ABS));
+        const _pedeDemais = _cabe.tokensEstimados > JANELA_TOKENS;
+        const _teto = _pedeDemais
+          ? Math.min(_cabe.maxImagens, MAX_IMAGENS_ABS)
+          : Math.min(imagens.length, MAX_IMAGENS_ABS);
+        const imagensEnviadas = imagens.slice(-_teto);
         if (imagensEnviadas.length < imagens.length) {
           cortouImagens = imagens.length - imagensEnviadas.length;
         }
@@ -2953,7 +2972,18 @@ Deno.serve(async (req) => {
         tempo: _relogio(),
       });
     }
-    const houveCorte = contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
+    // O CORTE QUE IMPORTA É O DAS PÁGINAS, e ele acontece no navegador.
+    //
+    // `houveCorte` procurava MARCA_CORTE nos blocos — a marca do corte de UM
+    // documento, feita aqui dentro. O corte de PÁGINAS, que é o que realmente
+    // omite conteúdo do processo, é decidido em montarTextoDoProcesso e escreve
+    // outra frase: o aviso "parte do conteúdo foi omitida" nunca disparava por
+    // ele. Em compensação disparava por ANOTAÇÃO longa, porque capNotas usava a
+    // mesma marca — o aviso falava do processo por causa do histórico do card.
+    const _paginasOmitidas = Number(body.paginas_omitidas) || 0;
+    const _textoCortado = body.texto_cortado === true || _paginasOmitidas > 0;
+    const houveCorte = _textoCortado ||
+      contentBlocks.some((b: any) => typeof b?.text === 'string' && b.text.includes(MARCA_CORTE));
 
     // 3b. PORTÃO 1 — QUALIFICAÇÃO (roda ANTES de tudo). Só quando se está LENDO
     // o processo: refinar e salvar trabalham sobre análise que já passou por ele.
@@ -3141,6 +3171,7 @@ Deno.serve(async (req) => {
       marcar('segunda leitura dos valores (IA)');
     }
     dados._houveCorte = houveCorte;
+    dados._paginas_omitidas = _paginasOmitidas;
     dados._paginas_imagem = paginasImagem;
     dados._tamanho_texto = textoDireto.length;
     dados._imagens_cortadas = cortouImagens;
@@ -4376,7 +4407,13 @@ Deno.serve(async (req) => {
       );
     }
     if (dados._houveCorte)
-      avisosBase.push('O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA. Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.');
+      avisosBase.push(
+        'O processo é muito grande e PARTE do conteúdo foi omitida na leitura da IA' +
+        (Number(dados._paginas_omitidas) > 0
+          ? `: ${Number(dados._paginas_omitidas)} página(s) de texto ficaram de fora, escolhidas por pontuação — o começo e o fim foram preservados. `
+          : '. ') +
+        'Confira com atenção os valores (bruto, líquido, IR, INSS, honorários) e as datas.',
+      );
     if (Number(dados._imagens_cortadas) > 0)
       avisosBase.push(
         `⚠️ ${Number(dados._imagens_cortadas)} página(s) digitalizada(s) NÃO couberam no pedido e ficaram de fora da leitura ` +

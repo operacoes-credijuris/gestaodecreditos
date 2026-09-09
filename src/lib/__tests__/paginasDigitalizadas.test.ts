@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   escolherPaginasParaImagem,
   descreverSelecao,
+  LIMITES_PADRAO,
   resumirNumeros,
   type ArquivoParaImagem,
 } from '../paginasDigitalizadas'
@@ -92,5 +93,46 @@ describe('resumirNumeros e descreverSelecao', () => {
     const d = descreverSelecao(sel)
     expect(d).toContain('"curto.pdf": todas as 3 página(s)')
     expect(d).toContain('"longo.pdf": 46 de 100 página(s) digitalizadas (p. 1-6, 61-100)')
+  })
+
+  // #70 HÍBRIDO É QUANDO A IMAGEM É MINORIA.
+  //
+  // O critério era "tem QUALQUER texto": um arquivo 99% escaneado com uma
+  // única página de camada de texto virava híbrido, e no híbrido só as páginas
+  // de imagem concorrem — sem a regra de INÍCIO (partes, número, juízo) que um
+  // arquivo inteiramente digitalizado ganha.
+  it('quase todo escaneado leva as páginas de abertura', () => {
+    const sel = escolherPaginasParaImagem(
+      [{
+        nome: 'autos.pdf',
+        paginas: 300,
+        texto: 'uma página só tinha camada de texto',
+        paginasImagem: Array.from({ length: 299 }, (_, i) => i + 2),
+        bytes,
+      }],
+      // fim menor que o teto, para as duas regras concorrerem — com fim 40 e
+      // teto 20 a regra do fim sozinha consome tudo.
+      { max: 20, inicio: 6, fim: 10 },
+    )
+    const numeros = sel.flatMap((s) => s.numeros)
+    // A REGRA DO INÍCIO VOLTA A VALER: partes, número do processo e juízo.
+    expect(numeros).toContain(1)
+    expect(numeros).toContain(6)
+    // E o fim, onde estão a conta e o requisitório, continua vindo.
+    expect(numeros).toContain(300)
+  })
+
+  it('digital com poucas páginas escaneadas continua híbrido', () => {
+    const sel = escolherPaginasParaImagem(
+      [{
+        nome: 'autos.pdf',
+        paginas: 300,
+        texto: 'processo nato-digital, com texto em quase tudo',
+        paginasImagem: [150, 151, 152],
+        bytes,
+      }],
+      { ...LIMITES_PADRAO, max: 20 },
+    )
+    expect(sel.flatMap((s) => s.numeros).sort((a, b) => a - b)).toEqual([150, 151, 152])
   })
 })

@@ -74,7 +74,15 @@ export function escolherPaginasParaImagem(
 
   for (const a of arquivos) {
     if (!a.bytes || a.paginas <= 0 || a.erro) continue
-    const temTexto = a.texto.trim().length > 0
+    // HÍBRIDO É QUANDO A IMAGEM É MINORIA.
+    //
+    // O critério era "tem QUALQUER texto": um processo 99% escaneado com uma
+    // única página de camada de texto virava híbrido, e no híbrido só as páginas
+    // de imagem concorrem — sem a regra de INÍCIO (partes, número, juízo) que um
+    // arquivo inteiramente digitalizado ganha. Perdiam-se as páginas de abertura
+    // de um arquivo que, para todos os efeitos, é uma digitalização.
+    const _emImagem = a.paginas > 0 ? (a.paginasImagem ?? []).length / a.paginas : 0
+    const temTexto = a.texto.trim().length > 0 && _emImagem < 0.5
 
     if (temTexto) {
       // Híbrido: só as páginas de imagem, e elas têm prioridade máxima.

@@ -46,11 +46,26 @@ const INICIO_OBRIGATORIO = 6
 /** Páginas do fim do último arquivo que sempre entram. */
 const FIM_OBRIGATORIO = 4
 
+/**
+ * VALORES EM REAL, que é do que uma página de CONTA é feita.
+ *
+ * A pontuação era só por palavra-chave, e isso premiava a prosa: a folha de
+ * rosto da contadoria ("CONTADORIA… cálculo… homologação") batia o teto,
+ * enquanto as folhas com os TOTAIS — colunas de datas, índices e reais, quase
+ * sem palavra — pontuavam 2 a 5 e perdiam para qualquer petição com vinte
+ * ocorrências de "sentença/honorários/juros", que num processo há às centenas.
+ * As folhas de total são as que decidem o preço.
+ */
+const RE_DINHEIRO = /R$s*[d.]+,d{2}/g
+
 function pontuar(p: PaginaLida): number {
   let n = 0
   RE_CHAVE.lastIndex = 0
   while (RE_CHAVE.exec(p.texto) && n < TETO_CHAVE) n++
-  return n
+  let dinheiro = 0
+  RE_DINHEIRO.lastIndex = 0
+  while (RE_DINHEIRO.exec(p.texto) && dinheiro < TETO_CHAVE) dinheiro++
+  return n + dinheiro
 }
 
 /** Como uma página é escrita no texto final. */
@@ -177,6 +192,17 @@ export function montarTextoDoProcesso(paginas: PaginaLida[], max: number): Texto
   const primeiroArquivo = validas[0].arquivo
   const ultimoArquivo = validas[validas.length - 1].arquivo
   const idxUltimoDoUltimo = validas.length - 1
+  // A CONTA É CONTÍGUA. A memória de cálculo tem uma folha de rosto e três,
+  // quatro folhas de tabela em sequência; a de rosto pontua alto e as de tabela,
+  // baixo. Herdando parte da pontuação da vizinha, a sequência entra junto — que
+  // é como ela existe nos autos. Metade do bônus, para vizinhança não valer mais
+  // que conteúdo próprio.
+  const pontos = validas.map((p) => pontuar(p))
+  const comVizinhanca = pontos.map((n, i) => {
+    const antes = pontos[i - 1] ?? 0
+    const depois = pontos[i + 1] ?? 0
+    return n + Math.max(antes, depois) * 0.5
+  })
   const prioridade = validas.map((p, i) => {
     const obrigatoria =
       (p.arquivo === primeiroArquivo && p.numero <= INICIO_OBRIGATORIO) ||
@@ -184,13 +210,23 @@ export function montarTextoDoProcesso(paginas: PaginaLida[], max: number): Texto
     // Recência desempata: mais perto do fim, mais chance de ser a conta que
     // vale (a última homologada) e o andamento atual.
     const recencia = i / Math.max(1, validas.length - 1)
-    return { i, obrigatoria, pontos: pontuar(p) * 10 + recencia * 5, custo: marcar(p).length + 1 }
+    return { i, obrigatoria, pontos: comVizinhanca[i] * 10 + recencia * 5, custo: marcar(p).length + 1 }
   })
 
   const escolhidas = new Set<number>()
   let gasto = 0
-  // Orçamento com folga para cabeçalhos e marcadores de buraco.
-  const folga = porArquivo.size * 80 + 400
+  // ORÇAMENTO COM FOLGA PARA CABEÇALHOS **E BURACOS**.
+  //
+  // Cada trecho omitido escreve "[… N página(s) omitida(s) por tamanho …]", uns
+  // 46 caracteres, e a escolha por pontuação pega páginas ESPALHADAS pelo meio:
+  // um processo de 300 páginas com as ímpares pontuando gera dezenas de
+  // buracos. A folga de 80 por arquivo não cobria nada disso, o texto estourava
+  // `max`, e a defesa final fatiava o FIM — justamente as páginas obrigatórias
+  // do andamento atual —, com `incluidas` continuando a contá-las.
+  //
+  // No pior caso há um buraco por página escolhida (uma sim, uma não), então o
+  // orçamento reserva 50 caracteres por página candidata.
+  const folga = porArquivo.size * 80 + 400 + validas.length * 50
   const orcamento = Math.max(0, max - folga)
 
   // Obrigatórias primeiro; se nem elas cabem, cortam-se pelo próprio texto.
@@ -202,7 +238,23 @@ export function montarTextoDoProcesso(paginas: PaginaLida[], max: number): Texto
   }
 
   let texto = escrever(escolhidas)
-  // Defesa final: uma página gigante pode estourar sozinha.
+  // DEFESA FINAL: TIRA PÁGINA, NÃO FATIA TEXTO.
+  //
+  // Fatiar corta o FIM — as páginas obrigatórias do andamento atual, que é onde
+  // está a conta que vale — e deixa o último marcador de página truncado, com
+  // `incluidas` mentindo. Tirando a página não obrigatória de menor pontuação e
+  // reescrevendo, o que sai é uma página inteira, escolhida, e a contagem
+  // continua verdadeira.
+  const descartaveis = prioridade
+    .filter((x) => !x.obrigatoria && escolhidas.has(x.i))
+    .sort((a, b) => a.pontos - b.pontos || a.i - b.i)
+  for (const c of descartaveis) {
+    if (texto.length <= max) break
+    escolhidas.delete(c.i)
+    texto = escrever(escolhidas)
+  }
+  // Só as obrigatórias e ainda não cabe: aí não há página a tirar sem perder o
+  // que sustenta a leitura, e a fatia volta como último recurso.
   if (texto.length > max) texto = texto.slice(0, max)
 
   return { texto, incluidas: escolhidas.size, omitidas: validas.length - escolhidas.size, cortou: true }

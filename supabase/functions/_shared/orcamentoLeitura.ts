@@ -160,7 +160,17 @@ export function planoDeLeitura(o: {
  * está hoje. Cortar só o fim perderia o estado atual; cortar só o começo
  * perderia o combinado.
  */
-export function capNotas(txt: string, marca = 'TRECHO INTERMEDIÁRIO OMITIDO POR TAMANHO'): string {
+/**
+ * A marca do corte das ANOTAÇÕES, que não é a do corte do processo.
+ *
+ * Era a mesma frase, e o servidor procurava essa frase nos blocos para acender
+ * o aviso "o processo é muito grande e PARTE do conteúdo foi omitida". Card com
+ * histórico de anotações longo acendia o aviso sobre o PROCESSO, que estava
+ * inteiro.
+ */
+export const MARCA_CORTE_NOTAS = 'ANOTAÇÕES DO CARD OMITIDAS POR TAMANHO'
+
+export function capNotas(txt: string, marca = MARCA_CORTE_NOTAS): string {
   if (txt.length <= MAX_NOTAS_CHARS) return txt
   const head = Math.floor(MAX_NOTAS_CHARS * 0.5)
   const tail = MAX_NOTAS_CHARS - head

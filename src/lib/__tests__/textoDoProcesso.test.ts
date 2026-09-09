@@ -152,4 +152,74 @@ describe('semRodapeDeAssinatura', () => {
     expect(semRodapeDeAssinatura('  a   b  ')).toBe('a b')
     expect(semRodapeDeAssinatura('')).toBe('')
   })
+
+  // #67 A FOLGA TEM DE CONTAR OS BURACOS.
+  //
+  // Cada trecho omitido escreve "[… N página(s) omitida(s) por tamanho …]", uns
+  // 46 caracteres, e a escolha por pontuação pega páginas ESPALHADAS: um
+  // processo em que só as ímpares pontuam gera um buraco por página escolhida.
+  // A folga antiga (80 por arquivo) não cobria nada disso, o texto estourava e
+  // a defesa final fatiava o FIM — as páginas do andamento atual —, com
+  // `incluidas` continuando a contá-las.
+  it('cabe no teto mesmo com um buraco por página escolhida', () => {
+    const paginas = Array.from({ length: 200 }, (_, i) =>
+      // Só as ímpares pontuam: a seleção fica intercalada, e cada escolhida
+      // vira um buraco.
+      pag('autos.pdf', i + 1, i % 2 === 0 ? enche(40, 'z') : `sentença honorários juros ${enche(30)}`))
+    const r = montarTextoDoProcesso(paginas, 20_000)
+    expect(r.cortou).toBe(true)
+    expect(r.texto.length).toBeLessThanOrEqual(20_000)
+  })
+
+  it('o texto termina com uma página inteira, não numa fatia', () => {
+    const paginas = Array.from({ length: 120 }, (_, i) =>
+      pag('autos.pdf', i + 1, i % 2 === 0 ? enche(60, 'w') : `sentença juros correção ${enche(50)}`))
+    const r = montarTextoDoProcesso(paginas, 15_000)
+    expect(r.texto.length).toBeLessThanOrEqual(15_000)
+    // O número de marcadores de página tem de bater com a contagem informada:
+    // uma fatia no fim deixava um marcador pela metade e a contagem mentindo.
+    expect((r.texto.match(/\[p\.\d+\]/g) ?? []).length).toBe(r.incluidas)
+    expect(r.incluidas + r.omitidas).toBe(120)
+  })
+
+  // #71 A CONTA É FEITA DE DINHEIRO, e a pontuação era só de palavra: a folha
+  // de rosto da contadoria batia o teto e as folhas de TOTAL — colunas de
+  // datas, índices e reais — perdiam para qualquer petição com vinte
+  // ocorrências de "sentença/honorários/juros", que num processo há às centenas.
+  it('a folha de valores entra na frente da petição de recheio', () => {
+    const recheio = `sentença honorários juros correção monetária ${'sentença honorários juros '.repeat(10)}`
+    const paginas = [
+      pag('autos.pdf', 1, 'capa'),
+      ...Array.from({ length: 60 }, (_, i) => pag('autos.pdf', i + 2, recheio)),
+      pag('autos.pdf', 62, 'CONTADORIA JUDICIAL memória de cálculo homologação'),
+      pag('autos.pdf', 63, 'R$ 84.320,10 R$ 12.500,00 R$ 3.200,00 R$ 1.100,50 R$ 96.820,60 R$ 7.218,00'),
+      pag('autos.pdf', 64, 'R$ 45.000,00 R$ 2.000,00 R$ 500,00 R$ 47.500,00 R$ 9.000,00 R$ 1.234,56'),
+      pag('autos.pdf', 65, 'andamento atual'),
+    ]
+    // Teto apertado: cabe pouca coisa, e o que couber revela a preferência.
+    const r = montarTextoDoProcesso(paginas, 6_000)
+    expect(r.cortou).toBe(true)
+    expect(r.texto).toContain('R$ 84.320,10')
+    expect(r.texto).toContain('R$ 45.000,00')
+    // E o recheio, que só tem palavra, fica de fora do que sobrou.
+    expect(r.omitidas).toBeGreaterThan(40)
+  })
+
+  // O BÔNUS DE VIZINHANÇA: a memória de cálculo tem uma folha de rosto e as
+  // folhas de tabela em sequência. A de rosto pontua alto por palavra; as de
+  // tabela herdam metade dela e entram junto, que é como existem nos autos.
+  it('a página vizinha de uma que pontua alto herda parte da pontuação', () => {
+    const neutra = enche(30, 'n')
+    const paginas = [
+      pag('autos.pdf', 1, 'capa'),
+      ...Array.from({ length: 30 }, (_, i) => pag('autos.pdf', i + 2, neutra)),
+      pag('autos.pdf', 32, 'CONTADORIA cálculo homologação sentença honorários juros correção INSS IR'),
+      pag('autos.pdf', 33, neutra),
+      pag('autos.pdf', 34, 'fim'),
+    ]
+    const r = montarTextoDoProcesso(paginas, 3_200)
+    expect(r.texto).toContain('CONTADORIA')
+    // A vizinha da folha de rosto entra antes de uma neutra distante.
+    expect(r.texto).toContain('[p.33]')
+  })
 })

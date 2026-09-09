@@ -1774,7 +1774,15 @@ export function AnaliseRpvModal({
         // carrega até 60 páginas em base64, e duas cópias vivas na memória do
         // mesmo worker é o que produziu o HTTP 546 antes.
         setPasso('Lendo os valores e o questionário (duas leituras ao mesmo tempo)…')
-        const comum = { texto: t, job_id: jobId, notas_kommo: notasKommo, qualificacao: q.qualificacao, ...corpoCard }
+        // O CORTE DAS PÁGINAS VIAJA. Sem isto o servidor não tinha como saber
+        // que houve corte — ele procurava a marca do corte de UM documento — e o
+        // aviso "parte do conteúdo foi omitida" nunca chegava a quem analisa.
+        const comum = {
+          texto: t, job_id: jobId, notas_kommo: notasKommo, qualificacao: q.qualificacao,
+          texto_cortado: montado.cortou,
+          paginas_omitidas: montado.omitidas,
+          ...corpoCard,
+        }
         // Promise.all e não allSettled: sem o questionário a planilha sairia
         // com a aba jurídica em branco, e um documento assim é pior que
         // nenhum. Falhando uma, falha a análise, com a mensagem da que falhou.
