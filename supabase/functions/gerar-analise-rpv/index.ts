@@ -3233,6 +3233,7 @@ Deno.serve(async (req) => {
     }
     dados._houveCorte = houveCorte;
     dados._paginas_imagem = paginasImagem;
+    dados._tamanho_texto = textoDireto.length;
     dados._imagens_cortadas = cortouImagens;
     // AS PÁGINAS SUBIDAS SÓ SERVEM À LEITURA, que acabou: saem já. Antes a
     // limpeza ficava para o 'salvar', que não sabe quais arquivos são — e a
@@ -3497,7 +3498,7 @@ Deno.serve(async (req) => {
         (verbas.principal && (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) - (Number(dados.inss) || 0) - honorariosCalc > 0) ||
         (verbas.contratuais && honorariosCalc > 0) ||
         (verbas.sucumbenciais && _sucumbBrutosAutos > 0);
-      if (!temAlgo) return errorResponse(
+      const _semValor =
         `O card manda negociar ${dados.tipo_credito}, mas não localizei valor para nenhuma dessas verbas nos documentos. ` +
         `O que a leitura trouxe: bruto ${brl(Number(dados.bruto_total) || 0)}, IR ${brl(Number(dados.ir) || 0)}, ` +
         `INSS ${brl(Number(dados.inss) || 0)}, honorários contratuais ${brl(honorariosCalc)}, ` +
@@ -3506,10 +3507,30 @@ Deno.serve(async (req) => {
           ? `A IA disse ter tirado os números de: ${String(dados.origem_valores).slice(0, 300)} `
           : 'A IA não apontou documento nenhum como origem dos valores — não achou a peça, ou não a reconheceu. ') +
         `Na triagem, o valor do crédito saiu como ${brl(Number(dados._valor_qualificacao) || 0)}. ` +
+        `A leitura recebeu ${Number(dados._tamanho_texto) || 0} caracteres de texto e ${Number(dados._paginas_imagem) || 0} página(s) como imagem. ` +
         (verbas.principal
           ? 'Confira os cálculos anexados ao card: se a quantia estiver numa dessas outras verbas, é ela que está no campo errado.'
-          : 'Junte a peça que fixa os honorários (sentença, acórdão ou conta da contadoria), ou informe o percentual no formulário.'),
-      );
+          : 'Junte a peça que fixa os honorários (sentença, acórdão ou conta da contadoria), ou informe o percentual no formulário.');
+
+      if (!temAlgo) {
+        // CRÉDITO SEM VALOR NOS AUTOS É RESULTADO, não falha de sistema.
+        //
+        // O 400 jogava fora a análise inteira: a síntese, o questionário e os
+        // riscos ficavam prontos do outro lado e não chegavam a ninguém, e a
+        // pessoa terminava sem nada na tela para levar a uma diligência —
+        // justamente o desfecho que este caso pede. Reprovado com o motivo à
+        // vista, ela manda apurar em um clique.
+        //
+        // NO 'salvar' CONTINUA ERRO: ali já houve uma tela com o resultado, e
+        // gerar planilha de crédito sem valor é produzir um documento que
+        // afirma zero.
+        if (acao === 'analisar' || acao === null) {
+          return jsonResponse({
+            ok: true, reprovado: true, motivos: [_semValor], avisos: avisosQualif, qualificacao: null,
+          });
+        }
+        return errorResponse(_semValor);
+      }
     }
 
     // 3c. Prazo (T5) + datas — pela ESFERA DO ENTE DEVEDOR

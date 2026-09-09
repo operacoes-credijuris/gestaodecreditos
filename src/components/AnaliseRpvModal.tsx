@@ -1739,6 +1739,20 @@ export function AnaliseRpvModal({
           ...(doc.tempo ? [{ rotulo: 'questionário', ...doc.tempo }] : []),
         )
 
+        // A METADE DOS VALORES REPROVA SOZINHA — piso mínimo, crédito sem
+        // valor nos autos. Aí não há o que consolidar: `dados` não veio, e
+        // juntar `undefined` com o questionário produziria uma análise de
+        // valor zero com cara de resultado. O motivo pronto É o resultado.
+        //
+        // A SÍNTESE VAI JUNTO, da outra metade, que leu o processo inteiro: é
+        // ela que dá à janela de diligência o objeto do processo para a IA
+        // redigir. Sem isso a leitura toda se perderia por causa de um número.
+        if (preco.reprovado) {
+          const doDocumento = doc.dados_documento as { m1_sintese?: string } | undefined
+          setAtual({ ...preco, m1_sintese: doDocumento?.m1_sintese ?? null })
+          return
+        }
+
         // A CONSOLIDAÇÃO É DO SERVIDOR, e não daqui. Juntar os dois `dados` é
         // um spread de chaves que não se cruzam; o que NÃO é trivial é tudo o
         // que se deriva do conjunto — normalizar as respostas contra as listas
