@@ -567,7 +567,7 @@ export function PainelProcessosJudiciais({
         {pedeAdvogado && (
           <>
             {campo(alvos.cedenteEhOAdvogado ? 'Advogado (é quem cede)' : 'Advogado', advNome, setAdvNome)}
-            {campo('OAB', advOab, setAdvOab, 'Como nos autos: "GO 12345".')}
+            {campo('OAB', advOab, setAdvOab, 'Serve para achar o CPF dele — a busca de dívida é sempre por CPF.')}
             {campo('CPF do advogado', advCpf, setAdvCpf, undefined, true)}
           </>
         )}

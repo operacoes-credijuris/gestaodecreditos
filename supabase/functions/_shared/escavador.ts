@@ -8,8 +8,13 @@
 // processo", mas "que processos há desta pessoa". São buscas diferentes, e uma
 // delas a Judit não faz: a linha 11 do questionário pergunta pelo ADVOGADO, e
 // não existe CPF de advogado nos autos — só a OAB. A migration 0056 registrou a
-// lacuna com todas as letras ("o advogado costuma ser conhecido só pela OAB");
-// é o /advogado/processos daqui que a fecha.
+// lacuna com todas as letras ("o advogado costuma ser conhecido só pela OAB"), e
+// quem a fecha é /advogado/resumo, que troca a inscrição pelo CPF dele.
+//
+// A OAB NÃO É CHAVE DE BUSCA, é chave de identidade. Procurar processos POR OAB
+// devolve as causas que o advogado patrocina, e em nenhuma delas ele é parte —
+// nada ali é dívida dele. A diligência procura sempre por CPF ou CNPJ, do
+// advogado como de qualquer um.
 //
 // O QUE SAI DAQUI JÁ É LINHA DE dd_processo. O tradutor abaixo devolve
 // exatamente as colunas da tabela — polo, ha_cobranca, valor, estágio, risco —
@@ -401,7 +406,16 @@ export function traduzirProcesso(
 }
 
 /**
- * A lista inteira, sem repetir processo.
+ * A lista inteira: sem repetir processo, e sem os que não são dele.
+ *
+ * QUEM APARECE COMO TERCEIRO NÃO RESPONDE POR NADA ALI, e é por isso que esses
+ * processos saem em vez de entrarem com risco "nenhum". Terceiro aqui é o
+ * advogado da causa e o "outros" do Escavador — interessado, perito, quem foi
+ * intimado uma vez. Um advogado tem centenas de processos nessa condição: com
+ * eles dentro, a tabela da diligência vira o extrato de trabalho dele e a
+ * execução que de fato pesa fica na página três. Manter a linha para dizer "não
+ * é risco" não é honestidade, é ruído — a pergunta da diligência é "que dívida
+ * esta pessoa tem", e patrocinar uma causa não é dívida.
  *
  * De-duplicado por DÍGITO: o mesmo processo aparece mascarado num lugar e cru
  * noutro, e a chave única de dd_processo usa a mesma normalização.
@@ -415,6 +429,7 @@ export function apurarProcessos(
   for (const item of items || []) {
     const linha = traduzirProcesso(item, alvo)
     if (!linha) continue
+    if (linha.polo === 'TERCEIRO') continue
     const chave = digitosDoCnj(linha.numero_processo)
     if (vistos.has(chave)) continue
     vistos.add(chave)
@@ -600,26 +615,11 @@ export async function identidadeDoAdvogado(
   }
 }
 
-/**
- * Os processos que um advogado PATROCINA, por OAB.
- *
- * Não confundir com as dívidas dele: aqui ele é sempre o procurador, nunca a
- * parte, e todo resultado sai no polo TERCEIRO. Serve para conhecer a atuação
- * (volume, tribunais, se a banca é do ramo) — para a linha 11 do questionário o
- * caminho é `identidadeDoAdvogado` e depois `processosDoEnvolvido` com o CPF.
- */
-export function processosDoAdvogado(
-  chave: string,
-  oab: { uf: string; numero: string; tipo?: string },
-): Promise<BuscaEscavador> {
-  const q = new URLSearchParams({
-    oab_estado: semAcento(oab.uf).trim(),
-    oab_numero: soDigitos(oab.numero),
-    limit: String(POR_PAGINA),
-  })
-  if (oab.tipo) q.set('oab_tipo', oab.tipo)
-  return paginar(chave, `${BASE_ESCAVADOR}/advogado/processos?${q}`, 'advogado_encontrado')
-}
+// A BUSCA POR OAB SAIU DAQUI, e não é economia de código: ela não serve à
+// diligência. /advogado/processos devolve os processos que o advogado
+// PATROCINA, onde ele é procurador e nunca parte — nenhum deles é dívida dele.
+// A OAB continua entrando, mas só como IDENTIDADE: `identidadeDoAdvogado` a
+// troca pelo CPF, e a busca de dívidas é a mesma de qualquer outro sujeito.
 
 /**
  * QUANTOS processos existem, antes de pagar pela lista.

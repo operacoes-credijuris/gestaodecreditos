@@ -266,6 +266,59 @@ describe('apurarProcessos', () => {
   it('lista vazia não quebra', () => {
     expect(apurarProcessos([], {})).toEqual([])
   })
+
+  // QUEM APARECE COMO TERCEIRO NÃO RESPONDE POR NADA ALI, e por isso o processo
+  // sai da lista em vez de entrar com risco "nenhum". A pergunta da diligência é
+  // "que dívida esta pessoa tem", e patrocinar uma causa não é dívida.
+  it('processo em que o alvo é só o advogado não entra', () => {
+    const comoAdvogado = processo({
+      numero: '0800777-33.2019.8.09.0051',
+      envolvidos: [
+        parte({
+          cpf: CPF_OUTRO,
+          polo: 'ATIVO',
+          advogados: [{ nome: 'Dra. Beltrana', polo: 'ADVOGADO', cpf: CPF_CEDENTE }],
+        }),
+      ],
+    })
+    expect(apurarProcessos([comoAdvogado], { documento: CPF_CEDENTE })).toEqual([])
+  })
+
+  // O MESMO ADVOGADO, quando é ele o executado, continua entrando: a busca é
+  // pelo CPF dele, e o que importa é o polo em cada processo.
+  it('o advogado que é PARTE num processo entra', () => {
+    const comoParte = processo({
+      classe: 'EXECUCAO FISCAL',
+      envolvidos: [parte({ cpf: CPF_CEDENTE, polo: 'PASSIVO' })],
+    })
+    const lista = apurarProcessos([comoParte], { documento: CPF_CEDENTE })
+    expect(lista).toHaveLength(1)
+    expect(lista[0].risco).toBe('ALTO')
+  })
+
+  // O caso que a busca do advogado por CPF produz de verdade: centenas de
+  // causas patrocinadas e uma execução contra ele. Só a execução é diligência.
+  it('entre as causas que ele patrocina, sobra a dívida dele', () => {
+    const patrocinadas = [1, 2, 3].map((i) =>
+      processo({
+        numero: `080000${i}-11.2020.8.09.0051`,
+        envolvidos: [
+          parte({
+            cpf: CPF_OUTRO,
+            polo: 'ATIVO',
+            advogados: [{ nome: 'Dra. Beltrana', polo: 'ADVOGADO', cpf: CPF_CEDENTE }],
+          }),
+        ],
+      }),
+    )
+    const contraEle = processo({
+      numero: '0809999-99.2022.8.09.0051',
+      classe: 'EXECUCAO DE TITULO EXTRAJUDICIAL',
+      envolvidos: [parte({ cpf: CPF_CEDENTE, polo: 'PASSIVO' })],
+    })
+    const lista = apurarProcessos([...patrocinadas, contraEle], { documento: CPF_CEDENTE })
+    expect(lista.map((l) => l.numero_processo)).toEqual(['0809999-99.2022.8.09.0051'])
+  })
 })
 
 // ---------------------------------------------------------------------------
