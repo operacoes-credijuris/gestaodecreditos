@@ -332,3 +332,73 @@ describe('risco alto vira aviso da análise', () => {
     expect(nota).not.toMatch(/⚠️/)
   })
 })
+
+describe('a diligência lida e liberada devolve o "Não"', () => {
+  /**
+   * O BOTÃO "SEGUIR" DA JANELA DE DUE DILIGENCE, do lado do motor.
+   *
+   * O motor é conservador por construção: processo no polo passivo vira "Sim,
+   * tem dívida". Quem opera lê a lista e frequentemente conclui o contrário —
+   * execução de mil e seiscentos reais em juizado não ameaça um crédito de
+   * trinta mil. Sem um lugar para registrar esse julgamento, ele viraria
+   * omissão numa planilha que vai ao investidor.
+   *
+   * O QUE ELE NÃO FAZ é apagar a apuração: a coluna D continua listando os
+   * processos, com a marca do conflito. Esconder o que a busca achou seria pior
+   * do que não tê-la feito.
+   */
+  const comDivida = (liberado: boolean) =>
+    historicoDoCredito(
+      [apuracao({ id: 'h1', papel: 'CEDENTE', liberado_em: liberado ? '2026-09-09T18:00:00Z' : null })],
+      [proc({ historico_id: 'h1', numero_processo: '0001234-56.2020.8.09.0051', objeto: 'Execução fiscal' })],
+    )
+
+  it('sem liberar, a linha responde "Sim"', () => {
+    const r = aplicarDiligenciaNoM2({ '10': { resposta: 'Não', complemento: '' } }, comDivida(false))
+    expect(so(r.m2, '10')?.resposta).toBe('Sim')
+  })
+
+  it('liberada, a linha volta para "Não"', () => {
+    const r = aplicarDiligenciaNoM2({ '10': { resposta: 'Não', complemento: '' } }, comDivida(true))
+    expect(so(r.m2, '10')?.resposta).toBe('Não')
+  })
+
+  it('e a coluna D continua dizendo o que a diligência achou', () => {
+    const r = aplicarDiligenciaNoM2({ '10': { resposta: 'Não', complemento: '' } }, comDivida(true))
+    const d = so(r.m2, '10')?.complemento ?? ''
+    expect(d).toContain('0001234-56.2020.8.09.0051')
+    expect(d).toMatch(/A DUE DILIGENCE ENCONTROU DÍVIDA/)
+  })
+
+  it('o conflito vira aviso, e diz que veio da janela e não do chat', () => {
+    const r = aplicarDiligenciaNoM2({ '10': { resposta: 'Não', complemento: '' } }, comDivida(true))
+    expect(r.notas.join(' ')).toMatch(/quem revisou a diligência declarou/)
+    expect(r.notas.join(' ')).not.toMatch(/por pedido no chat/)
+  })
+
+  // A IA LENDO OS AUTOS NÃO É SOBRESCRITA PELA LIBERAÇÃO. Liberar é dizer que os
+  // processos DE FORA não impedem a cessão; o que os próprios autos mostram
+  // continua valendo.
+  it('liberar não apaga a dívida que a IA achou nos autos', () => {
+    const r = aplicarDiligenciaNoM2(
+      { '10': { resposta: 'Sim', complemento: 'penhora no rosto dos autos' } },
+      comDivida(true),
+    )
+    expect(so(r.m2, '10')?.resposta).toBe('Sim')
+  })
+
+  // Dois advogados, um liberado e o outro não: a célula fala dos dois, e
+  // liberar metade não a torna "Não".
+  it('com dois alvos, liberar um só não libera a linha', () => {
+    const hs = historicoDoCredito(
+      [
+        apuracao({ id: 'a1', papel: 'ADVOGADO', liberado_em: '2026-09-09T18:00:00Z' }),
+        apuracao({ id: 'a2', papel: 'ADVOGADO' }),
+      ],
+      [proc({ historico_id: 'a2', numero_processo: '0009999-11.2021.8.09.0051' })],
+    )
+    expect(hs[0].liberada).toBe(false)
+    const r = aplicarDiligenciaNoM2({ '11': { resposta: 'Não', complemento: '' } }, hs)
+    expect(so(r.m2, '11')?.resposta).toBe('Sim')
+  })
+})

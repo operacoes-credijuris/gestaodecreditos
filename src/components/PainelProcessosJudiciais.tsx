@@ -37,7 +37,7 @@
 // com os campos preenchidos e diz o que falta. O custo de cada chamada volta na
 // tela.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ExternalLink, RefreshCw, Search } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Info, RefreshCw, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { formatCpfCnpjInput, onlyDigits } from '@/lib/format'
@@ -57,6 +57,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { EmptyState, Loading, Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
+import { Tabs } from '@/components/ui/Tabs'
 import { useToast } from '@/components/ui/Toast'
 import type { ItemDeRisco } from '@/components/JanelaDeDesfecho'
 
@@ -137,7 +138,8 @@ export function PainelProcessosJudiciais({
    * card seguinte tem de apurar de novo, e o mesmo card não.
    */
   const jaEncadeou = useRef<number | null>(null)
-  const [avisosDaLeitura, setAvisosDaLeitura] = useState<string[]>([])
+  /** Qual titular está aberto na tabela. Vazio até a apuração chegar. */
+  const [abaDoTitular, setAbaDoTitular] = useState('')
 
   // ------------------------------------------------- de quem é o que compramos
   //
@@ -252,10 +254,10 @@ export function PainelProcessosJudiciais({
       .filter((t) => t.trim())
       .join('\n\n===== PRÓXIMO ARQUIVO =====\n\n')
     if (!texto.trim()) {
-      setAvisosDaLeitura([
+      toast.error(
         'Os anexos deste card não têm texto para ler — processo digitalizado só tem imagem. ' +
           'Preencha os titulares à mão.',
-      ])
+      )
       return []
     }
     setLendoTitulares(true)
@@ -282,7 +284,11 @@ export function PainelProcessosJudiciais({
         if (doAdvogado.oab) setAdvOab(doAdvogado.oab)
         if (doAdvogado.documento) setAdvCpf(formatCpfCnpjInput(doAdvogado.documento))
       }
-      setAvisosDaLeitura(r.avisos ?? [])
+      // A LACUNA VAI PARA O TOAST, e não para uma caixa fixa sobre a tabela.
+      // Ela é do MOMENTO da leitura; permanente, repetiria a mesma frase em toda
+      // reabertura do card e empurraria a tabela para baixo. O registro que fica
+      // é a observação em dd_historico, que a análise lê.
+      for (const a of r.avisos ?? []) toast.error(a)
       return achados
     } catch (e) {
       setErro((e as Error).message)
@@ -429,16 +435,6 @@ export function PainelProcessosJudiciais({
 
   // ------------------------------------------------------------- a tabela
 
-  /** De quem é cada processo — só interessa quando há mais de um titular. */
-  const deQuem = useMemo(
-    () =>
-      new Map(
-        apuracoes.map((a) => [a.id, a.papel === 'ADVOGADO' ? 'advogado' : 'cedente'] as const),
-      ),
-    [apuracoes],
-  )
-  const maisDeUmTitular = apuracoes.length > 1
-
   /** O que pesa primeiro: quem abre a tabela procura a execução em curso. */
   const processosOrdenados = useMemo(() => {
     const peso = (r: unknown) => (r === 'ALTO' ? 0 : r === 'ATENCAO' ? 1 : 2)
@@ -446,24 +442,19 @@ export function PainelProcessosJudiciais({
   }, [processos])
 
   /**
-   * O QUE A APURAÇÃO NÃO CONSEGUIU, num lugar só.
+   * A aba aberta acompanha o que existe.
    *
-   * A lacuna é a diferença entre "procurei e não achei" e "não procurei", e
-   * some da tela se ninguém a escrever. Vem de dois lugares — o que a leitura
-   * dos autos não achou e o que a busca ressalvou (nome sem CPF, lista
-   * truncada) — e não faz sentido separá-los para quem lê.
+   * Sem isto, a aba escolhida continuaria apontando para a apuração do card
+   * ANTERIOR depois de trocar de crédito, e a tabela abriria vazia sobre uma
+   * lista cheia. Reapurar também troca os ids: a apuração é reescrita.
    */
-  const avisos = useMemo(() => {
-    const dasApuracoes = apuracoes
-      .flatMap((a) => [
-        a.status === 'FALHA'
-          ? `Não apurei ${a.papel === 'ADVOGADO' ? 'o advogado' : 'o cedente'}: ${a.observacao ?? 'falha na consulta'}`
-          : null,
-        a.status === 'APURADO' ? a.observacao : null,
-      ])
-      .filter((x): x is string => Boolean(x))
-    return [...new Set([...avisosDaLeitura, ...dasApuracoes])]
-  }, [apuracoes, avisosDaLeitura])
+  useEffect(() => {
+    if (apuracoes.length === 0) return
+    if (apuracoes.some((a) => a.id === abaDoTitular)) return
+    setAbaDoTitular(apuracoes[0].id)
+  }, [apuracoes, abaDoTitular])
+
+
 
   /**
    * Os processos apurados, no formato que a janela do desfecho marca.
@@ -503,15 +494,30 @@ export function PainelProcessosJudiciais({
 
   if (carregando) return <Loading label="Lendo a diligência…" />
 
-  /** Um campo de identidade, que é tudo o que esta tela pede de entrada. */
+  /**
+   * A dica que não cabe embaixo do campo.
+   *
+   * NUM "i" AO LADO DO RÓTULO, e não numa linha de texto cinza sob cada caixa:
+   * são três campos numa janela que já tem tabela, e três linhas de explicação
+   * empurravam a tabela — o conteúdo — para fora da vista. Quem precisa da
+   * explicação passa o mouse; quem já sabe não paga por ela.
+   */
+  const comDica = (rotulo: string, dica: string) => (
+    <span className="inline-flex items-center gap-1">
+      {rotulo}
+      <span title={dica} aria-label={dica} className="cursor-help text-slate-400">
+        <Info className="h-3.5 w-3.5" />
+      </span>
+    </span>
+  )
+
   const campo = (
-    rotulo: string,
+    rotulo: React.ReactNode,
     valor: string,
     onChange: (v: string) => void,
-    dica?: string,
     documento = false,
   ) => (
-    <Field label={rotulo} hint={dica}>
+    <Field label={rotulo}>
       <Input
         value={valor}
         disabled={apurando || lendoTitulares}
@@ -520,6 +526,25 @@ export function PainelProcessosJudiciais({
       />
     </Field>
   )
+
+  /** Refazer a busca, e o que ela custou — no fim da última linha de campos. */
+  const refazer = (
+    <div className="flex items-end justify-end gap-3 pb-1">
+      {custo && <span className="text-xs text-slate-500">Custo: {custo}</span>}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => void apurar()}
+        loading={apurando}
+        disabled={lendoTitulares || Boolean(passo)}
+        icon={<Search className="h-4 w-4" />}
+      >
+        {apuracoes.length > 0 ? 'Reapurar' : 'Apurar'}
+      </Button>
+    </div>
+  )
+
+  const daAba = processosOrdenados.filter((x) => x.historico_id === abaDoTitular)
 
   return (
     <div className="space-y-4">
@@ -544,39 +569,46 @@ export function PainelProcessosJudiciais({
         </p>
       )}
 
-      {/* OS CAMPOS DO TITULAR, e só eles.
-          Eles chegam preenchidos pela leitura dos autos; ficam editáveis porque
-          é aqui que se corrige um homônimo ou um CPF que o PDF trouxe cortado —
-          e porque, corrigido o campo, o Reapurar é o que refaz a busca. Quais
-          campos aparecem depende da verba cedida: numa cessão só de honorários
-          não há cedente a apurar, e um campo de cedente ali seria um convite a
-          apurar quem não é parte do negócio. */}
-      <div className="grid gap-3 sm:grid-cols-2">
+      {/* OS CAMPOS DO TITULAR, e só eles. Chegam preenchidos pela leitura dos
+          autos e ficam editáveis porque é aqui que se corrige um homônimo ou um
+          CPF que o PDF trouxe cortado — e, corrigido o campo, o Reapurar refaz a
+          busca. Quais campos aparecem depende da verba cedida. */}
+      <div className="grid gap-3 sm:grid-cols-3">
         {pedeCedente && (
           <>
             {campo('Cedente', cedenteNome, setCedenteNome)}
             {campo(
-              'CPF do cedente',
+              comDica('CPF do cedente', 'Sem CPF a busca vai pelo nome, e homônimo entra.'),
               cedenteCpf,
               setCedenteCpf,
-              'Sem CPF a busca vai pelo nome, e homônimo entra.',
               true,
             )}
+            {!pedeAdvogado && refazer}
           </>
         )}
         {pedeAdvogado && (
           <>
-            {campo(alvos.cedenteEhOAdvogado ? 'Advogado (é quem cede)' : 'Advogado', advNome, setAdvNome)}
-            {campo('OAB', advOab, setAdvOab, 'Serve para achar o CPF dele — a busca de dívida é sempre por CPF.')}
-            {campo('CPF do advogado', advCpf, setAdvCpf, undefined, true)}
+            {campo(
+              alvos.cedenteEhOAdvogado ? 'Advogado (é quem cede)' : 'Advogado',
+              advNome,
+              setAdvNome,
+            )}
+            {campo(
+              comDica('OAB', 'Serve para achar o CPF dele — a busca de dívida é sempre por CPF.'),
+              advOab,
+              setAdvOab,
+            )}
+            {campo('CPF do advogado', advCpf, setAdvCpf, true)}
+            <div className="hidden sm:block" />
+            <div className="hidden sm:block" />
+            {refazer}
           </>
         )}
       </div>
 
-      {/* AS SUGESTÕES SÓ APARECEM QUANDO O CAMPO ESTÁ VAZIO — ou seja, quando a
-          leitura dos autos não achou o documento. No caminho normal a janela
-          não as mostra; elas são a saída para quando a leitura falha, e não uma
-          lista para conferir de rotina. */}
+      {/* AS SUGESTÕES SÓ APARECEM COM O CAMPO VAZIO — ou seja, quando a leitura
+          dos autos não achou o documento. No caminho normal a janela não as
+          mostra; elas são a saída para quando a leitura falha. */}
       {pedeCedente && !onlyDigits(cedenteCpf) && cpfsSugeridos.length > 0 && (
         <div>
           <p className="text-xs text-slate-500">
@@ -620,51 +652,35 @@ export function PainelProcessosJudiciais({
         </div>
       )}
 
-      {/* O QUE A APURAÇÃO NÃO CONSEGUIU, dito em voz alta: busca pelo nome,
-          lista truncada, titular não identificado. A lacuna é a diferença entre
-          "procurei e não achei" e "não procurei", e some da tela se ninguém a
-          escrever. */}
-      {avisos.length > 0 && (
-        <ul className="space-y-1 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
-          {avisos.map((a) => (
-            <li key={a} className="text-xs text-amber-800">
-              {a}
-            </li>
-          ))}
-        </ul>
+      {/* UMA TABELA POR TITULAR, em abas.
+          A coluna "de quem" repetia "cedente" em vinte linhas seguidas para
+          dizer o que o cabeçalho diz uma vez — e, com os dois titulares, misturava
+          na mesma lista duas perguntas diferentes: a dívida do cedente e a do
+          advogado respondem linhas distintas do questionário. Com um titular só
+          a régua de abas não aparece: uma aba solitária não é uma escolha. */}
+      {apuracoes.length > 1 && (
+        <Tabs
+          items={apuracoes.map((a) => ({
+            key: a.id,
+            label: a.papel === 'ADVOGADO' ? 'Advogado' : a.papel === 'CEDENTE' ? 'Cedente' : a.papel,
+            count: processos.filter((x) => x.historico_id === a.id).length,
+          }))}
+          value={abaDoTitular}
+          onChange={setAbaDoTitular}
+        />
       )}
 
-      {!passo && !lendoPdf && (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void apurar()}
-            loading={apurando}
-            disabled={lendoTitulares}
-            icon={<Search className="h-4 w-4" />}
-          >
-            {apuracoes.length > 0 ? 'Reapurar' : 'Apurar no Escavador'}
-          </Button>
-          {custo && <span className="text-xs text-slate-500">Custo desta consulta: {custo}</span>}
-        </div>
-      )}
-
-      {/* A TABELA, UMA SÓ. Antes eram uma por titular apurado, com cabeçalho de
-          seção cada uma; com um titular — que é o caso normal — a moldura era
-          maior que o conteúdo. A coluna "de quem" só aparece quando há mais de
-          um, que é quando a pergunta existe. */}
-      {processos.length === 0 ? (
+      {daAba.length === 0 ? (
         <EmptyState
           title={
-            apuracoes.some((a) => a.status === 'APURADO')
-              ? 'Nenhum processo em nome dos titulares'
+            apuracoes.some((a) => a.id === abaDoTitular && a.status === 'APURADO')
+              ? 'Nenhum processo em nome dele'
               : 'Nada apurado ainda'
           }
           description={
-            apuracoes.some((a) => a.status === 'APURADO')
+            apuracoes.some((a) => a.id === abaDoTitular && a.status === 'APURADO')
               ? 'A busca correu e não achou processo nenhum além do próprio crédito.'
-              : 'Confira os campos acima e clique em Apurar no Escavador.'
+              : 'Confira os campos acima e clique em Apurar.'
           }
         />
       ) : (
@@ -673,50 +689,49 @@ export function PainelProcessosJudiciais({
             <TR>
               <TH>Processo</TH>
               <TH>Objeto</TH>
-              {maisDeUmTitular && <TH>De quem</TH>}
               <TH>Polo</TH>
               <TH className="text-right">Valor da causa</TH>
               <TH>Estágio</TH>
-              <TH>Risco para a cessão</TH>
+              <TH>Risco</TH>
             </TR>
           </THead>
           <TBody>
-            {processosOrdenados.map((p) => (
-              <TR key={p.id}>
+            {daAba.map((x) => (
+              <TR key={x.id}>
                 <TD className="whitespace-nowrap font-mono text-xs">
-                  {p.url_fonte ? (
+                  {x.url_fonte ? (
                     <a
-                      href={p.url_fonte}
+                      href={x.url_fonte}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1 text-brand-700 hover:underline"
                     >
-                      {p.numero_processo}
+                      {x.numero_processo}
                       <ExternalLink className="h-3 w-3" />
                     </a>
                   ) : (
-                    p.numero_processo
+                    x.numero_processo
                   )}
-                  {p.tribunal && <span className="block text-slate-400">{p.tribunal}</span>}
+                  {x.tribunal && <span className="block text-slate-400">{x.tribunal}</span>}
                 </TD>
-                <TD>{p.objeto ?? '—'}</TD>
-                {maisDeUmTitular && (
-                  <TD className="text-xs">{deQuem.get(p.historico_id) ?? '—'}</TD>
-                )}
+                <TD>{x.objeto ?? '—'}</TD>
                 <TD>
-                  <Badge tone={p.polo === 'PASSIVO' ? 'orange' : 'gray'} size="sm">
-                    {p.polo === 'PASSIVO' ? 'réu' : p.polo === 'ATIVO' ? 'autor' : 'terceiro'}
+                  <Badge tone={x.polo === 'PASSIVO' ? 'orange' : 'gray'} size="sm">
+                    {x.polo === 'PASSIVO' ? 'réu' : x.polo === 'ATIVO' ? 'autor' : 'terceiro'}
                   </Badge>
                 </TD>
-                <TD className="text-right tabular-nums">{brl(p.valor_cobrado)}</TD>
-                <TD className="text-xs">{p.estagio ?? '—'}</TD>
+                <TD className="text-right tabular-nums">{brl(x.valor_cobrado)}</TD>
+                <TD className="text-xs">{x.estagio ?? '—'}</TD>
+                {/* O SELO, SEM O PARÁGRAFO. O motivo do risco continua no banco e
+                    vai para a anotação quando a IA redige a recusa; na tabela ele
+                    triplicava a altura de cada linha e enterrava as colunas que se
+                    comparam de relance. Fica no title, para quem quiser. */}
                 <TD>
-                  <Badge tone={TOM_DO_RISCO[String(p.risco)] ?? 'gray'} size="sm">
-                    {p.risco === 'NENHUM' ? 'sem risco' : String(p.risco).toLowerCase()}
-                  </Badge>
-                  {p.risco_motivo && (
-                    <p className="mt-1 text-xs text-slate-600">{p.risco_motivo}</p>
-                  )}
+                  <span title={x.risco_motivo ?? undefined}>
+                    <Badge tone={TOM_DO_RISCO[String(x.risco)] ?? 'gray'} size="sm">
+                      {x.risco === 'NENHUM' ? 'sem risco' : String(x.risco).toLowerCase()}
+                    </Badge>
+                  </span>
                 </TD>
               </TR>
             ))}

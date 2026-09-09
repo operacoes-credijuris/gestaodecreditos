@@ -1988,6 +1988,17 @@ export default function AnaliseCredito() {
           // diligência, achar o card na lista e abrir outra coisa seria pedir
           // para decidir com a lista de processos fora da vista.
           acoes={abaAtual?.acoes ?? []}
+          // SEGUIR É O QUE DESTRAVA O TRABALHO SEGUINTE, e qual é ele depende do
+          // funil: em RPV a análise precifica, no precatório interno a jurídica
+          // opina. Onde não há análise — a trilha dos Fundos, cuja opinião é do
+          // fundo — Seguir apenas libera a diligência e fecha a janela.
+          onSeguir={
+            botoesDoCard === 'rpv'
+              ? () => onAnalisar(ddLead)
+              : botoesDoCard === 'precatorio'
+                ? () => onAnaliseJuridica(ddLead)
+                : undefined
+          }
           onMover={async (statusId, comentario) => {
             await moverComNota(ddLead.kommo_lead_id, statusId, comentario)
             // O card saiu desta aba: manter a diligência aberta seria oferecer

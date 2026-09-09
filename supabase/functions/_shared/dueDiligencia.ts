@@ -42,6 +42,17 @@ export interface ApuracaoDD {
   fonte?: string | null
   apurado_em?: string | null
   observacao?: string | null
+  /**
+   * Quando alguém LEU a apuração e declarou que ela não impede a cessão.
+   *
+   * É o botão "Seguir" da janela de due diligence (migração 0062). O motor
+   * conservador responde "Sim, tem dívida" para qualquer processo no polo
+   * passivo; quem opera lê a lista e frequentemente conclui o contrário — uma
+   * execução de mil e seiscentos reais em juizado não ameaça um crédito de
+   * trinta mil. Sem um lugar para registrar esse julgamento, ele viraria
+   * omissão numa planilha que vai ao investidor.
+   */
+  liberado_em?: string | null
 }
 
 /** Um processo achado pela apuração (dd_processo). */
@@ -63,6 +74,14 @@ export interface HistoricoDePapel {
   linha: '10' | '11'
   /** Alguém de fato procurou. Só `status = 'APURADO'` conta. */
   apurada: boolean
+  /**
+   * Alguém LEU o que a busca achou e disse que não impede a cessão.
+   *
+   * Faz a linha responder "Não" mesmo com processo no polo passivo — e a coluna
+   * D continua listando os processos, com a marca do conflito. É a mesma regra
+   * da linha travada pelo chat, por outra porta.
+   */
+  liberada: boolean
   /** Houve tentativa e ela falhou — diferente de nunca ter sido pedida. */
   falhou: boolean
   quem: string
@@ -176,6 +195,9 @@ export function historicoDoCredito(
       // Vários advogados: só vale como apurado quando TODOS foram. Um apurado e
       // outro pendente escreveria "Não" numa célula que fala dos dois.
       apurada: status.length > 0 && status.every((s) => s === 'APURADO'),
+      // TODOS, e não algum: com dois advogados, liberar um e deixar o outro
+      // pendente escreveria "Não" numa célula que fala dos dois.
+      liberada: minhas.length > 0 && minhas.every((a) => Boolean(a.liberado_em)),
       falhou: status.some((s) => s === 'FALHA'),
       quem: minhas
         .map((a) => [a.nome, a.oab ? `OAB ${a.oab}` : null].filter(Boolean).join(', '))
@@ -260,6 +282,10 @@ export interface ResultadoDiligenciaM2 {
  * desmontar têm de usar a MESMA grafia, daí as constantes.
  */
 const MARCA_DILIGENCIA = 'Due diligence: '
+// A GRAFIA É CHAVE DE IDEMPOTÊNCIA, não texto: textoDosAutos a procura para
+// devolver a célula ao que a IA escreveu. Trocar uma palavra aqui faz a passada
+// seguinte não reconhecer o próprio resultado e embrulhá-lo de novo, e as
+// células que já saíram com a grafia antiga passam a crescer a cada ação.
 const MARCA_CONFLITO =
   '⚠️ A DUE DILIGENCE ENCONTROU DÍVIDA (resposta "Não" mantida a pedido de quem revisou) — '
 const MARCA_AUTOS = 'nos autos: '
@@ -332,7 +358,12 @@ export function aplicarDiligenciaNoM2(
 
     const atual = (saida[h.linha] ?? {}) as { resposta?: unknown; complemento?: unknown }
     const iaDisseSim = semAcento(String(atual.resposta ?? '').trim()).startsWith('sim')
-    const travada = travas.has(h.linha)
+    // DUAS PORTAS PARA A MESMA COISA: a linha travada pelo chat e a diligência
+    // liberada na janela ("Seguir"). Nas duas, quem responde a coluna B é a
+    // pessoa, não a apuração — ela está com o processo aberto e pode saber o que
+    // a busca não sabe: que a execução é de mil reais em juizado, que a dívida
+    // já foi quitada, que o homônimo não é ele.
+    const travada = travas.has(h.linha) || h.liberada
     // Linha travada pelo chat: a coluna B é de quem revisou. Sem trava, é a
     // união — "Sim" se a diligência OU os autos acharam.
     const resposta = travada
@@ -375,7 +406,10 @@ export function aplicarDiligenciaNoM2(
     if (contradiz) {
       notas.push(
         `⚠️ LINHA ${h.linha} EM CONFLITO: a due diligence achou dívida ${qual} e a resposta foi mantida em "Não" ` +
-        'por pedido no chat. A coluna D da planilha registra os processos encontrados — confira antes de assinar.',
+          (h.liberada
+            ? 'porque quem revisou a diligência declarou que os processos não impedem a cessão.'
+            : 'por pedido no chat.') +
+          ' A coluna D da planilha registra os processos encontrados — confira antes de assinar.',
       )
     }
 

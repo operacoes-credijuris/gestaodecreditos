@@ -22,6 +22,8 @@
 // perder um formulário meio preenchido, e `display:none` também tira os campos
 // do foco, então o focus trap do modal continua correto.
 import { useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { useToast } from '@/components/ui/Toast'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
@@ -46,6 +48,7 @@ export function DueDiligence({
   comCertidoes,
   acoes,
   onMover,
+  onSeguir,
 }: {
   leadId: number
   /** O título do card: é dele que sai QUAIS verbas estão sendo cedidas. */
@@ -78,6 +81,15 @@ export function DueDiligence({
    */
   acoes?: AcaoTela[]
   onMover?: (statusId: number, comentario: string) => Promise<void>
+  /**
+   * O que vem depois de "Seguir": a análise do crédito.
+   *
+   * A janela não sabe QUAL análise é — em RPV é o motor que precifica, no
+   * precatório interno é a jurídica, e na trilha dos Fundos não há nenhuma.
+   * Quem sabe é a tela que abriu esta janela. Sem ela, "Seguir" só libera e
+   * fecha, que continua sendo uma decisão inteira.
+   */
+  onSeguir?: () => void
 }) {
   const [aba, setAba] = useState<Aba>(comCertidoes ? 'certidoes' : 'processos')
   // Reportado PELO painel: só ele sabe que há formulário mexido e não salvo, e
@@ -95,6 +107,43 @@ export function DueDiligence({
    * dentro não dispara a cada render.
    */
   const [itens, setItens] = useState<ItemDeRisco[]>([])
+  const [seguindo, setSeguindo] = useState(false)
+  const toast = useToast()
+
+  /**
+   * SEGUIR É UMA DECISÃO, e é por isso que ela fica gravada.
+   *
+   * O motor de RPV é conservador por construção: qualquer processo em que o
+   * titular esteja no polo passivo vira "Sim, tem dívida" nas linhas 10 e 11 do
+   * questionário. Quem lê a lista frequentemente conclui o contrário — a
+   * execução é de mil e seiscentos reais, está em juizado, e o crédito é de
+   * trinta mil. Clicar em Seguir é declarar isso, e `liberado_em` é onde a
+   * declaração fica (migração 0062): a partir dela as duas linhas voltam a
+   * responder "Não".
+   *
+   * NÃO APAGA A APURAÇÃO. A coluna D da planilha continua listando os processos,
+   * com a marca de que o "Não" foi decisão de quem revisou — esconder o que a
+   * busca achou seria pior do que não tê-la feito.
+   */
+  async function seguir() {
+    setSeguindo(true)
+    try {
+      const { error } = await supabase
+        .from('dd_historico')
+        .update({ liberado_em: new Date().toISOString() })
+        .eq('kommo_lead_id', leadId)
+        // O check da 0062 recusa liberado sem apuração: só se libera o que foi
+        // olhado, e olhar exige que a busca tenha corrido.
+        .eq('status', 'APURADO')
+      if (error) throw new Error(error.message)
+      onSeguir?.()
+      onClose()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSeguindo(false)
+    }
+  }
 
   /**
    * A IA redige o desfecho a partir dos processos marcados.
@@ -130,17 +179,27 @@ export function DueDiligence({
               diferente, e enfileirá-los juntos faria "Fechar" parecer a quarta
               opção de uma decisão. */}
           <div className="flex flex-wrap items-center gap-2">
-            {(acoes ?? []).map((a) => (
-              <Button
-                key={a.statusId}
-                size="sm"
-                variant={a.variant}
-                onClick={() => setDesfecho(a)}
-                disabled={!onMover}
-              >
-                {a.label}
-              </Button>
-            ))}
+            {/* SEGUIR NÃO MOVE O CARD, e por isso não sai da lista de ações da
+                etapa: "Enviar para validação" e "Aprovar" são passos do funil,
+                decididos com a análise à frente. Aqui a pergunta é outra — os
+                processos que a diligência achou impedem a cessão? —, e a
+                resposta "não impedem" é o que destrava o trabalho seguinte. */}
+            <Button size="sm" onClick={seguir} loading={seguindo}>
+              Seguir
+            </Button>
+            {(acoes ?? [])
+              .filter((a) => a.papel === 'diligenciar' || a.papel === 'reprovar')
+              .map((a) => (
+                <Button
+                  key={a.statusId}
+                  size="sm"
+                  variant={a.variant}
+                  onClick={() => setDesfecho(a)}
+                  disabled={!onMover || seguindo}
+                >
+                  {a.label}
+                </Button>
+              ))}
           </div>
           <Button variant="ghost" onClick={onClose}>
             Fechar

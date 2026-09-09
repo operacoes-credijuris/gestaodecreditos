@@ -2327,7 +2327,7 @@ async function lerDiligencia(
     const [{ data: apuracoes, error: e1 }, doisProcessos] = await Promise.all([
       sb
         .from('dd_historico')
-        .select('id, papel, nome, documento, oab, status, fonte, apurado_em, observacao')
+        .select('id, papel, nome, documento, oab, status, fonte, apurado_em, observacao, liberado_em')
         .eq('kommo_lead_id', leadId),
       sb
         .from('dd_processo')
