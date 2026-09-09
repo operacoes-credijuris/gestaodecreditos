@@ -23,12 +23,23 @@ export function parseNumeroFlex(num: string): number | null {
   return isNaN(v) ? null : v;
 }
 
+/**
+ * 'DD/MM/AAAA' -> Date, ou null.
+ *
+ * CONFERE O QUE O CONSTRUTOR FEZ, porque ele ROLA: `new Date(2024, 1, 31)` é
+ * 02/03/2024, e `new Date(2024, 98, 99)` é uma data válida anos à frente. As
+ * duas passavam em `isNaN(getTime())` e alimentavam o corte goiano de
+ * 15/11/2025 e as datas do prazo — uma data impossível nos autos virava uma
+ * data plausível na conta, sem um aviso.
+ */
 export function parseDataBR(s: any): Date | null {
   if (typeof s !== 'string') return null;
   const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
   if (!m) return null;
-  const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
-  return isNaN(d.getTime()) ? null : d;
+  const dia = Number(m[1]), mes = Number(m[2]), ano = Number(m[3]);
+  const d = new Date(ano, mes - 1, dia);
+  if (isNaN(d.getTime())) return null;
+  return d.getDate() === dia && d.getMonth() === mes - 1 && d.getFullYear() === ano ? d : null;
 }
 export const ehSim = (v: any) => typeof v === 'string' && v.trim().toUpperCase().startsWith('SIM');
 
@@ -61,7 +72,10 @@ export function ehEstadoDeGoias(...candidatos: unknown[]): boolean {
       /fazenda\s+(publica\s+)?(d[eo]\s+estado\s+d[eo]\s+)?goias/.test(t) ||
       /goiasprev|goias\s+previd/.test(t) ||
       /\bipasgo\b/.test(t) ||
-      /detran[\s\-\/]*go\b|departamento\s+estadual\s+de\s+transito\s+de\s+goias/.test(t) ||
+      // "GO" OU "GOIAS": era `detran[\s\-\/]*go\b`, e a fronteira depois de "go"
+      // recusava "DETRAN GOIÁS" escrito por extenso — que é como a autarquia
+      // aparece em metade dos requisitórios.
+      /detran[\s\-\/]*go(ias)?\b/.test(t) || /departamento\s+estadual\s+de\s+transito\s+de\s+goias/.test(t) ||
       /\bagr\b.*goi|agencia\s+goiana/.test(t) ||
       /\bagehab\b|agrodefesa|\bgoinfra\b/.test(t) ||
       /\bueg\b|universidade\s+estadual\s+de\s+goias/.test(t) ||

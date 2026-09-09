@@ -166,10 +166,22 @@ describe('as leituras de que o portão depende', () => {
 
   it('parseDataBR devolve null, e não Invalid Date', () => {
     expect(parseDataBR('15/11/2025')?.getFullYear()).toBe(2025)
-    expect(parseDataBR('31/02/2025')).not.toBe(null) // 31/02 rola para março
     expect(parseDataBR('NÃO LOCALIZADO')).toBe(null)
     expect(parseDataBR(null)).toBe(null)
     expect(parseDataBR(42)).toBe(null)
+  })
+
+  // DATA QUE "ROLA" NÃO É DATA. O construtor de Date aceita 31/02 e devolve
+  // 02/03; aceita 99/99 e devolve uma data anos à frente. As duas passavam em
+  // `isNaN(getTime())` e alimentavam o corte goiano de 15/11/2025 e as datas do
+  // prazo — data impossível nos autos virando data plausível na conta.
+  it('data impossível é null, e não a data para onde ela rolaria', () => {
+    expect(parseDataBR('31/02/2025')).toBe(null)
+    expect(parseDataBR('30/02/2024')).toBe(null)
+    expect(parseDataBR('99/99/2024')).toBe(null)
+    expect(parseDataBR('00/01/2025')).toBe(null)
+    // E o dia 29 de fevereiro de ano bissexto continua valendo.
+    expect(parseDataBR('29/02/2024')?.getMonth()).toBe(1)
   })
 
   it('ehSim só aceita texto começando por SIM', () => {
@@ -190,6 +202,15 @@ describe('as leituras de que o portão depende', () => {
     ]) {
       expect(ehEstadoDeGoias(ente)).toBe(true)
     }
+  })
+
+  // "GO" OU "GOIAS": a fronteira depois de "go" recusava a forma por extenso,
+  // que é como a autarquia aparece em metade dos requisitórios.
+  it('DETRAN escrito por extenso também é o Estado', () => {
+    expect(ehEstadoDeGoias('DETRAN GOIÁS')).toBe(true)
+    expect(ehEstadoDeGoias('Detran Goias')).toBe(true)
+    expect(ehEstadoDeGoias('DETRAN/GO')).toBe(true)
+    expect(ehEstadoDeGoias('Departamento Estadual de Trânsito de Goiás')).toBe(true)
   })
 
   it('município goiano fica fora', () => {

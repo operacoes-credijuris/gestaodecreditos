@@ -18,3 +18,16 @@ comment on column public.kommo_leads.oportunidade is
   'Entrada do resumo da oportunidade (ficha do crédito, link do Drive, prazo aferido), gravada pelo salvar da análise. NÃO INCLUIR no upsert do kommo-sync: o sync espelha o Kommo, que não conhece este campo, e um upsert que o mencione o apagaria a cada sincronização.';
 
 notify pgrst, 'reload schema';
+
+-- O QUE SE PERDE QUANDO O CARD SAI DO FUNIL, e e decisao consciente.
+--
+-- O kommo-sync APAGA a linha do espelho de quem deixou os dois funis, e o
+-- DELETE leva com ela estas duas colunas — que o Kommo nao conhece e que
+-- ninguem mais tem. Card que sai e volta renasce sem o atalho do Drive e sem o
+-- resumo da oportunidade: o titulo dele perde o link e o Aprovar de Validacao
+-- abre vazio ate a proxima analise salva.
+--
+-- ACEITO PORQUE O ESPELHO E CACHE e a perda e reparavel rodando a analise de
+-- novo — ao contrario de marcar a linha como "fora do funil", que deixaria
+-- crescer indefinidamente uma tabela que hoje se limpa sozinha. Fica escrito
+-- aqui para quem for procurar o resumo que desapareceu.

@@ -100,8 +100,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 type ResultadoAnalise = {
   reprovado?: boolean
   motivo?: string
-  relatorio_due_diligence?: string | null
-  due_diligence_url?: string | null
+
   drive_file_url?: string | null
   drive_folder_url?: string | null
   aviso?: string | null
@@ -555,12 +554,19 @@ function JanelaDeMensagem({
 }) {
   const [mensagem, setMensagem] = useState(sugestao)
   const [erro, setErro] = useState<string | null>(null)
+  // APROVAR SEM RESUMO É UM CARD SEM ANÁLISE SALVA.
+  //
+  // O resumo da oportunidade é gravado no card pelo 'salvar' da análise. Sem
+  // ele, a janela de Aprovar abria com o campo VAZIO e o placeholder "Opcional",
+  // e o Confirmar liberado: o card subia para Proposta sem uma linha sobre o que
+  // se está comprando — que é justamente o que quem recebe precisa ler.
+  const semResumo = acao.statusId === ST_PROPOSTA && !lead.oportunidade
   // `ocupado` é o `isPending` da MOVIMENTAÇÃO, e ela é só a primeira metade: a
   // nota vem depois, noutra requisição. Nessa fresta o Confirmar voltava a
   // ficar habilitado e sem spinner, e um segundo clique disparava tudo de novo.
   const [enviando, setEnviando] = useState(false)
   const trabalhando = ocupado || enviando
-  const podeEnviar = !trabalhando && (!exigeMotivo || mensagem.trim().length >= 10)
+  const podeEnviar = !trabalhando && (!(exigeMotivo || semResumo) || mensagem.trim().length >= 10)
 
   return (
     <Modal
@@ -595,7 +601,14 @@ function JanelaDeMensagem({
           </Button>
           <button
             type="button"
-            onClick={onFechar}
+            // A MESMA CHECAGEM DO X, DO OVERLAY E DO ESC. O `dirty` do Modal só
+            // protege aquelas três portas; este botão chamava `onFechar` direto e
+            // descartava o texto digitado sem perguntar — e é o botão que está
+            // mais perto do cursor de quem acabou de escrever.
+            onClick={() => {
+              if (mensagem.trim() !== sugestao.trim() && !window.confirm('Descartar alterações não salvas?')) return
+              onFechar()
+            }}
             disabled={trabalhando}
             className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
           >
@@ -618,6 +631,13 @@ function JanelaDeMensagem({
       {exigeMotivo && mensagem.trim().length > 0 && mensagem.trim().length < 10 && (
         <p className="mt-1.5 text-xs text-amber-700">
           Escreva a razão por extenso — ela fica no card como registro da decisão.
+        </p>
+      )}
+      {semResumo && (
+        <p className="mt-1.5 text-xs text-amber-700">
+          Este card não tem resumo da oportunidade gravado — a análise não foi salva
+          por esta versão do sistema. Abra a análise e salve, ou escreva o resumo à
+          mão aqui: é o que a proposta vai ler.
         </p>
       )}
       {erro && <p className="mt-1.5 text-xs text-red-700">{erro}</p>}
@@ -656,14 +676,33 @@ function AvisoSemNumero({ lead }: { lead: KommoLead }) {
   // string, e há cards com histórico longo. Refazer isso a cada render de cada
   // card de uma lista de centenas é desperdício sem contrapartida.
   const d = useMemo(() => lerCardCredijuris(lead), [lead])
-  if (d.numero) return null
-  return (
-    <div className="mt-1.5">
-      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
-        sem número de processo no card
-      </span>
-    </div>
-  )
+  // A DISCORDÂNCIA DE TIPO PASSA A DISCORDAR EM VOZ ALTA.
+  //
+  // `divergenciaTipo` era calculado, devolvido e lido por NINGUÉM — o comentário
+  // de lerCardCredijuris promete que a linha TIPO da anotação "passa a servir só
+  // para DISCORDAR em voz alta", e ela não discordava em lugar nenhum. Card no
+  // funil de RPV com "TIPO: Precatório" na anotação era analisado como RPV, em
+  // silêncio: prazo de meses num crédito que a Fazenda paga em anos.
+  if (!d.numero || d.divergenciaTipo) {
+    return (
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {!d.numero && (
+          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+            sem número de processo no card
+          </span>
+        )}
+        {d.divergenciaTipo && (
+          <span
+            className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200"
+            title={d.divergenciaTipo}
+          >
+            funil e anotação discordam do tipo
+          </span>
+        )}
+      </div>
+    )
+  }
+  return null
 }
 
 function CardCredito({
@@ -911,26 +950,14 @@ function CardCredito({
       <div>
         {resultadoAnalise && (
           <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+            {/* OS RAMOS DE REPROVAÇÃO SAÍRAM: eles nunca renderizavam. Este
+                painel só existe depois de `onSalvo`, e salvar exige
+                `!atual.reprovado` — análise reprovada não gera planilha, então
+                não chega aqui. Dois deles ainda liam campos
+                (relatorio_due_diligence, due_diligence_url) que função nenhuma
+                devolve, e um deles rotulava toda reprovação como "Portão 1". */}
             {resultadoAnalise.erro ? (
               <div className="text-red-700">Erro: {resultadoAnalise.erro}</div>
-            ) : resultadoAnalise.reprovado && resultadoAnalise.motivo ? (
-              <div className="text-red-700">
-                ⛔ {resultadoAnalise.motivo}{' '}
-                {resultadoAnalise.relatorio_due_diligence && (
-                  <a
-                    className="font-medium underline"
-                    href={resultadoAnalise.relatorio_due_diligence}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Ver relatório
-                  </a>
-                )}
-              </div>
-            ) : resultadoAnalise.reprovado ? (
-              <div className="text-red-700">
-                Reprovado no Portão 1: {(resultadoAnalise.motivos ?? []).join(' ')}
-              </div>
             ) : (
               // O PAINEL DO CARD É UM RESUMO, e o card é um item de lista lido
               // de relance entre dezenas. Antes ele trazia a grade inteira mais
@@ -1227,6 +1254,24 @@ export default function AnaliseCredito() {
   }
 
   /** O que a função de RPV precisa saber do card, em toda chamada da janela. */
+  /**
+   * OS MEGABYTES DOS PDFs SAEM DA MEMÓRIA — por qualquer porta.
+   *
+   * Eles serviam a uma coisa só, renderizar as páginas digitalizadas, e isso já
+   * aconteceu. O TEXTO fica, porque a aba de Certidões ainda o usa para sugerir
+   * CPF. O descarte morava dentro do `onClose` da janela, e o caminho do
+   * DESFECHO — Enviar para validação, Confirmar da janela de reprovar — fecha
+   * com `setRpvLead(null)` direto: um processo digitalizado de 150 MB ficava
+   * retido até o próximo sync, e o comentário do onClose afirmava o contrário.
+   */
+  function soltarBytes(id: number) {
+    setArquivosCache((p) => {
+      const atual = p[id]
+      if (!atual) return p
+      return { ...p, [id]: atual.map(({ bytes: _b, ...resto }) => resto) }
+    })
+  }
+
   function dadosParaRpv(lead: KommoLead): DadosDoCardRpv {
     const d = lerCardCredijuris(lead)
     return {
@@ -1848,7 +1893,9 @@ export default function AnaliseCredito() {
             await moverComNota(rpvLead.kommo_lead_id, statusId, comentario)
             // A janela fecha porque o card saiu desta aba: manter aberta uma
             // análise de um card que já foi movido é oferecer botões que não
-            // valem mais.
+            // valem mais. E os bytes saem por aqui também — ver soltarBytes: o
+            // desfecho é uma porta de saída como qualquer outra.
+            soltarBytes(rpvLead.kommo_lead_id)
             setRpvLead(null)
           }}
           dadosDoCard={dadosParaRpv(rpvLead)}
@@ -1863,21 +1910,17 @@ export default function AnaliseCredito() {
             // em kommo_analise_interna, e sem invalidar o cache ele só apareceria
             // na próxima visita à tela.
             qc.invalidateQueries({ queryKey: ['kommo_analise_interna'] })
+            // E O CARD: o 'salvar' gravou drive_pasta_id e oportunidade em
+            // kommo_leads. Com staleTime de 30 s e sem refetch no foco, o título
+            // ficava sem link e o Aprovar de Validação abria sem resumo até
+            // alguém mover o card ou sincronizar.
+            qc.invalidateQueries({ queryKey: ['kommo_leads'] })
             void anotarResultadoNaKommo(rpvLead.kommo_lead_id, final, analistaNome).then((falhas) => {
               if (falhas.length) toast.error('A análise foi salva no Drive, mas a anotação no card do Kommo não subiu: ' + falhas.join('; '))
             })
           }}
           onClose={() => {
-            // OS BYTES DOS PDFs SAEM DA MEMÓRIA AO FECHAR. Eles serviam a uma
-            // coisa só — renderizar as páginas digitalizadas —, e isso já
-            // aconteceu. O TEXTO fica, porque a aba de Certidões ainda o usa
-            // para sugerir CPF; os megabytes, não.
-            const id = rpvLead.kommo_lead_id
-            setArquivosCache((p) => {
-              const atual = p[id]
-              if (!atual) return p
-              return { ...p, [id]: atual.map((a) => (a.bytes ? { ...a, bytes: undefined } : a)) }
-            })
+            soltarBytes(rpvLead.kommo_lead_id)
             setRpvLead(null)
           }}
         />

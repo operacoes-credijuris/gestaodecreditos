@@ -46,7 +46,7 @@ import {
   mesesEntre,
   pontosMensais,
   recalcularItem,
-  regimePadrao,
+  regimeDoIndice,
   SERIE_DO_INDICE,
   urlSgs,
   type Acumulado,
@@ -83,7 +83,10 @@ import {
   storageGetBytes,
 } from "../_shared/credijuris.ts";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
-import { encodeBase64 as b64encode } from "jsr:@std/encoding@1/base64";
+// VERSÃO EXATA, como todo import externo daqui (ver a política em _shared/auth.ts).
+// "@1" é qualquer 1.x: uma publicação nova do @std entra em produção sem ninguém
+// aprovar, e o deno.lock já resolvia 1.0.11.
+import { encodeBase64 as b64encode } from "jsr:@std/encoding@1.0.11/base64";
 
 // Helpers do Drive e do Storage: _shared/credijuris.ts, fonte única para esta
 // função, a análise de precatório e a geração de contrato. Já viveram
@@ -1314,7 +1317,7 @@ const SYSTEM_QUALIFICACAO =
   'Você é um analista jurídico especializado em precatórios e RPVs, fazendo a QUALIFICAÇÃO (pré-análise) de um crédito para a Credijuris. ' +
   'A fonte é um processo judicial completo. Analise-o página por página com rigor e seja conservador: quando um dado não estiver claro, use "NÃO LOCALIZADO" (NUNCA invente datas, valores ou nomes). ' +
   'REGRA DE LOCALIZAÇÃO: indique onde cada dado está nesta ordem de prioridade: (1) numeração impressa ("fls.", "Pág. X de Y", numeração do PJe); (2) ID do documento (ex.: ID 295ff54); (3) a passagem. Informe o intervalo de páginas quando possível. ' +
-  'REGRAS: datas em DD/MM/AAAA; valores como número puro (ex.: 124500.00); uma linha por credor (se houver mais de um, use o principal e diga isso em origem_valores); baseie-se somente no documento enviado. ' +
+  'REGRAS: datas em DD/MM/AAAA; valores como número puro (ex.: 124500.00); uma linha por credor (se houver mais de um, use o principal e diga isso em "oficio_localizacao", junto da localização); baseie-se somente no documento enviado. ' +
   'DEFINIÇÕES IMPORTANTES: ' +
   '(a) "trânsito em julgado da FASE DE CONHECIMENTO" é a data em que a decisão de MÉRITO se tornou definitiva — NÃO confunda com o trânsito da fase de execução/cumprimento de sentença; ' +
   '(b) "prazo de pagamento (60 dias) vencido" e "reserva financeira": procure decisão/despacho informando que o prazo de pagamento já passou e/ou que já existe reserva, sequestro ou depósito de verba destinada ao pagamento; ' +
@@ -2090,6 +2093,16 @@ async function refinarDados(
       messages: mensagens,
     })
     .finalMessage();
+  // CORTADA É CORTADA, aqui também. Com max_tokens 4000, um patch grande
+  // (reescrever o m2 inteiro) volta truncado e o erro chegava como "A IA não
+  // devolveu a análise revisada" — que manda a pessoa reformular a pergunta
+  // quando o problema era o tamanho da resposta.
+  if (resp.stop_reason === 'max_tokens') {
+    throw new Error(
+      'A revisão foi CORTADA por tamanho: o pedido pediu mais alterações do que cabe numa resposta. ' +
+      'Peça em partes menores — uma ou duas linhas do questionário por vez.',
+    );
+  }
   const uso = resp.content.find((c) => c.type === 'tool_use' && c.name === FERRAMENTA_REVISAO.name);
   if (!uso || uso.type !== 'tool_use') {
     const txt = resp.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join(' ').trim();
@@ -2367,6 +2380,10 @@ function avisoDeTeto(
   // afirmar o que não se apurou. Então o aviso sai NOS DOIS SENTIDOS: acima da
   // referência ou abaixo dela, o texto é o mesmo pedido de conferência, mudando
   // só o que a comparação sugere.
+  // SEM BRUTO NAO HA REGUA. A guarda vinha DEPOIS deste ramo, entao cessao so
+  // de honorarios contra municipio produzia "o bruto e R$ 0,00 — por essa regua
+  // caberia sem renuncia", que e uma afirmacao sobre nada.
+  if (!bruto || bruto <= 0) return null;
   if (teto.escopo === 'capital') {
     const capital = _brlTeto(teto.valor);
     const acima = bruto > teto.valor;
@@ -2409,20 +2426,26 @@ async function lerDiligencia(
   const semTabela = (m: string) =>
     /does not exist|schema cache|PGRST205|relation .* does not exist/i.test(m);
   try {
-    const { data: apuracoes, error: e1 } = await sb
-      .from('dd_historico')
-      .select('id, papel, nome, documento, oab, status, fonte, apurado_em, observacao')
-      .eq('kommo_lead_id', leadId);
+    // AS DUAS CONSULTAS JUNTAS. A segunda filtra pelo MESMO `kommo_lead_id`, não
+    // pelo resultado da primeira: em série eram duas idas ao banco somadas ao
+    // relógio de parede de toda ação, e o preço de fazê-las juntas é uma consulta
+    // barata a mais quando não há histórico nenhum.
+    const [{ data: apuracoes, error: e1 }, doisProcessos] = await Promise.all([
+      sb
+        .from('dd_historico')
+        .select('id, papel, nome, documento, oab, status, fonte, apurado_em, observacao')
+        .eq('kommo_lead_id', leadId),
+      sb
+        .from('dd_processo')
+        .select(
+          'historico_id, numero_processo, tribunal, objeto, polo, ha_cobranca, valor_cobrado, estagio, risco, risco_motivo',
+        )
+        .eq('kommo_lead_id', leadId),
+    ]);
     if (e1) throw new Error(e1.message);
     const lista = (apuracoes ?? []) as ApuracaoDD[];
     if (lista.length === 0) return { hs: [], falha: null };
-
-    const { data: processos, error: e2 } = await sb
-      .from('dd_processo')
-      .select(
-        'historico_id, numero_processo, tribunal, objeto, polo, ha_cobranca, valor_cobrado, estagio, risco, risco_motivo',
-      )
-      .eq('kommo_lead_id', leadId);
+    const { data: processos, error: e2 } = doisProcessos;
     if (e2) throw new Error(e2.message);
 
     return { hs: historicoDoCredito(lista, (processos ?? []) as ProcessoDD[]), falha: null };
@@ -2613,9 +2636,18 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, estado: t.estado, escopo: t.escopo, valor: t.valor });
     }
 
-    const _google = await segredoGoogle();
+    // AS TRÊS IDAS AO BANCO SAEM JUNTAS.
+    //
+    // Elas não dependem uma da outra — só de `leadId` e do cliente, que já
+    // existem — e eram aguardadas em fila: segredo do Google, chave da
+    // Anthropic, due diligence. Somadas à autenticação, eram cinco a seis idas
+    // encadeadas antes de qualquer trabalho útil, repetidas em cada uma das
+    // cinco a sete invocações de uma análise.
+    // `leadId` só é lido do corpo mais abaixo, então a due diligence não pode
+    // entrar aqui — ela ganhou o mesmo tratamento por dentro (ver lerDiligencia).
+    const [_google, _anthropic] = await Promise.all([segredoGoogle(), chaveAnthropic()]);
     const cfg: Record<string, string> = {
-      anthropic_api_key: (await chaveAnthropic()) ?? '',
+      anthropic_api_key: _anthropic ?? '',
       google_oauth_client_id: _google?.client_id ?? '',
       google_oauth_client_secret: _google?.client_secret ?? '',
       google_oauth_refresh_token: _google?.refresh_token ?? '',
@@ -2825,7 +2857,14 @@ Deno.serve(async (req) => {
         // A partir daqui há o que limpar, aconteça o que acontecer.
         limparUploads = async () => {
           if (!arquivos.length) return;
-          try { await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map((a) => `${prefix}/${a.name}`)); } catch (_) { /* ok */ }
+          try {
+            await sbAdmin.storage.from(BUCKET_INPUT).remove(arquivos.map((a) => `${prefix}/${a.name}`));
+          } catch (e) {
+            // NÃO DERRUBA NADA, mas deixa rastro: o bucket não tem lifecycle, e
+            // uma remoção que falha em silêncio é lixo que ninguém encontra mais
+            // — não se sabe nem a que job as páginas pertenciam.
+            console.warn('[gerar-analise-rpv] limparUploads falhou', prefix, arquivos.length, (e as Error)?.message ?? e);
+          }
           arquivos = [];
         };
         // Pelo nome: o navegador nomeia por arquivo e página (…-p0042.jpg), então
@@ -2938,8 +2977,10 @@ Deno.serve(async (req) => {
               '\n\nIsto NÃO está nos autos que você recebeu: é busca por documento, feita fora deste processo. ' +
               'As linhas 10 e 11 do m2 serão escritas a partir daqui pelo sistema — não tente reproduzi-las nem contradizê-las. ' +
               'O que você tem a fazer com esta informação é OUTRA coisa: se houver processo com cobrança contra o cedente, ' +
-              'avalie em "riscos" o risco de FRAUDE À EXECUÇÃO sobre o crédito que estamos comprando (CPC art. 792; CTN art. 185 nas dívidas fiscais) ' +
-              'e diga em "bloco_g_riscos" o que isso significa para a cessão. Se a diligência não achou nada, não invente risco.',
+              'há risco de FRAUDE À EXECUÇÃO sobre o crédito que estamos comprando (CPC art. 792; CTN art. 185 nas dívidas fiscais). ' +
+              'NA LEITURA QUE ESCREVE OS RISCOS (a que tem "bloco_g_riscos"), registre-o ali, dizendo o que significa para a cessão; ' +
+              'na leitura dos VALORES, isto é só contexto — a ferramenta dela não tem campo de risco, e escrever para o vazio gasta relógio. ' +
+              'Se a diligência não achou nada, não invente risco.',
           });
         }
       }
@@ -3095,12 +3136,18 @@ Deno.serve(async (req) => {
     if (!veredito.aprovado) {
       // Reprovado: não monta tabela jurídica nem precificação. Limpa os uploads e devolve o motivo.
       await limparUploads?.();
+      marcar('portão de qualificação (leitura da IA)');
       return jsonResponse({
         ok: true,
         reprovado: true,
         motivos: veredito.motivos,
         avisos: veredito.avisos,
         qualificacao: qualif,
+        // O RELÓGIO TAMBÉM NA REPROVAÇÃO. Todas as outras saídas o levam, e a
+        // linha do tempo da janela ficava sem a fase do servidor justamente nas
+        // execuções reprovadas — que são as que a gente quer entender por que
+        // demoraram.
+        tempo: _relogio(),
       });
     }
     avisosQualif = veredito.avisos;  // alertas da qualificação (seguem para a resposta final)
@@ -3154,10 +3201,19 @@ Deno.serve(async (req) => {
     ) {
       try {
         const resgate = await extrairValoresDeResgate(cfg.anthropic_api_key, contentBlocks) as Record<string, unknown>;
+        // QUAIS CAMPOS VIERAM DAQUI, e não só o bruto.
+        //
+        // A marca era só `_bruto_da_segunda_leitura`: numa cessão de honorários,
+        // em que a segunda passada traz apenas os honorários ou os
+        // sucumbenciais, o preço inteiro saía calibrado sobre um número da
+        // leitura menor — que não segue a ordem de autoridade das peças — sem o
+        // aviso de "confira a origem".
+        const _daSegunda: string[] = [];
         for (const campo of CAMPOS_RESGATE) {
           const v = resgate?.[campo];
-          if (v != null && v !== '') dados[campo] = v;
+          if (v != null && v !== '') { dados[campo] = v; _daSegunda.push(campo); }
         }
+        dados._campos_da_segunda_leitura = _daSegunda.filter((c) => c !== 'origem_valores');
         if (numeroDoCampo(dados.bruto_total) > 0) dados._bruto_da_segunda_leitura = numeroDoCampo(dados.bruto_total);
       } catch (e) {
         // O RESGATE É EXTRA: falhar nele não pode custar a análise que a
@@ -3479,6 +3535,7 @@ Deno.serve(async (req) => {
         if (acao === 'analisar' || acao === null) {
           return jsonResponse({
             ok: true, reprovado: true, motivos: [_semValor], avisos: avisosQualif, qualificacao: null,
+            tempo: _relogio(),
           });
         }
         return errorResponse(_semValor);
@@ -3901,7 +3958,7 @@ Deno.serve(async (req) => {
         }
         _validos.push({
           natureza: nat, base,
-          regime: ehRegime(it?.regime) ? it.regime : regimePadrao(nat),
+          regime: ehRegime(it?.regime) ? it.regime : regimeDoIndice(nat, tit.indice),
           titulo: tit, conta: con,
         });
       }
@@ -4235,7 +4292,10 @@ Deno.serve(async (req) => {
       // nenhuma troca de cenário salva esse crédito, e a leitura do documento
       // custaria uma chamada de IA por nada.
       if ((acao === 'analisar' || acao === null) && !_cabe) {
-        return jsonResponse({ ok: true, reprovado: true, motivos: [_motivo], avisos: avisosQualif, qualificacao: null });
+        return jsonResponse({
+          ok: true, reprovado: true, motivos: [_motivo], avisos: avisosQualif, qualificacao: null,
+          tempo: _relogio(),
+        });
       }
       // LIBERADO À MÃO: a barreira do piso é da CASA, não da lei, e quem
       // analisa vê coisas que a regra não vê — carteira do mesmo cedente,
@@ -4260,7 +4320,15 @@ Deno.serve(async (req) => {
     // a pessoa conferir à mão.
 
     // Nome do credor em Title Case (usado na pasta do Drive, no nome do arquivo e na aba de precificação)
-    const credorBruto = (dados.credor_nome || (dados.cedente_cpf || '').split(/\bCPF\b/i)[0] || numeroProcesso || 'cedente');
+    // O NOME DO CEDENTE, SEM O CPF DELE.
+    //
+    // O último recurso era partir `cedente_cpf` na palavra "CPF" — e quando a
+    // leitura devolve "Maria Silva - 123.456.789-00", sem a palavra, os dígitos
+    // iam inteiros para o NOME DA PASTA e do arquivo no Drive. Dado pessoal no
+    // nome de um objeto compartilhável, onde ninguém procuraria por ele.
+    const credorBruto = String(
+      dados.credor_nome || (dados.cedente_cpf || '').split(/\bCPF\b/i)[0] || numeroProcesso || 'cedente',
+    ).replace(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g, '').replace(/[\s\-–—.]+$/, '').trim();
     const credorTitulo = (tituloNome(credorBruto).slice(0, 80)) || 'Cedente';
     dados._credor_titulo = credorTitulo;
 
@@ -4576,12 +4644,32 @@ Deno.serve(async (req) => {
         'Algum valor veio de documento diferente dos outros. Confira antes de fechar — o preço foi calibrado sobre o bruto.' +
         (dados.origem_valores ? ` De onde a IA disse que tirou: ${String(dados.origem_valores).slice(0, 300)}` : ''),
       );
-    if (Number(dados._bruto_da_segunda_leitura) > 0)
-      avisosBase.unshift(
-        `⚠️ VALOR VINDO DE UMA SEGUNDA LEITURA (${brl(Number(dados._bruto_da_segunda_leitura))}). ` +
-        'A primeira passada não devolveu valor nenhum, e a segunda — pedida só para o dinheiro — encontrou este. ' +
-        'CONFIRA A ORIGEM antes de fechar: o preço inteiro foi calibrado sobre ele.',
-      );
+    // O AVISO ACOMPANHA QUALQUER VERBA QUE VEIO DA SEGUNDA PASSADA, e não só o
+    // bruto: numa cessão de honorários ela traz os honorários, e o preço inteiro
+    // se formava sobre um número da leitura menor sem ninguém ser avisado.
+    {
+      const _daSegunda = Array.isArray(dados._campos_da_segunda_leitura)
+        ? (dados._campos_da_segunda_leitura as string[])
+        : [];
+      const _valores = _daSegunda.filter((c) => c !== 'origem_valores');
+      if (Number(dados._bruto_da_segunda_leitura) > 0 || _valores.length) {
+        const _quanto = Number(dados._bruto_da_segunda_leitura) > 0
+          ? ` (bruto ${brl(Number(dados._bruto_da_segunda_leitura))})`
+          : '';
+        const NOME_DA_VERBA: Record<string, string> = {
+          bruto_total: 'bruto', ir: 'IR', inss: 'INSS',
+          honorarios: 'honorários contratuais', honorarios_sucumbenciais: 'honorários sucumbenciais',
+        };
+        avisosBase.unshift(
+          `⚠️ VALOR VINDO DE UMA SEGUNDA LEITURA${_quanto}. ` +
+          'A primeira passada não devolveu valor nenhum, e a segunda — pedida só para o dinheiro — encontrou este. ' +
+          (_valores.length
+            ? `Veio dela: ${_valores.map((c) => NOME_DA_VERBA[c] ?? c).join(', ')}. `
+            : '') +
+          'CONFIRA A ORIGEM antes de fechar: o preço inteiro foi calibrado sobre ele.',
+        );
+      }
+    }
     if (Number(dados._bruto_do_portao) > 0)
       avisosBase.unshift(
         `⚠️ VALOR VINDO DA TRIAGEM, NÃO DA LEITURA DETALHADA (${brl(Number(dados._bruto_do_portao))}). ` +
@@ -4730,9 +4818,11 @@ Deno.serve(async (req) => {
     const _verbasNome = (Array.isArray(dados._parcelas) ? dados._parcelas : [])
       .map((p: any) => SIGLA_VERBA[p.nome] ?? p.nome).join(' + ');
     const enteDevedor = String(dados.ente_devedor || '').trim();
+    // SEM SUFIXO PENDURADO: só `originador` é obrigatório no corpo, então
+    // `numeroProcesso` pode estar vazio — e o nome terminava em " -.xlsx".
     const nomeArquivo = limparNomeArquivo(
       `Análise de RPV${_verbasNome ? ` [${_verbasNome}]` : ''} - ${credorTitulo}` +
-      `${enteDevedor ? ` v. ${enteDevedor}` : ''} - ${numeroProcesso}`,
+      `${enteDevedor ? ` v. ${enteDevedor}` : ''}${numeroProcesso ? ` - ${numeroProcesso}` : ''}`,
     ) + '.xlsx';
     const up = await driveUploadBytes(token, nomeArquivo, cedenteId, xlsx, XLSX_MIME, true);
 

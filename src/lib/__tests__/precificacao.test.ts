@@ -216,17 +216,22 @@ describe('calibrarDesagio — casos de borda', () => {
     expect(r.desagio).toBeCloseTo(0.95, 4)
   })
 
+  // MINIMALIDADE DE VERDADE, e não a tautologia de antes: as duas chamadas
+  // tinham os MESMOS argumentos, e a asserção comparava o deságio consigo
+  // mesmo. Uma busca que devolvesse sempre 95% passava no teste, porque com 95%
+  // a rentabilidade também bate o alvo.
+  //
+  // O caminho `desagioFixo` é o que permite provar a minimalidade: um passo
+  // ABAIXO do escolhido não pode atingir a meta.
   it('a binária acha o MENOR deságio que serve', () => {
-    // Um passo abaixo do escolhido já não pode bater o alvo.
     const parcelas: Parcela[] = [{ nome: 'principal', liquido: 80000, bruto: 80000, desagiavel: true }]
     const r = calibrarDesagio({ parcelas, T5: 12, alvo: 0.028, regra: REGRA })
     expect(r.atingiuAlvo).toBe(true)
-    const umPassoAbaixo = calibrarDesagio({
-      parcelas, T5: 12, alvo: 0.028, regra: REGRA,
-    })
-    expect(umPassoAbaixo.desagio).toBe(r.desagio)
-    // A rentabilidade no deságio escolhido bate; no anterior, não.
     expect(r.Y9).toBeGreaterThanOrEqual(0.028)
+    const abaixo = calibrarDesagio({
+      parcelas, T5: 12, alvo: 0.028, regra: REGRA, desagioFixo: r.desagio - 0.0025,
+    })
+    expect(abaixo.Y9).toBeLessThan(0.028)
   })
 })
 

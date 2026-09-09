@@ -1109,7 +1109,7 @@ export function GradeValoresRpv({
  */
 function JanelaDeDesfecho({
   acao,
-  achados,
+  achados: achadosRecebidos,
   onRedigir,
   onMover,
   onFechar,
@@ -1126,6 +1126,14 @@ function JanelaDeDesfecho({
   motivoSugerido?: string
 }) {
   const [motivo, setMotivo] = useState(motivoSugerido ?? '')
+  // OS ACHADOS CONGELAM AO ABRIR.
+  //
+  // `marcados` guarda POSIÇÕES na lista, e a lista vem de `atual` — que pode
+  // mudar com esta janela aberta: um levantamento de cartório disparado pelo
+  // chat faz `setAtual` em segundo plano e a lista de avisos muda ("cartório não
+  // incluído" sai). As marcas passavam a apontar para outros itens, e o texto
+  // que a IA já redigiu deixava de corresponder ao que está marcado.
+  const [achados] = useState(achadosRecebidos)
   const [marcados, setMarcados] = useState<Set<number>>(new Set())
   const [enviando, setEnviando] = useState(false)
   const [redigindo, setRedigindo] = useState(false)
@@ -1455,7 +1463,14 @@ export function AnaliseRpvModal({
   const [salvoComoEstava, setSalvoComoEstava] = useState<RespostaAnaliseRpv | null>(null)
   const fimDoChat = useRef<HTMLDivElement>(null)
 
-  const ocupado = passo !== null
+  // OCUPADO INCLUI A TROCA DE CENÁRIO E O ENVIO PARA VALIDAÇÃO.
+  //
+  // `passo` cobria só as etapas que mostram rótulo. Durante a reprecificação de
+  // um cenário — segundos — o Salvar ficava aceso e mandava o `dados` do cenário
+  // ANTIGO com o `tipo_aquisicao` novo: planilha e nome de arquivo de cenários
+  // diferentes. E ao voltar, `setAtual` marcava "mudou desde o último
+  // salvamento" para um arquivo que já era o novo.
+  const ocupado = passo !== null || trocandoCenario || enviandoValidacao
   /**
    * Quantas vezes a análise foi substituída (revisão ou salvamento).
    *
@@ -1678,9 +1693,21 @@ export function AnaliseRpvModal({
                 // antes da esteira.
                 const tarefa = (async () => {
                   try {
-                    const { error } = await supabase.storage
+                    // UMA RETENTATIVA, COM ESPERA. O Storage devolve 429 sob
+                    // carga — o comentário da esteira já diz isso —, e uma
+                    // oscilação de rede tirava a página da leitura para sempre: a
+                    // IA era avisada, mas o resultado é uma conta lida sem uma
+                    // folha. Duas tentativas resolvem o 429 e a oscilação; a
+                    // terceira seria insistir num erro que não é transitório.
+                    let { error } = await supabase.storage
                       .from('analises-input')
                       .upload(caminho, img.blob, { contentType: 'image/jpeg', upsert: true })
+                    if (error) {
+                      await new Promise((r) => setTimeout(r, 1200))
+                      ;({ error } = await supabase.storage
+                        .from('analises-input')
+                        .upload(caminho, img.blob, { contentType: 'image/jpeg', upsert: true }))
+                    }
                     if (error) falhas.push(`"${sel.arquivo}" p. ${img.numero}: ${error.message}`)
                     else {
                       // O CAMINHO FICA GUARDADO para a limpeza do fechamento

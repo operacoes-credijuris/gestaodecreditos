@@ -158,7 +158,11 @@ export function resumoDaOportunidade(e: EntradaOportunidade): string {
 
   const meses = e.prazoMeses
   const recebimento = [
-    meses != null && meses > 0 ? `${meses} ${meses === 1 ? 'mês' : 'meses'}` : '',
+    // COM VÍRGULA, que é como se escreve em português: o produtor grava
+    // `Number(T5.toFixed(1))` e o texto do CRM saía "Recebimento: 14.3 meses".
+    meses != null && meses > 0
+      ? `${meses.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${meses === 1 ? 'mês' : 'meses'}`
+      : '',
     e.dataPagamento?.trim() ? `previsão ${e.dataPagamento.trim()}` : '',
   ]
     .filter(Boolean)

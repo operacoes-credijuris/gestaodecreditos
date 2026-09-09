@@ -43,6 +43,26 @@ export async function segredoGoogle(): Promise<SegredoGoogle | null> {
   return (data as SegredoGoogle | null) ?? null
 }
 
+/**
+ * O PAR TOKEN + SUBDOMÍNIO, da mesma fonte que a kommo-sync e a kommo-mover.
+ *
+ * A kommo-anotar tinha o subdomínio FIXO no código enquanto as outras duas o
+ * leem de `integracao_kommo_secret` — que é onde a salvar-token-kommo grava. Um
+ * subdomínio trocado (renomear a conta no Kommo, migrar para outra) consertava
+ * duas funções e deixava a terceira escrevendo no lugar errado.
+ */
+export async function contaKommo(): Promise<{ token: string; subdominio: string } | null> {
+  const doAmbiente = Deno.env.get('KOMMO_TOKEN')
+  const { data } = await serviceClient()
+    .from('integracao_kommo_secret')
+    .select('token, subdominio')
+    .eq('id', 1)
+    .maybeSingle()
+  const token = doAmbiente || data?.token
+  const subdominio = data?.subdominio || Deno.env.get('KOMMO_SUBDOMINIO')
+  return token && subdominio ? { token, subdominio } : null
+}
+
 export async function chaveKommo(): Promise<string | null> {
   const doAmbiente = Deno.env.get('KOMMO_TOKEN')
   if (doAmbiente) return doAmbiente

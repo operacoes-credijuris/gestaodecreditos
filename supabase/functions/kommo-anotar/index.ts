@@ -21,10 +21,9 @@
 import { assinarNota, marcarComoDePessoa } from "../_shared/notaCredijuris.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
-import { chaveKommo } from "../_shared/segredos.ts";
+import { contaKommo } from "../_shared/segredos.ts";
 
 const CORS = corsHeaders;
-const KOMMO_SUBDOMAIN = "contatocredijuriscom";
 
 function json(o: unknown, s = 200) {
   return new Response(JSON.stringify(o), {
@@ -51,10 +50,11 @@ Deno.serve(async (req) => {
     const dePessoa = String((body as any).origem ?? "analise") === "pessoa";
     const autor = String((body as any).autor ?? "").trim() || null;
 
-    const token = await chaveKommo();
-    if (!token) return json({ erro: "Token da Kommo não configurado (integracao_kommo_secret)." }, 500);
+    const conta = await contaKommo();
+    if (!conta) return json({ erro: "Token ou subdomínio da Kommo não configurado (integracao_kommo_secret)." }, 500);
+    const { token, subdominio } = conta;
 
-    const base = `https://${KOMMO_SUBDOMAIN}.kommo.com/api/v4`;
+    const base = `https://${subdominio}.kommo.com/api/v4`;
     const res = await fetch(`${base}/leads/notes`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },

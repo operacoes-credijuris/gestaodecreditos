@@ -60,8 +60,18 @@ export type NomeDeIndice = keyof typeof SERIE_DO_INDICE
 export const INDICE_FIXO = 'FIXO' as const
 export type IndiceDeclarado = NomeDeIndice | typeof INDICE_FIXO
 
+/**
+ * É um dos índices que têm série no SGS?
+ *
+ * `hasOwnProperty`, e não `in`: `'constructor' in SERIE_DO_INDICE` é VERDADEIRO
+ * (a chave é herdada do protótipo), o type guard promovia a string a
+ * NomeDeIndice, `SERIE_DO_INDICE[v]` devolvia uma FUNÇÃO e a URL do SGS saía
+ * "bcdata.sgs.function toString()…". Um item de auditoria com índice
+ * "constructor" — improvável, mas é o modelo que escreve o campo — derrubava a
+ * busca com um erro incompreensível.
+ */
 export function ehIndiceDeSerie(v: unknown): v is NomeDeIndice {
-  return typeof v === 'string' && v in SERIE_DO_INDICE
+  return typeof v === 'string' && Object.prototype.hasOwnProperty.call(SERIE_DO_INDICE, v)
 }
 export function ehIndiceDeclarado(v: unknown): v is IndiceDeclarado {
   return v === INDICE_FIXO || ehIndiceDeSerie(v)
@@ -81,6 +91,21 @@ export function ehRegime(v: unknown): v is Regime {
  * para o lado que infla o crédito, então o default segue a prática judicial e
  * não a conveniência.
  */
+/**
+ * O regime de acumulação quando a leitura não o declara.
+ *
+ * A SELIC É EXCEÇÃO, e por isso o índice entra na conta. Sob a EC 113/2021 ela
+ * substitui correção E juros de uma vez, e o Manual de Cálculos da Justiça
+ * Federal a acumula por SOMA SIMPLES dos percentuais mensais. Classificada pela
+ * leitura como "correcao", ela caía no regime composto: em alguns anos a
+ * diferença passa de pontos percentuais inteiros, sempre para o lado de inflar
+ * o crédito.
+ */
+export function regimeDoIndice(natureza: 'correcao' | 'juros', indice?: unknown): Regime {
+  if (indice === 'SELIC') return 'simples'
+  return regimePadrao(natureza)
+}
+
 export function regimePadrao(natureza: 'correcao' | 'juros'): Regime {
   return natureza === 'juros' ? 'simples' : 'composto'
 }
@@ -234,7 +259,18 @@ export function acumular(
   if (chave(ultimo.ano, ultimo.mes) < kAte) {
     faltas.push(`a série termina em ${fmt(ultimo)}, antes do termo final pedido`)
   }
-  if (dentro.length < esperados && !faltas.length) {
+  // O BURACO INTERNO SE DIZ SEMPRE, e não só quando as pontas estão íntegras.
+  //
+  // Era `&& !faltas.length`: série que começa depois do termo inicial E com um
+  // mês faltando no meio escondia o mês faltante — e é o do meio que faz o fator
+  // sair errado sem parecer errado, porque as pontas já explicam a diferença.
+  const cobertos = mesesEntre(
+    { ano: primeiro.ano, mes: primeiro.mes },
+    { ano: ultimo.ano, mes: ultimo.mes },
+  )
+  if (dentro.length < cobertos) {
+    faltas.push(`faltam ${cobertos - dentro.length} mês(es) DENTRO do trecho coberto (${fmt(primeiro)} a ${fmt(ultimo)})`)
+  } else if (dentro.length < esperados && !faltas.length) {
     faltas.push(`faltam ${esperados - dentro.length} mês(es) dentro do período`)
   }
 

@@ -121,8 +121,21 @@ Deno.serve(async (req: Request) => {
     ]
     if (comentario) linhas.push(comentario)
 
+    /** O fetch da nota, que nunca rejeita: devolve o não-ok ou o motivo. */
+    const fetchDaNota = async (url: string, init: RequestInit) => {
+      try {
+        return await fetch(url, init)
+      } catch (e) {
+        return { ok: false, status: 0, motivo: (e as Error)?.message ?? String(e) } as
+          { ok: false; status: number; motivo: string }
+      }
+    }
     let avisoNota: string | null = null
-    const resNota = await fetch(`${base}/leads/notes`, {
+    // O FETCH PODE REJEITAR, e não só devolver não-ok: rede, DNS, timeout. A
+    // rejeição subia ao catch geral e a função respondia 500 DEPOIS de o PATCH
+    // já ter movido o card — e sem rodar o passo 3, deixando o espelho na coluna
+    // antiga sem explicação. Falha de nota é aviso, nunca erro.
+    const resNota = await fetchDaNota(`${base}/leads/notes`, {
       method: 'POST',
       headers,
       body: JSON.stringify([
@@ -144,7 +157,10 @@ Deno.serve(async (req: Request) => {
       // O card JÁ foi movido. Falhar aqui não desfaz nada, então reporta como
       // aviso em vez de erro — reverter seria pior (duas movimentações no
       // histórico por causa de um registro que não gravou).
-      avisoNota = `O card foi movido, mas a anotação não foi registrada (HTTP ${resNota.status}).`
+      const _porque = 'motivo' in resNota && resNota.motivo
+        ? `falha de rede: ${resNota.motivo}`
+        : `HTTP ${resNota.status}`
+      avisoNota = `O card foi movido, mas a anotação não foi registrada (${_porque}).`
     }
 
     // 3. Espelho local: atualiza o status e descarta a marcação interna, que só

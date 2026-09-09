@@ -4,8 +4,8 @@ import {
   acumularFixo,
   chaveDaBusca,
   competencia,
-  ehIndiceDeclarado,
   ehIndiceDeSerie,
+  ehIndiceDeclarado,
   ehRegime,
   fatorPlausivel,
   INDICE_FIXO,
@@ -13,6 +13,7 @@ import {
   mesesEntre,
   pontosMensais,
   recalcularItem,
+  regimeDoIndice,
   regimePadrao,
   SERIE_DO_INDICE,
   urlSgs,
@@ -170,6 +171,43 @@ describe('índices do BCB', () => {
       expect(competencia('12/05/1899')).toBe(null)
     })
 
+    // CHAVE HERDADA NÃO É ÍNDICE: `'constructor' in SERIE_DO_INDICE` é
+    // verdadeiro, o type guard promovia a string e SERIE_DO_INDICE[v] devolvia
+    // uma FUNÇÃO — a URL do SGS saía "bcdata.sgs.function toString()…".
+    it('o protótipo não é uma série', () => {
+      expect(ehIndiceDeSerie('constructor')).toBe(false)
+      expect(ehIndiceDeSerie('toString')).toBe(false)
+      expect(ehIndiceDeSerie('hasOwnProperty')).toBe(false)
+      expect(ehIndiceDeSerie('__proto__')).toBe(false)
+      expect(ehIndiceDeSerie('IPCA-E')).toBe(true)
+    })
+
+    // O BURACO INTERNO SE DIZ MESMO COM FALTA NA PONTA. Era `&& !faltas.length`:
+    // a falta da ponta já explicava a diferença, e o mês do meio — que faz o
+    // fator sair errado sem parecer errado — ficava invisível.
+    it('acusa o buraco do meio junto com a falta da ponta', () => {
+      const pontos = [
+        { ano: 2015, mes: 2, pct: 1 },
+        // 03/2015 falta
+        { ano: 2015, mes: 4, pct: 1 },
+      ]
+      const f = acumular(pontos, c(1, 2015), c(4, 2015), 'composto')
+      expect(f.incompleto).toMatch(/come[çc]a em 02\/2015/)
+      expect(f.incompleto).toMatch(/DENTRO do trecho coberto/)
+    })
+
+    // VARIAÇÃO NEGATIVA COMPÕE PARA BAIXO — IGP-M deflacionário existe, e um
+    // fator abaixo de 1 é resultado legítimo, não erro.
+    it('mês negativo derruba o fator abaixo de 1', () => {
+      const pontos = [
+        { ano: 2015, mes: 1, pct: -0.5 },
+        { ano: 2015, mes: 2, pct: -0.5 },
+      ]
+      const f = acumular(pontos, c(1, 2015), c(2, 2015), 'composto')
+      expect(f.fator).toBeLessThan(1)
+      expect(f.fator).toBeCloseTo(0.995 * 0.995, 10)
+    })
+
     it('período invertido falha', () => {
       expect(() => acumular(pontosMensais(IPCA15_2015), c(3, 2015), c(1, 2015), 'composto'))
         .toThrow(/anterior ao inicial/)
@@ -319,6 +357,24 @@ describe('índices do BCB', () => {
       expect(fatorPlausivel(1.5087)).toBe(true)
       expect(fatorPlausivel(80)).toBe(false)
       expect(fatorPlausivel(NaN)).toBe(false)
+    })
+  })
+
+  describe('o regime de acumulação', () => {
+    // A SELIC É EXCEÇÃO. Sob a EC 113/2021 ela substitui correção E juros de uma
+    // vez, e o Manual de Cálculos da Justiça Federal a acumula por SOMA SIMPLES.
+    // Classificada pela leitura como "correcao", ela caía no composto — e a
+    // diferença, em alguns anos, passa de pontos percentuais inteiros, sempre
+    // para o lado de inflar o crédito.
+    it('Selic é simples mesmo declarada como correção', () => {
+      expect(regimeDoIndice('correcao', 'SELIC')).toBe('simples')
+      expect(regimeDoIndice('juros', 'SELIC')).toBe('simples')
+    })
+
+    it('os demais índices seguem a natureza', () => {
+      expect(regimeDoIndice('correcao', 'IPCA-E')).toBe(regimePadrao('correcao'))
+      expect(regimeDoIndice('juros', 'IPCA-E')).toBe(regimePadrao('juros'))
+      expect(regimeDoIndice('correcao')).toBe(regimePadrao('correcao'))
     })
   })
 

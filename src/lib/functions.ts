@@ -47,6 +47,13 @@ async function erroDaFuncao(error: { message: string }): Promise<ErroDeFuncao> {
         // `erro` e `msg` entram porque as funções não falam uma língua só.
         const achado = j.error ?? j.erro ?? j.message ?? j.msg
         detalhe = achado ? String(achado) : txt.slice(0, 300)
+        // E O CAMPO `detalhe`, quando a função o manda. A kommo-anotar põe ali a
+        // resposta do próprio Kommo, e sem isto a tela mostrava só "Kommo
+        // recusou a anotação" com o status — que não distingue token expirado de
+        // card apagado de texto recusado.
+        if (typeof j.detalhe === 'string' && j.detalhe.trim()) {
+          detalhe = `${detalhe} — ${j.detalhe.trim().slice(0, 200)}`
+        }
         if (typeof j.codigo === 'string' && j.codigo) codigo = j.codigo
       } catch {
         // Corpo que não é JSON ainda diz muito: HTML de gateway, rastro de pilha.

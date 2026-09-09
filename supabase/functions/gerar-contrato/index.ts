@@ -52,7 +52,8 @@ import {
 import { type SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import JSZip from 'npm:jszip@3.10.1'
 import { DOMParser, XMLSerializer } from 'npm:@xmldom/xmldom@0.8.10'
-import { encodeBase64 as b64encode } from 'jsr:@std/encoding@1/base64'
+// Versão exata, como no resto do repositório: "@1" é qualquer 1.x.
+import { encodeBase64 as b64encode } from 'jsr:@std/encoding@1.0.11/base64'
 
 // ============================================================================
 // Constants
