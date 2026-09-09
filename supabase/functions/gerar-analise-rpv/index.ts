@@ -56,6 +56,10 @@ import {
 } from "../_shared/indicesBcb.ts";
 import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, escolherModelo, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type Precificacao, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { grauDaPlanilha } from "../_shared/graus.ts";
+import { calcularIrFaltante, memoriaDoIrFaltante } from "../_shared/irFaltante.ts";
+// O PISO É PURO E TEM TESTE. Ver _shared/piso.ts: quatro desfechos sobre uma
+// regra da casa, cada um mudando o que dá para fazer em seguida.
+import { avaliarPiso } from "../_shared/piso.ts";
 // O PORTÃO 1 É PURO E TEM TESTE. Ver _shared/portao.ts: é a árvore que decide se
 // o crédito entra, e vivia aqui sem um caso escrito — com um defeito registrado
 // em comentário que já tinha voltado uma vez.
@@ -63,7 +67,7 @@ import { avaliarQualificacao, ehEstadoDeGoias, ehSim, parseDataBR, parseNumeroFl
 // O PRAZO É PURO E TEM TESTE. Ver _shared/prazo.ts: ele decide T5, que é a
 // variável que mais mexe no deságio, e vivia aqui sem um caso escrito.
 import { PISO_MESES, prazoMeses, REGRAS_PRAZO, roteiroValido, type AtoRoteiro, type Esfera, type RegraPrazo } from "../_shared/prazo.ts";
-import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
+import { aplicarPatch, aplicarParametrosManuais, CAMPOS_LISTA, parametrosParaCalibragem, resetarLinhasDeBase } from "../_shared/revisao.ts";
 import {
   aplicarDiligenciaNoM2,
   historicoDoCredito,
@@ -1986,10 +1990,6 @@ const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
  * decisões do motor, não dados da análise.
  */
 const CAMPOS_EDITAVEIS: ReadonlySet<string> = new Set(Object.keys(SCHEMA_ANALISE));
-const CAMPOS_LISTA: ReadonlySet<string> = new Set([
-  'roteiro_prazo', 'bloco_g_riscos', 'auditoria_divergencias', 'auditoria_confronto', 'auditoria_recalculo', 'auditoria_ir_faltante', 'notas_celulas',
-]);
-
 const FERRAMENTA_REVISAO = {
   name: 'revisar_analise',
   description: 'Devolve a análise revisada conforme o pedido do usuário, e um resumo curto do que mudou.',
@@ -2131,66 +2131,7 @@ async function refinarDados(
   // cima de um número afirmado seria cobrar o imposto duas vezes, e desta vez
   // contra quem tem razão.
   {
-    const _tocados = Object.keys(alteracoes ?? {});
-    if (_tocados.includes('ir')) {
-      delete r.dados._ir_lido;
-      if (Array.isArray(r.dados.auditoria_ir_faltante) && r.dados.auditoria_ir_faltante.length) {
-        delete r.dados.auditoria_ir_faltante;
-        r.mudancas.push('IR ditado no chat: a estimativa automática do imposto foi descartada');
-      }
-    }
-    if (_tocados.includes('principal_liquido')) delete r.dados._liquido_lido;
-    if (_tocados.includes('auditoria_justificativa')) delete r.dados._auditoria_justificativa_lida;
-    // HONORÁRIO DITADO NO CHAT VENCE O PERCENTUAL DO CARD.
-    //
-    // Ele é campo editável, o SISTEMA_REVISAO promete que "quem afirma o dado é
-    // o usuário", e a resposta dizia "Aplicado: honorarios: X → Y" — mas a
-    // passada seguinte recalculava `pct × base` e descartava o número em
-    // silêncio. Agora a marca desliga o percentual do card, com aviso na tela
-    // para ninguém achar que o card foi ignorado por acaso. Ela sai quando o
-    // chat mexe no próprio percentual.
-    if (_tocados.includes('honorarios')) {
-      delete r.dados._honorarios_lido;
-      r.dados._honorarios_ditado = true;
-    }
-    if (_tocados.includes('honorarios_contratuais_pct')) delete r.dados._honorarios_ditado;
-    // O CENÁRIO CONSERVADOR DITADO NO CHAT FICA.
-    //
-    // O convite a corrigi-lo está na própria resposta da análise ("corrija
-    // auditoria_bruto_conservador aqui no chat"), e o número durava até o fim do
-    // mesmo request: o recálculo pelo Banco Central roda em TODA passada e
-    // gravava por cima. O chat respondia "Aplicado: 61.200 → 58.000" e a tela
-    // mostrava 61.200 — repetir o pedido nunca resolvia.
-    if (_tocados.includes('auditoria_bruto_conservador')) {
-      r.dados._conservador_ditado = true;
-      r.mudancas.push('cenário conservador ditado no chat: o recálculo automático por índice não vai sobrepô-lo');
-    }
-    // Mexer nos ITENS do recálculo é pedir o recálculo de volta.
-    if (_tocados.includes('auditoria_recalculo')) delete r.dados._conservador_ditado;
-    // Bruto novo muda a base de tudo: a estimativa antiga do imposto foi feita
-    // sobre outro número e não vale mais.
-    if (_tocados.includes('bruto_total')) {
-      // DEVOLVE ANTES DE APAGAR. `dados.ir` viaja INFLADO — é o lido mais a
-      // nossa estimativa do imposto faltante —, e apagar a linha de base com o
-      // campo nesse estado faz a passada seguinte tomar o valor já somado como
-      // se fosse o lido e somar o imposto DE NOVO. Cada correção de bruto no
-      // chat acrescentava mais uma vez o IR estimado, o líquido caía na mesma
-      // proporção, e o aviso mostrava a soma repetida como se fosse nova.
-      if (!_tocados.includes('ir') && r.dados._ir_lido != null) r.dados.ir = r.dados._ir_lido;
-      if (!_tocados.includes('principal_liquido') && r.dados._liquido_lido != null) {
-        r.dados.principal_liquido = r.dados._liquido_lido;
-      }
-      delete r.dados._ir_lido;
-      delete r.dados._liquido_lido;
-      // O aviso dos sucumbenciais dentro do bruto falaria de um bruto que já não
-      // existe. A conferência aritmética refaz a marca se o caso persistir.
-      delete r.dados._sucumbDentroDoBruto;
-      // Bruto ditado a mao encerra o remanejamento do honorario e o valor da
-      // triagem: os avisos contariam uma origem que o numero de agora nao tem.
-      delete r.dados._honorarioEraOPrincipal;
-      delete r.dados._bruto_do_portao;
-      delete r.dados._bruto_da_segunda_leitura;
-    }
+    r.mudancas.push(...resetarLinhasDeBase(r.dados, Object.keys(alteracoes ?? {})));
   }
 
   // AS LINHAS DO QUESTIONÁRIO QUE O CHAT MANDOU ESCREVER ficam marcadas, e a
@@ -3696,56 +3637,19 @@ Deno.serve(async (req) => {
     // regime que a própria análise diz que não se aplica não é meia resposta —
     // é resposta errada com cara de exata.
     {
-      const _itensIr = Array.isArray(dados.auditoria_ir_faltante)
-        ? dados.auditoria_ir_faltante.slice(0, 6)
-        : [];
-      const _brutoAqui = Number(dados.bruto_total) || 0;
-      const _memoriasIr: string[] = [];
-      let _somaIr = 0;
-      for (const it of _itensIr) {
-        const _verba = String(it?.verba ?? 'verba tributável').slice(0, 60);
-        const _base = Number(it?.base);
-        if (!Number.isFinite(_base) || _base <= 0) continue;
-        // Base maior que o bruto é valor lido errado — o total de outro credor,
-        // a soma de requisitórios. Tributar sobre ela devolveria um imposto que
-        // engoliria o crédito, e a precificação aceitaria sem reclamar.
-        if (_brutoAqui > 0 && _base > _brutoAqui) {
-          _avisosDaConta.push(
-            `A auditoria apontou IR faltante sobre uma base de ${brl(_base)} em ${_verba}, maior que o bruto (${brl(_brutoAqui)}). ` +
-            'O item foi ignorado — confira de onde saiu essa base.',
-          );
-          continue;
-        }
-        // AS COMPETÊNCIAS: declaradas, ou contadas do período de apuração.
-        // Contar do período é o caminho normal — a auditoria já leu o termo
-        // inicial e o final para o confronto com o título.
-        const _mDito = Number(it?.meses);
-        const _de = competencia(it?.de);
-        const _ate = competencia(it?.ate);
-        const _meses = Number.isFinite(_mDito) && _mDito >= 1
-          ? Math.floor(_mDito)
-          : (_de && _ate ? mesesEntre(_de, _ate) : null);
-        if (_meses == null || _meses < 1) {
-          _avisosDaContaAuditoria.push(
-            `⚠️ IR NÃO CALCULADO em ${_verba}: a auditoria achou a base tributável (${brl(_base)}) mas não disse em quantas competências ` +
-            'o pagamento se refere, nem o período de apuração. O art. 12-A da Lei 7.713/88 tributa rendimento acumulado pela tabela do MÊS sobre a média mensal, ' +
-            'e sem os meses não há como aplicá-la — jogar a tabela mensal sobre o total inteiro seria outro regime, não uma aproximação. ' +
-            'O preço NÃO embute este imposto. Diga o período no chat ("o período de apuração desta verba é 01/2015 a 12/2021") e o preço se refaz.',
-          );
-          continue;
-        }
-        const _calc = irProgressivo(_base, _meses);
-        if (!(_calc.imposto > 0)) {
-          _avisosDaContaAuditoria.push(
-            `IR de ${_verba}: nada a reter — ${_calc.memoria}.`,
-          );
-          continue;
-        }
-        _somaIr += _calc.imposto;
-        _memoriasIr.push(`${_verba} — ${_calc.memoria}`);
-      }
-      if (_somaIr > 0) {
-        _somaIr = Number(_somaIr.toFixed(2));
+      // A CONTA MORA EM _shared/irFaltante.ts — pura e com teste. Ela é o bloco
+      // que DOBRAVA o IR a cada ação, e o conserto (a linha de base) não tinha
+      // caso escrito que o protegesse.
+      const _ir = calcularIrFaltante({
+        itens: dados.auditoria_ir_faltante,
+        bruto: Number(dados.bruto_total) || 0,
+        brl,
+      });
+      _avisosDaConta.push(..._ir.avisos);
+      _avisosDaContaAuditoria.push(..._ir.avisosAuditoria);
+      const _memoriasIr = _ir.memorias;
+      if (_ir.soma > 0) {
+        const _somaIr = _ir.soma;
         const _irAntes = Number(dados.ir) || 0;
         dados.ir = Number((_irAntes + _somaIr).toFixed(2));
         // O LÍQUIDO ACOMPANHA, e não é detalhe: sem isto a conferência de soma
@@ -3754,9 +3658,9 @@ Deno.serve(async (req) => {
         // acerto achando que é erro de leitura.
         const _liqAntes = Number(dados.principal_liquido) || 0;
         if (_liqAntes > 0) dados.principal_liquido = Number(Math.max(0, _liqAntes - _somaIr).toFixed(2));
-        const _memoriaIr =
-          `IR NÃO RETIDO PELA CONTA, calculado pela tabela progressiva ${ANO_TABELA_IRRF}: ` +
-          `${_memoriasIr.join(' | ')}. Total acrescentado ao IR: ${brl(_somaIr)} (de ${brl(_irAntes)} para ${brl(dados.ir)}).`;
+        const _memoriaIr = memoriaDoIrFaltante({
+          soma: _somaIr, memorias: _memoriasIr, irAntes: _irAntes, irDepois: Number(dados.ir) || 0, brl,
+        });
         const _notasIr = Array.isArray(dados.notas_celulas) ? dados.notas_celulas : [];
         _notasIr.push({ campo: 'ir', nota: _memoriaIr.slice(0, 350), origem: 'sistema' });
         dados.notas_celulas = _notasIr;
@@ -4260,19 +4164,22 @@ Deno.serve(async (req) => {
     // uma análise que mudou volta a esbarrar no piso, em vez de herdar um
     // "pode" dado sobre outros números.
     const _pisoLiberado = body.abaixo_do_minimo_ok === true;
-    if (Number(calc.Y3) > 0 && Number(calc.Y3) < PISO_NEGOCIO) {
-      const _tudo = montarParcelas({
+    // A DECISÃO MORA EM _shared/piso.ts — pura e com teste. São quatro desfechos
+    // sobre uma regra da casa, e cada um muda o que quem está com o card aberto
+    // pode fazer em seguida.
+    const _piso = avaliarPiso({
+      negociado: Number(calc.Y3) || 0,
+      tudoSomado: montarParcelas({
         ..._auditoria.valores,
         verbas: { principal: true, contratuais: true, sucumbenciais: true },
-      }).reduce((s, p) => s + p.liquido, 0);
-      const _cabe = _tudo >= PISO_NEGOCIO;
-      const _motivo =
-        `O valor total líquido negociado é ${brl(calc.Y3)}, abaixo do mínimo de ${brl(PISO_NEGOCIO)} ` +
-        `(${String(dados.tipo_credito ?? 'verbas do negócio')}). ` +
-        (_cabe
-          ? `Somando TODAS as verbas do processo dá ${brl(_tudo)} — se a cessão puder incluir as demais, ` +
-            'corrija o "PARCELA CEDIDA" do card (ou troque o cenário aqui na janela) e rode de novo.'
-          : `Nem somando todas as verbas do processo se chega ao mínimo: o total líquido disponível é ${brl(_tudo)}.`);
+      }).reduce((s, p) => s + p.liquido, 0),
+      tipoCredito: dados.tipo_credito,
+      acao,
+      liberado: _pisoLiberado,
+      brl,
+    });
+    if (_piso.desfecho !== 'ok') {
+      const _motivo = _piso.motivo;
 
       // BECO SEM SAÍDA SÓ QUANDO NÃO HÁ SAÍDA.
       //
@@ -4291,7 +4198,7 @@ Deno.serve(async (req) => {
       // Não dá nem somando tudo? Aí reprovar é a resposta certa, e para cedo:
       // nenhuma troca de cenário salva esse crédito, e a leitura do documento
       // custaria uma chamada de IA por nada.
-      if ((acao === 'analisar' || acao === null) && !_cabe) {
+      if (_piso.desfecho === 'reprovado') {
         return jsonResponse({
           ok: true, reprovado: true, motivos: [_motivo], avisos: avisosQualif, qualificacao: null,
           tempo: _relogio(),
@@ -4302,12 +4209,12 @@ Deno.serve(async (req) => {
       // crédito que fecha junto com outro, prazo curto que compensa o valor. O
       // que não pode é passar em silêncio: liberar deixa registro no aviso, que
       // sobe para o card com a análise.
-      if (acao === 'salvar' && !_pisoLiberado) {
+      if (_piso.desfecho === 'erro') {
         return errorResponse(_motivo + ' Não gerei a planilha.', 400, {
           codigo: 'ABAIXO_DO_MINIMO',
         });
       }
-      if (acao === 'salvar') dados._piso_liberado = true;
+      if (_piso.desfecho === 'aviso' && _piso.liberado) dados._piso_liberado = true;
       // 'refinar' e 'reprecificar': não derruba o que está na tela — o operador
       // está no meio de uma conversa e pode estar justamente corrigindo isto.
       dados._abaixo_do_piso = _motivo;

@@ -1,3 +1,5 @@
+import { PISO_NEGOCIO } from './piso.ts';
+
 // O PORTÃO 1 — a decisão de o crédito entrar ou não.
 //
 // SEM DEPENDÊNCIA DE NADA, como precificacao.ts, prazo.ts e irpf.ts. Isto morava
@@ -103,7 +105,7 @@ export function ehEstadoDeGoias(...candidatos: unknown[]): boolean {
  * isso é seguro por construção, porque o líquido nunca é maior que o bruto, e
  * poupa a leitura completa de um crédito que não serve.
  */
-export const PISO_NEGOCIO = 20000;
+export { PISO_NEGOCIO } from './piso.ts';
 
 // Aplica a ÁRVORE DE DECISÃO do Portão 1 sobre o JSON da IA.
 // Retorna aprovado + motivos de recusa (se houver) + avisos (não reprovam).

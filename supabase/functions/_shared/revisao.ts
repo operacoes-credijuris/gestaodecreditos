@@ -396,3 +396,116 @@ export function parametrosParaCalibragem(dados: Record<string, unknown>): Parame
     descricao: desc,
   }
 }
+
+/**
+ * AS LINHAS DE BASE, refeitas quando o chat dita o número.
+ *
+ * POR QUE ELAS EXISTEM. O objeto da análise viaja entre as ações — 'analisar',
+ * cada mensagem do chat, 'reprecificar', 'salvar' — e vários blocos do motor
+ * ACRESCENTAM a um campo em vez de recalculá-lo: o IR faltante somava o imposto
+ * estimado ao `ir`, e como o `dados` volta do navegador com o valor já somado,
+ * cada passada somava outra vez. A tela mostra sempre a consolidação, então ela
+ * saía com o IR dobrado, e cada frase no chat dobrava mais.
+ *
+ * A cura foi guardar o valor LIDO (`_ir_lido`, `_liquido_lido`,
+ * `_honorarios_lido`, `_auditoria_justificativa_lida`) e reconstruir a partir
+ * dele em toda ação: rodar dez vezes dá o mesmo que rodar uma.
+ *
+ * E ESTA FUNÇÃO É O PAR OBRIGATÓRIO DISSO. Sozinha, a linha de base criaria
+ * outro problema: quem escrevesse "o IR é R$ 5.000" no chat veria o número
+ * voltar ao lido na passada seguinte, porque a base ficou congelada na primeira.
+ * Mexendo o chat num desses campos, a base se REFAZ a partir do que ele
+ * escreveu — e a estimativa automática sai da frente, porque somar a nossa
+ * conta por cima de um número afirmado é cobrar o imposto duas vezes, e desta
+ * vez contra quem tem razão.
+ *
+ * SAIU DO HANDLER porque é lógica pura e é o que sustenta a idempotência do
+ * motor inteiro — o defeito que ela conserta já esteve em produção, e nada o
+ * impedia de voltar.
+ */
+export function resetarLinhasDeBase(
+  dados: Record<string, any>,
+  tocados: readonly string[],
+): string[] {
+  const mudancas: string[] = []
+  const _tocados = tocados ?? []
+  if (_tocados.includes('ir')) {
+    delete dados._ir_lido
+    if (Array.isArray(dados.auditoria_ir_faltante) && dados.auditoria_ir_faltante.length) {
+      delete dados.auditoria_ir_faltante
+      mudancas.push('IR ditado no chat: a estimativa automática do imposto foi descartada')
+    }
+  }
+  if (_tocados.includes('principal_liquido')) delete dados._liquido_lido
+  if (_tocados.includes('auditoria_justificativa')) delete dados._auditoria_justificativa_lida
+  // HONORÁRIO DITADO NO CHAT VENCE O PERCENTUAL DO CARD.
+  //
+  // Ele é campo editável, o SISTEMA_REVISAO promete que "quem afirma o dado é
+  // o usuário", e a resposta dizia "Aplicado: honorarios: X → Y" — mas a
+  // passada seguinte recalculava `pct × base` e descartava o número em
+  // silêncio. Agora a marca desliga o percentual do card, com aviso na tela
+  // para ninguém achar que o card foi ignorado por acaso. Ela sai quando o
+  // chat mexe no próprio percentual.
+  if (_tocados.includes('honorarios')) {
+    delete dados._honorarios_lido
+    dados._honorarios_ditado = true
+  }
+  if (_tocados.includes('honorarios_contratuais_pct')) delete dados._honorarios_ditado
+  // O CENÁRIO CONSERVADOR DITADO NO CHAT FICA.
+  //
+  // O convite a corrigi-lo está na própria resposta da análise ("corrija
+  // auditoria_bruto_conservador aqui no chat"), e o número durava até o fim do
+  // mesmo request: o recálculo pelo Banco Central roda em TODA passada e
+  // gravava por cima. O chat respondia "Aplicado: 61.200 → 58.000" e a tela
+  // mostrava 61.200 — repetir o pedido nunca resolvia.
+  if (_tocados.includes('auditoria_bruto_conservador')) {
+    dados._conservador_ditado = true
+    mudancas.push('cenário conservador ditado no chat: o recálculo automático por índice não vai sobrepô-lo')
+  }
+  // Mexer nos ITENS do recálculo é pedir o recálculo de volta.
+  if (_tocados.includes('auditoria_recalculo')) delete dados._conservador_ditado
+  // Bruto novo muda a base de tudo: a estimativa antiga do imposto foi feita
+  // sobre outro número e não vale mais.
+  if (_tocados.includes('bruto_total')) {
+    // DEVOLVE ANTES DE APAGAR. `dados.ir` viaja INFLADO — é o lido mais a
+    // nossa estimativa do imposto faltante —, e apagar a linha de base com o
+    // campo nesse estado faz a passada seguinte tomar o valor já somado como
+    // se fosse o lido e somar o imposto DE NOVO. Cada correção de bruto no
+    // chat acrescentava mais uma vez o IR estimado, o líquido caía na mesma
+    // proporção, e o aviso mostrava a soma repetida como se fosse nova.
+    if (!_tocados.includes('ir') && dados._ir_lido != null) dados.ir = dados._ir_lido
+    if (!_tocados.includes('principal_liquido') && dados._liquido_lido != null) {
+      dados.principal_liquido = dados._liquido_lido
+    }
+    delete dados._ir_lido
+    delete dados._liquido_lido
+    // O aviso dos sucumbenciais dentro do bruto falaria de um bruto que já não
+    // existe. A conferência aritmética refaz a marca se o caso persistir.
+    delete dados._sucumbDentroDoBruto
+    // Bruto ditado a mao encerra o remanejamento do honorario e o valor da
+    // triagem: os avisos contariam uma origem que o numero de agora nao tem.
+    delete dados._honorarioEraOPrincipal
+    delete dados._bruto_do_portao
+    delete dados._bruto_da_segunda_leitura
+  }
+  return mudancas
+}
+
+/**
+ * OS CAMPOS QUE SÃO LISTA, e por isso se editam POR ÍNDICE.
+ *
+ * Vivia no handler, e o teste do patch definia a própria cópia — que já havia
+ * divergido: `auditoria_confronto`, `auditoria_recalculo`,
+ * `auditoria_ir_faltante` e `notas_celulas` são listas em produção e não eram
+ * em nenhum caso escrito. Uma lista que o patch não reconhece é SUBSTITUÍDA
+ * inteira quando a IA manda uma linha só: o resto do questionário some.
+ */
+export const CAMPOS_LISTA: ReadonlySet<string> = new Set([
+  'roteiro_prazo',
+  'bloco_g_riscos',
+  'auditoria_divergencias',
+  'auditoria_confronto',
+  'auditoria_recalculo',
+  'auditoria_ir_faltante',
+  'notas_celulas',
+])
