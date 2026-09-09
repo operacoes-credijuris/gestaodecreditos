@@ -13,6 +13,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   ABA_JURIDICO,
+  ABA_FUNDOS_COMPARTILHADA,
+  ehCardDeFundos,
   FUNIL_PRECATORIO,
   FUNIL_RPV,
   SUBDIVISOES_PRECATORIO,
@@ -291,5 +293,59 @@ describe('RPV não é afetado pela subdivisão', () => {
       'Reprovados',
     ])
     expect(abas.find((a) => a.label === 'Validação')!.acoes).toHaveLength(3)
+  })
+})
+
+describe('ehCardDeFundos', () => {
+  /**
+   * A DESTINAÇÃO SAI DO CARD, não da pílula aberta.
+   *
+   * A subdivisão é um recorte da TELA. Se a due diligence perguntasse a ela,
+   * alternar Interno/Fundos atrás de uma janela aberta trocaria as frentes da
+   * diligência em curso — a aba de certidões aparecendo e sumindo enquanto
+   * alguém preenche o formulário. Quem responde é o status_id.
+   */
+  it('coluna que só existe nos Fundos é card de fundo', () => {
+    for (const coluna of [
+      'Qualificação Jurídica Preliminar',
+      'Encaminhar ao Fundo',
+      'Defesa Técnica (TIER 2+)',
+      'Revisão da Defesa Técnica (TIER 2+)',
+    ]) {
+      expect(ehCardDeFundos(idDe(coluna), espelho()), coluna).toBe(true)
+    }
+  })
+
+  it('coluna do Interno não é', () => {
+    for (const coluna of [
+      'Análise Jurídica (TIER 1)',
+      'Análise Econômico-Financeira (TIER 1)',
+      'Revisão (TIER 1)',
+      'Diligência',
+      'Reprovados Operacional',
+    ]) {
+      expect(ehCardDeFundos(idDe(coluna), espelho()), coluna).toBe(false)
+    }
+  })
+
+  // "APRESENTAÇÃO DE PROPOSTA" É A MESMA COLUNA nas duas trilhas — "Aprovados"
+  // no Interno, "Apresentação" nos Fundos. Dela não se sabe a destinação, então
+  // ela conta como Interno: é o comportamento que já valia, e é por isso que
+  // aquela aba não oferece botão em trilha nenhuma.
+  it('a coluna compartilhada não é tratada como de fundo', () => {
+    expect(ehCardDeFundos(idDe('Apresentação de Proposta'), espelho())).toBe(false)
+  })
+
+  it('coluna fora das trilhas, e espelho vazio, não são de fundo', () => {
+    expect(ehCardDeFundos(idDe('Nutrição'), espelho())).toBe(false)
+    expect(ehCardDeFundos(90000, [])).toBe(false)
+  })
+
+  // A aba compartilhada é nomeada em kommo.ts para a tela poder excluí-la dos
+  // botões; se a chave mudar lá e não aqui, o botão reaparece na aba errada.
+  it('ABA_FUNDOS_COMPARTILHADA aponta para a aba da coluna compartilhada', () => {
+    const fundos = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'fundos')!
+    const aba = fundos.abas.find((a) => a.key === ABA_FUNDOS_COMPARTILHADA)
+    expect(aba?.colunaKommo).toBe('Apresentação de Proposta')
   })
 })

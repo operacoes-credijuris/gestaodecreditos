@@ -481,6 +481,42 @@ export function colunasPrecatorioDesalinhadas(
 }
 
 /**
+ * A aba dos Fundos que é a MESMA coluna do Kommo que "Aprovados" no Interno.
+ *
+ * "Apresentação de Proposta" serve às duas trilhas, e é por isso que ela não
+ * oferece trabalho em nenhuma: o mesmo card mostraria o botão de um lado e não
+ * do outro, dependendo de qual pílula estivesse selecionada. Um card não muda de
+ * natureza porque alguém trocou o recorte da tela.
+ */
+export const ABA_FUNDOS_COMPARTILHADA = 'fun-apresentacao'
+
+/**
+ * O card está numa coluna que SÓ EXISTE na trilha dos Fundos?
+ *
+ * A pergunta parece a mesma que "qual pílula está aberta", e não é: a
+ * subdivisão é um recorte da TELA, e a due diligence de um card aberto não pode
+ * mudar de frentes porque alguém clicou em Interno atrás da janela. Quem
+ * responde tem de ser o card, e o que o card tem é o status_id.
+ *
+ * "Apresentação de Proposta" fica de fora justamente por pertencer às duas —
+ * dela não se sabe a destinação, então ela conta como Interno, que é o
+ * comportamento que já valia antes desta função existir.
+ */
+export function ehCardDeFundos(statusId: number, etapas: EtapaKommo[]): boolean {
+  const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
+  const idsDaTrilha = (key: SubdivisaoPrecatorio): Set<number> => {
+    const ids = new Set<number>()
+    const def = SUBDIVISOES_PRECATORIO.find((s) => s.key === key)
+    for (const a of def?.abas ?? []) {
+      const id = nomes.get(normalizarBusca(a.colunaKommo))
+      if (id !== undefined) ids.add(id)
+    }
+    return ids
+  }
+  return idsDaTrilha('fundos').has(statusId) && !idsDaTrilha('interno').has(statusId)
+}
+
+/**
  * As abas de um funil.
  *
  * OS DOIS FUNIS TÊM ABAS FIXAS, cada um do seu jeito: RPV amarra o status_id

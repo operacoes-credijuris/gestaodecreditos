@@ -50,6 +50,8 @@ import {
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABA_JURIDICO,
+  ABA_FUNDOS_COMPARTILHADA,
+  ehCardDeFundos,
   abasDoFunil,
   agruparPorAba,
   statusExibidos,
@@ -504,9 +506,16 @@ function tituloCard(lead: KommoLead): string {
  *
  *   'rpv'         a análise de RPV que já existia, mais a due diligence
  *   'precatorio'  due diligence + análise jurídica (só na aba Jurídico)
+ *   'dd'          só a due diligence — a trilha dos Fundos
  *   'nenhum'      etapa em que não se analisa: aprovados, diligência, reprovados
+ *
+ * 'dd' EXISTE PORQUE OS FUNDOS NÃO TÊM ANÁLISE NOSSA. Naquela trilha o parecer é
+ * do fundo; o que a casa faz antes de encaminhar é apurar de quem é o crédito e
+ * o que pesa contra o cedente. Oferecer ali a "Análise jurídica" — que roda o
+ * motor do Interno — produziria parecer que ninguém pediu, e "Executar análise"
+ * roda o motor de RPV, que num precatório já era o defeito conhecido.
  */
-type BotoesDoCard = 'rpv' | 'precatorio' | 'nenhum'
+type BotoesDoCard = 'rpv' | 'precatorio' | 'dd' | 'nenhum'
 
 /**
  * As abas de RPV em que a análise JÁ ACABOU.
@@ -838,8 +847,14 @@ function CardCredito({
           Sem número em parte nenhuma é DEFEITO, e é dito: sem ele o card fica
           fora da busca por processo e o checklist de certidões não acha o CNJ.
           É a única checagem daqui, porque é a única que nenhuma outra etapa faz
-          nestas abas. */}
-      {botoes === 'nenhum' && (
+          nestas abas.
+
+          NOS FUNDOS ELE FICA JUNTO DO BOTÃO, e não no lugar dele: ali o card
+          oferece due diligence, e é a diligência que mais precisa do número. É
+          por ele que a apuração RECONHECE o próprio crédito na lista de
+          processos do cedente e o exclui — sem número, o precatório que estamos
+          comprando volta da busca como se fosse mais uma dívida dele. */}
+      {(botoes === 'nenhum' || botoes === 'dd') && (
         <AvisoSemNumero lead={lead} />
       )}
 
@@ -848,7 +863,8 @@ function CardCredito({
           precatório, só a aba Jurídico os oferece — analisar um card já aprovado
           ou reprovado não é trabalho, é retrabalho — e "Analisar" NÃO aparece: o
           motor dele é o de RPV (template, cenários e prazo de RPV), e rodá-lo num
-          precatório produzia parecer errado com cara de conferido. */}
+          precatório produzia parecer errado com cara de conferido. Na trilha dos
+          Fundos sobra só a due diligence: a análise de lá é do fundo. */}
       {botoes !== 'nenhum' && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {/* A MESMA ORDEM NOS DOIS FUNIS: due diligence primeiro, análise
@@ -1513,13 +1529,22 @@ export default function AnaliseCredito() {
    * Era o defeito relatado: o motor por trás dele é o `gerar-analise-rpv`, com
    * template, cenários (RPV expedida ou não) e cálculo de prazo de RPV, e num
    * precatório ele entregava parecer e planilha errados sem nenhum sinal na tela.
+   *
+   * NOS FUNDOS, SÓ A DUE DILIGENCE. A análise daquela trilha é do fundo, não
+   * nossa — mas saber de quem é o crédito e o que pesa contra o cedente é
+   * trabalho da casa em qualquer destinação, e é o que se faz ANTES de
+   * encaminhar. Fica de fora "Apresentação", que é a MESMA coluna do Kommo que
+   * "Aprovados" no Interno: com o botão lá, o mesmo card o teria numa pílula e
+   * não na outra.
    */
   const botoesDoCard: BotoesDoCard =
     funil === FUNIL_RPV
       ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
       : abaAtual?.key === ABA_JURIDICO
         ? 'precatorio'
-        : 'nenhum'
+        : subdivisao === 'fundos' && abaAtual && abaAtual.key !== ABA_FUNDOS_COMPARTILHADA
+          ? 'dd'
+          : 'nenhum'
 
   const lista = useMemo(() => {
     let l = abaAtual ? (porAba[abaAtual.key] ?? []) : []
@@ -1940,10 +1965,20 @@ export default function AnaliseCredito() {
             rpvLead?.kommo_lead_id === ddLead.kommo_lead_id
           }
           avisoPdf={avisoPdf[ddLead.kommo_lead_id] ?? null}
-          // Certidões só no precatório. Lido do CARD, não do funil aberto: o
-          // card guardado no estado é quem manda, e trocar de funil com a janela
-          // aberta não pode mudar as frentes da diligência em curso.
-          comCertidoes={ddLead.pipeline_id === FUNIL_PRECATORIO}
+          // Certidões só no precatório do INTERNO. Lido do CARD, não do funil
+          // nem da pílula abertos: o card guardado no estado é quem manda, e
+          // trocar de recorte com a janela aberta não pode mudar as frentes da
+          // diligência em curso — daí `ehCardDeFundos` responder pelo status_id
+          // e não por `subdivisao`.
+          //
+          // NOS FUNDOS SÓ PROCESSOS JUDICIAIS, como em RPV. O checklist de
+          // certidões é a diligência documental que precede a NOSSA aquisição;
+          // no crédito que vai ao fundo quem a monta é ele, e abrir a aba aqui
+          // convidaria a equipe a emitir certidão para um dossiê que não é nosso.
+          comCertidoes={
+            ddLead.pipeline_id === FUNIL_PRECATORIO &&
+            !ehCardDeFundos(ddLead.status_id, etapas.data ?? [])
+          }
           onClose={() => setDdLead(null)}
         />
       )}
