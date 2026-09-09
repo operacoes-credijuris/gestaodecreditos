@@ -292,16 +292,11 @@ function EscavadorConfig() {
             </Field>
             <div className="sm:col-span-2 space-y-2">
               <Button onClick={salvar} loading={saving}>
-                Salvar e testar
+                Salvar
               </Button>
               {saldo && (
                 <p className="text-sm text-slate-600">Saldo na API: {saldo}</p>
               )}
-              <p className="text-xs text-slate-500">
-                Fonte da aba “Processos judiciais” da due diligence: é por ela que as linhas
-                10 e 11 da análise (dívida do cedente e do advogado) passam a ser respondidas
-                por apuração, e não pela leitura dos autos. Cada consulta consome crédito.
-              </p>
             </div>
           </div>
         )}
