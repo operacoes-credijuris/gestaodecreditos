@@ -7,7 +7,7 @@
 // acionava um item da navegação, trocando de rota e destruindo a ficha que
 // estava sendo lida. Três implementações da mesma regra viravam três
 // comportamentos; agora é uma.
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 /** Elementos que recebem foco por Tab dentro de um painel. */
 export const FOCAVEIS =
@@ -18,6 +18,27 @@ export const FOCAVEIS =
 // comum aqui), e o fundo voltaria a rolar sob o diálogo de cima.
 let abertos = 0
 let overflowOriginal = ''
+
+/**
+ * A PILHA DOS DIÁLOGOS ABERTOS, do mais antigo para o de cima.
+ *
+ * POR QUE ELA EXISTE. Cada diálogo registra o seu próprio listener de Escape no
+ * `document`, e o Escape chega a TODOS ao mesmo tempo. Com uma janela aberta
+ * dentro de outra — a de reprovar/diligenciar dentro da análise de RPV, que é o
+ * caso comum aqui — um Escape fechava as duas: a de dentro pedia confirmação e
+ * a de fora, se não estivesse "dirty", fechava calada, levando embora o texto
+ * que a pessoa acabou de digitar. Estando dirty, vinham DOIS `window.confirm`
+ * com a mesma frase, e quem clicava OK no primeiro pensando ser o da janela
+ * pequena descartava a análise inteira.
+ *
+ * Parar a propagação no painel não resolveria: os listeners estão no
+ * `document`, não na árvore de cada janela.
+ *
+ * SÍMBOLO, e não um número: a identidade não pode colidir nem sobreviver a um
+ * remonte. Sai da pilha de onde estiver — o desmonte não é garantidamente na
+ * ordem inversa quando duas janelas fecham no mesmo ciclo.
+ */
+const pilha: symbol[] = []
 
 /**
  * Trava o scroll do body enquanto o diálogo estiver aberto.
@@ -56,8 +77,36 @@ export function useFocoPreso(
   ativo: boolean,
   painelRef: React.RefObject<HTMLElement | null>,
   preferirCampo = false,
-) {
+): () => boolean {
   const focoAnterior = useRef<HTMLElement | null>(null)
+  // O REGISTRO NA PILHA MORA AQUI porque todo diálogo da plataforma já passa
+  // por este hook — Modal, Drawer e o menu do celular. Registrar em cada um
+  // deles daria três lugares para esquecer, que é como os três já divergiram
+  // uma vez.
+  const marca = useRef<symbol | null>(null)
+  if (marca.current === null) marca.current = Symbol('dialogo')
+
+  useEffect(() => {
+    if (!ativo) return
+    const m = marca.current as symbol
+    pilha.push(m)
+    return () => {
+      const i = pilha.lastIndexOf(m)
+      if (i >= 0) pilha.splice(i, 1)
+    }
+  }, [ativo])
+
+  /**
+   * Este diálogo é o de cima? É o que decide quem responde ao Escape.
+   *
+   * Pilha vazia devolve true de propósito: um diálogo que por qualquer motivo
+   * não se registrou continua fechando com Escape. Um teclado que não fecha
+   * janela é pior que uma janela que fecha na vez de outra.
+   */
+  const ehTopo = useCallback(
+    () => pilha.length === 0 || pilha[pilha.length - 1] === marca.current,
+    [],
+  )
 
   useEffect(() => {
     if (!ativo) return
@@ -84,6 +133,10 @@ export function useFocoPreso(
     if (!ativo) return
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Tab') return
+      // O MESMO MOTIVO DO ESCAPE: com duas janelas abertas, os dois laços de Tab
+      // disparam e o de fora rouba o foco de volta para o painel dele — o Tab
+      // dentro da janela pequena pulava para o fundo.
+      if (!ehTopo()) return
       const painel = painelRef.current
       if (!painel) return
       const focaveis = Array.from(painel.querySelectorAll<HTMLElement>(FOCAVEIS))
@@ -103,5 +156,7 @@ export function useFocoPreso(
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [ativo, painelRef])
+  }, [ativo, painelRef, ehTopo])
+
+  return ehTopo
 }

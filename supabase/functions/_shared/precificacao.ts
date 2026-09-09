@@ -423,3 +423,103 @@ export function sucumbenciaisNoBruto(o: {
     sucumbenciais: o.sucumbenciais,
   }
 }
+
+/**
+ * O BLOCO DA PLANILHA: verde (1) quando os honorários foram DESTACADOS nos
+ * autos, azul (2) quando não.
+ *
+ * A PERGUNTA É SOBRE OS AUTOS, NÃO SOBRE O NEGÓCIO. É fato do processo, e
+ * independe de estarmos comprando o principal, os honorários ou os dois.
+ * Confundir as duas coisas punha metade dos casos no bloco errado — e os dois
+ * blocos calculam o honorário sobre bases diferentes: o verde sobre o bruto, o
+ * azul sobre o líquido.
+ *
+ * Sem o campo (análise de antes desta versão), cai no valor destacado, que era
+ * o critério anterior.
+ */
+export function escolherModelo(destacados: unknown, honorariosContratuais: number): 1 | 2 {
+  if (destacados === true) return 1
+  if (destacados === false) return 2
+  return honorariosContratuais > 0 ? 1 : 2
+}
+
+/**
+ * TUDO O QUE SE DECIDE SOBRE O HONORÁRIO CONTRATUAL, de uma vez e sem estado.
+ *
+ * POR QUE SAIU DO HANDLER. A conta morava solta no meio da ação, lendo
+ * `dados.honorarios` e gravando de volta no MESMO campo — e o `dados` viaja
+ * entre as ações (analisar, chat, reprecificar, salvar). Na passada seguinte, o
+ * "honorário destacado pela contadoria" que ela lia já era o número que ela
+ * mesma havia calculado do percentual do card. Três coisas mudavam sozinhas
+ * entre a preliminar e a consolidação que a tela mostra:
+ *
+ *   (a) o BLOCO virava 1 quando `honorarios_destacados` vinha ausente (0 → >0),
+ *       e com ele a base do percentual (líquido → bruto): honorário maior,
+ *       principal líquido menor, outro documento;
+ *   (b) a DIVERGÊNCIA "card 30% × autos 20%" desaparecia, porque o percentual
+ *       dos autos passava a ser derivado do nosso próprio número — o aviso que
+ *       existe para ser visto era justamente o que não chegava à tela;
+ *   (c) "a contadoria destacou R$ X" passava a citar o valor calculado.
+ *
+ * A CURA É A LINHA DE BASE, como no IR: quem chama guarda o valor LIDO uma vez
+ * (`_honorarios_lido`) e passa SEMPRE ele em `honorariosLido`. Assim rodar dez
+ * vezes dá o mesmo que rodar uma.
+ *
+ * E A BASE SE FORMA COM O BRUTO FINAL: o bruto ainda se move depois da leitura
+ * (honorário que era o principal, valor do portão, sucumbenciais somados dentro),
+ * então esta função é chamada DE NOVO depois desses ajustes. Chamar uma vez só,
+ * antes deles, dava percentual sobre um bruto que a própria ação já corrigiu.
+ */
+export function decidirHonorarios(o: {
+  /** O honorário destacado LIDO nos autos. Linha de base, nunca o recalculado. */
+  honorariosLido: number
+  /** `honorarios_destacados` como a leitura devolveu: true, false ou ausente. */
+  destacados: unknown
+  bruto: number
+  /** IR e INSS LIDOS: a base do contrato é o líquido dos autos, não o líquido
+   *  depois da nossa estimativa de imposto faltante. */
+  ir: number
+  inss: number
+  /** O percentual do card, quando o comercial informou. */
+  pctCard: number | null
+  /** O percentual escrito nos autos, quando a leitura o achou. */
+  pctAutosLido: number | null
+}): {
+  modelo: 1 | 2
+  houveDestaque: boolean
+  honBase: number
+  honorariosCalc: number
+  pctAutos: number | null
+  pctDoProcesso: boolean
+} {
+  const honLido = Number.isFinite(o.honorariosLido) ? o.honorariosLido : 0
+  const modelo = escolherModelo(o.destacados, honLido)
+  const houveDestaque = modelo === 1
+  const bruto = Number.isFinite(o.bruto) ? o.bruto : 0
+  const ir = Number.isFinite(o.ir) ? o.ir : 0
+  const inss = Number.isFinite(o.inss) ? o.inss : 0
+  // A base do percentual acompanha o BLOCO: o verde calcula o honorário sobre
+  // o bruto, o azul sobre o líquido. É a mesma pergunta do bloco, então tem de
+  // ser a mesma resposta — usar o valor destacado aqui e o fato lá em cima
+  // deixava os dois discordando.
+  const honBase = houveDestaque ? bruto : bruto - ir - inss
+  const honorariosCalc = o.pctCard != null ? honBase * (o.pctCard / 100) : honLido
+  // A PORCENTAGEM DOS CONTRATUAIS SEGUNDO OS AUTOS.
+  //
+  // Lida do processo, não derivada aqui — e a diferença é o ponto. Derivar
+  // exige escolher uma base, e a base é justamente o que costuma divergir: o
+  // destaque pode ter saído sobre o bruto, sobre o líquido de INSS ou sobre o
+  // valor atualizado de outra data. Percentual igual sobre bases diferentes dá
+  // reais diferentes, e comparar reais acusaria divergência onde não há.
+  //
+  // A divisão em código fica como último recurso, para quando a leitura não
+  // achou a porcentagem escrita nem conseguiu dividir dentro de um documento só.
+  const pctLido = Number(o.pctAutosLido)
+  const pctDoProcesso = Number.isFinite(pctLido) && pctLido > 0
+  const pctAutos = pctDoProcesso
+    ? pctLido
+    : honBase > 0 && honLido > 0
+      ? (honLido / honBase) * 100
+      : null
+  return { modelo, houveDestaque, honBase, honorariosCalc, pctAutos, pctDoProcesso }
+}

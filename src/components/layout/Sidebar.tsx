@@ -54,7 +54,7 @@ export function Sidebar({
   const [rendered, setRendered] = useState(mobileOpen)
   const [visible, setVisible] = useState(mobileOpen)
   const painelRef = useRef<HTMLDivElement>(null)
-  useFocoPreso(mobileOpen, painelRef)
+  const ehTopo = useFocoPreso(mobileOpen, painelRef)
   useTravaScroll(mobileOpen)
 
   useEffect(() => {
@@ -81,7 +81,7 @@ export function Sidebar({
   useEffect(() => {
     if (!mobileOpen) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && ehTopo()) onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

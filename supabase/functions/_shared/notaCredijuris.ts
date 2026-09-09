@@ -39,14 +39,56 @@ const ASSINATURA = 'Credijuris · nota automática'
  * IDEMPOTENTE porque o texto pode passar por aqui mais de uma vez — a mesma
  * análise reescrita, um texto que já vinha assinado de outra ação — e duas
  * assinaturas no rodapé denunciam o remendo em vez do registro.
+ *
+ * OLHA A ASSINATURA, E NÃO `ehNotaNossa`: esta última também reconhece as notas
+ * antigas, escritas antes de a marca existir, e usá-la aqui deixaria uma nota
+ * NOVA sem marca só porque a forma dela é a de sempre.
  */
 export function assinarNota(texto: string): string {
   const t = String(texto ?? '').trim()
   if (!t) return t
-  return ehNotaNossa(t) ? t : `${t}\n\n${MARCA_NOTA}`
+  return t.includes(ASSINATURA) ? t : `${t}\n\n${MARCA_NOTA}`
+}
+
+/**
+ * AS NOTAS ANTIGAS, escritas entre 13/08 e 07/09 de 2026 — `note_type: 'common'`
+ * e ainda sem marca nenhuma.
+ *
+ * A marca conserta as notas de agora e não alcança as de trás: um card analisado
+ * naquela janela que ainda esteja em Pendentes, Validação ou Diligência tem no
+ * feed uma ficha e um veredito NOSSOS que o espelho continua trazendo de volta
+ * como se fossem cadastro do comercial. É a mesma regressão que a marca existe
+ * para impedir, viva no legado — "PARCELA CEDIDA: <o que a IA escolheu>" volta
+ * como o que o card diz, e a análise seguinte confirma a si mesma.
+ *
+ * RECONHECER PELA FORMA, e não pelo conteúdo: cada padrão aqui é algo que só
+ * este código produz. Rótulo em CAIXA no começo da linha seguido de dois-pontos
+ * (a ficha, montada por `linhasDaFicha`), o cabeçalho do resumo da oportunidade,
+ * a linha do Drive e os vereditos com o emoji. Exige-se DOIS rótulos na ficha
+ * porque um só ("PROCESSO: 5001…") é coisa que gente escreve.
+ *
+ * O RISCO ACEITÁVEL é o inverso: uma nota humana confundida com nossa deixa de
+ * alimentar a análise. Perde-se informação; não se cria informação falsa. Errar
+ * para o outro lado — nossa nota lida como cadastro — é o que já custou caro.
+ */
+const ROTULOS_DA_FICHA =
+  /^(?:TIPO|PROCESSO|TRIBUNAL|CEDENTE|ENTIDADE DEVEDORA|PARCELA CEDIDA|VALOR CEDIDO|HONORÁRIOS C\.):/gm
+
+const FORMAS_LEGADAS: RegExp[] = [
+  /^Oportunidade Credijuris/m,
+  /^Planilha e análise no Drive: https?:\/\//m,
+  /(?:✅|❌)\s*(?:APROVADO|RECUSADO) na análise automática\./,
+  /ANÁLISE JURÍDICA CONCLUÍDA\./,
+]
+
+function ehFormatoLegado(t: string): boolean {
+  if (FORMAS_LEGADAS.some((r) => r.test(t))) return true
+  return (t.match(ROTULOS_DA_FICHA) ?? []).length >= 2
 }
 
 /** A nota foi escrita pelo sistema? É o que mantém o espelho livre dela. */
 export function ehNotaNossa(texto: string | null | undefined): boolean {
-  return String(texto ?? '').includes(ASSINATURA)
+  const t = String(texto ?? '')
+  if (!t.trim()) return false
+  return t.includes(ASSINATURA) || ehFormatoLegado(t)
 }

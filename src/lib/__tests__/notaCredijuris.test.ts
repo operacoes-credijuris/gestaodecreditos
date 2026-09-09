@@ -4,6 +4,7 @@ import {
   ehNotaNossa,
   MARCA_NOTA,
 } from '../../../supabase/functions/_shared/notaCredijuris.ts'
+import { anotacoesDaAnalise, resumoDaOportunidade } from '../anotacaoKommo.ts'
 
 /**
  * A marca que separa a nota do sistema da nota escrita por gente.
@@ -52,5 +53,49 @@ describe('notaCredijuris', () => {
   it('reconhece mesmo sem o travessão do começo', () => {
     expect(ehNotaNossa('Texto.\n\nCredijuris · nota automática da análise')).toBe(true)
     expect(ehNotaNossa('Texto.\n\n- Credijuris · nota automática da análise')).toBe(true)
+  })
+
+  // AS NOTAS DE ANTES DA MARCA (13/08 a 07/09 de 2026) continuam no feed dos
+  // cards que ainda estão em análise, e o espelho as traria de volta como
+  // cadastro do comercial. Os textos abaixo saem das MESMAS funções que os
+  // escreveram — se a forma mudar, o teste muda com ela.
+  it('reconhece a ficha antiga, sem marca nenhuma', () => {
+    const [ficha] = anotacoesDaAnalise({
+      ficha: { tipo: 'RPV', processo: '5001234-56.2026.8.09.0051', parcela_cedida: 'Principal' },
+    })
+    expect(ficha).not.toContain(MARCA_NOTA)
+    expect(ehNotaNossa(ficha)).toBe(true)
+  })
+
+  it('reconhece o veredito antigo, aprovado e recusado', () => {
+    const [, aprovado] = anotacoesDaAnalise({ ficha: { tipo: 'RPV' }, link: 'https://drive/x' })
+    expect(ehNotaNossa(aprovado)).toBe(true)
+    const [recusado] = anotacoesDaAnalise({ reprovado: true, motivo: 'sem valor nos autos' })
+    expect(ehNotaNossa(recusado)).toBe(true)
+    const [, concluida] = anotacoesDaAnalise({
+      ficha: { tipo: 'RPV' },
+      veredito: '✅ ANÁLISE JURÍDICA CONCLUÍDA.',
+    })
+    expect(ehNotaNossa(concluida)).toBe(true)
+  })
+
+  it('reconhece o resumo antigo da oportunidade', () => {
+    const r = resumoDaOportunidade({ ficha: { tipo: 'RPV', cedente: 'Fulano' }, link: 'https://drive/y' })
+    expect(ehNotaNossa(r)).toBe(true)
+  })
+
+  // UM RÓTULO SÓ É COISA QUE GENTE ESCREVE. Exigir dois é o que separa a
+  // ficha do sistema do bilhete de um colega que copiou o número do processo.
+  it('um rótulo isolado continua sendo nota de gente', () => {
+    expect(ehNotaNossa('PROCESSO: 5001234-56.2026.8.09.0051 — cedente vem amanhã')).toBe(false)
+    expect(ehNotaNossa('Tipo: RPV\nProcesso: 5001234-56')).toBe(false)
+  })
+
+  // E A MARCA CONTINUA SENDO POSTA nas notas novas: assinarNota olha a
+  // assinatura, não o reconhecimento largo, senão uma nota nova no formato de
+  // sempre sairia sem marca — e o legado voltaria a se criar sozinho.
+  it('assina a nota nova mesmo quando a forma é a legada', () => {
+    const [ficha] = anotacoesDaAnalise({ ficha: { tipo: 'RPV', processo: '5001234-56' } })
+    expect(assinarNota(ficha)).toBe(`${ficha}\n\n${MARCA_NOTA}`)
   })
 })

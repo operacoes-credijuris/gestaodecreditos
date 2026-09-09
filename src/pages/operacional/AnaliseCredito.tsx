@@ -447,7 +447,8 @@ async function anotarResultadoNaKommo(
   analista: string,
   /** A primeira linha do veredito. Omitido = aprovado na análise automática. */
   veredito?: string,
-) {
+): Promise<string[]> {
+  const falhas: string[] = []
   const textos = anotacoesDaAnalise({
     reprovado: r.reprovado,
     motivo: r.motivo,
@@ -470,10 +471,16 @@ async function anotarResultadoNaKommo(
   for (const texto of textos) {
     try {
       await invokeFunction('kommo-anotar', { lead_id: leadId, texto })
-    } catch {
-      /* segue para a próxima */
+    } catch (e) {
+      // DEVOLVE, EM VEZ DE ENGOLIR. Falhar aqui não derruba o resultado que já
+      // está na tela — mas token do Kommo expirado ou 5xx do CRM deixava as
+      // DUAS notas no chão em silêncio: a janela dizia "salvo" e o comercial
+      // nunca via a ficha nem o link do Drive. É uma das duas únicas saídas
+      // persistidas da análise, e a única que ele lê.
+      falhas.push((e as Error)?.message ?? String(e))
     }
   }
+  return falhas
 }
 
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
@@ -1285,7 +1292,11 @@ export default function AnaliseCredito() {
       // A ANOTAÇÃO NO CARD, como na RPV: a ficha do crédito e o veredito.
       // Antes esta etapa não escrevia nada no Kommo — quem rodava a análise via
       // o resultado na tela, e o comercial não via nada.
-      void anotarResultadoNaKommo(id, r as unknown as ResultadoAnalise, analistaNome, VEREDITO_JURIDICO)
+      void anotarResultadoNaKommo(id, r as unknown as ResultadoAnalise, analistaNome, VEREDITO_JURIDICO).then(
+        (falhas) => {
+          if (falhas.length) toast.error('A análise ficou pronta, mas a anotação no card do Kommo não subiu: ' + falhas.join('; '))
+        },
+      )
     } catch (e) {
       setResultadoJuridico((p) => ({
         ...p,
@@ -1818,7 +1829,9 @@ export default function AnaliseCredito() {
             // era isso que a versão de um clique fazia cedo demais.
             const final = r as unknown as ResultadoAnalise
             setResultadoAnalise((p) => ({ ...p, [rpvLead.kommo_lead_id]: final }))
-            void anotarResultadoNaKommo(rpvLead.kommo_lead_id, final, analistaNome)
+            void anotarResultadoNaKommo(rpvLead.kommo_lead_id, final, analistaNome).then((falhas) => {
+              if (falhas.length) toast.error('A análise foi salva no Drive, mas a anotação no card do Kommo não subiu: ' + falhas.join('; '))
+            })
           }}
           onClose={() => {
             // OS BYTES DOS PDFs SAEM DA MEMÓRIA AO FECHAR. Eles serviam a uma

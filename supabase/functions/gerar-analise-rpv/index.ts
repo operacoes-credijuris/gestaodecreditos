@@ -52,7 +52,7 @@ import {
   type IndiceDeclarado,
   type Regime,
 } from "../_shared/indicesBcb.ts";
-import { aplicarAuditoria, calibrarDesagio, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, escolherModelo, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { aplicarPatch, aplicarParametrosManuais, parametrosParaCalibragem } from "../_shared/revisao.ts";
 import {
   aplicarDiligenciaNoM2,
@@ -489,29 +489,6 @@ function prazoMeses(o: {
   return { meses, regra, detalhe, roteiro: null };
 }
 
-// Modelo 1 (verde) se há honorários contratuais a destacar; senão Modelo 2 (azul).
-/**
- * Qual bloco da planilha vale: o verde (1) ou o azul (2).
- *
- * A PERGUNTA É SOBRE OS AUTOS, NÃO SOBRE O NEGÓCIO. O verde é "os honorários
- * FORAM DESTACADOS na RPV ou nos cálculos da contadoria"; o azul, "não foram".
- * É fato do processo, e independe de estarmos comprando o principal, os
- * honorários ou os dois.
- *
- * Confundir as duas coisas punha metade dos casos no bloco errado: crédito com
- * destaque cuja cessão é só do principal caía no azul, e crédito sem destaque
- * cuja cessão inclui honorários caía no verde. Além de o documento afirmar algo
- * falso sobre o processo, os dois blocos calculam o honorário sobre bases
- * diferentes — o verde sobre o bruto, o azul sobre o líquido.
- *
- * Sem o campo (análise de antes desta versão), cai no valor destacado, que era
- * o critério anterior.
- */
-function escolherModelo(destacados: unknown, honorariosContratuais: number): 1 | 2 {
-  if (destacados === true) return 1;
-  if (destacados === false) return 2;
-  return honorariosContratuais > 0 ? 1 : 2;
-}
 
 
 /**
@@ -1615,8 +1592,11 @@ const SYSTEM_ANALISE =
   '(2) o CÁLCULO HOMOLOGADO por decisão judicial — o valor homologado, não o que a parte pediu; ' +
   '(3) a CONTA DA CONTADORIA judicial, quando as partes foram intimadas e o prazo correu sem impugnação, ou a impugnação foi rejeitada; ' +
   '(4) o valor apresentado pelo EXECUTADO em execução invertida, quando o exequente concordou ou não impugnou no prazo; ' +
-  '(5) o valor apresentado pelo EXEQUENTE, quando não houve impugnação e o prazo passou. ' +
-  'Se NENHUM desses existir, devolva null nos valores. Não monte a conta você mesmo, não some parcelas soltas e não use o valor da petição inicial. ' +
+  '(5) o valor apresentado pelo EXEQUENTE, quando não houve impugnação e o prazo passou; ' +
+  '(6) a MEMÓRIA DE CÁLCULO que instrui o cumprimento de sentença ou a execução, AINDA QUE PENDENTE DE IMPUGNAÇÃO e sem homologação. ' +
+  'Ela é o último da ordem porque é a menos firme de todas — mas é um número dos autos, apresentado por quem executa, e devolvê-lo com a ressalva vale mais que devolver nada. ' +
+  'Usando (6), DIGA EM origem_valores que o valor não está homologado e que o prazo de impugnação pode não ter corrido: a auditoria e o risco de revisão cuidam do resto. ' +
+  'Se NENHUM desses existir, devolva null nos valores. Não monte a conta você mesmo, não some parcelas que nenhuma peça dos autos já somou e não use o valor da petição inicial da ação de conhecimento. ' +
   'EXECUÇÃO DE HONORÁRIOS — defensoria dativa/UHD, curador especial, perito, advogado em causa própria. ' +
   'A MESMA ordem de autoridade vale, e as peças têm outros nomes: a certidão de honorários ou o ato que os ARBITRA, a memória que instrui a execução, a decisão que a homologa e a RPV expedida em nome do advogado. ' +
   'NÃO DEVOLVA ZERO POR NÃO RECONHECER O NOME DA PEÇA: o valor está lá, e é o que se executa. ' +
@@ -2191,11 +2171,40 @@ async function refinarDados(
     }
     if (_tocados.includes('principal_liquido')) delete r.dados._liquido_lido;
     if (_tocados.includes('auditoria_justificativa')) delete r.dados._auditoria_justificativa_lida;
+    // Honorário ditado no chat vira a nova linha de base — quem tem o processo
+    // aberto acabou de dizer quanto a contadoria destacou.
+    if (_tocados.includes('honorarios')) delete r.dados._honorarios_lido;
+    // O CENÁRIO CONSERVADOR DITADO NO CHAT FICA.
+    //
+    // O convite a corrigi-lo está na própria resposta da análise ("corrija
+    // auditoria_bruto_conservador aqui no chat"), e o número durava até o fim do
+    // mesmo request: o recálculo pelo Banco Central roda em TODA passada e
+    // gravava por cima. O chat respondia "Aplicado: 61.200 → 58.000" e a tela
+    // mostrava 61.200 — repetir o pedido nunca resolvia.
+    if (_tocados.includes('auditoria_bruto_conservador')) {
+      r.dados._conservador_ditado = true;
+      r.mudancas.push('cenário conservador ditado no chat: o recálculo automático por índice não vai sobrepô-lo');
+    }
+    // Mexer nos ITENS do recálculo é pedir o recálculo de volta.
+    if (_tocados.includes('auditoria_recalculo')) delete r.dados._conservador_ditado;
     // Bruto novo muda a base de tudo: a estimativa antiga do imposto foi feita
     // sobre outro número e não vale mais.
     if (_tocados.includes('bruto_total')) {
+      // DEVOLVE ANTES DE APAGAR. `dados.ir` viaja INFLADO — é o lido mais a
+      // nossa estimativa do imposto faltante —, e apagar a linha de base com o
+      // campo nesse estado faz a passada seguinte tomar o valor já somado como
+      // se fosse o lido e somar o imposto DE NOVO. Cada correção de bruto no
+      // chat acrescentava mais uma vez o IR estimado, o líquido caía na mesma
+      // proporção, e o aviso mostrava a soma repetida como se fosse nova.
+      if (!_tocados.includes('ir') && r.dados._ir_lido != null) r.dados.ir = r.dados._ir_lido;
+      if (!_tocados.includes('principal_liquido') && r.dados._liquido_lido != null) {
+        r.dados.principal_liquido = r.dados._liquido_lido;
+      }
       delete r.dados._ir_lido;
       delete r.dados._liquido_lido;
+      // O aviso dos sucumbenciais dentro do bruto falaria de um bruto que já não
+      // existe. A conferência aritmética refaz a marca se o caso persistir.
+      delete r.dados._sucumbDentroDoBruto;
       // Bruto ditado a mao encerra o remanejamento do honorario e o valor da
       // triagem: os avisos contariam uma origem que o numero de agora nao tem.
       delete r.dados._honorarioEraOPrincipal;
@@ -3314,42 +3323,49 @@ Deno.serve(async (req) => {
     dados.auditoria_bruto_conservador = numeroOuNulo(dados.auditoria_bruto_conservador);
     dados.honorarios_contratuais_pct = numeroOuNulo(dados.honorarios_contratuais_pct);
 
+    // O HONORÁRIO DESTACADO NOS AUTOS, guardado UMA VEZ.
+    //
+    // Pelo mesmo motivo de `_ir_lido`: adiante o campo `honorarios` recebe o
+    // valor CALCULADO do percentual do card, e o `dados` viaja com ele para a
+    // ação seguinte. Sem esta linha, o "quanto a contadoria destacou" que a
+    // próxima passada lê é o nosso próprio número — e então o bloco da planilha
+    // troca de verde para azul, a divergência "card 30% × autos 20%" desaparece
+    // da tela e o aviso passa a citar o valor que nós calculamos. A tela mostra
+    // sempre a SEGUNDA passada, então era justamente o aviso que não chegava a
+    // quem confere.
+    if (dados._honorarios_lido == null) dados._honorarios_lido = Number(dados.honorarios) || 0;
+
     // 3b.1 O que está sendo cedido (escolha manual sobrepõe a detecção automática) + % de honorários
-    const honAI = Number(dados.honorarios) || 0;          // honorários destacados pela contadoria (0 = sem destaque)
-    // A base do percentual acompanha o BLOCO: o verde calcula o honorário sobre
-    // o bruto, o azul sobre o líquido. É a mesma pergunta do bloco, então tem de
-    // ser a mesma resposta — usar o valor destacado aqui e o fato lá em cima
-    // deixava os dois discordando.
-    const houveDestaque = escolherModelo(dados.honorarios_destacados, honAI) === 1;
-    const brutoNum = Number(dados.bruto_total) || 0;
-    const irNum = Number(dados.ir) || 0;
-    const inssNum = Number(dados.inss) || 0;
-    // honorários a usar: se o usuário informou %, aplica a regra (com destaque→bruto; sem destaque→líquido); senão, usa o da contadoria
-    const _honBase = houveDestaque ? brutoNum : (brutoNum - irNum - inssNum);
-    let honorariosCalc = honAI;
-    if (honorariosPct != null) honorariosCalc = _honBase * (honorariosPct / 100);
-    // A PORCENTAGEM DOS CONTRATUAIS SEGUNDO OS AUTOS.
     //
-    // Lida do processo, não derivada aqui — e a diferença é o ponto. Derivar
-    // exige escolher uma base, e a base é justamente o que costuma divergir: o
-    // destaque pode ter saído sobre o bruto, sobre o líquido de INSS ou sobre o
-    // valor atualizado de outra data. Percentual igual sobre bases diferentes dá
-    // reais diferentes, e comparar reais acusaria divergência onde não há.
-    //
-    // A divisão em código fica como último recurso, para quando a IA não achou
-    // a porcentagem escrita nem conseguiu dividir dentro de um documento só.
-    const _pctAutosLido = Number(dados.honorarios_contratuais_pct);
-    const _pctDoProcesso = Number.isFinite(_pctAutosLido) && _pctAutosLido > 0;
-    const _pctAutos = _pctDoProcesso
-      ? _pctAutosLido
-      : (_honBase > 0 && honAI > 0 ? (honAI / _honBase) * 100 : null);
+    // A CONTA MORA EM _shared/precificacao.ts — pura e com teste. Ela decide de
+    // uma vez o bloco, a base, o honorário e o percentual dos autos, e sempre a
+    // partir do valor LIDO. Ver lá por que: solta aqui, ela lia o campo que ela
+    // mesma escrevia e mudava de resposta entre a preliminar e a consolidação.
+    const honAI = Number(dados._honorarios_lido) || 0;   // o que a contadoria destacou (0 = sem destaque)
+    // O IR E O INSS LIDOS, e não os que viajam: adiante o IR recebe a nossa
+    // estimativa do imposto faltante, e o contrato de honorário incide sobre o
+    // líquido DOS AUTOS. Sem isto, cada passada encolhia a base do honorário.
+    const _refazerHonorario = () => decidirHonorarios({
+      honorariosLido: honAI,
+      destacados: dados.honorarios_destacados,
+      bruto: Number(dados.bruto_total) || 0,
+      ir: Number(dados._ir_lido ?? dados.ir) || 0,
+      inss: Number(dados.inss) || 0,
+      pctCard: honorariosPct,
+      pctAutosLido: dados.honorarios_contratuais_pct,
+    });
+    let _hon = _refazerHonorario();
+    const houveDestaque = _hon.houveDestaque;
+    let honorariosCalc = _hon.honorariosCalc;
+    let _pctAutos = _hon.pctAutos;
     // DE ONDE ELA VEIO, porque muda o peso de uma divergência: percentual lido
     // no contrato contradiz o card de verdade; percentual que eu estimei sobre
     // uma base escolhida por mim pode estar divergindo pela base, não pelo
     // negócio. Quem confere precisa saber qual dos dois está lendo.
-    const _pctOrigem = _pctDoProcesso
+    const _origemDoPct = () => _hon.pctDoProcesso
       ? String(dados.honorarios_contratuais_pct_origem ?? 'lida no processo')
       : 'estimada aqui: honorário destacado ÷ base do bloco, porque o processo não traz a porcentagem escrita';
+    let _pctOrigem = _origemDoPct();
 
     // A PORCENTAGEM DA FICHA que volta ao card: a do comercial quando ele a
     // informou (é a dele que precificou), a dos autos quando não.
@@ -3371,7 +3387,7 @@ Deno.serve(async (req) => {
     let verbas: VerbasNegociadas;
     // O BLOCO DA PLANILHA SAI DOS AUTOS; as verbas, do negócio. Duas perguntas
     // diferentes, e amarrá-las punha metade dos casos no bloco errado.
-    dados.modelo = escolherModelo(dados.honorarios_destacados, honAI);
+    dados.modelo = _hon.modelo;
 
     if (tipoAquisicao === 'principal') {
       verbas = { principal: true, contratuais: false, sucumbenciais: false };
@@ -3817,8 +3833,38 @@ Deno.serve(async (req) => {
       if (_fora) {
         dados.bruto_total = _fora.brutoCorrigido;
         dados._sucumbDentroDoBruto = { antes: _antes, depois: _fora.brutoCorrigido, sucumbenciais: _fora.sucumbenciais };
+        // A AUDITORIA ACOMPANHA O BRUTO CORRIGIDO — o princípio que o bloco do
+        // chat já aplica, e que faltava aqui.
+        //
+        // O cenário conservador foi estimado sobre o bruto INFLADO (com os
+        // sucumbenciais somados dentro). Tirando-os do bruto e deixando o
+        // conservador onde estava, `aplicarAuditoria` compara um alvo antigo com
+        // um bruto novo, conclui que "a auditoria estimou um crédito MAIOR que o
+        // dos autos" e aplica corte ZERO: o preço sai cheio, e o motivo na tela
+        // diz o contrário do que houve. O corte que a auditoria achou desce com
+        // o bruto, na mesma quantia.
+        const _cons = Number(dados.auditoria_bruto_conservador) || 0;
+        if (_cons > 0) {
+          dados.auditoria_bruto_conservador = Number(Math.max(0, _cons - _fora.sucumbenciais).toFixed(2));
+        }
       }
     }
+
+    // O HONORÁRIO SE REFAZ AGORA, com o bruto que sobreviveu aos ajustes.
+    //
+    // Entre a primeira conta e aqui, o bruto pode ter mudado três vezes: o
+    // honorário que era o próprio principal, o valor do Portão 1 como último
+    // recurso, e os sucumbenciais tirados de dentro. Com percentual informado no
+    // card, o honorário é uma fração DO BRUTO — então calculá-lo antes desses
+    // ajustes dava um número que a passada seguinte, já com o bruto corrigido,
+    // recalculava diferente. Preliminar e consolidação discordavam sem ninguém
+    // ter mexido em nada.
+    _hon = _refazerHonorario();
+    honorariosCalc = _hon.honorariosCalc;
+    _pctAutos = _hon.pctAutos;
+    _pctOrigem = _origemDoPct();
+    dados.honorarios = honorariosCalc;
+    dados._hon_pct = honorariosPct != null ? honorariosPct : _pctAutos;
 
     if (_liqDeclarado > 0) {
       const _liqCalculado = (Number(dados.bruto_total) || 0) - (Number(dados.ir) || 0) -
@@ -3877,7 +3923,10 @@ Deno.serve(async (req) => {
     // estimativa que a IA já escreveu em auditoria_bruto_conservador, e o aviso
     // diz que o índice não foi confirmado.
     {
-      const _itens = Array.isArray(dados.auditoria_recalculo)
+      // NÚMERO DITADO NO CHAT NÃO SE RECALCULA. Quem escreveu está com o
+      // processo aberto; a marca só sai quando o chat mexe nos ITENS do
+      // recálculo, que é pedir a conta automática de volta.
+      const _itens = Array.isArray(dados.auditoria_recalculo) && !dados._conservador_ditado
         ? dados.auditoria_recalculo.slice(0, 6)
         : [];
       const _brutoAutos = Number(dados.bruto_total) || 0;
@@ -3963,13 +4012,26 @@ Deno.serve(async (req) => {
           }));
 
           const _delta = _feitos.reduce((soma, r) => soma + r.delta, 0);
-          const _revisado = Number((_brutoAutos + _delta).toFixed(2));
-          if (!(_revisado > 0)) throw new Error('o recálculo devolveu bruto revisado não positivo');
+          const _oficial = Number((_brutoAutos + _delta).toFixed(2));
+          if (!(_oficial > 0)) throw new Error('o recálculo devolveu bruto revisado não positivo');
 
-          // O NÚMERO OFICIAL SOBREPÕE A ESTIMATIVA. Quem decide se ele entra no
-          // preço é aplicarAuditoria, que recusa conservador MAIOR que o bruto
-          // dos autos — auditoria não aumenta crédito, e delta positivo é
-          // exatamente o caso da conta que subestimou.
+          // O NÚMERO OFICIAL SUBSTITUI A ESTIMATIVA DO ÍNDICE, NÃO A DO RESTO.
+          //
+          // O prompt manda estimar o conservador pelo efeito de TODAS as
+          // divergências — verba deferida a mais, base de cálculo errada,
+          // período de apuração —, e este recálculo confere só os consectários.
+          // Sobrepondo o campo inteiro por `bruto + Σdelta`, tudo o que não era
+          // índice sumia: R$ 30 mil de verba a mais eram esquecidos porque a
+          // correção pela TR, conferida na fonte, tinha SUBESTIMADO o crédito —
+          // e o corte virava zero, com o aviso dizendo "conferido na fonte
+          // oficial", cara de conta fechada.
+          //
+          // O MENOR DOS DOIS, então. Auditoria não aumenta crédito: se a
+          // estimativa da IA já era mais protetiva, ela fica, e o número oficial
+          // vai no aviso e na memória para quem confere. Errar para o lado de
+          // pagar menos custa um negócio; para o outro, custa o negócio inteiro.
+          const _consIa = Number(dados.auditoria_bruto_conservador) || 0;
+          const _revisado = _consIa > 0 ? Math.min(_consIa, _oficial) : _oficial;
           dados.auditoria_bruto_conservador = _revisado;
           const _memorias = _feitos.map((r) => r.memoria).join(' ');
           dados.auditoria_justificativa =
@@ -3984,7 +4046,12 @@ Deno.serve(async (req) => {
           _avisosDaContaAuditoria.push(
             `${_feitos.length} ${_feitos.length === 1 ? 'consectário' : 'consectários'} conferido(s) na fonte oficial (Banco Central/SGS): ` +
             _feitos.map((r) => `${r.natureza} ${r.delta < 0 ? '−' : '+'}${brl(Math.abs(r.delta))}`).join(', ') +
-            `. Bruto revisado para ${brl(_revisado)}.`,
+            `. Bruto revisado para ${brl(_revisado)}.` +
+            (_revisado !== _oficial
+              ? ` A conta dos índices sozinha daria ${brl(_oficial)}; MANTIVE ${brl(_revisado)}, que é a estimativa da leitura — ` +
+                'ela cobre também as divergências que não são de índice, e a auditoria não aumenta crédito. ' +
+                'Discordando, dite o número no chat: o que você escrever fica.'
+              : ''),
           );
           for (const r of _feitos) if (r.aviso) _avisosDaContaAuditoria.push(`⚠️ ${r.aviso}`);
         } catch (e) {
@@ -4118,7 +4185,24 @@ Deno.serve(async (req) => {
             'corrija o "PARCELA CEDIDA" do card (ou troque o cenário aqui na janela) e rode de novo.'
           : `Nem somando todas as verbas do processo se chega ao mínimo: o total líquido disponível é ${brl(_tudo)}.`);
 
-      if (acao === 'analisar' || acao === null) {
+      // BECO SEM SAÍDA SÓ QUANDO NÃO HÁ SAÍDA.
+      //
+      // Reprovar aqui devolve a tela sem seletor de cenário, sem chat e sem
+      // salvar — e o próprio motivo dizia "troque o cenário aqui na janela",
+      // promessa que a tela não tinha como cumprir. O card com PARCELA CEDIDA =
+      // "Principal" cujo principal dá R$ 15 mil e cujos honorários dão R$ 12 mil
+      // morria ali: a única saída era corrigir no Kommo e reler os autos, três
+      // chamadas de IA para trocar uma palavra.
+      //
+      // Somando TODAS as verbas dá o mínimo? Então a análise SEGUE, com o aviso
+      // IMPEDITIVO no topo (o mesmo caminho de 'refinar'/'reprecificar'): quem
+      // analisa troca o cenário na janela, o preço se refaz sem IA, e o salvar
+      // ainda esbarra no piso — com o "Seguir mesmo assim" ao lado do erro.
+      //
+      // Não dá nem somando tudo? Aí reprovar é a resposta certa, e para cedo:
+      // nenhuma troca de cenário salva esse crédito, e a leitura do documento
+      // custaria uma chamada de IA por nada.
+      if ((acao === 'analisar' || acao === null) && !_cabe) {
         return jsonResponse({ ok: true, reprovado: true, motivos: [_motivo], avisos: avisosQualif, qualificacao: null });
       }
       // LIBERADO À MÃO: a barreira do piso é da CASA, não da lei, e quem

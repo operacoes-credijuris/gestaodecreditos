@@ -56,7 +56,7 @@ export function Modal({
   // Foco inicial no primeiro CAMPO (não no X) e preso ao painel; scroll do fundo
   // travado. As três regras moram em lib/dialogo.ts, compartilhadas com o Drawer
   // e com o menu lateral do celular.
-  useFocoPreso(open, panelRef, true)
+  const ehTopo = useFocoPreso(open, panelRef, true)
   useTravaScroll(open)
 
   // Centraliza a checagem de "dirty" para todas as formas de fechar
@@ -69,11 +69,15 @@ export function Modal({
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') requestClose()
+      // SÓ A JANELA DE CIMA RESPONDE. Ver a pilha em lib/dialogo.ts: sem este
+      // teste, um Escape na janela de reprovar fechava também a análise atrás
+      // dela — sem perguntar, quando a análise não estava suja — e o texto
+      // digitado ia com ela.
+      if (e.key === 'Escape' && ehTopo()) requestClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open, requestClose])
+  }, [open, requestClose, ehTopo])
 
   if (!open) return null
 

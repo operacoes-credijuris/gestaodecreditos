@@ -1618,8 +1618,22 @@ export function AnaliseRpvModal({
           // processos, e o total sozinho não diz o que atacar: rasterização
           // pede Web Worker, rede pede concorrência ou compressão.
           const conta = { paginas: 0, rasterizacao: 0, consumidor: 0 }
-          for (const sel of selecao) {
-            const base = sel.arquivo.replace(/\.pdf$/i, '').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'arquivo'
+          for (const [iArq, sel] of selecao.entries()) {
+            // O ÍNDICE DO ARQUIVO NA FRENTE, e não só o nome cortado.
+            //
+            // `base` é o nome saneado e cortado em 40 caracteres, e o upload usa
+            // `upsert: true`: dois PDFs do mesmo card cujos 40 primeiros
+            // caracteres coincidem — "…Autos completos - Volume 1.pdf" e
+            // "… Volume 2.pdf", que é como o cartório digitaliza — gravavam a
+            // página N no MESMO caminho, e o segundo volume sobrescrevia o
+            // primeiro sem erro nenhum. A contagem de enviadas dizia que as duas
+            // subiram, e a IA lia páginas de um volume rotuladas como do outro.
+            //
+            // NA FRENTE porque o servidor ordena os arquivos pelo NOME para
+            // reconstituir a ordem do processo: o índice zerado à esquerda mantém
+            // a ordem alfabética igual à ordem da seleção.
+            const base = String(iArq).padStart(2, '0') + '-' +
+              (sel.arquivo.replace(/\.pdf$/i, '').replace(/[^\w.-]+/g, '_').slice(0, 40) || 'arquivo')
             const { falhas: f, tempo: tR } = await renderizarPaginas(
               sel.bytes,
               sel.numeros,
@@ -1798,6 +1812,21 @@ export function AnaliseRpvModal({
           }).catch(() => {})
         }
 
+        // A JANELA SE SOLTA ANTES DO CARTÓRIO.
+        //
+        // `ocupado` é `passo !== null`, e o `passo` da consolidação só saía no
+        // finally — depois deste await. O levantamento da tabela de emolumentos
+        // leva de segundos a PRAZO_LEVANTAMENTO inteiro (dez minutos) num estado
+        // que ainda não está em cache, e nesse tempo a análise já estava na tela
+        // com tudo desabilitado: o chat, o seletor de cenário, Salvar no Drive,
+        // Diligência, Reprovar e os campos manuais de cartório. A faixa do
+        // cartório prometia, ao mesmo tempo, "você já pode pedir alterações".
+        //
+        // O caminho do chat sempre foi assim (`void levantarRegraCartorio`, sem
+        // bloquear); o da abertura passa a ser igual. O await fica só pelo
+        // `marcar('cartório')`, e a guarda de `revisao.current` lá dentro é o que
+        // impede o resultado atrasado de sobrepor o que a pessoa fizer nesse meio.
+        setPasso(null)
         // O CARTÓRIO CHEGA DEPOIS, e de propósito: a busca web leva dezenas de
         // segundos e, dentro da análise, derrubava o worker (HTTP 546).
         await levantarRegraCartorio(r)
@@ -1955,6 +1984,20 @@ export function AnaliseRpvModal({
    */
   async function trocarCenario(novo: string) {
     if (novo === cenario || !atual?.dados) return
+    // TROCAR DE CENÁRIO SUBSTITUI A ANÁLISE, e portanto conta como revisão.
+    //
+    // Sem este incremento, um `levantarRegraCartorio` em voo — disparado pelo
+    // chat, que não bloqueia — continuava se achando atual e gravava por cima o
+    // preço reprecificado a partir do `dados` do cenário ANTERIOR, com o seletor
+    // já marcando o novo. A tela passava a mostrar o preço de "Principal,
+    // apenas" sob um seletor escrito "Principal + Honorários", e um salvar em
+    // seguida mandava esses números com o outro rótulo: planilha e nome de
+    // arquivo de cenários diferentes.
+    //
+    // A tabela levantada NÃO se perde: `setRegraCartorio` acontece antes da
+    // guarda, e a próxima ação já sai com o cartório dentro. É o mesmo contrato
+    // de `pedirAlteracao`.
+    revisao.current += 1
     const naEpoca = revisao.current
     setCenario(novo)
     setTrocandoCenario(true)
@@ -2227,6 +2270,20 @@ export function AnaliseRpvModal({
   const podeSalvar =
     !!atual && !atual.reprovado && !!atual.dados && !ocupado && (!salvo || mudouDesdeSalvar)
 
+  /**
+   * QUEM REPROVOU: a triagem, ou a análise depois de ler os autos.
+   *
+   * São três saídas com `reprovado: true` e uma só levava o nome: o Portão 1
+   * (triagem, que devolve a qualificação), o crédito sem valor nos autos e o
+   * piso da casa que nem somando todas as verbas se alcança. As duas últimas
+   * vêm com `qualificacao: null` — a triagem PASSOU, e foi a análise que barrou.
+   *
+   * Chamar tudo de "Portão 1" não era só um rótulo torto na tela: o texto vai
+   * como motivo na anotação do card, onde fica como registro permanente
+   * apontando o portão errado.
+   */
+  const tituloDaReprovacao = atual?.qualificacao ? 'Reprovado no Portão 1' : 'Reprovado na análise'
+
   const acaoDiligencia = acoes.find((a) => a.statusId === ST_DILIGENCIA)
   const acaoReprovar = acoes.find((a) => a.statusId === ST_REPROVADO)
   const acaoValidacao = acoes.find((a) => a.statusId === ST_DECISAO)
@@ -2338,7 +2395,7 @@ export function AnaliseRpvModal({
           // seria copiar o que está escrito acima na mesma tela.
           motivoSugerido={
             atual?.reprovado && (atual.motivos ?? []).length
-              ? `Reprovado no Portão 1: ${(atual.motivos ?? []).join('; ')}`
+              ? `${tituloDaReprovacao}: ${(atual.motivos ?? []).join('; ')}`
               : undefined
           }
         />
@@ -2372,7 +2429,7 @@ export function AnaliseRpvModal({
       {atual?.reprovado && (
         <div className="space-y-5">
           <div className="rounded-xl bg-red-50/70 p-4 text-sm text-red-800 ring-1 ring-inset ring-red-200/70">
-            <p className="font-semibold">Reprovado no Portão 1</p>
+            <p className="font-semibold">{tituloDaReprovacao}</p>
             <ul className="mt-1 list-inside list-disc space-y-0.5">
               {(atual.motivos ?? []).map((m, i) => (
                 <li key={i}>{m}</li>

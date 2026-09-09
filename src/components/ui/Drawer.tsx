@@ -32,7 +32,7 @@ export function Drawer({
   const [rendered, setRendered] = useState(open)
   const [visible, setVisible] = useState(open)
   const painelRef = useRef<HTMLDivElement>(null)
-  useFocoPreso(open, painelRef)
+  const ehTopo = useFocoPreso(open, painelRef)
   useTravaScroll(open)
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export function Drawer({
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && ehTopo()) onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
