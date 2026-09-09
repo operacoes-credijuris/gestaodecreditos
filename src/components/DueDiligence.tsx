@@ -20,8 +20,8 @@ import { useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
-import { EmptyState } from '@/components/ui/Table'
 import { PainelCertidoes } from '@/components/PainelCertidoes'
+import { PainelProcessosJudiciais } from '@/components/PainelProcessosJudiciais'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 
 type Aba = 'certidoes' | 'processos'
@@ -104,14 +104,17 @@ export function DueDiligence({
           </div>
         )}
 
+        {/* A SEGUNDA FRENTE, que era um EmptyState "Ainda não implementado" até
+            a integração com o Escavador existir. O que faltava não era tela: era
+            FONTE. Buscar dívida é buscar por CPF, e o advogado — a linha 11 do
+            questionário — só tem OAB nos autos; o Escavador liga uma coisa à
+            outra. Ver _shared/escavador.ts e a migração 0061. */}
         <div hidden={aba !== 'processos'}>
-          {/* Vazia de propósito, e DIZENDO o que vem — uma aba em branco sem
-              explicação se lê como defeito de carregamento. O texto descreve a
-              pergunta que o bloco "Histórico do Cedente" do modelo faz e que a
-              aba de Certidões não responde. */}
-          <EmptyState
-            title="Ainda não implementado"
-            description="Aqui vão os processos judiciais dos sujeitos do crédito — o que cada certidão positiva revelou: número do processo, objeto, valor cobrado e estágio. É o que separa uma certidão positiva inofensiva de um risco de fraude à execução. Por ora, essa apuração continua fora da plataforma."
+          <PainelProcessosJudiciais
+            leadId={leadId}
+            cedenteDoCard={cedenteDoCard}
+            arquivos={arquivos}
+            ativo={aba === 'processos'}
           />
         </div>
       </div>

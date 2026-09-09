@@ -13,6 +13,7 @@ import {
   Pencil,
   Sparkles,
   Puzzle,
+  Search,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
@@ -23,6 +24,7 @@ import type {
   ConfigAdvbox,
   ConfigAnthropic,
   ConfigDjen,
+  ConfigEscavador,
   ConfigKommo,
   ServicoIntegracao,
 } from '@/lib/types'
@@ -53,6 +55,7 @@ export default function Configuracoes() {
         <AdvboxConfig />
         <KommoConfig />
         <AnthropicConfig />
+        <EscavadorConfig />
         <SkillsConfig />
         <DjenConfig />
         <UsuariosConfig />
@@ -196,6 +199,109 @@ function AnthropicConfig() {
               <Button onClick={salvar} loading={saving}>
                 Salvar
               </Button>
+            </div>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  )
+}
+
+// ----------------------- Escavador (due diligence) -----------------------
+//
+// O TOKEN É TESTADO ANTES DE SER GRAVADO, e não conferido por formato: o do
+// Escavador é opaco, sem prefixo que se possa exigir como o "sk-ant-" da
+// Anthropic, e um palpite de formato só criaria falso negativo. A função
+// salvar-token-escavador gasta uma chamada em /quantidade-creditos — que não
+// consome crédito — e só grava se a API responder. De quebra volta o SALDO, que
+// é o número que interessa antes de sair apurando: aqui, ao contrário das
+// outras integrações, CADA CONSULTA CUSTA DINHEIRO.
+function EscavadorConfig() {
+  const { data, isLoading, error } = useIntegracao('escavador')
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [token, setToken] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saldo, setSaldo] = useState<string | null>(null)
+
+  const configurado = Boolean((data?.config as ConfigEscavador)?.configurado)
+
+  async function salvar() {
+    if (!token.trim()) {
+      toast.error('Informe o token do Escavador.')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await invokeFunction<{ saldo?: { descricao?: string } }>(
+        'salvar-token-escavador',
+        { token: token.trim() },
+      )
+      setToken('')
+      setSaldo(r.saldo?.descricao ?? null)
+      await qc.invalidateQueries({ queryKey: ['integracoes', 'escavador'] })
+      toast.success(
+        'Token do Escavador salvo e confirmado' +
+          (r.saldo?.descricao ? `. Saldo: ${r.saldo.descricao}` : '.'),
+      )
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <Search className="h-5 w-5 text-brand-600" /> Integração Escavador
+          </span>
+        }
+        action={
+          <SeloIntegracao
+            error={error}
+            configurado={configurado}
+            rotuloOk="Token configurado"
+            rotuloSem="Sem token"
+          />
+        }
+      />
+      <CardBody>
+        <AvisoLeitura error={error} />
+        {isLoading ? (
+          <Loading />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Token de acesso"
+              hint={
+                configurado
+                  ? 'Já configurado. Preencha apenas para substituir.'
+                  : 'Criado em api.escavador.com/tokens. É exibido uma única vez.'
+              }
+            >
+              <Input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="••••••••••••"
+                autoComplete="off"
+              />
+            </Field>
+            <div className="sm:col-span-2 space-y-2">
+              <Button onClick={salvar} loading={saving}>
+                Salvar e testar
+              </Button>
+              {saldo && (
+                <p className="text-sm text-slate-600">Saldo na API: {saldo}</p>
+              )}
+              <p className="text-xs text-slate-500">
+                Fonte da aba “Processos judiciais” da due diligence: é por ela que as linhas
+                10 e 11 da análise (dívida do cedente e do advogado) passam a ser respondidas
+                por apuração, e não pela leitura dos autos. Cada consulta consome crédito.
+              </p>
             </div>
           </div>
         )}

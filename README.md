@@ -3,7 +3,8 @@
 Sistema interno da Credijuris reunindo os setores **Comercial** e **Operacional**,
 com uma camada de **Gestão Estratégica** consolidando os dois. Integra com
 **ADVBOX** (tarefas e movimentações), **DJEN/Comunica PJe** (publicações),
-**Kommo** (funil de análise), **Judit** (due diligence), **Anthropic** (análise de
+**Kommo** (funil de análise), **Judit** (autos dos processos), **Escavador**
+(due diligence de processos), **Anthropic** (análise de
 crédito, resumo de carteira e redação de petições) e **Google Drive** (arquivo das
 análises e das petições geradas).
 
@@ -148,6 +149,15 @@ supabase functions deploy
   Keys*). É o que liga o assistente de dados — o botão no canto inferior direito
   de qualquer tela. Sem a chave, o assistente responde dizendo que falta
   configurar; o resto do sistema não é afetado.
+- **Escavador:** informe o token de acesso (criado em *api.escavador.com/tokens*,
+  exibido uma única vez). O botão **Salvar e testar** confere a chave contra a
+  própria API antes de gravá-la e devolve o saldo. É a fonte da aba **Processos
+  judiciais** da janela de due diligence: é por ela que as linhas 10 e 11 da
+  análise de RPV — dívida do cedente e dívida do advogado — passam a ser
+  respondidas por apuração em vez da leitura dos autos, que não enxerga dívida
+  fora do processo em análise. **Cada consulta consome crédito**, então a
+  apuração é sempre por clique, nunca automática, e o gasto de cada uma fica
+  registrado em `escavador_consumo`.
 
 ## 4. Publicar no GitHub Pages
 
@@ -198,7 +208,8 @@ src/
   pages/           estrategica / comercial / operacional / configuracoes
 supabase/
   migrations/      0001 em diante, na ordem (tabelas, RLS, triggers, storage)
-  functions/       Edge Functions (ADVBOX, DJEN, Kommo, Judit, petição, IA,
+  functions/       Edge Functions (ADVBOX, DJEN, Kommo, Judit, Escavador,
+                   petição, IA,
                    gestão de usuários)
   *.sql            scripts de execução manual (seed e agendamentos)
 ```

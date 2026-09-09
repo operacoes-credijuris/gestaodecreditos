@@ -73,3 +73,22 @@ export async function chaveKommo(): Promise<string | null> {
     .maybeSingle()
   return data?.token ?? null
 }
+
+/**
+ * O token do ESCAVADOR, a fonte da due diligence de processos judiciais.
+ *
+ * Gravado por salvar-token-escavador na tabela integracao_escavador_secret
+ * (migração 0061), que tem RLS ligada e nenhuma policy — service_role e mais
+ * ninguém. Nunca como VITE_*: variável de ambiente do front vai assada no
+ * bundle público, e este token gasta crédito por requisição.
+ */
+export async function chaveEscavador(): Promise<string | null> {
+  const doAmbiente = Deno.env.get('ESCAVADOR_API_KEY')
+  if (doAmbiente) return doAmbiente
+  const { data } = await serviceClient()
+    .from('integracao_escavador_secret')
+    .select('token')
+    .eq('id', 1)
+    .maybeSingle()
+  return data?.token ?? null
+}

@@ -376,7 +376,7 @@ export interface Contrato {
 }
 
 // ---------- Configurações / Integrações ----------
-export type ServicoIntegracao = 'advbox' | 'djen' | 'kommo' | 'anthropic'
+export type ServicoIntegracao = 'advbox' | 'djen' | 'kommo' | 'anthropic' | 'escavador'
 
 export interface Integracao {
   id: UUID
@@ -420,6 +420,15 @@ export interface ConfigDjen {
  * tabela integracao_anthropic_secret, inacessível ao cliente.
  */
 export interface ConfigAnthropic {
+  configurado?: boolean
+}
+
+/**
+ * Escavador: só o indicador de que o token está gravado. O token vive em
+ * integracao_escavador_secret, inacessível ao cliente — a API é paga por
+ * requisição, e chave vazada é conta aberta.
+ */
+export interface ConfigEscavador {
   configurado?: boolean
 }
 

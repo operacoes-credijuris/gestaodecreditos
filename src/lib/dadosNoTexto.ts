@@ -689,3 +689,86 @@ export function acharEstadoCivil(
     .sort((a, b) => Number(b.doCedente) - Number(a.doCedente) || a.posicao - b.posicao)
     .slice(0, limite)
 }
+
+// ------------------------------------------------------------------ OAB
+
+export interface OabEncontrada {
+  /** "GO" — sempre em maiúsculas. */
+  uf: string
+  /** Só dígitos, sem o ponto de milhar que os autos usam. */
+  numero: string
+  /** O nome que aparece imediatamente antes, quando dá para reconhecer. */
+  nome: string | null
+  /** ~110 caracteres em volta, para saber de quem é a OAB. */
+  contexto: string
+  posicao: number
+}
+
+const UFS = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
+  'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+]
+
+/** "Fulano de Tal, OAB/GO 12345" -> o nome que vem antes da inscrição. */
+function nomeAntesDaOab(anterior: string): string | null {
+  const limpo = anterior.replace(/\s+/g, ' ').replace(/[,;:\-–—(]+\s*$/, '').trim()
+  const m = limpo.match(
+    /([A-ZÀ-Ú][A-Za-zÀ-ú'`]+(?:\s+(?:d[aeiou]s?|e|[A-ZÀ-Ú][A-Za-zÀ-ú'`]+)){1,5})$/,
+  )
+  if (!m) return null
+  const nome = m[1].trim()
+  // "Advogado", "Procurador", "Inscrito" e afins vêm coladas na inscrição e
+  // passariam pelo padrão de nome próprio.
+  const primeira = semAcento(nome.split(' ')[0])
+  const RUINS = ['advogado', 'advogada', 'procurador', 'procuradora', 'inscrito', 'inscrita', 'dr', 'dra', 'sob', 'numero']
+  if (RUINS.includes(primeira) && nome.split(' ').length <= 2) return null
+  return nome.length >= 5 ? nome : null
+}
+
+/**
+ * As OABs citadas num texto — a identidade do advogado nos autos.
+ *
+ * SEMPRE ANCORADA NA PALAVRA "OAB". Um par "número/UF" solto casa com data, com
+ * número de lei e com metade dos endereços; a sigla é o que torna o achado
+ * seguro. Os autos escrevem "OAB/GO 12.345", "OAB GO nº 12345" e
+ * "OAB 12345/GO", e as três entram.
+ *
+ * NÃO ESCOLHE, pelo mesmo motivo de cpfNoTexto.ts e do resto deste arquivo: um
+ * processo tem o advogado do cedente, o do ente devedor e o de cada terceiro. A
+ * função devolve candidatos com o trecho em volta; quem confere clica. É a OAB
+ * que abre a linha 11 do questionário, e apontar a errada é diligenciar a
+ * dívida de outra pessoa.
+ */
+export function acharOabs(texto: string, limite = 12): OabEncontrada[] {
+  if (!texto) return []
+  const achados: OabEncontrada[] = []
+  const vistos = new Map<string, number>()
+
+  const registrar = (uf: string, numeroBruto: string, i: number, tam: number) => {
+    const UF = uf.toUpperCase()
+    if (!UFS.includes(UF)) return
+    const numero = numeroBruto.replace(/\D/g, '')
+    if (numero.length < 2 || numero.length > 7) return
+    const chave = UF + numero
+    if (vistos.has(chave)) return
+    vistos.set(chave, achados.length)
+    achados.push({
+      uf: UF,
+      numero,
+      nome: nomeAntesDaOab(texto.slice(Math.max(0, i - 80), i)),
+      contexto: limpar(texto.slice(Math.max(0, i - 80), i + tam + 30)),
+      posicao: i,
+    })
+  }
+
+  // Ordem 1: OAB/GO 12.345
+  const comUfAntes = /OAB[\s.:/\-]*([A-Za-z]{2})[\s.:/\-]*n?[oº°]?[\s.:]*(\d[\d.]{1,8})/g
+  // Ordem 2: OAB nº 12.345/GO
+  const comUfDepois = /OAB[\s.:/\-]*n?[oº°]?[\s.:]*(\d[\d.]{1,8})[\s./\-]*([A-Za-z]{2})\b/g
+
+  let m: RegExpExecArray | null
+  while ((m = comUfAntes.exec(texto)) !== null) registrar(m[1], m[2], m.index, m[0].length)
+  while ((m = comUfDepois.exec(texto)) !== null) registrar(m[2], m[1], m.index, m[0].length)
+
+  return achados.sort((a, b) => a.posicao - b.posicao).slice(0, limite)
+}
