@@ -55,6 +55,7 @@ import {
   type Regime,
 } from "../_shared/indicesBcb.ts";
 import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, escolherModelo, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type Precificacao, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { confrontarAnexoComCard } from "../_shared/confrontoDoAnexo.ts";
 import { grauDaPlanilha } from "../_shared/graus.ts";
 // AS LISTAS SUSPENSAS DA PLANILHA são puras e têm teste. Ver _shared/m2.ts: é o
 // que decide se a resposta sai válida na célula ou vira aviso.
@@ -1222,7 +1223,8 @@ const SCHEMA_ANALISE = {
 
 // ---- PORTÃO 1: QUALIFICAÇÃO (roda ANTES da análise) ----
 const SCHEMA_QUALIFICACAO = {
-  numero_processo: 'número no padrão CNJ ou "NÃO LOCALIZADO"',
+  numero_processo: 'número no padrão CNJ do processo DESTES AUTOS — o dos arquivos anexados —, ou "NÃO LOCALIZADO". ' +
+    'NUNCA o de outro processo citado nas anotações do card: elas registram as dívidas do titular em OUTRAS ações, e esses números não são deste crédito',
   titular_nome: 'nome completo do titular do crédito',
   cpf: 'CPF do titular',
   esfera: 'Federal | Estadual | Municipal',
@@ -2923,6 +2925,15 @@ Deno.serve(async (req) => {
     let dados: any;
     let avisosQualif: string[] = [];
     /**
+     * O aviso de que não deu para conferir se o anexo é deste processo.
+     *
+     * Guardado à parte porque `avisosQualif` é SUBSTITUÍDO pelos avisos do
+     * veredito do portão mais abaixo — um push aqui se perderia. E ele entra na
+     * FRENTE da lista: é o único aviso que põe em dúvida se o crédito analisado
+     * é o do card, e isso vem antes de qualquer coisa que se diga sobre o mérito.
+     */
+    let _avisoDoAnexo: string | null = null;
+    /**
      * O valor que o Portão 1 viu.
      *
      * FORA de `dados`, que ainda não existe quando o portão roda: `dados` nasce
@@ -2968,21 +2979,22 @@ Deno.serve(async (req) => {
       ? body.qualificacao
       : await extrairQualificacao(cfg.anthropic_api_key, contentBlocks);
 
-    // O PDF É DESTE PROCESSO? O número do card sobrepõe o que a IA leu nos
-    // autos — e sobrepunha em silêncio: anexo trocado de card produzia a
-    // análise completa do processo errado, com o número certo no nome do
-    // arquivo. Só compara quando os dois são CNJ inteiros (20 dígitos); "NÃO
-    // LOCALIZADO" e número parcial não acusam nada.
-    const _soDigitos = (v: unknown) => String(v ?? '').replace(/\D/g, '');
-    const _mascara = (d: string) => d.replace(/^(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})$/, '$1-$2.$3.$4.$5.$6');
-    const _cnjCard = _soDigitos(numeroProcesso);
-    const _cnjAutos = _soDigitos(qualif.numero_processo);
-    if (_cnjCard.length === 20 && _cnjAutos.length === 20 && _cnjCard !== _cnjAutos) {
-      await limparUploads?.();
-      return errorResponse(
-        `O PDF anexado é do processo ${_mascara(_cnjAutos)}, mas o card é do processo ${_mascara(_cnjCard)}. ` +
-        'Anexo trocado de card? Confira o arquivo e o título do card antes de rodar de novo.',
-      );
+    // O ANEXO É DESTE PROCESSO? A conferência mora em
+    // _shared/confrontoDoAnexo.ts — pura e com teste, e é lá que está escrito
+    // por que ela olha os ARQUIVOS e não o que a leitura devolveu.
+    {
+      const _c = confrontarAnexoComCard({
+        numeroDoCard: numeroProcesso,
+        // O TEXTO DOS ARQUIVOS, e só ele: as anotações do Kommo citam outros
+        // processos do titular, e passá-las aqui é o defeito que isto conserta.
+        textoDosAnexos: textoDireto,
+        numeroLidoPelaLeitura: qualif.numero_processo,
+      });
+      if (_c.desfecho === 'trocado') {
+        await limparUploads?.();
+        return errorResponse(_c.motivo);
+      }
+      if (_c.desfecho === 'nao_confere') _avisoDoAnexo = _c.aviso;
     }
 
     // PRECATÓRIO NO FUNIL DE RPV. A qualificação já lia o tipo do requisitório,
@@ -3033,7 +3045,7 @@ Deno.serve(async (req) => {
         ok: true,
         reprovado: true,
         motivos: veredito.motivos,
-        avisos: veredito.avisos,
+        avisos: [...(_avisoDoAnexo ? [_avisoDoAnexo] : []), ...veredito.avisos],
         qualificacao: qualif,
         // O RELÓGIO TAMBÉM NA REPROVAÇÃO. Todas as outras saídas o levam, e a
         // linha do tempo da janela ficava sem a fase do servidor justamente nas
@@ -3042,7 +3054,8 @@ Deno.serve(async (req) => {
         tempo: _relogio(),
       });
     }
-    avisosQualif = veredito.avisos;  // alertas da qualificação (seguem para a resposta final)
+    // alertas da qualificação (seguem para a resposta final), com o do anexo na frente
+    avisosQualif = [...(_avisoDoAnexo ? [_avisoDoAnexo] : []), ...veredito.avisos];
 
     // ================================================================
     // AQUI TERMINA A PRIMEIRA REQUISIÇÃO — e é por isso que ela existe.
