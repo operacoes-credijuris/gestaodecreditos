@@ -3006,6 +3006,13 @@ Deno.serve(async (req) => {
     // o processo: refinar e salvar trabalham sobre análise que já passou por ele.
     let dados: any;
     let avisosQualif: string[] = [];
+    /**
+     * O valor que o Portão 1 viu.
+     *
+     * FORA de `dados`, que ainda não existe quando o portão roda: `dados` nasce
+     * da leitura dos valores, que vem depois. Entra lá assim que houver onde.
+     */
+    let valorDaTriagem = 0;
     let respostaRevisao: string | null = null;
     if (acao === 'refinar' || acao === 'reprecificar' || acao === 'salvar') {
       if (!body.dados || typeof body.dados !== 'object') return errorResponse('Faltou a análise atual (dados) para ' + acao + '.');
@@ -3093,7 +3100,7 @@ Deno.serve(async (req) => {
     // primeira arriscou um valor. Guardar aqui é o que permite dizer, depois,
     // se o crédito não tem valor nos autos ou se foi a exigência que o barrou.
     const _valorPortao = Number(qualif.valor_credito);
-    dados._valor_qualificacao = Number.isFinite(_valorPortao) && _valorPortao > 0 ? _valorPortao : 0;
+    valorDaTriagem = Number.isFinite(_valorPortao) && _valorPortao > 0 ? _valorPortao : 0;
     const veredito = avaliarQualificacao(qualif);
     if (!veredito.aprovado) {
       // Reprovado: não monta tabela jurídica nem precificação. Limpa os uploads e devolve o motivo.
@@ -3143,6 +3150,7 @@ Deno.serve(async (req) => {
     // 3c. Extração pela IA (só chega aqui se foi APROVADO no Portão 1)
     dados = await extrairPreco(cfg.anthropic_api_key, contentBlocks);
     marcar('leitura dos valores e da auditoria (IA)');
+    dados._valor_qualificacao = valorDaTriagem;
     dados._houveCorte = houveCorte;
     dados._paginas_imagem = paginasImagem;
     dados._imagens_cortadas = cortouImagens;
