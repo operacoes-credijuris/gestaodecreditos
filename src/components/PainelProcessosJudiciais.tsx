@@ -34,13 +34,20 @@
 // dois botões e um formulário em branco no meio deles, o que convidava a
 // digitar à mão o que a leitura ia trazer melhor.
 //
-// A APURAÇÃO CUSTA DINHEIRO — a API do Escavador é paga por requisição —, e é
-// disso que saem as três travas da corrente: ela não roda em crédito que já tem
-// apuração (reabrir para conferir não pode cobrar de novo), não roda antes de os
-// anexos terminarem de ser lidos, e não roda sem documento. Buscar por nome traz
-// o homônimo junto e cada página é cobrada: sem CPF, CNPJ ou OAB a corrente para
-// com os campos preenchidos e diz o que falta. O custo de cada chamada volta na
-// tela.
+// LER OS AUTOS E BUSCAR DÍVIDA CUSTAM COISAS DIFERENTES, e é essa distinção que
+// governa a corrente. A leitura gasta tokens; a busca gasta CRÉDITO da API do
+// Escavador, cobrado por requisição.
+//
+// Por isso a leitura roda em TODA abertura da aba: ela é barata e é ela que
+// conserta o erro que mais custa caro — a IA identificar o titular errado, o
+// exequente que não é o cedente do card num litisconsórcio. E por isso a busca
+// NÃO roda quando a leitura confirma quem já foi apurado: buscar de novo sobre o
+// mesmo CPF devolveria a lista que já está na tela.
+//
+// As outras duas travas da busca: ela não corre antes de os anexos terminarem de
+// ser lidos, e não corre sem documento. Buscar por nome traz o homônimo junto e
+// cada página é cobrada — sem CPF, CNPJ ou OAB a corrente para com os campos
+// preenchidos e diz o que falta. O custo de cada chamada volta na tela.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ExternalLink, Info, RefreshCw, ScanText, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -401,8 +408,10 @@ export function PainelProcessosJudiciais({
   //
   // O QUE AINDA SEGURA A CORRENTE, e por que cada um:
   //
-  //   já apurado       a consulta é PAGA. Reabrir o card para conferir não pode
-  //                    cobrar de novo; refazer a apuração é o botão Reapurar.
+  //   já apurado       a LEITURA roda de novo (é barata, e é ela que conserta
+  //                    titular errado); a BUSCA só corre se a leitura tiver
+  //                    achado outra pessoa. Consulta paga não se repete para
+  //                    devolver a lista que já está na tela.
   //   PDF em leitura   os anexos chegam depois da janela. Rodar antes de eles
   //                    existirem concluiria "não há texto nos autos" sobre um
   //                    processo que está chegando naquele segundo.
@@ -438,6 +447,19 @@ export function PainelProcessosJudiciais({
         }
       }
       if (paraApurar.length === 0) return
+
+      // A LEITURA CONFIRMOU QUEM JÁ FOI APURADO? Então não se paga de novo.
+      //
+      // É isto que deixa a releitura acontecer a cada abertura sem custo: a
+      // leitura dos autos gasta tokens e a busca gasta CRÉDITO, e são coisas
+      // diferentes. Reler é barato e conserta o erro de pessoa; buscar de novo
+      // sobre o mesmo CPF não conserta nada — devolveria a lista que já está na
+      // tela.
+      if (apuracoes.length > 0 && paraApurar.every((n) => jaApuradoIgual(n))) {
+        toast.success('A leitura dos autos confirmou os titulares. A apuração de antes vale.')
+        return
+      }
+
       setPasso('apurando')
       await apurar(paraApurar)
     } finally {
@@ -445,11 +467,27 @@ export function PainelProcessosJudiciais({
     }
   }
 
+  /**
+   * O titular que a leitura acabou de achar é o mesmo que já foi apurado?
+   *
+   * PELO DOCUMENTO, quando ele veio; pela OAB quando não veio. O advogado é o
+   * caso que exige o segundo ramo: a apuração guardou o CPF que o Escavador
+   * devolveu a partir da inscrição, e a releitura dos autos costuma achar de
+   * novo só a OAB — comparar documento com documento diria "mudou" em toda
+   * abertura e refaria a busca paga sem nada ter mudado.
+   */
+  function jaApuradoIgual(novo: Record<string, string>): boolean {
+    const anterior = apuracoes.find((a) => a.papel === novo.papel)
+    if (!anterior) return false
+    const doc = onlyDigits(novo.documento)
+    if (doc) return onlyDigits(anterior.documento) === doc
+    const semEspaco = (v: unknown) => String(v ?? '').toUpperCase().replace(/\s+/g, '')
+    const oab = semEspaco(novo.oab)
+    return oab !== '' && semEspaco(anterior.oab) === oab
+  }
+
   useEffect(() => {
     if (!ativo || carregando || erro) return
-    // Já existe apuração para este crédito: a foto está na tela, e refazê-la
-    // custa dinheiro. Quem quiser refazer clica — ver "Reler os autos".
-    if (apuracoes.length > 0) return
     if (lendoPdf) return
     if (jaEncadeou.current === leadId) return
     jaEncadeou.current = leadId
