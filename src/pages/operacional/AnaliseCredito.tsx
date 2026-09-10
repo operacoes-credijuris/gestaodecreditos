@@ -79,6 +79,7 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { DueDiligence } from '@/components/DueDiligence'
+import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
 import { supabase } from '@/lib/supabase'
 import {
   verbasQueSobram,
@@ -729,6 +730,7 @@ function CardCredito({
   analisando,
   resultadoAnalise,
   onDueDiligence,
+  onAnaliseExterna,
   onAnaliseJuridica,
   analisandoJuridico,
   resultadoJuridico,
@@ -746,6 +748,8 @@ function CardCredito({
   analisando: boolean
   resultadoAnalise?: ResultadoAnalise
   onDueDiligence: (l: KommoLead) => void
+  /** Abre a conversa da análise no Claude — só no precatório externo. */
+  onAnaliseExterna: (l: KommoLead) => void
   onAnaliseJuridica: (l: KommoLead) => void
   analisandoJuridico: boolean
   resultadoJuridico?: ResultadoJuridico
@@ -913,6 +917,25 @@ function CardCredito({
                   PRECIFICA (deságio, prazo, preço de cessão). Dar o mesmo nome
                   esconderia que este botão mexe em dinheiro e o outro não. */}
               {analisando ? 'Analisando…' : 'Executar análise'}
+            </Button>
+          )}
+
+          {/* A ANÁLISE DO EXTERNO ACONTECE FORA DAQUI, e o botão é a porta.
+              No Interno o motor analisa: lê os autos, audita a conta,
+              precifica. No Externo quem decide o preço é o fundo comprador — o
+              que a casa faz é montar o crédito e conversar sobre ele, no
+              Claude, num projeto que carrega o contexto da operação. Mesmo
+              lugar e mesma forma do botão de RPV de propósito: é o mesmo ato do
+              ponto de vista de quem opera, e muda só para onde leva. */}
+          {botoes === 'dd' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<FileSearch className="h-4 w-4" />}
+              onClick={() => onAnaliseExterna(lead)}
+              disabled={ocupado}
+            >
+              Executar análise
             </Button>
           )}
 
@@ -1303,6 +1326,72 @@ export default function AnaliseCredito() {
         .filter((x): x is PapelApurado => x === 'CEDENTE' || x === 'ADVOGADO'),
     }))
     setRpvLead(lead)
+  }
+
+  /**
+   * A ANÁLISE DO PRECATÓRIO EXTERNO: abre a conversa no Claude e baixa os anexos.
+   *
+   * DUAS METADES, porque só duas são possíveis. Não existe forma de anexar
+   * arquivo a uma conversa do claude.ai por link — nem parâmetro de URL, nem
+   * área de transferência (o navegador só deixa escrever texto e imagem no
+   * clipboard, não PDF). O anexo entra pela mão de quem conversa. Então o botão
+   * abre a conversa com a pergunta pronta E baixa os arquivos do card, para o
+   * arrasto ser um gesto só.
+   *
+   * A ABA ABRE PRIMEIRO, e isto não é ordem arbitrária: abrir janela depois de um
+   * `await` é bloqueado como popup. A pergunta sai do título, que já está na
+   * memória, então nada precisa ser esperado antes de abrir.
+   */
+  function onAnaliseExterna(lead: KommoLead) {
+    const prompt = promptDaAnaliseExterna(lerTituloCard(tituloCard(lead)))
+    window.open(urlDoClaude(prompt), '_blank', 'noopener,noreferrer')
+    void baixarAnexosDoCard(lead)
+  }
+
+  /**
+   * Baixa para a máquina os anexos que o card tem no Kommo.
+   *
+   * PELO BLOB, e não por um link com o atributo `download`: ele é ignorado em URL
+   * de outro domínio, e o navegador ABRIRIA o PDF numa aba em vez de salvá-lo —
+   * o que não serve, porque o que se quer é o arquivo no disco para arrastar.
+   */
+  async function baixarAnexosDoCard(lead: KommoLead) {
+    try {
+      const bk = await invokeFunction<{
+        erro?: string
+        download_url?: string
+        nome_arquivo?: string
+        arquivos?: { nome: string; download: string }[]
+      }>('buscar-kommo', { lead_id: lead.kommo_lead_id })
+      if (bk.erro) throw new Error(bk.erro)
+      const lista =
+        bk.arquivos && bk.arquivos.length > 0
+          ? bk.arquivos
+          : bk.download_url
+            ? [{ nome: bk.nome_arquivo ?? 'processo.pdf', download: bk.download_url }]
+            : []
+      if (lista.length === 0) {
+        toast.error('Este card não tem anexo no Kommo — a conversa abriu sem os autos.')
+        return
+      }
+      for (const a of lista) {
+        const res = await fetch(a.download)
+        if (!res.ok) throw new Error(a.nome + ': HTTP ' + res.status)
+        const url = URL.createObjectURL(await res.blob())
+        const link = document.createElement('a')
+        link.href = url
+        link.download = a.nome
+        link.click()
+        // Solta o objeto depois do clique: revogar na mesma linha cancelaria o
+        // download em alguns navegadores.
+        setTimeout(() => URL.revokeObjectURL(url), 30_000)
+      }
+      toast.success(
+        lista.length + ' anexo(s) baixado(s) — arraste-os para a conversa do Claude.',
+      )
+    } catch (e) {
+      toast.error('Não consegui baixar os anexos: ' + (e as Error).message)
+    }
   }
 
   /** Lê os anexos do card, guardando no cache na hora — a janela e a due diligence dividem o mesmo PDF. */
@@ -1914,6 +2003,7 @@ export default function AnaliseCredito() {
                     : resultadoAnalise[l.kommo_lead_id]
                 }
                 onDueDiligence={onDueDiligence}
+                onAnaliseExterna={onAnaliseExterna}
                 onAnaliseJuridica={onAnaliseJuridica}
                 analisandoJuridico={analisandoJurId === l.kommo_lead_id}
                 resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
