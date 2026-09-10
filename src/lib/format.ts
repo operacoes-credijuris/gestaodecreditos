@@ -323,6 +323,28 @@ export function nomeParecido(
 }
 
 /** Data e hora local: "10/08/2026 às 16:21". Para carimbo de geração. */
+/**
+ * Data com hora, minuto e SEGUNDO — para a anotação do Kommo.
+ *
+ * O segundo não é preciosismo aqui. As anotações do card chegam em rajada:
+ * o comercial cola o bloco de dados e, no mesmo minuto, escreve a ressalva
+ * que corrige um dos campos. Sem o segundo as duas exibem o mesmo horário e
+ * a ORDEM entre elas some da tela — e é a ordem que diz qual das duas vale.
+ *
+ * Separado de formatDateTime de propósito: lá o segundo seria ruído ("Gerado
+ * em", horário de conversa), e é a mesma razão pela qual ele importa aqui.
+ */
+export function formatDataHoraSegundos(value: string | null | undefined): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
   const d = new Date(value)

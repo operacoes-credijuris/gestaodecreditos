@@ -92,7 +92,7 @@ import {
   type RespostaAnaliseRpv,
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
-import { formatDate } from '@/lib/format'
+import { formatDataHoraSegundos } from '@/lib/format'
 import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -1078,14 +1078,20 @@ function CardCredito({
         <div className="mt-2 space-y-2">
           {notas.map((n, i) => (
             <div key={n.id || i}>
-              {/* Só a data. Sem rótulo de posição, porque há cards em que a
+              {/* DATA COM HORA, MINUTO E SEGUNDO. As anotações chegam em rajada:
+                  o comercial cola o bloco de dados e, no mesmo minuto, escreve a
+                  ressalva que corrige um dos campos. Só com a data as duas
+                  ficavam indistinguíveis, e some da tela a ORDEM — que é o que
+                  diz qual das duas vale.
+
+                  Sem rótulo de posição, porque há cards em que a
                   primeira anotação é um comentário curto e o bloco de dados vem
                   depois — numerar sugeriria uma ordem semântica que não existe.
                   E sem autor: a equipe usa um login só e se identifica no próprio
                   texto da anotação; os nomes que aparecem são de antes disso.
                   O campo continua guardado em kommo_leads.notas. */}
               <div className="mb-0.5 text-xs text-slate-400">
-                {n.criado_em && formatDate(n.criado_em)}
+                {n.criado_em && formatDataHoraSegundos(n.criado_em)}
               </div>
               <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
                 {n.texto}
