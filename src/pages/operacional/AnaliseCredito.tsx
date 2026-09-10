@@ -79,7 +79,11 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { DueDiligence } from '@/components/DueDiligence'
-import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
+import {
+  podeCompartilharArquivos,
+  promptDaAnaliseExterna,
+  urlDoClaude,
+} from '@/lib/analiseExterna'
 import { supabase } from '@/lib/supabase'
 import {
   verbasQueSobram,
@@ -1344,8 +1348,72 @@ export default function AnaliseCredito() {
    */
   function onAnaliseExterna(lead: KommoLead) {
     const prompt = promptDaAnaliseExterna(lerTituloCard(tituloCard(lead)))
+    // A DECISÃO É SÍNCRONA porque as duas saídas precisam do GESTO: abrir aba e
+    // abrir o painel de compartilhamento são ambos negados quando a ativação do
+    // clique já foi consumida por um await. `canShare` responde sem rede.
+    if (podeCompartilharArquivos()) {
+      void compartilharAnexos(lead, prompt)
+      return
+    }
     window.open(urlDoClaude(prompt), '_blank', 'noopener,noreferrer')
     void baixarAnexosDoCard(lead)
+  }
+
+  /**
+   * Entrega os anexos ao painel de compartilhamento do sistema, com a pergunta.
+   *
+   * É A ÚNICA VIA REAL para os arquivos chegarem à conversa sem passar pela mão
+   * de quem conversa — e ela depende de o Claude estar instalado como aplicativo
+   * e registrado para receber arquivo. Se ele não estiver na lista, quem opera vê
+   * o painel e fecha; daí o caminho de sempre.
+   *
+   * O `await` GASTA A ATIVAÇÃO DO CLIQUE, e o navegador pode negar o painel por
+   * isso. Negado, cancelado ou sem alvo, cai no download com a aba aberta —
+   * nunca fica sem saída.
+   */
+  async function compartilharAnexos(lead: KommoLead, prompt: string) {
+    try {
+      const arquivos = await baixarComoFiles(lead)
+      if (arquivos.length === 0) throw new Error('sem anexo no card')
+      await navigator.share({ files: arquivos, text: prompt })
+      toast.success('Anexos enviados. Escolha o Claude no painel do sistema.')
+    } catch (e) {
+      // AbortError é quem fechou o painel de propósito: não é falha, e insistir
+      // com um erro vermelho seria discutir com a decisão da pessoa.
+      const abortou = (e as Error)?.name === 'AbortError'
+      window.open(urlDoClaude(prompt), '_blank', 'noopener,noreferrer')
+      if (!abortou) void baixarAnexosDoCard(lead)
+    }
+  }
+
+  /** Os anexos do card como File, para o compartilhamento. */
+  async function baixarComoFiles(lead: KommoLead): Promise<File[]> {
+    const lista = await listarAnexosDoCard(lead)
+    const arquivos: File[] = []
+    for (const a of lista) {
+      const res = await fetch(a.download)
+      if (!res.ok) continue
+      const blob = await res.blob()
+      arquivos.push(new File([blob], a.nome, { type: blob.type || 'application/pdf' }))
+    }
+    return arquivos
+  }
+
+  /** A lista de anexos que o card tem no Kommo, com os links de download. */
+  async function listarAnexosDoCard(
+    lead: KommoLead,
+  ): Promise<{ nome: string; download: string }[]> {
+    const bk = await invokeFunction<{
+      erro?: string
+      download_url?: string
+      nome_arquivo?: string
+      arquivos?: { nome: string; download: string }[]
+    }>('buscar-kommo', { lead_id: lead.kommo_lead_id })
+    if (bk.erro) throw new Error(bk.erro)
+    if (bk.arquivos && bk.arquivos.length > 0) return bk.arquivos
+    return bk.download_url
+      ? [{ nome: bk.nome_arquivo ?? 'processo.pdf', download: bk.download_url }]
+      : []
   }
 
   /**
@@ -1357,19 +1425,7 @@ export default function AnaliseCredito() {
    */
   async function baixarAnexosDoCard(lead: KommoLead) {
     try {
-      const bk = await invokeFunction<{
-        erro?: string
-        download_url?: string
-        nome_arquivo?: string
-        arquivos?: { nome: string; download: string }[]
-      }>('buscar-kommo', { lead_id: lead.kommo_lead_id })
-      if (bk.erro) throw new Error(bk.erro)
-      const lista =
-        bk.arquivos && bk.arquivos.length > 0
-          ? bk.arquivos
-          : bk.download_url
-            ? [{ nome: bk.nome_arquivo ?? 'processo.pdf', download: bk.download_url }]
-            : []
+      const lista = await listarAnexosDoCard(lead)
       if (lista.length === 0) {
         toast.error('Este card não tem anexo no Kommo — a conversa abriu sem os autos.')
         return

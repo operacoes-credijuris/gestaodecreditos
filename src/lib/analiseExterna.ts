@@ -85,3 +85,30 @@ export function urlDoClaude(prompt: string, projeto: string = PROJETO_CLAUDE): s
   if (!permitida) return `https://claude.ai/new?q=${q}`
   return base.includes('?') ? `${base}&q=${q}` : `${base}?q=${q}`
 }
+
+/**
+ * O NAVEGADOR SABE ENTREGAR ARQUIVO A OUTRO APLICATIVO?
+ *
+ * É a única via real para "mandar os anexos junto" sem passar pela mão de quem
+ * conversa. As outras não existem: URL não carrega arquivo, e a área de
+ * transferência só aceita texto, HTML e PNG — PDF, não.
+ *
+ * O Web Share com arquivos entrega ao PAINEL DE COMPARTILHAMENTO DO SISTEMA, e
+ * ali aparece quem se registrou para receber. O Claude aparece se estiver
+ * instalado como aplicativo e declarar um alvo de compartilhamento que aceite
+ * arquivo. Não é coisa que se descubra lendo documentação: descobre-se abrindo
+ * o painel. Por isso a tela TENTA e cai no download quando não dá.
+ *
+ * TESTADO COM UM ARQUIVO DE MENTIRA, de propósito: `canShare` responde sobre a
+ * CAPACIDADE, e precisa de um File para responder. Criar um vazio é mais barato
+ * que baixar os autos para descobrir que o navegador não sabe compartilhar.
+ */
+export function podeCompartilharArquivos(): boolean {
+  try {
+    if (typeof navigator === 'undefined' || typeof navigator.canShare !== 'function') return false
+    const teste = new File([new Uint8Array(1)], 'teste.pdf', { type: 'application/pdf' })
+    return navigator.canShare({ files: [teste] })
+  } catch {
+    return false
+  }
+}
