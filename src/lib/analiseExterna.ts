@@ -7,12 +7,23 @@
 // contexto da operação, e o papel desta tela é ABRIR essa conversa já dizendo de
 // que crédito se trata.
 //
-// O QUE NÃO DÁ, e não é limitação nossa: NÃO EXISTE forma de anexar arquivo a uma
-// conversa do claude.ai por link. Nem parâmetro de URL, nem área de
-// transferência (o navegador só deixa escrever texto e imagem no clipboard, não
-// PDF). Anexo entra na conversa pela mão de quem conversa — arrastando ou pelo
-// seletor. Então o botão faz as duas metades que PODE fazer: abre a conversa com
-// a pergunta pronta e baixa os anexos do card, para o arrasto ser um gesto só.
+// ABRE O APLICATIVO, e não o navegador. O Claude Desktop registra o esquema
+// `claude://` no Windows, e as rotas dele espelham as da web — o próprio app usa
+// `claude://claude.ai/new?surface=chat` no atalho "New Chat" da barra de tarefas.
+// Então `claude://claude.ai/new?q=…` abre a conversa no app com a pergunta
+// escrita.
+//
+// O QUE NÃO DÁ, e isto foi VERIFICADO no pacote instalado, não suposto: o app
+// NÃO declara alvo de compartilhamento (não há ShareTarget no AppxManifest), o
+// que exclui a única via que existiria para o navegador entregar arquivo a outro
+// aplicativo. Somada às duas que já não existiam — URL não carrega arquivo, e o
+// clipboard só aceita texto, HTML e PNG —, sobra o disco: o anexo entra na
+// conversa pela mão de quem conversa.
+//
+// E POR AÍ FICA BOM, porque o app ASSOCIA .pdf (uap3:FileTypeAssociation): os
+// arquivos baixados abrem nele por "Abrir com", e a janela do app aceita
+// arrastar. O botão faz as duas metades que pode: abre o app com a pergunta
+// pronta e baixa os anexos, para o arrasto ser um gesto só.
 
 /** O que o título do card informa, já lido por `lerTituloCard`. */
 export interface DadosDoTituloParaPrompt {
@@ -71,44 +82,34 @@ export const PROJETO_CLAUDE = ''
  * trocada por descuido faria este botão abrir um site qualquer levando o nome
  * do cedente na query.
  */
-export function urlDoClaude(prompt: string, projeto: string = PROJETO_CLAUDE): string {
+export function urlDoClaude(
+  prompt: string,
+  projeto: string = PROJETO_CLAUDE,
+  /**
+   * No APLICATIVO, que é o padrão.
+   *
+   * `claude://` é o esquema que o Claude Desktop registra, e o caminho é o mesmo
+   * da web — o app o usa assim no próprio atalho de "New Chat". Falso abre no
+   * navegador, que é a saída para máquina sem o app instalado: ali o esquema não
+   * tem quem o atenda e o clique não faz nada visível.
+   */
+  noApp = true,
+): string {
   const q = encodeURIComponent(prompt)
   const base = String(projeto ?? '').trim()
-  let permitida = false
+  let caminho = '/new'
   if (base) {
     try {
-      permitida = new URL(base).hostname.endsWith('claude.ai')
+      const u = new URL(base)
+      // SÓ claude.ai. A URL do projeto é digitada por uma pessoa, e uma linha
+      // trocada por descuido faria este botão abrir um site qualquer levando o
+      // nome do cedente na query.
+      if (u.hostname.endsWith('claude.ai')) caminho = u.pathname + u.search
     } catch {
-      permitida = false
+      caminho = '/new'
     }
   }
-  if (!permitida) return `https://claude.ai/new?q=${q}`
-  return base.includes('?') ? `${base}&q=${q}` : `${base}?q=${q}`
-}
-
-/**
- * O NAVEGADOR SABE ENTREGAR ARQUIVO A OUTRO APLICATIVO?
- *
- * É a única via real para "mandar os anexos junto" sem passar pela mão de quem
- * conversa. As outras não existem: URL não carrega arquivo, e a área de
- * transferência só aceita texto, HTML e PNG — PDF, não.
- *
- * O Web Share com arquivos entrega ao PAINEL DE COMPARTILHAMENTO DO SISTEMA, e
- * ali aparece quem se registrou para receber. O Claude aparece se estiver
- * instalado como aplicativo e declarar um alvo de compartilhamento que aceite
- * arquivo. Não é coisa que se descubra lendo documentação: descobre-se abrindo
- * o painel. Por isso a tela TENTA e cai no download quando não dá.
- *
- * TESTADO COM UM ARQUIVO DE MENTIRA, de propósito: `canShare` responde sobre a
- * CAPACIDADE, e precisa de um File para responder. Criar um vazio é mais barato
- * que baixar os autos para descobrir que o navegador não sabe compartilhar.
- */
-export function podeCompartilharArquivos(): boolean {
-  try {
-    if (typeof navigator === 'undefined' || typeof navigator.canShare !== 'function') return false
-    const teste = new File([new Uint8Array(1)], 'teste.pdf', { type: 'application/pdf' })
-    return navigator.canShare({ files: [teste] })
-  } catch {
-    return false
-  }
+  const separador = caminho.includes('?') ? '&' : '?'
+  const prefixo = noApp ? 'claude://claude.ai' : 'https://claude.ai'
+  return `${prefixo}${caminho}${separador}q=${q}`
 }

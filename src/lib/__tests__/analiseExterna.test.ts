@@ -51,20 +51,33 @@ describe('promptDaAnaliseExterna', () => {
 })
 
 describe('urlDoClaude', () => {
-  it('sem projeto, abre conversa nova com a pergunta pronta', () => {
+  // ABRE O APLICATIVO, e não o navegador: o Claude Desktop registra o esquema
+  // "claude://" e as rotas dele espelham as da web — o próprio app usa
+  // "claude://claude.ai/new?surface=chat" no atalho da barra de tarefas.
+  it('sem projeto, abre conversa nova no aplicativo', () => {
     expect(urlDoClaude('teste de análise')).toBe(
-      'https://claude.ai/new?q=teste%20de%20an%C3%A1lise',
+      'claude://claude.ai/new?q=teste%20de%20an%C3%A1lise',
     )
   })
 
-  it('com projeto, a pergunta vai anexada à URL dele', () => {
-    const u = urlDoClaude('oi', 'https://claude.ai/project/abc-123')
-    expect(u).toBe('https://claude.ai/project/abc-123?q=oi')
+  it('com projeto, a conversa nasce dentro dele', () => {
+    expect(urlDoClaude('oi', 'https://claude.ai/project/abc-123')).toBe(
+      'claude://claude.ai/project/abc-123?q=oi',
+    )
   })
 
   it('projeto que já tem query recebe a pergunta com &', () => {
     expect(urlDoClaude('oi', 'https://claude.ai/project/abc?x=1')).toBe(
-      'https://claude.ai/project/abc?x=1&q=oi',
+      'claude://claude.ai/project/abc?x=1&q=oi',
+    )
+  })
+
+  // A SAÍDA PARA MÁQUINA SEM O APP: ali o esquema não tem quem o atenda e o
+  // clique não faz nada visível.
+  it('pedindo o navegador, sai https', () => {
+    expect(urlDoClaude('oi', '', false)).toBe('https://claude.ai/new?q=oi')
+    expect(urlDoClaude('oi', 'https://claude.ai/project/abc', false)).toBe(
+      'https://claude.ai/project/abc?q=oi',
     )
   })
 
@@ -73,17 +86,17 @@ describe('urlDoClaude', () => {
   it('endereço que não é do claude.ai é ignorado', () => {
     for (const ruim of [
       'https://claude.ai.exemplo.com/projeto',
-      'http://exemplo.com',
+      'http://exemplo.com/x',
       'javascript:alert(1)',
       'nem url',
     ]) {
-      expect(urlDoClaude('oi', ruim), ruim).toBe('https://claude.ai/new?q=oi')
+      expect(urlDoClaude('oi', ruim), ruim).toBe('claude://claude.ai/new?q=oi')
     }
   })
 
   it('subdomínio do claude.ai é aceito', () => {
     expect(urlDoClaude('oi', 'https://www.claude.ai/project/abc')).toBe(
-      'https://www.claude.ai/project/abc?q=oi',
+      'claude://claude.ai/project/abc?q=oi',
     )
   })
 })

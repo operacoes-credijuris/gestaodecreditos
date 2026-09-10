@@ -79,11 +79,7 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { DueDiligence } from '@/components/DueDiligence'
-import {
-  podeCompartilharArquivos,
-  promptDaAnaliseExterna,
-  urlDoClaude,
-} from '@/lib/analiseExterna'
+import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
 import { supabase } from '@/lib/supabase'
 import {
   verbasQueSobram,
@@ -1348,57 +1344,15 @@ export default function AnaliseCredito() {
    */
   function onAnaliseExterna(lead: KommoLead) {
     const prompt = promptDaAnaliseExterna(lerTituloCard(tituloCard(lead)))
-    // A DECISÃO É SÍNCRONA porque as duas saídas precisam do GESTO: abrir aba e
-    // abrir o painel de compartilhamento são ambos negados quando a ativação do
-    // clique já foi consumida por um await. `canShare` responde sem rede.
-    if (podeCompartilharArquivos()) {
-      void compartilharAnexos(lead, prompt)
-      return
-    }
-    window.open(urlDoClaude(prompt), '_blank', 'noopener,noreferrer')
+    // O ESQUEMA PRECISA DE UM CLIQUE DE VERDADE, e é por isso que sai de um <a>
+    // e não de `location.href`: navegação programática para esquema externo é
+    // recusada por algumas versões do Chrome, e o clique sintético num link
+    // carrega a ativação do gesto que ainda está valendo.
+    const link = document.createElement('a')
+    link.href = urlDoClaude(prompt)
+    link.click()
     void baixarAnexosDoCard(lead)
   }
-
-  /**
-   * Entrega os anexos ao painel de compartilhamento do sistema, com a pergunta.
-   *
-   * É A ÚNICA VIA REAL para os arquivos chegarem à conversa sem passar pela mão
-   * de quem conversa — e ela depende de o Claude estar instalado como aplicativo
-   * e registrado para receber arquivo. Se ele não estiver na lista, quem opera vê
-   * o painel e fecha; daí o caminho de sempre.
-   *
-   * O `await` GASTA A ATIVAÇÃO DO CLIQUE, e o navegador pode negar o painel por
-   * isso. Negado, cancelado ou sem alvo, cai no download com a aba aberta —
-   * nunca fica sem saída.
-   */
-  async function compartilharAnexos(lead: KommoLead, prompt: string) {
-    try {
-      const arquivos = await baixarComoFiles(lead)
-      if (arquivos.length === 0) throw new Error('sem anexo no card')
-      await navigator.share({ files: arquivos, text: prompt })
-      toast.success('Anexos enviados. Escolha o Claude no painel do sistema.')
-    } catch (e) {
-      // AbortError é quem fechou o painel de propósito: não é falha, e insistir
-      // com um erro vermelho seria discutir com a decisão da pessoa.
-      const abortou = (e as Error)?.name === 'AbortError'
-      window.open(urlDoClaude(prompt), '_blank', 'noopener,noreferrer')
-      if (!abortou) void baixarAnexosDoCard(lead)
-    }
-  }
-
-  /** Os anexos do card como File, para o compartilhamento. */
-  async function baixarComoFiles(lead: KommoLead): Promise<File[]> {
-    const lista = await listarAnexosDoCard(lead)
-    const arquivos: File[] = []
-    for (const a of lista) {
-      const res = await fetch(a.download)
-      if (!res.ok) continue
-      const blob = await res.blob()
-      arquivos.push(new File([blob], a.nome, { type: blob.type || 'application/pdf' }))
-    }
-    return arquivos
-  }
-
   /** A lista de anexos que o card tem no Kommo, com os links de download. */
   async function listarAnexosDoCard(
     lead: KommoLead,
@@ -1443,7 +1397,7 @@ export default function AnaliseCredito() {
         setTimeout(() => URL.revokeObjectURL(url), 30_000)
       }
       toast.success(
-        lista.length + ' anexo(s) baixado(s) — arraste-os para a conversa do Claude.',
+        lista.length + ' anexo(s) baixado(s) — arraste-os para a janela do Claude.',
       )
     } catch (e) {
       toast.error('Não consegui baixar os anexos: ' + (e as Error).message)
