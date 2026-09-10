@@ -23,6 +23,7 @@ export function Tabs({
   value,
   onChange,
   trailing,
+  trailingNaBorda,
 }: {
   items: TabItem[]
   value: string
@@ -41,6 +42,15 @@ export function Tabs({
    * para as duas partes dividirem a mesma linha.
    */
   trailing?: ReactNode
+  /**
+   * O `trailing` vai para a BORDA da linha, e não colado nas abas.
+   *
+   * A escolha é sobre A QUE o controle pertence. Um filtro daquelas abas fica
+   * junto delas — é a regra acima. Um controle do PAINEL INTEIRO, como o botão
+   * que refaz a busca cujos resultados as abas apenas recortam, pertence à
+   * seção, e colado nas abas se leria como se filtrasse a aba aberta.
+   */
+  trailingNaBorda?: boolean
 }) {
   // Refs dos botões para mover o foco na navegação por setas.
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -114,7 +124,9 @@ export function Tabs({
           )
         })}
       </div>
-      {trailing && <div className="shrink-0">{trailing}</div>}
+      {trailing && (
+        <div className={cn('shrink-0', trailingNaBorda && 'ml-auto')}>{trailing}</div>
+      )}
     </div>
   )
 }

@@ -78,6 +78,16 @@ const TOM_DO_RISCO: Record<string, 'red' | 'amber' | 'green' | 'gray'> = {
   NAO_AVALIADO: 'gray',
 }
 
+/**
+ * A ORDEM DOS TITULARES NA TELA, que não é a alfabética.
+ *
+ * A consulta trazia por `papel`, e alfabeticamente ADVOGADO vem antes de
+ * CEDENTE — a aba do advogado abria primeiro num crédito cujo titular é o
+ * cedente. A ordem certa é a do negócio: quem cede o principal primeiro, quem
+ * cede os honorários depois.
+ */
+const ORDEM_DO_PAPEL: Record<string, number> = { CEDENTE: 0, CONJUGE: 1, PJ: 2, ADVOGADO: 3 }
+
 const brl = (v: unknown): string => {
   const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(',', '.'))
   return Number.isFinite(n) && n > 0
@@ -189,7 +199,14 @@ export function PainelProcessosJudiciais({
             '0056 e 0061 no Supabase antes de usar esta aba.'
         : falha,
     )
-    setApuracoes((h.data ?? []) as ApuracaoDD[])
+    setApuracoes(
+      ((h.data ?? []) as ApuracaoDD[])
+        .slice()
+        .sort(
+          (a, b) =>
+            (ORDEM_DO_PAPEL[String(a.papel)] ?? 9) - (ORDEM_DO_PAPEL[String(b.papel)] ?? 9),
+        ),
+    )
     setProcessos((p.data ?? []) as unknown as ProcessoNaTela[])
     setCarregando(false)
   }, [leadId])
@@ -533,9 +550,9 @@ export function PainelProcessosJudiciais({
     </Field>
   )
 
-  /** Refazer a busca, e o que ela custou — no fim da última linha de campos. */
+  /** Refazer a busca, e o que ela custou. */
   const refazer = (
-    <div className="flex items-end justify-end gap-3 pb-1">
+    <div className="flex items-center justify-end gap-3">
       {custo && <span className="text-xs text-slate-500">Custo: {custo}</span>}
       <Button
         size="sm"
@@ -596,7 +613,6 @@ export function PainelProcessosJudiciais({
               setCedenteCpf,
               true,
             )}
-            {!pedeAdvogado && refazer}
           </>
         )}
         {pedeAdvogado && (
@@ -612,10 +628,6 @@ export function PainelProcessosJudiciais({
               setAdvOab,
             )}
             {campo('CPF do advogado', advCpf, setAdvCpf, true)}
-            {/* A SEXTA CÉLULA DA GRADE, que é o canto que sobra depois dos cinco
-                campos. Havia dois espaçadores aqui empurrando o botão para uma
-                terceira linha, no meio dela — o oposto do canto direito. */}
-            {refazer}
           </>
         )}
       </div>
@@ -626,7 +638,17 @@ export function PainelProcessosJudiciais({
           na mesma lista duas perguntas diferentes: a dívida do cedente e a do
           advogado respondem linhas distintas do questionário. Com um titular só
           a régua de abas não aparece: uma aba solitária não é uma escolha. */}
-      {abasDeTitular.length > 1 && (
+      {/* A LINHA DOS TITULARES, com o Reapurar na ponta.
+          Ele estava no canto da grade de campos, e ali se lia como um controle
+          DAQUELES CAMPOS — algo que confirma o que se acabou de digitar. É o
+          contrário: ele refaz a busca inteira, cujos resultados as abas apenas
+          recortam. Na borda desta linha, encostado na tabela que ele reescreve,
+          está no lugar certo.
+
+          A régua aparece com um titular só, e é de propósito: aqui ela não
+          sugere uma visão escondida, ela ROTULA de quem é a tabela — sem ela,
+          "94 processos" ficaria sem dono na tela. */}
+      {abasDeTitular.length > 0 && (
         <Tabs
           items={abasDeTitular.map((a) => ({
             key: a.key,
@@ -637,8 +659,11 @@ export function PainelProcessosJudiciais({
           }))}
           value={abaDoTitular}
           onChange={setAbaDoTitular}
+          trailing={refazer}
+          trailingNaBorda
         />
       )}
+      {abasDeTitular.length === 0 && <div className="flex justify-end">{refazer}</div>}
 
       {daAba.length === 0 ? (
         <EmptyState
