@@ -562,7 +562,7 @@ export function PainelProcessosJudiciais({
         disabled={lendoTitulares || Boolean(passo)}
         icon={<Search className="h-4 w-4" />}
       >
-        {apuracoes.length > 0 ? 'Reapurar' : 'Apurar'}
+        {apuracoes.length > 0 ? 'Refazer' : 'Apurar'}
       </Button>
     </div>
   )
@@ -685,7 +685,9 @@ export function PainelProcessosJudiciais({
               <TH>Processo</TH>
               <TH>Objeto</TH>
               <TH>Polo</TH>
-              <TH className="text-right">Valor da causa</TH>
+              {/* nowrap: sem ele o cabeçalho quebra em "VALOR DA / CAUSA" e a
+                  linha do cabeçalho fica com o dobro da altura das outras. */}
+              <TH className="whitespace-nowrap text-right">Valor da causa</TH>
               <TH>Estágio</TH>
               <TH>Risco</TH>
             </TR>
