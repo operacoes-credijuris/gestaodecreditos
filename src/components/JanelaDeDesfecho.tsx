@@ -69,11 +69,17 @@ export interface ItemDeRisco {
  * a lista de achados de uma análise ruim é longa, e ela é o motivo pelo qual a
  * janela existe. Aqui ela tem a tela inteira.
  *
- * O MOTIVO É OBRIGATÓRIO nos dois desfechos. "Diligência" sem dizer o que falta
- * transfere ao comercial a tarefa de adivinhar o que apurar, e "Reprovar" sem
- * motivo apaga o trabalho de quem analisou: seis meses depois o card diz que
- * foi reprovado e ninguém sabe por quê — nem para não repetir o mesmo cedente,
- * nem para reabrir se a razão deixou de valer.
+ * O MOTIVO ESCRITO É O ÚNICO REQUISITO, e ele é obrigatório nos dois desfechos.
+ * "Diligência" sem dizer o que falta transfere ao comercial a tarefa de
+ * adivinhar o que apurar, e "Reprovar" sem motivo apaga o trabalho de quem
+ * analisou: seis meses depois o card diz que foi reprovado e ninguém sabe por
+ * quê — nem para não repetir o mesmo cedente, nem para reabrir se a razão
+ * deixou de valer.
+ *
+ * MARCAR NÃO É REQUISITO, e nunca deveria ter travado o botão. A razão de
+ * recusar frequentemente NÃO ESTÁ na lista: a análise levantou três divergências
+ * e quem decide recusa por uma quarta coisa, que só ele viu. As marcas servem
+ * para a IA redigir; quem escreve a própria razão confirma sem tocar nelas.
  *
  * Mandar para validação não passa por aqui: é o caminho normal, não pede
  * justificativa, e está no rodapé como um clique só.
@@ -189,9 +195,11 @@ export function JanelaDeDesfecho({
     setErro(null)
     setEnviando(true)
     try {
-      // VAI SÓ O TEXTO DO CAMPO. Os achados marcados já estão nele, escritos
-      // pela IA e lidos por quem confirma — `podeEnviar` não libera o botão de
-      // outro jeito. Anexar a lista crua aqui era o que enchia o card de
+      // VAI SÓ O TEXTO DO CAMPO, e é o que quem confirma acabou de ler.
+      //
+      // Os achados marcados entram nele pela mão da IA, quando ela redige;
+      // confirmado sem redigir, eles ficam de fora — o aviso ao lado do botão
+      // diz isso. Anexar a lista crua aqui era o que enchia o card de
       // "- [IMPEDITIVO] ..." em vez da mensagem.
       await onMover(acao.statusId, motivo.trim())
       onFechar()
@@ -202,11 +210,24 @@ export function JanelaDeDesfecho({
     }
   }
 
-  // ACHADO MARCADO SÓ CHEGA AO CARD PELA REDAÇÃO DA IA.
-  //
-  // Marcar é atalho de conteúdo, não de forma: o que se aponta com o dedo vira
-  // frase no texto da IA, nunca a lista de rótulos entre colchetes. Quem não
-  // quer a IA desmarca tudo e escreve à mão.
+  /**
+   * O QUE LIBERA O CONFIRMAR É O TEXTO ESCRITO, e só ele.
+   *
+   * MARCAR NUNCA FOI OBRIGATÓRIO, mas marcar e depois não redigir travava o
+   * botão — e a razão de alguém recusar frequentemente NÃO ESTÁ na lista: a
+   * análise levantou três divergências de conta e quem decide recusa por uma
+   * quarta coisa, que só ele viu. Nesse caso a lista é ruído, e exigir que ela
+   * passasse pela IA era exigir que a pessoa apagasse as marcas para poder
+   * confirmar o texto que já tinha escrito.
+   *
+   * CINQUENTA CARACTERES, e não dez: dez cabem em "não passa", que é o que se
+   * escreve com pressa e é exatamente o que não serve. Quem lê é o comercial,
+   * sem a análise à frente, seis meses depois.
+   *
+   * O que a marcação faz continua valendo: ela alimenta a redação da IA. Só
+   * deixou de ser um pedágio.
+   */
+  const MINIMO_DO_MOTIVO = 50
   /**
    * O MOTIVO É OBRIGATÓRIO NO QUE INTERROMPE, e no que aprova.
    *
@@ -225,8 +246,7 @@ export function JanelaDeDesfecho({
   const podeEnviar =
     !enviando &&
     !redigindo &&
-    (!motivoObrigatorio || motivo.trim().length >= 10) &&
-    (marcados.size === 0 || revisado)
+    (!motivoObrigatorio || motivo.trim().length >= MINIMO_DO_MOTIVO)
 
   return (
     <Modal
@@ -353,18 +373,22 @@ export function JanelaDeDesfecho({
               Texto reescrito pela IA — confira e edite antes de confirmar.
             </span>
           ) : marcados.size > 0 ? (
-            /* Dizer o que falta, e não apenas desligar o botão: um Confirmar
-               apagado sem explicação é um beco. */
+            /* AVISO, E NÃO TRAVA. O que vai para o card é o texto do campo; os
+               achados marcados só entram nele pela mão da IA. Confirmar sem
+               redigir é legítimo — é o caso de quem recusa por uma razão que
+               não está na lista —, mas então as marcas não vão a lugar nenhum,
+               e isso precisa estar dito. */
             <span className="text-xs text-amber-700">
-              {marcados.size === 1 ? '1 achado marcado' : `${marcados.size} achados marcados`} — a IA
-              precisa redigir antes de confirmar, porque é o texto dela que vai para o card.
+              {marcados.size === 1 ? '1 achado marcado' : `${marcados.size} achados marcados`} — eles só
+              chegam ao card se a IA redigir. Confirmando assim, vai só o texto acima.
             </span>
           ) : null}
         </div>
 
-        {motivoObrigatorio && motivo.trim().length > 0 && motivo.trim().length < 10 && (
+        {motivoObrigatorio && motivo.trim().length > 0 && motivo.trim().length < MINIMO_DO_MOTIVO && (
           <p className="text-xs text-amber-700">
-            Escreva a razão por extenso — o comercial lê isso sem ter a análise à mão.
+            Escreva a razão por extenso — faltam {MINIMO_DO_MOTIVO - motivo.trim().length}{' '}
+            caracteres. O comercial lê isso sem ter a análise à mão.
           </p>
         )}
         {erro && <p className="text-xs text-red-700">{erro}</p>}
