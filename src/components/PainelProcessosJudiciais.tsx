@@ -42,7 +42,7 @@
 // com os campos preenchidos e diz o que falta. O custo de cada chamada volta na
 // tela.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ExternalLink, Info, RefreshCw, Search } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Info, RefreshCw, ScanText, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { formatCpfCnpjInput, onlyDigits } from '@/lib/format'
@@ -412,17 +412,19 @@ export function PainelProcessosJudiciais({
   //                    decide se manda buscar pelo nome mesmo assim.
   const [passo, setPasso] = useState<'lendo' | 'apurando' | null>(null)
 
-  useEffect(() => {
-    if (!ativo || carregando || erro) return
-    // Já existe apuração para este crédito: a foto está na tela, e refazê-la
-    // custa dinheiro.
-    if (apuracoes.length > 0) return
-    if (lendoPdf) return
-    if (jaEncadeou.current === leadId) return
-    jaEncadeou.current = leadId
-
-    void (async () => {
-      setPasso('lendo')
+  /**
+   * Os dois passos, em sequência: ler os titulares nos autos e procurar as
+   * dívidas deles.
+   *
+   * FUNÇÃO NOMEADA, e não um corpo dentro do efeito, porque ela tem DOIS
+   * gatilhos. O efeito a dispara sozinho na primeira abertura; o botão "Reler os
+   * autos" a dispara de novo quando a leitura errou de pessoa — e ali a
+   * releitura tem de arrastar a apuração junto, senão a busca continuaria
+   * valendo sobre o titular errado.
+   */
+  async function correnteCompleta() {
+    setPasso('lendo')
+    try {
       const titulares = await lerTitulares()
       const paraApurar: Record<string, string>[] = []
       for (const papel of alvos.papeis) {
@@ -432,22 +434,26 @@ export function PainelProcessosJudiciais({
         // devolve o CPF dele.
         const temIdentidade = Boolean(t?.documento) || (papel === 'ADVOGADO' && Boolean(t?.oab))
         if (t && temIdentidade) {
-          paraApurar.push({
-            papel,
-            nome: t.nome,
-            documento: t.documento,
-            oab: t.oab,
-          })
+          paraApurar.push({ papel, nome: t.nome, documento: t.documento, oab: t.oab })
         }
       }
-      if (paraApurar.length === 0) {
-        setPasso(null)
-        return
-      }
+      if (paraApurar.length === 0) return
       setPasso('apurando')
       await apurar(paraApurar)
+    } finally {
       setPasso(null)
-    })()
+    }
+  }
+
+  useEffect(() => {
+    if (!ativo || carregando || erro) return
+    // Já existe apuração para este crédito: a foto está na tela, e refazê-la
+    // custa dinheiro. Quem quiser refazer clica — ver "Reler os autos".
+    if (apuracoes.length > 0) return
+    if (lendoPdf) return
+    if (jaEncadeou.current === leadId) return
+    jaEncadeou.current = leadId
+    void correnteCompleta()
     // As funções são recriadas a cada render e entrariam aqui como dependência
     // instável; a trava por `leadId` é o que garante uma execução por card.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -584,10 +590,31 @@ export function PainelProcessosJudiciais({
     </Field>
   )
 
-  /** Refazer a busca, e o que ela custou. */
+  /**
+   * As duas maneiras de refazer, e elas não são a mesma.
+   *
+   * RELER OS AUTOS volta ao começo: manda a IA identificar os titulares de novo
+   * e busca com o que ela achar. É a saída para quando a leitura pegou a pessoa
+   * errada — num litisconsórcio, o exequente que não é o cedente do card —, e
+   * nesse caso a apuração anterior também está errada, porque procurou dívida de
+   * quem não é parte do negócio. Por isso ela arrasta a busca junto.
+   *
+   * REFAZER usa o que está NOS CAMPOS. É para quando quem confere já corrigiu o
+   * CPF à mão e quer só a busca de novo, sem pagar outra leitura dos autos.
+   */
   const refazer = (
     <div className="flex items-center justify-end gap-3">
       {custo && <span className="text-xs text-slate-500">Custo: {custo}</span>}
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => void correnteCompleta()}
+        loading={lendoTitulares}
+        disabled={apurando || Boolean(passo)}
+        icon={<ScanText className="h-4 w-4" />}
+      >
+        Reler os autos
+      </Button>
       <Button
         size="sm"
         variant="outline"
