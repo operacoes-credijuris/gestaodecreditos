@@ -788,9 +788,15 @@ function CardCredito({
             ) : (
               <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
             )}
-            {analisePronta !== null && (
-              <Badge size="sm" tone={analisePronta ? 'green' : 'yellow'}>
-                {analisePronta ? 'Finalizado' : 'Em curso'}
+            {/* SÓ O "FINALIZADO". O par tinha um selo para cada estado, e o
+                "Em curso" aparecia em todo card que ninguém tocou — que é a
+                maioria da lista. Selo que está em quase toda linha não distingue
+                nada: vira textura, e ainda empurra o título. O que a pessoa
+                procura na fila é o card cuja análise JÁ ESTÁ PRONTA; a ausência
+                do selo diz o resto. */}
+            {analisePronta === true && (
+              <Badge size="sm" tone="green">
+                Finalizado
               </Badge>
             )}
           </div>
