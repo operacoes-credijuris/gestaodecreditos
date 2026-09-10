@@ -28,7 +28,15 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
 import { PainelCertidoes } from '@/components/PainelCertidoes'
-import { PainelProcessosJudiciais } from '@/components/PainelProcessosJudiciais'
+import {
+  PainelProcessosJudiciais,
+  type GrupoDeTitular,
+} from '@/components/PainelProcessosJudiciais'
+import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
+import {
+  verbasQueSobram,
+  type PapelApurado,
+} from '../../supabase/functions/_shared/titularesDaCessao.ts'
 import { JanelaDeDesfecho, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
 import { invokeFunction } from '@/lib/functions'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
@@ -111,8 +119,54 @@ export function DueDiligence({
    * dentro não dispara a cada render.
    */
   const [itens, setItens] = useState<ItemDeRisco[]>([])
+  const [grupos, setGrupos] = useState<GrupoDeTitular[]>([])
+  const [marcados, setMarcados] = useState<string[]>([])
   const [seguindo, setSeguindo] = useState(false)
   const toast = useToast()
+
+  /**
+   * A RECUSA PODE SER DE UMA VERBA SÓ, e é isto que decide qual.
+   *
+   * O card cede até duas coisas com DONOS DIFERENTES: o principal, do exequente,
+   * e os honorários, do advogado. São créditos distintos — o honorário destacado
+   * não responde pelas dívidas do exequente, e a penhora contra ele não o
+   * alcança. Marcados só os processos de um titular, a verba dele cai e a outra
+   * segue; o card só vai para Reprovados quando não sobra nenhuma.
+   */
+  const papeisRecusados: PapelApurado[] = [
+    ...new Set(grupos.filter((g) => marcados.includes(g.label)).flatMap((g) => g.papeis)),
+  ]
+  const sobra = verbasQueSobram(
+    classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida),
+    papeisRecusados,
+  )
+  const recusaParcial = papeisRecusados.length > 0 && !sobra.tudoRecusado
+
+  /**
+   * Grava a recusa da verba e anota no card — sem mover o card.
+   *
+   * O TEXTO VAI PARA DOIS LUGARES QUE NÃO SE FALAM: a anotação no Kommo, agora,
+   * e a linha 10 ou 11 da aba jurídica, quando a análise correr. Por isso ele
+   * fica em `reprovado_motivo` em vez de só ser publicado: regravá-lo à mão no
+   * segundo lugar produziria duas versões da mesma razão.
+   */
+  async function recusarVerba(texto: string) {
+    const { error } = await supabase
+      .from('dd_historico')
+      .update({ reprovado_em: new Date().toISOString(), reprovado_motivo: texto })
+      .eq('kommo_lead_id', leadId)
+      .in('papel', papeisRecusados)
+      .eq('status', 'APURADO')
+    if (error) throw new Error(error.message)
+    // A ANOTAÇÃO FALHANDO NÃO DESFAZ A RECUSA: ela já está no banco e já governa
+    // a análise. O card sem a nota é um registro incompleto, não uma decisão
+    // perdida — e avisar é melhor do que reverter.
+    try {
+      await invokeFunction('kommo-anotar', { lead_id: leadId, texto })
+    } catch (e) {
+      toast.error('Recusa gravada, mas a nota não foi ao Kommo: ' + (e as Error).message)
+    }
+  }
 
   /**
    * SEGUIR É UMA DECISÃO, e é por isso que ela fica gravada.
@@ -167,13 +221,17 @@ export function DueDiligence({
    * fraude à execução, massa falida. Sem isso a anotação listaria números de
    * processo e deixaria a conclusão por conta de quem lê.
    */
-  async function redigir(tipo: string, marcados: string[], texto: string) {
+  async function redigir(tipo: string, itensMarcados: string[], texto: string) {
     const r = await invokeFunction<{ mensagem?: string }>('redigir-desfecho', {
       desfecho: tipo,
-      itens: marcados,
+      itens: itensMarcados,
       texto,
       origem: 'diligencia',
       cedente: cedenteDoCard || null,
+      // O TÍTULO NOMEIA A VERBA quando só ela cai. Quem varre o funil precisa
+      // distinguir de relance o card que perdeu uma verba do que foi recusado
+      // inteiro, e "Crédito Recusado" nos dois casos apagaria a diferença.
+      titulo: recusaParcial ? sobra.tituloDaRecusa : undefined,
     })
     const m = String(r?.mensagem ?? '').trim()
     if (!m) throw new Error('A IA não devolveu texto para a anotação.')
@@ -257,7 +315,10 @@ export function DueDiligence({
             arquivos={arquivos}
             lendoPdf={lendoPdf}
             ativo={aba === 'processos'}
-            onItensDeRisco={setItens}
+            onItensDeRisco={(i, g) => {
+              setItens(i)
+              setGrupos(g)
+            }}
           />
         </div>
       </div>
@@ -267,11 +328,28 @@ export function DueDiligence({
           acao={desfecho}
           achados={itens}
           onRedigir={redigir}
+          onGruposMarcados={setMarcados}
+          // O BOTÃO DIZ O QUE VAI ACONTECER. Confirmar movendo o card e
+          // confirmar deixando-o seguir com a outra verba são atos diferentes, e
+          // a diferença aparece enquanto se marca — não depois.
+          rotuloConfirmar={
+            recusaParcial ? `Recusar ${sobra.recusada.toLowerCase()} e seguir` : undefined
+          }
           onMover={async (statusId, comentario) => {
+            if (recusaParcial) {
+              await recusarVerba(comentario)
+              setDesfecho(null)
+              onSeguir?.()
+              onClose()
+              return
+            }
             await onMover(statusId, comentario)
             setDesfecho(null)
           }}
-          onFechar={() => setDesfecho(null)}
+          onFechar={() => {
+            setDesfecho(null)
+            setMarcados([])
+          }}
         />
       )}
     </Modal>

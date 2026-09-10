@@ -3,6 +3,7 @@ import {
   alvosDaCessao,
   lacunasDaLeitura,
   normalizarTitulares,
+  verbasQueSobram,
   type TitularLido,
 } from '../../../supabase/functions/_shared/titularesDaCessao.ts'
 import { classificarParcelaCedida } from '../kommo'
@@ -188,5 +189,73 @@ describe('lacunasDaLeitura', () => {
       { papel: 'CEDENTE', nome: 'Fulano', documento: '12345678900', oab: '', tipoPessoa: 'PF', evidencia: '' },
     ])
     expect(avisos).toEqual([])
+  })
+})
+
+describe('verbasQueSobram', () => {
+  /**
+   * A RECUSA É DO TITULAR, NÃO DO CARD.
+   *
+   * O card cede até duas coisas com donos diferentes: o principal, do exequente,
+   * e os honorários, do advogado. São créditos distintos — o honorário destacado
+   * (art. 22, §4º da Lei 8.906/94) não responde pelas dívidas do exequente, e a
+   * penhora contra ele não o alcança. Reprovar o card inteiro quando só um
+   * titular tem dívida joga fora um negócio bom por causa de outro ruim que só
+   * divide o número do processo com ele.
+   */
+  it('sem recusa, sobra tudo', () => {
+    const r = verbasQueSobram('ambos', [])
+    expect(r).toMatchObject({ parcela: 'ambos', tudoRecusado: false, recusada: '' })
+  })
+
+  it('recusado o cedente, sobram os honorários', () => {
+    const r = verbasQueSobram('ambos', ['CEDENTE'])
+    expect(r.parcela).toBe('honorarios')
+    expect(r.tudoRecusado).toBe(false)
+    expect(r.tituloDaRecusa).toBe('Crédito Principal Recusado')
+  })
+
+  it('recusado o advogado, sobra o principal', () => {
+    const r = verbasQueSobram('ambos', ['ADVOGADO'])
+    expect(r.parcela).toBe('principal')
+    expect(r.tudoRecusado).toBe(false)
+    expect(r.tituloDaRecusa).toBe('Créditos de Honorários Recusados')
+  })
+
+  it('recusados os dois, não sobra nada', () => {
+    const r = verbasQueSobram('ambos', ['CEDENTE', 'ADVOGADO'])
+    expect(r.parcela).toBeNull()
+    expect(r.tudoRecusado).toBe(true)
+  })
+
+  // CESSÃO DE UMA VERBA SÓ: recusar o titular dela é recusar a cessão. Não há
+  // segundo crédito escondido — o outro titular nem entrou no negócio.
+  it('cessão só do principal: recusar o cedente recusa tudo', () => {
+    const r = verbasQueSobram('principal', ['CEDENTE'])
+    expect(r.tudoRecusado).toBe(true)
+    expect(r.tituloDaRecusa).toBe('Crédito Principal Recusado')
+  })
+
+  it('cessão só de honorários: recusar o advogado recusa tudo', () => {
+    for (const p of ['honorarios', 'contratuais', 'sucumbenciais'] as const) {
+      expect(verbasQueSobram(p, ['ADVOGADO']).tudoRecusado, p).toBe(true)
+    }
+  })
+
+  // NA DÚVIDA NÃO SOBRA NADA. Card cuja parcela o título não declara tem os dois
+  // titulares apurados; recusado um deles, não dá para afirmar que o outro tem
+  // crédito próprio ali — deixar seguir seria analisar verba que talvez não exista.
+  it('parcela não declarada: recusar um titular para a cessão', () => {
+    for (const p of ['auto', 'indefinido'] as const) {
+      expect(verbasQueSobram(p, ['CEDENTE']).tudoRecusado, p).toBe(true)
+    }
+  })
+
+  it('toda recusa nomeia a verba que caiu e o título da anotação', () => {
+    for (const papeis of [['CEDENTE'], ['ADVOGADO'], ['CEDENTE', 'ADVOGADO']] as const) {
+      const r = verbasQueSobram('ambos', [...papeis])
+      expect(r.recusada.length, papeis.join('+')).toBeGreaterThan(5)
+      expect(r.tituloDaRecusa.length, papeis.join('+')).toBeGreaterThan(5)
+    }
   })
 })

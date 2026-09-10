@@ -53,6 +53,16 @@ export interface ApuracaoDD {
    * omissão numa planilha que vai ao investidor.
    */
   liberado_em?: string | null
+  /**
+   * Quando a VERBA DESTE TITULAR foi recusada pela due diligence.
+   *
+   * A recusa é do titular, não do card (migração 0063): reprovado o cedente, o
+   * principal sai da cessão e a análise segue com os honorários do advogado, que
+   * são crédito dele e não respondem pelas dívidas do exequente.
+   */
+  reprovado_em?: string | null
+  /** O texto que a IA redigiu, o mesmo que foi para a anotação do card. */
+  reprovado_motivo?: string | null
 }
 
 /** Um processo achado pela apuração (dd_processo). */
@@ -82,6 +92,10 @@ export interface HistoricoDePapel {
    * da linha travada pelo chat, por outra porta.
    */
   liberada: boolean
+  /** A verba deste titular foi recusada: a linha responde "Sim" e diz por quê. */
+  reprovada: boolean
+  /** O motivo redigido, condensado para caber na célula. */
+  motivoDaRecusa: string
   /** Houve tentativa e ela falhou — diferente de nunca ter sido pedida. */
   falhou: boolean
   quem: string
@@ -198,6 +212,13 @@ export function historicoDoCredito(
       // TODOS, e não algum: com dois advogados, liberar um e deixar o outro
       // pendente escreveria "Não" numa célula que fala dos dois.
       liberada: minhas.length > 0 && minhas.every((a) => Boolean(a.liberado_em)),
+      // ALGUM, e não todos: recusada a verba, ela está fora da cessão — não há
+      // "meio recusado". Se dois advogados dividem a mesma verba e um foi
+      // recusado, a verba caiu.
+      reprovada: minhas.some((a) => Boolean(a.reprovado_em)),
+      motivoDaRecusa: condensarMotivo(
+        minhas.find((a) => a.reprovado_em)?.reprovado_motivo ?? '',
+      ),
       falhou: status.some((s) => s === 'FALHA'),
       quem: minhas
         .map((a) => [a.nome, a.oab ? `OAB ${a.oab}` : null].filter(Boolean).join(', '))
@@ -289,6 +310,34 @@ const MARCA_DILIGENCIA = 'Due diligence: '
 const MARCA_CONFLITO =
   '⚠️ A DUE DILIGENCE ENCONTROU DÍVIDA (resposta "Não" mantida a pedido de quem revisou) — '
 const MARCA_AUTOS = 'nos autos: '
+/**
+ * A verba deste titular foi RECUSADA, e a célula abre dizendo isso.
+ *
+ * Ela não é uma variação do complemento: é a informação que muda o que o resto
+ * da linha significa. "Sim, tem dívida" com a lista dos processos descreve um
+ * risco que alguém ainda vai avaliar; com esta marca na frente, descreve a razão
+ * de uma verba já ter saído do negócio.
+ */
+const MARCA_RECUSA = '⛔ VERBA RECUSADA NA DUE DILIGENCE — '
+
+/**
+ * O parecer da recusa, encolhido para caber numa célula de planilha.
+ *
+ * O texto original tem três blocos e até 250 palavras — é a anotação do card,
+ * escrita para ser lida inteira. Aqui ele divide a célula com a lista dos
+ * processos, e o que importa é a razão, não a redação. O título ("Crédito
+ * Recusado") sai: a marca acima já diz isso, e repetir gastaria metade do
+ * espaço.
+ */
+function condensarMotivo(texto: unknown): string {
+  const linhas = String(texto ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+  const semTitulo = linhas.length > 1 && linhas[0].length < 40 ? linhas.slice(1) : linhas
+  const corrido = semTitulo.join(' ').replace(/^\*\s*/, '').replace(/\s*\*\s*/g, ' · ')
+  return corrido.length > 500 ? corrido.slice(0, 497).trimEnd() + '…' : corrido
+}
 
 /**
  * O que a IA (ou o chat) escreveu na célula, sem o que a diligência já colou
@@ -305,7 +354,11 @@ const MARCA_AUTOS = 'nos autos: '
 export function textoDosAutos(complemento: unknown): string {
   const s = String(complemento ?? '').trim()
   if (s.startsWith(MARCA_AUTOS)) return s.slice(MARCA_AUTOS.length).trim()
-  if (s.startsWith(MARCA_DILIGENCIA) || s.startsWith(MARCA_CONFLITO)) {
+  if (
+    s.startsWith(MARCA_DILIGENCIA) ||
+    s.startsWith(MARCA_CONFLITO) ||
+    s.startsWith(MARCA_RECUSA)
+  ) {
     const separador = '; ' + MARCA_AUTOS
     const i = s.indexOf(separador)
     return i < 0 ? '' : s.slice(i + separador.length).trim()
@@ -363,12 +416,16 @@ export function aplicarDiligenciaNoM2(
     // pessoa, não a apuração — ela está com o processo aberto e pode saber o que
     // a busca não sabe: que a execução é de mil reais em juizado, que a dívida
     // já foi quitada, que o homônimo não é ele.
-    const travada = travas.has(h.linha) || h.liberada
+    // RECUSADA NÃO SE LIBERA. A verba saiu da cessão porque a dívida a
+    // impede; devolver "Não" aqui apagaria a razão da própria recusa.
+    const travada = !h.reprovada && (travas.has(h.linha) || h.liberada)
     // Linha travada pelo chat: a coluna B é de quem revisou. Sem trava, é a
     // união — "Sim" se a diligência OU os autos acharam.
-    const resposta = travada
-      ? (iaDisseSim ? 'Sim' : 'Não')
-      : (h.temDivida || iaDisseSim ? 'Sim' : 'Não')
+    const resposta = h.reprovada
+      ? 'Sim'
+      : travada
+        ? (iaDisseSim ? 'Sim' : 'Não')
+        : (h.temDivida || iaDisseSim ? 'Sim' : 'Não')
     const contradiz = travada && !iaDisseSim && h.temDivida
 
     // O que a IA escreveu na célula — SEM o que esta função já colou por cima
@@ -390,11 +447,14 @@ export function aplicarDiligenciaNoM2(
     // abre a planilha depois leria "não tem dívida" sem saber que existe uma
     // busca dizendo o contrário. O marcador de conflito deixa a divergência no
     // documento, em vez de resolvê-la em silêncio para um dos lados.
-    const daDiligencia = h.complemento
-      ? (contradiz
-          ? `${MARCA_CONFLITO}${h.complemento}`
-          : `${MARCA_DILIGENCIA}${h.complemento}`)
-      : ''
+    const daDiligencia = h.reprovada
+      ? MARCA_RECUSA +
+        [h.motivoDaRecusa, h.complemento].filter(Boolean).join(' Processos: ')
+      : h.complemento
+        ? (contradiz
+            ? `${MARCA_CONFLITO}${h.complemento}`
+            : `${MARCA_DILIGENCIA}${h.complemento}`)
+        : ''
 
     const complemento = daDiligencia
       ? [daDiligencia, complementoIA].filter(Boolean).join('; ')
@@ -413,7 +473,14 @@ export function aplicarDiligenciaNoM2(
       )
     }
 
-    if (h.temDivida) {
+    if (h.reprovada) {
+      notas.push(
+        `⛔ ${qual === 'do cedente' ? 'O CRÉDITO PRINCIPAL' : 'OS HONORÁRIOS'} FOI RECUSADO NA DUE DILIGENCE` +
+          `: a linha ${h.linha} registra a razão, e esta verba está fora da cessão. ` +
+          'A análise abaixo precifica só o que sobrou.',
+      )
+    }
+    if (h.temDivida && !h.reprovada) {
       const alto = h.altoRisco.length
       notas.push(
         `${alto ? '⚠️ ' : ''}DUE DILIGENCE ${qual.toUpperCase()}: ${

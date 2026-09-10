@@ -54,6 +54,7 @@ import type {
 } from '../../supabase/functions/_shared/dueDiligencia.ts'
 import {
   alvosDaCessao,
+  type PapelApurado,
   type TitularLido,
 } from '../../supabase/functions/_shared/titularesDaCessao.ts'
 import { Badge } from '@/components/ui/Badge'
@@ -63,6 +64,19 @@ import { EmptyState, Loading, Table, TBody, TD, TH, THead, TR } from '@/componen
 import { Tabs } from '@/components/ui/Tabs'
 import { useToast } from '@/components/ui/Toast'
 import type { ItemDeRisco } from '@/components/JanelaDeDesfecho'
+
+/**
+ * Um titular na tela: o rótulo que aparece e os papéis por trás dele.
+ *
+ * OS DOIS, porque quem lê precisa de um e quem decide precisa do outro. A aba
+ * diz "Cedente e advogado" quando o mesmo CPF ocupa os dois papéis; a recusa,
+ * porém, é do PAPEL — e recusar aquele grupo derruba as duas verbas.
+ */
+export interface GrupoDeTitular {
+  key: string
+  label: string
+  papeis: PapelApurado[]
+}
 
 /** O que vem do banco, além do que o motor de RPV precisa. */
 interface ProcessoNaTela extends ProcessoDD {
@@ -126,7 +140,7 @@ export function PainelProcessosJudiciais({
    * botões do rodapé, ao lado de Fechar, e não do meio do painel. O painel
    * mostra a evidência; a janela decide com ela.
    */
-  onItensDeRisco?: (itens: ItemDeRisco[]) => void
+  onItensDeRisco?: (itens: ItemDeRisco[], grupos: GrupoDeTitular[]) => void
 }) {
   const toast = useToast()
   const [carregando, setCarregando] = useState(true)
@@ -451,13 +465,16 @@ export function PainelProcessosJudiciais({
    * procura outra coisa e encontra a primeira de novo.
    */
   const abasDeTitular = useMemo(() => {
-    const porPessoa = new Map<string, { ids: string[]; papeis: string[] }>()
+    const porPessoa = new Map<string, { ids: string[]; papeis: string[]; cru: PapelApurado[] }>()
     for (const a of apuracoes) {
       const chave = a.documento || a.oab || a.nome || a.id
-      const atual = porPessoa.get(chave) ?? { ids: [], papeis: [] }
+      const atual = porPessoa.get(chave) ?? { ids: [], papeis: [], cru: [] }
       atual.ids.push(a.id)
       const papel = a.papel === 'ADVOGADO' ? 'Advogado' : a.papel === 'CEDENTE' ? 'Cedente' : String(a.papel)
       if (!atual.papeis.includes(papel)) atual.papeis.push(papel)
+      if (a.papel === 'CEDENTE' || a.papel === 'ADVOGADO') {
+        if (!atual.cru.includes(a.papel)) atual.cru.push(a.papel)
+      }
       porPessoa.set(chave, atual)
     }
     return [...porPessoa.values()].map((v) => ({
@@ -465,6 +482,7 @@ export function PainelProcessosJudiciais({
       ids: v.ids,
       // "Cedente e advogado" numa aba só, que é o que aquela pessoa é.
       label: v.papeis.join(' e '),
+      papeis: v.cru,
     }))
   }, [apuracoes])
 
@@ -502,6 +520,9 @@ export function PainelProcessosJudiciais({
   const itensParaRecusa: ItemDeRisco[] = useMemo(() => {
     const peso = (r: unknown) => (r === 'ALTO' ? 0 : r === 'ATENCAO' ? 1 : 2)
     const quem = new Map(apuracoes.map((a) => [a.id, a.papel === 'ADVOGADO' ? 'advogado' : 'cedente']))
+    const rotuloDoTitular = new Map(
+      abasDeTitular.flatMap((g) => g.ids.map((id) => [id, g.label] as const)),
+    )
     return processos
       .slice()
       .sort((a, b) => peso(a.risco) - peso(b.risco))
@@ -516,14 +537,17 @@ export function PainelProcessosJudiciais({
           grau: p.risco === 'ALTO' ? 'ALTO' : p.risco === 'ATENCAO' ? 'ATENÇÃO' : 'NOTA',
           texto: p.numero_processo + (partes.length ? ' — ' + partes.join(', ') : ''),
           fundamento: p.risco_motivo ?? undefined,
+          // O TITULAR VAI JUNTO. É o que deixa a recusa ser de uma verba só: sem
+          // ele, marcar dois processos não diz de quem eles são.
+          grupo: rotuloDoTitular.get(p.historico_id) ?? '',
         } as ItemDeRisco
       })
-  }, [processos, apuracoes])
+  }, [processos, apuracoes, abasDeTitular])
 
   // Os itens sobem para a janela, que é onde ficam os botões de desfecho.
   useEffect(() => {
-    onItensDeRisco?.(itensParaRecusa)
-  }, [itensParaRecusa, onItensDeRisco])
+    onItensDeRisco?.(itensParaRecusa, abasDeTitular)
+  }, [itensParaRecusa, abasDeTitular, onItensDeRisco])
 
   if (carregando) return <Loading label="Lendo a diligência…" />
 

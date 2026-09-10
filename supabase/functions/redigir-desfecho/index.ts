@@ -48,7 +48,12 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json().catch(() => ({}))
     const desfecho = String(body.desfecho ?? '').toLowerCase() as Desfecho
-    const titulo = TITULO_DO_DESFECHO[desfecho] ?? TITULO_DO_DESFECHO.validacao
+    // O TÍTULO PODE VIR DE FORA, e só a recusa parcial o manda: quando cai UMA
+    // verba e a outra segue, a anotação abre nomeando qual — "Crédito Principal
+    // Recusado" — porque quem varre o funil precisa distinguir isso de relance
+    // do card recusado inteiro.
+    const doPedido = String(body.titulo ?? '').trim().slice(0, 80)
+    const titulo = doPedido || TITULO_DO_DESFECHO[desfecho] || TITULO_DO_DESFECHO.validacao
 
     const itens: string[] = (Array.isArray(body.itens) ? body.itens : [])
       .map((i: unknown) => String(i ?? '').trim())

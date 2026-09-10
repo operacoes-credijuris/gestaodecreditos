@@ -48,6 +48,17 @@ export interface ItemDeRisco {
   grau: GrauRisco
   texto: string
   fundamento?: string
+  /**
+   * A QUEM ESTE ITEM PERTENCE — o titular, na diligência.
+   *
+   * A lista chega dividida porque a decisão pode ser dividida: achada execução
+   * contra o cedente, o principal cai e os honorários do advogado seguem. Sem o
+   * grupo, marcar dois processos não diria de quem eles são, e a recusa só
+   * poderia ser do card inteiro.
+   *
+   * Vazio nos achados da análise, que falam todos do mesmo processo.
+   */
+  grupo?: string
 }
 
 /**
@@ -74,12 +85,24 @@ export function JanelaDeDesfecho({
   onMover,
   onFechar,
   motivoSugerido,
+  onGruposMarcados,
+  rotuloConfirmar,
 }: {
   acao: AcaoTela
   /** Os achados da análise, para marcar em vez de redigitar. */
   achados: ItemDeRisco[]
   /** Manda a IA reescrever o motivo para quem vai ler no card. */
   onRedigir: (desfecho: string, itens: string[], texto: string) => Promise<string>
+  /**
+   * Quais GRUPOS têm item marcado, sempre que a marcação muda.
+   *
+   * É o que permite a quem chama distinguir "recusar o crédito" de "recusar a
+   * verba deste titular" — e, na segunda, seguir com a outra em vez de mover o
+   * card para Reprovados.
+   */
+  onGruposMarcados?: (grupos: string[]) => void
+  /** O rótulo do Confirmar, quando o que ele faz deixa de ser mover o card. */
+  rotuloConfirmar?: string
   onMover: (statusId: number, comentario: string) => Promise<void>
   onFechar: () => void
   /** Texto que já entra no campo, quando existe um pronto. */
@@ -107,6 +130,31 @@ export function JanelaDeDesfecho({
    */
   const [revisado, setRevisado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+
+  // Os grupos com item marcado sobem a cada mudança: quem chama decide o que
+  // fazer com "só o cedente" antes mesmo de o Confirmar existir.
+  const marcar = (i: number) => {
+    setMarcados((s) => {
+      const n = new Set(s)
+      if (n.has(i)) n.delete(i)
+      else n.add(i)
+      onGruposMarcados?.([...new Set([...n].map((j) => achados[j]?.grupo ?? '').filter(Boolean))])
+      return n
+    })
+    // MUDOU A MARCAÇÃO, a redação anterior não vale mais: o texto no campo fala
+    // de achados que não são estes.
+    setRevisado(false)
+  }
+
+  /** Os achados por titular, na ordem em que chegaram. */
+  const grupos = (() => {
+    const mapa = new Map<string, number[]>()
+    achados.forEach((a, i) => {
+      const chave = a.grupo ?? ''
+      mapa.set(chave, [...(mapa.get(chave) ?? []), i])
+    })
+    return [...mapa.entries()]
+  })()
 
   /** O rótulo curto do desfecho, que o servidor usa para escolher o tom. */
   const tipoDoDesfecho =
@@ -190,7 +238,7 @@ export function JanelaDeDesfecho({
       footer={
         <div className="flex items-center gap-2">
           <Button variant={acao.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
-            Confirmar
+            {rotuloConfirmar ?? 'Confirmar'}
           </Button>
           <button
             type="button"
@@ -216,35 +264,41 @@ export function JanelaDeDesfecho({
         {achados.length > 0 && (
           <div>
             <p className="text-xs text-slate-500">Selecionar motivos</p>
-            <ul className="mt-1.5 max-h-64 space-y-1 overflow-y-auto pr-1">
-              {achados.map((a, i) => (
-                <li key={i}>
-                  <label className="flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-slate-700">
-                    <input
-                      type="checkbox"
-                      className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                      checked={marcados.has(i)}
-                      disabled={enviando || redigindo}
-                      onChange={() => {
-                        setMarcados((s) => {
-                          const n = new Set(s)
-                          if (n.has(i)) n.delete(i)
-                          else n.add(i)
-                          return n
-                        })
-                        // MUDOU A MARCAÇÃO, a redação anterior não vale mais: o
-                        // texto no campo fala de achados que não são estes.
-                        setRevisado(false)
-                      }}
-                    />
-                    <span>
-                      <Selo grau={a.grau} />
-                      {a.texto}
-                    </span>
-                  </label>
-                </li>
+            {/* AGRUPADOS COMO A TABELA, e pelo mesmo motivo: são dois créditos
+                com donos diferentes. Marcar só os processos de um titular é
+                dizer que a verba DELE cai — e é isso que deixa a outra seguir.
+                Numa lista corrida essa distinção não existiria, e a recusa
+                voltaria a ser do card inteiro. */}
+            <div className="mt-1.5 max-h-64 space-y-3 overflow-y-auto pr-1">
+              {grupos.map(([nome, indices]) => (
+                <div key={nome}>
+                  {nome && (
+                    <p className="font-display text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                      {nome}
+                    </p>
+                  )}
+                  <ul className="mt-1 space-y-1">
+                    {indices.map((i) => (
+                      <li key={i}>
+                        <label className="flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-slate-700">
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            checked={marcados.has(i)}
+                            disabled={enviando || redigindo}
+                            onChange={() => marcar(i)}
+                          />
+                          <span>
+                            <Selo grau={achados[i].grau} />
+                            {achados[i].texto}
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
         )}
 

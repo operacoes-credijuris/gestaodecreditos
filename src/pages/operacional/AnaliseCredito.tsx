@@ -79,6 +79,11 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { DueDiligence } from '@/components/DueDiligence'
+import { supabase } from '@/lib/supabase'
+import {
+  verbasQueSobram,
+  type PapelApurado,
+} from '../../../supabase/functions/_shared/titularesDaCessao.ts'
 import {
   AnaliseRpvModal,
   GradeValoresRpv,
@@ -1253,7 +1258,16 @@ export default function AnaliseCredito() {
       return n
     })
 
-  function onAnalisar(lead: KommoLead) {
+  /**
+   * As verbas que a due diligence RECUSOU, por card.
+   *
+   * Lido antes de abrir a janela, e não durante: o seletor de cenário nasce com
+   * `useState(dadosDoCard.tipo_aquisicao)`, então um valor que chegasse depois
+   * não seria adotado — a análise precificaria a verba recusada.
+   */
+  const [verbasRecusadas, setVerbasRecusadas] = useState<Record<number, PapelApurado[]>>({})
+
+  async function onAnalisar(lead: KommoLead) {
     // O CACHE DE ANEXOS CAI ao abrir a análise. Ele existe para a due diligence
     // e a análise dividirem o mesmo download; mas o comercial anexa o cálculo
     // corrigido e o operador reabre a janela sem sincronizar — e a análise lia
@@ -1264,6 +1278,24 @@ export default function AnaliseCredito() {
       void _descartado
       return resto
     })
+
+    // O QUE A DILIGÊNCIA JÁ RECUSOU, antes de a janela abrir.
+    //
+    // Recusada a verba de um titular, ela está fora da cessão: analisar o card
+    // como se ele ainda cedesse as duas precificaria um crédito que a casa
+    // acabou de dizer que não compra. Falha de leitura não impede analisar — o
+    // cenário fica o do card, que é o comportamento de sempre.
+    const { data: recusadas } = await supabase
+      .from('dd_historico')
+      .select('papel')
+      .eq('kommo_lead_id', lead.kommo_lead_id)
+      .not('reprovado_em', 'is', null)
+    setVerbasRecusadas((p) => ({
+      ...p,
+      [lead.kommo_lead_id]: ((recusadas ?? []) as { papel: string }[])
+        .map((r) => String(r.papel))
+        .filter((x): x is PapelApurado => x === 'CEDENTE' || x === 'ADVOGADO'),
+    }))
     setRpvLead(lead)
   }
 
@@ -1296,11 +1328,21 @@ export default function AnaliseCredito() {
 
   function dadosParaRpv(lead: KommoLead): DadosDoCardRpv {
     const d = lerCardCredijuris(lead)
+    // O CENÁRIO É O QUE SOBROU, e não o que o card cede.
+    //
+    // Achada execução contra o cedente e recusado o principal, o que se compra
+    // são os honorários do advogado — crédito dele, que não responde pelas
+    // dívidas do exequente. Sem esta linha a análise precificaria o principal
+    // recusado junto, e a planilha sairia oferecendo o que a casa não compra.
+    const sobra = verbasQueSobram(
+      d.tipo_aquisicao,
+      verbasRecusadas[lead.kommo_lead_id] ?? [],
+    )
     return {
       numero_processo: d.numero,
       categoria: d.categoria,
       intermediador: d.intermediador,
-      tipo_aquisicao: d.tipo_aquisicao,
+      tipo_aquisicao: sobra.parcela ?? d.tipo_aquisicao,
       honorarios_pct: d.honorarios_pct,
     }
   }

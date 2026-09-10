@@ -2327,7 +2327,10 @@ async function lerDiligencia(
     const [{ data: apuracoes, error: e1 }, doisProcessos] = await Promise.all([
       sb
         .from('dd_historico')
-        .select('id, papel, nome, documento, oab, status, fonte, apurado_em, observacao, liberado_em')
+        .select(
+          'id, papel, nome, documento, oab, status, fonte, apurado_em, observacao, ' +
+            'liberado_em, reprovado_em, reprovado_motivo',
+        )
         .eq('kommo_lead_id', leadId),
       sb
         .from('dd_processo')
@@ -2337,7 +2340,9 @@ async function lerDiligencia(
         .eq('kommo_lead_id', leadId),
     ]);
     if (e1) throw new Error(e1.message);
-    const lista = (apuracoes ?? []) as ApuracaoDD[];
+    // `as unknown` no meio: com a lista de colunas quebrada em duas linhas o
+    // PostgREST perde a inferência do tipo da linha e devolve GenericStringError[].
+    const lista = (apuracoes ?? []) as unknown as ApuracaoDD[];
     if (lista.length === 0) return { hs: [], falha: null };
     const { data: processos, error: e2 } = doisProcessos;
     if (e2) throw new Error(e2.message);

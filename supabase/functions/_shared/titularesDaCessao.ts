@@ -225,3 +225,111 @@ export function lacunasDaLeitura(
   }
   return avisos
 }
+
+// ---------------------------------------------------------------------------
+// O que sobra quando um titular é recusado
+// ---------------------------------------------------------------------------
+
+export interface VerbasQueSobram {
+  /**
+   * A parcela cedida DEPOIS da recusa, no vocabulário de `classificarParcelaCedida`.
+   *
+   * `null` quando não sobra nada — é o caso em que o card vai mesmo para
+   * Reprovados, porque não há segundo crédito para analisar.
+   */
+  parcela: ParcelaCedida | null
+  /** Como dizer isso na tela e na anotação do card. */
+  descricao: string
+  /** A verba que caiu, em texto corrido. */
+  recusada: string
+  /**
+   * O TÍTULO EXATO da anotação que vai ao card.
+   *
+   * Fixo aqui, como os de _shared/desfecho.ts e pelo mesmo motivo: é o que faz a
+   * coluna do CRM ficar legível de cima a baixo. Quem varre o funil precisa
+   * distinguir de relance o card que perdeu UMA verba do que foi recusado
+   * inteiro — e "Crédito Recusado" nos dois casos apagaria a diferença.
+   */
+  tituloDaRecusa: string
+  /** Recusaram tudo o que havia: não é reprovação parcial, é reprovação. */
+  tudoRecusado: boolean
+}
+
+/**
+ * O QUE AINDA SE COMPRA depois de recusar o titular de uma das verbas.
+ *
+ * A pergunta que isto responde é comercial, não jurídica: achada uma execução
+ * contra o cedente, os honorários do advogado continuam compráveis? Continuam —
+ * o honorário destacado é crédito dele, e a penhora contra o exequente não o
+ * alcança. Reprovar o card inteiro nesse caso joga fora um negócio bom por causa
+ * de outro ruim que só divide o número do processo com ele.
+ *
+ * A TRADUÇÃO É A MESMA DE `alvosDaCessao`, PELO AVESSO: lá a verba diz quem
+ * apurar, aqui o titular recusado diz que verba cai. Principal ↔ cedente,
+ * honorários ↔ advogado.
+ *
+ * NA DÚVIDA NÃO SOBRA NADA. Card cuja parcela o título não declara ('auto',
+ * 'indefinido') tem os dois titulares apurados; recusado um deles, não dá para
+ * afirmar que o outro tem crédito próprio ali — pode ser uma cessão só do
+ * principal em que o advogado nem é parte do negócio. Deixar seguir seria
+ * analisar uma verba que talvez não exista.
+ */
+export function verbasQueSobram(
+  parcela: ParcelaCedida | string,
+  papeisRecusados: PapelApurado[],
+): VerbasQueSobram {
+  const recusouCedente = papeisRecusados.includes('CEDENTE')
+  const recusouAdvogado = papeisRecusados.includes('ADVOGADO')
+  const nada = (recusada: string, tituloDaRecusa: string): VerbasQueSobram => ({
+    parcela: null,
+    descricao: 'nenhuma verba',
+    recusada,
+    tituloDaRecusa,
+    tudoRecusado: true,
+  })
+
+  if (!recusouCedente && !recusouAdvogado) {
+    return {
+      parcela: parcela as ParcelaCedida,
+      descricao: 'tudo o que o card cede',
+      recusada: '',
+      tituloDaRecusa: '',
+      tudoRecusado: false,
+    }
+  }
+
+  const dosDois = recusouCedente && recusouAdvogado
+  if (dosDois) return nada('Crédito principal e honorários', 'Crédito Recusado')
+
+  switch (parcela) {
+    case 'ambos':
+      return recusouCedente
+        ? {
+            parcela: 'honorarios',
+            descricao: 'os honorários',
+            recusada: 'Crédito principal',
+            tituloDaRecusa: 'Crédito Principal Recusado',
+            tudoRecusado: false,
+          }
+        : {
+            parcela: 'principal',
+            descricao: 'o crédito principal',
+            recusada: 'Créditos de honorários',
+            tituloDaRecusa: 'Créditos de Honorários Recusados',
+            tudoRecusado: false,
+          }
+    // Cessão de uma verba só: recusar o titular dela é recusar a cessão. Não há
+    // segundo crédito escondido — o outro titular nem entrou no negócio.
+    case 'principal':
+      return nada('Crédito principal', 'Crédito Principal Recusado')
+    case 'honorarios':
+    case 'contratuais':
+    case 'sucumbenciais':
+      return nada('Créditos de honorários', 'Créditos de Honorários Recusados')
+    default:
+      return nada(
+        recusouCedente ? 'Crédito principal' : 'Créditos de honorários',
+        recusouCedente ? 'Crédito Principal Recusado' : 'Créditos de Honorários Recusados',
+      )
+  }
+}
