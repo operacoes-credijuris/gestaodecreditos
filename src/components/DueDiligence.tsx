@@ -46,7 +46,7 @@ export function DueDiligence({
   open,
   onClose,
   comCertidoes,
-  acoes,
+  acaoReprovar,
   onMover,
   onSeguir,
 }: {
@@ -72,14 +72,18 @@ export function DueDiligence({
    */
   comCertidoes: boolean
   /**
-   * Os desfechos da etapa em que o card está.
+   * A recusa, quando ela cabe.
    *
-   * VÊM DE FORA porque a coluna de destino é do FUNIL: RPV e Precatório numeram
-   * as mesmas colunas com ids diferentes, e quem sabe em que etapa o card está é
-   * a tela que o listou. Etapa terminal manda lista vazia e o rodapé fica só com
-   * Fechar — que é o certo: de Aprovados e Reprovados o card não sai por aqui.
+   * DUAS SAÍDAS, E SÓ DUAS: seguir ou recusar. "Exigir diligência" saiu daqui —
+   * ela pede documento que falta nos autos, que é assunto da análise, e no
+   * rodapé de uma janela sobre dívidas de terceiro virava uma terceira opção
+   * sem pergunta correspondente. Ela continua no card, onde sempre esteve.
+   *
+   * VEM DE FORA porque a coluna de destino é do FUNIL: RPV e Precatório numeram
+   * as mesmas colunas com ids diferentes, e quem sabe em qual funil o card está é
+   * a tela que o listou.
    */
-  acoes?: AcaoTela[]
+  acaoReprovar?: AcaoTela | null
   onMover?: (statusId: number, comentario: string) => Promise<void>
   /**
    * O que vem depois de "Seguir": a análise do crédito.
@@ -187,19 +191,16 @@ export function DueDiligence({
             <Button size="sm" onClick={seguir} loading={seguindo}>
               Seguir
             </Button>
-            {(acoes ?? [])
-              .filter((a) => a.papel === 'diligenciar' || a.papel === 'reprovar')
-              .map((a) => (
-                <Button
-                  key={a.statusId}
-                  size="sm"
-                  variant={a.variant}
-                  onClick={() => setDesfecho(a)}
-                  disabled={!onMover || seguindo}
-                >
-                  {a.label}
-                </Button>
-              ))}
+            {acaoReprovar && (
+              <Button
+                size="sm"
+                variant={acaoReprovar.variant}
+                onClick={() => setDesfecho(acaoReprovar)}
+                disabled={!onMover || seguindo}
+              >
+                {acaoReprovar.label}
+              </Button>
+            )}
           </div>
           <Button variant="ghost" onClick={onClose}>
             Fechar

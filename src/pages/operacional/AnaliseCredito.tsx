@@ -48,6 +48,7 @@ import {
   SUBDIVISAO_PADRAO,
   ABA_JURIDICO,
   ABA_FUNDOS_COMPARTILHADA,
+  acaoDeReprovar,
   ehCardDeFundos,
   abasDoFunil,
   agruparPorAba,
@@ -1979,15 +1980,24 @@ export default function AnaliseCredito() {
             ddLead.pipeline_id === FUNIL_PRECATORIO &&
             !ehCardDeFundos(ddLead.status_id, etapas.data ?? [])
           }
-          // OS DESFECHOS DA ETAPA, no rodapé da janela.
+          // A RECUSA, no rodapé da janela.
           //
-          // NÃO SÃO UMA SEGUNDA PORTA para a mesma decisão. A janela da análise
-          // decide pelos ACHADOS deste processo; aqui se decide pelos PROCESSOS
+          // NÃO É UMA SEGUNDA PORTA para a mesma decisão. A janela da análise
+          // recusa pelos ACHADOS deste processo; aqui se recusa pelos PROCESSOS
           // DE TERCEIRO que a apuração achou — evidência que a análise não tem e
           // que só existe depois que alguém apurou. Obrigar a fechar a
           // diligência, achar o card na lista e abrir outra coisa seria pedir
           // para decidir com a lista de processos fora da vista.
-          acoes={abaAtual?.acoes ?? []}
+          //
+          // DO FUNIL DO CARD, e não da aba aberta: a apuração acontece em
+          // qualquer etapa, inclusive na trilha dos Fundos, que não tem desfecho
+          // nenhum — lá a janela ficava só com "Seguir", achando execução contra
+          // o cedente e sem oferecer como recusar. Só não aparece no card que já
+          // está em Reprovados: mover para onde ele já está não é decisão.
+          acaoReprovar={(() => {
+            const a = acaoDeReprovar(ddLead.pipeline_id, etapas.data ?? [])
+            return a && a.statusId !== ddLead.status_id ? a : null
+          })()}
           // SEGUIR É O QUE DESTRAVA O TRABALHO SEGUINTE, e qual é ele depende do
           // funil: em RPV a análise precifica, no precatório interno a jurídica
           // opina. Onde não há análise — a trilha dos Fundos, cuja opinião é do

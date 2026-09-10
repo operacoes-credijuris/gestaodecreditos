@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest'
 import {
   ABA_JURIDICO,
   ABA_FUNDOS_COMPARTILHADA,
+  acaoDeReprovar,
   ehCardDeFundos,
   FUNIL_PRECATORIO,
   FUNIL_RPV,
@@ -376,5 +377,38 @@ describe('ehCardDeFundos', () => {
     const fundos = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'fundos')!
     const aba = fundos.abas.find((a) => a.key === ABA_FUNDOS_COMPARTILHADA)
     expect(aba?.colunaKommo).toBe('Apresentação de Proposta')
+  })
+})
+
+describe('acaoDeReprovar', () => {
+  /**
+   * A RECUSA DA JANELA DE DUE DILIGENCE não segue o mapa das etapas.
+   *
+   * As ações de uma aba são as saídas daquela ETAPA: existem onde o trabalho
+   * acontece e somem nas terminais. A recusa por diligência nasce do que a
+   * apuração achou, e a apuração pode acontecer em qualquer card — inclusive na
+   * trilha dos Fundos, que não tem desfecho nenhum e deixava a janela achando
+   * execução contra o cedente sem oferecer como recusar.
+   */
+  it('no precatório, resolve a coluna pelo nome no espelho', () => {
+    const a = acaoDeReprovar(FUNIL_PRECATORIO, espelho())
+    expect(a?.statusId).toBe(idDe('Reprovados Operacional'))
+    expect(a?.papel).toBe('reprovar')
+  })
+
+  it('em RPV, é a constante de sempre', () => {
+    expect(acaoDeReprovar(FUNIL_RPV, espelho())?.statusId).toBe(ST_REPROVADO)
+  })
+
+  // Sem a coluna no espelho não há botão: melhor a janela sem recusa do que um
+  // botão que move o card para lugar nenhum.
+  it('sem a coluna no kanban, não há ação', () => {
+    const sem = espelho(COLUNAS_KOMMO.filter((n) => n !== 'Reprovados Operacional'))
+    expect(acaoDeReprovar(FUNIL_PRECATORIO, sem)).toBeNull()
+    expect(acaoDeReprovar(FUNIL_PRECATORIO, [])).toBeNull()
+  })
+
+  it('funil que não é do operacional não tem recusa', () => {
+    expect(acaoDeReprovar(999, espelho())).toBeNull()
   })
 })

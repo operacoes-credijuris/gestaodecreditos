@@ -567,6 +567,38 @@ export function ehCardDeFundos(statusId: number, etapas: EtapaKommo[]): boolean 
  * espelho não tem não vira botão: melhor a aba sem desfecho do que um botão que
  * move para lugar nenhum.
  */
+/**
+ * A RECUSA, para a janela de due diligence — em qualquer funil e qualquer etapa.
+ *
+ * POR QUE ELA NÃO SAI DE `abasDoFunil`. As ações de uma aba são as saídas
+ * daquela ETAPA do fluxo: existem onde o trabalho acontece e somem nas
+ * terminais. A recusa por diligência não segue esse mapa — ela nasce do que a
+ * apuração achou, e a apuração pode acontecer em qualquer card. Na trilha dos
+ * Fundos, que não tem desfecho nenhum (o parecer é do fundo), a janela ficava só
+ * com "Seguir": uma diligência que acha execução contra o cedente e não oferece
+ * como recusar.
+ *
+ * O ID SAI DE ONDE SEMPRE SAIU: constante em RPV, nome da coluna no espelho para
+ * o Precatório, que numera as mesmas colunas com outros ids. Sem a coluna no
+ * espelho não há botão — melhor a janela sem recusa do que um botão que move o
+ * card para lugar nenhum.
+ */
+export function acaoDeReprovar(
+  pipelineId: number,
+  etapas: EtapaKommo[],
+): AcaoTela | null {
+  const reprovar = (statusId: number): AcaoTela => ({
+    statusId,
+    label: 'Reprovar crédito',
+    variant: 'danger',
+    papel: 'reprovar',
+  })
+  if (pipelineId === FUNIL_RPV) return reprovar(ST_REPROVADO)
+  if (pipelineId !== FUNIL_PRECATORIO) return null
+  const id = porNomeDeColuna(FUNIL_PRECATORIO, etapas).get(normalizarBusca(COLUNA_REPROVADOS))
+  return id === undefined ? null : reprovar(id)
+}
+
 export function abasDoFunil(
   pipelineId: number,
   etapas: EtapaKommo[],
