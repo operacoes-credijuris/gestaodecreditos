@@ -10,7 +10,7 @@
 // iguais lado a lado se leem como a mesma pergunta feita duas vezes:
 //
 //   tipo de crédito   RPV | Precatórios          abas sublinhadas, com ícone
-//   destinação        Interno | Fundos           pílulas na mesma linha,
+//   destinação        Interno | Externo           pílulas na mesma linha,
 //                     (só no Precatório)         encostadas na aba
 //   etapa             as colunas daquela trilha  pílulas dentro do cartão
 //
@@ -47,9 +47,9 @@ import {
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABA_JURIDICO,
-  ABA_FUNDOS_COMPARTILHADA,
+  ABA_EXTERNA_COMPARTILHADA,
   acaoDeReprovar,
-  ehCardDeFundos,
+  ehCardExterno,
   abasDoFunil,
   agruparPorAba,
   statusExibidos,
@@ -511,7 +511,7 @@ function tituloCard(lead: KommoLead): string {
  *
  *   'rpv'         a análise de RPV que já existia, mais a due diligence
  *   'precatorio'  due diligence + análise jurídica (só na aba Jurídico)
- *   'dd'          só a due diligence — a trilha dos Fundos
+ *   'dd'          só a due diligence — a trilha Externa
  *   'nenhum'      etapa em que não se analisa: aprovados, diligência, reprovados
  *
  * 'dd' EXISTE PORQUE OS FUNDOS NÃO TÊM ANÁLISE NOSSA. Naquela trilha o parecer é
@@ -875,7 +875,7 @@ function CardCredito({
           ou reprovado não é trabalho, é retrabalho — e "Analisar" NÃO aparece: o
           motor dele é o de RPV (template, cenários e prazo de RPV), e rodá-lo num
           precatório produzia parecer errado com cara de conferido. Na trilha dos
-          Fundos sobra só a due diligence: a análise de lá é do fundo. */}
+          Externa sobra só a due diligence: a análise de lá é do fundo comprador. */}
       {botoes !== 'nenhum' && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {/* A MESMA ORDEM NOS DOIS FUNIS: due diligence primeiro, análise
@@ -1105,7 +1105,7 @@ function CardCredito({
 }
 
 /**
- * Alternador Interno | Fundos, ao lado das abas de tipo de crédito.
+ * Alternador Interno | Externo, ao lado das abas de tipo de crédito.
  *
  * NÃO É UM Segmented, ainda que a mecânica seja a mesma, e a diferença é o
  * ponto: a pílula cinza do Segmented tem o mesmo peso visual das abas, e dois
@@ -1570,7 +1570,7 @@ export default function AnaliseCredito() {
   )
 
   // A aba escolhida pode não existir no funil recém-selecionado (as chaves de
-  // RPV são 'pendentes'…, as de Precatório são 'int-…'/'fun-…'). Cai na primeira.
+  // RPV são 'pendentes'…, as de Precatório são 'int-…'/'ext-…'). Cai na primeira.
   const abaAtual = abas.find((a) => a.key === aba) ?? abas[0] ?? null
 
   /**
@@ -1597,7 +1597,7 @@ export default function AnaliseCredito() {
       ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
       : abaAtual?.key === ABA_JURIDICO
         ? 'precatorio'
-        : subdivisao === 'fundos' && abaAtual && abaAtual.key !== ABA_FUNDOS_COMPARTILHADA
+        : subdivisao === 'externo' && abaAtual && abaAtual.key !== ABA_EXTERNA_COMPARTILHADA
           ? 'dd'
           : 'nenhum'
 
@@ -1770,7 +1770,7 @@ export default function AnaliseCredito() {
                 onChange={(v) => {
                   setSubdivisao(v)
                   // As chaves das abas são próprias de cada trilha ('int-…' e
-                  // 'fun-…'): sem limpar, a tela cairia na primeira por acidente
+                  // 'ext-…'): sem limpar, a tela cairia na primeira por acidente
                   // em vez de por decisão.
                   setAba('')
                 }}
@@ -2024,7 +2024,7 @@ export default function AnaliseCredito() {
           // Certidões só no precatório do INTERNO. Lido do CARD, não do funil
           // nem da pílula abertos: o card guardado no estado é quem manda, e
           // trocar de recorte com a janela aberta não pode mudar as frentes da
-          // diligência em curso — daí `ehCardDeFundos` responder pelo status_id
+          // diligência em curso — daí `ehCardExterno` responder pelo status_id
           // e não por `subdivisao`.
           //
           // NOS FUNDOS SÓ PROCESSOS JUDICIAIS, como em RPV. O checklist de
@@ -2033,7 +2033,7 @@ export default function AnaliseCredito() {
           // convidaria a equipe a emitir certidão para um dossiê que não é nosso.
           comCertidoes={
             ddLead.pipeline_id === FUNIL_PRECATORIO &&
-            !ehCardDeFundos(ddLead.status_id, etapas.data ?? [])
+            !ehCardExterno(ddLead.status_id, etapas.data ?? [])
           }
           // A RECUSA, no rodapé da janela.
           //
@@ -2045,7 +2045,7 @@ export default function AnaliseCredito() {
           // para decidir com a lista de processos fora da vista.
           //
           // DO FUNIL DO CARD, e não da aba aberta: a apuração acontece em
-          // qualquer etapa, inclusive na trilha dos Fundos, que não tem desfecho
+          // qualquer etapa, inclusive na trilha Externa, que não tem desfecho
           // nenhum — lá a janela ficava só com "Seguir", achando execução contra
           // o cedente e sem oferecer como recusar. Só não aparece no card que já
           // está em Reprovados: mover para onde ele já está não é decisão.
@@ -2055,7 +2055,7 @@ export default function AnaliseCredito() {
           })()}
           // SEGUIR É O QUE DESTRAVA O TRABALHO SEGUINTE, e qual é ele depende do
           // funil: em RPV a análise precifica, no precatório interno a jurídica
-          // opina. Onde não há análise — a trilha dos Fundos, cuja opinião é do
+          // opina. Onde não há análise — a trilha Externa, cuja opinião é do
           // fundo — Seguir apenas libera a diligência e fecha a janela.
           onSeguir={
             botoesDoCard === 'rpv'

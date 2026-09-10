@@ -97,7 +97,7 @@ export function DueDiligence({
    * O que vem depois de "Seguir": a análise do crédito.
    *
    * A janela não sabe QUAL análise é — em RPV é o motor que precifica, no
-   * precatório interno é a jurídica, e na trilha dos Fundos não há nenhuma.
+   * precatório interno é a jurídica, e na trilha Externa não há nenhuma.
    * Quem sabe é a tela que abriu esta janela. Sem ela, "Seguir" só libera e
    * fecha, que continua sendo uma decisão inteira.
    */

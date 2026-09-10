@@ -21,7 +21,7 @@
 // exista só na nossa base — o kanban é a fonte de verdade.
 //
 // PRECATÓRIOS seguem a mesma ideia, com uma diferença: o funil deles atende
-// DUAS destinações (Interno e Fundos), então as colunas estão divididas em duas
+// DUAS destinações (Interno e Externo), então as colunas estão divididas em duas
 // listas fixas — ver SUBDIVISOES_PRECATORIO. Antes isso era configurável na
 // própria tela (tabela etapa_visao, migration 0045); passou a ser fixo no
 // código, como RPV sempre foi.
@@ -57,7 +57,7 @@ export const ST_REPROVADO = 107830031 // Reprovados Operacional
  * precisa dar formas diferentes a cada um — dois seletores idênticos lado a
  * lado se leem como a mesma pergunta feita duas vezes.
  */
-export type SubdivisaoPrecatorio = 'interno' | 'fundos'
+export type SubdivisaoPrecatorio = 'interno' | 'externo'
 
 /**
  * Uma aba do Precatório: o rótulo da plataforma e a coluna do Kommo por trás.
@@ -126,7 +126,7 @@ const COLUNA_REPROVADOS = 'Reprovados Operacional'
  *
  * "APRESENTAÇÃO DE PROPOSTA" APARECE NAS DUAS, de propósito: é a MESMA coluna
  * do Kommo, com rótulo diferente em cada trilha ("Aprovados" no Interno,
- * "Apresentação" nos Fundos). Consequência assumida: um card ali é contado nas
+ * "Apresentação" no Externo). Consequência assumida: um card ali é contado nas
  * duas subdivisões. Confirmado pelo dono — não é descuido de cópia.
  *
  * A ordem das abas é a DO TRABALHO, não a do kanban: no Interno, Aprovados vem
@@ -177,35 +177,35 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
     ],
   },
   {
-    key: 'fundos',
-    label: 'Fundos',
+    key: 'externo',
+    label: 'Externo',
     abas: [
       {
-        key: 'fun-qualificacao',
+        key: 'ext-qualificacao',
         label: 'Qualificação Preliminar',
         colunaKommo: 'Qualificação Jurídica Preliminar',
         descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
       },
       {
-        key: 'fun-encaminhar',
+        key: 'ext-encaminhar',
         label: 'Encaminhar',
         colunaKommo: 'Encaminhar ao Fundo',
         descricaoVazia: 'Nenhum precatório a encaminhar.',
       },
       {
-        key: 'fun-defesa',
+        key: 'ext-defesa',
         label: 'Defesa Técnica',
         colunaKommo: 'Defesa Técnica (TIER 2+)',
         descricaoVazia: 'Nenhuma defesa técnica em elaboração.',
       },
       {
-        key: 'fun-validacao',
+        key: 'ext-validacao',
         label: 'Validação',
         colunaKommo: 'Revisão da Defesa Técnica (TIER 2+)',
         descricaoVazia: 'Nenhuma defesa técnica aguardando validação.',
       },
       {
-        key: 'fun-apresentacao',
+        key: 'ext-apresentacao',
         label: 'Apresentação',
         colunaKommo: 'Apresentação de Proposta',
         descricaoVazia: 'Nenhum precatório em apresentação.',
@@ -471,7 +471,7 @@ function porNomeDeColuna(pipelineId: number, etapas: EtapaKommo[]): Map<string, 
  *
  * NO PRECATÓRIO É A UNIÃO DAS DUAS TRILHAS, não a trilha aberta. O número
  * descreve o FUNIL, e trocar de destinação não muda quantos precatórios existem;
- * um número que mudasse ao alternar Interno/Fundos se leria como dado mudando.
+ * um número que mudasse ao alternar Interno/Externo se leria como dado mudando.
  * Set, então "Apresentação de Proposta" — que serve às duas — entra uma vez só.
  */
 export function statusExibidos(pipelineId: number, etapas: EtapaKommo[]): Set<number> {
@@ -513,17 +513,17 @@ export function colunasPrecatorioDesalinhadas(
 }
 
 /**
- * A aba dos Fundos que é a MESMA coluna do Kommo que "Aprovados" no Interno.
+ * A aba do Externo que é a MESMA coluna do Kommo que "Aprovados" no Interno.
  *
  * "Apresentação de Proposta" serve às duas trilhas, e é por isso que ela não
  * oferece trabalho em nenhuma: o mesmo card mostraria o botão de um lado e não
  * do outro, dependendo de qual pílula estivesse selecionada. Um card não muda de
  * natureza porque alguém trocou o recorte da tela.
  */
-export const ABA_FUNDOS_COMPARTILHADA = 'fun-apresentacao'
+export const ABA_EXTERNA_COMPARTILHADA = 'ext-apresentacao'
 
 /**
- * O card está numa coluna que SÓ EXISTE na trilha dos Fundos?
+ * O card está numa coluna que SÓ EXISTE na trilha Externa?
  *
  * A pergunta parece a mesma que "qual pílula está aberta", e não é: a
  * subdivisão é um recorte da TELA, e a due diligence de um card aberto não pode
@@ -534,7 +534,7 @@ export const ABA_FUNDOS_COMPARTILHADA = 'fun-apresentacao'
  * dela não se sabe a destinação, então ela conta como Interno, que é o
  * comportamento que já valia antes desta função existir.
  */
-export function ehCardDeFundos(statusId: number, etapas: EtapaKommo[]): boolean {
+export function ehCardExterno(statusId: number, etapas: EtapaKommo[]): boolean {
   const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
   const idsDaTrilha = (key: SubdivisaoPrecatorio): Set<number> => {
     const ids = new Set<number>()
@@ -545,7 +545,7 @@ export function ehCardDeFundos(statusId: number, etapas: EtapaKommo[]): boolean 
     }
     return ids
   }
-  return idsDaTrilha('fundos').has(statusId) && !idsDaTrilha('interno').has(statusId)
+  return idsDaTrilha('externo').has(statusId) && !idsDaTrilha('interno').has(statusId)
 }
 
 /**
@@ -558,7 +558,7 @@ export function ehCardDeFundos(statusId: number, etapas: EtapaKommo[]): boolean 
  * NO PRECATÓRIO SÓ OS DOIS DESFECHOS QUE INTERROMPEM, e só na trilha Interna.
  * Diligência e Reprovação são atos cujo significado o dono definiu; "Aprovar"
  * continua fora, porque qual coluna significa aprovado no Precatório ninguém
- * disse, e adivinhar seria mover card de verdade com base em palpite. Nos Fundos
+ * disse, e adivinhar seria mover card de verdade com base em palpite. No Externo
  * também não há desfecho: o parecer de lá é do fundo, e quem move o card depois
  * de encaminhar é ele.
  *
@@ -573,10 +573,10 @@ export function ehCardDeFundos(statusId: number, etapas: EtapaKommo[]): boolean 
  * POR QUE ELA NÃO SAI DE `abasDoFunil`. As ações de uma aba são as saídas
  * daquela ETAPA do fluxo: existem onde o trabalho acontece e somem nas
  * terminais. A recusa por diligência não segue esse mapa — ela nasce do que a
- * apuração achou, e a apuração pode acontecer em qualquer card. Na trilha dos
- * Fundos, que não tem desfecho nenhum (o parecer é do fundo), a janela ficava só
- * com "Seguir": uma diligência que acha execução contra o cedente e não oferece
- * como recusar.
+ * apuração achou, e a apuração pode acontecer em qualquer card. Na trilha
+ * Externa, que não tem desfecho nenhum (o parecer é do fundo comprador), a
+ * janela ficava só com "Seguir": uma diligência que acha execução contra o
+ * cedente e não oferece como recusar.
  *
  * O ID SAI DE ONDE SEMPRE SAIU: constante em RPV, nome da coluna no espelho para
  * o Precatório, que numera as mesmas colunas com outros ids. Sem a coluna no

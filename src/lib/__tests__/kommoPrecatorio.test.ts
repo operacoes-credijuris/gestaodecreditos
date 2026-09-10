@@ -13,9 +13,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   ABA_JURIDICO,
-  ABA_FUNDOS_COMPARTILHADA,
+  ABA_EXTERNA_COMPARTILHADA,
   acaoDeReprovar,
-  ehCardDeFundos,
+  ehCardExterno,
   FUNIL_PRECATORIO,
   FUNIL_RPV,
   SUBDIVISOES_PRECATORIO,
@@ -72,9 +72,9 @@ const lead = (statusId: number, id = statusId): KommoLead =>
   }) as KommoLead
 
 describe('SUBDIVISOES_PRECATORIO', () => {
-  it('tem as duas trilhas, nomeadas Interno e Fundos', () => {
-    expect(SUBDIVISOES_PRECATORIO.map((s) => s.key)).toEqual(['interno', 'fundos'])
-    expect(SUBDIVISOES_PRECATORIO.map((s) => s.label)).toEqual(['Interno', 'Fundos'])
+  it('tem as duas trilhas, nomeadas Interno e Externo', () => {
+    expect(SUBDIVISOES_PRECATORIO.map((s) => s.key)).toEqual(['interno', 'externo'])
+    expect(SUBDIVISOES_PRECATORIO.map((s) => s.label)).toEqual(['Interno', 'Externo'])
   })
 
   it('não repete chave de aba entre as trilhas', () => {
@@ -153,8 +153,8 @@ describe('abas do Interno', () => {
   })
 })
 
-describe('abas dos Fundos', () => {
-  const abas = abasDoFunil(FUNIL_PRECATORIO, espelho(), 'fundos')
+describe('abas da trilha Externa', () => {
+  const abas = abasDoFunil(FUNIL_PRECATORIO, espelho(), 'externo')
 
   it('mostra os cinco rótulos da plataforma, na ordem da trilha', () => {
     expect(abas.map((a) => a.label)).toEqual([
@@ -184,9 +184,9 @@ describe('Apresentação de Proposta serve às duas trilhas', () => {
     // nas duas trilhas. Se um dia isso mudar, é este teste que cai — e o rótulo
     // duplo deixa de ser intencional.
     const interno = abasDoFunil(FUNIL_PRECATORIO, espelho(), 'interno')
-    const fundos = abasDoFunil(FUNIL_PRECATORIO, espelho(), 'fundos')
+    const externo = abasDoFunil(FUNIL_PRECATORIO, espelho(), 'externo')
     const aprovados = interno.find((a) => a.label === 'Aprovados')!
-    const apresentacao = fundos.find((a) => a.label === 'Apresentação')!
+    const apresentacao = externo.find((a) => a.label === 'Apresentação')!
     expect(aprovados.statusIds).toEqual(apresentacao.statusIds)
   })
 })
@@ -255,7 +255,7 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     const etapas = espelho()
     const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
     // 10 colunas listadas, mas Apresentação de Proposta serve às duas trilhas:
-    // 6 do Interno + 5 dos Fundos = 11 abas sobre 10 colunas distintas.
+    // 6 do Interno + 5 do Externo = 11 abas sobre 10 colunas distintas.
     expect(ids.size).toBe(10)
     for (const nome of COLUNAS_KOMMO.slice(0, 10)) {
       expect(ids.has(idDe(nome, etapas))).toBe(true)
@@ -286,18 +286,18 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     const doTipo = leads.filter((l) => ids.has(l.status_id)).length
     expect(doTipo).toBe(4)
 
-    const somaDe = (sub: 'interno' | 'fundos') => {
+    const somaDe = (sub: 'interno' | 'externo') => {
       const { porAba } = agruparPorAba(
         leads,
         abasDoFunil(FUNIL_PRECATORIO, etapas, sub),
       )
       return Object.values(porAba).reduce((t, l) => t + l.length, 0)
     }
-    // Interno vê 3 (jurídica, revisão, proposta); Fundos vê 2 (defesa,
+    // Interno vê 3 (jurídica, revisão, proposta); Externo vê 2 (defesa,
     // proposta). A proposta entra nas duas, e é por isso que a soma por trilha
     // não bate isolada — só a união bate, que é o que o número de cima usa.
     expect(somaDe('interno')).toBe(3)
-    expect(somaDe('fundos')).toBe(2)
+    expect(somaDe('externo')).toBe(2)
   })
 
   it('em RPV, são os cinco status curados', () => {
@@ -314,7 +314,7 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
 describe('RPV não é afetado pela subdivisão', () => {
   it('devolve as cinco telas curadas, com os botões de mover', () => {
     // A subdivisão é um eixo só do Precatório. Passá-la aqui não pode mudar nada.
-    const abas = abasDoFunil(FUNIL_RPV, espelho(), 'fundos')
+    const abas = abasDoFunil(FUNIL_RPV, espelho(), 'externo')
     expect(abas.map((a) => a.label)).toEqual([
       'Pendentes',
       'Validação',
@@ -326,23 +326,23 @@ describe('RPV não é afetado pela subdivisão', () => {
   })
 })
 
-describe('ehCardDeFundos', () => {
+describe('ehCardExterno', () => {
   /**
    * A DESTINAÇÃO SAI DO CARD, não da pílula aberta.
    *
    * A subdivisão é um recorte da TELA. Se a due diligence perguntasse a ela,
-   * alternar Interno/Fundos atrás de uma janela aberta trocaria as frentes da
+   * alternar Interno/Externo atrás de uma janela aberta trocaria as frentes da
    * diligência em curso — a aba de certidões aparecendo e sumindo enquanto
    * alguém preenche o formulário. Quem responde é o status_id.
    */
-  it('coluna que só existe nos Fundos é card de fundo', () => {
+  it('coluna que só existe no Externo é card externo', () => {
     for (const coluna of [
       'Qualificação Jurídica Preliminar',
       'Encaminhar ao Fundo',
       'Defesa Técnica (TIER 2+)',
       'Revisão da Defesa Técnica (TIER 2+)',
     ]) {
-      expect(ehCardDeFundos(idDe(coluna), espelho()), coluna).toBe(true)
+      expect(ehCardExterno(idDe(coluna), espelho()), coluna).toBe(true)
     }
   })
 
@@ -354,28 +354,28 @@ describe('ehCardDeFundos', () => {
       'Diligência',
       'Reprovados Operacional',
     ]) {
-      expect(ehCardDeFundos(idDe(coluna), espelho()), coluna).toBe(false)
+      expect(ehCardExterno(idDe(coluna), espelho()), coluna).toBe(false)
     }
   })
 
   // "APRESENTAÇÃO DE PROPOSTA" É A MESMA COLUNA nas duas trilhas — "Aprovados"
-  // no Interno, "Apresentação" nos Fundos. Dela não se sabe a destinação, então
+  // no Interno, "Apresentação" no Externo. Dela não se sabe a destinação, então
   // ela conta como Interno: é o comportamento que já valia, e é por isso que
   // aquela aba não oferece botão em trilha nenhuma.
   it('a coluna compartilhada não é tratada como de fundo', () => {
-    expect(ehCardDeFundos(idDe('Apresentação de Proposta'), espelho())).toBe(false)
+    expect(ehCardExterno(idDe('Apresentação de Proposta'), espelho())).toBe(false)
   })
 
   it('coluna fora das trilhas, e espelho vazio, não são de fundo', () => {
-    expect(ehCardDeFundos(idDe('Nutrição'), espelho())).toBe(false)
-    expect(ehCardDeFundos(90000, [])).toBe(false)
+    expect(ehCardExterno(idDe('Nutrição'), espelho())).toBe(false)
+    expect(ehCardExterno(90000, [])).toBe(false)
   })
 
   // A aba compartilhada é nomeada em kommo.ts para a tela poder excluí-la dos
   // botões; se a chave mudar lá e não aqui, o botão reaparece na aba errada.
-  it('ABA_FUNDOS_COMPARTILHADA aponta para a aba da coluna compartilhada', () => {
-    const fundos = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'fundos')!
-    const aba = fundos.abas.find((a) => a.key === ABA_FUNDOS_COMPARTILHADA)
+  it('ABA_EXTERNA_COMPARTILHADA aponta para a aba da coluna compartilhada', () => {
+    const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
+    const aba = externo.abas.find((a) => a.key === ABA_EXTERNA_COMPARTILHADA)
     expect(aba?.colunaKommo).toBe('Apresentação de Proposta')
   })
 })
@@ -387,7 +387,7 @@ describe('acaoDeReprovar', () => {
    * As ações de uma aba são as saídas daquela ETAPA: existem onde o trabalho
    * acontece e somem nas terminais. A recusa por diligência nasce do que a
    * apuração achou, e a apuração pode acontecer em qualquer card — inclusive na
-   * trilha dos Fundos, que não tem desfecho nenhum e deixava a janela achando
+   * trilha Externa, que não tem desfecho nenhum e deixava a janela achando
    * execução contra o cedente sem oferecer como recusar.
    */
   it('no precatório, resolve a coluna pelo nome no espelho', () => {
