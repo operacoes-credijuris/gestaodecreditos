@@ -612,8 +612,9 @@ export function PainelProcessosJudiciais({
               setAdvOab,
             )}
             {campo('CPF do advogado', advCpf, setAdvCpf, true)}
-            <div className="hidden sm:block" />
-            <div className="hidden sm:block" />
+            {/* A SEXTA CÉLULA DA GRADE, que é o canto que sobra depois dos cinco
+                campos. Havia dois espaçadores aqui empurrando o botão para uma
+                terceira linha, no meio dela — o oposto do canto direito. */}
             {refazer}
           </>
         )}
