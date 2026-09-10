@@ -150,7 +150,15 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    const titulares = normalizarTitulares(lido.titulares)
+    // SÓ OS PAPÉIS PEDIDOS, conferido aqui e não só pedido no prompt.
+    //
+    // O campo preenchido na tela é o que autoriza a busca paga: se o modelo
+    // devolvesse o advogado numa cessão só do principal, a tela o preencheria
+    // e o Refazer procuraria dívida de quem não é parte do negócio. Obediência
+    // de modelo não é garantia — a garantia é este filtro.
+    const titulares = normalizarTitulares(lido.titulares).filter((t) =>
+      alvos.papeis.includes(t.papel),
+    )
     const avisos = lacunasDaLeitura(alvos, titulares)
     const doModelo = String(lido.aviso ?? '').trim()
     if (doModelo) avisos.push(doModelo)

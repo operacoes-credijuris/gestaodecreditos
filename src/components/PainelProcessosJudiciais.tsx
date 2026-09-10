@@ -136,7 +136,17 @@ export function PainelProcessosJudiciais({
   const [apuracoes, setApuracoes] = useState<ApuracaoDD[]>([])
   const [processos, setProcessos] = useState<ProcessoNaTela[]>([])
 
-  const [cedenteNome, setCedenteNome] = useState(cedenteDoCard ?? '')
+  // O NOME DO CARD SÓ ENTRA SE O CEDENTE FOR TITULAR DE ALGUMA VERBA CEDIDA.
+  // Numa cessão só de honorários, prefixar o campo com o nome dele faria a
+  // busca por NOME disparar no Refazer — cinco páginas pagas sobre quem não é
+  // parte do negócio, por causa de um preenchimento que ninguém pediu.
+  const [cedenteNome, setCedenteNome] = useState(
+    alvosDaCessao(classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida)).papeis.includes(
+      'CEDENTE',
+    )
+      ? (cedenteDoCard ?? '')
+      : '',
+  )
   const [cedenteCpf, setCedenteCpf] = useState('')
   const [advNome, setAdvNome] = useState('')
   const [advOab, setAdvOab] = useState('')
@@ -157,17 +167,19 @@ export function PainelProcessosJudiciais({
   // ------------------------------------------------- de quem é o que compramos
   //
   // A DILIGÊNCIA É DO TITULAR DA VERBA, e o título do card já diz qual verba é.
-  // Perguntar sempre pelo cedente E pelo advogado, como esta tela fazia, apura
-  // quem não é parte do negócio: numa cessão só de honorários as dívidas do
-  // exequente não alcançam nada, e numa cessão só do principal as do advogado
-  // também não. Cada consulta a mais é paga, e cada alerta a mais sobre quem não
-  // importa ensina quem lê a ignorar o alerta.
+  // Procurar sempre pelo cedente E pelo advogado apura quem não é parte do
+  // negócio: numa cessão só de honorários as dívidas do exequente não alcançam
+  // nada, e numa cessão só do principal as do advogado também não. Cada consulta
+  // a mais é paga, e cada alerta a mais sobre quem não importa ensina quem lê a
+  // ignorar o alerta.
+  //
+  // ISTO GOVERNA O PREENCHIMENTO, e não a existência dos campos: os cinco estão
+  // sempre à vista, e a leitura dos autos preenche só os titulares daqui. O que
+  // fica em branco não vira busca.
   const alvos = useMemo(
     () => alvosDaCessao(classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida)),
     [tituloDoCard],
   )
-  const pedeCedente = alvos.papeis.includes('CEDENTE')
-  const pedeAdvogado = alvos.papeis.includes('ADVOGADO')
 
   // ------------------------------------------------------------------ banco
 
@@ -300,17 +312,19 @@ export function PainelProcessosJudiciais({
   /**
    * Os alvos a partir do que está NOS CAMPOS — o caminho do botão.
    *
-   * SÓ OS TITULARES DA VERBA CEDIDA. Mandar os dois sempre gastaria consulta
-   * paga com quem não é parte do negócio, e devolveria alerta sobre dívida que
-   * não alcança o crédito, que é pior do que não apurar.
+   * CAMPO EM BRANCO NÃO DISPARA NADA, e é essa a regra inteira. Quem decide de
+   * quem se procura dívida é o preenchimento: a leitura dos autos preenche só os
+   * titulares das verbas que o título declara, e quem opera pode acrescentar ou
+   * apagar. Uma consulta paga sobre quem não é parte do negócio devolveria
+   * alerta sobre dívida que não alcança o crédito — pior do que não apurar.
    */
   function alvosDosCampos(): Record<string, string>[] {
     const saida: Record<string, string>[] = []
     const cpf = onlyDigits(cedenteCpf)
-    if (pedeCedente && (cedenteNome.trim() || cpf)) {
+    if (cedenteNome.trim() || cpf) {
       saida.push({ papel: 'CEDENTE', nome: cedenteNome.trim(), documento: cpf })
     }
-    if (pedeAdvogado && (advOab.trim() || onlyDigits(advCpf))) {
+    if (advNome.trim() || advOab.trim() || onlyDigits(advCpf)) {
       saida.push({
         papel: 'ADVOGADO',
         nome: advNome.trim(),
@@ -323,11 +337,7 @@ export function PainelProcessosJudiciais({
 
   async function apurar(alvosParaApurar = alvosDosCampos()) {
     if (alvosParaApurar.length === 0) {
-      toast.error(
-        pedeCedente
-          ? 'Informe ao menos o CPF do cedente ou a OAB do advogado.'
-          : 'Informe a OAB (ou o CPF) do advogado, que é quem cede esta verba.',
-      )
+      toast.error('Preencha o titular de quem se vai procurar dívida — os campos estão vazios.')
       return
     }
 
@@ -603,33 +613,38 @@ export function PainelProcessosJudiciais({
           autos e ficam editáveis porque é aqui que se corrige um homônimo ou um
           CPF que o PDF trouxe cortado — e, corrigido o campo, o Reapurar refaz a
           busca. Quais campos aparecem depende da verba cedida. */}
+      {/* OS CINCO CAMPOS ESTÃO SEMPRE À VISTA, e o que decide a busca é o que
+          está PREENCHIDO neles — campo em branco não dispara requisição.
+          Esconder os campos do titular que não entra na cessão era mais direto,
+          e estava errado por duas razões: some da tela a informação de que
+          existe outro titular, e tira de quem opera a única saída para o caso em
+          que ele discorda da leitura do título ("o card diz principal, mas os
+          honorários vêm junto"). Preencher continua sendo um ato, e é ele que
+          gasta consulta.
+
+          QUEM PREENCHE É A LEITURA DOS AUTOS, e ela só procura os titulares das
+          verbas que o título declara (ver alvosDaCessao): numa cessão só do
+          principal os três campos do advogado ficam vazios, e nada é buscado em
+          nome dele. */}
       <div className="grid gap-3 sm:grid-cols-3">
-        {pedeCedente && (
-          <>
-            {campo('Cedente', cedenteNome, setCedenteNome)}
-            {campo(
-              comDica('CPF do cedente', 'Sem CPF a busca vai pelo nome, e homônimo entra.'),
-              cedenteCpf,
-              setCedenteCpf,
-              true,
-            )}
-          </>
+        {campo('Cedente', cedenteNome, setCedenteNome)}
+        {campo(
+          comDica('CPF do cedente', 'Sem CPF a busca vai pelo nome, e homônimo entra.'),
+          cedenteCpf,
+          setCedenteCpf,
+          true,
         )}
-        {pedeAdvogado && (
-          <>
-            {campo(
-              alvos.cedenteEhOAdvogado ? 'Advogado (é quem cede)' : 'Advogado',
-              advNome,
-              setAdvNome,
-            )}
-            {campo(
-              comDica('OAB', 'Serve para achar o CPF dele — a busca de dívida é sempre por CPF.'),
-              advOab,
-              setAdvOab,
-            )}
-            {campo('CPF do advogado', advCpf, setAdvCpf, true)}
-          </>
+        {campo(
+          alvos.cedenteEhOAdvogado ? 'Advogado (é quem cede)' : 'Advogado',
+          advNome,
+          setAdvNome,
         )}
+        {campo(
+          comDica('OAB', 'Serve para achar o CPF dele — a busca de dívida é sempre por CPF.'),
+          advOab,
+          setAdvOab,
+        )}
+        {campo('CPF do advogado', advCpf, setAdvCpf, true)}
       </div>
 
       {/* UMA TABELA POR TITULAR, em abas.
