@@ -689,7 +689,7 @@ export function PainelProcessosJudiciais({
                   linha do cabeçalho fica com o dobro da altura das outras. */}
               <TH className="whitespace-nowrap text-right">Valor da causa</TH>
               <TH>Estágio</TH>
-              <TH>Risco</TH>
+              <TH className="whitespace-nowrap">Risco</TH>
             </TR>
           </THead>
           <TBody>
@@ -724,7 +724,10 @@ export function PainelProcessosJudiciais({
                     triplicava a altura de cada linha e enterrava as colunas que se
                     comparam de relance. Fica no title, para quem quiser. */}
                 <TD>
-                  <span title={x.risco_motivo ?? undefined}>
+                  {/* nowrap no selo: "sem risco" quebrava em duas linhas e
+                      esticava a altura da linha inteira por causa de um rótulo
+                      de nove caracteres. */}
+                  <span className="whitespace-nowrap" title={x.risco_motivo ?? undefined}>
                     <Badge tone={TOM_DO_RISCO[String(x.risco)] ?? 'gray'} size="sm">
                       {x.risco === 'NENHUM' ? 'sem risco' : String(x.risco).toLowerCase()}
                     </Badge>
