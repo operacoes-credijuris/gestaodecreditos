@@ -143,7 +143,17 @@ export function DueDiligence({
       onSeguir?.()
       onClose()
     } catch (e) {
-      toast.error((e as Error).message)
+      // MIGRAÇÃO PENDENTE TEM CARA DE DEFEITO. O PostgREST responde "Could not
+      // find the 'liberado_em' column of 'dd_historico' in the schema cache",
+      // que na tela se lê como bug do sistema — e manda procurar erro no código
+      // em vez de rodar o SQL que falta.
+      const m = (e as Error).message
+      toast.error(
+        /liberado_em|schema cache/i.test(m)
+          ? 'A migração 0062 ainda não rodou no banco: sem a coluna liberado_em não há onde ' +
+            'registrar que a diligência foi lida. Rode-a no SQL Editor do Supabase.'
+          : m,
+      )
     } finally {
       setSeguindo(false)
     }
