@@ -1225,7 +1225,7 @@ const SCHEMA_ANALISE = {
 const SCHEMA_QUALIFICACAO = {
   numero_processo: 'número no padrão CNJ do processo DESTES AUTOS — o dos arquivos anexados —, ou "NÃO LOCALIZADO". ' +
     'NUNCA o de outro processo citado nas anotações do card: elas registram as dívidas do titular em OUTRAS ações, e esses números não são deste crédito',
-  titular_nome: 'nome completo do titular do crédito',
+  titular_nome: 'nome completo do titular do crédito ANALISADO — o cedente do card, quando ele for indicado',
   cpf: 'CPF do titular',
   esfera: 'Federal | Estadual | Municipal',
   ente_devedor: 'qual Estado/Município/Órgão (ex.: "Estado de Goiás", "Estado do Paraná", "Município de Campinas", "União")',
@@ -1274,7 +1274,12 @@ const SYSTEM_QUALIFICACAO =
   'Você é um analista jurídico especializado em precatórios e RPVs, fazendo a QUALIFICAÇÃO (pré-análise) de um crédito para a Credijuris. ' +
   'A fonte é um processo judicial completo. Analise-o página por página com rigor e seja conservador: quando um dado não estiver claro, use "NÃO LOCALIZADO" (NUNCA invente datas, valores ou nomes). ' +
   'REGRA DE LOCALIZAÇÃO: indique onde cada dado está nesta ordem de prioridade: (1) numeração impressa ("fls.", "Pág. X de Y", numeração do PJe); (2) ID do documento (ex.: ID 295ff54); (3) a passagem. Informe o intervalo de páginas quando possível. ' +
-  'REGRAS: datas em DD/MM/AAAA; valores como número puro (ex.: 124500.00); uma linha por credor (se houver mais de um, use o principal e diga isso em "oficio_localizacao", junto da localização); baseie-se somente no documento enviado. ' +
+  'REGRAS: datas em DD/MM/AAAA; valores como número puro (ex.: 124500.00); baseie-se somente no documento enviado. ' +
+  'UMA LINHA POR CREDOR, E O CREDOR É O DO CARD. Litisconsórcio é comum, e cada litisconsorte tem o SEU requisitório: ' +
+  'num mesmo processo um pode ter precatório e outro RPV, e um pode ter renunciado ao excedente e convertido o dele em RPV. ' +
+  'Todos os campos — valor, tipo do requisitório, ofício, honorários, trânsito — referem-se AO CREDOR INDICADO no fim desta mensagem. ' +
+  'Não o encontrando entre os credores, devolva "NÃO LOCALIZADO" em titular_nome e liste em "oficio_localizacao" os credores que os autos trazem; ' +
+  'NÃO adote outro no lugar dele. Sem credor indicado, e só então, use o principal e diga isso em "oficio_localizacao", junto da localização. ' +
   'DEFINIÇÕES IMPORTANTES: ' +
   '(a) "trânsito em julgado da FASE DE CONHECIMENTO" é a data em que a decisão de MÉRITO se tornou definitiva — NÃO confunda com o trânsito da fase de execução/cumprimento de sentença; ' +
   '(b) "prazo de pagamento (60 dias) vencido" e "reserva financeira": procure decisão/despacho informando que o prazo de pagamento já passou e/ou que já existe reserva, sequestro ou depósito de verba destinada ao pagamento; ' +
@@ -1911,9 +1916,29 @@ const _seriesSgs = new Map<string, Promise<unknown>>();
 const COBERTURA_MINIMA_DA_SERIE = 0.75;
 
 // ---- PORTÃO 1: chamada de IA + decisão ----
-const extrairQualificacao = (apiKey: string, contentBlocks: any[]) =>
+/**
+ * O CREDOR DO CARD ANCORA A QUALIFICAÇÃO, e isto não é refinamento.
+ *
+ * Num litisconsórcio cada credor tem o SEU requisitório: no processo que expôs
+ * o defeito, três credoras dividiam os autos — uma com dois precatórios, e as
+ * outras duas com RPVs depois de renunciarem ao excedente. A regra antiga
+ * mandava "use o principal", a leitura adotou a primeira, e o portão barrou a
+ * análise dizendo "este processo tem PRECATÓRIO expedido" sobre um card cuja
+ * cedente tinha RPV. O crédito era bom e a mensagem estava tecnicamente certa
+ * sobre a pessoa errada — o pior tipo de recusa, porque não há como discordar
+ * dela lendo só a tela.
+ */
+const extrairQualificacao = (apiKey: string, contentBlocks: any[], cedente?: string) =>
   extrairComFerramenta(apiKey, {
-    rotulo: 'qualificação', instrucoes: SYSTEM_QUALIFICACAO, ferramenta: FERRAMENTA_QUALIFICACAO,
+    rotulo: 'qualificação',
+    instrucoes:
+      SYSTEM_QUALIFICACAO +
+      (cedente
+        ? ' CREDOR INDICADO PARA ESTA ANÁLISE: ' +
+          String(cedente).slice(0, 160) +
+          '. É dele o crédito que está sendo cedido; os campos falam dele.'
+        : ''),
+    ferramenta: FERRAMENTA_QUALIFICACAO,
     conteudo: contentBlocks, maxTokens: 4000,
   });
 
@@ -2894,7 +2919,7 @@ Deno.serve(async (req) => {
     // acima do bloco 3b. Vindo pronto, nao se le de novo.
     const qualif = (body.qualificacao && typeof body.qualificacao === 'object')
       ? body.qualificacao
-      : await extrairQualificacao(cfg.anthropic_api_key, contentBlocks);
+      : await extrairQualificacao(cfg.anthropic_api_key, contentBlocks, String(body.cedente ?? ''));
 
     // O ANEXO É DESTE PROCESSO? A conferência mora em
     // _shared/confrontoDoAnexo.ts — pura e com teste, e é lá que está escrito
@@ -2927,10 +2952,18 @@ Deno.serve(async (req) => {
       ehSim(qualif.requisitorio_expedido)
     ) {
       await limparUploads?.();
+      // O NOME DE QUEM TEM O PRECATÓRIO, na frase. Num litisconsórcio a recusa
+      // sem o nome é indiscutível pela tela: quem lê não tem como saber se o
+      // requisitório lido é o do cedente do card ou o de outro credor dos mesmos
+      // autos — e foi exatamente assim que um RPV bom foi barrado.
+      const _deQuem = String(qualif.titular_nome ?? '').trim();
       return errorResponse(
-        `Este processo tem PRECATÓRIO expedido${qualif.oficio_localizacao ? ` (${String(qualif.oficio_localizacao)})` : ''}, não RPV. ` +
+        `O crédito de ${_deQuem || 'quem consta como titular nos autos'} tem PRECATÓRIO expedido` +
+        `${qualif.oficio_localizacao ? ` (${String(qualif.oficio_localizacao)})` : ''}, não RPV. ` +
         'O motor de RPV precificaria com prazo de meses um crédito que a Fazenda paga em anos. ' +
-        'Mova o card para o funil de Precatórios e analise lá.',
+        'Mova o card para o funil de Precatórios e analise lá. ' +
+        'SE O CEDENTE DESTE CARD NÃO FOR ESSA PESSOA, o processo tem mais de um credor e a leitura pegou o requisitório do outro: ' +
+        'confira o nome no título do card antes de mover.',
       );
     }
 

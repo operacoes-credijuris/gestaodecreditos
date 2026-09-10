@@ -293,6 +293,16 @@ export interface DadosDoCardRpv {
   numero_processo: string
   categoria: string
   intermediador: string
+  /**
+   * O CEDENTE DO CARD, que ancora a qualificação nos autos.
+   *
+   * Litisconsórcio é comum, e cada litisconsorte tem o SEU requisitório — num
+   * mesmo processo um pode ter precatório e outro RPV. Sem dizer de quem é o
+   * crédito, a leitura adota "o principal" e pode descrever o requisitório de
+   * outro credor dos mesmos autos: foi assim que um RPV bom foi barrado por um
+   * precatório que não era dele.
+   */
+  cedente: string
   tipo_aquisicao: string
   honorarios_pct: string
 }
@@ -2055,13 +2065,16 @@ export function AnaliseRpvModal({
       itens,
       texto,
       origem: 'analise',
-      cedente: atual?.cedente ?? null,
       // A SÍNTESE VAI JUNTO porque a anotação abre com o objeto do processo, e
       // esta ação não lê os autos. Sem ela a IA não teria de onde tirar o
       // resumo — e inventaria quem litiga contra quem, num registro que o
       // comercial vai repetir ao cedente.
       sintese: atual?.m1_sintese ?? null,
       ...corpoCard,
+      // DEPOIS DO ESPALHAMENTO, de propósito: `corpoCard` traz o cedente do
+      // TÍTULO, e a análise leu o nome na qualificação dos autos — por extenso e
+      // conferido. O do título entra só quando a análise ainda não rodou.
+      cedente: atual?.cedente || corpoCard.cedente || null,
     })
     const m = String(r?.mensagem ?? '').trim()
     if (!m) throw new Error('A IA não devolveu texto para a anotação.')

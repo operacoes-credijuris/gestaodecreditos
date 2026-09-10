@@ -1342,6 +1342,7 @@ export default function AnaliseCredito() {
       numero_processo: d.numero,
       categoria: d.categoria,
       intermediador: d.intermediador,
+      cedente: d.cedente,
       tipo_aquisicao: sobra.parcela ?? d.tipo_aquisicao,
       honorarios_pct: d.honorarios_pct,
     }
