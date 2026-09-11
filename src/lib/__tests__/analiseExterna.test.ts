@@ -100,3 +100,49 @@ describe('urlDoClaude', () => {
     )
   })
 })
+
+describe('os anexos na pergunta', () => {
+  /**
+   * ENDEREÇO, E NÃO ARQUIVO. Nenhuma das quatro vias de anexar de verdade
+   * alcança um site que chama o app de fora: URL não carrega conteúdo, o
+   * clipboard só aceita texto/HTML/PNG, o app não declara alvo de
+   * compartilhamento, e a API interna de anexar fala com `window.parent` — é
+   * para página que roda DENTRO da conversa.
+   *
+   * O link contorna todas: o download do Kommo é público, e quem busca é o
+   * Claude.
+   */
+  const dados = { cedente: 'Fulano', parcelaCedida: 'Crédito principal', honorariosPct: '30' }
+
+  it('sem anexo, a pergunta é só a linha do crédito', () => {
+    expect(promptDaAnaliseExterna(dados, [])).toBe(
+      'executar análise de crédito: Fulano - Crédito principal - 30% de honorários contratuais',
+    )
+  })
+
+  it('com anexos, a pergunta manda abrir cada um', () => {
+    const p = promptDaAnaliseExterna(dados, [
+      { nome: 'processo.pdf', download: 'https://drive.kommo.com/a.pdf' },
+      { nome: 'calculo.pdf', download: 'https://drive.kommo.com/b.pdf' },
+    ])
+    expect(p).toContain('executar análise de crédito: Fulano')
+    expect(p).toMatch(/Baixe e leia cada um antes de responder/)
+    expect(p).toContain('- processo.pdf: https://drive.kommo.com/a.pdf')
+    expect(p).toContain('- calculo.pdf: https://drive.kommo.com/b.pdf')
+  })
+
+  it('anexo sem link não entra na lista', () => {
+    const p = promptDaAnaliseExterna(dados, [
+      { nome: 'sem-link.pdf', download: '' },
+      { nome: 'bom.pdf', download: 'https://drive.kommo.com/b.pdf' },
+    ])
+    expect(p).not.toContain('sem-link.pdf')
+    expect(p).toContain('bom.pdf')
+  })
+
+  it('só anexos sem link é o mesmo que nenhum anexo', () => {
+    expect(promptDaAnaliseExterna(dados, [{ nome: 'x.pdf', download: '' }])).toBe(
+      promptDaAnaliseExterna(dados, []),
+    )
+  })
+})

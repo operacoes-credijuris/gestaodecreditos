@@ -13,17 +13,23 @@
 // Então `claude://claude.ai/new?q=…` abre a conversa no app com a pergunta
 // escrita.
 //
-// O QUE NÃO DÁ, e isto foi VERIFICADO no pacote instalado, não suposto: o app
-// NÃO declara alvo de compartilhamento (não há ShareTarget no AppxManifest), o
-// que exclui a única via que existiria para o navegador entregar arquivo a outro
-// aplicativo. Somada às duas que já não existiam — URL não carrega arquivo, e o
-// clipboard só aceita texto, HTML e PNG —, sobra o disco: o anexo entra na
-// conversa pela mão de quem conversa.
+// OS ANEXOS VÃO POR LINK, e é assim que eles chegam à conversa sem ninguém
+// arrastar nada. O link de download do Kommo é PÚBLICO — o navegador o busca sem
+// cabeçalho de autenticação, que é como esta plataforma já lê os PDFs — então
+// basta que ele esteja na pergunta para o Claude buscar os autos por conta
+// própria.
 //
-// E POR AÍ FICA BOM, porque o app ASSOCIA .pdf (uap3:FileTypeAssociation): os
-// arquivos baixados abrem nele por "Abrir com", e a janela do app aceita
-// arrastar. O botão faz as duas metades que pode: abre o app com a pergunta
-// pronta e baixa os anexos, para o arrasto ser um gesto só.
+// POR QUE NÃO ANEXAR DE VERDADE, e isto foi verificado no pacote instalado, não
+// suposto. Quatro vias existiriam e as quatro estão fechadas para quem chama de
+// fora: URL não carrega o CONTEÚDO de um arquivo; a área de transferência só
+// aceita texto, HTML e PNG; o app não declara alvo de compartilhamento (não há
+// ShareTarget no AppxManifest); e a API interna de anexar
+// (`postMessage({type:"anthropic:attach-files"})`) fala com `window.parent` — é
+// para página que roda DENTRO da conversa, num artifact, não para um site.
+//
+// O LINK CONTORNA TODAS ELAS, porque não transporta arquivo: transporta endereço,
+// e quem busca é o Claude. O download continua acontecendo como rede de
+// segurança — se a busca falhar, os arquivos já estão no disco para arrastar.
 
 /** O que o título do card informa, já lido por `lerTituloCard`. */
 export interface DadosDoTituloParaPrompt {
@@ -45,7 +51,16 @@ export interface DadosDoTituloParaPrompt {
  * o modelo tenta suprir o que falta em vez de perguntar. O que o título não
  * trouxer, quem conversa diz.
  */
-export function promptDaAnaliseExterna(dados: DadosDoTituloParaPrompt): string {
+export function promptDaAnaliseExterna(
+  dados: DadosDoTituloParaPrompt,
+  /**
+   * Os anexos do card, por endereço.
+   *
+   * ENDEREÇO, E NÃO ARQUIVO: o link do Kommo é público, e o Claude o busca
+   * sozinho. É o que faz a conversa nascer com os autos sem ninguém arrastar.
+   */
+  anexos: { nome: string; download: string }[] = [],
+): string {
   const pct = String(dados.honorariosPct ?? '').trim()
   // "0" é informação: quer dizer cessão sem honorário contratual, e some num
   // teste de string vazia se ele for feito com truthy.
@@ -53,7 +68,19 @@ export function promptDaAnaliseExterna(dados: DadosDoTituloParaPrompt): string {
   const partes = [dados.cedente, dados.parcelaCedida, comPct]
     .map((p) => String(p ?? '').trim())
     .filter(Boolean)
-  return 'executar análise de crédito: ' + partes.join(' - ')
+  const cabeca = 'executar análise de crédito: ' + partes.join(' - ')
+  const links = anexos
+    .filter((a) => a && a.download)
+    .map((a) => '- ' + (a.nome || 'anexo') + ': ' + a.download)
+  if (links.length === 0) return cabeca
+  // A INSTRUÇÃO VEM JUNTO. Sem ela o modelo lê uma lista de endereços e pode
+  // tratá-la como referência a citar; com ela, sabe que o trabalho começa por
+  // abrir os arquivos.
+  return (
+    cabeca +
+    '\n\nOs autos estão nos anexos abaixo. Baixe e leia cada um antes de responder:\n' +
+    links.join('\n')
+  )
 }
 
 /**
