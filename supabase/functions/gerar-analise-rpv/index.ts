@@ -1454,7 +1454,19 @@ const SYSTEM_ANALISE =
   'O CESSIONÁRIO NÃO HERDA AS PREFERÊNCIAS do credor originário (art. 100, §13, parte final: não se aplicam ao cessionário os §§2º e 3º). ' +
   'ISTO MEXE NO PRAZO, e não só no risco: se o cedente é idoso, portador de doença grave ou deficiente e o crédito tramitaria na fila preferencial, essa vantagem SE PERDE com a cessão. ' +
   'Havendo sinal de preferência nos autos, NÃO monte o roteiro_prazo com a fila preferencial — use a fila comum e diga isso na base do ato correspondente. ' +
-  'FRACIONAR É VEDADO (art. 100, §8º, da CF; art. 17, §3º, da Lei 10.259/2001): não se paga parte por RPV e parte por precatório, nem se expede precatório complementar do que foi pago. ' +
+  'FRACIONAR É VEDADO (art. 100, §8º, da CF; art. 17, §3º, da Lei 10.259/2001; e, no regime da Lei de Benefícios, art. 128, §§1º e 2º, da Lei 8.213/91, na redação da Lei 10.099/2000): ' +
+  'não se paga parte por RPV e parte por precatório, nem se expede precatório complementar ou suplementar do que foi pago por requisição de pequeno valor. ' +
+  'O CRITÉRIO É A TITULARIDADE DO CRÉDITO, E NÃO A NATUREZA DA VERBA — é o que a Primeira Seção do STJ assentou, e é o ponto em que esta verificação costuma falhar. ' +
+  'DUAS REQUISIÇÕES PARA O MESMO TITULAR, no mesmo processo, são fracionamento ainda que correspondam a condenações DISTINTAS: danos materiais e danos morais, principal e juros, ' +
+  'períodos diferentes do mesmo pedido. O que se soma é o que é devido ÀQUELA PESSOA naquela execução — verbas de naturezas diferentes não são créditos diferentes para este fim. ' +
+  'VERIFICAÇÃO OBRIGATÓRIA, em todo processo: agrupe POR TITULAR os requisitórios já expedidos e os em expedição (RPV, minuta, ofício requisitório, alvará), ' +
+  'some os do MESMO titular e compare a soma com o teto do ente. Passando do teto, o caminho legítimo era precatório — ou renúncia ao excedente —, e não duas requisições. ' +
+  'REQUISITÓRIOS DE TITULARES DIFERENTES NÃO SE SOMAM e não viram risco: cada litisconsorte, coexequente ou herdeiro tem o seu, e os honorários sucumbenciais do advogado ' +
+  'são crédito autônomo DELE (Súmula Vinculante 47/STF), não do exequente. ' +
+  'ACHANDO INDÍCIO, registre em bloco_g_riscos, com a soma e os documentos que a compõem no fundamento: IMPEDITIVO quando os autos já trouxerem impugnação da Fazenda, ' +
+  'decisão reconhecendo o vício ou determinação de conversão em precatório; ELEVADO quando o defeito estiver apenas na conta e nas requisições, sem ninguém ter suscitado ainda. ' +
+  'O QUE ESTÁ EM JOGO PARA O COMPRADOR: reconhecido o fracionamento, a requisição é anulada e o valor volta à fila como precatório, com outro prazo, e o que já tiver sido pago ' +
+  'pode ser objeto de devolução. Sem elemento nos autos, não registre nada — ausência de fracionamento não é risco e não vira item. ' +
   'RENUNCIAR AO EXCEDENTE, por outro lado, é legítimo e não é fracionamento: o exequente abre mão do que passa do teto para receber o saldo como RPV (art. 17, §4º, da Lei 10.259/2001; ADCT, art. 87). ' +
   'A diferença importa para o preço: renúncia significa que o valor acima do teto NÃO VIRÁ DEPOIS — ele deixa de existir. Crédito acima do teto sem renúncia nos autos vira precatório, com outra fila e outro prazo. ' +
   'HONORÁRIOS SUCUMBENCIAIS têm natureza alimentar autônoma e podem ser destacados do principal, com requisição PRÓPRIA e ordem própria (Súmula Vinculante 47/STF) — o destaque não é fracionamento. ' +
