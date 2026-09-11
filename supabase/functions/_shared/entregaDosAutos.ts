@@ -51,9 +51,19 @@ export const FORMA_DA_ENTREGA = [
  * que o comercial escreveu, e o roteiro exige documento e página para cada campo
  * da ficha — oferecer um como o outro é o que a regra de ancoragem proíbe.
  */
-export function montarEntrega(g: AutosGuardados): string {
+export function montarEntrega(
+  g: AutosGuardados,
+  /**
+   * O roteiro em vigor.
+   *
+   * VEM DE FORA porque a operação o edita pela tela de Configurações, e o que
+   * está no repositório é o CHÃO: texto vazio, linha ausente ou banco novo caem
+   * no padrão versionado. Nenhuma análise roda sem método.
+   */
+  roteiro: string = ROTEIRO_QUALIFICACAO,
+): string {
   const cabeca = [
-    ROTEIRO_QUALIFICACAO,
+    (roteiro || '').trim() || ROTEIRO_QUALIFICACAO,
     '',
     '---',
     '',

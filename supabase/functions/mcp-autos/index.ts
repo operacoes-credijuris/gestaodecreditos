@@ -25,6 +25,26 @@
 import { serviceClient } from "../_shared/auth.ts";
 import { type AutosGuardados, montarEntrega } from "../_shared/entregaDosAutos.ts";
 
+/** A chave do roteiro na tabela que a operação edita (ver migration 0065). */
+const CHAVE_ROTEIRO = "qualificacao_preliminar";
+
+/**
+ * O roteiro que a operação tem em vigor, ou vazio para cair no padrão.
+ *
+ * FALHA EM SILÊNCIO DE PROPÓSITO. Se a tabela não existir ainda, ou a leitura
+ * cair, a análise não pode parar por causa disso: ela segue com o roteiro
+ * versionado no repositório, que é o mesmo texto que estava valendo antes de
+ * esta tela existir.
+ */
+async function roteiroEmVigor(db: ReturnType<typeof serviceClient>): Promise<string> {
+  const { data } = await db
+    .from("prompts_operacao")
+    .select("texto")
+    .eq("chave", CHAVE_ROTEIRO)
+    .maybeSingle();
+  return String((data as { texto?: string } | null)?.texto ?? "");
+}
+
 // O aplicativo manda cabeçalhos próprios do MCP; sem eles no preflight, o
 // navegador que hospeda a conversa recusa a chamada antes de sair.
 const CORS = {
@@ -117,7 +137,9 @@ async function buscarAutos(codigo: string) {
           .from("analise_externa_autos")
           .update({ lido_em: new Date().toISOString() })
           .eq("codigo", codigo);
-        return { content: [{ type: "text", text: montarEntrega(g) }] };
+        return {
+          content: [{ type: "text", text: montarEntrega(g, await roteiroEmVigor(db)) }],
+        };
       }
     }
 

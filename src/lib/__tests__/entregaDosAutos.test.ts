@@ -54,6 +54,31 @@ describe('montarEntrega', () => {
     expect(montarEntrega({ ...guardado, titulo: '' })).toContain('(card sem título)')
   })
 
+  /**
+   * O ROTEIRO É EDITÁVEL PELA OPERAÇÃO, e o padrão do repositório é o CHÃO.
+   *
+   * Quem edita está num campo de texto, e um salvamento em branco não pode
+   * significar uma análise sem método — sairia uma redação convincente sem ficha,
+   * sem eixos e sem regra de ancoragem, que é a pior forma de errar aqui.
+   */
+  it('usa o roteiro que a operação editou', () => {
+    const t = montarEntrega(guardado, '# ROTEIRO NOVO DA CASA')
+    expect(t.indexOf('# ROTEIRO NOVO DA CASA')).toBe(0)
+    expect(t).not.toContain('# PROMPT — Qualificação Jurídica Preliminar')
+    // O resto da entrega não depende de qual roteiro está em vigor.
+    expect(t).toContain('FORMA DA ENTREGA')
+    expect(t).toContain('TEOR DOS AUTOS PRINCIPAIS')
+  })
+
+  it('roteiro vazio ou em branco cai no padrão do sistema', () => {
+    for (const vazio of ['', '   ', '\n\n']) {
+      expect(montarEntrega(guardado, vazio), JSON.stringify(vazio)).toContain(
+        '# PROMPT — Qualificação Jurídica Preliminar',
+      )
+    }
+    expect(montarEntrega(guardado)).toContain('# PROMPT — Qualificação Jurídica Preliminar')
+  })
+
   it('arquivo sem contagem de páginas não inventa uma', () => {
     const t = montarEntrega({
       ...guardado,

@@ -14,6 +14,9 @@ import {
   Sparkles,
   Puzzle,
   Search,
+  Scale,
+  Undo2,
+  RotateCcw,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
@@ -28,12 +31,12 @@ import type {
   ConfigKommo,
   ServicoIntegracao,
 } from '@/lib/types'
-import { ADMIN_EMAIL } from '@/contexts/AuthContext'
+import { ADMIN_EMAIL, useAuth } from '@/contexts/AuthContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select } from '@/components/ui/Field'
+import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { IconButton } from '@/components/ui/IconButton'
 import {
@@ -46,6 +49,7 @@ import {
   Loading,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
+import { ROTEIRO_QUALIFICACAO } from '../../../supabase/functions/_shared/roteiroQualificacao.ts'
 
 export default function Configuracoes() {
   return (
@@ -57,6 +61,7 @@ export default function Configuracoes() {
         <AnthropicConfig />
         <EscavadorConfig />
         <SkillsConfig />
+        <RoteiroConfig />
         <DjenConfig />
         <UsuariosConfig />
       </div>
@@ -916,6 +921,186 @@ const UFS = [
 interface OabItem {
   uf: string
   numero: string
+}
+
+/** A chave do roteiro na tabela `prompts_operacao` (migration 0065). */
+const CHAVE_ROTEIRO = 'qualificacao_preliminar'
+
+interface PromptDaOperacao {
+  chave: string
+  texto: string
+  texto_anterior: string | null
+  atualizado_em: string
+  atualizado_por: string | null
+}
+
+/**
+ * O ROTEIRO DA QUALIFICAÇÃO, editável por quem analisa.
+ *
+ * ELE É O MÉTODO: que fases percorrer, que eixos varrer, o que é proibido
+ * afirmar sem fonte. Nasceu dentro do repositório, e ali mudá-lo custava um
+ * programador e um deploy — caro demais para um texto que a operação ajusta toda
+ * vez que um caso novo ensina alguma coisa.
+ *
+ * O PADRÃO CONTINUA NO CÓDIGO e é o chão: campo vazio, linha ausente ou banco
+ * novo caem nele. Nenhuma análise roda sem método, nem por salvamento em branco.
+ */
+function RoteiroConfig() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const { user } = useAuth()
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['prompts_operacao', CHAVE_ROTEIRO],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('prompts_operacao')
+        .select('*')
+        .eq('chave', CHAVE_ROTEIRO)
+        .maybeSingle()
+      if (error) throw new Error(error.message)
+      return (data ?? null) as PromptDaOperacao | null
+    },
+  })
+
+  const emVigor = (data?.texto ?? '').trim() || ROTEIRO_QUALIFICACAO
+  const [texto, setTexto] = useState('')
+  const [tocado, setTocado] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+
+  // O CAMPO NASCE COM O QUE ESTÁ VALENDO, e só para de acompanhar o servidor
+  // depois que alguém digita: recarregar a lista não pode apagar a edição em
+  // curso, e abrir a tela não pode mostrar texto velho.
+  useEffect(() => {
+    if (!tocado && !isLoading) setTexto(emVigor)
+  }, [emVigor, isLoading, tocado])
+
+  const mudou = texto.trim() !== emVigor.trim()
+  const ehOPadrao = emVigor.trim() === ROTEIRO_QUALIFICACAO.trim()
+
+  async function gravar(novo: string, recado: string) {
+    setSalvando(true)
+    try {
+      const { error } = await supabase.from('prompts_operacao').upsert({
+        chave: CHAVE_ROTEIRO,
+        texto: novo,
+        // O QUE ESTAVA VALENDO VIRA O ANTERIOR — é o desfazer de um clique. São
+        // 17 mil caracteres que a análise inteira obedece, e quem edita está
+        // colando num campo de texto.
+        texto_anterior: emVigor,
+        atualizado_em: new Date().toISOString(),
+        atualizado_por: user?.email ?? null,
+      })
+      if (error) throw new Error(error.message)
+      setTocado(false)
+      await qc.invalidateQueries({ queryKey: ['prompts_operacao', CHAVE_ROTEIRO] })
+      toast.success(recado)
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <Scale className="h-5 w-5 text-brand-600" /> Roteiro da qualificação preliminar
+          </span>
+        }
+        description="O método que a análise do precatório externo segue. Vale na próxima análise, sem publicar nada."
+        action={
+          ehOPadrao ? (
+            <Badge tone="gray">Padrão do sistema</Badge>
+          ) : (
+            <Badge tone="green">Editado pela operação</Badge>
+          )
+        }
+      />
+      <CardBody>
+        <AvisoLeitura error={error} />
+        {isLoading ? (
+          <Loading />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Este texto é entregue ao Claude junto com os autos, toda vez que alguém clica em
+              <strong> Executar análise</strong> no funil externo. Editar aqui muda a análise
+              seguinte — não é preciso avisar ninguém nem reabrir conversa.
+            </p>
+
+            <Textarea
+              rows={18}
+              className="font-mono text-xs leading-relaxed"
+              value={texto}
+              spellCheck={false}
+              onChange={(e) => {
+                setTocado(true)
+                setTexto(e.target.value)
+              }}
+            />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                onClick={() => gravar(texto, 'Roteiro salvo. A próxima análise já o usa.')}
+                disabled={!mudou || salvando}
+                loading={salvando}
+              >
+                Salvar roteiro
+              </Button>
+
+              {/* DESFAZER É DIFERENTE DE RESTAURAR O PADRÃO: um volta uma
+                  colagem errada, o outro joga fora todo o ajuste acumulado. */}
+              <Button
+                variant="secondary"
+                icon={<Undo2 className="h-4 w-4" />}
+                onClick={() => gravar(data?.texto_anterior ?? '', 'Alteração desfeita.')}
+                disabled={salvando || !data?.texto_anterior}
+                title={
+                  data?.texto_anterior
+                    ? 'Volta o roteiro para como estava antes do último salvamento'
+                    : 'Não há alteração anterior para desfazer'
+                }
+              >
+                Desfazer a última alteração
+              </Button>
+
+              <Button
+                variant="secondary"
+                icon={<RotateCcw className="h-4 w-4" />}
+                onClick={() => {
+                  setTocado(true)
+                  setTexto(ROTEIRO_QUALIFICACAO)
+                }}
+                disabled={salvando}
+                title="Traz o texto original do sistema para o campo — nada é salvo até você clicar em Salvar"
+              >
+                Trazer o padrão para o campo
+              </Button>
+
+              {mudou && (
+                <span className="text-xs font-medium text-amber-700">
+                  alterações não salvas
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+              <span>{texto.length.toLocaleString('pt-BR')} caracteres</span>
+              {data?.atualizado_em && (
+                <span>
+                  Última alteração em{' '}
+                  {new Date(data.atualizado_em).toLocaleString('pt-BR')}
+                  {data.atualizado_por ? ' por ' + data.atualizado_por : ''}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  )
 }
 
 function DjenConfig() {
