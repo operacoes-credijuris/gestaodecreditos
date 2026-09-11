@@ -11,6 +11,7 @@
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
+import { limparParaOBanco } from "../_shared/textoParaOBanco.ts";
 
 const CORS = corsHeaders;
 
@@ -74,8 +75,12 @@ Deno.serve(async (req) => {
     const arquivos: { nome: string; paginas: number; texto: string }[] = [];
     const deFora: string[] = [];
     for (const a of brutos) {
-      const nome = String((a as any)?.nome ?? "arquivo sem nome");
-      const texto = String((a as any)?.texto ?? "").trim();
+      // LIMPO ANTES DE QUALQUER OUTRA COISA: texto de PDF traz NUL, e o
+      // Postgres nao guarda NUL nem em jsonb nem em text. Sem esta passagem a
+      // gravacao morria com "unsupported Unicode escape sequence" — e o erro
+      // chegava como 500, indistinguivel de defeito nosso.
+      const nome = limparParaOBanco((a as any)?.nome) || "arquivo sem nome";
+      const texto = limparParaOBanco((a as any)?.texto).trim();
       if (!texto) { deFora.push(`${nome} (sem texto legível)`); continue; }
       if (usado >= MAX_TOTAL) { deFora.push(`${nome} (não coube no limite total)`); continue; }
       const cortado = cortar(texto, Math.min(MAX_POR_ARQUIVO, MAX_TOTAL - usado));
@@ -92,7 +97,7 @@ Deno.serve(async (req) => {
     const { error } = await db.from("analise_externa_autos").upsert({
       codigo,
       lead_id: leadId,
-      titulo: String((body as any).titulo ?? "").slice(0, 500),
+      titulo: limparParaOBanco((body as any).titulo).slice(0, 500),
       arquivos,
       // Reescrever o mesmo código (a pessoa clicou duas vezes) reabre o prazo:
       // o que vale é a última entrega.
