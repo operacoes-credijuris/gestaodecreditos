@@ -15,8 +15,6 @@ import {
   Puzzle,
   Search,
   Scale,
-  Undo2,
-  RotateCcw,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
@@ -1009,14 +1007,11 @@ function RoteiroConfig() {
             <Scale className="h-5 w-5 text-brand-600" /> Roteiro da qualificação preliminar
           </span>
         }
-        description="O método que a análise do precatório externo segue. Vale na próxima análise, sem publicar nada."
-        action={
-          ehOPadrao ? (
-            <Badge tone="gray">Padrão do sistema</Badge>
-          ) : (
-            <Badge tone="green">Editado pela operação</Badge>
-          )
-        }
+        description="Este texto é entregue ao Claude junto com os autos, toda vez que alguém clica em Executar análise no funil externo."
+        // SÓ O SELO DE EDITADO. Estar no padrão é o estado comum, e um selo que
+        // aparece sempre não informa nada — o que vale a pena flagrar é o texto
+        // ter saído do que o sistema entrega.
+        action={ehOPadrao ? null : <Badge tone="green">Editado pela operação</Badge>}
       />
       <CardBody>
         <AvisoLeitura error={error} />
@@ -1024,12 +1019,6 @@ function RoteiroConfig() {
           <Loading />
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-slate-600">
-              Este texto é entregue ao Claude junto com os autos, toda vez que alguém clica em
-              <strong> Executar análise</strong> no funil externo. Editar aqui muda a análise
-              seguinte — não é preciso avisar ninguém nem reabrir conversa.
-            </p>
-
             <Textarea
               rows={18}
               className="font-mono text-xs leading-relaxed"
@@ -1047,36 +1036,7 @@ function RoteiroConfig() {
                 disabled={!mudou || salvando}
                 loading={salvando}
               >
-                Salvar roteiro
-              </Button>
-
-              {/* DESFAZER É DIFERENTE DE RESTAURAR O PADRÃO: um volta uma
-                  colagem errada, o outro joga fora todo o ajuste acumulado. */}
-              <Button
-                variant="secondary"
-                icon={<Undo2 className="h-4 w-4" />}
-                onClick={() => gravar(data?.texto_anterior ?? '', 'Alteração desfeita.')}
-                disabled={salvando || !data?.texto_anterior}
-                title={
-                  data?.texto_anterior
-                    ? 'Volta o roteiro para como estava antes do último salvamento'
-                    : 'Não há alteração anterior para desfazer'
-                }
-              >
-                Desfazer a última alteração
-              </Button>
-
-              <Button
-                variant="secondary"
-                icon={<RotateCcw className="h-4 w-4" />}
-                onClick={() => {
-                  setTocado(true)
-                  setTexto(ROTEIRO_QUALIFICACAO)
-                }}
-                disabled={salvando}
-                title="Traz o texto original do sistema para o campo — nada é salvo até você clicar em Salvar"
-              >
-                Trazer o padrão para o campo
+                Salvar
               </Button>
 
               {mudou && (
