@@ -86,3 +86,20 @@ verify_jwt = true
 # Drive do escritório: o JWT é exigido no portão.
 [functions.gerar-contrato]
 verify_jwt = true
+
+# Põe no balcão o texto dos autos de um card, para o Claude vir buscar pelo
+# conector. Sempre disparada por uma pessoa, no botão "Executar análise" do
+# precatório externo — e o que ela guarda são os autos de um processo: o JWT é
+# exigido no portão, e a função ainda confere se a conta está ATIVA.
+[functions.autos-guardar]
+verify_jwt = true
+
+# O conector (MCP) pelo qual o aplicativo do Claude busca os autos.
+#
+# SEM JWT PORQUE NÃO HÁ COMO TER UM: quem chama é o aplicativo do Claude, que não
+# conhece o Supabase nem a sessão de quem está usando a plataforma. O que
+# autoriza a leitura é o CÓDIGO da análise — um uuid que nasce no clique, vale
+# duas horas e serve a um card só. Sem código válido a função não devolve nada, e
+# um código inexistente recebe a mesma resposta de um vencido.
+[functions.mcp-autos]
+verify_jwt = false

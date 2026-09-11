@@ -3,9 +3,9 @@
 //
 // No Interno o motor analisa: lê os autos, audita a conta, precifica. No Externo
 // quem decide o preço é o fundo comprador — o que a casa faz é montar o crédito
-// e conversar sobre ele. Essa conversa mora no Claude, num projeto que carrega o
-// contexto da operação, e o papel desta tela é ABRIR essa conversa já dizendo de
-// que crédito se trata.
+// e conversar sobre ele. Essa conversa mora no Claude, e o papel desta tela é
+// ABRIR essa conversa já dizendo de que crédito se trata e já entregando os
+// autos.
 //
 // ABRE O APLICATIVO, e não o navegador. O Claude Desktop registra o esquema
 // `claude://` no Windows, e as rotas dele espelham as da web — o próprio app usa
@@ -13,23 +13,24 @@
 // Então `claude://claude.ai/new?q=…` abre a conversa no app com a pergunta
 // escrita.
 //
-// OS ANEXOS VÃO POR LINK, e é assim que eles chegam à conversa sem ninguém
-// arrastar nada. O link de download do Kommo é PÚBLICO — o navegador o busca sem
-// cabeçalho de autenticação, que é como esta plataforma já lê os PDFs — então
-// basta que ele esteja na pergunta para o Claude buscar os autos por conta
-// própria.
-//
-// POR QUE NÃO ANEXAR DE VERDADE, e isto foi verificado no pacote instalado, não
-// suposto. Quatro vias existiriam e as quatro estão fechadas para quem chama de
-// fora: URL não carrega o CONTEÚDO de um arquivo; a área de transferência só
-// aceita texto, HTML e PNG; o app não declara alvo de compartilhamento (não há
+// OS AUTOS NÃO VÃO: SÃO BUSCADOS. Esta é a inversão que faz o fluxo funcionar.
+// Anexar de verdade não é possível de fora, e isto foi verificado no pacote
+// instalado, não suposto — as quatro vias que existiriam estão todas fechadas:
+// a URL não carrega o CONTEÚDO de um arquivo; a área de transferência só aceita
+// texto, HTML e PNG; o app não declara alvo de compartilhamento (não há
 // ShareTarget no AppxManifest); e a API interna de anexar
 // (`postMessage({type:"anthropic:attach-files"})`) fala com `window.parent` — é
 // para página que roda DENTRO da conversa, num artifact, não para um site.
 //
-// O LINK CONTORNA TODAS ELAS, porque não transporta arquivo: transporta endereço,
-// e quem busca é o Claude. O download continua acontecendo como rede de
-// segurança — se a busca falhar, os arquivos já estão no disco para arrastar.
+// PÔR O LINK DO KOMMO NA PERGUNTA TAMBÉM NÃO RESOLVEU. Foi a primeira tentativa,
+// e era barata: o link é público, então bastaria o modelo buscá-lo. Ele não
+// busca. Fica registrado para ninguém tentar de novo.
+//
+// O QUE RESOLVE É O CONECTOR. A plataforma deposita o TEXTO dos autos num balcão
+// (a função `autos-guardar`) sob um código, e põe esse código na pergunta; o
+// aplicativo do Claude chama o conector `mcp-autos` com o código e recebe os
+// autos inteiros. Nada trafega pelo disco, nada é arrastado, e quem lê os PDFs
+// continua sendo o navegador — com pdf.js, como no resto da plataforma.
 
 /** O que o título do card informa, já lido por `lerTituloCard`. */
 export interface DadosDoTituloParaPrompt {
@@ -54,12 +55,14 @@ export interface DadosDoTituloParaPrompt {
 export function promptDaAnaliseExterna(
   dados: DadosDoTituloParaPrompt,
   /**
-   * Os anexos do card, por endereço.
+   * O código com que o Claude vem buscar os autos.
    *
-   * ENDEREÇO, E NÃO ARQUIVO: o link do Kommo é público, e o Claude o busca
-   * sozinho. É o que faz a conversa nascer com os autos sem ninguém arrastar.
+   * É A CHAVE DO BALCÃO, e por isso vai escrito na pergunta: o aplicativo não
+   * recebe arquivo nenhum, ele chama o conector com este código e lê os autos de
+   * lá. Vazio abre a conversa sem os autos — o que acontece quando o depósito
+   * falhou, e aí o resgate é pelo disco.
    */
-  anexos: { nome: string; download: string }[] = [],
+  codigo = '',
 ): string {
   const pct = String(dados.honorariosPct ?? '').trim()
   // "0" é informação: quer dizer cessão sem honorário contratual, e some num
@@ -69,17 +72,17 @@ export function promptDaAnaliseExterna(
     .map((p) => String(p ?? '').trim())
     .filter(Boolean)
   const cabeca = 'executar análise de crédito: ' + partes.join(' - ')
-  const links = anexos
-    .filter((a) => a && a.download)
-    .map((a) => '- ' + (a.nome || 'anexo') + ': ' + a.download)
-  if (links.length === 0) return cabeca
-  // A INSTRUÇÃO VEM JUNTO. Sem ela o modelo lê uma lista de endereços e pode
-  // tratá-la como referência a citar; com ela, sabe que o trabalho começa por
-  // abrir os arquivos.
+  const chave = String(codigo ?? '').trim()
+  if (!chave) return cabeca
+  // A INSTRUÇÃO VEM JUNTO, e nomeia a ferramenta. Um código solto na mensagem
+  // não diz a ninguém o que fazer com ele; dito assim, a primeira coisa que a
+  // conversa faz é abrir os autos.
   return (
     cabeca +
-    '\n\nOs autos estão nos anexos abaixo. Baixe e leia cada um antes de responder:\n' +
-    links.join('\n')
+    '\n\nOs autos deste crédito estão no conector Credijuris. Antes de responder, ' +
+    'leia-os com a ferramenta `autos_do_credito`, código ' +
+    chave +
+    '.'
   )
 }
 
@@ -88,8 +91,10 @@ export function promptDaAnaliseExterna(
  *
  * Vazio abre uma conversa solta, que funciona e perde o contexto — o projeto é
  * quem carrega as instruções da operação, o manual e o histórico. Cole aqui a
- * URL do projeto (https://claude.ai/project/…) para as conversas nascerem
- * dentro dele.
+ * URL do projeto (https://claude.ai/project/…).
+ *
+ * MAS LEIA `urlDoClaude` ANTES DE PREENCHER: no aplicativo, projeto e pergunta
+ * são excludentes, e a pergunta ganha.
  *
  * CONSTANTE, e não configuração de tela: é uma URL por instalação, não por
  * usuário, e uma tela de configuração para um campo que muda de ano em ano custa
@@ -100,14 +105,23 @@ export const PROJETO_CLAUDE = ''
 /**
  * A URL que abre a conversa com a pergunta já escrita.
  *
- * `?q=` é o que o claude.ai lê para pré-preencher o campo. Anexado à URL do
- * PROJETO quando há um: se aquela página ignorar o parâmetro, a conversa abre
- * dentro do projeto com o campo vazio — que continua sendo melhor do que uma
- * conversa fora dele.
+ * `?q=` é o que o claude.ai lê para pré-preencher o campo.
  *
- * SÓ claude.ai. A URL do projeto é digitada por uma pessoa, e uma linha
- * trocada por descuido faria este botão abrir um site qualquer levando o nome
- * do cedente na query.
+ * NO APLICATIVO, O PROJETO CUSTA A PERGUNTA — e isto está no código do próprio
+ * Claude Desktop, não é suposição. O tratador de `claude://` tem um ramo por
+ * rota: o de `/new` repassa o `q`, o de `/project/…` chama um copiador que só
+ * conhece os parâmetros de retorno de OAuth (`oauth_error`, `gdrive_success` e
+ * afins) e DESCARTA todo o resto. Abrir o projeto no app, portanto, abre uma
+ * conversa dentro dele com o campo vazio — e sem a pergunta não há código, sem
+ * código não há autos, e a análise não começa.
+ *
+ * ENTÃO A PERGUNTA GANHA: com `PROJETO_CLAUDE` preenchido, o aplicativo continua
+ * indo para `/new`. No NAVEGADOR o projeto é honrado, porque lá a página lê o
+ * `?q=` em qualquer rota.
+ *
+ * SÓ claude.ai. A URL do projeto é digitada por uma pessoa, e uma linha trocada
+ * por descuido faria este botão abrir um site qualquer levando o nome do cedente
+ * na query.
  */
 export function urlDoClaude(
   prompt: string,
@@ -125,12 +139,10 @@ export function urlDoClaude(
   const q = encodeURIComponent(prompt)
   const base = String(projeto ?? '').trim()
   let caminho = '/new'
-  if (base) {
+  // No app, `/project/…` engoliria o `?q=`: fica em `/new`.
+  if (base && !noApp) {
     try {
       const u = new URL(base)
-      // SÓ claude.ai. A URL do projeto é digitada por uma pessoa, e uma linha
-      // trocada por descuido faria este botão abrir um site qualquer levando o
-      // nome do cedente na query.
       if (u.hostname.endsWith('claude.ai')) caminho = u.pathname + u.search
     } catch {
       caminho = '/new'

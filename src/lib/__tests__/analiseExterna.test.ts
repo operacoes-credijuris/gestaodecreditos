@@ -60,15 +60,31 @@ describe('urlDoClaude', () => {
     )
   })
 
-  it('com projeto, a conversa nasce dentro dele', () => {
+  /**
+   * NO APLICATIVO, O PROJETO CUSTARIA A PERGUNTA.
+   *
+   * Está no código do próprio Claude Desktop: o tratador de `claude://` tem um
+   * ramo por rota, e enquanto o de `/new` repassa o `q`, o de `/project/…` chama
+   * um copiador que só conhece os parâmetros de retorno de OAuth e descarta todo
+   * o resto. Abrir o projeto pelo app abriria uma conversa de campo vazio — e
+   * sem a pergunta não há código, sem código não há autos.
+   */
+  it('no aplicativo, o projeto cede lugar à pergunta', () => {
     expect(urlDoClaude('oi', 'https://claude.ai/project/abc-123')).toBe(
-      'claude://claude.ai/project/abc-123?q=oi',
+      'claude://claude.ai/new?q=oi',
+    )
+  })
+
+  // NO NAVEGADOR O PROJETO VALE, porque ali a página lê o `?q=` em qualquer rota.
+  it('no navegador, a conversa nasce dentro do projeto', () => {
+    expect(urlDoClaude('oi', 'https://claude.ai/project/abc-123', false)).toBe(
+      'https://claude.ai/project/abc-123?q=oi',
     )
   })
 
   it('projeto que já tem query recebe a pergunta com &', () => {
-    expect(urlDoClaude('oi', 'https://claude.ai/project/abc?x=1')).toBe(
-      'claude://claude.ai/project/abc?x=1&q=oi',
+    expect(urlDoClaude('oi', 'https://claude.ai/project/abc?x=1', false)).toBe(
+      'https://claude.ai/project/abc?x=1&q=oi',
     )
   })
 
@@ -76,9 +92,6 @@ describe('urlDoClaude', () => {
   // clique não faz nada visível.
   it('pedindo o navegador, sai https', () => {
     expect(urlDoClaude('oi', '', false)).toBe('https://claude.ai/new?q=oi')
-    expect(urlDoClaude('oi', 'https://claude.ai/project/abc', false)).toBe(
-      'https://claude.ai/project/abc?q=oi',
-    )
   })
 
   // A URL DO PROJETO É DIGITADA POR UMA PESSOA. Uma linha trocada por descuido
@@ -90,59 +103,58 @@ describe('urlDoClaude', () => {
       'javascript:alert(1)',
       'nem url',
     ]) {
-      expect(urlDoClaude('oi', ruim), ruim).toBe('claude://claude.ai/new?q=oi')
+      expect(urlDoClaude('oi', ruim, false), ruim).toBe('https://claude.ai/new?q=oi')
     }
   })
 
-  it('subdomínio do claude.ai é aceito', () => {
-    expect(urlDoClaude('oi', 'https://www.claude.ai/project/abc')).toBe(
-      'claude://claude.ai/project/abc?q=oi',
+  // SUBDOMÍNIO PASSA, MAS NORMALIZADO: o que se aproveita da URL digitada é o
+  // CAMINHO; o host sai sempre daqui. Um "www." a mais não muda o destino, e
+  // nenhum host de fora entra por essa porta.
+  it('subdomínio do claude.ai é aceito, e o endereço sai normalizado', () => {
+    expect(urlDoClaude('oi', 'https://www.claude.ai/project/abc', false)).toBe(
+      'https://claude.ai/project/abc?q=oi',
     )
   })
 })
 
-describe('os anexos na pergunta', () => {
+describe('o código dos autos', () => {
   /**
-   * ENDEREÇO, E NÃO ARQUIVO. Nenhuma das quatro vias de anexar de verdade
-   * alcança um site que chama o app de fora: URL não carrega conteúdo, o
-   * clipboard só aceita texto/HTML/PNG, o app não declara alvo de
-   * compartilhamento, e a API interna de anexar fala com `window.parent` — é
-   * para página que roda DENTRO da conversa.
+   * OS AUTOS NÃO VÃO NA MENSAGEM: SÃO BUSCADOS.
    *
-   * O link contorna todas: o download do Kommo é público, e quem busca é o
-   * Claude.
+   * Nenhuma das quatro vias de anexar de verdade alcança um site que chama o app
+   * de fora — URL não carrega conteúdo, o clipboard só aceita texto/HTML/PNG, o
+   * app não declara alvo de compartilhamento, e a API interna de anexar fala com
+   * `window.parent`. Pôr o link público do Kommo na pergunta também não
+   * funcionou: o modelo não busca o PDF.
+   *
+   * O que vai é um CÓDIGO. A plataforma deposita o texto dos autos num balcão
+   * sob ele, e o aplicativo o troca pelos autos no conector.
    */
   const dados = { cedente: 'Fulano', parcelaCedida: 'Crédito principal', honorariosPct: '30' }
+  const codigo = '3f2a1c9e-4b7d-4a10-9c22-8de5f0a1b2c3'
 
-  it('sem anexo, a pergunta é só a linha do crédito', () => {
-    expect(promptDaAnaliseExterna(dados, [])).toBe(
+  it('sem código, a pergunta é só a linha do crédito', () => {
+    expect(promptDaAnaliseExterna(dados)).toBe(
       'executar análise de crédito: Fulano - Crédito principal - 30% de honorários contratuais',
     )
+    expect(promptDaAnaliseExterna(dados, '   ')).toBe(promptDaAnaliseExterna(dados))
   })
 
-  it('com anexos, a pergunta manda abrir cada um', () => {
-    const p = promptDaAnaliseExterna(dados, [
-      { nome: 'processo.pdf', download: 'https://drive.kommo.com/a.pdf' },
-      { nome: 'calculo.pdf', download: 'https://drive.kommo.com/b.pdf' },
-    ])
+  // A INSTRUÇÃO VEM JUNTO E NOMEIA A FERRAMENTA: um código solto não diz a
+  // ninguém o que fazer com ele.
+  it('com código, a pergunta manda ler os autos pelo conector', () => {
+    const p = promptDaAnaliseExterna(dados, codigo)
     expect(p).toContain('executar análise de crédito: Fulano')
-    expect(p).toMatch(/Baixe e leia cada um antes de responder/)
-    expect(p).toContain('- processo.pdf: https://drive.kommo.com/a.pdf')
-    expect(p).toContain('- calculo.pdf: https://drive.kommo.com/b.pdf')
+    expect(p).toContain('autos_do_credito')
+    expect(p).toContain(codigo)
+    expect(p).toMatch(/antes de responder/i)
   })
 
-  it('anexo sem link não entra na lista', () => {
-    const p = promptDaAnaliseExterna(dados, [
-      { nome: 'sem-link.pdf', download: '' },
-      { nome: 'bom.pdf', download: 'https://drive.kommo.com/b.pdf' },
-    ])
-    expect(p).not.toContain('sem-link.pdf')
-    expect(p).toContain('bom.pdf')
-  })
-
-  it('só anexos sem link é o mesmo que nenhum anexo', () => {
-    expect(promptDaAnaliseExterna(dados, [{ nome: 'x.pdf', download: '' }])).toBe(
-      promptDaAnaliseExterna(dados, []),
-    )
+  // O CÓDIGO ATRAVESSA A URL INTEIRO: é ele que abre o balcão, e um caractere
+  // perdido na codificação deixaria a conversa sem os autos.
+  it('o código chega inteiro na URL do aplicativo', () => {
+    const url = urlDoClaude(promptDaAnaliseExterna(dados, codigo))
+    expect(url.startsWith('claude://claude.ai/new?q=')).toBe(true)
+    expect(decodeURIComponent(url.slice('claude://claude.ai/new?q='.length))).toContain(codigo)
   })
 })

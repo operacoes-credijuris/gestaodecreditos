@@ -731,7 +731,6 @@ function CardCredito({
   resultadoAnalise,
   onDueDiligence,
   onAnaliseExterna,
-  onPrepararAnaliseExterna,
   onAnaliseJuridica,
   analisandoJuridico,
   resultadoJuridico,
@@ -751,8 +750,6 @@ function CardCredito({
   onDueDiligence: (l: KommoLead) => void
   /** Abre a conversa da análise no Claude — só no precatório externo. */
   onAnaliseExterna: (l: KommoLead) => void
-  /** Busca os links dos anexos antes do clique, para ele poder ser síncrono. */
-  onPrepararAnaliseExterna: (l: KommoLead) => void
   onAnaliseJuridica: (l: KommoLead) => void
   analisandoJuridico: boolean
   resultadoJuridico?: ResultadoJuridico
@@ -936,11 +933,6 @@ function CardCredito({
               variant="secondary"
               icon={<FileSearch className="h-4 w-4" />}
               onClick={() => onAnaliseExterna(lead)}
-              // O MOUSE CHEGA ANTES DO CLIQUE, e é nessa folga que os links dos
-              // anexos são buscados: o clique precisa ser síncrono para o
-              // aplicativo abrir. `onFocus` cobre quem chega pelo teclado.
-              onMouseEnter={() => onPrepararAnaliseExterna(lead)}
-              onFocus={() => onPrepararAnaliseExterna(lead)}
               disabled={ocupado}
             >
               Executar análise
@@ -1350,32 +1342,13 @@ export default function AnaliseCredito() {
    * `await` é bloqueado como popup. A pergunta sai do título, que já está na
    * memória, então nada precisa ser esperado antes de abrir.
    */
-  /**
-   * Os links dos anexos, guardados por card.
-   *
-   * PRÉ-CARREGADOS AO PASSAR O MOUSE, e é isso que deixa o clique SÍNCRONO. O
-   * esquema `claude://` só é aceito com a ativação do gesto valendo, e ela morre
-   * no primeiro `await` — buscar os links depois do clique custaria a abertura
-   * do aplicativo. Ao passar o mouse não custa nada: a resposta chega antes do
-   * dedo.
-   */
-  const [linksDosAnexos, setLinksDosAnexos] = useState<
-    Record<number, { nome: string; download: string }[]>
-  >({})
-
-  function precarregarAnexos(lead: KommoLead) {
-    const id = lead.kommo_lead_id
-    if (linksDosAnexos[id]) return
-    void listarAnexosDoCard(lead)
-      .then((lista) => setLinksDosAnexos((p) => ({ ...p, [id]: lista })))
-      // Silêncio de propósito: isto roda ao passar o mouse, e um erro aqui não
-      // pertence a nenhuma ação que a pessoa tenha pedido. O clique reclama.
-      .catch(() => undefined)
-  }
-
   function onAnaliseExterna(lead: KommoLead) {
-    const anexos = linksDosAnexos[lead.kommo_lead_id] ?? []
-    const prompt = promptDaAnaliseExterna(lerTituloCard(tituloCard(lead)), anexos)
+    // O CÓDIGO NASCE AQUI, ANTES DE QUALQUER `await`, e é isso que deixa o
+    // clique síncrono: o esquema `claude://` só é aceito com a ativação do
+    // gesto valendo, e ela morre na primeira espera. Gerar um uuid não espera
+    // nada, então a conversa abre na hora e os autos correm atrás.
+    const codigo = crypto.randomUUID()
+    const prompt = promptDaAnaliseExterna(lerTituloCard(tituloCard(lead)), codigo)
     // O ESQUEMA PRECISA DE UM CLIQUE DE VERDADE, e é por isso que sai de um <a>
     // e não de `location.href`: navegação programática para esquema externo é
     // recusada por algumas versões do Chrome, e o clique sintético num link
@@ -1383,16 +1356,44 @@ export default function AnaliseCredito() {
     const link = document.createElement('a')
     link.href = urlDoClaude(prompt)
     link.click()
-    if (anexos.length === 0) {
-      // Sem os links na pergunta, o Claude não tem como buscar os autos: o
-      // disco volta a ser o caminho, e quem arrasta é quem conversa.
-      void baixarAnexosDoCard(lead)
-    } else {
+    void depositarAutos(lead, codigo)
+  }
+
+  /**
+   * Põe os autos no balcão, para o Claude vir buscá-los pelo conector.
+   *
+   * DEPOIS DE ABRIR A CONVERSA, e não antes — a leitura dos PDFs leva segundos e
+   * o aplicativo não pode esperar por ela. A corrida está prevista do outro
+   * lado: a ferramenta do conector espera o depósito chegar antes de dizer que
+   * não achou.
+   *
+   * QUEM LÊ O PDF É ESTE NAVEGADOR, com pdf.js, como em toda a plataforma — e
+   * pelo mesmo cache que a due diligence usa, então um card já aberto não é
+   * lido duas vezes. Para o servidor vai só o TEXTO.
+   */
+  async function depositarAutos(lead: KommoLead, codigo: string) {
+    try {
+      const lidos = await lerArquivosComCache(lead)
+      await invokeFunction('autos-guardar', {
+        codigo,
+        lead_id: lead.kommo_lead_id,
+        titulo: tituloCard(lead),
+        // Só nome, páginas e texto: os `bytes` do PDF são megabytes e não têm o
+        // que fazer no servidor.
+        arquivos: lidos.map((a) => ({ nome: a.nome, paginas: a.paginas, texto: a.texto })),
+      })
       toast.success(
-        anexos.length + ' anexo(s) na pergunta — o Claude abre os autos sozinho.',
+        lidos.length + ' arquivo(s) à disposição do Claude — peça a análise na conversa.',
       )
+    } catch (e) {
+      // RESGATE PELO DISCO. Sem o depósito o conector não tem o que entregar, e
+      // a conversa já abriu: baixar os arquivos devolve à pessoa o caminho
+      // antigo, o do arrasto, em vez de deixá-la diante de uma conversa vazia.
+      toast.error('Não consegui pôr os autos à disposição do Claude: ' + (e as Error).message)
+      void baixarAnexosDoCard(lead)
     }
   }
+
   /** A lista de anexos que o card tem no Kommo, com os links de download. */
   async function listarAnexosDoCard(
     lead: KommoLead,
@@ -2054,7 +2055,6 @@ export default function AnaliseCredito() {
                 }
                 onDueDiligence={onDueDiligence}
                 onAnaliseExterna={onAnaliseExterna}
-                onPrepararAnaliseExterna={precarregarAnexos}
                 onAnaliseJuridica={onAnaliseJuridica}
                 analisandoJuridico={analisandoJurId === l.kommo_lead_id}
                 resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
