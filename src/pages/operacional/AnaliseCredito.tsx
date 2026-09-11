@@ -287,6 +287,24 @@ async function extrairTextoDoPdf(
   }
 }
 
+/**
+ * COMO VAI O PREPARO DOS AUTOS de um card, para o Claude vir buscá-los.
+ *
+ * ISTO NÃO É DIAGNÓSTICO, É A METADE QUE FALTAVA DO FLUXO. Quem clica em
+ * "Executar análise" sai da plataforma no mesmo instante — o aplicativo do
+ * Claude toma a frente da tela —, e a única notícia que existia do depósito era
+ * um aviso passageiro que ninguém chega a ver. Quando ele falhava, a conversa
+ * ficava do outro lado chamando o conector em vão, e aqui não sobrava rastro
+ * nenhum do motivo.
+ *
+ * Então o estado FICA no card: enquanto lê, quando fica pronto, e sobretudo o
+ * que deu errado, com a mensagem inteira que a função respondeu.
+ */
+export interface PreparoDosAutos {
+  estado: 'lendo' | 'pronto' | 'falhou'
+  detalhe: string
+}
+
 export interface ArquivoLido {
   nome: string
   texto: string
@@ -731,6 +749,7 @@ function CardCredito({
   resultadoAnalise,
   onDueDiligence,
   onAnaliseExterna,
+  preparoDosAutos,
   onAnaliseJuridica,
   analisandoJuridico,
   resultadoJuridico,
@@ -750,6 +769,8 @@ function CardCredito({
   onDueDiligence: (l: KommoLead) => void
   /** Abre a conversa da análise no Claude — só no precatório externo. */
   onAnaliseExterna: (l: KommoLead) => void
+  /** Como vai o preparo dos autos deste card, se já foi pedido. */
+  preparoDosAutos?: PreparoDosAutos
   onAnaliseJuridica: (l: KommoLead) => void
   analisandoJuridico: boolean
   resultadoJuridico?: ResultadoJuridico
@@ -950,6 +971,31 @@ function CardCredito({
             >
               {analisandoJuridico ? 'Analisando…' : 'Análise jurídica'}
             </Button>
+          )}
+        </div>
+      )}
+      {preparoDosAutos && (
+        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+          {preparoDosAutos.estado === 'lendo' && (
+            <div className="text-slate-700">⏳ {preparoDosAutos.detalhe}</div>
+          )}
+          {preparoDosAutos.estado === 'pronto' && (
+            <div className="text-green-700">✅ {preparoDosAutos.detalhe}</div>
+          )}
+          {preparoDosAutos.estado === 'falhou' && (
+            <div className="text-red-700">
+              {/* O QUE A CONVERSA VAI DIZER, dito aqui primeiro: do outro lado o
+                  Claude só sabe que não achou o código, e a pessoa não teria
+                  como ligar uma coisa à outra. */}
+              <div className="font-medium">
+                Os autos não subiram — o Claude não vai achá-los por este código.
+              </div>
+              <p className="mt-1 break-words whitespace-pre-line">{preparoDosAutos.detalhe}</p>
+              <p className="mt-1 text-slate-600">
+                Os arquivos foram baixados para a sua máquina; dá para arrastá-los
+                para a conversa enquanto isto não se resolve.
+              </p>
+            </div>
           )}
         </div>
       )}
@@ -1342,6 +1388,10 @@ export default function AnaliseCredito() {
    * `await` é bloqueado como popup. A pergunta sai do título, que já está na
    * memória, então nada precisa ser esperado antes de abrir.
    */
+  const [preparoDosAutos, setPreparoDosAutos] = useState<Record<number, PreparoDosAutos>>({})
+  const anotarPreparo = (id: number, estado: PreparoDosAutos['estado'], detalhe: string) =>
+    setPreparoDosAutos((p) => ({ ...p, [id]: { estado, detalhe } }))
+
   function onAnaliseExterna(lead: KommoLead) {
     // O CÓDIGO NASCE AQUI, ANTES DE QUALQUER `await`, e é isso que deixa o
     // clique síncrono: o esquema `claude://` só é aceito com a ativação do
@@ -1372,6 +1422,8 @@ export default function AnaliseCredito() {
    * lido duas vezes. Para o servidor vai só o TEXTO.
    */
   async function depositarAutos(lead: KommoLead, codigo: string) {
+    const id = lead.kommo_lead_id
+    anotarPreparo(id, 'lendo', 'Lendo os PDFs do card. Num processo grande isto leva um minuto.')
     try {
       const lidos = await lerArquivosComCache(lead)
       await invokeFunction('autos-guardar', {
@@ -1382,14 +1434,24 @@ export default function AnaliseCredito() {
         // que fazer no servidor.
         arquivos: lidos.map((a) => ({ nome: a.nome, paginas: a.paginas, texto: a.texto })),
       })
+      anotarPreparo(
+        id,
+        'pronto',
+        lidos.length + ' arquivo(s) à disposição do Claude — peça a análise na conversa.',
+      )
       toast.success(
         lidos.length + ' arquivo(s) à disposição do Claude — peça a análise na conversa.',
       )
     } catch (e) {
+      // A MENSAGEM INTEIRA FICA NO CARD. `erroDaFuncao` já traz o motivo real do
+      // corpo da resposta e o status HTTP; jogá-la fora num aviso passageiro era
+      // perder a única explicação que existe do lado de cá.
+      const motivo = (e as Error)?.message ?? String(e)
+      anotarPreparo(id, 'falhou', motivo)
       // RESGATE PELO DISCO. Sem o depósito o conector não tem o que entregar, e
       // a conversa já abriu: baixar os arquivos devolve à pessoa o caminho
       // antigo, o do arrasto, em vez de deixá-la diante de uma conversa vazia.
-      toast.error('Não consegui pôr os autos à disposição do Claude: ' + (e as Error).message)
+      toast.error('Não consegui pôr os autos à disposição do Claude: ' + motivo)
       void baixarAnexosDoCard(lead)
     }
   }
@@ -2055,6 +2117,7 @@ export default function AnaliseCredito() {
                 }
                 onDueDiligence={onDueDiligence}
                 onAnaliseExterna={onAnaliseExterna}
+                preparoDosAutos={preparoDosAutos[l.kommo_lead_id]}
                 onAnaliseJuridica={onAnaliseJuridica}
                 analisandoJuridico={analisandoJurId === l.kommo_lead_id}
                 resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
