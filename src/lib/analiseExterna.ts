@@ -108,6 +108,22 @@ export function promptDaAnaliseExterna(
 export const PROJETO_CLAUDE = ''
 
 /**
+ * A SUPERFÍCIE DO CLAUDE em que a conversa nasce: Cowork.
+ *
+ * DITA, E NÃO SORTEADA. Sem este parâmetro o aplicativo abre na última
+ * superfície usada — quem tivesse acabado de conversar no Chat abria a análise
+ * no Chat, e quem estivesse no Cowork abria no Cowork. O conector funciona nos
+ * dois, mas a esteira não pode depender do que a pessoa fez antes: é ela que
+ * decide se a análise vira uma tarefa com trabalho em andamento ou uma conversa
+ * solta.
+ *
+ * O tratador de `claude://` lê este parâmetro na rota `/new` e o traduz para a
+ * superfície escolhida — é o mesmo caminho que o próprio aplicativo usa nos
+ * atalhos da barra de tarefas.
+ */
+export const SUPERFICIE_CLAUDE = 'cowork'
+
+/**
  * A URL que abre a conversa com a pergunta já escrita.
  *
  * `?q=` é o que o claude.ai lê para pré-preencher o campo.
@@ -155,5 +171,8 @@ export function urlDoClaude(
   }
   const separador = caminho.includes('?') ? '&' : '?'
   const prefixo = noApp ? 'claude://claude.ai' : 'https://claude.ai'
-  return `${prefixo}${caminho}${separador}q=${q}`
+  // A SUPERFÍCIE SÓ VALE EM `/new`: é a rota que a lê. Numa rota de projeto o
+  // parâmetro seria ignorado, e escrevê-lo ali só sugeriria que faz algo.
+  const superficie = caminho === '/new' ? `&surface=${SUPERFICIE_CLAUDE}` : ''
+  return `${prefixo}${caminho}${separador}q=${q}${superficie}`
 }

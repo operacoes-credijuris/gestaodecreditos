@@ -76,8 +76,25 @@ describe('urlDoClaude', () => {
   // "claude://claude.ai/new?surface=chat" no atalho da barra de tarefas.
   it('sem projeto, abre conversa nova no aplicativo', () => {
     expect(urlDoClaude('teste de análise')).toBe(
-      'claude://claude.ai/new?q=teste%20de%20an%C3%A1lise',
+      'claude://claude.ai/new?q=teste%20de%20an%C3%A1lise&surface=cowork',
     )
+  })
+
+  /**
+   * A SUPERFÍCIE É DITA, E NÃO SORTEADA. Sem o parâmetro, o aplicativo abre na
+   * última que a pessoa usou: quem tinha acabado de conversar no Chat abria a
+   * análise no Chat. O conector funciona nos dois, mas qual deles a esteira usa
+   * é decisão da casa, não do histórico de navegação de quem clicou.
+   */
+  it('a conversa nasce sempre no Cowork', () => {
+    expect(urlDoClaude('oi')).toContain('&surface=cowork')
+    expect(urlDoClaude('oi', '', false)).toBe('https://claude.ai/new?q=oi&surface=cowork')
+  })
+
+  // Numa rota de projeto o parâmetro seria ignorado; escrevê-lo ali só sugeriria
+  // que faz alguma coisa.
+  it('a superfície não é escrita em rota de projeto', () => {
+    expect(urlDoClaude('oi', 'https://claude.ai/project/abc', false)).not.toContain('surface')
   })
 
   /**
@@ -91,7 +108,7 @@ describe('urlDoClaude', () => {
    */
   it('no aplicativo, o projeto cede lugar à pergunta', () => {
     expect(urlDoClaude('oi', 'https://claude.ai/project/abc-123')).toBe(
-      'claude://claude.ai/new?q=oi',
+      'claude://claude.ai/new?q=oi&surface=cowork',
     )
   })
 
@@ -111,7 +128,7 @@ describe('urlDoClaude', () => {
   // A SAÍDA PARA MÁQUINA SEM O APP: ali o esquema não tem quem o atenda e o
   // clique não faz nada visível.
   it('pedindo o navegador, sai https', () => {
-    expect(urlDoClaude('oi', '', false)).toBe('https://claude.ai/new?q=oi')
+    expect(urlDoClaude('oi', '', false)).toBe('https://claude.ai/new?q=oi&surface=cowork')
   })
 
   // A URL DO PROJETO É DIGITADA POR UMA PESSOA. Uma linha trocada por descuido
@@ -123,7 +140,9 @@ describe('urlDoClaude', () => {
       'javascript:alert(1)',
       'nem url',
     ]) {
-      expect(urlDoClaude('oi', ruim, false), ruim).toBe('https://claude.ai/new?q=oi')
+      expect(urlDoClaude('oi', ruim, false), ruim).toBe(
+        'https://claude.ai/new?q=oi&surface=cowork',
+      )
     }
   })
 
@@ -175,6 +194,10 @@ describe('o código dos autos', () => {
   it('o código chega inteiro na URL do aplicativo', () => {
     const url = urlDoClaude(promptDaAnaliseExterna(dados, codigo))
     expect(url.startsWith('claude://claude.ai/new?q=')).toBe(true)
-    expect(decodeURIComponent(url.slice('claude://claude.ai/new?q='.length))).toContain(codigo)
+    // Lido como o aplicativo lê: o `q` é um parâmetro entre outros, e a pergunta
+    // tem de sair dele intacta mesmo com a superfície escrita depois.
+    const q = new URLSearchParams(url.slice(url.indexOf('?') + 1)).get('q') ?? ''
+    expect(q).toContain(codigo)
+    expect(q).toContain('autos_do_credito')
   })
 })

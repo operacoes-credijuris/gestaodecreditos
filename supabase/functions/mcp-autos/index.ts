@@ -23,7 +23,7 @@
 // endpoint não servir de sonda.
 
 import { serviceClient } from "../_shared/auth.ts";
-import { ROTEIRO_QUALIFICACAO } from "../_shared/roteiroQualificacao.ts";
+import { type AutosGuardados, montarEntrega } from "../_shared/entregaDosAutos.ts";
 
 // O aplicativo manda cabeçalhos próprios do MCP; sem eles no preflight, o
 // navegador que hospeda a conversa recusa a chamada antes de sair.
@@ -90,58 +90,6 @@ function falhaDaFerramenta(texto: string) {
 
 const dorme = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type Guardado = {
-  lead_id: number;
-  titulo: string;
-  arquivos: { nome: string; paginas: number; texto: string }[];
-  criado_em: string;
-};
-
-/**
- * O que o modelo vai ler, em três partes e nesta ordem: o MÉTODO, o CADASTRO e
- * os AUTOS.
- *
- * O ROTEIRO VEM PRIMEIRO de propósito. Ele diz o que fazer com o que vem
- * depois — que fases percorrer, que eixos varrer, o que é proibido afirmar sem
- * fonte. Chegando junto com os autos, ele vale para qualquer conversa e para
- * qualquer pessoa da operação, sem ninguém precisar lembrar de colá-lo nem de
- * abrir a conversa no projeto certo.
- *
- * O CADASTRO VEM SEPARADO DOS AUTOS, e rotulado como cadastro. O título do card
- * é o que o comercial escreveu, não o que o processo diz — e o roteiro exige
- * documento e página para cada campo da ficha. Misturar os dois seria oferecer
- * cadastro como prova, que é exatamente o que a regra de ancoragem proíbe.
- */
-function textoDosAutos(g: Guardado): string {
-  const cabeca = [
-    ROTEIRO_QUALIFICACAO,
-    "",
-    "---",
-    "",
-    "## DADOS DO CARD (cadastro do comercial — NÃO é fonte documental)",
-    "",
-    "O título do card segue o formato `[intermediador] - [cedente] - [nº CNJ] - " +
-      "[parcela cedida] - [% de honorários contratuais]`, e neste crédito está assim:",
-    "",
-    `> ${g.titulo || "(card sem título)"}`,
-    "",
-    "Use-o para preencher o que puder do bloco [0]. Ele NÃO substitui os autos em",
-    "nenhum campo da Ficha de Identificação: divergência entre o card e os autos é,",
-    "ela própria, achado a registrar.",
-    "",
-    "---",
-    "",
-    "## AUTOS ANEXOS",
-    "",
-    `Card Kommo ${g.lead_id} · ${g.arquivos.length} arquivo(s) · lidos da Kommo em ${g.criado_em}`,
-  ].join("\n");
-  const corpo = g.arquivos.map((a, i) => {
-    const paginas = a.paginas > 0 ? ` (${a.paginas} páginas)` : "";
-    return `\n\n=== ARQUIVO ${i + 1}/${g.arquivos.length}: ${a.nome}${paginas} ===\n\n${a.texto}`;
-  });
-  return cabeca + corpo.join("");
-}
-
 async function buscarAutos(codigo: string) {
   const db = serviceClient();
   const limite = Date.now() + ESPERA_TOTAL_MS;
@@ -163,13 +111,13 @@ async function buscarAutos(codigo: string) {
             "Clique de novo em “Executar análise” na plataforma Credijuris para abrir uma conversa nova.",
         );
       }
-      const g = data as unknown as Guardado;
+      const g = data as unknown as AutosGuardados;
       if (Array.isArray(g.arquivos) && g.arquivos.length > 0) {
         await db
           .from("analise_externa_autos")
           .update({ lido_em: new Date().toISOString() })
           .eq("codigo", codigo);
-        return { content: [{ type: "text", text: textoDosAutos(g) }] };
+        return { content: [{ type: "text", text: montarEntrega(g) }] };
       }
     }
 
@@ -198,7 +146,8 @@ async function despachar(msg: any): Promise<unknown | null> {
         instructions:
           "Este conector entrega os autos de um crédito da Credijuris, junto com o roteiro de qualificação " +
           "jurídica preliminar que a casa segue. Quando a pergunta trouxer um código de análise, chame " +
-          "`autos_do_credito` com ele antes de responder e siga o roteiro que vier no resultado.",
+          "`autos_do_credito` com ele antes de responder, siga o roteiro que vier no resultado e " +
+          "escreva a análise na própria conversa, sem gerar arquivo nenhum.",
       });
     }
     case "ping":
