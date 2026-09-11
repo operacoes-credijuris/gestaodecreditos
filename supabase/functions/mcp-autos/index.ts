@@ -23,6 +23,7 @@
 // endpoint não servir de sonda.
 
 import { serviceClient } from "../_shared/auth.ts";
+import { ROTEIRO_QUALIFICACAO } from "../_shared/roteiroQualificacao.ts";
 
 // O aplicativo manda cabeçalhos próprios do MCP; sem eles no preflight, o
 // navegador que hospeda a conversa recusa a chamada antes de sair.
@@ -51,8 +52,8 @@ const FERRAMENTA = {
   name: "autos_do_credito",
   title: "Autos do crédito",
   description:
-    "Devolve o texto integral dos autos (os PDFs anexados ao card do Kommo) de um crédito que a plataforma Credijuris pôs em análise. " +
-    "Use sempre que a pergunta trouxer um código de análise da Credijuris — os autos são a fonte da análise e devem ser lidos antes de qualquer conclusão. " +
+    "Devolve os autos de um crédito que a plataforma Credijuris pôs em análise — o texto integral dos PDFs anexados ao card do Kommo — E MAIS o roteiro da qualificação jurídica preliminar que a casa usa, que deve ser seguido à risca. " +
+    "Use sempre que a pergunta trouxer um código de análise da Credijuris: os autos são a única fonte factual da análise e o roteiro é o método. " +
     "O código de 36 caracteres vem na própria pergunta que abriu a conversa.",
   inputSchema: {
     type: "object",
@@ -96,10 +97,42 @@ type Guardado = {
   criado_em: string;
 };
 
-/** Monta o que o modelo vai ler: um cabeçalho curto e os arquivos inteiros, na ordem. */
+/**
+ * O que o modelo vai ler, em três partes e nesta ordem: o MÉTODO, o CADASTRO e
+ * os AUTOS.
+ *
+ * O ROTEIRO VEM PRIMEIRO de propósito. Ele diz o que fazer com o que vem
+ * depois — que fases percorrer, que eixos varrer, o que é proibido afirmar sem
+ * fonte. Chegando junto com os autos, ele vale para qualquer conversa e para
+ * qualquer pessoa da operação, sem ninguém precisar lembrar de colá-lo nem de
+ * abrir a conversa no projeto certo.
+ *
+ * O CADASTRO VEM SEPARADO DOS AUTOS, e rotulado como cadastro. O título do card
+ * é o que o comercial escreveu, não o que o processo diz — e o roteiro exige
+ * documento e página para cada campo da ficha. Misturar os dois seria oferecer
+ * cadastro como prova, que é exatamente o que a regra de ancoragem proíbe.
+ */
 function textoDosAutos(g: Guardado): string {
   const cabeca = [
-    `AUTOS DO CRÉDITO — ${g.titulo || "(card sem título)"}`,
+    ROTEIRO_QUALIFICACAO,
+    "",
+    "---",
+    "",
+    "## DADOS DO CARD (cadastro do comercial — NÃO é fonte documental)",
+    "",
+    "O título do card segue o formato `[intermediador] - [cedente] - [nº CNJ] - " +
+      "[parcela cedida] - [% de honorários contratuais]`, e neste crédito está assim:",
+    "",
+    `> ${g.titulo || "(card sem título)"}`,
+    "",
+    "Use-o para preencher o que puder do bloco [0]. Ele NÃO substitui os autos em",
+    "nenhum campo da Ficha de Identificação: divergência entre o card e os autos é,",
+    "ela própria, achado a registrar.",
+    "",
+    "---",
+    "",
+    "## AUTOS ANEXOS",
+    "",
     `Card Kommo ${g.lead_id} · ${g.arquivos.length} arquivo(s) · lidos da Kommo em ${g.criado_em}`,
   ].join("\n");
   const corpo = g.arquivos.map((a, i) => {
@@ -163,8 +196,9 @@ async function despachar(msg: any): Promise<unknown | null> {
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVIDOR,
         instructions:
-          "Este conector entrega os autos de um crédito da Credijuris. Quando a pergunta trouxer um código de análise, " +
-          "chame `autos_do_credito` com ele antes de responder.",
+          "Este conector entrega os autos de um crédito da Credijuris, junto com o roteiro de qualificação " +
+          "jurídica preliminar que a casa segue. Quando a pergunta trouxer um código de análise, chame " +
+          "`autos_do_credito` com ele antes de responder e siga o roteiro que vier no resultado.",
       });
     }
     case "ping":

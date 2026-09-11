@@ -27,6 +27,26 @@ describe('promptDaAnaliseExterna', () => {
     expect(promptDaAnaliseExterna(t)).toContain('0% de honorários contratuais')
   })
 
+  /**
+   * QUANDO O QUE SE CEDE JÁ É O HONORÁRIO, o sufixo repetia a parcela: saía
+   * "Honorários contratuais - 30% de honorários contratuais". Sai na tela de
+   * quem opera e na primeira linha da conversa — e uma frase que se repete é
+   * uma frase em que se confia menos.
+   */
+  it('parcela de honorários não repete a palavra no percentual', () => {
+    const t = lerTituloCard(
+      'Dr. Gabriel Perin - Kauá Henrique Silva Barros - 5012860-38.2023.4.03.6105 - Honorários contratuais - 30%',
+    )
+    expect(promptDaAnaliseExterna(t)).toBe(
+      'executar análise de crédito: Kauá Henrique Silva Barros - Honorários contratuais - 30%',
+    )
+  })
+
+  it('parcela que não é honorário mantém o complemento', () => {
+    const t = lerTituloCard('CBR - Fulano - 1006377-08.2020.4.01.3814 - Crédito principal - 30%')
+    expect(promptDaAnaliseExterna(t)).toContain('30% de honorários contratuais')
+  })
+
   it('a vírgula do decimal volta na mensagem', () => {
     const t = lerTituloCard('CBR - Fulano - 1006377-08.2020.4.01.3814 - principal - 12,5%')
     expect(promptDaAnaliseExterna(t)).toContain('12,5% de honorários contratuais')

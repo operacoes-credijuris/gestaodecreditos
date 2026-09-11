@@ -65,10 +65,15 @@ export function promptDaAnaliseExterna(
   codigo = '',
 ): string {
   const pct = String(dados.honorariosPct ?? '').trim()
+  const parcela = String(dados.parcelaCedida ?? '').trim()
+  // A PARCELA CEDIDA JÁ PODE SER A VERBA DE HONORÁRIOS, e aí o sufixo repete o
+  // que ela acabou de dizer: "Honorários contratuais - 30% de honorários
+  // contratuais". Quando ela fala de honorário, o percentual entra sozinho.
+  const sufixo = /honor/i.test(parcela) ? '' : ' de honorários contratuais'
   // "0" é informação: quer dizer cessão sem honorário contratual, e some num
   // teste de string vazia se ele for feito com truthy.
-  const comPct = pct !== '' ? `${pct.replace('.', ',')}% de honorários contratuais` : ''
-  const partes = [dados.cedente, dados.parcelaCedida, comPct]
+  const comPct = pct !== '' ? `${pct.replace('.', ',')}%${sufixo}` : ''
+  const partes = [dados.cedente, parcela, comPct]
     .map((p) => String(p ?? '').trim())
     .filter(Boolean)
   const cabeca = 'executar análise de crédito: ' + partes.join(' - ')
