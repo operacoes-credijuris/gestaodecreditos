@@ -284,15 +284,18 @@ describe('abas da trilha Externa', () => {
     expect(nomes).not.toContain('AGUARDANDO PRECIFICAÇÃO')
   })
 
+  /** As duas etapas em que a casa decide algo — as demais são de espera. */
+  const DECISORIAS = ['Qualificação Preliminar', 'Revisão']
+
   /**
-   * O DESFECHO DO EXTERNO MORA NA QUALIFICAÇÃO, e só nela.
+   * O DESFECHO DO EXTERNO MORA NAS DUAS ETAPAS DE DECISÃO.
    *
-   * É a única etapa em que a casa decide algo: dali o crédito segue para o
-   * fundo, volta para diligência ou é recusado. Depois de encaminhado quem move
-   * o card é o fundo, e o parecer é dele — oferecer desfecho adiante seria
-   * decidir no lugar de quem decide.
+   * A qualificação é dos analistas e a revisão é de quem decide — são os dois
+   * pontos em que a casa diz alguma coisa sobre o crédito. Depois de encaminhado
+   * quem move o card é o fundo, e o parecer é dele: oferecer desfecho adiante
+   * seria decidir no lugar de quem decide.
    */
-  it('só a Qualificação oferece desfecho, e são as três saídas', () => {
+  it('a Qualificação oferece as três saídas', () => {
     const qualificacao = abas.find((a) => a.label === 'Qualificação Preliminar')!
     expect(qualificacao.acoes.map((x) => x.papel)).toEqual([
       'aprovar',
@@ -320,8 +323,33 @@ describe('abas da trilha Externa', () => {
     expect(aprovar.label).toBe('Aprovar e enviar para Revisão')
   })
 
+  /**
+   * NA REVISÃO A APROVAÇÃO ENCAMINHA DE VERDADE — é a segunda leitura, e depois
+   * dela não há terceira. As outras duas saídas são as mesmas: quem revisa
+   * também pode exigir diligência ou recusar.
+   */
+  it('a Revisão oferece as três saídas, e aprova para os fundos', () => {
+    const revisao = abas.find((a) => a.label === 'Revisão')!
+    expect(revisao.acoes.map((x) => x.papel)).toEqual(['aprovar', 'diligenciar', 'reprovar'])
+    const porPapel = new Map(revisao.acoes.map((a) => [a.papel, a.statusId]))
+    expect(porPapel.get('aprovar')).toBe(idDe('ENCAMINHAR AOS FUNDOS'))
+    expect(porPapel.get('diligenciar')).toBe(idDe('DILIGÊNCIA'))
+    expect(porPapel.get('reprovar')).toBe(idDe('REPROVADOS'))
+  })
+
+  /**
+   * AQUI O RÓTULO NÃO DIZ O DESTINO, e é de propósito: o derivado sairia
+   * "Aprovar e enviar para Aprovados", que gagueja e não informa nada. O nome do
+   * destino só precisa ser dito quando ele SURPREENDE — como na qualificação,
+   * onde aprovar manda para a revisão.
+   */
+  it('na Revisão o botão é só "Aprovar crédito"', () => {
+    const revisao = abas.find((a) => a.label === 'Revisão')!
+    expect(revisao.acoes.find((x) => x.papel === 'aprovar')!.label).toBe('Aprovar crédito')
+  })
+
   it('as demais abas do Externo não oferecem desfecho', () => {
-    for (const aba of abas.filter((a) => a.label !== 'Qualificação Preliminar')) {
+    for (const aba of abas.filter((a) => !DECISORIAS.includes(a.label))) {
       expect(aba.acoes, aba.label).toEqual([])
     }
   })
@@ -331,11 +359,9 @@ describe('abas da trilha Externa', () => {
    * conversa com o Claude; três botões soltos no card convidariam o clique antes
    * do texto, e o texto é o único registro que aquela análise deixa no CRM.
    */
-  it('a Qualificação marca o desfecho como agrupado', () => {
-    const qualificacao = abas.find((a) => a.label === 'Qualificação Preliminar')!
-    expect(qualificacao.desfechoAgrupado).toBe(true)
-    for (const aba of abas.filter((a) => a.label !== 'Qualificação Preliminar')) {
-      expect(aba.desfechoAgrupado, aba.label).toBe(false)
+  it('as duas etapas de decisão marcam o desfecho como agrupado', () => {
+    for (const aba of abas) {
+      expect(aba.desfechoAgrupado, aba.label).toBe(DECISORIAS.includes(aba.label))
     }
   })
 

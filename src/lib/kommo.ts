@@ -122,6 +122,16 @@ export interface DefAbaPrecatorio {
    * oferece saída nenhuma — é etapa de espera, onde quem move o card é o fundo.
    */
   aprovaPara?: string
+  /**
+   * O rótulo do botão de aprovar, quando o derivado não serve.
+   *
+   * O PADRÃO É DIZER O DESTINO — "Aprovar e enviar para Revisão" —, e ele existe
+   * porque "Aprovar crédito" sozinho não deixava claro para onde o card ia. Mas
+   * quando o destino é a própria coluna de aprovados, o derivado gagueja
+   * ("enviar para Aprovados") e a redundância não informa nada: ali o verbo já
+   * diz tudo.
+   */
+  rotuloAprovar?: string
 }
 
 export interface DefSubdivisao {
@@ -267,6 +277,12 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
         label: 'Revisão',
         colunaKommo: 'REVISÃO DA QUALIFICAÇÃO',
         descricaoVazia: 'Nenhuma qualificação aguardando revisão.',
+        // AQUI A APROVAÇÃO ENCAMINHA DE VERDADE. É a segunda leitura, feita por
+        // quem decide; aprovada nela, o crédito segue para o fundo. As outras
+        // duas saídas são as mesmas da qualificação — quem revisa também pode
+        // exigir diligência ou recusar, e aí não há terceira leitura.
+        aprovaPara: 'ENCAMINHAR AOS FUNDOS',
+        rotuloAprovar: 'Aprovar crédito',
       },
       {
         key: 'ext-encaminhar',
@@ -798,11 +814,12 @@ export function abasDoFunil(
    * para aprovados? Como o destino é o nome de uma coluna que costuma ser
    * também uma aba da tela, o rótulo sai dela e continua certo se o fluxo mudar.
    */
-  const rotuloDaAprovacao = (destino: string): string => {
-    const aba = def.abas.find(
-      (a) => normalizarBusca(a.colunaKommo) === normalizarBusca(destino),
+  const rotuloDaAprovacao = (aba: DefAbaPrecatorio): string => {
+    if (aba.rotuloAprovar) return aba.rotuloAprovar
+    const destino = def.abas.find(
+      (x) => normalizarBusca(x.colunaKommo) === normalizarBusca(aba.aprovaPara ?? ''),
     )
-    return aba ? `Aprovar e enviar para ${aba.label}` : 'Aprovar crédito'
+    return destino ? `Aprovar e enviar para ${destino.label}` : 'Aprovar crédito'
   }
 
   const desfechos = (aba: DefAbaPrecatorio): AcaoTela[] => {
@@ -816,7 +833,7 @@ export function abasDoFunil(
     if (idAprovados !== undefined) {
       saida.push({
         statusId: idAprovados,
-        label: rotuloDaAprovacao(aba.aprovaPara!),
+        label: rotuloDaAprovacao(aba),
         variant: 'primary',
         papel: 'aprovar',
       })
