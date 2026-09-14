@@ -677,21 +677,29 @@ function JanelaDeMensagem({
               {acoes.length === 1 ? 'Confirmar' : acao.label}
             </Button>
           ))}
-          <button
-            type="button"
-            // A MESMA CHECAGEM DO X, DO OVERLAY E DO ESC. O `dirty` do Modal só
-            // protege aquelas três portas; este botão chamava `onFechar` direto e
-            // descartava o texto digitado sem perguntar — e é o botão que está
-            // mais perto do cursor de quem acabou de escrever.
-            onClick={() => {
-              if (mensagem.trim() !== sugestao.trim() && !window.confirm('Descartar alterações não salvas?')) return
-              onFechar()
-            }}
-            disabled={trabalhando}
-            className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
-          >
-            cancelar
-          </button>
+          {/* O CANCELAR SÓ ONDE HÁ UMA SAÍDA. Com três decisões no rodapé, um
+              quarto controle que NÃO é decisão disputa a mesma linha e o mesmo
+              olhar — e a saída sem consequência já existe no X do topo, no Esc e
+              no clique fora, todos com a mesma pergunta sobre texto não salvo.
+              Com uma saída só o par Confirmar/cancelar continua, que é a forma
+              que quem usa a tela já conhece. */}
+          {acoes.length === 1 && (
+            <button
+              type="button"
+              // A MESMA CHECAGEM DO X, DO OVERLAY E DO ESC. O `dirty` do Modal só
+              // protege aquelas três portas; este botão chamava `onFechar` direto e
+              // descartava o texto digitado sem perguntar — e é o botão que está
+              // mais perto do cursor de quem acabou de escrever.
+              onClick={() => {
+                if (mensagem.trim() !== sugestao.trim() && !window.confirm('Descartar alterações não salvas?')) return
+                onFechar()
+              }}
+              disabled={trabalhando}
+              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
+            >
+              cancelar
+            </button>
+          )}
         </div>
       }
     >
@@ -1021,7 +1029,13 @@ function CardCredito({
           {botoes === 'dd' && onConcluir && (
             <Button
               size="sm"
-              variant="secondary"
+              // O AZUL DA MARCA, e não o `secondary` de "Executar análise": os
+              // dois saíam em slate-800 e viravam o mesmo botão repetido, com
+              // rótulos diferentes. Três ações lado a lado precisam de três
+              // pesos — o contorno branco da diligência, o escuro da análise e
+              // este, que é o que FECHA a etapa. Verde ficaria errado: concluir
+              // também é recusar.
+              variant="primary"
               icon={<CheckCircle2 className="h-4 w-4" />}
               onClick={() => onConcluir(lead)}
               disabled={ocupado}

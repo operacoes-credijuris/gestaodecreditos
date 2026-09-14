@@ -300,9 +300,24 @@ describe('abas da trilha Externa', () => {
       'reprovar',
     ])
     const porPapel = new Map(qualificacao.acoes.map((a) => [a.papel, a.statusId]))
-    expect(porPapel.get('aprovar')).toBe(idDe('ENCAMINHAR AOS FUNDOS'))
+    // APROVAR AQUI E PEDIR REVISAO, e nao encaminhar ao fundo: quem trabalha
+    // nesta etapa sao os analistas, e a decisao de mandar o credito para fora e
+    // de quem revisa. Interromper — diligencia e recusa — passa direto.
+    expect(porPapel.get('aprovar')).toBe(idDe('REVISÃO DA QUALIFICAÇÃO'))
     expect(porPapel.get('diligenciar')).toBe(idDe('DILIGÊNCIA'))
     expect(porPapel.get('reprovar')).toBe(idDe('REPROVADOS'))
+  })
+
+  /**
+   * O RÓTULO DIZ PARA ONDE LEVA, e isso não é preciosismo: "Aprovar crédito"
+   * sozinho já gerou a pergunta certa de quem opera — vai para revisão ou para
+   * aprovados? O texto sai do rótulo da aba de destino, então continua verdadeiro
+   * se o fluxo mudar.
+   */
+  it('a aprovação diz no rótulo para onde o card vai', () => {
+    const qualificacao = abas.find((a) => a.label === 'Qualificação Preliminar')!
+    const aprovar = qualificacao.acoes.find((x) => x.papel === 'aprovar')!
+    expect(aprovar.label).toBe('Aprovar e enviar para Revisão')
   })
 
   it('as demais abas do Externo não oferecem desfecho', () => {
@@ -329,7 +344,7 @@ describe('abas da trilha Externa', () => {
   it('saída sem coluna no kanban simplesmente não aparece', () => {
     const sem = espelho(
       COLUNAS_INTERNO,
-      COLUNAS_EXTERNO.filter((n) => n !== 'ENCAMINHAR AOS FUNDOS'),
+      COLUNAS_EXTERNO.filter((n) => n !== 'REVISÃO DA QUALIFICAÇÃO'),
     )
     const qualificacao = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, sem, 'externo').find(
       (a) => a.key === 'ext-qualificacao',

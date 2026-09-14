@@ -106,6 +106,22 @@ export interface DefAbaPrecatorio {
   /** Nome da coluna no kanban do Kommo, como está escrito lá. */
   colunaKommo: string
   descricaoVazia: string
+  /**
+   * Para onde vai o crédito APROVADO nesta etapa — o nome da coluna no kanban.
+   *
+   * É DA ETAPA, E NÃO DA TRILHA, e a diferença é o fluxo de trabalho real: quem
+   * está na qualificação são os analistas, e a aprovação deles não encaminha
+   * nada — manda para a REVISÃO de quem decide. A mesma palavra, "aprovar",
+   * significa destinos diferentes conforme quem a aperta.
+   *
+   * Diligência e reprovação não seguem essa regra: elas interrompem, e
+   * interromper leva sempre ao mesmo lugar (ver `colunaDiligencia` e
+   * `colunaReprovados`, que são da trilha).
+   *
+   * É TAMBÉM O QUE DIZ QUE A ETAPA TEM DESFECHO. Aba sem `aprovaPara` não
+   * oferece saída nenhuma — é etapa de espera, onde quem move o card é o fundo.
+   */
+  aprovaPara?: string
 }
 
 export interface DefSubdivisao {
@@ -124,15 +140,6 @@ export interface DefSubdivisao {
   colunaDiligencia: string
   /** A coluna de reprovação desta trilha, pelo nome no kanban. */
   colunaReprovados: string
-  /**
-   * A coluna para onde vai o crédito APROVADO, quando a trilha tem uma.
-   *
-   * O INTERNO NÃO TEM, e a ausência é antiga e deliberada: qual coluna significa
-   * "aprovado" no precatório interno ninguém definiu, e adivinhar seria mover
-   * card de verdade com base em palpite. No Externo foi definida — é a coluna
-   * para onde o crédito segue quando a qualificação o aprova.
-   */
-  colunaAprovados?: string
   abas: DefAbaPrecatorio[]
 }
 
@@ -160,15 +167,10 @@ const ABAS_INTERNO_COM_DESFECHO: ReadonlySet<string> = new Set([
   'int-validacao',
 ])
 
-/**
- * A aba do Externo de onde o crédito sai por decisão nossa.
- *
- * SÓ A QUALIFICAÇÃO, porque é a única etapa da trilha em que a casa decide algo:
- * dali o crédito segue para o fundo, volta para diligência ou é recusado. Depois
- * de encaminhado quem move o card é o fundo, e o parecer é dele — oferecer
- * desfecho ali seria decidir no lugar de quem decide.
- */
-const ABAS_EXTERNO_COM_DESFECHO: ReadonlySet<string> = new Set(['ext-qualificacao'])
+// QUE ABAS DO EXTERNO TÊM DESFECHO é dito por `aprovaPara`, na própria aba —
+// não há lista separada. Uma lista teria de ser mantida em sincronia com os
+// destinos, e a primeira vez que alguém acrescentasse uma etapa decisória sem
+// atualizar as duas, a etapa apareceria muda.
 
 // AS COLUNAS DE DESFECHO AGORA SÃO DE CADA TRILHA (ver DefSubdivisao), e não
 // mais duas constantes deste arquivo. O funil novo do externo renomeou
@@ -248,13 +250,17 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
     // "REPROVADOS", e não "Reprovados Operacional": o funil novo encurtou o
     // nome, e o antigo continua com o dele na trilha de cima.
     colunaReprovados: 'REPROVADOS',
-    colunaAprovados: 'ENCAMINHAR AOS FUNDOS',
     abas: [
       {
         key: 'ext-qualificacao',
         label: 'Qualificação Preliminar',
         colunaKommo: 'QUALIFICAÇÃO PRELIMINAR',
         descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
+        // APROVAR AQUI É PEDIR REVISÃO, e não encaminhar ao fundo. Quem trabalha
+        // nesta etapa são os analistas; a decisão de mandar o crédito para fora
+        // é de quem revisa. Recusar e exigir diligência, ao contrário, passam
+        // direto — essas não precisam de segunda leitura.
+        aprovaPara: 'REVISÃO DA QUALIFICAÇÃO',
       },
       {
         key: 'ext-revisao',
@@ -782,23 +788,35 @@ export function abasDoFunil(
   // pipelines diferentes durante a migração.
   const nomes = porNomeDeColuna(def.pipelineId, etapas)
 
-  const oferece = (abaKey: string): boolean =>
-    def.key === 'interno'
-      ? ABAS_INTERNO_COM_DESFECHO.has(abaKey)
-      : ABAS_EXTERNO_COM_DESFECHO.has(abaKey)
+  const oferece = (aba: DefAbaPrecatorio): boolean =>
+    def.key === 'interno' ? ABAS_INTERNO_COM_DESFECHO.has(aba.key) : Boolean(aba.aprovaPara)
 
-  const desfechos = (abaKey: string): AcaoTela[] => {
-    if (!oferece(abaKey)) return []
+  /**
+   * O rótulo da aprovação DIZ PARA ONDE ELA LEVA.
+   *
+   * "Aprovar crédito" sozinho já causou a pergunta certa — vai para revisão ou
+   * para aprovados? Como o destino é o nome de uma coluna que costuma ser
+   * também uma aba da tela, o rótulo sai dela e continua certo se o fluxo mudar.
+   */
+  const rotuloDaAprovacao = (destino: string): string => {
+    const aba = def.abas.find(
+      (a) => normalizarBusca(a.colunaKommo) === normalizarBusca(destino),
+    )
+    return aba ? `Aprovar e enviar para ${aba.label}` : 'Aprovar crédito'
+  }
+
+  const desfechos = (aba: DefAbaPrecatorio): AcaoTela[] => {
+    if (!oferece(aba)) return []
     const saida: AcaoTela[] = []
     // A APROVAÇÃO VEM PRIMEIRO onde ela existe: é o desfecho que se busca, e a
     // diligência é o desvio. Mesma ordem das abas.
-    const idAprovados = def.colunaAprovados
-      ? nomes.get(normalizarBusca(def.colunaAprovados))
+    const idAprovados = aba.aprovaPara
+      ? nomes.get(normalizarBusca(aba.aprovaPara))
       : undefined
     if (idAprovados !== undefined) {
       saida.push({
         statusId: idAprovados,
-        label: 'Aprovar crédito',
+        label: rotuloDaAprovacao(aba.aprovaPara!),
         variant: 'primary',
         papel: 'aprovar',
       })
@@ -835,11 +853,11 @@ export function abasDoFunil(
       // colunasPrecatorioDesalinhadas, no topo da tela.
       statusIds: statusId === undefined ? [] : [statusId],
       descricaoVazia: a.descricaoVazia,
-      acoes: desfechos(a.key),
-      // NO EXTERNO OS TRÊS SAEM DE UM BOTÃO SÓ — ver `desfechoAgrupado`: a
+      acoes: desfechos(a),
+      // NO EXTERNO AS SAÍDAS SAEM DE UM BOTÃO SÓ — ver `desfechoAgrupado`: a
       // análise aconteceu fora daqui, e o que a plataforma precisa guardar é a
       // razão escrita por quem voltou dela.
-      desfechoAgrupado: def.key === 'externo' && ABAS_EXTERNO_COM_DESFECHO.has(a.key),
+      desfechoAgrupado: def.key === 'externo' && oferece(a),
     }
   })
 }
