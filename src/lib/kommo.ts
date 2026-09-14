@@ -434,9 +434,30 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
 const POR_PAGINA = 1000
 const MAX_PAGINAS = 20
 
+/**
+ * Os funis de onde a tela precisa buscar cards com este tipo de crédito aberto.
+ *
+ * QUASE SEMPRE É UM SÓ, e no Precatório são dois. As trilhas foram separadas em
+ * pipelines próprios, mas para quem olha a tela "Precatórios" continua sendo UMA
+ * aba com uma pílula dentro — então o que a consulta precisa trazer é o card das
+ * duas, não o do funil que serve de chave para a aba de cima.
+ *
+ * ERA ESTE O DEFEITO: buscar por um id só deixava a trilha Externa sem card
+ * nenhum, com as abas certas e a lista vazia. Nada acusava — lista vazia se lê
+ * como "não tem trabalho aqui", que é exatamente o que o funil novo parecia
+ * dizer depois de sincronizado.
+ */
+export function funisExibidos(pipelineId: number): number[] {
+  if (!ehFunilPrecatorio(pipelineId)) return [pipelineId]
+  return [...new Set(SUBDIVISOES_PRECATORIO.map((s) => s.pipelineId))]
+}
+
 export function useKommoLeads(pipelineId: number) {
+  const funis = funisExibidos(pipelineId)
   return useQuery({
-    queryKey: ['kommo_leads', pipelineId],
+    // A CHAVE CARREGA OS DOIS IDS: com a chave antiga, trocar de tipo de crédito
+    // reaproveitaria o cache de uma consulta que trouxe outro conjunto de funis.
+    queryKey: ['kommo_leads', funis.join(',')],
     queryFn: async () => {
       const todos: KommoLead[] = []
       for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
@@ -444,7 +465,7 @@ export function useKommoLeads(pipelineId: number) {
         const { data, error } = await supabase
           .from('kommo_leads')
           .select('*')
-          .eq('pipeline_id', pipelineId)
+          .in('pipeline_id', funis)
           .order('atualizado_em', { ascending: false })
           .order('kommo_lead_id', { ascending: false })
           .range(de, de + POR_PAGINA - 1)

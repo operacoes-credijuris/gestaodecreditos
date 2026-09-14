@@ -25,6 +25,7 @@ import {
   FUNIL_PRECATORIO,
   FUNIL_PRECATORIO_EXTERNO,
   FUNIL_RPV,
+  funisExibidos,
   SUBDIVISOES_PRECATORIO,
   ST_ANALISE,
   ST_DECISAO,
@@ -124,6 +125,28 @@ describe('SUBDIVISOES_PRECATORIO', () => {
     expect(ehFunilPrecatorio(FUNIL_PRECATORIO_EXTERNO)).toBe(true)
     expect(ehFunilPrecatorio(FUNIL_RPV)).toBe(false)
     expect(ehFunilPrecatorio(999)).toBe(false)
+  })
+
+  /**
+   * A CONSULTA DE CARDS TEM DE COBRIR OS DOIS FUNIS.
+   *
+   * Foi o defeito que a separação criou e que nada acusava: as abas do Externo
+   * resolviam certo, e a lista vinha vazia porque os cards eram buscados por um
+   * id só — o da aba de cima, que é o funil antigo. Lista vazia se lê como "não
+   * tem trabalho aqui".
+   */
+  it('a tela busca cards dos dois funis quando o Precatório está aberto', () => {
+    expect(new Set(funisExibidos(FUNIL_PRECATORIO))).toEqual(
+      new Set([FUNIL_PRECATORIO, FUNIL_PRECATORIO_EXTERNO]),
+    )
+    expect(new Set(funisExibidos(FUNIL_PRECATORIO_EXTERNO))).toEqual(
+      new Set([FUNIL_PRECATORIO, FUNIL_PRECATORIO_EXTERNO]),
+    )
+  })
+
+  it('fora do Precatório, busca só o funil aberto', () => {
+    expect(funisExibidos(FUNIL_RPV)).toEqual([FUNIL_RPV])
+    expect(funisExibidos(999)).toEqual([999])
   })
 
   it('não repete chave de aba entre as trilhas', () => {
