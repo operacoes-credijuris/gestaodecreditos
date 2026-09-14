@@ -28,7 +28,18 @@ import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
 
 const FUNIL_RPV = 13901939
 const FUNIL_PRECATORIO = 13971995
-const FUNIS = [FUNIL_RPV, FUNIL_PRECATORIO]
+// OS DOIS FUNIS NOVOS DE PRECATÓRIO, criados em 14/09/2026 para separar o que
+// antes convivia num pipeline só — a trilha interna e a externa. Entram aqui
+// antes de qualquer outra coisa porque NADA da tela funciona sem isto: o
+// espelho das colunas é filtrado por esta lista (`FUNIS.includes(p.id)`), e os
+// cards também são buscados por ela. Sem estes dois ids, os funis novos não
+// existem para a plataforma.
+const FUNIL_PRECATORIO_INTERNO = 14439512;
+const FUNIL_PRECATORIO_EXTERNO = 14439516;
+// O FUNIL ANTIGO CONTINUA NA LISTA POR ENQUANTO. Ele foi dado por encerrado,
+// mas tirá-lo agora deixaria de atualizar cards que talvez ainda estejam lá —
+// e o espelho deles some da tela sem aviso. Sai quando a migração terminar.
+const FUNIS = [FUNIL_RPV, FUNIL_PRECATORIO, FUNIL_PRECATORIO_INTERNO, FUNIL_PRECATORIO_EXTERNO];
 
 // Margem confortável abaixo do teto de 7/s.
 const INTERVALO_MS = 160
