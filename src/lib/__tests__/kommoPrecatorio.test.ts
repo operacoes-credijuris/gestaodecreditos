@@ -206,6 +206,18 @@ describe('abas do Interno', () => {
     }
   })
 
+  /**
+   * O INTERNO CONTINUA SEM APROVAÇÃO, e isso não é esquecimento: qual coluna
+   * significa "aprovado" no precatório interno ninguém definiu, e adivinhar seria
+   * mover card de verdade com base em palpite. O Externo ganhou a sua porque lá
+   * ela foi definida — este teste existe para que a de lá não vaze para cá.
+   */
+  it('nenhuma aba do Interno oferece aprovação', () => {
+    for (const aba of abas) {
+      expect(aba.acoes.some((x) => x.papel === 'aprovar'), aba.label).toBe(false)
+    }
+  })
+
   // Das terminais o card não volta pelo app: de Aprovados e Reprovados não se
   // sai, e a diligência quem devolve é o comercial, pelo Kommo.
   it('as abas terminais não oferecem desfecho', () => {
@@ -234,7 +246,7 @@ describe('abas da trilha Externa', () => {
     expect(abas.map((a) => a.label)).toEqual([
       'Qualificação Preliminar',
       'Revisão',
-      'Encaminhar',
+      'Aprovados',
       'Diligência',
       'Reprovados',
       'Apresentação',
@@ -246,7 +258,10 @@ describe('abas da trilha Externa', () => {
     const porLabel = new Map(abas.map((a) => [a.label, a.statusIds[0]]))
     expect(porLabel.get('Qualificação Preliminar')).toBe(idDe('QUALIFICAÇÃO PRELIMINAR'))
     expect(porLabel.get('Revisão')).toBe(idDe('REVISÃO DA QUALIFICAÇÃO'))
-    expect(porLabel.get('Encaminhar')).toBe(idDe('ENCAMINHAR AOS FUNDOS'))
+    // "APROVADOS" AQUI, "ENCAMINHAR AOS FUNDOS" LÁ: o rótulo é o vocabulário de
+    // quem analisa, o nome da coluna é o do comercial. O teste guarda os dois
+    // lados justamente porque eles divergem de propósito.
+    expect(porLabel.get('Aprovados')).toBe(idDe('ENCAMINHAR AOS FUNDOS'))
     expect(porLabel.get('Diligência')).toBe(idDe('DILIGÊNCIA'))
     expect(porLabel.get('Reprovados')).toBe(idDe('REPROVADOS'))
     expect(porLabel.get('Apresentação')).toBe(idDe('PRODUÇÃO DE PROPOSTA'))
@@ -269,10 +284,57 @@ describe('abas da trilha Externa', () => {
     expect(nomes).not.toContain('AGUARDANDO PRECIFICAÇÃO')
   })
 
-  // A trilha Externa não tem desfecho: o parecer é do fundo comprador, e quem
-  // move o card depois de encaminhar é ele.
-  it('nenhuma aba do Externo oferece desfecho', () => {
-    for (const aba of abas) expect(aba.acoes, aba.label).toEqual([])
+  /**
+   * O DESFECHO DO EXTERNO MORA NA QUALIFICAÇÃO, e só nela.
+   *
+   * É a única etapa em que a casa decide algo: dali o crédito segue para o
+   * fundo, volta para diligência ou é recusado. Depois de encaminhado quem move
+   * o card é o fundo, e o parecer é dele — oferecer desfecho adiante seria
+   * decidir no lugar de quem decide.
+   */
+  it('só a Qualificação oferece desfecho, e são as três saídas', () => {
+    const qualificacao = abas.find((a) => a.label === 'Qualificação Preliminar')!
+    expect(qualificacao.acoes.map((x) => x.papel)).toEqual([
+      'aprovar',
+      'diligenciar',
+      'reprovar',
+    ])
+    const porPapel = new Map(qualificacao.acoes.map((a) => [a.papel, a.statusId]))
+    expect(porPapel.get('aprovar')).toBe(idDe('ENCAMINHAR AOS FUNDOS'))
+    expect(porPapel.get('diligenciar')).toBe(idDe('DILIGÊNCIA'))
+    expect(porPapel.get('reprovar')).toBe(idDe('REPROVADOS'))
+  })
+
+  it('as demais abas do Externo não oferecem desfecho', () => {
+    for (const aba of abas.filter((a) => a.label !== 'Qualificação Preliminar')) {
+      expect(aba.acoes, aba.label).toEqual([])
+    }
+  })
+
+  /**
+   * AS TRÊS SAEM DE UM BOTÃO SÓ. A análise acontece fora da plataforma, numa
+   * conversa com o Claude; três botões soltos no card convidariam o clique antes
+   * do texto, e o texto é o único registro que aquela análise deixa no CRM.
+   */
+  it('a Qualificação marca o desfecho como agrupado', () => {
+    const qualificacao = abas.find((a) => a.label === 'Qualificação Preliminar')!
+    expect(qualificacao.desfechoAgrupado).toBe(true)
+    for (const aba of abas.filter((a) => a.label !== 'Qualificação Preliminar')) {
+      expect(aba.desfechoAgrupado, aba.label).toBe(false)
+    }
+  })
+
+  // Sem a coluna no espelho não há saída: melhor a janela com duas do que um
+  // botão que move o card para lugar nenhum.
+  it('saída sem coluna no kanban simplesmente não aparece', () => {
+    const sem = espelho(
+      COLUNAS_INTERNO,
+      COLUNAS_EXTERNO.filter((n) => n !== 'ENCAMINHAR AOS FUNDOS'),
+    )
+    const qualificacao = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, sem, 'externo').find(
+      (a) => a.key === 'ext-qualificacao',
+    )!
+    expect(qualificacao.acoes.map((x) => x.papel)).toEqual(['diligenciar', 'reprovar'])
   })
 })
 

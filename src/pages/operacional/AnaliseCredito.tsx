@@ -35,6 +35,7 @@ import {
   Landmark,
   Receipt,
   Scale,
+  CheckCircle2,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
@@ -570,44 +571,76 @@ type BotoesDoCard = 'rpv' | 'precatorio' | 'dd' | 'nenhum'
  * nota sai sob o nome de quem confirma, e a linha da cessão pede complemento à
  * mão.
  */
+/**
+ * O MOTIVO É EXIGIDO ONDE A DECISÃO INTERROMPE o caminho do crédito.
+ *
+ * Diligência e reprovação mandam o card para trás ou para fora, e quem o recebe
+ * não tem a análise à frente: sem a razão escrita, a movimentação sozinha não
+ * diz nada. Aprovar segue o fluxo esperado e dispensa.
+ */
+const exigeMotivoDe = (acao: AcaoTela): boolean =>
+  acao.papel === 'diligenciar' || acao.papel === 'reprovar'
+
 function JanelaDeMensagem({
   lead,
-  acao,
+  acoes,
+  titulo,
   sugestao,
-  exigeMotivo,
   ocupado,
   onConfirmar,
   onFechar,
 }: {
   lead: KommoLead
-  acao: AcaoTela
+  /**
+   * As saídas oferecidas nesta janela.
+   *
+   * UMA, quase sempre: o botão do card já disse para onde vai, e aqui só se
+   * escreve o porquê. TRÊS na qualificação do precatório externo, onde a análise
+   * aconteceu fora da plataforma e quem volta dela decide entre aprovar, mandar
+   * diligenciar e recusar — com a razão no mesmo campo, escrita uma vez.
+   */
+  acoes: AcaoTela[]
+  titulo: string
   sugestao: string
-  exigeMotivo: boolean
   ocupado: boolean
-  onConfirmar: (mensagem: string) => Promise<void>
+  onConfirmar: (acao: AcaoTela, mensagem: string) => Promise<void>
   onFechar: () => void
 }) {
   const [mensagem, setMensagem] = useState(sugestao)
   const [erro, setErro] = useState<string | null>(null)
+  /** Qual saída está em curso — as outras ficam travadas enquanto isso. */
+  const [emCurso, setEmCurso] = useState<number | null>(null)
+  const exigeMotivo = acoes.some(exigeMotivoDe)
   // APROVAR SEM RESUMO É UM CARD SEM ANÁLISE SALVA.
   //
   // O resumo da oportunidade é gravado no card pelo 'salvar' da análise. Sem
   // ele, a janela de Aprovar abria com o campo VAZIO e o placeholder "Opcional",
   // e o Confirmar liberado: o card subia para Proposta sem uma linha sobre o que
   // se está comprando — que é justamente o que quem recebe precisa ler.
-  const semResumo = acao.papel === 'aprovar' && !lead.oportunidade
+  //
+  // SÓ ONDE HÁ ANÁLISE INTERNA PARA RESUMIR. No precatório externo a análise
+  // acontece fora da plataforma, numa conversa com o Claude, e o card nunca vai
+  // ter `oportunidade` gravada — exigi-la ali travaria a aprovação para sempre.
+  // Lá o que faz as vezes do resumo é o texto que a pessoa escreve nesta janela.
+  const semResumoDe = (acao: AcaoTela): boolean =>
+    acao.papel === 'aprovar' &&
+    !lead.oportunidade &&
+    !ehFunilPrecatorio(lead.pipeline_id)
   // `ocupado` é o `isPending` da MOVIMENTAÇÃO, e ela é só a primeira metade: a
   // nota vem depois, noutra requisição. Nessa fresta o Confirmar voltava a
   // ficar habilitado e sem spinner, e um segundo clique disparava tudo de novo.
   const [enviando, setEnviando] = useState(false)
   const trabalhando = ocupado || enviando
-  const podeEnviar = !trabalhando && (!(exigeMotivo || semResumo) || mensagem.trim().length >= 10)
+  const semTexto = mensagem.trim().length < 10
+  const podeEnviar = (acao: AcaoTela) =>
+    !trabalhando && (!(exigeMotivoDe(acao) || semResumoDe(acao)) || !semTexto)
+  const semResumo = acoes.some(semResumoDe)
 
   return (
     <Modal
       open
       onClose={onFechar}
-      title={acao.label}
+      title={titulo}
       // O CARD EMBAIXO, e não colado no título: são duas informações de peso
       // diferente — o que se vai fazer, e sobre qual crédito. Juntas numa linha
       // só passavam de oitenta caracteres e quebravam o título em duas.
@@ -615,25 +648,35 @@ function JanelaDeMensagem({
       size="lg"
       dirty={mensagem.trim() !== sugestao.trim()}
       footer={
-        <div className="flex items-center gap-2">
-          <Button
-            variant={acao.variant}
-            onClick={async () => {
-              setErro(null)
-              setEnviando(true)
-              try {
-                await onConfirmar(mensagem.trim())
-              } catch (e) {
-                setErro((e as Error)?.message ?? String(e))
-              } finally {
-                setEnviando(false)
-              }
-            }}
-            disabled={!podeEnviar}
-            loading={trabalhando}
-          >
-            Confirmar
-          </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {acoes.map((acao) => (
+            <Button
+              key={acao.statusId}
+              variant={acao.variant}
+              onClick={async () => {
+                setErro(null)
+                setEnviando(true)
+                setEmCurso(acao.statusId)
+                try {
+                  await onConfirmar(acao, mensagem.trim())
+                } catch (e) {
+                  setErro((e as Error)?.message ?? String(e))
+                } finally {
+                  setEnviando(false)
+                  setEmCurso(null)
+                }
+              }}
+              disabled={!podeEnviar(acao)}
+              // O SPINNER NO BOTÃO CLICADO, e não nos três: com `trabalhando`
+              // solto, os outros dois pareceriam estar enviando também.
+              loading={emCurso === acao.statusId || (acoes.length === 1 && trabalhando)}
+            >
+              {/* COM UMA SAÍDA SÓ, "Confirmar": o botão do card já disse o que
+                  vai acontecer, e repetir o rótulo aqui é redundância. Com
+                  três, cada um precisa dizer para onde leva. */}
+              {acoes.length === 1 ? 'Confirmar' : acao.label}
+            </Button>
+          ))}
           <button
             type="button"
             // A MESMA CHECAGEM DO X, DO OVERLAY E DO ESC. O `dirty` do Modal só
@@ -751,6 +794,7 @@ function CardCredito({
   resultadoAnalise,
   onDueDiligence,
   onAnaliseExterna,
+  onConcluir,
   preparoDosAutos,
   onAnaliseJuridica,
   analisandoJuridico,
@@ -771,6 +815,13 @@ function CardCredito({
   onDueDiligence: (l: KommoLead) => void
   /** Abre a conversa da análise no Claude — só no precatório externo. */
   onAnaliseExterna: (l: KommoLead) => void
+  /**
+   * Fecha a etapa: abre a janela com a razão e as saídas possíveis.
+   *
+   * Indefinido nas abas cujo desfecho não é agrupado — lá as saídas continuam
+   * sendo um botão cada, na linha de cima do card.
+   */
+  onConcluir?: (l: KommoLead) => void
   /** Como vai o preparo dos autos deste card, se já foi pedido. */
   preparoDosAutos?: PreparoDosAutos
   onAnaliseJuridica: (l: KommoLead) => void
@@ -959,6 +1010,23 @@ function CardCredito({
               disabled={ocupado}
             >
               Executar análise
+            </Button>
+          )}
+
+          {/* CONCLUIR FECHA A ETAPA, e fica à direita da análise porque é o que
+              vem depois dela: a conversa com o Claude acontece fora daqui, e
+              quem volta precisa registrar o que decidiu e mover o card. Sem este
+              botão, as duas coisas ficavam a cargo de quem opera — dentro do
+              Kommo, à mão, e fora do alcance da plataforma. */}
+          {botoes === 'dd' && onConcluir && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<CheckCircle2 className="h-4 w-4" />}
+              onClick={() => onConcluir(lead)}
+              disabled={ocupado}
+            >
+              Concluir
             </Button>
           )}
 
@@ -1827,7 +1895,11 @@ export default function AnaliseCredito() {
   }, [porAba, abaAtual, busca])
 
   /** O card e o desfecho aguardando a mensagem, quando a decisão vem do card. */
-  const [mensagemDoCard, setMensagemDoCard] = useState<{ lead: KommoLead; acao: AcaoTela } | null>(
+  const [mensagemDoCard, setMensagemDoCard] = useState<{
+    lead: KommoLead
+    acoes: AcaoTela[]
+    titulo: string
+  } | null>(
     null,
   )
 
@@ -1901,7 +1973,20 @@ export default function AnaliseCredito() {
    * sozinha não diz por quê.
    */
   function acionar(lead: KommoLead, acao: AcaoTela) {
-    setMensagemDoCard({ lead, acao })
+    setMensagemDoCard({ lead, acoes: [acao], titulo: acao.label })
+  }
+
+  /**
+   * O desfecho AGRUPADO: um botão, três saídas, uma razão.
+   *
+   * É a qualificação do precatório externo. A análise aconteceu numa conversa
+   * com o Claude, fora daqui, e a plataforma não tem como saber o que foi
+   * decidido — quem volta é que sabe. Três botões soltos no card convidariam o
+   * clique antes do texto, e o texto é o único registro que aquela análise vai
+   * deixar dentro do CRM.
+   */
+  function concluir(lead: KommoLead, acoes: AcaoTela[]) {
+    setMensagemDoCard({ lead, acoes, titulo: 'Concluir a qualificação' })
   }
 
   return (
@@ -2092,7 +2177,16 @@ export default function AnaliseCredito() {
                 key={l.kommo_lead_id}
                 lead={l}
                 acoes={abaAtual?.acoes ?? []}
-                desfechoNoCard={abaAtual?.key !== ABA_RPV_DESFECHO_NA_JANELA}
+                // O AGRUPADO NÃO VAI NA LINHA DE CIMA: ele sai de um botão só,
+                // junto dos outros de trabalho, e não de um botão por saída.
+                desfechoNoCard={
+                  abaAtual?.key !== ABA_RPV_DESFECHO_NA_JANELA && !abaAtual?.desfechoAgrupado
+                }
+                onConcluir={
+                  abaAtual?.desfechoAgrupado && (abaAtual?.acoes.length ?? 0) > 0
+                    ? (l) => concluir(l, abaAtual.acoes)
+                    : undefined
+                }
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria
@@ -2132,30 +2226,31 @@ export default function AnaliseCredito() {
 
       {mensagemDoCard && (
         <JanelaDeMensagem
-          key={`${mensagemDoCard.lead.kommo_lead_id}-${mensagemDoCard.acao.statusId}`}
+          key={`${mensagemDoCard.lead.kommo_lead_id}-${mensagemDoCard.acoes.map((a) => a.statusId).join('-')}`}
           lead={mensagemDoCard.lead}
-          acao={mensagemDoCard.acao}
-          // O RESUMO DA OPORTUNIDADE SÓ NA APROVAÇÃO: é o que a coluna seguinte
-          // precisa para montar a proposta. Numa diligência ou reprovação ele
-          // seria a ficha de um crédito que não vai adiante.
+          acoes={mensagemDoCard.acoes}
+          titulo={mensagemDoCard.titulo}
+          // O RESUMO DA OPORTUNIDADE SÓ NA APROVAÇÃO, e só quando a janela tem
+          // UMA saída: é o que a coluna seguinte precisa para montar a proposta.
+          // Numa diligência ou reprovação ele seria a ficha de um crédito que
+          // não vai adiante — e numa janela de três saídas ele apareceria antes
+          // de a pessoa ter escolhido, sugerindo a aprovação.
           sugestao={
-            mensagemDoCard.acao.papel === 'aprovar' && mensagemDoCard.lead.oportunidade
+            mensagemDoCard.acoes.length === 1 &&
+            mensagemDoCard.acoes[0].papel === 'aprovar' &&
+            mensagemDoCard.lead.oportunidade
               ? resumoDaOportunidade(mensagemDoCard.lead.oportunidade)
               : ''
           }
-          exigeMotivo={
-            mensagemDoCard.acao.papel === 'diligenciar' ||
-            mensagemDoCard.acao.papel === 'reprovar'
-          }
           ocupado={mover.isPending}
-          onConfirmar={async (mensagem) => {
+          onConfirmar={async (acao, mensagem) => {
             setEmAndamento({
               leadId: mensagemDoCard.lead.kommo_lead_id,
-              statusId: mensagemDoCard.acao.statusId,
+              statusId: acao.statusId,
             })
             await moverComNota(
               mensagemDoCard.lead.kommo_lead_id,
-              mensagemDoCard.acao.statusId,
+              acao.statusId,
               mensagem,
             )
             setMensagemDoCard(null)

@@ -124,6 +124,15 @@ export interface DefSubdivisao {
   colunaDiligencia: string
   /** A coluna de reprovação desta trilha, pelo nome no kanban. */
   colunaReprovados: string
+  /**
+   * A coluna para onde vai o crédito APROVADO, quando a trilha tem uma.
+   *
+   * O INTERNO NÃO TEM, e a ausência é antiga e deliberada: qual coluna significa
+   * "aprovado" no precatório interno ninguém definiu, e adivinhar seria mover
+   * card de verdade com base em palpite. No Externo foi definida — é a coluna
+   * para onde o crédito segue quando a qualificação o aprova.
+   */
+  colunaAprovados?: string
   abas: DefAbaPrecatorio[]
 }
 
@@ -150,6 +159,16 @@ const ABAS_INTERNO_COM_DESFECHO: ReadonlySet<string> = new Set([
   'int-precificacao',
   'int-validacao',
 ])
+
+/**
+ * A aba do Externo de onde o crédito sai por decisão nossa.
+ *
+ * SÓ A QUALIFICAÇÃO, porque é a única etapa da trilha em que a casa decide algo:
+ * dali o crédito segue para o fundo, volta para diligência ou é recusado. Depois
+ * de encaminhado quem move o card é o fundo, e o parecer é dele — oferecer
+ * desfecho ali seria decidir no lugar de quem decide.
+ */
+const ABAS_EXTERNO_COM_DESFECHO: ReadonlySet<string> = new Set(['ext-qualificacao'])
 
 // AS COLUNAS DE DESFECHO AGORA SÃO DE CADA TRILHA (ver DefSubdivisao), e não
 // mais duas constantes deste arquivo. O funil novo do externo renomeou
@@ -229,6 +248,7 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
     // "REPROVADOS", e não "Reprovados Operacional": o funil novo encurtou o
     // nome, e o antigo continua com o dele na trilha de cima.
     colunaReprovados: 'REPROVADOS',
+    colunaAprovados: 'ENCAMINHAR AOS FUNDOS',
     abas: [
       {
         key: 'ext-qualificacao',
@@ -244,9 +264,13 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
       },
       {
         key: 'ext-encaminhar',
-        label: 'Encaminhar',
+        // "APROVADOS" NA PLATAFORMA, "ENCAMINHAR AOS FUNDOS" NO KOMMO — e é de
+        // propósito. O rótulo daqui é o vocabulário de quem analisa: o que o ato
+        // significa para a casa é uma aprovação. O nome do kanban é o do
+        // comercial, diz o que acontece DEPOIS, e não muda por causa disto.
+        label: 'Aprovados',
         colunaKommo: 'ENCAMINHAR AOS FUNDOS',
-        descricaoVazia: 'Nenhum precatório a encaminhar.',
+        descricaoVazia: 'Nenhum precatório aprovado.',
       },
       {
         key: 'ext-diligencia',
@@ -547,6 +571,19 @@ export interface Aba {
   statusIds: number[]
   descricaoVazia: string
   acoes: AcaoTela[]
+  /**
+   * Os desfechos desta aba saem de UM botão só, e não de um botão cada.
+   *
+   * QUANDO A DECISÃO VEM DEPOIS DE LER ALGO QUE NÃO ESTÁ AQUI. Na qualificação
+   * do Externo a análise acontece fora da plataforma, numa conversa com o
+   * Claude; quem volta já sabe o que decidiu e precisa registrar POR QUÊ. Três
+   * botões soltos no card convidam o clique antes do texto — e o texto é o
+   * único registro que vai sobrar daquela análise dentro do CRM.
+   *
+   * Então o card oferece "Concluir", e as três saídas ficam na janela, ao lado
+   * do campo em que a razão é escrita.
+   */
+  desfechoAgrupado?: boolean
 }
 
 /**
@@ -745,11 +782,29 @@ export function abasDoFunil(
   // pipelines diferentes durante a migração.
   const nomes = porNomeDeColuna(def.pipelineId, etapas)
 
+  const oferece = (abaKey: string): boolean =>
+    def.key === 'interno'
+      ? ABAS_INTERNO_COM_DESFECHO.has(abaKey)
+      : ABAS_EXTERNO_COM_DESFECHO.has(abaKey)
+
   const desfechos = (abaKey: string): AcaoTela[] => {
-    if (def.key !== 'interno' || !ABAS_INTERNO_COM_DESFECHO.has(abaKey)) return []
+    if (!oferece(abaKey)) return []
+    const saida: AcaoTela[] = []
+    // A APROVAÇÃO VEM PRIMEIRO onde ela existe: é o desfecho que se busca, e a
+    // diligência é o desvio. Mesma ordem das abas.
+    const idAprovados = def.colunaAprovados
+      ? nomes.get(normalizarBusca(def.colunaAprovados))
+      : undefined
+    if (idAprovados !== undefined) {
+      saida.push({
+        statusId: idAprovados,
+        label: 'Aprovar crédito',
+        variant: 'primary',
+        papel: 'aprovar',
+      })
+    }
     const idDiligencia = nomes.get(normalizarBusca(def.colunaDiligencia))
     const idReprovados = nomes.get(normalizarBusca(def.colunaReprovados))
-    const saida: AcaoTela[] = []
     if (idDiligencia !== undefined) {
       saida.push({
         statusId: idDiligencia,
@@ -781,6 +836,10 @@ export function abasDoFunil(
       statusIds: statusId === undefined ? [] : [statusId],
       descricaoVazia: a.descricaoVazia,
       acoes: desfechos(a.key),
+      // NO EXTERNO OS TRÊS SAEM DE UM BOTÃO SÓ — ver `desfechoAgrupado`: a
+      // análise aconteceu fora daqui, e o que a plataforma precisa guardar é a
+      // razão escrita por quem voltou dela.
+      desfechoAgrupado: def.key === 'externo' && ABAS_EXTERNO_COM_DESFECHO.has(a.key),
     }
   })
 }
