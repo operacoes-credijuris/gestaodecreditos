@@ -47,7 +47,8 @@ import {
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABA_JURIDICO,
-  ABA_EXTERNA_COMPARTILHADA,
+  ABAS_EXTERNO_SEM_TRABALHO,
+  ehFunilPrecatorio,
   acaoDeReprovar,
   ehCardExterno,
   abasDoFunil,
@@ -181,15 +182,16 @@ function lerCardCredijuris(lead: KommoLead) {
   //
   // O funil é dado do CRM, não texto livre. É a fonte certa. A linha TIPO passa a
   // servir só para DISCORDAR em voz alta.
-  const categoria =
-    lead.pipeline_id === FUNIL_PRECATORIO
-      ? 'Precatórios'
-      : 'Requisições de Pequeno Valor'
+  // POR `ehFunilPrecatorio`, e não por igualdade com um id: o precatório vive
+  // em mais de um funil desde que as trilhas foram separadas, e comparar com um
+  // número só faria o card do funil novo ser analisado como RPV — com a
+  // categoria errada, a pasta errada no Drive e nenhum sinal na tela.
+  const ehPrecatorio = ehFunilPrecatorio(lead.pipeline_id)
+  const categoria = ehPrecatorio ? 'Precatórios' : 'Requisições de Pequeno Valor'
   const divergenciaTipo =
-    tipo && /precat/i.test(tipo) !== (lead.pipeline_id === FUNIL_PRECATORIO)
-      ? `O card está no funil de ${
-          lead.pipeline_id === FUNIL_PRECATORIO ? 'Precatórios' : 'RPV'
-        }, mas a anotação diz "TIPO: ${tipo.trim()}". Analisei como ${categoria} ` +
+    tipo && /precat/i.test(tipo) !== ehPrecatorio
+      ? `O card está no funil de ${ehPrecatorio ? 'Precatórios' : 'RPV'}, ` +
+        `mas a anotação diz "TIPO: ${tipo.trim()}". Analisei como ${categoria} ` +
         `(o funil manda). Se estiver errado, mova o card no Kommo.`
       : null
 
@@ -1799,7 +1801,7 @@ export default function AnaliseCredito() {
       ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
       : abaAtual?.key === ABA_JURIDICO
         ? 'precatorio'
-        : subdivisao === 'externo' && abaAtual && abaAtual.key !== ABA_EXTERNA_COMPARTILHADA
+        : subdivisao === 'externo' && abaAtual && !ABAS_EXTERNO_SEM_TRABALHO.has(abaAtual.key)
           ? 'dd'
           : 'nenhum'
 
@@ -2228,16 +2230,15 @@ export default function AnaliseCredito() {
           // Certidões só no precatório do INTERNO. Lido do CARD, não do funil
           // nem da pílula abertos: o card guardado no estado é quem manda, e
           // trocar de recorte com a janela aberta não pode mudar as frentes da
-          // diligência em curso — daí `ehCardExterno` responder pelo status_id
-          // e não por `subdivisao`.
+          // diligência em curso — daí `ehCardExterno` responder pelo FUNIL do
+          // card e não por `subdivisao`.
           //
           // NOS FUNDOS SÓ PROCESSOS JUDICIAIS, como em RPV. O checklist de
           // certidões é a diligência documental que precede a NOSSA aquisição;
           // no crédito que vai ao fundo quem a monta é ele, e abrir a aba aqui
           // convidaria a equipe a emitir certidão para um dossiê que não é nosso.
           comCertidoes={
-            ddLead.pipeline_id === FUNIL_PRECATORIO &&
-            !ehCardExterno(ddLead.status_id, etapas.data ?? [])
+            ehFunilPrecatorio(ddLead.pipeline_id) && !ehCardExterno(ddLead.pipeline_id)
           }
           // A RECUSA, no rodapé da janela.
           //

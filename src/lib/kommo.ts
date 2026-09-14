@@ -36,7 +36,28 @@ export const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
 
 // Funis que o operacional usa.
 export const FUNIL_RPV = 13901939
+/**
+ * O funil de Precatórios antigo, hoje só a trilha INTERNA.
+ *
+ * Ele nasceu com as duas destinações dentro, e era isso que obrigava a tela a
+ * adivinhar a trilha pelo NOME da coluna. Em 14/09/2026 a casa separou os
+ * pipelines; o externo já mudou (abaixo) e o interno ainda lê daqui.
+ */
 export const FUNIL_PRECATORIO = 13971995
+/**
+ * O funil do Precatório EXTERNO, criado em 14/09/2026.
+ *
+ * O funil PRÓPRIO é o que faz a trilha deixar de ser um palpite: antes, saber se
+ * um card era externo exigia comparar conjuntos de colunas, e a coluna que
+ * servia às duas trilhas ("Apresentação de Proposta") não tinha resposta — ela
+ * contava como interna por convenção. Agora a pergunta é o pipeline do card, e
+ * pipeline não é ambíguo.
+ *
+ * O interno ganhou funil próprio no mesmo dia (14439512) e ainda NÃO foi
+ * espelhado aqui: a migração está sendo feita uma trilha por vez, a pedido de
+ * quem opera.
+ */
+export const FUNIL_PRECATORIO_EXTERNO = 14439516
 
 // Estágios do Funil Geral RPV que interessam ao operacional. Os nomes das
 // constantes seguem os nomes das COLUNAS NO KOMMO; o rótulo que o usuário vê
@@ -90,6 +111,19 @@ export interface DefAbaPrecatorio {
 export interface DefSubdivisao {
   key: SubdivisaoPrecatorio
   label: string
+  /**
+   * O funil do Kommo de onde esta trilha lê.
+   *
+   * É PROPRIEDADE DA TRILHA, e não uma constante do arquivo, porque as duas
+   * deixaram de morar no mesmo pipeline. Enquanto a migração não termina, as
+   * duas apontam para funis diferentes — e é esta linha que sustenta isso sem
+   * nenhum ramo especial no código que a lê.
+   */
+  pipelineId: number
+  /** A coluna de diligência desta trilha, pelo nome no kanban. */
+  colunaDiligencia: string
+  /** A coluna de reprovação desta trilha, pelo nome no kanban. */
+  colunaReprovados: string
   abas: DefAbaPrecatorio[]
 }
 
@@ -117,17 +151,25 @@ const ABAS_INTERNO_COM_DESFECHO: ReadonlySet<string> = new Set([
   'int-validacao',
 ])
 
-/** As colunas de desfecho do Interno, pelo nome — os ids são de cada funil. */
-const COLUNA_DILIGENCIA = 'Diligência'
-const COLUNA_REPROVADOS = 'Reprovados Operacional'
+// AS COLUNAS DE DESFECHO AGORA SÃO DE CADA TRILHA (ver DefSubdivisao), e não
+// mais duas constantes deste arquivo. O funil novo do externo renomeou
+// "Reprovados Operacional" para "REPROVADOS": um nome só, fixo aqui, mandaria o
+// botão Reprovar procurar uma coluna que não existe naquele kanban — e sem
+// coluna não há botão, então a recusa sumiria da tela sem erro nenhum.
 
 /**
- * As colunas de cada destinação, e só elas. Do "Funil Geral Precatório".
+ * As colunas de cada destinação, cada uma no SEU funil.
  *
- * "APRESENTAÇÃO DE PROPOSTA" APARECE NAS DUAS, de propósito: é a MESMA coluna
- * do Kommo, com rótulo diferente em cada trilha ("Aprovados" no Interno,
- * "Apresentação" no Externo). Consequência assumida: um card ali é contado nas
- * duas subdivisões. Confirmado pelo dono — não é descuido de cópia.
+ * CADA TRILHA TEM O SEU PIPELINE desde 14/09/2026 — e é isso que desfez o pior
+ * remendo daqui. Enquanto as duas moravam no mesmo funil, "Apresentação de
+ * Proposta" era a MESMA coluna nas duas, com rótulo diferente em cada uma, e o
+ * mesmo card era contado duas vezes. Agora cada funil tem a sua, e a
+ * ambiguidade não existe mais: nada é compartilhado.
+ *
+ * A MIGRAÇÃO É UMA TRILHA POR VEZ, a pedido de quem opera. O externo já lê do
+ * funil novo; o interno ainda lê do antigo, com as colunas que sempre teve.
+ * Quando ele migrar, muda o `pipelineId` e a lista de abas desta entrada — o
+ * resto do arquivo não toma conhecimento.
  *
  * A ordem das abas é a DO TRABALHO, não a do kanban: no Interno, Aprovados vem
  * antes de Diligência porque é o desfecho que se busca, e a diligência é o
@@ -137,6 +179,9 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
   {
     key: 'interno',
     label: 'Interno',
+    pipelineId: FUNIL_PRECATORIO,
+    colunaDiligencia: 'Diligência',
+    colunaReprovados: 'Reprovados Operacional',
     abas: [
       {
         key: ABA_JURIDICO,
@@ -179,40 +224,79 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
   {
     key: 'externo',
     label: 'Externo',
+    pipelineId: FUNIL_PRECATORIO_EXTERNO,
+    colunaDiligencia: 'DILIGÊNCIA',
+    // "REPROVADOS", e não "Reprovados Operacional": o funil novo encurtou o
+    // nome, e o antigo continua com o dele na trilha de cima.
+    colunaReprovados: 'REPROVADOS',
     abas: [
       {
         key: 'ext-qualificacao',
         label: 'Qualificação Preliminar',
-        colunaKommo: 'Qualificação Jurídica Preliminar',
+        colunaKommo: 'QUALIFICAÇÃO PRELIMINAR',
         descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
+      },
+      {
+        key: 'ext-revisao',
+        label: 'Revisão',
+        colunaKommo: 'REVISÃO DA QUALIFICAÇÃO',
+        descricaoVazia: 'Nenhuma qualificação aguardando revisão.',
       },
       {
         key: 'ext-encaminhar',
         label: 'Encaminhar',
-        colunaKommo: 'Encaminhar ao Fundo',
+        colunaKommo: 'ENCAMINHAR AOS FUNDOS',
         descricaoVazia: 'Nenhum precatório a encaminhar.',
       },
       {
-        key: 'ext-defesa',
-        label: 'Defesa Técnica',
-        colunaKommo: 'Defesa Técnica (TIER 2+)',
-        descricaoVazia: 'Nenhuma defesa técnica em elaboração.',
+        key: 'ext-diligencia',
+        label: 'Diligência',
+        colunaKommo: 'DILIGÊNCIA',
+        descricaoVazia: 'Nenhum precatório externo em diligência.',
       },
       {
-        key: 'ext-validacao',
-        label: 'Validação',
-        colunaKommo: 'Revisão da Defesa Técnica (TIER 2+)',
-        descricaoVazia: 'Nenhuma defesa técnica aguardando validação.',
+        key: 'ext-reprovados',
+        label: 'Reprovados',
+        colunaKommo: 'REPROVADOS',
+        descricaoVazia: 'Nenhum precatório externo reprovado.',
       },
       {
         key: 'ext-apresentacao',
         label: 'Apresentação',
-        colunaKommo: 'Apresentação de Proposta',
+        colunaKommo: 'PRODUÇÃO DE PROPOSTA',
         descricaoVazia: 'Nenhum precatório em apresentação.',
       },
+      {
+        key: 'ext-fechados',
+        label: 'Fechados',
+        colunaKommo: 'FECHADOS',
+        descricaoVazia: 'Nenhum precatório externo fechado.',
+      },
     ],
+    // FORA DA TELA, de propósito e por decisão de quem opera: "MEMORANDO DE
+    // NEGOCIAÇÃO" e "AGUARDANDO PRECIFICAÇÃO" existem no kanban e não viram
+    // aba. Ficam registradas aqui para que a ausência se leia como escolha, e
+    // não como coluna esquecida no remapeamento.
   },
 ]
+
+/**
+ * Este funil é um dos de Precatório?
+ *
+ * DEIXOU DE SER UMA COMPARAÇÃO e virou uma pergunta, porque a resposta deixou de
+ * ser um número: são dois pipelines hoje e serão outros dois quando o interno
+ * migrar. Todo lugar que comparava `pipeline_id === FUNIL_PRECATORIO` para
+ * dizer "é precatório" passa por aqui — senão um card do funil novo se leria
+ * como RPV, e a análise sairia com a categoria errada e sem aviso.
+ */
+export function ehFunilPrecatorio(pipelineId: number): boolean {
+  return SUBDIVISOES_PRECATORIO.some((s) => s.pipelineId === pipelineId)
+}
+
+/** A trilha a que um funil pertence, ou nada se ele não for de Precatório. */
+function subdivisaoDoPipeline(pipelineId: number): DefSubdivisao | undefined {
+  return SUBDIVISOES_PRECATORIO.find((s) => s.pipelineId === pipelineId)
+}
 
 /** A subdivisão que a tela abre por padrão. */
 export const SUBDIVISAO_PADRAO: SubdivisaoPrecatorio = 'interno'
@@ -476,10 +560,14 @@ function porNomeDeColuna(pipelineId: number, etapas: EtapaKommo[]): Map<string, 
  */
 export function statusExibidos(pipelineId: number, etapas: EtapaKommo[]): Set<number> {
   if (pipelineId === FUNIL_RPV) return new Set(TELAS.map((t) => t.statusId))
-  if (pipelineId !== FUNIL_PRECATORIO) return new Set()
-  const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
+  if (!ehFunilPrecatorio(pipelineId)) return new Set()
   const ids = new Set<number>()
+  // UM ESPELHO POR TRILHA, porque cada uma lê do seu funil. Resolver todas as
+  // colunas num mapa só voltaria a misturar os dois kanbans — e há nome que se
+  // repete entre eles ("PRODUÇÃO DE PROPOSTA", "DILIGÊNCIA"), com ids
+  // diferentes.
   for (const s of SUBDIVISOES_PRECATORIO) {
+    const nomes = porNomeDeColuna(s.pipelineId, etapas)
     for (const a of s.abas) {
       const id = nomes.get(normalizarBusca(a.colunaKommo))
       if (id !== undefined) ids.add(id)
@@ -503,49 +591,60 @@ export function colunasPrecatorioDesalinhadas(
   etapas: EtapaKommo[],
   subdivisao: SubdivisaoPrecatorio | null = null,
 ): DefAbaPrecatorio[] {
-  const doFunil = etapas.filter((e) => e.pipeline_id === FUNIL_PRECATORIO)
-  if (doFunil.length === 0) return []
-  const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
-  const defs = subdivisao
-    ? (SUBDIVISOES_PRECATORIO.find((s) => s.key === subdivisao)?.abas ?? [])
-    : SUBDIVISOES_PRECATORIO.flatMap((s) => s.abas)
-  return defs.filter((a) => !nomes.has(normalizarBusca(a.colunaKommo)))
+  const alvos = subdivisao
+    ? SUBDIVISOES_PRECATORIO.filter((s) => s.key === subdivisao)
+    : SUBDIVISOES_PRECATORIO
+  const faltando: DefAbaPrecatorio[] = []
+  for (const s of alvos) {
+    // ESPELHO AUSENTE NÃO É DESALINHAMENTO, e agora isso se pergunta POR FUNIL:
+    // com as trilhas em pipelines diferentes, o espelho de uma pode ter chegado
+    // e o da outra não. Acusar a trilha que ainda não sincronizou seria apontar
+    // defeito onde só falta dado.
+    if (!etapas.some((e) => e.pipeline_id === s.pipelineId)) continue
+    const nomes = porNomeDeColuna(s.pipelineId, etapas)
+    for (const a of s.abas) {
+      if (!nomes.has(normalizarBusca(a.colunaKommo))) faltando.push(a)
+    }
+  }
+  return faltando
 }
 
 /**
- * A aba do Externo que é a MESMA coluna do Kommo que "Aprovados" no Interno.
+ * As abas do Externo que NÃO oferecem trabalho.
  *
- * "Apresentação de Proposta" serve às duas trilhas, e é por isso que ela não
- * oferece trabalho em nenhuma: o mesmo card mostraria o botão de um lado e não
- * do outro, dependendo de qual pílula estivesse selecionada. Um card não muda de
- * natureza porque alguém trocou o recorte da tela.
+ * SUBSTITUI A ABA COMPARTILHADA. Antes havia uma exceção só, e por outro motivo:
+ * "Apresentação de Proposta" era a MESMA coluna do Kommo nas duas trilhas, e o
+ * botão apareceria ou não conforme a pílula aberta — um card não pode mudar de
+ * natureza porque alguém trocou o recorte da tela. Com funis separados essa
+ * ambiguidade acabou.
+ *
+ * O QUE SOBRA É UMA REGRA DE ETAPA, e não de ambiguidade: apresentação, fechado,
+ * em diligência e reprovado são pontos onde o trabalho da casa já passou.
+ * Oferecer "executar análise" ali convida ao retrabalho — é o mesmo critério que
+ * já valia para as abas terminais de RPV.
  */
-export const ABA_EXTERNA_COMPARTILHADA = 'ext-apresentacao'
+export const ABAS_EXTERNO_SEM_TRABALHO: ReadonlySet<string> = new Set([
+  'ext-apresentacao',
+  'ext-fechados',
+  'ext-diligencia',
+  'ext-reprovados',
+])
 
 /**
- * O card está numa coluna que SÓ EXISTE na trilha Externa?
+ * O card é da trilha Externa?
  *
- * A pergunta parece a mesma que "qual pílula está aberta", e não é: a
- * subdivisão é um recorte da TELA, e a due diligence de um card aberto não pode
- * mudar de frentes porque alguém clicou em Interno atrás da janela. Quem
- * responde tem de ser o card, e o que o card tem é o status_id.
+ * AGORA É O PIPELINE QUE RESPONDE, e a função encolheu para uma linha. Antes ela
+ * comparava conjuntos de colunas resolvidos pelo nome, porque as duas trilhas
+ * dividiam um funil — e mesmo assim havia uma coluna sem resposta possível, a
+ * que pertencia às duas. Com um funil por trilha, a pergunta tem resposta exata
+ * e não depende do espelho ter chegado.
  *
- * "Apresentação de Proposta" fica de fora justamente por pertencer às duas —
- * dela não se sabe a destinação, então ela conta como Interno, que é o
- * comportamento que já valia antes desta função existir.
+ * CONTINUA SENDO O CARD QUE RESPONDE, e não a pílula aberta: a subdivisão é um
+ * recorte da TELA, e a due diligence de um card aberto não pode mudar de frentes
+ * porque alguém clicou em Interno atrás da janela.
  */
-export function ehCardExterno(statusId: number, etapas: EtapaKommo[]): boolean {
-  const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
-  const idsDaTrilha = (key: SubdivisaoPrecatorio): Set<number> => {
-    const ids = new Set<number>()
-    const def = SUBDIVISOES_PRECATORIO.find((s) => s.key === key)
-    for (const a of def?.abas ?? []) {
-      const id = nomes.get(normalizarBusca(a.colunaKommo))
-      if (id !== undefined) ids.add(id)
-    }
-    return ids
-  }
-  return idsDaTrilha('externo').has(statusId) && !idsDaTrilha('interno').has(statusId)
+export function ehCardExterno(pipelineId: number): boolean {
+  return subdivisaoDoPipeline(pipelineId)?.key === 'externo'
 }
 
 /**
@@ -594,8 +693,9 @@ export function acaoDeReprovar(
     papel: 'reprovar',
   })
   if (pipelineId === FUNIL_RPV) return reprovar(ST_REPROVADO)
-  if (pipelineId !== FUNIL_PRECATORIO) return null
-  const id = porNomeDeColuna(FUNIL_PRECATORIO, etapas).get(normalizarBusca(COLUNA_REPROVADOS))
+  const sub = subdivisaoDoPipeline(pipelineId)
+  if (!sub) return null
+  const id = porNomeDeColuna(sub.pipelineId, etapas).get(normalizarBusca(sub.colunaReprovados))
   return id === undefined ? null : reprovar(id)
 }
 
@@ -613,18 +713,21 @@ export function abasDoFunil(
       acoes: ACOES[t.key],
     }))
   }
-  if (pipelineId !== FUNIL_PRECATORIO) return []
+  if (!ehFunilPrecatorio(pipelineId)) return []
 
   const def = SUBDIVISOES_PRECATORIO.find(
     (s) => s.key === (subdivisao ?? SUBDIVISAO_PADRAO),
   )
   if (!def) return []
-  const nomes = porNomeDeColuna(FUNIL_PRECATORIO, etapas)
+  // DO FUNIL DA TRILHA, e não do que veio por parâmetro: o parâmetro é o funil
+  // que a tela tem aberto no topo, e as duas trilhas do Precatório vivem em
+  // pipelines diferentes durante a migração.
+  const nomes = porNomeDeColuna(def.pipelineId, etapas)
 
   const desfechos = (abaKey: string): AcaoTela[] => {
     if (def.key !== 'interno' || !ABAS_INTERNO_COM_DESFECHO.has(abaKey)) return []
-    const idDiligencia = nomes.get(normalizarBusca(COLUNA_DILIGENCIA))
-    const idReprovados = nomes.get(normalizarBusca(COLUNA_REPROVADOS))
+    const idDiligencia = nomes.get(normalizarBusca(def.colunaDiligencia))
+    const idReprovados = nomes.get(normalizarBusca(def.colunaReprovados))
     const saida: AcaoTela[] = []
     if (idDiligencia !== undefined) {
       saida.push({
