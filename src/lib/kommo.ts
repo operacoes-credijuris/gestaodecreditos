@@ -122,16 +122,20 @@ export interface DefAbaPrecatorio {
    * oferece saída nenhuma — é etapa de espera, onde quem move o card é o fundo.
    */
   aprovaPara?: string
-  /**
-   * O rótulo do botão de aprovar, quando o derivado não serve.
+/**
+   * O rótulo e o tom do botão que segue em frente nesta etapa.
    *
-   * O PADRÃO É DIZER O DESTINO — "Aprovar e enviar para Revisão" —, e ele existe
-   * porque "Aprovar crédito" sozinho não deixava claro para onde o card ia. Mas
-   * quando o destino é a própria coluna de aprovados, o derivado gagueja
-   * ("enviar para Aprovados") e a redundância não informa nada: ali o verbo já
-   * diz tudo.
+   * NEM TODO "SEGUIR" É UM "APROVAR", e é isso que estes dois campos existem
+   * para dizer. Na qualificação a saída positiva manda o crédito para a REVISÃO
+   * de outra pessoa: não se aprovou nada ainda, apenas se passou adiante — daí
+   * "Enviar para revisão", em tom neutro. Na revisão é aprovação de verdade, e
+   * vai no azul da casa.
+   *
+   * Sem o padrão os dois botões saíam iguais, e o de quem analisa parecia ter o
+   * peso do de quem decide.
    */
   rotuloAprovar?: string
+  varianteAprovar?: AcaoTela['variant']
 }
 
 export interface DefSubdivisao {
@@ -271,6 +275,8 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
         // é de quem revisa. Recusar e exigir diligência, ao contrário, passam
         // direto — essas não precisam de segunda leitura.
         aprovaPara: 'REVISÃO DA QUALIFICAÇÃO',
+        rotuloAprovar: 'Enviar para revisão',
+        varianteAprovar: 'secondary',
       },
       {
         key: 'ext-revisao',
@@ -283,6 +289,7 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
         // exigir diligência ou recusar, e aí não há terceira leitura.
         aprovaPara: 'ENCAMINHAR AOS FUNDOS',
         rotuloAprovar: 'Aprovar crédito',
+        varianteAprovar: 'primary',
       },
       {
         key: 'ext-encaminhar',
@@ -419,7 +426,10 @@ export type PapelDaAcao = 'validar' | 'aprovar' | 'diligenciar' | 'reprovar'
 export interface AcaoTela {
   statusId: number
   label: string
-  variant: 'primary' | 'success' | 'warning' | 'danger'
+  // 'secondary' É O TOM NEUTRO, e existe para a saída que PASSA ADIANTE sem
+  // decidir nada — mandar para a revisão de outra pessoa não é aprovar. Sem ele
+  // essa saída sairia no azul da aprovação, e as duas se confundiriam.
+  variant: 'primary' | 'secondary' | 'success' | 'warning' | 'danger'
   papel: PapelDaAcao
 }
 
@@ -807,21 +817,6 @@ export function abasDoFunil(
   const oferece = (aba: DefAbaPrecatorio): boolean =>
     def.key === 'interno' ? ABAS_INTERNO_COM_DESFECHO.has(aba.key) : Boolean(aba.aprovaPara)
 
-  /**
-   * O rótulo da aprovação DIZ PARA ONDE ELA LEVA.
-   *
-   * "Aprovar crédito" sozinho já causou a pergunta certa — vai para revisão ou
-   * para aprovados? Como o destino é o nome de uma coluna que costuma ser
-   * também uma aba da tela, o rótulo sai dela e continua certo se o fluxo mudar.
-   */
-  const rotuloDaAprovacao = (aba: DefAbaPrecatorio): string => {
-    if (aba.rotuloAprovar) return aba.rotuloAprovar
-    const destino = def.abas.find(
-      (x) => normalizarBusca(x.colunaKommo) === normalizarBusca(aba.aprovaPara ?? ''),
-    )
-    return destino ? `Aprovar e enviar para ${destino.label}` : 'Aprovar crédito'
-  }
-
   const desfechos = (aba: DefAbaPrecatorio): AcaoTela[] => {
     if (!oferece(aba)) return []
     const saida: AcaoTela[] = []
@@ -833,8 +828,8 @@ export function abasDoFunil(
     if (idAprovados !== undefined) {
       saida.push({
         statusId: idAprovados,
-        label: rotuloDaAprovacao(aba),
-        variant: 'primary',
+        label: aba.rotuloAprovar ?? 'Aprovar crédito',
+        variant: aba.varianteAprovar ?? 'primary',
         papel: 'aprovar',
       })
     }

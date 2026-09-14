@@ -312,15 +312,18 @@ describe('abas da trilha Externa', () => {
   })
 
   /**
-   * O RÓTULO DIZ PARA ONDE LEVA, e isso não é preciosismo: "Aprovar crédito"
-   * sozinho já gerou a pergunta certa de quem opera — vai para revisão ou para
-   * aprovados? O texto sai do rótulo da aba de destino, então continua verdadeiro
-   * se o fluxo mudar.
+   * NEM TODO "SEGUIR" É UM "APROVAR".
+   *
+   * Na qualificação a saída positiva manda o crédito para a REVISÃO de outra
+   * pessoa: não se aprovou nada ainda, apenas se passou adiante. O rótulo diz
+   * isso e o tom é neutro — no azul da aprovação, o botão de quem analisa teria
+   * o peso do de quem decide.
    */
-  it('a aprovação diz no rótulo para onde o card vai', () => {
+  it('a saída positiva da Qualificação envia para revisão, em tom neutro', () => {
     const qualificacao = abas.find((a) => a.label === 'Qualificação Preliminar')!
     const aprovar = qualificacao.acoes.find((x) => x.papel === 'aprovar')!
-    expect(aprovar.label).toBe('Aprovar e enviar para Revisão')
+    expect(aprovar.label).toBe('Enviar para revisão')
+    expect(aprovar.variant).toBe('secondary')
   })
 
   /**
@@ -343,9 +346,11 @@ describe('abas da trilha Externa', () => {
    * destino só precisa ser dito quando ele SURPREENDE — como na qualificação,
    * onde aprovar manda para a revisão.
    */
-  it('na Revisão o botão é só "Aprovar crédito"', () => {
+  it('na Revisão é aprovação de verdade, e no azul da casa', () => {
     const revisao = abas.find((a) => a.label === 'Revisão')!
-    expect(revisao.acoes.find((x) => x.papel === 'aprovar')!.label).toBe('Aprovar crédito')
+    const aprovar = revisao.acoes.find((x) => x.papel === 'aprovar')!
+    expect(aprovar.label).toBe('Aprovar crédito')
+    expect(aprovar.variant).toBe('primary')
   })
 
   it('as demais abas do Externo não oferecem desfecho', () => {
