@@ -98,7 +98,7 @@ import {
   type RespostaAnaliseRpv,
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
-import { formatDataHoraSegundos, formatDate, formatDateTime, tempoDecorrido } from '@/lib/format'
+import { formatDataHoraSegundos, formatDateTime, tempoDecorrido } from '@/lib/format'
 import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -811,10 +811,11 @@ function AvisoSemNumero({ lead }: { lead: KommoLead }) {
  * criação não responde (card de março movido ontem) e a de atualização também
  * não (muda quando alguém troca uma tag).
  *
- * A DATA E O DECORRIDO JUNTOS. A data sozinha obriga a fazer a conta de cabeça;
- * o "há 3 dias" sozinho apaga o dia exato, que é o que se copia para uma
- * cobrança. A hora fica no title, para não gastar largura com o que raramente
- * importa.
+ * A DATA COM HORA E O DECORRIDO, JUNTOS. A data sozinha obriga a fazer a conta
+ * de cabeça; o "há 3 dias" sozinho apaga o instante exato, que é o que se copia
+ * para uma cobrança — e a HORA importa porque o movimento do dia é o assunto da
+ * manhã seguinte: dois cards que entraram "hoje" podem ter entrado antes e
+ * depois da reunião, e é a hora que diz qual é qual.
  *
  * SEM DATA, NADA — nem traço, nem "—". O card que ainda não teve a etapa
  * apurada aparece igual aos outros, e a próxima sincronização o preenche; um
@@ -825,12 +826,12 @@ function SeloDaEtapa({ lead }: { lead: KommoLead }) {
   if (!quando) return null
   const decorrido = tempoDecorrido(quando)
   return (
-    <span
-      className="text-xs whitespace-nowrap text-slate-400"
-      title={`Entrou nesta coluna em ${formatDateTime(quando)}`}
-    >
-      {formatDate(quando)}
-      {decorrido && <span className="text-slate-300"> · {decorrido}</span>}
+    // A QUEBRA SÓ PODE CAIR ENTRE AS DUAS METADES: cada uma é `nowrap`, o
+    // conjunto não. Em tela estreita o decorrido desce uma linha em vez de
+    // partir a hora ao meio ou de espremer o título do card.
+    <span className="text-right text-xs text-slate-400" title="Quando o card entrou nesta coluna">
+      <span className="whitespace-nowrap">{formatDateTime(quando)}</span>
+      {decorrido && <span className="whitespace-nowrap text-slate-300"> · {decorrido}</span>}
     </span>
   )
 }

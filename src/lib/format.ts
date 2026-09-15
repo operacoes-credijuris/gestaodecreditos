@@ -356,11 +356,6 @@ export function formatDateTime(value: string | null | undefined): string {
 }
 
 /**
- * Hoje em ISO local (YYYY-MM-DD). O locale sv-SE já entrega nesse formato, e
- * usar a data LOCAL (não UTC) importa: perto da meia-noite o toISOString()
- * viraria o dia antes da hora e acenderia semáforo errado.
- */
-/**
  * "hoje", "ontem", "há 3 dias", "há 2 meses" — o tempo decorrido, em uma linha.
  *
  * POR DIA CIVIL, e não por 24 horas. Um card movido ontem às 23h é "ontem" às
@@ -387,6 +382,11 @@ export function tempoDecorrido(value: string | null | undefined, agora: Date = n
   return anos === 1 ? 'há 1 ano' : `há ${anos} anos`
 }
 
+/**
+ * Hoje em ISO local (YYYY-MM-DD). O locale sv-SE já entrega nesse formato, e
+ * usar a data LOCAL (não UTC) importa: perto da meia-noite o toISOString()
+ * viraria o dia antes da hora e acenderia semáforo errado.
+ */
 export function hojeISO(): string {
   return new Date().toLocaleDateString('sv-SE')
 }
