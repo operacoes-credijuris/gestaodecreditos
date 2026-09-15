@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   FORMA_DA_ENTREGA,
+  MARCA_CORTE,
   montarEntrega,
   type AutosGuardados,
 } from '../../../supabase/functions/_shared/entregaDosAutos.ts'
@@ -86,6 +87,61 @@ describe('montarEntrega', () => {
     })
     expect(t).toContain('=== ARQUIVO 1/1: anexo.pdf ===')
     expect(t).not.toContain('0 páginas')
+  })
+})
+
+describe('o aviso de entrega incompleta', () => {
+  /**
+   * O MARCADOR DO CORTE FICA NO MIOLO DO ARQUIVO, e quem lê pode chegar à
+   * conclusão sem nunca passar por ele. Foi o que aconteceu: um processo de 341
+   * páginas entrou cortado, e a análise só descobriu porque o modelo topou com a
+   * marcação no meio do texto.
+   *
+   * O aviso no TOPO transforma a falta num fato da análise — e diz o que fazer
+   * com ela nos termos do próprio roteiro.
+   */
+  const comCorte = (): AutosGuardados => ({
+    ...guardado,
+    arquivos: [
+      {
+        nome: 'processo.pdf',
+        paginas: 341,
+        texto: `INÍCIO\n\n${MARCA_CORTE}: 205.000 caracteres deste arquivo não vieram...]\n\nFIM`,
+      },
+      { nome: 'requisitorio.pdf', paginas: 3, texto: 'INTEIRO' },
+    ],
+  })
+
+  it('não existe quando tudo coube', () => {
+    const t = montarEntrega(guardado)
+    expect(t).not.toContain('ENTREGA INCOMPLETA')
+    // E o roteiro continua sendo a primeira coisa lida.
+    expect(t.indexOf('# PROMPT — Qualificação Jurídica Preliminar')).toBe(0)
+  })
+
+  it('abre a entrega e nomeia só os arquivos cortados', () => {
+    const t = montarEntrega(comCorte())
+    expect(t.indexOf('ENTREGA INCOMPLETA')).toBeLessThan(
+      t.indexOf('# PROMPT — Qualificação Jurídica Preliminar'),
+    )
+    const aviso = t.slice(0, t.indexOf('# PROMPT'))
+    expect(aviso).toContain('processo.pdf')
+    expect(aviso).toContain('341 páginas no original')
+    expect(aviso).not.toContain('requisitorio.pdf')
+  })
+
+  // O AVISO FALA A LÍNGUA DO ROTEIRO: sem citar a fase e o veredito, ele vira
+  // uma observação que a análise pode contornar.
+  it('diz o que fazer com a falta, nos termos do roteiro', () => {
+    const aviso = montarEntrega(comCorte())
+    expect(aviso).toContain('FASE 4')
+    expect(aviso).toContain('INCONCLUSIVO POR INSUFICIÊNCIA DOCUMENTAL')
+  })
+
+  it('os arquivos continuam inteiros depois do aviso', () => {
+    const t = montarEntrega(comCorte())
+    expect(t).toContain('=== ARQUIVO 1/2: processo.pdf (341 páginas) ===')
+    expect(t).toContain('INTEIRO')
   })
 })
 

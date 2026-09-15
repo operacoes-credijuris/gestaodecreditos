@@ -304,7 +304,16 @@ async function extrairTextoDoPdf(
  * que deu errado, com a mensagem inteira que a função respondeu.
  */
 export interface PreparoDosAutos {
-  estado: 'lendo' | 'pronto' | 'falhou'
+  /**
+   * 'parcial' É O ESTADO QUE FALTAVA, e a falta dele escondeu um defeito caro.
+   *
+   * Entre "deu certo" e "deu errado" existe "chegou incompleto": um anexo que
+   * não é PDF, um processo grande demais que veio cortado pelo meio. Sem um
+   * estado próprio, isso saía como sucesso — a tela dizia "3 arquivo(s) à
+   * disposição" contando os LIDOS, e ninguém ficava sabendo que o Claude
+   * recebeu dois, um deles pela metade.
+   */
+  estado: 'lendo' | 'pronto' | 'parcial' | 'falhou'
   detalhe: string
 }
 
@@ -1066,6 +1075,12 @@ function CardCredito({
           {preparoDosAutos.estado === 'pronto' && (
             <div className="text-green-700">✅ {preparoDosAutos.detalhe}</div>
           )}
+          {preparoDosAutos.estado === 'parcial' && (
+            <div className="text-amber-800">
+              <div className="font-medium">Os autos chegaram incompletos ao Claude.</div>
+              <p className="mt-1 break-words whitespace-pre-line">{preparoDosAutos.detalhe}</p>
+            </div>
+          )}
           {preparoDosAutos.estado === 'falhou' && (
             <div className="text-red-700">
               {/* O QUE A CONVERSA VAI DIZER, dito aqui primeiro: do outro lado o
@@ -1510,7 +1525,15 @@ export default function AnaliseCredito() {
     anotarPreparo(id, 'lendo', 'Lendo os PDFs do card. Num processo grande isto leva um minuto.')
     try {
       const lidos = await lerArquivosComCache(lead)
-      await invokeFunction('autos-guardar', {
+      // A RESPOSTA É LIDA, e antes não era. Ela sempre disse o que ficou de
+      // fora; jogá-la fora fazia a tela afirmar uma entrega completa que não
+      // aconteceu.
+      const r = await invokeFunction<{
+        guardados?: number
+        caracteres?: number
+        de_fora?: string[]
+        cortados?: { nome: string; de: number; para: number }[]
+      }>('autos-guardar', {
         codigo,
         lead_id: lead.kommo_lead_id,
         titulo: tituloCard(lead),
@@ -1518,14 +1541,31 @@ export default function AnaliseCredito() {
         // que fazer no servidor.
         arquivos: lidos.map((a) => ({ nome: a.nome, paginas: a.paginas, texto: a.texto })),
       })
-      anotarPreparo(
-        id,
-        'pronto',
-        lidos.length + ' arquivo(s) à disposição do Claude — peça a análise na conversa.',
-      )
-      toast.success(
-        lidos.length + ' arquivo(s) à disposição do Claude — peça a análise na conversa.',
-      )
+
+      const guardados = r.guardados ?? lidos.length
+      const deFora = r.de_fora ?? []
+      const cortados = r.cortados ?? []
+      const num = (n: number) => n.toLocaleString('pt-BR')
+
+      if (deFora.length === 0 && cortados.length === 0) {
+        const recado = guardados + ' arquivo(s) à disposição do Claude — peça a análise na conversa.'
+        anotarPreparo(id, 'pronto', recado)
+        toast.success(recado)
+      } else {
+        // O QUE FALTOU, NOMEADO. "Parte não foi entregue" sem dizer qual parte
+        // obriga quem opera a descobrir sozinho — e foi assim que um processo de
+        // 341 páginas chegou pela metade sem ninguém notar.
+        const linhas = [
+          `${guardados} de ${lidos.length} arquivo(s) entregues ao Claude (${num(r.caracteres ?? 0)} caracteres).`,
+          ...cortados.map(
+            (c) => `Cortado: ${c.nome} — ${num(c.de)} caracteres no original, ${num(c.para)} entregues.`,
+          ),
+          ...(deFora.length > 0 ? ['Fora: ' + deFora.join('; ') + '.'] : []),
+          'A análise recebe um aviso da falta e deve registrá-la nas pendências — mas o trecho ausente não chega até ela.',
+        ]
+        anotarPreparo(id, 'parcial', linhas.join('\n'))
+        toast.error('Os autos foram entregues incompletos — veja o aviso no card.')
+      }
     } catch (e) {
       // A MENSAGEM INTEIRA FICA NO CARD. `erroDaFuncao` já traz o motivo real do
       // corpo da resposta e o status HTTP; jogá-la fora num aviso passageiro era

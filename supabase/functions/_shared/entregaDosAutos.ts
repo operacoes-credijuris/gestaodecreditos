@@ -9,6 +9,16 @@
 
 import { ROTEIRO_QUALIFICACAO } from './roteiroQualificacao.ts'
 
+/**
+ * O começo do marcador que a `autos-guardar` deixa no lugar do que cortou.
+ *
+ * UMA FONTE SÓ PARA OS DOIS LADOS: quem corta escreve, quem monta a entrega
+ * procura. Escrito duas vezes, bastaria mudar a frase de um lado para o aviso do
+ * topo parar de aparecer — e a falta voltaria a ser visível só para quem lesse o
+ * arquivo inteiro até o meio.
+ */
+export const MARCA_CORTE = '[...TRECHO DO MEIO OMITIDO POR TAMANHO'
+
 /** Uma linha do balcão: os autos de um card esperando serem buscados. */
 export interface AutosGuardados {
   lead_id: number
@@ -51,6 +61,36 @@ export const FORMA_DA_ENTREGA = [
  * que o comercial escreveu, e o roteiro exige documento e página para cada campo
  * da ficha — oferecer um como o outro é o que a regra de ancoragem proíbe.
  */
+/**
+ * O aviso de entrega incompleta, quando algum arquivo veio cortado.
+ *
+ * NO TOPO, E NÃO SÓ NO MEIO DO TEXTO. O marcador do corte fica onde o corte
+ * aconteceu — no miolo do arquivo —, e quem lê pode chegar à conclusão sem
+ * nunca ter passado por ele. Isto aqui é o que transforma a falta num FATO da
+ * análise: entra antes do método, é lido antes de tudo, e diz o que fazer com
+ * ela nos termos do próprio roteiro.
+ */
+function avisoDeCorte(g: AutosGuardados): string {
+  const cortados = g.arquivos.filter((a) => (a.texto ?? '').includes(MARCA_CORTE))
+  if (cortados.length === 0) return ''
+  return [
+    '> **ENTREGA INCOMPLETA — LEIA ANTES DE COMEÇAR**',
+    '>',
+    '> Os arquivos abaixo não couberam inteiros e vieram cortados pelo meio:',
+    ...cortados.map((a) => `> - ${a.nome}${a.paginas > 0 ? ` (${a.paginas} páginas no original)` : ''}`),
+    '>',
+    '> O trecho que falta está marcado dentro do próprio arquivo, com a contagem',
+    '> do que ficou de fora. Registre a lacuna na FASE 4 (pendências documentais),',
+    '> nomeando o arquivo, e trate como NÃO VERIFICÁVEL tudo que dependeria do',
+    '> trecho ausente. Se a falta alcançar os campos 5, 6, 8 ou 10 da Ficha, o',
+    '> veredito é INCONCLUSIVO POR INSUFICIÊNCIA DOCUMENTAL — a regra de corte da',
+    '> Fase 1 vale aqui como valeria para um documento não anexado.',
+    '',
+    '---',
+    '',
+  ].join('\n')
+}
+
 export function montarEntrega(
   g: AutosGuardados,
   /**
@@ -62,7 +102,13 @@ export function montarEntrega(
    */
   roteiro: string = ROTEIRO_QUALIFICACAO,
 ): string {
+  const aviso = avisoDeCorte(g)
   const cabeca = [
+    // ANTES DO MÉTODO, de propósito: é a única coisa aqui que muda o que se pode
+    // concluir. ESPALHADO, e não posto como item vazio: uma entrada em branco
+    // vira uma quebra de linha no `join`, e a entrega passaria a começar com uma
+    // linha vazia sempre que estivesse completa.
+    ...(aviso ? [aviso] : []),
     (roteiro || '').trim() || ROTEIRO_QUALIFICACAO,
     '',
     '---',

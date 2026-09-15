@@ -12,6 +12,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { limparParaOBanco } from "../_shared/textoParaOBanco.ts";
+import { MARCA_CORTE } from "../_shared/entregaDosAutos.ts";
 
 const CORS = corsHeaders;
 
@@ -25,26 +26,41 @@ function json(o: unknown, s = 200) {
 /** Um uuid, e nada além disso — é o que a tabela aceita como chave. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// OS TETOS SÃO DO CONTEXTO DA CONVERSA, e não do banco.
+// O TETO É DO CONTEXTO DA CONVERSA, e não do banco.
 //
 // Um resultado de ferramenta com 800 mil caracteres não é generosidade: é a
 // janela do modelo estourando antes de ele chegar à conclusão. Cortamos aqui, no
 // servidor, porque é aqui que a regra vale para todo mundo que escreve.
-const MAX_POR_ARQUIVO = 120_000;
 const MAX_TOTAL = 400_000;
+
+// UM TETO FIXO POR ARQUIVO ERA O DEFEITO, e custou uma análise inteira: ele
+// valia 120 mil caracteres, e um processo de 341 páginas tem uns 600 mil. O
+// arquivo entrava cortado pelo meio — 20% entregues — mesmo quando ele era o
+// ÚNICO do card e o orçamento total estava quase todo livre.
+//
+// Agora o teto de cada arquivo é o que sobra do orçamento, menos uma RESERVA
+// para os que ainda vêm. É o que impede o processo grande de comer o pequeno: o
+// ofício requisitório de três páginas cabe inteiro mesmo atrás de um processo
+// que não coube.
+const RESERVA_POR_ARQUIVO = 20_000;
 
 /**
  * Corta pelo meio, preservando começo e fim.
  *
  * É ONDE ESTÁ O QUE IMPORTA: as partes e a fase inicial abrem o processo, o
  * valor e o dispositivo fecham. O meio de um processo longo é andamento.
+ *
+ * O MARCADOR DIZ QUANTO FALTA, e não só que faltou. Quem lê precisa saber se
+ * perdeu duas páginas ou duzentas — é a diferença entre uma ressalva e uma
+ * análise que não deveria concluir nada.
  */
 function cortar(texto: string, max: number): string {
   if (texto.length <= max) return texto;
   const inicio = Math.floor(max * 0.6);
+  const omitidos = texto.length - max;
   return (
     texto.slice(0, inicio) +
-    "\n\n[...TRECHO DO MEIO OMITIDO POR TAMANHO...]\n\n" +
+    `\n\n${MARCA_CORTE}: ${omitidos.toLocaleString("pt-BR")} caracteres deste arquivo não vieram...]\n\n` +
     texto.slice(texto.length - (max - inicio))
   );
 }
@@ -74,7 +90,11 @@ Deno.serve(async (req) => {
     let usado = 0;
     const arquivos: { nome: string; paginas: number; texto: string }[] = [];
     const deFora: string[] = [];
-    for (const a of brutos) {
+    const cortados: { nome: string; de: number; para: number }[] = [];
+    for (let i = 0; i < brutos.length; i++) {
+      const a = brutos[i];
+      // O que precisa sobrar para os arquivos que ainda vêm.
+      const reservado = (brutos.length - i - 1) * RESERVA_POR_ARQUIVO;
       // LIMPO ANTES DE QUALQUER OUTRA COISA: texto de PDF traz NUL, e o
       // Postgres nao guarda NUL nem em jsonb nem em text. Sem esta passagem a
       // gravacao morria com "unsupported Unicode escape sequence" — e o erro
@@ -82,8 +102,12 @@ Deno.serve(async (req) => {
       const nome = limparParaOBanco((a as any)?.nome) || "arquivo sem nome";
       const texto = limparParaOBanco((a as any)?.texto).trim();
       if (!texto) { deFora.push(`${nome} (sem texto legível)`); continue; }
-      if (usado >= MAX_TOTAL) { deFora.push(`${nome} (não coube no limite total)`); continue; }
-      const cortado = cortar(texto, Math.min(MAX_POR_ARQUIVO, MAX_TOTAL - usado));
+      const teto = Math.max(0, MAX_TOTAL - usado - reservado);
+      if (teto === 0) { deFora.push(`${nome} (não coube no limite total)`); continue; }
+      const cortado = cortar(texto, teto);
+      if (cortado.length < texto.length) {
+        cortados.push({ nome, de: texto.length, para: teto });
+      }
       usado += cortado.length;
       arquivos.push({ nome, paginas: Number((a as any)?.paginas ?? 0) || 0, texto: cortado });
     }
@@ -107,7 +131,16 @@ Deno.serve(async (req) => {
     });
     if (error) return json({ erro: `Não consegui guardar os autos: ${error.message}` }, 500);
 
-    return json({ pronto: true, guardados: arquivos.length, caracteres: usado, de_fora: deFora });
+    // A RESPOSTA CONTA O QUE FALTOU, e quem a ignorar mente para quem opera: a
+    // tela dizia "N arquivo(s) à disposição" contando os LIDOS, não os
+    // entregues, e nada dizia que um deles tinha sido cortado pelo meio.
+    return json({
+      pronto: true,
+      guardados: arquivos.length,
+      caracteres: usado,
+      de_fora: deFora,
+      cortados,
+    });
   } catch (e) {
     return json({ erro: String((e as Error)?.message ?? e) }, 500);
   }
