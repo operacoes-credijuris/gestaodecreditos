@@ -1,26 +1,66 @@
 import { describe, it, expect } from 'vitest'
 import {
+  buscarNosAutos,
+  COMO_LER_OS_AUTOS,
   FORMA_DA_ENTREGA,
-  MARCA_CORTE,
+  lerPaginas,
   montarEntrega,
+  paginasDoArquivo,
+  textoDaBusca,
+  textoDoArquivo,
   type AutosGuardados,
 } from '../../../supabase/functions/_shared/entregaDosAutos.ts'
 
 /**
- * O QUE A FERRAMENTA ENTREGA quando o Claude vem buscar os autos.
+ * O QUE O CONECTOR ENTREGA quando o Claude vem buscar os autos.
  *
- * Este texto decide como a análise sai — o método que ela segue, onde ela é
- * escrita e o que nela é prova. Vale testar, e não conferir a olho.
+ * A PRIMEIRA VERSÃO ERA PIOR QUE O MÉTODO MANUAL que veio substituir. Quando
+ * alguém subia o PDF no Claude, o arquivo ficava FORA da conversa e o modelo
+ * abria o que precisava; a ferramenta tentava empurrar tudo PARA DENTRO da
+ * janela, e um processo de 341 páginas chegava cortado pelo meio, com um quinto
+ * do conteúdo. Estes testes guardam a correção: o material fica inteiro, e a
+ * conversa recebe o que cabe mais o caminho para o resto.
  */
 const guardado: AutosGuardados = {
   lead_id: 15269795,
   titulo: 'Dr. Gabriel Perin - Kauá Henrique Silva Barros - 5012860-38.2023.4.03.6105 - Honorários contratuais - 30%',
   criado_em: '2026-09-11T03:12:00.000Z',
   arquivos: [
-    { nome: 'processo.pdf', paginas: 239, texto: 'TEOR DOS AUTOS PRINCIPAIS' },
-    { nome: 'requisitorio.pdf', paginas: 3, texto: 'TEOR DO REQUISITORIO' },
+    {
+      nome: 'processo.pdf',
+      paginas: 3,
+      paginasTexto: [
+        'PETIÇÃO INICIAL do feito',
+        'DESPACHO que defere a CESSÃO de crédito',
+        'ALVARÁ de levantamento expedido',
+      ],
+    },
+    { nome: 'requisitorio.pdf', paginas: 1, paginasTexto: ['OFÍCIO REQUISITÓRIO'] },
   ],
 }
+
+describe('o formato do que fica guardado', () => {
+  // PÁGINA A PÁGINA é o formato de verdade: é o que permite citar a fonte que o
+  // roteiro exige em todo campo da ficha.
+  it('lê as páginas do formato novo', () => {
+    expect(paginasDoArquivo(guardado.arquivos[0])).toHaveLength(3)
+    expect(textoDoArquivo(guardado.arquivos[0])).toContain('PETIÇÃO INICIAL')
+    expect(textoDoArquivo(guardado.arquivos[0])).toContain('ALVARÁ')
+  })
+
+  // O FORMATO ANTIGO AINDA É LIDO: as linhas do balcão duram duas horas, e
+  // exigir que as duas pontas subissem no mesmo instante quebraria as que
+  // estivessem em voo.
+  it('lê o bloco único do formato antigo como uma página', () => {
+    const velho = { nome: 'x.pdf', paginas: 9, texto: 'TUDO NUM BLOCO' }
+    expect(paginasDoArquivo(velho)).toEqual(['TUDO NUM BLOCO'])
+    expect(textoDoArquivo(velho)).toBe('TUDO NUM BLOCO')
+  })
+
+  it('arquivo sem texto nenhum não vira página vazia', () => {
+    expect(paginasDoArquivo({ nome: 'x.pdf', paginas: 0 })).toEqual([])
+  })
+})
 
 describe('montarEntrega', () => {
   // A ORDEM É O ARGUMENTO: o método antes do material. O roteiro diz o que fazer
@@ -28,17 +68,62 @@ describe('montarEntrega', () => {
   it('põe o método antes dos autos', () => {
     const t = montarEntrega(guardado)
     expect(t.indexOf('# PROMPT — Qualificação Jurídica Preliminar')).toBe(0)
-    expect(t.indexOf('FORMA DA ENTREGA')).toBeLessThan(t.indexOf('## AUTOS ANEXOS'))
-    expect(t.indexOf('## DADOS DO CARD')).toBeLessThan(t.indexOf('## AUTOS ANEXOS'))
+    expect(t.indexOf('FORMA DA ENTREGA')).toBeLessThan(t.indexOf('## AUTOS'))
+    expect(t.indexOf('## DADOS DO CARD')).toBeLessThan(t.indexOf('## AUTOS'))
   })
 
-  it('entrega todos os arquivos, numerados e na ordem', () => {
+  // SEM A INSTRUÇÃO DE COMO LER, a leitura integral da regra [9].7 seria cumprida
+  // só na aparência: o modelo leria o que chegou e concluiria.
+  it('ensina a buscar o que não veio', () => {
     const t = montarEntrega(guardado)
-    expect(t).toContain('=== ARQUIVO 1/2: processo.pdf (239 páginas) ===')
-    expect(t).toContain('=== ARQUIVO 2/2: requisitorio.pdf (3 páginas) ===')
-    expect(t).toContain('TEOR DOS AUTOS PRINCIPAIS')
-    expect(t).toContain('TEOR DO REQUISITORIO')
-    expect(t.indexOf('processo.pdf')).toBeLessThan(t.indexOf('requisitorio.pdf'))
+    expect(t).toContain(COMO_LER_OS_AUTOS)
+    expect(t).toContain('ler_paginas')
+    expect(t).toContain('buscar_nos_autos')
+  })
+
+  it('traz o índice com o tamanho de cada arquivo', () => {
+    const t = montarEntrega(guardado)
+    expect(t).toContain('## ÍNDICE DOS ARQUIVOS')
+    expect(t).toContain('processo.pdf')
+    expect(t).toContain('requisitorio.pdf')
+  })
+
+  it('entrega inteiros os arquivos que cabem', () => {
+    const t = montarEntrega(guardado)
+    expect(t).toContain('=== ARQUIVO: processo.pdf (3 páginas) ===')
+    expect(t).toContain('ALVARÁ de levantamento expedido')
+    expect(t).toContain('OFÍCIO REQUISITÓRIO')
+  })
+
+  /**
+   * O QUE NÃO CABE NÃO É MUTILADO — é anunciado.
+   *
+   * Antes, o arquivo grande vinha cortado pelo meio com um marcador no miolo:
+   * quem lesse a primeira metade e concluísse nunca passava pelo aviso. Agora ele
+   * não vem, aparece no índice com o tamanho e o modelo recebe a ordem de ir
+   * buscá-lo.
+   */
+  it('o arquivo que não cabe fica de fora inteiro, e é anunciado', () => {
+    const t = montarEntrega(guardado, undefined, 30)
+    expect(t).toContain('**não — leia com `ler_paginas`**')
+    expect(t).toContain('não vieram nesta mensagem por tamanho')
+    expect(t).not.toContain('PETIÇÃO INICIAL do feito')
+    // E o índice continua dizendo que ele existe e quanto tem.
+    expect(t).toContain('processo.pdf')
+  })
+
+  // ARQUIVO PEQUENO ATRÁS DE UM GRANDE CONTINUA ENTRANDO: o grande é pulado, não
+  // é cortado, então o orçamento que ele não usou fica para os seguintes.
+  it('o arquivo grande não come o pequeno', () => {
+    const t = montarEntrega(guardado, undefined, 40)
+    expect(t).not.toContain('DESPACHO que defere')
+    expect(t).toContain('OFÍCIO REQUISITÓRIO')
+  })
+
+  it('cabendo tudo, não há aviso de falta', () => {
+    const t = montarEntrega(guardado)
+    expect(t).not.toContain('não vieram nesta mensagem')
+    expect(t).toContain('sim, inteiro')
   })
 
   // CADASTRO NÃO É PROVA, e o texto tem de dizer isso: o roteiro exige documento
@@ -66,9 +151,7 @@ describe('montarEntrega', () => {
     const t = montarEntrega(guardado, '# ROTEIRO NOVO DA CASA')
     expect(t.indexOf('# ROTEIRO NOVO DA CASA')).toBe(0)
     expect(t).not.toContain('# PROMPT — Qualificação Jurídica Preliminar')
-    // O resto da entrega não depende de qual roteiro está em vigor.
-    expect(t).toContain('FORMA DA ENTREGA')
-    expect(t).toContain('TEOR DOS AUTOS PRINCIPAIS')
+    expect(t).toContain('OFÍCIO REQUISITÓRIO')
   })
 
   it('roteiro vazio ou em branco cai no padrão do sistema', () => {
@@ -77,71 +160,79 @@ describe('montarEntrega', () => {
         '# PROMPT — Qualificação Jurídica Preliminar',
       )
     }
-    expect(montarEntrega(guardado)).toContain('# PROMPT — Qualificação Jurídica Preliminar')
-  })
-
-  it('arquivo sem contagem de páginas não inventa uma', () => {
-    const t = montarEntrega({
-      ...guardado,
-      arquivos: [{ nome: 'anexo.pdf', paginas: 0, texto: 'x' }],
-    })
-    expect(t).toContain('=== ARQUIVO 1/1: anexo.pdf ===')
-    expect(t).not.toContain('0 páginas')
   })
 })
 
-describe('o aviso de entrega incompleta', () => {
+describe('lerPaginas', () => {
+  it('devolve o intervalo pedido, com o número de cada página', () => {
+    const t = lerPaginas(guardado, 'processo.pdf', 2, 3)
+    expect(t).toContain('processo.pdf — páginas 2 a 3 de 3')
+    expect(t).toContain('--- página 2 ---')
+    expect(t).toContain('DESPACHO que defere')
+    expect(t).toContain('ALVARÁ')
+    expect(t).not.toContain('PETIÇÃO INICIAL')
+  })
+
+  // O NOME VEM DIGITADO PELO MODELO, de memória: acento e caixa não podem
+  // quebrar, e a posição no índice é a saída quando o nome é feio.
+  it('acha o arquivo pela posição e por parte do nome', () => {
+    expect(lerPaginas(guardado, '2', 1, 1)).toContain('OFÍCIO REQUISITÓRIO')
+    expect(lerPaginas(guardado, 'REQUISITORIO', 1, 1)).toContain('OFÍCIO REQUISITÓRIO')
+  })
+
+  // ARQUIVO QUE NÃO EXISTE DEVOLVE A LISTA, e não um "não achei" seco: o modelo
+  // erra o nome e precisa do certo para tentar de novo.
+  it('arquivo inexistente devolve os nomes que existem', () => {
+    const t = lerPaginas(guardado, 'contrato.pdf', 1, 1)
+    expect(t).toContain('Não há arquivo')
+    expect(t).toContain('1. processo.pdf')
+    expect(t).toContain('2. requisitorio.pdf')
+  })
+
+  it('página além do fim diz quantas existem', () => {
+    expect(lerPaginas(guardado, 'processo.pdf', 99, 100)).toContain('tem 3 páginas')
+  })
+})
+
+describe('buscarNosAutos', () => {
   /**
-   * O MARCADOR DO CORTE FICA NO MIOLO DO ARQUIVO, e quem lê pode chegar à
-   * conclusão sem nunca passar por ele. Foi o que aconteceu: um processo de 341
-   * páginas entrou cortado, e a análise só descobriu porque o modelo topou com a
-   * marcação no meio do texto.
-   *
-   * O aviso no TOPO transforma a falta num fato da análise — e diz o que fazer
-   * com ela nos termos do próprio roteiro.
+   * É O CAMINHO DOS EIXOS DE VARREDURA. O Eixo 2 é literalmente uma lista de
+   * termos, e o Eixo 7 outra; sem isto, cumpri-los num processo de trezentas
+   * páginas exigia despejar o processo inteiro para achar três parágrafos.
    */
-  const comCorte = (): AutosGuardados => ({
-    ...guardado,
-    arquivos: [
-      {
-        nome: 'processo.pdf',
-        paginas: 341,
-        texto: `INÍCIO\n\n${MARCA_CORTE}: 205.000 caracteres deste arquivo não vieram...]\n\nFIM`,
-      },
-      { nome: 'requisitorio.pdf', paginas: 3, texto: 'INTEIRO' },
-    ],
+  it('acha o termo e devolve a página', () => {
+    const achados = buscarNosAutos(guardado, 'cessão')
+    expect(achados).toHaveLength(1)
+    expect(achados[0].arquivo).toBe('processo.pdf')
+    expect(achados[0].pagina).toBe(2)
+    expect(achados[0].trecho).toContain('DESPACHO')
   })
 
-  it('não existe quando tudo coube', () => {
-    const t = montarEntrega(guardado)
-    expect(t).not.toContain('ENTREGA INCOMPLETA')
-    // E o roteiro continua sendo a primeira coisa lida.
-    expect(t.indexOf('# PROMPT — Qualificação Jurídica Preliminar')).toBe(0)
+  it('acento e caixa não atrapalham', () => {
+    expect(buscarNosAutos(guardado, 'CESSAO')).toHaveLength(1)
+    expect(buscarNosAutos(guardado, 'alvara')[0].pagina).toBe(3)
   })
 
-  it('abre a entrega e nomeia só os arquivos cortados', () => {
-    const t = montarEntrega(comCorte())
-    expect(t.indexOf('ENTREGA INCOMPLETA')).toBeLessThan(
-      t.indexOf('# PROMPT — Qualificação Jurídica Preliminar'),
-    )
-    const aviso = t.slice(0, t.indexOf('# PROMPT'))
-    expect(aviso).toContain('processo.pdf')
-    expect(aviso).toContain('341 páginas no original')
-    expect(aviso).not.toContain('requisitorio.pdf')
+  it('termo vazio não procura nada', () => {
+    expect(buscarNosAutos(guardado, '   ')).toEqual([])
   })
 
-  // O AVISO FALA A LÍNGUA DO ROTEIRO: sem citar a fase e o veredito, ele vira
-  // uma observação que a análise pode contornar.
-  it('diz o que fazer com a falta, nos termos do roteiro', () => {
-    const aviso = montarEntrega(comCorte())
-    expect(aviso).toContain('FASE 4')
-    expect(aviso).toContain('INCONCLUSIVO POR INSUFICIÊNCIA DOCUMENTAL')
+  /**
+   * AUSÊNCIA É RESPOSTA VÁLIDA e o roteiro depende dela — o Eixo 2 exige a
+   * declaração expressa de que nada foi localizado. Mas ela vale sobre o TEXTO:
+   * página digitalizada não tem texto para procurar, e dizer só "não achei"
+   * convidaria a análise a afirmar uma inexistência que ela não verificou.
+   */
+  it('não achando, ressalva o processo digitalizado', () => {
+    const t = textoDaBusca(guardado, 'penhora')
+    expect(t).toContain('Nenhuma ocorrência')
+    expect(t).toContain('digitalizada não tem texto')
   })
 
-  it('os arquivos continuam inteiros depois do aviso', () => {
-    const t = montarEntrega(comCorte())
-    expect(t).toContain('=== ARQUIVO 1/2: processo.pdf (341 páginas) ===')
-    expect(t).toContain('INTEIRO')
+  it('achando, escreve arquivo e página', () => {
+    const t = textoDaBusca(guardado, 'alvará')
+    expect(t).toContain('1 ocorrência(s)')
+    expect(t).toContain('processo.pdf — página 3')
   })
 })
 

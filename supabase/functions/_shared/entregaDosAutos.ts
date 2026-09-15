@@ -1,31 +1,72 @@
-// O QUE A FERRAMENTA `autos_do_credito` ENTREGA, montado.
+// O QUE O CONECTOR ENTREGA quando o Claude vem buscar os autos.
 //
-// Três partes, nesta ordem: o MÉTODO, a FORMA DA ENTREGA e o material — o
-// CADASTRO do card e os AUTOS.
+// O ERRO QUE ESTE ARQUIVO CONSERTA. A primeira versão tentava empurrar o
+// processo INTEIRO para dentro da janela da conversa, de uma vez. Isso é pior do
+// que o método manual que ela veio substituir: quando alguém subia o PDF no
+// Claude, o arquivo ficava FORA da conversa e o modelo abria o que precisava.
+// Empurrando tudo, apareceu um teto que o método antigo não tinha — e um
+// processo de 341 páginas chegava cortado pelo meio, com 20% do conteúdo.
 //
-// AQUI E NÃO DENTRO DA FUNÇÃO, porque assim o mesmo arquivo roda no vitest do
-// site: é um módulo puro, sem `npm:` e sem `Deno.`. O que este texto diz decide
-// como a análise sai — e isso merece teste, não conferência a olho.
+// ENTÃO A FERRAMENTA PASSA A SE PARECER COM O ARQUIVO. Os autos ficam
+// guardados inteiros, PÁGINA A PÁGINA, e a conversa recebe de uma vez só o que
+// cabe com folga. O que não cabe não se perde: fica anunciado no índice, e o
+// modelo o lê por página ou o procura por termo, como faria com um documento
+// aberto ao lado.
+//
+// A PAGINAÇÃO TAMBÉM PAGA OUTRA DÍVIDA: o roteiro exige "valor + fonte
+// (documento e página aproximada)" em cada campo da ficha. Com o texto num bloco
+// só, a página era palpite. Agora é dado.
+//
+// MÓDULO PURO — sem `npm:` e sem `Deno.` —, então o mesmo arquivo roda no vitest
+// do site. O que este texto diz decide como a análise sai, e isso merece teste.
 
 import { ROTEIRO_QUALIFICACAO } from './roteiroQualificacao.ts'
 
-/**
- * O começo do marcador que a `autos-guardar` deixa no lugar do que cortou.
- *
- * UMA FONTE SÓ PARA OS DOIS LADOS: quem corta escreve, quem monta a entrega
- * procura. Escrito duas vezes, bastaria mudar a frase de um lado para o aviso do
- * topo parar de aparecer — e a falta voltaria a ser visível só para quem lesse o
- * arquivo inteiro até o meio.
- */
-export const MARCA_CORTE = '[...TRECHO DO MEIO OMITIDO POR TAMANHO'
+export interface ArquivoGuardado {
+  nome: string
+  paginas: number
+  /**
+   * O texto de cada página, na ordem.
+   *
+   * É O FORMATO DE VERDADE: permite citar a página, ler um intervalo e dizer
+   * onde um termo apareceu. O navegador já extraía assim (pdf.js devolve por
+   * página) e a informação era jogada fora ao juntar tudo num bloco.
+   */
+  paginasTexto?: string[]
+  /** Formato antigo, de linha gravada antes da paginação. Ainda lido. */
+  texto?: string
+}
 
-/** Uma linha do balcão: os autos de um card esperando serem buscados. */
 export interface AutosGuardados {
   lead_id: number
   titulo: string
-  arquivos: { nome: string; paginas: number; texto: string }[]
+  arquivos: ArquivoGuardado[]
   criado_em: string
 }
+
+/** As páginas de um arquivo, venha ele no formato novo ou no antigo. */
+export function paginasDoArquivo(a: ArquivoGuardado): string[] {
+  if (Array.isArray(a.paginasTexto) && a.paginasTexto.length > 0) return a.paginasTexto
+  return a.texto ? [a.texto] : []
+}
+
+/** O arquivo inteiro, com as páginas coladas na ordem. */
+export function textoDoArquivo(a: ArquivoGuardado): string {
+  return paginasDoArquivo(a).join('\n')
+}
+
+/**
+ * O QUE CABE NA PRIMEIRA ENTREGA, em caracteres.
+ *
+ * Não é o tamanho do que a plataforma guarda — isso é muito maior. É quanto do
+ * material entra na conversa DE UMA VEZ, deixando janela para o roteiro, para a
+ * análise inteira e para a conversa que vem depois dela. O resto continua
+ * inteiro do outro lado, a uma chamada de distância.
+ */
+export const ORCAMENTO_DA_PRIMEIRA_ENTREGA = 250_000
+
+/** Teto de uma leitura por páginas, para uma chamada não estourar a janela. */
+export const MAX_POR_LEITURA = 120_000
 
 /**
  * A FORMA DA ENTREGA — regra desta esteira, não do roteiro.
@@ -54,43 +95,69 @@ export const FORMA_DA_ENTREGA = [
 ].join('\n')
 
 /**
- * O texto que o modelo vai ler.
+ * COMO LER OS AUTOS — a instrução que substitui o processo manual.
+ *
+ * Ela existe porque a leitura integral que o roteiro exige (regra [9].7) deixou
+ * de ser "ler o que veio na mensagem": parte do material pode estar do outro
+ * lado das outras duas ferramentas. Sem dizer isso, o modelo leria o que
+ * chegou, concluiria, e a regra teria sido cumprida só na aparência.
+ */
+export const COMO_LER_OS_AUTOS = [
+  '## COMO LER OS AUTOS',
+  '',
+  'Os autos estão guardados INTEIROS, página a página. O que coube veio abaixo; o',
+  'que não coube está a uma chamada de distância, e é seu dever ir buscá-lo — a',
+  'leitura integral prévia da regra [9].7 vale sobre o processo, não sobre o que',
+  'chegou nesta primeira mensagem.',
+  '',
+  '- `ler_paginas` devolve um intervalo de páginas de um arquivo. Use para ler por',
+  '  inteiro o que ficou de fora, e para conferir o entorno de um achado.',
+  '- `buscar_nos_autos` procura um termo em todos os arquivos e devolve os trechos',
+  '  COM O NÚMERO DA PÁGINA. É o caminho dos eixos que são busca textual — o Eixo 2',
+  '  ("cessão", "cessionário", "habilitação", "reserva de crédito", "expeça-se em',
+  '  nome de") e o Eixo 7 (alvarás, depósitos, levantamentos).',
+  '',
+  'CITE A PÁGINA que a ferramenta devolveu. O roteiro pede fonte com página em',
+  'todo campo da ficha, e agora ela é dado, não estimativa.',
+].join('\n')
+
+/** Uma linha do índice: o que existe, quanto tem e se já veio. */
+interface LinhaDoIndice {
+  nome: string
+  paginas: number
+  caracteres: number
+  inteiro: boolean
+}
+
+function indice(linhas: LinhaDoIndice[]): string {
+  const num = (n: number) => n.toLocaleString('pt-BR')
+  return [
+    '## ÍNDICE DOS ARQUIVOS',
+    '',
+    '| # | Arquivo | Páginas | Caracteres | Nesta mensagem |',
+    '|---|---------|--------:|-----------:|----------------|',
+    ...linhas.map(
+      (l, i) =>
+        `| ${i + 1} | ${l.nome} | ${l.paginas || '—'} | ${num(l.caracteres)} | ${
+          l.inteiro ? 'sim, inteiro' : '**não — leia com `ler_paginas`**'
+        } |`,
+    ),
+  ].join('\n')
+}
+
+/**
+ * A primeira entrega: o método, o cadastro, o índice e o que couber dos autos.
  *
  * O ROTEIRO VEM PRIMEIRO porque diz o que fazer com tudo que vem depois. O
  * CADASTRO vem rotulado como cadastro e separado dos autos: o título do card é o
  * que o comercial escreveu, e o roteiro exige documento e página para cada campo
  * da ficha — oferecer um como o outro é o que a regra de ancoragem proíbe.
- */
-/**
- * O aviso de entrega incompleta, quando algum arquivo veio cortado.
  *
- * NO TOPO, E NÃO SÓ NO MEIO DO TEXTO. O marcador do corte fica onde o corte
- * aconteceu — no miolo do arquivo —, e quem lê pode chegar à conclusão sem
- * nunca ter passado por ele. Isto aqui é o que transforma a falta num FATO da
- * análise: entra antes do método, é lido antes de tudo, e diz o que fazer com
- * ela nos termos do próprio roteiro.
+ * O QUE NÃO COUBER NÃO É CORTADO PELO MEIO. Antes era, e o resultado era um
+ * arquivo mutilado com um aviso no miolo. Agora um arquivo vem inteiro ou não
+ * vem — e o que não veio está no índice, nomeado, com o tamanho, e o modelo sabe
+ * como buscá-lo.
  */
-function avisoDeCorte(g: AutosGuardados): string {
-  const cortados = g.arquivos.filter((a) => (a.texto ?? '').includes(MARCA_CORTE))
-  if (cortados.length === 0) return ''
-  return [
-    '> **ENTREGA INCOMPLETA — LEIA ANTES DE COMEÇAR**',
-    '>',
-    '> Os arquivos abaixo não couberam inteiros e vieram cortados pelo meio:',
-    ...cortados.map((a) => `> - ${a.nome}${a.paginas > 0 ? ` (${a.paginas} páginas no original)` : ''}`),
-    '>',
-    '> O trecho que falta está marcado dentro do próprio arquivo, com a contagem',
-    '> do que ficou de fora. Registre a lacuna na FASE 4 (pendências documentais),',
-    '> nomeando o arquivo, e trate como NÃO VERIFICÁVEL tudo que dependeria do',
-    '> trecho ausente. Se a falta alcançar os campos 5, 6, 8 ou 10 da Ficha, o',
-    '> veredito é INCONCLUSIVO POR INSUFICIÊNCIA DOCUMENTAL — a regra de corte da',
-    '> Fase 1 vale aqui como valeria para um documento não anexado.',
-    '',
-    '---',
-    '',
-  ].join('\n')
-}
-
 export function montarEntrega(
   g: AutosGuardados,
   /**
@@ -101,14 +168,26 @@ export function montarEntrega(
    * no padrão versionado. Nenhuma análise roda sem método.
    */
   roteiro: string = ROTEIRO_QUALIFICACAO,
+  orcamento: number = ORCAMENTO_DA_PRIMEIRA_ENTREGA,
 ): string {
-  const aviso = avisoDeCorte(g)
+  // QUEM CABE VEM INTEIRO, na ordem da Kommo. Arquivo pequeno atrás de um
+  // grande continua entrando: o grande é pulado, não é cortado.
+  let usado = 0
+  const linhas: LinhaDoIndice[] = []
+  const corpos: string[] = []
+  for (const a of g.arquivos) {
+    const texto = textoDoArquivo(a)
+    const cabe = texto.length > 0 && usado + texto.length <= orcamento
+    linhas.push({ nome: a.nome, paginas: a.paginas, caracteres: texto.length, inteiro: cabe })
+    if (!cabe) continue
+    usado += texto.length
+    const paginas = a.paginas > 0 ? ` (${a.paginas} páginas)` : ''
+    corpos.push(`\n\n=== ARQUIVO: ${a.nome}${paginas} ===\n\n${texto}`)
+  }
+
+  const faltando = linhas.filter((l) => !l.inteiro)
+
   const cabeca = [
-    // ANTES DO MÉTODO, de propósito: é a única coisa aqui que muda o que se pode
-    // concluir. ESPALHADO, e não posto como item vazio: uma entrada em branco
-    // vira uma quebra de linha no `join`, e a entrega passaria a começar com uma
-    // linha vazia sempre que estivesse completa.
-    ...(aviso ? [aviso] : []),
     (roteiro || '').trim() || ROTEIRO_QUALIFICACAO,
     '',
     '---',
@@ -117,12 +196,16 @@ export function montarEntrega(
     '',
     '---',
     '',
+    COMO_LER_OS_AUTOS,
+    '',
+    '---',
+    '',
     '## DADOS DO CARD (cadastro do comercial — NÃO é fonte documental)',
     '',
     'O título do card segue o formato `[intermediador] - [cedente] - [nº CNJ] - ' +
       '[parcela cedida] - [% de honorários contratuais]`, e neste crédito está assim:',
     '',
-    '> ' + (g.titulo || '(card sem título)'),
+    `> ${g.titulo || '(card sem título)'}`,
     '',
     'Use-o para preencher o que puder do bloco [0]. Ele NÃO substitui os autos em',
     'nenhum campo da Ficha de Identificação: divergência entre o card e os autos é,',
@@ -130,17 +213,155 @@ export function montarEntrega(
     '',
     '---',
     '',
-    '## AUTOS ANEXOS',
+    indice(linhas),
     '',
-    'Card Kommo ' + g.lead_id + ' · ' + g.arquivos.length + ' arquivo(s) · lidos da Kommo em ' + g.criado_em,
+    `Card Kommo ${g.lead_id} · lidos da Kommo em ${g.criado_em}`,
+    ...(faltando.length > 0
+      ? [
+          '',
+          `> **${faltando.length} arquivo(s) não vieram nesta mensagem por tamanho.**`,
+          '> Eles estão guardados inteiros. Leia-os com `ler_paginas` antes de',
+          '> concluir qualquer coisa que dependa deles, e use `buscar_nos_autos`',
+          '> para os eixos de varredura. Não trate como inexistente o que você',
+          '> ainda não pediu.',
+        ]
+      : []),
+    '',
+    '---',
+    '',
+    '## AUTOS',
   ].join('\n')
 
-  const corpo = g.arquivos.map((a, i) => {
-    const paginas = a.paginas > 0 ? ' (' + a.paginas + ' páginas)' : ''
-    return (
-      '\n\n=== ARQUIVO ' + (i + 1) + '/' + g.arquivos.length + ': ' + a.nome + paginas + ' ===\n\n' + a.texto
-    )
-  })
+  return cabeca + corpos.join('')
+}
 
-  return cabeca + corpo.join('')
+/** Acha um arquivo pelo nome (parcial, sem acento/caixa) ou pela posição (1-based). */
+function acharArquivo(g: AutosGuardados, alvo: string): ArquivoGuardado | undefined {
+  const cru = String(alvo ?? '').trim()
+  if (!cru) return undefined
+  const n = Number(cru)
+  if (Number.isInteger(n) && n >= 1 && n <= g.arquivos.length) return g.arquivos[n - 1]
+  const chave = normalizar(cru)
+  return (
+    g.arquivos.find((a) => normalizar(a.nome) === chave) ??
+    g.arquivos.find((a) => normalizar(a.nome).includes(chave))
+  )
+}
+
+/** Sem acento, sem caixa: o nome do arquivo é digitado pelo modelo, de memória. */
+function normalizar(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+/**
+ * Um intervalo de páginas de um arquivo.
+ *
+ * O TETO É POR CHAMADA, e não pelo que existe: pedir mais do que cabe devolve o
+ * que cabe e DIZ onde parou, com a página seguinte a pedir. Uma leitura que se
+ * interrompe em silêncio é o defeito que esta entrega inteira veio corrigir.
+ */
+export function lerPaginas(
+  g: AutosGuardados,
+  arquivo: string,
+  de: number,
+  ate: number,
+): string {
+  const a = acharArquivo(g, arquivo)
+  if (!a) {
+    const nomes = g.arquivos.map((x, i) => `${i + 1}. ${x.nome}`).join('\n')
+    return `Não há arquivo "${arquivo}" neste crédito. Os arquivos são:\n${nomes}`
+  }
+  const paginas = paginasDoArquivo(a)
+  if (paginas.length === 0) return `O arquivo "${a.nome}" não tem texto legível.`
+
+  const ini = Math.max(1, Math.floor(de) || 1)
+  const fim = Math.min(paginas.length, Math.floor(ate) || paginas.length)
+  if (ini > paginas.length) {
+    return `O arquivo "${a.nome}" tem ${paginas.length} páginas; a ${ini} não existe.`
+  }
+
+  const partes: string[] = []
+  let usado = 0
+  let ultima = ini - 1
+  for (let p = ini; p <= fim; p++) {
+    const texto = paginas[p - 1] ?? ''
+    if (usado + texto.length > MAX_POR_LEITURA && partes.length > 0) break
+    partes.push(`\n\n--- página ${p} ---\n\n${texto}`)
+    usado += texto.length
+    ultima = p
+  }
+
+  const cabeca = `${a.nome} — páginas ${ini} a ${ultima} de ${paginas.length}`
+  const resto =
+    ultima < fim
+      ? `\n\n[A leitura parou na página ${ultima} por tamanho. Peça de ${ultima + 1} a ${fim} para continuar.]`
+      : ''
+  return cabeca + partes.join('') + resto
+}
+
+/** Uma ocorrência do termo procurado. */
+export interface Ocorrencia {
+  arquivo: string
+  pagina: number
+  trecho: string
+}
+
+/**
+ * Procura um termo em todos os arquivos, e devolve a PÁGINA de cada ocorrência.
+ *
+ * É O CAMINHO DOS EIXOS DE VARREDURA. O Eixo 2 é literalmente uma lista de
+ * termos ("cessão", "cessionário", "habilitação", "reserva de crédito") e o
+ * Eixo 7 outra; sem isto, cumpri-los num processo de trezentas páginas exigia
+ * despejar o processo inteiro na conversa para achar três parágrafos.
+ */
+export function buscarNosAutos(
+  g: AutosGuardados,
+  termo: string,
+  maxOcorrencias = 40,
+  margem = 400,
+): Ocorrencia[] {
+  const alvo = normalizar(termo)
+  if (!alvo) return []
+  const achados: Ocorrencia[] = []
+  for (const a of g.arquivos) {
+    const paginas = paginasDoArquivo(a)
+    for (let p = 0; p < paginas.length; p++) {
+      const texto = paginas[p] ?? ''
+      const onde = normalizar(texto).indexOf(alvo)
+      if (onde < 0) continue
+      const ini = Math.max(0, onde - margem)
+      const fim = Math.min(texto.length, onde + alvo.length + margem)
+      achados.push({
+        arquivo: a.nome,
+        // A página é 1-based para quem lê — é assim que ela será citada.
+        pagina: p + 1,
+        trecho: (ini > 0 ? '…' : '') + texto.slice(ini, fim).trim() + (fim < texto.length ? '…' : ''),
+      })
+      if (achados.length >= maxOcorrencias) return achados
+    }
+  }
+  return achados
+}
+
+/** A busca, escrita para quem vai ler. */
+export function textoDaBusca(g: AutosGuardados, termo: string): string {
+  const achados = buscarNosAutos(g, termo)
+  if (achados.length === 0) {
+    // AUSÊNCIA É RESPOSTA VÁLIDA, e o roteiro depende dela: o Eixo 2 exige a
+    // declaração expressa de que nada foi localizado. Mas ela vale sobre o que
+    // está NO TEXTO — e um processo digitalizado não tem texto para procurar.
+    return (
+      `Nenhuma ocorrência de "${termo}" no texto dos autos deste crédito ` +
+      `(${g.arquivos.length} arquivo(s)). Ausência no texto não é prova de ausência ` +
+      `nos autos: página digitalizada não tem texto para procurar.`
+    )
+  }
+  return [
+    `${achados.length} ocorrência(s) de "${termo}":`,
+    ...achados.map((o) => `\n\n### ${o.arquivo} — página ${o.pagina}\n\n${o.trecho}`),
+  ].join('')
 }

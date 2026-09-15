@@ -23,7 +23,12 @@
 // endpoint não servir de sonda.
 
 import { serviceClient } from "../_shared/auth.ts";
-import { type AutosGuardados, montarEntrega } from "../_shared/entregaDosAutos.ts";
+import {
+  type AutosGuardados,
+  lerPaginas,
+  montarEntrega,
+  textoDaBusca,
+} from "../_shared/entregaDosAutos.ts";
 
 /** A chave do roteiro na tabela que a operação edita (ver migration 0065). */
 const CHAVE_ROTEIRO = "qualificacao_preliminar";
@@ -68,25 +73,73 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ESPERA_TOTAL_MS = 45_000;
 const ESPERA_PASSO_MS = 1_500;
 
-const FERRAMENTA = {
-  name: "autos_do_credito",
-  title: "Autos do crédito",
-  description:
-    "Devolve os autos de um crédito que a plataforma Credijuris pôs em análise — o texto integral dos PDFs anexados ao card do Kommo — E MAIS o roteiro da qualificação jurídica preliminar que a casa usa, que deve ser seguido à risca. " +
-    "Use sempre que a pergunta trouxer um código de análise da Credijuris: os autos são a única fonte factual da análise e o roteiro é o método. " +
-    "O código de 36 caracteres vem na própria pergunta que abriu a conversa.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      codigo: {
-        type: "string",
-        description: "O código de análise (uuid de 36 caracteres) que a plataforma pôs na pergunta.",
-      },
-    },
-    required: ["codigo"],
-    additionalProperties: false,
-  },
+const CODIGO = {
+  type: "string",
+  description: "O código de análise (uuid de 36 caracteres) que a plataforma pôs na pergunta.",
 };
+
+/**
+ * TRÊS FERRAMENTAS, E NÃO UMA, e o motivo é o que este conector veio substituir.
+ *
+ * Antes havia só uma, que tentava despejar o processo inteiro na
+ * conversa. Isso é PIOR do que o método manual que ele substituiu: quando alguém
+ * subia o PDF no Claude, o arquivo ficava fora da conversa e o modelo abria o
+ * que precisava. Despejando tudo, apareceu um teto que o método antigo não tinha
+ * — e um processo de 341 páginas chegava com um quinto do conteúdo.
+ *
+ * Agora as três juntas fazem o que o arquivo aberto ao lado fazia: uma abre o
+ * caso e diz o que existe, outra lê um trecho, a terceira procura.
+ */
+const FERRAMENTAS = [
+  {
+    name: "autos_do_credito",
+    title: "Autos do crédito",
+    description:
+      "Abre a análise de um crédito da Credijuris: devolve o roteiro de qualificação que a casa segue, os dados do card, o ÍNDICE dos arquivos anexados e o conteúdo dos que couberem nesta mensagem. " +
+      "Chame PRIMEIRO, sempre que a pergunta trouxer um código de análise. Arquivo que não couber aqui não se perdeu — leia com a ferramenta ler_paginas.",
+    inputSchema: {
+      type: "object",
+      properties: { codigo: CODIGO },
+      required: ["codigo"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ler_paginas",
+    title: "Ler páginas dos autos",
+    description:
+      "Devolve um intervalo de páginas de um arquivo dos autos, com o número de cada página. " +
+      "Use para ler por inteiro o que não coube na primeira entrega e para conferir o entorno de um achado. O arquivo pode ser indicado pelo nome ou pela posição no índice.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        codigo: CODIGO,
+        arquivo: { type: "string", description: "Nome do arquivo, ou a posição dele no índice (1, 2, 3…)." },
+        de: { type: "integer", description: "Primeira página a ler (1 é a primeira do arquivo)." },
+        ate: { type: "integer", description: "Última página a ler. Omitido, vai até onde couber." },
+      },
+      required: ["codigo", "arquivo", "de"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "buscar_nos_autos",
+    title: "Buscar nos autos",
+    description:
+      "Procura um termo no texto de TODOS os arquivos do crédito e devolve os trechos encontrados COM O NÚMERO DA PÁGINA. " +
+      "É o caminho dos eixos de varredura do roteiro — cessão, cessionário, habilitação, reserva de crédito, penhora, alvará, levantamento. " +
+      "Acento e caixa não importam. Ausência no texto não prova ausência nos autos: página digitalizada não tem texto para procurar.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        codigo: CODIGO,
+        termo: { type: "string", description: "O que procurar. Um termo por chamada." },
+      },
+      required: ["codigo", "termo"],
+      additionalProperties: false,
+    },
+  },
+];
 
 function resposta(corpo: unknown, status = 200, extras: Record<string, string> = {}) {
   return new Response(corpo === null ? null : JSON.stringify(corpo), {
@@ -110,7 +163,16 @@ function falhaDaFerramenta(texto: string) {
 
 const dorme = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function buscarAutos(codigo: string) {
+/**
+ * Os autos guardados sob um código, ou a explicação de por que não vieram.
+ *
+ * A ESPERA CONTINUA AQUI, e serve às três ferramentas: o aplicativo abre e a
+ * pergunta é enviada em segundos, enquanto a leitura dos PDFs no navegador leva
+ * mais que isso.
+ */
+async function carregarAutos(codigo: string): Promise<
+  { ok: true; g: AutosGuardados } | { ok: false; falha: ReturnType<typeof falhaDaFerramenta> }
+> {
   const db = serviceClient();
   const limite = Date.now() + ESPERA_TOTAL_MS;
   for (;;) {
@@ -119,17 +181,22 @@ async function buscarAutos(codigo: string) {
       .select("lead_id, titulo, arquivos, criado_em, expira_em")
       .eq("codigo", codigo)
       .maybeSingle();
-    if (error) return falhaDaFerramenta(`Não consegui ler o balcão dos autos: ${error.message}`);
+    if (error) {
+      return { ok: false, falha: falhaDaFerramenta(`Não consegui ler o balcão dos autos: ${error.message}`) };
+    }
 
     if (data) {
       // VENCIDO É TRATADO COMO INEXISTENTE na mensagem, mas aqui já sabemos a
       // diferença — e dizê-la ajuda quem está na conversa: reabrir a análise
       // pela plataforma resolve, tentar de novo não.
       if (new Date(String((data as any).expira_em)).getTime() < Date.now()) {
-        return falhaDaFerramenta(
-          "Este código de análise expirou (os autos ficam disponíveis por 2 horas). " +
-            "Clique de novo em “Executar análise” na plataforma Credijuris para abrir uma conversa nova.",
-        );
+        return {
+          ok: false,
+          falha: falhaDaFerramenta(
+            "Este código de análise expirou (os autos ficam disponíveis por 2 horas). " +
+              "Clique de novo em “Executar análise” na plataforma Credijuris para abrir uma conversa nova.",
+          ),
+        };
       }
       const g = data as unknown as AutosGuardados;
       if (Array.isArray(g.arquivos) && g.arquivos.length > 0) {
@@ -137,19 +204,25 @@ async function buscarAutos(codigo: string) {
           .from("analise_externa_autos")
           .update({ lido_em: new Date().toISOString() })
           .eq("codigo", codigo);
-        return {
-          content: [{ type: "text", text: montarEntrega(g, await roteiroEmVigor(db)) }],
-        };
+        return { ok: true, g };
       }
     }
 
     if (Date.now() >= limite) break;
     await dorme(ESPERA_PASSO_MS);
   }
-  return falhaDaFerramenta(
-    "Não encontrei autos para este código. Ou ele está errado, ou a plataforma ainda não terminou de ler os PDFs do card " +
-      "(processos grandes levam algum tempo). Espere alguns segundos e chame esta ferramenta de novo com o mesmo código.",
-  );
+  return {
+    ok: false,
+    falha: falhaDaFerramenta(
+      "Não encontrei autos para este código. Ou ele está errado, ou a plataforma ainda não terminou de ler os PDFs do card " +
+        "(processos grandes levam algum tempo). Espere alguns segundos e chame esta ferramenta de novo com o mesmo código.",
+    ),
+  };
+}
+
+/** O texto de uma ferramenta que deu certo. */
+function okDaFerramenta(texto: string) {
+  return { content: [{ type: "text", text: texto }] };
 }
 
 async function despachar(msg: any): Promise<unknown | null> {
@@ -166,19 +239,22 @@ async function despachar(msg: any): Promise<unknown | null> {
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVIDOR,
         instructions:
-          "Este conector entrega os autos de um crédito da Credijuris, junto com o roteiro de qualificação " +
+          "Este conector dá acesso aos autos de um crédito da Credijuris e ao roteiro de qualificação " +
           "jurídica preliminar que a casa segue. Quando a pergunta trouxer um código de análise, chame " +
-          "`autos_do_credito` com ele antes de responder, siga o roteiro que vier no resultado e " +
-          "escreva a análise na própria conversa, sem gerar arquivo nenhum.",
+          "`autos_do_credito` com ele ANTES de responder; depois use `ler_paginas` para o que não tiver " +
+          "cabido na primeira entrega e `buscar_nos_autos` para os eixos de varredura. Siga o roteiro que " +
+          "vier no resultado, cite a página de cada achado e escreva a análise na própria conversa, sem " +
+          "gerar arquivo nenhum.",
       });
     }
     case "ping":
       return okRpc(id, {});
     case "tools/list":
-      return okRpc(id, { tools: [FERRAMENTA] });
+      return okRpc(id, { tools: FERRAMENTAS });
     case "tools/call": {
-      if (params?.name !== FERRAMENTA.name) {
-        return erroRpc(id, -32602, `Ferramenta desconhecida: ${params?.name}`);
+      const nome = String(params?.name ?? "");
+      if (!FERRAMENTAS.some((f) => f.name === nome)) {
+        return erroRpc(id, -32602, `Ferramenta desconhecida: ${nome}`);
       }
       const codigo = String(params?.arguments?.codigo ?? "").trim();
       if (!UUID.test(codigo)) {
@@ -191,7 +267,23 @@ async function despachar(msg: any): Promise<unknown | null> {
           ),
         );
       }
-      return okRpc(id, await buscarAutos(codigo));
+      // AS TRÊS CARREGAM O MESMO MATERIAL, e é por isso que a busca dele vem
+      // antes do despacho: o código é a chave de todas, e a espera pelo depósito
+      // também.
+      const carga = await carregarAutos(codigo);
+      if (!carga.ok) return okRpc(id, carga.falha);
+      const args = params?.arguments ?? {};
+
+      if (nome === "ler_paginas") {
+        const arquivo = String(args.arquivo ?? "").trim();
+        const de = Number(args.de ?? 1);
+        const ate = Number(args.ate ?? Number.MAX_SAFE_INTEGER);
+        return okRpc(id, okDaFerramenta(lerPaginas(carga.g, arquivo, de, ate)));
+      }
+      if (nome === "buscar_nos_autos") {
+        return okRpc(id, okDaFerramenta(textoDaBusca(carga.g, String(args.termo ?? ""))));
+      }
+      return okRpc(id, okDaFerramenta(montarEntrega(carga.g, await roteiroEmVigor(serviceClient()))));
     }
     // resources e prompts não existem aqui; responder a lista vazia é mais
     // gentil que -32601 com clientes que perguntam por hábito.

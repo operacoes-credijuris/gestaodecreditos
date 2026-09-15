@@ -5,14 +5,25 @@
 // Function tem teto de CPU e um processo digitalizado a derrubaria. Aqui chega
 // só o texto.
 //
+// PÁGINA A PÁGINA, e não num bloco só. O navegador sempre extraiu assim, e
+// juntar tudo numa string jogava fora a única informação que o roteiro exige em
+// TODO campo da ficha: a página. Guardado por página, o conector cita a fonte em
+// vez de estimá-la — e consegue entregar um intervalo sob demanda, que é o que
+// substitui de verdade o velho "baixar do Kommo e subir no Claude".
+//
+// O TETO AQUI É DE ARMAZENAMENTO, não de leitura. Ele existe só para uma linha
+// não virar um monstro no banco; quanto entra na CONVERSA é decisão do conector,
+// e lá o que não cabe de uma vez é lido por página. Nada é cortado pelo meio:
+// arquivo entra inteiro ou fica de fora COM AVISO — texto mutilado com um
+// marcador no miolo foi o defeito que esta versão veio corrigir.
+//
 // USO (POST, com sessão logada):
-//   { codigo, lead_id, titulo, arquivos: [{ nome, paginas, texto }] }
-//   -> { pronto: true, guardados: 3, caracteres: 184203 }
+//   { codigo, lead_id, titulo, arquivos: [{ nome, paginas, paginasTexto[], texto }] }
+//   -> { pronto: true, guardados: 3, caracteres: 604203, paginas: 344, de_fora: [] }
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { limparParaOBanco } from "../_shared/textoParaOBanco.ts";
-import { MARCA_CORTE } from "../_shared/entregaDosAutos.ts";
 
 const CORS = corsHeaders;
 
@@ -26,44 +37,8 @@ function json(o: unknown, s = 200) {
 /** Um uuid, e nada além disso — é o que a tabela aceita como chave. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// O TETO É DO CONTEXTO DA CONVERSA, e não do banco.
-//
-// Um resultado de ferramenta com 800 mil caracteres não é generosidade: é a
-// janela do modelo estourando antes de ele chegar à conclusão. Cortamos aqui, no
-// servidor, porque é aqui que a regra vale para todo mundo que escreve.
-const MAX_TOTAL = 400_000;
-
-// UM TETO FIXO POR ARQUIVO ERA O DEFEITO, e custou uma análise inteira: ele
-// valia 120 mil caracteres, e um processo de 341 páginas tem uns 600 mil. O
-// arquivo entrava cortado pelo meio — 20% entregues — mesmo quando ele era o
-// ÚNICO do card e o orçamento total estava quase todo livre.
-//
-// Agora o teto de cada arquivo é o que sobra do orçamento, menos uma RESERVA
-// para os que ainda vêm. É o que impede o processo grande de comer o pequeno: o
-// ofício requisitório de três páginas cabe inteiro mesmo atrás de um processo
-// que não coube.
-const RESERVA_POR_ARQUIVO = 20_000;
-
-/**
- * Corta pelo meio, preservando começo e fim.
- *
- * É ONDE ESTÁ O QUE IMPORTA: as partes e a fase inicial abrem o processo, o
- * valor e o dispositivo fecham. O meio de um processo longo é andamento.
- *
- * O MARCADOR DIZ QUANTO FALTA, e não só que faltou. Quem lê precisa saber se
- * perdeu duas páginas ou duzentas — é a diferença entre uma ressalva e uma
- * análise que não deveria concluir nada.
- */
-function cortar(texto: string, max: number): string {
-  if (texto.length <= max) return texto;
-  const inicio = Math.floor(max * 0.6);
-  const omitidos = texto.length - max;
-  return (
-    texto.slice(0, inicio) +
-    `\n\n${MARCA_CORTE}: ${omitidos.toLocaleString("pt-BR")} caracteres deste arquivo não vieram...]\n\n` +
-    texto.slice(texto.length - (max - inicio))
-  );
-}
+/** Teto de armazenamento do card inteiro. Generoso: é para conter o absurdo. */
+const MAX_TOTAL = 2_000_000;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -84,32 +59,38 @@ Deno.serve(async (req) => {
     const brutos = Array.isArray((body as any).arquivos) ? (body as any).arquivos : [];
     if (brutos.length === 0) return json({ erro: "Nenhum arquivo com texto para guardar." }, 400);
 
-    // Corta arquivo por arquivo e depois no total, na ordem da Kommo: o que
-    // chegar depois do teto entra truncado, e o que não couber de todo fica de
-    // fora COM AVISO — some sem dizer era o defeito a não repetir.
     let usado = 0;
-    const arquivos: { nome: string; paginas: number; texto: string }[] = [];
+    const arquivos: { nome: string; paginas: number; paginasTexto: string[] }[] = [];
     const deFora: string[] = [];
-    const cortados: { nome: string; de: number; para: number }[] = [];
-    for (let i = 0; i < brutos.length; i++) {
-      const a = brutos[i];
-      // O que precisa sobrar para os arquivos que ainda vêm.
-      const reservado = (brutos.length - i - 1) * RESERVA_POR_ARQUIVO;
+    for (const a of brutos) {
       // LIMPO ANTES DE QUALQUER OUTRA COISA: texto de PDF traz NUL, e o
-      // Postgres nao guarda NUL nem em jsonb nem em text. Sem esta passagem a
-      // gravacao morria com "unsupported Unicode escape sequence" — e o erro
-      // chegava como 500, indistinguivel de defeito nosso.
+      // Postgres não guarda NUL nem em jsonb nem em text. Sem esta passagem a
+      // gravação morria com "unsupported Unicode escape sequence" — e o erro
+      // chegava como 500, indistinguível de defeito nosso.
       const nome = limparParaOBanco((a as any)?.nome) || "arquivo sem nome";
-      const texto = limparParaOBanco((a as any)?.texto).trim();
-      if (!texto) { deFora.push(`${nome} (sem texto legível)`); continue; }
-      const teto = Math.max(0, MAX_TOTAL - usado - reservado);
-      if (teto === 0) { deFora.push(`${nome} (não coube no limite total)`); continue; }
-      const cortado = cortar(texto, teto);
-      if (cortado.length < texto.length) {
-        cortados.push({ nome, de: texto.length, para: teto });
+
+      // O FORMATO NOVO É A LISTA DE PÁGINAS; o antigo, um bloco só. Aceitar os
+      // dois evita exigir que as duas pontas subam no mesmo instante.
+      const cruas: unknown[] = Array.isArray((a as any)?.paginasTexto)
+        ? (a as any).paginasTexto
+        : [(a as any)?.texto ?? ""];
+      const paginasTexto = cruas.map((p) => limparParaOBanco(p));
+      const tamanho = paginasTexto.reduce((t, p) => t + p.length, 0);
+
+      if (paginasTexto.join("").trim() === "") {
+        deFora.push(`${nome} (sem texto legível)`);
+        continue;
       }
-      usado += cortado.length;
-      arquivos.push({ nome, paginas: Number((a as any)?.paginas ?? 0) || 0, texto: cortado });
+      if (usado + tamanho > MAX_TOTAL) {
+        deFora.push(`${nome} (passaria do limite de armazenamento)`);
+        continue;
+      }
+      usado += tamanho;
+      arquivos.push({
+        nome,
+        paginas: Number((a as any)?.paginas ?? 0) || paginasTexto.length,
+        paginasTexto,
+      });
     }
     if (arquivos.length === 0) return json({ erro: "Nenhum dos arquivos trouxe texto legível." }, 400);
 
@@ -132,14 +113,13 @@ Deno.serve(async (req) => {
     if (error) return json({ erro: `Não consegui guardar os autos: ${error.message}` }, 500);
 
     // A RESPOSTA CONTA O QUE FALTOU, e quem a ignorar mente para quem opera: a
-    // tela dizia "N arquivo(s) à disposição" contando os LIDOS, não os
-    // entregues, e nada dizia que um deles tinha sido cortado pelo meio.
+    // tela dizia "N arquivo(s) à disposição" contando os LIDOS, não os guardados.
     return json({
       pronto: true,
       guardados: arquivos.length,
       caracteres: usado,
+      paginas: arquivos.reduce((t, a) => t + a.paginasTexto.length, 0),
       de_fora: deFora,
-      cortados,
     });
   } catch (e) {
     return json({ erro: String((e as Error)?.message ?? e) }, 500);

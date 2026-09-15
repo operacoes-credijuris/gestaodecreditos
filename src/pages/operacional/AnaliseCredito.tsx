@@ -1531,24 +1531,34 @@ export default function AnaliseCredito() {
       const r = await invokeFunction<{
         guardados?: number
         caracteres?: number
+        paginas?: number
         de_fora?: string[]
-        cortados?: { nome: string; de: number; para: number }[]
       }>('autos-guardar', {
         codigo,
         lead_id: lead.kommo_lead_id,
         titulo: tituloCard(lead),
-        // Só nome, páginas e texto: os `bytes` do PDF são megabytes e não têm o
-        // que fazer no servidor.
-        arquivos: lidos.map((a) => ({ nome: a.nome, paginas: a.paginas, texto: a.texto })),
+        // PÁGINA A PÁGINA, e não o bloco colado. O pdf.js já devolve assim, e
+        // era essa a informação que se perdia: o roteiro exige a PÁGINA como
+        // fonte de todo campo da ficha, e sem ela a citação virava estimativa.
+        // Os `bytes` do PDF continuam fora — são megabytes e não têm o que
+        // fazer no servidor.
+        arquivos: lidos.map((a) => ({
+          nome: a.nome,
+          paginas: a.paginas,
+          paginasTexto: a.paginasTexto ?? (a.texto ? [a.texto] : []),
+        })),
       })
 
       const guardados = r.guardados ?? lidos.length
       const deFora = r.de_fora ?? []
-      const cortados = r.cortados ?? []
       const num = (n: number) => n.toLocaleString('pt-BR')
 
-      if (deFora.length === 0 && cortados.length === 0) {
-        const recado = guardados + ' arquivo(s) à disposição do Claude — peça a análise na conversa.'
+      if (deFora.length === 0) {
+        const recado =
+          guardados +
+          ' arquivo(s) à disposição do Claude' +
+          (r.paginas ? `, ${num(r.paginas)} páginas` : '') +
+          ' — peça a análise na conversa.'
         anotarPreparo(id, 'pronto', recado)
         toast.success(recado)
       } else {
@@ -1556,12 +1566,9 @@ export default function AnaliseCredito() {
         // obriga quem opera a descobrir sozinho — e foi assim que um processo de
         // 341 páginas chegou pela metade sem ninguém notar.
         const linhas = [
-          `${guardados} de ${lidos.length} arquivo(s) entregues ao Claude (${num(r.caracteres ?? 0)} caracteres).`,
-          ...cortados.map(
-            (c) => `Cortado: ${c.nome} — ${num(c.de)} caracteres no original, ${num(c.para)} entregues.`,
-          ),
-          ...(deFora.length > 0 ? ['Fora: ' + deFora.join('; ') + '.'] : []),
-          'A análise recebe um aviso da falta e deve registrá-la nas pendências — mas o trecho ausente não chega até ela.',
+          `${guardados} de ${lidos.length} arquivo(s) guardados (${num(r.caracteres ?? 0)} caracteres).`,
+          'Fora: ' + deFora.join('; ') + '.',
+          'O que está guardado o Claude lê inteiro, por página. O que ficou de fora, não.',
         ]
         anotarPreparo(id, 'parcial', linhas.join('\n'))
         toast.error('Os autos foram entregues incompletos — veja o aviso no card.')
