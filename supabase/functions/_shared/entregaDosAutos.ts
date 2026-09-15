@@ -112,10 +112,12 @@ export const COMO_LER_OS_AUTOS = [
   '',
   '- `ler_paginas` devolve um intervalo de páginas de um arquivo. Use para ler por',
   '  inteiro o que ficou de fora, e para conferir o entorno de um achado.',
-  '- `buscar_nos_autos` procura um termo em todos os arquivos e devolve os trechos',
-  '  COM O NÚMERO DA PÁGINA. É o caminho dos eixos que são busca textual — o Eixo 2',
-  '  ("cessão", "cessionário", "habilitação", "reserva de crédito", "expeça-se em',
-  '  nome de") e o Eixo 7 (alvarás, depósitos, levantamentos).',
+  '- `buscar_nos_autos` procura TERMOS — vários numa chamada só — em todos os',
+  '  arquivos, e devolve os trechos COM O NÚMERO DA PÁGINA. Mande a lista inteira',
+  '  do eixo de uma vez: o Eixo 2 ("cessão", "cessionário", "habilitação", "reserva',
+  '  de crédito", "expeça-se em nome de") é UMA chamada, não cinco; o Eixo 7',
+  '  (alvará, depósito, levantamento) é outra. Cada chamada dessas pede autorização',
+  '  a quem está operando: um termo por vez enche a tela de pedidos.',
   '',
   'CITE A PÁGINA que a ferramenta devolveu. O roteiro pede fonte com página em',
   'todo campo da ficha, e agora ela é dado, não estimativa.',
@@ -310,6 +312,52 @@ export interface Ocorrencia {
   trecho: string
 }
 
+/** O que um termo achou, dentro de uma busca que pode ter vários. */
+export interface BuscaDeUmTermo {
+  termo: string
+  ocorrencias: Ocorrencia[]
+}
+
+/** Teto do texto de uma busca, somando todos os termos da mesma chamada. */
+export const MAX_POR_BUSCA = 120_000
+
+/** Termos por chamada. Acima disso não é varredura de eixo, é pescaria. */
+export const MAX_TERMOS_POR_BUSCA = 25
+
+/** Ocorrências por termo quando a chamada traz vários. */
+const POR_TERMO_NA_LISTA = 15
+
+/**
+ * Os termos de uma chamada, sem repetição e sem vazios.
+ *
+ * VÁRIOS DE UMA VEZ, E ISSO NÃO É CONVENIÊNCIA. Cada chamada de ferramenta pede
+ * autorização a quem está na conversa, e um eixo do roteiro é uma lista de
+ * cinco ou dez termos. Um termo por chamada — que foi como esta ferramenta
+ * nasceu — transformava a varredura do Eixo 2 numa fila de permissões, com o
+ * operador clicando "permitir uma vez" dez vezes para a mesma varredura.
+ *
+ * VÍRGULA E PONTO E VÍRGULA TAMBÉM SEPARAM, porque o modelo pode mandar a lista
+ * numa string só. Separar demais erra para o lado seguro: um termo partido
+ * procura MAIS, não menos, e o cabeçalho de cada bloco diz exatamente o que foi
+ * procurado — quem lê vê o que a busca fez.
+ */
+export function termosDaBusca(termos: string | string[] | undefined): string[] {
+  const crus = Array.isArray(termos) ? termos : [String(termos ?? '')]
+  const vistos = new Set<string>()
+  const lista: string[] = []
+  for (const cru of crus) {
+    for (const parte of String(cru ?? '').split(/[,;\n]/)) {
+      const termo = parte.trim()
+      const chave = normalizar(termo)
+      if (!chave || vistos.has(chave)) continue
+      vistos.add(chave)
+      lista.push(termo)
+      if (lista.length >= MAX_TERMOS_POR_BUSCA) return lista
+    }
+  }
+  return lista
+}
+
 /**
  * Procura um termo em todos os arquivos, e devolve a PÁGINA de cada ocorrência.
  *
@@ -347,21 +395,79 @@ export function buscarNosAutos(
   return achados
 }
 
+/** Cada termo da chamada com o que achou, na ordem em que foram pedidos. */
+export function buscarVarios(
+  g: AutosGuardados,
+  termos: string | string[],
+  margem = 400,
+): BuscaDeUmTermo[] {
+  const lista = termosDaBusca(termos)
+  // MENOS OCORRÊNCIAS POR TERMO QUANDO SÃO MUITOS. A chamada devolve uma
+  // varredura, não o processo inteiro de volta pela porta dos fundos; quem
+  // precisar de todas as ocorrências de um termo pede aquele termo sozinho.
+  const porTermo = lista.length > 1 ? POR_TERMO_NA_LISTA : 40
+  return lista.map((termo) => ({ termo, ocorrencias: buscarNosAutos(g, termo, porTermo, margem) }))
+}
+
+/**
+ * AUSÊNCIA É RESPOSTA VÁLIDA, e o roteiro depende dela: o Eixo 2 exige a
+ * declaração expressa de que nada foi localizado. Mas ela vale sobre o que está
+ * NO TEXTO — e um processo digitalizado não tem texto para procurar. Sem esta
+ * ressalva, a declaração viraria afirmação sobre o que não foi verificado.
+ */
+const RESSALVA_DA_AUSENCIA =
+  'Ausência no texto não é prova de ausência nos autos: página digitalizada não tem ' +
+  'texto para procurar. Se o arquivo for imagem, diga isso na análise em vez de afirmar ' +
+  'que nada existe.'
+
 /** A busca, escrita para quem vai ler. */
-export function textoDaBusca(g: AutosGuardados, termo: string): string {
-  const achados = buscarNosAutos(g, termo)
-  if (achados.length === 0) {
-    // AUSÊNCIA É RESPOSTA VÁLIDA, e o roteiro depende dela: o Eixo 2 exige a
-    // declaração expressa de que nada foi localizado. Mas ela vale sobre o que
-    // está NO TEXTO — e um processo digitalizado não tem texto para procurar.
-    return (
-      `Nenhuma ocorrência de "${termo}" no texto dos autos deste crédito ` +
-      `(${g.arquivos.length} arquivo(s)). Ausência no texto não é prova de ausência ` +
-      `nos autos: página digitalizada não tem texto para procurar.`
-    )
+export function textoDaBusca(g: AutosGuardados, termos: string | string[]): string {
+  const buscas = buscarVarios(g, termos)
+  if (buscas.length === 0) {
+    return 'Nenhum termo para procurar. Mande em `termos` a lista do eixo que você está varrendo.'
   }
-  return [
-    `${achados.length} ocorrência(s) de "${termo}":`,
-    ...achados.map((o) => `\n\n### ${o.arquivo} — página ${o.pagina}\n\n${o.trecho}`),
+
+  const blocos: string[] = []
+  const semNada: string[] = []
+  const naoCoube: string[] = []
+  let usado = 0
+  for (const b of buscas) {
+    if (b.ocorrencias.length === 0) {
+      semNada.push(b.termo)
+      blocos.push(`\n\n## "${b.termo}" — nenhuma ocorrência no texto`)
+      continue
+    }
+    const bloco = [
+      `\n\n## "${b.termo}" — ${b.ocorrencias.length} ocorrência(s)`,
+      ...b.ocorrencias.map((o) => `\n\n### ${o.arquivo} — página ${o.pagina}\n\n${o.trecho}`),
+    ].join('')
+    // O QUE NÃO COUBER É NOMEADO, nunca sumido: engolir um termo em silêncio
+    // depois de tê-lo achado é o defeito que esta entrega inteira veio corrigir.
+    if (usado + bloco.length > MAX_POR_BUSCA && blocos.length > 0) {
+      naoCoube.push(b.termo)
+      continue
+    }
+    usado += bloco.length
+    blocos.push(bloco)
+  }
+
+  const cabeca =
+    `Busca em ${g.arquivos.length} arquivo(s) — ${buscas.length} termo(s): ` +
+    buscas.map((b) => `"${b.termo}"`).join(', ') +
+    '.'
+
+  const rodape = [
+    ...(semNada.length > 0
+      ? [`\n\n> **Sem ocorrência no texto:** ${semNada.map((t) => `"${t}"`).join(', ')}. ${RESSALVA_DA_AUSENCIA}`]
+      : []),
+    ...(naoCoube.length > 0
+      ? [
+          `\n\n> **${naoCoube.length} termo(s) acharam ocorrências que não couberam nesta resposta:** ` +
+            `${naoCoube.map((t) => `"${t}"`).join(', ')}. Eles EXISTEM nos autos — peça cada um ` +
+            `numa chamada separada antes de concluir qualquer coisa a respeito deles.`,
+        ]
+      : []),
   ].join('')
+
+  return cabeca + blocos.join('') + rodape
 }

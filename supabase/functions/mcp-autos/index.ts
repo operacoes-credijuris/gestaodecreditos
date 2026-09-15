@@ -126,16 +126,22 @@ const FERRAMENTAS = [
     name: "buscar_nos_autos",
     title: "Buscar nos autos",
     description:
-      "Procura um termo no texto de TODOS os arquivos do crédito e devolve os trechos encontrados COM O NÚMERO DA PÁGINA. " +
-      "É o caminho dos eixos de varredura do roteiro — cessão, cessionário, habilitação, reserva de crédito, penhora, alvará, levantamento. " +
+      "Procura TERMOS no texto de TODOS os arquivos do crédito e devolve os trechos encontrados COM O NÚMERO DA PÁGINA. " +
+      "MANDE A LISTA INTEIRA DE UMA VEZ, em `termos`: um eixo de varredura do roteiro é uma lista (cessão, cessionário, habilitação, reserva de crédito, expeça-se em nome de) e ela cabe numa chamada só. " +
+      "Uma chamada por termo obriga quem está operando a autorizar a mesma varredura dez vezes seguidas. " +
       "Acento e caixa não importam. Ausência no texto não prova ausência nos autos: página digitalizada não tem texto para procurar.",
     inputSchema: {
       type: "object",
       properties: {
         codigo: CODIGO,
-        termo: { type: "string", description: "O que procurar. Um termo por chamada." },
+        termos: {
+          type: "array",
+          items: { type: "string" },
+          description: "Os termos a procurar — todos os do eixo de uma vez. Até 25 por chamada.",
+        },
+        termo: { type: "string", description: "Um termo só. Existe para compatibilidade; prefira `termos`." },
       },
-      required: ["codigo", "termo"],
+      required: ["codigo"],
       additionalProperties: false,
     },
   },
@@ -242,9 +248,10 @@ async function despachar(msg: any): Promise<unknown | null> {
           "Este conector dá acesso aos autos de um crédito da Credijuris e ao roteiro de qualificação " +
           "jurídica preliminar que a casa segue. Quando a pergunta trouxer um código de análise, chame " +
           "`autos_do_credito` com ele ANTES de responder; depois use `ler_paginas` para o que não tiver " +
-          "cabido na primeira entrega e `buscar_nos_autos` para os eixos de varredura. Siga o roteiro que " +
-          "vier no resultado, cite a página de cada achado e escreva a análise na própria conversa, sem " +
-          "gerar arquivo nenhum.",
+          "cabido na primeira entrega e `buscar_nos_autos` para os eixos de varredura. AGRUPE AS BUSCAS: " +
+          "mande todos os termos de um eixo numa chamada só, porque cada chamada pede autorização a quem " +
+          "está operando a plataforma. Siga o roteiro que vier no resultado, cite a página de cada achado " +
+          "e escreva a análise na própria conversa, sem gerar arquivo nenhum.",
       });
     }
     case "ping":
@@ -281,7 +288,11 @@ async function despachar(msg: any): Promise<unknown | null> {
         return okRpc(id, okDaFerramenta(lerPaginas(carga.g, arquivo, de, ate)));
       }
       if (nome === "buscar_nos_autos") {
-        return okRpc(id, okDaFerramenta(textoDaBusca(carga.g, String(args.termo ?? ""))));
+        // OS DOIS FORMATOS. `termos` é o caminho — a lista do eixo numa chamada
+        // só, porque cada chamada custa uma autorização de quem está operando.
+        // `termo` sobrou para o modelo que insistir em um por vez.
+        const pedidos = args.termos ?? args.termo ?? "";
+        return okRpc(id, okDaFerramenta(textoDaBusca(carga.g, pedidos)));
       }
       return okRpc(id, okDaFerramenta(montarEntrega(carga.g, await roteiroEmVigor(serviceClient()))));
     }

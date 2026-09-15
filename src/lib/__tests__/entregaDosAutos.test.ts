@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import {
   buscarNosAutos,
+  buscarVarios,
   COMO_LER_OS_AUTOS,
   FORMA_DA_ENTREGA,
   lerPaginas,
+  MAX_TERMOS_POR_BUSCA,
   montarEntrega,
   paginasDoArquivo,
+  termosDaBusca,
   textoDaBusca,
   textoDoArquivo,
   type AutosGuardados,
@@ -225,7 +228,7 @@ describe('buscarNosAutos', () => {
    */
   it('não achando, ressalva o processo digitalizado', () => {
     const t = textoDaBusca(guardado, 'penhora')
-    expect(t).toContain('Nenhuma ocorrência')
+    expect(t).toContain('nenhuma ocorrência no texto')
     expect(t).toContain('digitalizada não tem texto')
   })
 
@@ -233,6 +236,64 @@ describe('buscarNosAutos', () => {
     const t = textoDaBusca(guardado, 'alvará')
     expect(t).toContain('1 ocorrência(s)')
     expect(t).toContain('processo.pdf — página 3')
+  })
+})
+
+/**
+ * VÁRIOS TERMOS NUMA CHAMADA SÓ, e o motivo não é economia de código.
+ *
+ * Cada chamada de ferramenta pede autorização a quem está na conversa. A
+ * primeira versão desta busca dizia, na própria descrição, "um termo por
+ * chamada" — e como o Eixo 2 do roteiro é uma lista de termos, a varredura
+ * virava uma fila de dez pedidos de permissão para a mesma operação. Quem opera
+ * cansa antes do fim, e parar no meio de uma varredura é exatamente o que a
+ * análise não pode fazer.
+ */
+describe('busca em lote', () => {
+  it('a lista inteira do eixo vai numa chamada só', () => {
+    const t = textoDaBusca(guardado, ['cessão', 'penhora', 'alvará'])
+    expect(t).toContain('3 termo(s)')
+    expect(t).toContain('"cessão" — 1 ocorrência(s)')
+    expect(t).toContain('"penhora" — nenhuma ocorrência')
+    expect(t).toContain('"alvará" — 1 ocorrência(s)')
+  })
+
+  it('o que não achou é nomeado, e não some entre os que acharam', () => {
+    const t = textoDaBusca(guardado, ['cessão', 'penhora'])
+    expect(t).toContain('Sem ocorrência no texto:** "penhora"')
+    expect(t).toContain('digitalizada não tem texto')
+  })
+
+  // O modelo pode mandar a lista numa string só. Separar demais erra para o
+  // lado seguro: termo partido procura MAIS, não menos, e o cabeçalho de cada
+  // bloco diz o que de fato foi procurado.
+  it('vírgula e ponto e vírgula também separam', () => {
+    expect(termosDaBusca('cessão, cessionário; habilitação')).toEqual([
+      'cessão',
+      'cessionário',
+      'habilitação',
+    ])
+  })
+
+  it('termo repetido não vira duas buscas', () => {
+    expect(termosDaBusca(['Cessão', 'CESSAO', 'cessão'])).toEqual(['Cessão'])
+  })
+
+  it('vazio não procura nada', () => {
+    expect(termosDaBusca('  ,  ; ')).toEqual([])
+    expect(textoDaBusca(guardado, [])).toContain('Nenhum termo para procurar')
+  })
+
+  it('a lista tem teto', () => {
+    const muitos = Array.from({ length: 40 }, (_, i) => `termo ${i}`)
+    expect(termosDaBusca(muitos)).toHaveLength(MAX_TERMOS_POR_BUSCA)
+  })
+
+  it('buscarVarios devolve um resultado por termo, na ordem pedida', () => {
+    const r = buscarVarios(guardado, ['alvará', 'cessão'])
+    expect(r.map((x) => x.termo)).toEqual(['alvará', 'cessão'])
+    expect(r[0].ocorrencias[0].pagina).toBe(3)
+    expect(r[1].ocorrencias[0].pagina).toBe(2)
   })
 })
 
