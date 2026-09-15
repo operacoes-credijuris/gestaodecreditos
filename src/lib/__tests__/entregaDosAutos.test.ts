@@ -2,12 +2,15 @@ import { describe, it, expect } from 'vitest'
 import {
   buscarNosAutos,
   buscarVarios,
+  caminhoDaImagem,
   COMO_LER_OS_AUTOS,
   FORMA_DA_ENTREGA,
   lerPaginas,
   MAX_TERMOS_POR_BUSCA,
   montarEntrega,
+  paginasComImagem,
   paginasDoArquivo,
+  semTexto,
   termosDaBusca,
   textoDaBusca,
   textoDoArquivo,
@@ -108,7 +111,7 @@ describe('montarEntrega', () => {
    */
   it('o arquivo que não cabe fica de fora inteiro, e é anunciado', () => {
     const t = montarEntrega(guardado, undefined, 30)
-    expect(t).toContain('**não — leia com `ler_paginas`**')
+    expect(t).toContain('**não veio — leia com `ler_paginas`**')
     expect(t).toContain('não vieram nesta mensagem por tamanho')
     expect(t).not.toContain('PETIÇÃO INICIAL do feito')
     // E o índice continua dizendo que ele existe e quanto tem.
@@ -126,7 +129,7 @@ describe('montarEntrega', () => {
   it('cabendo tudo, não há aviso de falta', () => {
     const t = montarEntrega(guardado)
     expect(t).not.toContain('não vieram nesta mensagem')
-    expect(t).toContain('sim, inteiro')
+    expect(t).toContain('veio inteira nesta mensagem')
   })
 
   // CADASTRO NÃO É PROVA, e o texto tem de dizer isso: o roteiro exige documento
@@ -294,6 +297,121 @@ describe('busca em lote', () => {
     expect(r.map((x) => x.termo)).toEqual(['alvará', 'cessão'])
     expect(r[0].ocorrencias[0].pagina).toBe(3)
     expect(r[1].ocorrencias[0].pagina).toBe(2)
+  })
+})
+
+/**
+ * O ARQUIVO SEM TEXTO — a correção mais importante desta entrega.
+ *
+ * Dezenove anexos no card, dezessete na análise. Um acórdão e um ofício vinham
+ * escaneados; o pdf.js não tira texto de imagem, e eles eram DESCARTADOS antes
+ * de chegar ao balcão. A análise saía inteira na aparência e declarava, com as
+ * palavras que o roteiro exige, que nada fora localizado — sem ter aberto os
+ * dois documentos que poderiam dizer o contrário.
+ *
+ * Um arquivo que o modelo SABE que não leu vale mais do que um que ele não sabe
+ * que existe.
+ */
+const comDigitalizado: AutosGuardados = {
+  ...guardado,
+  arquivos: [
+    ...guardado.arquivos,
+    {
+      nome: 'acordao.pdf',
+      paginas: 12,
+      paginasTexto: [],
+      motivo: 'digitalizado (sem camada de texto)',
+      imagensPrevistas: [1, 2, 11, 12],
+      imagens: [{ pagina: 1, caminho: 'u1/c1/autos/02-acordao-p0001.jpg' }],
+    },
+    {
+      nome: 'oficio.pdf',
+      paginas: 0,
+      paginasTexto: [],
+      motivo: 'não consegui ler: HTTP 404 ao baixar do Kommo',
+    },
+  ],
+}
+
+describe('arquivo sem texto', () => {
+  it('o digitalizado aparece no índice, apontando para ver_paginas', () => {
+    const t = montarEntrega(comDigitalizado)
+    expect(t).toContain('acordao.pdf')
+    expect(t).toContain('ver_paginas')
+    expect(t).toContain('4 pág. em imagem')
+  })
+
+  it('o que não tem texto nem imagem é NÃO LIDO, e vira diligência', () => {
+    const t = montarEntrega(comDigitalizado)
+    expect(t).toContain('**NÃO LIDO — não consegui ler: HTTP 404 ao baixar do Kommo**')
+    expect(t).toContain('trate como diligência')
+    expect(t).toContain('não como documento inexistente')
+  })
+
+  // A REGRA QUE FECHA O BURACO: o roteiro pede declaração expressa de ausência,
+  // e ela vale sobre o que foi lido. Sem esta linha, "não há cessão nos autos"
+  // sairia de uma varredura que nunca passou pelo acórdão.
+  it('proíbe declarar ausência do que não foi aberto', () => {
+    expect(COMO_LER_OS_AUTOS).toContain('NÃO DECLARE AUSÊNCIA DO QUE VOCÊ NÃO ABRIU')
+    expect(montarEntrega(comDigitalizado)).toContain('nada que dependa desses documentos está verificado')
+  })
+
+  it('lerPaginas manda ver o que é para ver', () => {
+    const t = lerPaginas(comDigitalizado, 'acordao.pdf', 1, 5)
+    expect(t).toContain('é digitalizado')
+    expect(t).toContain('ver_paginas')
+  })
+
+  it('lerPaginas não finge que o ilegível é vazio', () => {
+    const t = lerPaginas(comDigitalizado, 'oficio.pdf', 1, 5)
+    expect(t).toContain('HTTP 404')
+    expect(t).toContain('NÃO LIDO')
+  })
+
+  // A BUSCA É CEGA NO QUE ESTÁ EM IMAGEM, e calar isso seria apoiar a declaração
+  // de ausência do Eixo 2 numa varredura que não passou por dois documentos.
+  it('a busca declara sua própria cegueira', () => {
+    const t = textoDaBusca(comDigitalizado, 'penhora')
+    expect(t).toContain('2 arquivo(s) deste crédito são digitalizados')
+    expect(t).toContain('"acordao.pdf"')
+    expect(t).toContain('"oficio.pdf"')
+  })
+
+  it('achando o termo, não há por que alarmar', () => {
+    expect(textoDaBusca(comDigitalizado, 'cessão')).not.toContain('são digitalizados e esta busca')
+  })
+
+  /**
+   * AS PROMETIDAS CONTAM. O texto é depositado em segundos e as imagens levam o
+   * tempo da rasterização no navegador; se o índice anunciasse só o que já
+   * chegou, a primeira entrega diria que o acórdão é ilegível.
+   */
+  it('conta as páginas prontas e as a caminho, sem repetir', () => {
+    expect(paginasComImagem(comDigitalizado.arquivos[2])).toEqual([1, 2, 11, 12])
+    expect(paginasComImagem(comDigitalizado.arquivos[3])).toEqual([])
+  })
+
+  it('o caminho só existe para a página que já subiu', () => {
+    expect(caminhoDaImagem(comDigitalizado.arquivos[2], 1)).toBe('u1/c1/autos/02-acordao-p0001.jpg')
+    expect(caminhoDaImagem(comDigitalizado.arquivos[2], 2)).toBeUndefined()
+  })
+
+  // O HIBRIDO E O CASO QUE MAIS ENGANA: arquivo nato-digital com a conta da
+  // contadoria escaneada no meio. Ele chega inteiro e parece lido, e a folha que
+  // decide o preco esta numa pagina que o texto nao alcanca.
+  it('o hibrido avisa a pagina escaneada mesmo tendo vindo inteiro', () => {
+    const hibrido: AutosGuardados = {
+      ...guardado,
+      arquivos: [{ ...guardado.arquivos[0], imagensPrevistas: [2] }],
+    }
+    const t = montarEntrega(hibrido)
+    expect(t).toContain('veio inteira nesta mensagem · 1 pág. escaneada(s)')
+    expect(t).toContain('ver_paginas')
+  })
+
+  it('semTexto separa o que se lê do que se vê', () => {
+    expect(semTexto(comDigitalizado.arquivos[0])).toBe(false)
+    expect(semTexto(comDigitalizado.arquivos[2])).toBe(true)
   })
 })
 

@@ -22,11 +22,15 @@
 // que não exista e um que tenha vencido recebem a MESMA resposta, para o
 // endpoint não servir de sonda.
 
+import { encodeBase64 } from "jsr:@std/encoding@1.0.11/base64";
 import { serviceClient } from "../_shared/auth.ts";
 import {
+  arquivoDosAutos,
   type AutosGuardados,
+  caminhoDaImagem,
   lerPaginas,
   montarEntrega,
+  paginasComImagem,
   textoDaBusca,
 } from "../_shared/entregaDosAutos.ts";
 
@@ -73,13 +77,28 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ESPERA_TOTAL_MS = 45_000;
 const ESPERA_PASSO_MS = 1_500;
 
+// AS IMAGENS DEMORAM MAIS QUE O TEXTO, e por um motivo de física: o texto sai
+// pronto do pdf.js, e cada imagem precisa ser rasterizada e desenhada num canvas,
+// na thread principal do navegador. Num processo digitalizado isso já levou dois
+// minutos medidos. Quem chama `ver_paginas` espera mais, porque a alternativa é a
+// análise seguir sem o documento.
+const ESPERA_IMAGENS_MS = 90_000;
+
+/** O mesmo balde das páginas digitalizadas da análise de RPV (migração 0055). */
+const BALDE = "analises-input";
+
+// CINCO PÁGINAS POR CHAMADA. Uma A4 a 1.568 px custa perto de 2.300 tokens ao
+// modelo; cinco cabem com folga numa resposta, e o intervalo seguinte está a um
+// pedido de distância.
+const MAX_IMAGENS_POR_CHAMADA = 5;
+
 const CODIGO = {
   type: "string",
   description: "O código de análise (uuid de 36 caracteres) que a plataforma pôs na pergunta.",
 };
 
 /**
- * TRÊS FERRAMENTAS, E NÃO UMA, e o motivo é o que este conector veio substituir.
+ * QUATRO FERRAMENTAS, E NÃO UMA, e o motivo é o que este conector veio substituir.
  *
  * Antes havia só uma, que tentava despejar o processo inteiro na
  * conversa. Isso é PIOR do que o método manual que ele substituiu: quando alguém
@@ -87,8 +106,9 @@ const CODIGO = {
  * que precisava. Despejando tudo, apareceu um teto que o método antigo não tinha
  * — e um processo de 341 páginas chegava com um quinto do conteúdo.
  *
- * Agora as três juntas fazem o que o arquivo aberto ao lado fazia: uma abre o
- * caso e diz o que existe, outra lê um trecho, a terceira procura.
+ * Agora elas juntas fazem o que o arquivo aberto ao lado fazia: uma abre o caso e
+ * diz o que existe, outra lê um trecho, a terceira procura — e a quarta VÊ o que
+ * está em imagem, que é a única leitura possível de um documento escaneado.
  */
 const FERRAMENTAS = [
   {
@@ -142,6 +162,26 @@ const FERRAMENTAS = [
         termo: { type: "string", description: "Um termo só. Existe para compatibilidade; prefira `termos`." },
       },
       required: ["codigo"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ver_paginas",
+    title: "Ver páginas digitalizadas",
+    description:
+      "Devolve como IMAGEM as páginas de um arquivo digitalizado — aquele que o índice marca como sem texto. " +
+      "Documento escaneado não tem texto para extrair nem para procurar: `ler_paginas` e `buscar_nos_autos` são cegas nele, e ver é a única leitura que existe. " +
+      "Até 5 páginas por chamada; peça o intervalo seguinte se precisar de mais. " +
+      "As imagens levam alguns segundos a mais que o texto para ficarem prontas, e esta ferramenta espera por elas.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        codigo: CODIGO,
+        arquivo: { type: "string", description: "Nome do arquivo, ou a posição dele no índice (1, 2, 3…)." },
+        de: { type: "integer", description: "Primeira página a ver (1 é a primeira do arquivo)." },
+        ate: { type: "integer", description: "Última página a ver. Omitido, vai até onde couber." },
+      },
+      required: ["codigo", "arquivo", "de"],
       additionalProperties: false,
     },
   },
@@ -231,6 +271,97 @@ function okDaFerramenta(texto: string) {
   return { content: [{ type: "text", text: texto }] };
 }
 
+/**
+ * As páginas digitalizadas de um arquivo, como imagem.
+ *
+ * ESTA FERRAMENTA EXISTE PORQUE A ANÁLISE ESTAVA SENDO FEITA SEM DOIS ANEXOS.
+ * Um acórdão e um ofício vinham escaneados; o pdf.js não tira texto de imagem, e
+ * eles eram descartados antes de chegar ao balcão. A análise saía inteira na
+ * aparência, declarando ausências que nunca foram verificadas naqueles dois.
+ *
+ * ESPERA AS IMAGENS, e por isso tem laço próprio. O texto é depositado em
+ * segundos; a rasterização das páginas acontece na thread principal do navegador
+ * e leva bem mais. A conversa costuma chegar aqui antes de o navegador terminar,
+ * e devolver "não há imagem" nesse instante seria mentir por alguns segundos de
+ * diferença — e a análise seguiria sem o documento.
+ */
+async function verPaginas(codigo: string, arquivo: string, de: number, ate: number) {
+  const limite = Date.now() + ESPERA_IMAGENS_MS;
+  for (;;) {
+    const carga = await carregarAutos(codigo);
+    if (!carga.ok) return carga.falha;
+
+    const a = arquivoDosAutos(carga.g, arquivo);
+    if (!a) {
+      const nomes = carga.g.arquivos.map((x, i) => `${i + 1}. ${x.nome}`).join("\n");
+      return falhaDaFerramenta(`Não há arquivo "${arquivo}" neste crédito. Os arquivos são:\n${nomes}`);
+    }
+
+    const disponiveis = paginasComImagem(a);
+    if (disponiveis.length === 0) {
+      return falhaDaFerramenta(
+        `O arquivo "${a.nome}" não tem página em imagem aqui` +
+          (a.motivo ? ` (${a.motivo})` : "") +
+          ". Se ele tem texto, use `ler_paginas`. Se não tem nem texto nem imagem, " +
+          "ele não pôde ser lido: registre-o na análise como pendência de diligência, " +
+          "e não como documento inexistente.",
+      );
+    }
+
+    const querem = disponiveis
+      .filter((p) => p >= de && p <= ate)
+      .slice(0, MAX_IMAGENS_POR_CHAMADA);
+    if (querem.length === 0) {
+      return falhaDaFerramenta(
+        `O arquivo "${a.nome}" não tem imagem no intervalo pedido (${de} a ${ate}). ` +
+          `As páginas disponíveis em imagem são: ${disponiveis.join(", ")}.`,
+      );
+    }
+
+    const caminhos = querem.map((p) => ({ pagina: p, caminho: caminhoDaImagem(a, p) }));
+    const faltam = caminhos.filter((c) => !c.caminho);
+    if (faltam.length > 0 && Date.now() < limite) {
+      await dorme(ESPERA_PASSO_MS);
+      continue;
+    }
+
+    const db = serviceClient();
+    const conteudo: unknown[] = [];
+    const erros: string[] = [];
+    for (const c of caminhos) {
+      if (!c.caminho) {
+        erros.push(`p. ${c.pagina} (ainda não subiu)`);
+        continue;
+      }
+      const { data, error } = await db.storage.from(BALDE).download(c.caminho);
+      if (error || !data) {
+        erros.push(`p. ${c.pagina} (${error?.message ?? "não encontrada"})`);
+        continue;
+      }
+      const bytes = new Uint8Array(await data.arrayBuffer());
+      conteudo.push({ type: "text", text: `--- ${a.nome} — página ${c.pagina} ---` });
+      conteudo.push({ type: "image", data: encodeBase64(bytes), mimeType: "image/jpeg" });
+    }
+
+    const ultima = querem[querem.length - 1];
+    const restam = disponiveis.filter((p) => p > ultima);
+    const cabeca =
+      `${a.nome} — páginas em imagem ${querem.join(", ")} (de ${disponiveis.length} disponíveis). ` +
+      "Leia o que está escrito nelas: é documento dos autos, e a página citada é a que vem no rótulo." +
+      (restam.length > 0 ? ` Ainda há imagem das páginas ${restam.join(", ")} — peça o próximo intervalo.` : "") +
+      (erros.length > 0 ? ` Não consegui trazer: ${erros.join("; ")}.` : "");
+
+    if (conteudo.length === 0) {
+      return falhaDaFerramenta(
+        `${cabeca} Nenhuma imagem pôde ser trazida agora. Tente de novo em alguns segundos; ` +
+          "se continuar assim, registre na análise que o documento ficou sem leitura.",
+      );
+    }
+    return { content: [{ type: "text", text: cabeca }, ...conteudo] };
+  }
+}
+
+
 async function despachar(msg: any): Promise<unknown | null> {
   const { id, method, params } = msg ?? {};
   // Notificação não tem id e não tem resposta — devolver algo aqui é erro de
@@ -248,7 +379,9 @@ async function despachar(msg: any): Promise<unknown | null> {
           "Este conector dá acesso aos autos de um crédito da Credijuris e ao roteiro de qualificação " +
           "jurídica preliminar que a casa segue. Quando a pergunta trouxer um código de análise, chame " +
           "`autos_do_credito` com ele ANTES de responder; depois use `ler_paginas` para o que não tiver " +
-          "cabido na primeira entrega e `buscar_nos_autos` para os eixos de varredura. AGRUPE AS BUSCAS: " +
+          "cabido na primeira entrega, `ver_paginas` para os arquivos que o índice marcar como " +
+          "digitalizados (neles não há texto: ver é a única leitura) e `buscar_nos_autos` para os " +
+          "eixos de varredura. AGRUPE AS BUSCAS: " +
           "mande todos os termos de um eixo numa chamada só, porque cada chamada pede autorização a quem " +
           "está operando a plataforma. Siga o roteiro que vier no resultado, cite a página de cada achado " +
           "e escreva a análise na própria conversa, sem gerar arquivo nenhum.",
@@ -286,6 +419,11 @@ async function despachar(msg: any): Promise<unknown | null> {
         const de = Number(args.de ?? 1);
         const ate = Number(args.ate ?? Number.MAX_SAFE_INTEGER);
         return okRpc(id, okDaFerramenta(lerPaginas(carga.g, arquivo, de, ate)));
+      }
+      if (nome === "ver_paginas") {
+        const de = Number(args.de ?? 1);
+        const ate = Number(args.ate ?? Number.MAX_SAFE_INTEGER);
+        return okRpc(id, await verPaginas(codigo, String(args.arquivo ?? "").trim(), de, ate));
       }
       if (nome === "buscar_nos_autos") {
         // OS DOIS FORMATOS. `termos` é o caminho — a lista do eixo numa chamada

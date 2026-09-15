@@ -82,6 +82,8 @@ import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { DueDiligence } from '@/components/DueDiligence'
 import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
+import { escolherPaginasParaImagem } from '@/lib/paginasDigitalizadas'
+import { subirImagensDosAutos, type ImagemSubida } from '@/lib/imagensDosAutos'
 import { supabase } from '@/lib/supabase'
 import {
   verbasQueSobram,
@@ -1525,14 +1527,24 @@ export default function AnaliseCredito() {
     anotarPreparo(id, 'lendo', 'Lendo os PDFs do card. Num processo grande isto leva um minuto.')
     try {
       const lidos = await lerArquivosComCache(lead)
+      // AS PÁGINAS QUE SERÃO VISTAS SÃO ESCOLHIDAS ANTES DO DEPÓSITO, e não
+      // depois. O índice da entrega sai no instante em que o texto chega, e
+      // precisa já anunciar o que está a caminho em imagem — senão ele descreve
+      // o acórdão digitalizado como ilegível, e a análise segue sem ele. Que foi
+      // exatamente o defeito: dezenove anexos no card, dezessete na análise.
+      const selecao = escolherPaginasParaImagem(lidos)
+      const previstas = new Map(selecao.map((s) => [s.arquivo, s.numeros]))
+
       // A RESPOSTA É LIDA, e antes não era. Ela sempre disse o que ficou de
       // fora; jogá-la fora fazia a tela afirmar uma entrega completa que não
       // aconteceu.
       const r = await invokeFunction<{
         guardados?: number
+        com_texto?: number
         caracteres?: number
         paginas?: number
         de_fora?: string[]
+        sem_texto?: { nome: string; motivo: string; imagens: number }[]
       }>('autos-guardar', {
         codigo,
         lead_id: lead.kommo_lead_id,
@@ -1546,32 +1558,81 @@ export default function AnaliseCredito() {
           nome: a.nome,
           paginas: a.paginas,
           paginasTexto: a.paginasTexto ?? (a.texto ? [a.texto] : []),
+          // O DIAGNÓSTICO VIAJA JUNTO. Sem ele o servidor não distingue um
+          // escaneado de um download que falhou, e a análise recebe os dois com
+          // a mesma etiqueta — sendo que só um deles tem conserto.
+          digitalizado: a.digitalizado,
+          erro: a.erro ?? '',
+          paginas_imagem: previstas.get(a.nome) ?? [],
         })),
       })
 
       const guardados = r.guardados ?? lidos.length
+      const comTexto = r.com_texto ?? guardados
       const deFora = r.de_fora ?? []
+      const semTexto = r.sem_texto ?? []
       const num = (n: number) => n.toLocaleString('pt-BR')
 
-      if (deFora.length === 0) {
-        const recado =
-          guardados +
-          ' arquivo(s) à disposição do Claude' +
+      // AS IMAGENS VÃO DEPOIS DO TEXTO, e não antes. O texto chega em segundos e
+      // o conector já abre o caso com ele; a rasterização das páginas acontece
+      // na thread principal e leva o tempo que leva. A ferramenta `ver_paginas`
+      // espera pelas imagens do outro lado.
+      let prontas: ImagemSubida[] = []
+      let falhasDeImagem: string[] = []
+      if (selecao.length > 0) {
+        const totalImg = selecao.reduce((n, s) => n + s.numeros.length, 0)
+        anotarPreparo(
+          id,
+          'lendo',
+          `${comTexto} arquivo(s) com texto à disposição. ` +
+            `Preparando ${totalImg} página(s) digitalizada(s) para o Claude ver…`,
+        )
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          falhasDeImagem.push('sessão expirada — entre de novo para subir as páginas digitalizadas')
+        } else {
+          const envio = await subirImagensDosAutos(selecao, codigo, user.id, (feitas, t) =>
+            anotarPreparo(id, 'lendo', `Preparando páginas digitalizadas: ${feitas}/${t}…`),
+          )
+          prontas = envio.prontas
+          falhasDeImagem = envio.falhas
+          if (prontas.length > 0) {
+            await invokeFunction('autos-imagens', { codigo, imagens: prontas })
+          }
+        }
+      }
+
+      // O QUE FALTOU, NOMEADO. "Parte não foi entregue" sem dizer qual parte
+      // obriga quem opera a descobrir sozinho — e foi assim que um processo de
+      // 341 páginas chegou pela metade sem ninguém notar.
+      const semLeitura = semTexto.filter((s) => !prontas.some((p) => p.arquivo === s.nome))
+      const linhas = [
+        `${comTexto} arquivo(s) com texto à disposição do Claude` +
           (r.paginas ? `, ${num(r.paginas)} páginas` : '') +
-          ' — peça a análise na conversa.'
+          '.',
+        ...(prontas.length > 0
+          ? [`${prontas.length} página(s) digitalizada(s) subiram como imagem — o Claude as vê por lá.`]
+          : []),
+      ]
+
+      if (deFora.length === 0 && semLeitura.length === 0 && falhasDeImagem.length === 0) {
+        const recado = linhas.join(' ') + ' Peça a análise na conversa.'
         anotarPreparo(id, 'pronto', recado)
         toast.success(recado)
       } else {
-        // O QUE FALTOU, NOMEADO. "Parte não foi entregue" sem dizer qual parte
-        // obriga quem opera a descobrir sozinho — e foi assim que um processo de
-        // 341 páginas chegou pela metade sem ninguém notar.
-        const linhas = [
-          `${guardados} de ${lidos.length} arquivo(s) guardados (${num(r.caracteres ?? 0)} caracteres).`,
-          'Fora: ' + deFora.join('; ') + '.',
-          'O que está guardado o Claude lê inteiro, por página. O que ficou de fora, não.',
-        ]
+        if (deFora.length > 0) linhas.push('Fora por tamanho: ' + deFora.join('; ') + '.')
+        if (semLeitura.length > 0) {
+          linhas.push(
+            'Sem leitura: ' + semLeitura.map((s) => `${s.nome} (${s.motivo})`).join('; ') + '. ' +
+              'O Claude sabe que existem e é instruído a tratá-los como diligência, ' +
+              'em vez de concluir que o documento não existe.',
+          )
+        }
+        if (falhasDeImagem.length > 0) {
+          linhas.push('Páginas que não subiram: ' + falhasDeImagem.slice(0, 3).join('; ') + '.')
+        }
         anotarPreparo(id, 'parcial', linhas.join('\n'))
-        toast.error('Os autos foram entregues incompletos — veja o aviso no card.')
+        toast.error('Os autos foram entregues com pendência — veja o aviso no card.')
       }
     } catch (e) {
       // A MENSAGEM INTEIRA FICA NO CARD. `erroDaFuncao` já traz o motivo real do

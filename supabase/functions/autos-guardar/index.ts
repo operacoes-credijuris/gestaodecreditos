@@ -11,6 +11,14 @@
 // vez de estimá-la — e consegue entregar um intervalo sob demanda, que é o que
 // substitui de verdade o velho "baixar do Kommo e subir no Claude".
 //
+// O ARQUIVO SEM TEXTO TAMBÉM É GUARDADO, e esta é a correção mais importante
+// deste arquivo. Ele era descartado aqui dentro: dezenove anexos entravam,
+// dezessete saíam, e os dois que faltavam — um acórdão e um ofício, ambos
+// digitalizados — não existiam para a análise. Ela então declarava, com as
+// palavras que o roteiro exige, que nada fora localizado, sem ter aberto os dois
+// documentos que poderiam dizer o contrário. Agora eles entram com o MOTIVO, e
+// com as páginas que o navegador vai subir como imagem.
+//
 // O TETO AQUI É DE ARMAZENAMENTO, não de leitura. Ele existe só para uma linha
 // não virar um monstro no banco; quanto entra na CONVERSA é decisão do conector,
 // e lá o que não cabe de uma vez é lido por página. Nada é cortado pelo meio:
@@ -18,8 +26,9 @@
 // marcador no miolo foi o defeito que esta versão veio corrigir.
 //
 // USO (POST, com sessão logada):
-//   { codigo, lead_id, titulo, arquivos: [{ nome, paginas, paginasTexto[], texto }] }
-//   -> { pronto: true, guardados: 3, caracteres: 604203, paginas: 344, de_fora: [] }
+//   { codigo, lead_id, titulo, arquivos: [{ nome, paginas, paginasTexto[],
+//     texto, digitalizado, erro, paginas_imagem[] }] }
+//   -> { pronto, guardados, com_texto, caracteres, paginas, de_fora, sem_texto }
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
@@ -40,6 +49,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Teto de armazenamento do card inteiro. Generoso: é para conter o absurdo. */
 const MAX_TOTAL = 2_000_000;
 
+/** O mesmo balde das páginas digitalizadas da análise de RPV (migração 0055). */
+const BALDE = "analises-input";
+
+interface Guardado {
+  nome: string;
+  paginas: number;
+  paginasTexto: string[];
+  motivo?: string;
+  imagensPrevistas?: number[];
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
@@ -57,11 +77,12 @@ Deno.serve(async (req) => {
     if (!Number.isFinite(leadId) || leadId <= 0) return json({ erro: "lead_id é obrigatório." }, 400);
 
     const brutos = Array.isArray((body as any).arquivos) ? (body as any).arquivos : [];
-    if (brutos.length === 0) return json({ erro: "Nenhum arquivo com texto para guardar." }, 400);
+    if (brutos.length === 0) return json({ erro: "Nenhum arquivo para guardar." }, 400);
 
     let usado = 0;
-    const arquivos: { nome: string; paginas: number; paginasTexto: string[] }[] = [];
+    const arquivos: Guardado[] = [];
     const deFora: string[] = [];
+    const semTexto: { nome: string; motivo: string; imagens: number }[] = [];
     for (const a of brutos) {
       // LIMPO ANTES DE QUALQUER OUTRA COISA: texto de PDF traz NUL, e o
       // Postgres não guarda NUL nem em jsonb nem em text. Sem esta passagem a
@@ -76,9 +97,30 @@ Deno.serve(async (req) => {
         : [(a as any)?.texto ?? ""];
       const paginasTexto = cruas.map((p) => limparParaOBanco(p));
       const tamanho = paginasTexto.reduce((t, p) => t + p.length, 0);
+      const paginas = Number((a as any)?.paginas ?? 0) || paginasTexto.length;
+      const previstas = (Array.isArray((a as any)?.paginas_imagem) ? (a as any).paginas_imagem : [])
+        .map((n: unknown) => Number(n))
+        .filter((n: number) => Number.isInteger(n) && n >= 1);
 
       if (paginasTexto.join("").trim() === "") {
-        deFora.push(`${nome} (sem texto legível)`);
+        // SEM TEXTO NÃO É SEM DADO. O motivo separa o que se resolve vendo
+        // (digitalizado) do que não se resolve de jeito nenhum (falhou o
+        // download, não é PDF) — e quem lê a análise precisa saber qual dos dois
+        // aconteceu, porque só um deles vira diligência.
+        const erro = limparParaOBanco((a as any)?.erro).slice(0, 300);
+        const motivo = erro
+          ? `não consegui ler: ${erro}`
+          : paginas > 0
+          ? "digitalizado (sem camada de texto)"
+          : "sem texto e sem páginas legíveis";
+        arquivos.push({
+          nome,
+          paginas,
+          paginasTexto: [],
+          motivo,
+          ...(previstas.length > 0 ? { imagensPrevistas: previstas } : {}),
+        });
+        semTexto.push({ nome, motivo, imagens: previstas.length });
         continue;
       }
       if (usado + tamanho > MAX_TOTAL) {
@@ -88,16 +130,35 @@ Deno.serve(async (req) => {
       usado += tamanho;
       arquivos.push({
         nome,
-        paginas: Number((a as any)?.paginas ?? 0) || paginasTexto.length,
+        paginas,
         paginasTexto,
+        // Híbrido: tem texto no geral e páginas escaneadas no meio — a conta da
+        // contadoria costuma estar exatamente nelas.
+        ...(previstas.length > 0 ? { imagensPrevistas: previstas } : {}),
       });
     }
-    if (arquivos.length === 0) return json({ erro: "Nenhum dos arquivos trouxe texto legível." }, 400);
+    if (arquivos.length === 0) return json({ erro: "Nenhum dos arquivos pôde ser guardado." }, 400);
 
     // Varre o que venceu antes de escrever. Não há cron para isto e não precisa
     // haver: o balcão só cresce quando alguém o usa, então limpá-lo no uso
     // mantém a tabela do tamanho do movimento do dia.
-    await db.from("analise_externa_autos").delete().lt("expira_em", new Date().toISOString());
+    //
+    // AS IMAGENS SAEM JUNTO. Elas vivem no balde, não na linha; apagar só a
+    // linha deixaria no Storage as páginas de todo processo já analisado, sem
+    // ninguém para apagá-las depois — o caminho delas morre com a linha.
+    const agora = new Date().toISOString();
+    const { data: vencidos } = await db
+      .from("analise_externa_autos")
+      .select("arquivos")
+      .lt("expira_em", agora)
+      .limit(50);
+    const caminhos = (vencidos ?? []).flatMap((v: any) =>
+      (Array.isArray(v?.arquivos) ? v.arquivos : []).flatMap((x: any) =>
+        (Array.isArray(x?.imagens) ? x.imagens : []).map((i: any) => String(i?.caminho ?? "")),
+      ),
+    ).filter((c: string) => c.length > 0);
+    if (caminhos.length > 0) await db.storage.from(BALDE).remove(caminhos);
+    await db.from("analise_externa_autos").delete().lt("expira_em", agora);
 
     const { error } = await db.from("analise_externa_autos").upsert({
       codigo,
@@ -117,9 +178,11 @@ Deno.serve(async (req) => {
     return json({
       pronto: true,
       guardados: arquivos.length,
+      com_texto: arquivos.filter((a) => a.paginasTexto.length > 0).length,
       caracteres: usado,
       paginas: arquivos.reduce((t, a) => t + a.paginasTexto.length, 0),
       de_fora: deFora,
+      sem_texto: semTexto,
     });
   } catch (e) {
     return json({ erro: String((e as Error)?.message ?? e) }, 500);

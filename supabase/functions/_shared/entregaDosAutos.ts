@@ -35,6 +35,28 @@ export interface ArquivoGuardado {
   paginasTexto?: string[]
   /** Formato antigo, de linha gravada antes da paginação. Ainda lido. */
   texto?: string
+  /**
+   * POR QUE ESTE ARQUIVO NÃO TEM TEXTO: digitalizado, erro na leitura, anexo
+   * que não é PDF.
+   *
+   * ARQUIVO SEM TEXTO NÃO É ARQUIVO SEM DADO — e antes ele nem chegava a ser
+   * guardado: sumia entre o card e a conversa. A análise então declarava, com
+   * as palavras que o roteiro exige, que nada havia sido localizado — sobre um
+   * acórdão que estava ali, anexado ao card, e que ninguém tinha aberto. Um
+   * arquivo que o modelo sabe que não leu vale mais que um que ele não sabe que
+   * existe.
+   */
+  motivo?: string
+  /** Páginas que o navegador vai subir como imagem (1-based), prometidas no depósito. */
+  imagensPrevistas?: number[]
+  /** Páginas já disponíveis como imagem, com o caminho no balde. */
+  imagens?: ImagemDaPagina[]
+}
+
+/** Uma página digitalizada esperando no balde para ser VISTA, já que não se lê. */
+export interface ImagemDaPagina {
+  pagina: number
+  caminho: string
 }
 
 export interface AutosGuardados {
@@ -53,6 +75,32 @@ export function paginasDoArquivo(a: ArquivoGuardado): string[] {
 /** O arquivo inteiro, com as páginas coladas na ordem. */
 export function textoDoArquivo(a: ArquivoGuardado): string {
   return paginasDoArquivo(a).join('\n')
+}
+
+/** Arquivo do qual o pdf.js não tirou texto nenhum — imagem, ou falha na leitura. */
+export function semTexto(a: ArquivoGuardado): boolean {
+  return textoDoArquivo(a).trim().length === 0
+}
+
+/**
+ * As páginas deste arquivo que podem ser VISTAS — as prontas e as a caminho.
+ *
+ * AS PROMETIDAS CONTAM, e isso não é otimismo. O texto é depositado em segundos;
+ * as imagens levam o tempo da rasterização no navegador, que é muito maior. Se o
+ * índice anunciasse só o que já chegou, a primeira entrega — que sai assim que o
+ * texto chega — descreveria o acórdão digitalizado como ilegível, e o modelo
+ * concluiria a análise sem ele, com a razão de sempre: ninguém lhe disse.
+ */
+export function paginasComImagem(a: ArquivoGuardado): number[] {
+  const n = new Set<number>()
+  for (const i of a.imagens ?? []) n.add(i.pagina)
+  for (const p of a.imagensPrevistas ?? []) n.add(p)
+  return [...n].sort((x, y) => x - y)
+}
+
+/** O caminho da imagem de uma página, quando ela já subiu. */
+export function caminhoDaImagem(a: ArquivoGuardado, pagina: number): string | undefined {
+  return (a.imagens ?? []).find((i) => i.pagina === pagina)?.caminho
 }
 
 /**
@@ -118,17 +166,52 @@ export const COMO_LER_OS_AUTOS = [
   '  de crédito", "expeça-se em nome de") é UMA chamada, não cinco; o Eixo 7',
   '  (alvará, depósito, levantamento) é outra. Cada chamada dessas pede autorização',
   '  a quem está operando: um termo por vez enche a tela de pedidos.',
+  '- `ver_paginas` devolve páginas DIGITALIZADAS como imagem. Documento escaneado',
+  '  não tem texto para extrair nem para procurar — a busca é cega nele, e o',
+  '  índice diz quais arquivos estão nessa situação. Nesses, ver é a única leitura',
+  '  que existe.',
   '',
   'CITE A PÁGINA que a ferramenta devolveu. O roteiro pede fonte com página em',
   'todo campo da ficha, e agora ela é dado, não estimativa.',
+  '',
+  'NÃO DECLARE AUSÊNCIA DO QUE VOCÊ NÃO ABRIU. O roteiro exige declaração expressa',
+  'quando nada é localizado, e ela vale sobre o que foi lido: enquanto houver',
+  'arquivo do índice que você não leu nem viu, escrever "não há cessão nos autos"',
+  'é afirmar o que não se verificou. Leia primeiro; se não der para ler, diga qual',
+  'arquivo ficou sem leitura e registre a diligência.',
 ].join('\n')
 
-/** Uma linha do índice: o que existe, quanto tem e se já veio. */
+/** Uma linha do índice: o que existe, quanto tem e por onde se lê. */
 interface LinhaDoIndice {
   nome: string
   paginas: number
   caracteres: number
   inteiro: boolean
+  /** Por que não há texto, quando não há. */
+  motivo?: string
+  /** Quantas páginas deste arquivo podem ser vistas como imagem. */
+  imagens: number
+}
+
+/**
+ * A COLUNA QUE IMPORTA NO ÍNDICE não é o tamanho: é por onde se lê cada arquivo.
+ *
+ * Um arquivo digitalizado tem zero caractere, e uma tabela que só mostrasse
+ * números deixaria a linha dele parecendo um arquivo vazio — que é exatamente a
+ * leitura errada. Ele não está vazio; ele está em imagem.
+ */
+function comoLer(l: LinhaDoIndice): string {
+  // O HÍBRIDO É O CASO QUE MAIS ENGANA: arquivo nato-digital com a conta da
+  // contadoria escaneada no meio. Ele tem texto, então chega inteiro e parece
+  // lido — e justamente a folha que decide o preço está numa página que o texto
+  // não alcança. A coluna diz quantas são.
+  const escaneadas = l.imagens > 0 ? ` · ${l.imagens} pág. escaneada(s), veja com \`ver_paginas\`` : ''
+  if (l.inteiro) return 'veio inteira nesta mensagem' + escaneadas
+  if (l.caracteres > 0) return '**não veio — leia com `ler_paginas`**' + escaneadas
+  if (l.imagens > 0) {
+    return `**sem texto (${l.motivo ?? 'digitalizado'}) — ${l.imagens} pág. em imagem, use \`ver_paginas\`**`
+  }
+  return `**NÃO LIDO — ${l.motivo ?? 'sem texto extraível'}**`
 }
 
 function indice(linhas: LinhaDoIndice[]): string {
@@ -136,13 +219,10 @@ function indice(linhas: LinhaDoIndice[]): string {
   return [
     '## ÍNDICE DOS ARQUIVOS',
     '',
-    '| # | Arquivo | Páginas | Caracteres | Nesta mensagem |',
-    '|---|---------|--------:|-----------:|----------------|',
+    '| # | Arquivo | Páginas | Caracteres | Como ler |',
+    '|---|---------|--------:|-----------:|----------|',
     ...linhas.map(
-      (l, i) =>
-        `| ${i + 1} | ${l.nome} | ${l.paginas || '—'} | ${num(l.caracteres)} | ${
-          l.inteiro ? 'sim, inteiro' : '**não — leia com `ler_paginas`**'
-        } |`,
+      (l, i) => `| ${i + 1} | ${l.nome} | ${l.paginas || '—'} | ${num(l.caracteres)} | ${comoLer(l)} |`,
     ),
   ].join('\n')
 }
@@ -159,6 +239,12 @@ function indice(linhas: LinhaDoIndice[]): string {
  * arquivo mutilado com um aviso no miolo. Agora um arquivo vem inteiro ou não
  * vem — e o que não veio está no índice, nomeado, com o tamanho, e o modelo sabe
  * como buscá-lo.
+ *
+ * O ARQUIVO SEM TEXTO TAMBÉM ESTÁ NO ÍNDICE, e esta é a segunda correção. Ele
+ * não chegava nem a ser guardado: dois anexos de dezenove — um acórdão e um
+ * ofício, ambos digitalizados — desapareciam entre o card e a conversa. A
+ * análise saía completa na aparência, declarando ausências que ninguém tinha
+ * verificado naqueles dois.
  */
 export function montarEntrega(
   g: AutosGuardados,
@@ -180,14 +266,56 @@ export function montarEntrega(
   for (const a of g.arquivos) {
     const texto = textoDoArquivo(a)
     const cabe = texto.length > 0 && usado + texto.length <= orcamento
-    linhas.push({ nome: a.nome, paginas: a.paginas, caracteres: texto.length, inteiro: cabe })
+    linhas.push({
+      nome: a.nome,
+      paginas: a.paginas,
+      caracteres: texto.length,
+      inteiro: cabe,
+      motivo: a.motivo,
+      imagens: paginasComImagem(a).length,
+    })
     if (!cabe) continue
     usado += texto.length
     const paginas = a.paginas > 0 ? ` (${a.paginas} páginas)` : ''
     corpos.push(`\n\n=== ARQUIVO: ${a.nome}${paginas} ===\n\n${texto}`)
   }
 
-  const faltando = linhas.filter((l) => !l.inteiro)
+  // TRÊS SITUAÇÕES DIFERENTES, e confundi-las já custou uma análise. Um arquivo
+  // que não coube se lê; um digitalizado se vê; um que falhou não se lê de jeito
+  // nenhum e vira diligência. Só a terceira autoriza seguir sem ele — e mesmo
+  // ela não autoriza afirmar que o que estava nele não existe.
+  const porTamanho = linhas.filter((l) => !l.inteiro && l.caracteres > 0)
+  const emImagem = linhas.filter((l) => l.caracteres === 0 && l.imagens > 0)
+  const perdidos = linhas.filter((l) => l.caracteres === 0 && l.imagens === 0)
+
+  const nomes = (ls: LinhaDoIndice[]) => ls.map((l) => `"${l.nome}"`).join(', ')
+  const avisos = [
+    ...(porTamanho.length > 0
+      ? [
+          '',
+          `> **${porTamanho.length} arquivo(s) não vieram nesta mensagem por tamanho:** ${nomes(porTamanho)}.`,
+          '> Estão guardados inteiros. Leia-os com `ler_paginas` antes de concluir',
+          '> qualquer coisa que dependa deles.',
+        ]
+      : []),
+    ...(emImagem.length > 0
+      ? [
+          '',
+          `> **${emImagem.length} arquivo(s) estão DIGITALIZADOS:** ${nomes(emImagem)}.`,
+          '> Não têm texto para extrair nem para procurar — `buscar_nos_autos` é cega',
+          '> neles. Abra-os com `ver_paginas`, que devolve as páginas como imagem.',
+          '> Enquanto não abrir, nada que dependa desses documentos está verificado.',
+        ]
+      : []),
+    ...(perdidos.length > 0
+      ? [
+          '',
+          `> **${perdidos.length} arquivo(s) não puderam ser lidos:** ${nomes(perdidos)}.`,
+          '> Não há texto nem imagem deles aqui. Registre na análise QUAL arquivo ficou',
+          '> sem leitura e trate como diligência — não como documento inexistente.',
+        ]
+      : []),
+  ]
 
   const cabeca = [
     (roteiro || '').trim() || ROTEIRO_QUALIFICACAO,
@@ -218,16 +346,7 @@ export function montarEntrega(
     indice(linhas),
     '',
     `Card Kommo ${g.lead_id} · lidos da Kommo em ${g.criado_em}`,
-    ...(faltando.length > 0
-      ? [
-          '',
-          `> **${faltando.length} arquivo(s) não vieram nesta mensagem por tamanho.**`,
-          '> Eles estão guardados inteiros. Leia-os com `ler_paginas` antes de',
-          '> concluir qualquer coisa que dependa deles, e use `buscar_nos_autos`',
-          '> para os eixos de varredura. Não trate como inexistente o que você',
-          '> ainda não pediu.',
-        ]
-      : []),
+    ...avisos,
     '',
     '---',
     '',
@@ -237,8 +356,14 @@ export function montarEntrega(
   return cabeca + corpos.join('')
 }
 
-/** Acha um arquivo pelo nome (parcial, sem acento/caixa) ou pela posição (1-based). */
-function acharArquivo(g: AutosGuardados, alvo: string): ArquivoGuardado | undefined {
+/**
+ * Acha um arquivo pelo nome (parcial, sem acento/caixa) ou pela posição (1-based).
+ *
+ * EXPORTADO porque o conector também precisa dele: `ver_paginas` recebe o mesmo
+ * "arquivo" digitado de memória pelo modelo, e resolvê-lo de outro jeito faria a
+ * mesma palavra apontar para documentos diferentes em ferramentas diferentes.
+ */
+export function arquivoDosAutos(g: AutosGuardados, alvo: string): ArquivoGuardado | undefined {
   const cru = String(alvo ?? '').trim()
   if (!cru) return undefined
   const n = Number(cru)
@@ -272,13 +397,23 @@ export function lerPaginas(
   de: number,
   ate: number,
 ): string {
-  const a = acharArquivo(g, arquivo)
+  const a = arquivoDosAutos(g, arquivo)
   if (!a) {
     const nomes = g.arquivos.map((x, i) => `${i + 1}. ${x.nome}`).join('\n')
     return `Não há arquivo "${arquivo}" neste crédito. Os arquivos são:\n${nomes}`
   }
   const paginas = paginasDoArquivo(a)
-  if (paginas.length === 0) return `O arquivo "${a.nome}" não tem texto legível.`
+  if (paginas.length === 0) {
+    // NEM TODO ARQUIVO SEM TEXTO ESTÁ PERDIDO: o digitalizado se vê. Devolver
+    // a quem procurou um "não tem texto" seco era condenar o acórdão escaneado
+    // ao mesmo silêncio de antes.
+    const imgs = paginasComImagem(a)
+    return imgs.length > 0
+      ? `O arquivo "${a.nome}" é digitalizado: não tem texto, tem imagem. ` +
+        `Use \`ver_paginas\` — há ${imgs.length} página(s) disponível(is) para ver.`
+      : `O arquivo "${a.nome}" não tem texto legível${a.motivo ? ` (${a.motivo})` : ''}. ` +
+        'Registre-o como NÃO LIDO em vez de concluir sobre o conteúdo dele.'
+  }
 
   const ini = Math.max(1, Math.floor(de) || 1)
   const fim = Math.min(paginas.length, Math.floor(ate) || paginas.length)
@@ -420,6 +555,21 @@ const RESSALVA_DA_AUSENCIA =
   'texto para procurar. Se o arquivo for imagem, diga isso na análise em vez de afirmar ' +
   'que nada existe.'
 
+/**
+ * A BUSCA É CEGA NO QUE ESTÁ EM IMAGEM, e calar isso é o pior jeito de errar
+ * aqui: o Eixo 2 pede declaração expressa de ausência, e ela sairia apoiada numa
+ * varredura que nunca passou pelo acórdão digitalizado.
+ */
+function avisoDosCegos(g: AutosGuardados): string {
+  const cegos = g.arquivos.filter((a) => semTexto(a))
+  if (cegos.length === 0) return ''
+  return (
+    ` ATENÇÃO: ${cegos.length} arquivo(s) deste crédito são digitalizados e esta busca ` +
+    `NÃO passou por eles — ${cegos.map((a) => `"${a.nome}"`).join(', ')}. Veja-os com ` +
+    '`ver_paginas` antes de declarar qualquer ausência.'
+  )
+}
+
 /** A busca, escrita para quem vai ler. */
 export function textoDaBusca(g: AutosGuardados, termos: string | string[]): string {
   const buscas = buscarVarios(g, termos)
@@ -458,7 +608,11 @@ export function textoDaBusca(g: AutosGuardados, termos: string | string[]): stri
 
   const rodape = [
     ...(semNada.length > 0
-      ? [`\n\n> **Sem ocorrência no texto:** ${semNada.map((t) => `"${t}"`).join(', ')}. ${RESSALVA_DA_AUSENCIA}`]
+      ? [
+          `\n\n> **Sem ocorrência no texto:** ${semNada.map((t) => `"${t}"`).join(', ')}. ` +
+            RESSALVA_DA_AUSENCIA +
+            avisoDosCegos(g),
+        ]
       : []),
     ...(naoCoube.length > 0
       ? [
