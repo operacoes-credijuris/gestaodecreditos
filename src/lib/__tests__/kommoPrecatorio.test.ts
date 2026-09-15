@@ -57,10 +57,10 @@ const COLUNAS_INTERNO = [
 /**
  * As colunas do funil NOVO do Externo, como o Kommo as devolveu.
  *
- * EM CAIXA ALTA PORQUE É ASSIM QUE ESTÃO LÁ, e duas delas — "MEMORANDO DE
- * NEGOCIAÇÃO" e "AGUARDANDO PRECIFICAÇÃO" — existem no kanban e NÃO viram aba,
- * por decisão de quem opera. Ficam no espelho de propósito: é o que garante que
- * a ausência delas na tela seja escolha, e não coluna perdida.
+ * EM CAIXA ALTA PORQUE É ASSIM QUE ESTÃO LÁ. "AGUARDANDO PRECIFICAÇÃO" existe
+ * no kanban e NÃO vira aba, por decisão de quem opera — é espera pelo fundo, não
+ * trabalho da casa. Fica no espelho de propósito: é o que garante que a ausência
+ * dela na tela seja escolha, e não coluna perdida.
  */
 const COLUNAS_EXTERNO = [
   'Etapa de leads de entrada',
@@ -242,14 +242,15 @@ describe('abas do Interno', () => {
 describe('abas da trilha Externa', () => {
   const abas = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, espelho(), 'externo')
 
-  it('mostra os sete rótulos da plataforma, na ordem da trilha', () => {
+  it('mostra os oito rótulos da plataforma, na ordem da trilha', () => {
     expect(abas.map((a) => a.label)).toEqual([
       'Qualificação Preliminar',
       'Revisão',
+      'Memorando',
       'Aprovados',
       'Diligência',
       'Reprovados',
-      'Apresentação',
+      'Proposta',
       'Fechados',
     ])
   })
@@ -258,30 +259,41 @@ describe('abas da trilha Externa', () => {
     const porLabel = new Map(abas.map((a) => [a.label, a.statusIds[0]]))
     expect(porLabel.get('Qualificação Preliminar')).toBe(idDe('QUALIFICAÇÃO PRELIMINAR'))
     expect(porLabel.get('Revisão')).toBe(idDe('REVISÃO DA QUALIFICAÇÃO'))
+    expect(porLabel.get('Memorando')).toBe(idDe('MEMORANDO DE NEGOCIAÇÃO'))
     // "APROVADOS" AQUI, "ENCAMINHAR AOS FUNDOS" LÁ: o rótulo é o vocabulário de
     // quem analisa, o nome da coluna é o do comercial. O teste guarda os dois
     // lados justamente porque eles divergem de propósito.
     expect(porLabel.get('Aprovados')).toBe(idDe('ENCAMINHAR AOS FUNDOS'))
     expect(porLabel.get('Diligência')).toBe(idDe('DILIGÊNCIA'))
     expect(porLabel.get('Reprovados')).toBe(idDe('REPROVADOS'))
-    expect(porLabel.get('Apresentação')).toBe(idDe('PRODUÇÃO DE PROPOSTA'))
+    expect(porLabel.get('Proposta')).toBe(idDe('PRODUÇÃO DE PROPOSTA'))
     expect(porLabel.get('Fechados')).toBe(idDe('FECHADOS'))
   })
 
   /**
-   * AS DUAS COLUNAS QUE FICARAM DE FORA, e ficaram por decisão.
+   * A COLUNA QUE FICOU DE FORA, e ficou por decisão.
    *
-   * Elas existem no kanban e não viram aba. O teste não afirma que isso é certo
-   * — afirma que é DELIBERADO: se um dia alguém as espelhar, este teste cai e
-   * obriga a decisão a ser tomada de novo, em vez de entrar de carona.
+   * "AGUARDANDO PRECIFICAÇÃO" existe no kanban e não vira aba: é espera pelo
+   * fundo, e não trabalho da casa. O teste não afirma que isso é certo — afirma
+   * que é DELIBERADO: se um dia alguém a espelhar, este teste cai e obriga a
+   * decisão a ser tomada de novo, em vez de entrar de carona.
+   *
+   * FOI ASSIM QUE O MEMORANDO ENTROU: ele estava nesta lista, o teste caiu, e a
+   * inclusão passou por uma decisão em vez de por um descuido.
    */
-  it('memorando e precificação do fundo não viram aba', () => {
-    const colunas = abas.map((a) => a.descricaoVazia + '')
-    expect(colunas).toHaveLength(7)
+  it('a precificação do fundo não vira aba', () => {
+    expect(abas).toHaveLength(8)
     const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
     const nomes = externo.abas.map((a) => a.colunaKommo)
-    expect(nomes).not.toContain('MEMORANDO DE NEGOCIAÇÃO')
     expect(nomes).not.toContain('AGUARDANDO PRECIFICAÇÃO')
+  })
+
+  // ETAPA DE TRABALHO, NÃO DE DECISÃO: a saída do memorando ainda não foi
+  // definida, e enquanto não for é o Kommo que move o card.
+  it('o Memorando não oferece desfecho', () => {
+    const memorando = abas.find((a) => a.label === 'Memorando')!
+    expect(memorando.acoes).toEqual([])
+    expect(memorando.desfechoAgrupado).toBe(false)
   })
 
   /** As duas etapas em que a casa decide algo — as demais são de espera. */
@@ -503,8 +515,8 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     // precatórios existem. Se mudasse, se leria como dado mudando.
     const etapas = espelho()
     const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
-    // 6 abas do Interno + 7 do Externo, e nada compartilhado desde a separação.
-    expect(ids.size).toBe(13)
+    // 6 abas do Interno + 8 do Externo, e nada compartilhado desde a separação.
+    expect(ids.size).toBe(14)
   })
 
   it('a união vale seja qual for o funil de precatório perguntado', () => {
@@ -523,7 +535,6 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
     expect(ids.has(idDe('Nutrição', etapas))).toBe(false)
     expect(ids.has(idDe('Venda ganha', etapas))).toBe(false)
-    expect(ids.has(idDe('MEMORANDO DE NEGOCIAÇÃO', etapas))).toBe(false)
     expect(ids.has(idDe('AGUARDANDO PRECIFICAÇÃO', etapas))).toBe(false)
   })
 

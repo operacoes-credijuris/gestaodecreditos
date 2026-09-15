@@ -122,7 +122,7 @@ export interface DefAbaPrecatorio {
    * oferece saída nenhuma — é etapa de espera, onde quem move o card é o fundo.
    */
   aprovaPara?: string
-/**
+  /**
    * O rótulo e o tom do botão que segue em frente nesta etapa.
    *
    * NEM TODO "SEGUIR" É UM "APROVAR", e é isso que estes dois campos existem
@@ -292,6 +292,15 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
         varianteAprovar: 'primary',
       },
       {
+        key: 'ext-memorando',
+        // SEM DESFECHO, por ora: é etapa de trabalho, não de decisão. A saída
+        // dela ainda não foi definida — e enquanto não for, a aba mostra os
+        // cards e quem os move é o Kommo.
+        label: 'Memorando',
+        colunaKommo: 'MEMORANDO DE NEGOCIAÇÃO',
+        descricaoVazia: 'Nenhum crédito em memorando de negociação.',
+      },
+      {
         key: 'ext-encaminhar',
         // "APROVADOS" NA PLATAFORMA, "ENCAMINHAR AOS FUNDOS" NO KOMMO — e é de
         // propósito. O rótulo daqui é o vocabulário de quem analisa: o que o ato
@@ -315,7 +324,10 @@ export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
       },
       {
         key: 'ext-apresentacao',
-        label: 'Apresentação',
+        // "PROPOSTA" NA PLATAFORMA: o que a etapa produz. "Apresentação" vinha
+        // do funil antigo, onde a coluna se chamava "Apresentação de Proposta" —
+        // o nome guardava o ato e perdia a coisa.
+        label: 'Proposta',
         colunaKommo: 'PRODUÇÃO DE PROPOSTA',
         descricaoVazia: 'Nenhum precatório em apresentação.',
       },
