@@ -74,6 +74,23 @@ interface KommoLead {
   _embedded?: { tags?: { name?: string }[] }
 }
 
+/**
+ * Um evento de movimentação de card (`lead_status_changed`).
+ *
+ * `value_after` é uma LISTA de um item só — é assim que a API devolve, e
+ * tratá-la como objeto foi a primeira coisa que eu errei ao ler a documentação.
+ */
+interface EventoKommo {
+  entity_id: number
+  created_at?: number
+  value_after?: { lead_status?: { id?: number; pipeline_id?: number } }[]
+}
+
+interface RespostaEventos {
+  _embedded?: { events?: EventoKommo[] }
+  _links?: { next?: { href?: string } }
+}
+
 interface KommoNote {
   id: number
   entity_id: number
@@ -347,6 +364,141 @@ Deno.serve(async (req: Request) => {
       lista.sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0))
     }
 
+    // ---------- Desde quando cada card está na coluna em que está ----------
+    //
+    // A PERGUNTA DE QUEM ABRE A TELA é há quanto tempo um crédito está parado
+    // naquela coluna, e nenhum campo do card responde isso: `created_at` é o
+    // nascimento e `updated_at` muda com qualquer edição — responsável, tag,
+    // anotação. Um card criado em março e movido ontem erra nos dois.
+    //
+    // A FONTE É O EVENTO `lead_status_changed`, que traz origem, destino e hora.
+    // Duas passadas, e a divisão é o que mantém isto barato: a janela recente
+    // cobre quem se moveu desde a última sincronização — que é quase sempre o
+    // único grupo que mudou —, e a busca dirigida preenche o resto, uma vez por
+    // card, porque o valor fica guardado no espelho.
+    //
+    // FALHAR AQUI NÃO DERRUBA O SYNC: a data é conforto na tela, os cards são o
+    // serviço. Mas o aviso volta no resumo, porque uma coluna sem data é
+    // diferente de uma coluna cujos cards entraram todos hoje.
+    const jaSabido = new Map<number, { em: string | null; status: number | null }>()
+    // A PRÓPRIA LEITURA DIZ SE A MIGRAÇÃO 0066 JÁ RODOU, e isso não é esperteza:
+    // é o que separa o deploy da migração. Sem a coluna, um upsert que a mencione
+    // derruba a sincronização INTEIRA — os cards param de chegar à tela por causa
+    // de uma data no canto do card. Detectando aqui, o sync segue sem a data e diz
+    // o que falta, em vez de morrer com um erro de coluna inexistente.
+    let temColunaEtapa = true
+    {
+      const { data: doEspelho, error: erroEspelho } = await svc
+        .from('kommo_leads')
+        .select('kommo_lead_id, etapa_em, etapa_status_id')
+        .in('pipeline_id', FUNIS)
+      if (erroEspelho) temColunaEtapa = false
+      for (const r of doEspelho ?? []) {
+        jaSabido.set(r.kommo_lead_id, { em: r.etapa_em, status: r.etapa_status_id })
+      }
+    }
+
+    const statusAtual = new Map(leads.map((l) => [l.id, l.status_id]))
+    const entradaNaColuna = new Map<number, string>()
+    const perguntados = new Set<number>()
+
+    /**
+     * Guarda o evento se ele for a entrada na coluna ATUAL do card.
+     *
+     * A MAIS RECENTE ENTRE AS QUE CASAM, e não a primeira que aparecer: um card
+     * que foi de Revisão para Diligência e voltou tem duas entradas em Revisão,
+     * e a que vale é a última. A API não promete ordem entre páginas, então isto
+     * é um máximo.
+     */
+    const anotarEvento = (e: EventoKommo) => {
+      const destino = e.value_after?.[0]?.lead_status?.id
+      const quando = iso(e.created_at)
+      if (!quando || !destino || destino !== statusAtual.get(e.entity_id)) return
+      const anterior = entradaNaColuna.get(e.entity_id)
+      if (!anterior || quando > anterior) entradaNaColuna.set(e.entity_id, quando)
+    }
+
+    // A MENSAGEM TEM DE DIZER O QUE FALTA. Cair no catch aqui responderia 'não
+    // consegui ler os eventos do Kommo', que é falso e manda procurar no lugar
+    // errado: o Kommo está bem, o banco é que ainda não tem onde guardar.
+    let avisoEventos: string | null = temColunaEtapa
+      ? null
+      : 'A migração 0066 ainda não rodou (colunas etapa_em e etapa_status_id). Os cards ' +
+        'sincronizam normalmente; o que falta é a data de entrada na coluna, no canto do card.'
+    try {
+      const desde = Math.floor(Date.now() / 1000) - 3 * 24 * 60 * 60
+      for (let pagina = 1; temColunaEtapa && pagina <= 20; pagina++) {
+        const r = await kommo<RespostaEventos>(
+          '/events?filter[entity]=lead&filter[type]=lead_status_changed' +
+            `&filter[created_at][from]=${desde}&limit=250&page=${pagina}`,
+        )
+        if (!r) break
+        for (const e of r._embedded?.events ?? []) anotarEvento(e)
+        if (!r._links?.next?.href) break
+      }
+
+      // Quem continua sem data: card novo para o espelho, card que se moveu há
+      // mais tempo que a janela, ou card cuja data guardada é de outra coluna.
+      const faltando = !temColunaEtapa ? [] : leads.filter((l) => {
+        if (entradaNaColuna.has(l.id)) return false
+        const s = jaSabido.get(l.id)
+        return !(s?.em && s.status === l.status_id)
+      })
+      // DEZ IDS POR CONSULTA é o teto documentado do filter[entity_id] em
+      // /events — não é escolha nossa, e é por isso que há um teto de consultas
+      // logo abaixo: 300 cards sem data custariam 30 requisições.
+      const IDS_POR_CONSULTA_EVENTO = 10
+      const MAX_CONSULTAS_EVENTO = 40
+      let consultas = 0
+      for (
+        let i = 0;
+        i < faltando.length && consultas < MAX_CONSULTAS_EVENTO;
+        i += IDS_POR_CONSULTA_EVENTO
+      ) {
+        const ids = faltando.slice(i, i + IDS_POR_CONSULTA_EVENTO).map((l) => l.id)
+        consultas++
+        for (let pagina = 1; pagina <= 10; pagina++) {
+          const r = await kommo<RespostaEventos>(
+            `/events?filter[entity]=lead&filter[entity_id]=${ids.join(',')}` +
+              '&filter[type]=lead_status_changed&limit=250&page=' + pagina,
+          )
+          if (!r) break
+          for (const e of r._embedded?.events ?? []) anotarEvento(e)
+          if (!r._links?.next?.href) break
+        }
+        // PERGUNTADO É DIFERENTE DE NÃO ACHADO. Só quem passou por aqui pode
+        // cair no `created_at`: para quem não coube na passada, ficar sem data é
+        // o que faz a próxima tentar de novo — gravar um palpite congelaria o
+        // erro, porque a condição que traz o card de volta a esta lista é
+        // justamente não ter data.
+        for (const id of ids) perguntados.add(id)
+      }
+      const semConsulta = faltando.length - consultas * IDS_POR_CONSULTA_EVENTO
+      if (semConsulta > 0) {
+        avisoEventos =
+          `${semConsulta} card(s) ficaram sem a data de entrada na coluna nesta passada ` +
+          '(teto de consultas por sincronização). A próxima continua de onde esta parou.'
+      }
+    } catch (e) {
+      avisoEventos =
+        'Não consegui ler os eventos de movimentação do Kommo: ' +
+        `${(e as Error)?.message ?? e}. As datas de entrada na coluna ficam como estavam.`
+    }
+
+    /** A data de entrada na coluna atual, e a coluna a que ela se refere. */
+    const etapaDoLead = (l: KommoLead): { em: string | null; status: number | null } => {
+      const achado = entradaNaColuna.get(l.id)
+      if (achado) return { em: achado, status: l.status_id }
+      const antes = jaSabido.get(l.id)
+      if (antes?.em && antes.status === l.status_id) return { em: antes.em, status: antes.status }
+      // Perguntamos e não há evento: ou o card nunca saiu da coluna em que
+      // nasceu, ou a movimentação é mais antiga que o histórico que o Kommo
+      // guarda. `created_at` é a melhor resposta verdadeira nos dois casos — e é
+      // a resposta exata no primeiro.
+      if (perguntados.has(l.id)) return { em: iso(l.created_at), status: l.status_id }
+      return { em: antes?.em ?? null, status: antes?.status ?? null }
+    }
+
     // ---------- Grava o espelho ----------
     const registros = leads.map((l) => {
       const doLead = notasPorLead.get(l.id) ?? []
@@ -361,6 +513,7 @@ Deno.serve(async (req: Request) => {
       // os dados do crédito. Há cards em que a primeira é um comentário curto
       // ("qualificado") e o bloco de dados vem na segunda.
       const nota = notas[0]?.texto ?? null
+      const etapa = etapaDoLead(l)
       return {
         kommo_lead_id: l.id,
         pipeline_id: l.pipeline_id,
@@ -387,6 +540,10 @@ Deno.serve(async (req: Request) => {
           .filter((n): n is string => typeof n === 'string' && n.length > 0),
         criado_em: iso(l.created_at),
         atualizado_em: iso(l.updated_at),
+        // A DATA E A COLUNA A QUE ELA SE REFERE, sempre juntas: sozinha, a
+        // data continuaria na tela depois de o card mudar de coluna, dizendo
+        // com confiança há quanto tempo ele está num lugar onde não está.
+        ...(temColunaEtapa ? { etapa_em: etapa.em, etapa_status_id: etapa.status } : {}),
         raw: l,
         sincronizado_em: agora,
       }
@@ -480,7 +637,7 @@ Deno.serve(async (req: Request) => {
       // sincronizaram. Mas volta — coluna nova que não chegou aqui é aba que não
       // aparece na tela, e funil que voltou vazio com espelho cheio é leitura
       // falhada. Nenhum dos dois pode ser descoberto por acidente.
-      aviso: [avisoEtapas, ...avisosEspelho].filter(Boolean).join(' · ') || null,
+      aviso: [avisoEtapas, avisoEventos, ...avisosEspelho].filter(Boolean).join(' · ') || null,
       mensagem:
         `Kommo sincronizado — ${registros.length} card(s), ` +
         `${comCnj} com processo identificado` +

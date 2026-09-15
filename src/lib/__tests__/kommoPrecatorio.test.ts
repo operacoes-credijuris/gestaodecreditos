@@ -34,6 +34,7 @@ import {
   ST_REPROVADO,
   abasDoFunil,
   agruparPorAba,
+  dataDaEtapa,
   colunasPrecatorioDesalinhadas,
   statusExibidos,
   type EtapaKommo,
@@ -505,7 +506,88 @@ describe('cards fora das trilhas', () => {
       abas,
     )
     expect(porAba[ABA_JURIDICO].map((l) => l.kommo_lead_id)).toEqual([1])
-    expect(outras.map((l) => l.kommo_lead_id)).toEqual([2, 3])
+    // A ORDEM AQUI NAO E O ASSUNTO: cada coluna passou a sair do mais novo para
+    // o mais antigo, e o que este teste guarda e o particionamento.
+    expect([...outras.map((l) => l.kommo_lead_id)].sort((a, b) => a - b)).toEqual([2, 3])
+  })
+})
+
+/**
+ * A ORDEM DENTRO DA COLUNA, e a data que a decide.
+ *
+ * A pergunta de quem abre a tela é há quanto tempo um crédito está parado
+ * naquela etapa. Nenhum campo do card do Kommo responde isso: `created_at` é o
+ * nascimento — um card de março movido ontem erra por cinco meses — e
+ * `updated_at` muda quando alguém troca uma tag. A resposta vem do evento
+ * `lead_status_changed`, que o kommo-sync grava em `etapa_em`.
+ */
+describe('a ordem dentro da coluna', () => {
+  const etapas = espelho()
+  const abas = abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno')
+  const juridico = idDe('Análise Jurídica (TIER 1)', etapas)
+  const naColuna = (
+    id: number,
+    etapa_em: string | null,
+    extras: Partial<KommoLead> = {},
+  ): KommoLead =>
+    ({
+      ...lead(juridico, id),
+      etapa_em,
+      etapa_status_id: juridico,
+      criado_em: null,
+      ...extras,
+    }) as KommoLead
+
+  it('o mais recente vem primeiro', () => {
+    const { porAba } = agruparPorAba(
+      [
+        naColuna(1, '2026-09-01T10:00:00Z'),
+        naColuna(2, '2026-09-14T10:00:00Z'),
+        naColuna(3, '2026-09-08T10:00:00Z'),
+      ],
+      abas,
+    )
+    expect(porAba[ABA_JURIDICO].map((l) => l.kommo_lead_id)).toEqual([2, 3, 1])
+  })
+
+  /**
+   * A DATA SÓ VALE PARA A COLUNA EM QUE FOI APURADA.
+   *
+   * Entre uma sincronização e outra alguém move o card no Kommo. Sem comparar
+   * `etapa_status_id` com `status_id`, a tela exibiria com toda a confiança há
+   * quanto tempo o card está num lugar onde ele já não está — e o erro seria
+   * invisível, porque data errada tem a mesma cara de data certa.
+   */
+  it('data de outra coluna não é exibida', () => {
+    const mudouDeColuna = naColuna(1, '2026-09-14T10:00:00Z', { etapa_status_id: 999 })
+    expect(dataDaEtapa(mudouDeColuna)).toBeNull()
+    expect(dataDaEtapa(naColuna(2, '2026-09-14T10:00:00Z'))).toBe('2026-09-14T10:00:00Z')
+    expect(dataDaEtapa(naColuna(3, null))).toBeNull()
+  })
+
+  // CARD SEM DATA APURADA NÃO AFUNDA. Ele cairia para o fim da lista com zero —
+  // o pior lugar para um card que pode ter chegado hoje —, e a data de criação
+  // erra por pouco e na direção certa.
+  it('sem data apurada, a criação segura a posição', () => {
+    const { porAba } = agruparPorAba(
+      [
+        naColuna(1, '2026-09-10T10:00:00Z'),
+        naColuna(2, null, { criado_em: '2026-09-15T10:00:00Z' }),
+        naColuna(3, null, { criado_em: '2026-09-02T10:00:00Z' }),
+      ],
+      abas,
+    )
+    expect(porAba[ABA_JURIDICO].map((l) => l.kommo_lead_id)).toEqual([2, 1, 3])
+  })
+
+  // Empate pelo id, que também cresce no tempo: dois cards movidos no mesmo
+  // instante (uma movimentação em lote) não podem trocar de lugar a cada render.
+  it('empate desempata pelo id, do maior para o menor', () => {
+    const { porAba } = agruparPorAba(
+      [naColuna(7, '2026-09-10T10:00:00Z'), naColuna(9, '2026-09-10T10:00:00Z')],
+      abas,
+    )
+    expect(porAba[ABA_JURIDICO].map((l) => l.kommo_lead_id)).toEqual([9, 7])
   })
 })
 

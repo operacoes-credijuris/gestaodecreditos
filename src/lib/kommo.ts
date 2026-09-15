@@ -902,6 +902,39 @@ export function abasDoFunil(
  * card estranho FORA das abas em vez de misturá-lo na primeira — e é o que o
  * teste de particionamento verifica.
  */
+/**
+ * Desde quando o card está na coluna em que está — ou null, se não sabemos.
+ *
+ * A CONFERÊNCIA DO STATUS É O CORAÇÃO DISTO. A data é gravada junto com a
+ * coluna a que se refere, porque entre uma sincronização e outra alguém move o
+ * card no Kommo. Sem comparar as duas, a tela exibiria com toda a confiança há
+ * quanto tempo o card está num lugar onde ele já não está — e o erro seria
+ * invisível, porque uma data errada tem exatamente a mesma cara de uma certa.
+ */
+export function dataDaEtapa(lead: KommoLead): string | null {
+  if (!lead.etapa_em) return null
+  return lead.etapa_status_id === lead.status_id ? lead.etapa_em : null
+}
+
+/**
+ * A chave de ordenação dentro da coluna: quanto maior, mais recente.
+ *
+ * `criado_em` É A REDE DE SEGURANÇA, e não um segundo critério: card que ainda
+ * não teve a data apurada — ou que se moveu depois do último sync — cairia para
+ * o fim da lista com zero, que é o pior lugar para um card recém-chegado. A data
+ * de criação erra por pouco e na direção certa.
+ */
+export function ordemNaColuna(lead: KommoLead): number {
+  const quando = dataDaEtapa(lead) ?? lead.criado_em
+  const t = quando ? Date.parse(quando) : NaN
+  return Number.isNaN(t) ? 0 : t
+}
+
+/** Do mais recente para o mais antigo; empate pelo id, que também cresce no tempo. */
+function daColunaMaisNovoPrimeiro(a: KommoLead, b: KommoLead): number {
+  return ordemNaColuna(b) - ordemNaColuna(a) || b.kommo_lead_id - a.kommo_lead_id
+}
+
 export function agruparPorAba(
   leads: KommoLead[],
   abas: Aba[],
@@ -918,6 +951,12 @@ export function agruparPorAba(
     if (chave) porAba[chave].push(l)
     else outras.push(l)
   }
+  // CADA COLUNA DO MAIS NOVO PARA O MAIS ANTIGO, e a ordenação é aqui porque é
+  // aqui que a coluna existe: a consulta devolve os cards dos quatro funis
+  // misturados, e ordenar lá deixaria a ordem de cada aba à mercê de quem
+  // mexeu no card mais recentemente em qualquer outra.
+  for (const chave of Object.keys(porAba)) porAba[chave].sort(daColunaMaisNovoPrimeiro)
+  outras.sort(daColunaMaisNovoPrimeiro)
   return { porAba, outras }
 }
 

@@ -360,6 +360,33 @@ export function formatDateTime(value: string | null | undefined): string {
  * usar a data LOCAL (não UTC) importa: perto da meia-noite o toISOString()
  * viraria o dia antes da hora e acenderia semáforo errado.
  */
+/**
+ * "hoje", "ontem", "há 3 dias", "há 2 meses" — o tempo decorrido, em uma linha.
+ *
+ * POR DIA CIVIL, e não por 24 horas. Um card movido ontem às 23h é "ontem" às
+ * 8h da manhã seguinte; uma conta de horas diria "há 9 horas", que é verdade e
+ * não é o que se pergunta olhando uma fila de trabalho.
+ *
+ * FUTURO VOLTA VAZIO em vez de "há -2 dias": relógio de servidor adiantado e
+ * fuso horário produzem diferenças de algumas horas, e uma data no futuro aqui
+ * é sinal de defeito, não informação para a tela.
+ */
+export function tempoDecorrido(value: string | null | undefined, agora: Date = new Date()): string {
+  if (!value) return ''
+  const d = new Date(value.length <= 10 ? `${value}T00:00:00` : value)
+  if (Number.isNaN(d.getTime())) return ''
+  const dia = (x: Date) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate())
+  const dias = Math.round((dia(agora) - dia(d)) / 86_400_000)
+  if (dias < 0) return ''
+  if (dias === 0) return 'hoje'
+  if (dias === 1) return 'ontem'
+  if (dias < 30) return `há ${dias} dias`
+  const meses = Math.floor(dias / 30)
+  if (meses < 12) return meses === 1 ? 'há 1 mês' : `há ${meses} meses`
+  const anos = Math.floor(dias / 365)
+  return anos === 1 ? 'há 1 ano' : `há ${anos} anos`
+}
+
 export function hojeISO(): string {
   return new Date().toLocaleDateString('sv-SE')
 }

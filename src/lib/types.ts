@@ -84,6 +84,23 @@ export interface KommoLead {
   tags: string[]
   criado_em: string | null
   atualizado_em: string | null
+  /**
+   * Quando o card entrou na coluna em que está (migração 0066).
+   *
+   * NÃO É `criado_em` NEM `atualizado_em`, e a diferença é a pergunta que a
+   * tela responde: há quanto tempo este crédito está parado NESTA etapa. O
+   * primeiro é o nascimento; o segundo muda com qualquer edição do card.
+   * Sai do evento `lead_status_changed` do Kommo, lido pelo kommo-sync.
+   */
+  etapa_em: string | null
+  /**
+   * A coluna a que `etapa_em` se refere.
+   *
+   * Diferente de `status_id` significa que o card se moveu depois do último
+   * sync: a data guardada é de outra coluna e NÃO deve ser exibida. Ver
+   * `dataDaEtapa`, que é por onde a tela pergunta.
+   */
+  etapa_status_id: number | null
   sincronizado_em: string
 }
 

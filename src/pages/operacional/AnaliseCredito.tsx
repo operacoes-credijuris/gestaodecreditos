@@ -51,6 +51,7 @@ import {
   ABAS_EXTERNO_SEM_TRABALHO,
   ehFunilPrecatorio,
   acaoDeReprovar,
+  dataDaEtapa,
   ehCardExterno,
   abasDoFunil,
   agruparPorAba,
@@ -97,7 +98,7 @@ import {
   type RespostaAnaliseRpv,
   type ValoresRpv,
 } from '@/components/AnaliseRpvModal'
-import { formatDataHoraSegundos } from '@/lib/format'
+import { formatDataHoraSegundos, formatDate, formatDateTime, tempoDecorrido } from '@/lib/format'
 import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
@@ -802,6 +803,38 @@ function AvisoSemNumero({ lead }: { lead: KommoLead }) {
   return null
 }
 
+/**
+ * Desde quando este card está NESTA coluna.
+ *
+ * A PERGUNTA QUE ELE RESPONDE é há quanto tempo o crédito está parado na etapa
+ * — a que decide o que puxar primeiro numa coluna de trinta cards. A data de
+ * criação não responde (card de março movido ontem) e a de atualização também
+ * não (muda quando alguém troca uma tag).
+ *
+ * A DATA E O DECORRIDO JUNTOS. A data sozinha obriga a fazer a conta de cabeça;
+ * o "há 3 dias" sozinho apaga o dia exato, que é o que se copia para uma
+ * cobrança. A hora fica no title, para não gastar largura com o que raramente
+ * importa.
+ *
+ * SEM DATA, NADA — nem traço, nem "—". O card que ainda não teve a etapa
+ * apurada aparece igual aos outros, e a próxima sincronização o preenche; um
+ * marcador de vazio em meia dúzia de cards viraria ruído permanente na coluna.
+ */
+function SeloDaEtapa({ lead }: { lead: KommoLead }) {
+  const quando = dataDaEtapa(lead)
+  if (!quando) return null
+  const decorrido = tempoDecorrido(quando)
+  return (
+    <span
+      className="text-xs whitespace-nowrap text-slate-400"
+      title={`Entrou nesta coluna em ${formatDateTime(quando)}`}
+    >
+      {formatDate(quando)}
+      {decorrido && <span className="text-slate-300"> · {decorrido}</span>}
+    </span>
+  )
+}
+
 function CardCredito({
   lead,
   acoes,
@@ -902,10 +935,12 @@ function CardCredito({
               </Badge>
             )}
           </div>
-          {/* Sem linha de metadados: o processo já vem no título, o responsável é
-              sempre a Credijuris, e a data de criação do card é redundante com as
-              datas das próprias anotações. Tags também ficam de fora — as atuais
-              são artefato da migração do Chatwoot. Tudo continua em kommo_leads. */}
+          {/* Sem linha de metadados: o processo já vem no título e o responsável é
+              sempre a Credijuris. A data de CRIAÇÃO continua fora — ela é
+              redundante com as datas das anotações, e a que importa numa fila é
+              outra: desde quando o card está nesta coluna, que fica à direita
+              (ver SeloDaEtapa). Tags também ficam de fora — as atuais são
+              artefato da migração do Chatwoot. Tudo continua em kommo_leads. */}
         </div>
 
         {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
@@ -919,25 +954,31 @@ function CardCredito({
             — quem revisa lê a anotação e a planilha, não roda de novo —, e tirar
             os botões de lá obrigaria a abrir a janela e pagar dois minutos de
             leitura do processo para mover um card. */}
-        {acoes.length > 0 && desfechoNoCard && (
-          <div className="flex flex-none flex-wrap items-center justify-end gap-1.5">
-            {acoes.map((a) => (
-              <Button
-                key={a.statusId}
-                size="sm"
-                variant={a.variant}
-                icon={ICONES[a.papel]}
-                onClick={() => onAcao(lead, a)}
-                loading={statusEmAndamento === a.statusId}
-                // Trava as outras ações do card enquanto uma corre: duas
-                // movimentações simultâneas no mesmo card se atropelariam.
-                disabled={ocupado}
-              >
-                {a.label}
-              </Button>
-            ))}
-          </div>
-        )}
+        {/* A COLUNA DA DIREITA: a data em cima, os desfechos embaixo. Eram só os
+            botões, e o selo precisa do canto superior — é lido junto com o
+            título, na varredura de cima para baixo que se faz numa fila. */}
+        <div className="flex flex-none flex-col items-end gap-1.5">
+          <SeloDaEtapa lead={lead} />
+          {acoes.length > 0 && desfechoNoCard && (
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              {acoes.map((a) => (
+                <Button
+                  key={a.statusId}
+                  size="sm"
+                  variant={a.variant}
+                  icon={ICONES[a.papel]}
+                  onClick={() => onAcao(lead, a)}
+                  loading={statusEmAndamento === a.statusId}
+                  // Trava as outras ações do card enquanto uma corre: duas
+                  // movimentações simultâneas no mesmo card se atropelariam.
+                  disabled={ocupado}
+                >
+                  {a.label}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* O QUE O TÍTULO DIZ, onde não há análise para dizer.
