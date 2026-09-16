@@ -38,6 +38,7 @@ import {
   ST_DECISAO,
   ST_DILIGENCIA,
   ST_PROPOSTA,
+  ST_PROTOCOLO,
   ST_REPROVADO,
   abasDoFunil,
   agruparPorAba,
@@ -767,9 +768,9 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     expect(somaDe('interno') + somaDe('externo')).toBe(4)
   })
 
-  it('em RPV, são os cinco status curados', () => {
+  it('em RPV, são os seis status curados', () => {
     expect(statusExibidos(FUNIL_RPV, espelho())).toEqual(
-      new Set([ST_ANALISE, ST_DECISAO, ST_PROPOSTA, ST_DILIGENCIA, ST_REPROVADO]),
+      new Set([ST_ANALISE, ST_DECISAO, ST_PROPOSTA, ST_DILIGENCIA, ST_REPROVADO, ST_PROTOCOLO]),
     )
   })
 
@@ -779,17 +780,21 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
 })
 
 describe('RPV não é afetado pela subdivisão', () => {
-  it('devolve as cinco telas curadas, com os botões de mover', () => {
+  it('devolve as seis telas curadas, com os botões de mover', () => {
     // A subdivisão é um eixo só do Precatório. Passá-la aqui não pode mudar nada.
     const abas = abasDoFunil(FUNIL_RPV, espelho(), 'externo')
     expect(abas.map((a) => a.label)).toEqual([
-      'Pendentes',
-      'Validação',
+      'Em análise',
+      'Revisão',
       'Aprovados',
       'Diligência',
       'Reprovados',
+      'p/ Protocolo',
     ])
-    expect(abas.find((a) => a.label === 'Validação')!.acoes).toHaveLength(3)
+    expect(abas.find((a) => a.label === 'Revisão')!.acoes).toHaveLength(3)
+    // O protocolo é acompanhamento: o card chega ali depois de tudo o que a casa
+    // decidiu, e quem o move de lá é quem protocola.
+    expect(abas.find((a) => a.label === 'p/ Protocolo')!.acoes).toEqual([])
   })
 })
 

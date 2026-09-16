@@ -6,16 +6,20 @@
 // escreve é a kommo-mover.
 //
 // Fluxo do operacional:
-//   Pendentes   a IA analisa o card, que fica aqui até a equipe de revisão
+//   Em análise  a IA analisa o card, que fica aqui até a equipe de revisão
 //               considerar a análise boa
-//        ↓      "Enviar para validação"
-//   Validação   três saídas
+//        ↓      "Enviar para revisão"
+//   Revisão     três saídas
 //        ↓
 //   Aprovados | Diligência | Reprovados
 //
-// A análise (inclusive o motivo de uma eventual reprovação) é produzida em
-// Pendentes. Validação só ratifica — por isso nenhuma das três saídas pede
+// A análise (inclusive o motivo de uma eventual reprovação) é produzida em Em
+// análise. A revisão só ratifica — por isso nenhuma das três saídas pede
 // justificativa: ela já foi escrita antes.
+//
+// Depois de aprovado o crédito passa por etapas do comercial (oferta, contratos,
+// assinaturas) que não têm aba aqui, e reaparece em "p/ Protocolo", que é
+// trabalho nosso de novo.
 //
 // Toda tela corresponde a exatamente uma coluna do Kommo. Não há estado que
 // exista só na nossa base — o kanban é a fonte de verdade.
@@ -67,12 +71,17 @@ export { ABA_ANALISE_INTERNA, FUNIL_PRECATORIO_EXTERNO, FUNIL_PRECATORIO_INTERNO
 
 // Estágios do Funil Geral RPV que interessam ao operacional. Os nomes das
 // constantes seguem os nomes das COLUNAS NO KOMMO; o rótulo que o usuário vê
-// está em TELAS[].label e pode divergir (ST_DECISAO aparece como "Validação").
+// está em TELAS[].label e pode divergir (ST_DECISAO aparece como "Revisão").
 export const ST_ANALISE = 107272803 // Análise Jurídica-Econômico
 export const ST_DECISAO = 107272807 // Revisão e Decisão do Pedro
 export const ST_DILIGENCIA = 107830027 // Diligência
 export const ST_PROPOSTA = 107830035 // Apresentação de Proposta
 export const ST_REPROVADO = 107830031 // Reprovados Operacional
+// A ÚLTIMA COLUNA QUE O OPERACIONAL ACOMPANHA no RPV. As anteriores a ela —
+// oferta a investidores, contratos, assinaturas — são do comercial, e por isso
+// não têm aba: a plataforma volta a mostrar o crédito quando ele chega ao
+// protocolo, que é trabalho nosso outra vez.
+export const ST_PROTOCOLO = 107830059 // Protocolo
 
 // ---------- Precatórios: as duas destinações, fixas ----------
 
@@ -129,6 +138,7 @@ export type TelaAnalise =
   | 'aprovados'
   | 'diligencia'
   | 'reprovados'
+  | 'protocolo'
 
 export interface DefTela {
   key: TelaAnalise
@@ -148,14 +158,19 @@ export interface DefTela {
 export const TELAS: DefTela[] = [
   {
     key: 'pendentes',
-    label: 'Pendentes',
+    // AS CHAVES SÃO HISTÓRICAS, os rótulos não. 'pendentes' e 'validacao' são o
+    // que a tela guarda e o que vai na URL; o que se lê mudou para o vocabulário
+    // que a operação usa hoje, o mesmo das duas trilhas do Precatório — em
+    // análise, depois revisão. Renomear as chaves quebraria link salvo sem
+    // devolver nada em troca.
+    label: 'Em análise',
     statusId: ST_ANALISE,
     descricaoVazia:
       'Nenhum card aguardando revisão. Quando o comercial mover um crédito para análise no Kommo, ele aparece aqui.',
   },
   {
     key: 'validacao',
-    label: 'Validação',
+    label: 'Revisão',
     statusId: ST_DECISAO,
     descricaoVazia: 'Nenhum crédito aguardando validação.',
   },
@@ -176,6 +191,12 @@ export const TELAS: DefTela[] = [
     label: 'Reprovados',
     statusId: ST_REPROVADO,
     descricaoVazia: 'Nenhum crédito reprovado.',
+  },
+  {
+    key: 'protocolo',
+    label: 'p/ Protocolo',
+    statusId: ST_PROTOCOLO,
+    descricaoVazia: 'Nenhum crédito aguardando protocolo.',
   },
 ]
 
@@ -224,7 +245,10 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   // são dois botões no rodapé da janela, e o envio só acende quando existe
   // planilha na pasta do Drive.
   pendentes: [
-    { statusId: ST_DECISAO, label: 'Enviar para validação', variant: 'primary', papel: 'validar' },
+    // O RÓTULO SEGUE O NOME DA ETAPA: a coluna passou a se chamar Revisão, e um
+    // botão que manda 'para validação' apontaria para uma aba que não existe mais
+    // com esse nome. O papel continua `validar` — é o ato, não o rótulo.
+    { statusId: ST_DECISAO, label: 'Enviar para revisão', variant: 'primary', papel: 'validar' },
     { statusId: ST_DILIGENCIA, label: 'Exigir diligência', variant: 'warning', papel: 'diligenciar' },
     { statusId: ST_REPROVADO, label: 'Reprovar crédito', variant: 'danger', papel: 'reprovar' },
   ],
@@ -239,6 +263,9 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   aprovados: [],
   diligencia: [],
   reprovados: [],
+  // O PROTOCOLO É ACOMPANHAMENTO, não decisão: o card chega ali depois de tudo
+  // o que a casa decidiu, e quem o move de lá é quem protocola.
+  protocolo: [],
 }
 
 // ---------- Consultas ----------
