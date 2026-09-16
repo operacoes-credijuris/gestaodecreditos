@@ -35,6 +35,42 @@ export const FUNIL_PRECATORIO_EXTERNO = 14439516
 export type VarianteDeAcao = 'primary' | 'secondary' | 'success' | 'warning' | 'danger'
 
 /**
+ * O QUE A AÇÃO FAZ, independente de para qual coluna ela move.
+ *
+ * Existe porque o `statusId` não identifica o ato: as mesmas etapas têm ids
+ * diferentes em cada funil, e comparar com uma constante responderia "não" para
+ * todas — reprovar um precatório não pediria motivo, e a anotação sairia com o
+ * tom errado. Silenciosamente.
+ *
+ * MORA AQUI, e não em `src/lib/kommo.ts`, porque as saídas de cada etapa moram
+ * aqui: o papel é campo delas.
+ */
+export type PapelDaAcao = 'validar' | 'aprovar' | 'diligenciar' | 'reprovar'
+
+/**
+ * Uma saída positiva de uma etapa: para onde o card vai, e com que palavras.
+ *
+ * É UMA LISTA, E NÃO UM DESTINO SÓ, desde 16/09/2026. Eram três campos paralelos
+ * — `aprovaPara`, `rotuloAprovar`, `varianteAprovar` — que só sabiam descrever
+ * uma saída; a revisão do Externo passou a ter duas (encaminhar ao fundo, ou
+ * pedir o memorando de negociação antes), e um quarto campo paralelo para a
+ * segunda deixaria a definição ilegível.
+ *
+ * O PAPEL DIZ O ATO, e é ele que decide o ícone, se o motivo é exigido e o tom
+ * que a IA usa ao redigir a anotação. "Pedir memorando" não aprova nem recusa:
+ * manda o crédito para outra etapa de trabalho, que é o que `validar` significa
+ * desde o RPV.
+ */
+export interface SaidaDaEtapa {
+  /** O nome da coluna de destino no kanban do Kommo. */
+  colunaKommo: string
+  label: string
+  variant?: VarianteDeAcao
+  /** Omitido, é `aprovar` — a saída positiva é a regra, as outras a exceção. */
+  papel?: PapelDaAcao
+}
+
+/**
  * Uma aba do Precatório: uma coluna do kanban, com o nome que a casa lhe dá.
  *
  * A LIGAÇÃO É PELO NOME DA COLUNA, e não pelo status_id. Os ids do Precatório não
@@ -55,36 +91,22 @@ export interface DefAbaPrecatorio {
   colunaKommo: string
   descricaoVazia: string
   /**
-   * Para onde vai o crédito APROVADO nesta etapa — o nome da coluna no kanban.
+   * As saídas positivas desta etapa, na ordem em que os botões aparecem.
    *
-   * É DA ETAPA, E NÃO DA TRILHA, e a diferença é o fluxo de trabalho real: quem
-   * está na primeira análise são os analistas, e a aprovação deles não encaminha
-   * nada — manda para a REVISÃO de quem decide. A mesma palavra, "aprovar",
-   * significa destinos diferentes conforme quem a aperta.
+   * SÃO DA ETAPA, E NÃO DA TRILHA, e a diferença é o fluxo de trabalho real: quem
+   * está na primeira análise são os analistas, e a saída deles não encaminha nada
+   * — manda para a REVISÃO de quem decide. A mesma palavra, "aprovar", significa
+   * destinos diferentes conforme quem a aperta.
    *
    * Diligência e reprovação não seguem essa regra: elas interrompem, e
    * interromper leva sempre ao mesmo lugar (ver `colunaDiligencia` e
    * `colunaReprovados`, que são da trilha).
    *
-   * É TAMBÉM O QUE DIZ QUE A ETAPA TEM DESFECHO. Aba sem `aprovaPara` não
-   * oferece saída nenhuma — é etapa de espera ou terminal, onde quem move o card
-   * é o comercial, pelo Kommo.
+   * É TAMBÉM O QUE DIZ QUE A ETAPA TEM DESFECHO. Aba sem saída não oferece botão
+   * nenhum — é etapa de espera ou terminal, onde quem move o card é o comercial,
+   * pelo Kommo.
    */
-  aprovaPara?: string
-  /**
-   * O rótulo e o tom do botão que segue em frente nesta etapa.
-   *
-   * NEM TODO "SEGUIR" É UM "APROVAR", e é isso que estes dois campos existem
-   * para dizer. Na primeira análise a saída positiva manda o crédito para a
-   * REVISÃO de outra pessoa: não se aprovou nada ainda, apenas se passou adiante
-   * — daí "Enviar para revisão", em tom neutro. Na revisão é aprovação de
-   * verdade, e vai no azul da casa.
-   *
-   * Sem o padrão os dois botões saíam iguais, e o de quem analisa parecia ter o
-   * peso do de quem decide.
-   */
-  rotuloAprovar?: string
-  varianteAprovar?: VarianteDeAcao
+  saidas?: SaidaDaEtapa[]
 }
 
 export interface DefSubdivisao {
@@ -156,9 +178,9 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // APROVAR AQUI É PEDIR REVISÃO, e não aprovar o crédito. Quem trabalha
         // nesta etapa são os analistas; a decisão é de quem revisa. Recusar e
         // exigir diligência passam direto — não precisam de segunda leitura.
-        aprovaPara: 'REVISÃO DA ANÁLISE',
-        rotuloAprovar: 'Enviar para revisão',
-        varianteAprovar: 'secondary',
+        saidas: [
+          { colunaKommo: 'REVISÃO DA ANÁLISE', label: 'Enviar para revisão', variant: 'secondary' },
+        ],
       },
       {
         key: 'int-revisao',
@@ -167,9 +189,9 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         descricaoVazia: 'Nenhuma análise aguardando revisão.',
         // AQUI A APROVAÇÃO É DE VERDADE: é a segunda leitura, feita por quem
         // decide, e o crédito segue para a produção da proposta.
-        aprovaPara: 'PRODUÇÃO DE PROPOSTA',
-        rotuloAprovar: 'Aprovar crédito',
-        varianteAprovar: 'primary',
+        saidas: [
+          { colunaKommo: 'PRODUÇÃO DE PROPOSTA', label: 'Aprovar crédito', variant: 'primary' },
+        ],
       },
       {
         key: 'int-aprovados',
@@ -215,16 +237,19 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     abas: [
       {
         key: 'ext-qualificacao',
-        label: 'Qualificação Preliminar',
+        // "EM QUALIFICAÇÃO" diz o ESTADO do crédito, que é o que se lê numa fila;
+        // "QUALIFICAÇÃO PRELIMINAR", no kanban, descreve o trabalho. Mesma escolha
+        // do "Em análise" do Interno.
+        label: 'Em qualificação',
         colunaKommo: 'QUALIFICAÇÃO PRELIMINAR',
         descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
         // APROVAR AQUI É PEDIR REVISÃO, e não encaminhar ao fundo. Quem trabalha
         // nesta etapa são os analistas; a decisão de mandar o crédito para fora
         // é de quem revisa. Recusar e exigir diligência, ao contrário, passam
         // direto — essas não precisam de segunda leitura.
-        aprovaPara: 'REVISÃO DA QUALIFICAÇÃO',
-        rotuloAprovar: 'Enviar para revisão',
-        varianteAprovar: 'secondary',
+        saidas: [
+          { colunaKommo: 'REVISÃO DA QUALIFICAÇÃO', label: 'Enviar para revisão', variant: 'secondary' },
+        ],
       },
       {
         key: 'ext-revisao',
@@ -235,9 +260,23 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // quem decide; aprovada nela, o crédito segue para o fundo. As outras
         // duas saídas são as mesmas da qualificação — quem revisa também pode
         // exigir diligência ou recusar, e aí não há terceira leitura.
-        aprovaPara: 'ENCAMINHAR AOS FUNDOS',
-        rotuloAprovar: 'Aprovar crédito',
-        varianteAprovar: 'primary',
+        saidas: [
+          { colunaKommo: 'ENCAMINHAR AOS FUNDOS', label: 'Aprovar crédito', variant: 'primary' },
+          {
+            // PEDIR MEMORANDO NÃO É APROVAR NEM RECUSAR. O crédito não foi recusado
+            // e ainda não vai ao fundo: falta uma peça, e ela é trabalho da casa —
+            // é o caso do valor alto ou do originador sem vínculo direto. Por isso o
+            // papel é `validar`, o mesmo de "Enviar para revisão" no RPV: passa
+            // adiante para outra etapa de trabalho, sem decidir nada sobre o mérito.
+            //
+            // A ABA MEMORANDO CONTINUA SEM BOTÃO, por decisão de quem opera: pronto
+            // o memorando, quem move o card de volta é o Kommo.
+            colunaKommo: 'MEMORANDO DE NEGOCIAÇÃO',
+            label: 'Pedir memorando',
+            variant: 'secondary',
+            papel: 'validar',
+          },
+        ],
       },
       {
         key: 'ext-memorando',
@@ -315,7 +354,7 @@ export function destinosDaTrilha(pipelineId: number): string[] {
   if (!trilha) return []
   const nomes = new Set<string>([trilha.colunaDiligencia, trilha.colunaReprovados])
   for (const aba of trilha.abas) {
-    if (aba.aprovaPara) nomes.add(aba.aprovaPara)
+    for (const saida of aba.saidas ?? []) nomes.add(saida.colunaKommo)
   }
   return [...nomes]
 }

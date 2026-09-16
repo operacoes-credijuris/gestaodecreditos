@@ -360,7 +360,7 @@ describe('abas da trilha Externa', () => {
 
   it('mostra os oito rótulos da plataforma, na ordem da trilha', () => {
     expect(abas.map((a) => a.label)).toEqual([
-      'Qualificação Preliminar',
+      'Em qualificação',
       'Revisão',
       'Memorando',
       'Aprovados',
@@ -373,7 +373,9 @@ describe('abas da trilha Externa', () => {
 
   it('cada rótulo resolve para a coluna certa do funil novo', () => {
     const porLabel = new Map(abas.map((a) => [a.label, a.statusIds[0]]))
-    expect(porLabel.get('Qualificação Preliminar')).toBe(idExt('QUALIFICAÇÃO PRELIMINAR'))
+    // O RÓTULO DIZ O ESTADO, a coluna diz o trabalho: "Em qualificação" na
+    // plataforma, "QUALIFICAÇÃO PRELIMINAR" no kanban.
+    expect(porLabel.get('Em qualificação')).toBe(idExt('QUALIFICAÇÃO PRELIMINAR'))
     expect(porLabel.get('Revisão')).toBe(idExt('REVISÃO DA QUALIFICAÇÃO'))
     expect(porLabel.get('Memorando')).toBe(idExt('MEMORANDO DE NEGOCIAÇÃO'))
     // "APROVADOS" AQUI, "ENCAMINHAR AOS FUNDOS" LÁ: o rótulo é o vocabulário de
@@ -404,8 +406,9 @@ describe('abas da trilha Externa', () => {
     expect(nomes).not.toContain('AGUARDANDO PRECIFICAÇÃO')
   })
 
-  // ETAPA DE TRABALHO, NÃO DE DECISÃO: a saída do memorando ainda não foi
-  // definida, e enquanto não for é o Kommo que move o card.
+  // ETAPA DE TRABALHO, NÃO DE DECISÃO. A Revisão passou a MANDAR cards para cá
+  // ("Pedir memorando"), mas a volta continua sendo do Kommo, por decisão de quem
+  // opera: pronto o memorando, quem move o card é quem o escreveu.
   it('o Memorando não oferece desfecho', () => {
     const memorando = abas.find((a) => a.label === 'Memorando')!
     expect(memorando.acoes).toEqual([])
@@ -413,7 +416,7 @@ describe('abas da trilha Externa', () => {
   })
 
   /** As duas etapas em que a casa decide algo — as demais são de espera. */
-  const DECISORIAS = ['Qualificação Preliminar', 'Revisão']
+  const DECISORIAS = ['Em qualificação', 'Revisão']
 
   /**
    * O DESFECHO DO EXTERNO MORA NAS DUAS ETAPAS DE DECISÃO.
@@ -424,7 +427,7 @@ describe('abas da trilha Externa', () => {
    * seria decidir no lugar de quem decide.
    */
   it('a Qualificação oferece as três saídas', () => {
-    const qualificacao = abas.find((a) => a.label === 'Qualificação Preliminar')!
+    const qualificacao = abas.find((a) => a.label === 'Em qualificação')!
     expect(qualificacao.acoes.map((x) => x.papel)).toEqual([
       'aprovar',
       'diligenciar',
@@ -448,7 +451,7 @@ describe('abas da trilha Externa', () => {
    * o peso do de quem decide.
    */
   it('a saída positiva da Qualificação envia para revisão, em tom neutro', () => {
-    const qualificacao = abas.find((a) => a.label === 'Qualificação Preliminar')!
+    const qualificacao = abas.find((a) => a.label === 'Em qualificação')!
     const aprovar = qualificacao.acoes.find((x) => x.papel === 'aprovar')!
     expect(aprovar.label).toBe('Enviar para revisão')
     expect(aprovar.variant).toBe('secondary')
@@ -459,13 +462,43 @@ describe('abas da trilha Externa', () => {
    * dela não há terceira. As outras duas saídas são as mesmas: quem revisa
    * também pode exigir diligência ou recusar.
    */
-  it('a Revisão oferece as três saídas, e aprova para os fundos', () => {
+  it('a Revisão oferece quatro saídas, e aprova para os fundos', () => {
     const revisao = abas.find((a) => a.label === 'Revisão')!
-    expect(revisao.acoes.map((x) => x.papel)).toEqual(['aprovar', 'diligenciar', 'reprovar'])
-    const porPapel = new Map(revisao.acoes.map((a) => [a.papel, a.statusId]))
-    expect(porPapel.get('aprovar')).toBe(idExt('ENCAMINHAR AOS FUNDOS'))
-    expect(porPapel.get('diligenciar')).toBe(idExt('DILIGÊNCIA'))
-    expect(porPapel.get('reprovar')).toBe(idExt('REPROVADOS'))
+    expect(revisao.acoes.map((x) => x.papel)).toEqual([
+      'aprovar',
+      'validar',
+      'diligenciar',
+      'reprovar',
+    ])
+    const porLabel = new Map(revisao.acoes.map((a) => [a.label, a.statusId]))
+    expect(porLabel.get('Aprovar crédito')).toBe(idExt('ENCAMINHAR AOS FUNDOS'))
+    expect(porLabel.get('Exigir diligência')).toBe(idExt('DILIGÊNCIA'))
+    expect(porLabel.get('Reprovar crédito')).toBe(idExt('REPROVADOS'))
+  })
+
+  /**
+   * PEDIR MEMORANDO NÃO É APROVAR NEM RECUSAR.
+   *
+   * O crédito não foi recusado e ainda não vai ao fundo: falta uma peça, e ela é
+   * trabalho da casa — o caso do valor alto ou do originador sem vínculo direto.
+   * O papel é `validar`, o mesmo de "Enviar para revisão" no RPV: passa adiante
+   * para outra etapa de trabalho sem dizer nada sobre o mérito. É o papel que
+   * decide o ícone, se o motivo é exigido e o tom que a IA usa na anotação —
+   * marcá-lo como aprovação faria a nota do Kommo anunciar um encaminhamento que
+   * não aconteceu.
+   */
+  it('a Revisão pode pedir o memorando, ao lado de aprovar', () => {
+    const revisao = abas.find((a) => a.label === 'Revisão')!
+    const memorando = revisao.acoes.find((x) => x.label === 'Pedir memorando')!
+    expect(memorando.statusId).toBe(idExt('MEMORANDO DE NEGOCIAÇÃO'))
+    expect(memorando.papel).toBe('validar')
+    expect(memorando.variant).toBe('secondary')
+    // AO LADO DE APROVAR, e logo depois: a ordem dos botões é a ordem das saídas
+    // declaradas na etapa, e a aprovação é o caminho que se busca.
+    expect(revisao.acoes.map((x) => x.label).slice(0, 2)).toEqual([
+      'Aprovar crédito',
+      'Pedir memorando',
+    ])
   })
 
   /**

@@ -41,6 +41,7 @@ import {
   ABA_ANALISE_INTERNA,
   type DefAbaPrecatorio,
   type DefSubdivisao,
+  type PapelDaAcao,
   FUNIL_PRECATORIO_EXTERNO,
   FUNIL_PRECATORIO_INTERNO,
   type SubdivisaoPrecatorio,
@@ -211,7 +212,7 @@ export const TELAS: DefTela[] = [
  * responder "não" para todas: reprovar um precatório não pediria motivo e a
  * anotação sairia com o tom de validação. Silenciosamente, nos dois casos.
  */
-export type PapelDaAcao = 'validar' | 'aprovar' | 'diligenciar' | 'reprovar'
+export type { PapelDaAcao }
 
 export interface AcaoTela {
   statusId: number
@@ -615,22 +616,25 @@ export function abasDoFunil(
   // destinos; a primeira etapa decisória acrescentada sem atualizar as duas
   // apareceria muda. Com a migração de 16/09/2026 o Interno ganhou `aprovaPara`
   // como o Externo, e a lista deixou de ter o que dizer.
-  const oferece = (aba: DefAbaPrecatorio): boolean => Boolean(aba.aprovaPara)
+  const oferece = (aba: DefAbaPrecatorio): boolean => (aba.saidas?.length ?? 0) > 0
 
   const desfechos = (aba: DefAbaPrecatorio): AcaoTela[] => {
     if (!oferece(aba)) return []
     const saida: AcaoTela[] = []
-    // A APROVAÇÃO VEM PRIMEIRO onde ela existe: é o desfecho que se busca, e a
-    // diligência é o desvio. Mesma ordem das abas.
-    const idAprovados = aba.aprovaPara
-      ? nomes.get(normalizarBusca(aba.aprovaPara))
-      : undefined
-    if (idAprovados !== undefined) {
+    // AS SAÍDAS POSITIVAS VÊM PRIMEIRO, na ordem declarada na etapa: é o caminho
+    // que se busca, e as que interrompem são o desvio. Mesma ordem das abas.
+    //
+    // COLUNA QUE O ESPELHO NÃO TEM NÃO VIRA BOTÃO, e a saída é pulada sem levar
+    // as outras junto: melhor a etapa com um botão a menos do que um que move o
+    // card para lugar nenhum.
+    for (const s of aba.saidas ?? []) {
+      const id = nomes.get(normalizarBusca(s.colunaKommo))
+      if (id === undefined) continue
       saida.push({
-        statusId: idAprovados,
-        label: aba.rotuloAprovar ?? 'Aprovar crédito',
-        variant: aba.varianteAprovar ?? 'primary',
-        papel: 'aprovar',
+        statusId: id,
+        label: s.label,
+        variant: s.variant ?? 'primary',
+        papel: s.papel ?? 'aprovar',
       })
     }
     const idDiligencia = nomes.get(normalizarBusca(def.colunaDiligencia))

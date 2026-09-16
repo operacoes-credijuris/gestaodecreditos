@@ -607,9 +607,9 @@ function JanelaDeMensagem({
    * As saídas oferecidas nesta janela.
    *
    * UMA, quase sempre: o botão do card já disse para onde vai, e aqui só se
-   * escreve o porquê. TRÊS na qualificação do precatório externo, onde a análise
-   * aconteceu fora da plataforma e quem volta dela decide entre aprovar, mandar
-   * diligenciar e recusar — com a razão no mesmo campo, escrita uma vez.
+   * escreve o porquê. VÁRIAS nas etapas de decisão do precatório, onde quem
+   * conclui escolhe entre aprovar, pedir o memorando, mandar diligenciar e
+   * recusar — com a razão no mesmo campo, escrita uma vez.
    */
   acoes: AcaoTela[]
   titulo: string
@@ -679,18 +679,18 @@ function JanelaDeMensagem({
                 }
               }}
               disabled={!podeEnviar(acao)}
-              // O SPINNER NO BOTÃO CLICADO, e não nos três: com `trabalhando`
-              // solto, os outros dois pareceriam estar enviando também.
+              // O SPINNER NO BOTÃO CLICADO, e não em todos: com `trabalhando`
+              // solto, os demais pareceriam estar enviando também.
               loading={emCurso === acao.statusId || (acoes.length === 1 && trabalhando)}
             >
               {/* COM UMA SAÍDA SÓ, "Confirmar": o botão do card já disse o que
                   vai acontecer, e repetir o rótulo aqui é redundância. Com
-                  três, cada um precisa dizer para onde leva. */}
+                  várias, cada uma precisa dizer para onde leva. */}
               {acoes.length === 1 ? 'Confirmar' : acao.label}
             </Button>
           ))}
-          {/* O CANCELAR SÓ ONDE HÁ UMA SAÍDA. Com três decisões no rodapé, um
-              quarto controle que NÃO é decisão disputa a mesma linha e o mesmo
+          {/* O CANCELAR SÓ ONDE HÁ UMA SAÍDA. Com várias decisões no rodapé, mais
+              um controle que NÃO é decisão disputa a mesma linha e o mesmo
               olhar — e a saída sem consequência já existe no X do topo, no Esc e
               no clique fora, todos com a mesma pergunta sobre texto não salvo.
               Com uma saída só o par Confirmar/cancelar continua, que é a forma
