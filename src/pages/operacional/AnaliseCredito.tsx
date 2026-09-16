@@ -47,7 +47,7 @@ import {
   type PapelDaAcao,
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
-  ABA_JURIDICO,
+  ABA_ANALISE_INTERNA,
   ABAS_EXTERNO_SEM_TRABALHO,
   ehFunilPrecatorio,
   acaoDeReprovar,
@@ -2031,7 +2031,7 @@ export default function AnaliseCredito() {
   const botoesDoCard: BotoesDoCard =
     funil === FUNIL_RPV
       ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
-      : abaAtual?.key === ABA_JURIDICO
+      : abaAtual?.key === ABA_ANALISE_INTERNA
         ? 'precatorio'
         : subdivisao === 'externo' && abaAtual && !ABAS_EXTERNO_SEM_TRABALHO.has(abaAtual.key)
           ? 'dd'

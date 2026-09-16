@@ -17,6 +17,7 @@
 //     mover pelo app dispara o Digital Pipeline configurado no funil.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
+import { destinosDaTrilha } from '../_shared/trilhasDoPrecatorio.ts'
 
 /** Rótulo exibido no selo da anotação, dentro do card. */
 const SERVICO = 'Operacional'
@@ -31,22 +32,23 @@ const COLUNAS: Record<number, string> = {
 }
 
 /**
- * Os destinos do funil de PRECATÓRIOS, pelo NOME da coluna.
+ * Os destinos do Precatório saem de `_shared/trilhasDoPrecatorio.ts`, pelo NOME
+ * da coluna e por trilha.
  *
- * Por nome porque os ids desse funil não existem em lugar nenhum do código: são
- * lidos do espelho (kommo_etapa), como a tela faz para montar as abas. Colar
- * aqui números copiados da URL do Kommo é o erro que a migration 0044 existe
- * para evitar — um dígito trocado aponta para outra coluna existente, e o card
- * vai parar nela sem erro nenhum.
+ * ESTA LISTA JÁ FOI ESCRITA À MÃO AQUI, e o defeito que isso causou é o motivo
+ * de ela ter mudado de lugar. Eram dois nomes do funil antigo — "Diligência" e
+ * "Reprovados Operacional" — mais o id daquele funil. Quando as trilhas
+ * migraram para pipelines próprios (14/09 e 16/09/2026), a tela passou a
+ * oferecer saídas que esta função recusava com "Coluna de destino não
+ * reconhecida": o botão existia, o card não se movia, e nada no caminho dizia
+ * que a culpa era de duas listas que precisavam concordar.
  *
- * SÓ OS DOIS QUE INTERROMPEM. "Apresentação de Proposta" fica de fora: qual
- * coluna significa "aprovado" no Precatório ninguém definiu, e a lista aqui
- * precisa espelhar exatamente o que a tela oferece — um destino a mais é uma
- * porta que só se descobre pelo card que passou por ela.
+ * Por NOME, e não por id, porque os ids do Precatório não existem em lugar
+ * nenhum do código: são lidos do espelho (kommo_etapa), como a tela faz para
+ * montar as abas. Colar aqui números copiados da URL do Kommo é o erro que a
+ * migration 0044 existe para evitar — um dígito trocado aponta para outra coluna
+ * existente, e o card vai parar nela sem erro nenhum.
  */
-const DESTINOS_PRECATORIO = ['Diligência', 'Reprovados Operacional']
-
-const FUNIL_PRECATORIO = 13971995
 
 /** Acento, caixa e espaço a mais não podem decidir se o card move. */
 const normalizar = (s: unknown) =>
@@ -98,10 +100,10 @@ Deno.serve(async (req: Request) => {
       .limit(20)
     const nomeDoDestino =
       COLUNAS[statusId] ??
-      (destino ?? []).find(
-        (e) =>
-          Number(e.pipeline_id) === FUNIL_PRECATORIO &&
-          DESTINOS_PRECATORIO.some((d) => normalizar(d) === normalizar(e.nome)),
+      (destino ?? []).find((e) =>
+        // Funil que não é de precatório devolve lista vazia, e nada casa: é o
+        // que mantém a coluna do comercial fora do alcance de um statusId solto.
+        destinosDaTrilha(Number(e.pipeline_id)).some((d) => normalizar(d) === normalizar(e.nome)),
       )?.nome
     if (!nomeDoDestino) {
       return jsonResponse({ error: 'Coluna de destino não reconhecida.' }, 400)

@@ -29,6 +29,19 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { normalizarBusca } from './format'
 import { primeiroCnj } from '../../supabase/functions/_shared/nucleo/cnj.ts'
+// A DEFINIÇÃO DAS TRILHAS VEM DE `supabase/functions/_shared`, por caminho
+// relativo, porque a Edge Function que MOVE o card lê a mesma lista. Duas
+// listas que precisam dizer a mesma coisa acabam divergindo — e esta divergiu
+// no primeiro dia da migração do Externo.
+import {
+  ABA_ANALISE_INTERNA,
+  type DefAbaPrecatorio,
+  type DefSubdivisao,
+  FUNIL_PRECATORIO_EXTERNO,
+  FUNIL_PRECATORIO_INTERNO,
+  type SubdivisaoPrecatorio,
+  TRILHAS_PRECATORIO,
+} from '../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
 import type { KommoLead, KommoAnaliseInterna } from './types'
 
 // Conta do Kommo. O subdomínio não é segredo — é o que aparece na URL.
@@ -37,27 +50,20 @@ export const KOMMO_SUBDOMINIO = 'contatocredijuriscom'
 // Funis que o operacional usa.
 export const FUNIL_RPV = 13901939
 /**
- * O funil de Precatórios antigo, hoje só a trilha INTERNA.
+ * O FUNIL QUE A PÍLULA "Precatórios" ABRE, e que é também o da trilha Interna.
  *
- * Ele nasceu com as duas destinações dentro, e era isso que obrigava a tela a
- * adivinhar a trilha pelo NOME da coluna. Em 14/09/2026 a casa separou os
- * pipelines; o externo já mudou (abaixo) e o interno ainda lê daqui.
+ * O funil antigo (13971995) tinha as duas destinações dentro, e por isso servia
+ * de chave para a tela inteira. Em 14/09/2026 a casa separou os pipelines — o
+ * Externo migrou naquele dia, o Interno em 16/09 —, e o antigo deixou de ser
+ * lido: nenhuma aba aponta para ele.
+ *
+ * A TELA PRECISA DE UMA CHAVE SÓ para o tipo de crédito, e é esta. Quem decide
+ * de quais funis a consulta traz card é `funisExibidos`, que devolve os dois —
+ * apontar a chave para um funil que não é de precatório faria a consulta buscar
+ * só ele, e a tela ficaria vazia com as abas certas.
  */
-export const FUNIL_PRECATORIO = 13971995
-/**
- * O funil do Precatório EXTERNO, criado em 14/09/2026.
- *
- * O funil PRÓPRIO é o que faz a trilha deixar de ser um palpite: antes, saber se
- * um card era externo exigia comparar conjuntos de colunas, e a coluna que
- * servia às duas trilhas ("Apresentação de Proposta") não tinha resposta — ela
- * contava como interna por convenção. Agora a pergunta é o pipeline do card, e
- * pipeline não é ambíguo.
- *
- * O interno ganhou funil próprio no mesmo dia (14439512) e ainda NÃO foi
- * espelhado aqui: a migração está sendo feita uma trilha por vez, a pedido de
- * quem opera.
- */
-export const FUNIL_PRECATORIO_EXTERNO = 14439516
+export const FUNIL_PRECATORIO = FUNIL_PRECATORIO_INTERNO
+export { ABA_ANALISE_INTERNA, FUNIL_PRECATORIO_EXTERNO, FUNIL_PRECATORIO_INTERNO }
 
 // Estágios do Funil Geral RPV que interessam ao operacional. Os nomes das
 // constantes seguem os nomes das COLUNAS NO KOMMO; o rótulo que o usuário vê
@@ -77,273 +83,24 @@ export const ST_REPROVADO = 107830031 // Reprovados Operacional
  * são as abas). É um terceiro eixo, e é justamente por serem três que a tela
  * precisa dar formas diferentes a cada um — dois seletores idênticos lado a
  * lado se leem como a mesma pergunta feita duas vezes.
+ *
+ * O TIPO E AS DEFINIÇÕES MORAM EM `_shared/trilhasDoPrecatorio.ts`, e são
+ * reexportados aqui para nada que já os importava precisar mudar. Foram para lá
+ * porque a Edge Function `kommo-mover` também precisa deles: ela guardava uma
+ * lista PRÓPRIA das colunas que aceita como destino, e no dia em que o Externo
+ * migrou a lista dela ficou para trás — a tela oferecia quatro saídas que o
+ * servidor recusava.
  */
-export type SubdivisaoPrecatorio = 'interno' | 'externo'
+export type { DefAbaPrecatorio, DefSubdivisao, SubdivisaoPrecatorio }
 
 /**
- * Uma aba do Precatório: o rótulo da plataforma e a coluna do Kommo por trás.
+ * A aba do Interno onde a análise acontece, e as trilhas inteiras.
  *
- * A LIGAÇÃO É PELO NOME DA COLUNA, e não pelo status_id como em RPV. Não é
- * preferência de estilo: os ids do funil de Precatórios não existem em lugar
- * nenhum do código e só se leem com sessão aberta no banco (kommo_etapa exige
- * `authenticated`). O nome é o que se lê no kanban, então é o que dá para fixar
- * aqui — e a tela resolve o id sozinha, no navegador de quem já está logado.
- *
- * A troca de risco é explícita: id fixo quebra quando a coluna é RECRIADA no
- * Kommo (ganha id novo); nome fixo quebra quando ela é RENOMEADA. Nos dois
- * casos a aba mostraria zero card para sempre — e é por isso que existe
- * `colunasPrecatorioDesalinhadas`: a tela diz qual nome não encontrou, em vez
- * de ficar vazia em silêncio.
- *
- * A comparação passa por normalizarBusca, então acento, caixa e espaço a mais
- * não quebram nada: "Análise Jurídica (TIER 1)" casa com "ANALISE JURIDICA
- * (TIER 1)".
+ * Reexportadas de `_shared/trilhasDoPrecatorio.ts` — ver lá o porquê de a
+ * definição ter saído deste arquivo. `SUBDIVISOES_PRECATORIO` mantém o nome que
+ * a tela sempre usou: quem lê "subdivisão" na tela é quem escolhe a pílula.
  */
-export interface DefAbaPrecatorio {
-  key: string
-  /** Rótulo na plataforma — vocabulário nosso, não o do CRM do comercial. */
-  label: string
-  /** Nome da coluna no kanban do Kommo, como está escrito lá. */
-  colunaKommo: string
-  descricaoVazia: string
-  /**
-   * Para onde vai o crédito APROVADO nesta etapa — o nome da coluna no kanban.
-   *
-   * É DA ETAPA, E NÃO DA TRILHA, e a diferença é o fluxo de trabalho real: quem
-   * está na qualificação são os analistas, e a aprovação deles não encaminha
-   * nada — manda para a REVISÃO de quem decide. A mesma palavra, "aprovar",
-   * significa destinos diferentes conforme quem a aperta.
-   *
-   * Diligência e reprovação não seguem essa regra: elas interrompem, e
-   * interromper leva sempre ao mesmo lugar (ver `colunaDiligencia` e
-   * `colunaReprovados`, que são da trilha).
-   *
-   * É TAMBÉM O QUE DIZ QUE A ETAPA TEM DESFECHO. Aba sem `aprovaPara` não
-   * oferece saída nenhuma — é etapa de espera, onde quem move o card é o fundo.
-   */
-  aprovaPara?: string
-  /**
-   * O rótulo e o tom do botão que segue em frente nesta etapa.
-   *
-   * NEM TODO "SEGUIR" É UM "APROVAR", e é isso que estes dois campos existem
-   * para dizer. Na qualificação a saída positiva manda o crédito para a REVISÃO
-   * de outra pessoa: não se aprovou nada ainda, apenas se passou adiante — daí
-   * "Enviar para revisão", em tom neutro. Na revisão é aprovação de verdade, e
-   * vai no azul da casa.
-   *
-   * Sem o padrão os dois botões saíam iguais, e o de quem analisa parecia ter o
-   * peso do de quem decide.
-   */
-  rotuloAprovar?: string
-  varianteAprovar?: AcaoTela['variant']
-}
-
-export interface DefSubdivisao {
-  key: SubdivisaoPrecatorio
-  label: string
-  /**
-   * O funil do Kommo de onde esta trilha lê.
-   *
-   * É PROPRIEDADE DA TRILHA, e não uma constante do arquivo, porque as duas
-   * deixaram de morar no mesmo pipeline. Enquanto a migração não termina, as
-   * duas apontam para funis diferentes — e é esta linha que sustenta isso sem
-   * nenhum ramo especial no código que a lê.
-   */
-  pipelineId: number
-  /** A coluna de diligência desta trilha, pelo nome no kanban. */
-  colunaDiligencia: string
-  /** A coluna de reprovação desta trilha, pelo nome no kanban. */
-  colunaReprovados: string
-  abas: DefAbaPrecatorio[]
-}
-
-/**
- * A aba do Interno onde a análise do precatório acontece.
- *
- * Exportada porque a TELA precisa reconhecê-la: é a única aba do precatório cujos
- * cards oferecem Due Diligence e Análise Jurídica. Comparar com uma string solta
- * espalharia a regra por dois arquivos, e renomear a chave aqui deixaria os
- * botões desaparecerem sem nenhum erro.
- */
-export const ABA_JURIDICO = 'int-juridico'
-
-/**
- * As abas do Interno de onde um precatório PODE SAIR por decisão nossa.
- *
- * São as três de trabalho — jurídico, precificação e validação. As terminais
- * ficam de fora pelo motivo de sempre: de Aprovados e Reprovados o card não
- * volta pelo app, e a diligência é encargo do comercial, que devolve o card pelo
- * Kommo quando a cumpre.
- */
-const ABAS_INTERNO_COM_DESFECHO: ReadonlySet<string> = new Set([
-  ABA_JURIDICO,
-  'int-precificacao',
-  'int-validacao',
-])
-
-// QUE ABAS DO EXTERNO TÊM DESFECHO é dito por `aprovaPara`, na própria aba —
-// não há lista separada. Uma lista teria de ser mantida em sincronia com os
-// destinos, e a primeira vez que alguém acrescentasse uma etapa decisória sem
-// atualizar as duas, a etapa apareceria muda.
-
-// AS COLUNAS DE DESFECHO AGORA SÃO DE CADA TRILHA (ver DefSubdivisao), e não
-// mais duas constantes deste arquivo. O funil novo do externo renomeou
-// "Reprovados Operacional" para "REPROVADOS": um nome só, fixo aqui, mandaria o
-// botão Reprovar procurar uma coluna que não existe naquele kanban — e sem
-// coluna não há botão, então a recusa sumiria da tela sem erro nenhum.
-
-/**
- * As colunas de cada destinação, cada uma no SEU funil.
- *
- * CADA TRILHA TEM O SEU PIPELINE desde 14/09/2026 — e é isso que desfez o pior
- * remendo daqui. Enquanto as duas moravam no mesmo funil, "Apresentação de
- * Proposta" era a MESMA coluna nas duas, com rótulo diferente em cada uma, e o
- * mesmo card era contado duas vezes. Agora cada funil tem a sua, e a
- * ambiguidade não existe mais: nada é compartilhado.
- *
- * A MIGRAÇÃO É UMA TRILHA POR VEZ, a pedido de quem opera. O externo já lê do
- * funil novo; o interno ainda lê do antigo, com as colunas que sempre teve.
- * Quando ele migrar, muda o `pipelineId` e a lista de abas desta entrada — o
- * resto do arquivo não toma conhecimento.
- *
- * A ordem das abas é a DO TRABALHO, não a do kanban: no Interno, Aprovados vem
- * antes de Diligência porque é o desfecho que se busca, e a diligência é o
- * desvio. Mudar a ordem aqui muda a ordem na tela, nada mais.
- */
-export const SUBDIVISOES_PRECATORIO: DefSubdivisao[] = [
-  {
-    key: 'interno',
-    label: 'Interno',
-    pipelineId: FUNIL_PRECATORIO,
-    colunaDiligencia: 'Diligência',
-    colunaReprovados: 'Reprovados Operacional',
-    abas: [
-      {
-        key: ABA_JURIDICO,
-        label: 'Jurídico',
-        colunaKommo: 'Análise Jurídica (TIER 1)',
-        descricaoVazia: 'Nenhum precatório no jurídico.',
-      },
-      {
-        key: 'int-precificacao',
-        label: 'Precificação',
-        colunaKommo: 'Análise Econômico-Financeira (TIER 1)',
-        descricaoVazia: 'Nenhum precatório em precificação.',
-      },
-      {
-        key: 'int-validacao',
-        label: 'Validação',
-        colunaKommo: 'Revisão (TIER 1)',
-        descricaoVazia: 'Nenhum precatório aguardando validação.',
-      },
-      {
-        key: 'int-aprovados',
-        label: 'Aprovados',
-        colunaKommo: 'Apresentação de Proposta',
-        descricaoVazia: 'Nenhum precatório aprovado.',
-      },
-      {
-        key: 'int-diligencia',
-        label: 'Diligência',
-        colunaKommo: 'Diligência',
-        descricaoVazia: 'Nenhum precatório em diligência.',
-      },
-      {
-        key: 'int-reprovados',
-        label: 'Reprovados',
-        colunaKommo: 'Reprovados Operacional',
-        descricaoVazia: 'Nenhum precatório reprovado.',
-      },
-    ],
-  },
-  {
-    key: 'externo',
-    label: 'Externo',
-    pipelineId: FUNIL_PRECATORIO_EXTERNO,
-    colunaDiligencia: 'DILIGÊNCIA',
-    // "REPROVADOS", e não "Reprovados Operacional": o funil novo encurtou o
-    // nome, e o antigo continua com o dele na trilha de cima.
-    colunaReprovados: 'REPROVADOS',
-    abas: [
-      {
-        key: 'ext-qualificacao',
-        label: 'Qualificação Preliminar',
-        colunaKommo: 'QUALIFICAÇÃO PRELIMINAR',
-        descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
-        // APROVAR AQUI É PEDIR REVISÃO, e não encaminhar ao fundo. Quem trabalha
-        // nesta etapa são os analistas; a decisão de mandar o crédito para fora
-        // é de quem revisa. Recusar e exigir diligência, ao contrário, passam
-        // direto — essas não precisam de segunda leitura.
-        aprovaPara: 'REVISÃO DA QUALIFICAÇÃO',
-        rotuloAprovar: 'Enviar para revisão',
-        varianteAprovar: 'secondary',
-      },
-      {
-        key: 'ext-revisao',
-        label: 'Revisão',
-        colunaKommo: 'REVISÃO DA QUALIFICAÇÃO',
-        descricaoVazia: 'Nenhuma qualificação aguardando revisão.',
-        // AQUI A APROVAÇÃO ENCAMINHA DE VERDADE. É a segunda leitura, feita por
-        // quem decide; aprovada nela, o crédito segue para o fundo. As outras
-        // duas saídas são as mesmas da qualificação — quem revisa também pode
-        // exigir diligência ou recusar, e aí não há terceira leitura.
-        aprovaPara: 'ENCAMINHAR AOS FUNDOS',
-        rotuloAprovar: 'Aprovar crédito',
-        varianteAprovar: 'primary',
-      },
-      {
-        key: 'ext-memorando',
-        // SEM DESFECHO, por ora: é etapa de trabalho, não de decisão. A saída
-        // dela ainda não foi definida — e enquanto não for, a aba mostra os
-        // cards e quem os move é o Kommo.
-        label: 'Memorando',
-        colunaKommo: 'MEMORANDO DE NEGOCIAÇÃO',
-        descricaoVazia: 'Nenhum crédito em memorando de negociação.',
-      },
-      {
-        key: 'ext-encaminhar',
-        // "APROVADOS" NA PLATAFORMA, "ENCAMINHAR AOS FUNDOS" NO KOMMO — e é de
-        // propósito. O rótulo daqui é o vocabulário de quem analisa: o que o ato
-        // significa para a casa é uma aprovação. O nome do kanban é o do
-        // comercial, diz o que acontece DEPOIS, e não muda por causa disto.
-        label: 'Aprovados',
-        colunaKommo: 'ENCAMINHAR AOS FUNDOS',
-        descricaoVazia: 'Nenhum precatório aprovado.',
-      },
-      {
-        key: 'ext-diligencia',
-        label: 'Diligência',
-        colunaKommo: 'DILIGÊNCIA',
-        descricaoVazia: 'Nenhum precatório externo em diligência.',
-      },
-      {
-        key: 'ext-reprovados',
-        label: 'Reprovados',
-        colunaKommo: 'REPROVADOS',
-        descricaoVazia: 'Nenhum precatório externo reprovado.',
-      },
-      {
-        key: 'ext-apresentacao',
-        // "PROPOSTA" NA PLATAFORMA: o que a etapa produz. "Apresentação" vinha
-        // do funil antigo, onde a coluna se chamava "Apresentação de Proposta" —
-        // o nome guardava o ato e perdia a coisa.
-        label: 'Proposta',
-        colunaKommo: 'PRODUÇÃO DE PROPOSTA',
-        descricaoVazia: 'Nenhum precatório em apresentação.',
-      },
-      {
-        key: 'ext-fechados',
-        label: 'Fechados',
-        colunaKommo: 'FECHADOS',
-        descricaoVazia: 'Nenhum precatório externo fechado.',
-      },
-    ],
-    // FORA DA TELA, de propósito e por decisão de quem opera: "MEMORANDO DE
-    // NEGOCIAÇÃO" e "AGUARDANDO PRECIFICAÇÃO" existem no kanban e não viram
-    // aba. Ficam registradas aqui para que a ausência se leia como escolha, e
-    // não como coluna esquecida no remapeamento.
-  },
-]
+export const SUBDIVISOES_PRECATORIO = TRILHAS_PRECATORIO
 
 /**
  * Este funil é um dos de Precatório?
@@ -826,8 +583,12 @@ export function abasDoFunil(
   // pipelines diferentes durante a migração.
   const nomes = porNomeDeColuna(def.pipelineId, etapas)
 
-  const oferece = (aba: DefAbaPrecatorio): boolean =>
-    def.key === 'interno' ? ABAS_INTERNO_COM_DESFECHO.has(aba.key) : Boolean(aba.aprovaPara)
+  // QUEM TEM DESFECHO É DITO PELA PRÓPRIA ABA, nas duas trilhas. O Interno tinha
+  // uma lista separada de chaves, que precisava ser mantida em sincronia com os
+  // destinos; a primeira etapa decisória acrescentada sem atualizar as duas
+  // apareceria muda. Com a migração de 16/09/2026 o Interno ganhou `aprovaPara`
+  // como o Externo, e a lista deixou de ter o que dizer.
+  const oferece = (aba: DefAbaPrecatorio): boolean => Boolean(aba.aprovaPara)
 
   const desfechos = (aba: DefAbaPrecatorio): AcaoTela[] => {
     if (!oferece(aba)) return []
@@ -878,10 +639,12 @@ export function abasDoFunil(
       statusIds: statusId === undefined ? [] : [statusId],
       descricaoVazia: a.descricaoVazia,
       acoes: desfechos(a),
-      // NO EXTERNO AS SAÍDAS SAEM DE UM BOTÃO SÓ — ver `desfechoAgrupado`: a
-      // análise aconteceu fora daqui, e o que a plataforma precisa guardar é a
-      // razão escrita por quem voltou dela.
-      desfechoAgrupado: def.key === 'externo' && oferece(a),
+      // AS SAÍDAS SAEM DE UM BOTÃO SÓ — ver `desfechoAgrupado`. Era regra do
+      // Externo, onde a análise acontece fora da plataforma e o que se precisa
+      // guardar é a razão escrita por quem voltou dela; no Interno vale igual, e
+      // por um motivo a mais: a janela é o único lugar onde a anotação que vai
+      // para o Kommo é escrita antes de o card se mover.
+      desfechoAgrupado: oferece(a),
     }
   })
 }
