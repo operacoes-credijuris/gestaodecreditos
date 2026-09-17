@@ -197,7 +197,7 @@ describe('abas do Interno', () => {
 
   it('mostra os seis rótulos da plataforma, na ordem do trabalho', () => {
     expect(abas.map((a) => a.label)).toEqual([
-      'Em análise',
+      'Análise',
       'Revisão',
       'Aprovados',
       'Diligência',
@@ -208,7 +208,7 @@ describe('abas do Interno', () => {
 
   it('cada rótulo resolve para a coluna certa do funil novo', () => {
     const porLabel = new Map(abas.map((a) => [a.label, a.statusIds[0]]))
-    expect(porLabel.get('Em análise')).toBe(idDe('ANÁLISE JURÍDICA E ECONÔMICA'))
+    expect(porLabel.get('Análise')).toBe(idDe('ANÁLISE JURÍDICA E ECONÔMICA'))
     expect(porLabel.get('Revisão')).toBe(idDe('REVISÃO DA ANÁLISE'))
     expect(porLabel.get('Aprovados')).toBe(idDe('PRODUÇÃO DE PROPOSTA'))
     expect(porLabel.get('Diligência')).toBe(idDe('DILIGÊNCIA'))
@@ -224,7 +224,7 @@ describe('abas do Interno', () => {
    * esconderia que a análise econômica também acontece nela.
    */
   it('a análise jurídica e a econômica moram na mesma aba', () => {
-    expect(abas.find((a) => a.key === ABA_ANALISE_INTERNA)!.label).toBe('Em análise')
+    expect(abas.find((a) => a.key === ABA_ANALISE_INTERNA)!.label).toBe('Análise')
     expect(abas.map((a) => a.label)).not.toContain('Precificação')
   })
 
@@ -235,7 +235,7 @@ describe('abas do Interno', () => {
    * aba e não da trilha.
    */
   it('a análise envia para revisão; a revisão aprova', () => {
-    const emAnalise = abas.find((a) => a.label === 'Em análise')!
+    const emAnalise = abas.find((a) => a.label === 'Análise')!
     const daAnalise = emAnalise.acoes.find((x) => x.papel === 'aprovar')!
     expect(daAnalise.label).toBe('Enviar para revisão')
     expect(daAnalise.variant).toBe('secondary')
@@ -249,7 +249,7 @@ describe('abas do Interno', () => {
   })
 
   it('as duas abas de decisão também interrompem', () => {
-    for (const label of ['Em análise', 'Revisão']) {
+    for (const label of ['Análise', 'Revisão']) {
       const aba = abas.find((a) => a.label === label)!
       expect(aba.acoes.map((x) => x.papel), label).toEqual([
         'aprovar',
@@ -283,7 +283,7 @@ describe('abas do Interno', () => {
   it('sem a coluna no kanban, o botão não aparece', () => {
     const semReprovados = espelho(COLUNAS_INTERNO.filter((n) => n !== 'REPROVADOS'))
     const emAnalise = abasDoFunil(FUNIL_PRECATORIO, semReprovados, 'interno').find(
-      (a) => a.label === 'Em análise',
+      (a) => a.label === 'Análise',
     )!
     expect(emAnalise.acoes.map((x) => x.papel)).toEqual(['aprovar', 'diligenciar'])
   })
@@ -360,7 +360,7 @@ describe('abas da trilha Externa', () => {
 
   it('mostra os oito rótulos da plataforma, na ordem da trilha', () => {
     expect(abas.map((a) => a.label)).toEqual([
-      'Em qualificação',
+      'Qualificação',
       'Revisão',
       'Memorando',
       'Aprovados',
@@ -373,9 +373,9 @@ describe('abas da trilha Externa', () => {
 
   it('cada rótulo resolve para a coluna certa do funil novo', () => {
     const porLabel = new Map(abas.map((a) => [a.label, a.statusIds[0]]))
-    // O RÓTULO DIZ O ESTADO, a coluna diz o trabalho: "Em qualificação" na
+    // O RÓTULO NOMEIA A ETAPA, a coluna diz o trabalho: "Qualificação" na
     // plataforma, "QUALIFICAÇÃO PRELIMINAR" no kanban.
-    expect(porLabel.get('Em qualificação')).toBe(idExt('QUALIFICAÇÃO PRELIMINAR'))
+    expect(porLabel.get('Qualificação')).toBe(idExt('QUALIFICAÇÃO PRELIMINAR'))
     expect(porLabel.get('Revisão')).toBe(idExt('REVISÃO DA QUALIFICAÇÃO'))
     expect(porLabel.get('Memorando')).toBe(idExt('MEMORANDO DE NEGOCIAÇÃO'))
     // "APROVADOS" AQUI, "ENCAMINHAR AOS FUNDOS" LÁ: o rótulo é o vocabulário de
@@ -416,7 +416,7 @@ describe('abas da trilha Externa', () => {
   })
 
   /** As duas etapas em que a casa decide algo — as demais são de espera. */
-  const DECISORIAS = ['Em qualificação', 'Revisão']
+  const DECISORIAS = ['Qualificação', 'Revisão']
 
   /**
    * O DESFECHO DO EXTERNO MORA NAS DUAS ETAPAS DE DECISÃO.
@@ -427,7 +427,7 @@ describe('abas da trilha Externa', () => {
    * seria decidir no lugar de quem decide.
    */
   it('a Qualificação oferece as três saídas', () => {
-    const qualificacao = abas.find((a) => a.label === 'Em qualificação')!
+    const qualificacao = abas.find((a) => a.label === 'Qualificação')!
     expect(qualificacao.acoes.map((x) => x.papel)).toEqual([
       'aprovar',
       'diligenciar',
@@ -451,7 +451,7 @@ describe('abas da trilha Externa', () => {
    * o peso do de quem decide.
    */
   it('a saída positiva da Qualificação envia para revisão, em tom neutro', () => {
-    const qualificacao = abas.find((a) => a.label === 'Em qualificação')!
+    const qualificacao = abas.find((a) => a.label === 'Qualificação')!
     const aprovar = qualificacao.acoes.find((x) => x.papel === 'aprovar')!
     expect(aprovar.label).toBe('Enviar para revisão')
     expect(aprovar.variant).toBe('secondary')
@@ -817,7 +817,7 @@ describe('RPV não é afetado pela subdivisão', () => {
     // A subdivisão é um eixo só do Precatório. Passá-la aqui não pode mudar nada.
     const abas = abasDoFunil(FUNIL_RPV, espelho(), 'externo')
     expect(abas.map((a) => a.label)).toEqual([
-      'Em análise',
+      'Análise',
       'Revisão',
       'Aprovados',
       'Diligência',

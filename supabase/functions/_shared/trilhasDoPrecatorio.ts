@@ -169,10 +169,10 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     abas: [
       {
         key: ABA_ANALISE_INTERNA,
-        // "EM ANÁLISE" PARA UMA COLUNA QUE SE CHAMA "ANÁLISE JURÍDICA E
-        // ECONÔMICA": o rótulo da plataforma diz o ESTADO do crédito, que é o
-        // que se lê numa fila; o nome do kanban descreve o trabalho.
-        label: 'Em análise',
+        // UMA PALAVRA, e a coluna do Kommo se chama "ANÁLISE JURÍDICA E
+        // ECONÔMICA": o rótulo da plataforma nomeia a etapa, o nome do kanban
+        // descreve o trabalho que acontece nela.
+        label: 'Análise',
         colunaKommo: 'ANÁLISE JURÍDICA E ECONÔMICA',
         descricaoVazia: 'Nenhum precatório em análise.',
         // APROVAR AQUI É PEDIR REVISÃO, e não aprovar o crédito. Quem trabalha
@@ -237,10 +237,9 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     abas: [
       {
         key: 'ext-qualificacao',
-        // "EM QUALIFICAÇÃO" diz o ESTADO do crédito, que é o que se lê numa fila;
-        // "QUALIFICAÇÃO PRELIMINAR", no kanban, descreve o trabalho. Mesma escolha
-        // do "Em análise" do Interno.
-        label: 'Em qualificação',
+        // UMA PALAVRA, como a "Análise" do Interno: o rótulo nomeia a etapa e
+        // "QUALIFICAÇÃO PRELIMINAR", no kanban, descreve o trabalho.
+        label: 'Qualificação',
         colunaKommo: 'QUALIFICAÇÃO PRELIMINAR',
         descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
         // APROVAR AQUI É PEDIR REVISÃO, e não encaminhar ao fundo. Quem trabalha

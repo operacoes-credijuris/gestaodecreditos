@@ -755,7 +755,7 @@ const ABAS_RPV_TERMINAIS: ReadonlySet<string> = new Set([
 /**
  * A aba em que o desfecho se decide DENTRO da janela da análise.
  *
- * Em "Em análise" o trabalho é ler a análise e decidir, e as duas coisas passaram
+ * Na Análise o trabalho é ler a análise e decidir, e as duas coisas passaram
  * a acontecer no mesmo lugar. Na Revisão não: ali a análise já foi feita e
  * salva, quem revisa lê a anotação e a planilha, e obrigá-lo a abrir a janela
  * custaria dois minutos de releitura do processo para mover um card.

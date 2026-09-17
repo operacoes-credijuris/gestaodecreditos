@@ -6,15 +6,15 @@
 // escreve é a kommo-mover.
 //
 // Fluxo do operacional:
-//   Em análise  a IA analisa o card, que fica aqui até a equipe de revisão
+//   Análise     a IA analisa o card, que fica aqui até a equipe de revisão
 //               considerar a análise boa
 //        ↓      "Enviar para revisão"
 //   Revisão     três saídas
 //        ↓
 //   Aprovados | Diligência | Reprovados
 //
-// A análise (inclusive o motivo de uma eventual reprovação) é produzida em Em
-// análise. A revisão só ratifica — por isso nenhuma das três saídas pede
+// A análise (inclusive o motivo de uma eventual reprovação) é produzida na
+// Análise. A revisão só ratifica — por isso nenhuma das três saídas pede
 // justificativa: ela já foi escrita antes.
 //
 // Depois de aprovado o crédito passa por etapas do comercial (oferta, contratos,
@@ -164,7 +164,7 @@ export const TELAS: DefTela[] = [
     // que a operação usa hoje, o mesmo das duas trilhas do Precatório — em
     // análise, depois revisão. Renomear as chaves quebraria link salvo sem
     // devolver nada em troca.
-    label: 'Em análise',
+    label: 'Análise',
     statusId: ST_ANALISE,
     descricaoVazia:
       'Nenhum card aguardando revisão. Quando o comercial mover um crédito para análise no Kommo, ele aparece aqui.',
