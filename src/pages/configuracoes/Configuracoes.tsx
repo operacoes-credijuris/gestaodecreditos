@@ -1007,7 +1007,6 @@ function RoteiroConfig() {
             <Scale className="h-5 w-5 text-brand-600" /> Roteiro da qualificação preliminar
           </span>
         }
-        description="Este texto é entregue ao Claude junto com os autos, toda vez que alguém clica em Executar análise no funil externo."
         // SÓ O SELO DE EDITADO. Estar no padrão é o estado comum, e um selo que
         // aparece sempre não informa nada — o que vale a pena flagrar é o texto
         // ter saído do que o sistema entrega.
@@ -1030,31 +1029,37 @@ function RoteiroConfig() {
               }}
             />
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                onClick={() => gravar(texto, 'Roteiro salvo. A próxima análise já o usa.')}
-                disabled={!mudou || salvando}
-                loading={salvando}
-              >
-                Salvar
-              </Button>
+            {/* UMA LINHA SÓ, com o Salvar à direita. Eram duas faixas empilhadas
+                embaixo de um campo de dezoito linhas — botão numa, contagem e data
+                noutra —, e a tela inteira é uma página de cartões: cada faixa a mais
+                aqui empurra os outros para baixo. O rodapé do cartão é o lugar de
+                tudo isso, e ele cabe numa linha. */}
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span>{texto.length.toLocaleString('pt-BR')} caracteres</span>
+                {data?.atualizado_em && (
+                  <span>
+                    Última alteração em{' '}
+                    {new Date(data.atualizado_em).toLocaleString('pt-BR')}
+                    {data.atualizado_por ? ' por ' + data.atualizado_por : ''}
+                  </span>
+                )}
+              </div>
 
-              {mudou && (
-                <span className="text-xs font-medium text-amber-700">
-                  alterações não salvas
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-              <span>{texto.length.toLocaleString('pt-BR')} caracteres</span>
-              {data?.atualizado_em && (
-                <span>
-                  Última alteração em{' '}
-                  {new Date(data.atualizado_em).toLocaleString('pt-BR')}
-                  {data.atualizado_por ? ' por ' + data.atualizado_por : ''}
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {mudou && (
+                  <span className="text-xs font-medium text-amber-700">
+                    alterações não salvas
+                  </span>
+                )}
+                <Button
+                  onClick={() => gravar(texto, 'Roteiro salvo. A próxima análise já o usa.')}
+                  disabled={!mudou || salvando}
+                  loading={salvando}
+                >
+                  Salvar
+                </Button>
+              </div>
             </div>
           </div>
         )}
