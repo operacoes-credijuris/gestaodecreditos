@@ -62,12 +62,18 @@ function Secao({
   children: ReactNode
 }) {
   return (
-    <section className="space-y-3 py-5 first:pt-1 last:pb-1">
+    // O NOME DA SEÇÃO NUMA COLUNA, os campos noutra. Empilhados, o título e a
+    // explicação viravam mais duas linhas de texto entre campos — e numa tela
+    // larga os campos se esticavam de ponta a ponta, com o rótulo de um a meio
+    // metro do valor do outro. Lado a lado, a largura vira margem de leitura.
+    <section className="grid gap-x-10 gap-y-3 py-6 md:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
       <div>
         <h3 className="text-sm font-semibold text-slate-800">{titulo}</h3>
-        {descricao && <p className="mt-0.5 text-xs text-slate-500">{descricao}</p>}
+        {descricao && (
+          <p className="mt-1 text-xs leading-relaxed text-slate-500">{descricao}</p>
+        )}
       </div>
-      {children}
+      <div className="space-y-4">{children}</div>
     </section>
   )
 }
@@ -273,126 +279,129 @@ function GerarPanel() {
       )}
 
       <Card>
-        <form onSubmit={handleSubmit} className="divide-y divide-slate-100">
+        {/* O RECUO É DO FORMULÁRIO, e não do cartão: assim os filetes que separam
+            as seções ficam recuados também, em vez de cortarem o cartão de ponta
+            a ponta. `Card` não traz recuo nenhum — quem o dá é quem o usa. */}
+        <form onSubmit={handleSubmit} className="divide-y divide-slate-100 px-5 py-1">
           <Secao
             titulo="O crédito"
             descricao="Quem compra, de quem veio e qual processo — o número é o que localiza a análise no Drive."
           >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Investidor (cessionário)" required>
-              <Select value={investidorNome} onChange={(e) => setInvestidorNome(e.target.value)}>
-                <option value="">Selecione…</option>
-                {investidores.map((i) => (
-                  <option key={i.nome_chave} value={i.nome_exibicao ?? i.nome_chave}>
-                    {i.nome_exibicao ?? i.nome_chave}
-                  </option>
-                ))}
-              </Select>
-              {investidores.length === 0 && !investidorDados.isLoading && (
-                <p className="mt-1 text-xs text-slate-500">
-                  Nenhum investidor cadastrado — cadastre em "Dados pessoais e bancários".
-                </p>
-              )}
-            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Investidor (cessionário)" required>
+                <Select value={investidorNome} onChange={(e) => setInvestidorNome(e.target.value)}>
+                  <option value="">Selecione…</option>
+                  {investidores.map((i) => (
+                    <option key={i.nome_chave} value={i.nome_exibicao ?? i.nome_chave}>
+                      {i.nome_exibicao ?? i.nome_chave}
+                    </option>
+                  ))}
+                </Select>
+                {investidores.length === 0 && !investidorDados.isLoading && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Nenhum investidor cadastrado — cadastre em "Dados pessoais e bancários".
+                  </p>
+                )}
+              </Field>
 
-            <Field label="Categoria" required>
-              <Select
-                value={categoria}
-                onChange={(e) => setCategoria(e.target.value as (typeof CATEGORIAS)[number])}
-              >
-                {CATEGORIAS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+              <Field label="Categoria" required>
+                <Select
+                  value={categoria}
+                  onChange={(e) => setCategoria(e.target.value as (typeof CATEGORIAS)[number])}
+                >
+                  {CATEGORIAS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
 
-            <Field label="Originador" required>
-              <Select value={originador} onChange={(e) => setOriginador(e.target.value)}>
-                <option value="">
-                  {carregandoOriginadores ? 'Carregando…' : 'Selecione…'}
-                </option>
-                {originadores.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
+              <Field label="Originador" required>
+                <Select value={originador} onChange={(e) => setOriginador(e.target.value)}>
+                  <option value="">
+                    {carregandoOriginadores ? 'Carregando…' : 'Selecione…'}
                   </option>
-                ))}
-              </Select>
-            </Field>
+                  {originadores.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
 
-            <Field label="Número do processo" required hint="Usado para localizar a análise no Drive">
-              <Input
-                value={numeroProcesso}
-                onChange={(e) => setNumeroProcesso(e.target.value)}
-                placeholder="0000000-00.0000.0.00.0000"
-              />
-            </Field>
-          </div>
+              <Field label="Número do processo" required hint="Usado para localizar a análise no Drive">
+                <Input
+                  value={numeroProcesso}
+                  onChange={(e) => setNumeroProcesso(e.target.value)}
+                  placeholder="0000000-00.0000.0.00.0000"
+                />
+              </Field>
+            </div>
           </Secao>
 
           <Secao
             titulo="Documentos"
             descricao="Servem só para extrair os dados do cedente e do escritório. Nada fica guardado neste formulário."
           >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <ArquivosField
-              titulo="Do cedente"
-              genero={cedenteGenero}
-              onGeneroChange={setCedenteGenero}
-              generoLabel="Gênero do cedente"
-              arquivos={uploads.cedente}
-              onAdicionar={(f) => adicionarArquivos('cedente', f)}
-              onRemover={(i) => removerArquivo('cedente', i)}
-            />
-            <ArquivosField
-              titulo="Do escritório"
-              genero={socioGenero}
-              onGeneroChange={setSocioGenero}
-              generoLabel="Gênero do sócio responsável"
-              arquivos={uploads.escritorio}
-              onAdicionar={(f) => adicionarArquivos('escritorio', f)}
-              onRemover={(i) => removerArquivo('escritorio', i)}
-            />
-          </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ArquivosField
+                titulo="Do cedente"
+                genero={cedenteGenero}
+                onGeneroChange={setCedenteGenero}
+                generoLabel="Gênero do cedente"
+                arquivos={uploads.cedente}
+                onAdicionar={(f) => adicionarArquivos('cedente', f)}
+                onRemover={(i) => removerArquivo('cedente', i)}
+              />
+              <ArquivosField
+                titulo="Do escritório"
+                genero={socioGenero}
+                onGeneroChange={setSocioGenero}
+                generoLabel="Gênero do sócio responsável"
+                arquivos={uploads.escritorio}
+                onAdicionar={(f) => adicionarArquivos('escritorio', f)}
+                onRemover={(i) => removerArquivo('escritorio', i)}
+              />
+            </div>
           </Secao>
 
           <Secao
             titulo="O que gerar"
             descricao="Pela análise de crédito a casa já sabe quais peças o negócio exige. Desmarque para escolher à mão."
           >
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={tiposAuto}
-                onChange={(e) => setTiposAuto(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300"
-              />
-              {/* O "(pela análise de crédito)" saiu daqui: estava dito na linha
-                  de cima, e rótulo que repete a explicação ao lado faz a pessoa
-                  ler duas vezes para descobrir que é a mesma frase. */}
-              Escolher automaticamente
-            </label>
-            {!tiposAuto && (
-              <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2">
-                {TIPOS_GERACAO.map((t) => (
-                  <label key={t} className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={tiposEscolhidos.has(t)}
-                      onChange={() => alternarTipo(t)}
-                      className="h-4 w-4 rounded border-slate-300"
-                    />
-                    {TIPO_CONTRATO[t]?.label ?? t}
-                  </label>
-                ))}
-              </div>
-            )}
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={tiposAuto}
+                  onChange={(e) => setTiposAuto(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                {/* O "(pela análise de crédito)" saiu daqui: estava dito na linha
+                    de cima, e rótulo que repete a explicação ao lado faz a pessoa
+                    ler duas vezes para descobrir que é a mesma frase. */}
+                Escolher automaticamente
+              </label>
+              {!tiposAuto && (
+                <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2">
+                  {TIPOS_GERACAO.map((t) => (
+                    <label key={t} className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={tiposEscolhidos.has(t)}
+                        onChange={() => alternarTipo(t)}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                      {TIPO_CONTRATO[t]?.label ?? t}
+                    </label>
+                  ))}
+                </div>
+              )}
           </Secao>
 
           {/* O ANDAMENTO AO LADO DO BOTÃO: a geração leva de 30 a 90 segundos, e
               sem ele o clique parece não ter feito nada. */}
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-5">
+          <div className="flex flex-wrap items-center justify-end gap-3 py-5">
             {enviando && <p className="mr-auto text-sm text-slate-600">{progresso}</p>}
             <Button
               type="submit"
