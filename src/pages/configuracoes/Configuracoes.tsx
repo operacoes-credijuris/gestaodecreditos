@@ -235,8 +235,13 @@ function AnthropicConfig() {
 function SaldoEscavador() {
   const { data, isFetching, error, refetch } = useQuery({
     queryKey: ['escavador', 'saldo'],
-    // SEM CACHE: o saldo anda a cada diligência, e número velho na tela é pior
-    // que número nenhum — é o que faz alguém começar uma apuração confiando em
+    // A CONSULTA É SOZINHA, ao abrir a tela: é a única pergunta desta página
+    // cuja resposta MUDA sem ninguém mexer aqui — todo o resto é configuração,
+    // que só muda quando alguém a edita. Um saldo atrás de um clique seria um
+    // saldo que ninguém olha.
+    //
+    // SEM CACHE: ele anda a cada diligência, e número velho na tela é pior que
+    // número nenhum — é o que faz alguém começar uma apuração confiando em
     // crédito que já foi gasto.
     staleTime: 0,
     retry: false,
@@ -248,38 +253,37 @@ function SaldoEscavador() {
       ).saldo,
   })
 
+  // NADA ENQUANTO CONSULTA. O número aparece em menos de um segundo, e um "…"
+  // piscando ao lado do título chama mais atenção do que o próprio saldo.
+  if (isFetching && !data && !error) return null
+
+  if (error) {
+    // O TEXTO DO ESCAVADOR FICA NO title — 401 é token recusado, 429 é limite de
+    // chamadas, e são consertos diferentes. Na linha, só o suficiente para
+    // alguém saber que há o que conferir: o selo ao lado diz "configurado", e
+    // sem isto a tela afirmaria que está tudo bem.
+    return (
+      <span className="text-xs text-amber-700" title={(error as Error).message}>
+        saldo indisponível
+      </span>
+    )
+  }
+
   return (
-    <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-100">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-          Saldo na API
-        </span>
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="text-xs text-brand-600 hover:underline disabled:opacity-50"
-        >
-          {isFetching ? 'consultando…' : 'atualizar'}
-        </button>
-      </div>
-      {error ? (
-        // O TEXTO DO ESCAVADOR, e não "erro ao consultar": 401 é token recusado e
-        // 429 é limite de chamadas — dois consertos diferentes.
-        <p className="mt-1 text-sm text-amber-700">{(error as Error).message}</p>
-      ) : (
-        <>
-          <p className="mt-0.5 text-2xl font-semibold text-slate-800">
-            {data ? data.descricao || formatBRL(data.saldo) : '—'}
-          </p>
-          <p className="text-xs text-slate-500">
-            {data
-              ? `${data.creditos.toLocaleString('pt-BR')} crédito(s) · cada consulta da diligência gasta daqui`
-              : 'consultando…'}
-          </p>
-        </>
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={() => void refetch()}
+      disabled={isFetching}
+      title={
+        data
+          ? `Saldo na API do Escavador · ${data.creditos.toLocaleString('pt-BR')} crédito(s). ` +
+            'Cada consulta da diligência gasta daqui. Clique para atualizar.'
+          : undefined
+      }
+      className="text-xs text-slate-500 tabular-nums hover:text-slate-700 disabled:opacity-50"
+    >
+      Saldo {data ? data.descricao || formatBRL(data.saldo) : '—'}
+    </button>
   )
 }
 
@@ -327,12 +331,19 @@ function EscavadorConfig() {
           </span>
         }
         action={
-          <SeloIntegracao
-            error={error}
-            configurado={configurado}
-            rotuloOk="Token configurado"
-            rotuloSem="Sem token"
-          />
+          // O SALDO AO LADO DO SELO, e não num quadro no corpo do cartão. Ele é
+          // um número que se confere de passagem — "ainda tenho crédito?" —, e
+          // não um campo para preencher; um quadro no meio da tela de
+          // configuração dava a ele o peso de uma decisão a tomar.
+          <span className="flex items-center gap-3">
+            {configurado && <SaldoEscavador />}
+            <SeloIntegracao
+              error={error}
+              configurado={configurado}
+              rotuloOk="Token configurado"
+              rotuloSem="Sem token"
+            />
+          </span>
         }
       />
       <CardBody>
@@ -357,12 +368,6 @@ function EscavadorConfig() {
                 autoComplete="off"
               />
             </Field>
-            {/* O SALDO AO LADO DO CAMPO, e não escondido atrás de um salvamento:
-                das integrações da casa esta é a única em que cada consulta custa
-                dinheiro, e o número é o que se olha ANTES de sair apurando. Só
-                com token: sem chave não há o que perguntar. */}
-            {configurado ? <SaldoEscavador /> : <div />}
-
             <div className="sm:col-span-2">
               <Button onClick={salvar} loading={saving}>
                 Salvar
