@@ -33,6 +33,7 @@ import {
   ClipboardCheck,
   RefreshCw,
   Landmark,
+  Paperclip,
   Receipt,
   Scale,
   CheckCircle2,
@@ -85,7 +86,7 @@ import { DueDiligence } from '@/components/DueDiligence'
 import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
 import { escolherPaginasParaImagem } from '@/lib/paginasDigitalizadas'
 import { subirImagensDosAutos, type ImagemSubida } from '@/lib/imagensDosAutos'
-import { agruparNotas } from '@/lib/historicoDeNotas'
+import { agruparNotas, ehAnexo, nomeDoAnexo } from '@/lib/historicoDeNotas'
 import { supabase } from '@/lib/supabase'
 import {
   verbasQueSobram,
@@ -883,6 +884,7 @@ function CardCredito({
   onDueDiligence,
   onAnaliseExterna,
   onConcluir,
+  onAbrirAnexo,
   preparoDosAutos,
   onAnaliseJuridica,
   analisandoJuridico,
@@ -910,6 +912,14 @@ function CardCredito({
    * sendo um botão cada, na linha de cima do card.
    */
   onConcluir?: (l: KommoLead) => void
+  /**
+   * Abre um arquivo do histórico, pelo nome.
+   *
+   * PELO NOME, e não por um link guardado: a anotação de anexo do Kommo traz o
+   * nome do arquivo, e o endereço de download é assinado na hora pela API. Um
+   * link gravado no espelho seria um link vencido.
+   */
+  onAbrirAnexo: (l: KommoLead, nome: string) => void
   /** Como vai o preparo dos autos deste card, se já foi pedido. */
   preparoDosAutos?: PreparoDosAutos
   onAnaliseJuridica: (l: KommoLead) => void
@@ -1328,7 +1338,14 @@ function CardCredito({
               que o explica — e exibidos como o espelho os guarda, os dois viram
               dois registros soltos, com um bloco inteiro só para dizer um nome de
               arquivo. Ver historicoDeNotas.ts. */}
-          {agruparNotas(notas).map(({ nota: n, anexos }, i) => (
+          {agruparNotas(notas).map(({ nota: n, anexos }, i) => {
+            // O ANEXO ÓRFÃO É O PRÓPRIO BLOCO. A nota de arquivo não tem texto no
+            // Kommo — o espelho monta "📎 nome.pdf" só para ela ter o que mostrar
+            // —, e exibi-la como parágrafo fazia um nome de arquivo ocupar um
+            // bloco inteiro de texto.
+            const arquivos = ehAnexo(n) ? [n, ...anexos] : anexos
+            const corpo = ehAnexo(n) ? '' : n.texto
+            return (
             <div key={n.id || i}>
               {/* DATA COM HORA, MINUTO E SEGUNDO. As anotações chegam em rajada:
                   o comercial cola o bloco de dados e, no mesmo minuto, escreve a
@@ -1354,31 +1371,56 @@ function CardCredito({
                   </span>
                 )}
               </div>
-              <pre
+              {/* O ARQUIVO DENTRO DA ANOTAÇÃO, como o feed do Kommo o mostra. Ele
+                  estava do lado de fora, numa faixa própria — e no Kommo, que é
+                  de onde a pessoa vem, o nome do arquivo é uma linha do próprio
+                  comentário. Duas formas para a mesma coisa obrigam a ler duas
+                  vezes para entender que é a mesma. */}
+              <div
                 className={cn(
-                  'whitespace-pre-wrap break-words rounded-lg p-3 text-xs ring-1 ring-inset',
-                  n.automatica
-                    ? 'bg-white text-slate-500 ring-slate-100'
-                    : 'bg-slate-50 text-slate-700 ring-slate-100',
+                  'rounded-lg p-3 ring-1 ring-inset ring-slate-100',
+                  n.automatica ? 'bg-white' : 'bg-slate-50',
                 )}
               >
-                {n.texto}
-              </pre>
-              {anexos.length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {anexos.map((a) => (
-                    <span
-                      key={a.id}
-                      title={a.criado_em ? formatDataHoraSegundos(a.criado_em) : undefined}
-                      className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600"
-                    >
-                      {a.texto}
-                    </span>
-                  ))}
-                </div>
-              )}
+                {corpo && (
+                  <pre
+                    className={cn(
+                      'whitespace-pre-wrap break-words text-xs',
+                      n.automatica ? 'text-slate-500' : 'text-slate-700',
+                    )}
+                  >
+                    {corpo}
+                  </pre>
+                )}
+                {arquivos.length > 0 && (
+                  <div
+                    className={cn(
+                      'flex flex-col items-start gap-1',
+                      corpo && 'mt-2 border-t border-slate-200/70 pt-2',
+                    )}
+                  >
+                    {arquivos.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => onAbrirAnexo(lead, nomeDoAnexo(a))}
+                        title={
+                          a.criado_em
+                            ? `Anexado em ${formatDataHoraSegundos(a.criado_em)} — clique para abrir`
+                            : 'Clique para abrir'
+                        }
+                        className="inline-flex max-w-full items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
+                      >
+                        <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                        <span className="break-all text-left">{nomeDoAnexo(a)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -1783,6 +1825,42 @@ export default function AnaliseCredito() {
    * de outro domínio, e o navegador ABRIRIA o PDF numa aba em vez de salvá-lo —
    * o que não serve, porque o que se quer é o arquivo no disco para arrastar.
    */
+  /**
+   * Abre, numa aba, o arquivo que a pessoa clicou no histórico do card.
+   *
+   * O LINK NÃO ESTÁ NA ANOTAÇÃO. A nota de anexo do Kommo traz o NOME do
+   * arquivo; o endereço de download vive na API de arquivos e é assinado na
+   * hora. Guardá-lo no espelho seria guardar um link que vence — por isso a
+   * busca acontece no clique.
+   *
+   * A ABA ABRE ANTES DA BUSCA, e isto não é ordem arbitrária: janela aberta
+   * depois de um `await` perde a ativação do gesto e é barrada como popup. Ela
+   * nasce em branco e recebe o endereço quando ele chega; falhando a busca, é
+   * fechada — aba em branco esquecida é pior que erro nenhum.
+   */
+  async function abrirAnexo(lead: KommoLead, nome: string) {
+    const aba = window.open('', '_blank', 'noopener')
+    try {
+      const r = await invokeFunction<{
+        arquivos?: { nome: string; download: string }[]
+        erro?: string
+      }>('buscar-kommo', { lead_id: lead.kommo_lead_id, todos: true })
+      if (r.erro) throw new Error(r.erro)
+      const igual = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+      const alvo = (r.arquivos ?? []).find((a) => igual(a.nome, nome))
+      if (!alvo) {
+        throw new Error(
+          `o card não tem mais um anexo chamado "${nome}" (ele pode ter sido removido no Kommo)`,
+        )
+      }
+      if (aba) aba.location.href = alvo.download
+      else window.open(alvo.download, '_blank', 'noopener')
+    } catch (e) {
+      aba?.close()
+      toast.error('Não consegui abrir o anexo: ' + ((e as Error)?.message ?? String(e)))
+    }
+  }
+
   async function baixarAnexosDoCard(lead: KommoLead) {
     try {
       const lista = await listarAnexosDoCard(lead)
@@ -2423,6 +2501,7 @@ export default function AnaliseCredito() {
                     ? (l) => concluir(l, abaAtual.acoes)
                     : undefined
                 }
+                onAbrirAnexo={abrirAnexo}
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria

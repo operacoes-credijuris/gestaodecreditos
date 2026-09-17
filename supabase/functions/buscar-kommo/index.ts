@@ -9,6 +9,10 @@
 //
 // USO (POST, com sessão logada): { "lead_id": 15269795 }
 //   -> { pronto:true, download_url, nome_arquivo, mime }
+//
+// Com { "lead_id": 15269795, "todos": true } devolve TODOS os anexos com link,
+// PDF ou não — é o que o histórico do card usa para abrir o arquivo que a pessoa
+// clicou. O caminho da análise continua querendo PDF, e recusando o resto.
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
@@ -92,6 +96,24 @@ Deno.serve(async (req) => {
         mime: String((m as any)?.metadata?.mime_type || "").toLowerCase(),
         ext: String((m as any)?.metadata?.extension || "").toLowerCase(),
         download: (m as any)?._links?.download?.href,
+      });
+    }
+
+    // TODOS OS ANEXOS, quando quem pergunta é o histórico do card.
+    //
+    // O caminho da análise quer PDF e RECUSA o resto — e recusar é certo lá: sem
+    // PDF não há o que analisar, e devolver um JPG faria a leitura falhar mais
+    // adiante, longe da causa. Aqui a pergunta é outra: a pessoa clicou no nome de
+    // um arquivo que ela está VENDO no card, e ele pode ser o RG em foto.
+    if ((body as any).todos === true) {
+      const todos = metas.filter((x) => !!x.download);
+      return json({
+        pronto: true,
+        arquivos: todos.map((x) => ({ nome: x.nome, download: x.download!, mime: x.mime })),
+        sem_link: [
+          ...metas.filter((x) => !x.download).map((x) => x.nome || "anexo sem nome"),
+          ...semMetadado,
+        ],
       });
     }
 

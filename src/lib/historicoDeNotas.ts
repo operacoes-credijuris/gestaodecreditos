@@ -26,7 +26,20 @@ export interface BlocoDoHistorico {
 /** Quanto tempo separa um arquivo da anotação que o comenta. */
 export const JANELA_DO_ANEXO_MS = 3 * 60 * 1000
 
-const ehAnexo = (n: KommoNota): boolean => n.tipo === 'attachment'
+/** A nota é um arquivo anexado? */
+export const ehAnexo = (n: KommoNota): boolean => n.tipo === 'attachment'
+
+/**
+ * O nome do arquivo, sem o clipe que o espelho põe na frente.
+ *
+ * O CLIPE É DO TEXTO, e não um campo. A nota de anexo não tem texto nenhum no
+ * Kommo — só o nome do arquivo noutro campo —, e o kommo-sync monta
+ * "📎 nome.pdf" para a nota ter o que mostrar. Quem vai procurar esse arquivo
+ * pelo nome na API precisa do nome limpo.
+ */
+export function nomeDoAnexo(n: KommoNota): string {
+  return String(n.texto ?? '').replace(/^📎\s*/u, '').trim()
+}
 
 const instante = (n: KommoNota): number => {
   const t = n.criado_em ? Date.parse(n.criado_em) : NaN
