@@ -85,6 +85,7 @@ import { DueDiligence } from '@/components/DueDiligence'
 import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
 import { escolherPaginasParaImagem } from '@/lib/paginasDigitalizadas'
 import { subirImagensDosAutos, type ImagemSubida } from '@/lib/imagensDosAutos'
+import { agruparNotas } from '@/lib/historicoDeNotas'
 import { supabase } from '@/lib/supabase'
 import {
   verbasQueSobram,
@@ -1322,7 +1323,12 @@ function CardCredito({
 
       {aberto && notas.length > 0 && (
         <div className="mt-2 space-y-2">
-          {notas.map((n, i) => (
+          {/* O ANEXO VOLTA PARA A ANOTAÇÃO DELE. No Kommo o arquivo é uma nota
+              separada, sem texto, escrita segundos antes ou depois do comentário
+              que o explica — e exibidos como o espelho os guarda, os dois viram
+              dois registros soltos, com um bloco inteiro só para dizer um nome de
+              arquivo. Ver historicoDeNotas.ts. */}
+          {agruparNotas(notas).map(({ nota: n, anexos }, i) => (
             <div key={n.id || i}>
               {/* DATA COM HORA, MINUTO E SEGUNDO. As anotações chegam em rajada:
                   o comercial cola o bloco de dados e, no mesmo minuto, escreve a
@@ -1358,6 +1364,19 @@ function CardCredito({
               >
                 {n.texto}
               </pre>
+              {anexos.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {anexos.map((a) => (
+                    <span
+                      key={a.id}
+                      title={a.criado_em ? formatDataHoraSegundos(a.criado_em) : undefined}
+                      className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600"
+                    >
+                      {a.texto}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>

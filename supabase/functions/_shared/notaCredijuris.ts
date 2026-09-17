@@ -111,9 +111,36 @@ export function marcarComoDePessoa(texto: string, autor?: string | null): string
   return t.includes('pela plataforma Credijuris') ? t : `${t}\n\n${rodape}`
 }
 
-/** A nota foi escrita pelo sistema? É o que mantém o espelho livre dela. */
-export function ehNotaNossa(texto: string | null | undefined): boolean {
+/**
+ * QUANDO A MARCA PASSOU A EXISTIR.
+ *
+ * Depois desta data, toda nota que o sistema escreve sai assinada. Então nota
+ * mais nova que isto e sem assinatura é de gente — ponto, sem farejar formato.
+ */
+export const DESDE_QUANDO_ASSINAMOS = '2026-09-08T00:00:00.000Z'
+
+/**
+ * A nota foi escrita pelo sistema?
+ *
+ * A DATA FECHA O FAREJADOR, e isso conserta um erro que apareceu na tela. O
+ * reconhecimento por FORMA existe para as notas de 13/08 a 07/09 de 2026, que
+ * nasceram sem marca; aplicado às novas, ele classificava como nossa a nota em
+ * que uma PESSOA colou o resumo da oportunidade — "Oportunidade Credijuris" é
+ * uma das formas farejadas. Duas consequências, e a segunda é pior: a nota dela
+ * não alimentava a análise seguinte, e o histórico do card exibia "nota da
+ * plataforma" sobre um texto que ela escreveu.
+ *
+ * SEM DATA, O COMPORTAMENTO ANTIGO. Quem chama sem saber quando a nota nasceu
+ * recebe a resposta conservadora — errar excluindo perde informação, errar
+ * incluindo faz a análise confirmar a si mesma.
+ */
+export function ehNotaNossa(
+  texto: string | null | undefined,
+  criadoEm?: string | null,
+): boolean {
   const t = String(texto ?? '')
   if (!t.trim()) return false
-  return t.includes(ASSINATURA) || ehFormatoLegado(t)
+  if (t.includes(ASSINATURA)) return true
+  if (criadoEm && criadoEm >= DESDE_QUANDO_ASSINAMOS) return false
+  return ehFormatoLegado(t)
 }

@@ -13,6 +13,7 @@
 //     Chamar .json() nesse caso estoura.
 //   - Leads não têm contagem total: paginação é seguir _links.next até acabar.
 import { ehNotaNossa } from '../_shared/notaCredijuris.ts'
+import { semEntidadesHtml } from '../_shared/textoDoKommo.ts'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 
@@ -110,9 +111,11 @@ interface KommoNote {
  */
 function textoDaNota(n: KommoNote): string {
   const p = n.params ?? {}
-  const texto = String(p.text ?? '').trim()
+  // SEM AS ENTIDADES HTML: o Kommo guarda a nota como HTML e a devolve
+  // escapada — "-&gt;" onde a pessoa escreveu "->". Ver _shared/textoDoKommo.ts.
+  const texto = semEntidadesHtml(p.text).trim()
   if (texto) return texto
-  const arquivo = String(p.original_file_name ?? p.file_name ?? '').trim()
+  const arquivo = semEntidadesHtml(p.original_file_name ?? p.file_name).trim()
   return arquivo ? `📎 ${arquivo}` : ''
 }
 
@@ -553,17 +556,21 @@ Deno.serve(async (req: Request) => {
       const doLead = notasPorLead.get(l.id) ?? []
       const notas: NotaGravada[] = doLead.map((n) => {
         const texto = textoDaNota(n)
+        const criadoEm = iso(n.created_at)
         return {
           id: n.id,
           texto,
-          criado_em: iso(n.created_at),
+          criado_em: criadoEm,
           // created_by = 0 é o robô/automação do Kommo, não uma pessoa.
           autor: n.created_by ? usuarios.get(n.created_by) ?? null : null,
           tipo: String(n.note_type ?? 'common'),
           // O QUE NÃO É `common` NÃO É CADASTRO. Movimentação, anexo e mensagem
           // de automação são registro do que aconteceu com o card, não o que o
           // comercial declarou sobre o crédito — e a análise lê declaração.
-          automatica: n.note_type !== 'common' || ehNotaNossa(texto),
+          // A DATA VAI JUNTO: sem ela, o reconhecimento por forma — que existe para
+          // as notas antigas, sem assinatura — marcaria como nossa a nota em que uma
+          // PESSOA colou o resumo da oportunidade.
+          automatica: n.note_type !== 'common' || ehNotaNossa(texto, criadoEm),
         }
       })
       // nota_texto é simplesmente a PRIMEIRA anotação DO COMERCIAL — sem promessa
