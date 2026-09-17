@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
+import { formatBRL } from '@/lib/format'
 import { KOMMO_SUBDOMINIO as SUBDOMINIO_PADRAO } from '@/lib/kommo'
 import type {
   Integracao,
@@ -219,13 +220,75 @@ function AnthropicConfig() {
 // consome crédito — e só grava se a API responder. De quebra volta o SALDO, que
 // é o número que interessa antes de sair apurando: aqui, ao contrário das
 // outras integrações, CADA CONSULTA CUSTA DINHEIRO.
+/**
+ * O saldo da API, perguntado sempre que a tela abre.
+ *
+ * ELE JÁ VINHA, mas só no instante em que alguém gravava um token novo: a função
+ * que confere a chave usa a mesma chamada, e o número aparecia no aviso daquele
+ * salvamento. Quem abrisse Configurações no dia seguinte não via nada — e o
+ * saldo acabava no meio de uma apuração, chegando como um 402 numa diligência,
+ * longe da tela onde se resolve.
+ *
+ * A CHAMADA NÃO CONSOME CRÉDITO. É por isso que ela serve para conferir o token,
+ * e é por isso que dá para fazê-la a cada abertura sem pensar duas vezes.
+ */
+function SaldoEscavador() {
+  const { data, isFetching, error, refetch } = useQuery({
+    queryKey: ['escavador', 'saldo'],
+    // SEM CACHE: o saldo anda a cada diligência, e número velho na tela é pior
+    // que número nenhum — é o que faz alguém começar uma apuração confiando em
+    // crédito que já foi gasto.
+    staleTime: 0,
+    retry: false,
+    queryFn: async () =>
+      (
+        await invokeFunction<{
+          saldo: { creditos: number; saldo: number; descricao: string }
+        }>('escavador-saldo', {})
+      ).saldo,
+  })
+
+  return (
+    <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-100">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          Saldo na API
+        </span>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          disabled={isFetching}
+          className="text-xs text-brand-600 hover:underline disabled:opacity-50"
+        >
+          {isFetching ? 'consultando…' : 'atualizar'}
+        </button>
+      </div>
+      {error ? (
+        // O TEXTO DO ESCAVADOR, e não "erro ao consultar": 401 é token recusado e
+        // 429 é limite de chamadas — dois consertos diferentes.
+        <p className="mt-1 text-sm text-amber-700">{(error as Error).message}</p>
+      ) : (
+        <>
+          <p className="mt-0.5 text-2xl font-semibold text-slate-800">
+            {data ? data.descricao || formatBRL(data.saldo) : '—'}
+          </p>
+          <p className="text-xs text-slate-500">
+            {data
+              ? `${data.creditos.toLocaleString('pt-BR')} crédito(s) · cada consulta da diligência gasta daqui`
+              : 'consultando…'}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function EscavadorConfig() {
   const { data, isLoading, error } = useIntegracao('escavador')
   const qc = useQueryClient()
   const toast = useToast()
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
-  const [saldo, setSaldo] = useState<string | null>(null)
 
   const configurado = Boolean((data?.config as ConfigEscavador)?.configurado)
 
@@ -241,8 +304,9 @@ function EscavadorConfig() {
         { token: token.trim() },
       )
       setToken('')
-      setSaldo(r.saldo?.descricao ?? null)
       await qc.invalidateQueries({ queryKey: ['integracoes', 'escavador'] })
+      // O saldo da tela é de OUTRA chave a partir de agora.
+      await qc.invalidateQueries({ queryKey: ['escavador', 'saldo'] })
       toast.success(
         'Token do Escavador salvo e confirmado' +
           (r.saldo?.descricao ? `. Saldo: ${r.saldo.descricao}` : '.'),
@@ -293,13 +357,16 @@ function EscavadorConfig() {
                 autoComplete="off"
               />
             </Field>
-            <div className="sm:col-span-2 space-y-2">
+            {/* O SALDO AO LADO DO CAMPO, e não escondido atrás de um salvamento:
+                das integrações da casa esta é a única em que cada consulta custa
+                dinheiro, e o número é o que se olha ANTES de sair apurando. Só
+                com token: sem chave não há o que perguntar. */}
+            {configurado ? <SaldoEscavador /> : <div />}
+
+            <div className="sm:col-span-2">
               <Button onClick={salvar} loading={saving}>
                 Salvar
               </Button>
-              {saldo && (
-                <p className="text-sm text-slate-600">Saldo na API: {saldo}</p>
-              )}
             </div>
           </div>
         )}
