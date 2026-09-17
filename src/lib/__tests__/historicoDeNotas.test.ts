@@ -104,6 +104,41 @@ describe('agruparNotas', () => {
     expect(agruparNotas([])).toEqual([])
   })
 
+  /**
+   * O ENVIO EM LOTE, que é como um processo chega: dezoito peças no mesmo
+   * segundo, nenhuma com comentário ao lado. Sem agrupar os órfãos entre si, o
+   * histórico do card virava uma coluna de dezoito faixas iguais, cada uma com
+   * um nome de arquivo dentro e um selo "anexo" em cima.
+   */
+  it('vários arquivos sem anotação viram um bloco só', () => {
+    const lote = Array.from({ length: 18 }, (_, i) => anexo(i + 1, '2026-09-14T18:30:15Z'))
+    const blocos = agruparNotas(lote)
+    expect(blocos).toHaveLength(1)
+    expect(blocos[0].anexos).toHaveLength(17)
+  })
+
+  // MEDIDOS CONTRA O PRIMEIRO do grupo: um bloco nunca cobre mais que a janela
+  // inteira, por mais arquivos que entrem nele em cadeia.
+  it('o lote não cresce indefinidamente em cadeia', () => {
+    const blocos = agruparNotas([
+      anexo(1, '2026-09-14T18:30:00Z'),
+      anexo(2, '2026-09-14T18:32:00Z'),
+      anexo(3, '2026-09-14T18:34:00Z'),
+    ])
+    expect(blocos).toHaveLength(2)
+    expect(blocos[0].anexos.map((a) => a.id)).toEqual([2])
+    expect(blocos[1].nota.id).toBe(3)
+  })
+
+  it('o lote não engole a anotação que vem no meio', () => {
+    const blocos = agruparNotas([
+      anexo(1, '2026-09-14T18:00:00Z'),
+      nota(2, '2026-09-14T18:20:00Z'),
+      anexo(3, '2026-09-14T18:40:00Z'),
+    ])
+    expect(blocos.map((b) => b.nota.id)).toEqual([1, 2, 3])
+  })
+
   // Linha gravada antes de 17/09/2026 não tem `tipo`: nada é anexo, e o
   // histórico continua saindo como saía.
   it('sem tipo, nada vira anexo', () => {

@@ -1345,6 +1345,11 @@ function CardCredito({
             // bloco inteiro de texto.
             const arquivos = ehAnexo(n) ? [n, ...anexos] : anexos
             const corpo = ehAnexo(n) ? '' : n.texto
+            // "3 anexos" em vez de "anexo" quando o bloco é só de arquivos: um
+            // processo chega em dezoito peças no mesmo segundo, e o número é a
+            // primeira coisa que quem lê quer saber.
+            const selo =
+              ehAnexo(n) && arquivos.length > 1 ? `${arquivos.length} anexos` : rotuloDaNota(n)
             return (
             <div key={n.id || i}>
               {/* DATA COM HORA, MINUTO E SEGUNDO. As anotações chegam em rajada:
@@ -1365,9 +1370,9 @@ function CardCredito({
                     a trazer também movimentação, anexo e a anotação que a própria
                     plataforma escreveu — sem o selo, uma ficha redigida pela
                     análise se leria como declaração de quem cadastrou o card. */}
-                {rotuloDaNota(n) && (
+                {selo && (
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">
-                    {rotuloDaNota(n)}
+                    {selo}
                   </span>
                 )}
               </div>
@@ -1839,7 +1844,26 @@ export default function AnaliseCredito() {
    * fechada — aba em branco esquecida é pior que erro nenhum.
    */
   async function abrirAnexo(lead: KommoLead, nome: string) {
-    const aba = window.open('', '_blank', 'noopener')
+    // SEM `noopener` AQUI, e isso não é descuido: com ele o `window.open`
+    // devolve NULL por definição — o opener não recebe referência nenhuma da
+    // janela nova. A aba abria e ficava órfã em "about:blank" para sempre,
+    // enquanto o código caía no ramo de reserva e tentava abrir uma SEGUNDA
+    // janela, essa sim barrada como popup por já não haver gesto.
+    //
+    // A proteção continua, por outro caminho: `opener = null` logo depois faz o
+    // mesmo que a flag, e ainda assim devolve a referência que precisamos para
+    // apontar a aba ao arquivo.
+    const aba = window.open('', '_blank')
+    if (aba) {
+      aba.opener = null
+      // Uma linha enquanto o link é resolvido: a aba em branco por dois segundos
+      // parece defeito, e é o que estava sendo relatado como "abriu em branco".
+      aba.document.write(
+        '<title>Abrindo anexo…</title>' +
+          '<p style="font:14px system-ui,sans-serif;color:#475569;padding:24px">Abrindo o anexo…</p>',
+      )
+      aba.document.close()
+    }
     try {
       const r = await invokeFunction<{
         arquivos?: { nome: string; download: string }[]
@@ -1853,8 +1877,13 @@ export default function AnaliseCredito() {
           `o card não tem mais um anexo chamado "${nome}" (ele pode ter sido removido no Kommo)`,
         )
       }
+      // A ABA JÁ ESTÁ ABERTA: só recebe o endereço. O ramo de reserva existe
+      // para o caso de o bloqueador de popup ter impedido a abertura lá em cima
+      // — aí se tenta de novo, e se também for barrado o toast conta o que houve.
       if (aba) aba.location.href = alvo.download
-      else window.open(alvo.download, '_blank', 'noopener')
+      else if (!window.open(alvo.download, '_blank', 'noopener')) {
+        throw new Error('o navegador bloqueou a janela — libere os popups deste site')
+      }
     } catch (e) {
       aba?.close()
       toast.error('Não consegui abrir o anexo: ' + ((e as Error)?.message ?? String(e)))

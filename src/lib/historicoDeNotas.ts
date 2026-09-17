@@ -97,5 +97,29 @@ export function agruparNotas(notas: KommoNota[]): BlocoDoHistorico[] {
     }
   }
 
-  return blocos.filter((_, i) => !adotados.has(i))
+  // OS ÓRFÃOS SE AGRUPAM ENTRE SI, e é o que salva o envio em lote. Um processo
+  // que chega em dezoito peças — todas no mesmo segundo, nenhuma com comentário
+  // ao lado — virava dezoito blocos idênticos, cada um com um nome de arquivo
+  // dentro e um selo "anexo" em cima. A página do card ficava com uma coluna de
+  // dezoito faixas para dizer o que cabe numa.
+  //
+  // CONSECUTIVOS, e medidos contra o PRIMEIRO do grupo: assim um bloco nunca
+  // cobre mais que a janela inteira, por mais arquivos que entrem nele.
+  const sobraram = blocos.filter((_, i) => !adotados.has(i))
+  const juntos: BlocoDoHistorico[] = []
+  for (const bloco of sobraram) {
+    const anterior = juntos[juntos.length - 1]
+    if (
+      anterior &&
+      ehAnexo(anterior.nota) &&
+      ehAnexo(bloco.nota) &&
+      autoresCompativeis(anterior.nota, bloco.nota) &&
+      Math.abs(instante(bloco.nota) - instante(anterior.nota)) <= JANELA_DO_ANEXO_MS
+    ) {
+      anterior.anexos.push(bloco.nota)
+      continue
+    }
+    juntos.push(bloco)
+  }
+  return juntos
 }
