@@ -67,7 +67,7 @@ import {
   lerTituloCard,
   valorDoCampo,
 } from '@/lib/kommo'
-import type { KommoLead } from '@/lib/types'
+import type { KommoLead, KommoNota } from '@/lib/types'
 import { semRodapeDeAssinatura } from '@/lib/textoDoProcesso'
 import { resumoDaOportunidade } from '@/lib/anotacaoKommo'
 import { Modal } from '@/components/ui/Modal'
@@ -143,10 +143,22 @@ type ResultadoJuridico = {
   erro?: string
 }
 
+/**
+ * SÓ AS NOTAS DE GENTE alimentam a leitura do cadastro.
+ *
+ * O espelho passou a guardar TAMBÉM as notas de máquina — as nossas e as da
+ * automação do Kommo —, para o histórico do card parar de aparecer com buracos.
+ * Elas não podem entrar aqui: a ficha que a análise escreveu voltaria como "o
+ * que o card diz", e o sistema confirmaria a si mesmo. Já aconteceu.
+ */
+const notasDeGente = (lead: KommoLead): KommoNota[] =>
+  (lead.notas ?? []).filter((n) => !n.automatica)
+
 function lerCardCredijuris(lead: KommoLead) {
+  const daGente = notasDeGente(lead)
   const notas =
-    lead.notas && lead.notas.length > 0
-      ? lead.notas.map((n) => n.texto).join('\n')
+    daGente.length > 0
+      ? daGente.map((n) => n.texto).join('\n')
       : (lead.nota_texto ?? '')
   const pegar = (re: RegExp) => valorDoCampo(notas.match(re)?.[1] ?? '')
 
@@ -531,6 +543,21 @@ const ICONES: Record<PapelDaAcao, ReactNode> = {
   reprovar: <X className="h-4 w-4" />,
 }
 
+/**
+ * O selo que diz de quem é a nota — vazio para a do comercial, que é a regra.
+ *
+ * O HISTÓRICO MOSTRA TUDO desde 17/09/2026. Antes o espelho só trazia nota
+ * `common` escrita por gente, e o card aparecia com anotações esparsas: faltavam
+ * a movimentação (quem moveu e por quê), o anexo e a anotação da própria
+ * análise. Trazer tudo sem dizer o que é cada coisa seria o defeito oposto —
+ * uma ficha redigida pela IA lida como declaração de quem cadastrou o card.
+ */
+function rotuloDaNota(n: KommoNota): string {
+  if (n.tipo === 'attachment') return 'anexo'
+  if (n.tipo && n.tipo !== 'common') return 'movimentação'
+  return n.automatica ? 'nota da plataforma' : ''
+}
+
 /** Link para o card no Kommo — o operacional às vezes precisa do original. */
 function urlCard(leadId: number): string {
   return `https://${KOMMO_SUBDOMINIO}.kommo.com/leads/detail/${leadId}`
@@ -895,7 +922,7 @@ function CardCredito({
   const ocupado = statusEmAndamento !== null
   // Compatibilidade com cards sincronizados antes da coluna `notas` existir:
   // cai no nota_texto para não sumir o dado do crédito antes do próximo sync.
-  const notas =
+  const notas: KommoNota[] =
     lead.notas?.length > 0
       ? lead.notas
       : lead.nota_texto?.trim()
@@ -1309,10 +1336,26 @@ function CardCredito({
                   E sem autor: a equipe usa um login só e se identifica no próprio
                   texto da anotação; os nomes que aparecem são de antes disso.
                   O campo continua guardado em kommo_leads.notas. */}
-              <div className="mb-0.5 text-xs text-slate-400">
+              <div className="mb-0.5 flex flex-wrap items-baseline gap-2 text-xs text-slate-400">
                 {n.criado_em && formatDataHoraSegundos(n.criado_em)}
+                {/* DE QUEM É A NOTA, quando não é do comercial. O histórico passou
+                    a trazer também movimentação, anexo e a anotação que a própria
+                    plataforma escreveu — sem o selo, uma ficha redigida pela
+                    análise se leria como declaração de quem cadastrou o card. */}
+                {rotuloDaNota(n) && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">
+                    {rotuloDaNota(n)}
+                  </span>
+                )}
               </div>
-              <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
+              <pre
+                className={cn(
+                  'whitespace-pre-wrap break-words rounded-lg p-3 text-xs ring-1 ring-inset',
+                  n.automatica
+                    ? 'bg-white text-slate-500 ring-slate-100'
+                    : 'bg-slate-50 text-slate-700 ring-slate-100',
+                )}
+              >
                 {n.texto}
               </pre>
             </div>
@@ -1799,7 +1842,10 @@ export default function AnaliseCredito() {
 
   /** Todas as anotações do card, da mais antiga à mais nova: a IA lê junto com os autos. */
   function notasDoCard(lead: KommoLead): string {
-    const lista = lead.notas && lead.notas.length > 0 ? lead.notas.map((n) => n.texto) : [lead.nota_texto ?? '']
+    // DE GENTE, pelo mesmo motivo de `notasDeGente`: a IA lendo a própria
+    // anotação anterior confirma a si mesma.
+    const daGente = notasDeGente(lead)
+    const lista = daGente.length > 0 ? daGente.map((n) => n.texto) : [lead.nota_texto ?? '']
     return lista.filter(Boolean).join('\n---\n')
   }
 

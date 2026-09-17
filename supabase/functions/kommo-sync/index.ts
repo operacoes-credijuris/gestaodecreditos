@@ -94,9 +94,26 @@ interface RespostaEventos {
 interface KommoNote {
   id: number
   entity_id: number
+  note_type?: string
   created_at?: number
   created_by?: number
-  params?: { text?: string }
+  params?: Record<string, unknown>
+}
+
+/**
+ * O texto de uma nota, qualquer que seja o tipo dela.
+ *
+ * NEM TODA NOTA GUARDA O TEXTO EM `text`. O anexo guarda o nome do arquivo, e
+ * era por isso que "fulano anexou o PDF" nunca aparecia no histórico do card:
+ * a nota vinha, `params.text` era vazio, e o laço a descartava. Num card cuja
+ * conversa inteira é troca de documento, o histórico ficava quase vazio.
+ */
+function textoDaNota(n: KommoNote): string {
+  const p = n.params ?? {}
+  const texto = String(p.text ?? '').trim()
+  if (texto) return texto
+  const arquivo = String(p.original_file_name ?? p.file_name ?? '').trim()
+  return arquivo ? `📎 ${arquivo}` : ''
 }
 
 /** Uma anotação como fica guardada em kommo_leads.notas. */
@@ -105,6 +122,22 @@ interface NotaGravada {
   texto: string
   criado_em: string | null
   autor: string | null
+  /** O tipo no Kommo: `common`, `service_message`, `attachment`… */
+  tipo: string
+  /**
+   * A nota foi escrita pelo sistema?
+   *
+   * MARCA EM VEZ DE DESCARTE, e é a correção que este campo traz. A nota nossa
+   * era EXCLUÍDA do espelho para a análise não reler a própria ficha como
+   * cadastro do comercial — o que continua valendo. Mas quem lê o card na tela
+   * perdia junto o registro do que a casa decidiu, e o histórico ficava com
+   * buracos sem explicação: anotações esparsas, como se o comercial tivesse
+   * escrito pouco.
+   *
+   * Agora a nota fica, marcada. Quem exibe mostra tudo; quem alimenta a análise
+   * filtra por este campo.
+   */
+  automatica: boolean
 }
 
 Deno.serve(async (req: Request) => {
@@ -324,39 +357,55 @@ Deno.serve(async (req: Request) => {
     // dezenas de cards custa MENOS requisições que as 40 páginas anteriores.
     // Também não gasta orçamento com notas de outros funis nem de cards fechados.
     //
-    // O filtro note_type=common tira o registro de movimentação (que é
-    // service_message). O QUE ELE NÃO TIRA MAIS é a anotação da análise, que
-    // voltou a ser `common` para o feed preservar as quebras de linha — dessa
-    // cuida `ehNotaNossa`, pela marca no rodapé.
+    // TODOS OS TIPOS DE NOTA, e não só `common` — foi o que fez o histórico do
+    // card aparecer pela metade. O filtro `note_type=common` deixava de fora o
+    // registro de movimentação (`service_message`, que é como a plataforma anota
+    // quem moveu o card e por quê), as mensagens de automação do Kommo e os
+    // anexos. Quem abria o card na plataforma via anotações esparsas e concluía
+    // que o comercial tinha escrito pouco.
     //
-    // ISSO NÃO É DETALHE. Deixar a nossa anotação entrar aqui é a análise ler o
-    // próprio resultado como cadastro do comercial: a ficha que ela escreveu
-    // vira "o que o card diz" na análise seguinte, e o sistema confirma a si
-    // mesmo. Acumula TODAS as notas de cada card, não só a mais antiga:
-    // comentários posteriores do comercial também interessam.
+    // A NOSSA PRÓPRIA ANOTAÇÃO TAMBÉM FICA, agora MARCADA em vez de descartada.
+    // O motivo do descarte continua de pé e não pode ser esquecido: deixar a
+    // nossa anotação ALIMENTAR A ANÁLISE é a análise ler o próprio resultado como
+    // cadastro do comercial — a ficha que ela escreveu vira "o que o card diz" na
+    // análise seguinte, e o sistema confirma a si mesmo. Isso já aconteceu.
+    //
+    // O que mudou é que são DUAS PERGUNTAS: o que o card tem (tudo, para quem
+    // lê) e o que é cadastro do comercial (só o que não é nosso, para quem
+    // analisa). `NotaGravada.automatica` separa as duas.
     const notasPorLead = new Map<number, KommoNote[]>()
     // 100 ids por requisição: 250 caberiam no limite da API, mas a URL passaria
     // de 2.500 caracteres e servidor intermediário costuma cortar antes disso.
     const IDS_POR_CONSULTA = 100
+    // O TETO DE PÁGINAS SUBIU COM OS TIPOS. Filtrando `common` cabiam 10 mil notas
+    // por lote de 100 cards; trazendo movimentação, anexo e automação o volume
+    // multiplica, e passar do teto faz os ÚLTIMOS cards do lote chegarem sem nota
+    // nenhuma — gravando `notas: []` por cima dos dados bons, com resposta "Kommo
+    // sincronizado". É o mesmo defeito que a busca dirigida veio corrigir.
+    const MAX_PAGINAS_NOTAS = 100
+    let notasCortadas = 0
     for (let i = 0; i < leads.length; i += IDS_POR_CONSULTA) {
       const ids = leads.slice(i, i + IDS_POR_CONSULTA).map((l) => l.id)
       const filtroIds = ids.map((id) => `filter[entity_id][]=${id}`).join('&')
-      for (let pagina = 1; pagina <= 40; pagina++) {
+      let pagina = 1
+      for (; pagina <= MAX_PAGINAS_NOTAS; pagina++) {
         const r = await kommo<{
           _embedded?: { notes?: KommoNote[] }
           _links?: { next?: { href?: string } }
-        }>(`/leads/notes?${filtroIds}&filter[note_type][]=common&limit=250&page=${pagina}`)
+        }>(`/leads/notes?${filtroIds}&limit=250&page=${pagina}`)
         if (!r) break
         for (const n of r._embedded?.notes ?? []) {
-          if (!n.params?.text?.trim()) continue
-          // A NOSSA PRÓPRIA ANOTAÇÃO NÃO É DADO DO CARD.
-          if (ehNotaNossa(n.params.text)) continue
+          // SEM TEXTO NENHUM não há o que mostrar nem o que ler: nota de
+          // geolocalização, por exemplo, não tem palavra nenhuma.
+          if (!textoDaNota(n)) continue
           const lista = notasPorLead.get(n.entity_id)
           if (lista) lista.push(n)
           else notasPorLead.set(n.entity_id, [n])
         }
         if (!r._links?.next?.href) break
       }
+      // SAIU PELO TETO, E NÃO PORQUE ACABOU: o que falta não pode passar calado.
+      if (pagina > MAX_PAGINAS_NOTAS) notasCortadas += ids.length
     }
     // Da mais antiga para a mais recente. A API não garante ordem entre páginas,
     // então ordenar aqui é o que torna notas[0] confiável como "primeira".
@@ -502,17 +551,31 @@ Deno.serve(async (req: Request) => {
     // ---------- Grava o espelho ----------
     const registros = leads.map((l) => {
       const doLead = notasPorLead.get(l.id) ?? []
-      const notas: NotaGravada[] = doLead.map((n) => ({
-        id: n.id,
-        texto: n.params?.text ?? '',
-        criado_em: iso(n.created_at),
-        // created_by = 0 é o robô/automação do Kommo, não uma pessoa.
-        autor: n.created_by ? usuarios.get(n.created_by) ?? null : null,
-      }))
-      // nota_texto é simplesmente a PRIMEIRA anotação — sem promessa de conter
-      // os dados do crédito. Há cards em que a primeira é um comentário curto
-      // ("qualificado") e o bloco de dados vem na segunda.
-      const nota = notas[0]?.texto ?? null
+      const notas: NotaGravada[] = doLead.map((n) => {
+        const texto = textoDaNota(n)
+        return {
+          id: n.id,
+          texto,
+          criado_em: iso(n.created_at),
+          // created_by = 0 é o robô/automação do Kommo, não uma pessoa.
+          autor: n.created_by ? usuarios.get(n.created_by) ?? null : null,
+          tipo: String(n.note_type ?? 'common'),
+          // O QUE NÃO É `common` NÃO É CADASTRO. Movimentação, anexo e mensagem
+          // de automação são registro do que aconteceu com o card, não o que o
+          // comercial declarou sobre o crédito — e a análise lê declaração.
+          automatica: n.note_type !== 'common' || ehNotaNossa(texto),
+        }
+      })
+      // nota_texto é simplesmente a PRIMEIRA anotação DO COMERCIAL — sem promessa
+      // de conter os dados do crédito. Há cards em que a primeira é um comentário
+      // curto ("qualificado") e o bloco de dados vem na segunda.
+      //
+      // SÓ AS DE GENTE, e é o que preserva o que este campo sempre significou:
+      // agora que as nossas e as de sistema também são guardadas, a primeira nota
+      // do card pode ser uma movimentação automática — e a análise passaria a ler
+      // "Card movido para Diligência" como cadastro do crédito.
+      const doComercial = notas.filter((n) => !n.automatica)
+      const nota = doComercial[0]?.texto ?? null
       const etapa = etapaDoLead(l)
       return {
         kommo_lead_id: l.id,
@@ -532,7 +595,7 @@ Deno.serve(async (req: Request) => {
         // nos autos, o processo errado ia para o nome do arquivo e para a UF
         // do cartório. As anotações continuam valendo, para o card antigo sem
         // número no título.
-        processo_cnj: extrairCnj(l.name, ...notas.map((n) => n.texto)),
+        processo_cnj: extrairCnj(l.name, ...doComercial.map((n) => n.texto)),
         // filter(Boolean) não estreita o tipo em TS, então o predicado é
         // explícito — a coluna é text[] not null e não aceita nulo no meio.
         tags: (l._embedded?.tags ?? [])
@@ -637,7 +700,15 @@ Deno.serve(async (req: Request) => {
       // sincronizaram. Mas volta — coluna nova que não chegou aqui é aba que não
       // aparece na tela, e funil que voltou vazio com espelho cheio é leitura
       // falhada. Nenhum dos dois pode ser descoberto por acidente.
-      aviso: [avisoEtapas, avisoEventos, ...avisosEspelho].filter(Boolean).join(' · ') || null,
+      aviso: [
+        avisoEtapas,
+        avisoEventos,
+        notasCortadas > 0
+          ? `Um lote de ${notasCortadas} card(s) tem mais anotações do que coube nesta ` +
+            `passada: o histórico deles pode estar incompleto.`
+          : null,
+        ...avisosEspelho,
+      ].filter(Boolean).join(' · ') || null,
       mensagem:
         `Kommo sincronizado — ${registros.length} card(s), ` +
         `${comCnj} com processo identificado` +

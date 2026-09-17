@@ -46,6 +46,21 @@ export interface KommoNota {
   criado_em: string | null
   /** Nulo quando a anotação veio de automação do Kommo, não de uma pessoa. */
   autor: string | null
+  /** O tipo no Kommo: `common`, `service_message`, `attachment`… */
+  tipo?: string
+  /**
+   * Escrita por máquina — a plataforma, ou a automação do Kommo.
+   *
+   * QUEM EXIBE MOSTRA TUDO; QUEM ANALISA FILTRA POR AQUI. O espelho antes
+   * DESCARTAVA essas notas, e o histórico do card aparecia com buracos — parecia
+   * que o comercial tinha escrito pouco. Mas o descarte protegia algo real: a
+   * análise relendo a própria ficha como se fosse cadastro do comercial, e
+   * confirmando a si mesma. São duas perguntas, e agora cada uma tem a sua
+   * resposta.
+   *
+   * Ausente nas linhas gravadas antes de 17/09/2026: trate como falso.
+   */
+  automatica?: boolean
 }
 
 /**
