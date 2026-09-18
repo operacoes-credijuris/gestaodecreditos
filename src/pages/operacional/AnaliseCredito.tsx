@@ -49,6 +49,7 @@ import {
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABA_ANALISE_INTERNA,
+  ABA_APROVADOS_EXTERNO,
   ABAS_EXTERNO_SEM_TRABALHO,
   ehFunilPrecatorio,
   acaoDeReprovar,
@@ -892,6 +893,7 @@ function CardCredito({
   resultadoJuridico,
   botoes,
   desfechoNoCard,
+  mostrarTags,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -936,6 +938,16 @@ function CardCredito({
   botoes: BotoesDoCard
   /** Os desfechos ficam no card, ou na janela da análise? */
   desfechoNoCard: boolean
+  /**
+   * As etiquetas do Kommo aparecem neste card?
+   *
+   * SÓ NOS APROVADOS DO EXTERNO, por ora. O espelho guarda as tags de TODOS os
+   * cards desde sempre — vêm de graça no `_embedded` da listagem —, e mostrá-las
+   * em toda aba encheria a fila de etiquetas que não dizem nada sobre o trabalho
+   * daquela etapa. Depois de encaminhado, a etiqueta é a única coisa no card que
+   * diz PARA QUAL FUNDO ele foi.
+   */
+  mostrarTags: boolean
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -1001,6 +1013,22 @@ function CardCredito({
                 Finalizado
               </Badge>
             )}
+            {/* AS ETIQUETAS DO KOMMO, na linha do título.
+                Elas sempre estiveram no espelho — vêm de graça na listagem dos
+                cards — e nunca apareceram: nas etapas de trabalho seriam ruído,
+                porque o que se procura ali é o processo, não o rótulo. Depois de
+                encaminhado é o contrário: a etiqueta é a única coisa no card que
+                diz para qual fundo o crédito foi.
+
+                EM CINZA, e não coloridas por tema: a cor aqui já significa outra
+                coisa (verde é análise pronta, âmbar é atenção), e uma etiqueta
+                colorida disputaria esse vocabulário sem acrescentar sentido. */}
+            {mostrarTags &&
+              (lead.tags ?? []).map((t) => (
+                <Badge key={t} size="sm" tone="gray">
+                  {t}
+                </Badge>
+              ))}
           </div>
           {/* Sem linha de metadados: o processo já vem no título e o responsável é
               sempre a Credijuris. A data de CRIAÇÃO continua fora — ela é
@@ -2619,6 +2647,9 @@ export default function AnaliseCredito() {
                 }
                 onAbrirAnexo={abrirAnexo}
                 onPrepararAnexo={prepararAnexo}
+                // AS ETIQUETAS SÓ NOS APROVADOS DO EXTERNO: é onde elas dizem
+                // para qual fundo o crédito foi. Nas outras abas seriam ruído.
+                mostrarTags={abaAtual?.key === ABA_APROVADOS_EXTERNO}
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria

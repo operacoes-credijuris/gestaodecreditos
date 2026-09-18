@@ -25,6 +25,7 @@ import { normalizarBusca } from '@/lib/format'
 import { destinosDaTrilha } from '../../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
 import {
   ABA_ANALISE_INTERNA,
+  ABA_APROVADOS_EXTERNO,
   ABAS_EXTERNO_SEM_TRABALHO,
   acaoDeReprovar,
   ehCardExterno,
@@ -184,6 +185,21 @@ describe('SUBDIVISOES_PRECATORIO', () => {
     // tela abriria numa etapa que a pessoa não escolheu.
     const chaves = SUBDIVISOES_PRECATORIO.flatMap((s) => s.abas.map((a) => a.key))
     expect(new Set(chaves).size).toBe(chaves.length)
+  })
+
+  /**
+   * A CHAVE QUE A TELA IMPORTA TEM DE EXISTIR NA TRILHA.
+   *
+   * O card dos Aprovados do Externo é o único que mostra as etiquetas do Kommo, e
+   * ele reconhece a aba por esta constante. Renomear a chave na definição sem
+   * mexer aqui faria as etiquetas sumirem da tela sem erro nenhum — que é a
+   * família de defeito que este arquivo inteiro existe para pegar.
+   */
+  it('a chave dos Aprovados do Externo existe na trilha', () => {
+    const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
+    const aba = externo.abas.find((a) => a.key === ABA_APROVADOS_EXTERNO)
+    expect(aba?.colunaKommo).toBe('ENCAMINHAR AOS FUNDOS')
+    expect(aba?.label).toBe('Aprovados')
   })
 
   it('toda aba aponta para uma coluna que existe no kanban', () => {

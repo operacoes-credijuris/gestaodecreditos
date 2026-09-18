@@ -39,6 +39,7 @@ import { primeiroCnj } from '../../supabase/functions/_shared/nucleo/cnj.ts'
 // no primeiro dia da migração do Externo.
 import {
   ABA_ANALISE_INTERNA,
+  ABA_APROVADOS_EXTERNO,
   type DefAbaPrecatorio,
   type DefSubdivisao,
   type PapelDaAcao,
@@ -68,7 +69,12 @@ export const FUNIL_RPV = 13901939
  * só ele, e a tela ficaria vazia com as abas certas.
  */
 export const FUNIL_PRECATORIO = FUNIL_PRECATORIO_INTERNO
-export { ABA_ANALISE_INTERNA, FUNIL_PRECATORIO_EXTERNO, FUNIL_PRECATORIO_INTERNO }
+export {
+  ABA_ANALISE_INTERNA,
+  ABA_APROVADOS_EXTERNO,
+  FUNIL_PRECATORIO_EXTERNO,
+  FUNIL_PRECATORIO_INTERNO,
+}
 
 // Estágios do Funil Geral RPV que interessam ao operacional. Os nomes das
 // constantes seguem os nomes das COLUNAS NO KOMMO; o rótulo que o usuário vê

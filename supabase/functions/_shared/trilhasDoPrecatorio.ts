@@ -143,6 +143,17 @@ export interface DefSubdivisao {
 export const ABA_ANALISE_INTERNA = 'int-analise'
 
 /**
+ * A aba dos créditos que já foram encaminhados aos fundos, no Externo.
+ *
+ * EXPORTADA PORQUE A TELA PRECISA RECONHECÊ-LA: é a única em que o card mostra
+ * as TAGS do Kommo. Nas outras elas seriam ruído — a etiqueta que interessa ali
+ * é para qual fundo o crédito foi, e essa informação só existe depois do
+ * encaminhamento. Comparar com uma string solta na tela deixaria a regra a uma
+ * renomeação de distância de sumir sem nenhum erro.
+ */
+export const ABA_APROVADOS_EXTERNO = 'ext-encaminhar'
+
+/**
  * As colunas de cada destinação, cada uma no SEU funil.
  *
  * CADA TRILHA TEM O SEU PIPELINE desde 14/09/2026 — e é isso que desfez o pior
@@ -287,7 +298,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         descricaoVazia: 'Nenhum crédito em memorando de negociação.',
       },
       {
-        key: 'ext-encaminhar',
+        key: ABA_APROVADOS_EXTERNO,
         // "APROVADOS" NA PLATAFORMA, "ENCAMINHAR AOS FUNDOS" NO KOMMO — e é de
         // propósito. O rótulo daqui é o vocabulário de quem analisa: o que o ato
         // significa para a casa é uma aprovação. O nome do kanban é o do
