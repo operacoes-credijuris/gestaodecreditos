@@ -46,6 +46,7 @@ import {
   dataDaEtapa,
   colunasPrecatorioDesalinhadas,
   statusExibidos,
+  tomDaTag,
   type EtapaKommo,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
@@ -938,5 +939,35 @@ describe('acaoDeReprovar', () => {
 
   it('funil que não é do operacional não tem recusa', () => {
     expect(acaoDeReprovar(999, espelho())).toBeNull()
+  })
+})
+
+/**
+ * A COR DA ETIQUETA, e por que ela precisa ser estável.
+ *
+ * Numa coluna de trinta créditos encaminhados, quem procura os de um fundo acha
+ * pela mancha antes de ler o texto — mas só se a mesma etiqueta tiver sempre a
+ * mesma cor. Sorteada a cada render, ou tirada da posição na lista, a cor vira
+ * enfeite; e enfeite que muda a cada sincronização confunde em vez de ajudar.
+ */
+describe('tomDaTag', () => {
+  it('a mesma etiqueta tem sempre a mesma cor', () => {
+    expect(tomDaTag('Fundo Alfa')).toBe(tomDaTag('Fundo Alfa'))
+    expect(tomDaTag('')).toBe(tomDaTag(''))
+  })
+
+  // VERDE E VERMELHO FICAM DE FORA: no card eles já significam análise pronta e
+  // recusa, e uma etiqueta verde seria lida como estado do crédito.
+  it('não usa as cores que já significam outra coisa no card', () => {
+    for (const nome of ['Fundo Alfa', 'Beta', 'urgente', 'XP', 'a', 'zzz', '2026']) {
+      expect(['blue', 'purple', 'orange'], nome).toContain(tomDaTag(nome))
+    }
+  })
+
+  // Etiquetas diferentes não podem cair todas na mesma cor: com um punhado de
+  // fundos, a paleta tem de se dividir.
+  it('nomes diferentes se espalham pela paleta', () => {
+    const nomes = ['Fundo Alfa', 'Fundo Beta', 'Fundo Gama', 'Fundo Delta', 'Fundo Épsilon']
+    expect(new Set(nomes.map(tomDaTag)).size).toBeGreaterThan(1)
   })
 })

@@ -119,6 +119,25 @@ export type { DefAbaPrecatorio, DefSubdivisao, SubdivisaoPrecatorio }
 export const SUBDIVISOES_PRECATORIO = TRILHAS_PRECATORIO
 
 /**
+ * A cor de uma etiqueta do Kommo, estável pelo nome.
+ *
+ * PELA MESMA TAG, SEMPRE A MESMA COR. É o que faz a cor valer alguma coisa: numa
+ * coluna de trinta cards encaminhados, quem procura os de um fundo específico
+ * acha pela mancha antes de ler o texto. Cor sorteada a cada render, ou por
+ * posição na lista, seria enfeite — e enfeite que muda confunde.
+ *
+ * VERDE E VERMELHO FICAM DE FORA, e não por gosto: no card eles já significam
+ * outra coisa (verde é análise pronta, vermelho é recusa). Uma etiqueta verde
+ * seria lida como estado do crédito.
+ */
+export function tomDaTag(nome: string): 'blue' | 'purple' | 'orange' {
+  const tons = ['blue', 'purple', 'orange'] as const
+  let soma = 0
+  for (const c of String(nome ?? '')) soma += c.codePointAt(0) ?? 0
+  return tons[soma % tons.length]
+}
+
+/**
  * Este funil é um dos de Precatório?
  *
  * DEIXOU DE SER UMA COMPARAÇÃO e virou uma pergunta, porque a resposta deixou de

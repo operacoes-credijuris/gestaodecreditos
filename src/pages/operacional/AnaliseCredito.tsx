@@ -58,6 +58,7 @@ import {
   abasDoFunil,
   agruparPorAba,
   statusExibidos,
+  tomDaTag,
   telasRpvDesalinhadas,
   colunasPrecatorioDesalinhadas,
   useKommoLeads,
@@ -1013,23 +1014,34 @@ function CardCredito({
                 Finalizado
               </Badge>
             )}
-            {/* AS ETIQUETAS DO KOMMO, na linha do título.
-                Elas sempre estiveram no espelho — vêm de graça na listagem dos
-                cards — e nunca apareceram: nas etapas de trabalho seriam ruído,
-                porque o que se procura ali é o processo, não o rótulo. Depois de
-                encaminhado é o contrário: a etiqueta é a única coisa no card que
-                diz para qual fundo o crédito foi.
+          </div>
 
-                EM CINZA, e não coloridas por tema: a cor aqui já significa outra
-                coisa (verde é análise pronta, âmbar é atenção), e uma etiqueta
-                colorida disputaria esse vocabulário sem acrescentar sentido. */}
-            {mostrarTags &&
-              (lead.tags ?? []).map((t) => (
-                <Badge key={t} size="sm" tone="gray">
+          {/* AS ETIQUETAS DO KOMMO, na linha de baixo.
+              Elas sempre estiveram no espelho — vêm de graça na listagem dos
+              cards — e nunca apareceram: nas etapas de trabalho seriam ruído,
+              porque o que se procura ali é o processo, não o rótulo. Depois de
+              encaminhado é o contrário: a etiqueta é a única coisa no card que
+              diz para qual fundo o crédito foi.
+
+              ABAIXO DO TÍTULO, e não ao lado: o título é longo (intermediador,
+              cedente, número, parcela, percentual) e empurrava as etiquetas para
+              o fim de uma linha que já quebra — elas chegavam ao canto direito,
+              desgarradas do card. Em linha própria, são a primeira coisa que se
+              lê depois do nome.
+
+              A COR É DO NOME DA ETIQUETA, e sempre a mesma para a mesma tag: numa
+              coluna de trinta cards, quem procura os de um fundo acha pela mancha
+              antes de ler o texto. Verde e vermelho ficam fora da paleta — no
+              card eles já significam análise pronta e recusa. */}
+          {mostrarTags && (lead.tags ?? []).length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {(lead.tags ?? []).map((t) => (
+                <Badge key={t} size="sm" tone={tomDaTag(t)}>
                   {t}
                 </Badge>
               ))}
-          </div>
+            </div>
+          )}
           {/* Sem linha de metadados: o processo já vem no título e o responsável é
               sempre a Credijuris. A data de CRIAÇÃO continua fora — ela é
               redundante com as datas das anotações, e a que importa numa fila é
