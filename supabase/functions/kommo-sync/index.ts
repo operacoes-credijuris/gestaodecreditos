@@ -128,6 +128,19 @@ interface NotaGravada {
   /** O tipo no Kommo: `common`, `service_message`, `attachment`… */
   tipo: string
   /**
+   * O uuid do arquivo, quando a nota é um anexo.
+   *
+   * É A CHAVE DE VERDADE DO ARQUIVO, e o que permite abri-lo. Sem ele, a tela
+   * procurava o anexo clicado pelo NOME na lista de arquivos do card — e nome de
+   * arquivo repete ("default.aspx1.pdf", "default.aspx2.pdf", que é como um
+   * tribunal exporta), além de a lista da entidade nem sempre conter o arquivo de
+   * uma anotação. Abrir a peça errada é pior do que não abrir nada.
+   *
+   * O ENDEREÇO NÃO É GUARDADO: ele é assinado e vence. Guarda-se o uuid, que não
+   * muda, e o endereço se pede no clique (ver a function kommo-anexo).
+   */
+  arquivo_uuid: string | null
+  /**
    * A nota foi escrita pelo sistema?
    *
    * MARCA EM VEZ DE DESCARTE, e é a correção que este campo traz. A nota nossa
@@ -564,6 +577,7 @@ Deno.serve(async (req: Request) => {
           // created_by = 0 é o robô/automação do Kommo, não uma pessoa.
           autor: n.created_by ? usuarios.get(n.created_by) ?? null : null,
           tipo: String(n.note_type ?? 'common'),
+          arquivo_uuid: String((n.params as Record<string, unknown> | undefined)?.file_uuid ?? '') || null,
           // O QUE NÃO É `common` NÃO É CADASTRO. Movimentação, anexo e mensagem
           // de automação são registro do que aconteceu com o card, não o que o
           // comercial declarou sobre o crédito — e a análise lê declaração.

@@ -913,13 +913,13 @@ function CardCredito({
    */
   onConcluir?: (l: KommoLead) => void
   /**
-   * Abre um arquivo do histórico, pelo nome.
+   * Abre um arquivo do histórico.
    *
-   * PELO NOME, e não por um link guardado: a anotação de anexo do Kommo traz o
-   * nome do arquivo, e o endereço de download é assinado na hora pela API. Um
-   * link gravado no espelho seria um link vencido.
+   * RECEBE A NOTA INTEIRA, e não o nome: o que abre o arquivo é o `file_uuid`
+   * que a anotação do Kommo carrega. O endereço de download é assinado e vence,
+   * então o espelho guarda a chave e a tela pede o endereço no clique.
    */
-  onAbrirAnexo: (l: KommoLead, nome: string) => void
+  onAbrirAnexo: (l: KommoLead, anexo: KommoNota) => void
   /** Como vai o preparo dos autos deste card, se já foi pedido. */
   preparoDosAutos?: PreparoDosAutos
   onAnaliseJuridica: (l: KommoLead) => void
@@ -1408,7 +1408,7 @@ function CardCredito({
                       <button
                         key={a.id}
                         type="button"
-                        onClick={() => onAbrirAnexo(lead, nomeDoAnexo(a))}
+                        onClick={() => onAbrirAnexo(lead, a)}
                         title={
                           a.criado_em
                             ? `Anexado em ${formatDataHoraSegundos(a.criado_em)} — clique para abrir`
@@ -1843,7 +1843,50 @@ export default function AnaliseCredito() {
    * nasce em branco e recebe o endereço quando ele chega; falhando a busca, é
    * fechada — aba em branco esquecida é pior que erro nenhum.
    */
-  async function abrirAnexo(lead: KommoLead, nome: string) {
+  /**
+   * O endereço de download de um anexo — pelo uuid quando ele existe.
+   *
+   * O UUID É A CHAVE DE VERDADE. A primeira versão procurava o arquivo pelo NOME
+   * na lista de anexos do card, e o caminho quebrava por dois motivos: a lista
+   * vem do que está anexado À ENTIDADE, e o arquivo de uma anotação nem sempre
+   * aparece ali; e nome de arquivo repete — "default.aspx1.pdf",
+   * "default.aspx2.pdf", que é como um tribunal exporta —, então a comparação
+   * escolhia o primeiro que casasse. Abrir a peça errada é pior que não abrir.
+   *
+   * A BUSCA POR NOME FICA DE RESERVA, para as notas gravadas antes de o espelho
+   * guardar o uuid: elas continuam abrindo, com a fragilidade de sempre, até a
+   * próxima sincronização trazer a chave.
+   */
+  async function enderecoDoAnexo(
+    lead: KommoLead,
+    anexo: KommoNota,
+    nome: string,
+  ): Promise<{ download: string }> {
+    if (anexo.arquivo_uuid) {
+      const r = await invokeFunction<{ download?: string; erro?: string }>('kommo-anexo', {
+        file_uuid: anexo.arquivo_uuid,
+      })
+      if (r.erro || !r.download) throw new Error(r.erro ?? 'o Kommo não devolveu o endereço.')
+      return { download: r.download }
+    }
+    const r = await invokeFunction<{
+      arquivos?: { nome: string; download: string }[]
+      erro?: string
+    }>('buscar-kommo', { lead_id: lead.kommo_lead_id, todos: true })
+    if (r.erro) throw new Error(r.erro)
+    const igual = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+    const alvo = (r.arquivos ?? []).find((a) => igual(a.nome, nome))
+    if (!alvo) {
+      throw new Error(
+        `não achei "${nome}" entre os anexos do card. Sincronize o Kommo — depois disso ` +
+          'a plataforma passa a abrir o arquivo pelo identificador dele, e não pelo nome',
+      )
+    }
+    return alvo
+  }
+
+  async function abrirAnexo(lead: KommoLead, anexo: KommoNota) {
+    const nome = nomeDoAnexo(anexo)
     // SEM `noopener` AQUI, e isso não é descuido: com ele o `window.open`
     // devolve NULL por definição — o opener não recebe referência nenhuma da
     // janela nova. A aba abria e ficava órfã em "about:blank" para sempre,
@@ -1865,18 +1908,7 @@ export default function AnaliseCredito() {
       aba.document.close()
     }
     try {
-      const r = await invokeFunction<{
-        arquivos?: { nome: string; download: string }[]
-        erro?: string
-      }>('buscar-kommo', { lead_id: lead.kommo_lead_id, todos: true })
-      if (r.erro) throw new Error(r.erro)
-      const igual = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
-      const alvo = (r.arquivos ?? []).find((a) => igual(a.nome, nome))
-      if (!alvo) {
-        throw new Error(
-          `o card não tem mais um anexo chamado "${nome}" (ele pode ter sido removido no Kommo)`,
-        )
-      }
+      const alvo = await enderecoDoAnexo(lead, anexo, nome)
       // A ABA JÁ ESTÁ ABERTA: só recebe o endereço. O ramo de reserva existe
       // para o caso de o bloqueador de popup ter impedido a abertura lá em cima
       // — aí se tenta de novo, e se também for barrado o toast conta o que houve.

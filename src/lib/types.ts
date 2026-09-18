@@ -49,6 +49,13 @@ export interface KommoNota {
   /** O tipo no Kommo: `common`, `service_message`, `attachment`… */
   tipo?: string
   /**
+   * O uuid do arquivo, quando a nota é um anexo — a chave que o abre.
+   *
+   * Ausente nas linhas gravadas antes de 18/09/2026; nelas a tela cai na busca
+   * por nome, que é o caminho frágil que este campo veio substituir.
+   */
+  arquivo_uuid?: string | null
+  /**
    * Escrita por máquina — a plataforma, ou a automação do Kommo.
    *
    * QUEM EXIBE MOSTRA TUDO; QUEM ANALISA FILTRA POR AQUI. O espelho antes
