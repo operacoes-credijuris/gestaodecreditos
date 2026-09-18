@@ -52,7 +52,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ExternalLink, Info, RefreshCw, ScanText, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
-import { formatCpfCnpjInput, onlyDigits } from '@/lib/format'
+import { cn } from '@/lib/cn'
+import { formatCpfCnpjInput, mesAno, onlyDigits } from '@/lib/format'
 import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import type {
@@ -156,6 +157,14 @@ export function PainelProcessosJudiciais({
   const [custo, setCusto] = useState<string | null>(null)
   const [apuracoes, setApuracoes] = useState<ApuracaoDD[]>([])
   const [processos, setProcessos] = useState<ProcessoNaTela[]>([])
+  /**
+   * O estágio escolhido no filtro, ou vazio para todos.
+   *
+   * ZERA AO TROCAR DE TITULAR: os estágios de um não são os do outro, e um
+   * filtro herdado deixaria a aba do advogado vazia por causa de uma escolha
+   * feita na do cedente — sem nada na tela explicando por quê.
+   */
+  const [filtroEstagio, setFiltroEstagio] = useState('')
 
   // O NOME DO CARD SÓ ENTRA SE O CEDENTE FOR TITULAR DE ALGUMA VERBA CEDIDA.
   // Numa cessão só de honorários, prefixar o campo com o nome dele faria a
@@ -184,6 +193,7 @@ export function PainelProcessosJudiciais({
   const jaEncadeou = useRef<number | null>(null)
   /** Qual titular está aberto na tabela. Vazio até a apuração chegar. */
   const [abaDoTitular, setAbaDoTitular] = useState('')
+  useEffect(() => setFiltroEstagio(''), [abaDoTitular])
 
   // ------------------------------------------------- de quem é o que compramos
   //
@@ -215,10 +225,13 @@ export function PainelProcessosJudiciais({
         .order('papel'),
       supabase
         .from('dd_processo')
-        .select(
-          'id, historico_id, numero_processo, tribunal, objeto, polo, ha_cobranca, ' +
-            'valor_cobrado, estagio, risco, risco_motivo, fonte, url_fonte',
-        )
+        // `*`, E NÃO A LISTA DE COLUNAS. A lista era mais econômica e criava uma
+        // dependência dura: nomear uma coluna que a migração ainda não criou faz
+        // o PostgREST recusar a CONSULTA INTEIRA, e a aba toda quebraria em quem
+        // ainda não rodou a 0067 — por causa de uma coluna de data. Com `*`, a
+        // coluna que não existe simplesmente não vem, e a célula mostra um traço.
+        // A tabela não tem coluna pesada; o que se economizava era ruído.
+        .select('*')
         .eq('kommo_lead_id', leadId),
     ])
     // AS TABELAS PODEM NÃO EXISTIR AINDA. A 0056 criou dd_historico e
@@ -229,7 +242,9 @@ export function PainelProcessosJudiciais({
     setErro(
       falha && /does not exist|schema cache/i.test(falha)
         ? 'As tabelas da due diligence ainda não existem no banco — rode as migrações ' +
-            '0056 e 0061 no Supabase antes de usar esta aba.'
+            '0056 e 0061 no Supabase antes de usar esta aba. (A 0067 acrescenta a ' +
+            'data da última movimentação: sem ela a aba funciona, só aquela coluna ' +
+            'fica vazia.)'
         : falha,
     )
     setApuracoes(
@@ -640,19 +655,31 @@ export function PainelProcessosJudiciais({
    * REFAZER usa o que está NOS CAMPOS. É para quando quem confere já corrigiu o
    * CPF à mão e quer só a busca de novo, sem pagar outra leitura dos autos.
    */
+  /**
+   * RELER OS AUTOS SUBIU PARA JUNTO DOS CAMPOS, e o custo ficou no lugar dele.
+   *
+   * Os dois estavam na mesma fileira, encostados na tabela, e diziam coisas de
+   * naturezas diferentes: um refaz a LEITURA que preencheu aqueles campos, o
+   * outro informa quanto a busca já gastou. Junto do campo que ele reescreve, o
+   * botão diz o que faz sem precisar de explicação — e o custo, sozinho na
+   * fileira das abas, para de disputar o olhar com dois botões.
+   */
+  const relerOsAutos = (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => void correnteCompleta()}
+      loading={lendoTitulares}
+      disabled={apurando || Boolean(passo)}
+      icon={<ScanText className="h-4 w-4" />}
+    >
+      Reler os autos
+    </Button>
+  )
+
   const refazer = (
     <div className="flex items-center justify-end gap-3">
       {custo && <span className="text-xs text-slate-500">Custo: {custo}</span>}
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => void correnteCompleta()}
-        loading={lendoTitulares}
-        disabled={apurando || Boolean(passo)}
-        icon={<ScanText className="h-4 w-4" />}
-      >
-        Reler os autos
-      </Button>
       <Button
         size="sm"
         variant="outline"
@@ -669,11 +696,28 @@ export function PainelProcessosJudiciais({
   const idsDaAba = abasDeTitular.find((a) => a.key === abaDoTitular)?.ids ?? []
   // De-duplicado por processo: com o mesmo CPF em dois papéis, as duas apurações
   // guardam a mesma lista, e sem isto cada linha apareceria duas vezes.
-  const daAba = processosOrdenados.filter(
-    (x, i, todos) =>
-      idsDaAba.includes(x.historico_id) &&
-      todos.findIndex((y) => y.numero_processo === x.numero_processo) === i,
-  )
+  const doTitular = (ids: string[]) =>
+    processosOrdenados.filter(
+      (x, i, todos) =>
+        ids.includes(x.historico_id) &&
+        todos.findIndex((y) => y.numero_processo === x.numero_processo) === i,
+    )
+  const daAba = doTitular(idsDaAba)
+
+  /**
+   * O SOMATÓRIO DAS CAUSAS, sob o nome do titular.
+   *
+   * A contagem diz quantos processos, e não quanto pesa: dez execuções de mil
+   * reais e uma de dois milhões chegam à tela com o mesmo "10" e o mesmo "1". O
+   * número que decide se a dívida ameaça a cessão é a soma, e ela estava
+   * espalhada pela coluna — quem precisava dela somava de cabeça.
+   */
+  const somaDasCausas = (lista: ProcessoNaTela[]) =>
+    lista.reduce((t, x) => t + (Number(x.valor_cobrado) || 0), 0)
+
+  /** Os estágios presentes nesta aba, para o filtro só oferecer o que existe. */
+  const estagiosDaAba = [...new Set(daAba.map((x) => x.estagio ?? '').filter(Boolean))].sort()
+  const listados = filtroEstagio ? daAba.filter((x) => x.estagio === filtroEstagio) : daAba
 
   return (
     <div className="space-y-4">
@@ -734,6 +778,12 @@ export function PainelProcessosJudiciais({
           setAdvOab,
         )}
         {campo('CPF do advogado', advCpf, setAdvCpf, true)}
+        {/* A CÉLULA VAGA DA GRADE, e não uma fileira nova: são cinco campos em
+            três colunas, e a sexta sobrava vazia. `items-end` alinha o botão pela
+            base dos campos e o recuo à esquerda o afasta do último deles — perto
+            o bastante para pertencer à grade, longe o bastante para não se ler
+            como um botão daquele campo. */}
+        <div className="flex items-end justify-start pb-1 sm:pl-4">{relerOsAutos}</div>
       </div>
 
       {/* UMA TABELA POR TITULAR, em abas.
@@ -754,13 +804,35 @@ export function PainelProcessosJudiciais({
           "94 processos" ficaria sem dono na tela. */}
       {abasDeTitular.length > 0 && (
         <Tabs
-          items={abasDeTitular.map((a) => ({
-            key: a.key,
-            label: a.label,
-            count: new Set(
-              processos.filter((x) => a.ids.includes(x.historico_id)).map((x) => x.numero_processo),
-            ).size,
-          }))}
+          items={abasDeTitular.map((a) => {
+            const lista = doTitular(a.ids)
+            const soma = somaDasCausas(lista)
+            const ativa = a.key === abaDoTitular
+            return {
+              key: a.key,
+              // A CONTAGEM VAI DENTRO DO RÓTULO, e não no `count` do Tabs: com a
+              // soma numa segunda linha, o selo do componente ficaria centrado
+              // entre as duas, longe do nome que ele conta.
+              label: (
+                <span className="flex flex-col items-start gap-0.5 leading-tight">
+                  <span className="flex items-center gap-2">
+                    {a.label}
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums',
+                        ativa ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-600',
+                      )}
+                    >
+                      {lista.length}
+                    </span>
+                  </span>
+                  <span className="text-xs font-normal tabular-nums text-slate-500">
+                    {soma > 0 ? brl(soma) : '—'}
+                  </span>
+                </span>
+              ),
+            }
+          })}
           value={abaDoTitular}
           onChange={setAbaDoTitular}
           trailing={refazer}
@@ -783,7 +855,39 @@ export function PainelProcessosJudiciais({
           }
         />
       ) : (
-        <Table dense>
+        <>
+          {/* O FILTRO DE ESTÁGIO, e a conta do que ele esconde.
+              Só aparece com dois estágios ou mais: com um só, o seletor seria uma
+              escolha entre "tudo" e "tudo". E filtro que esconde linha em
+              silêncio mente sobre o tamanho da dívida — por isso a linha à
+              direita diz quantos ficaram de fora e quanto eles somam. */}
+          {estagiosDaAba.length > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="flex items-center gap-2 text-xs text-slate-500">
+                Estágio
+                <select
+                  value={filtroEstagio}
+                  onChange={(e) => setFiltroEstagio(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-brand-400 focus:outline-none"
+                >
+                  <option value="">todos</option>
+                  {estagiosDaAba.map((e) => (
+                    <option key={e} value={e}>
+                      {e}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {filtroEstagio && (
+                <span className="text-xs text-slate-500 tabular-nums">
+                  {listados.length} de {daAba.length} processo(s) ·{' '}
+                  {brl(somaDasCausas(listados))} de {brl(somaDasCausas(daAba))}
+                </span>
+              )}
+            </div>
+          )}
+
+          <Table dense>
           <THead>
             <TR>
               <TH>Processo</TH>
@@ -793,11 +897,15 @@ export function PainelProcessosJudiciais({
                   linha do cabeçalho fica com o dobro da altura das outras. */}
               <TH className="whitespace-nowrap text-right">Valor da causa</TH>
               <TH>Estágio</TH>
+              {/* ÚLTIMA MOVIMENTAÇÃO, logo depois do estágio: as duas colunas
+                  respondem juntas. "Penhora" sozinho não diz se a ameaça é de
+                  agora ou de três anos atrás. */}
+              <TH className="whitespace-nowrap">Última mov.</TH>
               <TH className="whitespace-nowrap">Risco</TH>
             </TR>
           </THead>
           <TBody>
-            {daAba.map((x) => (
+            {listados.map((x) => (
               <TR key={x.id}>
                 <TD className="whitespace-nowrap font-mono text-xs">
                   {x.url_fonte ? (
@@ -823,6 +931,12 @@ export function PainelProcessosJudiciais({
                 </TD>
                 <TD className="text-right tabular-nums">{brl(x.valor_cobrado)}</TD>
                 <TD className="text-xs">{x.estagio ?? '—'}</TD>
+                {/* MÊS E ANO, sem o dia: a pergunta é "isto ainda anda?", e ela se
+                    responde na distância — agosto deste ano é vivo, agosto de 2021
+                    é lembrança. O dia exato gastaria largura sem mudar o juízo. */}
+                <TD className="whitespace-nowrap text-xs text-slate-500">
+                  {mesAno(x.data_ultima_movimentacao)}
+                </TD>
                 {/* O SELO, SEM O PARÁGRAFO. O motivo do risco continua no banco e
                     vai para a anotação quando a IA redige a recusa; na tabela ele
                     triplicava a altura de cada linha e enterrava as colunas que se
@@ -840,7 +954,8 @@ export function PainelProcessosJudiciais({
               </TR>
             ))}
           </TBody>
-        </Table>
+          </Table>
+        </>
       )}
     </div>
   )

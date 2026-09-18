@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { tempoDecorrido } from '../format'
+import { mesAno, tempoDecorrido } from '../format'
 
 /**
  * O TEMPO DECORRIDO, do jeito que se lê numa fila de trabalho.
@@ -62,5 +62,34 @@ describe('tempoDecorrido', () => {
   it('data sem hora não escorrega um dia para trás', () => {
     expect(tempoDecorrido('2026-09-14', agora)).toBe('ontem')
     expect(tempoDecorrido('2026-09-15', agora)).toBe('hoje')
+  })
+})
+
+/**
+ * "agosto/2026" — a data cuja precisão do dia não decide nada.
+ *
+ * É como a última movimentação de um processo aparece na due diligence: a
+ * pergunta é "isto ainda anda?", e a resposta se lê na distância. O dia exato
+ * ocuparia largura numa tabela apertada sem mudar o juízo de ninguém.
+ */
+describe('mesAno', () => {
+  it('escreve o mês por extenso e o ano em números', () => {
+    expect(mesAno('2026-08-14')).toBe('agosto/2026')
+    expect(mesAno('2021-01-02')).toBe('janeiro/2021')
+    expect(mesAno('2026-12-31T23:59:00Z')).toBe('dezembro/2026')
+  })
+
+  // Data pura é lida no fuso LOCAL: `new Date('2026-08-01')` é meia-noite UTC,
+  // que no Brasil ainda é 31 de julho — e o mês sairia errado na virada.
+  it('o primeiro dia do mês não escorrega para o mês anterior', () => {
+    expect(mesAno('2026-08-01')).toBe('agosto/2026')
+    expect(mesAno('2026-03-01')).toBe('março/2026')
+  })
+
+  it('sem data, um traço', () => {
+    expect(mesAno(null)).toBe('—')
+    expect(mesAno(undefined)).toBe('—')
+    expect(mesAno('')).toBe('—')
+    expect(mesAno('não sei')).toBe('—')
   })
 })

@@ -72,6 +72,8 @@ export interface FonteEscavador {
   arquivado?: boolean | null
   /** ATIVO | INATIVO — classificação do próprio Escavador, por IA. */
   status_predito?: string
+  /** A última movimentação REGISTRADA NESTA FONTE (YYYY-MM-DD). */
+  data_ultima_movimentacao?: string
   tribunal?: { sigla?: string; nome?: string }
   capa?: {
     classe?: string
@@ -128,6 +130,14 @@ export interface ProcessoApurado {
   ha_cobranca: boolean | null
   valor_cobrado: number | null
   estagio: string | null
+  /**
+   * Quando o processo andou pela última vez (YYYY-MM-DD), ou null.
+   *
+   * ESTÁGIO NÃO TEM IDADE, e é isso que este campo acrescenta: uma execução em
+   * penhora que andou semana passada e uma parada há três anos chegam à tela com
+   * o mesmo "penhora". A data separa a ameaça viva da lembrança.
+   */
+  data_ultima_movimentacao: string | null
   risco: 'NENHUM' | 'ATENCAO' | 'ALTO'
   risco_motivo: string | null
   fonte: string
@@ -262,6 +272,31 @@ export function poloDoAlvo(
 function fontePrincipal(item: ProcessoEscavador): FonteEscavador {
   const fontes = item.fontes || []
   return fontes.find((f) => f.grau === 1) ?? fontes[0] ?? {}
+}
+
+/**
+ * A última movimentação do processo — a mais recente entre as que a resposta traz.
+ *
+ * O ITEM TEM A SUA E CADA FONTE TEM A DELA. Num processo com duas fontes (o
+ * tribunal e o diário), elas divergem: uma pode ter sido varrida hoje e a outra há
+ * um mês. A mais recente é a resposta certa para a pergunta que se faz aqui — "isto
+ * ainda anda?" —, porque basta uma fonte ter registrado movimento.
+ *
+ * NÃO É `data_ultima_verificacao`, que a mesma resposta traz e que é sempre
+ * recente: aquela é quando o robô do Escavador OLHOU a fonte. Trocar uma pela
+ * outra faria todo processo morto parecer movimentado ontem.
+ */
+function ultimaMovimentacao(item: ProcessoEscavador): string | null {
+  const datas = [
+    item.data_ultima_movimentacao,
+    ...(item.fontes ?? []).map((f) => f.data_ultima_movimentacao),
+  ]
+    .map((d) => String(d ?? '').slice(0, 10))
+    // Só o que tem cara de data: a API manda YYYY-MM-DD, e string vazia ou
+    // "0000-00-00" viraria uma data no ano zero na tela.
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d > '1900-01-01')
+  // Ordem lexicográfica vale para ISO: o formato foi feito para isso.
+  return datas.length > 0 ? datas.sort().at(-1) ?? null : null
 }
 
 /** O processo ainda anda? Baixado e arquivado não alcançam mais nada hoje. */
@@ -409,6 +444,7 @@ export function traduzirProcesso(
     // passivo (é o que se cobra dele) e só confundiria nos outros.
     valor_cobrado: polo === 'PASSIVO' ? valorDaCausa(f) : null,
     estagio: capa.situacao || (estaAtivo(item, f) ? 'Em andamento' : 'Baixado/arquivado'),
+    data_ultima_movimentacao: ultimaMovimentacao(item),
     risco,
     risco_motivo: motivo,
     fonte: 'escavador',

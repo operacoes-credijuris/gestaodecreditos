@@ -383,6 +383,23 @@ export function tempoDecorrido(value: string | null | undefined, agora: Date = n
 }
 
 /**
+ * "agosto/2026" — mês por extenso e ano em números.
+ *
+ * PARA DATA CUJA PRECISÃO DO DIA NÃO DECIDE NADA. A última movimentação de um
+ * processo serve para responder "isto ainda anda?", e a resposta se lê na
+ * distância: agosto deste ano é vivo, agosto de 2021 é lembrança. O dia exato
+ * ocuparia largura numa tabela apertada sem mudar o juízo de ninguém.
+ */
+export function mesAno(value: string | null | undefined): string {
+  if (!value) return '—'
+  const d = new Date(value.length <= 10 ? `${value}T00:00:00` : value)
+  if (Number.isNaN(d.getTime())) return '—'
+  // O pt-BR escreve "agosto de 2026"; a barra é mais curta e é como a operação
+  // escreve competência em planilha.
+  return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).replace(' de ', '/')
+}
+
+/**
  * Hoje em ISO local (YYYY-MM-DD). O locale sv-SE já entrega nesse formato, e
  * usar a data LOCAL (não UTC) importa: perto da meia-noite o toISOString()
  * viraria o dia antes da hora e acenderia semáforo errado.

@@ -75,6 +75,8 @@ export interface ProcessoDD {
   ha_cobranca?: boolean | null
   valor_cobrado?: number | string | null
   estagio?: string | null
+  /** Quando o processo andou pela última vez (YYYY-MM-DD). Ver migração 0067. */
+  data_ultima_movimentacao?: string | null
   risco?: string | null // NAO_AVALIADO | NENHUM | ATENCAO | ALTO
   risco_motivo?: string | null
 }

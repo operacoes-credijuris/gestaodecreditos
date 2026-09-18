@@ -43,16 +43,20 @@ function processo(o: {
   arquivadasTodas?: boolean
   valor?: string
   envolvidos?: EnvolvidoEscavador[]
+  ultimaMovimentacao?: string
+  ultimaMovimentacaoDaFonte?: string
 } = {}): ProcessoEscavador {
   return {
     numero_cnj: o.numero ?? '0801234-56.2021.8.09.0051',
     fontes_tribunais_estao_arquivadas: o.arquivadasTodas,
+    data_ultima_movimentacao: o.ultimaMovimentacao,
     fontes: [
       {
         grau: 1,
         url: 'https://projudi.tjgo.jus.br/processo',
         arquivado: o.arquivado ?? null,
         status_predito: o.statusPredito ?? 'ATIVO',
+        data_ultima_movimentacao: o.ultimaMovimentacaoDaFonte,
         tribunal: { sigla: 'TJGO' },
         capa: {
           classe: o.classe ?? 'PROCEDIMENTO COMUM CIVEL',
@@ -497,5 +501,47 @@ describe('só quem é réu', () => {
     const chamadas = fingirApi([{ corpo: { items: [] } }])
     await processosDoEnvolvido('tok', { documento: CPF_CEDENTE })
     expect(chamadas[0]).not.toContain('polo=')
+  })
+})
+
+/**
+ * A DATA DA ÚLTIMA MOVIMENTAÇÃO, que já vinha e era jogada fora.
+ *
+ * ESTÁGIO NÃO TEM IDADE: uma execução em penhora que andou semana passada e uma
+ * parada há três anos chegam à tela com o mesmo "penhora". A data separa a ameaça
+ * viva da lembrança, e vem no mesmo pacote da busca — sem consulta a mais.
+ */
+describe('a última movimentação', () => {
+  it('vem do processo', () => {
+    const linha = traduzirProcesso(processo({ ultimaMovimentacao: '2026-08-14' }), {
+      documento: CPF_CEDENTE,
+    })
+    expect(linha?.data_ultima_movimentacao).toBe('2026-08-14')
+  })
+
+  // O ITEM TEM A SUA E CADA FONTE TEM A DELA, e elas divergem: basta uma fonte ter
+  // registrado movimento para o processo ter andado.
+  it('fica com a mais recente entre o processo e as fontes', () => {
+    const linha = traduzirProcesso(
+      processo({ ultimaMovimentacao: '2024-01-10', ultimaMovimentacaoDaFonte: '2026-08-14' }),
+      { documento: CPF_CEDENTE },
+    )
+    expect(linha?.data_ultima_movimentacao).toBe('2026-08-14')
+  })
+
+  // Sem data não se inventa uma: null é "não sei quando andou", e a tela mostra
+  // um traço — diferente de "andou hoje".
+  it('sem data, null', () => {
+    expect(traduzirProcesso(processo(), { documento: CPF_CEDENTE })?.data_ultima_movimentacao).
+      toBeNull()
+  })
+
+  it('data sem cara de data não passa', () => {
+    for (const lixo of ['0000-00-00', '1900-01-01', 'ontem', '']) {
+      const linha = traduzirProcesso(processo({ ultimaMovimentacao: lixo }), {
+        documento: CPF_CEDENTE,
+      })
+      expect(linha?.data_ultima_movimentacao, lixo).toBeNull()
+    }
   })
 })
