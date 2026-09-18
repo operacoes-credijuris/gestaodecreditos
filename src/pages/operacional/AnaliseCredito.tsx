@@ -885,6 +885,7 @@ function CardCredito({
   onAnaliseExterna,
   onConcluir,
   onAbrirAnexo,
+  onPrepararAnexo,
   preparoDosAutos,
   onAnaliseJuridica,
   analisandoJuridico,
@@ -920,6 +921,13 @@ function CardCredito({
    * então o espelho guarda a chave e a tela pede o endereço no clique.
    */
   onAbrirAnexo: (l: KommoLead, anexo: KommoNota) => void
+  /**
+   * Começa a resolver o endereço antes do clique, no passar do mouse.
+   *
+   * O tempo de abrir um anexo é quase todo espera de rede. Começando aqui, ela
+   * corre enquanto a pessoa ainda está mirando o link.
+   */
+  onPrepararAnexo: (l: KommoLead, anexo: KommoNota) => void
   /** Como vai o preparo dos autos deste card, se já foi pedido. */
   preparoDosAutos?: PreparoDosAutos
   onAnaliseJuridica: (l: KommoLead) => void
@@ -940,6 +948,19 @@ function CardCredito({
         ? [{ id: 0, texto: lead.nota_texto, criado_em: null, autor: null }]
         : []
   const posteriores = notas.length - 1
+
+  // A MIRA NO ANEXO: o passar do mouse só vira consulta depois de uma pausa. Um
+  // relógio só basta porque o mouse está sobre um link de cada vez.
+  const miraDoAnexo = useRef<number | null>(null)
+  const cancelarMira = () => {
+    if (miraDoAnexo.current !== null) window.clearTimeout(miraDoAnexo.current)
+    miraDoAnexo.current = null
+  }
+  const aoMirarAnexo = (a: KommoNota) => {
+    cancelarMira()
+    miraDoAnexo.current = window.setTimeout(() => onPrepararAnexo(lead, a), 200)
+  }
+  useEffect(() => cancelarMira, [])
 
   return (
     <div className="border-b border-slate-100 p-4 transition-colors last:border-b-0 hover:bg-slate-50/70">
@@ -1409,6 +1430,13 @@ function CardCredito({
                         key={a.id}
                         type="button"
                         onClick={() => onAbrirAnexo(lead, a)}
+                        // 200 ms ANTES DE COMEÇAR: quem passa o mouse por cima a
+                        // caminho de outro lugar não dispara consulta nenhuma —
+                        // e numa lista de dezoito anexos isso seriam dezoito.
+                        // Quem para para clicar, dispara.
+                        onMouseEnter={() => aoMirarAnexo(a)}
+                        onMouseLeave={cancelarMira}
+                        onFocus={() => onPrepararAnexo(lead, a)}
                         title={
                           a.criado_em
                             ? `Anexado em ${formatDataHoraSegundos(a.criado_em)} — clique para abrir`
@@ -1885,8 +1913,35 @@ export default function AnaliseCredito() {
     return alvo
   }
 
+  /**
+   * O ENDEREÇO RESOLVIDO ANTES DO CLIQUE, quando dá tempo.
+   *
+   * Abrir um anexo custa uma ida à Edge Function e dela ao Kommo — perto de um
+   * segundo, todo ele DEPOIS do clique, com a aba aberta em branco esperando.
+   * Começando no passar do mouse, esse tempo corre enquanto a pessoa ainda está
+   * mirando o link, e o clique costuma encontrar a resposta pronta.
+   *
+   * O CACHE É DA SESSÃO e serve também ao segundo clique no mesmo arquivo. Guarda
+   * a PROMESSA, e não o valor: dois cliques seguidos entram na mesma espera em
+   * vez de abrirem duas consultas.
+   */
+  const anexosResolvidos = useRef<Map<string, Promise<{ download: string }>>>(new Map())
+
+  function prepararAnexo(lead: KommoLead, anexo: KommoNota) {
+    const chave = anexo.arquivo_uuid ?? `${lead.kommo_lead_id}:${nomeDoAnexo(anexo)}`
+    const guardada = anexosResolvidos.current.get(chave)
+    if (guardada) return guardada
+    const pedido = enderecoDoAnexo(lead, anexo, nomeDoAnexo(anexo))
+    // FALHA NÃO FICA GUARDADA — o clique seguinte tenta de novo, em vez de
+    // repetir para sempre um erro que pode ter sido de rede. O `catch` também
+    // impede o aviso de promessa rejeitada sem dono, já que ninguém espera por
+    // esta aqui quando ela nasce de um passar de mouse.
+    pedido.catch(() => anexosResolvidos.current.delete(chave))
+    anexosResolvidos.current.set(chave, pedido)
+    return pedido
+  }
+
   async function abrirAnexo(lead: KommoLead, anexo: KommoNota) {
-    const nome = nomeDoAnexo(anexo)
     // SEM `noopener` AQUI, e isso não é descuido: com ele o `window.open`
     // devolve NULL por definição — o opener não recebe referência nenhuma da
     // janela nova. A aba abria e ficava órfã em "about:blank" para sempre,
@@ -1908,7 +1963,7 @@ export default function AnaliseCredito() {
       aba.document.close()
     }
     try {
-      const alvo = await enderecoDoAnexo(lead, anexo, nome)
+      const alvo = await prepararAnexo(lead, anexo)
       // A ABA JÁ ESTÁ ABERTA: só recebe o endereço. O ramo de reserva existe
       // para o caso de o bloqueador de popup ter impedido a abertura lá em cima
       // — aí se tenta de novo, e se também for barrado o toast conta o que houve.
@@ -2563,6 +2618,7 @@ export default function AnaliseCredito() {
                     : undefined
                 }
                 onAbrirAnexo={abrirAnexo}
+                onPrepararAnexo={prepararAnexo}
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria

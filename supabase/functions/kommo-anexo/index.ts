@@ -39,6 +39,34 @@ function json(o: unknown, s = 200) {
 /** O formato do uuid do drive — recusar o resto poupa uma ida à API. */
 const UUID = /^[0-9a-f-]{20,64}$/i;
 
+/**
+ * A URL DO DRIVE DA CONTA, guardada entre chamadas.
+ *
+ * Ela não muda — é o host onde os arquivos daquela conta vivem (drive-g,
+ * drive-b…) —, e descobri-la custava uma ida ao Kommo em TODO clique de anexo,
+ * antes da ida que realmente interessa. Duas viagens em série para abrir um
+ * arquivo: a primeira delas perguntava algo cuja resposta é sempre a mesma.
+ *
+ * O ESCOPO É A INSTÂNCIA da Edge Function, que o Supabase reaproveita entre
+ * chamadas: quem chegar numa instância fria paga a descoberta uma vez e os
+ * seguintes pegam de graça. Uma hora de validade protege do caso raro de a conta
+ * mudar de drive sem ninguém avisar.
+ */
+let driveDaConta: { url: string; em: number } | null = null;
+const VALIDADE_DRIVE_MS = 60 * 60 * 1000;
+
+async function urlDoDrive(auth: Record<string, string>): Promise<string | null> {
+  if (driveDaConta && Date.now() - driveDaConta.em < VALIDADE_DRIVE_MS) return driveDaConta.url;
+  const res = await fetch(
+    `https://${KOMMO_SUBDOMAIN}.kommo.com/api/v4/account?with=drive_url`,
+    { headers: auth },
+  );
+  const url = ((await res.json().catch(() => ({}))) as any)?.drive_url;
+  if (!url) return null;
+  driveDaConta = { url: String(url), em: Date.now() };
+  return driveDaConta.url;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
@@ -55,14 +83,7 @@ Deno.serve(async (req) => {
     if (!token) return json({ erro: "Token da Kommo não configurado." }, 500);
     const auth = { Authorization: `Bearer ${token}` };
 
-    // A URL do drive é da CONTA, e não fixa: contas diferentes respondem em
-    // hosts diferentes (drive-g, drive-b…). É a mesma descoberta que o
-    // buscar-kommo faz antes de ler os metadados de um anexo.
-    const accRes = await fetch(
-      `https://${KOMMO_SUBDOMAIN}.kommo.com/api/v4/account?with=drive_url`,
-      { headers: auth },
-    );
-    const drive = ((await accRes.json().catch(() => ({}))) as any)?.drive_url;
+    const drive = await urlDoDrive(auth);
     if (!drive) return json({ erro: "Não consegui descobrir a drive_url da conta Kommo." }, 502);
 
     const mRes = await fetch(`${drive}/v1.0/files/${uuid}`, { headers: auth });
