@@ -142,16 +142,29 @@ export interface DefSubdivisao {
  */
 export const ABA_ANALISE_INTERNA = 'int-analise'
 
-/**
- * A aba dos créditos que já foram encaminhados aos fundos, no Externo.
- *
- * EXPORTADA PORQUE A TELA PRECISA RECONHECÊ-LA: é a única em que o card mostra
- * as TAGS do Kommo. Nas outras elas seriam ruído — a etiqueta que interessa ali
- * é para qual fundo o crédito foi, e essa informação só existe depois do
- * encaminhamento. Comparar com uma string solta na tela deixaria a regra a uma
- * renomeação de distância de sumir sem nenhum erro.
- */
+/** A aba dos créditos que já foram encaminhados aos fundos, no Externo. */
 export const ABA_APROVADOS_EXTERNO = 'ext-encaminhar'
+
+/** A aba dos créditos recusados, no Externo. */
+export const ABA_REPROVADOS_EXTERNO = 'ext-reprovados'
+
+/**
+ * AS ABAS EM QUE O CARD MOSTRA AS ETIQUETAS DO KOMMO.
+ *
+ * As duas terminais do Externo, e não a tela toda. O espelho guarda as tags de
+ * TODOS os cards — vêm de graça na listagem —, e mostrá-las em toda aba encheria
+ * a fila de rótulo onde o que se procura é o processo. Nestas duas o quadro se
+ * inverte: passado o trabalho, a etiqueta é o que resta dizendo PARA QUAL FUNDO
+ * o crédito foi, ou por que ele não foi.
+ *
+ * É UM CONJUNTO, e não uma comparação solta na tela: renomear a chave de uma aba
+ * aqui faria as etiquetas sumirem sem nenhum erro — a família de defeito que
+ * este arquivo inteiro existe para evitar.
+ */
+export const ABAS_COM_TAGS: ReadonlySet<string> = new Set([
+  ABA_APROVADOS_EXTERNO,
+  ABA_REPROVADOS_EXTERNO,
+])
 
 /**
  * As colunas de cada destinação, cada uma no SEU funil.
@@ -314,7 +327,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         descricaoVazia: 'Nenhum precatório externo em diligência.',
       },
       {
-        key: 'ext-reprovados',
+        key: ABA_REPROVADOS_EXTERNO,
         label: 'Reprovados',
         colunaKommo: 'REPROVADOS',
         descricaoVazia: 'Nenhum precatório externo reprovado.',

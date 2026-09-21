@@ -40,6 +40,8 @@ import { primeiroCnj } from '../../supabase/functions/_shared/nucleo/cnj.ts'
 import {
   ABA_ANALISE_INTERNA,
   ABA_APROVADOS_EXTERNO,
+  ABA_REPROVADOS_EXTERNO,
+  ABAS_COM_TAGS,
   type DefAbaPrecatorio,
   type DefSubdivisao,
   type PapelDaAcao,
@@ -72,6 +74,8 @@ export const FUNIL_PRECATORIO = FUNIL_PRECATORIO_INTERNO
 export {
   ABA_ANALISE_INTERNA,
   ABA_APROVADOS_EXTERNO,
+  ABA_REPROVADOS_EXTERNO,
+  ABAS_COM_TAGS,
   FUNIL_PRECATORIO_EXTERNO,
   FUNIL_PRECATORIO_INTERNO,
 }

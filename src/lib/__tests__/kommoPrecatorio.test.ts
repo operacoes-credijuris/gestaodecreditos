@@ -26,6 +26,8 @@ import { destinosDaTrilha } from '../../../supabase/functions/_shared/trilhasDoP
 import {
   ABA_ANALISE_INTERNA,
   ABA_APROVADOS_EXTERNO,
+  ABA_REPROVADOS_EXTERNO,
+  ABAS_COM_TAGS,
   ABAS_EXTERNO_SEM_TRABALHO,
   acaoDeReprovar,
   ehCardExterno,
@@ -196,11 +198,17 @@ describe('SUBDIVISOES_PRECATORIO', () => {
    * mexer aqui faria as etiquetas sumirem da tela sem erro nenhum — que é a
    * família de defeito que este arquivo inteiro existe para pegar.
    */
-  it('a chave dos Aprovados do Externo existe na trilha', () => {
+  it('as abas que mostram etiqueta existem na trilha', () => {
     const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
-    const aba = externo.abas.find((a) => a.key === ABA_APROVADOS_EXTERNO)
-    expect(aba?.colunaKommo).toBe('ENCAMINHAR AOS FUNDOS')
-    expect(aba?.label).toBe('Aprovados')
+    const porChave = new Map(externo.abas.map((a) => [a.key, a]))
+    expect(porChave.get(ABA_APROVADOS_EXTERNO)?.colunaKommo).toBe('ENCAMINHAR AOS FUNDOS')
+    expect(porChave.get(ABA_APROVADOS_EXTERNO)?.label).toBe('Aprovados')
+    expect(porChave.get(ABA_REPROVADOS_EXTERNO)?.colunaKommo).toBe('REPROVADOS')
+    // O CONJUNTO É O QUE A TELA CONSULTA: chave que não existe na trilha é
+    // etiqueta que nunca aparece, sem erro nenhum para denunciar.
+    for (const chave of ABAS_COM_TAGS) {
+      expect(porChave.has(chave), chave).toBe(true)
+    }
   })
 
   it('toda aba aponta para uma coluna que existe no kanban', () => {

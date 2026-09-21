@@ -49,7 +49,7 @@ import {
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABA_ANALISE_INTERNA,
-  ABA_APROVADOS_EXTERNO,
+  ABAS_COM_TAGS,
   ABAS_EXTERNO_SEM_TRABALHO,
   ehFunilPrecatorio,
   acaoDeReprovar,
@@ -942,11 +942,13 @@ function CardCredito({
   /**
    * As etiquetas do Kommo aparecem neste card?
    *
-   * SÓ NOS APROVADOS DO EXTERNO, por ora. O espelho guarda as tags de TODOS os
-   * cards desde sempre — vêm de graça no `_embedded` da listagem —, e mostrá-las
-   * em toda aba encheria a fila de etiquetas que não dizem nada sobre o trabalho
-   * daquela etapa. Depois de encaminhado, a etiqueta é a única coisa no card que
-   * diz PARA QUAL FUNDO ele foi.
+   * NAS TERMINAIS DO EXTERNO — aprovados e reprovados. O espelho guarda as tags
+   * de TODOS os cards desde sempre (vêm de graça no `_embedded` da listagem), e
+   * mostrá-las em toda aba encheria a fila de etiquetas que não dizem nada sobre
+   * o trabalho daquela etapa. Passado o trabalho é o contrário: a etiqueta é o
+   * que resta dizendo para qual fundo o crédito foi, ou por que não foi.
+   *
+   * Quais abas, exatamente, é `ABAS_COM_TAGS` quem diz.
    */
   mostrarTags: boolean
 }) {
@@ -2659,9 +2661,10 @@ export default function AnaliseCredito() {
                 }
                 onAbrirAnexo={abrirAnexo}
                 onPrepararAnexo={prepararAnexo}
-                // AS ETIQUETAS SÓ NOS APROVADOS DO EXTERNO: é onde elas dizem
-                // para qual fundo o crédito foi. Nas outras abas seriam ruído.
-                mostrarTags={abaAtual?.key === ABA_APROVADOS_EXTERNO}
+                // AS ETIQUETAS NAS TERMINAIS DO EXTERNO — ver ABAS_COM_TAGS: é
+                // onde elas dizem para qual fundo o crédito foi, ou por que não
+                // foi. Nas abas de trabalho seriam ruído.
+                mostrarTags={ABAS_COM_TAGS.has(abaAtual?.key ?? '')}
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria
