@@ -155,6 +155,15 @@ export function PainelProcessosJudiciais({
   const [apurando, setApurando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [custo, setCusto] = useState<string | null>(null)
+  /**
+   * O que a apuração conseguiu fazer só pela metade.
+   *
+   * SEPARADO DO ERRO, e em âmbar: erro é apuração que não aconteceu; isto é
+   * apuração que aconteceu, foi paga e gravada, faltando uma parte — uma coluna
+   * nova cuja migração ainda não rodou, por exemplo. No vermelho do erro, quem
+   * lê acha que perdeu a consulta e clica de novo, pagando outra vez.
+   */
+  const [aviso, setAviso] = useState<string | null>(null)
   const [apuracoes, setApuracoes] = useState<ApuracaoDD[]>([])
   const [processos, setProcessos] = useState<ProcessoNaTela[]>([])
   /**
@@ -382,9 +391,11 @@ export function PainelProcessosJudiciais({
     try {
       const r = await invokeFunction<{
         custo?: string
+        aviso?: string | null
         apuracoes?: { papel: string; status: string; total: number; observacao?: string | null }[]
       }>('dd-processos', { lead_id: leadId, alvos: alvosParaApurar })
       setCusto(r.custo ?? null)
+      setAviso(r.aviso ?? null)
       const falhas = (r.apuracoes ?? []).filter((a) => a.status === 'FALHA')
       if (falhas.length > 0) {
         // FALHA NÃO É "NADA CONSTA". A apuração que não aconteceu precisa ficar
@@ -725,6 +736,13 @@ export function PainelProcessosJudiciais({
         <div className="flex items-start gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-700 ring-1 ring-red-200">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{erro}</span>
+        </div>
+      )}
+
+      {aviso && (
+        <div className="flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-800 ring-1 ring-amber-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{aviso}</span>
         </div>
       )}
 

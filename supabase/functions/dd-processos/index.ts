@@ -301,6 +301,14 @@ Deno.serve(async (req: Request) => {
     // passada anterior saem e entram os de agora — é o que "apuração refeita"
     // significa. As linhas de outra fonte (lançadas à mão) ficam.
     const gravadas: Record<string, unknown>[] = []
+    /**
+     * O que falta no banco, dito a quem acabou de pagar pela busca.
+     *
+     * Migração pendente não pode virar erro de gravação aqui: o Escavador cobra
+     * por requisição, e recusar a linha inteira joga fora o que já foi gasto.
+     * Grava-se o que dá, e o aviso sobe para a tela.
+     */
+    let avisoDeMigracao: string | null = null
     for (const a of apuracoes) {
       const alvo = alvos.find((x) => x.papel === a.papel && x.nome === a.nome) ?? alvos[0]
       const identidade = a.documento ?? a.oab ?? a.nome
@@ -350,9 +358,33 @@ Deno.serve(async (req: Request) => {
 
       await svc.from('dd_processo').delete().eq('historico_id', historicoId).eq('fonte', 'escavador')
       if (a.processos.length > 0) {
-        const { error } = await svc.from('dd_processo').insert(
-          a.processos.map((p) => ({ ...p, historico_id: historicoId, kommo_lead_id: leadId })),
-        )
+        const linhas = a.processos.map((p) => ({
+          ...p,
+          historico_id: historicoId,
+          kommo_lead_id: leadId,
+        }))
+        let { error } = await svc.from('dd_processo').insert(linhas)
+
+        // COLUNA QUE FALTA NÃO PODE CUSTAR A APURAÇÃO INTEIRA.
+        //
+        // A busca no Escavador é COBRADA POR REQUISIÇÃO, e quando ela volta o
+        // dinheiro já foi gasto. Recusar a gravação porque uma coluna nova ainda
+        // não existe no banco joga fora o que se pagou, e o próximo clique paga
+        // de novo — foi o que aconteceu no dia em que `data_ultima_movimentacao`
+        // entrou no código antes de a migração 0067 rodar.
+        //
+        // Aqui a apuração entra sem a coluna, e o aviso volta para a tela dizendo
+        // o que falta. A leitura já degrada do mesmo jeito (ver o `select('*')`
+        // do painel): o que não existe não vem, e a célula fica com um traço.
+        if (error && /data_ultima_movimentacao/i.test(error.message)) {
+          const semAColuna = linhas.map(({ data_ultima_movimentacao: _d, ...resto }) => resto)
+          ;({ error } = await svc.from('dd_processo').insert(semAColuna))
+          if (!error) {
+            avisoDeMigracao =
+              'A migração 0067 ainda não rodou: a apuração foi salva, mas sem a data da ' +
+              'última movimentação dos processos. Rode-a no SQL Editor do Supabase.'
+          }
+        }
         if (error) return jsonResponse({ erro: `dd_processo: ${error.message}` }, 400)
       }
 
@@ -388,6 +420,7 @@ Deno.serve(async (req: Request) => {
     const centavos = apuracoes.reduce((s, a) => s + a.centavos, 0)
     return jsonResponse({
       ok: true,
+      aviso: avisoDeMigracao,
       lead_id: leadId,
       credito: cnjDoCredito || null,
       custo_centavos: centavos,
