@@ -48,6 +48,8 @@ import {
   dataDaEtapa,
   colunasPrecatorioDesalinhadas,
   statusExibidos,
+  coresDasTags,
+  TONS_DA_TAG,
   tomDaTag,
   type EtapaKommo,
 } from '@/lib/kommo'
@@ -970,8 +972,10 @@ describe('tomDaTag', () => {
   // recusa, e uma etiqueta verde seria lida como estado do crédito.
   it('não usa as cores que já significam outra coisa no card', () => {
     for (const nome of ['Fundo Alfa', 'Beta', 'urgente', 'XP', 'a', 'zzz', '2026']) {
-      expect(['blue', 'purple', 'orange'], nome).toContain(tomDaTag(nome))
+      expect(TONS_DA_TAG, nome).toContain(tomDaTag(nome))
     }
+    expect(TONS_DA_TAG).not.toContain('green')
+    expect(TONS_DA_TAG).not.toContain('red')
   })
 
   // Etiquetas diferentes não podem cair todas na mesma cor: com um punhado de
@@ -979,5 +983,47 @@ describe('tomDaTag', () => {
   it('nomes diferentes se espalham pela paleta', () => {
     const nomes = ['Fundo Alfa', 'Fundo Beta', 'Fundo Gama', 'Fundo Delta', 'Fundo Épsilon']
     expect(new Set(nomes.map(tomDaTag)).size).toBeGreaterThan(1)
+  })
+})
+
+/**
+ * DUAS ETIQUETAS IGUAIS EM COR, NO MESMO CARD, sugerem parentesco que não existe.
+ *
+ * Seis cores não bastam para toda etiqueta que existe — o comercial cria quantas
+ * quiser — e nunca bastariam. O que se garante é o que o olho precisa: dentro de
+ * um card, nenhuma se repete.
+ */
+describe('coresDasTags', () => {
+  // As etiquetas reais de um card do funil externo, em 21/09/2026.
+  const doCard = ['Enviado PJUS', 'Reprovado BTG', 'Cotado BTG', 'Sem proposta']
+
+  it('nenhuma cor se repete dentro do card', () => {
+    const cores = [...coresDasTags(doCard).values()]
+    expect(new Set(cores).size).toBe(doCard.length)
+  })
+
+  it('a cor sai do nome quando não há choque', () => {
+    const so = coresDasTags(['Reprovado BTG'])
+    expect(so.get('Reprovado BTG')).toBe(tomDaTag('Reprovado BTG'))
+  })
+
+  // O DESVIO É LOCAL: só a segunda etiqueta do choque muda, e a primeira guarda
+  // a cor do nome dela — é o que mantém a mancha reconhecível pela coluna.
+  it('quem chega primeiro fica com a cor do próprio nome', () => {
+    const nomes = [...TONS_DA_TAG.keys()].map((i) => `tag ${i}`)
+    const cores = coresDasTags(nomes)
+    expect(cores.get(nomes[0])).toBe(tomDaTag(nomes[0]))
+    expect(new Set(cores.values()).size).toBe(TONS_DA_TAG.length)
+  })
+
+  // Mais etiquetas que cores: aí repete mesmo, e repetir é melhor do que deixar
+  // de mostrar a etiqueta.
+  it('não some com etiqueta quando as cores acabam', () => {
+    const nomes = Array.from({ length: TONS_DA_TAG.length + 3 }, (_, i) => `t${i}`)
+    expect(coresDasTags(nomes).size).toBe(nomes.length)
+  })
+
+  it('etiqueta repetida na lista não vira duas entradas', () => {
+    expect(coresDasTags(['A', 'A', 'B']).size).toBe(2)
   })
 })

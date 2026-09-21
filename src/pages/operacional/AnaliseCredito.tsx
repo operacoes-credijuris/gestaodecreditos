@@ -58,7 +58,7 @@ import {
   abasDoFunil,
   agruparPorAba,
   statusExibidos,
-  tomDaTag,
+  coresDasTags,
   telasRpvDesalinhadas,
   colunasPrecatorioDesalinhadas,
   useKommoLeads,
@@ -1037,8 +1037,8 @@ function CardCredito({
               card eles já significam análise pronta e recusa. */}
           {mostrarTags && (lead.tags ?? []).length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {(lead.tags ?? []).map((t) => (
-                <Badge key={t} size="sm" tone={tomDaTag(t)}>
+              {[...coresDasTags(lead.tags ?? [])].map(([t, tom]) => (
+                <Badge key={t} size="sm" tone={tom}>
                   {t}
                 </Badge>
               ))}

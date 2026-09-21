@@ -9,6 +9,13 @@ type Tone =
   | 'blue'
   | 'purple'
   | 'orange'
+  // TRÊS TONS SEM SIGNIFICADO PRÓPRIO, para quando o que se colore é uma
+  // etiqueta livre — o nome que o comercial deu à tag do Kommo, por exemplo.
+  // Ali a cor não diz nada sobre estado; ela só precisa DISTINGUIR, e três
+  // matizes não bastavam para meia dúzia de etiquetas.
+  | 'teal'
+  | 'pink'
+  | 'indigo'
   // Alias semântico (mesmas classes do tom original)
   | 'amber'
   // PREENCHIDOS. Os sete tons acima são todos fundo pálido, e numa tela onde
@@ -29,6 +36,9 @@ const tones: Record<Tone, string> = {
   blue: 'bg-blue-50 text-blue-700 ring-blue-200',
   purple: 'bg-violet-50 text-violet-700 ring-violet-200',
   orange: 'bg-orange-50 text-orange-700 ring-orange-200',
+  teal: 'bg-teal-50 text-teal-700 ring-teal-200',
+  pink: 'bg-pink-50 text-pink-700 ring-pink-200',
+  indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   amber: 'bg-amber-50 text-amber-700 ring-amber-200',
   tealSolid: 'bg-teal-600 text-white ring-teal-600',
   indigoSolid: 'bg-indigo-600 text-white ring-indigo-600',

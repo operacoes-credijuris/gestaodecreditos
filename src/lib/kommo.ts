@@ -136,11 +136,66 @@ export const SUBDIVISOES_PRECATORIO = TRILHAS_PRECATORIO
  * outra coisa (verde é análise pronta, vermelho é recusa). Uma etiqueta verde
  * seria lida como estado do crédito.
  */
-export function tomDaTag(nome: string): 'blue' | 'purple' | 'orange' {
-  const tons = ['blue', 'purple', 'orange'] as const
-  let soma = 0
-  for (const c of String(nome ?? '')) soma += c.codePointAt(0) ?? 0
-  return tons[soma % tons.length]
+/**
+ * SEIS TONS, E ERAM TRÊS. Com três, seis etiquetas distintas ("Enviado PJUS",
+ * "Reprovado BTG", "Cotado BTG", "Sem proposta"…) caíam duas a duas na mesma
+ * cor. Verde e vermelho continuam fora: no card eles já significam análise
+ * pronta e recusa.
+ */
+export const TONS_DA_TAG = ['blue', 'purple', 'orange', 'teal', 'pink', 'indigo'] as const
+
+export type TomDaTag = (typeof TONS_DA_TAG)[number]
+
+export function tomDaTag(nome: string): TomDaTag {
+  const tons = TONS_DA_TAG
+  // FNV-1a, e não a soma dos caracteres. A soma espalha mal quando os nomes
+  // compartilham palavras — que é exatamente o caso aqui, onde quase toda
+  // etiqueta é "<ato> <fundo>": "Reprovado PJUS" e "Reprovado BTG" têm metade
+  // dos caracteres em comum, e somas próximas caem no mesmo resto.
+  let h = 0x811c9dc5
+  for (const c of String(nome ?? '')) {
+    h ^= c.codePointAt(0) ?? 0
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return tons[h % tons.length]
+}
+
+/**
+ * As cores das etiquetas de UM card, garantidamente diferentes entre si.
+ *
+ * SEIS CORES NÃO BASTAM PARA TODA ETIQUETA QUE EXISTE, e nunca bastariam: o
+ * comercial cria quantas quiser, e em algum momento duas caem no mesmo tom. O
+ * que se pode garantir — e é o que o olho precisa — é que as etiquetas DE UM
+ * MESMO CARD nunca se repitam em cor: duas iguais lado a lado sugerem
+ * parentesco que não existe.
+ *
+ * A COR CONTINUA SAINDO DO NOME, e o desvio só acontece quando há choque ali
+ * naquele card: o vizinho escolhe o próximo tom livre. Na esmagadora maioria
+ * dos cards nada desvia, e a mesma etiqueta guarda a mesma cor pela coluna
+ * inteira — que é o que permite achar os de um fundo pela mancha.
+ */
+export function coresDasTags(nomes: readonly string[]): Map<string, TomDaTag> {
+  const usados = new Set<TomDaTag>()
+  const mapa = new Map<string, TomDaTag>()
+  for (const nome of nomes) {
+    if (mapa.has(nome)) continue
+    let tom = tomDaTag(nome)
+    if (usados.has(tom)) {
+      const inicio = TONS_DA_TAG.indexOf(tom)
+      for (let k = 1; k < TONS_DA_TAG.length; k++) {
+        const outro = TONS_DA_TAG[(inicio + k) % TONS_DA_TAG.length]
+        if (!usados.has(outro)) {
+          tom = outro
+          break
+        }
+      }
+      // Mais etiquetas que cores no mesmo card: aí repete mesmo, e repetir é
+      // melhor do que deixar de mostrar a etiqueta.
+    }
+    usados.add(tom)
+    mapa.set(nome, tom)
+  }
+  return mapa
 }
 
 /**
