@@ -672,6 +672,11 @@ export function abasDoFunil(
         papel: s.papel ?? 'aprovar',
       })
     }
+    // AS QUE INTERROMPEM SÃO DA TRILHA, e não da etapa — interromper leva sempre
+    // ao mesmo lugar. Mas nem toda etapa PODE interromper: a qualificação do
+    // Externo passou a só encaminhar, para recusa e diligência não saírem sem
+    // passar pela revisão. Ver `interrompe`.
+    if (aba.interrompe === false) return saida
     const idDiligencia = nomes.get(normalizarBusca(def.colunaDiligencia))
     const idReprovados = nomes.get(normalizarBusca(def.colunaReprovados))
     if (idDiligencia !== undefined) {

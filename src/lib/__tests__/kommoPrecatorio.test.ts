@@ -193,9 +193,9 @@ describe('SUBDIVISOES_PRECATORIO', () => {
   /**
    * A CHAVE QUE A TELA IMPORTA TEM DE EXISTIR NA TRILHA.
    *
-   * O card dos Aprovados do Externo é o único que mostra as etiquetas do Kommo, e
-   * ele reconhece a aba por esta constante. Renomear a chave na definição sem
-   * mexer aqui faria as etiquetas sumirem da tela sem erro nenhum — que é a
+   * Os cards das abas terminais do Externo são os que mostram as etiquetas do
+   * Kommo, e a tela as reconhece por estas constantes. Renomear a chave na
+   * definição sem mexer aqui faria as etiquetas sumirem sem erro nenhum — que é a
    * família de defeito que este arquivo inteiro existe para pegar.
    */
   it('as abas que mostram etiqueta existem na trilha', () => {
@@ -450,27 +450,23 @@ describe('abas da trilha Externa', () => {
   const DECISORIAS = ['Qualificação', 'Revisão']
 
   /**
-   * O DESFECHO DO EXTERNO MORA NAS DUAS ETAPAS DE DECISÃO.
+   * A QUALIFICAÇÃO TEM UMA SAÍDA SÓ, desde 21/09/2026.
    *
-   * A qualificação é dos analistas e a revisão é de quem decide — são os dois
-   * pontos em que a casa diz alguma coisa sobre o crédito. Depois de encaminhado
-   * quem move o card é o fundo, e o parecer é dele: oferecer desfecho adiante
-   * seria decidir no lugar de quem decide.
+   * Ela oferecia três: encaminhar à revisão, exigir diligência e recusar. As duas
+   * últimas saíam DIRETO de quem analisa — e a revisão, que existe para ler o que
+   * a casa decide, só via o que tinha sido aprovado. Recusa e diligência são
+   * decisões sobre o crédito tanto quanto a aprovação, e agora passam pela mesma
+   * segunda leitura.
+   *
+   * O QUE ESTE TESTE GUARDA é a ausência: uma etapa que volta a interromper sem
+   * ninguém decidir isso é o tipo de coisa que se descobre pelo card que já se
+   * moveu.
    */
-  it('a Qualificação oferece as três saídas', () => {
+  it('a Qualificação só encaminha para a revisão', () => {
     const qualificacao = abas.find((a) => a.label === 'Qualificação')!
-    expect(qualificacao.acoes.map((x) => x.papel)).toEqual([
-      'aprovar',
-      'diligenciar',
-      'reprovar',
-    ])
-    const porPapel = new Map(qualificacao.acoes.map((a) => [a.papel, a.statusId]))
-    // APROVAR AQUI E PEDIR REVISAO, e nao encaminhar ao fundo: quem trabalha
-    // nesta etapa sao os analistas, e a decisao de mandar o credito para fora e
-    // de quem revisa. Interromper — diligencia e recusa — passa direto.
-    expect(porPapel.get('aprovar')).toBe(idExt('REVISÃO DA QUALIFICAÇÃO'))
-    expect(porPapel.get('diligenciar')).toBe(idExt('DILIGÊNCIA'))
-    expect(porPapel.get('reprovar')).toBe(idExt('REPROVADOS'))
+    expect(qualificacao.acoes.map((x) => x.papel)).toEqual(['aprovar'])
+    expect(qualificacao.acoes[0].statusId).toBe(idExt('REVISÃO DA QUALIFICAÇÃO'))
+    expect(qualificacao.acoes[0].label).toBe('Enviar para revisão')
   })
 
   /**
@@ -567,12 +563,12 @@ describe('abas da trilha Externa', () => {
   it('saída sem coluna no kanban simplesmente não aparece', () => {
     const sem = espelho(
       COLUNAS_INTERNO,
-      COLUNAS_EXTERNO.filter((n) => n !== 'REVISÃO DA QUALIFICAÇÃO'),
+      COLUNAS_EXTERNO.filter((n) => n !== 'DILIGÊNCIA'),
     )
-    const qualificacao = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, sem, 'externo').find(
-      (a) => a.key === 'ext-qualificacao',
+    const revisao = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, sem, 'externo').find(
+      (a) => a.key === 'ext-revisao',
     )!
-    expect(qualificacao.acoes.map((x) => x.papel)).toEqual(['diligenciar', 'reprovar'])
+    expect(revisao.acoes.map((x) => x.papel)).toEqual(['aprovar', 'validar', 'reprovar'])
   })
 })
 

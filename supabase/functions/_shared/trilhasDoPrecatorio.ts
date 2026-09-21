@@ -107,6 +107,19 @@ export interface DefAbaPrecatorio {
    * pelo Kommo.
    */
   saidas?: SaidaDaEtapa[]
+  /**
+   * Esta etapa pode INTERROMPER o crédito — exigir diligência ou recusar?
+   *
+   * OMITIDO, SIM: quase toda etapa de decisão interrompe, e diligência e recusa
+   * levam sempre às colunas da trilha, sem a etapa precisar dizer para onde.
+   *
+   * FALSO NA QUALIFICAÇÃO DO EXTERNO, desde 21/09/2026 e por decisão de quem
+   * opera: ali a saída é uma só, passar adiante. Recusar um crédito e mandá-lo
+   * para diligência são decisões que a casa quer que passem pela REVISÃO — antes
+   * elas saíam direto de quem analisa, sem segunda leitura, e a revisão só via o
+   * que fora aprovado.
+   */
+  interrompe?: boolean
 }
 
 export interface DefSubdivisao {
@@ -279,13 +292,14 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         label: 'Qualificação',
         colunaKommo: 'QUALIFICAÇÃO PRELIMINAR',
         descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
-        // APROVAR AQUI É PEDIR REVISÃO, e não encaminhar ao fundo. Quem trabalha
-        // nesta etapa são os analistas; a decisão de mandar o crédito para fora
-        // é de quem revisa. Recusar e exigir diligência, ao contrário, passam
-        // direto — essas não precisam de segunda leitura.
+        // UMA SAÍDA SÓ, e é o que esta etapa passou a ser: quem qualifica lê os
+        // autos e passa adiante. Recusar e exigir diligência saíam daqui direto,
+        // sem segunda leitura — e a revisão, que existe para ler o que a casa
+        // decide, só via o que tinha sido aprovado. Agora tudo passa por ela.
         saidas: [
           { colunaKommo: 'REVISÃO DA QUALIFICAÇÃO', label: 'Enviar para revisão', variant: 'secondary' },
         ],
+        interrompe: false,
       },
       {
         key: 'ext-revisao',
