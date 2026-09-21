@@ -955,12 +955,17 @@ describe('acaoDeReprovar', () => {
 })
 
 /**
- * A COR DA ETIQUETA, e por que ela precisa ser estável.
+ * A COR DA ETIQUETA SAI DO ATO, e o ato é a primeira palavra dela.
  *
- * Numa coluna de trinta créditos encaminhados, quem procura os de um fundo acha
- * pela mancha antes de ler o texto — mas só se a mesma etiqueta tiver sempre a
- * mesma cor. Sorteada a cada render, ou tirada da posição na lista, a cor vira
- * enfeite; e enfeite que muda a cada sincronização confunde em vez de ajudar.
+ * As etiquetas da casa se escrevem "‹ato› ‹fundo›" — "Cotado BTG", "Reprovado
+ * PJUS", "Enviado ao Luiz". Na varredura de uma coluna o que a cor precisa dizer
+ * é o ATO: quem cotou está vivo, quem reprovou acabou. O fundo é o texto, lido
+ * depois que a cor chamou o olho.
+ *
+ * O que não casa com regra nenhuma cai numa paleta de reserva, e ali a cor não
+ * tem recado: serve só para distinguir, e por isso verde e vermelho ficam fora
+ * dela — uma etiqueta desconhecida que caísse no vermelho seria lida como recusa
+ * por acaso.
  */
 describe('tomDaTag', () => {
   it('a mesma etiqueta tem sempre a mesma cor', () => {
@@ -968,9 +973,28 @@ describe('tomDaTag', () => {
     expect(tomDaTag('')).toBe(tomDaTag(''))
   })
 
-  // VERDE E VERMELHO FICAM DE FORA: no card eles já significam análise pronta e
-  // recusa, e uma etiqueta verde seria lida como estado do crédito.
-  it('não usa as cores que já significam outra coisa no card', () => {
+  it('o ato manda na cor', () => {
+    expect(tomDaTag('Cotado PJUS')).toBe('green')
+    expect(tomDaTag('Cotado BTG')).toBe('green')
+    expect(tomDaTag('Enviado PJUS')).toBe('blue')
+    expect(tomDaTag('Reprovado BTG')).toBe('red')
+    expect(tomDaTag('Reprovado PJUS')).toBe('red')
+    expect(tomDaTag('Sem proposta')).toBe('red')
+  })
+
+  // O FUNDO MUDA E A FLEXÃO TAMBÉM: a regra olha o começo do nome, não o nome
+  // inteiro. "Cotado XP" entra amanhã e já nasce verde.
+  it('a regra vale para o fundo que ainda não existe', () => {
+    expect(tomDaTag('Cotado XP')).toBe('green')
+    expect(tomDaTag('Enviado ao Luiz')).toBe('blue')
+    expect(tomDaTag('Reprovada na mesa')).toBe('red')
+    expect(tomDaTag('COTADO BTG')).toBe('green')
+  })
+
+  // A PALETA DE RESERVA NÃO TEM RECADO: verde e vermelho são cores que dizem
+  // "passou" e "não passou", e uma etiqueta desconhecida não pode dizer isso por
+  // acaso.
+  it('etiqueta sem regra não cai em verde nem vermelho', () => {
     for (const nome of ['Fundo Alfa', 'Beta', 'urgente', 'XP', 'a', 'zzz', '2026']) {
       expect(TONS_DA_TAG, nome).toContain(tomDaTag(nome))
     }
@@ -997,9 +1021,32 @@ describe('coresDasTags', () => {
   // As etiquetas reais de um card do funil externo, em 21/09/2026.
   const doCard = ['Enviado PJUS', 'Reprovado BTG', 'Cotado BTG', 'Sem proposta']
 
-  it('nenhuma cor se repete dentro do card', () => {
-    const cores = [...coresDasTags(doCard).values()]
-    expect(new Set(cores).size).toBe(doCard.length)
+  /**
+   * A COR DO ATO NÃO DESVIA, e é a exceção que dá sentido à regra.
+   *
+   * "Reprovado BTG" e "Reprovado PJUS" no mesmo card têm de sair vermelhas as
+   * duas: a cor ali não separa etiquetas, diz o que aconteceu com o crédito em
+   * cada fundo. Desviar a segunda por higiene visual apagaria a informação.
+   */
+  it('o mesmo ato repete a cor, de propósito', () => {
+    const cores = coresDasTags(['Reprovado BTG', 'Reprovado PJUS', 'Cotado XP'])
+    expect(cores.get('Reprovado BTG')).toBe('red')
+    expect(cores.get('Reprovado PJUS')).toBe('red')
+    expect(cores.get('Cotado XP')).toBe('green')
+  })
+
+  it('cada ato do card sai com a sua cor', () => {
+    const cores = coresDasTags(doCard)
+    expect(cores.get('Enviado PJUS')).toBe('blue')
+    expect(cores.get('Cotado BTG')).toBe('green')
+    expect(cores.get('Reprovado BTG')).toBe('red')
+    expect(cores.get('Sem proposta')).toBe('red')
+  })
+
+  it('as sem regra não se repetem entre si no mesmo card', () => {
+    const semRegra = ['Fundo Alfa', 'Beta', 'urgente', 'XP', 'zzz']
+    const cores = [...coresDasTags(semRegra).values()]
+    expect(new Set(cores).size).toBe(semRegra.length)
   })
 
   it('a cor sai do nome quando não há choque', () => {

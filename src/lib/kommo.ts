@@ -137,16 +137,50 @@ export const SUBDIVISOES_PRECATORIO = TRILHAS_PRECATORIO
  * seria lida como estado do crédito.
  */
 /**
- * SEIS TONS, E ERAM TRÊS. Com três, seis etiquetas distintas ("Enviado PJUS",
- * "Reprovado BTG", "Cotado BTG", "Sem proposta"…) caíam duas a duas na mesma
- * cor. Verde e vermelho continuam fora: no card eles já significam análise
- * pronta e recusa.
+ * A PALETA DE RESERVA: as cores de uma etiqueta que a casa ainda não nomeou.
+ *
+ * Verde e vermelho ficam fora DELA de propósito. Eles são cores com recado —
+ * passou, não passou — e uma etiqueta desconhecida que caísse no vermelho seria
+ * lida como recusa por acaso. Quem tem recado a dar é a tabela abaixo.
  */
 export const TONS_DA_TAG = ['blue', 'purple', 'orange', 'teal', 'pink', 'indigo'] as const
 
-export type TomDaTag = (typeof TONS_DA_TAG)[number]
+export type TomDaTag = (typeof TONS_DA_TAG)[number] | 'red' | 'green'
+
+/**
+ * A COR SAI DO ATO, e não do nome inteiro.
+ *
+ * As etiquetas da casa se escrevem "‹ato› ‹fundo›" — "Cotado BTG", "Reprovado
+ * PJUS", "Enviado PJUS" —, e o que a cor precisa dizer, na varredura de uma
+ * coluna, é o ATO: quem cotou está vivo, quem reprovou acabou. O fundo é o
+ * texto, que se lê quando a cor já chamou o olho.
+ *
+ * FOI O QUE FEZ VERDE E VERMELHO VOLTAREM. Eles estavam fora da paleta porque
+ * uma cor com recado num sorteio mente; aqui não há sorteio — "Reprovado BTG"
+ * em vermelho diz exatamente o que aconteceu, no mesmo vocabulário que o resto
+ * da tela usa.
+ *
+ * COMPARAÇÃO POR PEDAÇO DO COMEÇO, e não igualdade: o fundo muda ("Cotado XP"
+ * entra amanhã) e a flexão também ("Reprovada", "Reprovados"). Nome que não
+ * casa com regra nenhuma cai na paleta de reserva, e continua tendo cor.
+ */
+const TOM_POR_ATO: { comeca: string; tom: TomDaTag }[] = [
+  { comeca: 'cotad', tom: 'green' },
+  { comeca: 'enviad', tom: 'blue' },
+  { comeca: 'reprovad', tom: 'red' },
+  { comeca: 'sem proposta', tom: 'red' },
+]
+
+/** A cor que o ato manda, ou nada — e aí quem decide é a paleta de reserva. */
+function tomPorAto(nome: string): TomDaTag | null {
+  const limpo = normalizarBusca(nome)
+  return TOM_POR_ATO.find((r) => limpo.startsWith(r.comeca))?.tom ?? null
+}
 
 export function tomDaTag(nome: string): TomDaTag {
+  const doAto = tomPorAto(nome)
+  if (doAto) return doAto
+
   const tons = TONS_DA_TAG
   // FNV-1a, e não a soma dos caracteres. A soma espalha mal quando os nomes
   // compartilham palavras — que é exatamente o caso aqui, onde quase toda
@@ -179,9 +213,21 @@ export function coresDasTags(nomes: readonly string[]): Map<string, TomDaTag> {
   const mapa = new Map<string, TomDaTag>()
   for (const nome of nomes) {
     if (mapa.has(nome)) continue
-    let tom = tomDaTag(nome)
+
+    // A COR DO ATO NÃO DESVIA, e é a exceção que dá sentido à regra: "Reprovado
+    // BTG" e "Reprovado PJUS" no mesmo card TÊM de sair vermelhas as duas — a
+    // cor ali não separa etiquetas, ela diz o que aconteceu com o crédito em
+    // cada fundo. Desviar a segunda por higiene visual apagaria a informação.
+    const doAto = tomPorAto(nome)
+    if (doAto) {
+      mapa.set(nome, doAto)
+      continue
+    }
+
+    // Sem regra de ato, a cor vem da paleta de reserva — e só ela desvia.
+    let tom: TomDaTag = tomDaTag(nome)
     if (usados.has(tom)) {
-      const inicio = TONS_DA_TAG.indexOf(tom)
+      const inicio = TONS_DA_TAG.indexOf(tom as (typeof TONS_DA_TAG)[number])
       for (let k = 1; k < TONS_DA_TAG.length; k++) {
         const outro = TONS_DA_TAG[(inicio + k) % TONS_DA_TAG.length]
         if (!usados.has(outro)) {
