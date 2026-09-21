@@ -149,6 +149,16 @@ export const ABA_APROVADOS_EXTERNO = 'ext-encaminhar'
 export const ABA_REPROVADOS_EXTERNO = 'ext-reprovados'
 
 /**
+ * A aba dos créditos que estão com o fundo, esperando preço.
+ *
+ * ELA FICOU FORA DA TELA ATÉ 21/09/2026, por decisão de quem opera: era espera
+ * do fundo, não trabalho da casa. Passou a valer a pena ver — um crédito parado
+ * ali é dinheiro esperando resposta de alguém, e quem acompanha precisa saber
+ * quantos são.
+ */
+export const ABA_EM_PRECIFICACAO_EXTERNO = 'ext-precificacao'
+
+/**
  * AS ABAS EM QUE O CARD MOSTRA AS ETIQUETAS DO KOMMO.
  *
  * As duas terminais do Externo, e não a tela toda. O espelho guarda as tags de
@@ -163,6 +173,9 @@ export const ABA_REPROVADOS_EXTERNO = 'ext-reprovados'
  */
 export const ABAS_COM_TAGS: ReadonlySet<string> = new Set([
   ABA_APROVADOS_EXTERNO,
+  // EM PRECIFICAÇÃO É ONDE A ETIQUETA MAIS IMPORTA: o crédito está com um fundo
+  // específico, esperando o preço dele, e a etiqueta é o que diz com qual.
+  ABA_EM_PRECIFICACAO_EXTERNO,
   ABA_REPROVADOS_EXTERNO,
 ])
 
@@ -321,6 +334,16 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         descricaoVazia: 'Nenhum precatório aprovado.',
       },
       {
+        key: ABA_EM_PRECIFICACAO_EXTERNO,
+        // "EM PRECIFICAÇÃO" NA PLATAFORMA, "AGUARDANDO PRECIFICAÇÃO" NO KOMMO. O
+        // nome do kanban descreve a espera de quem mandou; o daqui nomeia o
+        // estado do crédito, como nas outras abas — e nenhuma delas começa por
+        // "aguardando", embora quase todas sejam espera de alguém.
+        label: 'Em precificação',
+        colunaKommo: 'AGUARDANDO PRECIFICAÇÃO',
+        descricaoVazia: 'Nenhum precatório em precificação pelo fundo.',
+      },
+      {
         key: 'ext-diligencia',
         label: 'Diligência',
         colunaKommo: 'DILIGÊNCIA',
@@ -348,9 +371,9 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         descricaoVazia: 'Nenhum precatório externo fechado.',
       },
     ],
-    // FORA DA TELA, de propósito e por decisão de quem opera: "AGUARDANDO
-    // PRECIFICAÇÃO" existe no kanban e não vira aba — é espera pelo fundo, não
-    // trabalho da casa.
+    // TODAS AS COLUNAS DO KANBAN ESTÃO AQUI, menos a etapa de entrada — que é
+    // do comercial, antes de o crédito chegar à casa. "AGUARDANDO PRECIFICAÇÃO"
+    // era a última de fora e entrou em 21/09/2026.
   },
 ]
 

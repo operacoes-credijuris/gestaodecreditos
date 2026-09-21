@@ -40,6 +40,7 @@ import { primeiroCnj } from '../../supabase/functions/_shared/nucleo/cnj.ts'
 import {
   ABA_ANALISE_INTERNA,
   ABA_APROVADOS_EXTERNO,
+  ABA_EM_PRECIFICACAO_EXTERNO,
   ABA_REPROVADOS_EXTERNO,
   ABAS_COM_TAGS,
   type DefAbaPrecatorio,
@@ -74,6 +75,7 @@ export const FUNIL_PRECATORIO = FUNIL_PRECATORIO_INTERNO
 export {
   ABA_ANALISE_INTERNA,
   ABA_APROVADOS_EXTERNO,
+  ABA_EM_PRECIFICACAO_EXTERNO,
   ABA_REPROVADOS_EXTERNO,
   ABAS_COM_TAGS,
   FUNIL_PRECATORIO_EXTERNO,
@@ -544,6 +546,10 @@ export const ABAS_EXTERNO_SEM_TRABALHO: ReadonlySet<string> = new Set([
   'ext-fechados',
   'ext-diligencia',
   'ext-reprovados',
+  // EM PRECIFICAÇÃO A BOLA ESTÁ COM O FUNDO: o crédito já foi encaminhado e o
+  // que se espera é o preço dele. Oferecer diligência ali convidaria a refazer
+  // o que já foi feito antes de encaminhar.
+  ABA_EM_PRECIFICACAO_EXTERNO,
 ])
 
 /**

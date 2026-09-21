@@ -77,10 +77,10 @@ const COLUNAS_INTERNO = [
 /**
  * As colunas do funil NOVO do Externo, como o Kommo as devolveu.
  *
- * EM CAIXA ALTA PORQUE É ASSIM QUE ESTÃO LÁ. "AGUARDANDO PRECIFICAÇÃO" existe
- * no kanban e NÃO vira aba, por decisão de quem opera — é espera pelo fundo, não
- * trabalho da casa. Fica no espelho de propósito: é o que garante que a ausência
- * dela na tela seja escolha, e não coluna perdida.
+ * EM CAIXA ALTA PORQUE É ASSIM QUE ESTÃO LÁ. Todas viram aba menos a etapa de
+ * entrada, que é do comercial — o crédito ainda não chegou à casa. Ela fica no
+ * espelho de propósito: é o que garante que a ausência dela na tela seja
+ * escolha, e não coluna perdida no remapeamento.
  */
 const COLUNAS_EXTERNO = [
   'Etapa de leads de entrada',
@@ -383,12 +383,13 @@ describe('destinos que o servidor aceita', () => {
 describe('abas da trilha Externa', () => {
   const abas = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, espelho(), 'externo')
 
-  it('mostra os oito rótulos da plataforma, na ordem da trilha', () => {
+  it('mostra os nove rótulos da plataforma, na ordem da trilha', () => {
     expect(abas.map((a) => a.label)).toEqual([
       'Qualificação',
       'Revisão',
       'Memorando',
       'Aprovados',
+      'Em precificação',
       'Diligência',
       'Reprovados',
       'Proposta',
@@ -414,21 +415,26 @@ describe('abas da trilha Externa', () => {
   })
 
   /**
-   * A COLUNA QUE FICOU DE FORA, e ficou por decisão.
+   * A COLUNA QUE FICA DE FORA, e fica por decisão.
    *
-   * "AGUARDANDO PRECIFICAÇÃO" existe no kanban e não vira aba: é espera pelo
-   * fundo, e não trabalho da casa. O teste não afirma que isso é certo — afirma
-   * que é DELIBERADO: se um dia alguém a espelhar, este teste cai e obriga a
-   * decisão a ser tomada de novo, em vez de entrar de carona.
+   * Restou uma: a etapa de entrada, que é do comercial — o crédito ainda não
+   * chegou à casa. O teste não afirma que isso é certo; afirma que é DELIBERADO:
+   * se um dia alguém a espelhar, ele cai e obriga a decisão a ser tomada de novo,
+   * em vez de a aba entrar de carona.
    *
-   * FOI ASSIM QUE O MEMORANDO ENTROU: ele estava nesta lista, o teste caiu, e a
-   * inclusão passou por uma decisão em vez de por um descuido.
+   * FOI ASSIM QUE AS DUAS ÚLTIMAS ENTRARAM. O memorando estava nesta lista, o
+   * teste caiu, e a inclusão passou por uma decisão; "AGUARDANDO PRECIFICAÇÃO"
+   * saiu daqui em 21/09/2026 pelo mesmo caminho — era espera do fundo, e passou a
+   * valer a pena ver quantos créditos estão parados nela.
    */
-  it('a precificação do fundo não vira aba', () => {
-    expect(abas).toHaveLength(8)
+  it('só a etapa de entrada fica fora das abas', () => {
+    expect(abas).toHaveLength(9)
     const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
     const nomes = externo.abas.map((a) => a.colunaKommo)
-    expect(nomes).not.toContain('AGUARDANDO PRECIFICAÇÃO')
+    expect(nomes).toContain('AGUARDANDO PRECIFICAÇÃO')
+    expect(COLUNAS_EXTERNO.filter((c) => !nomes.includes(c))).toEqual([
+      'Etapa de leads de entrada',
+    ])
   })
 
   // ETAPA DE TRABALHO, NÃO DE DECISÃO. A Revisão passou a MANDAR cards para cá
@@ -770,8 +776,8 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     // precatórios existem. Se mudasse, se leria como dado mudando.
     const etapas = espelho()
     const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
-    // 6 abas do Interno + 8 do Externo, e nada compartilhado desde a separação.
-    expect(ids.size).toBe(14)
+    // 6 abas do Interno + 9 do Externo, e nada compartilhado desde a separação.
+    expect(ids.size).toBe(15)
   })
 
   it('a união vale seja qual for o funil de precatório perguntado', () => {
@@ -791,7 +797,7 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     expect(ids.has(idDe('FECHADOS', etapas))).toBe(false)
     expect(ids.has(idDe('FORMALIZAÇÃO (CONTRATOS E ESCRITURA)', etapas))).toBe(false)
     expect(ids.has(idDe('Etapa de leads de entrada', etapas))).toBe(false)
-    expect(ids.has(idExt('AGUARDANDO PRECIFICAÇÃO', etapas))).toBe(false)
+    expect(ids.has(idExt('Etapa de leads de entrada', etapas))).toBe(false)
   })
 
   it('a soma das pílulas fecha com o número do tipo de crédito', () => {
