@@ -34,20 +34,25 @@ describe('as etiquetas da precificação', () => {
   it('são exatamente as que a casa usa', () => {
     expect(ETIQUETAS_DA_PRECIFICACAO.map((e) => e.nome)).toEqual([
       'Enviado PJUS',
+      'Cotado PJUS',
       'Reprovado PJUS',
       'Cotado BTG',
       'Reprovado BTG',
       'Pendente Luiz',
+      'Cotado Luiz',
       'Reprovado Luiz',
     ])
   })
 
-  it('cada destino tem o desfecho vivo e o recusado, nessa ordem', () => {
+  // A ORDEM DENTRO DO GRUPO É A DO PERCURSO: onde o crédito está, a cotação que
+  // voltou, e por fim a recusa — que é sempre a última.
+  it('a recusa fecha cada destino, e é uma só', () => {
     const grupos = etiquetasPorDestino()
     expect(grupos.map((g) => g.destino)).toEqual(['PJUS', 'BTG', 'Luiz'])
     for (const g of grupos) {
-      expect(g.etiquetas, g.destino).toHaveLength(2)
-      expect(g.etiquetas[1].nome, g.destino).toMatch(/^Reprovado /)
+      const recusas = g.etiquetas.filter((e) => /^Reprovado /.test(e.nome))
+      expect(recusas, g.destino).toHaveLength(1)
+      expect(g.etiquetas[g.etiquetas.length - 1].nome, g.destino).toMatch(/^Reprovado /)
     }
   })
 })
@@ -60,11 +65,14 @@ describe('as etiquetas da precificação', () => {
  * `tags_to_delete`.
  */
 describe('irmasDaEtiqueta', () => {
-  it('a alternativa do mesmo destino sai quando esta entra', () => {
+  it('as alternativas do mesmo destino saem quando esta entra', () => {
     expect(irmasDaEtiqueta('Cotado BTG')).toEqual(['Reprovado BTG'])
     expect(irmasDaEtiqueta('Reprovado BTG')).toEqual(['Cotado BTG'])
-    expect(irmasDaEtiqueta('Enviado PJUS')).toEqual(['Reprovado PJUS'])
-    expect(irmasDaEtiqueta('Reprovado Luiz')).toEqual(['Pendente Luiz'])
+    // TRÊS NO DESTINO, DUAS IRMÃS: cotar um crédito que estava só enviado apaga
+    // o "Enviado", que é a notícia velha.
+    expect(irmasDaEtiqueta('Cotado PJUS')).toEqual(['Enviado PJUS', 'Reprovado PJUS'])
+    expect(irmasDaEtiqueta('Enviado PJUS')).toEqual(['Cotado PJUS', 'Reprovado PJUS'])
+    expect(irmasDaEtiqueta('Reprovado Luiz')).toEqual(['Pendente Luiz', 'Cotado Luiz'])
   })
 
   // ENTRE DESTINOS NÃO HÁ EXCLUSÃO: cotado no BTG e reprovado no PJUS é o estado
@@ -142,7 +150,7 @@ describe('mesmaEtiqueta', () => {
  */
 describe('etiquetasDaAba', () => {
   it('só a precificação oferece etiquetas', () => {
-    expect(etiquetasDaAba(ABA_EM_PRECIFICACAO_EXTERNO)).toHaveLength(6)
+    expect(etiquetasDaAba(ABA_EM_PRECIFICACAO_EXTERNO)).toEqual(ETIQUETAS_DA_PRECIFICACAO)
   })
 
   it('as outras abas ficam só na leitura', () => {

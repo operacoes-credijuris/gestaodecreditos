@@ -33,22 +33,27 @@ export interface EtiquetaDoFundo {
 }
 
 /**
- * AS SEIS ETIQUETAS DA ABA "EM PRECIFICAÇÃO", ditadas por quem opera em 22/09/2026.
+ * AS ETIQUETAS DA ABA "EM PRECIFICAÇÃO", ditadas por quem opera em 22/09/2026.
  *
  * O PRIMEIRO VERBO MUDA DE DESTINO PARA DESTINO — "Enviado", "Cotado",
  * "Pendente" — e não é descuido: é o vocabulário que o comercial já usa no
  * kanban, e uniformizá-lo aqui criaria etiquetas novas no Kommo em vez de casar
- * com as que estão lá. A segunda é sempre "Reprovado ‹destino›".
+ * com as que estão lá. A última de cada destino é sempre "Reprovado ‹destino›".
  *
- * A ORDEM É A DA LISTA NA TELA. Cada destino traz primeiro o desfecho vivo e
- * depois o recusado, que é a ordem em que os dois acontecem.
+ * A ORDEM É A DA LISTA NA TELA, e é a do próprio percurso do crédito: primeiro
+ * onde ele está (enviado, pendente), depois a cotação que voltou, e por fim a
+ * recusa. Como só uma vale por destino, subir um degrau apaga o anterior — que é
+ * o que se quer: "Cotado PJUS" substituindo "Enviado PJUS" é a notícia de que o
+ * fundo respondeu.
  */
 export const ETIQUETAS_DA_PRECIFICACAO: readonly EtiquetaDoFundo[] = [
   { destino: 'PJUS', nome: 'Enviado PJUS' },
+  { destino: 'PJUS', nome: 'Cotado PJUS' },
   { destino: 'PJUS', nome: 'Reprovado PJUS' },
   { destino: 'BTG', nome: 'Cotado BTG' },
   { destino: 'BTG', nome: 'Reprovado BTG' },
   { destino: 'Luiz', nome: 'Pendente Luiz' },
+  { destino: 'Luiz', nome: 'Cotado Luiz' },
   { destino: 'Luiz', nome: 'Reprovado Luiz' },
 ]
 
