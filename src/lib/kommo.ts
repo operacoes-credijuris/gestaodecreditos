@@ -60,6 +60,7 @@ import {
   type EtiquetaDoFundo,
   etiquetaCanonica,
   etiquetasPorDestino,
+  irmasDaEtiqueta,
   mesmaEtiqueta,
   normalizarEtiqueta,
 } from '../../supabase/functions/_shared/etiquetasDoFundo.ts'
@@ -94,6 +95,7 @@ export {
   type EtiquetaDoFundo,
   etiquetaCanonica,
   etiquetasPorDestino,
+  irmasDaEtiqueta,
   mesmaEtiqueta,
   normalizarEtiqueta,
   FUNIL_PRECATORIO_EXTERNO,

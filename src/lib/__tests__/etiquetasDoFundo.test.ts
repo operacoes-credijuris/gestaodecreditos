@@ -20,6 +20,7 @@ import {
   etiquetaCanonica,
   etiquetasDaAba,
   etiquetasPorDestino,
+  irmasDaEtiqueta,
   mesmaEtiqueta,
   normalizarEtiqueta,
   tomDaTag,
@@ -48,6 +49,43 @@ describe('as etiquetas da precificação', () => {
       expect(g.etiquetas, g.destino).toHaveLength(2)
       expect(g.etiquetas[1].nome, g.destino).toMatch(/^Reprovado /)
     }
+  })
+})
+
+/**
+ * UMA ETIQUETA POR DESTINO. O crédito está cotado no BTG ou reprovado no BTG,
+ * não nos dois — e quem opera pediu que a tela não deixasse as duas conviverem.
+ * A exclusão mora aqui, e não na tela, porque quem a executa é o servidor: a
+ * troca vai num PATCH só, com a nova em `tags_to_add` e a irmã em
+ * `tags_to_delete`.
+ */
+describe('irmasDaEtiqueta', () => {
+  it('a alternativa do mesmo destino sai quando esta entra', () => {
+    expect(irmasDaEtiqueta('Cotado BTG')).toEqual(['Reprovado BTG'])
+    expect(irmasDaEtiqueta('Reprovado BTG')).toEqual(['Cotado BTG'])
+    expect(irmasDaEtiqueta('Enviado PJUS')).toEqual(['Reprovado PJUS'])
+    expect(irmasDaEtiqueta('Reprovado Luiz')).toEqual(['Pendente Luiz'])
+  })
+
+  // ENTRE DESTINOS NÃO HÁ EXCLUSÃO: cotado no BTG e reprovado no PJUS é o estado
+  // normal de um crédito em precificação, e é o que a fila precisa mostrar.
+  it('nenhuma irmã é de outro destino', () => {
+    for (const e of ETIQUETAS_DA_PRECIFICACAO) {
+      const destinos = irmasDaEtiqueta(e.nome).map(
+        (n) => ETIQUETAS_DA_PRECIFICACAO.find((x) => x.nome === n)?.destino,
+      )
+      expect(new Set(destinos), e.nome).toEqual(new Set([e.destino]))
+    }
+  })
+
+  it('o que não é da casa não arrasta ninguém', () => {
+    expect(irmasDaEtiqueta('Cotado XP')).toEqual([])
+    expect(irmasDaEtiqueta('')).toEqual([])
+    expect(irmasDaEtiqueta(null)).toEqual([])
+  })
+
+  it('a comparação tolera caixa e espaço, como no resto', () => {
+    expect(irmasDaEtiqueta(' cotado   btg ')).toEqual(['Reprovado BTG'])
   })
 })
 

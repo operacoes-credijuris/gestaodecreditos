@@ -896,10 +896,14 @@ function SeloDaEtapa({ lead }: { lead: KommoLead }) {
  * na lista continua aparecendo no card, fora do alcance daqui: ela é de quem a
  * pôs.
  *
- * AS DUAS DE UM DESTINO NÃO SE EXCLUEM. Marcar "Reprovado PJUS" não tira
- * "Enviado PJUS" — quem opera pediu explicitamente para uma etiqueta não mexer
- * em outra, e a sequência enviado→reprovado é a história do crédito naquele
- * fundo, não um estado único.
+ * UMA POR DESTINO, e é o que a lista dentro de cada grupo desenha: marcar
+ * "Reprovado BTG" tira "Cotado BTG", porque o crédito está num dos dois e não
+ * nos dois. Entre destinos não há exclusão nenhuma — cotado no BTG e reprovado
+ * no PJUS é o estado normal de um crédito em precificação. A troca vai num PATCH
+ * só, do lado do servidor; a tela não manda duas chamadas.
+ *
+ * CLICAR NA MARCADA DESMARCA. É como se desfaz um clique errado, e sem isso a
+ * única saída seria marcar a outra — trocar um engano por outro.
  */
 function SeletorDeEtiquetas({
   oferecidas,
@@ -942,19 +946,23 @@ function SeletorDeEtiquetas({
 
   return (
     <div className="relative" ref={caixa}>
+      {/* SÓ O ÍCONE. O chip com a palavra "Etiquetas" competia com as próprias
+          etiquetas na mesma linha — um selo a mais, do mesmo tamanho, que não
+          dizia nada sobre o crédito. Aqui ele é ferramenta, não informação: fica
+          discreto ao lado das etiquetas e só o ponteiro e o título o explicam. */}
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
         title="Aplicar ou remover as etiquetas dos fundos"
+        aria-label="Etiquetas do card"
         className={cn(
-          'inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-xs font-medium transition-colors',
+          'inline-flex h-5 w-5 items-center justify-center rounded transition-colors',
           aberto
-            ? 'border-brand-400 bg-brand-50 text-brand-700'
-            : 'border-slate-300 text-slate-500 hover:border-brand-400 hover:text-brand-700',
+            ? 'bg-brand-50 text-brand-700'
+            : 'text-slate-400 hover:bg-slate-100 hover:text-brand-700',
         )}
       >
-        <Tag className="h-3 w-3" />
-        Etiquetas
+        <Tag className="h-3.5 w-3.5" />
       </button>
 
       {aberto && (
@@ -983,9 +991,12 @@ function SeletorDeEtiquetas({
                       posta ? 'font-medium text-slate-800' : 'text-slate-600',
                     )}
                   >
+                    {/* REDONDO, e não quadrado: dentro do grupo a escolha é uma
+                        só, e círculo é a forma que diz isso antes de a pessoa
+                        testar. O quadrado prometia poder marcar as duas. */}
                     <span
                       className={cn(
-                        'flex h-3.5 w-3.5 flex-none items-center justify-center rounded border',
+                        'flex h-3.5 w-3.5 flex-none items-center justify-center rounded-full border',
                         posta
                           ? 'border-brand-600 bg-brand-600 text-white'
                           : 'border-slate-300 text-slate-400',

@@ -21,8 +21,13 @@ export interface EtiquetaDoFundo {
   /**
    * O destino a que a etiqueta se refere: o fundo, ou a pessoa que negocia.
    *
-   * Agrupa o seletor, e só. As duas de um destino são os dois fins possíveis
-   * daquela tentativa — passou adiante, ou voltou recusada.
+   * AGRUPA E EXCLUI. As etiquetas de um destino são os fins possíveis daquela
+   * mesma tentativa — passou adiante, ou voltou recusada —, e o crédito está num
+   * deles, não em dois: marcar "Reprovado BTG" tira "Cotado BTG" do card. Quem
+   * opera pediu assim em 22/09/2026, depois de ver as duas conviverem.
+   *
+   * ENTRE DESTINOS NÃO HÁ EXCLUSÃO NENHUMA: o mesmo crédito pode estar cotado no
+   * BTG e reprovado no PJUS, e é exatamente isso que a fila precisa mostrar.
    */
   destino: string
 }
@@ -71,6 +76,29 @@ export function mesmaEtiqueta(a: unknown, b: unknown): boolean {
  */
 export function etiquetaCanonica(nome: unknown): string | null {
   return ETIQUETAS_DA_PRECIFICACAO.find((e) => mesmaEtiqueta(e.nome, nome))?.nome ?? null
+}
+
+/**
+ * As OUTRAS etiquetas do mesmo destino — as que saem quando esta entra.
+ *
+ * É AQUI QUE A EXCLUSÃO MORA, e não na tela, porque quem a executa é o servidor:
+ * a troca vai num PATCH só (`tags_to_add` com a nova, `tags_to_delete` com as
+ * irmãs), e não em duas chamadas. Duas deixariam o card num estado intermediário
+ * visível — sem etiqueta nenhuma, ou com as duas — se a segunda falhasse.
+ *
+ * DEVOLVE TODAS AS IRMÃS, tenha o card alguma ou não: pedir ao Kommo que
+ * desvincule uma etiqueta que não está lá não é erro, e perguntar antes custaria
+ * uma consulta para evitar coisa nenhuma.
+ */
+export function irmasDaEtiqueta(
+  nome: unknown,
+  etiquetas: readonly EtiquetaDoFundo[] = ETIQUETAS_DA_PRECIFICACAO,
+): string[] {
+  const dela = etiquetas.find((e) => mesmaEtiqueta(e.nome, nome))
+  if (!dela) return []
+  return etiquetas
+    .filter((e) => e.destino === dela.destino && !mesmaEtiqueta(e.nome, dela.nome))
+    .map((e) => e.nome)
 }
 
 /** As etiquetas agrupadas por destino, na ordem da lista — como o seletor as mostra. */

@@ -1,5 +1,10 @@
-// kommo-etiquetar — põe e tira UMA etiqueta de um card do Kommo, sem encostar
-// nas outras.
+// kommo-etiquetar — põe e tira as etiquetas da casa num card do Kommo, sem
+// encostar em nenhuma outra que o card tenha.
+//
+// O QUE ELA TOCA, exatamente: a etiqueta pedida e — ao aplicar — as do MESMO
+// destino, que são alternativas dela (ver `irmasDaEtiqueta`). Tudo o mais que
+// estiver no card fica onde está, inclusive etiqueta que a plataforma não
+// conhece: ela é de quem a pôs.
 //
 // POR QUE NÃO É UM PATCH DE `_embedded.tags`. Esse é o caminho óbvio, e é uma
 // armadilha: a documentação é literal — "all entity tags should be passed. If
@@ -25,7 +30,11 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
-import { etiquetaCanonica, mesmaEtiqueta } from '../_shared/etiquetasDoFundo.ts'
+import {
+  etiquetaCanonica,
+  irmasDaEtiqueta,
+  mesmaEtiqueta,
+} from '../_shared/etiquetasDoFundo.ts'
 import { trilhaDoPipeline } from '../_shared/trilhasDoPrecatorio.ts'
 
 /** Rótulo exibido no selo da anotação, dentro do card — o mesmo da kommo-mover. */
@@ -97,8 +106,17 @@ Deno.serve(async (req: Request) => {
     // para acrescentar o que já está lá não duplica, e pedir para tirar o que
     // não está não é erro — as duas são idempotentes, que é o que um botão de
     // alternar precisa quando o clique chega duas vezes.
+    //
+    // E A TROCA VAI NO MESMO PATCH: marcar "Reprovado BTG" tira "Cotado BTG",
+    // porque o crédito está num dos dois e não nos dois. Duas chamadas fariam a
+    // mesma coisa e deixariam um estado intermediário visível — sem etiqueta
+    // nenhuma, ou com as duas — se a segunda falhasse.
+    const irmas = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta) : []
     const patch = acao === 'adicionar'
-      ? { tags_to_add: [{ name: etiqueta }] }
+      ? {
+        tags_to_add: [{ name: etiqueta }],
+        ...(irmas.length > 0 ? { tags_to_delete: irmas.map((name) => ({ name })) } : {}),
+      }
       : { tags_to_delete: [{ name: etiqueta }] }
     const res = await fetch(`${base}/leads/${leadId}`, {
       method: 'PATCH',
@@ -141,8 +159,10 @@ Deno.serve(async (req: Request) => {
       // A ETIQUETA JÁ FOI GRAVADA — falhar aqui seria mentir sobre o que
       // aconteceu. Calcula o provável a partir do espelho, e diz que é provável.
       const antes = (espelho.tags ?? []) as string[]
+      const saiu = (t: string) =>
+        mesmaEtiqueta(t, etiqueta) || irmas.some((i) => mesmaEtiqueta(t, i))
       tags = acao === 'adicionar'
-        ? [...antes.filter((t) => !mesmaEtiqueta(t, etiqueta)), etiqueta]
+        ? [...antes.filter((t) => !saiu(t)), etiqueta]
         : antes.filter((t) => !mesmaEtiqueta(t, etiqueta))
       aviso =
         'A etiqueta foi gravada no Kommo, mas não consegui reler o card: a lista ' +
@@ -175,9 +195,20 @@ Deno.serve(async (req: Request) => {
       .eq('id', caller.id)
       .maybeSingle()
     const autor = perfil?.nome?.trim() || perfil?.email || caller.email || 'usuário do sistema'
+    // A QUE SAIU ENTRA NO TEXTO, quando saiu: "aplicada" sozinha esconderia que
+    // a outra do mesmo destino caiu junto, e é ela que o comercial tinha lido no
+    // card. Só entra a que o card de fato tinha — a lista de irmãs vai inteira
+    // ao Kommo, mas nem toda estava lá.
+    const substituidas = irmas.filter((i) =>
+      ((espelho.tags ?? []) as string[]).some((t) => mesmaEtiqueta(t, i)),
+    )
     const texto =
       acao === 'adicionar'
-        ? `Etiqueta "${etiqueta}" aplicada por ${autor}.`
+        ? substituidas.length > 0
+          ? `Etiqueta "${etiqueta}" aplicada por ${autor}, no lugar de ${
+            substituidas.map((t) => `"${t}"`).join(', ')
+          }.`
+          : `Etiqueta "${etiqueta}" aplicada por ${autor}.`
         : `Etiqueta "${etiqueta}" removida por ${autor}.`
     try {
       const resNota = await fetch(`${base}/leads/notes`, {
