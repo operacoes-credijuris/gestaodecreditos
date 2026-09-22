@@ -51,6 +51,18 @@ import {
   type SubdivisaoPrecatorio,
   TRILHAS_PRECATORIO,
 } from '../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
+// PELO MESMO MOTIVO das trilhas: a lista das etiquetas que a casa aplica é lida
+// pela tela, que desenha o seletor, e pela Edge Function `kommo-etiquetar`, que
+// decide o que aceita. Uma lista só — e ela precisa ser fechada, porque o Kommo
+// CRIA a etiqueta ao receber um nome que ainda não existe na conta.
+import {
+  ETIQUETAS_DA_PRECIFICACAO,
+  type EtiquetaDoFundo,
+  etiquetaCanonica,
+  etiquetasPorDestino,
+  mesmaEtiqueta,
+  normalizarEtiqueta,
+} from '../../supabase/functions/_shared/etiquetasDoFundo.ts'
 import type { KommoLead, KommoAnaliseInterna } from './types'
 
 // Conta do Kommo. O subdomínio não é segredo — é o que aparece na URL.
@@ -78,8 +90,31 @@ export {
   ABA_EM_PRECIFICACAO_EXTERNO,
   ABA_REPROVADOS_EXTERNO,
   ABAS_COM_TAGS,
+  ETIQUETAS_DA_PRECIFICACAO,
+  type EtiquetaDoFundo,
+  etiquetaCanonica,
+  etiquetasPorDestino,
+  mesmaEtiqueta,
+  normalizarEtiqueta,
   FUNIL_PRECATORIO_EXTERNO,
   FUNIL_PRECATORIO_INTERNO,
+}
+
+/**
+ * As etiquetas que a plataforma oferece NESTA aba — ou nenhuma, e aí o card só
+ * as mostra.
+ *
+ * SÓ "EM PRECIFICAÇÃO", por ora e por decisão de quem opera: é a aba em que o
+ * crédito está com um fundo esperando preço, e a etiqueta é o que diz com qual e
+ * em que pé. Nas outras duas abas com etiqueta — Aprovados e Reprovados — elas
+ * continuam sendo leitura: o trabalho já passou.
+ *
+ * DEVOLVE A LISTA, e não um booleano, porque é a lista que o seletor desenha e
+ * que o servidor valida. Quando outra aba ganhar etiquetas, o que muda aqui é
+ * uma linha, e não o componente.
+ */
+export function etiquetasDaAba(abaKey: string | null | undefined): readonly EtiquetaDoFundo[] {
+  return abaKey === ABA_EM_PRECIFICACAO_EXTERNO ? ETIQUETAS_DA_PRECIFICACAO : []
 }
 
 // Estágios do Funil Geral RPV que interessam ao operacional. Os nomes das
@@ -145,7 +180,7 @@ export const SUBDIVISOES_PRECATORIO = TRILHAS_PRECATORIO
  */
 export const TONS_DA_TAG = ['blue', 'purple', 'orange', 'teal', 'pink', 'indigo'] as const
 
-export type TomDaTag = (typeof TONS_DA_TAG)[number] | 'red' | 'green'
+export type TomDaTag = (typeof TONS_DA_TAG)[number] | 'red' | 'green' | 'yellow'
 
 /**
  * A COR SAI DO ATO, e não do nome inteiro.
@@ -169,6 +204,11 @@ const TOM_POR_ATO: { comeca: string; tom: TomDaTag }[] = [
   { comeca: 'enviad', tom: 'blue' },
   { comeca: 'reprovad', tom: 'red' },
   { comeca: 'sem proposta', tom: 'red' },
+  // PENDENTE É ESPERA, e espera tem cor própria na tela inteira: âmbar. Entrou
+  // com "Pendente Luiz", em 22/09/2026 — sem regra ela cairia na paleta de
+  // reserva, e um crédito que ainda vai ser cotado sairia da mesma cor de um
+  // rótulo qualquer, ao lado do verde de quem já cotou.
+  { comeca: 'pendente', tom: 'yellow' },
 ]
 
 /** A cor que o ato manda, ou nada — e aí quem decide é a paleta de reserva. */

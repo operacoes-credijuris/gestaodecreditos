@@ -33,9 +33,11 @@ import {
   ClipboardCheck,
   RefreshCw,
   Landmark,
+  Loader2,
   Paperclip,
   Receipt,
   Scale,
+  Tag,
   CheckCircle2,
   X,
 } from 'lucide-react'
@@ -51,6 +53,10 @@ import {
   ABA_ANALISE_INTERNA,
   ABAS_COM_TAGS,
   ABAS_EXTERNO_SEM_TRABALHO,
+  type EtiquetaDoFundo,
+  etiquetasDaAba,
+  etiquetasPorDestino,
+  mesmaEtiqueta,
   ehFunilPrecatorio,
   acaoDeReprovar,
   dataDaEtapa,
@@ -874,6 +880,135 @@ function SeloDaEtapa({ lead }: { lead: KommoLead }) {
   )
 }
 
+/**
+ * O SELETOR DE ETIQUETAS: marcar e desmarcar, no card, as etiquetas da casa.
+ *
+ * UMA POR CLIQUE, E SÓ ELA. A API do Kommo tem dois caminhos para etiquetar, e
+ * o óbvio — mandar `_embedded.tags` — SUBSTITUI a lista inteira do card: quem
+ * acrescentasse uma etiqueta sem devolver as outras apagaria as do comercial.
+ * Este seletor usa o outro, incremental (`tags_to_add`/`tags_to_delete`), e é
+ * por isso que ele pode existir dentro de uma lista de trinta cards sem risco:
+ * o que não foi clicado não é tocado. Ver a Edge Function `kommo-etiquetar`.
+ *
+ * SÓ AS DA CASA. A lista é fechada (ver `etiquetasDaAba`) porque o Kommo CRIA a
+ * etiqueta ao receber um nome desconhecido — e depois não a renomeia nem a
+ * apaga, nem pela API nem pelo painel. Etiqueta que o card já tenha e não esteja
+ * na lista continua aparecendo no card, fora do alcance daqui: ela é de quem a
+ * pôs.
+ *
+ * AS DUAS DE UM DESTINO NÃO SE EXCLUEM. Marcar "Reprovado PJUS" não tira
+ * "Enviado PJUS" — quem opera pediu explicitamente para uma etiqueta não mexer
+ * em outra, e a sequência enviado→reprovado é a história do crédito naquele
+ * fundo, não um estado único.
+ */
+function SeletorDeEtiquetas({
+  oferecidas,
+  aplicadas,
+  emVoo,
+  onAlternar,
+}: {
+  oferecidas: readonly EtiquetaDoFundo[]
+  /** As etiquetas que o card tem hoje — inclusive as de fora da lista. */
+  aplicadas: readonly string[]
+  /** A etiqueta DESTE card que está em voo, ou null. */
+  emVoo: string | null
+  onAlternar: (etiqueta: string, acao: 'adicionar' | 'remover') => void
+}) {
+  const [aberto, setAberto] = useState(false)
+  const caixa = useRef<HTMLDivElement>(null)
+
+  // Fecha ao clicar fora e no Esc. Sem isto, a lista de trinta cards ficaria com
+  // um painel aberto atrás do outro conforme a pessoa fosse clicando.
+  useEffect(() => {
+    if (!aberto) return
+    const fora = (e: MouseEvent) => {
+      if (!caixa.current?.contains(e.target as Node)) setAberto(false)
+    }
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAberto(false)
+    }
+    document.addEventListener('mousedown', fora)
+    document.addEventListener('keydown', tecla)
+    return () => {
+      document.removeEventListener('mousedown', fora)
+      document.removeEventListener('keydown', tecla)
+    }
+  }, [aberto])
+
+  // POR NOME NORMALIZADO, e não por igualdade: o que está no card veio do
+  // Kommo, e caixa ou espaço a mais ali deixariam a etiqueta marcada aparecer
+  // como desmarcada — e o clique seguinte mandaria acrescentar o que já existe.
+  const temEtiqueta = (nome: string) => aplicadas.some((t) => mesmaEtiqueta(t, nome))
+
+  return (
+    <div className="relative" ref={caixa}>
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        title="Aplicar ou remover as etiquetas dos fundos"
+        className={cn(
+          'inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-xs font-medium transition-colors',
+          aberto
+            ? 'border-brand-400 bg-brand-50 text-brand-700'
+            : 'border-slate-300 text-slate-500 hover:border-brand-400 hover:text-brand-700',
+        )}
+      >
+        <Tag className="h-3 w-3" />
+        Etiquetas
+      </button>
+
+      {aberto && (
+        <div className="absolute left-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          {etiquetasPorDestino(oferecidas).map((grupo) => (
+            <div key={grupo.destino}>
+              {/* O DESTINO AGRUPA, e é o que se procura: quem etiqueta está
+                  respondendo "o que aconteceu no BTG", não caçando um nome numa
+                  lista de seis. */}
+              <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                {grupo.destino}
+              </p>
+              {grupo.etiquetas.map((e) => {
+                const posta = temEtiqueta(e.nome)
+                return (
+                  <button
+                    key={e.nome}
+                    type="button"
+                    // Uma de cada vez NESTE card: duas chamadas simultâneas
+                    // voltariam com listas diferentes, e a última a chegar
+                    // sobrescreveria a outra na tela.
+                    disabled={emVoo !== null}
+                    onClick={() => onAlternar(e.nome, posta ? 'remover' : 'adicionar')}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60',
+                      posta ? 'font-medium text-slate-800' : 'text-slate-600',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex h-3.5 w-3.5 flex-none items-center justify-center rounded border',
+                        posta
+                          ? 'border-brand-600 bg-brand-600 text-white'
+                          : 'border-slate-300 text-slate-400',
+                      )}
+                    >
+                      {emVoo === e.nome ? (
+                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                      ) : posta ? (
+                        <Check className="h-2.5 w-2.5" />
+                      ) : null}
+                    </span>
+                    {e.nome}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CardCredito({
   lead,
   acoes,
@@ -895,6 +1030,9 @@ function CardCredito({
   botoes,
   desfechoNoCard,
   mostrarTags,
+  etiquetasOferecidas,
+  onEtiquetar,
+  etiquetaEmVoo,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -951,6 +1089,18 @@ function CardCredito({
    * Quais abas, exatamente, é `ABAS_COM_TAGS` quem diz.
    */
   mostrarTags: boolean
+  /**
+   * As etiquetas que ESTA aba deixa aplicar e remover — vazio, só leitura.
+   *
+   * Mostrar e EDITAR são coisas diferentes, e por isso são duas portas: em
+   * Aprovados e Reprovados a etiqueta é o registro do que já aconteceu, e ali
+   * ela se lê. Em "Em precificação" o crédito ainda está em jogo, e é lá que a
+   * casa marca em qual fundo ele está e como voltou.
+   */
+  etiquetasOferecidas: readonly EtiquetaDoFundo[]
+  onEtiquetar: (l: KommoLead, etiqueta: string, acao: 'adicionar' | 'remover') => void
+  /** A etiqueta deste card que está sendo gravada, ou null. */
+  etiquetaEmVoo: string | null
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -1035,15 +1185,28 @@ function CardCredito({
               coluna de trinta cards, quem procura os de um fundo acha pela mancha
               antes de ler o texto. Verde e vermelho ficam fora da paleta — no
               card eles já significam análise pronta e recusa. */}
-          {mostrarTags && (lead.tags ?? []).length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {[...coresDasTags(lead.tags ?? [])].map(([t, tom]) => (
-                <Badge key={t} size="sm" tone={tom}>
-                  {t}
-                </Badge>
-              ))}
-            </div>
-          )}
+          {mostrarTags &&
+            ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {[...coresDasTags(lead.tags ?? [])].map(([t, tom]) => (
+                  <Badge key={t} size="sm" tone={tom}>
+                    {t}
+                  </Badge>
+                ))}
+                {/* O SELETOR FICA NO FIM DA FILA DE ETIQUETAS, e aparece mesmo
+                    no card que ainda não tem nenhuma — é justamente ali que ele
+                    mais serve. Sem etiquetas e sem seletor, a linha inteira some
+                    e o card volta a ser o de antes. */}
+                {etiquetasOferecidas.length > 0 && (
+                  <SeletorDeEtiquetas
+                    oferecidas={etiquetasOferecidas}
+                    aplicadas={lead.tags ?? []}
+                    emVoo={etiquetaEmVoo}
+                    onAlternar={(etiqueta, acao) => onEtiquetar(lead, etiqueta, acao)}
+                  />
+                )}
+              </div>
+            )}
           {/* Sem linha de metadados: o processo já vem no título e o responsável é
               sempre a Credijuris. A data de CRIAÇÃO continua fora — ela é
               redundante com as datas das anotações, e a que importa numa fila é
@@ -2393,6 +2556,49 @@ export default function AnaliseCredito() {
     },
   })
 
+  /** Etiqueta em gravação: um card e uma etiqueta por vez, para o seletor travar. */
+  const [etiquetaEmVoo, setEtiquetaEmVoo] = useState<{
+    leadId: number
+    etiqueta: string
+  } | null>(null)
+
+  /**
+   * Marcar e desmarcar uma etiqueta do card, no Kommo.
+   *
+   * A LISTA DE VOLTA É A DO KOMMO — a função relê o card depois de gravar — e é
+   * ela que entra no cache. Invalidar a consulta em vez disso recarregaria os
+   * cards todos por causa de um clique, e ainda assim mostraria o espelho, que
+   * é o que acabou de mudar; escrever a lista relida é ao mesmo tempo mais
+   * barato e mais verdadeiro.
+   *
+   * SEM AVISO DE SUCESSO. A etiqueta aparece no card — o resultado É o aviso. O
+   * toast só entra quando algo saiu do lugar, que é quando ele informa algo.
+   */
+  const etiquetar = useMutation({
+    mutationFn: (args: {
+      leadId: number
+      etiqueta: string
+      acao: 'adicionar' | 'remover'
+    }) =>
+      invokeFunction<{ tags: string[]; aviso: string | null; mensagem: string }>(
+        'kommo-etiquetar',
+        args,
+      ),
+    onSuccess: (r, args) => {
+      qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+        antes?.map((l) =>
+          l.kommo_lead_id === args.leadId ? { ...l, tags: r?.tags ?? l.tags } : l,
+        ),
+      )
+      setEtiquetaEmVoo(null)
+      if (r?.aviso) toast.error(r.aviso)
+    },
+    onError: (e) => {
+      setEtiquetaEmVoo(null)
+      toast.error((e as Error).message)
+    },
+  })
+
   /**
    * Mover o card e deixar a mensagem como NOTA — o único caminho, para os dois
    * lugares em que se decide um desfecho (a janela de análise, em Pendentes, e
@@ -2665,6 +2871,17 @@ export default function AnaliseCredito() {
                 // onde elas dizem para qual fundo o crédito foi, ou por que não
                 // foi. Nas abas de trabalho seriam ruído.
                 mostrarTags={ABAS_COM_TAGS.has(abaAtual?.key ?? '')}
+                // E EDITÁVEIS SÓ EM "EM PRECIFICAÇÃO" — ver `etiquetasDaAba`.
+                // Nas outras duas com etiqueta a leitura basta: o trabalho
+                // naquele crédito já acabou.
+                etiquetasOferecidas={etiquetasDaAba(abaAtual?.key)}
+                onEtiquetar={(l, etiqueta, acao) => {
+                  setEtiquetaEmVoo({ leadId: l.kommo_lead_id, etiqueta })
+                  etiquetar.mutate({ leadId: l.kommo_lead_id, etiqueta, acao })
+                }}
+                etiquetaEmVoo={
+                  etiquetaEmVoo?.leadId === l.kommo_lead_id ? etiquetaEmVoo.etiqueta : null
+                }
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria
