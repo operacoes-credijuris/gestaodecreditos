@@ -12,6 +12,7 @@ import GeracaoContratos from '@/pages/comercial/GeracaoContratos'
 import CarteirasInvestidores from '@/pages/comercial/CarteirasInvestidores'
 import DadosPessoaisBancarios from '@/pages/comercial/DadosPessoaisBancarios'
 import AnaliseCredito from '@/pages/operacional/AnaliseCredito'
+import AutosDoProcesso from '@/pages/operacional/AutosDoProcesso'
 import PublicacoesMovimentacoes from '@/pages/operacional/execucao/PublicacoesMovimentacoes'
 import TarefasAdvbox from '@/pages/operacional/execucao/TarefasAdvbox'
 import Processos from '@/pages/operacional/execucao/Processos'
@@ -57,6 +58,7 @@ export default function App() {
 
         {/* Operacional */}
         <Route path="/operacional/analise" element={<AnaliseCredito />} />
+        <Route path="/operacional/autos" element={<AutosDoProcesso />} />
         <Route
           path="/operacional/execucao/publicacoes"
           element={<PublicacoesMovimentacoes />}
