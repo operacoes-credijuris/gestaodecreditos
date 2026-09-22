@@ -22,6 +22,7 @@ import {
   etiquetasPorDestino,
   irmasDaEtiqueta,
   mesmaEtiqueta,
+  ordenarEtiquetas,
   normalizarEtiqueta,
   tomDaTag,
 } from '@/lib/kommo'
@@ -94,6 +95,43 @@ describe('irmasDaEtiqueta', () => {
 
   it('a comparação tolera caixa e espaço, como no resto', () => {
     expect(irmasDaEtiqueta(' cotado   btg ')).toEqual(['Reprovado BTG'])
+  })
+})
+
+/**
+ * A ORDEM NO CARD É A DA CASA, e não a do Kommo.
+ *
+ * A do Kommo é a ordem em que alguém etiquetou, e muda de card para card: numa
+ * coluna de trinta, o mesmo fundo aparece ora no começo, ora no fim, e não há
+ * como varrer a fila sem ler cada linha. Fixa, a posição vira informação.
+ */
+describe('ordenarEtiquetas', () => {
+  it('PJUS, depois BTG, depois Luiz — venham como vierem', () => {
+    expect(
+      ordenarEtiquetas(['Reprovado Luiz', 'Cotado BTG', 'Enviado PJUS']),
+    ).toEqual(['Enviado PJUS', 'Cotado BTG', 'Reprovado Luiz'])
+  })
+
+  it('dentro do destino, a ordem é a do percurso', () => {
+    expect(ordenarEtiquetas(['Reprovado PJUS', 'Cotado PJUS', 'Enviado PJUS'])).toEqual([
+      'Enviado PJUS',
+      'Cotado PJUS',
+      'Reprovado PJUS',
+    ])
+  })
+
+  // ETIQUETA DE FORA É DE QUEM A PÔS: vai para o fim, na ordem em que veio.
+  // Inventar posição para ela seria fingir que a conhecemos.
+  it('o que não é da casa fica no fim, na ordem original', () => {
+    expect(
+      ordenarEtiquetas(['zzz', 'Reprovado BTG', 'urgente', 'Enviado PJUS']),
+    ).toEqual(['Enviado PJUS', 'Reprovado BTG', 'zzz', 'urgente'])
+  })
+
+  it('não perde nem inventa etiqueta', () => {
+    const doCard = ['Sem proposta', 'Cotado Luiz', 'Enviado PJUS']
+    expect(ordenarEtiquetas(doCard).slice().sort()).toEqual(doCard.slice().sort())
+    expect(ordenarEtiquetas([])).toEqual([])
   })
 })
 

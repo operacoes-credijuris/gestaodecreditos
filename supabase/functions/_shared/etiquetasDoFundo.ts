@@ -106,6 +106,37 @@ export function irmasDaEtiqueta(
     .map((e) => e.nome)
 }
 
+/**
+ * As etiquetas de um card NA ORDEM DA CASA: PJUS, depois BTG, depois Luiz.
+ *
+ * A ORDEM QUE VINHA ERA A DO KOMMO — isto é, a ordem em que alguém etiquetou —,
+ * e ela muda de card para card. Numa coluna de trinta, isso obriga a LER cada
+ * linha: o mesmo fundo aparece ora no começo, ora no fim. Com a ordem fixa, a
+ * posição vira informação: a primeira etiqueta é sempre a do PJUS, e a ausência
+ * dela se nota pelo que não está ali.
+ *
+ * É A MESMA ORDEM DO SELETOR, e de propósito: quem marca e quem lê veem a mesma
+ * sequência. Sai da lista, então basta reordenar lá para a tela acompanhar.
+ *
+ * O QUE NÃO É DA CASA VAI PARA O FIM, guardando a ordem em que veio — é etiqueta
+ * de quem a pôs, e inventar posição para ela seria fingir que a conhecemos.
+ */
+export function ordenarEtiquetas(
+  nomes: readonly string[],
+  etiquetas: readonly EtiquetaDoFundo[] = ETIQUETAS_DA_PRECIFICACAO,
+): string[] {
+  const posicao = (nome: string) => {
+    const i = etiquetas.findIndex((e) => mesmaEtiqueta(e.nome, nome))
+    return i === -1 ? etiquetas.length : i
+  }
+  return nomes
+    .map((nome, entrada) => ({ nome, entrada, ordem: posicao(nome) }))
+    // O DESEMPATE PELA ENTRADA mantém estável o que a lista não ordena: duas
+    // etiquetas de fora saem na ordem em que o Kommo as devolveu, sempre.
+    .sort((a, b) => a.ordem - b.ordem || a.entrada - b.entrada)
+    .map((x) => x.nome)
+}
+
 /** As etiquetas agrupadas por destino, na ordem da lista — como o seletor as mostra. */
 export function etiquetasPorDestino(
   etiquetas: readonly EtiquetaDoFundo[] = ETIQUETAS_DA_PRECIFICACAO,

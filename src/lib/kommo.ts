@@ -62,6 +62,7 @@ import {
   etiquetasPorDestino,
   irmasDaEtiqueta,
   mesmaEtiqueta,
+  ordenarEtiquetas,
   normalizarEtiqueta,
 } from '../../supabase/functions/_shared/etiquetasDoFundo.ts'
 import type { KommoLead, KommoAnaliseInterna } from './types'
@@ -97,6 +98,7 @@ export {
   etiquetasPorDestino,
   irmasDaEtiqueta,
   mesmaEtiqueta,
+  ordenarEtiquetas,
   normalizarEtiqueta,
   FUNIL_PRECATORIO_EXTERNO,
   FUNIL_PRECATORIO_INTERNO,

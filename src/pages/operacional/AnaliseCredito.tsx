@@ -57,6 +57,7 @@ import {
   etiquetasDaAba,
   etiquetasPorDestino,
   mesmaEtiqueta,
+  ordenarEtiquetas,
   ehFunilPrecatorio,
   acaoDeReprovar,
   dataDaEtapa,
@@ -1199,7 +1200,11 @@ function CardCredito({
           {mostrarTags &&
             ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0) && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {[...coresDasTags(lead.tags ?? [])].map(([t, tom]) => (
+                {/* A ORDEM É A DA CASA — PJUS, BTG, Luiz —, e não a do Kommo,
+                    que é a ordem em que alguém etiquetou e muda de card para
+                    card. Fixa, a POSIÇÃO passa a informar: a primeira é sempre
+                    a do PJUS, e a falta dela se nota pelo que não está ali. */}
+                {[...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => (
                   <Badge key={t} size="sm" tone={tom}>
                     {t}
                   </Badge>
