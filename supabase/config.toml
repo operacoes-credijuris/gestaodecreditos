@@ -103,3 +103,12 @@ verify_jwt = true
 # um código inexistente recebe a mesma resposta de um vencido.
 [functions.mcp-autos]
 verify_jwt = false
+
+# O aviso do Escavador de que um processo terminou de atualizar.
+#
+# SEM JWT PORQUE QUEM CHAMA É O ESCAVADOR, de fora, e não tem sessão nossa. O que
+# autoriza é o token gerado no painel deles e enviado no header Authorization —
+# a função o confere contra o que está gravado em integracao_escavador_secret e,
+# se ele não estiver configurado, RECUSA tudo em vez de aceitar tudo.
+[functions.escavador-callback]
+verify_jwt = false

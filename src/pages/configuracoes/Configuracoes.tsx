@@ -15,6 +15,7 @@ import {
   Puzzle,
   Search,
   Scale,
+  Copy,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
@@ -287,14 +288,48 @@ function SaldoEscavador() {
   )
 }
 
+/**
+ * O endereço que o Escavador precisa conhecer para nos avisar.
+ *
+ * SAI DA URL DO SUPABASE, e não de uma constante escrita à mão: o projeto é o
+ * mesmo que o app já usa, e um endereço digitado aqui envelheceria calado — o
+ * Escavador continuaria chamando um lugar que não existe mais, e o sintoma
+ * seria "os autos nunca chegam", sem nada apontando para a causa.
+ */
+function enderecoDoCallback(): string {
+  const base = String(import.meta.env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '')
+  return base ? `${base}/functions/v1/escavador-callback` : ''
+}
+
 function EscavadorConfig() {
   const { data, isLoading, error } = useIntegracao('escavador')
   const qc = useQueryClient()
   const toast = useToast()
   const [token, setToken] = useState('')
+  const [tokenCallback, setTokenCallback] = useState('')
   const [saving, setSaving] = useState(false)
 
   const configurado = Boolean((data?.config as ConfigEscavador)?.configurado)
+  const urlCallback = enderecoDoCallback()
+
+  async function salvarCallback() {
+    if (!tokenCallback.trim()) {
+      toast.error('Informe o token de callback gerado no painel do Escavador.')
+      return
+    }
+    setSaving(true)
+    try {
+      await invokeFunction('salvar-token-escavador', {
+        callback_token: tokenCallback.trim(),
+      })
+      setTokenCallback('')
+      toast.success('Token de callback salvo. A partir de agora os avisos do Escavador são aceitos.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function salvar() {
     if (!token.trim()) {
@@ -372,6 +407,57 @@ function EscavadorConfig() {
               <Button onClick={salvar} loading={saving}>
                 Salvar
               </Button>
+            </div>
+
+            {/* OS AVISOS DO ESCAVADOR.
+
+                Baixar os autos de um processo é assíncrono: pede-se, e a
+                resposta vem minutos ou horas depois. Perguntar "já foi?" de
+                tempos em tempos enche o log da conta e não acelera nada — o
+                caminho deles é o inverso, eles avisam. Para isso precisam saber
+                nosso endereço, e nós precisamos saber que o aviso é mesmo deles;
+                daí os dois campos abaixo, que se preenchem UMA vez. */}
+            <div className="sm:col-span-2 mt-2 border-t border-slate-100 pt-4">
+              <p className="mb-3 text-sm font-medium text-slate-800">
+                Avisos automáticos (callback)
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="URL para cadastrar no Escavador"
+                  hint="Cole este endereço em api.escavador.com/callbacks."
+                >
+                  <div className="flex items-center gap-2">
+                    <Input value={urlCallback} readOnly onFocus={(e) => e.target.select()} />
+                    <IconButton
+                      label="Copiar o endereço"
+                      icon={<Copy className="h-4 w-4" />}
+                      onClick={() => {
+                        navigator.clipboard
+                          .writeText(urlCallback)
+                          .then(() => toast.success('Endereço copiado.'))
+                          .catch(() => toast.error('Não consegui copiar; selecione e copie à mão.'))
+                      }}
+                    />
+                  </div>
+                </Field>
+                <Field
+                  label="Token de callback"
+                  hint="Gerado no painel do Escavador. É ele que prova que o aviso veio de lá."
+                >
+                  <Input
+                    type="password"
+                    value={tokenCallback}
+                    onChange={(e) => setTokenCallback(e.target.value)}
+                    placeholder="••••••••••••"
+                    autoComplete="off"
+                  />
+                </Field>
+                <div className="sm:col-span-2">
+                  <Button variant="outline" onClick={salvarCallback} loading={saving}>
+                    Salvar token de callback
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         )}

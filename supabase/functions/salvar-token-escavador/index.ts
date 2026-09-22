@@ -29,9 +29,34 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Acesso restrito ao administrador.' }, 403)
     }
 
-    const { token } = await req.json()
-    const chave = String(token ?? '').trim()
-    if (!chave) return jsonResponse({ error: 'Informe o token do Escavador.' }, 400)
+    const corpo = await req.json()
+    const chave = String(corpo?.token ?? '').trim()
+    const doCallback = String(corpo?.callback_token ?? '').trim()
+    if (!chave && !doCallback) {
+      return jsonResponse({ error: 'Informe o token do Escavador.' }, 400)
+    }
+
+    // O TOKEN DE CALLBACK É OUTRA COISA, e por isso pode vir sozinho: ele não
+    // fala com a API do Escavador — é o segredo que eles devolvem no header
+    // Authorization ao nos avisar que um processo terminou de atualizar, e o que
+    // a `escavador-callback` confere para saber que o POST é mesmo deles.
+    //
+    // NÃO HÁ COMO TESTÁ-LO, e é por isso que ele não passa pela confirmação do
+    // outro: não existe rota que diga "este é o token de callback certo". A
+    // prova vem no primeiro evento recebido.
+    if (doCallback) {
+      const { error } = await svc.from('integracao_escavador_secret').upsert(
+        {
+          id: 1,
+          callback_token: doCallback,
+          atualizado_em: new Date().toISOString(),
+          atualizado_por: caller?.id ?? null,
+        },
+        { onConflict: 'id' },
+      )
+      if (error) return jsonResponse({ error: error.message }, 400)
+      if (!chave) return jsonResponse({ ok: true, callback: true })
+    }
 
     let saldo: { creditos: number; saldo: number; descricao: string }
     try {
