@@ -49,7 +49,7 @@
 // cada página é cobrada — sem CPF, CNPJ ou OAB a corrente para com os campos
 // preenchidos e diz o que falta. O custo de cada chamada volta na tela.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ExternalLink, Info, RefreshCw, ScanText, Search } from 'lucide-react'
+import { AlertTriangle, Check, ExternalLink, Info, RefreshCw, ScanText, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
@@ -167,13 +167,19 @@ export function PainelProcessosJudiciais({
   const [apuracoes, setApuracoes] = useState<ApuracaoDD[]>([])
   const [processos, setProcessos] = useState<ProcessoNaTela[]>([])
   /**
-   * O estágio escolhido no filtro, ou vazio para todos.
+   * Os estágios marcados no filtro, ou nenhum para todos.
+   *
+   * VÁRIOS, E NÃO UM, desde 27/09/2026. O Escavador nomeia o mesmo fim de
+   * processo de jeitos diferentes conforme o tribunal — "Arquivado",
+   * "Encerrado", "Baixado" —, e para a diligência são a mesma coisa: processo
+   * que não ameaça mais a cessão. Com uma escolha só, ver "os que acabaram"
+   * obrigava a olhar um estágio, depois o outro, e somar de cabeça.
    *
    * ZERA AO TROCAR DE TITULAR: os estágios de um não são os do outro, e um
    * filtro herdado deixaria a aba do advogado vazia por causa de uma escolha
    * feita na do cedente — sem nada na tela explicando por quê.
    */
-  const [filtroEstagio, setFiltroEstagio] = useState('')
+  const [filtroEstagios, setFiltroEstagios] = useState<string[]>([])
 
   // O NOME DO CARD SÓ ENTRA SE O CEDENTE FOR TITULAR DE ALGUMA VERBA CEDIDA.
   // Numa cessão só de honorários, prefixar o campo com o nome dele faria a
@@ -202,7 +208,7 @@ export function PainelProcessosJudiciais({
   const jaEncadeou = useRef<number | null>(null)
   /** Qual titular está aberto na tabela. Vazio até a apuração chegar. */
   const [abaDoTitular, setAbaDoTitular] = useState('')
-  useEffect(() => setFiltroEstagio(''), [abaDoTitular])
+  useEffect(() => setFiltroEstagios([]), [abaDoTitular])
 
   // ------------------------------------------------- de quem é o que compramos
   //
@@ -728,7 +734,18 @@ export function PainelProcessosJudiciais({
 
   /** Os estágios presentes nesta aba, para o filtro só oferecer o que existe. */
   const estagiosDaAba = [...new Set(daAba.map((x) => x.estagio ?? '').filter(Boolean))].sort()
-  const listados = filtroEstagio ? daAba.filter((x) => x.estagio === filtroEstagio) : daAba
+  // SÓ VALE O QUE EXISTE NESTA ABA. Uma nova apuração pode trocar os estágios
+  // debaixo do filtro, e uma marcação órfã esconderia tudo sem nada marcado à
+  // vista para explicar a lista vazia.
+  const estagiosMarcados = filtroEstagios.filter((e) => estagiosDaAba.includes(e))
+  const listados =
+    estagiosMarcados.length > 0
+      ? daAba.filter((x) => estagiosMarcados.includes(x.estagio ?? ''))
+      : daAba
+  const alternarEstagio = (estagio: string) =>
+    setFiltroEstagios((antes) =>
+      antes.includes(estagio) ? antes.filter((e) => e !== estagio) : [...antes, estagio],
+    )
 
   return (
     <div className="space-y-4">
@@ -875,28 +892,61 @@ export function PainelProcessosJudiciais({
       ) : (
         <>
           {/* O FILTRO DE ESTÁGIO, e a conta do que ele esconde.
-              Só aparece com dois estágios ou mais: com um só, o seletor seria uma
+              Só aparece com dois estágios ou mais: com um só, o filtro seria uma
               escolha entre "tudo" e "tudo". E filtro que esconde linha em
               silêncio mente sobre o tamanho da dívida — por isso a linha à
-              direita diz quantos ficaram de fora e quanto eles somam. */}
+              direita diz quantos ficaram de fora e quanto eles somam.
+
+              MARCAÇÃO, E NÃO SELETOR: o Escavador chama o mesmo fim de
+              processo de nomes diferentes ("Arquivado", "Encerrado"), e juntar
+              os dois é marcar os dois. Nada marcado é tudo à vista — o estado
+              em que a aba abre. O NÚMERO AO LADO de cada estágio diz quantos
+              processos ele tem, para a escolha não ser às cegas. */}
           {estagiosDaAba.length > 1 && (
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-xs text-slate-500">
-                Estágio
-                <select
-                  value={filtroEstagio}
-                  onChange={(e) => setFiltroEstagio(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-brand-400 focus:outline-none"
-                >
-                  <option value="">todos</option>
-                  {estagiosDaAba.map((e) => (
-                    <option key={e} value={e}>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-xs text-slate-500">Estágio</span>
+                {estagiosDaAba.map((e) => {
+                  const marcado = estagiosMarcados.includes(e)
+                  const quantos = daAba.filter((x) => x.estagio === e).length
+                  return (
+                    <button
+                      key={e}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={marcado}
+                      onClick={() => alternarEstagio(e)}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors',
+                        marcado
+                          ? 'border-brand-400 bg-brand-50 text-brand-800'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'flex h-3 w-3 flex-none items-center justify-center rounded-sm border',
+                          marcado ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300',
+                        )}
+                      >
+                        {marcado && <Check className="h-2.5 w-2.5" />}
+                      </span>
                       {e}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {filtroEstagio && (
+                      <span className="tabular-nums text-slate-400">{quantos}</span>
+                    </button>
+                  )
+                })}
+                {estagiosMarcados.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFiltroEstagios([])}
+                    className="ml-1 text-xs text-brand-700 underline underline-offset-2 hover:text-brand-800"
+                  >
+                    limpar
+                  </button>
+                )}
+              </div>
+              {estagiosMarcados.length > 0 && (
                 <span className="text-xs text-slate-500 tabular-nums">
                   {listados.length} de {daAba.length} processo(s) ·{' '}
                   {brl(somaDasCausas(listados))} de {brl(somaDasCausas(daAba))}
