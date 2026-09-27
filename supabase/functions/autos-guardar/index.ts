@@ -91,6 +91,7 @@ interface Guardado {
   paginasTexto: string[];
   motivo?: string;
   imagensPrevistas?: number[];
+  imagens?: { pagina: number; caminho: string }[];
 }
 
 Deno.serve(async (req) => {
@@ -199,6 +200,21 @@ Deno.serve(async (req) => {
       const previstas = (Array.isArray((a as any)?.paginas_imagem) ? (a as any).paginas_imagem : [])
         .map((n: unknown) => Number(n))
         .filter((n: number) => Number.isInteger(n) && n >= 1);
+      // AS IMAGENS JÁ PRONTAS vêm junto desde 27/09/2026 — ver o comentário da
+      // gravação, abaixo. O caminho é conferido como o `autos-imagens` conferia: a
+      // pasta do dono e nada acima dela, porque o conector baixa do balde com
+      // service_role e entregaria qualquer caminho que estivesse aqui.
+      const imagens = (Array.isArray((a as any)?.imagens) ? (a as any).imagens : [])
+        .map((i: any) => ({ pagina: Number(i?.pagina ?? 0), caminho: String(i?.caminho ?? "").trim() }))
+        .filter((i: { pagina: number; caminho: string }) =>
+          Number.isInteger(i.pagina) && i.pagina >= 1 &&
+          i.caminho.startsWith(`${user.id}/`) && !i.caminho.includes("..")
+        )
+        .sort((x: { pagina: number }, y: { pagina: number }) => x.pagina - y.pagina);
+      const comImagem = {
+        ...(previstas.length > 0 ? { imagensPrevistas: previstas } : {}),
+        ...(imagens.length > 0 ? { imagens } : {}),
+      };
 
       if (paginasTexto.join("").trim() === "") {
         // SEM TEXTO NÃO É SEM DADO. O motivo separa o que se resolve vendo
@@ -216,9 +232,9 @@ Deno.serve(async (req) => {
           paginas,
           paginasTexto: [],
           motivo,
-          ...(previstas.length > 0 ? { imagensPrevistas: previstas } : {}),
+          ...comImagem,
         });
-        semTexto.push({ nome, motivo, imagens: previstas.length });
+        semTexto.push({ nome, motivo, imagens: Math.max(previstas.length, imagens.length) });
         continue;
       }
       if (usado + tamanho > MAX_TOTAL) {
@@ -232,7 +248,7 @@ Deno.serve(async (req) => {
         paginasTexto,
         // Híbrido: tem texto no geral e páginas escaneadas no meio — a conta da
         // contadoria costuma estar exatamente nelas.
-        ...(previstas.length > 0 ? { imagensPrevistas: previstas } : {}),
+        ...comImagem,
       });
     }
     if (arquivos.length === 0) return json({ erro: "Nenhum dos arquivos pôde ser guardado." }, 400);
@@ -258,7 +274,15 @@ Deno.serve(async (req) => {
     if (caminhos.length > 0) await db.storage.from(BALDE).remove(caminhos);
     await db.from("analise_externa_autos").delete().lt("expira_em", agora);
 
-    const deposito = {
+    const deposito: {
+      codigo: string;
+      lead_id: number;
+      titulo: string;
+      arquivos: Guardado[];
+      criado_em: string;
+      expira_em: string;
+      lido_em: null;
+    } = {
       codigo,
       lead_id: leadId,
       titulo: limparParaOBanco((body as any).titulo).slice(0, 500),
@@ -271,25 +295,56 @@ Deno.serve(async (req) => {
     };
     // O ESTADO FINAL VAI JUNTO: "imagens" enquanto houver página digitalizada a
     // caminho, "pronto" quando não houver. Sem a 0069, grava como antes.
-    const aindaVemImagem = arquivos.some((a) => (a.imagensPrevistas ?? []).length > 0);
-    let { error } = await db.from("analise_externa_autos").upsert({
-      ...deposito,
-      estado: aindaVemImagem ? "imagens" : "pronto",
-      atualizado_em: new Date().toISOString(),
+    // IMAGEM AINDA A CAMINHO é página prometida e não entregue. O navegador de
+    // hoje manda as imagens prontas junto, e aí nada fica a caminho; o de antes
+    // (aba aberta desde antes da atualização) ainda promete e manda depois.
+    const aindaVemImagem = arquivos.some((a) => {
+      const prontas = new Set((a.imagens ?? []).map((i) => i.pagina));
+      return (a.imagensPrevistas ?? []).some((p) => !prontas.has(p));
     });
-    if (error && /column|schema cache/i.test(error.message)) {
-      ({ error } = await db.from("analise_externa_autos").upsert(deposito));
+    const gravar = async (linha: typeof deposito) => {
+      let { error } = await db.from("analise_externa_autos").upsert({
+        ...linha,
+        estado: aindaVemImagem ? "imagens" : "pronto",
+        atualizado_em: new Date().toISOString(),
+      });
+      if (error && /column|schema cache/i.test(error.message)) {
+        ({ error } = await db.from("analise_externa_autos").upsert(linha));
+      }
+      return error;
+    };
+    let error = await gravar(deposito);
+
+    // RECUAR EM VEZ DE FALHAR. Se o banco recusar gravar tudo junto — tamanho,
+    // tempo —, tira o maior arquivo e tenta de novo, até três vezes. Chegar ao
+    // Claude sem um arquivo, COM AVISO nomeando qual, é muito melhor do que não
+    // chegar nada: antes, uma recusa aqui derrubava a entrega inteira e a tela
+    // mandava baixar os PDFs para arrastar à mão.
+    for (let tentativa = 0; error && tentativa < 3; tentativa++) {
+      const comTexto = deposito.arquivos
+        .map((a, i) => ({ i, tamanho: a.paginasTexto.reduce((n, p) => n + p.length, 0) }))
+        .filter((x) => x.tamanho > 0)
+        .sort((x, y) => y.tamanho - x.tamanho);
+      if (comTexto.length <= 1) break;
+      const maior = deposito.arquivos[comTexto[0].i];
+      deFora.push(`${maior.nome} (o banco recusou gravar tudo junto: ${String(error.message).slice(0, 120)})`);
+      usado -= comTexto[0].tamanho;
+      deposito.arquivos = deposito.arquivos.filter((_, i) => i !== comTexto[0].i);
+      error = await gravar(deposito);
     }
     if (error) return json({ erro: `Não consegui guardar os autos: ${error.message}` }, 500);
 
     // A RESPOSTA CONTA O QUE FALTOU, e quem a ignorar mente para quem opera: a
     // tela dizia "N arquivo(s) à disposição" contando os LIDOS, não os guardados.
+    // CONTA O QUE FOI GRAVADO, e não o que chegou: depois de um recuo, a lista
+    // gravada é menor que a recebida, e a tela tem de dizer a menor.
+    const gravados = deposito.arquivos;
     return json({
       pronto: true,
-      guardados: arquivos.length,
-      com_texto: arquivos.filter((a) => a.paginasTexto.length > 0).length,
+      guardados: gravados.length,
+      com_texto: gravados.filter((a) => a.paginasTexto.length > 0).length,
       caracteres: usado,
-      paginas: arquivos.reduce((t, a) => t + a.paginasTexto.length, 0),
+      paginas: gravados.reduce((t, a) => t + a.paginasTexto.length, 0),
       de_fora: deFora,
       sem_texto: semTexto,
     });

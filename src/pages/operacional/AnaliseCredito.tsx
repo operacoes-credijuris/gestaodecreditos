@@ -1046,6 +1046,7 @@ function CardCredito({
   resultadoAnalise,
   onDueDiligence,
   onAnaliseExterna,
+  onBaixarAnexos,
   onConcluir,
   onAbrirAnexo,
   onPrepararAnexo,
@@ -1073,6 +1074,8 @@ function CardCredito({
   onDueDiligence: (l: KommoLead) => void
   /** Abre a conversa da análise no Claude — só no precatório externo. */
   onAnaliseExterna: (l: KommoLead) => void
+  /** Baixa os anexos do card para o disco — o resgate, quando os autos não subiram. */
+  onBaixarAnexos?: (l: KommoLead) => void
   /**
    * Fecha a etapa: abre a janela com a razão e as saídas possíveis.
    *
@@ -1438,10 +1441,18 @@ function CardCredito({
                 Os autos não subiram — o Claude não vai achá-los por este código.
               </div>
               <p className="mt-1 break-words whitespace-pre-line">{preparoDosAutos.detalhe}</p>
-              <p className="mt-1 text-slate-600">
-                Os arquivos foram baixados para a sua máquina; dá para arrastá-los
-                para a conversa enquanto isto não se resolve.
-              </p>
+              {/* O RESGATE É UM BOTÃO, e não um download que acontece sozinho:
+                  quem decide encher a pasta de Downloads com o processo é quem
+                  opera. */}
+              {onBaixarAnexos && (
+                <button
+                  type="button"
+                  onClick={() => onBaixarAnexos(lead)}
+                  className="mt-1.5 text-xs font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800"
+                >
+                  Baixar os anexos para arrastar à conversa
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -2079,8 +2090,41 @@ export default function AnaliseCredito() {
       // o acórdão digitalizado como ilegível, e a análise segue sem ele. Que foi
       // exatamente o defeito: dezenove anexos no card, dezessete na análise.
       const selecao = escolherPaginasParaImagem(lidos)
-      const previstas = new Map(selecao.map((s) => [s.arquivo, s.numeros]))
 
+      // AS IMAGENS VÃO ANTES DO TEXTO, e numa gravação só com ele — desde
+      // 27/09/2026. Antes o texto ia primeiro e as imagens depois, por uma
+      // segunda função que BAIXAVA O BALCÃO INTEIRO (todo o texto do processo)
+      // só para pendurar nele o caminho de dez páginas, e o GRAVAVA INTEIRO DE
+      // VOLTA. Com processo de milhares de páginas, era essa segunda viagem que
+      // quebrava — e a quebra derrubava a entrega toda como "falhou".
+      //
+      // E A FALHA DAS IMAGENS NÃO É MAIS A FALHA DE TUDO: página que não subiu
+      // vai para o aviso, e o texto segue. Antes ela caía no mesmo tratamento de
+      // um depósito que não aconteceu.
+      let prontas: ImagemSubida[] = []
+      let falhasDeImagem: string[] = []
+      if (selecao.length > 0) {
+        const totalImg = selecao.reduce((n, s) => n + s.numeros.length, 0)
+        anotarPreparo(id, 'lendo', `Preparando ${totalImg} página(s) digitalizada(s) para o Claude ver…`)
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) {
+            falhasDeImagem.push('sessão expirada — entre de novo para subir as páginas digitalizadas')
+          } else {
+            const envio = await subirImagensDosAutos(selecao, codigo, user.id, (feitas, t) =>
+              anotarPreparo(id, 'lendo', `Preparando páginas digitalizadas: ${feitas}/${t}…`),
+            )
+            prontas = envio.prontas
+            falhasDeImagem = envio.falhas
+          }
+        } catch (e) {
+          falhasDeImagem.push((e as Error)?.message ?? String(e))
+        }
+      }
+      const imagensDo = (nome: string) =>
+        prontas.filter((p) => p.arquivo === nome).map((p) => ({ pagina: p.pagina, caminho: p.caminho }))
+
+      anotarPreparo(id, 'lendo', 'Entregando os autos ao Claude…')
       // A RESPOSTA É LIDA, e antes não era. Ela sempre disse o que ficou de
       // fora; jogá-la fora fazia a tela afirmar uma entrega completa que não
       // aconteceu.
@@ -2109,7 +2153,9 @@ export default function AnaliseCredito() {
           // a mesma etiqueta — sendo que só um deles tem conserto.
           digitalizado: a.digitalizado,
           erro: a.erro ?? '',
-          paginas_imagem: previstas.get(a.nome) ?? [],
+          // AS IMAGENS JÁ PRONTAS, e não mais a promessa delas: nada fica "a
+          // caminho" depois do depósito, e o conector não precisa esperar.
+          imagens: imagensDo(a.nome),
         })),
       })
 
@@ -2118,35 +2164,6 @@ export default function AnaliseCredito() {
       const deFora = r.de_fora ?? []
       const semTexto = r.sem_texto ?? []
       const num = (n: number) => n.toLocaleString('pt-BR')
-
-      // AS IMAGENS VÃO DEPOIS DO TEXTO, e não antes. O texto chega em segundos e
-      // o conector já abre o caso com ele; a rasterização das páginas acontece
-      // na thread principal e leva o tempo que leva. A ferramenta `ver_paginas`
-      // espera pelas imagens do outro lado.
-      let prontas: ImagemSubida[] = []
-      let falhasDeImagem: string[] = []
-      if (selecao.length > 0) {
-        const totalImg = selecao.reduce((n, s) => n + s.numeros.length, 0)
-        anotarPreparo(
-          id,
-          'lendo',
-          `${comTexto} arquivo(s) com texto à disposição. ` +
-            `Preparando ${totalImg} página(s) digitalizada(s) para o Claude ver…`,
-        )
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          falhasDeImagem.push('sessão expirada — entre de novo para subir as páginas digitalizadas')
-        } else {
-          const envio = await subirImagensDosAutos(selecao, codigo, user.id, (feitas, t) =>
-            anotarPreparo(id, 'lendo', `Preparando páginas digitalizadas: ${feitas}/${t}…`),
-          )
-          prontas = envio.prontas
-          falhasDeImagem = envio.falhas
-          if (prontas.length > 0) {
-            await invokeFunction('autos-imagens', { codigo, imagens: prontas })
-          }
-        }
-      }
 
       // O QUE FALTOU, NOMEADO. "Parte não foi entregue" sem dizer qual parte
       // obriga quem opera a descobrir sozinho — e foi assim que um processo de
@@ -2189,11 +2206,12 @@ export default function AnaliseCredito() {
       // O CONECTOR PRECISA SABER, ou a conversa espera para sempre por autos que
       // não vêm — ou pior, desiste e segue sem eles.
       void invokeFunction('autos-guardar', { acao: 'falhou', codigo, motivo }).catch(() => undefined)
-      // RESGATE PELO DISCO. Sem o depósito o conector não tem o que entregar, e
-      // a conversa já abriu: baixar os arquivos devolve à pessoa o caminho
-      // antigo, o do arrasto, em vez de deixá-la diante de uma conversa vazia.
+      // SEM DOWNLOAD AUTOMÁTICO desde 27/09/2026. O resgate pelo disco era de
+      // antes do conector saber avisar a conversa: baixava os PDFs sozinho
+      // para a pessoa arrastar ao Claude. Hoje o conector diz à conversa que a
+      // leitura falhou, e um processo de 17 MB caindo na pasta de Downloads a
+      // cada tentativa era só susto. O resgate continua — num botão, no card.
       toast.error('Não consegui pôr os autos à disposição do Claude: ' + motivo)
-      void baixarAnexosDoCard(lead)
     }
   }
 
@@ -3069,6 +3087,7 @@ export default function AnaliseCredito() {
                 }
                 onDueDiligence={onDueDiligence}
                 onAnaliseExterna={onAnaliseExterna}
+                onBaixarAnexos={(l) => void baixarAnexosDoCard(l)}
                 preparoDosAutos={preparoDosAutos[l.kommo_lead_id]}
                 onAnaliseJuridica={onAnaliseJuridica}
                 analisandoJuridico={analisandoJurId === l.kommo_lead_id}
