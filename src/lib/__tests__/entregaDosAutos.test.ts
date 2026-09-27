@@ -542,3 +542,60 @@ describe('COMO_LER_OS_AUTOS manda agrupar as leituras', () => {
     expect(COMO_LER_OS_AUTOS).toContain('`leituras`')
   })
 })
+
+/**
+ * O BALCÃO FICOU MAIOR QUE A CONVERSA. Com o teto de armazenamento em 10
+ * milhões de caracteres, um card pode trazer um processo de milhares de páginas
+ * — um milhão de tokens, cinco vezes a janela do modelo. Mandar ler tudo
+ * estouraria a conversa antes da análise; o que não cabe se VARRE pela busca, e
+ * a análise diz que foi assim.
+ */
+describe('o que não cabe na conversa se varre, não se lê', () => {
+  const pagina = 'x'.repeat(5_000)
+  const grande = {
+    nome: 'processo-origem.pdf',
+    paginas: 100,
+    paginasTexto: Array.from({ length: 100 }, () => pagina), // 500 mil caracteres
+  }
+  const pequeno = { nome: 'certidao.pdf', paginas: 1, paginasTexto: ['CERTIDÃO DE TRÂNSITO EM JULGADO'] }
+  const card = (arquivos: AutosGuardados['arquivos']): AutosGuardados => ({
+    lead_id: 1,
+    titulo: 't',
+    criado_em: '2026-09-27T00:00:00.000Z',
+    arquivos,
+  })
+
+  it('arquivo grande demais é marcado para varrer, e sai do pedido de leitura', () => {
+    const t = montarEntrega(card([grande]), undefined, 10)
+    expect(t).toContain('grandes demais para ler inteiros nesta conversa')
+    expect(t).toContain('VARRA-OS')
+    expect(t).toContain('FORAM VARRIDOS POR BUSCA')
+    expect(t).toContain('grande demais para ler inteiro — varra com `buscar_nos_autos`')
+    expect(t).not.toContain('TODOS NUMA CHAMADA SÓ')
+  })
+
+  // ADAPTATIVO: o pequeno ainda se lê inteiro, e só o grande vai para a busca.
+  // Uma regra que tratasse os dois do mesmo jeito perderia um ou outro.
+  it('o pequeno se lê e o grande se varre, no mesmo card', () => {
+    const t = montarEntrega(card([pequeno, grande]), undefined, 10)
+    expect(t).toContain('`ler_paginas` com `leituras` = `[{"arquivo":"1"}]`')
+    expect(t).toContain('grandes demais para ler inteiros nesta conversa:** "processo-origem.pdf"')
+  })
+
+  it('o que cabe continua indo para a leitura, como antes', () => {
+    const t = montarEntrega(card([pequeno]), undefined, 10)
+    expect(t).toContain('TODOS NUMA CHAMADA SÓ')
+    expect(t).not.toContain('grandes demais')
+  })
+
+  // A BUSCA PASSA PELO GRANDE — é o que torna a varredura possível. Se ele não
+  // estivesse no balcão (era o que acontecia com o teto de 2 milhões), nem isso.
+  it('a busca alcança o arquivo grande', () => {
+    const g = card([pequeno, { ...grande, paginasTexto: [...grande.paginasTexto.slice(0, 99), 'termo de CESSÃO de crédito'] }])
+    expect(textoDaBusca(g, ['cessão'])).toContain('processo-origem.pdf')
+  })
+
+  it('a instrução geral explica a varredura', () => {
+    expect(COMO_LER_OS_AUTOS).toContain('ARQUIVO GRANDE DEMAIS SE VARRE')
+  })
+})

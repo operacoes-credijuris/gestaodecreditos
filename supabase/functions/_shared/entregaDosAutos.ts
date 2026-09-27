@@ -134,6 +134,22 @@ export const MAX_POR_LEITURA = 200_000
 export const MAX_LEITURAS_POR_CHAMADA = 20
 
 /**
+ * Quanto dos autos que não vieram na primeira entrega ainda cabe LER na conversa.
+ *
+ * EXISTE PORQUE O BALCÃO FICOU MAIOR QUE A CONVERSA. Com o teto do
+ * `autos-guardar` em 10 milhões de caracteres (27/09/2026), um card pode trazer
+ * processos inteiros de milhares de páginas — um milhão de tokens, cinco vezes a
+ * janela do modelo. Mandar ler tudo, como a instrução mandava, estouraria a
+ * conversa no meio da leitura, antes de uma linha de análise.
+ *
+ * QUATROCENTOS MIL CARACTERES são duas chamadas de `ler_paginas` — somados à
+ * primeira entrega e ao roteiro, deixam janela para a análise. O que passar
+ * disso é VARRIDO: busca pelos eixos do roteiro e leitura dos trechos que ela
+ * apontar. E a análise diz que foi assim, em vez de afirmar leitura integral.
+ */
+export const ORCAMENTO_DE_LEITURA_NA_CONVERSA = 400_000
+
+/**
  * A FORMA DA ENTREGA — regra desta esteira, não do roteiro.
  *
  * SEPARADA DE PROPÓSITO. O roteiro é o método da casa e está aqui verbatim; o
@@ -195,6 +211,10 @@ export const COMO_LER_OS_AUTOS = [
   'CITE A PÁGINA que a ferramenta devolveu. O roteiro pede fonte com página em',
   'todo campo da ficha, e agora ela é dado, não estimativa.',
   '',
+  'ARQUIVO GRANDE DEMAIS SE VARRE, NÃO SE LÊ. Quando o índice marcar um arquivo',
+  'assim, ele não cabe nesta conversa: leia-o pela busca (os eixos do roteiro) e pelos',
+  'trechos que ela apontar, e diga na análise que ele foi varrido, não lido inteiro.',
+  '',
   'NÃO DECLARE AUSÊNCIA DO QUE VOCÊ NÃO ABRIU. O roteiro exige declaração expressa',
   'quando nada é localizado, e ela vale sobre o que foi lido: enquanto houver',
   'arquivo do índice que você não leu nem viu, escrever "não há cessão nos autos"',
@@ -212,6 +232,8 @@ interface LinhaDoIndice {
   motivo?: string
   /** Quantas páginas deste arquivo podem ser vistas como imagem. */
   imagens: number
+  /** Não veio, e é grande demais para ler inteiro na conversa: varre-se pela busca. */
+  varrer?: boolean
 }
 
 /**
@@ -228,6 +250,9 @@ function comoLer(l: LinhaDoIndice): string {
   // não alcança. A coluna diz quantas são.
   const escaneadas = l.imagens > 0 ? ` · ${l.imagens} pág. escaneada(s), veja com \`ver_paginas\`` : ''
   if (l.inteiro) return 'veio inteira nesta mensagem' + escaneadas
+  if (l.caracteres > 0 && l.varrer) {
+    return '**grande demais para ler inteiro — varra com `buscar_nos_autos` e leia os trechos com `ler_paginas`**' + escaneadas
+  }
   if (l.caracteres > 0) return '**não veio — leia com `ler_paginas`**' + escaneadas
   if (l.imagens > 0) {
     return `**sem texto (${l.motivo ?? 'digitalizado'}) — ${l.imagens} pág. em imagem, use \`ver_paginas\`**`
@@ -306,6 +331,17 @@ export function montarEntrega(
   // nenhum e vira diligência. Só a terceira autoriza seguir sem ele — e mesmo
   // ela não autoriza afirmar que o que estava nele não existe.
   const porTamanho = linhas.filter((l) => !l.inteiro && l.caracteres > 0)
+  // O QUE AINDA CABE LER, na ordem do índice; o resto se varre. Adaptativo de
+  // propósito: três anexos médios se leem inteiros, e um processo de dois mil
+  // páginas é varrido — em vez de uma regra por arquivo que trataria os dois
+  // do mesmo jeito.
+  let aLer = 0
+  for (const l of porTamanho) {
+    if (aLer + l.caracteres <= ORCAMENTO_DE_LEITURA_NA_CONVERSA) aLer += l.caracteres
+    else l.varrer = true
+  }
+  const paraLer = porTamanho.filter((l) => !l.varrer)
+  const paraVarrer = porTamanho.filter((l) => l.varrer)
   const emImagem = linhas.filter((l) => l.caracteres === 0 && l.imagens > 0)
   const perdidos = linhas.filter((l) => l.caracteres === 0 && l.imagens === 0)
 
@@ -315,17 +351,31 @@ export function montarEntrega(
   // por chamada, que é uma autorização por arquivo na tela de quem opera.
   // Mostrar a chamada inteira, já montada, é a instrução mais difícil de ler
   // errado.
-  const posicoes = porTamanho.map((l) => linhas.indexOf(l) + 1)
+  const posicoes = paraLer.map((l) => linhas.indexOf(l) + 1)
   const pedidoPronto = JSON.stringify(posicoes.map((n) => ({ arquivo: String(n) })))
   const avisos = [
-    ...(porTamanho.length > 0
+    ...(paraLer.length > 0
       ? [
           '',
-          `> **${porTamanho.length} arquivo(s) não vieram nesta mensagem por tamanho:** ${nomes(porTamanho)}.`,
+          `> **${paraLer.length} arquivo(s) não vieram nesta mensagem por tamanho:** ${nomes(paraLer)}.`,
           '> Estão guardados inteiros. Leia-os antes de concluir qualquer coisa que',
           '> dependa deles — TODOS NUMA CHAMADA SÓ:',
           '>',
           `> \`ler_paginas\` com \`leituras\` = \`${pedidoPronto}\``,
+        ]
+      : []),
+    ...(paraVarrer.length > 0
+      ? [
+          '',
+          `> **${paraVarrer.length} arquivo(s) são grandes demais para ler inteiros nesta conversa:** ${nomes(paraVarrer)}` +
+            ` (${paraVarrer.reduce((n, l) => n + l.caracteres, 0).toLocaleString('pt-BR')} caracteres).`,
+          '> Estão guardados inteiros e a busca passa por eles. NÃO tente lê-los de ponta a',
+          '> ponta: a conversa não comporta, e estouraria antes da análise. VARRA-OS com',
+          '> `buscar_nos_autos` — a lista inteira de cada eixo do roteiro numa chamada — e',
+          '> leia com `ler_paginas` as páginas que a busca apontar, várias numa chamada só.',
+          '> NA ANÁLISE, DIGA QUE ESTES ARQUIVOS FORAM VARRIDOS POR BUSCA e não lidos na',
+          '> íntegra: a leitura integral do roteiro não foi possível neles, e quem lê a',
+          '> análise precisa saber disso para pesar as ausências declaradas.',
         ]
       : []),
     ...(emImagem.length > 0
@@ -643,6 +693,29 @@ export function termosDaBusca(termos: string | string[] | undefined): string[] {
  * Eixo 7 outra; sem isto, cumpri-los num processo de trezentas páginas exigia
  * despejar o processo inteiro na conversa para achar três parágrafos.
  */
+/**
+ * As páginas de um arquivo já sem acento e sem caixa — calculadas UMA VEZ.
+ *
+ * A BUSCA NORMALIZAVA CADA PÁGINA PARA CADA TERMO. Com a lista inteira de um
+ * eixo numa chamada (25 termos), o processo era normalizado 25 vezes, e era isso
+ * que fazia a busca custar quase um segundo de CPU num processo de 8 milhões de
+ * caracteres — perto do teto de 2 s da Edge Function. Medido em 27/09/2026:
+ * normalizando uma vez, cai para uma fração disso, e foi o que permitiu subir o
+ * teto de armazenamento do `autos-guardar`.
+ *
+ * WEAKMAP PELO OBJETO DO ARQUIVO: no conector, cada chamada lê a linha do banco
+ * de novo, então o cache vive exatamente uma chamada e nunca fica velho.
+ */
+const NORMALIZADAS = new WeakMap<ArquivoGuardado, string[]>()
+function paginasNormalizadas(a: ArquivoGuardado): string[] {
+  let n = NORMALIZADAS.get(a)
+  if (!n) {
+    n = paginasDoArquivo(a).map(normalizar)
+    NORMALIZADAS.set(a, n)
+  }
+  return n
+}
+
 export function buscarNosAutos(
   g: AutosGuardados,
   termo: string,
@@ -654,9 +727,10 @@ export function buscarNosAutos(
   const achados: Ocorrencia[] = []
   for (const a of g.arquivos) {
     const paginas = paginasDoArquivo(a)
+    const normalizadas = paginasNormalizadas(a)
     for (let p = 0; p < paginas.length; p++) {
       const texto = paginas[p] ?? ''
-      const onde = normalizar(texto).indexOf(alvo)
+      const onde = (normalizadas[p] ?? '').indexOf(alvo)
       if (onde < 0) continue
       const ini = Math.max(0, onde - margem)
       const fim = Math.min(texto.length, onde + alvo.length + margem)

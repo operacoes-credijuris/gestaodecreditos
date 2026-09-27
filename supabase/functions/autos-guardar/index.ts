@@ -58,8 +58,23 @@ function json(o: unknown, s = 200) {
 /** Um uuid, e nada além disso — é o que a tabela aceita como chave. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Teto de armazenamento do card inteiro. Generoso: é para conter o absurdo. */
-const MAX_TOTAL = 2_000_000;
+/**
+ * Teto de armazenamento do card inteiro. Existe para conter o absurdo, e não o
+ * processo grande.
+ *
+ * ERA 2 MILHÕES, e cortava processo de verdade: em 27/09/2026 um card de
+ * precatório chegou ao Claude sem os DOIS PDFs do processo de origem (17 MB e
+ * 3,5 MB) — justamente onde ficam cessão e habilitação. A análise não tinha nem
+ * como buscar neles.
+ *
+ * DEZ MILHÕES, MEDIDO, não chutado. O custo que importa é o de CPU (2 s por
+ * chamada na Edge Function), e com um processo sintético de 12 milhões de
+ * caracteres: guardar leva ~50 ms; no conector, ler a linha e montar a entrega
+ * ~20 ms, e a busca de 25 termos ~270 ms — depois de ela passar a normalizar
+ * cada página uma vez só (antes normalizava uma vez por termo, e custava 1,1 s).
+ * Dez milhões deixam folga para uma máquina três vezes mais lenta que a medida.
+ */
+const MAX_TOTAL = 10_000_000;
 
 /** O mesmo balde das páginas digitalizadas da análise de RPV (migração 0055). */
 const BALDE = "analises-input";
