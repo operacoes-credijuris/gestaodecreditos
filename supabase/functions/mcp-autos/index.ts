@@ -28,9 +28,10 @@ import {
   arquivoDosAutos,
   type AutosGuardados,
   caminhoDaImagem,
-  lerPaginas,
+  lerVarias,
   montarEntrega,
   paginasComImagem,
+  pedidosDeLeitura,
   textoDaBusca,
 } from "../_shared/entregaDosAutos.ts";
 
@@ -66,7 +67,7 @@ const CORS = {
 };
 
 const VERSAO_PADRAO = "2025-06-18";
-const SERVIDOR = { name: "credijuris-autos", title: "Credijuris — autos do crédito", version: "1.0.0" };
+const SERVIDOR = { name: "credijuris-autos", title: "Credijuris — autos do crédito", version: "1.1.0" };
 
 /** Só uuid: é o formato do código, e recusar o resto poupa uma ida ao banco. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -110,6 +111,27 @@ const CODIGO = {
  * diz o que existe, outra lê um trecho, a terceira procura — e a quarta VÊ o que
  * está em imagem, que é a única leitura possível de um documento escaneado.
  */
+/**
+ * AS QUATRO SÓ LEEM, e dizê-lo ao aplicativo é o que tira o pedido de
+ * autorização da frente de quem opera.
+ *
+ * O app do Claude separa as ferramentas de um conector em GRUPOS — "somente
+ * leitura" e "escrita/exclusão" — e a permissão de cada grupo se escolhe em
+ * Personalizar → Conectores (sempre permitir, pedir aprovação, bloquear). Sem
+ * a anotação, estas caíam no grupo que pergunta a cada chamada, e uma análise
+ * de precatório virava dez, quinze cliques de "permitir" por processo.
+ *
+ * É VERDADE, e não conveniência: nenhuma das quatro grava nada. Elas leem o
+ * balcão dos autos por um código que vale duas horas — a única escrita do
+ * caminho é o `lido_em`, que é registro de acesso, não efeito no mundo.
+ */
+const SO_LEITURA = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+
 const FERRAMENTAS = [
   {
     name: "autos_do_credito",
@@ -123,24 +145,42 @@ const FERRAMENTAS = [
       required: ["codigo"],
       additionalProperties: false,
     },
+    annotations: SO_LEITURA,
   },
   {
     name: "ler_paginas",
     title: "Ler páginas dos autos",
     description:
-      "Devolve um intervalo de páginas de um arquivo dos autos, com o número de cada página. " +
-      "Use para ler por inteiro o que não coube na primeira entrega e para conferir o entorno de um achado. O arquivo pode ser indicado pelo nome ou pela posição no índice.",
+      "Devolve páginas dos arquivos dos autos, com o número de cada página. " +
+      "MANDE TODAS AS LEITURAS DE UMA VEZ, em `leituras`: os arquivos que não couberam na primeira entrega cabem numa chamada só, e os trechos a conferir também (até 20 por chamada). " +
+      "Cada chamada pede autorização a quem está operando — um arquivo por chamada enche a tela de pedidos. " +
+      "O arquivo pode ser indicado pelo nome ou pela posição no índice; sem páginas, vem o arquivo inteiro (até onde couber, e a resposta diz onde parou).",
     inputSchema: {
       type: "object",
       properties: {
         codigo: CODIGO,
-        arquivo: { type: "string", description: "Nome do arquivo, ou a posição dele no índice (1, 2, 3…)." },
-        de: { type: "integer", description: "Primeira página a ler (1 é a primeira do arquivo)." },
-        ate: { type: "integer", description: "Última página a ler. Omitido, vai até onde couber." },
+        leituras: {
+          type: "array",
+          description: "Todas as leituras desta chamada. Ex.: [{\"arquivo\": \"3\"}, {\"arquivo\": \"7\"}, {\"arquivo\": \"2\", \"de\": 40, \"ate\": 45}].",
+          items: {
+            type: "object",
+            properties: {
+              arquivo: { type: "string", description: "Nome do arquivo, ou a posição dele no índice (1, 2, 3…)." },
+              de: { type: "integer", description: "Primeira página. Omitida, é a 1." },
+              ate: { type: "integer", description: "Última página. Omitida, vai até onde couber." },
+            },
+            required: ["arquivo"],
+            additionalProperties: false,
+          },
+        },
+        arquivo: { type: "string", description: "Um arquivo só. Existe para compatibilidade; prefira `leituras`." },
+        de: { type: "integer", description: "Com `arquivo`: primeira página a ler." },
+        ate: { type: "integer", description: "Com `arquivo`: última página a ler." },
       },
-      required: ["codigo", "arquivo", "de"],
+      required: ["codigo"],
       additionalProperties: false,
     },
+    annotations: SO_LEITURA,
   },
   {
     name: "buscar_nos_autos",
@@ -164,6 +204,7 @@ const FERRAMENTAS = [
       required: ["codigo"],
       additionalProperties: false,
     },
+    annotations: SO_LEITURA,
   },
   {
     name: "ver_paginas",
@@ -184,6 +225,7 @@ const FERRAMENTAS = [
       required: ["codigo", "arquivo", "de"],
       additionalProperties: false,
     },
+    annotations: SO_LEITURA,
   },
 ];
 
@@ -381,9 +423,9 @@ async function despachar(msg: any): Promise<unknown | null> {
           "`autos_do_credito` com ele ANTES de responder; depois use `ler_paginas` para o que não tiver " +
           "cabido na primeira entrega, `ver_paginas` para os arquivos que o índice marcar como " +
           "digitalizados (neles não há texto: ver é a única leitura) e `buscar_nos_autos` para os " +
-          "eixos de varredura. AGRUPE AS BUSCAS: " +
-          "mande todos os termos de um eixo numa chamada só, porque cada chamada pede autorização a quem " +
-          "está operando a plataforma. Siga o roteiro que vier no resultado, cite a página de cada achado " +
+          "eixos de varredura. AGRUPE TUDO: " +
+          "mande todos os termos de um eixo numa chamada só, e todas as leituras em `leituras` numa chamada " +
+          "só, porque cada chamada pede autorização a quem está operando a plataforma. Siga o roteiro que vier no resultado, cite a página de cada achado " +
           "e escreva a análise na própria conversa, sem gerar arquivo nenhum.",
       });
     }
@@ -415,10 +457,15 @@ async function despachar(msg: any): Promise<unknown | null> {
       const args = params?.arguments ?? {};
 
       if (nome === "ler_paginas") {
-        const arquivo = String(args.arquivo ?? "").trim();
-        const de = Number(args.de ?? 1);
-        const ate = Number(args.ate ?? Number.MAX_SAFE_INTEGER);
-        return okRpc(id, okDaFerramenta(lerPaginas(carga.g, arquivo, de, ate)));
+        // OS DOIS FORMATOS, como na busca. `leituras` é o caminho — todas numa
+        // chamada, porque cada chamada custa uma autorização a quem opera. O
+        // `arquivo` solto sobrou para o modelo que insistir em um por vez.
+        const pedidos = pedidosDeLeitura(
+          Array.isArray(args.leituras) && args.leituras.length > 0
+            ? args.leituras
+            : { arquivo: args.arquivo, de: args.de, ate: args.ate },
+        );
+        return okRpc(id, okDaFerramenta(lerVarias(carga.g, pedidos)));
       }
       if (nome === "ver_paginas") {
         const de = Number(args.de ?? 1);

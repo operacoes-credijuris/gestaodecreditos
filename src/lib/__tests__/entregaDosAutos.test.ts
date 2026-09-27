@@ -6,10 +6,13 @@ import {
   COMO_LER_OS_AUTOS,
   FORMA_DA_ENTREGA,
   lerPaginas,
+  lerVarias,
+  MAX_LEITURAS_POR_CHAMADA,
   MAX_TERMOS_POR_BUSCA,
   montarEntrega,
   paginasComImagem,
   paginasDoArquivo,
+  pedidosDeLeitura,
   semTexto,
   termosDaBusca,
   textoDaBusca,
@@ -118,6 +121,15 @@ describe('montarEntrega', () => {
     expect(t).toContain('processo.pdf')
   })
 
+  // O PEDIDO VAI MONTADO. "Leia com ler_paginas" deixava o formato por conta do
+  // modelo, e ele escolhia um arquivo por chamada — uma autorização por arquivo
+  // na tela de quem opera. Com a chamada inteira escrita, não há o que escolher.
+  it('o aviso traz a chamada pronta, com todos os que não vieram', () => {
+    const t = montarEntrega(guardado, undefined, 10)
+    expect(t).toContain('TODOS NUMA CHAMADA SÓ')
+    expect(t).toContain('`ler_paginas` com `leituras` = `[{"arquivo":"1"},{"arquivo":"2"}]`')
+  })
+
   // ARQUIVO PEQUENO ATRÁS DE UM GRANDE CONTINUA ENTRANDO: o grande é pulado, não
   // é cortado, então o orçamento que ele não usou fica para os seguintes.
   it('o arquivo grande não come o pequeno', () => {
@@ -197,6 +209,87 @@ describe('lerPaginas', () => {
 
   it('página além do fim diz quantas existem', () => {
     expect(lerPaginas(guardado, 'processo.pdf', 99, 100)).toContain('tem 3 páginas')
+  })
+})
+
+/**
+ * VÁRIAS LEITURAS NUMA CHAMADA — e o motivo é a tela de quem opera.
+ *
+ * Cada chamada de ferramenta pede autorização. Com uma leitura por chamada, um
+ * card com quinze anexos que não couberam na primeira entrega eram quinze
+ * cliques de "permitir" por processo: o mesmo defeito que a busca já tinha, e
+ * que foi resolvido do mesmo jeito — a lista inteira numa chamada só.
+ */
+describe('lerVarias', () => {
+  it('lê vários arquivos de uma vez, cada um com as suas páginas', () => {
+    const t = lerVarias(guardado, [{ arquivo: '1', de: 2, ate: 2 }, { arquivo: '2' }])
+    expect(t).toContain('processo.pdf — páginas 2 a 2 de 3')
+    expect(t).toContain('DESPACHO que defere')
+    expect(t).toContain('requisitorio.pdf — páginas 1 a 1 de 1')
+    expect(t).toContain('OFÍCIO REQUISITÓRIO')
+    expect(t).not.toContain('PETIÇÃO INICIAL')
+  })
+
+  // UM PEDIDO SÓ É A LEITURA DE SEMPRE: o formato novo não pode mudar o que o
+  // antigo devolvia.
+  it('um pedido só devolve exatamente o que a leitura simples devolveria', () => {
+    expect(lerVarias(guardado, [{ arquivo: 'processo.pdf', de: 2, ate: 3 }])).toBe(
+      lerPaginas(guardado, 'processo.pdf', 2, 3),
+    )
+  })
+
+  // ARQUIVO ERRADO NO MEIO DA LISTA NÃO DERRUBA OS OUTROS: ele responde com os
+  // nomes certos, e os vizinhos chegam normalmente.
+  it('um nome errado não impede os demais', () => {
+    const t = lerVarias(guardado, [{ arquivo: 'contrato.pdf' }, { arquivo: '2' }])
+    expect(t).toContain('Não há arquivo "contrato.pdf"')
+    expect(t).toContain('OFÍCIO REQUISITÓRIO')
+  })
+
+  it('sem pedido nenhum, devolve a lista do que existe', () => {
+    const t = lerVarias(guardado, [])
+    expect(t).toContain('Nenhum arquivo indicado')
+    expect(t).toContain('1. processo.pdf')
+  })
+})
+
+/**
+ * O FORMATO QUE O MODELO MANDAR. Ele escreve { arquivo: "3" }, { arquivo: 3 } ou
+ * só "3", e os três querem dizer a mesma coisa. Recusar por tipo seria devolver
+ * um erro — e a quem opera, mais uma autorização para a nova tentativa.
+ */
+describe('pedidosDeLeitura', () => {
+  it('aceita objeto, número e texto', () => {
+    expect(pedidosDeLeitura([{ arquivo: '3' }, { arquivo: 4 }, '5'])).toEqual([
+      { arquivo: '3' },
+      { arquivo: '4' },
+      { arquivo: '5' },
+    ])
+  })
+
+  it('guarda as páginas quando vêm, e ignora as que não fazem sentido', () => {
+    expect(pedidosDeLeitura([{ arquivo: '2', de: 40, ate: 45 }])).toEqual([
+      { arquivo: '2', de: 40, ate: 45 },
+    ])
+    expect(pedidosDeLeitura([{ arquivo: '2', de: 0, ate: -1 }])).toEqual([{ arquivo: '2' }])
+  })
+
+  it('o mesmo pedido duas vezes vira um', () => {
+    expect(pedidosDeLeitura([{ arquivo: '3' }, { arquivo: '3' }, { arquivo: 'X' }, { arquivo: 'x' }])).toHaveLength(2)
+  })
+
+  it('pedido sem arquivo é descartado', () => {
+    expect(pedidosDeLeitura([{ de: 3 }, { arquivo: '  ' }, null])).toEqual([])
+    expect(pedidosDeLeitura(undefined)).toEqual([])
+  })
+
+  it('o formato antigo, de um arquivo solto, continua valendo', () => {
+    expect(pedidosDeLeitura({ arquivo: '1', de: 2, ate: 3 })).toEqual([{ arquivo: '1', de: 2, ate: 3 }])
+  })
+
+  it('não passa do teto de leituras por chamada', () => {
+    const muitos = Array.from({ length: 40 }, (_, i) => ({ arquivo: String(i + 1) }))
+    expect(pedidosDeLeitura(muitos)).toHaveLength(MAX_LEITURAS_POR_CHAMADA)
   })
 })
 
@@ -440,5 +533,12 @@ describe('FORMA_DA_ENTREGA', () => {
 
   it('vai junto na entrega', () => {
     expect(montarEntrega(guardado)).toContain(FORMA_DA_ENTREGA)
+  })
+})
+
+describe('COMO_LER_OS_AUTOS manda agrupar as leituras', () => {
+  it('pede todas as leituras numa chamada só', () => {
+    expect(COMO_LER_OS_AUTOS).toContain('TODAS AS LEITURAS DE UMA VEZ')
+    expect(COMO_LER_OS_AUTOS).toContain('`leituras`')
   })
 })

@@ -113,8 +113,25 @@ export function caminhoDaImagem(a: ArquivoGuardado, pagina: number): string | un
  */
 export const ORCAMENTO_DA_PRIMEIRA_ENTREGA = 250_000
 
-/** Teto de uma leitura por páginas, para uma chamada não estourar a janela. */
-export const MAX_POR_LEITURA = 120_000
+/**
+ * Teto de uma chamada de `ler_paginas`, para ela não estourar a janela.
+ *
+ * ERA 120 MIL, e subiu para 200 mil em 27/09/2026 porque cada chamada custa uma
+ * autorização na tela de quem opera: um processo de 600 mil caracteres pedia
+ * cinco leituras, agora pede três. O teto novo continua abaixo da primeira
+ * entrega (250 mil), que chega numa resposta só desde o começo — é a prova de
+ * que o canal aguenta.
+ */
+export const MAX_POR_LEITURA = 200_000
+
+/**
+ * Quantas leituras cabem numa chamada de `ler_paginas`.
+ *
+ * O LIMITE É DE ORGANIZAÇÃO, não de tamanho — quem limita o tamanho é o teto
+ * acima. Vinte é mais do que os arquivos de um card costumam somar, e menos do
+ * que uma lista em que o modelo começou a repetir pedidos.
+ */
+export const MAX_LEITURAS_POR_CHAMADA = 20
 
 /**
  * A FORMA DA ENTREGA — regra desta esteira, não do roteiro.
@@ -158,8 +175,12 @@ export const COMO_LER_OS_AUTOS = [
   'leitura integral prévia da regra [9].7 vale sobre o processo, não sobre o que',
   'chegou nesta primeira mensagem.',
   '',
-  '- `ler_paginas` devolve um intervalo de páginas de um arquivo. Use para ler por',
-  '  inteiro o que ficou de fora, e para conferir o entorno de um achado.',
+  '- `ler_paginas` devolve páginas dos arquivos, com o número de cada uma. Mande',
+  '  TODAS AS LEITURAS DE UMA VEZ, em `leituras`: os arquivos que não vieram nesta',
+  '  mensagem cabem numa chamada só, e os trechos a conferir também. Cada chamada',
+  '  pede autorização a quem está operando — um arquivo por vez são dez, quinze',
+  '  pedidos seguidos na tela. Se a resposta disser que algo não coube, peça o',
+  '  restante, de novo tudo junto.',
   '- `buscar_nos_autos` procura TERMOS — vários numa chamada só — em todos os',
   '  arquivos, e devolve os trechos COM O NÚMERO DA PÁGINA. Mande a lista inteira',
   '  do eixo de uma vez: o Eixo 2 ("cessão", "cessionário", "habilitação", "reserva',
@@ -289,13 +310,22 @@ export function montarEntrega(
   const perdidos = linhas.filter((l) => l.caracteres === 0 && l.imagens === 0)
 
   const nomes = (ls: LinhaDoIndice[]) => ls.map((l) => `"${l.nome}"`).join(', ')
+  // O PEDIDO VAI PRONTO, com as posições no índice. Dizer "leia com
+  // ler_paginas" deixava o modelo escolher o formato — e ele escolhia um arquivo
+  // por chamada, que é uma autorização por arquivo na tela de quem opera.
+  // Mostrar a chamada inteira, já montada, é a instrução mais difícil de ler
+  // errado.
+  const posicoes = porTamanho.map((l) => linhas.indexOf(l) + 1)
+  const pedidoPronto = JSON.stringify(posicoes.map((n) => ({ arquivo: String(n) })))
   const avisos = [
     ...(porTamanho.length > 0
       ? [
           '',
           `> **${porTamanho.length} arquivo(s) não vieram nesta mensagem por tamanho:** ${nomes(porTamanho)}.`,
-          '> Estão guardados inteiros. Leia-os com `ler_paginas` antes de concluir',
-          '> qualquer coisa que dependa deles.',
+          '> Estão guardados inteiros. Leia-os antes de concluir qualquer coisa que',
+          '> dependa deles — TODOS NUMA CHAMADA SÓ:',
+          '>',
+          `> \`ler_paginas\` com \`leituras\` = \`${pedidoPronto}\``,
         ]
       : []),
     ...(emImagem.length > 0
@@ -397,10 +427,28 @@ export function lerPaginas(
   de: number,
   ate: number,
 ): string {
+  return lerTrecho(g, arquivo, de, ate, MAX_POR_LEITURA).texto
+}
+
+/**
+ * Um trecho de um arquivo, dentro de um orçamento de caracteres.
+ *
+ * É O MIOLO DAS DUAS LEITURAS — a de um arquivo só e a de vários —, e o
+ * orçamento vem de fora justamente por isso: numa leitura em lote, o que o
+ * primeiro trecho gastou é o que o segundo deixa de ter. Devolve quanto usou
+ * para quem chama saber o que sobrou.
+ */
+function lerTrecho(
+  g: AutosGuardados,
+  arquivo: string,
+  de: number,
+  ate: number,
+  orcamento: number,
+): { texto: string; usado: number } {
   const a = arquivoDosAutos(g, arquivo)
   if (!a) {
     const nomes = g.arquivos.map((x, i) => `${i + 1}. ${x.nome}`).join('\n')
-    return `Não há arquivo "${arquivo}" neste crédito. Os arquivos são:\n${nomes}`
+    return { texto: `Não há arquivo "${arquivo}" neste crédito. Os arquivos são:\n${nomes}`, usado: 0 }
   }
   const paginas = paginasDoArquivo(a)
   if (paginas.length === 0) {
@@ -408,17 +456,18 @@ export function lerPaginas(
     // a quem procurou um "não tem texto" seco era condenar o acórdão escaneado
     // ao mesmo silêncio de antes.
     const imgs = paginasComImagem(a)
-    return imgs.length > 0
+    const texto = imgs.length > 0
       ? `O arquivo "${a.nome}" é digitalizado: não tem texto, tem imagem. ` +
         `Use \`ver_paginas\` — há ${imgs.length} página(s) disponível(is) para ver.`
       : `O arquivo "${a.nome}" não tem texto legível${a.motivo ? ` (${a.motivo})` : ''}. ` +
         'Registre-o como NÃO LIDO em vez de concluir sobre o conteúdo dele.'
+    return { texto, usado: 0 }
   }
 
   const ini = Math.max(1, Math.floor(de) || 1)
   const fim = Math.min(paginas.length, Math.floor(ate) || paginas.length)
   if (ini > paginas.length) {
-    return `O arquivo "${a.nome}" tem ${paginas.length} páginas; a ${ini} não existe.`
+    return { texto: `O arquivo "${a.nome}" tem ${paginas.length} páginas; a ${ini} não existe.`, usado: 0 }
   }
 
   const partes: string[] = []
@@ -426,7 +475,7 @@ export function lerPaginas(
   let ultima = ini - 1
   for (let p = ini; p <= fim; p++) {
     const texto = paginas[p - 1] ?? ''
-    if (usado + texto.length > MAX_POR_LEITURA && partes.length > 0) break
+    if (usado + texto.length > orcamento && partes.length > 0) break
     partes.push(`\n\n--- página ${p} ---\n\n${texto}`)
     usado += texto.length
     ultima = p
@@ -437,7 +486,100 @@ export function lerPaginas(
     ultima < fim
       ? `\n\n[A leitura parou na página ${ultima} por tamanho. Peça de ${ultima + 1} a ${fim} para continuar.]`
       : ''
-  return cabeca + partes.join('') + resto
+  return { texto: cabeca + partes.join('') + resto, usado }
+}
+
+/** Um pedido de leitura: qual arquivo, e de que página a que página. */
+export interface PedidoDeLeitura {
+  arquivo: string
+  de?: number
+  ate?: number
+}
+
+/**
+ * Os pedidos de leitura, do jeito que o modelo mandou.
+ *
+ * TOLERANTE NA FORMA: o modelo escreve `{ arquivo: "3" }`, `{ arquivo: 3 }` ou
+ * só `"3"`, e os três querem dizer "o arquivo 3 inteiro". Recusar dois deles por
+ * detalhe de tipo devolveria ao modelo um erro, e a quem opera mais uma
+ * autorização para a nova tentativa.
+ *
+ * O MESMO PEDIDO DUAS VEZES VIRA UM. Repetir leitura na lista não traz nada de
+ * novo e gasta o orçamento de quem vem depois.
+ */
+export function pedidosDeLeitura(bruto: unknown): PedidoDeLeitura[] {
+  const lista = Array.isArray(bruto) ? bruto : bruto == null ? [] : [bruto]
+  const vistos = new Set<string>()
+  const saida: PedidoDeLeitura[] = []
+  for (const item of lista) {
+    const obj = (typeof item === 'object' && item !== null ? item : { arquivo: item }) as Record<
+      string,
+      unknown
+    >
+    const arquivo = String(obj.arquivo ?? '').trim()
+    if (!arquivo) continue
+    const de = Number(obj.de)
+    const ate = Number(obj.ate)
+    const pedido: PedidoDeLeitura = {
+      arquivo,
+      ...(Number.isFinite(de) && de > 0 ? { de } : {}),
+      ...(Number.isFinite(ate) && ate > 0 ? { ate } : {}),
+    }
+    const chave = `${arquivo.toLowerCase()}|${pedido.de ?? 1}|${pedido.ate ?? '∞'}`
+    if (vistos.has(chave)) continue
+    vistos.add(chave)
+    saida.push(pedido)
+    if (saida.length >= MAX_LEITURAS_POR_CHAMADA) break
+  }
+  return saida
+}
+
+/**
+ * VÁRIAS LEITURAS NUMA CHAMADA SÓ — e é o motivo de esta função existir.
+ *
+ * Cada chamada de ferramenta pede autorização na tela de quem opera. Com uma
+ * leitura por chamada, um card com quinze anexos que não couberam na primeira
+ * entrega eram quinze autorizações seguidas, por processo — o mesmo defeito
+ * que já tinha sido corrigido na busca, que recebe a lista de termos inteira.
+ *
+ * O ORÇAMENTO É DA CHAMADA, dividido na ordem dos pedidos. O que não couber não
+ * é cortado nem esquecido: vai listado no fim, pelo nome, com o pedido pronto
+ * para a próxima chamada — a regra desta esteira desde o começo é que leitura
+ * interrompida diz onde parou.
+ */
+export function lerVarias(g: AutosGuardados, pedidos: PedidoDeLeitura[]): string {
+  if (pedidos.length === 0) {
+    const nomes = g.arquivos.map((x, i) => `${i + 1}. ${x.nome}`).join('\n')
+    return `Nenhum arquivo indicado. Os arquivos deste crédito são:\n${nomes}`
+  }
+  // UM PEDIDO SÓ É A LEITURA DE SEMPRE, sem cabeçalho de lote em volta.
+  if (pedidos.length === 1) {
+    const p = pedidos[0]
+    return lerPaginas(g, p.arquivo, p.de ?? 1, p.ate ?? Number.MAX_SAFE_INTEGER)
+  }
+
+  let restante = MAX_POR_LEITURA
+  const blocos: string[] = []
+  const ficaram: PedidoDeLeitura[] = []
+  for (const p of pedidos) {
+    if (restante <= 0) {
+      ficaram.push(p)
+      continue
+    }
+    const r = lerTrecho(g, p.arquivo, p.de ?? 1, p.ate ?? Number.MAX_SAFE_INTEGER, restante)
+    blocos.push(r.texto)
+    restante -= r.usado
+  }
+
+  const rodape =
+    ficaram.length > 0
+      ? '\n\n[Não couberam nesta chamada: ' +
+        ficaram
+          .map((p) => `"${p.arquivo}"${p.de || p.ate ? ` (p. ${p.de ?? 1}–${p.ate ?? 'fim'})` : ''}`)
+          .join(', ') +
+        '. Peça-os todos juntos na próxima chamada.]'
+      : ''
+  return blocos.join('\n\n==========\n\n') + rodape
 }
 
 /** Uma ocorrência do termo procurado. */
