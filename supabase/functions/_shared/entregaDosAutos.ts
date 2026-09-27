@@ -137,7 +137,7 @@ export const MAX_LEITURAS_POR_CHAMADA = 20
  * Quanto dos autos que não vieram na primeira entrega ainda cabe LER na conversa.
  *
  * EXISTE PORQUE O BALCÃO FICOU MAIOR QUE A CONVERSA. Com o teto do
- * `autos-guardar` em 10 milhões de caracteres (27/09/2026), um card pode trazer
+ * `autos-guardar` em 16 milhões de caracteres (27/09/2026), um card pode trazer
  * processos inteiros de milhares de páginas — um milhão de tokens, cinco vezes a
  * janela do modelo. Mandar ler tudo, como a instrução mandava, estouraria a
  * conversa no meio da leitura, antes de uma linha de análise.

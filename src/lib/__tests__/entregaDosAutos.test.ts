@@ -544,7 +544,7 @@ describe('COMO_LER_OS_AUTOS manda agrupar as leituras', () => {
 })
 
 /**
- * O BALCÃO FICOU MAIOR QUE A CONVERSA. Com o teto de armazenamento em 10
+ * O BALCÃO FICOU MAIOR QUE A CONVERSA. Com o teto de armazenamento em 16
  * milhões de caracteres, um card pode trazer um processo de milhares de páginas
  * — um milhão de tokens, cinco vezes a janela do modelo. Mandar ler tudo
  * estouraria a conversa antes da análise; o que não cabe se VARRE pela busca, e
