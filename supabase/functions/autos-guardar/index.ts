@@ -29,6 +29,18 @@
 //   { codigo, lead_id, titulo, arquivos: [{ nome, paginas, paginasTexto[],
 //     texto, digitalizado, erro, paginas_imagem[] }] }
 //   -> { pronto, guardados, com_texto, caracteres, paginas, de_fora, sem_texto }
+//
+// E TRÊS AÇÕES DE ANDAMENTO, desde 27/09/2026 (migração 0069):
+//   { acao: 'reservar',  codigo, lead_id, titulo }        — no clique
+//   { acao: 'progresso', itens: [{ codigo, estado, progresso }] } — batimento
+//   { acao: 'falhou',    codigo, motivo }                 — a leitura quebrou
+//
+// POR QUE ELAS EXISTEM. A conversa do Claude abre no clique, e a leitura dos PDFs
+// vem depois, numa fila do navegador — várias análises podem ser disparadas de
+// uma vez. Sem saber que o código é válido e a leitura está em curso, o conector
+// só sabia dizer "não achei", e o modelo às vezes seguia sem os autos. Com a
+// reserva e o batimento, ele diz "ainda lendo, 7 de 15" ou "a leitura parou" — e
+// proíbe começar pela metade.
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
@@ -70,8 +82,73 @@ Deno.serve(async (req) => {
     if (!user) return json({ erro: ERRO_ACESSO }, 401);
 
     const body = await req.json().catch(() => ({}));
+    const acao = String((body as any).acao ?? "");
+
+    // O BATIMENTO vem em lote: uma chamada por minuto para TODAS as análises na
+    // fila, e não uma por análise. Coluna ausente (migração 0069 por rodar) não
+    // é erro de quem chama — o progresso é enfeite do caminho, não o caminho.
+    if (acao === "progresso") {
+      const itens = Array.isArray((body as any).itens) ? (body as any).itens : [];
+      let anotados = 0;
+      for (const it of itens.slice(0, 50)) {
+        const c = String(it?.codigo ?? "").trim();
+        if (!UUID.test(c)) continue;
+        const { error } = await db
+          .from("analise_externa_autos")
+          .update({
+            estado: String(it?.estado ?? "lendo").slice(0, 20),
+            progresso: it?.progresso && typeof it.progresso === "object" ? it.progresso : {},
+            atualizado_em: new Date().toISOString(),
+          })
+          .eq("codigo", c)
+          // SÓ ENQUANTO NÃO HÁ AUTOS. Um batimento atrasado chegando depois do
+          // depósito não pode rebaixar para "lendo" o que já está pronto.
+          .eq("arquivos", "[]");
+        if (!error) anotados++;
+      }
+      return json({ ok: true, anotados });
+    }
+
     const codigo = String((body as any).codigo ?? "").trim();
     if (!UUID.test(codigo)) return json({ erro: "codigo inválido (esperado um uuid)." }, 400);
+
+    if (acao === "falhou") {
+      const motivo = limparParaOBanco((body as any).motivo).slice(0, 300);
+      await db
+        .from("analise_externa_autos")
+        .update({ estado: "falhou", progresso: { motivo }, atualizado_em: new Date().toISOString() })
+        .eq("codigo", codigo)
+        .eq("arquivos", "[]");
+      return json({ ok: true });
+    }
+
+    if (acao === "reservar") {
+      const leadRes = Number((body as any).lead_id ?? 0);
+      if (!Number.isFinite(leadRes) || leadRes <= 0) return json({ erro: "lead_id é obrigatório." }, 400);
+      const base = {
+        codigo,
+        lead_id: leadRes,
+        titulo: limparParaOBanco((body as any).titulo).slice(0, 500),
+        arquivos: [],
+        criado_em: new Date().toISOString(),
+        expira_em: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        lido_em: null,
+      };
+      // COM AS COLUNAS DE PROGRESSO, e sem elas se a 0069 ainda não rodou: a
+      // reserva vazia continua servindo — o conector segue esperando por ela
+      // como sempre esperou —, só não diz quanto falta.
+      let { error } = await db.from("analise_externa_autos").upsert({
+        ...base,
+        estado: "fila",
+        progresso: { etapa: "fila", na_frente: Number((body as any).na_frente ?? 0) || 0 },
+        atualizado_em: new Date().toISOString(),
+      });
+      if (error && /column|schema cache/i.test(error.message)) {
+        ({ error } = await db.from("analise_externa_autos").upsert(base));
+      }
+      if (error) return json({ erro: `Não consegui reservar o balcão: ${error.message}` }, 500);
+      return json({ ok: true, reservado: true });
+    }
 
     const leadId = Number((body as any).lead_id ?? 0);
     if (!Number.isFinite(leadId) || leadId <= 0) return json({ erro: "lead_id é obrigatório." }, 400);
@@ -160,7 +237,7 @@ Deno.serve(async (req) => {
     if (caminhos.length > 0) await db.storage.from(BALDE).remove(caminhos);
     await db.from("analise_externa_autos").delete().lt("expira_em", agora);
 
-    const { error } = await db.from("analise_externa_autos").upsert({
+    const deposito = {
       codigo,
       lead_id: leadId,
       titulo: limparParaOBanco((body as any).titulo).slice(0, 500),
@@ -170,7 +247,18 @@ Deno.serve(async (req) => {
       criado_em: new Date().toISOString(),
       expira_em: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
       lido_em: null,
+    };
+    // O ESTADO FINAL VAI JUNTO: "imagens" enquanto houver página digitalizada a
+    // caminho, "pronto" quando não houver. Sem a 0069, grava como antes.
+    const aindaVemImagem = arquivos.some((a) => (a.imagensPrevistas ?? []).length > 0);
+    let { error } = await db.from("analise_externa_autos").upsert({
+      ...deposito,
+      estado: aindaVemImagem ? "imagens" : "pronto",
+      atualizado_em: new Date().toISOString(),
     });
+    if (error && /column|schema cache/i.test(error.message)) {
+      ({ error } = await db.from("analise_externa_autos").upsert(deposito));
+    }
     if (error) return json({ erro: `Não consegui guardar os autos: ${error.message}` }, 500);
 
     // A RESPOSTA CONTA O QUE FALTOU, e quem a ignorar mente para quem opera: a

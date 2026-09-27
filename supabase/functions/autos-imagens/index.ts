@@ -105,6 +105,14 @@ Deno.serve(async (req) => {
       .eq("codigo", codigo);
     if (erroUp) return json({ erro: `Não consegui anotar as imagens: ${erroUp.message}` }, 500);
 
+    // AS IMAGENS ERAM A ÚLTIMA COISA A CHEGAR: o balcão está completo. Sem a
+    // migração 0069 a coluna não existe e o update falha — em silêncio, porque
+    // o estado só refina a mensagem do conector, e as imagens já estão gravadas.
+    await db
+      .from("analise_externa_autos")
+      .update({ estado: "pronto", atualizado_em: new Date().toISOString() })
+      .eq("codigo", codigo);
+
     return json({
       pronto: true,
       arquivos: arquivos.filter((a: any) => (a?.imagens ?? []).length > 0).length,

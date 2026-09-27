@@ -34,6 +34,7 @@ import {
   pedidosDeLeitura,
   textoDaBusca,
 } from "../_shared/entregaDosAutos.ts";
+import { situacaoDosAutos, type BalcaoDosAutos } from "../_shared/esperaDosAutos.ts";
 
 /** A chave do roteiro na tabela que a operação edita (ver migration 0065). */
 const CHAVE_ROTEIRO = "qualificacao_preliminar";
@@ -263,47 +264,51 @@ async function carregarAutos(codigo: string): Promise<
 > {
   const db = serviceClient();
   const limite = Date.now() + ESPERA_TOTAL_MS;
+  let ultima: BalcaoDosAutos | null = null;
   for (;;) {
+    // `*`, E NÃO A LISTA DE COLUNAS: as de progresso (estado, progresso,
+    // atualizado_em) chegaram com a migração 0069, e nomear coluna que ainda
+    // não existe faz o PostgREST recusar a consulta inteira. Sem elas, a espera
+    // funciona como antes — só com mensagens menos precisas.
     const { data, error } = await db
       .from("analise_externa_autos")
-      .select("lead_id, titulo, arquivos, criado_em, expira_em")
+      .select("*")
       .eq("codigo", codigo)
       .maybeSingle();
     if (error) {
       return { ok: false, falha: falhaDaFerramenta(`Não consegui ler o balcão dos autos: ${error.message}`) };
     }
 
-    if (data) {
-      // VENCIDO É TRATADO COMO INEXISTENTE na mensagem, mas aqui já sabemos a
-      // diferença — e dizê-la ajuda quem está na conversa: reabrir a análise
-      // pela plataforma resolve, tentar de novo não.
-      if (new Date(String((data as any).expira_em)).getTime() < Date.now()) {
-        return {
-          ok: false,
-          falha: falhaDaFerramenta(
-            "Este código de análise expirou (os autos ficam disponíveis por 2 horas). " +
-              "Clique de novo em “Executar análise” na plataforma Credijuris para abrir uma conversa nova.",
-          ),
-        };
-      }
-      const g = data as unknown as AutosGuardados;
-      if (Array.isArray(g.arquivos) && g.arquivos.length > 0) {
-        await db
-          .from("analise_externa_autos")
-          .update({ lido_em: new Date().toISOString() })
-          .eq("codigo", codigo);
-        return { ok: true, g };
-      }
+    ultima = (data ?? null) as BalcaoDosAutos | null;
+    const situacao = situacaoDosAutos(ultima);
+    if (situacao?.tipo === "pronto") {
+      await db
+        .from("analise_externa_autos")
+        .update({ lido_em: new Date().toISOString() })
+        .eq("codigo", codigo);
+      return { ok: true, g: data as unknown as AutosGuardados };
+    }
+    // FALHOU, PAROU OU VENCEU: esperar mais não muda nada. Responder já poupa
+    // quarenta segundos de uma espera inútil — e a mensagem manda parar.
+    if (situacao && situacao.tipo !== "esperando") {
+      return { ok: false, falha: falhaDaFerramenta(situacao.mensagem) };
     }
 
     if (Date.now() >= limite) break;
     await dorme(ESPERA_PASSO_MS);
   }
+
+  // O TEMPO DESTA CHAMADA ACABOU. Com a linha reservada, sabemos que a leitura
+  // está em curso e dizemos quanto falta; sem linha, pode ser código errado ou
+  // o instante antes da reserva — e a mensagem cobre os dois sem mandar seguir.
+  const situacao = situacaoDosAutos(ultima);
   return {
     ok: false,
     falha: falhaDaFerramenta(
-      "Não encontrei autos para este código. Ou ele está errado, ou a plataforma ainda não terminou de ler os PDFs do card " +
-        "(processos grandes levam algum tempo). Espere alguns segundos e chame esta ferramenta de novo com o mesmo código.",
+      situacao && situacao.tipo === "esperando"
+        ? situacao.mensagem
+        : "Não encontrei autos para este código. Ou ele está errado, ou a plataforma ainda não começou a lê-los. " +
+            "NÃO COMECE A ANÁLISE sem os autos: chame esta ferramenta de novo com o mesmo código.",
     ),
   };
 }

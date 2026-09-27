@@ -339,7 +339,12 @@ export interface PreparoDosAutos {
    * disposição" contando os LIDOS, e ninguém ficava sabendo que o Claude
    * recebeu dois, um deles pela metade.
    */
-  estado: 'lendo' | 'pronto' | 'parcial' | 'falhou'
+  /**
+   * 'fila' desde 27/09/2026: a leitura virou fila, e um card clicado depois de
+   * outros espera a sua vez — com a conversa do Claude já aberta, esperando
+   * junto. Sem estado próprio, ele apareceria como 'lendo' sem estar.
+   */
+  estado: 'fila' | 'lendo' | 'pronto' | 'parcial' | 'falhou'
   detalhe: string
 }
 
@@ -400,7 +405,15 @@ const DENSIDADE_MINIMA = 150
  * achou nada" — a leitura nunca mais seria tentada, e a tela ficaria em branco
  * para sempre sem dizer por quê.
  */
-async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
+async function lerArquivosDoCard(
+  lead: KommoLead,
+  /**
+   * Avisa a cada arquivo lido. Existe para a FILA das análises externas: o
+   * conector diz ao Claude "7 de 15 arquivos" enquanto espera, e é o número que
+   * o faz esperar em vez de desistir.
+   */
+  aoProgresso?: (feitos: number, total: number, nome: string) => void,
+): Promise<ArquivoLido[]> {
   const bk = await invokeFunction<{
     pronto?: boolean
     download_url?: string
@@ -424,6 +437,7 @@ async function lerArquivosDoCard(lead: KommoLead): Promise<ArquivoLido[]> {
 
   const lidos: ArquivoLido[] = []
   for (const a of lista) {
+    aoProgresso?.(lidos.length, lista.length, a.nome)
     try {
       const { texto, paginas, paginasTexto, bytes } = await extrairTextoDoPdf(a.download)
       const limpo = texto.trim()
@@ -1400,6 +1414,9 @@ function CardCredito({
       )}
       {preparoDosAutos && (
         <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+          {preparoDosAutos.estado === 'fila' && (
+            <div className="text-slate-600">🕒 {preparoDosAutos.detalhe}</div>
+          )}
           {preparoDosAutos.estado === 'lendo' && (
             <div className="text-slate-700">⏳ {preparoDosAutos.detalhe}</div>
           )}
@@ -1818,11 +1835,14 @@ export default function AnaliseCredito() {
   }, [])
 
   /** Lê uma vez só, ainda que dois lugares peçam ao mesmo tempo. */
-  const lerUmaVezSo = useCallback((lead: KommoLead): Promise<ArquivoLido[]> => {
+  const lerUmaVezSo = useCallback((
+    lead: KommoLead,
+    aoProgresso?: (feitos: number, total: number, nome: string) => void,
+  ): Promise<ArquivoLido[]> => {
     const id = lead.kommo_lead_id
     const emVoo = leiturasEmVoo.current.get(id)
     if (emVoo) return emVoo
-    const p = lerArquivosDoCard(lead).finally(() => leiturasEmVoo.current.delete(id))
+    const p = lerArquivosDoCard(lead, aoProgresso).finally(() => leiturasEmVoo.current.delete(id))
     leiturasEmVoo.current.set(id, p)
     return p
   }, [])
@@ -1914,8 +1934,123 @@ export default function AnaliseCredito() {
     const link = document.createElement('a')
     link.href = urlDoClaude(prompt)
     link.click()
-    void depositarAutos(lead, codigo)
+    enfileirarAutos(lead, codigo)
   }
+
+  // ------------------------------------------------ A FILA DAS ANÁLISES EXTERNAS
+  //
+  // POR QUE FILA. Cada clique em "Executar análise" abre uma conversa no Claude
+  // e manda ler os PDFs do card — e os PDFs daqui são grandes. Disparadas juntas,
+  // as leituras disputavam o mesmo processador e TODAS terminavam tarde; cada
+  // conversa esperava pelos seus autos, desistia, e às vezes seguia sem eles.
+  // Em fila, a primeira termina cedo e a sua conversa começa, enquanto as de
+  // trás esperam — sabendo que esperam, porque o conector diz a posição.
+  //
+  // DUAS DE CADA VEZ, e não uma: boa parte da leitura é download do Kommo, que
+  // espera a rede e não o processador. Com duas, o download de uma corre
+  // enquanto a outra lê.
+  //
+  // A FILA VIVE NA PÁGINA, e não no card: fechar uma janela ou trocar de aba
+  // dentro da plataforma não a interrompe. Fechar ou recarregar a ABA DO
+  // NAVEGADOR interrompe — e para isso há a guarda do `beforeunload` abaixo, e o
+  // batimento que deixa o conector perceber quando ela morreu.
+  const MAX_LEITURAS_SIMULTANEAS = 2
+  const filaDosAutos = useRef<{ lead: KommoLead; codigo: string }[]>([])
+  const andamentoDosAutos = useRef(
+    new Map<string, { leadId: number; estado: string; progresso: Record<string, unknown> }>(),
+  )
+  const leiturasCorrendo = useRef(0)
+
+  /** Anota o andamento de uma análise, e o manda já — quando a mudança importa. */
+  function anotarAndamento(
+    codigo: string,
+    leadId: number,
+    estado: string,
+    progresso: Record<string, unknown>,
+    enviarJa = false,
+  ) {
+    andamentoDosAutos.current.set(codigo, { leadId, estado, progresso })
+    if (enviarJa) {
+      void invokeFunction('autos-guardar', {
+        acao: 'progresso',
+        itens: [{ codigo, estado, progresso }],
+      }).catch(() => undefined)
+    }
+  }
+
+  /** Diz a cada card na fila quantas análises estão à frente dele. */
+  function renumerarFila() {
+    filaDosAutos.current.forEach((job, i) => {
+      const naFrente = i + leiturasCorrendo.current
+      anotarPreparo(
+        job.lead.kommo_lead_id,
+        'fila',
+        naFrente > 0
+          ? `Na fila: ${naFrente} análise(s) à frente. A conversa do Claude já está aberta e espera os autos.`
+          : 'Começando a leitura…',
+      )
+      anotarAndamento(job.codigo, job.lead.kommo_lead_id, 'fila', { etapa: 'fila', na_frente: naFrente })
+    })
+  }
+
+  function enfileirarAutos(lead: KommoLead, codigo: string) {
+    const naFrente = filaDosAutos.current.length + leiturasCorrendo.current
+    // A RESERVA VAI JÁ, antes da leitura: é ela que diz ao conector que este
+    // código existe e está a caminho. Sem ela, "não achei" continuaria
+    // significando três coisas diferentes.
+    void invokeFunction('autos-guardar', {
+      acao: 'reservar',
+      codigo,
+      lead_id: lead.kommo_lead_id,
+      titulo: tituloCard(lead),
+      na_frente: naFrente,
+    }).catch(() => undefined)
+    filaDosAutos.current.push({ lead, codigo })
+    processarFila()
+  }
+
+  function processarFila() {
+    while (leiturasCorrendo.current < MAX_LEITURAS_SIMULTANEAS && filaDosAutos.current.length > 0) {
+      const job = filaDosAutos.current.shift()!
+      leiturasCorrendo.current++
+      void depositarAutos(job.lead, job.codigo).finally(() => {
+        leiturasCorrendo.current--
+        andamentoDosAutos.current.delete(job.codigo)
+        processarFila()
+      })
+    }
+    renumerarFila()
+  }
+
+  // O BATIMENTO: a cada 45 segundos, o andamento de TODAS as análises pendentes
+  // numa chamada só. É o que mantém vivo, do lado do conector, o sinal de que a
+  // leitura continua — parado há mais de três minutos, ele conclui que a aba
+  // morreu e manda o Claude parar em vez de esperar para sempre.
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const itens = [...andamentoDosAutos.current.entries()].map(([codigo, a]) => ({
+        codigo,
+        estado: a.estado,
+        progresso: a.progresso,
+      }))
+      if (itens.length === 0) return
+      void invokeFunction('autos-guardar', { acao: 'progresso', itens }).catch(() => undefined)
+    }, 45_000)
+    return () => window.clearInterval(t)
+  }, [])
+
+  // A GUARDA DA ABA. Fechar ou recarregar com leitura em curso entrega ao
+  // Claude autos pela metade — ou nenhum. O navegador pergunta antes; a frase
+  // própria ele não mostra mais, mas a pergunta basta para evitar o acidente.
+  useEffect(() => {
+    const aoSair = (e: BeforeUnloadEvent) => {
+      if (filaDosAutos.current.length === 0 && leiturasCorrendo.current === 0) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', aoSair)
+    return () => window.removeEventListener('beforeunload', aoSair)
+  }, [])
 
   /**
    * Põe os autos no balcão, para o Claude vir buscá-los pelo conector.
@@ -1932,8 +2067,12 @@ export default function AnaliseCredito() {
   async function depositarAutos(lead: KommoLead, codigo: string) {
     const id = lead.kommo_lead_id
     anotarPreparo(id, 'lendo', 'Lendo os PDFs do card. Num processo grande isto leva um minuto.')
+    anotarAndamento(codigo, id, 'lendo', { etapa: 'lendo', feitos: 0, total: 0 }, true)
     try {
-      const lidos = await lerArquivosComCache(lead)
+      const lidos = await lerArquivosComCache(lead, (feitos, total, nome) => {
+        anotarPreparo(id, 'lendo', `Lendo os PDFs do card: ${feitos} de ${total} — ${nome}`)
+        anotarAndamento(codigo, id, 'lendo', { etapa: 'lendo', feitos, total })
+      })
       // AS PÁGINAS QUE SERÃO VISTAS SÃO ESCOLHIDAS ANTES DO DEPÓSITO, e não
       // depois. O índice da entrega sai no instante em que o texto chega, e
       // precisa já anunciar o que está a caminho em imagem — senão ele descreve
@@ -2047,6 +2186,9 @@ export default function AnaliseCredito() {
       // perder a única explicação que existe do lado de cá.
       const motivo = (e as Error)?.message ?? String(e)
       anotarPreparo(id, 'falhou', motivo)
+      // O CONECTOR PRECISA SABER, ou a conversa espera para sempre por autos que
+      // não vêm — ou pior, desiste e segue sem eles.
+      void invokeFunction('autos-guardar', { acao: 'falhou', codigo, motivo }).catch(() => undefined)
       // RESGATE PELO DISCO. Sem o depósito o conector não tem o que entregar, e
       // a conversa já abriu: baixar os arquivos devolve à pessoa o caminho
       // antigo, o do arrasto, em vez de deixá-la diante de uma conversa vazia.
@@ -2226,9 +2368,12 @@ export default function AnaliseCredito() {
   }
 
   /** Lê os anexos do card, guardando no cache na hora — a janela e a due diligence dividem o mesmo PDF. */
-  async function lerArquivosComCache(lead: KommoLead): Promise<ArquivoLido[]> {
+  async function lerArquivosComCache(
+    lead: KommoLead,
+    aoProgresso?: (feitos: number, total: number, nome: string) => void,
+  ): Promise<ArquivoLido[]> {
     const id = lead.kommo_lead_id
-    const lidos = arquivosCache[id] ?? (await lerUmaVezSo(lead))
+    const lidos = arquivosCache[id] ?? (await lerUmaVezSo(lead, aoProgresso))
     guardarNoCache(id, lidos)
     return lidos
   }

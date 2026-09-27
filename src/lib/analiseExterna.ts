@@ -87,7 +87,14 @@ export function promptDaAnaliseExterna(
     '\n\nOs autos deste crédito estão no conector Credijuris. Antes de responder, ' +
     'leia-os com a ferramenta `autos_do_credito`, código ' +
     chave +
-    '.'
+    '.' +
+    // A ESPERA VAI DITA NA PERGUNTA, e não só na resposta da ferramenta. A
+    // leitura dos PDFs é uma fila — com várias análises disparadas juntas, a
+    // desta pode levar minutos —, e é na pergunta que o modelo decide o que a
+    // conversa é. Dito aqui, "ainda lendo" vira motivo para chamar de novo, e
+    // não licença para começar com o que tem.
+    ' Se ela disser que os autos ainda estão sendo lidos, chame-a de novo até ' +
+    'chegarem: não comece a análise sem eles.'
   )
 }
 
