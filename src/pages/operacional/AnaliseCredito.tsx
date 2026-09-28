@@ -36,7 +36,6 @@ import {
   Loader2,
   Paperclip,
   Receipt,
-  Scale,
   Tag,
   CheckCircle2,
   X,
@@ -50,7 +49,6 @@ import {
   type PapelDaAcao,
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
-  ABA_ANALISE_INTERNA,
   ABAS_COM_TAGS,
   ABAS_EXTERNO_SEM_TRABALHO,
   ABAS_INTERNO_SEM_TRABALHO,
@@ -565,7 +563,6 @@ function tituloCard(lead: KommoLead): string {
  * Que botões de trabalho o card oferece.
  *
  *   'rpv'         a análise de RPV que já existia, mais a due diligence
- *   'precatorio'  o de 'dd' + a análise jurídica — só na aba Análise do Interno
  *   'dd'          due diligence + Executar análise (no Claude) + Concluir — as
  *                 abas de trabalho do Externo e, desde 28/09/2026, do Interno
  *   'nenhum'      etapa em que não se analisa: aprovados, diligência, reprovados
@@ -576,7 +573,7 @@ function tituloCard(lead: KommoLead): string {
  * 'rpv' nunca aparece fora do funil de RPV. O do precatório abre uma conversa no
  * Claude, que busca os autos pelo conector e segue o roteiro da casa.
  */
-type BotoesDoCard = 'rpv' | 'precatorio' | 'dd' | 'nenhum'
+type BotoesDoCard = 'rpv' | 'dd' | 'nenhum'
 
 /**
  * As abas de RPV em que a análise JÁ ACABOU.
@@ -1116,7 +1113,6 @@ function CardCredito({
   onAbrirAnexo,
   onPrepararAnexo,
   preparoDosAutos,
-  onAnaliseJuridica,
   onPreencherPlanilha,
   analisandoJuridico,
   resultadoJuridico,
@@ -1166,7 +1162,6 @@ function CardCredito({
   onPrepararAnexo: (l: KommoLead, anexo: KommoNota) => void
   /** Como vai o preparo dos autos deste card, se já foi pedido. */
   preparoDosAutos?: PreparoDosAutos
-  onAnaliseJuridica: (l: KommoLead) => void
   /** Abre a janela que recebe o bloco da planilha entregue pela conversa do Claude. */
   onPreencherPlanilha?: (l: KommoLead) => void
   analisandoJuridico: boolean
@@ -1201,6 +1196,9 @@ function CardCredito({
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
+  // A planilha jurídica é do Interno: é só nele que o conector a pede à conversa.
+  const planilhaDeReserva =
+    Boolean(onPreencherPlanilha) && ehFunilPrecatorio(lead.pipeline_id) && !ehCardExterno(lead.pipeline_id)
   // Compatibilidade com cards sincronizados antes da coluna `notas` existir:
   // cai no nota_texto para não sumir o dado do crédito antes do próximo sync.
   const notas: KommoNota[] =
@@ -1376,7 +1374,7 @@ function CardCredito({
           por ele que a apuração RECONHECE o próprio crédito na lista de
           processos do cedente e o exclui — sem número, o precatório que estamos
           comprando volta da busca como se fosse mais uma dívida dele. */}
-      {(botoes === 'nenhum' || botoes === 'dd' || botoes === 'precatorio') && (
+      {(botoes === 'nenhum' || botoes === 'dd') && (
         <AvisoSemNumero lead={lead} />
       )}
 
@@ -1433,7 +1431,7 @@ function CardCredito({
               equipe. Mesmo lugar e mesma forma do botão de RPV de propósito: é
               o mesmo ato do ponto de vista de quem opera, e muda só para onde
               leva. */}
-          {(botoes === 'dd' || botoes === 'precatorio') && (
+          {botoes === 'dd' && (
             <Button
               size="sm"
               variant="secondary"
@@ -1445,30 +1443,12 @@ function CardCredito({
             </Button>
           )}
 
-          {/* A PLANILHA DA ANÁLISE JURÍDICA, que desde 28/09/2026 nasce da
-              conversa do Claude: o "Executar análise" do Interno leva o
-              questionário junto com os autos, e aqui se cola o bloco que ele
-              devolveu. Era o botão "Análise jurídica", que rodava um motor à
-              parte — outra leitura, sem o contexto da qualificação. O motor
-              antigo segue dentro da janela, para quando faltar o bloco. */}
-          {botoes === 'precatorio' && (
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<Scale className="h-4 w-4" />}
-              onClick={() => (onPreencherPlanilha ? onPreencherPlanilha(lead) : onAnaliseJuridica(lead))}
-              loading={analisandoJuridico}
-              disabled={ocupado || analisandoJuridico}
-            >
-              {analisandoJuridico ? 'Analisando…' : 'Preencher planilha'}
-            </Button>
-          )}
           {/* CONCLUIR FECHA A ETAPA, e fica à direita da análise porque é o que
               vem depois dela: a conversa com o Claude acontece fora daqui, e
               quem volta precisa registrar o que decidiu e mover o card. Sem este
               botão, as duas coisas ficavam a cargo de quem opera — dentro do
               Kommo, à mão, e fora do alcance da plataforma. */}
-          {(botoes === 'dd' || botoes === 'precatorio') && onConcluir && (
+          {botoes === 'dd' && onConcluir && (
             <Button
               size="sm"
               // O AZUL DA MARCA, e não o `secondary` de "Executar análise": os
@@ -1499,6 +1479,21 @@ function CardCredito({
           {preparoDosAutos.estado === 'pronto' && (
             <div className="text-green-700">✅ {preparoDosAutos.detalhe}</div>
           )}
+          {/* A SAÍDA DE EMERGÊNCIA DA PLANILHA, e só ela. O caminho é o Claude
+              gravar a planilha sozinho, pela ferramenta do conector; mas se uma
+              conversa entregar o bloco em vez de gravar — ferramenta ainda não
+              enxergada por quem opera, ou uma falha dela —, o bloco precisa ter
+              para onde ir. Um link discreto aqui, e não um botão na fileira: é
+              exceção, e a fileira é o que se faz sempre. */}
+          {planilhaDeReserva && (preparoDosAutos.estado === 'pronto' || preparoDosAutos.estado === 'parcial') && (
+            <button
+              type="button"
+              onClick={() => onPreencherPlanilha?.(lead)}
+              className="mt-1.5 text-slate-500 underline underline-offset-2 hover:text-slate-700"
+            >
+              A planilha não foi gravada pelo Claude? Colar o bloco que ele entregou
+            </button>
+          )}
           {preparoDosAutos.estado === 'parcial' && (
             <div className="text-amber-800">
               <div className="font-medium">Os autos chegaram incompletos ao Claude.</div>
@@ -1528,6 +1523,11 @@ function CardCredito({
               )}
             </div>
           )}
+        </div>
+      )}
+      {analisandoJuridico && (
+        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
+          ⏳ Rodando a análise jurídica antiga — a planilha vai para o Drive quando terminar.
         </div>
       )}
       {resultadoJuridico && (
@@ -2813,8 +2813,9 @@ export default function AnaliseCredito() {
    * template, cenários (RPV expedida ou não) e cálculo de prazo de RPV, e num
    * precatório ele entregava parecer e planilha errados sem nenhum sinal na tela.
    *
-   * A ANÁLISE JURÍDICA é a única diferença que sobrou: ela é o motor do
-   * Interno e aparece só na aba Análise dele, ao lado das ferramentas comuns.
+   * AS DUAS TRILHAS TÊM OS MESMOS BOTÕES desde 28/09/2026. A planilha jurídica do
+   * Interno, que tinha botão próprio, passou a ser entregue pela conversa do
+   * Claude, e o motor antigo ficou só como reserva, dentro da janela de colar.
    */
   //
   // AS DUAS TRILHAS COM AS MESMAS FERRAMENTAS, desde 28/09/2026 e a pedido da
@@ -2825,8 +2826,10 @@ export default function AnaliseCredito() {
   // agrupado estava ligado, mas o botão só existia no modo do Externo, e a
   // Revisão do Interno não tinha como aprovar pela plataforma.
   //
-  // A ANÁLISE JURÍDICA CONTINUA na aba Análise do Interno, ao lado: é o motor
-  // interno, e ninguém pediu para tirá-lo.
+  // A PLANILHA JURÍDICA NÃO TEM MAIS BOTÃO PRÓPRIO (28/09/2026): o "Executar
+  // análise" do Interno leva o questionário à conversa, e o Claude a grava pela
+  // ferramenta `entregar_planilha` do conector. Sobrou só a saída de emergência
+  // no quadro de status do card — ver `planilhaDeReserva`.
   const semTrabalho =
     subdivisao === 'externo' ? ABAS_EXTERNO_SEM_TRABALHO : ABAS_INTERNO_SEM_TRABALHO
   const botoesDoCard: BotoesDoCard =
@@ -2834,9 +2837,7 @@ export default function AnaliseCredito() {
       ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
       : !abaAtual || semTrabalho.has(abaAtual.key)
         ? 'nenhum'
-        : abaAtual.key === ABA_ANALISE_INTERNA
-          ? 'precatorio'
-          : 'dd'
+        : 'dd'
 
   const lista = useMemo(() => {
     let l = abaAtual ? (porAba[abaAtual.key] ?? []) : []
@@ -3240,7 +3241,6 @@ export default function AnaliseCredito() {
                 onAnaliseExterna={onAnaliseExterna}
                 onBaixarAnexos={(l) => void baixarAnexosDoCard(l)}
                 preparoDosAutos={preparoDosAutos[l.kommo_lead_id]}
-                onAnaliseJuridica={onAnaliseJuridica}
                 onPreencherPlanilha={(l) => setPlanilhaLead(l)}
                 analisandoJuridico={analisandoJurId === l.kommo_lead_id}
                 resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
