@@ -45,6 +45,7 @@ import {
 import {
   abrirModelo,
   checklistEmTexto,
+  preencherCertidoesDoChecklist,
   ligarPastaAoCard,
   salvarPlanilhaNoDrive,
 } from "../_shared/planilhaJuridica.ts";
@@ -525,6 +526,9 @@ async function entregarPlanilha(g: AutosGuardados, args: any) {
 
   const { wb, ws, linhas, comFormula } = await abrirModelo(db);
   const { temChecklist } = await checklistEmTexto(db, g.lead_id);
+  // AS CERTIDÕES PRIMEIRO, do banco: nas linhas que o checklist responde, ele
+  // prevalece sobre o que a conversa escreveu.
+  const doChecklist = await preencherCertidoesDoChecklist(db, g.lead_id, ws, linhas);
   const { escritas, avisos, ficha, verbasNome } = aplicarRespostas(ws, linhas, comFormula, saida, {
     numero_processo: cadastro.numero,
     cedente: cadastro.cedente,
@@ -532,6 +536,7 @@ async function entregarPlanilha(g: AutosGuardados, args: any) {
     honorarios_pct: cadastro.honorarios_pct,
     temChecklist,
   });
+  avisos.push(...doChecklist.avisos);
   // PLANILHA SEM RESPOSTA NÃO VAI AO DRIVE: seria lida como análise feita.
   if (escritas === 0) {
     return falhaDaFerramenta(
@@ -585,7 +590,8 @@ async function entregarPlanilha(g: AutosGuardados, args: any) {
   }
 
   return okDaFerramenta([
-    `Planilha gravada: ${escritas} de ${linhas.length} linhas do questionário.`,
+    `Planilha gravada: ${escritas + doChecklist.escritas} de ${linhas.length} linhas do questionário` +
+      (doChecklist.escritas ? ` (${doChecklist.escritas} delas do checklist de certidões da plataforma).` : "."),
     drive.drive_file_url ? `Arquivo: ${drive.drive_file_url}` : "",
     `Pasta do cedente no Drive: ${drive.drive_folder_url} (o título do card na plataforma já abre esta pasta).`,
     falhasDaNota.length

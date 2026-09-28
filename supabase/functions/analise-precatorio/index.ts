@@ -53,7 +53,13 @@ import {
   REGRAS_DA_PLANILHA,
   type SaidaDaPlanilha,
 } from '../_shared/questionarioJuridico.ts'
-import { abrirModelo, checklistEmTexto, ligarPastaAoCard, salvarPlanilhaNoDrive } from '../_shared/planilhaJuridica.ts'
+import {
+  abrirModelo,
+  checklistEmTexto,
+  ligarPastaAoCard,
+  preencherCertidoesDoChecklist,
+  salvarPlanilhaNoDrive,
+} from '../_shared/planilhaJuridica.ts'
 
 /**
  * OPUS 5, e não Sonnet.
@@ -258,6 +264,8 @@ Deno.serve(async (req: Request) => {
 
     // 4. Preenchimento, com os guards, e a ficha que volta ao card — as mesmas
     // regras de sempre, agora no módulo que a `planilha-juridica` também usa.
+    // As certidões primeiro, do banco — ver preencherCertidoesDoChecklist.
+    const doChecklist = await preencherCertidoesDoChecklist(svc, leadId, ws, linhas)
     const { escritas, avisos, ficha, verbasNome } = aplicarRespostas(ws, linhas, comFormula, saida, {
       numero_processo: body.numero_processo,
       cedente: body.cedente,
@@ -266,6 +274,7 @@ Deno.serve(async (req: Request) => {
       temChecklist: checklist.temChecklist,
       cortou,
     })
+    avisos.push(...doChecklist.avisos)
 
     // 5. Drive: A. Análises de crédito / Precatórios / {originador} / {cedente}
     const drive = await salvarPlanilhaNoDrive(wb, {
@@ -282,7 +291,8 @@ Deno.serve(async (req: Request) => {
       ok: true,
       resumo: saida.resumo ?? null,
       linhas_no_questionario: linhas.length,
-      linhas_preenchidas: escritas,
+      linhas_preenchidas: escritas + doChecklist.escritas,
+      linhas_do_checklist: doChecklist.escritas,
       avisos,
       ficha,
       template: templatePath,

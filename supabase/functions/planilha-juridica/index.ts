@@ -31,7 +31,13 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { aplicarRespostas, extrairSaidaColada } from '../_shared/questionarioJuridico.ts'
-import { abrirModelo, checklistEmTexto, ligarPastaAoCard, salvarPlanilhaNoDrive } from '../_shared/planilhaJuridica.ts'
+import {
+  abrirModelo,
+  checklistEmTexto,
+  ligarPastaAoCard,
+  preencherCertidoesDoChecklist,
+  salvarPlanilhaNoDrive,
+} from '../_shared/planilhaJuridica.ts'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -64,6 +70,9 @@ Deno.serve(async (req: Request) => {
     // se havia o que responder — sem sujeito cadastrado, o bloco fica em branco
     // e a pessoa precisa saber por quê.
     const { temChecklist } = await checklistEmTexto(svc, leadId)
+    // AS CERTIDÕES PRIMEIRO, do banco: nas linhas que o checklist responde, ele
+    // prevalece sobre o que a conversa escreveu.
+    const doChecklist = await preencherCertidoesDoChecklist(svc, leadId, ws, linhas)
 
     const { escritas, avisos, ficha, verbasNome } = aplicarRespostas(ws, linhas, comFormula, saida, {
       numero_processo: body.numero_processo,
@@ -72,6 +81,7 @@ Deno.serve(async (req: Request) => {
       honorarios_pct: body.honorarios_pct,
       temChecklist,
     })
+    avisos.push(...doChecklist.avisos)
 
     // PLANILHA SEM RESPOSTA NENHUMA NÃO VAI AO DRIVE. Um arquivo com o nome de
     // análise e as células vazias seria lido como análise feita.
@@ -102,7 +112,8 @@ Deno.serve(async (req: Request) => {
       origem: 'conversa',
       resumo: saida.resumo ?? null,
       linhas_no_questionario: linhas.length,
-      linhas_preenchidas: escritas,
+      linhas_preenchidas: escritas + doChecklist.escritas,
+      linhas_do_checklist: doChecklist.escritas,
       avisos,
       ficha,
       template: path,

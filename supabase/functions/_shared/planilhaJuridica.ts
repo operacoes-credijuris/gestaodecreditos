@@ -25,6 +25,12 @@ import {
   type LinhaQuestionario,
   lerQuestionario,
 } from './questionarioJuridico.ts'
+import {
+  certidoesParaPlanilha,
+  escreverCertidoes,
+  type ItemDaPlanilha,
+  type SujeitoDaPlanilha,
+} from './certidoesNaPlanilha.ts'
 
 type Servico = ReturnType<typeof serviceClient>
 
@@ -106,12 +112,12 @@ interface Sujeito {
 /**
  * O bloco "Histórico do Cedente" em texto, a partir do banco.
  *
- * A PLATAFORMA NÃO GUARDA SE A CERTIDÃO VEIO POSITIVA OU NEGATIVA. `dd_certidao`
- * registra se ela foi OBTIDA (status), não o resultado dela — `regra_positiva`
- * fica no catálogo e diz o que fazer quando é positiva, sem que ninguém anote
- * que foi. Então o texto abaixo diz o estado do checklist, e as regras proíbem
- * concluir positivo/negativo a partir dele. Confundir "obtida" com "negativa"
- * reprovaria ou aprovaria crédito por dado que não existe.
+ * O RESULTADO SÓ QUANDO REGISTRADO. Desde a migração 0071, a certidão emitida
+ * pela BullAI traz o resultado (negativa, positiva, nada consta) em
+ * `dd_certidao.resultado`, e o texto o repete. A obtida à mão, antes disso, só
+ * diz que foi OBTIDA — e as regras proíbem concluir positivo/negativo onde o
+ * resultado não está escrito. Confundir "obtida" com "negativa" reprovaria ou
+ * aprovaria crédito por dado que não existe.
  */
 export async function checklistEmTexto(
   svc: Servico,
@@ -133,12 +139,9 @@ export async function checklistEmTexto(
     }
   }
 
-  const { data: itens } = await svc
-    .from('dd_certidao')
-    .select(
-      'sujeito_id, certidao_codigo, status, obrigatoria, parametros, emitida_em, validade_ate, dispensa_motivo',
-    )
-    .eq('kommo_lead_id', leadId)
+  // `*`: `resultado` é da migração 0071, e coluna pedida pelo nome antes dela
+  // derrubaria a leitura inteira.
+  const { data: itens } = await svc.from('dd_certidao').select('*').eq('kommo_lead_id', leadId)
   const { data: catalogo } = await svc.from('certidao_catalogo').select('codigo, nome_curto')
   const nomeDaCertidao = new Map(
     ((catalogo ?? []) as { codigo: string; nome_curto: string }[]).map((c) => [c.codigo, c.nome_curto]),
@@ -168,6 +171,7 @@ export async function checklistEmTexto(
       const p = i.parametros as Record<string, unknown> | null
       const escopo = p && Object.keys(p).length ? ` [${Object.values(p).join('/')}]` : ''
       const extra = [
+        i.resultado ? `resultado: ${String(i.resultado).replace('_', ' ')}` : i.status === 'OBTIDA' ? 'resultado não registrado' : null,
         i.emitida_em ? `emitida ${i.emitida_em}` : null,
         i.validade_ate ? `vale até ${i.validade_ate}` : null,
         i.dispensa_motivo ? `DISPENSADA: ${i.dispensa_motivo}` : null,
@@ -181,6 +185,43 @@ export async function checklistEmTexto(
     }
   }
   return { texto: partes.join('\n'), temChecklist: true }
+}
+
+/**
+ * O BLOCO "HISTÓRICO DO CEDENTE", escrito do checklist antes das respostas da
+ * conversa — ver `certidoesNaPlanilha.ts`. Roda ANTES de `aplicarRespostas`:
+ * célula ocupada não é reescrita, então nas linhas que o checklist responde a
+ * plataforma prevalece sobre a IA.
+ *
+ * `select('*')` de propósito: `resultado` e `arquivos` são da migração 0071,
+ * e pedir coluna que ainda não existe derrubaria a planilha inteira.
+ */
+export async function preencherCertidoesDoChecklist(
+  svc: Servico,
+  leadId: number,
+  ws: AbaDaPlanilha,
+  linhas: LinhaQuestionario[],
+): Promise<{ escritas: number; avisos: string[] }> {
+  const [{ data: sujeitos }, { data: itens }] = await Promise.all([
+    svc.from('dd_sujeito').select('*').eq('kommo_lead_id', leadId),
+    svc.from('dd_certidao').select('*').eq('kommo_lead_id', leadId),
+  ])
+  if (!sujeitos?.length) return { escritas: 0, avisos: [] }
+  // HOJE NO FUSO DE BRASÍLIA: é contra ele que se vê se a certidão venceu.
+  const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
+  const { escritas, desalinhadas } = escreverCertidoes(
+    ws,
+    linhas,
+    certidoesParaPlanilha(sujeitos as SujeitoDaPlanilha[], (itens ?? []) as ItemDaPlanilha[], hoje),
+  )
+  const avisos: string[] = []
+  if (desalinhadas.length) {
+    avisos.push(
+      `As linhas ${desalinhadas.join(', ')} do modelo não têm a pergunta que a plataforma esperava — o ` +
+        'checklist de certidões não foi escrito nelas. O modelo mudou? Avise quem mantém a plataforma.',
+    )
+  }
+  return { escritas, avisos }
 }
 
 const limparNomeArquivo = (s: string) =>
