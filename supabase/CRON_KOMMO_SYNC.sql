@@ -8,9 +8,10 @@
 -- tinha script correspondente aqui. Agendamento de produção que só existe no
 -- banco não se revisa, não se recria e não se corrige junto dos outros.
 --
--- 15 MINUTOS, e não 2 horas como os demais: a Análise de Crédito trabalha em
--- cima dos cards, e card que entrou no funil precisa aparecer na tela no mesmo
--- expediente — não no fim da tarde.
+-- 5 MINUTOS (eram 15 até 28/09/2026), e não 2 horas como os demais: a Análise
+-- de Crédito trabalha em cima dos cards, e o card novo numa coluna de entrada
+-- dispara o pedido dos autos ao Escavador assim que chega ao espelho. Quanto
+-- mais cedo o sync o vê, mais cedo o robô entra no tribunal.
 --
 -- IMPORTANTE: substitua __CRON_SECRET__ pelo mesmo valor do secret CRON_SECRET
 -- da Edge Function. NÃO faça commit deste arquivo com o segredo real.
@@ -19,13 +20,15 @@
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
--- Remove agendamento anterior (idempotente).
+-- Remove agendamentos anteriores (idempotente) — o de 15 minutos inclusive.
 select cron.unschedule('kommo-sync-15min')
 where exists (select 1 from cron.job where jobname = 'kommo-sync-15min');
+select cron.unschedule('kommo-sync-5min')
+where exists (select 1 from cron.job where jobname = 'kommo-sync-5min');
 
 select cron.schedule(
-  'kommo-sync-15min',
-  '*/15 * * * *',
+  'kommo-sync-5min',
+  '*/5 * * * *',
   $$
   select net.http_post(
     url     := 'https://dnxqajfxmdayqljyiqps.supabase.co/functions/v1/kommo-sync',

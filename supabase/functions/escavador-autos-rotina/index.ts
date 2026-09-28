@@ -58,6 +58,11 @@ const REVER_MIN = 30
 const DESISTIR_H = 72
 /** Autos trazidos há menos que isto servem sem pedir de novo. */
 const REUSO_DIAS = 30
+/**
+ * Posse de pedido (PEDINDO) parada há mais que isto: a volta que a tomou morreu
+ * no meio. Antes de pedir de novo, pergunta-se ao Escavador se o pedido saiu.
+ */
+const PEDINDO_PARADO_MS = 5 * 60_000
 /** Tentativas por documento antes de desistir dele. */
 const MAX_TENTATIVAS = 3
 /** Voltas encadeadas no máximo, por disparo do cron. */
@@ -79,6 +84,7 @@ interface Card {
   chaves_anexadas: string[]
   verificado_em: string | null
   criado_em: string
+  atualizado_em: string
 }
 
 // ------------------------------------------------------------------ Escavador
@@ -225,12 +231,23 @@ async function pedirNovos(
   for (const l of naEntrada) {
     const leadId = Number(l.kommo_lead_id)
     const linha = porLead.get(leadId)
-    // Só volta a olhar quem ainda não foi pedido.
-    if (linha && !['SEM_CNJ', 'FILA', 'SEM_SALDO'].includes(linha.estado)) continue
+    // UM PEDIDO POR CARD, PARA SEMPRE. Card com linha já foi pedido (ou
+    // reaproveitou o pedido de outro) e não se pede de novo — nem quando muda de
+    // coluna, nem quando o sync o apaga e o traz de volta. Só volta a ser olhado
+    // quem ainda não custou nada: sem CNJ, na fila da cota, sem saldo — e a posse
+    // que ficou parada porque a volta que a tomou morreu no meio.
+    const retomavel = linha && ['SEM_CNJ', 'FILA', 'SEM_SALDO'].includes(linha.estado)
+    const posseParada =
+      linha?.estado === 'PEDINDO' && Date.now() - Date.parse(linha.atualizado_em) > PEDINDO_PARADO_MS
+    if (linha && !retomavel && !posseParada) continue
+    // NA FILA DA COTA, com a cota ainda cheia, nem se pergunta ao Escavador: a
+    // consulta é de graça, mas uma por card a cada volta enche o log da conta.
+    if (linha?.estado === 'FILA' && pedidosHoje >= LIMITE_PEDIDOS_DIA) continue
 
     const digitos = digitosDoCnj(l.processo_cnj || cnjDoCard(l.nome))
     if (digitos.length !== 20) {
       if (!linha) {
+        // Chave primária: se outra volta já gravou, este insert só falha.
         await svc.from('escavador_autos_card').insert({
           kommo_lead_id: leadId,
           estado: 'SEM_CNJ',
@@ -240,21 +257,48 @@ async function pedirNovos(
       continue
     }
     const cnj = mascaraCnj(digitos)
+
+    // A POSSE DO CARD, ANTES DE QUALQUER CHAMADA PAGA. O cron, o sync e o aviso
+    // do Escavador podem acordar a rotina ao mesmo tempo, e as duas voltas
+    // leriam o mesmo card como "sem pedido". Quem pede é quem conseguiu gravar
+    // PEDINDO — pela chave primária (card novo) ou por um update condicionado ao
+    // estado que ela leu (card retomado). A outra volta encontra a posse tomada
+    // e segue adiante.
+    if (!linha) {
+      const { error } = await svc
+        .from('escavador_autos_card')
+        .insert({ kommo_lead_id: leadId, numero_cnj: cnj, estado: 'PEDINDO', atualizado_em: agora() })
+      if (error) continue
+    } else {
+      const { data: tomei } = await svc
+        .from('escavador_autos_card')
+        .update({ estado: 'PEDINDO', numero_cnj: cnj, atualizado_em: agora() })
+        .eq('kommo_lead_id', leadId)
+        .eq('estado', linha.estado)
+        .eq('atualizado_em', linha.atualizado_em)
+        .select('kommo_lead_id')
+      if (!tomei?.length) continue
+    }
     const gravar = (m: Record<string, unknown>) =>
       svc.from('escavador_autos_card').upsert(
         { kommo_lead_id: leadId, numero_cnj: cnj, atualizado_em: agora(), ...m },
         { onConflict: 'kommo_lead_id' },
       )
 
-    // O MESMO PROCESSO EM OUTRO CARD: segue o pedido dele.
+    // O MESMO PROCESSO EM OUTRO CARD: segue o pedido dele. Se o outro está no
+    // meio do pedido, este espera a próxima volta em vez de pedir junto.
     const { data: irmao } = await svc
       .from('escavador_autos_card')
       .select('estado, pedido_id')
       .eq('numero_cnj', cnj)
-      .in('estado', ['AGUARDANDO', 'ANEXANDO', 'CONCLUIDO'])
+      .in('estado', ['PEDINDO', 'AGUARDANDO', 'ANEXANDO', 'CONCLUIDO'])
       .neq('kommo_lead_id', leadId)
       .limit(1)
       .maybeSingle()
+    if (irmao?.estado === 'PEDINDO') {
+      await gravar({ estado: 'FILA', detalhe: 'Outro card deste processo está fazendo o pedido.' })
+      continue
+    }
     if (irmao?.pedido_id) {
       await gravar({
         estado: irmao.estado === 'AGUARDANDO' ? 'AGUARDANDO' : 'ANEXANDO',
@@ -265,7 +309,8 @@ async function pedirNovos(
     }
 
     // AUTOS RECENTES NO ESCAVADOR não se pedem de novo — a consulta é de graça
-    // e o pedido não.
+    // e o pedido não. É também o que socorre a posse parada: se a volta que
+    // morreu chegou a pedir, o pedido aparece aqui como PENDENTE e é adotado.
     const v = await ultimaVerificacao(chave, cnj)
     const comAutos = v?.opcoes?.autos === true
     const recente =
@@ -301,7 +346,14 @@ async function pedirNovos(
       // RECUSA DEFINITIVA NÃO SE REPETE a cada volta — seria o log da conta
       // cheio de novo, como no primeiro teste. Só o erro do lado deles (5xx)
       // volta para a fila.
-      if (r.status >= 500) {
+      // A RECUSA PODE SER "JÁ HÁ PEDIDO EM ANDAMENTO": outra volta, ou outra
+      // pessoa pelo painel, pediu este processo entre a consulta e o POST. Aí o
+      // card adota aquele pedido — é o mesmo processo, e ele já foi pago.
+      const depois = r.status < 500 ? await ultimaVerificacao(chave, cnj) : null
+      if (depois?.opcoes?.autos === true && depois?.status === 'PENDENTE') {
+        await registrarPedido(svc, Number(depois.id), cnj, leadId, depois)
+        await gravar({ estado: 'AGUARDANDO', pedido_id: Number(depois.id), verificado_em: agora(), detalhe: null })
+      } else if (r.status >= 500) {
         await gravar({ estado: 'FILA', detalhe })
       } else {
         await gravar({ estado: 'FALHOU', detalhe })
@@ -477,6 +529,16 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
         }
         try {
           let uuid: string | null = d.kommo_file_uuid ?? null
+          if (!uuid) {
+            // OUTRO CARD DO MESMO PROCESSO pode ter subido este PDF enquanto
+            // esta volta trabalhava: pergunta de novo antes de baixar.
+            const { data: fresco } = await svc
+              .from('escavador_documento')
+              .select('kommo_file_uuid')
+              .eq('id', d.id)
+              .maybeSingle()
+            uuid = fresco?.kommo_file_uuid ?? null
+          }
           if (!uuid) {
             const res = await fetch(`${BASE_ESCAVADOR}/processos/numero_cnj/${cnj}/documentos/${d.chave}`, {
               headers: { Authorization: `Bearer ${chave}` },

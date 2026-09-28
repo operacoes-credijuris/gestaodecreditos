@@ -1240,7 +1240,7 @@ function KommoConfig() {
                 autoComplete="off"
               />
             </Field>
-            {/* Sem botão de sincronizar aqui: o cron roda de 15 em 15 min e a
+            {/* Sem botão de sincronizar aqui: o cron roda de 5 em 5 min e a
                 aba Análise de Crédito sincroniza ao abrir. Um terceiro gatilho
                 nesta tela só serviria para depurar a integração. */}
             <div className="sm:col-span-2">

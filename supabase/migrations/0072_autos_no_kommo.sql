@@ -21,6 +21,8 @@
 -- ESTADOS:
 --   SEM_CNJ     o card não tem número de processo no título nem nas anotações
 --               (a rotina olha de novo a cada volta — o comercial pode corrigir)
+--   PEDINDO     uma volta da rotina tomou o card e está pedindo — é a trava que
+--               impede duas voltas simultâneas de pagarem dois pedidos
 --   FILA        esperando a cota diária de pedidos
 --   AGUARDANDO  pedido feito; o robô do Escavador está no tribunal
 --   ANEXANDO    os autos estão prontos e descendo para o card

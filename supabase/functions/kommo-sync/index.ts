@@ -26,7 +26,13 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 // de coluna não tem cara de nada: um dígito trocado aponta para outra coluna que
 // também existe, e o card simplesmente não aparece na tela — sem erro nenhum.
 import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
-import { COLUNA_NOVOS, FUNIL_GERAL, normal } from '../_shared/autosParaOKommo.ts'
+import {
+  COLUNA_NOVOS,
+  entradasDoOperacional,
+  FUNIL_GERAL,
+  FUNIS_DE_ENTRADA_POR_NOME,
+  normal,
+} from '../_shared/autosParaOKommo.ts'
 
 const FUNIL_RPV = 13901939
 const FUNIL_PRECATORIO = 13971995
@@ -760,6 +766,40 @@ Deno.serve(async (req: Request) => {
         .delete()
         .not('kommo_lead_id', 'in', `(${idsEspelho.join(',')})`)
     }
+
+    // ---------- Os autos dos cards que acabaram de chegar ----------
+    //
+    // CARD NOVO NUMA COLUNA DE ENTRADA acorda a rotina dos autos agora, e não no
+    // próximo tique dela: o card entra no espelho aqui, e é daqui que se sabe que
+    // ele é novo. "Novo" é não ter linha em `escavador_autos_card` — card que já
+    // foi pedido não acorda nada. A rotina se protege sozinha de duas voltas ao
+    // mesmo tempo (a posse PEDINDO), então disparar a mais nunca paga pedido a
+    // mais. Falhar aqui não derruba o sync: o cron da rotina cobre em 10 minutos.
+    try {
+      const { data: etapasDeEntrada } = await svc
+        .from('kommo_etapa')
+        .select('pipeline_id, status_id, nome')
+        .in('pipeline_id', FUNIS_DE_ENTRADA_POR_NOME)
+      const entradas = entradasDoOperacional((etapasDeEntrada ?? []) as { pipeline_id: number; status_id: number; nome: string }[])
+      const naEntrada = registros
+        .filter((r) => entradas.some((e) => e.pipeline_id === r.pipeline_id && e.status_id === r.status_id))
+        .map((r) => r.kommo_lead_id)
+      if (naEntrada.length) {
+        const { data: conhecidos, error: erroAutos } = await svc
+          .from('escavador_autos_card')
+          .select('kommo_lead_id')
+          .in('kommo_lead_id', naEntrada)
+        if (!erroAutos && (conhecidos?.length ?? 0) < naEntrada.length) {
+          const p = fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/escavador-autos-rotina`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-cron-secret': Deno.env.get('CRON_SECRET') ?? '' },
+            body: '{}',
+          }).catch(() => null)
+          const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime
+          if (rt?.waitUntil) rt.waitUntil(p)
+        }
+      }
+    } catch { /* o cron da rotina cobre */ }
 
     const comCnj = registros.filter((r) => r.processo_cnj).length
     return jsonResponse({
