@@ -61,6 +61,8 @@ import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { EmissaoBullai } from '@/components/EmissaoBullai'
+import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
+import type { QualificacaoLida } from '../../supabase/functions/_shared/qualificacaoDoCedente.ts'
 
 // ------------------------------------------------------------------ tipos
 
@@ -663,6 +665,7 @@ const SELECT_ITENS =
 
 export function PainelCertidoes({
   leadId,
+  tituloDoCard,
   cedenteDoCard,
   arquivos,
   lendoPdf,
@@ -671,6 +674,8 @@ export function PainelCertidoes({
   onDirtyChange,
 }: {
   leadId: number
+  /** O título do card: diz QUAIS verbas se cedem, e portanto quem cede. */
+  tituloDoCard: string
   /** Nome do cedente lido do card. Sugestão: o campo continua editável. */
   cedenteDoCard: string
   /**
@@ -726,6 +731,11 @@ export function PainelCertidoes({
   // O que foi preenchido sozinho a partir do processo. Fica VISÍVEL: campo que se
   // preencheu sem ninguém mandar tem de dizer de onde veio.
   const [preenchido, setPreenchido] = useState<string[]>([])
+  // A LEITURA DA IA sobre os autos (dd-qualificacao): o cadastro inteiro, com o
+  // trecho de onde saiu cada campo.
+  const [leituraIA, setLeituraIA] = useState<QualificacaoLida | null>(null)
+  const [lendoIA, setLendoIA] = useState(false)
+  const leituraPedida = useRef<number | null>(null)
 
   const [ufs, setUfs] = useState<string[]>([])
   const [municipios, setMunicipios] = useState<Record<string, string[]>>({})
@@ -1098,6 +1108,110 @@ export function PainelCertidoes({
     if (!rc.error) setCompletude((rc.data ?? null) as Completude | null)
   }, [leadId])
 
+  /**
+   * A IA LÊ OS AUTOS E PREENCHE O CADASTRO — ao abrir a aba de um crédito ainda
+   * sem ninguém cadastrado, ou quando alguém pede de novo.
+   *
+   * É o que o parser de CPF não sabe fazer: dizer QUAL dos CPFs do processo é
+   * de quem cede. Por isso aqui o CPF entra, e no parser não — mas só depois de
+   * `normalizarQualificacao` conferir que aquele número está ESCRITO nos autos
+   * e tem dígito válido. O trecho de cada campo fica à vista, e nada é gravado
+   * até alguém clicar em "Gravar e montar checklist".
+   *
+   * SÓ TOCA EM CAMPO VAZIO: o que a pessoa digitou vence o que a IA leu.
+   */
+  async function lerComIA() {
+    const texto = arquivos
+      .map((a) => a.texto ?? '')
+      .filter((t) => t.trim())
+      .join('\n\n===== PRÓXIMO ARQUIVO =====\n\n')
+    if (!texto.trim()) return
+    setLendoIA(true)
+    try {
+      const q = await invokeFunction<QualificacaoLida>('dd-qualificacao', {
+        lead_id: leadId,
+        titulo: tituloDoCard,
+        texto,
+        parcela: classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida),
+      })
+      setLeituraIA(q)
+      aplicarLeitura(q)
+    } catch (e) {
+      toast.error(`A IA não conseguiu ler a qualificação: ${(e as Error).message}`)
+    } finally {
+      setLendoIA(false)
+    }
+  }
+
+  /** O nome do município como o IBGE escreve, para o campo aceitar. */
+  function municipioDoIbge(uf: string, nome: string): string {
+    const sem = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+    return (municipios[uf] ?? []).find((m) => sem(m) === sem(nome)) ?? nome
+  }
+
+  function aplicarLeitura(q: QualificacaoLida) {
+    const feitos: string[] = []
+    const atual = q.residencias.find((r) => r.atual)
+    const anteriores = q.residencias.filter((r) => !r.atual)
+    const c = q.cedente
+    // O parser de CPF preenche nascimento e endereço ao ver um CPF novo; com a
+    // leitura da IA já feita, ele não tem o que acrescentar.
+    if (c.cpf) cpfAplicado.current = c.cpf.valor
+    setCedente((f) => {
+      const n = { ...f }
+      if (!n.nome.trim() && c.nome) n.nome = c.nome.valor
+      if (!onlyDigits(n.cpf) && c.cpf) n.cpf = formatCpfCnpjInput(c.cpf.valor)
+      if (!n.nascimento && c.nascimento) n.nascimento = c.nascimento.valor
+      if (!n.uf && atual) {
+        n.uf = atual.uf
+        n.municipio = atual.municipio ? municipioDoIbge(atual.uf, atual.municipio) : ''
+      }
+      return n
+    })
+    if (c.cpf) feitos.push(`CPF ${formatCpfCnpjInput(c.cpf.valor)}`)
+    if (c.nascimento) feitos.push(`nascimento ${c.nascimento.valor.split('-').reverse().join('/')}`)
+    if (atual) feitos.push(`residência ${atual.municipio ? atual.municipio + '/' : ''}${atual.uf}`)
+    if (anteriores.length > 0) {
+      setUfsAnteriores((v) => v.trim() || [...new Set(anteriores.map((r) => r.uf))].join(', '))
+      setMunicipiosAnteriores(
+        (v) =>
+          v.trim() ||
+          anteriores
+            .filter((r) => r.municipio)
+            .map((r) => municipioDoIbge(r.uf, r.municipio))
+            .join(', '),
+      )
+      feitos.push(`${anteriores.length} residência(s) anterior(es)`)
+    }
+    if (q.estado_civil) {
+      const pede = PEDE_CONJUGE.has(q.estado_civil.valor)
+      setTemConjuge(pede)
+      feitos.push(ROTULO_ESTADO_CIVIL[q.estado_civil.valor] ?? q.estado_civil.valor)
+      if (pede && q.conjuge) {
+        const j = q.conjuge
+        setConjuge((f) => ({
+          ...f,
+          nome: f.nome.trim() || j.nome?.valor || '',
+          cpf: onlyDigits(f.cpf) ? f.cpf : j.cpf ? formatCpfCnpjInput(j.cpf.valor) : '',
+          nascimento: f.nascimento || j.nascimento?.valor || '',
+        }))
+        if (j.nome) feitos.push(`cônjuge ${j.nome.valor}`)
+      }
+    }
+    if (feitos.length > 0) {
+      setMexeu(true)
+      setPreenchido(feitos)
+    }
+  }
+
+  useEffect(() => {
+    if (!ativo || carregando || !editando || sujeitos.length > 0 || lendoPdf || !temTexto) return
+    if (leituraPedida.current === leadId) return
+    leituraPedida.current = leadId
+    void lerComIA()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ativo, carregando, editando, sujeitos.length, lendoPdf, temTexto, leadId])
+
   // ---------------------------------------------------------------- validação
 
   const problemas = useMemo(() => {
@@ -1231,6 +1345,19 @@ export function PainelCertidoes({
       const rel = (data ?? {}) as { certidoes_removidas?: number }
       if (rel.certidoes_removidas) {
         toast.success(`${rel.certidoes_removidas} item(ns) do checklist antigo removido(s).`)
+      }
+
+      // O NOME DA MÃE, quando a IA o leu para ESTE CPF. O formulário não tem o
+      // campo, e a BullAI o usa para separar homônimos; perder é pior que gravar
+      // o que está escrito nos autos. Falha aqui não desfaz o cadastro.
+      const mae = leituraIA?.cedente.nome_mae?.valor
+      if (mae && leituraIA?.cedente.cpf?.valor === onlyDigits(cedente.cpf)) {
+        await supabase
+          .from('dd_sujeito')
+          .update({ nome_mae: mae })
+          .eq('kommo_lead_id', leadId)
+          .eq('papel', 'CEDENTE')
+          .is('nome_mae', null)
       }
 
       const r = await invokeFunction<RespostaGeracao>('gerar-checklist-certidoes', {
@@ -1578,11 +1705,77 @@ export function PainelCertidoes({
             </div>
           </details>
 
+          {/* ---------------- leitura da IA ---------------- */}
+          {(lendoIA || leituraIA || temTexto) && (
+            <div className="rounded-lg bg-brand-50/60 p-3 ring-1 ring-inset ring-brand-200">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                  <Sparkles className="h-4 w-4 text-brand-600" />
+                  {lendoIA
+                    ? 'A IA está lendo a qualificação nos autos…'
+                    : leituraIA
+                      ? 'Cadastro lido dos autos pela IA — confira antes de gravar'
+                      : 'A IA pode ler a qualificação do cedente nos autos'}
+                </div>
+                {!lendoIA && temTexto && (
+                  <Button size="sm" variant="outline" onClick={() => void lerComIA()}>
+                    {leituraIA ? 'Ler de novo' : 'Ler com a IA'}
+                  </Button>
+                )}
+              </div>
+              {leituraIA && (
+                <details className="mt-2 text-xs text-slate-600">
+                  <summary className="cursor-pointer text-brand-700">De onde saiu cada campo</summary>
+                  <ul className="mt-2 space-y-1.5">
+                    {(
+                      [
+                        ['Nome', leituraIA.cedente.nome],
+                        ['CPF', leituraIA.cedente.cpf],
+                        ['Nascimento', leituraIA.cedente.nascimento],
+                        ['Mãe', leituraIA.cedente.nome_mae],
+                        ['Estado civil', leituraIA.estado_civil],
+                        ['Cônjuge', leituraIA.conjuge?.nome ?? null],
+                        ['CPF do cônjuge', leituraIA.conjuge?.cpf ?? null],
+                      ] as [string, { valor: string; evidencia: string } | null][]
+                    )
+                      .filter(([, v]) => v)
+                      .map(([rotulo, v]) => (
+                        <li key={rotulo}>
+                          <strong className="text-slate-700">{rotulo}:</strong> {v!.valor}
+                          {v!.evidencia && <span className="text-slate-500"> — “{v!.evidencia}”</span>}
+                        </li>
+                      ))}
+                    {leituraIA.residencias.map((r) => (
+                      <li key={`${r.uf}|${r.municipio}`}>
+                        <strong className="text-slate-700">
+                          {r.atual ? 'Residência atual' : 'Residência anterior'}:
+                        </strong>{' '}
+                        {r.municipio ? `${r.municipio}/` : ''}
+                        {r.uf}
+                        {r.evidencia && <span className="text-slate-500"> — “{r.evidencia}”</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {(leituraIA?.avisos ?? []).length > 0 && (
+                <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-amber-800">
+                  {leituraIA!.avisos.map((a) => (
+                    <li key={a}>{a}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {preenchido.length > 0 && (
             <div className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-900 ring-1 ring-inset ring-emerald-200">
               Preenchi a partir do processo: <strong>{preenchido.join(' · ')}</strong>.
               Confira antes de gerar — o trecho de onde saiu cada um está no painel
-              acima. O CPF eu nunca preencho sozinho.
+              acima.{' '}
+              {leituraIA?.cedente.cpf
+                ? 'O CPF só entrou porque está escrito nos autos — confira se é mesmo de quem cede.'
+                : 'O CPF eu nunca preencho sozinho.'}
             </div>
           )}
 

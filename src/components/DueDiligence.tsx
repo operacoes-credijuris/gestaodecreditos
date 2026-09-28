@@ -292,6 +292,7 @@ export function DueDiligence({
           <div hidden={aba !== 'certidoes'}>
             <PainelCertidoes
               leadId={leadId}
+              tituloDoCard={tituloDoCard}
               cedenteDoCard={cedenteDoCard}
               arquivos={arquivos}
               lendoPdf={lendoPdf}
