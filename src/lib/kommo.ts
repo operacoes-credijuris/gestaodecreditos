@@ -698,6 +698,28 @@ export const ABAS_EXTERNO_SEM_TRABALHO: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * As abas do Interno em que o trabalho da casa já passou.
+ *
+ * O ESPELHO DE `ABAS_EXTERNO_SEM_TRABALHO`, e existe desde 28/09/2026, quando a
+ * equipe pediu no Interno as mesmas ferramentas do Externo — a due diligence
+ * com o Escavador e o "Executar análise" no Claude. Antes o Interno só tinha
+ * trabalho numa aba (Análise), e esta lista não precisava existir.
+ *
+ * DILIGÊNCIA E REPROVADOS pelo mesmo motivo do Externo: o crédito saiu do
+ * fluxo, e oferecer análise ali convida ao retrabalho. p/ PROTOCOLO porque é
+ * depois da venda — contrato assinado, o que resta é protocolar —, o análogo
+ * de "Fechados" no Externo.
+ *
+ * APROVADOS FICA COM AS FERRAMENTAS, como no Externo: o crédito aprovado ainda
+ * vai virar proposta, e reapurar o cedente antes dela é trabalho legítimo.
+ */
+export const ABAS_INTERNO_SEM_TRABALHO: ReadonlySet<string> = new Set([
+  'int-diligencia',
+  'int-reprovados',
+  'int-protocolo',
+])
+
+/**
  * O card é da trilha Externa?
  *
  * AGORA É O PIPELINE QUE RESPONDE, e a função encolheu para uma linha. Antes ela

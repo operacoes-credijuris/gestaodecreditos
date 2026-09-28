@@ -53,6 +53,7 @@ import {
   ABA_ANALISE_INTERNA,
   ABAS_COM_TAGS,
   ABAS_EXTERNO_SEM_TRABALHO,
+  ABAS_INTERNO_SEM_TRABALHO,
   type EtiquetaDoFundo,
   etiquetasDaAba,
   etiquetasPorDestino,
@@ -596,15 +597,16 @@ function tituloCard(lead: KommoLead): string {
  * Que botões de trabalho o card oferece.
  *
  *   'rpv'         a análise de RPV que já existia, mais a due diligence
- *   'precatorio'  due diligence + análise jurídica (só na aba Jurídico)
- *   'dd'          só a due diligence — a trilha Externa
+ *   'precatorio'  o de 'dd' + a análise jurídica — só na aba Análise do Interno
+ *   'dd'          due diligence + Executar análise (no Claude) + Concluir — as
+ *                 abas de trabalho do Externo e, desde 28/09/2026, do Interno
  *   'nenhum'      etapa em que não se analisa: aprovados, diligência, reprovados
  *
- * 'dd' EXISTE PORQUE OS FUNDOS NÃO TÊM ANÁLISE NOSSA. Naquela trilha o parecer é
- * do fundo; o que a casa faz antes de encaminhar é apurar de quem é o crédito e
- * o que pesa contra o cedente. Oferecer ali a "Análise jurídica" — que roda o
- * motor do Interno — produziria parecer que ninguém pediu, e "Executar análise"
- * roda o motor de RPV, que num precatório já era o defeito conhecido.
+ * O "EXECUTAR ANÁLISE" DO PRECATÓRIO NÃO É O DE RPV, embora tenha o mesmo nome.
+ * O de RPV roda o motor da plataforma (template, cenários, prazo de RPV), e num
+ * precatório ele entregava parecer errado com cara de conferido — por isso
+ * 'rpv' nunca aparece fora do funil de RPV. O do precatório abre uma conversa no
+ * Claude, que busca os autos pelo conector e segue o roteiro da casa.
  */
 type BotoesDoCard = 'rpv' | 'precatorio' | 'dd' | 'nenhum'
 
@@ -1308,7 +1310,7 @@ function CardCredito({
           por ele que a apuração RECONHECE o próprio crédito na lista de
           processos do cedente e o exclui — sem número, o precatório que estamos
           comprando volta da busca como se fosse mais uma dívida dele. */}
-      {(botoes === 'nenhum' || botoes === 'dd') && (
+      {(botoes === 'nenhum' || botoes === 'dd' || botoes === 'precatorio') && (
         <AvisoSemNumero lead={lead} />
       )}
 
@@ -1359,14 +1361,13 @@ function CardCredito({
             </Button>
           )}
 
-          {/* A ANÁLISE DO EXTERNO ACONTECE FORA DAQUI, e o botão é a porta.
-              No Interno o motor analisa: lê os autos, audita a conta,
-              precifica. No Externo quem decide o preço é o fundo comprador — o
-              que a casa faz é montar o crédito e conversar sobre ele, no
-              Claude, num projeto que carrega o contexto da operação. Mesmo
-              lugar e mesma forma do botão de RPV de propósito: é o mesmo ato do
-              ponto de vista de quem opera, e muda só para onde leva. */}
-          {botoes === 'dd' && (
+          {/* A ANÁLISE ACONTECE FORA DAQUI, e o botão é a porta: abre uma
+              conversa no Claude, que vem buscar os autos pelo conector. Era do
+              Externo, e desde 28/09/2026 vale nas duas trilhas, a pedido da
+              equipe. Mesmo lugar e mesma forma do botão de RPV de propósito: é
+              o mesmo ato do ponto de vista de quem opera, e muda só para onde
+              leva. */}
+          {(botoes === 'dd' || botoes === 'precatorio') && (
             <Button
               size="sm"
               variant="secondary"
@@ -1378,12 +1379,29 @@ function CardCredito({
             </Button>
           )}
 
+          {/* A ANÁLISE JURÍDICA DO INTERNO, que ficou ao lado do "Executar
+              análise" quando as ferramentas do Externo vieram para cá. EM
+              CONTORNO, e não escura: dois botões escuros lado a lado viram o
+              mesmo botão com rótulos diferentes, e o principal agora é o que
+              leva ao Claude — o mesmo gesto nas duas trilhas. */}
+          {botoes === 'precatorio' && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<Scale className="h-4 w-4" />}
+              onClick={() => onAnaliseJuridica(lead)}
+              loading={analisandoJuridico}
+              disabled={ocupado || analisandoJuridico}
+            >
+              {analisandoJuridico ? 'Analisando…' : 'Análise jurídica'}
+            </Button>
+          )}
           {/* CONCLUIR FECHA A ETAPA, e fica à direita da análise porque é o que
               vem depois dela: a conversa com o Claude acontece fora daqui, e
               quem volta precisa registrar o que decidiu e mover o card. Sem este
               botão, as duas coisas ficavam a cargo de quem opera — dentro do
               Kommo, à mão, e fora do alcance da plataforma. */}
-          {botoes === 'dd' && onConcluir && (
+          {(botoes === 'dd' || botoes === 'precatorio') && onConcluir && (
             <Button
               size="sm"
               // O AZUL DA MARCA, e não o `secondary` de "Executar análise": os
@@ -1401,18 +1419,6 @@ function CardCredito({
             </Button>
           )}
 
-          {botoes === 'precatorio' && (
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<Scale className="h-4 w-4" />}
-              onClick={() => onAnaliseJuridica(lead)}
-              loading={analisandoJuridico}
-              disabled={ocupado || analisandoJuridico}
-            >
-              {analisandoJuridico ? 'Analisando…' : 'Análise jurídica'}
-            </Button>
-          )}
         </div>
       )}
       {preparoDosAutos && (
@@ -2662,30 +2668,41 @@ export default function AnaliseCredito() {
   /**
    * Os botões de trabalho da etapa aberta.
    *
-   * RPV segue como era em toda aba. No PRECATÓRIO só a aba Jurídico oferece
-   * trabalho: é lá que a due diligence e a análise jurídica acontecem, e oferecer
-   * "analisar" num card já aprovado ou reprovado convida ao retrabalho.
+   * RPV segue como era em toda aba que não é terminal. No PRECATÓRIO, as duas
+   * trilhas oferecem as mesmas ferramentas em toda aba de trabalho — as que não
+   * são estão em `ABAS_EXTERNO_SEM_TRABALHO` e `ABAS_INTERNO_SEM_TRABALHO`,
+   * porque oferecer análise num card reprovado ou já vendido convida ao
+   * retrabalho.
    *
    * E o "Analisar" de RPV não aparece em precatório NENHUM — nem na aba Jurídico.
    * Era o defeito relatado: o motor por trás dele é o `gerar-analise-rpv`, com
    * template, cenários (RPV expedida ou não) e cálculo de prazo de RPV, e num
    * precatório ele entregava parecer e planilha errados sem nenhum sinal na tela.
    *
-   * NOS FUNDOS, SÓ A DUE DILIGENCE. A análise daquela trilha é do fundo, não
-   * nossa — mas saber de quem é o crédito e o que pesa contra o cedente é
-   * trabalho da casa em qualquer destinação, e é o que se faz ANTES de
-   * encaminhar. Fica de fora "Apresentação", que é a MESMA coluna do Kommo que
-   * "Aprovados" no Interno: com o botão lá, o mesmo card o teria numa pílula e
-   * não na outra.
+   * A ANÁLISE JURÍDICA é a única diferença que sobrou: ela é o motor do
+   * Interno e aparece só na aba Análise dele, ao lado das ferramentas comuns.
    */
+  //
+  // AS DUAS TRILHAS COM AS MESMAS FERRAMENTAS, desde 28/09/2026 e a pedido da
+  // equipe: due diligence com o Escavador, "Executar análise" no Claude e
+  // "Concluir" em toda aba de trabalho, no Interno como no Externo. Antes o
+  // Interno só oferecia trabalho na aba Análise — e, por um descuido que o
+  // transplante corrigiu, nenhuma aba dele desenhava o "Concluir": o desfecho
+  // agrupado estava ligado, mas o botão só existia no modo do Externo, e a
+  // Revisão do Interno não tinha como aprovar pela plataforma.
+  //
+  // A ANÁLISE JURÍDICA CONTINUA na aba Análise do Interno, ao lado: é o motor
+  // interno, e ninguém pediu para tirá-lo.
+  const semTrabalho =
+    subdivisao === 'externo' ? ABAS_EXTERNO_SEM_TRABALHO : ABAS_INTERNO_SEM_TRABALHO
   const botoesDoCard: BotoesDoCard =
     funil === FUNIL_RPV
       ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
-      : abaAtual?.key === ABA_ANALISE_INTERNA
-        ? 'precatorio'
-        : subdivisao === 'externo' && abaAtual && !ABAS_EXTERNO_SEM_TRABALHO.has(abaAtual.key)
-          ? 'dd'
-          : 'nenhum'
+      : !abaAtual || semTrabalho.has(abaAtual.key)
+        ? 'nenhum'
+        : abaAtual.key === ABA_ANALISE_INTERNA
+          ? 'precatorio'
+          : 'dd'
 
   const lista = useMemo(() => {
     let l = abaAtual ? (porAba[abaAtual.key] ?? []) : []

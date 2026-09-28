@@ -29,6 +29,7 @@ import {
   ABA_REPROVADOS_EXTERNO,
   ABAS_COM_TAGS,
   ABAS_EXTERNO_SEM_TRABALHO,
+  ABAS_INTERNO_SEM_TRABALHO,
   acaoDeReprovar,
   ehCardExterno,
   ehFunilPrecatorio,
@@ -904,6 +905,46 @@ describe('ABAS_EXTERNO_SEM_TRABALHO', () => {
   it('deixa de fora as três abas onde o trabalho acontece', () => {
     for (const k of ['ext-qualificacao', 'ext-revisao', 'ext-encaminhar']) {
       expect(ABAS_EXTERNO_SEM_TRABALHO.has(k), k).toBe(false)
+    }
+  })
+})
+
+/**
+ * AS FERRAMENTAS DO EXTERNO NO INTERNO (28/09/2026). A equipe pediu due
+ * diligence com o Escavador, Executar análise e Concluir nas duas trilhas; a
+ * tela esconde os botões onde o trabalho da casa já passou, e a lista do
+ * Interno é o espelho da do Externo.
+ */
+describe('ABAS_INTERNO_SEM_TRABALHO', () => {
+  // CHAVE ESCRITA ERRADA faria o botão reaparecer na aba errada, sem erro — o
+  // mesmo risco, e o mesmo teste, da lista do Externo.
+  it('toda chave listada existe entre as abas do Interno', () => {
+    const interno = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'interno')!
+    const chaves = new Set(interno.abas.map((a) => a.key))
+    for (const k of ABAS_INTERNO_SEM_TRABALHO) {
+      expect(chaves.has(k), k).toBe(true)
+    }
+  })
+
+  it('as abas de trabalho do Interno ficam com as ferramentas', () => {
+    for (const k of ['int-analise', 'int-revisao', 'int-aprovados']) {
+      expect(ABAS_INTERNO_SEM_TRABALHO.has(k), k).toBe(false)
+    }
+  })
+
+  // A REVISÃO É O CASO QUE MOTIVOU O TESTE: sem botão ali, Aprovar crédito não
+  // tinha como ser acionado pela plataforma — a aba tem saída e nenhuma porta.
+  it('toda aba do Interno com saída é aba de trabalho', () => {
+    const interno = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'interno')!
+    for (const aba of interno.abas.filter((a) => (a.saidas ?? []).length > 0)) {
+      expect(ABAS_INTERNO_SEM_TRABALHO.has(aba.key), aba.key).toBe(false)
+    }
+  })
+
+  it('o mesmo vale para o Externo', () => {
+    const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
+    for (const aba of externo.abas.filter((a) => (a.saidas ?? []).length > 0)) {
+      expect(ABAS_EXTERNO_SEM_TRABALHO.has(aba.key), aba.key).toBe(false)
     }
   })
 })
