@@ -4,7 +4,9 @@
 // documento descendo):
 //
 //   1. PEDE. Card que chegou na primeira coluna do Operacional (RPV, precatório
-//      interno e externo) e ainda não tem linha em `escavador_autos_card`: acha
+//      interno e externo) ou na NOVOS do funil geral, e ainda não tem linha em
+//      `escavador_autos_card` — um card que passa da NOVOS para um funil de
+//      trabalho é pedido uma vez só: acha
 //      o CNJ (título do card; na falta, anotações — é o `processo_cnj` do sync) e
 //      pede os autos ao Escavador, com o certificado digital. R$ 1,34 por
 //      processo, com cota diária. Autos já trazidos nos últimos 30 dias, por
@@ -37,12 +39,12 @@ import {
   emOrdemDosAutos,
   entradasDoOperacional,
   fatias,
+  FUNIS_DE_ENTRADA_POR_NOME,
   motivoDoEstado,
   nomeDoAnexo,
   notaDeFalha,
   notaDosAutos,
 } from '../_shared/autosParaOKommo.ts'
-import { FUNIL_PRECATORIO_EXTERNO, FUNIL_PRECATORIO_INTERNO } from '../_shared/trilhasDoPrecatorio.ts'
 
 type Servico = ReturnType<typeof serviceClient>
 
@@ -192,7 +194,7 @@ async function pedirNovos(
   const { data: etapas } = await svc
     .from('kommo_etapa')
     .select('pipeline_id, status_id, nome')
-    .in('pipeline_id', [FUNIL_PRECATORIO_INTERNO, FUNIL_PRECATORIO_EXTERNO])
+    .in('pipeline_id', FUNIS_DE_ENTRADA_POR_NOME)
   const entradas = entradasDoOperacional((etapas ?? []) as any[])
 
   let consulta = svc.from('kommo_leads').select('kommo_lead_id, pipeline_id, status_id, nome, processo_cnj')

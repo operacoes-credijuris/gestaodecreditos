@@ -26,6 +26,7 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 // de coluna não tem cara de nada: um dígito trocado aponta para outra coluna que
 // também existe, e o card simplesmente não aparece na tela — sem erro nenhum.
 import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
+import { COLUNA_NOVOS, FUNIL_GERAL, normal } from '../_shared/autosParaOKommo.ts'
 
 const FUNIL_RPV = 13901939
 const FUNIL_PRECATORIO = 13971995
@@ -41,6 +42,15 @@ const FUNIL_PRECATORIO_EXTERNO = 14439516;
 // mas tirá-lo agora deixaria de atualizar cards que talvez ainda estejam lá —
 // e o espelho deles some da tela sem aviso. Sai quando a migração terminar.
 const FUNIS = [FUNIL_RPV, FUNIL_PRECATORIO, FUNIL_PRECATORIO_INTERNO, FUNIL_PRECATORIO_EXTERNO];
+// O FUNIL GERAL ENTRA PELA METADE: só a coluna NOVOS, onde o card nasce. É de lá
+// que os autos do Escavador já podem começar a descer (ver
+// escavador-autos-rotina). O resto do funil geral não é do Operacional e não vem
+// — nem para a tela, que filtra por funil, nem para o espelho.
+//
+// As COLUNAS dele vêm todas para `kommo_etapa` (é por lá que a rotina acha a
+// NOVOS pelo nome); os CARDS, só os da NOVOS. Esta lista é o escopo de tudo que
+// o espelho guarda — colunas e cards.
+const FUNIS_NO_ESPELHO = [...FUNIS, FUNIL_GERAL];
 
 // Margem confortável abaixo do teto de 7/s.
 const INTERVALO_MS = 160
@@ -236,6 +246,10 @@ Deno.serve(async (req: Request) => {
     // aba que não aparece na tela.
     let etapasGravadas = 0
     let avisoEtapas: string | null = null
+    // O id da coluna NOVOS do funil geral, lido desta mesma resposta. Sem ele
+    // (coluna renomeada, funil sem permissão), os cards dela não são lidos — e o
+    // espelho deles fica como estava.
+    let statusNovos: number | null = null
     try {
       const rp = await kommo<{
         _embedded?: {
@@ -261,8 +275,11 @@ Deno.serve(async (req: Request) => {
           'A API não devolveu funil nenhum em /leads/pipelines. As abas da tela ' +
           'continuam com a última estrutura gravada.'
       } else {
+        const geral = funis.find((p) => p.id === FUNIL_GERAL)
+        statusNovos =
+          geral?._embedded?.statuses?.find((x) => normal(String(x.name ?? '')) === normal(COLUNA_NOVOS))?.id ?? null
         const linhas = funis
-          .filter((p) => FUNIS.includes(p.id))
+          .filter((p) => FUNIS_NO_ESPELHO.includes(p.id))
           .flatMap((p) =>
             (p._embedded?.statuses ?? []).map((s) => ({
               pipeline_id: p.id,
@@ -304,7 +321,7 @@ Deno.serve(async (req: Request) => {
           // Funil ausente da resposta não é funil sem coluna: é funil que não
           // deu para ler. Avisa e não mexe.
           const idsVindos = new Set(funis.map((p) => p.id))
-          const semResposta = FUNIS.filter((f) => !idsVindos.has(f))
+          const semResposta = FUNIS_NO_ESPELHO.filter((f) => !idsVindos.has(f))
           if (semResposta.length) {
             avisoEtapas =
               `O Kommo não devolveu o(s) funil(is) ${semResposta.join(', ')} em ` +
@@ -312,7 +329,7 @@ Deno.serve(async (req: Request) => {
               `com a última estrutura conhecida. Confira se o id do funil mudou.`
           }
 
-          for (const p of funis.filter((x) => FUNIS.includes(x.id))) {
+          for (const p of funis.filter((x) => FUNIS_NO_ESPELHO.includes(x.id))) {
             const ids = (p._embedded?.statuses ?? []).map((s) => s.id)
             if (ids.length === 0) continue // idem: sem coluna = não deu para ler
             const { error: erroDel } = await svc
@@ -356,6 +373,31 @@ Deno.serve(async (req: Request) => {
         if (!r._links?.next?.href) break
       }
       idsPorFunil.set(funil, idsDoFunil)
+    }
+
+    // A COLUNA NOVOS DO FUNIL GERAL, e só ela.
+    let avisoNovos: string | null = null
+    if (statusNovos) {
+      const idsDaNovos: number[] = []
+      for (let pagina = 1; pagina <= 40; pagina++) {
+        const r = await kommo<{
+          _embedded?: { leads?: KommoLead[] }
+          _links?: { next?: { href?: string } }
+        }>(
+          `/leads?filter[statuses][0][pipeline_id]=${FUNIL_GERAL}` +
+            `&filter[statuses][0][status_id]=${statusNovos}&limit=250&page=${pagina}`,
+        )
+        if (!r) break
+        const lote = r._embedded?.leads ?? []
+        leads.push(...lote)
+        idsDaNovos.push(...lote.map((l) => l.id))
+        if (!r._links?.next?.href) break
+      }
+      idsPorFunil.set(FUNIL_GERAL, idsDaNovos)
+    } else {
+      avisoNovos =
+        `Não achei a coluna "${COLUNA_NOVOS}" no funil geral (${FUNIL_GERAL}): os cards dela não foram lidos, ` +
+        'e os autos não descem a partir dela. A coluna foi renomeada?'
     }
 
     // ---------- Notas ----------
@@ -456,7 +498,7 @@ Deno.serve(async (req: Request) => {
       const { data: doEspelho, error: erroEspelho } = await svc
         .from('kommo_leads')
         .select('kommo_lead_id, etapa_em, etapa_status_id')
-        .in('pipeline_id', FUNIS)
+        .in('pipeline_id', FUNIS_NO_ESPELHO)
       if (erroEspelho) temColunaEtapa = false
       for (const r of doEspelho ?? []) {
         jaSabido.set(r.kommo_lead_id, { em: r.etapa_em, status: r.etapa_status_id })
@@ -662,6 +704,18 @@ Deno.serve(async (req: Request) => {
     let removidos = 0
     const avisosEspelho: string[] = []
     for (const [funil, ids] of idsPorFunil) {
+      // A NOVOS VAZIA É ROTINA, e não sinal de leitura falhada: é a coluna de
+      // passagem. E apagar o espelho dela por engano não perde nada — os cards
+      // voltam na próxima leitura, e o pedido dos autos já está registrado à parte.
+      if (ids.length === 0 && funil === FUNIL_GERAL) {
+        const { data: apagados } = await svc
+          .from('kommo_leads')
+          .delete()
+          .eq('pipeline_id', FUNIL_GERAL)
+          .select('kommo_lead_id')
+        removidos += apagados?.length ?? 0
+        continue
+      }
       if (ids.length === 0) {
         const { count } = await svc
           .from('kommo_leads')
@@ -698,7 +752,7 @@ Deno.serve(async (req: Request) => {
     const { data: noEspelho } = await svc
       .from('kommo_leads')
       .select('kommo_lead_id')
-      .in('pipeline_id', FUNIS)
+      .in('pipeline_id', FUNIS_NO_ESPELHO)
     const idsEspelho = (noEspelho ?? []).map((r) => r.kommo_lead_id)
     if (idsEspelho.length) {
       await svc
@@ -723,6 +777,7 @@ Deno.serve(async (req: Request) => {
       // falhada. Nenhum dos dois pode ser descoberto por acidente.
       aviso: [
         avisoEtapas,
+        avisoNovos,
         avisoEventos,
         notasCortadas > 0
           ? `Um lote de ${notasCortadas} card(s) tem mais anotações do que coube nesta ` +

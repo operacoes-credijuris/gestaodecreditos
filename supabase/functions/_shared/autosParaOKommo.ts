@@ -20,6 +20,15 @@ export const FUNIL_RPV = 13901939
 export const ENTRADA_RPV = 107272803
 
 /**
+ * O FUNIL GERAL e a coluna NOVOS, onde o card nasce antes de ir para um funil
+ * de trabalho (pedido de 28/09/2026: os autos já podem descer dali). O
+ * kommo-sync espelha SÓ esta coluna do funil geral — o resto dele não é do
+ * Operacional —, e é daqui que ele tira os dois valores.
+ */
+export const FUNIL_GERAL = 14439508
+export const COLUNA_NOVOS = 'NOVOS'
+
+/**
  * A coluna em que cada funil de Precatório chega ao Operacional: a PRIMEIRA aba
  * da trilha. Lida da definição das trilhas, e não copiada, para que mudar a
  * primeira aba lá mude a entrada aqui.
@@ -28,7 +37,18 @@ export function colunasDeEntradaDoPrecatorio(): { pipelineId: number; coluna: st
   return TRILHAS_PRECATORIO.map((t) => ({ pipelineId: t.pipelineId, coluna: t.abas[0].colunaKommo }))
 }
 
-const normal = (s: string) =>
+/** As colunas de entrada que se acham pelo NOME: a 1ª de cada trilha e a NOVOS do funil geral. */
+export function colunasDeEntradaPorNome(): { pipelineId: number; coluna: string }[] {
+  return [...colunasDeEntradaDoPrecatorio(), { pipelineId: FUNIL_GERAL, coluna: COLUNA_NOVOS }]
+}
+
+/** Os funis cujas colunas a rotina precisa achar no espelho. */
+export const FUNIS_DE_ENTRADA_POR_NOME = [
+  ...TRILHAS_PRECATORIO.map((t) => t.pipelineId),
+  FUNIL_GERAL,
+]
+
+export const normal = (s: string) =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toUpperCase()
 
 /**
@@ -40,7 +60,7 @@ export function entradasDoOperacional(
   etapas: { pipeline_id: number; status_id: number; nome: string }[],
 ): { pipeline_id: number; status_id: number }[] {
   const fora = [{ pipeline_id: FUNIL_RPV, status_id: ENTRADA_RPV }]
-  for (const e of colunasDeEntradaDoPrecatorio()) {
+  for (const e of colunasDeEntradaPorNome()) {
     const achada = etapas.find(
       (x) => Number(x.pipeline_id) === e.pipelineId && normal(String(x.nome)) === normal(e.coluna),
     )

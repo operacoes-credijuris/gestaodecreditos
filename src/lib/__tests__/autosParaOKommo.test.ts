@@ -11,6 +11,7 @@ import {
   emOrdemDosAutos,
   entradasDoOperacional,
   ENTRADA_RPV,
+  FUNIL_GERAL,
   FUNIL_RPV,
   fatias,
   nomeDoAnexo,
@@ -73,16 +74,19 @@ describe('fatias', () => {
 })
 
 describe('entradasDoOperacional', () => {
-  it('RPV pela coluna fixa, precatório pelo nome da primeira aba de cada trilha', () => {
+  it('RPV pela coluna fixa; precatório pela primeira aba de cada trilha; e a NOVOS do funil geral', () => {
     const etapas = [
       { pipeline_id: FUNIL_PRECATORIO_INTERNO, status_id: 111, nome: 'Análise Jurídica e Econômica' },
       { pipeline_id: FUNIL_PRECATORIO_INTERNO, status_id: 112, nome: 'REVISÃO DA ANÁLISE' },
       { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 221, nome: 'QUALIFICAÇÃO PRELIMINAR' },
+      { pipeline_id: FUNIL_GERAL, status_id: 331, nome: 'Novos' },
+      { pipeline_id: FUNIL_GERAL, status_id: 332, nome: 'QUALIFICADOS' },
     ]
     expect(entradasDoOperacional(etapas)).toEqual([
       { pipeline_id: FUNIL_RPV, status_id: ENTRADA_RPV },
       { pipeline_id: FUNIL_PRECATORIO_INTERNO, status_id: 111 },
       { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 221 },
+      { pipeline_id: FUNIL_GERAL, status_id: 331 },
     ])
   })
 
