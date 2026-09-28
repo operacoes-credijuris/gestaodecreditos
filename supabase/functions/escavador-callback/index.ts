@@ -91,7 +91,7 @@ async function recolher(numeroCnj: string, uuidEvento: string) {
 
   // 2. OS CARDS DESTE PROCESSO que esperavam: a rotina os confere na hora.
   if (pedidoEncerrado(status)) {
-    await svc.from('escavador_autos_card')
+    await svc.from('escavador_autos_processo')
       .update({ verificado_em: null })
       .eq('numero_cnj', numeroCnj)
       .eq('estado', 'AGUARDANDO')

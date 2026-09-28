@@ -124,7 +124,12 @@ export function emOrdemDosAutos<T extends { data: string | null; chave: string }
  * Kommo, que ordena por nome; a data vem em seguida porque "Certidão" se repete
  * trinta vezes num processo, e a data é o que distingue uma da outra.
  */
-export function nomeDoAnexo(ordem: number, total: number, doc: { titulo: string; data: string | null }): string {
+export function nomeDoAnexo(
+  ordem: number,
+  total: number,
+  doc: { titulo: string; data: string | null },
+  rotulo = 'Autos',
+): string {
   const casas = Math.max(3, String(total).length)
   const n = String(ordem).padStart(casas, '0')
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(doc.data ?? '')
@@ -134,7 +139,7 @@ export function nomeDoAnexo(ordem: number, total: number, doc: { titulo: string;
   const rep = /^(.+?)\s*(?:-|\()\s*\1\)?$/i.exec(titulo)
   if (rep) titulo = rep[1]
   titulo = titulo.replace(/[\\/:*?"<>|]/g, '-').slice(0, 90)
-  return `Autos ${n}${data} - ${titulo}.pdf`
+  return `${rotulo} ${n}${data} - ${titulo}.pdf`
 }
 
 /** As fatias do envio ao drive do Kommo: [início, fim) de cada parte. */
@@ -154,6 +159,8 @@ const dataBR = (iso: string | null | undefined) => {
 /** A nota do card quando os autos terminam de descer. */
 export function notaDosAutos(o: {
   cnj: string
+  /** "Conhecimento", "Precatório"… — o que abre o nome dos anexos deste processo. */
+  rotulo?: string
   anexados: number
   total: number
   paginas: number
@@ -163,10 +170,10 @@ export function notaDosAutos(o: {
 }): string {
   const periodo = o.primeiro && o.ultimo ? `, de ${dataBR(o.primeiro)} a ${dataBR(o.ultimo)}` : ''
   const linhas = [
-    `📂 Autos do processo ${o.cnj} anexados a este card pelo Escavador: ${o.anexados} de ${o.total} documento(s)` +
+    `📂 Autos do processo ${o.cnj}${o.rotulo && o.rotulo !== 'Autos' ? ` (${o.rotulo.toLowerCase()})` : ''} anexados a este card pelo Escavador: ${o.anexados} de ${o.total} documento(s)` +
       (o.paginas ? `, ${o.paginas.toLocaleString('pt-BR')} páginas` : '') +
       `${periodo}.`,
-    'Os arquivos "Autos 001, 002…" seguem a ordem do processo, do mais antigo ao mais novo.',
+    `Os arquivos "${o.rotulo ?? 'Autos'} 001, 002…" seguem a ordem do processo, do mais antigo ao mais novo.`,
   ]
   if (o.falhas.length) {
     linhas.push(`⚠️ ${o.falhas.length} documento(s) não desceram: ${o.falhas.slice(0, 5).join('; ')}${o.falhas.length > 5 ? '…' : ''}`)

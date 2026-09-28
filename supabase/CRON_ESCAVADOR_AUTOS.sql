@@ -1,12 +1,15 @@
 -- ============================================================
 -- CRON: os autos do Escavador, do tribunal para o card do Kommo.
 -- Rodar 1x no SQL Editor do Supabase (projeto dnxqajfxmdayqljyiqps), DEPOIS
--- da migração 0072.
+-- das migrações 0072 e 0073.
 --
 -- A CADA 10 MINUTOS a rotina `escavador-autos-rotina`:
---   - pede os autos dos cards que chegaram na primeira coluna do Operacional
---     (RPV, precatório interno e externo) — R$ 1,34 por processo, no máximo 40
---     pedidos por dia;
+--   - lê com a IA os cards que chegaram numa coluna de entrada (a primeira do
+--     Operacional em RPV, precatório interno e externo; e a NOVOS do funil
+--     geral) e define os processos do crédito: conhecimento, cumprimento e
+--     precatório/RPV;
+--   - pede os autos de cada processo, uma vez só — R$ 1,34 por processo, no
+--     máximo 40 pedidos por dia;
 --   - confere, de meia em meia hora e sem custo, os pedidos em andamento;
 --   - anexa ao card, em voltas encadeadas, os PDFs dos pedidos prontos.
 --
@@ -37,9 +40,13 @@ select cron.schedule(
   $$
 );
 
--- Conferir o andamento dos cards:
---   select kommo_lead_id, numero_cnj, estado, anexados, total_documentos, detalhe, atualizado_em
+-- Conferir o que a IA leu em cada card:
+--   select kommo_lead_id, estado, leituras, processos, fontes, detalhe
 --   from escavador_autos_card order by atualizado_em desc limit 20;
+--
+-- Conferir o andamento de cada processo:
+--   select kommo_lead_id, numero_cnj, rotulo, estado, anexados, total_documentos, detalhe
+--   from escavador_autos_processo order by atualizado_em desc limit 30;
 --
 -- Parar a automação (sem apagar nada):
 --   select cron.unschedule('escavador-autos-10min');
