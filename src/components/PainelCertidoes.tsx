@@ -60,6 +60,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
+import { EmissaoBullai } from '@/components/EmissaoBullai'
 
 // ------------------------------------------------------------------ tipos
 
@@ -95,6 +96,10 @@ interface ItemChecklist {
   erro_classe: string | null
   erro_detalhe: string | null
   dispensa_motivo: string | null
+  // Da migration 0071: o que a BullAI devolveu. Opcionais porque o select é `*`
+  // e, antes da migration, eles simplesmente não vêm.
+  resultado?: string | null
+  arquivos?: { portal: string; drive_link: string | null; nome: string }[] | null
   certidao_catalogo: {
     nome_curto: string
     orgao_emissor: string
@@ -644,6 +649,16 @@ function Sugestoes({
   )
 }
 
+/**
+ * O select do checklist. `*` na tabela, e não a lista de colunas: coluna que
+ * uma migration ainda não criou, pedida pelo nome, derruba a consulta inteira —
+ * e com `*` a tela funciona antes e depois da 0071.
+ */
+const SELECT_ITENS =
+  '*, certidao_catalogo(nome_curto, orgao_emissor, metodo, captcha, login,' +
+  ' url_oficial, dados_entrada, dados_entrada_pf, dados_entrada_pj,' +
+  ' validade_dias, sla_horas)'
+
 // ------------------------------------------------------------------ componente
 
 export function PainelCertidoes({
@@ -995,16 +1010,7 @@ export function PainelCertidoes({
           )
           .eq('kommo_lead_id', leadId)
           .order('papel'),
-        supabase
-          .from('dd_certidao')
-          .select(
-            'id, sujeito_id, certidao_codigo, parametros, obrigatoria, status,' +
-              ' erro_classe, erro_detalhe, dispensa_motivo,' +
-              ' certidao_catalogo(nome_curto, orgao_emissor, metodo, captcha, login,' +
-              ' url_oficial, dados_entrada, dados_entrada_pf, dados_entrada_pj,' +
-              ' validade_dias, sla_horas)',
-          )
-          .eq('kommo_lead_id', leadId),
+        supabase.from('dd_certidao').select(SELECT_ITENS).eq('kommo_lead_id', leadId),
         supabase
           .from('v_dd_completude')
           .select('*')
@@ -1079,6 +1085,18 @@ export function PainelCertidoes({
   useEffect(() => {
     if (ativo) void recarregar()
   }, [ativo, recarregar])
+
+  // O RECARREGAR DA EMISSÃO: só o checklist e o placar, sem o "Carregando…"
+  // que desmonta a lista e sem mexer no formulário. É o que roda a cada minuto
+  // enquanto a BullAI trabalha — o `recarregar` inteiro, ali, apagaria as marcações.
+  const recarregarItens = useCallback(async () => {
+    const [ri, rc] = await Promise.all([
+      supabase.from('dd_certidao').select(SELECT_ITENS).eq('kommo_lead_id', leadId),
+      supabase.from('v_dd_completude').select('*').eq('kommo_lead_id', leadId).maybeSingle(),
+    ])
+    if (!ri.error) setItens((ri.data ?? []) as unknown as ItemChecklist[])
+    if (!rc.error) setCompletude((rc.data ?? null) as Completude | null)
+  }, [leadId])
 
   // ---------------------------------------------------------------- validação
 
@@ -2109,6 +2127,16 @@ export function PainelCertidoes({
               </div>
             )
           })}
+
+          {sujeitos.length > 0 && itens.length > 0 && (
+            <EmissaoBullai
+              leadId={leadId}
+              sujeitos={sujeitos}
+              itens={itens}
+              ativo={ativo}
+              onMudou={() => void recarregarItens()}
+            />
+          )}
 
           {sujeitos.length === 0 && (
             <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
