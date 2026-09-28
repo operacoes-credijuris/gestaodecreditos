@@ -415,7 +415,7 @@ export interface Contrato {
 }
 
 // ---------- Configurações / Integrações ----------
-export type ServicoIntegracao = 'advbox' | 'djen' | 'kommo' | 'anthropic' | 'escavador'
+export type ServicoIntegracao = 'advbox' | 'djen' | 'kommo' | 'anthropic' | 'escavador' | 'bullai'
 
 export interface Integracao {
   id: UUID

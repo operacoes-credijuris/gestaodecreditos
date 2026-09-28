@@ -60,6 +60,7 @@ export default function Configuracoes() {
         <KommoConfig />
         <AnthropicConfig />
         <EscavadorConfig />
+        <BullaiConfig />
         <SkillsConfig />
         <RoteiroConfig />
         <DjenConfig />
@@ -459,6 +460,193 @@ function EscavadorConfig() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  )
+}
+
+// ----------------------- BullAI (emissão de certidões) -----------------------
+
+interface CreditosBullai {
+  restantes: number | null
+  limite: number | null
+  usadas: number
+  excedente: number
+  fimDoPeriodo: string | null
+}
+
+interface PortalBullai {
+  chave: string
+  rotulo: string
+  criterio: string
+  documento: 'CPF' | 'CNPJ'
+  presencial: boolean
+}
+
+/**
+ * A BullAI emite as certidões da due diligence: recebe um CPF ou CNPJ e a
+ * lista de portais, e devolve os PDFs com o resultado de cada certidão.
+ *
+ * O CATÁLOGO APARECE AQUI, e não só na diligência, porque é a pergunta que
+ * vem antes de tudo — "que certidões ela sabe buscar?" — e porque é por ele
+ * que se confere se a chave gravada é a da conta certa. O SALDO ao lado do
+ * título, como no Escavador: cada portal pedido gasta uma consulta do plano.
+ */
+function BullaiConfig() {
+  const { data, isLoading, error } = useIntegracao('bullai')
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [token, setToken] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [verCatalogo, setVerCatalogo] = useState(false)
+  const configurado = Boolean((data?.config as { configurado?: boolean } | null)?.configurado)
+
+  const catalogo = useQuery({
+    queryKey: ['bullai', 'catalogo'],
+    enabled: configurado,
+    staleTime: 0,
+    retry: false,
+    queryFn: () =>
+      invokeFunction<{ creditos: CreditosBullai; portais: PortalBullai[] }>('bullai-catalogo', {}),
+  })
+
+  async function salvar() {
+    if (!token.trim()) {
+      toast.error('Informe a chave da BullAI.')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await invokeFunction<{ creditos?: CreditosBullai }>('salvar-token-bullai', { token: token.trim() })
+      setToken('')
+      await qc.invalidateQueries({ queryKey: ['integracoes', 'bullai'] })
+      await qc.invalidateQueries({ queryKey: ['bullai', 'catalogo'] })
+      const c = r.creditos
+      toast.success(
+        'Chave da BullAI salva e confirmada' +
+          (c ? (c.restantes == null ? '. Plano ilimitado.' : `. ${c.restantes} consulta(s) restante(s).`) : '.'),
+      )
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const c = catalogo.data?.creditos
+  const portais = catalogo.data?.portais ?? []
+  const automaticos = portais.filter((p) => !p.presencial)
+
+  return (
+    <Card>
+      <CardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-brand-600" /> Integração BullAI
+          </span>
+        }
+        action={
+          <span className="flex items-center gap-3">
+            {configurado && c && (
+              <span className="text-xs text-slate-500" title="Cada portal pedido gasta uma consulta do plano.">
+                {c.restantes == null ? 'Plano ilimitado' : `${c.restantes.toLocaleString('pt-BR')} consulta(s)`}
+              </span>
+            )}
+            {configurado && catalogo.error && (
+              <span className="text-xs text-amber-700" title={(catalogo.error as Error).message}>
+                saldo indisponível
+              </span>
+            )}
+            <SeloIntegracao error={error} configurado={configurado} rotuloOk="Chave configurada" rotuloSem="Sem chave" />
+          </span>
+        }
+      />
+      <CardBody>
+        <AvisoLeitura error={error} />
+        {isLoading ? (
+          <Loading />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Chave da API"
+              hint={
+                configurado
+                  ? 'Já configurada. Preencha apenas para substituir.'
+                  : 'Criada na BullAI em Configurações › Chaves de API. É mostrada uma única vez.'
+              }
+            >
+              <Input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="••••••••••••"
+                autoComplete="off"
+              />
+            </Field>
+            <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+              <Button onClick={salvar} loading={saving}>
+                Salvar
+              </Button>
+              {configurado && portais.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setVerCatalogo((v) => !v)}
+                  className="text-sm text-brand-700 underline underline-offset-2 hover:text-brand-800"
+                >
+                  {verCatalogo
+                    ? 'Esconder o catálogo'
+                    : `Ver as ${portais.length} certidões que ela busca (${automaticos.length} automáticas)`}
+                </button>
+              )}
+              {configurado && verCatalogo && portais.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // A LISTA INTEIRA, em colunas separadas por tabulação: cola
+                    // direto numa planilha ou numa conversa. O catálogo não é
+                    // segredo — segredo é só a chave, que não vai junto.
+                    const TAB = String.fromCharCode(9)
+                    const QUEBRA = String.fromCharCode(10)
+                    const linhas = portais.map((p) =>
+                      [p.rotulo, p.documento, p.presencial ? 'presencial' : 'automática', p.chave].join(TAB),
+                    )
+                    navigator.clipboard
+                      .writeText([['Certidão', 'Documento', 'Como', 'Chave'].join(TAB), ...linhas].join(QUEBRA))
+                      .then(() => toast.success('Catálogo copiado.'))
+                      .catch(() => toast.error('Não consegui copiar.'))
+                  }}
+                  className="text-sm text-slate-600 underline underline-offset-2 hover:text-slate-800"
+                >
+                  Copiar a lista
+                </button>
+              )}
+            </div>
+            {verCatalogo && (
+              <div className="sm:col-span-2 max-h-96 overflow-auto rounded-lg ring-1 ring-slate-200">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Certidão</th>
+                      <th className="px-3 py-2 font-medium">Documento</th>
+                      <th className="px-3 py-2 font-medium">Como</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {portais.map((p) => (
+                      <tr key={p.chave} className="border-t border-slate-100" title={p.criterio}>
+                        <td className="px-3 py-1.5 text-slate-800">{p.rotulo}</td>
+                        <td className="px-3 py-1.5 text-slate-600">{p.documento}</td>
+                        <td className="px-3 py-1.5 text-slate-600">
+                          {p.presencial ? 'presencial — não automatiza' : 'automática'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </CardBody>

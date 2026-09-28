@@ -92,3 +92,19 @@ export async function chaveEscavador(): Promise<string | null> {
     .maybeSingle()
   return data?.token ?? null
 }
+
+/**
+ * A chave da BULLAI, a plataforma que emite as certidões da due diligence.
+ *
+ * Gravada por salvar-token-bullai na tabela integracao_bullai_secret (migração
+ * 0070): RLS ligada, nenhuma policy — service_role e mais ninguém. Cada portal
+ * pedido gasta uma consulta do plano.
+ */
+export async function chaveBullai(): Promise<string | null> {
+  const { data } = await serviceClient()
+    .from('integracao_bullai_secret')
+    .select('token')
+    .eq('id', 1)
+    .maybeSingle()
+  return data?.token ?? null
+}
