@@ -3,7 +3,6 @@ import {
   FileSignature,
   IdCard,
   Wallet,
-  FileSearch,
   ScanSearch,
   Newspaper,
   ListChecks,
@@ -74,7 +73,6 @@ export const NAVIGATION: NavSection[] = [
     title: 'Operacional',
     items: [
       { label: 'Análise de Crédito', to: '/operacional/analise', icon: ScanSearch },
-      { label: 'Autos do processo', to: '/operacional/autos', icon: FileSearch },
       {
         label: 'Publicações e Movimentações',
         to: '/operacional/execucao/publicacoes',
