@@ -31,7 +31,7 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { aplicarRespostas, extrairSaidaColada } from '../_shared/questionarioJuridico.ts'
-import { abrirModelo, checklistEmTexto, salvarPlanilhaNoDrive } from '../_shared/planilhaJuridica.ts'
+import { abrirModelo, checklistEmTexto, ligarPastaAoCard, salvarPlanilhaNoDrive } from '../_shared/planilhaJuridica.ts'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -93,6 +93,9 @@ Deno.serve(async (req: Request) => {
       numero_processo: body.numero_processo,
       verbasNome,
     })
+    // O TÍTULO DO CARD VIRA LINK PARA A PASTA — antes só a análise de RPV
+    // gravava isto, e a planilha do precatório ia para o Drive sem atalho.
+    await ligarPastaAoCard(svc, leadId, drive.pasta_id)
 
     return jsonResponse({
       ok: true,
@@ -105,6 +108,7 @@ Deno.serve(async (req: Request) => {
       template: path,
       drive_file_url: drive.drive_file_url,
       drive_folder_url: drive.drive_folder_url,
+      pasta_id: drive.pasta_id,
     })
   } catch (e) {
     return jsonResponse(

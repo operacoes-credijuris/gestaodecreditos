@@ -53,7 +53,7 @@ import {
   REGRAS_DA_PLANILHA,
   type SaidaDaPlanilha,
 } from '../_shared/questionarioJuridico.ts'
-import { abrirModelo, checklistEmTexto, salvarPlanilhaNoDrive } from '../_shared/planilhaJuridica.ts'
+import { abrirModelo, checklistEmTexto, ligarPastaAoCard, salvarPlanilhaNoDrive } from '../_shared/planilhaJuridica.ts'
 
 /**
  * OPUS 5, e não Sonnet.
@@ -274,6 +274,9 @@ Deno.serve(async (req: Request) => {
       numero_processo: body.numero_processo,
       verbasNome,
     })
+    // O TÍTULO DO CARD VIRA LINK PARA A PASTA — antes só a análise de RPV
+    // gravava isto, e a planilha do precatório ia para o Drive sem atalho.
+    await ligarPastaAoCard(svc, leadId, drive.pasta_id)
 
     return jsonResponse({
       ok: true,
@@ -285,6 +288,7 @@ Deno.serve(async (req: Request) => {
       template: templatePath,
       drive_file_url: drive.drive_file_url,
       drive_folder_url: drive.drive_folder_url,
+      pasta_id: drive.pasta_id,
     })
   } catch (e) {
     return jsonResponse(

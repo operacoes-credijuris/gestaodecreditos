@@ -154,6 +154,8 @@ type ResultadoJuridico = {
   ficha?: FichaDoCredito
   /** 'conversa' quando a planilha saiu do bloco que o Claude entregou; ausente, do motor antigo. */
   origem?: string
+  /** A pasta do cedente no Drive — a mesma que o título do card passa a abrir. */
+  pasta_id?: string
   erro?: string
 }
 
@@ -2053,6 +2055,40 @@ export default function AnaliseCredito() {
     link.href = urlDoClaude(prompt)
     link.click()
     enfileirarAutos(lead, codigo)
+    void criarPastaDoCard(lead)
+  }
+
+  /** O card passa a ter a pasta do Drive: o título vira link na mesma hora. */
+  function anotarPastaNoCard(leadId: number, pastaId: string | undefined) {
+    if (!pastaId) return
+    qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+      antes?.map((l) => (l.kommo_lead_id === leadId ? { ...l, drive_pasta_id: pastaId } : l)),
+    )
+  }
+
+  /**
+   * A PASTA DO CEDENTE NASCE NO CLIQUE, e não no fim — ideia da equipe
+   * (28/09/2026). Quem abre a conversa com o Claude já tem, no título do card,
+   * o caminho para onde o resultado vai; e qualquer arquivo da análise tem casa
+   * antes de existir. É a mesma pasta em que a planilha é salva depois.
+   *
+   * EM PARALELO E SEM TRAVAR NADA: a conversa já abriu, os autos já estão na
+   * fila. Se a pasta falhar, a análise segue — só o atalho fica para depois.
+   */
+  async function criarPastaDoCard(lead: KommoLead) {
+    if (lead.drive_pasta_id) return
+    const dados = lerCardCredijuris(lead)
+    if (!dados.cedente.trim()) return
+    try {
+      const r = await invokeFunction<{ pasta_id?: string }>('pasta-do-cedente', {
+        kommo_lead_id: lead.kommo_lead_id,
+        originador: dados.intermediador,
+        cedente: dados.cedente,
+      })
+      anotarPastaNoCard(lead.kommo_lead_id, r.pasta_id)
+    } catch (e) {
+      toast.error('A análise seguiu, mas não consegui criar a pasta no Drive: ' + ((e as Error)?.message ?? String(e)))
+    }
   }
 
   // ------------------------------------------------ A FILA DAS ANÁLISES EXTERNAS
@@ -2591,6 +2627,7 @@ export default function AnaliseCredito() {
       honorarios_pct: dados.honorarios_pct,
     })
     setResultadoJuridico((p) => ({ ...p, [id]: r }))
+    anotarPastaNoCard(id, r.pasta_id)
     void anotarResultadoNaKommo(id, r as unknown as ResultadoAnalise, analistaNome, VEREDITO_JURIDICO).then(
       (falhas) => {
         if (falhas.length) toast.error('A planilha ficou pronta, mas a anotação no card do Kommo não subiu: ' + falhas.join('; '))

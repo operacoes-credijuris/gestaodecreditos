@@ -196,10 +196,19 @@ const limparNomeArquivo = (s: string) =>
  * verbas no nome, cenário diferente é arquivo diferente, e refazer o MESMO
  * cenário continua substituindo, que é o que se quer.
  */
-export async function salvarPlanilhaNoDrive(
-  wb: ExcelJS.Workbook,
-  dados: { originador?: string; cedente?: string; numero_processo?: string; verbasNome: string },
-): Promise<{ drive_file_url: string | null; drive_folder_url: string }> {
+/**
+ * A pasta do cedente no Drive — achada ou criada —, e o token para usá-la.
+ *
+ * UM CAMINHO SÓ para os dois momentos que a tocam: o CLIQUE em "Executar
+ * análise", que cria a pasta antes de a análise acabar (para o título do card
+ * já levar a ela), e a GRAVAÇÃO da planilha, que salva o arquivo dentro dela.
+ * Com dois cálculos do caminho, um nome escrito diferente abriria duas pastas
+ * para o mesmo cedente — e a planilha cairia na que o link não aponta.
+ */
+export async function garantirPastaDoCedente(dados: {
+  originador?: string
+  cedente?: string
+}): Promise<{ token: string; pastaId: string; cedente: string }> {
   const google = await segredoGoogle()
   if (!google) {
     throw new Error('Credenciais do Google não configuradas — sem elas não dá para salvar no Drive.')
@@ -211,7 +220,27 @@ export async function salvarPlanilhaNoDrive(
   const originador = (dados.originador || 'Sem originador').trim()
   const cedente = (dados.cedente || 'Sem cedente').trim()
   const origId = await driveFindOrCreateFolder(token, originador, catId)
-  const cedId = await driveFindOrCreateFolder(token, cedente, origId)
+  const pastaId = await driveFindOrCreateFolder(token, cedente, origId)
+  return { token, pastaId, cedente }
+}
+
+/**
+ * O card passa a apontar para a pasta: é o que faz o título virar link.
+ *
+ * FALHA EM SILÊNCIO DE PROPÓSITO. A pasta e o arquivo já existem no Drive; o
+ * link no card é atalho, e perder o atalho não pode derrubar o que já foi
+ * salvo.
+ */
+export async function ligarPastaAoCard(svc: Servico, leadId: number, pastaId: string): Promise<void> {
+  if (!leadId || !pastaId) return
+  await svc.from('kommo_leads').update({ drive_pasta_id: pastaId }).eq('kommo_lead_id', leadId)
+}
+
+export async function salvarPlanilhaNoDrive(
+  wb: ExcelJS.Workbook,
+  dados: { originador?: string; cedente?: string; numero_processo?: string; verbasNome: string },
+): Promise<{ drive_file_url: string | null; drive_folder_url: string; pasta_id: string }> {
+  const { token, pastaId: cedId, cedente } = await garantirPastaDoCedente(dados)
 
   const bytes = new Uint8Array(await wb.xlsx.writeBuffer())
   // Fica logo depois de "Análise Jurídica", e não no fim: nome de arquivo é
@@ -225,5 +254,6 @@ export async function salvarPlanilhaNoDrive(
   return {
     drive_file_url: up.webViewLink ?? null,
     drive_folder_url: `https://drive.google.com/drive/folders/${cedId}`,
+    pasta_id: cedId,
   }
 }
