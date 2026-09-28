@@ -74,13 +74,12 @@ import {
   useAnalisesProntas,
   type AcaoTela,
   type SubdivisaoPrecatorio,
-  classificarParcelaCedida,
+  lerCadastroDoCard,
   lerTituloCard,
-  valorDoCampo,
 } from '@/lib/kommo'
 import type { KommoLead, KommoNota } from '@/lib/types'
 import { semRodapeDeAssinatura } from '@/lib/textoDoProcesso'
-import { resumoDaOportunidade } from '@/lib/anotacaoKommo'
+import { resumoDaOportunidade, VEREDITO_JURIDICO } from '@/lib/anotacaoKommo'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -171,36 +170,15 @@ const notasDeGente = (lead: KommoLead): KommoNota[] =>
   (lead.notas ?? []).filter((n) => !n.automatica)
 
 function lerCardCredijuris(lead: KommoLead) {
-  const daGente = notasDeGente(lead)
-  const notas =
-    daGente.length > 0
-      ? daGente.map((n) => n.texto).join('\n')
-      : (lead.nota_texto ?? '')
-  const pegar = (re: RegExp) => valorDoCampo(notas.match(re)?.[1] ?? '')
-
-  // O TÍTULO É A OUTRA FONTE DE TUDO, e não só do nome.
-  //
-  // O comercial vem encurtando o cadastro, e o destino é o título carregar os
-  // campos que a anotação carregava: número, parcela cedida e percentual de
-  // honorários. A ANOTAÇÃO CONTINUA VENCENDO onde existe — é a declaração mais
-  // explícita, e os cards antigos a têm —, mas onde ela falta o título responde.
-  //
-  // Sem isto, título com a parcela cedida e nenhuma anotação classificava tudo
-  // como "auto", e "auto" assume que o principal está no negócio: uma cessão só
-  // de sucumbenciais era precificada como principal + honorários, em silêncio.
-  const doTitulo = lerTituloCard(lead.nome)
-
-  // O TÍTULO PRIMEIRO. É o cadastro do card; o espelho (`processo_cnj`) vinha
-  // da sync procurando primeiro nas ANOTAÇÕES, e qualquer CNJ citado numa nota
-  // (processo conexo, "ver também") vencia o do título — e este número
-  // sobrepõe o que a IA lê nos autos. Espelho e nota "PROCESSO:" continuam
-  // como reserva para o card antigo sem número no título.
-  const numero = (
-    doTitulo.numero ||
-    (lead.processo_cnj ?? '') ||
-    pegar(/PROCESSO:\s*([0-9.\-]+)/i)
-  ).trim()
-  const tipo = pegar(/TIPO:\s*(.+)/i)
+  // O CADASTRO É LIDO NUM LUGAR SÓ — _shared/cadastroDoCard.ts —, desde
+  // 28/09/2026. O conector passou a gravar a planilha jurídica que o Claude
+  // entrega, e precisa exatamente destes campos: a verba cedida, o número, o
+  // cedente e o originador que nomeiam a pasta do Drive. Duas leituras, uma na
+  // tela e outra no servidor, divergiriam na primeira vírgula. As regras de
+  // cada campo (título primeiro para o número, anotação primeiro para o resto,
+  // só notas de gente) estão comentadas lá.
+  const cadastro = lerCadastroDoCard(lead)
+  const tipo = cadastro.tipo
 
   // A CATEGORIA VEM DO FUNIL, não do texto da anotação.
   //
@@ -227,27 +205,13 @@ function lerCardCredijuris(lead: KommoLead) {
         `(o funil manda). Se estiver errado, mova o card no Kommo.`
       : null
 
-  const intermediador = doTitulo.intermediador
-  const cedente = pegar(/CEDENTE:\s*(.+)/i) || doTitulo.cedente
-
-  const tipo_aquisicao = classificarParcelaCedida(
-    pegar(/PARCELA CEDIDA:\s*(.+)/i) || doTitulo.parcelaCedida,
-  )
-
-  const honMatch = notas.match(/HONOR[ÁA]RIOS?[^:\n]*:\s*([\d.,]+)\s*%/i)
-  // Na anotação o ponto é separador de milhar (o resto do cadastro é assim);
-  // no título, lerTituloCard já normalizou — porcentagem não tem milhar.
-  const honorarios_pct = honMatch
-    ? honMatch[1].replace(/\./g, '').replace(',', '.')
-    : doTitulo.honorariosPct
-
   return {
-    numero,
+    numero: cadastro.numero,
     categoria,
-    cedente,
-    intermediador,
-    tipo_aquisicao,
-    honorarios_pct,
+    cedente: cadastro.cedente,
+    intermediador: cadastro.intermediador,
+    tipo_aquisicao: cadastro.tipo_aquisicao,
+    honorarios_pct: cadastro.honorarios_pct,
     divergenciaTipo,
   }
 }
@@ -516,7 +480,7 @@ async function lerArquivosDoCard(
  * "APROVADO" no card afirmaria uma decisão que ninguém tomou, e o comercial age
  * sobre o que está escrito ali.
  */
-const VEREDITO_JURIDICO = '✅ ANÁLISE JURÍDICA CONCLUÍDA.'
+// O veredito mora em _shared/anotacaoKommo.ts: o conector também escreve esta nota.
 
 // Escreve o resultado da análise no card do Kommo. Os TEXTOS moram em
 // lib/anotacaoKommo.ts — é o único pedaço da análise que o comercial lê, então

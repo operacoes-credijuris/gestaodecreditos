@@ -36,8 +36,22 @@ import {
 } from "../_shared/entregaDosAutos.ts";
 import { situacaoDosAutos, type BalcaoDosAutos } from "../_shared/esperaDosAutos.ts";
 import { trilhaDoPipeline } from "../_shared/trilhasDoPrecatorio.ts";
-import { secaoDaPlanilhaParaAConversa } from "../_shared/questionarioJuridico.ts";
-import { abrirModelo, checklistEmTexto } from "../_shared/planilhaJuridica.ts";
+import {
+  aplicarRespostas,
+  ESQUEMA_DA_SAIDA,
+  secaoDaPlanilhaParaAConversa,
+  type SaidaDaPlanilha,
+} from "../_shared/questionarioJuridico.ts";
+import {
+  abrirModelo,
+  checklistEmTexto,
+  ligarPastaAoCard,
+  salvarPlanilhaNoDrive,
+} from "../_shared/planilhaJuridica.ts";
+import { lerCadastroDoCard } from "../_shared/cadastroDoCard.ts";
+import { anotacoesDaAnalise, VEREDITO_JURIDICO } from "../_shared/anotacaoKommo.ts";
+import { assinarNota } from "../_shared/notaCredijuris.ts";
+import { contaKommo } from "../_shared/segredos.ts";
 
 /** A chave do roteiro na tabela que a operação edita (ver migration 0065). */
 const CHAVE_ROTEIRO = "qualificacao_preliminar";
@@ -71,7 +85,7 @@ const CORS = {
 };
 
 const VERSAO_PADRAO = "2025-06-18";
-const SERVIDOR = { name: "credijuris-autos", title: "Credijuris — autos do crédito", version: "1.1.0" };
+const SERVIDOR = { name: "credijuris-autos", title: "Credijuris — autos do crédito", version: "1.2.0" };
 
 /** Só uuid: é o formato do código, e recusar o resto poupa uma ida ao banco. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -230,6 +244,30 @@ const FERRAMENTAS = [
       additionalProperties: false,
     },
     annotations: SO_LEITURA,
+  },
+  {
+    name: "entregar_planilha",
+    title: "Entregar a planilha da análise jurídica",
+    description:
+      "Grava a planilha da análise jurídica de um precatório INTERNO: recebe as respostas do questionário que veio em `autos_do_credito`, preenche o modelo da casa, salva na pasta do cedente no Drive e anota no card do Kommo. " +
+      "Chame UMA VEZ, ao final, depois de escrever a qualificação — com o objeto inteiro (respostas, avisos, resumo, ficha). " +
+      "Ela devolve o link da planilha: ponha-o na sua resposta a quem está operando.",
+    inputSchema: {
+      type: "object",
+      properties: { codigo: CODIGO, ...ESQUEMA_DA_SAIDA.properties },
+      required: ["codigo", "respostas", "ficha"],
+      additionalProperties: false,
+    },
+    // ESTA GRAVA, e dizê-lo é o que a põe no grupo certo do app: escrita pede
+    // aprovação — uma por análise, no fim —, ao contrário das quatro de leitura.
+    // Não destrói nada (cria o arquivo e uma nota), mas repeti-la cria outra
+    // nota no card: não é idempotente. E fala com o mundo de fora (Drive, Kommo).
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
   },
 ];
 
@@ -452,6 +490,112 @@ async function secaoDaPlanilha(leadId: number): Promise<string> {
   }
 }
 
+/**
+ * A PLANILHA ENTREGUE PELA PRÓPRIA CONVERSA — sem colar nada.
+ *
+ * É O MESMO CAMINHO DA `planilha-juridica`, e não uma segunda versão dele: o
+ * cadastro do card lido por `lerCadastroDoCard` (o mesmo da tela), a gravação
+ * por `aplicarRespostas`, a pasta por `salvarPlanilhaNoDrive` e a nota por
+ * `anotacoesDaAnalise`. Muda só de onde as respostas vêm: da ferramenta, em vez
+ * do bloco colado por quem opera.
+ *
+ * SÓ NO INTERNO, como a seção que a pede. No Externo a planilha é do fundo.
+ */
+async function entregarPlanilha(g: AutosGuardados, args: any) {
+  const db = serviceClient();
+  const { data: card } = await db
+    .from("kommo_leads")
+    .select("kommo_lead_id, nome, processo_cnj, notas, nota_texto, pipeline_id")
+    .eq("kommo_lead_id", g.lead_id)
+    .maybeSingle();
+  if (!card) {
+    return falhaDaFerramenta("Não achei o card deste crédito no espelho da plataforma — a planilha não foi gravada. Entregue o bloco JSON na resposta, para quem opera colar.");
+  }
+  if (trilhaDoPipeline(Number((card as any).pipeline_id))?.key !== "interno") {
+    return falhaDaFerramenta("A planilha jurídica é do precatório INTERNO, e este card não é. Nada foi gravado.");
+  }
+
+  const cadastro = lerCadastroDoCard(card as any);
+  const saida: SaidaDaPlanilha = {
+    respostas: Array.isArray(args?.respostas) ? args.respostas : [],
+    avisos: Array.isArray(args?.avisos) ? args.avisos : [],
+    resumo: typeof args?.resumo === "string" ? args.resumo : undefined,
+    ficha: args?.ficha && typeof args.ficha === "object" ? args.ficha : undefined,
+  };
+
+  const { wb, ws, linhas, comFormula } = await abrirModelo(db);
+  const { temChecklist } = await checklistEmTexto(db, g.lead_id);
+  const { escritas, avisos, ficha, verbasNome } = aplicarRespostas(ws, linhas, comFormula, saida, {
+    numero_processo: cadastro.numero,
+    cedente: cadastro.cedente,
+    tipo_aquisicao: cadastro.tipo_aquisicao,
+    honorarios_pct: cadastro.honorarios_pct,
+    temChecklist,
+  });
+  // PLANILHA SEM RESPOSTA NÃO VAI AO DRIVE: seria lida como análise feita.
+  if (escritas === 0) {
+    return falhaDaFerramenta(
+      "Nenhuma resposta entrou na planilha — confira se as linhas são as do questionário (L4, L5…). " +
+        (avisos.length ? "Avisos: " + avisos.join(" | ") : ""),
+    );
+  }
+
+  const drive = await salvarPlanilhaNoDrive(wb, {
+    originador: cadastro.intermediador,
+    cedente: cadastro.cedente,
+    numero_processo: cadastro.numero,
+    verbasNome,
+  });
+  await ligarPastaAoCard(db, g.lead_id, drive.pasta_id);
+
+  // A NOTA NO CARD, com os mesmos textos que a plataforma escreve — é o que o
+  // comercial lê, e ele não pode ler duas fichas diferentes para o mesmo ato.
+  // Uma por vez: o feed do Kommo ordena pela chegada.
+  const falhasDaNota: string[] = [];
+  const conta = await contaKommo();
+  if (!conta) {
+    falhasDaNota.push("Kommo não configurado");
+  } else {
+    const textos = anotacoesDaAnalise({
+      link: drive.drive_folder_url || drive.drive_file_url || "",
+      ficha,
+      avisos,
+      analista: "Claude (conversa da análise)",
+      veredito: VEREDITO_JURIDICO,
+    });
+    for (const texto of textos) {
+      try {
+        const res = await fetch(`https://${conta.subdominio}.kommo.com/api/v4/leads/notes`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${conta.token}`, "Content-Type": "application/json" },
+          body: JSON.stringify([{
+            entity_id: g.lead_id,
+            // NOTA DE VERDADE, com a marca no rodapé — o mesmo formato da
+            // kommo-anotar, que o kommo-sync reconhece e não relê como cadastro.
+            note_type: "common",
+            params: { text: assinarNota(texto) },
+            is_need_to_trigger_digital_pipeline: false,
+          }]),
+        });
+        if (!res.ok) falhasDaNota.push(`HTTP ${res.status}`);
+      } catch (e) {
+        falhasDaNota.push(String((e as Error)?.message ?? e));
+      }
+    }
+  }
+
+  return okDaFerramenta([
+    `Planilha gravada: ${escritas} de ${linhas.length} linhas do questionário.`,
+    drive.drive_file_url ? `Arquivo: ${drive.drive_file_url}` : "",
+    `Pasta do cedente no Drive: ${drive.drive_folder_url} (o título do card na plataforma já abre esta pasta).`,
+    falhasDaNota.length
+      ? `A anotação no card do Kommo NÃO subiu (${falhasDaNota.join("; ")}) — avise quem está operando.`
+      : "A ficha e o veredito foram anotados no card do Kommo.",
+    avisos.length ? "\nAvisos da planilha:\n- " + avisos.join("\n- ") : "",
+    "\nPonha o link da planilha na sua resposta a quem está operando.",
+  ].filter(Boolean).join("\n"));
+}
+
 async function despachar(msg: any): Promise<unknown | null> {
   const { id, method, params } = msg ?? {};
   // Notificação não tem id e não tem resposta — devolver algo aqui é erro de
@@ -474,7 +618,7 @@ async function despachar(msg: any): Promise<unknown | null> {
           "eixos de varredura. AGRUPE TUDO: " +
           "mande todos os termos de um eixo numa chamada só, e todas as leituras em `leituras` numa chamada " +
           "só, porque cada chamada pede autorização a quem está operando a plataforma. Siga o roteiro que vier no resultado, cite a página de cada achado " +
-          "e escreva a análise na própria conversa, sem gerar arquivo nenhum.",
+          "e escreva a análise na própria conversa, sem gerar arquivo nenhum. No precatório interno, depois da qualificação, entregue a planilha da análise jurídica com `entregar_planilha`.",
       });
     }
     case "ping":
@@ -519,6 +663,9 @@ async function despachar(msg: any): Promise<unknown | null> {
         const de = Number(args.de ?? 1);
         const ate = Number(args.ate ?? Number.MAX_SAFE_INTEGER);
         return okRpc(id, await verPaginas(codigo, String(args.arquivo ?? "").trim(), de, ate));
+      }
+      if (nome === "entregar_planilha") {
+        return okRpc(id, await entregarPlanilha(carga.g, args));
       }
       if (nome === "buscar_nos_autos") {
         // OS DOIS FORMATOS. `termos` é o caminho — a lista do eixo numa chamada

@@ -1,3 +1,8 @@
+import { formatBRL, formatPercent } from '../../supabase/functions/_shared/formato.ts'
+
+// Moraram aqui até 28/09/2026 — ver _shared/formato.ts para o porquê.
+export { formatBRL, formatPercent }
+
 // Helpers de formatação e normalização de strings (pt-BR).
 
 /** Converte string vazia/só espaços em null (mantém o banco sem ""). */
@@ -9,13 +14,6 @@ export function onlyDigits(v?: string | null): string {
   return (v ?? '').replace(/\D/g, '')
 }
 
-export function formatBRL(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—'
-  return value.toLocaleString('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-  })
-}
 
 /**
  * Campo de dinheiro: os dígitos entram pela direita como centavos, então
@@ -46,17 +44,6 @@ export function formatBRLInput(value: number | null | undefined): string {
 export const parsePercentInput = parseBRLInput
 export const formatPercentInput = formatBRLInput
 
-/**
- * Percentual com DUAS casas sempre: "10,00%" e não "10%". Casas fixas alinham a
- * coluna e evitam que 81,4 e 81,40 pareçam números de precisão diferente.
- */
-export function formatPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—'
-  return `${value.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}%`
-}
 
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—'

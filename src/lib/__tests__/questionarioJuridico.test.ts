@@ -206,8 +206,15 @@ describe('a planilha na entrega da conversa', () => {
     expect(secao).toContain('L105: Há cessão homologada?')
     expect(secao).toContain('CEDENTE (PF): Iana')
     expect(secao).toContain('NÃO INVENTE')
-    expect(secao).toContain('ENTREGUE UM BLOCO SÓ, NO FIM')
+    expect(secao).toContain('ENTREGUE A PLANILHA NO FIM')
     expect(secao).toContain('"respostas"')
+  })
+
+  // A FERRAMENTA PRIMEIRO, O BLOCO DE RESERVA: com a ferramenta de gravação
+  // visível, nada precisa ser colado; sem ela, o bloco continua sendo o caminho.
+  it('manda usar a ferramenta de gravação, e o bloco quando ela não existir', () => {
+    expect(secao).toContain('entregar_planilha')
+    expect(secao).toContain('SE NÃO TEM, entregue um bloco')
   })
 
   it('entra antes dos dados do card e dos autos', () => {
