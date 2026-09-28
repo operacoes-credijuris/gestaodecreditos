@@ -86,7 +86,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Input } from '@/components/ui/Field'
+import { Input, Textarea } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
 import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
@@ -152,6 +152,8 @@ type ResultadoJuridico = {
   drive_folder_url?: string | null
   /** Os campos do cadastro do comercial, preenchidos com o que a análise leu dos autos. */
   ficha?: FichaDoCredito
+  /** 'conversa' quando a planilha saiu do bloco que o Claude entregou; ausente, do motor antigo. */
+  origem?: string
   erro?: string
 }
 
@@ -647,6 +649,101 @@ type BotoesDoCard = 'rpv' | 'precatorio' | 'dd' | 'nenhum'
 const exigeMotivoDe = (acao: AcaoTela): boolean =>
   acao.papel === 'diligenciar' || acao.papel === 'reprovar'
 
+/**
+ * A PLANILHA QUE NASCE DA CONVERSA: colar o bloco que o Claude entregou.
+ *
+ * EXISTE PORQUE A PLANILHA PERDIA O CONTEXTO (28/09/2026). O motor antigo
+ * preenchia a análise jurídica lendo os autos de novo, com outro modelo, longe
+ * da conversa em que a qualificação era feita — e as duas podiam discordar.
+ * Agora o conector entrega o questionário à conversa, o Claude o responde com
+ * a leitura que acabou de fazer, e o bloco que ele devolve vem para cá.
+ *
+ * COLAR, E NÃO O CONECTOR GRAVAR SOZINHO: uma ferramenta de gravação no
+ * conector pediria reconectá-lo e, conforme a organização, o administrador.
+ * Colar funciona hoje. A gravação é a mesma nos dois caminhos.
+ *
+ * O MOTOR ANTIGO SOBREVIVE num link discreto, para o card cuja conversa não
+ * trouxe o bloco — com o aviso do que ele é: outra leitura, sem o contexto.
+ */
+function JanelaDaPlanilha({
+  lead,
+  onFechar,
+  onPreencher,
+  onMotorAntigo,
+}: {
+  lead: KommoLead
+  onFechar: () => void
+  onPreencher: (colado: string) => Promise<void>
+  onMotorAntigo: () => void
+}) {
+  const [colado, setColado] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [enviando, setEnviando] = useState(false)
+
+  return (
+    <Modal
+      open
+      onClose={onFechar}
+      title="Preencher planilha"
+      description={tituloCard(lead)}
+      size="lg"
+      dirty={colado.trim() !== ''}
+      footer={
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Button
+            onClick={async () => {
+              setErro(null)
+              setEnviando(true)
+              try {
+                await onPreencher(colado)
+                onFechar()
+              } catch (e) {
+                setErro((e as Error)?.message ?? String(e))
+              } finally {
+                setEnviando(false)
+              }
+            }}
+            loading={enviando}
+            disabled={!colado.trim() || enviando}
+          >
+            Preencher planilha
+          </Button>
+          <button
+            type="button"
+            className="ml-auto text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
+            onClick={() => {
+              onMotorAntigo()
+              onFechar()
+            }}
+            title="Lê os autos de novo, com outro modelo, sem o contexto da conversa com o Claude"
+          >
+            Não tenho o bloco — usar a análise jurídica antiga
+          </button>
+        </div>
+      }
+    >
+      <p className="mb-3 text-sm text-slate-600">
+        Ao final da análise, o Claude entrega um bloco de código com as respostas da planilha.
+        Copie <strong>esse bloco</strong> pelo botão de copiar dele e cole aqui: a plataforma
+        preenche o modelo da casa, salva na pasta do cedente no Drive e anota no card.
+      </p>
+      <Textarea
+        rows={12}
+        value={colado}
+        onChange={(e) => setColado(e.target.value)}
+        placeholder={'```json\n{ "respostas": [ { "linha": 4, "resposta": "…" } ], … }\n```'}
+        className="font-mono text-xs"
+        spellCheck={false}
+      />
+      {erro && (
+        <div className="mt-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 ring-1 ring-inset ring-red-200">
+          {erro}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 function JanelaDeMensagem({
   lead,
   acoes,
@@ -1054,6 +1151,7 @@ function CardCredito({
   onPrepararAnexo,
   preparoDosAutos,
   onAnaliseJuridica,
+  onPreencherPlanilha,
   analisandoJuridico,
   resultadoJuridico,
   botoes,
@@ -1103,6 +1201,8 @@ function CardCredito({
   /** Como vai o preparo dos autos deste card, se já foi pedido. */
   preparoDosAutos?: PreparoDosAutos
   onAnaliseJuridica: (l: KommoLead) => void
+  /** Abre a janela que recebe o bloco da planilha entregue pela conversa do Claude. */
+  onPreencherPlanilha?: (l: KommoLead) => void
   analisandoJuridico: boolean
   resultadoJuridico?: ResultadoJuridico
   botoes: BotoesDoCard
@@ -1379,21 +1479,22 @@ function CardCredito({
             </Button>
           )}
 
-          {/* A ANÁLISE JURÍDICA DO INTERNO, que ficou ao lado do "Executar
-              análise" quando as ferramentas do Externo vieram para cá. EM
-              CONTORNO, e não escura: dois botões escuros lado a lado viram o
-              mesmo botão com rótulos diferentes, e o principal agora é o que
-              leva ao Claude — o mesmo gesto nas duas trilhas. */}
+          {/* A PLANILHA DA ANÁLISE JURÍDICA, que desde 28/09/2026 nasce da
+              conversa do Claude: o "Executar análise" do Interno leva o
+              questionário junto com os autos, e aqui se cola o bloco que ele
+              devolveu. Era o botão "Análise jurídica", que rodava um motor à
+              parte — outra leitura, sem o contexto da qualificação. O motor
+              antigo segue dentro da janela, para quando faltar o bloco. */}
           {botoes === 'precatorio' && (
             <Button
               size="sm"
               variant="outline"
               icon={<Scale className="h-4 w-4" />}
-              onClick={() => onAnaliseJuridica(lead)}
+              onClick={() => (onPreencherPlanilha ? onPreencherPlanilha(lead) : onAnaliseJuridica(lead))}
               loading={analisandoJuridico}
               disabled={ocupado || analisandoJuridico}
             >
-              {analisandoJuridico ? 'Analisando…' : 'Análise jurídica'}
+              {analisandoJuridico ? 'Analisando…' : 'Preencher planilha'}
             </Button>
           )}
           {/* CONCLUIR FECHA A ETAPA, e fica à direita da análise porque é o que
@@ -1470,7 +1571,7 @@ function CardCredito({
           ) : (
             <div className="space-y-1.5">
               <div className="text-green-700">
-                ✅ Análise jurídica preenchida —{' '}
+                ✅ {resultadoJuridico.origem === 'conversa' ? 'Planilha preenchida a partir da conversa' : 'Análise jurídica preenchida'} —{' '}
                 <strong>
                   {resultadoJuridico.linhas_preenchidas} de{' '}
                   {resultadoJuridico.linhas_no_questionario}
@@ -2466,6 +2567,38 @@ export default function AnaliseCredito() {
    * ler" e "não existe nos autos" são respostas diferentes, e o modelo precisa
    * saber qual das duas está diante dele.
    */
+  /** O card cuja planilha está sendo colada, ou null. */
+  const [planilhaLead, setPlanilhaLead] = useState<KommoLead | null>(null)
+
+  /**
+   * Grava a planilha com o bloco que a conversa do Claude entregou.
+   *
+   * O MESMO DESTINO DO MOTOR ANTIGO — mesma planilha, mesma pasta no Drive,
+   * mesma anotação no card —, só que as respostas vêm da conversa, e não de
+   * uma segunda leitura. O erro sobe para a janela, que o mostra sem perder o
+   * que foi colado.
+   */
+  async function preencherPlanilha(lead: KommoLead, colado: string) {
+    const id = lead.kommo_lead_id
+    const dados = lerCardCredijuris(lead)
+    const r = await invokeFunction<ResultadoJuridico>('planilha-juridica', {
+      kommo_lead_id: id,
+      colado,
+      numero_processo: dados.numero,
+      cedente: dados.cedente,
+      originador: dados.intermediador,
+      tipo_aquisicao: dados.tipo_aquisicao,
+      honorarios_pct: dados.honorarios_pct,
+    })
+    setResultadoJuridico((p) => ({ ...p, [id]: r }))
+    void anotarResultadoNaKommo(id, r as unknown as ResultadoAnalise, analistaNome, VEREDITO_JURIDICO).then(
+      (falhas) => {
+        if (falhas.length) toast.error('A planilha ficou pronta, mas a anotação no card do Kommo não subiu: ' + falhas.join('; '))
+      },
+    )
+    toast.success('Planilha preenchida e salva no Drive.')
+  }
+
   async function onAnaliseJuridica(lead: KommoLead) {
     const id = lead.kommo_lead_id
     setAnalisandoJurId(id)
@@ -3107,6 +3240,7 @@ export default function AnaliseCredito() {
                 onBaixarAnexos={(l) => void baixarAnexosDoCard(l)}
                 preparoDosAutos={preparoDosAutos[l.kommo_lead_id]}
                 onAnaliseJuridica={onAnaliseJuridica}
+                onPreencherPlanilha={(l) => setPlanilhaLead(l)}
                 analisandoJuridico={analisandoJurId === l.kommo_lead_id}
                 resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
                 botoes={botoesDoCard}
@@ -3115,6 +3249,15 @@ export default function AnaliseCredito() {
           </div>
         )}
       </Card>
+
+      {planilhaLead && (
+        <JanelaDaPlanilha
+          lead={planilhaLead}
+          onFechar={() => setPlanilhaLead(null)}
+          onPreencher={(colado) => preencherPlanilha(planilhaLead, colado)}
+          onMotorAntigo={() => void onAnaliseJuridica(planilhaLead)}
+        />
+      )}
 
       {mensagemDoCard && (
         <JanelaDeMensagem
@@ -3249,12 +3392,14 @@ export default function AnaliseCredito() {
           // funil: em RPV a análise precifica, no precatório interno a jurídica
           // opina. Onde não há análise — a trilha Externa, cuja opinião é do
           // fundo — Seguir apenas libera a diligência e fecha a janela.
+          // NO PRECATÓRIO, SEGUIR SÓ LIBERA E FECHA, nas duas trilhas. No
+          // Interno ele rodava a análise jurídica antiga — que desde 28/09/2026
+          // é justamente o que a equipe pediu para evitar: planilha feita numa
+          // leitura à parte, sem o contexto da conversa. O próximo passo é o
+          // "Executar análise" do card, que não pode sair daqui: o Seguir chama
+          // depois de gravar no banco, e aí o navegador já não deixa abrir o Claude.
           onSeguir={
-            botoesDoCard === 'rpv'
-              ? () => onAnalisar(ddLead)
-              : botoesDoCard === 'precatorio'
-                ? () => onAnaliseJuridica(ddLead)
-                : undefined
+            botoesDoCard === 'rpv' ? () => onAnalisar(ddLead) : undefined
           }
           onMover={async (statusId, comentario) => {
             await moverComNota(ddLead.kommo_lead_id, statusId, comentario)

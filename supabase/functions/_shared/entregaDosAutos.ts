@@ -303,6 +303,15 @@ export function montarEntrega(
    */
   roteiro: string = ROTEIRO_QUALIFICACAO,
   orcamento: number = ORCAMENTO_DA_PRIMEIRA_ENTREGA,
+  /**
+   * Uma seção a mais de instruções, depois das de leitura e antes dos autos.
+   *
+   * EXISTE PARA A PLANILHA DO INTERNO (28/09/2026): o questionário da análise
+   * jurídica vai junto com o roteiro, para a planilha nascer da mesma conversa
+   * da qualificação. ANTES DOS AUTOS, e não depois: depois de 250 mil
+   * caracteres de processo ela seria lida como parte deles, se fosse lida.
+   */
+  secaoExtra = '',
 ): string {
   // QUEM CABE VEM INTEIRO, na ordem da Kommo. Arquivo pequeno atrás de um
   // grande continua entrando: o grande é pulado, não é cortado.
@@ -410,6 +419,7 @@ export function montarEntrega(
     '',
     '---',
     '',
+    ...(secaoExtra.trim() ? [secaoExtra.trim(), '', '---', ''] : []),
     '## DADOS DO CARD (cadastro do comercial — NÃO é fonte documental)',
     '',
     'O título do card segue o formato `[intermediador] - [cedente] - [nº CNJ] - ' +

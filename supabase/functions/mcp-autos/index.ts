@@ -35,6 +35,9 @@ import {
   textoDaBusca,
 } from "../_shared/entregaDosAutos.ts";
 import { situacaoDosAutos, type BalcaoDosAutos } from "../_shared/esperaDosAutos.ts";
+import { trilhaDoPipeline } from "../_shared/trilhasDoPrecatorio.ts";
+import { secaoDaPlanilhaParaAConversa } from "../_shared/questionarioJuridico.ts";
+import { abrirModelo, checklistEmTexto } from "../_shared/planilhaJuridica.ts";
 
 /** A chave do roteiro na tabela que a operação edita (ver migration 0065). */
 const CHAVE_ROTEIRO = "qualificacao_preliminar";
@@ -409,6 +412,46 @@ async function verPaginas(codigo: string, arquivo: string, de: number, ate: numb
 }
 
 
+/**
+ * A seção da planilha jurídica, para os cards do INTERNO — ou nada.
+ *
+ * É O QUE FAZ A PLANILHA NASCER DA CONVERSA (28/09/2026). A equipe pediu que
+ * o "Executar análise" do Interno entregasse também a planilha da análise
+ * jurídica, "senão perde o contexto que está sendo desenvolvido no desktop" —
+ * o motor antigo preenchia a planilha numa segunda leitura, por outro modelo.
+ * Aqui o questionário vai junto com os autos, lido do MODELO EM VIGOR no
+ * Supabase, e a conversa o responde com a leitura que acabou de fazer.
+ *
+ * QUEM DECIDE É O FUNIL DO CARD, lido do espelho: é o card, e não quem clicou,
+ * que diz a trilha. No Externo a planilha é do fundo, e não vai.
+ *
+ * FALHA NÃO DERRUBA A ENTREGA. Sem modelo no bucket, ou sem espelho, os autos
+ * seguem — e a conversa é avisada de que a planilha ficou de fora, para não
+ * entregar um bloco que ninguém vai poder gravar.
+ */
+async function secaoDaPlanilha(leadId: number): Promise<string> {
+  const db = serviceClient();
+  const { data: card } = await db
+    .from("kommo_leads")
+    .select("pipeline_id")
+    .eq("kommo_lead_id", leadId)
+    .maybeSingle();
+  const trilha = card ? trilhaDoPipeline(Number((card as any).pipeline_id)) : undefined;
+  if (trilha?.key !== "interno") return "";
+  try {
+    const { linhas } = await abrirModelo(db);
+    const { texto } = await checklistEmTexto(db, leadId);
+    return secaoDaPlanilhaParaAConversa(linhas, texto);
+  } catch (e) {
+    return (
+      "## PLANILHA DA ANÁLISE JURÍDICA\n\n" +
+      "O modelo da planilha não pôde ser carregado agora (" +
+      String((e as Error)?.message ?? e).slice(0, 200) +
+      "). Faça só a qualificação e diga, ao final, que a planilha ficou de fora."
+    );
+  }
+}
+
 async function despachar(msg: any): Promise<unknown | null> {
   const { id, method, params } = msg ?? {};
   // Notificação não tem id e não tem resposta — devolver algo aqui é erro de
@@ -484,7 +527,11 @@ async function despachar(msg: any): Promise<unknown | null> {
         const pedidos = args.termos ?? args.termo ?? "";
         return okRpc(id, okDaFerramenta(textoDaBusca(carga.g, pedidos)));
       }
-      return okRpc(id, okDaFerramenta(montarEntrega(carga.g, await roteiroEmVigor(serviceClient()))));
+      const [roteiro, planilha] = await Promise.all([
+        roteiroEmVigor(serviceClient()),
+        secaoDaPlanilha(Number(carga.g.lead_id)),
+      ]);
+      return okRpc(id, okDaFerramenta(montarEntrega(carga.g, roteiro, undefined, planilha)));
     }
     // resources e prompts não existem aqui; responder a lista vazia é mais
     // gentil que -32601 com clientes que perguntam por hábito.
