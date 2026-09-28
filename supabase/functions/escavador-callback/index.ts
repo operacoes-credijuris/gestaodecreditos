@@ -29,45 +29,36 @@ import { serviceClient } from '../_shared/auth.ts'
 import { chaveEscavador } from '../_shared/segredos.ts'
 import { BASE_ESCAVADOR } from '../_shared/escavador.ts'
 import {
-  caminhoDoDocumento,
   chaveDoEvento,
   cnjDoEvento,
-  documentosDaLista,
   nomeDoEvento,
-  pedidoBemSucedido,
+  pedidoEncerrado,
 } from '../_shared/autosDoEscavador.ts'
-
-/** O balde dos PDFs (migração 0068). Privado: quem entrega é URL assinada. */
-const BALDE = 'autos-escavador'
-
-/** Teto por documento. Um PDF de autos passa longe disso; um absurdo, não. */
-const MAX_BYTES = 80 * 1024 * 1024
 
 interface Resposta {
   status: number
   corpo: unknown
-  centavos: number
 }
 
 async function pedirAoEscavador(chave: string, caminho: string): Promise<Resposta> {
   const res = await fetch(`${BASE_ESCAVADOR}${caminho}`, {
     headers: { Authorization: `Bearer ${chave}`, Accept: 'application/json' },
   })
-  const centavos = Number(res.headers.get('Creditos-Utilizados') ?? 0) || 0
   const txt = await res.text()
   let corpo: unknown = txt
   try {
     corpo = JSON.parse(txt)
   } catch { /* corpo que não é JSON já diz muito pelo status */ }
-  return { status: res.status, corpo, centavos }
+  return { status: res.status, corpo }
 }
 
 /**
- * O trabalho pesado: confirmar o estado, listar os documentos e baixá-los.
+ * Confirma o estado na API, registra o pedido e ACORDA A ROTINA.
  *
- * SEPARADO DA RESPOSTA porque a recomendação deles é "responda rapidamente a
- * requisição e processe tarefas pesadas de forma assíncrona" — e porque demorar
- * faz o Escavador reenviar o mesmo evento, que é como um download vira dois.
+ * OS PDFs NÃO PASSAM POR AQUI desde 28/09/2026: eles vão direto para o card do
+ * Kommo, e quem os leva é a `escavador-autos-rotina` — em voltas, porque um
+ * processo grande são centenas de arquivos e esta função tem teto de tempo. O
+ * aviso só faz a rotina olhar agora, e não na próxima meia hora.
  */
 async function recolher(numeroCnj: string, uuidEvento: string) {
   const svc = serviceClient()
@@ -79,14 +70,8 @@ async function recolher(numeroCnj: string, uuidEvento: string) {
     return
   }
 
-  let centavos = 0
-  const anotarErro = async (erro: string) => {
-    await svc.from('escavador_callback').update({ erro }).eq('uuid', uuidEvento)
-  }
-
   // 1. O ESTADO DE VERDADE vem da API, não do corpo do evento.
   const st = await pedirAoEscavador(chave, `/processos/numero_cnj/${numeroCnj}/status-atualizacao`)
-  centavos += st.centavos
   const verificacao = (st.corpo as { ultima_verificacao?: Record<string, unknown> } | null)
     ?.ultima_verificacao ?? {}
   const pedidoId = Number(verificacao.id ?? 0) || null
@@ -94,8 +79,6 @@ async function recolher(numeroCnj: string, uuidEvento: string) {
 
   if (pedidoId) {
     // UPSERT, e não insert: o pedido já existe se foi esta plataforma que o fez.
-    // Se foi feito pelo painel do Escavador, nasce aqui — um pedido que ninguém
-    // registrou ainda assim rendeu documentos, e perdê-los seria o pior desfecho.
     await svc.from('escavador_pedido').upsert({
       id: pedidoId,
       numero_cnj: numeroCnj,
@@ -106,121 +89,17 @@ async function recolher(numeroCnj: string, uuidEvento: string) {
     }, { onConflict: 'id' })
   }
 
-  if (!pedidoBemSucedido(status)) {
-    // NÃO É ERRO NOSSO, e é informação: um `NAO_ENCONTRADO` diz que o processo é
-    // físico, sigiloso ou arquivado; um `ERRO` diz que o robô não conseguiu
-    // entrar. Fica registrado no pedido, e o callback se encerra tratado.
-    await svc.from('escavador_callback')
-      .update({ tratado_em: new Date().toISOString() })
-      .eq('uuid', uuidEvento)
-    return
-  }
-
-  // 2. OS DOCUMENTOS. Tenta os autos; se a permissão não abriu, cai nos
-  // públicos — que é exatamente a diferença entre ter e não ter certificado
-  // válido naquele processo, e não um defeito.
-  let lista = await pedirAoEscavador(chave, `/processos/numero_cnj/${numeroCnj}/autos?limit=100`)
-  centavos += lista.centavos
-  let origem = 'autos'
-  if (lista.status !== 200) {
-    lista = await pedirAoEscavador(
-      chave,
-      `/processos/numero_cnj/${numeroCnj}/documentos-publicos?limit=100`,
-    )
-    centavos += lista.centavos
-    origem = 'documentos_publicos'
-  }
-  if (lista.status !== 200) {
-    await anotarErro(`Nenhuma lista de documentos disponível (HTTP ${lista.status}).`)
-    return
-  }
-
-  const documentos = documentosDaLista(lista.corpo)
-
-  // 3. O QUE JÁ ESTÁ EM CASA NÃO DESCE DE NOVO. Reenvio de callback é previsto
-  // pela documentação deles, e cada download pode custar.
-  const { data: existentes } = await svc
-    .from('escavador_documento')
-    .select('chave, caminho')
-    .eq('numero_cnj', numeroCnj)
-  const jaBaixado = new Set(
-    (existentes ?? []).filter((d) => d.caminho).map((d) => String(d.chave)),
-  )
-
-  for (const doc of documentos) {
-    if (jaBaixado.has(doc.chave)) continue
-
-    // A linha nasce ANTES do download: documento listado e não baixado é um
-    // estado que precisa existir no banco, senão a falha é muda.
-    await svc.from('escavador_documento').upsert({
-      numero_cnj: numeroCnj,
-      pedido_id: pedidoId,
-      chave: doc.chave,
-      nome: doc.nome,
-      tipo: doc.tipo,
-    }, { onConflict: 'numero_cnj,chave' })
-
-    try {
-      const res = await fetch(
-        `${BASE_ESCAVADOR}/processos/numero_cnj/${numeroCnj}/documentos/${doc.chave}`,
-        { headers: { Authorization: `Bearer ${chave}` } },
-      )
-      centavos += Number(res.headers.get('Creditos-Utilizados') ?? 0) || 0
-      if (!res.ok) {
-        await svc.from('escavador_documento')
-          .update({ erro: `download HTTP ${res.status}` })
-          .eq('numero_cnj', numeroCnj).eq('chave', doc.chave)
-        continue
-      }
-      const bytes = new Uint8Array(await res.arrayBuffer())
-      if (bytes.byteLength > MAX_BYTES) {
-        await svc.from('escavador_documento')
-          .update({ erro: `arquivo grande demais (${bytes.byteLength} bytes)` })
-          .eq('numero_cnj', numeroCnj).eq('chave', doc.chave)
-        continue
-      }
-      const caminho = caminhoDoDocumento(numeroCnj, doc.chave)
-      const { error: eUp } = await svc.storage.from(BALDE).upload(caminho, bytes, {
-        contentType: 'application/pdf',
-        upsert: true,
-      })
-      if (eUp) {
-        await svc.from('escavador_documento')
-          .update({ erro: `balde: ${String(eUp.message).slice(0, 160)}` })
-          .eq('numero_cnj', numeroCnj).eq('chave', doc.chave)
-        continue
-      }
-      await svc.from('escavador_documento').update({
-        caminho,
-        bytes: bytes.byteLength,
-        erro: null,
-        baixado_em: new Date().toISOString(),
-      }).eq('numero_cnj', numeroCnj).eq('chave', doc.chave)
-    } catch (e) {
-      await svc.from('escavador_documento')
-        .update({ erro: String((e as Error)?.message ?? e).slice(0, 160) })
-        .eq('numero_cnj', numeroCnj).eq('chave', doc.chave)
-    }
-  }
-
-  // 4. O QUE ISSO CUSTOU. A API é paga por requisição e estamos em período de
-  // teste: "quanto custa trazer os autos de um processo" precisa ter resposta
-  // antes de a rotina virar automática de verdade.
-  if (centavos > 0) {
-    await svc.from('escavador_consumo').insert({
-      operacao: origem === 'autos' ? 'autos' : 'documentos_publicos',
-      alvo: numeroCnj,
-      centavos,
-      requisicoes: documentos.length + 2,
-      processos: 1,
-    })
-  }
-  if (pedidoId && centavos > 0) {
-    const { data: antes } = await svc
-      .from('escavador_pedido').select('centavos').eq('id', pedidoId).maybeSingle()
-    await svc.from('escavador_pedido')
-      .update({ centavos: (Number(antes?.centavos ?? 0) || 0) + centavos })
-      .eq('id', pedidoId)
+  // 2. OS CARDS DESTE PROCESSO que esperavam: a rotina os confere na hora.
+  if (pedidoEncerrado(status)) {
+    await svc.from('escavador_autos_card')
+      .update({ verificado_em: null })
+      .eq('numero_cnj', numeroCnj)
+      .eq('estado', 'AGUARDANDO')
+    await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/escavador-autos-rotina`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-cron-secret': Deno.env.get('CRON_SECRET') ?? '' },
+      body: '{}',
+    }).catch(() => null)
   }
 
   await svc.from('escavador_callback')

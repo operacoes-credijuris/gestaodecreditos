@@ -112,3 +112,9 @@ verify_jwt = false
 # se ele não estiver configurado, RECUSA tudo em vez de aceitar tudo.
 [functions.escavador-callback]
 verify_jwt = false
+
+# Os autos do Escavador para o card do Kommo. Chamada pelo cron (x-cron-secret),
+# por ela mesma em voltas encadeadas e pelo app (JWT do usuário); a própria
+# função valida a autorização, por isso verify_jwt = false.
+[functions.escavador-autos-rotina]
+verify_jwt = false
