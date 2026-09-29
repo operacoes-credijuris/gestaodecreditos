@@ -1227,10 +1227,7 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
             placeholder="Ex.: Retorno do BTG — proposta a 62%, pagamento em 30 dias após a cessão."
             className="w-full resize-y rounded-md border border-slate-200 p-2 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
           />
-          <div className="mt-1.5 flex items-center justify-between gap-2">
-            <span className="text-[10px] leading-tight text-slate-400">
-              Vai para o card no Kommo, com o seu nome. Ctrl+Enter envia.
-            </span>
+          <div className="mt-1.5 flex justify-end">
             <Button size="sm" onClick={() => void enviar()} loading={enviando} disabled={!temRascunho}>
               Enviar
             </Button>
