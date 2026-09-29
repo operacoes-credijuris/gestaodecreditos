@@ -14,10 +14,16 @@
 // que aceita a partir DELA TAMBÉM: foi a lição das trilhas, onde duas listas que
 // precisavam concordar divergiram no primeiro dia.
 
+/** Os atos de uma etiqueta — as colunas da grade do seletor, nesta ordem. */
+export const ATOS_DA_PRECIFICACAO = ['Enviado', 'Cotado', 'Reprovado'] as const
+export type AtoDaPrecificacao = (typeof ATOS_DA_PRECIFICACAO)[number]
+
 /** Uma etiqueta da casa, e o destino de que ela fala. */
 export interface EtiquetaDoFundo {
   /** O nome EXATO como está escrito no Kommo — é ele que vai no PATCH. */
   nome: string
+  /** O que aconteceu naquele fundo: a coluna da grade em que ela aparece. */
+  ato: AtoDaPrecificacao
   /**
    * O destino a que a etiqueta se refere: o fundo, ou a pessoa que negocia.
    *
@@ -33,29 +39,38 @@ export interface EtiquetaDoFundo {
 }
 
 /**
- * AS ETIQUETAS DA ABA "EM PRECIFICAÇÃO", ditadas por quem opera em 22/09/2026.
+ * OS FUNDOS EM QUE A CASA COTA, na ordem da tela — ditados por quem opera em
+ * 29/09/2026. Eram PJUS, BTG e Luiz; o Luiz saiu e entraram cinco fundos.
  *
- * O PRIMEIRO VERBO MUDA DE DESTINO PARA DESTINO — "Enviado", "Cotado",
- * "Pendente" — e não é descuido: é o vocabulário que o comercial já usa no
- * kanban, e uniformizá-lo aqui criaria etiquetas novas no Kommo em vez de casar
- * com as que estão lá. A última de cada destino é sempre "Reprovado ‹destino›".
- *
- * A ORDEM É A DA LISTA NA TELA, e é a do próprio percurso do crédito: primeiro
- * onde ele está (enviado, pendente), depois a cotação que voltou, e por fim a
- * recusa. Como só uma vale por destino, subir um degrau apaga o anterior — que é
- * o que se quer: "Cotado PJUS" substituindo "Enviado PJUS" é a notícia de que o
- * fundo respondeu.
+ * O BTG NÃO TEM "ENVIADO": ali o crédito não fica esperando — ou volta cotado,
+ * ou recusado. É o único fundo com dois atos.
  */
-export const ETIQUETAS_DA_PRECIFICACAO: readonly EtiquetaDoFundo[] = [
-  { destino: 'PJUS', nome: 'Enviado PJUS' },
-  { destino: 'PJUS', nome: 'Cotado PJUS' },
-  { destino: 'PJUS', nome: 'Reprovado PJUS' },
-  { destino: 'BTG', nome: 'Cotado BTG' },
-  { destino: 'BTG', nome: 'Reprovado BTG' },
-  { destino: 'Luiz', nome: 'Pendente Luiz' },
-  { destino: 'Luiz', nome: 'Cotado Luiz' },
-  { destino: 'Luiz', nome: 'Reprovado Luiz' },
+const FUNDOS: { destino: string; atos: readonly AtoDaPrecificacao[] }[] = [
+  { destino: 'PJUS', atos: ATOS_DA_PRECIFICACAO },
+  { destino: 'BTG', atos: ['Cotado', 'Reprovado'] },
+  { destino: 'PX Ativos', atos: ATOS_DA_PRECIFICACAO },
+  { destino: 'Invest Precatórios', atos: ATOS_DA_PRECIFICACAO },
+  { destino: 'K & WC Ativos', atos: ATOS_DA_PRECIFICACAO },
+  { destino: 'Precatur', atos: ATOS_DA_PRECIFICACAO },
+  { destino: 'Carbon', atos: ATOS_DA_PRECIFICACAO },
 ]
+
+/**
+ * AS ETIQUETAS DA ABA "EM PRECIFICAÇÃO": "‹ato› ‹fundo›", como as que o
+ * comercial já usava no kanban ("Enviado PJUS", "Cotado BTG") — o mesmo molde,
+ * para as dos fundos novos casarem com o vocabulário que está lá.
+ *
+ * CUIDADO AO MUDAR UM NOME: o Kommo cria a etiqueta na primeira vez que ela é
+ * aplicada, e depois não a renomeia nem a apaga. Nome novo aqui é etiqueta nova
+ * na conta, para sempre.
+ *
+ * A ORDEM É A DO PERCURSO dentro de cada fundo: enviado, a cotação que voltou, e
+ * por fim a recusa. Como só uma vale por fundo, marcar outra apaga a anterior —
+ * "Cotado PJUS" substituindo "Enviado PJUS" é a notícia de que o fundo respondeu.
+ */
+export const ETIQUETAS_DA_PRECIFICACAO: readonly EtiquetaDoFundo[] = FUNDOS.flatMap((f) =>
+  f.atos.map((ato) => ({ destino: f.destino, ato, nome: `${ato} ${f.destino}` })),
+)
 
 /** Acento, caixa e espaço a mais não podem decidir se duas etiquetas são a mesma. */
 export function normalizarEtiqueta(nome: unknown): string {
@@ -107,7 +122,8 @@ export function irmasDaEtiqueta(
 }
 
 /**
- * As etiquetas de um card NA ORDEM DA CASA: PJUS, depois BTG, depois Luiz.
+ * As etiquetas de um card NA ORDEM DA CASA: a dos fundos na lista (PJUS, BTG,
+ * PX Ativos…).
  *
  * A ORDEM QUE VINHA ERA A DO KOMMO — isto é, a ordem em que alguém etiquetou —,
  * e ela muda de card para card. Numa coluna de trinta, isso obriga a LER cada
@@ -137,7 +153,20 @@ export function ordenarEtiquetas(
     .map((x) => x.nome)
 }
 
-/** As etiquetas agrupadas por destino, na ordem da lista — como o seletor as mostra. */
+/**
+ * A GRADE DO SELETOR: uma linha por fundo, uma coluna por ato. A célula de um ato
+ * que o fundo não tem (o "Enviado" do BTG) vem vazia.
+ */
+export function gradeDasEtiquetas(
+  etiquetas: readonly EtiquetaDoFundo[] = ETIQUETAS_DA_PRECIFICACAO,
+): { destino: string; celulas: (EtiquetaDoFundo | null)[] }[] {
+  return etiquetasPorDestino(etiquetas).map((g) => ({
+    destino: g.destino,
+    celulas: ATOS_DA_PRECIFICACAO.map((ato) => g.etiquetas.find((e) => e.ato === ato) ?? null),
+  }))
+}
+
+/** As etiquetas agrupadas por destino, na ordem da lista. */
 export function etiquetasPorDestino(
   etiquetas: readonly EtiquetaDoFundo[] = ETIQUETAS_DA_PRECIFICACAO,
 ): { destino: string; etiquetas: EtiquetaDoFundo[] }[] {

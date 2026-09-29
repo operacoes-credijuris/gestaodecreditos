@@ -55,8 +55,9 @@ import {
   ABAS_EXTERNO_SEM_TRABALHO,
   ABAS_INTERNO_SEM_TRABALHO,
   type EtiquetaDoFundo,
+  ATOS_DA_PRECIFICACAO,
   etiquetasDaAba,
-  etiquetasPorDestino,
+  gradeDasEtiquetas,
   mesmaEtiqueta,
   ordenarEtiquetas,
   ehFunilPrecatorio,
@@ -975,11 +976,17 @@ function SeloDaEtapa({ lead }: { lead: KommoLead }) {
  * na lista continua aparecendo no card, fora do alcance daqui: ela é de quem a
  * pôs.
  *
- * UMA POR DESTINO, e é o que a lista dentro de cada grupo desenha: marcar
- * "Reprovado BTG" tira "Cotado BTG", porque o crédito está num dos dois e não
- * nos dois. Entre destinos não há exclusão nenhuma — cotado no BTG e reprovado
- * no PJUS é o estado normal de um crédito em precificação. A troca vai num PATCH
- * só, do lado do servidor; a tela não manda duas chamadas.
+ * UMA OU NENHUMA POR FUNDO, e é o que a grade desenha: uma linha por fundo, uma
+ * coluna por ato (Enviado, Cotado, Reprovado), e em cada linha no máximo um
+ * círculo marcado. Marcar "Reprovado BTG" tira "Cotado BTG", porque o crédito
+ * está num dos dois e não nos dois. Entre fundos não há exclusão nenhuma —
+ * cotado no BTG e reprovado no PJUS é o estado normal de um crédito em
+ * precificação. A troca vai num PATCH só, do lado do servidor; a tela não manda
+ * duas chamadas.
+ *
+ * EM GRADE, e não em lista, desde 29/09/2026: com sete fundos a lista passava de
+ * vinte linhas, e a grade põe cada fundo numa linha só — o estado do crédito em
+ * todos os fundos se lê de uma vez, coluna por coluna.
  *
  * CLICAR NA MARCADA DESMARCA. É como se desfaz um clique errado, e sem isso a
  * única saída seria marcar a outra — trocar um engano por outro.
@@ -1045,54 +1052,91 @@ function SeletorDeEtiquetas({
       </button>
 
       {aberto && (
-        <div className="absolute left-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-          {etiquetasPorDestino(oferecidas).map((grupo) => (
-            <div key={grupo.destino}>
-              {/* O DESTINO AGRUPA, e é o que se procura: quem etiqueta está
-                  respondendo "o que aconteceu no BTG", não caçando um nome numa
-                  lista de seis. */}
-              <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                {grupo.destino}
-              </p>
-              {grupo.etiquetas.map((e) => {
-                const posta = temEtiqueta(e.nome)
-                return (
-                  <button
-                    key={e.nome}
-                    type="button"
-                    // Uma de cada vez NESTE card: duas chamadas simultâneas
-                    // voltariam com listas diferentes, e a última a chegar
-                    // sobrescreveria a outra na tela.
-                    disabled={emVoo !== null}
-                    onClick={() => onAlternar(e.nome, posta ? 'remover' : 'adicionar')}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60',
-                      posta ? 'font-medium text-slate-800' : 'text-slate-600',
-                    )}
+        <div className="absolute left-0 z-20 mt-1 w-[22rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+          <table className="w-full text-xs">
+            <thead>
+              <tr>
+                <th className="pb-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Fundo
+                </th>
+                {ATOS_DA_PRECIFICACAO.map((ato) => (
+                  <th
+                    key={ato}
+                    className="w-[4.5rem] pb-1 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-400"
                   >
-                    {/* REDONDO, e não quadrado: dentro do grupo a escolha é uma
-                        só, e círculo é a forma que diz isso antes de a pessoa
-                        testar. O quadrado prometia poder marcar as duas. */}
-                    <span
+                    {ato}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {gradeDasEtiquetas(oferecidas).map((linha) => {
+                const algumaPosta = linha.celulas.some((e) => e && temEtiqueta(e.nome))
+                return (
+                  <tr key={linha.destino} className="border-t border-slate-100">
+                    {/* O FUNDO COM ETIQUETA fica em destaque: numa grade de sete,
+                        é o que se procura primeiro. */}
+                    <td
                       className={cn(
-                        'flex h-3.5 w-3.5 flex-none items-center justify-center rounded-full border',
-                        posta
-                          ? 'border-brand-600 bg-brand-600 text-white'
-                          : 'border-slate-300 text-slate-400',
+                        'py-1 pr-2',
+                        algumaPosta ? 'font-medium text-slate-800' : 'text-slate-600',
                       )}
                     >
-                      {emVoo === e.nome ? (
-                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                      ) : posta ? (
-                        <Check className="h-2.5 w-2.5" />
-                      ) : null}
-                    </span>
-                    {e.nome}
-                  </button>
+                      {linha.destino}
+                    </td>
+                    {linha.celulas.map((e, i) => {
+                      if (!e) {
+                        return (
+                          <td key={i} className="py-1 text-center text-slate-300">
+                            —
+                          </td>
+                        )
+                      }
+                      const posta = temEtiqueta(e.nome)
+                      return (
+                        <td key={e.nome} className="py-1 text-center">
+                          <button
+                            type="button"
+                            // Uma de cada vez NESTE card: duas chamadas simultâneas
+                            // voltariam com listas diferentes, e a última a chegar
+                            // sobrescreveria a outra na tela.
+                            disabled={emVoo !== null}
+                            onClick={() => onAlternar(e.nome, posta ? 'remover' : 'adicionar')}
+                            title={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"`}
+                            aria-label={e.nome}
+                            aria-pressed={posta}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {/* REDONDO, e não quadrado: na linha a escolha é uma
+                                só, e círculo é a forma que diz isso antes de a
+                                pessoa testar. Clicar no marcado desmarca — é como
+                                o fundo volta a "nenhuma". */}
+                            <span
+                              className={cn(
+                                'flex h-3.5 w-3.5 items-center justify-center rounded-full border',
+                                posta
+                                  ? 'border-brand-600 bg-brand-600 text-white'
+                                  : 'border-slate-300 text-slate-400',
+                              )}
+                            >
+                              {emVoo === e.nome ? (
+                                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                              ) : posta ? (
+                                <Check className="h-2.5 w-2.5" />
+                              ) : null}
+                            </span>
+                          </button>
+                        </td>
+                      )
+                    })}
+                  </tr>
                 )
               })}
-            </div>
-          ))}
+            </tbody>
+          </table>
+          <p className="mt-1.5 text-[10px] leading-tight text-slate-400">
+            Uma etiqueta por fundo. Clique na marcada para tirar.
+          </p>
         </div>
       )}
     </div>
@@ -1389,7 +1433,7 @@ function CardCredito({
           {mostrarTags &&
             ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0 || onAnotar) && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {/* A ORDEM É A DA CASA — PJUS, BTG, Luiz —, e não a do Kommo,
+                {/* A ORDEM É A DA CASA — PJUS, BTG, PX Ativos… —, e não a do Kommo,
                     que é a ordem em que alguém etiquetou e muda de card para
                     card. Fixa, a POSIÇÃO passa a informar: a primeira é sempre
                     a do PJUS, e a falta dela se nota pelo que não está ali. */}

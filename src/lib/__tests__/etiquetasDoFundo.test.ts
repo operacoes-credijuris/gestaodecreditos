@@ -20,6 +20,7 @@ import {
   etiquetaCanonica,
   etiquetasDaAba,
   etiquetasPorDestino,
+  gradeDasEtiquetas,
   irmasDaEtiqueta,
   mesmaEtiqueta,
   ordenarEtiquetas,
@@ -28,10 +29,10 @@ import {
 } from '@/lib/kommo'
 
 describe('as etiquetas da precificação', () => {
-  // AS SEIS QUE A OPERAÇÃO DITOU em 22/09/2026, com o verbo de cada destino. O
-  // primeiro muda — "Enviado", "Cotado", "Pendente" — porque é o vocabulário que
-  // o comercial já usa no Kommo; uniformizá-lo aqui criaria etiquetas NOVAS lá
-  // dentro em vez de casar com as que existem.
+  // OS SETE FUNDOS QUE A OPERAÇÃO DITOU em 29/09/2026, no molde "‹ato› ‹fundo›"
+  // que o comercial já usava. Cada nome aqui vira etiqueta na conta do Kommo na
+  // primeira vez que for aplicado — e não se apaga depois. Mudar um nome é
+  // decisão, não ajuste.
   it('são exatamente as que a casa usa', () => {
     expect(ETIQUETAS_DA_PRECIFICACAO.map((e) => e.nome)).toEqual([
       'Enviado PJUS',
@@ -39,22 +40,66 @@ describe('as etiquetas da precificação', () => {
       'Reprovado PJUS',
       'Cotado BTG',
       'Reprovado BTG',
-      'Pendente Luiz',
-      'Cotado Luiz',
-      'Reprovado Luiz',
+      'Enviado PX Ativos',
+      'Cotado PX Ativos',
+      'Reprovado PX Ativos',
+      'Enviado Invest Precatórios',
+      'Cotado Invest Precatórios',
+      'Reprovado Invest Precatórios',
+      'Enviado K & WC Ativos',
+      'Cotado K & WC Ativos',
+      'Reprovado K & WC Ativos',
+      'Enviado Precatur',
+      'Cotado Precatur',
+      'Reprovado Precatur',
+      'Enviado Carbon',
+      'Cotado Carbon',
+      'Reprovado Carbon',
     ])
+  })
+
+  // O LUIZ SAIU DA LISTA: a etiqueta dele que já está num card continua lá, mas
+  // a plataforma não a põe nem a tira mais.
+  it('o Luiz não é mais um destino da casa', () => {
+    expect(etiquetaCanonica('Pendente Luiz')).toBeNull()
+    expect(etiquetaCanonica('Cotado Luiz')).toBeNull()
   })
 
   // A ORDEM DENTRO DO GRUPO É A DO PERCURSO: onde o crédito está, a cotação que
   // voltou, e por fim a recusa — que é sempre a última.
   it('a recusa fecha cada destino, e é uma só', () => {
     const grupos = etiquetasPorDestino()
-    expect(grupos.map((g) => g.destino)).toEqual(['PJUS', 'BTG', 'Luiz'])
+    expect(grupos.map((g) => g.destino)).toEqual([
+      'PJUS',
+      'BTG',
+      'PX Ativos',
+      'Invest Precatórios',
+      'K & WC Ativos',
+      'Precatur',
+      'Carbon',
+    ])
     for (const g of grupos) {
       const recusas = g.etiquetas.filter((e) => /^Reprovado /.test(e.nome))
       expect(recusas, g.destino).toHaveLength(1)
       expect(g.etiquetas[g.etiquetas.length - 1].nome, g.destino).toMatch(/^Reprovado /)
     }
+  })
+})
+
+/**
+ * A GRADE DO SELETOR: um fundo por linha, Enviado / Cotado / Reprovado nas
+ * colunas. O BTG não tem "Enviado" — a célula vem vazia, e não com outra
+ * etiqueta no lugar.
+ */
+describe('gradeDasEtiquetas', () => {
+  it('uma linha por fundo, três colunas, e o buraco do BTG', () => {
+    const grade = gradeDasEtiquetas()
+    expect(grade).toHaveLength(7)
+    for (const l of grade) expect(l.celulas, l.destino).toHaveLength(3)
+    const btg = grade.find((l) => l.destino === 'BTG')!
+    expect(btg.celulas.map((e) => e?.nome ?? null)).toEqual([null, 'Cotado BTG', 'Reprovado BTG'])
+    const px = grade.find((l) => l.destino === 'PX Ativos')!
+    expect(px.celulas.map((e) => e?.nome)).toEqual(['Enviado PX Ativos', 'Cotado PX Ativos', 'Reprovado PX Ativos'])
   })
 })
 
@@ -73,7 +118,13 @@ describe('irmasDaEtiqueta', () => {
     // o "Enviado", que é a notícia velha.
     expect(irmasDaEtiqueta('Cotado PJUS')).toEqual(['Enviado PJUS', 'Reprovado PJUS'])
     expect(irmasDaEtiqueta('Enviado PJUS')).toEqual(['Cotado PJUS', 'Reprovado PJUS'])
-    expect(irmasDaEtiqueta('Reprovado Luiz')).toEqual(['Pendente Luiz', 'Cotado Luiz'])
+    expect(irmasDaEtiqueta('Reprovado Carbon')).toEqual(['Enviado Carbon', 'Cotado Carbon'])
+    // O "&" e o acento não confundem a troca.
+    expect(irmasDaEtiqueta('Cotado K & WC Ativos')).toEqual(['Enviado K & WC Ativos', 'Reprovado K & WC Ativos'])
+    expect(irmasDaEtiqueta('cotado invest precatorios')).toEqual([
+      'Enviado Invest Precatórios',
+      'Reprovado Invest Precatórios',
+    ])
   })
 
   // ENTRE DESTINOS NÃO HÁ EXCLUSÃO: cotado no BTG e reprovado no PJUS é o estado
@@ -106,10 +157,10 @@ describe('irmasDaEtiqueta', () => {
  * como varrer a fila sem ler cada linha. Fixa, a posição vira informação.
  */
 describe('ordenarEtiquetas', () => {
-  it('PJUS, depois BTG, depois Luiz — venham como vierem', () => {
+  it('na ordem dos fundos — PJUS, BTG, PX Ativos… —, venham como vierem', () => {
     expect(
-      ordenarEtiquetas(['Reprovado Luiz', 'Cotado BTG', 'Enviado PJUS']),
-    ).toEqual(['Enviado PJUS', 'Cotado BTG', 'Reprovado Luiz'])
+      ordenarEtiquetas(['Reprovado Carbon', 'Cotado BTG', 'Enviado Precatur', 'Enviado PJUS']),
+    ).toEqual(['Enviado PJUS', 'Cotado BTG', 'Enviado Precatur', 'Reprovado Carbon'])
   })
 
   it('dentro do destino, a ordem é a do percurso', () => {
@@ -129,7 +180,7 @@ describe('ordenarEtiquetas', () => {
   })
 
   it('não perde nem inventa etiqueta', () => {
-    const doCard = ['Sem proposta', 'Cotado Luiz', 'Enviado PJUS']
+    const doCard = ['Sem proposta', 'Cotado Luiz', 'Cotado Precatur', 'Enviado PJUS']
     expect(ordenarEtiquetas(doCard).slice().sort()).toEqual(doCard.slice().sort())
     expect(ordenarEtiquetas([])).toEqual([])
   })
@@ -144,7 +195,8 @@ describe('etiquetaCanonica', () => {
   it('devolve o nome da lista, e não o que chegou', () => {
     expect(etiquetaCanonica('enviado pjus')).toBe('Enviado PJUS')
     expect(etiquetaCanonica('  REPROVADO   BTG  ')).toBe('Reprovado BTG')
-    expect(etiquetaCanonica('Pendente Luiz')).toBe('Pendente Luiz')
+    expect(etiquetaCanonica('enviado invest precatorios')).toBe('Enviado Invest Precatórios')
+    expect(etiquetaCanonica('reprovado k & wc ativos')).toBe('Reprovado K & WC Ativos')
   })
 
   // O QUE NÃO ESTÁ NA LISTA NÃO PASSA — inclusive o que se PARECE com ela.
@@ -216,18 +268,19 @@ describe('a cor das etiquetas da precificação', () => {
   it('o ato manda, inclusive no que está pendente', () => {
     expect(tomDaTag('Enviado PJUS')).toBe('blue')
     expect(tomDaTag('Cotado BTG')).toBe('green')
-    expect(tomDaTag('Pendente Luiz')).toBe('yellow')
+    expect(tomDaTag('Enviado PX Ativos')).toBe('blue')
+    expect(tomDaTag('Cotado K & WC Ativos')).toBe('green')
     expect(tomDaTag('Reprovado PJUS')).toBe('red')
     expect(tomDaTag('Reprovado BTG')).toBe('red')
-    expect(tomDaTag('Reprovado Luiz')).toBe('red')
+    expect(tomDaTag('Reprovado Carbon')).toBe('red')
   })
 
   // O CARD REAL desta aba tem uma etiqueta por destino, e as três precisam se
   // ler de relance: uma esperando, uma cotada, uma recusada.
   it('um card com três destinos sai com três cores', () => {
-    const cores = coresDasTags(['Enviado PJUS', 'Cotado BTG', 'Reprovado Luiz'])
+    const cores = coresDasTags(['Enviado PJUS', 'Cotado BTG', 'Reprovado Carbon'])
     expect(cores.get('Enviado PJUS')).toBe('blue')
     expect(cores.get('Cotado BTG')).toBe('green')
-    expect(cores.get('Reprovado Luiz')).toBe('red')
+    expect(cores.get('Reprovado Carbon')).toBe('red')
   })
 })
