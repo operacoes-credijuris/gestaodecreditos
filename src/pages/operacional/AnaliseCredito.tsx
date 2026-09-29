@@ -979,8 +979,13 @@ function SeloDaEtapa({ lead }: { lead: KommoLead }) {
     // A QUEBRA SÓ PODE CAIR ENTRE AS DUAS METADES: cada uma é `nowrap`, o
     // conjunto não. Em tela estreita o decorrido desce uma linha em vez de
     // partir a hora ao meio ou de espremer o título do card.
-    <span className="text-right text-xs text-slate-400" title="Quando o card entrou nesta coluna">
-      <span className="whitespace-nowrap">{formatDateTime(quando)}</span>
+    // "ÚLT. MOV." NA FRENTE desde que a data de criação passou a vir logo abaixo:
+    // as duas têm o mesmo formato, e cada uma diz de que é.
+    <span
+      className="text-right text-xs text-slate-400"
+      title="Última movimentação: quando o card entrou na coluna em que está"
+    >
+      <span className="whitespace-nowrap">Últ. mov. em {formatDateTime(quando)}</span>
       {decorrido && <span className="whitespace-nowrap text-slate-300"> · {decorrido}</span>}
     </span>
   )
