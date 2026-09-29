@@ -360,12 +360,12 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
       },
       {
         key: ABA_EM_PRECIFICACAO_EXTERNO,
-        // "EM PRECIFICAÇÃO" NA PLATAFORMA, "AGUARDANDO PRECIFICAÇÃO" NO KOMMO. O
-        // nome do kanban descreve a espera de quem mandou; o daqui nomeia o
-        // estado do crédito, como nas outras abas — e nenhuma delas começa por
-        // "aguardando", embora quase todas sejam espera de alguém.
+        // "EM PRECIFICAÇÃO" NA PLATAFORMA E NO KOMMO desde 29/09/2026, quando a
+        // coluna do kanban deixou de se chamar "AGUARDANDO PRECIFICAÇÃO" — o nome
+        // do estado do crédito, como nas outras abas, em vez da espera de quem
+        // mandou. A ligação é pelo nome: renomear lá exige renomear aqui.
         label: 'Em precificação',
-        colunaKommo: 'AGUARDANDO PRECIFICAÇÃO',
+        colunaKommo: 'EM PRECIFICAÇÃO',
         descricaoVazia: 'Nenhum precatório em precificação pelo fundo.',
         // OS FUNDOS RESPONDERAM, e a casa escolhe com qual proposta seguir: o
         // card vai para a produção da proposta ao cedente (29/09/2026).
@@ -400,8 +400,8 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
       },
     ],
     // TODAS AS COLUNAS DO KANBAN ESTÃO AQUI, menos a etapa de entrada — que é
-    // do comercial, antes de o crédito chegar à casa. "AGUARDANDO PRECIFICAÇÃO"
-    // era a última de fora e entrou em 21/09/2026.
+    // do comercial, antes de o crédito chegar à casa. "EM PRECIFICAÇÃO" (então
+    // "AGUARDANDO PRECIFICAÇÃO") era a última de fora e entrou em 21/09/2026.
   },
 ]
 

@@ -91,7 +91,7 @@ const COLUNAS_EXTERNO = [
   'REVISÃO DA QUALIFICAÇÃO',
   'MEMORANDO DE NEGOCIAÇÃO',
   'ENCAMINHAR AOS FUNDOS',
-  'AGUARDANDO PRECIFICAÇÃO',
+  'EM PRECIFICAÇÃO',
   'PRODUÇÃO DE PROPOSTA',
   'FECHADOS',
   'DILIGÊNCIA',
@@ -444,7 +444,7 @@ describe('abas da trilha Externa', () => {
    * em vez de a aba entrar de carona.
    *
    * FOI ASSIM QUE AS DUAS ÚLTIMAS ENTRARAM. O memorando estava nesta lista, o
-   * teste caiu, e a inclusão passou por uma decisão; "AGUARDANDO PRECIFICAÇÃO"
+   * teste caiu, e a inclusão passou por uma decisão; "EM PRECIFICAÇÃO" (então "AGUARDANDO")
    * saiu daqui em 21/09/2026 pelo mesmo caminho — era espera do fundo, e passou a
    * valer a pena ver quantos créditos estão parados nela.
    */
@@ -452,7 +452,7 @@ describe('abas da trilha Externa', () => {
     expect(abas).toHaveLength(9)
     const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
     const nomes = externo.abas.map((a) => a.colunaKommo)
-    expect(nomes).toContain('AGUARDANDO PRECIFICAÇÃO')
+    expect(nomes).toContain('EM PRECIFICAÇÃO')
     expect(COLUNAS_EXTERNO.filter((c) => !nomes.includes(c))).toEqual([
       'Etapa de leads de entrada',
     ])
