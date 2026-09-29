@@ -528,10 +528,10 @@ describe('abas da trilha Externa', () => {
       'DILIGÊNCIA': 'Qualificação',
       'MEMORANDO DE NEGOCIAÇÃO': 'Qualificação',
       'ENCAMINHAR AOS FUNDOS': 'Qualificação',
-      'EM PRECIFICAÇÃO': 'Fechamento',
-      'PRODUÇÃO DE PROPOSTA': 'Fechamento',
-      'NEGOCIAÇÃO': 'Fechamento',
-      'FECHADOS': 'Fechamento',
+      'EM PRECIFICAÇÃO': 'Comercialização',
+      'PRODUÇÃO DE PROPOSTA': 'Comercialização',
+      'NEGOCIAÇÃO': 'Comercialização',
+      'FECHADOS': 'Comercialização',
       'OBTENÇÃO DE DOCUMENTAÇÃO': 'Formalização',
       'AGUARDANDO APROVAÇÃO DO FUNDO': 'Formalização',
       'REVISÃO/ASSINATURA DA ESCRITURA': 'Formalização',
@@ -548,7 +548,7 @@ describe('abas da trilha Externa', () => {
       { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 99_998, pipeline_nome: null, nome: 'CONTRAPROPOSTA', ordem: 8.5, tipo: 0 },
     ]
     const nova = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, comNova, 'externo').find((x) => x.label === 'CONTRAPROPOSTA')!
-    expect(nova.fase).toBe('Fechamento')
+    expect(nova.fase).toBe('Comercialização')
   })
 
   it('renomear a coluna não a tira da fase', () => {
