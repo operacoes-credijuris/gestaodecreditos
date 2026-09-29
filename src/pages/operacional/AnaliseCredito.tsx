@@ -2170,6 +2170,8 @@ export default function AnaliseCredito() {
   const jaMovidos = useRef<Set<string>>(new Set())
 
   const [aba, setAba] = useState<string>('pendentes')
+  // A fase do funil aberta — só no funil que tem fases (o Externo). Vazia, vale a da aba.
+  const [fase, setFase] = useState('')
   // Destinação do precatório. Só tem efeito no funil de Precatórios; em RPV o
   // valor fica guardado e ignorado, para voltar ao mesmo lugar na troca de funil.
   const [subdivisao, setSubdivisao] =
@@ -3112,10 +3114,22 @@ export default function AnaliseCredito() {
   // A aba escolhida pode não existir no funil recém-selecionado (as chaves de
   // RPV são 'pendentes'…, as de Precatório são 'int-…'/'ext-…'). Cai na primeira.
   //
-  // NO ESPELHO COMPLETO DO EXTERNO a primeira coluna é a de entrada, do comercial,
-  // quase sempre vazia: a tela abre na primeira que tem trabalho da casa.
+  // AS FASES, quando o funil as tem (o Externo): um nível acima das abas, e só as
+  // abas da fase aberta aparecem. A fase aberta é a escolhida, ou a da aba
+  // escolhida, ou a da primeira aba de trabalho.
+  const fases = useMemo(
+    () => [...new Set(abas.map((a) => a.fase).filter((f): f is string => Boolean(f)))],
+    [abas],
+  )
+  const faseAtual = fases.includes(fase)
+    ? fase
+    : (abas.find((a) => a.key === aba)?.fase ?? abas.find((a) => !a.soLeitura)?.fase ?? fases[0] ?? '')
+  const abasDaFase = fases.length ? abas.filter((a) => a.fase === faseAtual) : abas
+  //
+  // NO ESPELHO COMPLETO DO EXTERNO a primeira coluna pode não ter trabalho da
+  // casa: a tela abre na primeira que tem.
   const abaAtual =
-    abas.find((a) => a.key === aba) ?? abas.find((a) => !a.soLeitura) ?? abas[0] ?? null
+    abasDaFase.find((a) => a.key === aba) ?? abasDaFase.find((a) => !a.soLeitura) ?? abasDaFase[0] ?? null
 
   /**
    * Os botões de trabalho da etapa aberta.
@@ -3180,7 +3194,11 @@ export default function AnaliseCredito() {
   const achadosEmOutrasAbas = busca.trim()
     ? abas
         .filter((a) => a.key !== abaAtual?.key && (porAbaNaBusca[a.key]?.length ?? 0) > 0)
-        .map((a) => `${a.label} (${porAbaNaBusca[a.key].length})`)
+        .map(
+          (a) =>
+            `${a.label} (${porAbaNaBusca[a.key].length})` +
+            (a.fase && a.fase !== faseAtual ? `, na fase ${a.fase}` : ''),
+        )
     : []
 
   /** O card e o desfecho aguardando a mensagem, quando a decisão vem do card. */
@@ -3452,6 +3470,7 @@ export default function AnaliseCredito() {
             // A chave da aba não é comparável entre funis ('pendentes' vs
             // 'int-…'). Limpar aqui evita a tela abrir vazia por casar nada.
             setAba('')
+            setFase('')
             setBusca('')
           }}
           trailing={
@@ -3460,6 +3479,7 @@ export default function AnaliseCredito() {
                 valor={subdivisao}
                 onChange={(v) => {
                   setSubdivisao(v)
+                  setFase('')
                   // As chaves das abas são próprias de cada trilha ('int-…' e
                   // 'ext-…'): sem limpar, a tela cairia na primeira por acidente
                   // em vez de por decisão.
@@ -3481,11 +3501,32 @@ export default function AnaliseCredito() {
             onChange={(e) => setBusca(e.target.value)}
           />
         </div>
+        {/* A FASE, acima das colunas: o número é a soma das colunas dela, e
+            respeita a busca como elas. */}
+        {fases.length > 0 && (
+          <div className="mt-3">
+            <Segmented
+              ariaLabel="Fase do funil"
+              items={fases.map((f) => ({
+                key: f,
+                label: f,
+                count: abas
+                  .filter((a) => a.fase === f)
+                  .reduce((t, a) => t + (porAbaNaBusca[a.key]?.length ?? 0), 0),
+              }))}
+              value={faseAtual}
+              onChange={(v) => {
+                setFase(v)
+                setAba('')
+              }}
+            />
+          </div>
+        )}
         <div className="mt-3">
           {abas.length > 0 ? (
             <Segmented
               ariaLabel="Etapa da análise"
-              items={abas.map((a) => ({
+              items={abasDaFase.map((a) => ({
                 key: a.key,
                 label: a.label,
                 count: porAbaNaBusca[a.key]?.length ?? 0,

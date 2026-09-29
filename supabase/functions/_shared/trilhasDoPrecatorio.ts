@@ -173,6 +173,15 @@ export interface DefSubdivisao {
    * aparece sozinha, sem mexer no código.
    */
   espelhoCompleto?: boolean
+  /**
+   * AS FASES DO FUNIL: as colunas agrupadas, na tela, num nível acima das abas —
+   * pedido de 29/09/2026, quando o Externo passou de quinze abas numa fileira só.
+   *
+   * PELO ID DA COLUNA, como o resto. Coluna que não está em fase nenhuma (criada
+   * depois no Kommo) entra na fase da coluna que vem antes dela no kanban: as
+   * fases seguem a ordem do kanban, então é ali que ela quase sempre pertence.
+   */
+  fases?: { nome: string; colunas: number[] }[]
 }
 
 /** As duas colunas de sistema do Kommo, que existem em todo funil e não são etapa de ninguém. */
@@ -328,6 +337,30 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     idReprovados: 111534212,
     // O KANBAN INTEIRO, com os nomes de lá — ver `espelhoCompleto`.
     espelhoCompleto: true,
+    // AS QUATRO FASES, ditadas por quem opera em 29/09/2026 — pelos ids.
+    fases: [
+      {
+        nome: 'Qualificação',
+        // qualificação preliminar, revisão, diligência, memorando, encaminhar aos fundos
+        colunas: [111533968, 111533972, 111533996, 111533976, 111533980],
+      },
+      {
+        nome: 'Proposta',
+        // em precificação, produção de proposta, negociação, fechados
+        colunas: [111533984, 111533988, 112339984, 111533992],
+      },
+      {
+        nome: 'Conclusão',
+        // obtenção de documentação, aguardando aprovação do fundo,
+        // revisão/assinatura da escritura, pagos
+        colunas: [112341608, 112341612, 112341616, 112006404],
+      },
+      {
+        nome: 'Perdidos',
+        // reprovados, não fechado
+        colunas: [111534212, 111985976],
+      },
+    ],
     abas: [
       {
         key: 'ext-qualificacao',

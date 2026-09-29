@@ -608,6 +608,8 @@ export interface Aba {
    * cards, sem botão de trabalho nem desfecho. Ver `espelhoCompleto`.
    */
   soLeitura?: boolean
+  /** A fase do funil a que a aba pertence (ver `fases` da trilha), quando o funil tem fases. */
+  fase?: string
 }
 
 
@@ -936,10 +938,30 @@ export function abasDoFunil(
     for (const d of def.abas) {
       if (!usadas.has(d.key)) abas.push({ ...montar(d), label: d.colunaKommo })
     }
-    return abas
+    return comFases(abas, def)
   }
 
   return def.abas.map(montar)
+}
+
+/**
+ * A FASE DE CADA ABA, pelo id da coluna. A que não está em fase nenhuma herda a
+ * da aba anterior (na ordem do kanban), e a primeira sem fase fica na primeira.
+ * A aba cuja coluna sumiu do kanban usa o id declarado na trilha.
+ */
+function comFases(abas: Aba[], def: (typeof SUBDIVISOES_PRECATORIO)[number]): Aba[] {
+  const fases = def.fases ?? []
+  if (fases.length === 0) return abas
+  const faseDoId = new Map<number, string>()
+  for (const f of fases) for (const id of f.colunas) faseDoId.set(id, f.nome)
+  const idDeclarado = new Map(def.abas.map((a) => [a.key, a.statusId]))
+  let anterior = fases[0].nome
+  return abas.map((a) => {
+    const id = a.statusIds[0] ?? idDeclarado.get(a.key)
+    const fase = (id !== undefined ? faseDoId.get(id) : undefined) ?? anterior
+    anterior = fase
+    return { ...a, fase }
+  })
 }
 
 /**

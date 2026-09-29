@@ -517,6 +517,53 @@ describe('abas da trilha Externa', () => {
     expect(acaoDeReprovar(FUNIL_PRECATORIO_EXTERNO, renomeado)?.statusId).toBe(111534212)
   })
 
+  /**
+   * AS QUATRO FASES do Externo (29/09/2026), acima das abas — pelos ids.
+   */
+  it('cada coluna cai na fase que a operação definiu', () => {
+    const fase = Object.fromEntries(abas.map((x) => [x.label, x.fase]))
+    expect(fase).toEqual({
+      'QUALIFICAÇÃO PRELIMINAR': 'Qualificação',
+      'REVISÃO DA QUALIFICAÇÃO': 'Qualificação',
+      'DILIGÊNCIA': 'Qualificação',
+      'MEMORANDO DE NEGOCIAÇÃO': 'Qualificação',
+      'ENCAMINHAR AOS FUNDOS': 'Qualificação',
+      'EM PRECIFICAÇÃO': 'Proposta',
+      'PRODUÇÃO DE PROPOSTA': 'Proposta',
+      'NEGOCIAÇÃO': 'Proposta',
+      'FECHADOS': 'Proposta',
+      'OBTENÇÃO DE DOCUMENTAÇÃO': 'Conclusão',
+      'AGUARDANDO APROVAÇÃO DO FUNDO': 'Conclusão',
+      'REVISÃO/ASSINATURA DA ESCRITURA': 'Conclusão',
+      'PAGOS': 'Conclusão',
+      'REPROVADOS': 'Perdidos',
+      'NÃO FECHADO': 'Perdidos',
+    })
+  })
+
+  // COLUNA NOVA NO KOMMO entra na fase da que vem antes dela no kanban.
+  it('coluna nova herda a fase da coluna anterior', () => {
+    const comNova = [
+      ...espelho(),
+      { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 99_998, pipeline_nome: null, nome: 'CONTRAPROPOSTA', ordem: 8.5, tipo: 0 },
+    ]
+    const nova = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, comNova, 'externo').find((x) => x.label === 'CONTRAPROPOSTA')!
+    expect(nova.fase).toBe('Proposta')
+  })
+
+  it('renomear a coluna não a tira da fase', () => {
+    const renomeado = [
+      ...colunasDe(FUNIL_PRECATORIO, COLUNAS_INTERNO, 90_000),
+      ...colunasExterno(COLUNAS_EXTERNO, { 'PAGOS': 'LIQUIDADOS' }),
+    ]
+    const pagos = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, renomeado, 'externo').find((x) => x.label === 'LIQUIDADOS')!
+    expect(pagos.fase).toBe('Conclusão')
+  })
+
+  it('o Interno não tem fases', () => {
+    expect(abasDoFunil(FUNIL_PRECATORIO, espelho(), 'interno').every((x) => x.fase === undefined)).toBe(true)
+  })
+
   // OS IDS DA TRILHA SÃO OS DO KOMMO: cada um aponta para a coluna que tinha
   // aquele nome em 29/09/2026. Um dígito trocado cai aqui.
   it('cada id declarado na trilha é o da coluna com aquele nome', () => {
