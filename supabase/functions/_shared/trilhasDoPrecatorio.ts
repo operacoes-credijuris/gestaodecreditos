@@ -345,7 +345,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         colunas: [111533968, 111533972, 111533996, 111533976, 111533980],
       },
       {
-        nome: 'Negociação',
+        nome: 'Fechamento',
         // em precificação, produção de proposta, negociação, fechados
         colunas: [111533984, 111533988, 112339984, 111533992],
       },
