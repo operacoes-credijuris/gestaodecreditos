@@ -610,6 +610,8 @@ export interface Aba {
   soLeitura?: boolean
   /** A fase do funil a que a aba pertence (ver `fases` da trilha), quando o funil tem fases. */
   fase?: string
+  /** A fase dela é a de fora do fluxo (os perdidos) — a tela a mostra mais discreta. */
+  faseDiscreta?: boolean
 }
 
 
@@ -960,7 +962,7 @@ function comFases(abas: Aba[], def: (typeof SUBDIVISOES_PRECATORIO)[number]): Ab
     const id = a.statusIds[0] ?? idDeclarado.get(a.key)
     const fase = (id !== undefined ? faseDoId.get(id) : undefined) ?? anterior
     anterior = fase
-    return { ...a, fase }
+    return { ...a, fase, faseDiscreta: Boolean(fases.find((x) => x.nome === fase)?.discreta) }
   })
 }
 

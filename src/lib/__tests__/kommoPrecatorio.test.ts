@@ -527,7 +527,7 @@ describe('abas da trilha Externa', () => {
       'REVISÃO DA QUALIFICAÇÃO': 'Qualificação',
       'DILIGÊNCIA': 'Qualificação',
       'MEMORANDO DE NEGOCIAÇÃO': 'Qualificação',
-      'ENCAMINHAR AOS FUNDOS': 'Qualificação',
+      'ENCAMINHAR AOS FUNDOS': 'Comercialização',
       'EM PRECIFICAÇÃO': 'Comercialização',
       'PRODUÇÃO DE PROPOSTA': 'Comercialização',
       'NEGOCIAÇÃO': 'Comercialização',

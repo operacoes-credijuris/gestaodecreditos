@@ -181,7 +181,12 @@ export interface DefSubdivisao {
    * depois no Kommo) entra na fase da coluna que vem antes dela no kanban: as
    * fases seguem a ordem do kanban, então é ali que ela quase sempre pertence.
    */
-  fases?: { nome: string; colunas: number[] }[]
+  fases?: {
+    nome: string
+    colunas: number[]
+    /** Fase fora do fluxo (os perdidos): aparece mais discreta na tela. */
+    discreta?: boolean
+  }[]
 }
 
 /** As duas colunas de sistema do Kommo, que existem em todo funil e não são etapa de ninguém. */
@@ -341,13 +346,14 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     fases: [
       {
         nome: 'Qualificação',
-        // qualificação preliminar, revisão, diligência, memorando, encaminhar aos fundos
-        colunas: [111533968, 111533972, 111533996, 111533976, 111533980],
+        // qualificação preliminar, revisão, diligência, memorando
+        colunas: [111533968, 111533972, 111533996, 111533976],
       },
       {
         nome: 'Comercialização',
-        // em precificação, produção de proposta, negociação, fechados
-        colunas: [111533984, 111533988, 112339984, 111533992],
+        // encaminhar aos fundos (a primeira desde 29/09/2026: é quando o crédito
+        // vai ao mercado), em precificação, produção de proposta, negociação, fechados
+        colunas: [111533980, 111533984, 111533988, 112339984, 111533992],
       },
       {
         nome: 'Formalização',
@@ -359,6 +365,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         nome: 'Perdidos',
         // reprovados, não fechado
         colunas: [111534212, 111985976],
+        discreta: true,
       },
     ],
     abas: [

@@ -3526,35 +3526,79 @@ export default function AnaliseCredito() {
         </div>
         <div className="mt-3">
           {abas.length > 0 && fases.length > 0 ? (
-            // UMA LINHA POR FASE: o nome da fase à esquerda, com o total dela
-            // (que respeita a busca), e as colunas ao lado — o molde "fase:
-            // colunas" que a operação desenhou. A fase da coluna aberta fica em
-            // destaque.
-            <div className="space-y-1.5">
+            // UMA LINHA POR FASE, numa moldura, com divisória entre elas: o nome da
+            // fase à esquerda, em rótulo, com o total dela (que respeita a busca),
+            // e as colunas ao lado — o molde "fase: colunas" que a operação
+            // desenhou. A fase da coluna aberta ganha fundo e faixa de cor; coluna
+            // com zero card fica apagada, para as que têm trabalho saltarem; e a
+            // fase dos perdidos é mais discreta, porque não é etapa do fluxo.
+            <div className="divide-y divide-slate-100 overflow-hidden rounded-lg ring-1 ring-inset ring-slate-200">
               {fases.map((f) => {
                 const daFase = abas.filter((a) => a.fase === f)
                 const total = daFase.reduce((t, a) => t + (porAbaNaBusca[a.key]?.length ?? 0), 0)
+                const aberta = f === faseAtual
+                const discreta = daFase.some((a) => a.faseDiscreta)
                 return (
-                  <div key={f} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <div
+                    key={f}
+                    className={cn(
+                      'flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2',
+                      aberta && 'bg-brand-50/40 shadow-[inset_3px_0_0_theme(colors.brand.600)]',
+                    )}
+                  >
                     <div
                       className={cn(
-                        'font-display w-32 flex-none text-sm font-semibold',
-                        f === faseAtual ? 'text-brand-700' : 'text-slate-700',
+                        'font-display flex w-[13rem] flex-none items-center gap-2 text-xs font-bold uppercase tracking-wide',
+                        aberta ? 'text-brand-700' : discreta ? 'text-slate-400' : 'text-slate-500',
                       )}
                     >
                       {f}
-                      <span className="ml-1.5 text-xs font-medium text-slate-400">{total}</span>
+                      <span
+                        className={cn(
+                          'rounded-full px-1.5 text-xs font-semibold normal-case tracking-normal',
+                          aberta ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500',
+                        )}
+                      >
+                        {total}
+                      </span>
                     </div>
-                    <Segmented
-                      ariaLabel={`Colunas da fase ${f}`}
-                      items={daFase.map((a) => ({
-                        key: a.key,
-                        label: a.label,
-                        count: porAbaNaBusca[a.key]?.length ?? 0,
-                      }))}
-                      value={abaAtual?.key ?? ''}
-                      onChange={(v) => setAba(v)}
-                    />
+                    <div role="group" aria-label={`Colunas da fase ${f}`} className="flex flex-wrap items-center gap-1">
+                      {daFase.map((a) => {
+                        const n = porAbaNaBusca[a.key]?.length ?? 0
+                        const ativa = a.key === abaAtual?.key
+                        const vazia = n === 0
+                        return (
+                          <button
+                            key={a.key}
+                            type="button"
+                            aria-pressed={ativa}
+                            onClick={() => setAba(a.key)}
+                            className={cn(
+                              'font-display flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-sm transition-colors',
+                              ativa
+                                ? 'bg-white font-semibold text-brand-700 shadow-sm ring-1 ring-brand-200'
+                                : vazia
+                                  ? 'font-medium text-slate-400 hover:bg-slate-50 hover:text-slate-600'
+                                  : 'font-medium text-slate-700 hover:bg-slate-50',
+                            )}
+                          >
+                            {a.label}
+                            <span
+                              className={cn(
+                                'rounded-full px-1.5 text-xs',
+                                ativa
+                                  ? 'bg-brand-50 text-brand-700'
+                                  : vazia
+                                    ? 'text-slate-300'
+                                    : 'bg-slate-100 text-slate-500',
+                              )}
+                            >
+                              {n}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 )
               })}
