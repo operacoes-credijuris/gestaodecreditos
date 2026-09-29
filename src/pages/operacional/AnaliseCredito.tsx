@@ -3111,7 +3111,11 @@ export default function AnaliseCredito() {
 
   // A aba escolhida pode não existir no funil recém-selecionado (as chaves de
   // RPV são 'pendentes'…, as de Precatório são 'int-…'/'ext-…'). Cai na primeira.
-  const abaAtual = abas.find((a) => a.key === aba) ?? abas[0] ?? null
+  //
+  // NO ESPELHO COMPLETO DO EXTERNO a primeira coluna é a de entrada, do comercial,
+  // quase sempre vazia: a tela abre na primeira que tem trabalho da casa.
+  const abaAtual =
+    abas.find((a) => a.key === aba) ?? abas.find((a) => !a.soLeitura) ?? abas[0] ?? null
 
   /**
    * Os botões de trabalho da etapa aberta.
@@ -3149,7 +3153,7 @@ export default function AnaliseCredito() {
   const botoesDoCard: BotoesDoCard =
     funil === FUNIL_RPV
       ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
-      : !abaAtual || semTrabalho.has(abaAtual.key)
+      : !abaAtual || abaAtual.soLeitura || semTrabalho.has(abaAtual.key)
         ? 'nenhum'
         : 'dd'
 

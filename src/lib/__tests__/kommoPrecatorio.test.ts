@@ -26,6 +26,7 @@ import { destinosDaTrilha } from '../../../supabase/functions/_shared/trilhasDoP
 import {
   ABA_ANALISE_INTERNA,
   ABA_APROVADOS_EXTERNO,
+  ABA_EM_PRECIFICACAO_EXTERNO,
   ABA_REPROVADOS_EXTERNO,
   ABAS_COM_TAGS,
   ABAS_EXTERNO_SEM_TRABALHO,
@@ -78,24 +79,37 @@ const COLUNAS_INTERNO = [
 ]
 
 /**
- * As colunas do funil NOVO do Externo, como o Kommo as devolveu.
+ * As colunas do funil do Externo, como o Kommo as devolveu em 29/09/2026 — na
+ * ordem do kanban.
  *
- * EM CAIXA ALTA PORQUE É ASSIM QUE ESTÃO LÁ. Todas viram aba menos a etapa de
- * entrada, que é do comercial — o crédito ainda não chegou à casa. Ela fica no
- * espelho de propósito: é o que garante que a ausência dela na tela seja
- * escolha, e não coluna perdida no remapeamento.
+ * EM CAIXA ALTA PORQUE É ASSIM QUE ESTÃO LÁ, e é assim que aparecem na tela: o
+ * Externo espelha o kanban inteiro, com os nomes de lá (ver `espelhoCompleto`).
+ * As duas colunas de sistema do Kommo entram no espelho à parte, com os ids fixos
+ * delas (142 e 143), e são as únicas que ficam fora das abas.
  */
 const COLUNAS_EXTERNO = [
   'Etapa de leads de entrada',
   'QUALIFICAÇÃO PRELIMINAR',
   'REVISÃO DA QUALIFICAÇÃO',
+  'DILIGÊNCIA',
   'MEMORANDO DE NEGOCIAÇÃO',
   'ENCAMINHAR AOS FUNDOS',
   'EM PRECIFICAÇÃO',
   'PRODUÇÃO DE PROPOSTA',
+  'NEGOCIAÇÃO',
   'FECHADOS',
-  'DILIGÊNCIA',
+  'OBTENÇÃO DE DOCUMENTAÇÃO',
+  'AGUARDANDO APROVAÇÃO DO FUNDO',
+  'REVISÃO/ASSINATURA DA ESCRITURA',
+  'PAGOS',
   'REPROVADOS',
+  'NÃO FECHADO',
+]
+
+/** As colunas de sistema que todo funil do Kommo tem. */
+const DE_SISTEMA = (pipelineId: number): EtapaKommo[] => [
+  { pipeline_id: pipelineId, status_id: 142, pipeline_nome: null, nome: 'Closed - won', ordem: 10000, tipo: 0 },
+  { pipeline_id: pipelineId, status_id: 143, pipeline_nome: null, nome: 'Closed - lost', ordem: 11000, tipo: 0 },
 ]
 
 const colunasDe = (pipelineId: number, nomes: string[], base: number): EtapaKommo[] =>
@@ -116,6 +130,7 @@ const espelho = (
 ): EtapaKommo[] => [
   ...colunasDe(FUNIL_PRECATORIO, internas, 90_000),
   ...colunasDe(FUNIL_PRECATORIO_EXTERNO, externas, 95_000),
+  ...DE_SISTEMA(FUNIL_PRECATORIO_EXTERNO),
 ]
 
 /**
@@ -404,71 +419,76 @@ describe('destinos que o servidor aceita', () => {
 describe('abas da trilha Externa', () => {
   const abas = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, espelho(), 'externo')
 
-  it('mostra os nove rótulos da plataforma, na ordem da trilha', () => {
-    expect(abas.map((a) => a.label)).toEqual([
-      'Qualificação',
-      'Revisão',
-      'Memorando',
-      'Aprovados',
-      'Em precificação',
-      'Diligência',
-      'Reprovados',
-      'Proposta',
-      'Fechados',
-    ])
-  })
-
-  it('cada rótulo resolve para a coluna certa do funil novo', () => {
-    const porLabel = new Map(abas.map((a) => [a.label, a.statusIds[0]]))
-    // O RÓTULO NOMEIA A ETAPA, a coluna diz o trabalho: "Qualificação" na
-    // plataforma, "QUALIFICAÇÃO PRELIMINAR" no kanban.
-    expect(porLabel.get('Qualificação')).toBe(idExt('QUALIFICAÇÃO PRELIMINAR'))
-    expect(porLabel.get('Revisão')).toBe(idExt('REVISÃO DA QUALIFICAÇÃO'))
-    expect(porLabel.get('Memorando')).toBe(idExt('MEMORANDO DE NEGOCIAÇÃO'))
-    // "APROVADOS" AQUI, "ENCAMINHAR AOS FUNDOS" LÁ: o rótulo é o vocabulário de
-    // quem analisa, o nome da coluna é o do comercial. O teste guarda os dois
-    // lados justamente porque eles divergem de propósito.
-    expect(porLabel.get('Aprovados')).toBe(idExt('ENCAMINHAR AOS FUNDOS'))
-    expect(porLabel.get('Diligência')).toBe(idExt('DILIGÊNCIA'))
-    expect(porLabel.get('Reprovados')).toBe(idExt('REPROVADOS'))
-    expect(porLabel.get('Proposta')).toBe(idExt('PRODUÇÃO DE PROPOSTA'))
-    expect(porLabel.get('Fechados')).toBe(idExt('FECHADOS'))
-  })
-
   /**
-   * A COLUNA QUE FICA DE FORA, e fica por decisão.
-   *
-   * Restou uma: a etapa de entrada, que é do comercial — o crédito ainda não
-   * chegou à casa. O teste não afirma que isso é certo; afirma que é DELIBERADO:
-   * se um dia alguém a espelhar, ele cai e obriga a decisão a ser tomada de novo,
-   * em vez de a aba entrar de carona.
-   *
-   * FOI ASSIM QUE AS DUAS ÚLTIMAS ENTRARAM. O memorando estava nesta lista, o
-   * teste caiu, e a inclusão passou por uma decisão; "EM PRECIFICAÇÃO" (então "AGUARDANDO")
-   * saiu daqui em 21/09/2026 pelo mesmo caminho — era espera do fundo, e passou a
-   * valer a pena ver quantos créditos estão parados nela.
+   * O KANBAN INTEIRO, com os nomes e a ordem do Kommo — pedido de 29/09/2026,
+   * quando o funil ganhou sete colunas: "desta vez vamos usar o mesmo nome da
+   * coluna, não criar um diferente". Só as duas de sistema ficam de fora.
    */
-  it('só a etapa de entrada fica fora das abas', () => {
-    expect(abas).toHaveLength(9)
-    const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
-    const nomes = externo.abas.map((a) => a.colunaKommo)
-    expect(nomes).toContain('EM PRECIFICAÇÃO')
-    expect(COLUNAS_EXTERNO.filter((c) => !nomes.includes(c))).toEqual([
+  it('toda coluna do Kommo vira aba, com o nome e na ordem de lá', () => {
+    expect(abas.map((a) => a.label)).toEqual(COLUNAS_EXTERNO)
+    expect(abas.some((a) => /closed/i.test(a.label))).toBe(false)
+  })
+
+  it('cada aba resolve para a própria coluna', () => {
+    for (const a of abas) expect(a.statusIds, a.label).toEqual([idExt(a.label)])
+  })
+
+  // AS COLUNAS COM FUNÇÃO levam a aba da plataforma (botões, desfechos,
+  // etiquetas); as outras entram só para leitura.
+  it('a coluna com função leva a aba dela; a nova é só leitura', () => {
+    const chave = new Map(abas.map((a) => [a.label, a.key]))
+    expect(chave.get('QUALIFICAÇÃO PRELIMINAR')).toBe('ext-qualificacao')
+    expect(chave.get('REVISÃO DA QUALIFICAÇÃO')).toBe('ext-revisao')
+    expect(chave.get('MEMORANDO DE NEGOCIAÇÃO')).toBe('ext-memorando')
+    expect(chave.get('ENCAMINHAR AOS FUNDOS')).toBe(ABA_APROVADOS_EXTERNO)
+    expect(chave.get('EM PRECIFICAÇÃO')).toBe(ABA_EM_PRECIFICACAO_EXTERNO)
+    expect(chave.get('REPROVADOS')).toBe(ABA_REPROVADOS_EXTERNO)
+    const soLeitura = abas.filter((a) => a.soLeitura).map((a) => a.label)
+    expect(soLeitura).toEqual([
       'Etapa de leads de entrada',
+      'NEGOCIAÇÃO',
+      'OBTENÇÃO DE DOCUMENTAÇÃO',
+      'AGUARDANDO APROVAÇÃO DO FUNDO',
+      'REVISÃO/ASSINATURA DA ESCRITURA',
+      'PAGOS',
+      'NÃO FECHADO',
     ])
+    for (const a of abas.filter((x) => x.soLeitura)) {
+      expect(a.acoes, a.label).toEqual([])
+      expect(a.escolhaDeProposta ?? null, a.label).toBeNull()
+    }
+  })
+
+  // COLUNA CRIADA NO KOMMO APARECE SOZINHA, sem mexer no código.
+  it('coluna nova no kanban vira aba de leitura', () => {
+    const comNova = [
+      ...espelho(),
+      { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 99_999, pipeline_nome: null, nome: 'JURÍDICO DO FUNDO', ordem: 8, tipo: 0 },
+    ]
+    const nova = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, comNova, 'externo').find((a) => a.label === 'JURÍDICO DO FUNDO')!
+    expect(nova).toMatchObject({ statusIds: [99_999], soLeitura: true, acoes: [] })
+  })
+
+  // A ABA CONHECIDA CUJA COLUNA SUMIU fica no fim, vazia, com o nome esperado —
+  // é o que o aviso de coluna não encontrada aponta.
+  it('coluna com função que sumiu do kanban fica no fim, vazia', () => {
+    const sem = espelho(COLUNAS_INTERNO, COLUNAS_EXTERNO.filter((n) => n !== 'MEMORANDO DE NEGOCIAÇÃO'))
+    const lista = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, sem, 'externo')
+    const ultima = lista[lista.length - 1]
+    expect(ultima).toMatchObject({ key: 'ext-memorando', label: 'MEMORANDO DE NEGOCIAÇÃO', statusIds: [] })
   })
 
   // ETAPA DE TRABALHO, NÃO DE DECISÃO. A Revisão passou a MANDAR cards para cá
   // ("Pedir memorando"), mas a volta continua sendo do Kommo, por decisão de quem
   // opera: pronto o memorando, quem move o card é quem o escreveu.
   it('o Memorando não oferece desfecho', () => {
-    const memorando = abas.find((a) => a.label === 'Memorando')!
+    const memorando = abas.find((a) => a.key === 'ext-memorando')!
     expect(memorando.acoes).toEqual([])
     expect(memorando.desfechoAgrupado).toBe(false)
   })
 
   /** As duas etapas em que a casa decide algo — as demais são de espera. */
-  const DECISORIAS = ['Qualificação', 'Revisão']
+  const DECISORIAS = ['ext-qualificacao', 'ext-revisao']
 
   /**
    * A QUALIFICAÇÃO TEM UMA SAÍDA SÓ, desde 21/09/2026.
@@ -484,7 +504,7 @@ describe('abas da trilha Externa', () => {
    * moveu.
    */
   it('a Qualificação só encaminha para a revisão', () => {
-    const qualificacao = abas.find((a) => a.label === 'Qualificação')!
+    const qualificacao = abas.find((a) => a.key === 'ext-qualificacao')!
     expect(qualificacao.acoes.map((x) => x.papel)).toEqual(['aprovar'])
     expect(qualificacao.acoes[0].statusId).toBe(idExt('REVISÃO DA QUALIFICAÇÃO'))
     expect(qualificacao.acoes[0].label).toBe('Enviar para revisão')
@@ -499,7 +519,7 @@ describe('abas da trilha Externa', () => {
    * o peso do de quem decide.
    */
   it('a saída positiva da Qualificação envia para revisão, em tom neutro', () => {
-    const qualificacao = abas.find((a) => a.label === 'Qualificação')!
+    const qualificacao = abas.find((a) => a.key === 'ext-qualificacao')!
     const aprovar = qualificacao.acoes.find((x) => x.papel === 'aprovar')!
     expect(aprovar.label).toBe('Enviar para revisão')
     expect(aprovar.variant).toBe('secondary')
@@ -511,7 +531,7 @@ describe('abas da trilha Externa', () => {
    * também pode exigir diligência ou recusar.
    */
   it('a Revisão oferece quatro saídas, e aprova para os fundos', () => {
-    const revisao = abas.find((a) => a.label === 'Revisão')!
+    const revisao = abas.find((a) => a.key === 'ext-revisao')!
     expect(revisao.acoes.map((x) => x.papel)).toEqual([
       'aprovar',
       'validar',
@@ -536,7 +556,7 @@ describe('abas da trilha Externa', () => {
    * não aconteceu.
    */
   it('a Revisão pode pedir o memorando, ao lado de aprovar', () => {
-    const revisao = abas.find((a) => a.label === 'Revisão')!
+    const revisao = abas.find((a) => a.key === 'ext-revisao')!
     const memorando = revisao.acoes.find((x) => x.label === 'Pedir memorando')!
     expect(memorando.statusId).toBe(idExt('MEMORANDO DE NEGOCIAÇÃO'))
     expect(memorando.papel).toBe('validar')
@@ -556,14 +576,14 @@ describe('abas da trilha Externa', () => {
    * onde aprovar manda para a revisão.
    */
   it('na Revisão é aprovação de verdade, e no azul da casa', () => {
-    const revisao = abas.find((a) => a.label === 'Revisão')!
+    const revisao = abas.find((a) => a.key === 'ext-revisao')!
     const aprovar = revisao.acoes.find((x) => x.papel === 'aprovar')!
     expect(aprovar.label).toBe('Aprovar crédito')
     expect(aprovar.variant).toBe('primary')
   })
 
   it('as demais abas do Externo não oferecem desfecho', () => {
-    for (const aba of abas.filter((a) => !DECISORIAS.includes(a.label))) {
+    for (const aba of abas.filter((a) => !DECISORIAS.includes(a.key))) {
       expect(aba.acoes, aba.label).toEqual([])
     }
   })
@@ -575,7 +595,7 @@ describe('abas da trilha Externa', () => {
    */
   it('as duas etapas de decisão marcam o desfecho como agrupado', () => {
     for (const aba of abas) {
-      expect(aba.desfechoAgrupado, aba.label).toBe(DECISORIAS.includes(aba.label))
+      expect(aba.desfechoAgrupado, aba.label).toBe(DECISORIAS.includes(aba.key))
     }
   })
 
@@ -793,8 +813,9 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     // precatórios existem. Se mudasse, se leria como dado mudando.
     const etapas = espelho()
     const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
-    // 6 abas do Interno + 9 do Externo, e nada compartilhado desde a separação.
-    expect(ids.size).toBe(15)
+    // 6 abas do Interno + as 16 colunas do Externo (espelho completo, sem as duas
+    // de sistema), e nada compartilhado desde a separação.
+    expect(ids.size).toBe(6 + COLUNAS_EXTERNO.length)
   })
 
   it('a união vale seja qual for o funil de precatório perguntado', () => {
@@ -814,7 +835,10 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     expect(ids.has(idDe('FECHADOS', etapas))).toBe(false)
     expect(ids.has(idDe('FORMALIZAÇÃO (CONTRATOS E ESCRITURA)', etapas))).toBe(false)
     expect(ids.has(idDe('Etapa de leads de entrada', etapas))).toBe(false)
-    expect(ids.has(idExt('Etapa de leads de entrada', etapas))).toBe(false)
+    // NO EXTERNO O KANBAN É ESPELHADO INTEIRO: a entrada conta; as de sistema, não.
+    expect(ids.has(idExt('Etapa de leads de entrada', etapas))).toBe(true)
+    expect(ids.has(142)).toBe(false)
+    expect(ids.has(143)).toBe(false)
   })
 
   it('a soma das pílulas fecha com o número do tipo de crédito', () => {

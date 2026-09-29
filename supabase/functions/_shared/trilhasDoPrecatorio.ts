@@ -149,7 +149,22 @@ export interface DefSubdivisao {
   /** A coluna de reprovação desta trilha, pelo nome no kanban. */
   colunaReprovados: string
   abas: DefAbaPrecatorio[]
+  /**
+   * TODA COLUNA DO FUNIL VIRA ABA, com o nome e na ordem do Kommo — menos as
+   * duas de sistema ("Closed - won" e "Closed - lost").
+   *
+   * Pedido de 29/09/2026 para o Externo, depois de o funil dele ganhar sete
+   * colunas de uma vez: a plataforma espelha o kanban inteiro, e o nome da aba é
+   * o da coluna, sem vocabulário próprio. As `abas` daqui continuam valendo
+   * como o que cada coluna FAZ (botões, desfechos, etiquetas), casadas pelo nome;
+   * coluna que não está nelas entra só para leitura. Coluna criada no Kommo
+   * aparece sozinha, sem mexer no código.
+   */
+  espelhoCompleto?: boolean
 }
+
+/** As duas colunas de sistema do Kommo, que existem em todo funil e não são etapa de ninguém. */
+export const COLUNAS_DE_SISTEMA: ReadonlySet<number> = new Set([142, 143])
 
 /**
  * A aba onde a análise do precatório INTERNO acontece.
@@ -295,6 +310,8 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     pipelineId: FUNIL_PRECATORIO_EXTERNO,
     colunaDiligencia: 'DILIGÊNCIA',
     colunaReprovados: 'REPROVADOS',
+    // O KANBAN INTEIRO, com os nomes de lá — ver `espelhoCompleto`.
+    espelhoCompleto: true,
     abas: [
       {
         key: 'ext-qualificacao',
@@ -399,9 +416,9 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         descricaoVazia: 'Nenhum precatório externo fechado.',
       },
     ],
-    // TODAS AS COLUNAS DO KANBAN ESTÃO AQUI, menos a etapa de entrada — que é
-    // do comercial, antes de o crédito chegar à casa. "EM PRECIFICAÇÃO" (então
-    // "AGUARDANDO PRECIFICAÇÃO") era a última de fora e entrou em 21/09/2026.
+    // AS COLUNAS COM FUNÇÃO NA PLATAFORMA. As outras do kanban — a entrada, a
+    // negociação, a documentação, a escritura, os pagos — entram pelo
+    // `espelhoCompleto`, só para leitura.
   },
 ]
 

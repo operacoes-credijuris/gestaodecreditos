@@ -49,6 +49,7 @@ import {
   FUNIL_PRECATORIO_INTERNO,
   type SubdivisaoPrecatorio,
   TRILHAS_PRECATORIO,
+  COLUNAS_DE_SISTEMA,
 } from '../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
 // PELO MESMO MOTIVO das trilhas: a lista das etiquetas que a casa aplica é lida
 // pela tela, que desenha o seletor, e pela Edge Function `kommo-etiquetar`, que
@@ -601,6 +602,11 @@ export interface Aba {
    * Externo), ou null. Ver `escolhaDeProposta` em trilhasDoPrecatorio.ts.
    */
   escolhaDeProposta?: number | null
+  /**
+   * Coluna do kanban que a plataforma espelha sem dar função a ela: mostra os
+   * cards, sem botão de trabalho nem desfecho. Ver `espelhoCompleto`.
+   */
+  soLeitura?: boolean
 }
 
 /**
@@ -642,6 +648,10 @@ export function statusExibidos(pipelineId: number, etapas: EtapaKommo[]): Set<nu
   // repete entre eles ("PRODUÇÃO DE PROPOSTA", "DILIGÊNCIA"), com ids
   // diferentes.
   for (const s of SUBDIVISOES_PRECATORIO) {
+    // NO ESPELHO COMPLETO, toda coluna do funil é aba — e conta.
+    if (s.espelhoCompleto) {
+      for (const e of colunasDoFunil(s.pipelineId, etapas)) ids.add(e.status_id)
+    }
     const nomes = porNomeDeColuna(s.pipelineId, etapas)
     for (const a of s.abas) {
       const id = nomes.get(normalizarBusca(a.colunaKommo))
@@ -877,7 +887,7 @@ export function abasDoFunil(
     return saida
   }
 
-  return def.abas.map((a) => {
+  const montar = (a: DefAbaPrecatorio): Aba => {
     const statusId = nomes.get(normalizarBusca(a.colunaKommo))
     return {
       key: a.key,
@@ -899,7 +909,50 @@ export function abasDoFunil(
         ? (nomes.get(normalizarBusca(a.escolhaDeProposta.colunaKommo)) ?? null)
         : null,
     }
-  })
+  }
+
+  // O KANBAN INTEIRO, na ordem e com os nomes do Kommo (ver `espelhoCompleto`).
+  // A coluna que tem função aqui leva a aba dela — botões, desfechos, etiquetas
+  // —, só que com o nome do Kommo; a que não tem entra só para leitura.
+  if (def.espelhoCompleto) {
+    const doFunil = colunasDoFunil(def.pipelineId, etapas)
+    // SEM ESPELHO AINDA, as abas conhecidas: melhor que uma tela sem aba nenhuma.
+    if (doFunil.length === 0) return def.abas.map(montar)
+    const porNome = new Map(def.abas.map((a) => [normalizarBusca(a.colunaKommo), a]))
+    const usadas = new Set<string>()
+    const abas: Aba[] = doFunil.map((e) => {
+      const d = porNome.get(normalizarBusca(e.nome))
+      if (d) {
+        usadas.add(d.key)
+        return { ...montar(d), label: e.nome }
+      }
+      return {
+        key: `col-${e.status_id}`,
+        label: e.nome,
+        statusIds: [e.status_id],
+        descricaoVazia: `Nenhum card em ${e.nome}.`,
+        acoes: [],
+        desfechoAgrupado: false,
+        escolhaDeProposta: null,
+        soLeitura: true,
+      }
+    })
+    // A ABA CONHECIDA CUJA COLUNA SUMIU fica no fim, vazia — é o que o aviso de
+    // coluna não encontrada aponta, e sumir com ela esconderia o defeito.
+    for (const d of def.abas) {
+      if (!usadas.has(d.key)) abas.push({ ...montar(d), label: d.colunaKommo })
+    }
+    return abas
+  }
+
+  return def.abas.map(montar)
+}
+
+/** As colunas de um funil no espelho, na ordem do kanban, sem as de sistema. */
+function colunasDoFunil(pipelineId: number, etapas: EtapaKommo[]): EtapaKommo[] {
+  return etapas
+    .filter((e) => e.pipeline_id === pipelineId && !COLUNAS_DE_SISTEMA.has(Number(e.status_id)))
+    .sort((a, b) => a.ordem - b.ordem || a.status_id - b.status_id)
 }
 
 /**
