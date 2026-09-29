@@ -254,7 +254,7 @@ export const ABA_EM_PRECIFICACAO_EXTERNO = 'ext-precificacao'
 /**
  * AS ABAS EM QUE O CARD MOSTRA AS ETIQUETAS DO KOMMO.
  *
- * As duas terminais do Externo, e não a tela toda. O espelho guarda as tags de
+ * A remessa e a precificação do Externo, e não a tela toda. O espelho guarda as tags de
  * TODOS os cards — vêm de graça na listagem —, e mostrá-las em toda aba encheria
  * a fila de rótulo onde o que se procura é o processo. Nestas duas o quadro se
  * inverte: passado o trabalho, a etiqueta é o que resta dizendo PARA QUAL FUNDO
@@ -269,7 +269,8 @@ export const ABAS_COM_TAGS: ReadonlySet<string> = new Set([
   // EM PRECIFICAÇÃO É ONDE A ETIQUETA MAIS IMPORTA: o crédito está com um fundo
   // específico, esperando o preço dele, e a etiqueta é o que diz com qual.
   ABA_EM_PRECIFICACAO_EXTERNO,
-  ABA_REPROVADOS_EXTERNO,
+  // REPROVADOS SAIU EM 29/09/2026, a pedido: ali a etiqueta do fundo não diz
+  // nada que a coluna já não diga.
 ])
 
 /**

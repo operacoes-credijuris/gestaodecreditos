@@ -265,6 +265,11 @@ describe('SUBDIVISOES_PRECATORIO', () => {
     }
   })
 
+  // REPROVADOS NÃO MOSTRA ETIQUETA desde 29/09/2026, a pedido.
+  it('a coluna de reprovados não mostra etiquetas', () => {
+    expect(ABAS_COM_TAGS.has(ABA_REPROVADOS_EXTERNO)).toBe(false)
+  })
+
   it('toda aba aponta para uma coluna que existe no kanban', () => {
     // O teste que pega erro de digitação no nome da coluna.
     expect(colunasPrecatorioDesalinhadas(espelho())).toEqual([])
