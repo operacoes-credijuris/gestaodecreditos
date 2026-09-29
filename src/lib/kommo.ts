@@ -902,7 +902,7 @@ export function abasDoFunil(
       // guardar é a razão escrita por quem voltou dela; no Interno vale igual, e
       // por um motivo a mais: a janela é o único lugar onde a anotação que vai
       // para o Kommo é escrita antes de o card se mover.
-      desfechoAgrupado: oferece(a),
+      desfechoAgrupado: a.desfechoAgrupado ?? oferece(a),
       escolhaDeProposta: a.escolhaDeProposta ? (coluna(a.escolhaDeProposta) ?? null) : null,
     }
   }

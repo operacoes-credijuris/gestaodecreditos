@@ -127,6 +127,13 @@ export interface DefAbaPrecatorio {
    */
   escolhaDeProposta?: { colunaKommo: string; statusId?: number }
   /**
+   * As saídas saem de UM botão só ("Concluir", na fileira de trabalho) ou de um
+   * botão cada, no canto do card? OMITIDO, vale ter saída: agrupado. FALSO na
+   * aba cuja saída é um ato pontual e que não tem fileira de trabalho — a
+   * Diligência do Externo, onde "Diligência sanada" é um botão próprio.
+   */
+  desfechoAgrupado?: boolean
+  /**
    * Esta etapa pode INTERROMPER o crédito — exigir diligência ou recusar?
    *
    * OMITIDO, SIM: quase toda etapa de decisão interrompe, e diligência e recusa
@@ -446,6 +453,21 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
       },
       {
         key: 'ext-diligencia',
+        // DILIGÊNCIA SANADA VOLTA PARA A REVISÃO (29/09/2026): quem apurou o que
+        // faltava devolve o crédito à segunda leitura. Um botão próprio no card,
+        // com a janela da mensagem para dizer o que foi sanado — e sem os botões
+        // de diligência e recusa, que aqui não fazem sentido.
+        saidas: [
+          {
+            colunaKommo: 'REVISÃO DA QUALIFICAÇÃO',
+            statusId: 111533972,
+            label: 'Diligência sanada',
+            variant: 'primary',
+            papel: 'validar',
+          },
+        ],
+        interrompe: false,
+        desfechoAgrupado: false,
         label: 'Diligência',
         colunaKommo: 'DILIGÊNCIA', statusId: 111533996,
         descricaoVazia: 'Nenhum precatório externo em diligência.',

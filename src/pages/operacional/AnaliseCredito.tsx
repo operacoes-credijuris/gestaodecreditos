@@ -1564,6 +1564,9 @@ function CardCredito({
                 Finalizado
               </Badge>
             )}
+            {/* A ANOTAÇÃO AO LADO DO TÍTULO, onde a aba a oferece: é do card
+                inteiro, e não das etiquetas. */}
+            {onAnotar && <BotaoDeAnotacao onEnviar={(t) => onAnotar(lead, t)} />}
           </div>
 
           {/* AS ETIQUETAS DO KOMMO, na linha de baixo.
@@ -1583,11 +1586,7 @@ function CardCredito({
               coluna de trinta cards, quem procura os de um fundo acha pela mancha
               antes de ler o texto. Verde e vermelho ficam fora da paleta — no
               card eles já significam análise pronta e recusa. */}
-          {/* A LINHA ABAIXO DO TÍTULO: as etiquetas (onde a aba as mostra) e a
-              anotação (onde a aba a oferece). Aba sem etiquetas e com anotação —
-              a Diligência — mostra só o ícone da anotação. */}
-          {((mostrarTags && ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0)) ||
-            onAnotar) && (
+          {mostrarTags && ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0) && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {/* A ORDEM É A DA CASA — PJUS, BTG, PX Ativos… —, e não a do Kommo,
                     que é a ordem em que alguém etiquetou e muda de card para
@@ -1620,7 +1619,6 @@ function CardCredito({
                     onAlternar={(etiqueta, acao) => onEtiquetar(lead, etiqueta, acao)}
                   />
                 )}
-                {onAnotar && <BotaoDeAnotacao onEnviar={(t) => onAnotar(lead, t)} />}
               </div>
             )}
           {/* Sem linha de metadados: o processo já vem no título e o responsável é

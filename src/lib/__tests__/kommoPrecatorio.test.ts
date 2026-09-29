@@ -728,8 +728,24 @@ describe('abas da trilha Externa', () => {
     expect(aprovar.variant).toBe('primary')
   })
 
+  /**
+   * DILIGÊNCIA SANADA VOLTA PARA A REVISÃO (29/09/2026): um botão próprio no
+   * card — não o "Concluir" agrupado, porque a Diligência não tem fileira de
+   * trabalho —, e sem diligência nem recusa ao lado.
+   */
+  it('a Diligência devolve o card à revisão, num botão próprio', () => {
+    const diligencia = abas.find((a) => a.key === 'ext-diligencia')!
+    expect(diligencia.acoes).toHaveLength(1)
+    expect(diligencia.acoes[0]).toMatchObject({
+      label: 'Diligência sanada',
+      statusId: idExt('REVISÃO DA QUALIFICAÇÃO'),
+      papel: 'validar',
+    })
+    expect(diligencia.desfechoAgrupado).toBe(false)
+  })
+
   it('as demais abas do Externo não oferecem desfecho', () => {
-    for (const aba of abas.filter((a) => !DECISORIAS.includes(a.key))) {
+    for (const aba of abas.filter((a) => !DECISORIAS.includes(a.key) && a.key !== 'ext-diligencia')) {
       expect(aba.acoes, aba.label).toEqual([])
     }
   })
@@ -1134,9 +1150,11 @@ describe('ABAS_INTERNO_SEM_TRABALHO', () => {
     }
   })
 
+  // SÓ O DESFECHO AGRUPADO depende da fileira de trabalho (o "Concluir" mora
+  // nela); o de botão próprio aparece no canto do card, em qualquer aba.
   it('o mesmo vale para o Externo', () => {
     const externo = SUBDIVISOES_PRECATORIO.find((s) => s.key === 'externo')!
-    for (const aba of externo.abas.filter((a) => (a.saidas ?? []).length > 0)) {
+    for (const aba of externo.abas.filter((a) => (a.saidas ?? []).length > 0 && a.desfechoAgrupado !== false)) {
       expect(ABAS_EXTERNO_SEM_TRABALHO.has(aba.key), aba.key).toBe(false)
     }
   })
