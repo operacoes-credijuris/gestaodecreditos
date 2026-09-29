@@ -57,6 +57,7 @@ import {
 import {
   ETIQUETAS_DA_PRECIFICACAO,
   type EtiquetaDoFundo,
+  ATOS_DA_PRECIFICACAO,
   etiquetaCanonica,
   etiquetasPorDestino,
   irmasDaEtiqueta,
@@ -93,6 +94,7 @@ export {
   ABAS_COM_TAGS,
   ETIQUETAS_DA_PRECIFICACAO,
   type EtiquetaDoFundo,
+  ATOS_DA_PRECIFICACAO,
   etiquetaCanonica,
   etiquetasPorDestino,
   irmasDaEtiqueta,

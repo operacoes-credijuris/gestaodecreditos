@@ -14,7 +14,7 @@
 // que aceita a partir DELA TAMBÉM: foi a lição das trilhas, onde duas listas que
 // precisavam concordar divergiram no primeiro dia.
 
-/** Os atos de uma etiqueta, na ordem do percurso — é o que o seletor mostra ao lado do fundo. */
+/** Os atos de uma etiqueta, na ordem do percurso — as posições fixas do seletor, nesta ordem. */
 export const ATOS_DA_PRECIFICACAO = ['Enviado', 'Cotado', 'Reprovado'] as const
 export type AtoDaPrecificacao = (typeof ATOS_DA_PRECIFICACAO)[number]
 

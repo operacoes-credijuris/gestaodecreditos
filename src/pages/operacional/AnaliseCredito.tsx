@@ -55,6 +55,7 @@ import {
   ABAS_EXTERNO_SEM_TRABALHO,
   ABAS_INTERNO_SEM_TRABALHO,
   type EtiquetaDoFundo,
+  ATOS_DA_PRECIFICACAO,
   etiquetasDaAba,
   etiquetasPorDestino,
   mesmaEtiqueta,
@@ -1052,23 +1053,28 @@ function SeletorDeEtiquetas({
       </button>
 
       {aberto && (
-        <div className="absolute left-0 z-20 mt-1 w-[27rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+        <div className="absolute left-0 z-20 mt-1 w-[27.5rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
           {etiquetasPorDestino(oferecidas).map((grupo) => {
             const algumaPosta = grupo.etiquetas.some((e) => temEtiqueta(e.nome))
             return (
-              <div key={grupo.destino} className="flex items-center gap-2 py-0.5">
+              // AS OPÇÕES EM POSIÇÃO FIXA, e sem cara de tabela: Enviado sob
+              // Enviado, Cotado sob Cotado, Reprovado sob Reprovado, em todas as
+              // linhas. O ato que o fundo não tem (o Enviado do BTG) deixa o
+              // lugar em branco — é o que mantém os outros dois alinhados.
+              <div
+                key={grupo.destino}
+                className="grid grid-cols-[8.5rem_5.5rem_5.25rem_6.5rem] items-center py-0.5"
+              >
                 {/* O FUNDO COM ETIQUETA fica em destaque: numa lista de sete, é
                     o que se procura primeiro. */}
                 <span
-                  className={cn(
-                    'w-32 flex-none text-xs',
-                    algumaPosta ? 'font-medium text-slate-800' : 'text-slate-600',
-                  )}
+                  className={cn('text-xs', algumaPosta ? 'font-medium text-slate-800' : 'text-slate-600')}
                 >
                   {grupo.destino}:
                 </span>
-                <div className="flex flex-wrap items-center gap-1">
-                  {grupo.etiquetas.map((e) => {
+                {ATOS_DA_PRECIFICACAO.map((ato) => {
+                    const e = grupo.etiquetas.find((x) => x.ato === ato)
+                    if (!e) return <span key={ato} />
                     const posta = temEtiqueta(e.nome)
                     return (
                       <button
@@ -1082,7 +1088,7 @@ function SeletorDeEtiquetas({
                         title={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"`}
                         aria-pressed={posta}
                         className={cn(
-                          'inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60',
+                          'inline-flex items-center gap-1 justify-self-start rounded px-1.5 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60',
                           posta ? 'font-medium text-slate-800' : 'text-slate-600',
                         )}
                       >
@@ -1108,7 +1114,6 @@ function SeletorDeEtiquetas({
                       </button>
                     )
                   })}
-                </div>
               </div>
             )
           })}
