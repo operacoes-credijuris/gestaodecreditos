@@ -13,7 +13,7 @@
 //
 // SEM `Deno.` E SEM `npm:`: o vitest alcança este módulo direto.
 
-import { TRILHAS_PRECATORIO } from './trilhasDoPrecatorio.ts'
+import { resolverColuna, TRILHAS_PRECATORIO } from './trilhasDoPrecatorio.ts'
 
 /** O funil de RPV e a coluna em que o Operacional o recebe (Análise Jurídica-Econômico). */
 export const FUNIL_RPV = 13901939
@@ -33,12 +33,16 @@ export const COLUNA_NOVOS = 'NOVOS'
  * da trilha. Lida da definição das trilhas, e não copiada, para que mudar a
  * primeira aba lá mude a entrada aqui.
  */
-export function colunasDeEntradaDoPrecatorio(): { pipelineId: number; coluna: string }[] {
-  return TRILHAS_PRECATORIO.map((t) => ({ pipelineId: t.pipelineId, coluna: t.abas[0].colunaKommo }))
+export function colunasDeEntradaDoPrecatorio(): { pipelineId: number; coluna: string; statusId?: number }[] {
+  return TRILHAS_PRECATORIO.map((t) => ({
+    pipelineId: t.pipelineId,
+    coluna: t.abas[0].colunaKommo,
+    statusId: t.abas[0].statusId,
+  }))
 }
 
 /** As colunas de entrada que se acham pelo NOME: a 1ª de cada trilha e a NOVOS do funil geral. */
-export function colunasDeEntradaPorNome(): { pipelineId: number; coluna: string }[] {
+export function colunasDeEntradaPorNome(): { pipelineId: number; coluna: string; statusId?: number }[] {
   return [...colunasDeEntradaDoPrecatorio(), { pipelineId: FUNIL_GERAL, coluna: COLUNA_NOVOS }]
 }
 
@@ -61,10 +65,12 @@ export function entradasDoOperacional(
 ): { pipeline_id: number; status_id: number }[] {
   const fora = [{ pipeline_id: FUNIL_RPV, status_id: ENTRADA_RPV }]
   for (const e of colunasDeEntradaPorNome()) {
-    const achada = etapas.find(
-      (x) => Number(x.pipeline_id) === e.pipelineId && normal(String(x.nome)) === normal(e.coluna),
-    )
-    if (achada) fora.push({ pipeline_id: e.pipelineId, status_id: Number(achada.status_id) })
+    // PELO ID QUANDO HÁ (o Externo), e pelo nome de reserva — a mesma regra das
+    // abas: renomear a coluna de entrada no Kommo não para os autos.
+    const id = resolverColuna(e.pipelineId, etapas, { colunaKommo: e.coluna, statusId: e.statusId })
+    if (id !== undefined && etapas.some((x) => Number(x.pipeline_id) === e.pipelineId && Number(x.status_id) === id)) {
+      fora.push({ pipeline_id: e.pipelineId, status_id: id })
+    }
   }
   return fora
 }

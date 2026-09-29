@@ -22,7 +22,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { normalizarBusca } from '@/lib/format'
-import { destinosDaTrilha } from '../../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
+import { destinoPermitido, destinosDaTrilha } from '../../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
 import {
   ABA_ANALISE_INTERNA,
   ABA_APROVADOS_EXTERNO,
@@ -106,6 +106,41 @@ const COLUNAS_EXTERNO = [
   'NÃO FECHADO',
 ]
 
+/**
+ * OS IDS REAIS do funil do Externo, lidos do espelho em 29/09/2026. É por eles
+ * que a plataforma se liga ao kanban desde então — renomear a coluna no Kommo não
+ * tira função nenhuma. A de entrada vem com `tipo` 1, que é como o Kommo a marca.
+ */
+const IDS_EXTERNO: Record<string, number> = {
+  'Etapa de leads de entrada': 111533964,
+  'QUALIFICAÇÃO PRELIMINAR': 111533968,
+  'REVISÃO DA QUALIFICAÇÃO': 111533972,
+  'DILIGÊNCIA': 111533996,
+  'MEMORANDO DE NEGOCIAÇÃO': 111533976,
+  'ENCAMINHAR AOS FUNDOS': 111533980,
+  'EM PRECIFICAÇÃO': 111533984,
+  'PRODUÇÃO DE PROPOSTA': 111533988,
+  'NEGOCIAÇÃO': 112339984,
+  'FECHADOS': 111533992,
+  'OBTENÇÃO DE DOCUMENTAÇÃO': 112341608,
+  'AGUARDANDO APROVAÇÃO DO FUNDO': 112341612,
+  'REVISÃO/ASSINATURA DA ESCRITURA': 112341616,
+  'PAGOS': 112006404,
+  'REPROVADOS': 111534212,
+  'NÃO FECHADO': 111985976,
+}
+
+/** O espelho do Externo com os ids reais — e com nomes trocados, quando se quer. */
+const colunasExterno = (nomes: string[], renomear: Record<string, string> = {}): EtapaKommo[] =>
+  nomes.map((nome, i) => ({
+    pipeline_id: FUNIL_PRECATORIO_EXTERNO,
+    status_id: IDS_EXTERNO[nome] ?? 95_000 + i,
+    pipeline_nome: 'Funil Precatório Externo',
+    nome: renomear[nome] ?? nome,
+    ordem: i,
+    tipo: nome === 'Etapa de leads de entrada' ? 1 : 0,
+  }))
+
 /** As colunas de sistema que todo funil do Kommo tem. */
 const DE_SISTEMA = (pipelineId: number): EtapaKommo[] => [
   { pipeline_id: pipelineId, status_id: 142, pipeline_nome: null, nome: 'Closed - won', ordem: 10000, tipo: 0 },
@@ -129,7 +164,7 @@ const espelho = (
   externas: string[] = COLUNAS_EXTERNO,
 ): EtapaKommo[] => [
   ...colunasDe(FUNIL_PRECATORIO, internas, 90_000),
-  ...colunasDe(FUNIL_PRECATORIO_EXTERNO, externas, 95_000),
+  ...colunasExterno(externas),
   ...DE_SISTEMA(FUNIL_PRECATORIO_EXTERNO),
 ]
 
@@ -401,6 +436,15 @@ describe('destinos que o servidor aceita', () => {
     expect(vistas).toBe(1)
   })
 
+  // A PERMISSÃO É PELO ID: o servidor aceita mover para a coluna renomeada, e
+  // continua recusando a coluna que a tela não oferece, qualquer que seja o nome.
+  it('renomear a coluna não tira a permissão de mover para ela', () => {
+    expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111533988, 'PROPOSTA AO CEDENTE')).toBe(true)
+    expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111534212, 'RECUSADOS')).toBe(true)
+    expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111533964, 'Etapa de leads de entrada')).toBe(false)
+    expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 112006404, 'PAGOS')).toBe(false)
+  })
+
   it('funil que não é de precatório não tem destino nenhum', () => {
     expect(destinosDaTrilha(FUNIL_RPV)).toEqual([])
     expect(destinosDaTrilha(999)).toEqual([])
@@ -425,8 +469,64 @@ describe('abas da trilha Externa', () => {
    * coluna, não criar um diferente". Só as duas de sistema ficam de fora.
    */
   it('toda coluna do Kommo vira aba, com o nome e na ordem de lá', () => {
-    expect(abas.map((a) => a.label)).toEqual(COLUNAS_EXTERNO)
+    // MENOS A DE ENTRADA DE LEADS, que é do comercial (pedido de 29/09/2026), e
+    // as duas de sistema.
+    expect(abas.map((a) => a.label)).toEqual(COLUNAS_EXTERNO.filter((n) => n !== 'Etapa de leads de entrada'))
     expect(abas.some((a) => /closed/i.test(a.label))).toBe(false)
+  })
+
+  // PELO TIPO, e não pelo nome: renomeada, ela continua de fora.
+  it('a coluna de entrada fica de fora mesmo renomeada', () => {
+    const renomeado = [
+      ...colunasDe(FUNIL_PRECATORIO, COLUNAS_INTERNO, 90_000),
+      ...colunasExterno(COLUNAS_EXTERNO, { 'Etapa de leads de entrada': 'ENTRADA' }),
+    ]
+    const labels = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, renomeado, 'externo').map((a) => a.label)
+    expect(labels).not.toContain('ENTRADA')
+  })
+
+  /**
+   * RENOMEAR NO KOMMO NÃO TIRA FUNÇÃO NENHUMA (29/09/2026). Até então a ligação
+   * era pelo nome, e cada coluna renomeada perdia botões, etiquetas e automações
+   * até alguém renomear aqui também. Agora é pelo id.
+   */
+  it('coluna renomeada no Kommo mantém a função, com o nome novo', () => {
+    const renomeado = [
+      ...colunasDe(FUNIL_PRECATORIO, COLUNAS_INTERNO, 90_000),
+      ...colunasExterno(COLUNAS_EXTERNO, {
+        'EM PRECIFICAÇÃO': 'COM OS FUNDOS',
+        'REVISÃO DA QUALIFICAÇÃO': 'SEGUNDA LEITURA',
+        'PRODUÇÃO DE PROPOSTA': 'PROPOSTA AO CEDENTE',
+        'REPROVADOS': 'RECUSADOS',
+      }),
+    ]
+    const lista = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, renomeado, 'externo')
+    const precificacao = lista.find((a) => a.key === ABA_EM_PRECIFICACAO_EXTERNO)!
+    expect(precificacao.label).toBe('COM OS FUNDOS')
+    expect(precificacao.statusIds).toEqual([111533984])
+    expect(precificacao.escolhaDeProposta).toBe(111533988)
+    // A saída da qualificação continua apontando para a revisão renomeada…
+    const qualificacao = lista.find((a) => a.key === 'ext-qualificacao')!
+    expect(qualificacao.acoes[0].statusId).toBe(111533972)
+    // …a recusa da revisão, para a coluna de reprovados renomeada…
+    const revisao = lista.find((a) => a.key === 'ext-revisao')!
+    expect(revisao.label).toBe('SEGUNDA LEITURA')
+    expect(revisao.acoes.find((x) => x.papel === 'reprovar')?.statusId).toBe(111534212)
+    // …e nenhum aviso de coluna não encontrada.
+    expect(colunasPrecatorioDesalinhadas(renomeado, 'externo')).toEqual([])
+    expect(acaoDeReprovar(FUNIL_PRECATORIO_EXTERNO, renomeado)?.statusId).toBe(111534212)
+  })
+
+  // OS IDS DA TRILHA SÃO OS DO KOMMO: cada um aponta para a coluna que tinha
+  // aquele nome em 29/09/2026. Um dígito trocado cai aqui.
+  it('cada id declarado na trilha é o da coluna com aquele nome', () => {
+    const externo = SUBDIVISOES_PRECATORIO.find((x) => x.key === 'externo')!
+    for (const a of externo.abas) {
+      expect(a.statusId, a.colunaKommo).toBe(IDS_EXTERNO[a.colunaKommo])
+      for (const saida of a.saidas ?? []) expect(saida.statusId, saida.label).toBe(IDS_EXTERNO[saida.colunaKommo])
+    }
+    expect(externo.idDiligencia).toBe(IDS_EXTERNO['DILIGÊNCIA'])
+    expect(externo.idReprovados).toBe(IDS_EXTERNO['REPROVADOS'])
   })
 
   it('cada aba resolve para a própria coluna', () => {
@@ -445,7 +545,6 @@ describe('abas da trilha Externa', () => {
     expect(chave.get('REPROVADOS')).toBe(ABA_REPROVADOS_EXTERNO)
     const soLeitura = abas.filter((a) => a.soLeitura).map((a) => a.label)
     expect(soLeitura).toEqual([
-      'Etapa de leads de entrada',
       'NEGOCIAÇÃO',
       'OBTENÇÃO DE DOCUMENTAÇÃO',
       'AGUARDANDO APROVAÇÃO DO FUNDO',
@@ -815,7 +914,7 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
     // 6 abas do Interno + as 16 colunas do Externo (espelho completo, sem as duas
     // de sistema), e nada compartilhado desde a separação.
-    expect(ids.size).toBe(6 + COLUNAS_EXTERNO.length)
+    expect(ids.size).toBe(6 + COLUNAS_EXTERNO.length - 1)
   })
 
   it('a união vale seja qual for o funil de precatório perguntado', () => {
@@ -835,8 +934,8 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     expect(ids.has(idDe('FECHADOS', etapas))).toBe(false)
     expect(ids.has(idDe('FORMALIZAÇÃO (CONTRATOS E ESCRITURA)', etapas))).toBe(false)
     expect(ids.has(idDe('Etapa de leads de entrada', etapas))).toBe(false)
-    // NO EXTERNO O KANBAN É ESPELHADO INTEIRO: a entrada conta; as de sistema, não.
-    expect(ids.has(idExt('Etapa de leads de entrada', etapas))).toBe(true)
+    // NO EXTERNO O KANBAN É ESPELHADO INTEIRO, menos a entrada e as de sistema.
+    expect(ids.has(idExt('Etapa de leads de entrada', etapas))).toBe(false)
     expect(ids.has(142)).toBe(false)
     expect(ids.has(143)).toBe(false)
   })

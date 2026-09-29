@@ -64,6 +64,8 @@ export type PapelDaAcao = 'validar' | 'aprovar' | 'diligenciar' | 'reprovar'
 export interface SaidaDaEtapa {
   /** O nome da coluna de destino no kanban do Kommo. */
   colunaKommo: string
+  /** O id da coluna de destino — quando há, é ele que manda (ver `resolverColuna`). */
+  statusId?: number
   label: string
   variant?: VarianteDeAcao
   /** Omitido, é `aprovar` — a saída positiva é a regra, as outras a exceção. */
@@ -71,17 +73,21 @@ export interface SaidaDaEtapa {
 }
 
 /**
- * Uma aba do Precatório: uma coluna do kanban, com o nome que a casa lhe dá.
+ * Uma aba do Precatório: uma coluna do kanban, com o que a plataforma faz nela.
  *
- * A LIGAÇÃO É PELO NOME DA COLUNA, e não pelo status_id. Os ids do Precatório não
- * existem em lugar nenhum do código: são lidos do espelho (migration 0044). Colar
- * aqui números copiados da URL do Kommo é o erro que aquela migration existe para
- * evitar — um dígito trocado aponta para outra coluna que também existe, e o card
- * vai parar nela sem erro nenhum.
+ * A LIGAÇÃO É PELO ID DA COLUNA, QUANDO HÁ, e pelo nome quando não há. O nome
+ * foi a única ligação até 29/09/2026 — e cada coluna renomeada no Kommo fazia a
+ * aba perder botões, etiquetas e automações até alguém renomear aqui também. O
+ * id não muda com o nome: é por ele que o Externo se liga desde então, e o nome
+ * ficou de reserva (coluna recriada, id que sumiu do espelho) e de rótulo.
  *
- * Coluna renomeada no Kommo aparece em `colunasPrecatorioDesalinhadas`: a tela diz
- * qual nome não encontrou, em vez de ficar vazia em silêncio. A comparação passa
- * por `normalizarBusca`, então acento, caixa e espaço a mais não quebram nada.
+ * O MEDO ANTIGO ERA COPIAR ID DA URL — um dígito trocado aponta para outra coluna
+ * que também existe. Os ids daqui vieram do próprio espelho (`kommo_etapa`,
+ * consulta de 29/09/2026), e os testes os prendem ao nome que tinham naquele dia.
+ *
+ * Coluna que não se acha nem pelo id nem pelo nome aparece em
+ * `colunasPrecatorioDesalinhadas`: a tela diz qual não encontrou, em vez de
+ * ficar vazia em silêncio.
  */
 export interface DefAbaPrecatorio {
   key: string
@@ -89,6 +95,8 @@ export interface DefAbaPrecatorio {
   label: string
   /** Nome da coluna no kanban do Kommo, como está escrito lá. */
   colunaKommo: string
+  /** O id da coluna no Kommo — o que não muda quando ela é renomeada. */
+  statusId?: number
   descricaoVazia: string
   /**
    * As saídas positivas desta etapa, na ordem em que os botões aparecem.
@@ -117,7 +125,7 @@ export interface DefAbaPrecatorio {
    * FUNDO, e a mensagem do card sai dele ("Seguir com a proposta do BTG."). O
    * destino entra em `destinosDaTrilha` igual, que é o que a kommo-mover aceita.
    */
-  escolhaDeProposta?: { colunaKommo: string }
+  escolhaDeProposta?: { colunaKommo: string; statusId?: number }
   /**
    * Esta etapa pode INTERROMPER o crédito — exigir diligência ou recusar?
    *
@@ -148,10 +156,14 @@ export interface DefSubdivisao {
   colunaDiligencia: string
   /** A coluna de reprovação desta trilha, pelo nome no kanban. */
   colunaReprovados: string
+  /** Os ids das duas, quando há — ver `resolverColuna`. */
+  idDiligencia?: number
+  idReprovados?: number
   abas: DefAbaPrecatorio[]
   /**
    * TODA COLUNA DO FUNIL VIRA ABA, com o nome e na ordem do Kommo — menos as
-   * duas de sistema ("Closed - won" e "Closed - lost").
+   * duas de sistema ("Closed - won" e "Closed - lost") e a de entrada de leads
+   * (a do tipo 1 no Kommo), que é do comercial e ficou de fora a pedido.
    *
    * Pedido de 29/09/2026 para o Externo, depois de o funil dele ganhar sete
    * colunas de uma vez: a plataforma espelha o kanban inteiro, e o nome da aba é
@@ -310,6 +322,10 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     pipelineId: FUNIL_PRECATORIO_EXTERNO,
     colunaDiligencia: 'DILIGÊNCIA',
     colunaReprovados: 'REPROVADOS',
+    // OS IDS DO KANBAN, lidos do espelho em 29/09/2026 — é por eles que tudo se
+    // liga, e o nome fica de reserva. Renomear uma coluna no Kommo não tira nada.
+    idDiligencia: 111533996,
+    idReprovados: 111534212,
     // O KANBAN INTEIRO, com os nomes de lá — ver `espelhoCompleto`.
     espelhoCompleto: true,
     abas: [
@@ -318,28 +334,28 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // UMA PALAVRA, como a "Análise" do Interno: o rótulo nomeia a etapa e
         // "QUALIFICAÇÃO PRELIMINAR", no kanban, descreve o trabalho.
         label: 'Qualificação',
-        colunaKommo: 'QUALIFICAÇÃO PRELIMINAR',
+        colunaKommo: 'QUALIFICAÇÃO PRELIMINAR', statusId: 111533968,
         descricaoVazia: 'Nenhum precatório em qualificação preliminar.',
         // UMA SAÍDA SÓ, e é o que esta etapa passou a ser: quem qualifica lê os
         // autos e passa adiante. Recusar e exigir diligência saíam daqui direto,
         // sem segunda leitura — e a revisão, que existe para ler o que a casa
         // decide, só via o que tinha sido aprovado. Agora tudo passa por ela.
         saidas: [
-          { colunaKommo: 'REVISÃO DA QUALIFICAÇÃO', label: 'Enviar para revisão', variant: 'secondary' },
+          { colunaKommo: 'REVISÃO DA QUALIFICAÇÃO', statusId: 111533972, label: 'Enviar para revisão', variant: 'secondary' },
         ],
         interrompe: false,
       },
       {
         key: 'ext-revisao',
         label: 'Revisão',
-        colunaKommo: 'REVISÃO DA QUALIFICAÇÃO',
+        colunaKommo: 'REVISÃO DA QUALIFICAÇÃO', statusId: 111533972,
         descricaoVazia: 'Nenhuma qualificação aguardando revisão.',
         // AQUI A APROVAÇÃO ENCAMINHA DE VERDADE. É a segunda leitura, feita por
         // quem decide; aprovada nela, o crédito segue para o fundo. As outras
         // duas saídas são as mesmas da qualificação — quem revisa também pode
         // exigir diligência ou recusar, e aí não há terceira leitura.
         saidas: [
-          { colunaKommo: 'ENCAMINHAR AOS FUNDOS', label: 'Aprovar crédito', variant: 'primary' },
+          { colunaKommo: 'ENCAMINHAR AOS FUNDOS', statusId: 111533980, label: 'Aprovar crédito', variant: 'primary' },
           {
             // PEDIR MEMORANDO NÃO É APROVAR NEM RECUSAR. O crédito não foi recusado
             // e ainda não vai ao fundo: falta uma peça, e ela é trabalho da casa —
@@ -349,7 +365,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
             //
             // A ABA MEMORANDO CONTINUA SEM BOTÃO, por decisão de quem opera: pronto
             // o memorando, quem move o card de volta é o Kommo.
-            colunaKommo: 'MEMORANDO DE NEGOCIAÇÃO',
+            colunaKommo: 'MEMORANDO DE NEGOCIAÇÃO', statusId: 111533976,
             label: 'Pedir memorando',
             variant: 'secondary',
             papel: 'validar',
@@ -362,7 +378,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // dela ainda não foi definida — e enquanto não for, a aba mostra os
         // cards e quem os move é o Kommo.
         label: 'Memorando',
-        colunaKommo: 'MEMORANDO DE NEGOCIAÇÃO',
+        colunaKommo: 'MEMORANDO DE NEGOCIAÇÃO', statusId: 111533976,
         descricaoVazia: 'Nenhum crédito em memorando de negociação.',
       },
       {
@@ -372,7 +388,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // significa para a casa é uma aprovação. O nome do kanban é o do
         // comercial, diz o que acontece DEPOIS, e não muda por causa disto.
         label: 'Aprovados',
-        colunaKommo: 'ENCAMINHAR AOS FUNDOS',
+        colunaKommo: 'ENCAMINHAR AOS FUNDOS', statusId: 111533980,
         descricaoVazia: 'Nenhum precatório aprovado.',
       },
       {
@@ -380,24 +396,24 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // "EM PRECIFICAÇÃO" NA PLATAFORMA E NO KOMMO desde 29/09/2026, quando a
         // coluna do kanban deixou de se chamar "AGUARDANDO PRECIFICAÇÃO" — o nome
         // do estado do crédito, como nas outras abas, em vez da espera de quem
-        // mandou. A ligação é pelo nome: renomear lá exige renomear aqui.
+        // mandou. A ligação é pelo id: renomear lá não tira nada daqui.
         label: 'Em precificação',
-        colunaKommo: 'EM PRECIFICAÇÃO',
+        colunaKommo: 'EM PRECIFICAÇÃO', statusId: 111533984,
         descricaoVazia: 'Nenhum precatório em precificação pelo fundo.',
         // OS FUNDOS RESPONDERAM, e a casa escolhe com qual proposta seguir: o
         // card vai para a produção da proposta ao cedente (29/09/2026).
-        escolhaDeProposta: { colunaKommo: 'PRODUÇÃO DE PROPOSTA' },
+        escolhaDeProposta: { colunaKommo: 'PRODUÇÃO DE PROPOSTA', statusId: 111533988 },
       },
       {
         key: 'ext-diligencia',
         label: 'Diligência',
-        colunaKommo: 'DILIGÊNCIA',
+        colunaKommo: 'DILIGÊNCIA', statusId: 111533996,
         descricaoVazia: 'Nenhum precatório externo em diligência.',
       },
       {
         key: ABA_REPROVADOS_EXTERNO,
         label: 'Reprovados',
-        colunaKommo: 'REPROVADOS',
+        colunaKommo: 'REPROVADOS', statusId: 111534212,
         descricaoVazia: 'Nenhum precatório externo reprovado.',
       },
       {
@@ -406,13 +422,13 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // do funil antigo, onde a coluna se chamava "Apresentação de Proposta" —
         // o nome guardava o ato e perdia a coisa.
         label: 'Proposta',
-        colunaKommo: 'PRODUÇÃO DE PROPOSTA',
+        colunaKommo: 'PRODUÇÃO DE PROPOSTA', statusId: 111533988,
         descricaoVazia: 'Nenhum precatório em apresentação.',
       },
       {
         key: 'ext-fechados',
         label: 'Fechados',
-        colunaKommo: 'FECHADOS',
+        colunaKommo: 'FECHADOS', statusId: 111533992,
         descricaoVazia: 'Nenhum precatório externo fechado.',
       },
     ],
@@ -421,6 +437,45 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     // `espelhoCompleto`, só para leitura.
   },
 ]
+
+/** Uma coluna do espelho, nos campos que a resolução usa. */
+export interface ColunaDoEspelho {
+  pipeline_id: number
+  status_id: number
+  nome: string
+}
+
+const normalizarNome = (s: unknown) =>
+  String(s ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase()
+
+/**
+ * O id de uma coluna, dado o que a definição sabe dela: PELO ID, primeiro, e
+ * pelo nome na falta.
+ *
+ * O ID VALE SE O ESPELHO O TEM — sem espelho não há coluna, como antes: um botão
+ * para um id que o espelho não conhece moveria o card para onde a kommo-mover não
+ * reconhece. Id que sumiu do espelho — coluna apagada e recriada no Kommo — cai para o nome,
+ * que é o que a coluna nova provavelmente herdou. Nem um nem outro: undefined, e
+ * a tela avisa (ver `colunasPrecatorioDesalinhadas`).
+ */
+export function resolverColuna(
+  pipelineId: number,
+  etapas: readonly ColunaDoEspelho[],
+  ref: { colunaKommo: string; statusId?: number },
+): number | undefined {
+  const doFunil = etapas.filter((e) => Number(e.pipeline_id) === pipelineId)
+  if (ref.statusId && doFunil.some((e) => Number(e.status_id) === ref.statusId)) {
+    return ref.statusId
+  }
+  const alvo = normalizarNome(ref.colunaKommo)
+  const achada = doFunil.find((e) => normalizarNome(e.nome) === alvo)
+  return achada ? Number(achada.status_id) : undefined
+}
 
 /** A trilha a que um funil pertence, ou undefined se o funil não é de precatório. */
 export function trilhaDoPipeline(pipelineId: number): DefSubdivisao | undefined {
@@ -440,6 +495,31 @@ export function trilhaDoPipeline(pipelineId: number): DefSubdivisao | undefined 
  * são da trilha, e é para lá que vão os dois desfechos que interrompem —
  * inclusive o da janela de due diligence, que pode partir de qualquer card.
  */
+/** Os IDS das colunas para as quais a plataforma pode mover um card deste funil. */
+export function idsDestinoDaTrilha(pipelineId: number): number[] {
+  const trilha = trilhaDoPipeline(pipelineId)
+  if (!trilha) return []
+  const ids = new Set<number>()
+  if (trilha.idDiligencia) ids.add(trilha.idDiligencia)
+  if (trilha.idReprovados) ids.add(trilha.idReprovados)
+  for (const aba of trilha.abas) {
+    for (const saida of aba.saidas ?? []) if (saida.statusId) ids.add(saida.statusId)
+    if (aba.escolhaDeProposta?.statusId) ids.add(aba.escolhaDeProposta.statusId)
+  }
+  return [...ids]
+}
+
+/**
+ * A plataforma pode mover um card deste funil para esta coluna? PELO ID, e pelo
+ * nome de reserva — a mesma regra de `resolverColuna`, do lado do servidor.
+ * Renomear a coluna no Kommo não tira a permissão.
+ */
+export function destinoPermitido(pipelineId: number, statusId: number, nome: string | null): boolean {
+  if (idsDestinoDaTrilha(pipelineId).includes(statusId)) return true
+  const alvo = normalizarNome(nome)
+  return !!alvo && destinosDaTrilha(pipelineId).some((d) => normalizarNome(d) === alvo)
+}
+
 export function destinosDaTrilha(pipelineId: number): string[] {
   const trilha = trilhaDoPipeline(pipelineId)
   if (!trilha) return []

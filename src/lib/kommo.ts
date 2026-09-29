@@ -50,6 +50,7 @@ import {
   type SubdivisaoPrecatorio,
   TRILHAS_PRECATORIO,
   COLUNAS_DE_SISTEMA,
+  resolverColuna,
 } from '../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
 // PELO MESMO MOTIVO das trilhas: a lista das etiquetas que a casa aplica é lida
 // pela tela, que desenha o seletor, e pela Edge Function `kommo-etiquetar`, que
@@ -609,21 +610,6 @@ export interface Aba {
   soLeitura?: boolean
 }
 
-/**
- * Índice nome-da-coluna -> status_id, para um funil.
- *
- * A chave passa por normalizarBusca porque o nome vem digitado em dois lugares
- * diferentes: no kanban do Kommo e em SUBDIVISOES_PRECATORIO. Exigir igualdade
- * byte a byte faria um acento ou um espaço a mais esvaziar uma aba.
- */
-function porNomeDeColuna(pipelineId: number, etapas: EtapaKommo[]): Map<string, number> {
-  const m = new Map<string, number>()
-  for (const e of etapas) {
-    if (e.pipeline_id !== pipelineId) continue
-    m.set(normalizarBusca(e.nome), e.status_id)
-  }
-  return m
-}
 
 /**
  * Os status_id que um funil EXIBE — a união de todas as suas abas.
@@ -652,9 +638,8 @@ export function statusExibidos(pipelineId: number, etapas: EtapaKommo[]): Set<nu
     if (s.espelhoCompleto) {
       for (const e of colunasDoFunil(s.pipelineId, etapas)) ids.add(e.status_id)
     }
-    const nomes = porNomeDeColuna(s.pipelineId, etapas)
     for (const a of s.abas) {
-      const id = nomes.get(normalizarBusca(a.colunaKommo))
+      const id = resolverColuna(s.pipelineId, etapas, a)
       if (id !== undefined) ids.add(id)
     }
   }
@@ -662,7 +647,8 @@ export function statusExibidos(pipelineId: number, etapas: EtapaKommo[]): Set<nu
 }
 
 /**
- * As colunas que o Precatório fixa pelo nome e que o kanban do Kommo não tem.
+ * As colunas que o Precatório fixa e que o kanban do Kommo não tem — nem pelo id,
+ * nem pelo nome de reserva.
  *
  * O equivalente de telasRpvDesalinhadas para o outro funil, e por que ele
  * existe é o mesmo motivo: aba ligada a uma coluna inexistente mostra zero card
@@ -686,9 +672,8 @@ export function colunasPrecatorioDesalinhadas(
     // e o da outra não. Acusar a trilha que ainda não sincronizou seria apontar
     // defeito onde só falta dado.
     if (!etapas.some((e) => e.pipeline_id === s.pipelineId)) continue
-    const nomes = porNomeDeColuna(s.pipelineId, etapas)
     for (const a of s.abas) {
-      if (!nomes.has(normalizarBusca(a.colunaKommo))) faltando.push(a)
+      if (resolverColuna(s.pipelineId, etapas, a) === undefined) faltando.push(a)
     }
   }
   return faltando
@@ -806,7 +791,10 @@ export function acaoDeReprovar(
   if (pipelineId === FUNIL_RPV) return reprovar(ST_REPROVADO)
   const sub = subdivisaoDoPipeline(pipelineId)
   if (!sub) return null
-  const id = porNomeDeColuna(sub.pipelineId, etapas).get(normalizarBusca(sub.colunaReprovados))
+  const id = resolverColuna(sub.pipelineId, etapas, {
+    colunaKommo: sub.colunaReprovados,
+    statusId: sub.idReprovados,
+  })
   return id === undefined ? null : reprovar(id)
 }
 
@@ -833,7 +821,9 @@ export function abasDoFunil(
   // DO FUNIL DA TRILHA, e não do que veio por parâmetro: o parâmetro é o funil
   // que a tela tem aberto no topo, e as duas trilhas do Precatório vivem em
   // pipelines diferentes durante a migração.
-  const nomes = porNomeDeColuna(def.pipelineId, etapas)
+  // A COLUNA PELO ID, e pelo nome de reserva — ver `resolverColuna`.
+  const coluna = (ref: { colunaKommo: string; statusId?: number }) =>
+    resolverColuna(def.pipelineId, etapas, ref)
 
   // QUEM TEM DESFECHO É DITO PELA PRÓPRIA ABA, nas duas trilhas. O Interno tinha
   // uma lista separada de chaves, que precisava ser mantida em sincronia com os
@@ -852,7 +842,7 @@ export function abasDoFunil(
     // as outras junto: melhor a etapa com um botão a menos do que um que move o
     // card para lugar nenhum.
     for (const s of aba.saidas ?? []) {
-      const id = nomes.get(normalizarBusca(s.colunaKommo))
+      const id = coluna(s)
       if (id === undefined) continue
       saida.push({
         statusId: id,
@@ -866,8 +856,8 @@ export function abasDoFunil(
     // Externo passou a só encaminhar, para recusa e diligência não saírem sem
     // passar pela revisão. Ver `interrompe`.
     if (aba.interrompe === false) return saida
-    const idDiligencia = nomes.get(normalizarBusca(def.colunaDiligencia))
-    const idReprovados = nomes.get(normalizarBusca(def.colunaReprovados))
+    const idDiligencia = coluna({ colunaKommo: def.colunaDiligencia, statusId: def.idDiligencia })
+    const idReprovados = coluna({ colunaKommo: def.colunaReprovados, statusId: def.idReprovados })
     if (idDiligencia !== undefined) {
       saida.push({
         statusId: idDiligencia,
@@ -888,7 +878,7 @@ export function abasDoFunil(
   }
 
   const montar = (a: DefAbaPrecatorio): Aba => {
-    const statusId = nomes.get(normalizarBusca(a.colunaKommo))
+    const statusId = coluna(a)
     return {
       key: a.key,
       label: a.label,
@@ -905,9 +895,7 @@ export function abasDoFunil(
       // por um motivo a mais: a janela é o único lugar onde a anotação que vai
       // para o Kommo é escrita antes de o card se mover.
       desfechoAgrupado: oferece(a),
-      escolhaDeProposta: a.escolhaDeProposta
-        ? (nomes.get(normalizarBusca(a.escolhaDeProposta.colunaKommo)) ?? null)
-        : null,
+      escolhaDeProposta: a.escolhaDeProposta ? (coluna(a.escolhaDeProposta) ?? null) : null,
     }
   }
 
@@ -918,10 +906,16 @@ export function abasDoFunil(
     const doFunil = colunasDoFunil(def.pipelineId, etapas)
     // SEM ESPELHO AINDA, as abas conhecidas: melhor que uma tela sem aba nenhuma.
     if (doFunil.length === 0) return def.abas.map(montar)
-    const porNome = new Map(def.abas.map((a) => [normalizarBusca(a.colunaKommo), a]))
+    // A ABA CASA COM A COLUNA PELO ID: renomeada no Kommo, a coluna continua com
+    // os botões, as etiquetas e as automações dela, só que com o nome novo.
+    const porColuna = new Map<number, DefAbaPrecatorio>()
+    for (const a of def.abas) {
+      const id = coluna(a)
+      if (id !== undefined && !porColuna.has(id)) porColuna.set(id, a)
+    }
     const usadas = new Set<string>()
     const abas: Aba[] = doFunil.map((e) => {
-      const d = porNome.get(normalizarBusca(e.nome))
+      const d = porColuna.get(Number(e.status_id))
       if (d) {
         usadas.add(d.key)
         return { ...montar(d), label: e.nome }
@@ -948,10 +942,20 @@ export function abasDoFunil(
   return def.abas.map(montar)
 }
 
-/** As colunas de um funil no espelho, na ordem do kanban, sem as de sistema. */
+/**
+ * As colunas de um funil no espelho, na ordem do kanban — sem as duas de
+ * sistema (ganho e perdido) e sem a de ENTRADA DE LEADS, que o Kommo marca com
+ * `tipo` 1: é do comercial, e ficou fora da tela a pedido (29/09/2026). Pelo
+ * tipo, e não pelo nome, para continuar de fora se for renomeada.
+ */
 function colunasDoFunil(pipelineId: number, etapas: EtapaKommo[]): EtapaKommo[] {
   return etapas
-    .filter((e) => e.pipeline_id === pipelineId && !COLUNAS_DE_SISTEMA.has(Number(e.status_id)))
+    .filter(
+      (e) =>
+        e.pipeline_id === pipelineId &&
+        !COLUNAS_DE_SISTEMA.has(Number(e.status_id)) &&
+        Number(e.tipo) !== 1,
+    )
     .sort((a, b) => a.ordem - b.ordem || a.status_id - b.status_id)
 }
 

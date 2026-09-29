@@ -17,7 +17,7 @@
 //     mover pelo app dispara o Digital Pipeline configurado no funil.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
-import { destinosDaTrilha } from '../_shared/trilhasDoPrecatorio.ts'
+import { destinoPermitido } from '../_shared/trilhasDoPrecatorio.ts'
 
 /** Rótulo exibido no selo da anotação, dentro do card. */
 const SERVICO = 'Operacional'
@@ -32,8 +32,7 @@ const COLUNAS: Record<number, string> = {
 }
 
 /**
- * Os destinos do Precatório saem de `_shared/trilhasDoPrecatorio.ts`, pelo NOME
- * da coluna e por trilha.
+ * Os destinos do Precatório saem de `_shared/trilhasDoPrecatorio.ts`, por trilha.
  *
  * ESTA LISTA JÁ FOI ESCRITA À MÃO AQUI, e o defeito que isso causou é o motivo
  * de ela ter mudado de lugar. Eram dois nomes do funil antigo — "Diligência" e
@@ -43,20 +42,11 @@ const COLUNAS: Record<number, string> = {
  * reconhecida": o botão existia, o card não se movia, e nada no caminho dizia
  * que a culpa era de duas listas que precisavam concordar.
  *
- * Por NOME, e não por id, porque os ids do Precatório não existem em lugar
- * nenhum do código: são lidos do espelho (kommo_etapa), como a tela faz para
- * montar as abas. Colar aqui números copiados da URL do Kommo é o erro que a
- * migration 0044 existe para evitar — um dígito trocado aponta para outra coluna
- * existente, e o card vai parar nela sem erro nenhum.
+ * PELO ID DESDE 29/09/2026, com o nome de reserva (ver `destinoPermitido`): pelo
+ * nome, renomear uma coluna no Kommo fazia o botão da tela mover para uma coluna
+ * que esta função não reconhecia mais. Os ids vêm do espelho (consulta de
+ * 29/09/2026), e os testes os prendem ao nome daquele dia.
  */
-
-/** Acento, caixa e espaço a mais não podem decidir se o card move. */
-const normalizar = (s: unknown) =>
-  String(s ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toUpperCase()
 
 // Nenhum destino exige justificativa. A análise — inclusive o motivo de uma
 // eventual reprovação — é produzida na etapa de Pendentes; a de Validação apenas
@@ -90,9 +80,8 @@ Deno.serve(async (req: Request) => {
     //
     // DUAS LISTAS porque os dois funis se identificam de formas diferentes. RPV
     // tem os ids escritos aqui desde sempre e continua respondendo sem tocar no
-    // banco. O Precatório numera as MESMAS colunas com outros ids, que só o
-    // espelho conhece (migration 0044) — é por nome que se pergunta, como a tela
-    // faz para montar as abas.
+    // banco. O Precatório numera as MESMAS colunas com outros ids, e a pergunta é
+    // a mesma das abas: pelo id declarado na trilha, e pelo nome de reserva.
     const { data: destino } = await svc
       .from('kommo_etapa')
       .select('pipeline_id, nome')
@@ -103,7 +92,9 @@ Deno.serve(async (req: Request) => {
       (destino ?? []).find((e) =>
         // Funil que não é de precatório devolve lista vazia, e nada casa: é o
         // que mantém a coluna do comercial fora do alcance de um statusId solto.
-        destinosDaTrilha(Number(e.pipeline_id)).some((d) => normalizar(d) === normalizar(e.nome)),
+        // PELO ID DA COLUNA, e pelo nome de reserva: renomear a coluna no Kommo
+        // não tira a permissão de mover para ela.
+        destinoPermitido(Number(e.pipeline_id), Number(statusId), String(e.nome ?? '')),
       )?.nome
     if (!nomeDoDestino) {
       return jsonResponse({ error: 'Coluna de destino não reconhecida.' }, 400)

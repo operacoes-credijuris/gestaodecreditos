@@ -90,6 +90,13 @@ describe('entradasDoOperacional', () => {
     ])
   })
 
+  // A ENTRADA DO EXTERNO É PELO ID: renomeada no Kommo, os autos continuam
+  // descendo a partir dela.
+  it('a coluna de entrada do Externo vale pelo id, mesmo renomeada', () => {
+    const etapas = [{ pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 111533968, nome: 'TRIAGEM' }]
+    expect(entradasDoOperacional(etapas)).toContainEqual({ pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 111533968 })
+  })
+
   it('coluna que o espelho ainda não trouxe fica de fora', () => {
     expect(entradasDoOperacional([])).toEqual([{ pipeline_id: FUNIL_RPV, status_id: ENTRADA_RPV }])
   })
