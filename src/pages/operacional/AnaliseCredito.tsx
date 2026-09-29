@@ -1357,6 +1357,7 @@ function BotaoAnexarEMover({
       />
       <Button
         size="sm"
+        variant="success"
         icon={<FileUp className="h-4 w-4" />}
         onClick={() => (soMover ? void enviar(null) : entrada.current?.click())}
         loading={andamento !== null}
@@ -2275,15 +2276,10 @@ function SeletorDestinacao({
 
 /**
  * As abas em que o card oferece a anotação livre no Kommo (`BotaoDeAnotacao`):
- * Em precificação, onde se escreve o retorno dos fundos, e as três Diligências
- * (RPV, Interno e Externo), onde se escreve o que falta e o que chegou.
+ * Em precificação, onde se escreve o retorno dos fundos. Esteve também nas
+ * Diligências por um dia; saiu delas a pedido, onde o "Sanar" já leva a mensagem.
  */
-const ABAS_COM_ANOTACAO: ReadonlySet<string> = new Set([
-  ABA_EM_PRECIFICACAO_EXTERNO,
-  'diligencia',
-  'int-diligencia',
-  'ext-diligencia',
-])
+const ABAS_COM_ANOTACAO: ReadonlySet<string> = new Set([ABA_EM_PRECIFICACAO_EXTERNO])
 
 /** O card bate com a busca? `q` já em minúsculas. */
 function casaComBusca(x: KommoLead, q: string): boolean {
@@ -3522,12 +3518,22 @@ export default function AnaliseCredito() {
     const jaAnexado = anexadosSemMover.has(id)
     if (!jaAnexado) {
       if (!arquivo) return
-      const form = new FormData()
-      form.append('lead_id', String(id))
-      form.append('texto', cfg.nota)
-      form.append('arquivo', arquivo)
+      if (arquivo.size > 100 * 1024 * 1024) {
+        const msg = `O arquivo tem ${Math.round(arquivo.size / 1048576)} MB; o limite é 100 MB.`
+        toast.error(msg)
+        throw new Error(msg)
+      }
       try {
-        const r = await enviarArquivo<{ aviso?: string | null }>('kommo-anexo-enviar', form, onAndamento)
+        const r = await enviarArquivo<{ aviso?: string | null }>(
+          'kommo-anexo-enviar',
+          arquivo,
+          {
+            'x-lead-id': String(id),
+            'x-nome': encodeURIComponent(arquivo.name),
+            'x-texto': encodeURIComponent(cfg.nota),
+          },
+          onAndamento,
+        )
         if (r?.aviso) toast.error(r.aviso)
       } catch (e) {
         toast.error(`O arquivo não subiu para o Kommo: ${(e as Error).message}`)

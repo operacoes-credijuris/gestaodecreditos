@@ -2,83 +2,149 @@
 // com uma anotação.
 //
 // O PRIMEIRO USO é o memorando de negociação (29/09/2026): o comercial consegue
-// o memorando assinado, alguém o escolhe no computador pela plataforma, e o card
-// recebe o arquivo e a anotação "Memorando assinado." — a tela, em seguida, move
-// o card para a remessa aos fundos (pela kommo-mover, que já sabe fazer isso).
+// o memorando assinado, alguém o escolhe no computador pela plataforma ("Anexar"),
+// e o card recebe o arquivo e a anotação "Memorando assinado." — a tela, em
+// seguida, move o card para a remessa aos fundos (pela kommo-mover).
 //
-// O NAVEGADOR NÃO FALA COM O KOMMO: a API dele não tem CORS e o token é de
+// O NAVEGADOR NÃO FALA COM O KOMMO: o envio das partes ao drive exige o token de
 // administrador. O arquivo passa por aqui.
+//
+// SEM GUARDAR O ARQUIVO INTEIRO: ele chega como o CORPO da requisição (não como
+// formulário) e sai para o Kommo em partes de 512 KB, à medida que chega. É o
+// que deixa o teto em 100 MB sem encostar nos 256 MB de memória da função — e,
+// de quebra, o Kommo já está recebendo enquanto o navegador ainda envia.
 //
 // NO CARD FICAM DUAS NOTAS, nesta ordem: a de ARQUIVO (tipo `attachment`, que o
 // Kommo mostra com o nome e o link) e a de TEXTO, com o nome de quem enviou no
 // rodapé. A nota de arquivo do Kommo não leva texto — é da documentação.
 //
-// USO (POST multipart, com sessão): lead_id, texto, arquivo.
-import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
+// USO (POST, com sessão): o arquivo no corpo, e nos cabeçalhos
+//   x-lead-id, x-nome (encodeURIComponent), x-texto (encodeURIComponent).
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
 import { marcarComoDePessoa } from '../_shared/notaCredijuris.ts'
-import { subirAoDriveDoKommo, urlDoDriveDaConta } from '../_shared/driveDoKommo.ts'
+import { urlDoDriveDaConta } from '../_shared/driveDoKommo.ts'
 
-/** Teto do arquivo. Um memorando é um PDF de poucas páginas; isto é folga, não meta. */
-const MAX_BYTES = 25 * 1024 * 1024
+/** Teto do arquivo (pedido de 29/09/2026). */
+const MAX_BYTES = 100 * 1024 * 1024
+
+// OS CABEÇALHOS PRÓPRIOS entram no CORS desta função: sem isso o navegador nem
+// chega a enviar.
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-lead-id, x-nome, x-texto',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+const responder = (corpo: unknown, status = 200) =>
+  new Response(JSON.stringify(corpo), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
 const limparNome = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 180)
+const decodificar = (s: string | null) => {
+  try {
+    return decodeURIComponent(s ?? '')
+  } catch {
+    return s ?? ''
+  }
+}
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {
     const svc = serviceClient()
     const caller = await getCallerAtivo(req, svc)
-    if (!caller) return jsonResponse({ erro: ERRO_ACESSO }, 401)
+    if (!caller) return responder({ erro: ERRO_ACESSO }, 401)
 
-    const form = await req.formData().catch(() => null)
-    if (!form) return jsonResponse({ erro: 'Envie o arquivo como formulário (multipart).' }, 400)
-    const leadId = Number(form.get('lead_id'))
-    const texto = String(form.get('texto') ?? '').trim()
-    const arquivo = form.get('arquivo')
-    if (!leadId) return jsonResponse({ erro: 'lead_id é obrigatório.' }, 400)
-    if (!(arquivo instanceof File) || arquivo.size === 0) {
-      return jsonResponse({ erro: 'Nenhum arquivo recebido.' }, 400)
-    }
-    if (arquivo.size > MAX_BYTES) {
-      return jsonResponse({ erro: `Arquivo grande demais (${Math.round(arquivo.size / 1048576)} MB; o limite é 25 MB).` }, 413)
+    const leadId = Number(req.headers.get('x-lead-id'))
+    const nome = limparNome(decodificar(req.headers.get('x-nome')) || 'arquivo')
+    const texto = decodificar(req.headers.get('x-texto')).trim()
+    const tamanho = Number(req.headers.get('content-length'))
+    const mime = req.headers.get('content-type') || 'application/octet-stream'
+    if (!leadId) return responder({ erro: 'lead_id é obrigatório.' }, 400)
+    if (!tamanho || !req.body) return responder({ erro: 'Nenhum arquivo recebido.' }, 400)
+    if (tamanho > MAX_BYTES) {
+      return responder({ erro: `Arquivo grande demais (${Math.round(tamanho / 1048576)} MB; o limite é 100 MB).` }, 413)
     }
 
-    // SÓ CARD QUE A PLATAFORMA CONHECE: um id solto no formulário anexaria
-    // arquivo a qualquer card da conta.
+    // SÓ CARD QUE A PLATAFORMA CONHECE: um id solto anexaria arquivo a qualquer
+    // card da conta.
     const { data: espelho } = await svc
       .from('kommo_leads')
       .select('kommo_lead_id')
       .eq('kommo_lead_id', leadId)
       .maybeSingle()
-    if (!espelho) return jsonResponse({ erro: 'Card não encontrado no espelho local.' }, 404)
+    if (!espelho) return responder({ erro: 'Card não encontrado no espelho local.' }, 404)
 
     const conta = await contaKommo()
-    if (!conta) return jsonResponse({ erro: 'Kommo não configurado.' }, 500)
+    if (!conta) return responder({ erro: 'Kommo não configurado.' }, 500)
     const auth = { Authorization: `Bearer ${conta.token}` }
     const base = `https://${conta.subdominio}.kommo.com/api/v4`
 
-    // 1. O ARQUIVO no drive do Kommo, e anexado ao card.
-    const nome = limparNome(arquivo.name || 'arquivo')
+    // 1. A SESSÃO DE ENVIO no drive do Kommo, com o tamanho declarado.
     const drive = await urlDoDriveDaConta(base, auth)
-    const uuid = await subirAoDriveDoKommo({
-      drive,
-      auth,
-      nome,
-      bytes: new Uint8Array(await arquivo.arrayBuffer()),
-      mime: arquivo.type || 'application/octet-stream',
+    const s = await fetch(`${drive}/v1.0/sessions`, {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_name: nome, file_size: tamanho, content_type: mime }),
     })
+    if (!s.ok) {
+      return responder({ erro: `O drive do Kommo recusou o envio (HTTP ${s.status}): ${(await s.text()).slice(0, 160)}` }, 502)
+    }
+    const sessao = (await s.json()) as { upload_url?: string; max_part_size?: number; max_file_size?: number }
+    if (sessao.max_file_size && tamanho > Number(sessao.max_file_size)) {
+      return responder({ erro: `O Kommo aceita até ${Math.round(Number(sessao.max_file_size) / 1048576)} MB por arquivo.` }, 413)
+    }
+    const parte = Number(sessao.max_part_size) || 524_288
+    let url: string | null = sessao.upload_url ?? null
+    let uuid: string | null = null
+
+    const enviarParte = async (bytes: Uint8Array<ArrayBuffer>) => {
+      if (!url) throw new Error('o drive do Kommo não devolveu o endereço da próxima parte')
+      const r = await fetch(url, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/octet-stream' }, body: bytes })
+      if (!r.ok) throw new Error(`o drive do Kommo recusou uma parte (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`)
+      const j = (await r.json().catch(() => ({}))) as { uuid?: string; next_url?: string }
+      if (j?.uuid) uuid = String(j.uuid)
+      url = j?.next_url ?? null
+    }
+
+    // 2. O CORPO, PARTE A PARTE: acumula até o tamanho da parte e manda. Enquanto
+    // uma parte vai ao Kommo, a leitura espera — e o navegador também, que é o
+    // que faz a barra de progresso andar no ritmo de verdade.
+    const leitor = req.body.getReader()
+    const buffer = new Uint8Array(parte)
+    let cheio = 0
+    let recebidos = 0
+    for (;;) {
+      const { done, value } = await leitor.read()
+      if (done) break
+      recebidos += value.byteLength
+      if (recebidos > MAX_BYTES) throw new Error('o arquivo passou do limite de 100 MB')
+      let pos = 0
+      while (pos < value.byteLength) {
+        const n = Math.min(parte - cheio, value.byteLength - pos)
+        buffer.set(value.subarray(pos, pos + n), cheio)
+        cheio += n
+        pos += n
+        if (cheio === parte) {
+          await enviarParte(buffer.slice(0, cheio))
+          cheio = 0
+        }
+      }
+    }
+    if (cheio > 0) await enviarParte(buffer.slice(0, cheio))
+    if (recebidos !== tamanho) throw new Error(`o arquivo chegou incompleto (${recebidos} de ${tamanho} bytes)`)
+    if (!uuid) throw new Error('o drive do Kommo terminou o envio sem devolver o arquivo')
+
+    // 3. O ARQUIVO no card.
     const rAnexo = await fetch(`${base}/leads/${leadId}/files`, {
       method: 'PUT',
       headers: { ...auth, 'Content-Type': 'application/json' },
       body: JSON.stringify([{ file_uuid: uuid }]),
     })
     if (!rAnexo.ok) {
-      return jsonResponse({ erro: `O arquivo subiu, mas o Kommo recusou anexá-lo ao card (HTTP ${rAnexo.status}).` }, 502)
+      return responder({ erro: `O arquivo subiu, mas o Kommo recusou anexá-lo ao card (HTTP ${rAnexo.status}).` }, 502)
     }
 
-    // 2. AS NOTAS: a do arquivo e, se houver, a do texto — com quem enviou.
+    // 4. AS NOTAS: a do arquivo e, se houver, a do texto — com quem enviou.
     const { data: perfil } = await svc.from('profiles').select('nome, email').eq('id', caller.id).maybeSingle()
     const autor = perfil?.nome?.trim() || perfil?.email || caller.email || null
     const notas: unknown[] = [
@@ -97,12 +163,10 @@ Deno.serve(async (req: Request) => {
       headers: { ...auth, 'Content-Type': 'application/json' },
       body: JSON.stringify(notas),
     })
-    const aviso = rNotas.ok
-      ? null
-      : `O arquivo foi anexado ao card, mas a anotação não subiu (HTTP ${rNotas.status}).`
+    const aviso = rNotas.ok ? null : `O arquivo foi anexado ao card, mas a anotação não subiu (HTTP ${rNotas.status}).`
 
-    return jsonResponse({ ok: true, file_uuid: uuid, nome, aviso })
+    return responder({ ok: true, file_uuid: uuid, nome, aviso })
   } catch (e) {
-    return jsonResponse({ erro: (e as Error).message }, 500)
+    return responder({ erro: (e as Error).message }, 500)
   }
 })

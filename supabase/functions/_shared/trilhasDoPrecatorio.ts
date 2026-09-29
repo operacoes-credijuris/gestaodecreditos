@@ -432,7 +432,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // recebeu do comercial o escolhe no computador, o card recebe o arquivo e
         // a anotação, e segue para a remessa aos fundos.
         anexarEMover: {
-          rotulo: 'Memorando assinado',
+          rotulo: 'Anexar',
           nota: 'Memorando assinado.',
           colunaKommo: 'ENCAMINHAR AOS FUNDOS',
           statusId: 111533980,
@@ -477,8 +477,10 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
           {
             colunaKommo: 'REVISÃO DA QUALIFICAÇÃO',
             statusId: 111533972,
-            label: 'Sanado',
-            variant: 'primary',
+            label: 'Sanar',
+            // VERDE, como o "Anexar" do Memorando: os dois resolvem o que
+            // travava o crédito e o põem de volta no caminho.
+            variant: 'success',
             papel: 'validar',
           },
         ],

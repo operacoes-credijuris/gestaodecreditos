@@ -5,16 +5,21 @@
 // depois) a tela mostra uma barra, e a barra precisa do evento de progresso do
 // XMLHttpRequest, que o fetch não tem.
 //
+// O ARQUIVO VAI COMO O CORPO DA REQUISIÇÃO, e não num formulário: a função o
+// repassa ao Kommo em partes à medida que chega, sem guardá-lo inteiro (ver
+// kommo-anexo-enviar). Os dados que o acompanham vão em cabeçalhos.
+//
 // DUAS FASES: o arquivo subindo do computador (0 a 100%), e depois a função
-// trabalhando com ele (mandando ao Kommo) — essa não tem porcentagem, e a tela a
-// mostra como "gravando".
+// terminando com ele no Kommo — essa não tem porcentagem, e a tela a mostra como
+// "gravando".
 import { supabase } from '@/lib/supabase'
 
 export type ProgressoDoEnvio = { fase: 'enviando'; pct: number } | { fase: 'processando' }
 
 export async function enviarArquivo<T>(
   funcao: string,
-  form: FormData,
+  arquivo: File,
+  cabecalhos: Record<string, string>,
   onProgresso: (p: ProgressoDoEnvio) => void,
 ): Promise<T> {
   const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${funcao}`
@@ -28,6 +33,8 @@ export async function enviarArquivo<T>(
     xhr.open('POST', url)
     xhr.setRequestHeader('Authorization', `Bearer ${token}`)
     xhr.setRequestHeader('apikey', chave)
+    xhr.setRequestHeader('Content-Type', arquivo.type || 'application/octet-stream')
+    for (const [k, v] of Object.entries(cabecalhos)) xhr.setRequestHeader(k, v)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgresso({ fase: 'enviando', pct: Math.round((e.loaded / e.total) * 100) })
     }
@@ -46,6 +53,6 @@ export async function enviarArquivo<T>(
         reject(new Error(`${msg || 'O envio falhou'} (HTTP ${xhr.status})`))
       }
     }
-    xhr.send(form)
+    xhr.send(arquivo)
   })
 }

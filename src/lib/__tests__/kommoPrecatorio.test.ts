@@ -737,7 +737,8 @@ describe('abas da trilha Externa', () => {
     const diligencia = abas.find((a) => a.key === 'ext-diligencia')!
     expect(diligencia.acoes).toHaveLength(1)
     expect(diligencia.acoes[0]).toMatchObject({
-      label: 'Sanado',
+      label: 'Sanar',
+      variant: 'success',
       statusId: idExt('REVISÃO DA QUALIFICAÇÃO'),
       papel: 'validar',
     })
@@ -749,7 +750,7 @@ describe('abas da trilha Externa', () => {
   it('o Memorando tem o botão de anexar e mover para a remessa aos fundos', () => {
     const memorando = abas.find((a) => a.key === 'ext-memorando')!
     expect(memorando.anexarEMover).toEqual({
-      rotulo: 'Memorando assinado',
+      rotulo: 'Anexar',
       nota: 'Memorando assinado.',
       statusId: idExt('ENCAMINHAR AOS FUNDOS'),
     })
@@ -1125,8 +1126,11 @@ describe('ABAS_EXTERNO_SEM_TRABALHO', () => {
     expect(ABAS_EXTERNO_SEM_TRABALHO.has('ext-memorando')).toBe(true)
   })
 
-  it('deixa de fora as três abas onde o trabalho acontece', () => {
-    for (const k of ['ext-qualificacao', 'ext-revisao', 'ext-encaminhar']) {
+  // A REMESSA AOS FUNDOS saiu das abas de trabalho em 29/09/2026: o crédito já
+  // foi ao mercado.
+  it('deixa de fora as duas abas onde o trabalho acontece', () => {
+    expect(ABAS_EXTERNO_SEM_TRABALHO.has('ext-encaminhar')).toBe(true)
+    for (const k of ['ext-qualificacao', 'ext-revisao']) {
       expect(ABAS_EXTERNO_SEM_TRABALHO.has(k), k).toBe(false)
     }
   })
