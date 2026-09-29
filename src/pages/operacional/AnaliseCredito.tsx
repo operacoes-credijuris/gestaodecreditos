@@ -34,6 +34,7 @@ import {
   RefreshCw,
   Landmark,
   Loader2,
+  MessageSquarePlus,
   Paperclip,
   Receipt,
   Tag,
@@ -50,6 +51,7 @@ import {
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABAS_COM_TAGS,
+  ABA_EM_PRECIFICACAO_EXTERNO,
   ABAS_EXTERNO_SEM_TRABALHO,
   ABAS_INTERNO_SEM_TRABALHO,
   type EtiquetaDoFundo,
@@ -1097,6 +1099,104 @@ function SeletorDeEtiquetas({
   )
 }
 
+/**
+ * A ANOTAÇÃO NO CARD, escrita da fila de precificação.
+ *
+ * É ONDE O CRÉDITO ESTÁ EM JOGO: o fundo respondeu a proposta, pediu documento,
+ * mudou o deságio — e isso tinha de ser escrito no Kommo, à parte, abrindo o
+ * card lá. Aqui ela sai do mesmo lugar em que se marca a etiqueta do fundo, e as
+ * duas coisas costumam andar juntas ("Cotado BTG" e o que o BTG disse).
+ *
+ * VAI COMO NOTA DE PESSOA, com o nome de quem escreveu no rodapé (ver
+ * `marcarComoDePessoa`): é o que o comercial lê, e é o que a análise seguinte
+ * precisa ler como informação do card — não como anotação da própria máquina.
+ *
+ * O RASCUNHO NÃO SE PERDE AO FECHAR: clicar fora ou apertar Esc fecha a caixa e
+ * mantém o texto, e o ícone fica marcado enquanto houver rascunho. Só o envio
+ * bem-sucedido limpa.
+ */
+function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<void> }) {
+  const [aberto, setAberto] = useState(false)
+  const [texto, setTexto] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const caixa = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!aberto) return
+    const fora = (e: MouseEvent) => {
+      if (!caixa.current?.contains(e.target as Node)) setAberto(false)
+    }
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAberto(false)
+    }
+    document.addEventListener('mousedown', fora)
+    document.addEventListener('keydown', tecla)
+    return () => {
+      document.removeEventListener('mousedown', fora)
+      document.removeEventListener('keydown', tecla)
+    }
+  }, [aberto])
+
+  async function enviar() {
+    const t = texto.trim()
+    if (!t || enviando) return
+    setEnviando(true)
+    try {
+      await onEnviar(t)
+      setTexto('')
+      setAberto(false)
+    } catch {
+      // O aviso é de quem chamou; o texto fica na caixa para tentar de novo.
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  const temRascunho = texto.trim().length > 0
+  return (
+    <div className="relative" ref={caixa}>
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        title={temRascunho ? 'Anotação em rascunho — clique para continuar' : 'Escrever uma anotação no card do Kommo'}
+        aria-label="Anotação no card"
+        className={cn(
+          'inline-flex h-5 w-5 items-center justify-center rounded transition-colors',
+          aberto || temRascunho
+            ? 'bg-brand-50 text-brand-700'
+            : 'text-slate-400 hover:bg-slate-100 hover:text-brand-700',
+        )}
+      >
+        <MessageSquarePlus className="h-3.5 w-3.5" />
+      </button>
+
+      {aberto && (
+        <div className="absolute left-0 z-20 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+          <textarea
+            autoFocus
+            rows={4}
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void enviar()
+            }}
+            placeholder="Ex.: Retorno do BTG — proposta a 62%, pagamento em 30 dias após a cessão."
+            className="w-full resize-y rounded-md border border-slate-200 p-2 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+          />
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <span className="text-[10px] leading-tight text-slate-400">
+              Vai para o card no Kommo, com o seu nome. Ctrl+Enter envia.
+            </span>
+            <Button size="sm" onClick={() => void enviar()} loading={enviando} disabled={!temRascunho}>
+              Enviar
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CardCredito({
   lead,
   acoes,
@@ -1122,6 +1222,7 @@ function CardCredito({
   etiquetasOferecidas,
   onEtiquetar,
   etiquetaEmVoo,
+  onAnotar,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -1193,6 +1294,11 @@ function CardCredito({
   onEtiquetar: (l: KommoLead, etiqueta: string, acao: 'adicionar' | 'remover') => void
   /** A etiqueta deste card que está sendo gravada, ou null. */
   etiquetaEmVoo: string | null
+  /**
+   * Escreve uma anotação no card do Kommo. Só na aba "Em precificação" do
+   * Externo, ao lado das etiquetas — ver `BotaoDeAnotacao`.
+   */
+  onAnotar?: (l: KommoLead, texto: string) => Promise<void>
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -1281,7 +1387,7 @@ function CardCredito({
               antes de ler o texto. Verde e vermelho ficam fora da paleta — no
               card eles já significam análise pronta e recusa. */}
           {mostrarTags &&
-            ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0) && (
+            ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0 || onAnotar) && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {/* A ORDEM É A DA CASA — PJUS, BTG, Luiz —, e não a do Kommo,
                     que é a ordem em que alguém etiquetou e muda de card para
@@ -1304,6 +1410,7 @@ function CardCredito({
                     onAlternar={(etiqueta, acao) => onEtiquetar(lead, etiqueta, acao)}
                   />
                 )}
+                {onAnotar && <BotaoDeAnotacao onEnviar={(t) => onAnotar(lead, t)} />}
               </div>
             )}
           {/* Sem linha de metadados: o processo já vem no título e o responsável é
@@ -2997,6 +3104,38 @@ export default function AnaliseCredito() {
   }
 
   /**
+   * A anotação escrita na fila de precificação (ver `BotaoDeAnotacao`).
+   *
+   * APARECE NO CARD NA HORA: o espelho só a traria na próxima sincronização, e
+   * quem acabou de escrever o retorno do fundo procuraria a nota e não a veria.
+   * A sincronização seguinte troca esta cópia pela do Kommo.
+   */
+  async function anotarNoCard(lead: KommoLead, texto: string) {
+    try {
+      await invokeFunction('kommo-anotar', {
+        lead_id: lead.kommo_lead_id, texto, origem: 'pessoa', autor: analistaNome,
+      })
+    } catch (e) {
+      toast.error(`A anotação não subiu para o Kommo: ${(e as Error)?.message ?? e}. O texto continua na caixa.`)
+      throw e
+    }
+    const nova: KommoNota = {
+      id: -Date.now(),
+      texto,
+      criado_em: new Date().toISOString(),
+      autor: analistaNome,
+      tipo: 'common',
+      automatica: false,
+    }
+    qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+      antes?.map((l) =>
+        l.kommo_lead_id === lead.kommo_lead_id ? { ...l, notas: [...(l.notas ?? []), nova] } : l,
+      ),
+    )
+    toast.success('Anotação enviada ao card no Kommo.')
+  }
+
+  /**
    * O desfecho pelo CARD: abre a janela da mensagem.
    *
    * ANTES ERA UM CLIQUE SECO, e o card mudava de coluna sem uma linha de
@@ -3240,6 +3379,9 @@ export default function AnaliseCredito() {
                 etiquetaEmVoo={
                   etiquetaEmVoo?.leadId === l.kommo_lead_id ? etiquetaEmVoo.etiqueta : null
                 }
+                // A ANOTAÇÃO AO LADO DAS ETIQUETAS, na mesma aba que as edita:
+                // é onde o retorno do fundo precisa ser escrito.
+                onAnotar={abaAtual?.key === ABA_EM_PRECIFICACAO_EXTERNO ? anotarNoCard : undefined}
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria
