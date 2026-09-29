@@ -1090,6 +1090,11 @@ describe('ABAS_EXTERNO_SEM_TRABALHO', () => {
     }
   })
 
+  // O MEMORANDO NÃO TEM BOTÃO DE TRABALHO: a análise já passou pela revisão.
+  it('o memorando fica sem due diligence e sem Executar análise', () => {
+    expect(ABAS_EXTERNO_SEM_TRABALHO.has('ext-memorando')).toBe(true)
+  })
+
   it('deixa de fora as três abas onde o trabalho acontece', () => {
     for (const k of ['ext-qualificacao', 'ext-revisao', 'ext-encaminhar']) {
       expect(ABAS_EXTERNO_SEM_TRABALHO.has(k), k).toBe(false)

@@ -706,6 +706,10 @@ export const ABAS_EXTERNO_SEM_TRABALHO: ReadonlySet<string> = new Set([
   // que se espera é o preço dele. Oferecer diligência ali convidaria a refazer
   // o que já foi feito antes de encaminhar.
   ABA_EM_PRECIFICACAO_EXTERNO,
+  // NO MEMORANDO A ANÁLISE JÁ FOI FEITA E REVISADA: a revisão mandou o crédito
+  // para cá porque falta o memorando, não uma nova leitura. Sem due diligence
+  // nem "Executar análise" (pedido de 29/09/2026).
+  'ext-memorando',
 ])
 
 /**
