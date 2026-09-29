@@ -1295,6 +1295,234 @@ function BotaoEscolherProposta({
   )
 }
 
+/** Um fundo com plataforma própria de envio (ver `envioAosFundos` na trilha). */
+type FundoDoEnvio = { fundo: string; etiqueta: string; plataforma: string; nota: string }
+
+/**
+ * OS CHECKS DO ENVIO AOS FUNDOS, na remessa: um por fundo com plataforma própria.
+ *
+ * O NOME DO FUNDO É LINK para a plataforma dele (abre em outra aba) — é onde o
+ * economista sobe o crédito; o QUADRADO abre a janela da anotação. O check
+ * marcado é a etiqueta no card, com há quanto tempo.
+ *
+ * COM TODOS FEITOS E O CARD AINDA AQUI (a movimentação falhou, ou as etiquetas
+ * foram postas à mão no Kommo), aparece o botão de mover.
+ */
+function ChecksDosFundos({
+  lead,
+  fundos,
+  ocupado,
+  onAbrir,
+  onMover,
+}: {
+  lead: KommoLead
+  fundos: FundoDoEnvio[]
+  ocupado: boolean
+  onAbrir: (f: FundoDoEnvio) => void
+  onMover: () => void
+}) {
+  const feito = (f: FundoDoEnvio) => (lead.tags ?? []).some((t) => mesmaEtiqueta(t, f.etiqueta))
+  const todos = fundos.every(feito)
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="flex items-center gap-3">
+        {fundos.map((f) => {
+          const ok = feito(f)
+          const desde = ok ? desdeQuandoAEtiqueta(lead.tags_em, f.etiqueta) : null
+          return (
+            <div key={f.fundo} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onAbrir(f)}
+                disabled={ocupado || ok}
+                aria-pressed={ok}
+                title={
+                  ok
+                    ? `${f.etiqueta}${desde ? ` · ${tempoDecorrido(desde)}` : ''}`
+                    : `Registrar o envio ao ${f.fundo}`
+                }
+                className={cn(
+                  'flex h-5 w-5 items-center justify-center rounded border transition-colors disabled:cursor-default',
+                  ok
+                    ? 'border-emerald-600 bg-emerald-600 text-white'
+                    : 'border-slate-300 bg-white hover:border-emerald-500 hover:bg-emerald-50',
+                )}
+              >
+                {ok && <Check className="h-3.5 w-3.5" />}
+              </button>
+              <a
+                href={f.plataforma}
+                target="_blank"
+                rel="noreferrer"
+                title={`Abrir a plataforma do ${f.fundo}`}
+                className={cn(
+                  'font-display inline-flex items-center gap-1 text-sm font-semibold hover:underline',
+                  ok ? 'text-emerald-700' : 'text-slate-700 hover:text-brand-700',
+                )}
+              >
+                {f.fundo}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          )
+        })}
+      </div>
+      {todos && (
+        <Button size="sm" variant="success" icon={<ArrowRight className="h-4 w-4" />} onClick={onMover} disabled={ocupado}>
+          Mover para Em precificação
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A JANELA DO ENVIO A UM FUNDO: o texto (opcional) e as imagens — o print da
+ * plataforma, colado com Ctrl+V ou escolhido no computador. A anotação no card
+ * começa sempre pela linha padrão ("Crédito enviado ao BTG."), e o que se
+ * escrever vem depois.
+ */
+function JanelaDoEnvioAoFundo({
+  fundo,
+  onFechar,
+  onConfirmar,
+}: {
+  fundo: FundoDoEnvio
+  onFechar: () => void
+  onConfirmar: (texto: string, arquivos: File[], onAndamento: (texto: string, pct?: number) => void) => Promise<void>
+}) {
+  const [texto, setTexto] = useState('')
+  const [arquivos, setArquivos] = useState<File[]>([])
+  const [andamento, setAndamento] = useState<{ texto: string; pct?: number } | null>(null)
+  const entrada = useRef<HTMLInputElement>(null)
+  const ocupado = andamento !== null
+
+  // O PRINT COLADO chega como "image.png": ganha nome que diga de onde veio.
+  const acrescentar = (lista: File[]) =>
+    setArquivos((antes) => [
+      ...antes,
+      ...lista.map((a, i) =>
+        a.name && a.name !== 'image.png'
+          ? a
+          : new File([a], `print-${fundo.fundo}-${Date.now()}-${i + 1}.png`, { type: a.type || 'image/png' }),
+      ),
+    ])
+
+  async function confirmar() {
+    setAndamento({ texto: 'Começando…', pct: 0 })
+    try {
+      await onConfirmar(texto, arquivos, (t, pct) => setAndamento({ texto: t, pct }))
+    } catch {
+      // O aviso é de quem chamou; a janela fica aberta para tentar de novo.
+    } finally {
+      setAndamento(null)
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={() => !ocupado && onFechar()}
+      dirty={texto.trim().length > 0 || arquivos.length > 0}
+      title={`Envio ao ${fundo.fundo}`}
+      description={
+        <a
+          href={fundo.plataforma}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+        >
+          Abrir a plataforma do {fundo.fundo}
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      }
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onFechar} disabled={ocupado}>
+            Cancelar
+          </Button>
+          <Button variant="success" onClick={() => void confirmar()} loading={ocupado}>
+            Confirmar envio
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <textarea
+          autoFocus
+          rows={4}
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          onPaste={(e) => {
+            const imagens = [...e.clipboardData.files].filter((a) => a.type.startsWith('image/'))
+            if (imagens.length) {
+              e.preventDefault()
+              acrescentar(imagens)
+            }
+          }}
+          disabled={ocupado}
+          placeholder="O que foi enviado (opcional) — dá para colar o print aqui com Ctrl+V."
+          className="w-full resize-y rounded-md border border-slate-200 p-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+        />
+        <div>
+          <input
+            ref={entrada}
+            type="file"
+            accept="image/*,application/pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              acrescentar([...(e.target.files ?? [])])
+              e.target.value = ''
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<Paperclip className="h-4 w-4" />}
+            onClick={() => entrada.current?.click()}
+            disabled={ocupado}
+          >
+            Anexar imagem
+          </Button>
+          {arquivos.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {arquivos.map((a, i) => (
+                <li key={`${a.name}-${i}`} className="flex items-center justify-between gap-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                  <span className="truncate">{a.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setArquivos((antes) => antes.filter((_, j) => j !== i))}
+                    disabled={ocupado}
+                    className="text-slate-400 hover:text-red-600"
+                    aria-label={`Tirar ${a.name}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {andamento && (
+          <div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className={cn(
+                  'h-full rounded-full bg-emerald-600 transition-all duration-200',
+                  andamento.pct === undefined && 'animate-pulse',
+                )}
+                style={{ width: `${andamento.pct ?? 100}%` }}
+              />
+            </div>
+            <p className="mt-1 text-xs text-slate-500">{andamento.texto}</p>
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
 /** O andamento do anexar-e-mover: o arquivo subindo, o Kommo gravando, o card se movendo. */
 type AndamentoDoAnexo = ProgressoDoEnvio | { fase: 'movendo' }
 
@@ -1507,6 +1735,7 @@ function CardCredito({
   onAnotar,
   onEscolherProposta,
   anexarEMover,
+  envioAosFundos,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -1593,6 +1822,12 @@ function CardCredito({
     rotulo: string
     soMover: boolean
     onEnviar: (l: KommoLead, arquivo: File | null, onAndamento: (p: AndamentoDoAnexo) => void) => Promise<void>
+  }
+  /** Os checks do envio aos fundos, onde a aba os declara (a Remessa do Externo). */
+  envioAosFundos?: {
+    fundos: FundoDoEnvio[]
+    onAbrir: (l: KommoLead, f: FundoDoEnvio) => void
+    onMover: (l: KommoLead) => void
   }
 }) {
   const [aberto, setAberto] = useState(false)
@@ -1748,6 +1983,15 @@ function CardCredito({
             <SeloDaEtapa lead={lead} />
             <SeloDaCriacao lead={lead} />
           </div>
+          {envioAosFundos && (
+            <ChecksDosFundos
+              lead={lead}
+              fundos={envioAosFundos.fundos}
+              ocupado={ocupado}
+              onAbrir={(f) => envioAosFundos.onAbrir(lead, f)}
+              onMover={() => envioAosFundos.onMover(lead)}
+            />
+          )}
           {anexarEMover && (
             <BotaoAnexarEMover
               rotulo={anexarEMover.rotulo}
@@ -3507,6 +3751,114 @@ export default function AnaliseCredito() {
    * próximo clique só move — o arquivo não sobe duas vezes.
    */
   const [anexadosSemMover, setAnexadosSemMover] = useState<Set<number>>(new Set())
+
+  /**
+   * O ENVIO A UM FUNDO (ver `ChecksDosFundos`): a anotação (com as imagens, se
+   * houver), a etiqueta do fundo e — com todos os checks feitos — o card para o
+   * destino da aba.
+   *
+   * A ANOTAÇÃO QUE JÁ SUBIU não sobe de novo: se a etiqueta falhar, confirmar
+   * outra vez só etiqueta.
+   */
+  const [envioAberto, setEnvioAberto] = useState<{ lead: KommoLead; fundo: FundoDoEnvio } | null>(null)
+  const [notasDoEnvio, setNotasDoEnvio] = useState<Set<string>>(new Set())
+  async function moverAposOsFundos(lead: KommoLead) {
+    const cfg = abaAtual?.envioAosFundos
+    if (!cfg) return
+    setEmAndamento({ leadId: lead.kommo_lead_id, statusId: cfg.destino })
+    try {
+      await mover.mutateAsync({ leadId: lead.kommo_lead_id, statusId: cfg.destino, comentario: '' })
+    } finally {
+      setEmAndamento(null)
+    }
+  }
+  async function enviarAoFundo(
+    lead: KommoLead,
+    fundo: FundoDoEnvio,
+    texto: string,
+    arquivos: File[],
+    onAndamento: (texto: string, pct?: number) => void,
+  ) {
+    const cfg = abaAtual?.envioAosFundos
+    if (!cfg) return
+    const id = lead.kommo_lead_id
+    const chave = `${id}:${fundo.fundo}`
+    const nota = [fundo.nota, texto.trim()].filter(Boolean).join('\n\n')
+
+    // 1. A ANOTAÇÃO, com as imagens se houver (a primeira leva o texto).
+    if (!notasDoEnvio.has(chave)) {
+      try {
+        if (arquivos.length === 0) {
+          onAndamento('Gravando a anotação no Kommo…')
+          await invokeFunction('kommo-anotar', { lead_id: id, texto: nota, origem: 'pessoa', autor: analistaNome })
+        } else {
+          for (let i = 0; i < arquivos.length; i++) {
+            const a = arquivos[i]
+            if (a.size > 100 * 1024 * 1024) throw new Error(`${a.name} passa de 100 MB.`)
+            const qual = arquivos.length > 1 ? `arquivo ${i + 1} de ${arquivos.length} — ` : ''
+            const r = await enviarArquivo<{ aviso?: string | null }>(
+              'kommo-anexo-enviar',
+              a,
+              {
+                'x-lead-id': String(id),
+                'x-nome': encodeURIComponent(a.name),
+                'x-texto': encodeURIComponent(i === 0 ? nota : ''),
+              },
+              (p) =>
+                p.fase === 'enviando'
+                  ? onAndamento(`Enviando ${qual}${p.pct}%`, p.pct)
+                  : onAndamento(`Gravando no Kommo ${qual}…`),
+            )
+            if (r?.aviso) toast.error(r.aviso)
+          }
+        }
+      } catch (e) {
+        toast.error(`A anotação não subiu para o Kommo: ${(e as Error).message}`)
+        throw e
+      }
+      setNotasDoEnvio((antes) => new Set(antes).add(chave))
+    }
+
+    // 2. A ETIQUETA DO FUNDO.
+    onAndamento(`Pondo a etiqueta "${fundo.etiqueta}"…`)
+    let tags: string[]
+    try {
+      const r = await invokeFunction<{ tags?: string[]; aviso?: string | null }>('kommo-etiquetar', {
+        leadId: id,
+        etiqueta: fundo.etiqueta,
+        acao: 'adicionar',
+      })
+      tags = r?.tags ?? [...(lead.tags ?? []), fundo.etiqueta]
+      if (r?.aviso) toast.error(r.aviso)
+    } catch (e) {
+      toast.error(
+        `A anotação está no card, mas a etiqueta "${fundo.etiqueta}" não entrou: ${(e as Error).message}. ` +
+          'Confirme de novo — a anotação não se repete.',
+      )
+      throw e
+    }
+    qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+      antes?.map((l) =>
+        l.kommo_lead_id === id
+          ? { ...l, tags, tags_em: { ...(l.tags_em ?? {}), [fundo.etiqueta]: new Date().toISOString() } }
+          : l,
+      ),
+    )
+    setNotasDoEnvio((antes) => {
+      const n = new Set(antes)
+      n.delete(chave)
+      return n
+    })
+
+    // 3. TODOS OS FUNDOS FEITOS: o card segue para o destino.
+    const todos = cfg.fundos.every((f) => tags.some((t) => mesmaEtiqueta(t, f.etiqueta)))
+    if (!todos) {
+      toast.success(fundo.nota)
+      return
+    }
+    onAndamento('Movendo o card para Em precificação…')
+    await moverAposOsFundos(lead)
+  }
   async function anexarEMover(
     lead: KommoLead,
     arquivo: File | null,
@@ -3914,6 +4266,16 @@ export default function AnaliseCredito() {
                 // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
                 onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
                 // ANEXAR E MOVER, onde a aba o declara — o Memorando do Externo.
+                // OS CHECKS DO ENVIO AOS FUNDOS, onde a aba os declara — a Remessa.
+                envioAosFundos={
+                  abaAtual?.envioAosFundos
+                    ? {
+                        fundos: abaAtual.envioAosFundos.fundos,
+                        onAbrir: (lead, fundo) => setEnvioAberto({ lead, fundo }),
+                        onMover: (lead) => void moverAposOsFundos(lead).catch(() => null),
+                      }
+                    : undefined
+                }
                 anexarEMover={
                   abaAtual?.anexarEMover
                     ? {
@@ -3967,6 +4329,17 @@ export default function AnaliseCredito() {
           onFechar={() => setPlanilhaLead(null)}
           onPreencher={(colado) => preencherPlanilha(planilhaLead, colado)}
           onMotorAntigo={() => void onAnaliseJuridica(planilhaLead)}
+        />
+      )}
+
+      {envioAberto && (
+        <JanelaDoEnvioAoFundo
+          fundo={envioAberto.fundo}
+          onFechar={() => setEnvioAberto(null)}
+          onConfirmar={async (texto, arquivos, onAndamento) => {
+            await enviarAoFundo(envioAberto.lead, envioAberto.fundo, texto, arquivos, onAndamento)
+            setEnvioAberto(null)
+          }}
         />
       )}
 

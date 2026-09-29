@@ -141,6 +141,20 @@ export interface DefAbaPrecatorio {
    */
   anexarEMover?: { rotulo: string; nota: string; colunaKommo: string; statusId?: number }
   /**
+   * O ENVIO AOS FUNDOS: um check por fundo que tem plataforma própria de envio.
+   * Quem sobe o crédito lá marca o check, escreve (ou cola o print) numa janela,
+   * e a plataforma anota no card, põe a etiqueta daquele fundo e — com todos os
+   * checks feitos — move o card para o destino. Pedido de 29/09/2026 para a
+   * remessa aos fundos (BTG e PJUS, depois Em precificação).
+   *
+   * O CHECK FEITO É A ETIQUETA NO CARD: não há outro registro que possa
+   * discordar do Kommo, e a etiqueta posta à mão lá também conta.
+   */
+  envioAosFundos?: {
+    fundos: { fundo: string; etiqueta: string; plataforma: string; nota: string }[]
+    destino: { colunaKommo: string; statusId?: number }
+  }
+  /**
    * Esta etapa pode INTERROMPER o crédito — exigir diligência ou recusar?
    *
    * OMITIDO, SIM: quase toda etapa de decisão interrompe, e diligência e recusa
@@ -446,6 +460,26 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
       },
       {
         key: ABA_APROVADOS_EXTERNO,
+        // PRIMEIRO AS PLATAFORMAS DOS FUNDOS, DEPOIS A PRECIFICAÇÃO (29/09/2026):
+        // BTG e PJUS recebem o crédito nas plataformas deles; com os dois checks
+        // feitos, o card vai para Em precificação — já com as duas etiquetas.
+        envioAosFundos: {
+          fundos: [
+            {
+              fundo: 'BTG',
+              etiqueta: 'Cotado BTG',
+              plataforma: 'https://officer.precatoriosbrasil.com/monitor/precatorios/list/new',
+              nota: 'Crédito enviado ao BTG.',
+            },
+            {
+              fundo: 'PJUS',
+              etiqueta: 'Enviado PJUS',
+              plataforma: 'https://parceiro.pjus.com.br/area-parceiro/cotacoes/nova-cotacao',
+              nota: 'Crédito enviado à PJUS.',
+            },
+          ],
+          destino: { colunaKommo: 'EM PRECIFICAÇÃO', statusId: 111533984 },
+        },
         // "APROVADOS" NA PLATAFORMA, "ENCAMINHAR AOS FUNDOS" NO KOMMO — e é de
         // propósito. O rótulo daqui é o vocabulário de quem analisa: o que o ato
         // significa para a casa é uma aprovação. O nome do kanban é o do
@@ -586,6 +620,7 @@ export function idsDestinoDaTrilha(pipelineId: number): number[] {
     for (const saida of aba.saidas ?? []) if (saida.statusId) ids.add(saida.statusId)
     if (aba.escolhaDeProposta?.statusId) ids.add(aba.escolhaDeProposta.statusId)
     if (aba.anexarEMover?.statusId) ids.add(aba.anexarEMover.statusId)
+    if (aba.envioAosFundos?.destino.statusId) ids.add(aba.envioAosFundos.destino.statusId)
   }
   return [...ids]
 }
@@ -609,6 +644,7 @@ export function destinosDaTrilha(pipelineId: number): string[] {
     for (const saida of aba.saidas ?? []) nomes.add(saida.colunaKommo)
     if (aba.escolhaDeProposta) nomes.add(aba.escolhaDeProposta.colunaKommo)
     if (aba.anexarEMover) nomes.add(aba.anexarEMover.colunaKommo)
+    if (aba.envioAosFundos) nomes.add(aba.envioAosFundos.destino.colunaKommo)
   }
   return [...nomes]
 }

@@ -46,6 +46,7 @@ import {
   ST_PROTOCOLO,
   ST_REPROVADO,
   abasDoFunil,
+  etiquetaCanonica,
   agruparPorAba,
   dataDaEtapa,
   colunasPrecatorioDesalinhadas,
@@ -757,6 +758,25 @@ describe('abas da trilha Externa', () => {
     expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111533980, 'Remessa aos fundos')).toBe(true)
     // E SÓ ELE: o resto das abas não tem o botão.
     expect(abas.filter((a) => a.anexarEMover).map((a) => a.key)).toEqual(['ext-memorando'])
+  })
+
+  /**
+   * O ENVIO AOS FUNDOS na remessa (29/09/2026): um check por fundo com
+   * plataforma própria; a etiqueta de cada um é das da casa (senão a
+   * kommo-etiquetar a recusaria), e o destino é Em precificação — pelo id.
+   */
+  it('a Remessa aos fundos tem os checks do BTG e da PJUS, e leva a Em precificação', () => {
+    const remessa = abas.find((a) => a.key === ABA_APROVADOS_EXTERNO)!
+    expect(remessa.envioAosFundos?.fundos.map((f) => [f.fundo, f.etiqueta])).toEqual([
+      ['BTG', 'Cotado BTG'],
+      ['PJUS', 'Enviado PJUS'],
+    ])
+    for (const f of remessa.envioAosFundos!.fundos) {
+      expect(etiquetaCanonica(f.etiqueta), f.fundo).toBe(f.etiqueta)
+      expect(f.plataforma, f.fundo).toMatch(/^https:\/\//)
+    }
+    expect(remessa.envioAosFundos?.destino).toBe(idExt('EM PRECIFICAÇÃO'))
+    expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111533984, 'EM PRECIFICAÇÃO')).toBe(true)
   })
 
   it('as demais abas do Externo não oferecem desfecho', () => {

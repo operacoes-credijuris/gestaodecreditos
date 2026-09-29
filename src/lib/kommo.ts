@@ -614,6 +614,11 @@ export interface Aba {
   faseDiscreta?: boolean
   /** O botão de anexar e mover (ver `anexarEMover` na trilha), com a coluna já resolvida. */
   anexarEMover?: { rotulo: string; nota: string; statusId: number } | null
+  /** Os checks do envio aos fundos (ver `envioAosFundos` na trilha), com o destino resolvido. */
+  envioAosFundos?: {
+    fundos: { fundo: string; etiqueta: string; plataforma: string; nota: string }[]
+    destino: number
+  } | null
 }
 
 
@@ -914,6 +919,10 @@ export function abasDoFunil(
         return a.anexarEMover && id !== undefined
           ? { rotulo: a.anexarEMover.rotulo, nota: a.anexarEMover.nota, statusId: id }
           : null
+      })(),
+      envioAosFundos: (() => {
+        const id = a.envioAosFundos ? coluna(a.envioAosFundos.destino) : undefined
+        return a.envioAosFundos && id !== undefined ? { fundos: a.envioAosFundos.fundos, destino: id } : null
       })(),
     }
   }
