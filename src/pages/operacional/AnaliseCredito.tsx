@@ -1583,14 +1583,17 @@ function CardCredito({
               coluna de trinta cards, quem procura os de um fundo acha pela mancha
               antes de ler o texto. Verde e vermelho ficam fora da paleta — no
               card eles já significam análise pronta e recusa. */}
-          {mostrarTags &&
-            ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0 || onAnotar) && (
+          {/* A LINHA ABAIXO DO TÍTULO: as etiquetas (onde a aba as mostra) e a
+              anotação (onde a aba a oferece). Aba sem etiquetas e com anotação —
+              a Diligência — mostra só o ícone da anotação. */}
+          {((mostrarTags && ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0)) ||
+            onAnotar) && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {/* A ORDEM É A DA CASA — PJUS, BTG, PX Ativos… —, e não a do Kommo,
                     que é a ordem em que alguém etiquetou e muda de card para
                     card. Fixa, a POSIÇÃO passa a informar: a primeira é sempre
                     a do PJUS, e a falta dela se nota pelo que não está ali. */}
-                {[...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => {
+                {mostrarTags && [...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => {
                   // HÁ QUANTO TEMPO, junto da etiqueta: "Enviado PJUS · há 9
                   // dias" se lê na fila sem abrir nada.
                   const quando = desdeQuandoAEtiqueta(lead.tags_em, t)
@@ -1608,7 +1611,7 @@ function CardCredito({
                     no card que ainda não tem nenhuma — é justamente ali que ele
                     mais serve. Sem etiquetas e sem seletor, a linha inteira some
                     e o card volta a ser o de antes. */}
-                {etiquetasOferecidas.length > 0 && (
+                {mostrarTags && etiquetasOferecidas.length > 0 && (
                   <SeletorDeEtiquetas
                     oferecidas={etiquetasOferecidas}
                     aplicadas={lead.tags ?? []}
@@ -2166,6 +2169,18 @@ function SeletorDestinacao({
     </div>
   )
 }
+
+/**
+ * As abas em que o card oferece a anotação livre no Kommo (`BotaoDeAnotacao`):
+ * Em precificação, onde se escreve o retorno dos fundos, e as três Diligências
+ * (RPV, Interno e Externo), onde se escreve o que falta e o que chegou.
+ */
+const ABAS_COM_ANOTACAO: ReadonlySet<string> = new Set([
+  ABA_EM_PRECIFICACAO_EXTERNO,
+  'diligencia',
+  'int-diligencia',
+  'ext-diligencia',
+])
 
 /** O card bate com a busca? `q` já em minúsculas. */
 function casaComBusca(x: KommoLead, q: string): boolean {
@@ -3733,7 +3748,7 @@ export default function AnaliseCredito() {
                 }
                 // A ANOTAÇÃO AO LADO DAS ETIQUETAS, na mesma aba que as edita:
                 // é onde o retorno do fundo precisa ser escrito.
-                onAnotar={abaAtual?.key === ABA_EM_PRECIFICACAO_EXTERNO ? anotarNoCard : undefined}
+                onAnotar={ABAS_COM_ANOTACAO.has(abaAtual?.key ?? '') ? anotarNoCard : undefined}
                 // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
                 // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
                 onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
