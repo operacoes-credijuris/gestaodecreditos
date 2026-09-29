@@ -1840,6 +1840,21 @@ function SeletorDestinacao({
   )
 }
 
+/** O card bate com a busca? `q` já em minúsculas. */
+function casaComBusca(x: KommoLead, q: string): boolean {
+  return [
+    x.nome,
+    x.processo_cnj,
+    x.responsavel_nome,
+    // Busca em TODAS as anotações, não só na primeira: informação relevante
+    // costuma vir num comentário posterior.
+    ...(x.notas ?? []).map((n) => n.texto),
+    x.nota_texto,
+  ]
+    .filter(Boolean)
+    .some((v) => v!.toLowerCase().includes(q))
+}
+
 export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
@@ -2773,11 +2788,14 @@ export default function AnaliseCredito() {
    * `undefined` enquanto a consulta está em voo ou falhou, nunca 0: "Precatórios
    * 0" ao lado de uma mensagem de erro afirma que o funil está vazio.
    */
+  // COM BUSCA, O NÚMERO DO FUNIL TAMBÉM É O DE RESULTADOS — o mesmo critério das
+  // etapas logo abaixo, senão o topo diria 150 e as etapas somariam 3.
   const totalExibido = useMemo(() => {
     if (!leads.data) return undefined
     const ids = statusExibidos(funil, etapas.data ?? [])
-    return leads.data.filter((l) => ids.has(l.status_id)).length
-  }, [leads.data, funil, etapas.data])
+    const q = busca.trim().toLowerCase()
+    return leads.data.filter((l) => ids.has(l.status_id) && (!q || casaComBusca(l, q))).length
+  }, [leads.data, funil, etapas.data, busca])
 
   // Coluna que a tela fixa e o kanban não tem. Em RPV o vínculo é por id (quebra
   // se a coluna for recriada); em Precatório é por nome (quebra se for
@@ -2839,26 +2857,31 @@ export default function AnaliseCredito() {
         ? 'nenhum'
         : 'dd'
 
-  const lista = useMemo(() => {
-    let l = abaAtual ? (porAba[abaAtual.key] ?? []) : []
-    if (busca.trim()) {
-      const q = busca.toLowerCase()
-      l = l.filter((x) =>
-        [
-          x.nome,
-          x.processo_cnj,
-          x.responsavel_nome,
-          // Busca em TODAS as anotações, não só na primeira: informação
-          // relevante costuma vir num comentário posterior.
-          ...(x.notas ?? []).map((n) => n.texto),
-          x.nota_texto,
-        ]
-          .filter(Boolean)
-          .some((v) => v!.toLowerCase().includes(q)),
-      )
-    }
-    return l
-  }, [porAba, abaAtual, busca])
+  /**
+   * A BUSCA VALE PARA TODAS AS ABAS, e não só para a aberta. Filtrando só a lista
+   * da aba aberta, o número de cada etapa continuava o total, e quem buscava um
+   * card não tinha como saber em qual etapa ele estava sem abrir uma por uma. Com
+   * as abas filtradas juntas, o número de cada etapa é o de resultados nela.
+   */
+  const porAbaNaBusca = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    if (!q) return porAba
+    return Object.fromEntries(
+      Object.entries(porAba).map(([k, l]) => [k, l.filter((x) => casaComBusca(x, q))]),
+    ) as Record<string, KommoLead[]>
+  }, [porAba, busca])
+
+  const lista = useMemo(
+    () => (abaAtual ? (porAbaNaBusca[abaAtual.key] ?? []) : []),
+    [porAbaNaBusca, abaAtual],
+  )
+
+  /** Onde a busca achou cards, quando não foi na aba aberta: "Revisão (2), Aprovados (1)". */
+  const achadosEmOutrasAbas = busca.trim()
+    ? abas
+        .filter((a) => a.key !== abaAtual?.key && (porAbaNaBusca[a.key]?.length ?? 0) > 0)
+        .map((a) => `${a.label} (${porAbaNaBusca[a.key].length})`)
+    : []
 
   /** O card e o desfecho aguardando a mensagem, quando a decisão vem do card. */
   const [mensagemDoCard, setMensagemDoCard] = useState<{
@@ -3095,7 +3118,7 @@ export default function AnaliseCredito() {
               items={abas.map((a) => ({
                 key: a.key,
                 label: a.label,
-                count: porAba[a.key]?.length ?? 0,
+                count: porAbaNaBusca[a.key]?.length ?? 0,
               }))}
               value={abaAtual?.key ?? ''}
               onChange={(v) => setAba(v)}
@@ -3172,9 +3195,13 @@ export default function AnaliseCredito() {
             }
             description={
               busca.trim()
-                ? `Nenhum card corresponde à busca nesta etapa do funil de ${
-                    funil === FUNIL_PRECATORIO ? 'Precatórios' : 'RPV'
-                  }. O card pode estar em outra etapa, ou no outro funil.`
+                ? achadosEmOutrasAbas.length
+                  ? `Nenhum card corresponde à busca nesta etapa. Achei em: ${achadosEmOutrasAbas.join(', ')}.`
+                  : `Nenhum card corresponde à busca em nenhuma etapa do funil de ${
+                      funil === FUNIL_PRECATORIO ? 'Precatórios' : 'RPV'
+                    }. O card pode estar no outro funil${
+                      funil === FUNIL_PRECATORIO ? ' ou na outra destinação' : ''
+                    }.`
                 : (abaAtual?.descricaoVazia ??
                   'Este funil ainda não tem card nenhum no Kommo. Quando o comercial criar um, ele aparece aqui na próxima sincronização.')
             }
