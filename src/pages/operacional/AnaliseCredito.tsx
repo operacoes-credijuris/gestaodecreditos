@@ -1134,9 +1134,6 @@ function SeletorDeEtiquetas({
               })}
             </tbody>
           </table>
-          <p className="mt-1.5 text-[10px] leading-tight text-slate-400">
-            Uma etiqueta por fundo. Clique na marcada para tirar.
-          </p>
         </div>
       )}
     </div>
