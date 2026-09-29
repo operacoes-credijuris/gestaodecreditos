@@ -612,6 +612,8 @@ export interface Aba {
   fase?: string
   /** A fase dela é a de fora do fluxo (os perdidos) — a tela a mostra mais discreta. */
   faseDiscreta?: boolean
+  /** O botão de anexar e mover (ver `anexarEMover` na trilha), com a coluna já resolvida. */
+  anexarEMover?: { rotulo: string; nota: string; statusId: number } | null
 }
 
 
@@ -904,6 +906,12 @@ export function abasDoFunil(
       // para o Kommo é escrita antes de o card se mover.
       desfechoAgrupado: a.desfechoAgrupado ?? oferece(a),
       escolhaDeProposta: a.escolhaDeProposta ? (coluna(a.escolhaDeProposta) ?? null) : null,
+      anexarEMover: (() => {
+        const id = a.anexarEMover ? coluna(a.anexarEMover) : undefined
+        return a.anexarEMover && id !== undefined
+          ? { rotulo: a.anexarEMover.rotulo, nota: a.anexarEMover.nota, statusId: id }
+          : null
+      })(),
     }
   }
 

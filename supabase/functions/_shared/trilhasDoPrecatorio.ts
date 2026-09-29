@@ -134,6 +134,13 @@ export interface DefAbaPrecatorio {
    */
   desfechoAgrupado?: boolean
   /**
+   * ANEXAR E MOVER: o botão que recebe um arquivo do computador, sobe ao card
+   * com uma anotação padrão e move o card. O primeiro uso é o memorando de
+   * negociação (29/09/2026): "Memorando assinado", e o card vai para a remessa
+   * aos fundos. Fluxo próprio, como a escolha de proposta — fora das `saidas`.
+   */
+  anexarEMover?: { rotulo: string; nota: string; colunaKommo: string; statusId?: number }
+  /**
    * Esta etapa pode INTERROMPER o crédito — exigir diligência ou recusar?
    *
    * OMITIDO, SIM: quase toda etapa de decisão interrompe, e diligência e recusa
@@ -421,6 +428,15 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
       },
       {
         key: 'ext-memorando',
+        // O MEMORANDO ASSINADO LEVA O CRÉDITO AOS FUNDOS (29/09/2026): quem o
+        // recebeu do comercial o escolhe no computador, o card recebe o arquivo e
+        // a anotação, e segue para a remessa aos fundos.
+        anexarEMover: {
+          rotulo: 'Memorando assinado',
+          nota: 'Memorando assinado.',
+          colunaKommo: 'ENCAMINHAR AOS FUNDOS',
+          statusId: 111533980,
+        },
         // SEM DESFECHO, por ora: é etapa de trabalho, não de decisão. A saída
         // dela ainda não foi definida — e enquanto não for, a aba mostra os
         // cards e quem os move é o Kommo.
@@ -461,7 +477,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
           {
             colunaKommo: 'REVISÃO DA QUALIFICAÇÃO',
             statusId: 111533972,
-            label: 'Diligência sanada',
+            label: 'Sanado',
             variant: 'primary',
             papel: 'validar',
           },
@@ -567,6 +583,7 @@ export function idsDestinoDaTrilha(pipelineId: number): number[] {
   for (const aba of trilha.abas) {
     for (const saida of aba.saidas ?? []) if (saida.statusId) ids.add(saida.statusId)
     if (aba.escolhaDeProposta?.statusId) ids.add(aba.escolhaDeProposta.statusId)
+    if (aba.anexarEMover?.statusId) ids.add(aba.anexarEMover.statusId)
   }
   return [...ids]
 }
@@ -589,6 +606,7 @@ export function destinosDaTrilha(pipelineId: number): string[] {
   for (const aba of trilha.abas) {
     for (const saida of aba.saidas ?? []) nomes.add(saida.colunaKommo)
     if (aba.escolhaDeProposta) nomes.add(aba.escolhaDeProposta.colunaKommo)
+    if (aba.anexarEMover) nomes.add(aba.anexarEMover.colunaKommo)
   }
   return [...nomes]
 }

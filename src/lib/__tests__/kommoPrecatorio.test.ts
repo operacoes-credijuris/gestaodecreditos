@@ -737,11 +737,25 @@ describe('abas da trilha Externa', () => {
     const diligencia = abas.find((a) => a.key === 'ext-diligencia')!
     expect(diligencia.acoes).toHaveLength(1)
     expect(diligencia.acoes[0]).toMatchObject({
-      label: 'Diligência sanada',
+      label: 'Sanado',
       statusId: idExt('REVISÃO DA QUALIFICAÇÃO'),
       papel: 'validar',
     })
     expect(diligencia.desfechoAgrupado).toBe(false)
+  })
+
+  // O MEMORANDO ASSINADO leva o card à remessa aos fundos — pelo id, mesmo com a
+  // coluna renomeada ("Remessa aos fundos" no Kommo desde 29/09/2026).
+  it('o Memorando tem o botão de anexar e mover para a remessa aos fundos', () => {
+    const memorando = abas.find((a) => a.key === 'ext-memorando')!
+    expect(memorando.anexarEMover).toEqual({
+      rotulo: 'Memorando assinado',
+      nota: 'Memorando assinado.',
+      statusId: idExt('ENCAMINHAR AOS FUNDOS'),
+    })
+    expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111533980, 'Remessa aos fundos')).toBe(true)
+    // E SÓ ELE: o resto das abas não tem o botão.
+    expect(abas.filter((a) => a.anexarEMover).map((a) => a.key)).toEqual(['ext-memorando'])
   })
 
   it('as demais abas do Externo não oferecem desfecho', () => {

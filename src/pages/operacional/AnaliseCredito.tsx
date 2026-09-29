@@ -28,6 +28,7 @@ import {
   Search,
   ExternalLink,
   ArrowRight,
+  FileUp,
   Check,
   FileSearch,
   ClipboardCheck,
@@ -44,6 +45,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
+import { enviarArquivo, type ProgressoDoEnvio } from '@/lib/enviarArquivo'
 import {
   FUNIL_RPV,
   FUNIL_PRECATORIO,
@@ -1293,6 +1295,94 @@ function BotaoEscolherProposta({
   )
 }
 
+/** O andamento do anexar-e-mover: o arquivo subindo, o Kommo gravando, o card se movendo. */
+type AndamentoDoAnexo = ProgressoDoEnvio | { fase: 'movendo' }
+
+/**
+ * ANEXAR E MOVER: escolher um arquivo no computador, subi-lo ao card no Kommo
+ * com a anotação padrão, e mover o card (ver `anexarEMover` na trilha).
+ *
+ * UM CLIQUE, SEM JANELA NO MEIO: escolher o arquivo já é a confirmação — é o que
+ * a operação pediu. A barra mostra o arquivo subindo; depois, "gravando no
+ * Kommo" e "movendo o card", que não têm porcentagem.
+ *
+ * SE O ARQUIVO SUBIU E O CARD NÃO SE MOVEU, o botão passa a só mover: escolher o
+ * arquivo de novo o anexaria duas vezes.
+ */
+function BotaoAnexarEMover({
+  rotulo,
+  soMover,
+  ocupado,
+  onEnviar,
+}: {
+  rotulo: string
+  soMover: boolean
+  ocupado: boolean
+  onEnviar: (arquivo: File | null, onAndamento: (p: AndamentoDoAnexo) => void) => Promise<void>
+}) {
+  const entrada = useRef<HTMLInputElement>(null)
+  const [andamento, setAndamento] = useState<AndamentoDoAnexo | null>(null)
+
+  async function enviar(arquivo: File | null) {
+    setAndamento(arquivo ? { fase: 'enviando', pct: 0 } : { fase: 'movendo' })
+    try {
+      await onEnviar(arquivo, setAndamento)
+    } catch {
+      // O aviso é de quem chamou.
+    } finally {
+      setAndamento(null)
+    }
+  }
+
+  const texto = !andamento
+    ? null
+    : andamento.fase === 'enviando'
+      ? `Enviando ${andamento.pct}%`
+      : andamento.fase === 'processando'
+        ? 'Gravando no Kommo…'
+        : 'Movendo o card…'
+  const pct = andamento?.fase === 'enviando' ? andamento.pct : andamento ? 100 : 0
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <input
+        ref={entrada}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          const arquivo = e.target.files?.[0] ?? null
+          e.target.value = ''
+          if (arquivo) void enviar(arquivo)
+        }}
+      />
+      <Button
+        size="sm"
+        icon={<FileUp className="h-4 w-4" />}
+        onClick={() => (soMover ? void enviar(null) : entrada.current?.click())}
+        loading={andamento !== null}
+        disabled={ocupado || andamento !== null}
+        title={soMover ? 'O arquivo já está no card — falta só mover' : 'Escolher o arquivo no computador'}
+      >
+        {soMover ? 'Tentar mover de novo' : rotulo}
+      </Button>
+      {andamento && (
+        <div className="w-44">
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className={cn(
+                'h-full rounded-full bg-brand-500 transition-all duration-200',
+                andamento.fase !== 'enviando' && 'animate-pulse',
+              )}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <p className="mt-0.5 text-right text-xs text-slate-500">{texto}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * A ANOTAÇÃO NO CARD, escrita da fila de precificação.
  *
@@ -1415,6 +1505,7 @@ function CardCredito({
   etiquetaEmVoo,
   onAnotar,
   onEscolherProposta,
+  anexarEMover,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -1496,6 +1587,12 @@ function CardCredito({
    * Só na aba que declara `escolhaDeProposta` (Em precificação do Externo).
    */
   onEscolherProposta?: (l: KommoLead, fundo: string) => Promise<void>
+  /** O botão de anexar e mover, onde a aba o declara (o Memorando do Externo). */
+  anexarEMover?: {
+    rotulo: string
+    soMover: boolean
+    onEnviar: (l: KommoLead, arquivo: File | null, onAndamento: (p: AndamentoDoAnexo) => void) => Promise<void>
+  }
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -1650,6 +1747,14 @@ function CardCredito({
             <SeloDaEtapa lead={lead} />
             <SeloDaCriacao lead={lead} />
           </div>
+          {anexarEMover && (
+            <BotaoAnexarEMover
+              rotulo={anexarEMover.rotulo}
+              soMover={anexarEMover.soMover}
+              ocupado={ocupado}
+              onEnviar={(arquivo, onAndamento) => anexarEMover.onEnviar(lead, arquivo, onAndamento)}
+            />
+          )}
           {onEscolherProposta && (
             <BotaoEscolherProposta
               lead={lead}
@@ -3398,6 +3503,58 @@ export default function AnaliseCredito() {
   }
 
   /**
+   * ANEXAR E MOVER (ver `BotaoAnexarEMover`): o arquivo e a anotação padrão
+   * sobem pela kommo-anexo-enviar; o card se move pela kommo-mover, como todo
+   * desfecho.
+   *
+   * O CARD QUE JÁ RECEBEU O ARQUIVO e não se moveu fica registrado aqui: o
+   * próximo clique só move — o arquivo não sobe duas vezes.
+   */
+  const [anexadosSemMover, setAnexadosSemMover] = useState<Set<number>>(new Set())
+  async function anexarEMover(
+    lead: KommoLead,
+    arquivo: File | null,
+    onAndamento: (p: AndamentoDoAnexo) => void,
+  ) {
+    const cfg = abaAtual?.anexarEMover
+    if (!cfg) return
+    const id = lead.kommo_lead_id
+    const jaAnexado = anexadosSemMover.has(id)
+    if (!jaAnexado) {
+      if (!arquivo) return
+      const form = new FormData()
+      form.append('lead_id', String(id))
+      form.append('texto', cfg.nota)
+      form.append('arquivo', arquivo)
+      try {
+        const r = await enviarArquivo<{ aviso?: string | null }>('kommo-anexo-enviar', form, onAndamento)
+        if (r?.aviso) toast.error(r.aviso)
+      } catch (e) {
+        toast.error(`O arquivo não subiu para o Kommo: ${(e as Error).message}`)
+        throw e
+      }
+      setAnexadosSemMover((antes) => new Set(antes).add(id))
+    }
+    onAndamento({ fase: 'movendo' })
+    setEmAndamento({ leadId: id, statusId: cfg.statusId })
+    try {
+      await mover.mutateAsync({ leadId: id, statusId: cfg.statusId, comentario: '' })
+      setAnexadosSemMover((antes) => {
+        const n = new Set(antes)
+        n.delete(id)
+        return n
+      })
+    } catch (e) {
+      // A falha do movimento já tem aviso (o onError do mover); este diz o que
+      // já está feito e o que o próximo clique faz.
+      toast.error('O arquivo e a anotação já estão no card — clique em "Tentar mover de novo" para só mover.')
+      throw e
+    } finally {
+      setEmAndamento(null)
+    }
+  }
+
+  /**
    * A proposta escolhida (ver `BotaoEscolherProposta`): move o card para a
    * coluna que a aba declara e deixa a nota "Seguir com a proposta do(a) …".
    *
@@ -3750,6 +3907,16 @@ export default function AnaliseCredito() {
                 // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
                 // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
                 onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
+                // ANEXAR E MOVER, onde a aba o declara — o Memorando do Externo.
+                anexarEMover={
+                  abaAtual?.anexarEMover
+                    ? {
+                        rotulo: abaAtual.anexarEMover.rotulo,
+                        soMover: anexadosSemMover.has(l.kommo_lead_id),
+                        onEnviar: anexarEMover,
+                      }
+                    : undefined
+                }
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria

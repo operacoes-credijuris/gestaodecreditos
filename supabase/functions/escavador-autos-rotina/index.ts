@@ -34,11 +34,11 @@ import { chaveAnthropic, chaveEscavador, contaKommo } from '../_shared/segredos.
 import { BASE_ESCAVADOR } from '../_shared/escavador.ts'
 import { cnjDoCard, digitosDoCnj } from '../_shared/nucleo/cnj.ts'
 import { assinarNota } from '../_shared/notaCredijuris.ts'
+import { subirAoDriveDoKommo } from '../_shared/driveDoKommo.ts'
 import {
   documentosDosAutos,
   emOrdemDosAutos,
   entradasDoOperacional,
-  fatias,
   FUNIL_RPV,
   FUNIS_DE_ENTRADA_POR_NOME,
   motivoDoEstado,
@@ -207,33 +207,9 @@ function clienteKommo(token: string, subdominio: string) {
       if (r.status === 401 || r.status === 403) r = await fetch(url, { headers: auth })
       return r.ok ? new Uint8Array(await r.arrayBuffer()) : null
     },
-    /** Sobe um PDF ao drive do Kommo, em partes, e devolve o uuid do arquivo. */
+    /** Sobe um PDF ao drive do Kommo, em partes — ver `_shared/driveDoKommo.ts`. */
     async subir(nome: string, bytes: Uint8Array): Promise<string> {
-      const d = await cliente.urlDoDrive()
-      const s = await fetch(`${d}/v1.0/sessions`, {
-        method: 'POST',
-        headers: { ...auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_name: nome, file_size: bytes.byteLength, content_type: 'application/pdf' }),
-      })
-      if (!s.ok) throw new Error(`o drive do Kommo recusou a sessão (HTTP ${s.status}): ${(await s.text()).slice(0, 160)}`)
-      const sessao = (await s.json()) as any
-      if (sessao.max_file_size && bytes.byteLength > Number(sessao.max_file_size)) {
-        throw new Error(`arquivo maior que o limite do Kommo (${bytes.byteLength} bytes)`)
-      }
-      let url: string | null = sessao.upload_url
-      for (const [a, b] of fatias(bytes.byteLength, Number(sessao.max_part_size) || 524_288)) {
-        if (!url) throw new Error('o drive do Kommo não devolveu o endereço da próxima parte')
-        const r = await fetch(url, {
-          method: 'POST',
-          headers: { ...auth, 'Content-Type': 'application/octet-stream' },
-          body: bytes.slice(a, b),
-        })
-        if (!r.ok) throw new Error(`o drive do Kommo recusou uma parte (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`)
-        const j = (await r.json().catch(() => ({}))) as any
-        if (j?.uuid) return String(j.uuid)
-        url = j?.next_url ?? null
-      }
-      throw new Error('o drive do Kommo terminou o envio sem devolver o arquivo')
+      return subirAoDriveDoKommo({ drive: await cliente.urlDoDrive(), auth, nome, bytes, mime: 'application/pdf' })
     },
     async anexar(leadId: number, uuids: string[]) {
       const r = await api(`/leads/${leadId}/files`, {
