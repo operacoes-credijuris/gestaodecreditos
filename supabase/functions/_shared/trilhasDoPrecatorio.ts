@@ -345,12 +345,12 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         colunas: [111533968, 111533972, 111533996, 111533976, 111533980],
       },
       {
-        nome: 'Proposta',
+        nome: 'Negociação',
         // em precificação, produção de proposta, negociação, fechados
         colunas: [111533984, 111533988, 112339984, 111533992],
       },
       {
-        nome: 'Conclusão',
+        nome: 'Formalização',
         // obtenção de documentação, aguardando aprovação do fundo,
         // revisão/assinatura da escritura, pagos
         colunas: [112341608, 112341612, 112341616, 112006404],

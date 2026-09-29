@@ -528,14 +528,14 @@ describe('abas da trilha Externa', () => {
       'DILIGÊNCIA': 'Qualificação',
       'MEMORANDO DE NEGOCIAÇÃO': 'Qualificação',
       'ENCAMINHAR AOS FUNDOS': 'Qualificação',
-      'EM PRECIFICAÇÃO': 'Proposta',
-      'PRODUÇÃO DE PROPOSTA': 'Proposta',
-      'NEGOCIAÇÃO': 'Proposta',
-      'FECHADOS': 'Proposta',
-      'OBTENÇÃO DE DOCUMENTAÇÃO': 'Conclusão',
-      'AGUARDANDO APROVAÇÃO DO FUNDO': 'Conclusão',
-      'REVISÃO/ASSINATURA DA ESCRITURA': 'Conclusão',
-      'PAGOS': 'Conclusão',
+      'EM PRECIFICAÇÃO': 'Negociação',
+      'PRODUÇÃO DE PROPOSTA': 'Negociação',
+      'NEGOCIAÇÃO': 'Negociação',
+      'FECHADOS': 'Negociação',
+      'OBTENÇÃO DE DOCUMENTAÇÃO': 'Formalização',
+      'AGUARDANDO APROVAÇÃO DO FUNDO': 'Formalização',
+      'REVISÃO/ASSINATURA DA ESCRITURA': 'Formalização',
+      'PAGOS': 'Formalização',
       'REPROVADOS': 'Perdidos',
       'NÃO FECHADO': 'Perdidos',
     })
@@ -548,7 +548,7 @@ describe('abas da trilha Externa', () => {
       { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 99_998, pipeline_nome: null, nome: 'CONTRAPROPOSTA', ordem: 8.5, tipo: 0 },
     ]
     const nova = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, comNova, 'externo').find((x) => x.label === 'CONTRAPROPOSTA')!
-    expect(nova.fase).toBe('Proposta')
+    expect(nova.fase).toBe('Negociação')
   })
 
   it('renomear a coluna não a tira da fase', () => {
@@ -557,7 +557,7 @@ describe('abas da trilha Externa', () => {
       ...colunasExterno(COLUNAS_EXTERNO, { 'PAGOS': 'LIQUIDADOS' }),
     ]
     const pagos = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, renomeado, 'externo').find((x) => x.label === 'LIQUIDADOS')!
-    expect(pagos.fase).toBe('Conclusão')
+    expect(pagos.fase).toBe('Formalização')
   })
 
   it('o Interno não tem fases', () => {
