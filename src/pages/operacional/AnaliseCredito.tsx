@@ -33,6 +33,7 @@ import {
   ClipboardCheck,
   RefreshCw,
   Landmark,
+  Handshake,
   Loader2,
   MessageSquarePlus,
   Paperclip,
@@ -60,6 +61,8 @@ import {
   etiquetaCanonica,
   etiquetasDaAba,
   etiquetasPorDestino,
+  FUNDOS_DA_PRECIFICACAO,
+  mensagemDaProposta,
   mesmaEtiqueta,
   ordenarEtiquetas,
   ehFunilPrecatorio,
@@ -1149,6 +1152,122 @@ function SeletorDeEtiquetas({
 }
 
 /**
+ * ESCOLHER A PROPOSTA: os fundos responderam, e a casa escolhe com qual seguir.
+ *
+ * DOIS PASSOS NA MESMA CAIXA — o fundo, e depois a confirmação —, porque o
+ * clique move o card para a Produção de Proposta e deixa a nota "Seguir com a
+ * proposta da PX Ativos." no Kommo: é o registro de uma decisão, e um clique
+ * errado na lista não pode virar movimentação.
+ *
+ * AO LADO DE CADA FUNDO, O QUE ELE RESPONDEU — a etiqueta que o card tem dele e
+ * há quanto tempo —, para escolher sem sair da caixa. O cotado fica em destaque.
+ */
+function BotaoEscolherProposta({
+  lead,
+  ocupado,
+  carregando,
+  onEscolher,
+}: {
+  lead: KommoLead
+  ocupado: boolean
+  carregando: boolean
+  onEscolher: (fundo: string) => Promise<void>
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [fundo, setFundo] = useState<string | null>(null)
+  const caixa = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!aberto) return
+    const fora = (e: MouseEvent) => {
+      if (!caixa.current?.contains(e.target as Node)) setAberto(false)
+    }
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAberto(false)
+    }
+    document.addEventListener('mousedown', fora)
+    document.addEventListener('keydown', tecla)
+    return () => {
+      document.removeEventListener('mousedown', fora)
+      document.removeEventListener('keydown', tecla)
+    }
+  }, [aberto])
+
+  /** A etiqueta que o card tem deste fundo, e desde quando. */
+  const situacao = (destino: string) => {
+    const grupo = etiquetasPorDestino().find((g) => g.destino === destino)
+    const e = grupo?.etiquetas.find((x) => (lead.tags ?? []).some((t) => mesmaEtiqueta(t, x.nome)))
+    return e ? { ato: e.ato, desde: desdeQuandoAEtiqueta(lead.tags_em, e.nome) } : null
+  }
+
+  async function confirmar() {
+    if (!fundo) return
+    try {
+      await onEscolher(fundo)
+      setAberto(false)
+      setFundo(null)
+    } catch {
+      // O aviso é de quem chamou; a caixa fica aberta para tentar de novo.
+    }
+  }
+
+  return (
+    <div className="relative" ref={caixa}>
+      <Button
+        size="sm"
+        icon={<Handshake className="h-4 w-4" />}
+        onClick={() => {
+          setFundo(null)
+          setAberto((v) => !v)
+        }}
+        loading={carregando}
+        disabled={ocupado}
+      >
+        Escolher proposta
+      </Button>
+
+      {aberto && (
+        <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-2 text-left shadow-lg">
+          {fundo === null ? (
+            FUNDOS_DA_PRECIFICACAO.map((f) => {
+              const s = situacao(f)
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setFundo(f)}
+                  className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-slate-50"
+                >
+                  <span className={s?.ato === 'Cotado' ? 'font-medium text-slate-800' : 'text-slate-600'}>{f}</span>
+                  {s && (
+                    <span className="whitespace-nowrap text-[10px] text-slate-400">
+                      {s.ato}
+                      {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
+                    </span>
+                  )}
+                </button>
+              )
+            })
+          ) : (
+            <div className="p-1">
+              <p className="text-xs font-medium text-slate-800">{mensagemDaProposta(fundo)}</p>
+              <div className="mt-2 flex justify-end gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setFundo(null)} disabled={carregando}>
+                  Voltar
+                </Button>
+                <Button size="sm" onClick={() => void confirmar()} loading={carregando}>
+                  Confirmar e mover
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * A ANOTAÇÃO NO CARD, escrita da fila de precificação.
  *
  * É ONDE O CRÉDITO ESTÁ EM JOGO: o fundo respondeu a proposta, pediu documento,
@@ -1269,6 +1388,7 @@ function CardCredito({
   onEtiquetar,
   etiquetaEmVoo,
   onAnotar,
+  onEscolherProposta,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -1345,6 +1465,11 @@ function CardCredito({
    * Externo, ao lado das etiquetas — ver `BotaoDeAnotacao`.
    */
   onAnotar?: (l: KommoLead, texto: string) => Promise<void>
+  /**
+   * Escolhe o fundo com que seguir e move o card para a Produção de Proposta.
+   * Só na aba que declara `escolhaDeProposta` (Em precificação do Externo).
+   */
+  onEscolherProposta?: (l: KommoLead, fundo: string) => Promise<void>
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -1493,6 +1618,14 @@ function CardCredito({
             título, na varredura de cima para baixo que se faz numa fila. */}
         <div className="flex flex-none flex-col items-end gap-1.5">
           <SeloDaEtapa lead={lead} />
+          {onEscolherProposta && (
+            <BotaoEscolherProposta
+              lead={lead}
+              ocupado={ocupado}
+              carregando={ocupado}
+              onEscolher={(f) => onEscolherProposta(lead, f)}
+            />
+          )}
           {acoes.length > 0 && desfechoNoCard && (
             <div className="flex flex-wrap items-center justify-end gap-1.5">
               {acoes.map((a) => (
@@ -3205,6 +3338,31 @@ export default function AnaliseCredito() {
   }
 
   /**
+   * A proposta escolhida (ver `BotaoEscolherProposta`): move o card para a
+   * coluna que a aba declara e deixa a nota "Seguir com a proposta do(a) …".
+   *
+   * PELO MESMO CAMINHO DOS DESFECHOS (`moverComNota`): o movimento primeiro e a
+   * nota depois, e o retry que só refaz a nota quando o card já se moveu.
+   */
+  async function escolherProposta(lead: KommoLead, fundo: string) {
+    const statusId = abaAtual?.escolhaDeProposta
+    if (!statusId) {
+      toast.error('Não achei no Kommo a coluna Produção de Proposta. Sincronize e tente de novo.')
+      throw new Error('coluna de destino ausente')
+    }
+    setEmAndamento({ leadId: lead.kommo_lead_id, statusId })
+    try {
+      await moverComNota(lead.kommo_lead_id, statusId, mensagemDaProposta(fundo))
+    } catch (e) {
+      // A falha do MOVIMENTO já tem aviso (o onError do mover); a da NOTA, não.
+      if (jaMovidos.current.has(`${lead.kommo_lead_id}:${statusId}`)) toast.error((e as Error).message)
+      throw e
+    } finally {
+      setEmAndamento(null)
+    }
+  }
+
+  /**
    * O desfecho pelo CARD: abre a janela da mensagem.
    *
    * ANTES ERA UM CLIQUE SECO, e o card mudava de coluna sem uma linha de
@@ -3451,6 +3609,9 @@ export default function AnaliseCredito() {
                 // A ANOTAÇÃO AO LADO DAS ETIQUETAS, na mesma aba que as edita:
                 // é onde o retorno do fundo precisa ser escrito.
                 onAnotar={abaAtual?.key === ABA_EM_PRECIFICACAO_EXTERNO ? anotarNoCard : undefined}
+                // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
+                // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
+                onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
                 onAcao={acionar}
                 // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
                 // análise já passou pela revisão, e dizer "finalizado" ali seria

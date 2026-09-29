@@ -108,6 +108,17 @@ export interface DefAbaPrecatorio {
    */
   saidas?: SaidaDaEtapa[]
   /**
+   * A ESCOLHA DA PROPOSTA: a etapa em que os fundos respondem termina quando a
+   * casa escolhe com qual seguir, e o card vai para a coluna daqui.
+   *
+   * NÃO É UMA SAÍDA COMUM, e por isso não mora em `saidas`: saída comum vira
+   * botão genérico na tela, com a janela da mensagem livre e, junto, os botões de
+   * diligência e recusa da trilha. A escolha tem fluxo próprio — escolhe-se o
+   * FUNDO, e a mensagem do card sai dele ("Seguir com a proposta do BTG."). O
+   * destino entra em `destinosDaTrilha` igual, que é o que a kommo-mover aceita.
+   */
+  escolhaDeProposta?: { colunaKommo: string }
+  /**
    * Esta etapa pode INTERROMPER o crédito — exigir diligência ou recusar?
    *
    * OMITIDO, SIM: quase toda etapa de decisão interrompe, e diligência e recusa
@@ -356,6 +367,9 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         label: 'Em precificação',
         colunaKommo: 'AGUARDANDO PRECIFICAÇÃO',
         descricaoVazia: 'Nenhum precatório em precificação pelo fundo.',
+        // OS FUNDOS RESPONDERAM, e a casa escolhe com qual proposta seguir: o
+        // card vai para a produção da proposta ao cedente (29/09/2026).
+        escolhaDeProposta: { colunaKommo: 'PRODUÇÃO DE PROPOSTA' },
       },
       {
         key: 'ext-diligencia',
@@ -415,6 +429,7 @@ export function destinosDaTrilha(pipelineId: number): string[] {
   const nomes = new Set<string>([trilha.colunaDiligencia, trilha.colunaReprovados])
   for (const aba of trilha.abas) {
     for (const saida of aba.saidas ?? []) nomes.add(saida.colunaKommo)
+    if (aba.escolhaDeProposta) nomes.add(aba.escolhaDeProposta.colunaKommo)
   }
   return [...nomes]
 }

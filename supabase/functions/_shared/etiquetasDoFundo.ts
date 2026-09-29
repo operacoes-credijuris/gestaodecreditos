@@ -45,15 +45,27 @@ export interface EtiquetaDoFundo {
  * O BTG NÃO TEM "ENVIADO": ali o crédito não fica esperando — ou volta cotado,
  * ou recusado. É o único fundo com dois atos.
  */
-const FUNDOS: { destino: string; atos: readonly AtoDaPrecificacao[] }[] = [
-  { destino: 'PJUS', atos: ATOS_DA_PRECIFICACAO },
-  { destino: 'BTG', atos: ['Cotado', 'Reprovado'] },
-  { destino: 'PX Ativos', atos: ATOS_DA_PRECIFICACAO },
-  { destino: 'Invest Precatórios', atos: ATOS_DA_PRECIFICACAO },
-  { destino: 'K & WC Ativos', atos: ATOS_DA_PRECIFICACAO },
-  { destino: 'Precatur', atos: ATOS_DA_PRECIFICACAO },
-  { destino: 'Carbon', atos: ATOS_DA_PRECIFICACAO },
+const FUNDOS: { destino: string; atos: readonly AtoDaPrecificacao[]; artigo: 'do' | 'da' }[] = [
+  { destino: 'PJUS', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
+  { destino: 'BTG', atos: ['Cotado', 'Reprovado'], artigo: 'do' },
+  { destino: 'PX Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
+  { destino: 'Invest Precatórios', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
+  { destino: 'K & WC Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
+  { destino: 'Precatur', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
+  { destino: 'Carbon', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
 ]
+
+/** Os fundos, na ordem da tela — é entre eles que se escolhe a proposta. */
+export const FUNDOS_DA_PRECIFICACAO: readonly string[] = FUNDOS.map((f) => f.destino)
+
+/**
+ * A nota do card quando a casa escolhe a proposta: "Seguir com a proposta da PX
+ * Ativos." O artigo é do fundo — o BTG é "o banco", os outros são "a gestora".
+ */
+export function mensagemDaProposta(destino: string): string {
+  const f = FUNDOS.find((x) => mesmaEtiqueta(x.destino, destino))
+  return `Seguir com a proposta ${f?.artigo ?? 'do(a)'} ${f?.destino ?? destino}.`
+}
 
 /**
  * AS ETIQUETAS DA ABA "EM PRECIFICAÇÃO": "‹ato› ‹fundo›", como as que o

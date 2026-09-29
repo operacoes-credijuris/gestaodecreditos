@@ -368,6 +368,24 @@ describe('destinos que o servidor aceita', () => {
     }
   })
 
+  // A ESCOLHA DA PROPOSTA não é saída comum — não vira botão genérico —, mas o
+  // servidor precisa aceitá-la: senão o "Confirmar e mover" não moveria nada.
+  it('a escolha da proposta também é aceita', () => {
+    let vistas = 0
+    for (const trilha of SUBDIVISOES_PRECATORIO) {
+      for (const aba of abasDoFunil(trilha.pipelineId, espelho(), trilha.key)) {
+        if (!aba.escolhaDeProposta) continue
+        vistas++
+        expect(destinosDaTrilha(trilha.pipelineId).map(normalizarBusca), aba.label).toContain(
+          normalizarBusca(colunaDoId.get(aba.escolhaDeProposta)!),
+        )
+        // E NÃO GANHA OS BOTÕES GENÉRICOS: a aba segue sem desfecho próprio.
+        expect(aba.acoes, aba.label).toEqual([])
+      }
+    }
+    expect(vistas).toBe(1)
+  })
+
   it('funil que não é de precatório não tem destino nenhum', () => {
     expect(destinosDaTrilha(FUNIL_RPV)).toEqual([])
     expect(destinosDaTrilha(999)).toEqual([])

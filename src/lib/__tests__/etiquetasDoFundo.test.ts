@@ -21,6 +21,7 @@ import {
   etiquetasDaAba,
   etiquetasPorDestino,
   irmasDaEtiqueta,
+  mensagemDaProposta,
   mesmaEtiqueta,
   ordenarEtiquetas,
   normalizarEtiqueta,
@@ -278,5 +279,14 @@ describe('a cor das etiquetas da precificação', () => {
     expect(cores.get('Enviado PJUS')).toBe('blue')
     expect(cores.get('Cotado BTG')).toBe('green')
     expect(cores.get('Reprovado Carbon')).toBe('red')
+  })
+})
+
+/** A NOTA DA PROPOSTA ESCOLHIDA, com o artigo de cada fundo. */
+describe('mensagemDaProposta', () => {
+  it('o BTG é "do", os outros são "da"', () => {
+    expect(mensagemDaProposta('BTG')).toBe('Seguir com a proposta do BTG.')
+    expect(mensagemDaProposta('PX Ativos')).toBe('Seguir com a proposta da PX Ativos.')
+    expect(mensagemDaProposta('invest precatorios')).toBe('Seguir com a proposta da Invest Precatórios.')
   })
 })

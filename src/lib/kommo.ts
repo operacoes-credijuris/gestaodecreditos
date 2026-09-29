@@ -61,7 +61,9 @@ import {
   desdeQuandoAEtiqueta,
   etiquetaCanonica,
   etiquetasPorDestino,
+  FUNDOS_DA_PRECIFICACAO,
   irmasDaEtiqueta,
+  mensagemDaProposta,
   mesmaEtiqueta,
   ordenarEtiquetas,
   normalizarEtiqueta,
@@ -99,7 +101,9 @@ export {
   desdeQuandoAEtiqueta,
   etiquetaCanonica,
   etiquetasPorDestino,
+  FUNDOS_DA_PRECIFICACAO,
   irmasDaEtiqueta,
+  mensagemDaProposta,
   mesmaEtiqueta,
   ordenarEtiquetas,
   normalizarEtiqueta,
@@ -592,6 +596,11 @@ export interface Aba {
    * do campo em que a razão é escrita.
    */
   desfechoAgrupado?: boolean
+  /**
+   * A coluna para onde a ESCOLHA DA PROPOSTA leva o card (Em precificação do
+   * Externo), ou null. Ver `escolhaDeProposta` em trilhasDoPrecatorio.ts.
+   */
+  escolhaDeProposta?: number | null
 }
 
 /**
@@ -886,6 +895,9 @@ export function abasDoFunil(
       // por um motivo a mais: a janela é o único lugar onde a anotação que vai
       // para o Kommo é escrita antes de o card se mover.
       desfechoAgrupado: oferece(a),
+      escolhaDeProposta: a.escolhaDeProposta
+        ? (nomes.get(normalizarBusca(a.escolhaDeProposta.colunaKommo)) ?? null)
+        : null,
     }
   })
 }
