@@ -1394,6 +1394,9 @@ function JanelaDoEnvioAoFundo({
   const [texto, setTexto] = useState('')
   const [arquivos, setArquivos] = useState<File[]>([])
   const [andamento, setAndamento] = useState<{ texto: string; pct?: number } | null>(null)
+  // O ERRO FICA NA JANELA, e não só no aviso que some: é o que se copia para
+  // pedir ajuda, e o aviso passa antes de alguém conseguir ler.
+  const [erro, setErro] = useState<string | null>(null)
   const entrada = useRef<HTMLInputElement>(null)
   const ocupado = andamento !== null
 
@@ -1409,11 +1412,13 @@ function JanelaDoEnvioAoFundo({
     ])
 
   async function confirmar() {
+    setErro(null)
     setAndamento({ texto: 'Começando…', pct: 0 })
     try {
       await onConfirmar(texto, arquivos, (t, pct) => setAndamento({ texto: t, pct }))
-    } catch {
-      // O aviso é de quem chamou; a janela fica aberta para tentar de novo.
+    } catch (e) {
+      // A janela fica aberta para tentar de novo, com o motivo à vista.
+      setErro((e as Error)?.message ?? String(e))
     } finally {
       setAndamento(null)
     }
@@ -1504,6 +1509,11 @@ function JanelaDoEnvioAoFundo({
             </ul>
           )}
         </div>
+        {erro && !andamento && (
+          <p className="rounded-md bg-red-50 p-2 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+            Não deu certo: {erro}
+          </p>
+        )}
         {andamento && (
           <div>
             <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">

@@ -34,6 +34,8 @@ export async function enviarArquivo<T>(
     xhr.setRequestHeader('Authorization', `Bearer ${token}`)
     xhr.setRequestHeader('apikey', chave)
     xhr.setRequestHeader('Content-Type', arquivo.type || 'application/octet-stream')
+    // O TAMANHO EM CABEÇALHO PRÓPRIO: o Content-Length pode não chegar à função.
+    xhr.setRequestHeader('x-tamanho', String(arquivo.size))
     for (const [k, v] of Object.entries(cabecalhos)) xhr.setRequestHeader(k, v)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgresso({ fase: 'enviando', pct: Math.round((e.loaded / e.total) * 100) })

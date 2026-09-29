@@ -19,7 +19,10 @@
 // rodapé. A nota de arquivo do Kommo não leva texto — é da documentação.
 //
 // USO (POST, com sessão): o arquivo no corpo, e nos cabeçalhos
-//   x-lead-id, x-nome (encodeURIComponent), x-texto (encodeURIComponent).
+//   x-lead-id, x-nome (encodeURIComponent), x-texto (encodeURIComponent) e
+//   x-tamanho (bytes). O TAMANHO VAI EM CABEÇALHO PRÓPRIO porque o Content-Length
+//   pode não chegar até aqui: no caminho do navegador à função o corpo pode ser
+//   reenviado em blocos, e sem tamanho a sessão do Kommo não abre.
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
 import { marcarComoDePessoa } from '../_shared/notaCredijuris.ts'
@@ -32,7 +35,7 @@ const MAX_BYTES = 100 * 1024 * 1024
 // chega a enviar.
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-lead-id, x-nome, x-texto',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-lead-id, x-nome, x-texto, x-tamanho',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 const responder = (corpo: unknown, status = 200) =>
@@ -57,10 +60,12 @@ Deno.serve(async (req: Request) => {
     const leadId = Number(req.headers.get('x-lead-id'))
     const nome = limparNome(decodificar(req.headers.get('x-nome')) || 'arquivo')
     const texto = decodificar(req.headers.get('x-texto')).trim()
-    const tamanho = Number(req.headers.get('content-length'))
+    const tamanho = Number(req.headers.get('x-tamanho')) || Number(req.headers.get('content-length'))
     const mime = req.headers.get('content-type') || 'application/octet-stream'
     if (!leadId) return responder({ erro: 'lead_id é obrigatório.' }, 400)
-    if (!tamanho || !req.body) return responder({ erro: 'Nenhum arquivo recebido.' }, 400)
+    if (!tamanho || !req.body) {
+      return responder({ erro: 'Nenhum arquivo recebido (a função não soube o tamanho do arquivo).' }, 400)
+    }
     if (tamanho > MAX_BYTES) {
       return responder({ erro: `Arquivo grande demais (${Math.round(tamanho / 1048576)} MB; o limite é 100 MB).` }, 413)
     }
