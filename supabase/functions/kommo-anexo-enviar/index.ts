@@ -18,6 +18,10 @@
 // Kommo mostra com o nome e o link) e a de TEXTO, com o nome de quem enviou no
 // rodapé. A nota de arquivo do Kommo não leva texto — é da documentação.
 //
+// CADA NOTA NO SEU PEDIDO: o Kommo recusa o lote inteiro quando uma nota dele
+// é recusada, e a nota de arquivo derrubava junto a de texto — que é a que o
+// comercial lê.
+//
 // USO (POST, com sessão): o arquivo no corpo, e nos cabeçalhos
 //   x-lead-id, x-nome (encodeURIComponent), x-texto (encodeURIComponent) e
 //   x-tamanho (bytes). O TAMANHO VAI EM CABEÇALHO PRÓPRIO porque o Content-Length
@@ -101,13 +105,16 @@ Deno.serve(async (req: Request) => {
     const parte = Number(sessao.max_part_size) || 524_288
     let url: string | null = sessao.upload_url ?? null
     let uuid: string | null = null
+    let versao: string | null = null
 
     const enviarParte = async (bytes: Uint8Array<ArrayBuffer>) => {
       if (!url) throw new Error('o drive do Kommo não devolveu o endereço da próxima parte')
-      const r = await fetch(url, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/octet-stream' }, body: bytes })
+      // O TIPO DO ARQUIVO em cada parte, como na receita oficial do Kommo.
+      const r = await fetch(url, { method: 'POST', headers: { ...auth, 'Content-Type': mime }, body: bytes })
       if (!r.ok) throw new Error(`o drive do Kommo recusou uma parte (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`)
-      const j = (await r.json().catch(() => ({}))) as { uuid?: string; next_url?: string }
+      const j = (await r.json().catch(() => ({}))) as { uuid?: string; version_uuid?: string; next_url?: string }
       if (j?.uuid) uuid = String(j.uuid)
+      if (j?.version_uuid) versao = String(j.version_uuid)
       url = j?.next_url ?? null
     }
 
@@ -152,23 +159,30 @@ Deno.serve(async (req: Request) => {
     // 4. AS NOTAS: a do arquivo e, se houver, a do texto — com quem enviou.
     const { data: perfil } = await svc.from('profiles').select('nome, email').eq('id', caller.id).maybeSingle()
     const autor = perfil?.nome?.trim() || perfil?.email || caller.email || null
-    const notas: unknown[] = [
-      { entity_id: leadId, note_type: 'attachment', params: { file_uuid: uuid, file_name: nome } },
-    ]
+    const gravarNota = async (nota: Record<string, unknown>): Promise<string | null> => {
+      const r = await fetch(`${base}/leads/notes`, {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ entity_id: leadId, ...nota }]),
+      })
+      // O MOTIVO DO KOMMO vai junto: "HTTP 400" sozinho não diz o que corrigir.
+      return r.ok ? null : `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`
+    }
+    const falhas: string[] = []
+    const falhaDoArquivo = await gravarNota({
+      note_type: 'attachment',
+      params: { file_uuid: uuid, file_name: nome, ...(versao ? { version_uuid: versao } : {}) },
+    })
+    if (falhaDoArquivo) falhas.push(`a nota do arquivo não subiu (${falhaDoArquivo})`)
     if (texto) {
-      notas.push({
-        entity_id: leadId,
+      const falhaDoTexto = await gravarNota({
         note_type: 'common',
         params: { text: marcarComoDePessoa(texto, autor) },
         is_need_to_trigger_digital_pipeline: false,
       })
+      if (falhaDoTexto) falhas.push(`a anotação de texto não subiu (${falhaDoTexto})`)
     }
-    const rNotas = await fetch(`${base}/leads/notes`, {
-      method: 'POST',
-      headers: { ...auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify(notas),
-    })
-    const aviso = rNotas.ok ? null : `O arquivo foi anexado ao card, mas a anotação não subiu (HTTP ${rNotas.status}).`
+    const aviso = falhas.length ? `O arquivo foi anexado ao card, mas ${falhas.join('; ')}.` : null
 
     return responder({ ok: true, file_uuid: uuid, nome, aviso })
   } catch (e) {

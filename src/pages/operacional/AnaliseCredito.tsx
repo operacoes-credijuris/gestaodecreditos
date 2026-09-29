@@ -3769,9 +3769,18 @@ export default function AnaliseCredito() {
    *
    * A ANOTAÇÃO QUE JÁ SUBIU não sobe de novo: se a etiqueta falhar, confirmar
    * outra vez só etiqueta.
+   *
+   * O TEXTO VAI PELA kommo-anotar, em JSON, e não num cabeçalho do envio do
+   * arquivo: um texto de alguns parágrafos, codificado, pode passar do tamanho
+   * que o caminho até a função aceita num cabeçalho — e aí a requisição inteira
+   * é recusada. Os arquivos sobem depois, sem texto.
+   *
+   * CADA PARTE FEITA FICA REGISTRADA (o texto, cada arquivo): se o terceiro
+   * print falhar, confirmar de novo não repete o texto nem os dois primeiros.
    */
   const [envioAberto, setEnvioAberto] = useState<{ lead: KommoLead; fundo: FundoDoEnvio } | null>(null)
   const [notasDoEnvio, setNotasDoEnvio] = useState<Set<string>>(new Set())
+  const partesDoEnvio = useRef<Set<string>>(new Set())
   async function moverAposOsFundos(lead: KommoLead) {
     const cfg = abaAtual?.envioAosFundos
     if (!cfg) return
@@ -3795,38 +3804,39 @@ export default function AnaliseCredito() {
     const chave = `${id}:${fundo.fundo}`
     const nota = [fundo.nota, texto.trim()].filter(Boolean).join('\n\n')
 
-    // 1. A ANOTAÇÃO, com as imagens se houver (a primeira leva o texto).
+    // 1. A ANOTAÇÃO, e depois as imagens, se houver.
     if (!notasDoEnvio.has(chave)) {
+      const feitas = partesDoEnvio.current
       try {
-        if (arquivos.length === 0) {
+        if (!feitas.has(`${chave}:texto`)) {
           onAndamento('Gravando a anotação no Kommo…')
           await invokeFunction('kommo-anotar', { lead_id: id, texto: nota, origem: 'pessoa', autor: analistaNome })
-        } else {
-          for (let i = 0; i < arquivos.length; i++) {
-            const a = arquivos[i]
-            if (a.size > 100 * 1024 * 1024) throw new Error(`${a.name} passa de 100 MB.`)
-            const qual = arquivos.length > 1 ? `arquivo ${i + 1} de ${arquivos.length} — ` : ''
-            const r = await enviarArquivo<{ aviso?: string | null }>(
-              'kommo-anexo-enviar',
-              a,
-              {
-                'x-lead-id': String(id),
-                'x-nome': encodeURIComponent(a.name),
-                'x-texto': encodeURIComponent(i === 0 ? nota : ''),
-              },
-              (p) =>
-                p.fase === 'enviando'
-                  ? onAndamento(`Enviando ${qual}${p.pct}%`, p.pct)
-                  : onAndamento(`Gravando no Kommo ${qual}…`),
-            )
-            if (r?.aviso) toast.error(r.aviso)
-          }
+          feitas.add(`${chave}:texto`)
+        }
+        for (let i = 0; i < arquivos.length; i++) {
+          const a = arquivos[i]
+          const parteDoArquivo = `${chave}:arquivo:${a.name}:${a.size}:${a.lastModified}`
+          if (feitas.has(parteDoArquivo)) continue
+          if (a.size > 100 * 1024 * 1024) throw new Error(`${a.name} passa de 100 MB.`)
+          const qual = arquivos.length > 1 ? `arquivo ${i + 1} de ${arquivos.length} — ` : ''
+          const r = await enviarArquivo<{ aviso?: string | null }>(
+            'kommo-anexo-enviar',
+            a,
+            { 'x-lead-id': String(id), 'x-nome': encodeURIComponent(a.name), 'x-texto': '' },
+            (p) =>
+              p.fase === 'enviando'
+                ? onAndamento(`Enviando ${qual}${p.pct}%`, p.pct)
+                : onAndamento(`Gravando no Kommo ${qual}…`),
+          )
+          if (r?.aviso) toast.error(r.aviso)
+          feitas.add(parteDoArquivo)
         }
       } catch (e) {
         toast.error(`A anotação não subiu para o Kommo: ${(e as Error).message}`)
         throw e
       }
       setNotasDoEnvio((antes) => new Set(antes).add(chave))
+      for (const p of [...feitas]) if (p.startsWith(`${chave}:`)) feitas.delete(p)
     }
 
     // 2. A ETIQUETA DO FUNDO.

@@ -45,7 +45,9 @@ export async function subirAoDriveDoKommo(o: {
     if (!url) throw new Error('o drive do Kommo não devolveu o endereço da próxima parte')
     const r = await fetch(url, {
       method: 'POST',
-      headers: { ...o.auth, 'Content-Type': 'application/octet-stream' },
+      // O TIPO DO ARQUIVO em cada parte, como na receita oficial do Kommo (e não
+      // application/octet-stream).
+      headers: { ...o.auth, 'Content-Type': o.mime },
       body: o.bytes.slice(a, b),
     })
     if (!r.ok) throw new Error(`o drive do Kommo recusou uma parte (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`)
