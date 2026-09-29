@@ -14,7 +14,7 @@
 // que aceita a partir DELA TAMBÉM: foi a lição das trilhas, onde duas listas que
 // precisavam concordar divergiram no primeiro dia.
 
-/** Os atos de uma etiqueta — as colunas da grade do seletor, nesta ordem. */
+/** Os atos de uma etiqueta, na ordem do percurso — é o que o seletor mostra ao lado do fundo. */
 export const ATOS_DA_PRECIFICACAO = ['Enviado', 'Cotado', 'Reprovado'] as const
 export type AtoDaPrecificacao = (typeof ATOS_DA_PRECIFICACAO)[number]
 
@@ -153,20 +153,7 @@ export function ordenarEtiquetas(
     .map((x) => x.nome)
 }
 
-/**
- * A GRADE DO SELETOR: uma linha por fundo, uma coluna por ato. A célula de um ato
- * que o fundo não tem (o "Enviado" do BTG) vem vazia.
- */
-export function gradeDasEtiquetas(
-  etiquetas: readonly EtiquetaDoFundo[] = ETIQUETAS_DA_PRECIFICACAO,
-): { destino: string; celulas: (EtiquetaDoFundo | null)[] }[] {
-  return etiquetasPorDestino(etiquetas).map((g) => ({
-    destino: g.destino,
-    celulas: ATOS_DA_PRECIFICACAO.map((ato) => g.etiquetas.find((e) => e.ato === ato) ?? null),
-  }))
-}
-
-/** As etiquetas agrupadas por destino, na ordem da lista. */
+/** As etiquetas agrupadas por destino, na ordem da lista — como o seletor as mostra. */
 export function etiquetasPorDestino(
   etiquetas: readonly EtiquetaDoFundo[] = ETIQUETAS_DA_PRECIFICACAO,
 ): { destino: string; etiquetas: EtiquetaDoFundo[] }[] {

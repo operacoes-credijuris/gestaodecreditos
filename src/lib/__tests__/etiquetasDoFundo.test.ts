@@ -20,7 +20,6 @@ import {
   etiquetaCanonica,
   etiquetasDaAba,
   etiquetasPorDestino,
-  gradeDasEtiquetas,
   irmasDaEtiqueta,
   mesmaEtiqueta,
   ordenarEtiquetas,
@@ -87,19 +86,16 @@ describe('as etiquetas da precificação', () => {
 })
 
 /**
- * A GRADE DO SELETOR: um fundo por linha, Enviado / Cotado / Reprovado nas
- * colunas. O BTG não tem "Enviado" — a célula vem vazia, e não com outra
- * etiqueta no lugar.
+ * O QUE O SELETOR MOSTRA AO LADO DE CADA FUNDO: os atos dele, na ordem do
+ * percurso. O BTG só tem dois — não aparece "Enviado" nele.
  */
-describe('gradeDasEtiquetas', () => {
-  it('uma linha por fundo, três colunas, e o buraco do BTG', () => {
-    const grade = gradeDasEtiquetas()
-    expect(grade).toHaveLength(7)
-    for (const l of grade) expect(l.celulas, l.destino).toHaveLength(3)
-    const btg = grade.find((l) => l.destino === 'BTG')!
-    expect(btg.celulas.map((e) => e?.nome ?? null)).toEqual([null, 'Cotado BTG', 'Reprovado BTG'])
-    const px = grade.find((l) => l.destino === 'PX Ativos')!
-    expect(px.celulas.map((e) => e?.nome)).toEqual(['Enviado PX Ativos', 'Cotado PX Ativos', 'Reprovado PX Ativos'])
+describe('os atos de cada fundo', () => {
+  it('três em cada fundo, e o BTG sem Enviado', () => {
+    const atos = Object.fromEntries(etiquetasPorDestino().map((g) => [g.destino, g.etiquetas.map((e) => e.ato)]))
+    expect(atos.BTG).toEqual(['Cotado', 'Reprovado'])
+    for (const f of ['PJUS', 'PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur', 'Carbon']) {
+      expect(atos[f], f).toEqual(['Enviado', 'Cotado', 'Reprovado'])
+    }
   })
 })
 
