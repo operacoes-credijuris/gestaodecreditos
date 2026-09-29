@@ -950,6 +950,27 @@ function AvisoSemNumero({ lead }: { lead: KommoLead }) {
  * apurada aparece igual aos outros, e a próxima sincronização o preenche; um
  * marcador de vazio em meia dúzia de cards viraria ruído permanente na coluna.
  */
+/**
+ * HÁ QUANTO TEMPO O CARD ENTROU NA ESTEIRA: a data de criação no Kommo, logo
+ * abaixo da data da coluna (pedido de 29/09/2026). A de cima diz há quanto tempo
+ * o crédito está parado ONDE ESTÁ; esta, há quanto tempo ele está na casa — um
+ * card que chegou hoje à revisão pode estar no funil há dois meses.
+ *
+ * "CRIADO EM" NA FRENTE, e só nesta: as duas linhas têm o mesmo formato, e sem o
+ * rótulo a de baixo se leria como uma segunda data da coluna.
+ */
+function SeloDaCriacao({ lead }: { lead: KommoLead }) {
+  const quando = lead.criado_em
+  if (!quando) return null
+  const decorrido = tempoDecorrido(quando)
+  return (
+    <span className="text-right text-xs text-slate-400" title="Quando o card foi criado no Kommo">
+      <span className="whitespace-nowrap">Criado em {formatDateTime(quando)}</span>
+      {decorrido && <span className="whitespace-nowrap text-slate-300"> · {decorrido}</span>}
+    </span>
+  )
+}
+
 function SeloDaEtapa({ lead }: { lead: KommoLead }) {
   const quando = dataDaEtapa(lead)
   if (!quando) return null
@@ -1617,7 +1638,12 @@ function CardCredito({
             botões, e o selo precisa do canto superior — é lido junto com o
             título, na varredura de cima para baixo que se faz numa fila. */}
         <div className="flex flex-none flex-col items-end gap-1.5">
-          <SeloDaEtapa lead={lead} />
+          {/* AS DUAS DATAS JUNTAS, sem o espaço dos botões entre elas: na coluna
+              desde quando, e na esteira desde quando. */}
+          <div className="flex flex-col items-end">
+            <SeloDaEtapa lead={lead} />
+            <SeloDaCriacao lead={lead} />
+          </div>
           {onEscolherProposta && (
             <BotaoEscolherProposta
               lead={lead}
