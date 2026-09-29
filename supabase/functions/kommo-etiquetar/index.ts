@@ -34,6 +34,7 @@ import {
   etiquetaCanonica,
   irmasDaEtiqueta,
   mesmaEtiqueta,
+  datasDasEtiquetas,
 } from '../_shared/etiquetasDoFundo.ts'
 import { trilhaDoPipeline } from '../_shared/trilhasDoPrecatorio.ts'
 
@@ -176,6 +177,26 @@ Deno.serve(async (req: Request) => {
       .from('kommo_leads')
       .update({ tags })
       .eq('kommo_lead_id', leadId)
+    // A DATA DA ETIQUETA, na hora (migração 0074): é o "hoje" que aparece ao
+    // lado dela. Gravação à parte e sem aviso se falhar — sem a coluna, a
+    // etiqueta continua certa e o sync preenche a data depois.
+    try {
+      const { data: comDatas } = await svc
+        .from('kommo_leads')
+        .select('tags_em')
+        .eq('kommo_lead_id', leadId)
+        .maybeSingle()
+      if (comDatas) {
+        const antes = (comDatas.tags_em ?? {}) as Record<string, string | null>
+        const agora = acao === 'adicionar' ? { [etiqueta]: new Date().toISOString() } : {}
+        const tags_em = datasDasEtiquetas({
+          tags: tags,
+          antes: { ...Object.fromEntries(Object.entries(antes).filter(([k]) => !mesmaEtiqueta(k, etiqueta))), ...agora },
+        })
+        await svc.from('kommo_leads').update({ tags_em }).eq('kommo_lead_id', leadId)
+      }
+    } catch { /* o sync preenche */ }
+
     if (eEspelho) {
       console.error('[kommo-etiquetar] espelho', leadId, eEspelho)
       const _falha =

@@ -104,6 +104,11 @@ export interface KommoLead {
    */
   oportunidade: EntradaOportunidade | null
   tags: string[]
+  /**
+   * Desde quando cada etiqueta de fundo está no card (migração 0074): nome →
+   * data ISO, ou null quando o Kommo não guarda o evento. Ausente antes da 0074.
+   */
+  tags_em?: Record<string, string | null> | null
   criado_em: string | null
   atualizado_em: string | null
   /**

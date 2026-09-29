@@ -1,0 +1,60 @@
+/**
+ * DESDE QUANDO CADA ETIQUETA ESTÁ NO CARD — é o "há 3 dias" do seletor e do
+ * card, que diz há quanto tempo um fundo não responde.
+ */
+import { describe, it, expect } from 'vitest'
+import {
+  datasDasEtiquetas,
+  desdeQuandoAEtiqueta,
+  faltaDataDeEtiqueta,
+} from '../../../supabase/functions/_shared/etiquetasDoFundo.ts'
+
+const ev = (nome: string, quando: string) => ({
+  entity_id: 1,
+  created_at: Date.parse(quando) / 1000,
+  value_after: [{ tag: { name: nome } }],
+})
+
+describe('datasDasEtiquetas', () => {
+  it('a data é a do evento mais recente da etiqueta', () => {
+    const d = datasDasEtiquetas({
+      tags: ['Cotado PJUS'],
+      eventos: [ev('Cotado PJUS', '2026-09-20T10:00:00Z'), ev('cotado pjus', '2026-09-26T10:00:00Z')],
+    })
+    expect(d).toEqual({ 'Cotado PJUS': '2026-09-26T10:00:00.000Z' })
+  })
+
+  it('sem evento novo, fica a data que já se sabia; etiqueta que saiu some', () => {
+    const d = datasDasEtiquetas({
+      tags: ['Enviado Carbon'],
+      antes: { 'Enviado Carbon': '2026-09-10T00:00:00.000Z', 'Cotado BTG': '2026-09-01T00:00:00.000Z' },
+    })
+    expect(d).toEqual({ 'Enviado Carbon': '2026-09-10T00:00:00.000Z' })
+  })
+
+  // PERGUNTADO E SEM EVENTO: null, e não ausente — senão cada sincronização
+  // perguntaria de novo pela data que o Kommo não guarda.
+  it('perguntado e sem evento fica null; não perguntado fica de fora', () => {
+    expect(datasDasEtiquetas({ tags: ['Cotado Precatur'], perguntado: true })).toEqual({ 'Cotado Precatur': null })
+    expect(datasDasEtiquetas({ tags: ['Cotado Precatur'] })).toEqual({})
+  })
+
+  it('só as etiquetas da casa', () => {
+    expect(datasDasEtiquetas({ tags: ['urgente', 'Pendente Luiz'], perguntado: true })).toEqual({})
+  })
+})
+
+describe('faltaDataDeEtiqueta e desdeQuandoAEtiqueta', () => {
+  it('pergunta só por etiqueta da casa sem data', () => {
+    expect(faltaDataDeEtiqueta(['Cotado PJUS', 'urgente'], { 'Cotado PJUS': null })).toBe(false)
+    expect(faltaDataDeEtiqueta(['Cotado PJUS', 'Enviado Carbon'], { 'Cotado PJUS': null })).toBe(true)
+    expect(faltaDataDeEtiqueta(['urgente'], {})).toBe(false)
+  })
+
+  it('acha a data tolerando caixa e acento', () => {
+    const datas = { 'Enviado Invest Precatórios': '2026-09-27T00:00:00.000Z' }
+    expect(desdeQuandoAEtiqueta(datas, 'enviado invest precatorios')).toBe('2026-09-27T00:00:00.000Z')
+    expect(desdeQuandoAEtiqueta(datas, 'Cotado PJUS')).toBeNull()
+    expect(desdeQuandoAEtiqueta(null, 'Cotado PJUS')).toBeNull()
+  })
+})

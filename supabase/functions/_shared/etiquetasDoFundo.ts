@@ -165,3 +165,76 @@ export function etiquetasPorDestino(
   }
   return grupos
 }
+
+// ------------------------------------------------------------------ desde quando
+
+/** Um `entity_tag_added` do Kommo, nos campos que usamos. */
+export interface EventoDeEtiqueta {
+  entity_id: number
+  created_at: number
+  value_after?: { tag?: { name?: string } }[]
+}
+
+/**
+ * DESDE QUANDO CADA ETIQUETA DA CASA ESTÁ NO CARD: nome → data (ISO), ou null
+ * quando o Kommo já foi perguntado e não guarda o evento (etiqueta mais antiga
+ * que o histórico dele).
+ *
+ * É O QUE RESPONDE "HÁ QUANTO TEMPO ESTÁ DEMORANDO": "Enviado PJUS" há 9 dias é
+ * fundo que não respondeu; "Cotado BTG" há 2, cotação fresca. Pedido de quem
+ * opera em 29/09/2026.
+ *
+ * AS REGRAS:
+ *   - só as etiquetas da casa, e só as que o card TEM agora — a que saiu some do
+ *     mapa, e se voltar é contada de novo, da volta;
+ *   - vale o evento MAIS RECENTE da etiqueta: tirada e posta de novo, conta a
+ *     segunda vez;
+ *   - sem evento novo, fica a data que já se sabia;
+ *   - perguntado e sem evento, null — que é o que impede de perguntar de novo a
+ *     cada sincronização por uma data que o Kommo não tem.
+ */
+export function datasDasEtiquetas(o: {
+  tags: readonly string[]
+  antes?: Record<string, string | null> | null
+  eventos?: readonly EventoDeEtiqueta[]
+  perguntado?: boolean
+}): Record<string, string | null> {
+  const fora: Record<string, string | null> = {}
+  const antes = o.antes ?? {}
+  for (const t of o.tags) {
+    const nome = etiquetaCanonica(t)
+    if (!nome) continue
+    let quando: number | null = null
+    for (const e of o.eventos ?? []) {
+      if ((e.value_after ?? []).some((v) => mesmaEtiqueta(v?.tag?.name, nome))) {
+        if (quando === null || e.created_at > quando) quando = e.created_at
+      }
+    }
+    const jaSabida = Object.keys(antes).find((k) => mesmaEtiqueta(k, nome))
+    if (quando !== null) fora[nome] = new Date(quando * 1000).toISOString()
+    else if (jaSabida !== undefined) fora[nome] = antes[jaSabida]
+    else if (o.perguntado) fora[nome] = null
+  }
+  return fora
+}
+
+/** O card tem etiqueta da casa cuja data ainda não se perguntou ao Kommo? */
+export function faltaDataDeEtiqueta(
+  tags: readonly string[],
+  datas: Record<string, string | null> | null | undefined,
+): boolean {
+  const chaves = Object.keys(datas ?? {})
+  return tags.some((t) => {
+    const nome = etiquetaCanonica(t)
+    return nome !== null && !chaves.some((k) => mesmaEtiqueta(k, nome))
+  })
+}
+
+/** Desde quando o card tem esta etiqueta, ou null se não se sabe. */
+export function desdeQuandoAEtiqueta(
+  datas: Record<string, string | null> | null | undefined,
+  nome: string,
+): string | null {
+  const k = Object.keys(datas ?? {}).find((x) => mesmaEtiqueta(x, nome))
+  return k ? (datas![k] ?? null) : null
+}

@@ -56,6 +56,8 @@ import {
   ABAS_INTERNO_SEM_TRABALHO,
   type EtiquetaDoFundo,
   ATOS_DA_PRECIFICACAO,
+  desdeQuandoAEtiqueta,
+  etiquetaCanonica,
   etiquetasDaAba,
   etiquetasPorDestino,
   mesmaEtiqueta,
@@ -960,6 +962,17 @@ function SeloDaEtapa({ lead }: { lead: KommoLead }) {
   )
 }
 
+/** "há 3 dias", discreto, com a data e a hora exatas no passar do mouse. */
+function DesdeQuando({ quando }: { quando: string | null }) {
+  if (!quando) return <span />
+  const decorrido = tempoDecorrido(quando)
+  return (
+    <span className="whitespace-nowrap text-[10px] text-slate-400" title={`Desde ${formatDateTime(quando)}`}>
+      {decorrido}
+    </span>
+  )
+}
+
 /**
  * O SELETOR DE ETIQUETAS: marcar e desmarcar, no card, as etiquetas da casa.
  *
@@ -995,12 +1008,15 @@ function SeloDaEtapa({ lead }: { lead: KommoLead }) {
 function SeletorDeEtiquetas({
   oferecidas,
   aplicadas,
+  datas,
   emVoo,
   onAlternar,
 }: {
   oferecidas: readonly EtiquetaDoFundo[]
   /** As etiquetas que o card tem hoje — inclusive as de fora da lista. */
   aplicadas: readonly string[]
+  /** Desde quando cada etiqueta está no card — o "há 3 dias" ao lado da marcada. */
+  datas?: Record<string, string | null> | null
   /** A etiqueta DESTE card que está em voo, ou null. */
   emVoo: string | null
   onAlternar: (etiqueta: string, acao: 'adicionar' | 'remover') => void
@@ -1053,7 +1069,7 @@ function SeletorDeEtiquetas({
       </button>
 
       {aberto && (
-        <div className="absolute left-0 z-20 mt-1 w-[27.5rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+        <div className="absolute left-0 z-20 mt-1 w-[32rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
           {etiquetasPorDestino(oferecidas).map((grupo) => {
             const algumaPosta = grupo.etiquetas.some((e) => temEtiqueta(e.nome))
             return (
@@ -1063,7 +1079,7 @@ function SeletorDeEtiquetas({
               // lugar em branco — é o que mantém os outros dois alinhados.
               <div
                 key={grupo.destino}
-                className="grid grid-cols-[8.5rem_5.5rem_5.25rem_6.5rem] items-center py-0.5"
+                className="grid grid-cols-[8.5rem_5.5rem_5.25rem_6.5rem_4.5rem] items-center py-0.5"
               >
                 {/* O FUNDO COM ETIQUETA fica em destaque: numa lista de sete, é
                     o que se procura primeiro. */}
@@ -1114,6 +1130,15 @@ function SeletorDeEtiquetas({
                       </button>
                     )
                   })}
+                {/* HÁ QUANTO TEMPO a opção marcada está no card: é o controle
+                    de quanto o fundo está demorando. Em branco quando nenhuma
+                    está marcada, ou quando o Kommo não guarda a data. */}
+                <DesdeQuando
+                  quando={(() => {
+                    const marcada = grupo.etiquetas.find((e) => temEtiqueta(e.nome))
+                    return marcada ? desdeQuandoAEtiqueta(datas, marcada.nome) : null
+                  })()}
+                />
               </div>
             )
           })}
@@ -1414,11 +1439,20 @@ function CardCredito({
                     que é a ordem em que alguém etiquetou e muda de card para
                     card. Fixa, a POSIÇÃO passa a informar: a primeira é sempre
                     a do PJUS, e a falta dela se nota pelo que não está ali. */}
-                {[...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => (
-                  <Badge key={t} size="sm" tone={tom}>
-                    {t}
-                  </Badge>
-                ))}
+                {[...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => {
+                  // HÁ QUANTO TEMPO, junto da etiqueta: "Enviado PJUS · há 9
+                  // dias" se lê na fila sem abrir nada.
+                  const quando = desdeQuandoAEtiqueta(lead.tags_em, t)
+                  const decorrido = quando ? tempoDecorrido(quando) : ''
+                  return (
+                    <span key={t} title={quando ? `Desde ${formatDateTime(quando)}` : undefined}>
+                      <Badge size="sm" tone={tom}>
+                        {t}
+                        {decorrido && <span className="font-normal opacity-70"> · {decorrido}</span>}
+                      </Badge>
+                    </span>
+                  )
+                })}
                 {/* O SELETOR FICA NO FIM DA FILA DE ETIQUETAS, e aparece mesmo
                     no card que ainda não tem nenhuma — é justamente ali que ele
                     mais serve. Sem etiquetas e sem seletor, a linha inteira some
@@ -1427,6 +1461,7 @@ function CardCredito({
                   <SeletorDeEtiquetas
                     oferecidas={etiquetasOferecidas}
                     aplicadas={lead.tags ?? []}
+                    datas={lead.tags_em}
                     emVoo={etiquetaEmVoo}
                     onAlternar={(etiqueta, acao) => onEtiquetar(lead, etiqueta, acao)}
                   />
@@ -3068,9 +3103,22 @@ export default function AnaliseCredito() {
       ),
     onSuccess: (r, args) => {
       qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
-        antes?.map((l) =>
-          l.kommo_lead_id === args.leadId ? { ...l, tags: r?.tags ?? l.tags } : l,
-        ),
+        antes?.map((l) => {
+          if (l.kommo_lead_id !== args.leadId) return l
+          // A DATA JUNTO DA ETIQUETA: a que entrou é de agora, as que saíram
+          // (inclusive a irmã trocada) deixam o mapa — o mesmo que a
+          // kommo-etiquetar grava no espelho.
+          const tags = r?.tags ?? l.tags
+          const datas: Record<string, string | null> = Object.fromEntries(
+            Object.entries(l.tags_em ?? {}).filter(
+              ([k]) => tags.some((t) => mesmaEtiqueta(t, k)) && !mesmaEtiqueta(k, args.etiqueta),
+            ),
+          )
+          if (args.acao === 'adicionar') {
+            datas[etiquetaCanonica(args.etiqueta) ?? args.etiqueta] = new Date().toISOString()
+          }
+          return { ...l, tags, tags_em: datas }
+        }),
       )
       setEtiquetaEmVoo(null)
       if (r?.aviso) toast.error(r.aviso)

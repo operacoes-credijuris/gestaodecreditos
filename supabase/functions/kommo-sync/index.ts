@@ -27,6 +27,12 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 // também existe, e o card simplesmente não aparece na tela — sem erro nenhum.
 import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
 import {
+  datasDasEtiquetas,
+  etiquetaCanonica,
+  type EventoDeEtiqueta,
+  faltaDataDeEtiqueta,
+} from '../_shared/etiquetasDoFundo.ts'
+import {
   COLUNA_NOVOS,
   entradasDoOperacional,
   FUNIL_GERAL,
@@ -612,6 +618,82 @@ Deno.serve(async (req: Request) => {
       return { em: antes?.em ?? null, status: antes?.status ?? null }
     }
 
+    // ---------- Desde quando cada etiqueta de fundo está no card ----------
+    //
+    // O "há 3 dias" ao lado de "Enviado PJUS" (migração 0074). A fonte é o
+    // evento `entity_tag_added` do Kommo, que registra a etiqueta posta por
+    // qualquer caminho — pela plataforma ou à mão no Kommo.
+    //
+    // SÓ PERGUNTA O QUE NÃO SABE: card com etiqueta da casa sem data guardada. A
+    // data não muda depois de sabida (etiqueta que sai some do mapa, e a que volta
+    // é perguntada de novo), então passado o primeiro sync isto quase não custa
+    // nada. A etiqueta posta pela plataforma já chega com data — a kommo-etiquetar
+    // a grava na hora.
+    //
+    // FALHAR AQUI NÃO DERRUBA O SYNC, pelo mesmo motivo da data da coluna.
+    let temColunaTags = true
+    const datasAntes = new Map<number, Record<string, string | null>>()
+    {
+      const { data: comDatas, error: erroDatas } = await svc
+        .from('kommo_leads')
+        .select('kommo_lead_id, tags_em')
+        .in('pipeline_id', FUNIS_NO_ESPELHO)
+      if (erroDatas) temColunaTags = false
+      for (const r of comDatas ?? []) {
+        datasAntes.set(r.kommo_lead_id, (r.tags_em ?? {}) as Record<string, string | null>)
+      }
+    }
+    const nomesDasTags = (l: KommoLead) =>
+      (l._embedded?.tags ?? []).map((t) => String(t.name ?? '')).filter(Boolean)
+    const eventosDeEtiqueta = new Map<number, EventoDeEtiqueta[]>()
+    const perguntadosTags = new Set<number>()
+    let avisoTags: string | null = temColunaTags
+      ? null
+      : 'A migração 0074 ainda não rodou (coluna tags_em): o "há quantos dias" das etiquetas não aparece.'
+    if (temColunaTags) {
+      try {
+        const semData = leads.filter((l) => faltaDataDeEtiqueta(nomesDasTags(l), datasAntes.get(l.id)))
+        // Dez ids por consulta é o teto de /events; o teto de consultas espalha o
+        // primeiro preenchimento por alguns syncs em vez de pesar num só.
+        const MAX_CONSULTAS_TAGS = 20
+        let consultas = 0
+        for (let i = 0; i < semData.length && consultas < MAX_CONSULTAS_TAGS; i += 10) {
+          const ids = semData.slice(i, i + 10).map((l) => l.id)
+          consultas++
+          for (let pagina = 1; pagina <= 10; pagina++) {
+            const r = await kommo<{
+              _embedded?: { events?: EventoDeEtiqueta[] }
+              _links?: { next?: { href?: string } }
+            }>(
+              `/events?filter[entity]=lead&filter[entity_id]=${ids.join(',')}` +
+                '&filter[type]=entity_tag_added&limit=250&page=' + pagina,
+            )
+            if (!r) break
+            for (const e of r._embedded?.events ?? []) {
+              const lista = eventosDeEtiqueta.get(e.entity_id) ?? []
+              lista.push(e)
+              eventosDeEtiqueta.set(e.entity_id, lista)
+            }
+            if (!r._links?.next?.href) break
+          }
+          for (const id of ids) perguntadosTags.add(id)
+        }
+        const faltaram = semData.length - consultas * 10
+        if (faltaram > 0) {
+          avisoTags = `${faltaram} card(s) ficaram sem a data das etiquetas nesta passada; a próxima continua.`
+        }
+      } catch (e) {
+        avisoTags = `Não consegui ler no Kommo as datas das etiquetas: ${(e as Error)?.message ?? e}.`
+      }
+    }
+    const datasDoLead = (l: KommoLead) =>
+      datasDasEtiquetas({
+        tags: nomesDasTags(l).filter((t) => etiquetaCanonica(t)),
+        antes: datasAntes.get(l.id),
+        eventos: eventosDeEtiqueta.get(l.id),
+        perguntado: perguntadosTags.has(l.id),
+      })
+
     // ---------- Grava o espelho ----------
     const registros = leads.map((l) => {
       const doLead = notasPorLead.get(l.id) ?? []
@@ -676,6 +758,7 @@ Deno.serve(async (req: Request) => {
         // data continuaria na tela depois de o card mudar de coluna, dizendo
         // com confiança há quanto tempo ele está num lugar onde não está.
         ...(temColunaEtapa ? { etapa_em: etapa.em, etapa_status_id: etapa.status } : {}),
+        ...(temColunaTags ? { tags_em: datasDoLead(l) } : {}),
         raw: l,
         sincronizado_em: agora,
       }
@@ -819,6 +902,7 @@ Deno.serve(async (req: Request) => {
         avisoEtapas,
         avisoNovos,
         avisoEventos,
+        avisoTags,
         notasCortadas > 0
           ? `Um lote de ${notasCortadas} card(s) tem mais anotações do que coube nesta ` +
             `passada: o histórico deles pode estar incompleto.`
