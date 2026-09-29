@@ -39,6 +39,7 @@ import {
   MessageSquarePlus,
   Paperclip,
   Receipt,
+  ScrollText,
   Tag,
   CheckCircle2,
   X,
@@ -100,6 +101,7 @@ import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { DueDiligence } from '@/components/DueDiligence'
+import { JanelaDeCertidoes } from '@/components/JanelaDeCertidoes'
 import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
 import { escolherPaginasParaImagem } from '@/lib/paginasDigitalizadas'
 import { subirImagensDosAutos, type ImagemSubida } from '@/lib/imagensDosAutos'
@@ -1746,6 +1748,7 @@ function CardCredito({
   onEscolherProposta,
   anexarEMover,
   envioAosFundos,
+  onCertidoes,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -1839,6 +1842,8 @@ function CardCredito({
     onAbrir: (l: KommoLead, f: FundoDoEnvio) => void
     onMover: (l: KommoLead) => void
   }
+  /** Abre o painel de certidões, onde a aba o declara (a Obtenção de documentação do Externo). */
+  onCertidoes?: (l: KommoLead) => void
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -2001,6 +2006,17 @@ function CardCredito({
               onAbrir={(f) => envioAosFundos.onAbrir(lead, f)}
               onMover={() => envioAosFundos.onMover(lead)}
             />
+          )}
+          {onCertidoes && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<ScrollText className="h-4 w-4" />}
+              onClick={() => onCertidoes(lead)}
+              disabled={ocupado}
+            >
+              Certidões
+            </Button>
           )}
           {anexarEMover && (
             <BotaoAnexarEMover
@@ -2641,6 +2657,7 @@ export default function AnaliseCredito() {
     return p
   }, [])
   const [ddLead, setDdLead] = useState<KommoLead | null>(null)
+  const [certLead, setCertLead] = useState<KommoLead | null>(null)
   // CONJUNTO, não um id só. Com um id só, a leitura do card A terminando
   // limpava o indicador do card B, e o modal de B — ainda sem texto — passava a
   // afirmar "não achei nenhum CPF no PDF" sobre um PDF que nem tinha sido lido.
@@ -3386,6 +3403,15 @@ export default function AnaliseCredito() {
    */
   function onDueDiligence(lead: KommoLead) {
     setDdLead(lead)
+    lerAnexosDoCard(lead)
+  }
+  /** As certidões sozinhas (ver `certidoes` na trilha), com a mesma leitura dos anexos. */
+  function onCertidoes(lead: KommoLead) {
+    setCertLead(lead)
+    lerAnexosDoCard(lead)
+  }
+  /** Os PDFs do card, lidos em segundo plano para as sugestões do painel de certidões. */
+  function lerAnexosDoCard(lead: KommoLead) {
     const id = lead.kommo_lead_id
     // Lê os anexos sempre, mesmo quando a janela vai abrir no placar e as
     // sugestões não vão aparecer. É desperdício de rede conhecido, e uma escolha:
@@ -4337,6 +4363,7 @@ export default function AnaliseCredito() {
                 analisandoJuridico={analisandoJurId === l.kommo_lead_id}
                 resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
                 botoes={botoesDoCard}
+                onCertidoes={abaAtual?.certidoes ? onCertidoes : undefined}
               />
             ))}
           </div>
@@ -4446,6 +4473,22 @@ export default function AnaliseCredito() {
         />
       )}
 
+      {certLead && (
+        <JanelaDeCertidoes
+          key={certLead.kommo_lead_id}
+          leadId={certLead.kommo_lead_id}
+          tituloDoCard={tituloCard(certLead)}
+          cedenteDoCard={lerCardCredijuris(certLead).cedente}
+          arquivos={arquivosCache[certLead.kommo_lead_id] ?? []}
+          lendoPdf={
+            lendoPdf.has(certLead.kommo_lead_id) ||
+            rpvLead?.kommo_lead_id === certLead.kommo_lead_id
+          }
+          avisoPdf={avisoPdf[certLead.kommo_lead_id] ?? null}
+          onClose={() => setCertLead(null)}
+        />
+      )}
+
       {ddLead && (
         <DueDiligence
           // key pelo card: trocar de card remonta a janela do zero, em vez de
@@ -4471,6 +4514,9 @@ export default function AnaliseCredito() {
           // certidões é a diligência documental que precede a NOSSA aquisição;
           // no crédito que vai ao fundo quem a monta é ele, e abrir a aba aqui
           // convidaria a equipe a emitir certidão para um dossiê que não é nosso.
+          // A exceção é a Obtenção de documentação (29/09/2026): vendido o
+          // crédito, o fundo pede as certidões — e lá o card tem o botão
+          // "Certidões", que abre só este painel (ver JanelaDeCertidoes).
           comCertidoes={
             ehFunilPrecatorio(ddLead.pipeline_id) && !ehCardExterno(ddLead.pipeline_id)
           }

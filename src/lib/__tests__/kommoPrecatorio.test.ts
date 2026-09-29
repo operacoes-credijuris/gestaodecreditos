@@ -596,10 +596,10 @@ describe('abas da trilha Externa', () => {
     expect(chave.get('ENCAMINHAR AOS FUNDOS')).toBe(ABA_APROVADOS_EXTERNO)
     expect(chave.get('EM PRECIFICAÇÃO')).toBe(ABA_EM_PRECIFICACAO_EXTERNO)
     expect(chave.get('REPROVADOS')).toBe(ABA_REPROVADOS_EXTERNO)
+    expect(chave.get('OBTENÇÃO DE DOCUMENTAÇÃO')).toBe('ext-documentacao')
     const soLeitura = abas.filter((a) => a.soLeitura).map((a) => a.label)
     expect(soLeitura).toEqual([
       'NEGOCIAÇÃO',
-      'OBTENÇÃO DE DOCUMENTAÇÃO',
       'AGUARDANDO APROVAÇÃO DO FUNDO',
       'REVISÃO/ASSINATURA DA ESCRITURA',
       'PAGOS',
@@ -782,6 +782,20 @@ describe('abas da trilha Externa', () => {
     }
     expect(remessa.envioAosFundos?.destino).toBe(idExt('EM PRECIFICAÇÃO'))
     expect(destinoPermitido(FUNIL_PRECATORIO_EXTERNO, 111533984, 'EM PRECIFICAÇÃO')).toBe(true)
+  })
+
+  /**
+   * AS CERTIDÕES NA OBTENÇÃO DE DOCUMENTAÇÃO (29/09/2026): o botão que abre o
+   * painel de certidões do Interno — só ali, e sem os botões de trabalho nem
+   * desfecho.
+   */
+  it('a Obtenção de documentação tem o botão de certidões, e só ela', () => {
+    const doc = abas.find((a) => a.key === 'ext-documentacao')!
+    expect(doc.statusIds).toEqual([idExt('OBTENÇÃO DE DOCUMENTAÇÃO')])
+    expect(doc.certidoes).toBe(true)
+    expect(doc.acoes).toEqual([])
+    expect(ABAS_EXTERNO_SEM_TRABALHO.has('ext-documentacao')).toBe(true)
+    expect(abas.filter((a) => a.certidoes).map((a) => a.key)).toEqual(['ext-documentacao'])
   })
 
   it('as demais abas do Externo não oferecem desfecho', () => {

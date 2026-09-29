@@ -614,6 +614,8 @@ export interface Aba {
   faseDiscreta?: boolean
   /** O botão de anexar e mover (ver `anexarEMover` na trilha), com a coluna já resolvida. */
   anexarEMover?: { rotulo: string; nota: string; statusId: number } | null
+  /** O botão "Certidões" no card (ver `certidoes` na trilha). */
+  certidoes?: boolean
   /** Os checks do envio aos fundos (ver `envioAosFundos` na trilha), com o destino resolvido. */
   envioAosFundos?: {
     fundos: { fundo: string; etiqueta: string; plataforma: string; nota: string }[]
@@ -720,6 +722,9 @@ export const ABAS_EXTERNO_SEM_TRABALHO: ReadonlySet<string> = new Set([
   // para cá porque falta o memorando, não uma nova leitura. Sem due diligence
   // nem "Executar análise" (pedido de 29/09/2026).
   'ext-memorando',
+  // NA OBTENÇÃO DE DOCUMENTAÇÃO o crédito já foi vendido: o card tem só o botão
+  // de certidões (ver `certidoes` na trilha), e não a diligência inteira.
+  'ext-documentacao',
 ])
 
 /**
@@ -924,6 +929,7 @@ export function abasDoFunil(
         const id = a.envioAosFundos ? coluna(a.envioAosFundos.destino) : undefined
         return a.envioAosFundos && id !== undefined ? { fundos: a.envioAosFundos.fundos, destino: id } : null
       })(),
+      certidoes: a.certidoes ?? false,
     }
   }
 

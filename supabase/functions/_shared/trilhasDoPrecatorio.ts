@@ -141,6 +141,13 @@ export interface DefAbaPrecatorio {
    */
   anexarEMover?: { rotulo: string; nota: string; colunaKommo: string; statusId?: number }
   /**
+   * O BOTÃO "CERTIDÕES" no card: abre o painel de certidões da due diligence do
+   * Interno (checklist e emissão pela BullAI), sozinho. O primeiro uso é a
+   * Obtenção de documentação do Externo (29/09/2026), onde o fundo pede as
+   * certidões do cedente e a casa as tira.
+   */
+  certidoes?: boolean
+  /**
    * O ENVIO AOS FUNDOS: um check por fundo que tem plataforma própria de envio.
    * Quem sobe o crédito lá marca o check, escreve (ou cola o print) numa janela,
    * e a plataforma anota no card, põe a etiqueta daquele fundo e — com todos os
@@ -546,10 +553,21 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         colunaKommo: 'FECHADOS', statusId: 111533992,
         descricaoVazia: 'Nenhum precatório externo fechado.',
       },
+      {
+        key: 'ext-documentacao',
+        // AS CERTIDÕES DO CEDENTE, pela API da Bull (29/09/2026): na formalização
+        // o fundo pede os documentos, e o card ganha o botão que abre o mesmo
+        // painel de certidões da due diligence do Interno. Sem desfecho: quem
+        // move o card, por ora, é o Kommo.
+        certidoes: true,
+        label: 'Documentação',
+        colunaKommo: 'OBTENÇÃO DE DOCUMENTAÇÃO', statusId: 112341608,
+        descricaoVazia: 'Nenhum crédito em obtenção de documentação.',
+      },
     ],
     // AS COLUNAS COM FUNÇÃO NA PLATAFORMA. As outras do kanban — a entrada, a
-    // negociação, a documentação, a escritura, os pagos — entram pelo
-    // `espelhoCompleto`, só para leitura.
+    // negociação, a escritura, os pagos — entram pelo `espelhoCompleto`, só
+    // para leitura.
   },
 ]
 
