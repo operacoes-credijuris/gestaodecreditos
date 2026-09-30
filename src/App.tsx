@@ -1,9 +1,9 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { INICIO } from '@/components/layout/navigation'
 import { ProtectedRoute, AdminRoute } from '@/components/ProtectedRoute'
 import { AppLayout } from '@/components/layout/AppLayout'
 import Login from '@/pages/Login'
 import NotFound from '@/pages/NotFound'
-import Dashboard from '@/pages/estrategica/Dashboard'
 import InteligenciaVisaoGeral from '@/pages/inteligencia/VisaoGeral'
 import InteligenciaPerformance from '@/pages/inteligencia/Performance'
 import InteligenciaPrevisoes from '@/pages/inteligencia/Previsoes'
@@ -31,8 +31,10 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/estrategica" replace />} />
-        <Route path="/estrategica" element={<Dashboard />} />
+        <Route index element={<Navigate to={INICIO} replace />} />
+        {/* A GESTÃO ESTRATÉGICA SAIU (30/09/2026): o endereço antigo, salvo em
+            favorito ou histórico, leva ao início. */}
+        <Route path="/estrategica" element={<Navigate to={INICIO} replace />} />
 
         {/* Inteligência Econômica */}
         <Route path="/inteligencia" element={<InteligenciaVisaoGeral />} />

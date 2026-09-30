@@ -1,5 +1,4 @@
 import {
-  LayoutDashboard,
   FileSignature,
   IdCard,
   Wallet,
@@ -30,8 +29,12 @@ export interface NavSection {
 }
 
 // Hierarquia exatamente conforme o escopo:
-// Gestão Estratégica (topo) > Comercial > Operacional (com Execução Processual)
-// > Quadro Econômico > Configurações
+// Comercial > Operacional (com Execução Processual) > Quadro Econômico >
+// Configurações
+//
+// A GESTÃO ESTRATÉGICA SAIU DO MENU em 30/09/2026, a pedido da equipe. Era
+// também a página inicial; o início passou a ser a Análise de Crédito (ver
+// `INICIO`).
 //
 // Quadro Econômico fica por ÚLTIMO entre os setores porque não é um setor: é a
 // leitura do que os outros três produziram. Vem depois do trabalho, não antes.
@@ -39,17 +42,14 @@ export interface NavSection {
 // O nome é deliberado. "Quadro" é palavra de observação: o módulo retrata a
 // carteira com os dados que existem e diz quando não dá para concluir. Não
 // aponta caminho, não decide, não prevê o andamento do processo.
+/**
+ * A página em que a plataforma abre: depois do login, na raiz, no "voltar ao
+ * início" da página não encontrada e quando alguém sem permissão tenta abrir
+ * Configurações.
+ */
+export const INICIO = '/operacional/analise'
+
 export const NAVIGATION: NavSection[] = [
-  {
-    title: null,
-    items: [
-      {
-        label: 'Gestão Estratégica',
-        to: '/estrategica',
-        icon: LayoutDashboard,
-      },
-    ],
-  },
   {
     title: 'Comercial',
     // ORDEM = a do trabalho: o cadastro das pessoas vem antes e a geração de

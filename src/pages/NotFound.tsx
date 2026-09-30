@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Compass } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
+import { INICIO } from '@/components/layout/navigation'
 
 /** Página exibida para rotas inexistentes (em vez de redirecionar em silêncio). */
 export default function NotFound() {
@@ -18,10 +19,10 @@ export default function NotFound() {
           para o início.
         </p>
         <Link
-          to="/estrategica"
+          to={INICIO}
           className="mt-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700"
         >
-          Ir para a Gestão Estratégica
+          Ir para o início
         </Link>
       </Card>
     </div>

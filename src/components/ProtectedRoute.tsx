@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { Loader2, ShieldOff } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { INICIO } from '@/components/layout/navigation'
 
 function FullScreenLoader() {
   return (
@@ -67,6 +68,6 @@ export function AdminRoute({ children }: { children: ReactNode }) {
   // Desativado antes de admin: quem foi desligado não deve ver Configurações
   // nem ser mandado ao dashboard sem explicação.
   if (acessoDesativado) return <AcessoDesativado />
-  if (!isAdmin) return <Navigate to="/estrategica" replace />
+  if (!isAdmin) return <Navigate to={INICIO} replace />
   return <>{children}</>
 }

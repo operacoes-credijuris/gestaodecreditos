@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { INICIO } from '@/components/layout/navigation'
 import { Navigate, useLocation } from 'react-router-dom'
 import { Loader2, LogIn } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -27,7 +28,7 @@ export default function Login() {
   // por colega chega ao destino em vez de largar no dashboard.
   if (session) {
     const de = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
-    return <Navigate to={de && de !== '/login' ? de : '/estrategica'} replace />
+    return <Navigate to={de && de !== '/login' ? de : INICIO} replace />
   }
 
   async function handleSubmit(e: FormEvent) {
