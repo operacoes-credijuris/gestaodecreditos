@@ -2003,17 +2003,6 @@ function CardCredito({
               onMover={() => envioAosFundos.onMover(lead)}
             />
           )}
-          {onCertidoes && (
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<ScrollText className="h-4 w-4" />}
-              onClick={() => onCertidoes(lead)}
-              disabled={ocupado}
-            >
-              Certidões
-            </Button>
-          )}
           {anexarEMover && (
             <BotaoAnexarEMover
               rotulo={anexarEMover.rotulo}
@@ -2076,6 +2065,22 @@ function CardCredito({
           comprando volta da busca como se fosse mais uma dívida dele. */}
       {(botoes === 'nenhum' || botoes === 'dd') && (
         <AvisoSemNumero lead={lead} />
+      )}
+
+      {/* AS CERTIDÕES À ESQUERDA, no lugar da fileira de trabalho (30/09/2026):
+          é trabalho, como a due diligence, e não desfecho. */}
+      {onCertidoes && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<ScrollText className="h-4 w-4" />}
+            onClick={() => onCertidoes(lead)}
+            disabled={ocupado}
+          >
+            Certidões
+          </Button>
+        </div>
       )}
 
       {/* OS BOTÕES DE TRABALHO DEPENDEM DA ETAPA, e por dois motivos distintos.
