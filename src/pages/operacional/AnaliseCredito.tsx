@@ -55,7 +55,6 @@ import {
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABAS_COM_TAGS,
-  ABA_EM_PRECIFICACAO_EXTERNO,
   ABAS_EXTERNO_SEM_TRABALHO,
   ABAS_INTERNO_SEM_TRABALHO,
   type EtiquetaDoFundo,
@@ -1625,12 +1624,12 @@ function BotaoAnexarEMover({
 }
 
 /**
- * A ANOTAÇÃO NO CARD, escrita da fila de precificação.
+ * A ANOTAÇÃO NO CARD, de qualquer card da análise de crédito.
  *
- * É ONDE O CRÉDITO ESTÁ EM JOGO: o fundo respondeu a proposta, pediu documento,
- * mudou o deságio — e isso tinha de ser escrito no Kommo, à parte, abrindo o
- * card lá. Aqui ela sai do mesmo lugar em que se marca a etiqueta do fundo, e as
- * duas coisas costumam andar juntas ("Cotado BTG" e o que o BTG disse).
+ * NASCEU NA FILA DE PRECIFICAÇÃO, onde o fundo responde a proposta, pede
+ * documento, muda o deságio. Desde 30/09/2026 está em todos os cards, de todas
+ * as etapas e funis, a pedido da equipe: em qualquer fase acontece algo que
+ * precisa ser escrito no Kommo, e sem ela era preciso abrir o card lá.
  *
  * VAI COMO NOTA DE PESSOA, com o nome de quem escreveu no rodapé (ver
  * `marcarComoDePessoa`): é o que o comercial lê, e é o que a análise seguinte
@@ -1705,7 +1704,7 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
             onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void enviar()
             }}
-            placeholder="Ex.: Retorno do BTG — proposta a 62%, pagamento em 30 dias após a cessão."
+            placeholder="Ex.: Cedente enviou o RG; falta o comprovante de endereço."
             className="w-full resize-y rounded-md border border-slate-200 p-2 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
           />
           <div className="mt-1.5 flex justify-end">
@@ -1820,10 +1819,7 @@ function CardCredito({
   onEtiquetar: (l: KommoLead, etiqueta: string, acao: 'adicionar' | 'remover') => void
   /** A etiqueta deste card que está sendo gravada, ou null. */
   etiquetaEmVoo: string | null
-  /**
-   * Escreve uma anotação no card do Kommo. Só na aba "Em precificação" do
-   * Externo, ao lado das etiquetas — ver `BotaoDeAnotacao`.
-   */
+  /** Escreve uma anotação no card do Kommo — ver `BotaoDeAnotacao`. */
   onAnotar?: (l: KommoLead, texto: string) => Promise<void>
   /**
    * Escolhe o fundo com que seguir e move o card para a Produção de Proposta.
@@ -1912,8 +1908,8 @@ function CardCredito({
                 Finalizado
               </Badge>
             )}
-            {/* A ANOTAÇÃO AO LADO DO TÍTULO, onde a aba a oferece: é do card
-                inteiro, e não das etiquetas. */}
+            {/* A ANOTAÇÃO AO LADO DO TÍTULO: é do card inteiro, e não das
+                etiquetas. */}
             {onAnotar && <BotaoDeAnotacao onEnviar={(t) => onAnotar(lead, t)} />}
           </div>
 
@@ -2543,13 +2539,6 @@ function SeletorDestinacao({
     </div>
   )
 }
-
-/**
- * As abas em que o card oferece a anotação livre no Kommo (`BotaoDeAnotacao`):
- * Em precificação, onde se escreve o retorno dos fundos. Esteve também nas
- * Diligências por um dia; saiu delas a pedido, onde o "Sanar" já leva a mensagem.
- */
-const ABAS_COM_ANOTACAO: ReadonlySet<string> = new Set([ABA_EM_PRECIFICACAO_EXTERNO])
 
 /** O card bate com a busca? `q` já em minúsculas. */
 function casaComBusca(x: KommoLead, q: string): boolean {
@@ -3747,10 +3736,10 @@ export default function AnaliseCredito() {
   }
 
   /**
-   * A anotação escrita na fila de precificação (ver `BotaoDeAnotacao`).
+   * A anotação escrita no card (ver `BotaoDeAnotacao`).
    *
    * APARECE NO CARD NA HORA: o espelho só a traria na próxima sincronização, e
-   * quem acabou de escrever o retorno do fundo procuraria a nota e não a veria.
+   * quem acabou de escrever procuraria a nota e não a veria.
    * A sincronização seguinte troca esta cópia pela do Kommo.
    */
   async function anotarNoCard(lead: KommoLead, texto: string) {
@@ -4305,9 +4294,8 @@ export default function AnaliseCredito() {
                 etiquetaEmVoo={
                   etiquetaEmVoo?.leadId === l.kommo_lead_id ? etiquetaEmVoo.etiqueta : null
                 }
-                // A ANOTAÇÃO AO LADO DAS ETIQUETAS, na mesma aba que as edita:
-                // é onde o retorno do fundo precisa ser escrito.
-                onAnotar={ABAS_COM_ANOTACAO.has(abaAtual?.key ?? '') ? anotarNoCard : undefined}
+                // A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026).
+                onAnotar={anotarNoCard}
                 // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
                 // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
                 onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
