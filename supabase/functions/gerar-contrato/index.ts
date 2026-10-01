@@ -1136,12 +1136,38 @@ async function driveEncontrarAnaliseArquivos(
     throw new Error(`Originador '${originadorNome}' não encontrado em '${DRIVE_ANALISES_NAME}/${categoria}' — a análise precisa estar numa pasta com esse nome lá. Disponíveis: ${disponiveis.map(d => d.name).join(', ') || '(nenhum)'}`);
   }
 
-  // Pasta leaf = pasta da análise dentro do originador. O nome dela não segue uma
+  const procDigits = numeroProcesso.replace(/\D/g, '');
+
+  // PRIMEIRO, PELO ARQUIVO: varre o originador pasta por pasta (em largura, a raiz
+  // inclusive) até achar um arquivo com o nº do processo no nome. É o critério mais
+  // confiável — o nº é a chave da operação — e não depende de como a pasta foi
+  // batizada nem de onde a análise foi largada.
+  if (procDigits) {
+    const fila: Array<{ pasta: DriveFile; caminho: string }> = [{ pasta: inter, caminho: '' }];
+    for (let visitadas = 0; fila.length > 0 && visitadas < 200; visitadas++) {
+      const { pasta, caminho } = fila.shift()!;
+      const filhos = await driveListFiles(token, `'${pasta.id}' in parents and trashed = false`);
+      const doProcesso = filhos.filter(f => f.mimeType !== FOLDER_MIME && f.name.replace(/\D/g, '').includes(procDigits));
+      if (doProcesso.length > 0) {
+        const analises = doProcesso.filter(f => normalizar(f.name).includes('analisede'));
+        return {
+          folderId: pasta.id,
+          folderName: caminho || pasta.name,
+          arquivos: analises.length ? analises : doProcesso,
+          debug: { originador_id: inter.id, leaf_id: pasta.id, leaf_casou_por: 'arquivo com o nº do processo', pastas_visitadas: visitadas + 1 },
+        };
+      }
+      for (const f of filhos) {
+        if (f.mimeType === FOLDER_MIME) fila.push({ pasta: f, caminho: caminho ? `${caminho}/${f.name}` : f.name });
+      }
+    }
+  }
+
+  // Sem arquivo com o nº: cai na busca pelo nome da pasta. O nome dela não segue uma
   // regra única: costuma ser o do cedente, mas quando o que se negocia são honorários
   // ela vem com o nome do escritório (ex.: 'Klemm & CIA Ltda.' para a cedente Tatiana).
   // Por isso a busca tenta, em ordem, do mais específico ao palpite.
   const subs = await driveListFiles(token, `'${inter.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
-  const procDigits = numeroProcesso.replace(/\D/g, '');
   const porNome = (nome: string): DriveFile | null => {
     const n = normalizar(nome || '');
     if (!n) return null;
