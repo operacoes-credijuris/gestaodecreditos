@@ -43,9 +43,9 @@ export interface TempoDaRenderizacao {
 }
 
 /** O teto da API: acima disto ela reduz por conta própria, e o excedente é lixo. */
-const ARESTA_MAIOR_ALVO = 1568
+export const ARESTA_MAIOR_ALVO = 1568
 const ESCALA_MAXIMA = 2.5
-const QUALIDADE_JPEG = 0.72
+export const QUALIDADE_JPEG = 0.72
 
 /**
  * Renderiza as páginas pedidas (1-based). Página que falhar é pulada, e o erro

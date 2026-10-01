@@ -46,6 +46,11 @@ export interface LimitesImagem {
   inicio: number
   /** Páginas do fim de um arquivo inteiramente digitalizado. */
   fim: number
+  /**
+   * Quantas páginas de CADA arquivo entram antes de qualquer outra — a parte
+   * garantida dele. Omitido, não há garantia, e a prioridade decide sozinha.
+   */
+  porArquivo?: number
 }
 
 /**
@@ -62,6 +67,20 @@ export interface LimitesImagem {
  * pedido voltava HTTP 400 depois de minutos de renderização.
  */
 export const LIMITES_PADRAO: LimitesImagem = { max: 60, inicio: 6, fim: 40 }
+
+/**
+ * OS LIMITES DO CONECTOR do "Executar análise": o mesmo teto, e uma parte
+ * garantida para cada arquivo.
+ *
+ * O DEFEITO QUE ISTO CORRIGE (01/10/2026). As páginas escaneadas DENTRO de um
+ * processo que tem texto (o híbrido) têm prioridade sobre tudo — e num processo
+ * de 658 páginas com sessenta delas escaneadas, elas sozinhas gastaram o teto. O
+ * extrato do PRC, escaneado e num arquivo à parte, ficou sem página nenhuma em
+ * imagem: o Claude o recebeu sem texto e sem imagem, e a análise registrou que
+ * o conector não conseguia lê-lo. Com a parte garantida, o arquivo pequeno entra
+ * inteiro e o grande fica com o resto do teto.
+ */
+export const LIMITES_DO_CONECTOR: LimitesImagem = { ...LIMITES_PADRAO, porArquivo: 10 }
 
 interface Candidata { arquivo: string; numero: number; prioridade: number }
 
@@ -102,6 +121,17 @@ export function escolherPaginasParaImagem(
     }
     const inicio = Math.min(limites.inicio, Math.max(0, a.paginas - fim))
     for (let n = 1; n <= inicio; n++) candidatas.push({ arquivo: a.nome, numero: n, prioridade: 1000 - n })
+  }
+
+  // A PARTE GARANTIDA DE CADA ARQUIVO (ver `porArquivo`): as melhores páginas
+  // de cada um sobem de faixa, acima de qualquer prioridade de outro arquivo.
+  if (limites.porArquivo && limites.porArquivo > 0) {
+    const porNome = new Map<string, Candidata[]>()
+    for (const c of candidatas) porNome.set(c.arquivo, [...(porNome.get(c.arquivo) ?? []), c])
+    for (const doArquivo of porNome.values()) {
+      const melhores = [...doArquivo].sort((x, y) => y.prioridade - x.prioridade).slice(0, limites.porArquivo)
+      for (const c of melhores) c.prioridade += 10_000
+    }
   }
 
   // Maior prioridade primeiro; empate pela ordem de entrada (estável).

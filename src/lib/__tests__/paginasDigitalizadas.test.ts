@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   escolherPaginasParaImagem,
   descreverSelecao,
+  LIMITES_DO_CONECTOR,
   LIMITES_PADRAO,
   resumirNumeros,
   type ArquivoParaImagem,
@@ -22,6 +23,24 @@ const hibrido = (nome: string, paginas: number, imgs: number[]): ArquivoParaImag
 })
 
 describe('escolherPaginasParaImagem', () => {
+  /**
+   * O EXTRATO DO PRC QUE FICOU SEM LEITURA (01/10/2026): o processo híbrido com
+   * sessenta páginas escaneadas gastava o teto inteiro, e o extrato escaneado,
+   * num arquivo à parte, não ganhava página nenhuma. Com a parte garantida do
+   * conector, ele entra inteiro.
+   */
+  it('no conector, o arquivo pequeno entra inteiro mesmo com o híbrido grande na frente', () => {
+    const processo = hibrido('processo.pdf', 658, Array.from({ length: 80 }, (_, i) => 191 + i))
+    const prc = escaneado('PRC_CLAUDIO.pdf', 2)
+    const semGarantia = escolherPaginasParaImagem([processo, prc])
+    expect(semGarantia.find((s) => s.arquivo === 'PRC_CLAUDIO.pdf')).toBeUndefined()
+
+    const comGarantia = escolherPaginasParaImagem([processo, prc], LIMITES_DO_CONECTOR)
+    expect(comGarantia.find((s) => s.arquivo === 'PRC_CLAUDIO.pdf')?.numeros).toEqual([1, 2])
+    expect(comGarantia.find((s) => s.arquivo === 'processo.pdf')?.numeros).toHaveLength(58)
+    expect(LIMITES_DO_CONECTOR.max).toBe(LIMITES_PADRAO.max)
+  })
+
   it('arquivo inteiramente digitalizado: o fim inteiro e o começo, dentro do teto', () => {
     const [s] = escolherPaginasParaImagem([escaneado('proc.pdf', 200)], { max: 60, inicio: 6, fim: 40 })
     expect(s.numeros).toHaveLength(46)

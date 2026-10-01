@@ -104,8 +104,8 @@ import { useToast } from '@/components/ui/Toast'
 import { DueDiligence } from '@/components/DueDiligence'
 import { JanelaDeCertidoes } from '@/components/JanelaDeCertidoes'
 import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
-import { escolherPaginasParaImagem } from '@/lib/paginasDigitalizadas'
-import { subirImagensDosAutos, type ImagemSubida } from '@/lib/imagensDosAutos'
+import { escolherPaginasParaImagem, LIMITES_DO_CONECTOR } from '@/lib/paginasDigitalizadas'
+import { subirAnexosDeImagem, subirImagensDosAutos, type ImagemSubida } from '@/lib/imagensDosAutos'
 import { agruparNotas, ehAnexo, nomeDoAnexo } from '@/lib/historicoDeNotas'
 import { supabase } from '@/lib/supabase'
 import {
@@ -342,6 +342,15 @@ export interface ArquivoLido {
   paginasImagem?: number[]
   /** Os bytes do PDF, para renderizar páginas digitalizadas como imagem. */
   bytes?: ArrayBuffer
+  /**
+   * O anexo é IMAGEM (foto, print), e não PDF: o arquivo, já baixado. Continua
+   * com o `erro` de "não é PDF" para quem só lê PDF; a análise pelo conector o
+   * sobe como imagem (ver `subirAnexosDeImagem`).
+   *
+   * BAIXADO NA LEITURA, e não na hora de subir: o link do Kommo vence, e a
+   * leitura fica guardada no cache da página por muito mais tempo que ele.
+   */
+  anexoDeImagem?: Blob
   /** Caracteres de conteúdo por página, descontado o rodapé do tribunal. */
   densidade: number
   /** Densidade baixa: é digitalização. pdf.js lê texto, não imagem. */
@@ -401,6 +410,7 @@ async function lerArquivosDoCard(
     nome_arquivo?: string
     arquivos?: { nome: string; download: string; mime?: string }[]
     nao_pdf?: string[]
+    imagens?: { nome: string; download: string; mime?: string }[]
     sem_link?: string[]
   }>('buscar-kommo', { lead_id: lead.kommo_lead_id })
   if (bk.erro) throw new Error(bk.erro)
@@ -453,7 +463,18 @@ async function lerArquivosDoCard(
 
   // Anexo que não é PDF entra como aviso, não como silêncio: se o RG está em JPG,
   // "não achei o RG" seria falso — ele está ali, só não é legível por aqui.
+  const imagensDoCard = new Map((bk.imagens ?? []).map((i) => [i.nome, i]))
   for (const nome of bk.nao_pdf ?? []) {
+    const img = imagensDoCard.get(nome)
+    let anexoDeImagem: Blob | undefined
+    if (img) {
+      try {
+        const resp = await fetch(img.download)
+        if (resp.ok) anexoDeImagem = await resp.blob()
+      } catch {
+        /* sem a imagem, o anexo segue como hoje: nomeado, e "não é PDF" */
+      }
+    }
     lidos.push({
       nome,
       texto: '',
@@ -461,6 +482,7 @@ async function lerArquivosDoCard(
       densidade: 0,
       digitalizado: false,
       erro: 'Não é PDF — não consigo ler por aqui.',
+      ...(anexoDeImagem ? { anexoDeImagem } : {}),
     })
   }
 
@@ -2946,7 +2968,10 @@ export default function AnaliseCredito() {
       // precisa já anunciar o que está a caminho em imagem — senão ele descreve
       // o acórdão digitalizado como ilegível, e a análise segue sem ele. Que foi
       // exatamente o defeito: dezenove anexos no card, dezessete na análise.
-      const selecao = escolherPaginasParaImagem(lidos)
+      // COM A PARTE GARANTIDA DE CADA ARQUIVO (ver LIMITES_DO_CONECTOR): o
+      // processo grande não gasta o teto sozinho e deixa o extrato sem página.
+      const selecao = escolherPaginasParaImagem(lidos, LIMITES_DO_CONECTOR)
+      const anexosDeImagem = lidos.flatMap((a) => (a.anexoDeImagem ? [{ nome: a.nome, blob: a.anexoDeImagem }] : []))
 
       // AS IMAGENS VÃO ANTES DO TEXTO, e numa gravação só com ele — desde
       // 27/09/2026. Antes o texto ia primeiro e as imagens depois, por uma
@@ -2960,9 +2985,9 @@ export default function AnaliseCredito() {
       // um depósito que não aconteceu.
       let prontas: ImagemSubida[] = []
       let falhasDeImagem: string[] = []
-      if (selecao.length > 0) {
-        const totalImg = selecao.reduce((n, s) => n + s.numeros.length, 0)
-        anotarPreparo(id, 'lendo', `Preparando ${totalImg} página(s) digitalizada(s) para o Claude ver…`)
+      if (selecao.length > 0 || anexosDeImagem.length > 0) {
+        const totalImg = selecao.reduce((n, s) => n + s.numeros.length, 0) + anexosDeImagem.length
+        anotarPreparo(id, 'lendo', `Preparando ${totalImg} página(s) em imagem para o Claude ver…`)
         try {
           const { data: { user } } = await supabase.auth.getUser()
           if (!user) {
@@ -2973,6 +2998,12 @@ export default function AnaliseCredito() {
             )
             prontas = envio.prontas
             falhasDeImagem = envio.falhas
+            // OS ANEXOS EM IMAGEM (foto, print do extrato), cada um uma página.
+            if (anexosDeImagem.length > 0) {
+              const dosAnexos = await subirAnexosDeImagem(anexosDeImagem, codigo, user.id)
+              prontas = [...prontas, ...dosAnexos.prontas]
+              falhasDeImagem = [...falhasDeImagem, ...dosAnexos.falhas]
+            }
           }
         } catch (e) {
           falhasDeImagem.push((e as Error)?.message ?? String(e))
@@ -2980,6 +3011,9 @@ export default function AnaliseCredito() {
       }
       const imagensDo = (nome: string) =>
         prontas.filter((p) => p.arquivo === nome).map((p) => ({ pagina: p.pagina, caminho: p.caminho }))
+      const imagemDoAnexo = new Set(
+        anexosDeImagem.filter((a) => prontas.some((p) => p.arquivo === a.nome)).map((a) => a.nome),
+      )
 
       anotarPreparo(id, 'lendo', 'Entregando os autos ao Claude…')
       // A RESPOSTA É LIDA, e antes não era. Ela sempre disse o que ficou de
@@ -3009,10 +3043,12 @@ export default function AnaliseCredito() {
           // escaneado de um download que falhou, e a análise recebe os dois com
           // a mesma etiqueta — sendo que só um deles tem conserto.
           digitalizado: a.digitalizado,
-          erro: a.erro ?? '',
+          erro: imagemDoAnexo.has(a.nome) ? '' : (a.erro ?? ''),
           // AS IMAGENS JÁ PRONTAS, e não mais a promessa delas: nada fica "a
           // caminho" depois do depósito, e o conector não precisa esperar.
           imagens: imagensDo(a.nome),
+          // O ANEXO EM IMAGEM é um arquivo de uma página só, e ela é imagem.
+          ...(imagemDoAnexo.has(a.nome) ? { imagem: true, paginas: 1 } : {}),
         })),
       })
 

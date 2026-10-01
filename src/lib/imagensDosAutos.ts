@@ -18,7 +18,7 @@
 
 import { supabase } from '@/lib/supabase'
 import type { SelecaoImagem } from '@/lib/paginasDigitalizadas'
-import { renderizarPaginas } from '@/lib/renderizarPaginas'
+import { ARESTA_MAIOR_ALVO, QUALIDADE_JPEG, renderizarPaginas } from '@/lib/renderizarPaginas'
 
 /** O balde das páginas digitalizadas, criado pela migração 0055. */
 export const BALDE_AUTOS = 'analises-input'
@@ -131,5 +131,77 @@ export async function subirImagensDosAutos(
   }
   // O que ainda estava em voo quando a última página saiu do forno.
   await Promise.all(emVoo)
+  return { prontas, falhas }
+}
+
+/** Um anexo do card que é imagem (foto, print), e não PDF — já baixado. */
+export interface AnexoDeImagem {
+  nome: string
+  blob: Blob
+}
+
+/**
+ * A POSIÇÃO DOS ANEXOS EM IMAGEM no nome do balde, longe das dos PDFs: o índice
+ * de `baseDoArquivo` é a ordem da seleção, e um anexo com o mesmo índice
+ * gravaria por cima da página 1 de um PDF.
+ */
+const POSICAO_DOS_ANEXOS = 100
+
+/** A imagem no tamanho que o modelo olha (ver renderizarPaginas.ts), em JPEG. */
+async function imagemParaJpeg(original: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(original)
+  try {
+    const escala = Math.min(1, ARESTA_MAIOR_ALVO / Math.max(bitmap.width, bitmap.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(bitmap.width * escala))
+    canvas.height = Math.max(1, Math.round(bitmap.height * escala))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('o navegador não deu um canvas para converter a imagem')
+    // FUNDO BRANCO: PNG com transparência viraria preto no JPEG.
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    return await new Promise<Blob>((ok, falha) =>
+      canvas.toBlob((b) => (b ? ok(b) : falha(new Error('não consegui converter a imagem'))), 'image/jpeg', QUALIDADE_JPEG),
+    )
+  } finally {
+    bitmap.close()
+  }
+}
+
+/**
+ * Sobe os anexos em imagem do card, cada um como a página 1 de si mesmo.
+ *
+ * O DEFEITO QUE ISTO CORRIGE (01/10/2026). Anexo que não era PDF ia ao conector
+ * só como o nome e o aviso "não é PDF": o print do extrato do PRC, a foto do RG,
+ * ficavam fora da análise, e era preciso anexá-los de novo na conversa. Agora o
+ * Claude os vê pelo `ver_paginas`, como vê uma página escaneada.
+ */
+export async function subirAnexosDeImagem(
+  anexos: AnexoDeImagem[],
+  codigo: string,
+  userId: string,
+): Promise<EnvioDasImagens> {
+  const prontas: ImagemSubida[] = []
+  const falhas: string[] = []
+  for (const [k, a] of anexos.entries()) {
+    try {
+      const jpeg = await imagemParaJpeg(a.blob)
+      const caminho = caminhoDaPagina(userId, codigo, baseDoArquivo(POSICAO_DOS_ANEXOS + k, a.nome), 1)
+      let { error } = await supabase.storage
+        .from(BALDE_AUTOS)
+        .upload(caminho, jpeg, { contentType: 'image/jpeg', upsert: true })
+      if (error) {
+        await new Promise((r) => setTimeout(r, 1200))
+        ;({ error } = await supabase.storage
+          .from(BALDE_AUTOS)
+          .upload(caminho, jpeg, { contentType: 'image/jpeg', upsert: true }))
+      }
+      if (error) falhas.push(`"${a.nome}": ${error.message}`)
+      else prontas.push({ arquivo: a.nome, pagina: 1, caminho })
+    } catch (e) {
+      falhas.push(`"${a.nome}": ${(e as Error)?.message ?? String(e)}`)
+    }
+  }
   return { prontas, falhas }
 }

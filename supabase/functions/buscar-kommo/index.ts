@@ -138,10 +138,21 @@ Deno.serve(async (req) => {
     if (comLink.length === 0) return json({ erro: "Nenhum PDF do card trouxe link de download.", sem_link: semLink }, 502);
     const ultimo = comLink[comLink.length - 1];
 
+    // OS ANEXOS EM IMAGEM, com o link (01/10/2026): a análise pelo conector os
+    // mostra ao Claude como imagem. Continuam em `nao_pdf` também — quem só lê
+    // PDF (a due diligence, a análise de RPV) segue como antes.
+    const ehImagem = (x: { mime: string; ext: string; nome: string }) =>
+      /^image\/(jpeg|png|webp|gif|bmp)$/.test(x.mime) ||
+      /^(jpe?g|png|webp|gif|bmp)$/.test(x.ext) ||
+      /\.(jpe?g|png|webp|gif|bmp)$/i.test(x.nome);
+    const imagens = metas
+      .filter((x) => !ehPdf(x) && ehImagem(x) && !!x.download)
+      .map((x) => ({ nome: x.nome, download: x.download!, mime: x.mime }));
     return json({
       pronto: true,
       arquivos: comLink.map((x) => ({ nome: x.nome, download: x.download!, mime: x.mime })),
       nao_pdf: naoPdf,
+      imagens,
       sem_link: semLink,
       download_url: ultimo.download,
       nome_arquivo: ultimo.nome,

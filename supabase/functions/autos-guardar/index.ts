@@ -224,6 +224,8 @@ Deno.serve(async (req) => {
         const erro = limparParaOBanco((a as any)?.erro).slice(0, 300);
         const motivo = erro
           ? `não consegui ler: ${erro}`
+          : (a as any)?.imagem === true
+          ? "imagem anexada (foto ou print, não é PDF)"
           : paginas > 0
           ? "digitalizado (sem camada de texto)"
           : "sem texto e sem páginas legíveis";
