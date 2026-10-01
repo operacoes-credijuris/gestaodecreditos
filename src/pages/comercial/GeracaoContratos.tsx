@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type DragEvent,
   type FormEvent,
   type ReactNode,
 } from 'react'
@@ -442,6 +443,20 @@ function ArquivosField({
   // teclado não anda entre as duas opções, e o leitor de tela anuncia dois
   // controles soltos em vez de uma escolha.
   const grupo = `${inputId.current}-genero`
+  // ARRASTAR E SOLTAR. A caixa tracejada tem cara de área de soltar, e é o que a
+  // pessoa faz — sem `onDrop` o arquivo solto ali sumia sem aviso nenhum.
+  const [arrastando, setArrastando] = useState(false)
+  function soltar(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault()
+    setArrastando(false)
+    const aceitos = Array.from(e.dataTransfer.files).filter((f) =>
+      EXTENSOES_ACEITAS.some((ext) => f.name.toLowerCase().endsWith(ext)),
+    )
+    if (aceitos.length === 0) return
+    const dt = new DataTransfer()
+    aceitos.forEach((f) => dt.items.add(f))
+    onAdicionar(dt.files)
+  }
   return (
     <div className="space-y-3 rounded-lg border border-slate-200 p-4">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
@@ -470,16 +485,24 @@ function ArquivosField({
       </div>
       <label
         htmlFor={inputId.current}
-        className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 py-6 text-sm text-slate-500 transition-colors hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-600"
+        onDragOver={(e) => {
+          e.preventDefault()
+          setArrastando(true)
+        }}
+        onDragLeave={() => setArrastando(false)}
+        onDrop={soltar}
+        className={`flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed py-6 text-sm transition-colors hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-600 ${
+          arrastando ? 'border-brand-400 bg-brand-50/40 text-brand-600' : 'border-slate-300 text-slate-500'
+        }`}
       >
         <Upload className="h-4 w-4" />
-        {arquivos.length > 0 ? 'Adicionar mais arquivos' : 'Selecionar arquivos'}
+        {arquivos.length > 0 ? 'Adicionar mais arquivos' : 'Selecionar ou soltar arquivos'}
       </label>
       <input
         id={inputId.current}
         type="file"
         multiple
-        accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx"
+        accept={EXTENSOES_ACEITAS.join(',')}
         className="hidden"
         onChange={(e: ChangeEvent<HTMLInputElement>) => {
           onAdicionar(e.target.files)
@@ -516,6 +539,8 @@ function ArquivosField({
     </div>
   )
 }
+
+const EXTENSOES_ACEITAS = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.docx', '.xlsx']
 
 /** "312 KB", "1,4 MB" — o tamanho como se lê, não em bytes. */
 function tamanhoLegivel(bytes: number): string {

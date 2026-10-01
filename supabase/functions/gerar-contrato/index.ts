@@ -1095,7 +1095,17 @@ async function driveListarOriginadoresAnalise(token: string, categoria: string):
   const catFolder = await driveFindChildByTolerantName(token, analisesRootId, categoria);
   if (!catFolder) return [];
   const subs = await driveListFiles(token, `'${catFolder.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
-  return subs.map(s => s.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const nomes = subs.map(s => s.name);
+  // A casa também origina crédito: o Credijuris aparece sempre, tenha ou não pasta
+  // própria ainda — a de B. Processos é criada na geração (passo 13).
+  if (!nomes.some(ehPastaCredijuris)) nomes.push(ORIGINADOR_CREDIJURIS);
+  return nomes.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
+const ORIGINADOR_CREDIJURIS = 'Credijuris';
+// "Credijuris", "Originador - Credijuris", "Intermediador - CREDIJURIS"...
+function ehPastaCredijuris(nome: string): boolean {
+  return normalizar(nome).includes(normalizar(ORIGINADOR_CREDIJURIS));
 }
 
 // Navega A. Análises de crédito / {categoria} / {originador} / {pasta do cedente}
@@ -1116,10 +1126,14 @@ async function driveEncontrarAnaliseArquivos(
   if (!catFolder) throw new Error(`Categoria '${categoria}' não encontrada em '${DRIVE_ANALISES_NAME}'.`);
 
   // Match exato — o nome vem do dropdown, populado da mesma listagem do Drive.
-  const inter = await driveFindChild(token, originadorNome, catFolder.id, FOLDER_MIME);
+  let inter = await driveFindChild(token, originadorNome, catFolder.id, FOLDER_MIME);
+  const disponiveis = inter
+    ? []
+    : await driveListFiles(token, `'${catFolder.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
+  // Credijuris entra no dropdown mesmo sem pasta: aceita qualquer grafia dela.
+  if (!inter && ehPastaCredijuris(originadorNome)) inter = disponiveis.find(d => ehPastaCredijuris(d.name)) ?? null;
   if (!inter) {
-    const disponiveis = await driveListFiles(token, `'${catFolder.id}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
-    throw new Error(`Originador '${originadorNome}' não encontrado em '${DRIVE_ANALISES_NAME}/${categoria}'. Disponíveis: ${disponiveis.map(d => d.name).join(', ') || '(nenhum)'}`);
+    throw new Error(`Originador '${originadorNome}' não encontrado em '${DRIVE_ANALISES_NAME}/${categoria}' — a análise precisa estar numa pasta com esse nome lá. Disponíveis: ${disponiveis.map(d => d.name).join(', ') || '(nenhum)'}`);
   }
 
   // Pasta leaf = pasta da análise dentro do originador. O nome dela não segue uma
