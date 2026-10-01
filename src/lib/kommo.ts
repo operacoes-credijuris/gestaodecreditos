@@ -44,6 +44,7 @@ import {
   ABAS_COM_TAGS,
   type DefAbaPrecatorio,
   type DefSubdivisao,
+  type FundoDoEnvio,
   type PapelDaAcao,
   FUNIL_PRECATORIO_EXTERNO,
   FUNIL_PRECATORIO_INTERNO,
@@ -162,6 +163,7 @@ export const ST_PROTOCOLO = 107830059 // Protocolo
  * servidor recusava.
  */
 export type { DefAbaPrecatorio, DefSubdivisao, SubdivisaoPrecatorio }
+export type { AtoDoEnvio, FundoDoEnvio } from '../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
 
 /**
  * A aba do Interno onde a análise acontece, e as trilhas inteiras.
@@ -199,7 +201,7 @@ export type TomDaTag = (typeof TONS_DA_TAG)[number] | 'red' | 'green' | 'yellow'
  * A COR SAI DO ATO, e não do nome inteiro.
  *
  * As etiquetas da casa se escrevem "‹ato› ‹fundo›" — "Cotado BTG", "Reprovado
- * PJUS", "Enviado PJUS" —, e o que a cor precisa dizer, na varredura de uma
+ * PJus", "Enviado PJus" —, e o que a cor precisa dizer, na varredura de uma
  * coluna, é o ATO: quem cotou está vivo, quem reprovou acabou. O fundo é o
  * texto, que se lê quando a cor já chamou o olho.
  *
@@ -237,7 +239,7 @@ export function tomDaTag(nome: string): TomDaTag {
   const tons = TONS_DA_TAG
   // FNV-1a, e não a soma dos caracteres. A soma espalha mal quando os nomes
   // compartilham palavras — que é exatamente o caso aqui, onde quase toda
-  // etiqueta é "<ato> <fundo>": "Reprovado PJUS" e "Reprovado BTG" têm metade
+  // etiqueta é "<ato> <fundo>": "Reprovado PJus" e "Reprovado BTG" têm metade
   // dos caracteres em comum, e somas próximas caem no mesmo resto.
   let h = 0x811c9dc5
   for (const c of String(nome ?? '')) {
@@ -268,7 +270,7 @@ export function coresDasTags(nomes: readonly string[]): Map<string, TomDaTag> {
     if (mapa.has(nome)) continue
 
     // A COR DO ATO NÃO DESVIA, e é a exceção que dá sentido à regra: "Reprovado
-    // BTG" e "Reprovado PJUS" no mesmo card TÊM de sair vermelhas as duas — a
+    // BTG" e "Reprovado PJus" no mesmo card TÊM de sair vermelhas as duas — a
     // cor ali não separa etiquetas, ela diz o que aconteceu com o crédito em
     // cada fundo. Desviar a segunda por higiene visual apagaria a informação.
     const doAto = tomPorAto(nome)
@@ -618,7 +620,7 @@ export interface Aba {
   certidoes?: boolean
   /** Os checks do envio aos fundos (ver `envioAosFundos` na trilha), com o destino resolvido. */
   envioAosFundos?: {
-    fundos: { fundo: string; etiqueta: string; plataforma: string; nota: string }[]
+    fundos: FundoDoEnvio[]
     destino: number
   } | null
 }

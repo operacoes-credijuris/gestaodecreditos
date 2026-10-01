@@ -2,7 +2,7 @@
 //
 // Uma lista fechada, e é este o ponto do arquivo. A API do Kommo CRIA a etiqueta
 // quando recebe um nome que ainda não existe na conta — mandar texto livre daqui
-// faria nascer "Enviado PJUS ", "enviado pjus" e "Enviado Pjus" como três
+// faria nascer "Enviado PJus ", "enviado pjus" e "Enviado Pjus" como três
 // etiquetas distintas, cada uma com a sua cor, e a coluna do comercial ficaria
 // com uma sujeira que a API não sabe desfazer: o Kommo não tem endpoint para
 // renomear nem para apagar etiqueta (verificado em 22/09/2026 na referência
@@ -33,20 +33,26 @@ export interface EtiquetaDoFundo {
    * opera pediu assim em 22/09/2026, depois de ver as duas conviverem.
    *
    * ENTRE DESTINOS NÃO HÁ EXCLUSÃO NENHUMA: o mesmo crédito pode estar cotado no
-   * BTG e reprovado no PJUS, e é exatamente isso que a fila precisa mostrar.
+   * BTG e reprovado no PJus, e é exatamente isso que a fila precisa mostrar.
    */
   destino: string
 }
 
 /**
  * OS FUNDOS EM QUE A CASA COTA, na ordem da tela — ditados por quem opera em
- * 29/09/2026. Eram PJUS, BTG e Luiz; o Luiz saiu e entraram cinco fundos.
+ * 29/09/2026. Eram PJus, BTG e Luiz; o Luiz saiu e entraram cinco fundos.
  *
  * O BTG NÃO TEM "ENVIADO": ali o crédito não fica esperando — ou volta cotado,
  * ou recusado. É o único fundo com dois atos.
+ *
+ * "PJus", E NÃO "PJUS" (01/10/2026): é como a gestora escreve o nome. As
+ * etiquetas antigas, com "PJUS", continuam no Kommo — ele não renomeia nem
+ * apaga etiqueta —, e contam como as novas: a comparação ignora maiúsculas
+ * (ver `mesmaEtiqueta`). A tela mostra o nome novo, e a kommo-etiquetar tira a
+ * grafia antiga quando troca a etiqueta de fundo.
  */
 const FUNDOS: { destino: string; atos: readonly AtoDaPrecificacao[]; artigo: 'do' | 'da' }[] = [
-  { destino: 'PJUS', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
+  { destino: 'PJus', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
   { destino: 'BTG', atos: ['Cotado', 'Reprovado'], artigo: 'do' },
   { destino: 'PX Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
   { destino: 'Invest Precatórios', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
@@ -69,7 +75,7 @@ export function mensagemDaProposta(destino: string): string {
 
 /**
  * AS ETIQUETAS DA ABA "EM PRECIFICAÇÃO": "‹ato› ‹fundo›", como as que o
- * comercial já usava no kanban ("Enviado PJUS", "Cotado BTG") — o mesmo molde,
+ * comercial já usava no kanban ("Enviado PJus", "Cotado BTG") — o mesmo molde,
  * para as dos fundos novos casarem com o vocabulário que está lá.
  *
  * CUIDADO AO MUDAR UM NOME: o Kommo cria a etiqueta na primeira vez que ela é
@@ -78,7 +84,7 @@ export function mensagemDaProposta(destino: string): string {
  *
  * A ORDEM É A DO PERCURSO dentro de cada fundo: enviado, a cotação que voltou, e
  * por fim a recusa. Como só uma vale por fundo, marcar outra apaga a anterior —
- * "Cotado PJUS" substituindo "Enviado PJUS" é a notícia de que o fundo respondeu.
+ * "Cotado PJus" substituindo "Enviado PJus" é a notícia de que o fundo respondeu.
  */
 export const ETIQUETAS_DA_PRECIFICACAO: readonly EtiquetaDoFundo[] = FUNDOS.flatMap((f) =>
   f.atos.map((ato) => ({ destino: f.destino, ato, nome: `${ato} ${f.destino}` })),
@@ -134,13 +140,13 @@ export function irmasDaEtiqueta(
 }
 
 /**
- * As etiquetas de um card NA ORDEM DA CASA: a dos fundos na lista (PJUS, BTG,
+ * As etiquetas de um card NA ORDEM DA CASA: a dos fundos na lista (PJus, BTG,
  * PX Ativos…).
  *
  * A ORDEM QUE VINHA ERA A DO KOMMO — isto é, a ordem em que alguém etiquetou —,
  * e ela muda de card para card. Numa coluna de trinta, isso obriga a LER cada
  * linha: o mesmo fundo aparece ora no começo, ora no fim. Com a ordem fixa, a
- * posição vira informação: a primeira etiqueta é sempre a do PJUS, e a ausência
+ * posição vira informação: a primeira etiqueta é sempre a do PJus, e a ausência
  * dela se nota pelo que não está ali.
  *
  * É A MESMA ORDEM DO SELETOR, e de propósito: quem marca e quem lê veem a mesma
@@ -192,7 +198,7 @@ export interface EventoDeEtiqueta {
  * quando o Kommo já foi perguntado e não guarda o evento (etiqueta mais antiga
  * que o histórico dele).
  *
- * É O QUE RESPONDE "HÁ QUANTO TEMPO ESTÁ DEMORANDO": "Enviado PJUS" há 9 dias é
+ * É O QUE RESPONDE "HÁ QUANTO TEMPO ESTÁ DEMORANDO": "Enviado PJus" há 9 dias é
  * fundo que não respondeu; "Cotado BTG" há 2, cotação fresca. Pedido de quem
  * opera em 29/09/2026.
  *

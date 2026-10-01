@@ -26,7 +26,7 @@
 // administrador, no painel — o próprio Kommo não renomeia etiqueta nem por lá.
 //
 // USO (POST, com sessão logada):
-//   { "leadId": 15269795, "etiqueta": "Enviado PJUS", "acao": "adicionar" }
+//   { "leadId": 15269795, "etiqueta": "Enviado PJus", "acao": "adicionar" }
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
@@ -68,7 +68,7 @@ Deno.serve(async (req: Request) => {
     // conta do comercial — e a API não tem como renomeá-la nem apagá-la depois.
     //
     // E O NOME QUE SEGUE É O DA LISTA, nunca o que chegou na requisição:
-    // "enviado pjus" casa com a regra, mas quem vai ao Kommo é "Enviado PJUS".
+    // "enviado pjus" casa com a regra, mas quem vai ao Kommo é "Enviado PJus".
     const etiqueta = etiquetaCanonica(body.etiqueta)
     if (!etiqueta) {
       return jsonResponse(
@@ -113,12 +113,22 @@ Deno.serve(async (req: Request) => {
     // mesma coisa e deixariam um estado intermediário visível — sem etiqueta
     // nenhuma, ou com as duas — se a segunda falhasse.
     const irmas = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta) : []
+    // A GRAFIA QUE O CARD TEM SAI JUNTO: "Enviado PJUS", de antes de a PJus
+    // passar a ser escrita assim (01/10/2026), é a mesma etiqueta para a casa,
+    // mas o Kommo pode não tratá-la como tal — e aí pedir para tirar "Enviado
+    // PJus" deixaria a antiga no card. Pede-se também pelo nome exato de lá.
+    const doCard = (espelho.tags ?? []) as string[]
+    const comoNoCard = (nomes: string[]) =>
+      doCard.filter((t) => !nomes.includes(t) && nomes.some((n) => mesmaEtiqueta(t, n)))
+    const aTirar = acao === 'adicionar'
+      ? [...irmas, ...comoNoCard(irmas)]
+      : [etiqueta, ...comoNoCard([etiqueta])]
     const patch = acao === 'adicionar'
       ? {
         tags_to_add: [{ name: etiqueta }],
-        ...(irmas.length > 0 ? { tags_to_delete: irmas.map((name) => ({ name })) } : {}),
+        ...(aTirar.length > 0 ? { tags_to_delete: aTirar.map((name) => ({ name })) } : {}),
       }
-      : { tags_to_delete: [{ name: etiqueta }] }
+      : { tags_to_delete: aTirar.map((name) => ({ name })) }
     const res = await fetch(`${base}/leads/${leadId}`, {
       method: 'PATCH',
       headers,

@@ -770,14 +770,17 @@ describe('abas da trilha Externa', () => {
    * plataforma própria; a etiqueta de cada um é das da casa (senão a
    * kommo-etiquetar a recusaria), e o destino é Em precificação — pelo id.
    */
-  it('a Remessa aos fundos tem os checks do BTG e da PJUS, e leva a Em precificação', () => {
+  it('a Remessa aos fundos tem os checks do BTG e da PJus, e leva a Em precificação', () => {
     const remessa = abas.find((a) => a.key === ABA_APROVADOS_EXTERNO)!
-    expect(remessa.envioAosFundos?.fundos.map((f) => [f.fundo, f.etiqueta])).toEqual([
-      ['BTG', 'Cotado BTG'],
-      ['PJUS', 'Enviado PJUS'],
+    // DOIS DESFECHOS POR FUNDO (01/10/2026): aceito ou reprovado.
+    expect(
+      remessa.envioAosFundos?.fundos.map((f) => [f.fundo, f.atos.map((a) => [a.etiqueta, a.reprova ?? false])]),
+    ).toEqual([
+      ['BTG', [['Cotado BTG', false], ['Reprovado BTG', true]]],
+      ['PJus', [['Enviado PJus', false], ['Reprovado PJus', true]]],
     ])
     for (const f of remessa.envioAosFundos!.fundos) {
-      expect(etiquetaCanonica(f.etiqueta), f.fundo).toBe(f.etiqueta)
+      for (const a of f.atos) expect(etiquetaCanonica(a.etiqueta), a.etiqueta).toBe(a.etiqueta)
       expect(f.plataforma, f.fundo).toMatch(/^https:\/\//)
     }
     expect(remessa.envioAosFundos?.destino).toBe(idExt('EM PRECIFICAÇÃO'))
@@ -1267,7 +1270,7 @@ describe('acaoDeReprovar', () => {
  * A COR DA ETIQUETA SAI DO ATO, e o ato é a primeira palavra dela.
  *
  * As etiquetas da casa se escrevem "‹ato› ‹fundo›" — "Cotado BTG", "Reprovado
- * PJUS", "Enviado ao Luiz". Na varredura de uma coluna o que a cor precisa dizer
+ * PJus", "Enviado ao Luiz". Na varredura de uma coluna o que a cor precisa dizer
  * é o ATO: quem cotou está vivo, quem reprovou acabou. O fundo é o texto, lido
  * depois que a cor chamou o olho.
  *
@@ -1283,11 +1286,11 @@ describe('tomDaTag', () => {
   })
 
   it('o ato manda na cor', () => {
-    expect(tomDaTag('Cotado PJUS')).toBe('green')
+    expect(tomDaTag('Cotado PJus')).toBe('green')
     expect(tomDaTag('Cotado BTG')).toBe('green')
-    expect(tomDaTag('Enviado PJUS')).toBe('blue')
+    expect(tomDaTag('Enviado PJus')).toBe('blue')
     expect(tomDaTag('Reprovado BTG')).toBe('red')
-    expect(tomDaTag('Reprovado PJUS')).toBe('red')
+    expect(tomDaTag('Reprovado PJus')).toBe('red')
     expect(tomDaTag('Sem proposta')).toBe('red')
   })
 
@@ -1328,25 +1331,25 @@ describe('tomDaTag', () => {
  */
 describe('coresDasTags', () => {
   // As etiquetas reais de um card do funil externo, em 21/09/2026.
-  const doCard = ['Enviado PJUS', 'Reprovado BTG', 'Cotado BTG', 'Sem proposta']
+  const doCard = ['Enviado PJus', 'Reprovado BTG', 'Cotado BTG', 'Sem proposta']
 
   /**
    * A COR DO ATO NÃO DESVIA, e é a exceção que dá sentido à regra.
    *
-   * "Reprovado BTG" e "Reprovado PJUS" no mesmo card têm de sair vermelhas as
+   * "Reprovado BTG" e "Reprovado PJus" no mesmo card têm de sair vermelhas as
    * duas: a cor ali não separa etiquetas, diz o que aconteceu com o crédito em
    * cada fundo. Desviar a segunda por higiene visual apagaria a informação.
    */
   it('o mesmo ato repete a cor, de propósito', () => {
-    const cores = coresDasTags(['Reprovado BTG', 'Reprovado PJUS', 'Cotado XP'])
+    const cores = coresDasTags(['Reprovado BTG', 'Reprovado PJus', 'Cotado XP'])
     expect(cores.get('Reprovado BTG')).toBe('red')
-    expect(cores.get('Reprovado PJUS')).toBe('red')
+    expect(cores.get('Reprovado PJus')).toBe('red')
     expect(cores.get('Cotado XP')).toBe('green')
   })
 
   it('cada ato do card sai com a sua cor', () => {
     const cores = coresDasTags(doCard)
-    expect(cores.get('Enviado PJUS')).toBe('blue')
+    expect(cores.get('Enviado PJus')).toBe('blue')
     expect(cores.get('Cotado BTG')).toBe('green')
     expect(cores.get('Reprovado BTG')).toBe('red')
     expect(cores.get('Sem proposta')).toBe('red')

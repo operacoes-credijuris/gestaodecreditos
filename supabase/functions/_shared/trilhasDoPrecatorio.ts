@@ -89,6 +89,23 @@ export interface SaidaDaEtapa {
  * `colunasPrecatorioDesalinhadas`: a tela diz qual não encontrou, em vez de
  * ficar vazia em silêncio.
  */
+/** Um desfecho do envio a um fundo: a etiqueta que ele põe no card e a linha da anotação. */
+export interface AtoDoEnvio {
+  etiqueta: string
+  nota: string
+  /** O fundo recusou o crédito — o botão sai vermelho. */
+  reprova?: boolean
+}
+
+/** Um fundo com plataforma própria de envio, e os desfechos possíveis dele. */
+export interface FundoDoEnvio {
+  fundo: string
+  /** "o BTG", "a PJus" — para a tela escrever "envio ao BTG" e "envio à PJus". */
+  artigo: 'o' | 'a'
+  plataforma: string
+  atos: AtoDoEnvio[]
+}
+
 export interface DefAbaPrecatorio {
   key: string
   /** Rótulo na plataforma — vocabulário nosso, não o do CRM do comercial. */
@@ -152,13 +169,17 @@ export interface DefAbaPrecatorio {
    * Quem sobe o crédito lá marca o check, escreve (ou cola o print) numa janela,
    * e a plataforma anota no card, põe a etiqueta daquele fundo e — com todos os
    * checks feitos — move o card para o destino. Pedido de 29/09/2026 para a
-   * remessa aos fundos (BTG e PJUS, depois Em precificação).
+   * remessa aos fundos (BTG e PJus, depois Em precificação).
    *
    * O CHECK FEITO É A ETIQUETA NO CARD: não há outro registro que possa
    * discordar do Kommo, e a etiqueta posta à mão lá também conta.
+   *
+   * DOIS DESFECHOS POR FUNDO (01/10/2026): o fundo pode aceitar o crédito
+   * ("Enviado PJus", "Cotado BTG") ou reprová-lo já na plataforma ("Reprovado
+   * PJus", "Reprovado BTG"). Qualquer um dos dois faz o check daquele fundo.
    */
   envioAosFundos?: {
-    fundos: { fundo: string; etiqueta: string; plataforma: string; nota: string }[]
+    fundos: FundoDoEnvio[]
     destino: { colunaKommo: string; statusId?: number }
   }
   /**
@@ -469,21 +490,27 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
       {
         key: ABA_APROVADOS_EXTERNO,
         // PRIMEIRO AS PLATAFORMAS DOS FUNDOS, DEPOIS A PRECIFICAÇÃO (29/09/2026):
-        // BTG e PJUS recebem o crédito nas plataformas deles; com os dois checks
+        // BTG e PJus recebem o crédito nas plataformas deles; com os dois checks
         // feitos, o card vai para Em precificação — já com as duas etiquetas.
         envioAosFundos: {
           fundos: [
             {
               fundo: 'BTG',
-              etiqueta: 'Cotado BTG',
+              artigo: 'o',
               plataforma: 'https://officer.precatoriosbrasil.com/monitor/precatorios/list/new',
-              nota: 'Crédito enviado ao BTG.',
+              atos: [
+                { etiqueta: 'Cotado BTG', nota: 'Crédito enviado ao BTG.' },
+                { etiqueta: 'Reprovado BTG', nota: 'Crédito reprovado pelo BTG.', reprova: true },
+              ],
             },
             {
-              fundo: 'PJUS',
-              etiqueta: 'Enviado PJUS',
+              fundo: 'PJus',
+              artigo: 'a',
               plataforma: 'https://parceiro.pjus.com.br/area-parceiro/cotacoes/nova-cotacao',
-              nota: 'Crédito enviado à PJUS.',
+              atos: [
+                { etiqueta: 'Enviado PJus', nota: 'Crédito enviado à PJus.' },
+                { etiqueta: 'Reprovado PJus', nota: 'Crédito reprovado pela PJus.', reprova: true },
+              ],
             },
           ],
           destino: { colunaKommo: 'EM PRECIFICAÇÃO', statusId: 111533984 },

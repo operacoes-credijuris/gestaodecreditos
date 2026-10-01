@@ -58,6 +58,8 @@ import {
   ABAS_EXTERNO_SEM_TRABALHO,
   ABAS_INTERNO_SEM_TRABALHO,
   type EtiquetaDoFundo,
+  type AtoDoEnvio,
+  type FundoDoEnvio,
   ATOS_DA_PRECIFICACAO,
   desdeQuandoAEtiqueta,
   etiquetaCanonica,
@@ -1025,7 +1027,7 @@ function DesdeQuando({ quando }: { quando: string | null }) {
  * os atos dele ao lado do nome (Enviado, Cotado, Reprovado — o BTG só os dois
  * últimos), e em cada linha no máximo um círculo marcado. Marcar "Reprovado BTG" tira "Cotado BTG", porque o crédito
  * está num dos dois e não nos dois. Entre fundos não há exclusão nenhuma —
- * cotado no BTG e reprovado no PJUS é o estado normal de um crédito em
+ * cotado no BTG e reprovado no PJus é o estado normal de um crédito em
  * precificação. A troca vai num PATCH só, do lado do servidor; a tela não manda
  * duas chamadas.
  *
@@ -1296,15 +1298,22 @@ function BotaoEscolherProposta({
   )
 }
 
-/** Um fundo com plataforma própria de envio (ver `envioAosFundos` na trilha). */
-type FundoDoEnvio = { fundo: string; etiqueta: string; plataforma: string; nota: string }
+/** "ao BTG", "à PJus"; "do BTG", "da PJus". */
+const aoFundo = (f: FundoDoEnvio) => `${f.artigo === 'a' ? 'à' : 'ao'} ${f.fundo}`
+const doFundo = (f: FundoDoEnvio) => `${f.artigo === 'a' ? 'da' : 'do'} ${f.fundo}`
+
+/** O desfecho do fundo já posto no card (a etiqueta de um dos atos dele), ou null. */
+function atoFeito(f: FundoDoEnvio, tags: readonly string[] | null | undefined): AtoDoEnvio | null {
+  return f.atos.find((a) => (tags ?? []).some((t) => mesmaEtiqueta(t, a.etiqueta))) ?? null
+}
 
 /**
  * OS CHECKS DO ENVIO AOS FUNDOS, na remessa: um por fundo com plataforma própria.
  *
  * O NOME DO FUNDO É LINK para a plataforma dele (abre em outra aba) — é onde o
  * economista sobe o crédito; o QUADRADO abre a janela da anotação. O check
- * marcado é a etiqueta no card, com há quanto tempo.
+ * marcado é a etiqueta no card, com há quanto tempo: verde com o fundo aceitando
+ * o crédito, vermelho com ele reprovando.
  *
  * COM TODOS FEITOS E O CARD AINDA AQUI (a movimentação falhou, ou as etiquetas
  * foram postas à mão no Kommo), aparece o botão de mover.
@@ -1322,14 +1331,14 @@ function ChecksDosFundos({
   onAbrir: (f: FundoDoEnvio) => void
   onMover: () => void
 }) {
-  const feito = (f: FundoDoEnvio) => (lead.tags ?? []).some((t) => mesmaEtiqueta(t, f.etiqueta))
-  const todos = fundos.every(feito)
+  const todos = fundos.every((f) => atoFeito(f, lead.tags))
   return (
     <div className="flex flex-col items-end gap-1.5">
       <div className="flex items-center gap-3">
         {fundos.map((f) => {
-          const ok = feito(f)
-          const desde = ok ? desdeQuandoAEtiqueta(lead.tags_em, f.etiqueta) : null
+          const ato = atoFeito(f, lead.tags)
+          const ok = ato !== null
+          const desde = ato ? desdeQuandoAEtiqueta(lead.tags_em, ato.etiqueta) : null
           return (
             <div key={f.fundo} className="flex items-center gap-1.5">
               <button
@@ -1338,27 +1347,29 @@ function ChecksDosFundos({
                 disabled={ocupado || ok}
                 aria-pressed={ok}
                 title={
-                  ok
-                    ? `${f.etiqueta}${desde ? ` · ${tempoDecorrido(desde)}` : ''}`
-                    : `Registrar o envio ao ${f.fundo}`
+                  ato
+                    ? `${ato.etiqueta}${desde ? ` · ${tempoDecorrido(desde)}` : ''}`
+                    : `Registrar o envio ${aoFundo(f)}`
                 }
                 className={cn(
                   'flex h-5 w-5 items-center justify-center rounded border transition-colors disabled:cursor-default',
-                  ok
-                    ? 'border-emerald-600 bg-emerald-600 text-white'
-                    : 'border-slate-300 bg-white hover:border-emerald-500 hover:bg-emerald-50',
+                  ato?.reprova
+                    ? 'border-red-600 bg-red-600 text-white'
+                    : ato
+                      ? 'border-emerald-600 bg-emerald-600 text-white'
+                      : 'border-slate-300 bg-white hover:border-emerald-500 hover:bg-emerald-50',
                 )}
               >
-                {ok && <Check className="h-3.5 w-3.5" />}
+                {ato?.reprova ? <X className="h-3.5 w-3.5" /> : ato && <Check className="h-3.5 w-3.5" />}
               </button>
               <a
                 href={f.plataforma}
                 target="_blank"
                 rel="noreferrer"
-                title={`Abrir a plataforma do ${f.fundo}`}
+                title={`Abrir a plataforma ${doFundo(f)}`}
                 className={cn(
                   'font-display inline-flex items-center gap-1 text-sm font-semibold hover:underline',
-                  ok ? 'text-emerald-700' : 'text-slate-700 hover:text-brand-700',
+                  ato?.reprova ? 'text-red-700' : ok ? 'text-emerald-700' : 'text-slate-700 hover:text-brand-700',
                 )}
               >
                 {f.fundo}
@@ -1380,8 +1391,11 @@ function ChecksDosFundos({
 /**
  * A JANELA DO ENVIO A UM FUNDO: o texto (opcional) e as imagens — o print da
  * plataforma, colado com Ctrl+V ou escolhido no computador. A anotação no card
- * começa sempre pela linha padrão ("Crédito enviado ao BTG."), e o que se
- * escrever vem depois.
+ * começa sempre pela linha padrão do desfecho ("Crédito enviado ao BTG.",
+ * "Crédito reprovado pelo BTG."), e o que se escrever vem depois.
+ *
+ * UM BOTÃO POR DESFECHO, no lugar do "Confirmar envio" (01/10/2026): o fundo
+ * aceita ou reprova, e o botão escolhido decide a etiqueta e a linha da nota.
  */
 function JanelaDoEnvioAoFundo({
   fundo,
@@ -1390,11 +1404,16 @@ function JanelaDoEnvioAoFundo({
 }: {
   fundo: FundoDoEnvio
   onFechar: () => void
-  onConfirmar: (texto: string, arquivos: File[], onAndamento: (texto: string, pct?: number) => void) => Promise<void>
+  onConfirmar: (
+    ato: AtoDoEnvio,
+    texto: string,
+    arquivos: File[],
+    onAndamento: (texto: string, pct?: number) => void,
+  ) => Promise<void>
 }) {
   const [texto, setTexto] = useState('')
   const [arquivos, setArquivos] = useState<File[]>([])
-  const [andamento, setAndamento] = useState<{ texto: string; pct?: number } | null>(null)
+  const [andamento, setAndamento] = useState<{ texto: string; pct?: number; ato: string } | null>(null)
   // O ERRO FICA NA JANELA, e não só no aviso que some: é o que se copia para
   // pedir ajuda, e o aviso passa antes de alguém conseguir ler.
   const [erro, setErro] = useState<string | null>(null)
@@ -1412,11 +1431,11 @@ function JanelaDoEnvioAoFundo({
       ),
     ])
 
-  async function confirmar() {
+  async function confirmar(ato: AtoDoEnvio) {
     setErro(null)
-    setAndamento({ texto: 'Começando…', pct: 0 })
+    setAndamento({ texto: 'Começando…', pct: 0, ato: ato.etiqueta })
     try {
-      await onConfirmar(texto, arquivos, (t, pct) => setAndamento({ texto: t, pct }))
+      await onConfirmar(ato, texto, arquivos, (t, pct) => setAndamento({ texto: t, pct, ato: ato.etiqueta }))
     } catch (e) {
       // A janela fica aberta para tentar de novo, com o motivo à vista.
       setErro((e as Error)?.message ?? String(e))
@@ -1430,7 +1449,7 @@ function JanelaDoEnvioAoFundo({
       open
       onClose={() => !ocupado && onFechar()}
       dirty={texto.trim().length > 0 || arquivos.length > 0}
-      title={`Envio ao ${fundo.fundo}`}
+      title={`Envio ${aoFundo(fundo)}`}
       description={
         <a
           href={fundo.plataforma}
@@ -1438,7 +1457,7 @@ function JanelaDoEnvioAoFundo({
           rel="noreferrer"
           className="inline-flex items-center gap-1 text-brand-700 hover:underline"
         >
-          Abrir a plataforma do {fundo.fundo}
+          Abrir a plataforma {doFundo(fundo)}
           <ExternalLink className="h-3.5 w-3.5" />
         </a>
       }
@@ -1447,9 +1466,17 @@ function JanelaDoEnvioAoFundo({
           <Button variant="outline" onClick={onFechar} disabled={ocupado}>
             Cancelar
           </Button>
-          <Button variant="success" onClick={() => void confirmar()} loading={ocupado}>
-            Confirmar envio
-          </Button>
+          {fundo.atos.map((a) => (
+            <Button
+              key={a.etiqueta}
+              variant={a.reprova ? 'danger' : 'success'}
+              onClick={() => void confirmar(a)}
+              loading={andamento?.ato === a.etiqueta}
+              disabled={ocupado}
+            >
+              {a.etiqueta}
+            </Button>
+          ))}
         </div>
       }
     >
@@ -1467,7 +1494,7 @@ function JanelaDoEnvioAoFundo({
             }
           }}
           disabled={ocupado}
-          placeholder="O que foi enviado (opcional) — dá para colar o print aqui com Ctrl+V."
+          placeholder="O que foi enviado, ou o motivo da reprovação (opcional) — dá para colar o print aqui com Ctrl+V."
           className="w-full resize-y rounded-md border border-slate-200 p-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
         />
         <div>
@@ -1932,19 +1959,21 @@ function CardCredito({
               card eles já significam análise pronta e recusa. */}
           {mostrarTags && ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0) && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {/* A ORDEM É A DA CASA — PJUS, BTG, PX Ativos… —, e não a do Kommo,
+                {/* A ORDEM É A DA CASA — PJus, BTG, PX Ativos… —, e não a do Kommo,
                     que é a ordem em que alguém etiquetou e muda de card para
                     card. Fixa, a POSIÇÃO passa a informar: a primeira é sempre
-                    a do PJUS, e a falta dela se nota pelo que não está ali. */}
+                    a do PJus, e a falta dela se nota pelo que não está ali. */}
                 {mostrarTags && [...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => {
-                  // HÁ QUANTO TEMPO, junto da etiqueta: "Enviado PJUS · há 9
+                  // HÁ QUANTO TEMPO, junto da etiqueta: "Enviado PJus · há 9
                   // dias" se lê na fila sem abrir nada.
                   const quando = desdeQuandoAEtiqueta(lead.tags_em, t)
                   const decorrido = quando ? tempoDecorrido(quando) : ''
                   return (
                     <span key={t} title={quando ? `Desde ${formatDateTime(quando)}` : undefined}>
                       <Badge size="sm" tone={tom}>
-                        {t}
+                        {/* O NOME DA CASA, e não a grafia que o card tem: "Enviado
+                            PJUS", de antes de 01/10/2026, aparece como "Enviado PJus". */}
+                        {etiquetaCanonica(t) ?? t}
                         {decorrido && <span className="font-normal opacity-70"> · {decorrido}</span>}
                       </Badge>
                     </span>
@@ -3814,6 +3843,7 @@ export default function AnaliseCredito() {
   async function enviarAoFundo(
     lead: KommoLead,
     fundo: FundoDoEnvio,
+    ato: AtoDoEnvio,
     texto: string,
     arquivos: File[],
     onAndamento: (texto: string, pct?: number) => void,
@@ -3821,8 +3851,10 @@ export default function AnaliseCredito() {
     const cfg = abaAtual?.envioAosFundos
     if (!cfg) return
     const id = lead.kommo_lead_id
-    const chave = `${id}:${fundo.fundo}`
-    const nota = [fundo.nota, texto.trim()].filter(Boolean).join('\n\n')
+    // PELO DESFECHO, e não só pelo fundo: a nota de "enviado" que subiu não
+    // vale por uma de "reprovado", se a pessoa mudar de botão ao tentar de novo.
+    const chave = `${id}:${fundo.fundo}:${ato.etiqueta}`
+    const nota = [ato.nota, texto.trim()].filter(Boolean).join('\n\n')
 
     // 1. A ANOTAÇÃO, e depois as imagens, se houver.
     if (!notasDoEnvio.has(chave)) {
@@ -3860,19 +3892,19 @@ export default function AnaliseCredito() {
     }
 
     // 2. A ETIQUETA DO FUNDO.
-    onAndamento(`Pondo a etiqueta "${fundo.etiqueta}"…`)
+    onAndamento(`Pondo a etiqueta "${ato.etiqueta}"…`)
     let tags: string[]
     try {
       const r = await invokeFunction<{ tags?: string[]; aviso?: string | null }>('kommo-etiquetar', {
         leadId: id,
-        etiqueta: fundo.etiqueta,
+        etiqueta: ato.etiqueta,
         acao: 'adicionar',
       })
-      tags = r?.tags ?? [...(lead.tags ?? []), fundo.etiqueta]
+      tags = r?.tags ?? [...(lead.tags ?? []), ato.etiqueta]
       if (r?.aviso) toast.error(r.aviso)
     } catch (e) {
       toast.error(
-        `A anotação está no card, mas a etiqueta "${fundo.etiqueta}" não entrou: ${(e as Error).message}. ` +
+        `A anotação está no card, mas a etiqueta "${ato.etiqueta}" não entrou: ${(e as Error).message}. ` +
           'Confirme de novo — a anotação não se repete.',
       )
       throw e
@@ -3880,7 +3912,7 @@ export default function AnaliseCredito() {
     qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
       antes?.map((l) =>
         l.kommo_lead_id === id
-          ? { ...l, tags, tags_em: { ...(l.tags_em ?? {}), [fundo.etiqueta]: new Date().toISOString() } }
+          ? { ...l, tags, tags_em: { ...(l.tags_em ?? {}), [ato.etiqueta]: new Date().toISOString() } }
           : l,
       ),
     )
@@ -3890,10 +3922,11 @@ export default function AnaliseCredito() {
       return n
     })
 
-    // 3. TODOS OS FUNDOS FEITOS: o card segue para o destino.
-    const todos = cfg.fundos.every((f) => tags.some((t) => mesmaEtiqueta(t, f.etiqueta)))
+    // 3. TODOS OS FUNDOS FEITOS — aceito ou reprovado, cada um: o card segue
+    // para o destino.
+    const todos = cfg.fundos.every((f) => atoFeito(f, tags))
     if (!todos) {
-      toast.success(fundo.nota)
+      toast.success(ato.nota)
       return
     }
     onAndamento('Movendo o card para Em precificação…')
@@ -4376,8 +4409,8 @@ export default function AnaliseCredito() {
         <JanelaDoEnvioAoFundo
           fundo={envioAberto.fundo}
           onFechar={() => setEnvioAberto(null)}
-          onConfirmar={async (texto, arquivos, onAndamento) => {
-            await enviarAoFundo(envioAberto.lead, envioAberto.fundo, texto, arquivos, onAndamento)
+          onConfirmar={async (ato, texto, arquivos, onAndamento) => {
+            await enviarAoFundo(envioAberto.lead, envioAberto.fundo, ato, texto, arquivos, onAndamento)
             setEnvioAberto(null)
           }}
         />

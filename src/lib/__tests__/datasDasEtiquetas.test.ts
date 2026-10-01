@@ -18,10 +18,10 @@ const ev = (nome: string, quando: string) => ({
 describe('datasDasEtiquetas', () => {
   it('a data é a do evento mais recente da etiqueta', () => {
     const d = datasDasEtiquetas({
-      tags: ['Cotado PJUS'],
-      eventos: [ev('Cotado PJUS', '2026-09-20T10:00:00Z'), ev('cotado pjus', '2026-09-26T10:00:00Z')],
+      tags: ['Cotado PJus'],
+      eventos: [ev('Cotado PJus', '2026-09-20T10:00:00Z'), ev('cotado pjus', '2026-09-26T10:00:00Z')],
     })
-    expect(d).toEqual({ 'Cotado PJUS': '2026-09-26T10:00:00.000Z' })
+    expect(d).toEqual({ 'Cotado PJus': '2026-09-26T10:00:00.000Z' })
   })
 
   it('sem evento novo, fica a data que já se sabia; etiqueta que saiu some', () => {
@@ -46,15 +46,15 @@ describe('datasDasEtiquetas', () => {
 
 describe('faltaDataDeEtiqueta e desdeQuandoAEtiqueta', () => {
   it('pergunta só por etiqueta da casa sem data', () => {
-    expect(faltaDataDeEtiqueta(['Cotado PJUS', 'urgente'], { 'Cotado PJUS': null })).toBe(false)
-    expect(faltaDataDeEtiqueta(['Cotado PJUS', 'Enviado Carbon'], { 'Cotado PJUS': null })).toBe(true)
+    expect(faltaDataDeEtiqueta(['Cotado PJus', 'urgente'], { 'Cotado PJus': null })).toBe(false)
+    expect(faltaDataDeEtiqueta(['Cotado PJus', 'Enviado Carbon'], { 'Cotado PJus': null })).toBe(true)
     expect(faltaDataDeEtiqueta(['urgente'], {})).toBe(false)
   })
 
   it('acha a data tolerando caixa e acento', () => {
     const datas = { 'Enviado Invest Precatórios': '2026-09-27T00:00:00.000Z' }
     expect(desdeQuandoAEtiqueta(datas, 'enviado invest precatorios')).toBe('2026-09-27T00:00:00.000Z')
-    expect(desdeQuandoAEtiqueta(datas, 'Cotado PJUS')).toBeNull()
-    expect(desdeQuandoAEtiqueta(null, 'Cotado PJUS')).toBeNull()
+    expect(desdeQuandoAEtiqueta(datas, 'Cotado PJus')).toBeNull()
+    expect(desdeQuandoAEtiqueta(null, 'Cotado PJus')).toBeNull()
   })
 })

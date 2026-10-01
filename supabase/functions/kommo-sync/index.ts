@@ -620,7 +620,7 @@ Deno.serve(async (req: Request) => {
 
     // ---------- Desde quando cada etiqueta de fundo está no card ----------
     //
-    // O "há 3 dias" ao lado de "Enviado PJUS" (migração 0074). A fonte é o
+    // O "há 3 dias" ao lado de "Enviado PJus" (migração 0074). A fonte é o
     // evento `entity_tag_added` do Kommo, que registra a etiqueta posta por
     // qualquer caminho — pela plataforma ou à mão no Kommo.
     //
