@@ -23,7 +23,7 @@ import {
   type TipoPessoa,
 } from '@/lib/queries'
 import { listarPessoas, type PessoaLista } from '@/lib/pessoas'
-import { montarFichaPessoa, type CampoPessoa } from '@/lib/fichaPessoa'
+import { chaveDaFicha, enderecoDaFicha, montarFichaPessoa, type CampoPessoa } from '@/lib/fichaPessoa'
 import {
   compilarEndereco,
   cpfCnpjValido,
@@ -411,9 +411,9 @@ export default function DadosPessoaisBancarios() {
       toast.error(`Informe o nome do ${visao.rotulo.toLowerCase()}.`)
       return
     }
-    // A chave sai do NOME, não do que estava na janela: no cadastro novo o nome é
-    // digitado agora, e é ele que identifica a pessoa no banco.
-    const chave = normalizarNome(nome)
+    // Cadastro novo: do nome digitado. Ficha existente: a da linha aberta — ver
+    // chaveDaFicha (lib/fichaPessoa.ts), com teste.
+    const chave = chaveDaFicha({ novo: editando.novo, chave: editando.chave, nome })
     // Cadastro que cairia sobre uma ficha existente é barrado, não sobrescrito: o
     // Salvar é upsert da linha inteira, e "cadastrar" alguém que já tem ficha
     // apagaria CPF, conta e endereço de quem está lá.
@@ -853,10 +853,25 @@ export default function DadosPessoaisBancarios() {
                   </div>
                 </div>
                 {/* Prévia do texto corrido: é exatamente o que vai para a tabela e
-                    para o contrato, então quem edita confere antes de salvar. */}
-                <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  {compilarEndereco(form) || 'Endereço em branco'}
-                </div>
+                    para o contrato, então quem edita confere antes de salvar —
+                    pela MESMA regra do Salvar (enderecoDaFicha): o texto antigo
+                    continua até o endereço novo ter rua e cidade. */}
+                {(() => {
+                  const antigo = editando.novo
+                    ? undefined
+                    : dados.data?.get(chavePessoa(tipo, editando.chave))?.endereco
+                  const end = enderecoDaFicha(form, antigo)
+                  return (
+                    <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                      {end.texto || 'Endereço em branco'}
+                      {end.mantemAntigo && compilarEndereco(form) && (
+                        <p className="mt-1 text-xs font-medium">
+                          É o endereço antigo: ele continua valendo até a rua e a cidade serem preenchidas.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             </div>
           )}

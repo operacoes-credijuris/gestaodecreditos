@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { montarFichaPessoa, type CampoPessoa } from '../fichaPessoa'
+import { chaveDaFicha, enderecoDaFicha, montarFichaPessoa, type CampoPessoa } from '../fichaPessoa'
 
 /**
  * O Salvar da ficha de pessoa (Dados cadastrais), como ele é HOJE.
@@ -108,9 +108,30 @@ describe('montarFichaPessoa — o que o Salvar não pode perder', () => {
     )
   })
 
-  it('qualquer parte sozinha já substitui o antigo inteiro (até só o CEP)', () => {
-    expect(montar({ cep: '30140-071' }).endereco).toBe('CEP 30140-071')
-    expect(montar({ bairro: 'Savassi' }).endereco).toBe('bairro Savassi')
+  // MUDOU DE PROPÓSITO (02/10/2026, decisão do dono). Até ali, qualquer parte
+  // sozinha substituía o antigo inteiro — o CEP digitado virava o endereço do
+  // contrato. Agora o texto antigo só cede a um endereço novo com rua e cidade.
+  it('uma parte sozinha NÃO substitui o antigo (nem só o CEP, nem só o bairro)', () => {
+    expect(montar({ cep: '30140-071' }).endereco).toBe('Rua Antiga, 10, Centro, Barbacena/MG')
+    expect(montar({ bairro: 'Savassi' }).endereco).toBe('Rua Antiga, 10, Centro, Barbacena/MG')
+    expect(montar({ logradouro: 'Rua Nova', numero: '1' }).endereco).toBe('Rua Antiga, 10, Centro, Barbacena/MG')
+    expect(montar({ cidade: 'Belo Horizonte', uf: 'MG' }).endereco).toBe('Rua Antiga, 10, Centro, Barbacena/MG')
+  })
+
+  it('rua e cidade bastam para o endereço novo substituir o antigo', () => {
+    expect(montar({ logradouro: 'Rua Nova', cidade: 'Belo Horizonte', uf: 'MG' }).endereco).toBe(
+      'Rua Nova, Belo Horizonte/MG',
+    )
+  })
+
+  it('sem endereço antigo, qualquer parte vira o texto, como antes', () => {
+    expect(montar({ cep: '30140-071' }, { ...ANTERIOR, endereco: null }).endereco).toBe('CEP 30140-071')
+  })
+
+  it('as partes digitadas são gravadas nas colunas delas mesmo quando o texto antigo fica', () => {
+    const f = montar({ cep: '30140-071' })
+    expect(f.cep).toBe('30140-071')
+    expect(f.endereco).toBe('Rua Antiga, 10, Centro, Barbacena/MG')
   })
 
   it('sem ficha anterior (cadastro novo): gênero, qualificação e endereço null', () => {
@@ -280,5 +301,37 @@ describe('montarFichaPessoa — campo a campo', () => {
     const copia = { ...form }
     montarFichaPessoa({ tipo: 'investidor', chave: 'a', nome: 'A', form, anterior: ANTERIOR })
     expect(form).toEqual(copia)
+  })
+})
+
+describe('chaveDaFicha — o Salvar grava na linha certa', () => {
+  it('cadastro novo: a chave sai do nome digitado, normalizado', () => {
+    expect(chaveDaFicha({ novo: true, chave: '', nome: '  Maria  da Silva ' })).toBe(
+      chaveDaFicha({ novo: true, chave: '', nome: 'maria da silva' }),
+    )
+  })
+
+  it('ficha existente: a chave é a da linha aberta, mesmo se o nome normalizado for outro', () => {
+    // Ficha inserida direto no banco com nome_chave diferente do nome exibido:
+    // antes, o Salvar recalculava a chave e criava outra linha, órfã a primeira.
+    expect(chaveDaFicha({ novo: false, chave: 'chave-gravada-no-banco', nome: 'Maria da Silva' })).toBe(
+      'chave-gravada-no-banco',
+    )
+  })
+})
+
+describe('enderecoDaFicha — a prévia diz o que vai para o contrato', () => {
+  const vazio = { logradouro: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', cep: '' }
+  it('com endereço antigo e só o CEP novo, mostra o antigo e avisa', () => {
+    expect(enderecoDaFicha({ ...vazio, cep: '30140-071' }, 'Rua Antiga, 10')).toEqual({
+      texto: 'Rua Antiga, 10',
+      mantemAntigo: true,
+    })
+  })
+  it('sem nada novo, o antigo continua (e a tela não precisa avisar: o compilado é vazio)', () => {
+    expect(enderecoDaFicha(vazio, 'Rua Antiga, 10')).toEqual({ texto: 'Rua Antiga, 10', mantemAntigo: true })
+  })
+  it('sem endereço antigo, o compilado vale como está', () => {
+    expect(enderecoDaFicha({ ...vazio, cep: '30140-071' }, null).mantemAntigo).toBe(false)
   })
 })
