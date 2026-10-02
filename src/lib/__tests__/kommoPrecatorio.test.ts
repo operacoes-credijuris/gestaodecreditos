@@ -351,9 +351,21 @@ describe('destinos que o servidor aceita', () => {
 
   // UM statusId SOLTO NO CORPO DA REQUISIÇÃO moveria o card para uma coluna do
   // comercial. A lista é de desfechos, e só.
+  //
+  // "FECHADOS" SAIU DESTA LISTA DE PROPÓSITO EM 02/10/2026 (etapa 10a do
+  // redesenho): virou destino do desfecho da Negociação, com "Não fechados" e
+  // "Sem resposta" — e só a partir da Negociação (ver negociacaoNoServidor.test).
+  // A própria Negociação continua recusada: ela é a origem, não destino.
   it('não aceita coluna que não é desfecho', () => {
     const permitidos = destinosDaTrilha(FUNIL_PRECATORIO).map(normalizarBusca)
-    for (const fora of ['Fechados', 'Protocolo', 'Negociação', 'Etapa de leads de entrada']) {
+    for (const fora of [
+      'Protocolo',
+      'Negociação',
+      'Oferta aos investidores',
+      'Escritura pública',
+      'Pagamento finalizado',
+      'Etapa de leads de entrada',
+    ]) {
       expect(permitidos, fora).not.toContain(normalizarBusca(fora))
     }
   })
@@ -438,6 +450,24 @@ describe('abas da trilha Externa', () => {
       'REPROVADOS': 'Perdidos',
       'NÃO FECHADO': 'Perdidos',
     })
+  })
+
+  /**
+   * O "SEM RESPOSTA" DO EXTERNO (112346344), criado no Kommo depois do espelho
+   * destes testes, entra em Perdidos pelo id (02/10/2026, conforme a amostra).
+   * Sem ele em `fases`, herdaria a fase da coluna anterior do kanban.
+   */
+  it('o Sem resposta cai em Perdidos, mesmo vindo logo depois de uma coluna de outra fase', () => {
+    const comSemResposta = [
+      ...espelho(),
+      // LOGO DEPOIS DE PAGOS (Formalização) no kanban: fora de `fases`, herdaria
+      // Formalização.
+      { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 112346344, pipeline_nome: null, nome: 'SEM RESPOSTA', ordem: 13.5, tipo: 0 },
+    ]
+    const semResposta = abasDoFunil(FUNIL_PRECATORIO_EXTERNO, comSemResposta, 'externo').find(
+      (x) => x.label === 'SEM RESPOSTA',
+    )!
+    expect(semResposta).toMatchObject({ key: 'col-112346344', soLeitura: true, acoes: [], fase: 'Perdidos', faseDiscreta: true })
   })
 
   // COLUNA NOVA NO KOMMO entra na fase da que vem antes dela no kanban.
@@ -773,8 +803,12 @@ describe('coluna renomeada no Kommo', () => {
   it('o servidor aceita o destino renomeado, pelo id', () => {
     expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Revisão'], 'Segunda leitura')).toBe(true)
     expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Produção de proposta'], 'Proposta ao cedente')).toBe(true)
-    // E continua recusando coluna do comercial, com qualquer nome.
-    expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Fechados'], 'Fechados')).toBe(false)
+    // E continua recusando coluna do comercial, com qualquer nome. "FECHADOS"
+    // SAIU DAQUI DE PROPÓSITO EM 02/10/2026 — virou destino do desfecho da
+    // Negociação (etapa 10a); no lugar, a própria Negociação e a Oferta aos
+    // investidores, que continuam recusadas.
+    expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Negociação'], 'Negociação')).toBe(false)
+    expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Oferta aos investidores'], 'Oferta aos investidores')).toBe(false)
     expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Protocolo'], 'Protocolo')).toBe(false)
   })
 

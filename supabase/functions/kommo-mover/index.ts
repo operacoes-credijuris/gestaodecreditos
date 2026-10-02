@@ -20,9 +20,13 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { destinoPermitido } from '../_shared/trilhasDoPrecatorio.ts'
 // AS COLUNAS DO RPV moram em `_shared/colunasRpv.ts`, para o teste as prender.
 import { COLUNAS } from '../_shared/colunasRpv.ts'
-
-/** Rótulo exibido no selo da anotação, dentro do card. */
-const SERVICO = 'Operacional'
+// O SELO DA ANOTAÇÃO ("Operacional" ou "Comercial") sai do DESTINO, decidido
+// aqui no servidor — ver `_shared/servicoDaNota.ts`. Era a constante
+// 'Operacional' até 02/10/2026, quando o desfecho da Negociação (ato do
+// comercial) passou a ser aceito.
+import { servicoDaNota } from '../_shared/servicoDaNota.ts'
+// A CONFERÊNCIA DE ORIGEM do desfecho da Negociação (02/10/2026).
+import { recusaDaOrigem } from '../_shared/desfechoDaNegociacao.ts'
 
 /**
  * Os destinos do Precatório saem de `_shared/trilhasDoPrecatorio.ts`, por trilha.
@@ -85,20 +89,28 @@ Deno.serve(async (req: Request) => {
     // "Revisão") e a nota de auditoria saía com o nome velho. COLUNAS continua
     // decidindo a PERMISSÃO do RPV; o nome dela fica só de reserva, para o
     // espelho sem a etapa. O status_id é único na conta, então a linha é uma.
+    const linhaDoPrecatorio = (destino ?? []).find((e) =>
+      // Funil que não é de precatório devolve lista vazia, e nada casa: é o
+      // que mantém a coluna do comercial fora do alcance de um statusId solto.
+      // PELO ID DA COLUNA, e pelo nome de reserva: renomear a coluna no Kommo
+      // não tira a permissão de mover para ela.
+      destinoPermitido(Number(e.pipeline_id), Number(statusId), String(e.nome ?? '')),
+    )
     const nomeDoDestino =
       (COLUNAS[statusId] !== undefined
         ? String((destino ?? [])[0]?.nome ?? '').trim() || COLUNAS[statusId]
-        : undefined) ??
-      (destino ?? []).find((e) =>
-        // Funil que não é de precatório devolve lista vazia, e nada casa: é o
-        // que mantém a coluna do comercial fora do alcance de um statusId solto.
-        // PELO ID DA COLUNA, e pelo nome de reserva: renomear a coluna no Kommo
-        // não tira a permissão de mover para ela.
-        destinoPermitido(Number(e.pipeline_id), Number(statusId), String(e.nome ?? '')),
-      )?.nome
+        : undefined) ?? linhaDoPrecatorio?.nome
     if (!nomeDoDestino) {
       return jsonResponse({ error: 'Coluna de destino não reconhecida.' }, 400)
     }
+    // O SELO DA NOTA, pelo destino que ACABOU DE SER AUTORIZADO: no RPV pelo id,
+    // no Precatório pelo funil e pelo nome da linha que passou em
+    // `destinoPermitido`. Nunca pelo corpo da requisição.
+    const servico = servicoDaNota(
+      linhaDoPrecatorio ? Number(linhaDoPrecatorio.pipeline_id) : null,
+      statusId,
+      linhaDoPrecatorio ? String(linhaDoPrecatorio.nome ?? '') : null,
+    )
 
     const { data: secret } = await svc
       .from('integracao_kommo_secret')
@@ -112,9 +124,11 @@ Deno.serve(async (req: Request) => {
     // Coluna de origem: vem do espelho local, para a anotação dizer de onde
     // saiu. Se o espelho estiver defasado o texto sai sem a origem, o que é
     // melhor do que falhar a movimentação por causa do registro.
+    // O FUNIL VEM JUNTO para a conferência de origem do desfecho da Negociação
+    // (abaixo), que pergunta se a Negociação é a do MESMO funil.
     const { data: espelho } = await svc
       .from('kommo_leads')
-      .select('status_id')
+      .select('status_id, pipeline_id')
       .eq('kommo_lead_id', leadId)
       .maybeSingle()
     // O nome do Kommo primeiro, pelo mesmo motivo do destino; COLUNAS é reserva.
@@ -130,6 +144,27 @@ Deno.serve(async (req: Request) => {
         COLUNAS[espelho.status_id] ??
         null)
       : null
+
+    // O DESFECHO DA NEGOCIAÇÃO SÓ SAI DA NEGOCIAÇÃO DO MESMO FUNIL — ver
+    // `_shared/desfechoDaNegociacao.ts`. ANTES DO PATCH, de propósito: mover para
+    // "Fechados" dispara as automações de negócio fechado, e isso não se desfaz.
+    // Os outros destinos passam direto (a função devolve null), como sempre.
+    // Card fora do espelho: recusa, porque não há como saber de onde ele sai.
+    const recusa = recusaDaOrigem(
+      {
+        pipelineId: linhaDoPrecatorio ? Number(linhaDoPrecatorio.pipeline_id) : null,
+        statusId,
+        nome: nomeDoDestino,
+      },
+      espelho?.status_id
+        ? {
+            statusId: Number(espelho.status_id),
+            pipelineId: espelho.pipeline_id == null ? null : Number(espelho.pipeline_id),
+            nome: origem,
+          }
+        : null,
+    )
+    if (recusa) return jsonResponse({ error: recusa }, 400)
 
     // Nome de quem está movendo — é a informação que o Kommo não registra.
     const { data: perfil } = await svc
@@ -196,7 +231,7 @@ Deno.serve(async (req: Request) => {
           // Kommo ignora o \n sozinho e cola a linha de auditoria no motivo,
           // num parágrafo corrido. Verificado no card — a anotação da análise,
           // que usa \n\n, mantém a quebra; esta, que usava \n, não mantinha.
-          params: { service: SERVICO, text: linhas.join('\n\n') },
+          params: { service: servico, text: linhas.join('\n\n') },
           // Não dispara os gatilhos do Digital Pipeline por causa do registro
           // de auditoria — o PATCH acima já disparou o que havia para disparar.
           is_need_to_trigger_digital_pipeline: false,
