@@ -55,8 +55,8 @@ import {
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABAS_COM_TAGS,
-  ABAS_EXTERNO_SEM_TRABALHO,
-  ABAS_INTERNO_SEM_TRABALHO,
+  botoesDaAba,
+  type BotoesDoCard,
   type EtiquetaDoFundo,
   type AtoDoEnvio,
   type FundoDoEnvio,
@@ -595,35 +595,6 @@ function tituloCard(lead: KommoLead): string {
 }
 
 /**
- * Que botões de trabalho o card oferece.
- *
- *   'rpv'         a análise de RPV que já existia, mais a due diligence
- *   'dd'          due diligence + Executar análise (no Claude) + Concluir — as
- *                 abas de trabalho do Externo e, desde 28/09/2026, do Interno
- *   'nenhum'      etapa em que não se analisa: aprovados, diligência, reprovados
- *
- * O "EXECUTAR ANÁLISE" DO PRECATÓRIO NÃO É O DE RPV, embora tenha o mesmo nome.
- * O de RPV roda o motor da plataforma (template, cenários, prazo de RPV), e num
- * precatório ele entregava parecer errado com cara de conferido — por isso
- * 'rpv' nunca aparece fora do funil de RPV. O do precatório abre uma conversa no
- * Claude, que busca os autos pelo conector e segue o roteiro da casa.
- */
-type BotoesDoCard = 'rpv' | 'dd' | 'nenhum'
-
-/**
- * As abas de RPV em que a análise JÁ ACABOU.
- *
- * Due diligence e "Executar análise" apareciam em todas as abas do funil de
- * RPV, inclusive nestas três. O raciocínio que já valia para o precatório —
- * "analisar um card já aprovado ou reprovado não é trabalho, é retrabalho" —
- * nunca foi aplicado aqui, e o botão escuro de análise ficava oferecendo, num
- * card reprovado, os dois minutos de leitura do processo.
- *
- * EXPLÍCITO, e não derivado de ACOES estar vazio. Dava na mesma hoje, e daria
- * errado no dia em que uma aba terminal ganhasse uma saída — que é justamente o
- * que acabou de acontecer com Pendentes na direção contrária.
- */
-/**
  * A mensagem que acompanha o desfecho decidido PELO CARD.
  *
  * Existe porque mover um card é um ato que alguém vai ler depois, do outro lado
@@ -891,15 +862,6 @@ function JanelaDeMensagem({
     </Modal>
   )
 }
-
-const ABAS_RPV_TERMINAIS: ReadonlySet<string> = new Set([
-  'aprovados',
-  'diligencia',
-  'reprovados',
-  // Protocolo é acompanhamento: a análise já foi feita, salva e aprovada, e
-  // oferecer "Analisar" ali convidaria ao retrabalho.
-  'protocolo',
-])
 
 /**
  * A aba em que o desfecho se decide DENTRO da janela da análise.
@@ -3607,45 +3569,10 @@ export default function AnaliseCredito() {
   const abaAtual = abas.find((a) => a.key === aba) ?? abas.find((a) => !a.soLeitura) ?? abas[0] ?? null
   const faseAtual = abaAtual?.fase ?? ''
 
-  /**
-   * Os botões de trabalho da etapa aberta.
-   *
-   * RPV segue como era em toda aba que não é terminal. No PRECATÓRIO, as duas
-   * trilhas oferecem as mesmas ferramentas em toda aba de trabalho — as que não
-   * são estão em `ABAS_EXTERNO_SEM_TRABALHO` e `ABAS_INTERNO_SEM_TRABALHO`,
-   * porque oferecer análise num card reprovado ou já vendido convida ao
-   * retrabalho.
-   *
-   * E o "Analisar" de RPV não aparece em precatório NENHUM — nem na aba Jurídico.
-   * Era o defeito relatado: o motor por trás dele é o `gerar-analise-rpv`, com
-   * template, cenários (RPV expedida ou não) e cálculo de prazo de RPV, e num
-   * precatório ele entregava parecer e planilha errados sem nenhum sinal na tela.
-   *
-   * AS DUAS TRILHAS TÊM OS MESMOS BOTÕES desde 28/09/2026. A planilha jurídica do
-   * Interno, que tinha botão próprio, passou a ser entregue pela conversa do
-   * Claude, e o motor antigo ficou só como reserva, dentro da janela de colar.
-   */
-  //
-  // AS DUAS TRILHAS COM AS MESMAS FERRAMENTAS, desde 28/09/2026 e a pedido da
-  // equipe: due diligence com o Escavador, "Executar análise" no Claude e
-  // "Concluir" em toda aba de trabalho, no Interno como no Externo. Antes o
-  // Interno só oferecia trabalho na aba Análise — e, por um descuido que o
-  // transplante corrigiu, nenhuma aba dele desenhava o "Concluir": o desfecho
-  // agrupado estava ligado, mas o botão só existia no modo do Externo, e a
-  // Revisão do Interno não tinha como aprovar pela plataforma.
-  //
-  // A PLANILHA JURÍDICA NÃO TEM MAIS BOTÃO PRÓPRIO (28/09/2026): o "Executar
-  // análise" do Interno leva o questionário à conversa, e o Claude a grava pela
-  // ferramenta `entregar_planilha` do conector. Sobrou só a saída de emergência
-  // no quadro de status do card — ver `planilhaDeReserva`.
-  const semTrabalho =
-    subdivisao === 'externo' ? ABAS_EXTERNO_SEM_TRABALHO : ABAS_INTERNO_SEM_TRABALHO
-  const botoesDoCard: BotoesDoCard =
-    funil === FUNIL_RPV
-      ? (ABAS_RPV_TERMINAIS.has(abaAtual?.key ?? '') ? 'nenhum' : 'rpv')
-      : !abaAtual || abaAtual.soLeitura || semTrabalho.has(abaAtual.key)
-        ? 'nenhum'
-        : 'dd'
+  // OS BOTÕES DE TRABALHO DA ETAPA ABERTA. A regra e o porquê estão em
+  // `botoesDaAba` (src/lib/kommo.ts), que saiu daqui para os testes prenderem o
+  // que cada aba oferece — análise e due diligence são pagas.
+  const botoesDoCard: BotoesDoCard = botoesDaAba(funil, subdivisao, abaAtual)
 
   /**
    * A BUSCA VALE PARA TODAS AS ABAS, e não só para a aberta. Filtrando só a lista
