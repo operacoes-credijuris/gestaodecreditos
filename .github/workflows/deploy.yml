@@ -10,10 +10,13 @@ permissions:
   pages: write
   id-token: write
 
-# Evita deploys concorrentes.
+# Evita deploys concorrentes. SEM CANCELAR O QUE ESTÁ EM ANDAMENTO: desde que a
+# beta passou a ser publicada por aqui (job build, passos "Beta"), um disparo
+# vindo da branch `redesenho` cancelaria no meio uma publicação oficial. Assim
+# a nova espera a anterior terminar.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # OS TESTES ANTES DO BUILD: teste quebrado barra a publicação. Até 02/10/2026 o
@@ -74,6 +77,94 @@ jobs:
           # recusa a autorização.
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
+
+      # ======================================================================
+      # A VERSÃO BETA, em /gestaodecreditos/beta/ — o redesenho visto antes de
+      # chegar à equipe (ver PLANO-DE-IMPLEMENTACAO.md, seção 2).
+      #
+      # POR QUE AQUI, DENTRO DA PUBLICAÇÃO OFICIAL: o Pages publica UM pacote que
+      # substitui o site inteiro, e o ambiente github-pages só aceita a `main`.
+      # Um segundo workflow publicando a branch apagaria a oficial (ou seria
+      # recusado). Então cada publicação oficial leva junto a beta mais recente,
+      # compilada da branch `redesenho`; e um push na `redesenho` dispara este
+      # workflow da `main` (o .github/workflows/beta.yml mora só naquela branch).
+      #
+      # A BETA NUNCA BARRA A OFICIAL: todo passo dela tem continue-on-error, e a
+      # pasta só entra em dist/beta se testes e build passaram. Branch ausente,
+      # teste vermelho ou build quebrado = a oficial sai igual, sem /beta/.
+      #
+      # A BETA NUNCA PUBLICA FUNÇÕES: é só o site. Mesmo banco e mesmo Kommo da
+      # oficial — o que mexe em servidor entra pela `main`, com trava de admin.
+      # Por isso a branch é recusada se tiver qualquer diferença em supabase/.
+      # ======================================================================
+      - name: Beta — código da branch redesenho
+        id: beta_codigo
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          ref: redesenho
+          path: beta-src
+          fetch-depth: 0
+
+      - name: Beta — a branch não mexe no servidor
+        id: beta_servidor
+        if: steps.beta_codigo.outcome == 'success'
+        continue-on-error: true
+        working-directory: beta-src
+        run: |
+          mudou="$(git diff --name-only origin/main...HEAD -- supabase/)"
+          if [ -n "$mudou" ]; then
+            echo "::error::A branch redesenho mexe em supabase/ — a beta nunca publica funções:"
+            echo "$mudou"
+            exit 1
+          fi
+
+      # Os testes rodam no Node 22 (o supabase-js exige WebSocket nativo; ver o
+      # job testes), e o build no 20, como o oficial.
+      - name: Beta — Node 22 para os testes
+        id: beta_node22
+        if: steps.beta_servidor.outcome == 'success'
+        continue-on-error: true
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Beta — dependências e testes
+        id: beta_testes
+        if: steps.beta_node22.outcome == 'success'
+        continue-on-error: true
+        working-directory: beta-src
+        run: |
+          npm ci
+          npm test
+
+      - name: Beta — Node 20 para o build
+        id: beta_node20
+        if: steps.beta_testes.outcome == 'success'
+        continue-on-error: true
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Beta — build
+        id: beta_build
+        if: steps.beta_node20.outcome == 'success'
+        continue-on-error: true
+        working-directory: beta-src
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_CANAL: beta
+        run: npm run build
+
+      - name: Beta — junta ao site
+        if: steps.beta_build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          rm -rf dist/beta
+          cp -r beta-src/dist dist/beta
+          echo "Beta publicada junto: $(cd beta-src && git log -1 --format='%h %s')"
 
       # As três actions de Pages sobem JUNTAS, porque a GitHub as versiona em
       # conjunto: configure v5->v6, upload-pages-artifact v3->v5 e deploy v4->v5.

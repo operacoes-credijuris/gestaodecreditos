@@ -7,6 +7,7 @@ import { isSupabaseConfigured } from '@/lib/supabase'
 import { Field, Input } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
 import logo from '@/assets/logo-credijuris.png'
+import { FaixaBeta } from '@/components/layout/FaixaBeta'
 
 export default function Login() {
   const { session, loading, signIn } = useAuth()
@@ -44,6 +45,7 @@ export default function Login() {
     // Fundo claro, como os materiais comerciais da marca: a logomarca aparece
     // em cor plena (o azul dela não sobrevive legível sobre navy escuro).
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-papel via-white to-brand-100 p-4">
+      <FaixaBeta fixa />
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <h1 className="sr-only">Credijuris</h1>

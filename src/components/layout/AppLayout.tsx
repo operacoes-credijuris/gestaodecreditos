@@ -4,6 +4,8 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { findNavLocation } from './navigation'
 import { Assistente } from '@/components/Assistente'
+import { FaixaBeta } from './FaixaBeta'
+import { tituloDoCanal } from '@/lib/canal'
 
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -12,15 +14,16 @@ export function AppLayout() {
   // Título da aba do navegador acompanha a página ("Tarefas — Credijuris").
   useEffect(() => {
     const nav = findNavLocation(pathname)
-    document.title = nav
-      ? `${nav.leaf.label} — Credijuris`
-      : 'Credijuris — Gestão de Créditos'
+    document.title = tituloDoCanal(
+      nav ? `${nav.leaf.label} — Credijuris` : 'Credijuris — Gestão de Créditos',
+    )
   }, [pathname])
 
   return (
     <div className="flex h-screen overflow-hidden bg-papel">
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
+        <FaixaBeta />
         <Topbar onOpenMenu={() => setMobileOpen(true)} />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           {/* max-width evita tabelas esticadas de ponta a ponta em monitores
