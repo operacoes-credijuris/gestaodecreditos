@@ -10,6 +10,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveJudit, chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
+import { driveUploadBytes } from "../_shared/credijuris.ts";
 
 const CORS = corsHeaders;
 const JUDIT_REQUESTS = "https://requests.prod.judit.io/requests";
@@ -189,18 +190,11 @@ async function driveEncontrarAnalisesRoot(token: string): Promise<string> {
   const c = await driveFindChildByTolerantName(token, roots[0].id, DRIVE_ANALISES_NAME);
   if (!c) throw new Error(`'${DRIVE_ANALISES_NAME}' não existe em '${DRIVE_ROOT_NAME}'`); return c.id;
 }
-async function driveUploadBytes(token: string, name: string, parentId: string, bytes: Uint8Array, mime: string): Promise<{ id: string; webViewLink?: string }> {
-  const ex = await driveFindChild(token, name, parentId);
-  if (ex) await fetch(`https://www.googleapis.com/drive/v3/files/${ex.id}?supportsAllDrives=true`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
-  const boundary = "----cred" + Math.random().toString(36).slice(2);
-  const enc = new TextEncoder();
-  const head = enc.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, parents: [parentId] })}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`);
-  const tail = enc.encode(`\r\n--${boundary}--\r\n`);
-  const body = new Uint8Array(head.length + bytes.length + tail.length); body.set(head, 0); body.set(bytes, head.length); body.set(tail, head.length + bytes.length);
-  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink", { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": `multipart/related; boundary=${boundary}` }, body });
-  if (!res.ok) throw new Error(`Drive upload (${res.status}): ${(await res.text()).slice(0, 200)}`);
-  return await res.json();
-}
+// O ENVIO AO DRIVE É O COMPARTILHADO (_shared/credijuris.ts). Esta função tinha
+// uma cópia própria que fazia DELETE no arquivo de mesmo nome antes de subir — e
+// na API v3 o DELETE é definitivo, sem lixeira: refazer o parecer apagava o
+// anterior sem volta. O compartilhado grava como REVISÃO: mesmo id, mesmo link,
+// e o Drive guarda as versões anteriores.
 function limparNomeArquivo(s: string): string { return String(s || "").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim().slice(0, 180); }
 
 /* ===== Relatório PDF (copiado do dd-relatorio-teste, aprovado) ===== */

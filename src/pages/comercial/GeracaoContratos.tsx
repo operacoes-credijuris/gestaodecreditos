@@ -315,7 +315,7 @@ function GerarPanel() {
                 ) : (
                   investidores.length === 0 && !investidorDados.isLoading && (
                     <p className="mt-1 text-xs text-slate-500">
-                      Nenhum investidor cadastrado — cadastre em "Dados pessoais e bancários".
+                      Nenhum investidor cadastrado — cadastre em "Dados cadastrais".
                     </p>
                   )
                 )}

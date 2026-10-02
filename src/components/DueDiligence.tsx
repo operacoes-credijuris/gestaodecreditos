@@ -24,6 +24,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useToast } from '@/components/ui/Toast'
+import { useAuth } from '@/contexts/AuthContext'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
@@ -123,6 +124,9 @@ export function DueDiligence({
   const [marcados, setMarcados] = useState<string[]>([])
   const [seguindo, setSeguindo] = useState(false)
   const toast = useToast()
+  // QUEM DECIDIU, e não só quando: as colunas liberado_por e reprovado_por
+  // existem desde as migrações 0062 e 0063 e nunca eram preenchidas.
+  const { user } = useAuth()
 
   /**
    * A RECUSA PODE SER DE UMA VERBA SÓ, e é isto que decide qual.
@@ -153,7 +157,7 @@ export function DueDiligence({
   async function recusarVerba(texto: string) {
     const { error } = await supabase
       .from('dd_historico')
-      .update({ reprovado_em: new Date().toISOString(), reprovado_motivo: texto })
+      .update({ reprovado_em: new Date().toISOString(), reprovado_por: user?.id ?? null, reprovado_motivo: texto })
       .eq('kommo_lead_id', leadId)
       .in('papel', papeisRecusados)
       .eq('status', 'APURADO')
@@ -188,7 +192,7 @@ export function DueDiligence({
     try {
       const { error } = await supabase
         .from('dd_historico')
-        .update({ liberado_em: new Date().toISOString() })
+        .update({ liberado_em: new Date().toISOString(), liberado_por: user?.id ?? null })
         .eq('kommo_lead_id', leadId)
         // O check da 0062 recusa liberado sem apuração: só se libera o que foi
         // olhado, e olhar exige que a busca tenha corrido.

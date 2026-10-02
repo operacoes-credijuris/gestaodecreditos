@@ -1553,7 +1553,7 @@ Deno.serve(async (req) => {
     if (invErr) throw new Error('Erro lendo investidor_dados: ' + invErr.message);
     if (!invRow) {
       return errorResponse(
-        `Investidor '${investidorNome}' não tem ficha em "Dados pessoais e bancários" — cadastre CPF/RG/endereço antes de gerar o contrato.`,
+        `Investidor '${investidorNome}' não tem ficha em "Dados cadastrais" — cadastre CPF/RG/endereço antes de gerar o contrato.`,
         404,
       );
     }
