@@ -33,8 +33,10 @@ export function codigoDoErro(e: unknown): string | undefined {
  * UMA SÓ PARA AS DUAS INVOCAÇÕES. Esta decodificação vivia copiada nas duas, e
  * a cópia é o tipo de coisa que envelhece torto: o código do erro entrou aqui e
  * teria entrado numa delas só.
+ *
+ * Exportada só para o teste (src/lib/__tests__/erroDaFuncao.test.ts).
  */
-async function erroDaFuncao(error: { message: string }): Promise<ErroDeFuncao> {
+export async function erroDaFuncao(error: { message: string }): Promise<ErroDeFuncao> {
   const ctx = (error as unknown as { context?: Response }).context
   const status = typeof ctx?.status === 'number' ? ` (HTTP ${ctx.status})` : ''
   let detalhe = ''
@@ -46,7 +48,19 @@ async function erroDaFuncao(error: { message: string }): Promise<ErroDeFuncao> {
         const j = JSON.parse(txt) as Record<string, unknown>
         // `erro` e `msg` entram porque as funções não falam uma língua só.
         const achado = j.error ?? j.erro ?? j.message ?? j.msg
-        detalhe = achado ? String(achado) : txt.slice(0, 300)
+        // E A LISTA `avisos`, quando é só ela que vem. A parametros-bcb, com o
+        // Banco Central fora do ar, responde 502 com o que falhou em `avisos` e
+        // nenhum campo de erro — e a tela mostrava o JSON cru, chaves e aspas.
+        // Só entra na falta dos campos acima, então quem já manda `error` segue
+        // igual.
+        const avisos = Array.isArray(j.avisos)
+          ? j.avisos.filter((a): a is string => typeof a === 'string' && a.trim() !== '')
+          : []
+        detalhe = achado
+          ? String(achado)
+          : avisos.length
+            ? avisos.map((a) => a.trim()).join(' · ')
+            : txt.slice(0, 300)
         // E O CAMPO `detalhe`, quando a função o manda. A kommo-anotar põe ali a
         // resposta do próprio Kommo, e sem isto a tela mostrava só "Kommo
         // recusou a anotação" com o status — que não distingue token expirado de

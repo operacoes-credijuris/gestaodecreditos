@@ -904,6 +904,10 @@ function AdvboxConfig() {
   }
 
   const configurado = Boolean((data?.config as { configurado?: boolean })?.configurado)
+  // LEITURA FALHOU, NADA FOI LIDO: os campos nasceriam vazios, idênticos a "nunca
+  // configurado", e o Salvar regravaria a configuração inteira só com os ids fixos
+  // — apagando URL, responsável e o cadastro ligado. Sem leitura, sem formulário.
+  const naoLido = !!error && data === undefined
 
   // Busca os responsáveis ao abrir a tela, uma vez, para as três caixas já
   // aparecerem prontas — pedir um clique antes de mostrar o campo era o que fazia
@@ -918,6 +922,7 @@ function AdvboxConfig() {
   }, [configurado])
 
   async function salvar() {
+    if (naoLido) return
     const url = baseUrl.trim()
     // URL sem esquema (ex.: "app.advbox.com.br/api/v1") vira caminho relativo no
     // fetch do servidor e a integração cai inteira, com erro que não aponta para
@@ -988,7 +993,7 @@ function AdvboxConfig() {
         <AvisoLeitura error={error} />
         {isLoading ? (
           <Loading />
-        ) : (
+        ) : naoLido ? null : (
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
               label="URL base da API"
@@ -1320,8 +1325,14 @@ function RoteiroConfig() {
 
   const mudou = texto.trim() !== emVigor.trim()
   const ehOPadrao = emVigor.trim() === ROTEIRO_QUALIFICACAO.trim()
+  // LEITURA FALHOU, NADA FOI LIDO: o campo nasceu com o PADRÃO, não com o roteiro
+  // em vigor. Salvar daqui gravaria o padrão editado por cima do roteiro real, e o
+  // padrão viraria o "texto anterior" — o desfazer de um clique iria junto. Mesma
+  // trava dos Parâmetros de atualização: sem leitura, não se salva por cima.
+  const naoLido = !!error && data === undefined
 
   async function gravar(novo: string, recado: string) {
+    if (naoLido) return
     setSalvando(true)
     try {
       const { error } = await supabase.from('prompts_operacao').upsert({
@@ -1400,7 +1411,7 @@ function RoteiroConfig() {
                 )}
                 <Button
                   onClick={() => gravar(texto, 'Roteiro salvo. A próxima análise já o usa.')}
-                  disabled={!mudou || salvando}
+                  disabled={!mudou || salvando || naoLido}
                   loading={salvando}
                 >
                   Salvar
@@ -1438,7 +1449,13 @@ function DjenConfig() {
   const removeOab = (i: number) =>
     setItens((l) => l.filter((_, idx) => idx !== i))
 
+  // LEITURA FALHOU, NADA FOI LIDO: a lista nasceria vazia, dizendo "Nenhuma OAB
+  // cadastrada", e o Salvar gravaria a lista vazia por cima das OABs reais — a
+  // busca no DJEN pararia em silêncio. Sem leitura, sem formulário.
+  const naoLido = !!error && data === undefined
+
   async function salvar() {
+    if (naoLido) return
     setSaving(true)
     try {
       const oabs = itens
@@ -1473,7 +1490,7 @@ function DjenConfig() {
         <AvisoLeitura error={error} />
         {isLoading ? (
           <Loading />
-        ) : (
+        ) : naoLido ? null : (
           <div className="space-y-3">
             {itens.length === 0 && (
               <p className="text-sm text-slate-600">Nenhuma OAB cadastrada.</p>

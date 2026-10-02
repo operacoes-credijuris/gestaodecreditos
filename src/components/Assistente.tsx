@@ -23,6 +23,12 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { TextoIA } from '@/components/ui/TextoIA'
 import { PeticaoModal } from '@/components/PeticaoModal'
 import { formatDateTime } from '@/lib/format'
+import { haDialogoAberto } from '@/lib/dialogo'
+import {
+  BUCKET_ARQUIVOS,
+  caminhoDoArquivo,
+  type ArquivoGerado,
+} from '@/lib/arquivosDoAssistente'
 import { cn } from '@/lib/cn'
 import type { Processo } from '@/lib/types'
 
@@ -32,11 +38,6 @@ interface AcaoProposta {
   numero_cnj: string | null
   cessionario: string | null
   instrucao: string
-}
-
-interface ArquivoGerado {
-  nome: string
-  url: string
 }
 
 interface ContatoSugerido {
@@ -196,14 +197,30 @@ export function Assistente() {
     if (aberto) campo.current?.focus()
   }, [aberto])
 
-  // Esc fecha, como no Drawer e no Modal.
+  // Esc fecha, como no Drawer e no Modal — MAS SÓ SE NÃO HOUVER DIÁLOGO ABERTO.
+  // O Escape chega a todos os listeners: o que era para a confirmação de excluir
+  // conversa, para a revisão da petição ou para qualquer janela da página fechava
+  // também o assistente, e a conversa sumia da tela junto.
+  //
+  // A PILHA É LIDA NA CAPTURA, antes de qualquer janela tratar a tecla. Este
+  // listener roda por último (window, fase de bolha), e até lá o React já pode
+  // ter desmontado a janela que fechou com este mesmo Escape — a pilha estaria
+  // vazia e o assistente fecharia junto, que é o defeito.
   useEffect(() => {
     if (!aberto) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setAberto(false)
+    let haviaDialogo = false
+    const naCaptura = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') haviaDialogo = haDialogoAberto()
     }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !haviaDialogo) setAberto(false)
+    }
+    window.addEventListener('keydown', naCaptura, true)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', naCaptura, true)
+      window.removeEventListener('keydown', onKey)
+    }
   }, [aberto])
 
   // Clique fora fecha o menu de modelo — mesmo padrão de qualquer dropdown.
@@ -298,6 +315,47 @@ export function Assistente() {
     setConversaAtualId(c.id)
     setErro(null)
     setHistoricoAberto(false)
+    void renovarLinks(c.mensagens ?? [])
+  }
+
+  /**
+   * Assina de novo os links dos arquivos de uma conversa reaberta.
+   *
+   * O LINK GRAVADO NO HISTÓRICO VALE UMA HORA (ver lib/arquivosDoAssistente.ts),
+   * e o arquivo continua no bucket. A policy do bucket deixa cada um assinar os
+   * próprios arquivos, então o navegador resolve sozinho. Falhando, ficam os
+   * links antigos — o mesmo que acontecia antes.
+   */
+  async function renovarLinks(msgs: Mensagem[]) {
+    const caminhos = [
+      ...new Set(
+        msgs
+          .flatMap((m) => (m.arquivos ?? []).map(caminhoDoArquivo))
+          .filter((c): c is string => !!c),
+      ),
+    ]
+    if (caminhos.length === 0) return
+    const { data, error } = await supabase.storage
+      .from(BUCKET_ARQUIVOS)
+      .createSignedUrls(caminhos, 3600)
+    if (error || !data) return
+    const novos = new Map<string, string>()
+    for (const d of data) if (d.path && d.signedUrl && !d.error) novos.set(d.path, d.signedUrl)
+    if (novos.size === 0) return
+    setMensagens((atual) =>
+      atual.map((m) =>
+        m.arquivos
+          ? {
+              ...m,
+              arquivos: m.arquivos.map((f) => {
+                const caminho = caminhoDoArquivo(f)
+                const url = caminho ? novos.get(caminho) : undefined
+                return caminho && url ? { ...f, url, caminho } : f
+              }),
+            }
+          : m,
+      ),
+    )
   }
 
   async function confirmarExclusao() {
@@ -305,7 +363,12 @@ export function Assistente() {
     const id = excluirId
     setExcluirId(null)
     try {
-      await supabase.from('assistente_conversas').delete().eq('id', id)
+      // O supabase-js NÃO LANÇA: devolve `{ error }`. Sem conferir, a falha
+      // passava calada — a conversa continuava no banco, e a atual perdia o
+      // vínculo com ela, de modo que a próxima pergunta abria uma conversa nova
+      // em vez de continuar aquela.
+      const { error } = await supabase.from('assistente_conversas').delete().eq('id', id)
+      if (error) throw new Error(`Não foi possível excluir a conversa: ${error.message}`)
       if (id === conversaAtualId) setConversaAtualId(null)
       qc.invalidateQueries({ queryKey: ['assistente_conversas', user?.id] })
     } catch (e) {

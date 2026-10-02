@@ -38,7 +38,30 @@ const PARTICULAS = new Set([
   'de', 'da', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'a', 'o', 'di', 'du', 'del', 'la',
 ])
 
-function nomeProprio(s: string): string {
+/**
+ * SIGLA FICA EM MAIÚSCULAS. Texto todo em caixa alta não diz o que é sigla e o
+ * que é palavra — "TJGO" e "ESTADO" chegam iguais —, e a regra de caixa virava
+ * o TJGO em "Tjgo", o TRF1 em "Trf1" e o "- GO" do município em "- Go". Por
+ * isso uma lista: as UFs, os tribunais pelo formato do nome, e os entes que
+ * aparecem na carteira. Palavra sem vogal ou com dígito também é sigla — não
+ * existe palavra portuguesa assim.
+ */
+const UFS_SIGLA = new Set([
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA',
+  'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+])
+const SIGLAS = new Set(['INSS', 'IPASGO', 'GOIASPREV', 'DNIT'])
+const TRIBUNAL = /^(TJM?[A-Z]{0,4}|TR[FTE]\d{0,2}|STF|STJ|STM|TST|TSE|CJF|CNJ)$/
+
+function ehSigla(palavra: string): boolean {
+  const w = palavra.toUpperCase()
+  if (UFS_SIGLA.has(w) || SIGLAS.has(w) || TRIBUNAL.test(w)) return true
+  if (/\d/.test(w) && /[A-Z]/.test(w)) return true
+  return w.length >= 2 && /^[A-Z]+$/.test(w) && !/[AEIOUY]/.test(w)
+}
+
+/** Exportada para o teste (src/lib/__tests__/recortes.test.ts). */
+export function nomeProprio(s: string): string {
   const t = s.trim()
   if (!t) return t
   // Já vem com caixa mista de propósito (ex.: sigla de tribunal): não mexer.
@@ -52,7 +75,12 @@ function nomeProprio(s: string): string {
       const m = /^([(]*)(.*?)([)]*)$/.exec(p)
       if (!m) return p
       const [, abre, meio, fecha] = m
-      return abre + (meio ? meio.charAt(0).toUpperCase() + meio.slice(1) : '') + fecha
+      const caixa = meio ? meio.charAt(0).toUpperCase() + meio.slice(1) : ''
+      // Sigla colada por barra ou hífen ("GOIÂNIA/GO", "TRF-1") também volta.
+      const comSiglas = caixa.replace(/[\p{L}\p{N}]+/gu, (w) =>
+        ehSigla(w) ? w.toUpperCase() : w,
+      )
+      return abre + comSiglas + fecha
     })
     .join(' ')
 }

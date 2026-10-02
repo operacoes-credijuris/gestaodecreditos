@@ -60,6 +60,21 @@ export function TextoIA({ texto }: { texto: string }) {
         h3: ({ children }) => (
           <p className="mb-1 font-semibold text-slate-900">{children}</p>
         ),
+        // LINK EXTERNO ABRE EM OUTRA ABA. Na mesma aba, o clique trocava a
+        // plataforma pelo site do link, e iam embora o painel do assistente, a
+        // pergunta que estava sendo digitada e a tela que estava aberta atrás.
+        // `noopener noreferrer` porque o destino é texto do modelo, não um
+        // endereço que a plataforma escolheu.
+        a: ({ href, title, children }) =>
+          /^https?:\/\//i.test(href ?? '') ? (
+            <a href={href} title={title} target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          ) : (
+            <a href={href} title={title}>
+              {children}
+            </a>
+          ),
       }}
     >
       {texto}

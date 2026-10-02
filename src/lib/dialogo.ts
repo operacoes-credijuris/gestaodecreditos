@@ -41,6 +41,19 @@ let overflowOriginal = ''
 const pilha: symbol[] = []
 
 /**
+ * Há diálogo aberto (Modal, Drawer, menu do celular)?
+ *
+ * SERVE A QUEM NÃO É DIÁLOGO mas também responde ao Escape — o assistente
+ * flutuante. Ele não entra na pilha (não prende o foco: dá para usar a página
+ * com ele aberto), então não pode perguntar se é o de cima; pergunta se há
+ * diálogo aberto. Havendo, o Escape é do diálogo — é nele que a pessoa está,
+ * porque ele prende o foco.
+ */
+export function haDialogoAberto(): boolean {
+  return pilha.length > 0
+}
+
+/**
  * Trava o scroll do body enquanto o diálogo estiver aberto.
  *
  * O overlay do Modal rola sozinho, então a roda do mouse sobre ele parecia

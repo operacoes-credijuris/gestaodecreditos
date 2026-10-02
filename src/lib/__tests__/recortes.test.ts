@@ -11,7 +11,7 @@
 // type-check pega isso.
 
 import { describe, it, expect } from 'vitest'
-import { COLUNAS } from '@/pages/inteligencia/Recortes'
+import { COLUNAS, nomeProprio } from '@/pages/inteligencia/Recortes'
 
 /** Verbos que atribuem a ação de investir a quem não investe. */
 const VOZ_DE_INVESTIDOR = /investiu|recebeu/i
@@ -49,5 +49,40 @@ describe('rótulos das colunas de dinheiro em Recortes', () => {
         expect(texto.trim().length, `${aba}.${chave} vazio`).toBeGreaterThan(0)
       }
     }
+  })
+})
+
+// O ajuste de caixa dos nomes transformava "TJGO" em "Tjgo": texto todo em
+// maiúsculas não separa sigla de palavra, e a regra tratava tudo como palavra.
+describe('nomeProprio — siglas ficam em maiúsculas', () => {
+  it('tribunais', () => {
+    expect(nomeProprio('TJGO')).toBe('TJGO')
+    expect(nomeProprio('TJDFT')).toBe('TJDFT')
+    expect(nomeProprio('TRF1')).toBe('TRF1')
+    expect(nomeProprio('TRF-1')).toBe('TRF-1')
+    expect(nomeProprio('TRT18')).toBe('TRT18')
+    expect(nomeProprio('STJ')).toBe('STJ')
+    expect(nomeProprio('tjgo')).toBe('TJGO')
+  })
+
+  it('UF e ente com sigla dentro do nome', () => {
+    expect(nomeProprio('MUNICÍPIO DE GOIÂNIA - GO')).toBe('Município de Goiânia - GO')
+    expect(nomeProprio('MUNICÍPIO DE GOIÂNIA/GO')).toBe('Município de Goiânia/GO')
+    expect(nomeProprio('INSS')).toBe('INSS')
+    expect(nomeProprio('IPASGO')).toBe('IPASGO')
+  })
+
+  it('o que não é sigla continua como antes', () => {
+    expect(nomeProprio('ESTADO DE GOIÁS')).toBe('Estado de Goiás')
+    expect(nomeProprio('ERCÍLIO MARTINS DA COSTA JUNIOR')).toBe(
+      'Ercílio Martins da Costa Junior',
+    )
+    expect(nomeProprio('(sem investidor)')).toBe('(Sem Investidor)')
+    expect(nomeProprio('UNIÃO FEDERAL')).toBe('União Federal')
+  })
+
+  it('caixa mista vem de propósito e não é tocada', () => {
+    expect(nomeProprio('TJGO - Goiânia')).toBe('TJGO - Goiânia')
+    expect(nomeProprio('Maria da Silva')).toBe('Maria da Silva')
   })
 })

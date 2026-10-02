@@ -2361,7 +2361,7 @@ async function extrairArquivosGerados(
   content: unknown[],
   apiKey: string,
   userId: string,
-): Promise<{ nome: string; url: string }[]> {
+): Promise<{ nome: string; url: string; caminho: string }[]> {
   const fileIds: string[] = []
   for (const bloco of content as Record<string, unknown>[]) {
     if (bloco.type !== 'bash_code_execution_tool_result') continue
@@ -2375,7 +2375,7 @@ async function extrairArquivosGerados(
 
   const svc = serviceClient()
   const cabecalhos = { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
-  const arquivos: { nome: string; url: string }[] = []
+  const arquivos: { nome: string; url: string; caminho: string }[] = []
   for (const fileId of fileIds) {
     try {
       const meta = await fetch(`https://api.anthropic.com/v1/files/${fileId}`, {
@@ -2399,7 +2399,10 @@ async function extrairArquivosGerados(
       const { data: assinado } = await svc.storage
         .from('assistente-arquivos')
         .createSignedUrl(caminho, 3600)
-      if (assinado?.signedUrl) arquivos.push({ nome, url: assinado.signedUrl })
+      // O CAMINHO VAI JUNTO porque o link vence em uma hora e a conversa fica no
+      // histórico: ao reabri-la, o navegador assina de novo a partir dele (a
+      // policy do bucket deixa cada um ler a própria pasta).
+      if (assinado?.signedUrl) arquivos.push({ nome, url: assinado.signedUrl, caminho })
     } catch {
       // Um arquivo que falhou não pode derrubar a resposta inteira — a pessoa
       // ainda lê o texto, só não recebe aquele anexo.

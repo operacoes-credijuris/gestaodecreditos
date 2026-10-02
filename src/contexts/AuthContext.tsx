@@ -133,6 +133,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   async function signOut(): Promise<{ error: string | null }> {
     const { error } = await supabase.auth.signOut()
+    // A SESSÃO CAI ANTES DO PERFIL. Na ordem inversa, o perfil a null desfazia a
+    // tela de acesso desativado (acessoDesativado depende dele) com a sessão ainda
+    // de pé, e a plataforma aparecia por um instante para quem foi desligado.
+    if (error) {
+      console.error('Falha ao encerrar a sessão no servidor.', error)
+      await apagarSessaoNesteNavegador()
+      setSession(null)
+    }
     setProfile(null)
     usuarioCorrente.current = null
     qc.clear()
@@ -141,10 +149,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // disponível para o próximo que usasse a mesma aba.
     esquecerTokenDrive()
     if (error) {
-      console.error('Falha ao encerrar a sessão no servidor.', error)
-      // scope: 'local' remove o token deste navegador sem depender da rede.
-      await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
-      setSession(null)
       return {
         error:
           'Não foi possível confirmar a saída no servidor. A sessão foi encerrada neste dispositivo; entre novamente com conexão para revogar o acesso por completo.',
@@ -181,6 +185,47 @@ export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth deve ser usado dentro de <AuthProvider>')
   return ctx
+}
+
+/**
+ * Apaga a sessão guardada neste navegador, com ou sem rede.
+ *
+ * `signOut({ scope: 'local' })` NÃO DISPENSA A REDE: o auth-js ainda chama o
+ * /logout do servidor e, se essa chamada falha, devolve o erro SEM remover nada.
+ * A versão anterior confiava nele — e com a rede fora, justo o caso em que o Sair
+ * global já tinha falhado, o token continuava no localStorage. A tela mostrava o
+ * login, mas o próximo refresh do token (ou um F5) trazia a sessão de volta.
+ *
+ * Tenta o caminho público primeiro, porque com o servidor alcançável ele revoga a
+ * sessão lá também. Falhando, remove pelo próprio auth-js (`_removeSession`: apaga
+ * o armazenado, impede que um refresh em voo regrave o token e avisa SIGNED_OUT)
+ * e, se um dia esse método sumir, apaga a chave do armazenamento à mão.
+ */
+async function apagarSessaoNesteNavegador() {
+  const { error } = await supabase.auth.signOut({ scope: 'local' }).catch((e: unknown) => ({
+    error: e,
+  }))
+  if (!error) return
+  const auth = supabase.auth as unknown as {
+    _removeSession?: () => Promise<void>
+    storageKey?: string
+  }
+  try {
+    if (typeof auth._removeSession === 'function') {
+      await auth._removeSession()
+      return
+    }
+  } catch (e) {
+    console.error('Falha ao remover a sessão pelo auth-js; apagando a chave.', e)
+  }
+  if (!auth.storageKey) return
+  for (const sufixo of ['', '-code-verifier', '-user']) {
+    try {
+      localStorage.removeItem(auth.storageKey + sufixo)
+    } catch {
+      /* armazenamento indisponível: não há o que apagar */
+    }
+  }
 }
 
 function traduzErroAuth(msg: string): string {
