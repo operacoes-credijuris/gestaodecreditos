@@ -14,9 +14,15 @@
 
 import { fatias } from './autosParaOKommo.ts'
 
+// SEM TETO DE TEMPO, uma conexão parada segurava a função até o limite dela, e
+// a rotina dos autos perdia a trava no meio de um documento: outra volta entrava
+// e subia o mesmo PDF de novo. Cada parte tem 512 KB; um minuto é folga.
+const TEMPO_SESSAO_MS = 30_000
+const TEMPO_PARTE_MS = 60_000
+
 /** O endereço do drive da conta (drive-b, drive-c…), que o Kommo informa em /account. */
 export async function urlDoDriveDaConta(baseApi: string, auth: Record<string, string>): Promise<string> {
-  const r = await fetch(`${baseApi}/account?with=drive_url`, { headers: auth })
+  const r = await fetch(`${baseApi}/account?with=drive_url`, { headers: auth, signal: AbortSignal.timeout(TEMPO_SESSAO_MS) })
   const u = ((await r.json().catch(() => ({}))) as { drive_url?: string })?.drive_url
   if (!u) throw new Error('não consegui descobrir o drive da conta Kommo')
   return String(u)
@@ -32,6 +38,7 @@ export async function subirAoDriveDoKommo(o: {
 }): Promise<string> {
   const s = await fetch(`${o.drive}/v1.0/sessions`, {
     method: 'POST',
+    signal: AbortSignal.timeout(TEMPO_SESSAO_MS),
     headers: { ...o.auth, 'Content-Type': 'application/json' },
     body: JSON.stringify({ file_name: o.nome, file_size: o.bytes.byteLength, content_type: o.mime }),
   })
@@ -45,6 +52,7 @@ export async function subirAoDriveDoKommo(o: {
     if (!url) throw new Error('o drive do Kommo não devolveu o endereço da próxima parte')
     const r = await fetch(url, {
       method: 'POST',
+      signal: AbortSignal.timeout(TEMPO_PARTE_MS),
       // O TIPO DO ARQUIVO em cada parte, como na receita oficial do Kommo (e não
       // application/octet-stream).
       headers: { ...o.auth, 'Content-Type': o.mime },

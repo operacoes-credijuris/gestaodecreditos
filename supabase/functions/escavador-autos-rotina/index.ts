@@ -57,6 +57,16 @@ import {
   rotuloDoProcesso,
   SISTEMA_PROCESSOS,
 } from '../_shared/processosDoCredito.ts'
+import {
+  consultaRespondeu,
+  ehPdf,
+  erroPassageiro,
+  falhaPassageira,
+  MAX_BYTES_NA_MEMORIA,
+  recusaDaConta,
+  SEM_RESPOSTA,
+  semAcessoAoKommo,
+} from '../_shared/falhasDosAutos.ts'
 
 type Servico = ReturnType<typeof serviceClient>
 
@@ -93,8 +103,15 @@ const MODELO_LEITURA = 'claude-sonnet-5'
 const MAX_TENTATIVAS = 3
 /** Voltas encadeadas no máximo, por disparo. */
 const MAX_ENCADEADAS = 12
-/** Teto por PDF: o drive do Kommo aceita até 300 MB. */
-const MAX_BYTES = 300 * 1024 * 1024
+/**
+ * Quanto se espera cada chamada ao Escavador e ao Kommo. SEM TETO, uma conexão
+ * parada segurava a volta além da trava de 3 minutos, e outra volta entrava no
+ * mesmo processo e subia o mesmo PDF de novo: anexo em dobro no card.
+ */
+const TEMPO_API_MS = 30_000
+const TEMPO_DOWNLOAD_MS = 90_000
+/** Depois de cinco falhas seguidas que passam (rede, cota, 5xx), o processo descansa isto. */
+const PAUSA_APOS_FALHAS_MS = 30 * 60_000
 
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const agora = () => new Date().toISOString()
@@ -127,14 +144,24 @@ interface Processo {
 
 // ------------------------------------------------------------------ Escavador
 async function escavador(chave: string, caminho: string, init: RequestInit = {}) {
-  const res = await fetch(caminho.startsWith('http') ? caminho : `${BASE_ESCAVADOR}${caminho}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${chave}`,
-      Accept: 'application/json',
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-    },
-  })
+  let res: Response
+  try {
+    res = await fetch(caminho.startsWith('http') ? caminho : `${BASE_ESCAVADOR}${caminho}`, {
+      ...init,
+      signal: AbortSignal.timeout(TEMPO_API_MS),
+      headers: {
+        Authorization: `Bearer ${chave}`,
+        Accept: 'application/json',
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+    })
+  } catch (e) {
+    // SEM RESPOSTA (rede, tempo esgotado) vira status 0, e não exceção: quem
+    // chamou decide, e no pedido pago isso importa — o Escavador pode ter
+    // recebido e cobrado sem a resposta voltar, e a próxima volta adota o pedido
+    // pela consulta de status em vez de pagar outro.
+    return { status: SEM_RESPOSTA, corpo: String((e as Error)?.message ?? e), centavos: 0 }
+  }
   const centavos = Number(res.headers.get('Creditos-Utilizados') ?? 0) || 0
   const txt = await res.text()
   let corpo: any = txt
@@ -144,10 +171,30 @@ async function escavador(chave: string, caminho: string, init: RequestInit = {})
   return { status: res.status, corpo, centavos }
 }
 
-/** A última atualização do processo no Escavador (consulta gratuita). */
-async function ultimaVerificacao(chave: string, cnj: string): Promise<Record<string, any> | null> {
+/**
+ * A última atualização do processo no Escavador (consulta gratuita).
+ *
+ * `consultou` FALSO É "NÃO SEI", e não "não há pedido": antes, qualquer
+ * resposta diferente de 200 virava null, e o pedido pago seguia — passando por
+ * cima do reaproveitamento dos 30 dias e da adoção do pedido de uma volta que
+ * morreu. Ver `consultaRespondeu`.
+ */
+async function ultimaVerificacao(
+  chave: string,
+  cnj: string,
+): Promise<{ consultou: boolean; status: number; v: Record<string, any> | null }> {
   const r = await escavador(chave, `/processos/numero_cnj/${cnj}/status-atualizacao`)
-  return r.status === 200 ? (r.corpo?.ultima_verificacao ?? null) : null
+  return {
+    consultou: consultaRespondeu(r.status),
+    status: r.status,
+    v: r.status === 200 ? (r.corpo?.ultima_verificacao ?? null) : null,
+  }
+}
+
+/** Há token de callback cadastrado? Sem ele, o pedido não pode pedir aviso. */
+async function temCallback(svc: Servico): Promise<boolean> {
+  const { data } = await svc.from('integracao_escavador_secret').select('callback_token').eq('id', 1).maybeSingle()
+  return !!String(data?.callback_token ?? '').trim()
 }
 
 // ------------------------------------------------------------------ Kommo
@@ -163,6 +210,7 @@ function clienteKommo(token: string, subdominio: string) {
     ultima = Date.now()
     return fetch(`${base}${caminho}`, {
       ...init,
+      signal: AbortSignal.timeout(TEMPO_API_MS),
       headers: { ...auth, ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
     })
   }
@@ -192,7 +240,7 @@ function clienteKommo(token: string, subdominio: string) {
     /** Nome, tamanho, tipo e endereço de download de um arquivo do drive. */
     async metadados(uuid: string) {
       const d = await cliente.urlDoDrive()
-      const r = await fetch(`${d}/v1.0/files/${uuid}`, { headers: auth })
+      const r = await fetch(`${d}/v1.0/files/${uuid}`, { headers: auth, signal: AbortSignal.timeout(TEMPO_API_MS) })
       if (!r.ok) return null
       const m = (await r.json().catch(() => null)) as any
       return {
@@ -203,8 +251,10 @@ function clienteKommo(token: string, subdominio: string) {
       }
     },
     async baixar(url: string): Promise<Uint8Array | null> {
-      let r = await fetch(url)
-      if (r.status === 401 || r.status === 403) r = await fetch(url, { headers: auth })
+      let r = await fetch(url, { signal: AbortSignal.timeout(TEMPO_DOWNLOAD_MS) })
+      if (r.status === 401 || r.status === 403) {
+        r = await fetch(url, { headers: auth, signal: AbortSignal.timeout(TEMPO_DOWNLOAD_MS) })
+      }
       return r.ok ? new Uint8Array(await r.arrayBuffer()) : null
     },
     /** Sobe um PDF ao drive do Kommo, em partes — ver `_shared/driveDoKommo.ts`. */
@@ -290,6 +340,22 @@ async function fontesDoCard(kommo: Kommo, lead: any) {
   return { titulo: String(lead.nome ?? ''), anotacoes, pdfs, notas }
 }
 
+/**
+ * A leitura que falhou, e se vale tentar de novo.
+ *
+ * RELER SÓ O QUE PASSA. Cada leitura reenvia os PDFs (dezenas de centavos de
+ * dólar), e repetir quatro vezes uma resposta cortada ou um JSON inválido era
+ * pagar quatro vezes pelo mesmo erro.
+ */
+class FalhaDaLeitura extends Error {
+  constructor(mensagem: string, readonly passageira: boolean) {
+    super(mensagem)
+  }
+}
+
+/** Documento que não tem como descer (grande demais, não é PDF): tentar de novo não muda nada. */
+class DocumentoImpossivel extends Error {}
+
 /** A leitura pela IA. Documento recusado (grande demais, páginas demais) cai para uma leitura menor. */
 async function perguntarAIA(
   chave: string,
@@ -302,6 +368,7 @@ async function perguntarAIA(
     [],
   ]
   let ultimoErro = ''
+  let passageira = false
   for (const pdfs of tentativas) {
     const conteudo: unknown[] = [
       {
@@ -319,23 +386,40 @@ async function perguntarAIA(
       })),
       { type: 'text', text: 'Identifique os processos deste crédito.' },
     ]
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      signal: AbortSignal.timeout(ESPERA_DA_IA_MS),
-      headers: { 'x-api-key': chave, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: MODELO_LEITURA,
-        max_tokens: 1500,
-        system: SISTEMA_PROCESSOS,
-        messages: [{ role: 'user', content: conteudo }],
-      }),
-    })
+    let res: Response
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        signal: AbortSignal.timeout(ESPERA_DA_IA_MS),
+        headers: { 'x-api-key': chave, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: MODELO_LEITURA,
+          // SEM PENSAMENTO, e com folga na resposta. No Sonnet 5 o pensamento vem
+          // LIGADO quando o campo é omitido, e conta DENTRO do max_tokens (docs da
+          // Anthropic, "Thinking"): com 1.500 o JSON saía cortado justamente no
+          // card com mais PDF. Achar números de processo não pede raciocínio
+          // longo, e a espera aqui é de 55 segundos.
+          max_tokens: 4000,
+          thinking: { type: 'disabled' },
+          system: SISTEMA_PROCESSOS,
+          messages: [{ role: 'user', content: conteudo }],
+        }),
+      })
+    } catch (e) {
+      throw new FalhaDaLeitura(`a leitura pela IA não respondeu a tempo (${(e as Error)?.message ?? e})`, true)
+    }
     const j = (await res.json().catch(() => null)) as any
     if (!res.ok) {
       ultimoErro = `HTTP ${res.status}: ${String(j?.error?.message ?? '').slice(0, 200)}`
+      passageira = falhaPassageira(res.status)
       // SÓ O 400 SE RESOLVE ENCOLHENDO. Chave errada, limite de uso, fora do ar:
       // tentar de novo com menos documentos não muda nada.
       if (res.status === 400 && pdfs.length > 0) continue
+      break
+    }
+    if (j?.stop_reason === 'max_tokens') {
+      ultimoErro = 'a resposta da IA saiu cortada'
+      passageira = false
       break
     }
     const txt = ((j?.content ?? []) as any[])
@@ -348,10 +432,11 @@ async function perguntarAIA(
       return { bruto: JSON.parse(txt), lidos: pdfs.map((p) => p.nome) }
     } catch {
       ultimoErro = 'a IA não devolveu JSON válido'
+      passageira = false
       break
     }
   }
-  throw new Error(`a leitura pela IA falhou (${ultimoErro})`)
+  throw new FalhaDaLeitura(`a leitura pela IA falhou (${ultimoErro})`, passageira)
 }
 
 async function lerCards(
@@ -411,7 +496,12 @@ async function lerCards(
 
     const rpv = Number(l.pipeline_id) === FUNIL_RPV
     const leituras = (linha?.leituras ?? 0) + 1
-    const cnjDoTitulo = cnjDoCard(l.nome) || String(l.processo_cnj ?? '')
+    // SÓ O TÍTULO. O `processo_cnj` do espelho, quando o título não tem número, é
+    // o primeiro CNJ das ANOTAÇÕES — e entrava à força como "do título", mesmo
+    // que a IA o tivesse descartado (processo só citado, dívida do titular): um
+    // pedido de R$ 1,34 pelo processo errado. O título segue o formato
+    // "originador - cedente - nº do processo - parcelas - % de honorários".
+    const cnjDoTitulo = cnjDoCard(l.nome)
     let achados: ProcessoDoCredito[] = []
     let lidos: string[] = []
     // A leitura que não deu certo por um motivo passageiro (demora, limite de uso,
@@ -430,7 +520,10 @@ async function lerCards(
       // que a rotina fazia antes da leitura existir — e, havendo chave e
       // leituras sobrando, a IA tenta de novo na próxima volta.
       avisos.push(`card ${leadId}: ${(e as Error).message}`)
-      lerDeNovo = !!chaveIA && leituras < MAX_LEITURAS
+      // Falha do Kommo ao juntar as fontes conta como passageira; a da IA diz
+      // se é (ver FalhaDaLeitura).
+      const passa = e instanceof FalhaDaLeitura ? e.passageira : true
+      lerDeNovo = !!chaveIA && leituras < MAX_LEITURAS && passa
       achados = normalizarProcessos({ processos: [] }, { titulo: String(l.nome ?? ''), anotacoes: '', cnjDoTitulo }).processos
     }
 
@@ -501,6 +594,7 @@ async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number |
     .eq('operacao', 'autos_pedido')
     .gte('criado_em', `${hoje}T03:00:00Z`)
   let pedidosHoje = count ?? 0
+  const comCallback = await temCallback(svc)
 
   for (const p of processos) {
     const leadId = Number(p.kommo_lead_id)
@@ -551,7 +645,15 @@ async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number |
     // AUTOS RECENTES NO ESCAVADOR não se pedem de novo — a consulta é de graça e
     // o pedido não. Socorre também a posse parada: se a volta que morreu chegou a
     // pedir, o pedido aparece aqui como PENDENTE e é adotado.
-    const v = await ultimaVerificacao(chave, cnj)
+    const consulta = await ultimaVerificacao(chave, cnj)
+    if (!consulta.consultou) {
+      await gravar({
+        estado: 'FILA',
+        detalhe: `Não consegui consultar o Escavador antes de pedir (HTTP ${consulta.status}); tento de novo na próxima volta.`,
+      })
+      continue
+    }
+    const v = consulta.v
     const comAutos = v?.opcoes?.autos === true
     const recente = v?.concluido_em && Date.now() - Date.parse(String(v.concluido_em)) < REUSO_DIAS * 86_400_000
     if (comAutos && v?.status === 'SUCESSO' && recente) {
@@ -572,7 +674,12 @@ async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number |
 
     const r = await escavador(chave, `/processos/numero_cnj/${cnj}/solicitar-atualizacao`, {
       method: 'POST',
-      body: JSON.stringify({ autos: 1, utilizar_certificado: 1, enviar_callback: 1 }),
+      // O AVISO SÓ COM CALLBACK CADASTRADO. O SDK oficial do Escavador diz que
+      // `enviar_callback` exige uma URL de callback na conta, e o único pedido
+      // real (22/09, id 58021125) foi feito sem ele. Sem token de callback aqui,
+      // o aviso seria recusado mesmo que chegasse; a conferência de meia em
+      // meia hora cobre o acompanhamento.
+      body: JSON.stringify({ autos: 1, utilizar_certificado: 1, ...(comCallback ? { enviar_callback: 1 } : {}) }),
     })
     if (r.status === 402) {
       await gravar({ estado: 'SEM_SALDO', detalhe: 'O Escavador recusou o pedido por falta de crédito.' })
@@ -582,15 +689,27 @@ async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number |
     const pedidoId = Number(r.corpo?.id ?? 0)
     if (r.status >= 300 || !pedidoId) {
       const detalhe = `O Escavador recusou o pedido (HTTP ${r.status}): ${String(r.corpo?.message ?? '').slice(0, 200)}`
+      // PROBLEMA DA CONTA PARA A VOLTA, e não encerra o processo: token recusado
+      // ou limite de chamadas valem para todos, e FALHOU deixaria cada processo
+      // sem pedido para sempre, mesmo depois de o token ser trocado.
+      if (recusaDaConta(r.status)) {
+        await gravar({ estado: 'FILA', detalhe })
+        avisos.push(`Escavador recusou o pedido pela conta (HTTP ${r.status}): os pedidos param nesta volta.`)
+        break
+      }
+      // SEM RESPOSTA OU ERRO DO LADO DELES volta para a fila. Se o pedido chegou
+      // a ser feito e cobrado, a consulta da próxima volta o encontra PENDENTE e
+      // o adota, em vez de pagar outro.
+      if (falhaPassageira(r.status)) {
+        await gravar({ estado: 'FILA', detalhe: `${detalhe} — tento de novo na próxima volta.` })
+        continue
+      }
       // A RECUSA PODE SER "JÁ HÁ PEDIDO EM ANDAMENTO": adota-se aquele pedido.
-      // Recusa definitiva não se repete a cada volta (o log da conta); só o erro
-      // do lado deles (5xx) volta para a fila.
-      const depois = r.status < 500 ? await ultimaVerificacao(chave, cnj) : null
+      // Recusa definitiva não se repete a cada volta (o log da conta).
+      const depois = (await ultimaVerificacao(chave, cnj)).v
       if (depois?.opcoes?.autos === true && depois?.status === 'PENDENTE') {
         await registrarPedido(svc, Number(depois.id), cnj, leadId, depois)
         await gravar({ estado: 'AGUARDANDO', pedido_id: Number(depois.id), verificado_em: agora(), detalhe: null })
-      } else if (r.status >= 500) {
-        await gravar({ estado: 'FILA', detalhe })
       } else {
         await gravar({ estado: 'FALHOU', detalhe })
         await kommo.anotar(leadId, notaDeFalha(cnj, detalhe.replace(/^O Escavador/, 'o Escavador')))
@@ -612,6 +731,13 @@ async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number |
 }
 
 // ------------------------------------------------------------------ 3. ACOMPANHAR
+/** Quando o pedido foi feito, pelo registro dele (ms); null se não há como saber. */
+async function quandoFoiPedido(svc: Servico, pedidoId: number | null): Promise<number | null> {
+  if (!pedidoId) return null
+  const { data } = await svc.from('escavador_pedido').select('criado_em').eq('id', pedidoId).maybeSingle()
+  return Date.parse(String(data?.criado_em ?? '')) || null
+}
+
 async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: number | null) {
   let q = svc.from('escavador_autos_processo').select('*').eq('estado', 'AGUARDANDO')
   if (soEste) q = q.eq('kommo_lead_id', soEste)
@@ -624,11 +750,22 @@ async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: num
         .update({ atualizado_em: agora(), ...m })
         .eq('kommo_lead_id', p.kommo_lead_id)
         .eq('numero_cnj', p.numero_cnj)
-    const v = await ultimaVerificacao(chave, p.numero_cnj)
+    const consulta = await ultimaVerificacao(chave, p.numero_cnj)
+    // CONSULTA QUE NÃO RESPONDEU não decide nada: nem sucesso, nem desistência.
+    if (!consulta.consultou) {
+      await gravar({ verificado_em: agora() })
+      continue
+    }
+    const v = consulta.v
     const status = String(v?.status ?? 'PENDENTE').toUpperCase()
     const doPedido =
       v && (Number(v.id) === Number(p.pedido_id) || Date.parse(String(v.criado_em)) >= Date.parse(p.criado_em))
     if (v && doPedido) await registrarPedido(svc, Number(v.id), p.numero_cnj, p.kommo_lead_id, v)
+    // AS 72 HORAS CONTAM DO PEDIDO, e não da linha. `criado_em` da linha é a
+    // leitura do card: um processo que esperou três dias na FILA (cota, saldo)
+    // era pago e, meia hora depois, dado como "tribunal não respondeu" — R$ 1,34
+    // perdidos e nada no card.
+    const pedidoEm = (doPedido && Date.parse(String(v?.criado_em ?? ''))) || (await quandoFoiPedido(svc, p.pedido_id))
 
     if (doPedido && status === 'SUCESSO') {
       await gravar({ estado: 'ANEXANDO', verificado_em: agora(), detalhe: null })
@@ -636,7 +773,7 @@ async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: num
       const motivo = motivoDoEstado(status, v?.motivo_erro ?? null)
       await gravar({ estado: 'FALHOU', detalhe: motivo, verificado_em: agora() })
       await kommo.anotar(p.kommo_lead_id, notaDeFalha(`${p.numero_cnj} (${p.rotulo.toLowerCase()})`, motivo))
-    } else if (Date.now() - Date.parse(p.criado_em) > DESISTIR_H * 3_600_000) {
+    } else if (pedidoEm && Date.now() - pedidoEm > DESISTIR_H * 3_600_000) {
       const motivo = `o tribunal não respondeu em ${DESISTIR_H} horas`
       await gravar({ estado: 'FALHOU', detalhe: motivo })
       await kommo.anotar(p.kommo_lead_id, notaDeFalha(`${p.numero_cnj} (${p.rotulo.toLowerCase()})`, motivo))
@@ -652,20 +789,39 @@ async function listarAutos(svc: Servico, chave: string, cnj: string, pedidoId: n
   const docs: ReturnType<typeof documentosDosAutos> = []
   for (const rota of ['autos', 'documentos-publicos']) {
     let url: string | null = `/processos/numero_cnj/${cnj}/${rota}?limit=100`
-    let ok = false
+    let paginas = 0
+    const desta: typeof docs = []
     for (let i = 0; url && i < 60; i++) {
       const r = await escavador(chave, url)
-      if (r.status !== 200) break
-      ok = true
-      docs.push(...documentosDosAutos(r.corpo))
+      if (r.status !== 200) {
+        // LISTA PELA METADE NÃO É LISTA. Uma página do meio que falhava encerrava
+        // a leitura com o que já tinha, e o processo terminava "60 de 60" com 206
+        // documentos nos autos. O erro sobe, e a próxima volta lista de novo.
+        if (paginas > 0) {
+          throw new Error(`a lista dos autos parou na página ${paginas + 1} (HTTP ${r.status}); continua na próxima volta`)
+        }
+        // Na primeira página, só a recusa AFIRMADA passa para a outra rota (sem
+        // permissão para os autos → os documentos públicos); o resto é passageiro.
+        if (falhaPassageira(r.status) || r.status === 401) {
+          throw new Error(`o Escavador não entregou a lista dos autos (HTTP ${r.status}); continua na próxima volta`)
+        }
+        break
+      }
+      paginas++
+      desta.push(...documentosDosAutos(r.corpo))
       url = r.corpo?.links?.next ?? null
     }
-    if (ok && docs.length) break
+    if (desta.length) {
+      docs.push(...desta)
+      break
+    }
   }
   const vistos = new Set<string>()
   const unicos = emOrdemDosAutos(docs.filter((d) => !vistos.has(d.chave) && vistos.add(d.chave)))
   for (let i = 0; i < unicos.length; i += 100) {
-    await svc.from('escavador_documento').upsert(
+    // GRAVAÇÃO QUE FALHA NÃO PODE PASSAR EM SILÊNCIO: com a lista fora do banco,
+    // o processo terminava CONCLUIDO com "0 de 0" e nenhum aviso.
+    const { error } = await svc.from('escavador_documento').upsert(
       unicos.slice(i, i + 100).map((d, j) => ({
         numero_cnj: cnj,
         pedido_id: pedidoId,
@@ -678,6 +834,7 @@ async function listarAutos(svc: Servico, chave: string, cnj: string, pedidoId: n
       })),
       { onConflict: 'numero_cnj,chave' },
     )
+    if (error) throw new Error(`não consegui gravar a lista dos autos: ${String(error.message).slice(0, 160)}`)
   }
   return unicos
 }
@@ -699,15 +856,19 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
         .eq('kommo_lead_id', p.kommo_lead_id)
         .eq('numero_cnj', p.numero_cnj)
 
-    // A TRAVA: só uma volta trabalha neste processo do card por vez.
+    // A TRAVA: só uma volta trabalha neste processo do card por vez. A linha
+    // volta inteira e substitui a lida antes: entre as duas, outra volta pode
+    // ter anexado documentos, e `chaves_anexadas` velho subiria o mesmo PDF.
     const { data: peguei } = await svc
       .from('escavador_autos_processo')
       .update({ trabalhando_ate: new Date(Date.now() + 3 * 60_000).toISOString() })
       .eq('kommo_lead_id', p.kommo_lead_id)
       .eq('numero_cnj', p.numero_cnj)
+      .eq('estado', 'ANEXANDO')
       .or(`trabalhando_ate.is.null,trabalhando_ate.lt."${agora()}"`)
-      .select('kommo_lead_id')
+      .select('*')
     if (!peguei?.length) continue
+    Object.assign(p, peguei[0])
 
     const cnj = p.numero_cnj
     const leadId = p.kommo_lead_id
@@ -728,6 +889,7 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
         p.total_documentos = lista.length
         p.paginas = paginas
         ;({ data: docs } = await lerDocs())
+        if (!docs?.length) throw new Error('a lista dos autos não ficou gravada; continua na próxima volta')
       }
 
       const feitas = new Set(p.chaves_anexadas ?? [])
@@ -737,6 +899,8 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
       let seguidas = 0
       let acertos = 0
       let ultimoErro = ''
+      /** Os documentos da sequência de falhas: se o disjuntor abrir, a culpa não foi deles. */
+      let daSequencia: any[] = []
       for (const d of todos) {
         if (seguidas >= 5 && acertos === 0) break
         if (feitas.has(d.chave) || Number(d.tentativas) >= MAX_TENTATIVAS) continue
@@ -744,6 +908,10 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
           sobrou = true
           break
         }
+        // A TENTATIVA CONTA ANTES DE BAIXAR. Contada só no erro, um documento que
+        // derrubava a volta (memória, tempo) nunca era contado: voltava a ser o
+        // primeiro da fila em toda volta, e os seguintes nunca subiam.
+        let contada = false
         try {
           let uuid: string | null = d.kommo_file_uuid ?? null
           if (!uuid) {
@@ -756,12 +924,28 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
             uuid = fresco?.kommo_file_uuid ?? null
           }
           if (!uuid) {
+            d.tentativas = Number(d.tentativas) + 1
+            contada = true
+            await svc.from('escavador_documento').update({ tentativas: d.tentativas }).eq('id', d.id)
             const res = await fetch(`${BASE_ESCAVADOR}/processos/numero_cnj/${cnj}/documentos/${d.chave}`, {
               headers: { Authorization: `Bearer ${chave}` },
+              signal: AbortSignal.timeout(TEMPO_DOWNLOAD_MS),
             })
             if (!res.ok) throw new Error(`o Escavador recusou o download (HTTP ${res.status})`)
+            // GRANDE DEMAIS NÃO SE LÊ: o tamanho vem no cabeçalho, antes do corpo, e
+            // ler o corpo de um arquivo maior que a memória derruba a função.
+            const tamanho = Number(res.headers.get('content-length') ?? 0) || 0
+            if (tamanho > MAX_BYTES_NA_MEMORIA) {
+              await res.body?.cancel()
+              throw new DocumentoImpossivel(`arquivo grande demais para descer por aqui (${Math.round(tamanho / 1_048_576)} MB)`)
+            }
             const bytes = new Uint8Array(await res.arrayBuffer())
-            if (bytes.byteLength > MAX_BYTES) throw new Error(`arquivo grande demais (${bytes.byteLength} bytes)`)
+            if (bytes.byteLength > MAX_BYTES_NA_MEMORIA) {
+              throw new DocumentoImpossivel(`arquivo grande demais para descer por aqui (${Math.round(bytes.byteLength / 1_048_576)} MB)`)
+            }
+            // O ANEXO SOBE COMO PDF: corpo que não é PDF (página de erro, HTML)
+            // viraria um arquivo quebrado no card.
+            if (!ehPdf(bytes)) throw new DocumentoImpossivel('o Escavador não devolveu um PDF')
             const nome = nomeDoAnexo(
               Number(d.ordem) || 1,
               p.total_documentos,
@@ -769,15 +953,20 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
               p.rotulo,
             )
             uuid = await kommo.subir(nome, bytes)
+            // SUBIU: as tentativas voltam a zero. Elas valem para o documento em
+            // todos os cards do processo, e um acerto contado como tentativa
+            // tiraria o PDF do terceiro card que o anexasse.
             await svc.from('escavador_documento')
-              .update({ kommo_file_uuid: uuid, bytes: bytes.byteLength, baixado_em: agora(), erro: null })
+              .update({ kommo_file_uuid: uuid, bytes: bytes.byteLength, baixado_em: agora(), erro: null, tentativas: 0 })
               .eq('id', d.id)
+            d.tentativas = 0
           }
           await kommo.anexar(leadId, [uuid])
           feitas.add(d.chave)
           await svc.from('escavador_documento').update({ anexado_em: agora() }).eq('id', d.id)
           acertos++
           seguidas = 0
+          daSequencia = []
           await gravar({
             chaves_anexadas: [...feitas],
             anexados: feitas.size,
@@ -785,20 +974,44 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
           })
         } catch (e) {
           const erro = String((e as Error).message).slice(0, 300)
-          await svc.from('escavador_documento')
-            .update({ tentativas: Number(d.tentativas) + 1, erro })
-            .eq('id', d.id)
-          d.tentativas = Number(d.tentativas) + 1
+          // O documento que não tem como descer esgota as tentativas de uma vez, e
+          // não conta no disjuntor: o defeito é dele, não do caminho.
+          const impossivel = e instanceof DocumentoImpossivel
+          const tentativas = impossivel ? MAX_TENTATIVAS : Number(d.tentativas) + (contada ? 0 : 1)
+          await svc.from('escavador_documento').update({ tentativas, erro }).eq('id', d.id)
+          d.tentativas = tentativas
           d.erro = erro
-          seguidas++
-          ultimoErro = erro
+          if (!impossivel) {
+            seguidas++
+            ultimoErro = erro
+            daSequencia.push(d)
+          }
         }
       }
 
       if (seguidas >= 5 && acertos === 0) {
         const motivo = `os PDFs não sobem para o Kommo: ${ultimoErro.slice(0, 200)}`
-        await gravar({ estado: 'FALHOU', detalhe: motivo, trabalhando_ate: null })
-        await kommo.anotar(leadId, notaDeFalha(`${cnj} (${p.rotulo.toLowerCase()})`, motivo))
+        // SÓ A FALTA DE ACESSO ENCERRA. Antes, cinco falhas seguidas numa volta
+        // davam FALHOU para sempre — mesmo com 150 de 206 documentos já no card,
+        // e mesmo quando a causa era um 5xx ou um limite que passa em minutos. O
+        // processo descansa meia hora e continua; cada documento tem as suas três
+        // tentativas, então a espera não vira laço.
+        if (semAcessoAoKommo(ultimoErro)) {
+          await gravar({ estado: 'FALHOU', detalhe: motivo, trabalhando_ate: null })
+          await kommo.anotar(leadId, notaDeFalha(`${cnj} (${p.rotulo.toLowerCase()})`, motivo))
+        } else {
+          // A TENTATIVA DEVOLVIDA quando a queda foi passageira: uma
+          // indisponibilidade longa esgotaria os documentos da frente um a um,
+          // sem culpa deles. Recusa que não passa sozinha segue contando.
+          for (const d of erroPassageiro(ultimoErro) ? daSequencia : []) {
+            const t = Math.max(0, Number(d.tentativas) - 1)
+            await svc.from('escavador_documento').update({ tentativas: t }).eq('id', d.id)
+          }
+          await gravar({
+            detalhe: `${motivo} — tento de novo em meia hora.`,
+            trabalhando_ate: new Date(Date.now() + PAUSA_APOS_FALHAS_MS).toISOString(),
+          })
+        }
         continue
       }
 
