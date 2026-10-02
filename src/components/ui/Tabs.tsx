@@ -18,12 +18,19 @@ export interface TabItem {
   disabled?: boolean
 }
 
+/** O `id` de cada aba quando há `idDoPainel` — o que o painel cita no `aria-labelledby`. */
+export function idDaAba(idDoPainel: string, indice: number): string {
+  return `${idDoPainel}-aba-${indice}`
+}
+
 export function Tabs({
   items,
   value,
   onChange,
   trailing,
   trailingNaBorda,
+  rotulo,
+  idDoPainel,
 }: {
   items: TabItem[]
   value: string
@@ -51,6 +58,18 @@ export function Tabs({
    * seção, e colado nas abas se leria como se filtrasse a aba aberta.
    */
   trailingNaBorda?: boolean
+  /**
+   * O nome do grupo de abas para o leitor de tela ("Seções do quadro"). Sem ele,
+   * a lista de abas é anunciada sem dizer do que é.
+   */
+  rotulo?: string
+  /**
+   * O `id` do painel que mostra a aba aberta, quando as abas trocam o conteúdo de
+   * UM painel só (a moldura do Quadro). A aba aberta passa a apontar para ele
+   * (`aria-controls`), e cada aba ganha o `id` de `idDaAba`, para o painel dizer
+   * de qual aba é (`aria-labelledby`).
+   */
+  idDoPainel?: string
 }) {
   // Refs dos botões para mover o foco na navegação por setas.
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -83,7 +102,11 @@ export function Tabs({
           `trailing` encostar nela. Com flex-1 ela esticaria e empurraria o
           conteúdo para a borda da página. `min-w-0` mantém o scroll horizontal
           funcionando quando as abas não couberem. */}
-      <div role="tablist" className="flex min-w-0 gap-1 overflow-x-auto scrollbar-thin">
+      <div
+        role="tablist"
+        aria-label={rotulo}
+        className="flex min-w-0 gap-1 overflow-x-auto scrollbar-thin"
+      >
         {items.map((item, index) => {
           const active = item.key === value
           return (
@@ -92,8 +115,12 @@ export function Tabs({
               ref={(el) => {
                 tabRefs.current[index] = el
               }}
+              id={idDoPainel ? idDaAba(idDoPainel, index) : undefined}
               role="tab"
               aria-selected={active}
+              // SÓ A ABA ABERTA aponta para o painel: há um painel só, com o
+              // conteúdo dela; as outras não controlam nada que exista na tela.
+              aria-controls={idDoPainel && active ? idDoPainel : undefined}
               // Roving tabindex: só a aba ativa entra na ordem de tabulação.
               tabIndex={active ? 0 : -1}
               disabled={item.disabled}

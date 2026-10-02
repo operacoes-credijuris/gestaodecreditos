@@ -46,8 +46,11 @@ export default function VisaoGeral() {
 
   return (
     <div className="space-y-6">
+      {/* h2, e com o nome da ABA: o h1 "Quadro econômico" é da moldura
+          (Moldura.tsx), e repeti-lo aqui daria dois títulos iguais na tela. */}
       <PageHeader
-        title="Quadro Econômico"
+        nivel={2}
+        title="Visão geral"
         description={
           `${painel.operacoes.length} operações · ${carteira.n} encerradas de fato · ` +
           `parâmetros de correção com data-base ${formatDate(painel.parametrosEm)}`

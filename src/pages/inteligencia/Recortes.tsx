@@ -105,7 +105,9 @@ export default function Recortes() {
 
   return (
     <div className="space-y-6">
+      {/* h2: o h1 da tela é o "Quadro econômico" da moldura (Moldura.tsx). */}
       <PageHeader
+        nivel={2}
         title="Recortes"
         description="Onde o capital está, quanto dele já voltou e quanto ainda falta voltar."
       />

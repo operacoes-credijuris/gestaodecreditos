@@ -16,13 +16,21 @@
 //
 // Mudar uma rota DE PROPÓSITO é atualizar App, `rotas.ts` e a tabela abaixo,
 // e dizer no commit por quê.
+//
+// ETAPA 3 (o Quadro numa moldura com abas): mudaram DE PROPÓSITO o espelho do
+// App (`objetosDeRota`, agora com a rota-mãe da moldura) e o leitor do App (que
+// passa a aceitar a moldura como rota-mãe). A tabela `HOJE` NÃO mudou: os 19
+// endereços levam à mesma tela, com o mesmo guarda. A moldura em volta das
+// cinco telas do Quadro é conferida à parte, no fim do arquivo.
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { matchRoutes, type RouteObject } from 'react-router-dom'
-import { ROTAS, type Guarda, type Rota, type Tela } from '@/components/layout/rotas'
-import { INICIO } from '@/components/layout/navigation'
+import {
+  MOLDURAS, ROTAS, type Guarda, type Moldura, type Rota, type Tela,
+} from '@/components/layout/rotas'
+import { ABAS_DO_QUADRO, INICIO } from '@/components/layout/navigation'
 
 // ─── 1. A tabela de hoje ────────────────────────────────────────────────────
 
@@ -71,13 +79,37 @@ const HOJE: ReadonlyArray<{ endereco: string; guarda: Guarda } & Destino> = [
  * A lista no formato do react-router, com o MESMO aninhamento do App: o login
  * solto e todo o resto como filho de uma rota-mãe sem caminho (a do
  * `ProtectedRoute` + `AppLayout`). A raiz é a `index` dessa mãe.
+ *
+ * MUDOU DE PROPÓSITO NA ETAPA 3: as rotas com `moldura` vão para dentro de uma
+ * segunda rota-mãe, com o caminho da moldura (`MOLDURAS`), como no App — a
+ * primeira tela como `index` dela e as outras com o caminho relativo. Assim o
+ * casamento abaixo passa pelo mesmo aninhamento que o App monta, e não por uma
+ * lista plana que o App deixou de ter.
  */
 function objetosDeRota(rotas: readonly Rota[]): RouteObject[] {
   const folha = (r: Rota): RouteObject =>
     r.caminho === '/' ? { index: true, handle: r } : { path: r.caminho, handle: r }
+  const filhaDaMoldura = (base: string) => (r: Rota): RouteObject => {
+    if (r.caminho === base) return { index: true, handle: r }
+    if (!r.caminho.startsWith(`${base}/`)) {
+      throw new Error(`rotas.ts: ${r.caminho} está na moldura de ${base}, mas fora do caminho dela`)
+    }
+    return { path: r.caminho.slice(base.length + 1), handle: r }
+  }
+  const molduras = Object.entries(MOLDURAS) as Array<[Moldura, string]>
+  const doLayout = rotas.filter((r) => r.guarda !== 'nenhuma')
   return [
     ...rotas.filter((r) => r.guarda === 'nenhuma').map(folha),
-    { children: rotas.filter((r) => r.guarda !== 'nenhuma').map(folha) },
+    {
+      children: [
+        ...doLayout.filter((r) => !r.moldura).map(folha),
+        ...molduras.map(([moldura, base]): RouteObject => ({
+          path: base,
+          handle: { mae: moldura },
+          children: doLayout.filter((r) => r.moldura === moldura).map(filhaDaMoldura(base)),
+        })),
+      ],
+    },
   ]
 }
 
@@ -87,6 +119,14 @@ const OBJETOS = objetosDeRota(ROTAS)
 function resolver(endereco: string): Rota | undefined {
   const casou = matchRoutes(OBJETOS, endereco)
   return casou?.[casou.length - 1]?.route.handle as Rota | undefined
+}
+
+/** A moldura que o react-router desenha em volta da tela do endereço, se há. */
+function molduraEm(endereco: string): Moldura | undefined {
+  const casou = matchRoutes(OBJETOS, endereco) ?? []
+  return casou
+    .map((c) => (c.route.handle as { mae?: Moldura } | undefined)?.mae)
+    .find((m) => m !== undefined)
 }
 
 /** O que a pessoa vê: a tela ou o redirecionamento, e o guarda. */
@@ -155,8 +195,9 @@ describe('rotas: redirecionamentos', () => {
 //
 // Um leitor mínimo de JSX, só para o formato que o App usa. É ESTRITO: rota
 // com atributo desconhecido (`caseSensitive`, `loader`…), elemento em forma
-// nova ou rota-mãe que não seja a do layout faz o teste falhar com o motivo,
-// em vez de ser ignorada. Melhor um alarme a mais que uma rota fora da conta.
+// nova ou rota-mãe que não seja a do layout nem uma moldura conhecida
+// (`MOLDURAS`, no caminho dela) faz o teste falhar com o motivo, em vez de ser
+// ignorada. Melhor um alarme a mais que uma rota fora da conta.
 
 const APP = readFileSync(fileURLToPath(new URL('../../App.tsx', import.meta.url)), 'utf-8')
 
@@ -220,13 +261,18 @@ function rotasDoApp(fonte: string): Rota[] {
   // Componente → módulo em src/pages, pelos imports.
   const modulos = new Map<string, string>()
   for (const m of s.matchAll(/^import (\w+) from '@\/pages\/([^']+)'/gm)) modulos.set(m[1], m[2])
-  const telaDe = (componente: string): Tela => {
+  const moduloDe = (componente: string): string => {
     const modulo = modulos.get(componente)
     if (!modulo) throw new Error(`App.tsx: <${componente} /> não vem de um import de @/pages`)
-    return modulo as Tela
+    return modulo
   }
+  const telaDe = (componente: string): Tela => moduloDe(componente) as Tela
+  const ehMoldura = (modulo: string): modulo is Moldura =>
+    Object.prototype.hasOwnProperty.call(MOLDURAS, modulo)
 
-  const pilha: Array<{ caminho: string; guarda: Guarda }> = [{ caminho: '', guarda: 'nenhuma' }]
+  const pilha: Array<{ caminho: string; guarda: Guarda; moldura?: Moldura }> = [
+    { caminho: '', guarda: 'nenhuma' },
+  ]
   const rotas: Rota[] = []
   // `(?=[\s/>])`: não confundir com `<Routes>`.
   const marca = /<Route(?=[\s/>])|<\/Route>/g
@@ -245,30 +291,51 @@ function rotasDoApp(fonte: string): Rota[] {
     const elemento = normalizar(String(tag.atributos.get('element') ?? ''))
     const path = tag.atributos.get('path')
 
+    // O caminho inteiro: absoluto como está, ou relativo à rota-mãe.
+    const caminhoDe = (p: string) => (p.startsWith('/') || !pai.caminho ? p : `${pai.caminho}/${p}`)
+
     if (!tag.fechaSozinha) {
-      // Rota-mãe. Hoje só existe uma: a do layout, sem caminho.
-      if (elemento !== LAYOUT || path !== undefined || tag.atributos.has('index')) {
-        throw new Error(`App.tsx: rota-mãe nova (${elemento})`)
+      // Rota-mãe. São dois tipos, e só eles: a do layout, sem caminho...
+      if (elemento === LAYOUT && path === undefined && !tag.atributos.has('index')) {
+        pilha.push({ caminho: pai.caminho, guarda: 'sessao' })
+        continue
       }
-      pilha.push({ caminho: pai.caminho, guarda: 'sessao' })
-      continue
+      // ...e, dentro do layout, uma MOLDURA (etapa 3): caminho próprio e, como
+      // elemento, o módulo de uma moldura conhecida, no caminho que `MOLDURAS`
+      // diz. As filhas herdam o guarda do layout e ganham a moldura.
+      const x = /^<(\w+)\/>$/.exec(elemento)
+      const modulo = x && x[1] !== 'Navigate' ? moduloDe(x[1]) : null
+      if (
+        modulo && ehMoldura(modulo) && typeof path === 'string' &&
+        pai.guarda === 'sessao' && !pai.moldura && !tag.atributos.has('index')
+      ) {
+        const caminho = caminhoDe(path)
+        if (caminho !== MOLDURAS[modulo]) {
+          throw new Error(`App.tsx: moldura ${modulo} em ${caminho}, e não em ${MOLDURAS[modulo]}`)
+        }
+        pilha.push({ caminho, guarda: pai.guarda, moldura: modulo })
+        continue
+      }
+      throw new Error(`App.tsx: rota-mãe nova (${elemento})`)
     }
 
     let caminho: string
     if (tag.atributos.has('index')) caminho = pai.caminho || '/'
-    else if (typeof path === 'string') {
-      caminho = path.startsWith('/') || !pai.caminho ? path : `${pai.caminho}/${path}`
-    } else throw new Error(`App.tsx: <Route> sem path nem index (${elemento})`)
+    else if (typeof path === 'string') caminho = caminhoDe(path)
+    else throw new Error(`App.tsx: <Route> sem path nem index (${elemento})`)
 
+    // `moldura` só aparece nas filhas de uma moldura (undefined no resto, que o
+    // `toEqual` trata como ausente).
+    const { moldura } = pai
     let x: RegExpExecArray | null
     if ((x = /^<Navigate to=\{INICIO\} replace\/>$/.exec(elemento))) {
-      rotas.push({ caminho, guarda: pai.guarda, redireciona: INICIO })
+      rotas.push({ caminho, guarda: pai.guarda, redireciona: INICIO, moldura })
     } else if ((x = /^<Navigate to="([^"]+)" replace\/>$/.exec(elemento))) {
-      rotas.push({ caminho, guarda: pai.guarda, redireciona: x[1] })
+      rotas.push({ caminho, guarda: pai.guarda, redireciona: x[1], moldura })
     } else if ((x = /^<AdminRoute><(\w+)\/><\/AdminRoute>$/.exec(elemento))) {
-      rotas.push({ caminho, guarda: 'admin', tela: telaDe(x[1]) })
+      rotas.push({ caminho, guarda: 'admin', tela: telaDe(x[1]), moldura })
     } else if ((x = /^<(\w+)\/>$/.exec(elemento)) && x[1] !== 'Navigate') {
-      rotas.push({ caminho, guarda: pai.guarda, tela: telaDe(x[1]) })
+      rotas.push({ caminho, guarda: pai.guarda, tela: telaDe(x[1]), moldura })
     } else {
       throw new Error(`App.tsx: elemento em forma nova na rota ${caminho}: ${elemento}`)
     }
@@ -286,7 +353,7 @@ describe('rotas: a lista é a do App.tsx', () => {
     expect(rotasDoApp(APP)).toHaveLength(19)
   })
 
-  it('cada rota do App está na lista, com a mesma tela e o mesmo guarda, e vice-versa', () => {
+  it('cada rota do App está na lista, com a mesma tela, o mesmo guarda e a mesma moldura, e vice-versa', () => {
     // Comparadas por caminho, não pela ordem: o react-router classifica as
     // rotas pela especificidade, e reordenar o App não muda nada para quem usa.
     expect([...rotasDoApp(APP)].sort(porCaminho)).toEqual([...ROTAS].sort(porCaminho))
@@ -306,5 +373,100 @@ describe('rotas: a lista é a do App.tsx', () => {
     expect(() => rotasDoApp(base('<Route path="/x" element={<Fantasma />} />')))
       .toThrow(/não vem de um import/)
     expect(rotasDoApp(base(''))).toEqual([])
+
+    // A MOLDURA (etapa 3). A conhecida, no caminho dela, é aceita, e as filhas
+    // saem com o endereço inteiro e a moldura...
+    const comImports = (rota: string) =>
+      "import Login from '@/pages/Login'\n" +
+      "import MolduraDoQuadro from '@/pages/inteligencia/Moldura'\n" +
+      base(rota)
+    expect(rotasDoApp(comImports(`
+      <Route path="/inteligencia" element={<MolduraDoQuadro />}>
+        <Route index element={<Login />} />
+        <Route path="y" element={<Login />} />
+      </Route>`))).toEqual([
+      { caminho: '/inteligencia', guarda: 'sessao', tela: 'Login', moldura: 'inteligencia/Moldura' },
+      { caminho: '/inteligencia/y', guarda: 'sessao', tela: 'Login', moldura: 'inteligencia/Moldura' },
+    ])
+    // ...em outro caminho, não...
+    expect(() => rotasDoApp(comImports(
+      '<Route path="/quadro" element={<MolduraDoQuadro />}><Route index element={<Login />} /></Route>',
+    ))).toThrow(/moldura inteligencia\/Moldura em \/quadro/)
+    // ...nem dentro de outra moldura...
+    expect(() => rotasDoApp(comImports(
+      '<Route path="/inteligencia" element={<MolduraDoQuadro />}>' +
+      '<Route path="/inteligencia" element={<MolduraDoQuadro />}></Route></Route>',
+    ))).toThrow(/rota-mãe nova/)
+    // ...e rota-mãe com uma tela qualquer no lugar da moldura, também não.
+    expect(() => rotasDoApp(comImports(
+      '<Route path="/x" element={<Login />}><Route index element={<Login />} /></Route>',
+    ))).toThrow(/rota-mãe nova/)
+  })
+})
+
+// ─── 4. A moldura do Quadro econômico (etapa 3) ─────────────────────────────
+
+/** Os cinco endereços do Quadro, escritos à mão (não derivados de `ROTAS`). */
+const QUADRO = [
+  '/inteligencia',
+  '/inteligencia/previsoes',
+  '/inteligencia/performance',
+  '/inteligencia/recortes',
+  '/inteligencia/carteiras',
+]
+
+/** O fonte de um módulo de `src/pages`, sem os comentários de JSX. */
+function fonteDaPagina(modulo: string): string {
+  const url = new URL(`../../pages/${modulo}.tsx`, import.meta.url)
+  return readFileSync(fileURLToPath(url), 'utf-8').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+}
+
+/** O `nivel` de cada `<PageHeader>` do fonte ('1' quando ele não diz, o padrão). */
+function niveisDoCabecalho(fonte: string): string[] {
+  return [...fonte.matchAll(/<PageHeader(?=\s)/g)].map((m) => {
+    const nivel = lerTag(fonte, (m.index ?? 0) + '<PageHeader'.length).atributos.get('nivel')
+    return nivel === undefined ? '1' : String(nivel)
+  })
+}
+
+describe('rotas: a moldura do Quadro econômico', () => {
+  it('as cinco telas do Quadro abrem dentro da moldura, e nenhum outro endereço', () => {
+    for (const { endereco } of HOJE) {
+      expect(molduraEm(endereco), endereco)
+        .toBe(QUADRO.includes(endereco) ? 'inteligencia/Moldura' : undefined)
+    }
+    // O endereço antigo das Carteiras continua levando à aba, dentro da moldura.
+    expect(resolver('/comercial/carteiras')?.redireciona).toBe('/inteligencia/carteiras')
+    // Barra no fim e maiúsculas, como links salvos já usam: a mesma aba, na moldura.
+    expect(oQueAbre(resolver('/Inteligencia/Previsoes/')))
+      .toEqual({ guarda: 'sessao', tela: 'inteligencia/Previsoes' })
+    expect(molduraEm('/Inteligencia/Previsoes/')).toBe('inteligencia/Moldura')
+    // Subcaminho que nenhuma aba declara: a página não encontrada, FORA da moldura.
+    expect(oQueAbre(resolver('/inteligencia/recortes/x')))
+      .toEqual({ guarda: 'sessao', tela: 'NotFound' })
+    expect(molduraEm('/inteligencia/recortes/x')).toBeUndefined()
+  })
+
+  it('as abas que a moldura desenha são as rotas dela, na mesma ordem', () => {
+    // A moldura desenha `ABAS_DO_QUADRO`; o App monta as rotas. Aba sem rota
+    // abriria a página não encontrada; rota sem aba abriria sem aba acesa.
+    const rotasDaMoldura = ROTAS.filter((r) => r.moldura === 'inteligencia/Moldura')
+    expect(ABAS_DO_QUADRO.map((a) => a.to)).toEqual(rotasDaMoldura.map((r) => r.caminho))
+    expect(ABAS_DO_QUADRO.map((a) => a.to)).toEqual(QUADRO)
+  })
+
+  it('um h1 só por tela: o da moldura; o cabeçalho de cada aba é h2', () => {
+    // Lido como TEXTO, como o App: renderizar as telas no Vitest puxaria o
+    // cliente do Supabase e os gráficos.
+    expect(niveisDoCabecalho(fonteDaPagina('inteligencia/Moldura'))).toEqual(['1'])
+    const telas = ROTAS.filter((r) => r.moldura).map((r) => r.tela as Tela)
+    expect(telas).toHaveLength(5)
+    for (const tela of telas) {
+      const fonte = fonteDaPagina(tela)
+      const niveis = niveisDoCabecalho(fonte)
+      expect(niveis.length, tela).toBeGreaterThan(0)
+      expect(new Set(niveis), tela).toEqual(new Set(['2']))
+      expect(fonte, tela).not.toMatch(/<h1[\s>]/)
+    }
   })
 })

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
-import { findNavLocation } from './navigation'
+import { itemAtivo, tituloDaAba } from './navigation'
 import { Assistente } from '@/components/Assistente'
 import { FaixaBeta } from './FaixaBeta'
 import { tituloDoCanal } from '@/lib/canal'
@@ -11,13 +11,19 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
 
-  // Título da aba do navegador acompanha a página ("Tarefas — Credijuris").
+  // Título da aba do navegador acompanha a página ("Tarefas — Credijuris") e,
+  // no Quadro econômico, a aba aberta ("Previsões — Credijuris").
   useEffect(() => {
-    const nav = findNavLocation(pathname)
-    document.title = tituloDoCanal(
-      nav ? `${nav.leaf.label} — Credijuris` : 'Credijuris — Gestão de Créditos',
-    )
+    document.title = tituloDoCanal(tituloDaAba(pathname))
   }, [pathname])
+
+  // A CHAVE É A DO ITEM DO MENU, e não o endereço: as cinco abas do Quadro são
+  // cinco endereços de um item só, e trocar de aba não pode desmontar a moldura.
+  // Desmontada, ela levaria junto a aba que acabou de receber o foco pela seta
+  // (o Tabs foca a aba nova logo depois de navegar), e o teclado cairia no topo
+  // da página. A troca de aba anima só o painel, dentro da moldura. Endereço sem
+  // item (a página não encontrada) segue com a chave do próprio endereço.
+  const chave = itemAtivo(pathname) ?? pathname
 
   return (
     <div className="flex h-screen overflow-hidden bg-papel">
@@ -27,9 +33,9 @@ export function AppLayout() {
         <Topbar onOpenMenu={() => setMobileOpen(true)} />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           {/* max-width evita tabelas esticadas de ponta a ponta em monitores
-              largos; key={pathname} re-anima a entrada a cada troca de rota. */}
+              largos; a chave re-anima a entrada a cada troca de tela. */}
           <div
-            key={pathname}
+            key={chave}
             className="animate-page mx-auto w-full max-w-[1400px] px-4 py-6 lg:px-8"
           >
             <Outlet />

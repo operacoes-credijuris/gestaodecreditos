@@ -1,45 +1,45 @@
 import { useEffect, useRef, useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
-import { X, type LucideIcon } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 import { useAuth } from '@/contexts/AuthContext'
-import { NAVIGATION, NAV_CONFIG } from './navigation'
+import { NAVIGATION, NAV_CONFIG, itemAtivo, type NavLeaf } from './navigation'
 import marca from '@/assets/marca-credijuris.png'
 
 function LeafLink({
-  to,
-  label,
-  icon: Icon,
+  item: { to, label, icon: Icon },
+  ativo,
   onNavigate,
 }: {
-  to: string
-  label: string
-  icon: LucideIcon
+  item: NavLeaf
+  /** Se o item está aceso — decidido por `itemAtivo`, um só para o menu inteiro. */
+  ativo: boolean
   onNavigate?: () => void
 }) {
   return (
-    <NavLink
+    <Link
       to={to}
-      // SÓ O ENDEREÇO EXATO ACENDE O ITEM: sem o `end`, "Visão Geral"
-      // (/inteligencia) ficava aceso junto com Performance, Previsões, Recortes e
-      // Carteiras, que moram embaixo dele — dois itens marcados ao mesmo tempo.
-      end
+      // QUEM ACENDE O ITEM É `itemAtivo` (navigation.ts), não o casamento do
+      // NavLink. O Quadro econômico é um item só que precisa ficar aceso nas
+      // cinco abas, e o NavLink só faz isso por PREFIXO (sem o `end`) — o
+      // defeito corrigido em e9c405e, em que "Visão Geral" (/inteligencia) ficava
+      // aceso junto com as subtelas embaixo dele. `itemAtivo` acende pelos
+      // endereços que cada item declara, por igualdade.
+      aria-current={ativo ? 'page' : undefined}
       onClick={onNavigate}
-      className={({ isActive }) =>
-        cn(
-          // borda esquerda sempre presente (transparente) para o item não
-          // "pular" quando o indicador verde do ativo aparece
-          'flex items-center gap-3 rounded-lg border-l-2 px-3 py-2 text-sm font-medium transition-colors',
-          isActive
-            ? 'border-verde-400 bg-brand-700 text-white'
-            : 'border-transparent text-brand-100 hover:bg-brand-800/60 hover:text-white',
-        )
-      }
+      className={cn(
+        // borda esquerda sempre presente (transparente) para o item não
+        // "pular" quando o indicador verde do ativo aparece
+        'flex items-center gap-3 rounded-lg border-l-2 px-3 py-2 text-sm font-medium transition-colors',
+        ativo
+          ? 'border-verde-400 bg-brand-700 text-white'
+          : 'border-transparent text-brand-100 hover:bg-brand-800/60 hover:text-white',
+      )}
     >
       <Icon className="h-5 w-5 shrink-0" />
       <span className="leading-tight">{label}</span>
-    </NavLink>
+    </Link>
   )
 }
 
@@ -52,6 +52,8 @@ export function Sidebar({
 }) {
   const { isAdmin } = useAuth()
   const { pathname } = useLocation()
+  // UM ITEM ACESO, NO MÁXIMO, para o menu inteiro (ver `itemAtivo`).
+  const ativo = itemAtivo(pathname)
 
   // Drawer mobile animado: `rendered` mantém o nó montado durante a saída;
   // `visible` controla as classes de "aberto" (translate/fade).
@@ -119,12 +121,12 @@ export function Sidebar({
       <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4 scrollbar-thin">
         {NAVIGATION.map((section, idx) => {
           // A seção que contém a rota ativa fica mais visível — responde
-          // "em que setor do negócio estou?" sem varrer a lista inteira.
-          const sectionActive = section.items.some(
-            (i) => pathname === i.to || pathname.startsWith(`${i.to}/`),
-          )
+          // "em que setor do negócio estou?" sem varrer a lista inteira. Pelo
+          // MESMO item aceso, para o título do setor e o item nunca discordarem.
+          const sectionActive = section.items.some((i) => i.to === ativo)
           return (
             <div key={idx} className="space-y-1">
+              {/* A seção sem título (a Análise de crédito, no topo) desenha só o item. */}
               {section.title && (
                 <p
                   className={cn(
@@ -136,7 +138,12 @@ export function Sidebar({
                 </p>
               )}
               {section.items.map((item) => (
-                <LeafLink key={item.to} {...item} onNavigate={onClose} />
+                <LeafLink
+                  key={item.to}
+                  item={item}
+                  ativo={item.to === ativo}
+                  onNavigate={onClose}
+                />
               ))}
             </div>
           )
@@ -145,7 +152,7 @@ export function Sidebar({
 
       {isAdmin && (
         <div className="border-t border-brand-800 px-3 py-3">
-          <LeafLink {...NAV_CONFIG} onNavigate={onClose} />
+          <LeafLink item={NAV_CONFIG} ativo={NAV_CONFIG.to === ativo} onNavigate={onClose} />
         </div>
       )}
     </div>

@@ -1,17 +1,17 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Menu, LogOut, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
 import { useToast } from '@/components/ui/Toast'
-import { findNavLocation } from './navigation'
+import { caminhoNoTopo } from './navigation'
 
 export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { user, profile, isAdmin, signOut } = useAuth()
   const toast = useToast()
   const [menuOpen, setMenuOpen] = useState(false)
   const { pathname } = useLocation()
-  const nav = findNavLocation(pathname)
+  const partes = caminhoNoTopo(pathname)
 
   const nome = profile?.nome || user?.email || 'Usuário'
   const iniciais = nome
@@ -31,25 +31,28 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         <Menu className="h-5 w-5" />
       </button>
 
-      {/* Breadcrumb de localização: "Seção › Página" (derivado da navegação) */}
+      {/* Breadcrumb de localização: "Setor › Página", e "› Aba" numa moldura
+          ("Operacional › Quadro econômico › Previsões"). A Análise de crédito,
+          sem setor, mostra só o próprio nome. No celular, só a última parte. */}
       <nav
         aria-label="Você está em"
         className="flex min-w-0 flex-1 items-center gap-1.5 text-sm"
       >
-        {nav && (
-          <>
-            {nav.section && (
-              <>
-                <span className="hidden shrink-0 text-slate-600 sm:inline">
-                  {nav.section}
-                </span>
-                <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-slate-500 sm:inline" />
-              </>
-            )}
-            <span className="font-display truncate font-bold tracking-tight text-slate-900">
-              {nav.leaf.label}
+        {partes.map((parte, i) =>
+          i === partes.length - 1 ? (
+            <span
+              key={i}
+              aria-current="page"
+              className="font-display truncate font-bold tracking-tight text-slate-900"
+            >
+              {parte}
             </span>
-          </>
+          ) : (
+            <Fragment key={i}>
+              <span className="hidden shrink-0 text-slate-600 sm:inline">{parte}</span>
+              <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-slate-500 sm:inline" />
+            </Fragment>
+          ),
         )}
       </nav>
 

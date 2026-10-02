@@ -159,7 +159,9 @@ export default function Previsoes() {
 
   return (
     <div className="space-y-6">
+      {/* h2: o h1 da tela é o "Quadro econômico" da moldura (Moldura.tsx). */}
       <PageHeader
+        nivel={2}
         title="Previsões e recebimentos"
         description={
           forecast.blocos.length

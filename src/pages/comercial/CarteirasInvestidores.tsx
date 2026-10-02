@@ -87,7 +87,9 @@ export default function CarteirasInvestidores() {
 
   return (
     <div>
-      <PageHeader title="Carteiras de Investimento" />
+      {/* h2: esta tela é a aba Carteiras do Quadro econômico, e o h1 é o da
+          moldura (pages/inteligencia/Moldura.tsx). */}
+      <PageHeader nivel={2} title="Carteiras de Investimento" />
       <div className="mb-5">
         <Tabs items={TABS} value={tab} onChange={setTab} />
       </div>

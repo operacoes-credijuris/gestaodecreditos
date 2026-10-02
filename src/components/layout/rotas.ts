@@ -17,9 +17,13 @@
 //      lista e compara com a tabela congelada no próprio teste. Mexeu aqui sem
 //      querer, o teste falha também.
 //
-// Mudança de rota DE PROPÓSITO (ex.: a etapa 3, que aninha o Quadro numa
-// moldura) atualiza os três lugares — App, esta lista e a tabela do teste — e
-// diz no commit por quê.
+// Mudança de rota DE PROPÓSITO atualiza os três lugares — App, esta lista e a
+// tabela do teste — e diz no commit por quê.
+//
+// A ETAPA 3 DO REDESENHO aninhou as cinco telas do Quadro econômico numa
+// moldura com abas (`pages/inteligencia/Moldura.tsx`). Aqui isso é o campo
+// `moldura` dessas cinco rotas, e só: o endereço, a tela e o guarda de cada uma
+// continuam os mesmos — por isso a tabela `HOJE` do teste não mudou.
 
 import { INICIO } from './navigation'
 
@@ -56,13 +60,35 @@ export type Tela =
   | 'operacional/execucao/ContatosServentias'
   | 'configuracoes/Configuracoes'
 
+/**
+ * A MOLDURA em volta da tela, também pelo módulo em `src/pages`: a rota-mãe que
+ * desenha o título e as abas, com a tela da aba aberta no `<Outlet>`. Hoje só a
+ * do Quadro econômico.
+ */
+export type Moldura = 'inteligencia/Moldura'
+
+/**
+ * O caminho de cada moldura: o da rota-mãe no App. As telas dela moram nele (a
+ * `index`) e embaixo dele.
+ */
+export const MOLDURAS: Readonly<Record<Moldura, string>> = {
+  'inteligencia/Moldura': '/inteligencia',
+}
+
 interface RotaBase {
   /**
-   * Como está no `<Route path>`. A raiz `'/'` é a rota `index` do layout, e
-   * `'*'` é a da página não encontrada (DENTRO do layout, com a barra lateral).
+   * O endereço inteiro. No App, a raiz `'/'` é a rota `index` do layout, e `'*'`
+   * é a da página não encontrada (DENTRO do layout, com a barra lateral). Numa
+   * moldura, o App escreve o caminho RELATIVO à rota-mãe (`index`, `previsoes`);
+   * aqui fica o endereço que a pessoa digita.
    */
   caminho: string
   guarda: Guarda
+  /**
+   * A moldura em volta da tela, quando há. Não muda a tela nem o guarda — só o
+   * que se desenha em volta dela.
+   */
+  moldura?: Moldura
 }
 
 /**
@@ -83,13 +109,39 @@ export const ROTAS: readonly Rota[] = [
   // histórico leva ao início.
   { caminho: '/estrategica', guarda: 'sessao', redireciona: INICIO },
 
-  // Quadro Econômico (as rotas seguem em /inteligencia)
-  { caminho: '/inteligencia', guarda: 'sessao', tela: 'inteligencia/VisaoGeral' },
-  { caminho: '/inteligencia/performance', guarda: 'sessao', tela: 'inteligencia/Performance' },
-  { caminho: '/inteligencia/previsoes', guarda: 'sessao', tela: 'inteligencia/Previsoes' },
-  { caminho: '/inteligencia/recortes', guarda: 'sessao', tela: 'inteligencia/Recortes' },
+  // Quadro econômico (as rotas seguem em /inteligencia): as cinco abas da
+  // moldura, na ordem das abas.
+  {
+    caminho: '/inteligencia',
+    guarda: 'sessao',
+    tela: 'inteligencia/VisaoGeral',
+    moldura: 'inteligencia/Moldura',
+  },
+  {
+    caminho: '/inteligencia/previsoes',
+    guarda: 'sessao',
+    tela: 'inteligencia/Previsoes',
+    moldura: 'inteligencia/Moldura',
+  },
+  {
+    caminho: '/inteligencia/performance',
+    guarda: 'sessao',
+    tela: 'inteligencia/Performance',
+    moldura: 'inteligencia/Moldura',
+  },
+  {
+    caminho: '/inteligencia/recortes',
+    guarda: 'sessao',
+    tela: 'inteligencia/Recortes',
+    moldura: 'inteligencia/Moldura',
+  },
   // O módulo continua em pages/comercial; só o endereço mudou de setor.
-  { caminho: '/inteligencia/carteiras', guarda: 'sessao', tela: 'comercial/CarteirasInvestidores' },
+  {
+    caminho: '/inteligencia/carteiras',
+    guarda: 'sessao',
+    tela: 'comercial/CarteirasInvestidores',
+    moldura: 'inteligencia/Moldura',
+  },
 
   // Comercial
   { caminho: '/comercial/contratos', guarda: 'sessao', tela: 'comercial/GeracaoContratos' },

@@ -65,7 +65,9 @@ export default function Performance() {
 
   return (
     <div className="space-y-6">
+      {/* h2: o h1 da tela é o "Quadro econômico" da moldura (Moldura.tsx). */}
       <PageHeader
+        nivel={2}
         title="Performance"
         description={
           `${carteira.n} operações encerradas — status encerrado, com data de aquisição, ` +
