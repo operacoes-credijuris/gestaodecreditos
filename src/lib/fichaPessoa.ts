@@ -9,7 +9,7 @@
 //
 // Só `import type` de queries.ts: o valor de lá puxa o cliente do Supabase, e
 // esta função tem de rodar no teste sem rede.
-import { compilarEndereco, ehCnpj } from './format'
+import { compilarEndereco, ehCnpj, normalizarNome } from './format'
 import type { InvestidorDados, TipoPessoa } from './queries'
 
 /** Os campos que a ficha edita. São as chaves do formulário da tela. */
@@ -28,6 +28,49 @@ export type CampoPessoa =
   | 'cidade'
   | 'uf'
   | 'cep'
+
+/**
+ * A chave da linha que o Salvar grava.
+ *
+ * NO CADASTRO NOVO ela sai do NOME, que é digitado agora e é ele que identifica
+ * a pessoa no banco. NA FICHA QUE JÁ EXISTE, é a chave da LINHA ABERTA — o nome
+ * ali é fixo na tela. Recalculada do nome exibido, ela divergia da guardada
+ * sempre que o nome_chave não fosse o nome normalizado (ficha inserida direto
+ * no banco, normalização antiga), e o Salvar criava OUTRA linha, sem gênero,
+ * qualificação nem endereço antigo, deixando a original órfã. Decisão do dono
+ * (02/10/2026).
+ */
+export function chaveDaFicha(janela: { novo: boolean; chave: string; nome: string }): string {
+  return janela.novo ? normalizarNome(janela.nome.trim()) : janela.chave
+}
+
+/**
+ * O endereço em texto corrido que o Salvar grava — e que a prévia da tela mostra.
+ *
+ * O TEXTO ANTIGO SÓ CEDE A UM ENDEREÇO NOVO COM RUA E CIDADE. A ficha de quem
+ * só tem o endereço legado em texto corrido perdia o endereço inteiro quando
+ * alguém preenchia uma parte só — o CEP, por exemplo — e salvava: o texto
+ * gravado virava "CEP 30140-071", e é ele que vai para o contrato. Decisão do
+ * dono (02/10/2026). As partes digitadas são gravadas mesmo assim, nas colunas
+ * delas; só o texto corrido espera o endereço novo ficar utilizável.
+ *
+ * `mantemAntigo` diz à tela que o texto mostrado é o antigo, para ela explicar.
+ */
+export function enderecoDaFicha(
+  form: Pick<Record<CampoPessoa, string>, 'logradouro' | 'numero' | 'complemento' | 'bairro' | 'cidade' | 'uf' | 'cep'>,
+  antigo: string | null | undefined,
+): { texto: string | null; mantemAntigo: boolean } {
+  const compilado = compilarEndereco(form).trim() || null
+  const temAntigo = Boolean(antigo?.trim())
+  // Partes vazias NÃO apagam o texto legado: quem abre a ficha de alguém que só
+  // tem o endereço antigo em texto corrido, mexe no Pix e salva, perderia o
+  // endereço.
+  if (!compilado) return { texto: antigo ?? null, mantemAntigo: temAntigo }
+  if (temAntigo && !(form.logradouro.trim() && form.cidade.trim())) {
+    return { texto: antigo ?? null, mantemAntigo: true }
+  }
+  return { texto: compilado, mantemAntigo: false }
+}
 
 /**
  * A linha que o Salvar grava.
@@ -55,7 +98,6 @@ export function montarFichaPessoa({
   // Campo em branco vira null, não string vazia: no banco "não informado" é
   // ausência de valor, e "" faria a célula parecer preenchida com nada.
   const vazioNull = (s: string) => (s.trim() ? s.trim() : null)
-  const compilado = vazioNull(compilarEndereco(form))
   return {
     tipo,
     nome_chave: chave,
@@ -80,12 +122,9 @@ export function montarFichaPessoa({
     uf: vazioNull(form.uf),
     cep: vazioNull(form.cep),
     // O texto corrido é derivado das partes e gravado junto, para quem lê a
-    // tabela direto no banco ver o endereço pronto.
-    //
-    // Partes vazias NÃO apagam o texto legado: quem abre a ficha de alguém que
-    // só tem o endereço antigo em texto corrido, mexe no Pix e salva, perderia
-    // o endereço.
-    endereco: compilado ?? anterior?.endereco ?? null,
+    // tabela direto no banco ver o endereço pronto — com a regra do texto
+    // legado de `enderecoDaFicha`.
+    endereco: enderecoDaFicha(form, anterior?.endereco).texto,
     // Sem campo próprio nesta tela ainda (usados só na geração de contratos,
     // preenchidos direto no banco por enquanto) — preserva o que já estava
     // na ficha, mesmo raciocínio do endereço legado acima.
