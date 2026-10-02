@@ -187,8 +187,12 @@ function GerarPanel() {
     setTiposEscolhidos(new Set())
   }
 
+  // ESCOLHA À MÃO SEM PEÇA NENHUMA não pode ir: a função lê lista vazia como
+  // "escolha automática" e gerava as peças da análise — o contrário do que a
+  // pessoa pediu ao desmarcar a caixa.
+  const semPecaEscolhida = !tiposAuto && tiposEscolhidos.size === 0
   const podeSubmeter =
-    !enviando && !!investidorNome && !!originador && !!numeroProcesso.trim()
+    !enviando && !!investidorNome && !!originador && !!numeroProcesso.trim() && !semPecaEscolhida
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -298,10 +302,22 @@ function GerarPanel() {
                     </option>
                   ))}
                 </Select>
-                {investidores.length === 0 && !investidorDados.isLoading && (
-                  <p className="mt-1 text-xs text-slate-500">
-                    Nenhum investidor cadastrado — cadastre em "Dados pessoais e bancários".
+                {/* FALHA NÃO É LISTA VAZIA: dizer "nenhum investidor cadastrado"
+                    quando a leitura falhou mandava a pessoa cadastrar de novo quem
+                    já tem ficha. */}
+                {investidorDados.isError ? (
+                  <p className="mt-1 text-xs text-red-700">
+                    Não consegui carregar os investidores: {(investidorDados.error as Error)?.message ?? 'erro desconhecido'}.{' '}
+                    <button type="button" className="underline" onClick={() => investidorDados.refetch()}>
+                      Tentar de novo
+                    </button>
                   </p>
+                ) : (
+                  investidores.length === 0 && !investidorDados.isLoading && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Nenhum investidor cadastrado — cadastre em "Dados pessoais e bancários".
+                    </p>
+                  )
                 )}
               </Field>
 
@@ -397,6 +413,11 @@ function GerarPanel() {
                     </label>
                   ))}
                 </div>
+              )}
+              {semPecaEscolhida && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Marque ao menos uma peça — ou volte a marcar "Escolher automaticamente".
+                </p>
               )}
           </Secao>
 

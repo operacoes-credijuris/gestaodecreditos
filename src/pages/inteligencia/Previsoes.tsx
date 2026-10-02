@@ -22,7 +22,7 @@ import { formatBRL, formatCNJ, formatDate } from '@/lib/format'
 import type { OperacaoAnalitica } from '../../../supabase/functions/_shared/nucleo/tipos.ts'
 import {
   usePainel, CarregandoPainel, LinhaMetrica, SeloAmostra,
-  brl, dias, EXPLICA,
+  brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
 
 function rotuloMes(iso: string): string {
@@ -167,6 +167,7 @@ export default function Previsoes() {
             : 'Valor nominal previsto por mês.'
         }
       />
+      <AvisoParametros />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard

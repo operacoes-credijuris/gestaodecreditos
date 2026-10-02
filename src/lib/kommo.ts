@@ -347,10 +347,11 @@ export const TELAS: DefTela[] = [
   {
     key: 'pendentes',
     // AS CHAVES SÃO HISTÓRICAS, os rótulos não. 'pendentes' e 'validacao' são o
-    // que a tela guarda e o que vai na URL; o que se lê mudou para o vocabulário
-    // que a operação usa hoje, o mesmo das duas trilhas do Precatório — em
-    // análise, depois revisão. Renomear as chaves quebraria link salvo sem
-    // devolver nada em troca.
+    // que a tela guarda (no estado da página — hoje nada disso vai na URL) e o
+    // que o resto do código compara; o que se lê mudou para o vocabulário que a
+    // operação usa hoje, o mesmo das duas trilhas do Precatório — em análise,
+    // depois revisão. Manter as chaves deixa pronto o dia em que a aba for para a
+    // URL, sem renomear nada.
     label: 'Análise',
     statusId: ST_ANALISE,
     descricaoVazia:

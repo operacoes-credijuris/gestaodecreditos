@@ -19,7 +19,7 @@ import { ErrorState } from '@/components/ui/Table'
 import { formatDate } from '@/lib/format'
 import {
   usePainel, CarregandoPainel, Ressalva, LinhaMetrica, SeloAmostra,
-  pct, brl, dias, EXPLICA,
+  pct, brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
 
 export default function VisaoGeral() {
@@ -53,6 +53,7 @@ export default function VisaoGeral() {
           `parâmetros de correção com data-base ${formatDate(painel.parametrosEm)}`
         }
       />
+      <AvisoParametros />
 
       {conc?.concentrada && (
         <Ressalva>

@@ -1563,7 +1563,11 @@ Deno.serve(async (req) => {
     }
     const inv = {
       nome: invRow.nome_exibicao || investidorNome,
-      cpf: invRow.documento,
+      // A COLUNA É `cpf` (0023_investidor_dados.sql): ela guarda CPF ou CNPJ.
+      // `documento` é da tabela antiga `investidores` e não existe aqui — lido
+      // dela, o documento do investidor nunca chegava ao contrato, e a
+      // qualificação de pessoa jurídica (14 dígitos) também não.
+      cpf: invRow.cpf ?? null,
       rg: invRow.rg,
       endereco: compilarEnderecoInvestidor(invRow),
       banco: invRow.banco,

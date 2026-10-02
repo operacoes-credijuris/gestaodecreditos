@@ -236,7 +236,9 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({
       ok: true,
       aviso: avisoNota,
-      mensagem: avisoNota ?? `Card movido para "${COLUNAS[statusId]}".`,
+      // O NOME QUE AUTORIZOU O MOVIMENTO: `COLUNAS` só tem as colunas do RPV, e
+      // no Precatório a mensagem saía como `Card movido para "undefined".`
+      mensagem: avisoNota ?? `Card movido para "${nomeDoDestino}".`,
     })
   } catch (err) {
     return jsonResponse({ error: (err as Error).message }, 500)

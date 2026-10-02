@@ -59,25 +59,53 @@ import {
 import type { KommoLead } from '@/lib/types'
 
 /**
- * As colunas do funil NOVO do Interno, como o Kommo as devolveu.
+ * As colunas do funil do Interno, como o Kommo as devolveu em 01/10/2026 — na
+ * ordem do kanban e com os nomes de lá.
  *
- * EM CAIXA ALTA PORQUE É ASSIM QUE ESTÃO LÁ. A etapa de entrada, "FECHADOS" e
- * "FORMALIZAÇÃO (CONTRATOS E ESCRITURA)" existem no kanban e NÃO viram aba, por
- * decisão de quem opera — são etapas do comercial. Ficam no espelho de propósito:
- * é o que garante que a ausência delas na tela se leia como escolha, e não como
- * coluna perdida no remapeamento.
+ * O KOMMO RENOMEOU AS COLUNAS SEM MUDAR O ID: "REVISÃO DA ANÁLISE" virou "Revisão"
+ * e "PROTOCOLAR" virou "Protocolo". Enquanto o Interno se ligava só pelo nome,
+ * essa troca deixou as abas Revisão e p/ Protocolo sem coluna; desde 02/10/2026
+ * ele se liga pelo id, como o Externo (ver `IDS_INTERNO`).
+ *
+ * As colunas do comercial (negociação, fechados, oferta, escritura, pagamento,
+ * sem resposta, não fechados) existem no kanban e NÃO viram aba, por decisão de
+ * quem opera. Ficam no espelho de propósito: é o que garante que a ausência delas
+ * na tela se leia como escolha, e não como coluna perdida no remapeamento.
  */
 const COLUNAS_INTERNO = [
   'Etapa de leads de entrada',
-  'ANÁLISE JURÍDICA E ECONÔMICA',
-  'REVISÃO DA ANÁLISE',
-  'PRODUÇÃO DE PROPOSTA',
-  'FECHADOS',
-  'FORMALIZAÇÃO (CONTRATOS E ESCRITURA)',
-  'DILIGÊNCIA',
-  'REPROVADOS',
-  'PROTOCOLAR',
+  'Análise jurídica e econômica',
+  'Revisão',
+  'Diligência',
+  'Produção de proposta',
+  'Negociação',
+  'Fechados',
+  'Oferta aos investidores',
+  'Escritura pública',
+  'Protocolo',
+  'Pagamento finalizado',
+  'Reprovados',
+  'Sem resposta',
+  'Não fechados',
 ]
+
+/** OS IDS REAIS do funil do Interno, lidos do kommo_etapa em 01/10/2026. */
+const IDS_INTERNO: Record<string, number> = {
+  'Etapa de leads de entrada': 111533936,
+  'Análise jurídica e econômica': 111533940,
+  'Revisão': 111533944,
+  'Diligência': 111533960,
+  'Produção de proposta': 111533948,
+  'Negociação': 112466260,
+  'Fechados': 111533952,
+  'Oferta aos investidores': 112466032,
+  'Escritura pública': 111533956,
+  'Protocolo': 111693840,
+  'Pagamento finalizado': 112466340,
+  'Reprovados': 111534108,
+  'Sem resposta': 112465960,
+  'Não fechados': 112382612,
+}
 
 /**
  * As colunas do funil do Externo, como o Kommo as devolveu em 29/09/2026 — na
@@ -142,6 +170,17 @@ const colunasExterno = (nomes: string[], renomear: Record<string, string> = {}):
     tipo: nome === 'Etapa de leads de entrada' ? 1 : 0,
   }))
 
+/** O espelho do Interno com os ids reais — e com nomes trocados, quando se quer. */
+const colunasInterno = (nomes: string[], renomear: Record<string, string> = {}): EtapaKommo[] =>
+  nomes.map((nome, i) => ({
+    pipeline_id: FUNIL_PRECATORIO,
+    status_id: IDS_INTERNO[nome] ?? 96_000 + i,
+    pipeline_nome: 'Funil Precatório Interno',
+    nome: renomear[nome] ?? nome,
+    ordem: i,
+    tipo: nome === 'Etapa de leads de entrada' ? 1 : 0,
+  }))
+
 /** As colunas de sistema que todo funil do Kommo tem. */
 const DE_SISTEMA = (pipelineId: number): EtapaKommo[] => [
   { pipeline_id: pipelineId, status_id: 142, pipeline_nome: null, nome: 'Closed - won', ordem: 10000, tipo: 0 },
@@ -164,7 +203,7 @@ const espelho = (
   internas: string[] = COLUNAS_INTERNO,
   externas: string[] = COLUNAS_EXTERNO,
 ): EtapaKommo[] => [
-  ...colunasDe(FUNIL_PRECATORIO, internas, 90_000),
+  ...colunasInterno(internas),
   ...colunasExterno(externas),
   ...DE_SISTEMA(FUNIL_PRECATORIO_EXTERNO),
 ]
@@ -292,12 +331,12 @@ describe('abas do Interno', () => {
 
   it('cada rótulo resolve para a coluna certa do funil novo', () => {
     const porLabel = new Map(abas.map((a) => [a.label, a.statusIds[0]]))
-    expect(porLabel.get('Análise')).toBe(idDe('ANÁLISE JURÍDICA E ECONÔMICA'))
-    expect(porLabel.get('Revisão')).toBe(idDe('REVISÃO DA ANÁLISE'))
-    expect(porLabel.get('Aprovados')).toBe(idDe('PRODUÇÃO DE PROPOSTA'))
-    expect(porLabel.get('Diligência')).toBe(idDe('DILIGÊNCIA'))
-    expect(porLabel.get('Reprovados')).toBe(idDe('REPROVADOS'))
-    expect(porLabel.get('p/ Protocolo')).toBe(idDe('PROTOCOLAR'))
+    expect(porLabel.get('Análise')).toBe(idDe('Análise jurídica e econômica'))
+    expect(porLabel.get('Revisão')).toBe(idDe('Revisão'))
+    expect(porLabel.get('Aprovados')).toBe(idDe('Produção de proposta'))
+    expect(porLabel.get('Diligência')).toBe(idDe('Diligência'))
+    expect(porLabel.get('Reprovados')).toBe(idDe('Reprovados'))
+    expect(porLabel.get('p/ Protocolo')).toBe(idDe('Protocolo'))
   })
 
   /**
@@ -323,13 +362,13 @@ describe('abas do Interno', () => {
     const daAnalise = emAnalise.acoes.find((x) => x.papel === 'aprovar')!
     expect(daAnalise.label).toBe('Enviar para revisão')
     expect(daAnalise.variant).toBe('secondary')
-    expect(daAnalise.statusId).toBe(idDe('REVISÃO DA ANÁLISE'))
+    expect(daAnalise.statusId).toBe(idDe('Revisão'))
 
     const revisao = abas.find((a) => a.label === 'Revisão')!
     const daRevisao = revisao.acoes.find((x) => x.papel === 'aprovar')!
     expect(daRevisao.label).toBe('Aprovar crédito')
     expect(daRevisao.variant).toBe('primary')
-    expect(daRevisao.statusId).toBe(idDe('PRODUÇÃO DE PROPOSTA'))
+    expect(daRevisao.statusId).toBe(idDe('Produção de proposta'))
   })
 
   it('as duas abas de decisão também interrompem', () => {
@@ -341,10 +380,10 @@ describe('abas do Interno', () => {
         'reprovar',
       ])
       expect(aba.acoes.find((x) => x.papel === 'diligenciar')!.statusId, label).toBe(
-        idDe('DILIGÊNCIA'),
+        idDe('Diligência'),
       )
       expect(aba.acoes.find((x) => x.papel === 'reprovar')!.statusId, label).toBe(
-        idDe('REPROVADOS'),
+        idDe('Reprovados'),
       )
       // A janela de Concluir é o único lugar onde a anotação que vai para o
       // Kommo é escrita ANTES de o card se mover.
@@ -365,7 +404,7 @@ describe('abas do Interno', () => {
   // O ID VEM DO ESPELHO, e coluna que ele não tem não vira botão: melhor a aba
   // sem desfecho do que um botão que move o card para lugar nenhum.
   it('sem a coluna no kanban, o botão não aparece', () => {
-    const semReprovados = espelho(COLUNAS_INTERNO.filter((n) => n !== 'REPROVADOS'))
+    const semReprovados = espelho(COLUNAS_INTERNO.filter((n) => n !== 'Reprovados'))
     const emAnalise = abasDoFunil(FUNIL_PRECATORIO, semReprovados, 'interno').find(
       (a) => a.label === 'Análise',
     )!
@@ -373,12 +412,18 @@ describe('abas do Interno', () => {
   })
 
   // AS COLUNAS DO COMERCIAL FICAM FORA, e a ausência é escolha de quem opera:
-  // fechados, formalização e a etapa de entrada existem no kanban e não são
-  // trabalho do operacional.
+  // negociação, fechados, oferta, escritura, pagamento, sem resposta, não
+  // fechados e a etapa de entrada existem no kanban e não são trabalho do
+  // operacional.
   it('as colunas do comercial não viram aba', () => {
     for (const fora of [
-      'FECHADOS',
-      'FORMALIZAÇÃO (CONTRATOS E ESCRITURA)',
+      'Negociação',
+      'Fechados',
+      'Oferta aos investidores',
+      'Escritura pública',
+      'Pagamento finalizado',
+      'Sem resposta',
+      'Não fechados',
       'Etapa de leads de entrada',
     ]) {
       expect(abas.some((a) => a.statusIds[0] === idDe(fora)), fora).toBe(false)
@@ -460,7 +505,7 @@ describe('destinos que o servidor aceita', () => {
   // comercial. A lista é de desfechos, e só.
   it('não aceita coluna que não é desfecho', () => {
     const permitidos = destinosDaTrilha(FUNIL_PRECATORIO).map(normalizarBusca)
-    for (const fora of ['FECHADOS', 'PROTOCOLAR', 'Etapa de leads de entrada']) {
+    for (const fora of ['Fechados', 'Protocolo', 'Negociação', 'Etapa de leads de entrada']) {
       expect(permitidos, fora).not.toContain(normalizarBusca(fora))
     }
   })
@@ -857,21 +902,53 @@ describe('as duas trilhas não dividem mais nenhuma coluna', () => {
 })
 
 describe('coluna renomeada no Kommo', () => {
-  // O modo de falha do vínculo por nome, e o que impede que ele passe calado.
-  const renomeado = espelho(
-    COLUNAS_INTERNO.map((n) => (n === 'REVISÃO DA ANÁLISE' ? 'REVISÃO DA ANALISE FEITA' : n)),
-  )
+  /**
+   * RENOMEAR NO KOMMO NÃO TIRA A COLUNA DO INTERNO (02/10/2026). Foi exatamente o
+   * que aconteceu: "REVISÃO DA ANÁLISE" virou "Revisão" e "PROTOCOLAR" virou
+   * "Protocolo", e com o vínculo só pelo nome as duas abas ficaram vazias, o
+   * "Enviar para revisão" sumiu e o servidor recusava o destino.
+   */
+  it('renomear no Kommo não tira a coluna do Interno', () => {
+    const renomeado = [
+      ...colunasInterno(COLUNAS_INTERNO, { 'Revisão': 'Segunda leitura', 'Protocolo': 'A protocolar' }),
+      ...colunasExterno(COLUNAS_EXTERNO),
+      ...DE_SISTEMA(FUNIL_PRECATORIO_EXTERNO),
+    ]
+    expect(colunasPrecatorioDesalinhadas(renomeado, 'interno')).toEqual([])
+    const abas = abasDoFunil(FUNIL_PRECATORIO, renomeado, 'interno')
+    expect(abas.find((a) => a.label === 'Revisão')!.statusIds).toEqual([IDS_INTERNO['Revisão']])
+    expect(abas.find((a) => a.label === 'p/ Protocolo')!.statusIds).toEqual([IDS_INTERNO['Protocolo']])
+    const emAnalise = abas.find((a) => a.label === 'Análise')!
+    expect(emAnalise.acoes.find((x) => x.papel === 'aprovar')!.statusId).toBe(IDS_INTERNO['Revisão'])
+  })
+
+  it('o servidor aceita o destino renomeado, pelo id', () => {
+    expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Revisão'], 'Segunda leitura')).toBe(true)
+    expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Produção de proposta'], 'Proposta ao cedente')).toBe(true)
+    // E continua recusando coluna do comercial, com qualquer nome.
+    expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Fechados'], 'Fechados')).toBe(false)
+    expect(destinoPermitido(FUNIL_PRECATORIO, IDS_INTERNO['Protocolo'], 'Protocolo')).toBe(false)
+  })
+
+  // O MODO DE FALHA QUE SOBRA: coluna APAGADA E RECRIADA no Kommo ganha id novo,
+  // e se vier com outro nome nada a liga. Isso tem de ser denunciado, não calado.
+  const recriado = [
+    ...colunasInterno(COLUNAS_INTERNO.filter((n) => n !== 'Revisão')),
+    { pipeline_id: FUNIL_PRECATORIO, status_id: 99_999, pipeline_nome: 'Funil Precatório Interno', nome: 'Revisão da análise feita', ordem: 99, tipo: 0 },
+    ...colunasExterno(COLUNAS_EXTERNO),
+    ...DE_SISTEMA(FUNIL_PRECATORIO_EXTERNO),
+  ]
 
   it('é denunciada, com o nome que se esperava', () => {
-    const faltando = colunasPrecatorioDesalinhadas(renomeado, 'interno')
-    expect(faltando.map((a) => a.colunaKommo)).toEqual(['REVISÃO DA ANÁLISE'])
+    const faltando = colunasPrecatorioDesalinhadas(recriado, 'interno')
+    expect(faltando.map((a) => a.colunaKommo)).toEqual(['REVISÃO'])
     expect(faltando.map((a) => a.label)).toEqual(['Revisão'])
   })
 
   it('deixa a aba na tela, vazia, em vez de sumir com ela', () => {
     // Sumir com a aba esconderia o defeito: a pessoa veria cinco abas onde a
     // regra diz seis e não teria como saber qual faltou.
-    const abas = abasDoFunil(FUNIL_PRECATORIO, renomeado, 'interno')
+    const abas = abasDoFunil(FUNIL_PRECATORIO, recriado, 'interno')
     expect(abas).toHaveLength(6)
     expect(abas.find((a) => a.label === 'Revisão')!.statusIds).toEqual([])
   })
@@ -905,12 +982,18 @@ describe('coluna renomeada no Kommo', () => {
 })
 
 describe('acento, caixa e espaço não quebram o casamento', () => {
+  // PELO NOME DE RESERVA: ids que o espelho não conhece forçam o casamento pelo
+  // nome, que tem de tolerar acento, caixa e espaço sobrando.
   it('casa a coluna escrita sem acento e em caixa alta', () => {
-    const torto = espelho(
-      COLUNAS_INTERNO.map((n) =>
-        n === 'Análise Jurídica (TIER 1)' ? 'ANALISE  JURIDICA (TIER 1)' : n,
+    const torto = [
+      ...colunasDe(
+        FUNIL_PRECATORIO,
+        COLUNAS_INTERNO.map((n) => (n === 'Análise jurídica e econômica' ? 'ANALISE  JURIDICA E ECONOMICA ' : n === 'Revisão' ? 'REVISAO' : n)),
+        90_000,
       ),
-    )
+      ...colunasExterno(COLUNAS_EXTERNO),
+      ...DE_SISTEMA(FUNIL_PRECATORIO_EXTERNO),
+    ]
     expect(colunasPrecatorioDesalinhadas(torto, 'interno')).toEqual([])
   })
 
@@ -934,9 +1017,9 @@ describe('cards fora das trilhas', () => {
     const abas = abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno')
     const { porAba, outras } = agruparPorAba(
       [
-        lead(idDe('ANÁLISE JURÍDICA E ECONÔMICA', etapas), 1),
-        lead(idDe('FECHADOS', etapas), 2),
-        lead(idDe('FORMALIZAÇÃO (CONTRATOS E ESCRITURA)', etapas), 3),
+        lead(idDe('Análise jurídica e econômica', etapas), 1),
+        lead(idDe('Fechados', etapas), 2),
+        lead(idDe('Escritura pública', etapas), 3),
       ],
       abas,
     )
@@ -959,7 +1042,7 @@ describe('cards fora das trilhas', () => {
 describe('a ordem dentro da coluna', () => {
   const etapas = espelho()
   const abas = abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno')
-  const juridico = idDe('ANÁLISE JURÍDICA E ECONÔMICA', etapas)
+  const juridico = idDe('Análise jurídica e econômica', etapas)
   const naColuna = (
     id: number,
     etapa_em: string | null,
@@ -1051,8 +1134,8 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     // total de cima nunca fechava com a soma das pílulas de baixo.
     const etapas = espelho()
     const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
-    expect(ids.has(idDe('FECHADOS', etapas))).toBe(false)
-    expect(ids.has(idDe('FORMALIZAÇÃO (CONTRATOS E ESCRITURA)', etapas))).toBe(false)
+    expect(ids.has(idDe('Fechados', etapas))).toBe(false)
+    expect(ids.has(idDe('Escritura pública', etapas))).toBe(false)
     expect(ids.has(idDe('Etapa de leads de entrada', etapas))).toBe(false)
     // NO EXTERNO O KANBAN É ESPELHADO INTEIRO, menos a entrada e as de sistema.
     expect(ids.has(idExt('Etapa de leads de entrada', etapas))).toBe(false)
@@ -1066,12 +1149,12 @@ describe('statusExibidos — o número ao lado do tipo de crédito', () => {
     // servia às duas e era contada duas vezes.
     const etapas = espelho()
     const leads = [
-      lead(idDe('ANÁLISE JURÍDICA E ECONÔMICA', etapas), 1),
-      lead(idDe('REVISÃO DA ANÁLISE', etapas), 2),
+      lead(idDe('Análise jurídica e econômica', etapas), 1),
+      lead(idDe('Revisão', etapas), 2),
       lead(idExt('QUALIFICAÇÃO PRELIMINAR', etapas), 3, FUNIL_PRECATORIO_EXTERNO),
       lead(idExt('FECHADOS', etapas), 4, FUNIL_PRECATORIO_EXTERNO),
-      // Formalização é coluna do comercial: fora das trilhas, não conta.
-      lead(idDe('FORMALIZAÇÃO (CONTRATOS E ESCRITURA)', etapas), 5),
+      // Escritura pública é coluna do comercial: fora das trilhas, não conta.
+      lead(idDe('Escritura pública', etapas), 5),
     ]
     const ids = statusExibidos(FUNIL_PRECATORIO, etapas)
     expect(leads.filter((l) => ids.has(l.status_id)).length).toBe(4)
@@ -1232,7 +1315,7 @@ describe('acaoDeReprovar', () => {
    */
   it('no interno, resolve a coluna pelo nome no espelho', () => {
     const a = acaoDeReprovar(FUNIL_PRECATORIO, espelho())
-    expect(a?.statusId).toBe(idDe('REPROVADOS'))
+    expect(a?.statusId).toBe(idDe('Reprovados'))
     expect(a?.papel).toBe('reprovar')
   })
 
@@ -1255,7 +1338,7 @@ describe('acaoDeReprovar', () => {
   // Sem a coluna no espelho não há botão: melhor a janela sem recusa do que um
   // botão que move o card para lugar nenhum.
   it('sem a coluna no kanban, não há ação', () => {
-    const sem = espelho(COLUNAS_INTERNO.filter((n) => n !== 'REPROVADOS'))
+    const sem = espelho(COLUNAS_INTERNO.filter((n) => n !== 'Reprovados'))
     expect(acaoDeReprovar(FUNIL_PRECATORIO, sem)).toBeNull()
     expect(acaoDeReprovar(FUNIL_PRECATORIO, [])).toBeNull()
     expect(acaoDeReprovar(FUNIL_PRECATORIO_EXTERNO, [])).toBeNull()

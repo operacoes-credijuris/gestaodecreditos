@@ -325,6 +325,14 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     // "REPROVADOS", e não "Reprovados Operacional": o funil novo encurtou o
     // nome. Os dois funis novos usam o mesmo, e o antigo já não é lido.
     colunaReprovados: 'REPROVADOS',
+    // OS IDS DO KANBAN, como no Externo, desde 02/10/2026. Até então o Interno se
+    // ligava só pelo NOME, e o Kommo renomeou "REVISÃO DA ANÁLISE" para "Revisão"
+    // e "PROTOCOLAR" para "Protocolo": as abas Revisão e p/ Protocolo ficaram sem
+    // coluna, o "Concluir" da Análise perdeu o "Enviar para revisão" e o servidor
+    // recusava esse destino. Os ids não mudaram com a troca de nome (conferido nas
+    // duas consultas ao kommo_etapa que o dono mandou); o nome fica de reserva.
+    idDiligencia: 111533960,
+    idReprovados: 111534108,
     abas: [
       {
         key: ABA_ANALISE_INTERNA,
@@ -332,24 +340,26 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // ECONÔMICA": o rótulo da plataforma nomeia a etapa, o nome do kanban
         // descreve o trabalho que acontece nela.
         label: 'Análise',
-        colunaKommo: 'ANÁLISE JURÍDICA E ECONÔMICA',
+        // A PRIMEIRA ABA É A ENTRADA DO FUNIL: é nela que o Escavador busca os autos
+        // sozinho (ver `colunasDeEntradaDoPrecatorio`). Não mudar a ordem.
+        colunaKommo: 'ANÁLISE JURÍDICA E ECONÔMICA', statusId: 111533940,
         descricaoVazia: 'Nenhum precatório em análise.',
         // APROVAR AQUI É PEDIR REVISÃO, e não aprovar o crédito. Quem trabalha
         // nesta etapa são os analistas; a decisão é de quem revisa. Recusar e
         // exigir diligência passam direto — não precisam de segunda leitura.
         saidas: [
-          { colunaKommo: 'REVISÃO DA ANÁLISE', label: 'Enviar para revisão', variant: 'secondary' },
+          { colunaKommo: 'REVISÃO', statusId: 111533944, label: 'Enviar para revisão', variant: 'secondary' },
         ],
       },
       {
         key: 'int-revisao',
         label: 'Revisão',
-        colunaKommo: 'REVISÃO DA ANÁLISE',
+        colunaKommo: 'REVISÃO', statusId: 111533944,
         descricaoVazia: 'Nenhuma análise aguardando revisão.',
         // AQUI A APROVAÇÃO É DE VERDADE: é a segunda leitura, feita por quem
         // decide, e o crédito segue para a produção da proposta.
         saidas: [
-          { colunaKommo: 'PRODUÇÃO DE PROPOSTA', label: 'Aprovar crédito', variant: 'primary' },
+          { colunaKommo: 'PRODUÇÃO DE PROPOSTA', statusId: 111533948, label: 'Aprovar crédito', variant: 'primary' },
         ],
       },
       {
@@ -359,33 +369,34 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // analisa: o que o ato significa para a casa é uma aprovação. O nome do
         // kanban é o do comercial e diz o que acontece DEPOIS.
         label: 'Aprovados',
-        colunaKommo: 'PRODUÇÃO DE PROPOSTA',
+        colunaKommo: 'PRODUÇÃO DE PROPOSTA', statusId: 111533948,
         descricaoVazia: 'Nenhum precatório aprovado.',
       },
       {
         key: 'int-diligencia',
         label: 'Diligência',
-        colunaKommo: 'DILIGÊNCIA',
+        colunaKommo: 'DILIGÊNCIA', statusId: 111533960,
         descricaoVazia: 'Nenhum precatório interno em diligência.',
       },
       {
         key: 'int-reprovados',
         label: 'Reprovados',
-        colunaKommo: 'REPROVADOS',
+        colunaKommo: 'REPROVADOS', statusId: 111534108,
         descricaoVazia: 'Nenhum precatório interno reprovado.',
       },
       {
         key: 'int-protocolo',
         label: 'p/ Protocolo',
-        colunaKommo: 'PROTOCOLAR',
+        colunaKommo: 'PROTOCOLO', statusId: 111693840,
         descricaoVazia: 'Nenhum precatório aguardando protocolo.',
       },
     ],
-    // FORA DA TELA, por decisão de quem opera: "Etapa de leads de entrada",
-    // "FECHADOS" e "FORMALIZAÇÃO (CONTRATOS E ESCRITURA)" existem no kanban e não
-    // viram aba — são etapas do comercial, não do operacional. Ficam registradas
-    // aqui para que a ausência se leia como escolha, e não como coluna esquecida
-    // no remapeamento.
+    // FORA DA TELA, por decisão de quem opera: a etapa de entrada e as colunas do
+    // comercial (em 01/10/2026: Negociação, Fechados, Oferta aos investidores,
+    // Escritura pública, Pagamento finalizado, Sem resposta, Não fechados) existem
+    // no kanban e não viram aba — são etapas do comercial, não do operacional.
+    // Ficam registradas aqui para que a ausência se leia como escolha, e não como
+    // coluna esquecida no remapeamento.
   },
   {
     key: 'externo',

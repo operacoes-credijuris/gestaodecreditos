@@ -12,7 +12,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { IconButton } from '@/components/ui/IconButton'
 import { Select, Input } from '@/components/ui/Field'
 import { DrawerSection } from '@/components/ui/Drawer'
-import { EmptyState, Loading, Table, THead, TH, TBody, TR, TD } from '@/components/ui/Table'
+import { EmptyState, ErrorState, Loading, Table, THead, TH, TBody, TR, TD } from '@/components/ui/Table'
 import { getLabel, FASE_PROCESSUAL, FASE_ATIVO_ORDEM, FASE_COMPLEMENTAR_ORDEM } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
 import type { Processo } from '@/lib/types'
@@ -616,6 +616,10 @@ export function FaseProcessual({
 
       {fase.isLoading ? (
         <Loading />
+      ) : fase.isError ? (
+        // SEM ISTO A FALHA VIRAVA ZERO: todas as fases com 0 crédito, que se lê
+        // como "não tem nada aqui", e não como "não consegui ler".
+        <ErrorState message={(fase.error as Error)?.message} onRetry={() => fase.refetch()} />
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">

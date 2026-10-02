@@ -163,6 +163,25 @@ export function BlocoGrupo({
   )
 }
 
+/**
+ * SEM OS PARÂMETROS, A CONTA SAI INCOMPLETA E CALADA. Se a leitura de
+ * `parametros_atualizacao` falha, o painel é montado sem SELIC e IPCA: os créditos
+ * corrigidos por eles ficam sem valor projetado e somem dos totais "a receber",
+ * sem nada na tela dizendo por quê. Esta faixa diz.
+ */
+export function AvisoParametros() {
+  const { error } = useParametrosAtualizacao()
+  if (!error) return null
+  return (
+    <Ressalva>
+      Não consegui ler os parâmetros de atualização (SELIC e IPCA):{' '}
+      {(error as Error)?.message ?? 'erro desconhecido'}. Os valores projetados dos créditos
+      corrigidos por esses índices ficam de fora até a leitura voltar — recarregue a página
+      ou confira em Carteiras de Investimento › Parâmetros de atualização.
+    </Ressalva>
+  )
+}
+
 /** Faixa de aviso metodológico. Não é erro — é contexto obrigatório. */
 export function Ressalva({ children }: { children: ReactNode }) {
   return (

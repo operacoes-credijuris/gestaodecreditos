@@ -597,7 +597,18 @@ export default function Requerimentos() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
-        message={`Excluir o requerimento ${toDelete?.numero_protocolo || ''}?`}
+        // A CASCATA NA PERGUNTA, como em Créditos: o banco apaga os apensos junto
+        // (0009_apensos.sql), e eles são cadastro manual. Sem o aviso, excluir um
+        // requerimento para recadastrá-lo levava os apensos embora em silêncio.
+        message={
+          toDelete && apensos.contagem(toDelete.id) > 0
+            ? `Excluir o requerimento ${toDelete.numero_protocolo || ''}? ${
+                apensos.contagem(toDelete.id) === 1
+                  ? 'O apenso vinculado será excluído também.'
+                  : `Os ${apensos.contagem(toDelete.id)} apensos vinculados serão excluídos também.`
+              }`
+            : `Excluir o requerimento ${toDelete?.numero_protocolo || ''}?`
+        }
         confirmLabel="Excluir"
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}

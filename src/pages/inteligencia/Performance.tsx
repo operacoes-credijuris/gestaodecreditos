@@ -19,7 +19,7 @@ import { Table, THead, TH, TBody, TR, TD, EmptyState, ErrorState } from '@/compo
 import { formatDate, formatCNJ } from '@/lib/format'
 import {
   usePainel, CarregandoPainel, Ressalva, LinhaMetrica, SeloAmostra, Explicacao,
-  pct, brl, dias, EXPLICA,
+  pct, brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
 
 type Visao = 'todas' | 'extremos'
@@ -74,6 +74,7 @@ export default function Performance() {
           'delas ainda não é conhecido.'
         }
       />
+      <AvisoParametros />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>

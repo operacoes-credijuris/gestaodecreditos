@@ -41,6 +41,13 @@ jobs:
 
       - run: npm ci
 
+      # OS TESTES ANTES DO BUILD: teste quebrado barra a publicação. Até
+      # 02/10/2026 o site subia só com o build — e o build passa com um teste
+      # vermelho, porque tipagem não confere regra de negócio (colunas do
+      # Kommo, destinos que o servidor aceita, contas da carteira).
+      - name: Testes
+        run: npm test
+
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}

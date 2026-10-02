@@ -13,9 +13,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 
+// `||`, e não `??`: variável DEFINIDA E VAZIA também cai no provisório. Com `??`
+// o texto vazio passava adiante, e o createClient derrubava o módulo ("supabaseUrl
+// is required") — junto com todo teste que importa algo que importa este arquivo.
 export const supabase = createClient(
-  supabaseUrl ?? 'https://placeholder.supabase.co',
-  supabaseAnonKey ?? 'placeholder-anon-key',
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-anon-key',
   {
     auth: {
       persistSession: true,

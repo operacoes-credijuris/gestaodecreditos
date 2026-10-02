@@ -21,6 +21,10 @@ function LeafLink({
   return (
     <NavLink
       to={to}
+      // SÓ O ENDEREÇO EXATO ACENDE O ITEM: sem o `end`, "Visão Geral"
+      // (/inteligencia) ficava aceso junto com Performance, Previsões, Recortes e
+      // Carteiras, que moram embaixo dele — dois itens marcados ao mesmo tempo.
+      end
       onClick={onNavigate}
       className={({ isActive }) =>
         cn(

@@ -20,7 +20,7 @@ import { Tabs } from '@/components/ui/Tabs'
 import { Table, THead, TH, TBody, TR, TD, EmptyState, ErrorState } from '@/components/ui/Table'
 import {
   usePainel, CarregandoPainel, Ressalva, SeloAmostra, Explicacao,
-  pct, brl, dias, EXPLICA,
+  pct, brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
 import type { ResumoGrupo } from '@/lib/analytics'
 
@@ -81,6 +81,7 @@ export default function Recortes() {
         title="Recortes"
         description="Onde o capital está, quanto dele já voltou e quanto ainda falta voltar."
       />
+      <AvisoParametros />
 
       <Tabs
         value={aba}
