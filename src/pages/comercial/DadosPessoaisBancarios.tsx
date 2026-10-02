@@ -31,7 +31,6 @@ import {
   formatCpfCnpjInput,
   limparNumeroConta,
   nomeParecido,
-  normalizarBusca,
   normalizarNome,
   onlyDigits,
   rotuloDocumento,
@@ -381,27 +380,29 @@ export default function DadosPessoaisBancarios() {
     const janelaNaChamada = editando?.id
     setBuscandoCnpj(true)
     try {
-      const { buscarCnpj } = await import('@/lib/cnpj')
+      const { buscarCnpj, ufCidadeDoCnpj } = await import('@/lib/cnpj')
       const e = await buscarCnpj(docMascarado)
       if (meuId !== reqCnpjRef.current || janelaNaChamada !== editando?.id) return
       if (!e) return
       const m = municipios ?? (await import('@/lib/municipios')).MUNICIPIOS_POR_UF
-      // A Receita devolve o município em caixa alta e sem acento; o combobox só
-      // reconhece o nome exato da lista do IBGE, então casa por forma normalizada.
-      const daUf = e.uf ? (m[e.uf] ?? []) : []
-      const cidadeIbge = daUf.find(
-        (n) => normalizarBusca(n) === normalizarBusca(e.cidade),
-      )
-      setForm((f) => ({
-        ...f,
-        logradouro: f.logradouro || e.logradouro,
-        numero: f.numero || e.numero,
-        complemento: f.complemento || e.complemento,
-        bairro: f.bairro || e.bairro,
-        uf: f.uf || e.uf,
-        cidade: f.cidade || cidadeIbge || '',
-        cep: f.cep || (e.cep ? formatCepInput(e.cep) : ''),
-      }))
+      setForm((f) => {
+        // UF e cidade saem juntas (ver ufCidadeDoCnpj): nunca cidade de uma UF com outra.
+        const { uf, cidade } = ufCidadeDoCnpj(f, e, m)
+        return {
+          ...f,
+          logradouro: f.logradouro || e.logradouro,
+          numero: f.numero || e.numero,
+          complemento: f.complemento || e.complemento,
+          bairro: f.bairro || e.bairro,
+          uf,
+          cidade,
+          cep: f.cep || (e.cep ? formatCepInput(e.cep) : ''),
+        }
+      })
+      // O aviso sai do formulário da hora da digitação, e não de dentro do setForm:
+      // a função de atualização não pode ter efeito (o StrictMode a roda duas vezes).
+      const { aviso } = ufCidadeDoCnpj(form, e, m)
+      if (aviso) toast.info(aviso)
     } finally {
       setBuscandoCnpj(false)
     }

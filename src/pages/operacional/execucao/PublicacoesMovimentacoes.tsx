@@ -240,8 +240,12 @@ export default function PublicacoesMovimentacoes() {
  * divergindo aos poucos.
  */
 function FaseProcessualTab() {
-  const { data } = processosCrud.useList()
+  const { data, isError, error, refetch } = processosCrud.useList()
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
+  // SEM ISTO A FALHA VIRAVA ZERO: lista de créditos que não carregou chegava como
+  // lista vazia, e toda fase aparecia com 0 crédito.
+  if (isError)
+    return <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />
   return (
     <>
       <FaseProcessual processos={data ?? []} onAbrirDetalhe={setDetalhe} />

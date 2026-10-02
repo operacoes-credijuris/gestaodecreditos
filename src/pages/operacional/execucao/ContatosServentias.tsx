@@ -441,11 +441,7 @@ export default function ContatosServentias() {
     if (!toDelete) return
     try {
       await remove.mutateAsync(toDelete.id)
-      toast.success(
-        toDelete.tipo === 'auxiliar'
-          ? 'Contato auxiliar removido.'
-          : 'Contatos do órgão removidos.',
-      )
+      toast.success('Contato auxiliar removido.')
       setToDelete(null)
     } catch (err) {
       toast.error((err as Error).message)
@@ -800,12 +796,10 @@ export default function ContatosServentias() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
-        message={
-          toDelete?.tipo === 'auxiliar'
-            ? `Excluir o contato auxiliar "${toDelete?.orgao || ''}"?`
-            : `Limpar os contatos do órgão "${formatOrgaoLabel(toDelete?.orgao ?? '')}"?`
-        }
-        confirmLabel={toDelete?.tipo === 'auxiliar' ? 'Excluir' : 'Limpar'}
+        // Só o contato AUXILIAR tem lixeira (ver a coluna Ações); o contato de
+        // órgão julgador não é excluído por aqui.
+        message={`Excluir o contato auxiliar "${toDelete?.orgao || ''}"?`}
+        confirmLabel="Excluir"
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}
       />

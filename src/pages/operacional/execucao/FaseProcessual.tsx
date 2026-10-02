@@ -197,7 +197,19 @@ function useMovimentacoesRecentes(processos: Processo[]) {
     return m
   }, [processos, apensos.data, movs.data])
 
-  return { isLoading: apensos.isLoading || movs.isLoading, porCredito }
+  return {
+    isLoading: apensos.isLoading || movs.isLoading,
+    // FALHA NÃO É "NENHUMA MOVIMENTAÇÃO": sem isto, consulta que falhou virava
+    // "Nenhuma movimentação nos últimos 7 dias" — ou uma lista pela metade, sem os
+    // créditos que só casam pelo apenso.
+    isError: apensos.isError || movs.isError,
+    error: (apensos.error ?? movs.error) as Error | null,
+    refetch: () => {
+      if (apensos.isError) void apensos.refetch()
+      if (movs.isError) void movs.refetch()
+    },
+    porCredito,
+  }
 }
 
 /**
@@ -560,10 +572,18 @@ export function FaseProcessual({
   const gerar = useMutation({
     mutationFn: (vars: { processo_id?: string; forcar?: boolean }) =>
       invokeFunction<{ gerados: number; pulados: number; falhas: number }>('fase-processual', vars),
-    onSuccess: () => {
+    onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['processos_fase'], refetchType: 'all' })
       qc.invalidateQueries({ queryKey: ['processos_fase_mudancas'] })
-      toast.success('Classificação atualizada.')
+      // A função responde 200 mesmo quando parte dos créditos falhou — conta em
+      // `falhas`. Sucesso só quando não houve nenhuma.
+      if (r?.falhas) {
+        toast.error(
+          `${r.falhas} crédito(s) não puderam ser classificados; os demais foram atualizados.`,
+        )
+      } else {
+        toast.success('Classificação atualizada.')
+      }
     },
     onError: (e) => toast.error((e as Error).message),
   })
@@ -647,14 +667,18 @@ export function FaseProcessual({
 
           {contagem.semClassificacao > 0 && (
             <p className="text-sm text-slate-500">
-              {contagem.semClassificacao} crédito(s) ainda sem classificação — clique em "Reclassificar
-              tudo" para gerar.
+              {contagem.semClassificacao} crédito(s) ainda sem classificação — clique em "Atualizar
+              fases" (ao lado da busca) para gerar.
             </p>
           )}
 
           {filtro && (
             <Card className="p-0">
-              {listaFiltrada.length === 0 ? (
+              {situacoes.isError ? (
+                // Sem o catálogo a coluna Situação mostrava "—" em toda linha, que se
+                // lê como "nenhuma situação definida", e não como "não consegui ler".
+                <ErrorState message={(situacoes.error as Error)?.message} onRetry={() => situacoes.refetch()} />
+              ) : listaFiltrada.length === 0 ? (
                 <EmptyState title="Nada aqui" description="Nenhum crédito nesta seleção." />
               ) : (
                 <Table>
@@ -734,7 +758,7 @@ export function FaseProcessual({
             >
               <h3 className="text-sm font-semibold text-slate-700">
                 Movimentações recentes
-                {recentes.porCredito.size > 0 && (
+                {recentes.porCredito.size > 0 && !recentes.isError && (
                   <span className="ml-2 text-xs font-normal text-slate-400">({recentes.porCredito.size})</span>
                 )}
               </h3>
@@ -749,6 +773,8 @@ export function FaseProcessual({
               <div className="mt-3">
                 {recentes.isLoading ? (
               <Loading />
+            ) : recentes.isError ? (
+              <ErrorState message={recentes.error?.message} onRetry={recentes.refetch} />
             ) : recentes.porCredito.size === 0 ? (
               <p className="text-sm text-slate-500">Nenhuma movimentação nos últimos 7 dias.</p>
             ) : (
@@ -923,17 +949,27 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
         {r && (
           <>
             <span className="whitespace-nowrap text-sm font-medium text-slate-700">Situação</span>
-            <SituacaoSelect
-              situacaoIdAtual={r.situacao_id}
-              opcoes={opcoesSituacao}
-              criando={criarSituacao.isPending}
-              onCriar={(nome, cor) => criarSituacao.mutateAsync({ fase_codigo: r.fase_codigo, nome, cor })}
-              onDefinir={(situacaoId) =>
-                definirSituacao.mutate({ situacao_id: situacaoId, situacao_data: r.situacao_data })
-              }
-              onEditar={(id, nome, cor) => editarSituacao.mutate({ id, nome, cor })}
-              onExcluir={(id) => excluirSituacao.mutate(id)}
-            />
+            {/* Mesmo motivo da lista: catálogo que falhou não é "nenhuma situação". */}
+            {situacoes.isError ? (
+              <p className="text-xs text-red-700">
+                Não consegui carregar as situações: {(situacoes.error as Error)?.message ?? 'erro desconhecido'}.{' '}
+                <button type="button" className="underline" onClick={() => situacoes.refetch()}>
+                  Tentar de novo
+                </button>
+              </p>
+            ) : (
+              <SituacaoSelect
+                situacaoIdAtual={r.situacao_id}
+                opcoes={opcoesSituacao}
+                criando={criarSituacao.isPending}
+                onCriar={(nome, cor) => criarSituacao.mutateAsync({ fase_codigo: r.fase_codigo, nome, cor })}
+                onDefinir={(situacaoId) =>
+                  definirSituacao.mutate({ situacao_id: situacaoId, situacao_data: r.situacao_data })
+                }
+                onEditar={(id, nome, cor) => editarSituacao.mutate({ id, nome, cor })}
+                onExcluir={(id) => excluirSituacao.mutate(id)}
+              />
+            )}
           </>
         )}
       </div>

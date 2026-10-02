@@ -14,7 +14,6 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Field, Input, Select } from '@/components/ui/Field'
-import { useToast } from '@/components/ui/Toast'
 import { TIPO_CONTRATO } from '@/lib/labels'
 import { invokeFunction } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
@@ -111,7 +110,6 @@ function nomeArquivoSeguro(nome: string): string {
 }
 
 function GerarPanel() {
-  const toast = useToast()
   const investidorDados = useInvestidorDados()
   const investidores = useMemo(
     () => [...(investidorDados.data?.values() ?? [])].filter((v) => v.tipo === 'investidor'),
@@ -123,6 +121,8 @@ function GerarPanel() {
   const [categoria, setCategoria] = useState<(typeof CATEGORIAS)[number]>(CATEGORIAS[0])
   const [originadores, setOriginadores] = useState<string[]>([])
   const [carregandoOriginadores, setCarregandoOriginadores] = useState(false)
+  const [erroOriginadores, setErroOriginadores] = useState<string | null>(null)
+  const [recargaOriginadores, setRecargaOriginadores] = useState(0)
   const [originador, setOriginador] = useState('')
   const [numeroProcesso, setNumeroProcesso] = useState('')
   const [cedenteGenero, setCedenteGenero] = useState<'M' | 'F'>('M')
@@ -140,6 +140,10 @@ function GerarPanel() {
     let cancelado = false
     setCarregandoOriginadores(true)
     setOriginador('')
+    // A LISTA ANTERIOR SAI ANTES DE RECARREGAR: se a leitura falhasse, ficavam os
+    // originadores da outra categoria, escolhíveis como se fossem desta.
+    setOriginadores([])
+    setErroOriginadores(null)
     invokeFunction<{ originadores: string[] }>('gerar-contrato', {
       acao: 'listar_originadores',
       categoria,
@@ -148,7 +152,7 @@ function GerarPanel() {
         if (!cancelado) setOriginadores(r.originadores ?? [])
       })
       .catch((e) => {
-        if (!cancelado) toast.error((e as Error).message)
+        if (!cancelado) setErroOriginadores((e as Error).message)
       })
       .finally(() => {
         if (!cancelado) setCarregandoOriginadores(false)
@@ -156,8 +160,7 @@ function GerarPanel() {
     return () => {
       cancelado = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoria])
+  }, [categoria, recargaOriginadores])
 
   function adicionarArquivos(papel: Papel, lista: FileList | null) {
     if (!lista || lista.length === 0) return
@@ -345,6 +348,19 @@ function GerarPanel() {
                     </option>
                   ))}
                 </Select>
+                {/* Mesmo padrão do investidor acima: falha não é lista vazia. */}
+                {erroOriginadores && (
+                  <p className="mt-1 text-xs text-red-700">
+                    Não consegui carregar os originadores: {erroOriginadores}.{' '}
+                    <button
+                      type="button"
+                      className="underline"
+                      onClick={() => setRecargaOriginadores((n) => n + 1)}
+                    >
+                      Tentar de novo
+                    </button>
+                  </p>
+                )}
               </Field>
 
               <Field label="Número do processo" required hint="Usado para localizar a análise no Drive">
@@ -359,7 +375,7 @@ function GerarPanel() {
 
           <Secao
             titulo="Documentos"
-            descricao="Servem só para extrair os dados do cedente e do escritório. Nada fica guardado neste formulário."
+            descricao="Servem para extrair os dados do cedente e do escritório. Os do cedente ficam arquivados no Drive, na pasta do processo."
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <ArquivosField

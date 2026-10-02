@@ -1289,9 +1289,11 @@ export default function Processos() {
         // perdia os apensos sem nunca ter sido avisado.
         message={
           toDelete && apensos.contagem(toDelete.id) > 0
-            ? `Excluir o crédito ${formatCNJ(toDelete.numero_cnj)}? Os ${apensos.contagem(
-                toDelete.id,
-              )} apensos vinculados serão excluídos também.`
+            ? `Excluir o crédito ${formatCNJ(toDelete.numero_cnj)}? ${
+                apensos.contagem(toDelete.id) === 1
+                  ? 'O apenso vinculado será excluído também.'
+                  : `Os ${apensos.contagem(toDelete.id)} apensos vinculados serão excluídos também.`
+              }`
             : `Excluir o crédito ${formatCNJ(toDelete?.numero_cnj)}?`
         }
         confirmLabel="Excluir"

@@ -12,6 +12,8 @@
 // pagas e contratadas. O que dá para fazer sem serviço nenhum é validar o dígito
 // verificador, e isso a plataforma já faz em cpfCnpjValido.
 
+import { normalizarBusca } from './format'
+
 export interface EmpresaCnpj {
   razao_social: string
   logradouro: string
@@ -56,5 +58,37 @@ export async function buscarCnpj(cnpj: string): Promise<EmpresaCnpj | null> {
     }
   } catch {
     return null
+  }
+}
+
+/**
+ * UF e cidade que o cadastro da Receita pode pôr na ficha.
+ *
+ * Preenche só o que está em branco, como o resto do endereço do CNPJ, mas UF E
+ * CIDADE SÃO UM PAR: a cidade da Receita só entra se a UF da ficha for a da
+ * Receita. Antes, com outra UF já escolhida, a cidade vinha da UF da Receita e a UF
+ * ficava a antiga — e "Goiânia/SP" ia para o contrato. Agora a cidade fica em
+ * branco e o aviso diz por quê.
+ */
+export function ufCidadeDoCnpj(
+  ficha: { uf: string; cidade: string },
+  receita: Pick<EmpresaCnpj, 'uf' | 'cidade'>,
+  municipiosPorUf: Record<string, string[]>,
+): { uf: string; cidade: string; aviso: string | null } {
+  const daUf = receita.uf ? (municipiosPorUf[receita.uf] ?? []) : []
+  // A Receita devolve o município em caixa alta e sem acento; o combobox só
+  // reconhece o nome exato da lista do IBGE, então casa por forma normalizada.
+  const cidadeIbge =
+    daUf.find((n) => normalizarBusca(n) === normalizarBusca(receita.cidade)) ?? ''
+  // Ficha antiga com cidade e sem UF só ganha a UF da Receita se a cidade for de lá.
+  const uf = ficha.uf || (!ficha.cidade || daUf.includes(ficha.cidade) ? receita.uf : '')
+  if (ficha.cidade || !receita.uf) return { uf, cidade: ficha.cidade, aviso: null }
+  if (uf === receita.uf) return { uf, cidade: cidadeIbge, aviso: null }
+  return {
+    uf,
+    cidade: '',
+    aviso:
+      `A Receita registra este CNPJ em ${cidadeIbge || receita.cidade}/${receita.uf}, ` +
+      `e a UF da ficha é ${uf}. A cidade ficou em branco: confira a UF e escolha a cidade.`,
   }
 }

@@ -426,7 +426,7 @@ Deno.serve(async (req: Request) => {
       const caller = await getCallerAtivo(req, svc)
       if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
       if (!body.processo_id) return jsonResponse({ error: 'Informe processo_id.' }, 400)
-      await svc
+      const { error } = await svc
         .from('processos_fase')
         .update({
           tratado: body.tratado === true,
@@ -434,6 +434,9 @@ Deno.serve(async (req: Request) => {
           tratado_movimentacao_data: body.tratado === true ? (body.movimentacao_data ?? null) : null,
         })
         .eq('processo_id', body.processo_id)
+      // O SUPABASE-JS NÃO LANÇA, devolve `error`: sem conferir, a falha voltava como
+      // `ok` e a tela dava por gravado o que não foi. Vale para as três ações.
+      if (error) return jsonResponse({ error: error.message }, 500)
       return jsonResponse({ ok: true })
     }
 
@@ -442,13 +445,14 @@ Deno.serve(async (req: Request) => {
       const caller = await getCallerAtivo(req, svc)
       if (!caller) return jsonResponse({ error: ERRO_ACESSO }, 401)
       if (!body.processo_id) return jsonResponse({ error: 'Informe processo_id.' }, 400)
-      await svc
+      const { error } = await svc
         .from('processos_fase')
         .update({
           situacao_id: body.situacao_id ?? null,
           situacao_data: body.situacao_data ?? null,
         })
         .eq('processo_id', body.processo_id)
+      if (error) return jsonResponse({ error: error.message }, 500)
       return jsonResponse({ ok: true })
     }
 
@@ -459,25 +463,35 @@ Deno.serve(async (req: Request) => {
       if (!body.processo_id || !body.fase_codigo) {
         return jsonResponse({ error: 'Informe processo_id e fase_codigo.' }, 400)
       }
-      const { data: atualRow } = await svc
+      const { data: atualRow, error: erroLeitura } = await svc
         .from('processos_fase')
         .select('fase_codigo')
         .eq('processo_id', body.processo_id)
         .maybeSingle()
+      // Leitura falha ANTES de gravar: sem ela o histórico registraria "fase anterior:
+      // nenhuma" para quem tinha fase.
+      if (erroLeitura) return jsonResponse({ error: erroLeitura.message }, 500)
       const hoje = new Date().toISOString().slice(0, 10)
-      await svc.from('processos_fase').upsert({
+      const { error: erroFase } = await svc.from('processos_fase').upsert({
         processo_id: body.processo_id,
         fase_codigo: body.fase_codigo,
         data_entrada_fase: hoje,
         classificado_em: new Date().toISOString(),
       })
-      await svc.from('processos_fase_mudancas').insert({
+      if (erroFase) return jsonResponse({ error: erroFase.message }, 500)
+      const { error: erroHistorico } = await svc.from('processos_fase_mudancas').insert({
         processo_id: body.processo_id,
         fase_anterior: (atualRow as { fase_codigo: string } | null)?.fase_codigo ?? null,
         fase_nova: body.fase_codigo,
         origem: 'manual',
         usuario_id: caller.id,
       })
+      if (erroHistorico) {
+        return jsonResponse(
+          { error: `A fase foi alterada, mas o histórico da mudança não foi gravado: ${erroHistorico.message}` },
+          500,
+        )
+      }
       return jsonResponse({ ok: true })
     }
 
@@ -690,7 +704,7 @@ Deno.serve(async (req: Request) => {
             : { fase_codigo: resultado.fase_codigo, data_limite_pagamento: null }
 
         const faseAnterior = atual?.fase_codigo ?? null
-        await svc.from('processos_fase').upsert({
+        const { error: erroGravacao } = await svc.from('processos_fase').upsert({
           processo_id: p.id,
           fase_codigo: roteamento.fase_codigo,
           ciclo_complementacao: resultado.ciclo_complementacao,
@@ -708,6 +722,9 @@ Deno.serve(async (req: Request) => {
           erro: null,
           classificado_em: new Date().toISOString(),
         })
+        // Gravação que falhou é FALHA, não "gerado": vai para o catch, que anota o erro
+        // e conta em `falhas` — é essa conta que a tela usa para não dizer sucesso.
+        if (erroGravacao) throw new Error(erroGravacao.message)
         // Registra TODA vez que um crédito é reprocessado (não só quando a fase
         // muda) — é o que alimenta a seção "Movimentações recentes": mesmo permanecendo na
         // mesma fase, ela mostra a movimentação nova que justificou a

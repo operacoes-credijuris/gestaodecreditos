@@ -144,8 +144,10 @@ export function useApensosManager(parentField: ParentField) {
         toast.error(
           'Cadastro automático na ADVBOX está ligado, mas falta escolher o responsável em Configurações.',
         )
+      // A edição nunca escreve na ADVBOX (ver o salvar acima): o aviso não pode
+      // prometer que preencher o número depois cadastra.
       else if (r.motivo === 'sem_numero')
-        toast.info('Sem número, não cadastrei na ADVBOX. Ao preencher e salvar, cadastro.')
+        toast.info('Sem número, não cadastrei na ADVBOX. Preencher depois não cadastra: faça na ADVBOX, à mão.')
       else if (r.aviso) toast.error(r.aviso)
     } catch (err) {
       toast.error(`Apenso salvo, mas não cadastrei na ADVBOX: ${(err as Error).message}`)

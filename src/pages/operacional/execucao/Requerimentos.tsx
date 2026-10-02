@@ -215,9 +215,10 @@ export default function Requerimentos() {
           'Cadastro automático na ADVBOX está ligado, mas falta escolher o responsável em Configurações.',
         )
       // sem_numero NÃO é falha: é o estado normal de um requerimento que ainda não
-      // tem número. Ao preencher e salvar, o cadastro acontece sozinho.
+      // tem número. Mas preencher depois NÃO cadastra — a edição nunca escreve na
+      // ADVBOX (ver handleSalvar) —, e o aviso não pode prometer o contrário.
       else if (r.motivo === 'sem_numero')
-        toast.info('Sem número, não cadastrei na ADVBOX. Ao preencher e salvar, cadastro.')
+        toast.info('Sem número, não cadastrei na ADVBOX. Preencher depois não cadastra: faça na ADVBOX, à mão.')
       else if (r.aviso) toast.error(r.aviso)
     } catch (err) {
       toast.error(
