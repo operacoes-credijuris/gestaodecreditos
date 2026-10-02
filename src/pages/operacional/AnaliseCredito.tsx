@@ -2377,9 +2377,7 @@ function CardCredito({
                   <div className="mt-2">
                     <GradeValoresRpv
                       valores={resultadoAnalise.valores}
-                      cartorio={resultadoAnalise.cartorio}
                       atingiuAlvo={resultadoAnalise.atingiu_alvo}
-                      compacta
                     />
                   </div>
                 )}

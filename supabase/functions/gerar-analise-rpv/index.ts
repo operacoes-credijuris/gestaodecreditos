@@ -54,12 +54,12 @@ import {
   type ItemRecalculado,
   type Regime,
 } from "../_shared/indicesBcb.ts";
-import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, escolherModelo, montarParcelas, rotuloDoCenario, sucumbenciaisNoBruto, type Precificacao, type VerbasNegociadas } from "../_shared/precificacao.ts";
+import { aplicarAuditoria, calibrarDesagio, decidirHonorarios, montarParcelas, sucumbenciaisNoBruto, type Precificacao, type VerbasNegociadas } from "../_shared/precificacao.ts";
 import { confrontarAnexoComCard } from "../_shared/confrontoDoAnexo.ts";
 import { grauDaPlanilha } from "../_shared/graus.ts";
 // AS LISTAS SUSPENSAS DA PLANILHA são puras e têm teste. Ver _shared/m2.ts: é o
 // que decide se a resposta sai válida na célula ou vira aviso.
-import { LISTAS_M2, normalizarM2, SIM_NAO } from "../_shared/m2.ts";
+import { normalizarM2 } from "../_shared/m2.ts";
 import { decidirVerbas, temVerbaNegociavel, verbasDitadasNoChat } from "../_shared/verbas.ts";
 import { calcularIrFaltante, memoriaDoIrFaltante } from "../_shared/irFaltante.ts";
 // O PISO É PURO E TEM TESTE. Ver _shared/piso.ts: quatro desfechos sobre uma
@@ -71,7 +71,7 @@ import { avaliarPiso } from "../_shared/piso.ts";
 import { avaliarQualificacao, ehEstadoDeGoias, ehSim, parseDataBR, parseNumeroFlex, PISO_NEGOCIO } from "../_shared/portao.ts";
 // O PRAZO É PURO E TEM TESTE. Ver _shared/prazo.ts: ele decide T5, que é a
 // variável que mais mexe no deságio, e vivia aqui sem um caso escrito.
-import { PISO_MESES, prazoMeses, REGRAS_PRAZO, roteiroValido, type AtoRoteiro, type Esfera, type RegraPrazo } from "../_shared/prazo.ts";
+import { prazoMeses, type Esfera } from "../_shared/prazo.ts";
 import { aplicarPatch, aplicarParametrosManuais, CAMPOS_LISTA, parametrosParaCalibragem, resetarLinhasDeBase } from "../_shared/revisao.ts";
 import {
   aplicarDiligenciaNoM2,
@@ -2680,7 +2680,7 @@ Deno.serve(async (req) => {
     // trabalham sobre a análise que já veio pronta do navegador — exigir o texto
     // aqui era o HTTP 400 "Faltou o texto do processo": eu tirei o reenvio do
     // texto (que estourava o tempo da requisição) e esqueci esta guarda.
-    const precisaDoProcesso = acao === 'qualificar' || acao === 'analisar' || acao === 'documento' || acao === null;
+    const precisaDoProcesso = acao === 'qualificar' || acao === 'analisar' || acao === 'documento';
     if (!precisaDoProcesso) {
       // Nada a ler. O corte de conteúdo foi registrado na análise original e
       // viaja dentro de `dados`, então o aviso não se perde nas rodadas seguintes.
@@ -2910,11 +2910,8 @@ Deno.serve(async (req) => {
         // nova. Escala na mesma proporção: mantém o risco embutido (o lado
         // conservador) sem fingir que a estimativa antiga vale para a base nova.
         {
-          const _n = (v: unknown): number =>
-            typeof v === 'number' ? (Number.isFinite(v) ? v : 0)
-            : typeof v === 'string' ? (parseNumeroFlex(v.replace(/[^\d.,\-]/g, '')) ?? 0) : 0;
-          const _antes = _n(body.dados?.bruto_total), _depois = _n(dados.bruto_total);
-          const _consAntes = _n(body.dados?.auditoria_bruto_conservador), _consDepois = _n(dados.auditoria_bruto_conservador);
+          const _antes = numeroDoCampo(body.dados?.bruto_total), _depois = numeroDoCampo(dados.bruto_total);
+          const _consAntes = numeroDoCampo(body.dados?.auditoria_bruto_conservador), _consDepois = numeroDoCampo(dados.auditoria_bruto_conservador);
           if (_antes > 0 && _depois > 0 && Math.abs(_depois - _antes) > 0.005 && _consAntes > 0 && Math.abs(_consDepois - _consAntes) < 0.005) {
             dados.auditoria_bruto_conservador = Number((_consAntes * (_depois / _antes)).toFixed(2));
             respostaRevisao +=
@@ -3365,7 +3362,7 @@ Deno.serve(async (req) => {
         // NO 'salvar' CONTINUA ERRO: ali já houve uma tela com o resultado, e
         // gerar planilha de crédito sem valor é produzir um documento que
         // afirma zero.
-        if (acao === 'analisar' || acao === null) {
+        if (acao === 'analisar') {
           return jsonResponse({
             ok: true, reprovado: true, motivos: [_semValor], avisos: avisosQualif, qualificacao: null,
             tempo: _relogio(),
@@ -4029,14 +4026,12 @@ Deno.serve(async (req) => {
     // Compatibilidade com quem lê o resultado pelo nome das células do modelo.
     calc.L5 = _parcelas.find((p) => p.nome === 'principal')?.liquido ?? 0;
     calc.L7 = _parcelas.find((p) => p.nome === 'contratuais')?.liquido ?? 0;
-    calc.L8 = _parcelas.find((p) => p.nome === 'sucumbenciais')?.liquido ?? 0;
     calc.emolumentos = {
       escritura: calc.escrituraTotal, registro: calc.registroTotal, completo: calc.cartorioCompleto,
     };
     calc.faixaCartorio = emolumentos
       ? `${calc.descricaoCartorio} — tabela ${emolumentos.uf}/${emolumentos.ano}${emolumentos.vigencia ? `, ${emolumentos.vigencia}` : ''}`
       : `Confirmar com cartório${ufCredito ? ` — tabela de ${ufCredito} ainda não levantada` : ' — UF do tribunal não identificada'}`;
-    calc.IR = Number(dados.ir) || 0; calc.INSS = Number(dados.inss) || 0;
 
     // ================================================================
     // O PISO DE R$ 20 MIL, sobre o VALOR TOTAL LÍQUIDO NEGOCIADO
