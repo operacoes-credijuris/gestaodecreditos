@@ -80,8 +80,15 @@ Deno.serve(async (req: Request) => {
       .select('pipeline_id, nome')
       .eq('status_id', statusId)
       .limit(20)
+    // NO RPV, O NOME QUE VAI NA NOTA É O DO KOMMO DE HOJE (kommo_etapa), e não o
+    // de COLUNAS: as colunas foram renomeadas ("Revisão e Decisão do Pedro" virou
+    // "Revisão") e a nota de auditoria saía com o nome velho. COLUNAS continua
+    // decidindo a PERMISSÃO do RPV; o nome dela fica só de reserva, para o
+    // espelho sem a etapa. O status_id é único na conta, então a linha é uma.
     const nomeDoDestino =
-      COLUNAS[statusId] ??
+      (COLUNAS[statusId] !== undefined
+        ? String((destino ?? [])[0]?.nome ?? '').trim() || COLUNAS[statusId]
+        : undefined) ??
       (destino ?? []).find((e) =>
         // Funil que não é de precatório devolve lista vazia, e nada casa: é o
         // que mantém a coluna do comercial fora do alcance de um statusId solto.
@@ -110,9 +117,9 @@ Deno.serve(async (req: Request) => {
       .select('status_id')
       .eq('kommo_lead_id', leadId)
       .maybeSingle()
+    // O nome do Kommo primeiro, pelo mesmo motivo do destino; COLUNAS é reserva.
     const origem = espelho?.status_id
-      ? (COLUNAS[espelho.status_id] ??
-        (
+      ? ((
           await svc
             .from('kommo_etapa')
             .select('nome')
@@ -120,6 +127,7 @@ Deno.serve(async (req: Request) => {
             .limit(1)
             .maybeSingle()
         ).data?.nome ??
+        COLUNAS[espelho.status_id] ??
         null)
       : null
 
