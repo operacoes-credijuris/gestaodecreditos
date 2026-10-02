@@ -477,7 +477,11 @@ export default function Processos() {
     // "Dias em carteira" imprimindo número negativo com a TIR justificando
     // "Prazo nulo" — erro de digitação de ano que passava calado.
     const aq = vazioNull(editing.data_aquisicao ?? null)
-    const liq = vazioNull(editing.data_liquidacao ?? null)
+    // SÓ A DATA QUE ESTÁ NA TELA. Fora da liquidação o campo fica escondido e o
+    // salvar o apaga (payload.data_liquidacao = null, abaixo); conferido mesmo
+    // assim, um valor antigo fora de ordem travava o Salvar com o erro num campo
+    // que ninguém via — o botão simplesmente não fazia nada.
+    const liq = emLiquidacao(editing.status) ? vazioNull(editing.data_liquidacao ?? null) : null
     const exp = vazioNull(editing.expectativa_liquidacao ?? null)
     if (aq && liq && liq < aq)
       novosErros.data_liquidacao = 'A liquidação não pode ser anterior à cessão'
