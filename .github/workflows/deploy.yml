@@ -16,7 +16,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # OS TESTES ANTES DO BUILD: teste quebrado barra a publicação. Até 02/10/2026 o
+  # site subia só com o build — e o build passa com teste vermelho, porque
+  # tipagem não confere regra de negócio (colunas do Kommo, destinos que o
+  # servidor aceita, contas da carteira).
+  #
+  # NUM JOB À PARTE, COM NODE 22: o supabase-js atual exige WebSocket nativo fora
+  # do navegador, que o Node 20 não tem, e os testes que importam o cliente caem
+  # na carga ("Node.js 20 detected without native WebSocket support"). O build
+  # continua no Node 20 pelo motivo escrito lá embaixo; aqui o Node só RODA os
+  # testes, não produz nada que vá para o site.
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
   build:
+    needs: testes
     runs-on: ubuntu-latest
     steps:
       # v4 -> v7: o runner avisou que a v4 foi publicada para Node 20, que está
@@ -40,13 +62,6 @@ jobs:
           cache: npm
 
       - run: npm ci
-
-      # OS TESTES ANTES DO BUILD: teste quebrado barra a publicação. Até
-      # 02/10/2026 o site subia só com o build — e o build passa com um teste
-      # vermelho, porque tipagem não confere regra de negócio (colunas do
-      # Kommo, destinos que o servidor aceita, contas da carteira).
-      - name: Testes
-        run: npm test
 
       - name: Build
         env:
