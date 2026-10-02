@@ -23,6 +23,7 @@ import {
   type TipoPessoa,
 } from '@/lib/queries'
 import { listarPessoas, type PessoaLista } from '@/lib/pessoas'
+import { montarFichaPessoa, type CampoPessoa } from '@/lib/fichaPessoa'
 import {
   compilarEndereco,
   cpfCnpjValido,
@@ -57,22 +58,6 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-
-type CampoPessoa =
-  | 'cpf'
-  | 'rg'
-  | 'representante'
-  | 'banco'
-  | 'agencia'
-  | 'conta'
-  | 'pix'
-  | 'logradouro'
-  | 'numero'
-  | 'complemento'
-  | 'bairro'
-  | 'cidade'
-  | 'uf'
-  | 'cep'
 
 /**
  * `mascara` normaliza o que se digita, a cada tecla. É onde o formato deixa de
@@ -445,49 +430,17 @@ export default function DadosPessoaisBancarios() {
       toast.error('CPF/CNPJ inválido. Confira os dígitos antes de salvar.')
       return
     }
-    // Campo em branco vira null, não string vazia: no banco "não informado" é
-    // ausência de valor, e "" faria a célula parecer preenchida com nada.
-    const vazioNull = (s: string) => (s.trim() ? s.trim() : null)
-    const compilado = vazioNull(compilarEndereco(form))
+    // A montagem da linha (vazio vira null, representante só em CNPJ, o que a
+    // tela não edita preservado da ficha) mora em lib/fichaPessoa.ts, com teste.
+    const ficha = montarFichaPessoa({
+      tipo,
+      chave,
+      nome,
+      form,
+      anterior: dados.data?.get(chavePessoa(tipo, chave)),
+    })
     try {
-      await salvar.mutateAsync({
-        tipo,
-        nome_chave: chave,
-        nome_exibicao: nome,
-        cpf: vazioNull(form.cpf),
-        rg: vazioNull(form.rg),
-        // Representante só vale para pessoa jurídica. Se o documento não é CNPJ,
-        // grava null: mesmo padrão dos campos condicionais de Créditos — o campo
-        // saiu da tela, então o valor não pode ficar viajando escondido. Sem isso,
-        // corrigir um CNPJ digitado por engano deixaria a pessoa física com um
-        // "representante legal" invisível na ficha.
-        representante: ehCnpj(form.cpf) ? vazioNull(form.representante) : null,
-        banco: vazioNull(form.banco),
-        agencia: vazioNull(form.agencia),
-        conta: vazioNull(form.conta),
-        pix: vazioNull(form.pix),
-        logradouro: vazioNull(form.logradouro),
-        numero: vazioNull(form.numero),
-        complemento: vazioNull(form.complemento),
-        bairro: vazioNull(form.bairro),
-        cidade: vazioNull(form.cidade),
-        uf: vazioNull(form.uf),
-        cep: vazioNull(form.cep),
-        // O texto corrido é derivado das partes e gravado junto, para quem lê a
-        // tabela direto no banco ver o endereço pronto.
-        //
-        // Partes vazias NÃO apagam o texto legado: quem abre a ficha de alguém que
-        // só tem o endereço antigo em texto corrido, mexe no Pix e salva, perderia
-        // o endereço.
-        endereco:
-          compilado ?? dados.data?.get(chavePessoa(tipo, chave))?.endereco ?? null,
-        // Sem campo próprio nesta tela ainda (usados só na geração de contratos,
-        // preenchidos direto no banco por enquanto) — preserva o que já estava
-        // na ficha, mesmo raciocínio do endereço legado acima.
-        genero: dados.data?.get(chavePessoa(tipo, chave))?.genero ?? null,
-        qualificacao_complemento:
-          dados.data?.get(chavePessoa(tipo, chave))?.qualificacao_complemento ?? null,
-      })
+      await salvar.mutateAsync(ficha)
       toast.success(editando.novo ? `${visao.rotulo} cadastrado.` : 'Dados salvos.')
       setEditando(null)
     } catch (e) {

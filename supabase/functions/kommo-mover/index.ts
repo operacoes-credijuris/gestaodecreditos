@@ -18,18 +18,11 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { destinoPermitido } from '../_shared/trilhasDoPrecatorio.ts'
+// AS COLUNAS DO RPV moram em `_shared/colunasRpv.ts`, para o teste as prender.
+import { COLUNAS } from '../_shared/colunasRpv.ts'
 
 /** Rótulo exibido no selo da anotação, dentro do card. */
 const SERVICO = 'Operacional'
-
-/** Colunas do Funil Geral RPV para as quais o app permite mover. */
-const COLUNAS: Record<number, string> = {
-  107272803: 'Análise Jurídica-Econômico',
-  107272807: 'Revisão e Decisão do Pedro',
-  107830027: 'Diligência',
-  107830035: 'Apresentação de Proposta',
-  107830031: 'Reprovados Operacional',
-}
 
 /**
  * Os destinos do Precatório saem de `_shared/trilhasDoPrecatorio.ts`, por trilha.

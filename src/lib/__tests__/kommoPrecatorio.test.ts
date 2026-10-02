@@ -54,177 +54,25 @@ import {
   coresDasTags,
   TONS_DA_TAG,
   tomDaTag,
-  type EtapaKommo,
 } from '@/lib/kommo'
 import type { KommoLead } from '@/lib/types'
+// OS KANBANS MORAM EM `fixtures/kanbans.ts` — os mesmos que os testes de botões
+// e de movimentos usam. Ver lá de quando é cada um.
+import {
+  COLUNAS_EXTERNO,
+  COLUNAS_INTERNO,
+  colunasDe,
+  colunasExterno,
+  colunasInterno,
+  DE_SISTEMA,
+  espelho,
+  idDe,
+  idExt,
+  IDS_EXTERNO,
+  IDS_INTERNO,
+} from './fixtures/kanbans'
 
-/**
- * As colunas do funil do Interno, como o Kommo as devolveu em 01/10/2026 — na
- * ordem do kanban e com os nomes de lá.
- *
- * O KOMMO RENOMEOU AS COLUNAS SEM MUDAR O ID: "REVISÃO DA ANÁLISE" virou "Revisão"
- * e "PROTOCOLAR" virou "Protocolo". Enquanto o Interno se ligava só pelo nome,
- * essa troca deixou as abas Revisão e p/ Protocolo sem coluna; desde 02/10/2026
- * ele se liga pelo id, como o Externo (ver `IDS_INTERNO`).
- *
- * As colunas do comercial (negociação, fechados, oferta, escritura, pagamento,
- * sem resposta, não fechados) existem no kanban e NÃO viram aba, por decisão de
- * quem opera. Ficam no espelho de propósito: é o que garante que a ausência delas
- * na tela se leia como escolha, e não como coluna perdida no remapeamento.
- */
-const COLUNAS_INTERNO = [
-  'Etapa de leads de entrada',
-  'Análise jurídica e econômica',
-  'Revisão',
-  'Diligência',
-  'Produção de proposta',
-  'Negociação',
-  'Fechados',
-  'Oferta aos investidores',
-  'Escritura pública',
-  'Protocolo',
-  'Pagamento finalizado',
-  'Reprovados',
-  'Sem resposta',
-  'Não fechados',
-]
-
-/** OS IDS REAIS do funil do Interno, lidos do kommo_etapa em 01/10/2026. */
-const IDS_INTERNO: Record<string, number> = {
-  'Etapa de leads de entrada': 111533936,
-  'Análise jurídica e econômica': 111533940,
-  'Revisão': 111533944,
-  'Diligência': 111533960,
-  'Produção de proposta': 111533948,
-  'Negociação': 112466260,
-  'Fechados': 111533952,
-  'Oferta aos investidores': 112466032,
-  'Escritura pública': 111533956,
-  'Protocolo': 111693840,
-  'Pagamento finalizado': 112466340,
-  'Reprovados': 111534108,
-  'Sem resposta': 112465960,
-  'Não fechados': 112382612,
-}
-
-/**
- * As colunas do funil do Externo, como o Kommo as devolveu em 29/09/2026 — na
- * ordem do kanban.
- *
- * EM CAIXA ALTA PORQUE É ASSIM QUE ESTÃO LÁ, e é assim que aparecem na tela: o
- * Externo espelha o kanban inteiro, com os nomes de lá (ver `espelhoCompleto`).
- * As duas colunas de sistema do Kommo entram no espelho à parte, com os ids fixos
- * delas (142 e 143), e são as únicas que ficam fora das abas.
- */
-const COLUNAS_EXTERNO = [
-  'Etapa de leads de entrada',
-  'QUALIFICAÇÃO PRELIMINAR',
-  'REVISÃO DA QUALIFICAÇÃO',
-  'DILIGÊNCIA',
-  'MEMORANDO DE NEGOCIAÇÃO',
-  'ENCAMINHAR AOS FUNDOS',
-  'EM PRECIFICAÇÃO',
-  'PRODUÇÃO DE PROPOSTA',
-  'NEGOCIAÇÃO',
-  'FECHADOS',
-  'OBTENÇÃO DE DOCUMENTAÇÃO',
-  'AGUARDANDO APROVAÇÃO DO FUNDO',
-  'REVISÃO/ASSINATURA DA ESCRITURA',
-  'PAGOS',
-  'REPROVADOS',
-  'NÃO FECHADO',
-]
-
-/**
- * OS IDS REAIS do funil do Externo, lidos do espelho em 29/09/2026. É por eles
- * que a plataforma se liga ao kanban desde então — renomear a coluna no Kommo não
- * tira função nenhuma. A de entrada vem com `tipo` 1, que é como o Kommo a marca.
- */
-const IDS_EXTERNO: Record<string, number> = {
-  'Etapa de leads de entrada': 111533964,
-  'QUALIFICAÇÃO PRELIMINAR': 111533968,
-  'REVISÃO DA QUALIFICAÇÃO': 111533972,
-  'DILIGÊNCIA': 111533996,
-  'MEMORANDO DE NEGOCIAÇÃO': 111533976,
-  'ENCAMINHAR AOS FUNDOS': 111533980,
-  'EM PRECIFICAÇÃO': 111533984,
-  'PRODUÇÃO DE PROPOSTA': 111533988,
-  'NEGOCIAÇÃO': 112339984,
-  'FECHADOS': 111533992,
-  'OBTENÇÃO DE DOCUMENTAÇÃO': 112341608,
-  'AGUARDANDO APROVAÇÃO DO FUNDO': 112341612,
-  'REVISÃO/ASSINATURA DA ESCRITURA': 112341616,
-  'PAGOS': 112006404,
-  'REPROVADOS': 111534212,
-  'NÃO FECHADO': 111985976,
-}
-
-/** O espelho do Externo com os ids reais — e com nomes trocados, quando se quer. */
-const colunasExterno = (nomes: string[], renomear: Record<string, string> = {}): EtapaKommo[] =>
-  nomes.map((nome, i) => ({
-    pipeline_id: FUNIL_PRECATORIO_EXTERNO,
-    status_id: IDS_EXTERNO[nome] ?? 95_000 + i,
-    pipeline_nome: 'Funil Precatório Externo',
-    nome: renomear[nome] ?? nome,
-    ordem: i,
-    tipo: nome === 'Etapa de leads de entrada' ? 1 : 0,
-  }))
-
-/** O espelho do Interno com os ids reais — e com nomes trocados, quando se quer. */
-const colunasInterno = (nomes: string[], renomear: Record<string, string> = {}): EtapaKommo[] =>
-  nomes.map((nome, i) => ({
-    pipeline_id: FUNIL_PRECATORIO,
-    status_id: IDS_INTERNO[nome] ?? 96_000 + i,
-    pipeline_nome: 'Funil Precatório Interno',
-    nome: renomear[nome] ?? nome,
-    ordem: i,
-    tipo: nome === 'Etapa de leads de entrada' ? 1 : 0,
-  }))
-
-/** As colunas de sistema que todo funil do Kommo tem. */
-const DE_SISTEMA = (pipelineId: number): EtapaKommo[] => [
-  { pipeline_id: pipelineId, status_id: 142, pipeline_nome: null, nome: 'Closed - won', ordem: 10000, tipo: 0 },
-  { pipeline_id: pipelineId, status_id: 143, pipeline_nome: null, nome: 'Closed - lost', ordem: 11000, tipo: 0 },
-]
-
-const colunasDe = (pipelineId: number, nomes: string[], base: number): EtapaKommo[] =>
-  nomes.map((nome, i) => ({
-    pipeline_id: pipelineId,
-    status_id: base + i,
-    pipeline_nome:
-      pipelineId === FUNIL_PRECATORIO ? 'Funil Precatório Interno' : 'Funil Precatório Externo',
-    nome,
-    ordem: i,
-    tipo: 0,
-  }))
-
-/** O espelho como o kommo-sync o gravaria: os dois funis, lado a lado. */
-const espelho = (
-  internas: string[] = COLUNAS_INTERNO,
-  externas: string[] = COLUNAS_EXTERNO,
-): EtapaKommo[] => [
-  ...colunasInterno(internas),
-  ...colunasExterno(externas),
-  ...DE_SISTEMA(FUNIL_PRECATORIO_EXTERNO),
-]
-
-/**
- * O id de uma coluna, SEMPRE COM O FUNIL JUNTO.
- *
- * OS DOIS KANBANS REPETEM NOMES desde que o Interno migrou: "DILIGÊNCIA",
- * "REPROVADOS", "PRODUÇÃO DE PROPOSTA" e "FECHADOS" existem nos dois. Buscar só
- * pelo nome devolvia o id do primeiro funil da lista, e os testes do Externo
- * passariam a comparar com a coluna do Interno — exatamente o erro que a
- * produção não comete, porque lá a busca é escopada por pipeline.
- */
-const idDe = (nome: string, etapas = espelho(), pipelineId = FUNIL_PRECATORIO) =>
-  etapas.find((e) => e.pipeline_id === pipelineId && e.nome === nome)!.status_id
-
-/** O mesmo, no funil do Externo. */
-const idExt = (nome: string, etapas = espelho()) =>
-  idDe(nome, etapas, FUNIL_PRECATORIO_EXTERNO)
-
-const lead = (statusId: number, id = statusId, pipelineId = FUNIL_PRECATORIO): KommoLead =>
+const lead =(statusId: number, id = statusId, pipelineId = FUNIL_PRECATORIO): KommoLead =>
   ({
     kommo_lead_id: id,
     pipeline_id: pipelineId,
