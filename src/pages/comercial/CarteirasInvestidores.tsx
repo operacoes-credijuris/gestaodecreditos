@@ -122,7 +122,7 @@ function rotuloMes(iso: string): string {
 /** Rótulo de seção fora do card, como abertura da tabela. */
 function TituloSecao({ children }: { children: string }) {
   return (
-    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-600">
+    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-texto-2">
       {children}
     </h3>
   )
@@ -139,7 +139,7 @@ function TituloSecao({ children }: { children: string }) {
 const AGUARDANDO = 'aguardando dados financeiros no cadastro de Créditos'
 
 // Separador entre grupos de colunas.
-const SEP = 'border-l border-slate-200'
+const SEP = 'border-l border-borda'
 
 // Cor do TÍTULO de cada grupo. Tons escolhidos para contrastar com o fundo
 // claro do cabeçalho — amarelo e azul-claro puros ficariam ilegíveis.
@@ -159,26 +159,27 @@ const GRUPO = 'text-sm font-bold normal-case tracking-normal'
 /**
  * Altura dos botões da barra do investidor.
  *
- * As alturas do Button são em rem (h-10) e o html está em 12px, então h-10 vale
- * 30px. O Input (baseControl em ui/Field) e a caixa do mês usam `px-3 py-2` com
- * text-sm, fechando 33px (6 + 19 de line-height + 6 + 2 de borda). Os dois
- * nunca casam por coincidência, e o botão ficava 3px mais baixo.
+ * As alturas do Button são em rem (h-11) e o html está em 12px, então h-11 vale
+ * 33px. O Input (baseControl em ui/Field) e a caixa do mês usam `py-2` com o
+ * texto `corpo`, fechando 35px (6 + 21 de line-height + 6 + 2 de borda). Os dois
+ * nunca casam por coincidência, e o botão ficava 2px mais baixo.
  *
- * Solução: soltar a altura fixa e repetir aqui o `py-2` do Input. Reproduzir a
- * receita, em vez de fixar 33px na mão, mantém os três alinhados se os tokens
+ * Solução: soltar a altura fixa e repetir aqui o `py-2` e a linha de 21px do
+ * Input (o botão continua com a letra de 13px dos controles). Reproduzir a
+ * receita, em vez de fixar 35px na mão, mantém os três alinhados se os tokens
  * de tipografia mudarem.
  */
-const ALTURA_CONTROLE = 'h-auto py-2'
+const ALTURA_CONTROLE = 'h-auto py-2 leading-[21px]'
 
 // Cor do TEXTO da coluna Status. Sem selo/pílula: o nome da cor escrito na
 // própria cor já é a informação. Tons alinhados com o semáforo da Expectativa
 // na aba Créditos, para a mesma cor significar a mesma coisa nas duas telas.
 const COR_STATUS: Record<string, string> = {
-  green: 'text-emerald-700',
+  green: 'text-sucesso',
   blue: 'text-blue-600',
-  yellow: 'text-amber-700',
-  red: 'text-red-600',
-  gray: 'text-slate-600',
+  yellow: 'text-aviso',
+  red: 'text-perigo',
+  gray: 'text-texto-2',
 }
 
 /**
@@ -200,11 +201,11 @@ function CelulaResumo({
   carregando: boolean
   onClick: () => void
 }) {
-  if (carregando) return <span className="text-slate-300">…</span>
+  if (carregando) return <span className="text-texto-3">…</span>
   if (!texto) {
     return (
       <span
-        className="text-slate-300"
+        className="text-texto-3"
         title={erro || 'Resumo ainda não gerado para este crédito.'}
       >
         —
@@ -216,7 +217,7 @@ function CelulaResumo({
       type="button"
       onClick={onClick}
       title="Ver o texto completo"
-      className="block max-w-[220px] truncate text-left text-slate-700 underline decoration-slate-300 decoration-dotted underline-offset-4 hover:decoration-slate-500"
+      className="block max-w-[220px] truncate text-left text-texto underline decoration-slate-300 decoration-dotted underline-offset-4 hover:decoration-slate-500"
     >
       {texto}
     </button>
@@ -465,7 +466,7 @@ function Individual() {
           borda oposta — separá-los só afastava dois campos que se leem juntos. */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         <div className="w-full sm:max-w-md">
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-texto-2">
             Investidor
           </label>
           <Combobox
@@ -479,11 +480,11 @@ function Individual() {
           />
         </div>
         <div>
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-texto-2">
             Mês de referência
           </div>
           {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
-          <div className="inline-flex items-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
+          <div className="inline-flex items-center whitespace-nowrap rounded-campo border border-borda bg-superficie px-4 py-2 text-corpo font-medium text-texto">
             {mesRef}
           </div>
         </div>
@@ -515,7 +516,7 @@ function Individual() {
             variant="outline"
             className={cn(
               ALTURA_CONTROLE,
-              'border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800',
+              'border-sucesso-borda text-sucesso hover:bg-sucesso-fundo hover:text-sucesso',
             )}
             icon={<Download className="h-4 w-4" />}
             loading={baixando}
@@ -692,7 +693,7 @@ function Individual() {
                     Calculado automaticamente
                   </TH>
                 </tr>
-                <tr className="border-t border-slate-200 text-xs font-medium normal-case tracking-normal text-slate-600">
+                <tr className="border-t border-borda text-xs font-medium normal-case tracking-normal text-texto-2">
                   <TH>Nº processo</TH>
                   <TH>Cedente</TH>
                   <TH>Advogado</TH>
@@ -736,7 +737,7 @@ function Individual() {
                   return (
                   <TR key={p.id}>
                     {/* Identificação — tudo vem do cadastro do crédito. */}
-                    <TD className="font-medium text-slate-800">
+                    <TD className="font-medium text-texto">
                       {formatCNJ(p.numero_cnj)}
                     </TD>
                     <TD>{p.cedente || '—'}</TD>
@@ -788,7 +789,7 @@ function Individual() {
                           quem não distingue os tons. */}
                       <span
                         title={sl.dica}
-                        className={cn('font-medium', COR_STATUS[sl.tone] ?? 'text-slate-600')}
+                        className={cn('font-medium', COR_STATUS[sl.tone] ?? 'text-texto-2')}
                       >
                         {sl.label}
                       </span>
@@ -835,7 +836,7 @@ function Individual() {
                         vazio quando falta insumo, em vez de só mostrar "—". */}
                     <TD className={cn(SEP, 'text-right tabular-nums')}>
                       {proj.valor === null ? (
-                        <span className="text-slate-600" title={proj.motivo}>
+                        <span className="text-texto-2" title={proj.motivo}>
                           —
                         </span>
                       ) : (
@@ -860,7 +861,7 @@ function Individual() {
                         mesma convenção da coluna Status. */}
                     <TD
                       className={
-                        l.pago ? 'font-medium text-emerald-700' : 'text-slate-600'
+                        l.pago ? 'font-medium text-sucesso' : 'text-texto-2'
                       }
                     >
                       {l.statusTir}
@@ -870,7 +871,7 @@ function Individual() {
                         quando a expectativa é futura. */}
                     <TD className="text-right tabular-nums">
                       {tirCred.anual === null ? (
-                        <span className="text-slate-600" title={tirCred.motivo}>
+                        <span className="text-texto-2" title={tirCred.motivo}>
                           —
                         </span>
                       ) : (
@@ -881,7 +882,7 @@ function Individual() {
                     </TD>
                     <TD className="text-right tabular-nums">
                       {tirCred.mensal === null ? (
-                        <span className="text-slate-600">—</span>
+                        <span className="text-texto-2">—</span>
                       ) : (
                         formatPercent(tirCred.mensal)
                       )}
@@ -894,10 +895,10 @@ function Individual() {
                         vermelho: prejuízo não pode passar batido. */}
                     <TD className="text-right tabular-nums">
                       {ganho === null ? (
-                        <span className="text-slate-600">—</span>
+                        <span className="text-texto-2">—</span>
                       ) : (
                         <span
-                          className={ganho < 0 ? 'font-medium text-red-600' : undefined}
+                          className={ganho < 0 ? 'font-medium text-perigo' : undefined}
                           title={
                             p.valor_estimado_complementar
                               ? `Inclui ${formatBRL(p.valor_estimado_complementar)} de complementar a receber`
@@ -912,10 +913,10 @@ function Individual() {
                         o ganho que o origina. */}
                     <TD className="text-right tabular-nums">
                       {ret === null ? (
-                        <span className="text-slate-600">—</span>
+                        <span className="text-texto-2">—</span>
                       ) : (
                         <span
-                          className={ret < 0 ? 'font-medium text-red-600' : undefined}
+                          className={ret < 0 ? 'font-medium text-perigo' : undefined}
                         >
                           {formatPercent(ret)}
                         </span>
@@ -962,7 +963,7 @@ function Individual() {
       >
         {aberto && (
           <div className="space-y-3">
-            <div className="text-xs tabular-nums text-slate-600">
+            <div className="text-xs tabular-nums text-texto-2">
               {formatCNJ(aberto.cnj)}
             </div>
             {(() => {
@@ -973,14 +974,14 @@ function Individual() {
                 // whitespace-pre-line: preserva os parágrafos do modelo.
                 return (
                   <>
-                    <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                    <p className="whitespace-pre-line text-sm leading-relaxed text-texto">
                       {texto}
                     </p>
                     {/* Carimbo de geração: sem ele não há como saber se o texto
                         é de ontem ou de dois meses atrás. Não aparece na
                         mensagem fixa dos encerrados, que não é gerada. */}
                     {!t.fixo && r?.gerado_em && (
-                      <p className="border-t border-slate-100 pt-2 text-xs tabular-nums text-slate-600">
+                      <p className="border-t border-borda pt-2 text-xs tabular-nums text-texto-2">
                         Gerado em {formatDateTime(r.gerado_em)}
                       </p>
                     )}
@@ -988,7 +989,7 @@ function Individual() {
                 )
               }
               return (
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-texto-2">
                   {r?.erro || 'Resumo ainda não gerado para este crédito.'}
                 </p>
               )
@@ -1129,7 +1130,7 @@ function Consolidado() {
     <div className="space-y-5">
       {/* Solto sobre o fundo da página, como o seletor da aba Individual. */}
       <div className="w-full sm:max-w-xs">
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-texto-2">
           Filtrar por mês
         </label>
         <Select value={mes} onChange={(e) => setMes(e.target.value)}>
@@ -1180,7 +1181,7 @@ function Consolidado() {
               <TBody>
                 {linhas.map((l) => (
                   <TR key={l.nome}>
-                    <TD className="font-medium text-slate-800">{l.nome}</TD>
+                    <TD className="font-medium text-texto">{l.nome}</TD>
                     <TD className="text-right tabular-nums">{formatBRL(l.capital)}</TD>
                     <TD className="text-right tabular-nums">{formatBRL(l.aReceber)}</TD>
                     <TD className="text-right tabular-nums">
@@ -1190,7 +1191,7 @@ function Consolidado() {
                       {l.retorno === null ? (
                         '—'
                       ) : (
-                        <span className={l.retorno < 0 ? 'font-medium text-red-600' : undefined}>
+                        <span className={l.retorno < 0 ? 'font-medium text-perigo' : undefined}>
                           {formatPercent(l.retorno)}
                         </span>
                       )}
@@ -1198,7 +1199,7 @@ function Consolidado() {
                     <TD className="text-right tabular-nums">
                       {formatPercent(l.tirAa)}
                     </TD>
-                    <TD className="text-right tabular-nums text-slate-700">
+                    <TD className="text-right tabular-nums text-texto">
                       {l.operacoes}
                     </TD>
                   </TR>
@@ -1210,24 +1211,24 @@ function Consolidado() {
                     produz número com significado (12% + 15% não é 27% de
                     carteira), e a média simples daria a um aporte de R$ 10 mil
                     o mesmo peso de um de R$ 500 mil. */}
-                <TR className="bg-slate-50 font-semibold">
-                  <TD className="text-slate-800">Total da carteira</TD>
-                  <TD className="text-right tabular-nums text-slate-800">
+                <TR className="bg-superficie-2 font-semibold">
+                  <TD className="text-texto">Total da carteira</TD>
+                  <TD className="text-right tabular-nums text-texto">
                     {formatBRL(total.capital)}
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
+                  <TD className="text-right tabular-nums text-texto">
                     {formatBRL(total.aReceber)}
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
+                  <TD className="text-right tabular-nums text-texto">
                     {formatBRL(total.jaRecebido)}
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
+                  <TD className="text-right tabular-nums text-texto">
                     {total.retorno === null ? '—' : formatPercent(total.retorno)}
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
+                  <TD className="text-right tabular-nums text-texto">
                     {formatPercent(total.tirAa)}
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
+                  <TD className="text-right tabular-nums text-texto">
                     {total.operacoes}
                   </TD>
                 </TR>
@@ -1240,7 +1241,7 @@ function Consolidado() {
             total, e quem confere a soma a olho precisa saber por que a conta não
             fecha com a aba Créditos. */}
         {linhas.length > 0 && semCessionario > 0 && (
-          <p className="mt-2 text-xs text-slate-600">
+          <p className="mt-2 text-xs text-texto-2">
             {semCessionario} crédito(s) do período estão fora desta tabela por não
             ter cessionário cadastrado, e por isso também não entram no total.
           </p>

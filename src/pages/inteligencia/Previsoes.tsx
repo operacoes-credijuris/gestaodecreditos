@@ -92,8 +92,8 @@ function ListaOperacoes({
 }) {
   if (operacoes.length === 0) return null
   return (
-    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+    <div className="mt-3 rounded-lg border border-borda bg-superficie-2 p-3">
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-texto-3">
         {titulo} · {operacoes.length}{' '}
         {operacoes.length === 1 ? 'operação' : 'operações'}
       </p>
@@ -110,7 +110,7 @@ function ListaOperacoes({
         <TBody>
           {operacoes.map((o) => (
             <TR key={o.ref}>
-              <TD className="whitespace-nowrap font-mono text-xs text-slate-600">
+              <TD className="whitespace-nowrap font-mono text-xs text-texto-2">
                 {o.numeroCnj ? formatCNJ(o.numeroCnj) : o.ref}
               </TD>
               <TD>{o.tribunal ?? '—'}</TD>
@@ -122,7 +122,7 @@ function ListaOperacoes({
               {mostrarAtraso && (
                 <TD className="text-right tabular-nums">{dias(o.diasVencida)}</TD>
               )}
-              {motivo && <TD className="text-slate-600">{o.motivoSemValor ?? '—'}</TD>}
+              {motivo && <TD className="text-texto-2">{o.motivoSemValor ?? '—'}</TD>}
             </TR>
           ))}
         </TBody>
@@ -279,7 +279,7 @@ export default function Previsoes() {
               <TBody>
                 {forecast.blocos.map((b) => (
                   <TR key={b.rotulo}>
-                    <TD className="font-medium text-slate-800">{b.rotulo}</TD>
+                    <TD className="font-medium text-texto">{b.rotulo}</TD>
                     <TD className="text-right tabular-nums">
                       <BotaoVer
                         aberto={aberto === b.rotulo}
@@ -289,7 +289,7 @@ export default function Previsoes() {
                       </BotaoVer>
                     </TD>
                     <TD className="text-right tabular-nums">{brl(b.valor)}</TD>
-                    <TD className="text-slate-600">{b.motivo}</TD>
+                    <TD className="text-texto-2">{b.motivo}</TD>
                   </TR>
                 ))}
               </TBody>
@@ -305,8 +305,8 @@ export default function Previsoes() {
             )}
 
             {incalculaveis.length > 0 && (
-              <div className="mt-4 border-t border-slate-200 pt-3">
-                <p className="text-xs text-slate-500">
+              <div className="mt-4 border-t border-borda pt-3">
+                <p className="text-xs text-texto-3">
                   <BotaoVer
                     aberto={aberto === INCALCULAVEIS}
                     onClick={() => setAberto(aberto === INCALCULAVEIS ? null : INCALCULAVEIS)}
@@ -347,7 +347,7 @@ export default function Previsoes() {
           <CardBody>
             <LinhaMetrica rotulo="Desvio mediano observado" valor={dias(ajuste.desvioMediano)} destaque />
             <LinhaMetrica rotulo="Percentil 75 do desvio" valor={dias(ajuste.desvioP75)} />
-            <p className="mt-3 text-xs text-slate-500">{ajuste.metodologia}</p>
+            <p className="mt-3 text-xs text-texto-3">{ajuste.metodologia}</p>
           </CardBody>
         </Card>
       )}

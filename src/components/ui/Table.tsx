@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Inbox, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Inbox, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Button } from './Button'
 
@@ -17,12 +17,14 @@ export function Table({
       className={cn(
         // rounded acompanha o canto do Card que embrulha as listagens — sem
         // isso o cabeçalho tingido vazaria quadrado sobre o canto redondo.
-        'overflow-x-auto rounded-2xl scrollbar-thin',
-        // Densidade compacta usada nas listagens (Processos/Requerimentos/Contatos)
-        dense && '[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:text-sm',
+        'overflow-x-auto rounded-cartao scrollbar-thin',
+        // Densidade compacta usada nas listagens (Processos/Requerimentos/Contatos):
+        // aperta o ESPAÇO, não a letra. A célula fica nos 14px do texto corrido,
+        // como na tabela de Créditos da amostra.
+        dense && '[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:py-3',
       )}
     >
-      <table className={cn('w-full border-collapse text-sm', className)}>
+      <table className={cn('w-full border-collapse text-corpo', className)}>
         {children}
       </table>
     </div>
@@ -31,9 +33,10 @@ export function Table({
 
 export function THead({ children }: { children: ReactNode }) {
   return (
-    // Tinta da marca no cabeçalho (e não cinza): é o toque que faz toda tabela
-    // da plataforma "ser Credijuris" sem carregar a leitura.
-    <thead className="font-display border-b border-brand-100 bg-brand-50/60 text-left text-xs font-bold uppercase tracking-wide text-brand-800">
+    // O `.tbl th` da amostra: rótulo pequeno, em caixa alta e no cinza de
+    // metadado, sobre a superfície 2. A tinta azul de antes saiu — com o menu
+    // navy e o primário azul, o cabeçalho azul competia com o que é clicável.
+    <thead className="border-b border-borda bg-superficie-2 text-left text-xs font-bold uppercase tracking-wide text-texto-3">
       {children}
     </thead>
   )
@@ -50,14 +53,14 @@ export function TH({
   colSpan?: number
 }) {
   return (
-    <th colSpan={colSpan} className={cn('px-4 py-3 font-semibold', className)}>
+    <th colSpan={colSpan} className={cn('px-5 py-3 font-bold', className)}>
       {children}
     </th>
   )
 }
 
 export function TBody({ children }: { children: ReactNode }) {
-  return <tbody className="divide-y divide-slate-100">{children}</tbody>
+  return <tbody className="divide-y divide-borda">{children}</tbody>
 }
 
 export function TR({
@@ -73,8 +76,8 @@ export function TR({
     <tr
       onClick={onClick}
       className={cn(
-        // Hover levemente azulado + transição: a linha "acende" em vez de piscar.
-        'transition-colors duration-100 hover:bg-brand-50/40',
+        // Hover na superfície 2 + transição: a linha "acende" em vez de piscar.
+        'transition-colors duration-100 hover:bg-superficie-2',
         onClick && 'cursor-pointer',
         className,
       )}
@@ -95,7 +98,7 @@ export function TD({
     // align-top + break-words: as células mostram o texto INTEIRO, quebrando em
     // linhas quando necessário (o app não usa truncamento com "…" nas tabelas).
     <td
-      className={cn('break-words px-4 py-3 align-top text-slate-700', className)}
+      className={cn('break-words px-5 py-4 align-top text-corpo text-texto', className)}
     >
       {children}
     </td>
@@ -112,14 +115,16 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
-      <div className="rounded-full bg-brand-50 p-3 text-brand-400">
-        <Inbox className="h-6 w-6" />
+    // O `.empty` da amostra: o ícone numa placa azul-clara de cantos largos,
+    // título em negrito e a explicação em cinza secundário, com largura de leitura.
+    <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
+      <div className="grid h-16 w-16 place-items-center rounded-cartao bg-marca-suave text-marca-texto">
+        <Inbox className="h-7 w-7" aria-hidden />
       </div>
-      <div>
-        <p className="font-medium text-slate-700">{title}</p>
+      <div className="max-w-md">
+        <p className="font-display text-lg font-bold text-texto">{title}</p>
         {description && (
-          <p className="mt-1 text-sm text-slate-600">{description}</p>
+          <p className="mt-1 text-corpo text-texto-2">{description}</p>
         )}
       </div>
       {action}
@@ -131,9 +136,9 @@ export function Loading({ label = 'Carregando…' }: { label?: string }) {
   // Skeleton shimmer: sugere o conteúdo que está chegando, sem spinner.
   return (
     <div aria-busy="true" aria-label={label} className="space-y-3 py-8">
-      <div className="skeleton h-9 w-full rounded-lg" />
-      <div className="skeleton h-9 w-11/12 rounded-lg" />
-      <div className="skeleton h-9 w-full rounded-lg" />
+      <div className="skeleton h-9 w-full rounded-controle" />
+      <div className="skeleton h-9 w-11/12 rounded-controle" />
+      <div className="skeleton h-9 w-full rounded-controle" />
       <span className="sr-only">{label}</span>
     </div>
   )
@@ -147,9 +152,15 @@ export function ErrorState({
   onRetry?: () => void
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-14 text-center text-red-600">
-      <p className="font-medium">Não foi possível carregar os dados.</p>
-      {message && <p className="text-sm text-red-500">{message}</p>}
+    // Mesmo desenho do vazio, com a placa no vermelho de perigo (o `.ill.bad` da
+    // amostra). O título fica em vermelho; o motivo, no cinza de leitura — em
+    // vermelho, uma mensagem longa de erro cansava mais do que informava.
+    <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
+      <div className="mb-1 grid h-16 w-16 place-items-center rounded-cartao bg-perigo-fundo text-perigo">
+        <AlertTriangle className="h-7 w-7" aria-hidden />
+      </div>
+      <p className="font-display text-lg font-bold text-perigo">Não foi possível carregar os dados.</p>
+      {message && <p className="max-w-md text-corpo text-texto-2">{message}</p>}
       {onRetry && (
         <Button
           variant="outline"

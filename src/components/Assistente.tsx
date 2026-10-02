@@ -490,8 +490,8 @@ export function Assistente() {
         title="Perguntar ao assistente"
         className={cn(
           'fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center',
-          'rounded-full bg-gradient-to-b from-brand-600 to-brand-700 text-white shadow-lg',
-          'transition-all duration-150 hover:from-brand-500 hover:to-brand-600 hover:shadow-xl',
+          'rounded-full bg-gradient-to-b from-brand-600 to-brand-700 text-white shadow-nivel-2',
+          'transition-all duration-150 hover:from-brand-500 hover:to-brand-600 hover:shadow-nivel-3',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
           'active:scale-95',
         )}
@@ -507,21 +507,21 @@ export function Assistente() {
         role="dialog"
         aria-label="Assistente de dados"
         className={cn(
-          'fixed z-40 flex flex-col overflow-hidden rounded-xl border border-slate-200',
-          'bg-white shadow-2xl',
+          'fixed z-40 flex flex-col overflow-hidden rounded-xl border border-borda',
+          'bg-superficie shadow-nivel-3',
           // Celular: ocupa a tela. Desktop: painel no canto, como um chat.
           'inset-x-3 bottom-3 top-16 sm:inset-x-auto sm:top-auto sm:bottom-5 sm:right-5',
           'sm:h-[min(620px,calc(100vh-4rem))] sm:w-[420px]',
         )}
       >
-        <header className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <header className="flex items-center gap-2 border-b border-borda bg-superficie-2 px-4 py-3">
           <IconButton
             label="Histórico de conversas"
             icon={<Menu className="h-4 w-4" />}
             onClick={() => setHistoricoAberto((v) => !v)}
           />
           <Sparkles className="h-4 w-4 shrink-0 text-brand-700" />
-          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-texto">
             Assistente de dados
           </p>
           <IconButton
@@ -539,7 +539,7 @@ export function Assistente() {
             {mensagens.length === 0 && (
               <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
                 <div>
-                  <p className="font-display text-lg font-bold text-slate-800">
+                  <p className="font-display text-lg font-bold text-texto">
                     Olá{primeiroNome ? `, ${primeiroNome}` : ''}!
                   </p>
                 </div>
@@ -550,8 +550,8 @@ export function Assistente() {
                       type="button"
                       onClick={() => enviar(s)}
                       className={cn(
-                        'rounded-lg border border-slate-200 px-3 py-2 text-left text-sm',
-                        'text-slate-700 transition-colors hover:border-brand-300 hover:bg-brand-50',
+                        'rounded-lg border border-borda px-3 py-2 text-left text-sm',
+                        'text-texto transition-colors hover:border-brand-300 hover:bg-brand-50',
                         'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
                       )}
                     >
@@ -571,7 +571,7 @@ export function Assistente() {
                     ? 'ml-auto max-w-[92%] bg-brand-600 text-white'
                     : // A resposta pode trazer tabela de processos: ocupa a
                       // largura inteira, senão a tabela nasce comprimida.
-                      'w-full bg-slate-100 text-slate-800',
+                      'w-full bg-superficie-3 text-texto',
                 )}
               >
                 {m.role === 'user' ? (
@@ -622,22 +622,22 @@ export function Assistente() {
                         type="button"
                         onClick={() => abrirWhatsapp(m.contatoSugerido!)}
                         className={cn(
-                          'mt-3 flex w-full items-center gap-2.5 rounded-lg border border-emerald-200',
-                          'bg-emerald-50 p-3 text-left transition-colors hover:bg-emerald-100',
-                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500',
+                          'mt-3 flex w-full items-center gap-2.5 rounded-lg border border-sucesso-borda',
+                          'bg-sucesso-fundo p-3 text-left transition-colors hover:bg-sucesso-borda/40',
+                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-sucesso-cheio',
                         )}
                       >
-                        <MessageCircle className="h-5 w-5 shrink-0 text-emerald-700" />
+                        <MessageCircle className="h-5 w-5 shrink-0 text-sucesso" />
                         <span className="min-w-0 flex-1">
                           {m.contatoSugerido.nome_contato && (
-                            <span className="block truncate text-xs text-emerald-700">
+                            <span className="block truncate text-xs text-sucesso">
                               {m.contatoSugerido.nome_contato}
                             </span>
                           )}
-                          <span className="block font-medium text-emerald-900">
+                          <span className="block font-medium text-sucesso">
                             {m.contatoSugerido.whatsapp}
                           </span>
-                          <span className="block text-xs text-emerald-700">
+                          <span className="block text-xs text-sucesso">
                             Clique para abrir o WhatsApp e copiar a mensagem
                           </span>
                         </span>
@@ -649,18 +649,18 @@ export function Assistente() {
             ))}
 
             {carregando && (
-              <div className="flex items-center gap-2 text-sm text-slate-600">
+              <div className="flex items-center gap-2 text-sm text-texto-2">
                 <span className="flex gap-1">
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0ms]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-texto-3 [animation-delay:0ms]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-texto-3 [animation-delay:150ms]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-texto-3 [animation-delay:300ms]" />
                 </span>
                 Consultando os dados…
               </div>
             )}
 
             {erro && (
-              <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              <div className="flex items-start gap-2 rounded-lg bg-perigo-fundo px-3 py-2 text-sm text-perigo">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span className="break-words">{erro}</span>
               </div>
@@ -675,13 +675,13 @@ export function Assistente() {
           <div
             className={cn(
               'absolute inset-y-0 left-0 z-10 flex w-[82%] max-w-[280px] flex-col overflow-hidden',
-              'border-r border-slate-200 bg-white',
+              'border-r border-borda bg-superficie',
               'transition-transform duration-200 ease-out',
               historicoAberto ? 'translate-x-0' : '-translate-x-full pointer-events-none',
             )}
           >
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="text-sm font-semibold text-slate-800">Conversas</p>
+            <div className="flex items-center justify-between gap-2 border-b border-borda bg-superficie-2 px-3 py-2">
+              <p className="text-sm font-semibold text-texto">Conversas</p>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
@@ -699,10 +699,10 @@ export function Assistente() {
             </div>
             <div className="flex-1 overflow-y-auto scrollbar-thin">
               {conversasQuery.isLoading && (
-                <p className="p-4 text-sm text-slate-500">Carregando…</p>
+                <p className="p-4 text-sm text-texto-3">Carregando…</p>
               )}
               {conversasQuery.data?.length === 0 && (
-                <p className="p-4 text-sm text-slate-500">
+                <p className="p-4 text-sm text-texto-3">
                   Nenhuma conversa salva ainda — as últimas 10 aparecem aqui.
                 </p>
               )}
@@ -710,7 +710,7 @@ export function Assistente() {
                 <div
                   key={c.id}
                   className={cn(
-                    'group flex items-center gap-1 border-b border-slate-100 px-3 py-2.5 hover:bg-slate-50',
+                    'group flex items-center gap-1 border-b border-borda px-3 py-2.5 hover:bg-superficie-2',
                     c.id === conversaAtualId && 'bg-brand-50',
                   )}
                 >
@@ -719,8 +719,8 @@ export function Assistente() {
                     onClick={() => carregarConversa(c)}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <p className="truncate text-sm text-slate-800">{c.titulo}</p>
-                    <p className="text-xs text-slate-500">{formatDateTime(c.atualizado_em)}</p>
+                    <p className="truncate text-sm text-texto">{c.titulo}</p>
+                    <p className="text-xs text-texto-3">{formatDateTime(c.atualizado_em)}</p>
                   </button>
                   <IconButton
                     label="Excluir conversa"
@@ -738,14 +738,14 @@ export function Assistente() {
             e.preventDefault()
             enviar(texto)
           }}
-          className="border-t border-slate-200 bg-slate-50 px-3 py-3"
+          className="border-t border-borda bg-superficie-2 px-3 py-3"
         >
           {arquivos.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {arquivos.map((f, i) => (
                 <span
                   key={`${f.name}-${i}`}
-                  className="flex items-center gap-1 rounded-full bg-slate-200 py-1 pl-2.5 pr-1 text-xs text-slate-700"
+                  className="flex items-center gap-1 rounded-full bg-borda py-1 pl-2.5 pr-1 text-xs text-texto"
                 >
                   <Paperclip className="h-3 w-3 shrink-0" />
                   <span className="max-w-[120px] truncate">{f.name}</span>
@@ -753,7 +753,7 @@ export function Assistente() {
                     type="button"
                     onClick={() => removerArquivo(i)}
                     aria-label={`Remover ${f.name}`}
-                    className="rounded-full p-0.5 hover:bg-slate-300"
+                    className="rounded-full p-0.5 hover:bg-borda-forte"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -776,8 +776,8 @@ export function Assistente() {
             }}
             placeholder="Faça uma pergunta…"
             className={cn(
-              'max-h-28 min-h-[2.5rem] w-full resize-none rounded-lg border border-slate-300',
-              'px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400',
+              'max-h-28 min-h-[2.5rem] w-full resize-none rounded-lg border border-borda-forte',
+              'px-3 py-2 text-sm text-texto placeholder:text-texto-3',
               'focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500',
             )}
           />
@@ -794,8 +794,8 @@ export function Assistente() {
                   aria-haspopup="listbox"
                   aria-expanded={modeloAberto}
                   className={cn(
-                    'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600',
-                    'hover:bg-slate-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                    'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-texto-2',
+                    'hover:bg-borda/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
                   )}
                 >
                   <Sparkles className="h-3 w-3" />
@@ -806,7 +806,7 @@ export function Assistente() {
                 {modeloAberto && (
                   <div
                     role="listbox"
-                    className="absolute bottom-full left-0 z-20 mb-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                    className="absolute bottom-full left-0 z-20 mb-1 w-44 overflow-hidden rounded-lg border border-borda bg-superficie py-1 shadow-nivel-2"
                   >
                     {MODELOS.map((m) => (
                       <button
@@ -819,8 +819,8 @@ export function Assistente() {
                           setModeloAberto(false)
                         }}
                         className={cn(
-                          'flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-slate-50',
-                          m.key === modelo ? 'font-semibold text-brand-700' : 'text-slate-700',
+                          'flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-superficie-2',
+                          m.key === modelo ? 'font-semibold text-brand-700' : 'text-texto',
                         )}
                       >
                         {m.label}
@@ -841,8 +841,8 @@ export function Assistente() {
                     aria-haspopup="listbox"
                     aria-expanded={skillsAberto}
                     className={cn(
-                      'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600',
-                      'hover:bg-slate-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                      'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-texto-2',
+                      'hover:bg-borda/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
                     )}
                   >
                     <Puzzle className="h-3 w-3" />
@@ -855,7 +855,7 @@ export function Assistente() {
                     <div
                       role="listbox"
                       aria-multiselectable="true"
-                      className="absolute bottom-full left-0 z-20 mb-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                      className="absolute bottom-full left-0 z-20 mb-1 w-52 overflow-hidden rounded-lg border border-borda bg-superficie py-1 shadow-nivel-2"
                     >
                       {skillsQuery.data.map((s) => {
                         const marcada = skillsSelecionadas.has(s.skill_id)
@@ -866,14 +866,14 @@ export function Assistente() {
                             role="option"
                             aria-selected={marcada}
                             onClick={() => alternarSkill(s.skill_id)}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-texto hover:bg-superficie-2"
                           >
                             <span
                               className={cn(
                                 'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
                                 marcada
                                   ? 'border-brand-600 bg-brand-600 text-white'
-                                  : 'border-slate-300',
+                                  : 'border-borda-forte',
                               )}
                             >
                               {marcada && <Check className="h-3 w-3" />}
@@ -900,8 +900,8 @@ export function Assistente() {
                 aria-label="Anexar arquivo"
                 title="Anexar arquivo"
                 className={cn(
-                  'flex items-center justify-center rounded-md p-1.5 text-slate-600',
-                  'hover:bg-slate-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                  'flex items-center justify-center rounded-md p-1.5 text-texto-2',
+                  'hover:bg-borda/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
                 )}
               >
                 <Paperclip className="h-3.5 w-3.5" />

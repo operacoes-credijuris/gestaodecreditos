@@ -638,7 +638,7 @@ export function PainelProcessosJudiciais({
   const comDica = (rotulo: string, dica: string) => (
     <span className="inline-flex items-center gap-1">
       {rotulo}
-      <span title={dica} aria-label={dica} className="cursor-help text-slate-400">
+      <span title={dica} aria-label={dica} className="cursor-help text-texto-3">
         <Info className="h-3.5 w-3.5" />
       </span>
     </span>
@@ -696,7 +696,7 @@ export function PainelProcessosJudiciais({
 
   const refazer = (
     <div className="flex items-center justify-end gap-3">
-      {custo && <span className="text-xs text-slate-500">Custo: {custo}</span>}
+      {custo && <span className="text-xs text-texto-3">Custo: {custo}</span>}
       <Button
         size="sm"
         variant="outline"
@@ -750,14 +750,14 @@ export function PainelProcessosJudiciais({
   return (
     <div className="space-y-4">
       {erro && (
-        <div className="flex items-start gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-700 ring-1 ring-red-200">
+        <div className="flex items-start gap-2 rounded-xl bg-perigo-fundo p-3 text-sm text-perigo ring-1 ring-perigo-borda">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{erro}</span>
         </div>
       )}
 
       {aviso && (
-        <div className="flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-800 ring-1 ring-amber-200">
+        <div className="flex items-start gap-2 rounded-xl bg-aviso-fundo p-3 text-sm text-aviso ring-1 ring-aviso-borda">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{aviso}</span>
         </div>
@@ -855,13 +855,13 @@ export function PainelProcessosJudiciais({
                     <span
                       className={cn(
                         'rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums',
-                        ativa ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-600',
+                        ativa ? 'bg-brand-50 text-brand-700' : 'bg-superficie-3 text-texto-2',
                       )}
                     >
                       {lista.length}
                     </span>
                   </span>
-                  <span className="text-xs font-normal tabular-nums text-slate-500">
+                  <span className="text-xs font-normal tabular-nums text-texto-3">
                     {soma > 0 ? brl(soma) : '—'}
                   </span>
                 </span>
@@ -905,7 +905,7 @@ export function PainelProcessosJudiciais({
           {estagiosDaAba.length > 1 && (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-xs text-slate-500">Estágio</span>
+                <span className="mr-1 text-xs text-texto-3">Estágio</span>
                 {estagiosDaAba.map((e) => {
                   const marcado = estagiosMarcados.includes(e)
                   const quantos = daAba.filter((x) => x.estagio === e).length
@@ -920,19 +920,19 @@ export function PainelProcessosJudiciais({
                         'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors',
                         marcado
                           ? 'border-brand-400 bg-brand-50 text-brand-800'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+                          : 'border-borda bg-superficie text-texto-2 hover:border-borda-forte',
                       )}
                     >
                       <span
                         className={cn(
                           'flex h-3 w-3 flex-none items-center justify-center rounded-sm border',
-                          marcado ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300',
+                          marcado ? 'border-brand-600 bg-brand-600 text-white' : 'border-borda-forte',
                         )}
                       >
                         {marcado && <Check className="h-2.5 w-2.5" />}
                       </span>
                       {e}
-                      <span className="tabular-nums text-slate-400">{quantos}</span>
+                      <span className="tabular-nums text-texto-3">{quantos}</span>
                     </button>
                   )
                 })}
@@ -947,7 +947,7 @@ export function PainelProcessosJudiciais({
                 )}
               </div>
               {estagiosMarcados.length > 0 && (
-                <span className="text-xs text-slate-500 tabular-nums">
+                <span className="text-xs text-texto-3 tabular-nums">
                   {listados.length} de {daAba.length} processo(s) ·{' '}
                   {brl(somaDasCausas(listados))} de {brl(somaDasCausas(daAba))}
                 </span>
@@ -989,7 +989,7 @@ export function PainelProcessosJudiciais({
                   ) : (
                     x.numero_processo
                   )}
-                  {x.tribunal && <span className="block text-slate-400">{x.tribunal}</span>}
+                  {x.tribunal && <span className="block text-texto-3">{x.tribunal}</span>}
                 </TD>
                 <TD>{x.objeto ?? '—'}</TD>
                 <TD>
@@ -1002,7 +1002,7 @@ export function PainelProcessosJudiciais({
                 {/* MÊS E ANO, sem o dia: a pergunta é "isto ainda anda?", e ela se
                     responde na distância — agosto deste ano é vivo, agosto de 2021
                     é lembrança. O dia exato gastaria largura sem mudar o juízo. */}
-                <TD className="whitespace-nowrap text-xs text-slate-500">
+                <TD className="whitespace-nowrap text-xs text-texto-3">
                   {mesAno(x.data_ultima_movimentacao)}
                 </TD>
                 {/* O SELO, SEM O PARÁGRAFO. O motivo do risco continua no banco e

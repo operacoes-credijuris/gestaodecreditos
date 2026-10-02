@@ -679,7 +679,7 @@ function JanelaDaPlanilha({
           </Button>
           <button
             type="button"
-            className="ml-auto text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
+            className="ml-auto text-xs text-texto-3 underline underline-offset-2 hover:text-texto"
             onClick={() => {
               onMotorAntigo()
               onFechar()
@@ -691,7 +691,7 @@ function JanelaDaPlanilha({
         </div>
       }
     >
-      <p className="mb-3 text-sm text-slate-600">
+      <p className="mb-3 text-sm text-texto-2">
         Ao final da análise, o Claude entrega um bloco de código com as respostas da planilha.
         Copie <strong>esse bloco</strong> pelo botão de copiar dele e cole aqui: a plataforma
         preenche o modelo da casa, salva na pasta do cedente no Drive e anota no card.
@@ -705,7 +705,7 @@ function JanelaDaPlanilha({
         spellCheck={false}
       />
       {erro && (
-        <div className="mt-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 ring-1 ring-inset ring-red-200">
+        <div className="mt-2 rounded-lg bg-perigo-fundo p-2.5 text-xs text-perigo ring-1 ring-inset ring-perigo-borda">
           {erro}
         </div>
       )}
@@ -827,7 +827,7 @@ function JanelaDeMensagem({
                 onFechar()
               }}
               disabled={trabalhando}
-              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
+              className="text-xs text-texto-3 underline-offset-2 hover:text-texto-2 hover:underline disabled:opacity-50"
             >
               cancelar
             </button>
@@ -836,7 +836,7 @@ function JanelaDeMensagem({
       }
     >
       <textarea
-        className="min-h-[220px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 font-mono text-[13px] leading-relaxed placeholder:font-sans placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        className="min-h-[220px] w-full resize-y rounded-xl border border-borda px-3.5 py-2 font-mono text-sm leading-relaxed placeholder:font-sans placeholder:text-texto-3 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
         value={mensagem}
         disabled={trabalhando}
         placeholder={
@@ -847,18 +847,18 @@ function JanelaDeMensagem({
         onChange={(e) => setMensagem(e.target.value)}
       />
       {exigeMotivo && mensagem.trim().length > 0 && mensagem.trim().length < 10 && (
-        <p className="mt-1.5 text-xs text-amber-700">
+        <p className="mt-1.5 text-xs text-aviso">
           Escreva a razão por extenso — ela fica no card como registro da decisão.
         </p>
       )}
       {semResumo && (
-        <p className="mt-1.5 text-xs text-amber-700">
+        <p className="mt-1.5 text-xs text-aviso">
           Este card não tem resumo da oportunidade gravado — a análise não foi salva
           por esta versão do sistema. Abra a análise e salve, ou escreva o resumo à
           mão aqui: é o que a proposta vai ler.
         </p>
       )}
-      {erro && <p className="mt-1.5 text-xs text-red-700">{erro}</p>}
+      {erro && <p className="mt-1.5 text-xs text-perigo">{erro}</p>}
     </Modal>
   )
 }
@@ -903,13 +903,13 @@ function AvisoSemNumero({ lead }: { lead: KommoLead }) {
     return (
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {!d.numero && (
-          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+          <span className="rounded-full bg-aviso-fundo px-2 py-0.5 text-xs text-aviso ring-1 ring-inset ring-aviso-borda">
             sem número de processo no card
           </span>
         )}
         {d.divergenciaTipo && (
           <span
-            className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200"
+            className="rounded-full bg-aviso-fundo px-2 py-0.5 text-xs text-aviso ring-1 ring-inset ring-aviso-borda"
             title={d.divergenciaTipo}
           >
             funil e anotação discordam do tipo
@@ -953,9 +953,9 @@ function SeloDaCriacao({ lead }: { lead: KommoLead }) {
   if (!quando) return null
   const decorrido = tempoDecorrido(quando)
   return (
-    <span className="text-right text-xs text-slate-400" title="Quando o card foi criado no Kommo">
+    <span className="text-right text-xs text-texto-3" title="Quando o card foi criado no Kommo">
       <span className="whitespace-nowrap">Criado em {formatDateTime(quando)}</span>
-      {decorrido && <span className="whitespace-nowrap text-slate-300"> · {decorrido}</span>}
+      {decorrido && <span className="whitespace-nowrap text-texto-3"> · {decorrido}</span>}
     </span>
   )
 }
@@ -971,11 +971,11 @@ function SeloDaEtapa({ lead }: { lead: KommoLead }) {
     // "ÚLT. MOV." NA FRENTE desde que a data de criação passou a vir logo abaixo:
     // as duas têm o mesmo formato, e cada uma diz de que é.
     <span
-      className="text-right text-xs text-slate-400"
+      className="text-right text-xs text-texto-3"
       title="Última movimentação: quando o card entrou na coluna em que está"
     >
       <span className="whitespace-nowrap">Últ. mov. em {formatDateTime(quando)}</span>
-      {decorrido && <span className="whitespace-nowrap text-slate-300"> · {decorrido}</span>}
+      {decorrido && <span className="whitespace-nowrap text-texto-3"> · {decorrido}</span>}
     </span>
   )
 }
@@ -985,7 +985,7 @@ function DesdeQuando({ quando }: { quando: string | null }) {
   if (!quando) return <span />
   const decorrido = tempoDecorrido(quando)
   return (
-    <span className="whitespace-nowrap text-[10px] text-slate-400" title={`Desde ${formatDateTime(quando)}`}>
+    <span className="whitespace-nowrap text-[10px] text-texto-3" title={`Desde ${formatDateTime(quando)}`}>
       {decorrido}
     </span>
   )
@@ -1080,14 +1080,14 @@ function SeletorDeEtiquetas({
           'inline-flex h-5 w-5 items-center justify-center rounded transition-colors',
           aberto
             ? 'bg-brand-50 text-brand-700'
-            : 'text-slate-400 hover:bg-slate-100 hover:text-brand-700',
+            : 'text-texto-3 hover:bg-superficie-3 hover:text-brand-700',
         )}
       >
         <Tag className="h-3.5 w-3.5" />
       </button>
 
       {aberto && (
-        <div className="absolute left-0 z-20 mt-1 w-[32rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+        <div className="absolute left-0 z-20 mt-1 w-[32rem] max-w-[calc(100vw-2rem)] rounded-lg border border-borda bg-superficie p-2 shadow-nivel-2">
           {etiquetasPorDestino(oferecidas).map((grupo) => {
             const algumaPosta = grupo.etiquetas.some((e) => temEtiqueta(e.nome))
             return (
@@ -1102,7 +1102,7 @@ function SeletorDeEtiquetas({
                 {/* O FUNDO COM ETIQUETA fica em destaque: numa lista de sete, é
                     o que se procura primeiro. */}
                 <span
-                  className={cn('text-xs', algumaPosta ? 'font-medium text-slate-800' : 'text-slate-600')}
+                  className={cn('text-xs', algumaPosta ? 'font-medium text-texto' : 'text-texto-2')}
                 >
                   {grupo.destino}:
                 </span>
@@ -1122,8 +1122,8 @@ function SeletorDeEtiquetas({
                         title={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"`}
                         aria-pressed={posta}
                         className={cn(
-                          'inline-flex items-center gap-1 justify-self-start rounded px-1.5 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60',
-                          posta ? 'font-medium text-slate-800' : 'text-slate-600',
+                          'inline-flex items-center gap-1 justify-self-start rounded px-1.5 py-1 text-xs hover:bg-superficie-2 disabled:cursor-not-allowed disabled:opacity-60',
+                          posta ? 'font-medium text-texto' : 'text-texto-2',
                         )}
                       >
                         {/* REDONDO, e não quadrado: no fundo a escolha é uma só,
@@ -1135,7 +1135,7 @@ function SeletorDeEtiquetas({
                             'flex h-3.5 w-3.5 flex-none items-center justify-center rounded-full border',
                             posta
                               ? 'border-brand-600 bg-brand-600 text-white'
-                              : 'border-slate-300 text-slate-400',
+                              : 'border-borda-forte text-texto-3',
                           )}
                         >
                           {emVoo === e.nome ? (
@@ -1242,7 +1242,7 @@ function BotaoEscolherProposta({
       </Button>
 
       {aberto && (
-        <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-2 text-left shadow-lg">
+        <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-borda bg-superficie p-2 text-left shadow-nivel-2">
           {fundo === null ? (
             FUNDOS_DA_PRECIFICACAO.map((f) => {
               const s = situacao(f)
@@ -1251,11 +1251,11 @@ function BotaoEscolherProposta({
                   key={f}
                   type="button"
                   onClick={() => setFundo(f)}
-                  className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-slate-50"
+                  className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-superficie-2"
                 >
-                  <span className={s?.ato === 'Cotado' ? 'font-medium text-slate-800' : 'text-slate-600'}>{f}</span>
+                  <span className={s?.ato === 'Cotado' ? 'font-medium text-texto' : 'text-texto-2'}>{f}</span>
                   {s && (
-                    <span className="whitespace-nowrap text-[10px] text-slate-400">
+                    <span className="whitespace-nowrap text-[10px] text-texto-3">
                       {s.ato}
                       {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
                     </span>
@@ -1265,7 +1265,7 @@ function BotaoEscolherProposta({
             })
           ) : (
             <div className="p-1">
-              <p className="text-xs font-medium text-slate-800">{mensagemDaProposta(fundo)}</p>
+              <p className="text-xs font-medium text-texto">{mensagemDaProposta(fundo)}</p>
               <div className="mt-2 flex justify-end gap-2">
                 <Button size="sm" variant="secondary" onClick={() => setFundo(null)} disabled={carregando}>
                   Voltar
@@ -1338,10 +1338,10 @@ function ChecksDosFundos({
                 className={cn(
                   'flex h-5 w-5 items-center justify-center rounded border transition-colors disabled:cursor-default',
                   ato?.reprova
-                    ? 'border-red-600 bg-red-600 text-white'
+                    ? 'border-perigo-cheio bg-perigo-cheio text-white'
                     : ato
-                      ? 'border-emerald-600 bg-emerald-600 text-white'
-                      : 'border-slate-300 bg-white hover:border-emerald-500 hover:bg-emerald-50',
+                      ? 'border-sucesso-cheio bg-sucesso-cheio text-white'
+                      : 'border-borda-forte bg-superficie hover:border-sucesso-cheio hover:bg-sucesso-fundo',
                 )}
               >
                 {ato?.reprova ? <X className="h-3.5 w-3.5" /> : ato && <Check className="h-3.5 w-3.5" />}
@@ -1353,7 +1353,7 @@ function ChecksDosFundos({
                 title={`Abrir a plataforma ${doFundo(f)}`}
                 className={cn(
                   'font-display inline-flex items-center gap-1 text-sm font-semibold hover:underline',
-                  ato?.reprova ? 'text-red-700' : ok ? 'text-emerald-700' : 'text-slate-700 hover:text-brand-700',
+                  ato?.reprova ? 'text-perigo' : ok ? 'text-sucesso' : 'text-texto hover:text-brand-700',
                 )}
               >
                 {f.fundo}
@@ -1479,7 +1479,7 @@ function JanelaDoEnvioAoFundo({
           }}
           disabled={ocupado}
           placeholder="O que foi enviado, ou o motivo da reprovação (opcional) — dá para colar o print aqui com Ctrl+V."
-          className="w-full resize-y rounded-md border border-slate-200 p-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+          className="w-full resize-y rounded-md border border-borda p-2 text-sm text-texto placeholder:text-texto-3 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
         />
         <div>
           <input
@@ -1505,13 +1505,13 @@ function JanelaDoEnvioAoFundo({
           {arquivos.length > 0 && (
             <ul className="mt-2 space-y-1">
               {arquivos.map((a, i) => (
-                <li key={`${a.name}-${i}`} className="flex items-center justify-between gap-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                <li key={`${a.name}-${i}`} className="flex items-center justify-between gap-2 rounded bg-superficie-2 px-2 py-1 text-xs text-texto-2">
                   <span className="truncate">{a.name}</span>
                   <button
                     type="button"
                     onClick={() => setArquivos((antes) => antes.filter((_, j) => j !== i))}
                     disabled={ocupado}
-                    className="text-slate-400 hover:text-red-600"
+                    className="text-texto-3 hover:text-perigo"
                     aria-label={`Tirar ${a.name}`}
                   >
                     <X className="h-3.5 w-3.5" />
@@ -1522,22 +1522,22 @@ function JanelaDoEnvioAoFundo({
           )}
         </div>
         {erro && !andamento && (
-          <p className="rounded-md bg-red-50 p-2 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+          <p className="rounded-md bg-perigo-fundo p-2 text-xs text-perigo ring-1 ring-inset ring-perigo-borda">
             Não deu certo: {erro}
           </p>
         )}
         {andamento && (
           <div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-1.5 overflow-hidden rounded-full bg-superficie-3">
               <div
                 className={cn(
-                  'h-full rounded-full bg-emerald-600 transition-all duration-200',
+                  'h-full rounded-full bg-sucesso-cheio transition-all duration-200',
                   andamento.pct === undefined && 'animate-pulse',
                 )}
                 style={{ width: `${andamento.pct ?? 100}%` }}
               />
             </div>
-            <p className="mt-1 text-xs text-slate-500">{andamento.texto}</p>
+            <p className="mt-1 text-xs text-texto-3">{andamento.texto}</p>
           </div>
         )}
       </div>
@@ -1618,7 +1618,7 @@ function BotaoAnexarEMover({
       </Button>
       {andamento && (
         <div className="w-44">
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-1.5 overflow-hidden rounded-full bg-superficie-3">
             <div
               className={cn(
                 'h-full rounded-full bg-brand-500 transition-all duration-200',
@@ -1627,7 +1627,7 @@ function BotaoAnexarEMover({
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="mt-0.5 text-right text-xs text-slate-500">{texto}</p>
+          <p className="mt-0.5 text-right text-xs text-texto-3">{texto}</p>
         </div>
       )}
     </div>
@@ -1699,14 +1699,14 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
           'inline-flex h-5 w-5 items-center justify-center rounded transition-colors',
           aberto || temRascunho
             ? 'bg-brand-50 text-brand-700'
-            : 'text-slate-400 hover:bg-slate-100 hover:text-brand-700',
+            : 'text-texto-3 hover:bg-superficie-3 hover:text-brand-700',
         )}
       >
         <MessageSquarePlus className="h-3.5 w-3.5" />
       </button>
 
       {aberto && (
-        <div className="absolute left-0 z-20 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+        <div className="absolute left-0 z-20 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-borda bg-superficie p-2 shadow-nivel-2">
           <textarea
             autoFocus
             rows={4}
@@ -1716,7 +1716,7 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void enviar()
             }}
             placeholder="Ex.: Cedente enviou o RG; falta o comprovante de endereço."
-            className="w-full resize-y rounded-md border border-slate-200 p-2 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+            className="w-full resize-y rounded-md border border-borda p-2 text-xs text-texto placeholder:text-texto-3 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
           />
           <div className="mt-1.5 flex justify-end">
             <Button size="sm" onClick={() => void enviar()} loading={enviando} disabled={!temRascunho}>
@@ -1881,7 +1881,7 @@ function CardCredito({
   useEffect(() => cancelarMira, [])
 
   return (
-    <div className="border-b border-slate-100 p-4 transition-colors last:border-b-0 hover:bg-slate-50/70">
+    <div className="border-b border-borda p-4 transition-colors last:border-b-0 hover:bg-superficie-2/70">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -1901,12 +1901,12 @@ function CardCredito({
                 target="_blank"
                 rel="noreferrer"
                 title="Abrir a pasta deste cedente no Drive"
-                className="font-medium text-slate-800 underline decoration-slate-300 decoration-1 underline-offset-2 hover:text-brand-700 hover:decoration-brand-400"
+                className="font-medium text-texto underline decoration-slate-300 decoration-1 underline-offset-2 hover:text-brand-700 hover:decoration-brand-400"
               >
                 {tituloCard(lead)}
               </a>
             ) : (
-              <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
+              <span className="font-medium text-texto">{tituloCard(lead)}</span>
             )}
             {/* SÓ O "FINALIZADO". O par tinha um selo para cada estado, e o
                 "Em curso" aparecia em todo card que ninguém tocou — que é a
@@ -2187,15 +2187,15 @@ function CardCredito({
         </div>
       )}
       {preparoDosAutos && (
-        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+        <div className="mt-2 rounded-lg bg-superficie-2 p-3 text-xs ring-1 ring-inset ring-borda">
           {preparoDosAutos.estado === 'fila' && (
-            <div className="text-slate-600">🕒 {preparoDosAutos.detalhe}</div>
+            <div className="text-texto-2">🕒 {preparoDosAutos.detalhe}</div>
           )}
           {preparoDosAutos.estado === 'lendo' && (
-            <div className="text-slate-700">⏳ {preparoDosAutos.detalhe}</div>
+            <div className="text-texto">⏳ {preparoDosAutos.detalhe}</div>
           )}
           {preparoDosAutos.estado === 'pronto' && (
-            <div className="text-green-700">✅ {preparoDosAutos.detalhe}</div>
+            <div className="text-sucesso">✅ {preparoDosAutos.detalhe}</div>
           )}
           {/* A SAÍDA DE EMERGÊNCIA DA PLANILHA, e só ela. O caminho é o Claude
               gravar a planilha sozinho, pela ferramenta do conector; mas se uma
@@ -2207,19 +2207,19 @@ function CardCredito({
             <button
               type="button"
               onClick={() => onPreencherPlanilha?.(lead)}
-              className="mt-1.5 text-slate-500 underline underline-offset-2 hover:text-slate-700"
+              className="mt-1.5 text-texto-3 underline underline-offset-2 hover:text-texto"
             >
               A planilha não foi gravada pelo Claude? Colar o bloco que ele entregou
             </button>
           )}
           {preparoDosAutos.estado === 'parcial' && (
-            <div className="text-amber-800">
+            <div className="text-aviso">
               <div className="font-medium">Os autos chegaram incompletos ao Claude.</div>
               <p className="mt-1 break-words whitespace-pre-line">{preparoDosAutos.detalhe}</p>
             </div>
           )}
           {preparoDosAutos.estado === 'falhou' && (
-            <div className="text-red-700">
+            <div className="text-perigo">
               {/* O QUE A CONVERSA VAI DIZER, dito aqui primeiro: do outro lado o
                   Claude só sabe que não achou o código, e a pessoa não teria
                   como ligar uma coisa à outra. */}
@@ -2244,17 +2244,17 @@ function CardCredito({
         </div>
       )}
       {analisandoJuridico && (
-        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
+        <div className="mt-2 rounded-lg bg-superficie-2 p-3 text-xs text-texto ring-1 ring-inset ring-borda">
           ⏳ Rodando a análise jurídica antiga — a planilha vai para o Drive quando terminar.
         </div>
       )}
       {resultadoJuridico && (
-        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+        <div className="mt-2 rounded-lg bg-superficie-2 p-3 text-xs ring-1 ring-inset ring-borda">
           {resultadoJuridico.erro ? (
-            <div className="text-red-700">Erro: {resultadoJuridico.erro}</div>
+            <div className="text-perigo">Erro: {resultadoJuridico.erro}</div>
           ) : (
             <div className="space-y-1.5">
-              <div className="text-green-700">
+              <div className="text-sucesso">
                 ✅ {resultadoJuridico.origem === 'conversa' ? 'Planilha preenchida a partir da conversa' : 'Análise jurídica preenchida'} —{' '}
                 <strong>
                   {resultadoJuridico.linhas_preenchidas} de{' '}
@@ -2276,12 +2276,12 @@ function CardCredito({
                   "62 de 85" diz de cara que 23 linhas ficaram para uma pessoa.
                   Sem ela, "análise preenchida" se leria como análise completa. */}
               {resultadoJuridico.resumo && (
-                <p className="whitespace-pre-line text-slate-700">
+                <p className="whitespace-pre-line text-texto">
                   {resultadoJuridico.resumo}
                 </p>
               )}
               {!!resultadoJuridico.avisos?.length && (
-                <ul className="space-y-1 text-amber-800">
+                <ul className="space-y-1 text-aviso">
                   {resultadoJuridico.avisos.map((a, i) => (
                     <li key={i}>⚠️ {a}</li>
                   ))}
@@ -2294,7 +2294,7 @@ function CardCredito({
 
       <div>
         {resultadoAnalise && (
-          <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+          <div className="mt-2 rounded-lg bg-superficie-2 p-3 text-xs ring-1 ring-inset ring-borda">
             {/* OS RAMOS DE REPROVAÇÃO SAÍRAM: eles nunca renderizavam. Este
                 painel só existe depois de `onSalvo`, e salvar exige
                 `!atual.reprovado` — análise reprovada não gera planilha, então
@@ -2302,7 +2302,7 @@ function CardCredito({
                 (relatorio_due_diligence, due_diligence_url) que função nenhuma
                 devolve, e um deles rotulava toda reprovação como "Portão 1". */}
             {resultadoAnalise.erro ? (
-              <div className="text-red-700">Erro: {resultadoAnalise.erro}</div>
+              <div className="text-perigo">Erro: {resultadoAnalise.erro}</div>
             ) : (
               // O PAINEL DO CARD É UM RESUMO, e o card é um item de lista lido
               // de relance entre dezenas. Antes ele trazia a grade inteira mais
@@ -2312,7 +2312,7 @@ function CardCredito({
               // onde se confere.
               <div>
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <span className="font-medium text-green-700">Planilha gerada</span>
+                  <span className="font-medium text-sucesso">Planilha gerada</span>
                   {typeof resultadoAnalise.drive_file_url === 'string' && (
                     <a
                       className="font-medium text-brand-600 hover:underline"
@@ -2353,10 +2353,10 @@ function CardCredito({
                   ).length
                   if (!alertas) return null
                   return (
-                    <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+                    <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-aviso-fundo px-2.5 py-1 text-xs text-aviso ring-1 ring-inset ring-aviso-borda">
                       <span aria-hidden>⚠️</span>
                       {alertas === 1 ? '1 ponto de atenção' : `${alertas} pontos de atenção`}
-                      <span className="text-amber-700/70">· abra a análise para ver</span>
+                      <span className="text-aviso/70">· abra a análise para ver</span>
                     </p>
                   )
                 })()}
@@ -2384,7 +2384,7 @@ function CardCredito({
           href={urlCard(lead.kommo_lead_id)}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
+          className="inline-flex items-center gap-1 text-xs text-texto-3 transition-colors hover:text-texto-2"
         >
           <ExternalLink className="h-3.5 w-3.5" /> Abrir no Kommo
         </a>
@@ -2423,14 +2423,14 @@ function CardCredito({
                   E sem autor: a equipe usa um login só e se identifica no próprio
                   texto da anotação; os nomes que aparecem são de antes disso.
                   O campo continua guardado em kommo_leads.notas. */}
-              <div className="mb-0.5 flex flex-wrap items-baseline gap-2 text-xs text-slate-400">
+              <div className="mb-0.5 flex flex-wrap items-baseline gap-2 text-xs text-texto-3">
                 {n.criado_em && formatDataHoraSegundos(n.criado_em)}
                 {/* DE QUEM É A NOTA, quando não é do comercial. O histórico passou
                     a trazer também movimentação, anexo e a anotação que a própria
                     plataforma escreveu — sem o selo, uma ficha redigida pela
                     análise se leria como declaração de quem cadastrou o card. */}
                 {selo && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">
+                  <span className="rounded-full bg-superficie-3 px-2 py-0.5 text-texto-3">
                     {selo}
                   </span>
                 )}
@@ -2442,15 +2442,15 @@ function CardCredito({
                   vezes para entender que é a mesma. */}
               <div
                 className={cn(
-                  'rounded-lg p-3 ring-1 ring-inset ring-slate-100',
-                  n.automatica ? 'bg-white' : 'bg-slate-50',
+                  'rounded-lg p-3 ring-1 ring-inset ring-borda',
+                  n.automatica ? 'bg-superficie' : 'bg-superficie-2',
                 )}
               >
                 {corpo && (
                   <pre
                     className={cn(
                       'whitespace-pre-wrap break-words text-xs',
-                      n.automatica ? 'text-slate-500' : 'text-slate-700',
+                      n.automatica ? 'text-texto-3' : 'text-texto',
                     )}
                   >
                     {corpo}
@@ -2460,7 +2460,7 @@ function CardCredito({
                   <div
                     className={cn(
                       'flex flex-col items-start gap-1',
-                      corpo && 'mt-2 border-t border-slate-200/70 pt-2',
+                      corpo && 'mt-2 border-t border-borda/70 pt-2',
                     )}
                   >
                     {arquivos.map((a) => (
@@ -2527,7 +2527,7 @@ function SeletorDestinacao({
       // O ÚNICO rótulo do controle: não há texto visível dizendo o que ele
       // decide, então sem isto o leitor de tela anuncia dois botões soltos.
       aria-label="Destinação do precatório"
-      className="inline-flex items-center rounded-full bg-white p-0.5 ring-1 ring-inset ring-slate-200"
+      className="inline-flex items-center rounded-full bg-superficie p-0.5 ring-1 ring-inset ring-borda"
     >
       {SUBDIVISOES_PRECATORIO.map((s) => {
         const ativo = s.key === valor
@@ -2545,7 +2545,7 @@ function SeletorDestinacao({
               // não clarear esse cinza sem medir de novo.
               ativo
                 ? 'bg-brand-600 font-semibold text-white'
-                : 'font-medium text-slate-500 hover:text-slate-700',
+                : 'font-medium text-texto-3 hover:text-texto',
             )}
           >
             {s.label}
@@ -4078,7 +4078,7 @@ export default function AnaliseCredito() {
 
       <Card className="mb-4 p-4">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
           <Input
             className="pl-9"
             placeholder="Buscar por nome do card, processo, responsável ou conteúdo…"
@@ -4094,7 +4094,7 @@ export default function AnaliseCredito() {
             // desenhou. A fase da coluna aberta ganha fundo e faixa de cor; coluna
             // com zero card fica apagada, para as que têm trabalho saltarem; e a
             // fase dos perdidos é mais discreta, porque não é etapa do fluxo.
-            <div className="divide-y divide-slate-100 overflow-hidden rounded-lg ring-1 ring-inset ring-slate-200">
+            <div className="divide-y divide-borda overflow-hidden rounded-lg ring-1 ring-inset ring-borda">
               {fases.map((f) => {
                 const daFase = abas.filter((a) => a.fase === f)
                 const total = daFase.reduce((t, a) => t + (porAbaNaBusca[a.key]?.length ?? 0), 0)
@@ -4111,14 +4111,14 @@ export default function AnaliseCredito() {
                     <div
                       className={cn(
                         'font-display flex w-[13rem] flex-none items-center gap-2 text-xs font-bold uppercase tracking-wide',
-                        aberta ? 'text-brand-700' : discreta ? 'text-slate-400' : 'text-slate-500',
+                        aberta ? 'text-brand-700' : discreta ? 'text-texto-3' : 'text-texto-2',
                       )}
                     >
                       {f}
                       <span
                         className={cn(
                           'rounded-full px-1.5 text-xs font-semibold normal-case tracking-normal',
-                          aberta ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500',
+                          aberta ? 'bg-brand-100 text-brand-700' : 'bg-superficie-3 text-texto-3',
                         )}
                       >
                         {total}
@@ -4138,10 +4138,10 @@ export default function AnaliseCredito() {
                             className={cn(
                               'font-display flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-sm transition-colors',
                               ativa
-                                ? 'bg-white font-semibold text-brand-700 shadow-sm ring-1 ring-brand-200'
+                                ? 'bg-superficie font-semibold text-brand-700 shadow-nivel-1 ring-1 ring-brand-200'
                                 : vazia
-                                  ? 'font-medium text-slate-400 hover:bg-slate-50 hover:text-slate-600'
-                                  : 'font-medium text-slate-700 hover:bg-slate-50',
+                                  ? 'font-medium text-texto-3 hover:bg-superficie-2 hover:text-texto-2'
+                                  : 'font-medium text-texto hover:bg-superficie-2',
                             )}
                           >
                             {a.label}
@@ -4151,8 +4151,8 @@ export default function AnaliseCredito() {
                                 ativa
                                   ? 'bg-brand-50 text-brand-700'
                                   : vazia
-                                    ? 'text-slate-300'
-                                    : 'bg-slate-100 text-slate-500',
+                                    ? 'text-texto-3'
+                                    : 'bg-superficie-3 text-texto-3',
                               )}
                             >
                               {n}
@@ -4177,14 +4177,14 @@ export default function AnaliseCredito() {
               onChange={(v) => setAba(v)}
             />
           ) : etapas.isLoading ? (
-            <p className="text-sm text-slate-500">Carregando as etapas do Kommo…</p>
+            <p className="text-sm text-texto-3">Carregando as etapas do Kommo…</p>
           ) : etapas.isError ? (
             // A MENSAGEM REAL, não um palpite. A versão anterior descartava
             // etapas.error e afirmava uma causa ("a sincronização não conseguiu
             // ler o kanban") que podia estar errada — se o problema fosse
             // permissão de leitura da tabela, sincronizar de novo não mudaria
             // nada e a tela repetiria o mesmo diagnóstico falso para sempre.
-            <p className="text-sm text-red-700">
+            <p className="text-sm text-perigo">
               Não consegui ler as etapas deste funil: {(etapas.error as Error)?.message}{' '}
               <button
                 type="button"
@@ -4198,7 +4198,7 @@ export default function AnaliseCredito() {
             // Espelho vazio: o kommo-sync não gravou a estrutura do kanban.
             // Dizer isso é melhor que mostrar uma tela vazia, que se leria como
             // "não tem crédito nenhum".
-            <p className="text-sm text-amber-700">
+            <p className="text-sm text-aviso">
               Ainda não sei as etapas deste funil. Elas vêm do próprio Kommo —
               clique em <strong>Sincronizar</strong>, no alto da página. Se
               continuar assim, a sincronização não conseguiu ler a estrutura do
@@ -4211,7 +4211,7 @@ export default function AnaliseCredito() {
       {/* Coluna fixada que o kanban não tem. Vermelho, e não amarelo: aqui a aba
           fica vazia PARA SEMPRE, e é defeito de configuração, não recado. */}
       {rpvDesalinhado.length > 0 && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+        <div className="mb-4 rounded-lg bg-perigo-fundo p-3 text-xs text-perigo ring-1 ring-inset ring-perigo-borda">
           A coluna do Kommo de{' '}
           <strong>{rpvDesalinhado.map((t) => t.label).join(', ')}</strong> não existe
           mais neste funil. A aba vai mostrar zero card até alguém corrigir o número
@@ -4220,7 +4220,7 @@ export default function AnaliseCredito() {
       )}
 
       {precatorioDesalinhado.length > 0 && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+        <div className="mb-4 rounded-lg bg-perigo-fundo p-3 text-xs text-perigo ring-1 ring-inset ring-perigo-borda">
           Não achei no Kommo a coluna{' '}
           <strong>
             {precatorioDesalinhado.map((a) => `"${a.colunaKommo}"`).join(', ')}

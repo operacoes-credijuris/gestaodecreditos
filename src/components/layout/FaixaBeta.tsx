@@ -14,7 +14,7 @@ export function FaixaBeta({ fixa = false }: { fixa?: boolean }) {
   return (
     <div
       role="note"
-      className={`flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-amber-300 bg-amber-100 px-4 py-1.5 text-sm text-amber-900 ${
+      className={`flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-aviso-borda bg-aviso-fundo px-4 py-1.5 text-sm text-aviso ${
         fixa ? 'fixed inset-x-0 top-0 z-50' : ''
       }`}
     >
@@ -28,7 +28,7 @@ export function FaixaBeta({ fixa = false }: { fixa?: boolean }) {
           e.preventDefault()
           window.location.href = '../' + window.location.hash
         }}
-        className="font-medium underline underline-offset-2 hover:text-amber-950"
+        className="font-semibold underline underline-offset-2 hover:text-texto"
       >
         Abrir na versão oficial
       </a>

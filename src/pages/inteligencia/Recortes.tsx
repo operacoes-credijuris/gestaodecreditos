@@ -246,7 +246,7 @@ function TabelaGrupos({
               <TBody>
                 {grupos.map((g) => (
                   <TR key={g.nome}>
-                    <TD className="font-medium text-slate-800">{nomeProprio(g.rotulo)}</TD>
+                    <TD className="font-medium text-texto">{nomeProprio(g.rotulo)}</TD>
                     <TD className="text-right tabular-nums">{g.total}</TD>
                     <TD className="text-right tabular-nums">{g.n}</TD>
                     <TD className="text-right tabular-nums">{brl(g.capitalTotal)}</TD>

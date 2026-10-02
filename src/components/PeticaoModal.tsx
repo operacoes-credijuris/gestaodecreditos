@@ -634,7 +634,7 @@ export function PeticaoModal({
                       type="button"
                       onClick={() => void reanalisar()}
                       disabled={reanalisando}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-brand-700 disabled:opacity-50"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-texto-3 transition-colors hover:text-brand-700 disabled:opacity-50"
                     >
                       <RefreshCw
                         className={`h-3 w-3 ${reanalisando ? 'animate-spin' : ''}`}
@@ -667,7 +667,7 @@ export function PeticaoModal({
                     </button>
                   </Aviso>
                 ) : panorama.data ? (
-                  <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-4 text-sm leading-relaxed text-slate-700">
+                  <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-4 text-sm leading-relaxed text-texto">
                     <TextoIA texto={panorama.data.panorama} />
                   </div>
                 ) : null}
@@ -677,7 +677,7 @@ export function PeticaoModal({
               <section>
                 <label
                   htmlFor="peticao-instrucao"
-                  className="mb-1.5 block text-sm font-medium text-slate-700"
+                  className="mb-1.5 block text-sm font-medium text-texto"
                 >
                   Objeto da petição
                 </label>
@@ -712,7 +712,7 @@ export function PeticaoModal({
                   <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                     <label
                       htmlFor="peticao-texto"
-                      className="text-sm font-medium text-slate-700"
+                      className="text-sm font-medium text-texto"
                     >
                       Revisar
                     </label>
@@ -866,7 +866,7 @@ export function PeticaoModal({
               // Pré-visualização em texto, e não formatada: o que importa conferir
               // aqui é o CONTEÚDO preenchido. A forma final está no arquivo, e uma
               // prévia parecida-mas-não-igual daria falsa segurança.
-              <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-sans text-xs leading-relaxed text-slate-700 scrollbar-thin">
+              <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-borda bg-superficie-2 p-3 font-sans text-xs leading-relaxed text-texto scrollbar-thin">
                 {textoFinal}
               </pre>
             )
@@ -887,8 +887,8 @@ function Aviso({
 }) {
   const cores =
     tom === 'erro'
-      ? 'border-red-200 bg-red-50 text-red-800'
-      : 'border-amber-200 bg-amber-50 text-amber-900'
+      ? 'border-perigo-borda bg-perigo-fundo text-perigo'
+      : 'border-aviso-borda bg-aviso-fundo text-aviso'
   const Icone = tom === 'erro' ? AlertTriangle : FileText
   return (
     <div className={`flex gap-2 rounded-lg border p-3 text-sm ${cores}`}>

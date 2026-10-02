@@ -19,33 +19,36 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode
 }
 
+// AS VARIANTES DA AMOSTRA (estilo.css, `.btn-*`). O primário é o azul de títulos
+// do contrato chapado (#0A6296, 6,6:1 com o branco); o gradiente que partia do
+// azul da logomarca saiu, porque no #0B81C5 o texto branco ficava em 4,2:1.
 const variants: Record<Variant, string> = {
-  // gradiente vertical sutil + sombra dão o acabamento "sólido" do primário.
-  // Parte do azul da logomarca (brand-500 = #0B81C5) e escurece no hover —
-  // é o botão mais "Credijuris" possível.
-  primary:
-    'bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-sm hover:from-brand-600 hover:to-brand-700 focus-visible:ring-brand-500 disabled:from-brand-300 disabled:to-brand-300 disabled:shadow-none',
-  secondary:
-    'bg-slate-800 text-white hover:bg-slate-900 focus-visible:ring-slate-500',
-  outline:
-    'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus-visible:ring-brand-500',
-  ghost: 'text-slate-600 hover:bg-slate-100 focus-visible:ring-slate-400',
-  danger:
-    'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 disabled:bg-red-300',
+  primary: 'bg-marca text-white shadow-nivel-1 hover:bg-marca-hover',
+  // A AMOSTRA NÃO TEM BOTÃO ESCURO. O "secundário" dela é o contornado — o que
+  // aqui sempre se chamou `outline`. As cinco telas que pediam `secondary` (o
+  // "Executar análise" do card, entre elas) ficam iguais ao contornado: na
+  // amostra esse mesmo botão é `btn-secondary`.
+  secondary: 'border-borda-forte bg-superficie text-texto hover:bg-superficie-3',
+  outline: 'border-borda-forte bg-superficie text-texto hover:bg-superficie-3',
+  ghost: 'text-texto-2 hover:bg-superficie-3 hover:text-texto',
+  // O hover CLAREIA um pouco (o `filter: brightness` da amostra) em vez de
+  // escurecer: o vermelho e o verde já estão no tom mais escuro em que o branco
+  // passa de 4,5:1 com folga.
+  danger: 'bg-perigo-cheio text-white shadow-nivel-1 hover:brightness-105',
   // Desfechos positivo e intermediário, para telas em que as saídas são
   // alternativas legítimas e a cor comunica mais rápido que o rótulo.
-  success:
-    'bg-emerald-700 text-white hover:bg-emerald-800 focus-visible:ring-emerald-600 disabled:bg-emerald-300',
-  // orange-600 e não 700: no 700 o laranja escurece para um tijolo que fica
-  // perto demais do vermelho de perigo, e as duas ações precisam se distinguir.
-  warning:
-    'bg-orange-600 text-white hover:bg-orange-700 focus-visible:ring-orange-500 disabled:bg-orange-300',
+  success: 'bg-sucesso-cheio text-white shadow-nivel-1 hover:brightness-105',
+  // O aviso da amostra é PÁLIDO (fundo de aviso, texto âmbar escuro), e não o
+  // laranja cheio de antes: cheio, ele brigava com o vermelho de perigo.
+  warning: 'border-aviso-borda bg-aviso-fundo text-aviso hover:brightness-95',
 }
 
+// Alturas na grade de 3px (o <html> é 12px; ver index.css). O `md` fica em 33px,
+// o mais perto dos 32px da amostra; o `lg`, em 36px.
 const sizes: Record<Size, string> = {
-  sm: 'h-8 px-3 text-sm gap-1.5',
-  md: 'h-10 px-4 text-sm gap-2',
-  lg: 'h-11 px-5 text-base gap-2',
+  sm: 'h-9 px-3 text-sm gap-1.5',
+  md: 'h-11 px-4 text-sm gap-2',
+  lg: 'h-12 px-5 text-corpo gap-2',
 }
 
 export function Button({
@@ -61,11 +64,16 @@ export function Button({
   return (
     <button
       className={cn(
-        // whitespace-nowrap: as alturas são fixas (h-8/h-10/h-11), então rótulo
+        // whitespace-nowrap: as alturas são fixas (h-9/h-11/h-12), então rótulo
         // que quebra em duas linhas vaza do botão em vez de esticá-lo.
-        'inline-flex items-center justify-center whitespace-nowrap rounded-lg font-medium transition-all duration-150',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
-        'active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 disabled:active:scale-100',
+        // BORDA EM TODAS AS VARIANTES (transparente onde não aparece), como a
+        // `.btn` da amostra: assim o contornado e o cheio têm a mesma altura
+        // quando uma tela troca `h-*` por padding.
+        'inline-flex items-center justify-center whitespace-nowrap rounded-controle border border-transparent font-semibold transition-all duration-150',
+        // O anel de foco é o mesmo em toda variante (o da amostra): o foco diz
+        // "você está aqui", não "isto é perigoso".
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
+        'active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:brightness-100 disabled:active:scale-100',
         variants[variant],
         sizes[size],
         className,

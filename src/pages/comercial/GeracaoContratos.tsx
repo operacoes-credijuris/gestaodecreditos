@@ -68,9 +68,9 @@ function Secao({
     // metro do valor do outro. Lado a lado, a largura vira margem de leitura.
     <section className="grid gap-x-10 gap-y-3 py-6 md:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
       <div>
-        <h3 className="text-sm font-semibold text-slate-800">{titulo}</h3>
+        <h3 className="text-sm font-semibold text-texto">{titulo}</h3>
         {descricao && (
-          <p className="mt-1 text-xs leading-relaxed text-slate-500">{descricao}</p>
+          <p className="mt-1 text-xs leading-relaxed text-texto-3">{descricao}</p>
         )}
       </div>
       <div className="space-y-4">{children}</div>
@@ -257,29 +257,29 @@ function GerarPanel() {
           olho — abaixo do botão, à direita, disputando espaço com uma explicação
           que estava sempre lá. */}
       {erro && (
-        <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{erro}</Card>
+        <Card className="border-perigo-borda bg-perigo-fundo p-4 text-sm text-perigo">{erro}</Card>
       )}
       {resultado && (
-        <Card className="space-y-3 border-green-200 bg-green-50 p-4">
-          <p className="text-sm font-medium text-green-800">
+        <Card className="space-y-3 border-sucesso-borda bg-sucesso-fundo p-4">
+          <p className="text-sm font-medium text-sucesso">
             ✓ {resultado.tipos_gerados.length} contrato(s) gerado(s)
           </p>
-          <p className="text-xs text-green-700">{resultado.tipos_gerados.join(', ')}</p>
+          <p className="text-xs text-sucesso">{resultado.tipos_gerados.join(', ')}</p>
           <a
             href={resultado.drive_folder_url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-sm font-medium text-green-800 underline"
+            className="inline-flex items-center gap-1 text-sm font-medium text-sucesso underline"
           >
             Abrir pasta no Drive <ExternalLink className="h-3.5 w-3.5" />
           </a>
           {resultado.originador_criado && (
-            <p className="text-xs text-amber-700">
+            <p className="text-xs text-aviso">
               Pasta nova criada para o originador "{resultado.originador_criado}" — confira se não é erro de digitação.
             </p>
           )}
           {resultado.pendentes.length > 0 && (
-            <div className="rounded bg-amber-50 p-2 text-xs text-amber-800">
+            <div className="rounded bg-aviso-fundo p-2 text-xs text-aviso">
               Variáveis não preenchidas: {resultado.pendentes.join(', ')}
             </div>
           )}
@@ -290,7 +290,7 @@ function GerarPanel() {
         {/* O RECUO É DO FORMULÁRIO, e não do cartão: assim os filetes que separam
             as seções ficam recuados também, em vez de cortarem o cartão de ponta
             a ponta. `Card` não traz recuo nenhum — quem o dá é quem o usa. */}
-        <form onSubmit={handleSubmit} className="divide-y divide-slate-100 px-5 py-1">
+        <form onSubmit={handleSubmit} className="divide-y divide-borda px-5 py-1">
           <Secao
             titulo="O crédito"
             descricao="Quem compra, de quem veio e qual processo — o número é o que localiza a análise no Drive."
@@ -309,7 +309,7 @@ function GerarPanel() {
                     quando a leitura falhou mandava a pessoa cadastrar de novo quem
                     já tem ficha. */}
                 {investidorDados.isError ? (
-                  <p className="mt-1 text-xs text-red-700">
+                  <p className="mt-1 text-xs text-perigo">
                     Não consegui carregar os investidores: {(investidorDados.error as Error)?.message ?? 'erro desconhecido'}.{' '}
                     <button type="button" className="underline" onClick={() => investidorDados.refetch()}>
                       Tentar de novo
@@ -317,7 +317,7 @@ function GerarPanel() {
                   </p>
                 ) : (
                   investidores.length === 0 && !investidorDados.isLoading && (
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="mt-1 text-xs text-texto-3">
                       Nenhum investidor cadastrado — cadastre em "Dados cadastrais".
                     </p>
                   )
@@ -350,7 +350,7 @@ function GerarPanel() {
                 </Select>
                 {/* Mesmo padrão do investidor acima: falha não é lista vazia. */}
                 {erroOriginadores && (
-                  <p className="mt-1 text-xs text-red-700">
+                  <p className="mt-1 text-xs text-perigo">
                     Não consegui carregar os originadores: {erroOriginadores}.{' '}
                     <button
                       type="button"
@@ -403,12 +403,12 @@ function GerarPanel() {
             titulo="O que gerar"
             descricao="Pela análise de crédito a casa já sabe quais peças o negócio exige. Desmarque para escolher à mão."
           >
-              <label className="flex items-center gap-2 text-sm text-slate-700">
+              <label className="flex items-center gap-2 text-sm text-texto">
                 <input
                   type="checkbox"
                   checked={tiposAuto}
                   onChange={(e) => setTiposAuto(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300"
+                  className="h-4 w-4 rounded border-borda-forte"
                 />
                 {/* O "(pela análise de crédito)" saiu daqui: estava dito na linha
                     de cima, e rótulo que repete a explicação ao lado faz a pessoa
@@ -416,14 +416,14 @@ function GerarPanel() {
                 Escolher automaticamente
               </label>
               {!tiposAuto && (
-                <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2">
+                <div className="mt-3 grid gap-2 rounded-lg bg-superficie-2 p-3 sm:grid-cols-2">
                   {TIPOS_GERACAO.map((t) => (
-                    <label key={t} className="flex items-center gap-2 text-sm text-slate-700">
+                    <label key={t} className="flex items-center gap-2 text-sm text-texto">
                       <input
                         type="checkbox"
                         checked={tiposEscolhidos.has(t)}
                         onChange={() => alternarTipo(t)}
-                        className="h-4 w-4 rounded border-slate-300"
+                        className="h-4 w-4 rounded border-borda-forte"
                       />
                       {TIPO_CONTRATO[t]?.label ?? t}
                     </label>
@@ -431,7 +431,7 @@ function GerarPanel() {
                 </div>
               )}
               {semPecaEscolhida && (
-                <p className="mt-2 text-xs text-amber-700">
+                <p className="mt-2 text-xs text-aviso">
                   Marque ao menos uma peça — ou volte a marcar "Escolher automaticamente".
                 </p>
               )}
@@ -440,7 +440,7 @@ function GerarPanel() {
           {/* O ANDAMENTO AO LADO DO BOTÃO: a geração leva de 30 a 90 segundos, e
               sem ele o clique parece não ter feito nada. */}
           <div className="flex flex-wrap items-center justify-end gap-3 py-5">
-            {enviando && <p className="mr-auto text-sm text-slate-600">{progresso}</p>}
+            {enviando && <p className="mr-auto text-sm text-texto-2">{progresso}</p>}
             <Button
               type="submit"
               loading={enviando}
@@ -495,11 +495,11 @@ function ArquivosField({
     onAdicionar(dt.files)
   }
   return (
-    <div className="space-y-3 rounded-lg border border-slate-200 p-4">
+    <div className="space-y-3 rounded-lg border border-borda p-4">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <p className="text-sm font-medium text-slate-700">{titulo}</p>
-        <div className="flex items-center gap-3 text-xs text-slate-600">
-          <span className="text-slate-500">{generoLabel}</span>
+        <p className="text-sm font-medium text-texto">{titulo}</p>
+        <div className="flex items-center gap-3 text-xs text-texto-2">
+          <span className="text-texto-3">{generoLabel}</span>
           <label className="flex cursor-pointer items-center gap-1">
             <input
               type="radio"
@@ -529,7 +529,7 @@ function ArquivosField({
         onDragLeave={() => setArrastando(false)}
         onDrop={soltar}
         className={`flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed py-6 text-sm transition-colors hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-600 ${
-          arrastando ? 'border-brand-400 bg-brand-50/40 text-brand-600' : 'border-slate-300 text-slate-500'
+          arrastando ? 'border-brand-400 bg-brand-50/40 text-brand-600' : 'border-borda-forte text-texto-3'
         }`}
       >
         <Upload className="h-4 w-4" />
@@ -551,7 +551,7 @@ function ArquivosField({
           {arquivos.map((f, i) => (
             <li
               key={i}
-              className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-600"
+              className="flex items-center justify-between gap-2 rounded-md bg-superficie-2 px-2 py-1.5 text-xs text-texto-2"
             >
               <span className="truncate" title={f.name}>
                 {f.name}
@@ -559,11 +559,11 @@ function ArquivosField({
               <span className="flex shrink-0 items-center gap-2">
                 {/* O TAMANHO AO LADO DO NOME: é o que denuncia o arquivo vazio ou
                     o que veio errado antes de a geração começar e falhar longe. */}
-                <span className="tabular-nums text-slate-400">{tamanhoLegivel(f.size)}</span>
+                <span className="tabular-nums text-texto-3">{tamanhoLegivel(f.size)}</span>
                 <button
                   type="button"
                   onClick={() => onRemover(i)}
-                  className="text-slate-400 hover:text-red-500"
+                  className="text-texto-3 hover:text-perigo"
                   aria-label={`Remover ${f.name}`}
                 >
                   <X className="h-3.5 w-3.5" />

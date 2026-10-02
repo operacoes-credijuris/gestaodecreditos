@@ -397,10 +397,10 @@ function PainelPreco({ valores }: { valores: ValoresRpv }) {
   const celula = 'py-1.5 text-right tabular-nums'
 
   return (
-    <div className="overflow-hidden rounded-xl bg-white ring-1 ring-inset ring-slate-200/80">
+    <div className="overflow-hidden rounded-xl bg-superficie ring-1 ring-inset ring-borda/80">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-[11px] uppercase tracking-wide text-slate-400">
+          <tr className="text-[11px] uppercase tracking-wide text-texto-3">
             <th className="px-4 py-2 text-left font-medium">Verba</th>
             {/* "A receber" e "A pagar" diziam a direção do dinheiro e não o que
                 o número é. Aqui um lado é o CRÉDITO e o outro é o que se
@@ -413,13 +413,13 @@ function PainelPreco({ valores }: { valores: ValoresRpv }) {
             <th className="px-4 py-2 text-right font-medium">Deságio</th>
           </tr>
         </thead>
-        <tbody className="text-slate-700">
+        <tbody className="text-texto">
           {parcelas.map((p) => (
-            <tr key={p.nome} className="border-t border-slate-100">
+            <tr key={p.nome} className="border-t border-borda">
               <td className="px-4 py-1.5 text-left">{NOME_DA_VERBA[p.nome] ?? p.nome}</td>
               <td className={cn(celula, 'px-3')}>{formatBRL(p.liquido)}</td>
               <td className={cn(celula, 'px-3')}>{formatBRL(p.preco)}</td>
-              <td className={cn(celula, 'px-4 text-slate-500')}>
+              <td className={cn(celula, 'px-4 text-texto-3')}>
                 {/* ZERO SAI COMO 0,00%, e não como traço. O traço se lê como
                     "não se aplica" ou "não calculado"; aqui o número existe e é
                     zero — a verba é comprada pelo valor de face. Numa coluna de
@@ -428,7 +428,7 @@ function PainelPreco({ valores }: { valores: ValoresRpv }) {
               </td>
             </tr>
           ))}
-          <tr className="border-t border-slate-200 bg-slate-50/70 font-semibold text-slate-900">
+          <tr className="border-t border-borda bg-superficie-2/70 font-semibold text-texto">
             <td className="px-4 py-2 text-left">Total</td>
             <td className={cn(celula, 'px-3 py-2')}>{formatBRL(receber)}</td>
             <td className={cn(celula, 'px-3 py-2')}>{formatBRL(pagar)}</td>
@@ -472,36 +472,36 @@ function ResumoInvestimento({
 }) {
   const linha = (rotulo: ReactNode, valor: ReactNode, chave: string) => (
     <div key={chave} className="flex items-baseline justify-between gap-4 px-4 py-2 first:pt-2.5 last:pb-2.5">
-      <dt className="text-slate-600">{rotulo}</dt>
-      <dd className="tabular-nums text-slate-700">{valor}</dd>
+      <dt className="text-texto-2">{rotulo}</dt>
+      <dd className="tabular-nums text-texto">{valor}</dd>
     </div>
   )
 
   return (
     <section>
-      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-texto-3">
         Resumo do investimento
       </h3>
-      <div className="mt-2 overflow-hidden rounded-xl bg-white text-sm ring-1 ring-inset ring-slate-200/80">
+      <div className="mt-2 overflow-hidden rounded-xl bg-superficie text-sm ring-1 ring-inset ring-borda/80">
         <dl>
           {linha('Preço total da cessão', formatBRL(valores.preco_cessao), 'cessao')}
           {linha('Comissão', formatBRL(valores.comissao), 'comissao')}
           {linha(
             <>
               Cartório
-              {cartorio?.uf && <span className="text-slate-400"> · {cartorio.uf}</span>}
+              {cartorio?.uf && <span className="text-texto-3"> · {cartorio.uf}</span>}
             </>,
             valores.cartorio == null ? (
               // Ausente é dito como ausente: um custo sem cartório parece menor
               // do que é, e um traço sozinho não avisa.
-              <span className="text-amber-700">não incluído</span>
+              <span className="text-aviso">não incluído</span>
             ) : (
               formatBRL(valores.cartorio)
             ),
             'cartorio',
           )}
 
-          <div className="border-t border-slate-200 bg-slate-50/70 font-semibold text-slate-900">
+          <div className="border-t border-borda bg-superficie-2/70 font-semibold text-texto">
             <div className="flex items-baseline justify-between gap-4 px-4 py-2">
               <dt>Custo total</dt>
               <dd className="tabular-nums">{formatBRL(valores.custo_total)}</dd>
@@ -517,22 +517,22 @@ function ResumoInvestimento({
               quanto sai, quanto volta, em quanto tempo, a que taxa — e estavam
               num formato diferente, o que os fazia ler como rodapé decorativo
               em vez de parte da conta. */}
-          <div className="border-t border-slate-200">
+          <div className="border-t border-borda">
             {linha(
               'Prazo de resgate',
               <>
                 {valores.prazo_meses} meses
                 {valores.data_pagamento && (
-                  <span className="text-slate-400"> · {valores.data_pagamento}</span>
+                  <span className="text-texto-3"> · {valores.data_pagamento}</span>
                 )}
               </>,
               'prazo',
             )}
             {linha(
               'Rentabilidade',
-              <span className={cn(atingiuAlvo === false && 'text-amber-700')}>
+              <span className={cn(atingiuAlvo === false && 'text-aviso')}>
                 {pctBR(valores.rentabilidade_mensal)}
-                <span className="text-slate-400"> ao mês</span>
+                <span className="text-texto-3"> ao mês</span>
               </span>,
               'rentabilidade',
             )}
@@ -574,10 +574,10 @@ function ResumoInvestimento({
  * verificar" em "está certo", que é o oposto.
  */
 const VEREDITO_CONFRONTO: Record<string, { texto: string; cor: string }> = {
-  sim: { texto: 'confere', cor: 'text-slate-500' },
-  nao: { texto: 'fora do título', cor: 'text-amber-700' },
-  titulo_silente: { texto: 'título silente', cor: 'text-slate-400' },
-  conta_sem_memoria: { texto: 'sem memória', cor: 'text-amber-700' },
+  sim: { texto: 'confere', cor: 'text-texto-2' },
+  nao: { texto: 'fora do título', cor: 'text-aviso' },
+  titulo_silente: { texto: 'título silente', cor: 'text-texto-3' },
+  conta_sem_memoria: { texto: 'sem memória', cor: 'text-aviso' },
 }
 
 
@@ -650,7 +650,7 @@ function ListaDeRiscos({
 
   return (
     <section>
-      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-texto-3">
         Riscos
       </h3>
       {/* O FUNDAMENTO FICA À VISTA, e não atrás de um clique. Escondê-lo tinha
@@ -661,13 +661,13 @@ function ListaDeRiscos({
           de anuência do ente" sem a norma ao lado não tem como discordar. */}
       <ul className="mt-2 space-y-2.5">
         {itens.map((it, i) => (
-          <li key={i} className="text-sm leading-relaxed text-slate-700">
+          <li key={i} className="text-sm leading-relaxed text-texto">
             {/* O selo é INLINE, dentro do parágrafo: fora dele, cada item
                 deixava uma faixa vazia embaixo do selo. */}
             <Selo grau={it.grau} />
             {it.texto}
             {it.fundamento && (
-              <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
+              <span className="mt-1 block border-l-2 border-borda pl-3 text-xs text-texto-3">
                 {it.fundamento}
               </span>
             )}
@@ -752,10 +752,10 @@ function LinhaDoTempo({ fases }: { fases: FaseMedida[] }) {
       : undefined)
 
   return (
-    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
+    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-texto-3">
       {fases.map((f) => (
         <span key={f.nome} title={dentro(f)} className={cn(f.servidor && 'cursor-help')}>
-          {f.nome} <span className="tabular-nums text-slate-500">{duracao(f.ms)}</span>
+          {f.nome} <span className="tabular-nums text-texto-3">{duracao(f.ms)}</span>
         </span>
       ))}
       <span aria-hidden>·</span>
@@ -812,15 +812,15 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
 
   return (
     <section>
-      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-texto-3">
         Auditoria dos cálculos
       </h3>
 
-      <div className="mt-2 space-y-2.5 rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
+      <div className="mt-2 space-y-2.5 rounded-xl px-3.5 py-3 ring-1 ring-inset ring-borda/80">
         {/* O VEREDITO PRIMEIRO, na frase que o servidor redigiu — a mesma que
             vai para a anotação do Kommo. Duas redações do mesmo veredito
             divergem na primeira mudança de uma delas. */}
-        <p className="text-sm leading-relaxed text-slate-700">
+        <p className="text-sm leading-relaxed text-texto">
           <Selo grau={grauDoRisco} />
           {auditoria.avisos[0]?.replace(/^\s*⚠️\s*/, '') ??
             (divs.length
@@ -831,29 +831,29 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
         {/* O CORTE, EM NÚMEROS. "Reduzido em R$ 8.120" sozinho não diz sobre
             quanto; com as duas pontas, dá para conferir contra os autos. */}
         {auditoria.aplicada && auditoria.bruto_autos != null && auditoria.bruto_conservador != null && (
-          <p className="text-xs tabular-nums text-slate-500">
+          <p className="text-xs tabular-nums text-texto-3">
             Bruto nos autos {formatBRL(auditoria.bruto_autos)} → no cenário conservador{' '}
-            <span className="font-medium text-slate-700">{formatBRL(auditoria.bruto_conservador)}</span>
+            <span className="font-medium text-texto">{formatBRL(auditoria.bruto_conservador)}</span>
             {auditoria.corte > 0 && <> · corte de {formatBRL(auditoria.corte)}</>}
           </p>
         )}
 
         {auditoria.justificativa && (
-          <p className="text-xs leading-relaxed text-slate-500">{auditoria.justificativa}</p>
+          <p className="text-xs leading-relaxed text-texto-3">{auditoria.justificativa}</p>
         )}
 
         {divs.length > 0 && (
-          <ul className="space-y-2.5 border-t border-slate-200/80 pt-2.5">
+          <ul className="space-y-2.5 border-t border-borda/80 pt-2.5">
             {divs.map((d, i) => {
               const efeito = efeitoEmPalavras(d.efeito)
               return (
-                <li key={i} className="text-sm leading-relaxed text-slate-700">
+                <li key={i} className="text-sm leading-relaxed text-texto">
                   <Selo grau={normalizarGrau(d.gravidade)} />
                   {d.item}
-                  {efeito && <span className="text-slate-500"> — {efeito}</span>}
-                  <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
-                    O título/lei pede <span className="text-slate-700">"{d.esperado}"</span>; a conta fez{' '}
-                    <span className="text-slate-700">"{d.encontrado}"</span>.
+                  {efeito && <span className="text-texto-3"> — {efeito}</span>}
+                  <span className="mt-1 block border-l-2 border-borda pl-3 text-xs text-texto-3">
+                    O título/lei pede <span className="text-texto">"{d.esperado}"</span>; a conta fez{' '}
+                    <span className="text-texto">"{d.encontrado}"</span>.
                     {d.fundamento && <> {d.fundamento}</>}
                   </span>
                 </li>
@@ -867,11 +867,11 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
             vista: saber que 18 itens foram conferidos e 2 não bateram é
             informação de decisão; qual foi o índice do terceiro item não é. */}
         {(confronto.length > 0 || auditoria.natureza) && (
-          <div className="border-t border-slate-200/80 pt-2.5">
+          <div className="border-t border-borda/80 pt-2.5">
             <button
               type="button"
               onClick={() => setCriterios((v) => !v)}
-              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+              className="text-xs text-texto-3 underline-offset-2 hover:text-texto-2 hover:underline"
             >
               {criterios ? 'Esconder o confronto' : rotuloConfronto}
             </button>
@@ -879,8 +879,8 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
               <div className="mt-2 space-y-2 text-xs leading-relaxed">
                 {auditoria.natureza && (
                   <p>
-                    <span className="font-medium text-slate-600">Natureza do crédito: </span>
-                    <span className="text-slate-500">{auditoria.natureza}</span>
+                    <span className="font-medium text-texto-2">Natureza do crédito: </span>
+                    <span className="text-texto-3">{auditoria.natureza}</span>
                   </p>
                 )}
                 {confronto.length > 0 && (
@@ -889,7 +889,7 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[34rem] border-collapse">
                       <thead>
-                        <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                        <tr className="text-[10px] uppercase tracking-wide text-texto-3">
                           <th className="py-1 pr-3 text-left font-medium">Verba</th>
                           <th className="py-1 pr-3 text-left font-medium">Critério</th>
                           <th className="py-1 pr-3 text-left font-medium">O título manda</th>
@@ -899,28 +899,28 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
                       </thead>
                       <tbody>
                         {confronto.map((c, i) => {
-                          const v = VEREDITO_CONFRONTO[c.confere] ?? { texto: c.confere, cor: 'text-slate-400' }
+                          const v = VEREDITO_CONFRONTO[c.confere] ?? { texto: c.confere, cor: 'text-texto-3' }
                           const bate = c.confere === 'sim'
                           return (
-                            <tr key={i} className="border-t border-slate-200/70 align-top">
-                              <td className="py-1 pr-3 text-slate-600">{c.verba}</td>
-                              <td className="py-1 pr-3 text-slate-600">{c.criterio}</td>
+                            <tr key={i} className="border-t border-borda/70 align-top">
+                              <td className="py-1 pr-3 text-texto-2">{c.verba}</td>
+                              <td className="py-1 pr-3 text-texto-2">{c.criterio}</td>
                               {/* Item que bateu ocupa uma célula só, mesclada: a
                                   linha existe para provar que foi olhado, e
                                   duas colunas vazias leriam como preenchimento
                                   faltando em vez de nada a dizer. */}
                               {bate ? (
-                                <td className="py-1 pr-3 text-slate-300" colSpan={2}>
+                                <td className="py-1 pr-3 text-texto-3" colSpan={2}>
                                   {c.titulo || c.conta ? (
-                                    <span className="text-slate-500">{[c.titulo, c.conta].filter(Boolean).join(' · ')}</span>
+                                    <span className="text-texto-3">{[c.titulo, c.conta].filter(Boolean).join(' · ')}</span>
                                   ) : (
                                     '—'
                                   )}
                                 </td>
                               ) : (
                                 <>
-                                  <td className="py-1 pr-3 text-slate-500">{c.titulo || '—'}</td>
-                                  <td className="py-1 pr-3 text-slate-500">{c.conta || '—'}</td>
+                                  <td className="py-1 pr-3 text-texto-3">{c.titulo || '—'}</td>
+                                  <td className="py-1 pr-3 text-texto-3">{c.conta || '—'}</td>
                                 </>
                               )}
                               <td className={cn('py-1 whitespace-nowrap font-medium', v.cor)}>{v.texto}</td>
@@ -953,40 +953,40 @@ export function GradeValoresRpv({
   atingiuAlvo?: boolean
 }) {
   return (
-    <div className="text-xs text-slate-700">
+    <div className="text-xs text-texto">
       {/* OS TRÊS QUE DECIDEM, com peso de destaque.
           A grade antiga dava o mesmo peso a seis números e a duas linhas de
           texto corrido: o preço, que é a resposta, disputava atenção com a
           decomposição do cartório. */}
       <dl className="grid grid-cols-3 gap-x-4">
         <div>
-          <dt className="text-slate-500">Preço da cessão</dt>
-          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-slate-900 tabular-nums">
+          <dt className="text-texto-3">Preço da cessão</dt>
+          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-texto tabular-nums">
             {formatBRL(valores.preco_cessao)}
           </dd>
         </div>
         <div>
-          <dt className="text-slate-500">Deságio</dt>
-          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-slate-900 tabular-nums">
+          <dt className="text-texto-3">Deságio</dt>
+          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-texto tabular-nums">
             {pctBR(valores.desagio)}
           </dd>
         </div>
         <div>
-          <dt className="text-slate-500">Rentabilidade</dt>
+          <dt className="text-texto-3">Rentabilidade</dt>
           <dd
             className={cn(
               'font-display text-base font-semibold leading-tight sm:text-lg tabular-nums',
-              atingiuAlvo === false ? 'text-amber-700' : 'text-slate-900',
+              atingiuAlvo === false ? 'text-aviso' : 'text-texto',
             )}
           >
             {pctBR(valores.rentabilidade_mensal)}
-            <span className="text-xs font-normal text-slate-500"> ao mês</span>
+            <span className="text-xs font-normal text-texto-3"> ao mês</span>
           </dd>
         </div>
       </dl>
 
       {atingiuAlvo === false && (
-        <p className="mt-1 text-amber-700">Abaixo da meta de 2,80% ao mês.</p>
+        <p className="mt-1 text-aviso">Abaixo da meta de 2,80% ao mês.</p>
       )}
     </div>
   )
@@ -2148,7 +2148,7 @@ export function AnaliseRpvModal({
       )}
 
       {erro && (
-        <div className="mb-4 rounded-xl bg-red-50/70 px-3.5 py-3 text-sm text-red-700 ring-1 ring-inset ring-red-200/70">
+        <div className="mb-4 rounded-xl bg-perigo-fundo/70 px-3.5 py-3 text-sm text-perigo ring-1 ring-inset ring-perigo-borda/70">
           {erro}
           {/* A SAÍDA, junto do erro que a pediu. O mínimo de R$ 20 mil é regra
               da casa, e quem analisa enxerga o que ela não enxerga: carteira do
@@ -2156,7 +2156,7 @@ export function AnaliseRpvModal({
               compensa o valor. Passar fica registrado no aviso, que sobe para o
               card com a análise. */}
           {pisoBloqueou && (
-            <div className="mt-3 border-t border-red-200/70 pt-3">
+            <div className="mt-3 border-t border-perigo-borda/70 pt-3">
               <Button
                 size="sm"
                 variant="outline"
@@ -2174,7 +2174,7 @@ export function AnaliseRpvModal({
 
       {atual?.reprovado && (
         <div className="space-y-5">
-          <div className="rounded-xl bg-red-50/70 p-4 text-sm text-red-800 ring-1 ring-inset ring-red-200/70">
+          <div className="rounded-xl bg-perigo-fundo/70 p-4 text-sm text-perigo ring-1 ring-inset ring-perigo-borda/70">
             <p className="font-semibold">{tituloDaReprovacao}</p>
             <ul className="mt-1 list-inside list-disc space-y-0.5">
               {(atual.motivos ?? []).map((m, i) => (
@@ -2203,7 +2203,7 @@ export function AnaliseRpvModal({
               da janela para exibir três opções que não estão em uso. A lista
               mostra o que está valendo e guarda o resto. */}
           <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor="cenario-rpv" className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <label htmlFor="cenario-rpv" className="text-[11px] font-semibold uppercase tracking-wide text-texto-3">
               Negociando
             </label>
             <Select
@@ -2224,7 +2224,7 @@ export function AnaliseRpvModal({
                 </option>
               ))}
             </Select>
-            {trocandoCenario && <span className="text-xs text-slate-400">refazendo as contas…</span>}
+            {trocandoCenario && <span className="text-xs text-texto-3">refazendo as contas…</span>}
           </div>
 
           {/* O preço, verba a verba — a conversa com o cedente. */}
@@ -2244,28 +2244,28 @@ export function AnaliseRpvModal({
               Discordar de um item é uma frase no chat abaixo. */}
           {!!atual.roteiro?.length && (
             <section>
-              <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-texto-3">
                 Caminho até a liquidação
               </h3>
               {atual.etapa_atual && (
-                <p className="mt-1 text-xs text-slate-600">
-                  <span className="text-slate-500">Hoje:</span> {atual.etapa_atual}
+                <p className="mt-1 text-xs text-texto-2">
+                  <span className="text-texto-3">Hoje:</span> {atual.etapa_atual}
                 </p>
               )}
               <ol className="mt-2 space-y-1">
                 {atual.roteiro.map((a, i) => (
                   <li key={i} className="flex gap-2 text-xs">
-                    <span className="w-14 shrink-0 text-right font-semibold tabular-nums text-slate-700">
+                    <span className="w-14 shrink-0 text-right font-semibold tabular-nums text-texto">
                       {a.dias}d
                     </span>
                     <span className="min-w-0">
-                      <span className="text-slate-800">{a.ato}</span>
-                      {a.base && <span className="text-slate-500"> · {a.base}</span>}
+                      <span className="text-texto">{a.ato}</span>
+                      {a.base && <span className="text-texto-3"> · {a.base}</span>}
                     </span>
                   </li>
                 ))}
               </ol>
-              <p className="mt-1.5 border-t border-slate-200 pt-1.5 text-xs text-slate-600">
+              <p className="mt-1.5 border-t border-borda pt-1.5 text-xs text-texto-2">
                 <span className="w-14 inline-block text-right font-semibold tabular-nums">
                   {atual.roteiro.reduce((t, a) => t + a.dias, 0)}d
                 </span>{' '}
@@ -2278,10 +2278,10 @@ export function AnaliseRpvModal({
 
           {atual.m1_sintese && (
             <section>
-              <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-texto-3">
                 Síntese
               </h3>
-              <p className="mt-1 text-sm text-slate-800">{atual.m1_sintese}</p>
+              <p className="mt-1 text-sm text-texto">{atual.m1_sintese}</p>
             </section>
           )}
 
@@ -2306,8 +2306,8 @@ export function AnaliseRpvModal({
               campo morto sem explicação. Agora ela tem linha própria, some
               sozinha e o chat segue utilizável enquanto isso. */}
           {passoCartorio && (
-            <p className="flex items-center gap-2 rounded-xl px-3.5 py-3 text-xs text-slate-500 ring-1 ring-inset ring-slate-200/80">
-              <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+            <p className="flex items-center gap-2 rounded-xl px-3.5 py-3 text-xs text-texto-3 ring-1 ring-inset ring-borda/80">
+              <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-borda-forte border-t-slate-600" />
               {passoCartorio} Você já pode pedir alterações — o preço se refaz quando
               o custo chegar.
             </p>
@@ -2317,7 +2317,7 @@ export function AnaliseRpvModal({
               o aviso da análise diz que a tela pediria o custo em seguida — sem
               isto, a promessa fica sem desfecho. */}
           {falhaCartorio && (
-            <p className="rounded-xl bg-red-50/70 px-3.5 py-3 text-xs text-red-800 ring-1 ring-inset ring-red-200/70">
+            <p className="rounded-xl bg-perigo-fundo/70 px-3.5 py-3 text-xs text-perigo ring-1 ring-inset ring-perigo-borda/70">
               {falhaCartorio}
             </p>
           )}
@@ -2327,17 +2327,17 @@ export function AnaliseRpvModal({
               cartório onde lavra — sem isto, a busca falhando deixa a pessoa sem
               nada a fazer dentro da janela. */}
           {atual?.valores && atual.valores.cartorio == null && !passoCartorio && (
-            <div className="rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
-              <p className="mb-2 text-xs text-slate-600">
+            <div className="rounded-xl px-3.5 py-3 ring-1 ring-inset ring-borda/80">
+              <p className="mb-2 text-xs text-texto-2">
                 Informe o custo de cartório à mão e o preço se refaz. Digite só os
                 números — os dois últimos dígitos são os centavos. Deixe em branco o
                 que não souber.
               </p>
               <div className="flex flex-wrap items-end gap-2">
-                <label className="text-xs text-slate-500">
+                <label className="text-xs text-texto-3">
                   Escritura
                   <input
-                    className="mt-0.5 block w-32 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="mt-0.5 block w-32 rounded-md border border-borda-forte px-2 py-1 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                     inputMode="numeric"
                     placeholder="0,00"
                     value={manual.escritura ? formatBRLInput(parseBRLInput(manual.escritura)) : ''}
@@ -2347,10 +2347,10 @@ export function AnaliseRpvModal({
                     }
                   />
                 </label>
-                <label className="text-xs text-slate-500">
+                <label className="text-xs text-texto-3">
                   Registro
                   <input
-                    className="mt-0.5 block w-32 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="mt-0.5 block w-32 rounded-md border border-borda-forte px-2 py-1 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                     inputMode="numeric"
                     placeholder="0,00"
                     value={manual.registro ? formatBRLInput(parseBRLInput(manual.registro)) : ''}
@@ -2382,8 +2382,8 @@ export function AnaliseRpvModal({
               className={cn(
                 'rounded-xl px-3.5 py-3 text-sm ring-1 ring-inset',
                 mudouDesdeSalvar
-                  ? 'bg-amber-50/70 text-amber-900 ring-amber-200/70'
-                  : 'bg-emerald-50/70 text-emerald-800 ring-emerald-200/70',
+                  ? 'bg-aviso-fundo/70 text-aviso ring-aviso-borda/70'
+                  : 'bg-sucesso-fundo/70 text-sucesso ring-sucesso-borda/70',
               )}
             >
               {mudouDesdeSalvar
@@ -2399,11 +2399,11 @@ export function AnaliseRpvModal({
 
           <LinhaDoTempo fases={fases} />
 
-          <section className="border-t border-slate-200/80 pt-5">
+          <section className="border-t border-borda/80 pt-5">
             {/* A explicação saiu: ela ensinava o que o campo abaixo já ensina
                 pelo exemplo do placeholder, e ocupava duas linhas em toda
                 análise, inclusive na décima do dia. */}
-            <h3 className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <h3 className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-texto-3">
               <Sparkles className="h-3.5 w-3.5" /> Pedir alterações
             </h3>
 
@@ -2416,7 +2416,7 @@ export function AnaliseRpvModal({
                       'max-w-[85%] whitespace-pre-line rounded-xl px-3.5 py-2 text-sm leading-relaxed',
                       m.papel === 'usuario'
                         ? 'ml-auto bg-brand-600 text-white'
-                        : 'bg-slate-50 text-slate-700 ring-1 ring-inset ring-slate-200/70',
+                        : 'bg-superficie-2 text-texto ring-1 ring-inset ring-borda/70',
                     )}
                   >
                     {m.texto}
@@ -2428,7 +2428,7 @@ export function AnaliseRpvModal({
 
             <div className="mt-3 flex items-end gap-2">
               <textarea
-                className="min-h-[44px] flex-1 resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                className="min-h-[44px] flex-1 resize-y rounded-xl border border-borda px-3.5 py-2 text-sm placeholder:text-texto-3 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
                 rows={2}
                 placeholder='Ex.: "o valor bruto homologado é R$ 84.320,10" · "suprima o risco 2" · "a RPV foi expedida em 12/03/2026"'
                 value={pedido}
@@ -2453,14 +2453,14 @@ export function AnaliseRpvModal({
                 aria-label="Enviar pedido de alteração"
                 title="Enviar (Enter)"
                 className={cn(
-                  'mb-0.5 shrink-0 rounded-lg p-2.5 text-slate-400 transition-colors',
-                  'hover:bg-slate-100 hover:text-brand-700',
+                  'mb-0.5 shrink-0 rounded-lg p-2.5 text-texto-3 transition-colors',
+                  'hover:bg-superficie-3 hover:text-brand-700',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1',
-                  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400',
+                  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-texto-3',
                 )}
               >
                 {passo === 'Revisando a análise…' ? (
-                  <span className="block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+                  <span className="block h-4 w-4 animate-spin rounded-full border-2 border-borda-forte border-t-brand-600" />
                 ) : (
                   <SendHorizontal className="h-4 w-4" />
                 )}

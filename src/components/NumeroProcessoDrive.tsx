@@ -107,12 +107,12 @@ export function NumeroProcessoDrive({
     >
       {texto}
       {abrindo ? (
-        <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-slate-500" />
+        <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-texto-3" />
       ) : (
         // O ícone é discreto e sempre presente: sublinhado pontilhado sozinho não
         // diria PARA ONDE o clique leva, e a plataforma tem outros textos
         // sublinhados.
-        <FolderOpen className="h-3.5 w-3.5 flex-none text-slate-500" />
+        <FolderOpen className="h-3.5 w-3.5 flex-none text-texto-3" />
       )}
     </button>
   )

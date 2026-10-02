@@ -63,7 +63,7 @@ function Bolinha({ tone }: { tone: string }) {
     <span
       aria-hidden="true"
       className={cn(
-        'absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-white',
+        'absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-superficie',
         tone,
       )}
     />
@@ -78,7 +78,7 @@ function TextoLongo({ texto }: { texto: string }) {
     <>
       <p
         className={cn(
-          'mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700',
+          'mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-texto',
           longo && !expandido && 'line-clamp-4',
         )}
       >
@@ -102,8 +102,8 @@ function TextoLongo({ texto }: { texto: string }) {
 function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
   return (
     <li className="relative">
-      <Bolinha tone={primeiro ? 'bg-brand-500' : 'bg-slate-300'} />
-      <div className="text-xs font-semibold tabular-nums text-slate-600">
+      <Bolinha tone={primeiro ? 'bg-brand-500' : 'bg-borda-forte'} />
+      <div className="text-xs font-semibold tabular-nums text-texto-2">
         {mov.data ? formatDate(mov.data) : 'sem data'}
       </div>
       <TextoLongo texto={mov.conteudo ?? ''} />
@@ -117,22 +117,22 @@ function TarefaItem({ t }: { t: TarefaLinha }) {
   const resp = (t.responsaveis ?? []).filter(Boolean)
   return (
     <li className="relative">
-      <Bolinha tone={t.concluida ? 'bg-emerald-500' : 'bg-amber-400'} />
+      <Bolinha tone={t.concluida ? 'bg-sucesso-cheio' : 'bg-aviso-cheio'} />
       {/* Data e tarefa na mesma linha. A situação NÃO vira selo: a cor da
           bolinha à esquerda já diz se está concluída ou em aberto, e repetir
           isso num selo só pesava. CAIXA ALTA do ADVBOX pesa na leitura, então
           o tipo vai em sentence case (mesma regra da página de Tarefas). */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-sm text-slate-800">
+        <span className="text-sm text-texto">
           {/* A cor da bolinha é a única pista visual da situação; para quem usa
               leitor de tela, o estado vai aqui. */}
           <span className="sr-only">
             {t.concluida ? 'Concluída. ' : 'Em aberto. '}
           </span>
-          <span className="text-xs font-semibold tabular-nums text-slate-600">
+          <span className="text-xs font-semibold tabular-nums text-texto-2">
             {t.data ? formatDate(t.data) : 'sem data'}
           </span>
-          <span aria-hidden="true" className="mx-1.5 text-slate-300">
+          <span aria-hidden="true" className="mx-1.5 text-borda-forte">
             ·
           </span>
           <span className="font-medium">
@@ -152,7 +152,7 @@ function TarefaItem({ t }: { t: TarefaLinha }) {
         )}
       </div>
       {(t.date_deadline || resp.length > 0) && (
-        <p className="mt-0.5 text-xs text-slate-600">
+        <p className="mt-0.5 text-xs text-texto-2">
           {t.date_deadline && <>Prazo: {formatDate(t.date_deadline)}</>}
           {t.date_deadline && resp.length > 0 && ' · '}
           {resp.length > 0 && resp.map((n) => formatNome(n)).join(', ')}
@@ -191,13 +191,13 @@ function ChipSituacao({
       className={cn(
         'inline-flex items-center gap-1 text-xs transition-colors',
         ativo
-          ? 'text-slate-600 hover:text-slate-700'
-          : 'text-slate-300 hover:text-slate-600',
+          ? 'text-texto-2 hover:text-texto'
+          : 'text-texto-3 hover:text-texto-2',
       )}
     >
       <span
         aria-hidden="true"
-        className={cn('h-1.5 w-1.5 rounded-full', ativo ? cor : 'bg-slate-300')}
+        className={cn('h-1.5 w-1.5 rounded-full', ativo ? cor : 'bg-borda-forte')}
       />
       {rotulo}
       <span className="tabular-nums">{qtd}</span>
@@ -310,7 +310,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
   const tarMostradas = tarFiltradas.slice(0, visiveisTar)
 
   return (
-    <section className="border-b border-slate-100 py-4 first:pt-0 last:border-b-0">
+    <section className="border-b border-borda py-4 first:pt-0 last:border-b-0">
       {/* As duas visões são títulos de seção, não um controle à parte: usam a
           mesma tipografia de "Partes"/"Processo" (DrawerSection) e ficam
           separadas por uma barra. A ativa fica na cor do título; a outra
@@ -331,12 +331,12 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
               'uppercase transition-colors',
               aba === 'movimentacoes'
                 ? 'text-brand-600'
-                : 'text-slate-600 hover:text-slate-800',
+                : 'text-texto-2 hover:text-texto',
             )}
           >
             Movimentações{movs.data ? ` (${listaMov.length})` : ''}
           </button>
-          <span aria-hidden="true" className="font-normal text-slate-300">
+          <span aria-hidden="true" className="font-normal text-borda-forte">
             |
           </span>
           <button
@@ -345,7 +345,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             aria-pressed={aba === 'tarefas'}
             className={cn(
               'uppercase transition-colors',
-              aba === 'tarefas' ? 'text-brand-600' : 'text-slate-600 hover:text-slate-800',
+              aba === 'tarefas' ? 'text-brand-600' : 'text-texto-2 hover:text-texto',
             )}
           >
             Tarefas{tarefas.data ? ` (${listaTar.length})` : ''}
@@ -359,7 +359,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
           >
             <ChipSituacao
               ativo={mostrar.concluidas}
-              cor="bg-emerald-500"
+              cor="bg-sucesso-cheio"
               rotulo="concluídas"
               qtd={contagens.concluidas}
               onClick={() => {
@@ -369,7 +369,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             />
             <ChipSituacao
               ativo={mostrar.abertas}
-              cor="bg-amber-400"
+              cor="bg-aviso-cheio"
               rotulo="em aberto"
               qtd={contagens.abertas}
               onClick={() => {
@@ -388,21 +388,21 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             <div className="skeleton h-12 w-11/12 rounded-lg" />
           </div>
         ) : movs.isError ? (
-          <p className="text-sm text-red-600">{(movs.error as Error).message}</p>
+          <p className="text-sm text-perigo">{(movs.error as Error).message}</p>
         ) : listaMov.length === 0 ? (
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-texto-2">
             Nenhuma movimentação sincronizada para este processo. O histórico é
             atualizado pelo cron e ao abrir a aba Movimentações.
           </p>
         ) : (
           <>
             {listaMov.length === LIMITE && (
-              <p className="mb-3 text-xs text-slate-600">
+              <p className="mb-3 text-xs text-texto-2">
                 Mostrando as {LIMITE} mais recentes.
               </p>
             )}
             {/* Linha do tempo: trilho à esquerda, mais recente no topo. */}
-            <ol className="ml-1.5 space-y-4 border-l border-slate-200 pl-4">
+            <ol className="ml-1.5 space-y-4 border-l border-borda pl-4">
               {movMostradas.map((m, i) => (
                 <MovItem key={m.id} mov={m} primeiro={i === 0} />
               ))}
@@ -416,7 +416,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
       ) : (
         <>
           {sync.isPending && listaTar.length > 0 && (
-            <p className="mb-2 text-xs text-slate-600">atualizando do ADVBOX…</p>
+            <p className="mb-2 text-xs text-texto-2">atualizando do ADVBOX…</p>
           )}
 
           {tarefas.isLoading ? (
@@ -425,9 +425,9 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
               <div className="skeleton h-12 w-11/12 rounded-lg" />
             </div>
           ) : tarefas.isError ? (
-            <p className="text-sm text-red-600">{(tarefas.error as Error).message}</p>
+            <p className="text-sm text-perigo">{(tarefas.error as Error).message}</p>
           ) : tarFiltradas.length === 0 ? (
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-texto-2">
               {listaTar.length === 0
                 ? sync.isPending
                   ? 'Buscando as tarefas deste processo no ADVBOX…'
@@ -447,7 +447,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             </p>
           ) : (
             <>
-              <ol className="ml-1.5 space-y-4 border-l border-slate-200 pl-4">
+              <ol className="ml-1.5 space-y-4 border-l border-borda pl-4">
                 {tarMostradas.map((t) => (
                   <TarefaItem key={t.id} t={t} />
                 ))}
@@ -464,7 +464,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
           {/* Só com cache: sem ele, o próprio estado vazio acima já diz que a
               consulta falhou, e os dois juntos avisavam duas vezes. */}
           {sync.isError && listaTar.length > 0 && (
-            <p className="mt-3 text-xs text-amber-700">
+            <p className="mt-3 text-xs text-aviso">
               Não foi possível atualizar do ADVBOX agora: {(sync.error as Error).message}
             </p>
           )}

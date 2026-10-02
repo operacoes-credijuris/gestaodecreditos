@@ -236,11 +236,11 @@ export function EmissaoBullai({
 
   if (!ativo) return null
   if (catalogo.isLoading) {
-    return <div className="mt-6 text-xs text-slate-500">Carregando o catálogo da BullAI…</div>
+    return <div className="mt-6 text-xs text-texto-3">Carregando o catálogo da BullAI…</div>
   }
   if (catalogo.error) {
     return (
-      <div className="mt-6 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 ring-1 ring-inset ring-slate-200">
+      <div className="mt-6 rounded-lg bg-superficie-2 p-3 text-xs text-texto-2 ring-1 ring-inset ring-borda">
         Emissão pela BullAI indisponível: {(catalogo.error as Error).message}
       </div>
     )
@@ -253,8 +253,8 @@ export function EmissaoBullai({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50/60 px-4 py-2.5">
         <div className="flex items-center gap-2">
           <FileSearch className="h-4 w-4 text-brand-700" />
-          <span className="text-sm font-medium text-slate-800">Emitir pela BullAI</span>
-          <span className="text-xs text-slate-500">
+          <span className="text-sm font-medium text-texto">Emitir pela BullAI</span>
+          <span className="text-xs text-texto-3">
             marcadas pelas regras da planilha · {restantes == null ? 'plano ilimitado' : `${restantes} consulta(s) no plano`}
           </span>
         </div>
@@ -286,12 +286,12 @@ export function EmissaoBullai({
             <div key={s.id}>
               <div className="mb-1.5 flex flex-wrap items-center gap-2 text-sm">
                 <Badge size="sm" tone="blue">{s.papel}</Badge>
-                <span className="font-medium text-slate-800">{s.nome}</span>
+                <span className="font-medium text-texto">{s.nome}</span>
                 {s.tipo_pessoa === 'PF' && !s.data_nascimento && (
                   <Badge size="sm" tone="red">falta a data de nascimento — a BullAI exige</Badge>
                 )}
               </div>
-              <ul className="divide-y divide-slate-100 rounded-lg ring-1 ring-inset ring-slate-200">
+              <ul className="divide-y divide-borda rounded-lg ring-1 ring-inset ring-borda">
                 {doSujeito.map((i) => {
                   const t = traducoes.get(i.id)
                   const podePedir = pedivel(i) && (t?.chaves.length ?? 0) > 0
@@ -316,26 +316,26 @@ export function EmissaoBullai({
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-medium text-slate-700">
+                          <span className="font-medium text-texto">
                             {i.certidao_catalogo?.nome_curto ?? i.certidao_codigo}
                           </span>
                           {Object.values(i.parametros ?? {}).length > 0 && (
-                            <span className="text-slate-500">({Object.values(i.parametros).join(', ')})</span>
+                            <span className="text-texto-3">({Object.values(i.parametros).join(', ')})</span>
                           )}
                           {i.status === 'OBTIDA' && seloDoResultado(i.resultado)}
                           {i.status === 'EM_EMISSAO' && <Badge size="sm" tone="yellow">em emissão</Badge>}
                           {i.status === 'FALHA' && <Badge size="sm" tone="red">falhou</Badge>}
                         </div>
                         {t && t.chaves.length > 0 && (
-                          <div className="mt-0.5 text-slate-500">
+                          <div className="mt-0.5 text-texto-3">
                             {t.chaves.map((k) => porChave.get(k)?.rotulo ?? k).join(' · ')}
                           </div>
                         )}
                         {t?.semBullai && i.status !== 'OBTIDA' && (
-                          <div className="mt-0.5 text-amber-700">Manual: {t.semBullai}</div>
+                          <div className="mt-0.5 text-aviso">Manual: {t.semBullai}</div>
                         )}
                         {i.erro_detalhe && i.status !== 'OBTIDA' && (
-                          <div className="mt-0.5 text-slate-500">{i.erro_detalhe}</div>
+                          <div className="mt-0.5 text-texto-3">{i.erro_detalhe}</div>
                         )}
                         {(i.arquivos ?? []).filter((a) => a.drive_link).length > 0 && (
                           <div className="mt-1 flex flex-wrap gap-2">
@@ -366,8 +366,8 @@ export function EmissaoBullai({
                         setExtras((antes) => ({ ...antes, [s.id]: (antes[s.id] ?? []).filter((x) => x !== k) }))
                       }
                     />
-                    <span className="text-slate-700">{porChave.get(k)?.rotulo ?? k}</span>
-                    <span className="text-slate-400">acrescentada · fora da planilha</span>
+                    <span className="text-texto">{porChave.get(k)?.rotulo ?? k}</span>
+                    <span className="text-texto-3">acrescentada · fora da planilha</span>
                   </li>
                 ))}
               </ul>
@@ -377,16 +377,16 @@ export function EmissaoBullai({
                   este tipo de documento pode ser acrescentada aqui. */}
               <div className="relative mt-1.5">
                 <div className="flex items-center gap-1.5">
-                  <Plus className="h-3.5 w-3.5 text-slate-400" />
+                  <Plus className="h-3.5 w-3.5 text-texto-3" />
                   <input
                     value={busca[s.id] ?? ''}
                     onChange={(e) => setBusca((antes) => ({ ...antes, [s.id]: e.target.value }))}
                     placeholder={`Acrescentar outra certidão do catálogo (${portais.filter((p) => p.documento === documento).length} para ${documento})…`}
-                    className="w-full rounded-md border-0 bg-transparent py-1 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none"
+                    className="w-full rounded-md border-0 bg-transparent py-1 text-xs text-texto placeholder:text-texto-3 focus:outline-none"
                   />
                 </div>
                 {achados.length > 0 && (
-                  <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                  <div className="absolute z-20 mt-1 w-full rounded-lg border border-borda bg-superficie p-1 shadow-nivel-2">
                     {achados.map((p) => (
                       <button
                         key={p.chave}
@@ -398,7 +398,7 @@ export function EmissaoBullai({
                           }))
                           setBusca((antes) => ({ ...antes, [s.id]: '' }))
                         }}
-                        className="block w-full rounded px-2 py-1 text-left text-xs text-slate-700 hover:bg-slate-50"
+                        className="block w-full rounded px-2 py-1 text-left text-xs text-texto hover:bg-superficie-2"
                         title={p.criterio}
                       >
                         {p.rotulo}
@@ -411,9 +411,9 @@ export function EmissaoBullai({
           )
         })}
 
-        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-100 pt-3">
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-borda pt-3">
           {semNascimento.length > 0 && (
-            <span className="text-xs text-red-700">
+            <span className="text-xs text-perigo">
               Falta a data de nascimento de {semNascimento.map((p) => p.sujeito.nome).join(', ')} — corrija os dados antes.
             </span>
           )}

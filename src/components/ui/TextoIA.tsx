@@ -20,7 +20,7 @@ export function TextoIA({ texto }: { texto: string }) {
       components={{
         p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
         strong: ({ children }) => (
-          <strong className="font-semibold text-slate-900">{children}</strong>
+          <strong className="font-semibold text-texto">{children}</strong>
         ),
         em: ({ children }) => <em className="italic">{children}</em>,
         ul: ({ children }) => (
@@ -37,28 +37,28 @@ export function TextoIA({ texto }: { texto: string }) {
           </div>
         ),
         th: ({ children }) => (
-          <th className="border-b border-slate-300 px-2 py-1 text-left font-semibold">
+          <th className="border-b border-borda-forte px-2 py-1 text-left font-semibold">
             {children}
           </th>
         ),
         td: ({ children }) => (
-          <td className="whitespace-nowrap border-b border-slate-200 px-2 py-1">
+          <td className="whitespace-nowrap border-b border-borda px-2 py-1">
             {children}
           </td>
         ),
         code: ({ children }) => (
-          <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-xs">
+          <code className="rounded border border-borda bg-superficie-2 px-1 py-0.5 font-mono text-xs">
             {children}
           </code>
         ),
         h1: ({ children }) => (
-          <p className="mb-1 font-semibold text-slate-900">{children}</p>
+          <p className="mb-1 font-semibold text-texto">{children}</p>
         ),
         h2: ({ children }) => (
-          <p className="mb-1 font-semibold text-slate-900">{children}</p>
+          <p className="mb-1 font-semibold text-texto">{children}</p>
         ),
         h3: ({ children }) => (
-          <p className="mb-1 font-semibold text-slate-900">{children}</p>
+          <p className="mb-1 font-semibold text-texto">{children}</p>
         ),
         // LINK EXTERNO ABRE EM OUTRA ABA. Na mesma aba, o clique trocava a
         // plataforma pelo site do link, e iam embora o painel do assistente, a

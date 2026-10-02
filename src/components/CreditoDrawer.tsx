@@ -56,14 +56,14 @@ export function CreditoDrawer({
         processo && (
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold tracking-tight text-slate-800">
+              <h2 className="text-base font-bold tracking-tight text-texto">
                 {formatCNJ(processo.numero_cnj)}
               </h2>
               <Badge tone={getLabel(STATUS_PROCESSO, processo.status).tone}>
                 {getLabel(STATUS_PROCESSO, processo.status).label}
               </Badge>
             </div>
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-texto-2">
               {processo.cedente || '—'} v. {processo.cessionario || '—'}
             </p>
           </div>
@@ -157,13 +157,13 @@ export function CreditoDrawer({
 
           <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
             {apensosDoDetalhe.length === 0 ? (
-              <p className="col-span-2 text-sm text-slate-600">Nenhum apenso vinculado.</p>
+              <p className="col-span-2 text-sm text-texto-2">Nenhum apenso vinculado.</p>
             ) : (
               <div className="col-span-2 space-y-2">
                 {apensosDoDetalhe.map((a) => (
-                  <div key={a.id} className="rounded-lg border border-slate-200 p-2.5">
-                    <div className="text-sm font-medium text-slate-800">{formatCNJ(a.numero || '')}</div>
-                    <div className="text-xs text-slate-600">
+                  <div key={a.id} className="rounded-lg border border-borda p-2.5">
+                    <div className="text-sm font-medium text-texto">{formatCNJ(a.numero || '')}</div>
+                    <div className="text-xs text-texto-2">
                       {[a.classe_processual, a.tribunal, a.comarca].filter(Boolean).join(' · ') || '—'}
                     </div>
                   </div>

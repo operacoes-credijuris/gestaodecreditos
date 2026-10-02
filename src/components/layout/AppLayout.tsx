@@ -33,10 +33,12 @@ export function AppLayout() {
         <Topbar onOpenMenu={() => setMobileOpen(true)} />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           {/* max-width evita tabelas esticadas de ponta a ponta em monitores
-              largos; a chave re-anima a entrada a cada troca de tela. */}
+              largos; a chave re-anima a entrada a cada troca de tela. Medidas
+              do `.content` da amostra: 1360px no máximo e 24px de respiro
+              (15px no celular). */}
           <div
             key={chave}
-            className="animate-page mx-auto w-full max-w-[1400px] px-4 py-6 lg:px-8"
+            className="animate-page mx-auto w-full max-w-[1360px] px-5 py-8 lg:px-8"
           >
             <Outlet />
           </div>

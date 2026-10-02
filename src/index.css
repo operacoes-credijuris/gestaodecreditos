@@ -6,6 +6,104 @@
 @tailwind utilities;
 
 @layer base {
+  /* =====================================================================
+     TOKENS DO VISUAL — a fonte única de cor, raio e sombra (etapa 5a).
+     Valores tirados da amostra aprovada (estilo.css, `:root`); o nome da
+     amostra vai ao lado de cada um.
+
+     CANAIS R G B, E NÃO #HEX: o tailwind.config.js monta cada cor como
+     `rgb(var(--x) / <alpha-value>)`, e é isso que deixa `bg-superficie/80` e
+     `ring-anel/25` funcionarem. Com #hex aqui a opacidade do Tailwind sumiria
+     em silêncio.
+
+     O MODO ESCURO (decidido para depois) É SÓ REDEFINIR ESTAS VARIÁVEIS num
+     seletor próprio — os componentes não mudam. Por isso nenhuma tela deve
+     escrever cor fixa da paleta (a catraca em src/lib/__tests__/catraca.test.ts
+     conta), e por isso a escala `brand` também virou variável.
+
+     Contraste conferido em src/lib/__tests__/contraste.test.ts: texto sobre as
+     superfícies pelo menos 4,5:1; borda de campo e anel de foco pelo menos 3:1.
+     Mudou um valor aqui, o teste diz se ainda passa.
+     ===================================================================== */
+  :root {
+    /* ---- a escala da marca (a mesma de antes, agora em variável) ---- */
+    --brand-50: 242 249 253; /* #f2f9fd */
+    --brand-100: 226 241 250; /* #e2f1fa */
+    --brand-200: 191 226 244; /* #bfe2f4 */
+    --brand-300: 134 202 234; /* #86caea */
+    --brand-400: 64 171 220; /* #40abdc */
+    --brand-500: 11 129 197; /* #0b81c5 — o azul da logomarca */
+    --brand-600: 10 98 150; /* #0a6296 — títulos do contrato */
+    --brand-700: 7 82 120; /* #075278 — cabeçalho do contrato */
+    --brand-800: 5 63 101; /* #053f65 */
+    --brand-900: 4 44 83; /* #042c53 — navy da apresentação */
+    --brand-950: 2 28 56; /* #021c38 */
+    --verde-50: 233 250 241; /* #e9faf1 */
+    --verde-400: 46 204 113; /* #2ecc71 — acento dos materiais comerciais */
+    --verde-500: 31 167 91; /* #1fa75b */
+    --verde-600: 20 122 67; /* #147a43 */
+
+    /* ---- neutros ---- */
+    --papel: 248 245 239; /* #f8f5ef  amostra --bg */
+    --superficie: 255 255 255; /* #ffffff  --surface */
+    --superficie-2: 252 251 248; /* #fcfbf8  --surface-2 (cabeçalho de tabela, linha em foco) */
+    --superficie-3: 243 239 231; /* #f3efe7  --surface-3 (hover, trilho do segmentado) */
+    --borda: 232 226 214; /* #e8e2d6  --border (divisórias, cartões) */
+    --borda-forte: 214 205 189; /* #d6cdbd  --border-strong (botão secundário, separador) */
+    /* NÃO ESTÁ NA AMOSTRA. A borda do campo da amostra (--border-strong) dá
+       1,6:1 sobre o branco, e um campo vazio precisa de 3:1 para ser visto como
+       campo (WCAG 1.4.11). Mesmo matiz quente, só mais escuro: 3,4:1 no branco,
+       3,1:1 no papel. */
+    --borda-controle: 148 139 123; /* #948b7b */
+    --texto: 23 32 43; /* #17202b  --text   16,4:1 no branco */
+    --texto-2: 68 80 99; /* #445063  --text-2  8,2:1 */
+    --texto-3: 98 109 126; /* #626d7e  --text-3  5,2:1 (4,6:1 na superfície 3) — o cinza mais claro para texto */
+    --veu: 9 16 26; /* #09101a  o fundo escurecido atrás das janelas (amostra .overlay) */
+
+    /* ---- marca (papéis; apontam para a escala) ---- */
+    --marca: var(--brand-600); /* --brand: botão primário, 6,6:1 com texto branco */
+    --marca-hover: var(--brand-700); /* --brand-hover */
+    --marca-viva: var(--brand-500); /* --brand-500: sublinhado da aba, barras */
+    --marca-suave: var(--brand-100); /* --brand-soft: contagem acesa, avatar */
+    --marca-leve: var(--brand-50); /* --brand-softer: hover de link, caixa de ajuda */
+    --marca-texto: 10 90 138; /* #0a5a8a  --brand-text: texto e link na cor da marca */
+    --anel: var(--brand-500); /* --ring: o anel de foco */
+
+    /* ---- menu lateral ---- */
+    --nav-fundo: var(--brand-900); /* --nav-bg */
+    --nav-fundo-2: 6 55 95; /* #06375f  --nav-bg-2 */
+    --nav-texto: 201 220 238; /* #c9dcee  --nav-text */
+    --nav-apagado: 143 176 207; /* #8fb0cf  --nav-muted (títulos das seções) */
+    --nav-ativo: 11 74 122; /* #0b4a7a  --nav-active (item aceso) */
+    --acento: var(--verde-400); /* --accent: a barra do item aceso */
+
+    /* ---- estados: texto, fundo pálido, preenchido, borda ---- */
+    --sucesso: 19 108 60; /* #136c3c  --success */
+    --sucesso-fundo: 231 247 238; /* #e7f7ee */
+    --sucesso-cheio: 24 128 74; /* #18804a  --success-fill */
+    --sucesso-borda: 182 227 200; /* #b6e3c8 */
+    --perigo: 180 35 24; /* #b42318  --danger */
+    --perigo-fundo: 253 240 239; /* #fdf0ef */
+    --perigo-cheio: 192 57 43; /* #c0392b  --danger-fill */
+    --perigo-borda: 243 196 191; /* #f3c4bf */
+    --aviso: 147 82 10; /* #93520a  --warning */
+    --aviso-fundo: 253 243 225; /* #fdf3e1 */
+    --aviso-cheio: 232 163 23; /* #e8a317  o âmbar das bolinhas e barras de aviso da amostra */
+    --aviso-borda: 241 210 155; /* #f1d29b */
+    --info: 10 90 138; /* #0a5a8a  --info */
+    --info-fundo: 233 244 251; /* #e9f4fb */
+    --info-borda: 191 220 239; /* #bfdcef */
+
+    /* ---- raios e sombras ---- */
+    --raio-controle: 8px; /* botão, item de menu, aba do segmentado */
+    --raio-campo: 10px; /* --radius: campo, caixa de aviso */
+    --raio-cartao: 14px; /* --radius-lg: cartão, tabela, painel */
+    --raio-janela: 16px; /* janela (modal) */
+    --sombra-1: 0 1px 2px rgb(23 32 43 / 0.06), 0 1px 1px rgb(23 32 43 / 0.03);
+    --sombra-2: 0 6px 20px rgb(23 32 43 / 0.08), 0 1px 3px rgb(23 32 43 / 0.05);
+    --sombra-3: 0 24px 60px rgb(10 20 35 / 0.22);
+  }
+
   html,
   body,
   #root {
@@ -23,13 +121,45 @@
 
   body {
     /* Papel quente, o fundo das apresentações da marca: o fundo inteiro já
-       "é Credijuris" sem gritar — os cartões brancos ganham profundidade. */
-    @apply bg-papel text-slate-800 antialiased;
+       "é Credijuris" sem gritar — os cartões brancos ganham profundidade.
+
+       TEXTO CORRIDO EM 14 PX (decisão do dono, 02/10/2026), pelo tamanho
+       `corpo`. O <html> continua em 12px (ver acima): o que muda é só o texto
+       que não declara tamanho, que antes herdava os 12px da raiz. */
+    @apply bg-papel text-corpo text-texto antialiased;
   }
 
   /* Até selecionar texto tem a cor da casa. */
   ::selection {
     @apply bg-brand-200 text-brand-950;
+  }
+
+  /* FOCO VISÍVEL EM TUDO, o mesmo anel da amostra. Vale para o que não traz o
+     próprio (link no meio do texto, botão feito à mão numa tela); quem usa
+     `focus:outline-none` com `focus-visible:ring-*` continua com o seu. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--anel));
+    outline-offset: 2px;
+  }
+
+  /* O preflight do Tailwind pinta o placeholder de gray-400 (2,5:1). */
+  input::placeholder,
+  textarea::placeholder {
+    color: rgb(var(--texto-3));
+    opacity: 1;
+  }
+
+  /* MOVIMENTO REDUZIDO: quem pediu ao sistema menos animação não vê página,
+     janela e aviso deslizando. O giro de carregamento fica — parado, ele
+     pareceria uma tela travada. */
+  @media (prefers-reduced-motion: reduce) {
+    *:not(.animate-spin),
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
@@ -39,7 +169,7 @@
     height: 8px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-slate-300;
+    @apply rounded-full bg-borda-forte;
   }
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
@@ -65,15 +195,17 @@
   }
   /* Bloco de carregamento (skeleton shimmer). */
   .skeleton {
-    @apply relative overflow-hidden bg-slate-200/70;
+    @apply relative overflow-hidden bg-superficie-3;
   }
   .skeleton::after {
     content: '';
     @apply absolute inset-0;
+    /* O brilho é a própria superfície, e não branco fixo: no modo escuro ele
+       acompanha a troca das variáveis. */
     background: linear-gradient(
       90deg,
       transparent,
-      rgba(255, 255, 255, 0.65),
+      rgb(var(--superficie) / 0.65),
       transparent
     );
     animation: cj-shimmer 1.4s infinite;

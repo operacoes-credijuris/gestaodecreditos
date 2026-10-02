@@ -71,7 +71,7 @@ export default function Anomalias() {
             <Secao
               titulo="Contradições no dado"
               descricao="O registro se contradiz. Nesses casos, é erro de cadastro."
-              icone={<AlertTriangle className="h-4 w-4 text-red-500" />}
+              icone={<AlertTriangle className="h-4 w-4 text-perigo" />}
               achados={impossibilidades}
             />
           )}
@@ -79,7 +79,7 @@ export default function Anomalias() {
             <Secao
               titulo="Sinais estatísticos"
               descricao="Fora do padrão da carteira — o que não significa errado. Um resultado extremo pode ser um evento econômico real."
-              icone={<InfoIcon className="h-4 w-4 text-slate-400" />}
+              icone={<InfoIcon className="h-4 w-4 text-texto-3" />}
               achados={sinais}
             />
           )}
@@ -111,9 +111,9 @@ function Secao({
       <CardBody>
         <ul className="space-y-4">
           {achados.map((a) => (
-            <li key={a.regra} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
+            <li key={a.regra} className="border-b border-borda pb-4 last:border-0 last:pb-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-slate-800">{a.titulo}</span>
+                <span className="text-sm font-semibold text-texto">{a.titulo}</span>
                 <Badge tone={TOM_GRAVIDADE[a.gravidade]} size="sm">
                   {ROTULO_GRAVIDADE[a.gravidade]}
                 </Badge>
@@ -121,8 +121,8 @@ function Secao({
                   {a.refs.length} {a.refs.length === 1 ? 'operação' : 'operações'}
                 </Badge>
               </div>
-              <p className="mt-1 text-sm text-slate-600">{a.orientacao}</p>
-              <p className="mt-2 font-mono text-xs text-slate-400">{a.refs.join(' · ')}</p>
+              <p className="mt-1 text-sm text-texto-2">{a.orientacao}</p>
+              <p className="mt-2 font-mono text-xs text-texto-3">{a.refs.join(' · ')}</p>
             </li>
           ))}
         </ul>

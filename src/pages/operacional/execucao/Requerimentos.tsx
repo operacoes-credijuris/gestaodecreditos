@@ -251,7 +251,7 @@ export default function Requerimentos() {
 
       <Card className="mb-4 p-4">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
           <Input
             className="pl-9"
             placeholder="Buscar por protocolo, requerente, requerido, órgão, matéria…"
@@ -325,7 +325,7 @@ export default function Requerimentos() {
                 <TR onClick={() => setDetalhe(r)}>
                   {/* Sem nowrap na célula: o número não quebra, mas os nomes das
                       partes podem. */}
-                  <TD className="font-medium text-slate-800">
+                  <TD className="font-medium text-texto">
                     <span className="inline-flex items-center gap-1.5">
                       <span className="whitespace-nowrap tabular-nums">
                         {r.numero_protocolo || '—'}
@@ -338,7 +338,7 @@ export default function Requerimentos() {
                         a linha: protocolo sozinho não diz de quem é o requerimento.
                         O travessão de cada lado aparece mesmo vazio, para a falta
                         ficar à vista de quem cadastrou pela metade. */}
-                    <div className="text-xs font-normal text-slate-600">
+                    <div className="text-xs font-normal text-texto-2">
                       {r.requerente || '—'} v. {r.requerido || '—'}
                     </div>
                   </TD>
@@ -346,14 +346,14 @@ export default function Requerimentos() {
                       claro — a mesma hierarquia de devedora/comarca em Créditos. */}
                   <TD>
                     <div>{r.tribunal_entidade || '—'}</div>
-                    <div className="text-xs text-slate-600">{r.orgao || '—'}</div>
+                    <div className="text-xs text-texto-2">{r.orgao || '—'}</div>
                   </TD>
                   <TD>{r.classe_processual || '—'}</TD>
                   <TD>{r.materia || '—'}</TD>
                   {/* tabular-nums como em todas as outras colunas de data da
                       plataforma: sem ele os dígitos têm largura variável e a
                       coluna fica com as datas desalinhadas entre si. */}
-                  <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                  <TD className="whitespace-nowrap tabular-nums text-texto-2">
                     {formatDate(r.data_protocolo)}
                   </TD>
                   {/* Do cache do ADVBOX, como em Créditos — a mesma consulta e o
@@ -362,7 +362,7 @@ export default function Requerimentos() {
                       também pelo número de protocolo. Enquanto o mapa carrega,
                       mostra vazio em vez de "—", que afirmaria não haver
                       movimentação. */}
-                  <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                  <TD className="whitespace-nowrap tabular-nums text-texto-2">
                     {ultimaMov.isLoading
                       ? ''
                       : formatDate(
@@ -518,13 +518,13 @@ export default function Requerimentos() {
         title={
           detalhe && (
             <div className="min-w-0">
-              <h2 className="text-base font-bold tracking-tight text-slate-800">
+              <h2 className="text-base font-bold tracking-tight text-texto">
                 {detalhe.numero_protocolo || '—'}
               </h2>
               {/* Subtítulo com as PARTES, e não com tribunal · órgão: é o mesmo
                   cabeçalho da ficha de Créditos ("cedente v. cessionário"), e o
                   tribunal agora tem seção própria logo abaixo. */}
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-texto-2">
                 {detalhe.requerente || '—'} v. {detalhe.requerido || '—'}
               </p>
             </div>
@@ -557,7 +557,7 @@ export default function Requerimentos() {
 
             {detalhe.observacoes && (
               <DrawerSection title="Observações">
-                <p className="col-span-2 whitespace-pre-wrap break-words text-sm text-slate-800">
+                <p className="col-span-2 whitespace-pre-wrap break-words text-sm text-texto">
                   {detalhe.observacoes}
                 </p>
               </DrawerSection>
@@ -565,17 +565,17 @@ export default function Requerimentos() {
 
             <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
               {apensosDoDetalhe.length === 0 ? (
-                <p className="col-span-2 text-sm text-slate-600">
+                <p className="col-span-2 text-sm text-texto-2">
                   Nenhum apenso vinculado.
                 </p>
               ) : (
                 <div className="col-span-2 space-y-2">
                   {apensosDoDetalhe.map((a) => (
-                    <div key={a.id} className="rounded-lg border border-slate-200 p-2.5">
-                      <div className="text-sm font-medium text-slate-800">
+                    <div key={a.id} className="rounded-lg border border-borda p-2.5">
+                      <div className="text-sm font-medium text-texto">
                         {formatCNJ(a.numero)}
                       </div>
-                      <div className="text-xs text-slate-600">
+                      <div className="text-xs text-texto-2">
                         {[a.classe_processual, a.tribunal, a.comarca]
                           .filter(Boolean)
                           .join(' · ') || '—'}

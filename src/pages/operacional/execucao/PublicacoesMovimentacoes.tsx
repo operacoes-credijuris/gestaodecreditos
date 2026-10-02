@@ -210,7 +210,7 @@ export default function PublicacoesMovimentacoes() {
       {aba !== 'fase' && (
         <Card className="mb-4 p-4">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
             <Input
               className="pl-9"
               placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
@@ -453,7 +453,7 @@ function Publicacoes({ busca }: { busca: string }) {
     <div className="space-y-4">
       {/* gap-2, e não gap-3: o "·" do indicador tem 4,5px do próprio lado, e com
           gap-3 ele ficava visivelmente mais perto do texto da direita. */}
-      <div className="flex items-center gap-2 text-sm text-slate-600">
+      <div className="flex items-center gap-2 text-sm text-texto-2">
         <span>
           <strong>{filtradas.length}</strong>{' '}
           {filtradas.length === 1 ? 'publicação' : 'publicações'}
@@ -468,7 +468,7 @@ function Publicacoes({ busca }: { busca: string }) {
 
 
       {truncou && (
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <p className="rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
           Mostrando as {lista.data?.length} publicações mais recentes de{' '}
           {total.data} na janela de 30 dias. As mais antigas do período ficaram de
           fora — use a busca para encontrar uma publicação específica.
@@ -490,14 +490,14 @@ function Publicacoes({ busca }: { busca: string }) {
             {novas.length ? (
               novas.map(card)
             ) : (
-              <p className="text-sm text-slate-600">Nenhuma publicação nova.</p>
+              <p className="text-sm text-texto-2">Nenhuma publicação nova.</p>
             )}
           </Secao>
           <Secao titulo="Tratadas" qtd={providenciadas.length}>
             {providenciadas.length ? (
               providenciadas.map(card)
             ) : (
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-texto-2">
                 Nenhuma publicação tratada.
               </p>
             )}
@@ -531,11 +531,11 @@ function Secao({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3 pt-1">
-        <span className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+        <span className="text-sm font-semibold uppercase tracking-wide text-texto-2">
           {titulo}
         </span>
-        <span className="text-xs text-slate-600">({qtd})</span>
-        <div className="h-px flex-1 bg-slate-200" />
+        <span className="text-xs text-texto-2">({qtd})</span>
+        <div className="h-px flex-1 bg-borda" />
       </div>
       {children}
     </div>
@@ -562,10 +562,10 @@ function PublicacaoCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-sm font-medium text-slate-800">
+            <span className="text-sm font-medium text-texto">
               {formatCNJ(p.numero_processo ?? '')}
             </span>
-            <label className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+            <label className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 text-xs text-texto-2">
               <input
                 type="checkbox"
                 className="accent-brand-600"
@@ -576,7 +576,7 @@ function PublicacaoCard({
             </label>
           </div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-slate-600">
+            <div className="text-xs text-texto-2">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
@@ -599,7 +599,7 @@ function PublicacaoCard({
         </div>
       </div>
 
-      <div className="mt-3 text-xs text-slate-600">
+      <div className="mt-3 text-xs text-texto-2">
         Data de disponibilização: {formatDate(p.data_disponibilizacao)}
       </div>
 
@@ -631,7 +631,7 @@ function TextoExpand({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-2 text-sm text-slate-700">
+    <div className="mt-2 text-sm text-texto">
       <div
         ref={ref}
         className={cn('whitespace-pre-line break-words', !expanded && 'line-clamp-4')}
@@ -860,7 +860,7 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 text-sm text-slate-600">
+      <div className="flex items-center gap-2 text-sm text-texto-2">
         <span>
           <strong>{totalMovs}</strong>{' '}
           {totalMovs === 1 ? 'movimentação' : 'movimentações'} nos últimos 20 dias
@@ -874,7 +874,7 @@ function Movimentacoes({ busca }: { busca: string }) {
       </div>
 
       {total.data != null && (lista.data?.length ?? 0) < total.data && (
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <p className="rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
           Mostrando as {lista.data?.length} movimentações mais recentes de{' '}
           {total.data} na janela de 20 dias. Com o corte, um processo pode
           aparecer em Paralisados sem estar.
@@ -906,7 +906,7 @@ function Movimentacoes({ busca }: { busca: string }) {
                 />
               ))
             ) : (
-              <p className="text-sm text-slate-600">Nenhuma movimentação nova.</p>
+              <p className="text-sm text-texto-2">Nenhuma movimentação nova.</p>
             )}
           </Secao>
           <Secao titulo="Paralisados" qtd={paralisados.length}>
@@ -924,14 +924,14 @@ function Movimentacoes({ busca }: { busca: string }) {
               // exatamente o que aparecia quando a consulta de status falhava.
               // Dizer que nada está parado sem ter conseguido olhar é o pior
               // jeito de errar aqui.
-              <p className="text-sm text-amber-700">
+              <p className="text-sm text-aviso">
                 Não foi possível carregar o tempo sem movimentação dos processos:{' '}
                 {(status.error as Error).message}
               </p>
             ) : status.isLoading ? (
-              <p className="text-sm text-slate-600">Verificando…</p>
+              <p className="text-sm text-texto-2">Verificando…</p>
             ) : (
-              <p className="text-sm text-slate-600">Nenhum processo paralisado.</p>
+              <p className="text-sm text-texto-2">Nenhum processo paralisado.</p>
             )}
           </Secao>
         </>
@@ -960,14 +960,14 @@ function ProcessoMovimentacoes({
         type="button"
         onClick={() => setAberto((v) => !v)}
         aria-expanded={aberto}
-        className="flex w-full items-start justify-between gap-2 p-4 text-left transition-colors hover:bg-slate-50"
+        className="flex w-full items-start justify-between gap-2 p-4 text-left transition-colors hover:bg-superficie-2"
       >
         <div className="min-w-0">
-          <div className="text-sm font-medium text-slate-800">
+          <div className="text-sm font-medium text-texto">
             {formatCNJ(numero)}
           </div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-slate-600">
+            <div className="text-xs text-texto-2">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
@@ -990,16 +990,16 @@ function ProcessoMovimentacoes({
       </button>
 
       {aberto && (
-        <ol className="space-y-3 border-t border-slate-100 px-4 pb-4 pt-3">
+        <ol className="space-y-3 border-t border-borda px-4 pb-4 pt-3">
           {movs.map((m) => (
             <li key={m.id} className="flex gap-3">
               <div className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-brand-400" />
               <div className="min-w-0">
-                <div className="text-xs font-medium text-slate-600">
+                <div className="text-xs font-medium text-texto-2">
                   {formatDate(m.data)}
                 </div>
                 {m.conteudo && (
-                  <div className="whitespace-pre-line break-words text-sm text-slate-700">
+                  <div className="whitespace-pre-line break-words text-sm text-texto">
                     {m.conteudo}
                   </div>
                 )}
@@ -1033,13 +1033,13 @@ function ProcessoParalisado({
     <Card className={cn('border-l-4 p-4', b.borda)}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-slate-800">{formatCNJ(numero)}</div>
+          <div className="text-sm font-medium text-texto">{formatCNJ(numero)}</div>
           {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-slate-600">
+            <div className="text-xs text-texto-2">
               {info.cedente || '—'} v. {info.cessionario || '—'}
             </div>
           )}
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-texto-2">
             {ultima
               ? `Última movimentação: ${formatDate(ultima)}`
               : 'Sem movimentação registrada no ADVBOX'}

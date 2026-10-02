@@ -26,11 +26,11 @@ export function SyncStatus({
    */
   separador?: boolean
 }) {
-  const ponto = separador ? <span className="text-slate-300">·</span> : null
+  const ponto = separador ? <span className="text-borda-forte">·</span> : null
 
   if (syncing) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-brand-600">
+      <span className="inline-flex items-center gap-1.5 text-xs text-marca-texto">
         {ponto}
         <RefreshCw className="h-3.5 w-3.5 animate-spin" /> {label ?? 'sincronizando…'}
       </span>
@@ -40,7 +40,7 @@ export function SyncStatus({
   const d = new Date(updatedAt)
   if (Number.isNaN(d.getTime())) return null
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+    <span className="inline-flex items-center gap-1.5 text-xs text-texto-3">
       {ponto}
       <span>
         atualizado às{' '}

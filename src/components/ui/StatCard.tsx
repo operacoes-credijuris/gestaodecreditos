@@ -26,54 +26,57 @@ export function StatCard({
   /** Realce visual de "selecionado" — só faz sentido junto de `onClick`. */
   active?: boolean
 }) {
+  // A placa do ícone do `.kpi-ic` da amostra: fundo pálido e ícone no tom forte.
   const tones = {
-    brand: 'bg-brand-50 text-brand-700',
-    green: 'bg-emerald-50 text-emerald-700',
-    amber: 'bg-amber-50 text-amber-700',
-    red: 'bg-red-50 text-red-700',
-    slate: 'bg-slate-100 text-slate-600',
+    brand: 'bg-marca-leve text-marca-texto',
+    green: 'bg-sucesso-fundo text-sucesso',
+    amber: 'bg-aviso-fundo text-aviso',
+    red: 'bg-perigo-fundo text-perigo',
+    slate: 'bg-superficie-3 text-texto-2',
   }
   const clicavel = !!to || !!onClick
   const card = (
     <Card
       className={cn(
         'h-full p-5',
-        clicavel && 'transition hover:border-brand-300 hover:shadow-md',
-        active && 'border-brand-400 ring-1 ring-brand-300',
+        clicavel && 'transition hover:border-borda-forte hover:shadow-nivel-2',
+        // Selecionado: contorno no azul da logomarca e um halo largo e claro
+        // (o `.kpi.click.sel` da amostra).
+        active && 'border-marca-viva ring-[3px] ring-marca-viva/15',
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="flex items-center gap-1 truncate text-sm font-medium text-slate-600">
+          <p className="flex items-center gap-1 truncate text-corpo font-medium text-texto-2">
             {label}
             {/* A régua do indicador fica no tooltip do ⓘ — tela limpa,
                 informação a um hover de distância. */}
             {typeof hint === 'string' && hint && (
               <span title={hint} aria-label={hint} className="shrink-0 cursor-help">
-                <Info className="h-3.5 w-3.5 text-slate-300 transition-colors hover:text-slate-500" />
+                <Info className="h-3.5 w-3.5 text-texto-3 transition-colors hover:text-texto-2" />
               </span>
             )}
           </p>
-          <p className="font-display mt-1 text-2xl font-bold tabular-nums tracking-tight text-slate-900">
+          <p className="font-display mt-1 text-2xl font-bold tabular-nums tracking-tight text-texto">
             {value}
           </p>
         </div>
         {icon && (
-          <div className={cn('rounded-xl p-2.5', tones[tone])}>{icon}</div>
+          <div className={cn('rounded-controle p-2.5', tones[tone])}>{icon}</div>
         )}
       </div>
     </Card>
   )
   if (to) {
     return (
-      <Link to={to} className="block h-full">
+      <Link to={to} className="block h-full rounded-cartao">
         {card}
       </Link>
     )
   }
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} className="block h-full w-full text-left">
+      <button type="button" onClick={onClick} className="block h-full w-full rounded-cartao text-left">
         {card}
       </button>
     )

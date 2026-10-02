@@ -79,7 +79,7 @@ export default function Configuracoes() {
 function AvisoLeitura({ error }: { error: unknown }) {
   if (!error) return null
   return (
-    <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+    <p className="mb-4 rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
       Não foi possível ler o estado atual desta integração:{' '}
       {(error as Error).message}
     </p>
@@ -265,7 +265,7 @@ function SaldoEscavador() {
     // alguém saber que há o que conferir: o selo ao lado diz "configurado", e
     // sem isto a tela afirmaria que está tudo bem.
     return (
-      <span className="text-xs text-amber-700" title={(error as Error).message}>
+      <span className="text-xs text-aviso" title={(error as Error).message}>
         saldo indisponível
       </span>
     )
@@ -282,7 +282,7 @@ function SaldoEscavador() {
             'Cada consulta da diligência gasta daqui. Clique para atualizar.'
           : undefined
       }
-      className="text-xs text-slate-500 tabular-nums hover:text-slate-700 disabled:opacity-50"
+      className="text-xs text-texto-3 tabular-nums hover:text-texto disabled:opacity-50"
     >
       Saldo {data ? data.descricao || formatBRL(data.saldo) : '—'}
     </button>
@@ -418,8 +418,8 @@ function EscavadorConfig() {
                 caminho deles é o inverso, eles avisam. Para isso precisam saber
                 nosso endereço, e nós precisamos saber que o aviso é mesmo deles;
                 daí os dois campos abaixo, que se preenchem UMA vez. */}
-            <div className="sm:col-span-2 mt-2 border-t border-slate-100 pt-4">
-              <p className="mb-3 text-sm font-medium text-slate-800">
+            <div className="sm:col-span-2 mt-2 border-t border-borda pt-4">
+              <p className="mb-3 text-sm font-medium text-texto">
                 Avisos automáticos (callback)
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -550,12 +550,12 @@ function BullaiConfig() {
         action={
           <span className="flex items-center gap-3">
             {configurado && c && (
-              <span className="text-xs text-slate-500" title="Cada portal pedido gasta uma consulta do plano.">
+              <span className="text-xs text-texto-3" title="Cada portal pedido gasta uma consulta do plano.">
                 {c.restantes == null ? 'Plano ilimitado' : `${c.restantes.toLocaleString('pt-BR')} consulta(s)`}
               </span>
             )}
             {configurado && catalogo.error && (
-              <span className="text-xs text-amber-700" title={(catalogo.error as Error).message}>
+              <span className="text-xs text-aviso" title={(catalogo.error as Error).message}>
                 saldo indisponível
               </span>
             )}
@@ -617,16 +617,16 @@ function BullaiConfig() {
                       .then(() => toast.success('Catálogo copiado.'))
                       .catch(() => toast.error('Não consegui copiar.'))
                   }}
-                  className="text-sm text-slate-600 underline underline-offset-2 hover:text-slate-800"
+                  className="text-sm text-texto-2 underline underline-offset-2 hover:text-texto"
                 >
                   Copiar a lista
                 </button>
               )}
             </div>
             {verCatalogo && (
-              <div className="sm:col-span-2 max-h-96 overflow-auto rounded-lg ring-1 ring-slate-200">
+              <div className="sm:col-span-2 max-h-96 overflow-auto rounded-lg ring-1 ring-borda">
                 <table className="w-full text-left text-xs">
-                  <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                  <thead className="sticky top-0 bg-superficie-2 text-texto-2">
                     <tr>
                       <th className="px-3 py-2 font-medium">Certidão</th>
                       <th className="px-3 py-2 font-medium">Documento</th>
@@ -635,10 +635,10 @@ function BullaiConfig() {
                   </thead>
                   <tbody>
                     {portais.map((p) => (
-                      <tr key={p.chave} className="border-t border-slate-100" title={p.criterio}>
-                        <td className="px-3 py-1.5 text-slate-800">{p.rotulo}</td>
-                        <td className="px-3 py-1.5 text-slate-600">{p.documento}</td>
-                        <td className="px-3 py-1.5 text-slate-600">
+                      <tr key={p.chave} className="border-t border-borda" title={p.criterio}>
+                        <td className="px-3 py-1.5 text-texto">{p.rotulo}</td>
+                        <td className="px-3 py-1.5 text-texto-2">{p.documento}</td>
+                        <td className="px-3 py-1.5 text-texto-2">
                           {p.presencial ? 'presencial — não automatiza' : 'automática'}
                         </td>
                       </tr>
@@ -750,7 +750,7 @@ function SkillsConfig() {
         }
       />
       <CardBody>
-        <p className="mb-4 text-sm text-slate-600">
+        <p className="mb-4 text-sm text-texto-2">
           Pacotes de habilidade da Anthropic (feitos no Claude, subidos como .zip) que o
           assistente passa a usar. Uma skill ativa vale para todo mundo que usa o assistente.
         </p>
@@ -772,9 +772,9 @@ function SkillsConfig() {
                   {data.map((s) => (
                     <TR key={s.id}>
                       <TD>
-                        <p className="font-medium text-slate-800">{s.nome}</p>
+                        <p className="font-medium text-texto">{s.nome}</p>
                         {s.descricao && (
-                          <p className="text-xs text-slate-500">{s.descricao}</p>
+                          <p className="text-xs text-texto-3">{s.descricao}</p>
                         )}
                       </TD>
                       <TD>
@@ -813,7 +813,7 @@ function SkillsConfig() {
                   type="file"
                   accept=".zip"
                   onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
-                  className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
+                  className="block w-full text-sm text-texto-2 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
                 />
               </Field>
               <div className="sm:col-span-2">
@@ -1031,8 +1031,8 @@ function AdvboxConfig() {
                 As quatro escolhas são exigência da API — ela recusa a criação sem
                 cliente, responsável, fase e tipo. Vêm em lista, da própria conta,
                 porque pedir ID digitado seria pedir para errar. */}
-            <div className="space-y-3 border-t border-slate-200 pt-4 sm:col-span-2">
-              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-800">
+            <div className="space-y-3 border-t border-borda pt-4 sm:col-span-2">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-texto">
                 <input
                   type="checkbox"
                   className="accent-brand-600"
@@ -1107,7 +1107,7 @@ function AdvboxConfig() {
                   >
                     Carregar responsáveis
                   </Button>
-                  <span className="text-xs text-slate-600">
+                  <span className="text-xs text-texto-2">
                     Não consegui buscar a lista de responsáveis na ADVBOX agora.
                   </span>
                 </div>
@@ -1392,7 +1392,7 @@ function RoteiroConfig() {
                 aqui empurra os outros para baixo. O rodapé do cartão é o lugar de
                 tudo isso, e ele cabe numa linha. */}
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-texto-3">
                 <span>{texto.length.toLocaleString('pt-BR')} caracteres</span>
                 {data?.atualizado_em && (
                   <span>
@@ -1405,7 +1405,7 @@ function RoteiroConfig() {
 
               <div className="flex items-center gap-2">
                 {mudou && (
-                  <span className="text-xs font-medium text-amber-700">
+                  <span className="text-xs font-medium text-aviso">
                     alterações não salvas
                   </span>
                 )}
@@ -1493,7 +1493,7 @@ function DjenConfig() {
         ) : naoLido ? null : (
           <div className="space-y-3">
             {itens.length === 0 && (
-              <p className="text-sm text-slate-600">Nenhuma OAB cadastrada.</p>
+              <p className="text-sm text-texto-2">Nenhuma OAB cadastrada.</p>
             )}
             {itens.map((o, i) => (
               <div key={i} className="flex items-end gap-2">
@@ -1664,7 +1664,7 @@ function UsuariosConfig() {
         {/* Erro antes de tudo: tabela vazia por falha de leitura era
             indistinguível de "não há usuário cadastrado". */}
         {error ? (
-          <p className="m-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <p className="m-4 rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
             Não foi possível carregar os usuários: {(error as Error).message}
           </p>
         ) : isLoading ? (
@@ -1685,7 +1685,7 @@ function UsuariosConfig() {
                 const admin = p.role === 'admin' || p.email === ADMIN_EMAIL
                 return (
                   <TR key={p.id}>
-                    <TD className="font-medium text-slate-800">{p.nome || '—'}</TD>
+                    <TD className="font-medium text-texto">{p.nome || '—'}</TD>
                     <TD>{p.email}</TD>
                     <TD>
                       {admin ? (

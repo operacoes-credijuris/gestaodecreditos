@@ -407,17 +407,17 @@ function LinhaCertidao({
   }
 
   return (
-    <div className="border-b border-slate-100 text-xs last:border-b-0">
+    <div className="border-b border-borda text-xs last:border-b-0">
       <div className="flex flex-wrap items-center gap-2 p-2.5">
         <Badge size="sm" tone={TOM_STATUS[item.status] ?? 'gray'}>
           {item.status}
         </Badge>
-        <span className="font-medium text-slate-800">
+        <span className="font-medium text-texto">
           {cat?.nome_curto ?? item.certidao_codigo}
         </span>
-        <span className="text-slate-500">{cat?.orgao_emissor}</span>
+        <span className="text-texto-3">{cat?.orgao_emissor}</span>
         {rotuloParametros(item.parametros) && (
-          <span className="text-slate-500">({rotuloParametros(item.parametros)})</span>
+          <span className="text-texto-3">({rotuloParametros(item.parametros)})</span>
         )}
         {!item.obrigatoria && (
           <Badge size="sm" tone="gray">
@@ -425,13 +425,13 @@ function LinhaCertidao({
           </Badge>
         )}
         {item.status === 'NAO_APLICAVEL' && (
-          <span className="text-blue-700">
+          <span className="text-info">
             dispensada
             {item.dispensa_motivo ? `: ${item.dispensa_motivo}` : ' (sem motivo!)'}
           </span>
         )}
         {item.erro_classe && (
-          <span className="text-amber-700">
+          <span className="text-aviso">
             {MOTIVO_MANUAL[item.erro_classe] ?? item.erro_classe}
             {item.erro_detalhe ? `: ${item.erro_detalhe}` : ''}
           </span>
@@ -441,7 +441,7 @@ function LinhaCertidao({
           <button
             type="button"
             onClick={() => setAberto((v) => !v)}
-            className="font-medium text-slate-500 hover:text-slate-700 hover:underline"
+            className="font-medium text-texto-3 hover:text-texto hover:underline"
           >
             {aberto ? 'Fechar' : 'Como emitir'}
           </button>
@@ -455,30 +455,30 @@ function LinhaCertidao({
               Abrir portal <ExternalLink className="h-3 w-3" />
             </a>
           ) : (
-            <span className="text-amber-700">sem link</span>
+            <span className="text-aviso">sem link</span>
           )}
         </div>
       </div>
 
       {aberto && (
-        <div className="space-y-2 border-t border-slate-100 bg-slate-50 p-3">
+        <div className="space-y-2 border-t border-borda bg-superficie-2 p-3">
           {barreiras.length > 0 ? (
-            <div className="text-amber-800">
+            <div className="text-aviso">
               ⚠️ {barreiras.join(' · ')}
             </div>
           ) : (
-            <div className="text-emerald-700">Sem login e sem CAPTCHA conhecidos.</div>
+            <div className="text-sucesso">Sem login e sem CAPTCHA conhecidos.</div>
           )}
 
           <div>
-            <div className="mb-1 text-slate-600">O que o portal pede:</div>
+            <div className="mb-1 text-texto-2">O que o portal pede:</div>
             <div className="space-y-1">
               {insumos.map((x) => (
                 <div key={x.chave} className="flex items-center gap-2">
-                  <span className="w-36 flex-none text-slate-500">{x.rotulo}</span>
+                  <span className="w-36 flex-none text-texto-3">{x.rotulo}</span>
                   {x.valor ? (
                     <>
-                      <span className="font-mono text-slate-800">{x.valor}</span>
+                      <span className="font-mono text-texto">{x.valor}</span>
                       <button
                         type="button"
                         onClick={() => copiar(x.valor, x.chave)}
@@ -490,24 +490,24 @@ function LinhaCertidao({
                   ) : (
                     // Campo vazio é PENDÊNCIA, não detalhe: sem ele o portal não
                     // emite, e descobrir isso só lá é viagem perdida.
-                    <span className="text-red-700">falta no cadastro</span>
+                    <span className="text-perigo">falta no cadastro</span>
                   )}
                 </div>
               ))}
               {insumos.length === 0 && (
-                <div className="text-slate-500">Nada declarado no catálogo.</div>
+                <div className="text-texto-3">Nada declarado no catálogo.</div>
               )}
             </div>
           </div>
 
           {faltando.length > 0 && (
-            <div className="text-red-700">
+            <div className="text-perigo">
               Não dá para emitir ainda: falta {faltando.map((x) => x.rotulo).join(', ')}.
             </div>
           )}
 
           {cat?.validade_dias && (
-            <div className="text-slate-600">
+            <div className="text-texto-2">
               Validade: {cat.validade_dias} dias
               {cat.sla_horas ? ` · sai em até ${cat.sla_horas}h` : ''}
             </div>
@@ -519,8 +519,8 @@ function LinhaCertidao({
               precisa pela primeira vez cola aqui, e da segunda em diante aparece
               pronto para todo mundo. */}
           {!url && escopo && (
-            <div className="rounded-md bg-white p-2 ring-1 ring-inset ring-slate-200">
-              <div className="mb-1 text-slate-600">
+            <div className="rounded-md bg-superficie p-2 ring-1 ring-inset ring-borda">
+              <div className="mb-1 text-texto-2">
                 O link desta certidão depende de <strong>{escopo}</strong>, e ainda
                 não está cadastrado. Cole o endereço oficial e ele passa a aparecer
                 aqui para todos os créditos deste escopo:
@@ -542,12 +542,12 @@ function LinhaCertidao({
                   Salvar link
                 </Button>
               </div>
-              {erroUrl && <div className="mt-1 text-red-700">{erroUrl}</div>}
+              {erroUrl && <div className="mt-1 text-perigo">{erroUrl}</div>}
             </div>
           )}
 
           {!url && !escopo && (
-            <div className="text-amber-800">
+            <div className="text-aviso">
               Esta certidão não tem link no catálogo e não tem escopo (UF, município
               ou comarca) para cadastrar um. Emissão manual, procurando o portal.
             </div>
@@ -579,13 +579,13 @@ function Sugestoes({
   vazio: string
 }) {
   if (nascimentos.length === 0 && locais.length === 0) {
-    return <p className="text-xs text-slate-600">{vazio}</p>
+    return <p className="text-xs text-texto-2">{vazio}</p>
   }
   return (
     <div className="space-y-2">
       {nascimentos.length > 0 && (
         <div>
-          <div className="mb-1 text-xs text-slate-600">
+          <div className="mb-1 text-xs text-texto-2">
             Data de nascimento <strong>do cedente</strong> — só datas rotuladas como
             nascimento entram, senão a lista viria com toda data do processo:
           </div>
@@ -595,15 +595,15 @@ function Sugestoes({
                 key={n.iso}
                 type="button"
                 onClick={() => onNascimento(n.iso)}
-                className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+                className="block w-full rounded-md bg-superficie p-2 text-left text-xs ring-1 ring-inset ring-borda transition-colors hover:bg-brand-50 hover:ring-brand-300"
               >
-                <span className="font-mono font-medium text-slate-800">
+                <span className="font-mono font-medium text-texto">
                   {n.iso.split('-').reverse().join('/')}
                 </span>
                 {n.arquivo && (
-                  <span className="ml-2 text-slate-400">em {n.arquivo}</span>
+                  <span className="ml-2 text-texto-3">em {n.arquivo}</span>
                 )}
-                <span className="mt-0.5 block truncate text-slate-500">
+                <span className="mt-0.5 block truncate text-texto-3">
                   …{n.contexto}…
                 </span>
               </button>
@@ -613,7 +613,7 @@ function Sugestoes({
       )}
       {locais.length > 0 && (
         <div>
-          <div className="mb-1 text-xs text-slate-600">
+          <div className="mb-1 text-xs text-texto-2">
             Cidade e UF <strong>do cedente</strong> — conferidas contra a lista do
             IBGE. Clicar preenche as duas juntas:
           </div>
@@ -623,9 +623,9 @@ function Sugestoes({
                 key={`${l.uf}-${l.municipio}`}
                 type="button"
                 onClick={() => onLocal(l)}
-                className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+                className="block w-full rounded-md bg-superficie p-2 text-left text-xs ring-1 ring-inset ring-borda transition-colors hover:bg-brand-50 hover:ring-brand-300"
               >
-                <span className="font-medium text-slate-800">
+                <span className="font-medium text-texto">
                   {l.municipio}/{l.uf}
                 </span>
                 {l.residencial && (
@@ -634,12 +634,12 @@ function Sugestoes({
                   </Badge>
                 )}
                 {l.arquivo && (
-                  <span className="ml-2 text-slate-400">em {l.arquivo}</span>
+                  <span className="ml-2 text-texto-3">em {l.arquivo}</span>
                 )}
                 {l.forma === 'rotulado' && (
-                  <span className="ml-2 text-slate-400">(campo CIDADE/UF)</span>
+                  <span className="ml-2 text-texto-3">(campo CIDADE/UF)</span>
                 )}
-                <span className="mt-0.5 block truncate text-slate-500">
+                <span className="mt-0.5 block truncate text-texto-3">
                   …{l.contexto}…
                 </span>
               </button>
@@ -1447,41 +1447,41 @@ export function PainelCertidoes({
       {/* A descrição era do modal e desceu para cá com ele: o painel divide a
           janela com outra aba, então o cabeçalho da janela não pode falar só de
           certidões. */}
-      <p className="mb-4 text-sm text-slate-600">
+      <p className="mb-4 text-sm text-texto-2">
         {editando
           ? 'O checklist é montado por sujeito. Sem CPF e UF não há como saber quais certidões são exigidas.'
           : 'Checklist congelado no banco. A etapa documental só fecha com todas as obrigatórias em arquivo.'}
       </p>
 
       {erro && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 ring-1 ring-inset ring-red-200">
+        <div className="mb-4 rounded-lg bg-perigo-fundo p-3 text-sm text-perigo ring-1 ring-inset ring-perigo-borda">
           {erro}
         </div>
       )}
 
       {erroLinks && (
-        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
+        <div className="mb-4 rounded-lg bg-aviso-fundo p-3 text-sm text-aviso ring-1 ring-inset ring-aviso-borda">
           {erroLinks}
         </div>
       )}
 
       {erroMunicipios && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 ring-1 ring-inset ring-red-200">
+        <div className="mb-4 rounded-lg bg-perigo-fundo p-3 text-sm text-perigo ring-1 ring-inset ring-perigo-borda">
           {erroMunicipios}
         </div>
       )}
 
       {carregando ? (
-        <div className="py-8 text-center text-sm text-slate-500">Carregando…</div>
+        <div className="py-8 text-center text-sm text-texto-3">Carregando…</div>
       ) : editando ? (
         <div className="space-y-5">
           {/* ---------------- candidatos de CPF ---------------- */}
-          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-700">
+          <div className="rounded-lg bg-superficie-2 p-3 ring-1 ring-inset ring-borda">
+            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-texto">
               <FileText className="h-4 w-4" />
               O que achei nos anexos do card
               {arquivos.length > 0 && (
-                <span className="font-normal text-slate-500">
+                <span className="font-normal text-texto-3">
                   ({arquivos.length} arquivo{arquivos.length > 1 ? 's' : ''})
                 </span>
               )}
@@ -1496,7 +1496,7 @@ export function PainelCertidoes({
               ler" e "não existe".
             */}
             {digitalizados.length > 0 && (
-              <div className="mb-2 space-y-1 rounded-md bg-amber-50 p-2 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
+              <div className="mb-2 space-y-1 rounded-md bg-aviso-fundo p-2 text-xs text-aviso ring-1 ring-inset ring-aviso-borda">
                 {digitalizados.map((a, i) => (
                   <div key={`${a.nome}-${i}`}>
                     <strong>{a.nome || '(anexo sem nome)'}</strong>
@@ -1512,7 +1512,7 @@ export function PainelCertidoes({
               </div>
             )}
             {lendoPdf ? (
-              <p className="text-xs text-slate-500">Lendo o PDF do card…</p>
+              <p className="text-xs text-texto-3">Lendo o PDF do card…</p>
             ) : candidatos.length > 0 ||
               doPdf.nascimentos.length > 0 ||
               doPdf.locais.length > 0 ||
@@ -1520,7 +1520,7 @@ export function PainelCertidoes({
               digitalizados.length > 0 ? (
               <>
                 {candidatos.length > 0 && (
-                  <p className="mb-2 text-xs text-slate-600">
+                  <p className="mb-2 text-xs text-texto-2">
                     Dígito verificador conferido. <strong>Escolher é seu</strong>: um
                     processo traz o CPF do cedente, do advogado e às vezes de terceiros —
                     o sistema não tem como saber qual é qual. A lista pode estar
@@ -1528,7 +1528,7 @@ export function PainelCertidoes({
                   </p>
                 )}
                 {candidatos.length === 0 && (
-                  <p className="mb-2 text-xs text-amber-800">
+                  <p className="mb-2 text-xs text-aviso">
                     Nenhum CPF de dígito válido no texto — digite o do cedente abaixo,
                     conferindo no processo. O que achei do resto está logo abaixo.
                   </p>
@@ -1541,9 +1541,9 @@ export function PainelCertidoes({
                       onClick={() =>
                         alterar(setCedente)({ ...cedente, cpf: formatCpfCnpjInput(c.cpf) })
                       }
-                      className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+                      className="block w-full rounded-md bg-superficie p-2 text-left text-xs ring-1 ring-inset ring-borda transition-colors hover:bg-brand-50 hover:ring-brand-300"
                     >
-                      <span className="font-mono font-medium text-slate-800">
+                      <span className="font-mono font-medium text-texto">
                         {formatCpfCnpjInput(c.cpf)}
                       </span>
                       {c.rotulado && (
@@ -1552,9 +1552,9 @@ export function PainelCertidoes({
                         </Badge>
                       )}
                       {c.arquivo && (
-                        <span className="ml-2 text-slate-400">em {c.arquivo}</span>
+                        <span className="ml-2 text-texto-3">em {c.arquivo}</span>
                       )}
-                      <span className="mt-0.5 block truncate text-slate-500">
+                      <span className="mt-0.5 block truncate text-texto-3">
                         …{c.contexto}…
                       </span>
                     </button>
@@ -1569,8 +1569,8 @@ export function PainelCertidoes({
                   lá embaixo.
                 */}
                 {estadosCivis.length > 0 && (
-                  <div className="mt-3 border-t border-slate-200 pt-3">
-                    <div className="mb-1 text-xs text-slate-600">
+                  <div className="mt-3 border-t border-borda pt-3">
+                    <div className="mb-1 text-xs text-texto-2">
                       Estado civil na qualificação das partes — clicar já liga ou
                       desliga o bloco do cônjuge:
                     </div>
@@ -1580,13 +1580,13 @@ export function PainelCertidoes({
                           key={`${e.estado}-${e.conjuge ?? ''}`}
                           type="button"
                           onClick={() => usarEstadoCivil(e)}
-                          className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+                          className="block w-full rounded-md bg-superficie p-2 text-left text-xs ring-1 ring-inset ring-borda transition-colors hover:bg-brand-50 hover:ring-brand-300"
                         >
-                          <span className="font-medium text-slate-800">
+                          <span className="font-medium text-texto">
                             {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
                           </span>
                           {e.conjuge && (
-                            <span className="ml-2 text-slate-700">
+                            <span className="ml-2 text-texto">
                               — cônjuge: {e.conjuge}
                             </span>
                           )}
@@ -1599,14 +1599,14 @@ export function PainelCertidoes({
                               pode ser de outra parte
                             </Badge>
                           )}
-                          <span className="ml-2 text-slate-400">em {e.arquivo}</span>
-                          <span className="mt-0.5 block truncate text-slate-500">
+                          <span className="ml-2 text-texto-3">em {e.arquivo}</span>
+                          <span className="mt-0.5 block truncate text-texto-3">
                             …{e.contexto}…
                           </span>
                         </button>
                       ))}
                     </div>
-                    <p className="mt-1 text-xs text-amber-800">
+                    <p className="mt-1 text-xs text-aviso">
                       A petição pode ser antiga: &quot;casada&quot; naquela data não
                       é &quot;casada hoje&quot;. Confirme antes de gerar o checklist.
                     </p>
@@ -1617,7 +1617,7 @@ export function PainelCertidoes({
                   <div
                     className={
                       candidatos.length > 0
-                        ? 'mt-3 border-t border-slate-200 pt-3'
+                        ? 'mt-3 border-t border-borda pt-3'
                         : 'mt-2'
                     }
                   >
@@ -1635,17 +1635,17 @@ export function PainelCertidoes({
                 )}
               </>
             ) : avisoPdf ? (
-              <p className="text-xs text-slate-600">{avisoPdf}</p>
+              <p className="text-xs text-texto-2">{avisoPdf}</p>
             ) : temTexto ? (
               // Só se pode afirmar isto DEPOIS de ler o PDF. Sem texto, o certo é
               // dizer que não leu — não que o documento não tem CPF.
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-texto-2">
                 Li o PDF e não achei nenhum CPF de dígito válido no texto. Pode ser que o
                 documento traga o número partido de um jeito que a busca não pega — digite
                 abaixo, conferindo no processo.
               </p>
             ) : (
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-texto-2">
                 O PDF do card ainda não foi lido. Digite o CPF conferindo no processo.
               </p>
             )}
@@ -1666,8 +1666,8 @@ export function PainelCertidoes({
             (lib/dadosNoTexto.ts). Se um dia a Date Solutions tiver API, ligá-la é
             trocar de onde vem o texto — o resto já está feito.
           */}
-          <details className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
-            <summary className="cursor-pointer text-xs font-medium text-slate-700">
+          <details className="rounded-lg bg-superficie-2 p-3 ring-1 ring-inset ring-borda">
+            <summary className="cursor-pointer text-xs font-medium text-texto">
               <ClipboardPaste className="mr-1 inline h-4 w-4" />
               Colar resultado de outra consulta (Date Solutions, etc.)
             </summary>
@@ -1698,7 +1698,7 @@ export function PainelCertidoes({
                   }
                 />
               )}
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-texto-3">
                 Este texto NÃO é gravado. Só os campos em que você clicar entram no
                 cadastro — o resto morre quando a janela fecha.
               </p>
@@ -1709,7 +1709,7 @@ export function PainelCertidoes({
           {(lendoIA || leituraIA || temTexto) && (
             <div className="rounded-lg bg-brand-50/60 p-3 ring-1 ring-inset ring-brand-200">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                <div className="flex items-center gap-2 text-xs font-medium text-texto">
                   <Sparkles className="h-4 w-4 text-brand-600" />
                   {lendoIA
                     ? 'A IA está lendo a qualificação nos autos…'
@@ -1724,7 +1724,7 @@ export function PainelCertidoes({
                 )}
               </div>
               {leituraIA && (
-                <details className="mt-2 text-xs text-slate-600">
+                <details className="mt-2 text-xs text-texto-2">
                   <summary className="cursor-pointer text-brand-700">De onde saiu cada campo</summary>
                   <ul className="mt-2 space-y-1.5">
                     {(
@@ -1741,25 +1741,25 @@ export function PainelCertidoes({
                       .filter(([, v]) => v)
                       .map(([rotulo, v]) => (
                         <li key={rotulo}>
-                          <strong className="text-slate-700">{rotulo}:</strong> {v!.valor}
-                          {v!.evidencia && <span className="text-slate-500"> — “{v!.evidencia}”</span>}
+                          <strong className="text-texto">{rotulo}:</strong> {v!.valor}
+                          {v!.evidencia && <span className="text-texto-3"> — “{v!.evidencia}”</span>}
                         </li>
                       ))}
                     {leituraIA.residencias.map((r) => (
                       <li key={`${r.uf}|${r.municipio}`}>
-                        <strong className="text-slate-700">
+                        <strong className="text-texto">
                           {r.atual ? 'Residência atual' : 'Residência anterior'}:
                         </strong>{' '}
                         {r.municipio ? `${r.municipio}/` : ''}
                         {r.uf}
-                        {r.evidencia && <span className="text-slate-500"> — “{r.evidencia}”</span>}
+                        {r.evidencia && <span className="text-texto-3"> — “{r.evidencia}”</span>}
                       </li>
                     ))}
                   </ul>
                 </details>
               )}
               {(leituraIA?.avisos ?? []).length > 0 && (
-                <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-amber-800">
+                <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-aviso">
                   {leituraIA!.avisos.map((a) => (
                     <li key={a}>{a}</li>
                   ))}
@@ -1769,7 +1769,7 @@ export function PainelCertidoes({
           )}
 
           {preenchido.length > 0 && (
-            <div className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-900 ring-1 ring-inset ring-emerald-200">
+            <div className="rounded-lg bg-sucesso-fundo p-3 text-xs text-sucesso ring-1 ring-inset ring-sucesso-borda">
               Preenchi a partir do processo: <strong>{preenchido.join(' · ')}</strong>.
               Confira antes de gerar — o trecho de onde saiu cada um está no painel
               acima.{' '}
@@ -1781,7 +1781,7 @@ export function PainelCertidoes({
 
           {/* ---------------- cedente ---------------- */}
           <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-slate-800">Cedente</h4>
+            <h4 className="text-sm font-semibold text-texto">Cedente</h4>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Nome completo" required>
                 <Input
@@ -1868,17 +1868,17 @@ export function PainelCertidoes({
           </div>
 
           {/* ---------------- residência ---------------- */}
-          <div className="space-y-3 rounded-lg bg-amber-50/60 p-3 ring-1 ring-inset ring-amber-200">
+          <div className="space-y-3 rounded-lg bg-aviso-fundo/60 p-3 ring-1 ring-inset ring-aviso-borda">
             <label className="flex cursor-pointer items-start gap-2">
               <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                className="mt-0.5 h-4 w-4 rounded border-borda-forte text-brand-600"
                 checked={residenciaLevantada}
                 onChange={(e) => alterar(setResidenciaLevantada)(e.target.checked)}
               />
-              <span className="text-sm text-slate-800">
+              <span className="text-sm text-texto">
                 Levantei o histórico de residência do cedente
-                <span className="mt-0.5 block text-xs text-slate-600">
+                <span className="mt-0.5 block text-xs text-texto-2">
                   Deixe desmarcado se não conferiu. &quot;Não sei se morou em outro
                   estado&quot; e &quot;não morou&quot; são respostas diferentes, e a segunda
                   dispensa certidão que a primeira não dispensa. Vale só para o cedente: o
@@ -1910,13 +1910,13 @@ export function PainelCertidoes({
             <label className="flex cursor-pointer items-start gap-2">
               <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                className="mt-0.5 h-4 w-4 rounded border-borda-forte text-brand-600"
                 checked={temConjuge}
                 onChange={(e) => alterar(setTemConjuge)(e.target.checked)}
               />
-              <span className="text-sm font-semibold text-slate-800">
+              <span className="text-sm font-semibold text-texto">
                 O cedente é casado / tem companheiro(a)
-                <span className="mt-0.5 block text-xs font-normal text-slate-600">
+                <span className="mt-0.5 block text-xs font-normal text-texto-2">
                   A planilha dá bloco próprio de certidões ao cônjuge (linhas 52 a 67).
                   Sem isto, o checklist fecha completo com esse bloco inteiro faltando.
                   Desmarcar REMOVE o cônjuge já cadastrado e as certidões dele.
@@ -2007,7 +2007,7 @@ export function PainelCertidoes({
           </div>
 
           {impacto.sujeitos.length > 0 && (
-            <div className="rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+            <div className="rounded-lg bg-perigo-fundo p-3 text-xs text-perigo ring-1 ring-inset ring-perigo-borda">
               Gravar assim REMOVE{' '}
               {impacto.sujeitos.map((s) => `${s.papel} ${s.nome}`).join(', ')} e apaga{' '}
               {impacto.certidoes} item(ns) do checklist
@@ -2021,7 +2021,7 @@ export function PainelCertidoes({
           )}
 
           {problemas.length > 0 && (
-            <ul className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-200">
+            <ul className="space-y-1 rounded-lg bg-superficie-2 p-3 text-xs text-texto ring-1 ring-inset ring-borda">
               {problemas.map((p) => (
                 <li key={p}>• {p}</li>
               ))}
@@ -2046,10 +2046,10 @@ export function PainelCertidoes({
               ].map((c) => (
                 <div
                   key={c.r}
-                  className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200"
+                  className="rounded-lg bg-superficie-2 p-3 ring-1 ring-inset ring-borda"
                 >
-                  <div className="text-xs text-slate-500">{c.r}</div>
-                  <div className="text-xl font-semibold text-slate-800">{c.v}</div>
+                  <div className="text-xs text-texto-3">{c.r}</div>
+                  <div className="text-xl font-semibold text-texto">{c.v}</div>
                 </div>
               ))}
             </div>
@@ -2058,11 +2058,11 @@ export function PainelCertidoes({
           {completude && completude.necessarias > 0 && (
             <div className="text-sm">
               {completude.obtidas_validas === completude.necessarias ? (
-                <span className="font-medium text-emerald-700">
+                <span className="font-medium text-sucesso">
                   ✅ Documental completa — {completude.obtidas_validas} de{' '}
                   {completude.necessarias}
                   {completude.dispensadas > 0 && (
-                    <span className="text-amber-700">
+                    <span className="text-aviso">
                       {' '}
                       · {completude.dispensadas} dispensada(s) fora da conta
                     </span>
@@ -2070,7 +2070,7 @@ export function PainelCertidoes({
                   .
                 </span>
               ) : (
-                <span className="font-medium text-amber-700">
+                <span className="font-medium text-aviso">
                   ⏳ {completude.obtidas_validas} de {completude.necessarias} obtidas. A
                   etapa documental não fecha até chegar a {completude.necessarias}.
                 </span>
@@ -2080,9 +2080,9 @@ export function PainelCertidoes({
 
           {/* ---------------- avisos ---------------- */}
           {avisos.length > 0 && (
-            <div className="space-y-1.5 rounded-lg bg-amber-50 p-3 ring-1 ring-inset ring-amber-200">
+            <div className="space-y-1.5 rounded-lg bg-aviso-fundo p-3 ring-1 ring-inset ring-aviso-borda">
               {avisos.map((a) => (
-                <div key={a} className="flex gap-2 text-xs text-amber-900">
+                <div key={a} className="flex gap-2 text-xs text-aviso">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-none" />
                   <span>{a}</span>
                 </div>
@@ -2111,22 +2111,22 @@ export function PainelCertidoes({
             NENHUMA delas é silêncio — inclusive a de não ter achado.
           */}
           {sujeitos.length > 0 && !respostaEstadoCivil.temConjugeCadastrado && (
-            <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
-              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-700">
+            <div className="rounded-lg bg-superficie-2 p-3 ring-1 ring-inset ring-borda">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-texto">
                 <FileText className="h-4 w-4" />
                 Estado civil, segundo os anexos do card
                 {arquivos.length > 0 && (
-                  <span className="font-normal text-slate-500">
+                  <span className="font-normal text-texto-3">
                     ({arquivos.length} arquivo{arquivos.length > 1 ? 's' : ''})
                   </span>
                 )}
               </div>
 
               {lendoPdf ? (
-                <p className="text-xs text-slate-500">Lendo os anexos do card…</p>
+                <p className="text-xs text-texto-3">Lendo os anexos do card…</p>
               ) : respostaEstadoCivil.ancorado ? (
                 <div className="space-y-2">
-                  <div className="text-sm text-slate-800">
+                  <div className="text-sm text-texto">
                     O processo qualifica{' '}
                     <strong>
                       {sujeitos.find((s) => s.papel === 'CEDENTE')?.nome ?? 'o cedente'}
@@ -2144,18 +2144,18 @@ export function PainelCertidoes({
                     )}
                     .
                   </div>
-                  <div className="rounded-md bg-white p-2 text-xs text-slate-500 ring-1 ring-inset ring-slate-200">
+                  <div className="rounded-md bg-superficie p-2 text-xs text-texto-3 ring-1 ring-inset ring-borda">
                     …{respostaEstadoCivil.ancorado.contexto}…
                     {respostaEstadoCivil.ancorado.arquivo && (
-                      <span className="mt-0.5 block text-slate-400">
+                      <span className="mt-0.5 block text-texto-3">
                         em {respostaEstadoCivil.ancorado.arquivo}
                       </span>
                     )}
                   </div>
 
                   {PEDE_CONJUGE.has(respostaEstadoCivil.ancorado.estado) ? (
-                    <div className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 p-2 ring-1 ring-inset ring-amber-200">
-                      <span className="text-xs text-amber-900">
+                    <div className="flex flex-wrap items-center gap-2 rounded-md bg-aviso-fundo p-2 ring-1 ring-inset ring-aviso-borda">
+                      <span className="text-xs text-aviso">
                         Então faltam as certidões do cônjuge — o bloco das linhas 52 a
                         67 da planilha. O placar acima <strong>não</strong> conta essa
                         falta.
@@ -2172,7 +2172,7 @@ export function PainelCertidoes({
                       </Button>
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-600">
+                    <p className="text-xs text-texto-2">
                       Sem cônjuge, o bloco de certidões dele não se aplica — e o aviso
                       acima está respondido. <strong>Confira mesmo assim</strong>: o
                       documento pode ser de anos atrás, e estado civil muda.
@@ -2188,7 +2188,7 @@ export function PainelCertidoes({
                     seria trocar "é do cedente" por "estava por perto". O trecho
                     aparece para a pessoa julgar; o sistema não julga.
                   */}
-                  <p className="text-xs text-amber-800">
+                  <p className="text-xs text-aviso">
                     Achei estado civil no processo, mas{' '}
                     <strong>não consegui ligar ao nome nem ao CPF do cedente</strong> —
                     numa petição isso costuma ser do advogado ou da outra parte. Leia o
@@ -2198,15 +2198,15 @@ export function PainelCertidoes({
                     {respostaEstadoCivil.soltos.slice(0, 3).map((e) => (
                       <div
                         key={`${e.estado}-${e.conjuge ?? ''}`}
-                        className="rounded-md bg-white p-2 text-xs ring-1 ring-inset ring-slate-200"
+                        className="rounded-md bg-superficie p-2 text-xs ring-1 ring-inset ring-borda"
                       >
-                        <span className="font-medium text-slate-800">
+                        <span className="font-medium text-texto">
                           {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
                         </span>
                         {e.arquivo && (
-                          <span className="ml-2 text-slate-400">em {e.arquivo}</span>
+                          <span className="ml-2 text-texto-3">em {e.arquivo}</span>
                         )}
-                        <span className="mt-0.5 block text-slate-500">…{e.contexto}…</span>
+                        <span className="mt-0.5 block text-texto-3">…{e.contexto}…</span>
                       </div>
                     ))}
                   </div>
@@ -2228,7 +2228,7 @@ export function PainelCertidoes({
                     de uma tela calada é "então não tem cônjuge", que fecha o dossiê
                     com um bloco inteiro faltando.
                   */}
-                  <p className="text-xs text-amber-800">
+                  <p className="text-xs text-aviso">
                     {arquivos.length === 0
                       ? 'Não consegui abrir nenhum anexo deste card.'
                       : temTexto
@@ -2245,7 +2245,7 @@ export function PainelCertidoes({
                     — confira a petição inicial e cadastre à mão.
                   </p>
                   {digitalizados.length > 0 && (
-                    <p className="text-xs text-amber-900">
+                    <p className="text-xs text-aviso">
                       E {digitalizados.length} anexo(s) são digitalização ou não
                       abriram:{' '}
                       <strong>{digitalizados.map((a) => a.nome).join(', ')}</strong>. Se
@@ -2276,15 +2276,15 @@ export function PainelCertidoes({
                   <Badge size="sm" tone="blue">
                     {s.papel}
                   </Badge>
-                  <span className="text-sm font-medium text-slate-800">{s.nome}</span>
-                  <span className="font-mono text-xs text-slate-500">
+                  <span className="text-sm font-medium text-texto">{s.nome}</span>
+                  <span className="font-mono text-xs text-texto-3">
                     {formatCpfCnpjInput(s.documento)}
                   </span>
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-texto-3">
                     {s.municipio_atual ? `${s.municipio_atual}/` : ''}
                     {s.uf_atual ?? 'sem UF'}
                   </span>
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-texto-3">
                     · {lista.length} item(ns)
                   </span>
                   {!s.residencia_levantada && (
@@ -2293,9 +2293,9 @@ export function PainelCertidoes({
                     </Badge>
                   )}
                 </div>
-                <div className="overflow-hidden rounded-lg ring-1 ring-inset ring-slate-200">
+                <div className="overflow-hidden rounded-lg ring-1 ring-inset ring-borda">
                   {lista.length === 0 ? (
-                    <div className="p-3 text-xs text-slate-500">
+                    <div className="p-3 text-xs text-texto-3">
                       Nenhuma certidão gerada para este sujeito.
                     </div>
                   ) : (
@@ -2332,7 +2332,7 @@ export function PainelCertidoes({
           )}
 
           {sujeitos.length === 0 && (
-            <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+            <div className="rounded-lg bg-superficie-2 p-4 text-sm text-texto-2">
               Nenhum sujeito cadastrado neste crédito. Clique em{' '}
               <strong>Corrigir dados / cônjuge</strong> para começar pelo cedente.
             </div>
@@ -2343,7 +2343,7 @@ export function PainelCertidoes({
       {/* AS AÇÕES FICAM NO PAINEL, não no rodapé da janela. Eram do modal, e o
           rodapé agora é dividido com a aba de Processos Judiciais: "Gravar e
           montar checklist" ali embaixo pareceria valer para a janela toda. */}
-      <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4">
+      <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-borda pt-4">
         {editando ? (
           <Button
             onClick={salvarEGerar}

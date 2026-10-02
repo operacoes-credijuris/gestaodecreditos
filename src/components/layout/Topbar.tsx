@@ -22,57 +22,66 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
     .toUpperCase()
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-md lg:px-6">
+    // O `.topbar` da amostra: 64px, a superfície quase opaca com desfoque (o
+    // conteúdo passa por baixo sem sumir de vez) e 24px de margem lateral.
+    // A BUSCA GERAL (Ctrl+K) da amostra é item "Novo" e entra na onda 3; até lá
+    // o caminho ocupa o espaço dela.
+    <header className="sticky top-0 z-30 flex h-[64px] shrink-0 items-center justify-between gap-3 border-b border-borda bg-superficie/[0.86] px-4 backdrop-blur-[10px] lg:px-8">
       <button
         onClick={onOpenMenu}
-        className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"
+        className="rounded-controle p-2 text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto lg:hidden"
         aria-label="Abrir menu"
       >
-        <Menu className="h-5 w-5" />
+        <Menu className="h-6 w-6" />
       </button>
 
       {/* Breadcrumb de localização: "Setor › Página", e "› Aba" numa moldura
           ("Operacional › Quadro econômico › Previsões"). A Análise de crédito,
-          sem setor, mostra só o próprio nome. No celular, só a última parte. */}
+          sem setor, mostra só o próprio nome. No celular, só a última parte.
+          Como na amostra: o caminho no cinza de metadado e o lugar atual em
+          negrito na fonte de display. */}
       <nav
         aria-label="Você está em"
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-sm"
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-corpo text-texto-3"
       >
         {partes.map((parte, i) =>
           i === partes.length - 1 ? (
             <span
               key={i}
               aria-current="page"
-              className="font-display truncate font-bold tracking-tight text-slate-900"
+              className="font-display truncate text-lg font-bold tracking-tight text-texto"
             >
               {parte}
             </span>
           ) : (
             <Fragment key={i}>
-              <span className="hidden shrink-0 text-slate-600 sm:inline">{parte}</span>
-              <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-slate-500 sm:inline" />
+              <span className="hidden shrink-0 sm:inline">{parte}</span>
+              <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 sm:inline" aria-hidden />
             </Fragment>
           ),
         )}
       </nav>
 
       <div className="relative">
+        {/* O `.user-btn` da amostra: pílula com as iniciais na placa azul-clara,
+            nome e e-mail; o contorno só aparece sob o mouse. */}
         <button
           onClick={() => setMenuOpen((v) => !v)}
-          className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-100"
+          aria-expanded={menuOpen}
+          className="flex items-center gap-2 rounded-full border border-transparent py-0.5 pl-0.5 pr-2 transition-colors hover:border-borda hover:bg-superficie-3"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-700 text-sm font-semibold text-white">
+          <div className="font-display flex h-11 w-11 items-center justify-center rounded-full bg-marca-suave text-sm font-bold text-marca-texto">
             {iniciais}
           </div>
           <div className="hidden text-left sm:block">
-            <p className="text-sm font-medium leading-tight text-slate-800">
+            <p className="text-sm font-bold leading-tight text-texto">
               {nome}
             </p>
-            <p className="text-xs leading-tight text-slate-600">
+            <p className="text-xs leading-tight text-texto-3">
               {user?.email}
             </p>
           </div>
-          <ChevronDown className="h-4 w-4 text-slate-500" />
+          <ChevronDown className="h-4 w-4 text-texto-3" aria-hidden />
         </button>
 
         {menuOpen && (
@@ -81,17 +90,19 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
               className="fixed inset-0 z-10"
               onClick={() => setMenuOpen(false)}
             />
-            <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-              <div className="px-2 py-2">
-                <p className="text-sm font-medium text-slate-800">{nome}</p>
-                <p className="truncate text-xs text-slate-600">{user?.email}</p>
-                <div className="mt-1">
+            {/* O `.pop` da amostra: cartão de 12px de raio com sombra de
+                elemento flutuante; os itens com 36px de altura. */}
+            <div className="absolute right-0 z-20 mt-2 w-[240px] rounded-2xl border border-borda bg-superficie p-1.5 shadow-nivel-2">
+              <div className="px-2.5 py-2">
+                <p className="text-corpo font-bold text-texto">{nome}</p>
+                <p className="truncate text-xs text-texto-3">{user?.email}</p>
+                <div className="mt-1.5">
                   <Badge tone={isAdmin ? 'purple' : 'gray'}>
                     {isAdmin ? 'Administrador' : 'Usuário'}
                   </Badge>
                 </div>
               </div>
-              <div className="my-1 border-t border-slate-100" />
+              <div className="mx-1 my-1.5 border-t border-borda" />
               <button
                 onClick={async () => {
                   setMenuOpen(false)
@@ -100,7 +111,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                   const { error } = await signOut()
                   if (error) toast.error(error)
                 }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                className="flex h-12 w-full items-center gap-3 rounded-controle px-2.5 text-corpo text-texto transition-colors hover:bg-superficie-3"
               >
                 <LogOut className="h-4 w-4" />
                 Sair

@@ -101,7 +101,7 @@ function Observacao({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-0.5 text-sm font-normal text-slate-600">
+    <div className="mt-0.5 text-sm font-normal text-texto-2">
       <div
         ref={ref}
         className={cn('whitespace-normal break-words', !expanded && 'line-clamp-3')}
@@ -168,22 +168,22 @@ function diaMes(iso?: string | null): { dia: string; mes: string } | null {
 }
 
 const TONE_BAR: Record<Urgencia, string> = {
-  danger: 'bg-red-500',
-  warning: 'bg-amber-500',
+  danger: 'bg-perigo-cheio',
+  warning: 'bg-aviso-cheio',
   // Neutro na cor da marca (e não cinza): a régua de urgência continua sendo
   // vermelho > âmbar > calmo, só que "calmo" agora também é Credijuris.
   neutral: 'bg-brand-200',
 }
 const TONE_BLOCK: Record<Urgencia, string> = {
-  danger: 'bg-red-50 text-red-700',
-  warning: 'bg-amber-50 text-amber-700',
+  danger: 'bg-perigo-fundo text-perigo',
+  warning: 'bg-aviso-fundo text-aviso',
   neutral: 'bg-brand-50 text-brand-700',
 }
 // Pílula do prazo relativo ("hoje", "em 3 dias", "venceu há N dias").
 const TONE_PILL: Record<Urgencia, string> = {
-  danger: 'bg-red-50 text-red-700 ring-red-200',
-  warning: 'bg-amber-50 text-amber-700 ring-amber-200',
-  neutral: 'bg-slate-100 text-slate-600 ring-slate-200',
+  danger: 'bg-perigo-fundo text-perigo ring-perigo-borda',
+  warning: 'bg-aviso-fundo text-aviso ring-aviso-borda',
+  neutral: 'bg-superficie-3 text-texto-2 ring-borda',
 }
 
 /** Iniciais para o avatar do responsável ("Luiz Guilherme…" → "LG"). */
@@ -376,7 +376,7 @@ export default function TarefasAdvbox() {
     return (
       <div
         key={t.id}
-        className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-brand-950/[0.03] transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md hover:shadow-brand-950/[0.08]"
+        className="group relative overflow-hidden rounded-cartao border border-borda bg-superficie shadow-nivel-1 transition-all duration-150 hover:-translate-y-0.5 hover:border-borda-forte hover:shadow-nivel-2"
       >
         <div className={cn('absolute inset-y-0 left-0 w-1.5', TONE_BAR[tone])} />
         {/* flex-wrap: o bloco de responsáveis é flex-none. Numa tela de 375px,
@@ -411,7 +411,7 @@ export default function TarefasAdvbox() {
               a 52px. */}
           <div className="min-w-[11rem] flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-display text-base font-bold tracking-tight text-slate-900">
+              <span className="font-display text-base font-bold tracking-tight text-texto">
                 {t.tipo ? sentenceCase(t.tipo) : '—'}
               </span>
               {prazo?.rel && (
@@ -425,12 +425,12 @@ export default function TarefasAdvbox() {
                 </span>
               )}
               {t.urgent && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 ring-1 ring-inset ring-red-200">
+                <span className="inline-flex items-center gap-1 rounded-full bg-perigo-fundo px-2 py-0.5 text-xs font-semibold text-perigo ring-1 ring-inset ring-perigo-borda">
                   <Flame className="h-3 w-3" /> Urgente
                 </span>
               )}
               {t.important && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                <span className="inline-flex items-center gap-1 rounded-full bg-aviso-fundo px-2 py-0.5 text-xs font-semibold text-aviso ring-1 ring-inset ring-aviso-borda">
                   <Star className="h-3 w-3" /> Importante
                 </span>
               )}
@@ -439,14 +439,14 @@ export default function TarefasAdvbox() {
                 — e as PARTES do processo, que é o que identifica a tarefa de
                 relance, ficavam invisíveis. Quebrar em duas linhas custa altura;
                 esconder o nome da parte custa o entendimento. */}
-            <div className="mt-1 break-words text-sm text-slate-600">
+            <div className="mt-1 break-words text-sm text-texto-2">
               {/* Mesmo componente da tela de Créditos: o clique no número tem de
                   levar à mesma pasta nas duas telas. `cred` é o crédito que a tarefa
                   casou — nulo quando o processo não está cadastrado, e aí o número
                   aparece como texto comum. */}
               <NumeroProcessoDrive processo={cred} numero={t.processo} />
               {partes && (
-                <span className="text-slate-500"> · {partes}</span>
+                <span className="text-texto-3"> · {partes}</span>
               )}
             </div>
             {t.notes && <Observacao text={t.notes} />}
@@ -512,7 +512,7 @@ export default function TarefasAdvbox() {
             onChange={(k) => setFiltroPrazo(k as typeof filtroPrazo)}
           />
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
             <Input
               className="pl-9"
               placeholder="Buscar por tipo, processo, responsável…"
@@ -544,10 +544,10 @@ export default function TarefasAdvbox() {
         // Lista vazia por falta de vínculo, não por ausência de trabalho — dizer
         // isso evita que a pessoa conclua que não tem tarefas.
         <Card className="p-4">
-          <p className="text-sm font-medium text-slate-800">
+          <p className="text-sm font-medium text-texto">
             Perfil não encontrado no ADVBOX
           </p>
-          <p className="mt-1 text-sm text-slate-600">
+          <p className="mt-1 text-sm text-texto-2">
             {data.perfil_nome
               ? `O nome do seu perfil ("${data.perfil_nome}") não corresponde a nenhum usuário do ADVBOX`
               : 'Seu perfil está sem nome cadastrado'}
@@ -568,14 +568,14 @@ export default function TarefasAdvbox() {
             {pendentes.length ? (
               <div className="space-y-3">{pendentes.map(card)}</div>
             ) : (
-              <p className="text-sm text-slate-600">Nenhuma tarefa pendente.</p>
+              <p className="text-sm text-texto-2">Nenhuma tarefa pendente.</p>
             )}
           </Secao>
           <Secao titulo="Vencidas" qtd={vencidas.length}>
             {vencidas.length ? (
               <div className="space-y-3">{vencidas.map(card)}</div>
             ) : (
-              <p className="text-sm text-slate-600">Nenhuma tarefa vencida.</p>
+              <p className="text-sm text-texto-2">Nenhuma tarefa vencida.</p>
             )}
           </Secao>
         </div>
@@ -634,7 +634,7 @@ function Secao({
         <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-brand-800">
           {qtd}
         </span>
-        <div className="h-px flex-1 bg-slate-200" />
+        <div className="h-px flex-1 bg-borda" />
       </div>
       {children}
     </div>
@@ -862,10 +862,10 @@ export function NovaTarefaModal({
         />
       ) : semRemetente ? (
         <div className="space-y-1">
-          <p className="text-sm font-medium text-slate-800">
+          <p className="text-sm font-medium text-texto">
             Perfil não encontrado no ADVBOX
           </p>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-texto-2">
             {profile?.nome
               ? `O nome do seu perfil ("${profile.nome}") não corresponde a nenhum usuário do ADVBOX`
               : 'Seu perfil está sem nome cadastrado'}
@@ -940,23 +940,23 @@ export function NovaTarefaModal({
           </Field>
 
           <div className="flex gap-6">
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-texto">
               <input
                 type="checkbox"
                 className="accent-brand-600"
                 checked={form.important}
                 onChange={(e) => setForm({ ...form, important: e.target.checked })}
               />
-              <Star className="h-4 w-4 text-amber-500" /> Importante
+              <Star className="h-4 w-4 text-aviso-cheio" /> Importante
             </label>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-texto">
               <input
                 type="checkbox"
                 className="accent-brand-600"
                 checked={form.urgent}
                 onChange={(e) => setForm({ ...form, urgent: e.target.checked })}
               />
-              <Flame className="h-4 w-4 text-red-500" /> Urgente
+              <Flame className="h-4 w-4 text-perigo" /> Urgente
             </label>
           </div>
 

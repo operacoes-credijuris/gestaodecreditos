@@ -22,12 +22,15 @@ import type { GrauRisco } from '../../supabase/functions/_shared/graus.ts'
 
 export type { GrauRisco }
 
+// UMA ESCADA DE CINCO DEGRAUS, e os tokens só têm três cinzas de texto. Os dois
+// de baixo se distinguem pelo FUNDO, e não por um cinza mais claro: o NOTA era
+// slate-400 (2,5:1), legível só de perto. Agora a NOTA fica sem preenchimento.
 export const COR_GRAU: Record<GrauRisco, string> = {
-  IMPEDITIVO: 'bg-red-50 text-red-700 ring-red-200/70',
-  ALTO: 'bg-amber-50 text-amber-800 ring-amber-200/70',
-  MODERADO: 'bg-slate-100 text-slate-600 ring-slate-200/70',
-  'ATENÇÃO': 'bg-slate-50 text-slate-500 ring-slate-200/70',
-  NOTA: 'bg-slate-50 text-slate-400 ring-slate-200/60',
+  IMPEDITIVO: 'bg-perigo-fundo text-perigo ring-perigo-borda/70',
+  ALTO: 'bg-aviso-fundo text-aviso ring-aviso-borda/70',
+  MODERADO: 'bg-superficie-3 text-texto-2 ring-borda/70',
+  'ATENÇÃO': 'bg-superficie-2 text-texto-3 ring-borda/70',
+  NOTA: 'bg-transparent text-texto-3 ring-borda/60',
 }
 
 /** O selo do grau, inline no parágrafo. */
@@ -264,7 +267,7 @@ export function JanelaDeDesfecho({
             type="button"
             onClick={onFechar}
             disabled={enviando || redigindo}
-            className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
+            className="text-xs text-texto-3 underline-offset-2 hover:text-texto-2 hover:underline disabled:opacity-50"
           >
             cancelar
           </button>
@@ -283,7 +286,7 @@ export function JanelaDeDesfecho({
             escrever uma ressalva que contradiz uma delas. */}
         {achados.length > 0 && (
           <div>
-            <p className="text-xs text-slate-500">Selecionar motivos</p>
+            <p className="text-xs text-texto-3">Selecionar motivos</p>
             {/* AGRUPADOS COMO A TABELA, e pelo mesmo motivo: são dois créditos
                 com donos diferentes. Marcar só os processos de um titular é
                 dizer que a verba DELE cai — e é isso que deixa a outra seguir.
@@ -293,17 +296,17 @@ export function JanelaDeDesfecho({
               {grupos.map(([nome, indices]) => (
                 <div key={nome}>
                   {nome && (
-                    <p className="font-display text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                    <p className="font-display text-[11px] font-bold uppercase tracking-wide text-texto-3">
                       {nome}
                     </p>
                   )}
                   <ul className="mt-1 space-y-1">
                     {indices.map((i) => (
                       <li key={i}>
-                        <label className="flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-slate-700">
+                        <label className="flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-texto">
                           <input
                             type="checkbox"
-                            className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-borda-forte text-brand-600 focus:ring-brand-500"
                             checked={marcados.has(i)}
                             disabled={enviando || redigindo}
                             onChange={() => marcar(i)}
@@ -323,12 +326,12 @@ export function JanelaDeDesfecho({
         )}
 
         <div>
-          <label className="block text-xs text-slate-500" htmlFor="motivo-desfecho">
+          <label className="block text-xs text-texto-3" htmlFor="motivo-desfecho">
             Anotação no card
           </label>
           <textarea
             id="motivo-desfecho"
-            className="mt-1.5 min-h-[140px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            className="mt-1.5 min-h-[140px] w-full resize-y rounded-xl border border-borda px-3.5 py-2 text-sm placeholder:text-texto-3 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
             placeholder={
               acao.papel === 'diligenciar'
                 ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
@@ -369,7 +372,7 @@ export function JanelaDeDesfecho({
             {revisado ? 'Redigir de novo' : 'Redigir com a IA'}
           </Button>
           {revisado ? (
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-texto-3">
               Texto reescrito pela IA — confira e edite antes de confirmar.
             </span>
           ) : marcados.size > 0 ? (
@@ -378,7 +381,7 @@ export function JanelaDeDesfecho({
                redigir é legítimo — é o caso de quem recusa por uma razão que
                não está na lista —, mas então as marcas não vão a lugar nenhum,
                e isso precisa estar dito. */
-            <span className="text-xs text-amber-700">
+            <span className="text-xs text-aviso">
               {marcados.size === 1 ? '1 achado marcado' : `${marcados.size} achados marcados`} — eles só
               chegam ao card se a IA redigir. Confirmando assim, vai só o texto acima.
             </span>
@@ -386,12 +389,12 @@ export function JanelaDeDesfecho({
         </div>
 
         {motivoObrigatorio && motivo.trim().length > 0 && motivo.trim().length < MINIMO_DO_MOTIVO && (
-          <p className="text-xs text-amber-700">
+          <p className="text-xs text-aviso">
             Escreva a razão por extenso — faltam {MINIMO_DO_MOTIVO - motivo.trim().length}{' '}
             caracteres. O comercial lê isso sem ter a análise à mão.
           </p>
         )}
-        {erro && <p className="text-xs text-red-700">{erro}</p>}
+        {erro && <p className="text-xs text-perigo">{erro}</p>}
       </div>
     </Modal>
   )

@@ -33,8 +33,8 @@ function LinhaParametro({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-2.5 last:border-b-0">
-      <span className="text-sm text-slate-600">{rotulo}</span>
+    <div className="flex items-center justify-between gap-4 border-b border-borda py-2.5 last:border-b-0">
+      <span className="text-sm text-texto-2">{rotulo}</span>
       <div className="w-40 shrink-0">{children}</div>
     </div>
   )
@@ -201,7 +201,7 @@ export function ModalParametrosAtualizacao({
             nulo por cima da SELIC e do IPCA reais — parando a projeção de toda a
             carteira. Por isso o aviso, e o Salvar desabilitado abaixo. */}
         {params.isError && (
-          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <p className="mb-3 rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
             Não foi possível ler os parâmetros atuais, então não é seguro salvar
             por cima. Feche e abra novamente.{' '}
             <button
@@ -237,7 +237,7 @@ export function ModalParametrosAtualizacao({
 
         <LinhaParametro rotulo="IPCA + 2% a.a.">
           {/* Sem campo: é o IPCA acima somado a 2, calculado na hora. */}
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
+          <div className="rounded-lg bg-superficie-2 px-3 py-2 text-right text-sm font-medium tabular-nums text-texto">
             {derivado === null ? '—' : formatPercentInput(derivado)}
           </div>
         </LinhaParametro>
@@ -246,7 +246,7 @@ export function ModalParametrosAtualizacao({
           {/* Fixa em hoje, sem campo: é a competência do relatório que está
               sendo gerado, não uma escolha. Logo depois da busca no Banco
               Central, é a competência que ela gravou (ver dataBaseAoSalvar). */}
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
+          <div className="rounded-lg bg-superficie-2 px-3 py-2 text-right text-sm font-medium tabular-nums text-texto">
             {formatDate(dataBase)}
           </div>
         </LinhaParametro>

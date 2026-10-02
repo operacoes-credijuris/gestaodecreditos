@@ -225,7 +225,7 @@ export default function Performance() {
               <TBody>
                 {lista.map((o) => (
                   <TR key={o.ref}>
-                    <TD className="whitespace-nowrap font-mono text-xs text-slate-600">
+                    <TD className="whitespace-nowrap font-mono text-xs text-texto-2">
                       {o.numeroCnj ? formatCNJ(o.numeroCnj) : o.ref}
                     </TD>
                     <TD>{o.tribunal ?? '—'}</TD>

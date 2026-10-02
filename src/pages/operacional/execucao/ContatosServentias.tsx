@@ -80,19 +80,19 @@ function LinhaValor({
   return (
     <div className="flex items-baseline gap-1">
       {/* Rótulo Serv./Gab. não encolhe nem quebra; o valor ao lado é que quebra. */}
-      {label && <span className="shrink-0 text-xs text-slate-600">{label}</span>}
+      {label && <span className="shrink-0 text-xs text-texto-2">{label}</span>}
       {whatsapp ? (
         <a
           href={waLink(value)}
           target="_blank"
           rel="noreferrer"
-          className="text-emerald-700 hover:underline"
+          className="text-sucesso hover:underline"
           title="Abrir conversa no WhatsApp"
         >
           {value}
         </a>
       ) : (
-        <span className="text-slate-700">{value}</span>
+        <span className="text-texto">{value}</span>
       )}
     </div>
   )
@@ -115,10 +115,10 @@ function CelulaContato({
     return serventia ? (
       <LinhaValor value={serventia} whatsapp={whatsapp} />
     ) : (
-      <span className="text-slate-600">—</span>
+      <span className="text-texto-2">—</span>
     )
   }
-  if (!serventia && !gabinete) return <span className="text-slate-600">—</span>
+  if (!serventia && !gabinete) return <span className="text-texto-2">—</span>
   return (
     <div className="space-y-0.5">
       {serventia && <LinhaValor label="Serv." value={serventia} whatsapp={whatsapp} />}
@@ -422,7 +422,7 @@ export default function ContatosServentias() {
       <Card className="mb-4 p-4">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
             <Input
               className="pl-9"
               placeholder="Buscar por órgão, tribunal, telefone ou e-mail…"
@@ -448,7 +448,7 @@ export default function ContatosServentias() {
 
       {/* Legenda das bolinhas, no respiro entre a busca e a tabela. Derivada de
           DOT_TIPO justamente para não divergir das cores usadas nas linhas. */}
-      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-600">
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-texto-2">
         {Object.entries(DOT_TIPO).map(([tipo, { cor, label }]) => (
           <span key={tipo} className="inline-flex items-center gap-1.5">
             <span
@@ -532,7 +532,7 @@ export default function ContatosServentias() {
                 const c = row.contato
                 return (
                   <TR key={row.key}>
-                    <TD className="font-medium text-slate-800">
+                    <TD className="font-medium text-texto">
                       <div className="flex items-start gap-2">
                         <span
                           title={DOT_TIPO[row.tipo].label}
@@ -548,7 +548,7 @@ export default function ContatosServentias() {
                         </div>
                       </div>
                     </TD>
-                    <TD className="text-slate-600">{row.tribunal || '—'}</TD>
+                    <TD className="text-texto-2">{row.tribunal || '—'}</TD>
                     {/* Telefones/WhatsApp seguem sem quebra (números). */}
                     <TD className="whitespace-nowrap">
                       <CelulaContato
@@ -678,7 +678,7 @@ export default function ContatosServentias() {
             ) : (
               <>
                 <div>
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">Serventia</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-texto">Serventia</h3>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Telefone" error={erros.serventia_telefone}>
                       <Input
@@ -710,7 +710,7 @@ export default function ContatosServentias() {
                   </div>
                 </div>
                 <div>
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">Gabinete</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-texto">Gabinete</h3>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Telefone" error={erros.gabinete_telefone}>
                       <Input

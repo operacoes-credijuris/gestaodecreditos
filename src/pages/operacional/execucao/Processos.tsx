@@ -123,16 +123,16 @@ function corExpectativa(
   limiteAlerta: string,
 ): { classe: string; titulo?: string } {
   const d = (data ?? '').slice(0, 10)
-  if (!d) return { classe: 'text-slate-600' }
-  if (d < hoje) return { classe: 'font-medium text-red-600', titulo: 'Expectativa vencida' }
+  if (!d) return { classe: 'text-texto-2' }
+  if (d < hoje) return { classe: 'font-medium text-perigo', titulo: 'Expectativa vencida' }
   if (d <= limiteAlerta) {
     return {
-      classe: 'font-medium text-amber-700',
+      classe: 'font-medium text-aviso',
       titulo: `Vence em até ${MESES_ALERTA_EXPECTATIVA} meses`,
     }
   }
   return {
-    classe: 'font-medium text-emerald-700',
+    classe: 'font-medium text-sucesso',
     titulo: `Vence em mais de ${MESES_ALERTA_EXPECTATIVA} meses`,
   }
 }
@@ -171,7 +171,7 @@ function CampoMoeda({
 
   return (
     <div className="relative">
-      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-600">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-texto-2">
         R$
       </span>
       <Input
@@ -199,9 +199,9 @@ const N_COLUNAS = 7
 // redundante com o filtro de pílulas acima da tabela; a cor basta.
 // Só os tones que STATUS_PROCESSO produz; tone novo cai no fallback cinza.
 const DOT_STATUS: Record<string, string> = {
-  green: 'bg-emerald-500',
-  yellow: 'bg-amber-400',
-  gray: 'bg-slate-400',
+  green: 'bg-sucesso-cheio',
+  yellow: 'bg-aviso-cheio',
+  gray: 'bg-texto-3',
 }
 
 export default function Processos() {
@@ -522,7 +522,7 @@ export default function Processos() {
       <Card className="mb-4 p-4">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
             <Input
               className="pl-9"
               placeholder="Buscar por número, cedente, advogado, cessionário, devedora, comarca, tribunal, instrumento, RTDPJ…"
@@ -637,14 +637,14 @@ export default function Processos() {
                 return (
                   <Fragment key={p.id}>
                   <TR onClick={() => setDetalhe(p)}>
-                    <TD className="font-medium text-slate-800">
+                    <TD className="font-medium text-texto">
                       <div className="flex items-start gap-2">
                         <span
                           title={st.label}
                           aria-label={`Status: ${st.label}`}
                           className={cn(
                             'mt-1.5 h-2 w-2 shrink-0 rounded-full',
-                            DOT_STATUS[st.tone] ?? 'bg-slate-400',
+                            DOT_STATUS[st.tone] ?? 'bg-texto-3',
                           )}
                         />
                         <div className="min-w-0">
@@ -686,7 +686,7 @@ export default function Processos() {
                             {apensos.contador(p.id)}
                           </span>
                           {/* Nomes completos: quebram em linhas em vez de truncar. */}
-                          <div className="text-xs font-normal text-slate-600">
+                          <div className="text-xs font-normal text-texto-2">
                             {p.cedente || '—'} v. {p.cessionario || '—'}
                           </div>
                         </div>
@@ -695,11 +695,11 @@ export default function Processos() {
                     <TD>
                       {/* Devedora e comarca/vara em linhas próprias, texto completo. */}
                       <div>{p.entidade_devedora || '—'}</div>
-                      <div className="text-xs text-slate-600">
+                      <div className="text-xs text-texto-2">
                         {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
                       </div>
                     </TD>
-                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                    <TD className="whitespace-nowrap tabular-nums text-texto-2">
                       {formatDate(p.data_aquisicao)}
                     </TD>
                     {/* Semáforo: vencida (vermelho), dentro da janela de alerta
@@ -712,7 +712,7 @@ export default function Processos() {
                     </TD>
                     {/* Puxada do cache do ADVBOX, não digitada. Enquanto o mapa
                         carrega mostra vazio em vez de "—", que seria mentira. */}
-                    <TD className="whitespace-nowrap tabular-nums text-slate-600">
+                    <TD className="whitespace-nowrap tabular-nums text-texto-2">
                       {ultimaMov.isLoading
                         ? ''
                         : formatDate(
@@ -728,7 +728,7 @@ export default function Processos() {
                         '—'
                       )}
                       {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
-                        <div className="mt-0.5 text-xs text-slate-600">
+                        <div className="mt-0.5 text-xs text-texto-2">
                           {splitRtdpj(p.numero_rtdpj).map((n, i) => (
                             <div key={i}>{n}</div>
                           ))}
@@ -817,7 +817,7 @@ export default function Processos() {
             São dois momentos diferentes do trabalho, e sem a divisão o campo de
             busca parecia o primeiro campo do formulário. */}
         {editing && abaForm === 'auto' && !editing.id && (
-          <div className="mb-4 border-b border-slate-200 pb-4">
+          <div className="mb-4 border-b border-borda pb-4">
             <NovoCreditoDoDrive processos={data} onPreencher={preencherDoDrive} />
           </div>
         )}
@@ -1050,7 +1050,7 @@ export default function Processos() {
                   {Object.entries(TIPO_CREDITO).map(([k, v]) => (
                     <label
                       key={k}
-                      className="flex cursor-pointer items-center gap-2 text-sm text-slate-700"
+                      className="flex cursor-pointer items-center gap-2 text-sm text-texto"
                     >
                       <input
                         type="checkbox"

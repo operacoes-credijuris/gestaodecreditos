@@ -188,7 +188,7 @@ export function useApensosManager(parentField: ParentField) {
         title={`${count} apenso${count > 1 ? 's' : ''}`}
         // py-1.5 para os 24px de alvo (é o único jeito de abrir a lista de
         // apensos); -my-1.5 devolve o espaço à célula.
-        className="-my-1.5 inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-1.5 text-xs font-normal text-slate-600 transition-colors hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+        className="-my-1.5 inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-1.5 text-xs font-normal text-texto-2 transition-colors hover:bg-superficie-3 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
       >
         <span className="tabular-nums">{count}</span>
         <ChevronDown
@@ -213,10 +213,10 @@ export function useApensosManager(parentField: ParentField) {
     if (!expanded[parentId]) return null
     const apensos = porPai.get(parentId) ?? []
     return (
-      <tr className="bg-slate-50">
+      <tr className="bg-superficie-2">
         <td colSpan={colSpan} className="px-4 py-3">
           {apensos.length === 0 ? (
-            <div className="flex items-center gap-3 text-sm text-slate-600">
+            <div className="flex items-center gap-3 text-sm text-texto-2">
               Nenhum apenso vinculado a este registro.
               <Button
                 size="sm"
@@ -229,7 +229,7 @@ export function useApensosManager(parentField: ParentField) {
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              <div className="text-xs font-semibold uppercase tracking-wide text-texto-2">
                 Apensos
               </div>
               {apensos.map((a) => (
@@ -237,23 +237,23 @@ export function useApensosManager(parentField: ParentField) {
                 <div
                   key={a.id}
                   onClick={() => setFicha(a)}
-                  className="flex cursor-pointer items-start justify-between gap-3 rounded-md border border-slate-200 bg-white p-2.5 text-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  className="flex cursor-pointer items-start justify-between gap-3 rounded-md border border-borda bg-superficie p-2.5 text-sm transition-colors hover:border-borda-forte hover:bg-superficie-2"
                   title="Abrir ficha do apenso"
                 >
                   <div className="space-y-0.5">
-                    <div className="font-medium text-slate-800">
+                    <div className="font-medium text-texto">
                       {formatCNJ(a.numero)}
                       {a.classe_processual && (
-                        <span className="font-normal text-slate-600">
+                        <span className="font-normal text-texto-2">
                           {' '}
                           · {a.classe_processual}
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-slate-600">
+                    <div className="text-xs text-texto-2">
                       {[a.tribunal, a.comarca, a.vara].filter(Boolean).join(' · ') || '—'}
                     </div>
-                    <div className="text-xs text-slate-600">
+                    <div className="text-xs text-texto-2">
                       Polo ativo: {a.polo_ativo || '—'} · Polo passivo:{' '}
                       {a.polo_passivo || '—'}
                     </div>
@@ -274,7 +274,7 @@ export function useApensosManager(parentField: ParentField) {
                       icon={<Trash2 className="h-4 w-4" />}
                       onClick={() => setToDelete(a)}
                     />
-                    <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden="true" />
+                    <ChevronRight className="h-4 w-4 text-texto-3" aria-hidden="true" />
                   </div>
                 </div>
               ))}
@@ -406,14 +406,14 @@ export function useApensosManager(parentField: ParentField) {
             ficha && (
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold tracking-tight text-slate-800">
+                  <h2 className="text-base font-bold tracking-tight text-texto">
                     {formatCNJ(ficha.numero || '')}
                   </h2>
                   {ficha.classe_processual && (
                     <Badge tone="blue">{ficha.classe_processual}</Badge>
                   )}
                 </div>
-                <p className="text-xs text-slate-600">
+                <p className="text-xs text-texto-2">
                   Apenso vinculado a{' '}
                   {parentField === 'processo_id' ? 'um crédito' : 'um requerimento'}
                 </p>

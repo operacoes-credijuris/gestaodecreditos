@@ -19,18 +19,20 @@ export function PageHeader({
 }) {
   const Titulo = nivel === 1 ? 'h1' : 'h2'
   return (
-    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    // O `.page-head` da amostra: título de 26px em extranegrito e as ações
+    // alinhadas pela BASE do bloco (com a descrição), não pelo meio do título.
+    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <Titulo
           className={cn(
-            'font-display font-bold tracking-tight text-slate-900',
-            nivel === 1 ? 'text-2xl' : 'text-xl',
+            'font-display font-extrabold tracking-tight text-texto',
+            nivel === 1 ? 'text-3xl' : 'text-xl',
           )}
         >
           {title}
         </Titulo>
         {description && (
-          <p className="mt-1 text-sm text-slate-600">{description}</p>
+          <p className="mt-1 text-corpo text-texto-2">{description}</p>
         )}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}

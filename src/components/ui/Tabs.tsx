@@ -97,7 +97,7 @@ export function Tabs({
   // item mais alto, então ela continua definindo a altura da linha e o
   // sublinhado da aba ativa segue encostado na borda de baixo.
   return (
-    <div className="flex items-center gap-3 border-b border-slate-200">
+    <div className="flex items-center gap-3 border-b border-borda">
       {/* Sem `flex-1`: a régua de abas fica com a largura do conteúdo, para o
           `trailing` encostar nela. Com flex-1 ela esticaria e empurraria o
           conteúdo para a borda da página. `min-w-0` mantém o scroll horizontal
@@ -127,12 +127,15 @@ export function Tabs({
               onClick={() => onChange(item.key)}
               onKeyDown={(e) => handleKeyDown(e, index)}
               className={cn(
-                'font-display flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors',
+                // O `.tabs button` da amostra: 14px na fonte do corpo, cinza
+                // secundário, e a aberta em azul com o sublinhado no azul da
+                // logomarca. A desabilitada fica no cinza de metadado, apagada.
+                'flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-corpo font-semibold transition-colors',
                 item.disabled
-                  ? 'cursor-not-allowed border-transparent text-slate-400'
+                  ? 'cursor-not-allowed border-transparent text-texto-3 opacity-60'
                   : active
-                    ? 'border-brand-500 text-brand-700'
-                    : 'border-transparent text-slate-500 hover:border-brand-200 hover:text-slate-700',
+                    ? 'border-marca-viva text-marca-texto'
+                    : 'border-transparent text-texto-2 hover:border-borda-forte hover:text-texto',
               )}
             >
               {item.icon}
@@ -141,7 +144,7 @@ export function Tabs({
                 <span
                   className={cn(
                     'rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums',
-                    active ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-600',
+                    active ? 'bg-marca-suave text-marca-texto' : 'bg-superficie-3 text-texto-2',
                   )}
                 >
                   {item.count}

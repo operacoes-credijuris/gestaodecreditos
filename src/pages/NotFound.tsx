@@ -11,10 +11,10 @@ export default function NotFound() {
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50">
           <Compass className="h-7 w-7 text-brand-600" />
         </div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-texto">
           Página não encontrada
         </h1>
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-texto-2">
           O endereço acessado não existe ou foi movido. Confira o link ou volte
           para o início.
         </p>

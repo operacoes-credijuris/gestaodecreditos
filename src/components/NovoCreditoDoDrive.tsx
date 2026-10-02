@@ -279,7 +279,7 @@ export function NovoCreditoDoDrive({
 
       {/* O que a IA quer que a pessoa saiba antes de salvar. */}
       {!!extracao?.observacoes?.length && (
-        <ul className="space-y-1 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
+        <ul className="space-y-1 rounded-lg bg-aviso-fundo p-3 text-xs text-aviso">
           {extracao.observacoes.map((o, i) => (
             <li key={i} className="flex gap-1.5">
               <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -295,7 +295,7 @@ export function NovoCreditoDoDrive({
           Arquivo lido que não rendeu campo nenhum aparece assim mesmo, dizendo isso:
           é o sinal de que o dado esperado não estava onde se pensava. */}
       {!!extracao?.lidos?.length && (
-        <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+        <div className="rounded-lg bg-superficie-2 p-3 text-xs text-texto-2">
           <p className="mb-1 font-semibold uppercase tracking-wide">
             Lido pela IA · {extracao.lidos.length} arquivo(s)
           </p>
@@ -304,11 +304,11 @@ export function NovoCreditoDoDrive({
               const campos = camposDoArquivo(nome, extracao.procedencia)
               return (
                 <li key={nome}>
-                  <span className="text-slate-800">{nome}</span>
+                  <span className="text-texto">{nome}</span>
                   {campos.length > 0 ? (
-                    <span className="text-slate-500"> · {campos.join(', ')}</span>
+                    <span className="text-texto-3"> · {campos.join(', ')}</span>
                   ) : (
-                    <span className="text-slate-500"> · nenhum campo saiu daqui</span>
+                    <span className="text-texto-3"> · nenhum campo saiu daqui</span>
                   )}
                 </li>
               )
@@ -320,12 +320,12 @@ export function NovoCreditoDoDrive({
       {/* Arquivo que não deu para ler NÃO desaparece: PDF escaneado e formato sem
           texto são o caso em que falta campo, e é aqui que se descobre por quê. */}
       {!!extracao?.ignorados?.length && (
-        <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+        <div className="rounded-lg bg-superficie-2 p-3 text-xs text-texto-2">
           <p className="mb-1 font-semibold uppercase tracking-wide">Não foi possível ler</p>
           <ul className="space-y-0.5">
             {extracao.ignorados.map((ig, i) => (
               <li key={i} className="truncate">
-                {ig.nome} <span className="text-slate-500">· {ig.motivo}</span>
+                {ig.nome} <span className="text-texto-3">· {ig.motivo}</span>
               </li>
             ))}
           </ul>

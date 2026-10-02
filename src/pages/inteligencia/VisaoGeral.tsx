@@ -148,16 +148,16 @@ export default function VisaoGeral() {
                 <li
                   key={i.chave}
                   className={
-                    'rounded-lg border-l-4 bg-slate-50 px-3 py-2 ' +
+                    'rounded-lg border-l-4 bg-superficie-2 px-3 py-2 ' +
                     (i.tom === 'atencao'
-                      ? 'border-amber-400'
+                      ? 'border-aviso-cheio'
                       : i.tom === 'metodologico'
                         ? 'border-brand-400'
-                        : 'border-slate-300')
+                        : 'border-borda-forte')
                   }
                 >
-                  <p className="text-sm text-slate-800">{i.texto}</p>
-                  <p className="mt-1 text-xs text-slate-500">{i.base}</p>
+                  <p className="text-sm text-texto">{i.texto}</p>
+                  <p className="mt-1 text-xs text-texto-3">{i.base}</p>
                 </li>
               ))}
             </ul>
@@ -186,7 +186,7 @@ export default function VisaoGeral() {
                 explicacao="Operação sem capital ou sem valor recebido fica fora do numerador e do denominador. Entrar com zero afirmaria resultado zero onde o que falta é cadastro."
               />
             )}
-            <div className="mt-3 border-t border-slate-200 pt-2">
+            <div className="mt-3 border-t border-borda pt-2">
               <LinhaMetrica
                 rotulo="Capital investido — carteira inteira"
                 valor={brl(painel.capitalTotalInvestido)}
@@ -262,7 +262,7 @@ export default function VisaoGeral() {
                 explicacao="Ficam fora desta conta. A maioria entrou no sistema já paga, na importação da carteira."
               />
             )}
-            <p className="mt-3 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-texto-3">
               Previsão original e número de reprogramações passam a existir conforme o
               histórico acumula, a partir da implantação deste módulo.
             </p>

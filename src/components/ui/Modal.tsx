@@ -81,16 +81,19 @@ export function Modal({
 
   if (!open) return null
 
+  // AS LARGURAS DA AMOSTRA, EM PX. As da escala (max-w-md…) são em rem e, com o
+  // <html> em 12px, encolhiam um quarto: a janela média tinha 432px, e a pequena,
+  // 336px — estreita a ponto de quebrar o título da confirmação em três linhas.
   const sizes = {
-    sm: 'max-w-md',
-    md: 'max-w-xl',
-    lg: 'max-w-3xl',
-    xl: 'max-w-5xl',
+    sm: 'max-w-[420px]',
+    md: 'max-w-[560px]',
+    lg: 'max-w-[820px]',
+    xl: 'max-w-[1080px]',
   }
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-[2px] sm:p-6"
+      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] sm:p-6"
       onClick={(e) => {
         // Fecha só quando o clique é no próprio overlay, não dentro do painel.
         if (e.target === e.currentTarget) requestClose()
@@ -100,38 +103,43 @@ export function Modal({
         ref={panelRef}
         tabIndex={-1}
         className={cn(
-          'animate-modal-in mt-6 w-full rounded-2xl bg-white shadow-xl outline-none',
+          // `my-auto` CENTRA a janela (como na amostra) sem cortar o topo: se ela
+          // for mais alta que a tela, as margens automáticas viram zero e o
+          // fundo rola, em vez de a janela sair por cima.
+          'animate-modal-in my-auto w-full rounded-janela bg-superficie shadow-nivel-3 outline-none',
           sizes[size],
         )}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
-          <div>
+        {/* Cabeçalho sem divisória, como na amostra: o rodapé é que se separa,
+            porque é ele que fica parado enquanto o corpo rola. */}
+        <div className="flex items-start justify-between gap-4 px-6 pt-6">
+          <div className="min-w-0">
             <h2
               id={titleId}
-              className="font-display text-lg font-bold tracking-tight text-slate-900"
+              className="font-display text-xl font-extrabold tracking-tight text-texto"
             >
               {title}
             </h2>
             {description && (
-              <p className="mt-0.5 text-sm text-slate-600">{description}</p>
+              <p className="mt-1 text-corpo text-texto-2">{description}</p>
             )}
           </div>
           <button
             onClick={requestClose}
-            className="rounded-lg p-1 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-800"
+            className="-mr-2 -mt-1 shrink-0 rounded-controle p-1.5 text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto"
             aria-label="Fechar"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4 scrollbar-thin">
+        <div className="max-h-[70vh] overflow-y-auto px-6 py-5 scrollbar-thin">
           {children}
         </div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-borda px-6 pb-6 pt-4">
             {footer}
           </div>
         )}

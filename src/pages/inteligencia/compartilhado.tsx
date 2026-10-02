@@ -74,7 +74,7 @@ export function SeloAmostra({
       <Badge tone={TOM_CLASSE[classe]} size="sm">
         {compacto ? `n=${n}` : `${rotulo} · n=${n}`}
       </Badge>
-      <Info className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+      <Info className="h-3.5 w-3.5 shrink-0 text-texto-3" aria-hidden />
     </span>
   )
 }
@@ -88,7 +88,7 @@ export function Explicacao({ texto, children }: { texto: string; children: React
   return (
     <span className="inline-flex items-center gap-1" title={texto}>
       {children}
-      <Info className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+      <Info className="h-3.5 w-3.5 shrink-0 text-texto-3" aria-hidden />
     </span>
   )
 }
@@ -185,7 +185,7 @@ export function AvisoParametros() {
 /** Faixa de aviso metodológico. Não é erro — é contexto obrigatório. */
 export function Ressalva({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+    <div className="rounded-lg border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
       {children}
     </div>
   )
@@ -200,11 +200,11 @@ export function LinhaMetrica({
   destaque?: boolean
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-slate-100 py-1.5 last:border-0">
-      <span className="text-sm text-slate-600">
+    <div className="flex items-baseline justify-between gap-4 border-b border-borda py-1.5 last:border-0">
+      <span className="text-sm text-texto-2">
         {explicacao ? <Explicacao texto={explicacao}>{rotulo}</Explicacao> : rotulo}
       </span>
-      <span className={`tabular-nums text-right text-sm ${destaque ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
+      <span className={`tabular-nums text-right text-sm ${destaque ? 'font-semibold text-texto' : 'text-texto'}`}>
         {valor}
       </span>
     </div>

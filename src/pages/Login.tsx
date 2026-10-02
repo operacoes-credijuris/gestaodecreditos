@@ -44,7 +44,7 @@ export default function Login() {
   return (
     // Fundo claro, como os materiais comerciais da marca: a logomarca aparece
     // em cor plena (o azul dela não sobrevive legível sobre navy escuro).
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-papel via-white to-brand-100 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-papel via-superficie to-brand-100 p-4">
       <FaixaBeta fixa />
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
@@ -54,16 +54,16 @@ export default function Login() {
             alt="Credijuris — créditos judiciais"
             className="mx-auto mb-3 h-12 w-auto"
           />
-          <p className="text-sm text-slate-600">Sistema de Gestão de Créditos</p>
+          <p className="text-sm text-texto-2">Sistema de Gestão de Créditos</p>
         </div>
 
-        <div className="rounded-2xl border border-brand-100 bg-white p-6 shadow-xl shadow-brand-950/[0.07] sm:p-8">
-          <h2 className="font-display mb-6 text-lg font-bold tracking-tight text-slate-900">
+        <div className="rounded-cartao border border-borda bg-superficie p-6 shadow-nivel-2 sm:p-8">
+          <h2 className="font-display mb-6 text-lg font-bold tracking-tight text-texto">
             Acessar o sistema
           </h2>
 
           {!isSupabaseConfigured && (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <div className="mb-4 rounded-lg border border-aviso-borda bg-aviso-fundo p-3 text-sm text-aviso">
               Supabase não configurado. Defina <code>VITE_SUPABASE_URL</code> e{' '}
               <code>VITE_SUPABASE_ANON_KEY</code> no arquivo <code>.env</code>.
             </div>
@@ -92,7 +92,7 @@ export default function Login() {
             </Field>
 
             {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div className="rounded-lg border border-perigo-borda bg-perigo-fundo p-3 text-sm text-perigo">
                 {error}
               </div>
             )}
@@ -108,7 +108,7 @@ export default function Login() {
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-xs text-slate-600">
+          <p className="mt-6 text-center text-xs text-texto-2">
             Cadastro de usuários pelo administrador.
           </p>
         </div>

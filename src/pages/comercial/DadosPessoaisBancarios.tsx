@@ -138,17 +138,17 @@ function GrupoDados({
 }) {
   const preenchidas = linhas.filter((l) => l.valor)
   if (preenchidas.length === 0)
-    return <span className="text-slate-300">—</span>
+    return <span className="text-texto-3">—</span>
   return (
     <div className="grid grid-cols-[max-content_1fr] items-baseline gap-x-2.5 gap-y-1">
       {preenchidas.map((l) => (
         <Fragment key={l.rotulo}>
-          <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-texto-3">
             {l.rotulo}
           </span>
           {/* break-words: chave Pix de e-mail não tem espaço e, com a tabela de
               colunas fixas, vazaria por cima da coluna vizinha. */}
-          <span className="min-w-0 break-words text-slate-700">{l.valor}</span>
+          <span className="min-w-0 break-words text-texto">{l.valor}</span>
         </Fragment>
       ))}
     </div>
@@ -550,7 +550,7 @@ export default function DadosPessoaisBancarios() {
                   const endereco = d ? compilarEndereco(d) || d.endereco : null
                   return (
                     <TR key={i.chave}>
-                      <TD className="font-medium text-slate-800">
+                      <TD className="font-medium text-texto">
                         {i.nome}
                         {/* Cadastrado e ainda sem crédito. Não é pendência: é o
                             estado normal de quem o comercial acabou de cadastrar
@@ -566,7 +566,7 @@ export default function DadosPessoaisBancarios() {
                             O prefixo "Rep." diz o que é o nome: sem ele, dois nomes
                             empilhados parecem duas pessoas cadastradas. */}
                         {d?.representante && (
-                          <div className="mt-0.5 text-xs font-normal text-slate-600">
+                          <div className="mt-0.5 text-xs font-normal text-texto-2">
                             Rep. {d.representante}
                           </div>
                         )}
@@ -599,7 +599,7 @@ export default function DadosPessoaisBancarios() {
                         />
                       </TD>
                       <TD>
-                        {endereco || <span className="text-slate-300">—</span>}
+                        {endereco || <span className="text-texto-3">—</span>}
                       </TD>
                       <TD className="whitespace-nowrap text-right">
                         <div className="flex justify-end gap-1">
@@ -678,7 +678,7 @@ export default function DadosPessoaisBancarios() {
                 </Field>
               ) : (
                 <Field label={`Nome do ${visao.rotulo.toLowerCase()}`}>
-                  <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                  <div className="rounded-lg bg-superficie-2 px-3 py-2 text-sm font-medium text-texto">
                     {editando.nome}
                   </div>
                 </Field>
@@ -698,7 +698,7 @@ export default function DadosPessoaisBancarios() {
                 ] as const
               ).map((grupo) => (
                 <div key={grupo.titulo}>
-                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-texto-2">
                     {grupo.titulo}
                   </h4>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -746,7 +746,7 @@ export default function DadosPessoaisBancarios() {
 
               {/* ---------- Endereço em partes ---------- */}
               <div>
-                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-texto-2">
                   Endereço
                 </h4>
                 <div className="grid gap-4 sm:grid-cols-6">
@@ -862,7 +862,7 @@ export default function DadosPessoaisBancarios() {
                     : dados.data?.get(chavePessoa(tipo, editando.chave))?.endereco
                   const end = enderecoDaFicha(form, antigo)
                   return (
-                    <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                    <div className="mt-3 rounded-lg bg-superficie-2 px-3 py-2 text-sm text-texto-2">
                       {end.texto || 'Endereço em branco'}
                       {end.mantemAntigo && compilarEndereco(form) && (
                         <p className="mt-1 text-xs font-medium">

@@ -11,9 +11,10 @@ export function Card({
   return (
     <div
       className={cn(
-        // sombra levemente tingida da marca dá profundidade sem peso;
-        // cantos 2xl acompanham os cartões de Tarefas — um raio só no app inteiro
-        'rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-brand-950/[0.04]',
+        // O `.panel` da amostra: borda quente, sombra de um nível só e o raio de
+        // cartão (14px). UM RAIO SÓ NO APP INTEIRO: os cartões feitos à mão
+        // (Tarefas, Entrar) usam o mesmo `rounded-cartao`.
+        'rounded-cartao border border-borda bg-superficie shadow-nivel-1',
         className,
       )}
     >
@@ -32,13 +33,15 @@ export function CardHeader({
   action?: ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+    <div className="flex items-start justify-between gap-4 border-b border-borda px-5 py-4">
       <div>
-        <h3 className="font-display font-semibold tracking-tight text-slate-900">
+        {/* 16px em negrito, como o título de painel da amostra. Sem tamanho, o
+            título herdava os 12px da raiz e ficava menor que o próprio texto. */}
+        <h3 className="font-display text-lg font-bold tracking-tight text-texto">
           {title}
         </h3>
         {description && (
-          <p className="mt-0.5 text-sm text-slate-600">{description}</p>
+          <p className="mt-0.5 text-corpo text-texto-2">{description}</p>
         )}
       </div>
       {action}

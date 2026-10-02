@@ -7,7 +7,7 @@ import { INICIO } from '@/components/layout/navigation'
 
 function FullScreenLoader() {
   return (
-    <div className="flex h-screen items-center justify-center bg-slate-100">
+    <div className="flex h-screen items-center justify-center bg-superficie-3">
       <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
     </div>
   )
@@ -26,15 +26,15 @@ function AcessoDesativado() {
   // rotas e sobrevive à troca, como no Sair do menu do topo.
   const toast = useToast()
   return (
-    <div className="flex h-screen items-center justify-center bg-slate-100 p-6">
-      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-red-50">
-          <ShieldOff className="h-5 w-5 text-red-600" />
+    <div className="flex h-screen items-center justify-center bg-superficie-3 p-6">
+      <div className="w-full max-w-md rounded-xl border border-borda bg-superficie p-6 text-center shadow-nivel-1">
+        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-perigo-fundo">
+          <ShieldOff className="h-5 w-5 text-perigo" />
         </div>
-        <h1 className="mt-3 text-lg font-semibold text-slate-800">
+        <h1 className="mt-3 text-lg font-semibold text-texto">
           Acesso desativado
         </h1>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm text-texto-2">
           A conta {user?.email} está desativada. Procure o administrador da
           plataforma para reativá-la.
         </p>
