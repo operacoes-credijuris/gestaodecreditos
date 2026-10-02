@@ -12,8 +12,15 @@
 // não tem investidor selecionado, não tem mês de referência e não fala de
 // projeção. Ficar junto obrigava a passar pela carteira de alguém para chegar a
 // um cadastro.
-import { Fragment, useMemo, useRef, useState } from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+//
+// ONDA 2 DO REDESENHO (02/10/2026): a cara da amostra aprovada (paginas1.js ›
+// renderCadastros e formPessoa). Entraram a busca por nome ou documento, a linha
+// inteira abrindo a ficha, a seção "Para o contrato" (gênero e complemento da
+// qualificação) na ficha do investidor, o endereço antigo à vista com o aviso e
+// o "Descartar alterações?" ao fechar a ficha com algo digitado. O que o Salvar
+// grava continua em lib/fichaPessoa.ts, com teste.
+import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react'
+import { AlertTriangle, Info, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import {
   chavePessoa,
   processosCrud,
@@ -23,7 +30,14 @@ import {
   type TipoPessoa,
 } from '@/lib/queries'
 import { listarPessoas, type PessoaLista } from '@/lib/pessoas'
-import { chaveDaFicha, enderecoDaFicha, montarFichaPessoa, type CampoPessoa } from '@/lib/fichaPessoa'
+import {
+  chaveDaFicha,
+  enderecoDaFicha,
+  montarFichaPessoa,
+  type CampoPessoa,
+  type CamposParaContrato,
+} from '@/lib/fichaPessoa'
+import { casaBuscaDaFicha, iniciaisDoNome } from '@/lib/dadosCadastrais'
 import {
   compilarEndereco,
   cpfCnpjValido,
@@ -43,7 +57,7 @@ import { Card } from '@/components/ui/Card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
-import { Tabs } from '@/components/ui/Tabs'
+import { Tabs, idDaAba } from '@/components/ui/Tabs'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { IconButton } from '@/components/ui/IconButton'
 import {
@@ -60,70 +74,14 @@ import {
 import { useToast } from '@/components/ui/Toast'
 
 /**
- * `mascara` normaliza o que se digita, a cada tecla. É onde o formato deixa de
- * ser recomendação e passa a ser garantia: o CPF vira CNPJ sozinho ao passar de
- * 11 dígitos, agência/conta descartam letra, número aceita só dígito e o CEP sai
- * sempre 00000-000.
- */
-const CAMPOS_DOCUMENTO: {
-  chave: CampoPessoa
-  rotulo: string
-  mascara?: (v: string) => string
-  dica?: string
-  /** Só aparece quando o documento é CNPJ. Ver ehCnpj em lib/format.ts. */
-  soPj?: boolean
-}[] = [
-  {
-    chave: 'cpf',
-    // Rótulo e dica são recalculados no render conforme o que foi digitado
-    // (ver rotuloCampo/dicaCampo): chamar de "CPF" o documento de uma empresa
-    // está errado, e a máscara já troca sozinha no 12º dígito.
-    rotulo: 'CPF / CNPJ',
-    mascara: formatCpfCnpjInput,
-    dica: '000.000.000-00',
-  },
-  // ORDEM DELIBERADA: representante ANTES do RG. Em pessoa jurídica os campos
-  // saem "CNPJ | Representante legal" na primeira linha e o RG na segunda —
-  // porque aí o RG é o DO REPRESENTANTE, não da empresa (empresa não tem RG), e
-  // ele precisa vir depois de quem ele identifica. Em pessoa física o
-  // representante é filtrado e sobra "CPF | RG", como sempre foi.
-  {
-    chave: 'representante',
-    rotulo: 'Representante legal',
-    soPj: true,
-    dica: 'Quem assina pela empresa',
-  },
-  { chave: 'rg', rotulo: 'RG' },
-  { chave: 'banco', rotulo: 'Banco' },
-  { chave: 'agencia', rotulo: 'Agência', mascara: limparNumeroConta },
-  { chave: 'conta', rotulo: 'Conta', mascara: limparNumeroConta },
-  { chave: 'pix', rotulo: 'Pix' },
-]
-
-/**
- * Rótulo do campo conforme o documento digitado:
- *   • documento → "CNPJ" quando é de empresa, senão "CPF / CNPJ";
- *   • RG → "RG do representante" quando é empresa, porque é dele que o RG é.
- */
-const rotuloCampo = (chave: CampoPessoa, rotulo: string, doc: string) => {
-  if (!ehCnpj(doc)) return rotulo
-  if (chave === 'cpf') return 'CNPJ'
-  if (chave === 'rg') return 'RG do representante'
-  return rotulo
-}
-
-/** A dica acompanha o formato que a máscara está aplicando. */
-const dicaCampo = (chave: CampoPessoa, dica: string | undefined, doc: string) =>
-  chave === 'cpf' && ehCnpj(doc) ? '00.000.000/0000-00' : dica
-
-/**
- * Célula agrupada: pares "rótulo → valor" empilhados. A tabela tinha uma coluna
- * por campo (9 colunas!) e cada célula quebrava em duas ou três linhas de meia
- * palavra; agrupar em Identificação / Dados bancários dá largura de sobra para
- * cada valor sair inteiro — e o mini-rótulo diz o que é cada linha.
+ * Célula agrupada: pares "rótulo → valor" empilhados (o `.kv` da amostra). A
+ * tabela tinha uma coluna por campo (9 colunas!) e cada célula quebrava em duas
+ * ou três linhas de meia palavra; agrupar em Identificação / Dados bancários dá
+ * largura de sobra para cada valor sair inteiro — e o mini-rótulo diz o que é
+ * cada linha.
  *
  * GRID, e não flex com largura fixa no rótulo: `max-content` mede o rótulo mais
- * largo da célula e reserva exatamente isso, então "BANCO" e "AG/CC" nunca
+ * largo da célula e reserva exatamente isso, então "Banco" e "Ag/CC" nunca
  * transbordam por cima do valor (era o que colava "BANCOBanco do Brasil"), e as
  * duas colunas ficam alinhadas entre as linhas sem número mágico nenhum.
  *
@@ -134,24 +92,58 @@ const dicaCampo = (chave: CampoPessoa, dica: string | undefined, doc: string) =>
 function GrupoDados({
   linhas,
 }: {
-  linhas: { rotulo: string; valor?: string | null }[]
+  linhas: { rotulo: string; valor?: string | null; numero?: boolean }[]
 }) {
   const preenchidas = linhas.filter((l) => l.valor)
-  if (preenchidas.length === 0)
-    return <span className="text-texto-3">—</span>
+  if (preenchidas.length === 0) return <span className="text-texto-3">—</span>
   return (
-    <div className="grid grid-cols-[max-content_1fr] items-baseline gap-x-2.5 gap-y-1">
+    <dl className="m-0 grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-0.5">
       {preenchidas.map((l) => (
         <Fragment key={l.rotulo}>
-          <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-texto-3">
-            {l.rotulo}
-          </span>
+          <dt className="whitespace-nowrap text-texto-3">{l.rotulo}</dt>
           {/* break-words: chave Pix de e-mail não tem espaço e, com a tabela de
               colunas fixas, vazaria por cima da coluna vizinha. */}
-          <span className="min-w-0 break-words text-texto">{l.valor}</span>
+          <dd className={`m-0 min-w-0 break-words text-texto ${l.numero ? 'whitespace-nowrap tabular-nums' : ''}`}>
+            {l.valor}
+          </dd>
         </Fragment>
       ))}
-    </div>
+    </dl>
+  )
+}
+
+/** As iniciais na placa azul-clara, como na amostra. Só enfeite: o nome está ao lado. */
+function Avatar({ nome }: { nome: string }) {
+  return (
+    <span
+      aria-hidden
+      className="grid h-[32px] w-[32px] flex-none place-items-center rounded-full bg-marca-suave font-display text-xs font-bold text-marca-texto"
+    >
+      {iniciaisDoNome(nome)}
+    </span>
+  )
+}
+
+/** Título de seção da ficha (o `.fs-h` da amostra). */
+function SecaoFicha({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-3 font-display text-xs font-bold uppercase tracking-wider text-texto-3">
+        {titulo}
+      </h3>
+      {children}
+    </section>
+  )
+}
+
+/** Aviso âmbar com ícone (o `.hint-warn` da amostra). */
+function AvisoAmbar({ children, icone = 'alerta' }: { children: ReactNode; icone?: 'alerta' | 'info' }) {
+  const Icone = icone === 'info' ? Info : AlertTriangle
+  return (
+    <p role="status" className="mt-2 flex items-start gap-1.5 text-sm text-aviso">
+      <Icone className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+      <span>{children}</span>
+    </p>
   )
 }
 
@@ -172,6 +164,8 @@ const VAZIO: Record<CampoPessoa, string> = {
   cep: '',
 }
 
+const CONTRATO_VAZIO: CamposParaContrato = { genero: '', qualificacao_complemento: '' }
+
 /** O que muda entre as duas visões: só o rótulo e o texto de lista vazia. */
 const VISOES: Record<TipoPessoa, { rotulo: string; vazio: string }> = {
   investidor: {
@@ -186,6 +180,27 @@ const VISOES: Record<TipoPessoa, { rotulo: string; vazio: string }> = {
   },
 }
 
+/**
+ * As dicas dos dois campos do contrato, que mudam quando o documento vira CNPJ —
+ * é o que a função gerar-contrato faz com eles (montarQualificacaoInvestidor):
+ * empresa sai sempre no feminino, e o complemento dela é o representante.
+ */
+const dicasDoContrato = (pj: boolean) =>
+  pj
+    ? {
+        genero: 'Empresa sai sempre no feminino no contrato ("a cessionária").',
+        qualificacao:
+          'O representante por extenso. Ex.: "neste ato representada por Fulano de Tal, sócio-administrador".',
+      }
+    : {
+        genero:
+          'Concordância do contrato ("o cessionário" ou "a cessionária"). Sem gênero, sai no masculino.',
+        qualificacao: 'Estado civil e profissão. Ex.: "casada, empresária".',
+      }
+
+/** O id do painel das abas: as abas apontam para ele (aria-controls). */
+const PAINEL = 'painel-dados-cadastrais'
+
 export default function DadosPessoaisBancarios() {
   const processos = processosCrud.useList()
   const dados = useInvestidorDados()
@@ -195,6 +210,8 @@ export default function DadosPessoaisBancarios() {
 
   const [tipo, setTipo] = useState<TipoPessoa>('investidor')
   const visao = VISOES[tipo]
+  const rotuloMin = visao.rotulo.toLowerCase()
+  const [busca, setBusca] = useState('')
 
   // Pessoa na janela: o nome e o formulário à parte. `novo` libera a edição do
   // nome — na ficha de quem já existe o nome é fixo.
@@ -207,6 +224,12 @@ export default function DadosPessoaisBancarios() {
   } | null>(null)
   const seqJanela = useRef(0)
   const [form, setForm] = useState<Record<CampoPessoa, string>>(VAZIO)
+  // Gênero e complemento da qualificação: só a ficha do INVESTIDOR tem os
+  // campos (é dele a qualificação no contrato). Ficam fora de `form` porque o
+  // Salvar os trata à parte — ver `paraContrato` em lib/fichaPessoa.ts.
+  const [paraContrato, setParaContrato] = useState<CamposParaContrato>(CONTRATO_VAZIO)
+  /** A ficha como abriu, para saber se algo foi digitado ("Descartar alterações?"). */
+  const inicialRef = useRef('')
   const [aExcluir, setAExcluir] = useState<PessoaLista | null>(null)
 
   // Os 5.571 municípios entram por import DINÂMICO, e só quando alguém abre a
@@ -226,10 +249,26 @@ export default function DadosPessoaisBancarios() {
   const camposDoCep = useRef<Set<string>>(new Set())
   const [avisoCep, setAvisoCep] = useState<string | null>(null)
 
-  // Pessoas da visão atual, das duas origens, em ordem alfabética.
-  const pessoas = useMemo(
-    () => listarPessoas(tipo, processos.data, dados.data),
-    [tipo, processos.data, dados.data],
+  // As duas visões são calculadas juntas: a da aba aberta vira a tabela, e as
+  // duas dão a contagem ao lado do nome de cada aba.
+  const porTipo = useMemo(
+    () => ({
+      investidor: listarPessoas('investidor', processos.data, dados.data),
+      originador: listarPessoas('originador', processos.data, dados.data),
+    }),
+    [processos.data, dados.data],
+  )
+  const pessoas = porTipo[tipo]
+
+  // A busca olha o nome, o documento e o representante — por texto sem acento,
+  // ou pelos dígitos do documento (ver lib/dadosCadastrais.ts, com teste).
+  const visiveis = useMemo(
+    () =>
+      pessoas.filter((p) => {
+        const d = dados.data?.get(chavePessoa(tipo, p.chave))
+        return casaBuscaDaFicha([p.nome, d?.cpf, d?.representante], busca)
+      }),
+    [pessoas, dados.data, tipo, busca],
   )
 
   /**
@@ -257,9 +296,20 @@ export default function DadosPessoaisBancarios() {
       : undefined
   }, [editando, dados.data, pessoas, tipo])
 
+  /**
+   * Algo foi digitado na ficha? Então fechar pergunta antes (o `dirty` do Modal,
+   * e o Cancelar abaixo). Conta o nome do cadastro novo e qualquer campo
+   * diferente de como a ficha abriu — inclusive o que o CEP ou o CNPJ
+   * preencheram, que também se perderia.
+   */
+  const fichaSuja =
+    !!editando &&
+    ((editando.novo && editando.nome.trim() !== '') ||
+      JSON.stringify({ form, paraContrato }) !== inicialRef.current)
+
   async function abrirJanela(chave: string, nome: string, novo: boolean) {
     const d = novo ? undefined : dados.data?.get(chavePessoa(tipo, chave))
-    setForm({
+    const inicial: Record<CampoPessoa, string> = {
       cpf: d?.cpf ?? '',
       rg: d?.rg ?? '',
       representante: d?.representante ?? '',
@@ -274,7 +324,17 @@ export default function DadosPessoaisBancarios() {
       cidade: d?.cidade ?? '',
       uf: d?.uf ?? '',
       cep: d?.cep ?? '',
-    })
+    }
+    // O banco só aceita M, F ou vazio; o que não for M nem F abre como "Não
+    // informado" — nunca como masculino.
+    const g = (d?.genero ?? '').trim().toUpperCase()
+    const contrato: CamposParaContrato = {
+      genero: g === 'M' || g === 'F' ? g : '',
+      qualificacao_complemento: d?.qualificacao_complemento ?? '',
+    }
+    setForm(inicial)
+    setParaContrato(contrato)
+    inicialRef.current = JSON.stringify({ form: inicial, paraContrato: contrato })
     setEditando({ id: ++seqJanela.current, chave, nome, novo })
     setAvisoCep(null)
     camposDoCep.current = new Set()
@@ -283,6 +343,12 @@ export default function DadosPessoaisBancarios() {
       setMunicipios(m.MUNICIPIOS_POR_UF)
       setUfs(m.UFS)
     }
+  }
+
+  /** O Cancelar pergunta como o X, o Esc e o clique fora (que passam pelo Modal). */
+  function cancelarFicha() {
+    if (fichaSuja && !window.confirm('Descartar alterações não salvas?')) return
+    setEditando(null)
   }
 
   /**
@@ -408,7 +474,7 @@ export default function DadosPessoaisBancarios() {
     if (!editando) return
     const nome = editando.nome.trim()
     if (!nome) {
-      toast.error(`Informe o nome do ${visao.rotulo.toLowerCase()}.`)
+      toast.error(`Informe o nome do ${rotuloMin}.`)
       return
     }
     // Cadastro novo: do nome digitado. Ficha existente: a da linha aberta — ver
@@ -432,12 +498,15 @@ export default function DadosPessoaisBancarios() {
     }
     // A montagem da linha (vazio vira null, representante só em CNPJ, o que a
     // tela não edita preservado da ficha) mora em lib/fichaPessoa.ts, com teste.
+    // `paraContrato` SÓ NO INVESTIDOR: é a ficha que tem os campos; na do
+    // originador, gênero e qualificação são preservados da ficha anterior.
     const ficha = montarFichaPessoa({
       tipo,
       chave,
       nome,
       form,
       anterior: dados.data?.get(chavePessoa(tipo, chave)),
+      paraContrato: tipo === 'investidor' ? paraContrato : undefined,
     })
     try {
       await salvar.mutateAsync(ficha)
@@ -459,58 +528,82 @@ export default function DadosPessoaisBancarios() {
     }
   }
 
+  const carregando = processos.isLoading || dados.isLoading
+  const comErro = processos.isError || dados.isError
+
+  const cabecalho = (
+    <PageHeader
+      title="Dados cadastrais"
+      description="Investidores e originadores: identificação, dados bancários e endereço que entram nos contratos."
+      actions={
+        <Button
+          size="lg"
+          icon={<Plus className="h-[16px] w-[16px]" />}
+          disabled={!dados.data}
+          title={dados.data ? undefined : 'Espere as fichas carregarem'}
+          onClick={() => abrirJanela('', '', true)}
+        >
+          Cadastrar {rotuloMin}
+        </Button>
+      }
+    />
+  )
+
   // `dados` entra no portão junto com `processos`: esta tabela alimenta um
   // formulário cujo Salvar é upsert da LINHA INTEIRA. Com o mapa não carregado,
   // toda célula sairia "—" (igual a "nunca cadastrado") e o lápis abriria
   // formulário em branco sobre quem tem CPF, banco e conta gravados — o primeiro
-  // Salvar apagaria os treze campos.
-  if (processos.isLoading || dados.isLoading)
-    return <Loading label="Carregando dados…" />
-  if (processos.isError || dados.isError) {
+  // Salvar apagaria os treze campos. Por isso a tela inteira é o estado, com o
+  // "Cadastrar" travado.
+  if (carregando || comErro) {
     return (
-      <Card>
-        <ErrorState
-          message={
-            ((processos.error ?? dados.error) as Error)?.message ??
-            'Não foi possível carregar os dados.'
-          }
-          onRetry={() => {
-            void processos.refetch()
-            void dados.refetch()
-          }}
-        />
-      </Card>
+      <div>
+        {cabecalho}
+        <Card className="px-5">
+          {carregando ? (
+            <Loading label="Carregando dados…" />
+          ) : (
+            <ErrorState
+              message={
+                ((processos.error ?? dados.error) as Error)?.message ??
+                'Não foi possível carregar os dados.'
+              }
+              onRetry={() => {
+                void processos.refetch()
+                void dados.refetch()
+              }}
+            />
+          )}
+        </Card>
+      </div>
     )
   }
 
+  const pj = ehCnpj(form.cpf)
+  const dicas = dicasDoContrato(pj)
+
   return (
     <div>
-      <PageHeader
-        title="Dados cadastrais"
-        actions={
-          <Button
-            icon={<Plus className="h-4 w-4" />}
-            disabled={!dados.data}
-            onClick={() => abrirJanela('', '', true)}
-          >
-            Cadastrar {visao.rotulo.toLowerCase()}
-          </Button>
-        }
-      />
+      {cabecalho}
 
       {/* Tabs, e não Segmented dentro de Card: Investidores/Originadores são DUAS
           VISÕES da aba — o mesmo papel de Relatórios individuais/Visão global nas
-          Carteiras — e visões irmãs têm a mesma cara em toda a plataforma. O
-          sublinhado dispensa o cartão em volta. */}
-      <div className="mb-4">
+          Carteiras — e visões irmãs têm a mesma cara em toda a plataforma. A
+          contagem ao lado diz quantos a outra visão tem. */}
+      <div className="mb-5">
         <Tabs
+          rotulo="Visões de Dados cadastrais"
+          idDoPainel={PAINEL}
           items={[
-            { key: 'investidor', label: 'Investidores' },
-            { key: 'originador', label: 'Originadores' },
+            { key: 'investidor', label: 'Investidores', count: porTipo.investidor.length },
+            { key: 'originador', label: 'Originadores', count: porTipo.originador.length },
           ]}
           value={tipo}
           onChange={(k) => {
             setTipo(k as TipoPessoa)
+            // A busca é da visão: o nome procurado entre investidores raramente
+            // é o mesmo entre originadores.
+            setBusca('')
             // Fecha a janela ao trocar de visão: a ficha aberta pertence ao papel
             // anterior, e salvar depois da troca gravaria no papel errado.
             setEditando(null)
@@ -519,65 +612,110 @@ export default function DadosPessoaisBancarios() {
         />
       </div>
 
-      <div className="space-y-5">
-        <Card>
+      <Card>
+        <div
+          id={PAINEL}
+          role="tabpanel"
+          aria-labelledby={idDaAba(PAINEL, tipo === 'investidor' ? 0 : 1)}
+        >
+          {/* A BUSCA (item "Novo" da amostra): achar uma pessoa era rolar a
+              lista inteira. Por nome ou documento, sem acento, e pelos dígitos
+              do documento colado cru. */}
+          <div className="border-b border-borda px-5 py-4">
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-[16px] w-[16px] -translate-y-1/2 text-texto-3"
+                aria-hidden
+              />
+              <Input
+                type="search"
+                className="pl-10"
+                aria-label="Buscar por nome ou documento"
+                placeholder="Buscar por nome ou documento…"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+              />
+            </div>
+          </div>
+
           {pessoas.length === 0 ? (
+            <EmptyState title={`Nenhum ${rotuloMin}`} description={visao.vazio} />
+          ) : visiveis.length === 0 ? (
             <EmptyState
-              title={`Nenhum ${visao.rotulo.toLowerCase()}`}
-              description={visao.vazio}
+              title="Nada encontrado"
+              description={`Nenhum ${rotuloMin} corresponde a "${busca.trim()}".`}
+              action={
+                <Button variant="outline" onClick={() => setBusca('')}>
+                  Limpar busca
+                </Button>
+              }
             />
           ) : (
             // Larguras fixadas por coluna: sem elas o navegador distribui a
-            // sobra por igual e cada coluna curta vira um vão em branco.
-            // py-2.5 adensa as linhas — cada célula agrupada já é alta.
-            <Table className="table-fixed [&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:py-2.5 [&_td]:text-sm">
+            // sobra por igual e cada coluna curta vira um vão em branco. A
+            // LARGURA MÍNIMA faz a tabela rolar de lado no celular (o Table já
+            // rola), em vez de espremer cada coluna em uma letra por linha.
+            <Table className="min-w-[860px] table-fixed [&_th]:whitespace-nowrap [&_th]:px-4 [&_td]:px-4">
               <THead>
                 <tr>
-                  <TH className="w-[19%]">Nome do {visao.rotulo.toLowerCase()}</TH>
-                  <TH className="w-[16%]">Identificação</TH>
-                  <TH className="w-[23%]">Dados bancários</TH>
+                  <TH className="w-[24%]">Nome do {rotuloMin}</TH>
+                  <TH className="w-[19%]">Identificação</TH>
+                  <TH className="w-[21%]">Dados bancários</TH>
                   <TH>Endereço</TH>
-                  {/* w-32: dois botões de 32px + a palavra "Ações" no cabeçalho.
-                      Estava w-16 e o rótulo saía cortado ("AÇÕE"). */}
-                  <TH className="w-32 text-right">Ações</TH>
+                  {/* Dois botões de ícone + a palavra "Ações" no cabeçalho. */}
+                  <TH className="w-28 text-right">Ações</TH>
                 </tr>
               </THead>
               <TBody>
-                {pessoas.map((i) => {
+                {visiveis.map((i) => {
                   const d = dados.data?.get(chavePessoa(tipo, i.chave))
                   // Endereço em texto corrido, compilado das partes. Cai no
                   // texto legado enquanto um registro não tiver as partes.
                   const endereco = d ? compilarEndereco(d) || d.endereco : null
                   return (
-                    <TR key={i.chave}>
-                      <TD className="font-medium text-texto">
-                        {i.nome}
-                        {/* Cadastrado e ainda sem crédito. Não é pendência: é o
-                            estado normal de quem o comercial acabou de cadastrar
-                            para fazer o contrato. Marcar evita a leitura de que
-                            faltou lançar algo. */}
-                        {!i.emCredito && (
-                          <Badge tone="gray" size="sm" className="ml-2 align-middle">
-                            sem crédito
-                          </Badge>
-                        )}
-                        {/* Representante legal sob a razão social — mesmo padrão de
-                            texto secundário das outras tabelas (Créditos, carteiras).
-                            O prefixo "Rep." diz o que é o nome: sem ele, dois nomes
-                            empilhados parecem duas pessoas cadastradas. */}
-                        {d?.representante && (
-                          <div className="mt-0.5 text-xs font-normal text-texto-2">
-                            Rep. {d.representante}
+                    <TR
+                      key={i.chave}
+                      // A LINHA INTEIRA ABRE A FICHA (item "Novo" da amostra),
+                      // como em Créditos. O lápis continua lá: é o caminho do
+                      // teclado e de quem não sabe que a linha é clicável. Com o
+                      // mapa não carregado, nem a linha nem o lápis abrem — ver
+                      // o portão acima.
+                      onClick={dados.data ? () => abrirJanela(i.chave, i.nome, false) : undefined}
+                    >
+                      <TD>
+                        <div className="flex items-center gap-3">
+                          <Avatar nome={i.nome} />
+                          <div className="min-w-0">
+                            <span className="font-semibold text-texto">{i.nome}</span>
+                            {/* Representante legal sob a razão social. O prefixo
+                                "Rep." diz o que é o nome: sem ele, dois nomes
+                                empilhados parecem duas pessoas cadastradas. */}
+                            {d?.representante && (
+                              <span className="mt-0.5 block text-xs text-texto-3">
+                                Rep. {d.representante}
+                              </span>
+                            )}
+                            {/* Cadastrado e ainda sem crédito. Não é pendência: é
+                                o estado normal de quem o comercial acabou de
+                                cadastrar para fazer o contrato. Marcar evita a
+                                leitura de que faltou lançar algo. */}
+                            {!i.emCredito && (
+                              <div className="mt-1">
+                                <Badge tone="gray" size="sm">
+                                  sem crédito
+                                </Badge>
+                              </div>
+                            )}
                           </div>
-                        )}
+                        </div>
                       </TD>
                       <TD>
                         <GrupoDados
                           linhas={[
                             // CNPJ quando é empresa: o mesmo dígito que troca a
                             // máscara troca o rótulo aqui.
-                            { rotulo: rotuloDocumento(d?.cpf), valor: d?.cpf },
-                            { rotulo: 'RG', valor: d?.rg },
+                            { rotulo: rotuloDocumento(d?.cpf), valor: d?.cpf, numero: true },
+                            { rotulo: 'RG', valor: d?.rg, numero: true },
                           ]}
                         />
                       </TD>
@@ -593,19 +731,20 @@ export default function DadosPessoaisBancarios() {
                                 d?.agencia && d?.conta
                                   ? `${d.agencia} · ${d.conta}`
                                   : d?.agencia || d?.conta,
+                              numero: true,
                             },
                             { rotulo: 'Pix', valor: d?.pix },
                           ]}
                         />
                       </TD>
-                      <TD>
-                        {endereco || <span className="text-texto-3">—</span>}
-                      </TD>
+                      <TD className="text-texto-2">{endereco || <span className="text-texto-3">—</span>}</TD>
                       <TD className="whitespace-nowrap text-right">
-                        <div className="flex justify-end gap-1">
+                        {/* O clique nos botões não chega à linha: Remover não pode
+                            abrir a ficha por baixo da confirmação. */}
+                        <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                           <IconButton
                             label={`Editar dados de ${i.nome}`}
-                            icon={<Pencil className="h-4 w-4" />}
+                            icon={<Pencil className="h-[16px] w-[16px]" />}
                             // Cinto extra além do portão acima: abrir o formulário
                             // sobre um mapa que não carregou é o que transforma erro
                             // de leitura em apagamento de dado.
@@ -620,7 +759,7 @@ export default function DadosPessoaisBancarios() {
                           {!i.emCredito && (
                             <IconButton
                               label={`Remover ${i.nome}`}
-                              icon={<Trash2 className="h-4 w-4" />}
+                              icon={<Trash2 className="h-[16px] w-[16px]" />}
                               variant="danger"
                               onClick={() => setAExcluir(i)}
                             />
@@ -633,267 +772,318 @@ export default function DadosPessoaisBancarios() {
               </TBody>
             </Table>
           )}
-        </Card>
+        </div>
+      </Card>
 
-        <Modal
-          open={!!editando}
-          onClose={() => setEditando(null)}
-          title={
-            editando?.novo
-              ? `Cadastrar ${visao.rotulo.toLowerCase()}`
-              : `Dados do ${visao.rotulo.toLowerCase()}`
-          }
-          size="lg"
-          footer={
-            <>
-              <Button variant="outline" onClick={() => setEditando(null)}>
-                Cancelar
-              </Button>
-              <Button loading={salvar.isPending} onClick={handleSalvar}>
-                Salvar
-              </Button>
-            </>
-          }
-        >
-          {editando && (
-            <div className="space-y-4">
-              {/* No cadastro o nome é digitado, e SEM lista de quem já existe:
-                  cadastrar já pressupõe gente nova, e oferecer os que estão lá
-                  seria oferecer justamente o que não se quer. O aviso abaixo do
-                  campo cobre o caso raro em que a pessoa já está na plataforma
-                  escrita de outro jeito.
+      <Modal
+        open={!!editando}
+        onClose={() => setEditando(null)}
+        // "Descartar alterações?" ao fechar com algo digitado: o X, o Esc e o
+        // clique fora passam pelo Modal; o Cancelar pergunta igual.
+        dirty={fichaSuja}
+        title={editando?.novo ? `Cadastrar ${rotuloMin}` : `Dados do ${rotuloMin}`}
+        description={
+          editando?.novo
+            ? 'Só o nome é obrigatório. O endereço se completa pelo CEP (ou pelo CNPJ, quando é empresa).'
+            : 'O nome não muda aqui — ele é a chave dos créditos.'
+        }
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" className="mr-auto" onClick={cancelarFicha}>
+              Cancelar
+            </Button>
+            <Button loading={salvar.isPending} onClick={handleSalvar}>
+              Salvar
+            </Button>
+          </>
+        }
+      >
+        {editando && (
+          <div className="space-y-6">
+            {/* No cadastro o nome é digitado, e SEM lista de quem já existe:
+                cadastrar já pressupõe gente nova, e oferecer os que estão lá
+                seria oferecer justamente o que não se quer. O aviso abaixo do
+                campo cobre o caso raro em que a pessoa já está na plataforma
+                escrita de outro jeito.
 
-                  Na ficha de quem já existe o nome é FIXO: ele é a chave da
-                  linha, e editar aqui não renomearia — criaria outra pessoa e
-                  deixaria a primeira com os dados. Renomear se faz onde o nome
-                  nasce, no crédito. */}
-              {editando.novo ? (
-                <Field label={`Nome do ${visao.rotulo.toLowerCase()}`} error={avisoNome}>
+                Na ficha de quem já existe o nome é FIXO: ele é a chave da
+                linha, e editar aqui não renomearia — criaria outra pessoa e
+                deixaria a primeira com os dados. Renomear se faz onde o nome
+                nasce, no crédito. */}
+            {editando.novo ? (
+              <Field label={`Nome do ${rotuloMin}`} required>
+                <Input
+                  value={editando.nome}
+                  autoComplete="off"
+                  placeholder="Nome completo ou razão social"
+                  onChange={(e) => setEditando({ ...editando, nome: e.target.value })}
+                />
+                {avisoNome && <AvisoAmbar>{avisoNome}</AvisoAmbar>}
+              </Field>
+            ) : (
+              <Field label={`Nome do ${rotuloMin}`}>
+                <div className="rounded-campo bg-superficie-3 px-4 py-2 text-corpo text-texto-2">
+                  {editando.nome}
+                </div>
+              </Field>
+            )}
+
+            <SecaoFicha titulo="Identificação">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Rótulo, dica e máscara acompanham o documento: chamar de "CPF"
+                    o documento de uma empresa está errado, e a máscara já troca
+                    sozinha no 12º dígito. */}
+                <Field
+                  label={pj ? 'CNPJ' : 'CPF / CNPJ'}
+                  hint={buscandoCnpj ? 'Buscando na Receita…' : undefined}
+                  // Dígito verificador errado quase sempre é erro de digitação,
+                  // e num campo desses o erro vira dinheiro no lugar errado.
+                  error={!cpfCnpjValido(form.cpf) ? 'Dígito verificador não confere' : undefined}
+                >
                   <Input
-                    value={editando.nome}
-                    autoComplete="off"
-                    placeholder="Nome completo ou razão social"
-                    onChange={(e) => setEditando({ ...editando, nome: e.target.value })}
+                    className="tabular-nums"
+                    placeholder={pj ? '00.000.000/0000-00' : '000.000.000-00'}
+                    value={form.cpf}
+                    disabled={buscandoCnpj}
+                    onChange={(e) => {
+                      const valor = formatCpfCnpjInput(e.target.value)
+                      setForm((f) => ({ ...f, cpf: valor }))
+                      // CNPJ completo traz o endereço da empresa. Só com 14
+                      // dígitos: CPF não tem equivalente público (ver lib/cnpj.ts).
+                      if (onlyDigits(valor).length === 14) void preencherPorCnpj(valor)
+                    }}
                   />
                 </Field>
-              ) : (
-                <Field label={`Nome do ${visao.rotulo.toLowerCase()}`}>
-                  <div className="rounded-lg bg-superficie-2 px-3 py-2 text-sm font-medium text-texto">
-                    {editando.nome}
-                  </div>
+                {/* ORDEM DELIBERADA: representante ANTES do RG. Em pessoa jurídica
+                    os campos saem "CNPJ | Representante legal" na primeira linha e
+                    o RG na segunda — porque aí o RG é o DO REPRESENTANTE (empresa
+                    não tem RG), e ele vem depois de quem ele identifica. O
+                    representante aparece no 12º dígito do documento, junto com a
+                    troca do rótulo para CNPJ. */}
+                {pj && (
+                  <Field label="Representante legal">
+                    <Input
+                      placeholder="Quem assina pela empresa"
+                      value={form.representante}
+                      onChange={(e) => setForm((f) => ({ ...f, representante: e.target.value }))}
+                    />
+                  </Field>
+                )}
+                <Field label={pj ? 'RG do representante' : 'RG'}>
+                  <Input
+                    className="tabular-nums"
+                    value={form.rg}
+                    onChange={(e) => setForm((f) => ({ ...f, rg: e.target.value }))}
+                  />
                 </Field>
-              )}
-              {/* Mesmos grupos da tabela (Dados pessoais / bancários / Endereço):
-                  quem lê a linha e abre a janela encontra a mesma ordem. */}
-              {(
-                [
-                  {
-                    titulo: 'Identificação',
-                    chaves: ['cpf', 'rg', 'representante'],
-                  },
-                  {
-                    titulo: 'Dados bancários',
-                    chaves: ['banco', 'agencia', 'conta', 'pix'],
-                  },
-                ] as const
-              ).map((grupo) => (
-                <div key={grupo.titulo}>
-                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-texto-2">
-                    {grupo.titulo}
-                  </h4>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {CAMPOS_DOCUMENTO.filter(
-                      (c) =>
-                        (grupo.chaves as readonly string[]).includes(c.chave) &&
-                        // Representante legal aparece no 12º dígito do documento,
-                        // junto com a troca do rótulo para CNPJ: é o momento em
-                        // que a ficha passa a ser de uma empresa.
-                        (!c.soPj || ehCnpj(form.cpf)),
-                    ).map((c) => (
-                      <Field
-                        key={c.chave}
-                        label={rotuloCampo(c.chave, c.rotulo, form.cpf)}
-                        // Dígito verificador errado quase sempre é erro de digitação,
-                        // e num campo desses o erro vira dinheiro no lugar errado.
-                        error={
-                          c.chave === 'cpf' && !cpfCnpjValido(form.cpf)
-                            ? 'Dígito verificador não confere'
-                            : undefined
-                        }
-                      >
-                        <Input
-                          placeholder={dicaCampo(c.chave, c.dica, form.cpf)}
-                          value={form[c.chave]}
-                          disabled={c.chave === 'cpf' && buscandoCnpj}
-                          onChange={(e) => {
-                            const valor = c.mascara
-                              ? c.mascara(e.target.value)
-                              : e.target.value
-                            setForm((f) => ({ ...f, [c.chave]: valor }))
-                            // CNPJ completo traz o endereço da empresa. Só no campo
-                            // do documento, e só com 14 dígitos: CPF não tem
-                            // equivalente público (ver lib/cnpj.ts).
-                            if (c.chave === 'cpf' && onlyDigits(valor).length === 14) {
-                              void preencherPorCnpj(valor)
-                            }
-                          }}
-                        />
-                      </Field>
-                    ))}
-                  </div>
-                </div>
-              ))}
-
-              {/* ---------- Endereço em partes ---------- */}
-              <div>
-                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-texto-2">
-                  Endereço
-                </h4>
-                <div className="grid gap-4 sm:grid-cols-6">
-                  {/* CEP PRIMEIRO: é ele que preenche logradouro, bairro, cidade e
-                      UF, então digitá-lo antes poupa quatro campos. */}
-                  <div className="sm:col-span-2">
-                    <Field
-                      label="CEP"
-                      hint={buscandoCep ? 'Buscando…' : undefined}
-                      error={avisoCep ?? undefined}
-                    >
-                      <Input
-                        inputMode="numeric"
-                        placeholder="00000-000"
-                        value={form.cep}
-                        onChange={(e) => {
-                          const cep = formatCepInput(e.target.value)
-                          setForm((f) => ({ ...f, cep }))
-                          void preencherPorCep(cep)
-                        }}
-                      />
-                    </Field>
-                  </div>
-                  <div className="sm:col-span-4" />
-                  <div className="sm:col-span-4">
-                    <Field label="Logradouro">
-                      <Input
-                        value={form.logradouro}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, logradouro: e.target.value }))
-                        }
-                      />
-                    </Field>
-                  </div>
-                  <div className="sm:col-span-2">
-                    {/* Só dígito: "nº 223-A" tem de ir para o complemento. */}
-                    <Field label="Número">
-                      <Input
-                        inputMode="numeric"
-                        value={form.numero}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, numero: onlyDigits(e.target.value) }))
-                        }
-                      />
-                    </Field>
-                  </div>
-                  <div className="sm:col-span-3">
-                    <Field label="Complemento">
-                      <Input
-                        value={form.complemento}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, complemento: e.target.value }))
-                        }
-                      />
-                    </Field>
-                  </div>
-                  <div className="sm:col-span-3">
-                    <Field label="Bairro">
-                      <Input
-                        value={form.bairro}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, bairro: e.target.value }))
-                        }
-                      />
-                    </Field>
-                  </div>
-                  <div className="sm:col-span-2">
-                    {/* A UF vem PRIMEIRO porque é ela que define a lista de
-                        cidades. Trocar de UF limpa a cidade: manter "Belo
-                        Horizonte" depois de mudar para SP seria dado inválido. */}
-                    <Field label="UF">
-                      <Select
-                        value={form.uf}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, uf: e.target.value, cidade: '' }))
-                        }
-                      >
-                        <option value="">—</option>
-                        {ufs.map((u) => (
-                          <option key={u} value={u}>
-                            {u}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                  </div>
-                  <div className="sm:col-span-4">
-                    {/* Combobox e não Select: MG tem 853 municípios, e sem busca a
-                        lista é inutilizável. */}
-                    <Field label="Cidade">
-                      <Combobox
-                        opcoes={opcoesCidade}
-                        valor={form.cidade ? cidadesDaUf.indexOf(form.cidade) : null}
-                        onChange={(id) =>
-                          setForm((f) => ({
-                            ...f,
-                            cidade: id === null ? '' : (cidadesDaUf[id as number] ?? ''),
-                          }))
-                        }
-                        placeholder={form.uf ? 'Digite a cidade…' : 'Escolha a UF antes'}
-                        vazio="Nenhuma cidade encontrada nesta UF."
-                      />
-                    </Field>
-                  </div>
-                </div>
-                {/* Prévia do texto corrido: é exatamente o que vai para a tabela e
-                    para o contrato, então quem edita confere antes de salvar —
-                    pela MESMA regra do Salvar (enderecoDaFicha): o texto antigo
-                    continua até o endereço novo ter rua e cidade. */}
-                {(() => {
-                  const antigo = editando.novo
-                    ? undefined
-                    : dados.data?.get(chavePessoa(tipo, editando.chave))?.endereco
-                  const end = enderecoDaFicha(form, antigo)
-                  return (
-                    <div className="mt-3 rounded-lg bg-superficie-2 px-3 py-2 text-sm text-texto-2">
-                      {end.texto || 'Endereço em branco'}
-                      {end.mantemAntigo && compilarEndereco(form) && (
-                        <p className="mt-1 text-xs font-medium">
-                          É o endereço antigo: ele continua valendo até a rua e a cidade serem preenchidas.
-                        </p>
-                      )}
-                    </div>
-                  )
-                })()}
               </div>
-            </div>
-          )}
-        </Modal>
+            </SecaoFicha>
 
-        <ConfirmDialog
-          open={!!aExcluir}
-          title={`Remover ${visao.rotulo.toLowerCase()}`}
-          message={
-            <>
-              Remover <strong>{aExcluir?.nome}</strong> e os dados pessoais e
-              bancários dele? Como não há crédito com este nome, nada mais fica
-              apontando para ele.
-            </>
-          }
-          confirmLabel="Remover"
-          danger
-          loading={excluir.isPending}
-          onConfirm={handleExcluir}
-          onClose={() => setAExcluir(null)}
-        />
-      </div>
+            {/* PARA O CONTRATO (item "Novo" da amostra): as colunas existiam no
+                banco (migração 0047) e o Salvar as preservava, mas eram
+                preenchidas direto no banco. Só no INVESTIDOR, porque é dele a
+                qualificação que o gerar-contrato monta. */}
+            {tipo === 'investidor' && (
+              <SecaoFicha titulo="Para o contrato">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Gênero" hint={dicas.genero}>
+                    <Select
+                      value={paraContrato.genero}
+                      onChange={(e) => setParaContrato((c) => ({ ...c, genero: e.target.value }))}
+                    >
+                      <option value="">Não informado</option>
+                      <option value="M">Masculino</option>
+                      <option value="F">Feminino</option>
+                    </Select>
+                  </Field>
+                  <Field label="Complemento da qualificação" hint={dicas.qualificacao}>
+                    <Input
+                      value={paraContrato.qualificacao_complemento}
+                      onChange={(e) =>
+                        setParaContrato((c) => ({ ...c, qualificacao_complemento: e.target.value }))
+                      }
+                    />
+                  </Field>
+                </div>
+              </SecaoFicha>
+            )}
+
+            <SecaoFicha titulo="Dados bancários">
+              <div className="grid gap-4 sm:grid-cols-4">
+                <Field label="Banco">
+                  <Input
+                    value={form.banco}
+                    onChange={(e) => setForm((f) => ({ ...f, banco: e.target.value }))}
+                  />
+                </Field>
+                {/* Agência e conta descartam letra a cada tecla, e aceitam o
+                    hífen, o ponto e a barra do dígito (limparNumeroConta). */}
+                <Field label="Agência">
+                  <Input
+                    className="tabular-nums"
+                    value={form.agencia}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, agencia: limparNumeroConta(e.target.value) }))
+                    }
+                  />
+                </Field>
+                <Field label="Conta">
+                  <Input
+                    className="tabular-nums"
+                    value={form.conta}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, conta: limparNumeroConta(e.target.value) }))
+                    }
+                  />
+                </Field>
+                <Field label="Pix">
+                  <Input
+                    value={form.pix}
+                    onChange={(e) => setForm((f) => ({ ...f, pix: e.target.value }))}
+                  />
+                </Field>
+              </div>
+            </SecaoFicha>
+
+            {/* ---------- Endereço em partes ---------- */}
+            <SecaoFicha titulo="Endereço">
+              <div className="grid gap-4 sm:grid-cols-4">
+                {/* CEP PRIMEIRO: é ele que preenche logradouro, bairro, cidade e
+                    UF, então digitá-lo antes poupa quatro campos. */}
+                <Field
+                  label="CEP"
+                  hint={buscandoCep ? 'Buscando…' : undefined}
+                  error={avisoCep ?? undefined}
+                >
+                  <Input
+                    className="tabular-nums"
+                    inputMode="numeric"
+                    placeholder="00000-000"
+                    value={form.cep}
+                    onChange={(e) => {
+                      const cep = formatCepInput(e.target.value)
+                      setForm((f) => ({ ...f, cep }))
+                      void preencherPorCep(cep)
+                    }}
+                  />
+                </Field>
+                <Field label="Logradouro" className="sm:col-span-3">
+                  <Input
+                    value={form.logradouro}
+                    onChange={(e) => setForm((f) => ({ ...f, logradouro: e.target.value }))}
+                  />
+                </Field>
+                {/* Só dígito: "nº 223-A" tem de ir para o complemento. */}
+                <Field label="Número">
+                  <Input
+                    inputMode="numeric"
+                    value={form.numero}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, numero: onlyDigits(e.target.value) }))
+                    }
+                  />
+                </Field>
+                <Field label="Complemento">
+                  <Input
+                    value={form.complemento}
+                    onChange={(e) => setForm((f) => ({ ...f, complemento: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Bairro" className="sm:col-span-2">
+                  <Input
+                    value={form.bairro}
+                    onChange={(e) => setForm((f) => ({ ...f, bairro: e.target.value }))}
+                  />
+                </Field>
+                {/* A UF vem PRIMEIRO porque é ela que define a lista de cidades.
+                    Trocar de UF limpa a cidade: manter "Belo Horizonte" depois de
+                    mudar para SP seria dado inválido. */}
+                <Field label="UF">
+                  <Select
+                    value={form.uf}
+                    onChange={(e) => setForm((f) => ({ ...f, uf: e.target.value, cidade: '' }))}
+                  >
+                    <option value="">—</option>
+                    {ufs.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {/* Combobox e não Select: MG tem 853 municípios, e sem busca a
+                    lista é inutilizável. E só da lista do IBGE: o texto digitado
+                    é busca, não valor. */}
+                <Field label="Cidade" className="sm:col-span-3">
+                  <Combobox
+                    opcoes={opcoesCidade}
+                    valor={form.cidade ? cidadesDaUf.indexOf(form.cidade) : null}
+                    onChange={(id) =>
+                      setForm((f) => ({
+                        ...f,
+                        cidade: id === null ? '' : (cidadesDaUf[id as number] ?? ''),
+                      }))
+                    }
+                    placeholder={form.uf ? 'Digite a cidade…' : 'Escolha a UF antes'}
+                    vazio="Nenhuma cidade encontrada nesta UF."
+                  />
+                </Field>
+              </div>
+              {/* A prévia diz o que vai para a tabela e para o contrato, pela MESMA
+                  regra do Salvar (enderecoDaFicha): o texto antigo continua até o
+                  endereço novo ter rua e cidade.
+
+                  O ENDEREÇO ANTIGO À VISTA (item "Novo" da amostra): a ficha que
+                  só tem o endereço em texto corrido mostrava as partes em branco,
+                  e parecia não ter endereço nenhum — quem preenchia "do zero"
+                  achava que estava completando, não substituindo. */}
+              {(() => {
+                const antigo = editando.novo
+                  ? undefined
+                  : dados.data?.get(chavePessoa(tipo, editando.chave))?.endereco
+                const end = enderecoDaFicha(form, antigo)
+                const compilado = compilarEndereco(form)
+                if (end.mantemAntigo && end.texto) {
+                  return (
+                    <AvisoAmbar icone="info">
+                      Esta ficha tem o endereço no formato antigo, em texto corrido:{' '}
+                      <strong className="font-semibold text-texto">{end.texto}</strong>. Ele
+                      continua valendo até a rua e a cidade serem preenchidas — salvar sem
+                      elas não o apaga.
+                      {compilado && (
+                        <> O que já foi preenchido acima ({compilado}) é guardado nas partes.</>
+                      )}
+                    </AvisoAmbar>
+                  )
+                }
+                return (
+                  <p className="mt-3 rounded-controle bg-superficie-2 px-4 py-2 text-corpo text-texto-3">
+                    {end.texto || 'Endereço em branco'}
+                  </p>
+                )
+              })()}
+            </SecaoFicha>
+          </div>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!aExcluir}
+        title={`Remover ${rotuloMin}`}
+        message={
+          <>
+            Remover <strong>{aExcluir?.nome}</strong> e os dados pessoais e
+            bancários dele? Como não há crédito com este nome, nada mais fica
+            apontando para ele.
+          </>
+        }
+        confirmLabel="Remover"
+        danger
+        loading={excluir.isPending}
+        onConfirm={handleExcluir}
+        onClose={() => setAExcluir(null)}
+      />
     </div>
   )
 }

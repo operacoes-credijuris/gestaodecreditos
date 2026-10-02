@@ -8,15 +8,29 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
-import { FileText, Upload, X, ExternalLink } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  File as IconeArquivo,
+  FileText,
+  Upload,
+  X,
+} from 'lucide-react'
 import { useInvestidorDados } from '@/lib/queries'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Field, Input, Select } from '@/components/ui/Field'
-import { TIPO_CONTRATO } from '@/lib/labels'
+import { IconButton } from '@/components/ui/IconButton'
 import { invokeFunction } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
+import {
+  PECAS_DO_CONTRATO,
+  faltaParaGerar,
+  nomeDaPeca,
+  nomeDaVariavel,
+} from '@/lib/geracaoContratos'
 
 /**
  * A TELA É UMA SÓ, e não a primeira de três abas.
@@ -27,15 +41,16 @@ import { supabase } from '@/lib/supabase'
  * análise de crédito. Nenhuma Edge Function lia `contrato_templates` — a aba de
  * modelos editava um texto que ninguém mais gerava.
  *
- * E UMA ABA SÓ NÃO É UMA ABA: "Geração de Contratos" no título e "Gerar contrato"
- * logo abaixo diziam a mesma coisa duas vezes, e a fileira de abas prometia
- * lugares para ir que não levavam a lugar nenhum.
+ * ONDA 2 DO REDESENHO (02/10/2026): a cara da amostra aprovada (paginas1.js ›
+ * renderContratos) — os passos 1-2-3, o resumo lateral com o que está pronto e o
+ * que falta, e os nomes das peças e das variáveis em português (só na tela: a
+ * função continua recebendo e devolvendo as chaves). As regras são as de antes.
  */
 export default function GeracaoContratos() {
   return (
     <div>
       <PageHeader
-        title="Geração de Contratos"
+        title="Geração de contratos"
         description="O contrato sai dos modelos .docx e da análise de crédito já salva no Drive."
       />
       <GerarPanel />
@@ -44,36 +59,43 @@ export default function GeracaoContratos() {
 }
 
 /**
- * Um bloco do formulário: o que se pede, e para quê.
+ * Um passo do formulário: o número, o que se pede e para quê (o `.step` da
+ * amostra).
  *
- * O formulário tinha três grupos sem nome nenhum — quatro campos, duas caixas de
- * arquivo e uma linha de opções —, e quem abria a tela pela primeira vez não
- * tinha como saber que os documentos enviados ali não ficam guardados, nem o que
- * decide os contratos que saem. A explicação estava num quadro à direita, longe
- * do campo que ela explicava.
+ * O formulário tinha três grupos sem nome nenhum, e quem abria a tela pela
+ * primeira vez não tinha como saber que os documentos enviados ali não ficam
+ * guardados, nem o que decide os contratos que saem. NUMERADOS porque é a ordem
+ * em que se pensa o contrato: o crédito, os documentos, o que gerar.
  */
-function Secao({
+function Passo({
+  numero,
   titulo,
   descricao,
   children,
 }: {
+  numero: number
   titulo: string
-  descricao?: string
+  descricao: string
   children: ReactNode
 }) {
   return (
-    // O NOME DA SEÇÃO NUMA COLUNA, os campos noutra. Empilhados, o título e a
-    // explicação viravam mais duas linhas de texto entre campos — e numa tela
-    // larga os campos se esticavam de ponta a ponta, com o rótulo de um a meio
-    // metro do valor do outro. Lado a lado, a largura vira margem de leitura.
-    <section className="grid gap-x-10 gap-y-3 py-6 md:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
-      <div>
-        <h3 className="text-sm font-semibold text-texto">{titulo}</h3>
-        {descricao && (
-          <p className="mt-1 text-xs leading-relaxed text-texto-3">{descricao}</p>
-        )}
+    <section className="border-b border-borda py-5 last:border-b-0">
+      <div className="mb-4 flex gap-4">
+        <span
+          aria-hidden
+          className="grid h-[28px] w-[28px] flex-none place-items-center rounded-full bg-marca font-display text-sm font-bold text-white"
+        >
+          {numero}
+        </span>
+        <div>
+          <h2 className="mt-0.5 font-display text-lg font-bold text-texto">
+            <span className="sr-only">Passo {numero}: </span>
+            {titulo}
+          </h2>
+          <p className="mt-0.5 text-corpo text-texto-2">{descricao}</p>
+        </div>
       </div>
-      <div className="space-y-4">{children}</div>
+      {children}
     </section>
   )
 }
@@ -85,13 +107,6 @@ function Secao({
 // Claude, preenche os .docx e sobe no Drive) e mostra o link da pasta. O
 // browser nunca monta o .docx — só recebe URLs de volta.
 const CATEGORIAS = ['Requisições de Pequeno Valor', 'Precatórios'] as const
-const TIPOS_GERACAO = [
-  'cessao_credito',
-  'cessao_honorarios_contratuais',
-  'cessao_honorarios_sucumbenciais',
-  'intermediacao',
-  'procuracao',
-] as const
 
 type Papel = 'cedente' | 'escritorio'
 type ResultadoGeracao = {
@@ -109,8 +124,23 @@ function nomeArquivoSeguro(nome: string): string {
     .replace(/[^\w.\-()]/g, '_')
 }
 
+/** Um par "rótulo → valor" do resumo, com o que ainda falta em cinza. */
+function LinhaResumo({ rotulo, valor, falta }: { rotulo: string; valor?: string; falta: string }) {
+  return (
+    <>
+      <dt className="text-texto-3">{rotulo}</dt>
+      <dd className="m-0 min-w-0 break-words text-texto">
+        {valor || <span className="text-texto-3">{falta}</span>}
+      </dd>
+    </>
+  )
+}
+
 function GerarPanel() {
   const investidorDados = useInvestidorDados()
+  // SÓ QUEM TEM FICHA: a lista sai de investidor_dados, e não dos créditos. O
+  // contrato sai da ficha do investidor (CPF, RG, endereço, gênero); nome só de
+  // crédito não tem nada disso, e a função recusaria.
   const investidores = useMemo(
     () => [...(investidorDados.data?.values() ?? [])].filter((v) => v.tipo === 'investidor'),
     [investidorDados.data],
@@ -125,6 +155,8 @@ function GerarPanel() {
   const [recargaOriginadores, setRecargaOriginadores] = useState(0)
   const [originador, setOriginador] = useState('')
   const [numeroProcesso, setNumeroProcesso] = useState('')
+  // O GÊNERO DE CADA PAPEL FICA GUARDADO depois de gerar: resetarFormulario não
+  // mexe nele, nem na categoria.
   const [cedenteGenero, setCedenteGenero] = useState<'M' | 'F'>('M')
   const [socioGenero, setSocioGenero] = useState<'M' | 'F'>('M')
   const [tiposAuto, setTiposAuto] = useState(true)
@@ -136,6 +168,7 @@ function GerarPanel() {
   const [erro, setErro] = useState<string | null>(null)
 
   // Recarrega a lista de originadores (pastas em Drive) sempre que a categoria muda.
+  // TROCAR A CATEGORIA ZERA O ORIGINADOR: a lista é outra pasta do Drive.
   useEffect(() => {
     let cancelado = false
     setCarregandoOriginadores(true)
@@ -162,7 +195,7 @@ function GerarPanel() {
     }
   }, [categoria, recargaOriginadores])
 
-  function adicionarArquivos(papel: Papel, lista: FileList | null) {
+  function adicionarArquivos(papel: Papel, lista: FileList | File[] | null) {
     if (!lista || lista.length === 0) return
     setUploads((u) => ({ ...u, [papel]: [...u[papel], ...Array.from(lista)] }))
   }
@@ -190,12 +223,20 @@ function GerarPanel() {
     setTiposEscolhidos(new Set())
   }
 
-  // ESCOLHA À MÃO SEM PEÇA NENHUMA não pode ir: a função lê lista vazia como
-  // "escolha automática" e gerava as peças da análise — o contrário do que a
-  // pessoa pediu ao desmarcar a caixa.
+  // O QUE FALTA, em palavras, para o resumo — o mesmo critério do botão (ver
+  // lib/geracaoContratos.ts, com teste). Inclui a escolha à mão sem peça
+  // nenhuma, que não pode ir: a função lê lista vazia como "escolha
+  // automática" e gerava as peças da análise — o contrário do que a pessoa
+  // pediu ao desmarcar a caixa.
+  const falta = faltaParaGerar({
+    investidor: investidorNome,
+    originador,
+    numeroProcesso,
+    automatico: tiposAuto,
+    pecas: tiposEscolhidos,
+  })
   const semPecaEscolhida = !tiposAuto && tiposEscolhidos.size === 0
-  const podeSubmeter =
-    !enviando && !!investidorNome && !!originador && !!numeroProcesso.trim() && !semPecaEscolhida
+  const podeSubmeter = !enviando && falta.length === 0
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -250,48 +291,73 @@ function GerarPanel() {
     }
   }
 
+  const totalArquivos = uploads.cedente.length + uploads.escritorio.length
+
   return (
-    <div className="space-y-4">
-      {/* O RESULTADO ANTES DO FORMULÁRIO, e não numa coluna ao lado. Ele é a
-          resposta do que a pessoa acabou de mandar, e ficava fora do caminho do
-          olho — abaixo do botão, à direita, disputando espaço com uma explicação
-          que estava sempre lá. */}
+    <div>
+      {/* O RESULTADO ANTES DO FORMULÁRIO. Ele é a resposta do que a pessoa
+          acabou de mandar, e fica no caminho do olho. */}
       {erro && (
-        <Card className="border-perigo-borda bg-perigo-fundo p-4 text-sm text-perigo">{erro}</Card>
+        <div
+          role="alert"
+          className="mb-5 flex items-start gap-3 rounded-cartao border border-perigo-borda bg-perigo-fundo px-5 py-4 text-perigo"
+        >
+          <AlertTriangle className="mt-0.5 h-[20px] w-[20px] flex-none" aria-hidden />
+          <div>
+            <p className="font-semibold text-texto">Não deu para gerar</p>
+            <p className="mt-0.5 text-corpo text-texto-2">{erro}</p>
+          </div>
+        </div>
       )}
       {resultado && (
-        <Card className="space-y-3 border-sucesso-borda bg-sucesso-fundo p-4">
-          <p className="text-sm font-medium text-sucesso">
-            ✓ {resultado.tipos_gerados.length} contrato(s) gerado(s)
-          </p>
-          <p className="text-xs text-sucesso">{resultado.tipos_gerados.join(', ')}</p>
+        <div className="mb-5 flex flex-wrap items-start gap-3 rounded-cartao border border-sucesso-borda bg-sucesso-fundo px-5 py-4 text-sucesso">
+          <CheckCircle2 className="mt-0.5 h-[20px] w-[20px] flex-none" aria-hidden />
+          {/* min-w: no celular o botão da pasta desce para a linha de baixo, em
+              vez de espremer o texto numa coluna de uma palavra. */}
+          <div className="min-w-[200px] flex-1 space-y-1">
+            <p className="font-semibold text-texto">
+              ✓ {resultado.tipos_gerados.length} contrato(s) gerado(s)
+            </p>
+            {/* OS NOMES EM PORTUGUÊS: a função devolve as chaves
+                ("cessao_credito"), e só a tela traduz. */}
+            <p className="text-corpo text-texto-2">
+              {resultado.tipos_gerados.map(nomeDaPeca).join(', ')}
+            </p>
+            {resultado.originador_criado && (
+              <p className="flex items-start gap-1.5 text-sm text-aviso">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+                Pasta nova criada para o originador "{resultado.originador_criado}" — confira se não é erro de digitação.
+              </p>
+            )}
+            {resultado.pendentes.length > 0 && (
+              <p className="flex items-start gap-1.5 text-sm text-aviso">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+                Variáveis não preenchidas: {resultado.pendentes.map(nomeDaVariavel).join(', ')}
+              </p>
+            )}
+          </div>
           <a
             href={resultado.drive_folder_url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-sm font-medium text-sucesso underline"
+            className="inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-controle border border-borda-forte bg-superficie px-4 text-sm font-semibold text-texto transition-colors hover:bg-superficie-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2"
           >
-            Abrir pasta no Drive <ExternalLink className="h-3.5 w-3.5" />
+            <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
+            Abrir pasta no Drive
           </a>
-          {resultado.originador_criado && (
-            <p className="text-xs text-aviso">
-              Pasta nova criada para o originador "{resultado.originador_criado}" — confira se não é erro de digitação.
-            </p>
-          )}
-          {resultado.pendentes.length > 0 && (
-            <div className="rounded bg-aviso-fundo p-2 text-xs text-aviso">
-              Variáveis não preenchidas: {resultado.pendentes.join(', ')}
-            </div>
-          )}
-        </Card>
+        </div>
       )}
 
-      <Card>
-        {/* O RECUO É DO FORMULÁRIO, e não do cartão: assim os filetes que separam
-            as seções ficam recuados também, em vez de cortarem o cartão de ponta
-            a ponta. `Card` não traz recuo nenhum — quem o dá é quem o usa. */}
-        <form onSubmit={handleSubmit} className="divide-y divide-borda px-5 py-1">
-          <Secao
+      {/* O FORMULÁRIO ABRAÇA O RESUMO: o botão "Gerar contrato" mora no resumo
+          lateral, e continua sendo o submit do formulário (Enter num campo
+          também gera, como antes). */}
+      <form
+        onSubmit={handleSubmit}
+        className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]"
+      >
+        <Card className="px-6 py-1">
+          <Passo
+            numero={1}
             titulo="O crédito"
             descricao="Quem compra, de quem veio e qual processo — o número é o que localiza a análise no Drive."
           >
@@ -309,15 +375,19 @@ function GerarPanel() {
                     quando a leitura falhou mandava a pessoa cadastrar de novo quem
                     já tem ficha. */}
                 {investidorDados.isError ? (
-                  <p className="mt-1 text-xs text-perigo">
+                  <p role="alert" className="text-xs font-semibold text-perigo">
                     Não consegui carregar os investidores: {(investidorDados.error as Error)?.message ?? 'erro desconhecido'}.{' '}
-                    <button type="button" className="underline" onClick={() => investidorDados.refetch()}>
+                    <button
+                      type="button"
+                      className="inline-flex min-h-[24px] items-center underline"
+                      onClick={() => investidorDados.refetch()}
+                    >
                       Tentar de novo
                     </button>
                   </p>
                 ) : (
                   investidores.length === 0 && !investidorDados.isLoading && (
-                    <p className="mt-1 text-xs text-texto-3">
+                    <p className="text-xs text-texto-3">
                       Nenhum investidor cadastrado — cadastre em "Dados cadastrais".
                     </p>
                   )
@@ -337,7 +407,14 @@ function GerarPanel() {
                 </Select>
               </Field>
 
-              <Field label="Originador" required>
+              {/* SÓ DA LISTA DO DRIVE: o originador é uma pasta de "A. Análises
+                  de crédito / {categoria}". Um nome fora dela faria a função
+                  criar pasta nova. */}
+              <Field
+                label="Originador"
+                required
+                hint={erroOriginadores ? undefined : 'As pastas de originador da categoria, no Drive.'}
+              >
                 <Select value={originador} onChange={(e) => setOriginador(e.target.value)}>
                   <option value="">
                     {carregandoOriginadores ? 'Carregando…' : 'Selecione…'}
@@ -350,11 +427,11 @@ function GerarPanel() {
                 </Select>
                 {/* Mesmo padrão do investidor acima: falha não é lista vazia. */}
                 {erroOriginadores && (
-                  <p className="mt-1 text-xs text-perigo">
+                  <p role="alert" className="text-xs font-semibold text-perigo">
                     Não consegui carregar os originadores: {erroOriginadores}.{' '}
                     <button
                       type="button"
-                      className="underline"
+                      className="inline-flex min-h-[24px] items-center underline"
                       onClick={() => setRecargaOriginadores((n) => n + 1)}
                     >
                       Tentar de novo
@@ -365,17 +442,19 @@ function GerarPanel() {
 
               <Field label="Número do processo" required hint="Usado para localizar a análise no Drive">
                 <Input
+                  className="tabular-nums"
                   value={numeroProcesso}
                   onChange={(e) => setNumeroProcesso(e.target.value)}
                   placeholder="0000000-00.0000.0.00.0000"
                 />
               </Field>
             </div>
-          </Secao>
+          </Passo>
 
-          <Secao
+          <Passo
+            numero={2}
             titulo="Documentos"
-            descricao="Servem para extrair os dados do cedente e do escritório. Os do cedente ficam arquivados no Drive, na pasta do processo."
+            descricao="Servem para extrair os dados do cedente e do escritório. Os do cedente ficam arquivados no Drive, na pasta do processo (4. Documentos do cedente e advogado)."
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <ArquivosField
@@ -397,62 +476,96 @@ function GerarPanel() {
                 onRemover={(i) => removerArquivo('escritorio', i)}
               />
             </div>
-          </Secao>
+          </Passo>
 
-          <Secao
+          <Passo
+            numero={3}
             titulo="O que gerar"
             descricao="Pela análise de crédito a casa já sabe quais peças o negócio exige. Desmarque para escolher à mão."
           >
-              <label className="flex items-center gap-2 text-sm text-texto">
-                <input
-                  type="checkbox"
-                  checked={tiposAuto}
-                  onChange={(e) => setTiposAuto(e.target.checked)}
-                  className="h-4 w-4 rounded border-borda-forte"
-                />
-                {/* O "(pela análise de crédito)" saiu daqui: estava dito na linha
-                    de cima, e rótulo que repete a explicação ao lado faz a pessoa
-                    ler duas vezes para descobrir que é a mesma frase. */}
-                Escolher automaticamente
-              </label>
-              {!tiposAuto && (
-                <div className="mt-3 grid gap-2 rounded-lg bg-superficie-2 p-3 sm:grid-cols-2">
-                  {TIPOS_GERACAO.map((t) => (
-                    <label key={t} className="flex items-center gap-2 text-sm text-texto">
-                      <input
-                        type="checkbox"
-                        checked={tiposEscolhidos.has(t)}
-                        onChange={() => alternarTipo(t)}
-                        className="h-4 w-4 rounded border-borda-forte"
-                      />
-                      {TIPO_CONTRATO[t]?.label ?? t}
-                    </label>
-                  ))}
-                </div>
-              )}
-              {semPecaEscolhida && (
-                <p className="mt-2 text-xs text-aviso">
-                  Marque ao menos uma peça — ou volte a marcar "Escolher automaticamente".
-                </p>
-              )}
-          </Secao>
+            <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto">
+              <input
+                type="checkbox"
+                checked={tiposAuto}
+                onChange={(e) => setTiposAuto(e.target.checked)}
+                className="h-[16px] w-[16px] accent-marca"
+              />
+              Escolher automaticamente
+            </label>
+            {!tiposAuto && (
+              <fieldset className="mt-3 grid gap-2 sm:grid-cols-2">
+                <legend className="sr-only">Peças a gerar</legend>
+                {PECAS_DO_CONTRATO.map((t) => (
+                  <label
+                    key={t}
+                    className="inline-flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={tiposEscolhidos.has(t)}
+                      onChange={() => alternarTipo(t)}
+                      className="h-[16px] w-[16px] accent-marca"
+                    />
+                    {nomeDaPeca(t)}
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            {semPecaEscolhida && (
+              <p className="mt-2 text-xs font-semibold text-aviso">
+                Marque ao menos uma peça — ou volte a marcar "Escolher automaticamente".
+              </p>
+            )}
+          </Passo>
+        </Card>
 
-          {/* O ANDAMENTO AO LADO DO BOTÃO: a geração leva de 30 a 90 segundos, e
-              sem ele o clique parece não ter feito nada. */}
-          <div className="flex flex-wrap items-center justify-end gap-3 py-5">
-            {enviando && <p className="mr-auto text-sm text-texto-2">{progresso}</p>}
-            <Button
-              type="submit"
-              loading={enviando}
-              disabled={!podeSubmeter}
-              icon={<FileText className="h-4 w-4" />}
-            >
-              Gerar contrato
-            </Button>
-          </div>
-        </form>
-      </Card>
-
+        {/* O RESUMO AO LADO (item "Novo" da amostra): para conferir antes de
+            gerar era preciso rolar o formulário inteiro, e o botão travado não
+            dizia por quê. Aqui está o que foi escolhido, o que falta e o
+            andamento — a geração leva de 30 a 90 segundos, e sem ele o clique
+            parece não ter feito nada. */}
+        <Card className="p-5 lg:sticky lg:top-6">
+          <h2 className="mb-4 font-display text-lg font-bold text-texto">Resumo</h2>
+          <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5 text-corpo">
+            <LinhaResumo rotulo="Investidor" valor={investidorNome} falta="a escolher" />
+            <LinhaResumo rotulo="Categoria" valor={categoria} falta="" />
+            <LinhaResumo rotulo="Originador" valor={originador} falta="a escolher" />
+            <LinhaResumo rotulo="Processo" valor={numeroProcesso.trim()} falta="a informar" />
+            <LinhaResumo rotulo="Documentos" valor={`${totalArquivos} arquivo(s)`} falta="" />
+            <LinhaResumo
+              rotulo="Peças"
+              valor={
+                tiposAuto
+                  ? 'Definidas pela análise'
+                  : PECAS_DO_CONTRATO.filter((t) => tiposEscolhidos.has(t)).map(nomeDaPeca).join(', ')
+              }
+              falta="nenhuma marcada"
+            />
+          </dl>
+          <Button
+            type="submit"
+            size="lg"
+            className="mt-5 w-full"
+            loading={enviando}
+            disabled={!podeSubmeter}
+            title={
+              podeSubmeter || enviando
+                ? undefined
+                : 'Escolha o investidor e o originador, informe o número do processo e, na escolha à mão, marque ao menos uma peça.'
+            }
+            icon={<FileText className="h-[16px] w-[16px]" />}
+          >
+            {enviando ? 'Gerando…' : 'Gerar contrato'}
+          </Button>
+          <p aria-live="polite" className="mt-3 text-xs text-texto-3">
+            {enviando
+              ? progresso
+              : falta.length === 0
+                ? 'Leva até 1 minuto. Os arquivos vão para a pasta do crédito no Drive.'
+                : `Falta: ${falta.join(', ')}.`}
+          </p>
+        </Card>
+      </form>
     </div>
   )
 }
@@ -471,48 +584,53 @@ function ArquivosField({
   onGeneroChange: (g: 'M' | 'F') => void
   generoLabel: string
   arquivos: File[]
-  onAdicionar: (files: FileList | null) => void
+  onAdicionar: (files: File[]) => void
   onRemover: (idx: number) => void
 }) {
-  const inputId = useRef(`file-${Math.random().toString(36).slice(2)}`)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const id = useRef(`arquivos-${Math.random().toString(36).slice(2)}`)
   // O NOME AGRUPA OS RÁDIOS. Sem ele cada `input type=radio` é um grupo de um
   // só: a seleção continua certa (quem manda é o estado do React), mas a seta do
   // teclado não anda entre as duas opções, e o leitor de tela anuncia dois
   // controles soltos em vez de uma escolha.
-  const grupo = `${inputId.current}-genero`
+  const grupo = `${id.current}-genero`
   // ARRASTAR E SOLTAR. A caixa tracejada tem cara de área de soltar, e é o que a
-  // pessoa faz — sem `onDrop` o arquivo solto ali sumia sem aviso nenhum.
+  // pessoa faz — sem `onDrop` o arquivo solto ali sumia sem aviso nenhum. Entra
+  // só o que tem extensão aceita; o resto é ignorado, como na escolha.
   const [arrastando, setArrastando] = useState(false)
-  function soltar(e: DragEvent<HTMLLabelElement>) {
+  function soltar(e: DragEvent<HTMLButtonElement>) {
     e.preventDefault()
     setArrastando(false)
     const aceitos = Array.from(e.dataTransfer.files).filter((f) =>
       EXTENSOES_ACEITAS.some((ext) => f.name.toLowerCase().endsWith(ext)),
     )
-    if (aceitos.length === 0) return
-    const dt = new DataTransfer()
-    aceitos.forEach((f) => dt.items.add(f))
-    onAdicionar(dt.files)
+    if (aceitos.length > 0) onAdicionar(aceitos)
   }
   return (
-    <div className="space-y-3 rounded-lg border border-borda p-4">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <p className="text-sm font-medium text-texto">{titulo}</p>
-        <div className="flex items-center gap-3 text-xs text-texto-2">
-          <span className="text-texto-3">{generoLabel}</span>
-          <label className="flex cursor-pointer items-center gap-1">
+    <div className="rounded-cartao border border-borda p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <p className="font-semibold text-texto">{titulo}</p>
+        <div
+          role="radiogroup"
+          aria-label={generoLabel}
+          className="flex flex-wrap items-center gap-x-4 gap-y-1 text-corpo text-texto-2"
+        >
+          <span className="text-xs text-texto-3">{generoLabel}</span>
+          <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-1.5">
             <input
               type="radio"
               name={grupo}
+              className="h-[16px] w-[16px] accent-marca"
               checked={genero === 'M'}
               onChange={() => onGeneroChange('M')}
             />
             Masculino
           </label>
-          <label className="flex cursor-pointer items-center gap-1">
+          <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-1.5">
             <input
               type="radio"
               name={grupo}
+              className="h-[16px] w-[16px] accent-marca"
               checked={genero === 'F'}
               onChange={() => onGeneroChange('F')}
             />
@@ -520,55 +638,58 @@ function ArquivosField({
           </label>
         </div>
       </div>
-      <label
-        htmlFor={inputId.current}
+      {/* BOTÃO, e não `label` de um input escondido: o input `hidden` não recebe
+          foco, e a caixa ficava fora do alcance do teclado. */}
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault()
           setArrastando(true)
         }}
         onDragLeave={() => setArrastando(false)}
         onDrop={soltar}
-        className={`flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed py-6 text-sm transition-colors hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-600 ${
-          arrastando ? 'border-brand-400 bg-brand-50/40 text-brand-600' : 'border-borda-forte text-texto-3'
+        className={`flex w-full flex-col items-center justify-center gap-1 rounded-campo border-[1.5px] border-dashed px-4 py-4 text-center text-corpo transition-colors hover:border-marca-viva hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2 ${
+          arrastando ? 'border-marca-viva bg-marca-leve' : 'border-borda-forte bg-superficie-2'
         }`}
       >
-        <Upload className="h-4 w-4" />
-        {arquivos.length > 0 ? 'Adicionar mais arquivos' : 'Selecionar ou soltar arquivos'}
-      </label>
+        <Upload className="h-[20px] w-[20px] text-texto-3" aria-hidden />
+        <span className="font-semibold text-marca-texto">
+          {arquivos.length > 0 ? 'Adicionar mais arquivos' : 'Selecionar ou soltar arquivos'}
+        </span>
+        <span className="text-xs text-texto-3">{EXTENSOES_ACEITAS.join(' ')}</span>
+      </button>
       <input
-        id={inputId.current}
+        ref={inputRef}
         type="file"
         multiple
         accept={EXTENSOES_ACEITAS.join(',')}
         className="hidden"
         onChange={(e: ChangeEvent<HTMLInputElement>) => {
-          onAdicionar(e.target.files)
+          onAdicionar(Array.from(e.target.files ?? []))
           e.target.value = ''
         }}
       />
       {arquivos.length > 0 && (
-        <ul className="space-y-1">
+        <ul className="mt-2 grid gap-1">
           {arquivos.map((f, i) => (
             <li
               key={i}
-              className="flex items-center justify-between gap-2 rounded-md bg-superficie-2 px-2 py-1.5 text-xs text-texto-2"
+              className="flex items-center gap-2 rounded-controle bg-superficie-2 py-0.5 pl-2.5 pr-1 text-corpo text-texto"
             >
-              <span className="truncate" title={f.name}>
+              <IconeArquivo className="h-[14px] w-[14px] flex-none text-texto-3" aria-hidden />
+              <span className="min-w-0 flex-1 truncate" title={f.name}>
                 {f.name}
               </span>
-              <span className="flex shrink-0 items-center gap-2">
-                {/* O TAMANHO AO LADO DO NOME: é o que denuncia o arquivo vazio ou
-                    o que veio errado antes de a geração começar e falhar longe. */}
-                <span className="tabular-nums text-texto-3">{tamanhoLegivel(f.size)}</span>
-                <button
-                  type="button"
-                  onClick={() => onRemover(i)}
-                  className="text-texto-3 hover:text-perigo"
-                  aria-label={`Remover ${f.name}`}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </span>
+              {/* O TAMANHO AO LADO DO NOME: é o que denuncia o arquivo vazio ou
+                  o que veio errado antes de a geração começar e falhar longe. */}
+              <span className="flex-none tabular-nums text-texto-3">{tamanhoLegivel(f.size)}</span>
+              <IconButton
+                label={`Remover ${f.name}`}
+                variant="danger"
+                icon={<X className="h-[14px] w-[14px]" />}
+                onClick={() => onRemover(i)}
+              />
             </li>
           ))}
         </ul>
