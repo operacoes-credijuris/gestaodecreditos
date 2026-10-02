@@ -193,6 +193,12 @@ export function DueDiligence({
         // O check da 0062 recusa liberado sem apuração: só se libera o que foi
         // olhado, e olhar exige que a busca tenha corrido.
         .eq('status', 'APURADO')
+        // A VERBA JÁ RECUSADA FICA DE FORA. O check da 0063 proíbe liberado e
+        // reprovado na mesma linha, e um Seguir depois de recusa parcial —
+        // reabrir a janela para seguir com a outra verba — tentava marcar as
+        // linhas recusadas também: o banco recusava a gravação INTEIRA, e a
+        // verba que sobrou não era liberada.
+        .is('reprovado_em', null)
       if (error) throw new Error(error.message)
       onSeguir?.()
       onClose()
