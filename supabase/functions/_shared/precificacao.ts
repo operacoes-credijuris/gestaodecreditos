@@ -185,6 +185,11 @@ export function montarParcelas(o: {
     },
     {
       nome: 'contratuais',
+      // TABELA PROGRESSIVA CHEIA, NUNCA O RRA — decisão do dono (02/10/2026).
+      // O contratual não gera ofício próprio, mas tem natureza jurídica
+      // própria: é renda do advogado, sujeita ao IR pela tabela, e não leva os
+      // benefícios do crédito principal (o regime dos rendimentos acumulados,
+      // art. 12-A da Lei 7.713/88). Por isso `meses` fica no padrão, 1.
       liquido: o.contratuaisBrutos - irProgressivo(o.contratuaisBrutos).imposto,
       bruto: o.contratuaisBrutos,
       desagiavel: false,

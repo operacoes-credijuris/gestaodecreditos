@@ -34,6 +34,7 @@ import { corsHeaders } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, segredoGoogle } from '../_shared/segredos.ts'
 import { normalizarNome } from '../_shared/nucleo/texto.ts'
+import { ehPastaCredijuris, ORIGINADOR_CREDIJURIS, pastaDoOriginador } from '../_shared/pastaDoOriginador.ts'
 import {
   type DriveFile,
   FOLDER_MIME,
@@ -1102,11 +1103,6 @@ async function driveListarOriginadoresAnalise(token: string, categoria: string):
   return nomes.sort((a, b) => a.localeCompare(b, 'pt-BR'));
 }
 
-const ORIGINADOR_CREDIJURIS = 'Credijuris';
-// "Credijuris", "Originador - Credijuris", "Intermediador - CREDIJURIS"...
-function ehPastaCredijuris(nome: string): boolean {
-  return normalizar(nome).includes(normalizar(ORIGINADOR_CREDIJURIS));
-}
 
 // Navega A. Análises de crédito / {categoria} / {originador} / {pasta do cedente}
 // e lista os arquivos de análise. Pasta do cedente casa pelo NOME do cedente
@@ -1802,9 +1798,10 @@ Deno.serve(async (req) => {
     // mkdir -p que já valia pra pasta do cedente e as 7 subpastas dela, logo abaixo.
     const processosId = await driveEncontrarProcessosFolder(accessToken);
     const { originadores, debug: driveDebug } = await driveListOriginadores(accessToken, processosId, categoria);
-    const interTermo = normalizar(originadorNome);
-    let interId = (originadores.find(i => normalizar(i.name) === interTermo)
-                ?? originadores.find(i => normalizar(i.name).includes(interTermo)))?.id ?? null;
+    // SÓ NOME IGUAL (sem o prefixo "Intermediador - " das pastas de lá), e não
+    // "contém": ver _shared/pastaDoOriginador.ts — "Guilherme" caía na pasta de
+    // "Luiz Guilherme Batista Carvalho".
+    let interId = pastaDoOriginador(originadores, originadorNome)?.id ?? null;
     let originadorCriado = false;
     if (!interId) {
       // A pasta da categoria é obrigatória: criar categoria seria inventar estrutura.

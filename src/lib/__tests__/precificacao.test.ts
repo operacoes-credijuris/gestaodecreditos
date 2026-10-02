@@ -62,6 +62,19 @@ describe('montarParcelas', () => {
     expect(s.liquido).toBeCloseTo(10000 - irProgressivo(10000).imposto, 2)
   })
 
+  it('os contratuais pagam IR pela tabela progressiva CHEIA, sem o regime dos acumulados', () => {
+    // Decisão do dono (02/10/2026): o honorário contratual não gera ofício
+    // próprio, mas tem natureza jurídica própria — é renda do advogado, sujeita
+    // à tabela progressiva, e não leva benefício do crédito principal como o
+    // RRA (art. 12-A da Lei 7.713/88). Dividir pelos meses do processo, como
+    // se faz no IR do credor, prometeria um líquido que não vem: R$ 30 mil em
+    // 36 competências caem na faixa isenta.
+    const [c] = montarParcelas({ ...base, verbas: { principal: false, contratuais: true, sucumbenciais: false } })
+    expect(c.liquido).toBeCloseTo(30000 - irProgressivo(30000, 1).imposto, 2)
+    expect(irProgressivo(30000, 36).imposto).toBe(0)
+    expect(c.liquido).toBeLessThan(30000)
+  })
+
   it('e a verba que não está no negócio não influencia o imposto da outra', () => {
     // O erro que isto fixa: eu calculava o imposto sobre as verbas COMPRADAS e
     // rateava sobre TODAS as existentes, o que diluía o imposto da comprada.
