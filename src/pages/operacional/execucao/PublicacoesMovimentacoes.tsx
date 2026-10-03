@@ -719,8 +719,8 @@ interface StatusRow {
 
 // As cores de cada faixa de tempo parado (lib/paralisados.ts decide a faixa).
 // A ESCALA É A DA AMOSTRA, do âmbar ao vinho: o âmbar e o vermelho são os tokens
-// de aviso e de perigo; o laranja e o vinho do meio e do fim são fixos de
-// propósito — são degraus de uma escala graduada, sem papel próprio no tema.
+// de aviso e de perigo; o laranja e o vinho do meio e do fim são os tokens
+// `parado-*` — degraus de uma escala graduada, com a versão escura da amostra.
 const COR_FAIXA: Record<FaixaParalisado, { borda: string; selo: string; legenda: string }> = {
   aviso: {
     borda: 'border-l-aviso-cheio',
@@ -728,9 +728,9 @@ const COR_FAIXA: Record<FaixaParalisado, { borda: string; selo: string; legenda:
     legenda: 'bg-aviso-cheio',
   },
   serio: {
-    borda: 'border-l-orange-400',
-    selo: 'bg-orange-50 text-orange-800 ring-orange-200',
-    legenda: 'bg-orange-400',
+    borda: 'border-l-parado-serio-cheio',
+    selo: 'bg-parado-serio-fundo text-parado-serio-texto ring-parado-serio-borda',
+    legenda: 'bg-parado-serio-cheio',
   },
   ruim: {
     borda: 'border-l-perigo-cheio',
@@ -738,9 +738,9 @@ const COR_FAIXA: Record<FaixaParalisado, { borda: string; selo: string; legenda:
     legenda: 'bg-perigo-cheio',
   },
   critico: {
-    borda: 'border-l-red-900',
+    borda: 'border-l-parado-critico',
     selo: 'bg-perigo-fundo text-perigo ring-perigo-borda',
-    legenda: 'bg-red-900',
+    legenda: 'bg-parado-critico',
   },
 }
 

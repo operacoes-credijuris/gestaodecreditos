@@ -1,10 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Menu, LogOut, ChevronDown, ChevronRight, Search, Sparkles, Command, BookOpen } from 'lucide-react'
+import { Menu, LogOut, ChevronDown, ChevronRight, Search, Sparkles, Command, BookOpen, Moon, Sun } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
+import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/components/ui/Toast'
+import { cn } from '@/lib/cn'
 import { haDialogoAberto } from '@/lib/dialogo'
+import { alternarTema, OPCOES_DE_TEMA, useTema } from '@/lib/tema'
 import { caminhoNoTopo } from './navigation'
 import { useConsultas } from './Consultas'
 
@@ -16,6 +19,8 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { pathname } = useLocation()
   const partes = caminhoNoTopo(pathname)
   const { abrirBusca, abrirNovidades, abrirAtalhos, abrirGlossario } = useConsultas()
+  const { preferencia, tema, escolher } = useTema()
+  const escuro = tema === 'escuro'
 
   // ESC FECHA O MENU DO USUÁRIO e devolve o foco ao botão que o abriu, como
   // todo menu da amostra. Só a camada de cima responde: com uma janela aberta
@@ -99,6 +104,17 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         </kbd>
       </button>
 
+      {/* O `#btnTheme` da amostra: a lua liga o escuro, o sol volta ao claro.
+          O nome diz o que o clique FAZ, como o título da amostra ("Modo
+          escuro" / "Modo claro"). Sem atalho de teclado: a amostra não tem. O
+          "Do sistema" mora no menu do usuário, ao lado. */}
+      <IconButton
+        label={escuro ? 'Modo claro' : 'Modo escuro'}
+        icon={escuro ? <Sun className="h-[20px] w-[20px]" aria-hidden /> : <Moon className="h-[20px] w-[20px]" aria-hidden />}
+        onClick={() => escolher(alternarTema(tema))}
+        className="grid h-[36px] w-[36px] shrink-0 place-items-center p-0"
+      />
+
       <div className="relative shrink-0">
         {/* O `.user-btn` da amostra: pílula com as iniciais na placa azul-clara,
             nome e e-mail; o contorno só aparece sob o mouse. */}
@@ -173,6 +189,39 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                   {rotulo}
                 </button>
               ))}
+              <div className="mx-1 my-1.5 border-t border-borda" />
+              {/* O TEMA COM AS TRÊS ESCOLHAS. A amostra só tem o botão da lua
+                  (claro↔escuro); o "Do sistema", que acompanha o claro/escuro do
+                  computador ao vivo, precisava de um lugar, e o menu de quem
+                  está logado é onde moram as escolhas pessoais. O menu fica
+                  aberto: a pessoa vê a troca e pode voltar atrás. */}
+              <div className="px-2.5 pb-1.5 pt-1">
+                <p id="rotulo-do-tema" className="mb-1.5 text-xs font-semibold text-texto-3">
+                  Tema
+                </p>
+                <div
+                  role="group"
+                  aria-labelledby="rotulo-do-tema"
+                  className="grid grid-cols-3 gap-0.5 rounded-campo border border-borda bg-superficie-3 p-1"
+                >
+                  {OPCOES_DE_TEMA.map((o) => (
+                    <button
+                      key={o.chave}
+                      type="button"
+                      aria-pressed={preferencia === o.chave}
+                      onClick={() => escolher(o.chave)}
+                      className={cn(
+                        'h-[30px] whitespace-nowrap rounded-controle px-1 text-sm font-semibold transition-colors',
+                        preferencia === o.chave
+                          ? 'bg-superficie text-marca-texto shadow-nivel-1'
+                          : 'text-texto-2 hover:text-texto',
+                      )}
+                    >
+                      {o.rotulo}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="mx-1 my-1.5 border-t border-borda" />
               <button
                 onClick={async () => {

@@ -2,15 +2,24 @@
  * Uma cor do Tailwind lida de uma variável CSS de `src/index.css`.
  *
  * OS VALORES MORAM EM index.css, NÃO AQUI. Aqui só se dá nome às variáveis: é o
- * que deixa o modo escuro (decidido para depois) ser apenas outra lista de
+ * que deixa o modo escuro (aprovado em 03/10/2026) ser apenas outra lista de
  * valores, sem tocar em classe nenhuma. O `<alpha-value>` mantém funcionando a
  * opacidade das classes (`bg-superficie/80`, `ring-anel/25`).
  */
 const cor = (nome) => `rgb(var(--${nome}) / <alpha-value>)`
 
+/** Os papéis de um tom categórico: `tom('azul', ['fundo'])` → `{ fundo: cor('tom-azul-fundo') }`. */
+const tom = (matiz, papeis) =>
+  Object.fromEntries(papeis.map((p) => [p, cor(`tom-${matiz}-${p}`)]))
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  // O MODO ESCURO É O ATRIBUTO no <html> (src/lib/tema.ts), e não a preferência
+  // do sistema: a pessoa escolhe Claro, Escuro ou Do sistema. Quase nada usa
+  // `dark:` — as cores trocam pelas variáveis de index.css; a variante fica para
+  // o que não é cor de token (o filtro da logomarca no Entrar).
+  darkMode: ['selector', '[data-tema="escuro"]'],
   theme: {
     extend: {
       colors: {
@@ -108,12 +117,52 @@ export default {
           fundo: cor('info-fundo'),
           borda: cor('info-borda'),
         },
+        // O ícone de cada tipo no aviso flutuante (Toast), que é escuro no
+        // claro e claro no escuro.
+        flutuante: {
+          ok: cor('flutuante-ok'),
+          erro: cor('flutuante-erro'),
+          info: cor('flutuante-info'),
+        },
+        // TONS CATEGÓRICOS: a cor só distingue um nome de outro (etiqueta livre,
+        // situação da Fase processual, grupo de coluna da Carteira…). No claro,
+        // os mesmos valores da paleta do Tailwind de antes; no escuro, os da
+        // amostra. Ver o bloco "tons categóricos" de index.css.
+        tom: {
+          azul: tom('azul', ['fundo', 'texto', 'borda', 'ponto', 'forte']),
+          violeta: tom('violeta', ['fundo', 'texto', 'borda', 'ponto']),
+          laranja: tom('laranja', ['fundo', 'texto', 'borda', 'ponto']),
+          agua: tom('agua', ['fundo', 'texto', 'borda', 'cheio']),
+          rosa: tom('rosa', ['fundo', 'texto', 'borda', 'ponto']),
+          anil: tom('anil', ['fundo', 'texto', 'borda', 'cheio']),
+          ceu: tom('ceu', ['texto']),
+          ambar: tom('ambar', ['fundo', 'texto', 'ponto']),
+          esmeralda: tom('esmeralda', ['fundo', 'texto', 'ponto']),
+          vermelho: tom('vermelho', ['fundo', 'texto', 'ponto']),
+          ardosia: tom('ardosia', ['fundo', 'texto', 'ponto']),
+        },
+        // A escala graduada de "parado há…" (Publicações): os degraus do meio e
+        // do fim; as pontas são `aviso` e `perigo`.
+        parado: {
+          serio: {
+            fundo: cor('parado-serio-fundo'),
+            texto: cor('parado-serio-texto'),
+            borda: cor('parado-serio-borda'),
+            cheio: cor('parado-serio-cheio'),
+          },
+          critico: cor('parado-critico'),
+        },
       },
       // A BORDA SEM COR (`border`, `divide-y`) também é token: o preflight do
       // Tailwind usa este valor, que antes era o gray-200 frio da paleta.
       borderColor: { DEFAULT: cor('borda') },
       // `ring` sem cor era o azul do Tailwind (blue-500); agora é o anel da casa.
       ringColor: { DEFAULT: cor('anel') },
+      // O vão entre o anel de foco e o botão (`ring-offset-*`) era o branco fixo
+      // do Tailwind: no escuro, um halo branco em volta de todo foco. Agora é a
+      // superfície — no claro, o mesmo branco. Sem `<alpha-value>`: este valor
+      // vai cru para a variável do preflight.
+      ringOffsetColor: { DEFAULT: 'rgb(var(--superficie))' },
       // Os raios da amostra. A escala padrão (rounded-lg…) é em rem e, com o
       // <html> em 12px, encolhe um quarto: rounded-2xl vale 12px, não 16px.
       borderRadius: {

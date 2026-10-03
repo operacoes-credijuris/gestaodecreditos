@@ -16,10 +16,11 @@
      `ring-anel/25` funcionarem. Com #hex aqui a opacidade do Tailwind sumiria
      em silêncio.
 
-     O MODO ESCURO (decidido para depois) É SÓ REDEFINIR ESTAS VARIÁVEIS num
-     seletor próprio — os componentes não mudam. Por isso nenhuma tela deve
-     escrever cor fixa da paleta (a catraca em src/lib/__tests__/catraca.test.ts
-     conta), e por isso a escala `brand` também virou variável.
+     O MODO ESCURO (aprovado em 03/10/2026) É SÓ REDEFINIR ESTAS VARIÁVEIS: o
+     bloco `:root[data-tema='escuro']`, logo abaixo deste. Os componentes não
+     mudam. Por isso nenhuma tela deve escrever cor fixa da paleta (a catraca em
+     src/lib/__tests__/catraca.test.ts conta), e por isso a escala `brand` também
+     virou variável.
 
      Contraste conferido em src/lib/__tests__/contraste.test.ts: texto sobre as
      superfícies pelo menos 4,5:1; borda de campo e anel de foco pelo menos 3:1.
@@ -102,6 +103,205 @@
     --sombra-1: 0 1px 2px rgb(23 32 43 / 0.06), 0 1px 1px rgb(23 32 43 / 0.03);
     --sombra-2: 0 6px 20px rgb(23 32 43 / 0.08), 0 1px 3px rgb(23 32 43 / 0.05);
     --sombra-3: 0 24px 60px rgb(10 20 35 / 0.22);
+
+    /* ---- o aviso flutuante (toast): o ícone de cada tipo ----
+       O aviso é escuro no claro e claro no escuro (fundo `texto`), e o ícone
+       precisa ler sobre ele nos dois: daí um token próprio, e não o verde do
+       acento, que no aviso claro do modo escuro sumiria. */
+    --flutuante-ok: var(--verde-400); /* #2ecc71 */
+    --flutuante-erro: 243 196 191; /* #f3c4bf  o mesmo de --perigo-borda */
+    --flutuante-info: 134 202 234; /* #86caea  o mesmo de --brand-300 */
+
+    /* ---- tons categóricos ----
+       Paletas em que a cor SÓ DISTINGUE um nome de outro: as etiquetas livres
+       da Badge (azul, violeta, laranja, verde-água, rosa, anil), a situação da
+       Fase processual, os grupos de colunas da Carteira, o tipo de órgão nos
+       Contatos e a escala de "parado há…" das Publicações. No claro são
+       EXATAMENTE as cores da paleta do Tailwind que essas telas usavam (o nome
+       vai ao lado); no escuro, as da amostra (`.pill-tom-*`, `.grp-*`,
+       `.sev-pill-serious`). fundo = selo pálido, texto = letra do selo,
+       borda = contorno, ponto = bolinha, cheio = selo preenchido. */
+    --tom-azul-fundo: 239 246 255; /* blue-50 */
+    --tom-azul-texto: 29 78 216; /* blue-700 */
+    --tom-azul-borda: 191 219 254; /* blue-200 */
+    --tom-azul-ponto: 59 130 246; /* blue-500 */
+    --tom-azul-forte: 30 64 175; /* blue-800  título do grupo "vivo" da Carteira */
+    --tom-violeta-fundo: 245 243 255; /* violet-50 */
+    --tom-violeta-texto: 109 40 217; /* violet-700 */
+    --tom-violeta-borda: 221 214 254; /* violet-200 */
+    --tom-violeta-ponto: 139 92 246; /* violet-500 */
+    --tom-laranja-fundo: 255 247 237; /* orange-50 */
+    --tom-laranja-texto: 194 65 12; /* orange-700 */
+    --tom-laranja-borda: 254 215 170; /* orange-200 */
+    --tom-laranja-ponto: 249 115 22; /* orange-500 */
+    --tom-agua-fundo: 240 253 250; /* teal-50 */
+    --tom-agua-texto: 15 118 110; /* teal-700 */
+    --tom-agua-borda: 153 246 228; /* teal-200 */
+    --tom-agua-cheio: 13 148 136; /* teal-600 */
+    --tom-rosa-fundo: 253 242 248; /* pink-50 */
+    --tom-rosa-texto: 190 24 93; /* pink-700 */
+    --tom-rosa-borda: 251 207 232; /* pink-200 */
+    --tom-rosa-ponto: 236 72 153; /* pink-500 */
+    --tom-anil-fundo: 238 242 255; /* indigo-50 */
+    --tom-anil-texto: 67 56 202; /* indigo-700 */
+    --tom-anil-borda: 199 210 254; /* indigo-200 */
+    --tom-anil-cheio: 79 70 229; /* indigo-600 */
+    --tom-ceu-texto: 3 105 161; /* sky-700 */
+    --tom-ambar-fundo: 255 251 235; /* amber-50 */
+    --tom-ambar-texto: 180 83 9; /* amber-700 */
+    --tom-ambar-ponto: 245 158 11; /* amber-500 */
+    --tom-esmeralda-fundo: 236 253 245; /* emerald-50 */
+    --tom-esmeralda-texto: 4 120 87; /* emerald-700 */
+    --tom-esmeralda-ponto: 16 185 129; /* emerald-500 */
+    --tom-vermelho-fundo: 254 242 242; /* red-50 */
+    --tom-vermelho-texto: 185 28 28; /* red-700 */
+    --tom-vermelho-ponto: 239 68 68; /* red-500 */
+    --tom-ardosia-fundo: 241 245 249; /* slate-100 */
+    --tom-ardosia-texto: 51 65 85; /* slate-700 */
+    --tom-ardosia-ponto: 148 163 184; /* slate-400 */
+    /* a escala de "parado há…": os degraus do meio e do fim (as pontas são
+       os tokens de aviso e de perigo) */
+    --parado-serio-fundo: 255 247 237; /* orange-50 */
+    --parado-serio-texto: 154 52 18; /* orange-800 */
+    --parado-serio-borda: 254 215 170; /* orange-200 */
+    --parado-serio-cheio: 251 146 60; /* orange-400 */
+    --parado-critico: 127 29 29; /* red-900  o vinho */
+  }
+
+  /* =====================================================================
+     MODO ESCURO — os mesmos nomes, outros valores (amostra, estilo.css,
+     `[data-theme="dark"]`; o que a amostra não tem foi derivado no mesmo
+     espírito, e o comentário diz). Quem liga é o atributo no <html>, posto
+     ANTES do primeiro desenho pelo script do index.html e mantido por
+     src/lib/tema.ts. Sem o atributo, vale o claro acima — inteiro, sem mudar
+     um valor.
+
+     TODA VARIÁVEL DE COR DO :root TEM A SUA AQUI (os raios não mudam). O
+     contraste.test.ts confere isso e refaz no escuro as mesmas contas do claro.
+
+     A ESCALA `brand` É INVERTIDA: o 50 é o azul mais fundo e o 950 o mais
+     claro. Assim um `bg-brand-50` continua sendo "o fundo azulado discreto" e
+     um `text-brand-700` continua sendo "a letra azul que lê" — o papel da
+     classe se mantém nos dois temas. O 500 (o azul da logomarca) fica no meio.
+     ===================================================================== */
+  :root[data-tema='escuro'] {
+    /* Barras de rolagem, campos nativos (data, seleção) e o calendário do
+       navegador no escuro também. */
+    color-scheme: dark;
+
+    --brand-50: 16 42 63; /* #102a3f  amostra --brand-softer */
+    --brand-100: 18 50 75; /* #12324b  --brand-soft */
+    --brand-200: 29 69 99; /* #1d4563  --info-border */
+    --brand-300: 30 90 133; /* #1e5a85  derivado */
+    --brand-400: 31 111 166; /* #1f6fa6  derivado */
+    --brand-500: 11 129 197; /* #0b81c5  o azul da logomarca, igual */
+    --brand-600: 64 171 220; /* #40abdc  derivado */
+    --brand-700: 124 196 236; /* #7cc4ec  --brand-text */
+    --brand-800: 166 216 243; /* #a6d8f3  derivado */
+    --brand-900: 204 232 248; /* #cce8f8  derivado */
+    --brand-950: 230 244 252; /* #e6f4fc  derivado */
+    --verde-50: 18 48 31; /* #12301f  --success-bg */
+    --verde-400: 46 204 113; /* #2ecc71  o acento não muda */
+    --verde-500: 31 167 91; /* #1fa75b */
+    --verde-600: 111 212 156; /* #6fd49c  --success */
+
+    --papel: 13 20 29; /* #0d141d  --bg */
+    --superficie: 20 29 41; /* #141d29  --surface */
+    --superficie-2: 23 33 46; /* #17212e  --surface-2 */
+    --superficie-3: 29 40 54; /* #1d2836  --surface-3 */
+    --borda: 37 50 68; /* #253244  --border */
+    --borda-forte: 51 67 90; /* #33435a  --border-strong */
+    --borda-controle: 107 122 144; /* #6b7a90  derivado: 3:1 na superfície e no papel */
+    --texto: 232 238 245; /* #e8eef5  --text */
+    --texto-2: 180 192 207; /* #b4c0cf  --text-2 */
+    --texto-3: 147 161 180; /* #93a1b4  --text-3 */
+    --veu: 2 5 10; /* #02050a  derivado: o véu da amostra (#09101a) some sobre o papel escuro */
+
+    --marca: 22 119 181; /* #1677b5  --brand: 4,8:1 com texto branco */
+    --marca-hover: 17 112 171; /* #1170ab  --brand-hover */
+    --marca-viva: 11 129 197; /* #0b81c5  --brand-500 */
+    --marca-suave: 18 50 75; /* #12324b  --brand-soft */
+    --marca-leve: 16 42 63; /* #102a3f  --brand-softer */
+    --marca-texto: 124 196 236; /* #7cc4ec  --brand-text */
+    --anel: 91 182 232; /* #5bb6e8  --ring */
+
+    --nav-fundo: 10 22 34; /* #0a1622  --nav-bg */
+    --nav-fundo-2: 15 30 46; /* #0f1e2e  --nav-bg-2 */
+    --nav-texto: 201 220 238; /* #c9dcee  igual */
+    --nav-apagado: 143 176 207; /* #8fb0cf  igual */
+    --nav-ativo: 21 50 77; /* #15324d  --nav-active */
+    --acento: 46 204 113; /* #2ecc71  igual */
+
+    --sucesso: 111 212 156; /* #6fd49c */
+    --sucesso-fundo: 18 48 31; /* #12301f */
+    /* O --success-fill da amostra (#1d8a50) dá 4,4:1 com o texto branco; fica o
+       do claro, que passa (4,9:1). */
+    --sucesso-cheio: 24 128 74; /* #18804a */
+    --sucesso-borda: 34 84 58; /* #22543a */
+    --perigo: 242 155 146; /* #f29b92 */
+    --perigo-fundo: 58 23 20; /* #3a1714 */
+    --perigo-cheio: 200 68 58; /* #c8443a */
+    --perigo-borda: 94 39 34; /* #5e2722 */
+    --aviso: 242 194 122; /* #f2c27a */
+    --aviso-fundo: 54 38 13; /* #36260d */
+    --aviso-cheio: 232 163 23; /* #e8a317  igual: o âmbar já lê no escuro */
+    --aviso-borda: 90 65 21; /* #5a4115 */
+    --info: 143 205 240; /* #8fcdf0 */
+    --info-fundo: 16 41 61; /* #10293d */
+    --info-borda: 29 69 99; /* #1d4563 */
+
+    --sombra-1: 0 1px 2px rgb(0 0 0 / 0.35);
+    --sombra-2: 0 8px 24px rgb(0 0 0 / 0.35);
+    --sombra-3: 0 24px 60px rgb(0 0 0 / 0.55);
+
+    /* o aviso flutuante é CLARO aqui: ícones escuros (derivado) */
+    --flutuante-ok: 20 122 67; /* #147a43 */
+    --flutuante-erro: 180 35 24; /* #b42318 */
+    --flutuante-info: 10 90 138; /* #0a5a8a */
+
+    --tom-azul-fundo: 23 37 84; /* #172554  .pill-tom-blue */
+    --tom-azul-texto: 147 197 253; /* #93c5fd */
+    --tom-azul-borda: 30 58 138; /* #1e3a8a */
+    --tom-azul-ponto: 96 165 250; /* #60a5fa  derivado */
+    --tom-azul-forte: 147 197 253; /* #93c5fd  .grp-blue */
+    --tom-violeta-fundo: 46 16 101; /* #2e1065  .pill-tom-purple */
+    --tom-violeta-texto: 196 181 253; /* #c4b5fd */
+    --tom-violeta-borda: 76 29 149; /* #4c1d95 */
+    --tom-violeta-ponto: 167 139 250; /* #a78bfa  derivado */
+    --tom-laranja-fundo: 67 20 7; /* #431407  .pill-tom-orange */
+    --tom-laranja-texto: 253 186 116; /* #fdba74 */
+    --tom-laranja-borda: 124 45 18; /* #7c2d12 */
+    --tom-laranja-ponto: 251 146 60; /* #fb923c  derivado */
+    --tom-agua-fundo: 4 47 46; /* #042f2e  .pill-tom-teal */
+    --tom-agua-texto: 94 234 212; /* #5eead4 */
+    --tom-agua-borda: 19 78 74; /* #134e4a */
+    --tom-agua-cheio: 15 118 110; /* #0f766e  .pill-teal */
+    --tom-rosa-fundo: 80 7 36; /* #500724  .pill-tom-pink */
+    --tom-rosa-texto: 249 168 212; /* #f9a8d4 */
+    --tom-rosa-borda: 131 24 67; /* #831843 */
+    --tom-rosa-ponto: 244 114 182; /* #f472b6  derivado */
+    --tom-anil-fundo: 30 27 75; /* #1e1b4b  .pill-tom-indigo */
+    --tom-anil-texto: 165 180 252; /* #a5b4fc */
+    --tom-anil-borda: 49 46 129; /* #312e81 */
+    --tom-anil-cheio: 80 70 214; /* #5046d6  .pill-indigo */
+    --tom-ceu-texto: 125 211 252; /* #7dd3fc  .grp-sky */
+    --tom-ambar-fundo: 58 42 12; /* #3a2a0c  derivado (.novo) */
+    --tom-ambar-texto: 252 211 77; /* #fcd34d  .grp-amber */
+    --tom-ambar-ponto: 251 191 36; /* #fbbf24  derivado */
+    --tom-esmeralda-fundo: 2 44 34; /* #022c22  derivado */
+    --tom-esmeralda-texto: 110 231 183; /* #6ee7b7  .grp-emerald */
+    --tom-esmeralda-ponto: 52 211 153; /* #34d399  derivado */
+    --tom-vermelho-fundo: 69 10 10; /* #450a0a  derivado */
+    --tom-vermelho-texto: 252 165 165; /* #fca5a5  .grp-red */
+    --tom-vermelho-ponto: 248 113 113; /* #f87171  derivado */
+    --tom-ardosia-fundo: 30 41 59; /* #1e293b  derivado */
+    --tom-ardosia-texto: 203 213 225; /* #cbd5e1  derivado */
+    --tom-ardosia-ponto: 100 116 139; /* #64748b  derivado */
+    --parado-serio-fundo: 58 32 21; /* #3a2015  .sev-pill-serious */
+    --parado-serio-texto: 242 169 136; /* #f2a988 */
+    --parado-serio-borda: 94 51 34; /* #5e3322 */
+    --parado-serio-cheio: 251 146 60; /* #fb923c  igual */
+    --parado-critico: 159 18 57; /* #9f1239  derivado: um vinho que ainda se vê no escuro */
   }
 
   html,

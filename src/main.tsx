@@ -20,6 +20,12 @@ import { JanelaDeDescarte } from './components/layout/JanelaDeDescarte'
 import '@fontsource-variable/plus-jakarta-sans'
 import '@fontsource-variable/figtree'
 import './index.css'
+import { iniciarTema } from './lib/tema'
+
+// O TEMA ESCOLHIDO (Claro, Escuro ou Do sistema). O script do index.html já pôs
+// o atributo antes do primeiro desenho; daqui em diante quem cuida é o
+// lib/tema.ts, que também acompanha a troca do sistema ao vivo.
+iniciarTema()
 
 const queryClient = new QueryClient({
   defaultOptions: {

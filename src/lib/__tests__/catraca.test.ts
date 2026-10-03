@@ -36,8 +36,11 @@ const BASE_TEXTO_PX = 0
  *  contato) e a escala graduada de "parado há…" das Publicações. A onda 2 do
  *  Operacional passou para token as pontas dessa escala (o âmbar de aviso e o
  *  vermelho de perigo), e ficaram fixos só os degraus do meio e do fim; com a
- *  carteira do Quadro (o "Azul" virou token), 60. */
-const BASE_COR_FIXA = 60
+ *  carteira do Quadro (o "Azul" virou token), 60. O MODO ESCURO (03/10/2026)
+ *  levou as 60 para os tons categóricos (`tom-*`, `parado-*` em index.css): no
+ *  claro, exatamente as mesmas cores; no escuro, as da amostra. Ficou 0 — e
+ *  agora qualquer cor fixa nova é uma mancha no escuro. */
+const BASE_COR_FIXA = 0
 
 const SRC = fileURLToPath(new URL('../../', import.meta.url))
 

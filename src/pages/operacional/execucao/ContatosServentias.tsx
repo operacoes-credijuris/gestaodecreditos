@@ -67,8 +67,8 @@ interface OrgaoRow {
 // Bolinha de tipo ao lado do nome do órgão (igual à aba Créditos): a cor basta,
 // o rótulo por extenso ocupava uma linha inteira da célula.
 const DOT_TIPO: Record<OrgaoRow['tipo'], { cor: string; label: string }> = {
-  julgador: { cor: 'bg-blue-500', label: 'Julgador' },
-  auxiliar: { cor: 'bg-violet-500', label: 'Auxiliar' },
+  julgador: { cor: 'bg-tom-azul-ponto', label: 'Julgador' },
+  auxiliar: { cor: 'bg-tom-violeta-ponto', label: 'Auxiliar' },
 }
 
 type TipoValor = 'telefone' | 'whatsapp' | 'email'

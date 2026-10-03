@@ -506,7 +506,7 @@ export function Assistente() {
         title="Perguntar ao assistente"
         className={cn(
           'fixed bottom-[20px] right-[20px] z-40 flex h-[56px] w-[56px] items-center justify-center',
-          'rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-nivel-2',
+          'rounded-full bg-gradient-to-br from-marca-viva to-marca-hover text-white shadow-nivel-2',
           'transition-transform duration-150 hover:scale-105 active:scale-95',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
         )}

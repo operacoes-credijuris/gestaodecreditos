@@ -93,11 +93,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // O AVISO DA AMOSTRA É ESCURO (fundo `texto`, letra `superficie`): sobre o
   // papel e os cartões brancos ele se destaca sem precisar de cor, e o TIPO vem
   // pelo ícone — verde, rosado ou azul-claro, os tons que leem no escuro. As
-  // cores invertem juntas no modo escuro, porque são os mesmos dois tokens.
+  // cores invertem juntas no modo escuro, porque são os mesmos dois tokens; o
+  // ícone tem token próprio (`flutuante-*`), que no escuro vira o tom fundo que
+  // lê sobre o aviso claro.
   const icons = {
-    success: <CheckCircle2 className="h-5 w-5 shrink-0 text-acento" aria-hidden />,
-    error: <AlertCircle className="h-5 w-5 shrink-0 text-perigo-borda" aria-hidden />,
-    info: <Info className="h-5 w-5 shrink-0 text-brand-300" aria-hidden />,
+    success: <CheckCircle2 className="h-5 w-5 shrink-0 text-flutuante-ok" aria-hidden />,
+    error: <AlertCircle className="h-5 w-5 shrink-0 text-flutuante-erro" aria-hidden />,
+    info: <Info className="h-5 w-5 shrink-0 text-flutuante-info" aria-hidden />,
   }
 
   return (
