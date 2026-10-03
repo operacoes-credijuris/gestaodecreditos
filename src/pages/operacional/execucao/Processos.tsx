@@ -1,45 +1,33 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Plus,
-  Pencil,
-  Trash2,
-  Search,
+  AlertTriangle,
+  CalendarClock,
   ChevronRight,
-  PenLine,
-  Sparkles,
+  Folder,
+  Pencil,
+  Plus,
+  Trash2,
+  Wallet,
 } from 'lucide-react'
-import {
-  processosCrud,
-  useInvestidorDados,
-  useUltimaMovimentacao,
-} from '@/lib/queries'
-import { listarPessoas } from '@/lib/pessoas'
-import { invokeFunction } from '@/lib/functions'
-import {
-  NovoCreditoDoDrive,
-  type PreenchimentoDoDrive,
-} from '@/components/NovoCreditoDoDrive'
+import { processosCrud, useUltimaMovimentacao } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { useApensosManager } from '@/components/Apensos'
 import { NumeroProcessoDrive } from '@/components/NumeroProcessoDrive'
-import type {
-  Processo,
-  StatusProcesso,
-  Instrumento,
-  TipoCredito,
-  IndiceAtualizacao,
-  EspecieRequisitorio,
-} from '@/lib/types'
+import { CreditoFormModal } from '@/components/CreditoFormModal'
+import {
+  CampoDeBusca,
+  FerramentasDoPainel,
+  Partes,
+  SeloExpectativa,
+} from '@/components/operacional/Pecas'
+import type { Processo } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select } from '@/components/ui/Field'
-import { ComboboxTexto } from '@/components/ui/Combobox'
 import { Segmented } from '@/components/ui/Segmented'
-import { Tabs } from '@/components/ui/Tabs'
-import { Modal } from '@/components/ui/Modal'
+import { StatCard } from '@/components/ui/StatCard'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   Table,
@@ -60,38 +48,19 @@ import {
   getLabel,
   STATUS_PROCESSO,
   INSTRUMENTO,
-  TIPO_CREDITO,
-  INDICE_ATUALIZACAO,
   ESPECIE_REQUISITORIO,
 } from '@/lib/labels'
+import { formatCNJ, formatDate, hojeISO, mesesDepois, onlyDigits } from '@/lib/format'
+import { casaBusca } from '@/lib/buscaDaTela'
 import {
-  formatBRLInput,
-  formatCNJ,
-  formatDate,
-  hojeISO,
-  mesesDepois,
-  normalizarBusca,
-  onlyDigits,
-  parseBRLInput,
-} from '@/lib/format'
+  brlCurto,
+  MESES_ALERTA_EXPECTATIVA,
+  numerosDaSelecao,
+} from '@/lib/numerosDosCreditos'
 // As regras do Salvar (validação, campos escondidos zerados, o formulário de
-// crédito novo) moram em lib/regrasDoCredito.ts, com teste.
-import {
-  CREDITO_VAZIO,
-  emLiquidacao,
-  errosDoCredito,
-  payloadDoCredito,
-} from '@/lib/regrasDoCredito'
-
-/**
- * Abas da janela de crédito novo. Mesmo componente e mesmo formato das abas da
- * geração de petição — duas janelas que oferecem "faça à mão ou deixe a
- * plataforma preencher" não têm por que parecer coisas diferentes.
- */
-const ABAS_NOVO_CREDITO = [
-  { key: 'manual', label: 'Manual', icon: <PenLine className="h-4 w-4" /> },
-  { key: 'auto', label: 'Automatizado', icon: <Sparkles className="h-4 w-4" /> },
-]
+// crédito novo) moram em lib/regrasDoCredito.ts, com teste; a janela, em
+// components/CreditoFormModal.tsx.
+import { CREDITO_VAZIO } from '@/lib/regrasDoCredito'
 
 // Separa múltiplos nº RTDPJ (digitados com "e", vírgula, ";" ou quebra) para
 // exibir um por linha.
@@ -104,89 +73,6 @@ function splitRtdpj(v: string): string[] {
     .split(/\s*(?:\be\b|,|;|\n)\s*/i)
     .map((s) => s.trim())
     .filter(Boolean)
-}
-
-// Antecedência que acende o âmbar na coluna Expectativa. Régua num só lugar:
-// mudar aqui muda a cor e o texto da dica junto.
-const MESES_ALERTA_EXPECTATIVA = 3
-
-/**
- * Semáforo da expectativa de liquidação: vermelho já venceu, âmbar vence
- * dentro da janela de MESES_ALERTA_EXPECTATIVA, verde ainda tem folga.
- * Comparação por texto (ISO é ordenável) contra a data de hoje, recalculada a
- * cada render — então a cor vira sozinha na virada do dia, sem ninguém mexer
- * no cadastro.
- */
-function corExpectativa(
-  data: string | null | undefined,
-  hoje: string,
-  limiteAlerta: string,
-): { classe: string; titulo?: string } {
-  const d = (data ?? '').slice(0, 10)
-  if (!d) return { classe: 'text-texto-2' }
-  if (d < hoje) return { classe: 'font-medium text-perigo', titulo: 'Expectativa vencida' }
-  if (d <= limiteAlerta) {
-    return {
-      classe: 'font-medium text-aviso',
-      titulo: `Vence em até ${MESES_ALERTA_EXPECTATIVA} meses`,
-    }
-  }
-  return {
-    classe: 'font-medium text-sucesso',
-    titulo: `Vence em mais de ${MESES_ALERTA_EXPECTATIVA} meses`,
-  }
-}
-
-/**
- * Campo de dinheiro com "R$" fixo à esquerda. O valor vive como número no
- * estado; os dígitos digitados entram como centavos (ver parseBRLInput), então
- * o campo nunca aceita um formato inválido.
- */
-function CampoMoeda({
-  valor,
-  onChange,
-}: {
-  valor: number | null | undefined
-  onChange: (v: number | null) => void
-}) {
-  // OS DÍGITOS são a fonte da verdade durante a digitação, não o número.
-  //
-  // Com o número, o estado "nenhum dígito" era inalcançável: ao apagar tudo, o
-  // valor chegava a 0, e formatBRLInput(0) devolve "0,00" — reintroduzindo
-  // dígitos no campo. O apagar seguinte movia entre 0,00 e 0,00 e o campo ficava
-  // preso em R$ 0,00, que NÃO é "não informado": a carteira lê zero como valor
-  // declarado e um "Já recebido" de R$ 0,00 num crédito liquidado produz ganho
-  // fictício de todo o capital. Guardando os dígitos, apagar tudo devolve string
-  // vazia e o campo volta a null.
-  const [digitos, setDigitos] = useState(() => onlyDigits(formatBRLInput(valor)))
-
-  // Ressincroniza quando o valor vem de FORA (abrir outro crédito, resetar o
-  // formulário). Compara pelo valor, não pelo texto, para não brigar com a
-  // digitação em curso.
-  useEffect(() => {
-    if (parseBRLInput(digitos) !== (valor ?? null))
-      setDigitos(onlyDigits(formatBRLInput(valor)))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [valor])
-
-  return (
-    <div className="relative">
-      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-texto-2">
-        R$
-      </span>
-      <Input
-        className="pl-9 text-right tabular-nums"
-        inputMode="numeric"
-        placeholder="0,00"
-        value={digitos ? formatBRLInput(parseBRLInput(digitos)) : ''}
-        onChange={(e) => {
-          const d = onlyDigits(e.target.value)
-          setDigitos(d)
-          onChange(d ? parseBRLInput(d) : null)
-        }}
-      />
-    </div>
-  )
 }
 
 // Nº de colunas da tabela de créditos — usado no colSpan da linha de apensos.
@@ -205,39 +91,18 @@ const DOT_STATUS: Record<string, string> = {
 }
 
 export default function Processos() {
-  const { useList, useCreate, useUpdate, useRemove } = processosCrud
+  const { useList, useRemove } = processosCrud
   const { data, isLoading, isError, error, refetch } = useList()
-  const create = useCreate()
-  const update = useUpdate()
   const remove = useRemove()
   const toast = useToast()
   const qc = useQueryClient()
   const apensos = useApensosManager('processo_id')
   const ultimaMov = useUltimaMovimentacao()
 
-  // Nomes que já existem, para os campos Cessionário e Originador oferecerem
-  // em lista. Vêm dos próprios créditos e das fichas da aba "Dados pessoais e
-  // bancários" — o comercial cadastra o investidor antes de haver crédito.
-  //
-  // Falha nesta consulta NÃO trava a página nem aparece em erro: sem ela os dois
-  // campos continuam aceitando texto livre, só sem a metade cadastrada da lista.
-  const fichas = useInvestidorDados()
-  const nomesCessionario = useMemo(
-    () => listarPessoas('investidor', data, fichas.data).map((p) => p.nome),
-    [data, fichas.data],
-  )
-  const nomesOriginador = useMemo(
-    () => listarPessoas('originador', data, fichas.data).map((p) => p.nome),
-    [data, fichas.data],
-  )
-
   // Referências do semáforo da coluna Expectativa. Data local (sv-SE dá o
   // formato ISO), calculada no render: no dia seguinte a régua anda sozinha.
   const hoje = useMemo(() => hojeISO(), [])
-  const limiteAlerta = useMemo(
-    () => mesesDepois(hoje, MESES_ALERTA_EXPECTATIVA),
-    [hoje],
-  )
+  const limiteAlerta = useMemo(() => mesesDepois(hoje, MESES_ALERTA_EXPECTATIVA), [hoje])
 
   const [busca, setBusca] = useState('')
   // Padrão ao abrir a página: mostra apenas processos ativos.
@@ -249,91 +114,11 @@ export default function Processos() {
     'data_aquisicao' | 'expectativa_liquidacao' | 'ultima_movimentacao'
   >('data_aquisicao')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  /** Aba da janela de crédito novo. Na edição não aparece — ver o Modal. */
-  const [abaForm, setAbaForm] = useState<'manual' | 'auto'>('manual')
-  /** Uma pasta do Drive já preencheu os campos: libera a edição e o Salvar. */
-  const [autoPreenchido, setAutoPreenchido] = useState(false)
+  /** O crédito na janela de cadastro: o vazio (novo) ou o que se edita. */
+  const [formCredito, setFormCredito] = useState<Partial<Processo> | null>(null)
   const [toDelete, setToDelete] = useState<Processo | null>(null)
   // Crédito com a ficha aberta no painel lateral (clique na linha).
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
-  // Erros de validação por campo, exibidos inline nos <Field>.
-  const [erros, setErros] = useState<Record<string, string>>({})
-  // Snapshot do formulário ao abrir — base do cálculo de "dirty".
-  const snapshotRef = useRef('')
-
-  /**
-   * CADA ABA TEM O SEU RASCUNHO. Preencher no Automatizado não aparece no Manual,
-   * e vice-versa.
-   *
-   * Era um formulário só, e a mesma pasta escolhida no Automatizado aparecia
-   * preenchida no Manual. Confunde: as duas abas são dois CAMINHOS para cadastrar,
-   * e quem começou à mão não quer ver o trabalho misturado com o que veio da pasta
-   * — nem correr o risco de salvar uma mistura dos dois sem perceber.
-   *
-   * `editing` e `setEditing` continuam existindo e apontam para o rascunho da aba
-   * ATIVA. É o que mantém os cerca de sessenta pontos do formulário abaixo
-   * inalterados: quem escreve num campo escreve no rascunho de quem está na tela.
-   */
-  const [formManual, setFormManual] = useState<Partial<Processo> | null>(null)
-  const [formAuto, setFormAuto] = useState<Partial<Processo> | null>(null)
-  const naAuto = abaForm === 'auto'
-  const editing = naAuto ? formAuto : formManual
-  const setEditing = naAuto ? setFormAuto : setFormManual
-
-  // Sujo se QUALQUER um dos dois rascunhos saiu do estado inicial: trocar de aba e
-  // fechar não pode descartar em silêncio o que ficou na outra.
-  const dirty =
-    (!!formManual && JSON.stringify(formManual) !== snapshotRef.current) ||
-    (!!formAuto && JSON.stringify(formAuto) !== snapshotRef.current)
-
-  /** Fecha a janela, descartando os dois rascunhos. */
-  function fecharTudo() {
-    setFormManual(null)
-    setFormAuto(null)
-    setAutoPreenchido(false)
-  }
-
-  // Abre o formulário limpando erros e registrando o snapshot do estado inicial.
-  function abrirForm(p: Partial<Processo>) {
-    setErros({})
-    snapshotRef.current = JSON.stringify(p)
-    // Os dois rascunhos nascem iguais e vazios; o que a pessoa fizer em cada aba
-    // fica em cada aba.
-    setFormManual(p)
-    setFormAuto(p)
-    // Sempre na Manual: quem clica em Editar quer o formulário, e quem cadastra
-    // um crédito novo pode não ter pasta no Drive ainda.
-    setAbaForm('manual')
-    setAutoPreenchido(false)
-  }
-
-  /**
-   * Preenchimento vindo da aba Automatizado. Escreve SÓ no rascunho dela, soma ao
-   * que já estava lá — campo que a pasta não informa fica como estava — e libera os
-   * campos para edição, sem trocar de aba.
-   */
-  function preencherDoDrive(
-    dados: PreenchimentoDoDrive,
-    opts?: { avisar?: boolean },
-  ) {
-    // MESCLA, não substitui: as ondas do preenchimento se completam, e trocar o
-    // estado apagaria o que o caminho da pasta já trouxe.
-    setFormAuto((atual) => ({ ...(atual ?? {}), ...dados }))
-    setErros({})
-    setAutoPreenchido(true)
-    // Só a onda final avisa. Avisar na primeira era pedir conferência de um
-    // formulário que ainda estava sendo preenchido.
-    if (opts?.avisar) {
-      toast.success('Campos preenchidos pela pasta. Confira antes de salvar.')
-    }
-  }
-
-  // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
-  // cobre X/overlay/Escape via prop dirty).
-  function fecharForm() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
-    fecharTudo()
-  }
 
   function toggleSort(
     col: 'data_aquisicao' | 'expectativa_liquidacao' | 'ultima_movimentacao',
@@ -348,16 +133,13 @@ export default function Processos() {
   // Busca textual (sem o filtro de status) — reaproveitada na lista e nas
   // contagens exibidas no seletor de status.
   const baseBusca = useMemo(() => {
-    let l = data ?? []
-    if (busca.trim()) {
-      // Mesmo padrão das outras telas: sem acento, e número de processo também
-      // por dígito. Antes, "goiania" não achava "Goiânia" e o número copiado da
-      // tela ("5001234-56.2020.8.13.0001") não achava nada, porque a comparação
-      // era literal contra o valor cru do banco.
-      const q = normalizarBusca(busca)
-      const qd = onlyDigits(busca)
-      l = l.filter((p) => {
-        const achouTexto = [
+    const l = data ?? []
+    if (!busca.trim()) return l
+    // Sem acento, e número também por dígito (lib/buscaDaTela.ts). O número vale
+    // em qualquer campo — antes, só no CNJ, no RTDPJ e no administrativo.
+    return l.filter((p) =>
+      casaBusca(
+        [
           p.numero_cnj,
           // Entra na busca porque NÃO está na tabela: é o único número do crédito
           // que não se acha varrendo a lista com os olhos.
@@ -370,19 +152,10 @@ export default function Processos() {
           p.tribunal,
           p.numero_rtdpj,
           p.instrumento ? getLabel(INSTRUMENTO, p.instrumento).label : null,
-        ]
-          .filter(Boolean)
-          .some((v) => normalizarBusca(v!).includes(q))
-        if (achouTexto) return true
-        return (
-          qd.length >= 4 &&
-          (onlyDigits(p.numero_cnj).includes(qd) ||
-            onlyDigits(p.numero_rtdpj).includes(qd) ||
-            onlyDigits(p.numero_processo_administrativo).includes(qd))
-        )
-      })
-    }
-    return l
+        ],
+        busca,
+      ),
+    )
   }, [data, busca])
 
   const contagemStatus = useMemo(() => {
@@ -413,82 +186,9 @@ export default function Processos() {
     })
   }, [baseBusca, filtroStatus, sortBy, sortDir, ultimaMov.data])
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!editing) return
-    const novosErros = errosDoCredito(editing)
-    if (Object.keys(novosErros).length > 0) {
-      setErros(novosErros)
-      return
-    }
-    try {
-      const { id, payload } = payloadDoCredito(editing)
-      if (id) {
-        await update.mutateAsync({ id, changes: payload })
-        toast.success('Crédito atualizado.')
-        // NÃO CADASTRE NA ADVBOX AQUI, e a regra vale para os TRÊS cadastros — este,
-        // requerimento e apenso. É DECISÃO DE NEGÓCIO do dono, não esquecimento:
-        // escrita em sistema externo acontece na CRIAÇÃO, nunca na edição.
-        //
-        // O que ela protege: editar um registro é rotina — corrigir um valor, ajustar
-        // uma data —, e disparar o cadastro em cada salvamento criaria na ADVBOX
-        // processo que alguém pode ter deliberadamente deixado de fora. A plataforma
-        // passaria por cima de uma decisão humana, em silêncio.
-        //
-        // Os registros antigos que precisavam entrar já foram cadastrados à mão.
-      } else {
-        const criado = await create.mutateAsync(payload)
-        toast.success('Crédito cadastrado.')
-        // FORA do await do salvamento, de propósito: o cadastro na ADVBOX é
-        // consequência, não condição. Se a ADVBOX estiver fora do ar, o crédito
-        // continua salvo aqui — travar o cadastro da plataforma por causa de um
-        // sistema externo seria trocar um problema pequeno por um grande.
-        if (criado?.id) void cadastrarNaAdvbox(criado.id)
-      }
-      fecharTudo()
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
-
-  /**
-   * Cadastra o processo do crédito recém-criado na ADVBOX.
-   *
-   * A ADVBOX só traz movimentações de processo cadastrado nela, e o esquecimento
-   * não aparece em lugar nenhum: a aba Movimentações simplesmente não mostra aquele
-   * processo, o que é indistinguível de "não houve movimentação". Por isso é
-   * automático — e por isso avisa quando NÃO consegue.
-   *
-   * O silêncio é escolhido caso a caso. Integração desligada não é notícia; falha
-   * de verdade é, senão o esquecimento volta pela porta dos fundos.
-   */
-  async function cadastrarNaAdvbox(processoId: string) {
-    try {
-      const r = await invokeFunction<{
-        ok?: boolean
-        motivo?: string
-        criado?: boolean
-        ja_existia?: boolean
-        detalhe?: string
-        aviso?: string
-      }>('advbox-processos', { action: 'criar', processo_id: processoId })
-
-      if (r.ok && r.criado) toast.success('Processo cadastrado na ADVBOX.')
-      // Já existia: nada a dizer. É o caso de quem cadastrou o processo lá antes,
-      // e virou vínculo — informar aqui seria ruído sobre algo que deu certo.
-      else if (r.motivo === 'incompleto')
-        toast.error(
-          'Cadastro automático na ADVBOX está ligado, mas falta escolher responsável, fase, tipo ou cliente em Configurações.',
-        )
-      else if (r.motivo === 'sem_cnj')
-        toast.error(`Não cadastrei na ADVBOX: ${r.detalhe ?? 'número do processo inválido.'}`)
-      else if (r.aviso) toast.error(r.aviso)
-    } catch (err) {
-      // O crédito JÁ está salvo. Isto é aviso, não falha de cadastro — daí a
-      // mensagem dizer o que ficou pendente, e não parecer que nada funcionou.
-      toast.error(`Crédito salvo, mas não cadastrei na ADVBOX: ${(err as Error).message}`)
-    }
-  }
+  // OS CARTÕES SEGUEM A LISTA (item "Novo" da amostra): filtro de status e busca
+  // valem para eles também — o número é sempre "da seleção".
+  const numeros = useMemo(() => numerosDaSelecao(lista, hoje), [lista, hoje])
 
   async function confirmDelete() {
     if (!toDelete) return
@@ -508,28 +208,65 @@ export default function Processos() {
     }
   }
 
+  const nApensosAExcluir = toDelete ? apensos.contagem(toDelete.id) : 0
+
   return (
     <div>
       <PageHeader
         title="Créditos"
+        description="A carteira: cada crédito adquirido, de quem, contra quem e quando deve pagar."
         actions={
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...CREDITO_VAZIO })}>
+          <Button
+            icon={<Plus className="h-4 w-4" />}
+            onClick={() => setFormCredito({ ...CREDITO_VAZIO })}
+          >
             Novo crédito
           </Button>
         }
       />
 
-      <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por número, cedente, advogado, cessionário, devedora, comarca, tribunal, instrumento, RTDPJ…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
+      {/* Só com a lista carregada: durante a leitura (ou com erro) os cartões
+          diriam "0 créditos", que é afirmar sem ter olhado. */}
+      {!isLoading && !isError && (
+        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatCard
+            label="Créditos na seleção"
+            value={numeros.quantidade}
+            icon={<Folder className="h-[16px] w-[16px]" />}
+          />
+          <StatCard
+            label="Capital investido"
+            value={brlCurto(numeros.capital)}
+            icon={<Wallet className="h-[16px] w-[16px]" />}
+          />
+          <StatCard
+            label="Expectativa vencida"
+            value={numeros.vencidas}
+            hint={
+              numeros.vencidas
+                ? 'Créditos ativos com a expectativa de liquidação já passada: pedem acompanhamento.'
+                : 'Nenhum crédito ativo com a expectativa vencida.'
+            }
+            icon={<AlertTriangle className="h-[16px] w-[16px]" />}
+          />
+          <StatCard
+            label="Liquidam em 90 dias"
+            value={numeros.liquidamEm90}
+            hint="Créditos ainda a receber com a expectativa de liquidação nos próximos 90 dias."
+            icon={<CalendarClock className="h-[16px] w-[16px]" />}
+          />
+        </div>
+      )}
+
+      {/* A BUSCA MORA NO CARTÃO DA LISTA (a amostra): é dela, e não da página. */}
+      <Card>
+        <FerramentasDoPainel>
+          <CampoDeBusca
+            valor={busca}
+            onChange={setBusca}
+            placeholder="Buscar por número, cedente, advogado, cessionário, devedora, comarca, tribunal, instrumento, RTDPJ…"
+            className="min-w-[16rem]"
+          />
           <Segmented
             ariaLabel="Filtrar créditos por status"
             items={[
@@ -543,12 +280,10 @@ export default function Processos() {
             value={filtroStatus}
             onChange={setFiltroStatus}
           />
-        </div>
-      </Card>
+        </FerramentasDoPainel>
 
-      <Card>
         {isLoading ? (
-          <Loading />
+          <Loading label="Carregando créditos…" />
         ) : isError ? (
           <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : lista.length === 0 ? (
@@ -589,7 +324,7 @@ export default function Processos() {
               action={
                 <Button
                   icon={<Plus className="h-4 w-4" />}
-                  onClick={() => abrirForm({ ...CREDITO_VAZIO })}
+                  onClick={() => setFormCredito({ ...CREDITO_VAZIO })}
                 >
                   Novo crédito
                 </Button>
@@ -626,147 +361,142 @@ export default function Processos() {
                   className="w-[1%] whitespace-nowrap"
                 />
                 <TH>Instrumento</TH>
-                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
+                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
               {lista.map((p) => {
                 const st = getLabel(STATUS_PROCESSO, p.status)
                 const inst = getLabel(INSTRUMENTO, p.instrumento)
-                const exp = corExpectativa(p.expectativa_liquidacao, hoje, limiteAlerta)
                 return (
                   <Fragment key={p.id}>
-                  <TR onClick={() => setDetalhe(p)}>
-                    <TD className="font-medium text-texto">
-                      <div className="flex items-start gap-2">
-                        <span
-                          title={st.label}
-                          aria-label={`Status: ${st.label}`}
-                          className={cn(
-                            'mt-1.5 h-2 w-2 shrink-0 rounded-full',
-                            DOT_STATUS[st.tone] ?? 'bg-texto-3',
-                          )}
-                        />
-                        <div className="min-w-0">
-                          <span className="inline-flex items-center gap-1.5">
-                            {/* O SELO ALINHA ENTRE AS LINHAS sem precisar de coluna,
-                                e são duas coisas que fazem isso:
-                                  - tabular-nums, porque a fonte do app tem dígitos
-                                    de largura VARIÁVEL e dois números CNJ de mesmo
-                                    comprimento mediam diferente;
-                                  - reservarIcone, porque o ícone da pasta do Drive
-                                    só existe em crédito com pasta e a sua ausência
-                                    puxava tudo 14px para a esquerda.
-                                Com os dois, o número ocupa sempre a mesma largura e
-                                o que vem depois começa sempre no mesmo ponto. */}
-                            <NumeroProcessoDrive
-                              processo={p}
-                              numero={p.numero_cnj}
-                              className="whitespace-nowrap tabular-nums"
-                              reservarIcone
-                            />
-                            {/* Espécie colada no número: é natureza do requisitório,
-                                como o número — não é situação do crédito (isso é o
-                                status) nem valor. */}
-                            {p.especie_requisitorio && (
-                              <Badge
-                                size="sm"
-                                tone={
-                                  ESPECIE_REQUISITORIO[p.especie_requisitorio]?.tone ??
-                                  'gray'
-                                }
-                              >
-                                {ESPECIE_REQUISITORIO[p.especie_requisitorio]?.label ??
-                                  p.especie_requisitorio}
-                              </Badge>
+                    <TR onClick={() => setDetalhe(p)}>
+                      <TD className="font-medium text-texto">
+                        <div className="flex items-start gap-2">
+                          <span
+                            title={st.label}
+                            aria-label={`Status: ${st.label}`}
+                            className={cn(
+                              'mt-2 h-[9px] w-[9px] shrink-0 rounded-full',
+                              DOT_STATUS[st.tone] ?? 'bg-texto-3',
                             )}
-                            {/* Apensos à direita da espécie: número e espécie
-                                identificam o requisitório, e o contador é ação
-                                sobre ele. */}
-                            {apensos.contador(p.id)}
-                          </span>
-                          {/* Nomes completos: quebram em linhas em vez de truncar. */}
-                          <div className="text-xs font-normal text-texto-2">
-                            {p.cedente || '—'} v. {p.cessionario || '—'}
+                          />
+                          <div className="min-w-0">
+                            <span className="inline-flex flex-wrap items-center gap-1.5">
+                              {/* O SELO ALINHA ENTRE AS LINHAS sem precisar de coluna,
+                                  e são duas coisas que fazem isso:
+                                    - tabular-nums, porque a fonte do app tem dígitos
+                                      de largura VARIÁVEL e dois números CNJ de mesmo
+                                      comprimento mediam diferente;
+                                    - reservarIcone, porque o ícone da pasta do Drive
+                                      só existe em crédito com pasta e a sua ausência
+                                      puxava tudo 14px para a esquerda.
+                                  Com os dois, o número ocupa sempre a mesma largura e
+                                  o que vem depois começa sempre no mesmo ponto. */}
+                              <NumeroProcessoDrive
+                                processo={p}
+                                numero={p.numero_cnj}
+                                className="whitespace-nowrap font-semibold tabular-nums"
+                                reservarIcone
+                              />
+                              {/* Espécie colada no número: é natureza do requisitório,
+                                  como o número — não é situação do crédito (isso é o
+                                  status) nem valor. */}
+                              {p.especie_requisitorio && (
+                                <Badge
+                                  size="sm"
+                                  tone={
+                                    ESPECIE_REQUISITORIO[p.especie_requisitorio]?.tone ??
+                                    'gray'
+                                  }
+                                >
+                                  {ESPECIE_REQUISITORIO[p.especie_requisitorio]?.label ??
+                                    p.especie_requisitorio}
+                                </Badge>
+                              )}
+                              {/* Apensos à direita da espécie: número e espécie
+                                  identificam o requisitório, e o contador é ação
+                                  sobre ele. */}
+                              {apensos.contador(p.id)}
+                            </span>
+                            {/* Nomes completos: quebram em linhas em vez de truncar. */}
+                            <div className="mt-0.5 text-xs font-normal text-texto-2">
+                              <Partes a={p.cedente} b={p.cessionario} />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </TD>
-                    <TD>
-                      {/* Devedora e comarca/vara em linhas próprias, texto completo. */}
-                      <div>{p.entidade_devedora || '—'}</div>
-                      <div className="text-xs text-texto-2">
-                        {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
-                      </div>
-                    </TD>
-                    <TD className="whitespace-nowrap tabular-nums text-texto-2">
-                      {formatDate(p.data_aquisicao)}
-                    </TD>
-                    {/* Semáforo: vencida (vermelho), dentro da janela de alerta
-                        (âmbar), com folga (verde). O title mantém a informação
-                        para quem não distingue as cores. */}
-                    <TD className="whitespace-nowrap tabular-nums">
-                      <span className={exp.classe} title={exp.titulo}>
-                        {formatDate(p.expectativa_liquidacao)}
-                      </span>
-                    </TD>
-                    {/* Puxada do cache do ADVBOX, não digitada. Enquanto o mapa
-                        carrega mostra vazio em vez de "—", que seria mentira. */}
-                    <TD className="whitespace-nowrap tabular-nums text-texto-2">
-                      {ultimaMov.isLoading
-                        ? ''
-                        : formatDate(
-                            ultimaMov.data?.get(onlyDigits(p.numero_cnj)) ?? null,
-                          )}
-                    </TD>
-                    {/* Sem nowrap: nº RTDPJ longo deve quebrar em vez de
-                        alargar a tabela. O Badge é inline-flex e não quebra. */}
-                    <TD>
-                      {p.instrumento ? (
-                        <Badge tone={inst.tone}>{inst.label}</Badge>
-                      ) : (
-                        '—'
-                      )}
-                      {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
-                        <div className="mt-0.5 text-xs text-texto-2">
-                          {splitRtdpj(p.numero_rtdpj).map((n, i) => (
-                            <div key={i}>{n}</div>
-                          ))}
+                      </TD>
+                      <TD>
+                        {/* Devedora e comarca/vara em linhas próprias, texto completo. */}
+                        <div>{p.entidade_devedora || '—'}</div>
+                        <div className="text-xs text-texto-2">
+                          {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
                         </div>
-                      )}
-                    </TD>
-                    <TD>
-                      {/* stopPropagation: os botões não devem abrir a ficha da linha */}
-                      <div
-                        className="flex items-center gap-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {apensos.actions(p.id)}
-                        <IconButton
-                          label="Editar"
-                          icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => abrirForm(p)}
+                      </TD>
+                      <TD className="whitespace-nowrap tabular-nums text-texto-2">
+                        {formatDate(p.data_aquisicao)}
+                      </TD>
+                      {/* SELO, e não só a data colorida (item "Novo" da amostra):
+                          vencida, vence em até 3 meses, com folga — com ícone, e a
+                          dica dizendo o que a cor quer dizer. */}
+                      <TD className="whitespace-nowrap">
+                        <SeloExpectativa
+                          data={p.expectativa_liquidacao}
+                          hoje={hoje}
+                          limiteAlerta={limiteAlerta}
                         />
-                        <IconButton
-                          label="Excluir"
-                          variant="danger"
-                          icon={<Trash2 className="h-4 w-4" />}
-                          onClick={() => setToDelete(p)}
-                        />
-                        {/* Botão de verdade, e não seta decorativa: abrir a
-                            ficha era possível SÓ com o mouse, clicando na linha.
-                            Quem navega por teclado passava por Editar e Excluir e
-                            nunca alcançava a ficha — que é onde estão partes,
-                            valores, apensos e histórico. */}
-                        <IconButton
-                          label={`Abrir ficha de ${p.numero_cnj ?? 'crédito'}`}
-                          icon={<ChevronRight className="h-4 w-4" />}
-                          onClick={() => setDetalhe(p)}
-                        />
-                      </div>
-                    </TD>
-                  </TR>
-                  {apensos.detailRow(p.id, N_COLUNAS)}
+                      </TD>
+                      {/* Puxada do cache do ADVBOX, não digitada. Enquanto o mapa
+                          carrega mostra vazio em vez de "—", que seria mentira. */}
+                      <TD className="whitespace-nowrap tabular-nums text-texto-2">
+                        {ultimaMov.isLoading
+                          ? ''
+                          : formatDate(ultimaMov.data?.get(onlyDigits(p.numero_cnj)) ?? null)}
+                      </TD>
+                      {/* Sem nowrap: nº RTDPJ longo deve quebrar em vez de
+                          alargar a tabela. O Badge é inline-flex e não quebra. */}
+                      <TD>
+                        {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
+                        {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
+                          <div className="mt-0.5 text-xs tabular-nums text-texto-2">
+                            {splitRtdpj(p.numero_rtdpj).map((n, i) => (
+                              <div key={i}>{n}</div>
+                            ))}
+                          </div>
+                        )}
+                      </TD>
+                      <TD>
+                        {/* stopPropagation: os botões não devem abrir a ficha da linha */}
+                        <div
+                          className="flex items-center justify-end gap-0.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {apensos.actions(p.id)}
+                          <IconButton
+                            label="Editar"
+                            icon={<Pencil className="h-4 w-4" />}
+                            onClick={() => setFormCredito(p)}
+                          />
+                          <IconButton
+                            label="Excluir"
+                            variant="danger"
+                            icon={<Trash2 className="h-4 w-4" />}
+                            onClick={() => setToDelete(p)}
+                          />
+                          {/* Botão de verdade, e não seta decorativa: abrir a
+                              ficha era possível SÓ com o mouse, clicando na linha.
+                              Quem navega por teclado passava por Editar e Excluir e
+                              nunca alcançava a ficha — que é onde estão partes,
+                              valores, apensos e histórico. */}
+                          <IconButton
+                            label={`Abrir ficha de ${p.numero_cnj ?? 'crédito'}`}
+                            icon={<ChevronRight className="h-4 w-4" />}
+                            onClick={() => setDetalhe(p)}
+                          />
+                        </div>
+                      </TD>
+                    </TR>
+                    {apensos.detailRow(p.id, N_COLUNAS)}
                   </Fragment>
                 )
               })}
@@ -775,391 +505,11 @@ export default function Processos() {
         )}
       </Card>
 
-      <Modal
-        open={!!editing}
-        onClose={fecharTudo}
-        title={editing?.id ? 'Editar crédito' : 'Novo crédito'}
-        size="lg"
-        dirty={dirty}
-        footer={
-          <>
-            <Button variant="outline" onClick={fecharForm}>
-              Cancelar
-            </Button>
-            {/* Na aba Automatizado o Salvar só aparece depois de uma pasta
-                preencher os campos: antes disso ele prometeria gravar um
-                formulário vazio e travado. */}
-            {(abaForm === 'manual' || !!editing?.id || autoPreenchido) && (
-              <Button
-                type="submit"
-                form="form-processo"
-                loading={create.isPending || update.isPending}
-              >
-                Salvar
-              </Button>
-            )}
-          </>
-        }
-      >
-        {/* Só no cadastro NOVO. Editar um crédito que já existe não tem por que
-            passar pela descoberta de pastas — a pasta dele já é conhecida. */}
-        {editing && !editing.id && (
-          <div className="mb-4">
-            <Tabs
-              items={ABAS_NOVO_CREDITO}
-              value={abaForm}
-              onChange={(k) => setAbaForm(k as typeof abaForm)}
-            />
-          </div>
-        )}
-
-        {/* Linha divisória: separa a ESCOLHA da pasta do PREENCHIMENTO do crédito.
-            São dois momentos diferentes do trabalho, e sem a divisão o campo de
-            busca parecia o primeiro campo do formulário. */}
-        {editing && abaForm === 'auto' && !editing.id && (
-          <div className="mb-4 border-b border-borda pb-4">
-            <NovoCreditoDoDrive processos={data} onPreencher={preencherDoDrive} />
-          </div>
-        )}
-
-        {editing && (
-          <form id="form-processo" onSubmit={handleSubmit}>
-            {/* Os campos aparecem NAS DUAS abas, e na automatizada nascem
-                bloqueados: sem pasta escolhida não há o que editar, e um
-                formulário em branco e mexível ao lado de um campo de busca convida
-                a preencher à mão justamente onde a ideia era não precisar.
-                Escolher a pasta preenche e libera.
-
-                <fieldset disabled> em vez de `disabled` em cada campo: são
-                dezenas, e um esquecido seria um campo editável no meio de campos
-                travados — o tipo de inconsistência que ninguém reporta e todo
-                mundo estranha. O navegador propaga para tudo o que está dentro. */}
-            <fieldset
-              disabled={abaForm === 'auto' && !editing.id && !autoPreenchido}
-              className="m-0 min-w-0 space-y-4 border-0 p-0"
-            >
-            <Field label="Número do processo" required error={erros.numero_cnj}>
-              <Input
-                value={editing.numero_cnj ?? ''}
-                onChange={(e) => {
-                  setEditing({ ...editing, numero_cnj: e.target.value })
-                  // Digitar no campo limpa o erro de validação dele.
-                  if (erros.numero_cnj) setErros({})
-                }}
-                placeholder="0000000-00.0000.0.00.0000"
-              />
-            </Field>
-            {/* O SEGUNDO NÚMERO DO PRECATÓRIO. Precatório tramita em dois lugares:
-                o processo judicial, onde a dívida foi reconhecida, e um processo
-                administrativo no tribunal, por onde ele anda na fila de pagamento.
-                RPV não tem esse número, então o campo só existe em precatório — em
-                RPV seria um campo vazio permanente convidando a preencher errado.
-
-                A condição inclui "já tem valor" para o caso de a espécie ser
-                trocada depois: sem isso, mudar para RPV esconderia um número já
-                gravado, que continuaria no banco sem tela para editá-lo. */}
-            {(editing.especie_requisitorio === 'precatorio' ||
-              !!editing.numero_processo_administrativo) && (
-              <Field label="Número do processo administrativo (Precatório)">
-                <Input
-                  value={editing.numero_processo_administrativo ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      numero_processo_administrativo: e.target.value,
-                    })
-                  }
-                />
-              </Field>
-            )}
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Field label="Tribunal">
-                <Input
-                  value={editing.tribunal ?? ''}
-                  onChange={(e) => setEditing({ ...editing, tribunal: e.target.value })}
-                />
-              </Field>
-              <Field label="Comarca">
-                <Input
-                  value={editing.comarca ?? ''}
-                  onChange={(e) => setEditing({ ...editing, comarca: e.target.value })}
-                />
-              </Field>
-              <Field label="Vara">
-                <Input
-                  value={editing.vara ?? ''}
-                  onChange={(e) => setEditing({ ...editing, vara: e.target.value })}
-                />
-              </Field>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Cedente">
-                <Input
-                  value={editing.cedente ?? ''}
-                  onChange={(e) => setEditing({ ...editing, cedente: e.target.value })}
-                />
-              </Field>
-              <Field label="Advogado do cedente">
-                <Input
-                  value={editing.cedente_advogado ?? ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, cedente_advogado: e.target.value })
-                  }
-                />
-              </Field>
-              {/* Os dois campos abaixo aceitam texto livre E oferecem quem já
-                  existe. A lista não é enfeite: é o nome digitado, normalizado,
-                  que identifica a pessoa na aba "Dados pessoais e bancários", e
-                  uma letra trocada aqui cria uma segunda pessoa com ficha
-                  bancária própria — sem erro na tela, porque as duas linhas
-                  parecem certas. */}
-              <Field label="Cessionário">
-                <ComboboxTexto
-                  valor={editing.cessionario ?? ''}
-                  onChange={(v) => setEditing({ ...editing, cessionario: v })}
-                  opcoes={nomesCessionario}
-                  placeholder="Escolha ou digite um nome novo"
-                />
-              </Field>
-              <Field label="Originador">
-                <ComboboxTexto
-                  valor={editing.originador ?? ''}
-                  onChange={(v) => setEditing({ ...editing, originador: v })}
-                  opcoes={nomesOriginador}
-                  placeholder="Escolha ou digite um nome novo"
-                />
-              </Field>
-              <Field label="Entidade devedora">
-                <Input
-                  value={editing.entidade_devedora ?? ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, entidade_devedora: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Data de aquisição">
-                <Input
-                  type="date"
-                  value={editing.data_aquisicao ?? ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, data_aquisicao: e.target.value })
-                  }
-                />
-              </Field>
-              <Field
-                label="Expectativa de liquidação"
-                error={erros.expectativa_liquidacao}
-              >
-                <Input
-                  type="date"
-                  value={editing.expectativa_liquidacao ?? ''}
-                  onChange={(e) => {
-                    if (erros.expectativa_liquidacao)
-                      setErros((v) => ({ ...v, expectativa_liquidacao: '' }))
-                    setEditing({ ...editing, expectativa_liquidacao: e.target.value })
-                  }}
-                />
-              </Field>
-              <Field
-                label="Instrumento"
-                // Avisa que o campo condicional oculto será descartado no salvamento.
-                hint={
-                  editing.instrumento !== 'registro_publico' &&
-                  editing.numero_rtdpj?.trim()
-                    ? 'Ao salvar sem "Registro público", o nº RTDPJ será descartado.'
-                    : undefined
-                }
-              >
-                <Select
-                  value={editing.instrumento ?? ''}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      instrumento: (e.target.value || null) as Instrumento | null,
-                    })
-                  }
-                >
-                  <option value="">Não informado</option>
-                  {Object.entries(INSTRUMENTO).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              {editing.instrumento === 'registro_publico' && (
-                <Field label="Nº RTDPJ" hint="Opcional. Para mais de um, separe por vírgula.">
-                  <Input
-                    value={editing.numero_rtdpj ?? ''}
-                    onChange={(e) =>
-                      setEditing({ ...editing, numero_rtdpj: e.target.value })
-                    }
-                    placeholder="Número do registro no RTDPJ"
-                  />
-                </Field>
-              )}
-              <Field
-                label="Status"
-                required
-                // Avisa que os campos condicionais ocultos serão descartados.
-                hint={
-                  !emLiquidacao(editing.status) &&
-                  (editing.data_liquidacao ||
-                    editing.ja_recebido != null ||
-                    editing.valor_estimado_complementar != null)
-                    ? 'Ao salvar como Ativo, a data de liquidação, o já recebido e o valor estimado complementar serão descartados.'
-                    : undefined
-                }
-              >
-                <Select
-                  value={editing.status ?? 'ativo'}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      status: e.target.value as StatusProcesso,
-                    })
-                  }
-                >
-                  {Object.entries(STATUS_PROCESSO).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              {emLiquidacao(editing.status) && (
-                <Field label="Data de liquidação" error={erros.data_liquidacao}>
-                  <Input
-                    type="date"
-                    value={editing.data_liquidacao ?? ''}
-                    onChange={(e) => {
-                      if (erros.data_liquidacao)
-                        setErros((v) => ({ ...v, data_liquidacao: '' }))
-                      setEditing({ ...editing, data_liquidacao: e.target.value })
-                    }}
-                  />
-                </Field>
-              )}
-            </div>
-
-            {/* Financeiro do crédito. Fica só aqui e na ficha lateral — de
-                propósito fora da tabela, que segue enxuta para escanear. */}
-            <div>
-              <Field label="Tipo de crédito">
-                <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
-                  {Object.entries(TIPO_CREDITO).map(([k, v]) => (
-                    <label
-                      key={k}
-                      className="flex cursor-pointer items-center gap-2 text-sm text-texto"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={(editing.tipo_credito ?? []).includes(
-                          k as TipoCredito,
-                        )}
-                        onChange={() => {
-                          const atuais = editing.tipo_credito ?? []
-                          setEditing({
-                            ...editing,
-                            tipo_credito: atuais.includes(k as TipoCredito)
-                              ? atuais.filter((t) => t !== k)
-                              : [...atuais, k as TipoCredito],
-                          })
-                        }}
-                      />
-                      {v.label}
-                    </label>
-                  ))}
-                </div>
-              </Field>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                {/* Dentro da grade, e não numa linha própria: sozinho ele deixava
-                    metade da linha em branco. Aqui divide a linha com o capital
-                    investido, e o vão que sobra cai no fim da grade. */}
-                <Field label="Espécie do requisitório">
-                  <Select
-                    value={editing.especie_requisitorio ?? ''}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        especie_requisitorio: (e.target.value ||
-                          null) as EspecieRequisitorio | null,
-                      })
-                    }
-                  >
-                    <option value="">Não informado</option>
-                    {Object.entries(ESPECIE_REQUISITORIO).map(([k, v]) => (
-                      <option key={k} value={k}>
-                        {v.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Capital investido">
-                  <CampoMoeda
-                    valor={editing.capital_investido}
-                    onChange={(v) => setEditing({ ...editing, capital_investido: v })}
-                  />
-                </Field>
-                <Field label="Valor de face">
-                  <CampoMoeda
-                    valor={editing.valor_face}
-                    onChange={(v) => setEditing({ ...editing, valor_face: v })}
-                  />
-                </Field>
-                <Field label="Data de referência">
-                  <Input
-                    type="date"
-                    value={editing.data_referencia ?? ''}
-                    onChange={(e) =>
-                      setEditing({ ...editing, data_referencia: e.target.value })
-                    }
-                  />
-                </Field>
-                <Field label="Índice de atualização">
-                  <Select
-                    value={editing.indice_atualizacao ?? ''}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        indice_atualizacao: (e.target.value ||
-                          null) as IndiceAtualizacao | null,
-                      })
-                    }
-                  >
-                    <option value="">Não informado</option>
-                    {Object.entries(INDICE_ATUALIZACAO).map(([k, v]) => (
-                      <option key={k} value={k}>
-                        {v.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                {emLiquidacao(editing.status) && (
-                  <>
-                    <Field label="Já recebido">
-                      <CampoMoeda
-                        valor={editing.ja_recebido}
-                        onChange={(v) => setEditing({ ...editing, ja_recebido: v })}
-                      />
-                    </Field>
-                    <Field label="Valor estimado complementar">
-                      <CampoMoeda
-                        valor={editing.valor_estimado_complementar}
-                        onChange={(v) =>
-                          setEditing({ ...editing, valor_estimado_complementar: v })
-                        }
-                      />
-                    </Field>
-                  </>
-                )}
-              </div>
-            </div>
-            </fieldset>
-          </form>
-        )}
-      </Modal>
+      {/* Montada a cada abertura (e desmontada ao fechar): cada abertura começa
+          limpa, sem resto da anterior. */}
+      {formCredito && (
+        <CreditoFormModal inicial={formCredito} onClose={() => setFormCredito(null)} />
+      )}
 
       {/* Ficha completa do crédito — abre ao clicar na linha da tabela. */}
       <CreditoDrawer processo={detalhe} onClose={() => setDetalhe(null)} />
@@ -1168,19 +518,19 @@ export default function Processos() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
+        title="Excluir crédito"
         // A cascata precisa estar na pergunta: o banco apaga os apensos junto, e
         // eles são cadastro manual (número, classe, tribunal, comarca, vara,
         // polos). Quem excluía um crédito para recadastrá-lo com o número certo
-        // perdia os apensos sem nunca ter sido avisado.
-        message={
-          toDelete && apensos.contagem(toDelete.id) > 0
-            ? `Excluir o crédito ${formatCNJ(toDelete.numero_cnj)}? ${
-                apensos.contagem(toDelete.id) === 1
-                  ? 'O apenso vinculado será excluído também.'
-                  : `Os ${apensos.contagem(toDelete.id)} apensos vinculados serão excluídos também.`
-              }`
-            : `Excluir o crédito ${formatCNJ(toDelete?.numero_cnj)}?`
-        }
+        // perdia os apensos sem nunca ter sido avisado. Sem apenso, a pergunta diz
+        // o que mais muda (a amostra): o crédito sai da carteira e do Quadro.
+        message={`Excluir o crédito ${formatCNJ(toDelete?.numero_cnj)}? ${
+          nApensosAExcluir === 1
+            ? 'O apenso vinculado será excluído também.'
+            : nApensosAExcluir > 1
+              ? `Os ${nApensosAExcluir} apensos vinculados serão excluídos também.`
+              : 'O crédito sai da carteira e das telas do Quadro econômico.'
+        }`}
         confirmLabel="Excluir"
         onConfirm={confirmDelete}
         onClose={() => setToDelete(null)}

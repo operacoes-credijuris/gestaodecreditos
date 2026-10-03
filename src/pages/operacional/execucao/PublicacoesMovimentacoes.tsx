@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Search, ExternalLink, ListChecks, ChevronDown } from 'lucide-react'
+import { Clock, ExternalLink, Plus, ChevronDown } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
@@ -19,13 +19,21 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Input } from '@/components/ui/Field'
 import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { CreditoDrawer } from '@/components/CreditoDrawer'
+import { Aviso, CampoDeBusca, Partes, TituloDoGrupo } from '@/components/operacional/Pecas'
 import type { Processo } from '@/lib/types'
+import {
+  diasParado,
+  faixaParalisado,
+  LEGENDA_PARALISADO,
+  ordenarParalisados,
+  textoParalisado,
+  type FaixaParalisado,
+} from '@/lib/paralisados'
 import {
   formatCNJ,
   formatDate,
@@ -186,7 +194,10 @@ export default function PublicacoesMovimentacoes() {
 
   return (
     <div>
-      <PageHeader title="Publicações e Movimentações" />
+      <PageHeader
+        title="Publicações e movimentações"
+        description="O que saiu no DJEN e o que andou no ADVBOX nos processos da carteira."
+      />
 
       {/* Tabs, e não Segmented: Publicações/Movimentações são DUAS VISÕES da aba —
           duas fontes de dados distintas (DJEN e ADVBOX) —, o mesmo papel de
@@ -198,27 +209,24 @@ export default function PublicacoesMovimentacoes() {
           items={[
             { key: 'publicacoes', label: 'Publicações', count: nPub.data },
             { key: 'movimentacoes', label: 'Movimentações', count: nMov.data },
-            { key: 'fase', label: 'Fase Processual' },
+            { key: 'fase', label: 'Fase processual' },
           ]}
           value={aba}
           onChange={(k) => setAba(k as typeof aba)}
         />
       </div>
 
-      {/* A busca é da Publicações/Movimentações — a Fase Processual tem o
-          próprio recorte (trilha + fase), sem relação com este campo. */}
+      {/* A busca é da Publicações/Movimentações — a Fase processual tem o
+          próprio recorte (trilha + fase), sem relação com este campo. Solta, sem
+          cartão em volta (a amostra): ela vale para as duas listas abaixo. */}
       {aba !== 'fase' && (
-        <Card className="mb-4 p-4">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
-        </Card>
+        <div className="mb-4 flex">
+          <CampoDeBusca
+            valor={busca}
+            onChange={setBusca}
+            placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
+          />
+        </div>
       )}
 
       {aba === 'publicacoes' ? (
@@ -389,10 +397,15 @@ function Publicacoes({ busca }: { busca: string }) {
   // Memoizado pela lista, e não recalculado por tecla: textoLimpo cria elemento
   // de DOM para decodificar entidade, e fazer isso em até 2000 publicações a
   // cada tecla travaria a digitação.
+  //
+  // BUSCA MAIS LARGA (item "Novo" da amostra): entram também as PARTES e o status
+  // do crédito a que a publicação pertence — quem procura costuma lembrar do nome
+  // do cedente, não do número.
   const indiceBusca = useMemo(() => {
     const m = new Map<number, string>()
     for (const p of lista.data ?? []) {
       const r = p.raw ?? {}
+      const info = resolve(p.numero_processo)
       m.set(
         p.id,
         normalizarBusca(
@@ -403,6 +416,9 @@ function Publicacoes({ busca }: { busca: string }) {
             r.nomeOrgao,
             r.nomeClasse,
             textoLimpo(r.texto),
+            info.cedente,
+            info.cessionario,
+            rotuloDoVinculo(info),
           ]
             .filter(Boolean)
             .join(' '),
@@ -410,7 +426,7 @@ function Publicacoes({ busca }: { busca: string }) {
       )
     }
     return m
-  }, [lista.data])
+  }, [lista.data, resolve])
 
   const filtradas = useMemo(() => {
     const all = lista.data ?? []
@@ -418,9 +434,11 @@ function Publicacoes({ busca }: { busca: string }) {
     if (!q) return all
     const qd = dig(busca)
     return all.filter((p) => {
-      if ((indiceBusca.get(p.id) ?? '').includes(q)) return true
-      // Número de processo colado sem pontuação ainda tem de achar o formatado.
-      return qd.length >= 4 && dig(p.numero_processo).includes(qd)
+      const idx = indiceBusca.get(p.id) ?? ''
+      if (idx.includes(q)) return true
+      // Número colado sem pontuação ainda tem de achar o formatado — e, com 4
+      // dígitos ou mais, em qualquer campo (o número do órgão, o do texto).
+      return qd.length >= 4 && (dig(p.numero_processo).includes(qd) || dig(idx).includes(qd))
     })
   }, [lista.data, busca, indiceBusca])
 
@@ -451,28 +469,26 @@ function Publicacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      {/* gap-2, e não gap-3: o "·" do indicador tem 4,5px do próprio lado, e com
-          gap-3 ele ficava visivelmente mais perto do texto da direita. */}
-      <div className="flex items-center gap-2 text-sm text-texto-2">
+      {/* A contagem à esquerda e o indicador da sincronização no canto (a
+          amostra): o mesmo lugar em toda tela que sincroniza. */}
+      <LinhaDeResumo>
         <span>
-          <strong>{filtradas.length}</strong>{' '}
+          <strong className="text-texto">{filtradas.length}</strong>{' '}
           {filtradas.length === 1 ? 'publicação' : 'publicações'}
         </span>
         <SyncStatus
-          separador
           syncing={sync.isPending}
           updatedAt={lista.dataUpdatedAt}
           label="atualizando do DJEN…"
         />
-      </div>
-
+      </LinhaDeResumo>
 
       {truncou && (
-        <p className="rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
+        <Aviso tom="aviso">
           Mostrando as {lista.data?.length} publicações mais recentes de{' '}
           {total.data} na janela de 30 dias. As mais antigas do período ficaram de
           fora — use a busca para encontrar uma publicação específica.
-        </p>
+        </Aviso>
       )}
 
       {filtradas.length === 0 ? (
@@ -490,16 +506,14 @@ function Publicacoes({ busca }: { busca: string }) {
             {novas.length ? (
               novas.map(card)
             ) : (
-              <p className="text-sm text-texto-2">Nenhuma publicação nova.</p>
+              <p className="text-corpo text-texto-2">Nenhuma publicação nova.</p>
             )}
           </Secao>
           <Secao titulo="Tratadas" qtd={providenciadas.length}>
             {providenciadas.length ? (
               providenciadas.map(card)
             ) : (
-              <p className="text-sm text-texto-2">
-                Nenhuma publicação tratada.
-              </p>
+              <p className="text-corpo text-texto-2">Nenhuma publicação tratada.</p>
             )}
           </Secao>
         </>
@@ -518,28 +532,53 @@ function Publicacoes({ busca }: { busca: string }) {
   )
 }
 
-// Cabeçalho de seção: "Título (n) ————————".
+// Cabeçalho de grupo da lista (Novas, Tratadas, Paralisados): o título em caixa
+// alta e a contagem numa pílula, como nas outras listas do Operacional.
 function Secao({
   titulo,
   qtd,
   children,
+  extra,
 }: {
   titulo: string
   qtd: number
   children: ReactNode
+  /** O que vai entre o título e a lista — a legenda dos Paralisados. */
+  extra?: ReactNode
 }) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-3 pt-1">
-        <span className="text-sm font-semibold uppercase tracking-wide text-texto-2">
-          {titulo}
-        </span>
-        <span className="text-xs text-texto-2">({qtd})</span>
-        <div className="h-px flex-1 bg-borda" />
-      </div>
+    <section>
+      <TituloDoGrupo titulo={titulo} qtd={qtd} />
+      {extra}
+      <div className="space-y-2">{children}</div>
+    </section>
+  )
+}
+
+/** A linha de resumo acima das listas: a contagem e, no canto, a sincronização. */
+function LinhaDeResumo({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 text-corpo text-texto-2">
       {children}
     </div>
   )
+}
+
+/** "Ativo", "Complementar", "Encerrado" ou "Requerimento" — o que a busca também lê. */
+function rotuloDoVinculo(info: ResolveInfo): string | null {
+  if (info.kind === 'credito') return getLabel(STATUS_PROCESSO, info.status).label
+  if (info.kind === 'requerimento') return 'Requerimento'
+  return null
+}
+
+/** O selo do vínculo da publicação ou do processo: status do crédito ou "Requerimento". */
+function SeloDoVinculo({ info }: { info: ResolveInfo }) {
+  if (info.kind === 'credito') {
+    const st = getLabel(STATUS_PROCESSO, info.status)
+    return <Badge tone={st.tone}>{st.label}</Badge>
+  }
+  if (info.kind === 'requerimento') return <Badge tone="purple">Requerimento</Badge>
+  return null
 }
 
 function PublicacaoCard({
@@ -555,68 +594,76 @@ function PublicacaoCard({
 }) {
   const raw = p.raw ?? {}
   const texto = useMemo(() => textoLimpo(raw.texto), [raw.texto])
-  const st = getLabel(STATUS_PROCESSO, info.status)
+  const temPartes = info.kind === 'credito' && (info.cedente || info.cessionario)
 
   return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-sm font-medium text-texto">
-              {formatCNJ(p.numero_processo ?? '')}
-            </span>
-            <label className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 text-xs text-texto-2">
-              <input
-                type="checkbox"
-                className="accent-brand-600"
-                checked={p.tratada}
-                onChange={onToggle}
-              />
-              Tratada
-            </label>
-          </div>
-          {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-texto-2">
-              {info.cedente || '—'} v. {info.cessionario || '—'}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-shrink-0 flex-col items-end gap-2">
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
-            {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
-            {info.kind === 'requerimento' && (
-              <Badge tone="purple">Requerimento</Badge>
-            )}
-          </div>
-          <Button
-            size="sm"
-            icon={<ListChecks className="h-4 w-4" />}
-            onClick={onCriarTarefa}
-          >
-            Criar tarefa
-          </Button>
-        </div>
-      </div>
-
-      <div className="mt-3 text-xs text-texto-2">
-        Data de disponibilização: {formatDate(p.data_disponibilizacao)}
-      </div>
-
-      {texto && <TextoExpand text={texto} />}
-
-      {typeof raw.link === 'string' && raw.link && (
-        <div className="mt-2 text-xs">
-          <a
-            href={raw.link}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> Abrir no DJEN
-          </a>
-        </div>
+    // TRATADA ESMAECE (item "Novo" da amostra): continua legível, mas a vista
+    // passa por ela e para nas Novas. A borda esquerda grossa é a mesma dos
+    // cartões de Paralisados, aqui na cor da borda comum.
+    <Card
+      className={cn(
+        'grid gap-x-5 gap-y-2 border-l-4 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto]',
+        p.tratada && 'opacity-[.72]',
       )}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* A caixa ANTES do número (a amostra): marcar como tratada é o gesto
+              da tela, e o número é o que se lê em seguida. */}
+          <label
+            className="flex min-h-[24px] min-w-[24px] cursor-pointer items-center"
+            title={p.tratada ? 'Devolver para Novas' : 'Marcar como tratada'}
+          >
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-marca"
+              checked={p.tratada}
+              onChange={onToggle}
+            />
+            <span className="sr-only">Tratada</span>
+          </label>
+          <span className="font-semibold tabular-nums text-texto">
+            {formatCNJ(p.numero_processo ?? '')}
+          </span>
+          {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
+          <SeloDoVinculo info={info} />
+        </div>
+        <div className="mt-1 text-corpo text-texto-2">
+          {temPartes && (
+            <>
+              <Partes a={info.cedente} b={info.cessionario} /> ·{' '}
+            </>
+          )}
+          Data de disponibilização: {formatDate(p.data_disponibilizacao)}
+        </div>
+
+        {texto && <TextoExpand text={texto} />}
+
+        {typeof raw.link === 'string' && raw.link && (
+          <div className="mt-2 text-sm">
+            <a
+              href={raw.link}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-[24px] items-center gap-1 font-semibold text-marca-texto hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /> Abrir no DJEN
+            </a>
+          </div>
+        )}
+      </div>
+      {/* "Criar tarefa" SEMPRE NO MESMO CANTO (a amostra): o gesto que vem
+          depois de ler a publicação, no lugar onde a mão já sabe que está. */}
+      <div className="flex items-start sm:justify-end">
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<Plus className="h-4 w-4" />}
+          onClick={onCriarTarefa}
+        >
+          Criar tarefa
+        </Button>
+      </div>
     </Card>
   )
 }
@@ -631,7 +678,7 @@ function TextoExpand({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-2 text-sm text-texto">
+    <div className="mt-2 text-corpo text-texto-2">
       <div
         ref={ref}
         className={cn('whitespace-pre-line break-words', !expanded && 'line-clamp-4')}
@@ -642,7 +689,8 @@ function TextoExpand({ text }: { text: string }) {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-0.5 text-xs font-medium text-brand-600 hover:underline"
+          aria-expanded={expanded}
+          className="mt-0.5 min-h-[24px] text-sm font-semibold text-marca-texto hover:underline"
         >
           {expanded ? 'ler menos' : 'ler mais'}
         </button>
@@ -669,39 +717,48 @@ interface StatusRow {
   ultima_movimentacao: string | null
 }
 
-// Dias corridos desde uma data (YYYY-MM-DD), no mínimo 0.
-function diasDesde(dateStr: string): number {
-  const d = new Date(dateStr.length <= 10 ? `${dateStr}T00:00:00` : dateStr)
-  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000))
+// As cores de cada faixa de tempo parado (lib/paralisados.ts decide a faixa).
+// A ESCALA É A DA AMOSTRA, do âmbar ao vinho: o âmbar e o vermelho são os tokens
+// de aviso e de perigo; o laranja e o vinho do meio e do fim são fixos de
+// propósito — são degraus de uma escala graduada, sem papel próprio no tema.
+const COR_FAIXA: Record<FaixaParalisado, { borda: string; selo: string; legenda: string }> = {
+  aviso: {
+    borda: 'border-l-aviso-cheio',
+    selo: 'bg-aviso-fundo text-aviso ring-aviso-borda',
+    legenda: 'bg-aviso-cheio',
+  },
+  serio: {
+    borda: 'border-l-orange-400',
+    selo: 'bg-orange-50 text-orange-800 ring-orange-200',
+    legenda: 'bg-orange-400',
+  },
+  ruim: {
+    borda: 'border-l-perigo-cheio',
+    selo: 'bg-perigo-fundo text-perigo ring-perigo-borda',
+    legenda: 'bg-perigo-cheio',
+  },
+  critico: {
+    borda: 'border-l-red-900',
+    selo: 'bg-perigo-fundo text-perigo ring-perigo-borda',
+    legenda: 'bg-red-900',
+  },
 }
 
-// Badge de tempo sem movimentação: texto (dias → meses) e cor escalonando de
-// amarelo a vermelho (20–45 / 45–90 / 90–180 / +180 dias). null = nunca moveu.
-function badgeParalisado(dias: number | null): {
-  classes: string
-  texto: string
-  borda: string
-} {
-  if (dias == null)
-    return {
-      classes: 'bg-red-700 text-white',
-      texto: 'sem movimentação',
-      borda: 'border-l-red-700',
-    }
-  const texto = dias < 60 ? `há ${dias} dias` : `há ${Math.floor(dias / 30)} meses`
-  let classes = 'bg-amber-100 text-amber-700'
-  let borda = 'border-l-amber-400'
-  if (dias > 180) {
-    classes = 'bg-red-200 text-red-800'
-    borda = 'border-l-red-500'
-  } else if (dias > 90) {
-    classes = 'bg-red-100 text-red-700'
-    borda = 'border-l-red-400'
-  } else if (dias > 45) {
-    classes = 'bg-orange-100 text-orange-700'
-    borda = 'border-l-orange-400'
-  }
-  return { classes, texto, borda }
+/** A legenda das faixas (item "Novo" da amostra): a cor nunca fala sozinha. */
+function LegendaParalisados() {
+  return (
+    <ul
+      aria-label="Legenda do tempo sem movimentação"
+      className="mb-3 flex flex-wrap gap-x-4 gap-y-1.5 text-sm text-texto-2"
+    >
+      {LEGENDA_PARALISADO.map((l) => (
+        <li key={l.faixa} className="inline-flex items-center gap-1.5">
+          <span aria-hidden="true" className={cn('h-2.5 w-2.5 rounded-[3px]', COR_FAIXA[l.faixa].legenda)} />
+          {l.rotulo}
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 function Movimentacoes({ busca }: { busca: string }) {
@@ -769,7 +826,7 @@ function Movimentacoes({ busca }: { busca: string }) {
       const info = resolve(mov.numero_processo)
       m.set(mov.id, {
         texto: normalizarBusca(
-          [mov.numero_processo, mov.conteudo, info.cedente, info.cessionario]
+          [mov.numero_processo, mov.conteudo, info.cedente, info.cessionario, rotuloDoVinculo(info)]
             .filter(Boolean)
             .join(' '),
         ),
@@ -820,8 +877,9 @@ function Movimentacoes({ busca }: { busca: string }) {
   )
 
   // PARALISADOS: processos cadastrados/casados SEM movimento nos últimos 20
-  // dias. Ordenados do menos parado (última mov. mais recente) ao mais parado;
-  // quem nunca movimentou vai por último.
+  // dias. Ordenados DO MAIS PARADO AO MENOS PARADO (item "Novo" da amostra, a
+  // ordem inversa da de antes): o que pede ação vem primeiro. Quem nunca
+  // movimentou vai por último.
   const paralisados = useMemo(() => {
     let l = (status.data ?? [])
       .filter((s) => !numerosNovas.has(dig(s.numero_processo)))
@@ -831,7 +889,7 @@ function Movimentacoes({ busca }: { busca: string }) {
       l = l.filter((s) => {
         const info = resolve(s.numero_processo)
         if (
-          [s.numero_processo, info.cedente, info.cessionario]
+          [s.numero_processo, info.cedente, info.cessionario, rotuloDoVinculo(info)]
             .filter(Boolean)
             .some((v) => normalizarBusca(String(v)).includes(q))
         )
@@ -839,12 +897,7 @@ function Movimentacoes({ busca }: { busca: string }) {
         return qd.length >= 4 && dig(s.numero_processo).includes(qd)
       })
     }
-    return [...l].sort((a, b) => {
-      if (!a.ultima_movimentacao && !b.ultima_movimentacao) return 0
-      if (!a.ultima_movimentacao) return 1
-      if (!b.ultima_movimentacao) return -1
-      return b.ultima_movimentacao.localeCompare(a.ultima_movimentacao)
-    })
+    return ordenarParalisados(l, (s) => s.ultima_movimentacao)
   }, [status.data, numerosNovas, q, resolve])
 
   if (lista.isLoading) return <Loading label="Carregando movimentações…" />
@@ -860,25 +913,24 @@ function Movimentacoes({ busca }: { busca: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 text-sm text-texto-2">
+      <LinhaDeResumo>
         <span>
-          <strong>{totalMovs}</strong>{' '}
+          <strong className="text-texto">{totalMovs}</strong>{' '}
           {totalMovs === 1 ? 'movimentação' : 'movimentações'} nos últimos 20 dias
         </span>
         <SyncStatus
-          separador
           syncing={sync.isPending}
           updatedAt={lista.dataUpdatedAt}
           label="atualizando do ADVBOX…"
         />
-      </div>
+      </LinhaDeResumo>
 
       {total.data != null && (lista.data?.length ?? 0) < total.data && (
-        <p className="rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
+        <Aviso tom="aviso">
           Mostrando as {lista.data?.length} movimentações mais recentes de{' '}
           {total.data} na janela de 20 dias. Com o corte, um processo pode
           aparecer em Paralisados sem estar.
-        </p>
+        </Aviso>
       )}
 
       {/* status.isError entra na conta: sem isto, falha na consulta de status com
@@ -906,10 +958,14 @@ function Movimentacoes({ busca }: { busca: string }) {
                 />
               ))
             ) : (
-              <p className="text-sm text-texto-2">Nenhuma movimentação nova.</p>
+              <p className="text-corpo text-texto-2">Nenhuma movimentação nova.</p>
             )}
           </Secao>
-          <Secao titulo="Paralisados" qtd={paralisados.length}>
+          <Secao
+            titulo="Paralisados"
+            qtd={paralisados.length}
+            extra={paralisados.length > 0 ? <LegendaParalisados /> : null}
+          >
             {paralisados.length ? (
               paralisados.map((s) => (
                 <ProcessoParalisado
@@ -924,14 +980,14 @@ function Movimentacoes({ busca }: { busca: string }) {
               // exatamente o que aparecia quando a consulta de status falhava.
               // Dizer que nada está parado sem ter conseguido olhar é o pior
               // jeito de errar aqui.
-              <p className="text-sm text-aviso">
+              <p className="text-corpo text-aviso">
                 Não foi possível carregar o tempo sem movimentação dos processos:{' '}
                 {(status.error as Error).message}
               </p>
             ) : status.isLoading ? (
-              <p className="text-sm text-texto-2">Verificando…</p>
+              <p className="text-corpo text-texto-2">Verificando…</p>
             ) : (
-              <p className="text-sm text-texto-2">Nenhum processo paralisado.</p>
+              <p className="text-corpo text-texto-2">Nenhum processo paralisado.</p>
             )}
           </Secao>
         </>
@@ -941,8 +997,7 @@ function Movimentacoes({ busca }: { busca: string }) {
 }
 
 // Card de um processo. Por padrão mostra só o cabeçalho; clicar nele expande a
-// lista de andamentos (mais recente no topo). O chevron à direita indica o
-// estado de expansão.
+// lista de andamentos (mais recente no topo).
 function ProcessoMovimentacoes({
   numero,
   movs,
@@ -953,57 +1008,52 @@ function ProcessoMovimentacoes({
   info: ResolveInfo
 }) {
   const [aberto, setAberto] = useState(false)
-  const st = getLabel(STATUS_PROCESSO, info.status)
+  const temPartes = info.kind === 'credito' && (info.cedente || info.cessionario)
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden border-l-4">
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
         aria-expanded={aberto}
-        className="flex w-full items-start justify-between gap-2 p-4 text-left transition-colors hover:bg-superficie-2"
+        className="block w-full px-5 py-4 text-left transition-colors hover:bg-superficie-2"
       >
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-texto">
-            {formatCNJ(numero)}
-          </div>
-          {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-texto-2">
-              {info.cedente || '—'} v. {info.cessionario || '—'}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Badge tone="gray">
-              {movs.length} {movs.length === 1 ? 'andamento' : 'andamentos'}
-            </Badge>
-            {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
-            {info.kind === 'requerimento' && <Badge tone="purple">Requerimento</Badge>}
-          </div>
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-brand-600">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold tabular-nums text-texto">{formatCNJ(numero)}</span>
+          <SeloDoVinculo info={info} />
+          <Badge tone="gray">
+            {movs.length} {movs.length === 1 ? 'andamento' : 'andamentos'}
+          </Badge>
+          <span className="inline-flex items-center gap-1 text-sm font-semibold text-marca-texto">
             {aberto ? 'ocultar' : 'ver andamentos'}
             <ChevronDown
+              aria-hidden="true"
               className={cn('h-3.5 w-3.5 transition-transform', aberto && 'rotate-180')}
             />
           </span>
         </div>
+        {temPartes && (
+          <div className="mt-1 text-corpo text-texto-2">
+            <Partes a={info.cedente} b={info.cessionario} />
+          </div>
+        )}
       </button>
 
       {aberto && (
-        <ol className="space-y-3 border-t border-borda px-4 pb-4 pt-3">
+        <ol className="ml-6 space-y-3 border-l border-borda pb-4 pl-4 pr-5">
           {movs.map((m) => (
-            <li key={m.id} className="flex gap-3">
-              <div className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-brand-400" />
-              <div className="min-w-0">
-                <div className="text-xs font-medium text-texto-2">
-                  {formatDate(m.data)}
-                </div>
-                {m.conteudo && (
-                  <div className="whitespace-pre-line break-words text-sm text-texto">
-                    {m.conteudo}
-                  </div>
-                )}
+            <li key={m.id} className="relative">
+              <span
+                aria-hidden="true"
+                className="absolute -left-[21.5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-superficie bg-brand-400"
+              />
+              <div className="text-xs font-semibold tabular-nums text-texto-2">
+                {formatDate(m.data)}
               </div>
+              {m.conteudo && (
+                <div className="whitespace-pre-line break-words text-corpo text-texto">
+                  {m.conteudo}
+                </div>
+              )}
             </li>
           ))}
         </ol>
@@ -1012,9 +1062,9 @@ function ProcessoMovimentacoes({
   )
 }
 
-// Card de um processo paralisado: sem andamentos na janela. Mostra a última
-// movimentação conhecida e um badge de tempo (cor escalona de amarelo a
-// vermelho conforme o tempo parado).
+// Card de um processo paralisado: sem andamentos na janela. A gravidade do tempo
+// parado vira a borda esquerda e um selo com ícone e o tempo ESCRITO ("há 4
+// meses") — a cor nunca sozinha; a legenda acima da lista diz cada faixa.
 function ProcessoParalisado({
   numero,
   ultima,
@@ -1024,39 +1074,33 @@ function ProcessoParalisado({
   ultima: string | null
   info: ResolveInfo
 }) {
-  const dias = ultima ? diasDesde(ultima) : null
-  const b = badgeParalisado(dias)
-  const st = getLabel(STATUS_PROCESSO, info.status)
+  const dias = ultima ? diasParado(ultima) : null
+  const cor = COR_FAIXA[faixaParalisado(dias)]
+  const temPartes = info.kind === 'credito' && (info.cedente || info.cessionario)
   return (
-    // A gravidade do tempo parado vira borda esquerda colorida (o antigo
-    // opacity-60 fazia o card parecer desabilitado).
-    <Card className={cn('border-l-4 p-4', b.borda)}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-texto">{formatCNJ(numero)}</div>
-          {info.kind === 'credito' && (info.cedente || info.cessionario) && (
-            <div className="text-xs text-texto-2">
-              {info.cedente || '—'} v. {info.cessionario || '—'}
-            </div>
+    <Card className={cn('border-l-4 px-5 py-4', cor.borda)}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold tabular-nums text-texto">{formatCNJ(numero)}</span>
+        <SeloDoVinculo info={info} />
+        <span
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
+            cor.selo,
           )}
-          <div className="text-xs text-texto-2">
-            {ultima
-              ? `Última movimentação: ${formatDate(ultima)}`
-              : 'Sem movimentação registrada no ADVBOX'}
-          </div>
-        </div>
-        <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
-          <span
-            className={cn(
-              'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-              b.classes,
-            )}
-          >
-            {b.texto}
-          </span>
-          {info.kind === 'credito' && <Badge tone={st.tone}>{st.label}</Badge>}
-          {info.kind === 'requerimento' && <Badge tone="purple">Requerimento</Badge>}
-        </div>
+        >
+          <Clock className="h-3 w-3" aria-hidden="true" />
+          {textoParalisado(dias)}
+        </span>
+      </div>
+      <div className="mt-1 text-corpo text-texto-2">
+        {temPartes && (
+          <>
+            <Partes a={info.cedente} b={info.cessionario} /> ·{' '}
+          </>
+        )}
+        {ultima
+          ? `Última movimentação: ${formatDate(ultima)}`
+          : 'Sem movimentação registrada no ADVBOX'}
       </div>
     </Card>
   )
