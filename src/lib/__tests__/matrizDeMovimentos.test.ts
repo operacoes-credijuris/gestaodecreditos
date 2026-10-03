@@ -53,8 +53,9 @@ type Movimento = readonly [string, number, string]
  */
 //
 // O DESFECHO DA NEGOCIAÇÃO (onda 4 do redesenho) também entra, com o rótulo e o
-// papel de cada saída — "Fechado!", "Não fechou", "Sem resposta". Para quem não é
-// admin ele nem existe na aba (ver `abaParaQuemVe`), e as listas abaixo não mudam.
+// papel de cada saída — "Fechado!", "Não fechou", "Sem resposta". Desde
+// 03/10/2026 (decisão do dono) ele vale para todo mundo, e está nas listas abaixo.
+// O "Gerar contrato" não move card e não entra aqui: tem teste próprio.
 const movimentosDaAba = (a: Aba): Movimento[] => [
   ...a.acoes.map((x): Movimento => [x.label, x.statusId, x.papel]),
   ...[a.negociacao?.fechado, a.negociacao?.naoFechou, a.negociacao?.semResposta]
@@ -78,8 +79,8 @@ const COMBINACOES: [NomeDoFunil, SubdivisaoPrecatorio][] = [
 ]
 
 /** O que a tela oferece em cada aba, na ordem das abas e dos botões. */
-const daTela = (funil: NomeDoFunil, trilha: SubdivisaoPrecatorio): [string, Movimento[]][] =>
-  abasDoFunil(FUNIS[funil], espelhoDosTresFunis(), trilha).map((a) => [a.key, movimentosDaAba(a)])
+const daTela = (funil: NomeDoFunil, trilha: SubdivisaoPrecatorio, etapas = espelhoDosTresFunis()): [string, Movimento[]][] =>
+  abasDoFunil(FUNIS[funil], etapas, trilha).map((a) => [a.key, movimentosDaAba(a)])
 
 // ---------- O que a tela oferece, aba por aba ----------
 
@@ -92,6 +93,12 @@ const daTela = (funil: NomeDoFunil, trilha: SubdivisaoPrecatorio): [string, Movi
  * espelhar o kanban inteiro, na ordem do Kommo, e as nove colunas novas entram
  * como `col-<id>`, SÓ PARA LEITURA — nenhuma move nada. Os movimentos de antes
  * são exatamente os mesmos; só a ordem das abas segue o kanban.
+ *
+ * MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): os botões da onda 4 valem
+ * para todo mundo. A Revisão troca os três botões do card pelo Concluir — os
+ * MESMOS destinos, com os rótulos do Interno (etapa 9) —; a Diligência ganha o
+ * "Sanar", de volta à Revisão (etapa 8); e a Negociação, que segue só de leitura,
+ * ganha o desfecho (etapa 10b).
  */
 const MOVIMENTOS_RPV: [string, Movimento[]][] = [
   [
@@ -105,14 +112,21 @@ const MOVIMENTOS_RPV: [string, Movimento[]][] = [
   [
     'validacao',
     [
-      ['Aprovar', 107830035, 'aprovar'],
-      ['Diligência', 107830027, 'diligenciar'],
-      ['Reprovar', 107830031, 'reprovar'],
+      ['Aprovar crédito', 107830035, 'aprovar'],
+      ['Exigir diligência', 107830027, 'diligenciar'],
+      ['Reprovar crédito', 107830031, 'reprovar'],
     ],
   ],
-  ['diligencia', []],
+  ['diligencia', [['Sanar', 107272807, 'validar']]],
   ['aprovados', []],
-  ['col-107830039', []],
+  [
+    'col-107830039',
+    [
+      ['Fechado!', 107830043, 'fechar'],
+      ['Não fechou', 107830067, 'reprovar'],
+      ['Sem resposta', 112466388, 'reprovar'],
+    ],
+  ],
   ['col-107830043', []],
   ['col-107830047', []],
   ['col-107830051', []],
@@ -149,9 +163,19 @@ const MOVIMENTOS_INTERNO: [string, Movimento[]][] = [
   // DESDE A ONDA 2 (02/10/2026, só na beta) o Interno mostra o kanban inteiro,
   // na ordem do Kommo: as colunas novas são `col-<id>`, só leitura, e não movem
   // nada. Os movimentos de antes são exatamente os mesmos.
-  ['int-diligencia', []],
+  //
+  // MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): o "Sanar" da Diligência
+  // (de volta à Revisão) e o desfecho da Negociação, para todo mundo.
+  ['int-diligencia', [['Sanar', 111533944, 'validar']]],
   ['int-aprovados', []],
-  ['col-112466260', []],
+  [
+    'col-112466260',
+    [
+      ['Fechado!', 111533952, 'fechar'],
+      ['Não fechou', 112382612, 'reprovar'],
+      ['Sem resposta', 112465960, 'reprovar'],
+    ],
+  ],
   ['col-111533952', []],
   ['col-112466032', []],
   ['col-111533956', []],
@@ -182,7 +206,16 @@ const MOVIMENTOS_EXTERNO: [string, Movimento[]][] = [
   ['ext-encaminhar', [['Mover para Em precificação', 111533984, 'envioAosFundos']]],
   ['ext-precificacao', [['Escolher proposta', 111533988, 'escolhaDeProposta']]],
   ['ext-apresentacao', []],
-  ['col-112339984', []],
+  // MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): o desfecho da Negociação,
+  // para todo mundo. O "Sem resposta" (112346344) não está no espelho destes
+  // testes (29/09/2026), então a opção não aparece — ver o teste com ele.
+  [
+    'col-112339984',
+    [
+      ['Fechado!', 111533992, 'fechar'],
+      ['Não fechou', 111985976, 'reprovar'],
+    ],
+  ],
   ['ext-fechados', []],
   ['ext-documentacao', []],
   ['col-112341612', []],
@@ -211,18 +244,47 @@ describe('matriz de movimentos — o que cada aba oferece', () => {
    * mora na fileira de trabalho, e ela só aparece com 'dd' (ver o CardCredito em
    * AnaliseCredito.tsx). Aba agrupada sem 'dd' teria saídas que ninguém aciona
    * — foi o que a Revisão do Interno viveu antes de 28/09/2026.
+   *
+   * MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): o Concluir da Revisão do
+   * RPV vale para todo mundo, e a porta dele é a fileira de 'rpv' — o Concluir
+   * aparece em toda aba de trabalho (ver o CardCredito). As abas agrupadas estão
+   * escritas por extenso: aba nova agrupada, ou que deixou de ser, muda a lista.
    */
-  it("toda aba de desfecho agrupado é aba com 'dd'", () => {
-    let agrupadas = 0
+  it("toda aba de desfecho agrupado tem porta ('dd' ou 'rpv'), e são estas", () => {
+    const agrupadas: [string, string, string][] = []
     for (const [funil, trilha] of COMBINACOES) {
       for (const a of abasDoFunil(FUNIS[funil], espelhoDosTresFunis(), trilha)) {
         if (!a.desfechoAgrupado || a.acoes.length === 0) continue
-        agrupadas++
-        expect(botoesDaAba(FUNIS[funil], trilha, a), `${funil} · ${trilha} · ${a.label}`).toBe('dd')
+        const porta = botoesDaAba(FUNIS[funil], trilha, a)
+        expect(['dd', 'rpv'], `${funil} · ${trilha} · ${a.label}`).toContain(porta)
+        agrupadas.push([`${funil} · ${trilha}`, a.key, porta])
       }
     }
-    // int-analise, int-revisao, ext-qualificacao, ext-revisao.
-    expect(agrupadas).toBe(4)
+    expect(agrupadas).toEqual([
+      // A Revisão do RPV, nas duas trilhas que o RPV ignora.
+      ['RPV · interno', 'validacao', 'rpv'],
+      ['RPV · externo', 'validacao', 'rpv'],
+      ['Precatório · interno', 'int-analise', 'dd'],
+      ['Precatório · interno', 'int-revisao', 'dd'],
+      ['Precatório · externo', 'ext-qualificacao', 'dd'],
+      ['Precatório · externo', 'ext-revisao', 'dd'],
+    ])
+  })
+
+  /**
+   * O "GERAR CONTRATO" (onda 4): não move card — leva à Geração de contratos com
+   * o card no endereço —, por isso não está nas matrizes. Fica aqui, por extenso:
+   * SÓ na Elaboração de contratos do RPV, e em nenhuma aba do Precatório.
+   *
+   * MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): para todo mundo.
+   */
+  it('o "Gerar contrato": só na Elaboração de contratos do RPV', () => {
+    const comGerar = COMBINACOES.flatMap(([funil, trilha]) =>
+      abasDoFunil(FUNIS[funil], espelhoDosTresFunis(), trilha)
+        .filter((a) => a.gerarContrato)
+        .map((a) => `${funil} · ${trilha} · ${a.key}`),
+    )
+    expect(comGerar).toEqual(['RPV · interno · col-107830051', 'RPV · externo · col-107830051'])
   })
 })
 
@@ -260,8 +322,8 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
    * aceitar o desfecho da Negociação — Fechados (107830043), Não fechado
    * (107830067) e Sem resposta (112466388). EXATAMENTE ESSES TRÊS: a própria
    * Negociação (107830039) e a Oferta aos investidores (107830047) continuam
-   * recusadas. Nenhum botão da tela oficial move para eles (ver "o que o servidor
-   * aceita e nenhum botão oferece"); os botões vêm na beta, só para admin.
+   * recusadas. Os botões vieram na onda 4 e, desde 03/10/2026, são de todos (ver
+   * "todo destino aceito tem botão").
    */
   it('RPV: as colunas de `COLUNAS`', () => {
     expect(ordenado(Object.keys(COLUNAS).map(Number))).toEqual(
@@ -307,9 +369,9 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
         111534108, // REPROVADOS (da trilha)
         111533944, // REVISÃO — "Enviar para revisão" da Análise
         111533948, // PRODUÇÃO DE PROPOSTA — "Aprovar crédito" da Revisão
-        111533952, // Fechados — desfecho da Negociação (só servidor)
-        112382612, // Não fechados — desfecho da Negociação (só servidor)
-        112465960, // Sem resposta — desfecho da Negociação (só servidor)
+        111533952, // Fechados — desfecho da Negociação (botão na aba da Negociação)
+        112382612, // Não fechados — desfecho da Negociação (botão na aba da Negociação)
+        112465960, // Sem resposta — desfecho da Negociação (botão na aba da Negociação)
       ]),
     )
   })
@@ -326,9 +388,9 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
         111533976, // MEMORANDO DE NEGOCIAÇÃO — "Pedir memorando"
         111533984, // EM PRECIFICAÇÃO — o envio aos fundos
         111533988, // PRODUÇÃO DE PROPOSTA — a escolha da proposta
-        111533992, // FECHADOS — desfecho da Negociação (só servidor)
-        111985976, // NÃO FECHADO — desfecho da Negociação (só servidor)
-        112346344, // SEM RESPOSTA — desfecho da Negociação (só servidor)
+        111533992, // FECHADOS — desfecho da Negociação (botão na aba da Negociação)
+        111985976, // NÃO FECHADO — desfecho da Negociação (botão na aba da Negociação)
+        112346344, // SEM RESPOSTA — desfecho da Negociação (botão na aba da Negociação)
       ]),
     )
   })
@@ -379,15 +441,25 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
 })
 
 /**
- * A TELA E O SERVIDOR CONCORDAM. Todo movimento que a tela oferece o servidor
- * aceita (senão o botão existe e o card não se move); e o que o servidor aceita
- * sem botão nenhum fica dito aqui, para não crescer em silêncio.
+ * O ESPELHO COMO O KANBAN ESTÁ (kommo_etapa de 02/10/2026): o dos testes, mais o
+ * "SEM RESPOSTA" do Externo (112346344), que o espelho dos testes (29/09/2026)
+ * não tem. Sem a coluna no espelho, a opção não vira botão — é a regra de sempre
+ * ("melhor sem a opção do que um botão que move para lugar nenhum").
+ */
+const espelhoComSemRespostaDoExterno = () => [
+  ...espelhoDosTresFunis(),
+  { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 112346344, pipeline_nome: null, nome: 'SEM RESPOSTA', ordem: 14.5, tipo: 0 },
+]
+
+/**
+ * A TELA E O SERVIDOR CONCORDAM, NOS DOIS SENTIDOS. Todo movimento que a tela
+ * oferece o servidor aceita (senão o botão existe e o card não se move); e todo
+ * destino que o servidor aceita tem botão na tela — o que fica sem botão está
+ * dito aqui, por extenso, para não crescer em silêncio.
  */
 describe('a tela e o servidor concordam', () => {
-  const etapas = espelhoDosTresFunis()
-
   /** Os destinos que a tela oferece para os cards de um funil. */
-  const oferecidos = (pipelineId: number): Set<number> => {
+  const oferecidos = (pipelineId: number, etapas = espelhoDosTresFunis()): Set<number> => {
     const ids = new Set<number>()
     const trilha = SUBDIVISOES_PRECATORIO.find((s) => s.pipelineId === pipelineId)
     const abas =
@@ -409,26 +481,32 @@ describe('a tela e o servidor concordam', () => {
     it(`${nome}: todo destino oferecido é aceito pelo servidor`, () => {
       const permitidos = aceitos(pipelineId)
       for (const id of oferecidos(pipelineId)) expect(permitidos, String(id)).toContain(id)
+      for (const id of oferecidos(pipelineId, espelhoComSemRespostaDoExterno())) {
+        expect(permitidos, String(id)).toContain(id)
+      }
     })
   }
 
   /**
-   * O QUE O SERVIDOR ACEITA SEM BOTÃO NA TELA. No RPV, a Análise (107272803):
-   * nenhum botão move para lá hoje, e a `kommo-mover` aceita. Botão novo para a
-   * Análise — ou destino novo sem botão — muda esta lista.
+   * TODO DESTINO QUE O SERVIDOR ACEITA TEM BOTÃO. A única exceção é a Análise do
+   * RPV (107272803), de sempre: nenhum botão volta o card para lá, e a
+   * `kommo-mover` aceita. Botão novo para a Análise — ou destino novo sem botão —
+   * muda esta lista.
    *
-   * MUDOU DE PROPÓSITO EM 02/10/2026 (etapa 10a): + os três destinos do desfecho
-   * da Negociação em cada funil. O servidor os aceita e a tela OFICIAL não
-   * oferece botão nenhum para eles — é o princípio da etapa: o servidor primeiro,
-   * os botões depois, na beta e só para admin. Quando os botões chegarem à
-   * oficial, saem daqui.
+   * MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): até aqui a lista tinha
+   * também os três destinos do desfecho da Negociação de cada funil — o servidor
+   * os aceitava (etapa 10a) e só o admin tinha o botão. Com os botões da onda 4
+   * para todo mundo, eles saíram: agora têm botão, na aba da Negociação.
    */
-  it('o que o servidor aceita e nenhum botão oferece', () => {
-    const semBotao = (pipelineId: number) =>
-      ordenado(aceitos(pipelineId).filter((id) => !oferecidos(pipelineId).has(id)))
-    expect(semBotao(FUNIL_RPV)).toEqual(ordenado([107272803, 107830043, 107830067, 112466388]))
-    expect(semBotao(FUNIL_PRECATORIO_INTERNO)).toEqual(ordenado([111533952, 112382612, 112465960]))
-    expect(semBotao(FUNIL_PRECATORIO_EXTERNO)).toEqual(ordenado([111533992, 111985976, 112346344]))
+  it('todo destino aceito tem botão (só a Análise do RPV fica sem, de sempre)', () => {
+    const semBotao = (pipelineId: number, etapas = espelhoComSemRespostaDoExterno()) =>
+      ordenado(aceitos(pipelineId).filter((id) => !oferecidos(pipelineId, etapas).has(id)))
+    expect(semBotao(FUNIL_RPV)).toEqual([107272803])
+    expect(semBotao(FUNIL_PRECATORIO_INTERNO)).toEqual([])
+    expect(semBotao(FUNIL_PRECATORIO_EXTERNO)).toEqual([])
+    // NO ESPELHO DOS TESTES, sem a coluna "SEM RESPOSTA" do Externo, a opção não
+    // vira botão — e o destino fica aceito sem botão, só ele.
+    expect(semBotao(FUNIL_PRECATORIO_EXTERNO, espelhoDosTresFunis())).toEqual([112346344])
   })
 
   /**
@@ -444,77 +522,31 @@ describe('a tela e o servidor concordam', () => {
   })
 })
 
-// ---------- A visão de administrador (onda 4 do redesenho) ----------
+// ---------- Os botões da onda 4 do redesenho ----------
 
 /**
- * O QUE O ADMINISTRADOR VÊ A MAIS — escrito por extenso, como o resto. Entrou DE
- * PROPÓSITO na onda 4 (02/10/2026): os botões que movem card de um jeito novo
- * aparecem primeiro só para admin (`soAdmin`, filtrado em `abaParaQuemVe`), porque
- * mover card no Kommo dispara as automações e não se desfaz, e a beta usa o Kommo
- * de verdade. Tudo o que está acima — a visão de quem não é admin — continua igual.
+ * O ADMINISTRADOR VÊ O MESMO QUE TODO MUNDO. Na onda 4 (02/10/2026) os botões que
+ * movem card de um jeito novo apareciam primeiro só para admin (`soAdmin`,
+ * filtrado em `abaParaQuemVe`), e esta seção escrevia o que o admin via a mais.
  *
- * O que muda para o admin, e só isto:
- *   - RPV, Revisão: o Concluir no lugar dos três botões — os MESMOS destinos, com
- *     os rótulos do Interno (etapa 9);
- *   - RPV e Interno, Diligência: "Sanar", de volta à Revisão (etapa 8);
- *   - a Negociação dos três funis: "Fechado!", "Não fechou", "Sem resposta"
- *     (etapa 10b). No Externo, o "Sem resposta" (112346344) não está no espelho
- *     destes testes (29/09/2026), então a opção não aparece — ver o teste com ele.
+ * MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): os botões são de todos
+ * (`BOTOES_NOVOS_PARA_TODOS`), e as matrizes de cima já os trazem. O que fica
+ * aqui é que a visão do admin é exatamente a mesma matriz — a chave desligada,
+ * ou um botão novo só de admin, derruba estes testes.
  */
 const daTelaDoAdmin = (funil: NomeDoFunil, trilha: SubdivisaoPrecatorio, etapas = espelhoDosTresFunis()) =>
   abasDoFunil(FUNIS[funil], etapas, trilha, { admin: true }).map((a): [string, Movimento[]] => [a.key, movimentosDaAba(a)])
 
-/** A matriz de quem não é admin, com as linhas do admin trocadas. */
-const comAdmin = (base: [string, Movimento[]][], troca: Record<string, Movimento[]>) =>
-  base.map(([k, m]): [string, Movimento[]] => [k, troca[k] ?? m])
-
-describe('matriz de movimentos — a visão de administrador (onda 4)', () => {
-  it('RPV: o Concluir da Revisão, o Sanar e o desfecho da Negociação', () => {
-    const esperado = comAdmin(MOVIMENTOS_RPV, {
-      validacao: [
-        ['Aprovar crédito', 107830035, 'aprovar'],
-        ['Exigir diligência', 107830027, 'diligenciar'],
-        ['Reprovar crédito', 107830031, 'reprovar'],
-      ],
-      diligencia: [['Sanar', 107272807, 'validar']],
-      'col-107830039': [
-        ['Fechado!', 107830043, 'fechar'],
-        ['Não fechou', 107830067, 'reprovar'],
-        ['Sem resposta', 112466388, 'reprovar'],
-      ],
-    })
-    expect(daTelaDoAdmin('RPV', 'interno')).toEqual(esperado)
-    expect(daTelaDoAdmin('RPV', 'externo')).toEqual(esperado)
+describe('matriz de movimentos — os botões da onda 4, para todo mundo', () => {
+  it('o admin vê exatamente as matrizes de todo mundo', () => {
+    expect(daTelaDoAdmin('RPV', 'interno')).toEqual(MOVIMENTOS_RPV)
+    expect(daTelaDoAdmin('RPV', 'externo')).toEqual(MOVIMENTOS_RPV)
+    expect(daTelaDoAdmin('Precatório', 'interno')).toEqual(MOVIMENTOS_INTERNO)
+    expect(daTelaDoAdmin('Precatório', 'externo')).toEqual(MOVIMENTOS_EXTERNO)
   })
 
-  it('Precatório Interno: o Sanar e o desfecho da Negociação', () => {
-    expect(daTelaDoAdmin('Precatório', 'interno')).toEqual(
-      comAdmin(MOVIMENTOS_INTERNO, {
-        'int-diligencia': [['Sanar', 111533944, 'validar']],
-        'col-112466260': [
-          ['Fechado!', 111533952, 'fechar'],
-          ['Não fechou', 112382612, 'reprovar'],
-          ['Sem resposta', 112465960, 'reprovar'],
-        ],
-      }),
-    )
-  })
-
-  it('Precatório Externo: o desfecho da Negociação (o Sanar já era de todos)', () => {
-    expect(daTelaDoAdmin('Precatório', 'externo')).toEqual(
-      comAdmin(MOVIMENTOS_EXTERNO, {
-        'col-112339984': [
-          ['Fechado!', 111533992, 'fechar'],
-          ['Não fechou', 111985976, 'reprovar'],
-        ],
-      }),
-    )
-    // COM O "SEM RESPOSTA" NO ESPELHO (kommo_etapa de 02/10/2026), a opção entra.
-    const comSemResposta = [
-      ...espelhoDosTresFunis(),
-      { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 112346344, pipeline_nome: null, nome: 'SEM RESPOSTA', ordem: 14.5, tipo: 0 },
-    ]
-    const neg = daTelaDoAdmin('Precatório', 'externo', comSemResposta).find(([k]) => k === 'col-112339984')!
+  it('Externo: com o "SEM RESPOSTA" no espelho, a opção entra na Negociação', () => {
+    const neg = daTela('Precatório', 'externo', espelhoComSemRespostaDoExterno()).find(([k]) => k === 'col-112339984')!
     expect(neg[1]).toEqual([
       ['Fechado!', 111533992, 'fechar'],
       ['Não fechou', 111985976, 'reprovar'],
@@ -524,43 +556,9 @@ describe('matriz de movimentos — a visão de administrador (onda 4)', () => {
 
   it('sem espelho ainda, a Negociação do precatório não oferece nada (destino não resolvido)', () => {
     for (const trilha of ['interno', 'externo'] as const) {
-      for (const a of abasDoFunil(FUNIL_PRECATORIO, [], trilha, { admin: true })) {
+      for (const a of abasDoFunil(FUNIL_PRECATORIO, [], trilha)) {
         expect(a.negociacao, `${trilha} · ${a.key}`).toBeUndefined()
       }
-    }
-  })
-
-  // A PORTA DO CONCLUIR: no admin, a Revisão do RPV também é agrupada — com 'rpv'.
-  it("toda aba de desfecho agrupado tem porta ('dd' ou 'rpv')", () => {
-    let agrupadas = 0
-    for (const [funil, trilha] of COMBINACOES) {
-      for (const a of abasDoFunil(FUNIS[funil], espelhoDosTresFunis(), trilha, { admin: true })) {
-        if (!a.desfechoAgrupado || a.acoes.length === 0) continue
-        agrupadas++
-        expect(['dd', 'rpv'], `${funil} · ${trilha} · ${a.label}`).toContain(botoesDaAba(FUNIS[funil], trilha, a))
-      }
-    }
-    // As 4 de antes, mais a Revisão do RPV nas duas trilhas que o RPV ignora.
-    expect(agrupadas).toBe(6)
-  })
-
-  // TODO DESTINO NOVO É ACEITO PELO SERVIDOR, e o que sobra sem botão encolhe.
-  it('todo destino que o admin vê é aceito pelo servidor', () => {
-    const etapas = espelhoDosTresFunis()
-    const casos = [
-      [FUNIL_RPV, abasDoFunil(FUNIL_RPV, etapas, null, { admin: true }), Object.keys(COLUNAS).map(Number)],
-      [FUNIL_PRECATORIO_INTERNO, abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno', { admin: true }), idsDestinoDaTrilha(FUNIL_PRECATORIO_INTERNO)],
-      [FUNIL_PRECATORIO_EXTERNO, abasDoFunil(FUNIL_PRECATORIO, etapas, 'externo', { admin: true }), idsDestinoDaTrilha(FUNIL_PRECATORIO_EXTERNO)],
-    ] as const
-    for (const [funil, abas, aceitos] of casos) {
-      const oferecidos = new Set(abas.flatMap((a) => movimentosDaAba(a).map(([, id]) => id)))
-      for (const id of oferecidos) expect(aceitos as readonly number[], `${funil} · ${id}`).toContain(id)
-      // O QUE O SERVIDOR ACEITA E NEM O ADMIN TEM BOTÃO: a Análise do RPV (de
-      // sempre) e o "Sem resposta" do Externo, ausente do espelho destes testes.
-      const semBotao = ordenado(aceitos.filter((id) => !oferecidos.has(id) && id !== acaoDeReprovar(funil, etapas)?.statusId))
-      expect(semBotao, String(funil)).toEqual(
-        funil === FUNIL_RPV ? [107272803] : funil === FUNIL_PRECATORIO_EXTERNO ? [112346344] : [],
-      )
     }
   })
 })

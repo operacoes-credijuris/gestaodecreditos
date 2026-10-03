@@ -29,6 +29,7 @@ import {
   type CardParaContrato,
   type PreenchimentoDoCard,
 } from '@/lib/contratoDoCard'
+import { BOTOES_NOVOS_PARA_TODOS } from '@/lib/kommo'
 import { useInvestidorDados } from '@/lib/queries'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -223,7 +224,7 @@ function GerarPanel() {
     }
   }, [categoria, recargaOriginadores])
 
-  // ------------------------- "GERAR CONTRATO" A PARTIR DO CARD (onda 4, só admin)
+  // ------------------------- "GERAR CONTRATO" A PARTIR DO CARD (onda 4, para todos)
   //
   // A Análise de crédito abre esta tela com `?card=<id>` (só o id). O card é lido
   // do ESPELHO (kommo_leads — leitura, nada é gravado), e a tela preenche a
@@ -231,10 +232,15 @@ function GerarPanel() {
   // só é escolhido DELA (`originadorAAplicar`): um nome fora da lista faria o
   // `gerar-contrato` criar uma pasta nova. Nada é gerado sozinho — o botão
   // continua sendo o da pessoa.
+  //
+  // PARA TODOS DESDE 03/10/2026, como o botão do card (`BOTOES_NOVOS_PARA_TODOS`):
+  // até aqui só o admin tinha o botão, e só para ele o card era lido. Com o botão
+  // para todo mundo e esta leitura presa ao admin, quem não é admin clicaria em
+  // "Gerar contrato" e chegaria a um formulário vazio, sem aviso nenhum.
   const { isAdmin } = useAuth()
   const [parametros, setParametros] = useSearchParams()
   const navegar = useNavigate()
-  const cardPedido = isAdmin ? cardDoEndereco(parametros.get('card')) : null
+  const cardPedido = isAdmin || BOTOES_NOVOS_PARA_TODOS ? cardDoEndereco(parametros.get('card')) : null
   const [doCard, setDoCard] = useState<PreenchimentoDoCard | null>(null)
   const [erroDoCard, setErroDoCard] = useState<string | null>(null)
   /** O originador do card já foi aplicado: nunca de novo (a escolha à mão fica). */
@@ -406,7 +412,7 @@ function GerarPanel() {
 
   return (
     <div ref={topo}>
-      {/* VINDO DO CARD (onda 4, só admin): o que foi preenchido, o que falta e o
+      {/* VINDO DO CARD (onda 4, para todos): o que foi preenchido, o que falta e o
           caminho de volta. O originador só se diz escolhido depois da lista. */}
       {(doCard || erroDoCard) && cardPedido !== null && (
         <div

@@ -1890,7 +1890,8 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
 }
 
 /**
- * O "FECHADO!" DA NEGOCIAÇÃO (onda 4 do redesenho, etapa 10b — só admin): o
+ * O "FECHADO!" DA NEGOCIAÇÃO (onda 4 do redesenho, etapa 10b — para todos desde
+ * 03/10/2026, ver `BOTOES_NOVOS_PARA_TODOS`): o
  * cedente aceitou a proposta. Confirma num passo, numa caixa presa ao botão
  * (amostra, `confirmarFechado`), com uma anotação opcional.
  *
@@ -2013,7 +2014,8 @@ function BotaoFechado({
 }
 
 /**
- * O "NÃO FECHOU" DA NEGOCIAÇÃO (onda 4 do redesenho, etapa 10b — só admin): o
+ * O "NÃO FECHOU" DA NEGOCIAÇÃO (onda 4 do redesenho, etapa 10b — para todos desde
+ * 03/10/2026, ver `BOTOES_NOVOS_PARA_TODOS`): o
  * cedente recusou (vai para Não fechado/s) ou sumiu (vai para Sem resposta), com
  * o motivo escrito — pelo menos 10 caracteres — e motivos de um clique (amostra,
  * `janelaNaoFechou`).
@@ -2334,7 +2336,7 @@ function CardCredito({
   /** Densidade compacta (preferência da pessoa). */
   compacto: boolean
   /**
-   * O desfecho da Negociação no card (onda 4 — só chega aqui para admin, ver
+   * O desfecho da Negociação no card (onda 4 — para todos desde 03/10/2026, ver
    * `abaParaQuemVe`): o "Fechado!" e o "Não fechou".
    */
   negociacao?: {
@@ -2344,7 +2346,7 @@ function CardCredito({
     onFechado: (l: KommoLead, nota: string) => Promise<void>
     onNaoFechou: (l: KommoLead) => void
   }
-  /** Leva à Geração de contratos com este card (onda 4 — só admin). Não move card. */
+  /** Leva à Geração de contratos com este card (onda 4 — para todos desde 03/10/2026). Não move card. */
   onGerarContrato?: (l: KommoLead) => void
   /** O card que o endereço apontou ("Voltar ao card"): moldura de destaque, sem abrir nada. */
   realcado?: boolean
@@ -2807,7 +2809,7 @@ function CardCredito({
           {botoes === 'rpv' && (
             <Button
               size="sm"
-              // CONTORNADO TAMBÉM COM O CONCLUIR (a Revisão do RPV, para admin):
+              // CONTORNADO TAMBÉM COM O CONCLUIR (a Revisão do RPV, onda 4):
               // lá o desfecho é que avança.
               variant={(desfechoNoCard && acoes.length > 0) || onConcluir ? 'secondary' : 'primary'}
               className={BTN}
@@ -2848,9 +2850,9 @@ function CardCredito({
           {/* CONCLUIR FECHA A ETAPA, e fica à direita da análise porque é o que
               vem depois dela. O AZUL DA MARCA: concluir também é recusar, e
               verde ficaria errado. EM TODA ABA DE TRABALHO, e não só nas de 'dd':
-              a Revisão do RPV ('rpv') o ganha para admin (onda 4). Para quem não
-              é admin nada muda — o Concluir só chega às abas agrupadas, todas de
-              'dd' (matrizDeMovimentos.test.ts). */}
+              a Revisão do RPV ('rpv') o ganha na onda 4 — para todos desde
+              03/10/2026. As abas agrupadas, e a porta de cada uma ('dd' ou
+              'rpv'), estão em matrizDeMovimentos.test.ts. */}
           {botoes !== 'nenhum' && onConcluir && (
             <Button
               size="sm"
@@ -2919,7 +2921,7 @@ function CardCredito({
             </Button>
           )}
 
-          {/* A NEGOCIAÇÃO (onda 4, só admin): o cedente respondeu. O negativo
+          {/* A NEGOCIAÇÃO (onda 4, para todos desde 03/10/2026): o cedente respondeu. O negativo
               contornado à esquerda, o positivo em destaque à direita (amostra). */}
           {negociacao && (negociacao.opcoes.naoFechou || negociacao.opcoes.semResposta) && (
             <Button
@@ -2943,7 +2945,7 @@ function CardCredito({
             />
           )}
 
-          {/* "GERAR CONTRATO" (onda 4, só admin): abre a Geração de contratos com
+          {/* "GERAR CONTRATO" (onda 4, para todos desde 03/10/2026): abre a Geração de contratos com
               este card no endereço. Não move o card. */}
           {onGerarContrato && (
             <Button
@@ -3201,8 +3203,10 @@ export default function AnaliseCredito() {
     statusId: number
   } | null>(null)
   // Análise automática (Judit + due diligence + planilha) por card.
-  // `isAdmin` LIBERA OS BOTÕES DA ONDA 4 (os que movem card de um jeito novo e o
-  // "Gerar contrato"): ver `abaParaQuemVe`. Quem não é admin vê a tela da onda 2.
+  // `isAdmin` VAI PARA `abasDoFunil`, que libera o que é `soAdmin`. OS BOTÕES DA
+  // ONDA 4 (os que movem card de um jeito novo e o "Gerar contrato") são de TODO
+  // MUNDO desde 03/10/2026 (`BOTOES_NOVOS_PARA_TODOS`, ver `abaParaQuemVe`); o
+  // `isAdmin` segue passado para o próximo lançamento por etapas.
   const { user: authUser, profile: authProfile, isAdmin } = useAuth()
   const analistaNome = authProfile?.nome || authUser?.email || 'Usuário'
   // A análise de RPV abre uma JANELA (AnaliseRpvModal): preliminar, conversa e
@@ -4110,7 +4114,9 @@ export default function AnaliseCredito() {
   }, [])
 
   const abas = useMemo(
-    // A VISÃO DE QUEM ESTÁ LOGADO: o que é `soAdmin` só entra para o admin.
+    // A VISÃO DE QUEM ESTÁ LOGADO: o que é `soAdmin` só entra para o admin — salvo
+    // com `BOTOES_NOVOS_PARA_TODOS` ligado (a onda 4, desde 03/10/2026), quando
+    // entra para todos.
     () => abasDoFunil(funil, etapas.data ?? [], subdivisao, { admin: isAdmin }),
     [funil, etapas.data, subdivisao, isAdmin],
   )
@@ -4251,7 +4257,7 @@ export default function AnaliseCredito() {
   const achadosNoFunil = busca.trim() ? achadosDaBusca(abas, porAbaNaBusca, abaAtual, true) : []
   const achadosEmOutrasAbas = busca.trim() ? achadosDaBusca(abas, porAbaNaBusca, abaAtual, false) : []
 
-  // ---------------------------------------- "VOLTAR AO CARD" (onda 4, só admin)
+  // ---------------------------------------- "VOLTAR AO CARD" (onda 4, para todos)
   //
   // A Geração de contratos aberta pelo card volta para cá com `?card=<id>`. O
   // PARÂMETRO SÓ REALÇA E ROLA ATÉ O CARD — NUNCA abre janela nem move nada (a
@@ -4740,10 +4746,11 @@ export default function AnaliseCredito() {
     setMensagemDoCard({ lead, acoes, titulo: 'Concluir a qualificação' })
   }
 
-  // ------------------------------------------------ ONDA 4: SÓ PARA ADMIN
+  // ------------------------------------------------ ONDA 4: PARA TODOS (03/10/2026)
   //
-  // Os handlers abaixo só são chamados por botões que `abaParaQuemVe` entrega ao
-  // administrador. NENHUM DELES RODA SOZINHO: nada move ao abrir a tela, ao
+  // Os handlers abaixo só são chamados pelos botões da onda 4 que `abaParaQuemVe`
+  // entrega — a todo mundo desde 03/10/2026 (`BOTOES_NOVOS_PARA_TODOS`), antes só
+  // ao administrador. NENHUM DELES RODA SOZINHO: nada move ao abrir a tela, ao
   // carregar os cards ou por parâmetro de endereço — só pelo clique.
 
   /** O nome de uma coluna, como a tela a mostra (o rótulo da aba dela). */
@@ -5309,8 +5316,9 @@ export default function AnaliseCredito() {
                   resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
                   botoes={botoesDoCard}
                   onCertidoes={abaAtual?.certidoes ? onCertidoes : undefined}
-                  // ONDA 4, SÓ ADMIN: os campos só existem na aba de quem é admin
-                  // (`abaParaQuemVe`); para os outros, nada disto é passado.
+                  // ONDA 4: os campos só existem na aba que `abaParaQuemVe`
+                  // entrega com eles — a todos desde 03/10/2026; sem eles, nada
+                  // disto é passado.
                   negociacao={
                     abaAtual?.negociacao
                       ? {
@@ -5384,7 +5392,7 @@ export default function AnaliseCredito() {
               : ''
           }
           // A CAIXA DO RESUMO (onda 4): no Concluir do RPV — várias saídas, uma
-          // delas aprovar —, que só chega ao admin. Fora dele, a janela de sempre.
+          // delas aprovar —, para todos desde 03/10/2026. Fora dele, a janela de sempre.
           resumo={
             mensagemDoCard.lead.pipeline_id === FUNIL_RPV &&
             mensagemDoCard.acoes.length > 1 &&

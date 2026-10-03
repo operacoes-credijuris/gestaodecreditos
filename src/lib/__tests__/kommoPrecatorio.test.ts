@@ -253,12 +253,19 @@ describe('abas do Interno', () => {
 
   // Das terminais o card não volta pelo app: de Aprovados e Reprovados não se
   // sai, a diligência quem devolve é o comercial, e o protocolo é dele também.
-  it('as abas terminais não oferecem desfecho', () => {
-    for (const key of ['int-aprovados', 'int-diligencia', 'int-reprovados', 'int-protocolo']) {
+  // MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): o "Sanar" da Diligência
+  // (onda 4) passou a valer para todo mundo — a Diligência deixou de ser terminal:
+  // tem um botão só, de volta à Revisão, sem desfecho agrupado. As outras seguem
+  // sem nada.
+  it('as abas terminais não oferecem desfecho; a Diligência só o Sanar', () => {
+    for (const key of ['int-aprovados', 'int-reprovados', 'int-protocolo']) {
       const aba = daChave(key)
       expect(aba.acoes, key).toEqual([])
       expect(aba.desfechoAgrupado, key).toBe(false)
     }
+    const dil = daChave('int-diligencia')
+    expect(dil.acoes.map((a) => [a.label, a.statusId, a.papel])).toEqual([['Sanar', idDe('Revisão'), 'validar']])
+    expect(dil.desfechoAgrupado).toBe(false)
   })
 
   // O ID VEM DO ESPELHO, e coluna que ele não tem não vira botão: melhor a aba
@@ -276,6 +283,10 @@ describe('abas do Interno', () => {
    * ficavam fora da tela; agora aparecem para a equipe acompanhar o crédito até
    * o fim — sem botão de trabalho (nem análise nem due diligence, que são
    * pagas) e sem desfecho nenhum.
+   *
+   * A NEGOCIAÇÃO É A EXCEÇÃO desde 03/10/2026 (decisão do dono): continua só de
+   * leitura, mas leva o desfecho da Negociação (onda 4), agora para todo mundo.
+   * Ele mora no campo `negociacao`, não em `acoes`.
    */
   it('as colunas do comercial viram aba só de leitura', () => {
     for (const nome of [
@@ -290,6 +301,7 @@ describe('abas do Interno', () => {
       const aba = abas.find((a) => a.statusIds[0] === idDe(nome))!
       expect(aba, nome).toMatchObject({ key: `col-${idDe(nome)}`, soLeitura: true, acoes: [] })
       expect(botoesDaAba(FUNIL_PRECATORIO, 'interno', aba), nome).toBe('nenhum')
+      expect(Boolean(aba.negociacao), nome).toBe(nome === 'Negociação')
     }
   })
 
@@ -1130,7 +1142,12 @@ describe('RPV não é afetado pela subdivisão', () => {
   // MUDOU DE PROPÓSITO NA ETAPA 7 (02/10/2026): eram as seis telas curadas, com
   // os rótulos da plataforma; agora é o kanban inteiro, com os nomes do Kommo
   // (decisão do dono), nas quatro fases. Os botões de mover são os mesmos.
-  it('devolve o kanban inteiro nas quatro fases, com os botões de mover de antes', () => {
+  //
+  // MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): os botões da onda 4 são de
+  // todo mundo — a Revisão troca os três botões pelo Concluir (mesmos destinos),
+  // a Diligência ganha o Sanar, a Negociação o desfecho e a Elaboração de
+  // contratos o "Gerar contrato". A matriz completa está em matrizDeMovimentos.
+  it('devolve o kanban inteiro nas quatro fases, com os botões de mover', () => {
     // A subdivisão é um eixo só do Precatório. Passá-la aqui não pode mudar nada.
     const abas = abasDoFunil(FUNIL_RPV, espelho(), 'externo')
     expect(abas).toEqual(abasDoFunil(FUNIL_RPV, espelho(), 'interno'))
@@ -1159,10 +1176,16 @@ describe('RPV não é afetado pela subdivisão', () => {
       'Não fechado',
     ])
     expect(abas.find((a) => a.key === 'validacao')!.acoes).toHaveLength(3)
+    expect(abas.find((a) => a.key === 'validacao')!.desfechoAgrupado).toBe(true)
     expect(abas.find((a) => a.key === 'pendentes')!.acoes).toHaveLength(3)
-    // NENHUMA OUTRA ABA MOVE CARD — nem as seis de antes além destas duas, nem as
-    // nove colunas novas, que são só leitura.
-    expect(abas.filter((a) => a.acoes.length > 0).map((a) => a.key)).toEqual(['pendentes', 'validacao'])
+    expect(abas.find((a) => a.key === 'diligencia')!.acoes.map((a) => a.label)).toEqual(['Sanar'])
+    // NENHUMA OUTRA ABA TEM BOTÃO DE DESFECHO — nem as seis de antes além destas
+    // três, nem as nove colunas novas, que são só leitura.
+    expect(abas.filter((a) => a.acoes.length > 0).map((a) => a.key)).toEqual(['pendentes', 'validacao', 'diligencia'])
+    // DAS SÓ DE LEITURA, a Negociação leva o desfecho e a Elaboração de contratos
+    // o "Gerar contrato" — e nenhuma outra.
+    expect(abas.filter((a) => a.negociacao).map((a) => a.label)).toEqual(['Negociação'])
+    expect(abas.filter((a) => a.gerarContrato).map((a) => a.label)).toEqual(['Elaboração de contratos'])
     expect(abas.filter((a) => a.soLeitura).every((a) => a.key.startsWith('col-'))).toBe(true)
     expect(abas.filter((a) => a.soLeitura)).toHaveLength(9)
   })

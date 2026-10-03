@@ -564,6 +564,9 @@ export interface AcaoTela {
    * esta marca, e `abaParaQuemVe` a tira de quem não é admin. NÃO É PROTEÇÃO: a
    * `kommo-mover` só confere usuário ativo (plano, achado 2). É controle de
    * liberação na tela — quem não é admin vê a tela da onda 2.
+   *
+   * DESDE 03/10/2026 a marca não esconde nada: `BOTOES_NOVOS_PARA_TODOS` libera
+   * os botões da onda 4 para todo mundo. Ela fica para o próximo lançamento.
    */
   soAdmin?: boolean
 }
@@ -630,11 +633,12 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   protocolo: [],
 }
 
-// ---------- Onda 4 do redesenho: os movimentos novos, SÓ PARA ADMIN ----------
+// ---------- Onda 4 do redesenho: os movimentos novos (de todos desde 03/10/2026) ----------
 //
 // NENHUM DELES ENTRA EM `ACOES` NEM NAS `saidas` DAS TRILHAS, e é de propósito:
 // os dois viram botão para todo mundo, e a regra desta onda é que o botão novo
-// apareça primeiro só para o administrador (ver `soAdmin`). Os destinos já são
+// apareça primeiro só para o administrador (ver `soAdmin`; desde 03/10/2026,
+// `BOTOES_NOVOS_PARA_TODOS` os libera para todos). Os destinos já são
 // aceitos pelo servidor — a Revisão do RPV e a do Interno, e os três desfechos da
 // Negociação (`colunasRpv.ts`, campo `negociacao` das trilhas).
 
@@ -657,8 +661,9 @@ export const SANAR_RPV: AcaoTela = {
  * oportunidade numa caixa à parte. Os rótulos e a ordem são os do Interno
  * (amostra, `DESFECHOS['rpv-revisao']`).
  *
- * É A VISÃO DE ADMIN DA ABA: quem não é admin continua com os três botões no
- * card (`ACOES.validacao`). Os dois juntos dariam duas portas para a mesma decisão.
+ * NO LUGAR DOS TRÊS BOTÕES DO CARD (`ACOES.validacao`), nunca junto: os dois
+ * dariam duas portas para a mesma decisão. Era a visão de admin da aba; desde
+ * 03/10/2026 (`BOTOES_NOVOS_PARA_TODOS`) é a de todos.
  */
 export const CONCLUIR_REVISAO_RPV: readonly AcaoTela[] = [
   { statusId: ST_PROPOSTA, label: 'Aprovar crédito', variant: 'primary', papel: 'aprovar', soAdmin: true },
@@ -690,7 +695,8 @@ export function desfechoDaNegociacao(ids: {
 }
 
 /**
- * O SANAR DO PRECATÓRIO que ainda é só de admin: no Interno, da Diligência para a
+ * O SANAR DO PRECATÓRIO da onda 4 (marcado `soAdmin`; de todos desde 03/10/2026,
+ * ver `BOTOES_NOVOS_PARA_TODOS`): no Interno, da Diligência para a
  * Revisão (etapa 8). O destino sai da própria aba da Revisão da trilha — pelo id,
  * com o nome de reserva —, e não de um número escrito aqui.
  *
@@ -703,8 +709,9 @@ const SANAR_DO_PRECATORIO: Partial<Record<SubdivisaoPrecatorio, { aba: string; p
 
 /**
  * O QUE SE FAZ NA COLUNA, PARA QUEM TEM O BOTÃO NOVO. A frase de
- * `DESCRICAO_DA_COLUNA` foi escrita sem prometer botão que a tela não tem; para o
- * administrador, que tem, ela diz o que o botão faz (o texto da amostra).
+ * `DESCRICAO_DA_COLUNA` foi escrita sem prometer botão que a tela não tem; para
+ * quem tem o botão — o administrador, e todos desde 03/10/2026 —, ela diz o que o
+ * botão faz (o texto da amostra).
  */
 const DESCRICAO_PARA_ADMIN: Readonly<Record<number, string>> = {
   [ST_DILIGENCIA]: 'Falta algo para decidir. Sanada a pendência, o crédito volta para a Revisão.',
@@ -719,6 +726,14 @@ const DESCRICAO_PARA_ADMIN: Readonly<Record<number, string>> = {
     'Contratos de cessão sendo gerados. O botão do card abre a Geração de contratos já com o processo e o originador.',
 }
 
+/**
+ * OS BOTÕES NOVOS DA ONDA 4 PARA TODO MUNDO — decisão do dono em 03/10/2026, junto
+ * com a aprovação da beta. O `soAdmin` continua marcando o que foi lançado assim
+ * (e serve ao próximo lançamento por etapas); com isto ligado, ninguém deixa de
+ * ver. Desligar volta a regra de antes: só o administrador vê.
+ */
+export const BOTOES_NOVOS_PARA_TODOS = true
+
 /** Só o que esta pessoa pode ver: o item `soAdmin` sai para quem não é admin. */
 export function visivelPara<T extends { soAdmin?: boolean }>(itens: readonly T[], admin: boolean): T[] {
   return itens.filter((x) => admin || !x.soAdmin)
@@ -727,19 +742,23 @@ export function visivelPara<T extends { soAdmin?: boolean }>(itens: readonly T[]
 /**
  * A ABA COMO ESTA PESSOA A VÊ — o filtro do `soAdmin` (onda 4 do redesenho).
  *
- * PARA QUEM NÃO É ADMIN, a aba da onda 2, campo por campo: as ações `soAdmin`
- * saem, e a Negociação, o Concluir da Revisão do RPV e o "Gerar contrato" nem
- * aparecem no objeto. É o que `matrizDeMovimentos.test.ts` e
- * `botoesDaAba.test.ts` prendem, sem mudança.
+ * COM `BOTOES_NOVOS_PARA_TODOS` LIGADO (desde 03/10/2026), todos têm a visão do
+ * admin abaixo, e `ehAdmin` não muda nada — é o que `visaoDeAdmin.test.ts` e
+ * `matrizDeMovimentos.test.ts` prendem.
+ *
+ * DESLIGADO, PARA QUEM NÃO É ADMIN, a aba da onda 2, campo por campo: as ações
+ * `soAdmin` saem, e a Negociação, o Concluir da Revisão do RPV e o "Gerar
+ * contrato" nem aparecem no objeto.
  *
  * PARA O ADMIN, os botões novos: a ação `soAdmin` fica, a Negociação e o "Gerar
  * contrato" ficam, e a aba que declara `concluir` troca os botões do card pelo
  * Concluir — as saídas dele viram as ações, e o desfecho passa a ser agrupado.
  *
  * `abasDoFunil` passa TODA aba por aqui; sem dizer `admin`, a resposta é a de quem
- * não é. O padrão é o seguro.
+ * não é (com a chave ligada, a mesma do admin).
  */
-export function abaParaQuemVe(aba: Aba, admin: boolean): Aba {
+export function abaParaQuemVe(aba: Aba, ehAdmin: boolean): Aba {
+  const admin = ehAdmin || BOTOES_NOVOS_PARA_TODOS
   const { negociacao, concluir, gerarContrato, ...resto } = aba
   const visao: Aba = { ...resto, acoes: visivelPara(aba.acoes, admin) }
   const saidasDoConcluir = visivelPara(concluir ?? [], admin)
@@ -940,12 +959,12 @@ export interface Aba {
   } | null
   /**
    * O desfecho da Negociação (ver `DesfechoDaNegociacao`), na aba da Negociação
-   * dos três funis — SÓ PARA ADMIN, por ora (ver `abaParaQuemVe`).
+   * dos três funis — para todos desde 03/10/2026 (ver `abaParaQuemVe`).
    */
   negociacao?: DesfechoDaNegociacao | null
   /**
    * AS SAÍDAS DO CONCLUIR que substituem os botões do card para quem pode vê-las
-   * (a Revisão do RPV, só para admin). Nunca chega à tela: `abaParaQuemVe` o
+   * (a Revisão do RPV, onda 4). Nunca chega à tela: `abaParaQuemVe` o
    * troca por `acoes` + `desfechoAgrupado`, ou o tira.
    */
   concluir?: readonly AcaoTela[] | null
@@ -1252,8 +1271,8 @@ export function acaoDeReprovar(
 
 /**
  * AS ABAS COMO ESTA PESSOA AS VÊ: as abas do funil, cada uma passada por
- * `abaParaQuemVe`. SEM `admin`, a visão de quem não é — os botões novos da onda 4
- * só aparecem para quem a tela diz, explicitamente, que é administrador.
+ * `abaParaQuemVe`. SEM `admin`, a visão de quem não é — que, com
+ * `BOTOES_NOVOS_PARA_TODOS` ligado (desde 03/10/2026), já traz os botões da onda 4.
  */
 export function abasDoFunil(
   pipelineId: number,
@@ -1336,7 +1355,7 @@ function montarAbasDoFunil(
     return saida
   }
 
-  // O SANAR SÓ DE ADMIN desta trilha (ver `SANAR_DO_PRECATORIO`): da aba dele
+  // O SANAR DA ONDA 4 desta trilha (ver `SANAR_DO_PRECATORIO`): da aba dele
   // para a coluna da Revisão, resolvida como qualquer destino.
   const sanar = SANAR_DO_PRECATORIO[def.key]
   const sanarDa = (a: DefAbaPrecatorio): AcaoTela[] => {
@@ -1430,7 +1449,7 @@ function montarAbasDoFunil(
       const nome = exibicao?.espelho.find((c) => c.statusId === d.statusId)?.nome ?? d.colunaKommo
       abas.push({ ...montar(d), label: nome })
     }
-    // O DESFECHO DA NEGOCIAÇÃO (onda 4, só admin): na aba da Negociação, que é
+    // O DESFECHO DA NEGOCIAÇÃO (onda 4, de todos desde 03/10/2026): na aba da Negociação, que é
     // coluna só de leitura do espelho. Origem e destinos pelo id, com o nome de
     // reserva, como todo o resto; SEM ESPELHO, nenhum destino se resolve e a aba
     // fica sem botão — melhor que um botão que move para lugar nenhum.
@@ -1541,8 +1560,8 @@ function abasDoRpv(etapas: EtapaKommo[]): Aba[] {
       : ESPELHO_RPV.map((c) => ({ status_id: c.statusId, nome: c.nome }))
 
   // OS MOVIMENTOS NOVOS DA ONDA 4 entram aqui marcados `soAdmin` — o Sanar da
-  // Diligência e o Concluir da Revisão — e `abaParaQuemVe` os tira de quem não é
-  // admin. `ACOES` fica como estava: é a tela de quem não é.
+  // Diligência e o Concluir da Revisão — e `abaParaQuemVe` decide quem os vê (todos,
+  // desde 03/10/2026). `ACOES` fica como estava: é a tela sem a onda 4.
   const montar = (t: DefTela, nome: string): Aba => ({
     key: t.key,
     label: nome,
@@ -1553,7 +1572,7 @@ function abasDoRpv(etapas: EtapaKommo[]): Aba[] {
     ...(t.key === 'validacao' ? { concluir: CONCLUIR_REVISAO_RPV } : {}),
   })
 
-  // AS COLUNAS SÓ DE LEITURA que ganham botão de admin: a Negociação (o desfecho,
+  // AS COLUNAS SÓ DE LEITURA que ganham botão da onda 4: a Negociação (o desfecho,
   // pelos ids de `colunasRpv.ts`) e a Elaboração de contratos (o "Gerar
   // contrato"). Continuam só de leitura — sem 'rpv' nem 'dd' (ver `botoesDaAba`).
   const leitura = (c: { status_id: number; nome: string }): Aba => {

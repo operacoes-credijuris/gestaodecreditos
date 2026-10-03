@@ -7,6 +7,12 @@
 // (`negociacao`) e em `colunasRpv.ts`, e NUNCA em `saidas` — que a tela oficial
 // desenha como botão, para todo mundo, no mesmo deploy (`abasDoFunil`).
 //
+// DESDE 03/10/2026 (decisão do dono) os botões do desfecho são de todo mundo
+// (`BOTOES_NOVOS_PARA_TODOS`, em `src/lib/kommo.ts`). Continuam saindo do campo
+// `negociacao`, e não de `saidas`: o desfecho tem botão e janela próprios
+// ("Fechado!" com confirmação, "Não fechou" com o motivo), e só na aba da
+// Negociação — o que a conferência de origem do servidor exige.
+//
 // E O SELO DA NOTA ("Comercial" para esses destinos, "Operacional" no resto) é
 // decidido pelo servidor, pelo destino: `_shared/servicoDaNota.ts`, que a
 // `kommo-mover` usa.
@@ -49,8 +55,8 @@ const destinosDaAba = (a: Aba): number[] => [
   ...(a.escolhaDeProposta ? [a.escolhaDeProposta] : []),
   ...(a.anexarEMover ? [a.anexarEMover.statusId] : []),
   ...(a.envioAosFundos ? [a.envioAosFundos.destino] : []),
-  // O DESFECHO DA NEGOCIAÇÃO DA ONDA 4 (só admin): conta também, para que um
-  // vazamento dele à visão de quem não é admin derrube os testes abaixo.
+  // O DESFECHO DA NEGOCIAÇÃO DA ONDA 4 (de todos desde 03/10/2026): conta também,
+  // para que ele fora da aba da Negociação derrube os testes abaixo.
   ...[a.negociacao?.fechado, a.negociacao?.naoFechou, a.negociacao?.semResposta]
     .filter((x) => x !== undefined)
     .map((x) => x.statusId),
@@ -128,9 +134,10 @@ describe('Negociação: o servidor aceita os três destinos, e só eles', () => 
 })
 
 /**
- * A NEGOCIAÇÃO NÃO TEM `saidas`, NOS TRÊS FUNIS. É a trava do princípio da
- * etapa: saída vira botão na tela oficial para todo mundo. Quem puser os
- * destinos da Negociação em `saidas` derruba este teste.
+ * A NEGOCIAÇÃO NÃO TEM `saidas`, NOS TRÊS FUNIS. Saída vira botão genérico de
+ * desfecho, sem a janela própria do desfecho e fora do campo que a tela desenha
+ * só na aba da Negociação. Quem puser os destinos da Negociação em `saidas`
+ * derruba este teste.
  */
 describe('Negociação não tem `saidas`', () => {
   for (const key of ['interno', 'externo'] as const) {
@@ -156,49 +163,99 @@ describe('Negociação não tem `saidas`', () => {
 })
 
 /**
- * A TELA OFICIAL NÃO GANHA BOTÃO. Em nenhuma aba de nenhum funil algum movimento
- * vai para os destinos da Negociação, e a aba da Negociação (leitura, no Interno
- * e no Externo) não oferece nada — nem os botões pagos.
+ * A ABA DA NEGOCIAÇÃO OFERECE O DESFECHO, E SÓ ELA. Em cada funil, os únicos
+ * movimentos da tela que vão para os três destinos da Negociação saem da aba da
+ * Negociação — que continua só de leitura, sem botão de trabalho (nem os botões
+ * pagos) —, e todo movimento dessa aba vai para um dos três. E cada botão bate
+ * com a conferência de origem do servidor: de um card nessa aba, a `kommo-mover`
+ * aceita; de qualquer outra aba, recusa.
+ *
+ * MUDOU DE PROPÓSITO EM 03/10/2026 (decisão do dono): era "a tela oficial não
+ * oferece o desfecho da Negociação" — o servidor primeiro (etapa 10a), os botões
+ * depois e só para admin. Com os botões da onda 4 para todo mundo, o teste virou
+ * o contrário, sem afrouxar: o desfecho existe, mas só na aba certa e só para os
+ * destinos aceitos.
  */
-describe('a tela oficial não oferece o desfecho da Negociação', () => {
+describe('a aba da Negociação oferece o desfecho, e só para os três destinos aceitos', () => {
   const etapas = espelhoDosTresFunis()
+  // O "SEM RESPOSTA" DO EXTERNO não está no espelho destes testes (29/09/2026):
+  // com ele (kommo_etapa de 02/10/2026), a opção entra.
+  const comSemResposta = [
+    ...etapas,
+    { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 112346344, pipeline_nome: null, nome: 'SEM RESPOSTA', ordem: 14.5, tipo: 0 },
+  ]
 
-  it('nenhum movimento da tela vai para os destinos da Negociação', () => {
-    const casos = [
-      [FUNIL_RPV, 'interno', DESTINOS.RPV],
-      [FUNIL_PRECATORIO, 'interno', DESTINOS.Interno],
-      [FUNIL_PRECATORIO, 'externo', DESTINOS.Externo],
-    ] as const
-    for (const [funil, sub, destinos] of casos) {
-      for (const a of abasDoFunil(funil, etapas, sub)) {
-        for (const id of destinosDaAba(a)) expect(destinos as readonly number[], `${sub} · ${a.label}`).not.toContain(id)
+  const casos = [
+    { nome: 'RPV', funil: FUNIL_RPV, sub: 'interno', pipelineId: FUNIL_RPV, idNeg: NEGOCIACAO_RPV.coluna, destinos: DESTINOS.RPV },
+    { nome: 'Interno', funil: FUNIL_PRECATORIO, sub: 'interno', pipelineId: FUNIL_PRECATORIO_INTERNO, idNeg: IDS_INTERNO['Negociação'], destinos: DESTINOS.Interno },
+    { nome: 'Externo', funil: FUNIL_PRECATORIO, sub: 'externo', pipelineId: FUNIL_PRECATORIO_EXTERNO, idNeg: IDS_EXTERNO['NEGOCIAÇÃO'], destinos: DESTINOS.Externo },
+  ] as const
+
+  /** O que a tela oferece na aba da Negociação, para as duas visões. */
+  const abasDe = (c: (typeof casos)[number], admin: boolean, e = etapas) => abasDoFunil(c.funil, e, c.sub, { admin })
+
+  for (const c of casos) {
+    it(`${c.nome}: só a aba da Negociação leva aos destinos dela, para todos`, () => {
+      for (const admin of [false, true]) {
+        for (const a of abasDe(c, admin)) {
+          const vaiANeg = destinosDaAba(a).filter((id) => (c.destinos as readonly number[]).includes(id))
+          if (a.statusIds[0] === c.idNeg) {
+            // TODO MOVIMENTO DA ABA DA NEGOCIAÇÃO vai a um dos três destinos.
+            expect(destinosDaAba(a), `${c.nome} · ${admin}`).toEqual(vaiANeg)
+            expect(vaiANeg.length, `${c.nome} · ${admin}`).toBeGreaterThan(0)
+          } else {
+            expect(vaiANeg, `${c.nome} · ${admin} · ${a.label}`).toEqual([])
+          }
+        }
       }
-    }
-  })
+    })
 
-  it('a aba da Negociação, onde existe, é só de leitura, sem botão nenhum', () => {
-    // NO EXTERNO ela existe, pelo espelho completo: leitura, sem nada.
-    const id = IDS_EXTERNO['NEGOCIAÇÃO']
-    const a = abasDoFunil(FUNIL_PRECATORIO, etapas, 'externo').find((x) => x.statusIds[0] === id)!
-    expect(a).toMatchObject({ key: `col-${id}`, soLeitura: true, acoes: [] })
-    expect(destinosDaAba(a)).toEqual([])
-    expect(botoesDaAba(FUNIL_PRECATORIO, 'externo', a)).toBe('nenhum')
-    // NA BETA (branch redesenho), o Interno e o RPV mostram TODAS as colunas do
-    // Kommo nas quatro fases (etapa 7), então a Negociação vira aba aqui também —
-    // e vale a mesma regra do Externo: só leitura, sem movimento e sem botão
-    // pago. Na main, onde o redesenho ainda não chegou, ela nem é aba.
-    for (const [funil, idNeg] of [
-      [FUNIL_PRECATORIO, IDS_INTERNO['Negociação']],
-      [FUNIL_RPV, NEGOCIACAO_RPV.coluna],
-    ] as const) {
-      const abas = funil === FUNIL_RPV ? abasDoFunil(FUNIL_RPV, etapas) : abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno')
-      const neg = abas.find((x) => x.statusIds.includes(idNeg))
-      expect(neg, `Negociação deveria ser aba no funil ${funil}`).toBeDefined()
-      expect(neg!.soLeitura).toBe(true)
-      expect(destinosDaAba(neg!)).toEqual([])
-      expect(botoesDaAba(funil, 'interno', neg!)).toBe('nenhum')
-    }
-  })
+    it(`${c.nome}: a aba da Negociação segue só de leitura, sem botão de trabalho`, () => {
+      const neg = abasDe(c, false).find((x) => x.statusIds.includes(c.idNeg))
+      expect(neg, `Negociação deveria ser aba no funil ${c.nome}`).toBeDefined()
+      expect(neg).toMatchObject({ key: `col-${c.idNeg}`, soLeitura: true, acoes: [] })
+      expect(neg!.negociacao).toBeTruthy()
+      expect(botoesDaAba(c.funil, c.sub, neg!)).toBe('nenhum')
+    })
+
+    it(`${c.nome}: os três destinos, cada um com a saída certa`, () => {
+      const neg = abasDe(c, false, comSemResposta).find((x) => x.statusIds.includes(c.idNeg))!
+      const [fechados, naoFechados, semResposta] = c.destinos
+      expect(neg.negociacao).toEqual({
+        fechado: expect.objectContaining({ statusId: fechados, label: 'Fechado!', papel: 'fechar' }),
+        naoFechou: expect.objectContaining({ statusId: naoFechados, label: 'Não fechou', papel: 'reprovar' }),
+        semResposta: expect.objectContaining({ statusId: semResposta, label: 'Sem resposta', papel: 'reprovar' }),
+      })
+    })
+
+    // A CONFERÊNCIA DE ORIGEM DO SERVIDOR BATE COM O LUGAR DO BOTÃO: o card que
+    // está na aba da Negociação passa; o de qualquer outra aba é recusado — o
+    // botão nunca aparece onde a `kommo-mover` o recusaria, e o servidor não
+    // aceita o desfecho de onde a tela não o oferece.
+    it(`${c.nome}: a origem que o servidor exige é a aba onde o botão está`, () => {
+      const abas = abasDe(c, false, comSemResposta)
+      const neg = abas.find((x) => x.statusIds.includes(c.idNeg))!
+      const destinoPipeline = c.funil === FUNIL_RPV ? null : c.pipelineId
+      for (const id of destinosDaAba(neg)) {
+        // O DESTINO É ACEITO pela permissão do funil (`COLUNAS` no RPV, a trilha no Precatório).
+        if (c.funil === FUNIL_RPV) expect(COLUNAS[id], String(id)).toBeDefined()
+        else expect(destinoPermitido(c.pipelineId, id, null), String(id)).toBe(true)
+        expect(negociacaoDoDestino(destinoPipeline, id, null)?.coluna.statusId, String(id)).toBe(c.idNeg)
+        expect(
+          recusaDaOrigem({ pipelineId: destinoPipeline, statusId: id, nome: 'x' }, { statusId: c.idNeg, pipelineId: c.pipelineId, nome: neg.label }),
+          String(id),
+        ).toBeNull()
+        for (const outra of abas) {
+          const origem = outra.statusIds[0]
+          if (origem === undefined || origem === c.idNeg) continue
+          expect(
+            recusaDaOrigem({ pipelineId: destinoPipeline, statusId: id, nome: 'x' }, { statusId: origem, pipelineId: c.pipelineId, nome: outra.label }),
+            `${c.nome} · ${id} de ${outra.label}`,
+          ).not.toBeNull()
+        }
+      }
+    })
+  }
 
   it('as duas trilhas declaram a Negociação', () => {
     expect(SUBDIVISOES_PRECATORIO.every((s) => s.negociacao !== undefined)).toBe(true)
