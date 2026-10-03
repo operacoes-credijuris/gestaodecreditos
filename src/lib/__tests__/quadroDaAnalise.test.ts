@@ -106,12 +106,66 @@ describe('título do card quebrado em campos', () => {
     })
   })
 
-  it('fora do padrão (sem número, sem cedente, sem título), o título fica cru', () => {
+  // MUDADO DE PROPÓSITO (acabamento do redesenho, 03/10/2026): "sem número" saiu
+  // do nome deste teste. O dono quer o card sem processo com o título quebrado
+  // em campos, como a amostra (o nº pode faltar); continua cru só o título que
+  // não tem âncora nenhuma — nem número, nem parcela cedida.
+  it('fora do padrão (sem número nem parcela, sem cedente, sem título), o título fica cru', () => {
     expect(camposDoTitulo('Maria — proposta enviada por e-mail, aguardar')).toBeNull()
     expect(camposDoTitulo('Credijuris - Maria')).toBeNull()
+    expect(camposDoTitulo('Credijuris - Maria - 30%')).toBeNull()
     expect(camposDoTitulo('0001734-06.2024.5.05.0006')).toBeNull()
     expect(camposDoTitulo('')).toBeNull()
     expect(camposDoTitulo(null)).toBeNull()
+  })
+
+  describe('sem o número do processo', () => {
+    it('quebra em campos com a parcela como âncora; o número fica vazio', () => {
+      expect(
+        camposDoTitulo('AN Soberana Consultoria - Maria Aparecida Nogueira - principal + honorários contratuais - 25%'),
+      ).toEqual({
+        cedente: 'Maria Aparecida Nogueira',
+        intermediador: 'AN Soberana Consultoria',
+        numero: '',
+        objeto: 'Principal + honorários contratuais',
+        percentual: '25%',
+      })
+    })
+
+    it('o marcador no lugar do número não entra no nome do cedente', () => {
+      for (const marcador of ['sem número', 'Sem nº', 's/n', 'S/N', '?', '0001734-06.2024']) {
+        expect(camposDoTitulo(`Credijuris - João da Silva - ${marcador} - Crédito principal - 30%`)).toMatchObject({
+          intermediador: 'Credijuris',
+          cedente: 'João da Silva',
+          numero: '',
+          objeto: 'Crédito principal',
+          percentual: '30%',
+        })
+      }
+    })
+
+    it('o percentual pode faltar, ou vir colado na parcela', () => {
+      expect(camposDoTitulo('Credijuris - João da Silva - honorários contratuais')).toMatchObject({
+        cedente: 'João da Silva',
+        objeto: 'Honorários contratuais',
+        percentual: '',
+      })
+      expect(camposDoTitulo('Credijuris - João da Silva - principal 12,5%')).toMatchObject({
+        objeto: 'Principal',
+        percentual: '12,5%',
+      })
+    })
+
+    it('nome com " - " dentro continua inteiro, como na leitura com número', () => {
+      expect(camposDoTitulo('CBR - Silva - Advogados Associados - honorários - 30%')).toMatchObject({
+        intermediador: 'CBR',
+        cedente: 'Silva - Advogados Associados',
+      })
+    })
+
+    it('verba na segunda parte não é âncora: falta o cedente', () => {
+      expect(camposDoTitulo('Credijuris - principal - 30%')).toBeNull()
+    })
   })
 })
 

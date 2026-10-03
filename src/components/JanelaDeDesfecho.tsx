@@ -19,6 +19,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Field'
 import { CaixaDeAviso, DicaDeAviso, icSelo } from '@/components/analise/Pecas'
+import { perguntarDescarte } from '@/lib/descarte'
 import type { AcaoTela } from '@/lib/kommo'
 import type { GrauRisco } from '../../supabase/functions/_shared/graus.ts'
 
@@ -116,8 +117,11 @@ export function JanelaDeDesfecho({
   motivoSugerido,
   onGruposMarcados,
   rotuloConfirmar,
+  subtitulo,
 }: {
   acao: AcaoTela
+  /** O título do card, sob o título da janela (opcional). */
+  subtitulo?: string
   /** Os achados da análise, para marcar em vez de redigitar. */
   achados: ItemDeRisco[]
   /** Manda a IA reescrever o motivo para quem vai ler no card. */
@@ -275,19 +279,31 @@ export function JanelaDeDesfecho({
     !redigindo &&
     (!motivoObrigatorio || motivo.trim().length >= MINIMO_DO_MOTIVO)
 
+  // UMA REGRA SÓ PARA TODO JEITO DE FECHAR: o X, o Escape e o fundo passam pelo
+  // `dirty` do Modal, e o Cancelar do rodapé passa por aqui — antes ele fechava
+  // sem perguntar, e o motivo escrito ia embora com um clique.
+  const sujo = motivo.trim().length > 0
+  const cancelar = async () => {
+    if (sujo && !(await perguntarDescarte())) return
+    onFechar()
+  }
+
   return (
     <Modal
       open
       onClose={onFechar}
       size="lg"
       title={acao.label}
-      dirty={motivo.trim().length > 0}
+      // O CARD DE QUE SE FALA, sob o título (o apoio da amostra): a janela abre
+      // por cima de outra, e é este texto que diz qual crédito vai ser movido.
+      description={subtitulo || undefined}
+      dirty={sujo}
       footer={
         // O RODAPÉ DA AMOSTRA: Cancelar à esquerda, o ato à direita. O cancelar
         // era um link de 12px colado no Confirmar — pequeno demais para alvo de
         // clique, e perto demais do botão que move o card.
         <div className="flex w-full flex-wrap items-center gap-2">
-          <Button variant="ghost" onClick={onFechar} disabled={enviando || redigindo}>
+          <Button variant="ghost" onClick={() => void cancelar()} disabled={enviando || redigindo}>
             Cancelar
           </Button>
           <div className="flex-1" />

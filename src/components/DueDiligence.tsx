@@ -40,6 +40,7 @@ import {
 } from '../../supabase/functions/_shared/titularesDaCessao.ts'
 import { JanelaDeDesfecho, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
 import { invokeFunction } from '@/lib/functions'
+import { perguntarDescarte } from '@/lib/descarte'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import type { AcaoTela } from '@/lib/kommo'
 
@@ -110,6 +111,11 @@ export function DueDiligence({
   // identidade é estável — passar uma arrow inline aqui faria o efeito do painel
   // disparar a cada render.
   const [sujo, setSujo] = useState(false)
+  /** O Fechar do rodapé: a mesma pergunta que o X faz pelo `dirty` do Modal. */
+  const fechar = async () => {
+    if (sujo && !(await perguntarDescarte())) return
+    onClose()
+  }
   const [desfecho, setDesfecho] = useState<AcaoTela | null>(null)
   /**
    * Os processos apurados, que sobem do painel para virar itens marcáveis.
@@ -293,7 +299,9 @@ export function DueDiligence({
             </Button>
           )}
           <div className="flex-1" />
-          <Button variant="ghost" onClick={onClose}>
+          {/* PERGUNTA COMO O X: o formulário do cedente mexido e não salvo ia
+              embora com um clique no Fechar. */}
+          <Button variant="ghost" onClick={() => void fechar()}>
             Fechar
           </Button>
         </div>
@@ -351,6 +359,7 @@ export function DueDiligence({
       {desfecho && onMover && (
         <JanelaDeDesfecho
           acao={desfecho}
+          subtitulo={tituloDoCard}
           achados={itens}
           onRedigir={redigir}
           onGruposMarcados={setMarcados}

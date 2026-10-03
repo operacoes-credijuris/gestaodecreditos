@@ -35,6 +35,8 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { perguntarDescarte } from '@/lib/descarte'
+import { guardarLugar, lugarGuardado } from '@/lib/lugarDaAnalise'
+import { LinkTentarDeNovo } from '@/components/LinkTentarDeNovo'
 import {
   AlertTriangle,
   Search,
@@ -75,7 +77,6 @@ import {
   type PapelDaTela,
   type DesfechoDaNegociacao,
   SUBDIVISOES_PRECATORIO,
-  SUBDIVISAO_PADRAO,
   ABAS_COM_TAGS,
   botoesDaAba,
   type BotoesDoCard,
@@ -1556,6 +1557,14 @@ function JanelaDoEnvioAoFundo({
       ),
     ])
 
+  // O MESMO CRITÉRIO DO X, DO ESCAPE E DO CANCELAR: texto escrito ou imagem
+  // colada. O Cancelar do rodapé fechava sem perguntar, e o print colado ia junto.
+  const sujo = texto.trim().length > 0 || arquivos.length > 0
+  const cancelar = async () => {
+    if (sujo && !(await perguntarDescarte())) return
+    onFechar()
+  }
+
   async function confirmar(ato: AtoDoEnvio) {
     setErro(null)
     setAndamento({ texto: 'Começando…', pct: 0, ato: ato.etiqueta })
@@ -1573,7 +1582,7 @@ function JanelaDoEnvioAoFundo({
     <Modal
       open
       onClose={() => !ocupado && onFechar()}
-      dirty={texto.trim().length > 0 || arquivos.length > 0}
+      dirty={sujo}
       title={`Envio ${aoFundo(fundo)}`}
       description={
         <a
@@ -1588,7 +1597,7 @@ function JanelaDoEnvioAoFundo({
       }
       footer={
         <div className="flex w-full flex-wrap items-center justify-end gap-2">
-          <Button variant="ghost" className={BTN} onClick={onFechar} disabled={ocupado}>
+          <Button variant="ghost" className={BTN} onClick={() => void cancelar()} disabled={ocupado}>
             Cancelar
           </Button>
           {fundo.atos.map((a) => (
@@ -2438,19 +2447,25 @@ function CardCredito({
         {campos ? (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-corpo text-texto-2">
             <span>{campos.intermediador}</span>
-            <Ponto />
-            <span className="inline-flex items-center gap-0.5 font-medium tabular-nums tracking-[.01em] text-texto">
-              {campos.numero}
-              <button
-                type="button"
-                onClick={() => onCopiarProcesso(campos.numero)}
-                aria-label="Copiar número do processo"
-                title="Copiar número do processo"
-                className="grid h-[24px] w-[24px] place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
-              >
-                <Copy className="h-[14px] w-[14px]" aria-hidden />
-              </button>
-            </span>
+            {/* SEM NÚMERO NO TÍTULO, O CAMPO SOME (amostra) — o resto do título
+                continua separado. Quem avisa da falta é o selo do cadastro. */}
+            {campos.numero && (
+              <>
+                <Ponto />
+                <span className="inline-flex items-center gap-0.5 font-medium tabular-nums tracking-[.01em] text-texto">
+                  {campos.numero}
+                  <button
+                    type="button"
+                    onClick={() => onCopiarProcesso(campos.numero)}
+                    aria-label="Copiar número do processo"
+                    title="Copiar número do processo"
+                    className="grid h-[24px] w-[24px] place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
+                  >
+                    <Copy className="h-[14px] w-[14px]" aria-hidden />
+                  </button>
+                </span>
+              </>
+            )}
             {(campos.objeto || campos.percentual) && <Ponto />}
             {campos.objeto && <Selo>{campos.objeto}</Selo>}
             {campos.percentual && <Selo>{campos.percentual}</Selo>}
@@ -2465,8 +2480,8 @@ function CardCredito({
           </div>
         ) : (
           // TÍTULO FORA DO PADRÃO: cru, como sempre foi, com o aviso de que os
-          // campos não foram separados — separar sem a âncora do número
-          // inventaria um cedente.
+          // campos não foram separados — separar sem âncora (o número ou, sem
+          // ele, a parcela cedida) inventaria um cedente.
           <p
             className="mt-1 flex items-start gap-1.5 text-xs text-texto-3"
             title="O título não segue o padrão intermediador - cedente - processo - objeto - percentual"
@@ -2721,8 +2736,10 @@ function CardCredito({
         <div className="mt-[10px] flex flex-wrap items-center gap-x-4 gap-y-1">
           {/* As anotações vêm em texto livre e o formato varia entre cards, então
               são exibidas cruas, recolhidas por padrão. A contagem no rótulo evita
-              que anotação nova passe batida com o bloco fechado. */}
-          {notas.length > 0 && (
+              que anotação nova passe batida com o bloco fechado.
+              SÓ A PARTIR DE DUAS NOTAS (amostra): com uma, o histórico é a
+              própria linha da última nota, já à vista acima. */}
+          {notas.length > 1 && (
             <button type="button" onClick={() => setAberto((v) => !v)} aria-expanded={aberto} className={LINK_BTN}>
               <History className={IC} aria-hidden />
               <span>
@@ -3109,7 +3126,11 @@ export default function AnaliseCredito() {
   // Funil escolhido no seletor de cima. Os dois funis têm cards de crédito e o
   // mesmo trabalho de certidões; o que muda é a precificação e a análise do
   // caderno processual.
-  const [funil, setFunil] = useState<number>(FUNIL_RPV)
+  //
+  // O LUGAR DA ÚLTIMA VISITA (amostra): funil, destinação e etapa voltam como a
+  // pessoa deixou. Lido UMA VEZ, na montagem; o `?card=` vem depois e manda mais.
+  const [lugarInicial] = useState(lugarGuardado)
+  const [funil, setFunil] = useState<number>(lugarInicial.funil)
   const leads = useKommoLeads(funil)
   const etapas = useKommoEtapas()
   const prontas = useAnalisesProntas()
@@ -3121,11 +3142,15 @@ export default function AnaliseCredito() {
    */
   const jaMovidos = useRef<Set<string>>(new Set())
 
-  const [aba, setAba] = useState<string>('pendentes')
+  // SEM ETAPA GUARDADA, 'pendentes' (a Análise do RPV), como sempre foi; uma
+  // etapa que não existe mais cai na primeira com função (ver `abaAtual`).
+  const [aba, setAba] = useState<string>(lugarInicial.etapa || 'pendentes')
   // Destinação do precatório. Só tem efeito no funil de Precatórios; em RPV o
   // valor fica guardado e ignorado, para voltar ao mesmo lugar na troca de funil.
-  const [subdivisao, setSubdivisao] =
-    useState<SubdivisaoPrecatorio>(SUBDIVISAO_PADRAO)
+  const [subdivisao, setSubdivisao] = useState<SubdivisaoPrecatorio>(lugarInicial.destinacao)
+  useEffect(() => {
+    guardarLugar({ funil, destinacao: subdivisao, etapa: aba })
+  }, [funil, subdivisao, aba])
   const [busca, setBusca] = useState('')
   // OS FILTROS RÁPIDOS, A ORDEM E O "MOSTRAR MAIS" (itens "Novo" da amostra).
   // Só estado da tela: trocar de etapa volta tudo ao padrão (ver `irParaAba`).
@@ -5062,9 +5087,7 @@ export default function AnaliseCredito() {
         // leitura da tabela, sincronizar de novo não mudaria nada.
         <CaixaDeAviso tom="perigo" className="mb-6">
           Não consegui ler as etapas deste funil: {(etapas.error as Error)?.message}{' '}
-          <button type="button" onClick={() => etapas.refetch()} className="font-semibold underline">
-            Tentar de novo
-          </button>
+          <LinkTentarDeNovo tentando={etapas.isFetching} onClick={() => void etapas.refetch()} />
         </CaixaDeAviso>
       ) : (
         // Espelho vazio: o kommo-sync não gravou a estrutura do kanban. Dizer
@@ -5125,7 +5148,10 @@ export default function AnaliseCredito() {
 
         {/* OS FILTROS RÁPIDOS (item "Novo"), com a contagem: um clique mostra os
             parados, os com cotação, os com análise pronta ou os sem número. */}
-        {abaAtual && lista.length > 0 && (
+        {/* VISÍVEIS TAMBÉM COM A ETAPA VAZIA ("Todos 0"), como na amostra: a
+            barra que some e volta conforme a etapa faz a lista pular. Só não
+            aparecem antes de os cards chegarem — "0" ali seria afirmação falsa. */}
+        {abaAtual && leads.data && (
           <div role="group" aria-label="Filtros rápidos" className="mb-3 flex flex-wrap gap-2">
             {chips.map((c) => {
               const ativo = filtro === c.key
