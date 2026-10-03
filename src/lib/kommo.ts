@@ -53,6 +53,10 @@ import {
   COLUNAS_DE_SISTEMA,
   resolverColuna,
 } from '../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
+// O DESFECHO DA NEGOCIAÇÃO NO RPV, pelos MESMOS ids que a `kommo-mover` aceita
+// (onda 4 do redesenho): os botões da beta leem a lista do servidor, e não uma
+// cópia — o mesmo princípio das trilhas.
+import { NEGOCIACAO_RPV } from '../../supabase/functions/_shared/colunasRpv.ts'
 // PELO MESMO MOTIVO das trilhas: a lista das etiquetas que a casa aplica é lida
 // pela tela, que desenha o seletor, e pela Edge Function `kommo-etiquetar`, que
 // decide o que aceita. Uma lista só — e ela precisa ser fechada, porque o Kommo
@@ -144,6 +148,9 @@ export const ST_REPROVADO = 107830031 // Reprovados Operacional
 // não têm aba: a plataforma volta a mostrar o crédito quando ele chega ao
 // protocolo, que é trabalho nosso outra vez.
 export const ST_PROTOCOLO = 107830059 // Protocolo
+// A COLUNA EM QUE O CONTRATO DE CESSÃO É GERADO. É dela que sai o "Gerar
+// contrato" do card (onda 4 do redesenho) — pelo id, como as outras.
+export const ST_ELABORACAO_CONTRATOS = 107830051 // Elaboração de contratos
 
 // ---------- Precatórios: as duas destinações, fixas ----------
 
@@ -526,6 +533,19 @@ export const DESCRICAO_DA_COLUNA: Readonly<Record<number, string>> = {
  */
 export type { PapelDaAcao }
 
+/**
+ * O PAPEL NA TELA: os quatro da trilha e mais `fechar` — o "Fechado!" da
+ * Negociação (onda 4 do redesenho, 02/10/2026).
+ *
+ * UM PAPEL PRÓPRIO, E NÃO `aprovar`: o papel decide o ícone, o tom e se o motivo
+ * é exigido, e "o cedente aceitou a proposta" não é a aprovação do crédito.
+ * Reaproveitar `aprovar` faria a janela pedir o resumo da oportunidade e a nota
+ * sair com a cara da análise. MORA AQUI, e não em `_shared`: é só da tela — o
+ * servidor não recebe papel nenhum, e o selo da nota ("Comercial") ele decide
+ * pelo destino.
+ */
+export type PapelDaTela = PapelDaAcao | 'fechar'
+
 export interface AcaoTela {
   statusId: number
   label: string
@@ -533,7 +553,36 @@ export interface AcaoTela {
   // decidir nada — mandar para a revisão de outra pessoa não é aprovar. Sem ele
   // essa saída sairia no azul da aprovação, e as duas se confundiriam.
   variant: 'primary' | 'secondary' | 'success' | 'warning' | 'danger'
-  papel: PapelDaAcao
+  papel: PapelDaTela
+  /**
+   * SÓ PARA ADMINISTRADOR — a regra de lançamento da onda 4 do redesenho
+   * (02/10/2026).
+   *
+   * MOVER CARD NO KOMMO DISPARA AS AUTOMAÇÕES E NÃO SE DESFAZ, e a beta usa o
+   * Kommo de verdade. Por isso todo movimento novo desta onda (o Sanar do RPV e
+   * do Interno, o Concluir da Revisão do RPV, o desfecho da Negociação) nasce com
+   * esta marca, e `abaParaQuemVe` a tira de quem não é admin. NÃO É PROTEÇÃO: a
+   * `kommo-mover` só confere usuário ativo (plano, achado 2). É controle de
+   * liberação na tela — quem não é admin vê a tela da onda 2.
+   */
+  soAdmin?: boolean
+}
+
+/**
+ * O DESFECHO DA NEGOCIAÇÃO NO CARD (onda 4 do redesenho, etapa 10b): "Fechado!"
+ * leva a Fechados; "Não fechou" abre a janela com as duas saídas negativas — o
+ * cedente recusou (Não fechado/s) ou sumiu (Sem resposta).
+ *
+ * UM CAMPO PRÓPRIO, E NÃO `acoes`: as três não são três botões iguais. Sai um
+ * botão positivo com confirmação num passo, e um negativo que escolhe entre dois
+ * destinos com o motivo escrito. Cada saída é opcional: coluna que o espelho não
+ * tem não vira opção (melhor sem a opção do que um botão que move para lugar
+ * nenhum).
+ */
+export interface DesfechoDaNegociacao {
+  fechado?: AcaoTela
+  naoFechou?: AcaoTela
+  semResposta?: AcaoTela
 }
 
 /**
@@ -579,6 +628,145 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   // O PROTOCOLO É ACOMPANHAMENTO, não decisão: o card chega ali depois de tudo
   // o que a casa decidiu, e quem o move de lá é quem protocola.
   protocolo: [],
+}
+
+// ---------- Onda 4 do redesenho: os movimentos novos, SÓ PARA ADMIN ----------
+//
+// NENHUM DELES ENTRA EM `ACOES` NEM NAS `saidas` DAS TRILHAS, e é de propósito:
+// os dois viram botão para todo mundo, e a regra desta onda é que o botão novo
+// apareça primeiro só para o administrador (ver `soAdmin`). Os destinos já são
+// aceitos pelo servidor — a Revisão do RPV e a do Interno, e os três desfechos da
+// Negociação (`colunasRpv.ts`, campo `negociacao` das trilhas).
+
+/**
+ * O SANAR DA DILIGÊNCIA DO RPV (etapa 8): a pendência resolvida, o crédito volta
+ * para a Revisão. A mesma saída que o Externo já tem — verde, papel `validar`,
+ * na janela da mensagem, com a nota só do que foi digitado.
+ */
+export const SANAR_RPV: AcaoTela = {
+  statusId: ST_DECISAO,
+  label: 'Sanar',
+  variant: 'success',
+  papel: 'validar',
+  soAdmin: true,
+}
+
+/**
+ * O CONCLUIR DA REVISÃO DO RPV (etapa 9): a mesma decisão dos três botões de
+ * hoje — os MESMOS destinos —, numa janela só, com a razão escrita e o resumo da
+ * oportunidade numa caixa à parte. Os rótulos e a ordem são os do Interno
+ * (amostra, `DESFECHOS['rpv-revisao']`).
+ *
+ * É A VISÃO DE ADMIN DA ABA: quem não é admin continua com os três botões no
+ * card (`ACOES.validacao`). Os dois juntos dariam duas portas para a mesma decisão.
+ */
+export const CONCLUIR_REVISAO_RPV: readonly AcaoTela[] = [
+  { statusId: ST_PROPOSTA, label: 'Aprovar crédito', variant: 'primary', papel: 'aprovar', soAdmin: true },
+  { statusId: ST_DILIGENCIA, label: 'Exigir diligência', variant: 'warning', papel: 'diligenciar', soAdmin: true },
+  { statusId: ST_REPROVADO, label: 'Reprovar crédito', variant: 'danger', papel: 'reprovar', soAdmin: true },
+]
+
+/**
+ * O desfecho da Negociação com os destinos JÁ RESOLVIDOS (ids do funil), ou null
+ * se nenhum dos três foi achado. O rótulo de cada saída é o do botão ou da opção
+ * na janela; o papel das duas negativas é `reprovar`, que é o que exige o motivo.
+ */
+export function desfechoDaNegociacao(ids: {
+  fechados?: number
+  naoFechados?: number
+  semResposta?: number
+}): DesfechoDaNegociacao | null {
+  const d: DesfechoDaNegociacao = {}
+  if (ids.fechados !== undefined) {
+    d.fechado = { statusId: ids.fechados, label: 'Fechado!', variant: 'success', papel: 'fechar', soAdmin: true }
+  }
+  if (ids.naoFechados !== undefined) {
+    d.naoFechou = { statusId: ids.naoFechados, label: 'Não fechou', variant: 'danger', papel: 'reprovar', soAdmin: true }
+  }
+  if (ids.semResposta !== undefined) {
+    d.semResposta = { statusId: ids.semResposta, label: 'Sem resposta', variant: 'danger', papel: 'reprovar', soAdmin: true }
+  }
+  return d.fechado || d.naoFechou || d.semResposta ? d : null
+}
+
+/**
+ * O SANAR DO PRECATÓRIO que ainda é só de admin: no Interno, da Diligência para a
+ * Revisão (etapa 8). O destino sai da própria aba da Revisão da trilha — pelo id,
+ * com o nome de reserva —, e não de um número escrito aqui.
+ *
+ * O EXTERNO NÃO ENTRA: o Sanar dele já é saída da trilha, para todo mundo, desde
+ * 29/09/2026.
+ */
+const SANAR_DO_PRECATORIO: Partial<Record<SubdivisaoPrecatorio, { aba: string; para: string }>> = {
+  interno: { aba: 'int-diligencia', para: 'int-revisao' },
+}
+
+/**
+ * O QUE SE FAZ NA COLUNA, PARA QUEM TEM O BOTÃO NOVO. A frase de
+ * `DESCRICAO_DA_COLUNA` foi escrita sem prometer botão que a tela não tem; para o
+ * administrador, que tem, ela diz o que o botão faz (o texto da amostra).
+ */
+const DESCRICAO_PARA_ADMIN: Readonly<Record<number, string>> = {
+  [ST_DILIGENCIA]: 'Falta algo para decidir. Sanada a pendência, o crédito volta para a Revisão.',
+  111533960: 'Pendência a resolver antes de decidir. Sanada, o crédito volta para a Revisão.',
+  [NEGOCIACAO_RPV.coluna]:
+    'Proposta apresentada, em negociação com o cedente. Quando ele responder, marque no card: fechado, não fechou ou sem resposta.',
+  112466260:
+    'Proposta apresentada, em negociação com o cedente. Quando ele responder, marque no card: fechado, não fechou ou sem resposta.',
+  112339984:
+    'Proposta apresentada, em negociação com o cedente. Quando ele responder, marque no card: fechado, não fechou ou sem resposta.',
+  [ST_ELABORACAO_CONTRATOS]:
+    'Contratos de cessão sendo gerados. O botão do card abre a Geração de contratos já com o processo e o originador.',
+}
+
+/** Só o que esta pessoa pode ver: o item `soAdmin` sai para quem não é admin. */
+export function visivelPara<T extends { soAdmin?: boolean }>(itens: readonly T[], admin: boolean): T[] {
+  return itens.filter((x) => admin || !x.soAdmin)
+}
+
+/**
+ * A ABA COMO ESTA PESSOA A VÊ — o filtro do `soAdmin` (onda 4 do redesenho).
+ *
+ * PARA QUEM NÃO É ADMIN, a aba da onda 2, campo por campo: as ações `soAdmin`
+ * saem, e a Negociação, o Concluir da Revisão do RPV e o "Gerar contrato" nem
+ * aparecem no objeto. É o que `matrizDeMovimentos.test.ts` e
+ * `botoesDaAba.test.ts` prendem, sem mudança.
+ *
+ * PARA O ADMIN, os botões novos: a ação `soAdmin` fica, a Negociação e o "Gerar
+ * contrato" ficam, e a aba que declara `concluir` troca os botões do card pelo
+ * Concluir — as saídas dele viram as ações, e o desfecho passa a ser agrupado.
+ *
+ * `abasDoFunil` passa TODA aba por aqui; sem dizer `admin`, a resposta é a de quem
+ * não é. O padrão é o seguro.
+ */
+export function abaParaQuemVe(aba: Aba, admin: boolean): Aba {
+  const { negociacao, concluir, gerarContrato, ...resto } = aba
+  const visao: Aba = { ...resto, acoes: visivelPara(aba.acoes, admin) }
+  const saidasDoConcluir = visivelPara(concluir ?? [], admin)
+  if (saidasDoConcluir.length > 0) {
+    visao.acoes = saidasDoConcluir
+    visao.desfechoAgrupado = true
+  }
+  if (negociacao) {
+    const [fechado] = visivelPara(negociacao.fechado ? [negociacao.fechado] : [], admin)
+    const [naoFechou] = visivelPara(negociacao.naoFechou ? [negociacao.naoFechou] : [], admin)
+    const [semResposta] = visivelPara(negociacao.semResposta ? [negociacao.semResposta] : [], admin)
+    if (fechado || naoFechou || semResposta) {
+      visao.negociacao = {
+        ...(fechado ? { fechado } : {}),
+        ...(naoFechou ? { naoFechou } : {}),
+        ...(semResposta ? { semResposta } : {}),
+      }
+    }
+  }
+  if (gerarContrato && (admin || !gerarContrato.soAdmin)) visao.gerarContrato = gerarContrato
+  const temBotaoNovo =
+    visao.acoes.some((a) => a.soAdmin) || Boolean(visao.negociacao) || Boolean(visao.gerarContrato?.soAdmin)
+  const id = aba.statusIds[0]
+  if (admin && temBotaoNovo && id !== undefined && DESCRICAO_PARA_ADMIN[id]) {
+    visao.descricao = DESCRICAO_PARA_ADMIN[id]
+  }
+  return visao
 }
 
 // ---------- Consultas ----------
@@ -750,6 +938,23 @@ export interface Aba {
     fundos: FundoDoEnvio[]
     destino: number
   } | null
+  /**
+   * O desfecho da Negociação (ver `DesfechoDaNegociacao`), na aba da Negociação
+   * dos três funis — SÓ PARA ADMIN, por ora (ver `abaParaQuemVe`).
+   */
+  negociacao?: DesfechoDaNegociacao | null
+  /**
+   * AS SAÍDAS DO CONCLUIR que substituem os botões do card para quem pode vê-las
+   * (a Revisão do RPV, só para admin). Nunca chega à tela: `abaParaQuemVe` o
+   * troca por `acoes` + `desfechoAgrupado`, ou o tira.
+   */
+  concluir?: readonly AcaoTela[] | null
+  /**
+   * O "GERAR CONTRATO" no card (Elaboração de contratos do RPV): leva à Geração de
+   * contratos com o card no endereço. Não move card, e mesmo assim é `soAdmin`,
+   * pela consistência da liberação desta onda.
+   */
+  gerarContrato?: { soAdmin?: boolean } | null
 }
 
 
@@ -1045,10 +1250,25 @@ export function acaoDeReprovar(
   return id === undefined ? null : reprovar(id)
 }
 
+/**
+ * AS ABAS COMO ESTA PESSOA AS VÊ: as abas do funil, cada uma passada por
+ * `abaParaQuemVe`. SEM `admin`, a visão de quem não é — os botões novos da onda 4
+ * só aparecem para quem a tela diz, explicitamente, que é administrador.
+ */
 export function abasDoFunil(
   pipelineId: number,
   etapas: EtapaKommo[],
   subdivisao: SubdivisaoPrecatorio | null = null,
+  { admin = false }: { admin?: boolean } = {},
+): Aba[] {
+  return montarAbasDoFunil(pipelineId, etapas, subdivisao).map((a) => abaParaQuemVe(a, admin))
+}
+
+/** As abas do funil com TUDO, inclusive o que é só de admin — sempre filtradas por `abasDoFunil`. */
+function montarAbasDoFunil(
+  pipelineId: number,
+  etapas: EtapaKommo[],
+  subdivisao: SubdivisaoPrecatorio | null,
 ): Aba[] {
   if (pipelineId === FUNIL_RPV) return abasDoRpv(etapas)
   if (!ehFunilPrecatorio(pipelineId)) return []
@@ -1116,6 +1336,18 @@ export function abasDoFunil(
     return saida
   }
 
+  // O SANAR SÓ DE ADMIN desta trilha (ver `SANAR_DO_PRECATORIO`): da aba dele
+  // para a coluna da Revisão, resolvida como qualquer destino.
+  const sanar = SANAR_DO_PRECATORIO[def.key]
+  const sanarDa = (a: DefAbaPrecatorio): AcaoTela[] => {
+    if (!sanar || a.key !== sanar.aba) return []
+    const revisao = def.abas.find((x) => x.key === sanar.para)
+    const id = revisao ? coluna(revisao) : undefined
+    return id === undefined
+      ? []
+      : [{ statusId: id, label: 'Sanar', variant: 'success', papel: 'validar', soAdmin: true }]
+  }
+
   const montar = (a: DefAbaPrecatorio): Aba => {
     const statusId = coluna(a)
     return {
@@ -1128,7 +1360,7 @@ export function abasDoFunil(
       statusIds: statusId === undefined ? [] : [statusId],
       descricaoVazia: a.descricaoVazia,
       descricao: DESCRICAO_DA_COLUNA[statusId ?? a.statusId ?? -1],
-      acoes: desfechos(a),
+      acoes: [...desfechos(a), ...sanarDa(a)],
       // AS SAÍDAS SAEM DE UM BOTÃO SÓ — ver `desfechoAgrupado`. Era regra do
       // Externo, onde a análise acontece fora da plataforma e o que se precisa
       // guardar é a razão escrita por quem voltou dela; no Interno vale igual, e
@@ -1197,6 +1429,22 @@ export function abasDoFunil(
       if (usadas.has(d.key)) continue
       const nome = exibicao?.espelho.find((c) => c.statusId === d.statusId)?.nome ?? d.colunaKommo
       abas.push({ ...montar(d), label: nome })
+    }
+    // O DESFECHO DA NEGOCIAÇÃO (onda 4, só admin): na aba da Negociação, que é
+    // coluna só de leitura do espelho. Origem e destinos pelo id, com o nome de
+    // reserva, como todo o resto; SEM ESPELHO, nenhum destino se resolve e a aba
+    // fica sem botão — melhor que um botão que move para lugar nenhum.
+    const neg = def.negociacao
+    if (neg && !naReserva) {
+      const idNeg = coluna(neg.coluna)
+      const daNeg = idNeg === undefined ? undefined : abas.find((a) => a.statusIds[0] === idNeg)
+      if (daNeg) {
+        daNeg.negociacao = desfechoDaNegociacao({
+          fechados: coluna(neg.fechados),
+          naoFechados: coluna(neg.naoFechados),
+          semResposta: coluna(neg.semResposta),
+        })
+      }
     }
     return comFases(abas, def.fases ?? exibicao?.fases, idsDeclarados(def.abas))
   }
@@ -1292,20 +1540,40 @@ function abasDoRpv(etapas: EtapaKommo[]): Aba[] {
       ? doEspelho.map((e) => ({ status_id: Number(e.status_id), nome: e.nome }))
       : ESPELHO_RPV.map((c) => ({ status_id: c.statusId, nome: c.nome }))
 
+  // OS MOVIMENTOS NOVOS DA ONDA 4 entram aqui marcados `soAdmin` — o Sanar da
+  // Diligência e o Concluir da Revisão — e `abaParaQuemVe` os tira de quem não é
+  // admin. `ACOES` fica como estava: é a tela de quem não é.
   const montar = (t: DefTela, nome: string): Aba => ({
     key: t.key,
     label: nome,
     statusIds: [t.statusId],
     descricaoVazia: t.descricaoVazia,
     descricao: DESCRICAO_DA_COLUNA[t.statusId],
-    acoes: ACOES[t.key],
+    acoes: t.key === 'diligencia' ? [...ACOES[t.key], SANAR_RPV] : ACOES[t.key],
+    ...(t.key === 'validacao' ? { concluir: CONCLUIR_REVISAO_RPV } : {}),
   })
+
+  // AS COLUNAS SÓ DE LEITURA que ganham botão de admin: a Negociação (o desfecho,
+  // pelos ids de `colunasRpv.ts`) e a Elaboração de contratos (o "Gerar
+  // contrato"). Continuam só de leitura — sem 'rpv' nem 'dd' (ver `botoesDaAba`).
+  const leitura = (c: { status_id: number; nome: string }): Aba => {
+    const aba = colunaSoDeLeitura(c)
+    if (c.status_id === NEGOCIACAO_RPV.coluna) {
+      aba.negociacao = desfechoDaNegociacao({
+        fechados: NEGOCIACAO_RPV.fechados,
+        naoFechados: NEGOCIACAO_RPV.naoFechados,
+        semResposta: NEGOCIACAO_RPV.semResposta,
+      })
+    }
+    if (c.status_id === ST_ELABORACAO_CONTRATOS) aba.gerarContrato = { soAdmin: true }
+    return aba
+  }
 
   const porColuna = new Map(TELAS.map((t) => [t.statusId, t]))
   const usadas = new Set<string>()
   const abas: Aba[] = colunas.map((c) => {
     const t = porColuna.get(c.status_id)
-    if (!t) return colunaSoDeLeitura(c)
+    if (!t) return leitura(c)
     usadas.add(t.key)
     return montar(t, c.nome)
   })

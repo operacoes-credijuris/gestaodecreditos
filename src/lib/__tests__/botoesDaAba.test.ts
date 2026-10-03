@@ -305,3 +305,39 @@ describe('botoesDaAba — a lista de permissão do RPV e o que ainda não é pro
     expect(botoesDaAba(FUNIL_PRECATORIO, 'externo', { key: 'ext-nova', soLeitura: false })).toBe('dd')
   })
 })
+
+/**
+ * A VISÃO DE ADMINISTRADOR (onda 4 do redesenho, 02/10/2026) NÃO MUDA OS BOTÕES
+ * PAGOS. Os botões novos desta onda — Sanar, Concluir da Revisão do RPV, desfecho
+ * da Negociação, "Gerar contrato" — não são 'rpv' nem 'dd': a matriz acima vale
+ * igual para o admin, aba por aba, e a Negociação e a Elaboração de contratos
+ * continuam abas SÓ DE LEITURA (`soLeitura`), sem análise nem due diligence.
+ */
+describe('botoesDaAba — a visão de administrador não muda os botões pagos', () => {
+  const doAdmin = (funil: NomeDoFunil, trilha: SubdivisaoPrecatorio, etapas: EtapaKommo[]): Linha[] =>
+    abasDoFunil(FUNIS[funil], etapas, trilha, { admin: true }).map((a) => [
+      funil,
+      trilha,
+      a.key,
+      a.label,
+      botoesDaAba(FUNIS[funil], trilha, a),
+    ])
+
+  for (const [funil, trilha] of COMBINACOES) {
+    it(`${funil} · ${trilha}: a mesma matriz para o admin`, () => {
+      expect(doAdmin(funil, trilha, espelhoDosTresFunis())).toEqual(doQueATelaMonta(funil, trilha, espelhoDosTresFunis()))
+      expect(doAdmin(funil, trilha, [])).toEqual(doQueATelaMonta(funil, trilha, []))
+    })
+  }
+
+  it('a Negociação e a Elaboração de contratos seguem só de leitura, com o botão novo e sem botão pago', () => {
+    const rpv = abasDoFunil(FUNIL_RPV, espelhoDosTresFunis(), 'interno', { admin: true })
+    const neg = rpv.find((a) => a.key === 'col-107830039')!
+    expect(neg).toMatchObject({ soLeitura: true })
+    expect(neg.negociacao?.fechado?.statusId).toBe(107830043)
+    expect(botoesDaAba(FUNIL_RPV, 'interno', neg)).toBe('nenhum')
+    const contratos = rpv.find((a) => a.key === 'col-107830051')!
+    expect(contratos).toMatchObject({ soLeitura: true, gerarContrato: { soAdmin: true } })
+    expect(botoesDaAba(FUNIL_RPV, 'interno', contratos)).toBe('nenhum')
+  })
+})

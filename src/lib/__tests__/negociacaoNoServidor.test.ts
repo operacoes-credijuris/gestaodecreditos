@@ -49,6 +49,11 @@ const destinosDaAba = (a: Aba): number[] => [
   ...(a.escolhaDeProposta ? [a.escolhaDeProposta] : []),
   ...(a.anexarEMover ? [a.anexarEMover.statusId] : []),
   ...(a.envioAosFundos ? [a.envioAosFundos.destino] : []),
+  // O DESFECHO DA NEGOCIAÇÃO DA ONDA 4 (só admin): conta também, para que um
+  // vazamento dele à visão de quem não é admin derrube os testes abaixo.
+  ...[a.negociacao?.fechado, a.negociacao?.naoFechou, a.negociacao?.semResposta]
+    .filter((x) => x !== undefined)
+    .map((x) => x.statusId),
 ]
 
 /** Os três destinos da Negociação, por funil — os ids do Kommo de 02/10/2026. */

@@ -33,6 +33,7 @@ import {
   type RefObject,
 } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   Search,
@@ -43,6 +44,7 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  FileSignature,
   FileText,
   History,
   Info,
@@ -69,7 +71,8 @@ import {
   FUNIL_RPV,
   FUNIL_PRECATORIO,
   KOMMO_SUBDOMINIO,
-  type PapelDaAcao,
+  type PapelDaTela,
+  type DesfechoDaNegociacao,
   SUBDIVISOES_PRECATORIO,
   SUBDIVISAO_PADRAO,
   ABAS_COM_TAGS,
@@ -161,6 +164,16 @@ import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { useAuth } from '@/contexts/AuthContext'
+import {
+  comSugestao,
+  montarNotaDoDesfecho,
+  MOTIVOS_NAO_FECHOU,
+  motivoSuficiente,
+  notaDoFechado,
+  notaDoNaoFechou,
+  type TipoDeNaoFechou,
+} from '@/lib/desfechoDoCard'
+import { cardDoEndereco } from '@/lib/contratoDoCard'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -599,11 +612,14 @@ async function anotarResultadoNaKommo(
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
 // PELO PAPEL, e não pelo status_id: as mesmas colunas têm ids diferentes em
 // cada funil, e um mapa por id deixaria os botões do Precatório sem ícone.
-const ICONES: Record<PapelDaAcao, ReactNode> = {
+const ICONES: Record<PapelDaTela, ReactNode> = {
   validar: <ArrowRight className="h-4 w-4" />,
   aprovar: <Check className="h-4 w-4" />,
   diligenciar: <FileSearch className="h-4 w-4" />,
   reprovar: <X className="h-4 w-4" />,
+  // O "FECHADO!" DA NEGOCIAÇÃO (onda 4): o aperto de mão da amostra — o cedente
+  // aceitou, e isso não é a aprovação do crédito.
+  fechar: <Handshake className="h-4 w-4" />,
 }
 
 /**
@@ -799,7 +815,9 @@ function JanelaDeMensagem({
   acoes,
   titulo,
   sugestao,
+  resumo = null,
   ocupado,
+  jaMovido,
   onConfirmar,
   onFechar,
 }: {
@@ -815,11 +833,26 @@ function JanelaDeMensagem({
   acoes: AcaoTela[]
   titulo: string
   sugestao: string
+  /**
+   * O RESUMO DA OPORTUNIDADE NUMA CAIXA À PARTE, editável (o Concluir da Revisão
+   * do RPV, onda 4): o texto inicial da caixa, ou null para a janela sem caixa —
+   * a de sempre. Com a caixa, a nota do APROVAR é o resumo como ficou nela mais a
+   * mensagem; nas outras saídas, só a mensagem (ver `montarNotaDoDesfecho`).
+   */
+  resumo?: string | null
   ocupado: boolean
+  /**
+   * O card JÁ se moveu para esta saída nesta janela? Depois de uma falha da nota
+   * com o card movido, só a MESMA saída continua na mão — e ela só anota. Outra
+   * saída moveria o card de novo, para outra coluna. Indefinido: nada trava.
+   */
+  jaMovido?: (statusId: number) => boolean
   onConfirmar: (acao: AcaoTela, mensagem: string) => Promise<void>
   onFechar: () => void
 }) {
   const [mensagem, setMensagem] = useState(sugestao)
+  const [textoDoResumo, setTextoDoResumo] = useState(resumo ?? '')
+  const comResumo = resumo !== null
   const [erro, setErro] = useState<string | null>(null)
   /** Qual saída está em curso — as outras ficam travadas enquanto isso. */
   const [emCurso, setEmCurso] = useState<number | null>(null)
@@ -845,17 +878,30 @@ function JanelaDeMensagem({
   const [enviando, setEnviando] = useState(false)
   const trabalhando = ocupado || enviando
   const semTexto = mensagem.trim().length < 10
-  const podeEnviar = (acao: AcaoTela) =>
-    !trabalhando && (!(exigeMotivoDe(acao) || semResumoDe(acao)) || !semTexto)
+  /** A nota que esta saída deixa no card — o resumo só entra ao aprovar. */
+  const notaDe = (acao: AcaoTela) =>
+    montarNotaDoDesfecho({ papel: acao.papel, mensagem, resumo: comResumo ? textoDoResumo : null })
+  // MOVEU E A NOTA NÃO SUBIU: a saída que já moveu o card nesta janela. Só ela
+  // continua na mão (e só anota, com texto); as outras moveriam o card de novo.
+  const movida = erro ? acoes.find((a) => jaMovido?.(a.statusId)) : undefined
+  const podeEnviar = (acao: AcaoTela) => {
+    if (trabalhando) return false
+    if (movida) return acao.statusId === movida.statusId && notaDe(acao) !== ''
+    // COM A CAIXA DO RESUMO, aprovar sem resumo gravado pede o resumo escrito à
+    // mão NA CAIXA DELE, com a mesma régua — e não na mensagem.
+    if (comResumo && semResumoDe(acao)) return textoDoResumo.trim().length >= 10
+    return !(exigeMotivoDe(acao) || semResumoDe(acao)) || !semTexto
+  }
   const semResumo = acoes.some(semResumoDe)
   const varias = acoes.length > 1
+  const sujo = mensagem.trim() !== sugestao.trim() || (comResumo && textoDoResumo.trim() !== (resumo ?? '').trim())
 
   const cancelar = () => {
     // A MESMA CHECAGEM DO X, DO OVERLAY E DO ESC. O `dirty` do Modal só
     // protege aquelas três portas; este botão chamava `onFechar` direto e
     // descartava o texto digitado sem perguntar — e é o botão que está mais
     // perto do cursor de quem acabou de escrever.
-    if (mensagem.trim() !== sugestao.trim() && !window.confirm('Descartar alterações não salvas?')) return
+    if (sujo && !window.confirm('Descartar alterações não salvas?')) return
     onFechar()
   }
 
@@ -869,7 +915,7 @@ function JanelaDeMensagem({
       // só passavam de oitenta caracteres e quebravam o título em duas.
       description={tituloCard(lead)}
       size="lg"
-      dirty={mensagem.trim() !== sugestao.trim()}
+      dirty={sujo}
       footer={
         // O QUE NÃO DECIDE À ESQUERDA, AS DECISÕES À DIREITA (amostra): com uma
         // saída, "Cancelar" e "Confirmar"; com várias, "cancelar" discreto e um
@@ -901,7 +947,7 @@ function JanelaDeMensagem({
                 setEnviando(true)
                 setEmCurso(acao.statusId)
                 try {
-                  await onConfirmar(acao, mensagem.trim())
+                  await onConfirmar(acao, notaDe(acao))
                 } catch (e) {
                   setErro((e as Error)?.message ?? String(e))
                 } finally {
@@ -925,10 +971,41 @@ function JanelaDeMensagem({
     >
       {semResumo && (
         <CaixaDeAviso tom="aviso" className="mb-3">
-          Este card não tem resumo da oportunidade gravado — a análise não foi salva por esta
-          versão do sistema. Abra a análise e salve, ou escreva o resumo à mão aqui: é o que a
-          proposta vai ler.
+          {comResumo
+            ? 'Este card não tem resumo da oportunidade gravado — a análise não foi salva por esta versão do sistema. Abra a análise e salve, ou, para aprovar, escreva o resumo à mão aqui: é o que a proposta vai ler.'
+            : 'Este card não tem resumo da oportunidade gravado — a análise não foi salva por esta versão do sistema. Abra a análise e salve, ou escreva o resumo à mão aqui: é o que a proposta vai ler.'}
         </CaixaDeAviso>
+      )}
+      {/* O RESUMO DA OPORTUNIDADE NUMA CAIXA À PARTE (Revisão do RPV, onda 4):
+          editável — a linha da cessão sai "a confirmar" do motor, e quem aprova
+          é quem sabe completá-la —, e só entra na nota se a saída for aprovar.
+          Assim ele nunca vira, por engano, a razão de uma reprovação. */}
+      {comResumo && (
+        <details className="mb-3 rounded-campo border border-borda bg-superficie-2" open={semResumo}>
+          <summary className="flex min-h-[36px] cursor-pointer items-center gap-2 px-4 py-2 text-corpo font-semibold text-texto">
+            <FileText className={IC} aria-hidden />
+            Resumo da oportunidade
+            <span className="text-sm font-normal text-texto-3">— editável · vai para o card junto com a aprovação</span>
+          </summary>
+          <div className="border-t border-borda px-4 pb-3 pt-3">
+            <textarea
+              className="min-h-[132px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] font-mono text-sm leading-relaxed text-texto placeholder:font-sans placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
+              rows={textoDoResumo ? 11 : 6}
+              value={textoDoResumo}
+              disabled={trabalhando}
+              aria-label="Resumo da oportunidade"
+              placeholder="O que se está comprando: cedente, processo, ente devedor, objeto, valor líquido validado e prazo — é o que a proposta vai ler."
+              onChange={(e) => setTextoDoResumo(e.target.value)}
+            />
+            <p className="mt-1 text-sm text-texto-3">
+              Complete o que o motor deixou "a confirmar" (a extensão da cessão, por exemplo). Nas outras
+              saídas ele não vai para o card.
+            </p>
+            {semResumo && textoDoResumo.trim().length > 0 && textoDoResumo.trim().length < 10 && (
+              <DicaDeAviso>Escreva o resumo por extenso — é o que a proposta vai ler.</DicaDeAviso>
+            )}
+          </div>
+        </details>
       )}
       <textarea
         className="min-h-[220px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] font-mono text-sm leading-relaxed text-texto placeholder:font-sans placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
@@ -1801,6 +1878,307 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
   )
 }
 
+/**
+ * O "FECHADO!" DA NEGOCIAÇÃO (onda 4 do redesenho, etapa 10b — só admin): o
+ * cedente aceitou a proposta. Confirma num passo, numa caixa presa ao botão
+ * (amostra, `confirmarFechado`), com uma anotação opcional.
+ *
+ * A NOTA É "Proposta aceita pelo cedente." mais a anotação, se houver; o
+ * movimento é o da `kommo-mover`, que confere a origem (a Negociação) e marca a
+ * nota de serviço como "Comercial". FALHA DA NOTA COM O CARD MOVIDO: a caixa fica
+ * aberta com o aviso, e confirmar de novo só anota (ver `moverComNota`).
+ */
+function BotaoFechado({
+  acao,
+  cedente,
+  destino,
+  ocupado,
+  onConfirmar,
+}: {
+  acao: AcaoTela
+  cedente: string
+  /** O nome da coluna de destino, como a tela a mostra. */
+  destino: string
+  ocupado: boolean
+  onConfirmar: (nota: string) => Promise<void>
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [anotacao, setAnotacao] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const caixa = useRef<HTMLDivElement>(null)
+  // ENVIANDO, A CAIXA NÃO FECHA POR UM CLIQUE FORA: o aviso de falha da nota
+  // precisa de onde aparecer.
+  const fechar = useCallback(() => {
+    if (!enviando) setAberto(false)
+  }, [enviando])
+  useFecharFora(aberto, fechar, caixa)
+
+  async function confirmar() {
+    if (enviando) return
+    setErro(null)
+    setEnviando(true)
+    try {
+      await onConfirmar(notaDoFechado(anotacao))
+      setAberto(false)
+      setAnotacao('')
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="relative" ref={caixa}>
+      <Button
+        size="sm"
+        variant="success"
+        className={BTN}
+        icon={<Handshake className={IC} aria-hidden />}
+        onClick={() => {
+          setErro(null)
+          setAberto((v) => !v)
+        }}
+        disabled={ocupado && !aberto}
+        aria-expanded={aberto}
+      >
+        {acao.label}
+      </Button>
+
+      {aberto && (
+        <div
+          role="dialog"
+          aria-label="Confirmar negócio fechado"
+          className={cn(CAIXA_FLUTUANTE, 'right-0 w-[320px] max-w-[calc(100vw-2rem)] p-[14px] text-center')}
+        >
+          <span
+            aria-hidden
+            className="mx-auto mb-2 grid h-[36px] w-[36px] place-items-center rounded-full bg-sucesso-fundo text-sucesso"
+          >
+            <Handshake className="h-[20px] w-[20px]" />
+          </span>
+          <p className="font-display text-corpo font-bold text-texto">O cedente aceitou a proposta?</p>
+          <p className="mt-1 text-corpo text-texto-2">
+            {cedente} vai para <strong className="text-texto">{destino}</strong>.
+          </p>
+          <input
+            value={anotacao}
+            disabled={enviando}
+            onChange={(e) => setAnotacao(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void confirmar()
+            }}
+            aria-label="Anotação (opcional)"
+            placeholder="Anotação (opcional) — ex.: aceitou por telefone"
+            className="mt-3 h-[36px] w-full rounded-controle border border-borda-controle bg-superficie px-[10px] text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
+          />
+          {erro && (
+            <CaixaDeAviso tom="perigo" role="alert" className="mt-3 text-left">
+              {erro}
+            </CaixaDeAviso>
+          )}
+          <div className="mt-3 flex justify-center gap-2">
+            <Button size="sm" variant="ghost" className={BTN} onClick={() => setAberto(false)} disabled={enviando}>
+              Voltar
+            </Button>
+            <Button
+              // O FOCO NO CONFIRMAR ao abrir (amostra): é a ação que se procura.
+              autoFocus
+              size="sm"
+              variant="success"
+              className={BTN}
+              icon={<Check className={IC} aria-hidden />}
+              onClick={() => void confirmar()}
+              loading={enviando}
+            >
+              Confirmar: fechado!
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * O "NÃO FECHOU" DA NEGOCIAÇÃO (onda 4 do redesenho, etapa 10b — só admin): o
+ * cedente recusou (vai para Não fechado/s) ou sumiu (vai para Sem resposta), com
+ * o motivo escrito — pelo menos 10 caracteres — e motivos de um clique (amostra,
+ * `janelaNaoFechou`).
+ *
+ * FALHA DA NOTA COM O CARD MOVIDO: a janela fica aberta com o aviso, a escolha
+ * trava no destino que já recebeu o card, e confirmar de novo só anota — trocar
+ * de opção ali moveria o card uma segunda vez.
+ */
+function JanelaNaoFechou({
+  lead,
+  opcoes,
+  nomeDaColuna,
+  jaMovido,
+  onConfirmar,
+  onFechar,
+}: {
+  lead: KommoLead
+  opcoes: Partial<Record<TipoDeNaoFechou, AcaoTela>>
+  nomeDaColuna: (statusId: number) => string
+  jaMovido: (statusId: number) => boolean
+  onConfirmar: (acao: AcaoTela, nota: string) => Promise<void>
+  onFechar: () => void
+}) {
+  const tipos = (['recusou', 'sumiu'] as const).filter((t) => opcoes[t])
+  const [tipo, setTipo] = useState<TipoDeNaoFechou>(tipos[0] ?? 'recusou')
+  const [motivo, setMotivo] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const campo = useRef<HTMLTextAreaElement>(null)
+  const acao = opcoes[tipo]
+  // O DESTINO QUE JÁ RECEBEU O CARD nesta janela (só depois de um erro).
+  const movido = erro ? tipos.find((t) => opcoes[t] && jaMovido(opcoes[t]!.statusId)) : undefined
+  const m = MOTIVOS_NAO_FECHOU[tipo]
+  const pode = Boolean(acao) && !enviando && motivoSuficiente(motivo) && (!movido || movido === tipo)
+
+  const escolher = (t: TipoDeNaoFechou) => {
+    if (movido || enviando) return
+    setTipo(t)
+  }
+  // AS SETAS ANDAM ENTRE AS OPÇÕES, como num grupo de rádios.
+  const aoTeclar = (e: React.KeyboardEvent) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) || tipos.length < 2) return
+    e.preventDefault()
+    const i = tipos.indexOf(tipo)
+    const prox = tipos[(i + (e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? tipos.length - 1 : 1)) % tipos.length]
+    escolher(prox)
+    document.getElementById(`nf-${lead.kommo_lead_id}-${prox}`)?.focus()
+  }
+
+  async function confirmar() {
+    if (!acao || !pode) return
+    setErro(null)
+    setEnviando(true)
+    try {
+      await onConfirmar(acao, notaDoNaoFechou(tipo, motivo))
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  const cancelar = () => {
+    if (motivo.trim() && !window.confirm('Descartar alterações não salvas?')) return
+    onFechar()
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onFechar}
+      title="O cedente não fechou"
+      description={tituloCard(lead)}
+      size="lg"
+      dirty={motivo.trim() !== ''}
+      footer={
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Button variant="ghost" className={BTN} onClick={cancelar} disabled={enviando}>
+            Cancelar
+          </Button>
+          <span className="flex-1" />
+          <Button
+            variant="outline"
+            className={cn(BTN, PERIGO_CONTORNADO)}
+            icon={<X className={IC} aria-hidden />}
+            onClick={() => void confirmar()}
+            disabled={!pode}
+            loading={enviando}
+          >
+            {m.confirmar}
+          </Button>
+        </div>
+      }
+    >
+      <p id={`nf-${lead.kommo_lead_id}-rotulo`} className="mb-2 text-sm font-semibold text-texto">
+        O que aconteceu?
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby={`nf-${lead.kommo_lead_id}-rotulo`}
+        className="grid gap-2 sm:grid-cols-2"
+        onKeyDown={aoTeclar}
+      >
+        {tipos.map((t) => {
+          const o = MOTIVOS_NAO_FECHOU[t]
+          const marcado = t === tipo
+          return (
+            <button
+              key={t}
+              id={`nf-${lead.kommo_lead_id}-${t}`}
+              type="button"
+              role="radio"
+              aria-checked={marcado}
+              tabIndex={marcado ? 0 : -1}
+              disabled={Boolean(movido) && movido !== t}
+              onClick={() => escolher(t)}
+              className={cn(
+                'flex min-h-[56px] items-start gap-3 rounded-campo border px-4 py-3 text-left transition-colors disabled:opacity-50',
+                marcado ? 'border-marca-viva bg-marca-suave' : 'border-borda bg-superficie hover:bg-superficie-3',
+              )}
+            >
+              {t === 'recusou' ? (
+                <X className="mt-0.5 h-[20px] w-[20px] flex-none text-perigo" aria-hidden />
+              ) : (
+                <Clock className="mt-0.5 h-[20px] w-[20px] flex-none text-aviso" aria-hidden />
+              )}
+              <span className="min-w-0">
+                <span className="block text-corpo font-bold text-texto">{o.rotulo}</span>
+                <span className="block text-sm text-texto-2">
+                  {o.apoio} · vai para <i>{nomeDaColuna(opcoes[t]!.statusId)}</i>
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div role="group" aria-label="Motivos mais comuns" className="mt-4 flex flex-wrap items-center gap-1.5">
+        <span className="text-sm text-texto-3">Motivos comuns:</span>
+        {m.sugestoes.map((s) => (
+          <button
+            key={s}
+            type="button"
+            disabled={enviando}
+            onClick={() => {
+              setMotivo((v) => comSugestao(v, s))
+              campo.current?.focus()
+            }}
+            className="inline-flex min-h-[28px] items-center rounded-full border border-borda-forte bg-superficie px-3 text-sm font-medium text-texto-2 hover:bg-superficie-3"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+      <textarea
+        ref={campo}
+        autoFocus
+        rows={4}
+        value={motivo}
+        disabled={enviando}
+        aria-label="Motivo"
+        placeholder={m.exemplo}
+        onChange={(e) => setMotivo(e.target.value)}
+        className="mt-3 min-h-[112px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
+      />
+      {motivo.trim().length > 0 && !motivoSuficiente(motivo) && (
+        <DicaDeAviso>Escreva o motivo por extenso — é o que o comercial lê depois para entender a perda.</DicaDeAviso>
+      )}
+      {erro && (
+        <CaixaDeAviso tom="perigo" role="alert" className="mt-3">
+          {erro}
+        </CaixaDeAviso>
+      )}
+    </Modal>
+  )
+}
+
 /** O "·" entre os campos do título do card. */
 const Ponto = () => (
   <span className="text-borda-forte" aria-hidden>
@@ -1853,6 +2231,9 @@ function CardCredito({
   onCertidoes,
   onCopiarProcesso,
   compacto,
+  negociacao,
+  onGerarContrato,
+  realcado = false,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -1941,6 +2322,21 @@ function CardCredito({
   onCopiarProcesso: (numero: string) => void
   /** Densidade compacta (preferência da pessoa). */
   compacto: boolean
+  /**
+   * O desfecho da Negociação no card (onda 4 — só chega aqui para admin, ver
+   * `abaParaQuemVe`): o "Fechado!" e o "Não fechou".
+   */
+  negociacao?: {
+    opcoes: DesfechoDaNegociacao
+    /** O nome da coluna de Fechados, como a tela a mostra. */
+    destinoDoFechado: string
+    onFechado: (l: KommoLead, nota: string) => Promise<void>
+    onNaoFechou: (l: KommoLead) => void
+  }
+  /** Leva à Geração de contratos com este card (onda 4 — só admin). Não move card. */
+  onGerarContrato?: (l: KommoLead) => void
+  /** O card que o endereço apontou ("Voltar ao card"): moldura de destaque, sem abrir nada. */
+  realcado?: boolean
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -1996,6 +2392,7 @@ function CardCredito({
       className={cn(
         'relative grid grid-cols-1 gap-x-6 gap-y-2 rounded-cartao border border-borda bg-superficie px-[18px] shadow-nivel-1 transition-[border-color,box-shadow] duration-150 hover:border-borda-forte hover:shadow-nivel-2 focus:outline-none min-[900px]:grid-cols-[minmax(0,1fr)_auto]',
         compacto ? 'py-[10px]' : 'py-4',
+        realcado && 'border-marca-viva ring-[3px] ring-marca-viva/20',
       )}
     >
       <div className="min-w-0">
@@ -2391,7 +2788,9 @@ function CardCredito({
           {botoes === 'rpv' && (
             <Button
               size="sm"
-              variant={desfechoNoCard && acoes.length > 0 ? 'secondary' : 'primary'}
+              // CONTORNADO TAMBÉM COM O CONCLUIR (a Revisão do RPV, para admin):
+              // lá o desfecho é que avança.
+              variant={(desfechoNoCard && acoes.length > 0) || onConcluir ? 'secondary' : 'primary'}
               className={BTN}
               icon={<FileSearch className={IC} aria-hidden />}
               onClick={() => onAnalisar(lead)}
@@ -2429,8 +2828,11 @@ function CardCredito({
 
           {/* CONCLUIR FECHA A ETAPA, e fica à direita da análise porque é o que
               vem depois dela. O AZUL DA MARCA: concluir também é recusar, e
-              verde ficaria errado. */}
-          {botoes === 'dd' && onConcluir && (
+              verde ficaria errado. EM TODA ABA DE TRABALHO, e não só nas de 'dd':
+              a Revisão do RPV ('rpv') o ganha para admin (onda 4). Para quem não
+              é admin nada muda — o Concluir só chega às abas agrupadas, todas de
+              'dd' (matrizDeMovimentos.test.ts). */}
+          {botoes !== 'nenhum' && onConcluir && (
             <Button
               size="sm"
               variant="primary"
@@ -2495,6 +2897,45 @@ function CardCredito({
               disabled={ocupado}
             >
               Certidões
+            </Button>
+          )}
+
+          {/* A NEGOCIAÇÃO (onda 4, só admin): o cedente respondeu. O negativo
+              contornado à esquerda, o positivo em destaque à direita (amostra). */}
+          {negociacao && (negociacao.opcoes.naoFechou || negociacao.opcoes.semResposta) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className={cn(BTN, PERIGO_CONTORNADO)}
+              icon={<X className={IC} aria-hidden />}
+              onClick={() => negociacao.onNaoFechou(lead)}
+              disabled={ocupado}
+            >
+              Não fechou
+            </Button>
+          )}
+          {negociacao?.opcoes.fechado && (
+            <BotaoFechado
+              acao={negociacao.opcoes.fechado}
+              cedente={campos?.cedente ?? tituloCard(lead)}
+              destino={negociacao.destinoDoFechado}
+              ocupado={ocupado}
+              onConfirmar={(nota) => negociacao.onFechado(lead, nota)}
+            />
+          )}
+
+          {/* "GERAR CONTRATO" (onda 4, só admin): abre a Geração de contratos com
+              este card no endereço. Não move o card. */}
+          {onGerarContrato && (
+            <Button
+              size="sm"
+              className={BTN}
+              icon={<FileSignature className={IC} aria-hidden />}
+              onClick={() => onGerarContrato(lead)}
+              disabled={ocupado}
+              title="Abre a Geração de contratos com o processo e o originador deste card"
+            >
+              Gerar contrato
             </Button>
           )}
         </div>
@@ -2733,7 +3174,9 @@ export default function AnaliseCredito() {
     statusId: number
   } | null>(null)
   // Análise automática (Judit + due diligence + planilha) por card.
-  const { user: authUser, profile: authProfile } = useAuth()
+  // `isAdmin` LIBERA OS BOTÕES DA ONDA 4 (os que movem card de um jeito novo e o
+  // "Gerar contrato"): ver `abaParaQuemVe`. Quem não é admin vê a tela da onda 2.
+  const { user: authUser, profile: authProfile, isAdmin } = useAuth()
   const analistaNome = authProfile?.nome || authUser?.email || 'Usuário'
   // A análise de RPV abre uma JANELA (AnaliseRpvModal): preliminar, conversa e
   // só então o salvamento. `rpvLead` é o card cuja janela está aberta.
@@ -3640,8 +4083,9 @@ export default function AnaliseCredito() {
   }, [])
 
   const abas = useMemo(
-    () => abasDoFunil(funil, etapas.data ?? [], subdivisao),
-    [funil, etapas.data, subdivisao],
+    // A VISÃO DE QUEM ESTÁ LOGADO: o que é `soAdmin` só entra para o admin.
+    () => abasDoFunil(funil, etapas.data ?? [], subdivisao, { admin: isAdmin }),
+    [funil, etapas.data, subdivisao, isAdmin],
   )
 
   const { porAba } = useMemo(
@@ -3780,6 +4224,74 @@ export default function AnaliseCredito() {
   const achadosNoFunil = busca.trim() ? achadosDaBusca(abas, porAbaNaBusca, abaAtual, true) : []
   const achadosEmOutrasAbas = busca.trim() ? achadosDaBusca(abas, porAbaNaBusca, abaAtual, false) : []
 
+  // ---------------------------------------- "VOLTAR AO CARD" (onda 4, só admin)
+  //
+  // A Geração de contratos aberta pelo card volta para cá com `?card=<id>`. O
+  // PARÂMETRO SÓ REALÇA E ROLA ATÉ O CARD — NUNCA abre janela nem move nada (a
+  // due diligence busca no Escavador sozinha, e cada consulta custa; mover card
+  // não se desfaz). Lido uma vez e tirado do endereço, para um F5 não repetir.
+  const [parametros, setParametros] = useSearchParams()
+  const cardPedido = isAdmin ? cardDoEndereco(parametros.get('card')) : null
+  const [realce, setRealce] = useState<number | null>(null)
+  const procurouNoOutroFunil = useRef(false)
+  const rolouAte = useRef<number | null>(null)
+  useEffect(() => {
+    if (cardPedido === null || !leads.data || !etapas.data) return
+    const tirarDoEndereco = () =>
+      setParametros(
+        (p) => {
+          const n = new URLSearchParams(p)
+          n.delete('card')
+          return n
+        },
+        { replace: true },
+      )
+    const lead = leads.data.find((l) => l.kommo_lead_id === cardPedido)
+    if (!lead) {
+      // O CARD PODE ESTAR NO OUTRO FUNIL: procura lá uma vez, e só então desiste.
+      if (!procurouNoOutroFunil.current) {
+        procurouNoOutroFunil.current = true
+        setFunil(funil === FUNIL_RPV ? FUNIL_PRECATORIO : FUNIL_RPV)
+        irParaAba('')
+        return
+      }
+      toast.error('Não achei este card no espelho do Kommo. Sincronize e procure pela busca.')
+      tirarDoEndereco()
+      return
+    }
+    const trilha = SUBDIVISOES_PRECATORIO.find((s) => s.pipelineId === lead.pipeline_id)
+    if (trilha && trilha.key !== subdivisao) {
+      setSubdivisao(trilha.key)
+      return
+    }
+    const destino = abas.find((a) => a.statusIds.includes(lead.status_id))
+    if (destino) irParaAba(destino.key)
+    setBusca('')
+    rolouAte.current = null
+    setRealce(lead.kommo_lead_id)
+    tirarDoEndereco()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardPedido, leads.data, etapas.data, abas, funil, subdivisao])
+  useEffect(() => {
+    if (realce === null || rolouAte.current === realce) return
+    const i = filtrados.findIndex((l) => l.kommo_lead_id === realce)
+    if (i < 0) return
+    if (i >= mostrar) {
+      setMostrar(i + 1)
+      return
+    }
+    rolouAte.current = realce
+    const el = document.querySelector<HTMLElement>(`[data-lead="${realce}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el?.focus({ preventScroll: true })
+  }, [realce, filtrados, mostrar])
+  // O DESTAQUE SOME SOZINHO depois de alguns segundos: é para achar, não marca.
+  useEffect(() => {
+    if (realce === null) return
+    const t = window.setTimeout(() => setRealce(null), 6000)
+    return () => window.clearTimeout(t)
+  }, [realce])
+
   /** Copia o número do processo — e diz se deu certo, que é o que se quer saber. */
   const copiarProcesso = (numero: string) => {
     Promise.resolve()
@@ -3903,21 +4415,35 @@ export default function AnaliseCredito() {
       jaMovidos.current.add(chave)
     }
     const texto = mensagem.trim()
-    if (!texto) return
-    try {
-      // DE PESSOA: o texto é dela, e é o que a análise seguinte precisa ler no
-      // card. Ver marcarComoDePessoa, em _shared/notaCredijuris.ts.
-      await invokeFunction('kommo-anotar', {
-        lead_id: leadId, texto, origem: 'pessoa', autor: analistaNome,
-      })
-    } catch (e) {
-      throw new Error(
-        'O card foi movido, mas a nota com a mensagem não subiu (' +
-          ((e as Error)?.message ?? String(e)) +
-          '). O texto continua aqui — confirmar de novo tenta só a nota.',
-      )
+    if (texto) {
+      try {
+        // DE PESSOA: o texto é dela, e é o que a análise seguinte precisa ler no
+        // card. Ver marcarComoDePessoa, em _shared/notaCredijuris.ts.
+        await invokeFunction('kommo-anotar', {
+          lead_id: leadId, texto, origem: 'pessoa', autor: analistaNome,
+        })
+      } catch (e) {
+        throw new Error(
+          'O card foi movido, mas a nota com a mensagem não subiu (' +
+            ((e as Error)?.message ?? String(e)) +
+            '). O texto continua aqui — confirmar de novo tenta só a nota.',
+        )
+      }
     }
+    // TUDO FEITO, A MEMÓRIA SAI. Ela só existe para o retry da nota; se ficasse,
+    // o mesmo card voltando a esta coluna mais tarde na sessão — Revisão,
+    // Diligência, Sanar, Revisão de novo (onda 4) — teria o movimento PULADO, e a
+    // nota subiria dizendo um movimento que não aconteceu.
+    jaMovidos.current.delete(chave)
   }
+
+  /** Esquece os movimentos pendentes de nota de um card — a janela dele fechou. */
+  function esquecerMovimentos(leadId: number) {
+    for (const k of [...jaMovidos.current]) if (k.startsWith(`${leadId}:`)) jaMovidos.current.delete(k)
+  }
+
+  /** O card já se moveu para esta coluna nesta janela, e falta só a nota? */
+  const jaMovidoPara = (leadId: number) => (statusId: number) => jaMovidos.current.has(`${leadId}:${statusId}`)
 
   /**
    * A anotação escrita no card (ver `BotaoDeAnotacao`).
@@ -4184,6 +4710,39 @@ export default function AnaliseCredito() {
   function concluir(lead: KommoLead, acoes: AcaoTela[]) {
     setMensagemDoCard({ lead, acoes, titulo: 'Concluir a qualificação' })
   }
+
+  // ------------------------------------------------ ONDA 4: SÓ PARA ADMIN
+  //
+  // Os handlers abaixo só são chamados por botões que `abaParaQuemVe` entrega ao
+  // administrador. NENHUM DELES RODA SOZINHO: nada move ao abrir a tela, ao
+  // carregar os cards ou por parâmetro de endereço — só pelo clique.
+
+  /** O nome de uma coluna, como a tela a mostra (o rótulo da aba dela). */
+  const nomeDaColunaDoId = (statusId: number) =>
+    nomeDaColuna(abas.find((a) => a.statusIds.includes(statusId))?.label ?? String(statusId))
+
+  /** A janela do "Não fechou" aberta, com as saídas daquela Negociação. */
+  const [naoFechou, setNaoFechou] = useState<{ lead: KommoLead; opcoes: DesfechoDaNegociacao } | null>(null)
+
+  /**
+   * UM DESFECHO DA NEGOCIAÇÃO: o movimento pela `kommo-mover` (que confere que o
+   * card está na Negociação e marca a nota de serviço como "Comercial") e a nota
+   * com o texto, pelo mesmo `moverComNota` dos desfechos — falhando a nota, quem
+   * chamou mantém a janela aberta e confirmar de novo só anota.
+   */
+  async function desfechoDaNegociacaoNoCard(lead: KommoLead, acao: AcaoTela, nota: string) {
+    setEmAndamento({ leadId: lead.kommo_lead_id, statusId: acao.statusId })
+    try {
+      await moverComNota(lead.kommo_lead_id, acao.statusId, nota)
+    } finally {
+      setEmAndamento(null)
+    }
+  }
+
+  /** "Gerar contrato": a Geração de contratos com SÓ o id do card no endereço. */
+  const navegar = useNavigate()
+  const gerarContratoDoCard = (lead: KommoLead) =>
+    navegar(`/comercial/contratos?card=${encodeURIComponent(String(lead.kommo_lead_id))}`)
 
   // AS FASES DO FLUXO SE COMPARAM ENTRE SI (a mesma régua para a barra); a dos
   // perdidos tem régua própria — 73 reprovados não podem apagar as barras de
@@ -4718,6 +5277,23 @@ export default function AnaliseCredito() {
                   resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
                   botoes={botoesDoCard}
                   onCertidoes={abaAtual?.certidoes ? onCertidoes : undefined}
+                  // ONDA 4, SÓ ADMIN: os campos só existem na aba de quem é admin
+                  // (`abaParaQuemVe`); para os outros, nada disto é passado.
+                  negociacao={
+                    abaAtual?.negociacao
+                      ? {
+                          opcoes: abaAtual.negociacao,
+                          destinoDoFechado: abaAtual.negociacao.fechado
+                            ? nomeDaColunaDoId(abaAtual.negociacao.fechado.statusId)
+                            : '',
+                          onFechado: (lead, nota) =>
+                            desfechoDaNegociacaoNoCard(lead, abaAtual.negociacao!.fechado!, nota),
+                          onNaoFechou: (lead) => setNaoFechou({ lead, opcoes: abaAtual.negociacao! }),
+                        }
+                      : undefined
+                  }
+                  onGerarContrato={abaAtual?.gerarContrato ? gerarContratoDoCard : undefined}
+                  realcado={realce === l.kommo_lead_id}
                 />
               ))}
             </div>
@@ -4775,7 +5351,19 @@ export default function AnaliseCredito() {
               ? resumoDaOportunidade(mensagemDoCard.lead.oportunidade)
               : ''
           }
+          // A CAIXA DO RESUMO (onda 4): no Concluir do RPV — várias saídas, uma
+          // delas aprovar —, que só chega ao admin. Fora dele, a janela de sempre.
+          resumo={
+            mensagemDoCard.lead.pipeline_id === FUNIL_RPV &&
+            mensagemDoCard.acoes.length > 1 &&
+            mensagemDoCard.acoes.some((a) => a.papel === 'aprovar')
+              ? mensagemDoCard.lead.oportunidade
+                ? resumoDaOportunidade(mensagemDoCard.lead.oportunidade)
+                : ''
+              : null
+          }
           ocupado={mover.isPending}
+          jaMovido={jaMovidoPara(mensagemDoCard.lead.kommo_lead_id)}
           onConfirmar={async (acao, mensagem) => {
             setEmAndamento({
               leadId: mensagemDoCard.lead.kommo_lead_id,
@@ -4788,7 +5376,31 @@ export default function AnaliseCredito() {
             )
             setMensagemDoCard(null)
           }}
-          onFechar={() => setMensagemDoCard(null)}
+          onFechar={() => {
+            esquecerMovimentos(mensagemDoCard.lead.kommo_lead_id)
+            setMensagemDoCard(null)
+          }}
+        />
+      )}
+
+      {naoFechou && (
+        <JanelaNaoFechou
+          key={naoFechou.lead.kommo_lead_id}
+          lead={naoFechou.lead}
+          opcoes={{
+            ...(naoFechou.opcoes.naoFechou ? { recusou: naoFechou.opcoes.naoFechou } : {}),
+            ...(naoFechou.opcoes.semResposta ? { sumiu: naoFechou.opcoes.semResposta } : {}),
+          }}
+          nomeDaColuna={nomeDaColunaDoId}
+          jaMovido={jaMovidoPara(naoFechou.lead.kommo_lead_id)}
+          onConfirmar={async (acao, nota) => {
+            await desfechoDaNegociacaoNoCard(naoFechou.lead, acao, nota)
+            setNaoFechou(null)
+          }}
+          onFechar={() => {
+            esquecerMovimentos(naoFechou.lead.kommo_lead_id)
+            setNaoFechou(null)
+          }}
         />
       )}
 

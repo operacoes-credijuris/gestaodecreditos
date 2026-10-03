@@ -10,13 +10,25 @@ import {
 } from 'react'
 import {
   AlertTriangle,
+  ArrowLeft,
   CheckCircle2,
   ExternalLink,
   File as IconeArquivo,
   FileText,
+  Info,
   Upload,
   X,
 } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useAuth } from '@/contexts/AuthContext'
+import {
+  CATEGORIA_RPV,
+  cardDoEndereco,
+  originadorAAplicar,
+  preenchimentoDoCard,
+  type CardParaContrato,
+  type PreenchimentoDoCard,
+} from '@/lib/contratoDoCard'
 import { useInvestidorDados } from '@/lib/queries'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -167,6 +179,10 @@ function GerarPanel() {
   const [resultado, setResultado] = useState<ResultadoGeracao | null>(null)
   const [erro, setErro] = useState<string | null>(null)
 
+  // A CATEGORIA DA LISTA QUE CHEGOU, ou null enquanto nenhuma chegou (em voo, ou
+  // com erro). É o que diz ao "Gerar contrato" do card que já há de onde escolher.
+  const [categoriaDaLista, setCategoriaDaLista] = useState<string | null>(null)
+
   // Recarrega a lista de originadores (pastas em Drive) sempre que a categoria muda.
   // TROCAR A CATEGORIA ZERA O ORIGINADOR: a lista é outra pasta do Drive.
   useEffect(() => {
@@ -176,13 +192,16 @@ function GerarPanel() {
     // A LISTA ANTERIOR SAI ANTES DE RECARREGAR: se a leitura falhasse, ficavam os
     // originadores da outra categoria, escolhíveis como se fossem desta.
     setOriginadores([])
+    setCategoriaDaLista(null)
     setErroOriginadores(null)
     invokeFunction<{ originadores: string[] }>('gerar-contrato', {
       acao: 'listar_originadores',
       categoria,
     })
       .then((r) => {
-        if (!cancelado) setOriginadores(r.originadores ?? [])
+        if (cancelado) return
+        setOriginadores(r.originadores ?? [])
+        setCategoriaDaLista(categoria)
       })
       .catch((e) => {
         if (!cancelado) setErroOriginadores((e as Error).message)
@@ -194,6 +213,82 @@ function GerarPanel() {
       cancelado = true
     }
   }, [categoria, recargaOriginadores])
+
+  // ------------------------- "GERAR CONTRATO" A PARTIR DO CARD (onda 4, só admin)
+  //
+  // A Análise de crédito abre esta tela com `?card=<id>` (só o id). O card é lido
+  // do ESPELHO (kommo_leads — leitura, nada é gravado), e a tela preenche a
+  // categoria (RPV) e o número do processo. O ORIGINADOR ESPERA A LISTA DO DRIVE e
+  // só é escolhido DELA (`originadorAAplicar`): um nome fora da lista faria o
+  // `gerar-contrato` criar uma pasta nova. Nada é gerado sozinho — o botão
+  // continua sendo o da pessoa.
+  const { isAdmin } = useAuth()
+  const [parametros, setParametros] = useSearchParams()
+  const navegar = useNavigate()
+  const cardPedido = isAdmin ? cardDoEndereco(parametros.get('card')) : null
+  const [doCard, setDoCard] = useState<PreenchimentoDoCard | null>(null)
+  const [erroDoCard, setErroDoCard] = useState<string | null>(null)
+  /** O originador do card já foi aplicado: nunca de novo (a escolha à mão fica). */
+  const originadorDoCardAplicado = useRef(false)
+  /** O que o card deu ao originador: o item da lista, '' (sem item igual) ou null (ainda não). */
+  const [originadorDoCard, setOriginadorDoCard] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (cardPedido === null) return
+    let cancelado = false
+    originadorDoCardAplicado.current = false
+    setOriginadorDoCard(null)
+    setErroDoCard(null)
+    supabase
+      .from('kommo_leads')
+      .select('kommo_lead_id, pipeline_id, nome, processo_cnj, notas, nota_texto')
+      .eq('kommo_lead_id', cardPedido)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelado) return
+        if (error) return setErroDoCard(`Não consegui ler o card no espelho do Kommo: ${error.message}`)
+        if (!data) return setErroDoCard('Não achei este card no espelho do Kommo — preencha à mão.')
+        const p = preenchimentoDoCard(data as CardParaContrato)
+        setDoCard(p)
+        // SÓ O RPV TEM O BOTÃO, e só ele é preenchido: num card de outro funil a
+        // tela diz isso e não adivinha categoria nem pasta.
+        if (!p.ehRpv) return
+        setCategoria(CATEGORIA_RPV)
+        if (p.numero) setNumeroProcesso(p.numero)
+      })
+    return () => {
+      cancelado = true
+    }
+  }, [cardPedido])
+
+  // O ORIGINADOR, NO RETORNO DA LISTA E UMA VEZ SÓ (ver `originadorAAplicar`).
+  useEffect(() => {
+    const o = originadorAAplicar({
+      card: doCard,
+      jaAplicado: originadorDoCardAplicado.current,
+      categoriaDaLista,
+      carregando: carregandoOriginadores,
+      lista: originadores,
+    })
+    if (o === undefined) return
+    originadorDoCardAplicado.current = true
+    setOriginador(o)
+    setOriginadorDoCard(o)
+  }, [doCard, categoriaDaLista, carregandoOriginadores, originadores])
+
+  /** Dispensa o aviso do card: o formulário fica como está, e o endereço perde o card. */
+  function esquecerCard() {
+    setDoCard(null)
+    setErroDoCard(null)
+    setParametros(
+      (p) => {
+        const n = new URLSearchParams(p)
+        n.delete('card')
+        return n
+      },
+      { replace: true },
+    )
+  }
 
   function adicionarArquivos(papel: Papel, lista: FileList | File[] | null) {
     if (!lista || lista.length === 0) return
@@ -283,6 +378,9 @@ function GerarPanel() {
 
       setResultado(data)
       resetarFormulario()
+      // O FORMULÁRIO VOLTOU AO BRANCO: o aviso "já preenchidos" do card deixaria
+      // de ser verdade.
+      if (doCard || erroDoCard) esquecerCard()
     } catch (err) {
       setErro((err as Error).message)
     } finally {
@@ -295,6 +393,65 @@ function GerarPanel() {
 
   return (
     <div>
+      {/* VINDO DO CARD (onda 4, só admin): o que foi preenchido, o que falta e o
+          caminho de volta. O originador só se diz escolhido depois da lista. */}
+      {(doCard || erroDoCard) && cardPedido !== null && (
+        <div
+          role="status"
+          className="mb-5 flex flex-wrap items-start gap-3 rounded-cartao border border-info-borda bg-info-fundo px-5 py-4"
+        >
+          <Info className="mt-0.5 h-[20px] w-[20px] flex-none text-info" aria-hidden />
+          <p className="min-w-[220px] flex-1 text-corpo text-texto-2">
+            {erroDoCard ? (
+              erroDoCard
+            ) : doCard && !doCard.ehRpv ? (
+              <>Este card não é do funil de RPV — a tela não preencheu nada. Preencha à mão.</>
+            ) : doCard ? (
+              <>
+                Vindo do card de <strong className="text-texto">{doCard.cedente || `card ${doCard.id}`}</strong>{' '}
+                (Elaboração de contratos):{' '}
+                {[
+                  'categoria',
+                  doCard.numero && 'processo',
+                  originadorDoCard ? 'originador' : null,
+                ]
+                  .filter(Boolean)
+                  .join(', ')
+                  .replace(/, ([^,]*)$/, ' e $1')}{' '}
+                {doCard.numero || originadorDoCard ? 'já preenchidos.' : 'já preenchida.'}
+                {!doCard.numero && (
+                  <>
+                    {' '}
+                    <strong className="text-texto">O card não tem número de processo</strong> — informe abaixo.
+                  </>
+                )}
+                {originadorDoCard === null &&
+                  (erroOriginadores
+                    ? ' O originador entra quando a lista do Drive carregar — tente de novo no campo dele.'
+                    : ' O originador entra quando a lista do Drive carregar.')}
+                {originadorDoCard === '' &&
+                  ` O intermediador "${doCard.intermediador || '—'}" não tem pasta de originador — escolha na lista.`}{' '}
+                Escolha o investidor e confira os documentos.
+              </>
+            ) : null}
+          </p>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<ArrowLeft className="h-[16px] w-[16px]" aria-hidden />}
+              onClick={() => navegar(`/operacional/analise?card=${encodeURIComponent(String(cardPedido))}`)}
+            >
+              Voltar ao card
+            </Button>
+            <IconButton
+              label="Dispensar o aviso"
+              icon={<X className="h-[16px] w-[16px]" />}
+              onClick={esquecerCard}
+            />
+          </div>
+        </div>
+      )}
       {/* O RESULTADO ANTES DO FORMULÁRIO. Ele é a resposta do que a pessoa
           acabou de mandar, e fica no caminho do olho. */}
       {erro && (

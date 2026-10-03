@@ -51,8 +51,15 @@ type Movimento = readonly [string, number, string]
  *   envioAosFundos     "Mover para Em precificação" (ChecksDosFundos), que
  *                      também move sozinho quando o último fundo é marcado
  */
+//
+// O DESFECHO DA NEGOCIAÇÃO (onda 4 do redesenho) também entra, com o rótulo e o
+// papel de cada saída — "Fechado!", "Não fechou", "Sem resposta". Para quem não é
+// admin ele nem existe na aba (ver `abaParaQuemVe`), e as listas abaixo não mudam.
 const movimentosDaAba = (a: Aba): Movimento[] => [
   ...a.acoes.map((x): Movimento => [x.label, x.statusId, x.papel]),
+  ...[a.negociacao?.fechado, a.negociacao?.naoFechou, a.negociacao?.semResposta]
+    .filter((x) => x !== undefined)
+    .map((x): Movimento => [x.label, x.statusId, x.papel]),
   ...(a.escolhaDeProposta ? [['Escolher proposta', a.escolhaDeProposta, 'escolhaDeProposta'] as const] : []),
   ...(a.anexarEMover ? [[a.anexarEMover.rotulo, a.anexarEMover.statusId, 'anexarEMover'] as const] : []),
   ...(a.envioAosFundos
@@ -434,5 +441,126 @@ describe('a tela e o servidor concordam', () => {
     expect(telasRpvDesalinhadas([...KANBAN_RPV])).toEqual([])
     for (const t of TELAS) expect(doKanban.has(t.statusId), t.label).toBe(true)
     for (const id of Object.keys(COLUNAS).map(Number)) expect(doKanban.has(id), String(id)).toBe(true)
+  })
+})
+
+// ---------- A visão de administrador (onda 4 do redesenho) ----------
+
+/**
+ * O QUE O ADMINISTRADOR VÊ A MAIS — escrito por extenso, como o resto. Entrou DE
+ * PROPÓSITO na onda 4 (02/10/2026): os botões que movem card de um jeito novo
+ * aparecem primeiro só para admin (`soAdmin`, filtrado em `abaParaQuemVe`), porque
+ * mover card no Kommo dispara as automações e não se desfaz, e a beta usa o Kommo
+ * de verdade. Tudo o que está acima — a visão de quem não é admin — continua igual.
+ *
+ * O que muda para o admin, e só isto:
+ *   - RPV, Revisão: o Concluir no lugar dos três botões — os MESMOS destinos, com
+ *     os rótulos do Interno (etapa 9);
+ *   - RPV e Interno, Diligência: "Sanar", de volta à Revisão (etapa 8);
+ *   - a Negociação dos três funis: "Fechado!", "Não fechou", "Sem resposta"
+ *     (etapa 10b). No Externo, o "Sem resposta" (112346344) não está no espelho
+ *     destes testes (29/09/2026), então a opção não aparece — ver o teste com ele.
+ */
+const daTelaDoAdmin = (funil: NomeDoFunil, trilha: SubdivisaoPrecatorio, etapas = espelhoDosTresFunis()) =>
+  abasDoFunil(FUNIS[funil], etapas, trilha, { admin: true }).map((a): [string, Movimento[]] => [a.key, movimentosDaAba(a)])
+
+/** A matriz de quem não é admin, com as linhas do admin trocadas. */
+const comAdmin = (base: [string, Movimento[]][], troca: Record<string, Movimento[]>) =>
+  base.map(([k, m]): [string, Movimento[]] => [k, troca[k] ?? m])
+
+describe('matriz de movimentos — a visão de administrador (onda 4)', () => {
+  it('RPV: o Concluir da Revisão, o Sanar e o desfecho da Negociação', () => {
+    const esperado = comAdmin(MOVIMENTOS_RPV, {
+      validacao: [
+        ['Aprovar crédito', 107830035, 'aprovar'],
+        ['Exigir diligência', 107830027, 'diligenciar'],
+        ['Reprovar crédito', 107830031, 'reprovar'],
+      ],
+      diligencia: [['Sanar', 107272807, 'validar']],
+      'col-107830039': [
+        ['Fechado!', 107830043, 'fechar'],
+        ['Não fechou', 107830067, 'reprovar'],
+        ['Sem resposta', 112466388, 'reprovar'],
+      ],
+    })
+    expect(daTelaDoAdmin('RPV', 'interno')).toEqual(esperado)
+    expect(daTelaDoAdmin('RPV', 'externo')).toEqual(esperado)
+  })
+
+  it('Precatório Interno: o Sanar e o desfecho da Negociação', () => {
+    expect(daTelaDoAdmin('Precatório', 'interno')).toEqual(
+      comAdmin(MOVIMENTOS_INTERNO, {
+        'int-diligencia': [['Sanar', 111533944, 'validar']],
+        'col-112466260': [
+          ['Fechado!', 111533952, 'fechar'],
+          ['Não fechou', 112382612, 'reprovar'],
+          ['Sem resposta', 112465960, 'reprovar'],
+        ],
+      }),
+    )
+  })
+
+  it('Precatório Externo: o desfecho da Negociação (o Sanar já era de todos)', () => {
+    expect(daTelaDoAdmin('Precatório', 'externo')).toEqual(
+      comAdmin(MOVIMENTOS_EXTERNO, {
+        'col-112339984': [
+          ['Fechado!', 111533992, 'fechar'],
+          ['Não fechou', 111985976, 'reprovar'],
+        ],
+      }),
+    )
+    // COM O "SEM RESPOSTA" NO ESPELHO (kommo_etapa de 02/10/2026), a opção entra.
+    const comSemResposta = [
+      ...espelhoDosTresFunis(),
+      { pipeline_id: FUNIL_PRECATORIO_EXTERNO, status_id: 112346344, pipeline_nome: null, nome: 'SEM RESPOSTA', ordem: 14.5, tipo: 0 },
+    ]
+    const neg = daTelaDoAdmin('Precatório', 'externo', comSemResposta).find(([k]) => k === 'col-112339984')!
+    expect(neg[1]).toEqual([
+      ['Fechado!', 111533992, 'fechar'],
+      ['Não fechou', 111985976, 'reprovar'],
+      ['Sem resposta', 112346344, 'reprovar'],
+    ])
+  })
+
+  it('sem espelho ainda, a Negociação do precatório não oferece nada (destino não resolvido)', () => {
+    for (const trilha of ['interno', 'externo'] as const) {
+      for (const a of abasDoFunil(FUNIL_PRECATORIO, [], trilha, { admin: true })) {
+        expect(a.negociacao, `${trilha} · ${a.key}`).toBeUndefined()
+      }
+    }
+  })
+
+  // A PORTA DO CONCLUIR: no admin, a Revisão do RPV também é agrupada — com 'rpv'.
+  it("toda aba de desfecho agrupado tem porta ('dd' ou 'rpv')", () => {
+    let agrupadas = 0
+    for (const [funil, trilha] of COMBINACOES) {
+      for (const a of abasDoFunil(FUNIS[funil], espelhoDosTresFunis(), trilha, { admin: true })) {
+        if (!a.desfechoAgrupado || a.acoes.length === 0) continue
+        agrupadas++
+        expect(['dd', 'rpv'], `${funil} · ${trilha} · ${a.label}`).toContain(botoesDaAba(FUNIS[funil], trilha, a))
+      }
+    }
+    // As 4 de antes, mais a Revisão do RPV nas duas trilhas que o RPV ignora.
+    expect(agrupadas).toBe(6)
+  })
+
+  // TODO DESTINO NOVO É ACEITO PELO SERVIDOR, e o que sobra sem botão encolhe.
+  it('todo destino que o admin vê é aceito pelo servidor', () => {
+    const etapas = espelhoDosTresFunis()
+    const casos = [
+      [FUNIL_RPV, abasDoFunil(FUNIL_RPV, etapas, null, { admin: true }), Object.keys(COLUNAS).map(Number)],
+      [FUNIL_PRECATORIO_INTERNO, abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno', { admin: true }), idsDestinoDaTrilha(FUNIL_PRECATORIO_INTERNO)],
+      [FUNIL_PRECATORIO_EXTERNO, abasDoFunil(FUNIL_PRECATORIO, etapas, 'externo', { admin: true }), idsDestinoDaTrilha(FUNIL_PRECATORIO_EXTERNO)],
+    ] as const
+    for (const [funil, abas, aceitos] of casos) {
+      const oferecidos = new Set(abas.flatMap((a) => movimentosDaAba(a).map(([, id]) => id)))
+      for (const id of oferecidos) expect(aceitos as readonly number[], `${funil} · ${id}`).toContain(id)
+      // O QUE O SERVIDOR ACEITA E NEM O ADMIN TEM BOTÃO: a Análise do RPV (de
+      // sempre) e o "Sem resposta" do Externo, ausente do espelho destes testes.
+      const semBotao = ordenado(aceitos.filter((id) => !oferecidos.has(id) && id !== acaoDeReprovar(funil, etapas)?.statusId))
+      expect(semBotao, String(funil)).toEqual(
+        funil === FUNIL_RPV ? [107272803] : funil === FUNIL_PRECATORIO_EXTERNO ? [112346344] : [],
+      )
+    }
   })
 })
