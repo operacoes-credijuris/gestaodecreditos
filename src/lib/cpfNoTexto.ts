@@ -22,7 +22,7 @@
 // pegam. Quem chama tem de dizer "não encontrei", nunca "não existe" — ver o
 // aviso na tela do checklist.
 
-import { cpfValido, onlyDigits } from './format'
+import { cnpjValido, cpfValido, onlyDigits } from './format'
 
 export interface CpfEncontrado {
   /** Só dígitos — é assim que vai para o banco. */
@@ -137,4 +137,78 @@ export function acharCpfs(texto: string, limite = 12): CpfEncontrado[] {
   return [...porCpf.values()]
     .sort((a, b) => peso(a) - peso(b) || a.posicao - b.posicao)
     .slice(0, limite)
+}
+
+// ------------------------------------------------------------------ CNPJ
+//
+// O CEDENTE PODE SER EMPRESA (pedido do dono, 03/10/2026): uma sociedade de
+// advogados que cede honorários, uma empresa credora. Aí o documento que se
+// procura é o CNPJ, com as mesmas regras do CPF — dígito verificador como
+// filtro, fronteira dos dois lados, e a escolha sempre de quem confere.
+
+export interface CnpjEncontrado {
+  /** Só dígitos (14). */
+  cnpj: string
+  contexto: string
+  /** A palavra "CNPJ" aparece logo antes. */
+  rotulado: boolean
+  /** Veio com a pontuação de CNPJ (00.000.000/0000-00). */
+  mascarado: boolean
+  posicao: number
+}
+
+const CNPJ_MASCARA = new RegExp(
+  BORDA_ESQ + String.raw`\d{2}\s*\.\s*\d{3}\s*\.\s*\d{3}\s*\/\s*\d{4}\s*-\s*\d{2}` + BORDA_DIR,
+  'g',
+)
+const CNPJ_CRU = new RegExp(BORDA_ESQ + String.raw`\d{14}` + BORDA_DIR, 'g')
+
+/** Todos os CNPJs de dígito válido no texto, na mesma ordem sugerida de `acharCpfs`. */
+export function acharCnpjs(texto: string, limite = 12): CnpjEncontrado[] {
+  if (!texto) return []
+  const porCnpj = new Map<string, CnpjEncontrado>()
+  const varrer = (re: RegExp, mascarado: boolean) => {
+    re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(texto)) !== null) {
+      const cnpj = onlyDigits(m[0])
+      if (cnpj.length !== 14 || !cnpjValido(cnpj)) continue
+      const rotulado = /\bCNPJ\b/i.test(texto.slice(Math.max(0, m.index - 25), m.index))
+      const jaTem = porCnpj.get(cnpj)
+      if (jaTem) {
+        if (mascarado) jaTem.mascarado = true
+        if (rotulado) jaTem.rotulado = true
+        continue
+      }
+      porCnpj.set(cnpj, {
+        cnpj,
+        contexto: limparContexto(texto.slice(Math.max(0, m.index - 70), m.index + m[0].length + 20)),
+        rotulado,
+        mascarado,
+        posicao: m.index,
+      })
+    }
+  }
+  varrer(CNPJ_MASCARA, true)
+  varrer(CNPJ_CRU, false)
+  const peso = (c: CnpjEncontrado) => (c.rotulado ? 0 : c.mascarado ? 1 : 2)
+  return [...porCnpj.values()]
+    .sort((a, b) => peso(a) - peso(b) || a.posicao - b.posicao)
+    .slice(0, limite)
+}
+
+/** Um documento achado, CPF ou CNPJ — o que a tela lista, conforme o tipo do cedente. */
+export interface DocumentoEncontrado {
+  /** Só dígitos: 11 (CPF) ou 14 (CNPJ). */
+  doc: string
+  contexto: string
+  rotulado: boolean
+  posicao: number
+}
+
+/** Os CPFs (pessoa física) ou os CNPJs (pessoa jurídica) do texto. */
+export function acharDocumentos(texto: string, tipo: 'PF' | 'PJ', limite = 12): DocumentoEncontrado[] {
+  return tipo === 'PJ'
+    ? acharCnpjs(texto, limite).map((c) => ({ doc: c.cnpj, contexto: c.contexto, rotulado: c.rotulado, posicao: c.posicao }))
+    : acharCpfs(texto, limite).map((c) => ({ doc: c.cpf, contexto: c.contexto, rotulado: c.rotulado, posicao: c.posicao }))
 }

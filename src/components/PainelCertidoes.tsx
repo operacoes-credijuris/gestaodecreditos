@@ -39,6 +39,14 @@
 // IA, o placar em cartões de número, os avisos numa lista âmbar e o checklist em
 // blocos por pessoa. SÓ A APRESENTAÇÃO MUDOU: as regras acima, as gravações e as
 // mensagens são as de antes.
+//
+// 03/10/2026, PEDIDO DO DONO: a leitura da IA tem de trazer os dados DO CEDENTE,
+// "e ninguém mais", e o cedente pode ser empresa. Daí: o nome do cedente vai
+// para dd-qualificacao, que só devolve o que está na qualificação dele; a caixa
+// dos achados mostra o que a IA identificou, com o trecho, e a busca crua (todo
+// CPF do processo) vai para um "Outros números" recolhido; e o cadastro escolhe
+// pessoa física ou jurídica — CNPJ, razão social e sede, sem nascimento nem
+// cônjuge —, gravada com tipo_pessoa 'PJ' (migração 0075).
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
@@ -55,9 +63,11 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
-import { cpfValido, formatCpfCnpjInput, onlyDigits } from '@/lib/format'
+import { cnpjValido, cpfValido, formatCpfCnpjInput, onlyDigits } from '@/lib/format'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
-import { acharCpfs, type CpfEncontrado } from '@/lib/cpfNoTexto'
+import { acharDocumentos, type DocumentoEncontrado } from '@/lib/cpfNoTexto'
+import { lerUfsDigitadas } from '@/lib/ufsDigitadas'
+import { Segmented } from '@/components/ui/Segmented'
 import {
   acharEstadoCivil,
   acharLocais,
@@ -82,7 +92,8 @@ import {
 } from '@/components/analise/Pecas'
 import { EmissaoBullai } from '@/components/EmissaoBullai'
 import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
-import type { QualificacaoLida } from '../../supabase/functions/_shared/qualificacaoDoCedente.ts'
+import type { Lido, QualificacaoLida } from '../../supabase/functions/_shared/qualificacaoDoCedente.ts'
+import { mencionaNome, tipoPessoaPeloNome } from '../../supabase/functions/_shared/focoNoCedente.ts'
 
 // ------------------------------------------------------------------ tipos
 
@@ -157,6 +168,11 @@ interface RespostaGeracao {
 
 interface FormPessoa {
   nome: string
+  /**
+   * O DOCUMENTO, com máscara: CPF, ou CNPJ quando o cedente é pessoa jurídica
+   * (ver `tipoCedente`). O nome do campo ficou `cpf` para não mexer em toda a
+   * tela — o cônjuge é sempre pessoa física, e o cedente PJ é o caso novo.
+   */
   cpf: string
   uf: string
   municipio: string
@@ -164,6 +180,22 @@ interface FormPessoa {
 }
 
 const VAZIO: FormPessoa = { nome: '', cpf: '', uf: '', municipio: '', nascimento: '' }
+
+type TipoPessoa = 'PF' | 'PJ'
+
+/** O documento cabe no tipo? 11 dígitos de CPF válido, ou 14 de CNPJ válido. */
+function documentoValido(doc: string, tipo: TipoPessoa): boolean {
+  const d = onlyDigits(doc)
+  return tipo === 'PJ' ? d.length === 14 && cnpjValido(d) : d.length === 11 && cpfValido(d)
+}
+
+/** A máscara do tipo: CPF não passa de 11 dígitos, CNPJ vai a 14. */
+function mascaraDoTipo(v: string, tipo: TipoPessoa): string {
+  return formatCpfCnpjInput(onlyDigits(v).slice(0, tipo === 'PJ' ? 14 : 11))
+}
+
+/** "CPF" ou "CNPJ". */
+const rotuloDoc = (tipo: TipoPessoa) => (tipo === 'PJ' ? 'CNPJ' : 'CPF')
 
 // ------------------------------------------------------------------ rótulos
 
@@ -205,6 +237,16 @@ const CAND =
 
 /** O `.sub` da amostra: a linha de baixo do candidato — arquivo e trecho. */
 const SUB = 'mt-0.5 block truncate text-xs text-texto-3'
+
+/**
+ * O trecho dos autos de um dado lido pela IA: inteiro, em quantas linhas
+ * precisar. É a prova do dado — cortado em uma linha, sumia justamente o nome
+ * de quem ele é.
+ */
+const TRECHO = 'mt-0.5 block text-xs text-texto-3'
+
+/** Um achado que não se clica (o nome da mãe, que o formulário não tem). */
+const CAND_FIXO = 'block w-full rounded-campo border border-borda bg-superficie px-3 py-2.5 text-left text-corpo text-texto'
 
 /** O `.link-btn` da amostra: link na cor da marca, com área de clique de 24 px. */
 const LINK_BTN =
@@ -300,6 +342,10 @@ function rotuloParametros(p: Record<string, unknown>): string {
 function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
   const a: string[] = []
   if (sujeitos.length === 0) return a
+  // CEDENTE EMPRESA: não casa e não é "sócio de empresa" — os dois avisos de
+  // bloco esquecido abaixo não se aplicam, e o bloco da PJ já é dele (o motor
+  // o aplica ao cedente PJ).
+  const cedentePJ = sujeitos.some((s) => s.papel === 'CEDENTE' && s.tipo_pessoa === 'PJ')
 
   for (const s of sujeitos) {
     if (!s.residencia_levantada) {
@@ -323,7 +369,7 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
     }
   }
 
-  if (!sujeitos.some((s) => s.papel === 'CONJUGE')) {
+  if (!cedentePJ && !sujeitos.some((s) => s.papel === 'CONJUGE')) {
     a.push(
       'Nenhum cônjuge informado. Se o cedente for casado, o checklist está ' +
         'INCOMPLETO: a planilha dá bloco próprio de certidões ao cônjuge ' +
@@ -335,7 +381,7 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
   // EMPRESA em que o cedente é sócio. As duas primeiras têm campo nesta tela; a
   // terceira ainda não, então o aviso é o que impede que a ausência passe por
   // "não se aplica".
-  if (!sujeitos.some((s) => s.papel === 'PJ')) {
+  if (!cedentePJ && !sujeitos.some((s) => s.papel === 'PJ')) {
     a.push(
       'Nenhuma empresa (PJ) informada. Se o cedente for sócio de empresa, falta ' +
         'o bloco de certidões da PJ — CNPJ, FGTS e as estaduais/municipais dela ' +
@@ -619,18 +665,29 @@ function LinhaCertidao({
  * trecho em volta e deixar quem confere clicar. Ver lib/dadosNoTexto.ts.
  */
 function Sugestoes({
-  nascimentos,
-  locais,
+  nascimentos: nascimentosBrutos,
+  locais: locaisBrutos,
   onNascimento,
   onLocal,
   vazio,
+  marcarCedente,
 }: {
   nascimentos: (NascimentoEncontrado & { arquivo?: string })[]
   locais: (LocalEncontrado & { arquivo?: string })[]
   onNascimento: (iso: string) => void
   onLocal: (l: LocalEncontrado) => void
   vazio: string
+  /**
+   * O nome do cedente, quando a lista é a dos "outros dados do processo" (com
+   * a leitura da IA feita): o achado cujo trecho o menciona sobe e ganha selo.
+   */
+  marcarCedente?: string
 }) {
+  const doCedente = (contexto: string) => Boolean(marcarCedente) && mencionaNome(contexto, marcarCedente!)
+  const primeiroDoCedente = <T extends { contexto: string }>(l: T[]) =>
+    marcarCedente ? [...l].sort((a, b) => Number(doCedente(b.contexto)) - Number(doCedente(a.contexto))) : l
+  const nascimentos = primeiroDoCedente(nascimentosBrutos)
+  const locais = primeiroDoCedente(locaisBrutos)
   if (nascimentos.length === 0 && locais.length === 0) {
     return vazio ? <p className="text-xs text-texto-3">{vazio}</p> : null
   }
@@ -650,7 +707,10 @@ function Sugestoes({
                 onClick={() => onNascimento(n.iso)}
                 className={CAND}
               >
-                <b className="font-bold tabular-nums">{n.iso.split('-').reverse().join('/')}</b>
+                <span className="flex flex-wrap items-center gap-2">
+                  <b className="font-bold tabular-nums">{n.iso.split('-').reverse().join('/')}</b>
+                  {doCedente(n.contexto) && <Selo tom="info">menciona o cedente</Selo>}
+                </span>
                 <span className={SUB}>
                   {n.arquivo ? `em ${n.arquivo} · ` : ''}…{n.contexto}…
                 </span>
@@ -678,6 +738,7 @@ function Sugestoes({
                     {l.municipio}/{l.uf}
                   </b>
                   {l.residencial && <Selo tom="info">perto de &quot;residente&quot;</Selo>}
+                  {doCedente(l.contexto) && <Selo tom="info">menciona o cedente</Selo>}
                   {l.forma === 'rotulado' && (
                     <span className="text-xs text-texto-3">(campo CIDADE/UF)</span>
                   )}
@@ -761,8 +822,18 @@ export function PainelCertidoes({
 
   const [editando, setEditando] = useState(false)
   const [cedente, setCedente] = useState<FormPessoa>(VAZIO)
+  /**
+   * O cedente é pessoa física ou jurídica (pedido do dono, 03/10/2026). Vem do
+   * banco; sem cadastro, do nome ("LTDA", "S/A"…) e depois da leitura da IA —
+   * esta só enquanto ninguém escolheu à mão nem digitou documento.
+   */
+  const [tipoCedente, setTipoCedente] = useState<TipoPessoa>('PF')
+  const tipoEscolhido = useRef(false)
   const [conjuge, setConjuge] = useState<FormPessoa>(VAZIO)
   const [temConjuge, setTemConjuge] = useState(false)
+  // EMPRESA NÃO CASA. A caixa do cônjuge guarda o que estava marcado (voltar
+  // para PF devolve), mas só vale para cedente pessoa física.
+  const comConjuge = tipoCedente === 'PF' && temConjuge
   const [residenciaLevantada, setResidenciaLevantada] = useState(false)
   const [ufsAnteriores, setUfsAnteriores] = useState('')
   const [municipiosAnteriores, setMunicipiosAnteriores] = useState('')
@@ -823,16 +894,18 @@ export function PainelCertidoes({
    * Emitir certidão sobre CPF inventado é o pior desfecho do sistema: todo portal
    * responde "nada consta", corretamente, e o dossiê fecha limpo sobre ninguém.
    */
-  const candidatos: (CpfEncontrado & { arquivo: string })[] = useMemo(() => {
-    const fora: (CpfEncontrado & { arquivo: string })[] = []
+  //
+  // CEDENTE EMPRESA: a lista é de CNPJs, com as mesmas regras (ver cpfNoTexto.ts).
+  const candidatos: (DocumentoEncontrado & { arquivo: string })[] = useMemo(() => {
+    const fora: (DocumentoEncontrado & { arquivo: string })[] = []
     for (const a of arquivos) {
       if (!a.texto) continue
-      for (const c of acharCpfs(a.texto)) {
-        if (!fora.some((x) => x.cpf === c.cpf)) fora.push({ ...c, arquivo: a.nome })
+      for (const c of acharDocumentos(a.texto, tipoCedente)) {
+        if (!fora.some((x) => x.doc === c.doc)) fora.push({ ...c, arquivo: a.nome })
       }
     }
     return fora
-  }, [arquivos])
+  }, [arquivos, tipoCedente])
 
   const digitalizados = useMemo(
     () => arquivos.filter((a) => a.digitalizado || a.erro),
@@ -849,10 +922,21 @@ export function PainelCertidoes({
    * que já estão no formulário — então a lista melhora conforme a pessoa escolhe
    * o CPF, que é a ordem natural de preenchimento.
    */
-  const estadosCivis = useMemo(() => {
-    const ancoras = [onlyDigits(cedente.cpf), cedente.nome.trim()].filter(
-      (a) => a.length >= 4,
+  //
+  // AS ÂNCORAS ESPERAM A DIGITAÇÃO PARAR. Cada tecla no nome varria de novo
+  // todos os anexos (um processo de 200 páginas, a cada letra); agora a varredura
+  // roda 400 ms depois da última tecla. O efeito do "escolheu o CPF", abaixo,
+  // espera as âncoras alcançarem o CPF novo antes de usar a lista.
+  const [ancorasEc, setAncorasEc] = useState<string[]>([])
+  useEffect(() => {
+    const t = window.setTimeout(
+      () => setAncorasEc([onlyDigits(cedente.cpf), cedente.nome.trim()].filter((a) => a.length >= 4)),
+      400,
     )
+    return () => window.clearTimeout(t)
+  }, [cedente.cpf, cedente.nome])
+  const estadosCivis = useMemo(() => {
+    const ancoras = ancorasEc
     const fora: (EstadoCivilEncontrado & { arquivo: string })[] = []
     for (const a of arquivos) {
       if (!a.texto) continue
@@ -866,7 +950,7 @@ export function PainelCertidoes({
       }
     }
     return fora.sort((x, y) => Number(y.doCedente) - Number(x.doCedente))
-  }, [arquivos, cedente.cpf, cedente.nome])
+  }, [arquivos, ancorasEc])
 
   /**
    * Aplica o estado civil escolhido: liga ou desliga o bloco do cônjuge, e traz o
@@ -959,9 +1043,14 @@ export function PainelCertidoes({
    */
   const cpfAplicado = useRef<string>('')
   useEffect(() => {
+    // Só pessoa física: nascimento, "residente" e estado civil são da gente.
+    if (tipoCedente !== 'PF') return
     const doc = onlyDigits(cedente.cpf)
     if (doc.length !== 11 || !cpfValido(cedente.cpf)) return
     if (cpfAplicado.current === doc) return
+    // As âncoras do estado civil ainda são as de antes do CPF (ver `ancorasEc`):
+    // esperar, senão a lista usada seria a errada e o CPF ficaria "aplicado".
+    if (!ancorasEc.includes(doc)) return
     cpfAplicado.current = doc
 
     const feitos: string[] = []
@@ -1000,7 +1089,7 @@ export function PainelCertidoes({
       setPreenchido(feitos)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cedente.cpf, doPdf, estadosCivis])
+  }, [cedente.cpf, doPdf, estadosCivis, tipoCedente])
 
 
   // O mesmo, do texto colado.
@@ -1149,6 +1238,10 @@ export function PainelCertidoes({
             }
           : null
       setCedente(daPessoa(ced) ?? { ...VAZIO, nome: cedenteDoCard })
+      // PF OU PJ: o que está gravado; sem cadastro, o que o nome do card diz
+      // ("LTDA", "S/A"…). O gravado conta como escolha — a IA não o troca.
+      setTipoCedente(ced?.tipo_pessoa ?? tipoPessoaPeloNome(cedenteDoCard) ?? 'PF')
+      tipoEscolhido.current = Boolean(ced)
       // O CPF QUE VEM DO BANCO NÃO É UMA ESCOLHA NOVA. Sem isto, o efeito do
       // "escolheu o CPF" o tratava como tal e, achando um estado civil nos autos,
       // trocava a caixa do cônjuge do cadastro gravado e marcava a janela como
@@ -1209,6 +1302,15 @@ export function PainelCertidoes({
    *
    * SÓ TOCA EM CAMPO VAZIO: o que a pessoa digitou vence o que a IA leu.
    */
+  //
+  // E SÓ DO CEDENTE (pedido do dono, 03/10/2026): o nome vai junto — o do
+  // formulário, que é o do card ou o que alguém já corrigiu —, e o servidor
+  // devolve só os dados dessa pessoa, conferidos contra a qualificação DELA.
+  const cedenteRef = useRef(cedente)
+  cedenteRef.current = cedente
+  const tipoRef = useRef(tipoCedente)
+  tipoRef.current = tipoCedente
+
   async function lerComIA() {
     const texto = arquivos
       .map((a) => a.texto ?? '')
@@ -1222,6 +1324,7 @@ export function PainelCertidoes({
         titulo: tituloDoCard,
         texto,
         parcela: classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida),
+        cedente: cedenteRef.current.nome.trim() || cedenteDoCard,
       })
       setLeituraIA(q)
       aplicarLeitura(q)
@@ -1243,23 +1346,38 @@ export function PainelCertidoes({
     const atual = q.residencias.find((r) => r.atual)
     const anteriores = q.residencias.filter((r) => !r.atual)
     const c = q.cedente
+    // PF OU PJ: a IA marca o tipo só enquanto ninguém escolheu à mão nem
+    // digitou documento — a mesma regra do "só toca em campo vazio".
+    const tipo: TipoPessoa =
+      c.tipo_pessoa && !tipoEscolhido.current && !onlyDigits(cedenteRef.current.cpf)
+        ? c.tipo_pessoa
+        : tipoRef.current
+    if (tipo !== tipoRef.current) setTipoCedente(tipo)
+    // O documento da IA só entra se for do tipo escolhido: um CNPJ não vai para
+    // o campo de quem a pessoa marcou como pessoa física.
+    // (Servidor anterior a 03/10/2026 não manda o tipo: é pessoa física.)
+    const tipoLido: TipoPessoa = c.tipo_pessoa ?? 'PF'
+    const doc = tipoLido !== tipo ? null : tipoLido === 'PJ' ? (c.cnpj ?? null) : c.cpf
+    const pf = tipo === 'PF'
     // O parser de CPF preenche nascimento e endereço ao ver um CPF novo; com a
     // leitura da IA já feita, ele não tem o que acrescentar.
-    if (c.cpf) cpfAplicado.current = c.cpf.valor
+    if (pf && c.cpf) cpfAplicado.current = c.cpf.valor
     setCedente((f) => {
       const n = { ...f }
       if (!n.nome.trim() && c.nome) n.nome = c.nome.valor
-      if (!onlyDigits(n.cpf) && c.cpf) n.cpf = formatCpfCnpjInput(c.cpf.valor)
-      if (!n.nascimento && c.nascimento) n.nascimento = c.nascimento.valor
+      if (!onlyDigits(n.cpf) && doc) n.cpf = mascaraDoTipo(doc.valor, tipo)
+      if (pf && !n.nascimento && c.nascimento) n.nascimento = c.nascimento.valor
       if (!n.uf && atual) {
         n.uf = atual.uf
         n.municipio = atual.municipio ? municipioDoIbge(atual.uf, atual.municipio) : ''
       }
       return n
     })
-    if (c.cpf) feitos.push(`CPF ${formatCpfCnpjInput(c.cpf.valor)}`)
-    if (c.nascimento) feitos.push(`nascimento ${c.nascimento.valor.split('-').reverse().join('/')}`)
-    if (atual) feitos.push(`residência ${atual.municipio ? atual.municipio + '/' : ''}${atual.uf}`)
+    if (doc) feitos.push(`${rotuloDoc(tipo)} ${formatCpfCnpjInput(doc.valor)}`)
+    if (pf && c.nascimento) feitos.push(`nascimento ${c.nascimento.valor.split('-').reverse().join('/')}`)
+    if (atual) {
+      feitos.push(`${pf ? 'residência' : 'sede'} ${atual.municipio ? atual.municipio + '/' : ''}${atual.uf}`)
+    }
     if (anteriores.length > 0) {
       setUfsAnteriores((v) => v.trim() || [...new Set(anteriores.map((r) => r.uf))].join(', '))
       setMunicipiosAnteriores(
@@ -1270,9 +1388,9 @@ export function PainelCertidoes({
             .map((r) => municipioDoIbge(r.uf, r.municipio))
             .join(', '),
       )
-      feitos.push(`${anteriores.length} residência(s) anterior(es)`)
+      feitos.push(`${anteriores.length} ${pf ? 'residência(s)' : 'endereço(s) de sede'} anterior(es)`)
     }
-    if (q.estado_civil) {
+    if (pf && q.estado_civil) {
       const pede = PEDE_CONJUGE.has(q.estado_civil.valor)
       // SÓ LIGA, NUNCA DESLIGA (ver o efeito do CPF): a leitura leva segundos, e
       // o cônjuge marcado à mão nesse meio-tempo não pode sumir com a resposta.
@@ -1307,17 +1425,33 @@ export function PainelCertidoes({
 
   const problemas = useMemo(() => {
     const p: string[] = []
-    if (!cedente.nome.trim()) p.push('O nome do cedente é obrigatório.')
-    if (!cpfValido(cedente.cpf) || onlyDigits(cedente.cpf).length !== 11) {
-      p.push('CPF do cedente inválido — confira os 11 dígitos no processo.')
+    const pj = tipoCedente === 'PJ'
+    if (!cedente.nome.trim()) {
+      p.push(pj ? 'A razão social do cedente é obrigatória.' : 'O nome do cedente é obrigatório.')
+    }
+    if (!documentoValido(cedente.cpf, tipoCedente)) {
+      p.push(
+        pj
+          ? 'CNPJ do cedente inválido — confira os 14 dígitos no processo.'
+          : 'CPF do cedente inválido — confira os 11 dígitos no processo.',
+      )
     }
     if (!cedente.uf) {
       p.push(
-        'UF atual do cedente é obrigatória: é ela que define as certidões ' +
-          'estaduais do checklist.',
+        (pj ? 'UF da sede do cedente é obrigatória' : 'UF atual do cedente é obrigatória') +
+          ': é ela que define as certidões estaduais do checklist.',
       )
     }
-    if (temConjuge) {
+    // ESTADO ESCRITO DE UM JEITO QUE NÃO SE RECONHECE NÃO SOME CALADO: era
+    // descartado na gravação, e a certidão estadual dele saía do checklist.
+    const ufsNaoReconhecidas = lerUfsDigitadas(ufsAnteriores).naoReconhecidas
+    if (ufsNaoReconhecidas.length > 0) {
+      p.push(
+        `UF anterior não reconhecida: ${ufsNaoReconhecidas.join(', ')}. Use a sigla (MG, SP) ou o nome ` +
+          'do estado por extenso.',
+      )
+    }
+    if (comConjuge) {
       if (!conjuge.nome.trim()) p.push('O nome do cônjuge é obrigatório.')
       if (!cpfValido(conjuge.cpf) || onlyDigits(conjuge.cpf).length !== 11) {
         p.push('CPF do cônjuge inválido.')
@@ -1327,7 +1461,7 @@ export function PainelCertidoes({
       }
     }
     return p
-  }, [cedente, conjuge, temConjuge])
+  }, [cedente, conjuge, comConjuge, tipoCedente, ufsAnteriores])
 
   /**
    * O que a gravação vai DESTRUIR. Calculado do que já está na tela, sem ida ao
@@ -1338,7 +1472,8 @@ export function PainelCertidoes({
    */
   const impacto = useMemo(() => {
     const docCed = onlyDigits(cedente.cpf)
-    const docCnj = temConjuge ? onlyDigits(conjuge.cpf) : null
+    // Cedente PJ: o cônjuge que houver no banco sai (p_conjuge vai nulo).
+    const docCnj = comConjuge ? onlyDigits(conjuge.cpf) : null
     const condenados = sujeitos.filter(
       (s) =>
         (s.papel === 'CEDENTE' && s.documento !== docCed) ||
@@ -1351,7 +1486,7 @@ export function PainelCertidoes({
       certidoes: perdidas.length,
       obtidas: perdidas.filter((i) => i.status === 'OBTIDA').length,
     }
-  }, [sujeitos, itens, cedente.cpf, conjuge.cpf, temConjuge])
+  }, [sujeitos, itens, cedente.cpf, conjuge.cpf, comConjuge])
 
   // ---------------------------------------------------------------- gravação
 
@@ -1393,11 +1528,10 @@ export function PainelCertidoes({
     setSalvando(true)
     setErro(null)
     try {
-      const listaUf = (s: string) =>
-        s
-          .split(/[,;]/)
-          .map((x) => x.trim().toUpperCase())
-          .filter((x) => /^[A-Z]{2}$/.test(x))
+      // Sigla ou nome por extenso; o que não for estado já barrou a gravação
+      // (ver `problemas`).
+      const listaUf = (s: string) => lerUfsDigitadas(s).ufs
+      const pj = tipoCedente === 'PJ'
       const listaTexto = (s: string) =>
         s
           .split(/[,;]/)
@@ -1414,7 +1548,11 @@ export function PainelCertidoes({
         p_cedente: {
           nome: cedente.nome.trim(),
           documento: onlyDigits(cedente.cpf),
-          data_nascimento: cedente.nascimento || null,
+          // O TIPO VAI EXPLÍCITO (migração 0075). A função antiga ignora o
+          // campo e grava PF — que para CPF é o certo, e para CNPJ o banco
+          // recusa (ver o tratamento do erro abaixo).
+          tipo_pessoa: tipoCedente,
+          data_nascimento: pj ? null : cedente.nascimento || null,
           uf_atual: cedente.uf,
           municipio_atual: cedente.municipio.trim(),
           ufs_anteriores: listaUf(ufsAnteriores),
@@ -1424,7 +1562,7 @@ export function PainelCertidoes({
         // null APAGA o cônjuge no banco. É o que faz desmarcar a caixa valer
         // algo: antes, desmarcar era no-op e as certidões do cônjuge removido
         // continuavam contando como obrigatórias, para sempre.
-        p_conjuge: temConjuge
+        p_conjuge: comConjuge
           ? {
               nome: conjuge.nome.trim(),
               documento: onlyDigits(conjuge.cpf),
@@ -1441,10 +1579,16 @@ export function PainelCertidoes({
           : null,
       })
       if (error) {
+        // CNPJ RECUSADO POR "tipo_bate_documento" É MIGRAÇÃO PENDENTE, e não
+        // dígito errado: a função de antes da 0075 grava todo cedente como PF.
+        // Dizer "dígito inválido" mandaria conferir um CNPJ que está certo.
         throw new Error(
-          /documento_dv|documento_digitos|tipo_bate_documento/.test(error.message)
-            ? 'O banco recusou o documento: dígito verificador inválido. Confira o CPF no processo.'
-            : error.message,
+          pj && /tipo_bate_documento/.test(error.message)
+            ? 'O banco ainda não aceita cedente pessoa jurídica: falta rodar a migração 0075 ' +
+                '(0075_cedente_pessoa_juridica.sql) no SQL Editor do Supabase. Nada foi gravado.'
+            : /documento_dv|documento_digitos|tipo_bate_documento/.test(error.message)
+              ? `O banco recusou o documento: dígito verificador inválido. Confira o ${rotuloDoc(tipoCedente)} no processo.`
+              : error.message,
         )
       }
       const rel = (data ?? {}) as { certidoes_removidas?: number }
@@ -1454,15 +1598,20 @@ export function PainelCertidoes({
 
       // O NOME DA MÃE, quando a IA o leu para ESTE CPF. O formulário não tem o
       // campo, e a BullAI o usa para separar homônimos; perder é pior que gravar
-      // o que está escrito nos autos. Falha aqui não desfaz o cadastro.
+      // o que está escrito nos autos. Falha aqui não desfaz o cadastro — mas é
+      // DITA: engolida, a BullAI seguia sem o nome da mãe e ninguém sabia por quê.
+      // Só de pessoa física: empresa não tem mãe.
       const mae = leituraIA?.cedente.nome_mae?.valor
-      if (mae && leituraIA?.cedente.cpf?.valor === onlyDigits(cedente.cpf)) {
-        await supabase
+      if (!pj && mae && leituraIA?.cedente.cpf?.valor === onlyDigits(cedente.cpf)) {
+        const { error: erroMae } = await supabase
           .from('dd_sujeito')
           .update({ nome_mae: mae })
           .eq('kommo_lead_id', leadId)
           .eq('papel', 'CEDENTE')
           .is('nome_mae', null)
+        if (erroMae) {
+          toast.error(`Cadastro gravado, mas o nome da mãe lido dos autos não: ${erroMae.message}`)
+        }
       }
 
       const r = await invokeFunction<RespostaGeracao>('gerar-checklist-certidoes', {
@@ -1549,6 +1698,323 @@ export function PainelCertidoes({
     set(v)
   }
 
+  /**
+   * PF ↔ PJ, escolhido à mão. A escolha manda daí em diante (a IA não a
+   * desfaz), e o documento digitado que não cabe no tipo novo sai — um CPF no
+   * campo de CNPJ é necessariamente errado, e cortar dígitos o deixaria errado
+   * em silêncio.
+   */
+  function escolherTipo(t: TipoPessoa) {
+    if (t === tipoCedente) return
+    tipoEscolhido.current = true
+    setMexeu(true)
+    setTipoCedente(t)
+    setCedente((f) => (onlyDigits(f.cpf).length === (t === 'PJ' ? 14 : 11) ? f : { ...f, cpf: '' }))
+  }
+
+  // ---------------------------------------------------------------- achados
+  //
+  // A CAIXA DE ACHADOS, ASSERTIVA (pedido do dono, 03/10/2026). Antes ela listava
+  // todo CPF de dígito válido do processo, toda data de nascimento rotulada e
+  // toda cidade com UF — de todas as pessoas: o cedente, o outro autor, o
+  // advogado, o réu. Com a leitura da IA feita, a caixa mostra o que a IA
+  // identificou DO CEDENTE, cada dado com o trecho de onde saiu; a busca crua
+  // fica recolhida embaixo, como recurso manual. Sem leitura (falhou, processo
+  // digitalizado), a caixa é a de sempre.
+  const tipoDaLeitura: TipoPessoa = leituraIA?.cedente.tipo_pessoa ?? 'PF'
+  const docDaLeitura: Lido<string> | null = leituraIA
+    ? tipoDaLeitura === 'PJ'
+      ? (leituraIA.cedente.cnpj ?? null)
+      : leituraIA.cedente.cpf
+    : null
+  const iaAchouCedente = Boolean(
+    leituraIA &&
+      (docDaLeitura ||
+        leituraIA.cedente.nascimento ||
+        leituraIA.estado_civil ||
+        leituraIA.residencias.length > 0),
+  )
+  const nomeProcurado = leituraIA?.alvo?.nome || cedente.nome.trim() || cedenteDoCard
+
+  /** Usa uma residência (ou sede) lida: a atual vai para UF/município; a anterior, para as listas. */
+  function usarResidenciaLida(r: { uf: string; municipio: string; atual: boolean }) {
+    const municipio = r.municipio ? municipioDoIbge(r.uf, r.municipio) : ''
+    if (r.atual) {
+      usarLocal({ uf: r.uf, municipio })
+      return
+    }
+    setMexeu(true)
+    const junta = (lista: string, item: string) => {
+      const itens = lista.split(/[,;]/).map((x) => x.trim()).filter(Boolean)
+      return itens.some((x) => x.toLowerCase() === item.toLowerCase()) ? lista : [...itens, item].join(', ')
+    }
+    setUfsAnteriores((v) => junta(v, r.uf))
+    if (municipio) setMunicipiosAnteriores((v) => junta(v, municipio))
+  }
+
+  /** Aplica o estado civil lido pela IA, com o cônjuge que ela trouxe (só em campo vazio). */
+  function usarEstadoCivilLido() {
+    const ec = leituraIA?.estado_civil
+    if (!ec) return
+    setMexeu(true)
+    const pede = PEDE_CONJUGE.has(ec.valor)
+    setTemConjuge(pede)
+    const j = leituraIA?.conjuge
+    if (pede && j) {
+      setConjuge((f) => ({
+        ...f,
+        nome: f.nome.trim() || j.nome?.valor || '',
+        cpf: onlyDigits(f.cpf) ? f.cpf : j.cpf ? formatCpfCnpjInput(j.cpf.valor) : '',
+        nascimento: f.nascimento || j.nascimento?.valor || '',
+      }))
+    }
+  }
+
+  /** Um dado lido pela IA: o valor, o trecho dos autos embaixo, e clicar usa. */
+  function itemDaLeitura(chave: string, rotulo: string, valor: ReactNode, evidencia: string, usar?: () => void) {
+    const corpo = (
+      <>
+        <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-xs text-texto-3">{rotulo}</span>
+          <b className="font-bold">{valor}</b>
+        </span>
+        {evidencia && <span className={TRECHO}>“{evidencia}”</span>}
+      </>
+    )
+    return usar ? (
+      <button key={chave} type="button" onClick={usar} className={CAND}>
+        {corpo}
+      </button>
+    ) : (
+      <div key={chave} className={CAND_FIXO}>
+        {corpo}
+      </div>
+    )
+  }
+
+  /** O que a IA identificou do cedente — a parte principal da caixa, com a leitura feita. */
+  function achadosDaLeitura() {
+    if (!leituraIA) return null
+    const c = leituraIA.cedente
+    const pj = tipoDaLeitura === 'PJ'
+    const itensLidos: ReactNode[] = []
+    if (c.nome) {
+      itensLidos.push(
+        itemDaLeitura('nome', pj ? 'Razão social' : 'Nome', c.nome.valor, c.nome.evidencia, () =>
+          alterar(setCedente)({ ...cedente, nome: c.nome!.valor }),
+        ),
+      )
+    }
+    if (docDaLeitura) {
+      itensLidos.push(
+        itemDaLeitura(
+          'doc',
+          rotuloDoc(tipoDaLeitura),
+          <span className="tabular-nums">{formatCpfCnpjInput(docDaLeitura.valor)}</span>,
+          docDaLeitura.evidencia,
+          () => {
+            if (tipoDaLeitura !== tipoCedente) {
+              tipoEscolhido.current = true
+              setTipoCedente(tipoDaLeitura)
+            }
+            alterar(setCedente)({ ...cedente, cpf: mascaraDoTipo(docDaLeitura.valor, tipoDaLeitura) })
+          },
+        ),
+      )
+    }
+    if (!pj && c.nascimento) {
+      itensLidos.push(
+        itemDaLeitura(
+          'nasc',
+          'Nascimento',
+          <span className="tabular-nums">{c.nascimento.valor.split('-').reverse().join('/')}</span>,
+          c.nascimento.evidencia,
+          () => alterar(setCedente)({ ...cedente, nascimento: c.nascimento!.valor }),
+        ),
+      )
+    }
+    if (!pj && c.nome_mae) {
+      // SEM CLIQUE: o formulário não tem o campo. O nome da mãe é gravado junto
+      // com o cadastro quando o CPF gravado é este mesmo (ver salvarEGerar).
+      itensLidos.push(itemDaLeitura('mae', 'Mãe (gravada junto com este CPF)', c.nome_mae.valor, c.nome_mae.evidencia))
+    }
+    if (!pj && leituraIA.estado_civil) {
+      const j = leituraIA.conjuge
+      itensLidos.push(
+        itemDaLeitura(
+          'ec',
+          'Estado civil',
+          <>
+            {ROTULO_ESTADO_CIVIL[leituraIA.estado_civil.valor] ?? leituraIA.estado_civil.valor}
+            {j?.nome && ` — cônjuge: ${j.nome.valor}`}
+            {j?.cpf && <span className="tabular-nums"> (CPF {formatCpfCnpjInput(j.cpf.valor)})</span>}
+          </>,
+          leituraIA.estado_civil.evidencia,
+          usarEstadoCivilLido,
+        ),
+      )
+    }
+    for (const r of leituraIA.residencias) {
+      itensLidos.push(
+        itemDaLeitura(
+          `res-${r.uf}-${r.municipio}`,
+          pj ? (r.atual ? 'Sede atual' : 'Sede anterior') : r.atual ? 'Residência atual' : 'Residência anterior',
+          `${r.municipio ? `${r.municipio}/` : ''}${r.uf}`,
+          r.evidencia,
+          () => usarResidenciaLida(r),
+        ),
+      )
+    }
+    return (
+      <>
+        <p className="mt-2 text-xs text-texto-3">
+          A IA leu os autos procurando <b className="text-texto-2">{nomeProcurado || 'o cedente'}</b>
+          {pj ? ' (pessoa jurídica)' : ''} e trouxe só o que está na qualificação{' '}
+          {pj ? 'dessa empresa' : 'dessa pessoa'} — cada dado com o trecho dos autos de onde saiu. O
+          documento só aparece se estiver escrito ali, depois do nome. Clicar usa o dado no cadastro;
+          confira antes de gravar.
+        </p>
+        <div className="my-2 grid gap-2">{itensLidos}</div>
+      </>
+    )
+  }
+
+  /**
+   * A BUSCA CRUA DOS ANEXOS: documentos de dígito válido, datas rotuladas como
+   * nascimento, cidades com UF e estados civis — de todas as pessoas do
+   * processo. Sem leitura da IA, é a caixa (como sempre foi). Com a leitura,
+   * vai para o "Outros números no processo", recolhido: sai dela o documento
+   * que a IA já identificou, e o achado cujo trecho menciona o cedente sobe,
+   * com selo.
+   */
+  function achadosManuais(outros: boolean) {
+    const pj = tipoCedente === 'PJ'
+    const doc = rotuloDoc(tipoCedente)
+    const marcar = outros ? nomeProcurado : undefined
+    const menciona = (contexto: string) => Boolean(marcar) && mencionaNome(contexto, marcar!)
+    const docs = outros
+      ? candidatos
+          .filter((c) => c.doc !== docDaLeitura?.valor)
+          .sort((a, b) => Number(menciona(b.contexto)) - Number(menciona(a.contexto)))
+      : candidatos
+    const nascimentos = pj ? [] : doPdf.nascimentos
+    const ecs = pj ? [] : estadosCivis
+    const vazio = docs.length === 0 && nascimentos.length === 0 && doPdf.locais.length === 0 && ecs.length === 0
+    if (outros && vazio) {
+      return <p className="mt-2 text-xs text-texto-3">Nada além do que a IA já identificou.</p>
+    }
+    return (
+      <>
+        {/* A EXPLICAÇÃO VEM ANTES DA LISTA, como na amostra: quem lê
+            "escolher é seu" antes de ver os números não clica no primeiro
+            por reflexo. */}
+        {docs.length > 0 && (
+          <p className="mt-2 text-xs text-texto-3">
+            Dígito verificador conferido. <b className="text-texto-2">Escolher é seu</b>: um
+            processo traz o {doc} do cedente, do advogado e às vezes de terceiros —
+            {outros
+              ? ' estes são os que a leitura não atribuiu ao cedente.'
+              : ' o sistema não tem como saber qual é qual.'}{' '}
+            A lista pode estar incompleta: o PDF nem sempre entrega os números inteiros.
+          </p>
+        )}
+        {docs.length === 0 && !outros && (
+          <p className="mt-2 text-xs text-aviso">
+            Nenhum {doc} de dígito válido no texto — digite o do cedente abaixo,
+            conferindo no processo. O que achei do resto está logo abaixo.
+          </p>
+        )}
+        {docs.length > 0 && (
+          <div className="my-2 grid gap-2">
+            {docs.map((c) => (
+              <button
+                key={c.doc}
+                type="button"
+                onClick={() => alterar(setCedente)({ ...cedente, cpf: mascaraDoTipo(c.doc, tipoCedente) })}
+                className={CAND}
+              >
+                <span className="flex flex-wrap items-center gap-2">
+                  <b className="font-bold tabular-nums">{formatCpfCnpjInput(c.doc)}</b>
+                  {c.rotulado && <Selo tom="info">rotulado &quot;{doc}&quot;</Selo>}
+                  {menciona(c.contexto) && <Selo tom="info">menciona o cedente</Selo>}
+                </span>
+                <span className={SUB}>
+                  {c.arquivo ? `em ${c.arquivo} · ` : ''}…{c.contexto}…
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {(nascimentos.length > 0 || doPdf.locais.length > 0) && (
+          <Sugestoes
+            nascimentos={nascimentos}
+            locais={doPdf.locais}
+            onNascimento={(iso) => {
+              setMexeu(true)
+              setCedente((f) => ({ ...f, nascimento: iso }))
+            }}
+            onLocal={usarLocal}
+            vazio=""
+            marcarCedente={marcar}
+          />
+        )}
+
+        {/*
+          ESTADO CIVIL: é o que DOBRA o checklist.
+          Cedente casado tem bloco próprio de certidões para o cônjuge
+          (planilha, linhas 52 a 67). Deixar de marcar fecha o dossiê com
+          esse bloco inteiro faltando, e o placar não acusa nada — por isso
+          a sugestão fica aqui, na caixa dos achados junto com o CPF, e não
+          escondida na caixinha lá embaixo.
+        */}
+        {ecs.length > 0 && (
+          <>
+            <p className="mt-2 text-xs text-texto-2">
+              <b className="text-texto">Estado civil</b> na qualificação das partes —
+              clicar já liga ou desliga o bloco do cônjuge:
+            </p>
+            <div className="my-2 grid gap-2">
+              {ecs.map((e) => (
+                <button
+                  key={`${e.estado}-${e.conjuge ?? ''}`}
+                  type="button"
+                  onClick={() => usarEstadoCivil(e)}
+                  className={CAND}
+                >
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span>
+                      {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
+                      {e.conjuge && ` — cônjuge: ${e.conjuge}`}
+                    </span>
+                    {e.doCedente ? (
+                      <Selo tom="info">perto do cedente</Selo>
+                    ) : (
+                      <Selo tom="aviso">pode ser de outra parte</Selo>
+                    )}
+                  </span>
+                  <span className={SUB}>
+                    em {e.arquivo} · …{e.contexto}…
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-aviso">
+              A petição pode ser antiga: &quot;casada&quot; naquela data não
+              é &quot;casada hoje&quot;. Confirme antes de gerar o checklist.
+            </p>
+          </>
+        )}
+      </>
+    )
+  }
+
+  const temAchadosManuais =
+    candidatos.length > 0 ||
+    (tipoCedente === 'PF' && doPdf.nascimentos.length > 0) ||
+    doPdf.locais.length > 0 ||
+    (tipoCedente === 'PF' && estadosCivis.length > 0) ||
+    digitalizados.length > 0
+
   return (
     <div>
       {/* OS ERROS VÊM PRIMEIRO, como na amostra: o que falhou ao ler é a primeira
@@ -1576,7 +2042,7 @@ export function PainelCertidoes({
           certidões. */}
       <p className="mb-4 text-corpo text-texto-3">
         {editando
-          ? 'O checklist é montado por sujeito. Sem CPF e UF não há como saber quais certidões são exigidas.'
+          ? 'O checklist é montado por sujeito. Sem CPF (ou CNPJ) e UF não há como saber quais certidões são exigidas.'
           : 'Checklist congelado no banco. A etapa documental só fecha com todas as obrigatórias em arquivo.'}
       </p>
 
@@ -1620,109 +2086,34 @@ export function PainelCertidoes({
                 <RefreshCw className="h-[16px] w-[16px] animate-spin" aria-hidden />
                 Lendo o PDF do card…
               </p>
-            ) : candidatos.length > 0 ||
-              doPdf.nascimentos.length > 0 ||
-              doPdf.locais.length > 0 ||
-              estadosCivis.length > 0 ||
-              digitalizados.length > 0 ? (
+            ) : iaAchouCedente ? (
               <>
-                {/* A EXPLICAÇÃO VEM ANTES DA LISTA, como na amostra: quem lê
-                    "escolher é seu" antes de ver os números não clica no primeiro
-                    por reflexo. */}
-                {candidatos.length > 0 && (
-                  <p className="mt-2 text-xs text-texto-3">
-                    Dígito verificador conferido. <b className="text-texto-2">Escolher é seu</b>: um
-                    processo traz o CPF do cedente, do advogado e às vezes de terceiros —
-                    o sistema não tem como saber qual é qual. A lista pode estar
-                    incompleta: o PDF nem sempre entrega os números inteiros.
-                  </p>
+                {achadosDaLeitura()}
+                {/* A BUSCA CRUA, RECOLHIDA: é dela que vinham os achados de
+                    todas as pessoas do processo. Continua à mão para o caso de a
+                    leitura ter deixado escapar algo — mas não é mais a lista
+                    principal. */}
+                {temAchadosManuais && (
+                  <details className="mt-2.5 text-corpo">
+                    <summary className="cursor-pointer font-semibold text-marca-texto">
+                      Outros números no processo (de outras pessoas, segundo a leitura)
+                    </summary>
+                    {achadosManuais(true)}
+                  </details>
                 )}
-                {candidatos.length === 0 && (
-                  <p className="mt-2 text-xs text-aviso">
-                    Nenhum CPF de dígito válido no texto — digite o do cedente abaixo,
-                    conferindo no processo. O que achei do resto está logo abaixo.
-                  </p>
+              </>
+            ) : temAchadosManuais ? (
+              <>
+                {/* A LEITURA VEIO, MAS SEM O CEDENTE: dito, para a lista abaixo
+                    não ser lida como "do cedente". */}
+                {leituraIA && (
+                  <DicaDeAviso>
+                    A IA não identificou nos autos, com segurança, os dados de{' '}
+                    <b>{nomeProcurado || 'quem cede'}</b>. Os achados abaixo são de todas as
+                    pessoas do processo — escolha conferindo o trecho.
+                  </DicaDeAviso>
                 )}
-                {candidatos.length > 0 && (
-                  <div className="my-2 grid gap-2">
-                    {candidatos.map((c) => (
-                      <button
-                        key={c.cpf}
-                        type="button"
-                        onClick={() =>
-                          alterar(setCedente)({ ...cedente, cpf: formatCpfCnpjInput(c.cpf) })
-                        }
-                        className={CAND}
-                      >
-                        <span className="flex flex-wrap items-center gap-2">
-                          <b className="font-bold tabular-nums">{formatCpfCnpjInput(c.cpf)}</b>
-                          {c.rotulado && <Selo tom="info">rotulado &quot;CPF&quot;</Selo>}
-                        </span>
-                        <span className={SUB}>
-                          {c.arquivo ? `em ${c.arquivo} · ` : ''}…{c.contexto}…
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {(doPdf.nascimentos.length > 0 || doPdf.locais.length > 0) && (
-                  <Sugestoes
-                    nascimentos={doPdf.nascimentos}
-                    locais={doPdf.locais}
-                    onNascimento={(iso) => {
-                      setMexeu(true)
-                      setCedente((f) => ({ ...f, nascimento: iso }))
-                    }}
-                    onLocal={usarLocal}
-                    vazio=""
-                  />
-                )}
-
-                {/*
-                  ESTADO CIVIL: é o que DOBRA o checklist.
-                  Cedente casado tem bloco próprio de certidões para o cônjuge
-                  (planilha, linhas 52 a 67). Deixar de marcar fecha o dossiê com
-                  esse bloco inteiro faltando, e o placar não acusa nada — por isso
-                  a sugestão fica aqui, na caixa dos achados junto com o CPF, e não
-                  escondida na caixinha lá embaixo.
-                */}
-                {estadosCivis.length > 0 && (
-                  <>
-                    <p className="mt-2 text-xs text-texto-2">
-                      <b className="text-texto">Estado civil</b> na qualificação das partes —
-                      clicar já liga ou desliga o bloco do cônjuge:
-                    </p>
-                    <div className="my-2 grid gap-2">
-                      {estadosCivis.map((e) => (
-                        <button
-                          key={`${e.estado}-${e.conjuge ?? ''}`}
-                          type="button"
-                          onClick={() => usarEstadoCivil(e)}
-                          className={CAND}
-                        >
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span>
-                              {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
-                              {e.conjuge && ` — cônjuge: ${e.conjuge}`}
-                            </span>
-                            {e.doCedente ? (
-                              <Selo tom="info">perto do cedente</Selo>
-                            ) : (
-                              <Selo tom="aviso">pode ser de outra parte</Selo>
-                            )}
-                          </span>
-                          <span className={SUB}>
-                            em {e.arquivo} · …{e.contexto}…
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-xs text-aviso">
-                      A petição pode ser antiga: &quot;casada&quot; naquela data não
-                      é &quot;casada hoje&quot;. Confirme antes de gerar o checklist.
-                    </p>
-                  </>
-                )}
+                {achadosManuais(false)}
               </>
             ) : avisoPdf ? (
               <DicaDeAviso>{avisoPdf}</DicaDeAviso>
@@ -1730,13 +2121,13 @@ export function PainelCertidoes({
               // Só se pode afirmar isto DEPOIS de ler o PDF. Sem texto, o certo é
               // dizer que não leu — não que o documento não tem CPF.
               <p className="mt-2 text-xs">
-                Li o PDF e não achei nenhum CPF de dígito válido no texto. Pode ser que o
+                Li o PDF e não achei nenhum {rotuloDoc(tipoCedente)} de dígito válido no texto. Pode ser que o
                 documento traga o número partido de um jeito que a busca não pega — digite
                 abaixo, conferindo no processo.
               </p>
             ) : (
               <p className="mt-2 text-xs">
-                O PDF do card ainda não foi lido. Digite o CPF conferindo no processo.
+                O PDF do card ainda não foi lido. Digite o {rotuloDoc(tipoCedente)} conferindo no processo.
               </p>
             )}
 
@@ -1769,7 +2160,7 @@ export function PainelCertidoes({
               />
               {colado.trim() && (
                 <Sugestoes
-                  nascimentos={doColado.nascimentos}
+                  nascimentos={tipoCedente === 'PJ' ? [] : doColado.nascimentos}
                   locais={doColado.locais}
                   onNascimento={(iso) => {
                     setMexeu(true)
@@ -1812,43 +2203,8 @@ export function PainelCertidoes({
                 {(leituraIA?.avisos ?? []).map((a) => (
                   <DicaDeAviso key={a}>{a}</DicaDeAviso>
                 ))}
-                {leituraIA && (
-                  <details className="mt-2 text-corpo text-texto-2">
-                    <summary className="cursor-pointer font-semibold text-marca-texto">
-                      De onde saiu cada campo
-                    </summary>
-                    <ul className="mt-2 space-y-1.5 text-xs">
-                      {(
-                        [
-                          ['Nome', leituraIA.cedente.nome],
-                          ['CPF', leituraIA.cedente.cpf],
-                          ['Nascimento', leituraIA.cedente.nascimento],
-                          ['Mãe', leituraIA.cedente.nome_mae],
-                          ['Estado civil', leituraIA.estado_civil],
-                          ['Cônjuge', leituraIA.conjuge?.nome ?? null],
-                          ['CPF do cônjuge', leituraIA.conjuge?.cpf ?? null],
-                        ] as [string, { valor: string; evidencia: string } | null][]
-                      )
-                        .filter(([, v]) => v)
-                        .map(([rotulo, v]) => (
-                          <li key={rotulo}>
-                            <b className="text-texto">{rotulo}:</b> {v!.valor}
-                            {v!.evidencia && <span className="text-texto-3"> — “{v!.evidencia}”</span>}
-                          </li>
-                        ))}
-                      {leituraIA.residencias.map((r) => (
-                        <li key={`${r.uf}|${r.municipio}`}>
-                          <b className="text-texto">
-                            {r.atual ? 'Residência atual' : 'Residência anterior'}:
-                          </b>{' '}
-                          {r.municipio ? `${r.municipio}/` : ''}
-                          {r.uf}
-                          {r.evidencia && <span className="text-texto-3"> — “{r.evidencia}”</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
+                {/* O "De onde saiu cada campo" que morava aqui subiu para a caixa
+                    dos achados: lá cada dado já vem com o trecho, e clicável. */}
               </div>
               {temTexto && (
                 <Button
@@ -1872,28 +2228,55 @@ export function PainelCertidoes({
               Preenchi a partir do processo: <b>{preenchido.join(' · ')}</b>.
               Confira antes de gerar — o trecho de onde saiu cada um está no painel
               acima.{' '}
-              {leituraIA?.cedente.cpf
-                ? 'O CPF só entrou porque está escrito nos autos — confira se é mesmo de quem cede.'
-                : 'O CPF eu nunca preencho sozinho.'}
+              {docDaLeitura
+                ? `O ${rotuloDoc(tipoDaLeitura)} só entrou porque está escrito nos autos, na qualificação de ` +
+                  `${leituraIA?.cedente.nome?.valor || nomeProcurado || 'quem cede'} — confira se é mesmo de quem cede.`
+                : `O ${rotuloDoc(tipoCedente)} eu nunca preencho sozinho.`}
             </CaixaDeAviso>
           )}
 
           {/* ---------------- cedente ---------------- */}
           <div>
             <RotuloDeSecao className="mt-6">Cedente</RotuloDeSecao>
+            {/* PESSOA FÍSICA OU JURÍDICA (pedido do dono, 03/10/2026): a escolha
+                troca o documento (CPF ↔ CNPJ, com máscara e validação de cada
+                um) e tira o que não se aplica a empresa — nascimento, estado
+                civil, cônjuge. Vem marcada pelo banco, pelo nome ("LTDA",
+                "S/A") ou pela IA. */}
+            <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <Segmented
+                ariaLabel="O cedente é pessoa física ou jurídica"
+                items={[
+                  { key: 'PF', label: 'Pessoa física' },
+                  { key: 'PJ', label: 'Pessoa jurídica' },
+                ]}
+                value={tipoCedente}
+                onChange={(k) => escolherTipo(k as TipoPessoa)}
+              />
+              {tipoCedente === 'PJ' && (
+                <span className="text-xs text-texto-3">
+                  Empresa: CNPJ, razão social e endereço da sede. Sem nascimento, estado civil nem
+                  cônjuge; o checklist ganha o bloco da PJ (situação do CNPJ e FGTS).
+                </span>
+              )}
+            </div>
             <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-              <Field label="Nome completo" required className="sm:col-span-2">
+              <Field label={tipoCedente === 'PJ' ? 'Razão social' : 'Nome completo'} required className="sm:col-span-2">
                 <Input
                   value={cedente.nome}
                   onChange={(e) => alterar(setCedente)({ ...cedente, nome: e.target.value })}
-                  placeholder="Como está na qualificação das partes"
+                  placeholder={
+                    tipoCedente === 'PJ'
+                      ? 'Como está no contrato social ou na qualificação'
+                      : 'Como está na qualificação das partes'
+                  }
                 />
               </Field>
               <Field
-                label="CPF"
+                label={rotuloDoc(tipoCedente)}
                 required
                 error={
-                  cedente.cpf && !cpfValido(cedente.cpf)
+                  cedente.cpf && !documentoValido(cedente.cpf, tipoCedente)
                     ? 'Dígito verificador não fecha.'
                     : undefined
                 }
@@ -1903,28 +2286,30 @@ export function PainelCertidoes({
                   onChange={(e) =>
                     alterar(setCedente)({
                       ...cedente,
-                      cpf: formatCpfCnpjInput(e.target.value),
+                      cpf: mascaraDoTipo(e.target.value, tipoCedente),
                     })
                   }
                   inputMode="numeric"
-                  placeholder="000.000.000-00"
+                  placeholder={tipoCedente === 'PJ' ? '00.000.000/0000-00' : '000.000.000-00'}
                 />
               </Field>
 
+              {tipoCedente === 'PF' && (
+                <Field
+                  label="Data de nascimento"
+                  hint="A CND Federal (Receita/PGFN) não sai sem ela — é o primeiro item do checklist."
+                >
+                  <Input
+                    type="date"
+                    value={cedente.nascimento}
+                    onChange={(e) =>
+                      alterar(setCedente)({ ...cedente, nascimento: e.target.value })
+                    }
+                  />
+                </Field>
+              )}
               <Field
-                label="Data de nascimento"
-                hint="A CND Federal (Receita/PGFN) não sai sem ela — é o primeiro item do checklist."
-              >
-                <Input
-                  type="date"
-                  value={cedente.nascimento}
-                  onChange={(e) =>
-                    alterar(setCedente)({ ...cedente, nascimento: e.target.value })
-                  }
-                />
-              </Field>
-              <Field
-                label="UF atual"
+                label={tipoCedente === 'PJ' ? 'UF da sede' : 'UF atual'}
                 required
                 hint="Define as certidões estaduais (TJ, SEFAZ, Justiça Estadual)."
               >
@@ -1943,7 +2328,7 @@ export function PainelCertidoes({
                 </Select>
               </Field>
               <Field
-                label="Município atual"
+                label={tipoCedente === 'PJ' ? 'Município da sede' : 'Município atual'}
                 hint="Em branco = nenhuma certidão municipal entra no checklist."
               >
                 <Select
@@ -1978,17 +2363,31 @@ export function PainelCertidoes({
                 checked={residenciaLevantada}
                 onChange={(e) => alterar(setResidenciaLevantada)(e.target.checked)}
               />
-              Levantei o histórico de residência do cedente
+              {tipoCedente === 'PJ'
+                ? 'Levantei o histórico de endereços da sede'
+                : 'Levantei o histórico de residência do cedente'}
             </label>
-            <p className="mt-1 text-xs text-texto-3">
-              Deixe desmarcado se não conferiu. &quot;Não sei se morou em outro
-              estado&quot; e &quot;não morou&quot; são respostas diferentes, e a segunda
-              dispensa certidão que a primeira não dispensa. Vale só para o cedente: o
-              cônjuge entra sempre como não levantado, porque esta tela não pergunta o
-              histórico dele.
-            </p>
+            {tipoCedente === 'PJ' ? (
+              <p className="mt-1 text-xs text-texto-3">
+                Deixe desmarcado se não conferiu. &quot;Não sei se a sede já foi em outro
+                estado&quot; e &quot;nunca foi&quot; são respostas diferentes, e a segunda
+                dispensa certidão que a primeira não dispensa. O contrato social e as
+                alterações dele dizem por onde a sede passou.
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-texto-3">
+                Deixe desmarcado se não conferiu. &quot;Não sei se morou em outro
+                estado&quot; e &quot;não morou&quot; são respostas diferentes, e a segunda
+                dispensa certidão que a primeira não dispensa. Vale só para o cedente: o
+                cônjuge entra sempre como não levantado, porque esta tela não pergunta o
+                histórico dele.
+              </p>
+            )}
             <div className="mt-2.5 grid gap-x-5 gap-y-4 sm:grid-cols-2">
-              <Field label="UFs anteriores" hint="Siglas separadas por vírgula: MG, SP">
+              <Field
+                label={tipoCedente === 'PJ' ? 'UFs anteriores da sede' : 'UFs anteriores'}
+                hint="Siglas ou nomes, separados por vírgula: MG, São Paulo"
+              >
                 <Input
                   value={ufsAnteriores}
                   onChange={(e) => alterar(setUfsAnteriores)(e.target.value)}
@@ -2006,6 +2405,9 @@ export function PainelCertidoes({
           </CaixaSuave>
 
           {/* ---------------- cônjuge ---------------- */}
+          {/* SÓ PARA PESSOA FÍSICA. Empresa não casa — e o cônjuge que estiver no
+              banco sai na gravação, com o aviso de remoção logo abaixo. */}
+          {tipoCedente === 'PF' && (
           <div className="mt-4">
             <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-corpo text-texto">
               <input
@@ -2103,6 +2505,7 @@ export function PainelCertidoes({
               </div>
             )}
           </div>
+          )}
 
           {impacto.sujeitos.length > 0 && (
             <CaixaDeAviso tom="perigo" className="mt-4">
@@ -2209,7 +2612,10 @@ export function PainelCertidoes({
             As três saídas abaixo são deliberadamente diferentes entre si, e
             NENHUMA delas é silêncio — inclusive a de não ter achado.
           */}
-          {sujeitos.length > 0 && !respostaEstadoCivil.temConjugeCadastrado && (
+          {sujeitos.length > 0 &&
+            !respostaEstadoCivil.temConjugeCadastrado &&
+            // Empresa não casa: a pergunta do estado civil não se aplica.
+            !sujeitos.some((s) => s.papel === 'CEDENTE' && s.tipo_pessoa === 'PJ') && (
             // A `.ec-box` da amostra (estilo5.css): cabeçalho discreto, a resposta,
             // o trecho do documento e a ação.
             <div className="my-3 grid gap-2.5 rounded-campo border border-borda bg-superficie-2 px-[14px] py-3 text-corpo text-texto">
