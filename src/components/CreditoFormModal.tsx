@@ -191,10 +191,18 @@ export function CreditoFormModal({
    * já estava lá — campo que a pasta não informa fica como estava — e libera os
    * campos para edição, sem trocar de aba.
    */
-  function preencherDoDrive(dados: PreenchimentoDoDrive, opts?: { avisar?: boolean }) {
+  function preencherDoDrive(
+    dados: PreenchimentoDoDrive,
+    opts?: { avisar?: boolean; novaPasta?: boolean },
+  ) {
     // MESCLA, não substitui: as ondas do preenchimento se completam, e trocar o
     // estado apagaria o que o caminho da pasta já trouxe.
-    setFormAuto((atual) => ({ ...atual, ...dados }))
+    //
+    // MAS SÓ DENTRO DA MESMA PASTA. Escolher outra pasta recomeça do formulário
+    // vazio: somar sobre a anterior deixava no rascunho o que a nova não trouxe
+    // (o capital, o cessionário, a data de aquisição do OUTRO crédito), e o
+    // Salvar gravava a mistura dos dois.
+    setFormAuto((atual) => ({ ...(opts?.novaPasta ? inicial : atual), ...dados }))
     setErros({})
     setAutoPreenchido(true)
     // Só a onda final avisa. Avisar na primeira era pedir conferência de um

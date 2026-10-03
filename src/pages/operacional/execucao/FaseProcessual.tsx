@@ -265,8 +265,15 @@ function SituacaoSelect({
   }, [aberto])
 
   const confirmarNovo = async () => {
-    if (!novoNome.trim()) return
-    const criada = await onCriar(novoNome.trim(), novaCor)
+    if (!novoNome.trim() || criando) return
+    let criada: SituacaoCatalogo | undefined
+    try {
+      criada = await onCriar(novoNome.trim(), novaCor)
+    } catch {
+      // O erro já saiu no aviso da mutação; o nome digitado fica no campo para
+      // tentar de novo (antes, a promessa rejeitada ficava sem tratamento).
+      return
+    }
     if (criada) onDefinir(criada.id)
     setNovoAberto(false)
     setNovoNome('')
@@ -488,6 +495,64 @@ function SituacaoSelect({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * A data da situação, na linha da tabela.
+ *
+ * GRAVA AO SAIR DO CAMPO (ou no Enter), e não a cada mudança. O campo de data do
+ * navegador dispara `change` a cada pedaço digitado com o resto já preenchido: o
+ * ano "2026" digitado à mão passava por 0002, 0020 e 0202, e cada um ia ao
+ * servidor numa chamada própria, em paralelo — a última a CHEGAR ganhava, e podia
+ * ser a de 0202. E, como o campo mostrava o valor do servidor, ele voltava para a
+ * data antiga a cada tecla, até a gravação responder.
+ *
+ * O valor local acompanha o do servidor enquanto o campo não está em uso; se a
+ * gravação falhar (o erro já sai no aviso da mutação), volta ao do servidor.
+ */
+function DataDaSituacao({
+  valor,
+  onGravar,
+}: {
+  valor: string | null
+  onGravar: (data: string | null) => Promise<unknown>
+}) {
+  const [texto, setTexto] = useState(valor ?? '')
+  const emUso = useRef(false)
+  /** O último valor mandado (ou o do servidor): Enter seguido de sair do campo não grava duas vezes. */
+  const gravado = useRef(valor ?? '')
+  useEffect(() => {
+    gravado.current = valor ?? ''
+    if (!emUso.current) setTexto(valor ?? '')
+  }, [valor])
+
+  const gravar = (atual: string) => {
+    emUso.current = false
+    if (atual === gravado.current) return
+    gravado.current = atual
+    onGravar(atual || null).catch(() => {
+      gravado.current = valor ?? ''
+      setTexto(valor ?? '')
+    })
+  }
+
+  return (
+    <input
+      type="date"
+      aria-label="Data da situação"
+      className="w-full rounded-controle border border-borda-controle bg-superficie px-2 py-1 text-sm tabular-nums text-texto focus:border-marca-viva focus:outline-none focus:ring-1 focus:ring-anel"
+      value={texto}
+      onClick={(e) => e.stopPropagation()}
+      onFocus={() => {
+        emUso.current = true
+      }}
+      onChange={(e) => setTexto(e.target.value)}
+      onBlur={(e) => gravar(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') gravar(e.currentTarget.value)
+      }}
+    />
   )
 }
 
@@ -821,17 +886,13 @@ export function FaseProcessual({
                             />
                           </TD>
                           <TD className="w-40">
-                            <input
-                              type="date"
-                              aria-label="Data da situação"
-                              className="w-full rounded-controle border border-borda-controle bg-superficie px-2 py-1 text-sm tabular-nums text-texto focus:border-marca-viva focus:outline-none focus:ring-1 focus:ring-anel"
-                              value={r?.situacao_data ?? ''}
-                              onClick={(e) => e.stopPropagation()}
-                              onChange={(e) =>
-                                definirSituacao.mutate({
+                            <DataDaSituacao
+                              valor={r?.situacao_data ?? null}
+                              onGravar={(data) =>
+                                definirSituacao.mutateAsync({
                                   processo_id: processo.id,
                                   situacao_id: r?.situacao_id ?? null,
-                                  situacao_data: e.target.value || null,
+                                  situacao_data: data,
                                 })
                               }
                             />

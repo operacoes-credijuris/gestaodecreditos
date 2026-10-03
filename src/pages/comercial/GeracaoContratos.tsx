@@ -41,9 +41,11 @@ import { invokeFunction } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
 import {
   PECAS_DO_CONTRATO,
+  caminhosDosEnvios,
   faltaParaGerar,
   nomeDaPeca,
   nomeDaVariavel,
+  type PapelDoDocumento,
 } from '@/lib/geracaoContratos'
 
 /**
@@ -122,20 +124,12 @@ function Passo({
 // browser nunca monta o .docx — só recebe URLs de volta.
 const CATEGORIAS = ['Requisições de Pequeno Valor', 'Precatórios'] as const
 
-type Papel = 'cedente' | 'escritorio'
+type Papel = PapelDoDocumento
 type ResultadoGeracao = {
   tipos_gerados: string[]
   drive_folder_url: string
   pendentes: string[]
   originador_criado: string | null
-}
-
-// Storage rejeita nome de arquivo acentuado — mesma sanitização do app de origem.
-function nomeArquivoSeguro(nome: string): string {
-  return nome
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^\w.\-()]/g, '_')
 }
 
 /** Um par "rótulo → valor" do resumo, com o que ainda falta em cinza. */
@@ -155,12 +149,19 @@ function GerarPanel() {
   // SÓ QUEM TEM FICHA: a lista sai de investidor_dados, e não dos créditos. O
   // contrato sai da ficha do investidor (CPF, RG, endereço, gênero); nome só de
   // crédito não tem nada disso, e a função recusaria.
+  //
+  // EM ORDEM ALFABÉTICA: a lista vinha na ordem em que o banco devolve as fichas
+  // (nenhuma), e achar um investidor entre dezenas era ler a lista inteira.
   const investidores = useMemo(
-    () => [...(investidorDados.data?.values() ?? [])].filter((v) => v.tipo === 'investidor'),
+    () =>
+      [...(investidorDados.data?.values() ?? [])]
+        .filter((v) => v.tipo === 'investidor')
+        .sort((a, b) =>
+          (a.nome_exibicao ?? a.nome_chave).localeCompare(b.nome_exibicao ?? b.nome_chave, 'pt-BR'),
+        ),
     [investidorDados.data],
   )
 
-  const [jobId, setJobId] = useState(() => crypto.randomUUID())
   const [investidorNome, setInvestidorNome] = useState('')
   const [categoria, setCategoria] = useState<(typeof CATEGORIAS)[number]>(CATEGORIAS[0])
   const [originadores, setOriginadores] = useState<string[]>([])
@@ -324,7 +325,6 @@ function GerarPanel() {
   }
 
   function resetarFormulario() {
-    setJobId(crypto.randomUUID())
     setInvestidorNome('')
     setOriginador('')
     setNumeroProcesso('')
@@ -359,19 +359,25 @@ function GerarPanel() {
       const userId = sessao.user?.id
       if (!userId) throw new Error('Sessão expirada — faça login de novo.')
 
+      // UM JOB NOVO A CADA TENTATIVA. A função lê TUDO o que está na pasta do job
+      // no bucket, e só a limpa quando a geração dá certo. Com o mesmo job da
+      // tentativa que falhou, o documento removido da lista antes de tentar de
+      // novo continuava lá — e era lido e arquivado no Drive do processo como se
+      // tivesse sido enviado.
+      const jobId = crypto.randomUUID()
+
       // 1. Sobe os arquivos pro bucket 'contratos', em {user_id}/{job_id}/{papel}/<arquivo>
+      // (nomes únicos por papel — ver caminhosDosEnvios, com teste).
+      const envios = caminhosDosEnvios(userId, jobId, uploads)
       let feitos = 0
-      const total = uploads.cedente.length + uploads.escritorio.length
-      for (const papel of ['cedente', 'escritorio'] as const) {
-        for (const file of uploads[papel]) {
-          feitos++
-          setProgresso(`Enviando arquivos… (${feitos}/${total}) ${file.name}`)
-          const path = `${userId}/${jobId}/${papel}/${nomeArquivoSeguro(file.name)}`
-          const { error: upErr } = await supabase.storage
-            .from('contratos')
-            .upload(path, file, { upsert: true })
-          if (upErr) throw new Error(`Falha ao enviar ${file.name}: ${upErr.message}`)
-        }
+      for (const { papel, indice, caminho } of envios) {
+        const file = uploads[papel][indice]
+        feitos++
+        setProgresso(`Enviando arquivos… (${feitos}/${envios.length}) ${file.name}`)
+        const { error: upErr } = await supabase.storage
+          .from('contratos')
+          .upload(caminho, file, { upsert: true })
+        if (upErr) throw new Error(`Falha ao enviar ${file.name}: ${upErr.message}`)
       }
 
       // 2. Chama a geração — pode levar de 30 a 90 segundos (leitura da análise + IA).

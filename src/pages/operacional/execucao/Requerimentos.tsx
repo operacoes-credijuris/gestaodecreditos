@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Pencil, Trash2, ChevronRight } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { requerimentosCrud, useUltimaMovimentacao } from '@/lib/queries'
 import { invokeFunction } from '@/lib/functions'
 import { useApensosManager } from '@/components/Apensos'
@@ -65,6 +66,7 @@ export default function Requerimentos() {
   const update = useUpdate()
   const remove = useRemove()
   const toast = useToast()
+  const qc = useQueryClient()
   const apensos = useApensosManager('requerimento_id')
 
   const [busca, setBusca] = useState('')
@@ -221,6 +223,12 @@ export default function Requerimentos() {
     if (!toDelete) return
     try {
       await remove.mutateAsync(toDelete.id)
+      // A exclusão cascateia no banco para os apensos (0009_apensos.sql), e o
+      // makeCrud só invalida a própria tabela — mesmo cuidado de Créditos. Sem
+      // isto, os apensos do requerimento apagado seguiam no cache: em Tarefas, a
+      // tarefa do número de um deles ainda se resolvia como apenso, e Contatos
+      // seguia listando o órgão dele, até recarregar.
+      await qc.invalidateQueries({ queryKey: ['apensos'] })
       toast.success('Requerimento excluído.')
       setToDelete(null)
     } catch (err) {

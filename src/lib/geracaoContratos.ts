@@ -101,6 +101,58 @@ export function nomeDaVariavel(chave: string): string {
   return chave
 }
 
+/** Os dois grupos de documentos do passo 2, como a função os lê no bucket. */
+export type PapelDoDocumento = 'cedente' | 'escritorio'
+
+/**
+ * O nome do arquivo como vai para o bucket: o Storage rejeita nome acentuado —
+ * mesma sanitização do app de origem (controledecessoes).
+ */
+export function nomeArquivoSeguro(nome: string): string {
+  return nome
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\w.\-()]/g, '_')
+}
+
+/**
+ * Onde cada documento escolhido é gravado no bucket `contratos`:
+ * `{user_id}/{job_id}/{papel}/<arquivo>`, a convenção que a função gerar-contrato
+ * lista e que a policy do Storage espera.
+ *
+ * NOME ÚNICO DENTRO DE CADA PAPEL. O envio é com `upsert`, então dois documentos
+ * com o mesmo nome — dois "RG.pdf" de pastas diferentes, ou "Contrato á.pdf" e
+ * "Contrato a.pdf", que a sanitização torna iguais — gravavam no MESMO caminho, e
+ * o segundo apagava o primeiro sem aviso: a função lia (e arquivava no Drive) um
+ * documento a menos do que a tela listava. O repetido ganha "_(2)", "_(3)" antes
+ * da extensão; o nome que não repete sai exatamente como antes.
+ *
+ * `jobId` é de UMA tentativa — ver o envio em GeracaoContratos.tsx.
+ */
+export function caminhosDosEnvios(
+  userId: string,
+  jobId: string,
+  uploads: Record<PapelDoDocumento, ReadonlyArray<{ name: string }>>,
+): { papel: PapelDoDocumento; indice: number; caminho: string }[] {
+  const saida: { papel: PapelDoDocumento; indice: number; caminho: string }[] = []
+  for (const papel of ['cedente', 'escritorio'] as const) {
+    const usados = new Set<string>()
+    uploads[papel].forEach((arquivo, indice) => {
+      const seguro = nomeArquivoSeguro(arquivo.name)
+      let nome = seguro
+      const ponto = seguro.lastIndexOf('.')
+      const base = ponto > 0 ? seguro.slice(0, ponto) : seguro
+      const ext = ponto > 0 ? seguro.slice(ponto) : ''
+      for (let n = 2; usados.has(nome.toLowerCase()); n++) nome = `${base}_(${n})${ext}`
+      // Sem distinção de caixa: "RG.pdf" e "rg.PDF" viram o mesmo arquivo no Drive
+      // de quem abre no Windows.
+      usados.add(nome.toLowerCase())
+      saida.push({ papel, indice, caminho: `${userId}/${jobId}/${papel}/${nome}` })
+    })
+  }
+  return saida
+}
+
 /**
  * O que falta para liberar "Gerar contrato" — o mesmo critério do botão da
  * plataforma (investidor, originador, número do processo e, na escolha à mão,

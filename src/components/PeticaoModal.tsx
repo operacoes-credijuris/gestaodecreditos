@@ -18,7 +18,7 @@
 // "RPV") e porque a descrição da tarefa é texto livre digitado por gente. Pedir
 // sequestro não é juntar planilha para fins de sequestro, e protocolar a peça
 // errada custa mais que um clique a mais.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Download, FileText, Pencil, RefreshCw, Send, Sparkles } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
@@ -190,8 +190,15 @@ export function PeticaoModal({
   // Ao fechar, esquece a escolha e o texto: reabrir noutra tarefa tem de partir da
   // sugestão daquela tarefa, não da anterior. O mesmo vale para a redação da IA —
   // peça escrita para uma tarefa não pode reaparecer na janela de outra.
+  //
+  // E O QUE AINDA ESTÁ NO AR DEIXA DE VALER (`abertura`): a janela fica montada
+  // na tela de Tarefas, e a redação da IA — que leva dezenas de segundos —
+  // terminava depois de fechada e caía na janela aberta em seguida, para OUTRA
+  // tarefa, com a peça da anterior pronta para salvar.
+  const abertura = useRef(0)
   useEffect(() => {
     if (open) return
+    abertura.current++
     setIdEscolhido(null)
     setMd(null)
     setErroMd(null)
@@ -200,6 +207,8 @@ export function PeticaoModal({
     setInstrucao('')
     setRedacao(null)
     setTextoIA('')
+    setRedigindo(false)
+    setEditandoCredito(false)
   }, [open])
 
   const escolhido = ativos.find((t) => t.id === idEscolhido) ?? null
@@ -223,6 +232,10 @@ export function PeticaoModal({
     let cancelado = false
     setCarregandoMd(true)
     setErroMd(null)
+    // O TEXTO DO MODELO ANTERIOR SAI JÁ: enquanto o novo baixava, o Salvar seguia
+    // liberado com o texto do modelo antigo e o NOME do novo — a peça errada,
+    // com o nome certo, no Drive do processo.
+    setMd(null)
     baixarModelo(escolhido.arquivo)
       .then((texto) => {
         if (!cancelado) setMd(texto)
@@ -369,6 +382,7 @@ export function PeticaoModal({
 
   async function redigir() {
     if (!processo || !instrucao.trim()) return
+    const minha = abertura.current
     setRedigindo(true)
     try {
       const r = await invokeFunction<RespostaRedacao>('peticao-ia', {
@@ -379,6 +393,8 @@ export function PeticaoModal({
         panorama: panorama.data?.panorama,
         dados: dadosParaIA,
       })
+      // Janela fechada no meio: a peça era da tarefa de antes (ver `abertura`).
+      if (minha !== abertura.current) return
       setRedacao(r)
       setTextoIA(r.texto)
       if (r.truncada) {
@@ -388,9 +404,9 @@ export function PeticaoModal({
         )
       }
     } catch (err) {
-      toast.error((err as Error).message)
+      if (minha === abertura.current) toast.error((err as Error).message)
     } finally {
-      setRedigindo(false)
+      if (minha === abertura.current) setRedigindo(false)
     }
   }
 
@@ -504,6 +520,7 @@ export function PeticaoModal({
     pastaForcada?: number,
   ) {
     if (!processo) return
+    const minha = abertura.current
     setGerando(true)
     setPasso(null)
     setSemPasta(null)
@@ -532,7 +549,9 @@ export function PeticaoModal({
       const alvo = await resolverPastaDaPeticao(processo, nomeBase, pastaForcada)
 
       if (alvo.tipo !== 'pronto') {
-        setSemPasta({ motivo: alvo.motivo, caminho: alvo.caminho })
+        // O aviso é da janela em que se clicou em Salvar: fechada no meio, ele
+        // apareceria na petição da próxima tarefa (o arquivo baixa do mesmo jeito).
+        if (minha === abertura.current) setSemPasta({ motivo: alvo.motivo, caminho: alvo.caminho })
         baixar(blob, nome)
         toast.toast('Não achei a pasta no Drive. Baixei o arquivo.', 'info')
         return

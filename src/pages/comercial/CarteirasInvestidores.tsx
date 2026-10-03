@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -474,6 +474,8 @@ function Individual() {
   // Enquanto a varredura de todos os créditos corre no servidor, a tela fica
   // perguntando pelos textos que vão chegando.
   const [varrendo, setVarrendo] = useState(false)
+  const fimDaVarredura = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(fimDaVarredura.current), [])
   const resumos = useCarteiraResumos(varrendo)
   // Texto aberto na caixa: guarda o id e o campo, não o texto — assim, ao
   // gerar novamente, a caixa mostra o texto novo sem fechar.
@@ -504,8 +506,11 @@ function Individual() {
       if (r.restantes > 0) {
         setVarrendo(true)
         toast.success('Gerando os resumos — os textos vão aparecendo aqui.')
-        // Teto do acompanhamento: 95 créditos levam poucos minutos.
-        window.setTimeout(() => setVarrendo(false), 6 * 60 * 1000)
+        // Teto do acompanhamento: 95 créditos levam poucos minutos. O PRAZO
+        // RECOMEÇA a cada varredura: o relógio da anterior, que seguia correndo,
+        // desligava o acompanhamento da nova no meio.
+        window.clearTimeout(fimDaVarredura.current)
+        fimDaVarredura.current = window.setTimeout(() => setVarrendo(false), 6 * 60 * 1000)
       } else {
         toast.success(
           r.gerados > 0
