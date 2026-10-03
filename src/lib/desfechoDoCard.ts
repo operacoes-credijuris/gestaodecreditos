@@ -107,8 +107,13 @@ export function notaDoNaoFechou(tipo: TipoDeNaoFechou, motivo: string): string {
 /**
  * O MOTIVO DE UM CLIQUE entra no fim do que já foi escrito, como frase: "Achou o
  * deságio alto." — ou, depois de um texto, "… Achou o deságio alto.".
+ *
+ * O TEXTO SEM PONTO GANHA UM antes da frase nova: "achou caro" e um clique em
+ * "Desistiu de vender" davam "achou caro Desistiu de vender." — uma frase só,
+ * com maiúscula no meio, na nota que o comercial lê.
  */
 export function comSugestao(texto: string, sugestao: string): string {
   const t = texto.trim()
-  return t ? `${t} ${sugestao}.` : `${sugestao}.`
+  if (!t) return `${sugestao}.`
+  return /[.!?;:…]$/.test(t) ? `${t} ${sugestao}.` : `${t}. ${sugestao}.`
 }

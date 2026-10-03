@@ -19,6 +19,7 @@ import {
   nomeDaColuna,
   PRAZO_PARADO,
   temCotacao,
+  textoDaBusca,
   textoDosDias,
 } from '@/lib/quadroDaAnalise'
 import { espelhoDosTresFunis } from './fixtures/kanbans'
@@ -282,5 +283,42 @@ describe('resultado da busca', () => {
   it('o vazio diz só onde MAIS achou', () => {
     const r = achadosDaBusca(abas, por([['pendentes', 2], ['validacao', 1]]), aberta, false)
     expect(r.map((a) => a.key)).toEqual(['validacao'])
+  })
+})
+
+describe('o texto da busca, montado uma vez por card', () => {
+  // A REGRA DE ANTES, campo a campo: é contra ela que o texto montado se mede.
+  const casavaAntes = (x: KommoLead, q: string) =>
+    [x.nome, x.processo_cnj, x.responsavel_nome, ...(x.notas ?? []).map((n) => n.texto), x.nota_texto]
+      .filter(Boolean)
+      .some((v) => v!.toLowerCase().includes(q))
+  const c = card(7, null, {
+    nome: 'PX - Maria da Silva - 0001234-56.2020.8.09.0051 - principal',
+    processo_cnj: '0001234-56.2020.8.09.0051',
+    responsavel_nome: 'Luiz',
+    nota_texto: 'Primeira nota',
+    notas: [
+      { id: 1, texto: 'Cedente enviou o RG', criado_em: null, autor: null },
+      { id: 2, texto: 'Falta o COMPROVANTE de endereço', criado_em: null, autor: null },
+    ],
+  })
+
+  it('acha em qualquer campo e em qualquer anotação, sem caixa', () => {
+    const t = textoDaBusca(c)
+    for (const q of ['maria', '0001234-56', 'luiz', 'enviou o rg', 'comprovante', 'primeira']) {
+      expect(t.includes(q)).toBe(true)
+    }
+  })
+
+  it('responde igual à busca campo a campo — inclusive sem juntar o fim de um campo ao começo do outro', () => {
+    const t = textoDaBusca(c)
+    for (const q of ['maria', 'principal', 'rg', 'luizcedente', 'principal0001', 'rgfalta', 'xyz', 'endereço']) {
+      expect(t.includes(q)).toBe(casavaAntes(c, q))
+    }
+  })
+
+  it('card sem nada além do id não quebra', () => {
+    const vazio = card(8, null, { nome: null as unknown as string, notas: undefined as unknown as [] })
+    expect(textoDaBusca(vazio)).toBe('')
   })
 })

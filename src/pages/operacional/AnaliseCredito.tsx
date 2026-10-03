@@ -138,6 +138,7 @@ import {
   POR_VEZ,
   PRAZO_PARADO,
   temCotacao,
+  textoDaBusca,
   textoDosDias,
   type FiltroRapido,
   type OrdemDaLista,
@@ -176,6 +177,14 @@ import {
   type TipoDeNaoFechou,
 } from '@/lib/desfechoDoCard'
 import { cardDoEndereco } from '@/lib/contratoDoCard'
+import {
+  chaveDoMovimento,
+  comecarNoCard,
+  movimentoRecusado,
+  soDosAbertos,
+  terminarNoCard,
+  type PorCard,
+} from '@/lib/emCursoPorCard'
 import { TextoComTermos } from '@/components/layout/TextoComTermos'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
@@ -747,7 +756,9 @@ function JanelaDaPlanilha({
   return (
     <Modal
       open
-      onClose={onFechar}
+      // GRAVANDO, NÃO FECHA: o erro da gravação precisa de onde aparecer, com o
+      // bloco colado ainda no campo para tentar de novo.
+      onClose={enviando ? () => undefined : onFechar}
       title="Preencher planilha"
       description={tituloCard(lead)}
       size="lg"
@@ -911,7 +922,11 @@ function JanelaDeMensagem({
   return (
     <Modal
       open
-      onClose={onFechar}
+      // NÃO FECHA COM A MOVIMENTAÇÃO NO AR (o X, o Esc, o fundo). Fechando, a
+      // memória de "já movido" era apagada antes de o movimento terminar e
+      // gravada depois — e o próximo movimento do card para esta coluna, na
+      // sessão, seria pulado; e a falha da nota caía numa janela que não existia.
+      onClose={trabalhando ? () => undefined : onFechar}
       title={titulo}
       // O CARD EMBAIXO, e não colado no título: são duas informações de peso
       // diferente — o que se vai fazer, e sobre qual crédito. Juntas numa linha
@@ -2086,7 +2101,8 @@ function JanelaNaoFechou({
   return (
     <Modal
       open
-      onClose={onFechar}
+      // NÃO FECHA COM A MOVIMENTAÇÃO NO AR — o mesmo motivo da JanelaDeMensagem.
+      onClose={enviando ? () => undefined : onFechar}
       title="O cedente não fechou"
       description={tituloCard(lead)}
       size="lg"
@@ -3102,21 +3118,6 @@ function Seg<K extends string>({
   )
 }
 
-/** O card bate com a busca? `q` já em minúsculas. */
-function casaComBusca(x: KommoLead, q: string): boolean {
-  return [
-    x.nome,
-    x.processo_cnj,
-    x.responsavel_nome,
-    // Busca em TODAS as anotações, não só na primeira: informação relevante
-    // costuma vir num comentário posterior.
-    ...(x.notas ?? []).map((n) => n.texto),
-    x.nota_texto,
-  ]
-    .filter(Boolean)
-    .some((v) => v!.toLowerCase().includes(q))
-}
-
 export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
@@ -3174,11 +3175,15 @@ export default function AnaliseCredito() {
     setFiltro('todos')
     setMostrar(POR_VEZ)
   }
-  // Ação em curso, para o botão certo do card certo mostrar o spinner.
-  const [emAndamento, setEmAndamento] = useState<{
-    leadId: number
-    statusId: number
-  } | null>(null)
+  // Ação em curso, para o botão certo do card certo mostrar o spinner — o
+  // destino, POR CARD (ver lib/emCursoPorCard.ts).
+  const [emAndamento, setEmAndamento] = useState<PorCard<number>>({})
+  /**
+   * A MESMA TRAVA, SÍNCRONA. O estado só chega aos botões no render seguinte;
+   * o ref vale já no clique, e é o que garante que um card não recebe duas
+   * movimentações ao mesmo tempo, venha o segundo clique de onde vier.
+   */
+  const cardsTravados = useRef<Set<number>>(new Set())
   // Análise automática (Judit + due diligence + planilha) por card.
   // `isAdmin` VAI PARA `abasDoFunil`, que libera o que é `soAdmin`. OS BOTÕES DA
   // ONDA 4 (os que movem card de um jeito novo e o "Gerar contrato") são de TODO
@@ -3189,7 +3194,11 @@ export default function AnaliseCredito() {
   // A análise de RPV abre uma JANELA (AnaliseRpvModal): preliminar, conversa e
   // só então o salvamento. `rpvLead` é o card cuja janela está aberta.
   const [rpvLead, setRpvLead] = useState<KommoLead | null>(null)
-  const [analisandoJurId, setAnalisandoJurId] = useState<number | null>(null)
+  // POR CARD, como as movimentações (lib/emCursoPorCard.ts): com um id só, a
+  // análise do card A terminando apagava o "rodando" do card B, ainda no ar.
+  const [analisandoJur, setAnalisandoJur] = useState<PorCard<true>>({})
+  /** A mesma trava, síncrona: a análise jurídica antiga é paga (IA), uma por card. */
+  const juridicasNoAr = useRef<Set<number>>(new Set())
   const [resultadoJuridico, setResultadoJuridico] = useState<
     Record<number, ResultadoJuridico>
   >({})
@@ -3269,7 +3278,15 @@ export default function AnaliseCredito() {
    */
   const [verbasRecusadas, setVerbasRecusadas] = useState<Record<number, PapelApurado[]>>({})
 
+  /**
+   * O ÚLTIMO CARD cuja análise foi pedida. A janela só abre depois de uma
+   * consulta ao banco; clicando em dois cards seguidos, a resposta do primeiro
+   * podia chegar depois e abrir a janela do card errado.
+   */
+  const analisePedida = useRef<number | null>(null)
+
   async function onAnalisar(lead: KommoLead) {
+    analisePedida.current = lead.kommo_lead_id
     // O CACHE DE ANEXOS CAI ao abrir a análise. Ele existe para a due diligence
     // e a análise dividirem o mesmo download; mas o comercial anexa o cálculo
     // corrigido e o operador reabre a janela sem sincronizar — e a análise lia
@@ -3292,6 +3309,7 @@ export default function AnaliseCredito() {
       .select('papel')
       .eq('kommo_lead_id', lead.kommo_lead_id)
       .not('reprovado_em', 'is', null)
+    if (analisePedida.current !== lead.kommo_lead_id) return
     setVerbasRecusadas((p) => ({
       ...p,
       [lead.kommo_lead_id]: ((recusadas ?? []) as { papel: string }[])
@@ -3931,7 +3949,15 @@ export default function AnaliseCredito() {
 
   async function onAnaliseJuridica(lead: KommoLead) {
     const id = lead.kommo_lead_id
-    setAnalisandoJurId(id)
+    // UMA POR CARD: o link "Colar o bloco" continua no card enquanto a antiga
+    // roda, e um segundo "Não tenho o bloco" pagava outra leitura dos autos e
+    // deixava duas anotações no Kommo.
+    if (juridicasNoAr.current.has(id)) {
+      toast.error('A análise jurídica antiga deste card já está rodando — espere ela terminar.')
+      return
+    }
+    juridicasNoAr.current.add(id)
+    setAnalisandoJur((m) => comecarNoCard(m, id, true as const))
     try {
       const lidos = arquivosCache[id] ?? (await lerUmaVezSo(lead))
       guardarNoCache(id, lidos)
@@ -3989,7 +4015,8 @@ export default function AnaliseCredito() {
         [id]: { erro: (e as Error)?.message ?? String(e) },
       }))
     } finally {
-      setAnalisandoJurId(null)
+      juridicasNoAr.current.delete(id)
+      setAnalisandoJur((m) => terminarNoCard(m, id))
     }
   }
 
@@ -4072,13 +4099,13 @@ export default function AnaliseCredito() {
       // digitalização — e nada refazia a leitura, porque ela só dispara no
       // clique. Perder o aviso é o pior dos três: a janela voltava a dizer que o
       // PDF não tinha sido lido.
-      const aberto = ddLead?.kommo_lead_id
-      const manter = (antes: Record<number, unknown>) =>
-        aberto !== undefined && antes[aberto] !== undefined
-          ? { [aberto]: antes[aberto] }
-          : {}
-      setArquivosCache((antes) => manter(antes) as Record<number, ArquivoLido[]>)
-      setAvisoPdf((antes) => manter(antes) as Record<number, string>)
+      //
+      // AS DUAS JANELAS QUE LEEM O CACHE: a due diligence E as certidões (a
+      // Obtenção de documentação do Externo). Só a primeira era poupada, e a
+      // janela de Certidões esvaziava pelo mesmo caminho descrito acima.
+      const abertos = [ddLead?.kommo_lead_id, certLead?.kommo_lead_id]
+      setArquivosCache((antes) => soDosAbertos(antes, abertos))
+      setAvisoPdf((antes) => soDosAbertos(antes, abertos))
     },
     onError: (e) => toast.error(`Sincronização Kommo: ${(e as Error).message}`),
   })
@@ -4114,6 +4141,21 @@ export default function AnaliseCredito() {
    * `undefined` enquanto a consulta está em voo ou falhou, nunca 0: "Precatórios
    * 0" ao lado de uma mensagem de erro afirma que o funil está vazio.
    */
+  /**
+   * O texto de busca de cada card, montado UMA VEZ por carga dos cards — ver
+   * `textoDaBusca`. Era refeito (todas as anotações em minúsculas) três vezes
+   * por tecla digitada, para o funil inteiro.
+   */
+  const textoDeBusca = useMemo(
+    () => new Map((leads.data ?? []).map((l) => [l.kommo_lead_id, textoDaBusca(l)])),
+    [leads.data],
+  )
+  /** O card bate com a busca? `q` já em minúsculas. */
+  const casaComBusca = useCallback(
+    (x: KommoLead, q: string) => (textoDeBusca.get(x.kommo_lead_id) ?? textoDaBusca(x)).includes(q),
+    [textoDeBusca],
+  )
+
   // COM BUSCA, O NÚMERO DO FUNIL TAMBÉM É O DE RESULTADOS — o mesmo critério das
   // etapas logo abaixo, senão o topo diria 150 e as etapas somariam 3.
   const totalExibido = useMemo(() => {
@@ -4121,7 +4163,7 @@ export default function AnaliseCredito() {
     const ids = statusExibidos(funil, etapas.data ?? [])
     const q = busca.trim().toLowerCase()
     return leads.data.filter((l) => ids.has(l.status_id) && (!q || casaComBusca(l, q))).length
-  }, [leads.data, funil, etapas.data, busca])
+  }, [leads.data, funil, etapas.data, busca, casaComBusca])
 
   // Coluna que a tela fixa e o kanban não tem. Em RPV o vínculo é por id (quebra
   // se a coluna for recriada); em Precatório é por nome (quebra se for
@@ -4168,26 +4210,33 @@ export default function AnaliseCredito() {
     return Object.fromEntries(
       Object.entries(porAba).map(([k, l]) => [k, l.filter((x) => casaComBusca(x, q))]),
     ) as Record<string, KommoLead[]>
-  }, [porAba, busca])
+  }, [porAba, busca, casaComBusca])
 
   /**
    * O NÚMERO DE CADA DESTINAÇÃO, ao lado de Interno e Externo (item "Novo":
    * contadores nas pílulas). A soma das abas de cada trilha, pelo mesmo
    * critério das etapas — com busca, é contagem de resultado.
    */
-  const totalDaTrilha = useMemo(() => {
+  // O AGRUPAMENTO DE CADA TRILHA À PARTE DA BUSCA: ele ordena o funil inteiro
+  // duas vezes, e não muda com o que se digita — só a contagem muda.
+  const cardsPorTrilha = useMemo(() => {
     if (!leads.data || !ehFunilPrecatorio(funil)) return null
+    return SUBDIVISOES_PRECATORIO.map(
+      (s) => [s.key, Object.values(agruparPorAba(leads.data!, abasDoFunil(funil, etapas.data ?? [], s.key)).porAba)] as const,
+    )
+  }, [leads.data, funil, etapas.data])
+  const totalDaTrilha = useMemo(() => {
+    if (!cardsPorTrilha) return null
     const q = busca.trim().toLowerCase()
     const total: Partial<Record<SubdivisaoPrecatorio, number>> = {}
-    for (const s of SUBDIVISOES_PRECATORIO) {
-      const { porAba: daTrilha } = agruparPorAba(leads.data, abasDoFunil(funil, etapas.data ?? [], s.key))
-      total[s.key] = Object.values(daTrilha).reduce(
+    for (const [key, listas] of cardsPorTrilha) {
+      total[key] = listas.reduce(
         (t, l) => t + (q ? l.filter((x) => casaComBusca(x, q)).length : l.length),
         0,
       )
     }
     return total
-  }, [leads.data, funil, etapas.data, busca])
+  }, [cardsPorTrilha, busca, casaComBusca])
 
   const lista = useMemo(
     () => (abaAtual ? (porAbaNaBusca[abaAtual.key] ?? []) : []),
@@ -4249,7 +4298,12 @@ export default function AnaliseCredito() {
   const rolouAte = useRef<number | null>(null)
   useEffect(() => {
     if (cardPedido === null || !leads.data || !etapas.data) return
-    const tirarDoEndereco = () =>
+    // O PEDIDO ACABA AQUI, achado ou não — e a procura no outro funil volta a
+    // valer para o próximo. A página não remonta quando a busca geral (Ctrl+K)
+    // pede outro card com ela aberta; sem zerar a marca, todo pedido seguinte de
+    // card do outro funil desistia de cara com "Não achei este card".
+    const tirarDoEndereco = () => {
+      procurouNoOutroFunil.current = false
       setParametros(
         (p) => {
           const n = new URLSearchParams(p)
@@ -4258,6 +4312,7 @@ export default function AnaliseCredito() {
         },
         { replace: true },
       )
+    }
     const lead = leads.data.find((l) => l.kommo_lead_id === cardPedido)
     if (!lead) {
       // O CARD PODE ESTAR NO OUTRO FUNIL: procura lá uma vez, e só então desiste.
@@ -4336,19 +4391,36 @@ export default function AnaliseCredito() {
       // é sucesso parcial, não erro, e o usuário precisa saber da diferença.
       if (r?.aviso) toast.error(r.aviso)
       else toast.success(r?.mensagem ?? 'Card movido.')
-      setEmAndamento(null)
     },
+    // A TRAVA DO CARD NÃO SAI DAQUI: quem a solta é `comCardTravado`, quando a
+    // operação inteira acaba — o movimento E a nota que vem depois dele. Solta
+    // aqui, ela caía entre os dois, e na fresta os botões do card voltavam.
     onError: (e) => {
-      setEmAndamento(null)
       toast.error((e as Error).message)
     },
   })
 
-  /** Etiqueta em gravação: um card e uma etiqueta por vez, para o seletor travar. */
-  const [etiquetaEmVoo, setEtiquetaEmVoo] = useState<{
-    leadId: number
-    etiqueta: string
-  } | null>(null)
+  /**
+   * Uma operação que MOVE O CARD, do começo ao fim (o movimento e a nota): o
+   * card fica travado enquanto ela corre, e um segundo pedido para o mesmo card
+   * é recusado em vez de mover de novo. Os outros cards seguem livres.
+   */
+  async function comCardTravado<T>(leadId: number, statusId: number, operacao: () => Promise<T>): Promise<T> {
+    if (cardsTravados.current.has(leadId)) {
+      throw new Error('Este card já está sendo movido — espere terminar.')
+    }
+    cardsTravados.current.add(leadId)
+    setEmAndamento((m) => comecarNoCard(m, leadId, statusId))
+    try {
+      return await operacao()
+    } finally {
+      cardsTravados.current.delete(leadId)
+      setEmAndamento((m) => terminarNoCard(m, leadId))
+    }
+  }
+
+  /** Etiqueta em gravação: uma por card, para o seletor DAQUELE card travar. */
+  const [etiquetaEmVoo, setEtiquetaEmVoo] = useState<PorCard<string>>({})
 
   /**
    * Marcar e desmarcar uma etiqueta do card, no Kommo.
@@ -4391,11 +4463,11 @@ export default function AnaliseCredito() {
           return { ...l, tags, tags_em: datas }
         }),
       )
-      setEtiquetaEmVoo(null)
+      setEtiquetaEmVoo((m) => terminarNoCard(m, args.leadId))
       if (r?.aviso) toast.error(r.aviso)
     },
-    onError: (e) => {
-      setEtiquetaEmVoo(null)
+    onError: (e, args) => {
+      setEtiquetaEmVoo((m) => terminarNoCard(m, args.leadId))
       toast.error((e as Error).message)
     },
   })
@@ -4421,7 +4493,11 @@ export default function AnaliseCredito() {
     // Confirmar movia o card OUTRA VEZ para o mesmo status, deixando duas
     // movimentações no histórico por causa de uma nota. A memória por
     // (card, coluna) sobrevive ao retry porque mora num ref da página.
-    const chave = `${leadId}:${statusId}`
+    const chave = chaveDoMovimento(leadId, statusId)
+    // E NUNCA PARA OUTRA COLUNA enquanto falta a nota de um movimento anterior
+    // desta janela (ver `movimentoRecusado`).
+    const recusa = movimentoRecusado(jaMovidos.current, leadId, statusId)
+    if (recusa) throw new Error(recusa)
     if (!jaMovidos.current.has(chave)) {
       await mover.mutateAsync({ leadId, statusId, comentario: '' })
       jaMovidos.current.add(chave)
@@ -4455,7 +4531,7 @@ export default function AnaliseCredito() {
   }
 
   /** O card já se moveu para esta coluna nesta janela, e falta só a nota? */
-  const jaMovidoPara = (leadId: number) => (statusId: number) => jaMovidos.current.has(`${leadId}:${statusId}`)
+  const jaMovidoPara = (leadId: number) => (statusId: number) => jaMovidos.current.has(chaveDoMovimento(leadId, statusId))
 
   /**
    * A anotação escrita no card (ver `BotaoDeAnotacao`).
@@ -4521,12 +4597,9 @@ export default function AnaliseCredito() {
   async function moverAposOsFundos(lead: KommoLead) {
     const cfg = abaAtual?.envioAosFundos
     if (!cfg) return
-    setEmAndamento({ leadId: lead.kommo_lead_id, statusId: cfg.destino })
-    try {
-      await mover.mutateAsync({ leadId: lead.kommo_lead_id, statusId: cfg.destino, comentario: '' })
-    } finally {
-      setEmAndamento(null)
-    }
+    await comCardTravado(lead.kommo_lead_id, cfg.destino, () =>
+      mover.mutateAsync({ leadId: lead.kommo_lead_id, statusId: cfg.destino, comentario: '' }),
+    )
   }
   async function enviarAoFundo(
     lead: KommoLead,
@@ -4618,7 +4691,18 @@ export default function AnaliseCredito() {
       return
     }
     onAndamento('Movendo o card para Em precificação…')
-    await moverAposOsFundos(lead)
+    // A FALHA DO MOVIMENTO NÃO É FALHA DO ENVIO. A anotação, as imagens e a
+    // etiqueta já estão no card, e a marca de "anotação feita" já saiu (acima):
+    // devolver o erro deixava a janela aberta convidando a confirmar de novo, e
+    // o novo clique subia a anotação e os prints UMA SEGUNDA VEZ antes de
+    // tentar mover. A janela fecha; quem refaz o movimento é o botão "Mover
+    // para Em precificação", que aparece no card com todos os checks feitos.
+    try {
+      await moverAposOsFundos(lead)
+    } catch {
+      // O motivo já foi avisado (o onError do mover); este diz o que fazer.
+      toast.error('O envio está registrado no card, mas ele não se moveu — clique em "Mover para Em precificação" no card.')
+    }
   }
   async function anexarEMover(
     lead: KommoLead,
@@ -4655,9 +4739,10 @@ export default function AnaliseCredito() {
       setAnexadosSemMover((antes) => new Set(antes).add(id))
     }
     onAndamento({ fase: 'movendo' })
-    setEmAndamento({ leadId: id, statusId: cfg.statusId })
     try {
-      await mover.mutateAsync({ leadId: id, statusId: cfg.statusId, comentario: '' })
+      await comCardTravado(id, cfg.statusId, () =>
+        mover.mutateAsync({ leadId: id, statusId: cfg.statusId, comentario: '' }),
+      )
       setAnexadosSemMover((antes) => {
         const n = new Set(antes)
         n.delete(id)
@@ -4668,8 +4753,6 @@ export default function AnaliseCredito() {
       // já está feito e o que o próximo clique faz.
       toast.error('O arquivo e a anotação já estão no card — clique em "Tentar mover de novo" para só mover.')
       throw e
-    } finally {
-      setEmAndamento(null)
     }
   }
 
@@ -4686,15 +4769,20 @@ export default function AnaliseCredito() {
       toast.error('Não achei no Kommo a coluna Produção de Proposta. Sincronize e tente de novo.')
       throw new Error('coluna de destino ausente')
     }
-    setEmAndamento({ leadId: lead.kommo_lead_id, statusId })
     try {
-      await moverComNota(lead.kommo_lead_id, statusId, mensagemDaProposta(fundo))
+      await comCardTravado(lead.kommo_lead_id, statusId, () =>
+        moverComNota(lead.kommo_lead_id, statusId, mensagemDaProposta(fundo)),
+      )
     } catch (e) {
       // A falha do MOVIMENTO já tem aviso (o onError do mover); a da NOTA, não.
-      if (jaMovidos.current.has(`${lead.kommo_lead_id}:${statusId}`)) toast.error((e as Error).message)
+      // E A RECUSA DE MOVER DE NOVO (ver `movimentoRecusado`), que também não tem.
+      if (
+        jaMovidos.current.has(chaveDoMovimento(lead.kommo_lead_id, statusId)) ||
+        movimentoRecusado(jaMovidos.current, lead.kommo_lead_id, statusId)
+      ) {
+        toast.error((e as Error).message)
+      }
       throw e
-    } finally {
-      setEmAndamento(null)
     }
   }
 
@@ -4744,12 +4832,9 @@ export default function AnaliseCredito() {
    * chamou mantém a janela aberta e confirmar de novo só anota.
    */
   async function desfechoDaNegociacaoNoCard(lead: KommoLead, acao: AcaoTela, nota: string) {
-    setEmAndamento({ leadId: lead.kommo_lead_id, statusId: acao.statusId })
-    try {
-      await moverComNota(lead.kommo_lead_id, acao.statusId, nota)
-    } finally {
-      setEmAndamento(null)
-    }
+    await comCardTravado(lead.kommo_lead_id, acao.statusId, () =>
+      moverComNota(lead.kommo_lead_id, acao.statusId, nota),
+    )
   }
 
   /** "Gerar contrato": a Geração de contratos com SÓ o id do card no endereço. */
@@ -5225,10 +5310,11 @@ export default function AnaliseCredito() {
                   // E EDITÁVEIS SÓ EM "EM PRECIFICAÇÃO" — ver `etiquetasDaAba`.
                   etiquetasOferecidas={etiquetasDaAba(abaAtual?.key)}
                   onEtiquetar={(l, etiqueta, acao) => {
-                    setEtiquetaEmVoo({ leadId: l.kommo_lead_id, etiqueta })
+                    if (etiquetaEmVoo[l.kommo_lead_id] !== undefined) return
+                    setEtiquetaEmVoo((m) => comecarNoCard(m, l.kommo_lead_id, etiqueta))
                     etiquetar.mutate({ leadId: l.kommo_lead_id, etiqueta, acao })
                   }}
-                  etiquetaEmVoo={etiquetaEmVoo?.leadId === l.kommo_lead_id ? etiquetaEmVoo.etiqueta : null}
+                  etiquetaEmVoo={etiquetaEmVoo[l.kommo_lead_id] ?? null}
                   // A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026).
                   onAnotar={anotarNoCard}
                   // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
@@ -5265,7 +5351,7 @@ export default function AnaliseCredito() {
                       ? null
                       : (prontas.data?.has(l.kommo_lead_id) ?? false)
                   }
-                  statusEmAndamento={emAndamento?.leadId === l.kommo_lead_id ? emAndamento.statusId : null}
+                  statusEmAndamento={emAndamento[l.kommo_lead_id] ?? null}
                   onAnalisar={onAnalisar}
                   analisando={rpvLead?.kommo_lead_id === l.kommo_lead_id}
                   resultadoAnalise={
@@ -5276,7 +5362,7 @@ export default function AnaliseCredito() {
                   onBaixarAnexos={(l) => void baixarAnexosDoCard(l)}
                   preparoDosAutos={preparoDosAutos[l.kommo_lead_id]}
                   onPreencherPlanilha={(l) => setPlanilhaLead(l)}
-                  analisandoJuridico={analisandoJurId === l.kommo_lead_id}
+                  analisandoJuridico={analisandoJur[l.kommo_lead_id] === true}
                   resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
                   botoes={botoesDoCard}
                   onCertidoes={abaAtual?.certidoes ? onCertidoes : undefined}
@@ -5366,18 +5452,13 @@ export default function AnaliseCredito() {
                 : ''
               : null
           }
-          ocupado={mover.isPending}
+          // O CARD DESTA JANELA, e não a página: `mover.isPending` diz só da
+          // última movimentação pedida, de qualquer card.
+          ocupado={emAndamento[mensagemDoCard.lead.kommo_lead_id] !== undefined}
           jaMovido={jaMovidoPara(mensagemDoCard.lead.kommo_lead_id)}
           onConfirmar={async (acao, mensagem) => {
-            setEmAndamento({
-              leadId: mensagemDoCard.lead.kommo_lead_id,
-              statusId: acao.statusId,
-            })
-            await moverComNota(
-              mensagemDoCard.lead.kommo_lead_id,
-              acao.statusId,
-              mensagem,
-            )
+            const leadId = mensagemDoCard.lead.kommo_lead_id
+            await comCardTravado(leadId, acao.statusId, () => moverComNota(leadId, acao.statusId, mensagem))
             setMensagemDoCard(null)
           }}
           onFechar={() => {
@@ -5420,7 +5501,9 @@ export default function AnaliseCredito() {
           // lugares daria duas portas para a mesma decisão.
           acoes={abaAtual?.key === ABA_RPV_DESFECHO_NA_JANELA ? (abaAtual?.acoes ?? []) : []}
           onMover={async (statusId, comentario) => {
-            await moverComNota(rpvLead.kommo_lead_id, statusId, comentario)
+            await comCardTravado(rpvLead.kommo_lead_id, statusId, () =>
+              moverComNota(rpvLead.kommo_lead_id, statusId, comentario),
+            )
             // A janela fecha porque o card saiu desta aba: manter aberta uma
             // análise de um card que já foi movido é oferecer botões que não
             // valem mais. E os bytes saem por aqui também — ver soltarBytes: o
@@ -5451,6 +5534,9 @@ export default function AnaliseCredito() {
           }}
           onClose={() => {
             soltarBytes(rpvLead.kommo_lead_id)
+            // COMO AS OUTRAS JANELAS QUE MOVEM: o movimento que ficou sem nota
+            // aqui não pode fazer um movimento futuro do card ser PULADO.
+            esquecerMovimentos(rpvLead.kommo_lead_id)
             setRpvLead(null)
           }}
         />
@@ -5535,12 +5621,17 @@ export default function AnaliseCredito() {
             botoesDoCard === 'rpv' ? () => onAnalisar(ddLead) : undefined
           }
           onMover={async (statusId, comentario) => {
-            await moverComNota(ddLead.kommo_lead_id, statusId, comentario)
+            await comCardTravado(ddLead.kommo_lead_id, statusId, () =>
+              moverComNota(ddLead.kommo_lead_id, statusId, comentario),
+            )
             // O card saiu desta aba: manter a diligência aberta seria oferecer
             // uma apuração de um crédito que já foi recusado.
             setDdLead(null)
           }}
-          onClose={() => setDdLead(null)}
+          onClose={() => {
+            esquecerMovimentos(ddLead.kommo_lead_id)
+            setDdLead(null)
+          }}
         />
       )}
     </div>

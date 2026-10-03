@@ -66,6 +66,9 @@ describe('a nota do "Fechado!" e do "Não fechou"', () => {
   it('o motivo de um clique entra como frase no fim do texto', () => {
     expect(comSugestao('', 'Achou o deságio alto')).toBe('Achou o deságio alto.')
     expect(comSugestao('Ligou ontem. ', 'Desistiu de vender')).toBe('Ligou ontem. Desistiu de vender.')
+    // SEM PONTO NO FIM, ganha um: antes saía "achou caro Desistiu de vender.".
+    expect(comSugestao('achou caro', 'Desistiu de vender')).toBe('achou caro. Desistiu de vender.')
+    expect(comSugestao('Achou caro!', 'Desistiu de vender')).toBe('Achou caro! Desistiu de vender.')
   })
 
   it('cada jeito de não fechar tem rótulo, exemplo e motivos de um clique', () => {

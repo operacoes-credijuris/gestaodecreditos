@@ -309,6 +309,28 @@ export function filtrarEOrdenar(
   })
 }
 
+/**
+ * O TEXTO EM QUE A BUSCA PROCURA, de um card: o nome, o processo, o
+ * responsável e TODAS as anotações (informação relevante costuma vir num
+ * comentário posterior), já em minúsculas.
+ *
+ * MONTADO UMA VEZ POR CARD, e não a cada tecla. A busca filtra o funil inteiro
+ * três vezes por tecla (o total do topo, as etapas e as destinações), e cada
+ * filtro passava `toLowerCase` em todas as anotações de centenas de cards —
+ * megabytes de texto por letra digitada. A tela guarda este texto por card e
+ * só o refaz quando os cards mudam.
+ *
+ * As partes vão separadas por quebra de linha, que a busca (um campo de uma
+ * linha) nunca contém: um termo não casa juntando o fim de um campo com o
+ * começo do outro — é a mesma resposta de procurar campo a campo.
+ */
+export function textoDaBusca(lead: KommoLead): string {
+  return [lead.nome, lead.processo_cnj, lead.responsavel_nome, ...(lead.notas ?? []).map((n) => n.texto), lead.nota_texto]
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase())
+    .join('\n')
+}
+
 /** Uma etapa em que a busca achou cards. */
 export interface AchadoDaBusca {
   key: string
