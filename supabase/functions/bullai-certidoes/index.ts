@@ -24,6 +24,17 @@ import { corpoDoPedido, estadoDoItem, type RodadaDoPortal } from '../_shared/res
 import { lerCadastroDoCard } from '../_shared/cadastroDoCard.ts'
 import { garantirPastaDoCedente } from '../_shared/planilhaJuridica.ts'
 import { driveFindOrCreateFolder, driveUploadBytes } from '../_shared/credijuris.ts'
+// A RESERVA ATÔMICA DOS ITENS ANTES DE PEDIR (03/10/2026) — ver o módulo.
+import {
+  itemPedivel,
+  type ItemDoChecklist,
+  pedidoRepetido,
+  pedidosSemRegistro,
+  PREFIXO_RESERVA,
+  portaisDosReservados,
+  RESERVA_VENCE_MIN,
+  reservaVencida,
+} from '../_shared/reservaBullai.ts'
 
 type Servico = ReturnType<typeof serviceClient>
 
@@ -46,6 +57,42 @@ interface ArquivoNoDrive {
 const limparNome = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 150)
 
 // ------------------------------------------------------------------ PEDIR
+/** Violação de chave única: o registro do pedido já existe (outra tentativa gravou). */
+const ehDuplicado = (e: { code?: string | null; message?: string | null } | null) =>
+  !!e && (e.code === '23505' || /duplicate key/i.test(String(e.message ?? '')))
+
+/**
+ * Devolve os itens reservados ao estado em que estavam, quando o pedido não
+ * saiu. CONDICIONAL AO TOKEN: item que outra coisa já mexeu não é tocado.
+ * Devolve a primeira falha, ou null.
+ */
+async function liberarReserva(
+  svc: Servico,
+  leadId: number,
+  reserva: string,
+  antes: Map<string, ItemDoChecklist>,
+  ids: string[],
+): Promise<string | null> {
+  let falha: string | null = null
+  for (const id of ids) {
+    const a = antes.get(id)
+    if (!a) continue
+    const { error } = await svc
+      .from('dd_certidao')
+      .update({
+        status: a.status,
+        bullai_job_id: a.bullai_job_id ?? null,
+        bullai_portais: a.bullai_portais ?? [],
+        atualizado_em: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('kommo_lead_id', leadId)
+      .eq('bullai_job_id', reserva)
+    if (error && !falha) falha = error.message
+  }
+  return falha
+}
+
 async function pedir(svc: Servico, chave: string, leadId: number, body: any, criadoPor: string) {
   const pedidos = Array.isArray(body?.pedidos) ? body.pedidos : []
   if (pedidos.length === 0) return jsonResponse({ error: 'Nenhuma certidão marcada para pedir.' }, 400)
@@ -70,31 +117,102 @@ async function pedir(svc: Servico, chave: string, leadId: number, body: any, cri
     }
     const documento = sujeito.tipo_pessoa === 'PJ' ? 'CNPJ' : 'CPF'
 
-    // O MAPA portal → itens do checklist: é por ele que o resultado de cada
-    // portal volta para a linha certa.
-    const portais: Record<string, string[]> = {}
+    // O MAPA portal → itens do checklist, COMO A TELA PEDIU: é por ele que o
+    // resultado de cada portal volta para a linha certa. Depois da reserva ele
+    // encolhe para os itens que esta chamada conseguiu travar.
+    const pedidosDoMapa: Record<string, string[]> = {}
     for (const it of Array.isArray(p?.itens) ? p.itens : []) {
       for (const k of Array.isArray(it?.portais) ? it.portais : []) {
-        const lista = portais[String(k)] ?? []
+        const lista = pedidosDoMapa[String(k)] ?? []
         if (it?.certidao_id) lista.push(String(it.certidao_id))
-        portais[String(k)] = lista
+        pedidosDoMapa[String(k)] = lista
       }
     }
-    for (const k of Array.isArray(p?.extras) ? p.extras : []) portais[String(k)] = portais[String(k)] ?? []
+    for (const k of Array.isArray(p?.extras) ? p.extras : []) {
+      pedidosDoMapa[String(k)] = pedidosDoMapa[String(k)] ?? []
+    }
 
-    const invalidos = Object.keys(portais).filter((k) => {
+    const invalidos = Object.keys(pedidosDoMapa).filter((k) => {
       const c = catalogo.get(k)
       return !c || c.documento !== documento || c.presencial
     })
-    for (const k of invalidos) delete portais[k]
-    const chaves = Object.keys(portais)
+    for (const k of invalidos) delete pedidosDoMapa[k]
     if (invalidos.length) {
       recusados.push(`${sujeito.nome}: ${invalidos.length} certidão(ões) fora do catálogo ou de outro tipo de documento (${invalidos.join(', ')}).`)
     }
-    if (chaves.length === 0) continue
+    if (Object.keys(pedidosDoMapa).length === 0) continue
 
+    // O CADASTRO ANTES DA RESERVA: CPF inválido ou nascimento faltando recusam o
+    // pedido inteiro (não dependem dos portais), e não há por que travar itens.
+    const conferido = corpoDoPedido(sujeito, Object.keys(pedidosDoMapa))
+    if (!conferido.ok) {
+      recusados.push(conferido.falta)
+      continue
+    }
+
+    // ------------------------------------------------------------ A RESERVA
+    // Ver `_shared/reservaBullai.ts`. Lê o estado dos itens e reserva com um
+    // UPDATE CONDICIONAL ao status lido: de duas abas, só uma vê a linha mudar,
+    // e só o que mudou segue para a BullAI.
+    const pedidosIds = [...new Set(Object.values(pedidosDoMapa).flat())]
+    const reserva = PREFIXO_RESERVA + crypto.randomUUID()
+    const antes = new Map<string, ItemDoChecklist>()
+    const reservados = new Set<string>()
+    if (pedidosIds.length > 0) {
+      const { data: lidos, error: eLeitura } = await svc
+        .from('dd_certidao')
+        .select('id, status, erro_classe, bullai_job_id, bullai_portais')
+        .in('id', pedidosIds)
+        .eq('kommo_lead_id', leadId)
+      if (eLeitura) {
+        recusados.push(`${sujeito.nome}: não consegui ler o checklist (${eLeitura.message}); nada foi pedido.`)
+        continue
+      }
+      for (const l of (lidos ?? []) as ItemDoChecklist[]) antes.set(l.id, l)
+      const porStatus = new Map<string, string[]>()
+      for (const l of antes.values()) {
+        if (itemPedivel(l)) porStatus.set(l.status, [...(porStatus.get(l.status) ?? []), l.id])
+      }
+      let falhaDaReserva: string | null = null
+      for (const [status, ids] of porStatus) {
+        const { data: mudaram, error } = await svc
+          .from('dd_certidao')
+          .update({ status: 'EM_EMISSAO', bullai_job_id: reserva, atualizado_em: new Date().toISOString() })
+          .in('id', ids)
+          .eq('kommo_lead_id', leadId)
+          .eq('status', status)
+          .select('id')
+        if (error) {
+          falhaDaReserva = error.message
+          break
+        }
+        for (const m of (mudaram ?? []) as { id: string }[]) reservados.add(m.id)
+      }
+      if (falhaDaReserva) {
+        await liberarReserva(svc, leadId, reserva, antes, [...reservados])
+        recusados.push(`${sujeito.nome}: não consegui reservar os itens (${falhaDaReserva}); nada foi pedido.`)
+        continue
+      }
+    }
+    if (pedidoRepetido(pedidosIds.length, reservados.size)) {
+      recusados.push(
+        `${sujeito.nome}: as certidões marcadas já estão em emissão (pedidas por outra aba ou por um clique anterior); nada foi pedido de novo.`,
+      )
+      continue
+    }
+    const portais = portaisDosReservados(pedidosDoMapa, reservados)
+    const chaves = Object.keys(portais)
+    if (chaves.length === 0) {
+      await liberarReserva(svc, leadId, reserva, antes, [...reservados])
+      continue
+    }
+    const deFora = pedidosIds.length - reservados.size
+    if (deFora > 0) {
+      recusados.push(`${sujeito.nome}: ${deFora} certidão(ões) já em emissão ou fora de estado de pedido ficaram de fora.`)
+    }
     const montado = corpoDoPedido(sujeito, chaves)
     if (!montado.ok) {
+      await liberarReserva(svc, leadId, reserva, antes, [...reservados])
       recusados.push(montado.falta)
       continue
     }
@@ -103,13 +221,20 @@ async function pedir(svc: Servico, chave: string, leadId: number, body: any, cri
     try {
       job = await pedirBullai<JobDaBullai>(chave, '/jobs', { method: 'POST', body: JSON.stringify(montado.corpo) })
     } catch (e) {
-      recusados.push(`${sujeito.nome}: ${(e as Error).message}`)
+      // O PEDIDO NÃO SAIU: os itens voltam ao que eram, e podem ser pedidos de novo.
+      const falhaDaVolta = await liberarReserva(svc, leadId, reserva, antes, [...reservados])
+      recusados.push(
+        `${sujeito.nome}: ${(e as Error).message}` +
+          (falhaDaVolta ? ` (os itens ficaram reservados e voltam a FALHA em ${RESERVA_VENCE_MIN} min)` : ''),
+      )
       // SEM CONSULTAS NÃO ADIANTA TENTAR OS PRÓXIMOS.
       if ((e as ErroBullai).status === 402) break
       continue
     }
 
-    await svc.from('bullai_pedido').insert({
+    // DAQUI EM DIANTE O PEDIDO ESTÁ PAGO. Nenhuma falha de banco volta atrás
+    // nele: cada uma é dita, e a 'atualizar' sabe recompor o que faltar.
+    const registro = {
       job_id: job.jobId,
       kommo_lead_id: leadId,
       sujeito_id: sujeito.id,
@@ -121,14 +246,27 @@ async function pedir(svc: Servico, chave: string, leadId: number, body: any, cri
       portal_runs: job.portalRuns ?? [],
       artifacts: job.artifacts ?? [],
       criado_por: criadoPor,
-    })
+    }
+    let { error: eRegistro } = await svc.from('bullai_pedido').insert(registro)
+    if (eRegistro && !ehDuplicado(eRegistro)) {
+      ;({ error: eRegistro } = await svc.from('bullai_pedido').insert(registro))
+    }
+    if (ehDuplicado(eRegistro)) eRegistro = null
+    if (eRegistro) {
+      console.error('[bullai-certidoes] registro do pedido', job.jobId, eRegistro.message)
+      recusados.push(
+        `${sujeito.nome}: o pedido saiu na BullAI (job ${job.jobId}), mas não foi registrado (${eRegistro.message}). ` +
+          'A próxima atualização o recompõe pelos itens do checklist.',
+      )
+    }
 
-    // OS ITENS PASSAM A "EM EMISSÃO" na hora — é o que a tela mostra enquanto a
-    // BullAI trabalha, e o que impede alguém de pedir de novo o mesmo item.
-    const ids = [...new Set(Object.values(portais).flat())]
-    for (const id of ids) {
+    // OS ITENS PASSAM A "EM EMISSÃO" com o id do job — é o que a tela mostra
+    // enquanto a BullAI trabalha, e o que a 'atualizar' usa para recompor o
+    // registro se o insert acima falhou. Condicional ao token desta reserva.
+    const naoLigados: string[] = []
+    for (const id of reservados) {
       const doItem = chaves.filter((k) => portais[k].includes(id))
-      await svc
+      const { error } = await svc
         .from('dd_certidao')
         .update({
           status: 'EM_EMISSAO',
@@ -140,6 +278,17 @@ async function pedir(svc: Servico, chave: string, leadId: number, body: any, cri
         })
         .eq('id', id)
         .eq('kommo_lead_id', leadId)
+        .eq('bullai_job_id', reserva)
+      if (error) naoLigados.push(error.message)
+    }
+    if (naoLigados.length) {
+      console.error('[bullai-certidoes] itens do pedido', job.jobId, naoLigados)
+      recusados.push(
+        `${sujeito.nome}: ${naoLigados.length} item(ns) não foram ligados ao job ${job.jobId} (${naoLigados[0]}).` +
+          (eRegistro
+            ? ` Sem o registro do pedido, eles voltam a FALHA em ${RESERVA_VENCE_MIN} min.`
+            : ' A atualização os acerta pelo registro do pedido.'),
+      )
     }
     criados.push({ job_id: job.jobId, sujeito: sujeito.nome, portais: chaves.length })
   }
@@ -148,15 +297,100 @@ async function pedir(svc: Servico, chave: string, leadId: number, body: any, cri
 }
 
 // -------------------------------------------------------------- ATUALIZAR
+/**
+ * O QUE A AÇÃO 'pedir' PODE TER DEIXADO PELA METADE — ver `_shared/reservaBullai.ts`:
+ *   - pedido pago sem linha em `bullai_pedido`: recomposto pelos itens, que
+ *     guardam o id do job e os portais;
+ *   - reserva sem pedido, vencida: o item volta a FALHA, com o motivo, e pode
+ *     ser pedido de novo.
+ * Devolve quantos itens/pedidos mudaram e as falhas, para a tela.
+ */
+async function recomporPedidos(
+  svc: Servico,
+  leadId: number,
+  pedidos: any[],
+): Promise<{ mudou: number; falhas: string[]; novos: any[] }> {
+  const falhas: string[] = []
+  const novos: any[] = []
+  let mudou = 0
+  const { data: itens, error } = await svc
+    .from('dd_certidao')
+    .select('id, status, sujeito_id, bullai_job_id, bullai_portais, atualizado_em')
+    .eq('kommo_lead_id', leadId)
+    .eq('status', 'EM_EMISSAO')
+  if (error) return { mudou, falhas: [`checklist: ${error.message}`], novos }
+  const lista = (itens ?? []) as ItemDoChecklist[]
+
+  for (const r of pedidosSemRegistro(lista, new Set(pedidos.map((p) => String(p.job_id))))) {
+    const { data: sujeito } = await svc
+      .from('dd_sujeito')
+      .select('documento, tipo_pessoa')
+      .eq('id', String(r.sujeitoId ?? ''))
+      .maybeSingle()
+    if (!sujeito?.documento) {
+      falhas.push(`job ${r.jobId}: sem o sujeito do pedido no checklist, não há como recompor o registro.`)
+      continue
+    }
+    const linha = {
+      job_id: r.jobId,
+      kommo_lead_id: leadId,
+      sujeito_id: r.sujeitoId,
+      documento: String(sujeito.documento),
+      tipo_documento: sujeito.tipo_pessoa === 'PJ' ? 'CNPJ' : 'CPF',
+      portais: r.portais,
+    }
+    const { data: criado, error: eIns } = await svc.from('bullai_pedido').insert(linha).select('*').single()
+    if (eIns) {
+      if (!ehDuplicado(eIns)) falhas.push(`job ${r.jobId}: registro não recomposto (${eIns.message})`)
+      continue
+    }
+    novos.push(criado)
+    mudou++
+  }
+
+  // RESERVA VENCIDA que nenhum pedido registrado cobre: a função que a fez
+  // morreu antes de pedir (ou o pedido falhou e a devolução também).
+  const cobertos = new Set<string>(
+    [...pedidos, ...novos].flatMap((p) => Object.values((p.portais ?? {}) as Record<string, string[]>).flat()),
+  )
+  const agora = Date.now()
+  for (const i of lista) {
+    if (!reservaVencida(i, agora) || cobertos.has(i.id)) continue
+    const { data: soltos, error: eSolta } = await svc
+      .from('dd_certidao')
+      .update({
+        status: 'FALHA',
+        erro_classe: 'bullai',
+        erro_detalhe:
+          `O pedido à BullAI não chegou a ser confirmado (reserva de mais de ${RESERVA_VENCE_MIN} min sem pedido). ` +
+          'Pode pedir de novo.',
+        atualizado_em: new Date().toISOString(),
+      })
+      .eq('id', i.id)
+      .eq('status', 'EM_EMISSAO')
+      .eq('bullai_job_id', String(i.bullai_job_id))
+      .select('id')
+    if (eSolta) falhas.push(`item ${i.id}: ${eSolta.message}`)
+    else mudou += (soltos ?? []).length
+  }
+  return { mudou, falhas, novos }
+}
+
 async function atualizar(svc: Servico, chave: string, leadId: number) {
-  const { data: pedidos } = await svc
+  const { data: lidos, error: ePedidos } = await svc
     .from('bullai_pedido')
     .select('*')
     .eq('kommo_lead_id', leadId)
-  const abertos = (pedidos ?? []).filter(
+  // SEM A LISTA DE PEDIDOS NÃO SE RECOMPÕE NADA: todo item pareceria órfão.
+  if (ePedidos) return jsonResponse({ ok: false, atualizados: 0, falhas: [`bullai_pedido: ${ePedidos.message}`] })
+  const recomposicao = await recomporPedidos(svc, leadId, lidos ?? [])
+  const pedidos = [...(lidos ?? []), ...recomposicao.novos]
+  const abertos = pedidos.filter(
     (p: any) => !p.is_final || (Array.isArray(p.artifacts) && p.artifacts.length > (p.baixados?.length ?? 0)),
   )
-  if (abertos.length === 0) return jsonResponse({ ok: true, atualizados: 0 })
+  if (abertos.length === 0) {
+    return jsonResponse({ ok: true, atualizados: recomposicao.mudou, falhas: recomposicao.falhas })
+  }
 
   // A PASTA DO CEDENTE, a mesma da planilha — e dentro dela, "Certidões".
   let pastaCertidoes: { token: string; id: string } | null = null
@@ -179,7 +413,7 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
 
   const { data: validades } = await svc.from('certidao_catalogo').select('codigo, validade_dias')
   const validadeDe = new Map(((validades ?? []) as any[]).map((v) => [v.codigo, v.validade_dias as number | null]))
-  const falhas: string[] = []
+  const falhas: string[] = [...recomposicao.falhas]
 
   for (const p of abertos as any[]) {
     let job: JobDaBullai
@@ -225,7 +459,7 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
 
     // O PEDIDO, numa gravação só: o estado da BullAI e, em cada anexo, onde
     // ele ficou no Drive.
-    await svc
+    const { error: ePedido } = await svc
       .from('bullai_pedido')
       .update({
         status: job.status,
@@ -241,6 +475,7 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
         atualizado_em: new Date().toISOString(),
       })
       .eq('job_id', p.job_id)
+    if (ePedido) falhas.push(`pedido ${p.job_id}: ${ePedido.message}`)
 
     // CADA ITEM DO CHECKLIST, pelo que os portais DELE disseram.
     const comArquivo = new Set([...arquivosPorPortal.entries()].filter(([, l]) => l.length > 0).map(([k]) => k))
