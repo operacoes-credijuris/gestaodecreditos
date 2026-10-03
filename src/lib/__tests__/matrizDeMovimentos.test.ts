@@ -80,6 +80,11 @@ const daTela = (funil: NomeDoFunil, trilha: SubdivisaoPrecatorio): [string, Movi
  * O RPV, com as constantes ST_*. "Enviar para revisão" é `validar`: passa adiante
  * sem decidir o mérito. Os desfechos de 'pendentes' moram na janela da análise
  * de RPV, e os de 'validacao' no card — a tela decide onde, o destino é o mesmo.
+ *
+ * MUDOU DE PROPÓSITO NA ETAPA 7 DO REDESENHO (02/10/2026): o RPV passou a
+ * espelhar o kanban inteiro, na ordem do Kommo, e as nove colunas novas entram
+ * como `col-<id>`, SÓ PARA LEITURA — nenhuma move nada. Os movimentos de antes
+ * são exatamente os mesmos; só a ordem das abas segue o kanban.
  */
 const MOVIMENTOS_RPV: [string, Movimento[]][] = [
   [
@@ -98,10 +103,19 @@ const MOVIMENTOS_RPV: [string, Movimento[]][] = [
       ['Reprovar', 107830031, 'reprovar'],
     ],
   ],
-  ['aprovados', []],
   ['diligencia', []],
-  ['reprovados', []],
+  ['aprovados', []],
+  ['col-107830039', []],
+  ['col-107830043', []],
+  ['col-107830047', []],
+  ['col-107830051', []],
+  ['col-107830055', []],
   ['protocolo', []],
+  ['col-107830063', []],
+  ['reprovados', []],
+  ['col-107272811', []],
+  ['col-112466388', []],
+  ['col-107830067', []],
 ]
 
 /**
@@ -125,10 +139,20 @@ const MOVIMENTOS_INTERNO: [string, Movimento[]][] = [
       ['Reprovar crédito', 111534108, 'reprovar'],
     ],
   ],
-  ['int-aprovados', []],
+  // DESDE A ONDA 2 (02/10/2026, só na beta) o Interno mostra o kanban inteiro,
+  // na ordem do Kommo: as colunas novas são `col-<id>`, só leitura, e não movem
+  // nada. Os movimentos de antes são exatamente os mesmos.
   ['int-diligencia', []],
-  ['int-reprovados', []],
+  ['int-aprovados', []],
+  ['col-112466260', []],
+  ['col-111533952', []],
+  ['col-112466032', []],
+  ['col-111533956', []],
   ['int-protocolo', []],
+  ['col-112466340', []],
+  ['int-reprovados', []],
+  ['col-112465960', []],
+  ['col-112382612', []],
 ]
 
 /** O EXTERNO, na ordem do kanban; as `col-*` são só leitura e não movem nada. */
