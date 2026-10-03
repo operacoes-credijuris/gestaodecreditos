@@ -46,6 +46,25 @@ export const GRUPOS_DO_MENU: ReadonlyArray<{
 /** A seção que abre primeiro. */
 export const SECAO_INICIAL: SecaoId = 'advbox'
 
+/** Todas as seções, na ordem do menu (para validar a seção lembrada). */
+export const IDS_DAS_SECOES: readonly SecaoId[] = GRUPOS_DO_MENU.flatMap((g) => g.itens.map((i) => i.id))
+
+/**
+ * A faixa do que não está salvo, no topo da seção aberta: as seções com
+ * pendência, NA ORDEM DO MENU, e o lembrete de que cada uma salva no próprio
+ * botão (salvar o Kommo não salva as Skills).
+ */
+export function textoDasPendencias(pendentes: ReadonlySet<SecaoId>): string {
+  const nomes = GRUPOS_DO_MENU.flatMap((g) => g.itens)
+    .filter((i) => pendentes.has(i.id))
+    .map((i) => i.rotulo)
+  if (nomes.length === 0) return ''
+  const lista = nomes.length === 1 ? nomes[0] : `${nomes.slice(0, -1).join(', ')} e ${nomes[nomes.length - 1]}`
+  const inicio = nomes.length === 1 ? 'Alteração não salva em' : 'Alterações não salvas em'
+  const fim = nomes.length === 1 ? 'Salve no botão da seção.' : 'Cada seção salva no próprio botão.'
+  return `${inicio} ${lista}. ${fim}`
+}
+
 /**
  * Frase do Salvar travado quando a leitura falhou (ADVBOX e DJEN). Fica no
  * `title` do botão: a caixa âmbar acima já diz o que houve, e o botão apagado

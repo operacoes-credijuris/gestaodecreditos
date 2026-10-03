@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { usePreferencia, umaDas } from '@/lib/preferencias'
 import { Pencil } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { formatBRL } from '@/lib/format'
@@ -13,7 +14,9 @@ import {
 } from './consultas'
 import {
   GRUPOS_DO_MENU,
+  IDS_DAS_SECOES,
   SECAO_INICIAL,
+  textoDasPendencias,
   extraDoMenu,
   pontoDaIntegracao,
   pontoDoKommo,
@@ -60,8 +63,25 @@ const MARCA_AO_DIGITAR: ReadonlySet<SecaoId> = new Set<SecaoId>([
  * administrador mora na rota única `/configuracoes`.
  */
 export default function Configuracoes() {
-  const [secao, setSecao] = useState<SecaoId>(SECAO_INICIAL)
+  // A SEÇÃO ABERTA FICA LEMBRADA neste navegador (revisão de qualidade de vida):
+  // quem cuida dos usuários volta direto a Usuários. Continua fora da URL (ver
+  // acima); uma seção que deixou de existir volta à inicial.
+  const [secao, setSecao] = usePreferencia<SecaoId>('configuracoes.secao', SECAO_INICIAL, umaDas(IDS_DAS_SECOES))
   const [pendentes, setPendentes] = useState<ReadonlySet<SecaoId>>(() => new Set())
+
+  // FECHAR OU RECARREGAR A ABA COM ALTERAÇÃO NÃO SALVA: o navegador pergunta. O
+  // lápis do menu já dizia qual seção tinha pendência, mas nada segurava o
+  // fechamento da aba (ou o "recarregar" do aviso de versão nova), e um token
+  // colado e não salvo se perdia calado.
+  useEffect(() => {
+    if (pendentes.size === 0) return
+    const aoSair = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', aoSair)
+    return () => window.removeEventListener('beforeunload', aoSair)
+  }, [pendentes.size])
 
   // AS CONSULTAS QUE O MENU E OS CARTÕES DIVIDEM sobem para cá: uma chamada só,
   // e o ponto do menu acompanha o selo do cartão no mesmo instante, inclusive
@@ -160,6 +180,18 @@ export default function Configuracoes() {
           pendentes={pendentes}
         />
         <Card className="p-[20px]">
+          {/* O QUE NÃO ESTÁ SALVO, DITO COM TODAS AS LETRAS: o lápis no menu é
+              discreto, e cada seção salva no próprio botão — salvar uma não
+              salva as outras. Some quando não há pendência. */}
+          {pendentes.size > 0 && (
+            <p
+              role="status"
+              className="mb-[16px] flex items-start gap-2 rounded-campo border border-aviso-borda bg-aviso-fundo px-3 py-2 text-corpo text-texto"
+            >
+              <Pencil className="mt-[3px] h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden />
+              <span>{textoDasPendencias(pendentes)}</span>
+            </p>
+          )}
           {GRUPOS_DO_MENU.flatMap((g) => g.itens).map(({ id, rotulo }) => (
             // SEM CLASSE DE display AQUI: uma `flex` ou `block` venceria o
             // `[hidden]` do preflight e mostraria todas as seções de uma vez.

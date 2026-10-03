@@ -17,6 +17,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [capsLock, setCapsLock] = useState(false)
 
   if (loading) {
     return (
@@ -82,6 +83,9 @@ export default function Login() {
             <Input
               type="email"
               autoComplete="email"
+              // O FOCO JÁ NO E-MAIL: a tela só serve para isto, e quem abre a
+              // plataforma começa a digitar sem clicar.
+              autoFocus
               placeholder="seuemail@credijuris.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -95,8 +99,22 @@ export default function Login() {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              // O CAPS LOCK LIGADO é a causa mais comum de "senha errada" que
+              // não é senha errada; o aviso aparece enquanto se digita.
+              onKeyUp={(e) => setCapsLock(e.getModifierState?.('CapsLock') ?? false)}
+              onKeyDown={(e) => setCapsLock(e.getModifierState?.('CapsLock') ?? false)}
+              onBlur={() => setCapsLock(false)}
+              // SÓ COM O AVISO À VISTA: um `undefined` aqui apagaria a descrição
+              // que o Field dá ao campo.
+              {...(capsLock ? { 'aria-describedby': 'aviso-caps-lock' } : {})}
               required
             />
+            {capsLock && (
+              <p id="aviso-caps-lock" className="mt-1.5 flex items-center gap-1.5 text-sm text-aviso">
+                <AlertTriangle className="h-[14px] w-[14px] shrink-0" aria-hidden />
+                Caps Lock ligado.
+              </p>
+            )}
           </Field>
 
           {/* role="alert" (Novo, acessibilidade): o erro que aparece depois do

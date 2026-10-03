@@ -14,7 +14,7 @@
 // A moldura não lê dado nenhum: cada aba continua buscando a carteira como
 // antes (`usePainel`), e abrir o Quadro não faz consulta nova.
 
-import { Suspense, useId, useState } from 'react'
+import { Suspense, useEffect, useId, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Tabs, idDaAba } from '@/components/ui/Tabs'
@@ -22,6 +22,7 @@ import { Loading } from '@/components/ui/Table'
 import { ABAS_DO_QUADRO, findNavLocation } from '@/components/layout/navigation'
 import { LimiteDeErro } from '@/components/layout/LimiteDeErro'
 import { cn } from '@/lib/cn'
+import { gravarPreferencia, PREF_QUADRO_ABA } from '@/lib/preferencias'
 
 const ITENS = ABAS_DO_QUADRO.map((a) => ({ key: a.to, label: a.label }))
 
@@ -34,6 +35,14 @@ export default function Moldura() {
   // a reserva para o tipo, não um caso que aconteça.
   const ativa = findNavLocation(pathname)?.aba ?? ABAS_DO_QUADRO[0]
   const indice = ABAS_DO_QUADRO.findIndex((a) => a.to === ativa.to)
+
+  // A ÚLTIMA ABA FICA LEMBRADA (revisão de qualidade de vida): o item do menu
+  // volta a ela, e quem sempre olha as Previsões não passa pela Visão geral a
+  // cada visita. Os endereços continuam os mesmos — o link para
+  // /inteligencia segue abrindo a Visão geral.
+  useEffect(() => {
+    gravarPreferencia(PREF_QUADRO_ABA, ativa.to)
+  }, [ativa.to])
 
   // SÓ A TROCA DE ABA ANIMA O PAINEL. A primeira aba entra junto com a página,
   // e o AppLayout já anima essa entrada; animar os dois somaria os movimentos.

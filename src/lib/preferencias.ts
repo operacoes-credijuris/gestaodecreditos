@@ -8,6 +8,8 @@
 // TUDO EM try/catch: em janela anônima, com o armazenamento bloqueado ou cheio, o
 // navegador lança erro no acesso. A tela tem de funcionar igual, só sem lembrar.
 
+import { useCallback, useState } from 'react'
+
 /** O que o `localStorage` oferece e esta lógica usa (o teste passa um de mentira). */
 export interface Armazenamento {
   getItem(chave: string): string | null
@@ -20,6 +22,8 @@ const PREFIXO = 'credijuris.'
 
 export const PREF_MENU_RECOLHIDO = 'menu.recolhido'
 export const PREF_NOVIDADES_VISTAS = 'novidades.vistas'
+/** A última aba aberta do Quadro econômico (o endereço dela). */
+export const PREF_QUADRO_ABA = 'quadro.aba'
 
 function armazenamentoPadrao(): Armazenamento | null {
   try {
@@ -72,4 +76,49 @@ export function armazenamentoDisponivel(
   } catch {
     return false
   }
+}
+
+// ─── Lembrar a última escolha (revisão de qualidade de vida, 03/10/2026) ─────
+//
+// A aba do Quadro, o recorte, a seção das Configurações: escolhas de tela que a
+// pessoa refazia a cada visita. Guardadas aqui, voltam como ela deixou.
+//
+// SEMPRE COM VALIDAÇÃO: o que está guardado pode ser de uma versão antiga (uma
+// seção que mudou de nome) ou lixo. Valor que não é uma das opções de hoje vale
+// o padrão — nunca uma tela num estado que não existe.
+
+/** Lê a preferência e confere: fora das opções aceitas, o padrão. */
+export function lerPreferenciaValida<T>(
+  chave: string,
+  padrao: T,
+  aceita: (v: unknown) => v is T,
+  armazenamento?: Armazenamento | null,
+): T {
+  const v = lerPreferencia<unknown>(chave, padrao, armazenamento)
+  return aceita(v) ? v : padrao
+}
+
+/** O validador de "uma destas opções" (para `lerPreferenciaValida`/`usePreferencia`). */
+export function umaDas<T extends string>(opcoes: readonly T[]): (v: unknown) => v is T {
+  return (v: unknown): v is T => typeof v === 'string' && (opcoes as readonly string[]).includes(v)
+}
+
+/**
+ * O `useState` que lembra: começa no que estava guardado (validado) e grava a
+ * cada troca. Falhando o armazenamento, vale só nesta visita.
+ */
+export function usePreferencia<T>(
+  chave: string,
+  padrao: T,
+  aceita: (v: unknown) => v is T,
+): [T, (v: T) => void] {
+  const [valor, setValor] = useState(() => lerPreferenciaValida(chave, padrao, aceita))
+  const mudar = useCallback(
+    (v: T) => {
+      gravarPreferencia(chave, v)
+      setValor(v)
+    },
+    [chave],
+  )
+  return [valor, mudar]
 }

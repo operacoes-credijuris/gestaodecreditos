@@ -13,6 +13,7 @@ import {
   Plus,
   MessageCircle,
   RefreshCw,
+  Copy,
 } from 'lucide-react'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
@@ -21,6 +22,9 @@ import { useToast } from '@/components/ui/Toast'
 import { IconButton } from '@/components/ui/IconButton'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { BotaoCopiar, useCopiarTexto } from '@/components/ui/BotaoCopiar'
+import { gravarPreferencia, lerPreferenciaValida } from '@/lib/preferencias'
+import { chaveDoRascunho, LIMITE_DO_RASCUNHO, textoDaConversa } from '@/lib/conversaDoAssistente'
 import { formatDateTime } from '@/lib/format'
 import { haDialogoAberto } from '@/lib/dialogo'
 import { pecaSobDemanda } from '@/lib/telaSobDemanda'
@@ -160,7 +164,20 @@ export function Assistente() {
 
   const [aberto, setAberto] = useState(false)
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
-  const [texto, setTexto] = useState('')
+  // O RASCUNHO DA PERGUNTA FICA GUARDADO neste navegador, por pessoa
+  // (lib/conversaDoAssistente.ts): recarregar a página — ou o "recarregar" do
+  // aviso de versão nova — não leva embora a pergunta longa pela metade.
+  const chaveRascunho = chaveDoRascunho(user?.id)
+  const [texto, setTexto] = useState(() =>
+    chaveRascunho
+      ? lerPreferenciaValida(chaveRascunho, '', (v): v is string => typeof v === 'string')
+      : '',
+  )
+  useEffect(() => {
+    if (!chaveRascunho || texto.length > LIMITE_DO_RASCUNHO) return
+    gravarPreferencia(chaveRascunho, texto)
+  }, [chaveRascunho, texto])
+  const copiar = useCopiarTexto()
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [modelo, setModelo] = useState(() => lerModeloGuardado() || MODELO_PADRAO)
@@ -617,6 +634,15 @@ export function Assistente() {
             <Sparkles className="h-[16px] w-[16px] shrink-0 text-marca-texto" />
             <span className="truncate">Assistente de dados</span>
           </p>
+          {/* A CONVERSA INTEIRA, em texto corrido, para colar num e-mail ou
+              mandar a um colega. Só com conversa na tela. */}
+          {mensagens.length > 0 && (
+            <IconButton
+              label="Copiar conversa"
+              icon={<Copy className="h-[16px] w-[16px]" />}
+              onClick={() => void copiar(textoDaConversa(mensagens), 'Conversa copiada.')}
+            />
+          )}
           <IconButton
             label="Fechar assistente"
             icon={<X className="h-[16px] w-[16px]" />}
@@ -766,8 +792,16 @@ export function Assistente() {
                   // inteira, senão a tabela nasce comprimida.
                   <div
                     key={i}
-                    className="w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-4 py-[10px] text-corpo text-texto"
+                    className="relative w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-4 py-[10px] pr-[34px] text-corpo text-texto"
                   >
+                    {/* COPIAR A RESPOSTA com um clique, no canto — a lista de
+                        processos ou o texto pronto vão para a conversa com o
+                        cliente sem selecionar à mão. */}
+                    <BotaoCopiar
+                      valor={m.content}
+                      rotulo="Copiar resposta"
+                      className="absolute right-[6px] top-[6px]"
+                    />
                     <div className="[overflow-wrap:anywhere]">
                       {/* Enquanto o leitor de Markdown chega (só na primeira
                           resposta), o texto cru — legível, só sem formatação. */}
