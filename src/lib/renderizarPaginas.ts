@@ -16,7 +16,7 @@
 //
 // A 0,72 de qualidade, uma página A4 fica entre 80 e 190 KB. Menos que isso e os
 // dígitos de uma coluna de centavos viram borrão.
-import * as pdfjsLib from 'pdfjs-dist'
+import { carregarPdfjs } from './pdfjs'
 
 export interface PaginaRenderizada {
   numero: number
@@ -79,6 +79,7 @@ export async function renderizarPaginas(
   const tempo: TempoDaRenderizacao = { paginas: 0, rasterizacao: 0, consumidor: 0 }
   const agora = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
   // O pdf.js toma posse do buffer: cópia, para o chamador poder reutilizá-lo.
+  const pdfjsLib = await carregarPdfjs()
   const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise
   let feitas = 0
   for (const numero of numeros) {

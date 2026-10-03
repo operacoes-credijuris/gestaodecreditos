@@ -164,8 +164,7 @@ import {
 } from '@/components/AnaliseRpvModal'
 import { formatDataHoraSegundos, formatDateTime, tempoDecorrido } from '@/lib/format'
 import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
+import { carregarPdfjs } from '@/lib/pdfjs'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   comSugestao,
@@ -186,8 +185,6 @@ import {
   type PorCard,
 } from '@/lib/emCursoPorCard'
 import { TextoComTermos } from '@/components/layout/TextoComTermos'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 // ===== Análise automática do card (Judit -> due diligence -> planilha) =====
 // Lê os dados do próprio card (título + notas) e roda a sequência no motor.
@@ -316,6 +313,7 @@ async function extrairTextoDoPdf(
   const buf = await resp.arrayBuffer()
   // O pdf.js toma posse do buffer que recebe; a cópia é para o chamador poder
   // renderizar páginas depois (processo digitalizado vira imagem para a IA).
+  const pdfjsLib = await carregarPdfjs()
   const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise
   try {
     // POR PÁGINA, e não colado: é o que permite escolher o que vai para a IA

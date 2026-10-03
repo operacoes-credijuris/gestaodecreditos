@@ -31,11 +31,8 @@ function cortar(texto: string, max = MAX_CHARS_ARQUIVO): string {
  * do Vite e não existe em Node.
  */
 export async function textoDePdf(bytes: ArrayBuffer): Promise<string> {
-  const pdfjsLib = await import('pdfjs-dist')
-  const { default: pdfWorkerUrl } = await import(
-    'pdfjs-dist/build/pdf.worker.min.js?url'
-  )
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+  const { carregarPdfjs } = await import('./pdfjs')
+  const pdfjsLib = await carregarPdfjs()
   const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
   let texto = ''
   for (let p = 1; p <= pdf.numPages; p++) {

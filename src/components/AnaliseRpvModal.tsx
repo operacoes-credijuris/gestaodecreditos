@@ -423,7 +423,7 @@ function PainelPreco({ valores, esmaecido }: { valores: ValoresRpv; esmaecido?: 
   return (
     // ESMAECIDA ENQUANTO O CENÁRIO SE REFAZ: os números ainda são os do cenário
     // anterior, e lê-los como os do novo é o erro que a troca pode provocar.
-    <div className={cn('overflow-x-auto transition-opacity', esmaecido && 'opacity-[.45]')}>
+    <div className={cn('relative overflow-x-auto scrollbar-thin transition-opacity', esmaecido && 'opacity-[.45]')}>
       <table className="w-full border-collapse text-corpo">
         <thead>
           <tr>
@@ -1089,7 +1089,7 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
                 {confronto.length > 0 && (
                   // A tabela rola por dentro: são quatro colunas de texto, e a
                   // janela não pode rolar de lado por causa de uma delas.
-                  <div className="overflow-x-auto">
+                  <div className="relative overflow-x-auto scrollbar-thin">
                     {/* A `.tbl.mini` da amostra: a mesma tabela, mais densa. */}
                     <table className="w-full min-w-[34rem] border-collapse text-xs">
                       <thead>
