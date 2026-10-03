@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -83,12 +84,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [scheduleRemove],
   )
 
-  const value: ToastContextValue = {
-    toast,
-    success: (m, opts) => toast(m, 'success', opts),
-    error: (m, opts) => toast(m, 'error', opts),
-    info: (m, opts) => toast(m, 'info', opts),
-  }
+  // O VALOR É O MESMO OBJETO A VIDA TODA (useMemo sobre o `toast`, que é
+  // estável). Recriado a cada render, como era, cada aviso que aparecia ou
+  // sumia — duas renderizações deste provedor — redesenhava TODO componente que
+  // usa `useToast`: a Análise de crédito inteira, as listas, as janelas. A
+  // lista de avisos é desenhada aqui mesmo; quem só dispara avisos não precisa
+  // saber dela.
+  const value = useMemo<ToastContextValue>(
+    () => ({
+      toast,
+      success: (m, opts) => toast(m, 'success', opts),
+      error: (m, opts) => toast(m, 'error', opts),
+      info: (m, opts) => toast(m, 'info', opts),
+    }),
+    [toast],
+  )
 
   // O AVISO DA AMOSTRA É ESCURO (fundo `texto`, letra `superficie`): sobre o
   // papel e os cartões brancos ele se destaca sem precisar de cor, e o TIPO vem

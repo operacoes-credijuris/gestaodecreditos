@@ -101,7 +101,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] sm:p-6"
+      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin sm:p-6"
       onClick={(e) => {
         // Fecha só quando o clique é no próprio overlay, não dentro do painel.
         if (e.target === e.currentTarget) requestClose()
@@ -143,7 +143,11 @@ export function Modal({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-5 scrollbar-thin">
+        {/* `relative` NO CORPO QUE ROLA: um `sr-only` (ou outro `absolute` sem
+            caixa posicionada em volta) abaixo da dobra se media pelo FUNDO da
+            janela, que também rola — o fundo crescia, rolava, e a janela subia
+            deixando um vão embaixo. O mesmo defeito da moldura do layout. */}
+        <div className="relative max-h-[70vh] overflow-y-auto px-6 py-5 scrollbar-thin">
           {children}
         </div>
         {footer && (

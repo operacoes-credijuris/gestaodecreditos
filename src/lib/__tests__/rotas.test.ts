@@ -259,8 +259,19 @@ function rotasDoApp(fonte: string): Rota[] {
   const s = fonte.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 
   // Componente → módulo em src/pages, pelos imports.
+  //
+  // MUDOU DE PROPÓSITO NA REVISÃO PÓS-VIRADA (03/10/2026): as telas passaram a
+  // vir sob demanda (`const X = telaSobDemanda(() => import('@/pages/…'))`, ver
+  // lib/telaSobDemanda.ts), para o pacote de entrada não carregar a plataforma
+  // inteira. O leitor aceita as duas formas; o par componente → módulo segue
+  // conferido do mesmo jeito.
   const modulos = new Map<string, string>()
   for (const m of s.matchAll(/^import (\w+) from '@\/pages\/([^']+)'/gm)) modulos.set(m[1], m[2])
+  for (const m of s.matchAll(
+    /^const (\w+) = telaSobDemanda\(\s*\(\) => import\('@\/pages\/([^']+)'\)/gm,
+  )) {
+    modulos.set(m[1], m[2])
+  }
   const moduloDe = (componente: string): string => {
     const modulo = modulos.get(componente)
     if (!modulo) throw new Error(`App.tsx: <${componente} /> não vem de um import de @/pages`)

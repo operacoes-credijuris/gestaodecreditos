@@ -228,7 +228,15 @@ function MenuDasSecoes({
     <nav
       aria-label="Seções das configurações"
       onKeyDown={andarComSetas}
-      className="flex gap-[2px] overflow-x-auto p-[3px] min-[900px]:sticky min-[900px]:top-[80px] min-[900px]:flex-col min-[900px]:overflow-visible min-[900px]:p-0"
+      // NO CELULAR, A FILEIRA QUE ROLA DE LADO:
+      // - `scrollbar-thin`, a barra fina da casa. Sem ela aparecia a barra NATIVA
+      //   do Windows, com as setinhas, embaixo das seções — no escuro, um
+      //   trilho claro atravessando a tela;
+      // - `relative`, para os `sr-only` dos pontos de estado (o "(Token
+      //   configurado)" de cada item) se medirem por esta fileira, e não pelo
+      //   <main>. O do último item, fora da vista, alargava a página e a tela
+      //   inteira rolava de lado.
+      className="relative flex gap-[2px] overflow-x-auto p-[3px] scrollbar-thin min-[900px]:sticky min-[900px]:top-[80px] min-[900px]:flex-col min-[900px]:overflow-visible min-[900px]:p-0"
     >
       {GRUPOS_DO_MENU.map((g, gi) => (
         <div key={g.titulo} className="contents">

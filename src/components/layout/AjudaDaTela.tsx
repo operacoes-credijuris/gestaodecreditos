@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { BookOpen, Command } from 'lucide-react'
 import { haDialogoAberto } from '@/lib/dialogo'
+import { useDentroDaJanela } from '@/lib/dentroDaJanela'
 import { useConsultas } from './Consultas'
 
 /**
@@ -17,6 +18,8 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
   const caixaRef = useRef<HTMLDivElement>(null)
   const botaoRef = useRef<HTMLButtonElement>(null)
   const balaoRef = useRef<HTMLDivElement>(null)
+  // NO CELULAR O BALÃO NÃO SAI PELA DIREITA (lib/dentroDaJanela.ts).
+  const dx = useDentroDaJanela(balaoRef, aberto)
   const id = useId()
 
   useEffect(() => {
@@ -28,6 +31,10 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
     function tecla(e: KeyboardEvent) {
       // COM UMA JANELA ABERTA, o Escape é dela.
       if (e.key === 'Escape' && !haDialogoAberto()) {
+        // E PARA AQUI, como o menu do usuário: o assistente ouve o Escape na
+        // janela (window), depois do documento, e sem isto o mesmo Escape que
+        // fechava o balão fechava também o assistente aberto ao lado.
+        e.stopPropagation()
         setAberto(false)
         botaoRef.current?.focus()
       }
@@ -69,6 +76,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
       {aberto && (
         <div
           ref={balaoRef}
+          style={dx ? { transform: `translateX(${dx}px)` } : undefined}
           id={id}
           role="dialog"
           aria-modal="false"

@@ -1,6 +1,7 @@
-import { Fragment, useId, useMemo, useState } from 'react'
+import { Fragment, useId, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/cn'
 import { termosNoTexto, type TermoDoGlossario } from '@/lib/termosNoTexto'
+import { useDentroDaJanela } from '@/lib/dentroDaJanela'
 
 /**
  * Um texto com os termos do glossário sublinhados em pontilhado (o
@@ -49,6 +50,9 @@ export function TextoComTermos({
 function TermoComDica({ rotulo, definicao }: { rotulo: string; definicao: string }) {
   const id = useId()
   const [aberta, setAberta] = useState(false)
+  // A DICA NÃO SAI PELA DIREITA DA JANELA no celular (lib/dentroDaJanela.ts).
+  const dicaRef = useRef<HTMLSpanElement>(null)
+  const dx = useDentroDaJanela(dicaRef, aberta)
   return (
     <span
       className="relative"
@@ -73,7 +77,9 @@ function TermoComDica({ rotulo, definicao }: { rotulo: string; definicao: string
       {/* O `pt-1` é transparente e faz parte da dica: o mouse atravessa o vão
           entre o termo e a caixa sem sair da área, e a dica não some no meio. */}
       <span
+        ref={dicaRef}
         id={id}
+        style={dx ? { transform: `translateX(${dx}px)` } : undefined}
         role="tooltip"
         className={cn(
           'absolute left-0 top-full z-40 w-max max-w-[280px] pt-1',

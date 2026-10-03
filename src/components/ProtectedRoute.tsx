@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
 import { INICIO } from '@/components/layout/navigation'
+import { decidirGuarda } from '@/lib/guardaDaRota'
 import marca from '@/assets/marca-credijuris.png'
 
 function FullScreenLoader() {
@@ -69,26 +70,28 @@ function AcessoDesativado() {
   )
 }
 
-export function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { session, loading, acessoDesativado } = useAuth()
+/** A decisão da guarda, desenhada (a regra está em lib/guardaDaRota.ts). */
+function Guarda({ children, exigeAdmin }: { children: ReactNode; exigeAdmin: boolean }) {
+  const { session, loading, isAdmin, acessoDesativado, perfilCarregando } = useAuth()
   const location = useLocation()
-  if (loading) return <FullScreenLoader />
+  const decisao = decidirGuarda(
+    { carregando: loading, temSessao: !!session, perfilCarregando, acessoDesativado, isAdmin },
+    exigeAdmin,
+  )
+  if (decisao === 'carregando') return <FullScreenLoader />
   // `state` guarda a rota pedida: sem isto, quem abre um link direto de
   // publicação sem sessão autenticava e caía no dashboard, com o link já
   // substituído no histórico e sem Voltar que o traga.
-  if (!session) return <Navigate to="/login" replace state={{ from: location }} />
-  if (acessoDesativado) return <AcessoDesativado />
+  if (decisao === 'login') return <Navigate to="/login" replace state={{ from: location }} />
+  if (decisao === 'desativado') return <AcessoDesativado />
+  if (decisao === 'inicio') return <Navigate to={INICIO} replace />
   return <>{children}</>
 }
 
+export function ProtectedRoute({ children }: { children: ReactNode }) {
+  return <Guarda exigeAdmin={false}>{children}</Guarda>
+}
+
 export function AdminRoute({ children }: { children: ReactNode }) {
-  const { session, loading, isAdmin, acessoDesativado } = useAuth()
-  const location = useLocation()
-  if (loading) return <FullScreenLoader />
-  if (!session) return <Navigate to="/login" replace state={{ from: location }} />
-  // Desativado antes de admin: quem foi desligado não deve ver Configurações
-  // nem ser mandado ao dashboard sem explicação.
-  if (acessoDesativado) return <AcessoDesativado />
-  if (!isAdmin) return <Navigate to={INICIO} replace />
-  return <>{children}</>
+  return <Guarda exigeAdmin>{children}</Guarda>
 }

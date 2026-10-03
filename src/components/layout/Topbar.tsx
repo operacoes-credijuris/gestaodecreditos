@@ -16,6 +16,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const toast = useToast()
   const [menuOpen, setMenuOpen] = useState(false)
   const botaoDoMenuRef = useRef<HTMLButtonElement>(null)
+  const caixaDoMenuRef = useRef<HTMLDivElement>(null)
   const { pathname } = useLocation()
   const partes = caminhoNoTopo(pathname)
   const { abrirBusca, abrirNovidades, abrirAtalhos, abrirGlossario } = useConsultas()
@@ -34,8 +35,21 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
       setMenuOpen(false)
       botaoDoMenuRef.current?.focus()
     }
+    // CLIQUE FORA FECHA. Era uma camada `fixed inset-0` atrás do menu, mas o
+    // topo tem `backdrop-blur`, e um filtro no ancestral faz o `fixed` se medir
+    // por ELE, e não pela janela: a camada cobria só os 64px do topo. Clicar na
+    // página deixava o menu aberto (e o clique passava para a tela). Agora é o
+    // mesmo jeito do "?" da tela e dos menus do assistente: o toque fora do
+    // menu, em qualquer lugar.
+    function aoTocarFora(e: MouseEvent) {
+      if (!caixaDoMenuRef.current?.contains(e.target as Node)) setMenuOpen(false)
+    }
     document.addEventListener('keydown', aoTeclar)
-    return () => document.removeEventListener('keydown', aoTeclar)
+    document.addEventListener('mousedown', aoTocarFora)
+    return () => {
+      document.removeEventListener('keydown', aoTeclar)
+      document.removeEventListener('mousedown', aoTocarFora)
+    }
   }, [menuOpen])
 
   const nome = profile?.nome || user?.email || 'Usuário'
@@ -115,7 +129,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         className="grid h-[36px] w-[36px] shrink-0 place-items-center p-0"
       />
 
-      <div className="relative shrink-0">
+      <div ref={caixaDoMenuRef} className="relative shrink-0">
         {/* O `.user-btn` da amostra: pílula com as iniciais na placa azul-clara,
             nome e e-mail; o contorno só aparece sob o mouse. */}
         <button
@@ -140,10 +154,6 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
 
         {menuOpen && (
           <>
-            <div
-              className="fixed inset-0 z-10"
-              onClick={() => setMenuOpen(false)}
-            />
             {/* O `.pop` da amostra: cartão de 12px de raio com sombra de
                 elemento flutuante; os itens com 36px de altura. */}
             <div className="absolute right-0 z-20 mt-2 w-[240px] rounded-2xl border border-borda bg-superficie p-1.5 shadow-nivel-2">

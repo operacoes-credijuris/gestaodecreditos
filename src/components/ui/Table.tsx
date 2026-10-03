@@ -17,7 +17,11 @@ export function Table({
       className={cn(
         // rounded acompanha o canto do Card que embrulha as listagens — sem
         // isso o cabeçalho tingido vazaria quadrado sobre o canto redondo.
-        'overflow-x-auto rounded-cartao scrollbar-thin',
+        // `relative`: os `sr-only` das células (rótulos de botão, ordenação) se
+        // medem por esta caixa que rola de lado, e não pelo <main>. Sem isso, no
+        // celular, o da última coluna — fora da vista — alargava o <main>, e a
+        // tela inteira ganhava rolagem lateral.
+        'relative overflow-x-auto rounded-cartao scrollbar-thin',
         // Densidade compacta usada nas listagens (Processos/Requerimentos/Contatos):
         // aperta o ESPAÇO, não a letra. A célula fica nos 14px do texto corrido,
         // como na tabela de Créditos da amostra.

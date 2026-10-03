@@ -71,7 +71,12 @@ export function usePainel(): {
     void processos.refetch()
     void params.refetch()
   }
-  return { painel, carregando, erro: processos.error, tentarDeNovo }
+  // ERRO SÓ QUANDO NÃO HÁ CARTEIRA. A cada troca de aba a carteira é relida
+  // (passados 30 s); se essa releitura falha, o React Query GUARDA os dados que
+  // já tinha e acende o erro junto. Repassar o erro direto trocava o painel
+  // inteiro, já calculado, por "Não foi possível carregar" — por um soluço de
+  // rede, com os números certos na mão.
+  return { painel, carregando, erro: processos.data ? null : processos.error, tentarDeNovo }
 }
 
 export function CarregandoPainel() {
