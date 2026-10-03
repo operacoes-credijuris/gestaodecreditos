@@ -2346,6 +2346,7 @@ export function AnaliseRpvModal({
         <JanelaDeDesfecho
           key={desfechoAberto.statusId}
           acao={desfechoAberto}
+          subtitulo={titulo}
           achados={achadosDoDesfecho}
           onRedigir={redigirDesfecho}
           onMover={onMover}

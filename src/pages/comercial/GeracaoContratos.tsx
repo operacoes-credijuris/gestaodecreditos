@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { IconButton } from '@/components/ui/IconButton'
+import { LinkTentarDeNovo } from '@/components/LinkTentarDeNovo'
 import { invokeFunction } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
 import {
@@ -165,6 +166,10 @@ function GerarPanel() {
   const [carregandoOriginadores, setCarregandoOriginadores] = useState(false)
   const [erroOriginadores, setErroOriginadores] = useState<string | null>(null)
   const [recargaOriginadores, setRecargaOriginadores] = useState(0)
+  /** A recarga veio do "Tentar de novo" (e não de trocar a categoria). */
+  const tentandoOriginadores = useRef(false)
+  /** O começo da página, para onde se volta depois de gerar. */
+  const topo = useRef<HTMLDivElement>(null)
   const [originador, setOriginador] = useState('')
   const [numeroProcesso, setNumeroProcesso] = useState('')
   // O GÊNERO DE CADA PAPEL FICA GUARDADO depois de gerar: resetarFormulario não
@@ -193,13 +198,17 @@ function GerarPanel() {
     // originadores da outra categoria, escolhíveis como se fossem desta.
     setOriginadores([])
     setCategoriaDaLista(null)
-    setErroOriginadores(null)
+    // NO "TENTAR DE NOVO" O ERRO FICA À VISTA até a resposta, para o link dizer
+    // "Tentando…" no lugar dele; trocar de categoria apaga o erro da outra.
+    if (!tentandoOriginadores.current) setErroOriginadores(null)
+    tentandoOriginadores.current = false
     invokeFunction<{ originadores: string[] }>('gerar-contrato', {
       acao: 'listar_originadores',
       categoria,
     })
       .then((r) => {
         if (cancelado) return
+        setErroOriginadores(null)
         setOriginadores(r.originadores ?? [])
         setCategoriaDaLista(categoria)
       })
@@ -386,13 +395,17 @@ function GerarPanel() {
     } finally {
       setProgresso('')
       setEnviando(false)
+      // VOLTA AO TOPO, onde o resultado (ou o erro) aparece — como na amostra.
+      // O botão fica no fim de um formulário longo, e sem isto o "✓ contratos
+      // gerados" nascia fora da tela: parecia que nada tinha acontecido.
+      window.requestAnimationFrame(() => topo.current?.scrollIntoView({ block: 'start' }))
     }
   }
 
   const totalArquivos = uploads.cedente.length + uploads.escritorio.length
 
   return (
-    <div>
+    <div ref={topo}>
       {/* VINDO DO CARD (onda 4, só admin): o que foi preenchido, o que falta e o
           caminho de volta. O originador só se diz escolhido depois da lista. */}
       {(doCard || erroDoCard) && cardPedido !== null && (
@@ -534,13 +547,10 @@ function GerarPanel() {
                 {investidorDados.isError ? (
                   <p role="alert" className="text-xs font-semibold text-perigo">
                     Não consegui carregar os investidores: {(investidorDados.error as Error)?.message ?? 'erro desconhecido'}.{' '}
-                    <button
-                      type="button"
-                      className="inline-flex min-h-[24px] items-center underline"
-                      onClick={() => investidorDados.refetch()}
-                    >
-                      Tentar de novo
-                    </button>
+                    <LinkTentarDeNovo
+                      tentando={investidorDados.isFetching}
+                      onClick={() => void investidorDados.refetch()}
+                    />
                   </p>
                 ) : (
                   investidores.length === 0 && !investidorDados.isLoading && (
@@ -586,13 +596,13 @@ function GerarPanel() {
                 {erroOriginadores && (
                   <p role="alert" className="text-xs font-semibold text-perigo">
                     Não consegui carregar os originadores: {erroOriginadores}.{' '}
-                    <button
-                      type="button"
-                      className="inline-flex min-h-[24px] items-center underline"
-                      onClick={() => setRecargaOriginadores((n) => n + 1)}
-                    >
-                      Tentar de novo
-                    </button>
+                    <LinkTentarDeNovo
+                      tentando={carregandoOriginadores}
+                      onClick={() => {
+                        tentandoOriginadores.current = true
+                        setRecargaOriginadores((n) => n + 1)
+                      }}
+                    />
                   </p>
                 )}
               </Field>

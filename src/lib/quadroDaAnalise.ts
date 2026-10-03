@@ -72,7 +72,7 @@ export function estaParado(dias: number | null): boolean {
 export interface CamposDoTitulo {
   cedente: string
   intermediador: string
-  /** CNJ pontuado. */
+  /** CNJ pontuado, ou vazio quando o título não traz o número. */
   numero: string
   /** A parcela cedida, com a primeira letra maiúscula ("Principal + honorários"). */
   objeto: string
@@ -84,24 +84,98 @@ export interface CamposDoTitulo {
  * O TÍTULO DO CARD QUEBRADO EM CAMPOS (item "Novo" da amostra): cedente em
  * destaque e intermediador, processo, objeto e percentual em campos próprios.
  *
- * PELA MESMA LEITURA QUE A ANÁLISE USA (`lerTituloCard`), ancorada no número
- * CNJ — e só quando ela acha as três partes que identificam o crédito:
- * intermediador, cedente e número. Faltando uma, o título está FORA DO PADRÃO, e
- * a tela o mostra cru, como sempre mostrou: separar campos de um título que não
- * os tem inventaria um cedente.
+ * COM O NÚMERO, PELA MESMA LEITURA QUE A ANÁLISE USA (`lerTituloCard`),
+ * ancorada no CNJ — e só quando ela acha as três partes que identificam o
+ * crédito: intermediador, cedente e número.
+ *
+ * SEM O NÚMERO, A ÂNCORA É A PARCELA CEDIDA (`lerTituloSemNumero`). O card que
+ * chega sem processo é justamente o que mais precisa ser achado na lista, e
+ * mostrá-lo cru, com "Título fora do padrão", dizia que o comercial errou o
+ * formato quando ele só não tinha o número ainda (amostra: o cedente em
+ * destaque, e o campo do processo some).
+ *
+ * FORA DO PADRÃO de fato — sem intermediador, sem cedente, ou sem número E sem
+ * parcela — a tela mostra o título cru, como sempre mostrou: separar campos de
+ * um título que não os tem inventaria um cedente.
  */
 export function camposDoTitulo(nome: string | null | undefined): CamposDoTitulo | null {
   if (!nome?.trim()) return null
   const d = lerTituloCard(nome)
-  if (!d.intermediador || !d.cedente || !d.numero) return null
-  const objeto = d.parcelaCedida.trim()
+  const lido = d.numero ? d : lerTituloSemNumero(nome)
+  if (!lido || !lido.intermediador || !lido.cedente) return null
+  const objeto = lido.parcelaCedida.trim()
   return {
-    cedente: d.cedente,
-    intermediador: d.intermediador,
-    numero: d.numero,
+    cedente: lido.cedente,
+    intermediador: lido.intermediador,
+    numero: lido.numero,
     objeto: objeto ? objeto.charAt(0).toLocaleUpperCase('pt-BR') + objeto.slice(1) : '',
-    percentual: d.honorariosPct ? `${d.honorariosPct.replace('.', ',')}%` : '',
+    percentual: lido.honorariosPct ? `${lido.honorariosPct.replace('.', ',')}%` : '',
   }
+}
+
+// AS MESMAS REGRAS DE `lerTituloCard` (supabase/functions/_shared/
+// cadastroDoCard.ts), repetidas aqui porque lá elas não são exportadas e aquele
+// arquivo é do servidor. Se uma mudar lá, mude aqui.
+const RE_SEPARADOR = /\s+[-–—]\s+/
+const RE_SO_PORCENTAGEM = /^(\d{1,3}(?:[.,]\d+)?)\s*%?$/
+const RE_PORCENTAGEM_NO_FIM = /(\d{1,3}(?:[.,]\d+)?)\s*%\s*$/
+const RE_VERBA = /principal|honor|sucumb|contratu/i
+
+/**
+ * O LUGAR DO NÚMERO OCUPADO SEM NÚMERO: "sem número", "s/n", "sem nº", "?", ou
+ * um número que não chega a ser CNJ (incompleto, só com dígitos e pontuação).
+ * Ocupa a casa do processo e não entra no nome do cedente.
+ */
+const RE_LUGAR_DO_NUMERO =
+  /^(?:sem\s+(?:n[úu]mero|n[º°o]\.?)(?:\s+d[eo]\s+processo)?|s\s*\/\s*n[º°o]?\.?|n\s*\/\s*a|[?–—-]+|[\d][\d.\-/\s]*)$/i
+
+/**
+ * O TÍTULO SEM O NÚMERO DO PROCESSO: "originador - cedente - parcela - %", com
+ * ou sem um marcador no lugar do número ("sem número").
+ *
+ * A ÂNCORA É A PRIMEIRA PARTE DE VERBA (principal, honorários, sucumbência,
+ * contratuais), procurada a partir da terceira parte: antes dela estão o
+ * originador (a primeira) e o cedente (o resto, remontado com o separador, como
+ * faz `lerTituloCard` — um nome pode ter " - " dentro). SEM VERBA NÃO HÁ ÂNCORA:
+ * "Credijuris - Maria" pode ser qualquer coisa, e devolve null.
+ *
+ * O número fica vazio — o card não o tem, e a tela não mostra o campo.
+ */
+export function lerTituloSemNumero(nome: string | null | undefined): {
+  intermediador: string
+  cedente: string
+  numero: string
+  parcelaCedida: string
+  honorariosPct: string
+} | null {
+  const cru = String(nome ?? '').split(RE_SEPARADOR).map((p) => p.trim())
+  let honorariosPct = ''
+  const partes: string[] = []
+  cru.forEach((p, i) => {
+    const m = i > 0 && !honorariosPct ? p.match(RE_SO_PORCENTAGEM) : null
+    if (m) honorariosPct = m[1].replace(',', '.')
+    else partes.push(p)
+  })
+  const iVerba = partes.findIndex((p, i) => i >= 2 && RE_VERBA.test(p))
+  if (iVerba < 0) return null
+  const intermediador = partes[0] ?? ''
+  const cedente = partes
+    .slice(1, iVerba)
+    .filter((p) => p && !RE_LUGAR_DO_NUMERO.test(p))
+    .join(' - ')
+  const verbas: string[] = []
+  for (const p of partes.slice(iVerba)) {
+    if (!RE_VERBA.test(p)) continue
+    const m = p.match(RE_PORCENTAGEM_NO_FIM)
+    if (!m) {
+      verbas.push(p)
+      continue
+    }
+    if (!honorariosPct) honorariosPct = m[1].replace(',', '.')
+    verbas.push(p.slice(0, m.index).replace(/[\s,;:]+$/, ''))
+  }
+  if (!intermediador || !cedente) return null
+  return { intermediador, cedente, numero: '', parcelaCedida: verbas.join(' - '), honorariosPct }
 }
 
 /**

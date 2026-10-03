@@ -73,6 +73,7 @@ import {
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { perguntarDescarte } from '@/lib/descarte'
+import { avisoDoDigito } from '@/lib/digitoDoDocumento'
 
 /**
  * Célula agrupada: pares "rótulo → valor" empilhados (o `.kv` da amostra). A
@@ -793,8 +794,10 @@ export default function DadosPessoaisBancarios() {
             <Button variant="ghost" className="mr-auto" onClick={cancelarFicha}>
               Cancelar
             </Button>
+            {/* "SALVANDO…" ENQUANTO GRAVA (amostra): o giro sozinho não diz o
+                que está acontecendo, e a ficha leva um instante para voltar. */}
             <Button loading={salvar.isPending} onClick={handleSalvar}>
-              Salvar
+              {salvar.isPending ? 'Salvando…' : 'Salvar'}
             </Button>
           </>
         }
@@ -839,7 +842,10 @@ export default function DadosPessoaisBancarios() {
                   hint={buscandoCnpj ? 'Buscando na Receita…' : undefined}
                   // Dígito verificador errado quase sempre é erro de digitação,
                   // e num campo desses o erro vira dinheiro no lugar errado.
-                  error={!cpfCnpjValido(form.cpf) ? 'Dígito verificador não confere' : undefined}
+                  // SÓ COM O DOCUMENTO COMPLETO (11 ou 14 dígitos), como na
+                  // amostra: no meio da digitação o aviso acusava erro em quem
+                  // ainda não terminou. O Salvar continua barrando o incompleto.
+                  error={avisoDoDigito(form.cpf)}
                 >
                   <Input
                     className="tabular-nums"
@@ -953,8 +959,7 @@ export default function DadosPessoaisBancarios() {
                     UF, então digitá-lo antes poupa quatro campos. */}
                 <Field
                   label="CEP"
-                  hint={buscandoCep ? 'Buscando…' : undefined}
-                  error={avisoCep ?? undefined}
+                  hint={buscandoCep && !avisoCep ? 'Buscando…' : undefined}
                 >
                   <Input
                     className="tabular-nums"
@@ -967,6 +972,15 @@ export default function DadosPessoaisBancarios() {
                       void preencherPorCep(cep)
                     }}
                   />
+                  {/* AVISO, NÃO ERRO (amostra: `.hint.warn`): CEP não achado ou
+                      sem rua não impede salvar — pede para preencher à mão. Em
+                      vermelho, parecia que a ficha estava errada. O `error` do
+                      Field pintaria o campo de inválido, então o aviso vem aqui. */}
+                  {avisoCep && (
+                    <p role="status" className="text-xs font-semibold text-aviso">
+                      {avisoCep}
+                    </p>
+                  )}
                 </Field>
                 <Field label="Logradouro" className="sm:col-span-3">
                   <Input
@@ -1044,23 +1058,27 @@ export default function DadosPessoaisBancarios() {
                   : dados.data?.get(chavePessoa(tipo, editando.chave))?.endereco
                 const end = enderecoDaFicha(form, antigo)
                 const compilado = compilarEndereco(form)
-                if (end.mantemAntigo && end.texto) {
-                  return (
-                    <AvisoAmbar icone="info">
-                      Esta ficha tem o endereço no formato antigo, em texto corrido:{' '}
-                      <strong className="font-semibold text-texto">{end.texto}</strong>. Ele
-                      continua valendo até a rua e a cidade serem preenchidas — salvar sem
-                      elas não o apaga.
-                      {compilado && (
-                        <> O que já foi preenchido acima ({compilado}) é guardado nas partes.</>
-                      )}
-                    </AvisoAmbar>
-                  )
-                }
+                // A PRÉVIA E O AVISO, OS DOIS À VISTA (amostra): a prévia é das
+                // partes que se está preenchendo; o aviso, logo abaixo, diz que o
+                // texto antigo é o que vale até elas terem rua e cidade. Antes o
+                // aviso tomava o lugar da prévia, e quem digitava não via o que
+                // as partes formavam.
+                const legado = end.mantemAntigo && end.texto
                 return (
-                  <p className="mt-3 rounded-controle bg-superficie-2 px-4 py-2 text-corpo text-texto-3">
-                    {end.texto || 'Endereço em branco'}
-                  </p>
+                  <>
+                    <p className="mt-3 rounded-controle bg-superficie-2 px-4 py-2 text-corpo text-texto-3">
+                      {(legado ? compilado : end.texto) || 'Endereço em branco'}
+                    </p>
+                    {legado && (
+                      <AvisoAmbar icone="info">
+                        Esta ficha tem o endereço no formato antigo, em texto corrido:{' '}
+                        <strong className="font-semibold text-texto">{end.texto}</strong>. Ele
+                        continua valendo até a rua e a cidade serem preenchidas — salvar sem
+                        elas não o apaga.
+                        {compilado && <> O que já foi preenchido acima é guardado nas partes.</>}
+                      </AvisoAmbar>
+                    )}
+                  </>
                 )
               })()}
             </SecaoFicha>
