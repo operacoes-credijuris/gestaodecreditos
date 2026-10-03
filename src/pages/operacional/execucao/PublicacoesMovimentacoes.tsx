@@ -39,7 +39,9 @@ import {
   formatDate,
   normalizarBusca,
   onlyDigits as dig,
+  tempoDecorrido,
 } from '@/lib/format'
+import { BotaoCopiar } from '@/components/BotaoCopiar'
 
 // Teto de linhas por consulta, para a tela não puxar a tabela inteira. Bater no
 // teto ESCONDE registro — e publicação escondida é intimação que ninguém leu —,
@@ -628,6 +630,17 @@ function PublicacaoCard({
           <span className="font-semibold tabular-nums text-texto">
             {formatCNJ(p.numero_processo ?? '')}
           </span>
+          {/* COPIAR O NÚMERO (qualidade de vida): ler a publicação e ir ao PJe é
+              o caminho de toda intimação, e o duplo clique pega só um pedaço do
+              CNJ formatado. */}
+          {p.numero_processo && (
+            <BotaoCopiar
+              valor={formatCNJ(p.numero_processo)}
+              rotulo="Copiar o número do processo"
+              aviso="Número copiado."
+              className="-mx-1.5"
+            />
+          )}
           {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
           <SeloDoVinculo info={info} />
         </div>
@@ -638,6 +651,11 @@ function PublicacaoCard({
             </>
           )}
           Data de disponibilização: {formatDate(p.data_disponibilizacao)}
+          {/* HÁ QUANTO TEMPO, ao lado da data (qualidade de vida): é a conta que
+              decide a urgência de uma intimação, e a tela faz em vez de quem lê. */}
+          {tempoDecorrido(p.data_disponibilizacao) && (
+            <span className="text-texto-3"> ({tempoDecorrido(p.data_disponibilizacao)})</span>
+          )}
         </div>
 
         {texto && <TextoExpand text={texto} />}

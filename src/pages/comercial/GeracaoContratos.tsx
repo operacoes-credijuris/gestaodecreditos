@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  Copy,
   ExternalLink,
   File as IconeArquivo,
   FileText,
@@ -47,6 +48,8 @@ import {
   nomeDaVariavel,
   type PapelDoDocumento,
 } from '@/lib/geracaoContratos'
+import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
+import { useCopiarTexto } from '@/components/BotaoCopiar'
 
 /**
  * A TELA É UMA SÓ, e não a primeira de três abas.
@@ -146,6 +149,7 @@ function LinhaResumo({ rotulo, valor, falta }: { rotulo: string; valor?: string;
 
 function GerarPanel() {
   const investidorDados = useInvestidorDados()
+  const copiarTexto = useCopiarTexto()
   // SÓ QUEM TEM FICHA: a lista sai de investidor_dados, e não dos créditos. O
   // contrato sai da ficha do investidor (CPF, RG, endereço, gênero); nome só de
   // crédito não tem nada disso, e a função recusaria.
@@ -163,7 +167,15 @@ function GerarPanel() {
   )
 
   const [investidorNome, setInvestidorNome] = useState('')
-  const [categoria, setCategoria] = useState<(typeof CATEGORIAS)[number]>(CATEGORIAS[0])
+  // A CATEGORIA DA ÚLTIMA VEZ (qualidade de vida): quem gera contratos de
+  // precatório não troca o padrão de RPV a cada visita. O ORIGINADOR NÃO É
+  // LEMBRADO, de propósito: ele aponta a pasta do Drive onde a análise é lida, e
+  // um valor de outra geração passaria sem ninguém olhar.
+  const [categoria, setCategoria] = useEscolhaLembrada(
+    LEMBRAR.contratosCategoria,
+    CATEGORIAS,
+    CATEGORIAS[0],
+  )
   const [originadores, setOriginadores] = useState<string[]>([])
   const [carregandoOriginadores, setCarregandoOriginadores] = useState(false)
   const [erroOriginadores, setErroOriginadores] = useState<string | null>(null)
@@ -518,15 +530,29 @@ function GerarPanel() {
               </p>
             )}
           </div>
-          <a
-            href={resultado.drive_folder_url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-controle border border-borda-forte bg-superficie px-4 text-sm font-semibold text-texto transition-colors hover:bg-superficie-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2"
-          >
-            <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
-            Abrir pasta no Drive
-          </a>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={resultado.drive_folder_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-controle border border-borda-forte bg-superficie px-4 text-sm font-semibold text-texto transition-colors hover:bg-superficie-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2"
+            >
+              <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
+              Abrir pasta no Drive
+            </a>
+            {/* COPIAR O LINK (qualidade de vida): a pasta gerada vai para o
+                colega ou para o card, e copiar da barra do navegador era abrir a
+                pasta só para isso. */}
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              icon={<Copy className="h-[16px] w-[16px]" />}
+              onClick={() => void copiarTexto(resultado.drive_folder_url, 'Link da pasta copiado.')}
+            >
+              Copiar link
+            </Button>
+          </div>
         </div>
       )}
 

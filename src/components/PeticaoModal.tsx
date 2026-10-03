@@ -47,6 +47,11 @@ import { Aviso as CaixaDeAviso } from '@/components/operacional/Pecas'
 import { CreditoFormModal } from '@/components/CreditoFormModal'
 import type { Apenso, Processo } from '@/lib/types'
 import { perguntarDescarte } from '@/lib/descarte'
+import {
+  apagarRascunhoDaPeticao,
+  gravarRascunhoDaPeticao,
+  lerRascunhoDaPeticao,
+} from '@/lib/rascunhoDaPeticao'
 
 const ABAS = [
   { key: 'modelo', label: 'Modelo', icon: <FileText className="h-4 w-4" /> },
@@ -210,6 +215,20 @@ export function PeticaoModal({
     setRedigindo(false)
     setEditandoCredito(false)
   }, [open])
+
+  // O RASCUNHO DESTA TAREFA, se a janela anterior não terminou (recarregou a
+  // página, saiu da tela, a sessão caiu): volta o objeto, a peça e a revisão,
+  // na aba da IA. Só da MESMA tarefa — ver lib/rascunhoDaPeticao.ts.
+  useEffect(() => {
+    if (!open || !tarefaId) return
+    const r = lerRascunhoDaPeticao(tarefaId)
+    if (!r) return
+    setInstrucao(r.instrucao)
+    setRedacao(r.redacao)
+    setTextoIA(r.textoIA)
+    setAba('zero')
+    toast.info('Recuperei o rascunho da petição desta tarefa.')
+  }, [open, tarefaId, toast])
 
   const escolhido = ativos.find((t) => t.id === idEscolhido) ?? null
 
@@ -564,6 +583,10 @@ export function PeticaoModal({
       // de origem é brecha conhecida, e aqui não há motivo para manter o vínculo.
       window.open(link, '_blank', 'noopener,noreferrer')
       toast.success(`Salvo em ${alvo.caminho.join(' › ')}`)
+      // A peça da IA está no Drive: o rascunho dela já não guarda nada que se
+      // perderia. (Nos dois caminhos de download acima ele fica — o arquivo
+      // baixado pode não ter chegado aonde devia.)
+      if (naIA) apagarRascunhoDaPeticao(tarefaId)
     } catch (err) {
       const msg = (err as Error).message ?? ''
       // Chunk que não baixa quase nunca é falha de rede: é DEPLOY NOVO com a aba
@@ -602,15 +625,33 @@ export function PeticaoModal({
   // digitado ou com a peça redigida pergunta antes. Só trocar o modelo não conta
   // (lib/previaDaPeticao.ts, com teste).
   const dirty = open && peticaoAlterada({ instrucao, instrucaoInicial, textoIA })
+
+  // O que custaria refazer vai para o rascunho da tarefa a cada mudança (ver
+  // lib/rascunhoDaPeticao.ts). Sem `dirty` não grava nem apaga: na abertura, este
+  // efeito roda antes de o rascunho recuperado chegar ao estado.
+  useEffect(() => {
+    if (!open || !tarefaId || !dirty) return
+    gravarRascunhoDaPeticao(tarefaId, { instrucao, redacao, textoIA })
+  }, [open, tarefaId, dirty, instrucao, redacao, textoIA])
+
+  /**
+   * Fechar DE PROPÓSITO apaga o rascunho: com algo digitado, o "Descartar
+   * alterações?" já foi respondido (pelo Modal, ou em `fechar`). O rascunho é
+   * para o que se perde sem ninguém pedir.
+   */
+  function fecharDeVez() {
+    apagarRascunhoDaPeticao(tarefaId)
+    onClose()
+  }
   async function fechar() {
     if (dirty && !(await perguntarDescarte())) return
-    onClose()
+    fecharDeVez()
   }
 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={fecharDeVez}
       size="xl"
       title="Gerar petição"
       dirty={dirty}

@@ -18,6 +18,7 @@ import { DrawerHistorico } from '@/components/Movimentacoes'
 import { FaseDrawerSection } from '@/pages/operacional/execucao/FaseProcessual'
 import { useApensosManager } from '@/components/Apensos'
 import { BotaoPastaDrive } from '@/components/NumeroProcessoDrive'
+import { BotaoCopiar } from '@/components/BotaoCopiar'
 import {
   CabecalhoDaFicha,
   CartaoDeValor,
@@ -84,6 +85,17 @@ export function CreditoDrawer({
               etiqueta={[esp?.label, st?.label].filter(Boolean).join(' · ')}
               titulo={formatCNJ(processo.numero_cnj)}
               apoio={<Partes a={processo.cedente} b={processo.cessionario} />}
+              // COPIAR O NÚMERO (qualidade de vida): é o que se cola no PJe e nos
+              // e-mails, e o duplo clique pega só um pedaço do CNJ formatado.
+              acao={
+                processo.numero_cnj ? (
+                  <BotaoCopiar
+                    valor={formatCNJ(processo.numero_cnj)}
+                    rotulo="Copiar o número do processo"
+                    aviso="Número copiado."
+                  />
+                ) : null
+              }
             />
           )
         }

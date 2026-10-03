@@ -34,10 +34,14 @@ import { IconButton } from '@/components/ui/IconButton'
 import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer } from '@/components/ui/Drawer'
 import { DrawerHistorico } from '@/components/Movimentacoes'
+import { BotaoCopiar } from '@/components/BotaoCopiar'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate, onlyDigits, vazioNull } from '@/lib/format'
 import { casaBusca } from '@/lib/buscaDaTela'
 import { perguntarDescarte } from '@/lib/descarte'
+import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
+
+const SENTIDOS = ['asc', 'desc'] as const
 
 const VAZIO: Partial<Requerimento> = {
   numero_protocolo: '',
@@ -70,8 +74,9 @@ export default function Requerimentos() {
   const apensos = useApensosManager('requerimento_id')
 
   const [busca, setBusca] = useState('')
-  // Ordenação padrão: data de protocolo, do mais antigo para o mais novo.
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  // Ordenação padrão: data de protocolo, do mais antigo para o mais novo. O
+  // sentido escolhido fica lembrado entre visitas (lib/lembrarNaTela.ts).
+  const [sortDir, setSortDir] = useEscolhaLembrada(LEMBRAR.requerimentosSentido, SENTIDOS, 'asc')
   const [editing, setEditing] = useState<Partial<Requerimento> | null>(null)
   const [toDelete, setToDelete] = useState<Requerimento | null>(null)
   // Requerimento com a ficha aberta no painel lateral (clique na linha).
@@ -98,7 +103,7 @@ export default function Requerimentos() {
   }
 
   function toggleSort() {
-    setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
   }
 
   const lista = useMemo(() => {
@@ -551,6 +556,17 @@ export default function Requerimentos() {
               etiqueta="Requerimento administrativo"
               titulo={detalhe.numero_protocolo || '—'}
               apoio={<Partes a={detalhe.requerente} b={detalhe.requerido} />}
+              // Copiar o número, como na ficha do crédito: é o que se cola no
+              // sistema do órgão.
+              acao={
+                detalhe.numero_protocolo ? (
+                  <BotaoCopiar
+                    valor={detalhe.numero_protocolo}
+                    rotulo="Copiar o número do processo"
+                    aviso="Número copiado."
+                  />
+                ) : null
+              }
             />
           )
         }
