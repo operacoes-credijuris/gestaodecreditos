@@ -225,6 +225,11 @@ export default function Processos() {
 
   const nApensosAExcluir = toDelete ? apensos.contagem(toDelete.id) : 0
 
+  // A FICHA LÊ A VERSÃO MAIS NOVA DA LISTA, e não a cópia do clique: o primeiro
+  // "Pasta no Drive" grava o id da pasta no crédito, e com a cópia velha cada
+  // clique seguinte refazia as três chamadas ao Drive em vez de abrir na hora.
+  const detalheVivo = detalhe ? (data?.find((p) => p.id === detalhe.id) ?? detalhe) : null
+
   return (
     <div>
       <PageHeader
@@ -527,7 +532,7 @@ export default function Processos() {
       )}
 
       {/* Ficha completa do crédito — abre ao clicar na linha da tabela. */}
-      <CreditoDrawer processo={detalhe} onClose={() => setDetalhe(null)} />
+      <CreditoDrawer processo={detalheVivo} onClose={() => setDetalhe(null)} />
 
       <ConfirmDialog
         open={!!toDelete}

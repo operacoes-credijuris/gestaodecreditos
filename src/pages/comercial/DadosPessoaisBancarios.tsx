@@ -19,7 +19,7 @@
 // qualificação) na ficha do investidor, o endereço antigo à vista com o aviso e
 // o "Descartar alterações?" ao fechar a ficha com algo digitado. O que o Salvar
 // grava continua em lib/fichaPessoa.ts, com teste.
-import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Info, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import {
   chavePessoa,
@@ -225,6 +225,20 @@ export default function DadosPessoaisBancarios() {
     novo: boolean
   } | null>(null)
   const seqJanela = useRef(0)
+  /**
+   * O id da janela ABERTA AGORA (null = fechada), lido pelas buscas de CEP e de
+   * CNPJ DEPOIS do await.
+   *
+   * REF, E NÃO O `editando` DO RENDER: a busca compara a janela da chamada com a
+   * da resposta, e as duas saíam da MESMA closure — o `editando` capturado no
+   * render em que a busca começou. A comparação dava sempre igual, e a resposta
+   * atrasada de uma ficha caía no formulário da ficha aberta depois dela (fechar
+   * a de A e abrir a de B com a busca no ar levava a rua e a cidade de A para B).
+   */
+  const janelaAberta = useRef<number | null>(null)
+  useEffect(() => {
+    janelaAberta.current = editando?.id ?? null
+  }, [editando?.id])
   const [form, setForm] = useState<Record<CampoPessoa, string>>(VAZIO)
   // Gênero e complemento da qualificação: só a ficha do INVESTIDOR tem os
   // campos (é dele a qualificação no contrato). Ficam fora de `form` porque o
@@ -337,9 +351,17 @@ export default function DadosPessoaisBancarios() {
     setForm(inicial)
     setParaContrato(contrato)
     inicialRef.current = JSON.stringify({ form: inicial, paraContrato: contrato })
-    setEditando({ id: ++seqJanela.current, chave, nome, novo })
+    const id = ++seqJanela.current
+    janelaAberta.current = id
+    setEditando({ id, chave, nome, novo })
     setAvisoCep(null)
     camposDoCep.current = new Set()
+    // As buscas da ficha anterior que ainda estejam no ar deixam de valer, e o
+    // "Buscando…" (que trava o campo do documento) não passa para esta.
+    reqCepRef.current++
+    reqCnpjRef.current++
+    setBuscandoCep(false)
+    setBuscandoCnpj(false)
     if (!municipios) {
       const m = await import('@/lib/municipios')
       setMunicipios(m.MUNICIPIOS_POR_UF)
@@ -363,6 +385,11 @@ export default function DadosPessoaisBancarios() {
    */
   async function preencherPorCep(cepMascarado: string) {
     if (onlyDigits(cepMascarado).length !== 8) {
+      // CEP APAGADO OU INCOMPLETO INVALIDA A BUSCA EM VOO: sem isto, quem digitou
+      // o CEP inteiro e apagou um dígito recebia o endereço do CEP anterior por
+      // cima do que estava corrigindo.
+      reqCepRef.current++
+      setBuscandoCep(false)
       setAvisoCep(null)
       return
     }
@@ -373,13 +400,14 @@ export default function DadosPessoaisBancarios() {
     // cadastro novo não tem chave até ser salvo: duas aberturas seguidas
     // pareceriam a mesma ficha.
     const meuId = ++reqCepRef.current
-    const janelaNaChamada = editando?.id
+    const janelaNaChamada = janelaAberta.current
+    const valendo = () => meuId === reqCepRef.current && janelaNaChamada === janelaAberta.current
     setBuscandoCep(true)
     setAvisoCep(null)
     try {
       const { buscarCep } = await import('@/lib/cep')
       const e = await buscarCep(cepMascarado)
-      if (meuId !== reqCepRef.current || janelaNaChamada !== editando?.id) return
+      if (!valendo()) return
       if (!e) {
         setAvisoCep('CEP não encontrado. Preencha à mão.')
         return
@@ -387,6 +415,8 @@ export default function DadosPessoaisBancarios() {
       // A cidade tem de existir na lista do IBGE, senão o combobox não a
       // reconhece como selecionada e o campo pareceria vazio.
       const m = municipios ?? (await import('@/lib/municipios')).MUNICIPIOS_POR_UF
+      // De novo: o import acima também espera, e a janela pode ter trocado nele.
+      if (!valendo()) return
       const cidadeValida = e.uf && m[e.uf]?.includes(e.cidade)
       // O CEP novo SUBSTITUI o que veio do CEP anterior: CEP de cidade inteira
       // não tem logradouro, e manter a rua antiga montaria um endereço com cara
@@ -410,7 +440,8 @@ export default function DadosPessoaisBancarios() {
         setAvisoCep('Este CEP não tem logradouro. Preencha a rua à mão.')
       }
     } finally {
-      setBuscandoCep(false)
+      // Só a busca que vale desliga o "Buscando…": a atrasada desligaria o da nova.
+      if (meuId === reqCepRef.current) setBuscandoCep(false)
     }
   }
 
@@ -430,14 +461,16 @@ export default function DadosPessoaisBancarios() {
     // Mesma guarda de obsolescência da busca por CEP: só a última resposta escreve,
     // e só se a janela aberta ainda for a mesma.
     const meuId = ++reqCnpjRef.current
-    const janelaNaChamada = editando?.id
+    const janelaNaChamada = janelaAberta.current
+    const valendo = () => meuId === reqCnpjRef.current && janelaNaChamada === janelaAberta.current
     setBuscandoCnpj(true)
     try {
       const { buscarCnpj, ufCidadeDoCnpj } = await import('@/lib/cnpj')
       const e = await buscarCnpj(docMascarado)
-      if (meuId !== reqCnpjRef.current || janelaNaChamada !== editando?.id) return
+      if (!valendo()) return
       if (!e) return
       const m = municipios ?? (await import('@/lib/municipios')).MUNICIPIOS_POR_UF
+      if (!valendo()) return
       setForm((f) => {
         // UF e cidade saem juntas (ver ufCidadeDoCnpj): nunca cidade de uma UF com outra.
         const { uf, cidade } = ufCidadeDoCnpj(f, e, m)
@@ -457,7 +490,7 @@ export default function DadosPessoaisBancarios() {
       const { aviso } = ufCidadeDoCnpj(form, e, m)
       if (aviso) toast.info(aviso)
     } finally {
-      setBuscandoCnpj(false)
+      if (meuId === reqCnpjRef.current) setBuscandoCnpj(false)
     }
   }
 

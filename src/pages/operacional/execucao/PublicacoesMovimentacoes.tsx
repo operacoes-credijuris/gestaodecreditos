@@ -254,10 +254,13 @@ function FaseProcessualTab() {
   // lista vazia, e toda fase aparecia com 0 crédito.
   if (isError)
     return <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
+  // A versão mais nova da lista, como em Créditos (o id da pasta gravado pelo
+  // primeiro "Pasta no Drive" passa a valer na mesma ficha).
+  const detalheVivo = detalhe ? (data?.find((p) => p.id === detalhe.id) ?? detalhe) : null
   return (
     <>
       <FaseProcessual processos={data ?? []} onAbrirDetalhe={setDetalhe} />
-      <CreditoDrawer processo={detalhe} onClose={() => setDetalhe(null)} />
+      <CreditoDrawer processo={detalheVivo} onClose={() => setDetalhe(null)} />
     </>
   )
 }

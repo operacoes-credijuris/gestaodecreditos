@@ -145,7 +145,11 @@ export function NovoCreditoDoDrive({
    * de salvar" duas vezes por pasta escolhida — a primeira quando ainda faltava
    * tudo o que a IA ia trazer, e é justamente o aviso que pede conferência.
    */
-  onPreencher: (dados: PreenchimentoDoDrive, opts?: { avisar?: boolean }) => void
+  /**
+   * `novaPasta` marca a PRIMEIRA onda de uma pasta escolhida: o rascunho da aba
+   * recomeça do formulário vazio em vez de somar ao que a pasta anterior trouxe.
+   */
+  onPreencher: (dados: PreenchimentoDoDrive, opts?: { avisar?: boolean; novaPasta?: boolean }) => void
 }) {
   const [buscando, setBuscando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -190,20 +194,35 @@ export function NovoCreditoDoDrive({
    * respondendo. Só então começa a leitura dos documentos, que leva segundos —
    * esperar tudo para mostrar qualquer coisa faria a escolha parecer sem efeito.
    */
+  /**
+   * Qual escolha de pasta está valendo. A leitura leva segundos (Drive e IA), e
+   * a pessoa pode trocar de pasta no meio: SÓ A ÚLTIMA ESCOLHA ESCREVE. Antes, a
+   * resposta da pasta anterior chegava depois e se misturava ao formulário da
+   * nova — capital, cessionário e datas de um crédito no cadastro de outro.
+   */
+  const escolhaAtual = useRef(0)
+
   async function usarPasta(c: PastaCredito) {
+    const minha = ++escolhaAtual.current
+    const valendo = () => minha === escolhaAtual.current
     const contexto: Partial<Processo> = {
       numero_cnj: c.cnj ? formatCNJ(c.cnj) : '',
       cedente: c.cedente,
       originador: c.originador,
       especie_requisitorio: c.especie,
     }
-    onPreencher(contexto)
+    // OUTRA PASTA, OUTRO CRÉDITO: o rascunho recomeça. As ondas da MESMA pasta
+    // continuam se somando (a segunda, abaixo, não leva `novaPasta`).
+    onPreencher(contexto, { novaPasta: true })
 
     setExtracao(null)
     setErro(null)
     setPasso('Abrindo a pasta no Drive…')
     try {
-      const leitura = await lerDocumentosDoCredito(c.id, setPasso)
+      const leitura = await lerDocumentosDoCredito(c.id, (p) => {
+        if (valendo()) setPasso(p)
+      })
+      if (!valendo()) return
       if (leitura.documentos.length === 0) {
         setExtracao({ ignorados: leitura.ignorados, observacoes: [], lidos: [] })
         return
@@ -213,12 +232,13 @@ export function NovoCreditoDoDrive({
         documentos: leitura.documentos,
         contexto,
       })
+      if (!valendo()) return
       onPreencher(camposParaProcesso(r.campos ?? {}), { avisar: true })
       setExtracao({ ...r, ignorados: leitura.ignorados })
     } catch (e) {
-      setErro((e as Error).message)
+      if (valendo()) setErro((e as Error).message)
     } finally {
-      setPasso(null)
+      if (valendo()) setPasso(null)
     }
   }
 
