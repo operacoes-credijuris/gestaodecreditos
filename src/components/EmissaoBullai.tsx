@@ -127,8 +127,8 @@ export function EmissaoBullai({
   sujeitos: SujeitoDaEmissao[]
   itens: ItemDaEmissao[]
   ativo: boolean
-  /** O checklist mudou do lado do servidor: recarregue. */
-  onMudou: () => void
+  /** O checklist mudou do lado do servidor: recarregue (a promessa, se houver, é esperada). */
+  onMudou: () => void | Promise<void>
 }) {
   const toast = useToast()
   const catalogo = useQuery({
@@ -177,8 +177,21 @@ export function EmissaoBullai({
   const [pedindo, setPedindo] = useState(false)
   const [atualizando, setAtualizando] = useState(false)
 
+  /**
+   * OS ITENS JÁ PEDIDOS NESTA JANELA, até a lista nova chegar.
+   *
+   * O pedido volta e o botão destrava, mas os itens só deixam de ser pedíveis
+   * quando o checklist é relido — e, se a releitura demora ou falha, eles
+   * continuavam PENDENTE na tela, com "Extrair N" valendo de novo sobre o que
+   * acabou de ser pago. Saem daqui assim que `itens` muda (a lista nova diz o
+   * estado de verdade de cada um).
+   */
+  const [jaPedidos, setJaPedidos] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => setJaPedidos(new Set()), [itens])
+  const podePedir = (i: ItemDaEmissao) => pedivel(i) && !jaPedidos.has(i.id)
+
   const marcado = (i: ItemDaEmissao) =>
-    pedivel(i) && (traducoes.get(i.id)?.chaves.length ?? 0) > 0 && !desmarcados.has(i.id)
+    podePedir(i) && (traducoes.get(i.id)?.chaves.length ?? 0) > 0 && !desmarcados.has(i.id)
 
   const pedidos = sujeitos
     .map((s) => {
@@ -208,7 +221,15 @@ export function EmissaoBullai({
       montado.current = false
     }
   }, [])
+  /**
+   * UMA CONSULTA DE ANDAMENTO POR VEZ. O relógio de um minuto e o botão
+   * "Atualizar" podiam sobrepor duas: as duas liam a mesma lista de PDFs
+   * prontos e subiam o mesmo arquivo duas vezes ao Drive.
+   */
+  const atualizandoAgora = useRef(false)
   async function atualizar(silencioso = true) {
+    if (atualizandoAgora.current) return
+    atualizandoAgora.current = true
     setAtualizando(true)
     try {
       const r = await invokeFunction<{ atualizados: number; falhas?: string[] }>('bullai-certidoes', {
@@ -221,6 +242,7 @@ export function EmissaoBullai({
     } catch (e) {
       if (!silencioso) toast.error((e as Error).message)
     } finally {
+      atualizandoAgora.current = false
       setAtualizando(false)
     }
   }
@@ -245,7 +267,10 @@ export function EmissaoBullai({
       })
       setConfirmando(false)
       setExtras({})
-      onMudou()
+      setJaPedidos((antes) => new Set([...antes, ...pedidos.flatMap((p) => p.itens.map((i) => i.certidao_id))]))
+      // O BOTÃO SÓ DESTRAVA COM A LISTA NOVA NA TELA (ou com a releitura falhando,
+      // e aí a marca acima segura): é ela que diz o que já foi pedido.
+      await Promise.resolve(onMudou()).catch(() => undefined)
       void catalogo.refetch()
       if (r.criados.length) {
         toast.success(
@@ -256,6 +281,9 @@ export function EmissaoBullai({
       if (r.recusados.length) toast.error(r.recusados.join(' · '))
     } catch (e) {
       toast.error((e as Error).message)
+      // O ERRO PODE TER VINDO DEPOIS DE PARTE DOS PEDIDOS JÁ CRIADA (e paga): a
+      // lista é relida para o que já saiu aparecer "em emissão", e não pedível.
+      await Promise.resolve(onMudou()).catch(() => undefined)
     } finally {
       setPedindo(false)
     }
@@ -332,7 +360,7 @@ export function EmissaoBullai({
               <ul>
                 {doSujeito.map((i) => {
                   const t = traducoes.get(i.id)
-                  const podePedir = pedivel(i) && (t?.chaves.length ?? 0) > 0
+                  const podeMarcar = podePedir(i) && (t?.chaves.length ?? 0) > 0
                   const pdfs = (i.arquivos ?? []).filter((a) => a.drive_link)
                   return (
                     <li key={i.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 text-corpo">
@@ -342,14 +370,14 @@ export function EmissaoBullai({
                       <label
                         className={cn(
                           'inline-flex min-h-8 items-center gap-2',
-                          podePedir ? 'cursor-pointer' : 'cursor-default',
+                          podeMarcar ? 'cursor-pointer' : 'cursor-default',
                         )}
                       >
                         <input
                           type="checkbox"
                           className="h-[16px] w-[16px] flex-none accent-marca"
                           checked={marcado(i)}
-                          disabled={!podePedir}
+                          disabled={!podeMarcar}
                           onChange={() =>
                             setDesmarcados((antes) => {
                               const n = new Set(antes)

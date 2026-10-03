@@ -528,6 +528,9 @@ function LinhaCertidao({
                             type="button"
                             onClick={() => copiar(x.valor, x.chave)}
                             className={LINK_BTN}
+                            // O NOME DIZ O QUE SE COPIA: o leitor de tela ouvia
+                            // "copiar" repetido, sem saber de qual campo.
+                            aria-label={copiado === x.chave ? `${x.rotulo} copiado` : `Copiar ${x.rotulo}`}
                           >
                             {copiado === x.chave ? 'copiado' : 'copiar'}
                           </button>
@@ -854,9 +857,12 @@ export function PainelCertidoes({
     for (const a of arquivos) {
       if (!a.texto) continue
       for (const e of acharEstadoCivil(a.texto, ancoras)) {
-        if (!fora.some((x) => x.estado === e.estado && x.conjuge === e.conjuge)) {
-          fora.push({ ...e, arquivo: a.nome })
-        }
+        // A REPETIDA PODE SER A BOA, também entre arquivos (o mesmo cuidado de
+        // dadosNoTexto.ts dentro de um arquivo): a do primeiro arquivo, solta
+        // (do advogado), não pode descartar a do segundo ligada ao cedente.
+        const j = fora.findIndex((x) => x.estado === e.estado && x.conjuge === e.conjuge)
+        if (j < 0) fora.push({ ...e, arquivo: a.nome })
+        else if (e.doCedente && !fora[j].doCedente) fora[j] = { ...e, arquivo: a.nome }
       }
     }
     return fora.sort((x, y) => Number(y.doCedente) - Number(x.doCedente))
@@ -980,7 +986,9 @@ export function PainelCertidoes({
     if (ec.length === 1) {
       const e = ec[0]
       const pede = PEDE_CONJUGE.has(e.estado)
-      setTemConjuge(pede)
+      // SÓ LIGA, NUNCA DESLIGA: desligar esconde o cônjuge que a pessoa marcou,
+      // e gravar assim o APAGA do banco. "Só toca em campo vazio" vale aqui.
+      setTemConjuge((v) => v || pede)
       if (pede && e.conjuge) setConjuge((f) => ({ ...f, nome: f.nome.trim() || e.conjuge! }))
       feitos.push(
         `${ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}${e.conjuge ? ` (cônjuge ${e.conjuge})` : ''}`,
@@ -1037,7 +1045,20 @@ export function PainelCertidoes({
           : error.message,
       )
     }
-    await recarregar()
+    // SÓ O LINK MUDOU, e só ele entra na tela. O `recarregar` inteiro punha o
+    // painel em "Carregando…", desmontava a lista e a emissão pela BullAI — e
+    // as marcações e as certidões acrescentadas por lá se perdiam, o mesmo
+    // estrago que o `recarregarItens` existe para evitar.
+    const gravado: UrlPorEscopo = {
+      certidao_codigo: codigo,
+      escopo_valor: escopo,
+      url: url.trim(),
+      informado_em: new Date().toISOString(),
+    }
+    setUrls((antes) => [
+      ...antes.filter((u) => !(u.certidao_codigo === codigo && u.escopo_valor === escopo)),
+      gravado,
+    ])
   }
 
   /** Local escolhido preenche UF E MUNICÍPIO JUNTOS — nunca um sem o outro. */
@@ -1045,6 +1066,16 @@ export function PainelCertidoes({
     setMexeu(true)
     setCedente((f) => ({ ...f, uf: l.uf, municipio: l.municipio }))
   }
+
+  /**
+   * O cadastro do banco já foi lido alguma vez nesta janela?
+   *
+   * SEM ISSO, GRAVAR APAGAVA ÀS CEGAS. Falhando a primeira leitura (a view do
+   * placar, por exemplo), `sujeitos` fica vazio — e a confirmação de remoção,
+   * que é calculada sobre ele, não aparece. Gravar então trocava o cedente que
+   * já estava no banco, levando junto as certidões já obtidas, sem uma pergunta.
+   */
+  const carregouUmaVez = useRef(false)
 
   const recarregar = useCallback(async () => {
     setCarregando(true)
@@ -1118,6 +1149,11 @@ export function PainelCertidoes({
             }
           : null
       setCedente(daPessoa(ced) ?? { ...VAZIO, nome: cedenteDoCard })
+      // O CPF QUE VEM DO BANCO NÃO É UMA ESCOLHA NOVA. Sem isto, o efeito do
+      // "escolheu o CPF" o tratava como tal e, achando um estado civil nos autos,
+      // trocava a caixa do cônjuge do cadastro gravado e marcava a janela como
+      // alterada — antes de alguém mexer em nada.
+      cpfAplicado.current = ced ? onlyDigits(ced.documento) : ''
       setConjuge(daPessoa(cnj) ?? VAZIO)
       setTemConjuge(!!cnj)
       setResidenciaLevantada(ced?.residencia_levantada ?? false)
@@ -1125,6 +1161,7 @@ export function PainelCertidoes({
       setMunicipiosAnteriores((ced?.municipios_anteriores ?? []).join(', '))
       setEditando(listaS.length === 0)
       setMexeu(false)
+      carregouUmaVez.current = true
     } catch (e) {
       setErro((e as Error)?.message ?? String(e))
     } finally {
@@ -1132,8 +1169,20 @@ export function PainelCertidoes({
     }
   }, [leadId, cedenteDoCard])
 
+  // VOLTAR À ABA NÃO PODE APAGAR O FORMULÁRIO. O painel fica montado ao trocar
+  // de aba justamente para isso (ver `ativo`), mas o `recarregar` da volta
+  // reescrevia o cedente, o cônjuge e as UFs com o que está no banco e zerava o
+  // `mexeu` — o que foi digitado sumia, e fechar a janela já nem perguntava.
+  // Com alteração não salva, a volta só atualiza o checklist e o placar.
+  const sujoNaVolta = useRef(false)
+  sujoNaVolta.current = editando && mexeu
   useEffect(() => {
-    if (ativo) void recarregar()
+    if (!ativo) return
+    if (sujoNaVolta.current) void recarregarItens()
+    else void recarregar()
+    // `recarregarItens` não entra: ele só serve à volta com o formulário sujo,
+    // e muda junto com `recarregar` (os dois dependem de `leadId`).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ativo, recarregar])
 
   // O RECARREGAR DA EMISSÃO: só o checklist e o placar, sem o "Carregando…"
@@ -1225,7 +1274,9 @@ export function PainelCertidoes({
     }
     if (q.estado_civil) {
       const pede = PEDE_CONJUGE.has(q.estado_civil.valor)
-      setTemConjuge(pede)
+      // SÓ LIGA, NUNCA DESLIGA (ver o efeito do CPF): a leitura leva segundos, e
+      // o cônjuge marcado à mão nesse meio-tempo não pode sumir com a resposta.
+      setTemConjuge((v) => v || pede)
       feitos.push(ROTULO_ESTADO_CIVIL[q.estado_civil.valor] ?? q.estado_civil.valor)
       if (pede && q.conjuge) {
         const j = q.conjuge
@@ -1312,8 +1363,26 @@ export function PainelCertidoes({
    */
   const [confirmandoRemocao, setConfirmandoRemocao] = useState(false)
 
+  /**
+   * A REGRA QUE O MOTOR IGNOROU, dita. É o único aviso do servidor que a tela
+   * não refaz sozinha (`derivarAvisos` cobre os outros): uma regra apontando
+   * para certidão fora do catálogo deixa uma obrigatória fora do checklist, e o
+   * placar sai "completo".
+   */
+  function avisarRegrasIgnoradas(r: RespostaGeracao) {
+    const ignoradas = (r.avisos ?? []).filter((a) => a.startsWith('Regra '))
+    if (ignoradas.length > 0) toast.error(ignoradas.join(' · '))
+  }
+
   async function salvarEGerar(confirmado = false) {
     if (problemas.length > 0) return
+    if (!carregouUmaVez.current) {
+      setErro(
+        'Não consegui ler o que já está cadastrado para este crédito, e gravar agora poderia apagar o ' +
+          'cedente e as certidões já obtidas sem perguntar. Feche e abra a janela de novo para reler.',
+      )
+      return
+    }
 
     if (impacto.sujeitos.length > 0 && !confirmado) {
       setConfirmandoRemocao(true)
@@ -1399,6 +1468,7 @@ export function PainelCertidoes({
       const r = await invokeFunction<RespostaGeracao>('gerar-checklist-certidoes', {
         kommo_lead_id: leadId,
       })
+      avisarRegrasIgnoradas(r)
       toast.success(
         `Checklist montado: ${r.total ?? 0} item(ns), ${r.obrigatorias ?? 0} obrigatório(s)` +
           (r.pendencia_imediata ? `, ${r.pendencia_imediata} já em pendência manual` : '') +
@@ -1430,6 +1500,7 @@ export function PainelCertidoes({
       const r = await invokeFunction<RespostaGeracao>('gerar-checklist-certidoes', {
         kommo_lead_id: leadId,
       })
+      avisarRegrasIgnoradas(r)
       await recarregar()
       toast.success(`Motor rodou: ${r.total ?? 0} item(ns) na regra de hoje.`)
     } catch (e) {
@@ -2344,7 +2415,7 @@ export function PainelCertidoes({
               sujeitos={sujeitos}
               itens={itens}
               ativo={ativo}
-              onMudou={() => void recarregarItens()}
+              onMudou={recarregarItens}
             />
           )}
 
