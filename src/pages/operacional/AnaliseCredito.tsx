@@ -176,6 +176,7 @@ import {
   type TipoDeNaoFechou,
 } from '@/lib/desfechoDoCard'
 import { cardDoEndereco } from '@/lib/contratoDoCard'
+import { TextoComTermos } from '@/components/layout/TextoComTermos'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -5125,7 +5126,9 @@ export default function AnaliseCredito() {
                 </span>
               </h2>
               {abaAtual.descricao && (
-                <p className="mt-1 max-w-[640px] text-corpo text-texto-2">{abaAtual.descricao}</p>
+                <p className="mt-1 max-w-[640px] text-corpo text-texto-2">
+                  <TextoComTermos texto={abaAtual.descricao} />
+                </p>
               )}
             </div>
             <label className="flex h-[38px] w-[270px] items-center gap-2 rounded-campo border border-borda-controle bg-superficie px-4 text-texto-3 focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20 max-[900px]:w-full">
