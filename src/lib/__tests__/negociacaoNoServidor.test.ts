@@ -178,10 +178,21 @@ describe('a tela oficial não oferece o desfecho da Negociação', () => {
     expect(a).toMatchObject({ key: `col-${id}`, soLeitura: true, acoes: [] })
     expect(destinosDaAba(a)).toEqual([])
     expect(botoesDaAba(FUNIL_PRECATORIO, 'externo', a)).toBe('nenhum')
-    // NO INTERNO E NO RPV ela não é aba, por ora: as seis abas de sempre. O
-    // espelho completo do Interno espera a aprovação do dono (02/10/2026).
-    expect(abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno').some((x) => x.statusIds.includes(IDS_INTERNO['Negociação']))).toBe(false)
-    expect(abasDoFunil(FUNIL_RPV, etapas).some((x) => x.statusIds.includes(NEGOCIACAO_RPV.coluna))).toBe(false)
+    // NA BETA (branch redesenho), o Interno e o RPV mostram TODAS as colunas do
+    // Kommo nas quatro fases (etapa 7), então a Negociação vira aba aqui também —
+    // e vale a mesma regra do Externo: só leitura, sem movimento e sem botão
+    // pago. Na main, onde o redesenho ainda não chegou, ela nem é aba.
+    for (const [funil, idNeg] of [
+      [FUNIL_PRECATORIO, IDS_INTERNO['Negociação']],
+      [FUNIL_RPV, NEGOCIACAO_RPV.coluna],
+    ] as const) {
+      const abas = funil === FUNIL_RPV ? abasDoFunil(FUNIL_RPV, etapas) : abasDoFunil(FUNIL_PRECATORIO, etapas, 'interno')
+      const neg = abas.find((x) => x.statusIds.includes(idNeg))
+      expect(neg, `Negociação deveria ser aba no funil ${funil}`).toBeDefined()
+      expect(neg!.soLeitura).toBe(true)
+      expect(destinosDaAba(neg!)).toEqual([])
+      expect(botoesDaAba(funil, 'interno', neg!)).toBe('nenhum')
+    }
   })
 
   it('as duas trilhas declaram a Negociação', () => {
