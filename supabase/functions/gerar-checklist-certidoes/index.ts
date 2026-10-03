@@ -89,6 +89,13 @@ interface ItemNovo {
   erro_detalhe: string | null
 }
 
+/**
+ * Certidões que só existem para gente. Interdição, tutela e curatela são de
+ * pessoa natural: pedidas para o CNPJ de um cedente empresa, viram uma
+ * pendência que nenhum cartório consegue atender.
+ */
+const SO_PESSOA_FISICA = new Set(['PROP.INTERDICAO'])
+
 // ---------------------------------------------------------------- avaliação
 
 /**
@@ -347,8 +354,16 @@ Deno.serve(async (req) => {
     const avisos: string[] = []
 
     for (const s of sujeitos as Sujeito[]) {
+      // O CEDENTE QUE É EMPRESA RECEBE TAMBÉM O BLOCO DA PJ (planilha, linhas 68
+      // a 81: situação do CNPJ, FGTS e as estaduais/municipais da sede). As
+      // regras dizem a quem valem pelo PAPEL, e "PJ" ali é a empresa ligada ao
+      // cedente; quando o próprio cedente é a empresa (desde 03/10/2026 a tela
+      // cadastra cedente pessoa jurídica), o bloco é dele. As certidões que os
+      // dois blocos pedem não dobram: `vistos` abaixo é por sujeito e certidão.
+      const papeis = s.tipo_pessoa === 'PJ' && s.papel !== 'PJ' ? [s.papel, 'PJ'] : [s.papel]
       for (const r of regras as Regra[]) {
-        if (!(r.aplica_a ?? []).includes(s.papel)) continue
+        if (!(r.aplica_a ?? []).some((p) => papeis.includes(p))) continue
+        if (s.tipo_pessoa === 'PJ' && SO_PESSOA_FISICA.has(r.certidao_codigo)) continue
 
         const cert = porCodigo.get(r.certidao_codigo)
         if (!cert) {
@@ -398,7 +413,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (!(sujeitos as Sujeito[]).some((s) => s.papel === 'CONJUGE')) {
+    // EMPRESA NÃO CASA: o aviso do cônjuge só vale para cedente pessoa física.
+    const cedentePJ = (sujeitos as Sujeito[]).some((s) => s.papel === 'CEDENTE' && s.tipo_pessoa === 'PJ')
+    if (!cedentePJ && !(sujeitos as Sujeito[]).some((s) => s.papel === 'CONJUGE')) {
       avisos.push(
         'Nenhum cônjuge informado. Se o cedente for casado, o checklist está ' +
         'INCOMPLETO: a planilha dá bloco próprio de certidões ao cônjuge ' +
