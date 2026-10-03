@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
+import { perguntarDescarte } from '@/lib/descarte'
 
 /**
  * Modal acessível com focus trap.
@@ -13,7 +14,7 @@ import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
  *   circulam apenas entre os focáveis do modal; ao fechar, o foco volta ao
  *   elemento que estava focado antes da abertura.
  * - `dirty`: quando true, QUALQUER tentativa de fechar (X, overlay, Escape)
- *   pede confirmação com `window.confirm('Descartar alterações não salvas?')`
+ *   pede confirmação ("Descartar alterações?", a janela de lib/descarte.ts)
  *   antes de chamar `onClose`. Útil em formulários com alterações pendentes.
  *
  * VAI PARA O <body> POR PORTAL, e isto não é preferência de organização — é o que
@@ -61,8 +62,10 @@ export function Modal({
 
   // Centraliza a checagem de "dirty" para todas as formas de fechar
   // (X, overlay e Escape passam TODOS por aqui — uma única fonte da regra).
-  const requestClose = useCallback(() => {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+  // A PERGUNTA É A JANELA DA CASA (lib/descarte.ts), por cima desta, e não mais
+  // o `window.confirm`; o momento em que ela aparece é o mesmo.
+  const requestClose = useCallback(async () => {
+    if (dirty && !(await perguntarDescarte())) return
     onClose()
   }, [dirty, onClose])
 

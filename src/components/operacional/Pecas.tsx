@@ -43,7 +43,11 @@ export function CampoDeBusca({
         type="search"
         aria-label={placeholder.replace(/…$/, '')}
         className="pl-9"
-        placeholder={placeholder}
+        // O FILTRO DA TELA: é aqui que o "/" do teclado leva (layout/Consultas.tsx).
+        // A dica "( / )" só no texto de exemplo, como na amostra — o nome do
+        // campo para o leitor de tela continua sem ela.
+        data-filtro-tela=""
+        placeholder={`${placeholder}  ( / )`}
         value={valor}
         onChange={(e) => onChange(e.target.value)}
       />

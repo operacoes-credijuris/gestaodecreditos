@@ -72,6 +72,7 @@ import {
   EmptyState,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
+import { perguntarDescarte } from '@/lib/descarte'
 
 /**
  * Célula agrupada: pares "rótulo → valor" empilhados (o `.kv` da amostra). A
@@ -346,8 +347,8 @@ export default function DadosPessoaisBancarios() {
   }
 
   /** O Cancelar pergunta como o X, o Esc e o clique fora (que passam pelo Modal). */
-  function cancelarFicha() {
-    if (fichaSuja && !window.confirm('Descartar alterações não salvas?')) return
+  async function cancelarFicha() {
+    if (fichaSuja && !(await perguntarDescarte())) return
     setEditando(null)
   }
 
@@ -568,10 +569,7 @@ export default function DadosPessoaisBancarios() {
                 ((processos.error ?? dados.error) as Error)?.message ??
                 'Não foi possível carregar os dados.'
               }
-              onRetry={() => {
-                void processos.refetch()
-                void dados.refetch()
-              }}
+              onRetry={() => Promise.all([processos.refetch(), dados.refetch()])}
             />
           )}
         </Card>
@@ -631,7 +629,9 @@ export default function DadosPessoaisBancarios() {
                 type="search"
                 className="pl-10"
                 aria-label="Buscar por nome ou documento"
-                placeholder="Buscar por nome ou documento…"
+                // O "/" do teclado leva a este campo (layout/Consultas.tsx).
+                data-filtro-tela=""
+                placeholder="Buscar por nome ou documento…  ( / )"
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
               />

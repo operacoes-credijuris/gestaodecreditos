@@ -1,4 +1,6 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { lerPedidoDaBusca } from '@/lib/buscaGeral'
 import { Plus, Pencil, Trash2, Copy, Phone, Mail, MessageCircle } from 'lucide-react'
 import { apensosCrud, contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
@@ -26,6 +28,7 @@ import { CampoDeBusca, FerramentasDoPainel, SecaoDoFormulario } from '@/componen
 import { vazioNull } from '@/lib/format'
 import { casaBusca } from '@/lib/buscaDaTela'
 import { formatTelefone, telefoneIncompleto, waLink } from '@/lib/telefone'
+import { perguntarDescarte } from '@/lib/descarte'
 
 // Identificador do órgão julgador = "comarca / vara" (igual à aba Créditos).
 function buildOrgao(comarca?: string | null, vara?: string | null): string {
@@ -211,6 +214,17 @@ export default function ContatosServentias() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
+
+  // VEIO DA BUSCA GERAL (Ctrl+K) com um contato escolhido: a lista já abre
+  // filtrada pelo órgão dele. O pedido sai do histórico logo depois.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { filtrarContatos } = lerPedidoDaBusca(location.state)
+  useEffect(() => {
+    if (!filtrarContatos) return
+    setBusca(filtrarContatos)
+    navigate(location.pathname, { replace: true, state: null })
+  }, [filtrarContatos, navigate, location.pathname])
   // Filtro por tribunal — 'todos' mostra todos os órgãos.
   const [filtroTribunal, setFiltroTribunal] = useState('todos')
   const [editing, setEditing] = useState<Partial<ContatoServentia> | null>(null)
@@ -231,8 +245,8 @@ export default function ContatosServentias() {
 
   // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
   // cobre X/overlay/Escape via prop dirty).
-  function fecharForm() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+  async function fecharForm() {
+    if (dirty && !(await perguntarDescarte())) return
     setEditing(null)
   }
 
@@ -499,13 +513,16 @@ export default function ContatosServentias() {
         ) : isError ? (
           <ErrorState
             message={error?.message}
-            onRetry={() => {
-              // Refaz as quatro consultas que alimentam a listagem.
-              contatos.refetch()
-              processos.refetch()
-              requerimentos.refetch()
-              apensos.refetch()
-            }}
+            // Refaz as quatro consultas que alimentam a listagem; o botão diz
+            // "Tentando…" até as quatro voltarem.
+            onRetry={() =>
+              Promise.all([
+                contatos.refetch(),
+                processos.refetch(),
+                requerimentos.refetch(),
+                apensos.refetch(),
+              ])
+            }
           />
         ) : linhas.length === 0 ? (
           // Lista vazia POR CAUSA da busca/filtro é outra situação: convidar a

@@ -193,6 +193,15 @@
   .animate-toast-in {
     animation: cj-toast-in 0.2s ease-out;
   }
+  /* O card achado pela busca geral (Ctrl+K), contornado por um instante. SEM
+     ANIMAÇÃO de propósito: com o movimento reduzido, uma animação sumiria em
+     0,01ms e o realce não apareceria; um contorno que a busca tira depois de
+     2,5s vale para todos. O !important vence o `focus:outline-none` do card,
+     que recebe o foco junto com o realce. */
+  .realce-da-busca {
+    outline: 3px solid rgb(var(--anel)) !important;
+    outline-offset: 3px;
+  }
   /* Bloco de carregamento (skeleton shimmer). */
   .skeleton {
     @apply relative overflow-hidden bg-superficie-3;

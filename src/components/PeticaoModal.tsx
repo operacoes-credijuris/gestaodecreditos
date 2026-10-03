@@ -46,6 +46,7 @@ import { peticaoAlterada, trechosDaPrevia } from '@/lib/previaDaPeticao'
 import { Aviso as CaixaDeAviso } from '@/components/operacional/Pecas'
 import { CreditoFormModal } from '@/components/CreditoFormModal'
 import type { Apenso, Processo } from '@/lib/types'
+import { perguntarDescarte } from '@/lib/descarte'
 
 const ABAS = [
   { key: 'modelo', label: 'Modelo', icon: <FileText className="h-4 w-4" /> },
@@ -582,8 +583,8 @@ export function PeticaoModal({
   // digitado ou com a peça redigida pergunta antes. Só trocar o modelo não conta
   // (lib/previaDaPeticao.ts, com teste).
   const dirty = open && peticaoAlterada({ instrucao, instrucaoInicial, textoIA })
-  function fechar() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+  async function fechar() {
+    if (dirty && !(await perguntarDescarte())) return
     onClose()
   }
 

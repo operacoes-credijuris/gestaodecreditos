@@ -253,7 +253,7 @@ function FaseProcessualTab() {
   // SEM ISTO A FALHA VIRAVA ZERO: lista de créditos que não carregou chegava como
   // lista vazia, e toda fase aparecia com 0 crédito.
   if (isError)
-    return <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />
+    return <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
   return (
     <>
       <FaseProcessual processos={data ?? []} onAbrirDetalhe={setDetalhe} />
@@ -447,7 +447,7 @@ function Publicacoes({ busca }: { busca: string }) {
     return (
       <ErrorState
         message={(lista.error as Error)?.message}
-        onRetry={() => void lista.refetch()}
+        onRetry={() => lista.refetch()}
       />
     )
 
@@ -904,7 +904,7 @@ function Movimentacoes({ busca }: { busca: string }) {
   if (lista.isError) return (
       <ErrorState
         message={(lista.error as Error)?.message}
-        onRetry={() => void lista.refetch()}
+        onRetry={() => lista.refetch()}
       />
     )
 

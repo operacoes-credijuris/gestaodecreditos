@@ -47,6 +47,7 @@ import { formatBRLInput, formatCNJ, onlyDigits, parseBRLInput } from '@/lib/form
 // As regras do Salvar (validação, campos escondidos zerados, o formulário de
 // crédito novo) moram em lib/regrasDoCredito.ts, com teste.
 import { emLiquidacao, errosDoCredito, payloadDoCredito } from '@/lib/regrasDoCredito'
+import { perguntarDescarte } from '@/lib/descarte'
 
 /**
  * Abas da janela de crédito novo. Mesmo componente e mesmo formato das abas da
@@ -205,8 +206,8 @@ export function CreditoFormModal({
 
   // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
   // cobre X/overlay/Escape via prop dirty).
-  function fecharForm() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+  async function fecharForm() {
+    if (dirty && !(await perguntarDescarte())) return
     onClose()
   }
 

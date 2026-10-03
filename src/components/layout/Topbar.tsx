@@ -1,10 +1,11 @@
 import { Fragment, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Menu, LogOut, ChevronDown, ChevronRight } from 'lucide-react'
+import { Menu, LogOut, ChevronDown, ChevronRight, Search, Sparkles, Command, BookOpen } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
 import { useToast } from '@/components/ui/Toast'
 import { caminhoNoTopo } from './navigation'
+import { useConsultas } from './Consultas'
 
 export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { user, profile, isAdmin, signOut } = useAuth()
@@ -12,6 +13,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const { pathname } = useLocation()
   const partes = caminhoNoTopo(pathname)
+  const { abrirBusca, abrirNovidades, abrirAtalhos, abrirGlossario } = useConsultas()
 
   const nome = profile?.nome || user?.email || 'Usuário'
   const iniciais = nome
@@ -24,8 +26,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   return (
     // O `.topbar` da amostra: 64px, a superfície quase opaca com desfoque (o
     // conteúdo passa por baixo sem sumir de vez) e 24px de margem lateral.
-    // A BUSCA GERAL (Ctrl+K) da amostra é item "Novo" e entra na onda 3; até lá
-    // o caminho ocupa o espaço dela.
+    // No meio, a BUSCA GERAL (Ctrl+K, item "Novo" da amostra).
     <header className="sticky top-0 z-30 flex h-[64px] shrink-0 items-center justify-between gap-3 border-b border-borda bg-superficie/[0.86] px-4 backdrop-blur-[10px] lg:px-8">
       <button
         onClick={onOpenMenu}
@@ -42,7 +43,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           negrito na fonte de display. */}
       <nav
         aria-label="Você está em"
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-corpo text-texto-3"
+        className="flex min-w-0 shrink items-center gap-1.5 text-corpo text-texto-3"
       >
         {partes.map((parte, i) =>
           i === partes.length - 1 ? (
@@ -62,7 +63,25 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         )}
       </nav>
 
-      <div className="relative">
+      {/* O `.cmdk` da amostra: no meio do topo, até 460px; no celular, só a lupa. */}
+      <button
+        type="button"
+        onClick={abrirBusca}
+        aria-label="Buscar em toda a plataforma"
+        title="Buscar em toda a plataforma (Ctrl + K)"
+        aria-keyshortcuts="Control+K"
+        className="ml-auto flex h-[38px] w-[38px] shrink-0 items-center justify-center gap-3 rounded-campo border border-borda bg-superficie-2 text-corpo text-texto-3 transition-colors hover:border-borda-forte hover:bg-superficie md:mx-auto md:w-auto md:min-w-0 md:max-w-[460px] md:flex-1 md:shrink md:justify-start md:px-4"
+      >
+        <Search className="h-4 w-4 shrink-0" aria-hidden />
+        <span className="hidden flex-1 truncate text-left md:block">
+          Buscar crédito, card, contato ou tela…
+        </span>
+        <kbd className="hidden rounded-md border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2 md:block">
+          Ctrl K
+        </kbd>
+      </button>
+
+      <div className="relative shrink-0">
         {/* O `.user-btn` da amostra: pílula com as iniciais na placa azul-clara,
             nome e e-mail; o contorno só aparece sob o mouse. */}
         <button
@@ -102,6 +121,29 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                   </Badge>
                 </div>
               </div>
+              <div className="mx-1 my-1.5 border-t border-borda" />
+              {/* A AJUDA DA PLATAFORMA (itens "Novo" da amostra): as novidades
+                  voltam a qualquer hora daqui, e os atalhos e o glossário
+                  também abrem pelo "?" de cada tela. */}
+              {(
+                [
+                  [Sparkles, 'Novidades desta versão', abrirNovidades],
+                  [Command, 'Atalhos de teclado', abrirAtalhos],
+                  [BookOpen, 'Glossário', abrirGlossario],
+                ] as const
+              ).map(([Icone, rotulo, abrir]) => (
+                <button
+                  key={rotulo}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    abrir()
+                  }}
+                  className="flex h-12 w-full items-center gap-3 rounded-controle px-2.5 text-corpo text-texto transition-colors hover:bg-superficie-3"
+                >
+                  <Icone className="h-4 w-4" aria-hidden />
+                  {rotulo}
+                </button>
+              ))}
               <div className="mx-1 my-1.5 border-t border-borda" />
               <button
                 onClick={async () => {
