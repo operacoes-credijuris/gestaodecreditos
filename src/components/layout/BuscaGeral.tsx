@@ -2,7 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, FolderKanban, Loader2, Phone, ScanSearch, Search } from 'lucide-react'
+import { ArrowRight, FolderKanban, History, Loader2, Phone, ScanSearch, Search } from 'lucide-react'
+import { gravarPreferencia, lerPreferenciaValida } from '@/lib/preferencias'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { useAuth } from '@/contexts/AuthContext'
@@ -15,11 +16,15 @@ import {
   useKommoEtapas,
 } from '@/lib/kommo'
 import {
+  chaveDosRecentes,
+  ehListaDeRecentes,
+  enderecoDoResultado,
   ESPERA_MS,
   filtroDosCards,
   filtroDosContatos,
   filtroDosCreditos,
   LIMITE_POR_FONTE,
+  lembrarRecente,
   lerTermo,
   MIN_LETRAS,
   montarResultados,
@@ -65,9 +70,16 @@ function useEsperado(valor: string, ms: number): string {
  * lib/buscaGeral.ts.
  */
 export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
-  const { isAdmin } = useAuth()
+  const { isAdmin, user } = useAuth()
   const navigate = useNavigate()
   const [digitado, setDigitado] = useState('')
+  // OS ABERTOS HÁ POUCO (revisão de qualidade de vida): sem nada digitado, a
+  // busca começa por eles — voltar ao card ou ao crédito de cinco minutos atrás
+  // é o uso mais comum depois de ir a uma tela. Por pessoa, neste navegador.
+  const chaveRecentes = chaveDosRecentes(user?.id)
+  const [recentes] = useState(() =>
+    chaveRecentes ? lerPreferenciaValida(chaveRecentes, [], ehListaDeRecentes) : [],
+  )
   const [sel, setSel] = useState(0)
   const painelRef = useRef<HTMLDivElement>(null)
   const listaId = useId()
@@ -154,6 +166,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
     cards: dados?.cards,
     contatos: dados?.contatos,
     onde,
+    recentes,
   })
   const atual = Math.min(sel, Math.max(0, resultados.length - 1))
   useEffect(() => setSel(0), [digitado])
@@ -163,8 +176,17 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
     document.getElementById(opcaoId(atual))?.scrollIntoView({ block: 'nearest' })
   })
 
-  function escolher(r: ResultadoDaBusca) {
+  function escolher(r: ResultadoDaBusca, abaNova = false) {
+    if (chaveRecentes) gravarPreferencia(chaveRecentes, lembrarRecente(recentes, r))
     onFechar()
+    // NUMA ABA NOVA (Ctrl+Enter, Ctrl+clique ou o botão do meio): só o que tem
+    // endereço próprio — a tela e o card. O crédito e o contato chegam pela
+    // navegação desta aba (ver `enderecoDoResultado`).
+    const endereco = abaNova ? enderecoDoResultado(r) : null
+    if (endereco) {
+      window.open(`#${endereco}`, '_blank', 'noopener')
+      return
+    }
     if (r.tipo === 'tela') {
       navigate(r.alvo)
     } else if (r.tipo === 'credito') {
@@ -223,7 +245,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
                 setSel(Math.max(0, atual - 1))
               } else if (e.key === 'Enter' && resultados[atual]) {
                 e.preventDefault()
-                escolher(resultados[atual])
+                escolher(resultados[atual], e.ctrlKey || e.metaKey)
               }
             }}
             placeholder="Cedente, nº do processo, contato, tela…"
@@ -237,7 +259,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
 
         <ul id={listaId} role="listbox" aria-label="Resultados" className="max-h-[50vh] overflow-y-auto p-2 scrollbar-thin">
           {resultados.map((r, i) => {
-            const Icone = ICONE[r.tipo]
+            const Icone = r.recente ? History : ICONE[r.tipo]
             return (
               <li
                 key={r.chave}
@@ -247,7 +269,11 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
                 // O FOCO FICA NA CAIXA: o clique escolhe sem tirá-lo de lá.
                 onMouseDown={(e) => e.preventDefault()}
                 onMouseMove={() => i !== atual && setSel(i)}
-                onClick={() => escolher(r)}
+                onClick={(e) => escolher(r, e.ctrlKey || e.metaKey)}
+                // O BOTÃO DO MEIO abre numa aba nova, como num link.
+                onAuxClick={(e) => {
+                  if (e.button === 1) escolher(r, true)
+                }}
                 className={cn(
                   'flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2.5',
                   i === atual && 'bg-superficie-3',
@@ -284,7 +310,10 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
           <span>
             <kbd className="font-sans">Enter</kbd> abrir
           </span>
-          <span>créditos, cards, contatos e telas da plataforma</span>
+          <span>
+            <kbd className="font-sans">Ctrl</kbd> <kbd className="font-sans">Enter</kbd> aba nova
+          </span>
+          <span className="hidden sm:inline">créditos, cards, contatos e telas da plataforma</span>
         </div>
       </div>
     </div>,
