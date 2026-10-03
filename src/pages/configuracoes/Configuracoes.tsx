@@ -1,1825 +1,302 @@
-import { useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  KeyRound,
-  KanbanSquare,
-  Newspaper,
-  Users,
-  Plus,
-  Trash2,
-  CheckCircle2,
-  XCircle,
-  ShieldCheck,
-  Pencil,
-  Sparkles,
-  Puzzle,
-  Search,
-  Scale,
-  Copy,
-} from 'lucide-react'
-import { supabase } from '@/lib/supabase'
-import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
+import { useCallback, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { Pencil } from 'lucide-react'
+import { cn } from '@/lib/cn'
 import { formatBRL } from '@/lib/format'
-import { KOMMO_SUBDOMINIO as SUBDOMINIO_PADRAO } from '@/lib/kommo'
-import type {
-  Integracao,
-  Profile,
-  ConfigAdvbox,
-  ConfigAnthropic,
-  ConfigDjen,
-  ConfigEscavador,
-  ConfigKommo,
-  ServicoIntegracao,
-} from '@/lib/types'
-import { ADMIN_EMAIL, useAuth } from '@/contexts/AuthContext'
+import type { ConfigKommo } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { Button } from '@/components/ui/Button'
-import { Card, CardHeader, CardBody } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
-import { Field, Input, Select, Textarea } from '@/components/ui/Field'
-import { Modal } from '@/components/ui/Modal'
-import { IconButton } from '@/components/ui/IconButton'
+import { Card } from '@/components/ui/Card'
 import {
-  Table,
-  THead,
-  TH,
-  TBody,
-  TR,
-  TD,
-  Loading,
-} from '@/components/ui/Table'
-import { useToast } from '@/components/ui/Toast'
-import { ROTEIRO_QUALIFICACAO } from '../../../supabase/functions/_shared/roteiroQualificacao.ts'
+  configuradoDe,
+  useCatalogoBullai,
+  useIntegracao,
+  useSaldoEscavador,
+} from './consultas'
+import {
+  GRUPOS_DO_MENU,
+  SECAO_INICIAL,
+  extraDoMenu,
+  pontoDaIntegracao,
+  pontoDoKommo,
+  textoDoPlanoBullai,
+  type ExtraDoMenu,
+  type PontoDoMenu,
+  type SecaoId,
+} from '@/lib/menuDasConfiguracoes'
+import {
+  SecaoAdvbox,
+  SecaoAnthropic,
+  SecaoDjen,
+  SecaoKommo,
+  type Pendencia,
+} from './SecoesIntegracoes'
+import { SecaoBullai, SecaoEscavador } from './SecoesConsultas'
+import { SecaoRoteiro, SecaoSkills } from './SecoesAssistente'
+import { SecaoUsuarios } from './SecaoUsuarios'
 
+/**
+ * As seções em que digitar num campo já conta como "alteração não salva". O
+ * Roteiro fica de fora porque tem regra própria (o texto diferir do que está em
+ * vigor — voltar ao texto salvo apaga a pendência); Usuários, porque não tem
+ * campo na própria seção — os campos dele vivem nas janelas.
+ */
+const MARCA_AO_DIGITAR: ReadonlySet<SecaoId> = new Set<SecaoId>([
+  'advbox', 'kommo', 'anthropic', 'escavador', 'bullai', 'djen', 'skills',
+])
+
+/**
+ * CONFIGURAÇÕES EM SEÇÕES, com menu à esquerda.
+ *
+ * Eram nove cartões empilhados: para chegar a Usuários, rolava-se por todas as
+ * integrações. Agora o menu leva direto à seção — mas TODAS AS SEÇÕES CONTINUAM
+ * MONTADAS, só a escolhida à vista (as outras com `hidden`, nunca desmontadas).
+ * É isso que mantém o que os cartões empilhados já garantiam:
+ * - trocar de seção não apaga rascunho (o Roteiro tem ~17 mil caracteres);
+ * - as consultas da abertura continuam saindo ao abrir a tela, em qualquer seção
+ *   à vista: o saldo do Escavador, o catálogo da BullAI e os responsáveis da
+ *   ADVBOX.
+ *
+ * A SEÇÃO ESCOLHIDA FICA NO ESTADO, NÃO NA URL: `/configuracoes/usuarios` tem de
+ * continuar caindo em "página não encontrada" (rotas.test.ts), e o guarda de
+ * administrador mora na rota única `/configuracoes`.
+ */
 export default function Configuracoes() {
+  const [secao, setSecao] = useState<SecaoId>(SECAO_INICIAL)
+  const [pendentes, setPendentes] = useState<ReadonlySet<SecaoId>>(() => new Set())
+
+  // AS CONSULTAS QUE O MENU E OS CARTÕES DIVIDEM sobem para cá: uma chamada só,
+  // e o ponto do menu acompanha o selo do cartão no mesmo instante, inclusive
+  // depois de salvar (a invalidação do cartão atualiza as duas pontas).
+  const advbox = useIntegracao('advbox')
+  const kommo = useIntegracao('kommo')
+  const anthropic = useIntegracao('anthropic')
+  const escavador = useIntegracao('escavador')
+  const bullai = useIntegracao('bullai')
+  const escavadorConfigurado = configuradoDe(escavador.data)
+  const bullaiConfigurado = configuradoDe(bullai.data)
+  const saldo = useSaldoEscavador(escavadorConfigurado)
+  const catalogo = useCatalogoBullai(bullaiConfigurado)
+
+  const marcar = useCallback((k: SecaoId, sim: boolean) => {
+    setPendentes((atual) => {
+      if (atual.has(k) === sim) return atual
+      const novo = new Set(atual)
+      if (sim) novo.add(k)
+      else novo.delete(k)
+      return novo
+    })
+  }, [])
+
+  // Um callback ESTÁVEL por seção: o Roteiro o usa num efeito, e um callback
+  // novo a cada render dispararia o efeito à toa.
+  const pendencia = useMemo(() => {
+    const m = {} as Record<SecaoId, Pendencia>
+    for (const g of GRUPOS_DO_MENU) for (const i of g.itens) m[i.id] = (sim) => marcar(i.id, sim)
+    return m
+  }, [marcar])
+
+  const cfgKommo = (kommo.data?.config as ConfigKommo | undefined) ?? {}
+  const pontos: Partial<Record<SecaoId, PontoDoMenu>> = {
+    advbox: pontoDaIntegracao(advbox.error, configuradoDe(advbox.data)),
+    kommo: pontoDoKommo(kommo.error, Boolean(cfgKommo.configurado), Boolean(cfgKommo.validado)),
+    anthropic: pontoDaIntegracao(anthropic.error, configuradoDe(anthropic.data)),
+    escavador: pontoDaIntegracao(escavador.error, escavadorConfigurado),
+    bullai: pontoDaIntegracao(bullai.error, bullaiConfigurado),
+  }
+  const extras: Partial<Record<SecaoId, ExtraDoMenu | null>> = {
+    escavador: extraDoMenu(
+      escavadorConfigurado,
+      saldo.data,
+      saldo.error,
+      (d) => d.descricao || formatBRL(d.saldo),
+      'Saldo na API do Escavador',
+    ),
+    bullai: extraDoMenu(
+      bullaiConfigurado,
+      // OS CRÉDITOS, e não a resposta inteira: o cartão só mostra o plano quando
+      // eles vieram (`configurado && c`), e o menu segue a mesma regra.
+      catalogo.data?.creditos,
+      catalogo.error,
+      (c) => textoDoPlanoBullai(c.restantes),
+      'Plano da BullAI',
+    ),
+  }
+
+  const conteudo: Record<SecaoId, ReactNode> = {
+    advbox: <SecaoAdvbox consulta={advbox} pendencia={pendencia.advbox} />,
+    kommo: <SecaoKommo consulta={kommo} pendencia={pendencia.kommo} />,
+    anthropic: <SecaoAnthropic consulta={anthropic} pendencia={pendencia.anthropic} />,
+    escavador: <SecaoEscavador consulta={escavador} saldo={saldo} pendencia={pendencia.escavador} />,
+    bullai: <SecaoBullai consulta={bullai} catalogo={catalogo} pendencia={pendencia.bullai} />,
+    djen: <SecaoDjen pendencia={pendencia.djen} />,
+    skills: <SecaoSkills pendencia={pendencia.skills} />,
+    roteiro: <SecaoRoteiro pendencia={pendencia.roteiro} />,
+    usuarios: <SecaoUsuarios />,
+  }
+
+  /**
+   * Qualquer campo mexido na seção acende o lápis dela no menu. Só o que nasce
+   * DENTRO da seção conta: o React propaga o evento de uma janela (que vai para
+   * o <body> por portal) até o componente que a abriu, e uma janela cancelada
+   * não deixa nada pendente na seção.
+   */
+  function aoMudarCampo(k: SecaoId, e: FormEvent<HTMLElement>) {
+    if (!MARCA_AO_DIGITAR.has(k)) return
+    if (!e.currentTarget.contains(e.target as Node)) return
+    marcar(k, true)
+  }
+
   return (
     <div>
-      <PageHeader title="Configurações" />
-      <div className="space-y-6">
-        <AdvboxConfig />
-        <KommoConfig />
-        <AnthropicConfig />
-        <EscavadorConfig />
-        <BullaiConfig />
-        <SkillsConfig />
-        <RoteiroConfig />
-        <DjenConfig />
-        <UsuariosConfig />
+      <PageHeader
+        title="Configurações"
+        description="Integrações, assistente e equipe. Só administradores veem esta tela."
+      />
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-[16px] min-[900px]:grid-cols-[230px_minmax(0,1fr)]">
+        <MenuDasSecoes
+          secao={secao}
+          aoEscolher={setSecao}
+          pontos={pontos}
+          extras={extras}
+          pendentes={pendentes}
+        />
+        <Card className="p-[20px]">
+          {GRUPOS_DO_MENU.flatMap((g) => g.itens).map(({ id, rotulo }) => (
+            // SEM CLASSE DE display AQUI: uma `flex` ou `block` venceria o
+            // `[hidden]` do preflight e mostraria todas as seções de uma vez.
+            <section
+              key={id}
+              aria-label={rotulo}
+              hidden={id !== secao}
+              onChange={(e) => aoMudarCampo(id, e)}
+            >
+              {conteudo[id]}
+            </section>
+          ))}
+        </Card>
       </div>
     </div>
   )
 }
 
-/**
- * Falha de LEITURA não pode se disfarçar de "não configurado". Sem este aviso, o
- * selo do cartão dizia "Sem token" quando o que houve foi erro ao consultar a
- * tabela — e o administrador ia recadastrar token que já estava lá, ou pior,
- * concluir que a integração caiu quando o problema era outro.
- */
-function AvisoLeitura({ error }: { error: unknown }) {
-  if (!error) return null
-  return (
-    <p className="mb-4 rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
-      Não foi possível ler o estado atual desta integração:{' '}
-      {(error as Error).message}
-    </p>
-  )
+const COR_DO_PONTO: Record<PontoDoMenu['tom'], string> = {
+  ok: 'bg-sucesso-cheio',
+  off: 'bg-texto-3',
+  aviso: 'bg-aviso-cheio',
 }
 
-/** Selo dos cartões de integração, com o estado "não deu para saber". */
-function SeloIntegracao({
-  error,
-  configurado,
-  rotuloOk,
-  rotuloSem,
+/**
+ * O menu das seções. No celular vira uma fileira que rola de lado, e os títulos
+ * dos grupos somem (não cabem numa linha). As setas andam entre os itens; Enter
+ * ou Espaço abrem a seção, como em qualquer botão.
+ */
+function MenuDasSecoes({
+  secao,
+  aoEscolher,
+  pontos,
+  extras,
+  pendentes,
 }: {
-  error: unknown
-  configurado: boolean
-  rotuloOk: string
-  rotuloSem: string
+  secao: SecaoId
+  aoEscolher: (k: SecaoId) => void
+  pontos: Partial<Record<SecaoId, PontoDoMenu>>
+  extras: Partial<Record<SecaoId, ExtraDoMenu | null>>
+  pendentes: ReadonlySet<SecaoId>
 }) {
-  if (error)
-    return (
-      <Badge tone="amber">
-        <XCircle className="mr-1 inline h-3.5 w-3.5" /> Estado não carregado
-      </Badge>
-    )
-  return configurado ? (
-    <Badge tone="green">
-      <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> {rotuloOk}
-    </Badge>
-  ) : (
-    <Badge tone="gray">
-      <XCircle className="mr-1 inline h-3.5 w-3.5" /> {rotuloSem}
-    </Badge>
-  )
-}
-
-function useIntegracao(servico: ServicoIntegracao) {
-  return useQuery({
-    queryKey: ['integracoes', servico],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('integracoes')
-        .select('*')
-        .eq('servico', servico)
-        .maybeSingle()
-      if (error) throw new Error(error.message)
-      return (data as Integracao) ?? null
-    },
-  })
-}
-
-// ----------------------- Anthropic (assistente) -----------------------
-// Só a chave, sem campo de configuração: ao contrário do ADVBOX (URL base) e do
-// Kommo (subdomínio), a API da Anthropic tem endereço único.
-function AnthropicConfig() {
-  const { data, isLoading, error } = useIntegracao('anthropic')
-  const qc = useQueryClient()
-  const toast = useToast()
-  const [token, setToken] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const configurado = Boolean((data?.config as ConfigAnthropic)?.configurado)
-
-  async function salvar() {
-    if (!token.trim()) {
-      toast.error('Informe a chave da API.')
-      return
-    }
-    setSaving(true)
-    try {
-      // A chave é secreta, então vai só pela Edge Function admin-only — nunca
-      // pela tabela integracoes, que é legível por qualquer autenticado.
-      await invokeFunction('salvar-token-anthropic', { token: token.trim() })
-      setToken('')
-      await qc.invalidateQueries({ queryKey: ['integracoes', 'anthropic'] })
-      toast.success('Chave da Anthropic salva. O assistente já pode ser usado.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
+  function andarComSetas(e: KeyboardEvent<HTMLElement>) {
+    const passo =
+      e.key === 'ArrowDown' || e.key === 'ArrowRight'
+        ? 1
+        : e.key === 'ArrowUp' || e.key === 'ArrowLeft'
+          ? -1
+          : 0
+    const extremo = e.key === 'Home' ? 'inicio' : e.key === 'End' ? 'fim' : null
+    if (!passo && !extremo) return
+    const botoes = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button[data-secao]'))
+    const atual = botoes.indexOf(document.activeElement as HTMLButtonElement)
+    if (atual < 0) return
+    e.preventDefault()
+    const alvo =
+      extremo === 'inicio'
+        ? 0
+        : extremo === 'fim'
+          ? botoes.length - 1
+          : (atual + passo + botoes.length) % botoes.length
+    botoes[alvo].focus()
   }
 
   return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-brand-600" /> Integração Anthropic
-          </span>
-        }
-        action={
-          <SeloIntegracao
-            error={error}
-            configurado={configurado}
-            rotuloOk="Chave configurada"
-            rotuloSem="Sem chave"
-          />
-        }
-      />
-      <CardBody>
-        <AvisoLeitura error={error} />
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Chave de API"
-              hint={
-                configurado
-                  ? 'Já configurada. Preencha apenas para substituir.'
-                  : 'Gerada em console.anthropic.com > API Keys. Começa com "sk-ant-".'
-              }
-            >
-              <Input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="••••••••••••"
-                autoComplete="off"
-              />
-            </Field>
-            <div className="sm:col-span-2">
-              <Button onClick={salvar} loading={saving}>
-                Salvar
-              </Button>
-            </div>
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-// ----------------------- Escavador (due diligence) -----------------------
-//
-// O TOKEN É TESTADO ANTES DE SER GRAVADO, e não conferido por formato: o do
-// Escavador é opaco, sem prefixo que se possa exigir como o "sk-ant-" da
-// Anthropic, e um palpite de formato só criaria falso negativo. A função
-// salvar-token-escavador gasta uma chamada em /quantidade-creditos — que não
-// consome crédito — e só grava se a API responder. De quebra volta o SALDO, que
-// é o número que interessa antes de sair apurando: aqui, ao contrário das
-// outras integrações, CADA CONSULTA CUSTA DINHEIRO.
-/**
- * O saldo da API, perguntado sempre que a tela abre.
- *
- * ELE JÁ VINHA, mas só no instante em que alguém gravava um token novo: a função
- * que confere a chave usa a mesma chamada, e o número aparecia no aviso daquele
- * salvamento. Quem abrisse Configurações no dia seguinte não via nada — e o
- * saldo acabava no meio de uma apuração, chegando como um 402 numa diligência,
- * longe da tela onde se resolve.
- *
- * A CHAMADA NÃO CONSOME CRÉDITO. É por isso que ela serve para conferir o token,
- * e é por isso que dá para fazê-la a cada abertura sem pensar duas vezes.
- */
-function SaldoEscavador() {
-  const { data, isFetching, error, refetch } = useQuery({
-    queryKey: ['escavador', 'saldo'],
-    // A CONSULTA É SOZINHA, ao abrir a tela: é a única pergunta desta página
-    // cuja resposta MUDA sem ninguém mexer aqui — todo o resto é configuração,
-    // que só muda quando alguém a edita. Um saldo atrás de um clique seria um
-    // saldo que ninguém olha.
-    //
-    // SEM CACHE: ele anda a cada diligência, e número velho na tela é pior que
-    // número nenhum — é o que faz alguém começar uma apuração confiando em
-    // crédito que já foi gasto.
-    staleTime: 0,
-    retry: false,
-    queryFn: async () =>
-      (
-        await invokeFunction<{
-          saldo: { creditos: number; saldo: number; descricao: string }
-        }>('escavador-saldo', {})
-      ).saldo,
-  })
-
-  // NADA ENQUANTO CONSULTA. O número aparece em menos de um segundo, e um "…"
-  // piscando ao lado do título chama mais atenção do que o próprio saldo.
-  if (isFetching && !data && !error) return null
-
-  if (error) {
-    // O TEXTO DO ESCAVADOR FICA NO title — 401 é token recusado, 429 é limite de
-    // chamadas, e são consertos diferentes. Na linha, só o suficiente para
-    // alguém saber que há o que conferir: o selo ao lado diz "configurado", e
-    // sem isto a tela afirmaria que está tudo bem.
-    return (
-      <span className="text-xs text-aviso" title={(error as Error).message}>
-        saldo indisponível
-      </span>
-    )
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => void refetch()}
-      disabled={isFetching}
-      title={
-        data
-          ? `Saldo na API do Escavador · ${data.creditos.toLocaleString('pt-BR')} crédito(s). ` +
-            'Cada consulta da diligência gasta daqui. Clique para atualizar.'
-          : undefined
-      }
-      className="text-xs text-texto-3 tabular-nums hover:text-texto disabled:opacity-50"
+    <nav
+      aria-label="Seções das configurações"
+      onKeyDown={andarComSetas}
+      className="flex gap-[2px] overflow-x-auto p-[3px] min-[900px]:sticky min-[900px]:top-[80px] min-[900px]:flex-col min-[900px]:overflow-visible min-[900px]:p-0"
     >
-      Saldo {data ? data.descricao || formatBRL(data.saldo) : '—'}
-    </button>
-  )
-}
-
-/**
- * O endereço que o Escavador precisa conhecer para nos avisar.
- *
- * SAI DA URL DO SUPABASE, e não de uma constante escrita à mão: o projeto é o
- * mesmo que o app já usa, e um endereço digitado aqui envelheceria calado — o
- * Escavador continuaria chamando um lugar que não existe mais, e o sintoma
- * seria "os autos nunca chegam", sem nada apontando para a causa.
- */
-function enderecoDoCallback(): string {
-  const base = String(import.meta.env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '')
-  return base ? `${base}/functions/v1/escavador-callback` : ''
-}
-
-function EscavadorConfig() {
-  const { data, isLoading, error } = useIntegracao('escavador')
-  const qc = useQueryClient()
-  const toast = useToast()
-  const [token, setToken] = useState('')
-  const [tokenCallback, setTokenCallback] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const configurado = Boolean((data?.config as ConfigEscavador)?.configurado)
-  const urlCallback = enderecoDoCallback()
-
-  async function salvarCallback() {
-    if (!tokenCallback.trim()) {
-      toast.error('Informe o token de callback gerado no painel do Escavador.')
-      return
-    }
-    setSaving(true)
-    try {
-      await invokeFunction('salvar-token-escavador', {
-        callback_token: tokenCallback.trim(),
-      })
-      setTokenCallback('')
-      toast.success('Token de callback salvo. A partir de agora os avisos do Escavador são aceitos.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function salvar() {
-    if (!token.trim()) {
-      toast.error('Informe o token do Escavador.')
-      return
-    }
-    setSaving(true)
-    try {
-      const r = await invokeFunction<{ saldo?: { descricao?: string } }>(
-        'salvar-token-escavador',
-        { token: token.trim() },
-      )
-      setToken('')
-      await qc.invalidateQueries({ queryKey: ['integracoes', 'escavador'] })
-      // O saldo da tela é de OUTRA chave a partir de agora.
-      await qc.invalidateQueries({ queryKey: ['escavador', 'saldo'] })
-      toast.success(
-        'Token do Escavador salvo e confirmado' +
-          (r.saldo?.descricao ? `. Saldo: ${r.saldo.descricao}` : '.'),
-      )
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <Search className="h-5 w-5 text-brand-600" /> Integração Escavador
-          </span>
-        }
-        action={
-          // O SALDO AO LADO DO SELO, e não num quadro no corpo do cartão. Ele é
-          // um número que se confere de passagem — "ainda tenho crédito?" —, e
-          // não um campo para preencher; um quadro no meio da tela de
-          // configuração dava a ele o peso de uma decisão a tomar.
-          <span className="flex items-center gap-3">
-            {configurado && <SaldoEscavador />}
-            <SeloIntegracao
-              error={error}
-              configurado={configurado}
-              rotuloOk="Token configurado"
-              rotuloSem="Sem token"
-            />
-          </span>
-        }
-      />
-      <CardBody>
-        <AvisoLeitura error={error} />
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Token de acesso"
-              hint={
-                configurado
-                  ? 'Já configurado. Preencha apenas para substituir.'
-                  : 'Criado em api.escavador.com/tokens. É exibido uma única vez.'
-              }
-            >
-              <Input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="••••••••••••"
-                autoComplete="off"
-              />
-            </Field>
-            <div className="sm:col-span-2">
-              <Button onClick={salvar} loading={saving}>
-                Salvar
-              </Button>
-            </div>
-
-            {/* OS AVISOS DO ESCAVADOR.
-
-                Baixar os autos de um processo é assíncrono: pede-se, e a
-                resposta vem minutos ou horas depois. Perguntar "já foi?" de
-                tempos em tempos enche o log da conta e não acelera nada — o
-                caminho deles é o inverso, eles avisam. Para isso precisam saber
-                nosso endereço, e nós precisamos saber que o aviso é mesmo deles;
-                daí os dois campos abaixo, que se preenchem UMA vez. */}
-            <div className="sm:col-span-2 mt-2 border-t border-borda pt-4">
-              <p className="mb-3 text-sm font-medium text-texto">
-                Avisos automáticos (callback)
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  label="URL para cadastrar no Escavador"
-                  hint="Cole este endereço em api.escavador.com/callbacks."
-                >
-                  <div className="flex items-center gap-2">
-                    <Input value={urlCallback} readOnly onFocus={(e) => e.target.select()} />
-                    <IconButton
-                      label="Copiar o endereço"
-                      icon={<Copy className="h-4 w-4" />}
-                      onClick={() => {
-                        navigator.clipboard
-                          .writeText(urlCallback)
-                          .then(() => toast.success('Endereço copiado.'))
-                          .catch(() => toast.error('Não consegui copiar; selecione e copie à mão.'))
-                      }}
-                    />
-                  </div>
-                </Field>
-                <Field
-                  label="Token de callback"
-                  hint="Gerado no painel do Escavador. É ele que prova que o aviso veio de lá."
-                >
-                  <Input
-                    type="password"
-                    value={tokenCallback}
-                    onChange={(e) => setTokenCallback(e.target.value)}
-                    placeholder="••••••••••••"
-                    autoComplete="off"
-                  />
-                </Field>
-                <div className="sm:col-span-2">
-                  <Button variant="outline" onClick={salvarCallback} loading={saving}>
-                    Salvar token de callback
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-// ----------------------- BullAI (emissão de certidões) -----------------------
-
-interface CreditosBullai {
-  restantes: number | null
-  limite: number | null
-  usadas: number
-  excedente: number
-  fimDoPeriodo: string | null
-}
-
-interface PortalBullai {
-  chave: string
-  rotulo: string
-  criterio: string
-  documento: 'CPF' | 'CNPJ'
-  presencial: boolean
-}
-
-/**
- * A BullAI emite as certidões da due diligence: recebe um CPF ou CNPJ e a
- * lista de portais, e devolve os PDFs com o resultado de cada certidão.
- *
- * O CATÁLOGO APARECE AQUI, e não só na diligência, porque é a pergunta que
- * vem antes de tudo — "que certidões ela sabe buscar?" — e porque é por ele
- * que se confere se a chave gravada é a da conta certa. O SALDO ao lado do
- * título, como no Escavador: cada portal pedido gasta uma consulta do plano.
- */
-function BullaiConfig() {
-  const { data, isLoading, error } = useIntegracao('bullai')
-  const qc = useQueryClient()
-  const toast = useToast()
-  const [token, setToken] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [verCatalogo, setVerCatalogo] = useState(false)
-  const configurado = Boolean((data?.config as { configurado?: boolean } | null)?.configurado)
-
-  const catalogo = useQuery({
-    queryKey: ['bullai', 'catalogo'],
-    enabled: configurado,
-    staleTime: 0,
-    retry: false,
-    queryFn: () =>
-      invokeFunction<{ creditos: CreditosBullai; portais: PortalBullai[] }>('bullai-catalogo', {}),
-  })
-
-  async function salvar() {
-    if (!token.trim()) {
-      toast.error('Informe a chave da BullAI.')
-      return
-    }
-    setSaving(true)
-    try {
-      const r = await invokeFunction<{ creditos?: CreditosBullai }>('salvar-token-bullai', { token: token.trim() })
-      setToken('')
-      await qc.invalidateQueries({ queryKey: ['integracoes', 'bullai'] })
-      await qc.invalidateQueries({ queryKey: ['bullai', 'catalogo'] })
-      const c = r.creditos
-      toast.success(
-        'Chave da BullAI salva e confirmada' +
-          (c ? (c.restantes == null ? '. Plano ilimitado.' : `. ${c.restantes} consulta(s) restante(s).`) : '.'),
-      )
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const c = catalogo.data?.creditos
-  const portais = catalogo.data?.portais ?? []
-  const automaticos = portais.filter((p) => !p.presencial)
-
-  return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-brand-600" /> Integração BullAI
-          </span>
-        }
-        action={
-          <span className="flex items-center gap-3">
-            {configurado && c && (
-              <span className="text-xs text-texto-3" title="Cada portal pedido gasta uma consulta do plano.">
-                {c.restantes == null ? 'Plano ilimitado' : `${c.restantes.toLocaleString('pt-BR')} consulta(s)`}
-              </span>
+      {GRUPOS_DO_MENU.map((g, gi) => (
+        <div key={g.titulo} className="contents">
+          <div
+            className={cn(
+              'hidden px-[10px] pb-[6px] font-display text-xs font-bold uppercase tracking-wider text-texto-3 min-[900px]:block',
+              gi === 0 ? 'pt-0' : 'pt-[14px]',
             )}
-            {configurado && catalogo.error && (
-              <span className="text-xs text-aviso" title={(catalogo.error as Error).message}>
-                saldo indisponível
-              </span>
-            )}
-            <SeloIntegracao error={error} configurado={configurado} rotuloOk="Chave configurada" rotuloSem="Sem chave" />
-          </span>
-        }
-      />
-      <CardBody>
-        <AvisoLeitura error={error} />
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Chave da API"
-              hint={
-                configurado
-                  ? 'Já configurada. Preencha apenas para substituir.'
-                  : 'Criada na BullAI em Configurações › Chaves de API. É mostrada uma única vez.'
-              }
-            >
-              <Input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="••••••••••••"
-                autoComplete="off"
-              />
-            </Field>
-            <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
-              <Button onClick={salvar} loading={saving}>
-                Salvar
-              </Button>
-              {configurado && portais.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setVerCatalogo((v) => !v)}
-                  className="text-sm text-brand-700 underline underline-offset-2 hover:text-brand-800"
-                >
-                  {verCatalogo
-                    ? 'Esconder o catálogo'
-                    : `Ver as ${portais.length} certidões que ela busca (${automaticos.length} automáticas)`}
-                </button>
-              )}
-              {configurado && verCatalogo && portais.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    // A LISTA INTEIRA, em colunas separadas por tabulação: cola
-                    // direto numa planilha ou numa conversa. O catálogo não é
-                    // segredo — segredo é só a chave, que não vai junto.
-                    const TAB = String.fromCharCode(9)
-                    const QUEBRA = String.fromCharCode(10)
-                    const linhas = portais.map((p) =>
-                      [p.rotulo, p.documento, p.presencial ? 'presencial' : 'automática', p.chave].join(TAB),
-                    )
-                    navigator.clipboard
-                      .writeText([['Certidão', 'Documento', 'Como', 'Chave'].join(TAB), ...linhas].join(QUEBRA))
-                      .then(() => toast.success('Catálogo copiado.'))
-                      .catch(() => toast.error('Não consegui copiar.'))
-                  }}
-                  className="text-sm text-texto-2 underline underline-offset-2 hover:text-texto"
-                >
-                  Copiar a lista
-                </button>
-              )}
-            </div>
-            {verCatalogo && (
-              <div className="sm:col-span-2 max-h-96 overflow-auto rounded-lg ring-1 ring-borda">
-                <table className="w-full text-left text-xs">
-                  <thead className="sticky top-0 bg-superficie-2 text-texto-2">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">Certidão</th>
-                      <th className="px-3 py-2 font-medium">Documento</th>
-                      <th className="px-3 py-2 font-medium">Como</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {portais.map((p) => (
-                      <tr key={p.chave} className="border-t border-borda" title={p.criterio}>
-                        <td className="px-3 py-1.5 text-texto">{p.rotulo}</td>
-                        <td className="px-3 py-1.5 text-texto-2">{p.documento}</td>
-                        <td className="px-3 py-1.5 text-texto-2">
-                          {p.presencial ? 'presencial — não automatiza' : 'automática'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+          >
+            {g.titulo}
           </div>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-// ----------------------- Skills do assistente -----------------------
-
-interface SkillAssistente {
-  id: string
-  skill_id: string
-  nome: string
-  descricao: string | null
-  ativo: boolean
-  criado_em: string
-}
-
-/**
- * Pacotes de Agent Skills da Anthropic (feitos no Claude) que o assistente
- * pode usar. O pacote em si fica hospedado na Anthropic — aqui só se decide
- * QUAIS estão ativas; a Edge Function `assistente` lê essa lista a cada
- * pergunta. Uma skill ativa vale para todo mundo que usa o assistente.
- */
-function SkillsConfig() {
-  const qc = useQueryClient()
-  const toast = useToast()
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['assistente_skills'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('assistente_skills')
-        .select('*')
-        .order('criado_em', { ascending: false })
-      if (error) throw new Error(error.message)
-      return (data ?? []) as SkillAssistente[]
-    },
-  })
-
-  const [nome, setNome] = useState('')
-  const [descricao, setDescricao] = useState('')
-  const [arquivo, setArquivo] = useState<File | null>(null)
-  const [enviando, setEnviando] = useState(false)
-  const inputArquivo = useRef<HTMLInputElement>(null)
-
-  async function enviar() {
-    if (!nome.trim()) {
-      toast.error('Dê um nome para a Skill.')
-      return
-    }
-    if (!arquivo) {
-      toast.error('Selecione o arquivo .zip da Skill.')
-      return
-    }
-    setEnviando(true)
-    try {
-      const form = new FormData()
-      form.append('nome', nome.trim())
-      if (descricao.trim()) form.append('descricao', descricao.trim())
-      form.append('arquivo', arquivo)
-      await invokeFunctionForm('assistente-skills', form)
-      setNome('')
-      setDescricao('')
-      setArquivo(null)
-      if (inputArquivo.current) inputArquivo.current.value = ''
-      await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
-      toast.success('Skill enviada. O assistente já pode usá-la.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setEnviando(false)
-    }
-  }
-
-  async function alternar(id: string) {
-    try {
-      await invokeFunction('assistente-skills', { acao: 'alternar', id })
-      await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
-
-  async function remover(id: string) {
-    try {
-      await invokeFunction('assistente-skills', { acao: 'remover', id })
-      await qc.invalidateQueries({ queryKey: ['assistente_skills'] })
-      toast.success('Skill removida.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <Puzzle className="h-5 w-5 text-brand-600" /> Skills do assistente
-          </span>
-        }
-      />
-      <CardBody>
-        <p className="mb-4 text-sm text-texto-2">
-          Pacotes de habilidade da Anthropic (feitos no Claude, subidos como .zip) que o
-          assistente passa a usar. Uma skill ativa vale para todo mundo que usa o assistente.
-        </p>
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <>
-            <AvisoLeitura error={error} />
-            {data && data.length > 0 && (
-              <Table className="mb-4">
-                <THead>
-                  <TR>
-                    <TH>Nome</TH>
-                    <TH>Status</TH>
-                    <TH />
-                  </TR>
-                </THead>
-                <TBody>
-                  {data.map((s) => (
-                    <TR key={s.id}>
-                      <TD>
-                        <p className="font-medium text-texto">{s.nome}</p>
-                        {s.descricao && (
-                          <p className="text-xs text-texto-3">{s.descricao}</p>
-                        )}
-                      </TD>
-                      <TD>
-                        <button type="button" onClick={() => alternar(s.id)}>
-                          <Badge tone={s.ativo ? 'green' : 'gray'}>
-                            {s.ativo ? 'Ativa' : 'Desativada'}
-                          </Badge>
-                        </button>
-                      </TD>
-                      <TD className="text-right">
-                        <IconButton
-                          label="Remover skill"
-                          icon={<Trash2 className="h-4 w-4" />}
-                          onClick={() => remover(s.id)}
-                        />
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            )}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Nome">
-                <Input
-                  value={nome}
-                  onChange={(e) => setNome(e.target.value)}
-                  placeholder="Ex: Análise de precatório"
-                />
-              </Field>
-              <Field label="Descrição (opcional)">
-                <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} />
-              </Field>
-              <Field label="Arquivo .zip da Skill" className="sm:col-span-2">
-                <input
-                  ref={inputArquivo}
-                  type="file"
-                  accept=".zip"
-                  onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
-                  className="block w-full text-sm text-texto-2 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
-                />
-              </Field>
-              <div className="sm:col-span-2">
-                <Button onClick={enviar} loading={enviando}>
-                  Enviar Skill
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-// ----------------------- ADVBOX -----------------------
-/** Listas da conta ADVBOX, para as escolhas do cadastro automático. */
-interface OpcoesAdvbox {
-  users: { id: number | string; name: string }[]
-  stages: { id: number | string; name: string }[]
-  lawsuit_types: { id: number | string; name: string }[]
-  customers: { id: number | string; name: string }[]
-}
-
-type CriarProcesso = NonNullable<ConfigAdvbox['criar_processo']>
-
-/**
- * ESCOLHAS FIXAS do cadastro de processo na ADVBOX.
- *
- * A API exige cliente, fase e tipo, mas na operação da Credijuris os três são
- * sempre os mesmos — todo crédito é um cumprimento de sentença, do mesmo cliente,
- * do mesmo tipo. Eram três listas para escolher sempre a mesma coisa, e lista com
- * uma resposta certa é convite a errar por clique.
- *
- * Os ids são da conta da Credijuris, lidos de /settings e /customers. Não são
- * segredo: sem o token da API não abrem nada, e quem tem o token já pode listá-los.
- * Se a ADVBOX recriar uma fase ou um tipo, o id muda e a criação passa a falhar
- * com o erro da API na tela — a correção é trocar o número aqui.
- */
-const ADVBOX_FIXO = {
-  customers_id: 8795916,
-  customer_nome: 'CREDIJURIS',
-  stages_id: 2935559,
-  stage_nome: 'CUMPRIMENTO DE SENTENÇA',
-  type_lawsuits_id: 1562480,
-  type_nome: 'CREDJURIS',
-} as const
-
-function AdvboxConfig() {
-  const { data, isLoading, error } = useIntegracao('advbox')
-  const qc = useQueryClient()
-  const toast = useToast()
-  const [baseUrl, setBaseUrl] = useState('')
-  // Cadastro automático do processo. Vive no mesmo registro de integração, e por
-  // isso é salvo pelo mesmo botão — dois botões de salvar no mesmo cartão levariam
-  // alguém a mexer num campo e clicar no outro.
-  const [cp, setCp] = useState<CriarProcesso>({})
-  const [opcoes, setOpcoes] = useState<OpcoesAdvbox | null>(null)
-  const [carregando, setCarregando] = useState(false)
-  const [erroOpcoes, setErroOpcoes] = useState(false)
-  const [token, setToken] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    const cfg = (data?.config as ConfigAdvbox) ?? {}
-    setBaseUrl(cfg.base_url ?? '')
-    setCp(cfg.criar_processo ?? {})
-  }, [data])
-
-  async function carregarOpcoes(silencioso = false) {
-    setCarregando(true)
-    try {
-      const r = await invokeFunction<OpcoesAdvbox>('advbox-processos', {
-        action: 'options',
-        cliente_nome: 'credijuris',
-      })
-      setOpcoes(r)
-      setErroOpcoes(false)
-    } catch (err) {
-      setErroOpcoes(true)
-      // Carga automática que falha não vira alerta: quem abriu Configurações pode
-      // ter vindo mexer no Kommo. A lista de responsáveis fica com o botão de
-      // tentar de novo, e é ali que o aviso pertence.
-      if (!silencioso) toast.error((err as Error).message)
-    } finally {
-      setCarregando(false)
-    }
-  }
-
-  const configurado = Boolean((data?.config as { configurado?: boolean })?.configurado)
-  // LEITURA FALHOU, NADA FOI LIDO: os campos nasceriam vazios, idênticos a "nunca
-  // configurado", e o Salvar regravaria a configuração inteira só com os ids fixos
-  // — apagando URL, responsável e o cadastro ligado. Sem leitura, sem formulário.
-  const naoLido = !!error && data === undefined
-
-  // Busca os responsáveis ao abrir a tela, uma vez, para as três caixas já
-  // aparecerem prontas — pedir um clique antes de mostrar o campo era o que fazia
-  // este bloco parecer diferente do resto das Configurações. Só com token
-  // configurado: sem token a chamada falharia sempre, a cada visita.
-  const buscou = useRef(false)
-  useEffect(() => {
-    if (buscou.current || !configurado) return
-    buscou.current = true
-    void carregarOpcoes(true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configurado])
-
-  async function salvar() {
-    if (naoLido) return
-    const url = baseUrl.trim()
-    // URL sem esquema (ex.: "app.advbox.com.br/api/v1") vira caminho relativo no
-    // fetch do servidor e a integração cai inteira, com erro que não aponta para
-    // cá. Barrar na hora de salvar é o único momento em que dá para explicar.
-    if (url && !/^https?:\/\//i.test(url)) {
-      toast.error('A URL base precisa começar com https://.')
-      return
-    }
-    setSaving(true)
-    try {
-      // base_url (não secreto) vai direto na tabela integracoes.
-      // Campo em branco REMOVE a chave em vez de gravar string vazia: o servidor
-      // só cai no endereço padrão quando a chave está ausente (`??` não pega
-      // string vazia), e gravar '' derrubava a integração em silêncio.
-      const cfg: Record<string, unknown> = { ...(data?.config as object) }
-      if (url) cfg.base_url = url
-      else delete cfg.base_url
-      // Ligar sem responsável gravaria uma configuração que a função recusa a cada
-      // crédito salvo, e o motivo ficaria só no retorno da chamada — invisível para
-      // quem clicou aqui. Barra no único momento em que dá para explicar. Cliente,
-      // fase e tipo não são validados porque não são escolhidos: vêm fixos.
-      if (cp.ativo && (cp.users_id == null || cp.users_id === '')) {
-        toast.error('Para ligar o cadastro na ADVBOX, escolha o responsável.')
-        setSaving(false)
-        return
-      }
-      // Os três fixos são gravados SEMPRE, e não só quando faltam: se um dia o id
-      // mudar no código, o próximo salvamento corrige o que está no banco sem
-      // ninguém precisar saber que existe essa configuração.
-      cfg.criar_processo = { ...cp, ...ADVBOX_FIXO }
-      const { error } = await supabase
-        .from('integracoes')
-        .upsert({ servico: 'advbox', config: cfg, ativo: true }, { onConflict: 'servico' })
-      if (error) throw new Error(error.message)
-
-      // token (secreto) vai via Edge Function admin-only
-      if (token.trim()) {
-        await invokeFunction('salvar-token-advbox', { token: token.trim() })
-        setToken('')
-      }
-      await qc.invalidateQueries({ queryKey: ['integracoes', 'advbox'] })
-      toast.success('Configurações do ADVBOX salvas.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <KeyRound className="h-5 w-5 text-brand-600" /> Integração ADVBOX
-          </span>
-        }
-        action={
-          <SeloIntegracao
-            error={error}
-            configurado={configurado}
-            rotuloOk="Token configurado"
-            rotuloSem="Sem token"
-          />
-        }
-      />
-      <CardBody>
-        <AvisoLeitura error={error} />
-        {isLoading ? (
-          <Loading />
-        ) : naoLido ? null : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="URL base da API"
-              hint="Ex.: https://app.advbox.com.br/api/v1 (confirme na sua conta)."
-            >
-              <Input
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://app.advbox.com.br/api/v1"
-              />
-            </Field>
-            <Field
-              label="Token de API (Bearer)"
-              hint={
-                configurado
-                  ? 'Já configurado. Preencha apenas para substituir.'
-                  : 'Obtido em Configurações > Integrações e API no ADVBOX.'
-              }
-            >
-              <Input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="••••••••••••"
-                autoComplete="off"
-              />
-            </Field>
-            {/* CADASTRO AUTOMÁTICO DO PROCESSO.
-                A ADVBOX só traz movimentações de processo cadastrado nela, e
-                crédito esquecido lá fica sem andamento sem que nada acuse: a aba
-                Movimentações apenas não mostra aquele processo, o que é igual a
-                "não houve movimentação". Daí automatizar em vez de confiar na
-                lembrança.
-
-                As quatro escolhas são exigência da API — ela recusa a criação sem
-                cliente, responsável, fase e tipo. Vêm em lista, da própria conta,
-                porque pedir ID digitado seria pedir para errar. */}
-            <div className="space-y-3 border-t border-borda pt-4 sm:col-span-2">
-              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-texto">
-                <input
-                  type="checkbox"
-                  className="accent-brand-600"
-                  checked={!!cp.ativo}
-                  onChange={(e) => setCp({ ...cp, ativo: e.target.checked })}
-                />
-                Cadastro de créditos no ADVBOX
-              </label>
-
-              {/* TRÊS CAIXAS LADO A LADO, e as duas primeiras desabilitadas.
-                  Cliente e fase são sempre os mesmos, mas aparecem como campo e não
-                  como texto porque a linha das três caixas é o que faz este bloco
-                  parecer com o resto das Configurações. O tipo saiu da tela — ele
-                  continua sendo enviado à ADVBOX, fixo, só não ocupa espaço numa
-                  escolha que não existe. */}
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Field label="Cliente">
-                  <Select value="fixo" disabled onChange={() => {}}>
-                    <option value="fixo">{ADVBOX_FIXO.customer_nome}</option>
-                  </Select>
-                </Field>
-                <Field label="Fase processual">
-                  <Select value="fixo" disabled onChange={() => {}}>
-                    <option value="fixo">{ADVBOX_FIXO.stage_nome}</option>
-                  </Select>
-                </Field>
-                <Field label="Responsável">
-                  {opcoes ? (
-                    <Select
-                      value={String(cp.users_id ?? '')}
-                      onChange={(e) => {
-                        const achado = opcoes.users.find(
-                          (u) => String(u.id) === e.target.value,
-                        )
-                        setCp({
-                          ...cp,
-                          users_id: e.target.value || undefined,
-                          user_nome: achado?.name,
-                        })
-                      }}
-                    >
-                      <option value="">Escolha…</option>
-                      {opcoes.users.map((u) => (
-                        <option key={u.id} value={String(u.id)}>
-                          {u.name}
-                        </option>
-                      ))}
-                    </Select>
-                  ) : (
-                    // Lista ainda não veio: a caixa mostra o que está salvo e fica
-                    // travada. Select vazio e habilitado permitiria salvar por cima
-                    // do responsável configurado com "nenhum" — perder configuração
-                    // por causa de uma falha de rede seria o pior desfecho aqui.
-                    <Select value="atual" disabled onChange={() => {}}>
-                      <option value="atual">
-                        {carregando
-                          ? 'Carregando…'
-                          : cp.user_nome ||
-                            (cp.users_id ? 'Responsável configurado' : 'Não configurado')}
-                      </option>
-                    </Select>
-                  )}
-                </Field>
-              </div>
-
-              {erroOpcoes && !opcoes && (
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => carregarOpcoes()}
-                    loading={carregando}
-                  >
-                    Carregar responsáveis
-                  </Button>
-                  <span className="text-xs text-texto-2">
-                    Não consegui buscar a lista de responsáveis na ADVBOX agora.
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <div className="sm:col-span-2">
-              <Button onClick={salvar} loading={saving}>
-                Salvar
-              </Button>
-            </div>
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-// ----------------------- KOMMO -----------------------
-// O Kommo é o CRM em kanban onde o comercial cria os cards de análise de
-// crédito. Precisa de DUAS informações, não só do token: a API resolve a conta
-// pelo host (https://<subdominio>.kommo.com), então subdomínio errado devolve
-// 401 mesmo com token correto — daí a validação ao salvar.
-function KommoConfig() {
-  const { data, isLoading, error } = useIntegracao('kommo')
-  const qc = useQueryClient()
-  const toast = useToast()
-  const [subdominio, setSubdominio] = useState('')
-  const [token, setToken] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    const cfg = (data?.config as ConfigKommo) ?? {}
-    // Pré-preenche com a conta da Credijuris: é sempre a mesma, e digitar
-    // subdomínio errado dá 401 confuso (a API resolve a conta pelo host).
-    // Continua editável para o caso de a conta mudar.
-    setSubdominio(cfg.subdominio ?? SUBDOMINIO_PADRAO)
-  }, [data])
-
-  const cfg = (data?.config as ConfigKommo) ?? {}
-  const configurado = Boolean(cfg.configurado)
-
-  async function salvar() {
-    if (!subdominio.trim()) {
-      toast.error('Informe o subdomínio da conta Kommo.')
-      return
-    }
-    if (!configurado && !token.trim()) {
-      toast.error('Informe o token de longa duração do Kommo.')
-      return
-    }
-    setSaving(true)
-    try {
-      // Token e subdomínio vão juntos pela Edge Function admin-only: o token
-      // nunca passa pela tabela integracoes (que é legível pelo cliente).
-      const r = await invokeFunction<{ validado: boolean; aviso: string | null }>(
-        'salvar-token-kommo',
-        {
-          subdominio: subdominio.trim(),
-          ...(token.trim() ? { token: token.trim() } : {}),
-        },
-      )
-      setToken('')
-      await qc.invalidateQueries({ queryKey: ['integracoes', 'kommo'] })
-      if (r?.validado) toast.success('Kommo salvo e conexão verificada.')
-      else if (r?.aviso) toast.error(r.aviso)
-      else toast.success('Kommo salvo.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <KanbanSquare className="h-5 w-5 text-brand-600" /> Integração Kommo
-          </span>
-        }
-        action={
-          error ? (
-            <Badge tone="amber">
-              <XCircle className="mr-1 inline h-3.5 w-3.5" /> Estado não carregado
-            </Badge>
-          ) : configurado ? (
-            cfg.validado ? (
-              <Badge tone="green">
-                <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" /> Conexão verificada
-              </Badge>
-            ) : (
-              <Badge tone="amber">
-                <XCircle className="mr-1 inline h-3.5 w-3.5" /> Salvo, sem conexão
-              </Badge>
-            )
-          ) : (
-            <Badge tone="gray">
-              <XCircle className="mr-1 inline h-3.5 w-3.5" /> Não configurado
-            </Badge>
-          )
-        }
-      />
-      <CardBody>
-        <AvisoLeitura error={error} />
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Subdomínio da conta"
-              hint="O que aparece antes de .kommo.com. Pode colar a URL inteira."
-            >
-              <Input
-                value={subdominio}
-                onChange={(e) => setSubdominio(e.target.value)}
-                placeholder="minhaconta"
-                autoComplete="off"
-              />
-            </Field>
-            <Field
-              label="Token de longa duração"
-              hint={
-                configurado
-                  ? 'Já configurado. Preencha apenas para substituir.'
-                  : 'Kommo > Configurações > Integrações > criar integração privada.'
-              }
-            >
-              <Input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="••••••••••••"
-                autoComplete="off"
-              />
-            </Field>
-            {/* Sem botão de sincronizar aqui: o cron roda de 5 em 5 min e a
-                aba Análise de Crédito sincroniza ao abrir. Um terceiro gatilho
-                nesta tela só serviria para depurar a integração. */}
-            <div className="sm:col-span-2">
-              <Button onClick={salvar} loading={saving}>
-                Salvar
-              </Button>
-            </div>
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-// ----------------------- DJEN -----------------------
-const UFS = [
-  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
-  'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE',
-  'TO',
-]
-
-interface OabItem {
-  uf: string
-  numero: string
-}
-
-/** A chave do roteiro na tabela `prompts_operacao` (migration 0065). */
-const CHAVE_ROTEIRO = 'qualificacao_preliminar'
-
-interface PromptDaOperacao {
-  chave: string
-  texto: string
-  texto_anterior: string | null
-  atualizado_em: string
-  atualizado_por: string | null
-}
-
-/**
- * O ROTEIRO DA QUALIFICAÇÃO, editável por quem analisa.
- *
- * ELE É O MÉTODO: que fases percorrer, que eixos varrer, o que é proibido
- * afirmar sem fonte. Nasceu dentro do repositório, e ali mudá-lo custava um
- * programador e um deploy — caro demais para um texto que a operação ajusta toda
- * vez que um caso novo ensina alguma coisa.
- *
- * O PADRÃO CONTINUA NO CÓDIGO e é o chão: campo vazio, linha ausente ou banco
- * novo caem nele. Nenhuma análise roda sem método, nem por salvamento em branco.
- */
-function RoteiroConfig() {
-  const qc = useQueryClient()
-  const toast = useToast()
-  const { user } = useAuth()
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['prompts_operacao', CHAVE_ROTEIRO],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('prompts_operacao')
-        .select('*')
-        .eq('chave', CHAVE_ROTEIRO)
-        .maybeSingle()
-      if (error) throw new Error(error.message)
-      return (data ?? null) as PromptDaOperacao | null
-    },
-  })
-
-  const emVigor = (data?.texto ?? '').trim() || ROTEIRO_QUALIFICACAO
-  const [texto, setTexto] = useState('')
-  const [tocado, setTocado] = useState(false)
-  const [salvando, setSalvando] = useState(false)
-
-  // O CAMPO NASCE COM O QUE ESTÁ VALENDO, e só para de acompanhar o servidor
-  // depois que alguém digita: recarregar a lista não pode apagar a edição em
-  // curso, e abrir a tela não pode mostrar texto velho.
-  useEffect(() => {
-    if (!tocado && !isLoading) setTexto(emVigor)
-  }, [emVigor, isLoading, tocado])
-
-  const mudou = texto.trim() !== emVigor.trim()
-  const ehOPadrao = emVigor.trim() === ROTEIRO_QUALIFICACAO.trim()
-  // LEITURA FALHOU, NADA FOI LIDO: o campo nasceu com o PADRÃO, não com o roteiro
-  // em vigor. Salvar daqui gravaria o padrão editado por cima do roteiro real, e o
-  // padrão viraria o "texto anterior" — o desfazer de um clique iria junto. Mesma
-  // trava dos Parâmetros de atualização: sem leitura, não se salva por cima.
-  const naoLido = !!error && data === undefined
-
-  async function gravar(novo: string, recado: string) {
-    if (naoLido) return
-    setSalvando(true)
-    try {
-      const { error } = await supabase.from('prompts_operacao').upsert({
-        chave: CHAVE_ROTEIRO,
-        texto: novo,
-        // O QUE ESTAVA VALENDO VIRA O ANTERIOR — é o desfazer de um clique. São
-        // 17 mil caracteres que a análise inteira obedece, e quem edita está
-        // colando num campo de texto.
-        texto_anterior: emVigor,
-        atualizado_em: new Date().toISOString(),
-        atualizado_por: user?.email ?? null,
-      })
-      if (error) throw new Error(error.message)
-      setTocado(false)
-      await qc.invalidateQueries({ queryKey: ['prompts_operacao', CHAVE_ROTEIRO] })
-      toast.success(recado)
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSalvando(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <Scale className="h-5 w-5 text-brand-600" /> Roteiro da qualificação preliminar
-          </span>
-        }
-        // SÓ O SELO DE EDITADO. Estar no padrão é o estado comum, e um selo que
-        // aparece sempre não informa nada — o que vale a pena flagrar é o texto
-        // ter saído do que o sistema entrega.
-        action={ehOPadrao ? null : <Badge tone="green">Editado pela operação</Badge>}
-      />
-      <CardBody>
-        <AvisoLeitura error={error} />
-        {isLoading ? (
-          <Loading />
-        ) : (
-          <div className="space-y-3">
-            <Textarea
-              rows={18}
-              className="font-mono text-xs leading-relaxed"
-              value={texto}
-              spellCheck={false}
-              onChange={(e) => {
-                setTocado(true)
-                setTexto(e.target.value)
-              }}
-            />
-
-            {/* UMA LINHA SÓ, com o Salvar à direita. Eram duas faixas empilhadas
-                embaixo de um campo de dezoito linhas — botão numa, contagem e data
-                noutra —, e a tela inteira é uma página de cartões: cada faixa a mais
-                aqui empurra os outros para baixo. O rodapé do cartão é o lugar de
-                tudo isso, e ele cabe numa linha. */}
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-texto-3">
-                <span>{texto.length.toLocaleString('pt-BR')} caracteres</span>
-                {data?.atualizado_em && (
-                  <span>
-                    Última alteração em{' '}
-                    {new Date(data.atualizado_em).toLocaleString('pt-BR')}
-                    {data.atualizado_por ? ' por ' + data.atualizado_por : ''}
-                  </span>
+          {g.itens.map(({ id, rotulo }) => {
+            const ativo = id === secao
+            const ponto = pontos[id]
+            const extra = extras[id]
+            return (
+              <button
+                key={id}
+                type="button"
+                data-secao={id}
+                aria-current={ativo ? 'true' : undefined}
+                onClick={() => aoEscolher(id)}
+                className={cn(
+                  'flex h-[36px] shrink-0 items-center gap-2 whitespace-nowrap rounded-controle px-[10px] text-left text-corpo font-medium text-texto-2 transition-colors',
+                  'hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                  ativo &&
+                    'bg-superficie font-bold text-marca-texto shadow-nivel-1 hover:bg-superficie hover:text-marca-texto',
                 )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                {mudou && (
-                  <span className="text-xs font-medium text-aviso">
-                    alterações não salvas
-                  </span>
-                )}
-                <Button
-                  onClick={() => gravar(texto, 'Roteiro salvo. A próxima análise já o usa.')}
-                  disabled={!mudou || salvando || naoLido}
-                  loading={salvando}
-                >
-                  Salvar
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-function DjenConfig() {
-  const { data, isLoading, error } = useIntegracao('djen')
-  const qc = useQueryClient()
-  const toast = useToast()
-  const [itens, setItens] = useState<OabItem[]>([])
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    const cfg = (data?.config as ConfigDjen) ?? {}
-    const parsed = (cfg.oabs ?? [])
-      .map((s) => {
-        const m = String(s).match(/(\d+)\s*\/?\s*([A-Za-z]{2})?/)
-        return { numero: m?.[1] ?? '', uf: (m?.[2] ?? 'GO').toUpperCase() }
-      })
-      .filter((o) => o.numero)
-    setItens(parsed)
-  }, [data])
-
-  const setOab = (i: number, patch: Partial<OabItem>) =>
-    setItens((l) => l.map((o, idx) => (idx === i ? { ...o, ...patch } : o)))
-  const addOab = () => setItens((l) => [...l, { uf: 'GO', numero: '' }])
-  const removeOab = (i: number) =>
-    setItens((l) => l.filter((_, idx) => idx !== i))
-
-  // LEITURA FALHOU, NADA FOI LIDO: a lista nasceria vazia, dizendo "Nenhuma OAB
-  // cadastrada", e o Salvar gravaria a lista vazia por cima das OABs reais — a
-  // busca no DJEN pararia em silêncio. Sem leitura, sem formulário.
-  const naoLido = !!error && data === undefined
-
-  async function salvar() {
-    if (naoLido) return
-    setSaving(true)
-    try {
-      const oabs = itens
-        .map((o) => ({ uf: o.uf, numero: o.numero.replace(/\D/g, '') }))
-        .filter((o) => o.numero)
-        .map((o) => `${o.numero}/${o.uf}`)
-      // Janela fixa de 30 dias.
-      const cfg: ConfigDjen = { oabs, dias_retroativos: 30 }
-      const { error } = await supabase
-        .from('integracoes')
-        .upsert({ servico: 'djen', config: cfg, ativo: true }, { onConflict: 'servico' })
-      if (error) throw new Error(error.message)
-      await qc.invalidateQueries({ queryKey: ['integracoes', 'djen'] })
-      toast.success('OABs salvas.')
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <Newspaper className="h-5 w-5 text-brand-600" /> Integração DJEN
-          </span>
-        }
-      />
-      <CardBody>
-        <AvisoLeitura error={error} />
-        {isLoading ? (
-          <Loading />
-        ) : naoLido ? null : (
-          <div className="space-y-3">
-            {itens.length === 0 && (
-              <p className="text-sm text-texto-2">Nenhuma OAB cadastrada.</p>
-            )}
-            {itens.map((o, i) => (
-              <div key={i} className="flex items-end gap-2">
-                {/* w-32, não menos: o <select> reserva pr-8 para a setinha, e
-                    com menos largura a sigla saía cortada ("MG" virava "MC"). */}
-                <Field label={i === 0 ? 'UF' : undefined} className="w-32">
-                  <Select value={o.uf} onChange={(e) => setOab(i, { uf: e.target.value })}>
-                    {UFS.map((uf) => (
-                      <option key={uf} value={uf}>
-                        {uf}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field
-                  label={i === 0 ? 'Número da OAB' : undefined}
-                  className="flex-1"
-                >
-                  <Input
-                    value={o.numero}
-                    inputMode="numeric"
-                    placeholder="Somente números (ex.: 54162)"
-                    onChange={(e) =>
-                      setOab(i, { numero: e.target.value.replace(/\D/g, '') })
-                    }
-                  />
-                </Field>
-                <Button
-                  variant="ghost"
-                  onClick={() => removeOab(i)}
-                  title="Remover OAB"
-                  icon={<Trash2 className="h-4 w-4" />}
-                />
-              </div>
-            ))}
-            <Button
-              variant="outline"
-              size="sm"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={addOab}
-            >
-              Adicionar OAB
-            </Button>
-            <div className="pt-1">
-              <Button onClick={salvar} loading={saving}>
-                Salvar
-              </Button>
-            </div>
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-// ----------------------- Usuários -----------------------
-function UsuariosConfig() {
-  const qc = useQueryClient()
-  const toast = useToast()
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['profiles'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: true })
-      if (error) throw new Error(error.message)
-      return (data as Profile[]) ?? []
-    },
-  })
-
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ email: '', nome: '', password: '', role: 'usuario' })
-  const [saving, setSaving] = useState(false)
-  // Edição de usuário existente. O nome importa além do cadastro: é ele que
-  // assina as anotações que a plataforma grava nos cards do Kommo.
-  const [editando, setEditando] = useState<Profile | null>(null)
-  const [edicao, setEdicao] = useState({ nome: '', email: '', password: '' })
-
-  function abrirEdicao(p: Profile) {
-    setEditando(p)
-    // Senha em branco: o campo só é enviado se for preenchido.
-    setEdicao({ nome: p.nome ?? '', email: p.email, password: '' })
-  }
-
-  async function salvarEdicao() {
-    if (!editando) return
-    if (!edicao.email.trim()) {
-      toast.error('Informe o e-mail.')
-      return
-    }
-    if (edicao.password && edicao.password.length < 6) {
-      toast.error('A senha precisa ter ao menos 6 caracteres.')
-      return
-    }
-    setSaving(true)
-    try {
-      // Vai por Edge Function porque e-mail e senha vivem no Supabase Auth, e
-      // alterá-los exige a Admin API.
-      await invokeFunction('admin-update-user', {
-        userId: editando.id,
-        nome: edicao.nome.trim(),
-        email: edicao.email.trim(),
-        ...(edicao.password ? { password: edicao.password } : {}),
-      })
-      await qc.invalidateQueries({ queryKey: ['profiles'] })
-      toast.success('Usuário atualizado.')
-      setEditando(null)
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function criar() {
-    if (!form.email.trim() || !form.password) {
-      toast.error('Informe e-mail e senha.')
-      return
-    }
-    setSaving(true)
-    try {
-      await invokeFunction('admin-create-user', {
-        email: form.email.trim(),
-        password: form.password,
-        nome: form.nome.trim(),
-        role: form.role,
-      })
-      await qc.invalidateQueries({ queryKey: ['profiles'] })
-      toast.success('Usuário criado.')
-      setOpen(false)
-      setForm({ email: '', nome: '', password: '', role: 'usuario' })
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function toggleAtivo(p: Profile) {
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ ativo: !p.ativo })
-        .eq('id', p.id)
-      if (error) throw new Error(error.message)
-      await qc.invalidateQueries({ queryKey: ['profiles'] })
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-brand-600" /> Usuários
-          </span>
-        }
-        action={
-          <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setOpen(true)}>
-            Novo usuário
-          </Button>
-        }
-      />
-      <CardBody className="p-0">
-        {/* Erro antes de tudo: tabela vazia por falha de leitura era
-            indistinguível de "não há usuário cadastrado". */}
-        {error ? (
-          <p className="m-4 rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
-            Não foi possível carregar os usuários: {(error as Error).message}
-          </p>
-        ) : isLoading ? (
-          <Loading />
-        ) : (
-          <Table>
-            <THead>
-              <tr>
-                <TH>Nome</TH>
-                <TH>E-mail</TH>
-                <TH>Perfil</TH>
-                <TH>Situação</TH>
-                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {(data ?? []).map((p) => {
-                const admin = p.role === 'admin' || p.email === ADMIN_EMAIL
-                return (
-                  <TR key={p.id}>
-                    <TD className="font-medium text-texto">{p.nome || '—'}</TD>
-                    <TD>{p.email}</TD>
-                    <TD>
-                      {admin ? (
-                        <Badge tone="purple">
-                          <ShieldCheck className="mr-1 inline h-3.5 w-3.5" /> Administrador
-                        </Badge>
-                      ) : (
-                        <Badge tone="gray">Usuário</Badge>
+              >
+                <span className="min-w-0 truncate">{rotulo}</span>
+                <span className="ml-auto inline-flex shrink-0 items-center gap-[6px]">
+                  {extra && (
+                    <span
+                      className={cn(
+                        'text-xs font-medium tabular-nums',
+                        extra.aviso ? 'text-aviso' : 'text-texto-3',
                       )}
-                    </TD>
-                    <TD>
-                      <Badge tone={p.ativo ? 'green' : 'red'}>
-                        {p.ativo ? 'Ativo' : 'Inativo'}
-                      </Badge>
-                    </TD>
-                    <TD className="whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {!admin && (
-                          <Button size="sm" variant="outline" onClick={() => toggleAtivo(p)}>
-                            {p.ativo ? 'Desativar' : 'Ativar'}
-                          </Button>
-                        )}
-                        <IconButton
-                          label="Editar usuário"
-                          icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => abrirEdicao(p)}
-                        />
-                      </div>
-                    </TD>
-                  </TR>
-                )
-              })}
-            </TBody>
-          </Table>
-        )}
-      </CardBody>
-
-      <Modal
-        open={!!editando}
-        onClose={() => setEditando(null)}
-        title="Editar usuário"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setEditando(null)}>
-              Cancelar
-            </Button>
-            <Button onClick={salvarEdicao} loading={saving}>
-              Salvar
-            </Button>
-          </>
-        }
-      >
-        {editando && (
-          <div className="space-y-4">
-            <Field
-              label="Nome"
-              hint="Assina as anotações que a plataforma grava nos cards do Kommo."
-            >
-              <Input
-                value={edicao.nome}
-                onChange={(e) => setEdicao({ ...edicao, nome: e.target.value })}
-                placeholder="Nome completo"
-              />
-            </Field>
-            <Field label="E-mail" required>
-              <Input
-                type="email"
-                value={edicao.email}
-                onChange={(e) => setEdicao({ ...edicao, email: e.target.value })}
-              />
-            </Field>
-            <Field
-              label="Nova senha"
-              hint="Deixe em branco para manter a senha atual. Mínimo de 6 caracteres."
-            >
-              <Input
-                type="password"
-                value={edicao.password}
-                onChange={(e) => setEdicao({ ...edicao, password: e.target.value })}
-                placeholder="••••••••"
-                autoComplete="new-password"
-              />
-            </Field>
-          </div>
-        )}
-      </Modal>
-
-      <Modal
-        open={open}
-        onClose={() => setOpen(false)}
-        title="Novo usuário"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={criar} loading={saving}>
-              Criar usuário
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <Field label="Nome">
-            <Input
-              value={form.nome}
-              onChange={(e) => setForm({ ...form, nome: e.target.value })}
-            />
-          </Field>
-          <Field label="E-mail" required>
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-            />
-          </Field>
-          <Field label="Senha" required hint="Mínimo de 6 caracteres.">
-            <Input
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-            />
-          </Field>
-          <Field label="Perfil" required>
-            <Select
-              value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
-            >
-              <option value="usuario">Usuário</option>
-              <option value="admin">Administrador</option>
-            </Select>
-          </Field>
+                      title={extra.title}
+                    >
+                      {extra.texto}
+                    </span>
+                  )}
+                  {pendentes.has(id) && (
+                    <span
+                      role="img"
+                      aria-label="alterações não salvas"
+                      title="Alterações não salvas nesta seção"
+                      className="inline-flex text-aviso"
+                    >
+                      <Pencil className="h-[14px] w-[14px]" aria-hidden />
+                    </span>
+                  )}
+                  {ponto && (
+                    <>
+                      <span
+                        aria-hidden
+                        title={ponto.rotulo}
+                        className={cn('inline-block h-[9px] w-[9px] rounded-full', COR_DO_PONTO[ponto.tom])}
+                      />
+                      <span className="sr-only">({ponto.rotulo})</span>
+                    </>
+                  )}
+                </span>
+              </button>
+            )
+          })}
         </div>
-      </Modal>
-    </Card>
+      ))}
+    </nav>
   )
 }

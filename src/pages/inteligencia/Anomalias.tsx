@@ -11,16 +11,16 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
-import { EmptyState, ErrorState } from '@/components/ui/Table'
-import { usePainel, CarregandoPainel, Ressalva } from './compartilhado'
+import { EmptyState } from '@/components/ui/Table'
+import { usePainel, CarregandoPainel, ErroPainel, Ressalva } from './compartilhado'
 
 const TOM_GRAVIDADE = { alta: 'red', media: 'amber', baixa: 'gray' } as const
 const ROTULO_GRAVIDADE = { alta: 'Alta', media: 'Média', baixa: 'Baixa' } as const
 
 export default function Anomalias() {
-  const { painel, carregando, erro } = usePainel()
+  const { painel, carregando, erro, tentarDeNovo } = usePainel()
   if (carregando) return <CarregandoPainel />
-  if (erro || !painel) return <ErrorState message="Não foi possível carregar a carteira." />
+  if (erro || !painel) return <ErroPainel tentarDeNovo={tentarDeNovo} />
 
   const { anomalias } = painel
   const impossibilidades = anomalias.achados.filter((a) => a.natureza === 'impossibilidade')

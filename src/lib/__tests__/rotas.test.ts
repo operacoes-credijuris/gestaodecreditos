@@ -421,12 +421,22 @@ function fonteDaPagina(modulo: string): string {
   return readFileSync(fileURLToPath(url), 'utf-8').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 }
 
-/** O `nivel` de cada `<PageHeader>` do fonte ('1' quando ele não diz, o padrão). */
+/**
+ * O `nivel` de cada `<PageHeader>` do fonte ('1' quando ele não diz, o padrão).
+ *
+ * MUDOU DE PROPÓSITO NA ONDA 2 (decisão do dono: a amostra aprovada). Dentro do
+ * Quadro a aba não repete o título — fica só a frase do que ela mostra —, e o
+ * cabeçalho da aba virou o `CabecalhoDaAba` (inteligencia/compartilhado.tsx),
+ * que escreve o h2 só para o leitor de tela. Ele conta como nível 2; o teste
+ * abaixo confere que ele de fato escreve um h2, e nunca um h1.
+ */
 function niveisDoCabecalho(fonte: string): string[] {
-  return [...fonte.matchAll(/<PageHeader(?=\s)/g)].map((m) => {
+  const doPageHeader = [...fonte.matchAll(/<PageHeader(?=\s)/g)].map((m) => {
     const nivel = lerTag(fonte, (m.index ?? 0) + '<PageHeader'.length).atributos.get('nivel')
     return nivel === undefined ? '1' : String(nivel)
   })
+  const daAba = [...fonte.matchAll(/<CabecalhoDaAba(?=\s)/g)].map(() => '2')
+  return [...doPageHeader, ...daAba]
 }
 
 describe('rotas: a moldura do Quadro econômico', () => {
@@ -468,5 +478,10 @@ describe('rotas: a moldura do Quadro econômico', () => {
       expect(new Set(niveis), tela).toEqual(new Set(['2']))
       expect(fonte, tela).not.toMatch(/<h1[\s>]/)
     }
+    // O CabecalhoDaAba escreve o h2 (e não um h1, nem nada).
+    const comum = fonteDaPagina('inteligencia/compartilhado')
+    const corpo = comum.slice(comum.indexOf('export function CabecalhoDaAba'))
+    expect(corpo.slice(0, corpo.indexOf('\n}'))).toMatch(/<h2[\s>]/)
+    expect(corpo.slice(0, corpo.indexOf('\n}'))).not.toMatch(/<h1[\s>]/)
   })
 })
