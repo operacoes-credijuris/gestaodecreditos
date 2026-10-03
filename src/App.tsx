@@ -4,6 +4,7 @@ import { ProtectedRoute, AdminRoute } from '@/components/ProtectedRoute'
 import { AppLayout } from '@/components/layout/AppLayout'
 import Login from '@/pages/Login'
 import NotFound from '@/pages/NotFound'
+import MolduraDoQuadro from '@/pages/inteligencia/Moldura'
 import InteligenciaVisaoGeral from '@/pages/inteligencia/VisaoGeral'
 import InteligenciaPerformance from '@/pages/inteligencia/Performance'
 import InteligenciaPrevisoes from '@/pages/inteligencia/Previsoes'
@@ -36,14 +37,21 @@ export default function App() {
             favorito ou histórico, leva ao início. */}
         <Route path="/estrategica" element={<Navigate to={INICIO} replace />} />
 
-        {/* Inteligência Econômica */}
-        <Route path="/inteligencia" element={<InteligenciaVisaoGeral />} />
-        <Route path="/inteligencia/performance" element={<InteligenciaPerformance />} />
-        <Route path="/inteligencia/previsoes" element={<InteligenciaPrevisoes />} />
-        <Route path="/inteligencia/recortes" element={<InteligenciaRecortes />} />
-        {/* Saiu do Comercial: é relatório econômico por investidor, e consome o
-            mesmo núcleo de cálculo das demais telas de Inteligência. */}
-        <Route path="/inteligencia/carteiras" element={<CarteirasInvestidores />} />
+        {/* Quadro econômico: UMA MOLDURA COM ABAS, e cada aba é uma rota filha
+            — os endereços de antes continuam os mesmos (/inteligencia,
+            /inteligencia/previsoes…), e trocar de aba entra no histórico. Na
+            ordem das abas (ABAS_DO_QUADRO, em navigation.ts); o react-router não
+            depende dela. Subcaminho que nenhuma aba declara, como
+            /inteligencia/recortes/x, continua indo à página não encontrada. */}
+        <Route path="/inteligencia" element={<MolduraDoQuadro />}>
+          <Route index element={<InteligenciaVisaoGeral />} />
+          <Route path="previsoes" element={<InteligenciaPrevisoes />} />
+          <Route path="performance" element={<InteligenciaPerformance />} />
+          <Route path="recortes" element={<InteligenciaRecortes />} />
+          {/* Saiu do Comercial: é relatório econômico por investidor, e consome o
+              mesmo núcleo de cálculo das demais telas de Inteligência. */}
+          <Route path="carteiras" element={<CarteirasInvestidores />} />
+        </Route>
 
         {/* Comercial */}
         <Route path="/comercial/contratos" element={<GeracaoContratos />} />

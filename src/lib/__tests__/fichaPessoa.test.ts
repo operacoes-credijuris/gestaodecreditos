@@ -9,6 +9,13 @@ import { chaveDaFicha, enderecoDaFicha, montarFichaPessoa, type CampoPessoa } fr
  * novo apagar dado que vai para o contrato — o upsert é da linha inteira, e três
  * colunas (gênero, complemento da qualificação, endereço antigo) não têm campo
  * na tela: só sobrevivem porque o payload as copia da ficha anterior.
+ *
+ * MUDOU DE PROPÓSITO (02/10/2026, onda 2 do redesenho, decisão do dono): gênero
+ * e complemento da qualificação ganharam campo na ficha do INVESTIDOR (seção
+ * "Para o contrato"). Com os campos na tela (`paraContrato`), o Salvar grava o
+ * que a pessoa escolheu — bloco "campos na tela" no fim. Os testes de
+ * preservação abaixo continuam valendo para quando os campos NÃO estão na tela
+ * (a ficha do originador): nada aqui foi afrouxado.
  */
 
 const FORM_VAZIO: Record<CampoPessoa, string> = {
@@ -333,5 +340,110 @@ describe('enderecoDaFicha — a prévia diz o que vai para o contrato', () => {
   })
   it('sem endereço antigo, o compilado vale como está', () => {
     expect(enderecoDaFicha({ ...vazio, cep: '30140-071' }, null).mantemAntigo).toBe(false)
+  })
+})
+
+// MUDOU DE PROPÓSITO (02/10/2026, onda 2): a ficha do investidor passou a ter os
+// campos de gênero e complemento da qualificação. Ver o comentário do topo.
+describe('montarFichaPessoa — gênero e qualificação com os campos na tela (investidor)', () => {
+  const comTela = (
+    paraContrato: { genero: string; qualificacao_complemento: string },
+    anterior: Anterior = ANTERIOR,
+  ) =>
+    montarFichaPessoa({
+      tipo: 'investidor',
+      chave: 'maria da silva',
+      nome: 'Maria da Silva',
+      form: { ...FORM_VAZIO, pix: 'maria@x.com' },
+      anterior,
+      paraContrato,
+    })
+
+  it('quem não mexe nos campos grava o que já estava', () => {
+    const f = comTela({ genero: 'F', qualificacao_complemento: 'brasileira, casada, médica' })
+    expect(f.genero).toBe('F')
+    expect(f.qualificacao_complemento).toBe('brasileira, casada, médica')
+  })
+
+  it('grava o gênero escolhido, mesmo diferente do anterior', () => {
+    expect(comTela({ genero: 'M', qualificacao_complemento: '' }).genero).toBe('M')
+  })
+
+  it('"Não informado" sobre um gênero gravado: vazio (null), nunca masculino', () => {
+    expect(comTela({ genero: '', qualificacao_complemento: '' }).genero).toBeNull()
+  })
+
+  it('vazio continua vazio: null fica null, "" fica ""', () => {
+    expect(comTela({ genero: '', qualificacao_complemento: '' }, { ...ANTERIOR, genero: null }).genero).toBeNull()
+    expect(comTela({ genero: '', qualificacao_complemento: '' }, { ...ANTERIOR, genero: '' }).genero).toBe('')
+    expect(
+      comTela({ genero: '', qualificacao_complemento: '' }, { ...ANTERIOR, qualificacao_complemento: '' })
+        .qualificacao_complemento,
+    ).toBe('')
+  })
+
+  it('o banco só aceita M, F ou vazio: outro valor conta como "Não informado"', () => {
+    expect(comTela({ genero: 'X', qualificacao_complemento: '' }, { ...ANTERIOR, genero: null }).genero).toBeNull()
+    expect(comTela({ genero: 'f', qualificacao_complemento: '' }).genero).toBe('F')
+  })
+
+  it('grava o complemento digitado, sem espaço nas pontas', () => {
+    expect(comTela({ genero: 'F', qualificacao_complemento: '  solteira, advogada ' }).qualificacao_complemento).toBe(
+      'solteira, advogada',
+    )
+  })
+
+  it('complemento apagado na tela: null', () => {
+    expect(comTela({ genero: 'F', qualificacao_complemento: '   ' }).qualificacao_complemento).toBeNull()
+  })
+
+  it('cadastro novo com os campos preenchidos grava os dois', () => {
+    const f = montarFichaPessoa({
+      tipo: 'investidor',
+      chave: 'joao souza',
+      nome: 'João Souza',
+      form: FORM_VAZIO,
+      anterior: undefined,
+      paraContrato: { genero: 'M', qualificacao_complemento: 'casado, empresário' },
+    })
+    expect(f.genero).toBe('M')
+    expect(f.qualificacao_complemento).toBe('casado, empresário')
+  })
+
+  it('cadastro novo com os campos em branco: null', () => {
+    const f = montarFichaPessoa({
+      tipo: 'investidor',
+      chave: 'joao souza',
+      nome: 'João Souza',
+      form: FORM_VAZIO,
+      anterior: undefined,
+      paraContrato: { genero: '', qualificacao_complemento: '' },
+    })
+    expect(f.genero).toBeNull()
+    expect(f.qualificacao_complemento).toBeNull()
+  })
+
+  it('os campos da tela não mexem no endereço antigo', () => {
+    expect(comTela({ genero: 'M', qualificacao_complemento: '' }).endereco).toBe(
+      'Rua Antiga, 10, Centro, Barbacena/MG',
+    )
+  })
+
+  it('SEM os campos na tela (ficha do originador): preserva os dois da ficha', () => {
+    const f = montarFichaPessoa({
+      tipo: 'originador',
+      chave: 'an soberana',
+      nome: 'AN Soberana',
+      form: { ...FORM_VAZIO, pix: 'x' },
+      anterior: ANTERIOR,
+    })
+    expect(f.genero).toBe('F')
+    expect(f.qualificacao_complemento).toBe('brasileira, casada, médica')
+  })
+
+  it('a linha continua com todas as colunas, e nenhuma a mais', () => {
+    expect(Object.keys(comTela({ genero: 'M', qualificacao_complemento: '' })).sort()).toEqual(
+      Object.keys(montar({ pix: 'x' })).sort(),
+    )
   })
 })

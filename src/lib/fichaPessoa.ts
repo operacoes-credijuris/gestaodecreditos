@@ -2,10 +2,15 @@
 //
 // MORAVA DENTRO DE pages/comercial/DadosPessoaisBancarios.tsx, e saiu de lá para
 // poder ser testada: o Salvar é upsert da LINHA INTEIRA de investidor_dados, e
-// coluna que o payload esquece de carregar é coluna apagada. Três delas não têm
-// campo na tela — gênero, complemento da qualificação e o endereço antigo em
-// texto corrido — e as três vão para o contrato. Uma tela nova que montasse o
-// payload do zero apagaria as três sem erro nenhum.
+// coluna que o payload esquece de carregar é coluna apagada. Três delas iam para
+// o contrato sem campo na tela — gênero, complemento da qualificação e o
+// endereço antigo em texto corrido. Uma tela nova que montasse o payload do zero
+// apagaria as três sem erro nenhum.
+//
+// Desde a onda 2 do redesenho (02/10/2026, decisão do dono), gênero e
+// complemento GANHARAM CAMPO na ficha do INVESTIDOR (seção "Para o contrato"):
+// lá o Salvar grava o que a pessoa escolheu. Na ficha do ORIGINADOR, que não
+// tem os campos, continuam preservados da ficha anterior — ver `paraContrato`.
 //
 // Só `import type` de queries.ts: o valor de lá puxa o cliente do Supabase, e
 // esta função tem de rodar no teste sem rede.
@@ -73,12 +78,49 @@ export function enderecoDaFicha(
 }
 
 /**
+ * Os dois campos da seção "Para o contrato" da ficha do investidor, como a tela
+ * os tem: `genero` é '', 'M' ou 'F' (o '' é "Não informado").
+ */
+export interface CamposParaContrato {
+  genero: string
+  qualificacao_complemento: string
+}
+
+/**
+ * O valor da tela para uma coluna que pode estar vazia na ficha.
+ *
+ * VAZIO CONTINUA VAZIO, e do mesmo jeito: campo em branco grava null — salvo se
+ * a ficha já guardava "" (aí fica ""), para o Salvar de quem não mexeu no campo
+ * não trocar um vazio por outro. Valor preenchido vai sem espaço nas pontas.
+ */
+function daTela(valor: string, anterior: string | null | undefined): string | null {
+  const v = valor.trim()
+  if (v) return v
+  return anterior === '' ? '' : null
+}
+
+/**
+ * O gênero que a tela manda. O banco só aceita 'M', 'F' ou vazio
+ * (investidor_dados_genero_valido, migração 0047); qualquer outra coisa conta
+ * como "Não informado" — nunca vira masculino por conta própria.
+ */
+function generoDaTela(valor: string, anterior: string | null | undefined): string | null {
+  const g = valor.trim().toUpperCase()
+  return g === 'M' || g === 'F' ? g : daTela('', anterior)
+}
+
+/**
  * A linha que o Salvar grava.
  *
  * `chave` e `nome` chegam prontos (o nome já sem espaço nas pontas, a chave já
  * normalizada): a tela usa os dois ANTES, para barrar o cadastro sobre ficha
  * existente. `anterior` é a ficha como estava no banco — `undefined` no cadastro
  * novo —, e é dela que sai o que a tela não edita.
+ *
+ * `paraContrato` são o gênero e o complemento da qualificação QUANDO A TELA OS
+ * TEM (ficha do investidor): aí valem os da tela, inclusive para apagar. Sem
+ * ele (ficha do originador), os dois são preservados da ficha anterior, como
+ * sempre foram.
  */
 export function montarFichaPessoa({
   tipo,
@@ -86,6 +128,7 @@ export function montarFichaPessoa({
   nome,
   form,
   anterior,
+  paraContrato,
 }: {
   tipo: TipoPessoa
   chave: string
@@ -94,6 +137,7 @@ export function montarFichaPessoa({
   anterior:
     | Pick<InvestidorDados, 'endereco' | 'genero' | 'qualificacao_complemento'>
     | undefined
+  paraContrato?: CamposParaContrato
 }): Omit<InvestidorDados, 'atualizado_em'> {
   // Campo em branco vira null, não string vazia: no banco "não informado" é
   // ausência de valor, e "" faria a célula parecer preenchida com nada.
@@ -125,10 +169,14 @@ export function montarFichaPessoa({
     // tabela direto no banco ver o endereço pronto — com a regra do texto
     // legado de `enderecoDaFicha`.
     endereco: enderecoDaFicha(form, anterior?.endereco).texto,
-    // Sem campo próprio nesta tela ainda (usados só na geração de contratos,
-    // preenchidos direto no banco por enquanto) — preserva o que já estava
-    // na ficha, mesmo raciocínio do endereço legado acima.
-    genero: anterior?.genero ?? null,
-    qualificacao_complemento: anterior?.qualificacao_complemento ?? null,
+    // Com os campos na tela (investidor), grava o que a pessoa escolheu. Sem
+    // eles (originador), preserva o que já estava na ficha — mesmo raciocínio
+    // do endereço legado acima: coluna sem campo não pode ser apagada.
+    genero: paraContrato
+      ? generoDaTela(paraContrato.genero, anterior?.genero)
+      : (anterior?.genero ?? null),
+    qualificacao_complemento: paraContrato
+      ? daTela(paraContrato.qualificacao_complemento, anterior?.qualificacao_complemento)
+      : (anterior?.qualificacao_complemento ?? null),
   }
 }

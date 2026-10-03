@@ -1,5 +1,7 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { lerPedidoDaBusca } from '@/lib/buscaGeral'
+import { Plus, Pencil, Trash2, Copy, Phone, Mail, MessageCircle } from 'lucide-react'
 import { apensosCrud, contatosCrud, processosCrud, requerimentosCrud } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import type { ContatoServentia } from '@/lib/types'
@@ -22,8 +24,11 @@ import {
 } from '@/components/ui/Table'
 import { IconButton } from '@/components/ui/IconButton'
 import { useToast } from '@/components/ui/Toast'
-import { normalizarBusca, onlyDigits, vazioNull } from '@/lib/format'
+import { CampoDeBusca, FerramentasDoPainel, SecaoDoFormulario } from '@/components/operacional/Pecas'
+import { vazioNull } from '@/lib/format'
+import { casaBusca } from '@/lib/buscaDaTela'
 import { formatTelefone, telefoneIncompleto, waLink } from '@/lib/telefone'
+import { perguntarDescarte } from '@/lib/descarte'
 
 // Identificador do órgão julgador = "comarca / vara" (igual à aba Créditos).
 function buildOrgao(comarca?: string | null, vara?: string | null): string {
@@ -66,63 +71,106 @@ const DOT_TIPO: Record<OrgaoRow['tipo'], { cor: string; label: string }> = {
   auxiliar: { cor: 'bg-violet-500', label: 'Auxiliar' },
 }
 
-// Uma linha de valor dentro da célula (opcionalmente com rótulo Serv./Gab.
-// e, no caso do WhatsApp, como link clicável para o wa.me).
+type TipoValor = 'telefone' | 'whatsapp' | 'email'
+
+/**
+ * Copia o contato com um clique (item "Novo" da amostra). Pela área de
+ * transferência DE VERDADE; onde o navegador não deixa, o aviso diz como fazer à
+ * mão — calar a falha deixaria a pessoa colar o que estava antes.
+ */
+function useCopiar() {
+  const toast = useToast()
+  return async (valor: string, tipo: TipoValor) => {
+    try {
+      await navigator.clipboard.writeText(valor)
+      toast.success(tipo === 'email' ? 'E-mail copiado.' : 'Telefone copiado.')
+    } catch {
+      toast.error(
+        'O navegador não liberou a área de transferência. Selecione o contato e copie com Ctrl+C.',
+      )
+    }
+  }
+}
+
+// Uma linha de valor dentro da célula: o rótulo Serv./Gab. em cima (julgador),
+// o ícone do tipo e o valor; no telefone e no e-mail, o botão de copiar; no
+// WhatsApp, o link que abre a conversa.
 function LinhaValor({
   label,
   value,
-  whatsapp,
+  tipo,
 }: {
   label?: string
   value: string
-  whatsapp?: boolean
+  tipo: TipoValor
 }) {
+  const copiar = useCopiar()
+  const Icone = tipo === 'email' ? Mail : tipo === 'whatsapp' ? MessageCircle : Phone
   return (
-    <div className="flex items-baseline gap-1">
-      {/* Rótulo Serv./Gab. não encolhe nem quebra; o valor ao lado é que quebra. */}
-      {label && <span className="shrink-0 text-xs text-slate-600">{label}</span>}
-      {whatsapp ? (
+    <div>
+      {label && (
+        <span className="block text-xs font-bold uppercase tracking-wide text-texto-3">
+          {label}
+        </span>
+      )}
+      {tipo === 'whatsapp' ? (
         <a
           href={waLink(value)}
           target="_blank"
           rel="noreferrer"
-          className="text-emerald-700 hover:underline"
+          className="inline-flex min-h-[28px] items-center gap-1.5 text-sucesso hover:underline"
           title="Abrir conversa no WhatsApp"
         >
-          {value}
+          <Icone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="tabular-nums">{value}</span>
         </a>
       ) : (
-        <span className="text-slate-700">{value}</span>
+        <span className="inline-flex items-center gap-1.5 text-texto">
+          <Icone className="h-3.5 w-3.5 shrink-0 text-texto-3" aria-hidden="true" />
+          <span className={tipo === 'email' ? 'break-all' : 'whitespace-nowrap tabular-nums'}>
+            {value}
+          </span>
+          <button
+            type="button"
+            onClick={() => void copiar(value, tipo)}
+            aria-label={`Copiar ${value}`}
+            title="Copiar"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+          >
+            <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </span>
       )}
     </div>
   )
 }
 
 // Célula de um tipo de contato (telefone, whatsapp ou e-mail). Para julgadores
-// separa Serventia/Gabinete; para auxiliares mostra um valor único.
+// separa Serventia/Gabinete; para auxiliares mostra um valor único. Só aparece o
+// que está preenchido.
 function CelulaContato({
   serventia,
   gabinete,
   tipo,
-  whatsapp,
+  valor,
 }: {
   serventia?: string | null
   gabinete?: string | null
   tipo: 'julgador' | 'auxiliar'
-  whatsapp?: boolean
+  valor: TipoValor
 }) {
   if (tipo === 'auxiliar') {
     return serventia ? (
-      <LinhaValor value={serventia} whatsapp={whatsapp} />
+      <LinhaValor value={serventia} tipo={valor} />
     ) : (
-      <span className="text-slate-600">—</span>
+      <span className="text-texto-3">—</span>
     )
   }
-  if (!serventia && !gabinete) return <span className="text-slate-600">—</span>
+  if (!serventia && !gabinete) return <span className="text-texto-3">—</span>
   return (
-    <div className="space-y-0.5">
-      {serventia && <LinhaValor label="Serv." value={serventia} whatsapp={whatsapp} />}
-      {gabinete && <LinhaValor label="Gab." value={gabinete} whatsapp={whatsapp} />}
+    <div className="space-y-1.5">
+      {serventia && <LinhaValor label="Serv." value={serventia} tipo={valor} />}
+      {gabinete && <LinhaValor label="Gab." value={gabinete} tipo={valor} />}
     </div>
   )
 }
@@ -166,6 +214,17 @@ export default function ContatosServentias() {
   const toast = useToast()
 
   const [busca, setBusca] = useState('')
+
+  // VEIO DA BUSCA GERAL (Ctrl+K) com um contato escolhido: a lista já abre
+  // filtrada pelo órgão dele. O pedido sai do histórico logo depois.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { filtrarContatos } = lerPedidoDaBusca(location.state)
+  useEffect(() => {
+    if (!filtrarContatos) return
+    setBusca(filtrarContatos)
+    navigate(location.pathname, { replace: true, state: null })
+  }, [filtrarContatos, navigate, location.pathname])
   // Filtro por tribunal — 'todos' mostra todos os órgãos.
   const [filtroTribunal, setFiltroTribunal] = useState('todos')
   const [editing, setEditing] = useState<Partial<ContatoServentia> | null>(null)
@@ -186,8 +245,8 @@ export default function ContatosServentias() {
 
   // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
   // cobre X/overlay/Escape via prop dirty).
-  function fecharForm() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+  async function fecharForm() {
+    if (dirty && !(await perguntarDescarte())) return
     setEditing(null)
   }
 
@@ -294,38 +353,29 @@ export default function ContatosServentias() {
       l = l.filter((r) => r.tribunal.trim() === filtroTribunal)
     }
     if (busca.trim()) {
-      // Duas comparações, porque são dois jeitos de procurar a mesma coisa:
-      //   texto  sem acento ("goiania" acha "Goiânia" — antes não achava)
+      // Duas comparações, porque são dois jeitos de procurar a mesma coisa
+      // (lib/buscaDaTela.ts):
+      //   texto  sem acento ("goiania" acha "Goiânia");
       //   número só dígito ("3132221234" acha "(31) 3222-1234", que é como o
-      //          telefone está gravado; o placeholder promete busca por
-      //          telefone e ela só funcionava se a pontuação fosse digitada
-      //          igual)
-      const q = normalizarBusca(busca)
-      const qd = onlyDigits(busca)
-      l = l.filter((r) => {
-        const textos = [
-          formatOrgaoLabel(r.orgao, r.tipo),
-          r.tribunal,
-          r.contato?.serventia_telefone,
-          r.contato?.serventia_whatsapp,
-          r.contato?.serventia_email,
-          r.contato?.gabinete_telefone,
-          r.contato?.gabinete_whatsapp,
-          r.contato?.gabinete_email,
-        ].filter(Boolean) as string[]
-        if (textos.some((v) => normalizarBusca(v).includes(q))) return true
-        // A partir de 3 dígitos, para "31" não trazer meia lista.
-        if (qd.length >= 3) {
-          const tels = [
+      //          telefone está gravado) — a partir de 3 dígitos, para "31" não
+      //          trazer meia lista, e EM QUALQUER CAMPO (a amostra): também no
+      //          e-mail ("vara13@…") e no nome do órgão ("13ª Vara").
+      l = l.filter((r) =>
+        casaBusca(
+          [
+            formatOrgaoLabel(r.orgao, r.tipo),
+            r.tribunal,
             r.contato?.serventia_telefone,
             r.contato?.serventia_whatsapp,
+            r.contato?.serventia_email,
             r.contato?.gabinete_telefone,
             r.contato?.gabinete_whatsapp,
-          ].filter(Boolean) as string[]
-          if (tels.some((t) => onlyDigits(t).includes(qd))) return true
-        }
-        return false
-      })
+            r.contato?.gabinete_email,
+          ],
+          busca,
+          3,
+        ),
+      )
     }
     return l
   }, [todasLinhas, filtroTribunal, busca])
@@ -409,6 +459,7 @@ export default function ContatosServentias() {
     <div>
       <PageHeader
         title="Contatos"
+        description="Telefones e e-mails das serventias, gabinetes e órgãos auxiliares dos processos da carteira."
         actions={
           <Button
             icon={<Plus className="h-4 w-4" />}
@@ -419,17 +470,17 @@ export default function ContatosServentias() {
         }
       />
 
-      <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por órgão, tribunal, telefone ou e-mail…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
+      {/* A BUSCA E O FILTRO MORAM NO CARTÃO DA LISTA (a amostra), com a legenda
+          das bolinhas logo abaixo — derivada de DOT_TIPO, para não divergir das
+          cores usadas nas linhas. */}
+      <Card>
+        <FerramentasDoPainel>
+          <CampoDeBusca
+            valor={busca}
+            onChange={setBusca}
+            placeholder="Buscar por órgão, tribunal, telefone ou e-mail…"
+            className="min-w-[14rem]"
+          />
           <Select
             className="sm:w-64"
             value={filtroTribunal}
@@ -443,36 +494,35 @@ export default function ContatosServentias() {
               </option>
             ))}
           </Select>
-        </div>
-      </Card>
-
-      {/* Legenda das bolinhas, no respiro entre a busca e a tabela. Derivada de
-          DOT_TIPO justamente para não divergir das cores usadas nas linhas. */}
-      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-600">
-        {Object.entries(DOT_TIPO).map(([tipo, { cor, label }]) => (
-          <span key={tipo} className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className={cn('h-2 w-2 shrink-0 rounded-full', cor)}
-            />
-            órgão {label.toLowerCase()}
+        </FerramentasDoPainel>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-sm text-texto-2">
+          {Object.entries(DOT_TIPO).map(([tipo, { cor, label }]) => (
+            <span key={tipo} className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className={cn('h-2.5 w-2.5 shrink-0 rounded-full', cor)} />
+              órgão {label.toLowerCase()}
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-1.5">
+            <Copy className="h-3.5 w-3.5 text-texto-3" aria-hidden="true" />
+            copia o contato com um clique
           </span>
-        ))}
-      </div>
+        </div>
 
-      <Card>
         {isLoading ? (
           <Loading />
         ) : isError ? (
           <ErrorState
             message={error?.message}
-            onRetry={() => {
-              // Refaz as quatro consultas que alimentam a listagem.
-              contatos.refetch()
-              processos.refetch()
-              requerimentos.refetch()
-              apensos.refetch()
-            }}
+            // Refaz as quatro consultas que alimentam a listagem; o botão diz
+            // "Tentando…" até as quatro voltarem.
+            onRetry={() =>
+              Promise.all([
+                contatos.refetch(),
+                processos.refetch(),
+                requerimentos.refetch(),
+                apensos.refetch(),
+              ])
+            }
           />
         ) : linhas.length === 0 ? (
           // Lista vazia POR CAUSA da busca/filtro é outra situação: convidar a
@@ -524,7 +574,7 @@ export default function ContatosServentias() {
                 <TH>Telefone</TH>
                 <TH>WhatsApp</TH>
                 <TH>E-mail</TH>
-                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
+                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -532,13 +582,13 @@ export default function ContatosServentias() {
                 const c = row.contato
                 return (
                   <TR key={row.key}>
-                    <TD className="font-medium text-slate-800">
-                      <div className="flex items-start gap-2">
+                    <TD className="font-semibold text-texto">
+                      <div className="flex items-start gap-2.5">
                         <span
                           title={DOT_TIPO[row.tipo].label}
                           aria-label={`Tipo: ${DOT_TIPO[row.tipo].label}`}
                           className={cn(
-                            'mt-1.5 h-2 w-2 shrink-0 rounded-full',
+                            'mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full',
                             DOT_TIPO[row.tipo].cor,
                           )}
                         />
@@ -548,13 +598,14 @@ export default function ContatosServentias() {
                         </div>
                       </div>
                     </TD>
-                    <TD className="text-slate-600">{row.tribunal || '—'}</TD>
+                    <TD className="text-texto-2">{row.tribunal || '—'}</TD>
                     {/* Telefones/WhatsApp seguem sem quebra (números). */}
                     <TD className="whitespace-nowrap">
                       <CelulaContato
                         tipo={row.tipo}
                         serventia={c?.serventia_telefone}
                         gabinete={c?.gabinete_telefone}
+                        valor="telefone"
                       />
                     </TD>
                     <TD className="whitespace-nowrap">
@@ -562,20 +613,21 @@ export default function ContatosServentias() {
                         tipo={row.tipo}
                         serventia={c?.serventia_whatsapp}
                         gabinete={c?.gabinete_whatsapp}
-                        whatsapp
+                        valor="whatsapp"
                       />
                     </TD>
                     {/* E-mails longos podem quebrar em qualquer caractere. */}
-                    <TD className="break-all">
+                    <TD>
                       <CelulaContato
                         tipo={row.tipo}
                         serventia={c?.serventia_email}
                         gabinete={c?.gabinete_email}
+                        valor="email"
                       />
                     </TD>
                     {/* Ações: botões permanecem em linha única. */}
                     <TD className="whitespace-nowrap">
-                      <div className="flex gap-1">
+                      <div className="flex justify-end gap-0.5">
                         <IconButton
                           label="Editar contatos"
                           icon={<Pencil className="h-4 w-4" />}
@@ -609,6 +661,16 @@ export default function ContatosServentias() {
               : 'Novo contato auxiliar'
             : `Contatos — ${formatOrgaoLabel(editing?.orgao ?? '')}`
         }
+        description={
+          editandoAuxiliar
+            ? editing?.id
+              ? undefined
+              : 'Cartório, contadoria, setor de precatórios — o que não é vara nem gabinete.'
+            : editing?.orgao
+              ? todasLinhas.find((r) => r.tipo === 'julgador' && r.orgao === editing.orgao)
+                  ?.tribunal || undefined
+              : undefined
+        }
         size="lg"
         dirty={dirty}
         footer={
@@ -638,8 +700,9 @@ export default function ContatosServentias() {
                       placeholder="Ex.: Cartório do 2º Ofício"
                     />
                   </Field>
-                  <Field label="Tribunal / Entidade" required error={erros.tribunal}>
+                  <Field label="Tribunal / entidade" required error={erros.tribunal}>
                     <Input
+                      placeholder="Ex.: TJBA"
                       value={editing.tribunal ?? ''}
                       onChange={(e) => alterarCampo('tribunal', e.target.value)}
                     />
@@ -667,6 +730,7 @@ export default function ContatosServentias() {
                   <Field label="E-mail" className="sm:col-span-2">
                     <Input
                       type="email"
+                      placeholder="nome@tribunal.jus.br"
                       value={editing.serventia_email ?? ''}
                       onChange={(e) =>
                         setEditing({ ...editing, serventia_email: e.target.value })
@@ -677,8 +741,7 @@ export default function ContatosServentias() {
               </>
             ) : (
               <>
-                <div>
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">Serventia</h3>
+                <SecaoDoFormulario titulo="Serventia">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Telefone" error={erros.serventia_telefone}>
                       <Input
@@ -701,6 +764,7 @@ export default function ContatosServentias() {
                     <Field label="E-mail" className="sm:col-span-2">
                       <Input
                         type="email"
+                        placeholder="nome@tribunal.jus.br"
                         value={editing.serventia_email ?? ''}
                         onChange={(e) =>
                           setEditing({ ...editing, serventia_email: e.target.value })
@@ -708,9 +772,8 @@ export default function ContatosServentias() {
                       />
                     </Field>
                   </div>
-                </div>
-                <div>
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">Gabinete</h3>
+                </SecaoDoFormulario>
+                <SecaoDoFormulario titulo="Gabinete">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Telefone" error={erros.gabinete_telefone}>
                       <Input
@@ -733,6 +796,7 @@ export default function ContatosServentias() {
                     <Field label="E-mail" className="sm:col-span-2">
                       <Input
                         type="email"
+                        placeholder="nome@tribunal.jus.br"
                         value={editing.gabinete_email ?? ''}
                         onChange={(e) =>
                           setEditing({ ...editing, gabinete_email: e.target.value })
@@ -740,7 +804,7 @@ export default function ContatosServentias() {
                       />
                     </Field>
                   </div>
-                </div>
+                </SecaoDoFormulario>
               </>
             )}
           </form>
@@ -753,6 +817,7 @@ export default function ContatosServentias() {
         loading={remove.isPending}
         // Só o contato AUXILIAR tem lixeira (ver a coluna Ações); o contato de
         // órgão julgador não é excluído por aqui.
+        title="Excluir contato auxiliar"
         message={`Excluir o contato auxiliar "${toDelete?.orgao || ''}"?`}
         confirmLabel="Excluir"
         onConfirm={confirmDelete}

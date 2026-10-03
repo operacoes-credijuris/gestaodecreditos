@@ -3,15 +3,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Sparkles,
   X,
-  Send,
+  ArrowRight,
   AlertCircle,
   Menu,
   Trash2,
   Paperclip,
   ChevronDown,
   Check,
-  Puzzle,
+  Plus,
   MessageCircle,
+  RefreshCw,
 } from 'lucide-react'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
@@ -195,6 +196,20 @@ export function Assistente() {
 
   useEffect(() => {
     if (aberto) campo.current?.focus()
+  }, [aberto])
+
+  // AO FECHAR (pelo X ou pelo Esc), O FOCO VOLTA AO BOTÃO FLUTUANTE. Sem isto
+  // ele caía no <body> junto com o painel desmontado, e quem navega pelo
+  // teclado recomeçava do topo da página. Só depois de ter aberto uma vez: na
+  // primeira montagem o botão não pode roubar o foco da tela.
+  const botaoFlutuante = useRef<HTMLButtonElement>(null)
+  const jaAbriu = useRef(false)
+  useEffect(() => {
+    if (aberto) {
+      jaAbriu.current = true
+      return
+    }
+    if (jaAbriu.current) botaoFlutuante.current?.focus()
   }, [aberto])
 
   // Esc fecha, como no Drawer e no Modal — MAS SÓ SE NÃO HOUVER DIÁLOGO ABERTO.
@@ -484,22 +499,30 @@ export function Assistente() {
   if (!aberto) {
     return (
       <button
+        ref={botaoFlutuante}
         type="button"
         onClick={() => setAberto(true)}
         aria-label="Abrir assistente de dados"
         title="Perguntar ao assistente"
         className={cn(
-          'fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center',
-          'rounded-full bg-gradient-to-b from-brand-600 to-brand-700 text-white shadow-lg',
-          'transition-all duration-150 hover:from-brand-500 hover:to-brand-600 hover:shadow-xl',
-          'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
-          'active:scale-95',
+          'fixed bottom-[20px] right-[20px] z-40 flex h-[56px] w-[56px] items-center justify-center',
+          'rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-nivel-2',
+          'transition-transform duration-150 hover:scale-105 active:scale-95',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
         )}
       >
-        <Sparkles className="h-6 w-6" />
+        <Sparkles className="h-[22px] w-[22px]" />
       </button>
     )
   }
+
+  // Item de menu da amostra (`.pop .mi`): 36px de altura, o ✓ à esquerda.
+  const itemDeMenu = cn(
+    'flex h-12 w-full items-center gap-[10px] rounded-controle px-[10px] text-left text-corpo text-texto',
+    'hover:bg-superficie-3 focus:outline-none focus-visible:bg-superficie-3',
+  )
+  const menuFlutuante =
+    'absolute bottom-full left-0 z-20 mb-1 min-w-[220px] rounded-[12px] border border-borda bg-superficie p-[6px] shadow-nivel-2'
 
   return (
     <>
@@ -507,90 +530,185 @@ export function Assistente() {
         role="dialog"
         aria-label="Assistente de dados"
         className={cn(
-          'fixed z-40 flex flex-col overflow-hidden rounded-xl border border-slate-200',
-          'bg-white shadow-2xl',
+          'fixed z-40 flex flex-col overflow-hidden rounded-[18px] border border-borda',
+          'bg-superficie shadow-nivel-3',
           // Celular: ocupa a tela. Desktop: painel no canto, como um chat.
-          'inset-x-3 bottom-3 top-16 sm:inset-x-auto sm:top-auto sm:bottom-5 sm:right-5',
-          'sm:h-[min(620px,calc(100vh-4rem))] sm:w-[420px]',
+          'inset-x-3 bottom-3 top-16 sm:inset-x-auto sm:top-auto sm:bottom-[20px] sm:right-[20px]',
+          'sm:h-[min(620px,calc(100vh-40px))] sm:w-[420px]',
         )}
       >
-        <header className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <header className="flex items-center gap-[6px] border-b border-borda bg-superficie p-[10px]">
           <IconButton
             label="Histórico de conversas"
-            icon={<Menu className="h-4 w-4" />}
+            icon={<Menu className="h-[16px] w-[16px]" />}
             onClick={() => setHistoricoAberto((v) => !v)}
           />
-          <Sparkles className="h-4 w-4 shrink-0 text-brand-700" />
-          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">
-            Assistente de dados
+          <p className="flex min-w-0 flex-1 items-center gap-[8px] font-display text-corpo font-bold text-texto">
+            <Sparkles className="h-[16px] w-[16px] shrink-0 text-marca-texto" />
+            <span className="truncate">Assistente de dados</span>
           </p>
           <IconButton
             label="Fechar assistente"
-            icon={<X className="h-4 w-4" />}
+            icon={<X className="h-[16px] w-[16px]" />}
             onClick={() => setAberto(false)}
           />
         </header>
 
-        {/* Wrapper único (seletor de modelo + mensagens): é sobre ELE que a
-            gaveta de histórico se sobrepõe, então ela cobre o seletor
-            também — não só a lista de mensagens abaixo dele. */}
-        <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 space-y-3 overflow-y-auto scrollbar-thin px-4 py-4">
-            {mensagens.length === 0 && (
-              <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-                <div>
-                  <p className="font-display text-lg font-bold text-slate-800">
-                    Olá{primeiroNome ? `, ${primeiroNome}` : ''}!
-                  </p>
-                </div>
-                <div className="flex w-full max-w-xs flex-col gap-2">
-                  {SUGESTOES.map((s) => (
+        {/* O HISTÓRICO COBRE O PAINEL INTEIRO ABAIXO DO CABEÇALHO (o `.asst-hist`
+            da amostra), a caixa de pergunta inclusive: escolher uma conversa é
+            o que se faz ali, e a pergunta pela metade continua embaixo, intacta. */}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          {/* Sempre montada (mesmo fechada): é o transform que anima a entrada
+              pelo lado — condicionar a montagem trocaria a animação por um
+              "pop" instantâneo. */}
+          <div
+            className={cn(
+              'absolute inset-0 z-10 flex flex-col overflow-hidden bg-superficie',
+              'transition-transform duration-200 ease-out',
+              historicoAberto ? 'translate-x-0' : '-translate-x-full pointer-events-none',
+            )}
+          >
+            <div className="flex items-center gap-[6px] px-3 pb-[6px] pt-3">
+              <p className="min-w-0 flex-1 font-display text-corpo font-bold text-texto">
+                Conversas
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                icon={<Plus className="h-[16px] w-[16px]" />}
+                onClick={novaConversa}
+              >
+                Nova
+              </Button>
+              <IconButton
+                label="Fechar histórico"
+                icon={<X className="h-[16px] w-[16px]" />}
+                onClick={() => setHistoricoAberto(false)}
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto scrollbar-thin px-[8px] pb-[8px]">
+              {conversasQuery.isLoading && (
+                // O ÍCONE GIRA (a amostra): texto parado parecia lista travada.
+                <p role="status" className="flex items-center gap-[6px] p-3 text-sm text-texto-3">
+                  <RefreshCw className="h-[14px] w-[14px] shrink-0 animate-spin" aria-hidden />
+                  Carregando…
+                </p>
+              )}
+              {conversasQuery.data?.length === 0 && (
+                <p className="p-3 text-sm text-texto-3">
+                  Nenhuma conversa salva ainda — as últimas 10 aparecem aqui.
+                </p>
+              )}
+              {conversasQuery.data?.map((c) => {
+                const atual = c.id === conversaAtualId
+                return (
+                  <div
+                    key={c.id}
+                    className={cn(
+                      'flex items-center rounded-campo',
+                      atual ? 'bg-marca-leve' : 'hover:bg-superficie-3',
+                    )}
+                  >
                     <button
-                      key={s}
                       type="button"
-                      onClick={() => enviar(s)}
+                      onClick={() => carregarConversa(c)}
+                      aria-current={atual ? 'true' : undefined}
                       className={cn(
-                        'rounded-lg border border-slate-200 px-3 py-2 text-left text-sm',
-                        'text-slate-700 transition-colors hover:border-brand-300 hover:bg-brand-50',
-                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                        'grid min-w-0 flex-1 rounded-campo px-[10px] py-[8px] text-left',
+                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                       )}
                     >
-                      {s}
+                      <span
+                        className={cn(
+                          'truncate text-corpo font-bold',
+                          atual ? 'text-marca-texto' : 'text-texto',
+                        )}
+                      >
+                        {c.titulo}
+                      </span>
+                      <span className="text-xs text-texto-3">
+                        {formatDateTime(c.atualizado_em)}
+                      </span>
                     </button>
-                  ))}
-                </div>
-              </div>
-            )}
+                    <IconButton
+                      label="Excluir conversa"
+                      icon={<Trash2 className="h-[16px] w-[16px]" />}
+                      onClick={() => setExcluirId(c.id)}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
 
-            {mensagens.map((m, i) => (
-              <div
-                key={i}
-                className={cn(
-                  'rounded-lg px-3 py-2 text-sm',
-                  m.role === 'user'
-                    ? 'ml-auto max-w-[92%] bg-brand-600 text-white'
-                    : // A resposta pode trazer tabela de processos: ocupa a
-                      // largura inteira, senão a tabela nasce comprimida.
-                      'w-full bg-slate-100 text-slate-800',
-                )}
-              >
-                {m.role === 'user' ? (
-                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
+          <div className="relative flex flex-1 flex-col overflow-hidden">
+            <div className="flex flex-1 flex-col gap-3 overflow-y-auto scrollbar-thin p-[14px]">
+              {mensagens.length === 0 && (
+                <div className="my-auto text-center">
+                  <div className="mx-auto mb-[8px] flex h-[48px] w-[48px] items-center justify-center rounded-cartao bg-marca-suave text-marca-texto">
+                    <Sparkles className="h-[20px] w-[20px]" />
+                  </div>
+                  <p className="font-display text-xl font-extrabold text-texto">
+                    Olá{primeiroNome ? `, ${primeiroNome}` : ''}!
+                  </p>
+                  {/* A FRASE DE APOIO diz o que ele sabe responder antes das
+                      sugestões — o painel só com "Olá" não dava pista nenhuma. */}
+                  <p className="mb-[14px] mt-1 text-corpo text-texto-2">
+                    Pergunte sobre a carteira, os processos ou os contatos.
+                  </p>
+                  <div className="grid gap-[6px]">
+                    {SUGESTOES.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => enviar(s)}
+                        className={cn(
+                          'rounded-campo border border-borda bg-superficie-2 px-4 py-[10px] text-left text-sm text-texto',
+                          'transition-colors hover:border-marca-viva hover:bg-marca-leve',
+                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                        )}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {mensagens.map((m, i) =>
+                m.role === 'user' ? (
+                  <p
+                    key={i}
+                    className={cn(
+                      'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca px-4 py-[8px]',
+                      'whitespace-pre-wrap text-corpo text-white [overflow-wrap:anywhere]',
+                    )}
+                  >
+                    {m.content}
+                  </p>
                 ) : (
-                  <div className="break-words">
-                    <TextoIA texto={m.content} />
+                  // A resposta pode trazer tabela de processos: ocupa a largura
+                  // inteira, senão a tabela nasce comprimida.
+                  <div
+                    key={i}
+                    className="w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-4 py-[10px] text-corpo text-texto"
+                  >
+                    <div className="[overflow-wrap:anywhere]">
+                      <TextoIA texto={m.content} />
+                    </div>
 
                     {m.arquivos && m.arquivos.length > 0 && (
-                      <div className="mt-2 flex flex-col gap-1">
+                      <div className="mt-[8px] grid gap-1">
                         {m.arquivos.map((f) => (
                           <a
                             key={f.url}
                             href={f.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline"
+                            className="inline-flex items-center gap-[6px] text-sm font-semibold text-marca-texto hover:underline"
                           >
-                            <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                            <Paperclip className="h-[16px] w-[16px] shrink-0" />
                             {f.nome}
                           </a>
                         ))}
@@ -598,19 +716,28 @@ export function Assistente() {
                     )}
 
                     {m.acaoProposta && (
-                      <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50 p-3">
-                        <p className="font-medium text-brand-900">
+                      <div className="mt-[8px] grid gap-1 rounded-[12px] border border-info-borda bg-marca-leve p-[10px]">
+                        <p className="font-bold text-texto">
                           Gerar petição — processo {m.acaoProposta.numero_cnj ?? '(a confirmar)'}
                         </p>
-                        <p className="mt-1 text-brand-800">{m.acaoProposta.instrucao}</p>
-                        <p className="mt-1.5 text-xs text-brand-700">
+                        <p className="text-texto-2">{m.acaoProposta.instrucao}</p>
+                        <p className="text-xs text-texto-3">
                           Abre a tela de revisão de sempre — nada é gerado sem você conferir.
                         </p>
-                        <div className="mt-2 flex gap-2">
-                          <Button size="sm" onClick={() => confirmarAcao(m.acaoProposta!, i)}>
+                        <div className="mt-1 flex gap-[6px]">
+                          <Button
+                            type="button"
+                            size="md"
+                            onClick={() => confirmarAcao(m.acaoProposta!, i)}
+                          >
                             Confirmar
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => descartarAcao(i)}>
+                          <Button
+                            type="button"
+                            size="md"
+                            variant="ghost"
+                            onClick={() => descartarAcao(i)}
+                          >
                             Cancelar
                           </Button>
                         </div>
@@ -622,192 +749,142 @@ export function Assistente() {
                         type="button"
                         onClick={() => abrirWhatsapp(m.contatoSugerido!)}
                         className={cn(
-                          'mt-3 flex w-full items-center gap-2.5 rounded-lg border border-emerald-200',
-                          'bg-emerald-50 p-3 text-left transition-colors hover:bg-emerald-100',
-                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500',
+                          'mt-[8px] flex w-full items-center gap-[10px] rounded-[12px] border border-sucesso-borda',
+                          'bg-sucesso-fundo p-[10px] text-left text-texto transition-colors hover:bg-sucesso-borda/40',
+                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                         )}
                       >
-                        <MessageCircle className="h-5 w-5 shrink-0 text-emerald-700" />
-                        <span className="min-w-0 flex-1">
+                        <MessageCircle className="h-[22px] w-[22px] shrink-0 text-sucesso" />
+                        <span className="grid min-w-0 flex-1">
                           {m.contatoSugerido.nome_contato && (
-                            <span className="block truncate text-xs text-emerald-700">
+                            <span className="truncate text-xs text-sucesso">
                               {m.contatoSugerido.nome_contato}
                             </span>
                           )}
-                          <span className="block font-medium text-emerald-900">
+                          <span className="font-bold tabular-nums text-texto">
                             {m.contatoSugerido.whatsapp}
                           </span>
-                          <span className="block text-xs text-emerald-700">
+                          <span className="text-xs text-texto-3">
                             Clique para abrir o WhatsApp e copiar a mensagem
                           </span>
                         </span>
                       </button>
                     )}
                   </div>
-                )}
-              </div>
-            ))}
-
-            {carregando && (
-              <div className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="flex gap-1">
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0ms]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
-                </span>
-                Consultando os dados…
-              </div>
-            )}
-
-            {erro && (
-              <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span className="break-words">{erro}</span>
-              </div>
-            )}
-
-            <div ref={fimDaLista} />
-          </div>
-
-          {/* Sempre montada (mesmo fechada): é o transform que anima a entrada
-              pelo lado — condicionar a montagem trocaria a animação por um
-              "pop" instantâneo. */}
-          <div
-            className={cn(
-              'absolute inset-y-0 left-0 z-10 flex w-[82%] max-w-[280px] flex-col overflow-hidden',
-              'border-r border-slate-200 bg-white',
-              'transition-transform duration-200 ease-out',
-              historicoAberto ? 'translate-x-0' : '-translate-x-full pointer-events-none',
-            )}
-          >
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="text-sm font-semibold text-slate-800">Conversas</p>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={novaConversa}
-                  className="rounded px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
-                >
-                  Nova
-                </button>
-                <IconButton
-                  label="Fechar histórico"
-                  icon={<X className="h-4 w-4" />}
-                  onClick={() => setHistoricoAberto(false)}
-                />
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto scrollbar-thin">
-              {conversasQuery.isLoading && (
-                <p className="p-4 text-sm text-slate-500">Carregando…</p>
+                ),
               )}
-              {conversasQuery.data?.length === 0 && (
-                <p className="p-4 text-sm text-slate-500">
-                  Nenhuma conversa salva ainda — as últimas 10 aparecem aqui.
-                </p>
-              )}
-              {conversasQuery.data?.map((c) => (
+
+              {carregando && (
                 <div
-                  key={c.id}
+                  role="status"
                   className={cn(
-                    'group flex items-center gap-1 border-b border-slate-100 px-3 py-2.5 hover:bg-slate-50',
-                    c.id === conversaAtualId && 'bg-brand-50',
+                    'flex w-full items-center gap-[8px] rounded-[14px_14px_14px_4px] bg-superficie-3',
+                    'px-4 py-[10px] text-corpo text-texto-2',
                   )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => carregarConversa(c)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <p className="truncate text-sm text-slate-800">{c.titulo}</p>
-                    <p className="text-xs text-slate-500">{formatDateTime(c.atualizado_em)}</p>
-                  </button>
-                  <IconButton
-                    label="Excluir conversa"
-                    icon={<Trash2 className="h-4 w-4" />}
-                    onClick={() => setExcluirId(c.id)}
-                  />
+                  <span className="inline-flex gap-[3px]">
+                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:0ms]" />
+                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:150ms]" />
+                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:300ms]" />
+                  </span>
+                  Consultando os dados…
                 </div>
-              ))}
+              )}
+
+              {/* O ERRO FICA NUMA CAIXA À PARTE, depois da conversa: não entra no
+                  histórico, e a pergunta continua lá para tentar de novo. */}
+              {erro && (
+                <div
+                  role="alert"
+                  className={cn(
+                    'mt-[2px] flex items-start gap-[8px] rounded-[12px] border border-perigo-borda',
+                    'bg-perigo-fundo px-4 py-[10px] text-corpo text-perigo',
+                  )}
+                >
+                  <AlertCircle className="mt-[2px] h-[16px] w-[16px] shrink-0" />
+                  <span className="break-words text-texto">{erro}</span>
+                </div>
+              )}
+
+              <div ref={fimDaLista} />
             </div>
           </div>
-        </div>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            enviar(texto)
-          }}
-          className="border-t border-slate-200 bg-slate-50 px-3 py-3"
-        >
-          {arquivos.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {arquivos.map((f, i) => (
-                <span
-                  key={`${f.name}-${i}`}
-                  className="flex items-center gap-1 rounded-full bg-slate-200 py-1 pl-2.5 pr-1 text-xs text-slate-700"
-                >
-                  <Paperclip className="h-3 w-3 shrink-0" />
-                  <span className="max-w-[120px] truncate">{f.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removerArquivo(i)}
-                    aria-label={`Remover ${f.name}`}
-                    className="rounded-full p-0.5 hover:bg-slate-300"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          <textarea
-            ref={campo}
-            rows={1}
-            value={texto}
-            onChange={(e) => setTexto(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter envia, Shift+Enter quebra linha — convenção de chat.
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                enviar(texto)
-              }
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              enviar(texto)
             }}
-            placeholder="Faça uma pergunta…"
-            className={cn(
-              'max-h-28 min-h-[2.5rem] w-full resize-none rounded-lg border border-slate-300',
-              'px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400',
-              'focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500',
+            className="grid gap-[6px] border-t border-borda bg-superficie p-[10px]"
+          >
+            {arquivos.length > 0 && (
+              <div className="flex flex-wrap gap-[6px]">
+                {arquivos.map((f, i) => (
+                  <span
+                    key={`${f.name}-${i}`}
+                    className="inline-flex h-[24px] max-w-full items-center gap-[6px] rounded-full bg-superficie-3 pl-[8px] text-xs text-texto-2"
+                  >
+                    <Paperclip className="h-[12px] w-[12px] shrink-0" />
+                    <span className="max-w-[160px] truncate">{f.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removerArquivo(i)}
+                      aria-label={`Remover ${f.name}`}
+                      title={`Remover ${f.name}`}
+                      className={cn(
+                        'flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-full text-texto-3',
+                        'hover:bg-borda-forte hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                      )}
+                    >
+                      <X className="h-[12px] w-[12px]" />
+                    </button>
+                  </span>
+                ))}
+              </div>
             )}
-          />
 
-          {/* Seletor de modelo, no mesmo lugar do claude.ai: abaixo da caixa de
-              texto, um botão compacto que abre a lista ao clicar. Skills e o
-              clipe de anexo ficam do lado dele, no mesmo grupo. */}
-          <div className="mt-2 flex items-center justify-between">
+            <textarea
+              ref={campo}
+              rows={2}
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter envia, Shift+Enter quebra linha — convenção de chat.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  enviar(texto)
+                }
+              }}
+              placeholder="Faça uma pergunta…"
+              aria-label="Pergunta"
+              className={cn(
+                'max-h-28 w-full resize-none rounded-campo border border-borda-forte bg-superficie',
+                'px-[10px] py-[8px] text-corpo text-texto placeholder:text-texto-3',
+                'focus:border-anel focus:outline-none',
+              )}
+            />
+
+            {/* Seletor de modelo, no mesmo lugar do claude.ai: abaixo da caixa de
+                texto, um botão compacto que abre a lista ao clicar. Skills e o
+                clipe de anexo ficam do lado dele, e o Enviar na ponta direita. */}
             <div className="flex items-center gap-1">
               <div className="relative" ref={modeloRef}>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setModeloAberto((v) => !v)}
                   aria-haspopup="listbox"
                   aria-expanded={modeloAberto}
-                  className={cn(
-                    'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600',
-                    'hover:bg-slate-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
-                  )}
+                  title="Modelo do assistente"
+                  className="px-3"
                 >
-                  <Sparkles className="h-3 w-3" />
+                  <Sparkles className="h-[16px] w-[16px]" />
                   {MODELOS.find((m) => m.key === modelo)?.label ?? 'Sonnet'}
-                  <ChevronDown className="h-3 w-3" />
-                </button>
+                  <ChevronDown className="h-[16px] w-[16px]" />
+                </Button>
 
                 {modeloAberto && (
-                  <div
-                    role="listbox"
-                    className="absolute bottom-full left-0 z-20 mb-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
-                  >
+                  <div role="listbox" aria-label="Modelo" className={menuFlutuante}>
                     {MODELOS.map((m) => (
                       <button
                         key={m.key}
@@ -818,13 +895,14 @@ export function Assistente() {
                           trocarModelo(m.key)
                           setModeloAberto(false)
                         }}
-                        className={cn(
-                          'flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-slate-50',
-                          m.key === modelo ? 'font-semibold text-brand-700' : 'text-slate-700',
-                        )}
+                        className={itemDeMenu}
                       >
+                        {m.key === modelo ? (
+                          <Check className="h-[16px] w-[16px] shrink-0 text-marca-texto" />
+                        ) : (
+                          <span className="w-[16px] shrink-0" />
+                        )}
                         {m.label}
-                        {m.key === modelo && <Check className="h-3.5 w-3.5" />}
                       </button>
                     ))}
                   </div>
@@ -835,53 +913,63 @@ export function Assistente() {
                   dentro de uma lista vazia. */}
               {skillsQuery.data && skillsQuery.data.length > 0 && (
                 <div className="relative" ref={skillsRef}>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => setSkillsAberto((v) => !v)}
                     aria-haspopup="listbox"
                     aria-expanded={skillsAberto}
-                    className={cn(
-                      'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600',
-                      'hover:bg-slate-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
-                    )}
+                    title="Skills desta conversa"
+                    className="px-3"
                   >
-                    <Puzzle className="h-3 w-3" />
-                    Skills
-                    {skillsSelecionadas.size > 0 && ` (${skillsSelecionadas.size})`}
-                    <ChevronDown className="h-3 w-3" />
-                  </button>
+                    {/* Num span só: solto, o "(N)" virava outro item do flex e
+                        ganhava o espaço do gap além do próprio. */}
+                    <span>
+                      Skills
+                      {skillsSelecionadas.size > 0 && ` (${skillsSelecionadas.size})`}
+                    </span>
+                    <ChevronDown className="h-[16px] w-[16px]" />
+                  </Button>
 
                   {skillsAberto && (
-                    <div
-                      role="listbox"
-                      aria-multiselectable="true"
-                      className="absolute bottom-full left-0 z-20 mb-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
-                    >
-                      {skillsQuery.data.map((s) => {
-                        const marcada = skillsSelecionadas.has(s.skill_id)
-                        return (
-                          <button
-                            key={s.id}
-                            type="button"
-                            role="option"
-                            aria-selected={marcada}
-                            onClick={() => alternarSkill(s.skill_id)}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
-                          >
-                            <span
-                              className={cn(
-                                'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
-                                marcada
-                                  ? 'border-brand-600 bg-brand-600 text-white'
-                                  : 'border-slate-300',
-                              )}
+                    <div className={menuFlutuante}>
+                      <p
+                        id="assistente-skills-titulo"
+                        className="px-[10px] pb-1 pt-[6px] text-xs font-bold uppercase tracking-wider text-texto-3"
+                      >
+                        Skills desta conversa
+                      </p>
+                      <div
+                        role="listbox"
+                        aria-multiselectable="true"
+                        aria-labelledby="assistente-skills-titulo"
+                      >
+                        {skillsQuery.data.map((s) => {
+                          const marcada = skillsSelecionadas.has(s.skill_id)
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              role="option"
+                              aria-selected={marcada}
+                              onClick={() => alternarSkill(s.skill_id)}
+                              className={itemDeMenu}
                             >
-                              {marcada && <Check className="h-3 w-3" />}
-                            </span>
-                            <span className="truncate">{s.nome}</span>
-                          </button>
-                        )
-                      })}
+                              <span
+                                className={cn(
+                                  'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border',
+                                  marcada
+                                    ? 'border-marca bg-marca text-white'
+                                    : 'border-borda-forte bg-superficie',
+                                )}
+                              >
+                                {marcada && <Check className="h-[12px] w-[12px]" />}
+                              </span>
+                              <span className="truncate">{s.nome}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -894,36 +982,29 @@ export function Assistente() {
                 onChange={selecionarArquivos}
                 className="hidden"
               />
-              <button
-                type="button"
+              <IconButton
+                label="Anexar arquivo"
+                icon={<Paperclip className="h-[16px] w-[16px]" />}
                 onClick={() => inputArquivos.current?.click()}
-                aria-label="Anexar arquivo"
-                title="Anexar arquivo"
+              />
+
+              <button
+                type="submit"
+                disabled={!texto.trim() || carregando}
+                aria-label="Enviar pergunta"
+                title="Enviar pergunta"
                 className={cn(
-                  'flex items-center justify-center rounded-md p-1.5 text-slate-600',
-                  'hover:bg-slate-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                  'ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-controle',
+                  'bg-marca text-white shadow-nivel-1 transition-colors hover:bg-marca-hover active:scale-95',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
+                  'disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:bg-marca disabled:active:scale-100',
                 )}
               >
-                <Paperclip className="h-3.5 w-3.5" />
+                <ArrowRight className="h-[16px] w-[16px]" />
               </button>
             </div>
-
-            <button
-              type="submit"
-              disabled={!texto.trim() || carregando}
-              aria-label="Enviar pergunta"
-              className={cn(
-                'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-                'bg-gradient-to-b from-brand-600 to-brand-700 text-white transition-all',
-                'hover:from-brand-500 hover:to-brand-600 active:scale-95',
-                'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
-                'disabled:from-brand-300 disabled:to-brand-300 disabled:active:scale-100',
-              )}
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
 
       <ConfirmDialog

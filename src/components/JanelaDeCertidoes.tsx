@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { PainelCertidoes } from '@/components/PainelCertidoes'
+import { perguntarDescarte } from '@/lib/descarte'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 
 export function JanelaDeCertidoes({
@@ -31,6 +32,12 @@ export function JanelaDeCertidoes({
   onClose: () => void
 }) {
   const [sujo, setSujo] = useState(false)
+  // O FECHAR DO RODAPÉ PERGUNTA COMO O X: antes ele descartava o formulário
+  // mexido sem dizer nada.
+  const fechar = async () => {
+    if (sujo && !(await perguntarDescarte())) return
+    onClose()
+  }
   return (
     <Modal
       open
@@ -38,12 +45,13 @@ export function JanelaDeCertidoes({
       size="xl"
       dirty={sujo}
       title="Certidões do crédito"
+      // O TÍTULO DO CARD COMO APOIO, como na amostra: a janela cobre o quadro, e
+      // é este texto que diz de QUAL crédito são as certidões.
+      description={tituloDoCard || undefined}
       footer={
-        <div className="flex justify-end">
-          <Button variant="ghost" onClick={onClose}>
-            Fechar
-          </Button>
-        </div>
+        <Button variant="ghost" onClick={() => void fechar()}>
+          Fechar
+        </Button>
       }
     >
       <PainelCertidoes

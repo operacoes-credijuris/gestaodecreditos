@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react'
+import { Check, RefreshCw } from 'lucide-react'
 
 // Indicador uniforme de sincronização em segundo plano: enquanto sincroniza,
 // mostra spinner + rótulo; depois, o horário da última atualização (HH:MM).
@@ -26,13 +26,17 @@ export function SyncStatus({
    */
   separador?: boolean
 }) {
-  const ponto = separador ? <span className="text-slate-300">·</span> : null
+  const ponto = separador ? <span className="text-borda-forte">·</span> : null
 
+  // O `.sync-mini` da amostra: o texto no cinza de metadado e o ÍCONE VERDE nos
+  // dois estados — girando enquanto sincroniza, e o ✓ depois. O verde diz "está
+  // em dia" de relance; o texto continua discreto.
   if (syncing) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-brand-600">
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-texto-3">
         {ponto}
-        <RefreshCw className="h-3.5 w-3.5 animate-spin" /> {label ?? 'sincronizando…'}
+        <RefreshCw className="h-[14px] w-[14px] animate-spin text-sucesso-cheio" aria-hidden />{' '}
+        {label ?? 'sincronizando…'}
       </span>
     )
   }
@@ -40,8 +44,9 @@ export function SyncStatus({
   const d = new Date(updatedAt)
   if (Number.isNaN(d.getTime())) return null
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-texto-3">
       {ponto}
+      <Check className="h-[14px] w-[14px] text-sucesso-cheio" aria-hidden />
       <span>
         atualizado às{' '}
         {d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}

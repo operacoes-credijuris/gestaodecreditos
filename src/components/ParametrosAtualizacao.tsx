@@ -7,8 +7,15 @@
 // parcela que o originou. A data de referência nasce como hoje e é editável.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { AlertTriangle, Download } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
+import {
+  MSG_BCB_ATUALIZADO,
+  mensagemDaFalhaDoBcb,
+  parametrosAlterados,
+  type IndicesDosParametros,
+} from '@/lib/formulariosDasConfiguracoes'
+import { perguntarDescarte } from '@/lib/descarte'
 import {
   useParametrosAtualizacao,
   useSalvarParametrosAtualizacao,
@@ -25,6 +32,11 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 
+/**
+ * Uma linha da janela (o `.param-rows` da amostra): o rótulo à esquerda, na cor
+ * do texto, e o campo de 160px à direita. Sem régua entre as linhas — são só
+ * quatro, e o alinhamento já faz a tabela.
+ */
 function LinhaParametro({
   rotulo,
   children,
@@ -33,9 +45,18 @@ function LinhaParametro({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-2.5 last:border-b-0">
-      <span className="text-sm text-slate-600">{rotulo}</span>
-      <div className="w-40 shrink-0">{children}</div>
+    <div className="flex items-center justify-between gap-5 py-1.5">
+      <span className="text-corpo text-texto">{rotulo}</span>
+      <div className="w-[160px] shrink-0">{children}</div>
+    </div>
+  )
+}
+
+/** O valor sem campo (o `.ro` da amostra): derivado ou fixo, só para ler. */
+function SoLeitura({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-campo bg-superficie-3 px-4 py-2 text-right text-corpo tabular-nums text-texto-2">
+      {children}
     </div>
   )
 }
@@ -95,9 +116,16 @@ export function ModalParametrosAtualizacao({
     setIpca(params.data?.ipca_12m_aa ?? null)
   }, [open, params.data])
 
+  // O QUE O BANCO CENTRAL ACABOU DE GRAVAR, para a pergunta do descarte: o
+  // cache dos parâmetros só se atualiza um instante depois, e nesse meio-tempo os
+  // campos já mostram os índices novos — que não são rascunho, já estão gravados.
+  const [gravadosNaBusca, setGravadosNaBusca] = useState<IndicesDosParametros | null>(null)
+
   // A busca vale só para a abertura em que foi feita.
   useEffect(() => {
-    if (open) setDaBusca(null)
+    if (!open) return
+    setDaBusca(null)
+    setGravadosNaBusca(null)
   }, [open])
 
   const derivado = ipcaMais2(ipca)
@@ -134,6 +162,7 @@ export function ModalParametrosAtualizacao({
         typeof r.ipca_12m_aa === 'number' ? r.ipca_12m_aa : (params.data?.ipca_12m_aa ?? null)
       setSelic(novaSelic)
       setIpca(novoIpca)
+      setGravadosNaBusca({ selic: novaSelic, ipca: novoIpca })
       if (r.data_referencia) {
         setDaBusca({ selic: novaSelic, ipca: novoIpca, data: r.data_referencia })
       }
@@ -141,9 +170,11 @@ export function ModalParametrosAtualizacao({
       // do cache: sem invalidar, mostraria os números de antes da gravação.
       void qc.invalidateQueries({ queryKey: ['parametros_atualizacao'] })
       if (r.avisos?.length) r.avisos.forEach((a) => toast.error(a))
-      else toast.success('Índices do Banco Central atualizados e já gravados.')
+      else toast.success(MSG_BCB_ATUALIZADO)
     } catch (e) {
-      toast.error((e as Error).message)
+      // FALHA TOTAL NUMA FRASE LEGÍVEL: o que veio de cada índice, e que nada foi
+      // gravado (ver mensagemDaFalhaDoBcb).
+      toast.error(mensagemDaFalhaDoBcb(e))
     } finally {
       setBuscando(false)
     }
@@ -163,11 +194,35 @@ export function ModalParametrosAtualizacao({
     }
   }
 
+  // Por que o Salvar está travado, dito no próprio botão (o title da amostra).
+  const motivoDaTrava = params.isError
+    ? 'Os parâmetros atuais não foram lidos: salvar agora gravaria por cima sem saber o que está lá.'
+    : params.isLoading
+      ? 'Lendo os parâmetros atuais…'
+      : undefined
+
+  // SELIC OU IPCA MEXIDOS À MÃO: fechar pergunta antes de descartar. Enquanto a
+  // leitura corre não há o que comparar — os campos estão travados, vazios por
+  // falta de dado e não por quem digitou.
+  const gravados: IndicesDosParametros = gravadosNaBusca ?? {
+    selic: params.data?.selic_aa ?? null,
+    ipca: params.data?.ipca_12m_aa ?? null,
+  }
+  const sujo = !params.isLoading && parametrosAlterados({ selic, ipca }, gravados)
+
+  // O CANCELAR PERGUNTA COMO O X, o Escape e o clique fora (o `dirty` da Modal).
+  async function cancelar() {
+    if (sujo && !(await perguntarDescarte())) return
+    onClose()
+  }
+
   return (
     <Modal
       open={open}
       onClose={onClose}
+      dirty={sujo}
       title="Parâmetros de atualização"
+      description="Os índices que corrigem os valores do relatório."
       size="md"
       footer={
         <>
@@ -176,18 +231,19 @@ export function ModalParametrosAtualizacao({
           <Button
             variant="outline"
             className="mr-auto"
-            icon={<Download className="h-4 w-4" />}
+            icon={<Download className="h-[14px] w-[14px]" />}
             loading={buscando}
             onClick={buscarNoBcb}
           >
             Buscar no Banco Central
           </Button>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="ghost" onClick={() => void cancelar()}>
             Cancelar
           </Button>
           <Button
             loading={salvar.isPending}
             disabled={params.isLoading || params.isError}
+            title={motivoDaTrava}
             onClick={handleSalvar}
           >
             Salvar
@@ -195,23 +251,29 @@ export function ModalParametrosAtualizacao({
         </>
       }
     >
-      <div>
+      <div aria-busy={params.isLoading || undefined}>
         {/* Falha de leitura não pode virar formulário em branco: os campos
             nasceriam vazios, idênticos a "nunca cadastrado", e o Salvar gravaria
             nulo por cima da SELIC e do IPCA reais — parando a projeção de toda a
             carteira. Por isso o aviso, e o Salvar desabilitado abaixo. */}
         {params.isError && (
-          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Não foi possível ler os parâmetros atuais, então não é seguro salvar
-            por cima. Feche e abra novamente.{' '}
-            <button
-              type="button"
-              className="font-medium underline"
-              onClick={() => void params.refetch()}
-            >
-              Tentar de novo
-            </button>
-          </p>
+          <div className="mb-4 flex items-start gap-2.5 rounded-campo border border-aviso-borda bg-aviso-fundo px-4 py-3 text-corpo">
+            <AlertTriangle className="mt-0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
+            <p className="text-texto">
+              Não foi possível ler os parâmetros atuais, então não é seguro salvar
+              por cima. Feche e abra novamente.{' '}
+              {/* "TENTANDO…" ENQUANTO LÊ (Novo, só visual): sem isso o clique
+                  parecia não ter feito nada até a resposta chegar. */}
+              <button
+                type="button"
+                className="rounded font-semibold text-marca-texto underline underline-offset-2 disabled:cursor-wait disabled:no-underline disabled:opacity-70"
+                disabled={params.isFetching}
+                onClick={() => void params.refetch()}
+              >
+                {params.isFetching ? 'Tentando…' : 'Tentar de novo'}
+              </button>
+            </p>
+          </div>
         )}
         {/* Máscara de duas casas: os dígitos entram pela direita, então "1550"
             vira 15,50 e o campo nunca fica sem as casas decimais. */}
@@ -220,6 +282,10 @@ export function ModalParametrosAtualizacao({
             className="text-right tabular-nums"
             inputMode="numeric"
             placeholder="0,00"
+            aria-label="SELIC vigente (% a.a.)"
+            // TRAVADO ENQUANTO A LEITURA CORRE: o que se digitasse agora seria
+            // apagado pelos valores gravados quando a leitura chegasse.
+            disabled={params.isLoading}
             value={formatPercentInput(selic)}
             onChange={(e) => setSelic(parsePercentInput(e.target.value))}
           />
@@ -230,6 +296,8 @@ export function ModalParametrosAtualizacao({
             className="text-right tabular-nums"
             inputMode="numeric"
             placeholder="0,00"
+            aria-label="IPCA acumulado 12 meses (% a.a.)"
+            disabled={params.isLoading}
             value={formatPercentInput(ipca)}
             onChange={(e) => setIpca(parsePercentInput(e.target.value))}
           />
@@ -237,18 +305,14 @@ export function ModalParametrosAtualizacao({
 
         <LinhaParametro rotulo="IPCA + 2% a.a.">
           {/* Sem campo: é o IPCA acima somado a 2, calculado na hora. */}
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
-            {derivado === null ? '—' : formatPercentInput(derivado)}
-          </div>
+          <SoLeitura>{derivado === null ? '—' : formatPercentInput(derivado)}</SoLeitura>
         </LinhaParametro>
 
         <LinhaParametro rotulo="Data de referência do relatório">
           {/* Fixa em hoje, sem campo: é a competência do relatório que está
               sendo gerado, não uma escolha. Logo depois da busca no Banco
               Central, é a competência que ela gravou (ver dataBaseAoSalvar). */}
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-right text-sm font-medium tabular-nums text-slate-700">
-            {formatDate(dataBase)}
-          </div>
+          <SoLeitura>{formatDate(dataBase)}</SoLeitura>
         </LinhaParametro>
       </div>
     </Modal>

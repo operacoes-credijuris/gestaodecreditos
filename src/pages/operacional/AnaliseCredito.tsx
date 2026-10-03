@@ -22,14 +22,37 @@
 // funil inteiro do Kommo: o kanban do comercial tem colunas que não são do
 // operacional, e contá-las fazia o total de cima nunca fechar com a soma das
 // pílulas de baixo.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { perguntarDescarte } from '@/lib/descarte'
+import { guardarLugar, lugarGuardado } from '@/lib/lugarDaAnalise'
+import { LinkTentarDeNovo } from '@/components/LinkTentarDeNovo'
+import {
+  AlertTriangle,
   Search,
   ExternalLink,
   ArrowRight,
-  FileUp,
   Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Copy,
+  FileSignature,
+  FileText,
+  History,
+  Info,
+  Sparkles,
+  Upload,
   FileSearch,
   ClipboardCheck,
   RefreshCw,
@@ -51,9 +74,9 @@ import {
   FUNIL_RPV,
   FUNIL_PRECATORIO,
   KOMMO_SUBDOMINIO,
-  type PapelDaAcao,
+  type PapelDaTela,
+  type DesfechoDaNegociacao,
   SUBDIVISOES_PRECATORIO,
-  SUBDIVISAO_PADRAO,
   ABAS_COM_TAGS,
   botoesDaAba,
   type BotoesDoCard,
@@ -82,6 +105,7 @@ import {
   useKommoLeads,
   useKommoEtapas,
   useAnalisesProntas,
+  type TomDaTag,
   type AcaoTela,
   type SubdivisaoPrecatorio,
   lerCadastroDoCard,
@@ -95,12 +119,29 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Input, Textarea } from '@/components/ui/Field'
-import { Segmented } from '@/components/ui/Segmented'
-import { Tabs } from '@/components/ui/Tabs'
+import { Textarea } from '@/components/ui/Field'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
+import { CaixaDeAviso, DicaDeAviso, Selo, icSelo } from '@/components/analise/Pecas'
+import { haDialogoAberto } from '@/lib/dialogo'
+import {
+  achadosDaBusca,
+  camposDoTitulo,
+  diasNaEtapa,
+  estaParado,
+  fasesDoQuadro,
+  filtrarEOrdenar,
+  idadeCurta,
+  larguraDaBarra,
+  nomeDaColuna,
+  POR_VEZ,
+  PRAZO_PARADO,
+  temCotacao,
+  textoDosDias,
+  type FiltroRapido,
+  type OrdemDaLista,
+} from '@/lib/quadroDaAnalise'
 import { DueDiligence } from '@/components/DueDiligence'
 import { JanelaDeCertidoes } from '@/components/JanelaDeCertidoes'
 import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
@@ -125,6 +166,17 @@ import { anotacoesDaAnalise, type FichaDoCredito } from '@/lib/anotacaoKommo'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { useAuth } from '@/contexts/AuthContext'
+import {
+  comSugestao,
+  montarNotaDoDesfecho,
+  MOTIVOS_NAO_FECHOU,
+  motivoSuficiente,
+  notaDoFechado,
+  notaDoNaoFechou,
+  type TipoDeNaoFechou,
+} from '@/lib/desfechoDoCard'
+import { cardDoEndereco } from '@/lib/contratoDoCard'
+import { TextoComTermos } from '@/components/layout/TextoComTermos'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -563,11 +615,14 @@ async function anotarResultadoNaKommo(
 /** Ícone por destino — dá para reconhecer a ação sem ler o rótulo. */
 // PELO PAPEL, e não pelo status_id: as mesmas colunas têm ids diferentes em
 // cada funil, e um mapa por id deixaria os botões do Precatório sem ícone.
-const ICONES: Record<PapelDaAcao, ReactNode> = {
+const ICONES: Record<PapelDaTela, ReactNode> = {
   validar: <ArrowRight className="h-4 w-4" />,
   aprovar: <Check className="h-4 w-4" />,
   diligenciar: <FileSearch className="h-4 w-4" />,
   reprovar: <X className="h-4 w-4" />,
+  // O "FECHADO!" DA NEGOCIAÇÃO (onda 4): o aperto de mão da amostra — o cedente
+  // aceitou, e isso não é a aprovação do crédito.
+  fechar: <Handshake className="h-4 w-4" />,
 }
 
 /**
@@ -619,6 +674,46 @@ const exigeMotivoDe = (acao: AcaoTela): boolean =>
   acao.papel === 'diligenciar' || acao.papel === 'reprovar'
 
 /**
+ * OS BOTÕES DO CARD NA MEDIDA DA AMOSTRA: 32 px de altura e 12 px de folga
+ * lateral (`.btn`). O `size="sm"` do Button tem 27 px — pequeno para o alvo
+ * principal da linha, que é o que a mão procura dezenas de vezes por dia.
+ */
+const BTN = 'h-[32px] px-4'
+/** O ícone de 16 px dos botões e caixas da amostra (`h-4` vale 12 px aqui). */
+const IC = 'h-[16px] w-[16px] flex-none'
+/** O "Excluir" contornado da amostra (`.btn-danger-outline`): o negativo sem gritar. */
+const PERIGO_CONTORNADO = 'border-perigo-borda bg-superficie text-perigo hover:bg-perigo-fundo'
+
+/**
+ * Fecha uma caixa flutuante ao clicar fora e no Esc.
+ *
+ * Sem isto, a lista de trinta cards ficaria com um painel aberto atrás do outro
+ * conforme a pessoa fosse clicando. Era o mesmo efeito copiado em quatro caixas
+ * (anotação, etiquetas, proposta); juntou aqui sem mudar o que ele faz.
+ */
+function useFecharFora(aberto: boolean, fechar: () => void, caixa: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (!aberto) return
+    const fora = (e: MouseEvent) => {
+      if (!caixa.current?.contains(e.target as Node)) fechar()
+    }
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') fechar()
+    }
+    document.addEventListener('mousedown', fora)
+    document.addEventListener('keydown', tecla)
+    return () => {
+      document.removeEventListener('mousedown', fora)
+      document.removeEventListener('keydown', tecla)
+    }
+  }, [aberto, fechar, caixa])
+}
+
+/** A caixa flutuante da amostra (`.pop`): borda, sombra de menu, cantos de 12 px. */
+const CAIXA_FLUTUANTE =
+  'absolute z-20 mt-1 rounded-campo border border-borda bg-superficie p-1.5 text-left shadow-nivel-2'
+
+/**
  * A PLANILHA QUE NASCE DA CONVERSA: colar o bloco que o Claude entregou.
  *
  * EXISTE PORQUE A PLANILHA PERDIA O CONTEXTO (28/09/2026). O motor antigo
@@ -658,8 +753,23 @@ function JanelaDaPlanilha({
       size="lg"
       dirty={colado.trim() !== ''}
       footer={
+        // O LINK DE RESERVA À ESQUERDA E A AÇÃO À DIREITA, como na amostra: o
+        // motor antigo é exceção, e não pode disputar o lugar do botão principal.
         <div className="flex w-full flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="-ml-2 inline-flex h-[28px] items-center rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
+            onClick={() => {
+              onMotorAntigo()
+              onFechar()
+            }}
+            title="Lê os autos de novo, com outro modelo, sem o contexto da conversa com o Claude"
+          >
+            Não tenho o bloco — usar a análise jurídica antiga
+          </button>
+          <span className="flex-1" />
           <Button
+            className={BTN}
             onClick={async () => {
               setErro(null)
               setEnviando(true)
@@ -677,37 +787,27 @@ function JanelaDaPlanilha({
           >
             Preencher planilha
           </Button>
-          <button
-            type="button"
-            className="ml-auto text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
-            onClick={() => {
-              onMotorAntigo()
-              onFechar()
-            }}
-            title="Lê os autos de novo, com outro modelo, sem o contexto da conversa com o Claude"
-          >
-            Não tenho o bloco — usar a análise jurídica antiga
-          </button>
         </div>
       }
     >
-      <p className="mb-3 text-sm text-slate-600">
+      <p className="mb-3 text-corpo text-texto-2">
         Ao final da análise, o Claude entrega um bloco de código com as respostas da planilha.
-        Copie <strong>esse bloco</strong> pelo botão de copiar dele e cole aqui: a plataforma
-        preenche o modelo da casa, salva na pasta do cedente no Drive e anota no card.
+        Copie <strong className="text-texto">esse bloco</strong> pelo botão de copiar dele e cole aqui:
+        a plataforma preenche o modelo da casa, salva na pasta do cedente no Drive e anota no card.
       </p>
       <Textarea
-        rows={12}
+        rows={10}
         value={colado}
         onChange={(e) => setColado(e.target.value)}
         placeholder={'```json\n{ "respostas": [ { "linha": 4, "resposta": "…" } ], … }\n```'}
-        className="font-mono text-xs"
+        className="font-mono text-sm leading-relaxed"
         spellCheck={false}
+        aria-label="Bloco da planilha entregue pelo Claude"
       />
       {erro && (
-        <div className="mt-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 ring-1 ring-inset ring-red-200">
+        <CaixaDeAviso tom="perigo" role="alert" className="mt-3">
           {erro}
-        </div>
+        </CaixaDeAviso>
       )}
     </Modal>
   )
@@ -718,7 +818,9 @@ function JanelaDeMensagem({
   acoes,
   titulo,
   sugestao,
+  resumo = null,
   ocupado,
+  jaMovido,
   onConfirmar,
   onFechar,
 }: {
@@ -734,11 +836,26 @@ function JanelaDeMensagem({
   acoes: AcaoTela[]
   titulo: string
   sugestao: string
+  /**
+   * O RESUMO DA OPORTUNIDADE NUMA CAIXA À PARTE, editável (o Concluir da Revisão
+   * do RPV, onda 4): o texto inicial da caixa, ou null para a janela sem caixa —
+   * a de sempre. Com a caixa, a nota do APROVAR é o resumo como ficou nela mais a
+   * mensagem; nas outras saídas, só a mensagem (ver `montarNotaDoDesfecho`).
+   */
+  resumo?: string | null
   ocupado: boolean
+  /**
+   * O card JÁ se moveu para esta saída nesta janela? Depois de uma falha da nota
+   * com o card movido, só a MESMA saída continua na mão — e ela só anota. Outra
+   * saída moveria o card de novo, para outra coluna. Indefinido: nada trava.
+   */
+  jaMovido?: (statusId: number) => boolean
   onConfirmar: (acao: AcaoTela, mensagem: string) => Promise<void>
   onFechar: () => void
 }) {
   const [mensagem, setMensagem] = useState(sugestao)
+  const [textoDoResumo, setTextoDoResumo] = useState(resumo ?? '')
+  const comResumo = resumo !== null
   const [erro, setErro] = useState<string | null>(null)
   /** Qual saída está em curso — as outras ficam travadas enquanto isso. */
   const [emCurso, setEmCurso] = useState<number | null>(null)
@@ -764,9 +881,32 @@ function JanelaDeMensagem({
   const [enviando, setEnviando] = useState(false)
   const trabalhando = ocupado || enviando
   const semTexto = mensagem.trim().length < 10
-  const podeEnviar = (acao: AcaoTela) =>
-    !trabalhando && (!(exigeMotivoDe(acao) || semResumoDe(acao)) || !semTexto)
+  /** A nota que esta saída deixa no card — o resumo só entra ao aprovar. */
+  const notaDe = (acao: AcaoTela) =>
+    montarNotaDoDesfecho({ papel: acao.papel, mensagem, resumo: comResumo ? textoDoResumo : null })
+  // MOVEU E A NOTA NÃO SUBIU: a saída que já moveu o card nesta janela. Só ela
+  // continua na mão (e só anota, com texto); as outras moveriam o card de novo.
+  const movida = erro ? acoes.find((a) => jaMovido?.(a.statusId)) : undefined
+  const podeEnviar = (acao: AcaoTela) => {
+    if (trabalhando) return false
+    if (movida) return acao.statusId === movida.statusId && notaDe(acao) !== ''
+    // COM A CAIXA DO RESUMO, aprovar sem resumo gravado pede o resumo escrito à
+    // mão NA CAIXA DELE, com a mesma régua — e não na mensagem.
+    if (comResumo && semResumoDe(acao)) return textoDoResumo.trim().length >= 10
+    return !(exigeMotivoDe(acao) || semResumoDe(acao)) || !semTexto
+  }
   const semResumo = acoes.some(semResumoDe)
+  const varias = acoes.length > 1
+  const sujo = mensagem.trim() !== sugestao.trim() || (comResumo && textoDoResumo.trim() !== (resumo ?? '').trim())
+
+  const cancelar = async () => {
+    // A MESMA CHECAGEM DO X, DO OVERLAY E DO ESC. O `dirty` do Modal só
+    // protege aquelas três portas; este botão chamava `onFechar` direto e
+    // descartava o texto digitado sem perguntar — e é o botão que está mais
+    // perto do cursor de quem acabou de escrever.
+    if (sujo && !(await perguntarDescarte())) return
+    onFechar()
+  }
 
   return (
     <Modal
@@ -778,19 +918,39 @@ function JanelaDeMensagem({
       // só passavam de oitenta caracteres e quebravam o título em duas.
       description={tituloCard(lead)}
       size="lg"
-      dirty={mensagem.trim() !== sugestao.trim()}
+      dirty={sujo}
       footer={
-        <div className="flex flex-wrap items-center gap-2">
+        // O QUE NÃO DECIDE À ESQUERDA, AS DECISÕES À DIREITA (amostra): com uma
+        // saída, "Cancelar" e "Confirmar"; com várias, "cancelar" discreto e um
+        // botão por saída — o negativo contornado, para não disputar com o
+        // positivo.
+        <div className="flex w-full flex-wrap items-center gap-2">
+          {varias ? (
+            <button
+              type="button"
+              onClick={cancelar}
+              disabled={trabalhando}
+              className="-ml-2 inline-flex h-[28px] items-center rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve disabled:opacity-50"
+            >
+              cancelar
+            </button>
+          ) : (
+            <Button variant="ghost" className={BTN} onClick={cancelar} disabled={trabalhando}>
+              Cancelar
+            </Button>
+          )}
+          <span className="flex-1" />
           {acoes.map((acao) => (
             <Button
               key={acao.statusId}
-              variant={acao.variant}
+              variant={acao.variant === 'danger' && varias ? 'outline' : acao.variant}
+              className={cn(BTN, acao.variant === 'danger' && varias && PERIGO_CONTORNADO)}
               onClick={async () => {
                 setErro(null)
                 setEnviando(true)
                 setEmCurso(acao.statusId)
                 try {
-                  await onConfirmar(acao, mensagem.trim())
+                  await onConfirmar(acao, notaDe(acao))
                 } catch (e) {
                   setErro((e as Error)?.message ?? String(e))
                 } finally {
@@ -806,39 +966,55 @@ function JanelaDeMensagem({
               {/* COM UMA SAÍDA SÓ, "Confirmar": o botão do card já disse o que
                   vai acontecer, e repetir o rótulo aqui é redundância. Com
                   várias, cada uma precisa dizer para onde leva. */}
-              {acoes.length === 1 ? 'Confirmar' : acao.label}
+              {varias ? acao.label : 'Confirmar'}
             </Button>
           ))}
-          {/* O CANCELAR SÓ ONDE HÁ UMA SAÍDA. Com várias decisões no rodapé, mais
-              um controle que NÃO é decisão disputa a mesma linha e o mesmo
-              olhar — e a saída sem consequência já existe no X do topo, no Esc e
-              no clique fora, todos com a mesma pergunta sobre texto não salvo.
-              Com uma saída só o par Confirmar/cancelar continua, que é a forma
-              que quem usa a tela já conhece. */}
-          {acoes.length === 1 && (
-            <button
-              type="button"
-              // A MESMA CHECAGEM DO X, DO OVERLAY E DO ESC. O `dirty` do Modal só
-              // protege aquelas três portas; este botão chamava `onFechar` direto e
-              // descartava o texto digitado sem perguntar — e é o botão que está
-              // mais perto do cursor de quem acabou de escrever.
-              onClick={() => {
-                if (mensagem.trim() !== sugestao.trim() && !window.confirm('Descartar alterações não salvas?')) return
-                onFechar()
-              }}
-              disabled={trabalhando}
-              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
-            >
-              cancelar
-            </button>
-          )}
         </div>
       }
     >
+      {semResumo && (
+        <CaixaDeAviso tom="aviso" className="mb-3">
+          {comResumo
+            ? 'Este card não tem resumo da oportunidade gravado — a análise não foi salva por esta versão do sistema. Abra a análise e salve, ou, para aprovar, escreva o resumo à mão aqui: é o que a proposta vai ler.'
+            : 'Este card não tem resumo da oportunidade gravado — a análise não foi salva por esta versão do sistema. Abra a análise e salve, ou escreva o resumo à mão aqui: é o que a proposta vai ler.'}
+        </CaixaDeAviso>
+      )}
+      {/* O RESUMO DA OPORTUNIDADE NUMA CAIXA À PARTE (Revisão do RPV, onda 4):
+          editável — a linha da cessão sai "a confirmar" do motor, e quem aprova
+          é quem sabe completá-la —, e só entra na nota se a saída for aprovar.
+          Assim ele nunca vira, por engano, a razão de uma reprovação. */}
+      {comResumo && (
+        <details className="mb-3 rounded-campo border border-borda bg-superficie-2" open={semResumo}>
+          <summary className="flex min-h-[36px] cursor-pointer items-center gap-2 px-4 py-2 text-corpo font-semibold text-texto">
+            <FileText className={IC} aria-hidden />
+            Resumo da oportunidade
+            <span className="text-sm font-normal text-texto-3">— editável · vai para o card junto com a aprovação</span>
+          </summary>
+          <div className="border-t border-borda px-4 pb-3 pt-3">
+            <textarea
+              className="min-h-[132px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] font-mono text-sm leading-relaxed text-texto placeholder:font-sans placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
+              rows={textoDoResumo ? 11 : 6}
+              value={textoDoResumo}
+              disabled={trabalhando}
+              aria-label="Resumo da oportunidade"
+              placeholder="O que se está comprando: cedente, processo, ente devedor, objeto, valor líquido validado e prazo — é o que a proposta vai ler."
+              onChange={(e) => setTextoDoResumo(e.target.value)}
+            />
+            <p className="mt-1 text-sm text-texto-3">
+              Complete o que o motor deixou "a confirmar" (a extensão da cessão, por exemplo). Nas outras
+              saídas ele não vai para o card.
+            </p>
+            {semResumo && textoDoResumo.trim().length > 0 && textoDoResumo.trim().length < 10 && (
+              <DicaDeAviso>Escreva o resumo por extenso — é o que a proposta vai ler.</DicaDeAviso>
+            )}
+          </div>
+        </details>
+      )}
       <textarea
-        className="min-h-[220px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 font-mono text-[13px] leading-relaxed placeholder:font-sans placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        className="min-h-[220px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] font-mono text-sm leading-relaxed text-texto placeholder:font-sans placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
         value={mensagem}
         disabled={trabalhando}
+        aria-label="Mensagem"
         placeholder={
           exigeMotivo
             ? 'Por que o card está sendo movido. Quem lê não tem a análise à mão.'
@@ -847,18 +1023,13 @@ function JanelaDeMensagem({
         onChange={(e) => setMensagem(e.target.value)}
       />
       {exigeMotivo && mensagem.trim().length > 0 && mensagem.trim().length < 10 && (
-        <p className="mt-1.5 text-xs text-amber-700">
-          Escreva a razão por extenso — ela fica no card como registro da decisão.
-        </p>
+        <DicaDeAviso>Escreva a razão por extenso — ela fica no card como registro da decisão.</DicaDeAviso>
       )}
-      {semResumo && (
-        <p className="mt-1.5 text-xs text-amber-700">
-          Este card não tem resumo da oportunidade gravado — a análise não foi salva
-          por esta versão do sistema. Abra a análise e salve, ou escreva o resumo à
-          mão aqui: é o que a proposta vai ler.
-        </p>
+      {erro && (
+        <CaixaDeAviso tom="perigo" role="alert" className="mt-3">
+          {erro}
+        </CaixaDeAviso>
       )}
-      {erro && <p className="mt-1.5 text-xs text-red-700">{erro}</p>}
     </Modal>
   )
 }
@@ -874,108 +1045,79 @@ function JanelaDeMensagem({
 const ABA_RPV_DESFECHO_NA_JANELA = 'pendentes'
 
 /**
- * O card não tem número de processo — e isso é defeito, não ausência.
+ * Os avisos de cadastro do card — e isso é defeito, não ausência.
  *
- * ISTO ERA UMA LINHA DE METADADOS: "Precatório · 1057424-52.2022.8.26.0053 ·
- * principal + honorários · hon. 30%", abaixo do título, nas abas sem botão de
- * trabalho. Saiu por decisão do dono, e ela se sustenta: o número já está no
- * título do card, a espécie está na aba em que a pessoa acabou de clicar, e a
- * parcela cedida aparece na janela de análise, onde ela decide algo.
+ * A FALTA DO NÚMERO não é um campo vazio a mais: sem ele o card fica fora da
+ * busca por processo e o checklist de certidões não acha o CNJ. Nenhuma outra
+ * etapa destas abas checa isso.
  *
- * O QUE NÃO SAIU É O AVISO. A falta do número não é um campo vazio a mais: sem
- * ele o card fica fora da busca por processo e o checklist de certidões não acha
- * o CNJ. Nenhuma outra etapa destas abas checa isso, então some com a linha e o
- * defeito passa a não ter onde aparecer.
+ * A DISCORDÂNCIA DE TIPO DISCORDA EM VOZ ALTA: card no funil de RPV com "TIPO:
+ * Precatório" na anotação era analisado como RPV, em silêncio — prazo de meses
+ * num crédito que a Fazenda paga em anos.
+ *
+ * NA LINHA DO TÍTULO desde a onda 2, como selos (amostra): é estado do card, e
+ * é lido junto com o nome, na varredura de cima para baixo.
  */
-function AvisoSemNumero({ lead }: { lead: KommoLead }) {
-  // Memoizado porque lerCardCredijuris junta TODAS as anotações do card numa
-  // string, e há cards com histórico longo. Refazer isso a cada render de cada
-  // card de uma lista de centenas é desperdício sem contrapartida.
-  const d = useMemo(() => lerCardCredijuris(lead), [lead])
-  // A DISCORDÂNCIA DE TIPO PASSA A DISCORDAR EM VOZ ALTA.
-  //
-  // `divergenciaTipo` era calculado, devolvido e lido por NINGUÉM — o comentário
-  // de lerCardCredijuris promete que a linha TIPO da anotação "passa a servir só
-  // para DISCORDAR em voz alta", e ela não discordava em lugar nenhum. Card no
-  // funil de RPV com "TIPO: Precatório" na anotação era analisado como RPV, em
-  // silêncio: prazo de meses num crédito que a Fazenda paga em anos.
-  if (!d.numero || d.divergenciaTipo) {
-    return (
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {!d.numero && (
-          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
-            sem número de processo no card
-          </span>
-        )}
-        {d.divergenciaTipo && (
-          <span
-            className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200"
-            title={d.divergenciaTipo}
-          >
-            funil e anotação discordam do tipo
-          </span>
-        )}
-      </div>
-    )
-  }
-  return null
-}
-
-/**
- * Desde quando este card está NESTA coluna.
- *
- * A PERGUNTA QUE ELE RESPONDE é há quanto tempo o crédito está parado na etapa
- * — a que decide o que puxar primeiro numa coluna de trinta cards. A data de
- * criação não responde (card de março movido ontem) e a de atualização também
- * não (muda quando alguém troca uma tag).
- *
- * A DATA COM HORA E O DECORRIDO, JUNTOS. A data sozinha obriga a fazer a conta
- * de cabeça; o "há 3 dias" sozinho apaga o instante exato, que é o que se copia
- * para uma cobrança — e a HORA importa porque o movimento do dia é o assunto da
- * manhã seguinte: dois cards que entraram "hoje" podem ter entrado antes e
- * depois da reunião, e é a hora que diz qual é qual.
- *
- * SEM DATA, NADA — nem traço, nem "—". O card que ainda não teve a etapa
- * apurada aparece igual aos outros, e a próxima sincronização o preenche; um
- * marcador de vazio em meia dúzia de cards viraria ruído permanente na coluna.
- */
-/**
- * HÁ QUANTO TEMPO O CARD ENTROU NA ESTEIRA: a data de criação no Kommo, logo
- * abaixo da data da coluna (pedido de 29/09/2026). A de cima diz há quanto tempo
- * o crédito está parado ONDE ESTÁ; esta, há quanto tempo ele está na casa — um
- * card que chegou hoje à revisão pode estar no funil há dois meses.
- *
- * "CRIADO EM" NA FRENTE, e só nesta: as duas linhas têm o mesmo formato, e sem o
- * rótulo a de baixo se leria como uma segunda data da coluna.
- */
-function SeloDaCriacao({ lead }: { lead: KommoLead }) {
-  const quando = lead.criado_em
-  if (!quando) return null
-  const decorrido = tempoDecorrido(quando)
+function SelosDoCadastro({ d }: { d: ReturnType<typeof lerCardCredijuris> }) {
   return (
-    <span className="text-right text-xs text-slate-400" title="Quando o card foi criado no Kommo">
-      <span className="whitespace-nowrap">Criado em {formatDateTime(quando)}</span>
-      {decorrido && <span className="whitespace-nowrap text-slate-300"> · {decorrido}</span>}
-    </span>
+    <>
+      {!d.numero && (
+        <Selo
+          tom="aviso"
+          icone={<AlertTriangle className={icSelo} aria-hidden />}
+          title="Sem número, o card fica fora da busca por processo e o checklist de certidões não acha o CNJ."
+        >
+          sem número de processo no card
+        </Selo>
+      )}
+      {d.divergenciaTipo && (
+        <Selo tom="aviso" icone={<AlertTriangle className={icSelo} aria-hidden />} title={d.divergenciaTipo}>
+          funil e anotação discordam do tipo
+        </Selo>
+      )}
+    </>
   )
 }
 
-function SeloDaEtapa({ lead }: { lead: KommoLead }) {
-  const quando = dataDaEtapa(lead)
-  if (!quando) return null
-  const decorrido = tempoDecorrido(quando)
+/**
+ * AS DUAS DATAS DO CARD, no rodapé: desde quando ele está NESTA coluna e desde
+ * quando está na esteira.
+ *
+ * A PERGUNTA QUE A DE CIMA RESPONDE é há quanto tempo o crédito está parado na
+ * etapa — a que decide o que puxar primeiro numa coluna de trinta cards. A data
+ * de criação não responde (card de março movido ontem) e a de atualização
+ * também não (muda quando alguém troca uma tag). A de criação vem logo depois
+ * (pedido de 29/09/2026): um card que chegou hoje à revisão pode estar no funil
+ * há dois meses.
+ *
+ * A DATA COM HORA E O DECORRIDO, JUNTOS. A data sozinha obriga a fazer a conta
+ * de cabeça; o "há 3 dias" sozinho apaga o instante exato, que é o que se copia
+ * para uma cobrança.
+ *
+ * SEM DATA, NADA — nem traço, nem "—". "ÚLT. MOV." e "CRIADO EM" NA FRENTE: as
+ * duas têm o mesmo formato, e cada uma diz de que é.
+ */
+function DatasDoCard({ lead }: { lead: KommoLead }) {
+  const etapa = dataDaEtapa(lead)
+  const criado = lead.criado_em
+  if (!etapa && !criado) return null
+  const linha = (rotulo: string, quando: string, titulo: string) => {
+    const decorrido = tempoDecorrido(quando)
+    return (
+      // A QUEBRA SÓ PODE CAIR ENTRE AS DUAS METADES: cada uma é `nowrap`, o
+      // conjunto não.
+      <span title={titulo}>
+        <span className="whitespace-nowrap">
+          {rotulo} {formatDateTime(quando)}
+        </span>
+        {decorrido && <span className="whitespace-nowrap"> · {decorrido}</span>}
+      </span>
+    )
+  }
   return (
-    // A QUEBRA SÓ PODE CAIR ENTRE AS DUAS METADES: cada uma é `nowrap`, o
-    // conjunto não. Em tela estreita o decorrido desce uma linha em vez de
-    // partir a hora ao meio ou de espremer o título do card.
-    // "ÚLT. MOV." NA FRENTE desde que a data de criação passou a vir logo abaixo:
-    // as duas têm o mesmo formato, e cada uma diz de que é.
-    <span
-      className="text-right text-xs text-slate-400"
-      title="Última movimentação: quando o card entrou na coluna em que está"
-    >
-      <span className="whitespace-nowrap">Últ. mov. em {formatDateTime(quando)}</span>
-      {decorrido && <span className="whitespace-nowrap text-slate-300"> · {decorrido}</span>}
+    <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-texto-3">
+      {etapa && linha('Últ. mov. em', etapa, 'Última movimentação: quando o card entrou na coluna em que está')}
+      {criado && linha('Criado em', criado, 'Quando o card foi criado no Kommo')}
     </span>
   )
 }
@@ -985,7 +1127,7 @@ function DesdeQuando({ quando }: { quando: string | null }) {
   if (!quando) return <span />
   const decorrido = tempoDecorrido(quando)
   return (
-    <span className="whitespace-nowrap text-[10px] text-slate-400" title={`Desde ${formatDateTime(quando)}`}>
+    <span className="whitespace-nowrap text-right text-xs text-texto-3" title={`Desde ${formatDateTime(quando)}`}>
       {decorrido}
     </span>
   )
@@ -1007,21 +1149,15 @@ function DesdeQuando({ quando }: { quando: string | null }) {
  * na lista continua aparecendo no card, fora do alcance daqui: ela é de quem a
  * pôs.
  *
- * UMA OU NENHUMA POR FUNDO, e é o que a lista desenha: uma linha por fundo, com
- * os atos dele ao lado do nome (Enviado, Cotado, Reprovado — o BTG só os dois
- * últimos), e em cada linha no máximo um círculo marcado. Marcar "Reprovado BTG" tira "Cotado BTG", porque o crédito
- * está num dos dois e não nos dois. Entre fundos não há exclusão nenhuma —
- * cotado no BTG e reprovado no PJus é o estado normal de um crédito em
- * precificação. A troca vai num PATCH só, do lado do servidor; a tela não manda
- * duas chamadas.
+ * UMA OU NENHUMA POR FUNDO, e é o que a grade desenha: uma linha por fundo, uma
+ * coluna por ato (Enviado, Cotado, Reprovado — o BTG só os dois últimos), e em
+ * cada linha no máximo um círculo marcado. Marcar "Reprovado BTG" tira "Cotado
+ * BTG", porque o crédito está num dos dois e não nos dois. Entre fundos não há
+ * exclusão nenhuma. A troca vai num PATCH só, do lado do servidor.
  *
- * UM FUNDO POR LINHA desde 29/09/2026: com sete fundos, a lista antiga — um
- * título por fundo e um ato por linha — passava de vinte linhas. Veio a ser
- * tabela por um dia, e quem opera preferiu assim, sem colunas: o nome do fundo
- * e, ao lado, só os atos que ele tem.
- *
- * CLICAR NA MARCADA DESMARCA. É como se desfaz um clique errado, e sem isso a
- * única saída seria marcar a outra — trocar um engano por outro.
+ * A GRADE COM CABEÇALHO desde a onda 2 (amostra): o nome do ato no topo de cada
+ * coluna, e na linha só o círculo — o olho corre a coluna "Cotado" de cima a
+ * baixo. CLICAR NA MARCADA DESMARCA: é como se desfaz um clique errado.
  */
 function SeletorDeEtiquetas({
   oferecidas,
@@ -1041,24 +1177,8 @@ function SeletorDeEtiquetas({
 }) {
   const [aberto, setAberto] = useState(false)
   const caixa = useRef<HTMLDivElement>(null)
-
-  // Fecha ao clicar fora e no Esc. Sem isto, a lista de trinta cards ficaria com
-  // um painel aberto atrás do outro conforme a pessoa fosse clicando.
-  useEffect(() => {
-    if (!aberto) return
-    const fora = (e: MouseEvent) => {
-      if (!caixa.current?.contains(e.target as Node)) setAberto(false)
-    }
-    const tecla = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setAberto(false)
-    }
-    document.addEventListener('mousedown', fora)
-    document.addEventListener('keydown', tecla)
-    return () => {
-      document.removeEventListener('mousedown', fora)
-      document.removeEventListener('keydown', tecla)
-    }
-  }, [aberto])
+  const fechar = useCallback(() => setAberto(false), [])
+  useFecharFora(aberto, fechar, caixa)
 
   // POR NOME NORMALIZADO, e não por igualdade: o que está no card veio do
   // Kommo, e caixa ou espaço a mais ali deixariam a etiqueta marcada aparecer
@@ -1067,47 +1187,57 @@ function SeletorDeEtiquetas({
 
   return (
     <div className="relative" ref={caixa}>
-      {/* SÓ O ÍCONE. O chip com a palavra "Etiquetas" competia com as próprias
-          etiquetas na mesma linha — um selo a mais, do mesmo tamanho, que não
-          dizia nada sobre o crédito. Aqui ele é ferramenta, não informação: fica
-          discreto ao lado das etiquetas e só o ponteiro e o título o explicam. */}
+      {/* SÓ O ÍCONE, num selo tracejado (amostra `.tag-edit`): é ferramenta, não
+          informação — discreto ao lado das etiquetas, e o título o explica. */}
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
         title="Aplicar ou remover as etiquetas dos fundos"
-        aria-label="Etiquetas do card"
+        aria-label="Aplicar ou remover as etiquetas dos fundos"
+        aria-expanded={aberto}
         className={cn(
-          'inline-flex h-5 w-5 items-center justify-center rounded transition-colors',
+          'inline-flex h-[24px] items-center gap-1 rounded-full border border-dashed px-2 text-xs font-semibold transition-colors',
           aberto
-            ? 'bg-brand-50 text-brand-700'
-            : 'text-slate-400 hover:bg-slate-100 hover:text-brand-700',
+            ? 'border-marca-viva text-marca-texto'
+            : 'border-borda-forte text-texto-2 hover:border-marca-viva hover:text-marca-texto',
         )}
       >
-        <Tag className="h-3.5 w-3.5" />
+        <Tag className="h-[13px] w-[13px]" aria-hidden />
       </button>
 
       {aberto && (
-        <div className="absolute left-0 z-20 mt-1 w-[32rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-          {etiquetasPorDestino(oferecidas).map((grupo) => {
-            const algumaPosta = grupo.etiquetas.some((e) => temEtiqueta(e.nome))
-            return (
-              // AS OPÇÕES EM POSIÇÃO FIXA, e sem cara de tabela: Enviado sob
-              // Enviado, Cotado sob Cotado, Reprovado sob Reprovado, em todas as
-              // linhas. O ato que o fundo não tem (o Enviado do BTG) deixa o
-              // lugar em branco — é o que mantém os outros dois alinhados.
-              <div
-                key={grupo.destino}
-                className="grid grid-cols-[8.5rem_5.5rem_5.25rem_6.5rem_4.5rem] items-center py-0.5"
-              >
-                {/* O FUNDO COM ETIQUETA fica em destaque: numa lista de sete, é
-                    o que se procura primeiro. */}
-                <span
-                  className={cn('text-xs', algumaPosta ? 'font-medium text-slate-800' : 'text-slate-600')}
-                >
-                  {grupo.destino}:
-                </span>
-                {ATOS_DA_PRECIFICACAO.map((ato) => {
+        <div className={cn(CAIXA_FLUTUANTE, 'left-0 w-[460px] max-w-[calc(100vw-2rem)] px-4 py-[10px]')}>
+          <p className="px-1 pb-2 pt-1 text-xs font-bold uppercase tracking-[.05em] text-texto-3">
+            Etiquetas dos fundos · uma por fundo
+          </p>
+          <div
+            role="group"
+            aria-label="Etiquetas dos fundos"
+            className={cn(
+              'grid grid-cols-[minmax(0,1.4fr)_repeat(3,64px)_72px] items-center gap-x-1 gap-y-1.5 text-sm',
+              emVoo !== null && 'opacity-70',
+            )}
+          >
+            <span />
+            {ATOS_DA_PRECIFICACAO.map((ato) => (
+              <span key={ato} className="text-center text-xs font-bold uppercase tracking-[.04em] text-texto-3">
+                {ato}
+              </span>
+            ))}
+            <span className="text-right text-xs font-bold uppercase tracking-[.04em] text-texto-3">Desde</span>
+            {etiquetasPorDestino(oferecidas).map((grupo) => {
+              const marcada = grupo.etiquetas.find((e) => temEtiqueta(e.nome))
+              return (
+                <Fragment key={grupo.destino}>
+                  {/* O FUNDO COM ETIQUETA fica em destaque: numa lista de sete, é
+                      o que se procura primeiro. */}
+                  <span className={marcada ? 'font-bold text-texto' : 'font-medium text-texto-2'}>
+                    {grupo.destino}
+                  </span>
+                  {ATOS_DA_PRECIFICACAO.map((ato) => {
                     const e = grupo.etiquetas.find((x) => x.ato === ato)
+                    // O ATO QUE O FUNDO NÃO TEM (o Enviado do BTG) deixa o lugar
+                    // em branco — é o que mantém as colunas alinhadas.
                     if (!e) return <span key={ato} />
                     const posta = temEtiqueta(e.nome)
                     return (
@@ -1120,46 +1250,30 @@ function SeletorDeEtiquetas({
                         disabled={emVoo !== null}
                         onClick={() => onAlternar(e.nome, posta ? 'remover' : 'adicionar')}
                         title={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"`}
+                        aria-label={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"`}
                         aria-pressed={posta}
                         className={cn(
-                          'inline-flex items-center gap-1 justify-self-start rounded px-1.5 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60',
-                          posta ? 'font-medium text-slate-800' : 'text-slate-600',
+                          // REDONDO, e não quadrado: no fundo a escolha é uma só,
+                          // e círculo é a forma que diz isso antes de testar.
+                          'grid h-[24px] w-[24px] place-items-center justify-self-center rounded-full border-[1.5px] text-white transition-colors disabled:cursor-progress',
+                          posta ? 'border-marca bg-marca' : 'border-borda-forte bg-superficie hover:border-marca-viva',
                         )}
                       >
-                        {/* REDONDO, e não quadrado: no fundo a escolha é uma só,
-                            e círculo é a forma que diz isso antes de a pessoa
-                            testar. Clicar no marcado desmarca — é como o fundo
-                            volta a "nenhuma". */}
-                        <span
-                          className={cn(
-                            'flex h-3.5 w-3.5 flex-none items-center justify-center rounded-full border',
-                            posta
-                              ? 'border-brand-600 bg-brand-600 text-white'
-                              : 'border-slate-300 text-slate-400',
-                          )}
-                        >
-                          {emVoo === e.nome ? (
-                            <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                          ) : posta ? (
-                            <Check className="h-2.5 w-2.5" />
-                          ) : null}
-                        </span>
-                        {e.ato}
+                        {emVoo === e.nome ? (
+                          <Loader2 className="h-[14px] w-[14px] animate-spin text-marca-texto" aria-hidden />
+                        ) : posta ? (
+                          <Check className="h-[13px] w-[13px]" strokeWidth={3} aria-hidden />
+                        ) : null}
                       </button>
                     )
                   })}
-                {/* HÁ QUANTO TEMPO a opção marcada está no card: é o controle
-                    de quanto o fundo está demorando. Em branco quando nenhuma
-                    está marcada, ou quando o Kommo não guarda a data. */}
-                <DesdeQuando
-                  quando={(() => {
-                    const marcada = grupo.etiquetas.find((e) => temEtiqueta(e.nome))
-                    return marcada ? desdeQuandoAEtiqueta(datas, marcada.nome) : null
-                  })()}
-                />
-              </div>
-            )
-          })}
+                  {/* HÁ QUANTO TEMPO a opção marcada está no card: é o controle
+                      de quanto o fundo está demorando. */}
+                  <DesdeQuando quando={marcada ? desdeQuandoAEtiqueta(datas, marcada.nome) : null} />
+                </Fragment>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -1191,22 +1305,8 @@ function BotaoEscolherProposta({
   const [aberto, setAberto] = useState(false)
   const [fundo, setFundo] = useState<string | null>(null)
   const caixa = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!aberto) return
-    const fora = (e: MouseEvent) => {
-      if (!caixa.current?.contains(e.target as Node)) setAberto(false)
-    }
-    const tecla = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setAberto(false)
-    }
-    document.addEventListener('mousedown', fora)
-    document.addEventListener('keydown', tecla)
-    return () => {
-      document.removeEventListener('mousedown', fora)
-      document.removeEventListener('keydown', tecla)
-    }
-  }, [aberto])
+  const fechar = useCallback(() => setAberto(false), [])
+  useFecharFora(aberto, fechar, caixa)
 
   /** A etiqueta que o card tem deste fundo, e desde quando. */
   const situacao = (destino: string) => {
@@ -1230,47 +1330,58 @@ function BotaoEscolherProposta({
     <div className="relative" ref={caixa}>
       <Button
         size="sm"
-        icon={<Handshake className="h-4 w-4" />}
+        className={BTN}
+        icon={<Handshake className={IC} aria-hidden />}
         onClick={() => {
           setFundo(null)
           setAberto((v) => !v)
         }}
         loading={carregando}
         disabled={ocupado}
+        aria-expanded={aberto}
       >
         Escolher proposta
+        <ChevronDown className="h-[14px] w-[14px]" aria-hidden />
       </Button>
 
       {aberto && (
-        <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-2 text-left shadow-lg">
+        <div className={cn(CAIXA_FLUTUANTE, 'right-0 w-[300px]')}>
           {fundo === null ? (
-            FUNDOS_DA_PRECIFICACAO.map((f) => {
-              const s = situacao(f)
-              return (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setFundo(f)}
-                  className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-slate-50"
-                >
-                  <span className={s?.ato === 'Cotado' ? 'font-medium text-slate-800' : 'text-slate-600'}>{f}</span>
-                  {s && (
-                    <span className="whitespace-nowrap text-[10px] text-slate-400">
-                      {s.ato}
-                      {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
-                    </span>
-                  )}
-                </button>
-              )
-            })
+            <>
+              <p className="px-2.5 pb-1 pt-2 text-xs font-bold uppercase tracking-[.05em] text-texto-3">
+                Seguir com a proposta de
+              </p>
+              {FUNDOS_DA_PRECIFICACAO.map((f) => {
+                const s = situacao(f)
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFundo(f)}
+                    className={cn(
+                      'flex h-[36px] w-full items-center gap-2.5 rounded-controle px-2.5 text-left text-corpo text-texto hover:bg-superficie-3 focus-visible:bg-superficie-3',
+                      s?.ato === 'Cotado' && 'font-bold',
+                    )}
+                  >
+                    {f}
+                    {s && (
+                      <span className="ml-auto whitespace-nowrap text-xs font-normal text-texto-3">
+                        {s.ato}
+                        {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </>
           ) : (
-            <div className="p-1">
-              <p className="text-xs font-medium text-slate-800">{mensagemDaProposta(fundo)}</p>
-              <div className="mt-2 flex justify-end gap-2">
-                <Button size="sm" variant="secondary" onClick={() => setFundo(null)} disabled={carregando}>
+            <div>
+              <p className="px-2.5 pb-1 pt-2.5 text-corpo text-texto">{mensagemDaProposta(fundo)}</p>
+              <div className="flex justify-end gap-2 px-2 pb-2 pt-2">
+                <Button size="sm" variant="secondary" className={BTN} onClick={() => setFundo(null)} disabled={carregando}>
                   Voltar
                 </Button>
-                <Button size="sm" onClick={() => void confirmar()} loading={carregando}>
+                <Button size="sm" className={BTN} onClick={() => void confirmar()} loading={carregando}>
                   Confirmar e mover
                 </Button>
               </div>
@@ -1294,77 +1405,109 @@ function atoFeito(f: FundoDoEnvio, tags: readonly string[] | null | undefined): 
 /**
  * OS CHECKS DO ENVIO AOS FUNDOS, na remessa: um por fundo com plataforma própria.
  *
- * O NOME DO FUNDO É LINK para a plataforma dele (abre em outra aba) — é onde o
- * economista sobe o crédito; o QUADRADO abre a janela da anotação. O check
- * marcado é a etiqueta no card, com há quanto tempo: verde com o fundo aceitando
- * o crédito, vermelho com ele reprovando.
+ * O CHECK É A ETIQUETA DO CARD — a posta pela janela do envio e a posta à mão no
+ * Kommo: verde com o fundo aceitando o crédito, vermelho com ele reprovando, e
+ * há quanto tempo no passar do mouse.
+ *
+ * NA FAIXA DA AMOSTRA desde a onda 2: cada fundo é uma pílula com o quadrado e o
+ * nome (abre a janela do envio) e, ao lado, o ícone que abre a plataforma dele
+ * em outra aba. Antes o NOME era o link e só o quadrado abria a janela; as duas
+ * portas continuam, cada uma num alvo próprio.
  *
  * COM TODOS FEITOS E O CARD AINDA AQUI (a movimentação falhou, ou as etiquetas
- * foram postas à mão no Kommo), aparece o botão de mover.
+ * foram postas à mão no Kommo), aparece o botão de mover, na ponta da faixa.
  */
 function ChecksDosFundos({
   lead,
   fundos,
   ocupado,
+  movendo,
   onAbrir,
   onMover,
 }: {
   lead: KommoLead
   fundos: FundoDoEnvio[]
   ocupado: boolean
+  /** O "Mover para Em precificação" deste card está em curso. */
+  movendo: boolean
   onAbrir: (f: FundoDoEnvio) => void
   onMover: () => void
 }) {
   const todos = fundos.every((f) => atoFeito(f, lead.tags))
   return (
-    <div className="flex flex-col items-end gap-1.5">
-      <div className="flex items-center gap-3">
-        {fundos.map((f) => {
-          const ato = atoFeito(f, lead.tags)
-          const ok = ato !== null
-          const desde = ato ? desdeQuandoAEtiqueta(lead.tags_em, ato.etiqueta) : null
-          return (
-            <div key={f.fundo} className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => onAbrir(f)}
-                disabled={ocupado || ok}
-                aria-pressed={ok}
-                title={
-                  ato
-                    ? `${ato.etiqueta}${desde ? ` · ${tempoDecorrido(desde)}` : ''}`
-                    : `Registrar o envio ${aoFundo(f)}`
-                }
+    <div
+      role="group"
+      aria-label="Envio aos fundos"
+      className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-campo border border-dashed border-borda-forte bg-superficie-2 px-4 py-[10px]"
+    >
+      {fundos.map((f) => {
+        const ato = atoFeito(f, lead.tags)
+        const desde = ato ? desdeQuandoAEtiqueta(lead.tags_em, ato.etiqueta) : null
+        return (
+          <span
+            key={f.fundo}
+            className={cn(
+              'inline-flex items-center overflow-hidden rounded-full border',
+              ato?.reprova
+                ? 'border-perigo-borda bg-perigo-fundo'
+                : ato
+                  ? 'border-sucesso-borda bg-sucesso-fundo'
+                  : 'border-borda-forte bg-superficie',
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => onAbrir(f)}
+              disabled={ocupado || ato !== null}
+              aria-pressed={ato !== null}
+              title={
+                ato
+                  ? `${ato.etiqueta}${desde ? ` · ${tempoDecorrido(desde)}` : ''}`
+                  : `Registrar o envio ${aoFundo(f)}`
+              }
+              className="inline-flex h-[30px] items-center gap-1.5 pl-1.5 pr-[10px] text-sm font-semibold text-texto hover:bg-superficie-3 disabled:cursor-default disabled:hover:bg-transparent"
+            >
+              <span
                 className={cn(
-                  'flex h-5 w-5 items-center justify-center rounded border transition-colors disabled:cursor-default',
+                  'grid h-[18px] w-[18px] place-items-center rounded-[5px] border-[1.5px]',
                   ato?.reprova
-                    ? 'border-red-600 bg-red-600 text-white'
+                    ? 'border-perigo-cheio bg-perigo-cheio text-white'
                     : ato
-                      ? 'border-emerald-600 bg-emerald-600 text-white'
-                      : 'border-slate-300 bg-white hover:border-emerald-500 hover:bg-emerald-50',
+                      ? 'border-sucesso-cheio bg-sucesso-cheio text-white'
+                      : 'border-borda-forte bg-superficie',
                 )}
               >
-                {ato?.reprova ? <X className="h-3.5 w-3.5" /> : ato && <Check className="h-3.5 w-3.5" />}
-              </button>
-              <a
-                href={f.plataforma}
-                target="_blank"
-                rel="noreferrer"
-                title={`Abrir a plataforma ${doFundo(f)}`}
-                className={cn(
-                  'font-display inline-flex items-center gap-1 text-sm font-semibold hover:underline',
-                  ato?.reprova ? 'text-red-700' : ok ? 'text-emerald-700' : 'text-slate-700 hover:text-brand-700',
-                )}
-              >
-                {f.fundo}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            </div>
-          )
-        })}
-      </div>
+                {ato?.reprova ? (
+                  <X className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />
+                ) : ato ? (
+                  <Check className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />
+                ) : null}
+              </span>
+              {f.fundo}
+            </button>
+            <a
+              href={f.plataforma}
+              target="_blank"
+              rel="noreferrer"
+              title={`Abrir a plataforma ${doFundo(f)}`}
+              aria-label={`Abrir a plataforma ${doFundo(f)}`}
+              className="grid h-[30px] place-items-center border-l border-borda px-[9px] text-texto-3 hover:bg-superficie-3 hover:text-marca-texto"
+            >
+              <ExternalLink className="h-[14px] w-[14px]" aria-hidden />
+            </a>
+          </span>
+        )
+      })}
       {todos && (
-        <Button size="sm" variant="success" icon={<ArrowRight className="h-4 w-4" />} onClick={onMover} disabled={ocupado}>
+        <Button
+          size="sm"
+          variant="success"
+          className={cn(BTN, 'ml-auto')}
+          icon={<ArrowRight className={IC} aria-hidden />}
+          onClick={onMover}
+          loading={movendo}
+          disabled={ocupado}
+        >
           Mover para Em precificação
         </Button>
       )}
@@ -1415,6 +1558,14 @@ function JanelaDoEnvioAoFundo({
       ),
     ])
 
+  // O MESMO CRITÉRIO DO X, DO ESCAPE E DO CANCELAR: texto escrito ou imagem
+  // colada. O Cancelar do rodapé fechava sem perguntar, e o print colado ia junto.
+  const sujo = texto.trim().length > 0 || arquivos.length > 0
+  const cancelar = async () => {
+    if (sujo && !(await perguntarDescarte())) return
+    onFechar()
+  }
+
   async function confirmar(ato: AtoDoEnvio) {
     setErro(null)
     setAndamento({ texto: 'Começando…', pct: 0, ato: ato.etiqueta })
@@ -1432,28 +1583,29 @@ function JanelaDoEnvioAoFundo({
     <Modal
       open
       onClose={() => !ocupado && onFechar()}
-      dirty={texto.trim().length > 0 || arquivos.length > 0}
+      dirty={sujo}
       title={`Envio ${aoFundo(fundo)}`}
       description={
         <a
           href={fundo.plataforma}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+          className="inline-flex items-center gap-1 font-medium text-marca-texto hover:underline"
         >
           Abrir a plataforma {doFundo(fundo)}
-          <ExternalLink className="h-3.5 w-3.5" />
+          <ExternalLink className="h-[14px] w-[14px]" aria-hidden />
         </a>
       }
       footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onFechar} disabled={ocupado}>
+        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          <Button variant="ghost" className={BTN} onClick={() => void cancelar()} disabled={ocupado}>
             Cancelar
           </Button>
           {fundo.atos.map((a) => (
             <Button
               key={a.etiqueta}
               variant={a.reprova ? 'danger' : 'success'}
+              className={BTN}
               onClick={() => void confirmar(a)}
               loading={andamento?.ato === a.etiqueta}
               disabled={ocupado}
@@ -1464,11 +1616,12 @@ function JanelaDoEnvioAoFundo({
         </div>
       }
     >
-      <div className="space-y-3">
+      <div>
         <textarea
           autoFocus
           rows={4}
           value={texto}
+          aria-label="Anotação"
           onChange={(e) => setTexto(e.target.value)}
           onPaste={(e) => {
             const imagens = [...e.clipboardData.files].filter((a) => a.type.startsWith('image/'))
@@ -1479,9 +1632,9 @@ function JanelaDoEnvioAoFundo({
           }}
           disabled={ocupado}
           placeholder="O que foi enviado, ou o motivo da reprovação (opcional) — dá para colar o print aqui com Ctrl+V."
-          className="w-full resize-y rounded-md border border-slate-200 p-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+          className="w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
         />
-        <div>
+        <div className="mt-[10px]">
           <input
             ref={entrada}
             type="file"
@@ -1495,50 +1648,57 @@ function JanelaDoEnvioAoFundo({
           />
           <Button
             size="sm"
-            variant="outline"
-            icon={<Paperclip className="h-4 w-4" />}
+            variant="secondary"
+            className={BTN}
+            icon={<Upload className={IC} aria-hidden />}
             onClick={() => entrada.current?.click()}
             disabled={ocupado}
           >
             Anexar imagem
           </Button>
           {arquivos.length > 0 && (
-            <ul className="mt-2 space-y-1">
+            <ul className="mt-2 grid gap-1">
               {arquivos.map((a, i) => (
-                <li key={`${a.name}-${i}`} className="flex items-center justify-between gap-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">
-                  <span className="truncate">{a.name}</span>
+                <li
+                  key={`${a.name}-${i}`}
+                  className="flex items-center gap-2 rounded-controle bg-superficie-2 py-1 pl-2 pr-1 text-corpo text-texto"
+                >
+                  <FileText className="h-[14px] w-[14px] flex-none text-texto-3" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                  <span className="text-xs text-texto-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
                   <button
                     type="button"
                     onClick={() => setArquivos((antes) => antes.filter((_, j) => j !== i))}
                     disabled={ocupado}
-                    className="text-slate-400 hover:text-red-600"
+                    className="grid h-[26px] w-[26px] place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo"
                     aria-label={`Tirar ${a.name}`}
+                    title={`Tirar ${a.name}`}
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <X className="h-[14px] w-[14px]" aria-hidden />
                   </button>
                 </li>
               ))}
             </ul>
           )}
         </div>
-        {erro && !andamento && (
-          <p className="rounded-md bg-red-50 p-2 text-xs text-red-800 ring-1 ring-inset ring-red-200">
-            Não deu certo: {erro}
-          </p>
-        )}
         {andamento && (
-          <div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+          <div className="mt-3 grid gap-1.5 text-corpo text-texto-2" role="status">
+            <div className="h-2 overflow-hidden rounded-full bg-superficie-3">
               <div
                 className={cn(
-                  'h-full rounded-full bg-emerald-600 transition-all duration-200',
+                  'h-full rounded-full bg-marca-viva transition-all duration-300',
                   andamento.pct === undefined && 'animate-pulse',
                 )}
                 style={{ width: `${andamento.pct ?? 100}%` }}
               />
             </div>
-            <p className="mt-1 text-xs text-slate-500">{andamento.texto}</p>
+            <span>{andamento.texto}</span>
           </div>
+        )}
+        {erro && !andamento && (
+          <CaixaDeAviso tom="perigo" role="alert" className="mt-3">
+            Não deu certo: {erro}
+          </CaixaDeAviso>
         )}
       </div>
     </Modal>
@@ -1553,8 +1713,9 @@ type AndamentoDoAnexo = ProgressoDoEnvio | { fase: 'movendo' }
  * com a anotação padrão, e mover o card (ver `anexarEMover` na trilha).
  *
  * UM CLIQUE, SEM JANELA NO MEIO: escolher o arquivo já é a confirmação — é o que
- * a operação pediu. A barra mostra o arquivo subindo; depois, "gravando no
- * Kommo" e "movendo o card", que não têm porcentagem.
+ * a operação pediu. Enquanto sobe, a barra ocupa o lugar do botão (amostra):
+ * o arquivo subindo, depois "gravando no Kommo" e "movendo o card", que não têm
+ * porcentagem.
  *
  * SE O ARQUIVO SUBIU E O CARD NÃO SE MOVEU, o botão passa a só mover: escolher o
  * arquivo de novo o anexaria duas vezes.
@@ -1594,7 +1755,7 @@ function BotaoAnexarEMover({
   const pct = andamento?.fase === 'enviando' ? andamento.pct : andamento ? 100 : 0
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <>
       <input
         ref={entrada}
         type="file"
@@ -1605,32 +1766,33 @@ function BotaoAnexarEMover({
           if (arquivo) void enviar(arquivo)
         }}
       />
-      <Button
-        size="sm"
-        variant="success"
-        icon={<FileUp className="h-4 w-4" />}
-        onClick={() => (soMover ? void enviar(null) : entrada.current?.click())}
-        loading={andamento !== null}
-        disabled={ocupado || andamento !== null}
-        title={soMover ? 'O arquivo já está no card — falta só mover' : 'Escolher o arquivo no computador'}
-      >
-        {soMover ? 'Tentar mover de novo' : rotulo}
-      </Button>
-      {andamento && (
-        <div className="w-44">
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+      {andamento ? (
+        <div className="grid w-[180px] gap-1 text-xs text-texto-2" role="status">
+          <div className="h-1.5 overflow-hidden rounded-full bg-superficie-3">
             <div
               className={cn(
-                'h-full rounded-full bg-brand-500 transition-all duration-200',
+                'h-full rounded-full bg-marca-viva transition-all duration-200',
                 andamento.fase !== 'enviando' && 'animate-pulse',
               )}
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="mt-0.5 text-right text-xs text-slate-500">{texto}</p>
+          <span>{texto}</span>
         </div>
+      ) : (
+        <Button
+          size="sm"
+          variant="success"
+          className={BTN}
+          icon={soMover ? <ArrowRight className={IC} aria-hidden /> : <Upload className={IC} aria-hidden />}
+          onClick={() => (soMover ? void enviar(null) : entrada.current?.click())}
+          disabled={ocupado}
+          title={soMover ? 'O arquivo já está no card — falta só mover' : 'Escolher o arquivo no computador'}
+        >
+          {soMover ? 'Tentar mover de novo' : rotulo}
+        </Button>
       )}
-    </div>
+    </>
   )
 }
 
@@ -1647,30 +1809,19 @@ function BotaoAnexarEMover({
  * precisa ler como informação do card — não como anotação da própria máquina.
  *
  * O RASCUNHO NÃO SE PERDE AO FECHAR: clicar fora ou apertar Esc fecha a caixa e
- * mantém o texto, e o ícone fica marcado enquanto houver rascunho. Só o envio
- * bem-sucedido limpa.
+ * mantém o texto, e o botão fica marcado (âmbar, com o ponto) enquanto houver
+ * rascunho. Só o envio bem-sucedido limpa.
+ *
+ * "ANOTAR" COM TEXTO desde a onda 2 (amostra): era um ícone de 20 px ao lado do
+ * título; virou botão com rótulo, na zona de ações, com alvo de 32 px.
  */
 function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<void> }) {
   const [aberto, setAberto] = useState(false)
   const [texto, setTexto] = useState('')
   const [enviando, setEnviando] = useState(false)
   const caixa = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!aberto) return
-    const fora = (e: MouseEvent) => {
-      if (!caixa.current?.contains(e.target as Node)) setAberto(false)
-    }
-    const tecla = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setAberto(false)
-    }
-    document.addEventListener('mousedown', fora)
-    document.addEventListener('keydown', tecla)
-    return () => {
-      document.removeEventListener('mousedown', fora)
-      document.removeEventListener('keydown', tecla)
-    }
-  }, [aberto])
+  const fechar = useCallback(() => setAberto(false), [])
+  useFecharFora(aberto, fechar, caixa)
 
   async function enviar() {
     const t = texto.trim()
@@ -1690,36 +1841,45 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
   const temRascunho = texto.trim().length > 0
   return (
     <div className="relative" ref={caixa}>
-      <button
-        type="button"
+      <Button
+        size="sm"
+        variant="ghost"
         onClick={() => setAberto((v) => !v)}
         title={temRascunho ? 'Anotação em rascunho — clique para continuar' : 'Escrever uma anotação no card do Kommo'}
-        aria-label="Anotação no card"
-        className={cn(
-          'inline-flex h-5 w-5 items-center justify-center rounded transition-colors',
-          aberto || temRascunho
-            ? 'bg-brand-50 text-brand-700'
-            : 'text-slate-400 hover:bg-slate-100 hover:text-brand-700',
-        )}
+        aria-expanded={aberto}
+        className={cn(BTN, temRascunho && 'border-aviso-borda bg-aviso-fundo text-aviso hover:bg-aviso-fundo hover:text-aviso')}
+        icon={<MessageSquarePlus className={IC} aria-hidden />}
       >
-        <MessageSquarePlus className="h-3.5 w-3.5" />
-      </button>
+        Anotar
+        {temRascunho && <span className="ml-0.5 h-[7px] w-[7px] rounded-full bg-aviso-cheio" aria-hidden />}
+      </Button>
 
       {aberto && (
-        <div className="absolute left-0 z-20 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+        <div className={cn(CAIXA_FLUTUANTE, 'right-0 w-[340px] max-w-[calc(100vw-2rem)] p-[10px]')}>
           <textarea
             autoFocus
             rows={4}
             value={texto}
+            aria-label="Anotação"
             onChange={(e) => setTexto(e.target.value)}
             onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void enviar()
             }}
             placeholder="Ex.: Cedente enviou o RG; falta o comprovante de endereço."
-            className="w-full resize-y rounded-md border border-slate-200 p-2 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+            className="min-h-[96px] w-full resize-y rounded-controle border border-borda-controle bg-superficie px-[10px] py-2 text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20"
           />
-          <div className="mt-1.5 flex justify-end">
-            <Button size="sm" onClick={() => void enviar()} loading={enviando} disabled={!temRascunho}>
+          <div className="mt-2 flex items-center justify-between text-xs text-texto-3">
+            <span>
+              <kbd className="rounded-[6px] border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2">
+                Ctrl
+              </kbd>{' '}
+              +{' '}
+              <kbd className="rounded-[6px] border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2">
+                Enter
+              </kbd>{' '}
+              envia
+            </span>
+            <Button size="sm" className={BTN} onClick={() => void enviar()} loading={enviando} disabled={!temRascunho}>
               Enviar
             </Button>
           </div>
@@ -1728,6 +1888,329 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
     </div>
   )
 }
+
+/**
+ * O "FECHADO!" DA NEGOCIAÇÃO (onda 4 do redesenho, etapa 10b — para todos desde
+ * 03/10/2026, ver `BOTOES_NOVOS_PARA_TODOS`): o
+ * cedente aceitou a proposta. Confirma num passo, numa caixa presa ao botão
+ * (amostra, `confirmarFechado`), com uma anotação opcional.
+ *
+ * A NOTA É "Proposta aceita pelo cedente." mais a anotação, se houver; o
+ * movimento é o da `kommo-mover`, que confere a origem (a Negociação) e marca a
+ * nota de serviço como "Comercial". FALHA DA NOTA COM O CARD MOVIDO: a caixa fica
+ * aberta com o aviso, e confirmar de novo só anota (ver `moverComNota`).
+ */
+function BotaoFechado({
+  acao,
+  cedente,
+  destino,
+  ocupado,
+  onConfirmar,
+}: {
+  acao: AcaoTela
+  cedente: string
+  /** O nome da coluna de destino, como a tela a mostra. */
+  destino: string
+  ocupado: boolean
+  onConfirmar: (nota: string) => Promise<void>
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [anotacao, setAnotacao] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const caixa = useRef<HTMLDivElement>(null)
+  // ENVIANDO, A CAIXA NÃO FECHA POR UM CLIQUE FORA: o aviso de falha da nota
+  // precisa de onde aparecer.
+  const fechar = useCallback(() => {
+    if (!enviando) setAberto(false)
+  }, [enviando])
+  useFecharFora(aberto, fechar, caixa)
+
+  async function confirmar() {
+    if (enviando) return
+    setErro(null)
+    setEnviando(true)
+    try {
+      await onConfirmar(notaDoFechado(anotacao))
+      setAberto(false)
+      setAnotacao('')
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="relative" ref={caixa}>
+      <Button
+        size="sm"
+        variant="success"
+        className={BTN}
+        icon={<Handshake className={IC} aria-hidden />}
+        onClick={() => {
+          setErro(null)
+          setAberto((v) => !v)
+        }}
+        disabled={ocupado && !aberto}
+        aria-expanded={aberto}
+      >
+        {acao.label}
+      </Button>
+
+      {aberto && (
+        <div
+          role="dialog"
+          aria-label="Confirmar negócio fechado"
+          className={cn(CAIXA_FLUTUANTE, 'right-0 w-[320px] max-w-[calc(100vw-2rem)] p-[14px] text-center')}
+        >
+          <span
+            aria-hidden
+            className="mx-auto mb-2 grid h-[36px] w-[36px] place-items-center rounded-full bg-sucesso-fundo text-sucesso"
+          >
+            <Handshake className="h-[20px] w-[20px]" />
+          </span>
+          <p className="font-display text-corpo font-bold text-texto">O cedente aceitou a proposta?</p>
+          <p className="mt-1 text-corpo text-texto-2">
+            {cedente} vai para <strong className="text-texto">{destino}</strong>.
+          </p>
+          <input
+            value={anotacao}
+            disabled={enviando}
+            onChange={(e) => setAnotacao(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void confirmar()
+            }}
+            aria-label="Anotação (opcional)"
+            placeholder="Anotação (opcional) — ex.: aceitou por telefone"
+            className="mt-3 h-[36px] w-full rounded-controle border border-borda-controle bg-superficie px-[10px] text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
+          />
+          {erro && (
+            <CaixaDeAviso tom="perigo" role="alert" className="mt-3 text-left">
+              {erro}
+            </CaixaDeAviso>
+          )}
+          <div className="mt-3 flex justify-center gap-2">
+            <Button size="sm" variant="ghost" className={BTN} onClick={() => setAberto(false)} disabled={enviando}>
+              Voltar
+            </Button>
+            <Button
+              // O FOCO NO CONFIRMAR ao abrir (amostra): é a ação que se procura.
+              autoFocus
+              size="sm"
+              variant="success"
+              className={BTN}
+              icon={<Check className={IC} aria-hidden />}
+              onClick={() => void confirmar()}
+              loading={enviando}
+            >
+              Confirmar: fechado!
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * O "NÃO FECHOU" DA NEGOCIAÇÃO (onda 4 do redesenho, etapa 10b — para todos desde
+ * 03/10/2026, ver `BOTOES_NOVOS_PARA_TODOS`): o
+ * cedente recusou (vai para Não fechado/s) ou sumiu (vai para Sem resposta), com
+ * o motivo escrito — pelo menos 10 caracteres — e motivos de um clique (amostra,
+ * `janelaNaoFechou`).
+ *
+ * FALHA DA NOTA COM O CARD MOVIDO: a janela fica aberta com o aviso, a escolha
+ * trava no destino que já recebeu o card, e confirmar de novo só anota — trocar
+ * de opção ali moveria o card uma segunda vez.
+ */
+function JanelaNaoFechou({
+  lead,
+  opcoes,
+  nomeDaColuna,
+  jaMovido,
+  onConfirmar,
+  onFechar,
+}: {
+  lead: KommoLead
+  opcoes: Partial<Record<TipoDeNaoFechou, AcaoTela>>
+  nomeDaColuna: (statusId: number) => string
+  jaMovido: (statusId: number) => boolean
+  onConfirmar: (acao: AcaoTela, nota: string) => Promise<void>
+  onFechar: () => void
+}) {
+  const tipos = (['recusou', 'sumiu'] as const).filter((t) => opcoes[t])
+  const [tipo, setTipo] = useState<TipoDeNaoFechou>(tipos[0] ?? 'recusou')
+  const [motivo, setMotivo] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const campo = useRef<HTMLTextAreaElement>(null)
+  const acao = opcoes[tipo]
+  // O DESTINO QUE JÁ RECEBEU O CARD nesta janela (só depois de um erro).
+  const movido = erro ? tipos.find((t) => opcoes[t] && jaMovido(opcoes[t]!.statusId)) : undefined
+  const m = MOTIVOS_NAO_FECHOU[tipo]
+  const pode = Boolean(acao) && !enviando && motivoSuficiente(motivo) && (!movido || movido === tipo)
+
+  const escolher = (t: TipoDeNaoFechou) => {
+    if (movido || enviando) return
+    setTipo(t)
+  }
+  // AS SETAS ANDAM ENTRE AS OPÇÕES, como num grupo de rádios.
+  const aoTeclar = (e: React.KeyboardEvent) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) || tipos.length < 2) return
+    e.preventDefault()
+    const i = tipos.indexOf(tipo)
+    const prox = tipos[(i + (e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? tipos.length - 1 : 1)) % tipos.length]
+    escolher(prox)
+    document.getElementById(`nf-${lead.kommo_lead_id}-${prox}`)?.focus()
+  }
+
+  async function confirmar() {
+    if (!acao || !pode) return
+    setErro(null)
+    setEnviando(true)
+    try {
+      await onConfirmar(acao, notaDoNaoFechou(tipo, motivo))
+    } catch (e) {
+      setErro((e as Error)?.message ?? String(e))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  const cancelar = async () => {
+    if (motivo.trim() && !(await perguntarDescarte())) return
+    onFechar()
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onFechar}
+      title="O cedente não fechou"
+      description={tituloCard(lead)}
+      size="lg"
+      dirty={motivo.trim() !== ''}
+      footer={
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Button variant="ghost" className={BTN} onClick={cancelar} disabled={enviando}>
+            Cancelar
+          </Button>
+          <span className="flex-1" />
+          <Button
+            variant="outline"
+            className={cn(BTN, PERIGO_CONTORNADO)}
+            icon={<X className={IC} aria-hidden />}
+            onClick={() => void confirmar()}
+            disabled={!pode}
+            loading={enviando}
+          >
+            {m.confirmar}
+          </Button>
+        </div>
+      }
+    >
+      <p id={`nf-${lead.kommo_lead_id}-rotulo`} className="mb-2 text-sm font-semibold text-texto">
+        O que aconteceu?
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby={`nf-${lead.kommo_lead_id}-rotulo`}
+        className="grid gap-2 sm:grid-cols-2"
+        onKeyDown={aoTeclar}
+      >
+        {tipos.map((t) => {
+          const o = MOTIVOS_NAO_FECHOU[t]
+          const marcado = t === tipo
+          return (
+            <button
+              key={t}
+              id={`nf-${lead.kommo_lead_id}-${t}`}
+              type="button"
+              role="radio"
+              aria-checked={marcado}
+              tabIndex={marcado ? 0 : -1}
+              disabled={Boolean(movido) && movido !== t}
+              onClick={() => escolher(t)}
+              className={cn(
+                'flex min-h-[56px] items-start gap-3 rounded-campo border px-4 py-3 text-left transition-colors disabled:opacity-50',
+                marcado ? 'border-marca-viva bg-marca-suave' : 'border-borda bg-superficie hover:bg-superficie-3',
+              )}
+            >
+              {t === 'recusou' ? (
+                <X className="mt-0.5 h-[20px] w-[20px] flex-none text-perigo" aria-hidden />
+              ) : (
+                <Clock className="mt-0.5 h-[20px] w-[20px] flex-none text-aviso" aria-hidden />
+              )}
+              <span className="min-w-0">
+                <span className="block text-corpo font-bold text-texto">{o.rotulo}</span>
+                <span className="block text-sm text-texto-2">
+                  {o.apoio} · vai para <i>{nomeDaColuna(opcoes[t]!.statusId)}</i>
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div role="group" aria-label="Motivos mais comuns" className="mt-4 flex flex-wrap items-center gap-1.5">
+        <span className="text-sm text-texto-3">Motivos comuns:</span>
+        {m.sugestoes.map((s) => (
+          <button
+            key={s}
+            type="button"
+            disabled={enviando}
+            onClick={() => {
+              setMotivo((v) => comSugestao(v, s))
+              campo.current?.focus()
+            }}
+            className="inline-flex min-h-[28px] items-center rounded-full border border-borda-forte bg-superficie px-3 text-sm font-medium text-texto-2 hover:bg-superficie-3"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+      <textarea
+        ref={campo}
+        autoFocus
+        rows={4}
+        value={motivo}
+        disabled={enviando}
+        aria-label="Motivo"
+        placeholder={m.exemplo}
+        onChange={(e) => setMotivo(e.target.value)}
+        className="mt-3 min-h-[112px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
+      />
+      {motivo.trim().length > 0 && !motivoSuficiente(motivo) && (
+        <DicaDeAviso>Escreva o motivo por extenso — é o que o comercial lê depois para entender a perda.</DicaDeAviso>
+      )}
+      {erro && (
+        <CaixaDeAviso tom="perigo" role="alert" className="mt-3">
+          {erro}
+        </CaixaDeAviso>
+      )}
+    </Modal>
+  )
+}
+
+/** O "·" entre os campos do título do card. */
+const Ponto = () => (
+  <span className="text-borda-forte" aria-hidden>
+    •
+  </span>
+)
+
+/** O ícone de cada tom de etiqueta (amostra): cotado ✓, reprovado ✕, enviado →. */
+function iconeDaEtiqueta(tom: TomDaTag): ReactNode {
+  if (tom === 'green') return <Check className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />
+  if (tom === 'red') return <X className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />
+  if (tom === 'blue') return <ArrowRight className="h-[12px] w-[12px]" aria-hidden />
+  if (tom === 'yellow') return <Clock className="h-[12px] w-[12px]" aria-hidden />
+  return null
+}
+
+/** O link discreto da amostra (`.link-btn`), para o "Ver histórico" e afins. */
+const LINK_BTN =
+  '-ml-2 inline-flex h-[28px] items-center gap-1.5 rounded-controle px-2 text-sm font-semibold text-marca-texto transition-colors hover:bg-marca-leve'
 
 function CardCredito({
   lead,
@@ -1759,6 +2242,11 @@ function CardCredito({
   anexarEMover,
   envioAosFundos,
   onCertidoes,
+  onCopiarProcesso,
+  compacto,
+  negociacao,
+  onGerarContrato,
+  realcado = false,
 }: {
   lead: KommoLead
   acoes: AcaoTela[]
@@ -1771,7 +2259,7 @@ function CardCredito({
   analisando: boolean
   resultadoAnalise?: ResultadoAnalise
   onDueDiligence: (l: KommoLead) => void
-  /** Abre a conversa da análise no Claude — só no precatório externo. */
+  /** Abre a conversa da análise no Claude — no precatório. */
   onAnaliseExterna: (l: KommoLead) => void
   /** Baixa os anexos do card para o disco — o resgate, quando os autos não subiram. */
   onBaixarAnexos?: (l: KommoLead) => void
@@ -1779,7 +2267,7 @@ function CardCredito({
    * Fecha a etapa: abre a janela com a razão e as saídas possíveis.
    *
    * Indefinido nas abas cujo desfecho não é agrupado — lá as saídas continuam
-   * sendo um botão cada, na linha de cima do card.
+   * sendo um botão cada.
    */
   onConcluir?: (l: KommoLead) => void
   /**
@@ -1807,24 +2295,15 @@ function CardCredito({
   /** Os desfechos ficam no card, ou na janela da análise? */
   desfechoNoCard: boolean
   /**
-   * As etiquetas do Kommo aparecem neste card?
-   *
-   * NAS TERMINAIS DO EXTERNO — aprovados e reprovados. O espelho guarda as tags
-   * de TODOS os cards desde sempre (vêm de graça no `_embedded` da listagem), e
-   * mostrá-las em toda aba encheria a fila de etiquetas que não dizem nada sobre
-   * o trabalho daquela etapa. Passado o trabalho é o contrário: a etiqueta é o
-   * que resta dizendo para qual fundo o crédito foi, ou por que não foi.
-   *
-   * Quais abas, exatamente, é `ABAS_COM_TAGS` quem diz.
+   * As etiquetas do Kommo aparecem neste card? Quais abas, exatamente, é
+   * `ABAS_COM_TAGS` quem diz: passado o trabalho, a etiqueta é o que resta
+   * dizendo para qual fundo o crédito foi, ou por que não foi; nas etapas de
+   * trabalho seria ruído.
    */
   mostrarTags: boolean
   /**
    * As etiquetas que ESTA aba deixa aplicar e remover — vazio, só leitura.
-   *
-   * Mostrar e EDITAR são coisas diferentes, e por isso são duas portas: em
-   * Aprovados e Reprovados a etiqueta é o registro do que já aconteceu, e ali
-   * ela se lê. Em "Em precificação" o crédito ainda está em jogo, e é lá que a
-   * casa marca em qual fundo ele está e como voltou.
+   * Mostrar e EDITAR são coisas diferentes, e por isso são duas portas.
    */
   etiquetasOferecidas: readonly EtiquetaDoFundo[]
   onEtiquetar: (l: KommoLead, etiqueta: string, acao: 'adicionar' | 'remover') => void
@@ -1846,11 +2325,31 @@ function CardCredito({
   /** Os checks do envio aos fundos, onde a aba os declara (a Remessa do Externo). */
   envioAosFundos?: {
     fundos: FundoDoEnvio[]
+    destino: number
     onAbrir: (l: KommoLead, f: FundoDoEnvio) => void
     onMover: (l: KommoLead) => void
   }
   /** Abre o painel de certidões, onde a aba o declara (a Obtenção de documentação do Externo). */
   onCertidoes?: (l: KommoLead) => void
+  /** Copia o número do processo — o aviso de sucesso ou de falha é da página. */
+  onCopiarProcesso: (numero: string) => void
+  /** Densidade compacta (preferência da pessoa). */
+  compacto: boolean
+  /**
+   * O desfecho da Negociação no card (onda 4 — para todos desde 03/10/2026, ver
+   * `abaParaQuemVe`): o "Fechado!" e o "Não fechou".
+   */
+  negociacao?: {
+    opcoes: DesfechoDaNegociacao
+    /** O nome da coluna de Fechados, como a tela a mostra. */
+    destinoDoFechado: string
+    onFechado: (l: KommoLead, nota: string) => Promise<void>
+    onNaoFechou: (l: KommoLead) => void
+  }
+  /** Leva à Geração de contratos com este card (onda 4 — para todos desde 03/10/2026). Não move card. */
+  onGerarContrato?: (l: KommoLead) => void
+  /** O card que o endereço apontou ("Voltar ao card"): moldura de destaque, sem abrir nada. */
+  realcado?: boolean
 }) {
   const [aberto, setAberto] = useState(false)
   const ocupado = statusEmAndamento !== null
@@ -1866,6 +2365,20 @@ function CardCredito({
         ? [{ id: 0, texto: lead.nota_texto, criado_em: null, autor: null }]
         : []
   const posteriores = notas.length - 1
+  const grupos = useMemo(() => agruparNotas(notas), [notas])
+  const ultima = grupos[grupos.length - 1]
+
+  // O TÍTULO QUEBRADO EM CAMPOS (amostra), pela mesma leitura que a análise usa.
+  const campos = useMemo(() => camposDoTitulo(lead.nome), [lead.nome])
+  // OS AVISOS DE CADASTRO só onde não há análise de RPV para dizer: nas abas de
+  // due diligence e nas sem botão de trabalho. Memoizado porque
+  // lerCardCredijuris junta TODAS as anotações do card numa string, e há cards
+  // com histórico longo.
+  const mostrarAvisos = botoes === 'nenhum' || botoes === 'dd'
+  const cadastro = useMemo(() => (mostrarAvisos ? lerCardCredijuris(lead) : null), [lead, mostrarAvisos])
+  const dias = diasNaEtapa(lead)
+  const parado = estaParado(dias)
+  const quandoNaEtapa = dataDaEtapa(lead)
 
   // A MIRA NO ANEXO: o passar do mouse só vira consulta depois de uma pausa. Um
   // relógio só basta porque o mouse está sobre um link de cada vez.
@@ -1880,442 +2393,131 @@ function CardCredito({
   }
   useEffect(() => cancelarMira, [])
 
-  return (
-    <div className="border-b border-slate-100 p-4 transition-colors last:border-b-0 hover:bg-slate-50/70">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            {/* O TÍTULO VIRA LINK PARA A PASTA DO CEDENTE no Drive, quando ela
-                já existe — e é onde estão as planilhas daquele processo.
-                Chegar até ela era abrir o Drive e navegar três níveis, ou caçar
-                o link numa anotação antiga do Kommo.
+  const titulo = campos?.cedente ?? tituloCard(lead)
+  // OS AUTOS DESTE CARD AINDA ESTÃO SENDO LIDOS (precatório): o botão continua
+  // valendo — cada clique abre outra conversa e entra na fila —, só gira.
+  const lendoAutos = preparoDosAutos?.estado === 'fila' || preparoDosAutos?.estado === 'lendo'
 
-                LINK DE VERDADE, e não um clique que resolve a pasta na hora: o
-                id vem gravado no card (ver migração 0059), então o destino é
-                instantâneo e não há chance de falhar. Sem id — card nunca
-                analisado, ou analisado antes da 0059 — fica texto, porque
-                título que parece link e não leva a nada é pior que título. */}
+  return (
+    <article
+      data-lead={lead.kommo_lead_id}
+      tabIndex={-1}
+      className={cn(
+        'relative grid grid-cols-1 gap-x-6 gap-y-2 rounded-cartao border border-borda bg-superficie px-[18px] shadow-nivel-1 transition-[border-color,box-shadow] duration-150 hover:border-borda-forte hover:shadow-nivel-2 focus:outline-none min-[900px]:grid-cols-[minmax(0,1fr)_auto]',
+        compacto ? 'py-[10px]' : 'py-4',
+        realcado && 'border-marca-viva ring-[3px] ring-marca-viva/20',
+      )}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-display text-lg font-bold leading-snug tracking-tight text-texto">
+            {/* O NOME VIRA LINK PARA A PASTA DO CEDENTE no Drive, quando ela já
+                existe — e é onde estão as planilhas daquele processo. LINK DE
+                VERDADE: o id vem gravado no card (migração 0059). Sem id fica
+                texto, porque título que parece link e não leva a nada é pior
+                que título. */}
             {lead.drive_pasta_id ? (
               <a
                 href={`https://drive.google.com/drive/folders/${lead.drive_pasta_id}`}
                 target="_blank"
                 rel="noreferrer"
                 title="Abrir a pasta deste cedente no Drive"
-                className="font-medium text-slate-800 underline decoration-slate-300 decoration-1 underline-offset-2 hover:text-brand-700 hover:decoration-brand-400"
+                className="underline decoration-borda-forte decoration-1 underline-offset-[3px] hover:text-marca-texto"
               >
-                {tituloCard(lead)}
+                {titulo}
               </a>
             ) : (
-              <span className="font-medium text-slate-800">{tituloCard(lead)}</span>
+              titulo
             )}
-            {/* SÓ O "FINALIZADO". O par tinha um selo para cada estado, e o
-                "Em curso" aparecia em todo card que ninguém tocou — que é a
-                maioria da lista. Selo que está em quase toda linha não distingue
-                nada: vira textura, e ainda empurra o título. O que a pessoa
-                procura na fila é o card cuja análise JÁ ESTÁ PRONTA; a ausência
-                do selo diz o resto. */}
-            {analisePronta === true && (
-              <Badge size="sm" tone="green">
-                Finalizado
-              </Badge>
-            )}
-            {/* A ANOTAÇÃO AO LADO DO TÍTULO: é do card inteiro, e não das
-                etiquetas. */}
-            {onAnotar && <BotaoDeAnotacao onEnviar={(t) => onAnotar(lead, t)} />}
-          </div>
-
-          {/* AS ETIQUETAS DO KOMMO, na linha de baixo.
-              Elas sempre estiveram no espelho — vêm de graça na listagem dos
-              cards — e nunca apareceram: nas etapas de trabalho seriam ruído,
-              porque o que se procura ali é o processo, não o rótulo. Depois de
-              encaminhado é o contrário: a etiqueta é a única coisa no card que
-              diz para qual fundo o crédito foi.
-
-              ABAIXO DO TÍTULO, e não ao lado: o título é longo (intermediador,
-              cedente, número, parcela, percentual) e empurrava as etiquetas para
-              o fim de uma linha que já quebra — elas chegavam ao canto direito,
-              desgarradas do card. Em linha própria, são a primeira coisa que se
-              lê depois do nome.
-
-              A COR É DO NOME DA ETIQUETA, e sempre a mesma para a mesma tag: numa
-              coluna de trinta cards, quem procura os de um fundo acha pela mancha
-              antes de ler o texto. Verde e vermelho ficam fora da paleta — no
-              card eles já significam análise pronta e recusa. */}
-          {mostrarTags && ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0) && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {/* A ORDEM É A DA CASA — PJus, BTG, PX Ativos… —, e não a do Kommo,
-                    que é a ordem em que alguém etiquetou e muda de card para
-                    card. Fixa, a POSIÇÃO passa a informar: a primeira é sempre
-                    a do PJus, e a falta dela se nota pelo que não está ali. */}
-                {mostrarTags && [...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => {
-                  // HÁ QUANTO TEMPO, junto da etiqueta: "Enviado PJus · há 9
-                  // dias" se lê na fila sem abrir nada.
-                  const quando = desdeQuandoAEtiqueta(lead.tags_em, t)
-                  const decorrido = quando ? tempoDecorrido(quando) : ''
-                  return (
-                    <span key={t} title={quando ? `Desde ${formatDateTime(quando)}` : undefined}>
-                      <Badge size="sm" tone={tom}>
-                        {/* O NOME DA CASA, e não a grafia que o card tem: "Enviado
-                            PJUS", de antes de 01/10/2026, aparece como "Enviado PJus". */}
-                        {etiquetaCanonica(t) ?? t}
-                        {decorrido && <span className="font-normal opacity-70"> · {decorrido}</span>}
-                      </Badge>
-                    </span>
-                  )
-                })}
-                {/* O SELETOR FICA NO FIM DA FILA DE ETIQUETAS, e aparece mesmo
-                    no card que ainda não tem nenhuma — é justamente ali que ele
-                    mais serve. Sem etiquetas e sem seletor, a linha inteira some
-                    e o card volta a ser o de antes. */}
-                {mostrarTags && etiquetasOferecidas.length > 0 && (
-                  <SeletorDeEtiquetas
-                    oferecidas={etiquetasOferecidas}
-                    aplicadas={lead.tags ?? []}
-                    datas={lead.tags_em}
-                    emVoo={etiquetaEmVoo}
-                    onAlternar={(etiqueta, acao) => onEtiquetar(lead, etiqueta, acao)}
-                  />
-                )}
-              </div>
-            )}
-          {/* Sem linha de metadados: o processo já vem no título e o responsável é
-              sempre a Credijuris. A data de CRIAÇÃO continua fora — ela é
-              redundante com as datas das anotações, e a que importa numa fila é
-              outra: desde quando o card está nesta coluna, que fica à direita
-              (ver SeloDaEtapa). Tags também ficam de fora — as atuais são
-              artefato da migração do Chatwoot. Tudo continua em kommo_leads. */}
+          </h3>
+          {/* SÓ O "FINALIZADO": o que a pessoa procura na fila é o card cuja
+              análise JÁ ESTÁ PRONTA; a ausência do selo diz o resto. */}
+          {analisePronta === true && (
+            <Selo tom="sucesso" icone={<Check className={icSelo} aria-hidden />}>
+              Finalizado
+            </Selo>
+          )}
+          {/* PARADO HÁ N DIAS, depois do prazo (amostra): o dado que pede ação
+              vem junto do nome. Só com a data da etapa conhecida. */}
+          {parado && dias !== null && (
+            <Selo tom="aviso" icone={<Clock className={icSelo} aria-hidden />}>
+              Parado há {dias} dias
+            </Selo>
+          )}
+          {cadastro && <SelosDoCadastro d={cadastro} />}
         </div>
 
-        {/* Lado a lado: os rótulos são curtos e assim cada card ocupa uma linha
-            em vez de três. flex-wrap para não estourar em tela estreita. */}
-        {/* OS DESFECHOS SAÍRAM DO CARD NA ABA DE PENDENTES e vivem na janela da
-            análise: aprovar, diligenciar ou reprovar são decisões que se tomam
-            DEPOIS de ler a análise, e ali ficavam a um clique de qualquer
-            leitura, ao lado do botão que ainda ia gerá-la.
-
-            EM VALIDAÇÃO ELES FICAM. Naquela aba a análise já foi feita e salva
-            — quem revisa lê a anotação e a planilha, não roda de novo —, e tirar
-            os botões de lá obrigaria a abrir a janela e pagar dois minutos de
-            leitura do processo para mover um card. */}
-        {/* A COLUNA DA DIREITA: a data em cima, os desfechos embaixo. Eram só os
-            botões, e o selo precisa do canto superior — é lido junto com o
-            título, na varredura de cima para baixo que se faz numa fila. */}
-        <div className="flex flex-none flex-col items-end gap-1.5">
-          {/* AS DUAS DATAS JUNTAS, sem o espaço dos botões entre elas: na coluna
-              desde quando, e na esteira desde quando. */}
-          <div className="flex flex-col items-end">
-            <SeloDaEtapa lead={lead} />
-            <SeloDaCriacao lead={lead} />
-          </div>
-          {envioAosFundos && (
-            <ChecksDosFundos
-              lead={lead}
-              fundos={envioAosFundos.fundos}
-              ocupado={ocupado}
-              onAbrir={(f) => envioAosFundos.onAbrir(lead, f)}
-              onMover={() => envioAosFundos.onMover(lead)}
-            />
-          )}
-          {anexarEMover && (
-            <BotaoAnexarEMover
-              rotulo={anexarEMover.rotulo}
-              soMover={anexarEMover.soMover}
-              ocupado={ocupado}
-              onEnviar={(arquivo, onAndamento) => anexarEMover.onEnviar(lead, arquivo, onAndamento)}
-            />
-          )}
-          {onEscolherProposta && (
-            <BotaoEscolherProposta
-              lead={lead}
-              ocupado={ocupado}
-              carregando={ocupado}
-              onEscolher={(f) => onEscolherProposta(lead, f)}
-            />
-          )}
-          {acoes.length > 0 && desfechoNoCard && (
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
-              {acoes.map((a) => (
-                <Button
-                  key={a.statusId}
-                  size="sm"
-                  variant={a.variant}
-                  icon={ICONES[a.papel]}
-                  onClick={() => onAcao(lead, a)}
-                  loading={statusEmAndamento === a.statusId}
-                  // Trava as outras ações do card enquanto uma corre: duas
-                  // movimentações simultâneas no mesmo card se atropelariam.
-                  disabled={ocupado}
-                >
-                  {a.label}
-                </Button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* O QUE O TÍTULO DIZ, onde não há análise para dizer.
-
-          Nas etapas sem botão de trabalho — as quatro outras abas do Interno e
-          as CINCO DO FUNDO — o card mostrava só o título cru. A leitura do
-          título sempre valeu ali (lerTituloCard não tem porta por funil nem por
-          subdivisão), mas nada a consumia: o comercial escrevia a parcela cedida
-          e o percentual, e eles não apareciam em lugar nenhum.
-
-          UMA LINHA, e não a ficha de sete: o card é item de lista, lido de
-          relance. Campo que o título não trouxe é omitido — a ausência se lê
-          por comparação com os cards vizinhos.
-
-          Sem número em parte nenhuma é DEFEITO, e é dito: sem ele o card fica
-          fora da busca por processo e o checklist de certidões não acha o CNJ.
-          É a única checagem daqui, porque é a única que nenhuma outra etapa faz
-          nestas abas.
-
-          NOS FUNDOS ELE FICA JUNTO DO BOTÃO, e não no lugar dele: ali o card
-          oferece due diligence, e é a diligência que mais precisa do número. É
-          por ele que a apuração RECONHECE o próprio crédito na lista de
-          processos do cedente e o exclui — sem número, o precatório que estamos
-          comprando volta da busca como se fosse mais uma dívida dele. */}
-      {(botoes === 'nenhum' || botoes === 'dd') && (
-        <AvisoSemNumero lead={lead} />
-      )}
-
-      {/* AS CERTIDÕES À ESQUERDA, no lugar da fileira de trabalho (30/09/2026):
-          é trabalho, como a due diligence, e não desfecho. */}
-      {onCertidoes && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            icon={<ScrollText className="h-4 w-4" />}
-            onClick={() => onCertidoes(lead)}
-            disabled={ocupado}
-          >
-            Certidões
-          </Button>
-        </div>
-      )}
-
-      {/* OS BOTÕES DE TRABALHO DEPENDEM DA ETAPA, e por dois motivos distintos.
-          Em RPV segue o de sempre, que precifica 150 cards que funcionam. No
-          precatório, só a aba Jurídico os oferece — analisar um card já aprovado
-          ou reprovado não é trabalho, é retrabalho — e "Analisar" NÃO aparece: o
-          motor dele é o de RPV (template, cenários e prazo de RPV), e rodá-lo num
-          precatório produzia parecer errado com cara de conferido. Na trilha dos
-          Externa sobra só a due diligence: a análise de lá é do fundo comprador. */}
-      {botoes !== 'nenhum' && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {/* A MESMA ORDEM NOS DOIS FUNIS: due diligence primeiro, análise
-              depois. Em RPV estava invertida — o botão escuro vinha antes —, e
-              duas telas irmãs com a ordem trocada fazem a mão errar: quem opera
-              alterna entre elas o dia inteiro e clica pela POSIÇÃO, não pelo
-              rótulo. A ordem também é a do trabalho: apura-se antes de analisar.
-
-              DUE DILIGENCE NOS DOIS, com frentes diferentes: em RPV não se faz
-              diligência de CERTIDÕES, só de processos judiciais, então a janela
-              abre sem a aba de certidões (ver `comCertidoes`). Nunca automático:
-              o checklist depende de CPF e UF que uma pessoa confere no processo,
-              e rodar sozinho só produziria checklist sobre dado adivinhado. */}
-          <Button
-            size="sm"
-            variant="outline"
-            icon={<ClipboardCheck className="h-4 w-4" />}
-            onClick={() => onDueDiligence(lead)}
-            disabled={ocupado}
-          >
-            Due diligence
-          </Button>
-
-          {botoes === 'rpv' && (
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<FileSearch className="h-4 w-4" />}
-              onClick={() => onAnalisar(lead)}
-              loading={analisando}
-              disabled={ocupado || analisando}
-            >
-              {/* "Executar análise", e não "Análise jurídica" como no precatório:
-                  aqui a análise não é só jurídica — ela qualifica, extrai e
-                  PRECIFICA (deságio, prazo, preço de cessão). Dar o mesmo nome
-                  esconderia que este botão mexe em dinheiro e o outro não. */}
-              {analisando ? 'Analisando…' : 'Executar análise'}
-            </Button>
-          )}
-
-          {/* A ANÁLISE ACONTECE FORA DAQUI, e o botão é a porta: abre uma
-              conversa no Claude, que vem buscar os autos pelo conector. Era do
-              Externo, e desde 28/09/2026 vale nas duas trilhas, a pedido da
-              equipe. Mesmo lugar e mesma forma do botão de RPV de propósito: é
-              o mesmo ato do ponto de vista de quem opera, e muda só para onde
-              leva. */}
-          {botoes === 'dd' && (
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<FileSearch className="h-4 w-4" />}
-              onClick={() => onAnaliseExterna(lead)}
-              disabled={ocupado}
-            >
-              Executar análise
-            </Button>
-          )}
-
-          {/* CONCLUIR FECHA A ETAPA, e fica à direita da análise porque é o que
-              vem depois dela: a conversa com o Claude acontece fora daqui, e
-              quem volta precisa registrar o que decidiu e mover o card. Sem este
-              botão, as duas coisas ficavam a cargo de quem opera — dentro do
-              Kommo, à mão, e fora do alcance da plataforma. */}
-          {botoes === 'dd' && onConcluir && (
-            <Button
-              size="sm"
-              // O AZUL DA MARCA, e não o `secondary` de "Executar análise": os
-              // dois saíam em slate-800 e viravam o mesmo botão repetido, com
-              // rótulos diferentes. Três ações lado a lado precisam de três
-              // pesos — o contorno branco da diligência, o escuro da análise e
-              // este, que é o que FECHA a etapa. Verde ficaria errado: concluir
-              // também é recusar.
-              variant="primary"
-              icon={<CheckCircle2 className="h-4 w-4" />}
-              onClick={() => onConcluir(lead)}
-              disabled={ocupado}
-            >
-              Concluir
-            </Button>
-          )}
-
-        </div>
-      )}
-      {preparoDosAutos && (
-        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
-          {preparoDosAutos.estado === 'fila' && (
-            <div className="text-slate-600">🕒 {preparoDosAutos.detalhe}</div>
-          )}
-          {preparoDosAutos.estado === 'lendo' && (
-            <div className="text-slate-700">⏳ {preparoDosAutos.detalhe}</div>
-          )}
-          {preparoDosAutos.estado === 'pronto' && (
-            <div className="text-green-700">✅ {preparoDosAutos.detalhe}</div>
-          )}
-          {/* A SAÍDA DE EMERGÊNCIA DA PLANILHA, e só ela. O caminho é o Claude
-              gravar a planilha sozinho, pela ferramenta do conector; mas se uma
-              conversa entregar o bloco em vez de gravar — ferramenta ainda não
-              enxergada por quem opera, ou uma falha dela —, o bloco precisa ter
-              para onde ir. Um link discreto aqui, e não um botão na fileira: é
-              exceção, e a fileira é o que se faz sempre. */}
-          {planilhaDeReserva && (preparoDosAutos.estado === 'pronto' || preparoDosAutos.estado === 'parcial') && (
-            <button
-              type="button"
-              onClick={() => onPreencherPlanilha?.(lead)}
-              className="mt-1.5 text-slate-500 underline underline-offset-2 hover:text-slate-700"
-            >
-              A planilha não foi gravada pelo Claude? Colar o bloco que ele entregou
-            </button>
-          )}
-          {preparoDosAutos.estado === 'parcial' && (
-            <div className="text-amber-800">
-              <div className="font-medium">Os autos chegaram incompletos ao Claude.</div>
-              <p className="mt-1 break-words whitespace-pre-line">{preparoDosAutos.detalhe}</p>
-            </div>
-          )}
-          {preparoDosAutos.estado === 'falhou' && (
-            <div className="text-red-700">
-              {/* O QUE A CONVERSA VAI DIZER, dito aqui primeiro: do outro lado o
-                  Claude só sabe que não achou o código, e a pessoa não teria
-                  como ligar uma coisa à outra. */}
-              <div className="font-medium">
-                Os autos não subiram — o Claude não vai achá-los por este código.
-              </div>
-              <p className="mt-1 break-words whitespace-pre-line">{preparoDosAutos.detalhe}</p>
-              {/* O RESGATE É UM BOTÃO, e não um download que acontece sozinho:
-                  quem decide encher a pasta de Downloads com o processo é quem
-                  opera. */}
-              {onBaixarAnexos && (
-                <button
-                  type="button"
-                  onClick={() => onBaixarAnexos(lead)}
-                  className="mt-1.5 text-xs font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800"
-                >
-                  Baixar os anexos para arrastar à conversa
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-      {analisandoJuridico && (
-        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-100">
-          ⏳ Rodando a análise jurídica antiga — a planilha vai para o Drive quando terminar.
-        </div>
-      )}
-      {resultadoJuridico && (
-        <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
-          {resultadoJuridico.erro ? (
-            <div className="text-red-700">Erro: {resultadoJuridico.erro}</div>
-          ) : (
-            <div className="space-y-1.5">
-              <div className="text-green-700">
-                ✅ {resultadoJuridico.origem === 'conversa' ? 'Planilha preenchida a partir da conversa' : 'Análise jurídica preenchida'} —{' '}
-                <strong>
-                  {resultadoJuridico.linhas_preenchidas} de{' '}
-                  {resultadoJuridico.linhas_no_questionario}
-                </strong>{' '}
-                linhas do modelo.{' '}
-                {typeof resultadoJuridico.drive_file_url === 'string' && (
-                  <a
-                    className="font-medium underline"
-                    href={resultadoJuridico.drive_file_url}
-                    target="_blank"
-                    rel="noreferrer"
+        {campos ? (
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-corpo text-texto-2">
+            <span>{campos.intermediador}</span>
+            {/* SEM NÚMERO NO TÍTULO, O CAMPO SOME (amostra) — o resto do título
+                continua separado. Quem avisa da falta é o selo do cadastro. */}
+            {campos.numero && (
+              <>
+                <Ponto />
+                <span className="inline-flex items-center gap-0.5 font-medium tabular-nums tracking-[.01em] text-texto">
+                  {campos.numero}
+                  <button
+                    type="button"
+                    onClick={() => onCopiarProcesso(campos.numero)}
+                    aria-label="Copiar número do processo"
+                    title="Copiar número do processo"
+                    className="grid h-[24px] w-[24px] place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
                   >
-                    Abrir planilha
-                  </a>
-                )}
-              </div>
-              {/* A CONTAGEM VEM PRIMEIRO, e é a informação mais honesta da tela:
-                  "62 de 85" diz de cara que 23 linhas ficaram para uma pessoa.
-                  Sem ela, "análise preenchida" se leria como análise completa. */}
-              {resultadoJuridico.resumo && (
-                <p className="whitespace-pre-line text-slate-700">
-                  {resultadoJuridico.resumo}
-                </p>
-              )}
-              {!!resultadoJuridico.avisos?.length && (
-                <ul className="space-y-1 text-amber-800">
-                  {resultadoJuridico.avisos.map((a, i) => (
-                    <li key={i}>⚠️ {a}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+                    <Copy className="h-[14px] w-[14px]" aria-hidden />
+                  </button>
+                </span>
+              </>
+            )}
+            {(campos.objeto || campos.percentual) && <Ponto />}
+            {campos.objeto && <Selo>{campos.objeto}</Selo>}
+            {campos.percentual && <Selo>{campos.percentual}</Selo>}
+            {lead.responsavel_nome && (
+              <>
+                <Ponto />
+                <span className="text-texto-3" title="Responsável no Kommo">
+                  resp. {lead.responsavel_nome}
+                </span>
+              </>
+            )}
+          </div>
+        ) : (
+          // TÍTULO FORA DO PADRÃO: cru, como sempre foi, com o aviso de que os
+          // campos não foram separados — separar sem âncora (o número ou, sem
+          // ele, a parcela cedida) inventaria um cedente.
+          <p
+            className="mt-1 flex items-start gap-1.5 text-xs text-texto-3"
+            title="O título não segue o padrão intermediador - cedente - processo - objeto - percentual"
+          >
+            <Info className="mt-0.5 h-[14px] w-[14px] flex-none" aria-hidden />
+            <span>
+              Título fora do padrão — os campos não foram separados.
+              {lead.responsavel_nome && <> · resp. {lead.responsavel_nome}</>}
+            </span>
+          </p>
+        )}
 
-      <div>
         {resultadoAnalise && (
-          <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs ring-1 ring-inset ring-slate-100">
+          <div className="mt-[10px] rounded-campo border border-borda bg-superficie-2 px-4 py-[10px] text-corpo">
             {/* OS RAMOS DE REPROVAÇÃO SAÍRAM: eles nunca renderizavam. Este
                 painel só existe depois de `onSalvo`, e salvar exige
-                `!atual.reprovado` — análise reprovada não gera planilha, então
-                não chega aqui. Dois deles ainda liam campos
-                (relatorio_due_diligence, due_diligence_url) que função nenhuma
-                devolve, e um deles rotulava toda reprovação como "Portão 1". */}
+                `!atual.reprovado`. */}
             {resultadoAnalise.erro ? (
-              <div className="text-red-700">Erro: {resultadoAnalise.erro}</div>
+              <p className="flex items-start gap-2 text-perigo">
+                <AlertTriangle className={cn(IC, 'mt-0.5')} aria-hidden />
+                Erro: {resultadoAnalise.erro}
+              </p>
             ) : (
-              // O PAINEL DO CARD É UM RESUMO, e o card é um item de lista lido
-              // de relance entre dezenas. Antes ele trazia a grade inteira mais
-              // TODOS os avisos juntos num parágrafo só — quinze linhas de
-              // âmbar, com o preço perdido no meio. Agora: os três números, os
-              // links, e a contagem de alertas. O detalhe está na janela, que é
-              // onde se confere.
+              // O PAINEL DO CARD É UM RESUMO: os números, os links e a contagem
+              // de alertas. O detalhe está na janela, que é onde se confere.
               <div>
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <span className="font-medium text-green-700">Planilha gerada</span>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <Selo tom="sucesso" icone={<Check className={icSelo} aria-hidden />}>
+                    Planilha gerada
+                  </Selo>
                   {typeof resultadoAnalise.drive_file_url === 'string' && (
                     <a
-                      className="font-medium text-brand-600 hover:underline"
+                      className="font-semibold text-marca-texto hover:underline"
                       href={resultadoAnalise.drive_file_url}
                       target="_blank"
                       rel="noreferrer"
@@ -2325,7 +2527,7 @@ function CardCredito({
                   )}
                   {typeof resultadoAnalise.due_diligence_url === 'string' && (
                     <a
-                      className="font-medium text-brand-600 hover:underline"
+                      className="font-semibold text-marca-texto hover:underline"
                       href={resultadoAnalise.due_diligence_url}
                       target="_blank"
                       rel="noreferrer"
@@ -2334,29 +2536,21 @@ function CardCredito({
                     </a>
                   )}
                 </div>
-
                 {resultadoAnalise.valores && (
                   <div className="mt-2">
-                    <GradeValoresRpv
-                      valores={resultadoAnalise.valores}
-                      atingiuAlvo={resultadoAnalise.atingiu_alvo}
-                    />
+                    <GradeValoresRpv valores={resultadoAnalise.valores} atingiuAlvo={resultadoAnalise.atingiu_alvo} />
                   </div>
                 )}
-
-                {/* A CONTAGEM, e não o texto. Um número de alertas é lido de
-                    relance e leva a abrir a janela; quinze linhas de aviso na
-                    lista não são lidas por ninguém. */}
+                {/* A CONTAGEM, e não o texto: um número de alertas é lido de
+                    relance e leva a abrir a janela. */}
                 {(() => {
-                  const alertas = (resultadoAnalise.avisos ?? []).filter((a) =>
-                    String(a).trim().startsWith('⚠️'),
-                  ).length
+                  const alertas = (resultadoAnalise.avisos ?? []).filter((a) => String(a).trim().startsWith('⚠️')).length
                   if (!alertas) return null
                   return (
-                    <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
-                      <span aria-hidden>⚠️</span>
+                    <p className="mt-2 flex items-center gap-1.5 text-sm text-aviso">
+                      <AlertTriangle className="h-[14px] w-[14px]" aria-hidden />
                       {alertas === 1 ? '1 ponto de atenção' : `${alertas} pontos de atenção`}
-                      <span className="text-amber-700/70">· abra a análise para ver</span>
+                      <span className="text-texto-3">· abra a análise para ver</span>
                     </p>
                   )
                 })()}
@@ -2364,191 +2558,546 @@ function CardCredito({
             )}
           </div>
         )}
+
+        {/* AS ETIQUETAS DO KOMMO, na linha de baixo — nas abas de `ABAS_COM_TAGS`.
+            A ORDEM É A DA CASA (PJus, BTG, PX Ativos…), e não a do Kommo: fixa, a
+            POSIÇÃO passa a informar. A COR SAI DO ATO (cotado verde, enviado
+            azul, reprovado vermelho, pendente âmbar), com ícone, e a idade ao
+            lado; a data exata no passar do mouse. O seletor fica no fim, e
+            aparece mesmo no card que ainda não tem etiqueta. */}
+        {mostrarTags && ((lead.tags ?? []).length > 0 || etiquetasOferecidas.length > 0) && (
+          <div className="mt-[10px] flex flex-wrap items-center gap-1.5">
+            {[...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => {
+              const quando = desdeQuandoAEtiqueta(lead.tags_em, t)
+              const idade = idadeCurta(quando)
+              return (
+                <span key={t} title={quando ? `Desde ${formatDateTime(quando)}` : 'Etiqueta do Kommo'}>
+                  <Badge size="sm" tone={tom} className="h-[22px] gap-1 px-2">
+                    {iconeDaEtiqueta(tom)}
+                    {/* O NOME DA CASA, e não a grafia que o card tem: "Enviado
+                        PJUS", de antes de 01/10/2026, aparece como "Enviado PJus". */}
+                    {etiquetaCanonica(t) ?? t}
+                    {idade && <span className="font-medium opacity-80"> · {idade}</span>}
+                  </Badge>
+                </span>
+              )
+            })}
+            {etiquetasOferecidas.length > 0 && (
+              <SeletorDeEtiquetas
+                oferecidas={etiquetasOferecidas}
+                aplicadas={lead.tags ?? []}
+                datas={lead.tags_em}
+                emVoo={etiquetaEmVoo}
+                onAlternar={(etiqueta, acao) => onEtiquetar(lead, etiqueta, acao)}
+              />
+            )}
+          </div>
+        )}
+
+        {envioAosFundos && (
+          <ChecksDosFundos
+            lead={lead}
+            fundos={envioAosFundos.fundos}
+            ocupado={ocupado}
+            movendo={statusEmAndamento === envioAosFundos.destino}
+            onAbrir={(f) => envioAosFundos.onAbrir(lead, f)}
+            onMover={() => envioAosFundos.onMover(lead)}
+          />
+        )}
+
+        {/* COMO VAI O PREPARO DOS AUTOS, no card: enquanto lê, quando fica
+            pronto, e sobretudo o que deu errado, com a mensagem inteira que a
+            função respondeu (ver `PreparoDosAutos`). */}
+        {preparoDosAutos && (
+          <CaixaDeAviso
+            className="mt-[10px] px-4 py-[10px]"
+            tom={
+              preparoDosAutos.estado === 'pronto'
+                ? 'sucesso'
+                : preparoDosAutos.estado === 'parcial'
+                  ? 'aviso'
+                  : preparoDosAutos.estado === 'falhou'
+                    ? 'perigo'
+                    : 'neutro'
+            }
+            icone={
+              preparoDosAutos.estado === 'lendo' ? (
+                <RefreshCw className={cn(IC, 'animate-spin')} aria-hidden />
+              ) : preparoDosAutos.estado === 'fila' ? (
+                <Clock className={IC} aria-hidden />
+              ) : undefined
+            }
+          >
+            {preparoDosAutos.estado === 'falhou' && (
+              // O QUE A CONVERSA VAI DIZER, dito aqui primeiro: do outro lado o
+              // Claude só sabe que não achou o código.
+              <p className="font-bold">Os autos não subiram — o Claude não vai achá-los por este código.</p>
+            )}
+            {preparoDosAutos.estado === 'parcial' && (
+              <p className="font-bold">Os autos chegaram incompletos ao Claude.</p>
+            )}
+            <p
+              className={cn(
+                'whitespace-pre-line break-words',
+                (preparoDosAutos.estado === 'fila' || preparoDosAutos.estado === 'lendo') && 'text-texto-2',
+              )}
+            >
+              {preparoDosAutos.detalhe}
+            </p>
+            {/* O RESGATE É UM BOTÃO, e não um download que acontece sozinho:
+                quem decide encher a pasta de Downloads com o processo é quem
+                opera. */}
+            {preparoDosAutos.estado === 'falhou' && onBaixarAnexos && (
+              <button type="button" onClick={() => onBaixarAnexos(lead)} className={cn(LINK_BTN, 'mt-1')}>
+                Baixar os anexos para arrastar à conversa
+              </button>
+            )}
+            {/* A SAÍDA DE EMERGÊNCIA DA PLANILHA, e só ela: se uma conversa
+                entregar o bloco em vez de gravar, o bloco precisa ter para onde
+                ir. Um link discreto aqui, e não um botão na fileira: é exceção. */}
+            {planilhaDeReserva && (preparoDosAutos.estado === 'pronto' || preparoDosAutos.estado === 'parcial') && (
+              <button type="button" onClick={() => onPreencherPlanilha?.(lead)} className={cn(LINK_BTN, 'mt-1')}>
+                A planilha não foi gravada pelo Claude? Colar o bloco que ele entregou
+              </button>
+            )}
+          </CaixaDeAviso>
+        )}
+        {analisandoJuridico && (
+          <CaixaDeAviso tom="neutro" className="mt-[10px] px-4 py-[10px]" icone={<Clock className={IC} aria-hidden />}>
+            ⏳ Rodando a análise jurídica antiga — a planilha vai para o Drive quando terminar.
+          </CaixaDeAviso>
+        )}
+        {resultadoJuridico && (
+          <CaixaDeAviso
+            tom={resultadoJuridico.erro ? 'perigo' : 'sucesso'}
+            className="mt-[10px] px-4 py-[10px]"
+          >
+            {resultadoJuridico.erro ? (
+              <p>Erro: {resultadoJuridico.erro}</p>
+            ) : (
+              <div className="space-y-1.5">
+                {/* A CONTAGEM VEM PRIMEIRO, e é a informação mais honesta: "62
+                    de 85" diz de cara que 23 linhas ficaram para uma pessoa. */}
+                <p>
+                  ✅ {resultadoJuridico.origem === 'conversa' ? 'Planilha preenchida a partir da conversa' : 'Análise jurídica preenchida'} —{' '}
+                  <strong>
+                    {resultadoJuridico.linhas_preenchidas} de {resultadoJuridico.linhas_no_questionario}
+                  </strong>{' '}
+                  linhas do modelo.{' '}
+                  {typeof resultadoJuridico.drive_file_url === 'string' && (
+                    <a
+                      className="font-semibold text-marca-texto hover:underline"
+                      href={resultadoJuridico.drive_file_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Abrir planilha
+                    </a>
+                  )}
+                </p>
+                {resultadoJuridico.resumo && (
+                  <p className="whitespace-pre-line text-xs text-texto-2">{resultadoJuridico.resumo}</p>
+                )}
+                {!!resultadoJuridico.avisos?.length && (
+                  <ul className="space-y-1 text-xs text-aviso">
+                    {resultadoJuridico.avisos.map((a, i) => (
+                      <li key={i}>⚠️ {a}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </CaixaDeAviso>
+        )}
+
+        {/* A ÚLTIMA NOTA À VISTA (amostra): a mais recente, com data e selo do
+            tipo, numa linha; "Ver histórico" abre o resto. */}
+        {ultima && (
+          <div className="mt-[10px] flex min-w-0 flex-wrap items-baseline gap-2 rounded-r-controle border-l-[3px] border-borda-forte bg-superficie-2 px-[10px] py-2 text-corpo text-texto-2 sm:flex-nowrap">
+            {ultima.nota.criado_em && (
+              <span className="flex-none text-xs text-texto-3">{formatDataHoraSegundos(ultima.nota.criado_em)}</span>
+            )}
+            {(() => {
+              const arquivos = ehAnexo(ultima.nota) ? [ultima.nota, ...ultima.anexos] : ultima.anexos
+              const selo =
+                ehAnexo(ultima.nota) && arquivos.length > 1 ? `${arquivos.length} anexos` : rotuloDaNota(ultima.nota)
+              const texto = ehAnexo(ultima.nota)
+                ? arquivos.map(nomeDoAnexo).join(', ')
+                : ultima.nota.texto || arquivos.map(nomeDoAnexo).join(', ')
+              return (
+                <>
+                  {selo && <Selo className="flex-none">{selo}</Selo>}
+                  <span className="min-w-0 truncate" title={texto}>
+                    {texto}
+                  </span>
+                </>
+              )
+            })()}
+          </div>
+        )}
+
+        <div className="mt-[10px] flex flex-wrap items-center gap-x-4 gap-y-1">
+          {/* As anotações vêm em texto livre e o formato varia entre cards, então
+              são exibidas cruas, recolhidas por padrão. A contagem no rótulo evita
+              que anotação nova passe batida com o bloco fechado.
+              SÓ A PARTIR DE DUAS NOTAS (amostra): com uma, o histórico é a
+              própria linha da última nota, já à vista acima. */}
+          {notas.length > 1 && (
+            <button type="button" onClick={() => setAberto((v) => !v)} aria-expanded={aberto} className={LINK_BTN}>
+              <History className={IC} aria-hidden />
+              <span>
+                {aberto ? 'Ocultar histórico' : 'Ver histórico'}
+                {!aberto && posteriores > 0 && ` (+${posteriores})`}
+              </span>
+              <ChevronDown className={cn('h-[14px] w-[14px] transition-transform', aberto && 'rotate-180')} aria-hidden />
+            </button>
+          )}
+          <a
+            href={urlCard(lead.kommo_lead_id)}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(LINK_BTN, 'text-texto-3 hover:bg-superficie-3 hover:text-texto-2')}
+          >
+            <ExternalLink className={IC} aria-hidden />
+            Abrir no Kommo
+          </a>
+          <DatasDoCard lead={lead} />
+        </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-3">
-        {/* As anotações vêm em texto livre e o formato varia entre cards, então
-            são exibidas cruas, recolhidas por padrão. A contagem no rótulo evita
-            que anotação nova passe batida com o bloco fechado. */}
-        {notas.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setAberto((v) => !v)}
-            className="text-xs font-medium text-brand-600 hover:underline"
+      {/* A ZONA DE AÇÕES, SEMPRE À DIREITA (amostra): o tempo na etapa em cima,
+          os botões embaixo, a ação que avança em destaque e as outras
+          contornadas. Em tela estreita desce para baixo do card. */}
+      <div className="flex min-w-0 flex-row flex-wrap items-center justify-between gap-2.5 min-[900px]:flex-col min-[900px]:items-end">
+        {dias !== null && quandoNaEtapa && (
+          <div
+            className="leading-tight min-[900px]:text-right"
+            title={`Na coluna desde ${formatDateTime(quandoNaEtapa)}`}
           >
-            {aberto ? 'Ocultar histórico' : 'Ver histórico'}
-            {posteriores > 0 && ` (+${posteriores})`}
-          </button>
+            <span className="block text-xs text-texto-3">Nesta etapa</span>
+            <span className={cn('font-display text-lg font-bold tabular-nums', parado ? 'text-aviso' : 'text-texto')}>
+              {textoDosDias(dias)}
+            </span>
+          </div>
         )}
-        <a
-          href={urlCard(lead.kommo_lead_id)}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
-        >
-          <ExternalLink className="h-3.5 w-3.5" /> Abrir no Kommo
-        </a>
+        <div className="flex flex-wrap items-center justify-end gap-1.5 min-[900px]:mt-auto min-[900px]:max-w-[420px]">
+          {/* A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026). */}
+          {onAnotar && <BotaoDeAnotacao onEnviar={(t) => onAnotar(lead, t)} />}
+
+          {/* OS BOTÕES DE TRABALHO DEPENDEM DA ETAPA — a regra é `botoesDaAba`.
+              A MESMA ORDEM NOS DOIS FUNIS: due diligence primeiro, análise
+              depois — quem alterna entre as telas clica pela POSIÇÃO, e a ordem
+              também é a do trabalho: apura-se antes de analisar. Due diligence
+              nunca automática: o checklist depende de CPF e UF que uma pessoa
+              confere no processo. */}
+          {botoes !== 'nenhum' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className={BTN}
+              icon={<ClipboardCheck className={IC} aria-hidden />}
+              onClick={() => onDueDiligence(lead)}
+              disabled={ocupado}
+            >
+              Due diligence
+            </Button>
+          )}
+
+          {/* "Executar análise" do RPV: qualifica, extrai e PRECIFICA (deságio,
+              prazo, preço de cessão). EM DESTAQUE na Análise, onde é a ação que
+              avança; contornado na Revisão, onde o desfecho é que avança. */}
+          {botoes === 'rpv' && (
+            <Button
+              size="sm"
+              // CONTORNADO TAMBÉM COM O CONCLUIR (a Revisão do RPV, onda 4):
+              // lá o desfecho é que avança.
+              variant={(desfechoNoCard && acoes.length > 0) || onConcluir ? 'secondary' : 'primary'}
+              className={BTN}
+              icon={<FileSearch className={IC} aria-hidden />}
+              onClick={() => onAnalisar(lead)}
+              loading={analisando}
+              disabled={ocupado || analisando}
+            >
+              {analisando ? 'Analisando…' : 'Executar análise'}
+            </Button>
+          )}
+
+          {/* A ANÁLISE DO PRECATÓRIO ACONTECE FORA DAQUI, e o botão é a porta:
+              abre uma conversa no Claude, que vem buscar os autos pelo conector.
+              A LEITURA DOS AUTOS NÃO TRAVA O CARD: cada clique abre outra
+              conversa (serve a quem fechou a primeira) e a leitura entra na fila;
+              o ícone só gira. */}
+          {botoes === 'dd' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className={BTN}
+              icon={
+                lendoAutos ? (
+                  <RefreshCw className={cn(IC, 'animate-spin')} aria-hidden />
+                ) : (
+                  <Sparkles className={IC} aria-hidden />
+                )
+              }
+              onClick={() => onAnaliseExterna(lead)}
+              disabled={ocupado}
+              title={lendoAutos ? 'Os autos deste card estão sendo lidos — clicar de novo abre outra conversa' : undefined}
+            >
+              Executar análise
+            </Button>
+          )}
+
+          {/* CONCLUIR FECHA A ETAPA, e fica à direita da análise porque é o que
+              vem depois dela. O AZUL DA MARCA: concluir também é recusar, e
+              verde ficaria errado. EM TODA ABA DE TRABALHO, e não só nas de 'dd':
+              a Revisão do RPV ('rpv') o ganha na onda 4 — para todos desde
+              03/10/2026. As abas agrupadas, e a porta de cada uma ('dd' ou
+              'rpv'), estão em matrizDeMovimentos.test.ts. */}
+          {botoes !== 'nenhum' && onConcluir && (
+            <Button
+              size="sm"
+              variant="primary"
+              className={BTN}
+              icon={<CheckCircle2 className={IC} aria-hidden />}
+              onClick={() => onConcluir(lead)}
+              disabled={ocupado}
+            >
+              Concluir
+            </Button>
+          )}
+
+          {/* OS DESFECHOS NO CARD onde eles moram no card (a Revisão do RPV, o
+              Sanar da Diligência do Externo). Cores em vez de hierarquia: são
+              alternativas legítimas, e verde/âmbar/vermelho se lê mais rápido
+              que o rótulo. Trava as outras ações do card enquanto uma corre:
+              duas movimentações simultâneas no mesmo card se atropelariam. */}
+          {acoes.length > 0 &&
+            desfechoNoCard &&
+            acoes.map((a) => (
+              <Button
+                key={a.statusId}
+                size="sm"
+                variant={a.variant}
+                className={BTN}
+                icon={ICONES[a.papel]}
+                onClick={() => onAcao(lead, a)}
+                loading={statusEmAndamento === a.statusId}
+                disabled={ocupado}
+              >
+                {a.label}
+              </Button>
+            ))}
+
+          {anexarEMover && (
+            <BotaoAnexarEMover
+              rotulo={anexarEMover.rotulo}
+              soMover={anexarEMover.soMover}
+              ocupado={ocupado}
+              onEnviar={(arquivo, onAndamento) => anexarEMover.onEnviar(lead, arquivo, onAndamento)}
+            />
+          )}
+
+          {onEscolherProposta && (
+            <BotaoEscolherProposta
+              lead={lead}
+              ocupado={ocupado}
+              carregando={ocupado}
+              onEscolher={(f) => onEscolherProposta(lead, f)}
+            />
+          )}
+
+          {/* AS CERTIDÕES (a Obtenção de documentação do Externo): é trabalho,
+              como a due diligence, e não desfecho. */}
+          {onCertidoes && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className={BTN}
+              icon={<ScrollText className={IC} aria-hidden />}
+              onClick={() => onCertidoes(lead)}
+              disabled={ocupado}
+            >
+              Certidões
+            </Button>
+          )}
+
+          {/* A NEGOCIAÇÃO (onda 4, para todos desde 03/10/2026): o cedente respondeu. O negativo
+              contornado à esquerda, o positivo em destaque à direita (amostra). */}
+          {negociacao && (negociacao.opcoes.naoFechou || negociacao.opcoes.semResposta) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className={cn(BTN, PERIGO_CONTORNADO)}
+              icon={<X className={IC} aria-hidden />}
+              onClick={() => negociacao.onNaoFechou(lead)}
+              disabled={ocupado}
+            >
+              Não fechou
+            </Button>
+          )}
+          {negociacao?.opcoes.fechado && (
+            <BotaoFechado
+              acao={negociacao.opcoes.fechado}
+              cedente={campos?.cedente ?? tituloCard(lead)}
+              destino={negociacao.destinoDoFechado}
+              ocupado={ocupado}
+              onConfirmar={(nota) => negociacao.onFechado(lead, nota)}
+            />
+          )}
+
+          {/* "GERAR CONTRATO" (onda 4, para todos desde 03/10/2026): abre a Geração de contratos com
+              este card no endereço. Não move o card. */}
+          {onGerarContrato && (
+            <Button
+              size="sm"
+              className={BTN}
+              icon={<FileSignature className={IC} aria-hidden />}
+              onClick={() => onGerarContrato(lead)}
+              disabled={ocupado}
+              title="Abre a Geração de contratos com o processo e o originador deste card"
+            >
+              Gerar contrato
+            </Button>
+          )}
+        </div>
       </div>
 
       {aberto && notas.length > 0 && (
-        <div className="mt-2 space-y-2">
-          {/* O ANEXO VOLTA PARA A ANOTAÇÃO DELE. No Kommo o arquivo é uma nota
-              separada, sem texto, escrita segundos antes ou depois do comentário
-              que o explica — e exibidos como o espelho os guarda, os dois viram
-              dois registros soltos, com um bloco inteiro só para dizer um nome de
-              arquivo. Ver historicoDeNotas.ts. */}
-          {agruparNotas(notas).map(({ nota: n, anexos }, i) => {
-            // O ANEXO ÓRFÃO É O PRÓPRIO BLOCO. A nota de arquivo não tem texto no
-            // Kommo — o espelho monta "📎 nome.pdf" só para ela ter o que mostrar
-            // —, e exibi-la como parágrafo fazia um nome de arquivo ocupar um
-            // bloco inteiro de texto.
-            const arquivos = ehAnexo(n) ? [n, ...anexos] : anexos
-            const corpo = ehAnexo(n) ? '' : n.texto
-            // "3 anexos" em vez de "anexo" quando o bloco é só de arquivos: um
-            // processo chega em dezoito peças no mesmo segundo, e o número é a
-            // primeira coisa que quem lê quer saber.
-            const selo =
-              ehAnexo(n) && arquivos.length > 1 ? `${arquivos.length} anexos` : rotuloDaNota(n)
-            return (
-            <div key={n.id || i}>
-              {/* DATA COM HORA, MINUTO E SEGUNDO. As anotações chegam em rajada:
-                  o comercial cola o bloco de dados e, no mesmo minuto, escreve a
-                  ressalva que corrige um dos campos. Só com a data as duas
-                  ficavam indistinguíveis, e some da tela a ORDEM — que é o que
-                  diz qual das duas vale.
-
-                  Sem rótulo de posição, porque há cards em que a
-                  primeira anotação é um comentário curto e o bloco de dados vem
-                  depois — numerar sugeriria uma ordem semântica que não existe.
-                  E sem autor: a equipe usa um login só e se identifica no próprio
-                  texto da anotação; os nomes que aparecem são de antes disso.
-                  O campo continua guardado em kommo_leads.notas. */}
-              <div className="mb-0.5 flex flex-wrap items-baseline gap-2 text-xs text-slate-400">
-                {n.criado_em && formatDataHoraSegundos(n.criado_em)}
-                {/* DE QUEM É A NOTA, quando não é do comercial. O histórico passou
-                    a trazer também movimentação, anexo e a anotação que a própria
-                    plataforma escreveu — sem o selo, uma ficha redigida pela
-                    análise se leria como declaração de quem cadastrou o card. */}
-                {selo && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">
-                    {selo}
-                  </span>
-                )}
-              </div>
-              {/* O ARQUIVO DENTRO DA ANOTAÇÃO, como o feed do Kommo o mostra. Ele
-                  estava do lado de fora, numa faixa própria — e no Kommo, que é
-                  de onde a pessoa vem, o nome do arquivo é uma linha do próprio
-                  comentário. Duas formas para a mesma coisa obrigam a ler duas
-                  vezes para entender que é a mesma. */}
-              <div
-                className={cn(
-                  'rounded-lg p-3 ring-1 ring-inset ring-slate-100',
-                  n.automatica ? 'bg-white' : 'bg-slate-50',
-                )}
-              >
-                {corpo && (
-                  <pre
+        <div className="col-span-full mt-1 border-t border-borda pt-3">
+          {/* A LINHA DO TEMPO (amostra), da mais antiga à mais nova. O ANEXO
+              VOLTA PARA A ANOTAÇÃO DELE: no Kommo o arquivo é uma nota separada,
+              sem texto, escrita segundos antes ou depois do comentário que o
+              explica. Ver historicoDeNotas.ts. */}
+          <ol className="m-0 list-none pl-1">
+            {grupos.map(({ nota: n, anexos }, i) => {
+              // O ANEXO ÓRFÃO É O PRÓPRIO BLOCO: a nota de arquivo não tem texto
+              // no Kommo, e exibi-la como parágrafo fazia um nome de arquivo
+              // ocupar um bloco inteiro.
+              const arquivos = ehAnexo(n) ? [n, ...anexos] : anexos
+              const corpo = ehAnexo(n) ? '' : n.texto
+              // "3 anexos" em vez de "anexo" quando o bloco é só de arquivos.
+              const selo = ehAnexo(n) && arquivos.length > 1 ? `${arquivos.length} anexos` : rotuloDaNota(n)
+              const ultimo = i === grupos.length - 1
+              return (
+                <li key={n.id || i} className="relative pb-[14px] pl-[22px]">
+                  <span
+                    aria-hidden
                     className={cn(
-                      'whitespace-pre-wrap break-words text-xs',
-                      n.automatica ? 'text-slate-500' : 'text-slate-700',
+                      'absolute left-1 top-1.5 h-[9px] w-[9px] rounded-full border-2 bg-superficie',
+                      n.automatica || (n.tipo && n.tipo !== 'common') ? 'border-texto-3' : 'border-marca-viva',
                     )}
-                  >
-                    {corpo}
-                  </pre>
-                )}
-                {arquivos.length > 0 && (
-                  <div
-                    className={cn(
-                      'flex flex-col items-start gap-1',
-                      corpo && 'mt-2 border-t border-slate-200/70 pt-2',
+                  />
+                  {!ultimo && <span aria-hidden className="absolute bottom-0 left-2 top-[18px] w-px bg-borda" />}
+                  {/* DATA COM HORA, MINUTO E SEGUNDO: as anotações chegam em
+                      rajada, e só com a data some da tela a ORDEM. SEM AUTOR: a
+                      equipe usa um login só e se identifica no próprio texto. */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {n.criado_em && (
+                      <span className="text-xs text-texto-3">{formatDataHoraSegundos(n.criado_em)}</span>
                     )}
-                  >
-                    {arquivos.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        onClick={() => onAbrirAnexo(lead, a)}
-                        // 200 ms ANTES DE COMEÇAR: quem passa o mouse por cima a
-                        // caminho de outro lugar não dispara consulta nenhuma —
-                        // e numa lista de dezoito anexos isso seriam dezoito.
-                        // Quem para para clicar, dispara.
-                        onMouseEnter={() => aoMirarAnexo(a)}
-                        onMouseLeave={cancelarMira}
-                        onFocus={() => onPrepararAnexo(lead, a)}
-                        title={
-                          a.criado_em
-                            ? `Anexado em ${formatDataHoraSegundos(a.criado_em)} — clique para abrir`
-                            : 'Clique para abrir'
-                        }
-                        className="inline-flex max-w-full items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
-                      >
-                        <Paperclip className="h-3.5 w-3.5 shrink-0" />
-                        <span className="break-all text-left">{nomeDoAnexo(a)}</span>
-                      </button>
-                    ))}
+                    {/* DE QUEM É A NOTA, quando não é do comercial: sem o selo,
+                        uma ficha redigida pela análise se leria como declaração
+                        de quem cadastrou o card. */}
+                    {selo && <Selo>{selo}</Selo>}
                   </div>
-                )}
-              </div>
-            </div>
-            )
-          })}
+                  {corpo && (
+                    <pre
+                      className={cn(
+                        'mt-0.5 whitespace-pre-wrap break-words font-sans text-corpo',
+                        n.automatica ? 'text-texto-3' : 'text-texto-2',
+                      )}
+                    >
+                      {corpo}
+                    </pre>
+                  )}
+                  {arquivos.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-start gap-1.5">
+                      {arquivos.map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={() => onAbrirAnexo(lead, a)}
+                          // 200 ms ANTES DE COMEÇAR: quem passa o mouse por cima
+                          // a caminho de outro lugar não dispara consulta.
+                          onMouseEnter={() => aoMirarAnexo(a)}
+                          onMouseLeave={cancelarMira}
+                          onFocus={() => onPrepararAnexo(lead, a)}
+                          title={
+                            a.criado_em
+                              ? `Anexado em ${formatDataHoraSegundos(a.criado_em)} — clique para abrir`
+                              : 'Clique para abrir'
+                          }
+                          className="inline-flex min-h-[26px] max-w-full items-center gap-1.5 rounded-controle border border-borda bg-superficie px-2 py-0.5 text-sm font-medium text-marca-texto hover:bg-marca-leve"
+                        >
+                          <Paperclip className="h-[14px] w-[14px] shrink-0" aria-hidden />
+                          <span className="break-all text-left">{nomeDoAnexo(a)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ol>
         </div>
       )}
-    </div>
+    </article>
   )
 }
 
 /**
- * Alternador Interno | Externo, ao lado das abas de tipo de crédito.
+ * O CONTROLE SEGMENTADO da amostra (`.seg`): para o tipo de crédito, a destinação
+ * e a densidade. A contagem só no escolhido — o outro funil fica sem número até
+ * ser aberto: melhor sem número que com número errado.
  *
- * NÃO É UM Segmented, ainda que a mecânica seja a mesma, e a diferença é o
- * ponto: a pílula cinza do Segmented tem o mesmo peso visual das abas, e dois
- * controles de peso igual lado a lado não dizem qual manda. Aqui o contorno é
- * fino e o escolhido é azul CHEIO — a forma redonda o separa das abas
- * sublinhadas, e o preenchimento deixa óbvio que ali se escolhe uma das duas.
- *
- * Fonte no tamanho do resto da tela. A tentativa anterior encolhia a letra para
- * subordinar o controle, e encolher letra para hierarquizar só piora a leitura:
- * quem subordina aqui é a forma, não o tamanho.
- *
- * Vive nesta tela, e não em components/ui, porque tem um consumidor só. Se
- * aparecer um segundo, promove.
+ * VIVE NESTA TELA, e não em components/ui: o Segmented de lá não leva ícone e
+ * mostra a contagem em todos. Se aparecer um segundo consumidor, promove.
  */
-function SeletorDestinacao({
+function Seg<K extends string>({
+  rotulo,
+  itens,
   valor,
   onChange,
+  className,
 }: {
-  valor: SubdivisaoPrecatorio
-  onChange: (v: SubdivisaoPrecatorio) => void
+  rotulo: string
+  itens: { key: K; label: string; icone?: ReactNode; n?: number }[]
+  valor: K
+  onChange: (k: K) => void
+  className?: string
 }) {
   return (
     <div
       role="group"
-      // O ÚNICO rótulo do controle: não há texto visível dizendo o que ele
-      // decide, então sem isto o leitor de tela anuncia dois botões soltos.
-      aria-label="Destinação do precatório"
-      className="inline-flex items-center rounded-full bg-white p-0.5 ring-1 ring-inset ring-slate-200"
+      // O ÚNICO rótulo do controle: sem isto o leitor de tela anuncia botões soltos.
+      aria-label={rotulo}
+      className={cn('inline-flex gap-0.5 rounded-campo border border-borda bg-superficie-3 p-[3px]', className)}
     >
-      {SUBDIVISOES_PRECATORIO.map((s) => {
-        const ativo = s.key === valor
+      {itens.map((it) => {
+        const ativo = it.key === valor
         return (
           <button
-            key={s.key}
+            key={it.key}
             type="button"
             aria-pressed={ativo}
-            onClick={() => onChange(s.key)}
+            onClick={() => onChange(it.key)}
             className={cn(
-              'font-display rounded-full px-3 py-1 text-sm transition-colors',
-              // Contraste medido: brand-600 com branco dá 6,56:1 e slate-500 no
-              // branco 4,76:1. Os dois passam o AA de texto normal (4,5:1), que
-              // a plataforma toda já cumpre — o inativo com pouca folga, então
-              // não clarear esse cinza sem medir de novo.
-              ativo
-                ? 'bg-brand-600 font-semibold text-white'
-                : 'font-medium text-slate-500 hover:text-slate-700',
+              'inline-flex h-[32px] items-center gap-2 whitespace-nowrap rounded-controle px-4 text-sm font-semibold transition-colors',
+              ativo ? 'bg-superficie text-marca-texto shadow-nivel-1' : 'text-texto-2 hover:text-texto',
             )}
           >
-            {s.label}
+            {it.icone}
+            {it.label}
+            {it.n !== undefined && (
+              <span
+                className={cn(
+                  'rounded-full px-[7px] text-xs tabular-nums',
+                  ativo ? 'bg-marca-suave text-marca-texto' : 'bg-superficie-3 text-texto-2',
+                )}
+              >
+                {it.n}
+              </span>
+            )}
           </button>
         )
       })}
@@ -2571,13 +3120,20 @@ function casaComBusca(x: KommoLead, q: string): boolean {
     .some((v) => v!.toLowerCase().includes(q))
 }
 
+/** Onde o navegador guarda a densidade escolhida para a lista de cards. */
+const CHAVE_DA_DENSIDADE = 'analise.densidade'
+
 export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
   // Funil escolhido no seletor de cima. Os dois funis têm cards de crédito e o
   // mesmo trabalho de certidões; o que muda é a precificação e a análise do
   // caderno processual.
-  const [funil, setFunil] = useState<number>(FUNIL_RPV)
+  //
+  // O LUGAR DA ÚLTIMA VISITA (amostra): funil, destinação e etapa voltam como a
+  // pessoa deixou. Lido UMA VEZ, na montagem; o `?card=` vem depois e manda mais.
+  const [lugarInicial] = useState(lugarGuardado)
+  const [funil, setFunil] = useState<number>(lugarInicial.funil)
   const leads = useKommoLeads(funil)
   const etapas = useKommoEtapas()
   const prontas = useAnalisesProntas()
@@ -2589,19 +3145,69 @@ export default function AnaliseCredito() {
    */
   const jaMovidos = useRef<Set<string>>(new Set())
 
-  const [aba, setAba] = useState<string>('pendentes')
+  // SEM ETAPA GUARDADA, 'pendentes' (a Análise do RPV), como sempre foi; uma
+  // etapa que não existe mais cai na primeira com função (ver `abaAtual`).
+  const [aba, setAba] = useState<string>(lugarInicial.etapa || 'pendentes')
   // Destinação do precatório. Só tem efeito no funil de Precatórios; em RPV o
   // valor fica guardado e ignorado, para voltar ao mesmo lugar na troca de funil.
-  const [subdivisao, setSubdivisao] =
-    useState<SubdivisaoPrecatorio>(SUBDIVISAO_PADRAO)
+  const [subdivisao, setSubdivisao] = useState<SubdivisaoPrecatorio>(lugarInicial.destinacao)
+  useEffect(() => {
+    guardarLugar({ funil, destinacao: subdivisao, etapa: aba })
+  }, [funil, subdivisao, aba])
   const [busca, setBusca] = useState('')
+  // OS FILTROS RÁPIDOS, A ORDEM E O "MOSTRAR MAIS" (itens "Novo" da amostra).
+  // Só estado da tela: trocar de etapa volta tudo ao padrão (ver `irParaAba`).
+  const [filtro, setFiltro] = useState<FiltroRapido>('todos')
+  const [ordem, setOrdem] = useState<OrdemDaLista>('recente')
+  const [mostrar, setMostrar] = useState(POR_VEZ)
+  // A DENSIDADE É DA PESSOA, e fica no navegador dela: é conveniência, não dado.
+  // Sem acesso ao armazenamento (janela anônima, bloqueio), vale a confortável.
+  const [densidade, setDensidade] = useState<'confortavel' | 'compacta'>(() => {
+    try {
+      return window.localStorage.getItem(CHAVE_DA_DENSIDADE) === 'compacta' ? 'compacta' : 'confortavel'
+    } catch {
+      return 'confortavel'
+    }
+  })
+  const escolherDensidade = (d: 'confortavel' | 'compacta') => {
+    setDensidade(d)
+    try {
+      window.localStorage.setItem(CHAVE_DA_DENSIDADE, d)
+    } catch {
+      /* sem armazenamento, a escolha vale só nesta visita */
+    }
+  }
+  const campoDeBusca = useRef<HTMLInputElement>(null)
+  // "/" LEVA À BUSCA (amostra), fora de campo e de janela: quem está digitando
+  // uma barra num texto não pode ser arrancado dali.
+  useEffect(() => {
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+      const alvo = e.target as HTMLElement | null
+      if (alvo?.closest('input, textarea, select, [contenteditable="true"]') || haDialogoAberto()) return
+      e.preventDefault()
+      campoDeBusca.current?.focus()
+    }
+    document.addEventListener('keydown', aoTeclar)
+    return () => document.removeEventListener('keydown', aoTeclar)
+  }, [])
+  /** Abre uma etapa: o filtro e o "Mostrar mais" voltam ao padrão. */
+  const irParaAba = (key: string) => {
+    setAba(key)
+    setFiltro('todos')
+    setMostrar(POR_VEZ)
+  }
   // Ação em curso, para o botão certo do card certo mostrar o spinner.
   const [emAndamento, setEmAndamento] = useState<{
     leadId: number
     statusId: number
   } | null>(null)
   // Análise automática (Judit + due diligence + planilha) por card.
-  const { user: authUser, profile: authProfile } = useAuth()
+  // `isAdmin` VAI PARA `abasDoFunil`, que libera o que é `soAdmin`. OS BOTÕES DA
+  // ONDA 4 (os que movem card de um jeito novo e o "Gerar contrato") são de TODO
+  // MUNDO desde 03/10/2026 (`BOTOES_NOVOS_PARA_TODOS`, ver `abaParaQuemVe`); o
+  // `isAdmin` segue passado para o próximo lançamento por etapas.
+  const { user: authUser, profile: authProfile, isAdmin } = useAuth()
   const analistaNome = authProfile?.nome || authUser?.email || 'Usuário'
   // A análise de RPV abre uma JANELA (AnaliseRpvModal): preliminar, conversa e
   // só então o salvamento. `rpvLead` é o card cuja janela está aberta.
@@ -3508,8 +4114,11 @@ export default function AnaliseCredito() {
   }, [])
 
   const abas = useMemo(
-    () => abasDoFunil(funil, etapas.data ?? [], subdivisao),
-    [funil, etapas.data, subdivisao],
+    // A VISÃO DE QUEM ESTÁ LOGADO: o que é `soAdmin` só entra para o admin — salvo
+    // com `BOTOES_NOVOS_PARA_TODOS` ligado (a onda 4, desde 03/10/2026), quando
+    // entra para todos.
+    () => abasDoFunil(funil, etapas.data ?? [], subdivisao, { admin: isAdmin }),
+    [funil, etapas.data, subdivisao, isAdmin],
   )
 
   const { porAba } = useMemo(
@@ -3554,20 +4163,16 @@ export default function AnaliseCredito() {
   )
 
   // A aba escolhida pode não existir no funil recém-selecionado (as chaves de
-  // RPV são 'pendentes'…, as de Precatório são 'int-…'/'ext-…'). Cai na primeira.
-  //
-  // AS FASES, quando o funil as tem (o Externo): as abas se agrupam em linhas,
-  // uma por fase, todas à vista — "nome da fase: colunas". Nenhuma fica
-  // escondida atrás de outra escolha.
-  const fases = useMemo(
-    () => [...new Set(abas.map((a) => a.fase).filter((f): f is string => Boolean(f)))],
-    [abas],
-  )
-  //
-  // NO ESPELHO COMPLETO DO EXTERNO a primeira coluna pode não ter trabalho da
-  // casa: a tela abre na primeira que tem.
+  // RPV são 'pendentes'…, as de Precatório são 'int-…'/'ext-…'). Cai na primeira
+  // QUE TEM FUNÇÃO, e não na primeira com cards: no kanban inteiro a primeira
+  // coluna pode ser só de leitura.
   const abaAtual = abas.find((a) => a.key === aba) ?? abas.find((a) => !a.soLeitura) ?? abas[0] ?? null
-  const faseAtual = abaAtual?.fase ?? ''
+
+  // O QUADRO DE FASES (amostra), genérico sobre `Aba.fase`: o RPV pelas fases de
+  // kommo.ts, o Interno pela exibição do front, o Externo pelas da trilha.
+  const fasesDoFunil = useMemo(() => fasesDoQuadro(abas), [abas])
+  const indiceDaFase = fasesDoFunil.findIndex((f) => f.abas.some((a) => a.key === abaAtual?.key))
+  const faseAberta = indiceDaFase >= 0 ? fasesDoFunil[indiceDaFase] : null
 
   // OS BOTÕES DE TRABALHO DA ETAPA ABERTA. A regra e o porquê estão em
   // `botoesDaAba` (src/lib/kommo.ts), que saiu daqui para os testes prenderem o
@@ -3588,21 +4193,152 @@ export default function AnaliseCredito() {
     ) as Record<string, KommoLead[]>
   }, [porAba, busca])
 
+  /**
+   * O NÚMERO DE CADA DESTINAÇÃO, ao lado de Interno e Externo (item "Novo":
+   * contadores nas pílulas). A soma das abas de cada trilha, pelo mesmo
+   * critério das etapas — com busca, é contagem de resultado.
+   */
+  const totalDaTrilha = useMemo(() => {
+    if (!leads.data || !ehFunilPrecatorio(funil)) return null
+    const q = busca.trim().toLowerCase()
+    const total: Partial<Record<SubdivisaoPrecatorio, number>> = {}
+    for (const s of SUBDIVISOES_PRECATORIO) {
+      const { porAba: daTrilha } = agruparPorAba(leads.data, abasDoFunil(funil, etapas.data ?? [], s.key))
+      total[s.key] = Object.values(daTrilha).reduce(
+        (t, l) => t + (q ? l.filter((x) => casaComBusca(x, q)).length : l.length),
+        0,
+      )
+    }
+    return total
+  }, [leads.data, funil, etapas.data, busca])
+
   const lista = useMemo(
     () => (abaAtual ? (porAbaNaBusca[abaAtual.key] ?? []) : []),
     [porAbaNaBusca, abaAtual],
   )
 
-  /** Onde a busca achou cards, quando não foi na aba aberta: "Revisão (2), Aprovados (1)". */
-  const achadosEmOutrasAbas = busca.trim()
-    ? abas
-        .filter((a) => a.key !== abaAtual?.key && (porAbaNaBusca[a.key]?.length ?? 0) > 0)
-        .map(
-          (a) =>
-            `${a.label} (${porAbaNaBusca[a.key].length})` +
-            (a.fase && a.fase !== faseAtual ? `, na fase ${a.fase}` : ''),
-        )
-    : []
+  /**
+   * O CARD TEM NÚMERO DE PROCESSO? Pela mesma leitura do cadastro que o aviso do
+   * card usa (título primeiro, anotação depois). Só para a etapa aberta: é o que
+   * o filtro "Sem nº do processo" e a contagem dele precisam.
+   */
+  const temNumero = useMemo(
+    () => new Map(lista.map((l) => [l.kommo_lead_id, Boolean(lerCardCredijuris(l).numero)])),
+    [lista],
+  )
+  const ehPronta = useCallback((l: KommoLead) => prontas.data?.has(l.kommo_lead_id) ?? false, [prontas.data])
+  // OS FILTROS QUE A ETAPA OFERECE. "Com cotação" só onde a etiqueta do fundo é
+  // trabalho (Em precificação); "Análise pronta" só na Análise do RPV, a única
+  // coluna em que o selo "Finalizado" existe; "Sem nº do processo" só quando há.
+  const ofereceCotacao = etiquetasDaAba(abaAtual?.key).length > 0
+  const ofereceProntas = funil === FUNIL_RPV && abaAtual?.key === 'pendentes'
+  const contagemDoFiltro = useMemo(() => {
+    const agora = new Date()
+    return {
+      todos: lista.length,
+      parados: lista.filter((l) => estaParado(diasNaEtapa(l, agora))).length,
+      cotados: lista.filter(temCotacao).length,
+      prontas: lista.filter(ehPronta).length,
+      semnum: lista.filter((l) => !temNumero.get(l.kommo_lead_id)).length,
+    } satisfies Record<FiltroRapido, number>
+  }, [lista, ehPronta, temNumero])
+  const filtrados = useMemo(
+    () =>
+      filtrarEOrdenar(lista, {
+        filtro,
+        ordem,
+        temNumero: (l) => temNumero.get(l.kommo_lead_id) ?? true,
+        pronta: ehPronta,
+      }),
+    [lista, filtro, ordem, temNumero, ehPronta],
+  )
+
+  /** Onde a busca achou cards: a faixa de cima conta todas; o vazio, só as outras. */
+  const achadosNoFunil = busca.trim() ? achadosDaBusca(abas, porAbaNaBusca, abaAtual, true) : []
+  const achadosEmOutrasAbas = busca.trim() ? achadosDaBusca(abas, porAbaNaBusca, abaAtual, false) : []
+
+  // ---------------------------------------- "VOLTAR AO CARD" (onda 4, para todos)
+  //
+  // A Geração de contratos aberta pelo card volta para cá com `?card=<id>`. O
+  // PARÂMETRO SÓ REALÇA E ROLA ATÉ O CARD — NUNCA abre janela nem move nada (a
+  // due diligence busca no Escavador sozinha, e cada consulta custa; mover card
+  // não se desfaz). Lido uma vez e tirado do endereço, para um F5 não repetir.
+  const [parametros, setParametros] = useSearchParams()
+  // PARA TODOS desde a onda 3: a busca geral (Ctrl+K) também chega aqui com
+  // `?card=`, e realçar e rolar não move nada nem custa nada.
+  const cardPedido = cardDoEndereco(parametros.get('card'))
+  const [realce, setRealce] = useState<number | null>(null)
+  const procurouNoOutroFunil = useRef(false)
+  const rolouAte = useRef<number | null>(null)
+  useEffect(() => {
+    if (cardPedido === null || !leads.data || !etapas.data) return
+    const tirarDoEndereco = () =>
+      setParametros(
+        (p) => {
+          const n = new URLSearchParams(p)
+          n.delete('card')
+          return n
+        },
+        { replace: true },
+      )
+    const lead = leads.data.find((l) => l.kommo_lead_id === cardPedido)
+    if (!lead) {
+      // O CARD PODE ESTAR NO OUTRO FUNIL: procura lá uma vez, e só então desiste.
+      if (!procurouNoOutroFunil.current) {
+        procurouNoOutroFunil.current = true
+        setFunil(funil === FUNIL_RPV ? FUNIL_PRECATORIO : FUNIL_RPV)
+        irParaAba('')
+        return
+      }
+      toast.error('Não achei este card no espelho do Kommo. Sincronize e procure pela busca.')
+      tirarDoEndereco()
+      return
+    }
+    const trilha = SUBDIVISOES_PRECATORIO.find((s) => s.pipelineId === lead.pipeline_id)
+    if (trilha && trilha.key !== subdivisao) {
+      setSubdivisao(trilha.key)
+      return
+    }
+    const destino = abas.find((a) => a.statusIds.includes(lead.status_id))
+    if (destino) irParaAba(destino.key)
+    setBusca('')
+    rolouAte.current = null
+    setRealce(lead.kommo_lead_id)
+    tirarDoEndereco()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardPedido, leads.data, etapas.data, abas, funil, subdivisao])
+  useEffect(() => {
+    if (realce === null || rolouAte.current === realce) return
+    const i = filtrados.findIndex((l) => l.kommo_lead_id === realce)
+    if (i < 0) return
+    if (i >= mostrar) {
+      setMostrar(i + 1)
+      return
+    }
+    rolouAte.current = realce
+    const el = document.querySelector<HTMLElement>(`[data-lead="${realce}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el?.focus({ preventScroll: true })
+  }, [realce, filtrados, mostrar])
+  // O DESTAQUE SOME SOZINHO depois de alguns segundos: é para achar, não marca.
+  useEffect(() => {
+    if (realce === null) return
+    const t = window.setTimeout(() => setRealce(null), 6000)
+    return () => window.clearTimeout(t)
+  }, [realce])
+
+  /** Copia o número do processo — e diz se deu certo, que é o que se quer saber. */
+  const copiarProcesso = (numero: string) => {
+    Promise.resolve()
+      .then(() => navigator.clipboard.writeText(numero))
+      .then(
+        () => toast.success('Número do processo copiado.'),
+        () =>
+          toast.error(
+            'Não consegui copiar: o navegador bloqueou a área de transferência. Selecione o número e copie à mão.',
+          ),
+      )
+  }
 
   /** O card e o desfecho aguardando a mensagem, quando a decisão vem do card. */
   const [mensagemDoCard, setMensagemDoCard] = useState<{
@@ -3714,21 +4450,35 @@ export default function AnaliseCredito() {
       jaMovidos.current.add(chave)
     }
     const texto = mensagem.trim()
-    if (!texto) return
-    try {
-      // DE PESSOA: o texto é dela, e é o que a análise seguinte precisa ler no
-      // card. Ver marcarComoDePessoa, em _shared/notaCredijuris.ts.
-      await invokeFunction('kommo-anotar', {
-        lead_id: leadId, texto, origem: 'pessoa', autor: analistaNome,
-      })
-    } catch (e) {
-      throw new Error(
-        'O card foi movido, mas a nota com a mensagem não subiu (' +
-          ((e as Error)?.message ?? String(e)) +
-          '). O texto continua aqui — confirmar de novo tenta só a nota.',
-      )
+    if (texto) {
+      try {
+        // DE PESSOA: o texto é dela, e é o que a análise seguinte precisa ler no
+        // card. Ver marcarComoDePessoa, em _shared/notaCredijuris.ts.
+        await invokeFunction('kommo-anotar', {
+          lead_id: leadId, texto, origem: 'pessoa', autor: analistaNome,
+        })
+      } catch (e) {
+        throw new Error(
+          'O card foi movido, mas a nota com a mensagem não subiu (' +
+            ((e as Error)?.message ?? String(e)) +
+            '). O texto continua aqui — confirmar de novo tenta só a nota.',
+        )
+      }
     }
+    // TUDO FEITO, A MEMÓRIA SAI. Ela só existe para o retry da nota; se ficasse,
+    // o mesmo card voltando a esta coluna mais tarde na sessão — Revisão,
+    // Diligência, Sanar, Revisão de novo (onda 4) — teria o movimento PULADO, e a
+    // nota subiria dizendo um movimento que não aconteceu.
+    jaMovidos.current.delete(chave)
   }
+
+  /** Esquece os movimentos pendentes de nota de um card — a janela dele fechou. */
+  function esquecerMovimentos(leadId: number) {
+    for (const k of [...jaMovidos.current]) if (k.startsWith(`${leadId}:`)) jaMovidos.current.delete(k)
+  }
+
+  /** O card já se moveu para esta coluna nesta janela, e falta só a nota? */
+  const jaMovidoPara = (leadId: number) => (statusId: number) => jaMovidos.current.has(`${leadId}:${statusId}`)
 
   /**
    * A anotação escrita no card (ver `BotaoDeAnotacao`).
@@ -3996,10 +4746,92 @@ export default function AnaliseCredito() {
     setMensagemDoCard({ lead, acoes, titulo: 'Concluir a qualificação' })
   }
 
+  // ------------------------------------------------ ONDA 4: PARA TODOS (03/10/2026)
+  //
+  // Os handlers abaixo só são chamados pelos botões da onda 4 que `abaParaQuemVe`
+  // entrega — a todo mundo desde 03/10/2026 (`BOTOES_NOVOS_PARA_TODOS`), antes só
+  // ao administrador. NENHUM DELES RODA SOZINHO: nada move ao abrir a tela, ao
+  // carregar os cards ou por parâmetro de endereço — só pelo clique.
+
+  /** O nome de uma coluna, como a tela a mostra (o rótulo da aba dela). */
+  const nomeDaColunaDoId = (statusId: number) =>
+    nomeDaColuna(abas.find((a) => a.statusIds.includes(statusId))?.label ?? String(statusId))
+
+  /** A janela do "Não fechou" aberta, com as saídas daquela Negociação. */
+  const [naoFechou, setNaoFechou] = useState<{ lead: KommoLead; opcoes: DesfechoDaNegociacao } | null>(null)
+
+  /**
+   * UM DESFECHO DA NEGOCIAÇÃO: o movimento pela `kommo-mover` (que confere que o
+   * card está na Negociação e marca a nota de serviço como "Comercial") e a nota
+   * com o texto, pelo mesmo `moverComNota` dos desfechos — falhando a nota, quem
+   * chamou mantém a janela aberta e confirmar de novo só anota.
+   */
+  async function desfechoDaNegociacaoNoCard(lead: KommoLead, acao: AcaoTela, nota: string) {
+    setEmAndamento({ leadId: lead.kommo_lead_id, statusId: acao.statusId })
+    try {
+      await moverComNota(lead.kommo_lead_id, acao.statusId, nota)
+    } finally {
+      setEmAndamento(null)
+    }
+  }
+
+  /** "Gerar contrato": a Geração de contratos com SÓ o id do card no endereço. */
+  const navegar = useNavigate()
+  const gerarContratoDoCard = (lead: KommoLead) =>
+    navegar(`/comercial/contratos?card=${encodeURIComponent(String(lead.kommo_lead_id))}`)
+
+  // AS FASES DO FLUXO SE COMPARAM ENTRE SI (a mesma régua para a barra); a dos
+  // perdidos tem régua própria — 73 reprovados não podem apagar as barras de
+  // quem está em trabalho.
+  const nDaAba = (key: string) => porAbaNaBusca[key]?.length ?? 0
+  const fasesDoFluxo = fasesDoFunil.filter((f) => !f.discreta)
+  const maiorNoFluxo = Math.max(1, ...fasesDoFluxo.flatMap((f) => f.abas.map((a) => nDaAba(a.key))))
+  const temPerdidos = fasesDoFunil.some((f) => f.discreta)
+  /** A grade do quadro: as fases lado a lado na tela larga, a dos perdidos mais estreita. */
+  const gradeDoQuadro =
+    fasesDoFunil.length === 4 && temPerdidos
+      ? 'min-[1180px]:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,0.85fr)]'
+      : fasesDoFunil.length >= 4
+        ? 'min-[1180px]:grid-cols-4'
+        : fasesDoFunil.length === 3
+          ? 'min-[1180px]:grid-cols-3'
+          : fasesDoFunil.length === 2
+            ? 'min-[621px]:grid-cols-2'
+            : ''
+  const compacto = densidade === 'compacta'
+  const nomeDoFunil = funil === FUNIL_PRECATORIO ? 'Precatórios' : 'RPV'
+
+  /** Os nomes das etapas achadas, como links que levam a elas (item "Novo"). */
+  const linksDosAchados = (achados: typeof achadosNoFunil) =>
+    achados.map((a, i) => (
+      <Fragment key={a.key}>
+        {i > 0 && ', '}
+        <button
+          type="button"
+          onClick={() => irParaAba(a.key)}
+          className="font-semibold text-marca-texto underline-offset-2 hover:underline"
+        >
+          {nomeDaColuna(a.label)} ({a.n})
+        </button>
+        {a.outraFase && `, na fase ${a.outraFase}`}
+      </Fragment>
+    ))
+
+  const chips: { key: FiltroRapido; rotulo: string; icone?: ReactNode }[] = [
+    { key: 'todos', rotulo: 'Todos' },
+    { key: 'parados', rotulo: `Parados há ${PRAZO_PARADO}+ dias`, icone: <Clock className="h-[14px] w-[14px]" aria-hidden /> },
+    ...(ofereceCotacao ? [{ key: 'cotados' as const, rotulo: 'Com cotação' }] : []),
+    ...(ofereceProntas ? [{ key: 'prontas' as const, rotulo: 'Análise pronta' }] : []),
+    ...(contagemDoFiltro.semnum > 0
+      ? [{ key: 'semnum' as const, rotulo: 'Sem nº do processo', icone: <AlertTriangle className="h-[14px] w-[14px]" aria-hidden /> }]
+      : []),
+  ]
+
   return (
     <div>
       <PageHeader
-        title="Análise de Crédito"
+        title="Análise de crédito"
+        description="Acompanhe cada crédito pelo funil e aja no que está parado."
         actions={
           <div className="flex items-center gap-3">
             <SyncStatus
@@ -4013,9 +4845,9 @@ export default function AnaliseCredito() {
                 "sincronize de novo" era instrução impossível de seguir sem dar
                 F5. Card criado no Kommo agora também chega sem recarregar. */}
             <Button
-              size="sm"
-              variant="outline"
-              icon={<RefreshCw className="h-4 w-4" />}
+              variant="secondary"
+              className="h-[38px] px-4 text-corpo"
+              icon={<RefreshCw className={IC} aria-hidden />}
               onClick={() => sync.mutate()}
               loading={sync.isPending}
             >
@@ -4025,337 +4857,501 @@ export default function AnaliseCredito() {
         }
       />
 
-      {/* TRÊS EIXOS, TRÊS FORMAS. O tipo de crédito e a destinação já foram o
-          mesmo componente, um do lado do outro: liam-se como a mesma pergunta
-          feita duas vezes. A distinção agora é de forma e de posição —
-
-            tipo de crédito   abas sublinhadas, com ícone
-            destinação        pílulas encostadas na aba de Precatórios
-            etapa             pílulas dentro do cartão, sob a busca
-
-          A contagem sai do funil CARREGADO, então o outro fica sem número até
-          ser aberto: melhor sem número que com número errado. */}
-      <div className="mb-4">
-        <Tabs
-          items={[
-            {
-              key: String(FUNIL_RPV),
-              label: 'RPV',
-              icon: <Receipt className="h-4 w-4" />,
-              count: funil === FUNIL_RPV ? totalExibido : undefined,
-            },
-            {
-              key: String(FUNIL_PRECATORIO),
-              label: 'Precatórios',
-              icon: <Landmark className="h-4 w-4" />,
-              count: funil === FUNIL_PRECATORIO ? totalExibido : undefined,
-            },
-          ]}
-          value={String(funil)}
-          onChange={(v) => {
-            setFunil(Number(v))
+      {/* A BARRA DE CIMA (amostra): o tipo de crédito, a destinação (só no
+          Precatório), a busca e a densidade, numa linha. A contagem sai do funil
+          CARREGADO, então o outro fica sem número até ser aberto: melhor sem
+          número que com número errado. */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Seg
+          rotulo="Tipo de crédito"
+          valor={funil === FUNIL_RPV ? 'rpv' : 'prec'}
+          onChange={(k) => {
+            const novo = k === 'rpv' ? FUNIL_RPV : FUNIL_PRECATORIO
+            if (novo === funil) return
+            setFunil(novo)
             // A chave da aba não é comparável entre funis ('pendentes' vs
             // 'int-…'). Limpar aqui evita a tela abrir vazia por casar nada.
-            setAba('')
+            irParaAba('')
+            // TROCAR DE FUNIL LIMPA A BUSCA; trocar de destinação a mantém.
             setBusca('')
           }}
-          trailing={
-            funil === FUNIL_PRECATORIO ? (
-              <SeletorDestinacao
-                valor={subdivisao}
-                onChange={(v) => {
-                  setSubdivisao(v)
-                  // As chaves das abas são próprias de cada trilha ('int-…' e
-                  // 'ext-…'): sem limpar, a tela cairia na primeira por acidente
-                  // em vez de por decisão.
-                  setAba('')
-                }}
-              />
-            ) : undefined
-          }
+          itens={[
+            {
+              key: 'rpv',
+              label: 'RPV',
+              icone: <Receipt className={IC} aria-hidden />,
+              n: funil === FUNIL_RPV ? totalExibido : undefined,
+            },
+            {
+              key: 'prec',
+              label: 'Precatórios',
+              icone: <Landmark className={IC} aria-hidden />,
+              n: funil === FUNIL_PRECATORIO ? totalExibido : undefined,
+            },
+          ]}
+        />
+        {funil === FUNIL_PRECATORIO && (
+          <Seg
+            rotulo="Destinação do precatório"
+            valor={subdivisao}
+            onChange={(v) => {
+              if (v === subdivisao) return
+              setSubdivisao(v)
+              // As chaves das abas são próprias de cada trilha ('int-…' e
+              // 'ext-…'): sem limpar, a tela cairia na primeira por acidente
+              // em vez de por decisão.
+              irParaAba('')
+            }}
+            itens={SUBDIVISOES_PRECATORIO.map((s) => ({
+              key: s.key,
+              label: s.label,
+              n: s.key === subdivisao ? totalDaTrilha?.[s.key] : undefined,
+            }))}
+          />
+        )}
+        <label className="flex h-[38px] min-w-[240px] flex-1 items-center gap-2 rounded-campo border border-borda-controle bg-superficie px-4 text-texto-3 focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20">
+          <span className="sr-only">Buscar nos cards</span>
+          <Search className={IC} aria-hidden />
+          <input
+            ref={campoDeBusca}
+            className="w-full min-w-0 bg-transparent text-corpo text-texto outline-none placeholder:text-texto-3"
+            placeholder="Buscar por nome do card, processo, responsável ou conteúdo…  ( / )"
+            value={busca}
+            onChange={(e) => {
+              setBusca(e.target.value)
+              setMostrar(POR_VEZ)
+            }}
+          />
+        </label>
+        <span className="text-xs font-semibold uppercase tracking-[.06em] text-texto-3 max-[620px]:hidden">
+          Densidade
+        </span>
+        <Seg
+          rotulo="Densidade da lista"
+          className="max-[620px]:hidden"
+          valor={densidade}
+          onChange={escolherDensidade}
+          itens={[
+            { key: 'confortavel', label: 'Confortável' },
+            { key: 'compacta', label: 'Compacta' },
+          ]}
         />
       </div>
-
-      <Card className="mb-4 p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por nome do card, processo, responsável ou conteúdo…"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
-        </div>
-        <div className="mt-3">
-          {abas.length > 0 && fases.length > 0 ? (
-            // UMA LINHA POR FASE, numa moldura, com divisória entre elas: o nome da
-            // fase à esquerda, em rótulo, com o total dela (que respeita a busca),
-            // e as colunas ao lado — o molde "fase: colunas" que a operação
-            // desenhou. A fase da coluna aberta ganha fundo e faixa de cor; coluna
-            // com zero card fica apagada, para as que têm trabalho saltarem; e a
-            // fase dos perdidos é mais discreta, porque não é etapa do fluxo.
-            <div className="divide-y divide-slate-100 overflow-hidden rounded-lg ring-1 ring-inset ring-slate-200">
-              {fases.map((f) => {
-                const daFase = abas.filter((a) => a.fase === f)
-                const total = daFase.reduce((t, a) => t + (porAbaNaBusca[a.key]?.length ?? 0), 0)
-                const aberta = f === faseAtual
-                const discreta = daFase.some((a) => a.faseDiscreta)
-                return (
-                  <div
-                    key={f}
-                    className={cn(
-                      'flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2',
-                      aberta && 'bg-brand-50/40 shadow-[inset_3px_0_0_theme(colors.brand.600)]',
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'font-display flex w-[13rem] flex-none items-center gap-2 text-xs font-bold uppercase tracking-wide',
-                        aberta ? 'text-brand-700' : discreta ? 'text-slate-400' : 'text-slate-500',
-                      )}
-                    >
-                      {f}
-                      <span
-                        className={cn(
-                          'rounded-full px-1.5 text-xs font-semibold normal-case tracking-normal',
-                          aberta ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500',
-                        )}
-                      >
-                        {total}
-                      </span>
-                    </div>
-                    <div role="group" aria-label={`Colunas da fase ${f}`} className="flex flex-wrap items-center gap-1">
-                      {daFase.map((a) => {
-                        const n = porAbaNaBusca[a.key]?.length ?? 0
-                        const ativa = a.key === abaAtual?.key
-                        const vazia = n === 0
-                        return (
-                          <button
-                            key={a.key}
-                            type="button"
-                            aria-pressed={ativa}
-                            onClick={() => setAba(a.key)}
-                            className={cn(
-                              'font-display flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-sm transition-colors',
-                              ativa
-                                ? 'bg-white font-semibold text-brand-700 shadow-sm ring-1 ring-brand-200'
-                                : vazia
-                                  ? 'font-medium text-slate-400 hover:bg-slate-50 hover:text-slate-600'
-                                  : 'font-medium text-slate-700 hover:bg-slate-50',
-                            )}
-                          >
-                            {a.label}
-                            <span
-                              className={cn(
-                                'rounded-full px-1.5 text-xs',
-                                ativa
-                                  ? 'bg-brand-50 text-brand-700'
-                                  : vazia
-                                    ? 'text-slate-300'
-                                    : 'bg-slate-100 text-slate-500',
-                              )}
-                            >
-                              {n}
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          ) : abas.length > 0 ? (
-            <Segmented
-              ariaLabel="Etapa da análise"
-              items={abas.map((a) => ({
-                key: a.key,
-                label: a.label,
-                count: porAbaNaBusca[a.key]?.length ?? 0,
-              }))}
-              value={abaAtual?.key ?? ''}
-              onChange={(v) => setAba(v)}
-            />
-          ) : etapas.isLoading ? (
-            <p className="text-sm text-slate-500">Carregando as etapas do Kommo…</p>
-          ) : etapas.isError ? (
-            // A MENSAGEM REAL, não um palpite. A versão anterior descartava
-            // etapas.error e afirmava uma causa ("a sincronização não conseguiu
-            // ler o kanban") que podia estar errada — se o problema fosse
-            // permissão de leitura da tabela, sincronizar de novo não mudaria
-            // nada e a tela repetiria o mesmo diagnóstico falso para sempre.
-            <p className="text-sm text-red-700">
-              Não consegui ler as etapas deste funil: {(etapas.error as Error)?.message}{' '}
-              <button
-                type="button"
-                onClick={() => etapas.refetch()}
-                className="font-medium underline"
-              >
-                Tentar de novo
-              </button>
-            </p>
-          ) : (
-            // Espelho vazio: o kommo-sync não gravou a estrutura do kanban.
-            // Dizer isso é melhor que mostrar uma tela vazia, que se leria como
-            // "não tem crédito nenhum".
-            <p className="text-sm text-amber-700">
-              Ainda não sei as etapas deste funil. Elas vêm do próprio Kommo —
-              clique em <strong>Sincronizar</strong>, no alto da página. Se
-              continuar assim, a sincronização não conseguiu ler a estrutura do
-              kanban e o aviso dela vai aparecer aqui.
-            </p>
-          )}
-        </div>
-      </Card>
 
       {/* Coluna fixada que o kanban não tem. Vermelho, e não amarelo: aqui a aba
           fica vazia PARA SEMPRE, e é defeito de configuração, não recado. */}
       {rpvDesalinhado.length > 0 && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
-          A coluna do Kommo de{' '}
-          <strong>{rpvDesalinhado.map((t) => t.label).join(', ')}</strong> não existe
-          mais neste funil. A aba vai mostrar zero card até alguém corrigir o número
-          da coluna em src/lib/kommo.ts.
-        </div>
+        <CaixaDeAviso tom="perigo" className="mb-4">
+          A coluna do Kommo de <strong>{rpvDesalinhado.map((t) => t.label).join(', ')}</strong> não existe
+          mais neste funil. A aba vai mostrar zero card até alguém corrigir o número da coluna em
+          src/lib/kommo.ts.
+        </CaixaDeAviso>
       )}
-
       {precatorioDesalinhado.length > 0 && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+        <CaixaDeAviso tom="perigo" className="mb-4">
           Não achei no Kommo a coluna{' '}
-          <strong>
-            {precatorioDesalinhado.map((a) => `"${a.colunaKommo}"`).join(', ')}
-          </strong>
-          . A aba correspondente ({precatorioDesalinhado.map((a) => a.label).join(', ')}
-          ) fica com zero card até o nome bater. Causa provável: a coluna foi
-          renomeada no Kommo — é só alinhar o nome lá ou em src/lib/kommo.ts.
-        </div>
+          <strong>{precatorioDesalinhado.map((a) => `"${a.colunaKommo}"`).join(', ')}</strong>. A aba
+          correspondente ({precatorioDesalinhado.map((a) => a.label).join(', ')}) fica com zero card até o
+          nome bater. Causa provável: a coluna foi renomeada no Kommo — é só alinhar o nome lá ou em
+          src/lib/kommo.ts.
+        </CaixaDeAviso>
       )}
 
-      <Card>
-        {leads.isLoading ? (
-          <Loading />
-        ) : leads.isError ? (
-          <ErrorState
-            message={(leads.error as Error)?.message}
-            onRetry={() => leads.refetch()}
-          />
-        ) : lista.length === 0 ? (
+      {/* ONDE A BUSCA ACHOU (item "Novo"): uma faixa sobre o quadro, com as
+          etapas e as contagens, e cada nome leva à etapa. */}
+      {achadosNoFunil.length > 0 && (
+        <p className="-mt-1 mb-[14px] flex flex-wrap items-center gap-x-1 gap-y-1 text-corpo text-texto-2" role="status">
+          <Search className={cn(IC, 'mr-1 text-marca-texto')} aria-hidden />
+          Achei em: {linksDosAchados(achadosNoFunil)}.
+        </p>
+      )}
+
+      {abas.length > 0 ? (
+        // O QUADRO DE FASES (amostra): Qualificação, Comercialização,
+        // Formalização e Perdidos, as colunas do Kommo em cada uma, com a
+        // contagem e uma barra do tamanho dela. A fase da coluna aberta ganha
+        // moldura; a dos perdidos é mais discreta, porque não é etapa do fluxo;
+        // coluna vazia fica esmaecida, mas legível. COM BUSCA, todo número vira
+        // contagem de resultado.
+        <section
+          aria-label="Visão do funil por fases"
+          className={cn('mb-6 grid grid-cols-1 gap-3 min-[621px]:grid-cols-2', gradeDoQuadro)}
+        >
+          {fasesDoFunil.map((f, i) => {
+            const total = f.abas.reduce((t, a) => t + nDaAba(a.key), 0)
+            const atual = i === indiceDaFase
+            const maior = f.discreta ? Math.max(1, ...f.abas.map((a) => nDaAba(a.key))) : maiorNoFluxo
+            const proxima = fasesDoFunil[i + 1]
+            return (
+              <div
+                key={f.nome ?? 'etapas'}
+                className={cn(
+                  'relative min-w-0 rounded-cartao border px-3 pb-[10px] pt-[14px] shadow-nivel-1',
+                  f.discreta ? 'bg-superficie-2' : 'bg-superficie',
+                  atual ? 'border-marca-viva/45 ring-[3px] ring-marca-viva/10' : 'border-borda',
+                )}
+              >
+                <div className="flex items-center gap-2 px-1 pb-[10px]">
+                  {f.nome && (
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'font-display grid h-[22px] w-[22px] flex-none place-items-center rounded-full text-xs font-bold',
+                        atual ? 'bg-marca text-white' : 'bg-superficie-3 text-texto-2',
+                      )}
+                    >
+                      {f.discreta ? <X className="h-[12px] w-[12px]" aria-hidden /> : i + 1}
+                    </span>
+                  )}
+                  <h2
+                    className={cn(
+                      'font-display text-corpo font-bold',
+                      f.discreta ? 'text-texto-2' : 'text-texto',
+                    )}
+                  >
+                    {f.nome ?? 'Etapas'}
+                  </h2>
+                  <span className="ml-auto text-sm font-bold tabular-nums text-texto-2">{total}</span>
+                </div>
+                <ul className="m-0 grid list-none gap-0.5 p-0">
+                  {f.abas.map((a) => {
+                    const n = nDaAba(a.key)
+                    const ativa = a.key === abaAtual?.key
+                    const vazia = n === 0
+                    const nome = nomeDaColuna(a.label)
+                    return (
+                      <li key={a.key}>
+                        <button
+                          type="button"
+                          aria-pressed={ativa}
+                          onClick={() => irParaAba(a.key)}
+                          title={`${nome} — ${n} ${busca.trim() ? 'resultado(s) da busca' : 'crédito(s)'}`}
+                          className={cn(
+                            'relative grid h-[38px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-[10px] rounded-controle px-[10px] pb-1 text-left transition-colors',
+                            ativa ? 'bg-marca-suave' : 'hover:bg-superficie-3',
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'truncate text-sm',
+                              ativa
+                                ? 'font-bold text-marca-texto'
+                                : vazia
+                                  ? 'font-medium text-texto-3'
+                                  : 'font-medium text-texto',
+                            )}
+                          >
+                            {nome}
+                          </span>
+                          <span
+                            className={cn(
+                              'text-right text-sm tabular-nums',
+                              ativa ? 'font-bold text-marca-texto' : vazia ? 'font-medium text-texto-3' : 'font-bold text-texto',
+                            )}
+                          >
+                            {n}
+                          </span>
+                          {/* A BARRA EMBAIXO DO NOME: o comprimento compara as
+                              etapas sem ler número, e o nome inteiro cabe. */}
+                          <span
+                            aria-hidden
+                            className={cn(
+                              'absolute bottom-[5px] left-[10px] right-[10px] h-[3px] overflow-hidden rounded-full',
+                              ativa ? 'bg-marca-viva/20' : 'bg-superficie-3',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'block h-full rounded-full',
+                                ativa ? 'bg-marca-viva' : f.discreta ? 'bg-texto-3/50' : 'bg-marca-viva/70',
+                              )}
+                              style={{ width: `${larguraDaBarra(n, maior)}%` }}
+                            />
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+                {/* A SETA ENTRE AS FASES DO FLUXO — não entre o fluxo e os perdidos. */}
+                {!f.discreta && proxima && !proxima.discreta && (
+                  <span
+                    aria-hidden
+                    className="absolute -right-[11px] top-[18px] z-[1] hidden h-[18px] w-[18px] place-items-center rounded-full bg-papel text-texto-3 min-[1180px]:grid"
+                  >
+                    <ChevronRight className="h-[14px] w-[14px]" />
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </section>
+      ) : etapas.isLoading ? (
+        <Card className="mb-6 p-4">
+          <Loading label="Carregando as etapas do Kommo…" />
+        </Card>
+      ) : etapas.isError ? (
+        // A MENSAGEM REAL, não um palpite: se o problema fosse permissão de
+        // leitura da tabela, sincronizar de novo não mudaria nada.
+        <CaixaDeAviso tom="perigo" className="mb-6">
+          Não consegui ler as etapas deste funil: {(etapas.error as Error)?.message}{' '}
+          <LinkTentarDeNovo tentando={etapas.isFetching} onClick={() => void etapas.refetch()} />
+        </CaixaDeAviso>
+      ) : (
+        // Espelho vazio: o kommo-sync não gravou a estrutura do kanban. Dizer
+        // isso é melhor que mostrar uma tela vazia, que se leria como "não tem
+        // crédito nenhum".
+        <Card className="mb-6">
           <EmptyState
-            title={
-              busca.trim()
-                ? 'Nada encontrado'
-                : `Nenhum card em ${abaAtual?.label ?? 'nenhuma etapa'}`
-            }
+            title="Ainda não sei as etapas deste funil"
             description={
-              busca.trim()
-                ? achadosEmOutrasAbas.length
-                  ? `Nenhum card corresponde à busca nesta etapa. Achei em: ${achadosEmOutrasAbas.join(', ')}.`
-                  : `Nenhum card corresponde à busca em nenhuma etapa do funil de ${
-                      funil === FUNIL_PRECATORIO ? 'Precatórios' : 'RPV'
-                    }. O card pode estar no outro funil${
-                      funil === FUNIL_PRECATORIO ? ' ou na outra destinação' : ''
-                    }.`
-                : (abaAtual?.descricaoVazia ??
-                  'Este funil ainda não tem card nenhum no Kommo. Quando o comercial criar um, ele aparece aqui na próxima sincronização.')
+              <>
+                Elas vêm do próprio Kommo — clique em <strong>Sincronizar</strong>, no alto da página. Se
+                continuar assim, a sincronização não conseguiu ler a estrutura do kanban e o aviso dela vai
+                aparecer aqui.
+              </>
             }
           />
-        ) : (
-          <div>
-            {lista.map((l) => (
-              <CardCredito
-                key={l.kommo_lead_id}
-                lead={l}
-                acoes={abaAtual?.acoes ?? []}
-                // O AGRUPADO NÃO VAI NA LINHA DE CIMA: ele sai de um botão só,
-                // junto dos outros de trabalho, e não de um botão por saída.
-                desfechoNoCard={
-                  abaAtual?.key !== ABA_RPV_DESFECHO_NA_JANELA && !abaAtual?.desfechoAgrupado
-                }
-                onConcluir={
-                  abaAtual?.desfechoAgrupado && (abaAtual?.acoes.length ?? 0) > 0
-                    ? (l) => concluir(l, abaAtual.acoes)
-                    : undefined
-                }
-                onAbrirAnexo={abrirAnexo}
-                onPrepararAnexo={prepararAnexo}
-                // AS ETIQUETAS NAS TERMINAIS DO EXTERNO — ver ABAS_COM_TAGS: é
-                // onde elas dizem para qual fundo o crédito foi, ou por que não
-                // foi. Nas abas de trabalho seriam ruído.
-                mostrarTags={ABAS_COM_TAGS.has(abaAtual?.key ?? '')}
-                // E EDITÁVEIS SÓ EM "EM PRECIFICAÇÃO" — ver `etiquetasDaAba`.
-                // Nas outras duas com etiqueta a leitura basta: o trabalho
-                // naquele crédito já acabou.
-                etiquetasOferecidas={etiquetasDaAba(abaAtual?.key)}
-                onEtiquetar={(l, etiqueta, acao) => {
-                  setEtiquetaEmVoo({ leadId: l.kommo_lead_id, etiqueta })
-                  etiquetar.mutate({ leadId: l.kommo_lead_id, etiqueta, acao })
+        </Card>
+      )}
+
+      <section aria-live="polite" aria-label="Cards da etapa">
+        {abaAtual && (
+          // O CABEÇALHO DA ETAPA (item "Novo"): a fase, o nome com a contagem e
+          // uma frase do que se faz nela; à direita, a ordem da lista.
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+            <div className="min-w-0">
+              {faseAberta?.nome && (
+                <p className="font-display text-xs font-bold uppercase tracking-[.06em] text-marca-texto">
+                  {faseAberta.discreta ? 'Fora do fluxo' : `Fase ${indiceDaFase + 1} · ${faseAberta.nome}`}
+                </p>
+              )}
+              <h2 className="font-display mt-0.5 flex items-center gap-[10px] text-2xl font-extrabold tracking-tight text-texto">
+                {nomeDaColuna(abaAtual.label)}
+                <span className="rounded-full bg-marca-suave px-[9px] py-0.5 text-sm font-bold tabular-nums text-marca-texto">
+                  {lista.length}
+                </span>
+              </h2>
+              {abaAtual.descricao && (
+                <p className="mt-1 max-w-[640px] text-corpo text-texto-2">
+                  <TextoComTermos texto={abaAtual.descricao} />
+                </p>
+              )}
+            </div>
+            <label className="flex h-[38px] w-[270px] items-center gap-2 rounded-campo border border-borda-controle bg-superficie px-4 text-texto-3 focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20 max-[900px]:w-full">
+              <span className="sr-only">Ordenar</span>
+              <History className={IC} aria-hidden />
+              <select
+                value={ordem}
+                onChange={(e) => {
+                  setOrdem(e.target.value as OrdemDaLista)
+                  setMostrar(POR_VEZ)
                 }}
-                etiquetaEmVoo={
-                  etiquetaEmVoo?.leadId === l.kommo_lead_id ? etiquetaEmVoo.etiqueta : null
-                }
-                // A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026).
-                onAnotar={anotarNoCard}
-                // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
-                // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
-                onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
-                // ANEXAR E MOVER, onde a aba o declara — o Memorando do Externo.
-                // OS CHECKS DO ENVIO AOS FUNDOS, onde a aba os declara — a Remessa.
-                envioAosFundos={
-                  abaAtual?.envioAosFundos
-                    ? {
-                        fundos: abaAtual.envioAosFundos.fundos,
-                        onAbrir: (lead, fundo) => setEnvioAberto({ lead, fundo }),
-                        onMover: (lead) => void moverAposOsFundos(lead).catch(() => null),
-                      }
-                    : undefined
-                }
-                anexarEMover={
-                  abaAtual?.anexarEMover
-                    ? {
-                        rotulo: abaAtual.anexarEMover.rotulo,
-                        soMover: anexadosSemMover.has(l.kommo_lead_id),
-                        onEnviar: anexarEMover,
-                      }
-                    : undefined
-                }
-                onAcao={acionar}
-                // EM RPV o selo aparece só em Pendentes: nas etapas seguintes a
-                // análise já passou pela revisão, e dizer "finalizado" ali seria
-                // ruído. NO PRECATÓRIO ele aparece em toda aba, porque o fluxo
-                // de análise automática ainda não tem uma etapa definida como "a
-                // fila" — e sem o selo, card com análise pronta ficaria
-                // visualmente idêntico a card que ninguém tocou.
-                analisePronta={
-                  funil === FUNIL_RPV && abaAtual?.key !== 'pendentes'
-                    ? null
-                    : (prontas.data?.has(l.kommo_lead_id) ?? false)
-                }
-                statusEmAndamento={
-                  emAndamento?.leadId === l.kommo_lead_id
-                    ? emAndamento.statusId
-                    : null
-                }
-                onAnalisar={onAnalisar}
-                analisando={rpvLead?.kommo_lead_id === l.kommo_lead_id}
-                resultadoAnalise={
-                  funil === FUNIL_RPV && abaAtual?.key !== 'pendentes'
-                    ? undefined
-                    : resultadoAnalise[l.kommo_lead_id]
-                }
-                onDueDiligence={onDueDiligence}
-                onAnaliseExterna={onAnaliseExterna}
-                onBaixarAnexos={(l) => void baixarAnexosDoCard(l)}
-                preparoDosAutos={preparoDosAutos[l.kommo_lead_id]}
-                onPreencherPlanilha={(l) => setPlanilhaLead(l)}
-                analisandoJuridico={analisandoJurId === l.kommo_lead_id}
-                resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
-                botoes={botoesDoCard}
-                onCertidoes={abaAtual?.certidoes ? onCertidoes : undefined}
-              />
-            ))}
+                className="w-full min-w-0 cursor-pointer bg-transparent text-corpo text-texto outline-none"
+              >
+                <option value="recente">Entrada mais recente na etapa</option>
+                <option value="parado">Mais tempo na etapa</option>
+              </select>
+            </label>
           </div>
         )}
-      </Card>
+
+        {/* OS FILTROS RÁPIDOS (item "Novo"), com a contagem: um clique mostra os
+            parados, os com cotação, os com análise pronta ou os sem número. */}
+        {/* VISÍVEIS TAMBÉM COM A ETAPA VAZIA ("Todos 0"), como na amostra: a
+            barra que some e volta conforme a etapa faz a lista pular. Só não
+            aparecem antes de os cards chegarem — "0" ali seria afirmação falsa. */}
+        {abaAtual && leads.data && (
+          <div role="group" aria-label="Filtros rápidos" className="mb-3 flex flex-wrap gap-2">
+            {chips.map((c) => {
+              const ativo = filtro === c.key
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  aria-pressed={ativo}
+                  onClick={() => {
+                    setFiltro(c.key)
+                    setMostrar(POR_VEZ)
+                  }}
+                  className={cn(
+                    'inline-flex h-[30px] items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors',
+                    ativo
+                      ? 'border-texto bg-texto text-superficie'
+                      : 'border-borda-forte bg-superficie text-texto-2 hover:bg-superficie-3',
+                  )}
+                >
+                  {c.icone}
+                  {c.rotulo}
+                  <span className="font-medium tabular-nums opacity-80">{contagemDoFiltro[c.key]}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {leads.isLoading ? (
+          <Card>
+            <Loading />
+          </Card>
+        ) : leads.isError ? (
+          <Card>
+            <ErrorState message={(leads.error as Error)?.message} onRetry={() => leads.refetch()} />
+          </Card>
+        ) : filtrados.length === 0 ? (
+          <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie">
+            {lista.length > 0 ? (
+              <EmptyState
+                title="Nenhum card com esse filtro"
+                description="Limpe o filtro para ver todos os cards desta etapa."
+                action={
+                  <Button variant="secondary" className={BTN} onClick={() => setFiltro('todos')}>
+                    Limpar filtro
+                  </Button>
+                }
+              />
+            ) : busca.trim() ? (
+              <EmptyState
+                title="Nada encontrado"
+                description={
+                  achadosEmOutrasAbas.length ? (
+                    <>Nenhum card corresponde à busca nesta etapa. Achei em: {linksDosAchados(achadosEmOutrasAbas)}.</>
+                  ) : (
+                    `Nenhum card corresponde à busca em nenhuma etapa do funil de ${nomeDoFunil}. O card pode estar no outro funil${
+                      funil === FUNIL_PRECATORIO ? ' ou na outra destinação' : ''
+                    }.`
+                  )
+                }
+              />
+            ) : (
+              <EmptyState
+                title={`Nenhum card em ${abaAtual ? nomeDaColuna(abaAtual.label) : 'nenhuma etapa'}`}
+                description={
+                  abaAtual?.descricaoVazia ??
+                  'Este funil ainda não tem card nenhum no Kommo. Quando o comercial criar um, ele aparece aqui na próxima sincronização.'
+                }
+              />
+            )}
+          </div>
+        ) : (
+          <>
+            <div className={cn('grid', compacto ? 'gap-[6px]' : 'gap-[10px]')}>
+              {filtrados.slice(0, mostrar).map((l) => (
+                <CardCredito
+                  key={l.kommo_lead_id}
+                  lead={l}
+                  compacto={compacto}
+                  onCopiarProcesso={copiarProcesso}
+                  acoes={abaAtual?.acoes ?? []}
+                  // O AGRUPADO NÃO VAI UM BOTÃO POR SAÍDA: ele sai de um botão
+                  // só, o "Concluir", junto dos outros de trabalho.
+                  desfechoNoCard={
+                    abaAtual?.key !== ABA_RPV_DESFECHO_NA_JANELA && !abaAtual?.desfechoAgrupado
+                  }
+                  onConcluir={
+                    abaAtual?.desfechoAgrupado && (abaAtual?.acoes.length ?? 0) > 0
+                      ? (l) => concluir(l, abaAtual.acoes)
+                      : undefined
+                  }
+                  onAbrirAnexo={abrirAnexo}
+                  onPrepararAnexo={prepararAnexo}
+                  // AS ETIQUETAS NAS ABAS DE `ABAS_COM_TAGS`: é onde elas dizem
+                  // para qual fundo o crédito foi, ou por que não foi.
+                  mostrarTags={ABAS_COM_TAGS.has(abaAtual?.key ?? '')}
+                  // E EDITÁVEIS SÓ EM "EM PRECIFICAÇÃO" — ver `etiquetasDaAba`.
+                  etiquetasOferecidas={etiquetasDaAba(abaAtual?.key)}
+                  onEtiquetar={(l, etiqueta, acao) => {
+                    setEtiquetaEmVoo({ leadId: l.kommo_lead_id, etiqueta })
+                    etiquetar.mutate({ leadId: l.kommo_lead_id, etiqueta, acao })
+                  }}
+                  etiquetaEmVoo={etiquetaEmVoo?.leadId === l.kommo_lead_id ? etiquetaEmVoo.etiqueta : null}
+                  // A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026).
+                  onAnotar={anotarNoCard}
+                  // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
+                  // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
+                  onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
+                  // OS CHECKS DO ENVIO AOS FUNDOS, onde a aba os declara — a Remessa.
+                  envioAosFundos={
+                    abaAtual?.envioAosFundos
+                      ? {
+                          fundos: abaAtual.envioAosFundos.fundos,
+                          destino: abaAtual.envioAosFundos.destino,
+                          onAbrir: (lead, fundo) => setEnvioAberto({ lead, fundo }),
+                          onMover: (lead) => void moverAposOsFundos(lead).catch(() => null),
+                        }
+                      : undefined
+                  }
+                  // ANEXAR E MOVER, onde a aba o declara — o Memorando do Externo.
+                  anexarEMover={
+                    abaAtual?.anexarEMover
+                      ? {
+                          rotulo: abaAtual.anexarEMover.rotulo,
+                          soMover: anexadosSemMover.has(l.kommo_lead_id),
+                          onEnviar: anexarEMover,
+                        }
+                      : undefined
+                  }
+                  onAcao={acionar}
+                  // EM RPV o selo aparece só na Análise: nas etapas seguintes a
+                  // análise já passou pela revisão, e dizer "finalizado" ali seria
+                  // ruído. NO PRECATÓRIO ele aparece em toda aba — sem o selo,
+                  // card com análise pronta ficaria idêntico a card que ninguém tocou.
+                  analisePronta={
+                    funil === FUNIL_RPV && abaAtual?.key !== 'pendentes'
+                      ? null
+                      : (prontas.data?.has(l.kommo_lead_id) ?? false)
+                  }
+                  statusEmAndamento={emAndamento?.leadId === l.kommo_lead_id ? emAndamento.statusId : null}
+                  onAnalisar={onAnalisar}
+                  analisando={rpvLead?.kommo_lead_id === l.kommo_lead_id}
+                  resultadoAnalise={
+                    funil === FUNIL_RPV && abaAtual?.key !== 'pendentes' ? undefined : resultadoAnalise[l.kommo_lead_id]
+                  }
+                  onDueDiligence={onDueDiligence}
+                  onAnaliseExterna={onAnaliseExterna}
+                  onBaixarAnexos={(l) => void baixarAnexosDoCard(l)}
+                  preparoDosAutos={preparoDosAutos[l.kommo_lead_id]}
+                  onPreencherPlanilha={(l) => setPlanilhaLead(l)}
+                  analisandoJuridico={analisandoJurId === l.kommo_lead_id}
+                  resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
+                  botoes={botoesDoCard}
+                  onCertidoes={abaAtual?.certidoes ? onCertidoes : undefined}
+                  // ONDA 4: os campos só existem na aba que `abaParaQuemVe`
+                  // entrega com eles — a todos desde 03/10/2026; sem eles, nada
+                  // disto é passado.
+                  negociacao={
+                    abaAtual?.negociacao
+                      ? {
+                          opcoes: abaAtual.negociacao,
+                          destinoDoFechado: abaAtual.negociacao.fechado
+                            ? nomeDaColunaDoId(abaAtual.negociacao.fechado.statusId)
+                            : '',
+                          onFechado: (lead, nota) =>
+                            desfechoDaNegociacaoNoCard(lead, abaAtual.negociacao!.fechado!, nota),
+                          onNaoFechou: (lead) => setNaoFechou({ lead, opcoes: abaAtual.negociacao! }),
+                        }
+                      : undefined
+                  }
+                  onGerarContrato={abaAtual?.gerarContrato ? gerarContratoDoCard : undefined}
+                  realcado={realce === l.kommo_lead_id}
+                />
+              ))}
+            </div>
+            {/* DE 8 EM 8 (item "Novo"): a lista longa não empurra a página
+                inteira, e o botão diz quantos faltam. */}
+            {filtrados.length > mostrar && (
+              <div className="mt-[14px] flex justify-center">
+                <Button variant="secondary" className={BTN} onClick={() => setMostrar((m) => m + POR_VEZ)}>
+                  Mostrar mais {Math.min(POR_VEZ, filtrados.length - mostrar)}
+                  <span className="font-medium text-texto-3">
+                    · {mostrar} de {filtrados.length}
+                  </span>
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       {planilhaLead && (
         <JanelaDaPlanilha
@@ -4395,7 +5391,19 @@ export default function AnaliseCredito() {
               ? resumoDaOportunidade(mensagemDoCard.lead.oportunidade)
               : ''
           }
+          // A CAIXA DO RESUMO (onda 4): no Concluir do RPV — várias saídas, uma
+          // delas aprovar —, para todos desde 03/10/2026. Fora dele, a janela de sempre.
+          resumo={
+            mensagemDoCard.lead.pipeline_id === FUNIL_RPV &&
+            mensagemDoCard.acoes.length > 1 &&
+            mensagemDoCard.acoes.some((a) => a.papel === 'aprovar')
+              ? mensagemDoCard.lead.oportunidade
+                ? resumoDaOportunidade(mensagemDoCard.lead.oportunidade)
+                : ''
+              : null
+          }
           ocupado={mover.isPending}
+          jaMovido={jaMovidoPara(mensagemDoCard.lead.kommo_lead_id)}
           onConfirmar={async (acao, mensagem) => {
             setEmAndamento({
               leadId: mensagemDoCard.lead.kommo_lead_id,
@@ -4408,7 +5416,31 @@ export default function AnaliseCredito() {
             )
             setMensagemDoCard(null)
           }}
-          onFechar={() => setMensagemDoCard(null)}
+          onFechar={() => {
+            esquecerMovimentos(mensagemDoCard.lead.kommo_lead_id)
+            setMensagemDoCard(null)
+          }}
+        />
+      )}
+
+      {naoFechou && (
+        <JanelaNaoFechou
+          key={naoFechou.lead.kommo_lead_id}
+          lead={naoFechou.lead}
+          opcoes={{
+            ...(naoFechou.opcoes.naoFechou ? { recusou: naoFechou.opcoes.naoFechou } : {}),
+            ...(naoFechou.opcoes.semResposta ? { sumiu: naoFechou.opcoes.semResposta } : {}),
+          }}
+          nomeDaColuna={nomeDaColunaDoId}
+          jaMovido={jaMovidoPara(naoFechou.lead.kommo_lead_id)}
+          onConfirmar={async (acao, nota) => {
+            await desfechoDaNegociacaoNoCard(naoFechou.lead, acao, nota)
+            setNaoFechou(null)
+          }}
+          onFechar={() => {
+            esquecerMovimentos(naoFechou.lead.kommo_lead_id)
+            setNaoFechou(null)
+          }}
         />
       )}
 

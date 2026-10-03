@@ -1,0 +1,26 @@
+name: Publicar a beta
+
+# SÓ NESTA BRANCH (redesenho). Um push aqui dispara o deploy.yml DA MAIN, que é
+# quem publica o site: o ambiente github-pages só aceita a main, e o Pages
+# publica um pacote que substitui o site inteiro. O deploy da main compila esta
+# branch e a põe em /gestaodecreditos/beta/, ao lado da oficial — ver os passos
+# "Beta" em .github/workflows/deploy.yml (na main) e PLANO-DE-IMPLEMENTACAO.md.
+#
+# A BETA NUNCA PUBLICA FUNÇÕES: o deploy recusa a branch se ela mexer em
+# supabase/. O que mexe em servidor ou no Kommo entra pela main.
+on:
+  push:
+    branches: [redesenho]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispara a publicação da main (que leva a beta junto)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref main --repo "$GITHUB_REPOSITORY"

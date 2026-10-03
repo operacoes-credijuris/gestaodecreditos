@@ -53,6 +53,10 @@ import {
   COLUNAS_DE_SISTEMA,
   resolverColuna,
 } from '../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
+// O DESFECHO DA NEGOCIAÇÃO NO RPV, pelos MESMOS ids que a `kommo-mover` aceita
+// (onda 4 do redesenho): os botões da beta leem a lista do servidor, e não uma
+// cópia — o mesmo princípio das trilhas.
+import { NEGOCIACAO_RPV } from '../../supabase/functions/_shared/colunasRpv.ts'
 // PELO MESMO MOTIVO das trilhas: a lista das etiquetas que a casa aplica é lida
 // pela tela, que desenha o seletor, e pela Edge Function `kommo-etiquetar`, que
 // decide o que aceita. Uma lista só — e ela precisa ser fechada, porque o Kommo
@@ -144,6 +148,9 @@ export const ST_REPROVADO = 107830031 // Reprovados Operacional
 // não têm aba: a plataforma volta a mostrar o crédito quando ele chega ao
 // protocolo, que é trabalho nosso outra vez.
 export const ST_PROTOCOLO = 107830059 // Protocolo
+// A COLUNA EM QUE O CONTRATO DE CESSÃO É GERADO. É dela que sai o "Gerar
+// contrato" do card (onda 4 do redesenho) — pelo id, como as outras.
+export const ST_ELABORACAO_CONTRATOS = 107830051 // Elaboração de contratos
 
 // ---------- Precatórios: as duas destinações, fixas ----------
 
@@ -336,9 +343,19 @@ export interface DefTela {
 }
 
 /**
- * As telas da Análise de Crédito, uma por coluna do Kommo. Os rótulos usam o
- * vocabulário DA PLATAFORMA, não o do Kommo: quem opera aqui não precisa saber
- * que "Aprovados" é "Apresentação de Proposta" no CRM do comercial.
+ * As ABAS DE TRABALHO do RPV: as seis colunas do Kommo em que a plataforma tem
+ * função (ou teve, e por isso têm chave própria).
+ *
+ * DESDE A ETAPA 7 DO REDESENHO (02/10/2026) O RPV MOSTRA O KANBAN INTEIRO — ver
+ * `ESPELHO_RPV` e `abasDoFunil`. Estas seis continuam existindo porque são as que
+ * guardam CHAVE histórica ('pendentes', 'validacao'…), e é pela chave que o resto
+ * do código compara (os botões de trabalho, o desfecho na janela, o selo
+ * "Finalizado"). As outras nove colunas entram como `col-<id>`, só para leitura.
+ *
+ * OS RÓTULOS SÃO OS NOMES DO KOMMO desde a mesma data (decisão do dono, estudo
+ * §8.2: "Aprovados" vira "Produção de proposta", "p/ Protocolo" vira
+ * "Protocolo"). Na tela a aba usa o nome que o espelho traz; o daqui é o de
+ * 02/10/2026, e vale enquanto o espelho não chega e no aviso de coluna sumida.
  *
  * A anotação gravada no card do Kommo usa o nome de lá, de propósito — quem a
  * lê é o comercial, dentro do Kommo (ver COLUNAS na Edge Function kommo-mover).
@@ -348,11 +365,10 @@ export const TELAS: DefTela[] = [
     key: 'pendentes',
     // AS CHAVES SÃO HISTÓRICAS, os rótulos não. 'pendentes' e 'validacao' são o
     // que a tela guarda (no estado da página — hoje nada disso vai na URL) e o
-    // que o resto do código compara; o que se lê mudou para o vocabulário que a
-    // operação usa hoje, o mesmo das duas trilhas do Precatório — em análise,
-    // depois revisão. Manter as chaves deixa pronto o dia em que a aba for para a
-    // URL, sem renomear nada.
-    label: 'Análise',
+    // que o resto do código compara; o que se lê é o nome da coluna no Kommo.
+    // Manter as chaves deixa pronto o dia em que a aba for para a URL, sem
+    // renomear nada.
+    label: 'Análise Jurídica e Econômica',
     statusId: ST_ANALISE,
     descricaoVazia:
       'Nenhum card aguardando revisão. Quando o comercial mover um crédito para análise no Kommo, ele aparece aqui.',
@@ -365,7 +381,7 @@ export const TELAS: DefTela[] = [
   },
   {
     key: 'aprovados',
-    label: 'Aprovados',
+    label: 'Produção de proposta',
     statusId: ST_PROPOSTA,
     descricaoVazia: 'Nenhum crédito aprovado nesta etapa.',
   },
@@ -377,17 +393,132 @@ export const TELAS: DefTela[] = [
   },
   {
     key: 'reprovados',
-    label: 'Reprovados',
+    label: 'Reprovados operacional',
     statusId: ST_REPROVADO,
     descricaoVazia: 'Nenhum crédito reprovado.',
   },
   {
     key: 'protocolo',
-    label: 'p/ Protocolo',
+    label: 'Protocolo',
     statusId: ST_PROTOCOLO,
     descricaoVazia: 'Nenhum crédito aguardando protocolo.',
   },
 ]
+
+/**
+ * O KANBAN DO RPV INTEIRO, como o `kommo_etapa` o devolveu em 02/10/2026: as 15
+ * colunas do funil, na ordem de lá — sem a entrada de leads (tipo 1) e sem as
+ * duas de sistema (142 e 143), como no Externo.
+ *
+ * É A DEFINIÇÃO PRÓPRIA DO RPV, e mora aqui de propósito: o RPV NUNCA entra em
+ * `TRILHAS_PRECATORIO`. Lá ele trocaria a categoria da análise (a pasta do
+ * Drive), os destinos que a `kommo-mover` aceita e a coluna de entrada do
+ * Escavador — tudo o que as trilhas decidem para o precatório.
+ *
+ * SERVE DE RESERVA: com o espelho já sincronizado, a tela usa as colunas DELE
+ * (nome e ordem de lá, e coluna nova aparece sozinha, só para leitura); sem
+ * espelho ainda, usa esta lista — melhor que uma tela sem aba nenhuma. Pelo ID,
+ * como o resto: renomear a coluna no Kommo não tira nada.
+ */
+export const ESPELHO_RPV: readonly { statusId: number; nome: string }[] = [
+  { statusId: ST_ANALISE, nome: 'Análise Jurídica e Econômica' },
+  { statusId: ST_DECISAO, nome: 'Revisão' },
+  { statusId: ST_DILIGENCIA, nome: 'Diligência' },
+  { statusId: ST_PROPOSTA, nome: 'Produção de proposta' },
+  { statusId: 107830039, nome: 'Negociação' },
+  { statusId: 107830043, nome: 'Fechados' },
+  { statusId: 107830047, nome: 'Oferta aos investidores' },
+  { statusId: 107830051, nome: 'Elaboração de contratos' },
+  { statusId: 107830055, nome: 'Aguardando assinaturas' },
+  { statusId: ST_PROTOCOLO, nome: 'Protocolo' },
+  { statusId: 107830063, nome: 'Pagamento finalizado' },
+  { statusId: ST_REPROVADO, nome: 'Reprovados operacional' },
+  { statusId: 107272811, nome: 'Reprovados comercial' },
+  { statusId: 112466388, nome: 'Sem resposta' },
+  { statusId: 107830067, nome: 'Não fechado' },
+]
+
+/** Uma fase do funil: as colunas agrupadas num nível acima das abas. */
+export type DefFase = NonNullable<DefSubdivisao['fases']>[number]
+
+/**
+ * AS QUATRO FASES DO RPV, as mesmas do Externo (pedido de 01/10/2026), pelos ids.
+ * "Oferta aos investidores" fica em Comercialização (decisão do dono, estudo
+ * §8.3): depois de fechar com o cedente, a casa oferece o crédito aos
+ * investidores. Coluna que o Kommo ganhar depois entra na fase da que vem antes
+ * dela no kanban (ver `comFases`).
+ */
+export const FASES_RPV: readonly DefFase[] = [
+  { nome: 'Qualificação', colunas: [ST_ANALISE, ST_DECISAO, ST_DILIGENCIA] },
+  { nome: 'Comercialização', colunas: [ST_PROPOSTA, 107830039, 107830043, 107830047] },
+  { nome: 'Formalização', colunas: [107830051, 107830055, ST_PROTOCOLO, 107830063] },
+  { nome: 'Perdidos', colunas: [ST_REPROVADO, 107272811, 112466388, 107830067], discreta: true },
+]
+
+/**
+ * O QUE SE FAZ EM CADA COLUNA, em uma frase — o cabeçalho da etapa na tela
+ * (item "Novo" da amostra: "Cabeçalho da etapa"). Pelo id, nos três funis.
+ *
+ * SÓ TEXTO, e só o que a plataforma faz HOJE. A amostra descreve também os
+ * botões da onda 4 (o "Fechado!" da Negociação, o "Gerar contrato" da
+ * Elaboração de contratos, o "Sanar" do RPV e do Interno); essas frases foram
+ * reescritas sem prometer botão que a tela ainda não tem.
+ *
+ * Coluna sem frase aqui (criada depois no Kommo) mostra só o nome — sem
+ * inventar o que se faz nela.
+ */
+export const DESCRICAO_DA_COLUNA: Readonly<Record<number, string>> = {
+  // ---- RPV
+  [ST_ANALISE]:
+    'Créditos que o comercial mandou para análise. Rode a análise (qualifica e precifica) e envie para revisão.',
+  [ST_DECISAO]: 'A análise está pronta: quem decide confere e aprova, pede diligência ou reprova.',
+  [ST_DILIGENCIA]: 'Falta algo para decidir. Sanada a pendência, o comercial move o card de volta no Kommo.',
+  [ST_PROPOSTA]: 'Aprovado: a proposta ao cedente está sendo montada.',
+  107830039: 'Proposta apresentada, em negociação com o cedente.',
+  107830043: 'Negócio fechado com o cedente.',
+  107830047: 'O crédito fechado está sendo oferecido aos investidores.',
+  107830051: 'Contratos de cessão sendo gerados.',
+  107830055: 'Contratos enviados, aguardando as assinaturas.',
+  [ST_PROTOCOLO]: 'Cessão assinada, aguardando o protocolo no processo.',
+  107830063: 'Cessão paga ao cedente.',
+  [ST_REPROVADO]: 'Recusados na análise ou na revisão.',
+  107272811: 'Recusados na negociação.',
+  112466388: 'Cedente que deixou de responder.',
+  107830067: 'Negociação encerrada sem acordo.',
+  // ---- Precatório Interno
+  111533940: 'Leitura dos autos e planilha jurídica, pela conversa no Claude. Conclua com a razão escrita.',
+  111533944: 'Segunda leitura de quem decide: aprovar, exigir diligência ou reprovar.',
+  111533960: 'Pendência a resolver antes de decidir. Sanada, o comercial move o card de volta no Kommo.',
+  111533948:
+    'Aprovado: a proposta ao cedente está sendo montada. A due diligence e a análise continuam à mão.',
+  112466260: 'Proposta apresentada, em negociação com o cedente.',
+  111533952: 'Negócio fechado com o cedente.',
+  112466032: 'O crédito fechado está sendo oferecido aos investidores.',
+  111533956: 'Escritura de cessão em cartório.',
+  111693840: 'Cessão assinada, aguardando o protocolo no processo.',
+  112466340: 'Cessão paga ao cedente.',
+  111534108: 'Créditos recusados.',
+  112465960: 'Cedente que deixou de responder.',
+  112382612: 'Negociação encerrada sem acordo.',
+  // ---- Precatório Externo
+  111533968: 'Primeira leitura dos autos. Rode a análise no Claude e conclua com a razão escrita.',
+  111533972: 'Segunda leitura de quem decide: aprovar, pedir memorando, exigir diligência ou reprovar.',
+  111533996: 'Falta algo para seguir. Sanada a pendência, o crédito volta para a revisão.',
+  111533976: 'Aguardando o memorando assinado do comercial. Anexe-o para levar o crédito aos fundos.',
+  111533980:
+    'Suba o crédito nas plataformas do BTG e da PJus. Com os dois registros, o card vai para Em precificação.',
+  111533984: 'Os fundos estão precificando. Marque o retorno de cada um e escolha a proposta para seguir.',
+  111533988: 'Proposta ao cedente sendo montada.',
+  112339984: 'Proposta apresentada, em negociação com o cedente.',
+  111533992: 'Negócio fechado com o cedente.',
+  112341608: 'O fundo pediu os documentos. Emita as certidões do cedente pela BullAI.',
+  112341612: 'Documentação com o fundo, aguardando aprovação.',
+  112341616: 'Escritura de cessão em revisão ou assinatura.',
+  112006404: 'Cessão paga ao cedente.',
+  111534212: 'Créditos recusados pela casa ou pelos fundos.',
+  112346344: 'Cedente que deixou de responder.',
+  111985976: 'Negociação encerrada sem acordo.',
+}
 
 /**
  * O QUE A AÇÃO FAZ, independente de para qual coluna ela move.
@@ -402,6 +533,19 @@ export const TELAS: DefTela[] = [
  */
 export type { PapelDaAcao }
 
+/**
+ * O PAPEL NA TELA: os quatro da trilha e mais `fechar` — o "Fechado!" da
+ * Negociação (onda 4 do redesenho, 02/10/2026).
+ *
+ * UM PAPEL PRÓPRIO, E NÃO `aprovar`: o papel decide o ícone, o tom e se o motivo
+ * é exigido, e "o cedente aceitou a proposta" não é a aprovação do crédito.
+ * Reaproveitar `aprovar` faria a janela pedir o resumo da oportunidade e a nota
+ * sair com a cara da análise. MORA AQUI, e não em `_shared`: é só da tela — o
+ * servidor não recebe papel nenhum, e o selo da nota ("Comercial") ele decide
+ * pelo destino.
+ */
+export type PapelDaTela = PapelDaAcao | 'fechar'
+
 export interface AcaoTela {
   statusId: number
   label: string
@@ -409,7 +553,39 @@ export interface AcaoTela {
   // decidir nada — mandar para a revisão de outra pessoa não é aprovar. Sem ele
   // essa saída sairia no azul da aprovação, e as duas se confundiriam.
   variant: 'primary' | 'secondary' | 'success' | 'warning' | 'danger'
-  papel: PapelDaAcao
+  papel: PapelDaTela
+  /**
+   * SÓ PARA ADMINISTRADOR — a regra de lançamento da onda 4 do redesenho
+   * (02/10/2026).
+   *
+   * MOVER CARD NO KOMMO DISPARA AS AUTOMAÇÕES E NÃO SE DESFAZ, e a beta usa o
+   * Kommo de verdade. Por isso todo movimento novo desta onda (o Sanar do RPV e
+   * do Interno, o Concluir da Revisão do RPV, o desfecho da Negociação) nasce com
+   * esta marca, e `abaParaQuemVe` a tira de quem não é admin. NÃO É PROTEÇÃO: a
+   * `kommo-mover` só confere usuário ativo (plano, achado 2). É controle de
+   * liberação na tela — quem não é admin vê a tela da onda 2.
+   *
+   * DESDE 03/10/2026 a marca não esconde nada: `BOTOES_NOVOS_PARA_TODOS` libera
+   * os botões da onda 4 para todo mundo. Ela fica para o próximo lançamento.
+   */
+  soAdmin?: boolean
+}
+
+/**
+ * O DESFECHO DA NEGOCIAÇÃO NO CARD (onda 4 do redesenho, etapa 10b): "Fechado!"
+ * leva a Fechados; "Não fechou" abre a janela com as duas saídas negativas — o
+ * cedente recusou (Não fechado/s) ou sumiu (Sem resposta).
+ *
+ * UM CAMPO PRÓPRIO, E NÃO `acoes`: as três não são três botões iguais. Sai um
+ * botão positivo com confirmação num passo, e um negativo que escolhe entre dois
+ * destinos com o motivo escrito. Cada saída é opcional: coluna que o espelho não
+ * tem não vira opção (melhor sem a opção do que um botão que move para lugar
+ * nenhum).
+ */
+export interface DesfechoDaNegociacao {
+  fechado?: AcaoTela
+  naoFechou?: AcaoTela
+  semResposta?: AcaoTela
 }
 
 /**
@@ -455,6 +631,161 @@ export const ACOES: Record<TelaAnalise, AcaoTela[]> = {
   // O PROTOCOLO É ACOMPANHAMENTO, não decisão: o card chega ali depois de tudo
   // o que a casa decidiu, e quem o move de lá é quem protocola.
   protocolo: [],
+}
+
+// ---------- Onda 4 do redesenho: os movimentos novos (de todos desde 03/10/2026) ----------
+//
+// NENHUM DELES ENTRA EM `ACOES` NEM NAS `saidas` DAS TRILHAS, e é de propósito:
+// os dois viram botão para todo mundo, e a regra desta onda é que o botão novo
+// apareça primeiro só para o administrador (ver `soAdmin`; desde 03/10/2026,
+// `BOTOES_NOVOS_PARA_TODOS` os libera para todos). Os destinos já são
+// aceitos pelo servidor — a Revisão do RPV e a do Interno, e os três desfechos da
+// Negociação (`colunasRpv.ts`, campo `negociacao` das trilhas).
+
+/**
+ * O SANAR DA DILIGÊNCIA DO RPV (etapa 8): a pendência resolvida, o crédito volta
+ * para a Revisão. A mesma saída que o Externo já tem — verde, papel `validar`,
+ * na janela da mensagem, com a nota só do que foi digitado.
+ */
+export const SANAR_RPV: AcaoTela = {
+  statusId: ST_DECISAO,
+  label: 'Sanar',
+  variant: 'success',
+  papel: 'validar',
+  soAdmin: true,
+}
+
+/**
+ * O CONCLUIR DA REVISÃO DO RPV (etapa 9): a mesma decisão dos três botões de
+ * hoje — os MESMOS destinos —, numa janela só, com a razão escrita e o resumo da
+ * oportunidade numa caixa à parte. Os rótulos e a ordem são os do Interno
+ * (amostra, `DESFECHOS['rpv-revisao']`).
+ *
+ * NO LUGAR DOS TRÊS BOTÕES DO CARD (`ACOES.validacao`), nunca junto: os dois
+ * dariam duas portas para a mesma decisão. Era a visão de admin da aba; desde
+ * 03/10/2026 (`BOTOES_NOVOS_PARA_TODOS`) é a de todos.
+ */
+export const CONCLUIR_REVISAO_RPV: readonly AcaoTela[] = [
+  { statusId: ST_PROPOSTA, label: 'Aprovar crédito', variant: 'primary', papel: 'aprovar', soAdmin: true },
+  { statusId: ST_DILIGENCIA, label: 'Exigir diligência', variant: 'warning', papel: 'diligenciar', soAdmin: true },
+  { statusId: ST_REPROVADO, label: 'Reprovar crédito', variant: 'danger', papel: 'reprovar', soAdmin: true },
+]
+
+/**
+ * O desfecho da Negociação com os destinos JÁ RESOLVIDOS (ids do funil), ou null
+ * se nenhum dos três foi achado. O rótulo de cada saída é o do botão ou da opção
+ * na janela; o papel das duas negativas é `reprovar`, que é o que exige o motivo.
+ */
+export function desfechoDaNegociacao(ids: {
+  fechados?: number
+  naoFechados?: number
+  semResposta?: number
+}): DesfechoDaNegociacao | null {
+  const d: DesfechoDaNegociacao = {}
+  if (ids.fechados !== undefined) {
+    d.fechado = { statusId: ids.fechados, label: 'Fechado!', variant: 'success', papel: 'fechar', soAdmin: true }
+  }
+  if (ids.naoFechados !== undefined) {
+    d.naoFechou = { statusId: ids.naoFechados, label: 'Não fechou', variant: 'danger', papel: 'reprovar', soAdmin: true }
+  }
+  if (ids.semResposta !== undefined) {
+    d.semResposta = { statusId: ids.semResposta, label: 'Sem resposta', variant: 'danger', papel: 'reprovar', soAdmin: true }
+  }
+  return d.fechado || d.naoFechou || d.semResposta ? d : null
+}
+
+/**
+ * O SANAR DO PRECATÓRIO da onda 4 (marcado `soAdmin`; de todos desde 03/10/2026,
+ * ver `BOTOES_NOVOS_PARA_TODOS`): no Interno, da Diligência para a
+ * Revisão (etapa 8). O destino sai da própria aba da Revisão da trilha — pelo id,
+ * com o nome de reserva —, e não de um número escrito aqui.
+ *
+ * O EXTERNO NÃO ENTRA: o Sanar dele já é saída da trilha, para todo mundo, desde
+ * 29/09/2026.
+ */
+const SANAR_DO_PRECATORIO: Partial<Record<SubdivisaoPrecatorio, { aba: string; para: string }>> = {
+  interno: { aba: 'int-diligencia', para: 'int-revisao' },
+}
+
+/**
+ * O QUE SE FAZ NA COLUNA, PARA QUEM TEM O BOTÃO NOVO. A frase de
+ * `DESCRICAO_DA_COLUNA` foi escrita sem prometer botão que a tela não tem; para
+ * quem tem o botão — o administrador, e todos desde 03/10/2026 —, ela diz o que o
+ * botão faz (o texto da amostra).
+ */
+const DESCRICAO_PARA_ADMIN: Readonly<Record<number, string>> = {
+  [ST_DILIGENCIA]: 'Falta algo para decidir. Sanada a pendência, o crédito volta para a Revisão.',
+  111533960: 'Pendência a resolver antes de decidir. Sanada, o crédito volta para a Revisão.',
+  [NEGOCIACAO_RPV.coluna]:
+    'Proposta apresentada, em negociação com o cedente. Quando ele responder, marque no card: fechado, não fechou ou sem resposta.',
+  112466260:
+    'Proposta apresentada, em negociação com o cedente. Quando ele responder, marque no card: fechado, não fechou ou sem resposta.',
+  112339984:
+    'Proposta apresentada, em negociação com o cedente. Quando ele responder, marque no card: fechado, não fechou ou sem resposta.',
+  [ST_ELABORACAO_CONTRATOS]:
+    'Contratos de cessão sendo gerados. O botão do card abre a Geração de contratos já com o processo e o originador.',
+}
+
+/**
+ * OS BOTÕES NOVOS DA ONDA 4 PARA TODO MUNDO — decisão do dono em 03/10/2026, junto
+ * com a aprovação da beta. O `soAdmin` continua marcando o que foi lançado assim
+ * (e serve ao próximo lançamento por etapas); com isto ligado, ninguém deixa de
+ * ver. Desligar volta a regra de antes: só o administrador vê.
+ */
+export const BOTOES_NOVOS_PARA_TODOS = true
+
+/** Só o que esta pessoa pode ver: o item `soAdmin` sai para quem não é admin. */
+export function visivelPara<T extends { soAdmin?: boolean }>(itens: readonly T[], admin: boolean): T[] {
+  return itens.filter((x) => admin || !x.soAdmin)
+}
+
+/**
+ * A ABA COMO ESTA PESSOA A VÊ — o filtro do `soAdmin` (onda 4 do redesenho).
+ *
+ * COM `BOTOES_NOVOS_PARA_TODOS` LIGADO (desde 03/10/2026), todos têm a visão do
+ * admin abaixo, e `ehAdmin` não muda nada — é o que `visaoDeAdmin.test.ts` e
+ * `matrizDeMovimentos.test.ts` prendem.
+ *
+ * DESLIGADO, PARA QUEM NÃO É ADMIN, a aba da onda 2, campo por campo: as ações
+ * `soAdmin` saem, e a Negociação, o Concluir da Revisão do RPV e o "Gerar
+ * contrato" nem aparecem no objeto.
+ *
+ * PARA O ADMIN, os botões novos: a ação `soAdmin` fica, a Negociação e o "Gerar
+ * contrato" ficam, e a aba que declara `concluir` troca os botões do card pelo
+ * Concluir — as saídas dele viram as ações, e o desfecho passa a ser agrupado.
+ *
+ * `abasDoFunil` passa TODA aba por aqui; sem dizer `admin`, a resposta é a de quem
+ * não é (com a chave ligada, a mesma do admin).
+ */
+export function abaParaQuemVe(aba: Aba, ehAdmin: boolean): Aba {
+  const admin = ehAdmin || BOTOES_NOVOS_PARA_TODOS
+  const { negociacao, concluir, gerarContrato, ...resto } = aba
+  const visao: Aba = { ...resto, acoes: visivelPara(aba.acoes, admin) }
+  const saidasDoConcluir = visivelPara(concluir ?? [], admin)
+  if (saidasDoConcluir.length > 0) {
+    visao.acoes = saidasDoConcluir
+    visao.desfechoAgrupado = true
+  }
+  if (negociacao) {
+    const [fechado] = visivelPara(negociacao.fechado ? [negociacao.fechado] : [], admin)
+    const [naoFechou] = visivelPara(negociacao.naoFechou ? [negociacao.naoFechou] : [], admin)
+    const [semResposta] = visivelPara(negociacao.semResposta ? [negociacao.semResposta] : [], admin)
+    if (fechado || naoFechou || semResposta) {
+      visao.negociacao = {
+        ...(fechado ? { fechado } : {}),
+        ...(naoFechou ? { naoFechou } : {}),
+        ...(semResposta ? { semResposta } : {}),
+      }
+    }
+  }
+  if (gerarContrato && (admin || !gerarContrato.soAdmin)) visao.gerarContrato = gerarContrato
+  const temBotaoNovo =
+    visao.acoes.some((a) => a.soAdmin) || Boolean(visao.negociacao) || Boolean(visao.gerarContrato?.soAdmin)
+  const id = aba.statusIds[0]
+  if (admin && temBotaoNovo && id !== undefined && DESCRICAO_PARA_ADMIN[id]) {
+    visao.descricao = DESCRICAO_PARA_ADMIN[id]
+  }
+  return visao
 }
 
 // ---------- Consultas ----------
@@ -611,6 +942,8 @@ export interface Aba {
    * cards, sem botão de trabalho nem desfecho. Ver `espelhoCompleto`.
    */
   soLeitura?: boolean
+  /** O que se faz nesta coluna, em uma frase (ver `DESCRICAO_DA_COLUNA`), quando há. */
+  descricao?: string
   /** A fase do funil a que a aba pertence (ver `fases` da trilha), quando o funil tem fases. */
   fase?: string
   /** A fase dela é a de fora do fluxo (os perdidos) — a tela a mostra mais discreta. */
@@ -624,6 +957,23 @@ export interface Aba {
     fundos: FundoDoEnvio[]
     destino: number
   } | null
+  /**
+   * O desfecho da Negociação (ver `DesfechoDaNegociacao`), na aba da Negociação
+   * dos três funis — para todos desde 03/10/2026 (ver `abaParaQuemVe`).
+   */
+  negociacao?: DesfechoDaNegociacao | null
+  /**
+   * AS SAÍDAS DO CONCLUIR que substituem os botões do card para quem pode vê-las
+   * (a Revisão do RPV, onda 4). Nunca chega à tela: `abaParaQuemVe` o
+   * troca por `acoes` + `desfechoAgrupado`, ou o tira.
+   */
+  concluir?: readonly AcaoTela[] | null
+  /**
+   * O "GERAR CONTRATO" no card (Elaboração de contratos do RPV): leva à Geração de
+   * contratos com o card no endereço. Não move card, e mesmo assim é `soAdmin`,
+   * pela consistência da liberação desta onda.
+   */
+  gerarContrato?: { soAdmin?: boolean } | null
 }
 
 
@@ -642,22 +992,25 @@ export interface Aba {
  * Set, então "Apresentação de Proposta" — que serve às duas — entra uma vez só.
  */
 export function statusExibidos(pipelineId: number, etapas: EtapaKommo[]): Set<number> {
-  if (pipelineId === FUNIL_RPV) return new Set(TELAS.map((t) => t.statusId))
+  // NO RPV, AS COLUNAS QUE A TELA MOSTRA — o kanban inteiro desde a etapa 7 —, e
+  // pela mesma função que monta as abas: assim o número de cima é, por
+  // construção, a soma das colunas de baixo.
+  if (pipelineId === FUNIL_RPV) {
+    return new Set(abasDoFunil(FUNIL_RPV, etapas).flatMap((a) => a.statusIds))
+  }
   if (!ehFunilPrecatorio(pipelineId)) return new Set()
   const ids = new Set<number>()
   // UM ESPELHO POR TRILHA, porque cada uma lê do seu funil. Resolver todas as
   // colunas num mapa só voltaria a misturar os dois kanbans — e há nome que se
   // repete entre eles ("PRODUÇÃO DE PROPOSTA", "DILIGÊNCIA"), com ids
   // diferentes.
+  //
+  // PELA MESMA FUNÇÃO QUE MONTA AS ABAS, trilha por trilha: no espelho completo
+  // (o Externo pela trilha, o Interno pela exibição do front) toda coluna do
+  // funil é aba — e conta. Assim o número de cima é, por construção, a soma das
+  // colunas de baixo, seja qual for o jeito de cada trilha montar as suas.
   for (const s of SUBDIVISOES_PRECATORIO) {
-    // NO ESPELHO COMPLETO, toda coluna do funil é aba — e conta.
-    if (s.espelhoCompleto) {
-      for (const e of colunasDoFunil(s.pipelineId, etapas)) ids.add(e.status_id)
-    }
-    for (const a of s.abas) {
-      const id = resolverColuna(s.pipelineId, etapas, a)
-      if (id !== undefined) ids.add(id)
-    }
+    for (const a of abasDoFunil(s.pipelineId, etapas, s.key)) for (const id of a.statusIds) ids.add(id)
   }
   return ids
 }
@@ -753,26 +1106,25 @@ export const ABAS_INTERNO_SEM_TRABALHO: ReadonlySet<string> = new Set([
 ])
 
 /**
- * As abas de RPV em que a análise JÁ ACABOU.
+ * As abas de RPV em que a análise ACONTECE — as ÚNICAS que oferecem a análise de
+ * RPV e a due diligence, que são PAGAS.
  *
- * Due diligence e "Executar análise" apareciam em todas as abas do funil de
- * RPV, inclusive nestas três. O raciocínio que já valia para o precatório —
- * "analisar um card já aprovado ou reprovado não é trabalho, é retrabalho" —
- * nunca foi aplicado aqui, e o botão escuro de análise ficava oferecendo, num
- * card reprovado, os dois minutos de leitura do processo.
+ * ERA UMA LISTA DE EXCLUSÃO (`ABAS_RPV_TERMINAIS`: aprovados, diligência,
+ * reprovados, protocolo), e toda aba fora dela ganhava os dois botões. Com seis
+ * abas fixas isso não custava nada; com o kanban inteiro do RPV na tela (etapa 7,
+ * 02/10/2026), cada uma das nove colunas novas — e toda coluna que o Kommo
+ * ganhar depois — passaria a oferecer, num card de Negociação ou de Pagamento
+ * finalizado, os dois minutos de leitura do processo e a busca no Escavador.
  *
- * EXPLÍCITO, e não derivado de ACOES estar vazio. Dava na mesma hoje, e daria
- * errado no dia em que uma aba terminal ganhasse uma saída — que é justamente o
- * que acabou de acontecer com Pendentes na direção contrária.
+ * VIROU LISTA DE PERMISSÃO: só estas duas trabalham, e aba nova nasce sem botão.
+ * Oferecer trabalho numa aba passa a ser decisão escrita aqui — e presa em
+ * botoesDaAba.test.ts.
+ *
+ * Fora delas, pelo mesmo raciocínio que já valia no precatório: analisar um
+ * card já aprovado, reprovado, em diligência ou no protocolo não é trabalho, é
+ * retrabalho.
  */
-export const ABAS_RPV_TERMINAIS: ReadonlySet<string> = new Set([
-  'aprovados',
-  'diligencia',
-  'reprovados',
-  // Protocolo é acompanhamento: a análise já foi feita, salva e aprovada, e
-  // oferecer "Analisar" ali convidaria ao retrabalho.
-  'protocolo',
-])
+export const ABAS_RPV_COM_TRABALHO: ReadonlySet<string> = new Set(['pendentes', 'validacao'])
 
 /**
  * Que botões de trabalho o card oferece.
@@ -793,7 +1145,7 @@ export type BotoesDoCard = 'rpv' | 'dd' | 'nenhum'
 /**
  * Os botões de trabalho da etapa aberta.
  *
- * RPV segue como era em toda aba que não é terminal. No PRECATÓRIO, as duas
+ * RPV oferece só nas abas de `ABAS_RPV_COM_TRABALHO` (Análise e Revisão). No PRECATÓRIO, as duas
  * trilhas oferecem as mesmas ferramentas em toda aba de trabalho — as que não
  * são estão em `ABAS_EXTERNO_SEM_TRABALHO` e `ABAS_INTERNO_SEM_TRABALHO`,
  * porque oferecer análise num card reprovado ou já vendido convida ao
@@ -831,13 +1183,18 @@ export function botoesDaAba(
   // análise" do Interno leva o questionário à conversa, e o Claude a grava pela
   // ferramenta `entregar_planilha` do conector. Sobrou só a saída de emergência
   // no quadro de status do card — ver `planilhaDeReserva`.
+  //
+  // NO RPV, LISTA DE PERMISSÃO E `soLeitura` RESPEITADO (etapa 7, 02/10/2026):
+  // só as abas de `ABAS_RPV_COM_TRABALHO` oferecem a análise e a due diligence.
+  // Antes o ramo do RPV ignorava `soLeitura` e usava uma lista de exclusão — com
+  // o kanban inteiro na tela, toda coluna nova ganharia os dois botões pagos.
+  // Sem aba aberta, nada: a tela ainda não sabe em que etapa está.
+  if (funil === FUNIL_RPV) {
+    return aba && !aba.soLeitura && ABAS_RPV_COM_TRABALHO.has(aba.key) ? 'rpv' : 'nenhum'
+  }
   const semTrabalho =
     subdivisao === 'externo' ? ABAS_EXTERNO_SEM_TRABALHO : ABAS_INTERNO_SEM_TRABALHO
-  return funil === FUNIL_RPV
-    ? (ABAS_RPV_TERMINAIS.has(aba?.key ?? '') ? 'nenhum' : 'rpv')
-    : !aba || aba.soLeitura || semTrabalho.has(aba.key)
-      ? 'nenhum'
-      : 'dd'
+  return !aba || aba.soLeitura || semTrabalho.has(aba.key) ? 'nenhum' : 'dd'
 }
 
 /**
@@ -912,20 +1269,27 @@ export function acaoDeReprovar(
   return id === undefined ? null : reprovar(id)
 }
 
+/**
+ * AS ABAS COMO ESTA PESSOA AS VÊ: as abas do funil, cada uma passada por
+ * `abaParaQuemVe`. SEM `admin`, a visão de quem não é — que, com
+ * `BOTOES_NOVOS_PARA_TODOS` ligado (desde 03/10/2026), já traz os botões da onda 4.
+ */
 export function abasDoFunil(
   pipelineId: number,
   etapas: EtapaKommo[],
   subdivisao: SubdivisaoPrecatorio | null = null,
+  { admin = false }: { admin?: boolean } = {},
 ): Aba[] {
-  if (pipelineId === FUNIL_RPV) {
-    return TELAS.map((t) => ({
-      key: t.key,
-      label: t.label,
-      statusIds: [t.statusId],
-      descricaoVazia: t.descricaoVazia,
-      acoes: ACOES[t.key],
-    }))
-  }
+  return montarAbasDoFunil(pipelineId, etapas, subdivisao).map((a) => abaParaQuemVe(a, admin))
+}
+
+/** As abas do funil com TUDO, inclusive o que é só de admin — sempre filtradas por `abasDoFunil`. */
+function montarAbasDoFunil(
+  pipelineId: number,
+  etapas: EtapaKommo[],
+  subdivisao: SubdivisaoPrecatorio | null,
+): Aba[] {
+  if (pipelineId === FUNIL_RPV) return abasDoRpv(etapas)
   if (!ehFunilPrecatorio(pipelineId)) return []
 
   const def = SUBDIVISOES_PRECATORIO.find(
@@ -991,6 +1355,18 @@ export function abasDoFunil(
     return saida
   }
 
+  // O SANAR DA ONDA 4 desta trilha (ver `SANAR_DO_PRECATORIO`): da aba dele
+  // para a coluna da Revisão, resolvida como qualquer destino.
+  const sanar = SANAR_DO_PRECATORIO[def.key]
+  const sanarDa = (a: DefAbaPrecatorio): AcaoTela[] => {
+    if (!sanar || a.key !== sanar.aba) return []
+    const revisao = def.abas.find((x) => x.key === sanar.para)
+    const id = revisao ? coluna(revisao) : undefined
+    return id === undefined
+      ? []
+      : [{ statusId: id, label: 'Sanar', variant: 'success', papel: 'validar', soAdmin: true }]
+  }
+
   const montar = (a: DefAbaPrecatorio): Aba => {
     const statusId = coluna(a)
     return {
@@ -1002,7 +1378,8 @@ export function abasDoFunil(
       // colunasPrecatorioDesalinhadas, no topo da tela.
       statusIds: statusId === undefined ? [] : [statusId],
       descricaoVazia: a.descricaoVazia,
-      acoes: desfechos(a),
+      descricao: DESCRICAO_DA_COLUNA[statusId ?? a.statusId ?? -1],
+      acoes: [...desfechos(a), ...sanarDa(a)],
       // AS SAÍDAS SAEM DE UM BOTÃO SÓ — ver `desfechoAgrupado`. Era regra do
       // Externo, onde a análise acontece fora da plataforma e o que se precisa
       // guardar é a razão escrita por quem voltou dela; no Interno vale igual, e
@@ -1027,15 +1404,33 @@ export function abasDoFunil(
   // O KANBAN INTEIRO, na ordem e com os nomes do Kommo (ver `espelhoCompleto`).
   // A coluna que tem função aqui leva a aba dela — botões, desfechos, etiquetas
   // —, só que com o nome do Kommo; a que não tem entra só para leitura.
-  if (def.espelhoCompleto) {
-    const doFunil = colunasDoFunil(def.pipelineId, etapas)
-    // SEM ESPELHO AINDA, as abas conhecidas: melhor que uma tela sem aba nenhuma.
+  //
+  // O INTERNO ENTRA AQUI PELA EXIBIÇÃO DO FRONT (`EXIBICAO_NO_FRONT`), e não
+  // pela trilha: a trilha é lida também pela tela oficial e pelo servidor, e
+  // ligar `espelhoCompleto` nela mudaria a tela da equipe. Ver lá.
+  const exibicao = def.espelhoCompleto ? undefined : EXIBICAO_NO_FRONT[def.key]
+  if (def.espelhoCompleto || exibicao) {
+    const doEspelho = colunasDoFunil(def.pipelineId, etapas).map((e) => ({
+      status_id: Number(e.status_id),
+      nome: e.nome,
+    }))
+    // SEM ESPELHO AINDA: o kanban que a exibição declara, quando há (o Interno,
+    // como o RPV); senão, as abas conhecidas — melhor que uma tela sem aba.
+    const doFunil =
+      doEspelho.length > 0
+        ? doEspelho
+        : (exibicao?.espelho.map((c) => ({ status_id: c.statusId, nome: c.nome })) ?? [])
     if (doFunil.length === 0) return def.abas.map(montar)
     // A ABA CASA COM A COLUNA PELO ID: renomeada no Kommo, a coluna continua com
     // os botões, as etiquetas e as automações dela, só que com o nome novo.
+    // NA RESERVA (sem espelho), PELO ID DECLARADO: sem espelho `resolverColuna`
+    // não acha coluna nenhuma, e toda aba de trabalho viraria uma `col-*` só de
+    // leitura ao lado da aba dela, repetida. A aba continua sem os desfechos até
+    // o espelho chegar — o mesmo de antes, quando não havia reserva.
+    const naReserva = doEspelho.length === 0
     const porColuna = new Map<number, DefAbaPrecatorio>()
     for (const a of def.abas) {
-      const id = coluna(a)
+      const id = naReserva ? a.statusId : coluna(a)
       if (id !== undefined && !porColuna.has(id)) porColuna.set(id, a)
     }
     const usadas = new Set<string>()
@@ -1045,39 +1440,184 @@ export function abasDoFunil(
         usadas.add(d.key)
         return { ...montar(d), label: e.nome }
       }
-      return {
-        key: `col-${e.status_id}`,
-        label: e.nome,
-        statusIds: [e.status_id],
-        descricaoVazia: `Nenhum card em ${e.nome}.`,
-        acoes: [],
-        desfechoAgrupado: false,
-        escolhaDeProposta: null,
-        soLeitura: true,
-      }
+      return colunaSoDeLeitura(e)
     })
     // A ABA CONHECIDA CUJA COLUNA SUMIU fica no fim, vazia — é o que o aviso de
     // coluna não encontrada aponta, e sumir com ela esconderia o defeito.
     for (const d of def.abas) {
-      if (!usadas.has(d.key)) abas.push({ ...montar(d), label: d.colunaKommo })
+      if (usadas.has(d.key)) continue
+      const nome = exibicao?.espelho.find((c) => c.statusId === d.statusId)?.nome ?? d.colunaKommo
+      abas.push({ ...montar(d), label: nome })
     }
-    return comFases(abas, def)
+    // O DESFECHO DA NEGOCIAÇÃO (onda 4, de todos desde 03/10/2026): na aba da Negociação, que é
+    // coluna só de leitura do espelho. Origem e destinos pelo id, com o nome de
+    // reserva, como todo o resto; SEM ESPELHO, nenhum destino se resolve e a aba
+    // fica sem botão — melhor que um botão que move para lugar nenhum.
+    const neg = def.negociacao
+    if (neg && !naReserva) {
+      const idNeg = coluna(neg.coluna)
+      const daNeg = idNeg === undefined ? undefined : abas.find((a) => a.statusIds[0] === idNeg)
+      if (daNeg) {
+        daNeg.negociacao = desfechoDaNegociacao({
+          fechados: coluna(neg.fechados),
+          naoFechados: coluna(neg.naoFechados),
+          semResposta: coluna(neg.semResposta),
+        })
+      }
+    }
+    return comFases(abas, def.fases ?? exibicao?.fases, idsDeclarados(def.abas))
   }
 
-  return def.abas.map(montar)
+  // AS FASES TAMBÉM SEM O ESPELHO COMPLETO, se a trilha as declarar: a tela as
+  // desenha a partir de `fases`, e não do nome da trilha.
+  return comFases(def.abas.map(montar), def.fases, idsDeclarados(def.abas))
+}
+
+/**
+ * O QUADRO DE UMA TRILHA DESENHADO SÓ NO FRONT: o kanban inteiro e as fases,
+ * para a tela da beta, sem tocar na trilha.
+ *
+ * EXISTE PARA O INTERNO (pedido de 02/10/2026). As fases e o espelho completo do
+ * Externo moram na trilha (`_shared/trilhasDoPrecatorio.ts`), que a tela OFICIAL
+ * e o servidor também leem — ligar o mesmo no Interno mudaria a tela da equipe
+ * antes de o dono aprovar. Aqui é só exibição: as abas de trabalho do Interno
+ * continuam saindo da trilha, com as chaves, os botões e os destinos de hoje; as
+ * colunas novas entram como `col-<id>`, SÓ PARA LEITURA (sem 'rpv' nem 'dd',
+ * ver `botoesDaAba`). Nada daqui chega à `kommo-mover`.
+ *
+ * Trilha que um dia declarar `espelhoCompleto` passa a usar o dela, e esta
+ * entrada deixa de valer — sem mudar nada em `abasDoFunil`.
+ */
+export const EXIBICAO_NO_FRONT: Partial<
+  Record<SubdivisaoPrecatorio, { espelho: readonly { statusId: number; nome: string }[]; fases: readonly DefFase[] }>
+> = {
+  interno: {
+    // O KANBAN DO INTERNO (14439512) como o `kommo_etapa` o devolveu em
+    // 02/10/2026, na ordem de lá, sem a entrada de leads e as de sistema. É a
+    // reserva enquanto o espelho não chega; com ele, valem o nome e a ordem dele.
+    espelho: [
+      { statusId: 111533940, nome: 'Análise jurídica e econômica' },
+      { statusId: 111533944, nome: 'Revisão' },
+      { statusId: 111533960, nome: 'Diligência' },
+      { statusId: 111533948, nome: 'Produção de proposta' },
+      { statusId: 112466260, nome: 'Negociação' },
+      { statusId: 111533952, nome: 'Fechados' },
+      { statusId: 112466032, nome: 'Oferta aos investidores' },
+      { statusId: 111533956, nome: 'Escritura pública' },
+      { statusId: 111693840, nome: 'Protocolo' },
+      { statusId: 112466340, nome: 'Pagamento finalizado' },
+      { statusId: 111534108, nome: 'Reprovados' },
+      { statusId: 112465960, nome: 'Sem resposta' },
+      { statusId: 112382612, nome: 'Não fechados' },
+    ],
+    // AS MESMAS QUATRO FASES DO RPV E DO EXTERNO, pelos ids — a distribuição da
+    // amostra aprovada ("Oferta aos investidores" em Comercialização).
+    fases: [
+      { nome: 'Qualificação', colunas: [111533940, 111533944, 111533960] },
+      { nome: 'Comercialização', colunas: [111533948, 112466260, 111533952, 112466032] },
+      { nome: 'Formalização', colunas: [111533956, 111693840, 112466340] },
+      { nome: 'Perdidos', colunas: [111534108, 112465960, 112382612], discreta: true },
+    ],
+  },
+}
+
+/** A coluna do kanban que a plataforma espelha sem dar função — ver `espelhoCompleto`. */
+function colunaSoDeLeitura(e: { status_id: number; nome: string }): Aba {
+  return {
+    key: `col-${e.status_id}`,
+    label: e.nome,
+    statusIds: [e.status_id],
+    descricaoVazia: `Nenhum card em ${e.nome}.`,
+    descricao: DESCRICAO_DA_COLUNA[e.status_id],
+    acoes: [],
+    desfechoAgrupado: false,
+    escolhaDeProposta: null,
+    soLeitura: true,
+  }
+}
+
+/** O id que cada aba declara, pela chave — para achar a fase da aba cuja coluna sumiu. */
+function idsDeclarados(abas: readonly { key: string; statusId?: number }[]): Map<string, number | undefined> {
+  return new Map(abas.map((a) => [a.key, a.statusId]))
+}
+
+/**
+ * AS ABAS DO RPV: o kanban inteiro, nas quatro fases (etapa 7, 02/10/2026).
+ *
+ * A MESMA FORMA DO ESPELHO COMPLETO DO EXTERNO, com a definição própria do RPV
+ * (`ESPELHO_RPV`, `FASES_RPV`, `TELAS`): toda coluna do funil vira aba, com o
+ * nome e na ordem do Kommo; as seis que têm chave (`TELAS`) levam as ações
+ * delas, e as outras entram como `col-<id>`, SÓ PARA LEITURA — sem botão de
+ * trabalho (ver `botoesDaAba`) e sem desfecho. Nenhum movimento novo: as ações
+ * são exatamente as de `ACOES`, de antes.
+ */
+function abasDoRpv(etapas: EtapaKommo[]): Aba[] {
+  const doEspelho = colunasDoFunil(FUNIL_RPV, etapas)
+  // SEM ESPELHO AINDA, o kanban de 02/10/2026: melhor que uma tela sem aba.
+  const colunas =
+    doEspelho.length > 0
+      ? doEspelho.map((e) => ({ status_id: Number(e.status_id), nome: e.nome }))
+      : ESPELHO_RPV.map((c) => ({ status_id: c.statusId, nome: c.nome }))
+
+  // OS MOVIMENTOS NOVOS DA ONDA 4 entram aqui marcados `soAdmin` — o Sanar da
+  // Diligência e o Concluir da Revisão — e `abaParaQuemVe` decide quem os vê (todos,
+  // desde 03/10/2026). `ACOES` fica como estava: é a tela sem a onda 4.
+  const montar = (t: DefTela, nome: string): Aba => ({
+    key: t.key,
+    label: nome,
+    statusIds: [t.statusId],
+    descricaoVazia: t.descricaoVazia,
+    descricao: DESCRICAO_DA_COLUNA[t.statusId],
+    acoes: t.key === 'diligencia' ? [...ACOES[t.key], SANAR_RPV] : ACOES[t.key],
+    ...(t.key === 'validacao' ? { concluir: CONCLUIR_REVISAO_RPV } : {}),
+  })
+
+  // AS COLUNAS SÓ DE LEITURA que ganham botão da onda 4: a Negociação (o desfecho,
+  // pelos ids de `colunasRpv.ts`) e a Elaboração de contratos (o "Gerar
+  // contrato"). Continuam só de leitura — sem 'rpv' nem 'dd' (ver `botoesDaAba`).
+  const leitura = (c: { status_id: number; nome: string }): Aba => {
+    const aba = colunaSoDeLeitura(c)
+    if (c.status_id === NEGOCIACAO_RPV.coluna) {
+      aba.negociacao = desfechoDaNegociacao({
+        fechados: NEGOCIACAO_RPV.fechados,
+        naoFechados: NEGOCIACAO_RPV.naoFechados,
+        semResposta: NEGOCIACAO_RPV.semResposta,
+      })
+    }
+    if (c.status_id === ST_ELABORACAO_CONTRATOS) aba.gerarContrato = { soAdmin: true }
+    return aba
+  }
+
+  const porColuna = new Map(TELAS.map((t) => [t.statusId, t]))
+  const usadas = new Set<string>()
+  const abas: Aba[] = colunas.map((c) => {
+    const t = porColuna.get(c.status_id)
+    if (!t) return leitura(c)
+    usadas.add(t.key)
+    return montar(t, c.nome)
+  })
+  // A ABA DE TRABALHO CUJA COLUNA SUMIU DO KANBAN fica no fim, vazia, como no
+  // Externo — é o que o aviso de `telasRpvDesalinhadas` aponta.
+  for (const t of TELAS) if (!usadas.has(t.key)) abas.push(montar(t, t.label))
+  return comFases(abas, FASES_RPV, new Map(TELAS.map((t) => [t.key, t.statusId])))
 }
 
 /**
  * A FASE DE CADA ABA, pelo id da coluna. A que não está em fase nenhuma herda a
  * da aba anterior (na ordem do kanban), e a primeira sem fase fica na primeira.
- * A aba cuja coluna sumiu do kanban usa o id declarado na trilha.
+ * A aba cuja coluna sumiu do kanban usa o id declarado (`idDeclarado`).
+ *
+ * GENÉRICA SOBRE `fases`: serve às trilhas do precatório e ao RPV. Sem fases, as
+ * abas voltam como vieram.
  */
-function comFases(abas: Aba[], def: (typeof SUBDIVISOES_PRECATORIO)[number]): Aba[] {
-  const fases = def.fases ?? []
-  if (fases.length === 0) return abas
+function comFases(
+  abas: Aba[],
+  fases: readonly DefFase[] | undefined,
+  idDeclarado: Map<string, number | undefined>,
+): Aba[] {
+  if (!fases || fases.length === 0) return abas
   const faseDoId = new Map<number, string>()
   for (const f of fases) for (const id of f.colunas) faseDoId.set(id, f.nome)
-  const idDeclarado = new Map(def.abas.map((a) => [a.key, a.statusId]))
   let anterior = fases[0].nome
   return abas.map((a) => {
     const id = a.statusIds[0] ?? idDeclarado.get(a.key)

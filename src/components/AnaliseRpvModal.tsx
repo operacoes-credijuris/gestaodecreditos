@@ -23,13 +23,33 @@
 // em código a partir deles. Quem pede "baixe o deságio" recebe a pergunta de
 // volta: qual dado de entrada mudar.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Save, SendHorizontal, Sparkles } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  Clock,
+  Download,
+  Info,
+  RefreshCw,
+  XCircle,
+} from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { codigoDoErro, invokeFunction } from '@/lib/functions'
 import { type AcaoTela } from '@/lib/kommo'
-// A janela do desfecho, o selo do grau e o tipo do item saíram deste arquivo:
-// o precatório interno e a recusa por due diligence usam os mesmos.
-import { JanelaDeDesfecho, Selo, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
+// A janela do desfecho e o tipo do item saíram deste arquivo: o precatório
+// interno e a recusa por due diligence usam os mesmos.
+import { JanelaDeDesfecho, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
+// AS PEÇAS DA ANÁLISE (a caixa de aviso, o selo, o rótulo de seção, a caixa
+// suave) são as mesmas das outras janelas da tela — a amostra as desenha iguais.
+import {
+  CaixaDeAviso,
+  CaixaSuave,
+  RotuloDeSecao,
+  Selo as SeloDaPeca,
+  icSelo,
+  type TomDaPeca,
+} from '@/components/analise/Pecas'
 import type { FichaDoCredito } from '@/lib/anotacaoKommo'
 import {
   formatBRL,
@@ -40,13 +60,13 @@ import {
 } from '@/lib/format'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
-import { Select } from '@/components/ui/Field'
+import { Select, Textarea } from '@/components/ui/Field'
 import { Loading } from '@/components/ui/Table'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import { montarTextoDoProcesso, type PaginaLida } from '@/lib/textoDoProcesso'
 import { descreverSelecao, escolherPaginasParaImagem, LIMITES_PADRAO } from '@/lib/paginasDigitalizadas'
 import { planoDeLeitura } from '../../supabase/functions/_shared/orcamentoLeitura.ts'
-import { normalizarGrau, ORDEM_GRAU } from '../../supabase/functions/_shared/graus.ts'
+import { normalizarGrau, ORDEM_GRAU, type GrauRisco } from '../../supabase/functions/_shared/graus.ts'
 import { renderizarPaginas } from '@/lib/renderizarPaginas'
 import { supabase } from '@/lib/supabase'
 
@@ -384,7 +404,7 @@ const NOME_DA_VERBA: Record<string, string> = {
  * deságio efetivo sobre o negócio é bem menor, e é outra conversa. Agora as duas
  * coisas estão à vista, e o zero na linha dos honorários explica a diferença.
  */
-function PainelPreco({ valores }: { valores: ValoresRpv }) {
+function PainelPreco({ valores, esmaecido }: { valores: ValoresRpv; esmaecido?: boolean }) {
   const parcelas = valores.parcelas ?? []
   const receber = valores.liquido_base
   const pagar = valores.preco_cessao
@@ -394,32 +414,38 @@ function PainelPreco({ valores }: { valores: ValoresRpv }) {
   const desagioDe = (p: { liquido: number; preco: number }) =>
     p.liquido > 0 ? 1 - p.preco / p.liquido : 0
 
-  const celula = 'py-1.5 text-right tabular-nums'
+  // A `.tbl` da amostra: cabeçalho em caixa alta sobre a superfície 2, células
+  // de 14 px e o total sobre a superfície 3, em negrito.
+  const cab =
+    'whitespace-nowrap border-b border-borda bg-superficie-2 px-4 py-2.5 text-xs font-bold uppercase tracking-[.04em] text-texto-3'
+  const celula = 'whitespace-nowrap border-b border-borda px-4 py-3 text-right tabular-nums'
 
   return (
-    <div className="overflow-hidden rounded-xl bg-white ring-1 ring-inset ring-slate-200/80">
-      <table className="w-full text-sm">
+    // ESMAECIDA ENQUANTO O CENÁRIO SE REFAZ: os números ainda são os do cenário
+    // anterior, e lê-los como os do novo é o erro que a troca pode provocar.
+    <div className={cn('overflow-x-auto transition-opacity', esmaecido && 'opacity-[.45]')}>
+      <table className="w-full border-collapse text-corpo">
         <thead>
-          <tr className="text-[11px] uppercase tracking-wide text-slate-400">
-            <th className="px-4 py-2 text-left font-medium">Verba</th>
+          <tr>
+            <th className={cn(cab, 'text-left')}>Verba</th>
             {/* "A receber" e "A pagar" diziam a direção do dinheiro e não o que
                 o número é. Aqui um lado é o CRÉDITO e o outro é o que se
                 OFERECE por ele, e confundir os dois é o erro caro desta tela.
                 "Proposta" porque é isso que a coluna vira na conversa com o
                 cedente — e porque "preço da cessão" agora é o nome da linha
                 equivalente na tabela de baixo, onde ele é um custo. */}
-            <th className="px-3 py-2 text-right font-medium leading-tight">Valor do crédito</th>
-            <th className="px-3 py-2 text-right font-medium leading-tight">Proposta</th>
-            <th className="px-4 py-2 text-right font-medium">Deságio</th>
+            <th className={cn(cab, 'text-right')}>Valor do crédito</th>
+            <th className={cn(cab, 'text-right')}>Proposta</th>
+            <th className={cn(cab, 'text-right')}>Deságio</th>
           </tr>
         </thead>
-        <tbody className="text-slate-700">
+        <tbody className="text-texto">
           {parcelas.map((p) => (
-            <tr key={p.nome} className="border-t border-slate-100">
-              <td className="px-4 py-1.5 text-left">{NOME_DA_VERBA[p.nome] ?? p.nome}</td>
-              <td className={cn(celula, 'px-3')}>{formatBRL(p.liquido)}</td>
-              <td className={cn(celula, 'px-3')}>{formatBRL(p.preco)}</td>
-              <td className={cn(celula, 'px-4 text-slate-500')}>
+            <tr key={p.nome}>
+              <td className="border-b border-borda px-4 py-3 text-left">{NOME_DA_VERBA[p.nome] ?? p.nome}</td>
+              <td className={celula}>{formatBRL(p.liquido)}</td>
+              <td className={celula}>{formatBRL(p.preco)}</td>
+              <td className={celula}>
                 {/* ZERO SAI COMO 0,00%, e não como traço. O traço se lê como
                     "não se aplica" ou "não calculado"; aqui o número existe e é
                     zero — a verba é comprada pelo valor de face. Numa coluna de
@@ -428,11 +454,11 @@ function PainelPreco({ valores }: { valores: ValoresRpv }) {
               </td>
             </tr>
           ))}
-          <tr className="border-t border-slate-200 bg-slate-50/70 font-semibold text-slate-900">
-            <td className="px-4 py-2 text-left">Total</td>
-            <td className={cn(celula, 'px-3 py-2')}>{formatBRL(receber)}</td>
-            <td className={cn(celula, 'px-3 py-2')}>{formatBRL(pagar)}</td>
-            <td className={cn(celula, 'px-4 py-2')}>{pctBR(desagioTotal)}</td>
+          <tr className="bg-superficie-3 font-bold text-texto">
+            <td className="px-4 py-3 text-left">Total</td>
+            <td className={cn(celula, 'border-b-0')}>{formatBRL(receber)}</td>
+            <td className={cn(celula, 'border-b-0')}>{formatBRL(pagar)}</td>
+            <td className={cn(celula, 'border-b-0')}>{pctBR(desagioTotal)}</td>
           </tr>
         </tbody>
       </table>
@@ -470,76 +496,75 @@ function ResumoInvestimento({
   cartorio?: CartorioRpv
   atingiuAlvo?: boolean
 }) {
-  const linha = (rotulo: ReactNode, valor: ReactNode, chave: string) => (
-    <div key={chave} className="flex items-baseline justify-between gap-4 px-4 py-2 first:pt-2.5 last:pb-2.5">
-      <dt className="text-slate-600">{rotulo}</dt>
-      <dd className="tabular-nums text-slate-700">{valor}</dd>
-    </div>
-  )
+  // O `.kv.two-col` da amostra: rótulo discreto à esquerda, número em negrito
+  // alinhado à direita.
+  const linha = (rotulo: ReactNode, valor: ReactNode, chave: string, ddClasse?: string) => [
+    <dt key={`${chave}-r`} className="text-texto-3">{rotulo}</dt>,
+    <dd key={`${chave}-v`} className={cn('text-right font-semibold tabular-nums text-texto', ddClasse)}>
+      {valor}
+    </dd>,
+  ]
+  const lista = 'm-0 grid grid-cols-[1fr_auto] gap-x-5 gap-y-2.5 text-corpo'
 
   return (
-    <section>
-      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        Resumo do investimento
-      </h3>
-      <div className="mt-2 overflow-hidden rounded-xl bg-white text-sm ring-1 ring-inset ring-slate-200/80">
-        <dl>
-          {linha('Preço total da cessão', formatBRL(valores.preco_cessao), 'cessao')}
-          {linha('Comissão', formatBRL(valores.comissao), 'comissao')}
-          {linha(
-            <>
-              Cartório
-              {cartorio?.uf && <span className="text-slate-400"> · {cartorio.uf}</span>}
-            </>,
-            valores.cartorio == null ? (
-              // Ausente é dito como ausente: um custo sem cartório parece menor
-              // do que é, e um traço sozinho não avisa.
-              <span className="text-amber-700">não incluído</span>
-            ) : (
-              formatBRL(valores.cartorio)
-            ),
-            'cartorio',
-          )}
+    // O PAINEL AO LADO, e PARADO enquanto a análise rola (a `.rpv-side` da
+    // amostra): é a resposta que se consulta enquanto se lê o resto — riscos,
+    // auditoria, a conversa —, e rolar de volta para conferir o preço era o
+    // gesto mais repetido da janela. Na tela estreita ele desce e deixa de colar.
+    <aside
+      aria-label="Resumo do investimento"
+      className="grid gap-4 rounded-cartao border border-borda bg-superficie-2 p-[14px] min-[900px]:sticky min-[900px]:top-0"
+    >
+      <h3 className="text-sm font-semibold text-texto-2">Resumo do investimento</h3>
+      <dl className={lista}>
+        {linha('Preço total da cessão', formatBRL(valores.preco_cessao), 'cessao')}
+        {linha('Comissão', formatBRL(valores.comissao), 'comissao')}
+        {linha(
+          <>Cartório{cartorio?.uf && <> · {cartorio.uf}</>}</>,
+          // Ausente é dito como ausente: um custo sem cartório parece menor
+          // do que é, e um traço sozinho não avisa.
+          valores.cartorio == null ? 'não incluído' : formatBRL(valores.cartorio),
+          'cartorio',
+          valores.cartorio == null ? 'text-aviso' : undefined,
+        )}
+      </dl>
 
-          <div className="border-t border-slate-200 bg-slate-50/70 font-semibold text-slate-900">
-            <div className="flex items-baseline justify-between gap-4 px-4 py-2">
-              <dt>Custo total</dt>
-              <dd className="tabular-nums">{formatBRL(valores.custo_total)}</dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-4 px-4 pb-2">
-              <dt>A receber</dt>
-              <dd className="tabular-nums">{formatBRL(valores.liquido_base)}</dd>
-            </div>
-          </div>
-
-          {/* PRAZO E RENTABILIDADE COMO LINHAS, e não numa faixa de cartões
-              embaixo. Eles respondem à mesma pergunta das linhas de cima —
-              quanto sai, quanto volta, em quanto tempo, a que taxa — e estavam
-              num formato diferente, o que os fazia ler como rodapé decorativo
-              em vez de parte da conta. */}
-          <div className="border-t border-slate-200">
-            {linha(
-              'Prazo de resgate',
-              <>
-                {valores.prazo_meses} meses
-                {valores.data_pagamento && (
-                  <span className="text-slate-400"> · {valores.data_pagamento}</span>
-                )}
-              </>,
-              'prazo',
-            )}
-            {linha(
-              'Rentabilidade',
-              <span className={cn(atingiuAlvo === false && 'text-amber-700')}>
-                {pctBR(valores.rentabilidade_mensal)}
-                <span className="text-slate-400"> ao mês</span>
-              </span>,
-              'rentabilidade',
-            )}
-          </div>
-        </dl>
+      {/* O QUE SAI E O QUE VOLTA, em destaque (o `.hl-box`). O custo é o CHEIO
+          do motor — ver o comentário da função —, e não a soma das linhas de
+          cima. */}
+      <div className="grid grid-cols-2 gap-2 rounded-campo bg-marca-suave p-[10px]">
+        <div>
+          <span className="block text-xs text-texto-2">Custo total</span>
+          <b className="text-lg font-bold tabular-nums text-texto">{formatBRL(valores.custo_total)}</b>
+        </div>
+        <div>
+          <span className="block text-xs text-texto-2">A receber</span>
+          <b className="text-lg font-bold tabular-nums text-texto">{formatBRL(valores.liquido_base)}</b>
+        </div>
       </div>
-    </section>
+
+      {/* PRAZO E RENTABILIDADE COMO LINHAS, e não numa faixa de cartões
+          embaixo. Eles respondem à mesma pergunta das linhas de cima —
+          quanto sai, quanto volta, em quanto tempo, a que taxa — e estavam
+          num formato diferente, o que os fazia ler como rodapé decorativo
+          em vez de parte da conta. */}
+      <dl className={lista}>
+        {linha(
+          'Prazo de resgate',
+          <>
+            {valores.prazo_meses} meses
+            {valores.data_pagamento && <> · {valores.data_pagamento}</>}
+          </>,
+          'prazo',
+        )}
+        {linha(
+          'Rentabilidade',
+          <>{pctBR(valores.rentabilidade_mensal)} ao mês</>,
+          'rentabilidade',
+          atingiuAlvo === false ? 'text-aviso' : undefined,
+        )}
+      </dl>
+    </aside>
   )
 }
 
@@ -574,10 +599,10 @@ function ResumoInvestimento({
  * verificar" em "está certo", que é o oposto.
  */
 const VEREDITO_CONFRONTO: Record<string, { texto: string; cor: string }> = {
-  sim: { texto: 'confere', cor: 'text-slate-500' },
-  nao: { texto: 'fora do título', cor: 'text-amber-700' },
-  titulo_silente: { texto: 'título silente', cor: 'text-slate-400' },
-  conta_sem_memoria: { texto: 'sem memória', cor: 'text-amber-700' },
+  sim: { texto: 'confere', cor: 'text-texto-3' },
+  nao: { texto: 'fora do título', cor: 'text-aviso' },
+  titulo_silente: { texto: 'título silente', cor: 'text-texto-3' },
+  conta_sem_memoria: { texto: 'sem memória', cor: 'text-aviso' },
 }
 
 
@@ -609,6 +634,61 @@ function fundirRiscosEAvisos(
   return [...dosRiscos, ...dosAvisos]
     .filter((i) => i.texto.length > 0)
     .sort((a, b) => ORDEM_GRAU[a.grau] - ORDEM_GRAU[b.grau])
+}
+
+/**
+ * O tom e o ícone de cada grau, como a amostra os pinta (GRAUS, no topo de
+ * janelas-analise.js): IMPEDITIVO vermelho, ALTO âmbar, MODERADO azul, e os dois
+ * de baixo neutros — distintos pelo ÍCONE, alerta no ATENÇÃO e informação na
+ * NOTA, porque a cor nunca vai sozinha.
+ */
+const TOM_DO_GRAU: Record<GrauRisco, { tom: TomDaPeca; alerta: boolean }> = {
+  IMPEDITIVO: { tom: 'perigo', alerta: true },
+  ALTO: { tom: 'aviso', alerta: true },
+  MODERADO: { tom: 'info', alerta: false },
+  'ATENÇÃO': { tom: 'neutro', alerta: true },
+  NOTA: { tom: 'neutro', alerta: false },
+}
+
+/**
+ * O selo do grau, inline no parágrafo — o `.pill` da amostra.
+ *
+ * LOCAL, e não o `Selo` de JanelaDeDesfecho: aquele tem 10 px e a escala de
+ * cinzas antiga, e é a janela do desfecho (outro arquivo) que decide quando
+ * trocá-lo. O vocabulário dos graus é o mesmo nos dois.
+ */
+function SeloDoGrau({ grau }: { grau: GrauRisco }) {
+  const g = TOM_DO_GRAU[grau]
+  return (
+    <SeloDaPeca
+      tom={g.tom}
+      className="mr-1.5 align-middle"
+      icone={
+        g.alerta ? (
+          <AlertTriangle className={icSelo} aria-hidden />
+        ) : (
+          <Info className={icSelo} aria-hidden />
+        )
+      }
+    >
+      {grau}
+    </SeloDaPeca>
+  )
+}
+
+/**
+ * Um item da lista graduada (o `.risks li` da amostra): o selo, o texto e, por
+ * baixo, o fundamento em cinza. Serve aos riscos e às divergências da auditoria,
+ * que se leem do mesmo jeito.
+ */
+function ItemGraduado({ grau, children, fundamento }: { grau: GrauRisco; children: ReactNode; fundamento?: ReactNode }) {
+  return (
+    <li className="text-corpo leading-relaxed text-texto">
+      <SeloDoGrau grau={grau} />
+      {children}
+      {fundamento && <span className="ml-2 mt-0.5 block text-texto-3">{fundamento}</span>}
+    </li>
+  )
 }
 
 
@@ -650,28 +730,20 @@ function ListaDeRiscos({
 
   return (
     <section>
-      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        Riscos
-      </h3>
+      <RotuloDeSecao>Riscos</RotuloDeSecao>
       {/* O FUNDAMENTO FICA À VISTA, e não atrás de um clique. Escondê-lo tinha
           uma premissa que se mostrou falsa: a de que a lista seria longa. Ela
           encolheu — o que era da conta foi para a Auditoria, e o prompt agora
           manda agrupar em vez de repetir —, e num risco de duas ou três linhas
           o "por quê" é a metade que sustenta a outra. Quem lê "cessão precisa
           de anuência do ente" sem a norma ao lado não tem como discordar. */}
-      <ul className="mt-2 space-y-2.5">
+      <ul className="m-0 grid list-none gap-2 p-0">
+        {/* O selo é INLINE, dentro do parágrafo: fora dele, cada item deixava
+            uma faixa vazia embaixo do selo. */}
         {itens.map((it, i) => (
-          <li key={i} className="text-sm leading-relaxed text-slate-700">
-            {/* O selo é INLINE, dentro do parágrafo: fora dele, cada item
-                deixava uma faixa vazia embaixo do selo. */}
-            <Selo grau={it.grau} />
+          <ItemGraduado key={i} grau={it.grau} fundamento={it.fundamento}>
             {it.texto}
-            {it.fundamento && (
-              <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
-                {it.fundamento}
-              </span>
-            )}
-          </li>
+          </ItemGraduado>
         ))}
       </ul>
     </section>
@@ -685,6 +757,121 @@ function duracao(ms: number): string {
   const m = Math.floor(seg / 60)
   const r = seg % 60
   return r ? `${m}m${String(r).padStart(2, '0')}s` : `${m}m`
+}
+
+/**
+ * OS PASSOS DA LEITURA, um embaixo do outro (item "Novo" da amostra).
+ *
+ * SÓ APRESENTAÇÃO do progresso que já existia: a abertura continua mudando
+ * `passo` etapa a etapa, e aqui ele é reconhecido na lista — o atual girando,
+ * os feitos marcados, os que faltam em cinza. Antes era um esqueleto mudo com o
+ * rótulo só para leitor de tela, e uma espera de dois minutos sem dizer em que
+ * pé estava parecia travamento.
+ *
+ * OS RÓTULOS SÃO OS DA PRÓPRIA ABERTURA, letra por letra: o casamento é por
+ * igualdade, e o passo atual mostra o texto vivo (o das páginas digitalizadas
+ * conta as enviadas). A etapa das imagens só entra na lista quando acontece —
+ * processo nato-digital não tem essa etapa. Um passo que não está na lista cai
+ * no esqueleto de antes, com o rótulo: nunca some o aviso de que algo corre.
+ */
+const PASSOS_DA_LEITURA = [
+  'Lendo os anexos do card…',
+  'Preparando as páginas digitalizadas para leitura por imagem…',
+  'Qualificando o crédito…',
+  'Lendo os valores e o questionário (duas leituras ao mesmo tempo)…',
+  'Juntando as duas leituras…',
+]
+const ehPassoDasImagens = (p: string) => p.startsWith('Preparando')
+
+function PassosDaLeitura({ passo, comImagens }: { passo: string; comImagens: boolean }) {
+  const rotulos = PASSOS_DA_LEITURA.filter((r) => comImagens || !ehPassoDasImagens(r))
+  const atual = rotulos.findIndex((r) => (ehPassoDasImagens(r) ? ehPassoDasImagens(passo) : r === passo))
+  if (atual < 0) return <Loading label={passo} />
+  return (
+    <div aria-busy="true" className="py-1.5">
+      <ol className="m-0 grid list-none gap-2 p-0" aria-label="Passos da leitura">
+        {rotulos.map((r, i) => {
+          const feito = i < atual
+          const agora = i === atual
+          const estado = feito ? 'feito' : agora ? 'em andamento' : 'a seguir'
+          return (
+            <li
+              key={r}
+              title={estado}
+              aria-current={agora ? 'step' : undefined}
+              className={cn(
+                'flex items-center gap-2.5 text-corpo',
+                feito ? 'text-sucesso' : agora ? 'font-semibold text-texto' : 'text-texto-3',
+              )}
+            >
+              {feito ? (
+                <Check className="h-[16px] w-[16px] flex-none" aria-hidden />
+              ) : agora ? (
+                <RefreshCw className="h-[16px] w-[16px] flex-none animate-spin" aria-hidden />
+              ) : (
+                <Clock className="h-[16px] w-[16px] flex-none" aria-hidden />
+              )}
+              <span className="min-w-0">
+                {agora ? passo : r}
+                <span className="sr-only"> ({estado})</span>
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+      <div className="mt-4 space-y-3" aria-hidden>
+        <div className="skeleton h-4 rounded-full" />
+        <div className="skeleton h-4 w-[70%] rounded-full" />
+        <div className="skeleton h-4 w-[40%] rounded-full" />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Um campo de dinheiro com o "R$" grudado à esquerda (o `.inp-group` da amostra).
+ *
+ * A MÁSCARA É A DE SEMPRE, e mora em quem chama: só dígitos, e os dois últimos
+ * são os centavos (ver `manual`). Aqui é só a pintura — a moldura acende o anel
+ * de foco inteira, com o prefixo, para o campo não parecer dois.
+ */
+function CampoEmReais({
+  id,
+  rotulo,
+  digitos,
+  disabled,
+  onDigitos,
+}: {
+  id: string
+  rotulo: string
+  digitos: string
+  disabled: boolean
+  onDigitos: (digitos: string) => void
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-xs font-bold uppercase tracking-[.04em] text-texto-3">
+        {rotulo}
+      </label>
+      <div
+        className={cn(
+          'flex h-[35px] items-stretch overflow-hidden rounded-campo border border-borda-controle bg-superficie',
+          'focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20',
+        )}
+      >
+        <span className="grid place-items-center bg-superficie-3 px-3 text-corpo text-texto-3">R$</span>
+        <input
+          id={id}
+          className="w-28 bg-transparent px-3 text-corpo tabular-nums text-texto placeholder:text-texto-3 focus:outline-none disabled:cursor-not-allowed disabled:bg-superficie-3 disabled:text-texto-2"
+          inputMode="numeric"
+          placeholder="0,00"
+          value={digitos ? formatBRLInput(parseBRLInput(digitos)) : ''}
+          disabled={disabled}
+          onChange={(e) => onDigitos(onlyDigits(e.target.value))}
+        />
+      </div>
+    </div>
+  )
 }
 
 /** O relógio de dentro de UMA requisição. */
@@ -752,13 +939,17 @@ function LinhaDoTempo({ fases }: { fases: FaseMedida[] }) {
       : undefined)
 
   return (
-    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
+    // UMA LINHA SÓ, EM CORPO MIÚDO, com "·" entre as etapas (como na amostra):
+    // é diagnóstico, e não pode disputar o olho com a análise.
+    <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-xs text-texto-3">
       {fases.map((f) => (
-        <span key={f.nome} title={dentro(f)} className={cn(f.servidor && 'cursor-help')}>
-          {f.nome} <span className="tabular-nums text-slate-500">{duracao(f.ms)}</span>
+        <span key={f.nome} className="contents">
+          <span title={dentro(f)} className={cn(f.servidor && 'cursor-help')}>
+            {f.nome} <span className="tabular-nums">{duracao(f.ms)}</span>
+          </span>
+          <span aria-hidden>·</span>
         </span>
       ))}
-      <span aria-hidden>·</span>
       <span className="tabular-nums">{duracao(total)} no total</span>
     </p>
   )
@@ -812,16 +1003,14 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
 
   return (
     <section>
-      <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        Auditoria dos cálculos
-      </h3>
+      <RotuloDeSecao>Auditoria dos cálculos</RotuloDeSecao>
 
-      <div className="mt-2 space-y-2.5 rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
+      <div className="space-y-2">
         {/* O VEREDITO PRIMEIRO, na frase que o servidor redigiu — a mesma que
             vai para a anotação do Kommo. Duas redações do mesmo veredito
             divergem na primeira mudança de uma delas. */}
-        <p className="text-sm leading-relaxed text-slate-700">
-          <Selo grau={grauDoRisco} />
+        <p className="text-xs leading-relaxed text-texto">
+          <SeloDoGrau grau={grauDoRisco} />
           {auditoria.avisos[0]?.replace(/^\s*⚠️\s*/, '') ??
             (divs.length
               ? `${divs.length} divergência(s) na conta.`
@@ -831,99 +1020,110 @@ function PainelAuditoria({ auditoria }: { auditoria: AuditoriaRpv }) {
         {/* O CORTE, EM NÚMEROS. "Reduzido em R$ 8.120" sozinho não diz sobre
             quanto; com as duas pontas, dá para conferir contra os autos. */}
         {auditoria.aplicada && auditoria.bruto_autos != null && auditoria.bruto_conservador != null && (
-          <p className="text-xs tabular-nums text-slate-500">
+          <p className="text-xs tabular-nums text-texto-3">
             Bruto nos autos {formatBRL(auditoria.bruto_autos)} → no cenário conservador{' '}
-            <span className="font-medium text-slate-700">{formatBRL(auditoria.bruto_conservador)}</span>
+            <b className="font-semibold text-texto">{formatBRL(auditoria.bruto_conservador)}</b>
             {auditoria.corte > 0 && <> · corte de {formatBRL(auditoria.corte)}</>}
           </p>
         )}
 
         {auditoria.justificativa && (
-          <p className="text-xs leading-relaxed text-slate-500">{auditoria.justificativa}</p>
+          <p className="text-xs leading-relaxed text-texto-3">{auditoria.justificativa}</p>
         )}
 
         {divs.length > 0 && (
-          <ul className="space-y-2.5 border-t border-slate-200/80 pt-2.5">
+          <ul className="m-0 grid list-none gap-2 p-0">
             {divs.map((d, i) => {
               const efeito = efeitoEmPalavras(d.efeito)
               return (
-                <li key={i} className="text-sm leading-relaxed text-slate-700">
-                  <Selo grau={normalizarGrau(d.gravidade)} />
+                <ItemGraduado
+                  key={i}
+                  grau={normalizarGrau(d.gravidade)}
+                  fundamento={
+                    <>
+                      O título/lei pede <span className="text-texto">"{d.esperado}"</span>; a conta fez{' '}
+                      <span className="text-texto">"{d.encontrado}"</span>.
+                      {d.fundamento && <> {d.fundamento}</>}
+                    </>
+                  }
+                >
                   {d.item}
-                  {efeito && <span className="text-slate-500"> — {efeito}</span>}
-                  <span className="mt-1 block border-l-2 border-slate-200 pl-3 text-xs text-slate-500">
-                    O título/lei pede <span className="text-slate-700">"{d.esperado}"</span>; a conta fez{' '}
-                    <span className="text-slate-700">"{d.encontrado}"</span>.
-                    {d.fundamento && <> {d.fundamento}</>}
-                  </span>
-                </li>
+                  {efeito && <small className="text-sm text-texto-3"> — {efeito}</small>}
+                </ItemGraduado>
               )
             })}
           </ul>
         )}
 
-{/* O CONFRONTO, atrás de um clique — é a leitura de quem vai refazer a
+        {/* O CONFRONTO, atrás de um clique — é a leitura de quem vai refazer a
             conta, não de quem está decidindo o preço. Mas o CONTADOR fica à
             vista: saber que 18 itens foram conferidos e 2 não bateram é
             informação de decisão; qual foi o índice do terceiro item não é. */}
         {(confronto.length > 0 || auditoria.natureza) && (
-          <div className="border-t border-slate-200/80 pt-2.5">
+          <div>
+            {/* O `.link-btn` da amostra: 28 px de alvo, na cor da marca, com a
+                seta que vira ao abrir. */}
             <button
               type="button"
               onClick={() => setCriterios((v) => !v)}
-              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+              aria-expanded={criterios}
+              className={cn(
+                '-ml-2.5 inline-flex min-h-[28px] items-center gap-2 rounded-controle px-2.5 text-left text-sm font-semibold text-marca-texto transition-colors',
+                'hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+              )}
             >
+              <ChevronDown
+                className={cn('h-[16px] w-[16px] flex-none transition-transform', criterios && 'rotate-180')}
+                aria-hidden
+              />
               {criterios ? 'Esconder o confronto' : rotuloConfronto}
             </button>
             {criterios && (
-              <div className="mt-2 space-y-2 text-xs leading-relaxed">
+              <div className="mt-2 space-y-2">
                 {auditoria.natureza && (
-                  <p>
-                    <span className="font-medium text-slate-600">Natureza do crédito: </span>
-                    <span className="text-slate-500">{auditoria.natureza}</span>
+                  <p className="text-xs">
+                    <b className="font-semibold text-texto">Natureza do crédito:</b>{' '}
+                    <span className="text-texto-3">{auditoria.natureza}</span>
                   </p>
                 )}
                 {confronto.length > 0 && (
                   // A tabela rola por dentro: são quatro colunas de texto, e a
                   // janela não pode rolar de lado por causa de uma delas.
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[34rem] border-collapse">
+                    {/* A `.tbl.mini` da amostra: a mesma tabela, mais densa. */}
+                    <table className="w-full min-w-[34rem] border-collapse text-xs">
                       <thead>
-                        <tr className="text-[10px] uppercase tracking-wide text-slate-400">
-                          <th className="py-1 pr-3 text-left font-medium">Verba</th>
-                          <th className="py-1 pr-3 text-left font-medium">Critério</th>
-                          <th className="py-1 pr-3 text-left font-medium">O título manda</th>
-                          <th className="py-1 pr-3 text-left font-medium">A conta fez</th>
-                          <th className="py-1 text-left font-medium">Confere</th>
+                        <tr className="text-xs font-bold uppercase tracking-[.04em] text-texto-3">
+                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">Verba</th>
+                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">Critério</th>
+                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">O título manda</th>
+                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">A conta fez</th>
+                          <th className="whitespace-nowrap border-b border-borda bg-superficie-2 px-2.5 py-1.5 text-left">Confere</th>
                         </tr>
                       </thead>
                       <tbody>
                         {confronto.map((c, i) => {
-                          const v = VEREDITO_CONFRONTO[c.confere] ?? { texto: c.confere, cor: 'text-slate-400' }
+                          const v = VEREDITO_CONFRONTO[c.confere] ?? { texto: c.confere, cor: 'text-texto-3' }
                           const bate = c.confere === 'sim'
                           return (
-                            <tr key={i} className="border-t border-slate-200/70 align-top">
-                              <td className="py-1 pr-3 text-slate-600">{c.verba}</td>
-                              <td className="py-1 pr-3 text-slate-600">{c.criterio}</td>
+                            <tr key={i} className="border-b border-borda align-top last:border-b-0">
+                              <td className="px-2.5 py-1.5 text-texto">{c.verba}</td>
+                              <td className="px-2.5 py-1.5 text-texto">{c.criterio}</td>
                               {/* Item que bateu ocupa uma célula só, mesclada: a
                                   linha existe para provar que foi olhado, e
                                   duas colunas vazias leriam como preenchimento
                                   faltando em vez de nada a dizer. */}
                               {bate ? (
-                                <td className="py-1 pr-3 text-slate-300" colSpan={2}>
-                                  {c.titulo || c.conta ? (
-                                    <span className="text-slate-500">{[c.titulo, c.conta].filter(Boolean).join(' · ')}</span>
-                                  ) : (
-                                    '—'
-                                  )}
+                                <td className="px-2.5 py-1.5 text-texto-3" colSpan={2}>
+                                  {c.titulo || c.conta ? [c.titulo, c.conta].filter(Boolean).join(' · ') : '—'}
                                 </td>
                               ) : (
                                 <>
-                                  <td className="py-1 pr-3 text-slate-500">{c.titulo || '—'}</td>
-                                  <td className="py-1 pr-3 text-slate-500">{c.conta || '—'}</td>
+                                  <td className="px-2.5 py-1.5 text-texto">{c.titulo || '—'}</td>
+                                  <td className="px-2.5 py-1.5 text-texto">{c.conta || '—'}</td>
                                 </>
                               )}
-                              <td className={cn('py-1 whitespace-nowrap font-medium', v.cor)}>{v.texto}</td>
+                              <td className={cn('whitespace-nowrap px-2.5 py-1.5 font-bold', v.cor)}>{v.texto}</td>
                             </tr>
                           )
                         })}
@@ -953,40 +1153,40 @@ export function GradeValoresRpv({
   atingiuAlvo?: boolean
 }) {
   return (
-    <div className="text-xs text-slate-700">
+    <div className="text-xs text-texto">
       {/* OS TRÊS QUE DECIDEM, com peso de destaque.
           A grade antiga dava o mesmo peso a seis números e a duas linhas de
           texto corrido: o preço, que é a resposta, disputava atenção com a
           decomposição do cartório. */}
       <dl className="grid grid-cols-3 gap-x-4">
         <div>
-          <dt className="text-slate-500">Preço da cessão</dt>
-          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-slate-900 tabular-nums">
+          <dt className="text-texto-3">Preço da cessão</dt>
+          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-texto tabular-nums">
             {formatBRL(valores.preco_cessao)}
           </dd>
         </div>
         <div>
-          <dt className="text-slate-500">Deságio</dt>
-          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-slate-900 tabular-nums">
+          <dt className="text-texto-3">Deságio</dt>
+          <dd className="font-display text-base font-semibold leading-tight sm:text-lg text-texto tabular-nums">
             {pctBR(valores.desagio)}
           </dd>
         </div>
         <div>
-          <dt className="text-slate-500">Rentabilidade</dt>
+          <dt className="text-texto-3">Rentabilidade</dt>
           <dd
             className={cn(
               'font-display text-base font-semibold leading-tight sm:text-lg tabular-nums',
-              atingiuAlvo === false ? 'text-amber-700' : 'text-slate-900',
+              atingiuAlvo === false ? 'text-aviso' : 'text-texto',
             )}
           >
             {pctBR(valores.rentabilidade_mensal)}
-            <span className="text-xs font-normal text-slate-500"> ao mês</span>
+            <span className="text-xs font-normal text-texto-3"> ao mês</span>
           </dd>
         </div>
       </dl>
 
       {atingiuAlvo === false && (
-        <p className="mt-1 text-amber-700">Abaixo da meta de 2,80% ao mês.</p>
+        <p className="mt-1 text-aviso">Abaixo da meta de 2,80% ao mês.</p>
       )}
     </div>
   )
@@ -2077,8 +2277,12 @@ export function AnaliseRpvModal({
            para decidir, e o desfecho aparecia longe do botão de salvar, que é o
            outro ato da mesma pessoa no mesmo momento. Aqui os quatro caminhos
            estão lado a lado, e a ordem é a da gravidade: os que interrompem, o
-           que grava, o que segue. */
-        <div className="flex flex-wrap items-center justify-end gap-2">
+           que grava, o que segue.
+
+           COMO NA AMOSTRA: os que interrompem à ESQUERDA, o que grava e o que
+           segue à DIREITA — a distância entre os dois grupos é o que evita o
+           clique em Reprovar a caminho do Salvar. */
+        <div className="flex w-full flex-wrap items-center gap-2">
           {acaoDiligencia && (
             <Button
               variant={acaoDiligencia.variant}
@@ -2093,16 +2297,24 @@ export function AnaliseRpvModal({
               variant={acaoReprovar.variant}
               onClick={() => setDesfechoAberto(acaoReprovar)}
               disabled={ocupado}
+              // O REPROVAR É CONTORNADO NA AMOSTRA (`.btn-danger-outline`), e o
+              // Button não tem essa variante: a troca é só de pintura, aqui.
+              // Vermelho cheio ao lado do Salvar gritava mais que a ação comum.
+              className={cn(
+                acaoReprovar.variant === 'danger' &&
+                  'border-perigo-borda bg-superficie text-perigo shadow-none hover:bg-perigo-fundo hover:brightness-100',
+              )}
             >
               {acaoReprovar.label}
             </Button>
           )}
+          <span className="flex-1" aria-hidden />
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => salvar()}
             disabled={!podeSalvar}
             loading={passo === 'Gerando a planilha e salvando no Drive…'}
-            icon={<Save className="h-4 w-4" />}
+            icon={<Download className="h-[16px] w-[16px]" aria-hidden />}
           >
             Salvar no Drive
           </Button>
@@ -2112,6 +2324,7 @@ export function AnaliseRpvModal({
               onClick={() => enviarParaValidacao(acaoValidacao)}
               disabled={!podeEnviarParaValidacao}
               loading={enviandoValidacao}
+              icon={<ArrowRight className="h-[16px] w-[16px]" aria-hidden />}
               // O PORQUÊ DE ESTAR APAGADO, no lugar onde se clica. Botão
               // desligado sem explicação é um beco: a pessoa fica sem saber se
               // falta algo dela ou se o sistema é que não deixa.
@@ -2133,6 +2346,7 @@ export function AnaliseRpvModal({
         <JanelaDeDesfecho
           key={desfechoAberto.statusId}
           acao={desfechoAberto}
+          subtitulo={titulo}
           achados={achadosDoDesfecho}
           onRedigir={redigirDesfecho}
           onMover={onMover}
@@ -2147,40 +2361,78 @@ export function AnaliseRpvModal({
         />
       )}
 
+      {/* A ANÁLISE MUDOU DEPOIS DE SALVA, NO TOPO (a ordem da amostra): é o
+          aviso de que o arquivo no Drive não é o que está na tela, e quem vai
+          enviar para revisão precisa vê-lo antes de qualquer número. O "salva e
+          igual" fica embaixo, perto da linha do tempo — é confirmação, não
+          alerta. */}
+      {atual && !atual.reprovado && atual.valores && salvo && mudouDesdeSalvar && (
+        <CaixaDeAviso tom="aviso" className="mb-4">
+          <p className="m-0">
+            A análise mudou depois de salva — a planilha no Drive ainda é a versão anterior. Salve de novo para
+            gravar esta.{' '}
+            {salvo.drive_file_url && (
+              <a
+                className="rounded-sm font-semibold text-marca-texto underline focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+                href={salvo.drive_file_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Abrir a última planilha salva
+              </a>
+            )}
+          </p>
+        </CaixaDeAviso>
+      )}
+
       {erro && (
-        <div className="mb-4 rounded-xl bg-red-50/70 px-3.5 py-3 text-sm text-red-700 ring-1 ring-inset ring-red-200/70">
-          {erro}
-          {/* A SAÍDA, junto do erro que a pediu. O mínimo de R$ 20 mil é regra
-              da casa, e quem analisa enxerga o que ela não enxerga: carteira do
-              mesmo cedente, crédito que fecha junto com outro, prazo curto que
-              compensa o valor. Passar fica registrado no aviso, que sobe para o
-              card com a análise. */}
-          {pisoBloqueou && (
-            <div className="mt-3 border-t border-red-200/70 pt-3">
+        <CaixaDeAviso tom="perigo" role="alert" className="mb-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="m-0 min-w-0 flex-1 basis-64">{erro}</p>
+            {/* A SAÍDA, junto do erro que a pediu. O mínimo de R$ 20 mil é regra
+                da casa, e quem analisa enxerga o que ela não enxerga: carteira do
+                mesmo cedente, crédito que fecha junto com outro, prazo curto que
+                compensa o valor. Passar fica registrado no aviso, que sobe para o
+                card com a análise. */}
+            {pisoBloqueou && (
               <Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
+                className="ml-auto"
                 onClick={() => salvar({ ignorarMinimo: true })}
                 disabled={ocupado}
               >
                 Seguir mesmo assim
               </Button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </CaixaDeAviso>
       )}
 
-      {!atual && passo && <Loading label={passo} />}
+      {!atual && passo && (
+        <PassosDaLeitura
+          passo={passo}
+          // A ETAPA DAS IMAGENS SÓ EXISTE QUANDO ACONTECE: enquanto corre, o
+          // passo diz "Preparando…"; depois, a marca 'imagens' do relógio
+          // lembra que ela houve e a mantém na lista, já feita.
+          comImagens={ehPassoDasImagens(passo) || fases.some((f) => f.nome === 'imagens')}
+        />
+      )}
 
       {atual?.reprovado && (
         <div className="space-y-5">
-          <div className="rounded-xl bg-red-50/70 p-4 text-sm text-red-800 ring-1 ring-inset ring-red-200/70">
-            <p className="font-semibold">{tituloDaReprovacao}</p>
-            <ul className="mt-1 list-inside list-disc space-y-0.5">
-              {(atual.motivos ?? []).map((m, i) => (
-                <li key={i}>{m}</li>
-              ))}
-            </ul>
+          {/* A `.reprov-box` da amostra: o título e os motivos, e só — o
+              desfecho está no rodapé. */}
+          <div className="flex items-start gap-3.5 rounded-cartao border border-perigo-borda bg-perigo-fundo px-[18px] py-4">
+            <XCircle className="h-[22px] w-[22px] flex-none text-perigo" aria-hidden />
+            <div className="min-w-0">
+              <p className="m-0 font-display text-lg font-bold text-perigo">{tituloDaReprovacao}</p>
+              <ul className="my-2 grid list-disc gap-1 pl-[18px] text-corpo text-texto">
+                {(atual.motivos ?? []).map((m, i) => (
+                  <li key={i}>{m}</li>
+                ))}
+              </ul>
+            </div>
           </div>
 
           {/* O DESFECHO TAMBÉM AQUI, e este é o caso em que ele mais serve: o
@@ -2192,7 +2444,10 @@ export function AnaliseRpvModal({
       )}
 
       {atual && !atual.reprovado && atual.valores && (
-        <div className="space-y-5">
+        // DUAS COLUNAS (a `.rpv-grid` da amostra): a leitura à esquerda e o
+        // resumo do investimento parado à direita. Abaixo de 900 px vira uma.
+        <div className="grid items-start gap-5 min-[900px]:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 space-y-5">
           {/* O QUE ESTÁ SENDO COMPRADO, acima dos números — porque é a premissa
               deles. Vem do "PARCELA CEDIDA" do card e é editável: o cadastro do
               comercial erra, e até agora a única saída era corrigir no Kommo e
@@ -2202,13 +2457,14 @@ export function AnaliseRpvModal({
               quarenta caracteres, quebrando em duas linhas e ocupando a largura
               da janela para exibir três opções que não estão em uso. A lista
               mostra o que está valendo e guarda o resto. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor="cenario-rpv" className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <div>
+            <label htmlFor="cenario-rpv" className="mb-1.5 block text-corpo font-semibold text-texto">
               Negociando
             </label>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <Select
               id="cenario-rpv"
-              className="w-auto min-w-[16rem] py-1.5 text-sm"
+              className="max-w-[360px]"
               value={CENARIOS_RPV.some((c) => c.valor === cenario) ? cenario : ''}
               disabled={trocandoCenario || ocupado}
               onChange={(e) => void trocarCenario(e.target.value)}
@@ -2224,18 +2480,16 @@ export function AnaliseRpvModal({
                 </option>
               ))}
             </Select>
-            {trocandoCenario && <span className="text-xs text-slate-400">refazendo as contas…</span>}
+            {trocandoCenario && (
+              <span role="status" className="inline-flex items-center gap-1 text-xs text-texto-3">
+                <RefreshCw className="h-[13px] w-[13px] animate-spin" aria-hidden /> refazendo as contas…
+              </span>
+            )}
+            </div>
           </div>
 
           {/* O preço, verba a verba — a conversa com o cedente. */}
-          <PainelPreco valores={atual.valores} />
-
-          {/* E o que a operação custa e devolve — a conversa interna. */}
-          <ResumoInvestimento
-            valores={atual.valores}
-            cartorio={atual.cartorio}
-            atingiuAlvo={atual.atingiu_alvo}
-          />
+          <PainelPreco valores={atual.valores} esmaecido={trocandoCenario} />
 
           {/* O CAMINHO ATÉ O DINHEIRO. Prazo é a variável que mais mexe no
               preço — 8 meses ou 14 mudam o deságio inteiro —, e antes ele era um
@@ -2244,44 +2498,34 @@ export function AnaliseRpvModal({
               Discordar de um item é uma frase no chat abaixo. */}
           {!!atual.roteiro?.length && (
             <section>
-              <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Caminho até a liquidação
-              </h3>
-              {atual.etapa_atual && (
-                <p className="mt-1 text-xs text-slate-600">
-                  <span className="text-slate-500">Hoje:</span> {atual.etapa_atual}
+              <RotuloDeSecao>Caminho até a liquidação</RotuloDeSecao>
+              <div className="space-y-1 text-xs text-texto">
+                {atual.etapa_atual && (
+                  <p className="m-0">
+                    Hoje: <b className="font-semibold">{atual.etapa_atual}</b>
+                  </p>
+                )}
+                <ol className="m-0 list-disc pl-[18px]">
+                  {atual.roteiro.map((a, i) => (
+                    <li key={i} className="my-0.5">
+                      <span className="tabular-nums">{a.dias}d</span> {a.ato}
+                      {a.base && <span className="text-texto-3"> · {a.base}</span>}
+                    </li>
+                  ))}
+                </ol>
+                <p className="m-0 text-texto-3">
+                  <span className="tabular-nums">{atual.roteiro.reduce((t, a) => t + a.dias, 0)}d</span> somados
+                  {atual.valores &&
+                    ` · prazo usado no preço: ${atual.valores.prazo_meses} meses`}
                 </p>
-              )}
-              <ol className="mt-2 space-y-1">
-                {atual.roteiro.map((a, i) => (
-                  <li key={i} className="flex gap-2 text-xs">
-                    <span className="w-14 shrink-0 text-right font-semibold tabular-nums text-slate-700">
-                      {a.dias}d
-                    </span>
-                    <span className="min-w-0">
-                      <span className="text-slate-800">{a.ato}</span>
-                      {a.base && <span className="text-slate-500"> · {a.base}</span>}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-              <p className="mt-1.5 border-t border-slate-200 pt-1.5 text-xs text-slate-600">
-                <span className="w-14 inline-block text-right font-semibold tabular-nums">
-                  {atual.roteiro.reduce((t, a) => t + a.dias, 0)}d
-                </span>{' '}
-                somados
-                {atual.valores &&
-                  ` · prazo usado no preço: ${atual.valores.prazo_meses} meses`}
-              </p>
+              </div>
             </section>
           )}
 
           {atual.m1_sintese && (
             <section>
-              <h3 className="font-display text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Síntese
-              </h3>
-              <p className="mt-1 text-sm text-slate-800">{atual.m1_sintese}</p>
+              <RotuloDeSecao>Síntese</RotuloDeSecao>
+              <p className="m-0 text-xs leading-relaxed text-texto">{atual.m1_sintese}</p>
             </section>
           )}
 
@@ -2306,20 +2550,22 @@ export function AnaliseRpvModal({
               campo morto sem explicação. Agora ela tem linha própria, some
               sozinha e o chat segue utilizável enquanto isso. */}
           {passoCartorio && (
-            <p className="flex items-center gap-2 rounded-xl px-3.5 py-3 text-xs text-slate-500 ring-1 ring-inset ring-slate-200/80">
-              <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-              {passoCartorio} Você já pode pedir alterações — o preço se refaz quando
-              o custo chegar.
-            </p>
+            <CaixaSuave className="flex items-start gap-2">
+              <RefreshCw className="mt-[3px] h-[16px] w-[16px] flex-none animate-spin text-info" aria-hidden />
+              <p role="status" className="m-0">
+                {passoCartorio} Você já pode pedir alterações — o preço se refaz quando
+                o custo chegar.
+              </p>
+            </CaixaSuave>
           )}
 
           {/* A consulta do cartório falhou. Em vermelho, e separado dos avisos:
               o aviso da análise diz que a tela pediria o custo em seguida — sem
               isto, a promessa fica sem desfecho. */}
           {falhaCartorio && (
-            <p className="rounded-xl bg-red-50/70 px-3.5 py-3 text-xs text-red-800 ring-1 ring-inset ring-red-200/70">
-              {falhaCartorio}
-            </p>
+            <CaixaDeAviso tom="perigo">
+              <p className="m-0">{falhaCartorio}</p>
+            </CaixaDeAviso>
           )}
 
           {/* SAÍDA MANUAL. Aparece quando o preço está sem cartório e não há
@@ -2327,41 +2573,28 @@ export function AnaliseRpvModal({
               cartório onde lavra — sem isto, a busca falhando deixa a pessoa sem
               nada a fazer dentro da janela. */}
           {atual?.valores && atual.valores.cartorio == null && !passoCartorio && (
-            <div className="rounded-xl px-3.5 py-3 ring-1 ring-inset ring-slate-200/80">
-              <p className="mb-2 text-xs text-slate-600">
+            <CaixaSuave>
+              <p className="mb-2 mt-0 text-xs">
                 Informe o custo de cartório à mão e o preço se refaz. Digite só os
                 números — os dois últimos dígitos são os centavos. Deixe em branco o
                 que não souber.
               </p>
               <div className="flex flex-wrap items-end gap-2">
-                <label className="text-xs text-slate-500">
-                  Escritura
-                  <input
-                    className="mt-0.5 block w-32 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    inputMode="numeric"
-                    placeholder="0,00"
-                    value={manual.escritura ? formatBRLInput(parseBRLInput(manual.escritura)) : ''}
-                    disabled={ocupado}
-                    onChange={(e) =>
-                      setManual((m) => ({ ...m, escritura: onlyDigits(e.target.value) }))
-                    }
-                  />
-                </label>
-                <label className="text-xs text-slate-500">
-                  Registro
-                  <input
-                    className="mt-0.5 block w-32 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    inputMode="numeric"
-                    placeholder="0,00"
-                    value={manual.registro ? formatBRLInput(parseBRLInput(manual.registro)) : ''}
-                    disabled={ocupado}
-                    onChange={(e) =>
-                      setManual((m) => ({ ...m, registro: onlyDigits(e.target.value) }))
-                    }
-                  />
-                </label>
+                <CampoEmReais
+                  id="rpv-cartorio-escritura"
+                  rotulo="Escritura"
+                  digitos={manual.escritura}
+                  disabled={ocupado}
+                  onDigitos={(d) => setManual((m) => ({ ...m, escritura: d }))}
+                />
+                <CampoEmReais
+                  id="rpv-cartorio-registro"
+                  rotulo="Registro"
+                  digitos={manual.registro}
+                  disabled={ocupado}
+                  onDigitos={(d) => setManual((m) => ({ ...m, registro: d }))}
+                />
                 <Button
-                  size="sm"
                   variant="secondary"
                   onClick={aplicarCartorioManual}
                   disabled={ocupado || (!manual.escritura.trim() && !manual.registro.trim())}
@@ -2370,53 +2603,55 @@ export function AnaliseRpvModal({
                   Aplicar
                 </Button>
               </div>
-            </div>
+            </CaixaSuave>
           )}
 
           {/* O AVISO DO SALVAMENTO NÃO OCUPA MAIS O LUGAR DO CHAT — ele fica
               acima dele. Trocar um pelo outro era o que impedia de continuar
               trabalhando depois de gravar, e o preço disso era reabrir a janela
-              e reler o processo inteiro. */}
-          {salvo && (
-            <div
-              className={cn(
-                'rounded-xl px-3.5 py-3 text-sm ring-1 ring-inset',
-                mudouDesdeSalvar
-                  ? 'bg-amber-50/70 text-amber-900 ring-amber-200/70'
-                  : 'bg-emerald-50/70 text-emerald-800 ring-emerald-200/70',
-              )}
+              e reler o processo inteiro. O "mudou depois de salva" subiu para o
+              topo da janela; aqui fica só a confirmação. */}
+          {salvo && !mudouDesdeSalvar && (
+            <p
+              role="status"
+              className="m-0 flex flex-wrap items-center gap-1.5 rounded-campo border border-sucesso-borda bg-sucesso-fundo px-3 py-2 text-corpo text-sucesso"
             >
-              {mudouDesdeSalvar
-                ? 'A análise mudou depois de salva — a planilha no Drive ainda é a versão anterior. Salve de novo para gravar esta. '
-                : '✅ Planilha salva. '}
+              <Check className="h-[16px] w-[16px] flex-none" aria-hidden />
+              Planilha salva.
               {salvo.drive_file_url && (
-                <a className="font-medium underline" href={salvo.drive_file_url} target="_blank" rel="noreferrer">
+                <a
+                  className="rounded-sm font-semibold underline focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+                  href={salvo.drive_file_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   Abrir a última planilha salva
                 </a>
               )}
-            </div>
+            </p>
           )}
 
           <LinhaDoTempo fases={fases} />
 
-          <section className="border-t border-slate-200/80 pt-5">
+          <section>
             {/* A explicação saiu: ela ensinava o que o campo abaixo já ensina
                 pelo exemplo do placeholder, e ocupava duas linhas em toda
                 análise, inclusive na décima do dia. */}
-            <h3 className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              <Sparkles className="h-3.5 w-3.5" /> Pedir alterações
-            </h3>
+            <RotuloDeSecao>Pedir alterações</RotuloDeSecao>
 
             {mensagens.length > 0 && (
-              <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+              <div className="mb-2 flex max-h-64 flex-col gap-1.5 overflow-y-auto pr-1">
                 {mensagens.map((m, i) => (
                   <div
                     key={i}
                     className={cn(
-                      'max-w-[85%] whitespace-pre-line rounded-xl px-3.5 py-2 text-sm leading-relaxed',
+                      'whitespace-pre-line break-words px-3 text-corpo leading-normal',
+                      // OS BALÕES DA AMOSTRA (`.msg.eu`/`.msg.ia`): o pedido na
+                      // cor da marca, à direita; a resposta na superfície, à
+                      // esquerda — a quina reta aponta quem falou.
                       m.papel === 'usuario'
-                        ? 'ml-auto bg-brand-600 text-white'
-                        : 'bg-slate-50 text-slate-700 ring-1 ring-inset ring-slate-200/70',
+                        ? 'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca py-2 text-white'
+                        : 'max-w-[80%] self-start rounded-[14px_14px_14px_4px] bg-superficie-3 py-2.5 text-texto',
                     )}
                   >
                     {m.texto}
@@ -2426,9 +2661,10 @@ export function AnaliseRpvModal({
               </div>
             )}
 
-            <div className="mt-3 flex items-end gap-2">
-              <textarea
-                className="min-h-[44px] flex-1 resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            <div className="flex items-end gap-2">
+              <Textarea
+                aria-label="Pedir alteração"
+                className="min-h-[44px] flex-1"
                 rows={2}
                 placeholder='Ex.: "o valor bruto homologado é R$ 84.320,10" · "suprima o risco 2" · "a RPV foi expedida em 12/03/2026"'
                 value={pedido}
@@ -2442,35 +2678,31 @@ export function AnaliseRpvModal({
                   }
                 }}
               />
-              {/* SÓ O ÍCONE. Um botão sólido escrito "Enviar" ao lado do
-                  campo pesava mais que o próprio campo, num gesto que na
-                  prática se faz pelo Enter. Discreto, mas com alvo de clique
-                  inteiro e rótulo acessível. */}
-              <button
+              {/* SÓ O ÍCONE, como na amostra (`.btn-primary.btn-icon`): um botão
+                  escrito "Enviar" ao lado do campo pesava mais que o próprio
+                  campo, num gesto que na prática se faz pelo Enter. Quadrado de
+                  33 px, com rótulo acessível e a dica do atalho. */}
+              <Button
                 type="button"
+                variant="primary"
+                className="w-11 shrink-0 px-0"
                 onClick={pedirAlteracao}
                 disabled={ocupado || !pedido.trim()}
+                loading={passo === 'Revisando a análise…'}
                 aria-label="Enviar pedido de alteração"
                 title="Enviar (Enter)"
-                className={cn(
-                  'mb-0.5 shrink-0 rounded-lg p-2.5 text-slate-400 transition-colors',
-                  'hover:bg-slate-100 hover:text-brand-700',
-                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1',
-                  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400',
-                )}
-              >
-                {passo === 'Revisando a análise…' ? (
-                  <span className="block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
-                ) : (
-                  <SendHorizontal className="h-4 w-4" />
-                )}
-              </button>
+                icon={<ArrowRight className="h-[16px] w-[16px]" aria-hidden />}
+              />
             </div>
           </section>
+        </div>
 
-          {/* O DESFECHO POR ÚLTIMO, que é a ordem do trabalho: os números, a
-              auditoria, os riscos, o que se quis corrigir — e só então o que
-              fazer com isso. */}
+        {/* E o que a operação custa e devolve — a conversa interna —, ao lado. */}
+        <ResumoInvestimento
+          valores={atual.valores}
+          cartorio={atual.cartorio}
+          atingiuAlvo={atual.atingiu_alvo}
+        />
         </div>
       )}
     </Modal>

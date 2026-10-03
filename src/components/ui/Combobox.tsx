@@ -74,7 +74,7 @@ function Lista({
 
   if (opcoes.length === 0) {
     return (
-      <div className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-lg">
+      <div className="absolute z-20 mt-1 w-full rounded-campo border border-borda bg-superficie px-4 py-2 text-xs text-texto-2 shadow-nivel-2">
         {vazio}
       </div>
     )
@@ -82,7 +82,7 @@ function Lista({
   return (
     <ul
       ref={ulRef}
-      className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg scrollbar-thin"
+      className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-campo border border-borda bg-superficie py-1 shadow-nivel-2 scrollbar-thin"
     >
       {opcoes.map((o, i) => (
         <li key={o.id}>
@@ -96,20 +96,20 @@ function Lista({
             }}
             onMouseEnter={() => onDestacar(i)}
             className={cn(
-              'block w-full px-3 py-1.5 text-left',
-              i === destaque ? 'bg-brand-50' : 'hover:bg-slate-50',
+              'block w-full px-4 py-1.5 text-left',
+              i === destaque ? 'bg-marca-leve' : 'hover:bg-superficie-2',
             )}
           >
             <div
               className={cn(
-                'text-sm',
-                i === destaque ? 'text-brand-700' : 'text-slate-700',
+                'text-corpo',
+                i === destaque ? 'text-marca-texto' : 'text-texto',
               )}
             >
               {o.titulo}
             </div>
             {o.subtitulo && (
-              <div className="text-xs text-slate-600">{o.subtitulo}</div>
+              <div className="text-xs text-texto-3">{o.subtitulo}</div>
             )}
           </button>
         </li>
@@ -118,7 +118,7 @@ function Lista({
           existe: sem busca, a lista de MG mostrava 50 de 853 e terminava em
           "Arinos", sem Belo Horizonte e sem dizer que havia mais. */}
       {truncada && (
-        <li className="border-t border-slate-100 px-3 py-1.5 text-xs text-slate-600">
+        <li className="border-t border-borda px-4 py-1.5 text-xs text-texto-3">
           Mostrando os {opcoes.length} primeiros. Digite para refinar.
         </li>
       )}
@@ -270,7 +270,7 @@ export function Combobox({
         onKeyDown={onKeyDown}
       />
       {selecionada?.subtitulo && !aberto && (
-        <p className="mt-1 text-xs text-slate-600">{selecionada.subtitulo}</p>
+        <p className="mt-1 text-xs text-texto-3">{selecionada.subtitulo}</p>
       )}
       {aberto && (
         <Lista
@@ -488,14 +488,14 @@ export function MultiCombobox({
           {escolhidas.map((o) => (
             <span
               key={o.id}
-              className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-0.5 pl-2.5 pr-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-100"
+              className="inline-flex items-center gap-1 rounded-full bg-marca-leve py-0.5 pl-2.5 pr-1 text-xs font-semibold text-marca-texto ring-1 ring-inset ring-marca-suave"
             >
               {o.titulo}
               <button
                 type="button"
                 onClick={() => onChange(valores.filter((v) => v !== o.id))}
                 aria-label={`Remover ${o.titulo}`}
-                className="rounded-full p-0.5 text-brand-400 hover:bg-brand-100 hover:text-brand-700"
+                className="rounded-full p-0.5 text-marca-texto hover:bg-marca-suave"
               >
                 <X className="h-3 w-3" />
               </button>

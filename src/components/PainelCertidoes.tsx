@@ -33,15 +33,25 @@
 // em "Montar checklist": reabrir o card fazia o aviso "nenhum cônjuge informado"
 // desaparecer, e nada mais na tela dizia que o bloco do cônjuge nunca foi
 // considerado.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+//
+// O VISUAL É O DA AMOSTRA (janelas-analise.js, `painelCertidoes`): cadastro em
+// grade, "o que achei nos anexos" numa caixa suave com os candidatos, a caixa da
+// IA, o placar em cartões de número, os avisos numa lista âmbar e o checklist em
+// blocos por pessoa. SÓ A APRESENTAÇÃO MUDOU: as regras acima, as gravações e as
+// mensagens são as de antes.
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
-  ClipboardPaste,
+  ArrowRight,
+  Check,
+  Clock,
   ExternalLink,
   FileText,
   Pencil,
   Plus,
+  RefreshCw,
   Sparkles,
+  X,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
@@ -57,9 +67,19 @@ import {
   type NascimentoEncontrado,
 } from '@/lib/dadosNoTexto'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
+import { StatCard } from '@/components/ui/StatCard'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
+import {
+  CaixaDeAviso,
+  CaixaSuave,
+  DicaDeAviso,
+  RotuloDeSecao,
+  Selo,
+  icSelo,
+  type TomDaPeca,
+} from '@/components/analise/Pecas'
 import { EmissaoBullai } from '@/components/EmissaoBullai'
 import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
 import type { QualificacaoLida } from '../../supabase/functions/_shared/qualificacaoDoCedente.ts'
@@ -157,14 +177,42 @@ const MOTIVO_MANUAL: Record<string, string> = {
 
 // NAO_APLICAVEL em azul, não em cinza. Em cinza ficava idêntico a PENDENTE, e as
 // duas coisas são opostas: uma está por fazer, a outra saiu da conta de vez.
-const TOM_STATUS: Record<string, 'gray' | 'green' | 'yellow' | 'red' | 'blue'> = {
-  OBTIDA: 'green',
-  PENDENTE: 'gray',
-  EM_EMISSAO: 'blue',
-  PENDENTE_MANUAL: 'yellow',
-  FALHA: 'red',
-  NAO_APLICAVEL: 'blue',
+//
+// O SELO DA AMOSTRA (`selo()` em base.js): tom, ícone e o estado por extenso —
+// "Pendente manual" em vez de PENDENTE_MANUAL. Estado que o mapa não conhece sai
+// com o nome cru, para nunca sumir da tela.
+const ESTADO_DA_LINHA: Record<string, { tom: TomDaPeca; rotulo: string; icone?: ReactNode }> = {
+  OBTIDA: { tom: 'sucesso', rotulo: 'Obtida', icone: <Check className={icSelo} aria-hidden /> },
+  PENDENTE: { tom: 'neutro', rotulo: 'Pendente' },
+  EM_EMISSAO: {
+    tom: 'info',
+    rotulo: 'Em emissão',
+    icone: <ArrowRight className={icSelo} aria-hidden />,
+  },
+  PENDENTE_MANUAL: {
+    tom: 'aviso',
+    rotulo: 'Pendente manual',
+    icone: <Clock className={icSelo} aria-hidden />,
+  },
+  FALHA: { tom: 'perigo', rotulo: 'Falha', icone: <X className={icSelo} aria-hidden /> },
+  NAO_APLICAVEL: { tom: 'info', rotulo: 'Dispensada' },
 }
+
+/** O `.cand` da amostra: um achado do documento, clicável, com o trecho embaixo. */
+const CAND =
+  'block w-full rounded-campo border border-borda bg-superficie px-3 py-2.5 text-left text-corpo ' +
+  'text-texto transition-colors hover:border-marca-viva'
+
+/** O `.sub` da amostra: a linha de baixo do candidato — arquivo e trecho. */
+const SUB = 'mt-0.5 block truncate text-xs text-texto-3'
+
+/** O `.link-btn` da amostra: link na cor da marca, com área de clique de 24 px. */
+const LINK_BTN =
+  'inline-flex min-h-8 items-center gap-1 rounded-controle px-1.5 text-sm font-semibold ' +
+  'text-marca-texto hover:bg-marca-leve'
+
+/** A caixa de marcar da amostra (`.check input`): 16 px, na cor da marca. */
+const CAIXA_MARCAR = 'h-[16px] w-[16px] flex-none accent-marca'
 
 const ROTULO_ESTADO_CIVIL: Record<string, string> = {
   solteiro: 'solteiro(a)',
@@ -406,111 +454,109 @@ function LinhaCertidao({
     }
   }
 
+  const estado = ESTADO_DA_LINHA[item.status]
+
+  // O `.cert-row` da amostra: o que é (selo, nome, órgão, o detalhe) à esquerda,
+  // as duas ações à direita, e o "Como emitir" abrindo embaixo, na largura toda.
   return (
-    <div className="border-b border-slate-100 text-xs last:border-b-0">
-      <div className="flex flex-wrap items-center gap-2 p-2.5">
-        <Badge size="sm" tone={TOM_STATUS[item.status] ?? 'gray'}>
-          {item.status}
-        </Badge>
-        <span className="font-medium text-slate-800">
-          {cat?.nome_curto ?? item.certidao_codigo}
-        </span>
-        <span className="text-slate-500">{cat?.orgao_emissor}</span>
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-borda px-4 py-2.5 text-corpo last:border-b-0">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <Selo tom={estado?.tom ?? 'neutro'} icone={estado?.icone}>
+          {estado?.rotulo ?? item.status}
+        </Selo>
+        <b className="font-bold text-texto">{cat?.nome_curto ?? item.certidao_codigo}</b>
+        <span className="text-xs text-texto-3">{cat?.orgao_emissor}</span>
         {rotuloParametros(item.parametros) && (
-          <span className="text-slate-500">({rotuloParametros(item.parametros)})</span>
+          <span className="text-xs text-texto-3">({rotuloParametros(item.parametros)})</span>
         )}
-        {!item.obrigatoria && (
-          <Badge size="sm" tone="gray">
-            opcional
-          </Badge>
-        )}
+        {!item.obrigatoria && <Selo tom="neutro">opcional</Selo>}
         {item.status === 'NAO_APLICAVEL' && (
-          <span className="text-blue-700">
+          <span className="text-xs text-info">
             dispensada
             {item.dispensa_motivo ? `: ${item.dispensa_motivo}` : ' (sem motivo!)'}
           </span>
         )}
         {item.erro_classe && (
-          <span className="text-amber-700">
+          <span className="text-xs text-aviso">
             {MOTIVO_MANUAL[item.erro_classe] ?? item.erro_classe}
             {item.erro_detalhe ? `: ${item.erro_detalhe}` : ''}
           </span>
         )}
+      </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setAberto((v) => !v)}
-            className="font-medium text-slate-500 hover:text-slate-700 hover:underline"
-          >
-            {aberto ? 'Fechar' : 'Como emitir'}
-          </button>
-          {url ? (
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline"
-            >
-              Abrir portal <ExternalLink className="h-3 w-3" />
-            </a>
-          ) : (
-            <span className="text-amber-700">sem link</span>
-          )}
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setAberto((v) => !v)}
+          aria-expanded={aberto}
+          className={LINK_BTN}
+        >
+          {aberto ? 'Fechar' : 'Como emitir'}
+        </button>
+        {url ? (
+          <a href={url} target="_blank" rel="noreferrer" className={LINK_BTN}>
+            Abrir portal <ExternalLink className="h-4 w-4" aria-hidden />
+          </a>
+        ) : (
+          <span className="text-xs text-aviso">sem link</span>
+        )}
       </div>
 
       {aberto && (
-        <div className="space-y-2 border-t border-slate-100 bg-slate-50 p-3">
+        <div className="col-span-full space-y-2 rounded-campo bg-superficie-2 px-4 py-2.5 text-sm">
           {barreiras.length > 0 ? (
-            <div className="text-amber-800">
-              ⚠️ {barreiras.join(' · ')}
-            </div>
+            <p className="flex items-start gap-1.5 text-aviso">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+              <span>{barreiras.join(' · ')}</span>
+            </p>
           ) : (
-            <div className="text-emerald-700">Sem login e sem CAPTCHA conhecidos.</div>
+            <p className="text-sucesso">Sem login e sem CAPTCHA conhecidos.</p>
           )}
 
           <div>
-            <div className="mb-1 text-slate-600">O que o portal pede:</div>
-            <div className="space-y-1">
-              {insumos.map((x) => (
-                <div key={x.chave} className="flex items-center gap-2">
-                  <span className="w-36 flex-none text-slate-500">{x.rotulo}</span>
-                  {x.valor ? (
-                    <>
-                      <span className="font-mono text-slate-800">{x.valor}</span>
-                      <button
-                        type="button"
-                        onClick={() => copiar(x.valor, x.chave)}
-                        className="text-brand-600 hover:underline"
-                      >
-                        {copiado === x.chave ? 'copiado' : 'copiar'}
-                      </button>
-                    </>
-                  ) : (
-                    // Campo vazio é PENDÊNCIA, não detalhe: sem ele o portal não
-                    // emite, e descobrir isso só lá é viagem perdida.
-                    <span className="text-red-700">falta no cadastro</span>
-                  )}
-                </div>
-              ))}
-              {insumos.length === 0 && (
-                <div className="text-slate-500">Nada declarado no catálogo.</div>
-              )}
-            </div>
+            <p className="mb-1 font-semibold text-texto">O que o portal pede:</p>
+            {insumos.length > 0 ? (
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-0.5 text-corpo">
+                {insumos.map((x) => (
+                  <div key={x.chave} className="contents">
+                    <dt className="text-texto-3">{x.rotulo}</dt>
+                    <dd className="flex min-w-0 flex-wrap items-center gap-1 text-texto">
+                      {x.valor ? (
+                        <>
+                          <span className="tabular-nums">{x.valor}</span>
+                          <button
+                            type="button"
+                            onClick={() => copiar(x.valor, x.chave)}
+                            className={LINK_BTN}
+                          >
+                            {copiado === x.chave ? 'copiado' : 'copiar'}
+                          </button>
+                        </>
+                      ) : (
+                        // Campo vazio é PENDÊNCIA, não detalhe: sem ele o portal não
+                        // emite, e descobrir isso só lá é viagem perdida.
+                        <span className="text-perigo">falta no cadastro</span>
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="text-texto-3">Nada declarado no catálogo.</p>
+            )}
           </div>
 
           {faltando.length > 0 && (
-            <div className="text-red-700">
+            <p className="text-perigo">
               Não dá para emitir ainda: falta {faltando.map((x) => x.rotulo).join(', ')}.
-            </div>
+            </p>
           )}
 
           {cat?.validade_dias && (
-            <div className="text-slate-600">
+            <p className="text-xs text-texto-3">
               Validade: {cat.validade_dias} dias
               {cat.sla_horas ? ` · sai em até ${cat.sla_horas}h` : ''}
-            </div>
+            </p>
           )}
 
           {/* SEM LINK: o endereço desta certidão depende da UF, do município ou da
@@ -519,22 +565,22 @@ function LinhaCertidao({
               precisa pela primeira vez cola aqui, e da segunda em diante aparece
               pronto para todo mundo. */}
           {!url && escopo && (
-            <div className="rounded-md bg-white p-2 ring-1 ring-inset ring-slate-200">
-              <div className="mb-1 text-slate-600">
-                O link desta certidão depende de <strong>{escopo}</strong>, e ainda
+            <div className="space-y-2">
+              <p className="text-texto-2">
+                O link desta certidão depende de <b className="text-texto">{escopo}</b>, e ainda
                 não está cadastrado. Cole o endereço oficial e ele passa a aparecer
                 aqui para todos os créditos deste escopo:
-              </div>
+              </p>
               <div className="flex flex-wrap gap-2">
                 <Input
                   value={novaUrl}
                   onChange={(e) => setNovaUrl(e.target.value)}
                   placeholder="https://..."
+                  aria-label="Link de emissão"
                   className="min-w-0 flex-1"
                 />
                 <Button
-                  size="sm"
-                  variant="outline"
+                  variant="secondary"
                   onClick={salvarUrl}
                   loading={salvandoUrl}
                   disabled={!/^https?:\/\/\S+$/.test(novaUrl.trim())}
@@ -542,15 +588,19 @@ function LinhaCertidao({
                   Salvar link
                 </Button>
               </div>
-              {erroUrl && <div className="mt-1 text-red-700">{erroUrl}</div>}
+              {erroUrl && (
+                <p role="alert" className="text-perigo">
+                  {erroUrl}
+                </p>
+              )}
             </div>
           )}
 
           {!url && !escopo && (
-            <div className="text-amber-800">
+            <p className="text-aviso">
               Esta certidão não tem link no catálogo e não tem escopo (UF, município
               ou comarca) para cadastrar um. Emissão manual, procurando o portal.
-            </div>
+            </p>
           )}
         </div>
       )}
@@ -579,73 +629,63 @@ function Sugestoes({
   vazio: string
 }) {
   if (nascimentos.length === 0 && locais.length === 0) {
-    return <p className="text-xs text-slate-600">{vazio}</p>
+    return vazio ? <p className="text-xs text-texto-3">{vazio}</p> : null
   }
   return (
-    <div className="space-y-2">
+    <div>
       {nascimentos.length > 0 && (
-        <div>
-          <div className="mb-1 text-xs text-slate-600">
-            Data de nascimento <strong>do cedente</strong> — só datas rotuladas como
+        <>
+          <p className="mt-2 text-xs text-texto-2">
+            <b className="text-texto">Data de nascimento do cedente</b> — só datas rotuladas como
             nascimento entram, senão a lista viria com toda data do processo:
-          </div>
-          <div className="space-y-1">
+          </p>
+          <div className="my-2 grid gap-2">
             {nascimentos.map((n) => (
               <button
                 key={n.iso}
                 type="button"
                 onClick={() => onNascimento(n.iso)}
-                className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+                className={CAND}
               >
-                <span className="font-mono font-medium text-slate-800">
-                  {n.iso.split('-').reverse().join('/')}
-                </span>
-                {n.arquivo && (
-                  <span className="ml-2 text-slate-400">em {n.arquivo}</span>
-                )}
-                <span className="mt-0.5 block truncate text-slate-500">
-                  …{n.contexto}…
+                <b className="font-bold tabular-nums">{n.iso.split('-').reverse().join('/')}</b>
+                <span className={SUB}>
+                  {n.arquivo ? `em ${n.arquivo} · ` : ''}…{n.contexto}…
                 </span>
               </button>
             ))}
           </div>
-        </div>
+        </>
       )}
       {locais.length > 0 && (
-        <div>
-          <div className="mb-1 text-xs text-slate-600">
-            Cidade e UF <strong>do cedente</strong> — conferidas contra a lista do
+        <>
+          <p className="mt-2 text-xs text-texto-2">
+            <b className="text-texto">Cidade e UF do cedente</b> — conferidas contra a lista do
             IBGE. Clicar preenche as duas juntas:
-          </div>
-          <div className="space-y-1">
+          </p>
+          <div className="my-2 grid gap-2">
             {locais.map((l) => (
               <button
                 key={`${l.uf}-${l.municipio}`}
                 type="button"
                 onClick={() => onLocal(l)}
-                className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+                className={CAND}
               >
-                <span className="font-medium text-slate-800">
-                  {l.municipio}/{l.uf}
+                <span className="flex flex-wrap items-center gap-2">
+                  <b className="font-bold">
+                    {l.municipio}/{l.uf}
+                  </b>
+                  {l.residencial && <Selo tom="info">perto de &quot;residente&quot;</Selo>}
+                  {l.forma === 'rotulado' && (
+                    <span className="text-xs text-texto-3">(campo CIDADE/UF)</span>
+                  )}
                 </span>
-                {l.residencial && (
-                  <Badge size="sm" tone="blue" className="ml-2">
-                    perto de &quot;residente&quot;
-                  </Badge>
-                )}
-                {l.arquivo && (
-                  <span className="ml-2 text-slate-400">em {l.arquivo}</span>
-                )}
-                {l.forma === 'rotulado' && (
-                  <span className="ml-2 text-slate-400">(campo CIDADE/UF)</span>
-                )}
-                <span className="mt-0.5 block truncate text-slate-500">
-                  …{l.contexto}…
+                <span className={SUB}>
+                  {l.arquivo ? `em ${l.arquivo} · ` : ''}…{l.contexto}…
                 </span>
               </button>
             ))}
           </div>
-        </div>
+        </>
       )}
     </div>
   )
@@ -1264,26 +1304,22 @@ export function PainelCertidoes({
 
   // ---------------------------------------------------------------- gravação
 
-  async function salvarEGerar() {
+  /**
+   * A confirmação de remoção, numa janela da casa (a "Remover do crédito" da
+   * amostra) em vez do `window.confirm`. O TEXTO É O MESMO, e a regra também:
+   * sem o "sim" explícito, nada é gravado. `confirmado` só chega `true` pelo
+   * botão da janela — o botão de gravar chama sem argumento.
+   */
+  const [confirmandoRemocao, setConfirmandoRemocao] = useState(false)
+
+  async function salvarEGerar(confirmado = false) {
     if (problemas.length > 0) return
 
-    if (impacto.sujeitos.length > 0) {
-      const quem = impacto.sujeitos
-        .map((s) => `${s.papel} ${s.nome} (${formatCpfCnpjInput(s.documento)})`)
-        .join(', ')
-      const perda =
-        impacto.obtidas > 0
-          ? `\n\nATENÇÃO: ${impacto.obtidas} certidão(ões) JÁ OBTIDA(S) serão ` +
-            `apagadas do checklist, com o vínculo do arquivo no Drive. O arquivo ` +
-            `continua no Drive, mas o registro de que ele existe se perde.`
-          : ''
-      const segue = window.confirm(
-        `Isto vai REMOVER do crédito: ${quem}.\n` +
-          `E apagar ${impacto.certidoes} item(ns) do checklist dessa(s) pessoa(s).` +
-          `${perda}\n\nConfirma?`,
-      )
-      if (!segue) return
+    if (impacto.sujeitos.length > 0 && !confirmado) {
+      setConfirmandoRemocao(true)
+      return
     }
+    setConfirmandoRemocao(false)
 
     setSalvando(true)
     setErro(null)
@@ -1444,48 +1480,49 @@ export function PainelCertidoes({
 
   return (
     <div>
+      {/* OS ERROS VÊM PRIMEIRO, como na amostra: o que falhou ao ler é a primeira
+          coisa a saber, antes de confiar no que está abaixo. */}
+      {erro && (
+        <CaixaDeAviso tom="perigo" role="alert" className="mb-4">
+          {erro}
+        </CaixaDeAviso>
+      )}
+
+      {erroMunicipios && (
+        <CaixaDeAviso tom="perigo" className="mb-4">
+          {erroMunicipios}
+        </CaixaDeAviso>
+      )}
+
+      {erroLinks && (
+        <CaixaDeAviso tom="aviso" className="mb-4">
+          {erroLinks}
+        </CaixaDeAviso>
+      )}
+
       {/* A descrição era do modal e desceu para cá com ele: o painel divide a
           janela com outra aba, então o cabeçalho da janela não pode falar só de
           certidões. */}
-      <p className="mb-4 text-sm text-slate-600">
+      <p className="mb-4 text-corpo text-texto-3">
         {editando
           ? 'O checklist é montado por sujeito. Sem CPF e UF não há como saber quais certidões são exigidas.'
           : 'Checklist congelado no banco. A etapa documental só fecha com todas as obrigatórias em arquivo.'}
       </p>
 
-      {erro && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 ring-1 ring-inset ring-red-200">
-          {erro}
-        </div>
-      )}
-
-      {erroLinks && (
-        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
-          {erroLinks}
-        </div>
-      )}
-
-      {erroMunicipios && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 ring-1 ring-inset ring-red-200">
-          {erroMunicipios}
-        </div>
-      )}
-
       {carregando ? (
-        <div className="py-8 text-center text-sm text-slate-500">Carregando…</div>
+        <div className="py-8 text-center text-corpo text-texto-3">Carregando…</div>
       ) : editando ? (
-        <div className="space-y-5">
-          {/* ---------------- candidatos de CPF ---------------- */}
-          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-700">
-              <FileText className="h-4 w-4" />
+        <div>
+          {/* ---------------- o que achei nos anexos ---------------- */}
+          {/* UMA CAIXA SÓ, a `.soft-box` da amostra: CPF, nascimento, cidade,
+              estado civil e o texto colado de outra consulta são a mesma coisa —
+              achados para conferir e clicar —, e ficam juntos. */}
+          <CaixaSuave className="mb-3">
+            <b className="text-texto">
               O que achei nos anexos do card
-              {arquivos.length > 0 && (
-                <span className="font-normal text-slate-500">
-                  ({arquivos.length} arquivo{arquivos.length > 1 ? 's' : ''})
-                </span>
-              )}
-            </div>
+              {arquivos.length > 0 &&
+                ` (${arquivos.length} arquivo${arquivos.length > 1 ? 's' : ''})`}
+            </b>
 
             {/*
               ARQUIVO SEM TEXTO É DITO, não omitido.
@@ -1495,161 +1532,142 @@ export function PainelCertidoes({
               processo não tem" — que é falso. É a diferença entre "não consegui
               ler" e "não existe".
             */}
-            {digitalizados.length > 0 && (
-              <div className="mb-2 space-y-1 rounded-md bg-amber-50 p-2 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
-                {digitalizados.map((a, i) => (
-                  <div key={`${a.nome}-${i}`}>
-                    <strong>{a.nome || '(anexo sem nome)'}</strong>
-                    {a.erro
-                      ? ` — ${a.erro}`
-                      : ` — ${a.paginas} página(s) com só ${a.densidade} caractere(s) ` +
-                        `por página: é digitalização (o texto que tem é o rodapé de ` +
-                        `assinatura do tribunal). Se o nascimento ou o endereço ` +
-                        `estiverem só aí — foto de RG, comprovante de residência —, eu ` +
-                        `não leio: abra o arquivo e digite.`}
-                  </div>
-                ))}
-              </div>
-            )}
+            {digitalizados.map((a, i) => (
+              <DicaDeAviso key={`${a.nome}-${i}`}>
+                <b>{a.nome || '(anexo sem nome)'}</b>
+                {a.erro
+                  ? ` — ${a.erro}`
+                  : ` — ${a.paginas} página(s) com só ${a.densidade} caractere(s) ` +
+                    `por página: é digitalização (o texto que tem é o rodapé de ` +
+                    `assinatura do tribunal). Se o nascimento ou o endereço ` +
+                    `estiverem só aí — foto de RG, comprovante de residência —, eu ` +
+                    `não leio: abra o arquivo e digite.`}
+              </DicaDeAviso>
+            ))}
             {lendoPdf ? (
-              <p className="text-xs text-slate-500">Lendo o PDF do card…</p>
+              <p className="mt-2 flex items-center gap-2">
+                <RefreshCw className="h-[16px] w-[16px] animate-spin" aria-hidden />
+                Lendo o PDF do card…
+              </p>
             ) : candidatos.length > 0 ||
               doPdf.nascimentos.length > 0 ||
               doPdf.locais.length > 0 ||
               estadosCivis.length > 0 ||
               digitalizados.length > 0 ? (
               <>
+                {/* A EXPLICAÇÃO VEM ANTES DA LISTA, como na amostra: quem lê
+                    "escolher é seu" antes de ver os números não clica no primeiro
+                    por reflexo. */}
                 {candidatos.length > 0 && (
-                  <p className="mb-2 text-xs text-slate-600">
-                    Dígito verificador conferido. <strong>Escolher é seu</strong>: um
+                  <p className="mt-2 text-xs text-texto-3">
+                    Dígito verificador conferido. <b className="text-texto-2">Escolher é seu</b>: um
                     processo traz o CPF do cedente, do advogado e às vezes de terceiros —
                     o sistema não tem como saber qual é qual. A lista pode estar
                     incompleta: o PDF nem sempre entrega os números inteiros.
                   </p>
                 )}
                 {candidatos.length === 0 && (
-                  <p className="mb-2 text-xs text-amber-800">
+                  <p className="mt-2 text-xs text-aviso">
                     Nenhum CPF de dígito válido no texto — digite o do cedente abaixo,
                     conferindo no processo. O que achei do resto está logo abaixo.
                   </p>
                 )}
-                <div className="space-y-1.5">
-                  {candidatos.map((c) => (
-                    <button
-                      key={c.cpf}
-                      type="button"
-                      onClick={() =>
-                        alterar(setCedente)({ ...cedente, cpf: formatCpfCnpjInput(c.cpf) })
-                      }
-                      className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
-                    >
-                      <span className="font-mono font-medium text-slate-800">
-                        {formatCpfCnpjInput(c.cpf)}
-                      </span>
-                      {c.rotulado && (
-                        <Badge size="sm" tone="blue" className="ml-2">
-                          rotulado &quot;CPF&quot;
-                        </Badge>
-                      )}
-                      {c.arquivo && (
-                        <span className="ml-2 text-slate-400">em {c.arquivo}</span>
-                      )}
-                      <span className="mt-0.5 block truncate text-slate-500">
-                        …{c.contexto}…
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                {candidatos.length > 0 && (
+                  <div className="my-2 grid gap-2">
+                    {candidatos.map((c) => (
+                      <button
+                        key={c.cpf}
+                        type="button"
+                        onClick={() =>
+                          alterar(setCedente)({ ...cedente, cpf: formatCpfCnpjInput(c.cpf) })
+                        }
+                        className={CAND}
+                      >
+                        <span className="flex flex-wrap items-center gap-2">
+                          <b className="font-bold tabular-nums">{formatCpfCnpjInput(c.cpf)}</b>
+                          {c.rotulado && <Selo tom="info">rotulado &quot;CPF&quot;</Selo>}
+                        </span>
+                        <span className={SUB}>
+                          {c.arquivo ? `em ${c.arquivo} · ` : ''}…{c.contexto}…
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {(doPdf.nascimentos.length > 0 || doPdf.locais.length > 0) && (
+                  <Sugestoes
+                    nascimentos={doPdf.nascimentos}
+                    locais={doPdf.locais}
+                    onNascimento={(iso) => {
+                      setMexeu(true)
+                      setCedente((f) => ({ ...f, nascimento: iso }))
+                    }}
+                    onLocal={usarLocal}
+                    vazio=""
+                  />
+                )}
+
                 {/*
                   ESTADO CIVIL: é o que DOBRA o checklist.
                   Cedente casado tem bloco próprio de certidões para o cônjuge
                   (planilha, linhas 52 a 67). Deixar de marcar fecha o dossiê com
                   esse bloco inteiro faltando, e o placar não acusa nada — por isso
-                  a sugestão fica aqui, do lado do CPF, e não escondida na caixinha
-                  lá embaixo.
+                  a sugestão fica aqui, na caixa dos achados junto com o CPF, e não
+                  escondida na caixinha lá embaixo.
                 */}
                 {estadosCivis.length > 0 && (
-                  <div className="mt-3 border-t border-slate-200 pt-3">
-                    <div className="mb-1 text-xs text-slate-600">
-                      Estado civil na qualificação das partes — clicar já liga ou
-                      desliga o bloco do cônjuge:
-                    </div>
-                    <div className="space-y-1">
+                  <>
+                    <p className="mt-2 text-xs text-texto-2">
+                      <b className="text-texto">Estado civil</b> na qualificação das partes —
+                      clicar já liga ou desliga o bloco do cônjuge:
+                    </p>
+                    <div className="my-2 grid gap-2">
                       {estadosCivis.map((e) => (
                         <button
                           key={`${e.estado}-${e.conjuge ?? ''}`}
                           type="button"
                           onClick={() => usarEstadoCivil(e)}
-                          className="block w-full rounded-md bg-white p-2 text-left text-xs ring-1 ring-inset ring-slate-200 transition-colors hover:bg-brand-50 hover:ring-brand-300"
+                          className={CAND}
                         >
-                          <span className="font-medium text-slate-800">
-                            {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
-                          </span>
-                          {e.conjuge && (
-                            <span className="ml-2 text-slate-700">
-                              — cônjuge: {e.conjuge}
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span>
+                              {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
+                              {e.conjuge && ` — cônjuge: ${e.conjuge}`}
                             </span>
-                          )}
-                          {e.doCedente ? (
-                            <Badge size="sm" tone="blue" className="ml-2">
-                              perto do cedente
-                            </Badge>
-                          ) : (
-                            <Badge size="sm" tone="yellow" className="ml-2">
-                              pode ser de outra parte
-                            </Badge>
-                          )}
-                          <span className="ml-2 text-slate-400">em {e.arquivo}</span>
-                          <span className="mt-0.5 block truncate text-slate-500">
-                            …{e.contexto}…
+                            {e.doCedente ? (
+                              <Selo tom="info">perto do cedente</Selo>
+                            ) : (
+                              <Selo tom="aviso">pode ser de outra parte</Selo>
+                            )}
+                          </span>
+                          <span className={SUB}>
+                            em {e.arquivo} · …{e.contexto}…
                           </span>
                         </button>
                       ))}
                     </div>
-                    <p className="mt-1 text-xs text-amber-800">
+                    <p className="text-xs text-aviso">
                       A petição pode ser antiga: &quot;casada&quot; naquela data não
                       é &quot;casada hoje&quot;. Confirme antes de gerar o checklist.
                     </p>
-                  </div>
-                )}
-
-                {(doPdf.nascimentos.length > 0 || doPdf.locais.length > 0) && (
-                  <div
-                    className={
-                      candidatos.length > 0
-                        ? 'mt-3 border-t border-slate-200 pt-3'
-                        : 'mt-2'
-                    }
-                  >
-                    <Sugestoes
-                      nascimentos={doPdf.nascimentos}
-                      locais={doPdf.locais}
-                      onNascimento={(iso) => {
-                        setMexeu(true)
-                        setCedente((f) => ({ ...f, nascimento: iso }))
-                      }}
-                      onLocal={usarLocal}
-                      vazio=""
-                    />
-                  </div>
+                  </>
                 )}
               </>
             ) : avisoPdf ? (
-              <p className="text-xs text-slate-600">{avisoPdf}</p>
+              <DicaDeAviso>{avisoPdf}</DicaDeAviso>
             ) : temTexto ? (
               // Só se pode afirmar isto DEPOIS de ler o PDF. Sem texto, o certo é
               // dizer que não leu — não que o documento não tem CPF.
-              <p className="text-xs text-slate-600">
+              <p className="mt-2 text-xs">
                 Li o PDF e não achei nenhum CPF de dígito válido no texto. Pode ser que o
                 documento traga o número partido de um jeito que a busca não pega — digite
                 abaixo, conferindo no processo.
               </p>
             ) : (
-              <p className="text-xs text-slate-600">
+              <p className="mt-2 text-xs">
                 O PDF do card ainda não foi lido. Digite o CPF conferindo no processo.
               </p>
             )}
-          </div>
 
           {/* ---------------- colar de outra consulta ---------------- */}
           {/*
@@ -1666,16 +1684,16 @@ export function PainelCertidoes({
             (lib/dadosNoTexto.ts). Se um dia a Date Solutions tiver API, ligá-la é
             trocar de onde vem o texto — o resto já está feito.
           */}
-          <details className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
-            <summary className="cursor-pointer text-xs font-medium text-slate-700">
-              <ClipboardPaste className="mr-1 inline h-4 w-4" />
-              Colar resultado de outra consulta (Date Solutions, etc.)
-            </summary>
-            <div className="mt-2 space-y-2">
+            <details className="mt-2.5 text-corpo">
+              <summary className="cursor-pointer font-semibold text-marca-texto">
+                Colar resultado de outra consulta (Date Solutions, etc.)
+              </summary>
               <Textarea
                 value={colado}
                 onChange={(e) => setColado(e.target.value)}
-                rows={4}
+                rows={3}
+                aria-label="Resultado de outra consulta"
+                className="mt-2.5"
                 placeholder="Cole aqui o resultado da consulta do CEDENTE. Eu leio a data de nascimento e a cidade/UF; o resto do texto é ignorado e não fica guardado."
               />
               {colado.trim() && (
@@ -1698,92 +1716,102 @@ export function PainelCertidoes({
                   }
                 />
               )}
-              <p className="text-xs text-slate-500">
+              <p className="mt-2 text-xs text-texto-3">
                 Este texto NÃO é gravado. Só os campos em que você clicar entram no
                 cadastro — o resto morre quando a janela fecha.
               </p>
-            </div>
-          </details>
+            </details>
+          </CaixaSuave>
 
           {/* ---------------- leitura da IA ---------------- */}
+          {/* A `.ai-box` da amostra: o ícone, o que a IA fez (e os avisos dela) e
+              o botão à direita. O BOTÃO FICA À VISTA LENDO, desabilitado com
+              "Lendo…" — antes sumia, e a caixa parecia ter perdido a ação. */}
           {(lendoIA || leituraIA || temTexto) && (
-            <div className="rounded-lg bg-brand-50/60 p-3 ring-1 ring-inset ring-brand-200">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
-                  <Sparkles className="h-4 w-4 text-brand-600" />
+            <div className="my-3 flex items-start gap-2.5 rounded-campo border border-info-borda bg-marca-leve p-4 text-corpo">
+              <Sparkles className="mt-0.5 h-[16px] w-[16px] flex-none text-marca-texto" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <b className="text-texto">
                   {lendoIA
                     ? 'A IA está lendo a qualificação nos autos…'
                     : leituraIA
                       ? 'Cadastro lido dos autos pela IA — confira antes de gravar'
                       : 'A IA pode ler a qualificação do cedente nos autos'}
-                </div>
-                {!lendoIA && temTexto && (
-                  <Button size="sm" variant="outline" onClick={() => void lerComIA()}>
-                    {leituraIA ? 'Ler de novo' : 'Ler com a IA'}
-                  </Button>
-                )}
-              </div>
-              {leituraIA && (
-                <details className="mt-2 text-xs text-slate-600">
-                  <summary className="cursor-pointer text-brand-700">De onde saiu cada campo</summary>
-                  <ul className="mt-2 space-y-1.5">
-                    {(
-                      [
-                        ['Nome', leituraIA.cedente.nome],
-                        ['CPF', leituraIA.cedente.cpf],
-                        ['Nascimento', leituraIA.cedente.nascimento],
-                        ['Mãe', leituraIA.cedente.nome_mae],
-                        ['Estado civil', leituraIA.estado_civil],
-                        ['Cônjuge', leituraIA.conjuge?.nome ?? null],
-                        ['CPF do cônjuge', leituraIA.conjuge?.cpf ?? null],
-                      ] as [string, { valor: string; evidencia: string } | null][]
-                    )
-                      .filter(([, v]) => v)
-                      .map(([rotulo, v]) => (
-                        <li key={rotulo}>
-                          <strong className="text-slate-700">{rotulo}:</strong> {v!.valor}
-                          {v!.evidencia && <span className="text-slate-500"> — “{v!.evidencia}”</span>}
+                </b>
+                {(leituraIA?.avisos ?? []).map((a) => (
+                  <DicaDeAviso key={a}>{a}</DicaDeAviso>
+                ))}
+                {leituraIA && (
+                  <details className="mt-2 text-corpo text-texto-2">
+                    <summary className="cursor-pointer font-semibold text-marca-texto">
+                      De onde saiu cada campo
+                    </summary>
+                    <ul className="mt-2 space-y-1.5 text-xs">
+                      {(
+                        [
+                          ['Nome', leituraIA.cedente.nome],
+                          ['CPF', leituraIA.cedente.cpf],
+                          ['Nascimento', leituraIA.cedente.nascimento],
+                          ['Mãe', leituraIA.cedente.nome_mae],
+                          ['Estado civil', leituraIA.estado_civil],
+                          ['Cônjuge', leituraIA.conjuge?.nome ?? null],
+                          ['CPF do cônjuge', leituraIA.conjuge?.cpf ?? null],
+                        ] as [string, { valor: string; evidencia: string } | null][]
+                      )
+                        .filter(([, v]) => v)
+                        .map(([rotulo, v]) => (
+                          <li key={rotulo}>
+                            <b className="text-texto">{rotulo}:</b> {v!.valor}
+                            {v!.evidencia && <span className="text-texto-3"> — “{v!.evidencia}”</span>}
+                          </li>
+                        ))}
+                      {leituraIA.residencias.map((r) => (
+                        <li key={`${r.uf}|${r.municipio}`}>
+                          <b className="text-texto">
+                            {r.atual ? 'Residência atual' : 'Residência anterior'}:
+                          </b>{' '}
+                          {r.municipio ? `${r.municipio}/` : ''}
+                          {r.uf}
+                          {r.evidencia && <span className="text-texto-3"> — “{r.evidencia}”</span>}
                         </li>
                       ))}
-                    {leituraIA.residencias.map((r) => (
-                      <li key={`${r.uf}|${r.municipio}`}>
-                        <strong className="text-slate-700">
-                          {r.atual ? 'Residência atual' : 'Residência anterior'}:
-                        </strong>{' '}
-                        {r.municipio ? `${r.municipio}/` : ''}
-                        {r.uf}
-                        {r.evidencia && <span className="text-slate-500"> — “{r.evidencia}”</span>}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              {(leituraIA?.avisos ?? []).length > 0 && (
-                <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-amber-800">
-                  {leituraIA!.avisos.map((a) => (
-                    <li key={a}>{a}</li>
-                  ))}
-                </ul>
+                    </ul>
+                  </details>
+                )}
+              </div>
+              {temTexto && (
+                <Button
+                  variant="secondary"
+                  onClick={() => void lerComIA()}
+                  disabled={lendoIA}
+                  icon={
+                    lendoIA ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
+                    ) : undefined
+                  }
+                >
+                  {lendoIA ? 'Lendo…' : leituraIA ? 'Ler de novo' : 'Ler com a IA'}
+                </Button>
               )}
             </div>
           )}
 
           {preenchido.length > 0 && (
-            <div className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-900 ring-1 ring-inset ring-emerald-200">
-              Preenchi a partir do processo: <strong>{preenchido.join(' · ')}</strong>.
+            <CaixaDeAviso tom="sucesso" className="mb-3">
+              Preenchi a partir do processo: <b>{preenchido.join(' · ')}</b>.
               Confira antes de gerar — o trecho de onde saiu cada um está no painel
               acima.{' '}
               {leituraIA?.cedente.cpf
                 ? 'O CPF só entrou porque está escrito nos autos — confira se é mesmo de quem cede.'
                 : 'O CPF eu nunca preencho sozinho.'}
-            </div>
+            </CaixaDeAviso>
           )}
 
           {/* ---------------- cedente ---------------- */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-slate-800">Cedente</h4>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Nome completo" required>
+          <div>
+            <RotuloDeSecao className="mt-6">Cedente</RotuloDeSecao>
+            <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+              <Field label="Nome completo" required className="sm:col-span-2">
                 <Input
                   value={cedente.nome}
                   onChange={(e) => alterar(setCedente)({ ...cedente, nome: e.target.value })}
@@ -1868,26 +1896,27 @@ export function PainelCertidoes({
           </div>
 
           {/* ---------------- residência ---------------- */}
-          <div className="space-y-3 rounded-lg bg-amber-50/60 p-3 ring-1 ring-inset ring-amber-200">
-            <label className="flex cursor-pointer items-start gap-2">
+          {/* AS RESIDÊNCIAS ANTERIORES SEMPRE À VISTA, ao lado da caixa, e não
+              atrás dela: "não sei se morou em outro estado" e "não morou" são
+              respostas diferentes, e os campos valem marcados ou não. */}
+          <CaixaSuave aviso className="mt-4">
+            <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-corpo text-texto">
               <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                className={CAIXA_MARCAR}
                 checked={residenciaLevantada}
                 onChange={(e) => alterar(setResidenciaLevantada)(e.target.checked)}
               />
-              <span className="text-sm text-slate-800">
-                Levantei o histórico de residência do cedente
-                <span className="mt-0.5 block text-xs text-slate-600">
-                  Deixe desmarcado se não conferiu. &quot;Não sei se morou em outro
-                  estado&quot; e &quot;não morou&quot; são respostas diferentes, e a segunda
-                  dispensa certidão que a primeira não dispensa. Vale só para o cedente: o
-                  cônjuge entra sempre como não levantado, porque esta tela não pergunta o
-                  histórico dele.
-                </span>
-              </span>
+              Levantei o histórico de residência do cedente
             </label>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <p className="mt-1 text-xs text-texto-3">
+              Deixe desmarcado se não conferiu. &quot;Não sei se morou em outro
+              estado&quot; e &quot;não morou&quot; são respostas diferentes, e a segunda
+              dispensa certidão que a primeira não dispensa. Vale só para o cedente: o
+              cônjuge entra sempre como não levantado, porque esta tela não pergunta o
+              histórico dele.
+            </p>
+            <div className="mt-2.5 grid gap-x-5 gap-y-4 sm:grid-cols-2">
               <Field label="UFs anteriores" hint="Siglas separadas por vírgula: MG, SP">
                 <Input
                   value={ufsAnteriores}
@@ -1903,28 +1932,26 @@ export function PainelCertidoes({
                 />
               </Field>
             </div>
-          </div>
+          </CaixaSuave>
 
           {/* ---------------- cônjuge ---------------- */}
-          <div className="space-y-3">
-            <label className="flex cursor-pointer items-start gap-2">
+          <div className="mt-4">
+            <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-corpo text-texto">
               <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600"
+                className={CAIXA_MARCAR}
                 checked={temConjuge}
                 onChange={(e) => alterar(setTemConjuge)(e.target.checked)}
               />
-              <span className="text-sm font-semibold text-slate-800">
-                O cedente é casado / tem companheiro(a)
-                <span className="mt-0.5 block text-xs font-normal text-slate-600">
-                  A planilha dá bloco próprio de certidões ao cônjuge (linhas 52 a 67).
-                  Sem isto, o checklist fecha completo com esse bloco inteiro faltando.
-                  Desmarcar REMOVE o cônjuge já cadastrado e as certidões dele.
-                </span>
-              </span>
+              O cedente é casado / tem companheiro(a)
             </label>
+            <p className="ml-[24px] mt-0.5 text-xs text-texto-3">
+              A planilha dá bloco próprio de certidões ao cônjuge (linhas 52 a 67).
+              Sem isto, o checklist fecha completo com esse bloco inteiro faltando.
+              Desmarcar REMOVE o cônjuge já cadastrado e as certidões dele.
+            </p>
             {temConjuge && (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="mt-3 grid gap-x-5 gap-y-4 sm:grid-cols-2">
                 <Field label="Nome do cônjuge" required>
                   <Input
                     value={conjuge.nome}
@@ -2007,32 +2034,38 @@ export function PainelCertidoes({
           </div>
 
           {impacto.sujeitos.length > 0 && (
-            <div className="rounded-lg bg-red-50 p-3 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+            <CaixaDeAviso tom="perigo" className="mt-4">
               Gravar assim REMOVE{' '}
               {impacto.sujeitos.map((s) => `${s.papel} ${s.nome}`).join(', ')} e apaga{' '}
               {impacto.certidoes} item(ns) do checklist
               {impacto.obtidas > 0 && (
                 <>
-                  , dos quais <strong>{impacto.obtidas} já obtida(s)</strong>
+                  , dos quais <b>{impacto.obtidas} já obtida(s)</b>
                 </>
               )}
               . Vai pedir confirmação.
-            </div>
+            </CaixaDeAviso>
           )}
 
+          {/* O `.erros-lista` da amostra: o que falta para gravar, em vermelho e
+              com ícone — é o motivo de o botão abaixo estar desabilitado. */}
           {problemas.length > 0 && (
-            <ul className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 ring-1 ring-inset ring-slate-200">
+            <ul className="mt-4 grid gap-1">
               {problemas.map((p) => (
-                <li key={p}>• {p}</li>
+                <li key={p} className="flex items-start gap-1.5 text-corpo text-perigo">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+                  <span>{p}</span>
+                </li>
               ))}
             </ul>
           )}
         </div>
       ) : (
-        <div className="space-y-5">
+        <div>
           {/* ---------------- placar ---------------- */}
+          {/* Os `.kpis.five` da amostra: cinco cartões de número. */}
           {completude && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-5">
               {[
                 { r: 'Obrigatórias', v: completude.necessarias },
                 { r: 'Obtidas', v: completude.obtidas_validas },
@@ -2044,25 +2077,19 @@ export function PainelCertidoes({
                 // exigia. O número existia no banco e não aparecia na tela.
                 { r: 'Dispensadas', v: completude.dispensadas },
               ].map((c) => (
-                <div
-                  key={c.r}
-                  className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200"
-                >
-                  <div className="text-xs text-slate-500">{c.r}</div>
-                  <div className="text-xl font-semibold text-slate-800">{c.v}</div>
-                </div>
+                <StatCard key={c.r} label={c.r} value={c.v} />
               ))}
             </div>
           )}
 
           {completude && completude.necessarias > 0 && (
-            <div className="text-sm">
+            <p className="mb-2 text-corpo text-texto">
               {completude.obtidas_validas === completude.necessarias ? (
-                <span className="font-medium text-emerald-700">
+                <span className="font-semibold text-sucesso">
                   ✅ Documental completa — {completude.obtidas_validas} de{' '}
                   {completude.necessarias}
                   {completude.dispensadas > 0 && (
-                    <span className="text-amber-700">
+                    <span className="text-aviso">
                       {' '}
                       · {completude.dispensadas} dispensada(s) fora da conta
                     </span>
@@ -2070,24 +2097,25 @@ export function PainelCertidoes({
                   .
                 </span>
               ) : (
-                <span className="font-medium text-amber-700">
-                  ⏳ {completude.obtidas_validas} de {completude.necessarias} obtidas. A
-                  etapa documental não fecha até chegar a {completude.necessarias}.
+                <span className="inline-flex items-start gap-1.5">
+                  <Clock className="mt-0.5 h-[16px] w-[16px] flex-none text-aviso" aria-hidden />
+                  <span>
+                    {completude.obtidas_validas} de {completude.necessarias} obtidas. A
+                    etapa documental não fecha até chegar a {completude.necessarias}.
+                  </span>
                 </span>
               )}
-            </div>
+            </p>
           )}
 
           {/* ---------------- avisos ---------------- */}
+          {/* O `.avisos-placar` da amostra: uma lista âmbar, um aviso por item. */}
           {avisos.length > 0 && (
-            <div className="space-y-1.5 rounded-lg bg-amber-50 p-3 ring-1 ring-inset ring-amber-200">
+            <ul className="mb-3 mt-2 list-disc space-y-1 rounded-campo border border-aviso-borda bg-aviso-fundo py-3 pl-10 pr-4 text-corpo text-texto marker:text-aviso">
               {avisos.map((a) => (
-                <div key={a} className="flex gap-2 text-xs text-amber-900">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-                  <span>{a}</span>
-                </div>
+                <li key={a}>{a}</li>
               ))}
-            </div>
+            </ul>
           )}
 
           {/*
@@ -2111,76 +2139,76 @@ export function PainelCertidoes({
             NENHUMA delas é silêncio — inclusive a de não ter achado.
           */}
           {sujeitos.length > 0 && !respostaEstadoCivil.temConjugeCadastrado && (
-            <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
-              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-700">
-                <FileText className="h-4 w-4" />
-                Estado civil, segundo os anexos do card
+            // A `.ec-box` da amostra (estilo5.css): cabeçalho discreto, a resposta,
+            // o trecho do documento e a ação.
+            <div className="my-3 grid gap-2.5 rounded-campo border border-borda bg-superficie-2 px-[14px] py-3 text-corpo text-texto">
+              <div className="flex items-center gap-2 text-sm text-texto-2">
+                <FileText className="h-[16px] w-[16px] flex-none" aria-hidden />
+                <b>Estado civil, segundo os anexos do card</b>
                 {arquivos.length > 0 && (
-                  <span className="font-normal text-slate-500">
+                  <span className="text-xs text-texto-3">
                     ({arquivos.length} arquivo{arquivos.length > 1 ? 's' : ''})
                   </span>
                 )}
               </div>
 
               {lendoPdf ? (
-                <p className="text-xs text-slate-500">Lendo os anexos do card…</p>
+                <p className="text-xs text-texto-3">Lendo os anexos do card…</p>
               ) : respostaEstadoCivil.ancorado ? (
-                <div className="space-y-2">
-                  <div className="text-sm text-slate-800">
+                <>
+                  <p>
                     O processo qualifica{' '}
-                    <strong>
-                      {sujeitos.find((s) => s.papel === 'CEDENTE')?.nome ?? 'o cedente'}
-                    </strong>{' '}
+                    <b>{sujeitos.find((s) => s.papel === 'CEDENTE')?.nome ?? 'o cedente'}</b>{' '}
                     como{' '}
-                    <strong className="text-brand-700">
+                    <b className="text-marca-texto">
                       {ROTULO_ESTADO_CIVIL[respostaEstadoCivil.ancorado.estado] ??
                         respostaEstadoCivil.ancorado.estado}
-                    </strong>
+                    </b>
                     {respostaEstadoCivil.ancorado.conjuge && (
                       <>
-                        , cônjuge{' '}
-                        <strong>{respostaEstadoCivil.ancorado.conjuge}</strong>
+                        , cônjuge <b>{respostaEstadoCivil.ancorado.conjuge}</b>
                       </>
                     )}
                     .
-                  </div>
-                  <div className="rounded-md bg-white p-2 text-xs text-slate-500 ring-1 ring-inset ring-slate-200">
+                  </p>
+                  <div className="rounded-controle border border-borda bg-superficie px-3 py-2.5 text-sm text-texto-2">
                     …{respostaEstadoCivil.ancorado.contexto}…
                     {respostaEstadoCivil.ancorado.arquivo && (
-                      <span className="mt-0.5 block text-slate-400">
+                      <span className="mt-0.5 block text-xs text-texto-3">
                         em {respostaEstadoCivil.ancorado.arquivo}
                       </span>
                     )}
                   </div>
 
                   {PEDE_CONJUGE.has(respostaEstadoCivil.ancorado.estado) ? (
-                    <div className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 p-2 ring-1 ring-inset ring-amber-200">
-                      <span className="text-xs text-amber-900">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 rounded-controle border border-aviso-borda bg-aviso-fundo px-3 py-2.5 text-sm text-aviso">
+                      <AlertTriangle className="h-[16px] w-[16px] flex-none" aria-hidden />
+                      <span className="min-w-0 flex-[1_1_260px] text-texto">
                         Então faltam as certidões do cônjuge — o bloco das linhas 52 a
-                        67 da planilha. O placar acima <strong>não</strong> conta essa
+                        67 da planilha. O placar acima <b>não</b> conta essa
                         falta.
                       </span>
                       <Button
-                        size="sm"
+                        className="ml-auto"
                         onClick={() =>
                           cadastrarConjugeCom(respostaEstadoCivil.ancorado!)
                         }
                         disabled={salvando}
-                        icon={<Pencil className="h-4 w-4" />}
+                        icon={<Pencil className="h-4 w-4" aria-hidden />}
                       >
                         Cadastrar o cônjuge
                       </Button>
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-600">
+                    <p className="text-xs">
                       Sem cônjuge, o bloco de certidões dele não se aplica — e o aviso
-                      acima está respondido. <strong>Confira mesmo assim</strong>: o
+                      acima está respondido. <b>Confira mesmo assim</b>: o
                       documento pode ser de anos atrás, e estado civil muda.
                     </p>
                   )}
-                </div>
+                </>
               ) : respostaEstadoCivil.soltos.length > 0 ? (
-                <div className="space-y-2">
+                <>
                   {/*
                     Achei estado civil, mas NÃO consegui prendê-lo ao cedente. Numa
                     petição, a qualificação do advogado e a da parte contrária ficam
@@ -2188,47 +2216,43 @@ export function PainelCertidoes({
                     seria trocar "é do cedente" por "estava por perto". O trecho
                     aparece para a pessoa julgar; o sistema não julga.
                   */}
-                  <p className="text-xs text-amber-800">
+                  <p className="text-xs text-aviso">
                     Achei estado civil no processo, mas{' '}
-                    <strong>não consegui ligar ao nome nem ao CPF do cedente</strong> —
+                    <b>não consegui ligar ao nome nem ao CPF do cedente</b> —
                     numa petição isso costuma ser do advogado ou da outra parte. Leia o
                     trecho antes de usar:
                   </p>
-                  <div className="space-y-1">
-                    {respostaEstadoCivil.soltos.slice(0, 3).map((e) => (
-                      <div
-                        key={`${e.estado}-${e.conjuge ?? ''}`}
-                        className="rounded-md bg-white p-2 text-xs ring-1 ring-inset ring-slate-200"
-                      >
-                        <span className="font-medium text-slate-800">
-                          {ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}
-                        </span>
-                        {e.arquivo && (
-                          <span className="ml-2 text-slate-400">em {e.arquivo}</span>
-                        )}
-                        <span className="mt-0.5 block text-slate-500">…{e.contexto}…</span>
-                      </div>
-                    ))}
-                  </div>
+                  {respostaEstadoCivil.soltos.slice(0, 3).map((e) => (
+                    <div
+                      key={`${e.estado}-${e.conjuge ?? ''}`}
+                      className="rounded-controle border border-borda bg-superficie px-3 py-2.5 text-sm text-texto-2"
+                    >
+                      <b className="text-texto">{ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}</b>
+                      {e.arquivo && (
+                        <span className="ml-1.5 text-xs text-texto-3">em {e.arquivo}</span>
+                      )}
+                      <span className="mt-0.5 block">…{e.contexto}…</span>
+                    </div>
+                  ))}
                   <Button
-                    size="sm"
-                    variant="outline"
+                    variant="secondary"
+                    className="justify-self-start"
                     onClick={() => setEditando(true)}
                     disabled={salvando}
-                    icon={<Pencil className="h-4 w-4" />}
+                    icon={<Pencil className="h-4 w-4" aria-hidden />}
                   >
                     Abrir o cadastro para decidir
                   </Button>
-                </div>
+                </>
               ) : (
-                <div className="space-y-2">
+                <>
                   {/*
                     NÃO ACHEI ≠ NÃO É CASADA. É a regra da casa desde o começo, e o
                     lugar onde ela mais importa é justamente este: a leitura natural
                     de uma tela calada é "então não tem cônjuge", que fecha o dossiê
                     com um bloco inteiro faltando.
                   */}
-                  <p className="text-xs text-amber-800">
+                  <p className="text-xs text-aviso">
                     {arquivos.length === 0
                       ? 'Não consegui abrir nenhum anexo deste card.'
                       : temTexto
@@ -2239,30 +2263,28 @@ export function PainelCertidoes({
                         : `Nenhum d${arquivos.length > 1 ? 'os' : 'o'} ${
                             arquivos.length
                           } anexo${arquivos.length > 1 ? 's' : ''} tem texto para ler.`}{' '}
-                    <strong>
-                      &quot;Não achei&quot; não é &quot;não é casada&quot;
-                    </strong>{' '}
+                    <b>&quot;Não achei&quot; não é &quot;não é casada&quot;</b>{' '}
                     — confira a petição inicial e cadastre à mão.
                   </p>
                   {digitalizados.length > 0 && (
-                    <p className="text-xs text-amber-900">
+                    <p className="text-xs text-aviso">
                       E {digitalizados.length} anexo(s) são digitalização ou não
                       abriram:{' '}
-                      <strong>{digitalizados.map((a) => a.nome).join(', ')}</strong>. Se
+                      <b>{digitalizados.map((a) => a.nome).join(', ')}</b>. Se
                       a qualificação estiver só aí, ela está em imagem — e imagem eu
                       ainda não leio.
                     </p>
                   )}
                   <Button
-                    size="sm"
-                    variant="outline"
+                    variant="secondary"
+                    className="justify-self-start"
                     onClick={() => setEditando(true)}
                     disabled={salvando}
-                    icon={<Pencil className="h-4 w-4" />}
+                    icon={<Pencil className="h-4 w-4" aria-hidden />}
                   >
                     Cadastrar à mão
                   </Button>
-                </div>
+                </>
               )}
             </div>
           )}
@@ -2270,34 +2292,29 @@ export function PainelCertidoes({
           {/* ---------------- lista por sujeito ---------------- */}
           {sujeitos.map((s) => {
             const lista = porSujeito.get(s.id) ?? []
+            // O `.subj` da amostra: um bloco contornado por pessoa, com a faixa
+            // de cabeçalho (papel, nome, documento, onde mora, quantos itens).
             return (
-              <div key={s.id}>
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <Badge size="sm" tone="blue">
-                    {s.papel}
-                  </Badge>
-                  <span className="text-sm font-medium text-slate-800">{s.nome}</span>
-                  <span className="font-mono text-xs text-slate-500">
-                    {formatCpfCnpjInput(s.documento)}
-                  </span>
-                  <span className="text-xs text-slate-500">
+              <div key={s.id} className="my-3 overflow-hidden rounded-cartao border border-borda">
+                <div className="flex flex-wrap items-center gap-2 border-b border-borda bg-superficie-2 px-4 py-3 text-corpo">
+                  <Selo tom="info">{s.papel}</Selo>
+                  <b className="font-bold text-texto">{s.nome}</b>
+                  <span className="tabular-nums text-texto-3">
+                    {formatCpfCnpjInput(s.documento)} ·{' '}
                     {s.municipio_atual ? `${s.municipio_atual}/` : ''}
-                    {s.uf_atual ?? 'sem UF'}
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    · {lista.length} item(ns)
+                    {s.uf_atual ?? 'sem UF'} · {lista.length} item(ns)
                   </span>
                   {!s.residencia_levantada && (
-                    <Badge size="sm" tone="yellow">
+                    <Selo tom="aviso" icone={<AlertTriangle className={icSelo} aria-hidden />}>
                       residência não levantada
-                    </Badge>
+                    </Selo>
                   )}
                 </div>
-                <div className="overflow-hidden rounded-lg ring-1 ring-inset ring-slate-200">
+                <div>
                   {lista.length === 0 ? (
-                    <div className="p-3 text-xs text-slate-500">
+                    <p className="px-4 py-2 text-xs text-texto-3">
                       Nenhuma certidão gerada para este sujeito.
-                    </div>
+                    </p>
                   ) : (
                     lista.map((i) => (
                       <LinhaCertidao
@@ -2332,10 +2349,10 @@ export function PainelCertidoes({
           )}
 
           {sujeitos.length === 0 && (
-            <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+            <CaixaSuave>
               Nenhum sujeito cadastrado neste crédito. Clique em{' '}
-              <strong>Corrigir dados / cônjuge</strong> para começar pelo cedente.
-            </div>
+              <b>Corrigir dados / cônjuge</b> para começar pelo cedente.
+            </CaixaSuave>
           )}
         </div>
       )}
@@ -2343,13 +2360,15 @@ export function PainelCertidoes({
       {/* AS AÇÕES FICAM NO PAINEL, não no rodapé da janela. Eram do modal, e o
           rodapé agora é dividido com a aba de Processos Judiciais: "Gravar e
           montar checklist" ali embaixo pareceria valer para a janela toda. */}
-      <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4">
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-2.5 border-t border-borda pt-5">
         {editando ? (
           <Button
-            onClick={salvarEGerar}
+            // SEM ARGUMENTO, de propósito: o `true` de salvarEGerar é o "sim" da
+            // janela de remoção, e o evento do clique não pode passar por ele.
+            onClick={() => void salvarEGerar()}
             loading={salvando}
             disabled={problemas.length > 0}
-            icon={<Sparkles className="h-4 w-4" />}
+            icon={<Sparkles className="h-4 w-4" aria-hidden />}
           >
             Gravar e montar checklist
           </Button>
@@ -2359,7 +2378,7 @@ export function PainelCertidoes({
               variant="secondary"
               onClick={() => setEditando(true)}
               disabled={salvando}
-              icon={<Pencil className="h-4 w-4" />}
+              icon={<Pencil className="h-4 w-4" aria-hidden />}
             >
               Corrigir dados / cônjuge
             </Button>
@@ -2367,13 +2386,51 @@ export function PainelCertidoes({
               variant="outline"
               onClick={gerarFaltantes}
               loading={salvando}
-              icon={<Plus className="h-4 w-4" />}
+              icon={<Plus className="h-4 w-4" aria-hidden />}
             >
               Gerar itens faltantes
             </Button>
           </>
         )}
       </div>
+
+      {/* A "Remover do crédito" da amostra. O texto é o do confirm de antes,
+          palavra por palavra — inclusive o ATENÇÃO das certidões já obtidas. */}
+      <ConfirmDialog
+        open={confirmandoRemocao}
+        title="Remover do crédito"
+        danger
+        loading={salvando}
+        confirmLabel="Remover e gravar"
+        // SPANS EM BLOCO, e não <p>: o ConfirmDialog já embrulha a mensagem num
+        // <p>, e parágrafo dentro de parágrafo é HTML inválido.
+        message={
+          <>
+            <span className="block">
+              Isto vai REMOVER do crédito:{' '}
+              <b>
+                {impacto.sujeitos
+                  .map((s) => `${s.papel} ${s.nome} (${formatCpfCnpjInput(s.documento)})`)
+                  .join(', ')}
+              </b>
+              .
+            </span>
+            <span className="block">
+              E apagar {impacto.certidoes} item(ns) do checklist dessa(s) pessoa(s).
+            </span>
+            {impacto.obtidas > 0 && (
+              <span className="mt-3 block">
+                ATENÇÃO: {impacto.obtidas} certidão(ões) JÁ OBTIDA(S) serão apagadas do
+                checklist, com o vínculo do arquivo no Drive. O arquivo continua no
+                Drive, mas o registro de que ele existe se perde.
+              </span>
+            )}
+            <span className="mt-3 block">Confirma?</span>
+          </>
+        }
+        onConfirm={() => void salvarEGerar(true)}
+        onClose={() => setConfirmandoRemocao(false)}
+      />
     </div>
   )
 }

@@ -18,12 +18,19 @@ export interface TabItem {
   disabled?: boolean
 }
 
+/** O `id` de cada aba quando há `idDoPainel` — o que o painel cita no `aria-labelledby`. */
+export function idDaAba(idDoPainel: string, indice: number): string {
+  return `${idDoPainel}-aba-${indice}`
+}
+
 export function Tabs({
   items,
   value,
   onChange,
   trailing,
   trailingNaBorda,
+  rotulo,
+  idDoPainel,
 }: {
   items: TabItem[]
   value: string
@@ -51,6 +58,18 @@ export function Tabs({
    * seção, e colado nas abas se leria como se filtrasse a aba aberta.
    */
   trailingNaBorda?: boolean
+  /**
+   * O nome do grupo de abas para o leitor de tela ("Seções do quadro"). Sem ele,
+   * a lista de abas é anunciada sem dizer do que é.
+   */
+  rotulo?: string
+  /**
+   * O `id` do painel que mostra a aba aberta, quando as abas trocam o conteúdo de
+   * UM painel só (a moldura do Quadro). A aba aberta passa a apontar para ele
+   * (`aria-controls`), e cada aba ganha o `id` de `idDaAba`, para o painel dizer
+   * de qual aba é (`aria-labelledby`).
+   */
+  idDoPainel?: string
 }) {
   // Refs dos botões para mover o foco na navegação por setas.
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -78,12 +97,16 @@ export function Tabs({
   // item mais alto, então ela continua definindo a altura da linha e o
   // sublinhado da aba ativa segue encostado na borda de baixo.
   return (
-    <div className="flex items-center gap-3 border-b border-slate-200">
+    <div className="flex items-center gap-3 border-b border-borda">
       {/* Sem `flex-1`: a régua de abas fica com a largura do conteúdo, para o
           `trailing` encostar nela. Com flex-1 ela esticaria e empurraria o
           conteúdo para a borda da página. `min-w-0` mantém o scroll horizontal
           funcionando quando as abas não couberem. */}
-      <div role="tablist" className="flex min-w-0 gap-1 overflow-x-auto scrollbar-thin">
+      <div
+        role="tablist"
+        aria-label={rotulo}
+        className="flex min-w-0 gap-1 overflow-x-auto scrollbar-thin"
+      >
         {items.map((item, index) => {
           const active = item.key === value
           return (
@@ -92,20 +115,27 @@ export function Tabs({
               ref={(el) => {
                 tabRefs.current[index] = el
               }}
+              id={idDoPainel ? idDaAba(idDoPainel, index) : undefined}
               role="tab"
               aria-selected={active}
+              // SÓ A ABA ABERTA aponta para o painel: há um painel só, com o
+              // conteúdo dela; as outras não controlam nada que exista na tela.
+              aria-controls={idDoPainel && active ? idDoPainel : undefined}
               // Roving tabindex: só a aba ativa entra na ordem de tabulação.
               tabIndex={active ? 0 : -1}
               disabled={item.disabled}
               onClick={() => onChange(item.key)}
               onKeyDown={(e) => handleKeyDown(e, index)}
               className={cn(
-                'font-display flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors',
+                // O `.tabs button` da amostra: 14px na fonte do corpo, cinza
+                // secundário, e a aberta em azul com o sublinhado no azul da
+                // logomarca. A desabilitada fica no cinza de metadado, apagada.
+                'flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-corpo font-semibold transition-colors',
                 item.disabled
-                  ? 'cursor-not-allowed border-transparent text-slate-400'
+                  ? 'cursor-not-allowed border-transparent text-texto-3 opacity-60'
                   : active
-                    ? 'border-brand-500 text-brand-700'
-                    : 'border-transparent text-slate-500 hover:border-brand-200 hover:text-slate-700',
+                    ? 'border-marca-viva text-marca-texto'
+                    : 'border-transparent text-texto-2 hover:border-borda-forte hover:text-texto',
               )}
             >
               {item.icon}
@@ -114,7 +144,7 @@ export function Tabs({
                 <span
                   className={cn(
                     'rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums',
-                    active ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-600',
+                    active ? 'bg-marca-suave text-marca-texto' : 'bg-superficie-3 text-texto-2',
                   )}
                 >
                   {item.count}

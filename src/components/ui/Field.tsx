@@ -10,10 +10,21 @@ import {
 } from 'react'
 import { cn } from '@/lib/cn'
 
+/**
+ * O `.inp` da amostra, com duas diferenças conscientes:
+ * - A BORDA É `borda-controle` (3,4:1 no branco), e não a `--border-strong` da
+ *   amostra (1,6:1): um campo vazio precisa ser visto como campo (WCAG 1.4.11).
+ *   O teste de contraste cobra isso.
+ * - 35px de altura (6 + 21 de linha + 6 + 2 de borda), e não 38: fica a 2px do
+ *   botão médio (33px) nas barras de filtro, em vez de 5.
+ * Texto em 14px (`corpo`), o mesmo do texto corrido. O erro (aria-invalid, que o
+ * Field põe) pinta a borda de vermelho além da mensagem embaixo.
+ */
 const baseControl =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 ' +
-  'placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 ' +
-  'focus:ring-brand-100 disabled:cursor-not-allowed disabled:bg-slate-50'
+  'w-full rounded-campo border border-borda-controle bg-superficie px-4 py-2 text-corpo text-texto ' +
+  'placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] ' +
+  'focus:ring-anel/20 aria-[invalid=true]:border-perigo ' +
+  'disabled:cursor-not-allowed disabled:bg-superficie-3 disabled:text-texto-2'
 
 /**
  * Liga rótulo, dica e erro ao controle.
@@ -59,23 +70,25 @@ export function Field({
     invalido: !!error,
   }
   return (
-    <div className={cn('space-y-1', className)}>
+    // Rótulo de 14px em seminegrito, 6px até o campo e 6px até a dica — o
+    // `.field` da amostra.
+    <div className={cn('space-y-2', className)}>
       {label && (
-        <label htmlFor={id} className="block text-sm font-medium text-slate-700">
+        <label htmlFor={id} className="block text-corpo font-semibold text-texto">
           {label}
-          {required && <span className="ml-0.5 text-red-500">*</span>}
+          {required && <span className="ml-0.5 text-perigo">*</span>}
         </label>
       )}
       <FieldContext.Provider value={ctx}>{children}</FieldContext.Provider>
       {hint && !error && (
-        <p id={idDica} className="text-xs text-slate-600">
+        <p id={idDica} className="text-xs text-texto-3">
           {hint}
         </p>
       )}
       {/* role="alert": erro que aparece depois do Salvar precisa ser anunciado,
           senão quem usa leitor de tela fica esperando sem saber que falhou. */}
       {error && (
-        <p id={idErro} role="alert" className="text-xs text-red-600">
+        <p id={idErro} role="alert" className="text-xs font-semibold text-perigo">
           {error}
         </p>
       )}

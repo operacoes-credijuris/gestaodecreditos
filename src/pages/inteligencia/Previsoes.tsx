@@ -9,21 +9,17 @@
 // preciso saber QUAIS são, e isso não pode depender de rodar SQL no banco.
 
 import { useState, type ReactNode } from 'react'
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LabelList,
-} from 'recharts'
-import { ChevronDown } from 'lucide-react'
-import { PageHeader } from '@/components/ui/PageHeader'
-import { Card, CardBody, CardHeader } from '@/components/ui/Card'
-import { StatCard } from '@/components/ui/StatCard'
-import { Table, THead, TH, TBody, TR, TD, EmptyState, ErrorState } from '@/components/ui/Table'
-import { CHART } from '@/lib/chartColors'
-import { formatBRL, formatCNJ, formatDate } from '@/lib/format'
+import { AlertTriangle, ArrowRight, CalendarClock, ChevronDown, Wallet } from 'lucide-react'
+import { Table, THead, TH, TBody, TR, TD, EmptyState } from '@/components/ui/Table'
+import { cn } from '@/lib/cn'
+import { formatCNJ, formatDate } from '@/lib/format'
 import type { OperacaoAnalitica } from '../../../supabase/functions/_shared/nucleo/tipos.ts'
 import {
-  usePainel, CarregandoPainel, LinhaMetrica, SeloAmostra,
+  usePainel, CarregandoPainel, ErroPainel, CabecalhoDaAba, Painel, Metricas, LinhaMetrica,
+  SeloAmostra, CartaoNumero, GradeCartoes, ICONE_CARTAO, ProcessoOuRef, TABELA_NO_PAINEL,
   brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
+import { GraficoPrevisoes } from './graficos'
 
 function rotuloMes(iso: string): string {
   const [ano, mes] = iso.split('-').map(Number)
@@ -50,7 +46,27 @@ function brlCurto(v: number): string {
 /** Chave do bloco de incalculáveis, que não vem do núcleo como os outros. */
 const INCALCULAVEIS = '__incalculaveis__'
 
-/** Número clicável que abre a lista. Sublinhado tracejado = "tem mais aqui". */
+/**
+ * O selo de cada bloco sem mês (Novo: "blocos sem mês com selo de cor e
+ * ícone"), sempre com ícone e texto: vencida em vermelho com alerta, sem
+ * previsão neutro, complementar em azul com seta.
+ */
+function SeloDoBloco({ rotulo }: { rotulo: string }) {
+  const estilo =
+    rotulo === 'Previsão vencida'
+      ? { cor: 'border-perigo-borda bg-perigo-fundo text-perigo', Icone: AlertTriangle }
+      : rotulo === 'Complementar a receber'
+        ? { cor: 'border-info-borda bg-info-fundo text-info', Icone: ArrowRight }
+        : { cor: 'border-transparent bg-superficie-3 text-texto-2', Icone: null }
+  return (
+    <span className={cn('inline-flex h-[22px] items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-xs font-semibold', estilo.cor)}>
+      {estilo.Icone && <estilo.Icone className="h-[13px] w-[13px]" aria-hidden />}
+      {rotulo}
+    </span>
+  )
+}
+
+/** Número clicável que abre a lista (o `.link-btn` da amostra, com a seta que gira). */
 function BotaoVer({
   aberto, onClick, children,
 }: {
@@ -63,11 +79,11 @@ function BotaoVer({
       type="button"
       onClick={onClick}
       aria-expanded={aberto}
-      className="rounded font-medium text-brand-700 underline decoration-dotted underline-offset-2 hover:text-brand-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+      className="-ml-2 inline-flex h-[28px] items-center gap-1.5 rounded-controle px-2 text-sm font-semibold tabular-nums text-marca-texto transition-colors hover:bg-marca-leve"
     >
       {children}
       <ChevronDown
-        className={`ml-0.5 inline h-3.5 w-3.5 transition-transform ${aberto ? 'rotate-180' : ''}`}
+        className={cn('h-[14px] w-[14px] transition-transform', aberto && 'rotate-180')}
         aria-hidden
       />
     </button>
@@ -79,7 +95,7 @@ function BotaoVer({
  *
  * Existe porque "3 operações sem data prevista" não é acionável: para tirar uma
  * operação desse bloco alguém precisa abrir o processo, e para isso precisa
- * saber qual é. O `ref` (8 caracteres do UUID) não serve para ninguém.
+ * saber qual é. Sem CNJ, aparece o identificador interno — com a dica de por quê.
  */
 function ListaOperacoes({
   titulo, operacoes, complementar = false, mostrarAtraso = false, motivo = false,
@@ -92,37 +108,39 @@ function ListaOperacoes({
 }) {
   if (operacoes.length === 0) return null
   return (
-    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+    <div className="mx-6 mb-4 mt-1 rounded-campo border border-borda bg-superficie-2 px-4 py-3">
+      <p className="mb-1.5 font-display text-xs font-bold uppercase tracking-wider text-texto-3">
         {titulo} · {operacoes.length}{' '}
         {operacoes.length === 1 ? 'operação' : 'operações'}
       </p>
-      <Table dense>
+      <Table className="[&_td]:px-3 [&_td]:py-1.5 [&_td]:text-sm [&_th]:px-3 [&_th]:py-1.5">
         <THead>
-          <TH>Processo</TH>
-          <TH>Tribunal</TH>
-          <TH>Ente devedor</TH>
-          <TH>Aquisição</TH>
-          <TH className="text-right">{complementar ? 'Complementar' : 'Valor'}</TH>
-          {mostrarAtraso && <TH className="text-right">Vencida há</TH>}
-          {motivo && <TH>O que falta</TH>}
+          <tr>
+            <TH>Processo</TH>
+            <TH>Tribunal</TH>
+            <TH>Ente devedor</TH>
+            <TH>Aquisição</TH>
+            <TH className="text-right">{complementar ? 'Complementar' : 'Valor'}</TH>
+            {mostrarAtraso && <TH className="text-right">Vencida há</TH>}
+            {motivo && <TH>O que falta</TH>}
+          </tr>
         </THead>
         <TBody>
           {operacoes.map((o) => (
             <TR key={o.ref}>
-              <TD className="whitespace-nowrap font-mono text-xs text-slate-600">
-                {o.numeroCnj ? formatCNJ(o.numeroCnj) : o.ref}
+              <TD>
+                <ProcessoOuRef cnj={o.numeroCnj ? formatCNJ(o.numeroCnj) : null} refInterna={o.ref} />
               </TD>
               <TD>{o.tribunal ?? '—'}</TD>
               <TD>{o.ente ?? '—'}</TD>
-              <TD>{formatDate(o.dataAquisicao)}</TD>
-              <TD className="text-right tabular-nums">
+              <TD className="whitespace-nowrap tabular-nums">{formatDate(o.dataAquisicao)}</TD>
+              <TD className="whitespace-nowrap text-right tabular-nums">
                 {brl(complementar ? o.valorComplementar : o.valor)}
               </TD>
               {mostrarAtraso && (
-                <TD className="text-right tabular-nums">{dias(o.diasVencida)}</TD>
+                <TD className="whitespace-nowrap text-right tabular-nums">{dias(o.diasVencida)}</TD>
               )}
-              {motivo && <TD className="text-slate-600">{o.motivoSemValor ?? '—'}</TD>}
+              {motivo && <TD className="text-texto-3">{o.motivoSemValor ?? '—'}</TD>}
             </TR>
           ))}
         </TBody>
@@ -132,11 +150,11 @@ function ListaOperacoes({
 }
 
 export default function Previsoes() {
-  const { painel, carregando, erro } = usePainel()
+  const { painel, carregando, erro, tentarDeNovo } = usePainel()
   const [aberto, setAberto] = useState<string | null>(null)
 
   if (carregando) return <CarregandoPainel />
-  if (erro || !painel) return <ErrorState message="Não foi possível carregar a carteira." />
+  if (erro || !painel) return <ErroPainel tentarDeNovo={tentarDeNovo} />
 
   const { forecast, ajuste, aderencia } = painel
   const dados = forecast.meses.map((m) => ({ mes: rotuloMes(m.mes), valor: m.valor, n: m.operacoes }))
@@ -158,10 +176,10 @@ export default function Previsoes() {
   const parcelasSemMes = forecast.blocos.map((b) => b.rotulo.toLowerCase()).join(' e ')
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Previsões e recebimentos"
-        description={
+    <div className="space-y-5">
+      <CabecalhoDaAba
+        titulo="Previsões e recebimentos"
+        apoio={
           forecast.blocos.length
             ? `Valor nominal previsto por mês, mais ${parcelasSemMes}.`
             : 'Valor nominal previsto por mês.'
@@ -169,116 +187,66 @@ export default function Previsoes() {
       />
       <AvisoParametros />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard
-          label="Previsto com mês definido"
-          value={brl(forecast.totalFuturo)}
-          hint="Soma do valor projetado das operações abertas cuja data prevista ainda não passou."
+      {/* OS CARTÕES GANHARAM ÍCONE (Novo, só visual); o tom vermelho/âmbar da
+          previsão vencida é o de sempre. */}
+      <GradeCartoes>
+        <CartaoNumero
+          rotulo="Previsto com mês definido"
+          valor={brl(forecast.totalFuturo)}
+          icone={<CalendarClock className={ICONE_CARTAO} />}
+          dica="Soma do valor projetado das operações abertas cuja data prevista ainda não passou."
         />
-        <StatCard
-          label="Previsão vencida"
-          value={brl(vencidas?.valor ?? 0)}
-          tone={forecast.fracaoVencida > 0.2 ? 'red' : 'amber'}
-          hint={EXPLICA.vencida}
+        <CartaoNumero
+          rotulo="Previsão vencida"
+          valor={brl(vencidas?.valor ?? 0)}
+          tom={forecast.fracaoVencida > 0.2 ? 'perigo' : 'aviso'}
+          icone={<AlertTriangle className={ICONE_CARTAO} />}
+          dica={EXPLICA.vencida}
         />
-        <StatCard
-          label="Total a receber"
-          value={brl(forecast.totalGeral)}
-          tone="slate"
-          hint="Tudo somado: meses futuros, previsão vencida, sem previsão e complementar."
+        <CartaoNumero
+          rotulo="Total a receber"
+          valor={brl(forecast.totalGeral)}
+          icone={<Wallet className={ICONE_CARTAO} />}
+          dica="Tudo somado: meses futuros, previsão vencida, sem previsão e complementar."
         />
-      </div>
+      </GradeCartoes>
 
-      <Card>
-        <CardHeader
-          title="Operações a receber por mês"
-          description="A altura é o número de operações. Acima de cada barra, o valor previsto para o mês."
-        />
-        <CardBody>
-          {dados.length === 0 ? (
-            <EmptyState
-              title="Nenhuma previsão futura"
-              description="Nenhuma operação em aberto tem data prevista à frente de hoje."
-            />
-          ) : (
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={dados}
-                  margin={{ top: 24, right: 8, bottom: 4, left: 8 }}
-                  barCategoryGap="18%"
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} vertical={false} />
-                  <XAxis
-                    dataKey="mes"
-                    tick={{ fontSize: 12, fill: CHART.label }}
-                    tickLine={false}
-                    axisLine={false}
-                    interval={0}
-                  />
-                  {/* Contagem: só inteiros. Meia operação não existe, e o eixo
-                      não deve sugerir que exista. */}
-                  <YAxis
-                    tick={{ fontSize: 12, fill: CHART.label }}
-                    tickLine={false}
-                    axisLine={false}
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    cursor={{ fill: CHART.grid, fillOpacity: 0.4 }}
-                    labelStyle={{ color: CHART.ink }}
-                    formatter={(v: number, _n, p) => {
-                      const valor = (p?.payload as { valor: number })?.valor ?? 0
-                      return [
-                        `${v} ${v === 1 ? 'operação' : 'operações'} · ${formatBRL(valor)}`,
-                        'Previsto',
-                      ]
-                    }}
-                  />
-                  {/* Altura = número de operações; o valor vem como rótulo.
-                      Uma variável, uma codificação: a cor é a mesma em todas as
-                      barras e não disputa leitura com a altura.
-
-                      A contagem na altura compara melhor que o dinheiro: são
-                      inteiros pequenos, e a diferença entre 2 e 5 operações se
-                      enxerga de longe. Já o valor varia em ordens de grandeza,
-                      e é mais útil lido exato do que estimado numa régua. */}
-                  <Bar dataKey="n" radius={[4, 4, 0, 0]} fill={CHART.primary}>
-                    <LabelList
-                      dataKey="valor"
-                      position="top"
-                      offset={8}
-                      fontSize={11}
-                      fill={CHART.label}
-                      formatter={(v: number) => brlCurto(v)}
-                    />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </CardBody>
-      </Card>
+      <Painel
+        titulo="Operações a receber por mês"
+        apoio="A altura é o número de operações. Acima de cada barra, o valor previsto para o mês."
+      >
+        {dados.length === 0 ? (
+          <EmptyState
+            title="Nenhuma previsão futura"
+            description="Nenhuma operação em aberto tem data prevista à frente de hoje."
+          />
+        ) : (
+          <GraficoPrevisoes dados={dados} rotuloDaBarra={brlCurto} />
+        )}
+      </Painel>
 
       {forecast.blocos.length > 0 && (
-        <Card>
-          <CardHeader
-            title="Valores sem mês atribuível"
-            description="Ficam fora do gráfico de propósito. Clique no número de operações para ver quais são."
-          />
-          <CardBody>
-            <Table>
+        <Painel
+          titulo="Valores sem mês atribuível"
+          apoio="Ficam fora do gráfico de propósito. Clique no número de operações para ver quais são."
+        >
+          <div className="border-t border-borda">
+            <Table className={TABELA_NO_PAINEL}>
               <THead>
-                <TH>Bloco</TH>
-                <TH className="text-right">Operações</TH>
-                <TH className="text-right">Valor</TH>
-                <TH>Por que fica de fora</TH>
+                <tr>
+                  <TH>Bloco</TH>
+                  <TH className="text-right">Operações</TH>
+                  <TH className="text-right">Valor</TH>
+                  <TH>Por que fica de fora</TH>
+                </tr>
               </THead>
               <TBody>
                 {forecast.blocos.map((b) => (
                   <TR key={b.rotulo}>
-                    <TD className="font-medium text-slate-800">{b.rotulo}</TD>
-                    <TD className="text-right tabular-nums">
+                    <TD>
+                      <SeloDoBloco rotulo={b.rotulo} />
+                    </TD>
+                    <TD className="text-right">
                       <BotaoVer
                         aberto={aberto === b.rotulo}
                         onClick={() => setAberto(aberto === b.rotulo ? null : b.rotulo)}
@@ -286,43 +254,47 @@ export default function Previsoes() {
                         {b.operacoes}
                       </BotaoVer>
                     </TD>
-                    <TD className="text-right tabular-nums">{brl(b.valor)}</TD>
-                    <TD className="text-slate-600">{b.motivo}</TD>
+                    <TD className="whitespace-nowrap text-right tabular-nums">{brl(b.valor)}</TD>
+                    <TD className="text-texto-3">{b.motivo}</TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
+          </div>
 
-            {blocoAberto && (
+          {blocoAberto && (
+            <div className="pt-3">
               <ListaOperacoes
                 titulo={blocoAberto.rotulo}
                 operacoes={blocoAberto.refs.map((r) => porRef.get(r)).filter(Boolean) as OperacaoAnalitica[]}
                 complementar={blocoAberto.rotulo === 'Complementar a receber'}
                 mostrarAtraso={blocoAberto.rotulo === 'Previsão vencida'}
               />
-            )}
+            </div>
+          )}
 
-            {incalculaveis.length > 0 && (
-              <div className="mt-4 border-t border-slate-200 pt-3">
-                <p className="text-xs text-slate-500">
-                  <BotaoVer
-                    aberto={aberto === INCALCULAVEIS}
-                    onClick={() => setAberto(aberto === INCALCULAVEIS ? null : INCALCULAVEIS)}
-                  >
-                    {incalculaveis.length}
-                  </BotaoVer>{' '}
-                  {incalculaveis.length === 1 ? 'operação aberta não teve' : 'operações abertas não tiveram'}{' '}
-                  o valor projetado calculado, por falta de índice de atualização ou de parâmetro.
-                  Não entram em nenhum total — contá-las como zero afirmaria que não há nada a
-                  receber, quando o que falta é cadastro.
-                </p>
-                {aberto === INCALCULAVEIS && (
-                  <ListaOperacoes titulo="Sem valor projetado" operacoes={incalculaveis} motivo />
-                )}
-              </div>
-            )}
-          </CardBody>
-        </Card>
+          {incalculaveis.length > 0 ? (
+            <div className="border-t border-borda pb-1 pt-3">
+              <p className="px-6 pb-3 text-xs text-texto-3">
+                <BotaoVer
+                  aberto={aberto === INCALCULAVEIS}
+                  onClick={() => setAberto(aberto === INCALCULAVEIS ? null : INCALCULAVEIS)}
+                >
+                  {incalculaveis.length}
+                </BotaoVer>{' '}
+                {incalculaveis.length === 1 ? 'operação aberta não teve' : 'operações abertas não tiveram'}{' '}
+                o valor projetado calculado, por falta de índice de atualização ou de parâmetro.
+                Não entram em nenhum total — contá-las como zero afirmaria que não há nada a
+                receber, quando o que falta é cadastro.
+              </p>
+              {aberto === INCALCULAVEIS && (
+                <ListaOperacoes titulo="Sem valor projetado" operacoes={incalculaveis} motivo />
+              )}
+            </div>
+          ) : (
+            <div className="h-3" />
+          )}
+        </Painel>
       )}
 
       {/* A estimativa ajustada só aparece quando existe de fato.
@@ -337,34 +309,32 @@ export default function Previsoes() {
           instalado em 11/08 já grava. Enquanto isso não existir, o card não
           tem por que ocupar a tela. */}
       {ajuste.disponivel && (
-        <Card>
-          <CardHeader
-            title="Estimativa ajustada pelo histórico"
-            description="Corrige as datas previstas pelo desvio que a carteira historicamente apresenta."
-          />
-          <CardBody>
+        <Painel
+          titulo="Estimativa ajustada pelo histórico"
+          apoio="Corrige as datas previstas pelo desvio que a carteira historicamente apresenta."
+        >
+          <Metricas className="pb-3">
             <LinhaMetrica rotulo="Desvio mediano observado" valor={dias(ajuste.desvioMediano)} destaque />
             <LinhaMetrica rotulo="Percentil 75 do desvio" valor={dias(ajuste.desvioP75)} />
-            <p className="mt-3 text-xs text-slate-500">{ajuste.metodologia}</p>
-          </CardBody>
-        </Card>
+          </Metricas>
+          <p className="px-6 pb-5 text-xs text-texto-3">{ajuste.metodologia}</p>
+        </Painel>
       )}
 
       {aderencia.n > 0 && (
-        <Card>
-          <CardHeader
-            title="Aderência histórica"
-            description="Diferença entre a última previsão registrada e o pagamento efetivo."
-            action={
-              <SeloAmostra
-                n={aderencia.n}
-                classe={aderencia.representatividade.classe}
-                rotulo={aderencia.representatividade.rotulo}
-                explicacao={aderencia.representatividade.explicacao}
-              />
-            }
-          />
-          <CardBody>
+        <Painel
+          titulo="Aderência histórica"
+          apoio="Diferença entre a última previsão registrada e o pagamento efetivo."
+          acao={
+            <SeloAmostra
+              n={aderencia.n}
+              classe={aderencia.representatividade.classe}
+              rotulo={aderencia.representatividade.rotulo}
+              explicacao={aderencia.representatividade.explicacao}
+            />
+          }
+        >
+          <Metricas>
             <LinhaMetrica rotulo="Desvio mediano" valor={dias(aderencia.desvioDias.mediana)} explicacao={EXPLICA.mediana} destaque />
             <LinhaMetrica rotulo="Desvio médio" valor={dias(aderencia.desvioDias.media)} explicacao={EXPLICA.media} />
             <LinhaMetrica rotulo="Mais adiantado" valor={dias(aderencia.desvioDias.minimo)} />
@@ -376,8 +346,8 @@ export default function Previsoes() {
               valor={aderencia.semPrevisao}
               explicacao="Ficam fora da conta. A maior parte entrou no sistema já paga, na importação da carteira."
             />
-          </CardBody>
-        </Card>
+          </Metricas>
+        </Painel>
       )}
     </div>
   )

@@ -5,9 +5,8 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type ReactNode,
 } from 'react'
-import { Plus, Search, Flame, Star, FileText } from 'lucide-react'
+import { Plus, Flame, Star, FileText, X, Clock, Users } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invokeFunction } from '@/lib/functions'
 import { processosCrud, requerimentosCrud, apensosCrud } from '@/lib/queries'
@@ -16,6 +15,17 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Field, Input, Textarea } from '@/components/ui/Field'
+import { CampoDeBusca, Partes, TituloDoGrupo } from '@/components/operacional/Pecas'
+import { casaBusca } from '@/lib/buscaDaTela'
+import {
+  agruparPorPrazo,
+  diasAtePrazo,
+  GRUPOS_DO_PRAZO,
+  seloDoPrazo,
+  type GrupoDoPrazo,
+  type TomDoPrazo,
+} from '@/lib/prazoDasTarefas'
+import { tarefaAlterada } from '@/lib/formularioDaTarefa'
 import { Segmented } from '@/components/ui/Segmented'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Modal } from '@/components/ui/Modal'
@@ -26,13 +36,8 @@ import type { Apenso, Processo } from '@/lib/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import {
-  formatCNJ,
-  formatNome,
-  normalizarBusca,
-  onlyDigits as dig,
-  sentenceCase,
-} from '@/lib/format'
+import { formatCNJ, formatNome, onlyDigits as dig, sentenceCase } from '@/lib/format'
+import { perguntarDescarte } from '@/lib/descarte'
 
 // ---------- Tipos vindos da Edge Function advbox-tarefas ----------
 interface TarefaAdvbox {
@@ -101,7 +106,7 @@ function Observacao({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-0.5 text-sm font-normal text-slate-600">
+    <div className="mt-1 text-corpo font-normal text-texto-2">
       <div
         ref={ref}
         className={cn('whitespace-normal break-words', !expanded && 'line-clamp-3')}
@@ -112,7 +117,8 @@ function Observacao({ text }: { text: string }) {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-0.5 font-medium text-brand-600 hover:underline"
+          aria-expanded={expanded}
+          className="mt-0.5 min-h-[24px] text-sm font-semibold text-marca-texto hover:underline"
         >
           {expanded ? 'ler menos' : 'ler mais'}
         </button>
@@ -126,38 +132,8 @@ const MESES = [
   'jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez',
 ]
 
-// Diferença em dias inteiros entre duas datas ISO (YYYY-MM-DD), horário local.
-function diffDias(fromISO: string, toISO: string): number {
-  const a = new Date(`${fromISO}T00:00:00`).getTime()
-  const b = new Date(`${toISO}T00:00:00`).getTime()
-  return Math.round((b - a) / 86400000)
-}
-
-type Urgencia = 'danger' | 'warning' | 'neutral'
-
-// Classifica o prazo fatal: vence hoje/amanhã (vermelho), nesta semana
-// (âmbar) ou depois/sem prazo (neutro). Também devolve o rótulo relativo.
-function prazoInfo(
-  deadline: string | null | undefined,
-  hoje: string,
-): { tone: Urgencia; rel: string } | null {
-  if (!deadline) return null
-  const n = diffDias(hoje, deadline.slice(0, 10))
-  // Prazo ESTOURADO tem rótulo próprio. Desde que as vencidas deixaram de ser
-  // escondidas (elas ficam no grupo "Vencidas"), `n` negativo passou a ser
-  // possível — e caía no ramo de hoje/amanhã, então um atraso de nove meses saía
-  // rotulado "· hoje", contradizendo o bloco de data ao lado no mesmo cartão.
-  if (n < 0) {
-    const dias = -n
-    return {
-      tone: 'danger',
-      rel: dias === 1 ? 'venceu ontem' : `venceu há ${dias} dias`,
-    }
-  }
-  if (n <= 1) return { tone: 'danger', rel: n === 0 ? 'hoje' : 'amanhã' }
-  if (n <= 7) return { tone: 'warning', rel: `em ${n} dias` }
-  return { tone: 'neutral', rel: '' }
-}
+// O prazo — grupo, cor e texto relativo — mora em lib/prazoDasTarefas.ts, com
+// teste: o grupo e a cor do selo dizem a mesma coisa e não podem discordar.
 
 // Dia + mês abreviado para o bloco de calendário.
 function diaMes(iso?: string | null): { dia: string; mes: string } | null {
@@ -167,23 +143,25 @@ function diaMes(iso?: string | null): { dia: string; mes: string } | null {
   return { dia: String(dt.getDate()).padStart(2, '0'), mes: MESES[dt.getMonth()] }
 }
 
-const TONE_BAR: Record<Urgencia, string> = {
-  danger: 'bg-red-500',
-  warning: 'bg-amber-500',
-  // Neutro na cor da marca (e não cinza): a régua de urgência continua sendo
-  // vermelho > âmbar > calmo, só que "calmo" agora também é Credijuris.
-  neutral: 'bg-brand-200',
+// A folhinha do calendário na cor do prazo (a amostra): vermelho até amanhã,
+// âmbar até 7 dias, e a superfície neutra depois disso.
+const TOM_CALENDARIO: Record<TomDoPrazo, string> = {
+  perigo: 'border-perigo-borda bg-perigo-fundo text-perigo',
+  aviso: 'border-aviso-borda bg-aviso-fundo text-aviso',
+  neutro: 'border-borda bg-superficie-2 text-texto',
 }
-const TONE_BLOCK: Record<Urgencia, string> = {
-  danger: 'bg-red-50 text-red-700',
-  warning: 'bg-amber-50 text-amber-700',
-  neutral: 'bg-brand-50 text-brand-700',
+// O selo do prazo, com ícone (a amostra): a cor nunca sozinha.
+const TOM_SELO: Record<TomDoPrazo, string> = {
+  perigo: 'bg-perigo-fundo text-perigo ring-perigo-borda',
+  aviso: 'bg-aviso-fundo text-aviso ring-aviso-borda',
+  neutro: 'bg-superficie-3 text-texto-2 ring-borda',
 }
-// Pílula do prazo relativo ("hoje", "em 3 dias", "venceu há N dias").
-const TONE_PILL: Record<Urgencia, string> = {
-  danger: 'bg-red-50 text-red-700 ring-red-200',
-  warning: 'bg-amber-50 text-amber-700 ring-amber-200',
-  neutral: 'bg-slate-100 text-slate-600 ring-slate-200',
+// O título de cada grupo pede ação na mesma cor do prazo dele.
+const TOM_GRUPO: Record<GrupoDoPrazo, 'perigo' | 'aviso' | 'neutro'> = {
+  vencidas: 'perigo',
+  hoje_amanha: 'perigo',
+  proximos_7: 'aviso',
+  mais_adiante: 'neutro',
 }
 
 /** Iniciais para o avatar do responsável ("Luiz Guilherme…" → "LG"). */
@@ -310,37 +288,31 @@ export default function TarefasAdvbox() {
   // número do processo é comparado também por dígito, porque na tela ele aparece
   // formatado — colar o número cru não achava nada. Mesmo padrão das outras
   // telas.
+  //
+  // BUSCA MAIS LARGA (item "Novo" da amostra): também as PARTES do crédito da
+  // tarefa — o cedente e o cessionário que o cartão mostra sob o número. Com 4
+  // dígitos ou mais, o número casa com qualquer campo (lib/buscaDaTela.ts).
   const baseBusca = useMemo(() => {
-    const q = normalizarBusca(busca)
-    if (!q) return tarefas
-    const qd = dig(busca)
+    if (!busca.trim()) return tarefas
     return tarefas.filter((t) => {
-      const texto = normalizarBusca(
-        [t.tipo, t.processo, t.notes, ...(t.responsaveis ?? [])]
-          .filter(Boolean)
-          .join(' '),
+      const cred = resolveCredito(t.processo ?? '')
+      return casaBusca(
+        [t.tipo, t.processo, t.notes, ...(t.responsaveis ?? []), cred?.cedente, cred?.cessionario],
+        busca,
       )
-      if (texto.includes(q)) return true
-      return qd.length >= 4 && dig(t.processo).includes(qd)
     })
-  }, [tarefas, busca])
+  }, [tarefas, busca, resolveCredito])
 
-  // Fatais viram dois grupos (Pendentes / Vencidas); Sem prazo segue lista
-  // única — sem termo final não há o que vencer.
-  const { pendentes, vencidas, semPrazo } = useMemo(() => {
-    const prazo = (t: TarefaAdvbox) => (t.date_deadline || '').slice(0, 10)
+  // AS FATAIS EM QUATRO GRUPOS PELO PRAZO (item "Novo" da amostra): Vencidas,
+  // Hoje e amanhã, Próximos 7 dias e Mais adiante — no lugar de "Pendentes" e
+  // "Vencidas", com as vencidas embaixo. O que pede ação vem primeiro. Sem prazo
+  // segue lista única: sem termo final não há o que vencer.
+  const { grupos, fatais, semPrazo } = useMemo(() => {
     const dataRef = (t: TarefaAdvbox) => t.start_date || t.created_at || ''
     const comPrazo = baseBusca.filter((t) => !!t.date_deadline)
     return {
-      // Pendentes: prazo mais próximo primeiro — é o que aperta.
-      pendentes: comPrazo
-        .filter((t) => prazo(t) >= hoje)
-        .sort((a, b) => prazo(a).localeCompare(prazo(b))),
-      // Vencidas: a que estourou há menos tempo no topo; quanto mais fundo na
-      // lista, mais velho o atraso.
-      vencidas: comPrazo
-        .filter((t) => prazo(t) < hoje)
-        .sort((a, b) => prazo(b).localeCompare(prazo(a))),
+      grupos: agruparPorPrazo(comPrazo, hoje, (t) => t.date_deadline),
+      fatais: comPrazo.length,
       // Sem prazo: data mais nova primeiro.
       semPrazo: baseBusca
         .filter((t) => !t.date_deadline)
@@ -348,128 +320,113 @@ export default function TarefasAdvbox() {
     }
   }, [baseBusca, hoje])
 
-  const contagemPrazo = useMemo(
-    () => ({
-      fatais: pendentes.length + vencidas.length,
-      sem_prazo: semPrazo.length,
-    }),
-    [pendentes, vencidas, semPrazo],
-  )
+  const contagemPrazo = { fatais, sem_prazo: semPrazo.length }
 
-  const vazio =
-    filtroPrazo === 'fatais'
-      ? pendentes.length === 0 && vencidas.length === 0
-      : semPrazo.length === 0
+  const vazio = filtroPrazo === 'fatais' ? fatais === 0 : semPrazo.length === 0
 
   // Cartão de uma tarefa. Função (e não JSX inline) porque os grupos
-  // Pendentes e Vencidas renderizam o mesmo cartão.
+  // renderizam o mesmo cartão — o desenho é o da amostra: a folhinha do
+  // calendário, o tipo com os selos, o número e as partes, a observação, os
+  // responsáveis e "Gerar petição" no canto.
   const card = (t: TarefaAdvbox) => {
     const cred = resolveCredito(t.processo ?? '')
-    const partes =
-      cred && (cred.cedente || cred.cessionario)
-        ? `${cred.cedente || '—'} v. ${cred.cessionario || '—'}`
-        : ''
-    const prazo = prazoInfo(t.date_deadline, hoje)
-    const tone: Urgencia = prazo?.tone ?? 'neutral'
+    const prazo = t.date_deadline ? seloDoPrazo(diasAtePrazo(hoje, t.date_deadline)) : null
+    const tom: TomDoPrazo = prazo?.tom ?? 'neutro'
     const bloco = diaMes(t.date_deadline || t.start_date)
     const resp = t.responsaveis ?? []
     return (
-      <div
+      <Card
         key={t.id}
-        className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-brand-950/[0.03] transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md hover:shadow-brand-950/[0.08]"
+        className="grid grid-cols-1 items-start gap-4 px-5 py-4 sm:grid-cols-[56px_minmax(0,1fr)_auto]"
       >
-        <div className={cn('absolute inset-y-0 left-0 w-1.5', TONE_BAR[tone])} />
-        {/* flex-wrap: o bloco de responsáveis é flex-none. Numa tela de 375px,
-            sem a quebra, o conteúdo ficava espremido a 52px de largura — o
-            `truncate` que havia aqui escondia o aperto em vez de resolver. Com a
-            quebra, os responsáveis descem para a linha de baixo quando não
-            cabem. No desktop tudo continua numa linha só. */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-4 p-4 pl-5">
-          {/* Folhinha de calendário: o prazo é O dado desta tela, então ele é o
-              maior elemento do cartão. */}
-          <div
-            className={cn(
-              'flex w-14 flex-none flex-col items-center rounded-xl py-2',
-              TONE_BLOCK[tone],
-            )}
-          >
-            {bloco ? (
-              <>
-                <div className="font-display text-2xl font-extrabold leading-none tracking-tight">
-                  {bloco.dia}
-                </div>
-                <div className="mt-1 text-xs font-semibold uppercase leading-none tracking-wider">
-                  {bloco.mes}
-                </div>
-              </>
-            ) : (
-              <div className="py-2 text-sm">—</div>
-            )}
-          </div>
-          {/* min-w é o que FORÇA a quebra: sem um piso, o flex encolhe esta
-              coluna até caber o resto na mesma linha, e foi assim que ela chegou
-              a 52px. */}
-          <div className="min-w-[11rem] flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-display text-base font-bold tracking-tight text-slate-900">
-                {t.tipo ? sentenceCase(t.tipo) : '—'}
+        {/* Folhinha de calendário: o prazo é O dado desta tela, então ele é o
+            maior elemento do cartão. No celular ela sai — o selo diz o prazo. */}
+        <div
+          className={cn(
+            'hidden w-14 flex-col items-center rounded-campo border py-1.5 text-center sm:flex',
+            TOM_CALENDARIO[tom],
+          )}
+          aria-hidden="true"
+        >
+          {bloco ? (
+            <>
+              <div className="font-display text-xl font-bold leading-none tabular-nums">
+                {bloco.dia}
+              </div>
+              <div className="mt-1 text-xs font-semibold uppercase leading-none tracking-wider">
+                {bloco.mes}
+              </div>
+            </>
+          ) : (
+            <div className="py-1.5 text-sm">—</div>
+          )}
+        </div>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-display text-base font-bold tracking-tight text-texto">
+              {t.tipo ? sentenceCase(t.tipo) : '—'}
+            </span>
+            {prazo?.rel && (
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
+                  TOM_SELO[tom],
+                )}
+              >
+                {tom === 'perigo' ? (
+                  <X className="h-3 w-3" aria-hidden="true" />
+                ) : (
+                  <Clock className="h-3 w-3" aria-hidden="true" />
+                )}
+                {prazo.rel}
               </span>
-              {prazo?.rel && (
-                <span
-                  className={cn(
-                    'rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
-                    TONE_PILL[tone],
-                  )}
-                >
-                  {prazo.rel}
-                </span>
-              )}
-              {t.urgent && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 ring-1 ring-inset ring-red-200">
-                  <Flame className="h-3 w-3" /> Urgente
-                </span>
-              )}
-              {t.important && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
-                  <Star className="h-3 w-3" /> Importante
-                </span>
-              )}
-            </div>
-            {/* Sem truncate: medido a 375px, esta linha mostrava 9% do conteúdo
-                — e as PARTES do processo, que é o que identifica a tarefa de
-                relance, ficavam invisíveis. Quebrar em duas linhas custa altura;
-                esconder o nome da parte custa o entendimento. */}
-            <div className="mt-1 break-words text-sm text-slate-600">
-              {/* Mesmo componente da tela de Créditos: o clique no número tem de
-                  levar à mesma pasta nas duas telas. `cred` é o crédito que a tarefa
-                  casou — nulo quando o processo não está cadastrado, e aí o número
-                  aparece como texto comum. */}
-              <NumeroProcessoDrive processo={cred} numero={t.processo} />
-              {partes && (
-                <span className="text-slate-500"> · {partes}</span>
-              )}
-            </div>
-            {t.notes && <Observacao text={t.notes} />}
+            )}
+            {t.urgent && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-perigo-fundo px-2.5 py-1 text-xs font-semibold text-perigo ring-1 ring-inset ring-perigo-borda">
+                <Flame className="h-3 w-3" aria-hidden="true" /> Urgente
+              </span>
+            )}
+            {t.important && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-aviso-fundo px-2.5 py-1 text-xs font-semibold text-aviso ring-1 ring-inset ring-aviso-borda">
+                <Star className="h-3 w-3" aria-hidden="true" /> Importante
+              </span>
+            )}
           </div>
-          {/* Responsáveis: um chip com avatar de iniciais por pessoa — cada
-              nome é uma unidade que não quebra; com vários, a quebra cai ENTRE
-              chips. flex-none: só ocupa o que precisa, e a coluna de conteúdo
-              (flex-1) cede o espaço. O max-w é só teto para lista longa. */}
+          {/* Sem truncate: medido a 375px, esta linha mostrava 9% do conteúdo
+              — e as PARTES do processo, que é o que identifica a tarefa de
+              relance, ficavam invisíveis. Quebrar em duas linhas custa altura;
+              esconder o nome da parte custa o entendimento. */}
+          <div className="mt-1 break-words text-corpo text-texto-2">
+            {/* Mesmo componente da tela de Créditos: o clique no número tem de
+                levar à mesma pasta nas duas telas. `cred` é o crédito que a tarefa
+                casou — nulo quando o processo não está cadastrado, e aí o número
+                aparece como texto comum. */}
+            <NumeroProcessoDrive
+              processo={cred}
+              numero={t.processo}
+              className="font-semibold tabular-nums text-texto"
+            />
+            {cred && (cred.cedente || cred.cessionario) && (
+              <>
+                {' · '}
+                <Partes a={cred.cedente} b={cred.cessionario} />
+              </>
+            )}
+          </div>
+          {t.notes && <Observacao text={t.notes} />}
+          {/* Responsáveis: um chip com as iniciais por pessoa — cada nome é uma
+              unidade que não quebra; com vários, a quebra cai ENTRE chips. */}
           {resp.length > 0 && (
-            // justify-end: com mais de um responsável os chips empilham, e
-            // alinhados à esquerda ficavam "soltos" no meio do cartão — a borda
-            // direita alinhada com o botão dá o encaixe.
-            <div className="flex max-w-[20rem] flex-none flex-wrap items-center justify-end gap-1.5">
+            <div className="mt-2 flex flex-wrap gap-1.5">
               {resp.map((r, i) => (
                 <span
                   key={i}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-brand-900 ring-1 ring-inset ring-brand-100"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-superficie-3 py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-texto-2"
                 >
-                  {/* text-[10px] e leading-none, não text-xs: o círculo tem 6
-                      (18px na densidade de 12px do html), e duas letras em text-xs
-                      com a entrelinha padrão ficavam mais altas que ele — a
-                      inicial vazava por cima da borda. */}
-                  <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold leading-none text-white">
+                  <span
+                    aria-hidden="true"
+                    className="font-display grid h-[22px] w-[22px] flex-none place-items-center rounded-full bg-marca-suave text-xs font-bold leading-none text-marca-texto"
+                  >
                     {iniciais(r)}
                   </span>
                   {formatNome(r)}
@@ -477,15 +434,19 @@ export default function TarefasAdvbox() {
               ))}
             </div>
           )}
+        </div>
+        <div className="flex sm:justify-end">
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             title="Gerar petição"
             icon={<FileText className="h-4 w-4" />}
             onClick={() => setPeticaoDe(t)}
-          />
+          >
+            Gerar petição
+          </Button>
         </div>
-      </div>
+      </Card>
     )
   }
 
@@ -493,6 +454,7 @@ export default function TarefasAdvbox() {
     <div>
       <PageHeader
         title="Tarefas"
+        description="Prazos dos processos, sincronizados com o ADVBOX."
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNovo(true)}>
             Nova tarefa
@@ -500,31 +462,24 @@ export default function TarefasAdvbox() {
         }
       />
 
-      <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <Segmented
-            ariaLabel="Filtrar tarefas por prazo"
-            items={[
-              { key: 'fatais', label: 'Fatais', count: contagemPrazo.fatais },
-              { key: 'sem_prazo', label: 'Sem prazo', count: contagemPrazo.sem_prazo },
-            ]}
-            value={filtroPrazo}
-            onChange={(k) => setFiltroPrazo(k as typeof filtroPrazo)}
-          />
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-            <Input
-              className="pl-9"
-              placeholder="Buscar por tipo, processo, responsável…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
-          </div>
-        </div>
-      </Card>
-
-      {/* A lista recarrega em silêncio ao focar a janela; o indicador avisa. */}
-      <div className="mb-2">
+      {/* A BARRA DA AMOSTRA, sem cartão: o filtro de prazo, a busca e, no canto,
+          a sincronização — a lista recarrega em silêncio ao focar a janela, e o
+          indicador avisa. */}
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center">
+        <Segmented
+          ariaLabel="Filtrar tarefas por prazo"
+          items={[
+            { key: 'fatais', label: 'Fatais', count: contagemPrazo.fatais },
+            { key: 'sem_prazo', label: 'Sem prazo', count: contagemPrazo.sem_prazo },
+          ]}
+          value={filtroPrazo}
+          onChange={(k) => setFiltroPrazo(k as typeof filtroPrazo)}
+        />
+        <CampoDeBusca
+          valor={busca}
+          onChange={setBusca}
+          placeholder="Buscar por tipo, processo, responsável…"
+        />
         <SyncStatus
           syncing={isFetching}
           updatedAt={dataUpdatedAt}
@@ -538,46 +493,56 @@ export default function TarefasAdvbox() {
         </Card>
       ) : isError ? (
         <Card>
-          <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         </Card>
       ) : data?.sem_correspondencia ? (
         // Lista vazia por falta de vínculo, não por ausência de trabalho — dizer
         // isso evita que a pessoa conclua que não tem tarefas.
-        <Card className="p-4">
-          <p className="text-sm font-medium text-slate-800">
-            Perfil não encontrado no ADVBOX
-          </p>
-          <p className="mt-1 text-sm text-slate-600">
-            {data.perfil_nome
-              ? `O nome do seu perfil ("${data.perfil_nome}") não corresponde a nenhum usuário do ADVBOX`
-              : 'Seu perfil está sem nome cadastrado'}
-            , então não há como identificar quais tarefas são suas. Peça a um
-            administrador para acertar o nome em Configurações → Usuários,
-            exatamente como aparece no ADVBOX.
-          </p>
+        <Card>
+          <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+            <div className="grid h-16 w-16 place-items-center rounded-cartao bg-marca-suave text-marca-texto">
+              <Users className="h-7 w-7" aria-hidden="true" />
+            </div>
+            <p className="font-display text-lg font-bold text-texto">
+              Perfil não encontrado no ADVBOX
+            </p>
+            <p className="max-w-md text-corpo text-texto-2">
+              {data.perfil_nome
+                ? `O nome do seu perfil ("${data.perfil_nome}") não corresponde a nenhum usuário do ADVBOX`
+                : 'Seu perfil está sem nome cadastrado'}
+              , então não há como identificar quais tarefas são suas. Peça a um
+              administrador para acertar o nome em Configurações → Usuários,
+              exatamente como aparece no ADVBOX.
+            </p>
+          </div>
         </Card>
       ) : vazio ? (
+        // O VAZIO DIZ POR QUE ESTÁ VAZIO (a amostra): a busca, a visão sem prazo,
+        // ou de fato nada com prazo no ADVBOX.
         <Card>
-          <EmptyState title="Nenhuma tarefa" />
+          <EmptyState
+            title="Nenhuma tarefa"
+            description={
+              busca.trim()
+                ? 'Nenhuma tarefa corresponde à busca.'
+                : filtroPrazo === 'sem_prazo'
+                  ? 'Nenhuma tarefa sem prazo no ADVBOX.'
+                  : 'Nada com prazo no ADVBOX por enquanto.'
+            }
+          />
         </Card>
       ) : filtroPrazo === 'sem_prazo' ? (
-        <div className="space-y-3">{semPrazo.map(card)}</div>
+        <div className="space-y-2">{semPrazo.map(card)}</div>
       ) : (
         <div className="space-y-6">
-          <Secao titulo="Pendentes" qtd={pendentes.length}>
-            {pendentes.length ? (
-              <div className="space-y-3">{pendentes.map(card)}</div>
-            ) : (
-              <p className="text-sm text-slate-600">Nenhuma tarefa pendente.</p>
-            )}
-          </Secao>
-          <Secao titulo="Vencidas" qtd={vencidas.length}>
-            {vencidas.length ? (
-              <div className="space-y-3">{vencidas.map(card)}</div>
-            ) : (
-              <p className="text-sm text-slate-600">Nenhuma tarefa vencida.</p>
-            )}
-          </Secao>
+          {/* Só os grupos com tarefa (a amostra): um grupo vazio no meio da lista
+              só afasta o próximo prazo de quem está olhando. */}
+          {GRUPOS_DO_PRAZO.filter((g) => grupos[g.chave].length > 0).map((g) => (
+            <section key={g.chave}>
+              <TituloDoGrupo titulo={g.titulo} qtd={grupos[g.chave].length} tom={TOM_GRUPO[g.chave]} />
+              <div className="space-y-2">{grupos[g.chave].map(card)}</div>
+            </section>
+          ))}
         </div>
       )}
 
@@ -615,32 +580,6 @@ export default function TarefasAdvbox() {
   )
 }
 
-/** Cabeçalho de seção: "Título (n) ————————" (mesmo padrão de Publicações). */
-function Secao({
-  titulo,
-  qtd,
-  children,
-}: {
-  titulo: string
-  qtd: number
-  children: ReactNode
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2.5 pt-1">
-        <span className="font-display text-sm font-bold uppercase tracking-wide text-brand-800">
-          {titulo}
-        </span>
-        <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-brand-800">
-          {qtd}
-        </span>
-        <div className="h-px flex-1 bg-slate-200" />
-      </div>
-      {children}
-    </div>
-  )
-}
-
 // Opção do combobox: número do processo + descrição já resolvida
 // (Cedente v. Cessionário, Requerimento administrativo, etc.).
 interface LawOpt {
@@ -665,6 +604,12 @@ export function NovaTarefaModal({
   const toast = useToast()
   const { profile, isAdmin } = useAuth()
   const [form, setForm] = useState<FormState>({ ...FORM_VAZIO })
+  /**
+   * O processo com que a janela ABRIU escolhida (o da publicação). Guardado à
+   * parte porque chega depois, quando a lista do ADVBOX carrega — e o que a tela
+   * preencheu sozinha não pode contar como alteração no "Descartar alterações?".
+   */
+  const [processoInicial, setProcessoInicial] = useState<number | null>(null)
 
   const opcoes = useQuery({
     queryKey: ['advbox-tarefas-options'],
@@ -739,12 +684,16 @@ export function NovaTarefaModal({
   useEffect(() => {
     if (!open) {
       setForm({ ...FORM_VAZIO })
+      setProcessoInicial(null)
       return
     }
     if (!processoNumero) return
     const d = dig(processoNumero)
     const found = lawOptions.find((o) => dig(o.numero) === d)
-    if (found) setForm((f) => (f.lawsuit_id ? f : { ...f, lawsuit_id: found.id }))
+    if (found) {
+      setForm((f) => (f.lawsuit_id ? f : { ...f, lawsuit_id: found.id }))
+      setProcessoInicial((atual) => atual ?? found.id)
+    }
   }, [open, lawOptions, processoNumero])
 
   const criar = useMutation({
@@ -813,6 +762,19 @@ export function NovaTarefaModal({
     setForm((f) => (f.from ? f : { ...f, from: String(meuUsuarioAdvbox.id) }))
   }, [open, escolheRemetente, meuUsuarioAdvbox])
 
+  // "DESCARTAR ALTERAÇÕES?" (item "Novo" da amostra): fechar com algo escolhido
+  // ou digitado pergunta antes. O que a tela preencheu sozinha não conta
+  // (lib/formularioDaTarefa.ts, com teste).
+  const dirty =
+    open &&
+    !semRemetente &&
+    tarefaAlterada(form, { processoInicial, escolheRemetente })
+
+  async function fechar() {
+    if (dirty && !(await perguntarDescarte())) return
+    onClose()
+  }
+
   const opcoesProcesso = useMemo<OpcaoCombo[]>(
     () =>
       lawOptions.map((l) => ({
@@ -837,9 +799,10 @@ export function NovaTarefaModal({
       onClose={onClose}
       title="Nova tarefa"
       size="lg"
+      dirty={dirty}
       footer={
         <>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={fechar}>
             Cancelar
           </Button>
           <Button
@@ -858,14 +821,14 @@ export function NovaTarefaModal({
       ) : opcoes.isError ? (
         <ErrorState
           message={(opcoes.error as Error)?.message}
-          onRetry={() => void opcoes.refetch()}
+          onRetry={() => opcoes.refetch()}
         />
       ) : semRemetente ? (
         <div className="space-y-1">
-          <p className="text-sm font-medium text-slate-800">
+          <p className="text-corpo font-semibold text-texto">
             Perfil não encontrado no ADVBOX
           </p>
-          <p className="text-sm text-slate-600">
+          <p className="text-corpo text-texto-2">
             {profile?.nome
               ? `O nome do seu perfil ("${profile.nome}") não corresponde a nenhum usuário do ADVBOX`
               : 'Seu perfil está sem nome cadastrado'}
@@ -875,8 +838,10 @@ export function NovaTarefaModal({
           </p>
         </div>
       ) : (
-        <form id="form-nova-tarefa" onSubmit={handleSubmit} className="space-y-4">
-          <Field label="Processo" required>
+        <form id="form-nova-tarefa" onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+          {/* O PROCESSO SÓ DA LISTA DO ADVBOX (crédito, requerimento ou apenso
+              cadastrados aqui): texto digitado sem escolher não conta. */}
+          <Field label="Processo" required className="sm:col-span-2">
             <Combobox
               opcoes={opcoesProcesso}
               valor={form.lawsuit_id}
@@ -886,7 +851,7 @@ export function NovaTarefaModal({
             />
           </Field>
 
-          <Field label="Tipo de tarefa" required>
+          <Field label="Tipo de tarefa" required className="sm:col-span-2">
             <Combobox
               opcoes={opcoesTarefa}
               valor={form.tasks_id ? Number(form.tasks_id) : null}
@@ -896,22 +861,20 @@ export function NovaTarefaModal({
             />
           </Field>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Data" required>
-              <Input
-                type="date"
-                value={form.start_date}
-                onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-              />
-            </Field>
-            <Field label="Prazo">
-              <Input
-                type="date"
-                value={form.date_deadline}
-                onChange={(e) => setForm({ ...form, date_deadline: e.target.value })}
-              />
-            </Field>
-          </div>
+          <Field label="Data" required>
+            <Input
+              type="date"
+              value={form.start_date}
+              onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+            />
+          </Field>
+          <Field label="Prazo">
+            <Input
+              type="date"
+              value={form.date_deadline}
+              onChange={(e) => setForm({ ...form, date_deadline: e.target.value })}
+            />
+          </Field>
 
           {/* Remetente só aparece para quem pode escolher: o admin, que cria em
               nome de outros, e quem não foi encontrado no ADVBOX pelo nome do
@@ -929,7 +892,7 @@ export function NovaTarefaModal({
             </Field>
           )}
 
-          <Field label="Responsáveis" required>
+          <Field label="Responsáveis" required className={escolheRemetente ? undefined : 'sm:col-span-2'}>
             <MultiCombobox
               opcoes={opcoesUsuario}
               valores={form.guests}
@@ -939,28 +902,28 @@ export function NovaTarefaModal({
             />
           </Field>
 
-          <div className="flex gap-6">
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+          <div className="flex gap-6 sm:col-span-2">
+            <label className="flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto">
               <input
                 type="checkbox"
                 className="accent-brand-600"
                 checked={form.important}
                 onChange={(e) => setForm({ ...form, important: e.target.checked })}
               />
-              <Star className="h-4 w-4 text-amber-500" /> Importante
+              <Star className="h-4 w-4 text-aviso-cheio" /> Importante
             </label>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <label className="flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto">
               <input
                 type="checkbox"
                 className="accent-brand-600"
                 checked={form.urgent}
                 onChange={(e) => setForm({ ...form, urgent: e.target.checked })}
               />
-              <Flame className="h-4 w-4 text-red-500" /> Urgente
+              <Flame className="h-4 w-4 text-perigo" /> Urgente
             </label>
           </div>
 
-          <Field label="Descrição">
+          <Field label="Descrição" className="sm:col-span-2">
             <Textarea
               rows={3}
               value={form.comments}

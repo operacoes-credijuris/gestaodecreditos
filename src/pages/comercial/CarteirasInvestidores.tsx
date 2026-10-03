@@ -1,18 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Wallet,
-  Percent,
-  Target,
+  AlertTriangle,
+  Check,
   CheckCircle2,
   Clock,
-  Hash,
-  Sparkles,
-  RefreshCw,
   Download,
   FileText,
+  Gauge,
   MessageSquareText,
-  SlidersHorizontal,
+  Settings,
+  Sparkles,
+  TrendingUp,
+  Wallet,
 } from 'lucide-react'
 import {
   processosCrud,
@@ -36,19 +36,29 @@ import { exportarCarteiraXlsx } from '@/lib/exportarCarteira'
 import {
   montarCarteiraDoInvestidor,
   type DadosCarteira,
+  type LinhaCarteira,
 } from '@/lib/carteiraInvestidor'
+import {
+  GRUPOS_DA_CARTEIRA,
+  TOTAL_DE_COLUNAS,
+  alternarGrupo,
+  colunasNaTela,
+  gruposVisiveis,
+  todosLigados,
+  type ChaveGrupo,
+  type GruposLigados,
+} from '@/lib/gruposDaCarteira'
+import { iniciais } from '@/lib/iniciais'
 import { ModalParametrosAtualizacao } from '@/components/ParametrosAtualizacao'
 import { getLabel, INDICE_ATUALIZACAO, textosResumo } from '@/lib/labels'
 import { cn } from '@/lib/cn'
-import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
-import { StatCard } from '@/components/ui/StatCard'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { Select } from '@/components/ui/Field'
-import { Tabs } from '@/components/ui/Tabs'
+import { Segmented } from '@/components/ui/Segmented'
 import {
   Table,
   THead,
@@ -70,6 +80,14 @@ import {
   normalizarNome,
   sentenceCase,
 } from '@/lib/format'
+import {
+  CabecalhoDaAba,
+  CartaoNumero,
+  GradeCartoes,
+  ICONE_CARTAO,
+  Painel,
+  TABELA_NO_PAINEL,
+} from '@/pages/inteligencia/compartilhado'
 
 // As `key` são internas e não mudam com o rótulo: elas aparecem em estado e em
 // comparações pelo arquivo, e renomeá-las não traria nada.
@@ -77,7 +95,11 @@ import {
 // (Dados pessoais e bancários), no menu, porque não é carteira: não tem investidor
 // selecionado, nem mês de referência, nem projeção — e passou a guardar também os
 // originadores.
-const TABS = [
+//
+// UM SELETOR SEGMENTADO, e não abas: esta tela já é a aba Carteiras do Quadro
+// econômico, e aba dentro de aba confunde onde se está (a regra da amostra:
+// abas mudam de assunto, seletores mudam o recorte).
+const VISOES = [
   { key: 'individual', label: 'Relatórios individuais' },
   { key: 'consolidado', label: 'Visão global' },
 ]
@@ -86,11 +108,14 @@ export default function CarteirasInvestidores() {
   const [tab, setTab] = useState('individual')
 
   return (
-    <div>
-      <PageHeader title="Carteiras de Investimento" />
-      <div className="mb-5">
-        <Tabs items={TABS} value={tab} onChange={setTab} />
-      </div>
+    <div className="space-y-5">
+      {/* A aba não repete o título: o h1 é o "Quadro econômico" da moldura
+          (pages/inteligencia/Moldura.tsx), e o h2 fica para o leitor de tela. */}
+      <CabecalhoDaAba
+        titulo="Carteiras de investimento"
+        apoio="O relatório de cada investidor e a visão da carteira inteira."
+      />
+      <Segmented ariaLabel="Visão das carteiras" items={VISOES} value={tab} onChange={setTab} />
 
       {tab === 'individual' && <Individual />}
       {tab === 'consolidado' && <Consolidado />}
@@ -117,12 +142,12 @@ function rotuloMes(iso: string): string {
   })
 }
 
-/** Rótulo de seção fora do card, como abertura da tabela. */
-function TituloSecao({ children }: { children: string }) {
+/** O rótulo pequeno em caixa alta dos campos da barra (`.field.inline > label`). */
+function RotuloDaBarra({ children }: { children: ReactNode }) {
   return (
-    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-600">
+    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-texto-3">
       {children}
-    </h3>
+    </span>
   )
 }
 
@@ -136,47 +161,35 @@ function TituloSecao({ children }: { children: string }) {
 // financeira. Cada coluna será ligada de propósito nas próximas edições.
 const AGUARDANDO = 'aguardando dados financeiros no cadastro de Créditos'
 
-// Separador entre grupos de colunas.
-const SEP = 'border-l border-slate-200'
-
-// Cor do TÍTULO de cada grupo. Tons escolhidos para contrastar com o fundo
-// claro do cabeçalho — amarelo e azul-claro puros ficariam ilegíveis.
-const COR_GRUPO = {
-  identificacao: 'text-sky-700',
+// Cor de cada GRUPO de colunas — o título do grupo e as colunas dele, com o
+// sublinhado grosso na mesma cor (o `th.grp` da amostra). FIXAS DE PROPÓSITO,
+// fora dos tokens: são uma paleta categórica, em que a cor só distingue um grupo
+// do outro, e são as mesmas tintas do cabeçalho do Excel (exportarCarteira.ts).
+// Tons escolhidos para contrastar com o fundo claro do cabeçalho — amarelo e
+// azul-claro puros ficariam ilegíveis.
+const COR_GRUPO: Record<ChaveGrupo, string> = {
+  ide: 'text-sky-700',
   tir: 'text-amber-700',
-  credito: 'text-emerald-700',
-  recebimento: 'text-red-700',
-  complementar: 'text-orange-700',
-  vivos: 'text-blue-800',
-  calculado: 'text-violet-700',
+  cre: 'text-emerald-700',
+  rec: 'text-red-700',
+  compl: 'text-orange-700',
+  viv: 'text-blue-800',
+  calc: 'text-violet-700',
 }
 
-// Caixa alta desligada nos títulos dos grupos (o <thead> aplica uppercase).
-const GRUPO = 'text-sm font-bold normal-case tracking-normal'
-
 /**
- * Altura dos botões da barra do investidor.
- *
- * As alturas do Button são em rem (h-10) e o html está em 12px, então h-10 vale
- * 30px. O Input (baseControl em ui/Field) e a caixa do mês usam `px-3 py-2` com
- * text-sm, fechando 33px (6 + 19 de line-height + 6 + 2 de borda). Os dois
- * nunca casam por coincidência, e o botão ficava 3px mais baixo.
- *
- * Solução: soltar a altura fixa e repetir aqui o `py-2` do Input. Reproduzir a
- * receita, em vez de fixar 33px na mão, mantém os três alinhados se os tokens
- * de tipografia mudarem.
+ * O STATUS DA CARTEIRA: o nome da cor, escrito na cor — como no Excel e no
+ * relatório, que continuam só com o nome — e agora com ÍCONE (Novo): cor nunca
+ * sozinha. O title diz o que cada cor significa. Tons alinhados com o semáforo
+ * da Expectativa na aba Créditos, para a mesma cor significar a mesma coisa nas
+ * duas telas.
  */
-const ALTURA_CONTROLE = 'h-auto py-2'
-
-// Cor do TEXTO da coluna Status. Sem selo/pílula: o nome da cor escrito na
-// própria cor já é a informação. Tons alinhados com o semáforo da Expectativa
-// na aba Créditos, para a mesma cor significar a mesma coisa nas duas telas.
-const COR_STATUS: Record<string, string> = {
-  green: 'text-emerald-700',
-  blue: 'text-blue-600',
-  yellow: 'text-amber-700',
-  red: 'text-red-600',
-  gray: 'text-slate-600',
+const ESTILO_STATUS: Record<string, { cor: string; Icone: typeof Check | null }> = {
+  green: { cor: 'text-sucesso', Icone: Check },
+  blue: { cor: 'text-info', Icone: Clock },
+  yellow: { cor: 'text-aviso', Icone: Clock },
+  red: { cor: 'text-perigo', Icone: AlertTriangle },
+  gray: { cor: 'text-texto-3', Icone: null },
 }
 
 /**
@@ -186,6 +199,9 @@ const COR_STATUS: Record<string, string> = {
  * ESTA É A ÚNICA EXCEÇÃO ao "sem truncamento" das tabelas do app, e é
  * deliberada: são 6 linhas de narrativa numa tabela de 25 colunas. Aqui a
  * célula serve para VER QUE A COLUNA FOI PREENCHIDA; quem quer ler, clica.
+ *
+ * Sem texto, o "—" leva no title O MOTIVO DA FALHA da geração (ex.: "sem
+ * andamentos"), e não um vazio mudo.
  */
 function CelulaResumo({
   texto,
@@ -198,11 +214,11 @@ function CelulaResumo({
   carregando: boolean
   onClick: () => void
 }) {
-  if (carregando) return <span className="text-slate-300">…</span>
+  if (carregando) return <span className="text-texto-3">…</span>
   if (!texto) {
     return (
       <span
-        className="text-slate-300"
+        className="text-texto-3"
         title={erro || 'Resumo ainda não gerado para este crédito.'}
       >
         —
@@ -214,7 +230,7 @@ function CelulaResumo({
       type="button"
       onClick={onClick}
       title="Ver o texto completo"
-      className="block max-w-[220px] truncate text-left text-slate-700 underline decoration-slate-300 decoration-dotted underline-offset-4 hover:decoration-slate-500"
+      className="block max-w-[220px] truncate text-left text-texto underline decoration-texto-3 decoration-dotted underline-offset-[3px] hover:text-marca-texto"
     >
       {texto}
     </button>
@@ -224,7 +240,225 @@ function CelulaResumo({
 // nowrap também nos <th>: com 25 colunas, um título como "Providências /
 // prox. passos" quebrava em quatro linhas e esticava o cabeçalho inteiro.
 const CLASSES_CARTEIRA =
-  '[&_th]:whitespace-nowrap [&_th]:px-2.5 [&_td]:whitespace-nowrap [&_td]:px-2.5 [&_td]:text-sm'
+  '[&_th]:whitespace-nowrap [&_th]:px-4 [&_td]:whitespace-nowrap [&_td]:px-4 [&_td]:py-3'
+
+/** "—" cinza com o motivo no title, para o valor que não pôde ser calculado. */
+function Vazio({ motivo }: { motivo?: string }) {
+  return (
+    <span className="text-texto-3" title={motivo}>
+      —
+    </span>
+  )
+}
+
+/**
+ * As células de UM grupo de colunas de uma linha da carteira. Separadas por
+ * grupo para o liga/desliga da tela (ver lib/gruposDaCarteira.ts) tirar e pôr
+ * colunas inteiras sem que nenhuma conta mude: tudo já veio calculado de
+ * `montarCarteiraDoInvestidor`, e aqui só se formata.
+ */
+function CelulasDoGrupo({
+  grupo,
+  l,
+  erroResumo,
+  carregandoResumos,
+  carregandoMov,
+  abrir,
+}: {
+  grupo: ChaveGrupo
+  l: LinhaCarteira
+  erroResumo: string | null | undefined
+  carregandoResumos: boolean
+  carregandoMov: boolean
+  abrir: (campo: 'estagio' | 'providencias') => void
+}) {
+  const { p, status: sl, textos, proj, tir: tirCred, ganho, retorno: ret } = l
+  switch (grupo) {
+    // Identificação — tudo vem do cadastro do crédito.
+    case 'ide':
+      return (
+        <>
+          <TD className="font-bold tabular-nums text-texto">{formatCNJ(p.numero_cnj)}</TD>
+          <TD>{p.cedente || '—'}</TD>
+          <TD>{p.cedente_advogado || '—'}</TD>
+          {/* Numa linha só: a coluna se alarga conforme o texto (a tabela já
+              rola na horizontal) em vez de esticar a altura da linha. */}
+          <TD>{l.tipoCredito}</TD>
+          <TD>{p.tribunal || '—'}</TD>
+        </>
+      )
+    case 'tir':
+      return (
+        <>
+          <TD className="text-right tabular-nums">{formatBRL(p.capital_investido)}</TD>
+          <TD className="tabular-nums">{formatDate(p.data_aquisicao)}</TD>
+        </>
+      )
+    case 'cre':
+      return (
+        <>
+          <TD className="text-right tabular-nums">{formatBRL(p.valor_face)}</TD>
+          <TD className="tabular-nums">{formatDate(p.data_referencia)}</TD>
+          <TD>
+            {p.indice_atualizacao
+              ? getLabel(INDICE_ATUALIZACAO, p.indice_atualizacao).label
+              : '—'}
+          </TD>
+        </>
+      )
+    // ZERO NÃO É VAZIO: R$ 0,00 aparece; só o que não foi cadastrado vira "—".
+    case 'rec':
+      return (
+        <>
+          <TD className="tabular-nums">{formatDate(p.expectativa_liquidacao)}</TD>
+          <TD className="text-right tabular-nums">{formatBRL(p.ja_recebido)}</TD>
+          <TD className="tabular-nums">{formatDate(p.data_liquidacao)}</TD>
+        </>
+      )
+    case 'compl':
+      return <TD className="text-right tabular-nums">{formatBRL(p.valor_estimado_complementar)}</TD>
+    // Dados vivos. Status e Últ. atualização são CALCULADOS — ninguém digita.
+    case 'viv': {
+      const estilo = ESTILO_STATUS[sl.tone] ?? ESTILO_STATUS.gray
+      return (
+        <>
+          <TD>
+            <span
+              title={sl.dica}
+              className={cn('inline-flex items-center gap-1 text-sm font-bold', estilo.cor)}
+            >
+              {estilo.Icone && <estilo.Icone className="h-[13px] w-[13px] shrink-0" aria-hidden />}
+              {sl.label}
+            </span>
+          </TD>
+          <TD>
+            <CelulaResumo
+              texto={textos.estagio}
+              erro={textos.fixo ? null : erroResumo}
+              carregando={!textos.fixo && carregandoResumos}
+              onClick={() => abrir('estagio')}
+            />
+          </TD>
+          <TD>
+            <CelulaResumo
+              texto={textos.providencias}
+              erro={textos.fixo ? null : erroResumo}
+              carregando={!textos.fixo && carregandoResumos}
+              onClick={() => abrir('providencias')}
+            />
+          </TD>
+          {/* Do cache do ADVBOX, casado por dígitos. Enquanto o mapa carrega
+              mostra vazio em vez de "—", que seria mentira. */}
+          <TD className="tabular-nums">
+            {carregandoMov ? '' : formatDate(l.ultimaMovimentacao)}
+          </TD>
+        </>
+      )
+    }
+    case 'calc':
+      return (
+        <>
+          {/* Liquidado mostra o que entrou; o resto é o face atualizado até a
+              expectativa. O title diz por que está vazio quando falta insumo,
+              e até quando o face foi atualizado — sem isso, num crédito de
+              expectativa vencida o número não casa com a data ao lado. */}
+          <TD className="text-right tabular-nums">
+            {proj.valor === null ? (
+              <Vazio motivo={proj.motivo} />
+            ) : (
+              <span
+                title={
+                  proj.realizado
+                    ? 'Valor efetivamente recebido'
+                    : proj.expectativaVencida
+                      ? `Expectativa vencida: atualizado até hoje (${formatDate(proj.atualizadoAte)})`
+                      : `Atualizado até a data estimada (${formatDate(proj.atualizadoAte)})`
+                }
+              >
+                {formatBRL(proj.valor)}
+              </span>
+            )}
+          </TD>
+          {/* Efetivada = crédito já pago, então a taxa é a que aconteceu;
+              Estimada = ainda projeção. O verde segue a convenção do Status. */}
+          <TD className={l.pago ? 'font-bold text-sucesso' : 'text-texto-2'}>{l.statusTir}</TD>
+          {/* Taxa equivalente do fluxo cessão -> data do valor. O title mostra
+              o prazo usado, que NÃO é "Dias em carteira" quando a expectativa
+              é futura. */}
+          <TD className="text-right tabular-nums">
+            {tirCred.anual === null ? (
+              <Vazio motivo={tirCred.motivo} />
+            ) : (
+              <span title={`${tirCred.dias} dias, até ${formatDate(tirCred.ate)}`}>
+                {formatPercent(tirCred.anual)}
+              </span>
+            )}
+          </TD>
+          <TD className="text-right tabular-nums">
+            {tirCred.mensal === null ? <Vazio /> : formatPercent(tirCred.mensal)}
+          </TD>
+          {/* Da cessão até hoje enquanto não liquida; liquidado, para na data
+              de recebimento efetivo. */}
+          <TD className="text-right tabular-nums">{l.dias ?? '—'}</TD>
+          {/* (projetado + complementar) − capital. Negativo em vermelho:
+              prejuízo não pode passar batido. */}
+          <TD className="text-right tabular-nums">
+            {ganho === null ? (
+              <Vazio />
+            ) : (
+              <span
+                className={ganho < 0 ? 'font-bold text-perigo' : undefined}
+                title={
+                  p.valor_estimado_complementar
+                    ? `Inclui ${formatBRL(p.valor_estimado_complementar)} de complementar a receber`
+                    : undefined
+                }
+              >
+                {formatBRL(ganho)}
+              </span>
+            )}
+          </TD>
+          <TD className="text-right tabular-nums">
+            {ret === null ? (
+              <Vazio />
+            ) : (
+              <span className={ret < 0 ? 'font-bold text-perigo' : undefined}>
+                {formatPercent(ret)}
+              </span>
+            )}
+          </TD>
+        </>
+      )
+  }
+}
+
+/** O botão de liga/desliga de um grupo (o `.chipf` da amostra), com ✓ quando ligado. */
+function BotaoGrupo({
+  ligado,
+  onClick,
+  children,
+}: {
+  ligado: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={ligado}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-[30px] items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors',
+        ligado
+          ? 'border-texto bg-texto text-superficie'
+          : 'border-borda-forte bg-superficie text-texto-2 hover:bg-superficie-3',
+      )}
+    >
+      {ligado && <Check className="h-[13px] w-[13px]" aria-hidden />}
+      {children}
+    </button>
+  )
+}
 
 function Individual() {
   const processos = processosCrud.useList()
@@ -249,6 +483,9 @@ function Individual() {
     status: string | null
     campo: 'estagio' | 'providencias'
   } | null>(null)
+  // Os grupos de colunas da tabela (Novo). SÓ A TELA: o Excel, o relatório e a
+  // mensagem saem sempre com as 25 colunas (ver lib/gruposDaCarteira.ts).
+  const [grupos, setGrupos] = useState<GruposLigados>(todosLigados)
 
   const gerar = useMutation({
     mutationFn: (vars: { processo_id?: string; forcar?: boolean }) =>
@@ -444,7 +681,13 @@ function Individual() {
     }
   }
 
-  if (processos.isLoading) return <Loading label="Carregando créditos…" />
+  if (processos.isLoading) {
+    return (
+      <Card className="px-5">
+        <Loading label="Carregando créditos…" />
+      </Card>
+    )
+  }
   if (processos.isError) {
     return (
       <Card>
@@ -456,16 +699,19 @@ function Individual() {
     )
   }
 
+  const visiveis = gruposVisiveis(grupos)
+  const ativo = !!investidor && carteira.length > 0
+  const sel = 'selecione um investidor'
+
   return (
     <div className="space-y-5">
-      {/* Sem card: os dois controles ficam soltos sobre o fundo da página,
-          lado a lado. A competência acompanha o seletor em vez de ir para a
-          borda oposta — separá-los só afastava dois campos que se leem juntos. */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-        <div className="w-full sm:max-w-md">
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-            Investidor
-          </label>
+      {/* A BARRA DO INVESTIDOR, em duas linhas como na amostra: em cima o que
+          escolhe e prepara (investidor, competência, parâmetros, resumos);
+          embaixo o que sai daqui para o investidor (Excel, relatório,
+          mensagem). */}
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="w-full sm:w-[300px]">
+          <RotuloDaBarra>Investidor</RotuloDaBarra>
           <Combobox
             opcoes={opcoes}
             valor={indice >= 0 ? indice : null}
@@ -477,149 +723,132 @@ function Individual() {
           />
         </div>
         <div>
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-            Mês de referência
-          </div>
+          <RotuloDaBarra>Mês de referência</RotuloDaBarra>
           {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
-          <div className="inline-flex items-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
+          <div className="inline-flex items-center whitespace-nowrap rounded-campo bg-superficie-3 px-4 py-2 text-corpo text-texto-2">
             {mesRef}
           </div>
         </div>
-        {/* sm:ml-auto joga o trio de ações para a direita da mesma linha. */}
-        <div className="flex gap-2 sm:ml-auto">
+        <div className="flex flex-wrap gap-2 sm:ml-auto">
           {/* SELIC e IPCA que alimentam a coluna Valor projetado. */}
           <Button
             variant="outline"
-            className={ALTURA_CONTROLE}
-            icon={<SlidersHorizontal className="h-4 w-4" />}
+            icon={<Settings className="h-[14px] w-[14px]" />}
             onClick={() => setAbrirParametros(true)}
           >
             Parâmetros de atualização
           </Button>
           {/* Regera o estágio e as providências de TODOS os créditos, ignorando
-              a checagem de novidade que a rodada semanal faz. */}
+              a checagem de novidade que a rodada semanal faz. A DICA DIZ O
+              ALCANCE (Novo): não é só o investidor da tela, e cada crédito é
+              uma consulta paga à IA. */}
           <Button
             variant="outline"
-            className={ALTURA_CONTROLE}
-            icon={<Sparkles className="h-4 w-4" />}
+            icon={<Sparkles className="h-[14px] w-[14px]" />}
             loading={gerar.isPending && !gerar.variables?.processo_id}
             onClick={() => gerar.mutate({ forcar: true })}
+            title="Refaz o estágio processual e as providências de TODOS os créditos com cessionário, não só os deste investidor. Cada crédito é uma consulta à IA."
           >
             Gerar resumos
           </Button>
-          {/* Verde do Excel: distingue do botão vizinho sem virar ação
-              primária, que continua sendo gerar os resumos. */}
-          <Button
-            variant="outline"
-            className={cn(
-              ALTURA_CONTROLE,
-              'border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800',
-            )}
-            icon={<Download className="h-4 w-4" />}
-            loading={baixando}
-            disabled={!investidor || carteira.length === 0}
-            onClick={baixarXlsx}
-          >
-            Baixar Excel
-          </Button>
-          {/* O documento que vai ao investidor. Ação primária desta barra: é o
-              fim do trabalho do mês, e os outros três botões existem para
-              preparar este. */}
-          <Button
-            className={ALTURA_CONTROLE}
-            icon={<FileText className="h-4 w-4" />}
-            loading={gerandoHtml}
-            disabled={!investidor || carteira.length === 0}
-            onClick={gerarRelatorio}
-          >
-            Relatório do investidor
-          </Button>
-          <Button
-            variant="outline"
-            className={ALTURA_CONTROLE}
-            icon={<MessageSquareText className="h-4 w-4" />}
-            disabled={!investidor || carteira.length === 0}
-            onClick={copiarMensagem}
-            title="Copia o texto de acompanhamento para colar no WhatsApp junto com o relatório"
-          >
-            Mensagem
-          </Button>
         </div>
       </div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button
+          variant="outline"
+          icon={<Download className="h-[14px] w-[14px]" />}
+          loading={baixando}
+          disabled={!ativo}
+          onClick={baixarXlsx}
+          title="O arquivo leva as 25 colunas, mesmo as dos grupos desligados na tela."
+        >
+          Baixar Excel
+        </Button>
+        {/* O documento que vai ao investidor. Ação primária desta barra: é o
+            fim do trabalho do mês, e os outros botões existem para prepará-lo. */}
+        <Button
+          icon={<FileText className="h-[14px] w-[14px]" />}
+          loading={gerandoHtml}
+          disabled={!ativo}
+          onClick={gerarRelatorio}
+        >
+          Relatório do investidor
+        </Button>
+        <Button
+          variant="outline"
+          icon={<MessageSquareText className="h-[14px] w-[14px]" />}
+          disabled={!ativo}
+          onClick={copiarMensagem}
+          title="Copia o texto de acompanhamento para colar no WhatsApp junto com o relatório"
+        >
+          Mensagem
+        </Button>
+      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard
-          label="Capital total"
-          value={
+      <GradeCartoes seis>
+        <CartaoNumero
+          rotulo="Capital total"
+          icone={<Wallet className={ICONE_CARTAO} />}
+          valor={
             investidor && totais.capital.total !== null
               ? formatBRL(totais.capital.total)
               : '—'
           }
-          hint={
-            investidor ? cobertura(totais.capital.preenchidos) : 'selecione um investidor'
-          }
-          icon={<Wallet className="h-5 w-5" />}
-          tone="brand"
+          dica={investidor ? cobertura(totais.capital.preenchidos) : sel}
         />
-        <StatCard
-          label="TIR média"
-          value={
+        <CartaoNumero
+          rotulo="TIR média"
+          icone={<TrendingUp className={ICONE_CARTAO} />}
+          valor={
             investidor && calc.tirMedia.valor !== null
               ? formatPercent(calc.tirMedia.valor)
               : '—'
           }
-          hint={
+          dica={
             !investidor
-              ? 'selecione um investidor'
+              ? sel
               : calc.tirMedia.valor === null
                 ? 'nenhum crédito com TIR calculável'
                 : `carteira como fluxo único, prazo médio de ${calc.tirMedia.prazoMedioDias} dias, ${calc.tirMedia.considerados} de ${carteira.length} créditos`
           }
-          icon={<Percent className="h-5 w-5" />}
-          tone="green"
         />
-        <StatCard
-          label="Retorno projetado"
-          value={
+        <CartaoNumero
+          rotulo="Retorno projetado"
+          icone={<Gauge className={ICONE_CARTAO} />}
+          valor={
             investidor && calc.retornoCarteira.valor !== null
               ? formatPercent(calc.retornoCarteira.valor)
               : '—'
           }
-          hint={
+          dica={
             !investidor
-              ? 'selecione um investidor'
+              ? sel
               : calc.retornoCarteira.valor === null
                 ? 'nenhum crédito com ganho calculável'
                 : `soma dos ganhos sobre a soma do capital, de ${calc.retornoCarteira.considerados} de ${carteira.length} créditos`
           }
-          icon={<Target className="h-5 w-5" />}
-          tone="amber"
         />
-        <StatCard
-          label="Já recebido"
-          value={
+        <CartaoNumero
+          rotulo="Já recebido"
+          icone={<CheckCircle2 className={ICONE_CARTAO} />}
+          valor={
             investidor && totais.recebido.total !== null
               ? formatBRL(totais.recebido.total)
               : '—'
           }
-          hint={
-            investidor
-              ? cobertura(totais.recebido.preenchidos)
-              : 'selecione um investidor'
-          }
-          icon={<CheckCircle2 className="h-5 w-5" />}
-          tone="green"
+          dica={investidor ? cobertura(totais.recebido.preenchidos) : sel}
         />
-        <StatCard
-          label="A receber estimado"
-          value={
+        <CartaoNumero
+          rotulo="A receber estimado"
+          icone={<Clock className={ICONE_CARTAO} />}
+          valor={
             investidor && calc.aReceber.total !== null
               ? formatBRL(calc.aReceber.total)
               : '—'
           }
-          hint={
+          dica={
             !investidor
-              ? 'selecione um investidor'
+              ? sel
               : calc.aReceber.total === null
                 ? // "Nada a receber" é conclusão, e só vale quando não há crédito
                   // em aberto. Com crédito aberto e projeção incalculável (índice
@@ -638,295 +867,118 @@ function Individual() {
                     .filter(Boolean)
                     .join(' + ')
           }
-          icon={<Clock className="h-5 w-5" />}
-          tone="slate"
         />
-        <StatCard
-          label="Nº de operações"
-          value={investidor ? carteira.length : '—'}
-          hint={investidor ? 'créditos deste investidor' : 'selecione um investidor'}
-          icon={<Hash className="h-5 w-5" />}
-          tone="brand"
+        <CartaoNumero
+          rotulo="Nº de operações"
+          icone={<FileText className={ICONE_CARTAO} />}
+          valor={investidor ? String(carteira.length) : '—'}
+          dica={investidor ? 'créditos deste investidor' : sel}
         />
-      </div>
+      </GradeCartoes>
 
-      <div>
-        <TituloSecao>Carteira</TituloSecao>
-        <Card>
-          {!investidor ? (
-            <EmptyState
-              title="Selecione um investidor"
-              description="Escolha acima para ver a carteira dele."
-            />
-          ) : carteira.length === 0 ? (
-            <EmptyState
-              title="Nenhum crédito"
-              description="Este investidor não consta como cessionário em nenhum crédito."
-            />
-          ) : (
-            <Table className={CLASSES_CARTEIRA}>
-              <THead>
-                {/* Nível 1: grupos, cada um na sua cor. Nível 2: as colunas. */}
-                <tr>
-                  <TH colSpan={5} className={`${GRUPO} ${COR_GRUPO.identificacao}`}>
-                    Identificação · fixo na abertura
+      <Painel
+        titulo="Carteira"
+        apoio={`Da cessão mais antiga para a mais nova. A tabela inteira tem ${TOTAL_DE_COLUNAS} colunas em ${GRUPOS_DA_CARTEIRA.length} grupos — mostre só os que precisar.`}
+      >
+        <div
+          role="group"
+          aria-label="Grupos de colunas na tela"
+          className="flex flex-wrap items-center gap-2 border-b border-borda px-5 py-4"
+        >
+          <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-texto-3">
+            Colunas
+          </span>
+          {GRUPOS_DA_CARTEIRA.map((g) => (
+            <BotaoGrupo
+              key={g.chave}
+              ligado={grupos[g.chave]}
+              onClick={() => setGrupos((atual) => alternarGrupo(atual, g.chave))}
+            >
+              {g.curto}
+            </BotaoGrupo>
+          ))}
+          <span className="text-xs text-texto-3">
+            {colunasNaTela(grupos)} de {TOTAL_DE_COLUNAS} na tela · o Excel e o relatório levam
+            sempre as {TOTAL_DE_COLUNAS}
+          </span>
+        </div>
+
+        {!investidor ? (
+          <EmptyState
+            title="Selecione um investidor"
+            description="Escolha acima para ver a carteira dele."
+          />
+        ) : carteira.length === 0 ? (
+          <EmptyState
+            title="Nenhum crédito"
+            description="Este investidor não consta como cessionário em nenhum crédito."
+          />
+        ) : visiveis.length === 0 ? (
+          <EmptyState
+            title="Nenhum grupo de colunas na tela"
+            description="Ligue pelo menos um grupo acima para ver a carteira."
+          />
+        ) : (
+          <Table className={cn(CLASSES_CARTEIRA, TABELA_NO_PAINEL)}>
+            <THead>
+              {/* Nível 1: os grupos, cada um na sua cor, centralizados e com o
+                  sublinhado grosso. Nível 2: as colunas, na cor do grupo. */}
+              <tr>
+                {visiveis.map((g) => (
+                  <TH
+                    key={g.chave}
+                    colSpan={g.colunas.length}
+                    className={cn('border-b-[3px] border-current text-center', COR_GRUPO[g.chave])}
+                  >
+                    {g.titulo}
                   </TH>
-                  <TH colSpan={2} className={`${SEP} ${GRUPO} ${COR_GRUPO.tir}`}>
-                    TIR obrigatório
-                  </TH>
-                  <TH colSpan={3} className={`${SEP} ${GRUPO} ${COR_GRUPO.credito}`}>
-                    Crédito · fixo na abertura
-                  </TH>
-                  <TH colSpan={3} className={`${SEP} ${GRUPO} ${COR_GRUPO.recebimento}`}>
-                    Recebimento principal
-                  </TH>
-                  <TH colSpan={1} className={`${SEP} ${GRUPO} ${COR_GRUPO.complementar}`}>
-                    Complementar
-                  </TH>
-                  <TH colSpan={4} className={`${SEP} ${GRUPO} ${COR_GRUPO.vivos}`}>
-                    Dados vivos · atualizar mensalmente
-                  </TH>
-                  <TH colSpan={7} className={`${SEP} ${GRUPO} ${COR_GRUPO.calculado}`}>
-                    Calculado automaticamente
-                  </TH>
-                </tr>
-                <tr className="border-t border-slate-200 text-xs font-medium normal-case tracking-normal text-slate-600">
-                  <TH>Nº processo</TH>
-                  <TH>Cedente</TH>
-                  <TH>Advogado</TH>
-                  <TH>Tipo de crédito</TH>
-                  <TH>Tribunal</TH>
-
-                  <TH className={SEP}>Capital investido</TH>
-                  <TH>Data da cessão</TH>
-
-                  <TH className={SEP}>Valor de face</TH>
-                  <TH>Data ref. do face</TH>
-                  <TH>Índice de atualização</TH>
-
-                  <TH className={SEP}>Data est. recebimento</TH>
-                  <TH>Já recebido</TH>
-                  <TH>Data receb. efetivo</TH>
-
-                  <TH className={SEP}>Valor est. complementar</TH>
-
-                  <TH className={SEP}>Status</TH>
-                  <TH>Estágio processual</TH>
-                  <TH>Providências / prox. passos</TH>
-                  <TH>Últ. atualização</TH>
-
-                  <TH className={SEP}>Valor projetado</TH>
-                  <TH>Status TIR</TH>
-                  <TH>TIR a.a.</TH>
-                  <TH>TIR mensal</TH>
-                  <TH>Dias em carteira</TH>
-                  <TH>Ganho projetado</TH>
-                  <TH>Retorno</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {calc.linhas.map((l) => {
-                  // Tudo já veio calculado do módulo compartilhado; aqui só se
-                  // formata. `resumo` continua sendo lido direto porque a célula
-                  // precisa do campo `erro`, que não é conteúdo do relatório.
-                  const { p, status: sl, textos, proj, tir: tirCred, ganho, retorno: ret } = l
-                  const resumo = resumos.data?.get(p.id)
-                  return (
-                  <TR key={p.id}>
-                    {/* Identificação — tudo vem do cadastro do crédito. */}
-                    <TD className="font-medium text-slate-800">
-                      {formatCNJ(p.numero_cnj)}
-                    </TD>
-                    <TD>{p.cedente || '—'}</TD>
-                    <TD>{p.cedente_advogado || '—'}</TD>
-                    {/* Numa linha só: a coluna se alarga conforme o texto (a
-                        tabela já rola na horizontal) em vez de esticar a altura
-                        da linha. Inicial maiúscula, resto minúsculo. */}
-                    <TD>{l.tipoCredito}</TD>
-                    <TD>{p.tribunal || '—'}</TD>
-
-                    {/* TIR obrigatório */}
-                    <TD className={`${SEP} text-right tabular-nums`}>
-                      {formatBRL(p.capital_investido)}
-                    </TD>
-                    <TD className="tabular-nums">{formatDate(p.data_aquisicao)}</TD>
-
-                    {/* Crédito · fixo na abertura */}
-                    <TD className={`${SEP} text-right tabular-nums`}>
-                      {formatBRL(p.valor_face)}
-                    </TD>
-                    <TD className="tabular-nums">{formatDate(p.data_referencia)}</TD>
-                    <TD>
-                      {p.indice_atualizacao
-                        ? getLabel(INDICE_ATUALIZACAO, p.indice_atualizacao).label
-                        : '—'}
-                    </TD>
-
-                    {/* Recebimento principal */}
-                    <TD className={`${SEP} tabular-nums`}>
-                      {formatDate(p.expectativa_liquidacao)}
-                    </TD>
-                    <TD className="text-right tabular-nums">
-                      {formatBRL(p.ja_recebido)}
-                    </TD>
-                    <TD className="tabular-nums">{formatDate(p.data_liquidacao)}</TD>
-
-                    {/* Complementar */}
-                    <TD className={`${SEP} text-right tabular-nums`}>
-                      {formatBRL(p.valor_estimado_complementar)}
-                    </TD>
-
-                    {/* Dados vivos.
-                        Status e Últ. atualização são CALCULADOS — ninguém
-                        digita. Estágio processual e Providências seguem
-                        pendentes de origem. */}
-                    <TD className={SEP}>
-                      {/* Só o nome da cor, escrito na cor. O title diz o que
-                          cada cor significa — é o que sustenta a coluna para
-                          quem não distingue os tons. */}
-                      <span
-                        title={sl.dica}
-                        className={cn('font-medium', COR_STATUS[sl.tone] ?? 'text-slate-600')}
-                      >
-                        {sl.label}
-                      </span>
-                    </TD>
-                    <TD>
-                      <CelulaResumo
-                        texto={textos.estagio}
-                        erro={textos.fixo ? null : resumo?.erro}
-                        carregando={!textos.fixo && resumos.isLoading}
-                        onClick={() =>
-                          setAberto({
-                            id: p.id,
-                            cnj: p.numero_cnj,
-                            status: p.status,
-                            campo: 'estagio',
-                          })
-                        }
-                      />
-                    </TD>
-                    <TD>
-                      <CelulaResumo
-                        texto={textos.providencias}
-                        erro={textos.fixo ? null : resumo?.erro}
-                        carregando={!textos.fixo && resumos.isLoading}
-                        onClick={() =>
-                          setAberto({
-                            id: p.id,
-                            cnj: p.numero_cnj,
-                            status: p.status,
-                            campo: 'providencias',
-                          })
-                        }
-                      />
-                    </TD>
-                    {/* Do cache do ADVBOX, casado por dígitos. Enquanto o mapa
-                        carrega mostra vazio em vez de "—", que seria mentira. */}
-                    <TD className="tabular-nums">
-                      {ultimaMov.isLoading ? '' : formatDate(l.ultimaMovimentacao)}
-                    </TD>
-
-                    {/* Calculado automaticamente */}
-                    {/* Liquidado mostra o que entrou; o resto é o face
-                        atualizado até a expectativa. O title diz por que está
-                        vazio quando falta insumo, em vez de só mostrar "—". */}
-                    <TD className={cn(SEP, 'text-right tabular-nums')}>
-                      {proj.valor === null ? (
-                        <span className="text-slate-600" title={proj.motivo}>
-                          —
-                        </span>
-                      ) : (
-                        // O title diz até quando o face foi atualizado. Sem isso,
-                        // num crédito de expectativa vencida o número não casa
-                        // com a data da coluna ao lado e parece errado.
-                        <span
-                          title={
-                            proj.realizado
-                              ? 'Valor efetivamente recebido'
-                              : proj.expectativaVencida
-                                ? `Expectativa vencida: atualizado até hoje (${formatDate(proj.atualizadoAte)})`
-                                : `Atualizado até a data estimada (${formatDate(proj.atualizadoAte)})`
-                          }
-                        >
-                          {formatBRL(proj.valor)}
-                        </span>
-                      )}
-                    </TD>
-                    {/* Efetivada = crédito já pago, então a taxa é a que
-                        aconteceu; Estimada = ainda projeção. O verde segue a
-                        mesma convenção da coluna Status. */}
-                    <TD
-                      className={
-                        l.pago ? 'font-medium text-emerald-700' : 'text-slate-600'
-                      }
+                ))}
+              </tr>
+              <tr>
+                {visiveis.map((g) =>
+                  g.colunas.map((c) => (
+                    <TH
+                      key={`${g.chave}-${c.titulo}`}
+                      className={cn(COR_GRUPO[g.chave], c.direita && 'text-right')}
                     >
-                      {l.statusTir}
-                    </TD>
-                    {/* Taxa equivalente do fluxo cessão -> data do valor. O
-                        title mostra o prazo usado, que NÃO é "Dias em carteira"
-                        quando a expectativa é futura. */}
-                    <TD className="text-right tabular-nums">
-                      {tirCred.anual === null ? (
-                        <span className="text-slate-600" title={tirCred.motivo}>
-                          —
-                        </span>
-                      ) : (
-                        <span title={`${tirCred.dias} dias, até ${formatDate(tirCred.ate)}`}>
-                          {formatPercent(tirCred.anual)}
-                        </span>
-                      )}
-                    </TD>
-                    <TD className="text-right tabular-nums">
-                      {tirCred.mensal === null ? (
-                        <span className="text-slate-600">—</span>
-                      ) : (
-                        formatPercent(tirCred.mensal)
-                      )}
-                    </TD>
-                    {/* Da cessão até hoje enquanto não liquida; liquidado, para
-                        na data de recebimento efetivo. Recalculado no render, o
-                        número anda sozinho na virada do dia. */}
-                    <TD className="text-right tabular-nums">{l.dias ?? '—'}</TD>
-                    {/* (projetado + complementar) − capital. Negativo em
-                        vermelho: prejuízo não pode passar batido. */}
-                    <TD className="text-right tabular-nums">
-                      {ganho === null ? (
-                        <span className="text-slate-600">—</span>
-                      ) : (
-                        <span
-                          className={ganho < 0 ? 'font-medium text-red-600' : undefined}
-                          title={
-                            p.valor_estimado_complementar
-                              ? `Inclui ${formatBRL(p.valor_estimado_complementar)} de complementar a receber`
-                              : undefined
-                          }
-                        >
-                          {formatBRL(ganho)}
-                        </span>
-                      )}
-                    </TD>
-                    {/* Ganho sobre o capital, em %. Negativo em vermelho, como
-                        o ganho que o origina. */}
-                    <TD className="text-right tabular-nums">
-                      {ret === null ? (
-                        <span className="text-slate-600">—</span>
-                      ) : (
-                        <span
-                          className={ret < 0 ? 'font-medium text-red-600' : undefined}
-                        >
-                          {formatPercent(ret)}
-                        </span>
-                      )}
-                    </TD>
+                      {c.titulo}
+                    </TH>
+                  )),
+                )}
+              </tr>
+            </THead>
+            <TBody>
+              {calc.linhas.map((l) => {
+                // `resumo` continua sendo lido direto porque a célula precisa
+                // do campo `erro`, que não é conteúdo do relatório.
+                const resumo = resumos.data?.get(l.p.id)
+                return (
+                  <TR key={l.p.id}>
+                    {visiveis.map((g) => (
+                      <CelulasDoGrupo
+                        key={g.chave}
+                        grupo={g.chave}
+                        l={l}
+                        erroResumo={resumo?.erro}
+                        carregandoResumos={resumos.isLoading}
+                        carregandoMov={ultimaMov.isLoading}
+                        abrir={(campo) =>
+                          setAberto({
+                            id: l.p.id,
+                            cnj: l.p.numero_cnj,
+                            status: l.p.status,
+                            campo,
+                          })
+                        }
+                      />
+                    ))}
                   </TR>
-                  )
-                })}
-              </TBody>
-            </Table>
-          )}
-        </Card>
-      </div>
+                )
+              })}
+            </TBody>
+          </Table>
+        )}
+      </Painel>
 
       <ModalParametrosAtualizacao
         open={abrirParametros}
@@ -939,16 +991,18 @@ function Individual() {
         open={!!aberto}
         onClose={() => setAberto(null)}
         title={aberto?.campo === 'estagio' ? 'Estágio processual' : 'Providências'}
+        description={aberto ? formatCNJ(aberto.cnj) : undefined}
         size="lg"
         footer={
           <>
             <Button variant="outline" onClick={() => setAberto(null)}>
               Fechar
             </Button>
-            {/* Crédito encerrado tem texto fixo: não há o que regerar. */}
+            {/* Crédito ENCERRADO (pelo status, não pela cor) tem texto fixo:
+                não há o que regerar. */}
             {aberto?.status !== 'encerrado' && (
               <Button
-                icon={<RefreshCw className="h-4 w-4" />}
+                icon={<Sparkles className="h-[14px] w-[14px]" />}
                 loading={gerar.isPending && !!gerar.variables?.processo_id}
                 onClick={() => aberto && gerar.mutate({ processo_id: aberto.id })}
               >
@@ -958,41 +1012,38 @@ function Individual() {
           </>
         }
       >
-        {aberto && (
-          <div className="space-y-3">
-            <div className="text-xs tabular-nums text-slate-600">
-              {formatCNJ(aberto.cnj)}
-            </div>
-            {(() => {
-              const r = resumos.data?.get(aberto.id)
-              const t = textosResumo(aberto.status, r)
-              const texto = aberto.campo === 'estagio' ? t.estagio : t.providencias
-              if (texto) {
-                // whitespace-pre-line: preserva os parágrafos do modelo.
-                return (
-                  <>
-                    <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
-                      {texto}
-                    </p>
-                    {/* Carimbo de geração: sem ele não há como saber se o texto
-                        é de ontem ou de dois meses atrás. Não aparece na
-                        mensagem fixa dos encerrados, que não é gerada. */}
-                    {!t.fixo && r?.gerado_em && (
-                      <p className="border-t border-slate-100 pt-2 text-xs tabular-nums text-slate-600">
-                        Gerado em {formatDateTime(r.gerado_em)}
-                      </p>
-                    )}
-                  </>
-                )
-              }
+        {aberto &&
+          (() => {
+            const r = resumos.data?.get(aberto.id)
+            const t = textosResumo(aberto.status, r)
+            const texto = aberto.campo === 'estagio' ? t.estagio : t.providencias
+            if (texto) {
+              // whitespace-pre-line: preserva os parágrafos do modelo.
               return (
-                <p className="text-sm text-slate-600">
-                  {r?.erro || 'Resumo ainda não gerado para este crédito.'}
-                </p>
+                <div className="space-y-3">
+                  <p className="whitespace-pre-line text-corpo leading-relaxed text-texto">
+                    {texto}
+                  </p>
+                  {/* Carimbo de geração: sem ele não há como saber se o texto
+                      é de ontem ou de dois meses atrás. Não aparece na
+                      mensagem fixa dos encerrados, que não é gerada. DIZ A
+                      ORIGEM (a IA, lendo o ADVBOX), como a amostra: quem lê o
+                      texto precisa saber que não foi escrito por uma pessoa. */}
+                  {!t.fixo && r?.gerado_em && (
+                    <p className="text-xs text-texto-3">
+                      Gerado pela IA em <span className="tabular-nums">{formatDateTime(r.gerado_em)}</span>, a
+                      partir das movimentações do ADVBOX.
+                    </p>
+                  )}
+                </div>
               )
-            })()}
-          </div>
-        )}
+            }
+            return (
+              <p className="text-corpo text-texto-3">
+                {r?.erro || 'Resumo ainda não gerado para este crédito.'}
+              </p>
+            )
+          })()}
       </Modal>
     </div>
   )
@@ -1003,6 +1054,19 @@ function Individual() {
 // O recorte é pela DATA DE AQUISIÇÃO do crédito — "os processos fechados
 // naquele mês". Só investidor e quantidade de operações saem preenchidos; os
 // valores financeiros dependem de campos que o cadastro ainda não tem.
+
+/** As iniciais num círculo, ao lado do nome do investidor (Novo). */
+function Avatar({ nome }: { nome: string }) {
+  return (
+    <span
+      aria-hidden
+      className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-marca-suave font-display text-sm font-bold text-marca-texto"
+    >
+      {iniciais(nome)}
+    </span>
+  )
+}
+
 function Consolidado() {
   const processos = processosCrud.useList()
   // Os mesmos parâmetros da aba individual: sem eles o valor projetado não
@@ -1111,7 +1175,13 @@ function Consolidado() {
     }
   }, [processos.data, mes, parametros.data, hoje])
 
-  if (processos.isLoading) return <Loading label="Carregando créditos…" />
+  if (processos.isLoading) {
+    return (
+      <Card className="px-5">
+        <Loading label="Carregando créditos…" />
+      </Card>
+    )
+  }
   if (processos.isError) {
     return (
       <Card>
@@ -1124,126 +1194,128 @@ function Consolidado() {
   }
 
   return (
-    <div className="space-y-5">
-      {/* Solto sobre o fundo da página, como o seletor da aba Individual. */}
-      <div className="w-full sm:max-w-xs">
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-          Filtrar por mês
+    <Card className="overflow-hidden">
+      <div className="border-b border-borda px-5 py-4">
+        <label className="block w-full sm:max-w-xs">
+          <RotuloDaBarra>Filtrar por mês</RotuloDaBarra>
+          <Select value={mes} onChange={(e) => setMes(e.target.value)}>
+            <option value="todos">Tudo</option>
+            {meses.map((m) => (
+              <option key={m} value={m}>
+                {sentenceCase(rotuloMes(m))}
+              </option>
+            ))}
+          </Select>
         </label>
-        <Select value={mes} onChange={(e) => setMes(e.target.value)}>
-          <option value="todos">Tudo</option>
-          {meses.map((m) => (
-            <option key={m} value={m}>
-              {sentenceCase(rotuloMes(m))}
-            </option>
-          ))}
-        </Select>
       </div>
 
-      <div>
-        <Card>
-          {linhas.length === 0 ? (
-            // Dois estados que a tela tratava como um só. Sem esta distinção, um
-            // mês COM aquisições em que nenhum crédito tem cessionário dizia "não
-            // há créditos adquiridos no mês" — e o operador ia procurar erro no
-            // cadastro do crédito, quando o que falta é o cessionário.
-            noPeriodo > 0 ? (
-              <EmptyState
-                title="Sem investidor identificado"
-                description={`${noPeriodo} crédito(s) adquirido(s) no período, nenhum com cessionário cadastrado. Preencha o cessionário na aba Créditos para eles aparecerem aqui.`}
-              />
-            ) : (
-              <EmptyState
-                title="Nenhum crédito no período"
-                description={
-                  mes === 'todos'
-                    ? 'Nenhum crédito cadastrado com data de cessão.'
-                    : 'Não há créditos adquiridos no mês selecionado.'
-                }
-              />
-            )
-          ) : (
-            <Table className="[&_th]:whitespace-nowrap [&_th]:px-3 [&_td]:px-3 [&_td]:text-sm">
-              <THead>
-                <tr>
-                  <TH>Investidor</TH>
-                  <TH className="text-right">Capital investido (R$)</TH>
-                  <TH className="text-right">A receber (R$)</TH>
-                  <TH className="text-right">Já recebido (R$)</TH>
-                  <TH className="text-right">Retorno (%)</TH>
-                  <TH className="text-right">TIR a.a.</TH>
-                  <TH className="text-right">Qtde. operações</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {linhas.map((l) => (
-                  <TR key={l.nome}>
-                    <TD className="font-medium text-slate-800">{l.nome}</TD>
-                    <TD className="text-right tabular-nums">{formatBRL(l.capital)}</TD>
-                    <TD className="text-right tabular-nums">{formatBRL(l.aReceber)}</TD>
-                    <TD className="text-right tabular-nums">
-                      {formatBRL(l.jaRecebido)}
-                    </TD>
-                    <TD className="text-right tabular-nums">
-                      {l.retorno === null ? (
-                        '—'
-                      ) : (
-                        <span className={l.retorno < 0 ? 'font-medium text-red-600' : undefined}>
-                          {formatPercent(l.retorno)}
-                        </span>
-                      )}
-                    </TD>
-                    <TD className="text-right tabular-nums">
-                      {formatPercent(l.tirAa)}
-                    </TD>
-                    <TD className="text-right tabular-nums text-slate-700">
-                      {l.operacoes}
-                    </TD>
-                  </TR>
-                ))}
-                {/* Fechamento da carteira no período.
-                    REGRA DEFINIDA (ago/2026): Capital investido, A receber e
-                    Já recebido são SOMA. Retorno (%) e TIR a.a. são MÉDIA
-                    PONDERADA PELO CAPITAL INVESTIDO — somar percentual não
-                    produz número com significado (12% + 15% não é 27% de
-                    carteira), e a média simples daria a um aporte de R$ 10 mil
-                    o mesmo peso de um de R$ 500 mil. */}
-                <TR className="bg-slate-50 font-semibold">
-                  <TD className="text-slate-800">Total da carteira</TD>
-                  <TD className="text-right tabular-nums text-slate-800">
-                    {formatBRL(total.capital)}
+      {linhas.length === 0 ? (
+        // Dois estados que a tela tratava como um só. Sem esta distinção, um
+        // mês COM aquisições em que nenhum crédito tem cessionário dizia "não
+        // há créditos adquiridos no mês" — e o operador ia procurar erro no
+        // cadastro do crédito, quando o que falta é o cessionário.
+        noPeriodo > 0 ? (
+          <EmptyState
+            title="Sem investidor identificado"
+            description={`${noPeriodo} crédito(s) adquirido(s) no período, nenhum com cessionário cadastrado. Preencha o cessionário na aba Créditos para eles aparecerem aqui.`}
+          />
+        ) : (
+          <EmptyState
+            title="Nenhum crédito no período"
+            description={
+              mes === 'todos'
+                ? 'Nenhum crédito cadastrado com data de cessão.'
+                : 'Não há créditos adquiridos no mês selecionado.'
+            }
+          />
+        )
+      ) : (
+        <>
+          <Table className={cn('rounded-none [&_th]:whitespace-nowrap [&_td]:align-middle', TABELA_NO_PAINEL)}>
+            <THead>
+              <tr>
+                <TH>Investidor</TH>
+                <TH className="text-right">Capital investido (R$)</TH>
+                <TH className="text-right">A receber (R$)</TH>
+                <TH className="text-right">Já recebido (R$)</TH>
+                <TH className="text-right">Retorno (%)</TH>
+                <TH className="text-right">TIR a.a.</TH>
+                <TH className="text-right">Qtde. operações</TH>
+              </tr>
+            </THead>
+            <TBody>
+              {linhas.map((l) => (
+                <TR key={l.nome}>
+                  <TD>
+                    <span className="flex items-center gap-2.5">
+                      <Avatar nome={l.nome} />
+                      <span className="font-semibold text-texto">{l.nome}</span>
+                    </span>
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
-                    {formatBRL(total.aReceber)}
+                  <TD className="whitespace-nowrap text-right tabular-nums">{formatBRL(l.capital)}</TD>
+                  <TD className="whitespace-nowrap text-right tabular-nums">{formatBRL(l.aReceber)}</TD>
+                  <TD className="whitespace-nowrap text-right tabular-nums">
+                    {formatBRL(l.jaRecebido)}
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
-                    {formatBRL(total.jaRecebido)}
+                  <TD className="whitespace-nowrap text-right tabular-nums">
+                    {l.retorno === null ? (
+                      '—'
+                    ) : (
+                      <span className={l.retorno < 0 ? 'font-bold text-perigo' : undefined}>
+                        {formatPercent(l.retorno)}
+                      </span>
+                    )}
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
-                    {total.retorno === null ? '—' : formatPercent(total.retorno)}
+                  <TD className="whitespace-nowrap text-right tabular-nums">
+                    {formatPercent(l.tirAa)}
                   </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
-                    {formatPercent(total.tirAa)}
-                  </TD>
-                  <TD className="text-right tabular-nums text-slate-800">
-                    {total.operacoes}
+                  <TD className="text-right tabular-nums text-texto">
+                    {l.operacoes}
                   </TD>
                 </TR>
-              </TBody>
-            </Table>
+              ))}
+              {/* Fechamento da carteira no período.
+                  REGRA DEFINIDA (ago/2026): Capital investido, A receber e
+                  Já recebido são SOMA. Retorno (%) e TIR a.a. são MÉDIA
+                  PONDERADA PELO CAPITAL INVESTIDO — somar percentual não
+                  produz número com significado (12% + 15% não é 27% de
+                  carteira), e a média simples daria a um aporte de R$ 10 mil
+                  o mesmo peso de um de R$ 500 mil. */}
+              <TR className="bg-superficie-3 font-bold hover:bg-superficie-3">
+                <TD className="font-bold text-texto">Total da carteira</TD>
+                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                  {formatBRL(total.capital)}
+                </TD>
+                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                  {formatBRL(total.aReceber)}
+                </TD>
+                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                  {formatBRL(total.jaRecebido)}
+                </TD>
+                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                  {total.retorno === null ? '—' : formatPercent(total.retorno)}
+                </TD>
+                <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
+                  {formatPercent(total.tirAa)}
+                </TD>
+                <TD className="text-right font-bold tabular-nums text-texto">
+                  {total.operacoes}
+                </TD>
+              </TR>
+            </TBody>
+          </Table>
+          {/* O total é recalculado sobre os créditos QUE VIRARAM LINHA. Quando há
+              crédito sem cessionário no período, ele fica fora da tabela e do
+              total, e quem confere a soma a olho precisa saber por que a conta não
+              fecha com a aba Créditos. */}
+          {semCessionario > 0 && (
+            <p className="border-t border-borda px-6 py-4 text-xs text-texto-3">
+              {semCessionario} crédito(s) do período estão fora desta tabela por não
+              ter cessionário cadastrado, e por isso também não entram no total.
+            </p>
           )}
-        </Card>
-        {/* O total é recalculado sobre os créditos QUE VIRARAM LINHA. Quando há
-            crédito sem cessionário no período, ele fica fora da tabela e do
-            total, e quem confere a soma a olho precisa saber por que a conta não
-            fecha com a aba Créditos. */}
-        {linhas.length > 0 && semCessionario > 0 && (
-          <p className="mt-2 text-xs text-slate-600">
-            {semCessionario} crédito(s) do período estão fora desta tabela por não
-            ter cessionário cadastrado, e por isso também não entram no total.
-          </p>
-        )}
-      </div>
-    </div>
+        </>
+      )}
+    </Card>
   )
 }

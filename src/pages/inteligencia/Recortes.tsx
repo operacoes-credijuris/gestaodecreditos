@@ -12,16 +12,21 @@
 // Os RÓTULOS dessas três colunas mudam conforme o recorte, porque a relação com
 // o dinheiro é diferente em cada um: o investidor investe e recebe, o ente deve
 // e paga, e o tribunal não faz nem uma coisa nem outra. Ver `COLUNAS`.
+//
+// O RECORTE É UM SELETOR SEGMENTADO, e não abas: a tela já mora numa aba do
+// Quadro, e aba dentro de aba confunde onde se está (a regra da amostra: abas
+// mudam de assunto, seletores mudam o recorte). Acima da tabela, o RANKING do
+// capital por grupo (Novo), já ordenado.
 
 import { useState } from 'react'
-import { PageHeader } from '@/components/ui/PageHeader'
-import { Card, CardBody, CardHeader } from '@/components/ui/Card'
-import { Tabs } from '@/components/ui/Tabs'
-import { Table, THead, TH, TBody, TR, TD, EmptyState, ErrorState } from '@/components/ui/Table'
+import { Segmented } from '@/components/ui/Segmented'
+import { Table, THead, TH, TBody, TR, TD, EmptyState } from '@/components/ui/Table'
+import { cn } from '@/lib/cn'
 import {
-  usePainel, CarregandoPainel, Ressalva, SeloAmostra, Explicacao,
-  pct, brl, dias, EXPLICA, AvisoParametros,
+  usePainel, CarregandoPainel, ErroPainel, CabecalhoDaAba, Ressalva, SeloAmostra,
+  Explicacao, Painel, TABELA_NO_PAINEL, pct, brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
+import { Ranking } from './graficos'
 import type { ResumoGrupo } from '@/lib/analytics'
 
 type Aba = 'tribunal' | 'ente' | 'investidor'
@@ -86,11 +91,11 @@ export function nomeProprio(s: string): string {
 }
 
 export default function Recortes() {
-  const { painel, carregando, erro } = usePainel()
+  const { painel, carregando, erro, tentarDeNovo } = usePainel()
   const [aba, setAba] = useState<Aba>('tribunal')
 
   if (carregando) return <CarregandoPainel />
-  if (erro || !painel) return <ErrorState message="Não foi possível carregar a carteira." />
+  if (erro || !painel) return <ErroPainel tentarDeNovo={tentarDeNovo} />
 
   const grupos: Record<Aba, ResumoGrupo[]> = {
     tribunal: painel.porTribunal,
@@ -104,22 +109,26 @@ export default function Recortes() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Recortes"
-        description="Onde o capital está, quanto dele já voltou e quanto ainda falta voltar."
+    <div className="space-y-5">
+      <CabecalhoDaAba
+        titulo="Recortes"
+        apoio="Onde o capital está, quanto dele já voltou e quanto ainda falta voltar."
       />
       <AvisoParametros />
 
-      <Tabs
-        value={aba}
-        onChange={(v) => setAba(v as Aba)}
-        items={[
-          { key: 'tribunal', label: 'Tribunal' },
-          { key: 'ente', label: 'Ente devedor' },
-          { key: 'investidor', label: 'Investidor' },
-        ]}
-      />
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="text-sm font-semibold text-texto-2">Ver por</span>
+        <Segmented
+          ariaLabel="Agrupar por"
+          value={aba}
+          onChange={(v) => setAba(v as Aba)}
+          items={[
+            { key: 'tribunal', label: 'Tribunal' },
+            { key: 'ente', label: 'Ente devedor' },
+            { key: 'investidor', label: 'Investidor' },
+          ]}
+        />
+      </div>
 
       <TabelaGrupos
         grupos={grupos[aba]}
@@ -195,7 +204,7 @@ function TabelaGrupos({
   concentracao: { maior: string; fracaoOperacoes: number; fracaoCapital: number; concentrada: boolean } | null
 }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {concentracao?.concentrada && (
         <Ressalva>
           <strong>{pct(concentracao.fracaoOperacoes)}</strong> das operações e{' '}
@@ -204,72 +213,91 @@ function TabelaGrupos({
         </Ressalva>
       )}
 
-      <Card>
-        <CardHeader
-          title={`Por ${contexto}`}
-          description="Ordenado por número de operações."
-        />
-        <CardBody>
-          {grupos.length === 0 ? (
-            <EmptyState title="Sem dados para este recorte" />
-          ) : (
-            <Table dense>
-              <THead>
-                <TH>Grupo</TH>
-                <TH className="text-right">Operações</TH>
-                <TH className="text-right">Encerradas</TH>
-                <TH className="text-right">
-                  <Explicacao texto={colunas.expInvestido}>{colunas.investido}</Explicacao>
-                </TH>
-                <TH className="text-right">
-                  <Explicacao texto={colunas.expRecebido}>{colunas.recebido}</Explicacao>
-                </TH>
-                <TH className="text-right">
-                  <Explicacao texto={colunas.expAReceber}>{colunas.aReceber}</Explicacao>
-                </TH>
-                <TH className="text-right">
-                  <Explicacao texto={EXPLICA.ponderada}>Retorno ponderado</Explicacao>
-                </TH>
-                <TH className="text-right">
-                  <Explicacao texto={EXPLICA.mediana}>Mediana</Explicacao>
-                </TH>
-                <TH className="text-right">
-                  <Explicacao texto={EXPLICA.tir}>Anualizada</Explicacao>
-                </TH>
-                <TH className="text-right">Prazo mediano</TH>
-                <TH>
-                  <Explicacao texto={EXPLICA.representatividade}>Amostra</Explicacao>
-                </TH>
-              </THead>
-              <TBody>
-                {grupos.map((g) => (
-                  <TR key={g.nome}>
-                    <TD className="font-medium text-slate-800">{nomeProprio(g.rotulo)}</TD>
-                    <TD className="text-right tabular-nums">{g.total}</TD>
-                    <TD className="text-right tabular-nums">{g.n}</TD>
-                    <TD className="text-right tabular-nums">{brl(g.capitalTotal)}</TD>
-                    <TD className="text-right tabular-nums">{brl(g.recebidoTotal)}</TD>
-                    <TD className="text-right tabular-nums">{brl(g.aReceber)}</TD>
-                    <TD className="text-right tabular-nums">{pct(g.retornoPonderado)}</TD>
-                    <TD className="text-right tabular-nums">{pct(g.retorno.mediana)}</TD>
-                    <TD className="text-right tabular-nums">{pct(g.tir.mediana)}</TD>
-                    <TD className="text-right tabular-nums">{dias(g.prazo.mediana)}</TD>
-                    <TD>
-                      <SeloAmostra
-                        n={g.n}
-                        classe={g.representatividade.classe}
-                        rotulo={g.representatividade.rotulo}
-                        explicacao={g.representatividade.explicacao}
-                        compacto
-                      />
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          )}
-        </CardBody>
-      </Card>
+      {grupos.length === 0 ? (
+        <section className="rounded-cartao border border-borda bg-superficie shadow-nivel-1">
+          <EmptyState title="Sem dados para este recorte" />
+        </section>
+      ) : (
+        <>
+          {/* O RANKING (Novo): comparação é barra, e ordenada pelo capital. Os
+              números de cada linha continuam todos na tabela logo abaixo —
+              inclusive os de grupo com poucas encerradas, com o selo de amostra
+              ao lado dizendo quando não dá para concluir. */}
+          <Painel titulo={`Capital por ${contexto}`} apoio="Do maior para o menor.">
+            <Ranking
+              itens={[...grupos]
+                .sort((a, b) => b.capitalTotal - a.capitalTotal)
+                .map((g) => ({ rotulo: nomeProprio(g.rotulo), valor: g.capitalTotal }))}
+            />
+          </Painel>
+
+          <Painel titulo={`Por ${contexto}`} apoio="Ordenado por número de operações.">
+            <div className="border-t border-borda">
+              <Table dense className={TABELA_NO_PAINEL}>
+                <THead>
+                  <tr>
+                    <TH>Grupo</TH>
+                    <TH className="text-right">Operações</TH>
+                    <TH className="text-right">Encerradas</TH>
+                    <TH className="text-right">
+                      <Explicacao texto={colunas.expInvestido}>{colunas.investido}</Explicacao>
+                    </TH>
+                    <TH className="text-right">
+                      <Explicacao texto={colunas.expRecebido}>{colunas.recebido}</Explicacao>
+                    </TH>
+                    <TH className="text-right">
+                      <Explicacao texto={colunas.expAReceber}>{colunas.aReceber}</Explicacao>
+                    </TH>
+                    <TH className="text-right">
+                      <Explicacao texto={EXPLICA.ponderada}>Retorno ponderado</Explicacao>
+                    </TH>
+                    <TH className="text-right">
+                      <Explicacao texto={EXPLICA.mediana}>Mediana</Explicacao>
+                    </TH>
+                    <TH className="text-right">
+                      <Explicacao texto={EXPLICA.tir}>Anualizada</Explicacao>
+                    </TH>
+                    <TH className="text-right">Prazo mediano</TH>
+                    <TH>
+                      <Explicacao texto={EXPLICA.representatividade}>Amostra</Explicacao>
+                    </TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {grupos.map((g) => (
+                    <TR key={g.nome}>
+                      {/* "(sem tribunal)", "(sem investidor)": o grupo de quem
+                          não tem o dado aparece apagado, para não se ler como um
+                          tribunal ou um investidor de verdade. */}
+                      <TD className={cn('font-bold', g.nome.startsWith('(') ? 'text-texto-3' : 'text-texto')}>
+                        {nomeProprio(g.rotulo)}
+                      </TD>
+                      <TD className="text-right tabular-nums">{g.total}</TD>
+                      <TD className="text-right tabular-nums">{g.n}</TD>
+                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.capitalTotal)}</TD>
+                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.recebidoTotal)}</TD>
+                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.aReceber)}</TD>
+                      <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.retornoPonderado)}</TD>
+                      <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.retorno.mediana)}</TD>
+                      <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.tir.mediana)}</TD>
+                      <TD className="whitespace-nowrap text-right tabular-nums">{dias(g.prazo.mediana)}</TD>
+                      <TD>
+                        <SeloAmostra
+                          n={g.n}
+                          classe={g.representatividade.classe}
+                          rotulo={g.representatividade.rotulo}
+                          explicacao={g.representatividade.explicacao}
+                          compacto
+                        />
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </div>
+          </Painel>
+        </>
+      )}
     </div>
   )
 }

@@ -11,9 +11,11 @@ interface IconButtonProps
   variant?: Variant
 }
 
+// O `.btn-ghost.btn-icon` da amostra: some até o mouse chegar, e no perigo o
+// hover já avisa em vermelho antes do clique.
 const variants: Record<Variant, string> = {
-  default: 'hover:bg-slate-100 hover:text-brand-700 focus-visible:ring-brand-500',
-  danger: 'hover:bg-red-50 hover:text-red-600 focus-visible:ring-red-500',
+  default: 'hover:bg-superficie-3 hover:text-texto',
+  danger: 'hover:bg-perigo-fundo hover:text-perigo',
 }
 
 // Botão de ícone das linhas de tabela (Editar/Excluir etc.).
@@ -35,7 +37,7 @@ export function IconButton({
         // Drawer — as ações de linha não devem ser as únicas sem foco visível.
         // p-2 (não p-1.5): fecha os 24px mínimos de alvo de clique na densidade
         // de 12px do <html> — ver index.css.
-        'rounded-md p-2 text-slate-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
+        'rounded-controle p-2 text-texto-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-1',
         variants[variant],
         className,
       )}

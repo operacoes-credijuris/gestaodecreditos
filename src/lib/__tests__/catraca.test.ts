@@ -20,14 +20,24 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// ─── Linhas de base (contadas em 02/10/2026, sobre a main em 230bce6) ───────
-/** `text-[NNpx]`: 10 na janela de análise do RPV, 3 na Análise de Crédito, 2 em
- *  Tarefas e 2 na janela de desfecho. */
-const BASE_TEXTO_PX = 17
+// ─── Linhas de base ─────────────────────────────────────────────────────────
+/** `text-[NNpx]`: eram 17 (02/10/2026, main em 230bce6). A onda 1 do redesenho
+ *  trocou o único de 13px pelo `text-sm`; ficaram os de 10 e 11px, abaixo da
+ *  escala. A onda 2 tirou todos: 14 na Análise de crédito (janela de análise
+ *  do RPV, Análise e janela de desfecho), trocados pelo `text-xs` de 12px que a
+ *  amostra usa, e os 2 de Tarefas (iniciais do responsável, em `text-xs`): 0. */
+const BASE_TEXTO_PX = 0
 /** Cor da paleta do Tailwind com número (`bg-slate-50`, `hover:text-red-700`,
- *  `ring-amber-500/40`…). O plano estimava cerca de 1.493; a conta exata, com a
- *  regra abaixo, deu 1.162. */
-const BASE_COR_FIXA = 1162
+ *  `ring-amber-500/40`…). Eram 1.162 (o plano estimava cerca de 1.493). A onda 1
+ *  trocou por token (`text-texto-2`, `bg-aviso-fundo`…) tudo o que era troca de
+ *  1 para 1. As 65 que ficam são DE PROPÓSITO: paletas categóricas, em que a cor
+ *  só distingue um nome de outro (os tons de etiqueta da Badge, a paleta de
+ *  situação da Fase processual, os grupos de colunas da Carteira, os tipos de
+ *  contato) e a escala graduada de "parado há…" das Publicações. A onda 2 do
+ *  Operacional passou para token as pontas dessa escala (o âmbar de aviso e o
+ *  vermelho de perigo), e ficaram fixos só os degraus do meio e do fim; com a
+ *  carteira do Quadro (o "Azul" virou token), 60. */
+const BASE_COR_FIXA = 60
 
 const SRC = fileURLToPath(new URL('../../', import.meta.url))
 

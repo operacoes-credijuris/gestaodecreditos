@@ -34,27 +34,54 @@ type Linha = [NomeDoFunil, SubdivisaoPrecatorio, string, string, BotoesDoCard]
 /**
  * O RPV IGNORA A TRILHA, mas a tela a passa mesmo assim: a pílula fica guardada
  * enquanto o RPV está aberto, para voltar ao mesmo lugar na troca de funil. Por
- * isso as seis abas aparecem duas vezes — a resposta não pode depender dela.
+ * isso as abas aparecem duas vezes — a resposta não pode depender dela.
+ *
+ * MUDOU DE PROPÓSITO NA ETAPA 7 DO REDESENHO (02/10/2026): o RPV passou a
+ * espelhar o kanban INTEIRO — as 15 colunas, na ordem e com os nomes do Kommo
+ * (decisão do dono: "Aprovados" vira "Produção de proposta", "p/ Protocolo" vira
+ * "Protocolo"). As seis abas de antes mantêm a chave; as nove novas entram como
+ * `col-<id>`, só para leitura. Os botões de trabalho NÃO mudaram em aba
+ * nenhuma: continuam só em Análise e Revisão.
  */
 const RPV = (trilha: SubdivisaoPrecatorio): Linha[] => [
-  ['RPV', trilha, 'pendentes', 'Análise', 'rpv'],
+  ['RPV', trilha, 'pendentes', 'Análise Jurídica e Econômica', 'rpv'],
   ['RPV', trilha, 'validacao', 'Revisão', 'rpv'],
-  ['RPV', trilha, 'aprovados', 'Aprovados', 'nenhum'],
   ['RPV', trilha, 'diligencia', 'Diligência', 'nenhum'],
-  ['RPV', trilha, 'reprovados', 'Reprovados', 'nenhum'],
-  ['RPV', trilha, 'protocolo', 'p/ Protocolo', 'nenhum'],
+  ['RPV', trilha, 'aprovados', 'Produção de proposta', 'nenhum'],
+  ['RPV', trilha, 'col-107830039', 'Negociação', 'nenhum'],
+  ['RPV', trilha, 'col-107830043', 'Fechados', 'nenhum'],
+  ['RPV', trilha, 'col-107830047', 'Oferta aos investidores', 'nenhum'],
+  ['RPV', trilha, 'col-107830051', 'Elaboração de contratos', 'nenhum'],
+  ['RPV', trilha, 'col-107830055', 'Aguardando assinaturas', 'nenhum'],
+  ['RPV', trilha, 'protocolo', 'Protocolo', 'nenhum'],
+  ['RPV', trilha, 'col-107830063', 'Pagamento finalizado', 'nenhum'],
+  ['RPV', trilha, 'reprovados', 'Reprovados operacional', 'nenhum'],
+  ['RPV', trilha, 'col-107272811', 'Reprovados comercial', 'nenhum'],
+  ['RPV', trilha, 'col-112466388', 'Sem resposta', 'nenhum'],
+  ['RPV', trilha, 'col-107830067', 'Não fechado', 'nenhum'],
 ]
 
 /** A MATRIZ DE HOJE, com o kanban real dos três funis. */
 const MATRIZ: Linha[] = [
   ...RPV('interno'),
   ...RPV('externo'),
-  ['Precatório', 'interno', 'int-analise', 'Análise', 'dd'],
+  // O INTERNO ESPELHA O KANBAN INTEIRO desde a onda 2 do redesenho (02/10/2026,
+  // só na beta), pela exibição do front (`EXIBICAO_NO_FRONT`): as seis abas de
+  // trabalho com as chaves e os botões de antes, e as sete colunas do comercial
+  // como `col-<id>`, só para leitura. MUDOU DE PROPÓSITO; nenhum botão mudou.
+  ['Precatório', 'interno', 'int-analise', 'Análise jurídica e econômica', 'dd'],
   ['Precatório', 'interno', 'int-revisao', 'Revisão', 'dd'],
-  ['Precatório', 'interno', 'int-aprovados', 'Aprovados', 'dd'],
   ['Precatório', 'interno', 'int-diligencia', 'Diligência', 'nenhum'],
+  ['Precatório', 'interno', 'int-aprovados', 'Produção de proposta', 'dd'],
+  ['Precatório', 'interno', 'col-112466260', 'Negociação', 'nenhum'],
+  ['Precatório', 'interno', 'col-111533952', 'Fechados', 'nenhum'],
+  ['Precatório', 'interno', 'col-112466032', 'Oferta aos investidores', 'nenhum'],
+  ['Precatório', 'interno', 'col-111533956', 'Escritura pública', 'nenhum'],
+  ['Precatório', 'interno', 'int-protocolo', 'Protocolo', 'nenhum'],
+  ['Precatório', 'interno', 'col-112466340', 'Pagamento finalizado', 'nenhum'],
   ['Precatório', 'interno', 'int-reprovados', 'Reprovados', 'nenhum'],
-  ['Precatório', 'interno', 'int-protocolo', 'p/ Protocolo', 'nenhum'],
+  ['Precatório', 'interno', 'col-112465960', 'Sem resposta', 'nenhum'],
+  ['Precatório', 'interno', 'col-112382612', 'Não fechados', 'nenhum'],
   // O EXTERNO ESPELHA O KANBAN INTEIRO, na ordem e com os nomes de lá; a coluna
   // sem função na plataforma entra como `col-<id>`, só para leitura.
   ['Precatório', 'externo', 'ext-qualificacao', 'QUALIFICAÇÃO PRELIMINAR', 'dd'],
@@ -105,21 +132,26 @@ describe('botoesDaAba — a matriz de hoje', () => {
     })
   }
 
-  it('a matriz cobre as 33 abas de hoje', () => {
-    expect(MATRIZ).toHaveLength(33)
+  // ERAM 33 ATÉ A ONDA 2: o RPV passou de 6 para 15 abas (×2 trilhas) e o
+  // Interno de 6 para 13.
+  it('a matriz cobre as 58 abas de hoje', () => {
+    expect(MATRIZ).toHaveLength(58)
   })
 
   /**
    * ANTES DE O ESPELHO CHEGAR (a consulta ao kommo_etapa ainda em voo), o Externo
    * mostra só as abas que a trilha conhece, sem as `col-*`. Os botões continuam
    * saindo da chave — e é esta a tela que a equipe vê no primeiro segundo.
+   *
+   * O RPV, SEM ESPELHO, mostra o kanban de 02/10/2026 (`ESPELHO_RPV`): as mesmas
+   * 15 abas, com os mesmos botões.
    */
   it('sem espelho ainda, os botões saem da chave da aba', () => {
     const semEspelho = COMBINACOES.flatMap(([funil, trilha]) => doQueATelaMonta(funil, trilha, []))
     expect(semEspelho).toEqual([
       ...RPV('interno'),
       ...RPV('externo'),
-      // NO INTERNO NADA MUDA: as abas e os rótulos são da plataforma, não do kanban.
+      // NO INTERNO, o kanban de 02/10/2026 da exibição do front: as mesmas 13 abas.
       ...MATRIZ.filter((l) => l[0] === 'Precatório' && l[1] === 'interno'),
       // NO EXTERNO, as dez que a trilha declara, na ordem e com os rótulos dela.
       ['Precatório', 'externo', 'ext-qualificacao', 'Qualificação', 'dd'],
@@ -187,6 +219,14 @@ describe('botoesDaAba — nenhuma aba de leitura oferece análise nem due dilige
     })
   }
 
+  // A COLUNA NOVA NO RPV entra como leitura, na fase da coluna que vem antes dela.
+  it('a coluna que o RPV ganhar entra como leitura, sem botão', () => {
+    const etapas = [...espelhoDosTresFunis(), colunaNova(FUNIL_RPV, 99_901, 'Coluna nova do RPV', 55)]
+    const nova = abasDoFunil(FUNIL_RPV, etapas, 'interno').find((a) => a.label === 'Coluna nova do RPV')!
+    expect(nova).toMatchObject({ key: 'col-99901', soLeitura: true, acoes: [], fase: 'Comercialização' })
+    expect(botoesDaAba(FUNIL_RPV, 'interno', nova)).toBe('nenhum')
+  })
+
   // A COLUNA NOVA NO EXTERNO entra como leitura, e não como trabalho.
   it('a coluna que o Externo ganhar entra como leitura, sem botão', () => {
     const etapas = [
@@ -208,30 +248,44 @@ describe('botoesDaAba — nenhuma aba de leitura oferece análise nem due dilige
 })
 
 /**
- * O QUE A REGRA AINDA NÃO PROTEGE — preso como está HOJE, para que a mudança,
- * quando vier, seja de propósito.
+ * NO RPV A LACUNA FOI FECHADA (etapa 7, 02/10/2026) — e estes testes foram
+ * INVERTIDOS DE PROPÓSITO.
  *
- * AS DUAS LISTAS SÃO DE EXCLUSÃO: toda aba que não está nelas ganha os botões.
- * Hoje isso não custa nada, porque as abas são exatamente as da matriz acima.
- * Mas é o buraco por onde uma aba nova ganharia análise e due diligence pagas.
+ * Até ali `ABAS_RPV_TERMINAIS` era lista de EXCLUSÃO e o ramo do RPV ignorava
+ * `soLeitura`: toda aba fora da lista ganhava a análise de RPV e a due
+ * diligence, que são pagas. Os testes desta seção prendiam isso como estava
+ * ("no RPV, uma aba de leitura ainda receberia 'rpv'"), com o aviso de que a
+ * etapa 7 os trocaria. Trocou: com o kanban inteiro do RPV na tela, a regra
+ * virou lista de PERMISSÃO (`ABAS_RPV_COM_TRABALHO`: Análise e Revisão) e
+ * `soLeitura` passou a vencer a chave também no RPV.
+ *
+ * NO PRECATÓRIO AS LISTAS AINDA SÃO DE EXCLUSÃO (`ABAS_*_SEM_TRABALHO`): o
+ * último teste continua prendendo esse buraco como está.
  */
-describe('botoesDaAba — o que a regra ainda não protege', () => {
-  /**
-   * NO RPV, `soLeitura` É IGNORADO: só a chave conta. Hoje nenhuma aba do RPV é
-   * de leitura (as seis de `TELAS` são fixas), mas a etapa 7 do plano vai
-   * espelhar o kanban inteiro do RPV — e cada coluna nova ganharia a análise de
-   * RPV e a due diligence. A ETAPA 7 TEM DE TROCAR ESTE 'rpv' POR 'nenhum'
-   * (lista de permissão no lugar de `ABAS_RPV_TERMINAIS`), e este teste junto.
-   */
-  it("no RPV, uma aba de leitura ainda receberia 'rpv'", () => {
-    expect(botoesDaAba(FUNIL_RPV, 'interno', { key: 'col-107830039', soLeitura: true })).toBe('rpv')
-    expect(botoesDaAba(FUNIL_RPV, 'externo', { key: 'col-107830039', soLeitura: true })).toBe('rpv')
+describe('botoesDaAba — a lista de permissão do RPV e o que ainda não é protegido', () => {
+  it("no RPV, uma aba de leitura recebe 'nenhum'", () => {
+    expect(botoesDaAba(FUNIL_RPV, 'interno', { key: 'col-107830039', soLeitura: true })).toBe('nenhum')
+    expect(botoesDaAba(FUNIL_RPV, 'externo', { key: 'col-107830039', soLeitura: true })).toBe('nenhum')
   })
 
-  // NO RPV, SEM ABA NENHUMA, também 'rpv'. Não acontece na tela — `TELAS` nunca
-  // é vazia —, mas é a mesma regra de exclusão.
-  it("no RPV, sem aba aberta, a resposta é 'rpv'", () => {
-    expect(botoesDaAba(FUNIL_RPV, 'interno', null)).toBe('rpv')
+  // NO RPV, SEM ABA NENHUMA, nada — como no Precatório.
+  it("no RPV, sem aba aberta, a resposta é 'nenhum'", () => {
+    expect(botoesDaAba(FUNIL_RPV, 'interno', null)).toBe('nenhum')
+  })
+
+  // A PERMISSÃO É PELA CHAVE: aba fora da lista não trabalha, mesmo sem `soLeitura`.
+  it("no RPV, aba fora da lista de permissão recebe 'nenhum'", () => {
+    for (const key of ['aprovados', 'diligencia', 'reprovados', 'protocolo', 'col-1', 'nova']) {
+      expect(botoesDaAba(FUNIL_RPV, 'interno', { key }), key).toBe('nenhum')
+    }
+  })
+
+  // E `soLeitura` VENCE A CHAVE: nem a Análise trabalha se vier marcada como leitura.
+  it('no RPV, `soLeitura` vence a chave', () => {
+    for (const key of ['pendentes', 'validacao']) {
+      expect(botoesDaAba(FUNIL_RPV, 'interno', { key, soLeitura: true }), key).toBe('nenhum')
+      expect(botoesDaAba(FUNIL_RPV, 'interno', { key }), key).toBe('rpv')
+    }
   })
 
   // NO PRECATÓRIO, SEM ABA NENHUMA, nada: a tela ainda não sabe em que etapa está.
@@ -249,5 +303,41 @@ describe('botoesDaAba — o que a regra ainda não protege', () => {
   it("no Precatório, aba de trabalho fora das listas recebe 'dd'", () => {
     expect(botoesDaAba(FUNIL_PRECATORIO, 'interno', { key: 'int-nova' })).toBe('dd')
     expect(botoesDaAba(FUNIL_PRECATORIO, 'externo', { key: 'ext-nova', soLeitura: false })).toBe('dd')
+  })
+})
+
+/**
+ * A VISÃO DE ADMINISTRADOR (onda 4 do redesenho, 02/10/2026) NÃO MUDA OS BOTÕES
+ * PAGOS. Os botões novos desta onda — Sanar, Concluir da Revisão do RPV, desfecho
+ * da Negociação, "Gerar contrato" — não são 'rpv' nem 'dd': a matriz acima vale
+ * igual para o admin, aba por aba, e a Negociação e a Elaboração de contratos
+ * continuam abas SÓ DE LEITURA (`soLeitura`), sem análise nem due diligence.
+ */
+describe('botoesDaAba — a visão de administrador não muda os botões pagos', () => {
+  const doAdmin = (funil: NomeDoFunil, trilha: SubdivisaoPrecatorio, etapas: EtapaKommo[]): Linha[] =>
+    abasDoFunil(FUNIS[funil], etapas, trilha, { admin: true }).map((a) => [
+      funil,
+      trilha,
+      a.key,
+      a.label,
+      botoesDaAba(FUNIS[funil], trilha, a),
+    ])
+
+  for (const [funil, trilha] of COMBINACOES) {
+    it(`${funil} · ${trilha}: a mesma matriz para o admin`, () => {
+      expect(doAdmin(funil, trilha, espelhoDosTresFunis())).toEqual(doQueATelaMonta(funil, trilha, espelhoDosTresFunis()))
+      expect(doAdmin(funil, trilha, [])).toEqual(doQueATelaMonta(funil, trilha, []))
+    })
+  }
+
+  it('a Negociação e a Elaboração de contratos seguem só de leitura, com o botão novo e sem botão pago', () => {
+    const rpv = abasDoFunil(FUNIL_RPV, espelhoDosTresFunis(), 'interno', { admin: true })
+    const neg = rpv.find((a) => a.key === 'col-107830039')!
+    expect(neg).toMatchObject({ soLeitura: true })
+    expect(neg.negociacao?.fechado?.statusId).toBe(107830043)
+    expect(botoesDaAba(FUNIL_RPV, 'interno', neg)).toBe('nenhum')
+    const contratos = rpv.find((a) => a.key === 'col-107830051')!
+    expect(contratos).toMatchObject({ soLeitura: true, gerarContrato: { soAdmin: true } })
+    expect(botoesDaAba(FUNIL_RPV, 'interno', contratos)).toBe('nenhum')
   })
 })

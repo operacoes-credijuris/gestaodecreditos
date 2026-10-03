@@ -40,6 +40,7 @@ import {
 } from '../../supabase/functions/_shared/titularesDaCessao.ts'
 import { JanelaDeDesfecho, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
 import { invokeFunction } from '@/lib/functions'
+import { perguntarDescarte } from '@/lib/descarte'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
 import type { AcaoTela } from '@/lib/kommo'
 
@@ -110,6 +111,11 @@ export function DueDiligence({
   // identidade é estável — passar uma arrow inline aqui faria o efeito do painel
   // disparar a cada render.
   const [sujo, setSujo] = useState(false)
+  /** O Fechar do rodapé: a mesma pergunta que o X faz pelo `dirty` do Modal. */
+  const fechar = async () => {
+    if (sujo && !(await perguntarDescarte())) return
+    onClose()
+  }
   const [desfecho, setDesfecho] = useState<AcaoTela | null>(null)
   /**
    * Os processos apurados, que sobem do painel para virar itens marcáveis.
@@ -255,32 +261,47 @@ export function DueDiligence({
       size="xl"
       dirty={sujo}
       title="Due diligence do crédito"
+      // O CARD DE QUE SE FALA, sob o título (o "apoio" da amostra): a janela
+      // cobre a lista, e sem isto não há na tela nada que diga de qual crédito
+      // são os processos.
+      description={tituloDoCard || undefined}
       footer={
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        // `w-full`: o rodapé do Modal alinha tudo à direita, e sem ocupar a
+        // linha inteira o espaçador não teria o que empurrar.
+        <div className="flex w-full flex-wrap items-center gap-2">
           {/* Os desfechos à esquerda, o Fechar à direita: são atos de peso
               diferente, e enfileirá-los juntos faria "Fechar" parecer a quarta
               opção de uma decisão. */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* SEGUIR NÃO MOVE O CARD, e por isso não sai da lista de ações da
-                etapa: "Enviar para validação" e "Aprovar" são passos do funil,
-                decididos com a análise à frente. Aqui a pergunta é outra — os
-                processos que a diligência achou impedem a cessão? —, e a
-                resposta "não impedem" é o que destrava o trabalho seguinte. */}
-            <Button size="sm" onClick={seguir} loading={seguindo}>
-              Seguir
+          {/* SEGUIR NÃO MOVE O CARD, e por isso não sai da lista de ações da
+              etapa: "Enviar para validação" e "Aprovar" são passos do funil,
+              decididos com a análise à frente. Aqui a pergunta é outra — os
+              processos que a diligência achou impedem a cessão? —, e a
+              resposta "não impedem" é o que destrava o trabalho seguinte. */}
+          <Button onClick={seguir} loading={seguindo}>
+            Seguir
+          </Button>
+          {acaoReprovar && (
+            <Button
+              variant={acaoReprovar.variant}
+              onClick={() => setDesfecho(acaoReprovar)}
+              disabled={!onMover || seguindo}
+              // CONTORNADO, E NÃO CHEIO (o `btn-danger-outline` da amostra): o
+              // vermelho cheio fica para o Confirmar da janela do desfecho, que
+              // é onde a recusa acontece de fato. Aqui ele só abre essa janela,
+              // e ao lado do Seguir não pode gritar mais alto que ele.
+              className={
+                acaoReprovar.variant === 'danger'
+                  ? 'border-perigo-borda bg-superficie text-perigo shadow-none hover:bg-perigo-fundo hover:brightness-100'
+                  : undefined
+              }
+            >
+              {acaoReprovar.label}
             </Button>
-            {acaoReprovar && (
-              <Button
-                size="sm"
-                variant={acaoReprovar.variant}
-                onClick={() => setDesfecho(acaoReprovar)}
-                disabled={!onMover || seguindo}
-              >
-                {acaoReprovar.label}
-              </Button>
-            )}
-          </div>
-          <Button variant="ghost" onClick={onClose}>
+          )}
+          <div className="flex-1" />
+          {/* PERGUNTA COMO O X: o formulário do cedente mexido e não salvo ia
+              embora com um clique no Fechar. */}
+          <Button variant="ghost" onClick={() => void fechar()}>
             Fechar
           </Button>
         </div>
@@ -288,6 +309,7 @@ export function DueDiligence({
     >
       {comCertidoes && (
         <Tabs
+          rotulo="Frentes da diligência"
           items={[
             { key: 'certidoes', label: 'Certidões' },
             { key: 'processos', label: 'Processos judiciais' },
@@ -297,7 +319,7 @@ export function DueDiligence({
         />
       )}
 
-      <div className={comCertidoes ? 'mt-4' : undefined}>
+      <div className={comCertidoes ? 'mt-5' : undefined}>
         {comCertidoes && (
           <div hidden={aba !== 'certidoes'}>
             <PainelCertidoes
@@ -337,6 +359,7 @@ export function DueDiligence({
       {desfecho && onMover && (
         <JanelaDeDesfecho
           acao={desfecho}
+          subtitulo={tituloDoCard}
           achados={itens}
           onRedigir={redigir}
           onGruposMarcados={setMarcados}

@@ -8,12 +8,13 @@ import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { Field, Input } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
-import { Badge } from '@/components/ui/Badge'
-import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
+import { Drawer } from '@/components/ui/Drawer'
 import { DrawerHistorico } from '@/components/Movimentacoes'
+import { CabecalhoDaFicha, SecaoDaFicha } from '@/components/operacional/Pecas'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 import { formatCNJ, vazioNull } from '@/lib/format'
+import { perguntarDescarte } from '@/lib/descarte'
 
 type ParentField = 'processo_id' | 'requerimento_id'
 
@@ -186,9 +187,9 @@ export function useApensosManager(parentField: ParentField) {
         aria-expanded={aberto}
         aria-label={`${count} apenso${count > 1 ? 's' : ''} — ${aberto ? 'ocultar' : 'ver'}`}
         title={`${count} apenso${count > 1 ? 's' : ''}`}
-        // py-1.5 para os 24px de alvo (é o único jeito de abrir a lista de
-        // apensos); -my-1.5 devolve o espaço à célula.
-        className="-my-1.5 inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-1.5 text-xs font-normal text-slate-600 transition-colors hover:bg-slate-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+        // A pílula neutra da amostra (`.pill-btn`), com os 24px de alvo: é o
+        // único jeito de abrir a lista de apensos na tabela.
+        className="inline-flex min-h-[24px] shrink-0 items-center gap-0.5 rounded-full bg-superficie-3 px-2 text-xs font-semibold text-texto-2 ring-1 ring-inset ring-borda transition-colors hover:text-marca-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
       >
         <span className="tabular-nums">{count}</span>
         <ChevronDown
@@ -209,80 +210,98 @@ export function useApensosManager(parentField: ParentField) {
     )
   }
 
-  function detailRow(parentId: string, colSpan: number) {
-    if (!expanded[parentId]) return null
+  /**
+   * Os apensos de um pai, em cartões com as ações de cada um (abrir, editar,
+   * excluir) e o "Adicionar apenso" SEMPRE À VISTA — na linha aberta da tabela e
+   * dentro das fichas (item "Novo" da amostra). Antes, o botão só aparecia com a
+   * lista vazia, e a ficha só listava: para mexer num apenso era preciso fechar a
+   * ficha e achar a linha.
+   */
+  function cartoes(parentId: string, vazio: string) {
     const apensos = porPai.get(parentId) ?? []
     return (
-      <tr className="bg-slate-50">
-        <td colSpan={colSpan} className="px-4 py-3">
-          {apensos.length === 0 ? (
-            <div className="flex items-center gap-3 text-sm text-slate-600">
-              Nenhum apenso vinculado a este registro.
-              <Button
-                size="sm"
-                variant="outline"
-                icon={<Plus className="h-3.5 w-3.5" />}
-                onClick={() => openNew(parentId)}
-              >
-                Adicionar apenso
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Apensos
-              </div>
-              {apensos.map((a) => (
-                // Clique abre a ficha do apenso, como nas linhas de Créditos.
-                <div
-                  key={a.id}
-                  onClick={() => setFicha(a)}
-                  className="flex cursor-pointer items-start justify-between gap-3 rounded-md border border-slate-200 bg-white p-2.5 text-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
-                  title="Abrir ficha do apenso"
-                >
-                  <div className="space-y-0.5">
-                    <div className="font-medium text-slate-800">
-                      {formatCNJ(a.numero)}
-                      {a.classe_processual && (
-                        <span className="font-normal text-slate-600">
-                          {' '}
-                          · {a.classe_processual}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-600">
-                      {[a.tribunal, a.comarca, a.vara].filter(Boolean).join(' · ') || '—'}
-                    </div>
-                    <div className="text-xs text-slate-600">
-                      Polo ativo: {a.polo_ativo || '—'} · Polo passivo:{' '}
-                      {a.polo_passivo || '—'}
-                    </div>
-                  </div>
-                  {/* stopPropagation: os botões não devem abrir a ficha. */}
-                  <div
-                    className="flex shrink-0 items-center gap-1"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <IconButton
-                      label="Editar apenso"
-                      icon={<Pencil className="h-4 w-4" />}
-                      onClick={() => abrirForm(a)}
-                    />
-                    <IconButton
-                      label="Excluir apenso"
-                      variant="danger"
-                      icon={<Trash2 className="h-4 w-4" />}
-                      onClick={() => setToDelete(a)}
-                    />
-                    <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden="true" />
-                  </div>
+      <div className="space-y-2">
+        {apensos.length === 0 ? (
+          <p className="text-corpo text-texto-2">{vazio}</p>
+        ) : (
+          apensos.map((a) => (
+            // Clique abre a ficha do apenso, como nas linhas de Créditos. O cartão
+            // não é um botão (tem botões dentro); pelo teclado, a ficha abre pelo
+            // último botão, o da seta.
+            <div
+              key={a.id}
+              onClick={() => setFicha(a)}
+              className="flex cursor-pointer items-center gap-3 rounded-campo border border-borda bg-superficie px-3 py-2.5 text-corpo transition-colors hover:border-marca-viva"
+              title="Abrir ficha do apenso"
+            >
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="text-texto">
+                  <span className="font-semibold tabular-nums">{formatCNJ(a.numero)}</span>
+                  {a.classe_processual && (
+                    <span className="text-texto-2"> · {a.classe_processual}</span>
+                  )}
                 </div>
-              ))}
+                <div className="text-xs text-texto-2">
+                  {[a.tribunal, a.comarca, a.vara].filter(Boolean).join(' · ') || '—'}
+                </div>
+                <div className="text-xs text-texto-2">
+                  Polo ativo: {a.polo_ativo || '—'} · Polo passivo: {a.polo_passivo || '—'}
+                </div>
+              </div>
+              {/* stopPropagation: os botões não devem abrir a ficha. */}
+              <div
+                className="flex shrink-0 items-center gap-0.5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <IconButton
+                  label="Editar apenso"
+                  icon={<Pencil className="h-4 w-4" />}
+                  onClick={() => abrirForm(a)}
+                />
+                <IconButton
+                  label="Excluir apenso"
+                  variant="danger"
+                  icon={<Trash2 className="h-4 w-4" />}
+                  onClick={() => setToDelete(a)}
+                />
+                <IconButton
+                  label={`Abrir ficha do apenso ${formatCNJ(a.numero)}`}
+                  icon={<ChevronRight className="h-4 w-4" />}
+                  onClick={() => setFicha(a)}
+                />
+              </div>
             </div>
-          )}
+          ))
+        )}
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<Plus className="h-4 w-4" />}
+          onClick={() => openNew(parentId)}
+        >
+          Adicionar apenso
+        </Button>
+      </div>
+    )
+  }
+
+  function detailRow(parentId: string, colSpan: number) {
+    if (!expanded[parentId]) return null
+    return (
+      <tr className="bg-superficie-2">
+        <td colSpan={colSpan} className="px-4 py-3">
+          <div className="font-display mb-2 text-xs font-bold uppercase tracking-wider text-texto-3">
+            Apensos
+          </div>
+          {cartoes(parentId, 'Nenhum apenso vinculado a este registro.')}
         </td>
       </tr>
     )
+  }
+
+  /** Os apensos dentro da ficha do crédito ou do requerimento, com as ações. */
+  function listaNaFicha(parentId: string) {
+    return cartoes(parentId, 'Nenhum apenso vinculado.')
   }
 
   function modals() {
@@ -292,15 +311,20 @@ export function useApensosManager(parentField: ParentField) {
           open={!!editing}
           onClose={() => setEditing(null)}
           title={editing?.id ? 'Editar apenso' : 'Novo apenso'}
+          description={
+            editing?.id
+              ? undefined
+              : 'Processo ligado a este registro — embargos, impugnação, cumprimento de sentença.'
+          }
           size="lg"
           dirty={dirty}
           footer={
             <>
               <Button
                 variant="outline"
-                onClick={() => {
+                onClick={async () => {
                   // Botão próprio não passa pela confirmação do Modal — checa dirty aqui.
-                  if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+                  if (dirty && !(await perguntarDescarte())) return
                   setEditing(null)
                 }}
               >
@@ -311,7 +335,9 @@ export function useApensosManager(parentField: ParentField) {
                 form="form-apenso"
                 loading={create.isPending || update.isPending}
               >
-                Salvar
+                {/* O botão diz o que faz (a amostra): adicionar é criar — e é
+                    na criação que o apenso vai para a ADVBOX. */}
+                {editing?.id ? 'Salvar alterações' : 'Adicionar apenso'}
               </Button>
             </>
           }
@@ -335,6 +361,7 @@ export function useApensosManager(parentField: ParentField) {
                 </Field>
                 <Field label="Classe processual">
                   <Input
+                    placeholder="Ex.: Embargos à execução"
                     value={editing.classe_processual ?? ''}
                     onChange={(e) =>
                       setEditing({ ...editing, classe_processual: e.target.value })
@@ -359,6 +386,7 @@ export function useApensosManager(parentField: ParentField) {
                     tocaria a ficha e a sincronização, sem ganho nenhum. */}
                 <Field label="Órgão" className="sm:col-span-2">
                   <Input
+                    placeholder="Ex.: 2ª Turma, 13ª Vara do Trabalho"
                     value={editing.vara ?? ''}
                     onChange={(e) => setEditing({ ...editing, vara: e.target.value })}
                   />
@@ -391,6 +419,7 @@ export function useApensosManager(parentField: ParentField) {
           open={!!toDelete}
           danger
           loading={remove.isPending}
+          title="Excluir apenso"
           message={`Excluir o apenso ${toDelete?.numero || ''}?`}
           confirmLabel="Excluir"
           onConfirm={confirmDelete}
@@ -404,20 +433,13 @@ export function useApensosManager(parentField: ParentField) {
           onClose={() => setFicha(null)}
           title={
             ficha && (
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold tracking-tight text-slate-800">
-                    {formatCNJ(ficha.numero || '')}
-                  </h2>
-                  {ficha.classe_processual && (
-                    <Badge tone="blue">{ficha.classe_processual}</Badge>
-                  )}
-                </div>
-                <p className="text-xs text-slate-600">
-                  Apenso vinculado a{' '}
-                  {parentField === 'processo_id' ? 'um crédito' : 'um requerimento'}
-                </p>
-              </div>
+              <CabecalhoDaFicha
+                etiqueta={`Apenso vinculado a ${
+                  parentField === 'processo_id' ? 'um crédito' : 'um requerimento'
+                }`}
+                titulo={formatCNJ(ficha.numero || '')}
+                apoio={ficha.classe_processual || undefined}
+              />
             )
           }
           footer={
@@ -435,28 +457,29 @@ export function useApensosManager(parentField: ParentField) {
           }
         >
           {ficha && (
-            <>
-              <DrawerSection title="Processo">
-                <DrawerField label="Tribunal">{ficha.tribunal || '—'}</DrawerField>
-                <DrawerField label="Comarca">{ficha.comarca || '—'}</DrawerField>
-                {/* "Órgão", igual ao formulário: rótulo diferente para o mesmo campo
-                    entre a ficha e o cadastro faz parecer que são dois dados. */}
-                <DrawerField label="Órgão">{ficha.vara || '—'}</DrawerField>
-                <DrawerField label="Classe processual">
-                  {ficha.classe_processual || '—'}
-                </DrawerField>
-              </DrawerSection>
-
-              <DrawerSection title="Partes">
-                <DrawerField label="Polo ativo">{ficha.polo_ativo || '—'}</DrawerField>
-                <DrawerField label="Polo passivo">
-                  {ficha.polo_passivo || '—'}
-                </DrawerField>
-              </DrawerSection>
+            <div className="space-y-6">
+              {/* "Órgão", igual ao formulário: rótulo diferente para o mesmo campo
+                  entre a ficha e o cadastro faz parecer que são dois dados. */}
+              <SecaoDaFicha
+                titulo="Processo"
+                pares={[
+                  ['Tribunal', ficha.tribunal],
+                  ['Comarca', ficha.comarca],
+                  ['Órgão', ficha.vara],
+                  ['Classe processual', ficha.classe_processual],
+                ]}
+              />
+              <SecaoDaFicha
+                titulo="Partes"
+                pares={[
+                  ['Polo ativo', ficha.polo_ativo],
+                  ['Polo passivo', ficha.polo_passivo],
+                ]}
+              />
 
               {/* Aqui o apenso é o principal dos próprios autos. */}
               <DrawerHistorico numero={ficha.numero} />
-            </>
+            </div>
           )}
         </Drawer>
       </>
@@ -471,5 +494,5 @@ export function useApensosManager(parentField: ParentField) {
    */
   const contagem = (parentId: string) => porPai.get(parentId)?.length ?? 0
 
-  return { contador, contagem, actions, detailRow, modals }
+  return { contador, contagem, actions, detailRow, listaNaFicha, modals }
 }

@@ -11,16 +11,17 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
-import { EmptyState, ErrorState } from '@/components/ui/Table'
-import { usePainel, CarregandoPainel, Ressalva } from './compartilhado'
+import { EmptyState } from '@/components/ui/Table'
+import { usePainel, CarregandoPainel, ErroPainel, Ressalva } from './compartilhado'
+import { TextoComTermos } from '@/components/layout/TextoComTermos'
 
 const TOM_GRAVIDADE = { alta: 'red', media: 'amber', baixa: 'gray' } as const
 const ROTULO_GRAVIDADE = { alta: 'Alta', media: 'Média', baixa: 'Baixa' } as const
 
 export default function Anomalias() {
-  const { painel, carregando, erro } = usePainel()
+  const { painel, carregando, erro, tentarDeNovo } = usePainel()
   if (carregando) return <CarregandoPainel />
-  if (erro || !painel) return <ErrorState message="Não foi possível carregar a carteira." />
+  if (erro || !painel) return <ErroPainel tentarDeNovo={tentarDeNovo} />
 
   const { anomalias } = painel
   const impossibilidades = anomalias.achados.filter((a) => a.natureza === 'impossibilidade')
@@ -30,7 +31,9 @@ export default function Anomalias() {
     <div className="space-y-6">
       <PageHeader
         title="Revisão de dados"
-        description="Inconsistências e sinais atípicos encontrados na carteira. Nenhum dado foi alterado."
+        description={
+          <TextoComTermos texto="Inconsistências e sinais atípicos encontrados na carteira. Nenhum dado foi alterado." />
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -71,7 +74,7 @@ export default function Anomalias() {
             <Secao
               titulo="Contradições no dado"
               descricao="O registro se contradiz. Nesses casos, é erro de cadastro."
-              icone={<AlertTriangle className="h-4 w-4 text-red-500" />}
+              icone={<AlertTriangle className="h-4 w-4 text-perigo" />}
               achados={impossibilidades}
             />
           )}
@@ -79,7 +82,7 @@ export default function Anomalias() {
             <Secao
               titulo="Sinais estatísticos"
               descricao="Fora do padrão da carteira — o que não significa errado. Um resultado extremo pode ser um evento econômico real."
-              icone={<InfoIcon className="h-4 w-4 text-slate-400" />}
+              icone={<InfoIcon className="h-4 w-4 text-texto-3" />}
               achados={sinais}
             />
           )}
@@ -111,9 +114,9 @@ function Secao({
       <CardBody>
         <ul className="space-y-4">
           {achados.map((a) => (
-            <li key={a.regra} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
+            <li key={a.regra} className="border-b border-borda pb-4 last:border-0 last:pb-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-slate-800">{a.titulo}</span>
+                <span className="text-sm font-semibold text-texto">{a.titulo}</span>
                 <Badge tone={TOM_GRAVIDADE[a.gravidade]} size="sm">
                   {ROTULO_GRAVIDADE[a.gravidade]}
                 </Badge>
@@ -121,8 +124,8 @@ function Secao({
                   {a.refs.length} {a.refs.length === 1 ? 'operação' : 'operações'}
                 </Badge>
               </div>
-              <p className="mt-1 text-sm text-slate-600">{a.orientacao}</p>
-              <p className="mt-2 font-mono text-xs text-slate-400">{a.refs.join(' · ')}</p>
+              <p className="mt-1 text-sm text-texto-2">{a.orientacao}</p>
+              <p className="mt-2 font-mono text-xs text-texto-3">{a.refs.join(' · ')}</p>
             </li>
           ))}
         </ul>

@@ -19,15 +19,7 @@
 // sequestro não é juntar planilha para fins de sequestro, e protocolar a peça
 // errada custa mais que um clique a mais.
 import { useEffect, useMemo, useState } from 'react'
-import {
-  AlertTriangle,
-  Copy,
-  Download,
-  FileText,
-  RefreshCw,
-  Send,
-  Sparkles,
-} from 'lucide-react'
+import { Copy, Download, FileText, Pencil, RefreshCw, Send, Sparkles } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -48,9 +40,13 @@ import {
 } from '@/lib/peticao'
 import { driveConfigurado } from '@/lib/drive'
 import { invokeFunction } from '@/lib/functions'
-import { peticaoTemplatesCrud, useInvestidorDados } from '@/lib/queries'
+import { peticaoTemplatesCrud, processosCrud, useInvestidorDados } from '@/lib/queries'
 import { formatCNJ } from '@/lib/format'
+import { peticaoAlterada, trechosDaPrevia } from '@/lib/previaDaPeticao'
+import { Aviso as CaixaDeAviso } from '@/components/operacional/Pecas'
+import { CreditoFormModal } from '@/components/CreditoFormModal'
 import type { Apenso, Processo } from '@/lib/types'
+import { perguntarDescarte } from '@/lib/descarte'
 
 const ABAS = [
   { key: 'modelo', label: 'Modelo', icon: <FileText className="h-4 w-4" /> },
@@ -81,7 +77,7 @@ export function PeticaoModal({
   open,
   onClose,
   descricao,
-  processo,
+  processo: processoRecebido,
   apenso,
   numeroTarefa,
   tarefaId,
@@ -126,6 +122,25 @@ export function PeticaoModal({
 }) {
   const toast = useToast()
   const qc = useQueryClient()
+
+  /**
+   * O CRÉDITO NA VERSÃO MAIS NOVA da lista em cache, e não a cópia que chegou ao
+   * abrir. É o que faz "Abrir o cadastro do crédito" (abaixo) valer alguma coisa:
+   * o cadastro corrigido por cima desta janela grava, a lista se atualiza, e as
+   * faltas e a prévia se recalculam sem fechar a petição. É o mesmo registro —
+   * só mais novo.
+   */
+  const processosVivos = processosCrud.useList()
+  const processo = useMemo(
+    () =>
+      processoRecebido
+        ? (processosVivos.data?.find((p) => p.id === processoRecebido.id) ?? processoRecebido)
+        : null,
+    [processoRecebido, processosVivos.data],
+  )
+  /** O cadastro do crédito aberto por cima da petição, a partir da lista de faltas. */
+  const [editandoCredito, setEditandoCredito] = useState(false)
+
   const [aba, setAba] = useState('modelo')
   const [idEscolhido, setIdEscolhido] = useState<string | null>(null)
   const [md, setMd] = useState<string | null>(null)
@@ -564,12 +579,22 @@ export function PeticaoModal({
     ? !processo || !textoIA.trim() || gerando
     : impedido || gerando
 
+  // "DESCARTAR ALTERAÇÕES?" (item "Novo" da amostra): fechar com o objeto
+  // digitado ou com a peça redigida pergunta antes. Só trocar o modelo não conta
+  // (lib/previaDaPeticao.ts, com teste).
+  const dirty = open && peticaoAlterada({ instrucao, instrucaoInicial, textoIA })
+  async function fechar() {
+    if (dirty && !(await perguntarDescarte())) return
+    onClose()
+  }
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       size="xl"
       title="Gerar petição"
+      dirty={dirty}
       // "Cedente v. Cessionário", a mesma forma que a lista de tarefas usa sob o
       // número do processo — quem abre a janela vê a mesma identificação que viu
       // no card, sem ter de reconciliar duas descrições do mesmo crédito.
@@ -585,7 +610,7 @@ export function PeticaoModal({
       }
       footer={
         <>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={fechar}>
             Fechar
           </Button>
           <Button
@@ -634,7 +659,7 @@ export function PeticaoModal({
                       type="button"
                       onClick={() => void reanalisar()}
                       disabled={reanalisando}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-brand-700 disabled:opacity-50"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-texto-3 transition-colors hover:text-brand-700 disabled:opacity-50"
                     >
                       <RefreshCw
                         className={`h-3 w-3 ${reanalisando ? 'animate-spin' : ''}`}
@@ -667,7 +692,7 @@ export function PeticaoModal({
                     </button>
                   </Aviso>
                 ) : panorama.data ? (
-                  <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-4 text-sm leading-relaxed text-slate-700">
+                  <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-4 text-sm leading-relaxed text-texto">
                     <TextoIA texto={panorama.data.panorama} />
                   </div>
                 ) : null}
@@ -677,7 +702,7 @@ export function PeticaoModal({
               <section>
                 <label
                   htmlFor="peticao-instrucao"
-                  className="mb-1.5 block text-sm font-medium text-slate-700"
+                  className="mb-1.5 block text-sm font-medium text-texto"
                 >
                   Objeto da petição
                 </label>
@@ -712,7 +737,7 @@ export function PeticaoModal({
                   <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                     <label
                       htmlFor="peticao-texto"
-                      className="text-sm font-medium text-slate-700"
+                      className="text-sm font-medium text-texto"
                     >
                       Revisar
                     </label>
@@ -856,6 +881,20 @@ export function PeticaoModal({
                   </li>
                 ))}
               </ul>
+              {/* O ATALHO (item "Novo" da amostra): o cadastro abre por cima desta
+                  janela, e a petição se recalcula quando ele grava. É sempre o
+                  cadastro do crédito PRINCIPAL — é dele que saem cessionário, tipo
+                  e dados; o juízo de um apenso se corrige no apenso. */}
+              {processo && (
+                <button
+                  type="button"
+                  onClick={() => setEditandoCredito(true)}
+                  className="mt-1 inline-flex min-h-[24px] items-center gap-1 text-sm font-semibold text-marca-texto hover:underline"
+                >
+                  <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                  Abrir o cadastro do crédito
+                </button>
+              )}
             </Aviso>
           )}
 
@@ -866,12 +905,31 @@ export function PeticaoModal({
               // Pré-visualização em texto, e não formatada: o que importa conferir
               // aqui é o CONTEÚDO preenchido. A forma final está no arquivo, e uma
               // prévia parecida-mas-não-igual daria falsa segurança.
-              <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-sans text-xs leading-relaxed text-slate-700 scrollbar-thin">
-                {textoFinal}
+              //
+              // AS FALTAS MARCADAS (item "Novo" da amostra): o rótulo que o
+              // cadastro não preencheu fica destacado no próprio texto — a lista
+              // de pendências acima aponta para um lugar que se vê.
+              <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-campo border border-borda bg-superficie-2 px-4 py-3 font-mono text-sm leading-relaxed text-texto scrollbar-thin">
+                {trechosDaPrevia(textoFinal).map((t, i) =>
+                  t.falta ? (
+                    <mark
+                      key={i}
+                      className="rounded bg-aviso-fundo px-0.5 font-semibold text-aviso ring-1 ring-inset ring-aviso-borda"
+                    >
+                      {t.texto}
+                      <span className="sr-only"> (falta preencher)</span>
+                    </mark>
+                  ) : (
+                    <span key={i}>{t.texto}</span>
+                  ),
+                )}
               </pre>
             )
           )}
         </div>
+      )}
+      {editandoCredito && processo && (
+        <CreditoFormModal inicial={processo} onClose={() => setEditandoCredito(false)} />
       )}
     </Modal>
   )
@@ -885,15 +943,7 @@ function Aviso({
   tom: 'atencao' | 'erro'
   children: React.ReactNode
 }) {
-  const cores =
-    tom === 'erro'
-      ? 'border-red-200 bg-red-50 text-red-800'
-      : 'border-amber-200 bg-amber-50 text-amber-900'
-  const Icone = tom === 'erro' ? AlertTriangle : FileText
-  return (
-    <div className={`flex gap-2 rounded-lg border p-3 text-sm ${cores}`}>
-      <Icone className="mt-0.5 h-4 w-4 flex-none" />
-      <div className="min-w-0">{children}</div>
-    </div>
-  )
+  // O desenho de aviso das telas do Operacional (a amostra): ícone e borda no
+  // tom, o texto na cor de leitura.
+  return <CaixaDeAviso tom={tom === 'erro' ? 'perigo' : 'aviso'}>{children}</CaixaDeAviso>
 }

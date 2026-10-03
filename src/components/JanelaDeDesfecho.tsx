@@ -12,33 +12,57 @@
 // PROCESSOS, dívidas de terceiro que alcançam este crédito. Os dois chegam aqui
 // como ItemDeRisco — grau, texto, fundamento —, e quem sabe traduzir é quem
 // chama.
-import { useState } from 'react'
-import { Sparkles } from 'lucide-react'
+import { useId, useState } from 'react'
+import { AlertTriangle, Info, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
+import { Textarea } from '@/components/ui/Field'
+import { CaixaDeAviso, DicaDeAviso, icSelo } from '@/components/analise/Pecas'
+import { perguntarDescarte } from '@/lib/descarte'
 import type { AcaoTela } from '@/lib/kommo'
 import type { GrauRisco } from '../../supabase/functions/_shared/graus.ts'
 
 export type { GrauRisco }
 
+// A ESCADA DE CINCO DEGRAUS DA AMOSTRA (`grau()`, janelas-analise.js): IMPEDITIVO
+// em vermelho, ALTO em âmbar, MODERADO em azul, ATENÇÃO e NOTA no neutro. OS DOIS
+// DE BAIXO SE DISTINGUEM PELO ÍCONE (alerta × informação) e pelo nome escrito —
+// não por um cinza mais claro, que era o NOTA em slate-400 (2,5:1), legível só de
+// perto. O texto do selo fica sempre no contraste de leitura.
 export const COR_GRAU: Record<GrauRisco, string> = {
-  IMPEDITIVO: 'bg-red-50 text-red-700 ring-red-200/70',
-  ALTO: 'bg-amber-50 text-amber-800 ring-amber-200/70',
-  MODERADO: 'bg-slate-100 text-slate-600 ring-slate-200/70',
-  'ATENÇÃO': 'bg-slate-50 text-slate-500 ring-slate-200/70',
-  NOTA: 'bg-slate-50 text-slate-400 ring-slate-200/60',
+  IMPEDITIVO: 'border-perigo-borda bg-perigo-fundo text-perigo',
+  ALTO: 'border-aviso-borda bg-aviso-fundo text-aviso',
+  MODERADO: 'border-info-borda bg-info-fundo text-info',
+  'ATENÇÃO': 'border-transparent bg-superficie-3 text-texto-2',
+  NOTA: 'border-transparent bg-superficie-3 text-texto-2',
 }
 
-/** O selo do grau, inline no parágrafo. */
+/** O ícone de cada grau: a cor nunca vai sozinha (WCAG 1.4.1). */
+const ICONE_DO_GRAU: Record<GrauRisco, typeof AlertTriangle> = {
+  IMPEDITIVO: AlertTriangle,
+  ALTO: AlertTriangle,
+  MODERADO: Info,
+  'ATENÇÃO': AlertTriangle,
+  NOTA: Info,
+}
+
+/**
+ * O selo do grau (o `.pill` da amostra), inline no parágrafo.
+ *
+ * INLINE, E NÃO BLOCO: a análise de RPV o põe no começo de cada item, e fora do
+ * parágrafo cada um deixava uma faixa vazia embaixo do selo.
+ */
 export function Selo({ grau }: { grau: GrauRisco }) {
+  const Icone = ICONE_DO_GRAU[grau] ?? Info
   return (
     <span
       className={cn(
-        'mr-2 inline-block rounded px-1.5 align-[2px] text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
+        'mr-2 inline-flex h-[22px] items-center gap-1 whitespace-nowrap rounded-full border px-2 align-middle text-xs font-semibold',
         COR_GRAU[grau],
       )}
     >
+      <Icone className={icSelo} aria-hidden />
       {grau}
     </span>
   )
@@ -93,8 +117,11 @@ export function JanelaDeDesfecho({
   motivoSugerido,
   onGruposMarcados,
   rotuloConfirmar,
+  subtitulo,
 }: {
   acao: AcaoTela
+  /** O título do card, sob o título da janela (opcional). */
+  subtitulo?: string
   /** Os achados da análise, para marcar em vez de redigitar. */
   achados: ItemDeRisco[]
   /** Manda a IA reescrever o motivo para quem vai ler no card. */
@@ -115,6 +142,10 @@ export function JanelaDeDesfecho({
   motivoSugerido?: string
 }) {
   const [motivo, setMotivo] = useState(motivoSugerido ?? '')
+  // IDS POR JANELA, e não fixos: a janela abre por cima da análise de RPV ou da
+  // due diligence, e um id repetido na página liga o rótulo ao campo errado.
+  const idDoMotivo = useId()
+  const idDosMotivos = useId()
   // OS ACHADOS CONGELAM AO ABRIR.
   //
   // `marcados` guarda POSIÇÕES na lista, e a lista vem de `atual` — que pode
@@ -248,30 +279,41 @@ export function JanelaDeDesfecho({
     !redigindo &&
     (!motivoObrigatorio || motivo.trim().length >= MINIMO_DO_MOTIVO)
 
+  // UMA REGRA SÓ PARA TODO JEITO DE FECHAR: o X, o Escape e o fundo passam pelo
+  // `dirty` do Modal, e o Cancelar do rodapé passa por aqui — antes ele fechava
+  // sem perguntar, e o motivo escrito ia embora com um clique.
+  const sujo = motivo.trim().length > 0
+  const cancelar = async () => {
+    if (sujo && !(await perguntarDescarte())) return
+    onFechar()
+  }
+
   return (
     <Modal
       open
       onClose={onFechar}
       size="lg"
       title={acao.label}
-      dirty={motivo.trim().length > 0}
+      // O CARD DE QUE SE FALA, sob o título (o apoio da amostra): a janela abre
+      // por cima de outra, e é este texto que diz qual crédito vai ser movido.
+      description={subtitulo || undefined}
+      dirty={sujo}
       footer={
-        <div className="flex items-center gap-2">
+        // O RODAPÉ DA AMOSTRA: Cancelar à esquerda, o ato à direita. O cancelar
+        // era um link de 12px colado no Confirmar — pequeno demais para alvo de
+        // clique, e perto demais do botão que move o card.
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Button variant="ghost" onClick={() => void cancelar()} disabled={enviando || redigindo}>
+            Cancelar
+          </Button>
+          <div className="flex-1" />
           <Button variant={acao.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
             {rotuloConfirmar ?? 'Confirmar'}
           </Button>
-          <button
-            type="button"
-            onClick={onFechar}
-            disabled={enviando || redigindo}
-            className="text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-50"
-          >
-            cancelar
-          </button>
         </div>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-5">
         {/* OS ACHADOS DA PRÓPRIA ANÁLISE, para marcar em vez de redigitar.
             Eles estão na tela de trás, já graduados e fundamentados; obrigar a
             pessoa a copiá-los à mão é pedir que reescreva o que a máquina
@@ -282,28 +324,39 @@ export function JanelaDeDesfecho({
             sem marcar nada, escrevendo do zero, e dá para marcar três e
             escrever uma ressalva que contradiz uma delas. */}
         {achados.length > 0 && (
-          <div>
-            <p className="text-xs text-slate-500">Selecionar motivos</p>
+          <div className="space-y-2">
+            <p id={idDosMotivos} className="text-corpo font-semibold text-texto">
+              Selecionar motivos
+            </p>
             {/* AGRUPADOS COMO A TABELA, e pelo mesmo motivo: são dois créditos
                 com donos diferentes. Marcar só os processos de um titular é
                 dizer que a verba DELE cai — e é isso que deixa a outra seguir.
                 Numa lista corrida essa distinção não existiria, e a recusa
                 voltaria a ser do card inteiro. */}
-            <div className="mt-1.5 max-h-64 space-y-3 overflow-y-auto pr-1">
+            {/* A CAIXA DOS MOTIVOS (`.motivos` da amostra): moldura própria e
+                rolagem própria, para a lista longa de uma análise ruim não
+                empurrar o campo da anotação para fora da janela. */}
+            <div
+              role="group"
+              aria-labelledby={idDosMotivos}
+              className="max-h-[230px] space-y-2 overflow-y-auto rounded-campo border border-borda px-[10px] py-2 scrollbar-thin"
+            >
               {grupos.map(([nome, indices]) => (
                 <div key={nome}>
                   {nome && (
-                    <p className="font-display text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                    <p className="font-display mt-1 text-xs font-bold uppercase tracking-[.06em] text-texto-3">
                       {nome}
                     </p>
                   )}
-                  <ul className="mt-1 space-y-1">
+                  <ul className="mt-1 space-y-0.5">
                     {indices.map((i) => (
                       <li key={i}>
-                        <label className="flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-slate-700">
+                        {/* A LINHA INTEIRA É O ALVO: a caixa de 16px sozinha
+                            ficaria abaixo dos 24px de alvo de clique. */}
+                        <label className="flex min-h-[24px] cursor-pointer items-start gap-2 rounded-controle py-0.5 text-corpo text-texto">
                           <input
                             type="checkbox"
-                            className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            className="mt-[3px] h-[16px] w-[16px] flex-none cursor-pointer accent-marca focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-1 disabled:cursor-not-allowed"
                             checked={marcados.has(i)}
                             disabled={enviando || redigindo}
                             onChange={() => marcar(i)}
@@ -323,12 +376,13 @@ export function JanelaDeDesfecho({
         )}
 
         <div>
-          <label className="block text-xs text-slate-500" htmlFor="motivo-desfecho">
+          <label className="mb-2 block text-corpo font-semibold text-texto" htmlFor={idDoMotivo}>
             Anotação no card
           </label>
-          <textarea
-            id="motivo-desfecho"
-            className="mt-1.5 min-h-[140px] w-full resize-y rounded-xl border border-slate-200 px-3.5 py-2 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          <Textarea
+            id={idDoMotivo}
+            rows={5}
+            className="min-h-[140px]"
             placeholder={
               acao.papel === 'diligenciar'
                 ? 'O que falta apurar. Ex.: "a conta da contadoria não está nos autos — pedir ao advogado antes de precificar".'
@@ -345,53 +399,62 @@ export function JanelaDeDesfecho({
             // o Confirmar e obrigaria a redigir de novo, jogando fora o ajuste.
             onChange={(e) => setMotivo(e.target.value)}
           />
+
+          {/* A REDAÇÃO PELA IA, e num botão — não no confirmar.
+              Quem escreve a razão é quem acabou de auditar, e escreve como quem
+              auditou: "SELIC de 02/2024 sobre parcela com termo inicial em
+              09/2024". Quem lê é o comercial, que vai falar com o cedente e não
+              tem a análise à frente. A IA reescreve mantendo os termos técnicos
+              e explicando a consequência ao lado de cada um.
+
+              EXPLÍCITO, e não automático no confirmar: o texto vai para o card
+              sob o nome de quem clicou, e ninguém deve assinar um parágrafo que
+              não leu.
+
+              JUNTO DO CAMPO, como na amostra: o botão reescreve aquele texto, e
+              o recado de conferir fala dele. */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              icon={<Sparkles className="h-4 w-4" aria-hidden />}
+              onClick={redigir}
+              disabled={enviando || redigindo || (marcados.size === 0 && !motivo.trim())}
+              loading={redigindo}
+            >
+              {revisado ? 'Redigir de novo' : 'Redigir com a IA'}
+            </Button>
+            {revisado && (
+              <span className="text-sm text-texto-3">
+                Texto reescrito pela IA — confira e edite antes de confirmar.
+              </span>
+            )}
+          </div>
+          {/* AVISO, E NÃO TRAVA. O que vai para o card é o texto do campo; os
+              achados marcados só entram nele pela mão da IA. Confirmar sem
+              redigir é legítimo — é o caso de quem recusa por uma razão que não
+              está na lista —, mas então as marcas não vão a lugar nenhum, e
+              isso precisa estar dito. */}
+          {!revisado && marcados.size > 0 && (
+            <DicaDeAviso>
+              {marcados.size === 1 ? '1 achado marcado' : `${marcados.size} achados marcados`} — eles
+              só chegam ao card se a IA redigir. Confirmando assim, vai só o texto acima.
+            </DicaDeAviso>
+          )}
         </div>
 
-        {/* A REDAÇÃO PELA IA, e num botão — não no confirmar.
-            Quem escreve a razão é quem acabou de auditar, e escreve como quem
-            auditou: "SELIC de 02/2024 sobre parcela com termo inicial em
-            09/2024". Quem lê é o comercial, que vai falar com o cedente e não
-            tem a análise à frente. A IA reescreve mantendo os termos técnicos e
-            explicando a consequência ao lado de cada um.
-
-            EXPLÍCITO, e não automático no confirmar: o texto vai para o card
-            sob o nome de quem clicou, e ninguém deve assinar um parágrafo que
-            não leu. */}
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            icon={<Sparkles className="h-3.5 w-3.5" />}
-            onClick={redigir}
-            disabled={enviando || redigindo || (marcados.size === 0 && !motivo.trim())}
-            loading={redigindo}
-          >
-            {revisado ? 'Redigir de novo' : 'Redigir com a IA'}
-          </Button>
-          {revisado ? (
-            <span className="text-xs text-slate-400">
-              Texto reescrito pela IA — confira e edite antes de confirmar.
-            </span>
-          ) : marcados.size > 0 ? (
-            /* AVISO, E NÃO TRAVA. O que vai para o card é o texto do campo; os
-               achados marcados só entram nele pela mão da IA. Confirmar sem
-               redigir é legítimo — é o caso de quem recusa por uma razão que
-               não está na lista —, mas então as marcas não vão a lugar nenhum,
-               e isso precisa estar dito. */
-            <span className="text-xs text-amber-700">
-              {marcados.size === 1 ? '1 achado marcado' : `${marcados.size} achados marcados`} — eles só
-              chegam ao card se a IA redigir. Confirmando assim, vai só o texto acima.
-            </span>
-          ) : null}
-        </div>
-
+        {/* O ERRO NUMA CAIXA, e não numa linha de 12px: é o envio que não
+            aconteceu, e a janela fica aberta com o texto para tentar de novo. */}
+        {erro && (
+          <CaixaDeAviso tom="perigo" role="alert">
+            {erro}
+          </CaixaDeAviso>
+        )}
         {motivoObrigatorio && motivo.trim().length > 0 && motivo.trim().length < MINIMO_DO_MOTIVO && (
-          <p className="text-xs text-amber-700">
+          <DicaDeAviso>
             Escreva a razão por extenso — faltam {MINIMO_DO_MOTIVO - motivo.trim().length}{' '}
             caracteres. O comercial lê isso sem ter a análise à mão.
-          </p>
+          </DicaDeAviso>
         )}
-        {erro && <p className="text-xs text-red-700">{erro}</p>}
       </div>
     </Modal>
   )

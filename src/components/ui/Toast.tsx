@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from 'react'
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react'
-import { cn } from '@/lib/cn'
 
 type ToastType = 'success' | 'error' | 'info'
 interface ToastAction {
@@ -91,10 +90,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     info: (m, opts) => toast(m, 'info', opts),
   }
 
+  // O AVISO DA AMOSTRA É ESCURO (fundo `texto`, letra `superficie`): sobre o
+  // papel e os cartões brancos ele se destaca sem precisar de cor, e o TIPO vem
+  // pelo ícone — verde, rosado ou azul-claro, os tons que leem no escuro. As
+  // cores invertem juntas no modo escuro, porque são os mesmos dois tokens.
   const icons = {
-    success: <CheckCircle2 className="h-5 w-5 text-emerald-600" />,
-    error: <AlertCircle className="h-5 w-5 text-red-600" />,
-    info: <Info className="h-5 w-5 text-blue-600" />,
+    success: <CheckCircle2 className="h-5 w-5 shrink-0 text-acento" aria-hidden />,
+    error: <AlertCircle className="h-5 w-5 shrink-0 text-perigo-borda" aria-hidden />,
+    info: <Info className="h-5 w-5 shrink-0 text-brand-300" aria-hidden />,
   }
 
   return (
@@ -102,38 +105,38 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div
         aria-live="polite"
-        className="fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-2"
+        // 420px como na amostra, e nunca mais largo que a tela menos as margens
+        // (no celular, `w-full` com `right-4` empurrava o aviso para fora).
+        className="fixed bottom-4 right-4 z-[60] flex w-[calc(100vw-24px)] max-w-[420px] flex-col gap-2"
       >
         {items.map((t) => (
           <div
             key={t.id}
-            role="status"
+            // O ERRO É `alert`: o leitor de tela o anuncia na hora, interrompendo
+            // o que estiver lendo — falha de gravação não pode esperar a vez. Os
+            // outros seguem `status`, educados.
+            role={t.type === 'error' ? 'alert' : 'status'}
             // Pausa o auto-dismiss no hover; ao sair, reinicia com ~2s.
             onMouseEnter={() => pauseRemove(t.id)}
             onMouseLeave={() => scheduleRemove(t.id, 2000)}
-            className={cn(
-              'animate-toast-in flex items-start gap-3 rounded-lg border bg-white p-3 shadow-lg',
-              t.type === 'success' && 'border-emerald-200',
-              t.type === 'error' && 'border-red-200',
-              t.type === 'info' && 'border-blue-200',
-            )}
+            className="animate-toast-in flex items-start gap-3 rounded-2xl bg-texto px-4 py-3 text-superficie shadow-nivel-2"
           >
             {icons[t.type]}
-            <p className="flex-1 text-sm text-slate-700">{t.message}</p>
+            <p className="flex-1 text-corpo">{t.message}</p>
             {t.action && (
               <button
                 onClick={() => {
                   t.action?.onClick()
                   remove(t.id)
                 }}
-                className="shrink-0 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+                className="-my-0.5 shrink-0 rounded-controle border border-superficie/35 px-2.5 py-1 text-sm font-bold text-superficie transition-colors hover:bg-superficie/15"
               >
                 {t.action.label}
               </button>
             )}
             <button
               onClick={() => remove(t.id)}
-              className="text-slate-600 hover:text-slate-800"
+              className="-my-0.5 -mr-1 shrink-0 rounded-controle p-1 text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie"
               aria-label="Fechar aviso"
             >
               <X className="h-4 w-4" />

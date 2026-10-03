@@ -36,7 +36,9 @@ export function Segmented({
       role="group"
       aria-label={ariaLabel}
       className={cn(
-        'inline-flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-1',
+        // O `.seg` da amostra: trilho na superfície 3 com contorno, e a opção
+        // escolhida "levantada" em branco com o texto no azul da marca.
+        'inline-flex flex-wrap items-center gap-0.5 rounded-campo border border-borda bg-superficie-3 p-1',
         className,
       )}
     >
@@ -50,12 +52,12 @@ export function Segmented({
             disabled={item.disabled}
             onClick={() => onChange(item.key)}
             className={cn(
-              'font-display flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-semibold transition-all duration-150',
+              'flex items-center gap-1.5 whitespace-nowrap rounded-controle px-3 py-2 text-sm font-semibold transition-all duration-150',
               item.disabled
-                ? 'cursor-not-allowed text-slate-400 opacity-60'
+                ? 'cursor-not-allowed text-texto-3 opacity-60'
                 : active
-                  ? 'bg-white text-brand-700 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-700',
+                  ? 'bg-superficie text-marca-texto shadow-nivel-1'
+                  : 'text-texto-2 hover:text-texto',
             )}
           >
             {item.label}
@@ -63,7 +65,7 @@ export function Segmented({
               <span
                 className={cn(
                   'rounded-full px-1.5 py-0.5 text-xs font-semibold tabular-nums leading-none',
-                  active ? 'bg-brand-50 text-brand-700' : 'bg-slate-200 text-slate-600',
+                  active ? 'bg-marca-suave text-marca-texto' : 'bg-borda/70 text-texto-2',
                 )}
               >
                 {item.count}
