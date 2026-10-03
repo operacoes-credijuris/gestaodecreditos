@@ -42,6 +42,18 @@ import {
   processosDoEnvolvido,
   type ProcessoApurado,
 } from '../_shared/escavador.ts'
+// COMO A APURAÇÃO PAGA ENTRA NO BANCO (revisão de 03/10/2026) — ver o módulo.
+import {
+  destinoDaApuracao,
+  ehConflitoDeUnicidade,
+  faltaColunaDaLiberacao,
+  historicoDoAlvo,
+  type LinhaDoHistorico,
+  observacaoDaFalhaMantida,
+  observacaoDaGravacaoFalha,
+} from '../_shared/gravacaoDaApuracao.ts'
+
+type Servico = ReturnType<typeof serviceClient>
 
 type Papel = 'CEDENTE' | 'CONJUGE' | 'PJ' | 'ADVOGADO'
 const PAPEIS: Papel[] = ['CEDENTE', 'CONJUGE', 'PJ', 'ADVOGADO']
@@ -207,6 +219,153 @@ async function apurarAlvo(
   }
 }
 
+/**
+ * Grava UMA apuração: a linha de dd_historico e a foto dos processos dela.
+ *
+ * LANÇA no erro de banco — e quem chama registra o consumo assim mesmo (a busca
+ * já foi paga) e conta a falha na tela. As regras de quê gravar estão em
+ * `_shared/gravacaoDaApuracao.ts`.
+ */
+async function gravarApuracao(
+  svc: Servico,
+  leadId: number,
+  usuarioId: string,
+  alvo: Alvo | undefined,
+  a: Apuracao,
+): Promise<{ historicoId: string; mantida: LinhaDoHistorico | null; avisoDeMigracao: string | null }> {
+  const identidade = a.documento ?? a.oab ?? a.nome
+  const linha = {
+    kommo_lead_id: leadId,
+    papel: a.papel,
+    sujeito_id: alvo?.sujeito_id ?? null,
+    nome: a.nome || identidade,
+    documento: a.documento,
+    oab: a.oab,
+    status: a.status,
+    fonte: 'escavador',
+    // O check dd_historico_apurado_exige_data recusa APURADO sem data: uma
+    // apuração sem data é uma foto sem dia, e diligência tem validade.
+    apurado_em: a.status === 'APURADO' ? new Date().toISOString() : null,
+    observacao: a.observacao,
+    criado_por: usuarioId,
+    atualizado_em: new Date().toISOString(),
+  }
+  const quem = { documento: linha.documento, oab: linha.oab, nome: linha.nome }
+
+  // TODAS AS LINHAS DO PAPEL, e a escolha em código (`historicoDoAlvo`): o
+  // filtro `.or(nome.eq.…)` levava o nome cru para a sintaxe do PostgREST e
+  // tinha o erro ignorado. São poucas linhas por crédito e papel.
+  const lerLinhas = async (): Promise<LinhaDoHistorico[]> => {
+    const { data, error } = await svc
+      .from('dd_historico')
+      .select('id, documento, oab, nome, status, apurado_em')
+      .eq('kommo_lead_id', leadId)
+      .eq('papel', a.papel)
+    if (error) throw new Error(`dd_historico (leitura): ${error.message}`)
+    return (data ?? []) as LinhaDoHistorico[]
+  }
+
+  // A LIBERAÇÃO SAI em toda regravação (ver `destinoDaApuracao`). Sem a coluna
+  // da 0062 no banco não há liberação a tirar, e a gravação segue sem ela.
+  const atualizar = async (id: string) => {
+    let { error } = await svc
+      .from('dd_historico')
+      .update({ ...linha, liberado_em: null, liberado_por: null })
+      .eq('id', id)
+    if (error && faltaColunaDaLiberacao(error)) {
+      ;({ error } = await svc.from('dd_historico').update(linha).eq('id', id))
+    }
+    if (error) throw new Error(`dd_historico: ${error.message}`)
+  }
+
+  let anterior = historicoDoAlvo(await lerLinhas(), quem)
+  if (destinoDaApuracao(anterior, a.status).tipo === 'MANTER_ANTERIOR') {
+    return { historicoId: anterior!.id, mantida: anterior, avisoDeMigracao: null }
+  }
+
+  let historicoId: string
+  if (anterior) {
+    await atualizar(anterior.id)
+    historicoId = anterior.id
+  } else {
+    const { data, error } = await svc.from('dd_historico').insert(linha).select('id').single()
+    if (error && ehConflitoDeUnicidade(error)) {
+      // A CORRIDA: outra aba gravou o mesmo alvo entre a leitura e o insert.
+      // A linha dela é a desta apuração; relê e decide de novo sobre ela.
+      anterior = historicoDoAlvo(await lerLinhas(), quem)
+      if (!anterior) throw new Error(`dd_historico: ${error.message}`)
+      if (destinoDaApuracao(anterior, a.status).tipo === 'MANTER_ANTERIOR') {
+        return { historicoId: anterior.id, mantida: anterior, avisoDeMigracao: null }
+      }
+      await atualizar(anterior.id)
+      historicoId = anterior.id
+    } else if (error) {
+      throw new Error(`dd_historico: ${error.message}`)
+    } else {
+      historicoId = data.id as string
+    }
+  }
+
+  // REAPURAR SUBSTITUI A FOTO: saem os processos do Escavador da passada
+  // anterior, entram os de agora. As linhas de outra fonte (à mão) ficam.
+  const { error: eLimpeza } = await svc
+    .from('dd_processo')
+    .delete()
+    .eq('historico_id', historicoId)
+    .eq('fonte', 'escavador')
+  if (eLimpeza) throw new Error(`dd_processo (limpeza): ${eLimpeza.message}`)
+
+  let avisoDeMigracao: string | null = null
+  if (a.processos.length > 0) {
+    const linhas = a.processos.map((p) => ({
+      ...p,
+      historico_id: historicoId,
+      kommo_lead_id: leadId,
+    }))
+    let { error } = await svc.from('dd_processo').insert(linhas)
+
+    // COLUNA QUE FALTA NÃO PODE CUSTAR A APURAÇÃO INTEIRA.
+    //
+    // A busca no Escavador é COBRADA POR REQUISIÇÃO, e quando ela volta o
+    // dinheiro já foi gasto. Recusar a gravação porque uma coluna nova ainda
+    // não existe no banco joga fora o que se pagou, e o próximo clique paga
+    // de novo — foi o que aconteceu no dia em que `data_ultima_movimentacao`
+    // entrou no código antes de a migração 0067 rodar.
+    //
+    // Aqui a apuração entra sem a coluna, e o aviso volta para a tela dizendo
+    // o que falta. A leitura já degrada do mesmo jeito (ver o `select('*')`
+    // do painel): o que não existe não vem, e a célula fica com um traço.
+    if (error && /data_ultima_movimentacao/i.test(error.message)) {
+      const semAColuna = linhas.map(({ data_ultima_movimentacao: _d, ...resto }) => resto)
+      ;({ error } = await svc.from('dd_processo').insert(semAColuna))
+      if (!error) {
+        avisoDeMigracao =
+          'A migração 0067 ainda não rodou: a apuração foi salva, mas sem a data da ' +
+          'última movimentação dos processos. Rode-a no SQL Editor do Supabase.'
+      }
+    }
+    if (error) {
+      // APURADO SEM OS PROCESSOS É "NADA CONSTA" — o pior erro possível aqui: a
+      // linha já diz APURADO com a data de hoje, e a foto antiga já saiu. A
+      // linha volta a FALHA para a lacuna aparecer na análise. Se nem isso
+      // gravar (a linha tem recusa, que exige APURADO), fica o erro na tela.
+      await svc
+        .from('dd_historico')
+        .update({
+          status: 'FALHA',
+          apurado_em: null,
+          observacao:
+            `A busca achou ${a.processos.length} processo(s), mas a gravação deles falhou ` +
+            `(${error.message.slice(0, 200)}). Refaça a apuração.`,
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq('id', historicoId)
+      throw new Error(`dd_processo: ${error.message}`)
+    }
+  }
+  return { historicoId, mantida: null, avisoDeMigracao }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -309,89 +468,39 @@ Deno.serve(async (req: Request) => {
      * Grava-se o que dá, e o aviso sobe para a tela.
      */
     let avisoDeMigracao: string | null = null
-    for (const a of apuracoes) {
-      const alvo = alvos.find((x) => x.papel === a.papel && x.nome === a.nome) ?? alvos[0]
+    /**
+     * O que foi PAGO e não se conseguiu salvar. Nunca mais um 400 no meio do
+     * laço: ele jogava fora o consumo deste alvo e a gravação dos seguintes, que
+     * também já tinham sido pagos. Cada alvo grava o que dá, e a falha sobe para
+     * a tela — no item dele e no aviso.
+     */
+    const naoSalvas: string[] = []
+    for (let i = 0; i < apuracoes.length; i++) {
+      const a = apuracoes[i]
+      // PELA POSIÇÃO: Promise.all devolve na ordem dos alvos. Procurar pelo
+      // papel e pelo nome errava quando o Escavador devolvia o nome do advogado
+      // achado pela OAB (o nome mudava, e o sujeito_id vinha do primeiro alvo).
+      const alvo = alvos[i]
       const identidade = a.documento ?? a.oab ?? a.nome
 
-      const { data: existente } = await svc
-        .from('dd_historico')
-        .select('id')
-        .eq('kommo_lead_id', leadId)
-        .eq('papel', a.papel)
-        .or(
-          [
-            a.documento ? `documento.eq.${a.documento}` : null,
-            a.oab ? `oab.eq.${a.oab}` : null,
-            `nome.eq.${a.nome}`,
-          ]
-            .filter(Boolean)
-            .join(','),
-        )
-        .maybeSingle()
-
-      const linha = {
-        kommo_lead_id: leadId,
-        papel: a.papel,
-        sujeito_id: alvo?.sujeito_id ?? null,
-        nome: a.nome || identidade,
-        documento: a.documento,
-        oab: a.oab,
-        status: a.status,
-        fonte: 'escavador',
-        // O check dd_historico_apurado_exige_data recusa APURADO sem data: uma
-        // apuração sem data é uma foto sem dia, e diligência tem validade.
-        apurado_em: a.status === 'APURADO' ? new Date().toISOString() : null,
-        observacao: a.observacao,
-        criado_por: usuario.id,
-        atualizado_em: new Date().toISOString(),
+      let historicoId: string | null = null
+      let mantida: LinhaDoHistorico | null = null
+      let erroDeGravacao: string | null = null
+      try {
+        const r = await gravarApuracao(svc, leadId, usuario.id, alvo, a)
+        historicoId = r.historicoId
+        mantida = r.mantida
+        if (r.avisoDeMigracao) avisoDeMigracao = r.avisoDeMigracao
+      } catch (e) {
+        erroDeGravacao = String((e as Error)?.message ?? e)
+        console.error('[dd-processos] gravação', leadId, a.papel, erroDeGravacao)
       }
 
-      let historicoId = existente?.id as string | undefined
-      if (historicoId) {
-        const { error } = await svc.from('dd_historico').update(linha).eq('id', historicoId)
-        if (error) return jsonResponse({ erro: `dd_historico: ${error.message}` }, 400)
-      } else {
-        const { data, error } = await svc.from('dd_historico').insert(linha).select('id').single()
-        if (error) return jsonResponse({ erro: `dd_historico: ${error.message}` }, 400)
-        historicoId = data.id as string
-      }
-
-      await svc.from('dd_processo').delete().eq('historico_id', historicoId).eq('fonte', 'escavador')
-      if (a.processos.length > 0) {
-        const linhas = a.processos.map((p) => ({
-          ...p,
-          historico_id: historicoId,
-          kommo_lead_id: leadId,
-        }))
-        let { error } = await svc.from('dd_processo').insert(linhas)
-
-        // COLUNA QUE FALTA NÃO PODE CUSTAR A APURAÇÃO INTEIRA.
-        //
-        // A busca no Escavador é COBRADA POR REQUISIÇÃO, e quando ela volta o
-        // dinheiro já foi gasto. Recusar a gravação porque uma coluna nova ainda
-        // não existe no banco joga fora o que se pagou, e o próximo clique paga
-        // de novo — foi o que aconteceu no dia em que `data_ultima_movimentacao`
-        // entrou no código antes de a migração 0067 rodar.
-        //
-        // Aqui a apuração entra sem a coluna, e o aviso volta para a tela dizendo
-        // o que falta. A leitura já degrada do mesmo jeito (ver o `select('*')`
-        // do painel): o que não existe não vem, e a célula fica com um traço.
-        if (error && /data_ultima_movimentacao/i.test(error.message)) {
-          const semAColuna = linhas.map(({ data_ultima_movimentacao: _d, ...resto }) => resto)
-          ;({ error } = await svc.from('dd_processo').insert(semAColuna))
-          if (!error) {
-            avisoDeMigracao =
-              'A migração 0067 ainda não rodou: a apuração foi salva, mas sem a data da ' +
-              'última movimentação dos processos. Rode-a no SQL Editor do Supabase.'
-          }
-        }
-        if (error) return jsonResponse({ erro: `dd_processo: ${error.message}` }, 400)
-      }
-
-      // O QUE CUSTOU. O preço vem no header de cada resposta, em centavos; sem
-      // registrar, o gasto só aparece na fatura, agregado, sem dizer qual card
-      // o consumiu. Ver a migração 0061.
-      await svc.from('escavador_consumo').insert({
+      // O QUE CUSTOU — SEMPRE, gravada a apuração ou não. O preço vem no header
+      // de cada resposta, em centavos; sem registrar, o gasto só aparece na
+      // fatura, agregado, sem dizer qual card o consumiu. Ver a migração 0061.
+      // Uma segunda tentativa, porque é o único registro desse dinheiro.
+      const consumo = {
         kommo_lead_id: leadId,
         historico_id: historicoId,
         operacao: a.papel === 'ADVOGADO' ? 'advogado' : 'envolvido',
@@ -399,9 +508,39 @@ Deno.serve(async (req: Request) => {
         centavos: a.centavos,
         requisicoes: a.requisicoes,
         processos: a.processos.length,
-        erro: a.status === 'FALHA' ? a.observacao : null,
+        erro: a.status === 'FALHA'
+          ? a.observacao
+          : erroDeGravacao
+            ? `apuração não salva: ${erroDeGravacao}`.slice(0, 500)
+            : null,
         criado_por: usuario.id,
-      })
+      }
+      let { error: eConsumo } = await svc.from('escavador_consumo').insert(consumo)
+      if (eConsumo) ({ error: eConsumo } = await svc.from('escavador_consumo').insert(consumo))
+      if (eConsumo) {
+        console.error('[dd-processos] consumo não registrado', leadId, consumo, eConsumo.message)
+        naoSalvas.push(`o consumo de ${a.papel.toLowerCase()} não foi registrado (${eConsumo.message})`)
+      }
+
+      if (erroDeGravacao) {
+        naoSalvas.push(`a apuração de ${a.papel.toLowerCase()} não foi salva (${erroDeGravacao})`)
+        // FALHA PARA A TELA, com o motivo verdadeiro: o resultado não está no
+        // banco, e a lista que a tela recarrega não o terá.
+        gravadas.push({
+          historico_id: historicoId,
+          papel: a.papel,
+          nome: a.nome,
+          documento: a.documento,
+          status: 'FALHA',
+          gravada: false,
+          observacao: observacaoDaGravacaoFalha(erroDeGravacao, a.centavos),
+          total: 0,
+          com_risco: 0,
+          alto_risco: 0,
+          processos: [],
+        })
+        continue
+      }
 
       gravadas.push({
         historico_id: historicoId,
@@ -409,12 +548,17 @@ Deno.serve(async (req: Request) => {
         nome: a.nome,
         documento: a.documento,
         status: a.status,
-        observacao: a.observacao,
+        observacao: mantida ? observacaoDaFalhaMantida(a.observacao, mantida.apurado_em) : a.observacao,
+        ...(mantida ? { anterior_mantida: true } : {}),
         total: a.processos.length,
         com_risco: a.processos.filter((p) => p.risco !== 'NENHUM').length,
         alto_risco: a.processos.filter((p) => p.risco === 'ALTO').length,
         processos: a.processos,
       })
+    }
+    if (naoSalvas.length > 0) {
+      const t = 'Atenção: ' + naoSalvas.join('; ') + '.'
+      avisoDeMigracao = avisoDeMigracao ? `${avisoDeMigracao} ${t}` : t
     }
 
     const centavos = apuracoes.reduce((s, a) => s + a.centavos, 0)
