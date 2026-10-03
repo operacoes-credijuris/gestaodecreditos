@@ -96,6 +96,11 @@ export interface AlvoDaLeitura {
   ocorrencias: number
   /** O recorte foi montado em volta dele. */
   focado: boolean
+  /**
+   * De onde veio o nome procurado (acréscimo de 03/10/2026): o beneficiário do
+   * ofício requisitório, o cadastro da tela ou o título do card.
+   */
+  origem?: 'oficio' | 'cadastro' | 'titulo' | ''
 }
 
 export interface QualificacaoLida {
