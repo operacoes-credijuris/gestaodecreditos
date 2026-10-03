@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, CheckCircle2, ChevronDown, Pencil, Trash2, Search } from 'lucide-react'
+import { RefreshCw, CheckCircle2, ChevronDown, Pencil, Trash2, Info } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
@@ -8,10 +8,9 @@ import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Segmented } from '@/components/ui/Segmented'
-import { StatCard } from '@/components/ui/StatCard'
 import { IconButton } from '@/components/ui/IconButton'
 import { Select, Input } from '@/components/ui/Field'
-import { DrawerSection } from '@/components/ui/Drawer'
+import { CaixaSuave, TituloDaSecao, TituloDoGrupo } from '@/components/operacional/Pecas'
 import { EmptyState, ErrorState, Loading, Table, THead, TH, TBody, TR, TD } from '@/components/ui/Table'
 import { getLabel, FASE_PROCESSUAL, FASE_ATIVO_ORDEM, FASE_COMPLEMENTAR_ORDEM } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
@@ -278,16 +277,33 @@ function SituacaoSelect({
 
   return (
     <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
+      {/* O BOTÃO DA SITUAÇÃO (o `.sit-btn` da amostra): a bolinha na cor da
+          situação e o nome em texto de leitura. A cor carrega sentido para quem
+          usa, mas não fala sozinha — o nome está sempre ao lado. */}
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
+        aria-expanded={aberto}
+        aria-haspopup="true"
+        title="Situação dentro da fase — clique para trocar"
         className={cn(
-          'flex w-full items-center justify-between rounded-md border px-2 py-1 text-left text-xs',
-          situacaoAtual ? classeSelecionadaParaCor(situacaoAtual.cor) : 'border-borda-forte bg-superficie text-texto-3',
+          'flex min-h-[30px] w-full items-center justify-between gap-2 rounded-controle border px-2.5 py-1 text-left text-sm transition-colors hover:border-borda-forte',
+          situacaoAtual ? classeSelecionadaParaCor(situacaoAtual.cor) : 'border-borda-controle bg-superficie text-texto-3',
         )}
       >
-        <span className="truncate">{situacaoAtual?.nome ?? '—'}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+        <span className="flex min-w-0 items-center gap-1.5">
+          {situacaoAtual && (
+            <span
+              aria-hidden="true"
+              className={cn(
+                'h-2 w-2 shrink-0 rounded-full',
+                PALETA_SITUACAO.find((c) => c.chave === situacaoAtual.cor)?.bola ?? 'bg-borda-forte',
+              )}
+            />
+          )}
+          <span className="truncate">{situacaoAtual?.nome ?? '—'}</span>
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       </button>
 
       {aberto && (
@@ -322,6 +338,8 @@ function SituacaoSelect({
                       key={c.chave}
                       type="button"
                       title={c.chave}
+                      aria-label={`Cor ${c.chave}`}
+                      aria-pressed={corEditada === c.chave}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => setCorEditada(c.chave)}
                       className={cn(
@@ -379,20 +397,22 @@ function SituacaoSelect({
                 <button
                   type="button"
                   title="Editar"
+                  aria-label={`Editar ${o.nome}`}
                   onClick={() => {
                     setEditandoId(o.id)
                     setNomeEditado(o.nome)
                     setCorEditada(o.cor ?? PALETA_SITUACAO[1].chave)
                   }}
-                  className="shrink-0 text-texto-3 opacity-0 hover:text-texto-2 group-hover:opacity-100"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded text-texto-3 opacity-0 hover:text-texto-2 focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Pencil className="h-3 w-3" />
                 </button>
                 <button
                   type="button"
                   title="Excluir"
+                  aria-label={`Excluir ${o.nome}`}
                   onClick={() => onExcluir(o.id)}
-                  className="shrink-0 text-texto-3 opacity-0 hover:text-perigo group-hover:opacity-100"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded text-texto-3 opacity-0 hover:text-perigo focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
@@ -424,6 +444,8 @@ function SituacaoSelect({
                       key={c.chave}
                       type="button"
                       title={c.chave}
+                      aria-label={`Cor ${c.chave}`}
+                      aria-pressed={novaCor === c.chave}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => setNovaCor(c.chave)}
                       className={cn(
@@ -448,7 +470,7 @@ function SituacaoSelect({
               <button
                 type="button"
                 onClick={() => setNovoAberto(true)}
-                className="text-xs font-medium text-brand-700 hover:underline"
+                className="min-h-[24px] text-xs font-semibold text-marca-texto hover:underline"
               >
                 + Nova situação…
               </button>
@@ -457,6 +479,47 @@ function SituacaoSelect({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * O cartão de uma fase (o `.kpi.click` da amostra): o NOME INTEIRO da fase, que
+ * quebra em duas linhas em vez de ser cortado ("Homologado / Aguardando Período
+ * de Graça" não cabia no cartão de números da plataforma), o número e
+ * "crédito(s)". Clicar escolhe a fase; o escolhido ganha o contorno da marca.
+ */
+function CartaoDaFase({
+  rotulo,
+  n,
+  ativo,
+  onClick,
+  aviso,
+}: {
+  rotulo: string
+  n: number
+  ativo: boolean
+  onClick: () => void
+  /** O Concluso, que é atributo e não fase: o fundo âmbar o separa das fases. */
+  aviso?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={ativo}
+      className={cn(
+        'flex h-full flex-col gap-1 rounded-cartao border px-4 py-3 text-left shadow-nivel-1 transition hover:border-borda-forte focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+        aviso ? 'border-aviso-borda bg-aviso-fundo' : 'border-borda bg-superficie',
+        ativo && 'border-marca-viva ring-[3px] ring-marca-viva/15',
+      )}
+    >
+      <span className="flex min-h-[32px] items-start gap-1.5 text-xs font-medium leading-snug text-texto-2">
+        {aviso && <CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0 text-aviso" aria-hidden="true" />}
+        {rotulo}
+      </span>
+      <span className="font-display text-2xl font-bold tabular-nums leading-tight text-texto">{n}</span>
+      <span className="text-xs text-texto-3">{n === 1 ? 'crédito' : 'créditos'}</span>
+    </button>
   )
 }
 
@@ -597,8 +660,7 @@ export function FaseProcessual({
 
   return (
     <div className="space-y-4">
-      <Card className="p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <Segmented
             ariaLabel="Trilha do crédito"
             items={[
@@ -613,10 +675,10 @@ export function FaseProcessual({
           />
           <div className="flex flex-1 items-center gap-2">
             <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-texto-3" />
               <Input
-                className="w-full pl-8 text-sm"
-                placeholder="Localizar processo pelo número…"
+                className="w-full"
+                aria-label="Localizar processo pelo número"
+                placeholder="Localizar processo pelo número… (Enter)"
                 value={buscaProcesso}
                 onChange={(e) => setBuscaProcesso(e.target.value)}
                 onKeyDown={(e) => {
@@ -629,10 +691,10 @@ export function FaseProcessual({
               disabled={gerar.isPending}
               onClick={() => gerar.mutate({})}
               icon={<RefreshCw className={gerar.isPending ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />}
+              className="grid h-[35px] w-[35px] shrink-0 place-items-center border border-borda-forte bg-superficie p-0"
             />
           </div>
-        </div>
-      </Card>
+      </div>
 
       {fase.isLoading ? (
         <Loading />
@@ -642,26 +704,25 @@ export function FaseProcessual({
         <ErrorState message={(fase.error as Error)?.message} onRetry={() => fase.refetch()} />
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {ordem.map((codigo) => (
-              <StatCard
+              <CartaoDaFase
                 key={codigo}
-                label={getLabel(FASE_PROCESSUAL, codigo).label}
-                value={contagem.porFase[codigo] ?? 0}
-                active={filtro?.tipo === 'fase' && filtro.codigo === codigo}
+                rotulo={getLabel(FASE_PROCESSUAL, codigo).label}
+                n={contagem.porFase[codigo] ?? 0}
+                ativo={filtro?.tipo === 'fase' && filtro.codigo === codigo}
                 onClick={() => setFiltro({ tipo: 'fase', codigo })}
               />
             ))}
             {/* Concluso não é posição na esteira — card à parte, filtro sobre o
                 atributo conclusao_pendente, somado à fase substantiva de cada
                 processo (mesmo processo pode aparecer aqui e no card da fase). */}
-            <StatCard
-              label="Concluso"
-              value={contagem.conclusos}
-              icon={<CheckCircle2 className="h-4 w-4" />}
-              tone="amber"
-              active={filtro?.tipo === 'concluso'}
+            <CartaoDaFase
+              rotulo="Concluso"
+              n={contagem.conclusos}
+              ativo={filtro?.tipo === 'concluso'}
               onClick={() => setFiltro({ tipo: 'concluso' })}
+              aviso
             />
           </div>
 
@@ -672,8 +733,27 @@ export function FaseProcessual({
             </p>
           )}
 
+          {!filtro && (
+            <CaixaSuave>
+              <Info className="mt-0.5 h-[16px] w-[16px] shrink-0 text-info" aria-hidden="true" />
+              Escolha uma fase acima para ver os créditos dela.
+            </CaixaSuave>
+          )}
+
           {filtro && (
             <Card className="p-0">
+              {/* O nome da fase e a contagem no topo do painel (a amostra): a lista
+                  diz o que está mostrando. */}
+              <div className="border-b border-borda px-5 pb-1 pt-4">
+                <TituloDoGrupo
+                  titulo={
+                    filtro.tipo === 'concluso'
+                      ? 'Concluso'
+                      : getLabel(FASE_PROCESSUAL, filtro.codigo).label
+                  }
+                  qtd={listaFiltrada.length}
+                />
+              </div>
               {situacoes.isError ? (
                 // Sem o catálogo a coluna Situação mostrava "—" em toda linha, que se
                 // lê como "nenhuma situação definida", e não como "não consegui ler".
@@ -684,9 +764,9 @@ export function FaseProcessual({
                 <Table>
                   <THead>
                     <tr>
-                      <TH className="normal-case">Processo</TH>
-                      <TH className="w-96 normal-case">Situação</TH>
-                      <TH className="normal-case">Data da situação</TH>
+                      <TH>Processo</TH>
+                      <TH className="w-96">Situação</TH>
+                      <TH>Data da situação</TH>
                     </tr>
                   </THead>
                   <TBody>
@@ -698,13 +778,18 @@ export function FaseProcessual({
                       return (
                         <TR key={processo.id} onClick={() => onAbrirDetalhe(processo)}>
                           <TD>
-                            <p className="flex items-center gap-1.5 text-sm font-medium text-texto">
+                            <p className="flex items-center gap-1.5 font-semibold tabular-nums text-texto">
                               {formatCNJ(processo.numero_cnj)}
                               {r?.conclusao_pendente && (
-                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-aviso-cheio" />
+                                <span title="Concluso para decisão">
+                                  <CheckCircle2
+                                    className="h-3.5 w-3.5 shrink-0 text-aviso-cheio"
+                                    aria-label="Concluso para decisão"
+                                  />
+                                </span>
                               )}
                             </p>
-                            <p className="text-xs text-texto-3">{processo.entidade_devedora || '—'}</p>
+                            <p className="text-xs text-texto-2">{processo.entidade_devedora || '—'}</p>
                           </TD>
                           <TD className="w-96">
                             <SituacaoSelect
@@ -728,7 +813,8 @@ export function FaseProcessual({
                           <TD className="w-40">
                             <input
                               type="date"
-                              className="w-full rounded-md border border-borda-forte px-2 py-1 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              aria-label="Data da situação"
+                              className="w-full rounded-controle border border-borda-controle bg-superficie px-2 py-1 text-sm tabular-nums text-texto focus:border-marca-viva focus:outline-none focus:ring-1 focus:ring-anel"
                               value={r?.situacao_data ?? ''}
                               onClick={(e) => e.stopPropagation()}
                               onChange={(e) =>
@@ -752,14 +838,16 @@ export function FaseProcessual({
           <Card className="p-4">
             <button
               type="button"
-              className="flex w-full items-center justify-between text-left"
+              className="flex min-h-[24px] w-full items-center justify-between text-left"
               onClick={() => setRecentesAbertas((v) => !v)}
               aria-expanded={recentesAbertas}
             >
-              <h3 className="text-sm font-semibold text-texto">
+              <h3 className="font-display text-lg font-bold tracking-tight text-texto">
                 Movimentações recentes
-                {recentes.porCredito.size > 0 && !recentes.isError && (
-                  <span className="ml-2 text-xs font-normal text-texto-3">({recentes.porCredito.size})</span>
+                {/* A CONTAGEM SÓ DEPOIS DE CARREGAR: "(0)" durante a leitura
+                    afirmaria que não há nada. */}
+                {recentes.porCredito.size > 0 && !recentes.isError && !recentes.isLoading && (
+                  <span className="ml-2 text-sm font-semibold text-texto-3">({recentes.porCredito.size})</span>
                 )}
               </h3>
               <ChevronDown
@@ -776,7 +864,7 @@ export function FaseProcessual({
             ) : recentes.isError ? (
               <ErrorState message={recentes.error?.message} onRetry={recentes.refetch} />
             ) : recentes.porCredito.size === 0 ? (
-              <p className="text-sm text-texto-3">Nenhuma movimentação nos últimos 7 dias.</p>
+              <p className="text-corpo text-texto-2">Nenhuma movimentação nos últimos 7 dias.</p>
             ) : (
               <ul className="space-y-2">
                 {daTrilha
@@ -798,20 +886,24 @@ export function FaseProcessual({
                     return (
                       <li
                         key={p.id}
+                        // TRATADA ESMAECE (a amostra): continua na lista, no fim, e
+                        // volta a acender sozinha quando chega movimentação nova.
                         className={cn(
-                          'cursor-pointer rounded-lg border border-borda p-3 hover:bg-superficie-2',
-                          tratado && 'opacity-50',
+                          'cursor-pointer rounded-campo border border-borda p-3 transition-colors hover:bg-superficie-2',
+                          tratado && 'opacity-[.55]',
                         )}
                         onClick={() => onAbrirDetalhe(p)}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <label
-                            className="flex shrink-0 items-center pt-0.5"
+                            className="flex min-h-[24px] min-w-[24px] shrink-0 items-center"
+                            title="Marcar como tratado"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <input
                               type="checkbox"
-                              className="h-4 w-4 rounded border-borda-forte"
+                              className="h-4 w-4 rounded border-borda-forte accent-marca"
+                              aria-label={`Marcar ${formatCNJ(p.numero_cnj)} como tratado`}
                               checked={tratado}
                               disabled={!mov.data}
                               onChange={(e) =>
@@ -824,13 +916,13 @@ export function FaseProcessual({
                               }
                             />
                           </label>
-                          <span className="min-w-0 flex-1 text-sm font-medium text-texto">
+                          <span className="min-w-0 flex-1 font-semibold tabular-nums text-texto">
                             {formatCNJ(p.numero_cnj)}
                           </span>
-                          <span className="shrink-0 text-xs text-texto-3">{formatDate(mov.data)}</span>
+                          <span className="shrink-0 text-xs tabular-nums text-texto-3">{formatDate(mov.data)}</span>
                         </div>
                         {mov.conteudo && (
-                          <p className="mt-1 line-clamp-2 text-xs italic text-texto-3">"{mov.conteudo}"</p>
+                          <p className="mt-1 line-clamp-2 text-corpo italic text-texto-2">"{mov.conteudo}"</p>
                         )}
                         <div className="mt-2">
                           {r ? (
@@ -921,17 +1013,16 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
   const opcoesSituacao = (situacoes.data ?? []).filter((s) => s.fase_codigo === r?.fase_codigo)
 
   return (
-    <DrawerSection title="Fase processual">
-      {/* Grid próprio (não o flex de antes): rótulo e caixa em colunas
-          COMPARTILHADAS entre as duas linhas, então elas começam e terminam
-          exatamente no mesmo lugar — sem precisar adivinhar uma largura fixa
-          que quebra assim que o texto muda (foi o que aconteceu com w-56: o
-          rótulo "Fase processual" ou o nome de uma fase mais longa quebravam
-          linha e empurravam o card pra baixo). */}
-      <div className="col-span-2 grid grid-cols-[max-content_1fr] items-center gap-x-3 gap-y-2">
-        <span className="whitespace-nowrap text-sm font-medium text-texto">Fase processual</span>
-        <Select
-          className="w-full border-info-borda bg-info-fundo text-info"
+    <section>
+      <TituloDaSecao>Fase processual</TituloDaSecao>
+      {/* Os dois campos lado a lado, com o rótulo em cima (a amostra). A Situação
+          só existe com fase: crédito ainda não classificado pede "Escolher fase…"
+          primeiro. */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block space-y-1.5">
+          <span className="block text-sm font-semibold text-texto">Fase processual</span>
+          <Select
+          className="w-full"
           value={r?.fase_codigo ?? ''}
           disabled={query.isLoading || override.isPending}
           onChange={(e) => e.target.value && override.mutate(e.target.value)}
@@ -944,11 +1035,12 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
               {getLabel(FASE_PROCESSUAL, codigo).label}
             </option>
           ))}
-        </Select>
+          </Select>
+        </label>
 
         {r && (
-          <>
-            <span className="whitespace-nowrap text-sm font-medium text-texto">Situação</span>
+          <div className="space-y-1.5">
+            <span className="block text-sm font-semibold text-texto">Situação</span>
             {/* Mesmo motivo da lista: catálogo que falhou não é "nenhuma situação". */}
             {situacoes.isError ? (
               <p className="text-xs text-perigo">
@@ -970,9 +1062,9 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
                 onExcluir={(id) => excluirSituacao.mutate(id)}
               />
             )}
-          </>
+          </div>
         )}
       </div>
-    </DrawerSection>
+    </section>
   )
 }

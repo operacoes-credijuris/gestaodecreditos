@@ -1,4 +1,4 @@
-// Aba "Automatizado" da janela de novo crédito.
+// Aba "Pela pasta do Drive" (antes "Automatizado") da janela de novo crédito.
 //
 // Dois passos, e a diferença entre eles é a diferença entre certeza e leitura:
 //
@@ -12,7 +12,7 @@
 //
 // E ELA NUNCA SALVA. Preenche o formulário ao lado e espera a pessoa conferir.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, TriangleAlert } from 'lucide-react'
+import { Loader2, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { driveConfigurado } from '@/lib/drive'
 import {
@@ -26,7 +26,9 @@ import { invokeFunction } from '@/lib/functions'
 import type { Processo } from '@/lib/types'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
 import { IconButton } from '@/components/ui/IconButton'
-import { EmptyState, ErrorState, Loading } from '@/components/ui/Table'
+import { Field } from '@/components/ui/Field'
+import { EmptyState } from '@/components/ui/Table'
+import { Aviso, CaixaSuave } from '@/components/operacional/Pecas'
 
 /** O que a extração devolve para o formulário. */
 export type PreenchimentoDoDrive = Partial<Processo>
@@ -244,6 +246,9 @@ export function NovoCreditoDoDrive({
 
   return (
     <div className="space-y-3">
+      {/* O campo com rótulo e dica (a amostra): diz o que se escolhe e por que a
+          lista é curta — só aparecem as pastas que ainda não têm cadastro. */}
+      <Field label="Pasta do crédito no Drive" hint="Só as pastas de crédito que ainda não têm cadastro.">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <Combobox
@@ -269,24 +274,34 @@ export function NovoCreditoDoDrive({
           icon={<RefreshCw className={cn('h-4 w-4', buscando && 'animate-spin')} />}
           disabled={buscando || !!passo}
           onClick={procurar}
-          className="flex h-10 w-10 shrink-0 items-center justify-center p-0"
+          className="flex h-11 w-11 shrink-0 items-center justify-center border border-borda-forte bg-superficie p-0"
         />
       </div>
+      </Field>
 
-      {passo && <Loading label={passo} />}
+      {/* O passo da leitura, girando, para a tela não ficar parada sem dizer nada. */}
+      {passo && (
+        <CaixaSuave>
+          <span role="status" className="inline-flex items-center gap-2">
+            <Loader2 className="h-[16px] w-[16px] shrink-0 animate-spin text-info" aria-hidden="true" />
+            {passo}
+          </span>
+        </CaixaSuave>
+      )}
 
-      {erro && <ErrorState message={erro} />}
+      {erro && (
+        <Aviso tom="perigo" papel="alert">
+          {erro}
+        </Aviso>
+      )}
 
       {/* O que a IA quer que a pessoa saiba antes de salvar. */}
       {!!extracao?.observacoes?.length && (
-        <ul className="space-y-1 rounded-lg bg-aviso-fundo p-3 text-xs text-aviso">
+        <Aviso tom="aviso">
           {extracao.observacoes.map((o, i) => (
-            <li key={i} className="flex gap-1.5">
-              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              {o}
-            </li>
+            <p key={i}>{o}</p>
           ))}
-        </ul>
+        </Aviso>
       )}
 
       {/* "A IA CONSEGUIU LER?" — a pergunta que a tela não respondia, e sem a
@@ -295,11 +310,11 @@ export function NovoCreditoDoDrive({
           Arquivo lido que não rendeu campo nenhum aparece assim mesmo, dizendo isso:
           é o sinal de que o dado esperado não estava onde se pensava. */}
       {!!extracao?.lidos?.length && (
-        <div className="rounded-lg bg-superficie-2 p-3 text-xs text-texto-2">
-          <p className="mb-1 font-semibold uppercase tracking-wide">
+        <div className="rounded-campo border border-borda bg-superficie-2 px-4 py-3 text-corpo text-texto-2">
+          <p className="font-display mb-1 text-xs font-bold uppercase tracking-wide text-texto-2">
             Lido pela IA · {extracao.lidos.length} arquivo(s)
           </p>
-          <ul className="space-y-0.5">
+          <ul className="list-disc space-y-0.5 pl-5">
             {extracao.lidos.map((nome) => {
               const campos = camposDoArquivo(nome, extracao.procedencia)
               return (
@@ -320,12 +335,15 @@ export function NovoCreditoDoDrive({
       {/* Arquivo que não deu para ler NÃO desaparece: PDF escaneado e formato sem
           texto são o caso em que falta campo, e é aqui que se descobre por quê. */}
       {!!extracao?.ignorados?.length && (
-        <div className="rounded-lg bg-superficie-2 p-3 text-xs text-texto-2">
-          <p className="mb-1 font-semibold uppercase tracking-wide">Não foi possível ler</p>
-          <ul className="space-y-0.5">
+        <div className="rounded-campo border border-perigo-borda bg-perigo-fundo px-4 py-3 text-corpo text-texto-2">
+          <p className="font-display mb-1 text-xs font-bold uppercase tracking-wide text-perigo">
+            Não foi possível ler
+          </p>
+          <ul className="list-disc space-y-0.5 pl-5">
             {extracao.ignorados.map((ig, i) => (
-              <li key={i} className="truncate">
-                {ig.nome} <span className="text-texto-3">· {ig.motivo}</span>
+              <li key={i} className="break-words">
+                <span className="text-texto">{ig.nome}</span>{' '}
+                <span className="text-texto-2">· {ig.motivo}</span>
               </li>
             ))}
           </ul>

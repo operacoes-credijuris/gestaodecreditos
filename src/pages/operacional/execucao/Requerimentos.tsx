@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, Search, ChevronRight } from 'lucide-react'
-import { requerimentosCrud, apensosCrud, useUltimaMovimentacao } from '@/lib/queries'
+import { Plus, Pencil, Trash2, ChevronRight } from 'lucide-react'
+import { requerimentosCrud, useUltimaMovimentacao } from '@/lib/queries'
 import { invokeFunction } from '@/lib/functions'
 import { useApensosManager } from '@/components/Apensos'
 import type { Requerimento } from '@/lib/types'
@@ -8,6 +8,14 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Field, Input, Textarea } from '@/components/ui/Field'
+import {
+  CabecalhoDaFicha,
+  CampoDeBusca,
+  FerramentasDoPainel,
+  Partes,
+  SecaoDaFicha,
+  TituloDaSecao,
+} from '@/components/operacional/Pecas'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
@@ -23,16 +31,11 @@ import {
 } from '@/components/ui/Table'
 import { IconButton } from '@/components/ui/IconButton'
 import { SortableTH } from '@/components/ui/SortableTH'
-import { Drawer, DrawerField, DrawerSection } from '@/components/ui/Drawer'
+import { Drawer } from '@/components/ui/Drawer'
 import { DrawerHistorico } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
-import {
-  formatCNJ,
-  formatDate,
-  normalizarBusca,
-  onlyDigits,
-  vazioNull,
-} from '@/lib/format'
+import { formatDate, onlyDigits, vazioNull } from '@/lib/format'
+import { casaBusca } from '@/lib/buscaDaTela'
 
 const VAZIO: Partial<Requerimento> = {
   numero_protocolo: '',
@@ -70,15 +73,6 @@ export default function Requerimentos() {
   const [toDelete, setToDelete] = useState<Requerimento | null>(null)
   // Requerimento com a ficha aberta no painel lateral (clique na linha).
   const [detalhe, setDetalhe] = useState<Requerimento | null>(null)
-  // Apensos do requerimento em detalhe (lista de leitura na ficha).
-  const todosApensos = apensosCrud.useList()
-  const apensosDoDetalhe = useMemo(
-    () =>
-      detalhe
-        ? (todosApensos.data ?? []).filter((a) => a.requerimento_id === detalhe.id)
-        : [],
-    [todosApensos.data, detalhe],
-  )
   // Erros de validação por campo (mensagens inline nos <Field>).
   const [erros, setErros] = useState<Record<string, string>>({})
   // Snapshot do formulário ao abrir — base do cálculo de dirty.
@@ -107,30 +101,25 @@ export default function Requerimentos() {
   const lista = useMemo(() => {
     let l = data ?? []
     if (busca.trim()) {
-      // Sem acento e também por dígito, como nas outras telas: "goiania" tem de
-      // achar "Goiânia", e o protocolo colado cru tem de achar o formatado.
-      const q = normalizarBusca(busca)
-      const qd = onlyDigits(busca)
-      l = l.filter((r) => {
-        const texto = normalizarBusca(
+      // Sem acento e também por dígito (lib/buscaDaTela.ts): "goiania" acha
+      // "Goiânia", e o protocolo colado cru acha o formatado. As partes entram
+      // por serem o que identifica a linha: quem procura um requerimento costuma
+      // lembrar do nome, não do protocolo.
+      l = l.filter((r) =>
+        casaBusca(
           [
             r.numero_protocolo,
             r.orgao,
             r.tribunal_entidade,
-            // As partes entram na busca por serem o que identifica a linha: quem
-            // procura um requerimento costuma lembrar do nome, não do protocolo.
             r.requerente,
             r.requerido,
             r.materia,
             r.classe_processual,
             r.observacoes,
-          ]
-            .filter(Boolean)
-            .join(' '),
-        )
-        if (texto.includes(q)) return true
-        return qd.length >= 4 && onlyDigits(r.numero_protocolo).includes(qd)
-      })
+          ],
+          busca,
+        ),
+      )
     }
     const dir = sortDir === 'asc' ? 1 : -1
     return [...l].sort((a, b) => {
@@ -242,6 +231,7 @@ export default function Requerimentos() {
     <div>
       <PageHeader
         title="Requerimentos administrativos"
+        description="Pedidos feitos fora do processo — habilitações, preferências, retificações."
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
             Novo requerimento
@@ -249,33 +239,44 @@ export default function Requerimentos() {
         }
       />
 
-      <Card className="mb-4 p-4">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3" />
-          <Input
-            className="pl-9"
-            placeholder="Buscar por protocolo, requerente, requerido, órgão, matéria…"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
-        </div>
-      </Card>
-
+      {/* A BUSCA MORA NO CARTÃO DA LISTA (a amostra): é dela, e não da página. */}
       <Card>
+        <FerramentasDoPainel>
+          <CampoDeBusca
+            valor={busca}
+            onChange={setBusca}
+            placeholder="Buscar por protocolo, requerente, requerido, órgão, matéria…"
+          />
+        </FerramentasDoPainel>
         {isLoading ? (
-          <Loading />
+          <Loading label="Carregando requerimentos…" />
         ) : isError ? (
           <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         ) : lista.length === 0 ? (
-          <EmptyState
-            title="Nenhum requerimento"
-            description="Cadastre o primeiro requerimento."
-            action={
-              <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
-                Novo requerimento
-              </Button>
-            }
-          />
+          // VAZIO DA BUSCA É OUTRO VAZIO (item "Novo" da amostra): com requerimentos
+          // cadastrados, "Cadastre o primeiro requerimento" afirmaria que a base
+          // está vazia. A saída oferecida é limpar a busca, não cadastrar de novo.
+          busca.trim() && (data ?? []).length > 0 ? (
+            <EmptyState
+              title="Nada encontrado"
+              description={`Nenhum requerimento corresponde a "${busca.trim()}".`}
+              action={
+                <Button variant="outline" onClick={() => setBusca('')}>
+                  Limpar busca
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              title="Nenhum requerimento"
+              description="Cadastre o primeiro requerimento."
+              action={
+                <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
+                  Novo requerimento
+                </Button>
+              }
+            />
+          )
         ) : (
           <Table dense>
             <THead>
@@ -316,7 +317,7 @@ export default function Requerimentos() {
                   className="w-[1%] whitespace-nowrap"
                 />
                 <TH className="w-[1%] whitespace-nowrap">Últ. mov.</TH>
-                <TH className="w-[1%] whitespace-nowrap">Ações</TH>
+                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -327,7 +328,7 @@ export default function Requerimentos() {
                       partes podem. */}
                   <TD className="font-medium text-texto">
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="whitespace-nowrap tabular-nums">
+                      <span className="whitespace-nowrap font-semibold tabular-nums">
                         {r.numero_protocolo || '—'}
                       </span>
                       {/* Mesmo padrão de Créditos: o contador de apensos fica
@@ -338,8 +339,8 @@ export default function Requerimentos() {
                         a linha: protocolo sozinho não diz de quem é o requerimento.
                         O travessão de cada lado aparece mesmo vazio, para a falta
                         ficar à vista de quem cadastrou pela metade. */}
-                    <div className="text-xs font-normal text-texto-2">
-                      {r.requerente || '—'} v. {r.requerido || '—'}
+                    <div className="mt-0.5 text-xs font-normal text-texto-2">
+                      <Partes a={r.requerente} b={r.requerido} />
                     </div>
                   </TD>
                   {/* Tribunal em cima, na cor do corpo; órgão embaixo, menor e mais
@@ -372,7 +373,7 @@ export default function Requerimentos() {
                   <TD>
                     {/* stopPropagation: os botões não devem abrir a ficha da linha */}
                     <div
-                      className="flex items-center gap-1"
+                      className="flex items-center justify-end gap-0.5"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {apensos.actions(r.id)}
@@ -409,6 +410,11 @@ export default function Requerimentos() {
         open={!!editing}
         onClose={() => setEditing(null)}
         title={editing?.id ? 'Editar requerimento' : 'Novo requerimento'}
+        description={
+          editing?.id ? (
+            <span className="tabular-nums">{editing.numero_protocolo}</span>
+          ) : undefined
+        }
         size="lg"
         dirty={dirty}
         footer={
@@ -421,7 +427,9 @@ export default function Requerimentos() {
               form="form-requerimento"
               loading={create.isPending || update.isPending}
             >
-              Salvar
+              {/* O botão diz o que faz (a amostra): cadastrar é criar — e é na
+                  criação que o requerimento vai para a ADVBOX. */}
+              {editing?.id ? 'Salvar alterações' : 'Cadastrar requerimento'}
             </Button>
           </>
         }
@@ -436,7 +444,12 @@ export default function Requerimentos() {
                   que CNJ não caberia. A coluna do banco continua numero_protocolo:
                   renomeá-la exigiria migração e tocaria busca, ordenação e a
                   sincronização, sem ganho nenhum. */}
-              <Field label="Número do processo" required error={erros.numero_protocolo}>
+              <Field
+                label="Número do processo"
+                required
+                error={erros.numero_protocolo}
+                className="sm:col-span-2"
+              >
                 <Input
                   value={editing.numero_protocolo ?? ''}
                   placeholder="CNJ ou número de protocolo do órgão"
@@ -447,14 +460,24 @@ export default function Requerimentos() {
                   }}
                 />
               </Field>
+              {/* Onde tramita, e depois quem pede e contra quem (a ordem da amostra).
+                  As partes juntas e nesta ordem: é como elas aparecem na listagem
+                  ("requerente v. requerido") e como se lê um requerimento. */}
               <Field label="Órgão">
                 <Input
+                  placeholder="Ex.: Setor de Precatórios"
                   value={editing.orgao ?? ''}
                   onChange={(e) => setEditing({ ...editing, orgao: e.target.value })}
                 />
               </Field>
-              {/* As partes juntas e nesta ordem: é como elas aparecem na listagem
-                  ("requerente v. requerido") e como se lê um requerimento. */}
+              <Field label="Tribunal / entidade">
+                <Input
+                  value={editing.tribunal_entidade ?? ''}
+                  onChange={(e) =>
+                    setEditing({ ...editing, tribunal_entidade: e.target.value })
+                  }
+                />
+              </Field>
               <Field label="Requerente">
                 <Input
                   value={editing.requerente ?? ''}
@@ -467,16 +490,9 @@ export default function Requerimentos() {
                   onChange={(e) => setEditing({ ...editing, requerido: e.target.value })}
                 />
               </Field>
-              <Field label="Tribunal / Entidade">
-                <Input
-                  value={editing.tribunal_entidade ?? ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, tribunal_entidade: e.target.value })
-                  }
-                />
-              </Field>
               <Field label="Classe processual">
                 <Input
+                  placeholder="Ex.: Pedido de habilitação"
                   value={editing.classe_processual ?? ''}
                   onChange={(e) =>
                     setEditing({ ...editing, classe_processual: e.target.value })
@@ -502,6 +518,7 @@ export default function Requerimentos() {
             <Field label="Observações">
               <Textarea
                 rows={3}
+                placeholder="Ex.: protocolado presencialmente; resposta por e-mail."
                 value={editing.observacoes ?? ''}
                 onChange={(e) => setEditing({ ...editing, observacoes: e.target.value })}
               />
@@ -510,87 +527,70 @@ export default function Requerimentos() {
         )}
       </Modal>
 
-      {/* Ficha do requerimento — abre ao clicar na linha. Só leitura, como a
-          de Créditos: as ações ficam nos botões da própria linha. */}
+      {/* Ficha do requerimento — abre ao clicar na linha. Editar e excluir o
+          requerimento ficam nos botões da própria linha; as ações dos apensos,
+          aqui dentro. */}
       <Drawer
         open={!!detalhe}
         onClose={() => setDetalhe(null)}
         title={
           detalhe && (
-            <div className="min-w-0">
-              <h2 className="text-base font-bold tracking-tight text-texto">
-                {detalhe.numero_protocolo || '—'}
-              </h2>
-              {/* Subtítulo com as PARTES, e não com tribunal · órgão: é o mesmo
-                  cabeçalho da ficha de Créditos ("cedente v. cessionário"), e o
-                  tribunal agora tem seção própria logo abaixo. */}
-              <p className="text-xs text-texto-2">
-                {detalhe.requerente || '—'} v. {detalhe.requerido || '—'}
-              </p>
-            </div>
+            // Subtítulo com as PARTES, e não com tribunal · órgão: é o mesmo
+            // cabeçalho da ficha de Créditos ("cedente v. cessionário"), e o
+            // tribunal tem seção própria logo abaixo.
+            <CabecalhoDaFicha
+              etiqueta="Requerimento administrativo"
+              titulo={detalhe.numero_protocolo || '—'}
+              apoio={<Partes a={detalhe.requerente} b={detalhe.requerido} />}
+            />
           )
         }
       >
         {detalhe && (
-          <>
+          <div className="space-y-6">
             {/* Partes numa seção própria, antes do resto — mesma ordem da ficha de
                 Créditos, que abre por "Partes". Quem abre a ficha quer saber de quem
                 é o requerimento antes de saber onde ele tramita. */}
-            <DrawerSection title="Partes">
-              <DrawerField label="Requerente">{detalhe.requerente || '—'}</DrawerField>
-              <DrawerField label="Requerido">{detalhe.requerido || '—'}</DrawerField>
-            </DrawerSection>
+            <SecaoDaFicha
+              titulo="Partes"
+              pares={[
+                ['Requerente', detalhe.requerente],
+                ['Requerido', detalhe.requerido],
+              ]}
+            />
+            <SecaoDaFicha
+              titulo="Requerimento"
+              pares={[
+                ['Órgão', detalhe.orgao],
+                ['Tribunal / entidade', detalhe.tribunal_entidade],
+                ['Classe processual', detalhe.classe_processual],
+                ['Matéria', detalhe.materia],
+                ['Data de protocolo', detalhe.data_protocolo ? formatDate(detalhe.data_protocolo) : null],
+              ]}
+            />
 
-            <DrawerSection title="Requerimento">
-              <DrawerField label="Órgão">{detalhe.orgao || '—'}</DrawerField>
-              <DrawerField label="Tribunal / Entidade">
-                {detalhe.tribunal_entidade || '—'}
-              </DrawerField>
-              <DrawerField label="Classe processual">
-                {detalhe.classe_processual || '—'}
-              </DrawerField>
-              <DrawerField label="Matéria">{detalhe.materia || '—'}</DrawerField>
-              <DrawerField label="Data de protocolo">
-                {formatDate(detalhe.data_protocolo)}
-              </DrawerField>
-            </DrawerSection>
-
+            {/* Só quando há: seção vazia na ficha é ruído. */}
             {detalhe.observacoes && (
-              <DrawerSection title="Observações">
-                <p className="col-span-2 whitespace-pre-wrap break-words text-sm text-texto">
+              <section>
+                <TituloDaSecao>Observações</TituloDaSecao>
+                <p className="whitespace-pre-wrap break-words text-corpo text-texto">
                   {detalhe.observacoes}
                 </p>
-              </DrawerSection>
+              </section>
             )}
 
-            <DrawerSection title={`Apensos (${apensosDoDetalhe.length})`}>
-              {apensosDoDetalhe.length === 0 ? (
-                <p className="col-span-2 text-sm text-texto-2">
-                  Nenhum apenso vinculado.
-                </p>
-              ) : (
-                <div className="col-span-2 space-y-2">
-                  {apensosDoDetalhe.map((a) => (
-                    <div key={a.id} className="rounded-lg border border-borda p-2.5">
-                      <div className="text-sm font-medium text-texto">
-                        {formatCNJ(a.numero)}
-                      </div>
-                      <div className="text-xs text-texto-2">
-                        {[a.classe_processual, a.tribunal, a.comarca]
-                          .filter(Boolean)
-                          .join(' · ') || '—'}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </DrawerSection>
+            {/* OS APENSOS COM AS AÇÕES DELES (item "Novo" da amostra): abrir,
+                editar, excluir e "Adicionar apenso" sem sair da ficha. */}
+            <section>
+              <TituloDaSecao>Apensos ({apensos.contagem(detalhe.id)})</TituloDaSecao>
+              {apensos.listaNaFicha(detalhe.id)}
+            </section>
 
             {/* Histórico integral do ADVBOX — SÓ do principal. Andamento de
                 apenso fica na ficha do apenso (clique no card dele): autos
                 próprios, sem mistura. */}
             <DrawerHistorico numero={detalhe.numero_protocolo} />
-          </>
+          </div>
         )}
       </Drawer>
 
@@ -598,6 +598,7 @@ export default function Requerimentos() {
         open={!!toDelete}
         danger
         loading={remove.isPending}
+        title="Excluir requerimento"
         // A CASCATA NA PERGUNTA, como em Créditos: o banco apaga os apensos junto
         // (0009_apensos.sql), e eles são cadastro manual. Sem o aviso, excluir um
         // requerimento para recadastrá-lo levava os apensos embora em silêncio.

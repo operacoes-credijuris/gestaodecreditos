@@ -24,16 +24,20 @@ import { fileURLToPath } from 'node:url'
 /** `text-[NNpx]`: eram 17 (02/10/2026, main em 230bce6). A onda 1 do redesenho
  *  trocou o único de 13px pelo `text-sm`; ficam os de 10 e 11px, abaixo da
  *  escala (10 na janela de análise do RPV, 2 na Análise de Crédito, 2 em Tarefas
- *  e 2 na janela de desfecho), que a onda 2 resolve tela a tela. */
-const BASE_TEXTO_PX = 16
+ *  e 2 na janela de desfecho), que a onda 2 resolve tela a tela. A onda 2 do
+ *  Operacional tirou os 2 de Tarefas (as iniciais do responsável, agora em
+ *  `text-xs` num círculo maior): 14. */
+const BASE_TEXTO_PX = 14
 /** Cor da paleta do Tailwind com número (`bg-slate-50`, `hover:text-red-700`,
  *  `ring-amber-500/40`…). Eram 1.162 (o plano estimava cerca de 1.493). A onda 1
  *  trocou por token (`text-texto-2`, `bg-aviso-fundo`…) tudo o que era troca de
  *  1 para 1. As 65 que ficam são DE PROPÓSITO: paletas categóricas, em que a cor
  *  só distingue um nome de outro (os tons de etiqueta da Badge, a paleta de
  *  situação da Fase processual, os grupos de colunas da Carteira, os tipos de
- *  contato) e a escala graduada de "parado há…" das Publicações. */
-const BASE_COR_FIXA = 65
+ *  contato) e a escala graduada de "parado há…" das Publicações. A onda 2 do
+ *  Operacional passou para token as pontas dessa escala (o âmbar de aviso e o
+ *  vermelho de perigo), e ficaram fixos só os degraus do meio e do fim: 61. */
+const BASE_COR_FIXA = 61
 
 const SRC = fileURLToPath(new URL('../../', import.meta.url))
 

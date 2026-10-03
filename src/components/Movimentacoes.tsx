@@ -20,6 +20,7 @@ import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { Segmented } from '@/components/ui/Segmented'
 import { formatDate, formatNome, onlyDigits, sentenceCase } from '@/lib/format'
 
 interface MovLinha {
@@ -78,7 +79,7 @@ function TextoLongo({ texto }: { texto: string }) {
     <>
       <p
         className={cn(
-          'mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-texto',
+          'mt-0.5 whitespace-pre-wrap break-words text-corpo leading-relaxed text-texto',
           longo && !expandido && 'line-clamp-4',
         )}
       >
@@ -88,7 +89,7 @@ function TextoLongo({ texto }: { texto: string }) {
         <button
           type="button"
           onClick={() => setExpandido((v) => !v)}
-          className="mt-0.5 text-xs font-medium text-brand-600 hover:underline"
+          className="mt-0.5 min-h-[24px] text-xs font-semibold text-marca-texto hover:underline"
         >
           {expandido ? 'ler menos' : 'ler mais'}
         </button>
@@ -123,7 +124,7 @@ function TarefaItem({ t }: { t: TarefaLinha }) {
           isso num selo só pesava. CAIXA ALTA do ADVBOX pesa na leitura, então
           o tipo vai em sentence case (mesma regra da página de Tarefas). */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-sm text-texto">
+        <span className="text-corpo text-texto">
           {/* A cor da bolinha é a única pista visual da situação; para quem usa
               leitor de tela, o estado vai aqui. */}
           <span className="sr-only">
@@ -189,15 +190,15 @@ function ChipSituacao({
       aria-pressed={ativo}
       title={ativo ? `Ocultar ${rotulo}` : `Mostrar ${rotulo}`}
       className={cn(
-        'inline-flex items-center gap-1 text-xs transition-colors',
+        'inline-flex min-h-[24px] items-center gap-1.5 text-xs transition-colors',
         ativo
           ? 'text-texto-2 hover:text-texto'
-          : 'text-texto-3 hover:text-texto-2',
+          : 'text-texto-3 line-through hover:text-texto-2',
       )}
     >
       <span
         aria-hidden="true"
-        className={cn('h-1.5 w-1.5 rounded-full', ativo ? cor : 'bg-borda-forte')}
+        className={cn('h-[7px] w-[7px] rounded-full', ativo ? cor : 'bg-borda-forte')}
       />
       {rotulo}
       <span className="tabular-nums">{qtd}</span>
@@ -310,47 +311,31 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
   const tarMostradas = tarFiltradas.slice(0, visiveisTar)
 
   return (
-    <section className="border-b border-borda py-4 first:pt-0 last:border-b-0">
-      {/* As duas visões são títulos de seção, não um controle à parte: usam a
-          mesma tipografia de "Partes"/"Processo" (DrawerSection) e ficam
-          separadas por uma barra. A ativa fica na cor do título; a outra
-          recua. Contagem entre parênteses, como em "Apensos (3)". */}
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h3
-          role="group"
-          aria-label="Alternar entre movimentações e tarefas do processo"
-          className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider"
-        >
-          <button
-            type="button"
-            onClick={() => setAba('movimentacoes')}
-            aria-pressed={aba === 'movimentacoes'}
-            // `uppercase` repetido no botão: o reset de formulário do preflight
-            // impede a herança do <h3>, e sem isto o título sai em caixa mista.
-            className={cn(
-              'uppercase transition-colors',
-              aba === 'movimentacoes'
-                ? 'text-brand-600'
-                : 'text-texto-2 hover:text-texto',
-            )}
-          >
-            Movimentações{movs.data ? ` (${listaMov.length})` : ''}
-          </button>
-          <span aria-hidden="true" className="font-normal text-borda-forte">
-            |
-          </span>
-          <button
-            type="button"
-            onClick={() => setAba('tarefas')}
-            aria-pressed={aba === 'tarefas'}
-            className={cn(
-              'uppercase transition-colors',
-              aba === 'tarefas' ? 'text-brand-600' : 'text-texto-2 hover:text-texto',
-            )}
-          >
-            Tarefas{tarefas.data ? ` (${listaTar.length})` : ''}
-          </button>
-        </h3>
+    <section>
+      {/* O HISTÓRICO É UMA SEÇÃO DA FICHA, com o título de seção das outras, e as
+          duas visões num controle segmentado (a amostra). A contagem só aparece
+          depois de carregar: "(0)" durante a leitura afirmaria que não há nada. */}
+      <h3 className="font-display mb-2 text-xs font-bold uppercase tracking-wider text-texto-3">
+        Histórico
+      </h3>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <Segmented
+          ariaLabel="Alternar entre movimentações e tarefas do processo"
+          items={[
+            {
+              key: 'movimentacoes',
+              label: 'Movimentações',
+              count: movs.data ? listaMov.length : undefined,
+            },
+            {
+              key: 'tarefas',
+              label: 'Tarefas',
+              count: tarefas.data ? listaTar.length : undefined,
+            },
+          ]}
+          value={aba}
+          onChange={(k) => setAba(k as typeof aba)}
+        />
         {aba === 'tarefas' && (
           <div
             role="group"
@@ -388,9 +373,11 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             <div className="skeleton h-12 w-11/12 rounded-lg" />
           </div>
         ) : movs.isError ? (
-          <p className="text-sm text-perigo">{(movs.error as Error).message}</p>
+          <p role="alert" className="text-corpo text-perigo">
+            Não foi possível carregar o histórico: {(movs.error as Error).message}
+          </p>
         ) : listaMov.length === 0 ? (
-          <p className="text-sm text-texto-2">
+          <p className="text-corpo text-texto-2">
             Nenhuma movimentação sincronizada para este processo. O histórico é
             atualizado pelo cron e ao abrir a aba Movimentações.
           </p>
@@ -425,9 +412,11 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
               <div className="skeleton h-12 w-11/12 rounded-lg" />
             </div>
           ) : tarefas.isError ? (
-            <p className="text-sm text-perigo">{(tarefas.error as Error).message}</p>
+            <p role="alert" className="text-corpo text-perigo">
+              Não foi possível carregar o histórico: {(tarefas.error as Error).message}
+            </p>
           ) : tarFiltradas.length === 0 ? (
-            <p className="text-sm text-texto-2">
+            <p className="text-corpo text-texto-2">
               {listaTar.length === 0
                 ? sync.isPending
                   ? 'Buscando as tarefas deste processo no ADVBOX…'
