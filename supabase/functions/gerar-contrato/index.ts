@@ -1354,6 +1354,11 @@ function compilarEnderecoInvestidor(row: {
   if (cidadeUf) partes.push(cidadeUf);
   if (t(row.cep)) partes.push(`CEP ${t(row.cep)}`);
   const compilado = partes.join(', ');
+  // A MESMA REGRA DO SALVAR DA FICHA (enderecoDaFicha, src/lib/fichaPessoa.ts —
+  // decisão do dono, 02/10/2026): com o endereço antigo em texto corrido, ele só
+  // cede a partes que tenham rua E cidade. Sem isso, a ficha guardava o antigo
+  // mas o contrato saía só com "CEP 30140-071", montado da parte avulsa.
+  if (t(row.endereco) && !(t(row.logradouro) && t(row.cidade))) return t(row.endereco);
   return compilado || t(row.endereco);
 }
 

@@ -243,6 +243,36 @@ export interface DefSubdivisao {
     /** Fase fora do fluxo (os perdidos): aparece mais discreta na tela. */
     discreta?: boolean
   }[]
+  /**
+   * O DESFECHO DA NEGOCIAÇÃO COM O CEDENTE: da coluna Negociação, o card vai
+   * para Fechados, Não fechados ou Sem resposta (etapa 10a do redesenho,
+   * 02/10/2026). Pelo id, com o nome de reserva, como o resto.
+   *
+   * NÃO MORA EM `saidas`, E É DE PROPÓSITO. Saída vira botão na tela oficial,
+   * para todo mundo, no mesmo deploy (`abasDoFunil` as desenha). Estes destinos
+   * entram primeiro só no SERVIDOR — somados em `idsDestinoDaTrilha` e
+   * `destinosDaTrilha` —, e os botões vêm depois, na beta e só para
+   * administrador. Pôr aqui em `saidas` faria o botão aparecer para a equipe
+   * inteira antes de alguém decidir isso.
+   *
+   * `coluna` É A ORIGEM (a própria Negociação), e NÃO é destino. O servidor só
+   * aceita os outros três se o card estiver nela (ver
+   * `_shared/desfechoDaNegociacao.ts`), e a tela vai usá-la para saber em que aba
+   * oferecer os botões. A nota que o servidor grava ao mover para os três sai com
+   * o serviço "Comercial" (ver `_shared/servicoDaNota.ts`).
+   */
+  negociacao?: {
+    coluna: RefColuna
+    fechados: RefColuna
+    naoFechados: RefColuna
+    semResposta: RefColuna
+  }
+}
+
+/** Uma coluna do kanban: o id, quando há, e o nome de reserva (ver `resolverColuna`). */
+export interface RefColuna {
+  colunaKommo: string
+  statusId?: number
 }
 
 /** As duas colunas de sistema do Kommo, que existem em todo funil e não são etapa de ninguém. */
@@ -333,6 +363,19 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
     // duas consultas ao kommo_etapa que o dono mandou); o nome fica de reserva.
     idDiligencia: 111533960,
     idReprovados: 111534108,
+    // SEM `espelhoCompleto` E SEM `fases`, por ora: espelhar o kanban inteiro
+    // muda a cara da tela OFICIAL (abas com os nomes do Kommo, colunas do
+    // comercial como leitura), e isso espera a aprovação do dono (02/10/2026).
+    //
+    // O DESFECHO DA NEGOCIAÇÃO, só no servidor por ora — ver `negociacao`. A aba
+    // da Negociação não existe na tela do Interno; o campo serve à permissão do
+    // servidor e, depois, aos botões da beta.
+    negociacao: {
+      coluna: { colunaKommo: 'Negociação', statusId: 112466260 },
+      fechados: { colunaKommo: 'Fechados', statusId: 111533952 },
+      naoFechados: { colunaKommo: 'Não fechados', statusId: 112382612 },
+      semResposta: { colunaKommo: 'Sem resposta', statusId: 112465960 },
+    },
     abas: [
       {
         key: ABA_ANALISE_INTERNA,
@@ -431,11 +474,20 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
       },
       {
         nome: 'Perdidos',
-        // reprovados, não fechado
-        colunas: [111534212, 111985976],
+        // reprovados, sem resposta (criada no Kommo depois de 29/09/2026 e posta
+        // aqui em 02/10/2026, na ordem da amostra; sem ela, a coluna herdaria a
+        // fase da anterior no kanban), não fechado
+        colunas: [111534212, 112346344, 111985976],
         discreta: true,
       },
     ],
+    // O DESFECHO DA NEGOCIAÇÃO, só no servidor por ora — ver `negociacao`.
+    negociacao: {
+      coluna: { colunaKommo: 'NEGOCIAÇÃO', statusId: 112339984 },
+      fechados: { colunaKommo: 'FECHADOS', statusId: 111533992 },
+      naoFechados: { colunaKommo: 'NÃO FECHADO', statusId: 111985976 },
+      semResposta: { colunaKommo: 'SEM RESPOSTA', statusId: 112346344 },
+    },
     abas: [
       {
         key: 'ext-qualificacao',
@@ -666,6 +718,16 @@ export function trilhaDoPipeline(pipelineId: number): DefSubdivisao | undefined 
  * são da trilha, e é para lá que vão os dois desfechos que interrompem —
  * inclusive o da janela de due diligence, que pode partir de qualquer card.
  */
+/**
+ * Os destinos do desfecho da Negociação de uma trilha — Fechados, Não fechados e
+ * Sem resposta —, ou nenhum. A própria Negociação (`coluna`) NÃO entra: é a
+ * origem, e mover PARA ela continua recusado.
+ */
+export function destinosDaNegociacao(trilha: DefSubdivisao): RefColuna[] {
+  const n = trilha.negociacao
+  return n ? [n.fechados, n.naoFechados, n.semResposta] : []
+}
+
 /** Os IDS das colunas para as quais a plataforma pode mover um card deste funil. */
 export function idsDestinoDaTrilha(pipelineId: number): number[] {
   const trilha = trilhaDoPipeline(pipelineId)
@@ -679,6 +741,8 @@ export function idsDestinoDaTrilha(pipelineId: number): number[] {
     if (aba.anexarEMover?.statusId) ids.add(aba.anexarEMover.statusId)
     if (aba.envioAosFundos?.destino.statusId) ids.add(aba.envioAosFundos.destino.statusId)
   }
+  // O DESFECHO DA NEGOCIAÇÃO É DA TRILHA, e não de uma aba — ver `negociacao`.
+  for (const d of destinosDaNegociacao(trilha)) if (d.statusId) ids.add(d.statusId)
   return [...ids]
 }
 
@@ -703,5 +767,6 @@ export function destinosDaTrilha(pipelineId: number): string[] {
     if (aba.anexarEMover) nomes.add(aba.anexarEMover.colunaKommo)
     if (aba.envioAosFundos) nomes.add(aba.envioAosFundos.destino.colunaKommo)
   }
+  for (const d of destinosDaNegociacao(trilha)) nomes.add(d.colunaKommo)
   return [...nomes]
 }

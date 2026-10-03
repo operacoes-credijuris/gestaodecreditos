@@ -248,11 +248,24 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
   /**
    * O RPV: as chaves de `COLUNAS`. A `kommo-mover` aceita qualquer statusId que
    * esteja aqui, sem consultar a trilha.
+   *
+   * MUDOU DE PROPÓSITO EM 02/10/2026 (etapa 10a do redesenho): o servidor passa a
+   * aceitar o desfecho da Negociação — Fechados (107830043), Não fechado
+   * (107830067) e Sem resposta (112466388). EXATAMENTE ESSES TRÊS: a própria
+   * Negociação (107830039) e a Oferta aos investidores (107830047) continuam
+   * recusadas. Nenhum botão da tela oficial move para eles (ver "o que o servidor
+   * aceita e nenhum botão oferece"); os botões vêm na beta, só para admin.
    */
   it('RPV: as colunas de `COLUNAS`', () => {
     expect(ordenado(Object.keys(COLUNAS).map(Number))).toEqual(
-      ordenado([107272803, 107272807, 107830027, 107830035, 107830031]),
+      ordenado([
+        107272803, 107272807, 107830027, 107830035, 107830031,
+        // O DESFECHO DA NEGOCIAÇÃO (02/10/2026)
+        107830043, 107830067, 112466388,
+      ]),
     )
+    expect(COLUNAS[107830039], 'Negociação').toBeUndefined()
+    expect(COLUNAS[107830047], 'Oferta aos investidores').toBeUndefined()
   })
 
   /**
@@ -260,6 +273,9 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
    * por …"). São os nomes ANTIGOS das colunas — o kanban de 02/10/2026 chama
    * 107272807 de "Revisão" e 107830035 de "Produção de proposta" —, e mudar o
    * texto muda a nota que o comercial lê no card.
+   *
+   * OS TRÊS DA NEGOCIAÇÃO (02/10/2026) entram com o nome do kanban daquele dia.
+   * Ficam só de reserva, como os outros: a nota usa o nome do `kommo_etapa`.
    */
   it('RPV: o nome de cada coluna na anotação', () => {
     expect(COLUNAS).toEqual({
@@ -268,9 +284,15 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
       107830027: 'Diligência',
       107830035: 'Apresentação de Proposta',
       107830031: 'Reprovados Operacional',
+      107830043: 'Fechados',
+      107830067: 'Não fechado',
+      112466388: 'Sem resposta',
     })
   })
 
+  // MUDOU DE PROPÓSITO EM 02/10/2026 (etapa 10a): + os três destinos do desfecho
+  // da Negociação, que vêm do campo `negociacao` da trilha — não de `saidas`, que
+  // virariam botão na tela oficial. A Negociação (112466260) segue recusada.
   it('Precatório Interno: os ids de `idsDestinoDaTrilha`', () => {
     expect(ordenado(idsDestinoDaTrilha(FUNIL_PRECATORIO_INTERNO))).toEqual(
       ordenado([
@@ -278,10 +300,15 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
         111534108, // REPROVADOS (da trilha)
         111533944, // REVISÃO — "Enviar para revisão" da Análise
         111533948, // PRODUÇÃO DE PROPOSTA — "Aprovar crédito" da Revisão
+        111533952, // Fechados — desfecho da Negociação (só servidor)
+        112382612, // Não fechados — desfecho da Negociação (só servidor)
+        112465960, // Sem resposta — desfecho da Negociação (só servidor)
       ]),
     )
   })
 
+  // MUDOU DE PROPÓSITO EM 02/10/2026 (etapa 10a): idem, no Externo. A Negociação
+  // (112339984) segue recusada.
   it('Precatório Externo: os ids de `idsDestinoDaTrilha`', () => {
     expect(ordenado(idsDestinoDaTrilha(FUNIL_PRECATORIO_EXTERNO))).toEqual(
       ordenado([
@@ -292,6 +319,9 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
         111533976, // MEMORANDO DE NEGOCIAÇÃO — "Pedir memorando"
         111533984, // EM PRECIFICAÇÃO — o envio aos fundos
         111533988, // PRODUÇÃO DE PROPOSTA — a escolha da proposta
+        111533992, // FECHADOS — desfecho da Negociação (só servidor)
+        111985976, // NÃO FECHADO — desfecho da Negociação (só servidor)
+        112346344, // SEM RESPOSTA — desfecho da Negociação (só servidor)
       ]),
     )
   })
@@ -302,9 +332,20 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
    * no Kommo). É uma segunda porta de permissão, e por isso também fica por
    * extenso.
    */
+  //
+  // MUDOU DE PROPÓSITO EM 02/10/2026 (etapa 10a): + os nomes de reserva dos três
+  // destinos da Negociação, em cada trilha (os nomes do kanban daquele dia).
   it('Precatório: os nomes de reserva de `destinosDaTrilha`', () => {
     expect(ordenado(destinosDaTrilha(FUNIL_PRECATORIO_INTERNO))).toEqual(
-      ordenado(['DILIGÊNCIA', 'REPROVADOS', 'REVISÃO', 'PRODUÇÃO DE PROPOSTA']),
+      ordenado([
+        'DILIGÊNCIA',
+        'REPROVADOS',
+        'REVISÃO',
+        'PRODUÇÃO DE PROPOSTA',
+        'Fechados',
+        'Não fechados',
+        'Sem resposta',
+      ]),
     )
     expect(ordenado(destinosDaTrilha(FUNIL_PRECATORIO_EXTERNO))).toEqual(
       ordenado([
@@ -315,6 +356,9 @@ describe('lista de permissão do servidor — escrita por extenso', () => {
         'MEMORANDO DE NEGOCIAÇÃO',
         'EM PRECIFICAÇÃO',
         'PRODUÇÃO DE PROPOSTA',
+        'FECHADOS',
+        'NÃO FECHADO',
+        'SEM RESPOSTA',
       ]),
     )
   })
@@ -365,13 +409,19 @@ describe('a tela e o servidor concordam', () => {
    * O QUE O SERVIDOR ACEITA SEM BOTÃO NA TELA. No RPV, a Análise (107272803):
    * nenhum botão move para lá hoje, e a `kommo-mover` aceita. Botão novo para a
    * Análise — ou destino novo sem botão — muda esta lista.
+   *
+   * MUDOU DE PROPÓSITO EM 02/10/2026 (etapa 10a): + os três destinos do desfecho
+   * da Negociação em cada funil. O servidor os aceita e a tela OFICIAL não
+   * oferece botão nenhum para eles — é o princípio da etapa: o servidor primeiro,
+   * os botões depois, na beta e só para admin. Quando os botões chegarem à
+   * oficial, saem daqui.
    */
   it('o que o servidor aceita e nenhum botão oferece', () => {
     const semBotao = (pipelineId: number) =>
       ordenado(aceitos(pipelineId).filter((id) => !oferecidos(pipelineId).has(id)))
-    expect(semBotao(FUNIL_RPV)).toEqual([107272803])
-    expect(semBotao(FUNIL_PRECATORIO_INTERNO)).toEqual([])
-    expect(semBotao(FUNIL_PRECATORIO_EXTERNO)).toEqual([])
+    expect(semBotao(FUNIL_RPV)).toEqual(ordenado([107272803, 107830043, 107830067, 112466388]))
+    expect(semBotao(FUNIL_PRECATORIO_INTERNO)).toEqual(ordenado([111533952, 112382612, 112465960]))
+    expect(semBotao(FUNIL_PRECATORIO_EXTERNO)).toEqual(ordenado([111533992, 111985976, 112346344]))
   })
 
   /**

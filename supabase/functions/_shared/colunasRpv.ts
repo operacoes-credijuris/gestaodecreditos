@@ -10,6 +10,32 @@
 // MÓDULO PURO — sem `npm:` e sem `Deno.` —, como `trilhasDoPrecatorio.ts`: o
 // mesmo arquivo roda na Edge Function e no vitest do site.
 
+/**
+ * O DESFECHO DA NEGOCIAÇÃO NO RPV (etapa 10a do redesenho, 02/10/2026): da
+ * Negociação (107830039), o card vai para Fechados, Não fechado ou Sem resposta.
+ * Os ids são os do `kommo_etapa` de 02/10/2026.
+ *
+ * O MESMO DESENHO DO `negociacao` DAS TRILHAS DO PRECATÓRIO: entra primeiro só no
+ * servidor. No RPV a tela não lê `COLUNAS` para desenhar botão (os botões saem de
+ * `ACOES`, em `src/lib/kommo.ts`), então acrescentar aqui não põe botão nenhum na
+ * tela oficial. A Negociação em si é a ORIGEM, e não destino: não entra em
+ * `COLUNAS`. A nota destes três sai com o serviço "Comercial" (ver
+ * `servicoDaNota.ts`).
+ */
+export const NEGOCIACAO_RPV = {
+  coluna: 107830039,
+  fechados: 107830043,
+  naoFechados: 107830067,
+  semResposta: 112466388,
+} as const
+
+/** Os três destinos do desfecho da Negociação no RPV. */
+export const DESTINOS_DA_NEGOCIACAO_RPV: ReadonlySet<number> = new Set([
+  NEGOCIACAO_RPV.fechados,
+  NEGOCIACAO_RPV.naoFechados,
+  NEGOCIACAO_RPV.semResposta,
+])
+
 /** Colunas do Funil Geral RPV para as quais o app permite mover. */
 export const COLUNAS: Record<number, string> = {
   107272803: 'Análise Jurídica-Econômico',
@@ -17,4 +43,9 @@ export const COLUNAS: Record<number, string> = {
   107830027: 'Diligência',
   107830035: 'Apresentação de Proposta',
   107830031: 'Reprovados Operacional',
+  // O DESFECHO DA NEGOCIAÇÃO — ver `NEGOCIACAO_RPV`. Os nomes são os do kanban
+  // de 02/10/2026, e ficam só de reserva: a nota usa o nome do `kommo_etapa`.
+  [NEGOCIACAO_RPV.fechados]: 'Fechados',
+  [NEGOCIACAO_RPV.naoFechados]: 'Não fechado',
+  [NEGOCIACAO_RPV.semResposta]: 'Sem resposta',
 }
