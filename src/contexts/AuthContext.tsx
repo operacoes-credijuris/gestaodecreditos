@@ -27,6 +27,12 @@ interface AuthContextValue {
    * dizer o motivo em vez de mostrar tudo vazio.
    */
   acessoDesativado: boolean
+  /**
+   * Há sessão, mas o perfil deste usuário ainda não foi lido (logo depois do
+   * Entrar). Sem o perfil não se sabe se é administrador nem se está ativo — os
+   * guardas de rota esperam (ver lib/guardaDaRota.ts).
+   */
+  perfilCarregando: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   /** Devolve mensagem quando o servidor não confirmou a saída (ver signOut). */
   signOut: () => Promise<{ error: string | null }>
@@ -42,6 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /** Dono da sessão agora. Serve para descartar leitura de perfil em voo que
    *  chegue depois de trocar (ou encerrar) o usuário. */
   const usuarioCorrente = useRef<string | null>(null)
+  /** O usuário cujo perfil já teve a leitura concluída (com ou sem sucesso). */
+  const [perfilLidoDe, setPerfilLidoDe] = useState<string | null>(null)
 
   /**
    * Carrega o perfil. Duas guardas, e as duas nasceram de defeito real:
@@ -63,12 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select('*')
       .eq('id', userId)
       .maybeSingle()
-    if (error) {
-      console.error('Falha ao ler o perfil; mantendo o anterior.', error)
-      return
-    }
+    if (error) console.error('Falha ao ler o perfil; mantendo o anterior.', error)
     if (usuarioCorrente.current !== userId) return
-    setProfile((data as Profile) ?? null)
+    if (!error) setProfile((data as Profile) ?? null)
+    // LEITURA CONCLUÍDA, mesmo falhando: os guardas param de esperar e decidem
+    // com o que há (falha preserva o perfil anterior, como acima).
+    setPerfilLidoDe(userId)
   }
 
   useEffect(() => {
@@ -94,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loadProfile(newSession.user.id)
       } else {
         setProfile(null)
+        setPerfilLidoDe(null)
         // Sessão encerrada (logout, token revogado, senha trocada pelo admin):
         // o cache do React Query guarda o que o usuário anterior carregou —
         // carteira, dados de investidor, valores de crédito. Sem limpar, quem
@@ -142,6 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null)
     }
     setProfile(null)
+    setPerfilLidoDe(null)
     usuarioCorrente.current = null
     qc.clear()
     // O token do Drive vive no sessionStorage da aba (ver lib/drive.ts). Sem isto,
@@ -165,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // `=== false` e não `!profile?.ativo`: enquanto o perfil não carregou, profile
   // é null e não se sabe nada — só bloqueia com o desligamento confirmado.
   const acessoDesativado = profile?.ativo === false
+  const perfilCarregando = !!user && perfilLidoDe !== user.id
 
   const value: AuthContextValue = {
     session,
@@ -173,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     isAdmin,
     acessoDesativado,
+    perfilCarregando,
     signIn,
     signOut,
   }

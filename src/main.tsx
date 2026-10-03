@@ -6,6 +6,7 @@ import App from './App'
 import { AuthProvider } from './contexts/AuthContext'
 import { ToastProvider } from './components/ui/Toast'
 import { JanelaDeDescarte } from './components/layout/JanelaDeDescarte'
+import { TituloDaAba } from './components/layout/TituloDaAba'
 // TIPOGRAFIA DA CASA — duas fontes, cada uma no que faz melhor:
 //
 //   Plus Jakarta Sans (display) — títulos, números grandes, marca. Geométrica
@@ -43,6 +44,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <HashRouter>
         <AuthProvider>
           <ToastProvider>
+            {/* O título da aba do navegador, em todo endereço (TituloDaAba). */}
+            <TituloDaAba />
             <App />
             {/* "Descartar alterações?" de todas as telas (lib/descarte.ts). */}
             <JanelaDeDescarte />

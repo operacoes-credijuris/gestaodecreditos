@@ -5,20 +5,31 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import Login from '@/pages/Login'
 import NotFound from '@/pages/NotFound'
 import MolduraDoQuadro from '@/pages/inteligencia/Moldura'
-import InteligenciaVisaoGeral from '@/pages/inteligencia/VisaoGeral'
-import InteligenciaPerformance from '@/pages/inteligencia/Performance'
-import InteligenciaPrevisoes from '@/pages/inteligencia/Previsoes'
-import InteligenciaRecortes from '@/pages/inteligencia/Recortes'
-import GeracaoContratos from '@/pages/comercial/GeracaoContratos'
-import CarteirasInvestidores from '@/pages/comercial/CarteirasInvestidores'
-import DadosPessoaisBancarios from '@/pages/comercial/DadosPessoaisBancarios'
-import AnaliseCredito from '@/pages/operacional/AnaliseCredito'
-import PublicacoesMovimentacoes from '@/pages/operacional/execucao/PublicacoesMovimentacoes'
-import TarefasAdvbox from '@/pages/operacional/execucao/TarefasAdvbox'
-import Processos from '@/pages/operacional/execucao/Processos'
-import Requerimentos from '@/pages/operacional/execucao/Requerimentos'
-import ContatosServentias from '@/pages/operacional/execucao/ContatosServentias'
-import Configuracoes from '@/pages/configuracoes/Configuracoes'
+import { telaSobDemanda } from '@/lib/telaSobDemanda'
+
+// AS TELAS VÊM SOB DEMANDA (lib/telaSobDemanda.ts): cada uma é um pedaço do
+// pacote, baixado quando se abre. Ficam no pacote de entrada só o Entrar (a
+// primeira coisa que quem está sem sessão vê), a página não encontrada e a
+// moldura do Quadro (as abas continuam à vista enquanto a aba aberta chega). A
+// Análise de crédito é o início: começa a baixar já, junto com a sessão.
+const InteligenciaVisaoGeral = telaSobDemanda(() => import('@/pages/inteligencia/VisaoGeral'))
+const InteligenciaPerformance = telaSobDemanda(() => import('@/pages/inteligencia/Performance'))
+const InteligenciaPrevisoes = telaSobDemanda(() => import('@/pages/inteligencia/Previsoes'))
+const InteligenciaRecortes = telaSobDemanda(() => import('@/pages/inteligencia/Recortes'))
+const GeracaoContratos = telaSobDemanda(() => import('@/pages/comercial/GeracaoContratos'))
+const CarteirasInvestidores = telaSobDemanda(() => import('@/pages/comercial/CarteirasInvestidores'))
+const DadosPessoaisBancarios = telaSobDemanda(() => import('@/pages/comercial/DadosPessoaisBancarios'))
+const AnaliseCredito = telaSobDemanda(() => import('@/pages/operacional/AnaliseCredito'), {
+  adiantar: true,
+})
+const PublicacoesMovimentacoes = telaSobDemanda(
+  () => import('@/pages/operacional/execucao/PublicacoesMovimentacoes'),
+)
+const TarefasAdvbox = telaSobDemanda(() => import('@/pages/operacional/execucao/TarefasAdvbox'))
+const Processos = telaSobDemanda(() => import('@/pages/operacional/execucao/Processos'))
+const Requerimentos = telaSobDemanda(() => import('@/pages/operacional/execucao/Requerimentos'))
+const ContatosServentias = telaSobDemanda(() => import('@/pages/operacional/execucao/ContatosServentias'))
+const Configuracoes = telaSobDemanda(() => import('@/pages/configuracoes/Configuracoes'))
 
 export default function App() {
   return (

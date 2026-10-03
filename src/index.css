@@ -374,6 +374,16 @@
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
   }
+  /* O FIREFOX NÃO CONHECE O ::-webkit-scrollbar, e mostrava a barra nativa,
+     grossa, em toda área "fina". As propriedades padrão vão SÓ para ele: no
+     Chrome e no Edge, `scrollbar-color` desligaria as regras acima e traria de
+     volta a barra com as setinhas do Windows. */
+  @supports not selector(::-webkit-scrollbar) {
+    .scrollbar-thin {
+      scrollbar-width: thin;
+      scrollbar-color: rgb(var(--borda-forte)) transparent;
+    }
+  }
 
   /* ---- Micro-animações do design system (sutis, 150–250ms) ---- */
 

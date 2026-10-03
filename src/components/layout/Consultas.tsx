@@ -1,5 +1,6 @@
 import {
   createContext,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -29,13 +30,31 @@ import {
   useJanelaAberta,
 } from '@/lib/janelasAbertas'
 import { filtrarGlossario, NOVIDADES } from '@/lib/ajudaDaPlataforma'
+import { pecaSobDemanda } from '@/lib/telaSobDemanda'
 import {
   armazenamentoDisponivel,
   gravarPreferencia,
   lerPreferencia,
   PREF_NOVIDADES_VISTAS,
 } from '@/lib/preferencias'
-import { BuscaGeral } from './BuscaGeral'
+
+// A BUSCA GERAL VEM SOB DEMANDA: ela traz junto o núcleo do Kommo (funis,
+// colunas, leitura do título do card), que só a Análise usa — importada direto,
+// ia no pacote de entrada de toda tela. Para o Ctrl+K não esperar a rede na
+// primeira vez, ela é baixada sozinha logo depois de a tela abrir (ver abaixo).
+const importarBusca = () => import('./BuscaGeral')
+const BuscaGeral = pecaSobDemanda(() => importarBusca().then((m) => m.BuscaGeral), BuscaIndisponivel)
+
+/** Se a busca não chegar (rede, versão nova publicada): avisa e se fecha. */
+function BuscaIndisponivel({ onFechar }: { onFechar: () => void }) {
+  const toast = useToast()
+  useEffect(() => {
+    toast.error('Não foi possível abrir a busca agora. Recarregue a página e tente de novo.')
+    onFechar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return null
+}
 
 /**
  * As CONSULTAS da plataforma (itens "Novo" da amostra): a busca geral (Ctrl+K),
@@ -147,6 +166,15 @@ export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
     return () => document.removeEventListener('keydown', aoTeclar)
   }, [toast])
 
+  // A BUSCA BAIXADA DE ANTEMÃO: três segundos depois de a tela abrir, sem
+  // disputar a rede com ela. Falhando (rede), a busca tenta de novo ao abrir.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      importarBusca().catch(() => {})
+    }, 3000)
+    return () => window.clearTimeout(t)
+  }, [])
+
   // AS NOVIDADES ABREM SOZINHAS UMA VEZ para cada pessoa — e só se der para
   // lembrar que já foram vistas; senão abririam a cada visita. Depois, ficam no
   // menu do usuário.
@@ -163,7 +191,11 @@ export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
   return (
     <ContextoDasConsultas.Provider value={valor}>
       {children}
-      {busca && <BuscaGeral onFechar={() => setBusca(false)} />}
+      {busca && (
+        <Suspense fallback={null}>
+          <BuscaGeral onFechar={() => setBusca(false)} />
+        </Suspense>
+      )}
       <JanelaDoGlossario aberta={glossario} onFechar={() => setGlossario(false)} />
       <JanelaDosAtalhos aberta={atalhos} onFechar={() => setAtalhos(false)} />
       {novidades && <JanelaDasNovidades onFechar={fecharNovidades} />}
@@ -279,7 +311,7 @@ function JanelaDasNovidades({ onFechar }: { onFechar: () => void }) {
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px]"
+      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin"
       onClick={(e) => {
         if (e.target === e.currentTarget) onFechar()
       }}

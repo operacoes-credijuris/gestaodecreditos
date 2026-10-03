@@ -1,25 +1,23 @@
-import { useEffect, useState } from 'react'
+import { Suspense, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
-import { itemAtivo, tituloDaAba } from './navigation'
+import { itemAtivo } from './navigation'
 import { Assistente } from '@/components/Assistente'
 import { FaixaBeta } from './FaixaBeta'
-import { tituloDoCanal } from '@/lib/canal'
 import { AcessorioDoTitulo } from '@/components/ui/PageHeader'
+import { Loading } from '@/components/ui/Table'
 import { ajudaDaRota } from '@/lib/ajudaDaPlataforma'
 import { ProvedorDeConsultas } from './Consultas'
 import { AjudaDaTela } from './AjudaDaTela'
+import { LimiteDeErro } from './LimiteDeErro'
 
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
 
-  // Título da aba do navegador acompanha a página ("Tarefas — Credijuris") e,
-  // no Quadro econômico, a aba aberta ("Previsões — Credijuris").
-  useEffect(() => {
-    document.title = tituloDoCanal(tituloDaAba(pathname))
-  }, [pathname])
+  // O TÍTULO DA ABA DO NAVEGADOR mora acima das rotas (TituloDaAba, no App):
+  // aqui ele só aparecia depois da sessão e ficava velho na tela de Entrar.
 
   // A CHAVE É A DO ITEM DO MENU, e não o endereço: as cinco abas do Quadro são
   // cinco endereços de um item só, e trocar de aba não pode desmontar a moldura.
@@ -40,8 +38,12 @@ export function AppLayout() {
           como referência e é cortado por ela. Sem isso, um `sr-only` abaixo da
           dobra ficava preso à página, não ao <main>: a página crescia além da
           janela, rolava, e a tela inteira subia deixando uma faixa vazia embaixo
-          (visto em 03/10/2026). */}
-      <div className="relative flex h-screen overflow-hidden bg-papel">
+          (visto em 03/10/2026).
+          A ALTURA É A DA JANELA VISÍVEL (`dvh`), e não `100vh`: no celular o
+          `100vh` é a altura com a barra de endereço ESCONDIDA, e com ela à vista
+          o rodapé da tela ficava atrás da barra do navegador. Navegador sem
+          `dvh` fica no `h-screen` de antes. */}
+      <div className="relative flex h-screen overflow-hidden bg-papel supports-[height:100dvh]:h-dvh">
         <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
         <div className="flex min-w-0 flex-1 flex-col">
           <FaixaBeta />
@@ -56,7 +58,16 @@ export function AppLayout() {
               className="animate-page mx-auto w-full max-w-[1360px] px-5 py-8 lg:px-8"
             >
               <AcessorioDoTitulo.Provider value={frases ? <AjudaDaTela frases={frases} /> : null}>
-                <Outlet />
+                {/* A TELA CHEGA SOB DEMANDA (App.tsx): enquanto o pedaço dela
+                    baixa, o esqueleto de carregamento; se falhar ao desenhar —
+                    ou o pedaço não vier —, o aviso do limite de erro, com o menu
+                    e o topo de pé. A chave do limite é a mesma da tela: ir a
+                    outra tela o desfaz. */}
+                <LimiteDeErro key={chave}>
+                  <Suspense fallback={<Loading />}>
+                    <Outlet />
+                  </Suspense>
+                </LimiteDeErro>
               </AcessorioDoTitulo.Provider>
             </div>
           </main>

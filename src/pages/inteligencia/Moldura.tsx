@@ -14,11 +14,13 @@
 // A moldura não lê dado nenhum: cada aba continua buscando a carteira como
 // antes (`usePainel`), e abrir o Quadro não faz consulta nova.
 
-import { useId, useState } from 'react'
+import { Suspense, useId, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Tabs, idDaAba } from '@/components/ui/Tabs'
+import { Loading } from '@/components/ui/Table'
 import { ABAS_DO_QUADRO, findNavLocation } from '@/components/layout/navigation'
+import { LimiteDeErro } from '@/components/layout/LimiteDeErro'
 import { cn } from '@/lib/cn'
 
 const ITENS = ABAS_DO_QUADRO.map((a) => ({ key: a.to, label: a.label }))
@@ -68,7 +70,16 @@ export default function Moldura() {
         aria-labelledby={idDaAba(painel, indice)}
         className={cn('pt-6', trocou && 'animate-page')}
       >
-        <Outlet />
+        {/* A ABA CHEGA SOB DEMANDA (App.tsx). A espera e o erro ficam AQUI,
+            dentro do painel, e não no layout: lá eles trocariam a moldura
+            inteira, e as abas sumiriam enquanto a aba nova baixa. E o limite do
+            layout tem a mesma chave nas cinco abas — sem este, uma aba que
+            falhou seguiria falhando ao trocar de aba. */}
+        <LimiteDeErro>
+          <Suspense fallback={<Loading />}>
+            <Outlet />
+          </Suspense>
+        </LimiteDeErro>
       </div>
     </div>
   )

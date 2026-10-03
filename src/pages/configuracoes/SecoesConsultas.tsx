@@ -436,7 +436,7 @@ export function SecaoBullai({
           {verCatalogo && (
             <div
               id={idTabela}
-              className="mt-[8px] max-h-96 overflow-auto rounded-cartao border border-borda"
+              className="relative mt-[8px] max-h-96 overflow-auto rounded-cartao border border-borda scrollbar-thin"
             >
               <table className="w-full border-collapse text-left text-corpo">
                 <thead className="sticky top-0 bg-superficie-2 text-xs font-bold uppercase tracking-wide text-texto-3">

@@ -188,7 +188,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px]"
+      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin"
       onClick={(e) => {
         if (e.target === e.currentTarget) onFechar()
       }}

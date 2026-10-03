@@ -105,7 +105,10 @@ export function Tabs({
       <div
         role="tablist"
         aria-label={rotulo}
-        className="flex min-w-0 gap-1 overflow-x-auto scrollbar-thin"
+        // `relative`: o que for `absolute` dentro (um `sr-only`) se mede por esta
+        // régua que rola, e não pela página — senão a aba fora da vista alarga a
+        // tela no celular.
+        className="relative flex min-w-0 gap-1 overflow-x-auto scrollbar-thin"
       >
         {items.map((item, index) => {
           const active = item.key === value

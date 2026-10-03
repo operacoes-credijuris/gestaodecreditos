@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { Suspense, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Sparkles,
@@ -21,10 +21,9 @@ import { useToast } from '@/components/ui/Toast'
 import { IconButton } from '@/components/ui/IconButton'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { TextoIA } from '@/components/ui/TextoIA'
-import { PeticaoModal } from '@/components/PeticaoModal'
 import { formatDateTime } from '@/lib/format'
 import { haDialogoAberto } from '@/lib/dialogo'
+import { pecaSobDemanda } from '@/lib/telaSobDemanda'
 import {
   BUCKET_ARQUIVOS,
   caminhoDoArquivo,
@@ -32,6 +31,53 @@ import {
 } from '@/lib/arquivosDoAssistente'
 import { cn } from '@/lib/cn'
 import type { Processo } from '@/lib/types'
+
+// O ASSISTENTE MORA EM TODA TELA, mas o leitor de Markdown (react-markdown e o
+// GFM) e a janela de petição só servem com ele aberto e respondendo. Importados
+// direto, iam no pacote de entrada de toda a plataforma; sob demanda, chegam na
+// primeira resposta (e a janela, na primeira petição confirmada).
+// FALHANDO O PEDAÇO (rede, versão nova publicada), as reservas abaixo: o texto
+// cru no lugar do formatado, e um aviso no lugar da janela — nunca a plataforma
+// em branco (ver `pecaSobDemanda`).
+const TextoIA = pecaSobDemanda(
+  () => import('@/components/ui/TextoIA').then((m) => m.TextoIA),
+  ({ texto }: { texto: string }) => <p className="whitespace-pre-wrap">{texto}</p>,
+)
+const PeticaoModal = pecaSobDemanda(
+  () => import('@/components/PeticaoModal').then((m) => m.PeticaoModal),
+  PeticaoIndisponivel,
+)
+
+function PeticaoIndisponivel({ onClose }: { onClose: () => void }) {
+  const toast = useToast()
+  useEffect(() => {
+    toast.error('Não foi possível abrir a revisão da petição agora. Recarregue a página e tente de novo.')
+    onClose()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return null
+}
+
+/**
+ * O modelo escolhido, guardado neste navegador. EM try/catch: com o
+ * armazenamento bloqueado (janela anônima restrita, política da empresa), ler o
+ * `localStorage` LANÇA — e o assistente, que é montado em toda tela, levava a
+ * plataforma inteira junto, com a página em branco.
+ */
+function lerModeloGuardado(): string | null {
+  try {
+    return localStorage.getItem(CHAVE_MODELO_LOCAL)
+  } catch {
+    return null
+  }
+}
+function guardarModelo(key: string) {
+  try {
+    localStorage.setItem(CHAVE_MODELO_LOCAL, key)
+  } catch {
+    /* sem armazenamento: a escolha vale até fechar a aba */
+  }
+}
 
 interface AcaoProposta {
   tipo: 'gerar_peticao'
@@ -117,9 +163,7 @@ export function Assistente() {
   const [texto, setTexto] = useState('')
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
-  const [modelo, setModelo] = useState(
-    () => localStorage.getItem(CHAVE_MODELO_LOCAL) || MODELO_PADRAO,
-  )
+  const [modelo, setModelo] = useState(() => lerModeloGuardado() || MODELO_PADRAO)
 
   // Histórico de conversas
   const [historicoAberto, setHistoricoAberto] = useState(false)
@@ -141,7 +185,6 @@ export function Assistente() {
   // existir o seletor); a pessoa desmarca quem não quer nesta pergunta.
   const [skillsAberto, setSkillsAberto] = useState(false)
   const [skillsSelecionadas, setSkillsSelecionadas] = useState<Set<string>>(new Set())
-  const skillsInicializado = useRef(false)
   const skillsRef = useRef<HTMLDivElement>(null)
 
   // Arquivos anexados à próxima pergunta — limpos depois do envio.
@@ -167,7 +210,11 @@ export function Assistente() {
   })
 
   const skillsQuery = useQuery({
-    queryKey: ['assistente_skills_ativas'],
+    // SOB A CHAVE DAS CONFIGURAÇÕES ('assistente_skills'): ativar, desativar ou
+    // remover uma Skill lá invalida esta lista junto (o React Query casa por
+    // prefixo). Com a chave própria de antes, o seletor seguia mostrando a Skill
+    // removida — e mandando-a na pergunta — até a lista vencer.
+    queryKey: ['assistente_skills', 'ativas'],
     queryFn: async (): Promise<SkillOpcao[]> => {
       const { data, error } = await supabase
         .from('assistente_skills')
@@ -180,12 +227,20 @@ export function Assistente() {
     enabled: aberto,
   })
 
-  // Todas ativas marcadas por padrão, uma única vez (quando a lista chega).
+  // Todas ativas marcadas por padrão — e A SKILL QUE PASSA A EXISTIR DEPOIS
+  // também chega marcada. Antes a marcação era feita uma vez só, na primeira
+  // lista: a Skill ativada em Configurações com o assistente já usado entrava
+  // DESMARCADA, e não era enviada até recarregar a página. O que a pessoa
+  // desmarcou continua desmarcado (só as novas entram).
+  const skillsConhecidas = useRef<Set<string>>(new Set())
   useEffect(() => {
-    if (skillsQuery.data && !skillsInicializado.current) {
-      setSkillsSelecionadas(new Set(skillsQuery.data.map((s) => s.skill_id)))
-      skillsInicializado.current = true
-    }
+    if (!skillsQuery.data) return
+    const novas = skillsQuery.data
+      .map((s) => s.skill_id)
+      .filter((id) => !skillsConhecidas.current.has(id))
+    if (novas.length === 0) return
+    novas.forEach((id) => skillsConhecidas.current.add(id))
+    setSkillsSelecionadas((atual) => new Set([...atual, ...novas]))
   }, [skillsQuery.data])
 
   // Rola para a última mensagem a cada troca — sem isso a resposta nova nasce
@@ -221,6 +276,13 @@ export function Assistente() {
   // listener roda por último (window, fase de bolha), e até lá o React já pode
   // ter desmontado a janela que fechou com este mesmo Escape — a pilha estaria
   // vazia e o assistente fecharia junto, que é o defeito.
+  //
+  // E UMA CAMADA POR VEZ, de dentro para fora: com a lista de modelos ou de
+  // Skills aberta, o Escape fecha a lista; com o histórico por cima, fecha o
+  // histórico; só então fecha o assistente. Antes, o Escape dado para fechar a
+  // listinha de modelos fechava o painel inteiro.
+  const camadas = useRef({ menu: false, historico: false })
+  camadas.current = { menu: modeloAberto || skillsAberto, historico: historicoAberto }
   useEffect(() => {
     if (!aberto) return
     let haviaDialogo = false
@@ -228,7 +290,15 @@ export function Assistente() {
       if (e.key === 'Escape') haviaDialogo = haDialogoAberto()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !haviaDialogo) setAberto(false)
+      if (e.key !== 'Escape' || haviaDialogo) return
+      if (camadas.current.menu) {
+        setModeloAberto(false)
+        setSkillsAberto(false)
+      } else if (camadas.current.historico) {
+        setHistoricoAberto(false)
+      } else {
+        setAberto(false)
+      }
     }
     window.addEventListener('keydown', naCaptura, true)
     window.addEventListener('keydown', onKey)
@@ -282,7 +352,7 @@ export function Assistente() {
 
   function trocarModelo(key: string) {
     setModelo(key)
-    localStorage.setItem(CHAVE_MODELO_LOCAL, key)
+    guardarModelo(key)
   }
 
   /**
@@ -564,8 +634,12 @@ export function Assistente() {
           <div
             className={cn(
               'absolute inset-0 z-10 flex flex-col overflow-hidden bg-superficie',
-              'transition-transform duration-200 ease-out',
-              historicoAberto ? 'translate-x-0' : '-translate-x-full pointer-events-none',
+              // `invisible` FECHADO: fora da vista pelo transform, os botões do
+              // histórico continuavam na ordem do Tab — o teclado entrava em
+              // conversas que não estavam na tela. A visibilidade entra na
+              // transição para o painel só sumir DEPOIS de sair deslizando.
+              'transition-[transform,visibility] duration-200 ease-out',
+              historicoAberto ? 'translate-x-0' : 'invisible -translate-x-full pointer-events-none',
             )}
           >
             <div className="flex items-center gap-[6px] px-3 pb-[6px] pt-3">
@@ -695,7 +769,11 @@ export function Assistente() {
                     className="w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-4 py-[10px] text-corpo text-texto"
                   >
                     <div className="[overflow-wrap:anywhere]">
-                      <TextoIA texto={m.content} />
+                      {/* Enquanto o leitor de Markdown chega (só na primeira
+                          resposta), o texto cru — legível, só sem formatação. */}
+                      <Suspense fallback={<p className="whitespace-pre-wrap">{m.content}</p>}>
+                        <TextoIA texto={m.content} />
+                      </Suspense>
                     </div>
 
                     {m.arquivos && m.arquivos.length > 0 && (
@@ -1020,16 +1098,18 @@ export function Assistente() {
       {/* Montagem condicional de propósito: cada abertura precisa de uma instância
           nova, para `instrucaoInicial` semear o campo de instrução de novo. */}
       {peticaoAlvo && (
-        <PeticaoModal
-          open
-          onClose={() => setPeticaoAlvo(null)}
-          descricao={null}
-          processo={peticaoAlvo.processo}
-          apenso={null}
-          numeroTarefa={peticaoAlvo.numeroCnj ?? peticaoAlvo.processo.numero_cnj ?? 'Assistente'}
-          tarefaId={null}
-          instrucaoInicial={peticaoAlvo.instrucao}
-        />
+        <Suspense fallback={null}>
+          <PeticaoModal
+            open
+            onClose={() => setPeticaoAlvo(null)}
+            descricao={null}
+            processo={peticaoAlvo.processo}
+            apenso={null}
+            numeroTarefa={peticaoAlvo.numeroCnj ?? peticaoAlvo.processo.numero_cnj ?? 'Assistente'}
+            tarefaId={null}
+            instrucaoInicial={peticaoAlvo.instrucao}
+          />
+        </Suspense>
       )}
     </>
   )

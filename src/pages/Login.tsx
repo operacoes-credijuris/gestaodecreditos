@@ -8,6 +8,7 @@ import { Field, Input } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
 import logo from '@/assets/logo-credijuris.png'
 import { FaixaBeta } from '@/components/layout/FaixaBeta'
+import { destinoDepoisDoEntrar } from '@/lib/guardaDaRota'
 
 export default function Login() {
   const { session, loading, signIn } = useAuth()
@@ -29,8 +30,8 @@ export default function Login() {
   // guarda em state.from). Link direto de publicação ou de crédito compartilhado
   // por colega chega ao destino em vez de largar no dashboard.
   if (session) {
-    const de = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
-    return <Navigate to={de && de !== '/login' ? de : INICIO} replace />
+    // Com a busca do endereço (`?card=…`): ver destinoDepoisDoEntrar.
+    return <Navigate to={destinoDepoisDoEntrar(location.state, INICIO)} replace />
   }
 
   async function handleSubmit(e: FormEvent) {
