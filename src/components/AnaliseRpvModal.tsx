@@ -1381,22 +1381,30 @@ export function AnaliseRpvModal({
    * lifecycle e nem se sabe mais a que job as páginas pertenciam.
    */
   const subidos = useRef<string[]>([])
-  useEffect(() => () => {
-    vivo.current = false
-    // BEST-EFFORT, ao fechar: o que sobrou é lixo de uma leitura que não
-    // terminou. Falhar aqui não pode gerar erro em tela nenhuma — a janela está
-    // desmontando. O que a função já apagou volta como "não existe", que para
-    // o Storage não é erro.
-    const caminhos = subidos.current
-    subidos.current = []
-    if (caminhos.length) {
-      void supabase.storage.from('analises-input').remove(caminhos).then(() => {}, () => {})
+  useEffect(() => {
+    // VIVA DE NOVO A CADA MONTAGEM: o StrictMode (modo dev) desmonta e monta de
+    // mentira, e sem isto a limpeza deixava `vivo` em false para sempre — a
+    // análise parava calada na primeira guarda.
+    vivo.current = true
+    return () => {
+      vivo.current = false
+      // BEST-EFFORT, ao fechar: o que sobrou é lixo de uma leitura que não
+      // terminou. Falhar aqui não pode gerar erro em tela nenhuma — a janela está
+      // desmontando. O que a função já apagou volta como "não existe", que para
+      // o Storage não é erro.
+      const caminhos = subidos.current
+      subidos.current = []
+      if (caminhos.length) {
+        void supabase.storage.from('analises-input').remove(caminhos).then(() => {}, () => {})
+      }
     }
   }, [])
   useEffect(() => {
     if (!open || rodou.current) return
     rodou.current = true
     void (async () => {
+      /** A janela já foi solta (ver o `setPasso(null)` antes do cartório). */
+      let soltou = false
       // O CRONÔMETRO. `performance.now()` e não `Date.now()`: é monotônico, e
       // não anda se o relógio do sistema for ajustado no meio de uma espera de
       // minutos. Cada marca fecha a etapa anterior e abre a seguinte, e o
@@ -1523,6 +1531,10 @@ export function AnaliseRpvModal({
           // pede Web Worker, rede pede concorrência ou compressão.
           const conta = { paginas: 0, rasterizacao: 0, consumidor: 0 }
           for (const [iArq, sel] of selecao.entries()) {
+            // FECHADA A JANELA, A ESTEIRA PARA: as páginas que subissem agora
+            // entrariam em `subidos` depois da limpeza do fechamento, e ficariam
+            // no Storage para sempre.
+            if (!vivo.current) break
             // O ÍNDICE DO ARQUIVO NA FRENTE, e não só o nome cortado.
             //
             // `base` é o nome saneado e cortado em 40 caracteres, e o upload usa
@@ -1632,7 +1644,16 @@ export function AnaliseRpvModal({
         // A etapa das imagens só existe quando houve imagem: linha com
         // "imagens 0s" em processo nato-digital é ruído.
         if (selecao.length) marcarLocal('imagens', detalheImagens)
-        if (!vivo.current) return
+        if (!vivo.current) {
+          // O QUE SUBIU DEPOIS DA LIMPEZA DO FECHAMENTO (as tarefas que já
+          // estavam em voo) sai aqui — é o lixo que `subidos` existe para evitar.
+          const caminhos = subidos.current
+          subidos.current = []
+          if (caminhos.length) {
+            void supabase.storage.from('analises-input').remove(caminhos).then(() => {}, () => {})
+          }
+          return
+        }
         setPasso('Qualificando o crédito…')
         const q = await invokeFunction<RespostaAnaliseRpv>('gerar-analise-rpv', {
           acao: 'qualificar',
@@ -1762,6 +1783,11 @@ export function AnaliseRpvModal({
         // `marcar('cartório')`, e a guarda de `revisao.current` lá dentro é o que
         // impede o resultado atrasado de sobrepor o que a pessoa fizer nesse meio.
         setPasso(null)
+        // DAQUI EM DIANTE O `passo` NÃO É MAIS DESTA ROTINA: a janela está solta,
+        // e o Salvar ou o chat podem ter posto o deles. O `finally` o zerava ao
+        // fim do cartório — minutos depois —, destravando a tela com o Salvar ou
+        // o pedido do chat ainda no ar (duas planilhas, duas anotações).
+        soltou = true
         if (!vivo.current) return
         // O CARTÓRIO CHEGA DEPOIS, e de propósito: a busca web leva dezenas de
         // segundos e, dentro da análise, derrubava o worker (HTTP 546).
@@ -1774,7 +1800,7 @@ export function AnaliseRpvModal({
       } catch (e) {
         setErro((e as Error)?.message ?? String(e))
       } finally {
-        setPasso(null)
+        if (!soltou) setPasso(null)
       }
     })()
   }, [open, lerArquivos, notasKommo, dadosDoCard])
@@ -1808,6 +1834,10 @@ export function AnaliseRpvModal({
     // sobrescreve o que ela acabou de pedir — a regra fica guardada e entra na
     // rodada seguinte, que já a manda.
     const naEpoca = revisao.current
+    // A JANELA FECHOU, OU A ANÁLISE MUDOU: parar. Só a revisão era conferida, e
+    // fechar não a muda — a consulta seguia perguntando por até dez minutos e
+    // ainda reprecificava, no fim, para uma tela que não existia mais.
+    const parou = () => !vivo.current || revisao.current !== naEpoca
 
     setPassoCartorio(`Levantando a tabela de emolumentos de ${uf}…`)
     try {
@@ -1832,8 +1862,10 @@ export function AnaliseRpvModal({
           // pergunta demorou é jogar fora um trabalho que está indo bem. Falha
           // isolada (partida a frio, rede oscilando) é só mais uma volta.
           falhasSeguidas++
-          if (falhasSeguidas > MAX_FALHAS_SEGUIDAS || Date.now() >= ate) throw erroDaVolta
-          if (revisao.current !== naEpoca) return
+          // `>=`: o MAX é o número de falhas seguidas que encerra (três, como
+          // diz a constante), e não o último número tolerado.
+          if (falhasSeguidas >= MAX_FALHAS_SEGUIDAS || Date.now() >= ate) throw erroDaVolta
+          if (parou()) return
           setPassoCartorio(`Emolumentos de ${uf}: aguardando o servidor responder…`)
           await espera(INTERVALO_PERGUNTA)
           continue
@@ -1843,7 +1875,7 @@ export function AnaliseRpvModal({
         // A janela pode ter sido fechada, ou a pessoa já ter salvado: parar de
         // perguntar. A pesquisa continua no servidor e a próxima análise deste
         // estado já a encontra pronta.
-        if (revisao.current !== naEpoca) return
+        if (parou()) return
         // A etapa vem do servidor. Dizer "lendo a tabela da escritura no
         // documento" é uma informação; "aguarde" com um cronômetro não é, e foi
         // o que deixou a espera parecendo travamento.
@@ -1880,7 +1912,7 @@ export function AnaliseRpvModal({
       }
 
       setRegraCartorio(e.emolumentos)
-      if (revisao.current !== naEpoca) return
+      if (parou()) return
 
       setPassoCartorio('Refazendo o preço com o cartório…')
       // Sem IA: só recalcula. Por isso é ação própria, e não 'refinar'.
@@ -1892,7 +1924,7 @@ export function AnaliseRpvModal({
         avisos_qualificacao: r.avisos_qualificacao ?? [],
         ...corpoCard,
       })
-      if (revisao.current !== naEpoca) return
+      if (parou()) return
       setFalhaCartorio(null)
       setAtual(r2)
     } catch (e) {
@@ -1935,6 +1967,7 @@ export function AnaliseRpvModal({
     // de `pedirAlteracao`.
     revisao.current += 1
     const naEpoca = revisao.current
+    const anterior = cenario
     setCenario(novo)
     setTrocandoCenario(true)
     setErro(null)
@@ -1962,6 +1995,10 @@ export function AnaliseRpvModal({
       if (revisao.current !== naEpoca) return
       setAtual(r)
     } catch (e) {
+      // O SELETOR VOLTA AO QUE OS NÚMEROS SÃO. Ficando no novo, a tela mostrava
+      // o preço do cenário anterior sob o rótulo do novo, e o Salvar seguinte
+      // mandava os dois juntos: planilha de um cenário, nome de outro.
+      if (revisao.current === naEpoca) setCenario(anterior)
       setErro((e as Error)?.message ?? String(e))
     } finally {
       setTrocandoCenario(false)

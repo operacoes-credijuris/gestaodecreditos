@@ -170,14 +170,16 @@ export function JanelaDeDesfecho({
 
   // Os grupos com item marcado sobem a cada mudança: quem chama decide o que
   // fazer com "só o cedente" antes mesmo de o Confirmar existir.
+  //
+  // O AVISO AO PAI SAI FORA DO ATUALIZADOR: o React pode rodar o atualizador
+  // durante o render (e duas vezes, no modo dev), e mexer no estado de outro
+  // componente dali é o "Cannot update a component while rendering" dele.
   const marcar = (i: number) => {
-    setMarcados((s) => {
-      const n = new Set(s)
-      if (n.has(i)) n.delete(i)
-      else n.add(i)
-      onGruposMarcados?.([...new Set([...n].map((j) => achados[j]?.grupo ?? '').filter(Boolean))])
-      return n
-    })
+    const n = new Set(marcados)
+    if (n.has(i)) n.delete(i)
+    else n.add(i)
+    setMarcados(n)
+    onGruposMarcados?.([...new Set([...n].map((j) => achados[j]?.grupo ?? '').filter(Boolean))])
     // MUDOU A MARCAÇÃO, a redação anterior não vale mais: o texto no campo fala
     // de achados que não são estes.
     setRevisado(false)
@@ -291,7 +293,10 @@ export function JanelaDeDesfecho({
   return (
     <Modal
       open
-      onClose={onFechar}
+      // NÃO FECHA COM A MOVIMENTAÇÃO NO AR: o X, o Esc e o fundo fechavam, e se
+      // o card movesse e a nota falhasse, o erro caía numa janela que já não
+      // existia — o card ficava sem o motivo, e ninguém sabia.
+      onClose={enviando ? () => undefined : onFechar}
       size="lg"
       title={acao.label}
       // O CARD DE QUE SE FALA, sob o título (o apoio da amostra): a janela abre
