@@ -9,7 +9,6 @@ import {
   FileText,
   Gauge,
   MessageSquareText,
-  RefreshCw,
   Settings,
   Sparkles,
   TrendingUp,
@@ -1003,7 +1002,7 @@ function Individual() {
                 não há o que regerar. */}
             {aberto?.status !== 'encerrado' && (
               <Button
-                icon={<RefreshCw className="h-[14px] w-[14px]" />}
+                icon={<Sparkles className="h-[14px] w-[14px]" />}
                 loading={gerar.isPending && !!gerar.variables?.processo_id}
                 onClick={() => aberto && gerar.mutate({ processo_id: aberto.id })}
               >
@@ -1027,10 +1026,13 @@ function Individual() {
                   </p>
                   {/* Carimbo de geração: sem ele não há como saber se o texto
                       é de ontem ou de dois meses atrás. Não aparece na
-                      mensagem fixa dos encerrados, que não é gerada. */}
+                      mensagem fixa dos encerrados, que não é gerada. DIZ A
+                      ORIGEM (a IA, lendo o ADVBOX), como a amostra: quem lê o
+                      texto precisa saber que não foi escrito por uma pessoa. */}
                   {!t.fixo && r?.gerado_em && (
-                    <p className="border-t border-borda pt-2 text-xs tabular-nums text-texto-3">
-                      Gerado em {formatDateTime(r.gerado_em)}
+                    <p className="text-xs text-texto-3">
+                      Gerado pela IA em <span className="tabular-nums">{formatDateTime(r.gerado_em)}</span>, a
+                      partir das movimentações do ADVBOX.
                     </p>
                   )}
                 </div>

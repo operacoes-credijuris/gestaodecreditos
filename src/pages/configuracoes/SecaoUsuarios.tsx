@@ -15,7 +15,21 @@ import { IconButton } from '@/components/ui/IconButton'
 import { Modal } from '@/components/ui/Modal'
 import { Table, THead, TH, TBody, TR, TD, Loading } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { CabecalhoSecao, CaixaAviso, IconeOk, IconeRuim, Selo } from './comum'
+import { perguntarDescarte } from '@/lib/descarte'
+import {
+  PERFIL_INICIAL,
+  edicaoDeUsuarioSuja,
+  novoUsuarioSujo,
+} from '@/lib/formulariosDasConfiguracoes'
+import {
+  CabecalhoSecao,
+  CaixaAviso,
+  DUAS_COLUNAS,
+  GradeCampos,
+  IconeOk,
+  IconeRuim,
+  Selo,
+} from './comum'
 
 export function SecaoUsuarios() {
   const qc = useQueryClient()
@@ -33,7 +47,7 @@ export function SecaoUsuarios() {
   })
 
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ email: '', nome: '', password: '', role: 'usuario' })
+  const [form, setForm] = useState({ email: '', nome: '', password: '', role: PERFIL_INICIAL })
   const [saving, setSaving] = useState(false)
   // Edição de usuário existente. O nome importa além do cadastro: é ele que
   // assina as anotações que a plataforma grava nos cards do Kommo.
@@ -91,13 +105,35 @@ export function SecaoUsuarios() {
       })
       await qc.invalidateQueries({ queryKey: ['profiles'] })
       toast.success('Usuário criado.')
-      setOpen(false)
-      setForm({ email: '', nome: '', password: '', role: 'usuario' })
+      fecharNovo()
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
       setSaving(false)
     }
+  }
+
+  // "DESCARTAR ALTERAÇÕES?" AO FECHAR COM ALGO DIGITADO, nas duas janelas. O X, o
+  // Escape e o clique fora passam pelo `dirty` da Modal; o Cancelar, por aqui.
+  const novoSujo = novoUsuarioSujo(form)
+  const edicaoSuja =
+    !!editando && edicaoDeUsuarioSuja(edicao, { nome: editando.nome ?? null, email: editando.email })
+
+  // DESCARTAR É DESCARTAR: o rascunho sai junto com a janela. Antes ele ficava no
+  // estado e voltava na próxima abertura — e a janela já abriria "suja".
+  function fecharNovo() {
+    setOpen(false)
+    setForm({ email: '', nome: '', password: '', role: PERFIL_INICIAL })
+  }
+
+  async function cancelarNovo() {
+    if (novoSujo && !(await perguntarDescarte())) return
+    fecharNovo()
+  }
+
+  async function cancelarEdicao() {
+    if (edicaoSuja && !(await perguntarDescarte())) return
+    setEditando(null)
   }
 
   async function toggleAtivo(p: Profile) {
@@ -213,10 +249,11 @@ export function SecaoUsuarios() {
       <Modal
         open={!!editando}
         onClose={() => setEditando(null)}
+        dirty={edicaoSuja}
         title="Editar usuário"
         footer={
           <>
-            <Button variant="outline" onClick={() => setEditando(null)}>
+            <Button variant="outline" onClick={() => void cancelarEdicao()}>
               Cancelar
             </Button>
             <Button onClick={salvarEdicao} loading={saving}>
@@ -262,27 +299,33 @@ export function SecaoUsuarios() {
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={fecharNovo}
+        dirty={novoSujo}
         title="Novo usuário"
         footer={
           <>
-            <Button variant="outline" onClick={() => setOpen(false)}>
+            <Button variant="outline" onClick={() => void cancelarNovo()}>
               Cancelar
             </Button>
+            {/* "CRIANDO…" COM O ÍCONE GIRANDO enquanto a função responde (a
+                amostra): sem isso o clique parecia não ter feito nada. */}
             <Button onClick={criar} loading={saving}>
-              Criar usuário
+              {saving ? 'Criando…' : 'Criar usuário'}
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <Field label="Nome">
+        {/* SENHA E PERFIL LADO A LADO, nome e e-mail na largura toda (o `.fgrid`
+            da amostra); na tela estreita, um campo por linha. */}
+        <GradeCampos>
+          <Field label="Nome" className={DUAS_COLUNAS}>
             <Input
               value={form.nome}
               onChange={(e) => setForm({ ...form, nome: e.target.value })}
+              placeholder="Nome completo"
             />
           </Field>
-          <Field label="E-mail" required>
+          <Field label="E-mail" required className={DUAS_COLUNAS}>
             <Input
               type="email"
               value={form.email}
@@ -294,6 +337,9 @@ export function SecaoUsuarios() {
               type="password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
+              // SENHA DE OUTRA PESSOA: sem isto o navegador oferecia a senha
+              // salva de quem está logado.
+              autoComplete="new-password"
             />
           </Field>
           <Field label="Perfil" required>
@@ -305,7 +351,7 @@ export function SecaoUsuarios() {
               <option value="admin">Administrador</option>
             </Select>
           </Field>
-        </div>
+        </GradeCampos>
       </Modal>
     </>
   )

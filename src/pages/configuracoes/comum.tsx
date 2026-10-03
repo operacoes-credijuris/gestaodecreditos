@@ -2,7 +2,7 @@
 // campos, selos, a caixa de aviso e o campo de segredo.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, Lock, TriangleAlert, X, XCircle, type LucideIcon } from 'lucide-react'
+import { Check, Lock, TriangleAlert, X, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -112,6 +112,9 @@ const TOM_DO_SELO: Record<TomSelo, 'green' | 'gray' | 'amber' | 'red'> = {
  * Selo da amostra (`selo()` de base.js): pílula com ícone + texto. O ícone vai
  * junto do texto, e não no lugar dele — a cor sozinha não diz estado para quem
  * não distingue verde de âmbar.
+ *
+ * O NEUTRO VAI SEM ÍCONE, como na amostra (o `dot` de SELOS em base.js): "Não
+ * configurado" não é erro, e o X dizia que era.
  */
 export function Selo({
   tom,
@@ -132,7 +135,6 @@ export function Selo({
 
 export const IconeOk = Check
 export const IconeAlerta = TriangleAlert
-export const IconeSem = XCircle
 export const IconeRuim = X
 
 /** Selo dos cartões de integração, com o estado "não deu para saber". */
@@ -158,7 +160,7 @@ export function SeloIntegracao({
       {rotuloOk}
     </Selo>
   ) : (
-    <Selo tom="neutro" icone={IconeSem}>
+    <Selo tom="neutro">
       {rotuloSem}
     </Selo>
   )

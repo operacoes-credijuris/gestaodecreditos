@@ -3,6 +3,14 @@ import { supabase } from './supabase'
 /** Erro de Edge Function que veio com um código, além da mensagem. */
 export interface ErroDeFuncao extends Error {
   codigo?: string
+  /**
+   * `gravado: false` no corpo: a função DIZ que não gravou nada. Quem mostra o
+   * erro pode então afirmar isso à pessoa sem adivinhar pelo status — a
+   * parametros-bcb responde assim quando nenhum índice veio do Banco Central.
+   */
+  nadaGravado?: boolean
+  /** A lista `avisos` do corpo, um item por falha, quando a função a manda. */
+  avisos?: string[]
 }
 
 /**
@@ -41,6 +49,8 @@ export async function erroDaFuncao(error: { message: string }): Promise<ErroDeFu
   const status = typeof ctx?.status === 'number' ? ` (HTTP ${ctx.status})` : ''
   let detalhe = ''
   let codigo: string | undefined
+  let nadaGravado = false
+  let avisosDoCorpo: string[] = []
   try {
     const txt = ctx && typeof ctx.text === 'function' ? await ctx.text() : ''
     if (txt) {
@@ -69,6 +79,9 @@ export async function erroDaFuncao(error: { message: string }): Promise<ErroDeFu
           detalhe = `${detalhe} — ${j.detalhe.trim().slice(0, 200)}`
         }
         if (typeof j.codigo === 'string' && j.codigo) codigo = j.codigo
+        // SÓ O `false` EXPLÍCITO: corpo sem o campo não diz nada sobre o que gravou.
+        if (j.gravado === false) nadaGravado = true
+        avisosDoCorpo = avisos.map((a) => a.trim())
       } catch {
         // Corpo que não é JSON ainda diz muito: HTML de gateway, rastro de pilha.
         detalhe = txt.slice(0, 300)
@@ -79,6 +92,8 @@ export async function erroDaFuncao(error: { message: string }): Promise<ErroDeFu
   }
   const falha: ErroDeFuncao = new Error(`${detalhe || error.message}${status}`)
   if (codigo) falha.codigo = codigo
+  if (nadaGravado) falha.nadaGravado = true
+  if (avisosDoCorpo.length) falha.avisos = avisosDoCorpo
   return falha
 }
 

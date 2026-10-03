@@ -351,7 +351,7 @@ export function GradeCartoes({ children, seis = false }: { children: ReactNode; 
     <div
       className={cn(
         'grid gap-4',
-        seis ? 'grid-cols-2 md:grid-cols-3 2xl:grid-cols-6' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
+        seis ? 'grid-cols-2 md:grid-cols-3 min-[1180px]:grid-cols-6' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
       )}
     >
       {children}

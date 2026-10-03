@@ -12,6 +12,7 @@ import {
   Check,
   Plus,
   MessageCircle,
+  RefreshCw,
 } from 'lucide-react'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
 import { supabase } from '@/lib/supabase'
@@ -553,182 +554,16 @@ export function Assistente() {
           />
         </header>
 
-        {/* Wrapper único da área das mensagens: é sobre ELE que a gaveta de
-            histórico se sobrepõe. */}
-        <div className="relative flex flex-1 flex-col overflow-hidden">
-          <div className="flex flex-1 flex-col gap-3 overflow-y-auto scrollbar-thin p-[14px]">
-            {mensagens.length === 0 && (
-              <div className="my-auto text-center">
-                <div className="mx-auto mb-[8px] flex h-[48px] w-[48px] items-center justify-center rounded-cartao bg-marca-suave text-marca-texto">
-                  <Sparkles className="h-[20px] w-[20px]" />
-                </div>
-                <p className="font-display text-xl font-extrabold text-texto">
-                  Olá{primeiroNome ? `, ${primeiroNome}` : ''}!
-                </p>
-                {/* A FRASE DE APOIO diz o que ele sabe responder antes das
-                    sugestões — o painel só com "Olá" não dava pista nenhuma. */}
-                <p className="mb-[14px] mt-1 text-corpo text-texto-2">
-                  Pergunte sobre a carteira, os processos ou os contatos.
-                </p>
-                <div className="grid gap-[6px]">
-                  {SUGESTOES.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => enviar(s)}
-                      className={cn(
-                        'rounded-campo border border-borda bg-superficie-2 px-4 py-[10px] text-left text-sm text-texto',
-                        'transition-colors hover:border-marca-viva hover:bg-marca-leve',
-                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
-                      )}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {mensagens.map((m, i) =>
-              m.role === 'user' ? (
-                <p
-                  key={i}
-                  className={cn(
-                    'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca px-4 py-[8px]',
-                    'whitespace-pre-wrap text-corpo text-white [overflow-wrap:anywhere]',
-                  )}
-                >
-                  {m.content}
-                </p>
-              ) : (
-                // A resposta pode trazer tabela de processos: ocupa a largura
-                // inteira, senão a tabela nasce comprimida.
-                <div
-                  key={i}
-                  className="w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-4 py-[10px] text-corpo text-texto"
-                >
-                  <div className="[overflow-wrap:anywhere]">
-                    <TextoIA texto={m.content} />
-                  </div>
-
-                  {m.arquivos && m.arquivos.length > 0 && (
-                    <div className="mt-[8px] grid gap-1">
-                      {m.arquivos.map((f) => (
-                        <a
-                          key={f.url}
-                          href={f.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-[6px] text-sm font-semibold text-marca-texto hover:underline"
-                        >
-                          <Paperclip className="h-[16px] w-[16px] shrink-0" />
-                          {f.nome}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-
-                  {m.acaoProposta && (
-                    <div className="mt-[8px] grid gap-1 rounded-[12px] border border-info-borda bg-marca-leve p-[10px]">
-                      <p className="font-bold text-texto">
-                        Gerar petição — processo {m.acaoProposta.numero_cnj ?? '(a confirmar)'}
-                      </p>
-                      <p className="text-texto-2">{m.acaoProposta.instrucao}</p>
-                      <p className="text-xs text-texto-3">
-                        Abre a tela de revisão de sempre — nada é gerado sem você conferir.
-                      </p>
-                      <div className="mt-1 flex gap-[6px]">
-                        <Button
-                          type="button"
-                          size="md"
-                          onClick={() => confirmarAcao(m.acaoProposta!, i)}
-                        >
-                          Confirmar
-                        </Button>
-                        <Button
-                          type="button"
-                          size="md"
-                          variant="ghost"
-                          onClick={() => descartarAcao(i)}
-                        >
-                          Cancelar
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {m.contatoSugerido && (
-                    <button
-                      type="button"
-                      onClick={() => abrirWhatsapp(m.contatoSugerido!)}
-                      className={cn(
-                        'mt-[8px] flex w-full items-center gap-[10px] rounded-[12px] border border-sucesso-borda',
-                        'bg-sucesso-fundo p-[10px] text-left text-texto transition-colors hover:bg-sucesso-borda/40',
-                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
-                      )}
-                    >
-                      <MessageCircle className="h-[22px] w-[22px] shrink-0 text-sucesso" />
-                      <span className="grid min-w-0 flex-1">
-                        {m.contatoSugerido.nome_contato && (
-                          <span className="truncate text-xs text-sucesso">
-                            {m.contatoSugerido.nome_contato}
-                          </span>
-                        )}
-                        <span className="font-bold tabular-nums text-texto">
-                          {m.contatoSugerido.whatsapp}
-                        </span>
-                        <span className="text-xs text-texto-3">
-                          Clique para abrir o WhatsApp e copiar a mensagem
-                        </span>
-                      </span>
-                    </button>
-                  )}
-                </div>
-              ),
-            )}
-
-            {carregando && (
-              <div
-                role="status"
-                className={cn(
-                  'flex w-full items-center gap-[8px] rounded-[14px_14px_14px_4px] bg-superficie-3',
-                  'px-4 py-[10px] text-corpo text-texto-2',
-                )}
-              >
-                <span className="inline-flex gap-[3px]">
-                  <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:0ms]" />
-                  <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:150ms]" />
-                  <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:300ms]" />
-                </span>
-                Consultando os dados…
-              </div>
-            )}
-
-            {/* O ERRO FICA NUMA CAIXA À PARTE, depois da conversa: não entra no
-                histórico, e a pergunta continua lá para tentar de novo. */}
-            {erro && (
-              <div
-                role="alert"
-                className={cn(
-                  'mt-[2px] flex items-start gap-[8px] rounded-[12px] border border-perigo-borda',
-                  'bg-perigo-fundo px-4 py-[10px] text-corpo text-perigo',
-                )}
-              >
-                <AlertCircle className="mt-[2px] h-[16px] w-[16px] shrink-0" />
-                <span className="break-words text-texto">{erro}</span>
-              </div>
-            )}
-
-            <div ref={fimDaLista} />
-          </div>
-
+        {/* O HISTÓRICO COBRE O PAINEL INTEIRO ABAIXO DO CABEÇALHO (o `.asst-hist`
+            da amostra), a caixa de pergunta inclusive: escolher uma conversa é
+            o que se faz ali, e a pergunta pela metade continua embaixo, intacta. */}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* Sempre montada (mesmo fechada): é o transform que anima a entrada
               pelo lado — condicionar a montagem trocaria a animação por um
               "pop" instantâneo. */}
           <div
             className={cn(
-              'absolute inset-y-0 left-0 z-10 flex w-[82%] max-w-[280px] flex-col overflow-hidden',
-              'border-r border-borda bg-superficie shadow-nivel-2',
+              'absolute inset-0 z-10 flex flex-col overflow-hidden bg-superficie',
               'transition-transform duration-200 ease-out',
               historicoAberto ? 'translate-x-0' : '-translate-x-full pointer-events-none',
             )}
@@ -754,7 +589,11 @@ export function Assistente() {
             </div>
             <div className="flex-1 overflow-y-auto scrollbar-thin px-[8px] pb-[8px]">
               {conversasQuery.isLoading && (
-                <p className="p-3 text-sm text-texto-3">Carregando…</p>
+                // O ÍCONE GIRA (a amostra): texto parado parecia lista travada.
+                <p role="status" className="flex items-center gap-[6px] p-3 text-sm text-texto-3">
+                  <RefreshCw className="h-[14px] w-[14px] shrink-0 animate-spin" aria-hidden />
+                  Carregando…
+                </p>
               )}
               {conversasQuery.data?.length === 0 && (
                 <p className="p-3 text-sm text-texto-3">
@@ -802,202 +641,370 @@ export function Assistente() {
               })}
             </div>
           </div>
-        </div>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            enviar(texto)
-          }}
-          className="grid gap-[6px] border-t border-borda bg-superficie p-[10px]"
-        >
-          {arquivos.length > 0 && (
-            <div className="flex flex-wrap gap-[6px]">
-              {arquivos.map((f, i) => (
-                <span
-                  key={`${f.name}-${i}`}
-                  className="inline-flex h-[24px] max-w-full items-center gap-[6px] rounded-full bg-superficie-3 pl-[8px] text-xs text-texto-2"
-                >
-                  <Paperclip className="h-[12px] w-[12px] shrink-0" />
-                  <span className="max-w-[160px] truncate">{f.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removerArquivo(i)}
-                    aria-label={`Remover ${f.name}`}
-                    title={`Remover ${f.name}`}
-                    className={cn(
-                      'flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-full text-texto-3',
-                      'hover:bg-borda-forte hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
-                    )}
-                  >
-                    <X className="h-[12px] w-[12px]" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          <textarea
-            ref={campo}
-            rows={2}
-            value={texto}
-            onChange={(e) => setTexto(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter envia, Shift+Enter quebra linha — convenção de chat.
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                enviar(texto)
-              }
-            }}
-            placeholder="Faça uma pergunta…"
-            aria-label="Pergunta"
-            className={cn(
-              'max-h-28 w-full resize-none rounded-campo border border-borda-forte bg-superficie',
-              'px-[10px] py-[8px] text-corpo text-texto placeholder:text-texto-3',
-              'focus:border-anel focus:outline-none',
-            )}
-          />
-
-          {/* Seletor de modelo, no mesmo lugar do claude.ai: abaixo da caixa de
-              texto, um botão compacto que abre a lista ao clicar. Skills e o
-              clipe de anexo ficam do lado dele, e o Enviar na ponta direita. */}
-          <div className="flex items-center gap-1">
-            <div className="relative" ref={modeloRef}>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setModeloAberto((v) => !v)}
-                aria-haspopup="listbox"
-                aria-expanded={modeloAberto}
-                title="Modelo do assistente"
-                className="px-3"
-              >
-                <Sparkles className="h-[16px] w-[16px]" />
-                {MODELOS.find((m) => m.key === modelo)?.label ?? 'Sonnet'}
-                <ChevronDown className="h-[16px] w-[16px]" />
-              </Button>
-
-              {modeloAberto && (
-                <div role="listbox" aria-label="Modelo" className={menuFlutuante}>
-                  {MODELOS.map((m) => (
-                    <button
-                      key={m.key}
-                      type="button"
-                      role="option"
-                      aria-selected={m.key === modelo}
-                      onClick={() => {
-                        trocarModelo(m.key)
-                        setModeloAberto(false)
-                      }}
-                      className={itemDeMenu}
-                    >
-                      {m.key === modelo ? (
-                        <Check className="h-[16px] w-[16px] shrink-0 text-marca-texto" />
-                      ) : (
-                        <span className="w-[16px] shrink-0" />
-                      )}
-                      {m.label}
-                    </button>
-                  ))}
+          <div className="relative flex flex-1 flex-col overflow-hidden">
+            <div className="flex flex-1 flex-col gap-3 overflow-y-auto scrollbar-thin p-[14px]">
+              {mensagens.length === 0 && (
+                <div className="my-auto text-center">
+                  <div className="mx-auto mb-[8px] flex h-[48px] w-[48px] items-center justify-center rounded-cartao bg-marca-suave text-marca-texto">
+                    <Sparkles className="h-[20px] w-[20px]" />
+                  </div>
+                  <p className="font-display text-xl font-extrabold text-texto">
+                    Olá{primeiroNome ? `, ${primeiroNome}` : ''}!
+                  </p>
+                  {/* A FRASE DE APOIO diz o que ele sabe responder antes das
+                      sugestões — o painel só com "Olá" não dava pista nenhuma. */}
+                  <p className="mb-[14px] mt-1 text-corpo text-texto-2">
+                    Pergunte sobre a carteira, os processos ou os contatos.
+                  </p>
+                  <div className="grid gap-[6px]">
+                    {SUGESTOES.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => enviar(s)}
+                        className={cn(
+                          'rounded-campo border border-borda bg-superficie-2 px-4 py-[10px] text-left text-sm text-texto',
+                          'transition-colors hover:border-marca-viva hover:bg-marca-leve',
+                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                        )}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
 
-            {/* Só aparece se houver skill ativa — não faz sentido escolher
-                dentro de uma lista vazia. */}
-            {skillsQuery.data && skillsQuery.data.length > 0 && (
-              <div className="relative" ref={skillsRef}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setSkillsAberto((v) => !v)}
-                  aria-haspopup="listbox"
-                  aria-expanded={skillsAberto}
-                  title="Skills desta conversa"
-                  className="px-3"
-                >
-                  {/* Num span só: solto, o "(N)" virava outro item do flex e
-                      ganhava o espaço do gap além do próprio. */}
-                  <span>
-                    Skills
-                    {skillsSelecionadas.size > 0 && ` (${skillsSelecionadas.size})`}
-                  </span>
-                  <ChevronDown className="h-[16px] w-[16px]" />
-                </Button>
-
-                {skillsAberto && (
-                  <div className={menuFlutuante}>
-                    <p
-                      id="assistente-skills-titulo"
-                      className="px-[10px] pb-1 pt-[6px] text-xs font-bold uppercase tracking-wider text-texto-3"
-                    >
-                      Skills desta conversa
-                    </p>
-                    <div
-                      role="listbox"
-                      aria-multiselectable="true"
-                      aria-labelledby="assistente-skills-titulo"
-                    >
-                      {skillsQuery.data.map((s) => {
-                        const marcada = skillsSelecionadas.has(s.skill_id)
-                        return (
-                          <button
-                            key={s.id}
-                            type="button"
-                            role="option"
-                            aria-selected={marcada}
-                            onClick={() => alternarSkill(s.skill_id)}
-                            className={itemDeMenu}
-                          >
-                            <span
-                              className={cn(
-                                'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border',
-                                marcada
-                                  ? 'border-marca bg-marca text-white'
-                                  : 'border-borda-forte bg-superficie',
-                              )}
-                            >
-                              {marcada && <Check className="h-[12px] w-[12px]" />}
-                            </span>
-                            <span className="truncate">{s.nome}</span>
-                          </button>
-                        )
-                      })}
+              {mensagens.map((m, i) =>
+                m.role === 'user' ? (
+                  <p
+                    key={i}
+                    className={cn(
+                      'max-w-[85%] self-end rounded-[14px_14px_4px_14px] bg-marca px-4 py-[8px]',
+                      'whitespace-pre-wrap text-corpo text-white [overflow-wrap:anywhere]',
+                    )}
+                  >
+                    {m.content}
+                  </p>
+                ) : (
+                  // A resposta pode trazer tabela de processos: ocupa a largura
+                  // inteira, senão a tabela nasce comprimida.
+                  <div
+                    key={i}
+                    className="w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-4 py-[10px] text-corpo text-texto"
+                  >
+                    <div className="[overflow-wrap:anywhere]">
+                      <TextoIA texto={m.content} />
                     </div>
+
+                    {m.arquivos && m.arquivos.length > 0 && (
+                      <div className="mt-[8px] grid gap-1">
+                        {m.arquivos.map((f) => (
+                          <a
+                            key={f.url}
+                            href={f.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-[6px] text-sm font-semibold text-marca-texto hover:underline"
+                          >
+                            <Paperclip className="h-[16px] w-[16px] shrink-0" />
+                            {f.nome}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
+                    {m.acaoProposta && (
+                      <div className="mt-[8px] grid gap-1 rounded-[12px] border border-info-borda bg-marca-leve p-[10px]">
+                        <p className="font-bold text-texto">
+                          Gerar petição — processo {m.acaoProposta.numero_cnj ?? '(a confirmar)'}
+                        </p>
+                        <p className="text-texto-2">{m.acaoProposta.instrucao}</p>
+                        <p className="text-xs text-texto-3">
+                          Abre a tela de revisão de sempre — nada é gerado sem você conferir.
+                        </p>
+                        <div className="mt-1 flex gap-[6px]">
+                          <Button
+                            type="button"
+                            size="md"
+                            onClick={() => confirmarAcao(m.acaoProposta!, i)}
+                          >
+                            Confirmar
+                          </Button>
+                          <Button
+                            type="button"
+                            size="md"
+                            variant="ghost"
+                            onClick={() => descartarAcao(i)}
+                          >
+                            Cancelar
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {m.contatoSugerido && (
+                      <button
+                        type="button"
+                        onClick={() => abrirWhatsapp(m.contatoSugerido!)}
+                        className={cn(
+                          'mt-[8px] flex w-full items-center gap-[10px] rounded-[12px] border border-sucesso-borda',
+                          'bg-sucesso-fundo p-[10px] text-left text-texto transition-colors hover:bg-sucesso-borda/40',
+                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                        )}
+                      >
+                        <MessageCircle className="h-[22px] w-[22px] shrink-0 text-sucesso" />
+                        <span className="grid min-w-0 flex-1">
+                          {m.contatoSugerido.nome_contato && (
+                            <span className="truncate text-xs text-sucesso">
+                              {m.contatoSugerido.nome_contato}
+                            </span>
+                          )}
+                          <span className="font-bold tabular-nums text-texto">
+                            {m.contatoSugerido.whatsapp}
+                          </span>
+                          <span className="text-xs text-texto-3">
+                            Clique para abrir o WhatsApp e copiar a mensagem
+                          </span>
+                        </span>
+                      </button>
+                    )}
                   </div>
-                )}
+                ),
+              )}
+
+              {carregando && (
+                <div
+                  role="status"
+                  className={cn(
+                    'flex w-full items-center gap-[8px] rounded-[14px_14px_14px_4px] bg-superficie-3',
+                    'px-4 py-[10px] text-corpo text-texto-2',
+                  )}
+                >
+                  <span className="inline-flex gap-[3px]">
+                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:0ms]" />
+                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:150ms]" />
+                    <span className="h-[6px] w-[6px] animate-bounce rounded-full bg-texto-3 [animation-delay:300ms]" />
+                  </span>
+                  Consultando os dados…
+                </div>
+              )}
+
+              {/* O ERRO FICA NUMA CAIXA À PARTE, depois da conversa: não entra no
+                  histórico, e a pergunta continua lá para tentar de novo. */}
+              {erro && (
+                <div
+                  role="alert"
+                  className={cn(
+                    'mt-[2px] flex items-start gap-[8px] rounded-[12px] border border-perigo-borda',
+                    'bg-perigo-fundo px-4 py-[10px] text-corpo text-perigo',
+                  )}
+                >
+                  <AlertCircle className="mt-[2px] h-[16px] w-[16px] shrink-0" />
+                  <span className="break-words text-texto">{erro}</span>
+                </div>
+              )}
+
+              <div ref={fimDaLista} />
+            </div>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              enviar(texto)
+            }}
+            className="grid gap-[6px] border-t border-borda bg-superficie p-[10px]"
+          >
+            {arquivos.length > 0 && (
+              <div className="flex flex-wrap gap-[6px]">
+                {arquivos.map((f, i) => (
+                  <span
+                    key={`${f.name}-${i}`}
+                    className="inline-flex h-[24px] max-w-full items-center gap-[6px] rounded-full bg-superficie-3 pl-[8px] text-xs text-texto-2"
+                  >
+                    <Paperclip className="h-[12px] w-[12px] shrink-0" />
+                    <span className="max-w-[160px] truncate">{f.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removerArquivo(i)}
+                      aria-label={`Remover ${f.name}`}
+                      title={`Remover ${f.name}`}
+                      className={cn(
+                        'flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-full text-texto-3',
+                        'hover:bg-borda-forte hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+                      )}
+                    >
+                      <X className="h-[12px] w-[12px]" />
+                    </button>
+                  </span>
+                ))}
               </div>
             )}
 
-            <input
-              ref={inputArquivos}
-              type="file"
-              multiple
-              onChange={selecionarArquivos}
-              className="hidden"
-            />
-            <IconButton
-              label="Anexar arquivo"
-              icon={<Paperclip className="h-[16px] w-[16px]" />}
-              onClick={() => inputArquivos.current?.click()}
+            <textarea
+              ref={campo}
+              rows={2}
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter envia, Shift+Enter quebra linha — convenção de chat.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  enviar(texto)
+                }
+              }}
+              placeholder="Faça uma pergunta…"
+              aria-label="Pergunta"
+              className={cn(
+                'max-h-28 w-full resize-none rounded-campo border border-borda-forte bg-superficie',
+                'px-[10px] py-[8px] text-corpo text-texto placeholder:text-texto-3',
+                'focus:border-anel focus:outline-none',
+              )}
             />
 
-            <button
-              type="submit"
-              disabled={!texto.trim() || carregando}
-              aria-label="Enviar pergunta"
-              title="Enviar pergunta"
-              className={cn(
-                'ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-controle',
-                'bg-marca text-white shadow-nivel-1 transition-colors hover:bg-marca-hover active:scale-95',
-                'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
-                'disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:bg-marca disabled:active:scale-100',
+            {/* Seletor de modelo, no mesmo lugar do claude.ai: abaixo da caixa de
+                texto, um botão compacto que abre a lista ao clicar. Skills e o
+                clipe de anexo ficam do lado dele, e o Enviar na ponta direita. */}
+            <div className="flex items-center gap-1">
+              <div className="relative" ref={modeloRef}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setModeloAberto((v) => !v)}
+                  aria-haspopup="listbox"
+                  aria-expanded={modeloAberto}
+                  title="Modelo do assistente"
+                  className="px-3"
+                >
+                  <Sparkles className="h-[16px] w-[16px]" />
+                  {MODELOS.find((m) => m.key === modelo)?.label ?? 'Sonnet'}
+                  <ChevronDown className="h-[16px] w-[16px]" />
+                </Button>
+
+                {modeloAberto && (
+                  <div role="listbox" aria-label="Modelo" className={menuFlutuante}>
+                    {MODELOS.map((m) => (
+                      <button
+                        key={m.key}
+                        type="button"
+                        role="option"
+                        aria-selected={m.key === modelo}
+                        onClick={() => {
+                          trocarModelo(m.key)
+                          setModeloAberto(false)
+                        }}
+                        className={itemDeMenu}
+                      >
+                        {m.key === modelo ? (
+                          <Check className="h-[16px] w-[16px] shrink-0 text-marca-texto" />
+                        ) : (
+                          <span className="w-[16px] shrink-0" />
+                        )}
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Só aparece se houver skill ativa — não faz sentido escolher
+                  dentro de uma lista vazia. */}
+              {skillsQuery.data && skillsQuery.data.length > 0 && (
+                <div className="relative" ref={skillsRef}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setSkillsAberto((v) => !v)}
+                    aria-haspopup="listbox"
+                    aria-expanded={skillsAberto}
+                    title="Skills desta conversa"
+                    className="px-3"
+                  >
+                    {/* Num span só: solto, o "(N)" virava outro item do flex e
+                        ganhava o espaço do gap além do próprio. */}
+                    <span>
+                      Skills
+                      {skillsSelecionadas.size > 0 && ` (${skillsSelecionadas.size})`}
+                    </span>
+                    <ChevronDown className="h-[16px] w-[16px]" />
+                  </Button>
+
+                  {skillsAberto && (
+                    <div className={menuFlutuante}>
+                      <p
+                        id="assistente-skills-titulo"
+                        className="px-[10px] pb-1 pt-[6px] text-xs font-bold uppercase tracking-wider text-texto-3"
+                      >
+                        Skills desta conversa
+                      </p>
+                      <div
+                        role="listbox"
+                        aria-multiselectable="true"
+                        aria-labelledby="assistente-skills-titulo"
+                      >
+                        {skillsQuery.data.map((s) => {
+                          const marcada = skillsSelecionadas.has(s.skill_id)
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              role="option"
+                              aria-selected={marcada}
+                              onClick={() => alternarSkill(s.skill_id)}
+                              className={itemDeMenu}
+                            >
+                              <span
+                                className={cn(
+                                  'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-[4px] border',
+                                  marcada
+                                    ? 'border-marca bg-marca text-white'
+                                    : 'border-borda-forte bg-superficie',
+                                )}
+                              >
+                                {marcada && <Check className="h-[12px] w-[12px]" />}
+                              </span>
+                              <span className="truncate">{s.nome}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
-            >
-              <ArrowRight className="h-[16px] w-[16px]" />
-            </button>
-          </div>
-        </form>
+
+              <input
+                ref={inputArquivos}
+                type="file"
+                multiple
+                onChange={selecionarArquivos}
+                className="hidden"
+              />
+              <IconButton
+                label="Anexar arquivo"
+                icon={<Paperclip className="h-[16px] w-[16px]" />}
+                onClick={() => inputArquivos.current?.click()}
+              />
+
+              <button
+                type="submit"
+                disabled={!texto.trim() || carregando}
+                aria-label="Enviar pergunta"
+                title="Enviar pergunta"
+                className={cn(
+                  'ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-controle',
+                  'bg-marca text-white shadow-nivel-1 transition-colors hover:bg-marca-hover active:scale-95',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
+                  'disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:bg-marca disabled:active:scale-100',
+                )}
+              >
+                <ArrowRight className="h-[16px] w-[16px]" />
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
 
       <ConfirmDialog

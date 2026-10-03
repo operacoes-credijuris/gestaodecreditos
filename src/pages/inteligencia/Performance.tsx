@@ -114,7 +114,7 @@ export default function Performance() {
       />
       <AvisoParametros />
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-4 min-[1180px]:grid-cols-3">
         <Metrica
           titulo="Rentabilidade total"
           apoio="Quanto o capital rendeu, sem considerar o prazo."
