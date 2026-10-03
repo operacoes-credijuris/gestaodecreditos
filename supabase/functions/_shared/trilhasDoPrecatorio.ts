@@ -161,7 +161,8 @@ export interface DefAbaPrecatorio {
    * O BOTÃO "CERTIDÕES" no card: abre o painel de certidões da due diligence do
    * Interno (checklist e emissão pela BullAI), sozinho. O primeiro uso é a
    * Obtenção de documentação do Externo (29/09/2026), onde o fundo pede as
-   * certidões do cedente e a casa as tira.
+   * certidões do cedente e a casa as tira; desde 03/10/2026 também Em
+   * precificação, para adiantá-las.
    */
   certidoes?: boolean
   /**
@@ -598,6 +599,10 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         // OS FUNDOS RESPONDERAM, e a casa escolhe com qual proposta seguir: o
         // card vai para a produção da proposta ao cedente (29/09/2026).
         escolhaDeProposta: { colunaKommo: 'PRODUÇÃO DE PROPOSTA', statusId: 111533988 },
+        // AS CERTIDÕES JÁ NA PRECIFICAÇÃO (03/10/2026): enquanto o fundo precifica,
+        // a casa adianta as certidões do cedente que ele vai pedir na formalização.
+        // O mesmo botão da Obtenção de documentação.
+        certidoes: true,
       },
       {
         key: 'ext-diligencia',

@@ -711,17 +711,22 @@ describe('abas da trilha Externa', () => {
   })
 
   /**
-   * AS CERTIDÕES NA OBTENÇÃO DE DOCUMENTAÇÃO (29/09/2026): o botão que abre o
-   * painel de certidões do Interno — só ali, e sem os botões de trabalho nem
-   * desfecho.
+   * AS CERTIDÕES NA OBTENÇÃO DE DOCUMENTAÇÃO (29/09/2026) E EM PRECIFICAÇÃO
+   * (03/10/2026): o botão que abre o painel de certidões do Interno — só nessas
+   * duas, e sem os botões de trabalho.
    */
-  it('a Obtenção de documentação tem o botão de certidões, e só ela', () => {
+  it('Obtenção de documentação e Em precificação têm o botão de certidões, e só elas', () => {
     const doc = abas.find((a) => a.key === 'ext-documentacao')!
     expect(doc.statusIds).toEqual([idExt('OBTENÇÃO DE DOCUMENTAÇÃO')])
     expect(doc.certidoes).toBe(true)
     expect(doc.acoes).toEqual([])
     expect(ABAS_EXTERNO_SEM_TRABALHO.has('ext-documentacao')).toBe(true)
-    expect(abas.filter((a) => a.certidoes).map((a) => a.key)).toEqual(['ext-documentacao'])
+    const prec = abas.find((a) => a.key === ABA_EM_PRECIFICACAO_EXTERNO)!
+    expect(prec.certidoes).toBe(true)
+    expect(ABAS_EXTERNO_SEM_TRABALHO.has(ABA_EM_PRECIFICACAO_EXTERNO)).toBe(true)
+    expect(abas.filter((a) => a.certidoes).map((a) => a.key).sort()).toEqual(
+      ['ext-documentacao', ABA_EM_PRECIFICACAO_EXTERNO].sort(),
+    )
   })
 
   it('as demais abas do Externo não oferecem desfecho', () => {
