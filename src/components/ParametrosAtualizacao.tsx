@@ -7,7 +7,7 @@
 // parcela que o originou. A data de referência nasce como hoje e é editável.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { AlertTriangle, Download } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
   useParametrosAtualizacao,
@@ -25,6 +25,11 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 
+/**
+ * Uma linha da janela (o `.param-rows` da amostra): o rótulo à esquerda, na cor
+ * do texto, e o campo de 160px à direita. Sem régua entre as linhas — são só
+ * quatro, e o alinhamento já faz a tabela.
+ */
 function LinhaParametro({
   rotulo,
   children,
@@ -33,9 +38,18 @@ function LinhaParametro({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-borda py-2.5 last:border-b-0">
-      <span className="text-sm text-texto-2">{rotulo}</span>
-      <div className="w-40 shrink-0">{children}</div>
+    <div className="flex items-center justify-between gap-5 py-1.5">
+      <span className="text-corpo text-texto">{rotulo}</span>
+      <div className="w-[160px] shrink-0">{children}</div>
+    </div>
+  )
+}
+
+/** O valor sem campo (o `.ro` da amostra): derivado ou fixo, só para ler. */
+function SoLeitura({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-campo bg-superficie-3 px-4 py-2 text-right text-corpo tabular-nums text-texto-2">
+      {children}
     </div>
   )
 }
@@ -163,11 +177,19 @@ export function ModalParametrosAtualizacao({
     }
   }
 
+  // Por que o Salvar está travado, dito no próprio botão (o title da amostra).
+  const motivoDaTrava = params.isError
+    ? 'Os parâmetros atuais não foram lidos: salvar agora gravaria por cima sem saber o que está lá.'
+    : params.isLoading
+      ? 'Lendo os parâmetros atuais…'
+      : undefined
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Parâmetros de atualização"
+      description="Os índices que corrigem os valores do relatório."
       size="md"
       footer={
         <>
@@ -176,18 +198,19 @@ export function ModalParametrosAtualizacao({
           <Button
             variant="outline"
             className="mr-auto"
-            icon={<Download className="h-4 w-4" />}
+            icon={<Download className="h-[14px] w-[14px]" />}
             loading={buscando}
             onClick={buscarNoBcb}
           >
             Buscar no Banco Central
           </Button>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
           <Button
             loading={salvar.isPending}
             disabled={params.isLoading || params.isError}
+            title={motivoDaTrava}
             onClick={handleSalvar}
           >
             Salvar
@@ -201,17 +224,23 @@ export function ModalParametrosAtualizacao({
             nulo por cima da SELIC e do IPCA reais — parando a projeção de toda a
             carteira. Por isso o aviso, e o Salvar desabilitado abaixo. */}
         {params.isError && (
-          <p className="mb-3 rounded-md border border-aviso-borda bg-aviso-fundo px-3 py-2 text-sm text-aviso">
-            Não foi possível ler os parâmetros atuais, então não é seguro salvar
-            por cima. Feche e abra novamente.{' '}
-            <button
-              type="button"
-              className="font-medium underline"
-              onClick={() => void params.refetch()}
-            >
-              Tentar de novo
-            </button>
-          </p>
+          <div className="mb-4 flex items-start gap-2.5 rounded-campo border border-aviso-borda bg-aviso-fundo px-4 py-3 text-corpo">
+            <AlertTriangle className="mt-0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
+            <p className="text-texto">
+              Não foi possível ler os parâmetros atuais, então não é seguro salvar
+              por cima. Feche e abra novamente.{' '}
+              {/* "TENTANDO…" ENQUANTO LÊ (Novo, só visual): sem isso o clique
+                  parecia não ter feito nada até a resposta chegar. */}
+              <button
+                type="button"
+                className="rounded font-semibold text-marca-texto underline underline-offset-2 disabled:cursor-wait disabled:no-underline disabled:opacity-70"
+                disabled={params.isFetching}
+                onClick={() => void params.refetch()}
+              >
+                {params.isFetching ? 'Tentando…' : 'Tentar de novo'}
+              </button>
+            </p>
+          </div>
         )}
         {/* Máscara de duas casas: os dígitos entram pela direita, então "1550"
             vira 15,50 e o campo nunca fica sem as casas decimais. */}
@@ -220,6 +249,7 @@ export function ModalParametrosAtualizacao({
             className="text-right tabular-nums"
             inputMode="numeric"
             placeholder="0,00"
+            aria-label="SELIC vigente (% a.a.)"
             value={formatPercentInput(selic)}
             onChange={(e) => setSelic(parsePercentInput(e.target.value))}
           />
@@ -230,6 +260,7 @@ export function ModalParametrosAtualizacao({
             className="text-right tabular-nums"
             inputMode="numeric"
             placeholder="0,00"
+            aria-label="IPCA acumulado 12 meses (% a.a.)"
             value={formatPercentInput(ipca)}
             onChange={(e) => setIpca(parsePercentInput(e.target.value))}
           />
@@ -237,18 +268,14 @@ export function ModalParametrosAtualizacao({
 
         <LinhaParametro rotulo="IPCA + 2% a.a.">
           {/* Sem campo: é o IPCA acima somado a 2, calculado na hora. */}
-          <div className="rounded-lg bg-superficie-2 px-3 py-2 text-right text-sm font-medium tabular-nums text-texto">
-            {derivado === null ? '—' : formatPercentInput(derivado)}
-          </div>
+          <SoLeitura>{derivado === null ? '—' : formatPercentInput(derivado)}</SoLeitura>
         </LinhaParametro>
 
         <LinhaParametro rotulo="Data de referência do relatório">
           {/* Fixa em hoje, sem campo: é a competência do relatório que está
               sendo gerado, não uma escolha. Logo depois da busca no Banco
               Central, é a competência que ela gravou (ver dataBaseAoSalvar). */}
-          <div className="rounded-lg bg-superficie-2 px-3 py-2 text-right text-sm font-medium tabular-nums text-texto">
-            {formatDate(dataBase)}
-          </div>
+          <SoLeitura>{formatDate(dataBase)}</SoLeitura>
         </LinhaParametro>
       </div>
     </Modal>

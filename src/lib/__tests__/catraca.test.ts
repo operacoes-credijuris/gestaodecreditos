@@ -32,8 +32,10 @@ const BASE_TEXTO_PX = 16
  *  1 para 1. As 65 que ficam são DE PROPÓSITO: paletas categóricas, em que a cor
  *  só distingue um nome de outro (os tons de etiqueta da Badge, a paleta de
  *  situação da Fase processual, os grupos de colunas da Carteira, os tipos de
- *  contato) e a escala graduada de "parado há…" das Publicações. */
-const BASE_COR_FIXA = 65
+ *  contato) e a escala graduada de "parado há…" das Publicações.
+ *  A onda 2 (Quadro) baixou para 64: o azul do status "Azul" da carteira virou
+ *  o token `text-info`. */
+const BASE_COR_FIXA = 64
 
 const SRC = fileURLToPath(new URL('../../', import.meta.url))
 
