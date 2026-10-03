@@ -2243,7 +2243,6 @@ function CardCredito({
   envioAosFundos,
   onCertidoes,
   onCopiarProcesso,
-  compacto,
   negociacao,
   onGerarContrato,
   realcado = false,
@@ -2333,8 +2332,6 @@ function CardCredito({
   onCertidoes?: (l: KommoLead) => void
   /** Copia o número do processo — o aviso de sucesso ou de falha é da página. */
   onCopiarProcesso: (numero: string) => void
-  /** Densidade compacta (preferência da pessoa). */
-  compacto: boolean
   /**
    * O desfecho da Negociação no card (onda 4 — para todos desde 03/10/2026, ver
    * `abaParaQuemVe`): o "Fechado!" e o "Não fechou".
@@ -2404,7 +2401,7 @@ function CardCredito({
       tabIndex={-1}
       className={cn(
         'relative grid grid-cols-1 gap-x-6 gap-y-2 rounded-cartao border border-borda bg-superficie px-[18px] shadow-nivel-1 transition-[border-color,box-shadow] duration-150 hover:border-borda-forte hover:shadow-nivel-2 focus:outline-none min-[900px]:grid-cols-[minmax(0,1fr)_auto]',
-        compacto ? 'py-[10px]' : 'py-4',
+        'py-4',
         realcado && 'border-marca-viva ring-[3px] ring-marca-viva/20',
       )}
     >
@@ -3120,9 +3117,6 @@ function casaComBusca(x: KommoLead, q: string): boolean {
     .some((v) => v!.toLowerCase().includes(q))
 }
 
-/** Onde o navegador guarda a densidade escolhida para a lista de cards. */
-const CHAVE_DA_DENSIDADE = 'analise.densidade'
-
 export default function AnaliseCredito() {
   const qc = useQueryClient()
   const toast = useToast()
@@ -3160,23 +3154,6 @@ export default function AnaliseCredito() {
   const [filtro, setFiltro] = useState<FiltroRapido>('todos')
   const [ordem, setOrdem] = useState<OrdemDaLista>('recente')
   const [mostrar, setMostrar] = useState(POR_VEZ)
-  // A DENSIDADE É DA PESSOA, e fica no navegador dela: é conveniência, não dado.
-  // Sem acesso ao armazenamento (janela anônima, bloqueio), vale a confortável.
-  const [densidade, setDensidade] = useState<'confortavel' | 'compacta'>(() => {
-    try {
-      return window.localStorage.getItem(CHAVE_DA_DENSIDADE) === 'compacta' ? 'compacta' : 'confortavel'
-    } catch {
-      return 'confortavel'
-    }
-  })
-  const escolherDensidade = (d: 'confortavel' | 'compacta') => {
-    setDensidade(d)
-    try {
-      window.localStorage.setItem(CHAVE_DA_DENSIDADE, d)
-    } catch {
-      /* sem armazenamento, a escolha vale só nesta visita */
-    }
-  }
   const campoDeBusca = useRef<HTMLInputElement>(null)
   // "/" LEVA À BUSCA (amostra), fora de campo e de janela: quem está digitando
   // uma barra num texto não pode ser arrancado dali.
@@ -4798,7 +4775,6 @@ export default function AnaliseCredito() {
           : fasesDoFunil.length === 2
             ? 'min-[621px]:grid-cols-2'
             : ''
-  const compacto = densidade === 'compacta'
   const nomeDoFunil = funil === FUNIL_PRECATORIO ? 'Precatórios' : 'RPV'
 
   /** Os nomes das etapas achadas, como links que levam a elas (item "Novo"). */
@@ -4923,19 +4899,8 @@ export default function AnaliseCredito() {
             }}
           />
         </label>
-        <span className="text-xs font-semibold uppercase tracking-[.06em] text-texto-3 max-[620px]:hidden">
-          Densidade
-        </span>
-        <Seg
-          rotulo="Densidade da lista"
-          className="max-[620px]:hidden"
-          valor={densidade}
-          onChange={escolherDensidade}
-          itens={[
-            { key: 'confortavel', label: 'Confortável' },
-            { key: 'compacta', label: 'Compacta' },
-          ]}
-        />
+        {/* SEM ESCOLHA DE DENSIDADE (decisão do dono, 03/10/2026): a lista é
+            sempre a confortável. */}
       </div>
 
       {/* Coluna fixada que o kanban não tem. Vermelho, e não amarelo: aqui a aba
@@ -5235,12 +5200,11 @@ export default function AnaliseCredito() {
           </div>
         ) : (
           <>
-            <div className={cn('grid', compacto ? 'gap-[6px]' : 'gap-[10px]')}>
+            <div className="grid gap-[10px]">
               {filtrados.slice(0, mostrar).map((l) => (
                 <CardCredito
                   key={l.kommo_lead_id}
                   lead={l}
-                  compacto={compacto}
                   onCopiarProcesso={copiarProcesso}
                   acoes={abaAtual?.acoes ?? []}
                   // O AGRUPADO NÃO VAI UM BOTÃO POR SAÍDA: ele sai de um botão

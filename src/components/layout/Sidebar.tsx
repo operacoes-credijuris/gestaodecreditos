@@ -206,7 +206,7 @@ export function Sidebar({
         </button>
       </div>
 
-      <nav className="flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-4 pb-5 pt-4 scrollbar-thin">
+      <nav className="relative flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-4 pb-5 pt-4 scrollbar-thin">
         {NAVIGATION.map((section, idx) => {
           // A seção que contém a rota ativa fica mais visível — responde
           // "em que setor do negócio estou?" sem varrer a lista inteira. Pelo

@@ -35,12 +35,18 @@ export function AppLayout() {
 
   return (
     <ProvedorDeConsultas>
-      <div className="flex h-screen overflow-hidden bg-papel">
+      {/* `relative` NA MOLDURA E NO <main>: todo elemento `absolute` lá dentro
+          (os `sr-only` dos leitores de tela, dicas, selos) passa a ter a moldura
+          como referência e é cortado por ela. Sem isso, um `sr-only` abaixo da
+          dobra ficava preso à página, não ao <main>: a página crescia além da
+          janela, rolava, e a tela inteira subia deixando uma faixa vazia embaixo
+          (visto em 03/10/2026). */}
+      <div className="relative flex h-screen overflow-hidden bg-papel">
         <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
         <div className="flex min-w-0 flex-1 flex-col">
           <FaixaBeta />
           <Topbar onOpenMenu={() => setMobileOpen(true)} />
-          <main className="flex-1 overflow-y-auto scrollbar-thin">
+          <main className="relative flex-1 overflow-y-auto scrollbar-thin">
             {/* max-width evita tabelas esticadas de ponta a ponta em monitores
                 largos; a chave re-anima a entrada a cada troca de tela. Medidas
                 do `.content` da amostra: 1360px no máximo e 24px de respiro
