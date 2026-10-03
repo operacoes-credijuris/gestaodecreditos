@@ -27,6 +27,12 @@ import { COLUNAS } from '../_shared/colunasRpv.ts'
 import { servicoDaNota } from '../_shared/servicoDaNota.ts'
 // A CONFERÊNCIA DE ORIGEM do desfecho da Negociação (02/10/2026).
 import { recusaDaOrigem } from '../_shared/desfechoDaNegociacao.ts'
+// MOVER PARA ONDE O CARD JÁ ESTÁ NÃO É MOVER (03/10/2026) — ver o módulo.
+import {
+  lerLeituraDoKommo,
+  passoDoMovimento,
+  type LeituraDoKommo,
+} from '../_shared/movimentoIdempotente.ts'
 
 /**
  * Os destinos do Precatório saem de `_shared/trilhasDoPrecatorio.ts`, por trilha.
@@ -120,6 +126,12 @@ Deno.serve(async (req: Request) => {
     if (!secret?.token || !secret?.subdominio) {
       return jsonResponse({ error: 'Kommo não configurado.' }, 400)
     }
+    const base = `https://${secret.subdominio}.kommo.com/api/v4`
+    const headers = {
+      Authorization: `Bearer ${secret.token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    }
 
     // Coluna de origem: vem do espelho local, para a anotação dizer de onde
     // saiu. Se o espelho estiver defasado o texto sai sem a origem, o que é
@@ -131,17 +143,48 @@ Deno.serve(async (req: Request) => {
       .select('status_id, pipeline_id')
       .eq('kommo_lead_id', leadId)
       .maybeSingle()
+
+    // O CARD JÁ ESTÁ NO DESTINO? Repetir o PATCH gravava "Movido de X para X" e
+    // podia disparar as automações do funil outra vez. A leitura do Kommo só
+    // acontece quando o ESPELHO diz que o card já está lá (é uma chamada a mais
+    // no limite de taxa da conta, e só o caso suspeito a paga); se ela
+    // confirmar, a resposta é sucesso sem mover e sem nota. ANTES da conferência
+    // de origem, de propósito: o segundo clique em "Fechado!" encontra o card
+    // já em Fechados, e isso é o primeiro clique tendo dado certo, não um erro.
+    let leitura: LeituraDoKommo | null | undefined = undefined
+    if (passoDoMovimento(statusId, espelho?.status_id) === 'CONFERIR_NO_KOMMO') {
+      try {
+        const resLido = await fetch(`${base}/leads/${leadId}`, { headers })
+        leitura = resLido.ok ? lerLeituraDoKommo(await resLido.json().catch(() => null)) : null
+      } catch {
+        // Leitura que falha não para o movimento: segue como sempre seguiu.
+        leitura = null
+      }
+      if (passoDoMovimento(statusId, espelho?.status_id, leitura) === 'JA_ESTA') {
+        return jsonResponse({
+          ok: true,
+          aviso: null,
+          ja_estava: true,
+          mensagem: `O card já estava em "${nomeDoDestino}"; nada foi movido.`,
+        })
+      }
+    }
+    // O ESPELHO ESTAVA DEFASADO quando o Kommo respondeu outra coluna: a origem
+    // da nota e da conferência do desfecho passa a ser a que o Kommo disse.
+    const origemStatusId = leitura ? leitura.statusId : espelho?.status_id
+    const origemPipelineId = leitura ? leitura.pipelineId : espelho?.pipeline_id
+
     // O nome do Kommo primeiro, pelo mesmo motivo do destino; COLUNAS é reserva.
-    const origem = espelho?.status_id
+    const origem = origemStatusId
       ? ((
           await svc
             .from('kommo_etapa')
             .select('nome')
-            .eq('status_id', espelho.status_id)
+            .eq('status_id', origemStatusId)
             .limit(1)
             .maybeSingle()
         ).data?.nome ??
-        COLUNAS[espelho.status_id] ??
+        COLUNAS[origemStatusId] ??
         null)
       : null
 
@@ -156,10 +199,10 @@ Deno.serve(async (req: Request) => {
         statusId,
         nome: nomeDoDestino,
       },
-      espelho?.status_id
+      origemStatusId
         ? {
-            statusId: Number(espelho.status_id),
-            pipelineId: espelho.pipeline_id == null ? null : Number(espelho.pipeline_id),
+            statusId: Number(origemStatusId),
+            pipelineId: origemPipelineId == null ? null : Number(origemPipelineId),
             nome: origem,
           }
         : null,
@@ -173,13 +216,6 @@ Deno.serve(async (req: Request) => {
       .eq('id', caller.id)
       .maybeSingle()
     const autor = perfil?.nome?.trim() || perfil?.email || caller.email || 'usuário do sistema'
-
-    const base = `https://${secret.subdominio}.kommo.com/api/v4`
-    const headers = {
-      Authorization: `Bearer ${secret.token}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    }
 
     // 1. Move o card. Vem primeiro de propósito: se a anotação falhasse antes
     // do PATCH, o card teria registro de uma movimentação que não aconteceu.
