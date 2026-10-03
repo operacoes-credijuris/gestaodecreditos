@@ -34,6 +34,7 @@ import {
 } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { perguntarDescarte } from '@/lib/descarte'
 import {
   AlertTriangle,
   Search,
@@ -896,12 +897,12 @@ function JanelaDeMensagem({
   const varias = acoes.length > 1
   const sujo = mensagem.trim() !== sugestao.trim() || (comResumo && textoDoResumo.trim() !== (resumo ?? '').trim())
 
-  const cancelar = () => {
+  const cancelar = async () => {
     // A MESMA CHECAGEM DO X, DO OVERLAY E DO ESC. O `dirty` do Modal só
     // protege aquelas três portas; este botão chamava `onFechar` direto e
     // descartava o texto digitado sem perguntar — e é o botão que está mais
     // perto do cursor de quem acabou de escrever.
-    if (sujo && !window.confirm('Descartar alterações não salvas?')) return
+    if (sujo && !(await perguntarDescarte())) return
     onFechar()
   }
 
@@ -2065,8 +2066,8 @@ function JanelaNaoFechou({
     }
   }
 
-  const cancelar = () => {
-    if (motivo.trim() && !window.confirm('Descartar alterações não salvas?')) return
+  const cancelar = async () => {
+    if (motivo.trim() && !(await perguntarDescarte())) return
     onFechar()
   }
 
@@ -4231,7 +4232,9 @@ export default function AnaliseCredito() {
   // due diligence busca no Escavador sozinha, e cada consulta custa; mover card
   // não se desfaz). Lido uma vez e tirado do endereço, para um F5 não repetir.
   const [parametros, setParametros] = useSearchParams()
-  const cardPedido = isAdmin ? cardDoEndereco(parametros.get('card')) : null
+  // PARA TODOS desde a onda 3: a busca geral (Ctrl+K) também chega aqui com
+  // `?card=`, e realçar e rolar não move nada nem custa nada.
+  const cardPedido = cardDoEndereco(parametros.get('card'))
   const [realce, setRealce] = useState<number | null>(null)
   const procurouNoOutroFunil = useRef(false)
   const rolouAte = useRef<number | null>(null)

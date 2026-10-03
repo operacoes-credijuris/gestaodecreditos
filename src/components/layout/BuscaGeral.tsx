@@ -6,7 +6,6 @@ import { ArrowRight, FolderKanban, Loader2, Phone, ScanSearch, Search } from 'lu
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { useAuth } from '@/contexts/AuthContext'
-import { useToast } from '@/components/ui/Toast'
 import { Badge } from '@/components/ui/Badge'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 import {
@@ -68,7 +67,6 @@ function useEsperado(valor: string, ms: number): string {
 export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
   const { isAdmin } = useAuth()
   const navigate = useNavigate()
-  const toast = useToast()
   const [digitado, setDigitado] = useState('')
   const [sel, setSel] = useState(0)
   const painelRef = useRef<HTMLDivElement>(null)
@@ -178,15 +176,10 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
     } else {
       // O CARD SÓ É REALÇADO E ROLADO ATÉ A VISTA — NUNCA SE ABRE JANELA dele
       // daqui: a due diligence busca no Escavador sozinha ao abrir, e cada
-      // consulta custa. Card fora da etapa à vista: o aviso diz onde ele está.
-      navigate('/operacional/analise')
-      realcarCard(Number(r.alvo), () =>
-        toast.info(
-          `O card de ${r.titulo} está em ${[onde.funil(cardDoResultado(r, dados)), r.onde]
-            .filter(Boolean)
-            .join(' › ')}. Escolha o funil e a etapa no quadro para vê-lo.`,
-        ),
-      )
+      // consulta custa.
+      // PELO ENDEREÇO (`?card=`): a Análise acha o card em qualquer funil e
+      // etapa, troca para lá e o realça — o mesmo caminho do "Voltar ao card".
+      navigate(`/operacional/analise?card=${encodeURIComponent(String(r.alvo))}`)
     }
   }
 
@@ -297,38 +290,4 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
     </div>,
     document.body,
   )
-}
-
-/** O funil do card escolhido, para o aviso de onde ele está. */
-function cardDoResultado(
-  r: ResultadoDaBusca,
-  dados: { cards: CardAchado[] } | undefined,
-): number {
-  return dados?.cards.find((c) => String(c.kommo_lead_id) === r.alvo)?.pipeline_id ?? 0
-}
-
-/**
- * Realça o card na Análise de crédito, se ele estiver à vista: rola até ele,
- * põe o foco nele e o contorna por um instante. Espera a tela montar e os cards
- * chegarem (até alguns segundos); não achando, avisa onde ele está.
- *
- * SÓ OLHA A TELA (o `data-lead` que o card já tem): não abre nada, não consulta
- * nada, não muda o funil nem a etapa escolhidos.
- */
-function realcarCard(leadId: number, naoAchou: () => void) {
-  const inicio = Date.now()
-  const procurar = () => {
-    const el = document.querySelector<HTMLElement>(`article[data-lead="${leadId}"]`)
-    if (el) {
-      const suave = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-      el.scrollIntoView({ block: 'center', behavior: suave ? 'smooth' : 'auto' })
-      el.focus({ preventScroll: true })
-      el.classList.add('realce-da-busca')
-      window.setTimeout(() => el.classList.remove('realce-da-busca'), 2500)
-      return
-    }
-    if (Date.now() - inicio > 4000) return naoAchou()
-    window.setTimeout(procurar, 150)
-  }
-  window.setTimeout(procurar, 50)
 }
