@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
+import { perguntarDescarte } from '@/lib/descarte'
+import { useJanelaAberta } from '@/lib/janelasAbertas'
 
 /**
  * Painel lateral (slide-over) para exibir detalhes de um registro sem sair da
  * listagem. Desliza da direita com overlay desfocado; fecha por X, overlay ou
- * Escape. Use para "ficha" de leitura — edição continua nos modais.
+ * Escape. Use para "ficha" de leitura — edição continua nos modais. Com algo
+ * digitado na ficha, passe `dirty`: fechar pergunta antes (lib/descarte.ts).
  *
  * Vai para o <body> por portal, pelo mesmo motivo do Modal: `fixed inset-0` deixa
  * de se medir pela janela quando algum ancestral tem `transform`, e o
@@ -20,20 +23,44 @@ export function Drawer({
   title,
   children,
   footer,
+  dirty = false,
+  ariaLabel,
 }: {
   open: boolean
   onClose: () => void
   title: ReactNode
   children: ReactNode
   footer?: ReactNode
+  /**
+   * Quando true, fechar (X, fundo ou Escape) pergunta antes "Descartar
+   * alterações?", com o texto "nesta ficha" — o item "Novo" da amostra para a
+   * ficha lateral com algo digitado. Sem ela, fecha direto, como sempre.
+   */
+  dirty?: boolean
+  /**
+   * O nome do painel para o leitor de tela. Sem ele, o nome é o próprio
+   * `title` (aria-labelledby); passe-o quando o título não for texto que se
+   * leia bem sozinho.
+   */
+  ariaLabel?: string
 }) {
   // Mantém o nó montado durante a animação de saída (mesmo padrão do drawer
   // mobile da sidebar).
   const [rendered, setRendered] = useState(open)
   const [visible, setVisible] = useState(open)
   const painelRef = useRef<HTMLDivElement>(null)
+  const tituloId = useId()
   const ehTopo = useFocoPreso(open, painelRef)
   useTravaScroll(open)
+  // O Ctrl+K pergunta aqui se a ficha está alterada (lib/janelasAbertas.ts).
+  useJanelaAberta(open, dirty, onClose)
+
+  // TODAS AS FORMAS DE FECHAR PASSAM POR AQUI (X, fundo e Escape), como no
+  // Modal: uma regra só para o "Descartar alterações?".
+  const pedirFechar = useCallback(async () => {
+    if (dirty && !(await perguntarDescarte('ficha'))) return
+    onClose()
+  }, [dirty, onClose])
 
   useEffect(() => {
     if (open) {
@@ -55,26 +82,33 @@ export function Drawer({
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && ehTopo()) onClose()
+      if (e.key === 'Escape' && ehTopo()) pedirFechar()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, pedirFechar, ehTopo])
 
   if (!rendered) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50">
       <div
         className={cn(
           'absolute inset-0 bg-veu/40 backdrop-blur-[2px] transition-opacity duration-200',
           visible ? 'opacity-100' : 'opacity-0',
         )}
-        onClick={onClose}
+        onClick={pedirFechar}
       />
+      {/* O DIÁLOGO É O PAINEL, e não a camada inteira: o fundo escurecido não
+          faz parte dele. O nome vem do título (ou de `ariaLabel`) — antes o
+          leitor de tela anunciava só "diálogo", sem dizer de quê. */}
       <div
         ref={painelRef}
         tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabel ? undefined : tituloId}
         className={cn(
           // 520px, o painel lateral da amostra: a ficha usa grid de 2 colunas
           // (DrawerSection) e estreito os valores longos quebravam demais. Em px
@@ -84,9 +118,11 @@ export function Drawer({
         )}
       >
         <div className="flex items-start justify-between gap-3 border-b border-borda px-6 py-5">
-          <div className="min-w-0 flex-1">{title}</div>
+          <div id={tituloId} className="min-w-0 flex-1">
+            {title}
+          </div>
           <button
-            onClick={onClose}
+            onClick={pedirFechar}
             aria-label="Fechar painel"
             className="-mr-2 -mt-1 shrink-0 rounded-controle p-1.5 text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto"
           >

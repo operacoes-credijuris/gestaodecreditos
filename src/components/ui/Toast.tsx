@@ -112,7 +112,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {items.map((t) => (
           <div
             key={t.id}
-            role="status"
+            // O ERRO É `alert`: o leitor de tela o anuncia na hora, interrompendo
+            // o que estiver lendo — falha de gravação não pode esperar a vez. Os
+            // outros seguem `status`, educados.
+            role={t.type === 'error' ? 'alert' : 'status'}
             // Pausa o auto-dismiss no hover; ao sair, reinicia com ~2s.
             onMouseEnter={() => pauseRemove(t.id)}
             onMouseLeave={() => scheduleRemove(t.id, 2000)}

@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { PanelLeft, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
+import { useJanelaAberta } from '@/lib/janelasAbertas'
 import { useAuth } from '@/contexts/AuthContext'
 import { NAVIGATION, NAV_CONFIG, itemAtivo, type NavLeaf } from './navigation'
 import { useContadoresDoMenu } from './useContadoresDoMenu'
@@ -104,6 +105,8 @@ export function Sidebar({
   const painelRef = useRef<HTMLDivElement>(null)
   const ehTopo = useFocoPreso(mobileOpen, painelRef)
   useTravaScroll(mobileOpen)
+  // O menu do celular não tem nada digitado: o Ctrl+K o fecha e abre a busca.
+  useJanelaAberta(mobileOpen, false, onClose)
 
   useEffect(() => {
     if (mobileOpen) {

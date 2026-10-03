@@ -19,10 +19,33 @@
 /** O texto da pergunta, o mesmo do diálogo do navegador que ela substitui. */
 export const PERGUNTA_DO_DESCARTE = 'Descartar alterações não salvas?'
 
-type Ouvinte = (aberto: boolean) => void
+/**
+ * ONDE está o que se perde: numa janela (o padrão) ou numa ficha lateral (o
+ * Drawer). Muda só uma palavra do texto, como na amostra — a regra é a mesma.
+ */
+export type LugarDoDescarte = 'janela' | 'ficha'
+
+/** O texto do corpo da pergunta, para cada lugar (os da amostra, base.js). */
+export function textoDoDescarte(lugar: LugarDoDescarte = 'janela'): string {
+  return `O que foi digitado ${lugar === 'ficha' ? 'nesta ficha' : 'nesta janela'} ainda não foi salvo. Fechando agora, se perde.`
+}
+
+type Ouvinte = (aberto: boolean, lugar: LugarDoDescarte) => void
 
 let ouvinte: Ouvinte | null = null
-let pendente: { promessa: Promise<boolean>; resolver: (sim: boolean) => void } | null = null
+let pendente: {
+  promessa: Promise<boolean>
+  resolver: (sim: boolean) => void
+  lugar: LugarDoDescarte
+} | null = null
+
+/**
+ * Há uma pergunta "Descartar alterações?" na tela agora? Serve ao Ctrl+K: com
+ * ela aberta, há algo digitado embaixo, e a busca avisa em vez de fechar.
+ */
+export function perguntaDeDescarteAberta(): boolean {
+  return pendente !== null
+}
 
 /**
  * Pergunta se a pessoa quer descartar o que digitou. Devolve `true` para
@@ -31,8 +54,11 @@ let pendente: { promessa: Promise<boolean>; resolver: (sim: boolean) => void } |
  * UM PEDIDO POR VEZ: dois cliques seguidos no X (ou o X e o Escape no mesmo
  * instante) recebem a MESMA pergunta, e não duas janelas empilhadas — a segunda
  * resposta seria dada a uma pergunta que a pessoa já não vê.
+ *
+ * `lugar` só muda o texto ("nesta janela" ou "nesta ficha"); sem ele, é o de
+ * sempre.
  */
-export function perguntarDescarte(): Promise<boolean> {
+export function perguntarDescarte(lugar: LugarDoDescarte = 'janela'): Promise<boolean> {
   if (pendente) return pendente.promessa
   if (!ouvinte) {
     // SEM A JANELA MONTADA (não acontece no app: ela fica na raiz, em main.tsx),
@@ -44,8 +70,8 @@ export function perguntarDescarte(): Promise<boolean> {
   const promessa = new Promise<boolean>((r) => {
     resolver = r
   })
-  pendente = { promessa, resolver }
-  ouvinte(true)
+  pendente = { promessa, resolver, lugar }
+  ouvinte(true, lugar)
   return promessa
 }
 
@@ -53,7 +79,7 @@ export function perguntarDescarte(): Promise<boolean> {
 export function responderDescarte(sim: boolean): void {
   const p = pendente
   pendente = null
-  ouvinte?.(false)
+  ouvinte?.(false, p?.lugar ?? 'janela')
   p?.resolver(sim)
 }
 
@@ -64,7 +90,7 @@ export function responderDescarte(sim: boolean): void {
  */
 export function registrarJanelaDeDescarte(fn: Ouvinte): () => void {
   ouvinte = fn
-  if (pendente) fn(true)
+  if (pendente) fn(true, pendente.lugar)
   return () => {
     if (ouvinte !== fn) return
     ouvinte = null

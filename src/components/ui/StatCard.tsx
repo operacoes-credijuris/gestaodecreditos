@@ -13,6 +13,8 @@ export function StatCard({
   to,
   onClick,
   active,
+  iconPosition = 'right',
+  sub,
 }: {
   label: ReactNode
   value: ReactNode
@@ -25,6 +27,18 @@ export function StatCard({
   onClick?: () => void
   /** Realce visual de "selecionado" — só faz sentido junto de `onClick`. */
   active?: boolean
+  /**
+   * Onde fica o ícone. `'right'` (o padrão) é a placa grande no canto, como
+   * sempre. `'left'` é o `.kpi-top` da amostra: uma placa pequena (28px) À
+   * ESQUERDA do rótulo, na mesma linha — o ícone fica junto do nome do número.
+   */
+  iconPosition?: 'right' | 'left'
+  /**
+   * A linha de apoio VISÍVEL embaixo do número (o `.kpi-s` da amostra), em
+   * cinza de metadado: "de 128 créditos", "nos últimos 30 dias". Diferente do
+   * `hint`, que fica escondido no ⓘ.
+   */
+  sub?: ReactNode
 }) {
   // A placa do ícone do `.kpi-ic` da amostra: fundo pálido e ícone no tom forte.
   const tones = {
@@ -35,6 +49,19 @@ export function StatCard({
     slate: 'bg-superficie-3 text-texto-2',
   }
   const clicavel = !!to || !!onClick
+  const iconeAEsquerda = !!icon && iconPosition === 'left'
+  const rotulo = (
+    <p className="flex min-w-0 items-center gap-1 truncate text-corpo font-medium text-texto-2">
+      {label}
+      {/* A régua do indicador fica no tooltip do ⓘ — tela limpa,
+          informação a um hover de distância. */}
+      {typeof hint === 'string' && hint && (
+        <span title={hint} aria-label={hint} className="shrink-0 cursor-help">
+          <Info className="h-3.5 w-3.5 text-texto-3 transition-colors hover:text-texto-2" />
+        </span>
+      )}
+    </p>
+  )
   const card = (
     <Card
       className={cn(
@@ -47,21 +74,27 @@ export function StatCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="flex items-center gap-1 truncate text-corpo font-medium text-texto-2">
-            {label}
-            {/* A régua do indicador fica no tooltip do ⓘ — tela limpa,
-                informação a um hover de distância. */}
-            {typeof hint === 'string' && hint && (
-              <span title={hint} aria-label={hint} className="shrink-0 cursor-help">
-                <Info className="h-3.5 w-3.5 text-texto-3 transition-colors hover:text-texto-2" />
+          {iconeAEsquerda ? (
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle [&_svg]:h-[16px] [&_svg]:w-[16px]',
+                  tones[tone],
+                )}
+              >
+                {icon}
               </span>
-            )}
-          </p>
+              {rotulo}
+            </div>
+          ) : (
+            rotulo
+          )}
           <p className="font-display mt-1 text-2xl font-bold tabular-nums tracking-tight text-texto">
             {value}
           </p>
+          {sub && <p className="mt-1 text-xs text-texto-3">{sub}</p>}
         </div>
-        {icon && (
+        {icon && !iconeAEsquerda && (
           <div className={cn('rounded-controle p-2.5', tones[tone])}>{icon}</div>
         )}
       </div>
