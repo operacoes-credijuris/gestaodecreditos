@@ -46,9 +46,15 @@ describe('atalhos de teclado', () => {
     expect(estaDigitando({ tagName: 'SELECT' })).toBe(true)
     expect(estaDigitando({ tagName: 'DIV', isContentEditable: true })).toBe(true)
     expect(estaDigitando({ tagName: 'BUTTON', closest: () => null })).toBe(false)
-    for (const a of ['busca', 'filtro', 'atalhos'] as const) {
+    // MUDADO DE PROPÓSITO (acabamento do redesenho): o Ctrl+K saiu desta lista.
+    // Na amostra ele funciona em qualquer campo (base.js); aqui era ignorado, e
+    // o Chrome o pegava para levar o foco à barra de endereço. O "/" e o "?"
+    // continuam não disparando: são letras do texto.
+    for (const a of ['filtro', 'atalhos'] as const) {
       expect(decidirAtalho(a, { tagName: 'TEXTAREA' }, false)).toBe('ignorar')
     }
+    expect(decidirAtalho('busca', { tagName: 'TEXTAREA' }, false)).toBe('agir')
+    expect(decidirAtalho('busca', { tagName: 'INPUT' }, false)).toBe('agir')
   })
   it('com janela aberta: a busca avisa, o filtro não age, os atalhos abrem por cima', () => {
     const botao = { tagName: 'BUTTON' }

@@ -1,9 +1,10 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Menu, LogOut, ChevronDown, ChevronRight, Search, Sparkles, Command, BookOpen } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
 import { useToast } from '@/components/ui/Toast'
+import { haDialogoAberto } from '@/lib/dialogo'
 import { caminhoNoTopo } from './navigation'
 import { useConsultas } from './Consultas'
 
@@ -11,9 +12,26 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { user, profile, isAdmin, signOut } = useAuth()
   const toast = useToast()
   const [menuOpen, setMenuOpen] = useState(false)
+  const botaoDoMenuRef = useRef<HTMLButtonElement>(null)
   const { pathname } = useLocation()
   const partes = caminhoNoTopo(pathname)
   const { abrirBusca, abrirNovidades, abrirAtalhos, abrirGlossario } = useConsultas()
+
+  // ESC FECHA O MENU DO USUÁRIO e devolve o foco ao botão que o abriu, como
+  // todo menu da amostra. Só a camada de cima responde: com uma janela aberta
+  // por cima (a busca do Ctrl+K), o Escape é dela. E PARA AQUI — sem isso, o
+  // mesmo Escape fechava também o assistente aberto ao lado.
+  useEffect(() => {
+    if (!menuOpen) return
+    function aoTeclar(e: KeyboardEvent) {
+      if (e.key !== 'Escape' || haDialogoAberto()) return
+      e.stopPropagation()
+      setMenuOpen(false)
+      botaoDoMenuRef.current?.focus()
+    }
+    document.addEventListener('keydown', aoTeclar)
+    return () => document.removeEventListener('keydown', aoTeclar)
+  }, [menuOpen])
 
   const nome = profile?.nome || user?.email || 'Usuário'
   const iniciais = nome
@@ -85,6 +103,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         {/* O `.user-btn` da amostra: pílula com as iniciais na placa azul-clara,
             nome e e-mail; o contorno só aparece sob o mouse. */}
         <button
+          ref={botaoDoMenuRef}
           onClick={() => setMenuOpen((v) => !v)}
           aria-expanded={menuOpen}
           className="flex items-center gap-2 rounded-full border border-transparent py-0.5 pl-0.5 pr-2 transition-colors hover:border-borda hover:bg-superficie-3"
@@ -112,14 +131,24 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
             {/* O `.pop` da amostra: cartão de 12px de raio com sombra de
                 elemento flutuante; os itens com 36px de altura. */}
             <div className="absolute right-0 z-20 mt-2 w-[240px] rounded-2xl border border-borda bg-superficie p-1.5 shadow-nivel-2">
-              <div className="px-2.5 py-2">
-                <p className="text-corpo font-bold text-texto">{nome}</p>
-                <p className="truncate text-xs text-texto-3">{user?.email}</p>
-                <div className="mt-1.5">
-                  <Badge tone={isAdmin ? 'purple' : 'gray'}>
-                    {isAdmin ? 'Administrador' : 'Usuário'}
-                  </Badge>
+              {/* O `.user-card` da amostra: o avatar ao lado do nome e do
+                  e-mail, e o papel logo abaixo. */}
+              <div className="flex items-center gap-2.5 px-2.5 py-2">
+                <div
+                  className="font-display flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-full bg-marca-suave text-xs font-bold text-marca-texto"
+                  aria-hidden
+                >
+                  {iniciais}
                 </div>
+                <div className="min-w-0">
+                  <p className="text-corpo font-bold text-texto">{nome}</p>
+                  <p className="truncate text-xs text-texto-3">{user?.email}</p>
+                </div>
+              </div>
+              <div className="px-2.5 pb-2">
+                <Badge tone={isAdmin ? 'purple' : 'gray'}>
+                  {isAdmin ? 'Administrador' : 'Usuário'}
+                </Badge>
               </div>
               <div className="mx-1 my-1.5 border-t border-borda" />
               {/* A AJUDA DA PLATAFORMA (itens "Novo" da amostra): as novidades

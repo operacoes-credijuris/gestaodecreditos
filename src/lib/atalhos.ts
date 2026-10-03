@@ -3,9 +3,11 @@
 //
 // A REGRA QUE MAIS IMPORTA É QUANDO NÃO DISPARAR. Quem está digitando — num
 // campo, numa caixa de texto (a do Assistente inclusive) ou num editável — não
-// pode ter a barra ou a interrogação roubadas do texto, nem ser arrancado dali
-// por uma janela que se abre. E com uma janela aberta, a busca e o filtro não
-// agem por baixo dela: a janela pode ter algo digitado que ainda não foi salvo.
+// pode ter a barra ou a interrogação roubadas do texto. O Ctrl+K é a exceção
+// (como na amostra): ele não escreve nada, e no campo o navegador o usaria para
+// levar o foco à barra de endereço. E com uma janela aberta, a busca e o filtro
+// não agem por baixo dela: a janela pode ter algo digitado que ainda não foi
+// salvo.
 
 export type Atalho = 'busca' | 'filtro' | 'atalhos'
 
@@ -47,20 +49,38 @@ export function estaDigitando(alvo: AlvoDaTecla | null | undefined): boolean {
 /**
  * O atalho deve agir agora?
  *
- * - Digitando: nenhum.
- * - Com janela aberta: a busca AVISA (quem chama mostra o aviso) e o filtro não
- *   faz nada — os dois agiriam por baixo da janela. Os atalhos ("?") abrem POR
- *   CIMA dela: é consulta, e consultar não custa o que foi digitado embaixo.
+ * - Digitando: o "/" e o "?" não (são letras do texto). O Ctrl+K, sim: não é
+ *   letra, e quem o aperta num campo quer buscar — antes, era o navegador que o
+ *   pegava e levava o foco à barra de endereço.
+ * - Com janela aberta, a busca:
+ *   - ALTERADA (algo digitado e não salvo): AVISA, e a janela fica (quem chama
+ *     mostra o aviso). O que foi digitado não se perde por um atalho.
+ *   - Sem alteração: SUBSTITUI — a janela fecha e a busca abre no lugar dela,
+ *     como na amostra. Não há nada a perder.
+ * - Com janela aberta, o filtro não faz nada (agiria por baixo dela), e os
+ *   atalhos ("?") abrem POR CIMA: é consulta, e consultar não custa o que foi
+ *   digitado embaixo.
+ *
+ * `janelaAlterada` vale `true` quando não se sabe: o seguro é avisar.
  */
 export function decidirAtalho(
   atalho: Atalho,
   alvo: AlvoDaTecla | null | undefined,
   janelaAberta: boolean,
-): 'agir' | 'avisar' | 'ignorar' {
+  janelaAlterada = true,
+): 'agir' | 'avisar' | 'substituir' | 'ignorar' {
+  if (atalho === 'busca') {
+    if (!janelaAberta) return 'agir'
+    return janelaAlterada ? 'avisar' : 'substituir'
+  }
   if (estaDigitando(alvo)) return 'ignorar'
   if (!janelaAberta || atalho === 'atalhos') return 'agir'
-  return atalho === 'busca' ? 'avisar' : 'ignorar'
+  return 'ignorar'
 }
+
+/** O aviso do Ctrl+K com uma janela alterada aberta (o texto da amostra). */
+export const AVISO_DA_BUSCA_COM_JANELA_ALTERADA =
+  'Salve ou feche a janela aberta antes de buscar — o que foi digitado nela ainda não foi salvo.'
 
 /** A lista que a janela "Atalhos de teclado" mostra (a da amostra). */
 export const LISTA_DE_ATALHOS: readonly { teclas: readonly string[]; descricao: string }[] = [

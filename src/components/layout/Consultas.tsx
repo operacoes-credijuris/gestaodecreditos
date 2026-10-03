@@ -15,7 +15,19 @@ import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import { cn } from '@/lib/cn'
 import { haDialogoAberto, useFocoPreso, useTravaScroll } from '@/lib/dialogo'
-import { decidirAtalho, LISTA_DE_ATALHOS, qualAtalho } from '@/lib/atalhos'
+import {
+  AVISO_DA_BUSCA_COM_JANELA_ALTERADA,
+  decidirAtalho,
+  LISTA_DE_ATALHOS,
+  qualAtalho,
+} from '@/lib/atalhos'
+import { perguntaDeDescarteAberta } from '@/lib/descarte'
+import {
+  estadoDasJanelas,
+  fecharJanelasAbertas,
+  janelasAbertas,
+  useJanelaAberta,
+} from '@/lib/janelasAbertas'
 import { filtrarGlossario, NOVIDADES } from '@/lib/ajudaDaPlataforma'
 import {
   armazenamentoDisponivel,
@@ -81,24 +93,41 @@ export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
   // (digitando, ou com janela aberta).
   const atalhosAbertos = useRef(false)
   atalhosAbertos.current = atalhos
+  const buscaAberta = useRef(false)
+  buscaAberta.current = busca
   useEffect(() => {
     function aoTeclar(e: KeyboardEvent) {
       if (e.defaultPrevented) return
       const atalho = qualAtalho(e)
       if (!atalho) return
-      const decisao = decidirAtalho(atalho, e.target as HTMLElement | null, haDialogoAberto())
-      if (decisao === 'ignorar') return
       if (atalho === 'busca') {
-        // O Ctrl+K do navegador (ir à barra de endereço) não dispara por baixo.
+        // SEMPRE, até num campo: o Ctrl+K do navegador leva o foco à barra de
+        // endereço, e quem o aperta aqui quer a busca da plataforma.
         e.preventDefault()
-        // COM JANELA ABERTA, AVISA EM VEZ DE FECHAR: ela pode ter algo digitado.
+        // A busca já aberta: o atalho não a abre de novo nem a fecha.
+        if (buscaAberta.current) return
+        const janelas = janelasAbertas()
+        const estado = estadoDasJanelas(janelas, haDialogoAberto(), perguntaDeDescarteAberta())
+        const decisao = decidirAtalho(
+          atalho,
+          e.target as HTMLElement | null,
+          estado !== 'nenhuma',
+          estado === 'alterada',
+        )
+        // JANELA ALTERADA: AVISA E A DEIXA ABERTA — o que foi digitado não se
+        // perde por um atalho.
         if (decisao === 'avisar') {
-          toast.info('Salve ou feche a janela aberta antes de buscar: a busca leva a outra tela.')
+          toast.info(AVISO_DA_BUSCA_COM_JANELA_ALTERADA)
           return
         }
+        // SEM ALTERAÇÃO, A BUSCA TOMA O LUGAR DA JANELA (como na amostra): não
+        // há nada a perder, e a busca leva a outra tela.
+        if (decisao === 'substituir') fecharJanelasAbertas()
         setBusca(true)
         return
       }
+      const decisao = decidirAtalho(atalho, e.target as HTMLElement | null, haDialogoAberto())
+      if (decisao === 'ignorar') return
       if (atalho === 'filtro') {
         // O FILTRO DA TELA é o campo marcado com `data-filtro-tela`. A Análise de
         // crédito tem o seu próprio "/" e não o marca — então aqui nada acontece
@@ -233,6 +262,8 @@ function JanelaDasNovidades({ onFechar }: { onFechar: () => void }) {
   const painelRef = useRef<HTMLDivElement>(null)
   const ehTopo = useFocoPreso(true, painelRef)
   useTravaScroll(true)
+  // Nada digitado aqui: o Ctrl+K fecha as novidades e abre a busca no lugar.
+  useJanelaAberta(true, false, onFechar)
   useEffect(() => {
     function aoTeclar(e: KeyboardEvent) {
       if (e.key === 'Escape' && ehTopo()) onFechar()

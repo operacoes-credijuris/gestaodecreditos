@@ -5,6 +5,7 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 import { perguntarDescarte } from '@/lib/descarte'
+import { useJanelaAberta } from '@/lib/janelasAbertas'
 
 /**
  * Modal acessível com focus trap.
@@ -59,6 +60,10 @@ export function Modal({
   // e com o menu lateral do celular.
   const ehTopo = useFocoPreso(open, panelRef, true)
   useTravaScroll(open)
+  // O CTRL+K PERGUNTA AQUI se a janela está alterada (o mesmo `dirty` do
+  // "Descartar alterações?"): alterada, ele avisa; sem alteração, fecha esta
+  // janela e abre a busca no lugar dela (lib/janelasAbertas.ts).
+  useJanelaAberta(open, dirty, onClose)
 
   // Centraliza a checagem de "dirty" para todas as formas de fechar
   // (X, overlay e Escape passam TODOS por aqui — uma única fonte da regra).

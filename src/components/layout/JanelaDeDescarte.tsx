@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
-import { registrarJanelaDeDescarte, responderDescarte } from '@/lib/descarte'
+import {
+  registrarJanelaDeDescarte,
+  responderDescarte,
+  textoDoDescarte,
+  type LugarDoDescarte,
+} from '@/lib/descarte'
 
 /**
  * A janela "Descartar alterações?" (a da amostra), POR CIMA da que ia fechar.
@@ -16,7 +21,18 @@ import { registrarJanelaDeDescarte, responderDescarte } from '@/lib/descarte'
  */
 export function JanelaDeDescarte() {
   const [aberta, setAberta] = useState(false)
-  useEffect(() => registrarJanelaDeDescarte(setAberta), [])
+  // "NESTA JANELA" OU "NESTA FICHA": quem pergunta diz onde está o que se perde
+  // (o Drawer pede a ficha). Guardado só ao ABRIR, para o texto não trocar
+  // durante a animação de saída.
+  const [lugar, setLugar] = useState<LugarDoDescarte>('janela')
+  useEffect(
+    () =>
+      registrarJanelaDeDescarte((sim, onde) => {
+        if (sim) setLugar(onde)
+        setAberta(sim)
+      }),
+    [],
+  )
 
   return (
     <Modal
@@ -37,9 +53,7 @@ export function JanelaDeDescarte() {
     >
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-aviso" aria-hidden />
-        <p className="text-corpo text-texto-2">
-          O que foi digitado nesta janela ainda não foi salvo. Fechando agora, se perde.
-        </p>
+        <p className="text-corpo text-texto-2">{textoDoDescarte(lugar)}</p>
       </div>
     </Modal>
   )

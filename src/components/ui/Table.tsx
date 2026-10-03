@@ -109,17 +109,28 @@ export function EmptyState({
   title = 'Nada por aqui ainda',
   description,
   action,
+  icon,
 }: {
   title?: string
   description?: ReactNode
   action?: ReactNode
+  /**
+   * O ícone da placa (ex.: `<Search />` para "nada encontrado"). Sem ele, a
+   * caixa de entrada de sempre. O tamanho é o da placa: não precisa de classe.
+   */
+  icon?: ReactNode
 }) {
   return (
     // O `.empty` da amostra: o ícone numa placa azul-clara de cantos largos,
     // título em negrito e a explicação em cinza secundário, com largura de leitura.
-    <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-      <div className="grid h-16 w-16 place-items-center rounded-cartao bg-marca-suave text-marca-texto">
-        <Inbox className="h-7 w-7" aria-hidden />
+    // A BORDA TRACEJADA é dela também: diz "aqui caberia algo" — a área existe,
+    // só está vazia —, e separa o vazio de um cartão que não carregou.
+    <div className="flex flex-col items-center justify-center gap-3 rounded-cartao border border-dashed border-borda-forte bg-superficie px-6 py-14 text-center">
+      <div
+        className="grid h-16 w-16 place-items-center rounded-cartao bg-marca-suave text-marca-texto [&_svg]:h-7 [&_svg]:w-7"
+        aria-hidden
+      >
+        {icon ?? <Inbox />}
       </div>
       <div className="max-w-md">
         <p className="font-display text-lg font-bold text-texto">{title}</p>
@@ -133,13 +144,25 @@ export function EmptyState({
 }
 
 export function Loading({ label = 'Carregando…' }: { label?: string }) {
-  // Skeleton shimmer: sugere o conteúdo que está chegando, sem spinner.
+  // O `blocoDeEstado('carregando')` da amostra: quatro linhas de esqueleto em
+  // três colunas (como uma tabela chegando) e, embaixo, o TEXTO VISÍVEL com o
+  // ícone girando. Só o esqueleto não dizia o que estava acontecendo — numa
+  // conexão lenta, parecia uma tabela quebrada.
   return (
-    <div aria-busy="true" aria-label={label} className="space-y-3 py-8">
-      <div className="skeleton h-9 w-full rounded-controle" />
-      <div className="skeleton h-9 w-11/12 rounded-controle" />
-      <div className="skeleton h-9 w-full rounded-controle" />
-      <span className="sr-only">{label}</span>
+    <div role="status" aria-live="polite" aria-busy="true" className="px-[18px] pb-[18px] pt-4">
+      <div className="mb-3 grid gap-[14px]" aria-hidden>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="grid grid-cols-[2fr_3fr_1fr] items-center gap-[16px]">
+            <div className="skeleton h-[14px] w-[40%] rounded-md" />
+            <div className="skeleton h-[14px] w-[70%] rounded-md" />
+            <div className="skeleton h-[14px] w-[60%] rounded-md" />
+          </div>
+        ))}
+      </div>
+      <p className="flex items-center gap-1.5 text-xs text-texto-3">
+        <RefreshCw className="h-[14px] w-[14px] animate-spin" aria-hidden />
+        {label}
+      </p>
     </div>
   )
 }

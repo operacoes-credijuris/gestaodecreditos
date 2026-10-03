@@ -5,13 +5,21 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
 import { INICIO } from '@/components/layout/navigation'
+import marca from '@/assets/marca-credijuris.png'
 
 function FullScreenLoader() {
   return (
     // Sobre o papel da casa, como o Entrar e a recusa abaixo: a troca entre as
     // três telas cheias não pisca de cor.
-    <div className="flex h-screen flex-col items-center justify-center gap-3 bg-papel text-texto-2" role="status">
-      <Loader2 className="h-8 w-8 animate-spin text-marca-viva" aria-hidden />
+    // A LOGOMARCA NA PLACA BRANCA, acima do ícone (a `.tela-carregando` da
+    // amostra): quem abre a plataforma vê de cara que chegou ao lugar certo, e
+    // não uma tela vazia girando. Placa BRANCA FIXA, como no menu: é a única
+    // forma fiel de mostrar o "U" azul sem recolorir a marca.
+    <div className="flex h-screen flex-col items-center justify-center gap-[14px] bg-papel text-texto-2" role="status">
+      <div className="flex h-[44px] w-[44px] items-center justify-center rounded-[12px] bg-white p-[7px] shadow-nivel-1">
+        <img src={marca} alt="" className="block h-full w-full object-contain" />
+      </div>
+      <Loader2 className="h-[20px] w-[20px] animate-spin text-marca-viva" aria-hidden />
       <span className="text-corpo font-semibold">Carregando…</span>
     </div>
   )
