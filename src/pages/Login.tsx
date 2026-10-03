@@ -50,7 +50,10 @@ export default function Login() {
       <FaixaBeta fixa />
       <div className="flex flex-col items-center gap-2.5 text-center">
         <h1 className="sr-only">Credijuris</h1>
-        <img src={logo} alt="Credijuris — créditos judiciais" className="block h-[40px] w-auto" />
+        {/* NO ESCURO, A LOGOMARCA CLAREIA UM QUARTO: o azul e o cinza de
+            "créditos judiciais" ficavam em 4:1 sobre o papel escuro; com o
+            filtro passam de 6:1, sem trocar a arte nem pôr placa branca. */}
+        <img src={logo} alt="Credijuris — créditos judiciais" className="block h-[40px] w-auto dark:brightness-125" />
         <p className="text-corpo text-texto-2">Sistema de Gestão de Créditos</p>
       </div>
 

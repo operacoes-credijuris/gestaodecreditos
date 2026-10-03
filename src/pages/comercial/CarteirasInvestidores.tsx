@@ -162,19 +162,19 @@ function RotuloDaBarra({ children }: { children: ReactNode }) {
 const AGUARDANDO = 'aguardando dados financeiros no cadastro de Créditos'
 
 // Cor de cada GRUPO de colunas — o título do grupo e as colunas dele, com o
-// sublinhado grosso na mesma cor (o `th.grp` da amostra). FIXAS DE PROPÓSITO,
-// fora dos tokens: são uma paleta categórica, em que a cor só distingue um grupo
-// do outro, e são as mesmas tintas do cabeçalho do Excel (exportarCarteira.ts).
-// Tons escolhidos para contrastar com o fundo claro do cabeçalho — amarelo e
-// azul-claro puros ficariam ilegíveis.
+// sublinhado grosso na mesma cor (o `th.grp` da amostra). São TONS CATEGÓRICOS
+// (`tom-*`): a cor só distingue um grupo do outro, e no claro são as mesmas
+// tintas do cabeçalho do Excel (exportarCarteira.ts), escolhidas para contrastar
+// com o fundo claro do cabeçalho — amarelo e azul-claro puros ficariam
+// ilegíveis. No escuro, as claras da amostra (`.grp-*`).
 const COR_GRUPO: Record<ChaveGrupo, string> = {
-  ide: 'text-sky-700',
-  tir: 'text-amber-700',
-  cre: 'text-emerald-700',
-  rec: 'text-red-700',
-  compl: 'text-orange-700',
-  viv: 'text-blue-800',
-  calc: 'text-violet-700',
+  ide: 'text-tom-ceu-texto',
+  tir: 'text-tom-ambar-texto',
+  cre: 'text-tom-esmeralda-texto',
+  rec: 'text-tom-vermelho-texto',
+  compl: 'text-tom-laranja-texto',
+  viv: 'text-tom-azul-forte',
+  calc: 'text-tom-violeta-texto',
 }
 
 /**

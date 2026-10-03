@@ -8,6 +8,23 @@
     <!-- Azul de cabeçalho da marca: tinge a UI do navegador no mobile -->
     <meta name="theme-color" content="#075278" />
     <title>Credijuris — Gestão de Créditos</title>
+    <!-- O TEMA ANTES DO PRIMEIRO DESENHO: quem escolheu o escuro não vê a tela
+         branca piscar enquanto o React carrega. A mesma regra de
+         src/lib/tema.ts (resolverTema), em JavaScript puro; sem escolha, ou sem
+         armazenamento, fica o claro. -->
+    <script>
+      (function () {
+        try {
+          var p = JSON.parse(localStorage.getItem('credijuris.tema') || 'null')
+          var escuro =
+            p === 'escuro' ||
+            (p === 'sistema' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (escuro) document.documentElement.setAttribute('data-tema', 'escuro')
+        } catch (e) {
+          /* sem armazenamento: fica o claro */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

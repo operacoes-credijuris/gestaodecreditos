@@ -11,12 +11,13 @@ import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   CartesianGrid, LabelList,
 } from 'recharts'
-import { CHART } from '@/lib/chartColors'
+import { useCoresDoGrafico, type CoresDoGrafico } from '@/lib/chartColors'
 import { brlAbreviado, type FaixaDoHistograma, type PontoDaEvolucao } from '@/lib/graficosDoQuadro'
 import { formatBRL } from '@/lib/format'
 import { DicaDoGrafico, LegendaDoGrafico } from './compartilhado'
 
-const EIXO = { fontSize: 11, fill: CHART.label }
+/** O texto dos eixos, na cor de rótulo do tema que se vê. */
+const eixo = (cores: CoresDoGrafico) => ({ fontSize: 11, fill: cores.label })
 
 /** "2026-10" → "out" (o eixo da evolução) */
 function mesCurto(ym: string): string {
@@ -36,6 +37,8 @@ function mesLongo(ym: string): string {
  * sob o mouse.
  */
 export function GraficoEvolucao({ pontos }: { pontos: PontoDaEvolucao[] }) {
+  const CHART = useCoresDoGrafico()
+  const EIXO = eixo(CHART)
   const dados = pontos.map((p) => ({ ...p, rotulo: mesCurto(p.mes), titulo: mesLongo(p.mes) }))
   const ultimo = dados.length - 1
   const series = [
@@ -126,6 +129,8 @@ export function GraficoEvolucao({ pontos }: { pontos: PontoDaEvolucao[] }) {
 
 /** "Como a rentabilidade se distribui": quantas encerradas caem em cada faixa. */
 export function Histograma({ faixas }: { faixas: FaixaDoHistograma[] }) {
+  const CHART = useCoresDoGrafico()
+  const EIXO = eixo(CHART)
   const total = faixas.reduce((s, f) => s + f.operacoes, 0)
   return (
     <div
@@ -177,6 +182,8 @@ export function GraficoPrevisoes({
   dados: Array<{ mes: string; valor: number; n: number }>
   rotuloDaBarra: (v: number) => string
 }) {
+  const CHART = useCoresDoGrafico()
+  const EIXO = eixo(CHART)
   return (
     <div
       className="h-[260px] px-6 pb-6"
@@ -229,6 +236,7 @@ export function GraficoPrevisoes({
  * abaixo, então aqui basta o capital.
  */
 export function Ranking({ itens }: { itens: Array<{ rotulo: string; valor: number }> }) {
+  const CHART = useCoresDoGrafico()
   const max = Math.max(...itens.map((i) => i.valor), 1)
   return (
     <ol className="grid gap-2.5 px-6 pb-6 pt-1" aria-label="Capital por grupo, do maior para o menor">

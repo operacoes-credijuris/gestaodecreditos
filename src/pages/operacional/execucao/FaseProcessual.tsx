@@ -45,14 +45,14 @@ interface SituacaoCatalogo {
  * calculada. `chave` é o que fica salvo em processos_fase_situacoes_catalogo.cor.
  */
 const PALETA_SITUACAO = [
-  { chave: 'slate', bola: 'bg-slate-400', selecionado: 'bg-slate-100 text-slate-700' },
-  { chave: 'blue', bola: 'bg-blue-500', selecionado: 'bg-blue-50 text-blue-700' },
-  { chave: 'green', bola: 'bg-emerald-500', selecionado: 'bg-emerald-50 text-emerald-700' },
-  { chave: 'purple', bola: 'bg-violet-500', selecionado: 'bg-violet-50 text-violet-700' },
-  { chave: 'orange', bola: 'bg-orange-500', selecionado: 'bg-orange-50 text-orange-700' },
-  { chave: 'red', bola: 'bg-red-500', selecionado: 'bg-red-50 text-red-700' },
-  { chave: 'amber', bola: 'bg-amber-500', selecionado: 'bg-amber-50 text-amber-700' },
-  { chave: 'pink', bola: 'bg-pink-500', selecionado: 'bg-pink-50 text-pink-700' },
+  { chave: 'slate', bola: 'bg-tom-ardosia-ponto', selecionado: 'bg-tom-ardosia-fundo text-tom-ardosia-texto' },
+  { chave: 'blue', bola: 'bg-tom-azul-ponto', selecionado: 'bg-tom-azul-fundo text-tom-azul-texto' },
+  { chave: 'green', bola: 'bg-tom-esmeralda-ponto', selecionado: 'bg-tom-esmeralda-fundo text-tom-esmeralda-texto' },
+  { chave: 'purple', bola: 'bg-tom-violeta-ponto', selecionado: 'bg-tom-violeta-fundo text-tom-violeta-texto' },
+  { chave: 'orange', bola: 'bg-tom-laranja-ponto', selecionado: 'bg-tom-laranja-fundo text-tom-laranja-texto' },
+  { chave: 'red', bola: 'bg-tom-vermelho-ponto', selecionado: 'bg-tom-vermelho-fundo text-tom-vermelho-texto' },
+  { chave: 'amber', bola: 'bg-tom-ambar-ponto', selecionado: 'bg-tom-ambar-fundo text-tom-ambar-texto' },
+  { chave: 'pink', bola: 'bg-tom-rosa-ponto', selecionado: 'bg-tom-rosa-fundo text-tom-rosa-texto' },
 ]
 
 function classeSelecionadaParaCor(cor: string | null): string {

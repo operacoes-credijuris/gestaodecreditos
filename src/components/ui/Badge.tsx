@@ -30,23 +30,23 @@ type Size = 'md' | 'sm'
 
 // OS TONS QUE DIZEM ESTADO são tokens (os `.pill-*` da amostra: neutro, ok, aviso,
 // ruim). Os de etiqueta livre — azul, violeta, laranja, verde-água, rosa, anil —
-// CONTINUAM FIXOS DE PROPÓSITO: só distinguem um nome de outro, e a amostra os
-// mantém com estes mesmos valores (`.pill-tom-*`, estilo5.css). No modo escuro
-// eles ganham a versão própria, que a amostra também já traz.
+// são os TONS CATEGÓRICOS (`tom-*`): só distinguem um nome de outro. No claro
+// valem exatamente as cores de antes (`.pill-tom-*`, estilo5.css); no escuro, a
+// versão própria que a amostra traz. Ver index.css.
 const tones: Record<Tone, string> = {
   gray: 'bg-superficie-3 text-texto-2 ring-borda',
   green: 'bg-sucesso-fundo text-sucesso ring-sucesso-borda',
   red: 'bg-perigo-fundo text-perigo ring-perigo-borda',
   yellow: 'bg-aviso-fundo text-aviso ring-aviso-borda',
-  blue: 'bg-blue-50 text-blue-700 ring-blue-200',
-  purple: 'bg-violet-50 text-violet-700 ring-violet-200',
-  orange: 'bg-orange-50 text-orange-700 ring-orange-200',
-  teal: 'bg-teal-50 text-teal-700 ring-teal-200',
-  pink: 'bg-pink-50 text-pink-700 ring-pink-200',
-  indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  blue: 'bg-tom-azul-fundo text-tom-azul-texto ring-tom-azul-borda',
+  purple: 'bg-tom-violeta-fundo text-tom-violeta-texto ring-tom-violeta-borda',
+  orange: 'bg-tom-laranja-fundo text-tom-laranja-texto ring-tom-laranja-borda',
+  teal: 'bg-tom-agua-fundo text-tom-agua-texto ring-tom-agua-borda',
+  pink: 'bg-tom-rosa-fundo text-tom-rosa-texto ring-tom-rosa-borda',
+  indigo: 'bg-tom-anil-fundo text-tom-anil-texto ring-tom-anil-borda',
   amber: 'bg-aviso-fundo text-aviso ring-aviso-borda',
-  tealSolid: 'bg-teal-600 text-white ring-teal-600',
-  indigoSolid: 'bg-indigo-600 text-white ring-indigo-600',
+  tealSolid: 'bg-tom-agua-cheio text-white ring-tom-agua-cheio',
+  indigoSolid: 'bg-tom-anil-cheio text-white ring-tom-anil-cheio',
 }
 
 // `md` com 22px de altura, a da pílula da amostra (16 de linha + 3 + 3).
