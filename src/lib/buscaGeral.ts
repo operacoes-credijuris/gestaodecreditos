@@ -124,6 +124,8 @@ export interface ResultadoDaBusca {
   onde: string
   /** Para tela: o endereço. Para os outros: o id do registro. */
   alvo: string
+  /** Veio dos abertos há pouco (sem nada digitado), e não de uma consulta. */
+  recente?: boolean
 }
 
 /** Uma tela que a busca pode achar. */
@@ -221,8 +223,30 @@ export function montarResultados(entrada: {
   cards?: readonly CardAchado[]
   contatos?: readonly ContatoAchado[]
   onde?: OndeEstaOCard
+  /** Os abertos há pouco: sem nada digitado, vêm antes das telas sugeridas. */
+  recentes?: readonly ResultadoDaBusca[]
 }): ResultadoDaBusca[] {
   const q = normalizarBusca(entrada.digitado)
+  if (!q && entrada.recentes?.length) {
+    // SEM NADA DIGITADO: o que se abriu há pouco, e depois as telas — sem
+    // repetir a tela que já está entre os recentes.
+    const recentes = entrada.recentes.map((r) => ({ ...r, recente: true }))
+    const ja = new Set(recentes.map((r) => r.chave))
+    const telas = entrada.telas
+      .map(
+        (t): ResultadoDaBusca => ({
+          chave: `tela:${t.to}`,
+          tipo: 'tela',
+          titulo: t.titulo,
+          sub: t.sub,
+          onde: 'Tela',
+          alvo: t.to,
+        }),
+      )
+      .filter((t) => !ja.has(t.chave))
+      .slice(0, TELAS_SEM_BUSCA)
+    return [...recentes, ...telas].slice(0, LIMITE_TOTAL)
+  }
   const telasQueCasam = q
     ? ordenar(
         entrada.telas.filter((t) => normalizarBusca(`${t.titulo} ${t.sub}`).includes(q)),
@@ -309,4 +333,71 @@ export function lerPedidoDaBusca(state: unknown): PedidoDaBusca {
   if (typeof s.abrirCredito === 'string' && s.abrirCredito) pedido.abrirCredito = s.abrirCredito
   if (typeof s.filtrarContatos === 'string' && s.filtrarContatos) pedido.filtrarContatos = s.filtrarContatos
   return pedido
+}
+
+// ---------------------------------------------------------------- recentes
+
+/** Quantos abertos há pouco a busca lembra. */
+export const MAX_RECENTES = 5
+
+/** O selo do recente: o tipo, e não o lugar — a coluna do card pode ter mudado desde então. */
+const ONDE_DO_RECENTE: Record<TipoDoResultado, string> = {
+  tela: 'Tela',
+  card: 'Card',
+  credito: 'Crédito',
+  contato: 'Contato',
+}
+
+/**
+ * A chave dos recentes em lib/preferencias.ts. UMA POR PESSOA: no computador que
+ * mais de um usa, o que um abriu não aparece na busca do outro.
+ */
+export function chaveDosRecentes(userId: string | null | undefined): string | null {
+  return userId ? `busca.recentes.${userId}` : null
+}
+
+/**
+ * Põe o escolhido no topo dos recentes: sem repetir (o mesmo registro sobe) e
+ * com no máximo `MAX_RECENTES`. O selo vira o tipo (ver `ONDE_DO_RECENTE`).
+ */
+export function lembrarRecente(
+  recentes: readonly ResultadoDaBusca[],
+  escolhido: ResultadoDaBusca,
+  max: number = MAX_RECENTES,
+): ResultadoDaBusca[] {
+  const { chave, tipo, titulo, sub, alvo } = escolhido
+  const novo: ResultadoDaBusca = { chave, tipo, titulo, sub, alvo, onde: ONDE_DO_RECENTE[tipo] }
+  return [novo, ...recentes.filter((r) => r.chave !== chave)].slice(0, max)
+}
+
+const TIPOS: readonly TipoDoResultado[] = ['tela', 'card', 'credito', 'contato']
+
+/** O que estava guardado é uma lista de recentes de verdade? (Valor velho ou lixo vale lista vazia.) */
+export function ehListaDeRecentes(v: unknown): v is ResultadoDaBusca[] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (r) =>
+        r &&
+        typeof r === 'object' &&
+        typeof r.chave === 'string' &&
+        TIPOS.includes(r.tipo) &&
+        typeof r.titulo === 'string' &&
+        typeof r.sub === 'string' &&
+        typeof r.onde === 'string' &&
+        typeof r.alvo === 'string',
+    )
+  )
+}
+
+/**
+ * O endereço do resultado, para abrir NUMA ABA NOVA (Ctrl+Enter, Ctrl+clique).
+ * Só a tela e o card têm endereço próprio; o crédito e o contato chegam à tela
+ * pelo `state` da navegação (`PedidoDaBusca`), que não atravessa para outra aba
+ * — para eles, `null`, e a busca abre na mesma aba.
+ */
+export function enderecoDoResultado(r: Pick<ResultadoDaBusca, 'tipo' | 'alvo'>): string | null {
+  if (r.tipo === 'tela') return r.alvo
+  if (r.tipo === 'card') return `/operacional/analise?card=${encodeURIComponent(r.alvo)}`
+  return null
 }

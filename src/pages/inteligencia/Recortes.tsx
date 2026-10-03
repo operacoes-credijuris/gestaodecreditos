@@ -18,7 +18,7 @@
 // mudam de assunto, seletores mudam o recorte). Acima da tabela, o RANKING do
 // capital por grupo (Novo), já ordenado.
 
-import { useState } from 'react'
+import { usePreferencia, umaDas } from '@/lib/preferencias'
 import { Segmented } from '@/components/ui/Segmented'
 import { Table, THead, TH, TBody, TR, TD, EmptyState } from '@/components/ui/Table'
 import { cn } from '@/lib/cn'
@@ -30,6 +30,9 @@ import { Ranking } from './graficos'
 import type { ResumoGrupo } from '@/lib/analytics'
 
 type Aba = 'tribunal' | 'ente' | 'investidor'
+// O RECORTE ESCOLHIDO FICA LEMBRADO (lib/preferencias.ts): quem olha sempre por
+// investidor não troca de novo a cada visita.
+const ABAS_DO_RECORTE: readonly Aba[] = ['tribunal', 'ente', 'investidor']
 
 /**
  * Nome próprio legível.
@@ -92,7 +95,7 @@ export function nomeProprio(s: string): string {
 
 export default function Recortes() {
   const { painel, carregando, erro, tentarDeNovo } = usePainel()
-  const [aba, setAba] = useState<Aba>('tribunal')
+  const [aba, setAba] = usePreferencia<Aba>('quadro.recortes', 'tribunal', umaDas(ABAS_DO_RECORTE))
 
   if (carregando) return <CarregandoPainel />
   if (erro || !painel) return <ErroPainel tentarDeNovo={tentarDeNovo} />

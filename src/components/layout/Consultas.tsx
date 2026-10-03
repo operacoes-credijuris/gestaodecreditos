@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Info, PieChart, ScanSearch, Search, Sparkles } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -19,7 +20,9 @@ import { haDialogoAberto, useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 import {
   AVISO_DA_BUSCA_COM_JANELA_ALTERADA,
   decidirAtalho,
+  destinoDaSequencia,
   LISTA_DE_ATALHOS,
+  NAVEGACAO_POR_LETRA,
   qualAtalho,
 } from '@/lib/atalhos'
 import { perguntaDeDescarteAberta } from '@/lib/descarte'
@@ -93,6 +96,7 @@ export function Tecla({ children }: { children: ReactNode }) {
 
 export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
   const toast = useToast()
+  const navigate = useNavigate()
   const [busca, setBusca] = useState(false)
   const [glossario, setGlossario] = useState(false)
   const [atalhos, setAtalhos] = useState(false)
@@ -114,11 +118,31 @@ export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
   atalhosAbertos.current = atalhos
   const buscaAberta = useRef(false)
   buscaAberta.current = busca
+  // O "G" ESPERANDO A LETRA DA TELA (lib/atalhos.ts): quando foi apertado, ou null.
+  const prefixoEm = useRef<number | null>(null)
   useEffect(() => {
     function aoTeclar(e: KeyboardEvent) {
       if (e.defaultPrevented) return
+      // A SEGUNDA TECLA DO "G e a letra". Qualquer tecla encerra a espera — a
+      // que não é letra de tela também (e segue o caminho normal abaixo).
+      if (prefixoEm.current !== null) {
+        const destino = destinoDaSequencia(e, prefixoEm.current, Date.now())
+        prefixoEm.current = null
+        if (destino && decidirAtalho('navegar', e.target as HTMLElement | null, haDialogoAberto()) === 'agir') {
+          e.preventDefault()
+          navigate(destino)
+          return
+        }
+      }
       const atalho = qualAtalho(e)
       if (!atalho) return
+      if (atalho === 'navegar') {
+        // Só começa a sequência longe dos campos e sem janela aberta.
+        if (decidirAtalho(atalho, e.target as HTMLElement | null, haDialogoAberto()) === 'agir') {
+          prefixoEm.current = Date.now()
+        }
+        return
+      }
       if (atalho === 'busca') {
         // SEMPRE, até num campo: o Ctrl+K do navegador leva o foco à barra de
         // endereço, e quem o aperta aqui quer a busca da plataforma.
@@ -164,7 +188,7 @@ export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
     }
     document.addEventListener('keydown', aoTeclar)
     return () => document.removeEventListener('keydown', aoTeclar)
-  }, [toast])
+  }, [toast, navigate])
 
   // A BUSCA BAIXADA DE ANTEMÃO: três segundos depois de a tela abrir, sem
   // disputar a rede com ela. Falhando (rede), a busca tenta de novo ao abrir.
@@ -266,6 +290,20 @@ function JanelaDosAtalhos({ aberta, onFechar }: { aberta: boolean; onFechar: () 
               ))}
             </dt>
             <dd className="text-corpo text-texto-2">{a.descricao}</dd>
+          </div>
+        ))}
+      </dl>
+      {/* "G E DEPOIS A LETRA" (lib/atalhos.ts): as telas em duas colunas, para a
+          lista não dobrar de altura. */}
+      <h3 className="mb-3 mt-6 text-sm font-bold text-texto">Ir para uma tela: G e depois a letra</h3>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
+        {NAVEGACAO_POR_LETRA.map((n) => (
+          <div key={n.letra} className="flex items-center gap-2.5">
+            <dt className="flex gap-1 whitespace-nowrap">
+              <Tecla>G</Tecla>
+              <Tecla>{n.letra.toUpperCase()}</Tecla>
+            </dt>
+            <dd className="text-corpo text-texto-2">{n.rotulo}</dd>
           </div>
         ))}
       </dl>

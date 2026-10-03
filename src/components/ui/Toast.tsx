@@ -7,7 +7,11 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+import { CheckCircle2, AlertCircle, Info, X, Copy, Check } from 'lucide-react'
+import { duracaoDepoisDoMouse, duracaoDoAviso, detalhesDoErro, juntarAviso } from '@/lib/avisos'
+import { copiarTexto } from '@/lib/copiar'
+import { entradaCarregada } from '@/lib/versaoNova'
 
 type ToastType = 'success' | 'error' | 'info'
 interface ToastAction {
@@ -18,6 +22,8 @@ interface ToastItem {
   id: number
   type: ToastType
   message: string
+  /** Quando apareceu (ms): vai nos detalhes do erro copiados. */
+  em: number
   action?: ToastAction
 }
 interface ToastOptions {
@@ -46,11 +52,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([])
   // Timeout de auto-dismiss de cada toast, indexado pelo id.
   const timersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>())
+  // A PILHA DE AGORA, para o `toast` decidir sem esperar a renderização: dois
+  // avisos iguais disparados no mesmo clique virariam duas caixas.
+  const itemsRef = useRef<ToastItem[]>([])
 
   const remove = useCallback((id: number) => {
     const timer = timersRef.current.get(id)
     if (timer) clearTimeout(timer)
     timersRef.current.delete(id)
+    itemsRef.current = itemsRef.current.filter((t) => t.id !== id)
     setItems((prev) => prev.filter((t) => t.id !== id))
   }, [])
 
@@ -76,10 +86,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback(
     (message: string, type: ToastType = 'info', opts?: ToastOptions) => {
-      const id = ++counter
-      setItems((prev) => [...prev, { id, type, message, action: opts?.action }])
-      // Com ação, o usuário precisa de tempo para clicar em "Desfazer".
-      scheduleRemove(id, opts?.action ? 7000 : 4500)
+      const novo: ToastItem = { id: ++counter, type, message, action: opts?.action, em: Date.now() }
+      // AS REGRAS DA PILHA moram em lib/avisos.ts: o mesmo aviso não se empilha
+      // (renova o tempo do que já está na tela), e passando de quatro sai o
+      // mais antigo.
+      const { pilha, repetido } = juntarAviso(itemsRef.current, novo)
+      const alvo = repetido ?? novo
+      const ficam = new Set(pilha.map((t) => t.id))
+      for (const [id, timer] of timersRef.current) {
+        if (ficam.has(id)) continue
+        clearTimeout(timer)
+        timersRef.current.delete(id)
+      }
+      itemsRef.current = pilha
+      setItems(pilha)
+      // O ERRO FICA ATÉ SER FECHADO (`null`); os outros somem sozinhos — com
+      // ação ("Desfazer"), depois de mais tempo.
+      const ms = duracaoDoAviso(alvo.type, !!alvo.action)
+      if (ms !== null) scheduleRemove(alvo.id, ms)
     },
     [scheduleRemove],
   )
@@ -128,9 +152,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             // o que estiver lendo — falha de gravação não pode esperar a vez. Os
             // outros seguem `status`, educados.
             role={t.type === 'error' ? 'alert' : 'status'}
-            // Pausa o auto-dismiss no hover; ao sair, reinicia com ~2s.
+            // Pausa o auto-dismiss no hover; ao sair, reinicia com ~2s (o erro
+            // não tem tempo: fica até ser fechado).
             onMouseEnter={() => pauseRemove(t.id)}
-            onMouseLeave={() => scheduleRemove(t.id, 2000)}
+            onMouseLeave={() => {
+              const ms = duracaoDepoisDoMouse(t.type)
+              if (ms !== null) scheduleRemove(t.id, ms)
+            }}
             className="animate-toast-in flex items-start gap-3 rounded-2xl bg-texto px-4 py-3 text-superficie shadow-nivel-2"
           >
             {icons[t.type]}
@@ -146,9 +174,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 {t.action.label}
               </button>
             )}
+            {t.type === 'error' && <CopiarDetalhes mensagem={t.message} em={t.em} />}
             <button
               onClick={() => remove(t.id)}
-              className="-my-0.5 -mr-1 shrink-0 rounded-controle p-1 text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie"
+              className="-my-0.5 -mr-1 grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie"
               aria-label="Fechar aviso"
             >
               <X className="h-4 w-4" />
@@ -157,6 +186,40 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         ))}
       </div>
     </ToastContext.Provider>
+  )
+}
+
+/**
+ * O "Copiar detalhes" do aviso de erro: a mensagem com a tela, a hora e a versão
+ * (lib/avisos.ts), pronta para colar na conversa com quem vai consertar. O ✓
+ * no lugar do ícone diz que copiou.
+ */
+function CopiarDetalhes({ mensagem, em }: { mensagem: string; em: number }) {
+  const { pathname, search } = useLocation()
+  const [copiado, setCopiado] = useState(false)
+  const nome = copiado ? 'Detalhes copiados' : 'Copiar detalhes do erro'
+  const Icone = copiado ? Check : Copy
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        const ok = await copiarTexto(
+          detalhesDoErro({
+            mensagem,
+            quando: new Date(em),
+            tela: `${pathname}${search}`,
+            versao: entradaCarregada(),
+            navegador: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+          }),
+        )
+        if (ok) setCopiado(true)
+      }}
+      aria-label={nome}
+      title={nome}
+      className="-my-0.5 grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie"
+    >
+      <Icone className="h-4 w-4" aria-hidden />
+    </button>
   )
 }
 

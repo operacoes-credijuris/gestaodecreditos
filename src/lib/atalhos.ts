@@ -1,5 +1,7 @@
 // Os atalhos de teclado da plataforma (itens "Novo" da amostra): Ctrl+K abre a
-// busca geral, "/" vai ao filtro da tela e "?" mostra a lista de atalhos.
+// busca geral, "/" vai ao filtro da tela e "?" mostra a lista de atalhos. E,
+// da revisão de qualidade de vida (03/10/2026), "G" e depois a letra vai a uma
+// tela (`NAVEGACAO_POR_LETRA`).
 //
 // A REGRA QUE MAIS IMPORTA É QUANDO NÃO DISPARAR. Quem está digitando — num
 // campo, numa caixa de texto (a do Assistente inclusive) ou num editável — não
@@ -9,7 +11,7 @@
 // não agem por baixo dela: a janela pode ter algo digitado que ainda não foi
 // salvo.
 
-export type Atalho = 'busca' | 'filtro' | 'atalhos'
+export type Atalho = 'busca' | 'filtro' | 'atalhos' | 'navegar'
 
 /** O que do evento de teclado importa aqui (o teste monta um objeto simples). */
 export interface TeclaPressionada {
@@ -27,7 +29,60 @@ export function qualAtalho(e: TeclaPressionada): Atalho | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null
   if (e.key === '/') return 'filtro'
   if (e.key === '?') return 'atalhos'
+  // O "G" QUE COMEÇA A SEQUÊNCIA "ir para" (G e depois a letra da tela). Só o
+  // minúsculo: com Shift ou Caps Lock é outra coisa, e não navega por engano.
+  if (e.key === PREFIXO_DE_NAVEGACAO) return 'navegar'
   return null
+}
+
+// ─── "G" e depois a letra: ir para uma tela ─────────────────────────────────
+//
+// O PADRÃO DOS APLICATIVOS WEB (GitHub, Gmail): "g" e, logo depois, a letra da
+// tela. Duas teclas sem modificador, longe de qualquer campo — as regras de
+// quando não agir são as mesmas do "/" e do "?" (`decidirAtalho`): digitando,
+// ou com uma janela aberta, não navega (sair da tela fecharia a janela com o que
+// foi digitado nela).
+
+/** A tecla que abre a sequência. */
+export const PREFIXO_DE_NAVEGACAO = 'g'
+
+/** Quanto tempo o "g" espera pela letra da tela (ms). Passou, vale nada. */
+export const ESPERA_DO_PREFIXO_MS = 1500
+
+/**
+ * As letras e as telas, na ordem do menu. A letra é a do nome sempre que dá;
+ * quando duas telas disputam a mesma, fica com a mais usada (Créditos é o "c",
+ * Contatos é o "o" de cOntatos, Geração de contratos é o "g" de novo).
+ * Configurações fica de fora: é só de administrador, e raro.
+ *
+ * FORA DAS LETRAS: "j" e "k" (andam entre os cards da Análise de crédito), "/"
+ * e "?". O teste confere.
+ */
+export const NAVEGACAO_POR_LETRA: readonly { letra: string; to: string; rotulo: string }[] = [
+  { letra: 'a', to: '/operacional/analise', rotulo: 'Análise de crédito' },
+  { letra: 'd', to: '/comercial/dados-pessoais', rotulo: 'Dados cadastrais' },
+  { letra: 'g', to: '/comercial/contratos', rotulo: 'Geração de contratos' },
+  { letra: 'p', to: '/operacional/execucao/publicacoes', rotulo: 'Publicações e movimentações' },
+  { letra: 't', to: '/operacional/execucao/tarefas', rotulo: 'Tarefas' },
+  { letra: 'c', to: '/operacional/execucao/processos', rotulo: 'Créditos' },
+  { letra: 'r', to: '/operacional/execucao/requerimentos', rotulo: 'Requerimentos administrativos' },
+  { letra: 'o', to: '/operacional/execucao/contatos', rotulo: 'Contatos' },
+  { letra: 'q', to: '/inteligencia', rotulo: 'Quadro econômico' },
+]
+
+/**
+ * A tela da segunda tecla, se ela veio a tempo; senão null. Com modificador
+ * (Ctrl+C logo depois de um "g" solto), não é a sequência.
+ */
+export function destinoDaSequencia(
+  e: TeclaPressionada,
+  prefixoEm: number | null,
+  agora: number,
+  espera: number = ESPERA_DO_PREFIXO_MS,
+): string | null {
+  if (prefixoEm === null || agora - prefixoEm > espera || agora < prefixoEm) return null
+  if (e.ctrlKey || e.metaKey || e.altKey) return null
+  return NAVEGACAO_POR_LETRA.find((n) => n.letra === e.key)?.to ?? null
 }
 
 /** O que do alvo do evento importa aqui. */
@@ -85,9 +140,14 @@ export const AVISO_DA_BUSCA_COM_JANELA_ALTERADA =
 /** A lista que a janela "Atalhos de teclado" mostra (a da amostra). */
 export const LISTA_DE_ATALHOS: readonly { teclas: readonly string[]; descricao: string }[] = [
   { teclas: ['Ctrl', 'K'], descricao: 'Buscar crédito, card, contato ou tela' },
+  { teclas: ['Ctrl', 'Enter'], descricao: 'Na busca: abrir a tela ou o card numa aba nova' },
   { teclas: ['/'], descricao: 'Ir para o filtro da tela' },
+  { teclas: ['G', 'letra'], descricao: 'Ir para uma tela (as letras estão abaixo)' },
   { teclas: ['?'], descricao: 'Ver estes atalhos' },
   { teclas: ['Esc'], descricao: 'Fechar janela, menu ou painel' },
+  { teclas: ['Esc'], descricao: 'No campo de busca: limpar a busca' },
+  { teclas: ['J', 'K'], descricao: 'Andar entre os cards (Análise de crédito)' },
   { teclas: ['Ctrl', 'Enter'], descricao: 'Enviar a anotação' },
+  { teclas: ['Enter'], descricao: 'Enviar a pergunta ao assistente (Shift + Enter quebra a linha)' },
   { teclas: ['←', '→'], descricao: 'Andar entre abas' },
 ]

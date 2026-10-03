@@ -370,6 +370,44 @@ export function tempoDecorrido(value: string | null | undefined, agora: Date = n
 }
 
 /**
+ * "agora há pouco", "há 5 min", "há 2 h" e, de ontem para trás, o mesmo de
+ * `tempoDecorrido` ("ontem", "há 3 dias"…).
+ *
+ * PARA O QUE ACABOU DE ACONTECER: "atualizado há 3 min", "salvo há 2 h". Ali o
+ * `tempoDecorrido` diria só "hoje", e a pergunta é se a informação ainda vale.
+ * O corte entre horas e dias continua sendo o DIA CIVIL (a regra de
+ * `tempoDecorrido`): o que foi ontem às 23h é "ontem", mesmo à 1h da manhã.
+ *
+ * Aceita o ISO do banco, o número de milissegundos (o `dataUpdatedAt` do React
+ * Query) ou uma data. FUTURO: até dois minutos à frente é diferença de relógio
+ * e vale "agora há pouco"; mais que isso volta vazio, como em `tempoDecorrido`.
+ */
+export function formatarRelativo(
+  value: string | number | Date | null | undefined,
+  agora: Date = new Date(),
+): string {
+  if (value === null || value === undefined || value === '') return ''
+  const d =
+    value instanceof Date
+      ? value
+      : typeof value === 'number'
+        ? new Date(value)
+        : new Date(value.length <= 10 ? `${value}T00:00:00` : value)
+  if (Number.isNaN(d.getTime())) return ''
+  const ms = agora.getTime() - d.getTime()
+  if (ms < -120_000) return ''
+  const minutos = Math.floor(Math.max(0, ms) / 60_000)
+  if (minutos < 1) return 'agora há pouco'
+  const mesmoDia =
+    d.getFullYear() === agora.getFullYear() &&
+    d.getMonth() === agora.getMonth() &&
+    d.getDate() === agora.getDate()
+  if (!mesmoDia) return tempoDecorrido(d.toISOString(), agora)
+  if (minutos < 60) return `há ${minutos} min`
+  return `há ${Math.floor(minutos / 60)} h`
+}
+
+/**
  * "agosto/2026" — mês por extenso e ano em números.
  *
  * PARA DATA CUJA PRECISÃO DO DIA NÃO DECIDE NADA. A última movimentação de um

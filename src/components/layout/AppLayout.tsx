@@ -11,6 +11,7 @@ import { ajudaDaRota } from '@/lib/ajudaDaPlataforma'
 import { ProvedorDeConsultas } from './Consultas'
 import { AjudaDaTela } from './AjudaDaTela'
 import { LimiteDeErro } from './LimiteDeErro'
+import { AvisoDeVersaoNova } from './AvisoDeVersaoNova'
 
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -75,6 +76,8 @@ export function AppLayout() {
         {/* Fora do <main>: é fixo na tela e acompanha a pessoa em todas as
             páginas, em vez de rolar junto com o conteúdo. */}
         <Assistente />
+        {/* "Há uma versão nova — recarregar": avisa e espera a pessoa (lib/versaoNova.ts). */}
+        <AvisoDeVersaoNova />
       </div>
     </ProvedorDeConsultas>
   )

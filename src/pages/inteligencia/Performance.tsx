@@ -14,7 +14,8 @@
 // mediana (e, na rentabilidade total, também a ponderada pelo capital) vai em
 // tamanho grande; as outras medidas ficam embaixo, cada uma com o seu ⓘ.
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
+import { usePreferencia, umaDas } from '@/lib/preferencias'
 import { AlertTriangle } from 'lucide-react'
 import { Segmented } from '@/components/ui/Segmented'
 import { Table, THead, TH, TBody, TR, TD, EmptyState } from '@/components/ui/Table'
@@ -29,6 +30,8 @@ import {
 import { Histograma } from './graficos'
 
 type Visao = 'todas' | 'extremos'
+/** A visão da lista fica lembrada, como o recorte (lib/preferencias.ts). */
+const VISOES: readonly Visao[] = ['todas', 'extremos']
 
 /** Explicações desta tela. Ficam aqui porque são específicas dela. */
 const DIZ = {
@@ -90,7 +93,7 @@ function Metrica({
 
 export default function Performance() {
   const { painel, carregando, erro, tentarDeNovo } = usePainel()
-  const [visao, setVisao] = useState<Visao>('todas')
+  const [visao, setVisao] = usePreferencia<Visao>('quadro.performance', 'todas', umaDas(VISOES))
   const faixas = useMemo(() => (painel ? distribuicaoDoRetorno(painel.encerradas) : []), [painel])
 
   if (carregando) return <CarregandoPainel />

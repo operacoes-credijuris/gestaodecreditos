@@ -14,11 +14,19 @@ import {
   rotuloDoItemRecolhido,
   textoDoContador,
 } from '@/lib/contadoresDoMenu'
-import { PREF_MENU_RECOLHIDO, gravarPreferencia, lerPreferencia } from '@/lib/preferencias'
+import {
+  PREF_MENU_RECOLHIDO,
+  PREF_QUADRO_ABA,
+  gravarPreferencia,
+  lerPreferencia,
+  lerPreferenciaValida,
+  umaDas,
+} from '@/lib/preferencias'
 import marca from '@/assets/marca-credijuris.png'
 
 function LeafLink({
-  item: { to, label, icon: Icon },
+  item: { to: endereco, label, icon: Icon },
+  destino,
   ativo,
   forte = false,
   onNavigate,
@@ -26,6 +34,8 @@ function LeafLink({
   recolhido = false,
 }: {
   item: NavLeaf
+  /** Para onde o link leva, quando não é o `to` do item (a aba lembrada do Quadro). */
+  destino?: string
   /** Se o item está aceso — decidido por `itemAtivo`, um só para o menu inteiro. */
   ativo: boolean
   /** Em negrito: o item do topo, fora das seções (o `.sb-topo` da amostra). */
@@ -41,7 +51,7 @@ function LeafLink({
   const rotulo = recolhido ? rotuloDoItemRecolhido(label, contador?.texto) : undefined
   return (
     <Link
-      to={to}
+      to={destino ?? endereco}
       // QUEM ACENDE O ITEM É `itemAtivo` (navigation.ts), não o casamento do
       // NavLink. O Quadro econômico é um item só que precisa ficar aceso nas
       // cinco abas, e o NavLink só faz isso por PREFIXO (sem o `end`) — o
@@ -158,6 +168,14 @@ export function Sidebar({
     setRecolhido(novo)
   }
 
+  // O ITEM DE MOLDURA (o Quadro econômico) VOLTA À ÚLTIMA ABA ABERTA, que a
+  // moldura guarda. Lido a cada desenho do menu — ele se redesenha a cada troca
+  // de tela, que é quando a aba muda. Valor que não é aba de hoje: o `to`.
+  const abaLembrada = (item: NavLeaf) =>
+    item.abas
+      ? lerPreferenciaValida(PREF_QUADRO_ABA, item.to, umaDas(item.abas.map((a) => a.to)))
+      : undefined
+
   const conteudo = (recolhido: boolean) => (
     // O navy chapado da amostra (--nav-bg), e não o degradê de antes.
     <div className="flex h-full flex-col bg-nav text-white">
@@ -237,6 +255,7 @@ export function Sidebar({
                 <LeafLink
                   key={item.to}
                   item={item}
+                  destino={abaLembrada(item)}
                   ativo={item.to === ativo}
                   forte={!section.title}
                   onNavigate={onClose}
