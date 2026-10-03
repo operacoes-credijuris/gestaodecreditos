@@ -157,7 +157,7 @@ export default function VisaoGeral() {
       </GradeCartoes>
 
       {(insights.length > 0 || painel.operacoes.length > 0) && (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid gap-4 min-[1180px]:grid-cols-2">
           {insights.length > 0 && (
             <Painel
               titulo="O que os dados estão dizendo"
@@ -193,7 +193,7 @@ export default function VisaoGeral() {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 min-[1180px]:grid-cols-2">
         <Painel
           titulo="Composição da carteira"
           apoio="As três populações não se misturam em nenhum cálculo."

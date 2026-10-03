@@ -218,6 +218,7 @@ function useMovimentacoesRecentes(processos: Processo[]) {
  * pode aparecer em "Alvará Expedido".
  */
 function SituacaoSelect({
+  nomeFase,
   situacaoIdAtual,
   opcoes,
   criando,
@@ -226,6 +227,8 @@ function SituacaoSelect({
   onEditar,
   onExcluir,
 }: {
+  /** O nome da fase da linha, para o cabeçalho do menu (as situações são DESTA fase). */
+  nomeFase: string
   situacaoIdAtual: string | null
   opcoes: SituacaoCatalogo[]
   criando: boolean
@@ -308,6 +311,11 @@ function SituacaoSelect({
 
       {aberto && (
         <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-md border border-borda bg-superficie py-1 shadow-nivel-2 scrollbar-thin">
+          {/* O CABEÇALHO DIZ DE QUAL FASE SÃO AS SITUAÇÕES (o `.ph` da amostra):
+              a lista muda de fase para fase, e quem abre o menu precisa saber. */}
+          <p className="px-2.5 pb-1 pt-1.5 text-xs font-bold uppercase tracking-wider text-texto-3">
+            Situações de "{nomeFase}"
+          </p>
           <button
             type="button"
             onClick={() => {
@@ -392,8 +400,9 @@ function SituacaoSelect({
                   />
                   <span className="truncate text-xs text-texto">{o.nome}</span>
                 </button>
-                {/* opacity-0 + group-hover: os ícones só aparecem ao passar o
-                    mouse na linha, pra não poluir a lista toda de lápis/lixo. */}
+                {/* LÁPIS E LIXEIRA SEMPRE À VISTA (como a amostra), só apagados até o
+                    mouse passar na linha: escondidos, quem não passava o mouse não
+                    sabia que dava para editar ou excluir. */}
                 <button
                   type="button"
                   title="Editar"
@@ -403,7 +412,7 @@ function SituacaoSelect({
                     setNomeEditado(o.nome)
                     setCorEditada(o.cor ?? PALETA_SITUACAO[1].chave)
                   }}
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded text-texto-3 opacity-0 hover:text-texto-2 focus-visible:opacity-100 group-hover:opacity-100"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded text-texto-3 opacity-60 hover:text-texto-2 focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Pencil className="h-3 w-3" />
                 </button>
@@ -412,7 +421,7 @@ function SituacaoSelect({
                   title="Excluir"
                   aria-label={`Excluir ${o.nome}`}
                   onClick={() => onExcluir(o.id)}
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded text-texto-3 opacity-0 hover:text-perigo focus-visible:opacity-100 group-hover:opacity-100"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded text-texto-3 opacity-60 hover:text-perigo focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
@@ -793,6 +802,7 @@ export function FaseProcessual({
                           </TD>
                           <TD className="w-96">
                             <SituacaoSelect
+                              nomeFase={getLabel(FASE_PROCESSUAL, faseDaLinha).label}
                               situacaoIdAtual={r?.situacao_id ?? null}
                               opcoes={opcoes}
                               criando={criarSituacao.isPending}
@@ -1051,6 +1061,7 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
               </p>
             ) : (
               <SituacaoSelect
+                nomeFase={getLabel(FASE_PROCESSUAL, r.fase_codigo).label}
                 situacaoIdAtual={r.situacao_id}
                 opcoes={opcoesSituacao}
                 criando={criarSituacao.isPending}

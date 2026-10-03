@@ -10,6 +10,13 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Download } from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import {
+  MSG_BCB_ATUALIZADO,
+  mensagemDaFalhaDoBcb,
+  parametrosAlterados,
+  type IndicesDosParametros,
+} from '@/lib/formulariosDasConfiguracoes'
+import { perguntarDescarte } from '@/lib/descarte'
+import {
   useParametrosAtualizacao,
   useSalvarParametrosAtualizacao,
 } from '@/lib/queries'
@@ -109,9 +116,16 @@ export function ModalParametrosAtualizacao({
     setIpca(params.data?.ipca_12m_aa ?? null)
   }, [open, params.data])
 
+  // O QUE O BANCO CENTRAL ACABOU DE GRAVAR, para a pergunta do descarte: o
+  // cache dos parâmetros só se atualiza um instante depois, e nesse meio-tempo os
+  // campos já mostram os índices novos — que não são rascunho, já estão gravados.
+  const [gravadosNaBusca, setGravadosNaBusca] = useState<IndicesDosParametros | null>(null)
+
   // A busca vale só para a abertura em que foi feita.
   useEffect(() => {
-    if (open) setDaBusca(null)
+    if (!open) return
+    setDaBusca(null)
+    setGravadosNaBusca(null)
   }, [open])
 
   const derivado = ipcaMais2(ipca)
@@ -148,6 +162,7 @@ export function ModalParametrosAtualizacao({
         typeof r.ipca_12m_aa === 'number' ? r.ipca_12m_aa : (params.data?.ipca_12m_aa ?? null)
       setSelic(novaSelic)
       setIpca(novoIpca)
+      setGravadosNaBusca({ selic: novaSelic, ipca: novoIpca })
       if (r.data_referencia) {
         setDaBusca({ selic: novaSelic, ipca: novoIpca, data: r.data_referencia })
       }
@@ -155,9 +170,11 @@ export function ModalParametrosAtualizacao({
       // do cache: sem invalidar, mostraria os números de antes da gravação.
       void qc.invalidateQueries({ queryKey: ['parametros_atualizacao'] })
       if (r.avisos?.length) r.avisos.forEach((a) => toast.error(a))
-      else toast.success('Índices do Banco Central atualizados e já gravados.')
+      else toast.success(MSG_BCB_ATUALIZADO)
     } catch (e) {
-      toast.error((e as Error).message)
+      // FALHA TOTAL NUMA FRASE LEGÍVEL: o que veio de cada índice, e que nada foi
+      // gravado (ver mensagemDaFalhaDoBcb).
+      toast.error(mensagemDaFalhaDoBcb(e))
     } finally {
       setBuscando(false)
     }
@@ -184,10 +201,26 @@ export function ModalParametrosAtualizacao({
       ? 'Lendo os parâmetros atuais…'
       : undefined
 
+  // SELIC OU IPCA MEXIDOS À MÃO: fechar pergunta antes de descartar. Enquanto a
+  // leitura corre não há o que comparar — os campos estão travados, vazios por
+  // falta de dado e não por quem digitou.
+  const gravados: IndicesDosParametros = gravadosNaBusca ?? {
+    selic: params.data?.selic_aa ?? null,
+    ipca: params.data?.ipca_12m_aa ?? null,
+  }
+  const sujo = !params.isLoading && parametrosAlterados({ selic, ipca }, gravados)
+
+  // O CANCELAR PERGUNTA COMO O X, o Escape e o clique fora (o `dirty` da Modal).
+  async function cancelar() {
+    if (sujo && !(await perguntarDescarte())) return
+    onClose()
+  }
+
   return (
     <Modal
       open={open}
       onClose={onClose}
+      dirty={sujo}
       title="Parâmetros de atualização"
       description="Os índices que corrigem os valores do relatório."
       size="md"
@@ -204,7 +237,7 @@ export function ModalParametrosAtualizacao({
           >
             Buscar no Banco Central
           </Button>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={() => void cancelar()}>
             Cancelar
           </Button>
           <Button
@@ -218,7 +251,7 @@ export function ModalParametrosAtualizacao({
         </>
       }
     >
-      <div>
+      <div aria-busy={params.isLoading || undefined}>
         {/* Falha de leitura não pode virar formulário em branco: os campos
             nasceriam vazios, idênticos a "nunca cadastrado", e o Salvar gravaria
             nulo por cima da SELIC e do IPCA reais — parando a projeção de toda a
@@ -250,6 +283,9 @@ export function ModalParametrosAtualizacao({
             inputMode="numeric"
             placeholder="0,00"
             aria-label="SELIC vigente (% a.a.)"
+            // TRAVADO ENQUANTO A LEITURA CORRE: o que se digitasse agora seria
+            // apagado pelos valores gravados quando a leitura chegasse.
+            disabled={params.isLoading}
             value={formatPercentInput(selic)}
             onChange={(e) => setSelic(parsePercentInput(e.target.value))}
           />
@@ -261,6 +297,7 @@ export function ModalParametrosAtualizacao({
             inputMode="numeric"
             placeholder="0,00"
             aria-label="IPCA acumulado 12 meses (% a.a.)"
+            disabled={params.isLoading}
             value={formatPercentInput(ipca)}
             onChange={(e) => setIpca(parsePercentInput(e.target.value))}
           />

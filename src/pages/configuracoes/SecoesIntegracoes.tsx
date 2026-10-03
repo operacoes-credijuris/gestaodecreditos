@@ -20,7 +20,6 @@ import {
   GradeCampos,
   IconeAlerta,
   IconeOk,
-  IconeSem,
   RodapeSecao,
   Selo,
   SeloIntegracao,
@@ -429,7 +428,7 @@ export function SecaoKommo({
               </Selo>
             )
           ) : (
-            <Selo tom="neutro" icone={IconeSem}>
+            <Selo tom="neutro">
               Não configurado
             </Selo>
           )
