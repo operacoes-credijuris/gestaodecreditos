@@ -74,6 +74,10 @@ import {
   type PapelApurado,
   type TitularLido,
 } from '../../supabase/functions/_shared/titularesDaCessao.ts'
+import {
+  formatarDocumento,
+  type CamposDoOficio,
+} from '../../supabase/functions/_shared/oficioDoCredito.ts'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
@@ -255,6 +259,12 @@ export function PainelProcessosJudiciais({
   const [advCpf, setAdvCpf] = useState('')
   const [lendoTitulares, setLendoTitulares] = useState(false)
   /**
+   * O que a leitura disse do OFÍCIO REQUISITÓRIO (desde 03/10/2026): o titular
+   * de quem cede, a divergência com o título e o aviso de destaque. `null`
+   * antes da leitura, ou com o servidor anterior, que não manda nada disso.
+   */
+  const [oficio, setOficio] = useState<CamposDoOficio | null>(null)
+  /**
    * A cadeia já rodou para ESTE card.
    *
    * Ref, e não estado: ela não desenha nada, e como estado o próprio render que
@@ -369,30 +379,39 @@ export function PainelProcessosJudiciais({
    * de React não está atualizado na linha seguinte ao setState, e apurar lendo
    * os campos apuraria os valores anteriores.
    */
-  async function lerTitulares(): Promise<TitularLido[]> {
-    const texto = arquivos
-      .map((a) => a.texto ?? '')
-      .filter((t) => t.trim())
-      .join('\n\n===== PRÓXIMO ARQUIVO =====\n\n')
+  //
+  // O OFÍCIO REQUISITÓRIO DEFINE O TITULAR (regra do dono, 03/10/2026). O
+  // servidor acha o ofício entre os anexos e devolve os titulares JÁ com o
+  // beneficiário dele por cima da leitura dos autos. `pausar` diz à corrente
+  // que a busca PAGA não deve sair sozinha: o título diverge do ofício, ou o
+  // ofício traz mais de um beneficiário e nenhum bate com o título.
+  async function lerTitulares(): Promise<{ titulares: TitularLido[]; pausar: boolean }> {
+    const comTexto = arquivos.filter((a) => (a.texto ?? '').trim())
+    const texto = comTexto.map((a) => a.texto).join('\n\n===== PRÓXIMO ARQUIVO =====\n\n')
     if (!texto.trim()) {
       toast.error(
         'Os anexos deste card não têm texto para ler — processo digitalizado só tem imagem. ' +
           'Preencha os titulares à mão.',
       )
-      return []
+      return { titulares: [], pausar: false }
     }
     setLendoTitulares(true)
     setErro(null)
     try {
-      const r = await invokeFunction<{ titulares?: TitularLido[]; avisos?: string[] }>(
-        'dd-titulares',
-        {
-          lead_id: leadId,
-          titulo: tituloDoCard,
-          texto,
-          parcela: classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida),
-        },
-      )
+      const r = await invokeFunction<
+        { titulares?: TitularLido[]; avisos?: string[] } & CamposDoOficio
+      >('dd-titulares', {
+        lead_id: leadId,
+        titulo: tituloDoCard,
+        // OS ANEXOS COM O NOME: é pelo nome e pelo conteúdo que o servidor
+        // acha o ofício (os sem texto vão também — "achei e não li"). O
+        // `texto` junto é para o servidor anterior, enquanto o deploy não termina.
+        arquivos: arquivos.map((a) => ({ nome: a.nome, texto: a.texto ?? '' })),
+        texto,
+        parcela: classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida),
+      })
+      const doOficio: CamposDoOficio | null = r.aviso_do_oficio !== undefined ? r : null
+      setOficio(doOficio)
       const achados = r.titulares ?? []
       const doCedente = achados.find((t) => t.papel === 'CEDENTE')
       const doAdvogado = achados.find((t) => t.papel === 'ADVOGADO')
@@ -409,12 +428,18 @@ export function PainelProcessosJudiciais({
       // Ela é do MOMENTO da leitura; permanente, repetiria a mesma frase em toda
       // reabertura do card e empurraria a tabela para baixo. O registro que fica
       // é a observação em dd_historico, que a análise lê.
-      for (const a of r.avisos ?? []) toast.error(a)
-      return achados
+      // O aviso do ofício não vai para o toast: ele fica em destaque, fixo.
+      for (const a of r.avisos ?? []) if (a !== doOficio?.aviso_do_oficio) toast.error(a)
+      const ambiguo = Boolean(
+        doOficio?.oficio?.achado &&
+          !doOficio.titular_do_oficio &&
+          (doOficio.oficio.beneficiarios?.length ?? 0) > 1,
+      )
+      return { titulares: achados, pausar: Boolean(doOficio?.divergencia) || ambiguo }
     } catch (e) {
       setErro((e as Error).message)
       toast.error((e as Error).message)
-      return []
+      return { titulares: [], pausar: false }
     } finally {
       setLendoTitulares(false)
     }
@@ -547,7 +572,14 @@ export function PainelProcessosJudiciais({
   async function correnteCompleta() {
     setPasso('lendo')
     try {
-      const titulares = await lerTitulares()
+      const { titulares, pausar } = await lerTitulares()
+      // A DIVERGÊNCIA APARECE ANTES DE QUALQUER CONSULTA PAGA. Os campos já
+      // estão com o titular do ofício; a busca espera alguém conferir e clicar
+      // em Apurar — pagar pela pessoa errada não tem volta.
+      if (pausar) {
+        toast.info('O ofício requisitório pede conferência (aviso no topo da aba) — confira os titulares e clique em Apurar.')
+        return
+      }
       const paraApurar: Record<string, string>[] = []
       for (const papel of alvos.papeis) {
         const t = titulares.find((x) => x.papel === papel)
@@ -910,6 +942,34 @@ export function PainelProcessosJudiciais({
       )}
 
       {aviso && <CaixaDeAviso tom="aviso">{aviso}</CaixaDeAviso>}
+
+      {/* O OFÍCIO REQUISITÓRIO, fixo no topo e antes dos campos: é ele que diz
+          de quem se procura dívida. A divergência com o título aparece ANTES de
+          qualquer consulta paga — a corrente para nela (ver correnteCompleta). */}
+      {oficio?.divergencia ? (
+        <CaixaDeAviso tom="aviso" role="alert">
+          <b className="text-texto">O título do card e o ofício requisitório divergem.</b>{' '}
+          {oficio.divergencia.mensagem}{' '}
+          {apuracoes.length === 0 && 'A busca no Escavador não foi disparada: confira os campos e clique em Apurar.'}
+        </CaixaDeAviso>
+      ) : oficio?.aviso_do_oficio ? (
+        <CaixaDeAviso tom={oficio.oficio?.achado === false ? 'info' : 'aviso'}>
+          <b className="text-texto">Ofício requisitório:</b> {oficio.aviso_do_oficio}
+        </CaixaDeAviso>
+      ) : oficio?.titular_do_oficio ? (
+        <CaixaDeAviso tom="sucesso">
+          Titular conferido no ofício requisitório
+          {oficio.titular_do_oficio.arquivo ? ` (${oficio.titular_do_oficio.arquivo})` : ''}:{' '}
+          <b className="text-texto">
+            {oficio.titular_do_oficio.nome}
+            {oficio.titular_do_oficio.documento &&
+              ` (${oficio.titular_do_oficio.documento.length === 14 ? 'CNPJ' : 'CPF'} ${formatarDocumento(
+                oficio.titular_do_oficio.documento,
+              )})`}
+          </b>
+          .
+        </CaixaDeAviso>
+      ) : null}
 
       {/* A CORRENTE EM CURSO, dita passo a passo. Uma janela que abre e fica
           parada por vinte segundos se lê como travada — e quem não sabe que a

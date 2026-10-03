@@ -94,6 +94,16 @@ import { EmissaoBullai } from '@/components/EmissaoBullai'
 import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
 import type { Lido, QualificacaoLida } from '../../supabase/functions/_shared/qualificacaoDoCedente.ts'
 import { mencionaNome, tipoPessoaPeloNome } from '../../supabase/functions/_shared/focoNoCedente.ts'
+import {
+  formatarDocumento,
+  mesmaPessoa,
+  oficioParaACessao,
+  type CamposDoOficio,
+  type TitularDoOficio,
+} from '../../supabase/functions/_shared/oficioDoCredito.ts'
+
+/** A resposta de dd-qualificacao: a qualificação e, desde 03/10/2026, o ofício. */
+type LeituraDaIA = QualificacaoLida & CamposDoOficio
 
 // ------------------------------------------------------------------ tipos
 
@@ -847,7 +857,7 @@ export function PainelCertidoes({
   const [preenchido, setPreenchido] = useState<string[]>([])
   // A LEITURA DA IA sobre os autos (dd-qualificacao): o cadastro inteiro, com o
   // trecho de onde saiu cada campo.
-  const [leituraIA, setLeituraIA] = useState<QualificacaoLida | null>(null)
+  const [leituraIA, setLeituraIA] = useState<LeituraDaIA | null>(null)
   const [lendoIA, setLendoIA] = useState(false)
   const leituraPedida = useRef<number | null>(null)
 
@@ -1312,16 +1322,20 @@ export function PainelCertidoes({
   tipoRef.current = tipoCedente
 
   async function lerComIA() {
-    const texto = arquivos
-      .map((a) => a.texto ?? '')
-      .filter((t) => t.trim())
-      .join('\n\n===== PRÓXIMO ARQUIVO =====\n\n')
+    const comTexto = arquivos.filter((a) => (a.texto ?? '').trim())
+    const texto = comTexto.map((a) => a.texto).join('\n\n===== PRÓXIMO ARQUIVO =====\n\n')
     if (!texto.trim()) return
     setLendoIA(true)
     try {
-      const q = await invokeFunction<QualificacaoLida>('dd-qualificacao', {
+      const q = await invokeFunction<LeituraDaIA>('dd-qualificacao', {
         lead_id: leadId,
         titulo: tituloDoCard,
+        // OS ANEXOS COM O NOME (03/10/2026): é pelo nome ("ofício", "RPV") e
+        // pelo conteúdo que o servidor acha o ofício requisitório. O `texto`
+        // junto é para o servidor anterior, enquanto o deploy não termina.
+        // Vão também os SEM texto: um ofício digitalizado é "achei e não li", e
+        // não "não há ofício".
+        arquivos: arquivos.map((a) => ({ nome: a.nome, texto: a.texto ?? '' })),
         texto,
         parcela: classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida),
         cedente: cedenteRef.current.nome.trim() || cedenteDoCard,
@@ -1420,6 +1434,185 @@ export function PainelCertidoes({
     void lerComIA()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ativo, carregando, editando, sujeitos.length, lendoPdf, temTexto, leadId])
+
+  // ---------------------------------------------------------------- o ofício
+  //
+  // O TITULAR É O DO OFÍCIO REQUISITÓRIO (regra do dono, 03/10/2026): "o
+  // cedente deve corresponder ao titular do crédito, do precatório, o que
+  // precisa corresponder ao ofício anexado no kommo". A MESMA leitura do
+  // servidor (_shared/oficioDoCredito.ts, pura) roda aqui sobre os anexos já
+  // lidos: sem custo, ela pré-preenche e avisa antes de a IA responder — e
+  // também com o cadastro já gravado, quando a IA nem é chamada. Chegando a
+  // resposta do servidor (que a IA confirmou), vale a dele.
+  const parcelaDoCard = useMemo(
+    () => classificarParcelaCedida(lerTituloCard(tituloDoCard).parcelaCedida),
+    [tituloDoCard],
+  )
+  const oficioLocal = useMemo(
+    () =>
+      lendoPdf || arquivos.length === 0
+        ? null
+        : oficioParaACessao(
+            arquivos.map((a) => ({ nome: a.nome, texto: a.texto ?? '' })),
+            parcelaDoCard,
+            cedenteDoCard,
+          ),
+    [arquivos, lendoPdf, parcelaDoCard, cedenteDoCard],
+  )
+  // O servidor anterior a 03/10/2026 não manda os campos do ofício: aí, o local.
+  const servidorLeuOficio = Boolean(leituraIA && leituraIA.aviso_do_oficio !== undefined)
+  const titularOficio: TitularDoOficio | null = servidorLeuOficio
+    ? (leituraIA?.titular_do_oficio ?? null)
+    : (oficioLocal?.titular ?? null)
+  const avisoOficio: string | null = servidorLeuOficio
+    ? (leituraIA?.aviso_do_oficio ?? null)
+    : (oficioLocal?.aviso ?? null)
+  const divergenciaDoTitulo = servidorLeuOficio
+    ? (leituraIA?.divergencia ?? null)
+    : (oficioLocal?.divergencia ?? null)
+  const semOficio = servidorLeuOficio
+    ? leituraIA?.oficio?.achado === false
+    : Boolean(oficioLocal && oficioLocal.oficios.length === 0)
+
+  /**
+   * O OFÍCIO PRÉ-PREENCHE O CADASTRO — a regra de sempre: só campo vazio, e o
+   * que a pessoa digitou vence. O NOME QUE VEIO DO CARD NÃO É DIGITAÇÃO: o
+   * formulário de um crédito sem cadastro nasce com o nome do título, e é
+   * justamente ele que o ofício corrige. O tipo PF/PJ segue o documento do
+   * ofício (14 dígitos é PJ), enquanto ninguém escolheu à mão nem digitou
+   * documento. Uma vez por titular: apagar o campo depois não o traz de volta.
+   */
+  const oficioAplicado = useRef('')
+  useEffect(() => {
+    const t = titularOficio
+    if (!t || !editando || sujeitos.length > 0) return
+    const chave = `${leadId}|${t.nome}|${t.documento}`
+    if (oficioAplicado.current === chave) return
+    oficioAplicado.current = chave
+    const atual = cedenteRef.current
+    const doc = t.documento
+    const tipoDoOficio: TipoPessoa | null = doc.length === 14 ? 'PJ' : doc.length === 11 ? 'PF' : null
+    let tipo = tipoRef.current
+    if (tipoDoOficio && tipoDoOficio !== tipo && !tipoEscolhido.current && !onlyDigits(atual.cpf)) {
+      tipo = tipoDoOficio
+      setTipoCedente(tipo)
+    }
+    const nomeEntra =
+      Boolean(t.nome) &&
+      (!atual.nome.trim() || atual.nome.trim() === cedenteDoCard.trim()) &&
+      atual.nome.trim() !== t.nome
+    const docEntra = Boolean(doc) && !onlyDigits(atual.cpf) && tipoDoOficio === tipo
+    if (!nomeEntra && !docEntra) return
+    setCedente((f) => ({
+      ...f,
+      nome: nomeEntra ? t.nome : f.nome,
+      cpf: docEntra && !onlyDigits(f.cpf) ? mascaraDoTipo(doc, tipo) : f.cpf,
+    }))
+    setMexeu(true)
+    const feitos = [
+      ...(nomeEntra ? [`nome ${t.nome}`] : []),
+      ...(docEntra ? [`${rotuloDoc(tipo)} ${formatarDocumento(doc)}`] : []),
+    ]
+    setPreenchido((v) => [...v.filter((x) => !x.endsWith('(do ofício)')), `${feitos.join(' e ')} (do ofício)`])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titularOficio, editando, sujeitos.length, leadId, cedenteDoCard])
+
+  /**
+   * O CADASTRO (gravado ou digitado) DIVERGE DO OFÍCIO? É a pessoa ou o
+   * documento: nome que não é a mesma pessoa (tolerando acento, nome do meio,
+   * espólio), ou documento diferente.
+   */
+  const docDoCadastro = onlyDigits(cedente.cpf)
+  const cadastroDivergeDoOficio = Boolean(
+    titularOficio &&
+      ((cedente.nome.trim() &&
+        titularOficio.nome &&
+        !mesmaPessoa(cedente.nome, titularOficio.nome, [titularOficio.sucede])) ||
+        (docDoCadastro && titularOficio.documento && docDoCadastro !== titularOficio.documento)),
+  )
+
+  /** "Usar o do ofício": nome, documento e o tipo que o documento diz. */
+  function usarDoOficio() {
+    const t = titularOficio
+    if (!t) return
+    const tipo: TipoPessoa =
+      t.documento.length === 14 ? 'PJ' : t.documento.length === 11 ? 'PF' : tipoCedente
+    tipoEscolhido.current = true
+    setEditando(true)
+    setMexeu(true)
+    setTipoCedente(tipo)
+    setCedente((f) => ({
+      ...f,
+      nome: t.nome || f.nome,
+      cpf: t.documento
+        ? mascaraDoTipo(t.documento, tipo)
+        : onlyDigits(f.cpf).length === (tipo === 'PJ' ? 14 : 11)
+          ? f.cpf
+          : '',
+    }))
+    setPreenchido((v) => [
+      ...v.filter((x) => !x.endsWith('(do ofício)')),
+      `nome${t.documento ? ` e ${rotuloDoc(tipo)}` : ''} (do ofício)`,
+    ])
+  }
+
+  const comDoc = (nome: string, doc: string) =>
+    doc ? `${nome} (${doc.length === 14 ? 'CNPJ' : 'CPF'} ${formatarDocumento(doc)})` : nome
+
+  /**
+   * O AVISO DE DESTAQUE DO OFÍCIO, no topo do painel e fora da lista dos
+   * outros avisos — "não some no meio dos outros" (pedido do dono). A
+   * divergência com o título em âmbar e com a frase inteira; sem ofício, uma
+   * nota; o ofício que confirma, uma linha verde com o documento.
+   */
+  function avisoDoOficio(): ReactNode {
+    if (carregando || (!oficioLocal && !servidorLeuOficio)) return null
+    if (divergenciaDoTitulo) {
+      return (
+        <CaixaDeAviso tom="aviso" role="alert" className="mb-4">
+          <b className="text-texto">O título do card e o ofício requisitório divergem.</b>{' '}
+          {divergenciaDoTitulo.mensagem}
+        </CaixaDeAviso>
+      )
+    }
+    if (avisoOficio) {
+      return (
+        <CaixaDeAviso tom={semOficio ? 'info' : 'aviso'} className="mb-4">
+          <b className="text-texto">Ofício requisitório:</b> {avisoOficio}
+        </CaixaDeAviso>
+      )
+    }
+    if (titularOficio) {
+      return (
+        <CaixaDeAviso tom="sucesso" className="mb-4">
+          Titular conferido no ofício requisitório
+          {titularOficio.arquivo ? ` (${titularOficio.arquivo})` : ''}:{' '}
+          <b className="text-texto">{comDoc(titularOficio.nome, titularOficio.documento)}</b>.
+        </CaixaDeAviso>
+      )
+    }
+    return null
+  }
+
+  /** "O cadastro tem X; o ofício diz Y", com o botão para usar o do ofício. */
+  function divergenciaDoCadastro(): ReactNode {
+    if (!titularOficio || !cadastroDivergeDoOficio) return null
+    return (
+      <CaixaDeAviso tom="perigo" role="alert" className="mb-4">
+        <span className="flex flex-wrap items-center justify-between gap-3">
+          <span className="min-w-0 flex-1">
+            <b className="text-texto">O cadastro não bate com o ofício requisitório.</b> O cadastro tem{' '}
+            {comDoc(cedente.nome.trim() || '(sem nome)', docDoCadastro)}; o ofício diz{' '}
+            {comDoc(titularOficio.nome, titularOficio.documento)}. As certidões têm de sair no nome de
+            quem está no ofício.
+          </span>
+          <Button variant="secondary" onClick={usarDoOficio}>
+            Usar o do ofício
+          </Button>
+        </span>
+      </CaixaDeAviso>
+    )
+  }
 
   // ---------------------------------------------------------------- validação
 
@@ -2037,6 +2230,10 @@ export function PainelCertidoes({
         </CaixaDeAviso>
       )}
 
+      {/* O OFÍCIO REQUISITÓRIO, em destaque e antes de tudo o que depende dele:
+          é ele que diz de quem são as certidões. */}
+      {avisoDoOficio()}
+
       {/* A descrição era do modal e desceu para cá com ele: o painel divide a
           janela com outra aba, então o cabeçalho da janela não pode falar só de
           certidões. */}
@@ -2200,9 +2397,12 @@ export function PainelCertidoes({
                       ? 'Cadastro lido dos autos pela IA — confira antes de gravar'
                       : 'A IA pode ler a qualificação do cedente nos autos'}
                 </b>
-                {(leituraIA?.avisos ?? []).map((a) => (
-                  <DicaDeAviso key={a}>{a}</DicaDeAviso>
-                ))}
+                {/* O aviso do ofício já está em destaque no topo do painel. */}
+                {(leituraIA?.avisos ?? [])
+                  .filter((a) => a !== leituraIA?.aviso_do_oficio)
+                  .map((a) => (
+                    <DicaDeAviso key={a}>{a}</DicaDeAviso>
+                  ))}
                 {/* O "De onde saiu cada campo" que morava aqui subiu para a caixa
                     dos achados: lá cada dado já vem com o trecho, e clicável. */}
               </div>
@@ -2238,6 +2438,7 @@ export function PainelCertidoes({
           {/* ---------------- cedente ---------------- */}
           <div>
             <RotuloDeSecao className="mt-6">Cedente</RotuloDeSecao>
+            {divergenciaDoCadastro()}
             {/* PESSOA FÍSICA OU JURÍDICA (pedido do dono, 03/10/2026): a escolha
                 troca o documento (CPF ↔ CNPJ, com máscara e validação de cada
                 um) e tira o que não se aplica a empresa — nascimento, estado
@@ -2536,6 +2737,10 @@ export function PainelCertidoes({
         </div>
       ) : (
         <div>
+          {/* O CADASTRO GRAVADO CONTRA O OFÍCIO: o botão abre a correção já com o
+              nome e o documento do ofício — gravar continua sendo de quem confere. */}
+          {divergenciaDoCadastro()}
+
           {/* ---------------- placar ---------------- */}
           {/* Os `.kpis.five` da amostra: cinco cartões de número. */}
           {completude && (
