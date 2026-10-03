@@ -4066,7 +4066,7 @@ export default function AnaliseCredito() {
           ...p,
           [id]:
             `Não consegui ler o PDF do card (${(e as Error)?.message ?? e}). ` +
-            `Digite o CPF conferindo no processo.`,
+            `Digite o CPF ou CNPJ conferindo no processo.`,
         })),
       )
       .finally(() => marcarLendo(id, false))
