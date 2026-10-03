@@ -21,7 +21,7 @@
 // AS DUAS ABAS FICAM MONTADAS, e a inativa apenas oculta. Trocar de aba não pode
 // perder um formulário meio preenchido, e `display:none` também tira os campos
 // do foco, então o focus trap do modal continua correto.
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useToast } from '@/components/ui/Toast'
 import { useAuth } from '@/contexts/AuthContext'
@@ -127,6 +127,12 @@ export function DueDiligence({
    */
   const [itens, setItens] = useState<ItemDeRisco[]>([])
   const [grupos, setGrupos] = useState<GrupoDeTitular[]>([])
+  // IDENTIDADE ESTÁVEL, como o comentário acima promete: a arrow inline que
+  // estava no lugar fazia o efeito que reporta, no painel, rodar a cada render.
+  const reportarItens = useCallback((i: ItemDeRisco[], g: GrupoDeTitular[]) => {
+    setItens(i)
+    setGrupos(g)
+  }, [])
   const [marcados, setMarcados] = useState<string[]>([])
   const [seguindo, setSeguindo] = useState(false)
   const toast = useToast()
@@ -163,7 +169,18 @@ export function DueDiligence({
   async function recusarVerba(texto: string) {
     const { error } = await supabase
       .from('dd_historico')
-      .update({ reprovado_em: new Date().toISOString(), reprovado_por: user?.id ?? null, reprovado_motivo: texto })
+      // A RECUSA DESFAZ UM "SEGUIR" ANTERIOR. O check da 0063 proíbe liberado e
+      // reprovado na mesma linha: quem tinha clicado em Seguir e reabria a
+      // janela para recusar uma verba via o banco recusar a gravação INTEIRA,
+      // com a mensagem crua da constraint. É o espelho do que o `seguir` faz
+      // com as linhas já recusadas.
+      .update({
+        reprovado_em: new Date().toISOString(),
+        reprovado_por: user?.id ?? null,
+        reprovado_motivo: texto,
+        liberado_em: null,
+        liberado_por: null,
+      })
       .eq('kommo_lead_id', leadId)
       .in('papel', papeisRecusados)
       .eq('status', 'APURADO')
@@ -348,10 +365,7 @@ export function DueDiligence({
             arquivos={arquivos}
             lendoPdf={lendoPdf}
             ativo={aba === 'processos'}
-            onItensDeRisco={(i, g) => {
-              setItens(i)
-              setGrupos(g)
-            }}
+            onItensDeRisco={reportarItens}
           />
         </div>
       </div>

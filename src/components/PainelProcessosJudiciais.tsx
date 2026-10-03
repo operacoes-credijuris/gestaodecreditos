@@ -155,6 +155,18 @@ const FOCO =
  */
 const ORDEM_DO_PAPEL: Record<string, number> = { CEDENTE: 0, CONJUGE: 1, PJ: 2, ADVOGADO: 3 }
 
+/**
+ * AS APURAÇÕES NO AR, por card — no MÓDULO, e não no painel.
+ *
+ * A busca no Escavador leva dezenas de segundos e é cobrada por requisição.
+ * Quem acha que travou fecha a janela (o Fechar não pergunta nada) e reabre o
+ * card: o painel remonta, a trava que morava nele volta a zero, o banco ainda
+ * não tem a apuração da primeira busca — e a cadeia pagava a mesma busca uma
+ * segunda vez. Aqui a trava sobrevive ao painel — e guarda a PROMESSA, para o
+ * painel reaberto esperar a busca que já está paga em vez de pedir outra.
+ */
+const apuracoesNoAr = new Map<number, Promise<unknown>>()
+
 const brl = (v: unknown): string => {
   const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(',', '.'))
   return Number.isFinite(n) && n > 0
@@ -441,15 +453,34 @@ export function PainelProcessosJudiciais({
       toast.error('Preencha o titular de quem se vai procurar dívida — os campos estão vazios.')
       return
     }
+    // UMA BUSCA PAGA POR VEZ, POR CARD — venha o segundo pedido do botão, da
+    // cadeia automática ou de uma reabertura da janela (ver `apuracoesNoAr`).
+    const noAr = apuracoesNoAr.get(leadId)
+    if (noAr) {
+      toast.info('A apuração deste card já está em curso — o resultado aparece aqui quando ela terminar.')
+      setApurando(true)
+      try {
+        await noAr.catch(() => undefined)
+        await carregar()
+      } finally {
+        setApurando(false)
+      }
+      return
+    }
 
     setApurando(true)
     setErro(null)
     try {
-      const r = await invokeFunction<{
+      const pedido = invokeFunction<{
         custo?: string
         aviso?: string | null
         apuracoes?: { papel: string; status: string; total: number; observacao?: string | null }[]
-      }>('dd-processos', { lead_id: leadId, alvos: alvosParaApurar })
+      }>('dd-processos', { lead_id: leadId, alvos: alvosParaApurar }).finally(() => {
+        // A TRAVA SAI QUANDO A BUSCA ACABA, esteja o painel montado ou não.
+        if (apuracoesNoAr.get(leadId) === pedido) apuracoesNoAr.delete(leadId)
+      })
+      apuracoesNoAr.set(leadId, pedido)
+      const r = await pedido
       setCusto(r.custo ?? null)
       setAviso(r.aviso ?? null)
       const falhas = (r.apuracoes ?? []).filter((a) => a.status === 'FALHA')
@@ -558,26 +589,38 @@ export function PainelProcessosJudiciais({
    * novo só a OAB — comparar documento com documento diria "mudou" em toda
    * abertura e refaria a busca paga sem nada ter mudado.
    */
+  //
+  // CONTRA TODAS AS LINHAS DO PAPEL, e não contra a primeira. Corrigido o
+  // titular, a apuração da pessoa nova entra como OUTRA linha do mesmo papel
+  // (a chave do histórico inclui o documento), e a antiga fica. Comparando só
+  // com a primeira que o banco devolvesse — muitas vezes a antiga —, a leitura
+  // que confirmava a pessoa nova dizia "mudou" e pagava a mesma busca em toda
+  // abertura da janela.
   function jaApuradoIgual(novo: Record<string, string>): boolean {
-    const anterior = apuracoes.find((a) => a.papel === novo.papel)
-    if (!anterior) return false
+    const doPapel = apuracoes.filter((a) => a.papel === novo.papel)
+    if (doPapel.length === 0) return false
     const doc = onlyDigits(novo.documento)
-    if (doc) return onlyDigits(anterior.documento) === doc
+    if (doc) return doPapel.some((a) => onlyDigits(a.documento) === doc)
     const semEspaco = (v: unknown) => String(v ?? '').toUpperCase().replace(/\s+/g, '')
     const oab = semEspaco(novo.oab)
-    return oab !== '' && semEspaco(anterior.oab) === oab
+    return oab !== '' && doPapel.some((a) => semEspaco(a.oab) === oab)
   }
 
   useEffect(() => {
     if (!ativo || carregando || erro) return
     if (lendoPdf) return
+    // NEM COM UMA APURAÇÃO JÁ NO AR. O "Apurar" vale enquanto o PDF ainda chega;
+    // clicado nessa hora, a cadeia disparava assim que o PDF terminasse, com a
+    // lista de apurações ainda vazia na mão — e pagava uma segunda busca. Ela
+    // espera a primeira acabar, e aí compara com o que ela gravou.
+    if (apurando) return
     if (jaEncadeou.current === leadId) return
     jaEncadeou.current = leadId
     void correnteCompleta()
     // As funções são recriadas a cada render e entrariam aqui como dependência
     // instável; a trava por `leadId` é o que garante uma execução por card.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ativo, carregando, erro, lendoPdf, apuracoes.length, leadId])
+  }, [ativo, carregando, erro, lendoPdf, apurando, apuracoes.length, leadId])
 
   // ------------------------------------------------------------- a tabela
 
@@ -649,9 +692,19 @@ export function PainelProcessosJudiciais({
     const rotuloDoTitular = new Map(
       abasDeTitular.flatMap((g) => g.ids.map((id) => [id, g.label] as const)),
     )
+    // UMA VEZ POR TITULAR: com o mesmo CPF nos dois papéis (a cessão de
+    // honorários), as duas apurações guardam a mesma lista, e cada processo
+    // aparecia duas vezes no mesmo grupo da janela de recusa.
+    const vistos = new Set<string>()
     return processos
       .slice()
       .sort((a, b) => peso(a.risco) - peso(b.risco))
+      .filter((p) => {
+        const chave = `${rotuloDoTitular.get(p.historico_id) ?? ''}|${p.numero_processo}`
+        if (vistos.has(chave)) return false
+        vistos.add(chave)
+        return true
+      })
       .map((p) => {
         const partes = [
           p.objeto,
@@ -677,7 +730,10 @@ export function PainelProcessosJudiciais({
 
   // O ESQUELETO DA AMOSTRA: o que se está fazendo, escrito, e três barras no
   // lugar do conteúdo que vem.
-  if (carregando)
+  // SÓ NA PRIMEIRA CARGA. Na releitura do fim de uma apuração, o esqueleto
+  // desmontava o painel inteiro — e o foco, que estava no Refazer, caía no
+  // <body>; quem usa teclado perdia o lugar.
+  if (carregando && apuracoes.length === 0 && processos.length === 0)
     return (
       <div aria-busy="true" className="space-y-3">
         <p className="text-corpo text-texto-2">Lendo a diligência…</p>
@@ -781,12 +837,15 @@ export function PainelProcessosJudiciais({
   const idsDaAba = abasDeTitular.find((a) => a.key === abaDoTitular)?.ids ?? []
   // De-duplicado por processo: com o mesmo CPF em dois papéis, as duas apurações
   // guardam a mesma lista, e sem isto cada linha apareceria duas vezes.
+  //
+  // DENTRO DA LISTA DO TITULAR, e não da tabela inteira. Procurando o primeiro
+  // na tabela toda, o processo em que cedente e advogado (pessoas diferentes)
+  // são réus juntos só aparecia na aba de quem vinha primeiro — e a contagem e
+  // a soma das causas do outro saíam menores do que são.
   const doTitular = (ids: string[]) =>
-    processosOrdenados.filter(
-      (x, i, todos) =>
-        ids.includes(x.historico_id) &&
-        todos.findIndex((y) => y.numero_processo === x.numero_processo) === i,
-    )
+    processosOrdenados
+      .filter((x) => ids.includes(x.historico_id))
+      .filter((x, i, doTit) => doTit.findIndex((y) => y.numero_processo === x.numero_processo) === i)
   const daAba = doTitular(idsDaAba)
 
   /**
@@ -999,11 +1058,25 @@ export function PainelProcessosJudiciais({
                 titulo="Nenhum processo contra ele"
                 texto="A busca correu e não achou nenhum processo em que ele seja réu."
               />
+            ) : apuracoes.some((a) => idsDaAba.includes(a.id) && a.status === 'FALHA') ? (
+              // A BUSCA QUE FALHOU NÃO É "NADA APURADO AINDA": ela correu, e o
+              // motivo (que a consulta já traz) sumia com o aviso passageiro. E o
+              // botão, com apuração no banco, diz Refazer — não Apurar.
+              <Vazio
+                icone={<Search className="h-[24px] w-[24px]" aria-hidden />}
+                titulo="A busca não foi concluída"
+                texto={(() => {
+                  const m =
+                    apuracoes.find((a) => idsDaAba.includes(a.id) && a.status === 'FALHA')?.observacao?.trim() ||
+                    'A consulta não respondeu.'
+                  return `${/[.!?]$/.test(m) ? m : `${m}.`} Confira os campos acima e clique em Refazer.`
+                })()}
+              />
             ) : (
               <Vazio
                 icone={<Search className="h-[24px] w-[24px]" aria-hidden />}
                 titulo="Nada apurado ainda"
-                texto="Confira os campos acima e clique em Apurar."
+                texto={`Confira os campos acima e clique em ${apuracoes.length > 0 ? 'Refazer' : 'Apurar'}.`}
               />
             )
           ) : (
