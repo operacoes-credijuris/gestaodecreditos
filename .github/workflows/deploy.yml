@@ -166,6 +166,55 @@ jobs:
           cp -r beta-src/dist dist/beta
           echo "Beta publicada junto: $(cd beta-src && git log -1 --format='%h %s')"
 
+      # ======================================================================
+      # A VERSÃO CLÁSSICA, em /gestaodecreditos/classica/ — a última oficial antes
+      # do redesenho (tag `classica`), no ar como VOLTA DE EMERGÊNCIA desde a
+      # virada de 03/10/2026: se uma tela nova travar alguém, a clássica abre com
+      # o mesmo login, o mesmo banco e o mesmo Kommo.
+      #
+      # CONGELADA: compila sempre a mesma tag, sem testes (passaram quando ela
+      # era a oficial). Como a beta, nunca barra a oficial (continue-on-error) e
+      # nunca publica funções. Servidor que mude depois pode deixá-la para trás —
+      # é volta por alguns dias, não segunda plataforma. Para tirá-la do ar,
+      # apague estes passos.
+      # ======================================================================
+      - name: Clássica — código da tag classica
+        id: classica_codigo
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          ref: classica
+          path: classica-src
+
+      - name: Clássica — Node 20 para o build
+        id: classica_node
+        if: steps.classica_codigo.outcome == 'success'
+        continue-on-error: true
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Clássica — build
+        id: classica_build
+        if: steps.classica_node.outcome == 'success'
+        continue-on-error: true
+        working-directory: classica-src
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Clássica — junta ao site
+        if: steps.classica_build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          rm -rf dist/classica
+          cp -r classica-src/dist dist/classica
+          echo "Clássica publicada junto: $(cd classica-src && git log -1 --format='%h %s')"
+
       # As três actions de Pages sobem JUNTAS, porque a GitHub as versiona em
       # conjunto: configure v5->v6, upload-pages-artifact v3->v5 e deploy v4->v5.
       # A do upload é a que resolve o `upload-artifact@v4` que aparecia no aviso
