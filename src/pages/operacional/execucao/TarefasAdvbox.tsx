@@ -36,8 +36,12 @@ import type { Apenso, Processo } from '@/lib/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import { formatCNJ, formatNome, onlyDigits as dig, sentenceCase } from '@/lib/format'
+import { formatCNJ, formatNome, hojeISO, onlyDigits as dig, sentenceCase } from '@/lib/format'
 import { perguntarDescarte } from '@/lib/descarte'
+import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
+import { BotaoCopiar } from '@/components/BotaoCopiar'
+
+const VISOES_DO_PRAZO = ['fatais', 'sem_prazo'] as const
 
 // ---------- Tipos vindos da Edge Function advbox-tarefas ----------
 interface TarefaAdvbox {
@@ -278,7 +282,12 @@ export default function TarefasAdvbox() {
   const [busca, setBusca] = useState('')
   // Padrão ao abrir: tarefas fatais (com prazo). Só duas visões — "Todas"
   // saiu: era a soma de duas listas que não se comparam entre si.
-  const [filtroPrazo, setFiltroPrazo] = useState<'fatais' | 'sem_prazo'>('fatais')
+  // A visão escolhida fica lembrada entre visitas (lib/lembrarNaTela.ts).
+  const [filtroPrazo, setFiltroPrazo] = useEscolhaLembrada(
+    LEMBRAR.tarefasPrazo,
+    VISOES_DO_PRAZO,
+    'fatais',
+  )
   const [novo, setNovo] = useState(false)
 
   // Busca textual (sem o filtro de prazo) — base para lista e contagens.
@@ -406,6 +415,17 @@ export default function TarefasAdvbox() {
               numero={t.processo}
               className="font-semibold tabular-nums text-texto"
             />
+            {/* COPIAR O NÚMERO (qualidade de vida): clicar nele abre a pasta, e o
+                duplo clique pega só um pedaço do CNJ — copiar para o PJe era
+                selecionar à mão. */}
+            {t.processo && (
+              <BotaoCopiar
+                valor={formatCNJ(t.processo)}
+                rotulo="Copiar o número do processo"
+                aviso="Número copiado."
+                className="-my-1.5 align-middle"
+              />
+            )}
             {cred && (cred.cedente || cred.cessionario) && (
               <>
                 {' · '}
@@ -610,6 +630,8 @@ export function NovaTarefaModal({
    * preencheu sozinha não pode contar como alteração no "Descartar alterações?".
    */
   const [processoInicial, setProcessoInicial] = useState<number | null>(null)
+  /** A data com que a janela abre: hoje, tirado A CADA ABERTURA (a tela vira o dia aberta). */
+  const dataInicial = useMemo(() => (open ? hojeISO() : ''), [open])
 
   const opcoes = useQuery({
     queryKey: ['advbox-tarefas-options'],
@@ -687,6 +709,11 @@ export function NovaTarefaModal({
       setProcessoInicial(null)
       return
     }
+    // A DATA ABRE EM HOJE (qualidade de vida): é a resposta de quase toda tarefa
+    // criada, e o campo é obrigatório. Continua editável; o prazo não ganha valor
+    // padrão — prazo é decisão, não rotina. Não conta como alteração no
+    // "Descartar alterações?" (ver `dataInicial` em lib/formularioDaTarefa.ts).
+    setForm((f) => (f.start_date ? f : { ...f, start_date: dataInicial }))
     if (!processoNumero) return
     const d = dig(processoNumero)
     const found = lawOptions.find((o) => dig(o.numero) === d)
@@ -694,7 +721,7 @@ export function NovaTarefaModal({
       setForm((f) => (f.lawsuit_id ? f : { ...f, lawsuit_id: found.id }))
       setProcessoInicial((atual) => atual ?? found.id)
     }
-  }, [open, lawOptions, processoNumero])
+  }, [open, lawOptions, processoNumero, dataInicial])
 
   const criar = useMutation({
     mutationFn: (lawsuitId: number) =>
@@ -768,7 +795,7 @@ export function NovaTarefaModal({
   const dirty =
     open &&
     !semRemetente &&
-    tarefaAlterada(form, { processoInicial, escolheRemetente })
+    tarefaAlterada(form, { processoInicial, escolheRemetente, dataInicial })
 
   async function fechar() {
     if (dirty && !(await perguntarDescarte())) return

@@ -15,6 +15,9 @@ import { EmptyState, ErrorState, Loading, Table, THead, TH, TBody, TR, TD } from
 import { getLabel, FASE_PROCESSUAL, FASE_ATIVO_ORDEM, FASE_COMPLEMENTAR_ORDEM } from '@/lib/labels'
 import { formatCNJ, formatDate } from '@/lib/format'
 import type { Processo } from '@/lib/types'
+import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
+
+const TRILHAS = ['ativo', 'complementar'] as const
 
 interface FaseRow {
   processo_id: string
@@ -606,7 +609,9 @@ export function FaseProcessual({
 }) {
   const toast = useToast()
   const qc = useQueryClient()
-  const [trilha, setTrilha] = useState<'ativo' | 'complementar'>('ativo')
+  // A trilha escolhida fica lembrada entre visitas (lib/lembrarNaTela.ts). A fase
+  // aberta não: a lista dela muda de um dia para o outro.
+  const [trilha, setTrilha] = useEscolhaLembrada(LEMBRAR.faseTrilha, TRILHAS, 'ativo')
   const [filtro, setFiltro] = useState<{ tipo: 'fase'; codigo: string } | { tipo: 'concluso' } | null>(null)
   const [recentesAbertas, setRecentesAbertas] = useState(true)
   const [buscaProcesso, setBuscaProcesso] = useState('')

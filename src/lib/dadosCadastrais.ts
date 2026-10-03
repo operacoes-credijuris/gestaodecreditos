@@ -58,3 +58,49 @@ export function iniciaisDoNome(nome: string): string {
     .join('')
     .toUpperCase()
 }
+
+/** O que a ficha tem para copiar — os campos como a tela os mostra. */
+export interface FichaParaCopiar {
+  nome: string
+  cpf?: string | null
+  rg?: string | null
+  representante?: string | null
+  banco?: string | null
+  agencia?: string | null
+  conta?: string | null
+  pix?: string | null
+  /** O endereço já em texto corrido (o da prévia da ficha). */
+  endereco?: string | null
+}
+
+/**
+ * Os dados da ficha em texto, um por linha, para colar numa mensagem ou numa
+ * transferência ("Copiar dados" da ficha — revisão de qualidade de vida).
+ *
+ * POR QUE: o comercial copia CPF, banco, agência, conta e Pix o tempo todo, e na
+ * tabela não dá para selecionar — o clique na linha abre a ficha. Aqui sai tudo
+ * de uma vez, rotulado, para quem recebe não confundir agência com conta.
+ *
+ * Campo vazio NÃO vira linha (um "Pix: " em branco parece dado faltando de quem
+ * mandou). Os RÓTULOS SEGUEM O DOCUMENTO, como na tela: 12 dígitos ou mais é
+ * CNPJ, o representante aparece e o RG passa a ser o dele. Sem nenhum dado além
+ * do nome, devolve '' — não há o que copiar.
+ */
+export function textoDaFicha(f: FichaParaCopiar): string {
+  const pj = String(f.cpf ?? '').replace(/\D/g, '').length > 11
+  const linhas: Array<[string, string | null | undefined]> = [
+    [pj ? 'CNPJ' : 'CPF', f.cpf],
+    ['Representante legal', pj ? f.representante : null],
+    [pj ? 'RG do representante' : 'RG', f.rg],
+    ['Banco', f.banco],
+    ['Agência', f.agencia],
+    ['Conta', f.conta],
+    ['Pix', f.pix],
+    ['Endereço', f.endereco],
+  ]
+  const preenchidas = linhas
+    .map(([rotulo, valor]) => [rotulo, String(valor ?? '').trim()] as const)
+    .filter(([, valor]) => valor)
+  if (preenchidas.length === 0) return ''
+  return [`Nome: ${f.nome.trim()}`, ...preenchidas.map(([r, v]) => `${r}: ${v}`)].join('\n')
+}

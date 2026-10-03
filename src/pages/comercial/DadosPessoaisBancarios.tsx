@@ -20,7 +20,7 @@
 // o "Descartar alterações?" ao fechar a ficha com algo digitado. O que o Salvar
 // grava continua em lib/fichaPessoa.ts, com teste.
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, Info, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, Copy, Info, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import {
   chavePessoa,
   processosCrud,
@@ -37,7 +37,7 @@ import {
   type CampoPessoa,
   type CamposParaContrato,
 } from '@/lib/fichaPessoa'
-import { casaBuscaDaFicha, iniciaisDoNome } from '@/lib/dadosCadastrais'
+import { casaBuscaDaFicha, iniciaisDoNome, textoDaFicha } from '@/lib/dadosCadastrais'
 import {
   compilarEndereco,
   cpfCnpjValido,
@@ -74,6 +74,8 @@ import {
 import { useToast } from '@/components/ui/Toast'
 import { perguntarDescarte } from '@/lib/descarte'
 import { avisoDoDigito } from '@/lib/digitoDoDocumento'
+import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
+import { useCopiarTexto } from '@/components/BotaoCopiar'
 
 /**
  * Célula agrupada: pares "rótulo → valor" empilhados (o `.kv` da amostra). A
@@ -200,6 +202,9 @@ const dicasDoContrato = (pj: boolean) =>
         qualificacao: 'Estado civil e profissão. Ex.: "casada, empresária".',
       }
 
+/** As visões que a tela lembra (lib/lembrarNaTela.ts confere o valor guardado). */
+const VISOES_DA_TELA: readonly TipoPessoa[] = ['investidor', 'originador']
+
 /** O id do painel das abas: as abas apontam para ele (aria-controls). */
 const PAINEL = 'painel-dados-cadastrais'
 
@@ -209,8 +214,11 @@ export default function DadosPessoaisBancarios() {
   const salvar = useSalvarInvestidorDados()
   const excluir = useExcluirInvestidorDados()
   const toast = useToast()
+  const copiarTexto = useCopiarTexto()
 
-  const [tipo, setTipo] = useState<TipoPessoa>('investidor')
+  // A visão escolhida fica lembrada entre visitas (lib/lembrarNaTela.ts): quem
+  // cuida dos originadores não volta sempre para os investidores.
+  const [tipo, setTipo] = useEscolhaLembrada<TipoPessoa>(LEMBRAR.cadastrosVisao, VISOES_DA_TELA, 'investidor')
   const visao = VISOES[tipo]
   const rotuloMin = visao.rotulo.toLowerCase()
   const [busca, setBusca] = useState('')
@@ -259,6 +267,8 @@ export default function DadosPessoaisBancarios() {
   // Mesmo par para a busca por CNPJ.
   const [buscandoCnpj, setBuscandoCnpj] = useState(false)
   const reqCnpjRef = useRef(0)
+  /** O que a última busca por CNPJ deu, dito sob o campo. */
+  const [retornoCnpj, setRetornoCnpj] = useState<string | null>(null)
   /** Quais campos do endereço foram preenchidos pela ÚLTIMA busca de CEP. Só
    *  esses podem ser substituídos por uma busca nova; o que foi digitado à mão
    *  fica. */
@@ -362,6 +372,7 @@ export default function DadosPessoaisBancarios() {
     reqCnpjRef.current++
     setBuscandoCep(false)
     setBuscandoCnpj(false)
+    setRetornoCnpj(null)
     if (!municipios) {
       const m = await import('@/lib/municipios')
       setMunicipios(m.MUNICIPIOS_POR_UF)
@@ -468,9 +479,23 @@ export default function DadosPessoaisBancarios() {
       const { buscarCnpj, ufCidadeDoCnpj } = await import('@/lib/cnpj')
       const e = await buscarCnpj(docMascarado)
       if (!valendo()) return
-      if (!e) return
+      // O RETORNO À VISTA (qualidade de vida): a busca travava o campo e o
+      // soltava em silêncio, e o endereço preenchido fica lá embaixo na ficha —
+      // quem digitou não sabia se a Receita respondeu, nem se algo mudou.
+      if (!e) {
+        setRetornoCnpj('Não achei este CNPJ na Receita. Preencha o endereço à mão.')
+        return
+      }
       const m = municipios ?? (await import('@/lib/municipios')).MUNICIPIOS_POR_UF
       if (!valendo()) return
+      const completou = (
+        ['logradouro', 'numero', 'complemento', 'bairro', 'cep'] as const
+      ).some((k) => !form[k].trim() && !!e[k]) || (!form.cidade && !!e.cidade)
+      setRetornoCnpj(
+        completou
+          ? 'Endereço completado pela Receita. Confira antes de salvar.'
+          : 'A ficha já tinha o endereço: a Receita não mudou nada.',
+      )
       setForm((f) => {
         // UF e cidade saem juntas (ver ufCidadeDoCnpj): nunca cidade de uma UF com outra.
         const { uf, cidade } = ufCidadeDoCnpj(f, e, m)
@@ -613,6 +638,20 @@ export default function DadosPessoaisBancarios() {
 
   const pj = ehCnpj(form.cpf)
   const dicas = dicasDoContrato(pj)
+
+  // "COPIAR DADOS" (qualidade de vida): o que está na ficha, rotulado, para colar
+  // numa mensagem ou numa transferência — ver textoDaFicha, com teste. O endereço
+  // é o da prévia, pela mesma regra do Salvar.
+  const textoParaCopiar = editando
+    ? textoDaFicha({
+        nome: editando.nome,
+        ...form,
+        endereco: enderecoDaFicha(
+          form,
+          editando.novo ? undefined : dados.data?.get(chavePessoa(tipo, editando.chave))?.endereco,
+        ).texto,
+      })
+    : ''
 
   return (
     <div>
@@ -827,6 +866,18 @@ export default function DadosPessoaisBancarios() {
             <Button variant="ghost" className="mr-auto" onClick={cancelarFicha}>
               Cancelar
             </Button>
+            {/* Só na ficha de quem já existe e com algo além do nome: no cadastro
+                novo, quem digitou acabou de ter os dados na mão. */}
+            {!editando?.novo && textoParaCopiar && (
+              <Button
+                variant="outline"
+                icon={<Copy className="h-[16px] w-[16px]" />}
+                onClick={() => void copiarTexto(textoParaCopiar, 'Dados copiados.')}
+                title="Copia nome, documento, dados bancários, Pix e endereço, um por linha"
+              >
+                Copiar dados
+              </Button>
+            )}
             {/* "SALVANDO…" ENQUANTO GRAVA (amostra): o giro sozinho não diz o
                 que está acontecendo, e a ficha leva um instante para voltar. */}
             <Button loading={salvar.isPending} onClick={handleSalvar}>
@@ -872,7 +923,7 @@ export default function DadosPessoaisBancarios() {
                     sozinha no 12º dígito. */}
                 <Field
                   label={pj ? 'CNPJ' : 'CPF / CNPJ'}
-                  hint={buscandoCnpj ? 'Buscando na Receita…' : undefined}
+                  hint={buscandoCnpj ? 'Buscando na Receita…' : (retornoCnpj ?? undefined)}
                   // Dígito verificador errado quase sempre é erro de digitação,
                   // e num campo desses o erro vira dinheiro no lugar errado.
                   // SÓ COM O DOCUMENTO COMPLETO (11 ou 14 dígitos), como na
@@ -884,10 +935,16 @@ export default function DadosPessoaisBancarios() {
                     className="tabular-nums"
                     placeholder={pj ? '00.000.000/0000-00' : '000.000.000-00'}
                     value={form.cpf}
-                    disabled={buscandoCnpj}
+                    // readOnly, e não disabled: o campo desabilitado PERDIA O FOCO
+                    // no meio da digitação, e quem ia de Tab para o próximo campo
+                    // recomeçava do topo da janela. Trava a edição do mesmo jeito.
+                    readOnly={buscandoCnpj}
+                    aria-busy={buscandoCnpj}
                     onChange={(e) => {
                       const valor = formatCpfCnpjInput(e.target.value)
                       setForm((f) => ({ ...f, cpf: valor }))
+                      // O retorno era do documento de antes.
+                      setRetornoCnpj(null)
                       // CNPJ completo traz o endereço da empresa. Só com 14
                       // dígitos: CPF não tem equivalente público (ver lib/cnpj.ts).
                       if (onlyDigits(valor).length === 14) void preencherPorCnpj(valor)

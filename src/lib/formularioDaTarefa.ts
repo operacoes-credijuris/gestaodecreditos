@@ -6,8 +6,9 @@
 //   - o processo que veio escolhido da publicação ("Criar tarefa" de uma
 //     publicação já casa o número com a lista do ADVBOX);
 //   - o remetente de quem não é administrador, que é sempre a própria pessoa e
-//     entra sem campo na tela.
-// Escolher OUTRO processo, ou o remetente quando a pessoa pode escolher (admin),
+//     entra sem campo na tela;
+//   - a data, que abre em hoje (revisão de qualidade de vida, 03/10/2026).
+// Escolher OUTRO processo, OUTRA data, ou o remetente quando a pessoa pode escolher (admin),
 // conta como alteração.
 
 export interface FormularioDaTarefa {
@@ -27,17 +28,20 @@ export function tarefaAlterada(
   {
     processoInicial,
     escolheRemetente,
+    dataInicial = '',
   }: {
     /** O processo que a janela já abriu escolhido (o da publicação), ou null. */
     processoInicial: number | null
     /** A pessoa escolhe o remetente (admin)? Senão ele é preenchido sozinho. */
     escolheRemetente: boolean
+    /** A data com que a janela abriu preenchida (hoje); '' quando abriu vazia. */
+    dataInicial?: string
   },
 ): boolean {
   return (
     form.lawsuit_id !== processoInicial ||
     !!form.tasks_id ||
-    !!form.start_date ||
+    form.start_date !== dataInicial ||
     !!form.date_deadline ||
     (escolheRemetente && !!form.from) ||
     form.guests.length > 0 ||

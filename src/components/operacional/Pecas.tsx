@@ -180,19 +180,28 @@ export function CabecalhoDaFicha({
   etiqueta,
   titulo,
   apoio,
+  acao,
 }: {
   etiqueta: ReactNode
   titulo: ReactNode
   apoio?: ReactNode
+  /**
+   * Ao lado do título — o "copiar o número". FORA do <h2>, para o nome da ficha
+   * lido pelo leitor de tela continuar sendo só o número.
+   */
+  acao?: ReactNode
 }) {
   return (
     <div className="min-w-0">
       <p className="font-display text-xs font-bold uppercase tracking-wider text-marca-texto">
         {etiqueta}
       </p>
-      <h2 className="font-display mt-0.5 break-words text-lg font-extrabold tabular-nums tracking-tight text-texto">
-        {titulo}
-      </h2>
+      <div className="mt-0.5 flex items-center gap-1">
+        <h2 className="font-display min-w-0 break-words text-lg font-extrabold tabular-nums tracking-tight text-texto">
+          {titulo}
+        </h2>
+        {acao}
+      </div>
       {apoio && <p className="mt-0.5 text-xs text-texto-2">{apoio}</p>}
     </div>
   )

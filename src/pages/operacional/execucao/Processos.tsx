@@ -54,6 +54,7 @@ import {
 } from '@/lib/labels'
 import { formatCNJ, formatDate, hojeISO, mesesDepois, onlyDigits } from '@/lib/format'
 import { casaBusca } from '@/lib/buscaDaTela'
+import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
 import {
   brlCurto,
   MESES_ALERTA_EXPECTATIVA,
@@ -92,6 +93,12 @@ const DOT_STATUS: Record<string, string> = {
   gray: 'bg-texto-3',
 }
 
+// As escolhas que a tela lembra (lib/lembrarNaTela.ts confere o valor guardado
+// contra estas listas: filtro que deixou de existir volta ao padrão).
+const FILTROS_STATUS = [...Object.keys(STATUS_PROCESSO), 'todos']
+const ORDENS = ['data_aquisicao', 'expectativa_liquidacao', 'ultima_movimentacao'] as const
+const SENTIDOS = ['asc', 'desc'] as const
+
 export default function Processos() {
   const { useList, useRemove } = processosCrud
   const { data, isLoading, isError, error, refetch } = useList()
@@ -107,15 +114,19 @@ export default function Processos() {
   const limiteAlerta = useMemo(() => mesesDepois(hoje, MESES_ALERTA_EXPECTATIVA), [hoje])
 
   const [busca, setBusca] = useState('')
-  // Padrão ao abrir a página: mostra apenas processos ativos.
-  const [filtroStatus, setFiltroStatus] = useState('ativo')
+  // Padrão ao abrir a página: mostra apenas processos ativos. O FILTRO E A
+  // ORDENAÇÃO ESCOLHIDOS FICAM LEMBRADOS entre visitas (lib/lembrarNaTela.ts):
+  // quem trabalha nos Encerrados não refaz o clique a cada vez. A busca não.
+  const [filtroStatus, setFiltroStatus] = useEscolhaLembrada(
+    LEMBRAR.creditosStatus,
+    FILTROS_STATUS,
+    'ativo',
+  )
   // Ordenação padrão: data de aquisição, do mais antigo para o mais novo.
   // ultima_movimentacao não é campo do processo — vem do cache do ADVBOX, e o
   // comparador resolve pelo mapa (ver `lista`).
-  const [sortBy, setSortBy] = useState<
-    'data_aquisicao' | 'expectativa_liquidacao' | 'ultima_movimentacao'
-  >('data_aquisicao')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [sortBy, setSortBy] = useEscolhaLembrada(LEMBRAR.creditosOrdem, ORDENS, 'data_aquisicao')
+  const [sortDir, setSortDir] = useEscolhaLembrada(LEMBRAR.creditosSentido, SENTIDOS, 'asc')
   /** O crédito na janela de cadastro: o vazio (novo) ou o que se edita. */
   const [formCredito, setFormCredito] = useState<Partial<Processo> | null>(null)
   const [toDelete, setToDelete] = useState<Processo | null>(null)
@@ -135,10 +146,8 @@ export default function Processos() {
     navigate(location.pathname, { replace: true, state: null })
   }, [abrirCredito, data, navigate, location.pathname])
 
-  function toggleSort(
-    col: 'data_aquisicao' | 'expectativa_liquidacao' | 'ultima_movimentacao',
-  ) {
-    if (sortBy === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+  function toggleSort(col: (typeof ORDENS)[number]) {
+    if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
     else {
       setSortBy(col)
       setSortDir('asc')
