@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Inbox, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Button } from './Button'
@@ -149,8 +149,31 @@ export function ErrorState({
   onRetry,
 }: {
   message?: string
-  onRetry?: () => void
+  /**
+   * Devolvendo a promessa (o `refetch` do React Query devolve), o botão gira e
+   * diz "Tentando…" até ela terminar — o item "Novo" da amostra. Sem promessa,
+   * o botão é o de sempre.
+   */
+  onRetry?: () => void | Promise<unknown>
 }) {
+  const [tentando, setTentando] = useState(false)
+  const montado = useRef(true)
+  useEffect(() => {
+    montado.current = true
+    return () => {
+      montado.current = false
+    }
+  }, [])
+  function tentar() {
+    if (!onRetry || tentando) return
+    const r = onRetry()
+    if (r && typeof (r as Promise<unknown>).finally === 'function') {
+      setTentando(true)
+      void (r as Promise<unknown>)
+        .catch(() => {})
+        .finally(() => montado.current && setTentando(false))
+    }
+  }
   return (
     // Mesmo desenho do vazio, com a placa no vermelho de perigo (o `.ill.bad` da
     // amostra). O título fica em vermelho; o motivo, no cinza de leitura — em
@@ -165,11 +188,12 @@ export function ErrorState({
         <Button
           variant="outline"
           size="sm"
-          icon={<RefreshCw className="h-4 w-4" />}
-          onClick={onRetry}
+          icon={<RefreshCw className={cn('h-4 w-4', tentando && 'animate-spin')} />}
+          onClick={tentar}
+          disabled={tentando}
           className="mt-2"
         >
-          Tentar novamente
+          {tentando ? 'Tentando…' : 'Tentar novamente'}
         </Button>
       )}
     </div>

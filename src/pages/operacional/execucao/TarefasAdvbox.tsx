@@ -37,6 +37,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { formatCNJ, formatNome, onlyDigits as dig, sentenceCase } from '@/lib/format'
+import { perguntarDescarte } from '@/lib/descarte'
 
 // ---------- Tipos vindos da Edge Function advbox-tarefas ----------
 interface TarefaAdvbox {
@@ -492,7 +493,7 @@ export default function TarefasAdvbox() {
         </Card>
       ) : isError ? (
         <Card>
-          <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
         </Card>
       ) : data?.sem_correspondencia ? (
         // Lista vazia por falta de vínculo, não por ausência de trabalho — dizer
@@ -769,8 +770,8 @@ export function NovaTarefaModal({
     !semRemetente &&
     tarefaAlterada(form, { processoInicial, escolheRemetente })
 
-  function fechar() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+  async function fechar() {
+    if (dirty && !(await perguntarDescarte())) return
     onClose()
   }
 
@@ -820,7 +821,7 @@ export function NovaTarefaModal({
       ) : opcoes.isError ? (
         <ErrorState
           message={(opcoes.error as Error)?.message}
-          onRetry={() => void opcoes.refetch()}
+          onRetry={() => opcoes.refetch()}
         />
       ) : semRemetente ? (
         <div className="space-y-1">

@@ -1,4 +1,6 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { lerPedidoDaBusca } from '@/lib/buscaGeral'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -119,6 +121,19 @@ export default function Processos() {
   const [toDelete, setToDelete] = useState<Processo | null>(null)
   // Crédito com a ficha aberta no painel lateral (clique na linha).
   const [detalhe, setDetalhe] = useState<Processo | null>(null)
+
+  // VEIO DA BUSCA GERAL (Ctrl+K) com um crédito escolhido: abre a ficha dele,
+  // como o clique na linha, assim que a lista chega. O pedido é apagado do
+  // histórico logo depois — senão Voltar até aqui reabriria a ficha.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { abrirCredito } = lerPedidoDaBusca(location.state)
+  useEffect(() => {
+    if (!abrirCredito || !data) return
+    const p = data.find((x) => x.id === abrirCredito)
+    if (p) setDetalhe(p)
+    navigate(location.pathname, { replace: true, state: null })
+  }, [abrirCredito, data, navigate, location.pathname])
 
   function toggleSort(
     col: 'data_aquisicao' | 'expectativa_liquidacao' | 'ultima_movimentacao',

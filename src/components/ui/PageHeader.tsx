@@ -1,5 +1,15 @@
-import type { ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 import { cn } from '@/lib/cn'
+
+/**
+ * O QUE VAI AO LADO DO TÍTULO DA TELA (o h1), posto pela moldura do app — hoje,
+ * o "?" da ajuda da tela (item "Novo" da amostra).
+ *
+ * POR CONTEXTO, E NÃO POR PROP: assim toda tela ganha a ajuda sem que cada uma
+ * precise passá-la, e as props do PageHeader não mudam. Sem provedor (o padrão),
+ * o cabeçalho é exatamente o de antes. Só o h1: o cabeçalho de aba (h2) não leva.
+ */
+export const AcessorioDoTitulo = createContext<ReactNode>(null)
 
 export function PageHeader({
   title,
@@ -18,19 +28,35 @@ export function PageHeader({
   nivel?: 1 | 2
 }) {
   const Titulo = nivel === 1 ? 'h1' : 'h2'
+  const acessorio = useContext(AcessorioDoTitulo)
+  const comAcessorio = nivel === 1 && acessorio
   return (
     // O `.page-head` da amostra: título de 26px em extranegrito e as ações
     // alinhadas pela BASE do bloco (com a descrição), não pelo meio do título.
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <Titulo
-          className={cn(
-            'font-display font-extrabold tracking-tight text-texto',
-            nivel === 1 ? 'text-3xl' : 'text-xl',
-          )}
-        >
-          {title}
-        </Titulo>
+        {(() => {
+          const titulo = (
+            <Titulo
+              className={cn(
+                'font-display font-extrabold tracking-tight text-texto',
+                nivel === 1 ? 'text-3xl' : 'text-xl',
+              )}
+            >
+              {title}
+            </Titulo>
+          )
+          // AO LADO do h1, e não dentro: dentro, o nome do botão entraria no
+          // nome do título que o leitor de tela anuncia.
+          return comAcessorio ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {titulo}
+              {acessorio}
+            </div>
+          ) : (
+            titulo
+          )
+        })()}
         {description && (
           <p className="mt-1 text-corpo text-texto-2">{description}</p>
         )}

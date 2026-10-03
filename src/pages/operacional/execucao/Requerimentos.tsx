@@ -36,6 +36,7 @@ import { DrawerHistorico } from '@/components/Movimentacoes'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate, onlyDigits, vazioNull } from '@/lib/format'
 import { casaBusca } from '@/lib/buscaDaTela'
+import { perguntarDescarte } from '@/lib/descarte'
 
 const VAZIO: Partial<Requerimento> = {
   numero_protocolo: '',
@@ -89,8 +90,8 @@ export default function Requerimentos() {
 
   // Fecha pelo botão "Cancelar" respeitando alterações pendentes (o Modal já
   // cobre X/overlay/Escape via prop dirty).
-  function fecharForm() {
-    if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+  async function fecharForm() {
+    if (dirty && !(await perguntarDescarte())) return
     setEditing(null)
   }
 

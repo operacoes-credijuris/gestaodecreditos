@@ -14,6 +14,7 @@ import { CabecalhoDaFicha, SecaoDaFicha } from '@/components/operacional/Pecas'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 import { formatCNJ, vazioNull } from '@/lib/format'
+import { perguntarDescarte } from '@/lib/descarte'
 
 type ParentField = 'processo_id' | 'requerimento_id'
 
@@ -321,9 +322,9 @@ export function useApensosManager(parentField: ParentField) {
             <>
               <Button
                 variant="outline"
-                onClick={() => {
+                onClick={async () => {
                   // Botão próprio não passa pela confirmação do Modal — checa dirty aqui.
-                  if (dirty && !window.confirm('Descartar alterações não salvas?')) return
+                  if (dirty && !(await perguntarDescarte())) return
                   setEditing(null)
                 }}
               >
