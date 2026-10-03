@@ -18,6 +18,8 @@ import {
   regraDoCache,
   type Emolumentos,
 } from "../_shared/emolumentos.ts";
+// O CARTÓRIO DA PLANILHA É O DA TELA (03/10/2026) — ver o módulo.
+import { CHAVE_EMOLUMENTOS_PRECIFICADOS, regraParaPrecificar } from "../_shared/cartorioDaTela.ts";
 import { municipioDoEnte, resolverUf, type OrigemUf } from "../_shared/tribunais.ts";
 import {
   capNotas,
@@ -2066,7 +2068,10 @@ async function refinarDados(
   const notas = notasKommo.trim() ? `\n\nANOTAÇÕES DO CARD NO KOMMO (do comercial):\n${capNotas(notasKommo)}` : '';
   mensagens.push({
     role: 'user',
-    content: `ANÁLISE ATUAL (JSON):\n${JSON.stringify(dadosAtuais)}${notas}\n\nPEDIDO:\n${instrucao}`,
+    // SEM A MARCA DO CARTÓRIO (`_shared/cartorioDaTela.ts`): é a tabela inteira
+    // do estado, que a revisão não lê nem edita — só gastaria tokens. A rodada
+    // regrava a marca depois de precificar.
+    content: `ANÁLISE ATUAL (JSON):\n${JSON.stringify({ ...dadosAtuais, [CHAVE_EMOLUMENTOS_PRECIFICADOS]: undefined })}${notas}\n\nPEDIDO:\n${instrucao}`,
   });
   // max_tokens curto de propósito: a saída agora é um patch de poucos campos, e
   // um teto alto só dá margem para a resposta demorar.
@@ -3430,8 +3435,10 @@ Deno.serve(async (req) => {
     const origemUf = origemDoCredito(dados);
     const ufCredito = origemUf.uf;
     const recebida = body.emolumentos as Emolumentos | undefined;
-    const daTela: Emolumentos | null =
-      recebida && recebida.regra && (!ufCredito || recebida.uf === ufCredito) ? recebida : null;
+    // NO 'salvar', A REGRA QUE PRECIFICOU A TELA MANDA — ver
+    // `_shared/cartorioDaTela.ts`: a regra do corpo e a do cache podem ter
+    // chegado depois do preço que a pessoa viu, e a planilha sairia com outro.
+    const fonteDaRegra = regraParaPrecificar<Emolumentos>(acao, dados, recebida ?? null, ufCredito);
     // SEGUNDO CRÉDITO DO MESMO ESTADO. Se a tabela já foi levantada alguma vez
     // este ano, ela está a uma consulta de distância — e aí o preço já sai com
     // escritura e registro na PRIMEIRA resposta. Sem isto, mesmo com a regra
@@ -3443,7 +3450,12 @@ Deno.serve(async (req) => {
     // derrubava o worker; quando não há tabela, `falta_regra` continua indo
     // para a tela e é ela que pede, na requisição separada de sempre.
     const emolumentos: Emolumentos | null =
-      daTela ?? (ufCredito ? await regraDoCache(ufCredito, sbAdmin) : null);
+      fonteDaRegra.tipo === 'PRONTA'
+        ? fonteDaRegra.emolumentos
+        : ufCredito ? await regraDoCache(ufCredito, sbAdmin) : null;
+    // A MARCA DA RODADA: a regra que precificou esta resposta (null = sem
+    // cartório). Volta da tela dentro de `dados`, e é ela que o 'salvar' usa.
+    dados[CHAVE_EMOLUMENTOS_PRECIFICADOS] = emolumentos ?? null;
 
     // 3d. Calibragem do deságio — o cartório entra DENTRO dela, por preço.
     // AS PARCELAS FECHAM? Conferência de código, não de prompt.
