@@ -19,7 +19,12 @@ import {
   nomeDaColuna,
   PRAZO_PARADO,
   temCotacao,
-  textoDaBusca,
+  casaComABusca,
+  indiceDaBusca,
+  lerOrdem,
+  passoDaTecla,
+  prepararBusca,
+  proximoCard,
   textoDosDias,
 } from '@/lib/quadroDaAnalise'
 import { espelhoDosTresFunis } from './fixtures/kanbans'
@@ -286,8 +291,11 @@ describe('resultado da busca', () => {
   })
 })
 
-describe('o texto da busca, montado uma vez por card', () => {
-  // A REGRA DE ANTES, campo a campo: é contra ela que o texto montado se mede.
+describe('a busca, montada uma vez por card', () => {
+  // MUDOU DE PROPÓSITO (qualidade de vida, 03/10/2026): o texto montado era
+  // `textoDaBusca`, só em minúsculas, comparado com `includes`. A busca passou a
+  // tolerar acento e o número do processo sem pontuação; o teste mede, contra a
+  // regra de antes, que TUDO o que ela achava continua achando — a regra alargou.
   const casavaAntes = (x: KommoLead, q: string) =>
     [x.nome, x.processo_cnj, x.responsavel_nome, ...(x.notas ?? []).map((n) => n.texto), x.nota_texto]
       .filter(Boolean)
@@ -299,26 +307,104 @@ describe('o texto da busca, montado uma vez por card', () => {
     nota_texto: 'Primeira nota',
     notas: [
       { id: 1, texto: 'Cedente enviou o RG', criado_em: null, autor: null },
-      { id: 2, texto: 'Falta o COMPROVANTE de endereço', criado_em: null, autor: null },
+      { id: 2, texto: 'Falta o COMPROVANTE de endereço; CPF 123.456.789-00', criado_em: null, autor: null },
+      { id: 3, texto: 'Valor de R$ 1.000,00 em 2024', criado_em: null, autor: null },
     ],
   })
+  const casa = (x: KommoLead, q: string) => casaComABusca(indiceDaBusca(x), prepararBusca(q))
 
   it('acha em qualquer campo e em qualquer anotação, sem caixa', () => {
-    const t = textoDaBusca(c)
-    for (const q of ['maria', '0001234-56', 'luiz', 'enviou o rg', 'comprovante', 'primeira']) {
-      expect(t.includes(q)).toBe(true)
+    for (const q of ['maria', '0001234-56', 'luiz', 'enviou o rg', 'comprovante', 'primeira', 'MARIA']) {
+      expect(casa(c, q)).toBe(true)
     }
   })
 
-  it('responde igual à busca campo a campo — inclusive sem juntar o fim de um campo ao começo do outro', () => {
-    const t = textoDaBusca(c)
+  it('o que achava antes continua achando — e não junta o fim de um campo ao começo do outro', () => {
     for (const q of ['maria', 'principal', 'rg', 'luizcedente', 'principal0001', 'rgfalta', 'xyz', 'endereço']) {
-      expect(t.includes(q)).toBe(casavaAntes(c, q))
+      expect(casa(c, q)).toBe(casavaAntes(c, q))
     }
+  })
+
+  it('tolera acento, maiúscula e espaço repetido', () => {
+    expect(casa(c, 'endereco')).toBe(true)
+    expect(casa(c, 'ENDEREÇO')).toBe(true)
+    expect(casa(c, 'maria   da silva')).toBe(true)
+  })
+
+  it('acha o CNJ colado sem pontuação ou com outra pontuação, e o CPF cru', () => {
+    expect(casa(c, '00012345620208090051')).toBe(true)
+    expect(casa(c, '0001234.56.2020')).toBe(true)
+    expect(casa(c, '000123456')).toBe(true)
+    expect(casa(c, '12345678900')).toBe(true)
+  })
+
+  it('não inventa número juntando os de uma anotação', () => {
+    // "R$ 1.000,00 em 2024": a vírgula e o espaço separam números.
+    expect(casa(c, '1000002024')).toBe(false)
+    expect(casa(c, '0002024')).toBe(false)
+    // O CNJ de outro processo não acha este card.
+    expect(casa(c, '99999995620208090051')).toBe(false)
+  })
+
+  it('com letra no meio, é texto — os dígitos das duas metades não se juntam', () => {
+    expect(prepararBusca('Maria 0001')?.digitos).toBe('')
+    expect(casa(c, 'silva 0001234')).toBe(false)
+  })
+
+  it('número curto não compara por dígito; busca vazia casa com tudo', () => {
+    expect(prepararBusca('20')?.digitos).toBe('')
+    expect(prepararBusca('   ')).toBeNull()
+    expect(casa(c, '')).toBe(true)
   })
 
   it('card sem nada além do id não quebra', () => {
     const vazio = card(8, null, { nome: null as unknown as string, notas: undefined as unknown as [] })
-    expect(textoDaBusca(vazio)).toBe('')
+    expect(indiceDaBusca(vazio)).toEqual({ texto: '', digitos: '' })
+    expect(casa(vazio, 'maria')).toBe(false)
+  })
+})
+
+describe('a ordem lembrada', () => {
+  it('só as duas ordens que existem; o resto é o padrão', () => {
+    expect(lerOrdem('parado')).toBe('parado')
+    expect(lerOrdem('recente')).toBe('recente')
+    for (const v of [null, undefined, '', 'antigo', 1, {}]) expect(lerOrdem(v)).toBe('recente')
+  })
+})
+
+describe('J e K andam entre os cards', () => {
+  type Mod = Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>
+  const tecla = (key: string, extra: Mod = {}) => ({
+    key,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...extra,
+  })
+
+  it('j desce, k sobe; com modificador ou maiúscula, nada', () => {
+    expect(passoDaTecla(tecla('j'))).toBe(1)
+    expect(passoDaTecla(tecla('k'))).toBe(-1)
+    expect(passoDaTecla(tecla('J', { shiftKey: true }))).toBeNull()
+    expect(passoDaTecla(tecla('j', { ctrlKey: true }))).toBeNull()
+    expect(passoDaTecla(tecla('k', { altKey: true }))).toBeNull()
+    expect(passoDaTecla(tecla('k', { metaKey: true }))).toBeNull()
+  })
+
+  it('nenhuma outra tecla vira atalho — nada que aperte botão de card', () => {
+    for (const k of ['Enter', ' ', 'ArrowDown', 'ArrowUp', 'Escape', 'a', 'r', 'f', 'n']) {
+      expect(passoDaTecla(tecla(k))).toBeNull()
+    }
+  })
+
+  it('sem card em foco, vai ao primeiro; na ponta, fica onde está', () => {
+    expect(proximoCard(5, -1, 1)).toBe(0)
+    expect(proximoCard(5, -1, -1)).toBe(0)
+    expect(proximoCard(5, 0, 1)).toBe(1)
+    expect(proximoCard(5, 3, -1)).toBe(2)
+    expect(proximoCard(5, 4, 1)).toBeNull()
+    expect(proximoCard(5, 0, -1)).toBeNull()
+    expect(proximoCard(0, -1, 1)).toBeNull()
   })
 })

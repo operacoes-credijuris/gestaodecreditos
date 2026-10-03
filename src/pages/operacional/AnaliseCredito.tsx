@@ -125,21 +125,31 @@ import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { CaixaDeAviso, DicaDeAviso, Selo, icSelo } from '@/components/analise/Pecas'
 import { haDialogoAberto } from '@/lib/dialogo'
+import { estaDigitando } from '@/lib/atalhos'
+import { gravarPreferencia, lerPreferencia } from '@/lib/preferencias'
+import { apagarRascunho, guardarRascunho, rascunhoGuardado, type Rascunho } from '@/lib/rascunhoDoCard'
 import {
   achadosDaBusca,
   camposDoTitulo,
+  casaComABusca,
   diasNaEtapa,
   estaParado,
   fasesDoQuadro,
   filtrarEOrdenar,
   idadeCurta,
+  indiceDaBusca,
   larguraDaBarra,
+  lerOrdem,
   nomeDaColuna,
+  passoDaTecla,
   POR_VEZ,
   PRAZO_PARADO,
+  PREF_ORDEM_DA_ANALISE,
+  prepararBusca,
+  proximoCard,
   temCotacao,
-  textoDaBusca,
   textoDosDias,
+  type ConsultaDaBusca,
   type FiltroRapido,
   type OrdemDaLista,
 } from '@/lib/quadroDaAnalise'
@@ -862,9 +872,48 @@ function JanelaDeMensagem({
   onConfirmar: (acao: AcaoTela, mensagem: string) => Promise<void>
   onFechar: () => void
 }) {
-  const [mensagem, setMensagem] = useState(sugestao)
-  const [textoDoResumo, setTextoDoResumo] = useState(resumo ?? '')
   const comResumo = resumo !== null
+  // O RASCUNHO DESTA JANELA (ver rascunhoDoCard.ts): pelo card E pelas saídas —
+  // o motivo escrito para reprovar não reaparece na janela de aprovar.
+  const leadId = lead.kommo_lead_id
+  const saidas = acoes.map((a) => a.statusId).join('-')
+  const lugarDaMensagem = `mensagem.${saidas}`
+  const lugarDoResumo = `resumo.${saidas}`
+  const [recuperado, setRecuperado] = useState(() => {
+    const m = rascunhoGuardado(leadId, lugarDaMensagem)
+    const r = comResumo ? rascunhoGuardado(leadId, lugarDoResumo) : null
+    return { mensagem: m, resumo: r, maisNovo: [m, r].reduce<Rascunho | null>((a, x) => (x && (!a || x.em > a.em) ? x : a), null) }
+  })
+  const [mensagem, setMensagem] = useState(recuperado.mensagem?.texto ?? sugestao)
+  const [textoDoResumo, setTextoDoResumo] = useState(recuperado.resumo?.texto ?? resumo ?? '')
+  // GUARDADO SÓ O QUE DIFERE DO SUGERIDO: o texto que a tela mesma preencheu não
+  // é rascunho de ninguém.
+  const mudarMensagem = (v: string) => {
+    setMensagem(v)
+    if (v.trim() === sugestao.trim()) apagarRascunho(leadId, lugarDaMensagem)
+    else guardarRascunho(leadId, lugarDaMensagem, v)
+  }
+  const mudarResumo = (v: string) => {
+    setTextoDoResumo(v)
+    if (v.trim() === (resumo ?? '').trim()) apagarRascunho(leadId, lugarDoResumo)
+    else guardarRascunho(leadId, lugarDoResumo, v)
+  }
+  const esquecerRascunho = () => {
+    apagarRascunho(leadId, lugarDaMensagem)
+    apagarRascunho(leadId, lugarDoResumo)
+  }
+  /** "Descartar rascunho": os campos voltam ao que a janela sugere ao abrir. */
+  const descartarRascunho = () => {
+    esquecerRascunho()
+    setMensagem(sugestao)
+    setTextoDoResumo(resumo ?? '')
+    setRecuperado({ mensagem: null, resumo: null, maisNovo: null })
+  }
+  /** Fechar descartando (já perguntado, ou nada a perder): o rascunho vai junto. */
+  const fecharDescartando = () => {
+    esquecerRascunho()
+    onFechar()
+  }
   const [erro, setErro] = useState<string | null>(null)
   /** Qual saída está em curso — as outras ficam travadas enquanto isso. */
   const [emCurso, setEmCurso] = useState<number | null>(null)
@@ -914,7 +963,7 @@ function JanelaDeMensagem({
     // descartava o texto digitado sem perguntar — e é o botão que está mais
     // perto do cursor de quem acabou de escrever.
     if (sujo && !(await perguntarDescarte())) return
-    onFechar()
+    fecharDescartando()
   }
 
   return (
@@ -924,7 +973,7 @@ function JanelaDeMensagem({
       // memória de "já movido" era apagada antes de o movimento terminar e
       // gravada depois — e o próximo movimento do card para esta coluna, na
       // sessão, seria pulado; e a falha da nota caía numa janela que não existia.
-      onClose={trabalhando ? () => undefined : onFechar}
+      onClose={trabalhando ? () => undefined : fecharDescartando}
       title={titulo}
       // O CARD EMBAIXO, e não colado no título: são duas informações de peso
       // diferente — o que se vai fazer, e sobre qual crédito. Juntas numa linha
@@ -964,6 +1013,9 @@ function JanelaDeMensagem({
                 setEmCurso(acao.statusId)
                 try {
                   await onConfirmar(acao, notaDe(acao))
+                  // ENVIADO, O RASCUNHO SAI. Com falha (inclusive a da nota com o
+                  // card já movido), ele fica — o texto ainda não chegou ao card.
+                  esquecerRascunho()
                 } catch (e) {
                   setErro((e as Error)?.message ?? String(e))
                 } finally {
@@ -985,6 +1037,7 @@ function JanelaDeMensagem({
         </div>
       }
     >
+      {recuperado.maisNovo && <AvisoDoRascunho rascunho={recuperado.maisNovo} onDescartar={descartarRascunho} />}
       {semResumo && (
         <CaixaDeAviso tom="aviso" className="mb-3">
           {comResumo
@@ -997,7 +1050,9 @@ function JanelaDeMensagem({
           é quem sabe completá-la —, e só entra na nota se a saída for aprovar.
           Assim ele nunca vira, por engano, a razão de uma reprovação. */}
       {comResumo && (
-        <details className="mb-3 rounded-campo border border-borda bg-superficie-2" open={semResumo}>
+        // ABERTA TAMBÉM COM O RESUMO RECUPERADO DO RASCUNHO: fechada, a mudança
+        // feita antes passaria sem ser vista e iria para o card na aprovação.
+        <details className="mb-3 rounded-campo border border-borda bg-superficie-2" open={semResumo || Boolean(recuperado.resumo)}>
           <summary className="flex min-h-[36px] cursor-pointer items-center gap-2 px-4 py-2 text-corpo font-semibold text-texto">
             <FileText className={IC} aria-hidden />
             Resumo da oportunidade
@@ -1011,7 +1066,7 @@ function JanelaDeMensagem({
               disabled={trabalhando}
               aria-label="Resumo da oportunidade"
               placeholder="O que se está comprando: cedente, processo, ente devedor, objeto, valor líquido validado e prazo — é o que a proposta vai ler."
-              onChange={(e) => setTextoDoResumo(e.target.value)}
+              onChange={(e) => mudarResumo(e.target.value)}
             />
             <p className="mt-1 text-sm text-texto-3">
               Complete o que o motor deixou "a confirmar" (a extensão da cessão, por exemplo). Nas outras
@@ -1033,7 +1088,7 @@ function JanelaDeMensagem({
             ? 'Por que o card está sendo movido. Quem lê não tem a análise à mão.'
             : 'Opcional — o que o próximo a pegar este card precisa saber.'
         }
-        onChange={(e) => setMensagem(e.target.value)}
+        onChange={(e) => mudarMensagem(e.target.value)}
       />
       {exigeMotivo && mensagem.trim().length > 0 && mensagem.trim().length < 10 && (
         <DicaDeAviso>Escreva a razão por extenso — ela fica no card como registro da decisão.</DicaDeAviso>
@@ -1044,6 +1099,27 @@ function JanelaDeMensagem({
         </CaixaDeAviso>
       )}
     </Modal>
+  )
+}
+
+/**
+ * "RASCUNHO RECUPERADO": o texto que voltou ao campo diz de onde veio — sem
+ * isto, um motivo escrito há dias se leria como sugestão da tela. O
+ * "Descartar rascunho" volta o campo ao que a janela sugere ao abrir.
+ */
+function AvisoDoRascunho({ rascunho, onDescartar }: { rascunho: Rascunho; onDescartar: () => void }) {
+  return (
+    <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-texto-3" role="status">
+      <History className="h-[14px] w-[14px] flex-none" aria-hidden />
+      <span>Rascunho recuperado — escrito em {formatDateTime(new Date(rascunho.em).toISOString())} e não enviado.</span>
+      <button
+        type="button"
+        onClick={onDescartar}
+        className="inline-flex h-[24px] items-center rounded-controle px-1.5 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
+      >
+        Descartar rascunho
+      </button>
+    </p>
   )
 }
 
@@ -1823,14 +1899,19 @@ function BotaoAnexarEMover({
  *
  * O RASCUNHO NÃO SE PERDE AO FECHAR: clicar fora ou apertar Esc fecha a caixa e
  * mantém o texto, e o botão fica marcado (âmbar, com o ponto) enquanto houver
- * rascunho. Só o envio bem-sucedido limpa.
+ * rascunho. Só o envio bem-sucedido limpa (ou apagar o texto à mão). Desde
+ * 03/10/2026 ele fica guardado no navegador, por card: antes sumia quando o
+ * card saía da tela.
  *
  * "ANOTAR" COM TEXTO desde a onda 2 (amostra): era um ícone de 20 px ao lado do
  * título; virou botão com rótulo, na zona de ações, com alvo de 32 px.
  */
-function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<void> }) {
+function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (texto: string) => Promise<void> }) {
   const [aberto, setAberto] = useState(false)
-  const [texto, setTexto] = useState('')
+  // O RASCUNHO SOBREVIVE AO CARD (ver rascunhoDoCard.ts): trocar de etapa,
+  // filtrar ou sincronizar desmonta este botão, e o texto ia junto, sem aviso.
+  // Volta com o ponto âmbar no botão, como o rascunho de antes.
+  const [texto, setTexto] = useState(() => rascunhoGuardado(leadId, 'anotacao')?.texto ?? '')
   const [enviando, setEnviando] = useState(false)
   const caixa = useRef<HTMLDivElement>(null)
   const fechar = useCallback(() => setAberto(false), [])
@@ -1843,6 +1924,7 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
     try {
       await onEnviar(t)
       setTexto('')
+      apagarRascunho(leadId, 'anotacao')
       setAberto(false)
     } catch {
       // O aviso é de quem chamou; o texto fica na caixa para tentar de novo.
@@ -1874,7 +1956,10 @@ function BotaoDeAnotacao({ onEnviar }: { onEnviar: (texto: string) => Promise<vo
             rows={4}
             value={texto}
             aria-label="Anotação"
-            onChange={(e) => setTexto(e.target.value)}
+            onChange={(e) => {
+              setTexto(e.target.value)
+              guardarRascunho(leadId, 'anotacao', e.target.value)
+            }}
             onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void enviar()
             }}
@@ -2054,7 +2139,19 @@ function JanelaNaoFechou({
 }) {
   const tipos = (['recusou', 'sumiu'] as const).filter((t) => opcoes[t])
   const [tipo, setTipo] = useState<TipoDeNaoFechou>(tipos[0] ?? 'recusou')
-  const [motivo, setMotivo] = useState('')
+  // O MOTIVO ESCRITO E NÃO ENVIADO volta (ver rascunhoDoCard.ts); a opção
+  // (recusou/sumiu) não — ela é um clique, e quem reabre escolhe de novo.
+  const leadId = lead.kommo_lead_id
+  const [recuperado, setRecuperado] = useState(() => rascunhoGuardado(leadId, 'naofechou'))
+  const [motivo, setMotivo] = useState(recuperado?.texto ?? '')
+  const mudarMotivo = (v: string) => {
+    setMotivo(v)
+    guardarRascunho(leadId, 'naofechou', v)
+  }
+  const fecharDescartando = () => {
+    apagarRascunho(leadId, 'naofechou')
+    onFechar()
+  }
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const campo = useRef<HTMLTextAreaElement>(null)
@@ -2084,6 +2181,7 @@ function JanelaNaoFechou({
     setEnviando(true)
     try {
       await onConfirmar(acao, notaDoNaoFechou(tipo, motivo))
+      apagarRascunho(leadId, 'naofechou')
     } catch (e) {
       setErro((e as Error)?.message ?? String(e))
     } finally {
@@ -2093,14 +2191,14 @@ function JanelaNaoFechou({
 
   const cancelar = async () => {
     if (motivo.trim() && !(await perguntarDescarte())) return
-    onFechar()
+    fecharDescartando()
   }
 
   return (
     <Modal
       open
       // NÃO FECHA COM A MOVIMENTAÇÃO NO AR — o mesmo motivo da JanelaDeMensagem.
-      onClose={enviando ? () => undefined : onFechar}
+      onClose={enviando ? () => undefined : fecharDescartando}
       title="O cedente não fechou"
       description={tituloCard(lead)}
       size="lg"
@@ -2124,6 +2222,16 @@ function JanelaNaoFechou({
         </div>
       }
     >
+      {recuperado && (
+        <AvisoDoRascunho
+          rascunho={recuperado}
+          onDescartar={() => {
+            apagarRascunho(leadId, 'naofechou')
+            setMotivo('')
+            setRecuperado(null)
+          }}
+        />
+      )}
       <p id={`nf-${lead.kommo_lead_id}-rotulo`} className="mb-2 text-sm font-semibold text-texto">
         O que aconteceu?
       </p>
@@ -2174,7 +2282,7 @@ function JanelaNaoFechou({
             type="button"
             disabled={enviando}
             onClick={() => {
-              setMotivo((v) => comSugestao(v, s))
+              mudarMotivo(comSugestao(motivo, s))
               campo.current?.focus()
             }}
             className="inline-flex min-h-[28px] items-center rounded-full border border-borda-forte bg-superficie px-3 text-sm font-medium text-texto-2 hover:bg-superficie-3"
@@ -2191,7 +2299,7 @@ function JanelaNaoFechou({
         disabled={enviando}
         aria-label="Motivo"
         placeholder={m.exemplo}
-        onChange={(e) => setMotivo(e.target.value)}
+        onChange={(e) => mudarMotivo(e.target.value)}
         className="mt-3 min-h-[112px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3 disabled:text-texto-2"
       />
       {motivo.trim().length > 0 && !motivoSuficiente(motivo) && (
@@ -2256,7 +2364,7 @@ function CardCredito({
   anexarEMover,
   envioAosFundos,
   onCertidoes,
-  onCopiarProcesso,
+  onCopiar,
   negociacao,
   onGerarContrato,
   realcado = false,
@@ -2344,8 +2452,11 @@ function CardCredito({
   }
   /** Abre o painel de certidões, onde a aba o declara (a Obtenção de documentação do Externo). */
   onCertidoes?: (l: KommoLead) => void
-  /** Copia o número do processo — o aviso de sucesso ou de falha é da página. */
-  onCopiarProcesso: (numero: string) => void
+  /**
+   * Copia um texto do card (o número do processo, o nome do cedente) — o aviso
+   * de sucesso ou de falha é da página; `aviso` é o que ela diz quando dá certo.
+   */
+  onCopiar: (texto: string, aviso: string) => void
   /**
    * O desfecho da Negociação no card (onda 4 — para todos desde 03/10/2026, ver
    * `abaParaQuemVe`): o "Fechado!" e o "Não fechou".
@@ -2414,7 +2525,7 @@ function CardCredito({
       data-lead={lead.kommo_lead_id}
       tabIndex={-1}
       className={cn(
-        'relative grid grid-cols-1 gap-x-6 gap-y-2 rounded-cartao border border-borda bg-superficie px-[18px] shadow-nivel-1 transition-[border-color,box-shadow] duration-150 hover:border-borda-forte hover:shadow-nivel-2 focus:outline-none min-[900px]:grid-cols-[minmax(0,1fr)_auto]',
+        'relative grid grid-cols-1 gap-x-6 gap-y-2 rounded-cartao border border-borda bg-superficie px-[18px] shadow-nivel-1 transition-[border-color,box-shadow] duration-150 hover:border-borda-forte hover:shadow-nivel-2 focus:outline-none focus-visible:border-marca-viva focus-visible:ring-[3px] focus-visible:ring-marca-viva/20 min-[900px]:grid-cols-[minmax(0,1fr)_auto]',
         'py-4',
         realcado && 'border-marca-viva ring-[3px] ring-marca-viva/20',
       )}
@@ -2441,6 +2552,21 @@ function CardCredito({
               titulo
             )}
           </h3>
+          {/* COPIAR O NOME, como o número do processo: é o que se cola na busca
+              do tribunal, das certidões e do Drive — e com o título virando
+              link para a pasta, selecioná-lo com o mouse abria o Drive. Sem os
+              campos separados, copia o título inteiro do card. */}
+          <button
+            type="button"
+            onClick={() =>
+              onCopiar(titulo, campos?.cedente ? 'Nome do cedente copiado.' : 'Título do card copiado.')
+            }
+            aria-label={campos?.cedente ? 'Copiar nome do cedente' : 'Copiar título do card'}
+            title={campos?.cedente ? 'Copiar nome do cedente' : 'Copiar título do card'}
+            className="-ml-1 grid h-[24px] w-[24px] place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
+          >
+            <Copy className="h-[14px] w-[14px]" aria-hidden />
+          </button>
           {/* SÓ O "FINALIZADO": o que a pessoa procura na fila é o card cuja
               análise JÁ ESTÁ PRONTA; a ausência do selo diz o resto. */}
           {analisePronta === true && (
@@ -2470,7 +2596,7 @@ function CardCredito({
                   {campos.numero}
                   <button
                     type="button"
-                    onClick={() => onCopiarProcesso(campos.numero)}
+                    onClick={() => onCopiar(campos.numero, 'Número do processo copiado.')}
                     aria-label="Copiar número do processo"
                     title="Copiar número do processo"
                     className="grid h-[24px] w-[24px] place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
@@ -2793,7 +2919,7 @@ function CardCredito({
         )}
         <div className="flex flex-wrap items-center justify-end gap-1.5 min-[900px]:mt-auto min-[900px]:max-w-[420px]">
           {/* A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026). */}
-          {onAnotar && <BotaoDeAnotacao onEnviar={(t) => onAnotar(lead, t)} />}
+          {onAnotar && <BotaoDeAnotacao leadId={lead.kommo_lead_id} onEnviar={(t) => onAnotar(lead, t)} />}
 
           {/* OS BOTÕES DE TRABALHO DEPENDEM DA ETAPA — a regra é `botoesDaAba`.
               A MESMA ORDEM NOS DOIS FUNIS: due diligence primeiro, análise
@@ -3151,9 +3277,27 @@ export default function AnaliseCredito() {
   // OS FILTROS RÁPIDOS, A ORDEM E O "MOSTRAR MAIS" (itens "Novo" da amostra).
   // Só estado da tela: trocar de etapa volta tudo ao padrão (ver `irParaAba`).
   const [filtro, setFiltro] = useState<FiltroRapido>('todos')
-  const [ordem, setOrdem] = useState<OrdemDaLista>('recente')
+  // A ORDEM, ESTA SIM, LEMBRADA ENTRE VISITAS (ver `lerOrdem`).
+  const [ordem, setOrdem] = useState<OrdemDaLista>(() => lerOrdem(lerPreferencia<unknown>(PREF_ORDEM_DA_ANALISE, 'recente')))
   const [mostrar, setMostrar] = useState(POR_VEZ)
   const campoDeBusca = useRef<HTMLInputElement>(null)
+  // J E K ANDAM ENTRE OS CARDS (ver `passoDaTecla`): só o foco se move — nenhum
+  // card abre, nenhum botão é apertado. Fora de campo e de janela, como o "/".
+  useEffect(() => {
+    const aoTeclar = (e: KeyboardEvent) => {
+      const passo = passoDaTecla(e)
+      if (passo === null || estaDigitando(e.target as HTMLElement | null) || haDialogoAberto()) return
+      const cards = [...document.querySelectorAll<HTMLElement>('article[data-lead]')]
+      const atual = cards.findIndex((c) => c.contains(document.activeElement))
+      const i = proximoCard(cards.length, atual, passo)
+      if (i === null) return
+      e.preventDefault()
+      cards[i].focus({ preventScroll: true })
+      cards[i].scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+    document.addEventListener('keydown', aoTeclar)
+    return () => document.removeEventListener('keydown', aoTeclar)
+  }, [])
   // "/" LEVA À BUSCA (amostra), fora de campo e de janela: quem está digitando
   // uma barra num texto não pode ser arrancado dali.
   useEffect(() => {
@@ -4140,18 +4284,24 @@ export default function AnaliseCredito() {
    * 0" ao lado de uma mensagem de erro afirma que o funil está vazio.
    */
   /**
-   * O texto de busca de cada card, montado UMA VEZ por carga dos cards — ver
-   * `textoDaBusca`. Era refeito (todas as anotações em minúsculas) três vezes
+   * Onde a busca procura em cada card, montado UMA VEZ por carga dos cards — ver
+   * `indiceDaBusca`. Era refeito (todas as anotações em minúsculas) três vezes
    * por tecla digitada, para o funil inteiro.
    */
-  const textoDeBusca = useMemo(
-    () => new Map((leads.data ?? []).map((l) => [l.kommo_lead_id, textoDaBusca(l)])),
+  const indicesDaBusca = useMemo(
+    () => new Map((leads.data ?? []).map((l) => [l.kommo_lead_id, indiceDaBusca(l)])),
     [leads.data],
   )
-  /** O card bate com a busca? `q` já em minúsculas. */
+  /**
+   * A busca preparada uma vez por tecla: sem acento e, sendo número, só os
+   * dígitos — o CNJ colado sem pontuação acha o card (ver `prepararBusca`).
+   */
+  const consulta = useMemo(() => prepararBusca(busca), [busca])
+  /** O card bate com a busca? */
   const casaComBusca = useCallback(
-    (x: KommoLead, q: string) => (textoDeBusca.get(x.kommo_lead_id) ?? textoDaBusca(x)).includes(q),
-    [textoDeBusca],
+    (x: KommoLead, c: ConsultaDaBusca) =>
+      casaComABusca(indicesDaBusca.get(x.kommo_lead_id) ?? indiceDaBusca(x), c),
+    [indicesDaBusca],
   )
 
   // COM BUSCA, O NÚMERO DO FUNIL TAMBÉM É O DE RESULTADOS — o mesmo critério das
@@ -4159,9 +4309,8 @@ export default function AnaliseCredito() {
   const totalExibido = useMemo(() => {
     if (!leads.data) return undefined
     const ids = statusExibidos(funil, etapas.data ?? [])
-    const q = busca.trim().toLowerCase()
-    return leads.data.filter((l) => ids.has(l.status_id) && (!q || casaComBusca(l, q))).length
-  }, [leads.data, funil, etapas.data, busca, casaComBusca])
+    return leads.data.filter((l) => ids.has(l.status_id) && (!consulta || casaComBusca(l, consulta))).length
+  }, [leads.data, funil, etapas.data, consulta, casaComBusca])
 
   // Coluna que a tela fixa e o kanban não tem. Em RPV o vínculo é por id (quebra
   // se a coluna for recriada); em Precatório é por nome (quebra se for
@@ -4203,12 +4352,11 @@ export default function AnaliseCredito() {
    * as abas filtradas juntas, o número de cada etapa é o de resultados nela.
    */
   const porAbaNaBusca = useMemo(() => {
-    const q = busca.trim().toLowerCase()
-    if (!q) return porAba
+    if (!consulta) return porAba
     return Object.fromEntries(
-      Object.entries(porAba).map(([k, l]) => [k, l.filter((x) => casaComBusca(x, q))]),
+      Object.entries(porAba).map(([k, l]) => [k, l.filter((x) => casaComBusca(x, consulta))]),
     ) as Record<string, KommoLead[]>
-  }, [porAba, busca, casaComBusca])
+  }, [porAba, consulta, casaComBusca])
 
   /**
    * O NÚMERO DE CADA DESTINAÇÃO, ao lado de Interno e Externo (item "Novo":
@@ -4225,16 +4373,15 @@ export default function AnaliseCredito() {
   }, [leads.data, funil, etapas.data])
   const totalDaTrilha = useMemo(() => {
     if (!cardsPorTrilha) return null
-    const q = busca.trim().toLowerCase()
     const total: Partial<Record<SubdivisaoPrecatorio, number>> = {}
     for (const [key, listas] of cardsPorTrilha) {
       total[key] = listas.reduce(
-        (t, l) => t + (q ? l.filter((x) => casaComBusca(x, q)).length : l.length),
+        (t, l) => t + (consulta ? l.filter((x) => casaComBusca(x, consulta)).length : l.length),
         0,
       )
     }
     return total
-  }, [cardsPorTrilha, busca, casaComBusca])
+  }, [cardsPorTrilha, consulta, casaComBusca])
 
   const lista = useMemo(
     () => (abaAtual ? (porAbaNaBusca[abaAtual.key] ?? []) : []),
@@ -4357,15 +4504,15 @@ export default function AnaliseCredito() {
     return () => window.clearTimeout(t)
   }, [realce])
 
-  /** Copia o número do processo — e diz se deu certo, que é o que se quer saber. */
-  const copiarProcesso = (numero: string) => {
+  /** Copia um texto do card — e diz se deu certo, que é o que se quer saber. */
+  const copiar = (texto: string, aviso: string) => {
     Promise.resolve()
-      .then(() => navigator.clipboard.writeText(numero))
+      .then(() => navigator.clipboard.writeText(texto))
       .then(
-        () => toast.success('Número do processo copiado.'),
+        () => toast.success(aviso),
         () =>
           toast.error(
-            'Não consegui copiar: o navegador bloqueou a área de transferência. Selecione o número e copie à mão.',
+            'Não consegui copiar: o navegador bloqueou a área de transferência. Selecione o texto e copie à mão.',
           ),
       )
   }
@@ -4980,7 +5127,36 @@ export default function AnaliseCredito() {
               setBusca(e.target.value)
               setMostrar(POR_VEZ)
             }}
+            // ESC LIMPA A BUSCA, com o foco ainda no campo — o jeito de voltar à
+            // lista inteira sem apagar letra por letra. Campo vazio: o Esc segue
+            // seu caminho.
+            onKeyDown={(e) => {
+              if (e.key !== 'Escape' || !busca) return
+              e.preventDefault()
+              e.stopPropagation()
+              setBusca('')
+              setMostrar(POR_VEZ)
+            }}
+            aria-describedby="dica-da-busca"
           />
+          {busca && (
+            <button
+              type="button"
+              onClick={() => {
+                setBusca('')
+                setMostrar(POR_VEZ)
+                campoDeBusca.current?.focus()
+              }}
+              aria-label="Limpar a busca"
+              title="Limpar a busca (Esc)"
+              className="-mr-2 grid h-[24px] w-[24px] flex-none place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
+            >
+              <X className="h-[14px] w-[14px]" aria-hidden />
+            </button>
+          )}
+          <span id="dica-da-busca" className="sr-only">
+            Aceita o número do processo com ou sem pontuação. Esc limpa a busca; J e K andam entre os cards.
+          </span>
         </label>
         {/* SEM ESCOLHA DE DENSIDADE (decisão do dono, 03/10/2026): a lista é
             sempre a confortável. */}
@@ -5192,7 +5368,9 @@ export default function AnaliseCredito() {
               <select
                 value={ordem}
                 onChange={(e) => {
-                  setOrdem(e.target.value as OrdemDaLista)
+                  const nova = lerOrdem(e.target.value)
+                  setOrdem(nova)
+                  gravarPreferencia(PREF_ORDEM_DA_ANALISE, nova)
                   setMostrar(POR_VEZ)
                 }}
                 className="w-full min-w-0 cursor-pointer bg-transparent text-corpo text-texto outline-none"
@@ -5288,7 +5466,7 @@ export default function AnaliseCredito() {
                 <CardCredito
                   key={l.kommo_lead_id}
                   lead={l}
-                  onCopiarProcesso={copiarProcesso}
+                  onCopiar={copiar}
                   acoes={abaAtual?.acoes ?? []}
                   // O AGRUPADO NÃO VAI UM BOTÃO POR SAÍDA: ele sai de um botão
                   // só, o "Concluir", junto dos outros de trabalho.

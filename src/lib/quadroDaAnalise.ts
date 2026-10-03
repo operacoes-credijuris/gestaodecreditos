@@ -251,6 +251,19 @@ export function larguraDaBarra(n: number, maior: number): number {
 export type FiltroRapido = 'todos' | 'parados' | 'cotados' | 'prontas' | 'semnum'
 export type OrdemDaLista = 'recente' | 'parado'
 
+/**
+ * A ORDEM DA LISTA É LEMBRADA entre visitas, no navegador (`preferencias.ts`):
+ * quem trabalha pelos mais parados trabalha assim todo dia, e voltava a cada
+ * visita para a "Entrada mais recente". Esta é a chave e a leitura conferida —
+ * o que se guardou pode ter vindo de outra versão; o que não se reconhece é o
+ * padrão.
+ */
+export const PREF_ORDEM_DA_ANALISE = 'analise.ordem'
+
+export function lerOrdem(v: unknown): OrdemDaLista {
+  return v === 'parado' ? 'parado' : 'recente'
+}
+
 /** A etiqueta diz que o fundo cotou? Pelo começo do nome, como a cor (`tomDaTag`). */
 export const temCotacao = (lead: KommoLead): boolean =>
   (lead.tags ?? []).some((t) => normalizarBusca(t).startsWith('cotad'))
@@ -310,25 +323,126 @@ export function filtrarEOrdenar(
 }
 
 /**
- * O TEXTO EM QUE A BUSCA PROCURA, de um card: o nome, o processo, o
- * responsável e TODAS as anotações (informação relevante costuma vir num
- * comentário posterior), já em minúsculas.
+ * ONDE A BUSCA PROCURA, de um card: o nome, o processo, o responsável e TODAS as
+ * anotações (informação relevante costuma vir num comentário posterior) — em
+ * duas formas: o texto sem acento e sem maiúscula, e os números sem pontuação.
  *
  * MONTADO UMA VEZ POR CARD, e não a cada tecla. A busca filtra o funil inteiro
  * três vezes por tecla (o total do topo, as etapas e as destinações), e cada
  * filtro passava `toLowerCase` em todas as anotações de centenas de cards —
- * megabytes de texto por letra digitada. A tela guarda este texto por card e
- * só o refaz quando os cards mudam.
+ * megabytes de texto por letra digitada. A tela guarda isto por card e só o
+ * refaz quando os cards mudam.
  *
  * As partes vão separadas por quebra de linha, que a busca (um campo de uma
  * linha) nunca contém: um termo não casa juntando o fim de um campo com o
  * começo do outro — é a mesma resposta de procurar campo a campo.
  */
-export function textoDaBusca(lead: KommoLead): string {
-  return [lead.nome, lead.processo_cnj, lead.responsavel_nome, ...(lead.notas ?? []).map((n) => n.texto), lead.nota_texto]
+export interface IndiceDaBusca {
+  /** O texto de todas as partes, sem acento, em minúsculas, uma por linha. */
+  texto: string
+  /**
+   * OS NÚMEROS, sem a pontuação que os separa por dentro (ponto, hífen, barra),
+   * um por linha. "0001234-56.2020.8.09.0051" vira "00012345620208090051".
+   *
+   * POR NÚMERO, E NÃO A PARTE INTEIRA SÓ COM DÍGITOS: juntar os dígitos de uma
+   * anotação ("R$ 1.000,00 em 2024") inventaria números que não estão escritos
+   * nela, e a busca por um CNJ colado acharia card que não tem nada a ver.
+   * Vírgula e espaço separam números; ponto, hífen e barra não (o CNJ e o CPF
+   * os usam por dentro).
+   */
+  digitos: string
+}
+
+export function indiceDaBusca(lead: KommoLead): IndiceDaBusca {
+  const partes = [lead.nome, lead.processo_cnj, lead.responsavel_nome, ...(lead.notas ?? []).map((n) => n.texto), lead.nota_texto]
     .filter(Boolean)
-    .map((v) => String(v).toLowerCase())
-    .join('\n')
+    .map((v) => String(v))
+  return {
+    texto: partes.map(normalizarBusca).join('\n'),
+    digitos: partes
+      .map((p) => p.replace(/[^\d./-]+/g, '\n').replace(/[./-]/g, ''))
+      .join('\n'),
+  }
+}
+
+/** A busca já preparada para comparar — feita uma vez por tecla, não por card. */
+export interface ConsultaDaBusca {
+  texto: string
+  /** Os dígitos, quando a busca é um número (ver `prepararBusca`); vazio, não é. */
+  digitos: string
+}
+
+/**
+ * A PARTIR DE QUANTOS DÍGITOS a busca também compara por número — o mesmo
+ * mínimo das telas do Operacional (`casaBusca`, buscaDaTela.ts): com menos,
+ * "20" traria meia lista pelo ano.
+ */
+export const MIN_DIGITOS_DA_BUSCA = 4
+
+/**
+ * A busca digitada, pronta para comparar; null quando vazia (casa com tudo).
+ *
+ * NÚMERO É A BUSCA SEM LETRA: o CNJ colado do e-mail sem pontuação
+ * ("00012345620208090051"), com outra pontuação, ou o CPF. Com letra no meio
+ * ("Maria 0001"), é texto — a comparação por dígitos juntaria as duas metades.
+ */
+export function prepararBusca(busca: string | null | undefined): ConsultaDaBusca | null {
+  const texto = normalizarBusca(busca)
+  if (!texto) return null
+  const soNumero = !/[a-z]/.test(texto)
+  const digitos = soNumero ? texto.replace(/\D/g, '') : ''
+  return { texto, digitos: digitos.length >= MIN_DIGITOS_DA_BUSCA ? digitos : '' }
+}
+
+/**
+ * O card casa com a busca? O texto sem acento contido em qualquer parte; senão,
+ * sendo a busca um número, os dígitos dela contidos num número do card.
+ *
+ * TUDO O QUE ACHAVA ANTES CONTINUA ACHANDO: a regra só alargou (acento,
+ * espaço repetido e o número sem pontuação).
+ */
+export function casaComABusca(indice: IndiceDaBusca, consulta: ConsultaDaBusca | null): boolean {
+  if (!consulta) return true
+  if (indice.texto.includes(consulta.texto)) return true
+  return consulta.digitos !== '' && indice.digitos.includes(consulta.digitos)
+}
+
+/**
+ * J E K ANDAM ENTRE OS CARDS da lista (para baixo e para cima), como no e-mail.
+ * SÓ LEVAM O FOCO: nenhum card abre, nenhum botão é apertado — com o card em
+ * foco, o Tab entra nos botões dele, e cada um continua pedindo o clique (ou o
+ * Enter) de sempre. Movimento de card e consulta paga não ganham atalho.
+ *
+ * Sem modificador (Ctrl+J, Alt+K são do navegador ou do teclado) e sem
+ * maiúscula (Shift+J é alguém escrevendo). O "digitando" e a janela aberta
+ * são conferidos por quem chama (`estaDigitando`, `haDialogoAberto`).
+ */
+export function passoDaTecla(e: {
+  key: string
+  ctrlKey: boolean
+  metaKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+}): 1 | -1 | null {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return null
+  if (e.key === 'j') return 1
+  if (e.key === 'k') return -1
+  return null
+}
+
+/**
+ * Para qual card o foco vai: o índice na lista, ou null se não há para onde ir.
+ *
+ * Sem card em foco, o primeiro — seja J ou K: quem aperta a tecla quer
+ * começar pela lista, e o último pode estar fora da tela. Na ponta, null (o
+ * foco fica onde está, sem dar a volta: dar a volta jogaria a pessoa do fim da
+ * lista para o topo sem ela perceber).
+ */
+export function proximoCard(total: number, atual: number, passo: 1 | -1): number | null {
+  if (total <= 0) return null
+  if (atual < 0 || atual >= total) return 0
+  const destino = atual + passo
+  return destino < 0 || destino >= total ? null : destino
 }
 
 /** Uma etapa em que a busca achou cards. */
