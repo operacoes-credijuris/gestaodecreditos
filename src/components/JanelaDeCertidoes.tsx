@@ -38,12 +38,13 @@ export function JanelaDeCertidoes({
       size="xl"
       dirty={sujo}
       title="Certidões do crédito"
+      // O TÍTULO DO CARD COMO APOIO, como na amostra: a janela cobre o quadro, e
+      // é este texto que diz de QUAL crédito são as certidões.
+      description={tituloDoCard || undefined}
       footer={
-        <div className="flex justify-end">
-          <Button variant="ghost" onClick={onClose}>
-            Fechar
-          </Button>
-        </div>
+        <Button variant="ghost" onClick={onClose}>
+          Fechar
+        </Button>
       }
     >
       <PainelCertidoes

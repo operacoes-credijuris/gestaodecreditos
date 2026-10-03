@@ -202,9 +202,9 @@ const doRpv = (status_id: number, nome: string, ordem: number, tipo = 0): EtapaK
  * da `kommo-mover` ainda escreve os nomes antigos (ver `_shared/colunasRpv.ts`).
  * O RPV se liga pelo ID, e é o id que este espelho prende.
  *
- * HOJE A TELA SÓ MOSTRA SEIS DELAS (`TELAS`); as outras estão aqui porque as
- * próximas etapas do redesenho vão mostrá-las, e um teste que só conhece as seis
- * não teria como dizer que uma coluna nova ganhou botão.
+ * DESDE A ETAPA 7 DO REDESENHO A TELA MOSTRA TODAS ELAS (menos a entrada e as de
+ * sistema): as seis de `TELAS` com as ações delas, e as outras nove só para
+ * leitura. É com este espelho que os testes dizem se uma coluna ganhou botão.
  */
 export const KANBAN_RPV: readonly EtapaKommo[] = [
   doRpv(107272795, 'Leads de entrada', 10, 1),

@@ -48,8 +48,17 @@
 // ser lidos, e não corre sem documento. Buscar por nome traz o homônimo junto e
 // cada página é cobrada — sem CPF, CNPJ ou OAB a corrente para com os campos
 // preenchidos e diz o que falta. O custo de cada chamada volta na tela.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, ExternalLink, Info, RefreshCw, ScanText, Search } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
+import { Check, ExternalLink, Info, RefreshCw, ScanText, Search } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
@@ -65,13 +74,12 @@ import {
   type PapelApurado,
   type TitularLido,
 } from '../../supabase/functions/_shared/titularesDaCessao.ts'
-import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
-import { EmptyState, Loading, Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
-import { Tabs } from '@/components/ui/Tabs'
+import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
-import type { ItemDeRisco } from '@/components/JanelaDeDesfecho'
+import { Selo as SeloDoGrau, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
+import { CaixaDeAviso, CaixaSuave, Selo, icSelo } from '@/components/analise/Pecas'
 
 /**
  * Um titular na tela: o rótulo que aparece e os papéis por trás dele.
@@ -93,12 +101,49 @@ interface ProcessoNaTela extends ProcessoDD {
   fonte?: string | null
 }
 
-const TOM_DO_RISCO: Record<string, 'red' | 'amber' | 'green' | 'gray'> = {
-  ALTO: 'red',
-  ATENCAO: 'amber',
-  NENHUM: 'green',
-  NAO_AVALIADO: 'gray',
+/**
+ * O selo de risco de um processo, graduado como na amostra (`riscoHTML`).
+ *
+ * A MESMA ESCADA DA JANELA DO DESFECHO: ALTO em âmbar e ATENÇÃO no neutro, com o
+ * ícone de alerta — é o mesmo grau que vai para a lista de motivos quando se
+ * recusa, e o processo não pode mudar de cor entre a tabela e a janela. "Sem
+ * risco" em verde, com o visto; "não avaliado" no neutro, sem ícone, porque não
+ * afirma nada.
+ */
+function SeloDoRisco({ risco }: { risco: unknown }) {
+  if (risco === 'ALTO') return <SeloDoGrau grau="ALTO" />
+  if (risco === 'ATENCAO') return <SeloDoGrau grau="ATENÇÃO" />
+  if (risco === 'NENHUM')
+    return (
+      <Selo tom="sucesso" icone={<Check className={icSelo} aria-hidden />}>
+        sem risco
+      </Selo>
+    )
+  if (risco === 'NAO_AVALIADO') return <Selo tom="neutro">não avaliado</Selo>
+  return <Selo tom="neutro">{String(risco ?? '—').toLowerCase()}</Selo>
 }
+
+/**
+ * O VAZIO DA AMOSTRA (`vazio()`, com a moldura tracejada), com o ícone que diz
+ * qual vazio é: a lupa para "ainda não se procurou", o visto para "procurou-se e
+ * não há nada". O EmptyState de ui tem um ícone só, e os dois casos pareceriam
+ * o mesmo.
+ */
+function Vazio({ icone, titulo, texto }: { icone: ReactNode; titulo: string; texto: string }) {
+  return (
+    <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie px-6 py-12 text-center">
+      <div className="mx-auto mb-4 grid h-[52px] w-[52px] place-items-center rounded-cartao bg-marca-suave text-marca-texto">
+        {icone}
+      </div>
+      <p className="font-display text-lg font-bold text-texto">{titulo}</p>
+      <p className="mx-auto mt-2 max-w-[420px] text-corpo text-texto-2">{texto}</p>
+    </div>
+  )
+}
+
+/** O anel de foco da casa, para os botões desenhados aqui. */
+const FOCO =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-1'
 
 /**
  * A ORDEM DOS TITULARES NA TELA, que não é a alfabética.
@@ -209,6 +254,11 @@ export function PainelProcessosJudiciais({
   /** Qual titular está aberto na tabela. Vazio até a apuração chegar. */
   const [abaDoTitular, setAbaDoTitular] = useState('')
   useEffect(() => setFiltroEstagios([]), [abaDoTitular])
+  // AS ABAS DOS TITULARES SÃO DESENHADAS AQUI (os `.tit-tabs` da amostra, com a
+  // soma numa segunda linha), e por isso o teclado também: as setas andam entre
+  // elas, como no Tabs de ui. Os ids ligam a aba aberta à tabela que ela recorta.
+  const refsDasAbas = useRef<Array<HTMLButtonElement | null>>([])
+  const idDasAbas = useId()
 
   // ------------------------------------------------- de quem é o que compramos
   //
@@ -625,7 +675,17 @@ export function PainelProcessosJudiciais({
     onItensDeRisco?.(itensParaRecusa, abasDeTitular)
   }, [itensParaRecusa, abasDeTitular, onItensDeRisco])
 
-  if (carregando) return <Loading label="Lendo a diligência…" />
+  // O ESQUELETO DA AMOSTRA: o que se está fazendo, escrito, e três barras no
+  // lugar do conteúdo que vem.
+  if (carregando)
+    return (
+      <div aria-busy="true" className="space-y-3">
+        <p className="text-corpo text-texto-2">Lendo a diligência…</p>
+        <div className="skeleton h-4 rounded-controle" />
+        <div className="skeleton h-4 w-[70%] rounded-controle" />
+        <div className="skeleton h-4 w-[40%] rounded-controle" />
+      </div>
+    )
 
   /**
    * A dica que não cabe embaixo do campo.
@@ -636,10 +696,18 @@ export function PainelProcessosJudiciais({
    * explicação passa o mouse; quem já sabe não paga por ela.
    */
   const comDica = (rotulo: string, dica: string) => (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex items-center gap-1.5">
       {rotulo}
-      <span title={dica} aria-label={dica} className="cursor-help text-texto-3">
-        <Info className="h-3.5 w-3.5" />
+      {/* FOCÁVEL (o `tip()` da amostra): quem navega pelo teclado também
+          precisa chegar à dica, e o leitor de tela a lê pelo aria-label. */}
+      <span
+        tabIndex={0}
+        role="img"
+        title={dica}
+        aria-label={dica}
+        className={cn('inline-flex cursor-help rounded-full text-texto-3 hover:text-texto-2', FOCO)}
+      >
+        <Info className="h-4 w-4" aria-hidden />
       </span>
     </span>
   )
@@ -683,27 +751,27 @@ export function PainelProcessosJudiciais({
    */
   const relerOsAutos = (
     <Button
-      size="sm"
       variant="ghost"
       onClick={() => void correnteCompleta()}
       loading={lendoTitulares}
       disabled={apurando || Boolean(passo)}
-      icon={<ScanText className="h-4 w-4" />}
+      icon={<ScanText className="h-4 w-4" aria-hidden />}
     >
       Reler os autos
     </Button>
   )
 
+  // APURAR EM AZUL, REFAZER CONTORNADO (a amostra): sem nada apurado ele é o
+  // próximo passo da tela; com a tabela à vista, é uma correção.
   const refazer = (
     <div className="flex items-center justify-end gap-3">
-      {custo && <span className="text-xs text-texto-3">Custo: {custo}</span>}
+      {custo && <span className="text-xs tabular-nums text-texto-3">Custo: {custo}</span>}
       <Button
-        size="sm"
-        variant="outline"
+        variant={apuracoes.length > 0 ? 'outline' : 'primary'}
         onClick={() => void apurar()}
         loading={apurando}
         disabled={lendoTitulares || Boolean(passo)}
-        icon={<Search className="h-4 w-4" />}
+        icon={<Search className="h-4 w-4" aria-hidden />}
       >
         {apuracoes.length > 0 ? 'Refazer' : 'Apurar'}
       </Button>
@@ -747,34 +815,57 @@ export function PainelProcessosJudiciais({
       antes.includes(estagio) ? antes.filter((e) => e !== estagio) : [...antes, estagio],
     )
 
+  /** Setas, Home e End andam entre as abas dos titulares (com volta). */
+  function teclaNaAba(e: KeyboardEvent<HTMLButtonElement>, indice: number) {
+    const n = abasDeTitular.length
+    const alvo =
+      e.key === 'ArrowRight'
+        ? (indice + 1) % n
+        : e.key === 'ArrowLeft'
+          ? (indice - 1 + n) % n
+          : e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? n - 1
+              : null
+    if (alvo === null) return
+    e.preventDefault()
+    setAbaDoTitular(abasDeTitular[alvo].key)
+    refsDasAbas.current[alvo]?.focus()
+  }
+
+  const indiceAberto = abasDeTitular.findIndex((a) => a.key === abaDoTitular)
+  const idDoPainelDaAba = `${idDasAbas}-painel`
+  const ocupado = Boolean(lendoPdf || passo || apurando)
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      {/* O ERRO EM VERMELHO E O "PAGO PELA METADE" EM ÂMBAR, em caixas fixas no
+          topo, e não só no aviso que some: erro é apuração que não aconteceu;
+          âmbar é apuração que aconteceu, foi paga e gravada, faltando uma parte
+          — no vermelho, quem lê clicaria de novo e pagaria outra vez. */}
       {erro && (
-        <div className="flex items-start gap-2 rounded-xl bg-perigo-fundo p-3 text-sm text-perigo ring-1 ring-perigo-borda">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{erro}</span>
-        </div>
+        <CaixaDeAviso tom="perigo" role="alert">
+          {erro}
+        </CaixaDeAviso>
       )}
 
-      {aviso && (
-        <div className="flex items-start gap-2 rounded-xl bg-aviso-fundo p-3 text-sm text-aviso ring-1 ring-aviso-borda">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{aviso}</span>
-        </div>
-      )}
+      {aviso && <CaixaDeAviso tom="aviso">{aviso}</CaixaDeAviso>}
 
       {/* A CORRENTE EM CURSO, dita passo a passo. Uma janela que abre e fica
           parada por vinte segundos se lê como travada — e quem não sabe que a
           máquina está trabalhando começa a preencher os campos à mão. */}
       {(lendoPdf || passo) && (
-        <p className="flex items-center gap-2 text-sm text-brand-700">
-          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-          {lendoPdf
-            ? 'Lendo os anexos do card…'
-            : passo === 'lendo'
-              ? 'Identificando os titulares nos autos…'
-              : 'Procurando processos no Escavador…'}
-        </p>
+        <div role="status">
+          <CaixaSuave className="flex items-center gap-2">
+            <RefreshCw className="h-[16px] w-[16px] flex-none animate-spin text-marca-texto" aria-hidden />
+            {lendoPdf
+              ? 'Lendo os anexos do card…'
+              : passo === 'lendo'
+                ? 'Identificando os titulares nos autos…'
+                : 'Procurando processos no Escavador…'}
+          </CaixaSuave>
+        </div>
       )}
 
       {/* OS CAMPOS DO TITULAR, e só eles. Chegam preenchidos pela leitura dos
@@ -794,7 +885,7 @@ export function PainelProcessosJudiciais({
           verbas que o título declara (ver alvosDaCessao): numa cessão só do
           principal os três campos do advogado ficam vazios, e nada é buscado em
           nome dele. */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-x-[16px] gap-y-4 sm:grid-cols-3">
         {campo('Cedente', cedenteNome, setCedenteNome)}
         {campo(
           comDica('CPF do cedente', 'Sem CPF a busca vai pelo nome, e homônimo entra.'),
@@ -818,7 +909,7 @@ export function PainelProcessosJudiciais({
             base dos campos e o recuo à esquerda o afasta do último deles — perto
             o bastante para pertencer à grade, longe o bastante para não se ler
             como um botão daquele campo. */}
-        <div className="flex items-end justify-start pb-1 sm:pl-4">{relerOsAutos}</div>
+        <div className="flex items-end justify-start pb-px sm:pl-4">{relerOsAutos}</div>
       </div>
 
       {/* UMA TABELA POR TITULAR, em abas.
@@ -837,193 +928,225 @@ export function PainelProcessosJudiciais({
           A régua aparece com um titular só, e é de propósito: aqui ela não
           sugere uma visão escondida, ela ROTULA de quem é a tabela — sem ela,
           "94 processos" ficaria sem dono na tela. */}
-      {abasDeTitular.length > 0 && (
-        <Tabs
-          items={abasDeTitular.map((a) => {
-            const lista = doTitular(a.ids)
-            const soma = somaDasCausas(lista)
-            const ativa = a.key === abaDoTitular
-            return {
-              key: a.key,
-              // A CONTAGEM VAI DENTRO DO RÓTULO, e não no `count` do Tabs: com a
-              // soma numa segunda linha, o selo do componente ficaria centrado
-              // entre as duas, longe do nome que ele conta.
-              label: (
-                <span className="flex flex-col items-start gap-0.5 leading-tight">
-                  <span className="flex items-center gap-2">
+      {/* OS CARTÕES DOS TITULARES (os `.tit-tabs` da amostra): nome, contagem
+          e, embaixo, a soma das causas — o número que decide se a dívida ameaça
+          a cessão. A borda de baixo fecha a linha, e o Refazer fica na ponta
+          dela, com ou sem titular apurado. */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-borda pb-3">
+        {abasDeTitular.length > 0 && (
+          <div role="tablist" aria-label="Titulares apurados" className="flex flex-wrap gap-2">
+            {abasDeTitular.map((a, i) => {
+              const lista = doTitular(a.ids)
+              const soma = somaDasCausas(lista)
+              const ativa = a.key === abaDoTitular
+              return (
+                <button
+                  key={a.key}
+                  ref={(el) => {
+                    refsDasAbas.current[i] = el
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`${idDasAbas}-aba-${i}`}
+                  aria-selected={ativa}
+                  aria-controls={ativa ? idDoPainelDaAba : undefined}
+                  // SÓ A ABA ABERTA ENTRA NO TAB; as setas andam entre elas.
+                  tabIndex={ativa || (indiceAberto < 0 && i === 0) ? 0 : -1}
+                  onClick={() => setAbaDoTitular(a.key)}
+                  onKeyDown={(e) => teclaNaAba(e, i)}
+                  className={cn(
+                    'grid gap-0.5 rounded-campo border px-4 py-2 text-left transition-colors',
+                    FOCO,
+                    ativa
+                      ? 'border-marca-viva bg-marca-leve'
+                      : 'border-borda bg-superficie hover:bg-superficie-2',
+                  )}
+                >
+                  <span className="flex items-center gap-2 text-corpo font-bold text-texto">
                     {a.label}
                     <span
                       className={cn(
-                        'rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums',
-                        ativa ? 'bg-brand-50 text-brand-700' : 'bg-superficie-3 text-texto-2',
+                        'rounded-full px-2 text-xs font-semibold tabular-nums',
+                        ativa ? 'bg-marca-suave text-marca-texto' : 'bg-superficie-3 text-texto-2',
                       )}
                     >
                       {lista.length}
                     </span>
                   </span>
-                  <span className="text-xs font-normal tabular-nums text-texto-3">
+                  <span className="text-xs tabular-nums text-texto-3">
                     {soma > 0 ? brl(soma) : '—'}
                   </span>
-                </span>
-              ),
-            }
-          })}
-          value={abaDoTitular}
-          onChange={setAbaDoTitular}
-          trailing={refazer}
-          trailingNaBorda
-        />
-      )}
-      {abasDeTitular.length === 0 && <div className="flex justify-end">{refazer}</div>}
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <div className="ml-auto">{refazer}</div>
+      </div>
 
-      {daAba.length === 0 ? (
-        <EmptyState
-          title={
-            apuracoes.some((a) => idsDaAba.includes(a.id) && a.status === 'APURADO')
-              ? 'Nenhum processo contra ele'
-              : 'Nada apurado ainda'
-          }
-          description={
-            apuracoes.some((a) => idsDaAba.includes(a.id) && a.status === 'APURADO')
-              ? 'A busca correu e não achou nenhum processo em que ele seja réu.'
-              : 'Confira os campos acima e clique em Apurar.'
-          }
-        />
-      ) : (
-        <>
-          {/* O FILTRO DE ESTÁGIO, e a conta do que ele esconde.
-              Só aparece com dois estágios ou mais: com um só, o filtro seria uma
-              escolha entre "tudo" e "tudo". E filtro que esconde linha em
-              silêncio mente sobre o tamanho da dívida — por isso a linha à
-              direita diz quantos ficaram de fora e quanto eles somam.
+      {/* SEM TITULAR APURADO E COM A CORRENTE ANDANDO, o vazio espera: "clique
+          em Apurar" enquanto a busca já corre sozinha mandaria clicar à toa. */}
+      {!(daAba.length === 0 && abasDeTitular.length === 0 && ocupado) && (
+        <div
+          role={indiceAberto >= 0 ? 'tabpanel' : undefined}
+          id={idDoPainelDaAba}
+          aria-labelledby={indiceAberto >= 0 ? `${idDasAbas}-aba-${indiceAberto}` : undefined}
+        >
+          {daAba.length === 0 ? (
+            apuracoes.some((a) => idsDaAba.includes(a.id) && a.status === 'APURADO') ? (
+              <Vazio
+                icone={<Check className="h-[24px] w-[24px]" aria-hidden />}
+                titulo="Nenhum processo contra ele"
+                texto="A busca correu e não achou nenhum processo em que ele seja réu."
+              />
+            ) : (
+              <Vazio
+                icone={<Search className="h-[24px] w-[24px]" aria-hidden />}
+                titulo="Nada apurado ainda"
+                texto="Confira os campos acima e clique em Apurar."
+              />
+            )
+          ) : (
+            <div className="space-y-4">
+              {/* O FILTRO DE ESTÁGIO, e a conta do que ele esconde.
+                  Só aparece com dois estágios ou mais: com um só, o filtro seria uma
+                  escolha entre "tudo" e "tudo". E filtro que esconde linha em
+                  silêncio mente sobre o tamanho da dívida — por isso a linha à
+                  direita diz quantos ficaram de fora e quanto eles somam.
 
-              MARCAÇÃO, E NÃO SELETOR: o Escavador chama o mesmo fim de
-              processo de nomes diferentes ("Arquivado", "Encerrado"), e juntar
-              os dois é marcar os dois. Nada marcado é tudo à vista — o estado
-              em que a aba abre. O NÚMERO AO LADO de cada estágio diz quantos
-              processos ele tem, para a escolha não ser às cegas. */}
-          {estagiosDaAba.length > 1 && (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-xs text-texto-3">Estágio</span>
-                {estagiosDaAba.map((e) => {
-                  const marcado = estagiosMarcados.includes(e)
-                  const quantos = daAba.filter((x) => x.estagio === e).length
-                  return (
-                    <button
-                      key={e}
-                      type="button"
-                      role="checkbox"
-                      aria-checked={marcado}
-                      onClick={() => alternarEstagio(e)}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors',
-                        marcado
-                          ? 'border-brand-400 bg-brand-50 text-brand-800'
-                          : 'border-borda bg-superficie text-texto-2 hover:border-borda-forte',
-                      )}
-                    >
-                      <span
+                  MARCAÇÃO, E NÃO SELETOR: o Escavador chama o mesmo fim de
+                  processo de nomes diferentes ("Arquivado", "Encerrado"), e juntar
+                  os dois é marcar os dois. Nada marcado é tudo à vista — o estado
+                  em que a aba abre. O NÚMERO AO LADO de cada estágio diz quantos
+                  processos ele tem, para a escolha não ser às cegas. */}
+              {estagiosDaAba.length > 1 && (
+                // OS `.chipf` DA AMOSTRA: o marcado fica escuro e ganha o visto, e o
+                // "limpar" e a conta do que ficou de fora vêm logo depois deles.
+                <div role="group" aria-label="Filtrar por estágio" className="flex flex-wrap items-center gap-2">
+                  <span className="mr-1 text-sm font-semibold text-texto-2" aria-hidden>
+                    Estágio
+                  </span>
+                  {estagiosDaAba.map((e) => {
+                    const marcado = estagiosMarcados.includes(e)
+                    const quantos = daAba.filter((x) => x.estagio === e).length
+                    return (
+                      <button
+                        key={e}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={marcado}
+                        onClick={() => alternarEstagio(e)}
                         className={cn(
-                          'flex h-3 w-3 flex-none items-center justify-center rounded-sm border',
-                          marcado ? 'border-brand-600 bg-brand-600 text-white' : 'border-borda-forte',
+                          'inline-flex h-10 items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors',
+                          FOCO,
+                          marcado
+                            ? 'border-texto bg-texto text-superficie'
+                            : 'border-borda-forte bg-superficie text-texto-2 hover:bg-superficie-3',
                         )}
                       >
-                        {marcado && <Check className="h-2.5 w-2.5" />}
+                        {marcado && <Check className="h-4 w-4 flex-none" aria-hidden />}
+                        {e}
+                        <span className="font-medium tabular-nums opacity-80">{quantos}</span>
+                      </button>
+                    )
+                  })}
+                  {estagiosMarcados.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setFiltroEstagios([])}
+                        className={cn(
+                          'inline-flex h-9 items-center rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve',
+                          FOCO,
+                        )}
+                      >
+                        limpar
+                      </button>
+                      <span className="text-xs tabular-nums text-texto-3">
+                        {listados.length} de {daAba.length} processo(s) ·{' '}
+                        {brl(somaDasCausas(listados))} de {brl(somaDasCausas(daAba))}
                       </span>
-                      {e}
-                      <span className="tabular-nums text-texto-3">{quantos}</span>
-                    </button>
-                  )
-                })}
-                {estagiosMarcados.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setFiltroEstagios([])}
-                    className="ml-1 text-xs text-brand-700 underline underline-offset-2 hover:text-brand-800"
-                  >
-                    limpar
-                  </button>
-                )}
-              </div>
-              {estagiosMarcados.length > 0 && (
-                <span className="text-xs text-texto-3 tabular-nums">
-                  {listados.length} de {daAba.length} processo(s) ·{' '}
-                  {brl(somaDasCausas(listados))} de {brl(somaDasCausas(daAba))}
-                </span>
+                    </>
+                  )}
+                </div>
               )}
+
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>Processo</TH>
+                    <TH>Objeto</TH>
+                    <TH>Polo</TH>
+                    {/* nowrap: sem ele o cabeçalho quebra em "VALOR DA / CAUSA" e a
+                        linha do cabeçalho fica com o dobro da altura das outras. */}
+                    <TH className="whitespace-nowrap text-right">Valor da causa</TH>
+                    <TH>Estágio</TH>
+                    {/* ÚLTIMA MOVIMENTAÇÃO, logo depois do estágio: as duas colunas
+                        respondem juntas. "Penhora" sozinho não diz se a ameaça é de
+                        agora ou de três anos atrás. */}
+                    <TH className="whitespace-nowrap">Última mov.</TH>
+                    <TH className="whitespace-nowrap">Risco</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {listados.map((x) => (
+                    <TR key={x.id}>
+                      {/* O NÚMERO EM ALGARISMOS DE LARGURA FIXA, e não em fonte mono
+                          de 12px: na amostra ele tem o tamanho da célula, e as colunas
+                          de dígitos continuam alinhadas de uma linha para a outra. */}
+                      <TD className="whitespace-nowrap">
+                        {x.url_fonte ? (
+                          <a
+                            href={x.url_fonte}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Abre em nova aba"
+                            className="inline-flex items-center gap-1 rounded-controle tabular-nums text-marca-texto underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+                          >
+                            {x.numero_processo}
+                            <ExternalLink className="h-4 w-4 flex-none" aria-hidden />
+                          </a>
+                        ) : (
+                          <span className="tabular-nums">{x.numero_processo}</span>
+                        )}
+                        {x.tribunal && (
+                          <span className="mt-0.5 block text-xs text-texto-3">{x.tribunal}</span>
+                        )}
+                      </TD>
+                      <TD>{x.objeto ?? '—'}</TD>
+                      <TD>
+                        {/* RÉU EM ÂMBAR: é o polo em que a dívida é dele. */}
+                        <Selo tom={x.polo === 'PASSIVO' ? 'aviso' : 'neutro'}>
+                          {x.polo === 'PASSIVO' ? 'réu' : x.polo === 'ATIVO' ? 'autor' : 'terceiro'}
+                        </Selo>
+                      </TD>
+                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(x.valor_cobrado)}</TD>
+                      <TD>{x.estagio ?? '—'}</TD>
+                      {/* MÊS E ANO, sem o dia: a pergunta é "isto ainda anda?", e ela se
+                          responde na distância — agosto deste ano é vivo, agosto de 2021
+                          é lembrança. O dia exato gastaria largura sem mudar o juízo. */}
+                      <TD className="whitespace-nowrap tabular-nums">
+                        {mesAno(x.data_ultima_movimentacao)}
+                      </TD>
+                      {/* O SELO, SEM O PARÁGRAFO. O motivo do risco continua no banco e
+                          vai para a anotação quando a IA redige a recusa; na tabela ele
+                          triplicava a altura de cada linha e enterrava as colunas que se
+                          comparam de relance. Fica no title, para quem quiser. */}
+                      <TD>
+                        {/* nowrap no selo: "sem risco" quebrava em duas linhas e
+                            esticava a altura da linha inteira por causa de um rótulo
+                            de nove caracteres. */}
+                        <span className="whitespace-nowrap" title={x.risco_motivo ?? undefined}>
+                          <SeloDoRisco risco={x.risco} />
+                        </span>
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
             </div>
           )}
-
-          <Table dense>
-          <THead>
-            <TR>
-              <TH>Processo</TH>
-              <TH>Objeto</TH>
-              <TH>Polo</TH>
-              {/* nowrap: sem ele o cabeçalho quebra em "VALOR DA / CAUSA" e a
-                  linha do cabeçalho fica com o dobro da altura das outras. */}
-              <TH className="whitespace-nowrap text-right">Valor da causa</TH>
-              <TH>Estágio</TH>
-              {/* ÚLTIMA MOVIMENTAÇÃO, logo depois do estágio: as duas colunas
-                  respondem juntas. "Penhora" sozinho não diz se a ameaça é de
-                  agora ou de três anos atrás. */}
-              <TH className="whitespace-nowrap">Última mov.</TH>
-              <TH className="whitespace-nowrap">Risco</TH>
-            </TR>
-          </THead>
-          <TBody>
-            {listados.map((x) => (
-              <TR key={x.id}>
-                <TD className="whitespace-nowrap font-mono text-xs">
-                  {x.url_fonte ? (
-                    <a
-                      href={x.url_fonte}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-brand-700 hover:underline"
-                    >
-                      {x.numero_processo}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ) : (
-                    x.numero_processo
-                  )}
-                  {x.tribunal && <span className="block text-texto-3">{x.tribunal}</span>}
-                </TD>
-                <TD>{x.objeto ?? '—'}</TD>
-                <TD>
-                  <Badge tone={x.polo === 'PASSIVO' ? 'orange' : 'gray'} size="sm">
-                    {x.polo === 'PASSIVO' ? 'réu' : x.polo === 'ATIVO' ? 'autor' : 'terceiro'}
-                  </Badge>
-                </TD>
-                <TD className="text-right tabular-nums">{brl(x.valor_cobrado)}</TD>
-                <TD className="text-xs">{x.estagio ?? '—'}</TD>
-                {/* MÊS E ANO, sem o dia: a pergunta é "isto ainda anda?", e ela se
-                    responde na distância — agosto deste ano é vivo, agosto de 2021
-                    é lembrança. O dia exato gastaria largura sem mudar o juízo. */}
-                <TD className="whitespace-nowrap text-xs text-texto-3">
-                  {mesAno(x.data_ultima_movimentacao)}
-                </TD>
-                {/* O SELO, SEM O PARÁGRAFO. O motivo do risco continua no banco e
-                    vai para a anotação quando a IA redige a recusa; na tabela ele
-                    triplicava a altura de cada linha e enterrava as colunas que se
-                    comparam de relance. Fica no title, para quem quiser. */}
-                <TD>
-                  {/* nowrap no selo: "sem risco" quebrava em duas linhas e
-                      esticava a altura da linha inteira por causa de um rótulo
-                      de nove caracteres. */}
-                  <span className="whitespace-nowrap" title={x.risco_motivo ?? undefined}>
-                    <Badge tone={TOM_DO_RISCO[String(x.risco)] ?? 'gray'} size="sm">
-                      {x.risco === 'NENHUM' ? 'sem risco' : String(x.risco).toLowerCase()}
-                    </Badge>
-                  </span>
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-          </Table>
-        </>
+        </div>
       )}
     </div>
   )

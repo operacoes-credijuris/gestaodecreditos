@@ -22,10 +22,11 @@ import { fileURLToPath } from 'node:url'
 
 // ─── Linhas de base ─────────────────────────────────────────────────────────
 /** `text-[NNpx]`: eram 17 (02/10/2026, main em 230bce6). A onda 1 do redesenho
- *  trocou o único de 13px pelo `text-sm`; ficam os de 10 e 11px, abaixo da
- *  escala (10 na janela de análise do RPV, 2 na Análise de Crédito, 2 em Tarefas
- *  e 2 na janela de desfecho), que a onda 2 resolve tela a tela. */
-const BASE_TEXTO_PX = 16
+ *  trocou o único de 13px pelo `text-sm`; ficaram os de 10 e 11px, abaixo da
+ *  escala. A onda 2 da Análise de crédito tirou 14 deles (10 na janela de
+ *  análise do RPV, 2 na Análise de Crédito e 2 na janela de desfecho), trocados
+ *  pelo `text-xs` de 12px que a amostra usa. Sobram os 2 de Tarefas. */
+const BASE_TEXTO_PX = 2
 /** Cor da paleta do Tailwind com número (`bg-slate-50`, `hover:text-red-700`,
  *  `ring-amber-500/40`…). Eram 1.162 (o plano estimava cerca de 1.493). A onda 1
  *  trocou por token (`text-texto-2`, `bg-aviso-fundo`…) tudo o que era troca de

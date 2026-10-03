@@ -12,15 +12,29 @@
 // andamento ao abrir e a cada minuto enquanto houver item em emissão. Os PDFs vão
 // para a pasta do cedente no Drive, e o checklist recebe o estado e o RESULTADO
 // de cada certidão.
-import { useEffect, useMemo, useRef, useState } from 'react'
+//
+// O VISUAL É O DA AMOSTRA (`.bull`, `.bull-h`, `.bull-p`, `.bull-row`, `.cat-res`):
+// caixa contornada, um bloco por pessoa e uma linha por certidão. Só mudou a
+// apresentação — marcação, contagem de portais, trava de nascimento e
+// confirmação são as mesmas.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, FileSearch, Plus, RefreshCw } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  Clock,
+  Download,
+  ExternalLink,
+  RefreshCw,
+  X,
+} from 'lucide-react'
 import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
-import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Field'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
+import { CaixaSuave, DicaDeAviso, Selo, icSelo, type TomDaPeca } from '@/components/analise/Pecas'
 import { traduzirParaBullai } from '../../supabase/functions/_shared/mapaBullai.ts'
 
 interface PortalBullai {
@@ -65,15 +79,24 @@ function pedivel(i: ItemDaEmissao) {
   return i.status === 'PENDENTE_MANUAL' && i.erro_classe !== 'presencial'
 }
 
-/** O resultado da certidão no tom que a tela inteira usa: verde passa, vermelho pesa. */
+/**
+ * O resultado da certidão no tom que a tela inteira usa: verde passa, vermelho
+ * pesa. SEMPRE COM ÍCONE, como os selos da amostra: a cor nunca vai sozinha.
+ */
 function seloDoResultado(r: string | null | undefined) {
   if (!r) return null
-  const tom: Record<string, 'green' | 'red' | 'yellow' | 'gray'> = {
-    negativa: 'green',
-    nada_consta: 'green',
-    positiva: 'red',
-    indeterminada: 'yellow',
-    emitida: 'gray',
+  const tom: Record<string, TomDaPeca> = {
+    negativa: 'sucesso',
+    nada_consta: 'sucesso',
+    positiva: 'perigo',
+    indeterminada: 'aviso',
+    emitida: 'neutro',
+  }
+  const icone: Record<string, ReactNode> = {
+    negativa: <Check className={icSelo} aria-hidden />,
+    nada_consta: <Check className={icSelo} aria-hidden />,
+    positiva: <X className={icSelo} aria-hidden />,
+    indeterminada: <AlertTriangle className={icSelo} aria-hidden />,
   }
   const rotulo: Record<string, string> = {
     negativa: 'negativa',
@@ -83,11 +106,15 @@ function seloDoResultado(r: string | null | undefined) {
     emitida: 'emitida',
   }
   return (
-    <Badge size="sm" tone={tom[r] ?? 'gray'}>
+    <Selo tom={tom[r] ?? 'neutro'} icone={icone[r]}>
       {rotulo[r] ?? r}
-    </Badge>
+    </Selo>
   )
 }
+
+/** O `.link-btn` da amostra: link na cor da marca, com área de clique de 24 px. */
+const LINK_BTN =
+  'inline-flex min-h-8 items-center gap-1 rounded-controle px-1.5 text-sm font-semibold text-marca-texto hover:bg-marca-leve'
 
 export function EmissaoBullai({
   leadId,
@@ -235,13 +262,25 @@ export function EmissaoBullai({
   }
 
   if (!ativo) return null
+  // A MOLDURA É A MESMA NOS TRÊS ESTADOS (carregando, fora do ar, a lista), como
+  // na amostra: a seção não pula de lugar quando o catálogo chega.
+  const moldura = 'my-4 rounded-cartao border border-borda p-4'
   if (catalogo.isLoading) {
-    return <div className="mt-6 text-xs text-texto-3">Carregando o catálogo da BullAI…</div>
+    return (
+      <div className={moldura}>
+        <p className="flex items-center gap-2 text-corpo text-texto-3">
+          <RefreshCw className="h-[16px] w-[16px] animate-spin" aria-hidden />
+          Carregando o catálogo da BullAI…
+        </p>
+      </div>
+    )
   }
   if (catalogo.error) {
     return (
-      <div className="mt-6 rounded-lg bg-superficie-2 p-3 text-xs text-texto-2 ring-1 ring-inset ring-borda">
-        Emissão pela BullAI indisponível: {(catalogo.error as Error).message}
+      <div className={moldura}>
+        <CaixaSuave>
+          Emissão pela BullAI indisponível: {(catalogo.error as Error).message}
+        </CaixaSuave>
       </div>
     )
   }
@@ -249,29 +288,26 @@ export function EmissaoBullai({
   const restantes = catalogo.data?.creditos?.restantes
 
   return (
-    <div className="mt-6 rounded-xl ring-1 ring-inset ring-brand-200">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50/60 px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <FileSearch className="h-4 w-4 text-brand-700" />
-          <span className="text-sm font-medium text-texto">Emitir pela BullAI</span>
-          <span className="text-xs text-texto-3">
-            marcadas pelas regras da planilha · {restantes == null ? 'plano ilimitado' : `${restantes} consulta(s) no plano`}
-          </span>
-        </div>
+    <div className={moldura}>
+      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <b className="text-corpo font-bold text-texto">Emitir pela BullAI</b>
+        <span className="text-xs text-texto-3">
+          marcadas pelas regras da planilha · {restantes == null ? 'plano ilimitado' : `${restantes} consulta(s) no plano`}
+        </span>
         {emEmissao && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => void atualizar(false)}
             disabled={atualizando}
-            className="inline-flex items-center gap-1 text-xs text-brand-700 hover:text-brand-800"
+            icon={<RefreshCw className={cn('h-4 w-4', atualizando && 'animate-spin')} aria-hidden />}
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', atualizando && 'animate-spin')} />
             Atualizar andamento
-          </button>
+          </Button>
         )}
       </div>
 
-      <div className="space-y-4 p-4">
+      <div>
         {sujeitos.map((s) => {
           const doSujeito = itens.filter((i) => i.sujeito_id === s.id)
           if (doSujeito.length === 0) return null
@@ -283,25 +319,37 @@ export function EmissaoBullai({
                 .slice(0, 12)
             : []
           return (
-            <div key={s.id}>
-              <div className="mb-1.5 flex flex-wrap items-center gap-2 text-sm">
-                <Badge size="sm" tone="blue">{s.papel}</Badge>
-                <span className="font-medium text-texto">{s.nome}</span>
+            <div key={s.id} className="border-t border-borda pb-1 pt-2.5">
+              <div className="mb-1 flex flex-wrap items-center gap-2 text-corpo">
+                <Selo tom="info">{s.papel}</Selo>
+                <b className="font-bold text-texto">{s.nome}</b>
                 {s.tipo_pessoa === 'PF' && !s.data_nascimento && (
-                  <Badge size="sm" tone="red">falta a data de nascimento — a BullAI exige</Badge>
+                  <Selo tom="perigo" icone={<X className={icSelo} aria-hidden />}>
+                    falta a data de nascimento — a BullAI exige
+                  </Selo>
                 )}
               </div>
-              <ul className="divide-y divide-borda rounded-lg ring-1 ring-inset ring-borda">
+              <ul>
                 {doSujeito.map((i) => {
                   const t = traducoes.get(i.id)
                   const podePedir = pedivel(i) && (t?.chaves.length ?? 0) > 0
+                  const pdfs = (i.arquivos ?? []).filter((a) => a.drive_link)
                   return (
-                    <li key={i.id} className="flex flex-wrap items-start gap-2 px-3 py-2 text-xs">
-                      {podePedir ? (
+                    <li key={i.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 text-corpo">
+                      {/* A CAIXA APARECE SEMPRE, desabilitada no que não se pode
+                          pedir (como na amostra): a coluna fica alinhada e o
+                          "não dá" se vê. Desabilitada, ela não muda nada. */}
+                      <label
+                        className={cn(
+                          'inline-flex min-h-8 items-center gap-2',
+                          podePedir ? 'cursor-pointer' : 'cursor-default',
+                        )}
+                      >
                         <input
                           type="checkbox"
-                          className="mt-0.5"
+                          className="h-[16px] w-[16px] flex-none accent-marca"
                           checked={marcado(i)}
+                          disabled={!podePedir}
                           onChange={() =>
                             setDesmarcados((antes) => {
                               const n = new Set(antes)
@@ -311,116 +359,124 @@ export function EmissaoBullai({
                             })
                           }
                         />
-                      ) : (
-                        <span className="w-3.5" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-medium text-texto">
-                            {i.certidao_catalogo?.nome_curto ?? i.certidao_codigo}
-                          </span>
+                        <span className="text-texto">
+                          {i.certidao_catalogo?.nome_curto ?? i.certidao_codigo}
                           {Object.values(i.parametros ?? {}).length > 0 && (
-                            <span className="text-texto-3">({Object.values(i.parametros).join(', ')})</span>
+                            <span className="text-texto-3"> ({Object.values(i.parametros).join(', ')})</span>
                           )}
-                          {i.status === 'OBTIDA' && seloDoResultado(i.resultado)}
-                          {i.status === 'EM_EMISSAO' && <Badge size="sm" tone="yellow">em emissão</Badge>}
-                          {i.status === 'FALHA' && <Badge size="sm" tone="red">falhou</Badge>}
-                        </div>
-                        {t && t.chaves.length > 0 && (
-                          <div className="mt-0.5 text-texto-3">
-                            {t.chaves.map((k) => porChave.get(k)?.rotulo ?? k).join(' · ')}
-                          </div>
-                        )}
-                        {t?.semBullai && i.status !== 'OBTIDA' && (
-                          <div className="mt-0.5 text-aviso">Manual: {t.semBullai}</div>
-                        )}
-                        {i.erro_detalhe && i.status !== 'OBTIDA' && (
-                          <div className="mt-0.5 text-texto-3">{i.erro_detalhe}</div>
-                        )}
-                        {(i.arquivos ?? []).filter((a) => a.drive_link).length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-2">
-                            {(i.arquivos ?? []).filter((a) => a.drive_link).map((a) => (
-                              <a
-                                key={a.drive_link!}
-                                href={a.drive_link!}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-brand-700 hover:underline"
-                              >
-                                <ExternalLink className="h-3 w-3" />
-                                {porChave.get(a.portal)?.rotulo ?? a.nome}
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                        </span>
+                      </label>
+                      {t && t.chaves.length > 0 && (
+                        <span className="text-xs text-texto-3">
+                          portais: {t.chaves.map((k) => porChave.get(k)?.rotulo ?? k).join(' · ')}
+                        </span>
+                      )}
+                      {t?.semBullai && i.status !== 'OBTIDA' && (
+                        <span className="text-xs text-aviso">Manual: {t.semBullai}</span>
+                      )}
+                      {i.status === 'OBTIDA' && seloDoResultado(i.resultado)}
+                      {i.status === 'EM_EMISSAO' && (
+                        <Selo tom="aviso" icone={<Clock className={icSelo} aria-hidden />}>
+                          em emissão
+                        </Selo>
+                      )}
+                      {i.status === 'FALHA' && (
+                        <Selo tom="perigo" icone={<X className={icSelo} aria-hidden />}>
+                          falhou
+                        </Selo>
+                      )}
+                      {i.erro_detalhe && i.status !== 'OBTIDA' && (
+                        <span className="text-xs text-texto-3">{i.erro_detalhe}</span>
+                      )}
+                      {pdfs.map((a) => (
+                        <a
+                          key={a.drive_link!}
+                          href={a.drive_link!}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={LINK_BTN}
+                        >
+                          {porChave.get(a.portal)?.rotulo ?? a.nome}
+                          <ExternalLink className="h-4 w-4" aria-hidden />
+                        </a>
+                      ))}
                     </li>
                   )
                 })}
                 {(extras[s.id] ?? []).map((k) => (
-                  <li key={k} className="flex items-center gap-2 px-3 py-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked
-                      onChange={() =>
-                        setExtras((antes) => ({ ...antes, [s.id]: (antes[s.id] ?? []).filter((x) => x !== k) }))
-                      }
-                    />
-                    <span className="text-texto">{porChave.get(k)?.rotulo ?? k}</span>
-                    <span className="text-texto-3">acrescentada · fora da planilha</span>
+                  <li key={k} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 text-corpo">
+                    <label className="inline-flex min-h-8 cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-[16px] w-[16px] flex-none accent-marca"
+                        checked
+                        onChange={() =>
+                          setExtras((antes) => ({ ...antes, [s.id]: (antes[s.id] ?? []).filter((x) => x !== k) }))
+                        }
+                      />
+                      <span className="text-texto">{porChave.get(k)?.rotulo ?? k}</span>
+                    </label>
+                    <span className="text-xs text-texto-3">acrescentada · fora da planilha</span>
                   </li>
                 ))}
               </ul>
 
               {/* O CATÁLOGO INTEIRO, a um campo de distância: as marcadas são o
                   que a planilha pede; qualquer outra das que a BullAI emite para
-                  este tipo de documento pode ser acrescentada aqui. */}
-              <div className="relative mt-1.5">
-                <div className="flex items-center gap-1.5">
-                  <Plus className="h-3.5 w-3.5 text-texto-3" />
-                  <input
-                    value={busca[s.id] ?? ''}
-                    onChange={(e) => setBusca((antes) => ({ ...antes, [s.id]: e.target.value }))}
-                    placeholder={`Acrescentar outra certidão do catálogo (${portais.filter((p) => p.documento === documento).length} para ${documento})…`}
-                    className="w-full rounded-md border-0 bg-transparent py-1 text-xs text-texto placeholder:text-texto-3 focus:outline-none"
-                  />
-                </div>
+                  este tipo de documento pode ser acrescentada aqui. A LISTA
+                  FICA NO FLUXO, e não flutuando: dentro da janela que rola, uma
+                  lista flutuante era cortada pela borda do corpo. */}
+              <div className="mt-2">
+                <Input
+                  value={busca[s.id] ?? ''}
+                  onChange={(e) => setBusca((antes) => ({ ...antes, [s.id]: e.target.value }))}
+                  placeholder={`Acrescentar outra certidão do catálogo (${portais.filter((p) => p.documento === documento).length} para ${documento})…`}
+                  aria-label={`Acrescentar certidão do catálogo para ${s.nome}`}
+                />
                 {achados.length > 0 && (
-                  <div className="absolute z-20 mt-1 w-full rounded-lg border border-borda bg-superficie p-1 shadow-nivel-2">
+                  <ul className="mt-1 max-h-[240px] overflow-auto rounded-campo border border-borda bg-superficie p-1 shadow-nivel-2">
                     {achados.map((p) => (
-                      <button
-                        key={p.chave}
-                        type="button"
-                        onClick={() => {
-                          setExtras((antes) => ({
-                            ...antes,
-                            [s.id]: [...new Set([...(antes[s.id] ?? []), p.chave])],
-                          }))
-                          setBusca((antes) => ({ ...antes, [s.id]: '' }))
-                        }}
-                        className="block w-full rounded px-2 py-1 text-left text-xs text-texto hover:bg-superficie-2"
-                        title={p.criterio}
-                      >
-                        {p.rotulo}
-                      </button>
+                      <li key={p.chave}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExtras((antes) => ({
+                              ...antes,
+                              [s.id]: [...new Set([...(antes[s.id] ?? []), p.chave])],
+                            }))
+                            setBusca((antes) => ({ ...antes, [s.id]: '' }))
+                          }}
+                          className="flex min-h-11 w-full items-center rounded-controle px-2.5 text-left text-corpo text-texto hover:bg-superficie-3 focus-visible:bg-superficie-3"
+                          title={p.criterio}
+                        >
+                          {p.rotulo}
+                        </button>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 )}
               </div>
             </div>
           )
         })}
 
-        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-borda pt-3">
-          {semNascimento.length > 0 && (
-            <span className="text-xs text-perigo">
-              Falta a data de nascimento de {semNascimento.map((p) => p.sujeito.nome).join(', ')} — corrija os dados antes.
-            </span>
-          )}
+        {emEmissao && (
+          <p className="mt-2 text-xs text-texto-3">
+            A tela confere o andamento sozinha ao abrir e a cada 60 s.
+          </p>
+        )}
+        {semNascimento.length > 0 && (
+          <DicaDeAviso>
+            Falta a data de nascimento de {semNascimento.map((p) => p.sujeito.nome).join(', ')} — corrija os dados antes.
+          </DicaDeAviso>
+        )}
+
+        <div className="mt-6 flex flex-wrap items-center justify-end gap-2.5 border-t border-borda pt-5">
           <Button
             onClick={() => setConfirmando(true)}
             disabled={consultas === 0 || semNascimento.length > 0 || pedindo}
             loading={pedindo}
+            icon={<Download className="h-4 w-4" aria-hidden />}
           >
             Extrair {consultas} certidão(ões)
           </Button>
