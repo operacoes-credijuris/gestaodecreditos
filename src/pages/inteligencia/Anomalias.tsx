@@ -13,6 +13,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/Table'
 import { usePainel, CarregandoPainel, ErroPainel, Ressalva } from './compartilhado'
+import { TextoComTermos } from '@/components/layout/TextoComTermos'
 
 const TOM_GRAVIDADE = { alta: 'red', media: 'amber', baixa: 'gray' } as const
 const ROTULO_GRAVIDADE = { alta: 'Alta', media: 'Média', baixa: 'Baixa' } as const
@@ -30,7 +31,9 @@ export default function Anomalias() {
     <div className="space-y-6">
       <PageHeader
         title="Revisão de dados"
-        description="Inconsistências e sinais atípicos encontrados na carteira. Nenhum dado foi alterado."
+        description={
+          <TextoComTermos texto="Inconsistências e sinais atípicos encontrados na carteira. Nenhum dado foi alterado." />
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-3">

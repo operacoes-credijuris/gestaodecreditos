@@ -21,6 +21,7 @@ import { formatBRL, hojeISO } from '@/lib/format'
 import { processosCrud, useParametrosAtualizacao } from '@/lib/queries'
 import { montarPainel, type PainelEconomico, type ResumoGrupo } from '@/lib/analytics'
 import type { ClasseAmostra } from '../../../supabase/functions/_shared/nucleo/amostra.ts'
+import { TextoComTermos } from '@/components/layout/TextoComTermos'
 
 /** Percentual a partir de FRAÇÃO (0,3648 -> "36,5%"). */
 export function pct(f: number | null | undefined, casas = 1): string {
@@ -102,7 +103,13 @@ export function CabecalhoDaAba({ titulo, apoio }: { titulo: string; apoio?: Reac
   return (
     <div className="-mt-1.5">
       <h2 className="sr-only">{titulo}</h2>
-      {apoio && <p className="text-corpo text-texto-2">{apoio}</p>}
+      {/* OS TERMOS DO GLOSSÁRIO sublinhados quando o apoio é texto puro (o
+          `tab-desc` da amostra); apoio com marcação fica como veio. */}
+      {apoio && (
+        <p className="text-corpo text-texto-2">
+          {typeof apoio === 'string' ? <TextoComTermos texto={apoio} /> : apoio}
+        </p>
+      )}
     </div>
   )
 }
