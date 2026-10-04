@@ -23,6 +23,7 @@ export function NumeroProcessoDrive({
   numero,
   className,
   reservarIcone,
+  classeDoIcone,
 }: {
   /**
    * O crédito, quando a tarefa/linha casou com um. Nulo em tarefa de processo que
@@ -41,6 +42,12 @@ export function NumeroProcessoDrive({
    * direita do número, então é opt-in.
    */
   reservarIcone?: boolean
+  /**
+   * Classes do ícone da pasta. Em Tarefas (auditoria visual, T2) ele só aparece
+   * no hover ou no foco do cartão: depois do número vinham dois ícones (pasta e
+   * copiar) em toda tarefa, e a linha ficava poluída.
+   */
+  classeDoIcone?: string
 }) {
   const { abrir, abrindo, podeAbrir } = useAbrirPastaDoCredito(processo)
   const texto = formatCNJ(numero)
@@ -50,7 +57,7 @@ export function NumeroProcessoDrive({
       <span className={cn(reservarIcone && 'inline-flex items-center gap-1', className)}>
         {texto}
         {reservarIcone && (
-          <span className="inline-block h-3.5 w-3.5 flex-none" aria-hidden="true" />
+          <span className="inline-block h-[14px] w-[14px] flex-none" aria-hidden="true" />
         )}
       </span>
     )
@@ -68,12 +75,12 @@ export function NumeroProcessoDrive({
     >
       {texto}
       {abrindo ? (
-        <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-texto-3" />
+        <Loader2 className="h-[14px] w-[14px] flex-none animate-spin text-texto-3" />
       ) : (
         // O ícone é discreto e sempre presente: sublinhado pontilhado sozinho não
         // diria PARA ONDE o clique leva, e a plataforma tem outros textos
         // sublinhados.
-        <FolderOpen className="h-3.5 w-3.5 flex-none text-texto-3" />
+        <FolderOpen className={cn('h-[14px] w-[14px] flex-none text-texto-3', classeDoIcone)} />
       )}
     </button>
   )

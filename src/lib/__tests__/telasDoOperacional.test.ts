@@ -4,6 +4,7 @@ import {
   agruparPorPrazo,
   diasAtePrazo,
   grupoDoPrazo,
+  prazoCurto,
   seloDoPrazo,
 } from '../prazoDasTarefas'
 import { brlCurto, numerosDaSelecao, tomDaExpectativa } from '../numerosDosCreditos'
@@ -82,6 +83,21 @@ describe('prazo das tarefas — grupos e selo', () => {
     expect(seloDoPrazo(1)).toEqual({ tom: 'perigo', rel: 'amanhã' })
     expect(seloDoPrazo(5)).toEqual({ tom: 'aviso', rel: 'em 5 dias' })
     expect(seloDoPrazo(12)).toEqual({ tom: 'neutro', rel: '' })
+  })
+
+  // O texto de dentro do bloco de data (auditoria visual, T1): curto, e com a
+  // mesma régua do selo — nada depois de 7 dias.
+  it('o prazo curto cabe no bloco e segue a régua do selo', () => {
+    expect(prazoCurto(-12)).toBe('há 12 dias')
+    expect(prazoCurto(-2)).toBe('há 2 dias')
+    expect(prazoCurto(-1)).toBe('ontem')
+    expect(prazoCurto(0)).toBe('hoje')
+    expect(prazoCurto(1)).toBe('amanhã')
+    expect(prazoCurto(7)).toBe('em 7 dias')
+    expect(prazoCurto(8)).toBe('')
+    for (const d of [-30, -1, 0, 1, 3, 7, 8, 40]) {
+      expect(prazoCurto(d) === '').toBe(seloDoPrazo(d).rel === '')
+    }
   })
 
   it('agrupa, ordena como a plataforma e deixa de fora quem não tem prazo', () => {

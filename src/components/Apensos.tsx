@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import { apensosCrud } from '@/lib/queries'
 import { invokeFunction } from '@/lib/functions'
 import type { Apenso } from '@/lib/types'
 import { cn } from '@/lib/cn'
 import { Button } from '@/components/ui/Button'
-import { IconButton } from '@/components/ui/IconButton'
+import { AcoesDaLinha, type AcaoDoMenu } from '@/components/ui/MenuDeAcoes'
 import { Field, Input } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { Drawer } from '@/components/ui/Drawer'
@@ -21,7 +21,7 @@ type ParentField = 'processo_id' | 'requerimento_id'
 /**
  * Gerencia os apensos (incidentes, recursos etc.) atrelados a um principal
  * (crédito ou requerimento). Retorna helpers para embutir na tabela:
- * - actions(parentId): botões de expandir + adicionar (antes de editar/excluir)
+ * - acaoAdicionar(parentId): o "Adicionar apenso" do menu "⋯" da linha
  * - detailRow(parentId, colSpan): linha expansível com a lista de apensos
  * - modals(): modal de formulário + confirmação de exclusão (renderizar 1x)
  */
@@ -189,25 +189,27 @@ export function useApensosManager(parentField: ParentField) {
         title={`${count} apenso${count > 1 ? 's' : ''}`}
         // A pílula neutra da amostra (`.pill-btn`), com os 24px de alvo: é o
         // único jeito de abrir a lista de apensos na tabela.
-        className="inline-flex min-h-[24px] shrink-0 items-center gap-0.5 rounded-full bg-superficie-3 px-2 text-xs font-semibold text-texto-2 ring-1 ring-inset ring-borda transition-colors hover:text-marca-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+        className="inline-flex min-h-[24px] shrink-0 items-center gap-s0.5 rounded-full bg-superficie-3 px-s2 text-xs font-semibold text-texto-2 ring-1 ring-inset ring-borda transition-colors hover:text-marca-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
       >
         <span className="tabular-nums">{count}</span>
         <ChevronDown
-          className={cn('h-3 w-3 transition-transform', aberto && 'rotate-180')}
+          className={cn('h-[12px] w-[12px] transition-transform', aberto && 'rotate-180')}
           aria-hidden="true"
         />
       </button>
     )
   }
 
-  function actions(parentId: string) {
-    return (
-      <IconButton
-        label="Adicionar apenso"
-        icon={<Plus className="h-4 w-4" />}
-        onClick={() => openNew(parentId)}
-      />
-    )
+  /**
+   * "Adicionar apenso" como uma ação do menu "⋯" da linha (auditoria visual,
+   * C4): era o "+" solto, o primeiro de quatro ícones de 12px por linha.
+   */
+  function acaoAdicionar(parentId: string): AcaoDoMenu {
+    return {
+      rotulo: 'Adicionar apenso',
+      icone: <Plus aria-hidden="true" />,
+      onSelecionar: () => openNew(parentId),
+    }
   }
 
   /**
@@ -220,21 +222,21 @@ export function useApensosManager(parentField: ParentField) {
   function cartoes(parentId: string, vazio: string) {
     const apensos = porPai.get(parentId) ?? []
     return (
-      <div className="space-y-2">
+      <div className="space-y-s2">
         {apensos.length === 0 ? (
           <p className="text-corpo text-texto-2">{vazio}</p>
         ) : (
           apensos.map((a) => (
             // Clique abre a ficha do apenso, como nas linhas de Créditos. O cartão
             // não é um botão (tem botões dentro); pelo teclado, a ficha abre pelo
-            // último botão, o da seta.
+            // "›", o último botão.
             <div
               key={a.id}
               onClick={() => setFicha(a)}
-              className="flex cursor-pointer items-center gap-3 rounded-campo border border-borda bg-superficie px-3 py-2.5 text-corpo transition-colors hover:border-marca-viva"
+              className="flex cursor-pointer items-center gap-s3 rounded-campo border border-borda bg-superficie px-s3 py-s2 text-corpo transition-colors hover:border-marca-viva"
               title="Abrir ficha do apenso"
             >
-              <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="min-w-0 flex-1 space-y-s0.5">
                 <div className="text-texto">
                   <span className="font-semibold tabular-nums">{formatCNJ(a.numero)}</span>
                   {a.classe_processual && (
@@ -248,35 +250,31 @@ export function useApensosManager(parentField: ParentField) {
                   Polo ativo: {a.polo_ativo || '—'} · Polo passivo: {a.polo_passivo || '—'}
                 </div>
               </div>
-              {/* stopPropagation: os botões não devem abrir a ficha. */}
-              <div
-                className="flex shrink-0 items-center gap-0.5"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <IconButton
-                  label="Editar apenso"
-                  icon={<Pencil className="h-4 w-4" />}
-                  onClick={() => abrirForm(a)}
-                />
-                <IconButton
-                  label="Excluir apenso"
-                  variant="danger"
-                  icon={<Trash2 className="h-4 w-4" />}
-                  onClick={() => setToDelete(a)}
-                />
-                <IconButton
-                  label={`Abrir ficha do apenso ${formatCNJ(a.numero)}`}
-                  icon={<ChevronRight className="h-4 w-4" />}
-                  onClick={() => setFicha(a)}
-                />
-              </div>
+              {/* AS AÇÕES DA LINHA, como nas tabelas (auditoria visual, C4): o
+                  "⋯" com Editar e Excluir (em vermelho, por último) e o "›" que
+                  abre a ficha. A lixeira não fica mais colada no lápis. Os
+                  botões não deixam o clique chegar ao cartão. */}
+              <AcoesDaLinha
+                onAbrir={() => setFicha(a)}
+                rotuloAbrir={`Abrir ficha do apenso ${formatCNJ(a.numero)}`}
+                rotuloDasAcoes={`Ações do apenso ${formatCNJ(a.numero)}`}
+                acoes={[
+                  { rotulo: 'Editar apenso', icone: <Pencil aria-hidden="true" />, onSelecionar: () => abrirForm(a) },
+                  {
+                    rotulo: 'Excluir apenso',
+                    icone: <Trash2 aria-hidden="true" />,
+                    perigo: true,
+                    onSelecionar: () => setToDelete(a),
+                  },
+                ]}
+              />
             </div>
           ))
         )}
         <Button
           size="sm"
           variant="secondary"
-          icon={<Plus className="h-4 w-4" />}
+          icon={<Plus className="h-[16px] w-[16px]" />}
           onClick={() => openNew(parentId)}
         >
           Adicionar apenso
@@ -289,8 +287,8 @@ export function useApensosManager(parentField: ParentField) {
     if (!expanded[parentId]) return null
     return (
       <tr className="bg-superficie-2">
-        <td colSpan={colSpan} className="px-4 py-3">
-          <div className="font-display mb-2 text-xs font-bold uppercase tracking-wider text-texto-3">
+        <td colSpan={colSpan} className="px-s4 py-s3">
+          <div className="font-display mb-s2 text-xs font-bold uppercase tracking-wider text-texto-3">
             Apensos
           </div>
           {cartoes(parentId, 'Nenhum apenso vinculado a este registro.')}
@@ -316,7 +314,8 @@ export function useApensosManager(parentField: ParentField) {
               ? undefined
               : 'Processo ligado a este registro — embargos, impugnação, cumprimento de sentença.'
           }
-          size="lg"
+          // Formulário: 640px (auditoria visual, C8).
+          size="md"
           dirty={dirty}
           footer={
             <>
@@ -343,8 +342,8 @@ export function useApensosManager(parentField: ParentField) {
           }
         >
           {editing && (
-            <form id="form-apenso" onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
+            <form id="form-apenso" onSubmit={handleSubmit} className="space-y-s4">
+              <div className="grid gap-s4 sm:grid-cols-2">
                 {/* "Número do processo": o apenso tem CNJ próprio, e é por ele que a
                     ADVBOX busca o andamento dele. O rótulo curto não dizia de que
                     número se tratava. */}
@@ -445,7 +444,7 @@ export function useApensosManager(parentField: ParentField) {
           footer={
             ficha && (
               <Button
-                icon={<Pencil className="h-4 w-4" />}
+                icon={<Pencil className="h-[16px] w-[16px]" />}
                 onClick={() => {
                   setFicha(null)
                   abrirForm(ficha)
@@ -457,7 +456,7 @@ export function useApensosManager(parentField: ParentField) {
           }
         >
           {ficha && (
-            <div className="space-y-6">
+            <div className="space-y-s5">
               {/* "Órgão", igual ao formulário: rótulo diferente para o mesmo campo
                   entre a ficha e o cadastro faz parecer que são dois dados. */}
               <SecaoDaFicha
@@ -494,5 +493,5 @@ export function useApensosManager(parentField: ParentField) {
    */
   const contagem = (parentId: string) => porPai.get(parentId)?.length ?? 0
 
-  return { contador, contagem, actions, detailRow, listaNaFicha, modals }
+  return { contador, contagem, acaoAdicionar, detailRow, listaNaFicha, modals }
 }

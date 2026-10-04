@@ -369,8 +369,8 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
       {aba === 'movimentacoes' ? (
         movs.isLoading ? (
           <div className="space-y-2">
-            <div className="skeleton h-12 w-full rounded-lg" />
-            <div className="skeleton h-12 w-11/12 rounded-lg" />
+            <div className="skeleton h-12 w-full rounded-campo" />
+            <div className="skeleton h-12 w-11/12 rounded-campo" />
           </div>
         ) : movs.isError ? (
           <p role="alert" className="text-corpo text-perigo">
@@ -408,8 +408,8 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
 
           {tarefas.isLoading ? (
             <div className="space-y-2">
-              <div className="skeleton h-12 w-full rounded-lg" />
-              <div className="skeleton h-12 w-11/12 rounded-lg" />
+              <div className="skeleton h-12 w-full rounded-campo" />
+              <div className="skeleton h-12 w-11/12 rounded-campo" />
             </div>
           ) : tarefas.isError ? (
             <p role="alert" className="text-corpo text-perigo">

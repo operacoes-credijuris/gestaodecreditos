@@ -98,8 +98,8 @@ function Passo({
   children: ReactNode
 }) {
   return (
-    <section className="border-b border-borda py-5 last:border-b-0">
-      <div className="mb-4 flex gap-4">
+    <section className="border-b border-borda py-s5 last:border-b-0">
+      <div className="mb-s4 flex gap-s3">
         <span
           aria-hidden
           className="grid h-[28px] w-[28px] flex-none place-items-center rounded-full bg-marca font-display text-sm font-bold text-white"
@@ -107,11 +107,11 @@ function Passo({
           {numero}
         </span>
         <div>
-          <h2 className="mt-0.5 font-display text-lg font-bold text-texto">
+          <h2 className="mt-s0.5 font-display text-lg font-bold text-texto">
             <span className="sr-only">Passo {numero}: </span>
             {titulo}
           </h2>
-          <p className="mt-0.5 text-corpo text-texto-2">{descricao}</p>
+          <p className="mt-s0.5 text-corpo text-texto-2">{descricao}</p>
         </div>
       </div>
       {children}
@@ -519,13 +519,13 @@ function GerarPanel() {
             </p>
             {resultado.originador_criado && (
               <p className="flex items-start gap-1.5 text-sm text-aviso">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+                <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
                 Pasta nova criada para o originador "{resultado.originador_criado}" — confira se não é erro de digitação.
               </p>
             )}
             {resultado.pendentes.length > 0 && (
               <p className="flex items-start gap-1.5 text-sm text-aviso">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+                <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
                 Variáveis não preenchidas: {resultado.pendentes.map(nomeDaVariavel).join(', ')}
               </p>
             )}
@@ -535,7 +535,7 @@ function GerarPanel() {
               href={resultado.drive_folder_url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex h-11 items-center gap-2 whitespace-nowrap rounded-controle border border-borda-forte bg-superficie px-4 text-sm font-semibold text-texto transition-colors hover:bg-superficie-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2"
+              className="inline-flex h-controle items-center gap-s2 whitespace-nowrap rounded-controle border border-borda-forte bg-superficie px-s4 text-sm font-semibold text-texto transition-colors hover:bg-superficie-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2"
             >
               <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
               Abrir pasta no Drive
@@ -545,8 +545,7 @@ function GerarPanel() {
                 pasta só para isso. */}
             <Button
               type="button"
-              variant="outline"
-              size="lg"
+              variant="secondary"
               icon={<Copy className="h-[16px] w-[16px]" />}
               onClick={() => void copiarTexto(resultado.drive_folder_url, 'Link da pasta copiado.')}
             >
@@ -561,15 +560,15 @@ function GerarPanel() {
           também gera, como antes). */}
       <form
         onSubmit={handleSubmit}
-        className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]"
+        className="grid items-start gap-s5 lg:grid-cols-[minmax(0,1fr)_320px]"
       >
-        <Card className="px-6 py-1">
+        <Card className="px-s6 py-s1">
           <Passo
             numero={1}
             titulo="O crédito"
             descricao="Quem compra, de quem veio e qual processo — o número é o que localiza a análise no Drive."
           >
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-s4 sm:grid-cols-2">
               <Field label="Investidor (cessionário)" required>
                 <Select value={investidorNome} onChange={(e) => setInvestidorNome(e.target.value)}>
                   <option value="">Selecione…</option>
@@ -661,7 +660,7 @@ function GerarPanel() {
             titulo="Documentos"
             descricao="Servem para extrair os dados do cedente e do escritório. Os do cedente ficam arquivados no Drive, na pasta do processo (4. Documentos do cedente e advogado)."
           >
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-s4 sm:grid-cols-2">
               <ArquivosField
                 titulo="Do cedente"
                 genero={cedenteGenero}
@@ -729,8 +728,10 @@ function GerarPanel() {
             dizia por quê. Aqui está o que foi escolhido, o que falta e o
             andamento — a geração leva de 30 a 90 segundos, e sem ele o clique
             parece não ter feito nada. */}
-        <Card className="p-5 lg:sticky lg:top-6">
-          <h2 className="mb-4 font-display text-lg font-bold text-texto">Resumo</h2>
+        {/* FIXO NA ROLAGEM (auditoria visual, G1): o "Gerar contrato" e a lista
+            do que falta ficam à vista enquanto se preenche o formulário. */}
+        <Card className="p-s5 lg:sticky lg:top-s6">
+          <h2 className="mb-s4 font-display text-lg font-bold text-texto">Resumo</h2>
           <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5 text-corpo">
             <LinhaResumo rotulo="Investidor" valor={investidorNome} falta="a escolher" />
             <LinhaResumo rotulo="Categoria" valor={categoria} falta="" />
@@ -812,8 +813,11 @@ function ArquivosField({
     if (aceitos.length > 0) onAdicionar(aceitos)
   }
   return (
-    <div className="rounded-cartao border border-borda p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+    // SEM CARTÃO DENTRO DO CARTÃO (auditoria visual, G1 e §0.4): o bloco interno
+    // é a superfície 2 de canto de campo, sem borda — a borda era a segunda
+    // moldura dentro do cartão do formulário.
+    <div className="rounded-campo bg-superficie-2 p-s4">
+      <div className="mb-s3 flex flex-wrap items-center justify-between gap-x-s4 gap-y-s1">
         <p className="font-semibold text-texto">{titulo}</p>
         <div
           role="radiogroup"
@@ -855,7 +859,7 @@ function ArquivosField({
         onDragLeave={() => setArrastando(false)}
         onDrop={soltar}
         className={`flex w-full flex-col items-center justify-center gap-1 rounded-campo border-[1.5px] border-dashed px-4 py-4 text-center text-corpo transition-colors hover:border-marca-viva hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2 ${
-          arrastando ? 'border-marca-viva bg-marca-leve' : 'border-borda-forte bg-superficie-2'
+          arrastando ? 'border-marca-viva bg-marca-leve' : 'border-borda-forte bg-superficie'
         }`}
       >
         <Upload className="h-[20px] w-[20px] text-texto-3" aria-hidden />
@@ -880,7 +884,7 @@ function ArquivosField({
           {arquivos.map((f, i) => (
             <li
               key={i}
-              className="flex items-center gap-2 rounded-controle bg-superficie-2 py-0.5 pl-2.5 pr-1 text-corpo text-texto"
+              className="flex items-center gap-s2 rounded-controle bg-superficie py-s0.5 pl-s2 pr-s1 text-corpo text-texto"
             >
               <IconeArquivo className="h-[14px] w-[14px] flex-none text-texto-3" aria-hidden />
               <span className="min-w-0 flex-1 truncate" title={f.name}>

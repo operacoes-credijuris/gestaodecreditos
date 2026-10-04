@@ -20,7 +20,7 @@
 // o "Descartar alterações?" ao fechar a ficha com algo digitado. O que o Salvar
 // grava continua em lib/fichaPessoa.ts, com teste.
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, Copy, Info, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, Copy, Info, Pencil, Plus, Trash2 } from 'lucide-react'
 import {
   chavePessoa,
   processosCrud,
@@ -59,7 +59,9 @@ import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { Tabs, idDaAba } from '@/components/ui/Tabs'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
-import { IconButton } from '@/components/ui/IconButton'
+import { CampoDeBusca } from '@/components/ui/CampoDeBusca'
+import { AcoesDaLinha, type AcaoDoMenu } from '@/components/ui/MenuDeAcoes'
+import { CartaoNoCelular, ListaNoCelular } from '@/components/operacional/Pecas'
 import {
   Table,
   THead,
@@ -70,6 +72,8 @@ import {
   Loading,
   ErrorState,
   EmptyState,
+  SemResultado,
+  Truncado,
 } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { perguntarDescarte } from '@/lib/descarte'
@@ -96,19 +100,20 @@ import { useCopiarTexto } from '@/components/BotaoCopiar'
 function GrupoDados({
   linhas,
 }: {
-  linhas: { rotulo: string; valor?: string | null; numero?: boolean }[]
+  linhas: { rotulo: string; valor?: string | null; numero?: boolean; truncar?: boolean }[]
 }) {
   const preenchidas = linhas.filter((l) => l.valor)
   if (preenchidas.length === 0) return <span className="text-texto-3">—</span>
   return (
-    <dl className="m-0 grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-0.5">
+    <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-s3 gap-y-s0.5">
       {preenchidas.map((l) => (
         <Fragment key={l.rotulo}>
           <dt className="whitespace-nowrap text-texto-3">{l.rotulo}</dt>
-          {/* break-words: chave Pix de e-mail não tem espaço e, com a tabela de
-              colunas fixas, vazaria por cima da coluna vizinha. */}
+          {/* O PIX NUMA LINHA SÓ, cortado com "…" e inteiro na dica (auditoria
+              visual, D1): quebrado no meio, "financeiro@credijuriscapi / tal.invalid"
+              não se lia nem se copiava. O resto quebra entre palavras. */}
           <dd className={`m-0 min-w-0 break-words text-texto ${l.numero ? 'whitespace-nowrap tabular-nums' : ''}`}>
-            {l.valor}
+            {l.truncar && l.valor ? <Truncado texto={l.valor} max={9999} /> : l.valor}
           </dd>
         </Fragment>
       ))}
@@ -132,7 +137,7 @@ function Avatar({ nome }: { nome: string }) {
 function SecaoFicha({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
     <section>
-      <h3 className="mb-3 font-display text-xs font-bold uppercase tracking-wider text-texto-3">
+      <h3 className="mb-s3 font-display text-xs font-bold uppercase tracking-wider text-texto-3">
         {titulo}
       </h3>
       {children}
@@ -144,8 +149,8 @@ function SecaoFicha({ titulo, children }: { titulo: string; children: ReactNode 
 function AvisoAmbar({ children, icone = 'alerta' }: { children: ReactNode; icone?: 'alerta' | 'info' }) {
   const Icone = icone === 'info' ? Info : AlertTriangle
   return (
-    <p role="status" className="mt-2 flex items-start gap-1.5 text-sm text-aviso">
-      <Icone className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+    <p role="status" className="mt-s2 flex items-start gap-s1.5 text-sm text-aviso">
+      <Icone className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
       <span>{children}</span>
     </p>
   )
@@ -312,13 +317,13 @@ export default function DadosPessoaisBancarios() {
     if (!nome) return undefined
     const chave = normalizarNome(nome)
     if (dados.data?.has(chavePessoa(tipo, chave)))
-      return 'Já existe ficha com este nome. Cancele e edite pelo lápis na tabela.'
+      return 'Já existe ficha com este nome. Cancele e abra a ficha dele pela tabela.'
     const p = nomeParecido(
       nome,
       pessoas.map((x) => x.nome),
     )
     return p
-      ? `Parecido com "${p}". Se for o mesmo, cancele e edite pelo lápis na tabela.`
+      ? `Parecido com "${p}". Se for o mesmo, cancele e abra a ficha dele pela tabela.`
       : undefined
   }, [editando, dados.data, pessoas, tipo])
 
@@ -545,7 +550,7 @@ export default function DadosPessoaisBancarios() {
     // apagaria CPF, conta e endereço de quem está lá.
     if (editando.novo && dados.data?.has(chavePessoa(tipo, chave))) {
       toast.error(
-        `Já existe ficha de "${nome}". Abra pelo lápis na tabela para editar.`,
+        `Já existe ficha de "${nome}". Abra a ficha pela tabela para editar.`,
       )
       return
     }
@@ -588,6 +593,33 @@ export default function DadosPessoaisBancarios() {
     }
   }
 
+  /**
+   * O MENU "⋯" DA PESSOA (auditoria visual, D2). Editar abre a mesma ficha do
+   * "›". Remover existe só para quem NÃO está em crédito nenhum, que é o caso do
+   * cadastro feito com o nome errado: quem está num crédito não sairia da lista —
+   * o nome vem de lá —, e o botão só apagaria os dados bancários dando a
+   * impressão de remover. Fica no menu DESLIGADO, com o porquê na dica, em vez
+   * de sumir. Com o mapa não carregado, nada abre (ver o portão abaixo): abrir o
+   * formulário sobre um mapa que não carregou é o que transforma erro de leitura
+   * em apagamento de dado.
+   */
+  const acoesDaPessoa = (i: PessoaLista): AcaoDoMenu[] => [
+    {
+      rotulo: 'Editar dados',
+      icone: <Pencil aria-hidden />,
+      desabilitada: !dados.data,
+      onSelecionar: () => abrirJanela(i.chave, i.nome, false),
+    },
+    {
+      rotulo: `Remover ${rotuloMin}`,
+      icone: <Trash2 aria-hidden />,
+      perigo: true,
+      desabilitada: i.emCredito,
+      motivo: 'Está num crédito: o nome vem de lá, e remover aqui só apagaria os dados bancários.',
+      onSelecionar: () => setAExcluir(i),
+    },
+  ]
+
   const carregando = processos.isLoading || dados.isLoading
   const comErro = processos.isError || dados.isError
 
@@ -602,6 +634,8 @@ export default function DadosPessoaisBancarios() {
           disabled={!dados.data}
           title={dados.data ? undefined : 'Espere as fichas carregarem'}
           onClick={() => abrirJanela('', '', true)}
+          // No celular, o primário ocupa a largura (auditoria visual, K2).
+          className="w-full sm:w-auto"
         >
           Cadastrar {rotuloMin}
         </Button>
@@ -661,7 +695,7 @@ export default function DadosPessoaisBancarios() {
           VISÕES da aba — o mesmo papel de Relatórios individuais/Visão global nas
           Carteiras — e visões irmãs têm a mesma cara em toda a plataforma. A
           contagem ao lado diz quantos a outra visão tem. */}
-      <div className="mb-5">
+      <div className="mb-s4">
         <Tabs
           rotulo="Visões de Dados cadastrais"
           idDoPainel={PAINEL}
@@ -692,51 +726,70 @@ export default function DadosPessoaisBancarios() {
           {/* A BUSCA (item "Novo" da amostra): achar uma pessoa era rolar a
               lista inteira. Por nome ou documento, sem acento, e pelos dígitos
               do documento colado cru. */}
-          <div className="border-b border-borda px-5 py-4">
-            <div className="relative">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 h-[16px] w-[16px] -translate-y-1/2 text-texto-3"
-                aria-hidden
-              />
-              <Input
-                type="search"
-                className="pl-10"
-                aria-label="Buscar por nome ou documento"
-                // O "/" do teclado leva a este campo (layout/Consultas.tsx).
-                data-filtro-tela=""
-                placeholder="Buscar por nome ou documento…  ( / )"
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-              />
-            </div>
+          <div className="border-b border-borda px-s5 py-s4">
+            {/* O CAMPO DE BUSCA COMUM (auditoria visual, C3): a tecla "/" desenhada
+                à direita, no lugar do "( / )" escrito no texto de exemplo. */}
+            <CampoDeBusca
+              valor={busca}
+              onMudar={setBusca}
+              placeholder="Buscar por nome ou documento"
+              title="Busca em: nome, CPF/CNPJ (com ou sem pontuação) e representante"
+              classeDaCaixa="max-w-[520px]"
+            />
           </div>
 
           {pessoas.length === 0 ? (
             <EmptyState title={`Nenhum ${rotuloMin}`} description={visao.vazio} />
           ) : visiveis.length === 0 ? (
-            <EmptyState
-              title="Nada encontrado"
-              description={`Nenhum ${rotuloMin} corresponde a "${busca.trim()}".`}
-              action={
-                <Button variant="outline" onClick={() => setBusca('')}>
-                  Limpar busca
-                </Button>
-              }
+            // Sem resultado é uma linha simples (§0.10), sem a moldura do vazio.
+            <SemResultado
+              texto={`Nenhum ${rotuloMin} corresponde a "${busca.trim()}".`}
+              rotuloLimpar="Limpar busca"
+              onLimpar={() => setBusca('')}
             />
           ) : (
-            // Larguras fixadas por coluna: sem elas o navegador distribui a
-            // sobra por igual e cada coluna curta vira um vão em branco. A
-            // LARGURA MÍNIMA faz a tabela rolar de lado no celular (o Table já
-            // rola), em vez de espremer cada coluna em uma letra por linha.
-            <Table className="min-w-[860px] table-fixed [&_th]:whitespace-nowrap [&_th]:px-4 [&_td]:px-4">
+            <>
+            {/* NO CELULAR, CARTÕES (K1): o nome, o documento e o banco. */}
+            <ListaNoCelular rotulo={tipo === 'investidor' ? 'Investidores' : 'Originadores'}>
+              {visiveis.map((i) => {
+                const d = dados.data?.get(chavePessoa(tipo, i.chave))
+                return (
+                  <CartaoNoCelular
+                    key={i.chave}
+                    titulo={i.nome}
+                    linhas={[
+                      d?.cpf ? <span className="tabular-nums">{rotuloDocumento(d.cpf)} {d.cpf}</span> : null,
+                      [d?.banco, d?.agencia && d?.conta ? `${d.agencia} · ${d.conta}` : d?.agencia || d?.conta]
+                        .filter(Boolean)
+                        .join(' · ') || (!i.emCredito ? 'sem crédito' : null),
+                    ]}
+                    onAbrir={dados.data ? () => abrirJanela(i.chave, i.nome, false) : undefined}
+                    rotuloAbrir={`Abrir dados de ${i.nome}`}
+                    rotuloDasAcoes={`Ações de ${i.nome}`}
+                    acoes={acoesDaPessoa(i)}
+                  />
+                )
+              })}
+            </ListaNoCelular>
+            <div className="hidden md:block">
+            {/* Larguras fixadas por coluna: sem elas o navegador distribui a
+                sobra por igual e cada coluna curta vira um vão em branco. A
+                LARGURA MÍNIMA faz a tabela rolar de lado entre 768 e 1280px (o
+                Table já rola), em vez de espremer cada coluna em uma letra por
+                linha; abaixo de 768px, os cartões. */}
+            <Table className="min-w-[860px] table-fixed [&_th]:whitespace-nowrap">
               <THead>
                 <tr>
                   <TH className="w-[24%]">Nome do {rotuloMin}</TH>
-                  <TH className="w-[19%]">Identificação</TH>
-                  <TH className="w-[21%]">Dados bancários</TH>
+                  {/* IDENTIFICAÇÃO COM LARGURA MÍNIMA (auditoria visual, D1): em
+                      porcentagem, a 1280px com o menu aberto ela ficava estreita
+                      demais, e o CNPJ invadia a coluna vizinha
+                      ("07.440.205/0001-37Banco"). 232px cabem "CNPJ" e o número. */}
+                  <TH className="w-[232px]">Identificação</TH>
+                  <TH className="w-[24%]">Dados bancários</TH>
                   <TH>Endereço</TH>
-                  {/* Dois botões de ícone + a palavra "Ações" no cabeçalho. */}
-                  <TH className="w-28 text-right">Ações</TH>
+                  {/* A coluna das ações tem largura fixa (C4): o "⋯" e o "›". */}
+                  <TH className="w-[72px] text-right">Ações</TH>
                 </tr>
               </THead>
               <TBody>
@@ -806,37 +859,33 @@ export default function DadosPessoaisBancarios() {
                                   : d?.agencia || d?.conta,
                               numero: true,
                             },
-                            { rotulo: 'Pix', valor: d?.pix },
+                            { rotulo: 'Pix', valor: d?.pix, truncar: true },
                           ]}
                         />
                       </TD>
-                      <TD className="text-texto-2">{endereco || <span className="text-texto-3">—</span>}</TD>
-                      <TD className="whitespace-nowrap text-right">
-                        {/* O clique nos botões não chega à linha: Remover não pode
-                            abrir a ficha por baixo da confirmação. */}
-                        <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                          <IconButton
-                            label={`Editar dados de ${i.nome}`}
-                            icon={<Pencil className="h-[16px] w-[16px]" />}
-                            // Cinto extra além do portão acima: abrir o formulário
-                            // sobre um mapa que não carregou é o que transforma erro
-                            // de leitura em apagamento de dado.
-                            disabled={!dados.data}
-                            onClick={() => abrirJanela(i.chave, i.nome, false)}
+                      {/* O ENDEREÇO EM ATÉ DUAS LINHAS, inteiro na dica (D1): com três
+                          ou quatro, ele ditava a altura da linha toda. */}
+                      <TD className="text-texto-2">
+                        {endereco ? (
+                          <span title={endereco} className="line-clamp-2">
+                            {endereco}
+                          </span>
+                        ) : (
+                          <span className="text-texto-3">—</span>
+                        )}
+                      </TD>
+                      {/* AS AÇÕES NO MESMO LUGAR EM TODA LINHA (auditoria visual, D2 e
+                          C4): o lápis mudava de lugar quando a lixeira aparecia. Agora
+                          o "›" abre a ficha, sempre na ponta, e o "⋯" traz Editar e
+                          Remover. Os botões não deixam o clique chegar à linha. */}
+                      <TD className="w-[72px]">
+                        <div className="-my-[3px]">
+                          <AcoesDaLinha
+                            onAbrir={dados.data ? () => abrirJanela(i.chave, i.nome, false) : undefined}
+                            rotuloAbrir={`Abrir dados de ${i.nome}`}
+                            rotuloDasAcoes={`Ações de ${i.nome}`}
+                            acoes={acoesDaPessoa(i)}
                           />
-                          {/* Remover existe só para quem NÃO está em crédito
-                              nenhum, que é o caso do cadastro feito com o nome
-                              errado. Quem está num crédito não sairia da lista —
-                              o nome vem de lá —, então o botão só apagaria os
-                              dados bancários dando a impressão de remover. */}
-                          {!i.emCredito && (
-                            <IconButton
-                              label={`Remover ${i.nome}`}
-                              icon={<Trash2 className="h-[16px] w-[16px]" />}
-                              variant="danger"
-                              onClick={() => setAExcluir(i)}
-                            />
-                          )}
                         </div>
                       </TD>
                     </TR>
@@ -844,6 +893,8 @@ export default function DadosPessoaisBancarios() {
                 })}
               </TBody>
             </Table>
+            </div>
+            </>
           )}
         </div>
       </Card>
@@ -861,23 +912,27 @@ export default function DadosPessoaisBancarios() {
             : 'O nome não muda aqui — ele é a chave dos créditos.'
         }
         size="lg"
+        // O RODAPÉ NUMA ORDEM SÓ (auditoria visual, §0.6 e C8): a alternativa
+        // (Copiar dados) à esquerda; à direita, Cancelar e o primário.
+        rodapeInicio={
+          // Só na ficha de quem já existe e com algo além do nome: no cadastro
+          // novo, quem digitou acabou de ter os dados na mão.
+          !editando?.novo && textoParaCopiar ? (
+            <Button
+              variant="secondary"
+              icon={<Copy className="h-[16px] w-[16px]" />}
+              onClick={() => void copiarTexto(textoParaCopiar, 'Dados copiados.')}
+              title="Copia nome, documento, dados bancários, Pix e endereço, um por linha"
+            >
+              Copiar dados
+            </Button>
+          ) : undefined
+        }
         footer={
           <>
-            <Button variant="ghost" className="mr-auto" onClick={cancelarFicha}>
+            <Button variant="secondary" onClick={cancelarFicha}>
               Cancelar
             </Button>
-            {/* Só na ficha de quem já existe e com algo além do nome: no cadastro
-                novo, quem digitou acabou de ter os dados na mão. */}
-            {!editando?.novo && textoParaCopiar && (
-              <Button
-                variant="outline"
-                icon={<Copy className="h-[16px] w-[16px]" />}
-                onClick={() => void copiarTexto(textoParaCopiar, 'Dados copiados.')}
-                title="Copia nome, documento, dados bancários, Pix e endereço, um por linha"
-              >
-                Copiar dados
-              </Button>
-            )}
             {/* "SALVANDO…" ENQUANTO GRAVA (amostra): o giro sozinho não diz o
                 que está acontecendo, e a ficha leva um instante para voltar. */}
             <Button loading={salvar.isPending} onClick={handleSalvar}>
@@ -887,7 +942,7 @@ export default function DadosPessoaisBancarios() {
         }
       >
         {editando && (
-          <div className="space-y-6">
+          <div className="space-y-s5">
             {/* No cadastro o nome é digitado, e SEM lista de quem já existe:
                 cadastrar já pressupõe gente nova, e oferecer os que estão lá
                 seria oferecer justamente o que não se quer. O aviso abaixo do
@@ -910,14 +965,14 @@ export default function DadosPessoaisBancarios() {
               </Field>
             ) : (
               <Field label={`Nome do ${rotuloMin}`}>
-                <div className="rounded-campo bg-superficie-3 px-4 py-2 text-corpo text-texto-2">
+                <div className="flex h-controle items-center rounded-campo bg-superficie-3 px-s4 text-corpo text-texto-2">
                   {editando.nome}
                 </div>
               </Field>
             )}
 
             <SecaoFicha titulo="Identificação">
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-s4 sm:grid-cols-2">
                 {/* Rótulo, dica e máscara acompanham o documento: chamar de "CPF"
                     o documento de uma empresa está errado, e a máscara já troca
                     sozinha no 12º dígito. */}
@@ -982,7 +1037,7 @@ export default function DadosPessoaisBancarios() {
                 qualificação que o gerar-contrato monta. */}
             {tipo === 'investidor' && (
               <SecaoFicha titulo="Para o contrato">
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-s4 sm:grid-cols-2">
                   <Field label="Gênero" hint={dicas.genero}>
                     <Select
                       value={paraContrato.genero}
@@ -1006,7 +1061,7 @@ export default function DadosPessoaisBancarios() {
             )}
 
             <SecaoFicha titulo="Dados bancários">
-              <div className="grid gap-4 sm:grid-cols-4">
+              <div className="grid gap-s4 sm:grid-cols-4">
                 <Field label="Banco">
                   <Input
                     value={form.banco}
@@ -1044,7 +1099,7 @@ export default function DadosPessoaisBancarios() {
 
             {/* ---------- Endereço em partes ---------- */}
             <SecaoFicha titulo="Endereço">
-              <div className="grid gap-4 sm:grid-cols-4">
+              <div className="grid gap-s4 sm:grid-cols-4">
                 {/* CEP PRIMEIRO: é ele que preenche logradouro, bairro, cidade e
                     UF, então digitá-lo antes poupa quatro campos. */}
                 <Field
@@ -1156,7 +1211,7 @@ export default function DadosPessoaisBancarios() {
                 const legado = end.mantemAntigo && end.texto
                 return (
                   <>
-                    <p className="mt-3 rounded-controle bg-superficie-2 px-4 py-2 text-corpo text-texto-3">
+                    <p className="mt-s3 rounded-controle bg-superficie-2 px-s4 py-s2 text-corpo text-texto-3">
                       {(legado ? compilado : end.texto) || 'Endereço em branco'}
                     </p>
                     {legado && (

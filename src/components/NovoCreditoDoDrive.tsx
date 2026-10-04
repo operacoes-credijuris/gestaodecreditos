@@ -291,7 +291,7 @@ export function NovoCreditoDoDrive({
         </div>
         <IconButton
           label="Procurar novamente no Drive"
-          icon={<RefreshCw className={cn('h-4 w-4', buscando && 'animate-spin')} />}
+          icon={<RefreshCw className={cn('h-[16px] w-[16px]', buscando && 'animate-spin')} />}
           disabled={buscando || !!passo}
           onClick={procurar}
           className="flex h-11 w-11 shrink-0 items-center justify-center border border-borda-forte bg-superficie p-0"

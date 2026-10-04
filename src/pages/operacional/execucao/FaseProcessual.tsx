@@ -316,11 +316,11 @@ function SituacaoSelect({
           )}
           <span className="truncate">{situacaoAtual?.nome ?? '—'}</span>
         </span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <ChevronDown className="h-[16px] w-[16px] shrink-0" aria-hidden="true" />
       </button>
 
       {aberto && (
-        <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-md border border-borda bg-superficie py-1 shadow-nivel-2 scrollbar-thin">
+        <div className="absolute z-20 mt-s1 max-h-72 w-full overflow-auto rounded-flutuante border border-borda bg-superficie py-s1 shadow-nivel-2 scrollbar-thin dark:ring-1 dark:ring-white/[0.06]">
           {/* O CABEÇALHO DIZ DE QUAL FASE SÃO AS SITUAÇÕES (o `.ph` da amostra):
               a lista muda de fase para fase, e quem abre o menu precisa saber. */}
           <p className="px-2.5 pb-1 pt-1.5 text-xs font-bold uppercase tracking-wider text-texto-3">
@@ -342,7 +342,7 @@ function SituacaoSelect({
               <div key={o.id} className="space-y-1.5 border-t border-borda px-2 py-1.5">
                 <input
                   autoFocus
-                  className="w-full rounded-md border border-borda-forte px-2 py-1 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className="w-full rounded-controle border border-borda-controle bg-superficie px-s2 py-s1 text-xs text-texto focus:border-marca-viva focus:outline-none focus:ring-1 focus:ring-marca-viva"
                   value={nomeEditado}
                   onChange={(e) => setNomeEditado(e.target.value)}
                   onKeyDown={(e) => {
@@ -372,7 +372,7 @@ function SituacaoSelect({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={confirmarEdicao}
                     disabled={!nomeEditado.trim()}
-                    className="ml-1 text-xs font-medium text-brand-700 hover:underline disabled:text-texto-3"
+                    className="ml-s1 text-xs font-medium text-marca-texto hover:underline disabled:text-texto-3"
                   >
                     Salvar
                   </button>
@@ -422,18 +422,18 @@ function SituacaoSelect({
                     setNomeEditado(o.nome)
                     setCorEditada(o.cor ?? PALETA_SITUACAO[1].chave)
                   }}
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded text-texto-3 opacity-60 hover:text-texto-2 focus-visible:opacity-100 group-hover:opacity-100"
+                  className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-texto-3 opacity-60 hover:text-texto-2 focus-visible:opacity-100 group-hover:opacity-100"
                 >
-                  <Pencil className="h-3 w-3" />
+                  <Pencil className="h-[14px] w-[14px]" />
                 </button>
                 <button
                   type="button"
                   title="Excluir"
                   aria-label={`Excluir ${o.nome}`}
                   onClick={() => onExcluir(o.id)}
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded text-texto-3 opacity-60 hover:text-perigo focus-visible:opacity-100 group-hover:opacity-100"
+                  className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-texto-3 opacity-60 hover:text-perigo focus-visible:opacity-100 group-hover:opacity-100"
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Trash2 className="h-[14px] w-[14px]" />
                 </button>
               </div>
             ),
@@ -445,7 +445,7 @@ function SituacaoSelect({
                 <input
                   autoFocus
                   disabled={criando}
-                  className="w-full rounded-md border border-borda-forte px-2 py-1 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className="w-full rounded-controle border border-borda-controle bg-superficie px-s2 py-s1 text-xs text-texto focus:border-marca-viva focus:outline-none focus:ring-1 focus:ring-marca-viva"
                   placeholder="Nome da nova situação…"
                   value={novoNome}
                   onChange={(e) => setNovoNome(e.target.value)}
@@ -479,7 +479,7 @@ function SituacaoSelect({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => void confirmarNovo()}
                     disabled={criando || !novoNome.trim()}
-                    className="ml-1 text-xs font-medium text-brand-700 hover:underline disabled:text-texto-3"
+                    className="ml-s1 text-xs font-medium text-marca-texto hover:underline disabled:text-texto-3"
                   >
                     Salvar
                   </button>
@@ -591,7 +591,7 @@ function CartaoDaFase({
       )}
     >
       <span className="flex min-h-[32px] items-start gap-1.5 text-xs font-medium leading-snug text-texto-2">
-        {aviso && <CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0 text-aviso" aria-hidden="true" />}
+        {aviso && <CheckCircle2 className="mt-px h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden="true" />}
         {rotulo}
       </span>
       <span className="font-display text-2xl font-bold tabular-nums leading-tight text-texto">{n}</span>
@@ -769,8 +769,8 @@ export function FaseProcessual({
               label="Atualizar fases (só quem teve movimentação nova)"
               disabled={gerar.isPending}
               onClick={() => gerar.mutate({})}
-              icon={<RefreshCw className={gerar.isPending ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />}
-              className="grid h-[35px] w-[35px] shrink-0 place-items-center border border-borda-forte bg-superficie p-0"
+              icon={<RefreshCw className={gerar.isPending ? 'h-[16px] w-[16px] animate-spin' : 'h-[16px] w-[16px]'} />}
+              className="grid h-controle w-controle shrink-0 place-items-center border border-borda-forte bg-superficie p-0"
             />
           </div>
       </div>
@@ -862,7 +862,7 @@ export function FaseProcessual({
                               {r?.conclusao_pendente && (
                                 <span title="Concluso para decisão">
                                   <CheckCircle2
-                                    className="h-3.5 w-3.5 shrink-0 text-aviso-cheio"
+                                    className="h-[16px] w-[16px] shrink-0 text-aviso-cheio"
                                     aria-label="Concluso para decisão"
                                   />
                                 </span>
@@ -928,7 +928,7 @@ export function FaseProcessual({
               </h3>
               <ChevronDown
                 className={cn(
-                  'h-4 w-4 shrink-0 text-texto-3 transition-transform',
+                  'h-[16px] w-[16px] shrink-0 text-texto-3 transition-transform',
                   recentesAbertas && 'rotate-180',
                 )}
               />
@@ -978,7 +978,7 @@ export function FaseProcessual({
                           >
                             <input
                               type="checkbox"
-                              className="h-4 w-4 rounded border-borda-forte accent-marca"
+                              className="h-[16px] w-[16px] rounded border-borda-forte accent-marca"
                               aria-label={`Marcar ${formatCNJ(p.numero_cnj)} como tratado`}
                               checked={tratado}
                               disabled={!mov.data}
@@ -1091,12 +1091,13 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
   return (
     <section>
       <TituloDaSecao>Fase processual</TituloDaSecao>
-      {/* Os dois campos lado a lado, com o rótulo em cima (a amostra). A Situação
-          só existe com fase: crédito ainda não classificado pede "Escolher fase…"
-          primeiro. */}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block space-y-1.5">
-          <span className="block text-sm font-semibold text-texto">Fase processual</span>
+      {/* UM CAMPO EMBAIXO DO OUTRO, NA LARGURA INTEIRA (auditoria visual, C9):
+          lado a lado, o select da fase cortava o nome ("Homologado / Aguardando
+          F…"). A Situação vem embaixo, e só existe com fase: crédito ainda não
+          classificado pede "Escolher fase…" primeiro. */}
+      <div className="grid gap-s3">
+        <label className="block space-y-s1.5">
+          <span className="block text-corpo font-semibold text-texto">Fase processual</span>
           <Select
           className="w-full"
           value={r?.fase_codigo ?? ''}
@@ -1115,8 +1116,8 @@ export function FaseDrawerSection({ processo }: { processo: Processo }) {
         </label>
 
         {r && (
-          <div className="space-y-1.5">
-            <span className="block text-sm font-semibold text-texto">Situação</span>
+          <div className="space-y-s1.5">
+            <span className="block text-corpo font-semibold text-texto">Situação</span>
             {/* Mesmo motivo da lista: catálogo que falhou não é "nenhuma situação". */}
             {situacoes.isError ? (
               <p className="text-xs text-perigo">

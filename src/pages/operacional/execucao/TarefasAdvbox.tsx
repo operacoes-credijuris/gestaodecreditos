@@ -21,6 +21,7 @@ import {
   agruparPorPrazo,
   diasAtePrazo,
   GRUPOS_DO_PRAZO,
+  prazoCurto,
   seloDoPrazo,
   type GrupoDoPrazo,
   type TomDoPrazo,
@@ -110,7 +111,7 @@ function Observacao({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-1 text-corpo font-normal text-texto-2">
+    <div className="mt-s1 text-corpo font-normal text-texto-2">
       <div
         ref={ref}
         className={cn('whitespace-normal break-words', !expanded && 'line-clamp-3')}
@@ -139,6 +140,14 @@ const MESES = [
 // O prazo — grupo, cor e texto relativo — mora em lib/prazoDasTarefas.ts, com
 // teste: o grupo e a cor do selo dizem a mesma coisa e não podem discordar.
 
+/**
+ * Some até o mouse chegar ao cartão ou o foco entrar nele (auditoria visual,
+ * T2). Em tela de toque, sem hover, fica à vista: lá não há outro jeito de
+ * achar o botão.
+ */
+const SO_NO_HOVER =
+  '[@media(hover:hover)]:opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
+
 // Dia + mês abreviado para o bloco de calendário.
 function diaMes(iso?: string | null): { dia: string; mes: string } | null {
   if (!iso) return null
@@ -148,19 +157,22 @@ function diaMes(iso?: string | null): { dia: string; mes: string } | null {
 }
 
 // A folhinha do calendário na cor do prazo (a amostra): vermelho até amanhã,
-// âmbar até 7 dias, e a superfície neutra depois disso.
+// âmbar até 7 dias, e a superfície neutra depois disso. É O ÚNICO SINAL
+// COLORIDO DO PRAZO (auditoria visual, T1): o "há 2 dias" foi para dentro dela.
 const TOM_CALENDARIO: Record<TomDoPrazo, string> = {
   perigo: 'border-perigo-borda bg-perigo-fundo text-perigo',
   aviso: 'border-aviso-borda bg-aviso-fundo text-aviso',
   neutro: 'border-borda bg-superficie-2 text-texto',
 }
-// O selo do prazo, com ícone (a amostra): a cor nunca sozinha.
+// O selo do prazo, com ícone (a amostra): a cor nunca sozinha. SÓ NO CELULAR,
+// onde a folhinha não cabe e o selo é quem diz o prazo.
 const TOM_SELO: Record<TomDoPrazo, string> = {
   perigo: 'bg-perigo-fundo text-perigo ring-perigo-borda',
   aviso: 'bg-aviso-fundo text-aviso ring-aviso-borda',
   neutro: 'bg-superficie-3 text-texto-2 ring-borda',
 }
-// O título de cada grupo pede ação na mesma cor do prazo dele.
+// O tom da CONTAGEM de cada grupo: o título fica no cinza comum (T1, ver
+// TituloDoGrupo), e só o número leva a cor do prazo.
 const TOM_GRUPO: Record<GrupoDoPrazo, 'perigo' | 'aviso' | 'neutro'> = {
   vencidas: 'perigo',
   hoje_amanha: 'perigo',
@@ -339,20 +351,26 @@ export default function TarefasAdvbox() {
   // responsáveis e "Gerar petição" no canto.
   const card = (t: TarefaAdvbox) => {
     const cred = resolveCredito(t.processo ?? '')
-    const prazo = t.date_deadline ? seloDoPrazo(diasAtePrazo(hoje, t.date_deadline)) : null
+    const dias = t.date_deadline ? diasAtePrazo(hoje, t.date_deadline) : null
+    const prazo = dias !== null ? seloDoPrazo(dias) : null
+    const curto = dias !== null ? prazoCurto(dias) : ''
     const tom: TomDoPrazo = prazo?.tom ?? 'neutro'
     const bloco = diaMes(t.date_deadline || t.start_date)
     const resp = t.responsaveis ?? []
     return (
+      // `group`: a pasta e o copiar depois do número só aparecem no hover ou no
+      // foco do cartão (T2).
       <Card
         key={t.id}
-        className="grid grid-cols-1 items-start gap-4 px-5 py-4 sm:grid-cols-[56px_minmax(0,1fr)_auto]"
+        className="group grid grid-cols-1 items-start gap-s4 px-s4 py-s3 sm:grid-cols-[60px_minmax(0,1fr)_auto]"
       >
         {/* Folhinha de calendário: o prazo é O dado desta tela, então ele é o
-            maior elemento do cartão. No celular ela sai — o selo diz o prazo. */}
+            maior elemento do cartão — e o ÚNICO VERMELHO dela (auditoria visual,
+            T1): o "há 2 dias" mora aqui dentro, no lugar do selo vermelho ao
+            lado do título. No celular ela sai, e o selo volta. */}
         <div
           className={cn(
-            'hidden w-14 flex-col items-center rounded-campo border py-1.5 text-center sm:flex',
+            'hidden w-[60px] flex-col items-center rounded-campo border px-s1 py-s1.5 text-center sm:flex',
             TOM_CALENDARIO[tom],
           )}
           aria-hidden="true"
@@ -362,42 +380,52 @@ export default function TarefasAdvbox() {
               <div className="font-display text-xl font-bold leading-none tabular-nums">
                 {bloco.dia}
               </div>
-              <div className="mt-1 text-xs font-semibold uppercase leading-none tracking-wider">
+              <div className="mt-s1 text-xs font-semibold uppercase leading-none tracking-wider">
                 {bloco.mes}
               </div>
+              {curto && (
+                <div className="mt-s1 whitespace-nowrap text-xs font-semibold leading-none">{curto}</div>
+              )}
             </>
           ) : (
-            <div className="py-1.5 text-sm">—</div>
+            <div className="py-s1.5 text-sm">—</div>
           )}
         </div>
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-s3 gap-y-s1">
             <span className="font-display text-base font-bold tracking-tight text-texto">
               {t.tipo ? sentenceCase(t.tipo) : '—'}
             </span>
+            {/* O prazo por extenso para o leitor de tela: a folhinha é só
+                desenho (`aria-hidden`). */}
+            {prazo?.rel && <span className="sr-only">Prazo: {prazo.rel}.</span>}
             {prazo?.rel && (
               <span
+                aria-hidden="true"
                 className={cn(
-                  'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
+                  'inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset sm:hidden',
                   TOM_SELO[tom],
                 )}
               >
                 {tom === 'perigo' ? (
-                  <X className="h-3 w-3" aria-hidden="true" />
+                  <X className="h-[12px] w-[12px]" aria-hidden="true" />
                 ) : (
-                  <Clock className="h-3 w-3" aria-hidden="true" />
+                  <Clock className="h-[12px] w-[12px]" aria-hidden="true" />
                 )}
                 {prazo.rel}
               </span>
             )}
+            {/* A PRIORIDADE COMO ÍCONE E TEXTO, SEM SELO (T1): "Urgente" em
+                vermelho somava um terceiro sinal vermelho por tarefa. Só o
+                Urgente leva cor, e é a do aviso. */}
             {t.urgent && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-perigo-fundo px-2.5 py-1 text-xs font-semibold text-perigo ring-1 ring-inset ring-perigo-borda">
-                <Flame className="h-3 w-3" aria-hidden="true" /> Urgente
+              <span className="inline-flex items-center gap-s1 text-sm font-semibold text-aviso">
+                <Flame className="h-[16px] w-[16px]" aria-hidden="true" /> Urgente
               </span>
             )}
             {t.important && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-aviso-fundo px-2.5 py-1 text-xs font-semibold text-aviso ring-1 ring-inset ring-aviso-borda">
-                <Star className="h-3 w-3" aria-hidden="true" /> Importante
+              <span className="inline-flex items-center gap-s1 text-sm font-semibold text-texto-2">
+                <Star className="h-[16px] w-[16px]" aria-hidden="true" /> Importante
               </span>
             )}
           </div>
@@ -405,15 +433,18 @@ export default function TarefasAdvbox() {
               — e as PARTES do processo, que é o que identifica a tarefa de
               relance, ficavam invisíveis. Quebrar em duas linhas custa altura;
               esconder o nome da parte custa o entendimento. */}
-          <div className="mt-1 break-words text-corpo text-texto-2">
+          <div className="mt-s1 break-words text-corpo text-texto-2">
             {/* Mesmo componente da tela de Créditos: o clique no número tem de
                 levar à mesma pasta nas duas telas. `cred` é o crédito que a tarefa
                 casou — nulo quando o processo não está cadastrado, e aí o número
-                aparece como texto comum. */}
+                aparece como texto comum. A PASTA E O COPIAR SÓ NO HOVER OU NO
+                FOCO do cartão (T2): em toda tarefa, os dois ícones depois do
+                número poluíam a linha. No toque (sem hover), ficam à vista. */}
             <NumeroProcessoDrive
               processo={cred}
               numero={t.processo}
               className="font-semibold tabular-nums text-texto"
+              classeDoIcone={SO_NO_HOVER}
             />
             {/* COPIAR O NÚMERO (qualidade de vida): clicar nele abre a pasta, e o
                 duplo clique pega só um pedaço do CNJ — copiar para o PJe era
@@ -423,7 +454,7 @@ export default function TarefasAdvbox() {
                 valor={formatCNJ(t.processo)}
                 rotulo="Copiar o número do processo"
                 aviso="Número copiado."
-                className="-my-1.5 align-middle"
+                className={cn('-my-s1.5 align-middle', SO_NO_HOVER)}
               />
             )}
             {cred && (cred.cedente || cred.cessionario) && (
@@ -437,11 +468,11 @@ export default function TarefasAdvbox() {
           {/* Responsáveis: um chip com as iniciais por pessoa — cada nome é uma
               unidade que não quebra; com vários, a quebra cai ENTRE chips. */}
           {resp.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            <div className="mt-s2 flex flex-wrap gap-s1.5">
               {resp.map((r, i) => (
                 <span
                   key={i}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-superficie-3 py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-texto-2"
+                  className="inline-flex items-center gap-s1.5 rounded-full bg-superficie-3 py-s0.5 pl-s0.5 pr-s2 text-xs font-medium text-texto-2"
                 >
                   <span
                     aria-hidden="true"
@@ -455,12 +486,14 @@ export default function TarefasAdvbox() {
             </div>
           )}
         </div>
+        {/* "GERAR PETIÇÃO" FANTASMA (T2): secundário em todo cartão, a lista
+            inteira repetia o mesmo botão em destaque. */}
         <div className="flex sm:justify-end">
           <Button
             size="sm"
-            variant="secondary"
+            variant="ghost"
             title="Gerar petição"
-            icon={<FileText className="h-4 w-4" />}
+            icon={<FileText className="h-[16px] w-[16px]" />}
             onClick={() => setPeticaoDe(t)}
           >
             Gerar petição
@@ -476,7 +509,12 @@ export default function TarefasAdvbox() {
         title="Tarefas"
         description="Prazos dos processos, sincronizados com o ADVBOX."
         actions={
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNovo(true)}>
+          // No celular, o primário ocupa a largura (auditoria visual, K2).
+          <Button
+            icon={<Plus className="h-[16px] w-[16px]" />}
+            onClick={() => setNovo(true)}
+            className="w-full sm:w-auto"
+          >
             Nova tarefa
           </Button>
         }
@@ -485,7 +523,7 @@ export default function TarefasAdvbox() {
       {/* A BARRA DA AMOSTRA, sem cartão: o filtro de prazo, a busca e, no canto,
           a sincronização — a lista recarrega em silêncio ao focar a janela, e o
           indicador avisa. */}
-      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center">
+      <div className="mb-s5 flex flex-col gap-s2 lg:flex-row lg:items-center">
         <Segmented
           ariaLabel="Filtrar tarefas por prazo"
           items={[
@@ -498,7 +536,9 @@ export default function TarefasAdvbox() {
         <CampoDeBusca
           valor={busca}
           onChange={setBusca}
-          placeholder="Buscar por tipo, processo, responsável…"
+          placeholder="Buscar por tipo, processo ou responsável"
+          title="Busca em: tipo, número do processo (com ou sem pontuação), observação, responsáveis e as partes do crédito"
+          className="lg:max-w-[520px]"
         />
         <SyncStatus
           syncing={isFetching}
@@ -552,15 +592,15 @@ export default function TarefasAdvbox() {
           />
         </Card>
       ) : filtroPrazo === 'sem_prazo' ? (
-        <div className="space-y-2">{semPrazo.map(card)}</div>
+        <div className="space-y-s2">{semPrazo.map(card)}</div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-s5">
           {/* Só os grupos com tarefa (a amostra): um grupo vazio no meio da lista
               só afasta o próximo prazo de quem está olhando. */}
           {GRUPOS_DO_PRAZO.filter((g) => grupos[g.chave].length > 0).map((g) => (
             <section key={g.chave}>
               <TituloDoGrupo titulo={g.titulo} qtd={grupos[g.chave].length} tom={TOM_GRUPO[g.chave]} />
-              <div className="space-y-2">{grupos[g.chave].map(card)}</div>
+              <div className="space-y-s2">{grupos[g.chave].map(card)}</div>
             </section>
           ))}
         </div>
@@ -825,7 +865,9 @@ export function NovaTarefaModal({
       open={open}
       onClose={onClose}
       title="Nova tarefa"
-      size="lg"
+      // FORMULÁRIO: 640px (auditoria visual, C8). Em 960px, os campos de data
+      // esticavam até o dobro do que o valor pede.
+      size="md"
       dirty={dirty}
       footer={
         <>
@@ -865,7 +907,7 @@ export function NovaTarefaModal({
           </p>
         </div>
       ) : (
-        <form id="form-nova-tarefa" onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+        <form id="form-nova-tarefa" onSubmit={handleSubmit} className="grid gap-s4 sm:grid-cols-2">
           {/* O PROCESSO SÓ DA LISTA DO ADVBOX (crédito, requerimento ou apenso
               cadastrados aqui): texto digitado sem escolher não conta. */}
           <Field label="Processo" required className="sm:col-span-2">
@@ -929,24 +971,24 @@ export function NovaTarefaModal({
             />
           </Field>
 
-          <div className="flex gap-6 sm:col-span-2">
-            <label className="flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto">
+          <div className="flex gap-s5 sm:col-span-2">
+            <label className="flex min-h-[24px] cursor-pointer items-center gap-s2 text-corpo text-texto">
               <input
                 type="checkbox"
-                className="accent-brand-600"
+                className="h-[16px] w-[16px] accent-marca"
                 checked={form.important}
                 onChange={(e) => setForm({ ...form, important: e.target.checked })}
               />
-              <Star className="h-4 w-4 text-aviso-cheio" /> Importante
+              <Star className="h-[16px] w-[16px] text-texto-2" aria-hidden="true" /> Importante
             </label>
-            <label className="flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto">
+            <label className="flex min-h-[24px] cursor-pointer items-center gap-s2 text-corpo text-texto">
               <input
                 type="checkbox"
-                className="accent-brand-600"
+                className="h-[16px] w-[16px] accent-marca"
                 checked={form.urgent}
                 onChange={(e) => setForm({ ...form, urgent: e.target.checked })}
               />
-              <Flame className="h-4 w-4 text-perigo" /> Urgente
+              <Flame className="h-[16px] w-[16px] text-aviso" aria-hidden="true" /> Urgente
             </label>
           </div>
 
