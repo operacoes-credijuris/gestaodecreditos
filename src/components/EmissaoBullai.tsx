@@ -10,8 +10,9 @@
 // DEPOIS DO CLIQUE ELA SÓ OBSERVA. A BullAI trabalha no tempo dela — algumas
 // certidões chegam por e-mail horas depois —, e esta seção pergunta pelo
 // andamento ao abrir e a cada minuto enquanto houver item em emissão. Os PDFs vão
-// para a pasta do cedente no Drive, e o checklist recebe o estado e o RESULTADO
-// de cada certidão.
+// para a pasta da ANÁLISE do card no Drive, na subpasta Certidões (desde
+// 03/10/2026; ver _shared/pastaDaAnalise.ts), e o checklist recebe o estado e o
+// RESULTADO de cada certidão.
 //
 // O VISUAL É O DA AMOSTRA (`.bull`, `.bull-h`, `.bull-p`, `.bull-row`, `.cat-res`):
 // caixa contornada, um bloco por pessoa e uma linha por certidão. Só mudou a
@@ -22,9 +23,11 @@ import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   Clock,
   Download,
   ExternalLink,
+  Folder,
   RefreshCw,
   X,
 } from 'lucide-react'
@@ -36,6 +39,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 import { CaixaSuave, DicaDeAviso, Selo, icSelo, type TomDaPeca } from '@/components/analise/Pecas'
 import { traduzirParaBullai } from '../../supabase/functions/_shared/mapaBullai.ts'
+import type { PastaNaTela } from '@/lib/checklistDeCertidoes'
 
 interface PortalBullai {
   chave: string
@@ -63,7 +67,7 @@ export interface ItemDaEmissao {
   status: string
   erro_classe: string | null
   resultado?: string | null
-  arquivos?: { portal: string; drive_link: string | null; nome: string }[] | null
+  arquivos?: { portal: string; drive_link: string | null; nome: string; pasta_id?: string | null }[] | null
   erro_detalhe: string | null
   certidao_catalogo: { nome_curto: string } | null
 }
@@ -82,8 +86,10 @@ function pedivel(i: ItemDaEmissao) {
 /**
  * O resultado da certidão no tom que a tela inteira usa: verde passa, vermelho
  * pesa. SEMPRE COM ÍCONE, como os selos da amostra: a cor nunca vai sozinha.
+ * EXPORTADO desde 03/10/2026: a linha do checklist mostra o resultado também.
  */
-function seloDoResultado(r: string | null | undefined) {
+// eslint-disable-next-line react-refresh/only-export-components
+export function seloDoResultado(r: string | null | undefined) {
   if (!r) return null
   const tom: Record<string, TomDaPeca> = {
     negativa: 'sucesso',
@@ -122,6 +128,8 @@ export function EmissaoBullai({
   itens,
   ativo,
   onMudou,
+  pasta,
+  onPasta,
 }: {
   leadId: number
   sujeitos: SujeitoDaEmissao[]
@@ -129,6 +137,10 @@ export function EmissaoBullai({
   ativo: boolean
   /** O checklist mudou do lado do servidor: recarregue (a promessa, se houver, é esperada). */
   onMudou: () => void | Promise<void>
+  /** A pasta do Drive para onde os PDFs vão — o link depois de pedir. */
+  pasta?: PastaNaTela | null
+  /** A atualização disse em que pasta pôs os PDFs (a subpasta Certidões). */
+  onPasta?: (url: string) => void
 }) {
   const toast = useToast()
   const catalogo = useQuery({
@@ -176,6 +188,12 @@ export function EmissaoBullai({
   const [confirmando, setConfirmando] = useState(false)
   const [pedindo, setPedindo] = useState(false)
   const [atualizando, setAtualizando] = useState(false)
+  /** A seleção por certidão, recolhida por padrão (ver o render). */
+  const [listaAberta, setListaAberta] = useState(false)
+  /** A pasta onde a última atualização pôs PDFs — o "Abrir pasta no Drive". */
+  const [pastaSalva, setPastaSalva] = useState<string | null>(null)
+  /** Já houve pedido nesta janela: o aviso de para onde os PDFs vão aparece. */
+  const [pedidoFeito, setPedidoFeito] = useState(false)
 
   /**
    * OS ITENS JÁ PEDIDOS NESTA JANELA, até a lista nova chegar.
@@ -232,11 +250,16 @@ export function EmissaoBullai({
     atualizandoAgora.current = true
     setAtualizando(true)
     try {
-      const r = await invokeFunction<{ atualizados: number; falhas?: string[] }>('bullai-certidoes', {
-        acao: 'atualizar',
-        kommo_lead_id: leadId,
-      })
+      const r = await invokeFunction<{ atualizados: number; falhas?: string[]; pasta_certidoes_url?: string }>(
+        'bullai-certidoes',
+        { acao: 'atualizar', kommo_lead_id: leadId },
+      )
       ultimaAtualizacao.current = Date.now()
+      // A PASTA SÓ VEM quando a atualização subiu PDF (campo novo de 03/10/2026).
+      if (r.pasta_certidoes_url && montado.current) {
+        setPastaSalva(r.pasta_certidoes_url)
+        onPasta?.(r.pasta_certidoes_url)
+      }
       if (r.atualizados > 0 && montado.current) onMudou()
       if (!silencioso && r.falhas?.length) toast.error(r.falhas.slice(0, 3).join(' · '))
     } catch (e) {
@@ -267,6 +290,7 @@ export function EmissaoBullai({
       })
       setConfirmando(false)
       setExtras({})
+      setPedidoFeito(true)
       setJaPedidos((antes) => new Set([...antes, ...pedidos.flatMap((p) => p.itens.map((i) => i.certidao_id))]))
       // O BOTÃO SÓ DESTRAVA COM A LISTA NOVA NA TELA (ou com a releitura falhando,
       // e aí a marca acima segura): é ela que diz o que já foi pedido.
@@ -292,7 +316,7 @@ export function EmissaoBullai({
   if (!ativo) return null
   // A MOLDURA É A MESMA NOS TRÊS ESTADOS (carregando, fora do ar, a lista), como
   // na amostra: a seção não pula de lugar quando o catálogo chega.
-  const moldura = 'my-4 rounded-cartao border border-borda p-4'
+  const moldura = 'my-4 rounded-cartao border border-borda px-4 py-3'
   if (catalogo.isLoading) {
     return (
       <div className={moldura}>
@@ -314,193 +338,47 @@ export function EmissaoBullai({
   }
 
   const restantes = catalogo.data?.creditos?.restantes
+  const nMarcadas = pedidos.reduce((n, p) => n + p.itens.length + p.extras.length, 0)
 
+  // A SELEÇÃO RECOLHIDA (03/10/2026, pedido do dono de "condensar"): o checklist
+  // logo acima já mostra cada certidão, o estado, o resultado e o PDF. Aqui fica
+  // à vista o que decide — quantas estão marcadas, quanto custa, e o botão —, e
+  // a lista para conferir ou mudar a marcação abre a um clique. A marcação, a
+  // contagem de portais, a trava de nascimento e a confirmação são as mesmas.
   return (
     <div className={moldura}>
-      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <b className="text-corpo font-bold text-texto">Emitir pela BullAI</b>
-        <span className="text-xs text-texto-3">
-          marcadas pelas regras da planilha · {restantes == null ? 'plano ilimitado' : `${restantes} consulta(s) no plano`}
-        </span>
-        {emEmissao && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void atualizar(false)}
-            disabled={atualizando}
-            icon={<RefreshCw className={cn('h-4 w-4', atualizando && 'animate-spin')} aria-hidden />}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <div className="min-w-0 flex-1">
+          <b className="text-corpo font-bold text-texto">Emitir pela BullAI</b>
+          <span className="ml-2 text-xs text-texto-3">
+            {nMarcadas} marcada{nMarcadas === 1 ? '' : 's'} pelas regras da planilha ({consultas} consulta{consultas === 1 ? '' : 's'}) ·{' '}
+            {restantes == null ? 'plano ilimitado' : `${restantes} consulta(s) no plano`}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {emEmissao && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void atualizar(false)}
+              disabled={atualizando}
+              icon={<RefreshCw className={cn('h-4 w-4', atualizando && 'animate-spin')} aria-hidden />}
+              title="A tela confere o andamento sozinha ao abrir e a cada 60 s."
+            >
+              Atualizar andamento
+            </Button>
+          )}
+          <button
+            type="button"
+            className={LINK_BTN}
+            aria-expanded={listaAberta}
+            onClick={() => setListaAberta((v) => !v)}
           >
-            Atualizar andamento
-          </Button>
-        )}
-      </div>
-
-      <div>
-        {sujeitos.map((s) => {
-          const doSujeito = itens.filter((i) => i.sujeito_id === s.id)
-          if (doSujeito.length === 0) return null
-          const documento = s.tipo_pessoa === 'PJ' ? 'CNPJ' : 'CPF'
-          const termo = (busca[s.id] ?? '').trim().toLowerCase()
-          const achados = termo.length >= 3
-            ? portais
-                .filter((p) => p.documento === documento && !p.presencial && p.rotulo.toLowerCase().includes(termo))
-                .slice(0, 12)
-            : []
-          return (
-            <div key={s.id} className="border-t border-borda pb-1 pt-2.5">
-              <div className="mb-1 flex flex-wrap items-center gap-2 text-corpo">
-                <Selo tom="info">{s.papel}</Selo>
-                <b className="font-bold text-texto">{s.nome}</b>
-                {s.tipo_pessoa === 'PF' && !s.data_nascimento && (
-                  <Selo tom="perigo" icone={<X className={icSelo} aria-hidden />}>
-                    falta a data de nascimento — a BullAI exige
-                  </Selo>
-                )}
-              </div>
-              <ul>
-                {doSujeito.map((i) => {
-                  const t = traducoes.get(i.id)
-                  const podeMarcar = podePedir(i) && (t?.chaves.length ?? 0) > 0
-                  const pdfs = (i.arquivos ?? []).filter((a) => a.drive_link)
-                  return (
-                    <li key={i.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 text-corpo">
-                      {/* A CAIXA APARECE SEMPRE, desabilitada no que não se pode
-                          pedir (como na amostra): a coluna fica alinhada e o
-                          "não dá" se vê. Desabilitada, ela não muda nada. */}
-                      <label
-                        className={cn(
-                          'inline-flex min-h-8 items-center gap-2',
-                          podeMarcar ? 'cursor-pointer' : 'cursor-default',
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          className="h-[16px] w-[16px] flex-none accent-marca"
-                          checked={marcado(i)}
-                          disabled={!podeMarcar}
-                          onChange={() =>
-                            setDesmarcados((antes) => {
-                              const n = new Set(antes)
-                              if (n.has(i.id)) n.delete(i.id)
-                              else n.add(i.id)
-                              return n
-                            })
-                          }
-                        />
-                        <span className="text-texto">
-                          {i.certidao_catalogo?.nome_curto ?? i.certidao_codigo}
-                          {Object.values(i.parametros ?? {}).length > 0 && (
-                            <span className="text-texto-3"> ({Object.values(i.parametros).join(', ')})</span>
-                          )}
-                        </span>
-                      </label>
-                      {t && t.chaves.length > 0 && (
-                        <span className="text-xs text-texto-3">
-                          portais: {t.chaves.map((k) => porChave.get(k)?.rotulo ?? k).join(' · ')}
-                        </span>
-                      )}
-                      {t?.semBullai && i.status !== 'OBTIDA' && (
-                        <span className="text-xs text-aviso">Manual: {t.semBullai}</span>
-                      )}
-                      {i.status === 'OBTIDA' && seloDoResultado(i.resultado)}
-                      {i.status === 'EM_EMISSAO' && (
-                        <Selo tom="aviso" icone={<Clock className={icSelo} aria-hidden />}>
-                          em emissão
-                        </Selo>
-                      )}
-                      {i.status === 'FALHA' && (
-                        <Selo tom="perigo" icone={<X className={icSelo} aria-hidden />}>
-                          falhou
-                        </Selo>
-                      )}
-                      {i.erro_detalhe && i.status !== 'OBTIDA' && (
-                        <span className="text-xs text-texto-3">{i.erro_detalhe}</span>
-                      )}
-                      {pdfs.map((a) => (
-                        <a
-                          key={a.drive_link!}
-                          href={a.drive_link!}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={LINK_BTN}
-                        >
-                          {porChave.get(a.portal)?.rotulo ?? a.nome}
-                          <ExternalLink className="h-4 w-4" aria-hidden />
-                        </a>
-                      ))}
-                    </li>
-                  )
-                })}
-                {(extras[s.id] ?? []).map((k) => (
-                  <li key={k} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 text-corpo">
-                    <label className="inline-flex min-h-8 cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-[16px] w-[16px] flex-none accent-marca"
-                        checked
-                        onChange={() =>
-                          setExtras((antes) => ({ ...antes, [s.id]: (antes[s.id] ?? []).filter((x) => x !== k) }))
-                        }
-                      />
-                      <span className="text-texto">{porChave.get(k)?.rotulo ?? k}</span>
-                    </label>
-                    <span className="text-xs text-texto-3">acrescentada · fora da planilha</span>
-                  </li>
-                ))}
-              </ul>
-
-              {/* O CATÁLOGO INTEIRO, a um campo de distância: as marcadas são o
-                  que a planilha pede; qualquer outra das que a BullAI emite para
-                  este tipo de documento pode ser acrescentada aqui. A LISTA
-                  FICA NO FLUXO, e não flutuando: dentro da janela que rola, uma
-                  lista flutuante era cortada pela borda do corpo. */}
-              <div className="mt-2">
-                <Input
-                  value={busca[s.id] ?? ''}
-                  onChange={(e) => setBusca((antes) => ({ ...antes, [s.id]: e.target.value }))}
-                  placeholder={`Acrescentar outra certidão do catálogo (${portais.filter((p) => p.documento === documento).length} para ${documento})…`}
-                  aria-label={`Acrescentar certidão do catálogo para ${s.nome}`}
-                />
-                {achados.length > 0 && (
-                  <ul className="mt-1 max-h-[240px] overflow-auto rounded-campo border border-borda bg-superficie p-1 shadow-nivel-2">
-                    {achados.map((p) => (
-                      <li key={p.chave}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExtras((antes) => ({
-                              ...antes,
-                              [s.id]: [...new Set([...(antes[s.id] ?? []), p.chave])],
-                            }))
-                            setBusca((antes) => ({ ...antes, [s.id]: '' }))
-                          }}
-                          className="flex min-h-11 w-full items-center rounded-controle px-2.5 text-left text-corpo text-texto hover:bg-superficie-3 focus-visible:bg-superficie-3"
-                          title={p.criterio}
-                        >
-                          {p.rotulo}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          )
-        })}
-
-        {emEmissao && (
-          <p className="mt-2 text-xs text-texto-3">
-            A tela confere o andamento sozinha ao abrir e a cada 60 s.
-          </p>
-        )}
-        {semNascimento.length > 0 && (
-          <DicaDeAviso>
-            Falta a data de nascimento de {semNascimento.map((p) => p.sujeito.nome).join(', ')} — corrija os dados antes.
-          </DicaDeAviso>
-        )}
-
-        <div className="mt-6 flex flex-wrap items-center justify-end gap-2.5 border-t border-borda pt-5">
+            {listaAberta ? 'Ocultar a seleção' : 'Escolher certidões'}
+            <ChevronDown className={cn('h-4 w-4 transition-transform', listaAberta && 'rotate-180')} aria-hidden />
+          </button>
           <Button
+            size="sm"
             onClick={() => setConfirmando(true)}
             disabled={consultas === 0 || semNascimento.length > 0 || pedindo}
             loading={pedindo}
@@ -511,6 +389,187 @@ export function EmissaoBullai({
         </div>
       </div>
 
+      {/* DEPOIS DE BAIXAR, O LINK: o navegador bloqueia janela aberta depois de
+          uma chamada assíncrona, então a pasta não abre sozinha — fica à mão. */}
+      {pastaSalva ? (
+        <p role="status" className="mt-2 flex flex-wrap items-center gap-x-2 text-sm text-sucesso">
+          <Check className="h-4 w-4 flex-none" aria-hidden />
+          PDFs salvos na pasta da análise, em Certidões.
+          <a href={pastaSalva} target="_blank" rel="noreferrer" className={LINK_BTN}>
+            <Folder className="h-4 w-4" aria-hidden /> Abrir pasta no Drive
+          </a>
+        </p>
+      ) : (
+        (emEmissao || pedidoFeito) &&
+        pasta && (
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 text-sm text-texto-2">
+            Os PDFs chegam aos poucos e vão para a pasta da análise, em Certidões.
+            <a href={pasta.url} target="_blank" rel="noreferrer" className={LINK_BTN}>
+              <Folder className="h-4 w-4" aria-hidden /> Abrir pasta no Drive
+            </a>
+          </p>
+        )
+      )}
+
+      {semNascimento.length > 0 && (
+        <DicaDeAviso>
+          Falta a data de nascimento de {semNascimento.map((p) => p.sujeito.nome).join(', ')} — corrija os dados antes.
+        </DicaDeAviso>
+      )}
+
+      {listaAberta && (
+        <div className="mt-2">
+          {sujeitos.map((s) => {
+            const doSujeito = itens.filter((i) => i.sujeito_id === s.id)
+            if (doSujeito.length === 0) return null
+            const documento = s.tipo_pessoa === 'PJ' ? 'CNPJ' : 'CPF'
+            const termo = (busca[s.id] ?? '').trim().toLowerCase()
+            const achados = termo.length >= 3
+              ? portais
+                  .filter((p) => p.documento === documento && !p.presencial && p.rotulo.toLowerCase().includes(termo))
+                  .slice(0, 12)
+              : []
+            return (
+              <div key={s.id} className="border-t border-borda pb-1 pt-2">
+                <div className="mb-1 flex flex-wrap items-center gap-2 text-corpo">
+                  <Selo tom="info">{s.papel}</Selo>
+                  <b className="font-bold text-texto">{s.nome}</b>
+                  {s.tipo_pessoa === 'PF' && !s.data_nascimento && (
+                    <Selo tom="perigo" icone={<X className={icSelo} aria-hidden />}>
+                      falta a data de nascimento — a BullAI exige
+                    </Selo>
+                  )}
+                </div>
+                <ul>
+                  {doSujeito.map((i) => {
+                    const t = traducoes.get(i.id)
+                    const podeMarcar = podePedir(i) && (t?.chaves.length ?? 0) > 0
+                    const pdfs = (i.arquivos ?? []).filter((a) => a.drive_link)
+                    return (
+                      <li key={i.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-0.5 text-corpo">
+                        {/* A CAIXA APARECE SEMPRE, desabilitada no que não se pode
+                            pedir: a coluna fica alinhada e o "não dá" se vê. */}
+                        <label
+                          className={cn(
+                            'inline-flex min-h-8 items-center gap-2',
+                            podeMarcar ? 'cursor-pointer' : 'cursor-default',
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-[16px] w-[16px] flex-none accent-marca"
+                            checked={marcado(i)}
+                            disabled={!podeMarcar}
+                            onChange={() =>
+                              setDesmarcados((antes) => {
+                                const n = new Set(antes)
+                                if (n.has(i.id)) n.delete(i.id)
+                                else n.add(i.id)
+                                return n
+                              })
+                            }
+                          />
+                          <span className="text-texto">
+                            {i.certidao_catalogo?.nome_curto ?? i.certidao_codigo}
+                            {Object.values(i.parametros ?? {}).length > 0 && (
+                              <span className="text-texto-3"> ({Object.values(i.parametros).join(', ')})</span>
+                            )}
+                          </span>
+                        </label>
+                        {t && t.chaves.length > 0 && (
+                          <span className="text-xs text-texto-3">
+                            portais: {t.chaves.map((k) => porChave.get(k)?.rotulo ?? k).join(' · ')}
+                          </span>
+                        )}
+                        {t?.semBullai && i.status !== 'OBTIDA' && (
+                          <span className="text-xs text-aviso">Manual: {t.semBullai}</span>
+                        )}
+                        {i.status === 'OBTIDA' && seloDoResultado(i.resultado)}
+                        {i.status === 'EM_EMISSAO' && (
+                          <Selo tom="aviso" icone={<Clock className={icSelo} aria-hidden />}>
+                            em emissão
+                          </Selo>
+                        )}
+                        {i.status === 'FALHA' && (
+                          <Selo tom="perigo" icone={<X className={icSelo} aria-hidden />}>
+                            falhou
+                          </Selo>
+                        )}
+                        {i.erro_detalhe && i.status !== 'OBTIDA' && (
+                          <span className="text-xs text-texto-3">{i.erro_detalhe}</span>
+                        )}
+                        {pdfs.map((a) => (
+                          <a
+                            key={a.drive_link!}
+                            href={a.drive_link!}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={LINK_BTN}
+                          >
+                            {porChave.get(a.portal)?.rotulo ?? a.nome}
+                            <ExternalLink className="h-4 w-4" aria-hidden />
+                          </a>
+                        ))}
+                      </li>
+                    )
+                  })}
+                  {(extras[s.id] ?? []).map((k) => (
+                    <li key={k} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-0.5 text-corpo">
+                      <label className="inline-flex min-h-8 cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-[16px] w-[16px] flex-none accent-marca"
+                          checked
+                          onChange={() =>
+                            setExtras((antes) => ({ ...antes, [s.id]: (antes[s.id] ?? []).filter((x) => x !== k) }))
+                          }
+                        />
+                        <span className="text-texto">{porChave.get(k)?.rotulo ?? k}</span>
+                      </label>
+                      <span className="text-xs text-texto-3">acrescentada · fora da planilha</span>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* O CATÁLOGO INTEIRO, a um campo de distância. A LISTA FICA NO
+                    FLUXO, e não flutuando: dentro da janela que rola, uma lista
+                    flutuante era cortada pela borda do corpo. */}
+                <div className="mt-1.5">
+                  <Input
+                    value={busca[s.id] ?? ''}
+                    onChange={(e) => setBusca((antes) => ({ ...antes, [s.id]: e.target.value }))}
+                    placeholder={`Acrescentar outra certidão do catálogo (${portais.filter((p) => p.documento === documento).length} para ${documento})…`}
+                    aria-label={`Acrescentar certidão do catálogo para ${s.nome}`}
+                  />
+                  {achados.length > 0 && (
+                    <ul className="mt-1 max-h-[240px] overflow-auto rounded-campo border border-borda bg-superficie p-1 shadow-nivel-2">
+                      {achados.map((p) => (
+                        <li key={p.chave}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExtras((antes) => ({
+                                ...antes,
+                                [s.id]: [...new Set([...(antes[s.id] ?? []), p.chave])],
+                              }))
+                              setBusca((antes) => ({ ...antes, [s.id]: '' }))
+                            }}
+                            className="flex min-h-11 w-full items-center rounded-controle px-2.5 text-left text-corpo text-texto hover:bg-superficie-3 focus-visible:bg-superficie-3"
+                            title={p.criterio}
+                          >
+                            {p.rotulo}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       <ConfirmDialog
         open={confirmando}
         title="Extrair pela BullAI"
@@ -519,7 +578,7 @@ export function EmissaoBullai({
             Vou pedir <strong>{consultas}</strong> certidão(ões) à BullAI, em nome de{' '}
             {pedidos.map((p) => p.sujeito.nome).join(', ')}. Cada uma gasta uma consulta do plano
             {restantes == null ? '' : ` (restam ${restantes})`}. As certidões chegam aos poucos, e os PDFs vão para a
-            pasta do cedente no Drive.
+            pasta da análise no Drive, em Certidões.
           </>
         }
         confirmLabel={`Extrair ${consultas}`}

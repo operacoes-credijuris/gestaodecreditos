@@ -40,6 +40,14 @@
 // blocos por pessoa. SÓ A APRESENTAÇÃO MUDOU: as regras acima, as gravações e as
 // mensagens são as de antes.
 //
+// 03/10/2026, MAIS ENXUTO (pedido do dono: "tá muito poluído"): o placar em
+// cartões e a lista âmbar viraram uma FAIXA DE RESUMO (cedente, origem, placar e
+// o atalho da pasta no Drive) e uma linha de lacunas que abre; o checklist passou
+// de blocos por pessoa a grupos por ESTADO (problemas primeiro, obtidas
+// recolhidas), uma linha densa por certidão; a leitura da IA e dos anexos virou
+// uma linha de estado que abre. As regras de agrupar e contar moram em
+// lib/checklistDeCertidoes.ts. Nada saiu: tudo continua a um clique.
+//
 // 03/10/2026, PEDIDO DO DONO: a leitura da IA tem de trazer os dados DO CEDENTE,
 // "e ninguém mais", e o cedente pode ser empresa. Daí: o nome do cedente vai
 // para dd-qualificacao, que só devolve o que está na qualificação dele; a caixa
@@ -52,9 +60,12 @@ import {
   AlertTriangle,
   ArrowRight,
   Check,
+  ChevronDown,
   Clock,
   ExternalLink,
   FileText,
+  Folder,
+  HelpCircle,
   Pencil,
   Plus,
   RefreshCw,
@@ -62,6 +73,22 @@ import {
   X,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { cn } from '@/lib/cn'
+import { perguntarDescarte } from '@/lib/descarte'
+import { CopiarTexto } from '@/components/ui/BotaoCopiar'
+import {
+  agruparChecklist,
+  avisoDaIAEmDestaque,
+  conferenciaDoOficio,
+  GRUPOS_RECOLHIDOS,
+  hojeEmBrasilia,
+  origemDoCadastro,
+  pastaDoChecklistNaTela,
+  placarDoChecklist,
+  ROTULO_DO_GRUPO,
+  vencida,
+  type PastaNaTela,
+} from '@/lib/checklistDeCertidoes'
 import { invokeFunction } from '@/lib/functions'
 import { cnpjValido, cpfValido, formatCpfCnpjInput, onlyDigits } from '@/lib/format'
 import type { ArquivoLido } from '@/pages/operacional/AnaliseCredito'
@@ -78,7 +105,6 @@ import {
 } from '@/lib/dadosNoTexto'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
-import { StatCard } from '@/components/ui/StatCard'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 import {
@@ -90,7 +116,7 @@ import {
   icSelo,
   type TomDaPeca,
 } from '@/components/analise/Pecas'
-import { EmissaoBullai } from '@/components/EmissaoBullai'
+import { EmissaoBullai, seloDoResultado } from '@/components/EmissaoBullai'
 import { classificarParcelaCedida, lerTituloCard } from '@/lib/kommo'
 import type { Lido, QualificacaoLida } from '../../supabase/functions/_shared/qualificacaoDoCedente.ts'
 import { mencionaNome, tipoPessoaPeloNome } from '../../supabase/functions/_shared/focoNoCedente.ts'
@@ -142,7 +168,12 @@ interface ItemChecklist {
   // Da migration 0071: o que a BullAI devolveu. Opcionais porque o select é `*`
   // e, antes da migration, eles simplesmente não vêm.
   resultado?: string | null
-  arquivos?: { portal: string; drive_link: string | null; nome: string }[] | null
+  /** A pasta "Certidões" onde o PDF caiu (desde 03/10/2026; os de antes não a têm). */
+  arquivos?: { portal: string; drive_link: string | null; nome: string; pasta_id?: string | null }[] | null
+  // Da 0042, vindas pelo `*`: o PDF da certidão obtida e as datas dela.
+  drive_link?: string | null
+  emitida_em?: string | null
+  validade_ate?: string | null
   certidao_catalogo: {
     nome_curto: string
     orgao_emissor: string
@@ -206,6 +237,9 @@ function mascaraDoTipo(v: string, tipo: TipoPessoa): string {
 
 /** "CPF" ou "CNPJ". */
 const rotuloDoc = (tipo: TipoPessoa) => (tipo === 'PJ' ? 'CNPJ' : 'CPF')
+
+/** 'AAAA-MM-DD' → 'DD/MM/AAAA'. */
+const dataBr = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/')
 
 // ------------------------------------------------------------------ rótulos
 
@@ -349,8 +383,20 @@ function rotuloParametros(p: Record<string, unknown>): string {
  * aparece uma vez, no instante do clique, não é aviso — é notificação, e a
  * lacuna que ele denuncia continua lá depois de fechar o modal.
  */
-function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
-  const a: string[] = []
+/**
+ * CADA AVISO COM UM NOME CURTO (03/10/2026): a tela enxuta mostra os nomes
+ * numa linha só ("residência não levantada · sem cônjuge informado"), e o texto
+ * inteiro a um clique. Nenhum aviso deixou de existir — continuam todos à vista,
+ * só que encolhidos.
+ */
+interface AvisoDoPlacar {
+  curto: string
+  texto: string
+}
+
+function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): AvisoDoPlacar[] {
+  const a: AvisoDoPlacar[] = []
+  const push = (curto: string, texto: string) => a.push({ curto, texto })
   if (sujeitos.length === 0) return a
   // CEDENTE EMPRESA: não casa e não é "sócio de empresa" — os dois avisos de
   // bloco esquecido abaixo não se aplicam, e o bloco da PJ já é dele (o motor
@@ -358,21 +404,25 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
   const cedentePJ = sujeitos.some((s) => s.papel === 'CEDENTE' && s.tipo_pessoa === 'PJ')
 
   for (const s of sujeitos) {
+    const quem = s.papel === 'CEDENTE' ? '' : ` (${s.papel.toLowerCase()})`
     if (!s.residencia_levantada) {
-      a.push(
+      push(
+        `residência não levantada${quem}`,
         `${s.papel} (${s.nome}): histórico de residência não levantado. O checklist ` +
           `cobre apenas os endereços conhecidos hoje — pode faltar certidão estadual ` +
           `ou municipal de onde a pessoa morou antes.`,
       )
     }
     if (!s.uf_atual) {
-      a.push(
+      push(
+        `sem UF atual${quem}`,
         `${s.papel} (${s.nome}): sem UF atual. Nenhuma certidão estadual foi ` +
           `exigida para esta pessoa.`,
       )
     }
     if (!s.municipio_atual) {
-      a.push(
+      push(
+        `sem município atual${quem}`,
         `${s.papel} (${s.nome}): sem município atual. Nenhuma certidão municipal ` +
           `foi exigida para esta pessoa.`,
       )
@@ -380,7 +430,8 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
   }
 
   if (!cedentePJ && !sujeitos.some((s) => s.papel === 'CONJUGE')) {
-    a.push(
+    push(
+      'nenhum cônjuge informado',
       'Nenhum cônjuge informado. Se o cedente for casado, o checklist está ' +
         'INCOMPLETO: a planilha dá bloco próprio de certidões ao cônjuge ' +
         '(linhas 52 a 67).',
@@ -392,7 +443,8 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
   // terceira ainda não, então o aviso é o que impede que a ausência passe por
   // "não se aplica".
   if (!cedentePJ && !sujeitos.some((s) => s.papel === 'PJ')) {
-    a.push(
+    push(
+      'nenhuma empresa (PJ) informada',
       'Nenhuma empresa (PJ) informada. Se o cedente for sócio de empresa, falta ' +
         'o bloco de certidões da PJ — CNPJ, FGTS e as estaduais/municipais dela ' +
         '(planilha, linhas 68 a 81). Esta tela ainda não cadastra PJ: por ora, ' +
@@ -402,7 +454,8 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
 
   const dispensadas = itens.filter((i) => i.status === 'NAO_APLICAVEL')
   if (dispensadas.length > 0) {
-    a.push(
+    push(
+      `${dispensadas.length} dispensada(s) fora da conta`,
       `${dispensadas.length} certidão(ões) dispensada(s). Dispensa SAI do ` +
         `denominador do placar: "completo" abaixo significa completo entre as que ` +
         `sobraram, não entre as que a regra exigia.`,
@@ -427,12 +480,21 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): string[] {
  * gov.br evita a viagem: a pessoa junta as que dá para fazer agora e deixa as
  * outras para quando tiver o acesso.
  */
+//
+// A LINHA DENSA (03/10/2026, pedido do dono de "condensar"): o que é e em que pé
+// está numa linha só — estado, nome, órgão e escopo, o resultado da BullAI — e
+// UMA ação à vista: abrir o PDF quando já existe, senão abrir o portal, senão
+// cadastrar o link. O resto (barreiras, o que o portal pede com o botão de
+// copiar, validade, os outros PDFs, o portal quando a ação principal é o PDF)
+// fica no "Como emitir", que abre embaixo, na largura toda.
 function LinhaCertidao({
   item,
   sujeito,
   cnj,
   url,
   onSalvarUrl,
+  papel,
+  hoje,
 }: {
   item: ItemChecklist
   sujeito: Sujeito | undefined
@@ -440,12 +502,14 @@ function LinhaCertidao({
   /** Link já conhecido: do catálogo, ou cadastrado para este escopo. */
   url: string | null
   onSalvarUrl: (codigo: string, escopo: string, url: string) => Promise<void>
+  /** O papel do sujeito, quando há mais de um no crédito (senão a linha não o repete). */
+  papel?: string
+  hoje: string
 }) {
   const [aberto, setAberto] = useState(false)
   const [novaUrl, setNovaUrl] = useState('')
   const [salvandoUrl, setSalvandoUrl] = useState(false)
   const [erroUrl, setErroUrl] = useState<string | null>(null)
-  const [copiado, setCopiado] = useState<string | null>(null)
 
   const cat = item.certidao_catalogo
   const escopo = escopoDe(item.parametros)
@@ -485,17 +549,6 @@ function LinhaCertidao({
 
   const faltando = insumos.filter((x) => !x.valor)
 
-  async function copiar(texto: string, chave: string) {
-    try {
-      await navigator.clipboard.writeText(texto)
-      setCopiado(chave)
-      window.setTimeout(() => setCopiado(null), 1500)
-    } catch {
-      // Área de transferência bloqueada pelo navegador: o valor está na tela
-      // do lado, então dá para selecionar à mão. Não vale virar erro.
-    }
-  }
-
   async function salvarUrl() {
     if (!escopo) return
     setSalvandoUrl(true)
@@ -511,25 +564,36 @@ function LinhaCertidao({
   }
 
   const estado = ESTADO_DA_LINHA[item.status]
+  const estaVencida = vencida(item, hoje)
+  // OS PDFs DESTA CERTIDÃO no Drive: o da coluna e os que a BullAI trouxe por
+  // portal. O primeiro vira a ação principal; os outros, o "Como emitir".
+  const pdfs = [
+    ...(item.drive_link ? [{ link: item.drive_link, nome: 'PDF' }] : []),
+    ...(item.arquivos ?? [])
+      .filter((a) => a.drive_link && a.drive_link !== item.drive_link)
+      .map((a) => ({ link: a.drive_link!, nome: a.nome })),
+  ]
+  const pdfPrincipal = item.status === 'OBTIDA' ? pdfs[0] : undefined
+  const outrosPdfs = pdfPrincipal ? pdfs.slice(1) : pdfs
+  const escopoTexto = rotuloParametros(item.parametros)
 
-  // O `.cert-row` da amostra: o que é (selo, nome, órgão, o detalhe) à esquerda,
-  // as duas ações à direita, e o "Como emitir" abrindo embaixo, na largura toda.
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-borda px-4 py-2.5 text-corpo last:border-b-0">
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-borda px-3 py-2 text-corpo last:border-b-0">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Selo tom={estado?.tom ?? 'neutro'} icone={estado?.icone}>
-          {estado?.rotulo ?? item.status}
+        <Selo tom={estaVencida ? 'perigo' : (estado?.tom ?? 'neutro')} icone={estaVencida ? undefined : estado?.icone}>
+          {estaVencida ? 'Vencida' : (estado?.rotulo ?? item.status)}
         </Selo>
-        <b className="font-bold text-texto">{cat?.nome_curto ?? item.certidao_codigo}</b>
-        <span className="text-xs text-texto-3">{cat?.orgao_emissor}</span>
-        {rotuloParametros(item.parametros) && (
-          <span className="text-xs text-texto-3">({rotuloParametros(item.parametros)})</span>
-        )}
+        <b className="min-w-0 font-semibold text-texto">{cat?.nome_curto ?? item.certidao_codigo}</b>
+        <span className="text-xs text-texto-3">
+          {[cat?.orgao_emissor, escopoTexto].filter(Boolean).join(' · ')}
+        </span>
+        {papel && <Selo tom="info">{papel}</Selo>}
         {!item.obrigatoria && <Selo tom="neutro">opcional</Selo>}
+        {item.status === 'OBTIDA' && seloDoResultado(item.resultado)}
+        {estaVencida && <span className="text-xs text-perigo">venceu em {dataBr(item.validade_ate!)}</span>}
         {item.status === 'NAO_APLICAVEL' && (
           <span className="text-xs text-info">
-            dispensada
-            {item.dispensa_motivo ? `: ${item.dispensa_motivo}` : ' (sem motivo!)'}
+            {item.dispensa_motivo ? item.dispensa_motivo : 'sem motivo!'}
           </span>
         )}
         {item.erro_classe && (
@@ -540,26 +604,37 @@ function LinhaCertidao({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-1">
+        {pdfPrincipal ? (
+          <a href={pdfPrincipal.link} target="_blank" rel="noreferrer" className={LINK_BTN}>
+            <FileText className="h-4 w-4" aria-hidden /> Abrir PDF
+          </a>
+        ) : url ? (
+          <a href={url} target="_blank" rel="noreferrer" className={LINK_BTN}>
+            Abrir portal <ExternalLink className="h-4 w-4" aria-hidden />
+          </a>
+        ) : escopo ? (
+          <button type="button" className={LINK_BTN} onClick={() => setAberto(true)}>
+            Cadastrar link
+          </button>
+        ) : (
+          <span className="px-1.5 text-xs text-aviso">sem link</span>
+        )}
         <button
           type="button"
           onClick={() => setAberto((v) => !v)}
           aria-expanded={aberto}
+          aria-label={`${aberto ? 'Fechar' : 'Como emitir'}: ${cat?.nome_curto ?? item.certidao_codigo}`}
+          title={aberto ? 'Fechar' : 'Como emitir, o que o portal pede e os outros arquivos'}
           className={LINK_BTN}
         >
-          {aberto ? 'Fechar' : 'Como emitir'}
+          <span className="hidden sm:inline">{aberto ? 'Fechar' : 'Como emitir'}</span>
+          <ChevronDown className={cn('h-4 w-4 transition-transform', aberto && 'rotate-180')} aria-hidden />
         </button>
-        {url ? (
-          <a href={url} target="_blank" rel="noreferrer" className={LINK_BTN}>
-            Abrir portal <ExternalLink className="h-4 w-4" aria-hidden />
-          </a>
-        ) : (
-          <span className="text-xs text-aviso">sem link</span>
-        )}
       </div>
 
       {aberto && (
-        <div className="col-span-full space-y-2 rounded-campo bg-superficie-2 px-4 py-2.5 text-sm">
+        <div className="col-span-full space-y-2 rounded-campo bg-superficie-2 px-3 py-2.5 text-sm">
           {barreiras.length > 0 ? (
             <p className="flex items-start gap-1.5 text-aviso">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
@@ -569,41 +644,28 @@ function LinhaCertidao({
             <p className="text-sucesso">Sem login e sem CAPTCHA conhecidos.</p>
           )}
 
-          <div>
-            <p className="mb-1 font-semibold text-texto">O que o portal pede:</p>
-            {insumos.length > 0 ? (
-              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-0.5 text-corpo">
-                {insumos.map((x) => (
-                  <div key={x.chave} className="contents">
-                    <dt className="text-texto-3">{x.rotulo}</dt>
-                    <dd className="flex min-w-0 flex-wrap items-center gap-1 text-texto">
-                      {x.valor ? (
-                        <>
-                          <span className="tabular-nums">{x.valor}</span>
-                          <button
-                            type="button"
-                            onClick={() => copiar(x.valor, x.chave)}
-                            className={LINK_BTN}
-                            // O NOME DIZ O QUE SE COPIA: o leitor de tela ouvia
-                            // "copiar" repetido, sem saber de qual campo.
-                            aria-label={copiado === x.chave ? `${x.rotulo} copiado` : `Copiar ${x.rotulo}`}
-                          >
-                            {copiado === x.chave ? 'copiado' : 'copiar'}
-                          </button>
-                        </>
-                      ) : (
-                        // Campo vazio é PENDÊNCIA, não detalhe: sem ele o portal não
-                        // emite, e descobrir isso só lá é viagem perdida.
-                        <span className="text-perigo">falta no cadastro</span>
-                      )}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ) : (
-              <p className="text-texto-3">Nada declarado no catálogo.</p>
-            )}
-          </div>
+          {insumos.length > 0 ? (
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-0.5 text-corpo">
+              {insumos.map((x) => (
+                <div key={x.chave} className="contents">
+                  <dt className="text-texto-3">{x.rotulo}</dt>
+                  <dd className="flex min-w-0 items-center gap-1 text-texto">
+                    {x.valor ? (
+                      // O NOME DIZ O QUE SE COPIA: o leitor de tela ouvia "copiar"
+                      // repetido, sem saber de qual campo.
+                      <CopiarTexto valor={x.valor} rotulo={`Copiar ${x.rotulo}`} className="tabular-nums" />
+                    ) : (
+                      // Campo vazio é PENDÊNCIA, não detalhe: sem ele o portal não
+                      // emite, e descobrir isso só lá é viagem perdida.
+                      <span className="text-perigo">falta no cadastro</span>
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="text-texto-3">O portal não declara o que pede no catálogo.</p>
+          )}
 
           {faltando.length > 0 && (
             <p className="text-perigo">
@@ -611,11 +673,32 @@ function LinhaCertidao({
             </p>
           )}
 
-          {cat?.validade_dias && (
+          {(cat?.validade_dias || item.emitida_em) && (
             <p className="text-xs text-texto-3">
-              Validade: {cat.validade_dias} dias
-              {cat.sla_horas ? ` · sai em até ${cat.sla_horas}h` : ''}
+              {[
+                item.emitida_em ? `emitida em ${dataBr(item.emitida_em)}` : null,
+                item.validade_ate ? `vale até ${dataBr(item.validade_ate)}` : null,
+                cat?.validade_dias ? `validade de ${cat.validade_dias} dias` : null,
+                cat?.sla_horas ? `sai em até ${cat.sla_horas}h` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
+          )}
+
+          {(outrosPdfs.length > 0 || (pdfPrincipal && url)) && (
+            <div className="flex flex-wrap items-center gap-1">
+              {outrosPdfs.map((a) => (
+                <a key={a.link} href={a.link} target="_blank" rel="noreferrer" className={LINK_BTN}>
+                  <FileText className="h-4 w-4" aria-hidden /> {a.nome}
+                </a>
+              ))}
+              {pdfPrincipal && url && (
+                <a href={url} target="_blank" rel="noreferrer" className={LINK_BTN}>
+                  Abrir portal <ExternalLink className="h-4 w-4" aria-hidden />
+                </a>
+              )}
+            </div>
           )}
 
           {/* SEM LINK: o endereço desta certidão depende da UF, do município ou da
@@ -624,11 +707,10 @@ function LinhaCertidao({
               precisa pela primeira vez cola aqui, e da segunda em diante aparece
               pronto para todo mundo. */}
           {!url && escopo && (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <p className="text-texto-2">
-                O link desta certidão depende de <b className="text-texto">{escopo}</b>, e ainda
-                não está cadastrado. Cole o endereço oficial e ele passa a aparecer
-                aqui para todos os créditos deste escopo:
+                Link de <b className="text-texto">{escopo}</b> ainda não cadastrado — o que você colar vale
+                para todos os créditos deste escopo.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Input
@@ -657,13 +739,13 @@ function LinhaCertidao({
 
           {!url && !escopo && (
             <p className="text-aviso">
-              Esta certidão não tem link no catálogo e não tem escopo (UF, município
-              ou comarca) para cadastrar um. Emissão manual, procurando o portal.
+              Sem link no catálogo nem escopo (UF, município ou comarca) para cadastrar um: emissão
+              manual, procurando o portal.
             </p>
           )}
         </div>
       )}
-    </div>
+    </li>
   )
 }
 
@@ -706,8 +788,7 @@ function Sugestoes({
       {nascimentos.length > 0 && (
         <>
           <p className="mt-2 text-xs text-texto-2">
-            <b className="text-texto">Data de nascimento do cedente</b> — só datas rotuladas como
-            nascimento entram, senão a lista viria com toda data do processo:
+            <b className="text-texto">Nascimento</b> — só datas rotuladas como nascimento:
           </p>
           <div className="my-2 grid gap-2">
             {nascimentos.map((n) => (
@@ -732,8 +813,7 @@ function Sugestoes({
       {locais.length > 0 && (
         <>
           <p className="mt-2 text-xs text-texto-2">
-            <b className="text-texto">Cidade e UF do cedente</b> — conferidas contra a lista do
-            IBGE. Clicar preenche as duas juntas:
+            <b className="text-texto">Cidade/UF</b> — conferidas no IBGE; clicar preenche as duas:
           </p>
           <div className="my-2 grid gap-2">
             {locais.map((l) => (
@@ -829,6 +909,16 @@ export function PainelCertidoes({
   const [urls, setUrls] = useState<UrlPorEscopo[]>([])
   const [erroLinks, setErroLinks] = useState<string | null>(null)
   const [cnjDoCredito, setCnjDoCredito] = useState<string | null>(null)
+  /** A pasta da análise do card no Drive (kommo_leads.drive_pasta_id): o atalho do topo. */
+  const [drivePastaId, setDrivePastaId] = useState<string | null>(null)
+  /** A pasta que a última atualização da BullAI disse ter usado (vence a calculada aqui). */
+  const [pastaDaResposta, setPastaDaResposta] = useState<PastaNaTela | null>(null)
+  // O QUE ESTÁ ABERTO NA TELA ENXUTA (03/10/2026). `null` em achadosAbertos é
+  // "decide sozinho" (abre enquanto falta o documento do cedente).
+  const [ajudaAberta, setAjudaAberta] = useState(false)
+  const [achadosAbertos, setAchadosAbertos] = useState<boolean | null>(null)
+  const [residenciaAberta, setResidenciaAberta] = useState(false)
+  const [conjugeAberto, setConjugeAberto] = useState(false)
 
   const [editando, setEditando] = useState(false)
   const [cedente, setCedente] = useState<FormPessoa>(VAZIO)
@@ -1096,7 +1186,9 @@ export function PainelCertidoes({
 
     if (feitos.length > 0) {
       setMexeu(true)
-      setPreenchido(feitos)
+      // O QUE VEIO DO OFÍCIO FICA: era apagado por esta lista, e a tela passava
+      // a dizer que o documento foi digitado.
+      setPreenchido((v) => [...v.filter((x) => x.endsWith('(do ofício)')), ...feitos])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cedente.cpf, doPdf, estadosCivis, tipoCedente])
@@ -1203,7 +1295,7 @@ export function PainelCertidoes({
           .select('certidao_codigo, escopo_valor, url, informado_em'),
         supabase
           .from('kommo_leads')
-          .select('processo_cnj')
+          .select('processo_cnj, drive_pasta_id')
           .eq('kommo_lead_id', leadId)
           .maybeSingle(),
       ])
@@ -1232,6 +1324,7 @@ export function PainelCertidoes({
       setCnjDoCredito(
         ((rl.data as { processo_cnj?: string } | null)?.processo_cnj ?? null),
       )
+      setDrivePastaId((rl.data as { drive_pasta_id?: string | null } | null)?.drive_pasta_id ?? null)
 
       // Sem sujeito nenhum, a única coisa útil é o formulário. Com sujeito, o
       // padrão é ver o que já existe — corrigir é ação explícita.
@@ -1264,6 +1357,9 @@ export function PainelCertidoes({
       setMunicipiosAnteriores((ced?.municipios_anteriores ?? []).join(', '))
       setEditando(listaS.length === 0)
       setMexeu(false)
+      setAchadosAbertos(null)
+      setResidenciaAberta(false)
+      setConjugeAberto(false)
       carregouUmaVez.current = true
     } catch (e) {
       setErro((e as Error)?.message ?? String(e))
@@ -1292,12 +1388,16 @@ export function PainelCertidoes({
   // que desmonta a lista e sem mexer no formulário. É o que roda a cada minuto
   // enquanto a BullAI trabalha — o `recarregar` inteiro, ali, apagaria as marcações.
   const recarregarItens = useCallback(async () => {
-    const [ri, rc] = await Promise.all([
+    // A PASTA DO CARD JUNTO: a primeira certidão baixada pode tê-la gravado
+    // (quando o card ainda não tinha nenhuma), e o atalho do topo a mostra.
+    const [ri, rc, rl] = await Promise.all([
       supabase.from('dd_certidao').select(SELECT_ITENS).eq('kommo_lead_id', leadId),
       supabase.from('v_dd_completude').select('*').eq('kommo_lead_id', leadId).maybeSingle(),
+      supabase.from('kommo_leads').select('drive_pasta_id').eq('kommo_lead_id', leadId).maybeSingle(),
     ])
     if (!ri.error) setItens((ri.data ?? []) as unknown as ItemChecklist[])
     if (!rc.error) setCompletude((rc.data ?? null) as Completude | null)
+    if (!rl.error) setDrivePastaId((rl.data as { drive_pasta_id?: string | null } | null)?.drive_pasta_id ?? null)
   }, [leadId])
 
   /**
@@ -1423,7 +1523,9 @@ export function PainelCertidoes({
     }
     if (feitos.length > 0) {
       setMexeu(true)
-      setPreenchido(feitos)
+      // O QUE VEIO DO OFÍCIO FICA: era apagado por esta lista, e a tela passava
+      // a dizer que o documento foi digitado.
+      setPreenchido((v) => [...v.filter((x) => x.endsWith('(do ofício)')), ...feitos])
     }
   }
 
@@ -1569,7 +1671,7 @@ export function PainelCertidoes({
     if (carregando || (!oficioLocal && !servidorLeuOficio)) return null
     if (divergenciaDoTitulo) {
       return (
-        <CaixaDeAviso tom="aviso" role="alert" className="mb-4">
+        <CaixaDeAviso tom="aviso" role="alert" className="mb-3">
           <b className="text-texto">O título do card e o ofício requisitório divergem.</b>{' '}
           {divergenciaDoTitulo.mensagem}
         </CaixaDeAviso>
@@ -1577,20 +1679,14 @@ export function PainelCertidoes({
     }
     if (avisoOficio) {
       return (
-        <CaixaDeAviso tom={semOficio ? 'info' : 'aviso'} className="mb-4">
+        <CaixaDeAviso tom={semOficio ? 'info' : 'aviso'} className="mb-3">
           <b className="text-texto">Ofício requisitório:</b> {avisoOficio}
         </CaixaDeAviso>
       )
     }
-    if (titularOficio) {
-      return (
-        <CaixaDeAviso tom="sucesso" className="mb-4">
-          Titular conferido no ofício requisitório
-          {titularOficio.arquivo ? ` (${titularOficio.arquivo})` : ''}:{' '}
-          <b className="text-texto">{comDoc(titularOficio.nome, titularOficio.documento)}</b>.
-        </CaixaDeAviso>
-      )
-    }
+    // O OFÍCIO QUE CONFIRMA virou o selo "conferido no ofício" da faixa de
+    // resumo (com o arquivo ao lado e o titular na dica): confirmação não é
+    // aviso, e uma caixa verde inteira para ela era metade da poluição.
     return null
   }
 
@@ -1598,15 +1694,15 @@ export function PainelCertidoes({
   function divergenciaDoCadastro(): ReactNode {
     if (!titularOficio || !cadastroDivergeDoOficio) return null
     return (
-      <CaixaDeAviso tom="perigo" role="alert" className="mb-4">
+      <CaixaDeAviso tom="perigo" role="alert" className="mb-3">
         <span className="flex flex-wrap items-center justify-between gap-3">
           <span className="min-w-0 flex-1">
-            <b className="text-texto">O cadastro não bate com o ofício requisitório.</b> O cadastro tem{' '}
-            {comDoc(cedente.nome.trim() || '(sem nome)', docDoCadastro)}; o ofício diz{' '}
-            {comDoc(titularOficio.nome, titularOficio.documento)}. As certidões têm de sair no nome de
-            quem está no ofício.
+            <b className="text-texto">O cadastro não bate com o ofício requisitório.</b> Cadastro:{' '}
+            {comDoc(cedente.nome.trim() || '(sem nome)', docDoCadastro)}; ofício:{' '}
+            {comDoc(titularOficio.nome, titularOficio.documento)}. As certidões saem no nome de quem está no
+            ofício.
           </span>
-          <Button variant="secondary" onClick={usarDoOficio}>
+          <Button variant="secondary" size="sm" onClick={usarDoOficio}>
             Usar o do ofício
           </Button>
         </span>
@@ -1854,23 +1950,6 @@ export function PainelCertidoes({
 
   // ---------------------------------------------------------------- render
 
-  const porSujeito = useMemo(() => {
-    const mapa = new Map<string, ItemChecklist[]>()
-    for (const i of itens) {
-      const l = mapa.get(i.sujeito_id) ?? []
-      l.push(i)
-      mapa.set(i.sujeito_id, l)
-    }
-    for (const l of mapa.values()) {
-      l.sort((a, b) =>
-        (a.certidao_catalogo?.nome_curto ?? a.certidao_codigo).localeCompare(
-          b.certidao_catalogo?.nome_curto ?? b.certidao_codigo,
-          'pt-BR',
-        ),
-      )
-    }
-    return mapa
-  }, [itens])
 
   /**
    * Publica o "tem alteração não salva" para a janela.
@@ -2061,11 +2140,8 @@ export function PainelCertidoes({
     return (
       <>
         <p className="mt-2 text-xs text-texto-3">
-          A IA leu os autos procurando <b className="text-texto-2">{nomeProcurado || 'o cedente'}</b>
-          {pj ? ' (pessoa jurídica)' : ''} e trouxe só o que está na qualificação{' '}
-          {pj ? 'dessa empresa' : 'dessa pessoa'} — cada dado com o trecho dos autos de onde saiu. O
-          documento só aparece se estiver escrito ali, depois do nome. Clicar usa o dado no cadastro;
-          confira antes de gravar.
+          Só a qualificação de <b className="text-texto-2">{nomeProcurado || 'o cedente'}</b>
+          {pj ? ' (pessoa jurídica)' : ''}, cada dado com o trecho dos autos. Clicar usa no cadastro.
         </p>
         <div className="my-2 grid gap-2">{itensLidos}</div>
       </>
@@ -2103,18 +2179,14 @@ export function PainelCertidoes({
             por reflexo. */}
         {docs.length > 0 && (
           <p className="mt-2 text-xs text-texto-3">
-            Dígito verificador conferido. <b className="text-texto-2">Escolher é seu</b>: um
-            processo traz o {doc} do cedente, do advogado e às vezes de terceiros —
-            {outros
-              ? ' estes são os que a leitura não atribuiu ao cedente.'
-              : ' o sistema não tem como saber qual é qual.'}{' '}
-            A lista pode estar incompleta: o PDF nem sempre entrega os números inteiros.
+            Dígito conferido. <b className="text-texto-2">Escolher é seu</b>: o processo traz o {doc} do
+            cedente, do advogado e de terceiros
+            {outros ? ' — estes a leitura não atribuiu ao cedente' : ''}. A lista pode estar incompleta.
           </p>
         )}
         {docs.length === 0 && !outros && (
           <p className="mt-2 text-xs text-aviso">
-            Nenhum {doc} de dígito válido no texto — digite o do cedente abaixo,
-            conferindo no processo. O que achei do resto está logo abaixo.
+            Nenhum {doc} de dígito válido no texto — digite o do cedente, conferindo no processo.
           </p>
         )}
         {docs.length > 0 && (
@@ -2163,8 +2235,7 @@ export function PainelCertidoes({
         {ecs.length > 0 && (
           <>
             <p className="mt-2 text-xs text-texto-2">
-              <b className="text-texto">Estado civil</b> na qualificação das partes —
-              clicar já liga ou desliga o bloco do cônjuge:
+              <b className="text-texto">Estado civil</b> — clicar liga ou desliga o bloco do cônjuge:
             </p>
             <div className="my-2 grid gap-2">
               {ecs.map((e) => (
@@ -2192,8 +2263,7 @@ export function PainelCertidoes({
               ))}
             </div>
             <p className="text-xs text-aviso">
-              A petição pode ser antiga: &quot;casada&quot; naquela data não
-              é &quot;casada hoje&quot;. Confirme antes de gerar o checklist.
+              Petição antiga: &quot;casada&quot; naquela data não é &quot;casada hoje&quot;. Confirme.
             </p>
           </>
         )}
@@ -2208,510 +2278,798 @@ export function PainelCertidoes({
     (tipoCedente === 'PF' && estadosCivis.length > 0) ||
     digitalizados.length > 0
 
+  // ================================================================ A TELA ENXUTA
+  //
+  // PEDIDO DO DONO (03/10/2026): "tá muito poluído [...] condensar mais as
+  // informações importantes". A ordem passou a ser:
+  //   1. a FAIXA DE RESUMO — quem é o cedente, de onde veio o cadastro, o placar
+  //      e o atalho para a pasta no Drive;
+  //   2. os avisos que mudam o que se faz (erro, ofício, cadastro × ofício), em
+  //      destaque; os outros, juntos e recolhidos numa linha que diz quais são;
+  //   3. o checklist por ESTADO — problemas e pendências primeiro, obtidas e
+  //      dispensadas recolhidas no fim —, uma linha densa por certidão;
+  //   4. a emissão pela BullAI, com a seleção recolhida.
+  // NADA SAIU: cada texto e cada ação continuam a um clique. As regras também
+  // são as de antes — a ficha digitada vence a IA, cedente → checklist →
+  // emissão, as confirmações, a trava da BullAI e a regra do ofício.
+  const hoje = hojeEmBrasilia()
+  const grupos = useMemo(
+    () => agruparChecklist(itens, hoje, (i) => i.certidao_catalogo?.nome_curto ?? i.certidao_codigo),
+    [itens, hoje],
+  )
+  const placar = useMemo(() => placarDoChecklist(itens, hoje), [itens, hoje])
+  const sujeitoPorId = useMemo(() => new Map(sujeitos.map((s) => [s.id, s])), [sujeitos])
+  const variosSujeitos = sujeitos.length > 1
+  const semItens = itens.length > 0 ? sujeitos.filter((s) => !itens.some((i) => i.sujeito_id === s.id)) : []
+  const pasta: PastaNaTela | null = pastaDaResposta ?? pastaDoChecklistNaTela(itens, drivePastaId)
+  const cedenteGravado = sujeitos.find((s) => s.papel === 'CEDENTE')
+  const conjugeGravado = sujeitos.find((s) => s.papel === 'CONJUGE')
+  const conferencia = conferenciaDoOficio({
+    temTitular: Boolean(titularOficio),
+    diverge: cadastroDivergeDoOficio,
+    semOficio,
+  })
+  const origem = origemDoCadastro({
+    gravado: Boolean(cedenteGravado),
+    mexeu,
+    doOficio: preenchido.some((x) => x.endsWith('(do ofício)')),
+    daIA: iaAchouCedente,
+  })
+  // O aviso do ofício já está em destaque no topo; os da IA que falam do
+  // documento também; os outros vão com os achados, recolhidos.
+  const avisosDaIA = (leituraIA?.avisos ?? []).filter((a) => a !== leituraIA?.aviso_do_oficio)
+  const avisosIADestaque = avisosDaIA.filter(avisoDaIAEmDestaque)
+  const avisosIAMenores = avisosDaIA.filter((a) => !avisoDaIAEmDestaque(a))
+  const achadosVisiveis = achadosAbertos ?? !documentoValido(cedente.cpf, tipoCedente)
+  const residenciaVisivel = residenciaAberta || Boolean(ufsAnteriores.trim() || municipiosAnteriores.trim())
+  const conjugeCompleto =
+    Boolean(conjuge.nome.trim()) &&
+    onlyDigits(conjuge.cpf).length === 11 &&
+    cpfValido(conjuge.cpf) &&
+    onlyDigits(conjuge.cpf) !== onlyDigits(cedente.cpf)
+  const conjugeVisivel = conjugeAberto || !conjugeCompleto
+  /** Mexer no cônjuge mantém o formulário dele aberto até gravar. */
+  const alterarConjuge = (f: FormPessoa) => {
+    setConjugeAberto(true)
+    alterar(setConjuge)(f)
+  }
+
+  /** "Cancelar" da edição: volta ao que está gravado, perguntando se havia o que perder. */
+  async function cancelarEdicao() {
+    if (mexeu && !(await perguntarDescarte())) return
+    await recarregar()
+  }
+
+  /** Quantos dados do cedente a IA identificou (para a linha de estado da leitura). */
+  const dadosLidos = leituraIA
+    ? [
+        leituraIA.cedente.nome,
+        docDaLeitura,
+        tipoDaLeitura === 'PF' ? leituraIA.cedente.nascimento : null,
+        tipoDaLeitura === 'PF' ? leituraIA.cedente.nome_mae : null,
+        tipoDaLeitura === 'PF' ? leituraIA.estado_civil : null,
+        ...leituraIA.residencias,
+      ].filter(Boolean).length
+    : 0
+  const estadoDaLeitura = lendoPdf
+    ? 'Lendo o PDF do card…'
+    : lendoIA
+      ? 'A IA está lendo a qualificação nos autos…'
+      : iaAchouCedente
+        ? `Lido dos autos pela IA · ${dadosLidos} dado${dadosLidos === 1 ? '' : 's'}`
+        : leituraIA
+          ? 'A IA não achou os dados do cedente com segurança'
+          : temAchadosManuais
+            ? 'Achados nos anexos para conferir'
+            : avisoPdf
+              ? 'Não consegui ler os anexos do card'
+              : temTexto
+                ? `Nenhum ${rotuloDoc(tipoCedente)} de dígito válido nos anexos`
+                : 'Os anexos do card ainda não foram lidos'
+
+  /** Um número do placar, com o rótulo ao lado. */
+  const numero = (n: ReactNode, rotulo: string, tom = 'text-texto') => (
+    <span className="inline-flex items-baseline gap-1.5">
+      <b className={cn('font-display text-lg font-bold tabular-nums', tom)}>{n}</b>
+      <span className="text-texto-2">{rotulo}</span>
+    </span>
+  )
+
+  /** O topo da aba: o cedente numa linha, o placar noutra, e os atalhos. */
+  function faixaDeResumo(): ReactNode {
+    const nome = editando ? cedente.nome.trim() : (cedenteGravado?.nome ?? '')
+    const tipo: TipoPessoa = editando ? tipoCedente : (cedenteGravado?.tipo_pessoa ?? tipoCedente)
+    const doc = editando ? onlyDigits(cedente.cpf) : (cedenteGravado?.documento ?? '')
+    const lugar = (
+      editando
+        ? [cedente.municipio, cedente.uf]
+        : [cedenteGravado?.municipio_atual, cedenteGravado?.uf_atual]
+    )
+      .filter(Boolean)
+      .join('/')
+    const completa = Boolean(completude && completude.necessarias > 0 && completude.obtidas_validas === completude.necessarias)
+    return (
+      <div className="mb-3 rounded-cartao border border-borda bg-superficie px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div className="flex min-w-[min(100%,300px)] flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-corpo">
+            <span className="text-xs font-bold uppercase tracking-[.06em] text-texto-3">Cedente</span>
+            <b className="min-w-0 break-words font-bold text-texto">{nome || 'ainda sem cadastro'}</b>
+            {doc && (
+              <CopiarTexto
+                valor={doc}
+                rotulo={`Copiar o ${rotuloDoc(tipo)} do cedente`}
+                className="flex-none tabular-nums text-texto-2"
+              >
+                {formatCpfCnpjInput(doc)}
+              </CopiarTexto>
+            )}
+            <Selo tom="neutro" title={tipo === 'PJ' ? 'Pessoa jurídica' : 'Pessoa física'}>
+              {tipo}
+            </Selo>
+            {lugar && <span className="text-texto-2">{lugar}</span>}
+            {(nome || doc) && (
+              <Selo tom="neutro" title="De onde vieram os dados do cedente">
+                {origem}
+              </Selo>
+            )}
+            {conferencia && (
+              <Selo
+                tom={conferencia.tom}
+                title={
+                  titularOficio
+                    ? `Ofício requisitório: ${comDoc(titularOficio.nome, titularOficio.documento)}`
+                    : undefined
+                }
+              >
+                {conferencia.rotulo}
+              </Selo>
+            )}
+            {conferencia?.tom === 'sucesso' && titularOficio?.arquivo && (
+              <span className="text-xs text-texto-3">({titularOficio.arquivo})</span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            {pasta && (
+              <a
+                href={pasta.url}
+                target="_blank"
+                rel="noreferrer"
+                className={LINK_BTN}
+                title={
+                  pasta.qual === 'certidoes'
+                    ? 'Abrir no Drive a pasta Certidões, dentro da pasta da análise'
+                    : 'Abrir no Drive a pasta da análise (a subpasta Certidões nasce com o primeiro PDF)'
+                }
+              >
+                <Folder className="h-4 w-4" aria-hidden /> Pasta no Drive
+              </a>
+            )}
+            {!editando && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setEditando(true)}
+                disabled={salvando}
+                icon={<Pencil className="h-4 w-4" aria-hidden />}
+                title="Corrigir dados / cônjuge"
+              >
+                Editar
+              </Button>
+            )}
+            <button
+              type="button"
+              onClick={() => setAjudaAberta((v) => !v)}
+              aria-expanded={ajudaAberta}
+              aria-label="Como funciona esta aba"
+              title="Como funciona esta aba"
+              className="inline-grid h-8 w-8 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+            >
+              <HelpCircle className="h-[16px] w-[16px]" aria-hidden />
+            </button>
+          </div>
+        </div>
+
+        {!editando && conjugeGravado && (
+          <p className="mt-1 text-sm text-texto-2">
+            Cônjuge: <b className="text-texto">{conjugeGravado.nome}</b> ·{' '}
+            <span className="tabular-nums">{formatCpfCnpjInput(conjugeGravado.documento)}</span>
+            {conjugeGravado.uf_atual &&
+              ` · ${[conjugeGravado.municipio_atual, conjugeGravado.uf_atual].filter(Boolean).join('/')}`}
+          </p>
+        )}
+
+        {/* O PLACAR: o oficial (v_dd_completude) e os pendentes dela repartidos
+            pelo que se faz com cada um. As DISPENSADAS ao lado, e não
+            escondidas: elas saem do denominador, e "8 de 8" com 6 dispensadas
+            é um dossiê fechado sobre o que a regra exigia. */}
+        {!editando && completude && (
+          <div className="mt-2.5 flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t border-borda pt-2.5 text-sm">
+            {numero(
+              `${completude.obtidas_validas} de ${completude.necessarias}`,
+              'obrigatórias obtidas',
+              completa ? 'text-sucesso' : 'text-texto',
+            )}
+            {numero(placar.pendentes, 'pendentes')}
+            {numero(
+              placar.problema,
+              `com problema${completude.vencidas > 0 ? ` (${completude.vencidas} vencida${completude.vencidas > 1 ? 's' : ''})` : ''}`,
+              placar.problema > 0 ? 'text-perigo' : 'text-texto',
+            )}
+            {numero(placar.emissao, 'em emissão', placar.emissao > 0 ? 'text-info' : 'text-texto')}
+            {completude.dispensadas > 0 &&
+              numero(completude.dispensadas, 'dispensadas, fora da conta', 'text-aviso')}
+            <span className={cn('basis-full text-xs', completa ? 'font-semibold text-sucesso' : 'text-texto-3')}>
+              {completude.necessarias === 0
+                ? 'Nenhuma certidão obrigatória no checklist.'
+                : completa
+                  ? '✅ Documental completa.'
+                  : `A etapa documental não fecha até chegar a ${completude.necessarias}.`}
+            </span>
+          </div>
+        )}
+
+        {ajudaAberta && (
+          <div className="mt-2.5 space-y-1 border-t border-borda pt-2.5 text-sm text-texto-2">
+            <p>
+              O checklist é montado por sujeito, antes de qualquer emissão, e congelado no banco. Sem CPF (ou
+              CNPJ) e UF não há como saber quais certidões são exigidas.
+            </p>
+            <p>
+              A etapa documental só fecha com todas as obrigatórias em arquivo. Dispensar tira a certidão da
+              conta — por isso as dispensadas aparecem no placar.
+            </p>
+            <p>
+              A ordem é cedente → checklist → emissão. O que você digita vence o que a IA leu, e o titular é o
+              do ofício requisitório.
+            </p>
+            <p>Os PDFs da BullAI vão para a pasta da análise do card no Drive, na subpasta Certidões.</p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  /** Um cabeçalho de grupo do checklist: o nome e quantos. */
+  const cabecalhoDoGrupo = (rotulo: string, n: number) => (
+    <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.06em] text-texto-3">
+      {rotulo} <span className="tabular-nums">{n}</span>
+    </span>
+  )
+
+  /** O que os anexos dizem do estado civil, para quem ainda não tem cônjuge cadastrado. */
+  function estadoCivilDosAnexos(): ReactNode {
+    const nomeCed = cedenteGravado?.nome ?? 'o cedente'
+    if (lendoPdf) return <p className="text-xs text-texto-3">Lendo os anexos do card…</p>
+    const a = respostaEstadoCivil.ancorado
+    if (a) {
+      return (
+        <div className="text-sm text-texto">
+          Estado civil nos anexos: <b>{ROTULO_ESTADO_CIVIL[a.estado] ?? a.estado}</b>
+          {a.conjuge && <>, cônjuge <b>{a.conjuge}</b></>} — o bloco do cônjuge não se aplica.{' '}
+          <b>Confira mesmo assim</b>: o documento pode ser antigo, e estado civil muda.
+          <span className="mt-1 block rounded-controle border border-borda bg-superficie px-2.5 py-1.5 text-xs text-texto-2">
+            …{a.contexto}… {a.arquivo && <span className="text-texto-3">(em {a.arquivo})</span>}
+          </span>
+        </div>
+      )
+    }
+    if (respostaEstadoCivil.soltos.length > 0) {
+      return (
+        <div className="space-y-1.5 text-sm">
+          {/* Achei, mas NÃO consegui prender ao cedente: numa petição a
+              qualificação do advogado e a da outra parte ficam a poucos
+              caracteres da do autor. O trecho aparece; o sistema não julga. */}
+          <p className="text-aviso">
+            Achei estado civil nos anexos, mas <b>não ligado ao nome nem ao CPF de {nomeCed}</b> — costuma ser do
+            advogado ou da outra parte. Leia o trecho:
+          </p>
+          {respostaEstadoCivil.soltos.slice(0, 3).map((e) => (
+            <span
+              key={`${e.estado}-${e.conjuge ?? ''}`}
+              className="block rounded-controle border border-borda bg-superficie px-2.5 py-1.5 text-xs text-texto-2"
+            >
+              <b className="text-texto">{ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}</b>
+              {e.arquivo && <span className="text-texto-3"> (em {e.arquivo})</span>} …{e.contexto}…
+            </span>
+          ))}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setEditando(true)}
+            disabled={salvando}
+            icon={<Pencil className="h-4 w-4" aria-hidden />}
+          >
+            Abrir o cadastro para decidir
+          </Button>
+        </div>
+      )
+    }
+    // NÃO ACHEI ≠ NÃO É CASADA: a leitura natural de uma tela calada é "então
+    // não tem cônjuge", que fecha o dossiê com um bloco inteiro faltando.
+    return (
+      <div className="space-y-1.5 text-sm">
+        <p className="text-aviso">
+          {arquivos.length === 0
+            ? 'Não consegui abrir nenhum anexo deste card.'
+            : temTexto
+              ? 'Não achei estado civil na qualificação das partes.'
+              : 'Nenhum anexo tem texto para ler.'}{' '}
+          <b>&quot;Não achei&quot; não é &quot;não é casada&quot;</b> — confira a petição inicial.
+          {digitalizados.length > 0 && (
+            <> Digitalizados (não leio imagem): <b>{digitalizados.map((x) => x.nome).join(', ')}</b>.</>
+          )}
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setEditando(true)}
+          disabled={salvando}
+          icon={<Pencil className="h-4 w-4" aria-hidden />}
+        >
+          Cadastrar à mão
+        </Button>
+      </div>
+    )
+  }
+
+  // A PERGUNTA DO ESTADO CIVIL, no placar e não só no formulário: o aviso
+  // "Nenhum cônjuge informado" pergunta, e a tela tem o texto dos autos para
+  // responder. Cedente empresa não casa.
+  const perguntaDoConjuge =
+    sujeitos.length > 0 &&
+    !respostaEstadoCivil.temConjugeCadastrado &&
+    !sujeitos.some((s) => s.papel === 'CEDENTE' && s.tipo_pessoa === 'PJ')
+  const conjugeFaltando =
+    perguntaDoConjuge &&
+    !lendoPdf &&
+    Boolean(respostaEstadoCivil.ancorado && PEDE_CONJUGE.has(respostaEstadoCivil.ancorado.estado))
+
   return (
     <div>
-      {/* OS ERROS VÊM PRIMEIRO, como na amostra: o que falhou ao ler é a primeira
-          coisa a saber, antes de confiar no que está abaixo. */}
+      {/* OS ERROS VÊM PRIMEIRO: o que falhou ao ler é a primeira coisa a saber,
+          antes de confiar no que está abaixo. */}
       {erro && (
-        <CaixaDeAviso tom="perigo" role="alert" className="mb-4">
+        <CaixaDeAviso tom="perigo" role="alert" className="mb-3">
           {erro}
         </CaixaDeAviso>
       )}
-
       {erroMunicipios && (
-        <CaixaDeAviso tom="perigo" className="mb-4">
+        <CaixaDeAviso tom="perigo" className="mb-3">
           {erroMunicipios}
         </CaixaDeAviso>
       )}
-
       {erroLinks && (
-        <CaixaDeAviso tom="aviso" className="mb-4">
+        <CaixaDeAviso tom="aviso" className="mb-3">
           {erroLinks}
         </CaixaDeAviso>
       )}
 
+      {!carregando && faixaDeResumo()}
+
       {/* O OFÍCIO REQUISITÓRIO, em destaque e antes de tudo o que depende dele:
           é ele que diz de quem são as certidões. */}
       {avisoDoOficio()}
-
-      {/* A descrição era do modal e desceu para cá com ele: o painel divide a
-          janela com outra aba, então o cabeçalho da janela não pode falar só de
-          certidões. */}
-      <p className="mb-4 text-corpo text-texto-3">
-        {editando
-          ? 'O checklist é montado por sujeito. Sem CPF (ou CNPJ) e UF não há como saber quais certidões são exigidas.'
-          : 'Checklist congelado no banco. A etapa documental só fecha com todas as obrigatórias em arquivo.'}
-      </p>
+      {!carregando && divergenciaDoCadastro()}
 
       {carregando ? (
         <div className="py-8 text-center text-corpo text-texto-3">Carregando…</div>
       ) : editando ? (
         <div>
-          {/* ---------------- o que achei nos anexos ---------------- */}
-          {/* UMA CAIXA SÓ, a `.soft-box` da amostra: CPF, nascimento, cidade,
-              estado civil e o texto colado de outra consulta são a mesma coisa —
-              achados para conferir e clicar —, e ficam juntos. */}
-          <CaixaSuave className="mb-3">
-            <b className="text-texto">
-              O que achei nos anexos do card
-              {arquivos.length > 0 &&
-                ` (${arquivos.length} arquivo${arquivos.length > 1 ? 's' : ''})`}
-            </b>
-
-            {/*
-              ARQUIVO SEM TEXTO É DITO, não omitido.
-              Petição digitalizada, foto de RG, comprovante escaneado: são IMAGEM,
-              e o pdf.js extrai texto selecionável. Sem este aviso, o dado estaria
-              no processo, a tela não acharia nada, e a leitura natural seria "o
-              processo não tem" — que é falso. É a diferença entre "não consegui
-              ler" e "não existe".
-            */}
-            {digitalizados.map((a, i) => (
-              <DicaDeAviso key={`${a.nome}-${i}`}>
-                <b>{a.nome || '(anexo sem nome)'}</b>
-                {a.erro
-                  ? ` — ${a.erro}`
-                  : ` — ${a.paginas} página(s) com só ${a.densidade} caractere(s) ` +
-                    `por página: é digitalização (o texto que tem é o rodapé de ` +
-                    `assinatura do tribunal). Se o nascimento ou o endereço ` +
-                    `estiverem só aí — foto de RG, comprovante de residência —, eu ` +
-                    `não leio: abra o arquivo e digite.`}
-              </DicaDeAviso>
-            ))}
-            {lendoPdf ? (
-              <p className="mt-2 flex items-center gap-2">
-                <RefreshCw className="h-[16px] w-[16px] animate-spin" aria-hidden />
-                Lendo o PDF do card…
-              </p>
-            ) : iaAchouCedente ? (
-              <>
-                {achadosDaLeitura()}
-                {/* A BUSCA CRUA, RECOLHIDA: é dela que vinham os achados de
-                    todas as pessoas do processo. Continua à mão para o caso de a
-                    leitura ter deixado escapar algo — mas não é mais a lista
-                    principal. */}
-                {temAchadosManuais && (
-                  <details className="mt-2.5 text-corpo">
-                    <summary className="cursor-pointer font-semibold text-marca-texto">
-                      Outros números no processo (de outras pessoas, segundo a leitura)
-                    </summary>
-                    {achadosManuais(true)}
-                  </details>
-                )}
-              </>
-            ) : temAchadosManuais ? (
-              <>
-                {/* A LEITURA VEIO, MAS SEM O CEDENTE: dito, para a lista abaixo
-                    não ser lida como "do cedente". */}
-                {leituraIA && (
-                  <DicaDeAviso>
-                    A IA não identificou nos autos, com segurança, os dados de{' '}
-                    <b>{nomeProcurado || 'quem cede'}</b>. Os achados abaixo são de todas as
-                    pessoas do processo — escolha conferindo o trecho.
-                  </DicaDeAviso>
-                )}
-                {achadosManuais(false)}
-              </>
-            ) : avisoPdf ? (
-              <DicaDeAviso>{avisoPdf}</DicaDeAviso>
-            ) : temTexto ? (
-              // Só se pode afirmar isto DEPOIS de ler o PDF. Sem texto, o certo é
-              // dizer que não leu — não que o documento não tem CPF.
-              <p className="mt-2 text-xs">
-                Li o PDF e não achei nenhum {rotuloDoc(tipoCedente)} de dígito válido no texto. Pode ser que o
-                documento traga o número partido de um jeito que a busca não pega — digite
-                abaixo, conferindo no processo.
-              </p>
-            ) : (
-              <p className="mt-2 text-xs">
-                O PDF do card ainda não foi lido. Digite o {rotuloDoc(tipoCedente)} conferindo no processo.
-              </p>
-            )}
-
-          {/* ---------------- colar de outra consulta ---------------- */}
-          {/*
-            POR QUE UMA CAIXA DE COLAR, e não integração.
-
-            A Date Solutions é plataforma WEB: não publica API nem documentação de
-            integração. Automatizar contra ela seria robô preenchendo formulário de
-            terceiro — frágil e provavelmente contra os termos de uso. Mas o dado
-            que ela mostra na tela é o mesmo dado: copiar e colar aqui aproveita a
-            consulta que a pessoa JÁ fez, sem integração nenhuma, sem custo novo e
-            sem depender de fornecedor.
-
-            E vale para qualquer fonte, hoje e depois: o parser é o mesmo do PDF
-            (lib/dadosNoTexto.ts). Se um dia a Date Solutions tiver API, ligá-la é
-            trocar de onde vem o texto — o resto já está feito.
-          */}
-            <details className="mt-2.5 text-corpo">
-              <summary className="cursor-pointer font-semibold text-marca-texto">
-                Colar resultado de outra consulta (Date Solutions, etc.)
-              </summary>
-              <Textarea
-                value={colado}
-                onChange={(e) => setColado(e.target.value)}
-                rows={3}
-                aria-label="Resultado de outra consulta"
-                className="mt-2.5"
-                placeholder="Cole aqui o resultado da consulta do CEDENTE. Eu leio a data de nascimento e a cidade/UF; o resto do texto é ignorado e não fica guardado."
-              />
-              {colado.trim() && (
-                <Sugestoes
-                  nascimentos={tipoCedente === 'PJ' ? [] : doColado.nascimentos}
-                  locais={doColado.locais}
-                  onNascimento={(iso) => {
-                    setMexeu(true)
-                    setCedente((f) => ({ ...f, nascimento: iso }))
-                  }}
-                  onLocal={usarLocal}
-                  vazio={
-                    Object.keys(municipios).length === 0
-                      ? 'Ainda estou carregando a lista de municípios — sem ela não ' +
-                        'consigo conferir cidade. Aguarde um instante e cole de novo.'
-                      : 'Não achei nascimento nem cidade/UF neste texto. Data de ' +
-                        'nascimento só é reconhecida se vier rotulada ("nascimento", ' +
-                        '"nascido em"), e cidade só se existir na lista do IBGE junto ' +
-                        'com a UF.'
-                  }
-                />
+          {/* ---------------- a leitura dos anexos e da IA ---------------- */}
+          {/* UMA LINHA DE ESTADO que abre: o que a IA e a busca acharam, cada
+              dado com o trecho e clicável, os anexos sem texto e o colar de
+              outra consulta. Abre sozinha enquanto o documento do cedente não
+              está preenchido — escolher o CPF é de quem confere. */}
+          <div className="rounded-campo border border-info-borda bg-marca-leve text-corpo">
+            <div className="flex flex-wrap items-center gap-2 px-3 py-1.5">
+              {lendoIA || lendoPdf ? (
+                <RefreshCw className="h-[16px] w-[16px] flex-none animate-spin text-marca-texto" aria-hidden />
+              ) : (
+                <Sparkles className="h-[16px] w-[16px] flex-none text-marca-texto" aria-hidden />
               )}
-              <p className="mt-2 text-xs text-texto-3">
-                Este texto NÃO é gravado. Só os campos em que você clicar entram no
-                cadastro — o resto morre quando a janela fecha.
-              </p>
-            </details>
-          </CaixaSuave>
-
-          {/* ---------------- leitura da IA ---------------- */}
-          {/* A `.ai-box` da amostra: o ícone, o que a IA fez (e os avisos dela) e
-              o botão à direita. O BOTÃO FICA À VISTA LENDO, desabilitado com
-              "Lendo…" — antes sumia, e a caixa parecia ter perdido a ação. */}
-          {(lendoIA || leituraIA || temTexto) && (
-            <div className="my-3 flex items-start gap-2.5 rounded-campo border border-info-borda bg-marca-leve p-4 text-corpo">
-              <Sparkles className="mt-0.5 h-[16px] w-[16px] flex-none text-marca-texto" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <b className="text-texto">
-                  {lendoIA
-                    ? 'A IA está lendo a qualificação nos autos…'
-                    : leituraIA
-                      ? 'Cadastro lido dos autos pela IA — confira antes de gravar'
-                      : 'A IA pode ler a qualificação do cedente nos autos'}
-                </b>
-                {/* O aviso do ofício já está em destaque no topo do painel. */}
-                {(leituraIA?.avisos ?? [])
-                  .filter((a) => a !== leituraIA?.aviso_do_oficio)
-                  .map((a) => (
-                    <DicaDeAviso key={a}>{a}</DicaDeAviso>
-                  ))}
-                {/* O "De onde saiu cada campo" que morava aqui subiu para a caixa
-                    dos achados: lá cada dado já vem com o trecho, e clicável. */}
-              </div>
+              <button
+                type="button"
+                onClick={() => setAchadosAbertos(!achadosVisiveis)}
+                aria-expanded={achadosVisiveis}
+                className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-controle text-left font-semibold text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+              >
+                <span className="min-w-0">
+                  {estadoDaLeitura}
+                  {arquivos.length > 0 && (
+                    <span className="font-normal text-texto-3">
+                      {' '}
+                      · {arquivos.length} anexo{arquivos.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </span>
+                <span className="ml-auto inline-flex flex-none items-center gap-0.5 text-sm text-marca-texto">
+                  {achadosVisiveis ? 'ocultar' : 'ver'}
+                  <ChevronDown
+                    className={cn('h-4 w-4 transition-transform', achadosVisiveis && 'rotate-180')}
+                    aria-hidden
+                  />
+                </span>
+              </button>
+              {/* O BOTÃO FICA À VISTA LENDO, desabilitado com "Lendo…" — antes
+                  sumia, e a caixa parecia ter perdido a ação. */}
               {temTexto && (
-                <Button
-                  variant="secondary"
-                  onClick={() => void lerComIA()}
-                  disabled={lendoIA}
-                  icon={
-                    lendoIA ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
-                    ) : undefined
-                  }
-                >
+                <Button variant="secondary" size="sm" onClick={() => void lerComIA()} disabled={lendoIA}>
                   {lendoIA ? 'Lendo…' : leituraIA ? 'Ler de novo' : 'Ler com a IA'}
                 </Button>
               )}
             </div>
-          )}
+            {avisosIADestaque.length > 0 && (
+              <div className="px-3 pb-2">
+                {avisosIADestaque.map((a) => (
+                  <DicaDeAviso key={a} className="mt-0">
+                    {a}
+                  </DicaDeAviso>
+                ))}
+              </div>
+            )}
+
+            {achadosVisiveis && (
+              <div className="border-t border-info-borda px-3 pb-3 text-texto-2">
+                {avisosIAMenores.map((a) => (
+                  <DicaDeAviso key={a}>{a}</DicaDeAviso>
+                ))}
+                {/* ARQUIVO SEM TEXTO É DITO, não omitido: é a diferença entre
+                    "não consegui ler" e "não existe". */}
+                {digitalizados.map((a, i) => (
+                  <DicaDeAviso key={`${a.nome}-${i}`}>
+                    <b>{a.nome || '(anexo sem nome)'}</b>
+                    {a.erro
+                      ? ` — ${a.erro}`
+                      : ` — ${a.paginas} página(s), ${a.densidade} caractere(s) por página: digitalização. ` +
+                        'O que estiver só aí (foto de RG, comprovante) eu não leio: abra e digite.'}
+                  </DicaDeAviso>
+                ))}
+                {lendoPdf ? (
+                  <p className="mt-2 text-xs text-texto-3">Lendo o PDF do card…</p>
+                ) : iaAchouCedente ? (
+                  <>
+                    {achadosDaLeitura()}
+                    {/* A BUSCA CRUA, RECOLHIDA: continua à mão para o caso de a
+                        leitura ter deixado escapar algo. */}
+                    {temAchadosManuais && (
+                      <details className="mt-2 text-corpo">
+                        <summary className="cursor-pointer font-semibold text-marca-texto">
+                          Outros números no processo (de outras pessoas, segundo a leitura)
+                        </summary>
+                        {achadosManuais(true)}
+                      </details>
+                    )}
+                  </>
+                ) : temAchadosManuais ? (
+                  <>
+                    {/* A LEITURA VEIO, MAS SEM O CEDENTE: dito, para a lista
+                        abaixo não ser lida como "do cedente". */}
+                    {leituraIA && (
+                      <DicaDeAviso>
+                        A IA não identificou com segurança os dados de <b>{nomeProcurado || 'quem cede'}</b>. Os
+                        achados abaixo são de todas as pessoas do processo — escolha conferindo o trecho.
+                      </DicaDeAviso>
+                    )}
+                    {achadosManuais(false)}
+                  </>
+                ) : avisoPdf ? (
+                  <DicaDeAviso>{avisoPdf}</DicaDeAviso>
+                ) : temTexto ? (
+                  // Só se pode afirmar isto DEPOIS de ler o PDF.
+                  <p className="mt-2 text-xs">
+                    Li o PDF e não achei {rotuloDoc(tipoCedente)} de dígito válido (o número pode vir partido) —
+                    digite conferindo no processo.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs">
+                    O PDF do card ainda não foi lido. Digite o {rotuloDoc(tipoCedente)} conferindo no processo.
+                  </p>
+                )}
+
+                {/* COLAR DE OUTRA CONSULTA, e não integração: a Date Solutions
+                    não publica API, e o dado que ela mostra é o mesmo. O parser
+                    é o do PDF (lib/dadosNoTexto.ts). */}
+                <details className="mt-2 text-corpo">
+                  <summary className="cursor-pointer font-semibold text-marca-texto">
+                    Colar resultado de outra consulta (Date Solutions, etc.)
+                  </summary>
+                  <Textarea
+                    value={colado}
+                    onChange={(e) => setColado(e.target.value)}
+                    rows={3}
+                    aria-label="Resultado de outra consulta"
+                    className="mt-2"
+                    placeholder="Cole aqui o resultado da consulta do CEDENTE. Eu leio a data de nascimento e a cidade/UF; o resto do texto é ignorado e não fica guardado."
+                  />
+                  {colado.trim() && (
+                    <Sugestoes
+                      nascimentos={tipoCedente === 'PJ' ? [] : doColado.nascimentos}
+                      locais={doColado.locais}
+                      onNascimento={(iso) => {
+                        setMexeu(true)
+                        setCedente((f) => ({ ...f, nascimento: iso }))
+                      }}
+                      onLocal={usarLocal}
+                      vazio={
+                        Object.keys(municipios).length === 0
+                          ? 'Ainda estou carregando a lista de municípios — sem ela não ' +
+                            'consigo conferir cidade. Aguarde um instante e cole de novo.'
+                          : 'Não achei nascimento nem cidade/UF neste texto. Data de ' +
+                            'nascimento só é reconhecida se vier rotulada ("nascimento", ' +
+                            '"nascido em"), e cidade só se existir na lista do IBGE junto ' +
+                            'com a UF.'
+                      }
+                    />
+                  )}
+                  <p className="mt-1.5 text-xs text-texto-3">
+                    Este texto NÃO é gravado: só entram os campos em que você clicar.
+                  </p>
+                </details>
+              </div>
+            )}
+          </div>
 
           {preenchido.length > 0 && (
-            <CaixaDeAviso tom="sucesso" className="mb-3">
-              Preenchi a partir do processo: <b>{preenchido.join(' · ')}</b>.
-              Confira antes de gerar — o trecho de onde saiu cada um está no painel
-              acima.{' '}
+            <CaixaDeAviso tom="sucesso" className="mt-3">
+              Preenchi do processo: <b>{preenchido.join(' · ')}</b>. Confira antes de gravar.{' '}
               {docDaLeitura
-                ? `O ${rotuloDoc(tipoDaLeitura)} só entrou porque está escrito nos autos, na qualificação de ` +
-                  `${leituraIA?.cedente.nome?.valor || nomeProcurado || 'quem cede'} — confira se é mesmo de quem cede.`
-                : `O ${rotuloDoc(tipoCedente)} eu nunca preencho sozinho.`}
+                ? `O ${rotuloDoc(tipoDaLeitura)} só entrou porque está escrito na qualificação de ` +
+                  `${leituraIA?.cedente.nome?.valor || nomeProcurado || 'quem cede'}.`
+                : preenchido.some((x) => x.endsWith('(do ofício)') && /CPF|CNPJ/.test(x))
+                  ? `O ${rotuloDoc(tipoCedente)} veio do ofício requisitório — confira.`
+                  : `O ${rotuloDoc(tipoCedente)} eu nunca preencho sozinho.`}
             </CaixaDeAviso>
           )}
 
           {/* ---------------- cedente ---------------- */}
-          <div>
-            <RotuloDeSecao className="mt-6">Cedente</RotuloDeSecao>
-            {divergenciaDoCadastro()}
-            {/* PESSOA FÍSICA OU JURÍDICA (pedido do dono, 03/10/2026): a escolha
-                troca o documento (CPF ↔ CNPJ, com máscara e validação de cada
-                um) e tira o que não se aplica a empresa — nascimento, estado
-                civil, cônjuge. Vem marcada pelo banco, pelo nome ("LTDA",
-                "S/A") ou pela IA. */}
-            <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-              <Segmented
-                ariaLabel="O cedente é pessoa física ou jurídica"
-                items={[
-                  { key: 'PF', label: 'Pessoa física' },
-                  { key: 'PJ', label: 'Pessoa jurídica' },
-                ]}
-                value={tipoCedente}
-                onChange={(k) => escolherTipo(k as TipoPessoa)}
-              />
-              {tipoCedente === 'PJ' && (
-                <span className="text-xs text-texto-3">
-                  Empresa: CNPJ, razão social e endereço da sede. Sem nascimento, estado civil nem
-                  cônjuge; o checklist ganha o bloco da PJ (situação do CNPJ e FGTS).
-                </span>
-              )}
-            </div>
-            <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-              <Field label={tipoCedente === 'PJ' ? 'Razão social' : 'Nome completo'} required className="sm:col-span-2">
-                <Input
-                  value={cedente.nome}
-                  onChange={(e) => alterar(setCedente)({ ...cedente, nome: e.target.value })}
-                  placeholder={
-                    tipoCedente === 'PJ'
-                      ? 'Como está no contrato social ou na qualificação'
-                      : 'Como está na qualificação das partes'
-                  }
-                />
-              </Field>
-              <Field
-                label={rotuloDoc(tipoCedente)}
-                required
-                error={
-                  cedente.cpf && !documentoValido(cedente.cpf, tipoCedente)
-                    ? 'Dígito verificador não fecha.'
-                    : undefined
+          <RotuloDeSecao className="mt-5">Cedente</RotuloDeSecao>
+          {/* PESSOA FÍSICA OU JURÍDICA (pedido do dono, 03/10/2026): a escolha
+              troca o documento (CPF ↔ CNPJ) e tira o que não se aplica a empresa. */}
+          <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <Segmented
+              ariaLabel="O cedente é pessoa física ou jurídica"
+              items={[
+                { key: 'PF', label: 'Pessoa física' },
+                { key: 'PJ', label: 'Pessoa jurídica' },
+              ]}
+              value={tipoCedente}
+              onChange={(k) => escolherTipo(k as TipoPessoa)}
+            />
+            {tipoCedente === 'PJ' && (
+              <span className="text-xs text-texto-3">
+                Sem nascimento, estado civil nem cônjuge; entra o bloco da PJ (CNPJ e FGTS).
+              </span>
+            )}
+          </div>
+          <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
+            <Field label={tipoCedente === 'PJ' ? 'Razão social' : 'Nome completo'} required className="sm:col-span-2">
+              <Input
+                value={cedente.nome}
+                onChange={(e) => alterar(setCedente)({ ...cedente, nome: e.target.value })}
+                placeholder={
+                  tipoCedente === 'PJ'
+                    ? 'Como está no contrato social ou na qualificação'
+                    : 'Como está na qualificação das partes'
                 }
-              >
+              />
+            </Field>
+            <Field
+              label={rotuloDoc(tipoCedente)}
+              required
+              error={
+                cedente.cpf && !documentoValido(cedente.cpf, tipoCedente) ? 'Dígito verificador não fecha.' : undefined
+              }
+            >
+              <Input
+                value={cedente.cpf}
+                onChange={(e) => alterar(setCedente)({ ...cedente, cpf: mascaraDoTipo(e.target.value, tipoCedente) })}
+                inputMode="numeric"
+                placeholder={tipoCedente === 'PJ' ? '00.000.000/0000-00' : '000.000.000-00'}
+              />
+            </Field>
+            {tipoCedente === 'PF' && (
+              <Field label="Data de nascimento" hint="A CND Federal não sai sem ela.">
                 <Input
-                  value={cedente.cpf}
-                  onChange={(e) =>
-                    alterar(setCedente)({
-                      ...cedente,
-                      cpf: mascaraDoTipo(e.target.value, tipoCedente),
-                    })
-                  }
-                  inputMode="numeric"
-                  placeholder={tipoCedente === 'PJ' ? '00.000.000/0000-00' : '000.000.000-00'}
+                  type="date"
+                  value={cedente.nascimento}
+                  onChange={(e) => alterar(setCedente)({ ...cedente, nascimento: e.target.value })}
                 />
               </Field>
-
-              {tipoCedente === 'PF' && (
-                <Field
-                  label="Data de nascimento"
-                  hint="A CND Federal (Receita/PGFN) não sai sem ela — é o primeiro item do checklist."
-                >
-                  <Input
-                    type="date"
-                    value={cedente.nascimento}
-                    onChange={(e) =>
-                      alterar(setCedente)({ ...cedente, nascimento: e.target.value })
-                    }
-                  />
-                </Field>
-              )}
-              <Field
-                label={tipoCedente === 'PJ' ? 'UF da sede' : 'UF atual'}
-                required
-                hint="Define as certidões estaduais (TJ, SEFAZ, Justiça Estadual)."
+            )}
+            <Field label={tipoCedente === 'PJ' ? 'UF da sede' : 'UF atual'} required hint="Define as certidões estaduais.">
+              <Select
+                value={cedente.uf}
+                onChange={(e) => alterar(setCedente)({ ...cedente, uf: e.target.value, municipio: '' })}
               >
-                <Select
-                  value={cedente.uf}
-                  onChange={(e) =>
-                    alterar(setCedente)({ ...cedente, uf: e.target.value, municipio: '' })
-                  }
-                >
-                  <option value="">Selecione…</option>
-                  {ufs.map((u) => (
-                    <option key={u} value={u}>
-                      {u}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field
-                label={tipoCedente === 'PJ' ? 'Município da sede' : 'Município atual'}
-                hint="Em branco = nenhuma certidão municipal entra no checklist."
-              >
-                <Select
-                  value={cedente.municipio}
-                  onChange={(e) =>
-                    alterar(setCedente)({ ...cedente, municipio: e.target.value })
-                  }
-                  disabled={!cedente.uf}
-                >
-                  <option value="">
-                    {cedente.uf ? 'Selecione…' : 'Escolha a UF primeiro'}
+                <option value="">Selecione…</option>
+                {ufs.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
                   </option>
-                  {municipiosDaUf(cedente.uf).map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
+                ))}
+              </Select>
+            </Field>
+            <Field
+              label={tipoCedente === 'PJ' ? 'Município da sede' : 'Município atual'}
+              hint="Em branco, nenhuma certidão municipal."
+            >
+              <Select
+                value={cedente.municipio}
+                onChange={(e) => alterar(setCedente)({ ...cedente, municipio: e.target.value })}
+                disabled={!cedente.uf}
+              >
+                <option value="">{cedente.uf ? 'Selecione…' : 'Escolha a UF primeiro'}</option>
+                {municipiosDaUf(cedente.uf).map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </Select>
+            </Field>
           </div>
 
-          {/* ---------------- residência ---------------- */}
-          {/* AS RESIDÊNCIAS ANTERIORES SEMPRE À VISTA, ao lado da caixa, e não
-              atrás dela: "não sei se morou em outro estado" e "não morou" são
-              respostas diferentes, e os campos valem marcados ou não. */}
-          <CaixaSuave aviso className="mt-4">
-            <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-corpo text-texto">
-              <input
-                type="checkbox"
-                className={CAIXA_MARCAR}
-                checked={residenciaLevantada}
-                onChange={(e) => alterar(setResidenciaLevantada)(e.target.checked)}
-              />
-              {tipoCedente === 'PJ'
-                ? 'Levantei o histórico de endereços da sede'
-                : 'Levantei o histórico de residência do cedente'}
-            </label>
-            {tipoCedente === 'PJ' ? (
-              <p className="mt-1 text-xs text-texto-3">
-                Deixe desmarcado se não conferiu. &quot;Não sei se a sede já foi em outro
-                estado&quot; e &quot;nunca foi&quot; são respostas diferentes, e a segunda
-                dispensa certidão que a primeira não dispensa. O contrato social e as
-                alterações dele dizem por onde a sede passou.
-              </p>
-            ) : (
-              <p className="mt-1 text-xs text-texto-3">
-                Deixe desmarcado se não conferiu. &quot;Não sei se morou em outro
-                estado&quot; e &quot;não morou&quot; são respostas diferentes, e a segunda
-                dispensa certidão que a primeira não dispensa. Vale só para o cedente: o
-                cônjuge entra sempre como não levantado, porque esta tela não pergunta o
-                histórico dele.
-              </p>
+          {/* ---------------- histórico de endereços ---------------- */}
+          {/* A CAIXA SEMPRE À VISTA, e âmbar enquanto desmarcada: "não sei se
+              morou em outro estado" e "não morou" são respostas diferentes. Os
+              campos dos anteriores abrem a pedido — e ficam abertos quando têm
+              conteúdo. */}
+          <div
+            className={cn(
+              'mt-4 rounded-campo border px-3 py-2',
+              residenciaLevantada ? 'border-borda bg-superficie-2' : 'border-aviso-borda bg-aviso-fundo',
             )}
-            <div className="mt-2.5 grid gap-x-5 gap-y-4 sm:grid-cols-2">
-              <Field
-                label={tipoCedente === 'PJ' ? 'UFs anteriores da sede' : 'UFs anteriores'}
-                hint="Siglas ou nomes, separados por vírgula: MG, São Paulo"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-x-3">
+              <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-corpo text-texto">
+                <input
+                  type="checkbox"
+                  className={CAIXA_MARCAR}
+                  checked={residenciaLevantada}
+                  onChange={(e) => alterar(setResidenciaLevantada)(e.target.checked)}
+                />
+                {tipoCedente === 'PJ'
+                  ? 'Levantei o histórico de endereços da sede'
+                  : 'Levantei o histórico de residência do cedente'}
+              </label>
+              <button
+                type="button"
+                className={LINK_BTN}
+                aria-expanded={residenciaVisivel}
+                onClick={() => setResidenciaAberta((v) => !v)}
               >
-                <Input
-                  value={ufsAnteriores}
-                  onChange={(e) => alterar(setUfsAnteriores)(e.target.value)}
-                  placeholder="MG, SP"
-                />
-              </Field>
-              <Field label="Municípios anteriores" hint="Separados por vírgula.">
-                <Input
-                  value={municipiosAnteriores}
-                  onChange={(e) => alterar(setMunicipiosAnteriores)(e.target.value)}
-                  placeholder="Belo Horizonte, Campinas"
-                />
-              </Field>
+                {tipoCedente === 'PJ' ? 'Sedes anteriores' : 'Endereços anteriores'}
+                <ChevronDown className={cn('h-4 w-4 transition-transform', residenciaVisivel && 'rotate-180')} aria-hidden />
+              </button>
             </div>
-          </CaixaSuave>
+            <p className="text-xs text-texto-3">
+              Desmarcado = não conferido: &quot;não sei&quot; e &quot;nunca foi em outro estado&quot; são respostas
+              diferentes, e só a segunda dispensa certidão.{' '}
+              {tipoCedente === 'PJ'
+                ? 'O contrato social e as alterações dizem por onde a sede passou.'
+                : 'Vale só para o cedente: o cônjuge entra sempre como não levantado.'}
+            </p>
+            {residenciaVisivel && (
+              <div className="mt-2 grid gap-x-5 gap-y-3 sm:grid-cols-2">
+                <Field
+                  label={tipoCedente === 'PJ' ? 'UFs anteriores da sede' : 'UFs anteriores'}
+                  hint="Siglas ou nomes, por vírgula: MG, São Paulo"
+                >
+                  <Input
+                    value={ufsAnteriores}
+                    onChange={(e) => alterar(setUfsAnteriores)(e.target.value)}
+                    placeholder="MG, SP"
+                  />
+                </Field>
+                <Field label="Municípios anteriores" hint="Separados por vírgula.">
+                  <Input
+                    value={municipiosAnteriores}
+                    onChange={(e) => alterar(setMunicipiosAnteriores)(e.target.value)}
+                    placeholder="Belo Horizonte, Campinas"
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
 
           {/* ---------------- cônjuge ---------------- */}
-          {/* SÓ PARA PESSOA FÍSICA. Empresa não casa — e o cônjuge que estiver no
-              banco sai na gravação, com o aviso de remoção logo abaixo. */}
+          {/* SÓ PARA PESSOA FÍSICA. Completo e sem mexer, vira uma linha com
+              "Editar"; faltando algo, o formulário fica aberto. */}
           {tipoCedente === 'PF' && (
-          <div className="mt-4">
-            <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-corpo text-texto">
-              <input
-                type="checkbox"
-                className={CAIXA_MARCAR}
-                checked={temConjuge}
-                onChange={(e) => alterar(setTemConjuge)(e.target.checked)}
-              />
-              O cedente é casado / tem companheiro(a)
-            </label>
-            <p className="ml-[24px] mt-0.5 text-xs text-texto-3">
-              A planilha dá bloco próprio de certidões ao cônjuge (linhas 52 a 67).
-              Sem isto, o checklist fecha completo com esse bloco inteiro faltando.
-              Desmarcar REMOVE o cônjuge já cadastrado e as certidões dele.
-            </p>
-            {temConjuge && (
-              <div className="mt-3 grid gap-x-5 gap-y-4 sm:grid-cols-2">
-                <Field label="Nome do cônjuge" required>
-                  <Input
-                    value={conjuge.nome}
-                    onChange={(e) =>
-                      alterar(setConjuge)({ ...conjuge, nome: e.target.value })
-                    }
-                  />
-                </Field>
-                <Field
-                  label="CPF do cônjuge"
-                  required
-                  error={
-                    conjuge.cpf && !cpfValido(conjuge.cpf)
-                      ? 'Dígito verificador não fecha.'
-                      : undefined
-                  }
-                >
-                  <Input
-                    value={conjuge.cpf}
-                    onChange={(e) =>
-                      alterar(setConjuge)({
-                        ...conjuge,
-                        cpf: formatCpfCnpjInput(e.target.value),
-                      })
-                    }
-                    inputMode="numeric"
-                    placeholder="000.000.000-00"
-                  />
-                </Field>
-                <Field label="Data de nascimento do cônjuge">
-                  <Input
-                    type="date"
-                    value={conjuge.nascimento}
-                    onChange={(e) =>
-                      alterar(setConjuge)({ ...conjuge, nascimento: e.target.value })
-                    }
-                  />
-                </Field>
-                <Field
-                  label="UF do cônjuge"
-                  hint="Em branco = mesma UF E mesmo município do cedente."
-                >
-                  <Select
-                    value={conjuge.uf}
-                    onChange={(e) =>
-                      alterar(setConjuge)({
-                        ...conjuge,
-                        uf: e.target.value,
-                        municipio: '',
-                      })
-                    }
+            <div className="mt-4">
+              <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-corpo text-texto">
+                <input
+                  type="checkbox"
+                  className={CAIXA_MARCAR}
+                  checked={temConjuge}
+                  onChange={(e) => alterar(setTemConjuge)(e.target.checked)}
+                />
+                O cedente é casado / tem companheiro(a)
+              </label>
+              <p className="ml-[24px] text-xs text-texto-3">
+                O cônjuge tem bloco próprio de certidões (planilha, linhas 52 a 67): sem isto, o checklist fecha
+                completo com ele faltando. Desmarcar REMOVE o cônjuge cadastrado e as certidões dele.
+              </p>
+              {temConjuge && !conjugeVisivel && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-campo border border-borda bg-superficie-2 px-3 py-1.5 text-sm text-texto-2">
+                  <b className="text-texto">{conjuge.nome}</b>
+                  <span className="tabular-nums">CPF {conjuge.cpf}</span>
+                  {conjuge.nascimento && <span className="tabular-nums">{dataBr(conjuge.nascimento)}</span>}
+                  <span>
+                    {conjuge.uf
+                      ? [conjuge.municipio, conjuge.uf].filter(Boolean).join('/')
+                      : 'mesmo endereço do cedente'}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto"
+                    onClick={() => setConjugeAberto(true)}
+                    icon={<Pencil className="h-4 w-4" aria-hidden />}
                   >
-                    <option value="">Mesmo endereço do cedente</option>
-                    {ufs.map((u) => (
-                      <option key={u} value={u}>
-                        {u}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                {conjuge.uf && (
-                  <Field label="Município do cônjuge">
+                    Editar
+                  </Button>
+                </div>
+              )}
+              {temConjuge && conjugeVisivel && (
+                <div className="mt-2 grid gap-x-5 gap-y-3 sm:grid-cols-2">
+                  <Field label="Nome do cônjuge" required>
+                    <Input value={conjuge.nome} onChange={(e) => alterarConjuge({ ...conjuge, nome: e.target.value })} />
+                  </Field>
+                  <Field
+                    label="CPF do cônjuge"
+                    required
+                    error={conjuge.cpf && !cpfValido(conjuge.cpf) ? 'Dígito verificador não fecha.' : undefined}
+                  >
+                    <Input
+                      value={conjuge.cpf}
+                      onChange={(e) => alterarConjuge({ ...conjuge, cpf: formatCpfCnpjInput(e.target.value) })}
+                      inputMode="numeric"
+                      placeholder="000.000.000-00"
+                    />
+                  </Field>
+                  <Field label="Data de nascimento do cônjuge">
+                    <Input
+                      type="date"
+                      value={conjuge.nascimento}
+                      onChange={(e) => alterarConjuge({ ...conjuge, nascimento: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="UF do cônjuge" hint="Em branco = mesma UF E mesmo município do cedente.">
                     <Select
-                      value={conjuge.municipio}
-                      onChange={(e) =>
-                        alterar(setConjuge)({ ...conjuge, municipio: e.target.value })
-                      }
+                      value={conjuge.uf}
+                      onChange={(e) => alterarConjuge({ ...conjuge, uf: e.target.value, municipio: '' })}
                     >
-                      <option value="">Nenhuma certidão municipal</option>
-                      {municipiosDaUf(conjuge.uf).map((m) => (
-                        <option key={m} value={m}>
-                          {m}
+                      <option value="">Mesmo endereço do cedente</option>
+                      {ufs.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
                         </option>
                       ))}
                     </Select>
                   </Field>
-                )}
-              </div>
-            )}
-          </div>
+                  {conjuge.uf && (
+                    <Field label="Município do cônjuge">
+                      <Select
+                        value={conjuge.municipio}
+                        onChange={(e) => alterarConjuge({ ...conjuge, municipio: e.target.value })}
+                      >
+                        <option value="">Nenhuma certidão municipal</option>
+                        {municipiosDaUf(conjuge.uf).map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {impacto.sujeitos.length > 0 && (
             <CaixaDeAviso tom="perigo" className="mt-4">
-              Gravar assim REMOVE{' '}
-              {impacto.sujeitos.map((s) => `${s.papel} ${s.nome}`).join(', ')} e apaga{' '}
+              Gravar assim REMOVE {impacto.sujeitos.map((s) => `${s.papel} ${s.nome}`).join(', ')} e apaga{' '}
               {impacto.certidoes} item(ns) do checklist
               {impacto.obtidas > 0 && (
                 <>
@@ -2722,8 +3080,8 @@ export function PainelCertidoes({
             </CaixaDeAviso>
           )}
 
-          {/* O `.erros-lista` da amostra: o que falta para gravar, em vermelho e
-              com ícone — é o motivo de o botão abaixo estar desabilitado. */}
+          {/* O que falta para gravar, em vermelho e com ícone — é o motivo de o
+              botão abaixo estar desabilitado. */}
           {problemas.length > 0 && (
             <ul className="mt-4 grid gap-1">
               {problemas.map((p) => (
@@ -2737,288 +3095,135 @@ export function PainelCertidoes({
         </div>
       ) : (
         <div>
-          {/* O CADASTRO GRAVADO CONTRA O OFÍCIO: o botão abre a correção já com o
-              nome e o documento do ofício — gravar continua sendo de quem confere. */}
-          {divergenciaDoCadastro()}
-
-          {/* ---------------- placar ---------------- */}
-          {/* Os `.kpis.five` da amostra: cinco cartões de número. */}
-          {completude && (
-            <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-5">
-              {[
-                { r: 'Obrigatórias', v: completude.necessarias },
-                { r: 'Obtidas', v: completude.obtidas_validas },
-                { r: 'Pendentes', v: completude.pendentes },
-                { r: 'Vencidas', v: completude.vencidas },
-                // Dispensadas ao lado das outras quatro, e não escondida: ela SAI
-                // do denominador (v_dd_completude), então um placar "14 de 14" com
-                // 8 dispensadas é um dossiê fechado sobre 8 certidões que a regra
-                // exigia. O número existia no banco e não aparecia na tela.
-                { r: 'Dispensadas', v: completude.dispensadas },
-              ].map((c) => (
-                <StatCard key={c.r} label={c.r} value={c.v} />
-              ))}
-            </div>
-          )}
-
-          {completude && completude.necessarias > 0 && (
-            <p className="mb-2 text-corpo text-texto">
-              {completude.obtidas_validas === completude.necessarias ? (
-                <span className="font-semibold text-sucesso">
-                  ✅ Documental completa — {completude.obtidas_validas} de{' '}
-                  {completude.necessarias}
-                  {completude.dispensadas > 0 && (
-                    <span className="text-aviso">
-                      {' '}
-                      · {completude.dispensadas} dispensada(s) fora da conta
-                    </span>
+          {/* ---------------- o cônjuge que falta, em destaque ---------------- */}
+          {conjugeFaltando && respostaEstadoCivil.ancorado && (
+            <CaixaDeAviso tom="aviso" className="mb-3">
+              <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <span className="min-w-0 flex-[1_1_260px]">
+                  Os anexos qualificam <b>{cedenteGravado?.nome ?? 'o cedente'}</b> como{' '}
+                  <b>
+                    {ROTULO_ESTADO_CIVIL[respostaEstadoCivil.ancorado.estado] ?? respostaEstadoCivil.ancorado.estado}
+                  </b>
+                  {respostaEstadoCivil.ancorado.conjuge && (
+                    <>
+                      , cônjuge <b>{respostaEstadoCivil.ancorado.conjuge}</b>
+                    </>
                   )}
-                  .
+                  : faltam as certidões do cônjuge (planilha, linhas 52 a 67), e o placar <b>não</b> conta essa
+                  falta.
                 </span>
-              ) : (
-                <span className="inline-flex items-start gap-1.5">
-                  <Clock className="mt-0.5 h-[16px] w-[16px] flex-none text-aviso" aria-hidden />
-                  <span>
-                    {completude.obtidas_validas} de {completude.necessarias} obtidas. A
-                    etapa documental não fecha até chegar a {completude.necessarias}.
-                  </span>
+                <Button
+                  className="ml-auto"
+                  size="sm"
+                  onClick={() => cadastrarConjugeCom(respostaEstadoCivil.ancorado!)}
+                  disabled={salvando}
+                  icon={<Pencil className="h-4 w-4" aria-hidden />}
+                >
+                  Cadastrar o cônjuge
+                </Button>
+              </span>
+              <details className="mt-1.5 text-sm">
+                <summary className="cursor-pointer font-semibold text-marca-texto">Ver o trecho</summary>
+                <span className="mt-1 block rounded-controle border border-borda bg-superficie px-2.5 py-1.5 text-xs text-texto-2">
+                  …{respostaEstadoCivil.ancorado.contexto}…
+                  {respostaEstadoCivil.ancorado.arquivo && (
+                    <span className="text-texto-3"> (em {respostaEstadoCivil.ancorado.arquivo})</span>
+                  )}
                 </span>
-              )}
-            </p>
+              </details>
+            </CaixaDeAviso>
           )}
 
-          {/* ---------------- avisos ---------------- */}
-          {/* O `.avisos-placar` da amostra: uma lista âmbar, um aviso por item. */}
+          {/* ---------------- as lacunas, juntas e recolhidas ---------------- */}
+          {/* NÃO ESCONDE LACUNA: a linha diz QUAIS são, mesmo fechada, e abre o
+              texto inteiro de cada uma (e o que os anexos dizem do estado civil). */}
           {avisos.length > 0 && (
-            <ul className="mb-3 mt-2 list-disc space-y-1 rounded-campo border border-aviso-borda bg-aviso-fundo py-3 pl-10 pr-4 text-corpo text-texto marker:text-aviso">
-              {avisos.map((a) => (
-                <li key={a}>{a}</li>
-              ))}
-            </ul>
-          )}
-
-          {/*
-            ---------------- o que o processo diz do estado civil ----------------
-
-            AQUI, no placar, e não só dentro do formulário.
-
-            O aviso logo acima pergunta, em letras maiúsculas, se o cedente é
-            casado — e esta tela tem o texto do processo em memória, capaz de
-            responder. Antes a resposta existia e morava atrás de "Corrigir dados
-            / cônjuge", que é uma tela que só se abre quem já decidiu ir editar.
-            Num crédito já cadastrado a janela abre no placar, então na prática a
-            resposta nunca aparecia para quem estava lendo a pergunta.
-
-            E este silêncio é o desfecho mais caro do sistema: falta o bloco
-            inteiro de certidões do cônjuge (planilha, linhas 52 a 67) e o placar
-            marca "completo" sem acusar nada, porque o que não foi exigido não
-            entra no denominador.
-
-            As três saídas abaixo são deliberadamente diferentes entre si, e
-            NENHUMA delas é silêncio — inclusive a de não ter achado.
-          */}
-          {sujeitos.length > 0 &&
-            !respostaEstadoCivil.temConjugeCadastrado &&
-            // Empresa não casa: a pergunta do estado civil não se aplica.
-            !sujeitos.some((s) => s.papel === 'CEDENTE' && s.tipo_pessoa === 'PJ') && (
-            // A `.ec-box` da amostra (estilo5.css): cabeçalho discreto, a resposta,
-            // o trecho do documento e a ação.
-            <div className="my-3 grid gap-2.5 rounded-campo border border-borda bg-superficie-2 px-[14px] py-3 text-corpo text-texto">
-              <div className="flex items-center gap-2 text-sm text-texto-2">
-                <FileText className="h-[16px] w-[16px] flex-none" aria-hidden />
-                <b>Estado civil, segundo os anexos do card</b>
-                {arquivos.length > 0 && (
-                  <span className="text-xs text-texto-3">
-                    ({arquivos.length} arquivo{arquivos.length > 1 ? 's' : ''})
-                  </span>
-                )}
-              </div>
-
-              {lendoPdf ? (
-                <p className="text-xs text-texto-3">Lendo os anexos do card…</p>
-              ) : respostaEstadoCivil.ancorado ? (
-                <>
-                  <p>
-                    O processo qualifica{' '}
-                    <b>{sujeitos.find((s) => s.papel === 'CEDENTE')?.nome ?? 'o cedente'}</b>{' '}
-                    como{' '}
-                    <b className="text-marca-texto">
-                      {ROTULO_ESTADO_CIVIL[respostaEstadoCivil.ancorado.estado] ??
-                        respostaEstadoCivil.ancorado.estado}
-                    </b>
-                    {respostaEstadoCivil.ancorado.conjuge && (
-                      <>
-                        , cônjuge <b>{respostaEstadoCivil.ancorado.conjuge}</b>
-                      </>
-                    )}
-                    .
-                  </p>
-                  <div className="rounded-controle border border-borda bg-superficie px-3 py-2.5 text-sm text-texto-2">
-                    …{respostaEstadoCivil.ancorado.contexto}…
-                    {respostaEstadoCivil.ancorado.arquivo && (
-                      <span className="mt-0.5 block text-xs text-texto-3">
-                        em {respostaEstadoCivil.ancorado.arquivo}
-                      </span>
-                    )}
-                  </div>
-
-                  {PEDE_CONJUGE.has(respostaEstadoCivil.ancorado.estado) ? (
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 rounded-controle border border-aviso-borda bg-aviso-fundo px-3 py-2.5 text-sm text-aviso">
-                      <AlertTriangle className="h-[16px] w-[16px] flex-none" aria-hidden />
-                      <span className="min-w-0 flex-[1_1_260px] text-texto">
-                        Então faltam as certidões do cônjuge — o bloco das linhas 52 a
-                        67 da planilha. O placar acima <b>não</b> conta essa
-                        falta.
-                      </span>
-                      <Button
-                        className="ml-auto"
-                        onClick={() =>
-                          cadastrarConjugeCom(respostaEstadoCivil.ancorado!)
-                        }
-                        disabled={salvando}
-                        icon={<Pencil className="h-4 w-4" aria-hidden />}
-                      >
-                        Cadastrar o cônjuge
-                      </Button>
-                    </div>
-                  ) : (
-                    <p className="text-xs">
-                      Sem cônjuge, o bloco de certidões dele não se aplica — e o aviso
-                      acima está respondido. <b>Confira mesmo assim</b>: o
-                      documento pode ser de anos atrás, e estado civil muda.
-                    </p>
-                  )}
-                </>
-              ) : respostaEstadoCivil.soltos.length > 0 ? (
-                <>
-                  {/*
-                    Achei estado civil, mas NÃO consegui prendê-lo ao cedente. Numa
-                    petição, a qualificação do advogado e a da parte contrária ficam
-                    a poucos caracteres da do autor — oferecer isso como resposta
-                    seria trocar "é do cedente" por "estava por perto". O trecho
-                    aparece para a pessoa julgar; o sistema não julga.
-                  */}
-                  <p className="text-xs text-aviso">
-                    Achei estado civil no processo, mas{' '}
-                    <b>não consegui ligar ao nome nem ao CPF do cedente</b> —
-                    numa petição isso costuma ser do advogado ou da outra parte. Leia o
-                    trecho antes de usar:
-                  </p>
-                  {respostaEstadoCivil.soltos.slice(0, 3).map((e) => (
-                    <div
-                      key={`${e.estado}-${e.conjuge ?? ''}`}
-                      className="rounded-controle border border-borda bg-superficie px-3 py-2.5 text-sm text-texto-2"
-                    >
-                      <b className="text-texto">{ROTULO_ESTADO_CIVIL[e.estado] ?? e.estado}</b>
-                      {e.arquivo && (
-                        <span className="ml-1.5 text-xs text-texto-3">em {e.arquivo}</span>
-                      )}
-                      <span className="mt-0.5 block">…{e.contexto}…</span>
-                    </div>
+            <details className="group mb-3 rounded-campo border border-aviso-borda bg-aviso-fundo text-corpo">
+              <summary className="flex min-h-8 cursor-pointer list-none items-start gap-2 px-3 py-2 text-texto [&::-webkit-details-marker]:hidden">
+                <AlertTriangle className="mt-0.5 h-[16px] w-[16px] flex-none text-aviso" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <b>
+                    {avisos.length} lacuna{avisos.length > 1 ? 's' : ''} no cadastro:
+                  </b>{' '}
+                  {avisos.map((a) => a.curto).join(' · ')}
+                </span>
+                <ChevronDown
+                  className="mt-0.5 h-4 w-4 flex-none text-texto-3 transition-transform group-open:rotate-180"
+                  aria-hidden
+                />
+              </summary>
+              <div className="space-y-2 border-t border-aviso-borda px-3 py-2">
+                <ul className="list-disc space-y-1 pl-6 text-sm text-texto marker:text-aviso">
+                  {avisos.map((a) => (
+                    <li key={a.texto}>{a.texto}</li>
                   ))}
-                  <Button
-                    variant="secondary"
-                    className="justify-self-start"
-                    onClick={() => setEditando(true)}
-                    disabled={salvando}
-                    icon={<Pencil className="h-4 w-4" aria-hidden />}
-                  >
-                    Abrir o cadastro para decidir
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {/*
-                    NÃO ACHEI ≠ NÃO É CASADA. É a regra da casa desde o começo, e o
-                    lugar onde ela mais importa é justamente este: a leitura natural
-                    de uma tela calada é "então não tem cônjuge", que fecha o dossiê
-                    com um bloco inteiro faltando.
-                  */}
-                  <p className="text-xs text-aviso">
-                    {arquivos.length === 0
-                      ? 'Não consegui abrir nenhum anexo deste card.'
-                      : temTexto
-                        ? `Li o texto d${arquivos.length > 1 ? 'os' : 'o'} ${
-                            arquivos.length
-                          } anexo${arquivos.length > 1 ? 's' : ''} e não achei ` +
-                          'estado civil na qualificação das partes.'
-                        : `Nenhum d${arquivos.length > 1 ? 'os' : 'o'} ${
-                            arquivos.length
-                          } anexo${arquivos.length > 1 ? 's' : ''} tem texto para ler.`}{' '}
-                    <b>&quot;Não achei&quot; não é &quot;não é casada&quot;</b>{' '}
-                    — confira a petição inicial e cadastre à mão.
-                  </p>
-                  {digitalizados.length > 0 && (
-                    <p className="text-xs text-aviso">
-                      E {digitalizados.length} anexo(s) são digitalização ou não
-                      abriram:{' '}
-                      <b>{digitalizados.map((a) => a.nome).join(', ')}</b>. Se
-                      a qualificação estiver só aí, ela está em imagem — e imagem eu
-                      ainda não leio.
-                    </p>
-                  )}
-                  <Button
-                    variant="secondary"
-                    className="justify-self-start"
-                    onClick={() => setEditando(true)}
-                    disabled={salvando}
-                    icon={<Pencil className="h-4 w-4" aria-hidden />}
-                  >
-                    Cadastrar à mão
-                  </Button>
-                </>
-              )}
-            </div>
+                </ul>
+                {perguntaDoConjuge && !conjugeFaltando && estadoCivilDosAnexos()}
+              </div>
+            </details>
           )}
 
-          {/* ---------------- lista por sujeito ---------------- */}
-          {sujeitos.map((s) => {
-            const lista = porSujeito.get(s.id) ?? []
-            // O `.subj` da amostra: um bloco contornado por pessoa, com a faixa
-            // de cabeçalho (papel, nome, documento, onde mora, quantos itens).
-            return (
-              <div key={s.id} className="my-3 overflow-hidden rounded-cartao border border-borda">
-                <div className="flex flex-wrap items-center gap-2 border-b border-borda bg-superficie-2 px-4 py-3 text-corpo">
-                  <Selo tom="info">{s.papel}</Selo>
-                  <b className="font-bold text-texto">{s.nome}</b>
-                  <span className="tabular-nums text-texto-3">
-                    {formatCpfCnpjInput(s.documento)} ·{' '}
-                    {s.municipio_atual ? `${s.municipio_atual}/` : ''}
-                    {s.uf_atual ?? 'sem UF'} · {lista.length} item(ns)
-                  </span>
-                  {!s.residencia_levantada && (
-                    <Selo tom="aviso" icone={<AlertTriangle className={icSelo} aria-hidden />}>
-                      residência não levantada
-                    </Selo>
-                  )}
-                </div>
-                <div>
-                  {lista.length === 0 ? (
-                    <p className="px-4 py-2 text-xs text-texto-3">
-                      Nenhuma certidão gerada para este sujeito.
-                    </p>
+          {/* ---------------- o checklist, por estado ---------------- */}
+          {itens.length > 0 && (
+            <section>
+              <RotuloDeSecao className="mt-4">Checklist · {itens.length} certidões</RotuloDeSecao>
+              <div className="overflow-hidden rounded-cartao border border-borda">
+                {grupos.map(({ grupo, itens: lista }) => {
+                  const linhas = (
+                    <ul>
+                      {lista.map((i) => {
+                        const s = sujeitoPorId.get(i.sujeito_id)
+                        return (
+                          <LinhaCertidao
+                            key={i.id}
+                            item={i}
+                            sujeito={s}
+                            papel={variosSujeitos ? s?.papel : undefined}
+                            hoje={hoje}
+                            cnj={cnjDoCredito}
+                            url={
+                              i.certidao_catalogo?.url_oficial ||
+                              urlPorEscopo.get(`${i.certidao_codigo}|${escopoDe(i.parametros) ?? ''}`) ||
+                              null
+                            }
+                            onSalvarUrl={salvarUrlDoEscopo}
+                          />
+                        )
+                      })}
+                    </ul>
+                  )
+                  const cab = cabecalhoDoGrupo(ROTULO_DO_GRUPO[grupo], lista.length)
+                  return GRUPOS_RECOLHIDOS.has(grupo) ? (
+                    <details key={grupo} className="group border-t border-borda first:border-t-0">
+                      <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 bg-superficie-2 px-3 py-1.5 [&::-webkit-details-marker]:hidden">
+                        {cab}
+                        <ChevronDown
+                          className="h-4 w-4 flex-none text-texto-3 transition-transform group-open:rotate-180"
+                          aria-hidden
+                        />
+                      </summary>
+                      {linhas}
+                    </details>
                   ) : (
-                    lista.map((i) => (
-                      <LinhaCertidao
-                        key={i.id}
-                        item={i}
-                        sujeito={s}
-                        cnj={cnjDoCredito}
-                        url={
-                          i.certidao_catalogo?.url_oficial ||
-                          urlPorEscopo.get(
-                            `${i.certidao_codigo}|${escopoDe(i.parametros) ?? ''}`,
-                          ) ||
-                          null
-                        }
-                        onSalvarUrl={salvarUrlDoEscopo}
-                      />
-                    ))
-                  )}
-                </div>
+                    <div key={grupo} className="border-t border-borda first:border-t-0">
+                      <div className="bg-superficie-2 px-3 py-1.5">{cab}</div>
+                      {linhas}
+                    </div>
+                  )
+                })}
               </div>
-            )
-          })}
+              {semItens.map((s) => (
+                <p key={s.id} className="mt-1.5 text-xs text-texto-3">
+                  Nenhuma certidão gerada para {s.papel} {s.nome}.
+                </p>
+              ))}
+            </section>
+          )}
+          {sujeitos.length > 0 && itens.length === 0 && (
+            <CaixaSuave className="mt-3">
+              Nenhuma certidão no checklist ainda. <b>Gerar itens faltantes</b> roda as regras sobre o cadastro.
+            </CaixaSuave>
+          )}
 
           {sujeitos.length > 0 && itens.length > 0 && (
             <EmissaoBullai
@@ -3027,52 +3232,52 @@ export function PainelCertidoes({
               itens={itens}
               ativo={ativo}
               onMudou={recarregarItens}
+              pasta={pasta}
+              onPasta={(url) => setPastaDaResposta({ url, qual: 'certidoes' })}
             />
           )}
 
           {sujeitos.length === 0 && (
             <CaixaSuave>
-              Nenhum sujeito cadastrado neste crédito. Clique em{' '}
-              <b>Corrigir dados / cônjuge</b> para começar pelo cedente.
+              Nenhum sujeito cadastrado neste crédito. Clique em <b>Editar</b> para começar pelo cedente.
             </CaixaSuave>
           )}
         </div>
       )}
 
-      {/* AS AÇÕES FICAM NO PAINEL, não no rodapé da janela. Eram do modal, e o
-          rodapé agora é dividido com a aba de Processos Judiciais: "Gravar e
-          montar checklist" ali embaixo pareceria valer para a janela toda. */}
-      <div className="mt-6 flex flex-wrap items-center justify-end gap-2.5 border-t border-borda pt-5">
+      {/* AS AÇÕES FICAM NO PAINEL, não no rodapé da janela: o rodapé é dividido
+          com a aba de Processos Judiciais. */}
+      <div className="mt-5 flex flex-wrap items-center justify-end gap-2.5 border-t border-borda pt-4">
         {editando ? (
-          <Button
-            // SEM ARGUMENTO, de propósito: o `true` de salvarEGerar é o "sim" da
-            // janela de remoção, e o evento do clique não pode passar por ele.
-            onClick={() => void salvarEGerar()}
-            loading={salvando}
-            disabled={problemas.length > 0}
-            icon={<Sparkles className="h-4 w-4" aria-hidden />}
-          >
-            Gravar e montar checklist
-          </Button>
-        ) : (
           <>
+            {sujeitos.length > 0 && (
+              <Button variant="ghost" onClick={() => void cancelarEdicao()} disabled={salvando}>
+                Cancelar
+              </Button>
+            )}
             <Button
-              variant="secondary"
-              onClick={() => setEditando(true)}
-              disabled={salvando}
-              icon={<Pencil className="h-4 w-4" aria-hidden />}
-            >
-              Corrigir dados / cônjuge
-            </Button>
-            <Button
-              variant="outline"
-              onClick={gerarFaltantes}
+              // SEM ARGUMENTO, de propósito: o `true` de salvarEGerar é o "sim" da
+              // janela de remoção, e o evento do clique não pode passar por ele.
+              onClick={() => void salvarEGerar()}
               loading={salvando}
-              icon={<Plus className="h-4 w-4" aria-hidden />}
+              disabled={problemas.length > 0}
+              icon={<Sparkles className="h-4 w-4" aria-hidden />}
             >
-              Gerar itens faltantes
+              Gravar e montar checklist
             </Button>
           </>
+        ) : (
+          // "Gerar itens faltantes" e não "Recalcular": o motor só acrescenta
+          // (ver gerarFaltantes).
+          <Button
+            variant="outline"
+            onClick={gerarFaltantes}
+            loading={salvando}
+            icon={<Plus className="h-4 w-4" aria-hidden />}
+            title="Roda as regras de novo sobre o cadastro e acrescenta o que faltar (não tira nada)"
+          >
+            Gerar itens faltantes
+          </Button>
         )}
       </div>
 
