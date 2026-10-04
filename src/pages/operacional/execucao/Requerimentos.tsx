@@ -356,8 +356,8 @@ export default function Requerimentos() {
                   que a versão quebrada, porque a maior palavra da versão longa
                   ("MOVIMENTAÇÃO") já era mais larga do que o rótulo curto inteiro. */}
               <tr>
-                {/* Sem largura declarada: o protocolo e o selo da classe numa linha
-                    só ditam a largura (antes, 20% e o selo caindo para baixo). */}
+                {/* Sem largura declarada: o protocolo e o selo da classe ditam a
+                    largura (antes, 20% e o selo caindo para baixo mesmo com folga). */}
                 <TH>Protocolo</TH>
                 {/* Tribunal e órgão saíram do subtítulo do protocolo para uma coluna
                     própria: são a JURISDIÇÃO do requerimento, não parte da
@@ -394,8 +394,10 @@ export default function Requerimentos() {
                   {/* Sem nowrap na célula: o número não quebra, mas os nomes das
                       partes podem. */}
                   <TD className="font-medium text-texto">
-                    <span className="inline-flex items-center gap-s1.5 whitespace-nowrap">
-                      <span className="font-semibold tabular-nums">
+                    {/* O selo só desce de linha quando falta espaço (1280px com o menu
+                        aberto); com folga, fica ao lado do número. */}
+                    <span className="inline-flex flex-wrap items-center gap-s1.5">
+                      <span className="whitespace-nowrap font-semibold tabular-nums">
                         {r.numero_protocolo || '—'}
                       </span>
                       {seloDaClasse(r)}
