@@ -12,6 +12,7 @@ import { CheckCircle2, AlertCircle, Info, X, Copy, Check } from 'lucide-react'
 import { duracaoDepoisDoMouse, duracaoDoAviso, detalhesDoErro, juntarAviso } from '@/lib/avisos'
 import { copiarTexto } from '@/lib/copiar'
 import { entradaCarregada } from '@/lib/versaoNova'
+import { cn } from '@/lib/cn'
 
 type ToastType = 'success' | 'error' | 'info'
 interface ToastAction {
@@ -131,9 +132,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // ícone tem token próprio (`flutuante-*`), que no escuro vira o tom fundo que
   // lê sobre o aviso claro.
   const icons = {
-    success: <CheckCircle2 className="h-5 w-5 shrink-0 text-flutuante-ok" aria-hidden />,
-    error: <AlertCircle className="h-5 w-5 shrink-0 text-flutuante-erro" aria-hidden />,
-    info: <Info className="h-5 w-5 shrink-0 text-flutuante-info" aria-hidden />,
+    success: <CheckCircle2 className="mt-[2px] h-[16px] w-[16px] shrink-0 text-flutuante-ok" aria-hidden />,
+    error: <AlertCircle className="mt-[2px] h-[16px] w-[16px] shrink-0 text-flutuante-erro" aria-hidden />,
+    info: <Info className="mt-[2px] h-[16px] w-[16px] shrink-0 text-flutuante-info" aria-hidden />,
   }
 
   return (
@@ -143,7 +144,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         aria-live="polite"
         // 420px como na amostra, e nunca mais largo que a tela menos as margens
         // (no celular, `w-full` com `right-4` empurrava o aviso para fora).
-        className="fixed bottom-4 right-4 z-[60] flex w-[calc(100vw-24px)] max-w-[420px] flex-col gap-2"
+        // ACIMA DO BOTÃO DO ASSISTENTE enquanto ele está à vista (o atributo
+        // `data-assistente` no <html>, posto por ele): antes o aviso caía em
+        // cima do botão (auditoria visual, M2). Na camada mais alta (z-aviso).
+        className={cn(
+          'fixed bottom-s4 right-s3 z-aviso flex w-[calc(100vw-24px)] max-w-[420px] flex-col gap-s2 sm:right-[20px]',
+          '[html[data-assistente=botao]_&]:bottom-[76px] sm:[html[data-assistente=botao]_&]:bottom-[88px]',
+        )}
       >
         {items.map((t) => (
           <div
@@ -159,7 +166,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               const ms = duracaoDepoisDoMouse(t.type)
               if (ms !== null) scheduleRemove(t.id, ms)
             }}
-            className="animate-toast-in flex items-start gap-3 rounded-2xl bg-texto px-4 py-3 text-superficie shadow-nivel-2"
+            className="animate-toast-in flex items-start gap-s3 rounded-flutuante bg-texto px-s4 py-s3 text-superficie shadow-nivel-2"
           >
             {icons[t.type]}
             <p className="flex-1 text-corpo">{t.message}</p>

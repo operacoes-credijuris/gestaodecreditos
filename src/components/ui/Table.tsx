@@ -22,10 +22,17 @@ export function Table({
         // celular, o da última coluna — fora da vista — alargava o <main>, e a
         // tela inteira ganhava rolagem lateral.
         'relative overflow-x-auto rounded-cartao scrollbar-thin',
+        // A PARTIR DE 1280PX, SEM ROLAGEM PRÓPRIA (auditoria visual, C4): uma
+        // caixa com `overflow` vira a referência do `sticky`, e o cabeçalho
+        // fixo (THead) ficava preso a ela em vez de acompanhar a página. Abaixo
+        // disso a tabela larga ainda precisa rolar de lado. (A tela que embrulha
+        // a tabela num cartão com `overflow-hidden` também prende o cabeçalho:
+        // tire o `overflow-hidden` do cartão.)
+        'xl:overflow-visible',
         // Densidade compacta usada nas listagens (Processos/Requerimentos/Contatos):
         // aperta o ESPAÇO, não a letra. A célula fica nos 14px do texto corrido,
-        // como na tabela de Créditos da amostra.
-        dense && '[&_th]:px-2.5 [&_td]:px-2.5 [&_td]:py-3',
+        // como na tabela de Créditos da amostra. Na grade de 4px: 8px de lado.
+        dense && '[&_th]:px-s2 [&_td]:px-s2 [&_td]:py-s3',
       )}
     >
       <table className={cn('w-full border-collapse text-corpo', className)}>
@@ -40,7 +47,10 @@ export function THead({ children }: { children: ReactNode }) {
     // O `.tbl th` da amostra: rótulo pequeno, em caixa alta e no cinza de
     // metadado, sobre a superfície 2. A tinta azul de antes saiu — com o menu
     // navy e o primário azul, o cabeçalho azul competia com o que é clicável.
-    <thead className="border-b border-borda bg-superficie-2 text-left text-xs font-bold uppercase tracking-wide text-texto-3">
+    // FIXO NO TOPO AO ROLAR (auditoria visual, C4): em listas de 49 a 80
+    // linhas, o cabeçalho sumia. A linha de baixo é sombra, e não borda: com
+    // `border-collapse`, a borda de um `sticky` não acompanha.
+    <thead className="sticky top-0 z-cabecalho bg-superficie-2 font-display text-left text-xs font-bold uppercase tracking-[0.06em] text-texto-3 shadow-[inset_0_-1px_0_rgb(var(--borda))]">
       {children}
     </thead>
   )
@@ -50,14 +60,17 @@ export function TH({
   children,
   className,
   colSpan,
+  numero,
 }: {
   children?: ReactNode
   className?: string
   /** Agrupa colunas em cabeçalho de dois níveis (ex.: carteira do investidor). */
   colSpan?: number
+  /** Coluna de número, moeda ou percentual: o rótulo alinhado à direita, como os valores. */
+  numero?: boolean
 }) {
   return (
-    <th colSpan={colSpan} className={cn('px-5 py-3 font-bold', className)}>
+    <th colSpan={colSpan} className={cn('px-s4 py-[10px] font-bold', numero && 'text-right', className)}>
       {children}
     </th>
   )
@@ -80,8 +93,10 @@ export function TR({
     <tr
       onClick={onClick}
       className={cn(
-        // Hover na superfície 2 + transição: a linha "acende" em vez de piscar.
-        'transition-colors duration-100 hover:bg-superficie-2',
+        // A linha "acende" sob o mouse, com transição. NA SUPERFÍCIE 3 A 60%
+        // (auditoria visual, C4): a superfície 2 de antes (#fcfbf8 sobre o
+        // branco) não se via.
+        'transition-colors duration-100 hover:bg-superficie-3/60',
         onClick && 'cursor-pointer',
         className,
       )}
@@ -94,18 +109,93 @@ export function TR({
 export function TD({
   children,
   className,
+  numero,
+  curto,
 }: {
   children?: ReactNode
   className?: string
+  /**
+   * Número, moeda ou percentual (auditoria visual, §0.9): à direita, com
+   * algarismos de largura igual (`tabular-nums`), sem quebrar.
+   */
+  numero?: boolean
+  /**
+   * Dado curto que não pode quebrar no meio: número CNJ, CPF/CNPJ, data, selo.
+   * (Data fica à esquerda; passe também `className="tabular-nums"`.)
+   */
+  curto?: boolean
 }) {
   return (
     // align-top + break-words: as células mostram o texto INTEIRO, quebrando em
-    // linhas quando necessário (o app não usa truncamento com "…" nas tabelas).
+    // linhas quando necessário. A exceção é o dado curto (`curto`, `numero`) e
+    // o e-mail/Pix, que vai em `Truncado` — nunca quebrado no meio.
+    // Célula na grade de 4px: 16px de lado, 12px em cima e embaixo.
     <td
-      className={cn('break-words px-5 py-4 align-top text-corpo text-texto', className)}
+      className={cn(
+        'break-words px-s4 py-s3 align-top text-corpo text-texto',
+        (curto || numero) && 'whitespace-nowrap',
+        numero && 'text-right tabular-nums',
+        className,
+      )}
     >
       {children}
     </td>
+  )
+}
+
+/**
+ * E-MAIL, CHAVE PIX E OUTRO TEXTO SEM ESPAÇO numa célula (auditoria visual,
+ * §0.9): numa linha só, cortado com "…" e o texto inteiro na dica — nunca
+ * quebrado no meio ("financeiro@credijuriscapi / tal.invalid"). A largura
+ * máxima é obrigatória: numa tabela, sem ela o texto não tem onde cortar.
+ */
+export function Truncado({
+  texto,
+  max = 240,
+  className,
+}: {
+  texto: string
+  /** A largura máxima, em px (padrão 240). */
+  max?: number
+  className?: string
+}) {
+  return (
+    <span title={texto} style={{ maxWidth: max }} className={cn('block truncate', className)}>
+      {texto}
+    </span>
+  )
+}
+
+/**
+ * NADA COM ESSE FILTRO (auditoria visual, §0.10): a linha simples do "sem
+ * resultado", diferente do vazio de verdade (`EmptyState`, tracejado, "ainda
+ * não há"). Sem moldura: a lista existe, o filtro é que não achou nada.
+ */
+export function SemResultado({
+  texto = 'Nada com esse filtro',
+  onLimpar,
+  rotuloLimpar = 'Limpar filtros',
+}: {
+  texto?: ReactNode
+  onLimpar?: () => void
+  rotuloLimpar?: string
+}) {
+  return (
+    <p role="status" className="flex flex-wrap items-center justify-center gap-s2 px-s4 py-s8 text-center text-corpo text-texto-2">
+      <span>{texto}</span>
+      {onLimpar && (
+        <>
+          <span aria-hidden className="text-borda-forte">·</span>
+          <button
+            type="button"
+            onClick={onLimpar}
+            className="rounded-controle font-semibold text-marca-texto underline-offset-2 hover:underline"
+          >
+            {rotuloLimpar}
+          </button>
+        </>
+      )}
+    </p>
   )
 }
 
@@ -157,9 +247,9 @@ export function Loading({ label = 'Carregando…' }: { label?: string }) {
       <div className="mb-3 grid gap-[14px]" aria-hidden>
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="grid grid-cols-[2fr_3fr_1fr] items-center gap-[16px]">
-            <div className="skeleton h-[14px] w-[40%] rounded-md" />
-            <div className="skeleton h-[14px] w-[70%] rounded-md" />
-            <div className="skeleton h-[14px] w-[60%] rounded-md" />
+            <div className="skeleton h-[14px] w-[40%] rounded-controle" />
+            <div className="skeleton h-[14px] w-[70%] rounded-controle" />
+            <div className="skeleton h-[14px] w-[60%] rounded-controle" />
           </div>
         ))}
       </div>
@@ -215,7 +305,7 @@ export function ErrorState({
         <Button
           variant="outline"
           size="sm"
-          icon={<RefreshCw className={cn('h-4 w-4', tentando && 'animate-spin')} />}
+          icon={<RefreshCw className={cn('h-[16px] w-[16px]', tentando && 'animate-spin')} />}
           onClick={tentar}
           disabled={tentando}
           className="mt-2"

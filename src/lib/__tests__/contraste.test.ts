@@ -116,9 +116,11 @@ const TEXTO: Par[] = [
   ['nav-texto', 'nav-fundo', 'itens do menu'],
   ['nav-apagado', 'nav-fundo', 'títulos das seções do menu'],
   ['acento', 'nav-fundo', 'título da seção acesa do menu'],
+  // O número do contador no canto do ícone, no menu recolhido (o azul da marca).
+  ['branco', 'marca', 'contador do menu recolhido'],
   // O aviso flutuante (toast): a superfície sobre o texto (escuro no claro,
-  // claro no escuro).
-  ['superficie', 'texto', 'aviso flutuante'],
+  // claro no escuro). A dica do menu recolhido (ui/Dica.tsx) é o mesmo par.
+  ['superficie', 'texto', 'aviso flutuante e dica do menu'],
   // O selo neutro (Badge gray).
   ['texto-2', 'superficie-3', 'selo neutro'],
   // OS TONS CATEGÓRICOS: a letra do selo no fundo pálido dele (Badge, situação
@@ -160,6 +162,10 @@ const NAO_TEXTO: Par[] = [
   ['anel', 'superficie', 'anel de foco no cartão'],
   ['anel', 'papel', 'anel de foco no fundo da página'],
   ['anel', 'nav-fundo', 'anel de foco no menu'],
+  // O anel PRÓPRIO do menu (auditoria visual, 03/10/2026): o `anel` dava 3,2:1
+  // no navy; o `nav-foco`, por dentro do item, no fundo e no item aceso.
+  ['nav-foco', 'nav-fundo', 'anel de foco do menu (nav-foco)'],
+  ['nav-foco', 'nav-ativo', 'anel de foco no item aceso do menu'],
   // O sublinhado da aba aberta e a barra verde do item aceso.
   ['marca-viva', 'superficie', 'sublinhado da aba aberta'],
   ['acento', 'nav-fundo', 'barra do item aceso no menu'],
@@ -280,7 +286,9 @@ describe('os tokens chegam inteiros às classes', () => {
 
   it('os raios e as sombras dos tokens existem', () => {
     const usados = [...CONFIG.matchAll(/var\(--((?:raio|sombra)-[\w-]+)\)/g)].map((m) => m[1])
-    expect(usados.length).toBeGreaterThanOrEqual(7)
+    // 8: o raio dos flutuantes (auditoria visual, 03/10/2026) entrou.
+    expect(usados.length).toBeGreaterThanOrEqual(8)
+    expect(usados).toContain('raio-flutuante')
     expect(usados.filter((n) => !CLARO.has(n))).toEqual([])
   })
 
@@ -293,5 +301,23 @@ describe('os tokens chegam inteiros às classes', () => {
     expect(cn('rounded-cartao', 'rounded-lg')).toBe('rounded-lg')
     expect(cn('shadow-nivel-1', 'shadow-none')).toBe('shadow-none')
     expect(cn('border-borda-controle', 'border-perigo')).toBe('border-perigo')
+    // A grade de 4px, as alturas de controle, o raio dos flutuantes e as
+    // camadas (auditoria visual, 03/10/2026): a classe da tela vence a do
+    // componente, e não a ordem do CSS.
+    expect(cn('h-controle px-s4', 'h-9')).toBe('px-s4 h-9')
+    expect(cn('p-5', 'p-s5')).toBe('p-s5')
+    expect(cn('gap-s2', 'gap-s1.5')).toBe('gap-s1.5')
+    expect(cn('rounded-flutuante', 'rounded-controle')).toBe('rounded-controle')
+    expect(cn('z-topo', 'z-janela')).toBe('z-janela')
+    expect(cn('text-corpo', 'text-texto-2', 'h-controle-sm')).toBe('text-corpo text-texto-2 h-controle-sm')
+  })
+
+  it('o menu no escuro se separa do papel (auditoria visual, E1)', () => {
+    // O navy da amostra (#0a1622) era quase o papel (#0d141d): 1,01:1. Agora,
+    // 1,1:1 — com a borda à direita do menu, é o que basta para separar.
+    expect(contraste(rgbEm(ESCURO, 'nav-fundo'), rgbEm(ESCURO, 'papel'))).toBeGreaterThan(1.08)
+    expect(rgbEm(ESCURO, 'nav-fundo')).toEqual([15, 30, 46])
+    // O anel do menu é o mesmo nos dois temas.
+    expect(rgbEm(ESCURO, 'nav-foco')).toEqual(rgb('nav-foco'))
   })
 })

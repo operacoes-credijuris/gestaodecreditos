@@ -596,8 +596,8 @@ export default function DadosPessoaisBancarios() {
       title="Dados cadastrais"
       description="Investidores e originadores: identificação, dados bancários e endereço que entram nos contratos."
       actions={
+        // O PRIMÁRIO DO CABEÇALHO É `md`, como em toda tela (auditoria visual, M3).
         <Button
-          size="lg"
           icon={<Plus className="h-[16px] w-[16px]" />}
           disabled={!dados.data}
           title={dados.data ? undefined : 'Espere as fichas carregarem'}

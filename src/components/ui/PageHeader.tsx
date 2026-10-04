@@ -33,7 +33,9 @@ export function PageHeader({
   return (
     // O `.page-head` da amostra: título de 26px em extranegrito e as ações
     // alinhadas pela BASE do bloco (com a descrição), não pelo meio do título.
-    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    // NA GRADE DE 4PX (auditoria visual, M3): 24px até o conteúdo (eram 18) e
+    // 8px entre as ações. O primário do cabeçalho é sempre `size="md"`.
+    <div className="mb-s6 flex flex-col gap-s3 sm:flex-row sm:items-end sm:justify-between">
       <div>
         {(() => {
           const titulo = (
@@ -49,7 +51,7 @@ export function PageHeader({
           // AO LADO do h1, e não dentro: dentro, o nome do botão entraria no
           // nome do título que o leitor de tela anuncia.
           return comAcessorio ? (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-s2">
               {titulo}
               {acessorio}
             </div>
@@ -58,10 +60,10 @@ export function PageHeader({
           )
         })()}
         {description && (
-          <p className="mt-1 text-corpo text-texto-2">{description}</p>
+          <p className="mt-s1 text-corpo text-texto-2">{description}</p>
         )}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap gap-s2">{actions}</div>}
     </div>
   )
 }

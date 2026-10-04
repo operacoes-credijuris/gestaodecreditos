@@ -26,8 +26,13 @@ export function duracaoDepoisDoMouse(tipo: TipoDoAviso): number | null {
   return tipo === 'error' ? null : 2000
 }
 
-/** Quantos avisos cabem na pilha; passando disso, sai o mais antigo. */
-export const MAX_AVISOS = 4
+/**
+ * Quantos avisos cabem na pilha; passando disso, sai o mais antigo. ERAM 4: a
+ * pilha subia pelo canto e cobria a lista e o botão do assistente. Dois bastam
+ * (auditoria visual de 03/10/2026, C10) — o erro, que fica até ser fechado,
+ * continua sendo o último a sair.
+ */
+export const MAX_AVISOS = 2
 
 interface AvisoNaPilha {
   type: TipoDoAviso

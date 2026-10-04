@@ -76,6 +76,11 @@
     --nav-texto: 201 220 238; /* #c9dcee  --nav-text */
     --nav-apagado: 143 176 207; /* #8fb0cf  --nav-muted (títulos das seções) */
     --nav-ativo: 11 74 122; /* #0b4a7a  --nav-active (item aceso) */
+    /* NÃO ESTÁ NA AMOSTRA (auditoria visual, 03/10/2026). O anel de foco do
+       menu: o `--anel` (#0b81c5) dava 3,2:1 sobre o navy, e quem anda pelo
+       teclado perdia o lugar. Este é o brand-300 do claro, igual nos dois
+       temas: 7:1. */
+    --nav-foco: 134 202 234; /* #86caea */
     --acento: var(--verde-400); /* --accent: a barra do item aceso */
 
     /* ---- estados: texto, fundo pálido, preenchido, borda ---- */
@@ -100,6 +105,7 @@
     --raio-campo: 10px; /* --radius: campo, caixa de aviso */
     --raio-cartao: 14px; /* --radius-lg: cartão, tabela, painel */
     --raio-janela: 16px; /* janela (modal) */
+    --raio-flutuante: 12px; /* menu suspenso, o "?", aviso flutuante, aviso de versão */
     --sombra-1: 0 1px 2px rgb(23 32 43 / 0.06), 0 1px 1px rgb(23 32 43 / 0.03);
     --sombra-2: 0 6px 20px rgb(23 32 43 / 0.08), 0 1px 3px rgb(23 32 43 / 0.05);
     --sombra-3: 0 24px 60px rgb(10 20 35 / 0.22);
@@ -225,11 +231,16 @@
     --marca-texto: 124 196 236; /* #7cc4ec  --brand-text */
     --anel: 91 182 232; /* #5bb6e8  --ring */
 
-    --nav-fundo: 10 22 34; /* #0a1622  --nav-bg */
+    /* UM POUCO MAIS CLARO QUE O DA AMOSTRA (#0a1622), de propósito (auditoria
+       visual, 03/10/2026, E1): aquele era quase o papel (#0d141d), e o menu se
+       "derretia" na página. Com a borda à direita do menu, ele se separa do
+       conteúdo sem precisar de sombra. */
+    --nav-fundo: 15 30 46; /* #0f1e2e */
     --nav-fundo-2: 15 30 46; /* #0f1e2e  --nav-bg-2 */
     --nav-texto: 201 220 238; /* #c9dcee  igual */
     --nav-apagado: 143 176 207; /* #8fb0cf  igual */
     --nav-ativo: 21 50 77; /* #15324d  --nav-active */
+    --nav-foco: 134 202 234; /* #86caea  igual */
     --acento: 46 204 113; /* #2ecc71  igual */
 
     --sucesso: 111 212 156; /* #6fd49c */
@@ -340,6 +351,13 @@
   :focus-visible {
     outline: 2px solid rgb(var(--anel));
     outline-offset: 2px;
+  }
+
+  /* A CAIXA DE SELEÇÃO E O RÁDIO NO AZUL DA MARCA, nos dois temas (auditoria
+     visual, C8). O tamanho é de cada tela: a regra é `h-[16px] w-[16px]`. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: rgb(var(--marca-viva));
   }
 
   /* O preflight do Tailwind pinta o placeholder de gray-400 (2,5:1). */

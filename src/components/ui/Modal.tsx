@@ -40,6 +40,7 @@ export function Modal({
   description,
   children,
   footer,
+  rodapeInicio,
   size = 'md',
   dirty = false,
 }: {
@@ -48,7 +49,18 @@ export function Modal({
   title: ReactNode
   description?: ReactNode
   children: ReactNode
+  /**
+   * O rodapé, À DIREITA: `[Cancelar/Fechar] [Primário]`, nessa ordem — o
+   * primário por último, no canto (auditoria visual de 03/10/2026, §0.6/C8).
+   */
   footer?: ReactNode
+  /**
+   * O que vai À ESQUERDA do rodapé: a ação destrutiva ou alternativa
+   * ("Reprovar", "Exigir diligência"), longe do primário. Antes havia três
+   * ordens de rodapé, e na due diligence o "Seguir" (primário) ficava à
+   * esquerda.
+   */
+  rodapeInicio?: ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl'
   /** Quando true, fechar exige confirmação antes de descartar alterações. */
   dirty?: boolean
@@ -89,19 +101,19 @@ export function Modal({
 
   if (!open) return null
 
-  // AS LARGURAS DA AMOSTRA, EM PX. As da escala (max-w-md…) são em rem e, com o
-  // <html> em 12px, encolhiam um quarto: a janela média tinha 432px, e a pequena,
-  // 336px — estreita a ponto de quebrar o título da confirmação em três linhas.
+  // AS LARGURAS, EM PX (auditoria visual de 03/10/2026, C8): confirmação,
+  // formulário, consulta e a due diligence/certidões. As da escala (max-w-md…)
+  // são em rem e, com o <html> em 12px, encolhiam um quarto.
   const sizes = {
-    sm: 'max-w-[420px]',
-    md: 'max-w-[560px]',
-    lg: 'max-w-[820px]',
+    sm: 'max-w-[480px]',
+    md: 'max-w-[640px]',
+    lg: 'max-w-[960px]',
     xl: 'max-w-[1080px]',
   }
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin sm:p-6"
+      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin sm:p-6"
       onClick={(e) => {
         // Fecha só quando o clique é no próprio overlay, não dentro do painel.
         if (e.target === e.currentTarget) requestClose()
@@ -114,7 +126,9 @@ export function Modal({
           // `my-auto` CENTRA a janela (como na amostra) sem cortar o topo: se ela
           // for mais alta que a tela, as margens automáticas viram zero e o
           // fundo rola, em vez de a janela sair por cima.
-          'animate-modal-in my-auto w-full rounded-janela bg-superficie shadow-nivel-3 outline-none',
+          // No escuro, a sombra não separa a janela da página: o anel claro sim
+          // (auditoria visual, E3).
+          'animate-modal-in my-auto w-full rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]',
           sizes[size],
         )}
         role="dialog"
@@ -135,12 +149,13 @@ export function Modal({
               <p className="mt-1 text-corpo text-texto-2">{description}</p>
             )}
           </div>
+          {/* O X COM ALVO DE 32PX e ícone de 18px (era 24px de alvo). */}
           <button
             onClick={requestClose}
-            className="-mr-2 -mt-1 shrink-0 rounded-controle p-1.5 text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto"
+            className="-mr-s2 -mt-s1 grid h-[32px] w-[32px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto"
             aria-label="Fechar"
           >
-            <X className="h-5 w-5" />
+            <X className="h-[18px] w-[18px]" aria-hidden />
           </button>
         </div>
         {/* `relative` NO CORPO QUE ROLA: um `sr-only` (ou outro `absolute` sem
@@ -150,8 +165,9 @@ export function Modal({
         <div className="relative max-h-[70vh] overflow-y-auto px-6 py-5 scrollbar-thin">
           {children}
         </div>
-        {footer && (
-          <div className="flex flex-wrap justify-end gap-2 border-t border-borda px-6 pb-6 pt-4">
+        {(footer || rodapeInicio) && (
+          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda px-6 pb-6 pt-4">
+            {rodapeInicio && <div className="mr-auto flex flex-wrap items-center gap-s2">{rodapeInicio}</div>}
             {footer}
           </div>
         )}

@@ -8,6 +8,7 @@ type Variant =
   | 'outline'
   | 'ghost'
   | 'danger'
+  | 'dangerOutline'
   | 'success'
   | 'warning'
 type Size = 'sm' | 'md' | 'lg'
@@ -23,11 +24,19 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 // do contrato chapado (#0A6296, 6,6:1 com o branco); o gradiente que partia do
 // azul da logomarca saiu, porque no #0B81C5 o texto branco ficava em 4,2:1.
 const variants: Record<Variant, string> = {
-  primary: 'bg-marca text-white shadow-nivel-1 hover:bg-marca-hover',
+  // DESLIGADO NO ESCURO (auditoria visual, E6): o `opacity-50` sobre o azul
+  // #1677b5 virava um azul lamacento que ainda parecia clicável. No escuro, o
+  // primário desligado é a superfície apagada, sem a transparência.
+  primary:
+    'bg-marca text-white shadow-nivel-1 hover:bg-marca-hover dark:disabled:bg-superficie-3 dark:disabled:text-texto-3 dark:disabled:opacity-100',
   // A AMOSTRA NÃO TEM BOTÃO ESCURO. O "secundário" dela é o contornado — o que
   // aqui sempre se chamou `outline`. As cinco telas que pediam `secondary` (o
   // "Executar análise" do card, entre elas) ficam iguais ao contornado: na
   // amostra esse mesmo botão é `btn-secondary`.
+  //
+  // `outline` É APELIDO DE `secondary` (auditoria visual, §0.6): as duas sempre
+  // tiveram as mesmas classes. Código novo usa `secondary`; o apelido fica para
+  // nada quebrar.
   secondary: 'border-borda-forte bg-superficie text-texto hover:bg-superficie-3',
   outline: 'border-borda-forte bg-superficie text-texto hover:bg-superficie-3',
   ghost: 'text-texto-2 hover:bg-superficie-3 hover:text-texto',
@@ -35,6 +44,9 @@ const variants: Record<Variant, string> = {
   // escurecer: o vermelho e o verde já estão no tom mais escuro em que o branco
   // passa de 4,5:1 com folga.
   danger: 'bg-perigo-cheio text-white shadow-nivel-1 hover:brightness-105',
+  // O PERIGO DENTRO DA JANELA (auditoria visual, §0.6): contornado, à esquerda
+  // do rodapé ("Reprovar crédito"). O cheio fica só para a confirmação final.
+  dangerOutline: 'border-perigo-borda bg-superficie text-perigo hover:bg-perigo-fundo',
   // Desfechos positivo e intermediário, para telas em que as saídas são
   // alternativas legítimas e a cor comunica mais rápido que o rótulo.
   success: 'bg-sucesso-cheio text-white shadow-nivel-1 hover:brightness-105',
@@ -43,12 +55,14 @@ const variants: Record<Variant, string> = {
   warning: 'border-aviso-borda bg-aviso-fundo text-aviso hover:brightness-95',
 }
 
-// Alturas na grade de 3px (o <html> é 12px; ver index.css). O `md` fica em 33px,
-// o mais perto dos 32px da amostra; o `lg`, em 36px.
+// AS ALTURAS DE CONTROLE (auditoria visual, §0.2): o `md` tem 36px, a mesma
+// altura do campo, do select e do segmentado — numa barra de filtros, tudo na
+// mesma linha (eram 33, 35 e 39px). O `sm` (ação de linha) tem 28px; o `lg`,
+// 40px, só no Entrar e em formulário de página inteira.
 const sizes: Record<Size, string> = {
-  sm: 'h-9 px-3 text-sm gap-1.5',
-  md: 'h-11 px-4 text-sm gap-2',
-  lg: 'h-12 px-5 text-corpo gap-2',
+  sm: 'h-controle-sm px-s3 text-sm gap-s1.5',
+  md: 'h-controle px-s4 text-sm gap-s2',
+  lg: 'h-controle-lg px-s5 text-corpo gap-s2',
 }
 
 export function Button({
@@ -64,7 +78,7 @@ export function Button({
   return (
     <button
       className={cn(
-        // whitespace-nowrap: as alturas são fixas (h-9/h-11/h-12), então rótulo
+        // whitespace-nowrap: as alturas são fixas (as de controle), então rótulo
         // que quebra em duas linhas vaza do botão em vez de esticá-lo.
         // BORDA EM TODAS AS VARIANTES (transparente onde não aparece), como a
         // `.btn` da amostra: assim o contornado e o cheio têm a mesma altura
@@ -81,7 +95,7 @@ export function Button({
       disabled={disabled || loading}
       {...rest}
     >
-      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
+      {loading ? <Loader2 className="h-[16px] w-[16px] animate-spin" /> : icon}
       {children}
     </button>
   )

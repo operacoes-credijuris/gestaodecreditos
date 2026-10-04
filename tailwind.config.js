@@ -92,6 +92,10 @@ export default {
           texto: cor('nav-texto'),
           apagado: cor('nav-apagado'),
           ativo: cor('nav-ativo'),
+          // O anel de foco DENTRO do menu navy (auditoria visual, 03/10/2026): o
+          // azul do anel global dava 3,2:1 sobre o navy; este, 7:1, igual nos
+          // dois temas.
+          foco: cor('nav-foco'),
         },
         acento: cor('acento'), // barra verde do item aceso no menu
         sucesso: {
@@ -170,6 +174,52 @@ export default {
         campo: 'var(--raio-campo)',
         cartao: 'var(--raio-cartao)',
         janela: 'var(--raio-janela)',
+        // O que flutua sobre a tela: menu suspenso, o "?", aviso e o aviso de
+        // versão (auditoria visual, §0.3). O `rounded-2xl` de antes era em rem
+        // e valia 12px por acaso.
+        flutuante: 'var(--raio-flutuante)',
+      },
+      // A GRADE DE 4 PX, COM RITMO DE 8 (auditoria visual de 03/10/2026, §0.1).
+      // ADITIVA: a escala numérica de sempre continua (com o <html> em 12px, uma
+      // unidade vale 3px — `p-5` = 15px), e trocá-la inteira mudaria a densidade
+      // de todas as telas de uma vez (AP5, recusado). Estas valem em px, em
+      // qualquer utilitário de espaço (`p-s4`, `gap-s2`, `mb-s6`, `h-controle`…).
+      // Ao mexer num arquivo, converta: 0.5→s0.5; 1 e 1.5→s1; 2, 2.5 e 3→s2;
+      // 3.5 e 4→s3; 5→s4 (ou s5 em cartão); 6→s5; 8→s6; 10→s8.
+      //
+      // AS ALTURAS DE CONTROLE (§0.2): uma só para botão, campo, select, data,
+      // segmentado e busca de lista (36px); a pequena para botão `sm`, ação de
+      // linha e chip (28px); a grande só no Entrar e em formulário de página
+      // inteira (40px).
+      spacing: {
+        's0.5': '2px',
+        s1: '4px',
+        's1.5': '6px',
+        s2: '8px',
+        s3: '12px',
+        s4: '16px',
+        s5: '20px',
+        s6: '24px',
+        s8: '32px',
+        s10: '40px',
+        s12: '48px',
+        s16: '64px',
+        'controle-sm': '28px',
+        controle: '36px',
+        'controle-lg': '40px',
+      },
+      // AS CAMADAS (§0.11), por nome e não por número solto: quem fica por cima
+      // de quem é decisão da moldura, e um `z-40` escrito à mão numa tela não diz
+      // com quem compete. Antes, o botão do assistente e a gaveta do celular
+      // estavam ambos em z-40, e o botão ficava por cima do menu aberto.
+      zIndex: {
+        cabecalho: '10', // cabeçalho fixo de tabela
+        topo: '30', // a barra do topo
+        assistente: '30', // o botão flutuante do assistente
+        'assistente-painel': '40', // o painel aberto do assistente
+        janela: '50', // janela, painel lateral e a gaveta do menu no celular
+        'aviso-versao': '55', // "Há uma versão nova"
+        aviso: '60', // os avisos flutuantes e a dica do menu recolhido
       },
       boxShadow: {
         'nivel-1': 'var(--sombra-1)', // cartão

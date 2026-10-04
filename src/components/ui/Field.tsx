@@ -15,8 +15,10 @@ import { cn } from '@/lib/cn'
  * - A BORDA É `borda-controle` (3,4:1 no branco), e não a `--border-strong` da
  *   amostra (1,6:1): um campo vazio precisa ser visto como campo (WCAG 1.4.11).
  *   O teste de contraste cobra isso.
- * - 35px de altura (6 + 21 de linha + 6 + 2 de borda), e não 38: fica a 2px do
- *   botão médio (33px) nas barras de filtro, em vez de 5.
+ * - 36px DE ALTURA (`h-controle`), a mesma do botão médio, do segmentado e
+ *   do select (auditoria visual de 03/10/2026, §0.2): antes eram 35px no texto
+ *   e 37px na data, e numa linha de filtros nada se alinhava. A caixa de texto
+ *   (Textarea) cresce com as linhas, e não tem a altura fixa.
  * Texto em 14px (`corpo`), o mesmo do texto corrido. O erro (aria-invalid, que o
  * Field põe) pinta a borda de vermelho além da mensagem embaixo.
  */
@@ -110,7 +112,7 @@ function useCampo(idProprio?: string) {
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, ...rest }, ref) {
     const campo = useCampo(rest.id)
-    return <input ref={ref} className={cn(baseControl, className)} {...campo} {...rest} />
+    return <input ref={ref} className={cn(baseControl, 'h-controle py-0', className)} {...campo} {...rest} />
   },
 )
 
@@ -136,7 +138,7 @@ export const Select = forwardRef<
 >(function Select({ className, children, ...rest }, ref) {
   const campo = useCampo(rest.id)
   return (
-    <select ref={ref} className={cn(baseControl, 'pr-8', className)} {...campo} {...rest}>
+    <select ref={ref} className={cn(baseControl, 'h-controle py-0 pr-8', className)} {...campo} {...rest}>
       {children}
     </select>
   )

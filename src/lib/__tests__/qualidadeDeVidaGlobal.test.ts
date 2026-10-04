@@ -108,17 +108,21 @@ describe('avisos flutuantes', () => {
     expect(juntarAviso([a], { id: 3, type: 'info', message: 'Falhou.' }).pilha).toHaveLength(2)
   })
   it(`passando de ${MAX_AVISOS}, sai o mais antigo que não é erro`, () => {
+    // MUDADO DE PROPÓSITO (auditoria visual de 03/10/2026, C10): a pilha passou
+    // de 4 para 2 avisos. A regra de quem sai é a mesma; a conta, a da pilha nova.
+    expect(MAX_AVISOS).toBe(2)
     const pilha = [
       { id: 1, type: 'error' as const, message: 'e1' },
       { id: 2, type: 'success' as const, message: 's1' },
-      { id: 3, type: 'error' as const, message: 'e2' },
-      { id: 4, type: 'info' as const, message: 'i1' },
     ]
-    const r = juntarAviso(pilha, { id: 5, type: 'success', message: 's2' })
-    expect(r.pilha.map((t) => t.id)).toEqual([1, 3, 4, 5])
+    const r = juntarAviso(pilha, { id: 3, type: 'success', message: 's2' })
+    expect(r.pilha.map((t) => t.id)).toEqual([1, 3])
+    // Com outro limite, a mesma regra (o de antes, 4).
+    const quatro = [...pilha, { id: 3, type: 'error' as const, message: 'e2' }, { id: 4, type: 'info' as const, message: 'i1' }]
+    expect(juntarAviso(quatro, { id: 5, type: 'success', message: 's2' }, 4).pilha.map((t) => t.id)).toEqual([1, 3, 4, 5])
     // Só erros: sai o erro mais antigo, nunca o que acabou de chegar.
-    const erros = [1, 2, 3, 4].map((id) => ({ id, type: 'error' as const, message: `e${id}` }))
-    expect(juntarAviso(erros, { id: 5, type: 'error', message: 'e5' }).pilha.map((t) => t.id)).toEqual([2, 3, 4, 5])
+    const erros = [1, 2].map((id) => ({ id, type: 'error' as const, message: `e${id}` }))
+    expect(juntarAviso(erros, { id: 3, type: 'error', message: 'e3' }).pilha.map((t) => t.id)).toEqual([2, 3])
   })
   it('os detalhes do erro dizem onde, quando e em que versão — sem dado da sessão', () => {
     const t = detalhesDoErro({

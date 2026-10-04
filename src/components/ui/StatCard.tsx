@@ -13,7 +13,7 @@ export function StatCard({
   to,
   onClick,
   active,
-  iconPosition = 'right',
+  iconPosition = 'left',
   sub,
 }: {
   label: ReactNode
@@ -28,9 +28,11 @@ export function StatCard({
   /** Realce visual de "selecionado" — só faz sentido junto de `onClick`. */
   active?: boolean
   /**
-   * Onde fica o ícone. `'right'` (o padrão) é a placa grande no canto, como
-   * sempre. `'left'` é o `.kpi-top` da amostra: uma placa pequena (28px) À
-   * ESQUERDA do rótulo, na mesma linha — o ícone fica junto do nome do número.
+   * Onde fica o ícone. `'left'` (O PADRÃO desde a auditoria visual de
+   * 03/10/2026, C12) é o `.kpi-top` da amostra: uma placa pequena (28px) À
+   * ESQUERDA do rótulo, na mesma linha — o ícone junto do nome do número
+   * (proximidade). Havia dois desenhos na plataforma, um em Créditos e outro no
+   * Quadro. `'right'` é a placa grande no canto, o desenho antigo.
    */
   iconPosition?: 'right' | 'left'
   /**
@@ -50,14 +52,17 @@ export function StatCard({
   }
   const clicavel = !!to || !!onClick
   const iconeAEsquerda = !!icon && iconPosition === 'left'
+  // O RÓTULO QUEBRA EM ATÉ DUAS LINHAS (auditoria visual, C12): cortado com
+  // "…" ele escondia o que o número conta ("Créditos na sele…" no celular), e
+  // solto quebrava em três ("A / receber / estimado", em Carteiras a 1280px).
   const rotulo = (
-    <p className="flex min-w-0 items-center gap-1 truncate text-corpo font-medium text-texto-2">
-      {label}
+    <p className="flex min-w-0 items-start gap-s1 text-corpo font-medium text-texto-2">
+      <span className="line-clamp-2 min-w-0">{label}</span>
       {/* A régua do indicador fica no tooltip do ⓘ — tela limpa,
           informação a um hover de distância. */}
       {typeof hint === 'string' && hint && (
-        <span title={hint} aria-label={hint} className="shrink-0 cursor-help">
-          <Info className="h-3.5 w-3.5 text-texto-3 transition-colors hover:text-texto-2" />
+        <span title={hint} aria-label={hint} className="mt-[3px] shrink-0 cursor-help">
+          <Info className="h-[14px] w-[14px] text-texto-3 transition-colors hover:text-texto-2" />
         </span>
       )}
     </p>
@@ -65,7 +70,7 @@ export function StatCard({
   const card = (
     <Card
       className={cn(
-        'h-full p-5',
+        'h-full p-s4',
         clicavel && 'transition hover:border-borda-forte hover:shadow-nivel-2',
         // Selecionado: contorno no azul da logomarca e um halo largo e claro
         // (o `.kpi.click.sel` da amostra).
@@ -75,7 +80,7 @@ export function StatCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {iconeAEsquerda ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-s2">
               <span
                 className={cn(
                   'grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle [&_svg]:h-[16px] [&_svg]:w-[16px]',
@@ -115,4 +120,14 @@ export function StatCard({
     )
   }
   return card
+}
+
+/**
+ * A GRADE DOS CARTÕES DE INDICADOR (auditoria visual, C12): quantas colunas
+ * couberem, cada uma com pelo menos 200px, e 16px entre elas. Seis indicadores
+ * espremidos a 1280px (Carteiras) passam a descer de linha em vez de quebrar o
+ * rótulo em três.
+ */
+export function GradeDeIndicadores({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn('grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-s4', className)}>{children}</div>
 }

@@ -23,6 +23,7 @@ export function Drawer({
   title,
   children,
   footer,
+  rodapeInicio,
   dirty = false,
   ariaLabel,
 }: {
@@ -30,7 +31,10 @@ export function Drawer({
   onClose: () => void
   title: ReactNode
   children: ReactNode
+  /** O rodapé, à direita: `[Cancelar/Fechar] [Primário]` (ver o `Modal`). */
   footer?: ReactNode
+  /** À esquerda do rodapé: a ação destrutiva ou alternativa (ver o `Modal`). */
+  rodapeInicio?: ReactNode
   /**
    * Quando true, fechar (X, fundo ou Escape) pergunta antes "Descartar
    * alterações?", com o texto "nesta ficha" — o item "Novo" da amostra para a
@@ -91,7 +95,7 @@ export function Drawer({
   if (!rendered) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-janela">
       <div
         className={cn(
           'absolute inset-0 bg-veu/40 backdrop-blur-[2px] transition-opacity duration-200',
@@ -113,7 +117,7 @@ export function Drawer({
           // 520px, o painel lateral da amostra: a ficha usa grid de 2 colunas
           // (DrawerSection) e estreito os valores longos quebravam demais. Em px
           // porque a escala em rem (max-w-2xl) encolhe com o <html> de 12px.
-          'absolute inset-y-0 right-0 flex w-full max-w-[520px] flex-col border-l border-borda bg-superficie shadow-nivel-3 outline-none transition-transform duration-200',
+          'absolute inset-y-0 right-0 flex w-full max-w-[520px] flex-col border-l border-borda bg-superficie shadow-nivel-3 outline-none transition-transform duration-200 dark:ring-1 dark:ring-white/[0.06]',
           visible ? 'translate-x-0' : 'translate-x-full',
         )}
       >
@@ -124,16 +128,17 @@ export function Drawer({
           <button
             onClick={pedirFechar}
             aria-label="Fechar painel"
-            className="-mr-2 -mt-1 shrink-0 rounded-controle p-1.5 text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto"
+            className="-mr-s2 -mt-s1 grid h-[32px] w-[32px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto"
           >
-            <X className="h-5 w-5" />
+            <X className="h-[18px] w-[18px]" aria-hidden />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5 scrollbar-thin">
           {children}
         </div>
-        {footer && (
-          <div className="flex flex-wrap justify-end gap-2 border-t border-borda px-6 py-4">
+        {(footer || rodapeInicio) && (
+          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda px-6 py-4">
+            {rodapeInicio && <div className="mr-auto flex flex-wrap items-center gap-s2">{rodapeInicio}</div>}
             {footer}
           </div>
         )}

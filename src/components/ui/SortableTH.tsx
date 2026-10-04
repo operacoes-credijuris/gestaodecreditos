@@ -12,6 +12,7 @@ export function SortableTH({
   dir,
   onToggle,
   className,
+  numero,
 }: {
   label?: ReactNode
   children?: ReactNode
@@ -19,9 +20,11 @@ export function SortableTH({
   dir: 'asc' | 'desc'
   onToggle: () => void
   className?: string
+  /** Coluna de número ou moeda: rótulo e seta à direita, como os valores (ver `TH`). */
+  numero?: boolean
 }) {
   return (
-    <TH className={className}>
+    <TH className={className} numero={numero}>
       <button
         type="button"
         onClick={onToggle}
@@ -31,19 +34,19 @@ export function SortableTH({
         // só a seta: é o rótulo que o olho procura. A seta das outras colunas
         // fica esmaecida, presente só para dizer que dá para ordenar.
         className={cn(
-          '-my-1.5 inline-flex items-center gap-1 py-1.5 font-bold uppercase tracking-wide hover:text-texto',
+          '-my-1.5 inline-flex items-center gap-1 py-1.5 font-bold uppercase tracking-[0.06em] hover:text-texto',
           active && 'text-marca-texto hover:text-marca-texto',
         )}
       >
         {label ?? children}
         {active ? (
           dir === 'asc' ? (
-            <ArrowUp className="h-3.5 w-3.5" />
+            <ArrowUp className="h-[12px] w-[12px]" />
           ) : (
-            <ArrowDown className="h-3.5 w-3.5" />
+            <ArrowDown className="h-[12px] w-[12px]" />
           )
         ) : (
-          <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />
+          <ArrowUpDown className="h-[12px] w-[12px] opacity-40" />
         )}
       </button>
     </TH>
