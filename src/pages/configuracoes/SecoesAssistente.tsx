@@ -422,7 +422,7 @@ export function SecaoRoteiro({ pendencia }: { pendencia: Pendencia }) {
               )}
             </span>
             {mudou && (
-              <span className="inline-flex items-center gap-1 text-sm font-semibold text-aviso">
+              <span className="inline-flex items-center gap-s1 text-sm font-semibold text-aviso">
                 <TriangleAlert className="h-[14px] w-[14px]" aria-hidden />
                 alterações não salvas
               </span>

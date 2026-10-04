@@ -22,9 +22,9 @@ export function CabecalhoSecao({
     <div className="mb-[18px] flex flex-wrap items-start justify-between gap-[12px]">
       <div className="min-w-0">
         <h2 className="font-display text-xl font-extrabold tracking-tight text-texto">{titulo}</h2>
-        {apoio && <p className="mt-1 text-corpo text-texto-2">{apoio}</p>}
+        {apoio && <p className="mt-s1 text-corpo text-texto-2">{apoio}</p>}
       </div>
-      {direita && <div className="flex flex-wrap items-center gap-2">{direita}</div>}
+      {direita && <div className="flex flex-wrap items-center gap-s2">{direita}</div>}
     </div>
   )
 }
@@ -34,7 +34,7 @@ export function RodapeSecao({ children, className }: { children: ReactNode; clas
   return (
     <div
       className={cn(
-        'mt-[18px] flex flex-wrap items-center justify-end gap-2 border-t border-borda pt-[16px]',
+        'mt-[18px] flex flex-wrap items-center justify-end gap-s2 border-t border-borda pt-[16px]',
         className,
       )}
     >
@@ -127,7 +127,7 @@ export function Selo({
 }) {
   return (
     <Badge tone={TOM_DO_SELO[tom]}>
-      {Icone && <Icone className="mr-1 h-[13px] w-[13px] shrink-0" aria-hidden />}
+      {Icone && <Icone className="mr-s1 h-[13px] w-[13px] shrink-0" aria-hidden />}
       {children}
     </Badge>
   )
@@ -168,10 +168,10 @@ export function SeloIntegracao({
 
 /**
  * A pílula feita à mão, para o que a Badge não tem: o selo-botão do saldo e o
- * tom de informação do plano. Mesmas medidas da Badge `md` (22px de altura).
+ * tom de informação do plano. Mesmas medidas da Badge `md` (20px de altura, §0.8).
  */
 export const PILULA =
-  'inline-flex items-center gap-[5px] whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset'
+  'inline-flex h-[20px] items-center gap-[5px] whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset'
 
 /**
  * O SEGREDO TRATADO COMO SEGREDO (item "Novo" da amostra).
@@ -220,7 +220,7 @@ export function CampoSegredo({
   return (
     <Field label={rotulo} hint={temSegredo ? dicaConfigurado : dicaNovo}>
       {temSegredo && !substituindo ? (
-        <div className="flex h-[35px] items-center gap-2 rounded-campo border border-borda-forte bg-superficie-2 pl-[12px] pr-1 text-corpo text-texto-2">
+        <div className="flex h-controle items-center gap-s2 rounded-campo border border-borda-forte bg-superficie-2 pl-[12px] pr-s1 text-corpo text-texto-2">
           <Lock className="h-[16px] w-[16px] shrink-0" aria-hidden />
           <span className="min-w-0 flex-1 truncate">Configurado</span>
           <Button

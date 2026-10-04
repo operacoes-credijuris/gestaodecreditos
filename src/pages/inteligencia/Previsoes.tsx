@@ -28,21 +28,6 @@ function rotuloMes(iso: string): string {
     .replace('.', '')
 }
 
-/**
- * Valor em forma curta, para caber acima da barra: "R$ 120 mil", "R$ 1,3 mi".
- *
- * O valor exato fica no tooltip. Aqui a função é dar a ordem de grandeza sem
- * que os rótulos colidam quando o cronograma tem muitos meses.
- */
-function brlCurto(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  if (Math.abs(v) >= 1_000_000) {
-    return `R$ ${(v / 1_000_000).toFixed(1).replace('.', ',')} mi`
-  }
-  if (Math.abs(v) >= 1_000) return `R$ ${Math.round(v / 1000)} mil`
-  return `R$ ${Math.round(v)}`
-}
-
 /** Chave do bloco de incalculáveis, que não vem do núcleo como os outros. */
 const INCALCULAVEIS = '__incalculaveis__'
 
@@ -59,7 +44,7 @@ function SeloDoBloco({ rotulo }: { rotulo: string }) {
         ? { cor: 'border-info-borda bg-info-fundo text-info', Icone: ArrowRight }
         : { cor: 'border-transparent bg-superficie-3 text-texto-2', Icone: null }
   return (
-    <span className={cn('inline-flex h-[22px] items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-xs font-semibold', estilo.cor)}>
+    <span className={cn('inline-flex h-[22px] items-center gap-s1 whitespace-nowrap rounded-full border px-s2 text-xs font-semibold', estilo.cor)}>
       {estilo.Icone && <estilo.Icone className="h-[13px] w-[13px]" aria-hidden />}
       {rotulo}
     </span>
@@ -79,7 +64,7 @@ function BotaoVer({
       type="button"
       onClick={onClick}
       aria-expanded={aberto}
-      className="-ml-2 inline-flex h-[28px] items-center gap-1.5 rounded-controle px-2 text-sm font-semibold tabular-nums text-marca-texto transition-colors hover:bg-marca-leve"
+      className="-ml-s2 inline-flex h-[28px] items-center gap-s1 rounded-controle px-s2 text-sm font-semibold tabular-nums text-marca-texto transition-colors hover:bg-marca-leve"
     >
       {children}
       <ChevronDown
@@ -108,12 +93,12 @@ function ListaOperacoes({
 }) {
   if (operacoes.length === 0) return null
   return (
-    <div className="mx-6 mb-4 mt-1 rounded-campo border border-borda bg-superficie-2 px-4 py-3">
-      <p className="mb-1.5 font-display text-xs font-bold uppercase tracking-wider text-texto-3">
+    <div className="mx-s5 mb-s3 mt-s1 rounded-campo border border-borda bg-superficie-2 px-s3 py-s2">
+      <p className="mb-s1 font-display text-xs font-bold uppercase tracking-wider text-texto-3">
         {titulo} · {operacoes.length}{' '}
         {operacoes.length === 1 ? 'operação' : 'operações'}
       </p>
-      <Table className="[&_td]:px-3 [&_td]:py-1.5 [&_td]:text-sm [&_th]:px-3 [&_th]:py-1.5">
+      <Table className="[&_td]:px-s2 [&_td]:py-s1 [&_td]:text-sm [&_th]:px-s2 [&_th]:py-s1">
         <THead>
           <tr>
             <TH>Processo</TH>
@@ -176,7 +161,7 @@ export default function Previsoes() {
   const parcelasSemMes = forecast.blocos.map((b) => b.rotulo.toLowerCase()).join(' e ')
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-s4">
       <CabecalhoDaAba
         titulo="Previsões e recebimentos"
         apoio={
@@ -213,7 +198,7 @@ export default function Previsoes() {
 
       <Painel
         titulo="Operações a receber por mês"
-        apoio="A altura é o número de operações. Acima de cada barra, o valor previsto para o mês."
+        apoio="Quantas operações têm pagamento previsto em cada mês, e quanto elas somam."
       >
         {dados.length === 0 ? (
           <EmptyState
@@ -221,7 +206,7 @@ export default function Previsoes() {
             description="Nenhuma operação em aberto tem data prevista à frente de hoje."
           />
         ) : (
-          <GraficoPrevisoes dados={dados} rotuloDaBarra={brlCurto} />
+          <GraficoPrevisoes dados={dados} />
         )}
       </Painel>
 
@@ -263,7 +248,7 @@ export default function Previsoes() {
           </div>
 
           {blocoAberto && (
-            <div className="pt-3">
+            <div className="pt-s2">
               <ListaOperacoes
                 titulo={blocoAberto.rotulo}
                 operacoes={blocoAberto.refs.map((r) => porRef.get(r)).filter(Boolean) as OperacaoAnalitica[]}
@@ -274,8 +259,8 @@ export default function Previsoes() {
           )}
 
           {incalculaveis.length > 0 ? (
-            <div className="border-t border-borda pb-1 pt-3">
-              <p className="px-6 pb-3 text-xs text-texto-3">
+            <div className="border-t border-borda pb-s1 pt-s2">
+              <p className="px-s5 pb-s2 text-xs text-texto-3">
                 <BotaoVer
                   aberto={aberto === INCALCULAVEIS}
                   onClick={() => setAberto(aberto === INCALCULAVEIS ? null : INCALCULAVEIS)}
@@ -313,11 +298,11 @@ export default function Previsoes() {
           titulo="Estimativa ajustada pelo histórico"
           apoio="Corrige as datas previstas pelo desvio que a carteira historicamente apresenta."
         >
-          <Metricas className="pb-3">
+          <Metricas className="pb-s2">
             <LinhaMetrica rotulo="Desvio mediano observado" valor={dias(ajuste.desvioMediano)} destaque />
             <LinhaMetrica rotulo="Percentil 75 do desvio" valor={dias(ajuste.desvioP75)} />
           </Metricas>
-          <p className="px-6 pb-5 text-xs text-texto-3">{ajuste.metodologia}</p>
+          <p className="px-s5 pb-s4 text-xs text-texto-3">{ajuste.metodologia}</p>
         </Painel>
       )}
 

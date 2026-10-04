@@ -206,7 +206,7 @@ export function SecaoUsuarios() {
                     <TD className="align-middle">
                       {admin ? (
                         <Badge tone="purple">
-                          <ShieldCheck className="mr-1 h-[13px] w-[13px] shrink-0" aria-hidden />
+                          <ShieldCheck className="mr-s1 h-[13px] w-[13px] shrink-0" aria-hidden />
                           Administrador
                         </Badge>
                       ) : (
@@ -225,7 +225,7 @@ export function SecaoUsuarios() {
                       )}
                     </TD>
                     <TD className="whitespace-nowrap text-right align-middle">
-                      <div className="flex items-center justify-end gap-1.5">
+                      <div className="flex items-center justify-end gap-s1">
                         {!admin && (
                           <Button size="sm" variant="ghost" onClick={() => toggleAtivo(p)}>
                             {p.ativo ? 'Desativar' : 'Ativar'}
@@ -263,7 +263,7 @@ export function SecaoUsuarios() {
         }
       >
         {editando && (
-          <div className="space-y-4">
+          <div className="space-y-s3">
             <Field
               label="Nome"
               hint="Assina as anotações que a plataforma grava nos cards do Kommo."

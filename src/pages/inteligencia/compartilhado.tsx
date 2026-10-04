@@ -11,13 +11,14 @@
 // em components/ui, porque o desenho delas é do Quadro: o StatCard e o Card de
 // ui/ continuam servindo às outras telas como estão.
 
-import { useMemo, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Check, Info } from 'lucide-react'
 import { Card, CardBody } from '@/components/ui/Card'
 import { ErrorState, Loading } from '@/components/ui/Table'
 import { cn } from '@/lib/cn'
 import { formatBRL, hojeISO } from '@/lib/format'
+import { restaAlemDaBorda } from '@/lib/rolagemLateral'
 import { processosCrud, useParametrosAtualizacao } from '@/lib/queries'
 import { montarPainel, type PainelEconomico, type ResumoGrupo } from '@/lib/analytics'
 import type { ClasseAmostra } from '../../../supabase/functions/_shared/nucleo/amostra.ts'
@@ -106,7 +107,7 @@ export function ErroPainel({ tentarDeNovo }: { tentarDeNovo: () => void }) {
  */
 export function CabecalhoDaAba({ titulo, apoio }: { titulo: string; apoio?: ReactNode }) {
   return (
-    <div className="-mt-1.5">
+    <div className="-mt-s1">
       <h2 className="sr-only">{titulo}</h2>
       {/* OS TERMOS DO GLOSSÁRIO sublinhados quando o apoio é texto puro (o
           `tab-desc` da amostra); apoio com marcação fica como veio. */}
@@ -134,7 +135,7 @@ export function Dica({ texto, focavel = true }: { texto: string; focavel?: boole
       aria-label={texto}
       title={texto}
       tabIndex={focavel ? 0 : undefined}
-      className="-my-1 inline-grid h-[24px] w-[24px] shrink-0 cursor-help place-items-center rounded-[6px] text-texto-3 transition-colors hover:bg-superficie-3 hover:text-marca-texto focus-visible:bg-superficie-3 focus-visible:text-marca-texto"
+      className="-my-s1 inline-grid h-[24px] w-[24px] shrink-0 cursor-help place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-marca-texto focus-visible:bg-superficie-3 focus-visible:text-marca-texto"
     >
       <Info className="h-[14px] w-[14px]" aria-hidden />
     </span>
@@ -144,7 +145,7 @@ export function Dica({ texto, focavel = true }: { texto: string; focavel?: boole
 /** Rótulo com o ⓘ ao lado (item 19: nenhum indicador sem explicação). */
 export function Explicacao({ texto, children }: { texto: string; children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-0.5">
+    <span className="inline-flex items-center gap-s0.5">
       {children}
       <Dica texto={texto} />
     </span>
@@ -184,7 +185,7 @@ export function SeloAmostra({
       tabIndex={0}
       aria-label={`${rotulo} · n=${n}. ${explicacao}`}
       className={cn(
-        'inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-xs font-semibold',
+        'inline-flex h-[22px] shrink-0 items-center gap-s1 whitespace-nowrap rounded-full border px-s2 text-xs font-semibold',
         cor,
       )}
     >
@@ -256,11 +257,11 @@ export function Painel({
   className?: string
 }) {
   return (
-    <section className={cn('min-w-0 rounded-cartao border border-borda bg-superficie shadow-nivel-1', className)}>
-      <div className="flex flex-wrap items-start justify-between gap-4 px-6 pb-3 pt-5">
+    <section className={cn('min-w-0 rounded-cartao border border-borda bg-superficie shadow-nivel-1 dark:shadow-none', className)}>
+      <div className="flex flex-wrap items-start justify-between gap-s3 px-s5 pb-s2 pt-s4">
         <div className="min-w-0">
-          <h3 className="flex items-center gap-2 font-display text-lg font-bold text-texto">{titulo}</h3>
-          {apoio && <p className="mt-0.5 text-corpo text-texto-2">{apoio}</p>}
+          <h3 className="flex items-center gap-s2 font-display text-lg font-bold text-texto">{titulo}</h3>
+          {apoio && <p className="mt-s0.5 text-corpo text-texto-2">{apoio}</p>}
         </div>
         {acao}
       </div>
@@ -291,7 +292,7 @@ export function BlocoGrupo({
         />
       }
     >
-      <div className="px-6 pb-6">{children}</div>
+      <div className="px-s5 pb-s5">{children}</div>
     </Painel>
   )
 }
@@ -306,7 +307,7 @@ export function BlocoGrupo({
  * amostra): âmbar para o que pede atenção, vermelho para o que passou do ponto.
  */
 export function CartaoNumero({
-  rotulo, valor, icone, dica, sub, tom, to, tituloDoLink,
+  rotulo, valor, icone, dica, sub, tom, to, tituloDoLink, menor = false,
 }: {
   rotulo: string
   valor: ReactNode
@@ -317,6 +318,13 @@ export function CartaoNumero({
   to?: string
   /** O `title` do link, quando há `to`. */
   tituloDoLink?: string
+  /**
+   * O número da SEGUNDA FAIXA (auditoria visual, Q3): 18px em vez de 22px e
+   * menos altura. Na Visão geral, os três de dinheiro ficam grandes em cima e
+   * os de taxa e prazo descem um degrau — seis números do mesmo peso não
+   * diziam qual olhar primeiro.
+   */
+  menor?: boolean
 }) {
   const placa =
     tom === 'perigo'
@@ -325,15 +333,19 @@ export function CartaoNumero({
         ? 'bg-aviso-fundo text-aviso'
         : 'bg-marca-leve text-marca-texto'
   const cartao = (
-    <div
+    // A FAIXA DE ESTADO é a do Card de ui/ (auditoria visual, C5): uma barra
+    // interna de 3px, recortada pelo canto. O `border-l-4` de antes curvava
+    // junto com o raio e parecia borda dupla.
+    <Card
+      faixa={tom}
       className={cn(
-        'flex h-full min-w-0 flex-col gap-1 rounded-cartao border border-borda bg-superficie px-5 py-4 shadow-nivel-1',
-        tom === 'aviso' && 'border-l-4 border-l-aviso-cheio',
-        tom === 'perigo' && 'border-l-4 border-l-perigo-cheio',
+        // Cartão de indicador: 16px de respiro (§0.1).
+        'flex h-full min-w-0 flex-col gap-s1 p-s4',
+        menor && 'py-s3',
         to && 'transition group-hover:border-marca-viva group-hover:shadow-nivel-2',
       )}
     >
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-s2">
         {icone && (
           <span className={cn('grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle', placa)} aria-hidden>
             {icone}
@@ -342,9 +354,14 @@ export function CartaoNumero({
         <span className="min-w-0 text-corpo font-medium text-texto-2">{rotulo}</span>
         {dica && <Dica texto={dica} focavel={!to} />}
       </div>
-      <div className="text-2xl font-bold tabular-nums tracking-tight text-texto">{valor}</div>
+      {/* NA FONTE DO CORPO, como o `.kpi-v` da amostra, e não na de display:
+          o espaço do "R$ 7.075.026,00" na Plus Jakarta tem 3px, e o valor se
+          lia "R$7.075.026,00". */}
+      <div className={cn('font-bold tabular-nums tracking-tight text-texto', menor ? 'text-xl' : 'text-2xl')}>
+        {valor}
+      </div>
       {sub && <div className="text-xs text-texto-3">{sub}</div>}
-    </div>
+    </Card>
   )
   if (!to) return cartao
   return (
@@ -362,7 +379,7 @@ export function GradeCartoes({ children, seis = false }: { children: ReactNode; 
   return (
     <div
       className={cn(
-        'grid gap-4',
+        'grid gap-s4',
         seis ? 'grid-cols-2 md:grid-cols-3 min-[1180px]:grid-cols-6' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
       )}
     >
@@ -397,8 +414,8 @@ export function AvisoParametros() {
  */
 export function Ressalva({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2.5 rounded-campo border border-aviso-borda bg-aviso-fundo px-4 py-3 text-corpo">
-      <AlertTriangle className="mt-0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
+    <div className="flex items-start gap-s2 rounded-campo border border-aviso-borda bg-aviso-fundo px-s3 py-s2 text-corpo">
+      <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
       <p className="text-texto">{children}</p>
     </div>
   )
@@ -410,7 +427,7 @@ export function Ressalva({ children }: { children: ReactNode }) {
  * Envolve as `LinhaMetrica` num `<dl>`.
  */
 export function Metricas({ children, className }: { children: ReactNode; className?: string }) {
-  return <dl className={cn('space-y-2.5 px-6 pb-6 pt-1', className)}>{children}</dl>
+  return <dl className={cn('space-y-s2 px-s5 pb-s5 pt-s1', className)}>{children}</dl>
 }
 
 /** Uma linha de `Metricas`. `destaque` em negrito: é o número para usar. */
@@ -423,12 +440,12 @@ export function LinhaMetrica({
   destaque?: boolean
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-4">
-      <dt className="inline-flex min-w-0 items-center gap-0.5 text-corpo text-texto-3">
+    <div className="flex items-baseline justify-between gap-s3">
+      <dt className="inline-flex min-w-0 items-center gap-s0.5 text-corpo text-texto-3">
         {rotulo}
         {explicacao && <Dica texto={explicacao} />}
       </dt>
-      <dd className={cn('text-right text-corpo tabular-nums text-texto', destaque ? 'font-bold' : 'font-medium')}>
+      <dd className={cn('whitespace-nowrap text-right text-corpo tabular-nums text-texto', destaque ? 'font-bold' : 'font-medium')}>
         {valor}
       </dd>
     </div>
@@ -437,7 +454,7 @@ export function LinhaMetrica({
 
 /** A régua entre dois blocos de métricas do mesmo painel (`hr.sep`). */
 export function Separador() {
-  return <hr className="mx-6 my-1 border-borda" />
+  return <hr className="mx-s5 my-s1 border-borda" />
 }
 
 /**
@@ -473,18 +490,18 @@ export function DicaDoGrafico({
   if (!active || !payload?.length) return null
   const ponto = payload[0]?.payload ?? {}
   return (
-    <div className="min-w-[160px] rounded-campo border border-borda bg-superficie px-3 py-2 text-sm text-texto shadow-nivel-2">
-      <p className="mb-1 font-bold">{label}</p>
+    <div className="min-w-[160px] rounded-campo border border-borda bg-superficie px-s2 py-s2 text-sm text-texto shadow-nivel-2">
+      <p className="mb-s1 font-bold">{label}</p>
       {payload.map((p) => (
-        <div key={p.name} className="flex items-center gap-1.5 text-texto-2">
+        <div key={p.name} className="flex items-center gap-s1 text-texto-2">
           <i className="h-[10px] w-[10px] shrink-0 rounded-[3px]" style={{ background: p.color }} />
           {p.name}
-          <span className="ml-auto pl-3 font-bold tabular-nums text-texto">
+          <span className="ml-auto pl-s2 font-bold tabular-nums text-texto">
             {typeof p.value === 'number' ? formatar(p.value) : '—'}
           </span>
         </div>
       ))}
-      {extra && <p className="mt-1 text-xs text-texto-3">{extra(ponto)}</p>}
+      {extra && <p className="mt-s1 text-xs text-texto-3">{extra(ponto)}</p>}
     </div>
   )
 }
@@ -492,9 +509,9 @@ export function DicaDoGrafico({
 /** A legenda dos gráficos de duas séries ou mais (`.legend`). */
 export function LegendaDoGrafico({ itens }: { itens: Array<{ nome: string; cor: string }> }) {
   return (
-    <div className="mb-2 flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-texto-2">
+    <div className="mb-s2 flex flex-wrap gap-x-s4 gap-y-s1 text-sm text-texto-2">
       {itens.map((i) => (
-        <span key={i.nome} className="inline-flex items-center gap-1.5">
+        <span key={i.nome} className="inline-flex items-center gap-s1">
           <i className="h-[10px] w-[10px] shrink-0 rounded-[3px]" style={{ background: i.cor }} aria-hidden />
           {i.nome}
         </span>
@@ -510,4 +527,58 @@ export function LegendaDoGrafico({ itens }: { itens: Array<{ nome: string; cor: 
  * O cabeçalho não quebra linha, como o `.tbl th` da amostra.
  */
 export const TABELA_NO_PAINEL =
-  '[&_th]:whitespace-nowrap [&_td:first-child]:pl-6 [&_th:first-child]:pl-6 [&_td:last-child]:pr-6 [&_th:last-child]:pr-6'
+  '[&_th]:whitespace-nowrap [&_td:first-child]:pl-s5 [&_th:first-child]:pl-s5 [&_td:last-child]:pr-s5 [&_th:last-child]:pr-s5'
+
+/**
+ * A CAIXA QUE ROLA DE LADO para as tabelas largas do Quadro (auditoria visual,
+ * Q2). A Table de ui/ deixa de rolar a partir de 1280px (para o cabeçalho fixo
+ * acompanhar a página), e uma tabela de 10 ou 25 colunas passava da borda do
+ * painel. Aqui ela rola dentro do painel, com duas pistas:
+ *   - a borda direita ESMAECE enquanto há coluna escondida (some ao chegar ao
+ *     fim, para a última coluna não ficar apagada);
+ *   - `colunaFixa`: a primeira coluna (o nome do grupo) fica parada ao rolar,
+ *     com uma linha à direita — a linha não perde o dono.
+ * O preço: dentro de uma caixa que rola, o cabeçalho não fica fixo no topo da
+ * página. São tabelas curtas (um grupo por linha), e o nome da linha à vista
+ * vale mais aqui.
+ */
+export function TabelaQueRola({ children, colunaFixa = false }: { children: ReactNode; colunaFixa?: boolean }) {
+  const caixa = useRef<HTMLDivElement>(null)
+  const [temMais, setTemMais] = useState(false)
+  const medir = useCallback(() => {
+    const el = caixa.current
+    if (el) setTemMais(restaAlemDaBorda(el.scrollLeft, el.clientWidth, el.scrollWidth))
+  }, [])
+  useEffect(() => {
+    const el = caixa.current
+    if (!el) return
+    medir()
+    const obs = new ResizeObserver(medir)
+    obs.observe(el)
+    if (el.firstElementChild) obs.observe(el.firstElementChild)
+    return () => obs.disconnect()
+  }, [medir])
+  return (
+    <div
+      ref={caixa}
+      onScroll={medir}
+      className={cn(
+        // A Table de ui/ tem a própria caixa que rola abaixo de 1280px: aqui ela
+        // não rola, para a pista e a coluna fixa valerem em qualquer largura.
+        'overflow-x-auto scrollbar-thin [&>div]:overflow-visible',
+        temMais && '[mask-image:linear-gradient(to_right,black_92%,transparent)]',
+        colunaFixa && [
+          // A primeira coluna parada. O fundo é opaco (a linha de baixo não pode
+          // aparecer através dela ao rolar), e o realce da linha sob o mouse é
+          // a mesma tinta do TR, pintada por dentro da célula.
+          '[&_td:first-child]:sticky [&_td:first-child]:left-0 [&_td:first-child]:z-[1] [&_td:first-child]:bg-superficie',
+          '[&_th:first-child]:sticky [&_th:first-child]:left-0 [&_th:first-child]:z-[1] [&_th:first-child]:bg-superficie-2',
+          '[&_td:first-child]:[box-shadow:1px_0_0_rgb(var(--borda))] [&_th:first-child]:[box-shadow:1px_0_0_rgb(var(--borda))]',
+          '[&_tr:hover_td:first-child]:[box-shadow:1px_0_0_rgb(var(--borda)),inset_0_0_0_999px_rgb(var(--superficie-3)/0.6)]',
+        ],
+      )}
+    >
+      {children}
+    </div>
+  )
+}

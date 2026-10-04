@@ -13,6 +13,7 @@
 
 import { useMemo } from 'react'
 import { AlertTriangle, CalendarClock, Clock, Gauge, Info, TrendingUp, Wallet } from 'lucide-react'
+import { Card, type FaixaDoCartao } from '@/components/ui/Card'
 import { cn } from '@/lib/cn'
 import { formatDate } from '@/lib/format'
 import { evolucaoDaCarteira } from '@/lib/graficosDoQuadro'
@@ -23,12 +24,21 @@ import {
 } from './compartilhado'
 import { GraficoEvolucao } from './graficos'
 
-/** O tom de cada insight: borda, ícone e cor do ícone (`.insights li.warn/.brand`). */
-const TOM_INSIGHT = {
-  atencao: { borda: 'border-l-aviso-cheio', Icone: AlertTriangle, cor: 'text-aviso' },
-  metodologico: { borda: 'border-l-marca-viva', Icone: Info, cor: 'text-marca-texto' },
-  neutro: { borda: 'border-l-borda-forte', Icone: Info, cor: 'text-texto-3' },
-} as const
+/**
+ * O tom de cada insight: a faixa, o ícone e a cor do ícone
+ * (`.insights li.warn/.brand`). A FAIXA É A DO CARD de ui/ (auditoria visual,
+ * Q3/C5), uma barra interna de 3px; o `border-l` de antes curvava junto com o
+ * canto. O neutro não leva faixa: faixa de cor neutra não diz nada.
+ */
+const TOM_INSIGHT: Record<'atencao' | 'metodologico' | 'neutro', {
+  faixa?: FaixaDoCartao
+  Icone: typeof Info
+  cor: string
+}> = {
+  atencao: { faixa: 'aviso', Icone: AlertTriangle, cor: 'text-aviso' },
+  metodologico: { faixa: 'marca', Icone: Info, cor: 'text-marca-texto' },
+  neutro: { Icone: Info, cor: 'text-texto-3' },
+}
 
 export default function VisaoGeral() {
   const { painel, carregando, erro, tentarDeNovo } = usePainel()
@@ -60,7 +70,7 @@ export default function VisaoGeral() {
   ]
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-s4">
       <CabecalhoDaAba
         titulo="Visão geral"
         apoio={
@@ -124,7 +134,14 @@ export default function VisaoGeral() {
           icone={<AlertTriangle className={ICONE_CARTAO} />}
           dica={EXPLICA.vencida}
         />
+      </GradeCartoes>
+
+      {/* A SEGUNDA FAIXA, UM DEGRAU ABAIXO (auditoria visual, Q3): taxa e prazo
+          em 18px, e o dinheiro, em cima, em 22px. Seis números do mesmo peso
+          não diziam qual olhar primeiro. */}
+      <GradeCartoes>
         <CartaoNumero
+          menor
           rotulo="Rentabilidade do investidor"
           valor={pct(carteira.retornoPonderado)}
           icone={<TrendingUp className={ICONE_CARTAO} />}
@@ -136,6 +153,7 @@ export default function VisaoGeral() {
           }
         />
         <CartaoNumero
+          menor
           rotulo="Rentabilidade típica (mediana)"
           valor={pct(carteira.retorno.mediana)}
           icone={<Gauge className={ICONE_CARTAO} />}
@@ -146,6 +164,7 @@ export default function VisaoGeral() {
           }
         />
         <CartaoNumero
+          menor
           rotulo="Prazo mediano"
           valor={dias(carteira.prazo.mediana)}
           icone={<Clock className={ICONE_CARTAO} />}
@@ -157,25 +176,30 @@ export default function VisaoGeral() {
       </GradeCartoes>
 
       {(insights.length > 0 || painel.operacoes.length > 0) && (
-        <div className="grid gap-4 min-[1180px]:grid-cols-2">
+        <div className="grid gap-s4 min-[1180px]:grid-cols-2">
           {insights.length > 0 && (
             <Painel
               titulo="O que os dados estão dizendo"
               apoio="Gerado por regra a partir dos números calculados, não por texto livre."
             >
-              <ul className="grid gap-2.5 px-6 pb-6 pt-1">
+              <ul className="grid gap-s2 px-s5 pb-s5 pt-s1">
                 {insights.map((i) => {
                   const t = TOM_INSIGHT[i.tom as keyof typeof TOM_INSIGHT] ?? TOM_INSIGHT.neutro
                   return (
-                    <li
-                      key={i.chave}
-                      className={cn('flex gap-2.5 rounded-campo border-l-[3px] bg-superficie-2 px-4 py-3', t.borda)}
-                    >
-                      <t.Icone className={cn('mt-0.5 h-[16px] w-[16px] shrink-0', t.cor)} aria-hidden />
-                      <div className="min-w-0">
-                        <p className="text-corpo text-texto">{i.texto}</p>
-                        <p className="mt-0.5 text-xs text-texto-3">{i.base}</p>
-                      </div>
+                    <li key={i.chave}>
+                      {/* Bloco DENTRO do painel: sem a borda e a sombra de
+                          cartão (cartão dentro de cartão, não), só o fundo e a
+                          faixa. */}
+                      <Card
+                        faixa={t.faixa}
+                        className="flex gap-s2 rounded-campo border-0 bg-superficie-2 px-s4 py-s3 shadow-none"
+                      >
+                        <t.Icone className={cn('mt-s0.5 h-[16px] w-[16px] shrink-0', t.cor)} aria-hidden />
+                        <div className="min-w-0">
+                          <p className="text-corpo text-texto">{i.texto}</p>
+                          <p className="mt-s0.5 text-xs text-texto-3">{i.base}</p>
+                        </div>
+                      </Card>
                     </li>
                   )
                 })}
@@ -193,7 +217,7 @@ export default function VisaoGeral() {
         </div>
       )}
 
-      <div className="grid gap-4 min-[1180px]:grid-cols-2">
+      <div className="grid gap-s4 min-[1180px]:grid-cols-2">
         <Painel
           titulo="Composição da carteira"
           apoio="As três populações não se misturam em nenhum cálculo."
@@ -215,7 +239,7 @@ export default function VisaoGeral() {
             )}
           </Metricas>
           <Separador />
-          <Metricas className="pt-4">
+          <Metricas className="pt-s3">
             <LinhaMetrica
               rotulo="Capital investido — carteira inteira"
               valor={brl(painel.capitalTotalInvestido)}
@@ -276,7 +300,7 @@ export default function VisaoGeral() {
             />
           }
         >
-          <Metricas className="pb-3">
+          <Metricas className="pb-s2">
             <LinhaMetrica rotulo="Desvio mediano" valor={dias(aderencia.desvioDias.mediana)} destaque />
             <LinhaMetrica rotulo="Desvio médio" valor={dias(aderencia.desvioDias.media)} explicacao={EXPLICA.media} />
             <LinhaMetrica rotulo="Pagas até a previsão" valor={aderencia.pagasAteAPrevisao} />
@@ -289,7 +313,7 @@ export default function VisaoGeral() {
               />
             )}
           </Metricas>
-          <p className="px-6 pb-5 text-xs text-texto-3">
+          <p className="px-s5 pb-s4 text-xs text-texto-3">
             Previsão original e número de reprogramações passam a existir conforme o
             histórico acumula, a partir da implantação deste módulo.
           </p>

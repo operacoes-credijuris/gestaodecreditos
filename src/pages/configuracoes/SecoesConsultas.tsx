@@ -361,7 +361,7 @@ export function SecaoBullai({
 
   // O `.link-btn` da amostra: botão com cara de link, 28px de alvo.
   const linkBtn =
-    '-ml-2 inline-flex h-[28px] items-center gap-[6px] rounded-controle px-2 text-sm font-semibold text-marca-texto transition-colors hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel'
+    '-ml-s2 inline-flex h-[28px] items-center gap-[6px] rounded-controle px-s2 text-sm font-semibold text-marca-texto transition-colors hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel'
 
   return (
     <>
@@ -409,7 +409,7 @@ export function SecaoBullai({
           </RodapeSecao>
 
           {configurado && portais.length > 0 && (
-            <div className="mt-[12px] flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="mt-[12px] flex flex-wrap items-center gap-x-s3 gap-y-s2">
               <button
                 type="button"
                 className={linkBtn}
@@ -441,17 +441,17 @@ export function SecaoBullai({
               <table className="w-full border-collapse text-left text-corpo">
                 <thead className="sticky top-0 bg-superficie-2 text-xs font-bold uppercase tracking-wide text-texto-3">
                   <tr>
-                    <th className="px-[14px] py-2 font-bold">Certidão</th>
-                    <th className="px-[14px] py-2 font-bold">Documento</th>
-                    <th className="px-[14px] py-2 font-bold">Como</th>
+                    <th className="px-[14px] py-s2 font-bold">Certidão</th>
+                    <th className="px-[14px] py-s2 font-bold">Documento</th>
+                    <th className="px-[14px] py-s2 font-bold">Como</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borda">
                   {portais.map((p) => (
                     <tr key={p.chave} title={p.criterio}>
-                      <td className="px-[14px] py-2 text-texto">{p.rotulo}</td>
-                      <td className="px-[14px] py-2 text-texto-2">{p.documento}</td>
-                      <td className="px-[14px] py-2">
+                      <td className="px-[14px] py-s2 text-texto">{p.rotulo}</td>
+                      <td className="px-[14px] py-s2 text-texto-2">{p.documento}</td>
+                      <td className="px-[14px] py-s2">
                         {p.presencial ? (
                           <Selo tom="neutro">presencial — não automatiza</Selo>
                         ) : (
