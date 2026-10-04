@@ -101,12 +101,12 @@ export function AvisoDeVersaoNova() {
   return (
     // CENTRADA POR FLEX, e não por `translate`: a animação de entrada também usa
     // `transform`, e uma apagaria a outra.
-    <div className="pointer-events-none fixed inset-x-0 top-[76px] z-[55] flex justify-center px-3">
+    <div className="pointer-events-none fixed inset-x-0 top-[76px] z-aviso-versao flex justify-center px-s3">
       <div
         role="status"
-        className="animate-fade-in pointer-events-auto flex w-full max-w-[460px] items-center gap-3 rounded-2xl bg-texto py-2.5 pl-4 pr-2 text-superficie shadow-nivel-2"
+        className="animate-fade-in pointer-events-auto flex w-full max-w-[460px] items-center gap-s3 rounded-flutuante bg-texto py-s2 pl-s4 pr-s2 text-superficie shadow-nivel-2"
       >
-        <RefreshCw className="h-5 w-5 shrink-0 text-flutuante-info" aria-hidden />
+        <RefreshCw className="h-[16px] w-[16px] shrink-0 text-flutuante-info" aria-hidden />
         <p className="flex-1 text-corpo">Há uma versão nova da plataforma.</p>
         <button
           type="button"

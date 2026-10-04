@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Info, PieChart, ScanSearch, Search, Sparkles } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
+import { Tecla } from '@/components/ui/Tecla'
 import { useToast } from '@/components/ui/Toast'
 import { cn } from '@/lib/cn'
 import { haDialogoAberto, useFocoPreso, useTravaScroll } from '@/lib/dialogo'
@@ -85,14 +86,8 @@ export function useConsultas(): Consultas {
   return c
 }
 
-/** O `kbd` da amostra: a tecla desenhada. */
-export function Tecla({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="rounded-md border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2">
-      {children}
-    </kbd>
-  )
-}
+/** O `kbd` da amostra: a tecla desenhada (mora em `ui/Tecla.tsx`). */
+export { Tecla }
 
 export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
   const toast = useToast()
@@ -135,7 +130,8 @@ export function ProvedorDeConsultas({ children }: { children: ReactNode }) {
         }
       }
       const atalho = qualAtalho(e)
-      if (!atalho) return
+      // O "[" É DO MENU LATERAL, que guarda se está recolhido (layout/Sidebar.tsx).
+      if (!atalho || atalho === 'menu') return
       if (atalho === 'navegar') {
         // Só começa a sequência longe dos campos e sem janela aberta.
         if (decidirAtalho(atalho, e.target as HTMLElement | null, haDialogoAberto()) === 'agir') {
@@ -349,7 +345,7 @@ function JanelaDasNovidades({ onFechar }: { onFechar: () => void }) {
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin"
+      className="animate-fade-in fixed inset-0 z-janela flex items-center justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin"
       onClick={(e) => {
         if (e.target === e.currentTarget) onFechar()
       }}
@@ -361,7 +357,7 @@ function JanelaDasNovidades({ onFechar }: { onFechar: () => void }) {
         aria-modal="true"
         aria-label="Novidades desta versão"
         aria-describedby={tituloId}
-        className="animate-modal-in w-full max-w-[520px] rounded-janela bg-superficie text-center shadow-nivel-3 outline-none"
+        className="animate-modal-in w-full max-w-[520px] rounded-janela bg-superficie text-center shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]"
       >
         <div className="mx-auto mb-1 mt-9 grid h-[76px] w-[76px] place-items-center rounded-[22px] bg-marca-suave text-marca-texto">
           <Icone className="h-9 w-9" aria-hidden />

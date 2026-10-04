@@ -210,7 +210,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin"
+      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin"
       onClick={(e) => {
         if (e.target === e.currentTarget) onFechar()
       }}
@@ -221,7 +221,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-label="Buscar em toda a plataforma"
-        className="animate-modal-in mt-[10vh] w-full max-w-[620px] overflow-hidden rounded-janela bg-superficie shadow-nivel-3 outline-none"
+        className="animate-modal-in mt-[10vh] w-full max-w-[620px] overflow-hidden rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]"
       >
         <div className="flex h-[56px] items-center gap-3 border-b border-borda px-5 text-texto-3">
           <Search className="h-[18px] w-[18px] shrink-0" aria-hidden />

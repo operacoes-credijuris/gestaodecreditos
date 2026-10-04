@@ -156,13 +156,32 @@ const CHAVE_MODELO_LOCAL = 'assistente_modelo'
  * ferramentas de leitura, a possível ação proposta (gerar petição) e as
  * Skills habilitadas continuam decisão exclusiva do backend.
  */
-export function Assistente() {
+export function Assistente({
+  escondido = false,
+}: {
+  /**
+   * Some o botão flutuante (a gaveta do menu aberta no celular: ele ficava por
+   * cima dela). O painel aberto não é afetado.
+   */
+  escondido?: boolean
+} = {}) {
   const { user, profile } = useAuth()
   const primeiroNome = profile?.nome?.trim().split(/\s+/)[0]
   const toast = useToast()
   const qc = useQueryClient()
 
   const [aberto, setAberto] = useState(false)
+  // O BOTÃO À VISTA AVISA A PÁGINA, pelo atributo no <html>: os avisos
+  // flutuantes (ui/Toast.tsx) sobem para cima dele em vez de cair em cima
+  // (auditoria visual, M2). Fora da moldura (o Entrar), o atributo não existe.
+  useEffect(() => {
+    const raiz = document.documentElement
+    if (!aberto && !escondido) raiz.dataset.assistente = 'botao'
+    else delete raiz.dataset.assistente
+    return () => {
+      delete raiz.dataset.assistente
+    }
+  }, [aberto, escondido])
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   // O RASCUNHO DA PERGUNTA FICA GUARDADO neste navegador, por pessoa
   // (lib/conversaDoAssistente.ts): recarregar a página — ou o "recarregar" do
@@ -584,6 +603,7 @@ export function Assistente() {
   }
 
   if (!aberto) {
+    if (escondido) return null
     return (
       <button
         ref={botaoFlutuante}
@@ -592,7 +612,9 @@ export function Assistente() {
         aria-label="Abrir assistente de dados"
         title="Perguntar ao assistente"
         className={cn(
-          'fixed bottom-[20px] right-[20px] z-40 flex h-[56px] w-[56px] items-center justify-center',
+          // NA CAMADA DO TOPO (z-assistente, abaixo de janela e gaveta). No
+          // celular, 48px a 16px do canto; no computador, 56px a 20px.
+          'fixed bottom-s4 right-s4 z-assistente flex h-[48px] w-[48px] items-center justify-center sm:bottom-[20px] sm:right-[20px] sm:h-[56px] sm:w-[56px]',
           'rounded-full bg-gradient-to-br from-marca-viva to-marca-hover text-white shadow-nivel-2',
           'transition-transform duration-150 hover:scale-105 active:scale-95',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
@@ -609,7 +631,7 @@ export function Assistente() {
     'hover:bg-superficie-3 focus:outline-none focus-visible:bg-superficie-3',
   )
   const menuFlutuante =
-    'absolute bottom-full left-0 z-20 mb-1 min-w-[220px] rounded-[12px] border border-borda bg-superficie p-[6px] shadow-nivel-2'
+    'absolute bottom-full left-0 z-20 mb-1 min-w-[220px] rounded-flutuante border border-borda bg-superficie p-[6px] shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]'
 
   return (
     <>
@@ -617,8 +639,11 @@ export function Assistente() {
         role="dialog"
         aria-label="Assistente de dados"
         className={cn(
-          'fixed z-40 flex flex-col overflow-hidden rounded-[18px] border border-borda',
-          'bg-superficie shadow-nivel-3',
+          // O PAINEL na camada dele (z-assistente-painel), abaixo das janelas que
+          // ele mesmo abre. No escuro, a borda forte e o anel claro o separam da
+          // página (auditoria visual, E3).
+          'fixed z-assistente-painel flex flex-col overflow-hidden rounded-janela border border-borda',
+          'bg-superficie shadow-nivel-3 dark:border-borda-forte dark:ring-1 dark:ring-white/[0.06]',
           // Celular: ocupa a tela. Desktop: painel no canto, como um chat.
           'inset-x-3 bottom-3 top-16 sm:inset-x-auto sm:top-auto sm:bottom-[20px] sm:right-[20px]',
           'sm:h-[min(620px,calc(100vh-40px))] sm:w-[420px]',

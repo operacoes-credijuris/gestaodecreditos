@@ -11,7 +11,15 @@
 // não agem por baixo dela: a janela pode ter algo digitado que ainda não foi
 // salvo.
 
-export type Atalho = 'busca' | 'filtro' | 'atalhos' | 'navegar'
+export type Atalho = 'busca' | 'filtro' | 'atalhos' | 'navegar' | 'menu'
+
+/**
+ * A tecla que recolhe e abre o menu lateral (auditoria visual, 03/10/2026). O
+ * "[" de editores e de aplicativos de mensagem para a barra lateral; não colide
+ * com "/", "?", Ctrl+K, G+letra nem J/K. Mesmas regras do "/": digitando, ou com
+ * uma janela aberta, não age. Quem age é o próprio menu (layout/Sidebar.tsx).
+ */
+export const TECLA_DO_MENU = '['
 
 /** O que do evento de teclado importa aqui (o teste monta um objeto simples). */
 export interface TeclaPressionada {
@@ -29,6 +37,7 @@ export function qualAtalho(e: TeclaPressionada): Atalho | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null
   if (e.key === '/') return 'filtro'
   if (e.key === '?') return 'atalhos'
+  if (e.key === TECLA_DO_MENU) return 'menu'
   // O "G" QUE COMEÇA A SEQUÊNCIA "ir para" (G e depois a letra da tela). Só o
   // minúsculo: com Shift ou Caps Lock é outra coisa, e não navega por engano.
   if (e.key === PREFIXO_DE_NAVEGACAO) return 'navegar'
@@ -144,6 +153,7 @@ export const LISTA_DE_ATALHOS: readonly { teclas: readonly string[]; descricao: 
   { teclas: ['/'], descricao: 'Ir para o filtro da tela' },
   { teclas: ['G', 'letra'], descricao: 'Ir para uma tela (as letras estão abaixo)' },
   { teclas: ['?'], descricao: 'Ver estes atalhos' },
+  { teclas: [TECLA_DO_MENU], descricao: 'Recolher ou abrir o menu lateral' },
   { teclas: ['Esc'], descricao: 'Fechar janela, menu ou painel' },
   { teclas: ['Esc'], descricao: 'No campo de busca: limpar a busca' },
   { teclas: ['J', 'K'], descricao: 'Andar entre os cards (Análise de crédito)' },

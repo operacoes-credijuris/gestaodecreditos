@@ -4,6 +4,7 @@ import { Menu, LogOut, ChevronDown, ChevronRight, Search, Sparkles, Command, Boo
 import { useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
 import { IconButton } from '@/components/ui/IconButton'
+import { Tecla } from '@/components/ui/Tecla'
 import { useToast } from '@/components/ui/Toast'
 import { cn } from '@/lib/cn'
 import { haDialogoAberto } from '@/lib/dialogo'
@@ -53,6 +54,9 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   }, [menuOpen])
 
   const nome = profile?.nome || user?.email || 'Usuário'
+  // NO BOTÃO, SÓ O PRIMEIRO NOME (auditoria visual, M1): nome e e-mail eram
+  // cerca de 200px de ruído no topo. O nome inteiro e o e-mail ficam no menu.
+  const primeiroNome = profile?.nome?.trim().split(/\s+/)[0] || nome
   const iniciais = nome
     .split(' ')
     .map((p) => p[0])
@@ -62,104 +66,110 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
 
   return (
     // O `.topbar` da amostra: 64px, a superfície quase opaca com desfoque (o
-    // conteúdo passa por baixo sem sumir de vez) e 24px de margem lateral.
-    // No meio, a BUSCA GERAL (Ctrl+K, item "Novo" da amostra).
-    <header className="sticky top-0 z-30 flex h-[64px] shrink-0 items-center justify-between gap-3 border-b border-borda bg-superficie/[0.86] px-4 backdrop-blur-[10px] lg:px-8">
-      <button
-        onClick={onOpenMenu}
-        className="rounded-controle p-2 text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto lg:hidden"
-        aria-label="Abrir menu"
-      >
-        <Menu className="h-6 w-6" />
-      </button>
+    // conteúdo passa por baixo sem sumir de vez).
+    //
+    // TRÊS COLUNAS NO COMPUTADOR (auditoria visual, M1): o caminho à esquerda,
+    // a BUSCA SEMPRE NO MEIO e as ações à direita. Antes a busca era `flex-1`
+    // com `mx-auto`, e o lugar dela dependia do comprimento do caminho: começava
+    // em x≈538 em Configurações e em x≈645 em Publicações — um alvo usado toda
+    // hora não pode andar. No celular, a fila de sempre.
+    <header className="sticky top-0 z-topo flex h-[64px] shrink-0 items-center gap-s2 border-b border-borda bg-superficie/[0.86] px-s3 backdrop-blur-[10px] md:grid md:grid-cols-[minmax(0,1fr)_minmax(240px,460px)_minmax(0,1fr)] md:gap-s4 md:px-s6">
+      <div className="flex min-w-0 flex-1 items-center gap-s2">
+        <button
+          onClick={onOpenMenu}
+          className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto lg:hidden"
+          aria-label="Abrir menu"
+        >
+          <Menu className="h-[20px] w-[20px]" aria-hidden />
+        </button>
 
-      {/* Breadcrumb de localização: "Setor › Página", e "› Aba" numa moldura
-          ("Operacional › Quadro econômico › Previsões"). A Análise de crédito,
-          sem setor, mostra só o próprio nome. No celular, só a última parte.
-          Como na amostra: o caminho no cinza de metadado e o lugar atual em
-          negrito na fonte de display. */}
-      <nav
-        aria-label="Você está em"
-        className="flex min-w-0 shrink items-center gap-1.5 text-corpo text-texto-3"
-      >
-        {partes.map((parte, i) =>
-          i === partes.length - 1 ? (
-            <span
-              key={i}
-              aria-current="page"
-              className="font-display truncate text-lg font-bold tracking-tight text-texto"
-            >
-              {parte}
-            </span>
-          ) : (
-            <Fragment key={i}>
-              <span className="hidden shrink-0 sm:inline">{parte}</span>
-              <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 sm:inline" aria-hidden />
-            </Fragment>
-          ),
-        )}
-      </nav>
+        {/* Breadcrumb de localização: "Setor › Página", e "› Aba" numa moldura
+            ("Operacional › Quadro econômico › Previsões"). A Análise de
+            crédito, sem setor, mostra só o próprio nome. No celular, só a
+            última parte. O LUGAR ATUAL SEM A FONTE DE TÍTULO (auditoria visual,
+            M1): em 16px de display ele competia com o h1 da tela, logo abaixo,
+            que diz a mesma coisa. Fica no seminegrito do texto — ainda útil
+            quando o h1 sai da tela na rolagem. */}
+        <nav
+          aria-label="Você está em"
+          className="flex min-w-0 items-center gap-s1.5 text-corpo text-texto-3"
+        >
+          {partes.map((parte, i) =>
+            i === partes.length - 1 ? (
+              <span key={i} aria-current="page" className="truncate font-semibold text-texto-2">
+                {parte}
+              </span>
+            ) : (
+              <Fragment key={i}>
+                <span className="hidden shrink-0 whitespace-nowrap sm:inline">{parte}</span>
+                <ChevronRight className="hidden h-[14px] w-[14px] shrink-0 sm:inline" aria-hidden />
+              </Fragment>
+            ),
+          )}
+        </nav>
+      </div>
 
-      {/* O `.cmdk` da amostra: no meio do topo, até 460px; no celular, só a lupa. */}
+      {/* O `.cmdk` da amostra: no meio do topo, de 240 a 460px; no celular, só
+          a lupa, sem contorno, igual aos botões vizinhos. */}
       <button
         type="button"
         onClick={abrirBusca}
         aria-label="Buscar em toda a plataforma"
         title="Buscar em toda a plataforma (Ctrl + K)"
         aria-keyshortcuts="Control+K"
-        className="ml-auto flex h-[38px] w-[38px] shrink-0 items-center justify-center gap-3 rounded-campo border border-borda bg-superficie-2 text-corpo text-texto-3 transition-colors hover:border-borda-forte hover:bg-superficie md:mx-auto md:w-auto md:min-w-0 md:max-w-[460px] md:flex-1 md:shrink md:justify-start md:px-4"
+        className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto md:flex md:h-controle md:w-full md:items-center md:justify-start md:gap-s2 md:rounded-campo md:border md:border-borda md:bg-superficie-2 md:px-s3 md:text-corpo md:text-texto-3 md:hover:border-borda-forte md:hover:bg-superficie"
       >
-        <Search className="h-4 w-4 shrink-0" aria-hidden />
+        <Search className="h-[16px] w-[16px] shrink-0" aria-hidden />
         <span className="hidden flex-1 truncate text-left md:block">
           Buscar crédito, card, contato ou tela…
         </span>
-        <kbd className="hidden rounded-md border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2 md:block">
-          Ctrl K
-        </kbd>
+        <span className="hidden md:block">
+          <Tecla>Ctrl K</Tecla>
+        </span>
       </button>
 
-      {/* O `#btnTheme` da amostra: a lua liga o escuro, o sol volta ao claro.
-          O nome diz o que o clique FAZ, como o título da amostra ("Modo
-          escuro" / "Modo claro"). Sem atalho de teclado: a amostra não tem. O
-          "Do sistema" mora no menu do usuário, ao lado. */}
-      <IconButton
-        label={escuro ? 'Modo claro' : 'Modo escuro'}
-        icon={escuro ? <Sun className="h-[20px] w-[20px]" aria-hidden /> : <Moon className="h-[20px] w-[20px]" aria-hidden />}
-        onClick={() => escolher(alternarTema(tema))}
-        className="grid h-[36px] w-[36px] shrink-0 place-items-center p-0"
-      />
+      <div className="flex shrink-0 items-center gap-s1 md:justify-self-end">
+        {/* O `#btnTheme` da amostra: a lua liga o escuro, o sol volta ao claro.
+            O nome diz o que o clique FAZ, como o título da amostra ("Modo
+            escuro" / "Modo claro"). Sem atalho de teclado: a amostra não tem.
+            O "Do sistema" mora no menu do usuário, ao lado. */}
+        <IconButton
+          label={escuro ? 'Modo claro' : 'Modo escuro'}
+          icon={escuro ? <Sun className="h-[20px] w-[20px]" aria-hidden /> : <Moon className="h-[20px] w-[20px]" aria-hidden />}
+          onClick={() => escolher(alternarTema(tema))}
+          className="grid h-[36px] w-[36px] shrink-0 place-items-center p-0"
+        />
 
-      <div ref={caixaDoMenuRef} className="relative shrink-0">
-        {/* O `.user-btn` da amostra: pílula com as iniciais na placa azul-clara,
-            nome e e-mail; o contorno só aparece sob o mouse. */}
-        <button
-          ref={botaoDoMenuRef}
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-expanded={menuOpen}
-          className="flex items-center gap-2 rounded-full border border-transparent py-0.5 pl-0.5 pr-2 transition-colors hover:border-borda hover:bg-superficie-3"
-        >
-          <div className="font-display flex h-11 w-11 items-center justify-center rounded-full bg-marca-suave text-sm font-bold text-marca-texto">
-            {iniciais}
-          </div>
-          <div className="hidden text-left sm:block">
-            <p className="text-sm font-bold leading-tight text-texto">
-              {nome}
-            </p>
-            <p className="text-xs leading-tight text-texto-3">
-              {user?.email}
-            </p>
-          </div>
-          <ChevronDown className="h-4 w-4 text-texto-3" aria-hidden />
-        </button>
+        <div ref={caixaDoMenuRef} className="relative shrink-0">
+          {/* O `.user-btn` da amostra: pílula com as iniciais na placa
+              azul-clara e o primeiro nome; o contorno só aparece sob o mouse. */}
+          <button
+            ref={botaoDoMenuRef}
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-expanded={menuOpen}
+            aria-label={`Menu de ${nome}`}
+            className="flex items-center gap-s2 rounded-full border border-transparent py-s0.5 pl-s0.5 pr-s2 transition-colors hover:border-borda hover:bg-superficie-3"
+          >
+            <div
+              className="font-display flex h-[32px] w-[32px] items-center justify-center rounded-full bg-marca-suave text-xs font-bold text-marca-texto"
+              aria-hidden
+            >
+              {iniciais}
+            </div>
+            <span className="hidden max-w-[140px] truncate text-sm font-semibold text-texto sm:block">
+              {primeiroNome}
+            </span>
+            <ChevronDown className="h-[16px] w-[16px] text-texto-3" aria-hidden />
+          </button>
 
-        {menuOpen && (
-          <>
-            {/* O `.pop` da amostra: cartão de 12px de raio com sombra de
-                elemento flutuante; os itens com 36px de altura. */}
-            <div className="absolute right-0 z-20 mt-2 w-[240px] rounded-2xl border border-borda bg-superficie p-1.5 shadow-nivel-2">
+          {menuOpen && (
+            // O `.pop` da amostra: o raio dos flutuantes (12px) e a sombra de
+            // elemento flutuante; no escuro, o anel claro que o separa da
+            // página (auditoria visual, E3). Itens com 36px de altura.
+            <div className="absolute right-0 z-20 mt-s2 w-[240px] rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]">
               {/* O `.user-card` da amostra: o avatar ao lado do nome e do
                   e-mail, e o papel logo abaixo. */}
-              <div className="flex items-center gap-2.5 px-2.5 py-2">
+              <div className="flex items-center gap-s2 px-s2 py-s2">
                 <div
                   className="font-display flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-full bg-marca-suave text-xs font-bold text-marca-texto"
                   aria-hidden
@@ -171,12 +181,12 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                   <p className="truncate text-xs text-texto-3">{user?.email}</p>
                 </div>
               </div>
-              <div className="px-2.5 pb-2">
+              <div className="px-s2 pb-s2">
                 <Badge tone={isAdmin ? 'purple' : 'gray'}>
                   {isAdmin ? 'Administrador' : 'Usuário'}
                 </Badge>
               </div>
-              <div className="mx-1 my-1.5 border-t border-borda" />
+              <div className="mx-s1 my-s1.5 border-t border-borda" />
               {/* A AJUDA DA PLATAFORMA (itens "Novo" da amostra): as novidades
                   voltam a qualquer hora daqui, e os atalhos e o glossário
                   também abrem pelo "?" de cada tela. */}
@@ -193,26 +203,26 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                     setMenuOpen(false)
                     abrir()
                   }}
-                  className="flex h-12 w-full items-center gap-3 rounded-controle px-2.5 text-corpo text-texto transition-colors hover:bg-superficie-3"
+                  className="flex h-12 w-full items-center gap-s3 rounded-controle px-s2 text-corpo text-texto transition-colors hover:bg-superficie-3"
                 >
-                  <Icone className="h-4 w-4" aria-hidden />
+                  <Icone className="h-[16px] w-[16px]" aria-hidden />
                   {rotulo}
                 </button>
               ))}
-              <div className="mx-1 my-1.5 border-t border-borda" />
+              <div className="mx-s1 my-s1.5 border-t border-borda" />
               {/* O TEMA COM AS TRÊS ESCOLHAS. A amostra só tem o botão da lua
-                  (claro↔escuro); o "Do sistema", que acompanha o claro/escuro do
-                  computador ao vivo, precisava de um lugar, e o menu de quem
+                  (claro↔escuro); o "Do sistema", que acompanha o claro/escuro
+                  do computador ao vivo, precisava de um lugar, e o menu de quem
                   está logado é onde moram as escolhas pessoais. O menu fica
                   aberto: a pessoa vê a troca e pode voltar atrás. */}
-              <div className="px-2.5 pb-1.5 pt-1">
-                <p id="rotulo-do-tema" className="mb-1.5 text-xs font-semibold text-texto-3">
+              <div className="px-s2 pb-s1.5 pt-s1">
+                <p id="rotulo-do-tema" className="mb-s1.5 text-xs font-semibold text-texto-3">
                   Tema
                 </p>
                 <div
                   role="group"
                   aria-labelledby="rotulo-do-tema"
-                  className="grid grid-cols-3 gap-0.5 rounded-campo border border-borda bg-superficie-3 p-1"
+                  className="grid grid-cols-3 gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-s1"
                 >
                   {OPCOES_DE_TEMA.map((o) => (
                     <button
@@ -221,7 +231,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                       aria-pressed={preferencia === o.chave}
                       onClick={() => escolher(o.chave)}
                       className={cn(
-                        'h-[30px] whitespace-nowrap rounded-controle px-1 text-sm font-semibold transition-colors',
+                        'h-[30px] whitespace-nowrap rounded-controle px-s1 text-sm font-semibold transition-colors',
                         preferencia === o.chave
                           ? 'bg-superficie text-marca-texto shadow-nivel-1'
                           : 'text-texto-2 hover:text-texto',
@@ -232,7 +242,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                   ))}
                 </div>
               </div>
-              <div className="mx-1 my-1.5 border-t border-borda" />
+              <div className="mx-s1 my-s1.5 border-t border-borda" />
               <button
                 onClick={async () => {
                   setMenuOpen(false)
@@ -241,14 +251,14 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                   const { error } = await signOut()
                   if (error) toast.error(error)
                 }}
-                className="flex h-12 w-full items-center gap-3 rounded-controle px-2.5 text-corpo text-texto transition-colors hover:bg-superficie-3"
+                className="flex h-12 w-full items-center gap-s3 rounded-controle px-s2 text-corpo text-texto transition-colors hover:bg-superficie-3"
               >
-                <LogOut className="h-4 w-4" />
+                <LogOut className="h-[16px] w-[16px]" aria-hidden />
                 Sair
               </button>
             </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
     </header>
   )

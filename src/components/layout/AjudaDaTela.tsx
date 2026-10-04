@@ -82,7 +82,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
           aria-modal="false"
           aria-label="Como funciona esta tela"
           tabIndex={-1}
-          className="absolute left-0 top-full z-40 mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-2xl border border-borda bg-superficie px-3 pb-1.5 pt-3 text-corpo shadow-nivel-2 outline-none"
+          className="absolute left-0 top-full z-40 mt-s1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-flutuante border border-borda bg-superficie px-s3 pb-s1.5 pt-s3 text-corpo shadow-nivel-2 outline-none dark:ring-1 dark:ring-white/[0.06]"
         >
           <p className="font-display font-bold text-texto">Como funciona esta tela</p>
           <ol className="mb-3 mt-2 grid list-decimal gap-1.5 pl-5 text-texto-2">
@@ -96,7 +96,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
               onClick={abrir(abrirGlossario)}
               className="inline-flex min-h-[30px] items-center gap-1.5 rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
             >
-              <BookOpen className="h-4 w-4" aria-hidden />
+              <BookOpen className="h-[16px] w-[16px]" aria-hidden />
               Glossário
             </button>
             <button
@@ -104,7 +104,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
               onClick={abrir(abrirAtalhos)}
               className="inline-flex min-h-[30px] items-center gap-1.5 rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
             >
-              <Command className="h-4 w-4" aria-hidden />
+              <Command className="h-[16px] w-[16px]" aria-hidden />
               Atalhos
             </button>
           </div>

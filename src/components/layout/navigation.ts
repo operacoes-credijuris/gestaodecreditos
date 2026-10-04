@@ -1,12 +1,12 @@
 import {
   FileSignature,
   IdCard,
-  ScanSearch,
+  SquareKanban,
   Newspaper,
   ListChecks,
-  FolderKanban,
-  ClipboardList,
-  Phone,
+  Wallet,
+  Landmark,
+  BookUser,
   Settings,
   PieChart,
   type LucideIcon,
@@ -29,6 +29,20 @@ export interface NavLeaf {
    * próprio `to`: é ela que abre quando se clica no item.
    */
   abas?: readonly NavAba[]
+  /**
+   * O nome NO MENU, quando o inteiro quebra em duas linhas na largura do menu
+   * ("Publicações e movimentações" → "Publicações"). Só o menu o usa: o título
+   * da tela, o caminho no topo, a aba do navegador e a dica do menu recolhido
+   * continuam com o `label` inteiro. Aprovado pelo dono em 03/10/2026.
+   */
+  rotuloCurto?: string
+  /**
+   * 8px de respiro ANTES do item: começa um grupo novo dentro da seção, sem
+   * título (auditoria visual, §1). Em Operacional: a rotina (Publicações,
+   * Tarefas), a consulta (Créditos, Requerimentos, Contatos) e a leitura
+   * (Quadro econômico).
+   */
+  respiro?: boolean
 }
 
 export interface NavSection {
@@ -95,7 +109,7 @@ export const NAVIGATION: NavSection[] = [
     // SEM TÍTULO: o item solto no topo (ver o porquê no começo do arquivo).
     title: null,
     items: [
-      { label: 'Análise de crédito', to: '/operacional/analise', icon: ScanSearch },
+      { label: 'Análise de crédito', to: '/operacional/analise', icon: SquareKanban },
     ],
   },
   {
@@ -122,6 +136,7 @@ export const NAVIGATION: NavSection[] = [
     items: [
       {
         label: 'Publicações e movimentações',
+        rotuloCurto: 'Publicações',
         to: '/operacional/execucao/publicacoes',
         icon: Newspaper,
       },
@@ -133,23 +148,31 @@ export const NAVIGATION: NavSection[] = [
       {
         label: 'Créditos',
         to: '/operacional/execucao/processos',
-        icon: FolderKanban,
+        // A CARTEIRA (Wallet): era FolderKanban, que sugeria quadro de etapas —
+        // e o quadro de etapas é a Análise de crédito.
+        icon: Wallet,
+        respiro: true,
       },
       {
         label: 'Requerimentos administrativos',
+        rotuloCurto: 'Requerimentos',
         to: '/operacional/execucao/requerimentos',
-        icon: ClipboardList,
+        // Landmark (o órgão público): o ClipboardList de antes era quase igual
+        // ao ListChecks de Tarefas, dois itens acima.
+        icon: Landmark,
       },
       {
         label: 'Contatos',
         to: '/operacional/execucao/contatos',
-        icon: Phone,
+        // BookUser: os contatos têm e-mail, não só telefone.
+        icon: BookUser,
       },
       {
         label: 'Quadro econômico',
         to: '/inteligencia',
         icon: PieChart,
         abas: ABAS_DO_QUADRO,
+        respiro: true,
       },
     ],
   },

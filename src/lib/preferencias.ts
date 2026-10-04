@@ -122,3 +122,31 @@ export function usePreferencia<T>(
   )
   return [valor, mudar]
 }
+
+// ─── O menu lateral recolhido (auditoria visual, 03/10/2026; AP3 aprovado) ──
+
+/**
+ * Abaixo desta largura de janela (px), o menu começa RECOLHIDO para quem ainda
+ * não escolheu. A 1280px, o menu aberto de 240px deixava 1040px para a página,
+ * e as tabelas de Créditos, Dados cadastrais e Carteiras quebravam.
+ */
+export const LARGURA_DO_MENU_ABERTO_POR_PADRAO = 1366
+
+/**
+ * O menu começa recolhido? A ESCOLHA DA PESSOA VENCE SEMPRE: quem abriu ou
+ * recolheu o menu (pelo botão ou pelo "[") fica com o que escolheu, em qualquer
+ * largura. Sem escolha guardada (`null`, ou um valor que não é sim/não), decide
+ * a largura da janela.
+ */
+export function menuComecaRecolhido(larguraDaJanela: number, guardado: unknown): boolean {
+  if (typeof guardado === 'boolean') return guardado
+  return larguraDaJanela < LARGURA_DO_MENU_ABERTO_POR_PADRAO
+}
+
+/** O estado inicial do menu nesta visita: a escolha guardada ou, sem ela, a largura. */
+export function lerMenuRecolhido(
+  larguraDaJanela: number = typeof window === 'undefined' ? Infinity : window.innerWidth,
+  armazenamento?: Armazenamento | null,
+): boolean {
+  return menuComecaRecolhido(larguraDaJanela, lerPreferencia<unknown>(PREF_MENU_RECOLHIDO, null, armazenamento))
+}

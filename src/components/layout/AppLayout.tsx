@@ -51,12 +51,14 @@ export function AppLayout() {
           <Topbar onOpenMenu={() => setMobileOpen(true)} />
           <main className="relative flex-1 overflow-y-auto scrollbar-thin">
             {/* max-width evita tabelas esticadas de ponta a ponta em monitores
-                largos; a chave re-anima a entrada a cada troca de tela. Medidas
-                do `.content` da amostra: 1360px no máximo e 24px de respiro
-                (15px no celular). */}
+                largos (a 1920px, centraliza); a chave re-anima a entrada a cada
+                troca de tela. NA GRADE DE 4PX (auditoria visual, M3): 24px de
+                margem no computador e 16px no celular, 24px até o título. E 96PX
+                DE FOLGA EMBAIXO (M2): a última linha da lista nunca fica sob o
+                botão do assistente, que mora no canto. */}
             <div
               key={chave}
-              className="animate-page mx-auto w-full max-w-[1360px] px-5 py-8 lg:px-8"
+              className="animate-page mx-auto w-full max-w-[1360px] px-s4 pb-[96px] pt-s6 lg:px-s6"
             >
               <AcessorioDoTitulo.Provider value={frases ? <AjudaDaTela frases={frases} /> : null}>
                 {/* A TELA CHEGA SOB DEMANDA (App.tsx): enquanto o pedaço dela
@@ -75,7 +77,9 @@ export function AppLayout() {
         </div>
         {/* Fora do <main>: é fixo na tela e acompanha a pessoa em todas as
             páginas, em vez de rolar junto com o conteúdo. */}
-        <Assistente />
+        {/* Com a gaveta do menu aberta (celular), o botão do assistente some:
+            ele ficava por cima do menu (auditoria visual, M2). */}
+        <Assistente escondido={mobileOpen} />
         {/* "Há uma versão nova — recarregar": avisa e espera a pessoa (lib/versaoNova.ts). */}
         <AvisoDeVersaoNova />
       </div>
