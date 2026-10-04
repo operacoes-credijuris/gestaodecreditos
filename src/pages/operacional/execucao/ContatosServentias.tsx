@@ -8,6 +8,7 @@ import type { ContatoServentia } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -21,10 +22,18 @@ import {
   Loading,
   ErrorState,
   EmptyState,
+  SemResultado,
+  Truncado,
 } from '@/components/ui/Table'
-import { IconButton } from '@/components/ui/IconButton'
+import { AcoesDaLinha, type AcaoDoMenu } from '@/components/ui/MenuDeAcoes'
 import { useToast } from '@/components/ui/Toast'
-import { CampoDeBusca, FerramentasDoPainel, SecaoDoFormulario } from '@/components/operacional/Pecas'
+import {
+  CampoDeBusca,
+  CartaoNoCelular,
+  FerramentasDoPainel,
+  ListaNoCelular,
+  SecaoDoFormulario,
+} from '@/components/operacional/Pecas'
 import { vazioNull } from '@/lib/format'
 import { casaBusca } from '@/lib/buscaDaTela'
 import { formatTelefone, telefoneIncompleto, waLink } from '@/lib/telefone'
@@ -64,11 +73,12 @@ interface OrgaoRow {
   contato: ContatoServentia | null
 }
 
-// Bolinha de tipo ao lado do nome do órgão (igual à aba Créditos): a cor basta,
-// o rótulo por extenso ocupava uma linha inteira da célula.
-const DOT_TIPO: Record<OrgaoRow['tipo'], { cor: string; label: string }> = {
-  julgador: { cor: 'bg-tom-azul-ponto', label: 'Julgador' },
-  auxiliar: { cor: 'bg-tom-violeta-ponto', label: 'Auxiliar' },
+// O TIPO DO ÓRGÃO COMO SELO PÁLIDO, COM O NOME ESCRITO (auditoria visual, CT2):
+// antes era uma bolinha azul ou violeta, e a legenda acima da tabela só tinha
+// cor — quem não distingue as duas, ou não achava a legenda, não sabia o tipo.
+const SELO_TIPO: Record<OrgaoRow['tipo'], { tom: 'blue' | 'purple'; label: string }> = {
+  julgador: { tom: 'blue', label: 'Julgador' },
+  auxiliar: { tom: 'purple', label: 'Auxiliar' },
 }
 
 type TipoValor = 'telefone' | 'whatsapp' | 'email'
@@ -92,85 +102,136 @@ function useCopiar() {
   }
 }
 
-// Uma linha de valor dentro da célula: o rótulo Serv./Gab. em cima (julgador),
-// o ícone do tipo e o valor; no telefone e no e-mail, o botão de copiar; no
-// WhatsApp, o link que abre a conversa.
-function LinhaValor({
-  label,
-  value,
-  tipo,
-}: {
-  label?: string
-  value: string
-  tipo: TipoValor
-}) {
+/**
+ * Um valor de contato numa célula da grade: o ícone do tipo, o valor e, no
+ * telefone e no e-mail, o botão de copiar; no WhatsApp, o link que abre a
+ * conversa.
+ *
+ * O BOTÃO DE COPIAR FICA SEMPRE NA MESMA COLUNA (auditoria visual, CT1): o valor
+ * ocupa o espaço que sobra, e o botão de 28px encosta na ponta da célula. O
+ * E-MAIL NUMA LINHA SÓ, cortado com "…" e inteiro na dica — quebrado no meio
+ * ("1.juizado.especial…an@ / exemplo.invalid"), ele não se lia.
+ */
+function ValorDoContato({ value, tipo }: { value: string | null | undefined; tipo: TipoValor }) {
   const copiar = useCopiar()
+  if (!value) return <span className="text-texto-3">—</span>
   const Icone = tipo === 'email' ? Mail : tipo === 'whatsapp' ? MessageCircle : Phone
+  if (tipo === 'whatsapp') {
+    return (
+      <a
+        href={waLink(value)}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex min-h-[28px] items-center gap-s1.5 whitespace-nowrap text-sucesso hover:underline"
+        title="Abrir conversa no WhatsApp"
+      >
+        <Icone className="h-[16px] w-[16px] shrink-0" aria-hidden="true" />
+        <span className="tabular-nums">{value}</span>
+      </a>
+    )
+  }
   return (
-    <div>
-      {label && (
-        <span className="block text-xs font-bold uppercase tracking-wide text-texto-3">
-          {label}
-        </span>
-      )}
-      {tipo === 'whatsapp' ? (
-        <a
-          href={waLink(value)}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex min-h-[28px] items-center gap-1.5 text-sucesso hover:underline"
-          title="Abrir conversa no WhatsApp"
-        >
-          <Icone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="tabular-nums">{value}</span>
-        </a>
+    <span className="flex min-w-0 items-center gap-s1.5 text-texto">
+      <Icone className="h-[16px] w-[16px] shrink-0 text-texto-3" aria-hidden="true" />
+      {tipo === 'email' ? (
+        <Truncado texto={value} max={9999} className="min-w-0 flex-1" />
       ) : (
-        <span className="inline-flex items-center gap-1.5 text-texto">
-          <Icone className="h-3.5 w-3.5 shrink-0 text-texto-3" aria-hidden="true" />
-          <span className={tipo === 'email' ? 'break-all' : 'whitespace-nowrap tabular-nums'}>
-            {value}
-          </span>
-          <button
-            type="button"
-            onClick={() => void copiar(value, tipo)}
-            aria-label={`Copiar ${value}`}
-            title="Copiar"
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
-          >
-            <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </span>
+        <span className="min-w-0 flex-1 whitespace-nowrap tabular-nums">{value}</span>
       )}
+      <button
+        type="button"
+        onClick={() => void copiar(value, tipo)}
+        aria-label={`Copiar ${value}`}
+        title="Copiar"
+        className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+      >
+        <Copy className="h-[16px] w-[16px]" aria-hidden="true" />
+      </button>
+    </span>
+  )
+}
+
+/**
+ * A GRADE DOS CONTATOS DE UM ÓRGÃO (auditoria visual, CT1): uma linha por órgão,
+ * com as sublinhas FIXAS "Serventia" e "Gabinete" e as três colunas (telefone,
+ * WhatsApp, e-mail) lado a lado. Antes, "SERV." e "GAB." se empilhavam dentro de
+ * cada coluna, e uma linha chegava a 140px. O mesmo molde no cabeçalho
+ * (`GRADE_CONTATOS`), para os títulos ficarem sobre os valores.
+ */
+// O E-MAIL LEVA UMA FATIA MAIOR que o telefone e o WhatsApp, que têm sempre
+// 14 ou 15 caracteres: com três frações iguais, sobrava espaço nos números e
+// o e-mail era cortado logo no começo.
+const GRADE_CONTATOS =
+  'grid grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)] items-center gap-x-s3'
+
+function SubLinha({
+  rotulo,
+  telefone,
+  whatsapp,
+  email,
+}: {
+  rotulo: string
+  telefone?: string | null
+  whatsapp?: string | null
+  email?: string | null
+}) {
+  return (
+    <div className={cn(GRADE_CONTATOS, 'min-h-[28px]')}>
+      <span className="text-xs font-semibold text-texto-3">{rotulo}</span>
+      <ValorDoContato value={telefone} tipo="telefone" />
+      <ValorDoContato value={whatsapp} tipo="whatsapp" />
+      <ValorDoContato value={email} tipo="email" />
     </div>
   )
 }
 
-// Célula de um tipo de contato (telefone, whatsapp ou e-mail). Para julgadores
-// separa Serventia/Gabinete; para auxiliares mostra um valor único. Só aparece o
-// que está preenchido.
-function CelulaContato({
-  serventia,
-  gabinete,
-  tipo,
-  valor,
-}: {
-  serventia?: string | null
-  gabinete?: string | null
-  tipo: 'julgador' | 'auxiliar'
-  valor: TipoValor
-}) {
-  if (tipo === 'auxiliar') {
-    return serventia ? (
-      <LinhaValor value={serventia} tipo={valor} />
-    ) : (
-      <span className="text-texto-3">—</span>
+/** Os contatos do órgão: as duas sublinhas do julgador, a única do auxiliar. */
+function ContatosDoOrgao({ row }: { row: OrgaoRow }) {
+  const c = row.contato
+  const algum =
+    !!c &&
+    [
+      c.serventia_telefone,
+      c.serventia_whatsapp,
+      c.serventia_email,
+      c.gabinete_telefone,
+      c.gabinete_whatsapp,
+      c.gabinete_email,
+    ].some(Boolean)
+  // Órgão sem nenhum contato: uma linha só, e não duas sublinhas de traços.
+  if (!algum) {
+    return (
+      <div className={cn(GRADE_CONTATOS, 'min-h-[28px]')}>
+        <span aria-hidden="true" />
+        <span className="col-span-3 text-texto-3">Nenhum contato cadastrado</span>
+      </div>
     )
   }
-  if (!serventia && !gabinete) return <span className="text-texto-3">—</span>
+  if (row.tipo === 'auxiliar') {
+    // Auxiliar não tem separação serventia/gabinete: uma sublinha.
+    return (
+      <SubLinha
+        rotulo="Contato"
+        telefone={c?.serventia_telefone}
+        whatsapp={c?.serventia_whatsapp}
+        email={c?.serventia_email}
+      />
+    )
+  }
   return (
-    <div className="space-y-1.5">
-      {serventia && <LinhaValor label="Serv." value={serventia} tipo={valor} />}
-      {gabinete && <LinhaValor label="Gab." value={gabinete} tipo={valor} />}
+    <div className="space-y-s1">
+      <SubLinha
+        rotulo="Serventia"
+        telefone={c?.serventia_telefone}
+        whatsapp={c?.serventia_whatsapp}
+        email={c?.serventia_email}
+      />
+      <SubLinha
+        rotulo="Gabinete"
+        telefone={c?.gabinete_telefone}
+        whatsapp={c?.gabinete_whatsapp}
+        email={c?.gabinete_email}
+      />
     </div>
   )
 }
@@ -455,34 +516,60 @@ export default function ContatosServentias() {
 
   const editandoAuxiliar = editing?.tipo === 'auxiliar'
 
+  /** O menu "⋯" do órgão: só o contato AUXILIAR se exclui por aqui. */
+  const acoesDoOrgao = (row: OrgaoRow): AcaoDoMenu[] => [
+    { rotulo: 'Editar contatos', icone: <Pencil aria-hidden="true" />, onSelecionar: () => abrirEdicao(row) },
+    ...(row.tipo === 'auxiliar' && row.contato
+      ? [
+          {
+            rotulo: 'Excluir contato auxiliar',
+            icone: <Trash2 aria-hidden="true" />,
+            perigo: true,
+            onSelecionar: () => setToDelete(row.contato),
+          },
+        ]
+      : []),
+  ]
+
   return (
     <div>
       <PageHeader
         title="Contatos"
         description="Telefones e e-mails das serventias, gabinetes e órgãos auxiliares dos processos da carteira."
         actions={
+          // No celular, o primário ocupa a largura (auditoria visual, K2).
           <Button
-            icon={<Plus className="h-4 w-4" />}
+            icon={<Plus className="h-[16px] w-[16px]" />}
             onClick={() => abrirForm({ ...AUXILIAR_VAZIO })}
+            className="w-full sm:w-auto"
           >
             Novo contato
           </Button>
         }
       />
 
-      {/* A BUSCA E O FILTRO MORAM NO CARTÃO DA LISTA (a amostra), com a legenda
-          das bolinhas logo abaixo — derivada de DOT_TIPO, para não divergir das
-          cores usadas nas linhas. */}
+      {/* A BUSCA E O FILTRO MORAM NO CARTÃO DA LISTA (a amostra). A legenda das
+          bolinhas saiu: o tipo agora vem escrito num selo em cada linha (CT2). */}
       <Card>
-        <FerramentasDoPainel>
+        <FerramentasDoPainel
+          fim={
+            <span className="inline-flex items-center gap-s1.5">
+              <Copy className="h-[16px] w-[16px]" aria-hidden="true" />
+              copia o contato com um clique
+            </span>
+          }
+        >
           <CampoDeBusca
             valor={busca}
             onChange={setBusca}
-            placeholder="Buscar por órgão, tribunal, telefone ou e-mail…"
+            placeholder="Buscar por órgão, telefone ou e-mail"
+            title="Busca em: órgão, tribunal, telefones, WhatsApp e e-mails (o número com ou sem pontuação)"
             className="min-w-[14rem]"
           />
+          {/* SEM LARGURA FIXA (auditoria visual, C7 e CT2): com `w-64` o texto
+              cortava em "Todos os tribunais (5…". Só a largura mínima. */}
           <Select
-            className="sm:w-64"
+            className="w-auto min-w-[220px]"
             value={filtroTribunal}
             onChange={(e) => setFiltroTribunal(e.target.value)}
             aria-label="Filtrar por tribunal"
@@ -495,18 +582,6 @@ export default function ContatosServentias() {
             ))}
           </Select>
         </FerramentasDoPainel>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-sm text-texto-2">
-          {Object.entries(DOT_TIPO).map(([tipo, { cor, label }]) => (
-            <span key={tipo} className="inline-flex items-center gap-1.5">
-              <span aria-hidden="true" className={cn('h-2.5 w-2.5 shrink-0 rounded-full', cor)} />
-              órgão {label.toLowerCase()}
-            </span>
-          ))}
-          <span className="inline-flex items-center gap-1.5">
-            <Copy className="h-3.5 w-3.5 text-texto-3" aria-hidden="true" />
-            copia o contato com um clique
-          </span>
-        </div>
 
         {isLoading ? (
           <Loading />
@@ -529,27 +604,21 @@ export default function ContatosServentias() {
           // cadastrar ali sugere que não existe nada, quando o que há é um
           // recorte ativo escondendo o resto. A saída oferecida tem que ser
           // limpar o recorte, não criar registro.
+          // Sem resultado é uma linha simples (§0.10), sem a moldura do vazio.
           todasLinhas.length > 0 ? (
-            <EmptyState
-              title="Nada encontrado"
-              description={
+            <SemResultado
+              texto={
                 busca.trim()
                   ? `Nenhum órgão corresponde a "${busca.trim()}"${
                       filtroTribunal !== 'todos' ? ` no tribunal ${filtroTribunal}` : ''
                     }.`
                   : `Nenhum órgão no tribunal ${filtroTribunal}.`
               }
-              action={
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setBusca('')
-                    setFiltroTribunal('todos')
-                  }}
-                >
-                  Limpar busca e filtro
-                </Button>
-              }
+              rotuloLimpar="Limpar busca e filtro"
+              onLimpar={() => {
+                setBusca('')
+                setFiltroTribunal('todos')
+              }}
             />
           ) : (
             <EmptyState
@@ -557,7 +626,7 @@ export default function ContatosServentias() {
               description="Cadastre créditos/requerimentos ou um contato auxiliar."
               action={
                 <Button
-                  icon={<Plus className="h-4 w-4" />}
+                  icon={<Plus className="h-[16px] w-[16px]" />}
                   onClick={() => abrirForm({ ...AUXILIAR_VAZIO })}
                 >
                   Novo contato
@@ -566,88 +635,85 @@ export default function ContatosServentias() {
             />
           )
         ) : (
+          <>
+          {/* NO CELULAR, CARTÕES (K1): o órgão, o tribunal com o tipo e o
+              primeiro contato que houver. */}
+          <ListaNoCelular rotulo="Órgãos">
+            {linhas.map((row) => {
+              const c = row.contato
+              const primeiro =
+                c?.serventia_telefone || c?.gabinete_telefone || c?.serventia_email || c?.gabinete_email
+              return (
+                <CartaoNoCelular
+                  key={row.key}
+                  titulo={formatOrgaoLabel(row.orgao, row.tipo)}
+                  linhas={[
+                    [row.tribunal, SELO_TIPO[row.tipo].label].filter(Boolean).join(' · '),
+                    primeiro ?? 'Nenhum contato cadastrado',
+                  ]}
+                  onAbrir={() => abrirEdicao(row)}
+                  rotuloAbrir={`Editar contatos de ${formatOrgaoLabel(row.orgao, row.tipo)}`}
+                  rotuloDasAcoes={`Ações de ${formatOrgaoLabel(row.orgao, row.tipo)}`}
+                  acoes={acoesDoOrgao(row)}
+                />
+              )
+            })}
+          </ListaNoCelular>
+          <div className="hidden md:block">
           <Table dense>
             <THead>
               <tr>
-                <TH>Órgão</TH>
-                <TH>Tribunal</TH>
-                <TH>Telefone</TH>
-                <TH>WhatsApp</TH>
-                <TH>E-mail</TH>
-                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
+                <TH className="w-[26%]">Órgão</TH>
+                {/* Só a largura da sigla: a sobra vai para os contatos. */}
+                <TH className="w-[1%] whitespace-nowrap">Tribunal</TH>
+                {/* Os títulos das três colunas no MESMO MOLDE da grade das linhas. */}
+                <TH>
+                  <div className={GRADE_CONTATOS}>
+                    {/* Um invólucro no fluxo: o `sr-only` sozinho é absoluto e
+                        não ocuparia a primeira coluna da grade. */}
+                    <span>
+                      <span className="sr-only">Contato de</span>
+                    </span>
+                    <span>Telefone</span>
+                    <span>WhatsApp</span>
+                    <span>E-mail</span>
+                  </div>
+                </TH>
+                {/* A coluna das ações tem largura fixa (C4). */}
+                <TH className="w-[72px] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
-              {linhas.map((row) => {
-                const c = row.contato
-                return (
-                  <TR key={row.key}>
-                    <TD className="font-semibold text-texto">
-                      <div className="flex items-start gap-2.5">
-                        <span
-                          title={DOT_TIPO[row.tipo].label}
-                          aria-label={`Tipo: ${DOT_TIPO[row.tipo].label}`}
-                          className={cn(
-                            'mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full',
-                            DOT_TIPO[row.tipo].cor,
-                          )}
-                        />
-                        {/* Nome do órgão é longo: quebra em várias linhas, sem truncar. */}
-                        <div className="min-w-0">
-                          {formatOrgaoLabel(row.orgao, row.tipo)}
-                        </div>
-                      </div>
-                    </TD>
-                    <TD className="text-texto-2">{row.tribunal || '—'}</TD>
-                    {/* Telefones/WhatsApp seguem sem quebra (números). */}
-                    <TD className="whitespace-nowrap">
-                      <CelulaContato
-                        tipo={row.tipo}
-                        serventia={c?.serventia_telefone}
-                        gabinete={c?.gabinete_telefone}
-                        valor="telefone"
-                      />
-                    </TD>
-                    <TD className="whitespace-nowrap">
-                      <CelulaContato
-                        tipo={row.tipo}
-                        serventia={c?.serventia_whatsapp}
-                        gabinete={c?.gabinete_whatsapp}
-                        valor="whatsapp"
-                      />
-                    </TD>
-                    {/* E-mails longos podem quebrar em qualquer caractere. */}
-                    <TD>
-                      <CelulaContato
-                        tipo={row.tipo}
-                        serventia={c?.serventia_email}
-                        gabinete={c?.gabinete_email}
-                        valor="email"
-                      />
-                    </TD>
-                    {/* Ações: botões permanecem em linha única. */}
-                    <TD className="whitespace-nowrap">
-                      <div className="flex justify-end gap-0.5">
-                        <IconButton
-                          label="Editar contatos"
-                          icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => abrirEdicao(row)}
-                        />
-                        {row.tipo === 'auxiliar' && c && (
-                          <IconButton
-                            label="Excluir contato auxiliar"
-                            variant="danger"
-                            icon={<Trash2 className="h-4 w-4" />}
-                            onClick={() => setToDelete(c)}
-                          />
-                        )}
-                      </div>
-                    </TD>
-                  </TR>
-                )
-              })}
+              {linhas.map((row) => (
+                <TR key={row.key}>
+                  <TD className="font-semibold text-texto">
+                    {/* Nome do órgão é longo: quebra em várias linhas, sem truncar. */}
+                    <div>{formatOrgaoLabel(row.orgao, row.tipo)}</div>
+                    <Badge size="sm" tone={SELO_TIPO[row.tipo].tom} className="mt-s1">
+                      {SELO_TIPO[row.tipo].label}
+                    </Badge>
+                  </TD>
+                  <TD curto className="text-texto-2">{row.tribunal || '—'}</TD>
+                  <TD className="py-s2">
+                    <ContatosDoOrgao row={row} />
+                  </TD>
+                  {/* O "›" abre a edição dos contatos; o "⋯" traz Editar e, no
+                      auxiliar, Excluir — em vermelho, por último, e não mais
+                      colado no lápis (C4). */}
+                  <TD className="w-[72px] py-s2">
+                    <AcoesDaLinha
+                      onAbrir={() => abrirEdicao(row)}
+                      rotuloAbrir={`Editar contatos de ${formatOrgaoLabel(row.orgao, row.tipo)}`}
+                      rotuloDasAcoes={`Ações de ${formatOrgaoLabel(row.orgao, row.tipo)}`}
+                      acoes={acoesDoOrgao(row)}
+                    />
+                  </TD>
+                </TR>
+              ))}
             </TBody>
           </Table>
+          </div>
+          </>
         )}
       </Card>
 
@@ -671,7 +737,8 @@ export default function ContatosServentias() {
                   ?.tribunal || undefined
               : undefined
         }
-        size="lg"
+        // Formulário: 640px (auditoria visual, C8).
+        size="md"
         dirty={dirty}
         footer={
           <>
@@ -689,10 +756,10 @@ export default function ContatosServentias() {
         }
       >
         {editing && (
-          <form id="form-contato" onSubmit={handleSubmit} className="space-y-5">
+          <form id="form-contato" onSubmit={handleSubmit} className="space-y-s5">
             {editandoAuxiliar ? (
               <>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-s4 sm:grid-cols-2">
                   <Field label="Órgão" required error={erros.orgao}>
                     <Input
                       value={editing.orgao ?? ''}
@@ -708,7 +775,7 @@ export default function ContatosServentias() {
                     />
                   </Field>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-s4 sm:grid-cols-2">
                   <Field label="Telefone" error={erros.serventia_telefone}>
                     <Input
                       value={editing.serventia_telefone ?? ''}
@@ -742,7 +809,7 @@ export default function ContatosServentias() {
             ) : (
               <>
                 <SecaoDoFormulario titulo="Serventia">
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-s4 sm:grid-cols-2">
                     <Field label="Telefone" error={erros.serventia_telefone}>
                       <Input
                         value={editing.serventia_telefone ?? ''}
@@ -774,7 +841,7 @@ export default function ContatosServentias() {
                   </div>
                 </SecaoDoFormulario>
                 <SecaoDoFormulario titulo="Gabinete">
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-s4 sm:grid-cols-2">
                     <Field label="Telefone" error={erros.gabinete_telefone}>
                       <Input
                         value={editing.gabinete_telefone ?? ''}

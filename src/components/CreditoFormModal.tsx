@@ -58,8 +58,8 @@ import { perguntarDescarte } from '@/lib/descarte'
  * dados, que é o que a pessoa precisa saber para escolher a aba.
  */
 const ABAS_NOVO_CREDITO = [
-  { key: 'manual', label: 'Manual', icon: <PenLine className="h-4 w-4" /> },
-  { key: 'auto', label: 'Pela pasta do Drive', icon: <Sparkles className="h-4 w-4" /> },
+  { key: 'manual', label: 'Manual', icon: <PenLine className="h-[16px] w-[16px]" /> },
+  { key: 'auto', label: 'Pela pasta do Drive', icon: <Sparkles className="h-[16px] w-[16px]" /> },
 ]
 
 /**
@@ -607,6 +607,7 @@ export function CreditoFormModal({
                     >
                       <input
                         type="checkbox"
+                        className="h-[16px] w-[16px] accent-marca"
                         checked={(editing.tipo_credito ?? []).includes(k as TipoCredito)}
                         onChange={() => {
                           const atuais = editing.tipo_credito ?? []

@@ -6,10 +6,11 @@
 // ícone — e os componentes de ui/ são de toda a plataforma, com outra frente
 // cuidando deles. Tudo aqui é só apresentação: nenhuma peça busca ou grava dado.
 import type { ReactNode } from 'react'
-import { AlertTriangle, CheckCircle2, Clock, Info, Search, X, Check } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock, Info, X, Check } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/Badge'
-import { Input } from '@/components/ui/Field'
+import { CampoDeBusca as CampoDeBuscaComum, BarraDaLista } from '@/components/ui/CampoDeBusca'
+import { AcoesDaLinha, type AcaoDoMenu } from '@/components/ui/MenuDeAcoes'
 import {
   DICA_EXPECTATIVA,
   tomDaExpectativa,
@@ -19,52 +20,114 @@ import { formatDate } from '@/lib/format'
 /* ------------------------------------------------------------------ busca */
 
 /**
- * O campo de busca da tela (o `.input` com a lupa da amostra). O rótulo vai para
- * o leitor de tela pelo `aria-label`: o placeholder some ao digitar.
+ * O campo de busca das telas do Operacional: o `CampoDeBusca` comum (ui/), com
+ * a lupa de 16px, a altura de controle e a tecla "/" desenhada à direita
+ * (auditoria visual, C3). Antes o atalho ia escrito no texto de exemplo
+ * ("…  ( / )"). Este invólucro só mantém o `onChange` que as telas já usam.
+ *
+ * O TEXTO DE EXEMPLO TEM ATÉ 40 CARACTERES ("Buscar por número, cedente ou
+ * devedora"): a lista inteira dos campos lidos vai em `title`. O placeholder de
+ * nove campos cortava a 1280px ("…trib").
  */
 export function CampoDeBusca({
   valor,
   onChange,
   placeholder,
+  title,
   className,
 }: {
   valor: string
   onChange: (v: string) => void
   placeholder: string
+  /** Onde a busca procura, por extenso (a dica do campo). */
+  title?: string
   className?: string
 }) {
   return (
-    <div className={cn('relative min-w-0 flex-1', className)}>
-      <Search
-        aria-hidden="true"
-        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-texto-3"
-      />
-      <Input
-        type="search"
-        aria-label={placeholder.replace(/…$/, '')}
-        className="pl-9"
-        // O FILTRO DA TELA: é aqui que o "/" do teclado leva (layout/Consultas.tsx).
-        // A dica "( / )" só no texto de exemplo, como na amostra — o nome do
-        // campo para o leitor de tela continua sem ela.
-        data-filtro-tela=""
-        placeholder={`${placeholder}  ( / )`}
-        value={valor}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
+    <CampoDeBuscaComum
+      valor={valor}
+      onMudar={onChange}
+      placeholder={placeholder}
+      title={title}
+      classeDaCaixa={cn('flex-1', className)}
+    />
   )
 }
 
 /**
  * A faixa de ferramentas no topo de um painel (o `.panel-tools`): busca e
  * filtros DENTRO do cartão da lista, separados dela por uma borda — a busca é da
- * lista, e não da página.
+ * lista, e não da página. Por dentro, a `BarraDaLista` comum (C3): a busca
+ * primeiro (cresce até 520px), depois os filtros, e o `fim` encostado à direita.
  */
-export function FerramentasDoPainel({ children }: { children: ReactNode }) {
+export function FerramentasDoPainel({ children, fim }: { children: ReactNode; fim?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-2.5 border-b border-borda px-5 py-4">
-      {children}
+    <div className="border-b border-borda px-s5 py-s4">
+      <BarraDaLista fim={fim}>{children}</BarraDaLista>
     </div>
+  )
+}
+
+/* ------------------------------------------------------------------ celular */
+
+/**
+ * A TABELA VIRA LISTA DE CARTÕES NO CELULAR (auditoria visual, K1): abaixo de
+ * 768px, Créditos, Requerimentos, Contatos e Dados cadastrais rolavam de lado e
+ * ficavam inúteis. Cada linha vira um cartão com o título (número ou nome), até
+ * duas linhas de metadado e as mesmas ações da tabela ("⋯" e "›"). Os MESMOS
+ * dados: a tela renderiza as duas formas, e o CSS escolhe (`md:hidden` aqui, e a
+ * tabela dentro de `hidden md:block`).
+ *
+ * (A especificação previa um `ui/ListaResponsiva`; a base não o criou, e ele
+ * mora aqui enquanto só estas telas o usam.)
+ */
+export function ListaNoCelular({ rotulo, children }: { rotulo: string; children: ReactNode }) {
+  return (
+    <ul aria-label={rotulo} className="divide-y divide-borda md:hidden">
+      {children}
+    </ul>
+  )
+}
+
+/** Um cartão da `ListaNoCelular`. O toque no cartão abre o registro, como a linha. */
+export function CartaoNoCelular({
+  titulo,
+  linhas,
+  onAbrir,
+  rotuloAbrir,
+  acoes,
+  rotuloDasAcoes,
+}: {
+  titulo: ReactNode
+  /** Até duas linhas de metadado; as vazias não aparecem. */
+  linhas?: ReactNode[]
+  onAbrir?: () => void
+  rotuloAbrir?: string
+  acoes?: readonly AcaoDoMenu[]
+  rotuloDasAcoes?: string
+}) {
+  const metas = (linhas ?? []).filter((l) => l !== null && l !== undefined && l !== false && l !== '')
+  return (
+    <li
+      onClick={onAbrir}
+      className={cn('flex items-start gap-s2 px-s4 py-s3', onAbrir && 'cursor-pointer')}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-corpo font-semibold text-texto">{titulo}</div>
+        {metas.slice(0, 2).map((m, i) => (
+          <div key={i} className="mt-s0.5 text-xs text-texto-2">
+            {m}
+          </div>
+        ))}
+      </div>
+      {/* O "›" É O CAMINHO DO TECLADO, como na tabela: o cartão não recebe foco. */}
+      <AcoesDaLinha
+        onAbrir={onAbrir}
+        rotuloAbrir={rotuloAbrir}
+        acoes={acoes}
+        rotuloDasAcoes={rotuloDasAcoes}
+      />
+    </li>
   )
 }
 
@@ -112,10 +175,10 @@ export function Aviso({
   return (
     <div
       role={papel}
-      className={cn('flex items-start gap-2.5 rounded-campo border px-4 py-3 text-corpo', t.caixa, className)}
+      className={cn('flex items-start gap-s2 rounded-campo border px-s4 py-s3 text-corpo', t.caixa, className)}
     >
-      <span className="mt-0.5 shrink-0">{t.icone}</span>
-      <div className="min-w-0 flex-1 space-y-1 text-texto">{children}</div>
+      <span className="mt-s0.5 shrink-0">{t.icone}</span>
+      <div className="min-w-0 flex-1 space-y-s1 text-texto">{children}</div>
     </div>
   )
 }
@@ -125,7 +188,7 @@ export function CaixaSuave({ children, className }: { children: ReactNode; class
   return (
     <div
       className={cn(
-        'flex items-start gap-2 rounded-campo border border-info-borda bg-marca-leve px-4 py-3 text-corpo text-texto-2',
+        'flex items-start gap-s2 rounded-campo border border-info-borda bg-marca-leve px-s4 py-s3 text-corpo text-texto-2',
         className,
       )}
     >
@@ -137,8 +200,14 @@ export function CaixaSuave({ children, className }: { children: ReactNode; class
 /* ------------------------------------------------------------------ listas */
 
 /**
- * O título de um grupo da lista (o `.group-h`): caixa alta, a contagem numa
- * pílula e, nos grupos que pedem ação, a cor do tom no próprio título.
+ * O título de um grupo da lista (o `.group-h`): caixa alta e a contagem numa
+ * pílula.
+ *
+ * O TÍTULO FICA NO CINZA COMUM, E SÓ A CONTAGEM LEVA O TOM (auditoria visual,
+ * T1): em Tarefas, "VENCIDAS" em vermelho somava-se ao bloco de data, ao selo do
+ * prazo e ao "Urgente" — quatro sinais vermelhos para a mesma coisa, e a vista
+ * deixa de distinguir o que é grave (fadiga de alarme). A pílula colorida basta
+ * para dizer que o grupo pede ação.
  */
 export function TituloDoGrupo({
   titulo,
@@ -150,14 +219,18 @@ export function TituloDoGrupo({
   tom?: 'neutro' | 'perigo' | 'aviso'
 }) {
   return (
-    <h2
-      className={cn(
-        'font-display mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wide',
-        tom === 'perigo' ? 'text-perigo' : tom === 'aviso' ? 'text-aviso' : 'text-texto-2',
-      )}
-    >
+    <h2 className="font-display mb-s3 flex items-center gap-s2 text-sm font-bold uppercase tracking-wide text-texto-2">
       {titulo}
-      <span className="rounded-full bg-superficie-3 px-2 py-0.5 text-xs font-bold normal-case tabular-nums tracking-normal text-texto-2">
+      <span
+        className={cn(
+          'rounded-full px-s2 py-s0.5 text-xs font-bold normal-case tabular-nums tracking-normal',
+          tom === 'perigo'
+            ? 'bg-perigo-fundo text-perigo'
+            : tom === 'aviso'
+              ? 'bg-aviso-fundo text-aviso'
+              : 'bg-superficie-3 text-texto-2',
+        )}
+      >
         {qtd}
       </span>
     </h2>
@@ -196,13 +269,13 @@ export function CabecalhoDaFicha({
       <p className="font-display text-xs font-bold uppercase tracking-wider text-marca-texto">
         {etiqueta}
       </p>
-      <div className="mt-0.5 flex items-center gap-1">
+      <div className="mt-s0.5 flex items-center gap-s1">
         <h2 className="font-display min-w-0 break-words text-lg font-extrabold tabular-nums tracking-tight text-texto">
           {titulo}
         </h2>
         {acao}
       </div>
-      {apoio && <p className="mt-0.5 text-xs text-texto-2">{apoio}</p>}
+      {apoio && <p className="mt-s0.5 text-xs text-texto-2">{apoio}</p>}
     </div>
   )
 }
@@ -210,7 +283,7 @@ export function CabecalhoDaFicha({
 /** Título de seção da ficha (o `.dsec`). */
 export function TituloDaSecao({ children, acao }: { children: ReactNode; acao?: ReactNode }) {
   return (
-    <div className="mb-2 mt-6 flex items-center justify-between gap-3 first:mt-0">
+    <div className="mb-s2 mt-s5 flex items-center justify-between gap-s3 first:mt-0">
       <h3 className="font-display text-xs font-bold uppercase tracking-wider text-texto-3">
         {children}
       </h3>
@@ -223,7 +296,15 @@ export function TituloDaSecao({ children, acao }: { children: ReactNode; acao?: 
  * Uma seção de pares rótulo → valor, um por linha (o `.kv.big` da amostra): o
  * rótulo cinza à esquerda, o valor à direita, alinhados numa coluna só. Campo
  * vazio vira "—", como sempre foi na ficha.
+ *
+ * A COLUNA DO RÓTULO TEM LARGURA FIXA, IGUAL EM TODA SEÇÃO (auditoria visual,
+ * C9): com `auto`, cada seção media o próprio rótulo mais largo (cerca de 140,
+ * 60 e 160px na ficha do crédito), e os valores "pulavam" de uma seção para a
+ * outra. 176px cabe "Expectativa de liquidação"; no celular, 40% da largura.
  */
+export const GRADE_DA_FICHA =
+  'grid grid-cols-[minmax(96px,40%)_minmax(0,1fr)] gap-x-s4 gap-y-s2 sm:grid-cols-[176px_minmax(0,1fr)]'
+
 export function SecaoDaFicha({
   titulo,
   pares,
@@ -235,7 +316,7 @@ export function SecaoDaFicha({
   return (
     <section>
       <TituloDaSecao>{titulo}</TituloDaSecao>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-2 text-corpo">
+      <dl className={cn(GRADE_DA_FICHA, 'text-corpo')}>
         {linhas.map(([rotulo, valor]) => (
           <div key={rotulo} className="contents">
             <dt className="text-texto-3">{rotulo}</dt>
@@ -252,9 +333,9 @@ export function SecaoDaFicha({
 /** O cartão de valor da ficha do crédito (capital, valor de face…). */
 export function CartaoDeValor({ rotulo, valor }: { rotulo: string; valor: ReactNode }) {
   return (
-    <div className="rounded-cartao border border-borda bg-superficie px-4 py-3 shadow-nivel-1">
+    <div className="rounded-cartao border border-borda bg-superficie px-s4 py-s3 shadow-nivel-1 dark:shadow-none">
       <p className="text-corpo font-medium text-texto-2">{rotulo}</p>
-      <p className="font-display mt-0.5 break-words text-xl font-bold tabular-nums tracking-tight text-texto">
+      <p className="font-display mt-s0.5 break-words text-xl font-bold tabular-nums tracking-tight text-texto">
         {valor}
       </p>
     </div>
@@ -281,11 +362,11 @@ export function SeloExpectativa({
   if (!tom) return <span className="text-texto-2">—</span>
   const icone =
     tom === 'vencida' ? (
-      <X className="h-3 w-3" aria-hidden="true" />
+      <X className="h-[12px] w-[12px]" aria-hidden="true" />
     ) : tom === 'alerta' ? (
-      <Clock className="h-3 w-3" aria-hidden="true" />
+      <Clock className="h-[12px] w-[12px]" aria-hidden="true" />
     ) : (
-      <Check className="h-3 w-3" aria-hidden="true" />
+      <Check className="h-[12px] w-[12px]" aria-hidden="true" />
     )
   return (
     <span title={DICA_EXPECTATIVA[tom]}>

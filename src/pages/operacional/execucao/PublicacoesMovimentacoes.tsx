@@ -17,7 +17,7 @@ import { NovaTarefaModal } from '@/pages/operacional/execucao/TarefasAdvbox'
 import { FaseProcessual } from '@/pages/operacional/execucao/FaseProcessual'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
-import { Card } from '@/components/ui/Card'
+import { Card, type FaixaDoCartao } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
@@ -206,7 +206,7 @@ export default function PublicacoesMovimentacoes() {
           RPV/Precatórios na Análise e de Investidores/Originadores nos Dados
           cadastrais. A regra da plataforma: sublinhado para visões, pílula para
           filtros dentro da visão. A busca fica no cartão, que é dela. */}
-      <div className="mb-4">
+      <div className="mb-s4">
         <Tabs
           items={[
             { key: 'publicacoes', label: 'Publicações', count: nPub.data },
@@ -222,11 +222,13 @@ export default function PublicacoesMovimentacoes() {
           próprio recorte (trilha + fase), sem relação com este campo. Solta, sem
           cartão em volta (a amostra): ela vale para as duas listas abaixo. */}
       {aba !== 'fase' && (
-        <div className="mb-4 flex">
+        <div className="mb-s4 flex">
           <CampoDeBusca
             valor={busca}
             onChange={setBusca}
-            placeholder="Buscar por processo, tribunal, órgão, tipo, conteúdo…"
+            placeholder="Buscar por processo, órgão ou conteúdo"
+            title="Busca em: número do processo (com ou sem pontuação), tribunal, órgão, tipo, partes, vínculo e o texto"
+            className="max-w-[520px]"
           />
         </div>
       )}
@@ -473,7 +475,7 @@ function Publicacoes({ busca }: { busca: string }) {
   )
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-s4">
       {/* A contagem à esquerda e o indicador da sincronização no canto (a
           amostra): o mesmo lugar em toda tela que sincroniza. */}
       <LinhaDeResumo>
@@ -555,7 +557,7 @@ function Secao({
     <section>
       <TituloDoGrupo titulo={titulo} qtd={qtd} />
       {extra}
-      <div className="space-y-2">{children}</div>
+      <div className="space-y-s2">{children}</div>
     </section>
   )
 }
@@ -563,7 +565,7 @@ function Secao({
 /** A linha de resumo acima das listas: a contagem e, no canto, a sincronização. */
 function LinhaDeResumo({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 text-corpo text-texto-2">
+    <div className="flex flex-wrap items-center justify-between gap-s3 text-corpo text-texto-2">
       {children}
     </div>
   )
@@ -601,95 +603,98 @@ function PublicacaoCard({
   const texto = useMemo(() => textoLimpo(raw.texto), [raw.texto])
   const temPartes = info.kind === 'credito' && (info.cedente || info.cessionario)
 
+  const decorrido = tempoDecorrido(p.data_disponibilizacao)
+  const link = typeof raw.link === 'string' && raw.link ? raw.link : null
+
   return (
     // TRATADA ESMAECE (item "Novo" da amostra): continua legível, mas a vista
-    // passa por ela e para nas Novas. A borda esquerda grossa é a mesma dos
-    // cartões de Paralisados, aqui na cor da borda comum.
-    <Card
-      className={cn(
-        'grid gap-x-5 gap-y-2 border-l-4 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto]',
-        p.tratada && 'opacity-[.72]',
-      )}
-    >
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* A caixa ANTES do número (a amostra): marcar como tratada é o gesto
-              da tela, e o número é o que se lê em seguida. */}
-          <label
-            className="flex min-h-[24px] min-w-[24px] cursor-pointer items-center"
-            title={p.tratada ? 'Devolver para Novas' : 'Marcar como tratada'}
-          >
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-marca"
-              checked={p.tratada}
-              onChange={onToggle}
-            />
-            <span className="sr-only">Tratada</span>
-          </label>
-          <span className="font-semibold tabular-nums text-texto">
-            {formatCNJ(p.numero_processo ?? '')}
+    // passa por ela e para nas Novas.
+    //
+    // O CARTÃO COMPACTO (auditoria visual, P1 e P2): eram 3,5 publicações por
+    // tela. Linha 1 com a caixa, o número, os selos, a data à direita e as
+    // ações; linha 2 com as partes; o texto em 2 linhas com "Ler tudo". As ações
+    // viraram fantasma — "Criar tarefa" secundário em todo cartão fazia a lista
+    // inteira gritar a mesma coisa. Sem a borda esquerda grossa: neutra, ela
+    // curvava com o canto e parecia borda dupla (faixa de cor neutra: nenhuma).
+    <Card className={cn('px-s4 py-s3', p.tratada && 'opacity-[.72]')}>
+      <div className="flex flex-wrap items-center gap-x-s2 gap-y-s1">
+        {/* A caixa ANTES do número (a amostra): marcar como tratada é o gesto
+            da tela, e o número é o que se lê em seguida. 16px: era 12px, pequena
+            demais para o gesto principal da tela (P2). */}
+        <label
+          className="-ml-s1 flex h-controle-sm w-controle-sm cursor-pointer items-center justify-center"
+          title={p.tratada ? 'Devolver para Novas' : 'Marcar como tratada'}
+        >
+          <input
+            type="checkbox"
+            className="h-[16px] w-[16px] accent-marca"
+            checked={p.tratada}
+            onChange={onToggle}
+          />
+          <span className="sr-only">Tratada</span>
+        </label>
+        <span className="font-semibold tabular-nums text-texto">
+          {formatCNJ(p.numero_processo ?? '')}
+        </span>
+        {/* COPIAR O NÚMERO (qualidade de vida): ler a publicação e ir ao PJe é
+            o caminho de toda intimação, e o duplo clique pega só um pedaço do
+            CNJ formatado. */}
+        {p.numero_processo && (
+          <BotaoCopiar
+            valor={formatCNJ(p.numero_processo)}
+            rotulo="Copiar o número do processo"
+            aviso="Número copiado."
+            className="-mx-s1"
+          />
+        )}
+        {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
+        <SeloDoVinculo info={info} />
+        {/* A DATA À DIREITA, com HÁ QUANTO TEMPO ao lado (qualidade de vida): é a
+            conta que decide a urgência de uma intimação, e a tela faz em vez de
+            quem lê. */}
+        <span className="ml-auto flex items-center gap-s1">
+          <span className="whitespace-nowrap text-sm tabular-nums text-texto-2" title="Data de disponibilização">
+            <span className="sr-only">Data de disponibilização: </span>
+            {formatDate(p.data_disponibilizacao)}
+            {decorrido && <span className="text-texto-3"> · {decorrido}</span>}
           </span>
-          {/* COPIAR O NÚMERO (qualidade de vida): ler a publicação e ir ao PJe é
-              o caminho de toda intimação, e o duplo clique pega só um pedaço do
-              CNJ formatado. */}
-          {p.numero_processo && (
-            <BotaoCopiar
-              valor={formatCNJ(p.numero_processo)}
-              rotulo="Copiar o número do processo"
-              aviso="Número copiado."
-              className="-mx-1.5"
-            />
-          )}
-          {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}
-          <SeloDoVinculo info={info} />
-        </div>
-        <div className="mt-1 text-corpo text-texto-2">
-          {temPartes && (
-            <>
-              <Partes a={info.cedente} b={info.cessionario} /> ·{' '}
-            </>
-          )}
-          Data de disponibilização: {formatDate(p.data_disponibilizacao)}
-          {/* HÁ QUANTO TEMPO, ao lado da data (qualidade de vida): é a conta que
-              decide a urgência de uma intimação, e a tela faz em vez de quem lê. */}
-          {tempoDecorrido(p.data_disponibilizacao) && (
-            <span className="text-texto-3"> ({tempoDecorrido(p.data_disponibilizacao)})</span>
-          )}
-        </div>
-
-        {texto && <TextoExpand text={texto} />}
-
-        {typeof raw.link === 'string' && raw.link && (
-          <div className="mt-2 text-sm">
+          {/* "Criar tarefa" SEMPRE NO MESMO CANTO (a amostra): o gesto que vem
+              depois de ler a publicação, no lugar onde a mão já sabe que está. */}
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Plus className="h-[16px] w-[16px]" />}
+            onClick={onCriarTarefa}
+            className="ml-s1"
+          >
+            Criar tarefa
+          </Button>
+          {link && (
             <a
-              href={raw.link}
+              href={link}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-[24px] items-center gap-1 font-semibold text-marca-texto hover:underline"
+              aria-label="Abrir no DJEN"
+              title="Abrir no DJEN"
+              className="grid h-controle-sm w-controle-sm place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
             >
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /> Abrir no DJEN
+              <ExternalLink className="h-[16px] w-[16px]" aria-hidden="true" />
             </a>
-          </div>
-        )}
+          )}
+        </span>
       </div>
-      {/* "Criar tarefa" SEMPRE NO MESMO CANTO (a amostra): o gesto que vem
-          depois de ler a publicação, no lugar onde a mão já sabe que está. */}
-      <div className="flex items-start sm:justify-end">
-        <Button
-          size="sm"
-          variant="secondary"
-          icon={<Plus className="h-4 w-4" />}
-          onClick={onCriarTarefa}
-        >
-          Criar tarefa
-        </Button>
-      </div>
+      {temPartes && (
+        <div className="mt-s0.5 text-corpo text-texto-2">
+          <Partes a={info.cedente} b={info.cessionario} />
+        </div>
+      )}
+
+      {texto && <TextoExpand text={texto} />}
     </Card>
   )
 }
 
-// Texto da publicação: até 4 linhas + "ler mais".
+// Texto da publicação: até 2 linhas + "Ler tudo" (auditoria visual, P1: eram 4).
 function TextoExpand({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
@@ -699,10 +704,10 @@ function TextoExpand({ text }: { text: string }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight + 1)
   }, [text])
   return (
-    <div className="mt-2 text-corpo text-texto-2">
+    <div className="mt-s1 text-corpo text-texto-2">
       <div
         ref={ref}
-        className={cn('whitespace-pre-line break-words', !expanded && 'line-clamp-4')}
+        className={cn('whitespace-pre-line break-words', !expanded && 'line-clamp-2')}
       >
         {text}
       </div>
@@ -711,9 +716,9 @@ function TextoExpand({ text }: { text: string }) {
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="mt-0.5 min-h-[24px] text-sm font-semibold text-marca-texto hover:underline"
+          className="min-h-[24px] text-sm font-semibold text-marca-texto hover:underline"
         >
-          {expanded ? 'ler menos' : 'ler mais'}
+          {expanded ? 'Ler menos' : 'Ler tudo'}
         </button>
       )}
     </div>
@@ -742,24 +747,33 @@ interface StatusRow {
 // A ESCALA É A DA AMOSTRA, do âmbar ao vinho: o âmbar e o vermelho são os tokens
 // de aviso e de perigo; o laranja e o vinho do meio e do fim são os tokens
 // `parado-*` — degraus de uma escala graduada, com a versão escura da amostra.
-const COR_FAIXA: Record<FaixaParalisado, { borda: string; selo: string; legenda: string }> = {
+//
+// A FAIXA É A DO CARTÃO (auditoria visual, C5): uma barra interna de 3px, e não
+// o `border-l-4`, que curvava com o canto e parecia borda dupla. O `Card` tem
+// `aviso` e `perigo`; os degraus do meio e do fim trocam só a cor da barra.
+const COR_FAIXA: Record<
+  FaixaParalisado,
+  { faixa: FaixaDoCartao; corDaFaixa?: string; selo: string; legenda: string }
+> = {
   aviso: {
-    borda: 'border-l-aviso-cheio',
+    faixa: 'aviso',
     selo: 'bg-aviso-fundo text-aviso ring-aviso-borda',
     legenda: 'bg-aviso-cheio',
   },
   serio: {
-    borda: 'border-l-parado-serio-cheio',
+    faixa: 'aviso',
+    corDaFaixa: 'before:bg-parado-serio-cheio',
     selo: 'bg-parado-serio-fundo text-parado-serio-texto ring-parado-serio-borda',
     legenda: 'bg-parado-serio-cheio',
   },
   ruim: {
-    borda: 'border-l-perigo-cheio',
+    faixa: 'perigo',
     selo: 'bg-perigo-fundo text-perigo ring-perigo-borda',
     legenda: 'bg-perigo-cheio',
   },
   critico: {
-    borda: 'border-l-parado-critico',
+    faixa: 'perigo',
+    corDaFaixa: 'before:bg-parado-critico',
     selo: 'bg-perigo-fundo text-perigo ring-perigo-borda',
     legenda: 'bg-parado-critico',
   },
@@ -770,10 +784,10 @@ function LegendaParalisados() {
   return (
     <ul
       aria-label="Legenda do tempo sem movimentação"
-      className="mb-3 flex flex-wrap gap-x-4 gap-y-1.5 text-sm text-texto-2"
+      className="mb-s3 flex flex-wrap gap-x-s4 gap-y-s1.5 text-sm text-texto-2"
     >
       {LEGENDA_PARALISADO.map((l) => (
-        <li key={l.faixa} className="inline-flex items-center gap-1.5">
+        <li key={l.faixa} className="inline-flex items-center gap-s1.5">
           <span aria-hidden="true" className={cn('h-2.5 w-2.5 rounded-[3px]', COR_FAIXA[l.faixa].legenda)} />
           {l.rotulo}
         </li>
@@ -933,7 +947,7 @@ function Movimentacoes({ busca }: { busca: string }) {
   const vazio = novas.length === 0 && paralisados.length === 0
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-s4">
       <LinhaDeResumo>
         <span>
           <strong className="text-texto">{totalMovs}</strong>{' '}
@@ -1031,36 +1045,43 @@ function ProcessoMovimentacoes({
   const [aberto, setAberto] = useState(false)
   const temPartes = info.kind === 'credito' && (info.cedente || info.cessionario)
   return (
-    <Card className="overflow-hidden border-l-4">
+    // SEM `overflow-hidden` E SEM A BORDA ESQUERDA NEUTRA (auditoria visual, C5):
+    // o recorte prendia o que fosse fixo dentro do cartão, e a borda grossa
+    // curvava com o canto. Quem acompanha o canto agora é o próprio botão
+    // (`rounded-cartao`, e só em cima quando aberto).
+    <Card>
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
         aria-expanded={aberto}
-        className="block w-full px-5 py-4 text-left transition-colors hover:bg-superficie-2"
+        className={cn(
+          'block w-full rounded-cartao px-s4 py-s3 text-left transition-colors hover:bg-superficie-3/60',
+          aberto && 'rounded-b-none',
+        )}
       >
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-s2">
           <span className="font-semibold tabular-nums text-texto">{formatCNJ(numero)}</span>
           <SeloDoVinculo info={info} />
           <Badge tone="gray">
             {movs.length} {movs.length === 1 ? 'andamento' : 'andamentos'}
           </Badge>
-          <span className="inline-flex items-center gap-1 text-sm font-semibold text-marca-texto">
+          <span className="inline-flex items-center gap-s1 text-sm font-semibold text-marca-texto">
             {aberto ? 'ocultar' : 'ver andamentos'}
             <ChevronDown
               aria-hidden="true"
-              className={cn('h-3.5 w-3.5 transition-transform', aberto && 'rotate-180')}
+              className={cn('h-[16px] w-[16px] transition-transform', aberto && 'rotate-180')}
             />
           </span>
         </div>
         {temPartes && (
-          <div className="mt-1 text-corpo text-texto-2">
+          <div className="mt-s0.5 text-corpo text-texto-2">
             <Partes a={info.cedente} b={info.cessionario} />
           </div>
         )}
       </button>
 
       {aberto && (
-        <ol className="ml-6 space-y-3 border-l border-borda pb-4 pl-4 pr-5">
+        <ol className="ml-s6 space-y-s3 border-l border-borda pb-s4 pl-s4 pr-s5">
           {movs.map((m) => (
             <li key={m.id} className="relative">
               <span
@@ -1099,21 +1120,23 @@ function ProcessoParalisado({
   const cor = COR_FAIXA[faixaParalisado(dias)]
   const temPartes = info.kind === 'credito' && (info.cedente || info.cessionario)
   return (
-    <Card className={cn('border-l-4 px-5 py-4', cor.borda)}>
-      <div className="flex flex-wrap items-center gap-2">
+    // A FAIXA NA COR DO TEMPO PARADO (C5): a barra interna do Card; os degraus
+    // "sério" e "crítico" trocam só a cor dela.
+    <Card faixa={cor.faixa} className={cn('px-s4 py-s3', cor.corDaFaixa)}>
+      <div className="flex flex-wrap items-center gap-s2">
         <span className="font-semibold tabular-nums text-texto">{formatCNJ(numero)}</span>
         <SeloDoVinculo info={info} />
         <span
           className={cn(
-            'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
+            'inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset',
             cor.selo,
           )}
         >
-          <Clock className="h-3 w-3" aria-hidden="true" />
+          <Clock className="h-[12px] w-[12px]" aria-hidden="true" />
           {textoParalisado(dias)}
         </span>
       </div>
-      <div className="mt-1 text-corpo text-texto-2">
+      <div className="mt-s0.5 text-corpo text-texto-2">
         {temPartes && (
           <>
             <Partes a={info.cedente} b={info.cessionario} /> ·{' '}

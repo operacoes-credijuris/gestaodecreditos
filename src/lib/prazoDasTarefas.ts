@@ -49,6 +49,23 @@ export function seloDoPrazo(dias: number): { tom: TomDoPrazo; rel: string } {
 }
 
 /**
+ * O PRAZO EM POUCAS LETRAS, para caber DENTRO do bloco de data do cartão
+ * (auditoria visual, T1): "há 2 dias", "ontem", "hoje", "amanhã", "em 5 dias".
+ * O bloco passou a ser o único sinal colorido da tarefa, no lugar do selo
+ * "venceu há 2 dias" ao lado do título. O "venceu" sai porque o vermelho do
+ * bloco e o grupo "Vencidas" já dizem isso. Mesma régua do `seloDoPrazo`:
+ * depois de 7 dias, nada — a data basta.
+ */
+export function prazoCurto(dias: number): string {
+  if (dias < -1) return `há ${-dias} dias`
+  if (dias === -1) return 'ontem'
+  if (dias === 0) return 'hoje'
+  if (dias === 1) return 'amanhã'
+  if (dias <= 7) return `em ${dias} dias`
+  return ''
+}
+
+/**
  * As tarefas COM PRAZO, separadas nos quatro grupos.
  *
  * A ORDEM DENTRO DE CADA GRUPO é a da plataforma: as vencidas da que estourou há

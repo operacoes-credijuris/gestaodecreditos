@@ -103,10 +103,10 @@ export function CreditoDrawer({
         // linha da tabela; as ações dos apensos, aqui dentro.
       >
         {processo && (
-          <div className="space-y-6">
-            <div className="space-y-3">
+          <div className="space-y-s5">
+            <div className="space-y-s3">
               <BotaoPastaDrive processo={processo} />
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-s3 sm:grid-cols-2">
                 <CartaoDeValor rotulo="Capital investido" valor={valor(processo.capital_investido)} />
                 <CartaoDeValor rotulo="Valor de face" valor={valor(processo.valor_face)} />
                 {/* Mesma regra do formulário: já recebido e complementar só
@@ -155,13 +155,11 @@ export function CreditoDrawer({
             <SecaoDaFicha
               titulo="Aquisição e liquidação"
               pares={[
+                // O INSTRUMENTO EM TEXTO SIMPLES, como na tabela (auditoria visual,
+                // C4 e E2): é dado de consulta, não estado.
                 [
                   'Instrumento',
-                  processo.instrumento ? (
-                    <Badge tone={getLabel(INSTRUMENTO, processo.instrumento).tone}>
-                      {getLabel(INSTRUMENTO, processo.instrumento).label}
-                    </Badge>
-                  ) : null,
+                  processo.instrumento ? getLabel(INSTRUMENTO, processo.instrumento).label : null,
                 ],
                 [
                   'Nº RTDPJ',
@@ -190,7 +188,7 @@ export function CreditoDrawer({
                 [
                   'Tipo de crédito',
                   processo.tipo_credito?.length ? (
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-s1.5">
                       {processo.tipo_credito.map((t) => (
                         <Badge key={t} tone="gray">
                           {getLabel(TIPO_CREDITO, t).label}

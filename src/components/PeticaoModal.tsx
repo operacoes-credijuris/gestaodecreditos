@@ -54,8 +54,8 @@ import {
 } from '@/lib/rascunhoDaPeticao'
 
 const ABAS = [
-  { key: 'modelo', label: 'Modelo', icon: <FileText className="h-4 w-4" /> },
-  { key: 'zero', label: 'Geração por IA', icon: <Sparkles className="h-4 w-4" /> },
+  { key: 'modelo', label: 'Modelo', icon: <FileText className="h-[16px] w-[16px]" /> },
+  { key: 'zero', label: 'Geração por IA', icon: <Sparkles className="h-[16px] w-[16px]" /> },
 ]
 
 /**
@@ -684,7 +684,7 @@ export function PeticaoModal({
                   : undefined
             }
             disabled={impedidoSalvar}
-            icon={<Download className="h-4 w-4" />}
+            icon={<Download className="h-[16px] w-[16px]" />}
           >
             {/* "Salvar", e não "Gerar petição": repetir o título da janela no
                 botão não informa nada, e o que o clique faz é salvar a peça no
@@ -711,7 +711,7 @@ export function PeticaoModal({
               {/* ---------- Panorama ---------- */}
               <section>
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <h4 className="font-display text-xs font-bold uppercase tracking-wide text-brand-800">
+                  <h4 className="font-display text-xs font-bold uppercase tracking-wide text-marca-texto">
                     Panorama do caso
                   </h4>
                   {panorama.data && (
@@ -719,10 +719,10 @@ export function PeticaoModal({
                       type="button"
                       onClick={() => void reanalisar()}
                       disabled={reanalisando}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-texto-3 transition-colors hover:text-brand-700 disabled:opacity-50"
+                      className="inline-flex min-h-[24px] items-center gap-s1 text-xs font-medium text-texto-3 transition-colors hover:text-marca-texto disabled:opacity-50"
                     >
                       <RefreshCw
-                        className={`h-3 w-3 ${reanalisando ? 'animate-spin' : ''}`}
+                        className={`h-[14px] w-[14px] ${reanalisando ? 'animate-spin' : ''}`}
                       />
                       {reanalisando ? 'Analisando…' : 'Analisar de novo'}
                     </button>
@@ -730,8 +730,8 @@ export function PeticaoModal({
                 </div>
 
                 {panorama.isLoading ? (
-                  <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-4">
-                    <p className="text-sm text-brand-800">
+                  <div className="rounded-campo border border-info-borda bg-marca-leve p-s4">
+                    <p className="text-sm text-marca-texto">
                       Lendo as movimentações e as tarefas deste processo…
                     </p>
                     <div className="mt-3 space-y-2">
@@ -752,7 +752,7 @@ export function PeticaoModal({
                     </button>
                   </Aviso>
                 ) : panorama.data ? (
-                  <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-4 text-sm leading-relaxed text-texto">
+                  <div className="rounded-campo border border-info-borda bg-marca-leve p-s4 text-sm leading-relaxed text-texto">
                     <TextoIA texto={panorama.data.panorama} />
                   </div>
                 ) : null}
@@ -777,7 +777,7 @@ export function PeticaoModal({
                   <Button
                     size="sm"
                     variant="outline"
-                    icon={<Send className="h-4 w-4" />}
+                    icon={<Send className="h-[16px] w-[16px]" />}
                     loading={redigindo}
                     disabled={!instrucao.trim() || redigindo}
                     onClick={() => void redigir()}
@@ -806,7 +806,7 @@ export function PeticaoModal({
                     <Button
                       size="sm"
                       variant="ghost"
-                      icon={<Copy className="h-4 w-4" />}
+                      icon={<Copy className="h-[16px] w-[16px]" />}
                       onClick={() => void abrirNoClaude()}
                     >
                       Continuar no Claude
@@ -951,7 +951,7 @@ export function PeticaoModal({
                   onClick={() => setEditandoCredito(true)}
                   className="mt-1 inline-flex min-h-[24px] items-center gap-1 text-sm font-semibold text-marca-texto hover:underline"
                 >
-                  <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                  <Pencil className="h-[14px] w-[14px]" aria-hidden="true" />
                   Abrir o cadastro do crédito
                 </button>
               )}

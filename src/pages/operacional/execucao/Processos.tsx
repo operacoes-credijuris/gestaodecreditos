@@ -5,7 +5,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   CalendarClock,
-  ChevronRight,
   Folder,
   Pencil,
   Plus,
@@ -19,7 +18,9 @@ import { NumeroProcessoDrive } from '@/components/NumeroProcessoDrive'
 import { CreditoFormModal } from '@/components/CreditoFormModal'
 import {
   CampoDeBusca,
+  CartaoNoCelular,
   FerramentasDoPainel,
+  ListaNoCelular,
   Partes,
   SeloExpectativa,
 } from '@/components/operacional/Pecas'
@@ -29,7 +30,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Segmented } from '@/components/ui/Segmented'
-import { StatCard } from '@/components/ui/StatCard'
+import { GradeDeIndicadores, StatCard } from '@/components/ui/StatCard'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   Table,
@@ -41,8 +42,9 @@ import {
   Loading,
   ErrorState,
   EmptyState,
+  SemResultado,
 } from '@/components/ui/Table'
-import { IconButton } from '@/components/ui/IconButton'
+import { AcoesDaLinha, type AcaoDoMenu } from '@/components/ui/MenuDeAcoes'
 import { SortableTH } from '@/components/ui/SortableTH'
 import { CreditoDrawer } from '@/components/CreditoDrawer'
 import { useToast } from '@/components/ui/Toast'
@@ -239,15 +241,30 @@ export default function Processos() {
   // clique seguinte refazia as três chamadas ao Drive em vez de abrir na hora.
   const detalheVivo = detalhe ? (data?.find((p) => p.id === detalhe.id) ?? detalhe) : null
 
+  /**
+   * AS AÇÕES DA LINHA NO MENU "⋯" (auditoria visual, C4): eram 4 ícones de 12px
+   * (+ ✎ 🗑 ›), de cor fraca, com o Excluir colado no Editar. Agora o "›" abre a
+   * ficha, e o menu traz as outras por extenso, com o Excluir em vermelho, por
+   * último. As mesmas na tabela e no cartão do celular.
+   */
+  const acoesDoCredito = (p: Processo): AcaoDoMenu[] => [
+    apensos.acaoAdicionar(p.id),
+    { rotulo: 'Editar', icone: <Pencil aria-hidden="true" />, onSelecionar: () => setFormCredito(p) },
+    { rotulo: 'Excluir', icone: <Trash2 aria-hidden="true" />, perigo: true, onSelecionar: () => setToDelete(p) },
+  ]
+
   return (
     <div>
       <PageHeader
         title="Créditos"
         description="A carteira: cada crédito adquirido, de quem, contra quem e quando deve pagar."
         actions={
+          // NO CELULAR, O PRIMÁRIO OCUPA A LARGURA (auditoria visual, K2): solto à
+          // esquerda, ele deixava uma faixa meio vazia acima dos indicadores.
           <Button
-            icon={<Plus className="h-4 w-4" />}
+            icon={<Plus className="h-[16px] w-[16px]" />}
             onClick={() => setFormCredito({ ...CREDITO_VAZIO })}
+            className="w-full sm:w-auto"
           >
             Novo crédito
           </Button>
@@ -255,9 +272,12 @@ export default function Processos() {
       />
 
       {/* Só com a lista carregada: durante a leitura (ou com erro) os cartões
-          diriam "0 créditos", que é afirmar sem ter olhado. */}
+          diriam "0 créditos", que é afirmar sem ter olhado. A GRADE COMUM DOS
+          INDICADORES (C12): quantos couberem, de 200px no mínimo. */}
       {!isLoading && !isError && (
-        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        // No celular, dois por linha: com o mínimo de 200px da grade comum,
+        // os quatro empilhavam e empurravam a lista para baixo da dobra.
+        <GradeDeIndicadores className="mb-s4 max-sm:grid-cols-2 max-sm:gap-s3">
           <StatCard
             label="Créditos na seleção"
             value={numeros.quantidade}
@@ -284,7 +304,7 @@ export default function Processos() {
             hint="Créditos ainda a receber com a expectativa de liquidação nos próximos 90 dias."
             icon={<CalendarClock className="h-[16px] w-[16px]" />}
           />
-        </div>
+        </GradeDeIndicadores>
       )}
 
       {/* A BUSCA MORA NO CARTÃO DA LISTA (a amostra): é dela, e não da página. */}
@@ -293,7 +313,8 @@ export default function Processos() {
           <CampoDeBusca
             valor={busca}
             onChange={setBusca}
-            placeholder="Buscar por número, cedente, advogado, cessionário, devedora, comarca, tribunal, instrumento, RTDPJ…"
+            placeholder="Buscar por número, cedente ou devedora"
+            title="Busca em: número, nº administrativo, cedente, advogado, cessionário, devedora, comarca, tribunal, instrumento e RTDPJ"
             className="min-w-[16rem]"
           />
           <Segmented
@@ -320,10 +341,11 @@ export default function Processos() {
           // filtro de status ativo, "Cadastre o primeiro crédito" afirma que a
           // base está vazia e esconde que há dado atrás do recorte. A saída
           // oferecida tem de ser limpar o recorte, não cadastrar de novo.
+          // SEM RESULTADO É UMA LINHA SIMPLES (auditoria visual, §0.10): a
+          // moldura tracejada fica para o vazio de verdade ("ainda não há").
           (data ?? []).length > 0 ? (
-            <EmptyState
-              title="Nada encontrado"
-              description={
+            <SemResultado
+              texto={
                 busca.trim()
                   ? `Nenhum crédito corresponde a "${busca.trim()}"${
                       filtroStatus !== 'todos'
@@ -334,17 +356,11 @@ export default function Processos() {
                       getLabel(STATUS_PROCESSO, filtroStatus).label
                     }.`
               }
-              action={
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setBusca('')
-                    setFiltroStatus('todos')
-                  }}
-                >
-                  Limpar busca e filtro
-                </Button>
-              }
+              rotuloLimpar="Limpar busca e filtro"
+              onLimpar={() => {
+                setBusca('')
+                setFiltroStatus('todos')
+              }}
             />
           ) : (
             <EmptyState
@@ -352,7 +368,7 @@ export default function Processos() {
               description="Cadastre o primeiro crédito."
               action={
                 <Button
-                  icon={<Plus className="h-4 w-4" />}
+                  icon={<Plus className="h-[16px] w-[16px]" />}
                   onClick={() => setFormCredito({ ...CREDITO_VAZIO })}
                 >
                   Novo crédito
@@ -361,6 +377,43 @@ export default function Processos() {
             />
           )
         ) : (
+          <>
+          {/* NO CELULAR, CARTÕES (K1): o número com a espécie, as partes e a
+              devedora com a expectativa — e as mesmas ações da linha. */}
+          <ListaNoCelular rotulo="Créditos">
+            {lista.map((p) => {
+              const esp = p.especie_requisitorio ? ESPECIE_REQUISITORIO[p.especie_requisitorio] : null
+              return (
+                <CartaoNoCelular
+                  key={p.id}
+                  titulo={
+                    <span className="inline-flex flex-wrap items-center gap-s1.5">
+                      <span className="whitespace-nowrap tabular-nums">{formatCNJ(p.numero_cnj)}</span>
+                      {p.especie_requisitorio && (
+                        <Badge size="sm" tone={esp?.tone ?? 'gray'}>
+                          {esp?.label ?? p.especie_requisitorio}
+                        </Badge>
+                      )}
+                    </span>
+                  }
+                  linhas={[
+                    <Partes a={p.cedente} b={p.cessionario} />,
+                    <span>
+                      {p.entidade_devedora || '—'}
+                      {p.expectativa_liquidacao && (
+                        <span className="tabular-nums"> · expectativa {formatDate(p.expectativa_liquidacao)}</span>
+                      )}
+                    </span>,
+                  ]}
+                  onAbrir={() => setDetalhe(p)}
+                  rotuloAbrir={`Abrir ficha de ${p.numero_cnj ?? 'crédito'}`}
+                  rotuloDasAcoes={`Ações do crédito ${formatCNJ(p.numero_cnj)}`}
+                  acoes={acoesDoCredito(p)}
+                />
+              )
+            })}
+          </ListaNoCelular>
+          <div className="hidden md:block">
           <Table dense>
             <THead>
               <tr>
@@ -390,7 +443,8 @@ export default function Processos() {
                   className="w-[1%] whitespace-nowrap"
                 />
                 <TH>Instrumento</TH>
-                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
+                {/* A COLUNA DAS AÇÕES TEM LARGURA FIXA (C4): o "⋯" e o "›". */}
+                <TH className="w-[72px] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -401,17 +455,22 @@ export default function Processos() {
                   <Fragment key={p.id}>
                     <TR onClick={() => setDetalhe(p)}>
                       <TD className="font-medium text-texto">
-                        <div className="flex items-start gap-2">
+                        <div className="flex items-start gap-s2">
+                          {/* A BOLINHA NÃO FALA SÓ POR COR (CR2): a dica para o
+                              mouse e o nome do status para o leitor de tela. */}
                           <span
                             title={st.label}
-                            aria-label={`Status: ${st.label}`}
                             className={cn(
-                              'mt-2 h-[9px] w-[9px] shrink-0 rounded-full',
+                              'mt-[7px] h-[9px] w-[9px] shrink-0 rounded-full',
                               DOT_STATUS[st.tone] ?? 'bg-texto-3',
                             )}
-                          />
+                          >
+                            <span className="sr-only">{st.label}</span>
+                          </span>
                           <div className="min-w-0">
-                            <span className="inline-flex flex-wrap items-center gap-1.5">
+                            {/* SEM QUEBRA ENTRE O NÚMERO E O SELO (C4): a 1280px a
+                                espécie caía para baixo do número. */}
+                            <span className="inline-flex items-center gap-s1.5 whitespace-nowrap">
                               {/* O SELO ALINHA ENTRE AS LINHAS sem precisar de coluna,
                                   e são duas coisas que fazem isso:
                                     - tabular-nums, porque a fonte do app tem dígitos
@@ -449,7 +508,7 @@ export default function Processos() {
                               {apensos.contador(p.id)}
                             </span>
                             {/* Nomes completos: quebram em linhas em vez de truncar. */}
-                            <div className="mt-0.5 text-xs font-normal text-texto-2">
+                            <div className="mt-s0.5 text-xs font-normal text-texto-2">
                               <Partes a={p.cedente} b={p.cessionario} />
                             </div>
                           </div>
@@ -462,13 +521,13 @@ export default function Processos() {
                           {[p.comarca, p.vara].filter(Boolean).join(' · ') || '—'}
                         </div>
                       </TD>
-                      <TD className="whitespace-nowrap tabular-nums text-texto-2">
+                      <TD curto className="tabular-nums text-texto-2">
                         {formatDate(p.data_aquisicao)}
                       </TD>
                       {/* SELO, e não só a data colorida (item "Novo" da amostra):
                           vencida, vence em até 3 meses, com folga — com ícone, e a
                           dica dizendo o que a cor quer dizer. */}
-                      <TD className="whitespace-nowrap">
+                      <TD curto>
                         <SeloExpectativa
                           data={p.expectativa_liquidacao}
                           hoje={hoje}
@@ -477,51 +536,40 @@ export default function Processos() {
                       </TD>
                       {/* Puxada do cache do ADVBOX, não digitada. Enquanto o mapa
                           carrega mostra vazio em vez de "—", que seria mentira. */}
-                      <TD className="whitespace-nowrap tabular-nums text-texto-2">
+                      <TD curto className="tabular-nums text-texto-2">
                         {ultimaMov.isLoading
                           ? ''
                           : formatDate(ultimaMov.data?.get(onlyDigits(p.numero_cnj)) ?? null)}
                       </TD>
-                      {/* Sem nowrap: nº RTDPJ longo deve quebrar em vez de
-                          alargar a tabela. O Badge é inline-flex e não quebra. */}
-                      <TD>
-                        {p.instrumento ? <Badge tone={inst.tone}>{inst.label}</Badge> : '—'}
+                      {/* O INSTRUMENTO EM TEXTO SIMPLES (auditoria visual, C4 e
+                          E2): é dado de consulta, não estado — a pílula colorida
+                          com anel repetia uma mancha por linha (e virava bloco
+                          saturado no escuro). Sem nowrap: nº RTDPJ longo quebra
+                          em vez de alargar a tabela. */}
+                      <TD className="text-texto-2">
+                        <span className="whitespace-nowrap">{p.instrumento ? inst.label : '—'}</span>
                         {p.instrumento === 'registro_publico' && p.numero_rtdpj && (
-                          <div className="mt-0.5 text-xs tabular-nums text-texto-2">
+                          <div className="mt-s0.5 text-xs tabular-nums text-texto-3">
                             {splitRtdpj(p.numero_rtdpj).map((n, i) => (
                               <div key={i}>{n}</div>
                             ))}
                           </div>
                         )}
                       </TD>
-                      <TD>
-                        {/* stopPropagation: os botões não devem abrir a ficha da linha */}
-                        <div
-                          className="flex items-center justify-end gap-0.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {apensos.actions(p.id)}
-                          <IconButton
-                            label="Editar"
-                            icon={<Pencil className="h-4 w-4" />}
-                            onClick={() => setFormCredito(p)}
-                          />
-                          <IconButton
-                            label="Excluir"
-                            variant="danger"
-                            icon={<Trash2 className="h-4 w-4" />}
-                            onClick={() => setToDelete(p)}
-                          />
-                          {/* Botão de verdade, e não seta decorativa: abrir a
-                              ficha era possível SÓ com o mouse, clicando na linha.
-                              Quem navega por teclado passava por Editar e Excluir e
-                              nunca alcançava a ficha — que é onde estão partes,
-                              valores, apensos e histórico. */}
-                          <IconButton
-                            label={`Abrir ficha de ${p.numero_cnj ?? 'crédito'}`}
-                            icon={<ChevronRight className="h-4 w-4" />}
-                            onClick={() => setDetalhe(p)}
-                          />
+                      {/* O "›" é botão de verdade, e não seta decorativa: abrir a
+                          ficha era possível SÓ com o mouse, clicando na linha — e
+                          é na ficha que estão partes, valores, apensos e histórico.
+                          Os botões não deixam o clique chegar à linha. */}
+                      <TD className="w-[72px]">
+                        {/* -3px: o centro dos botões de 28px na altura da primeira
+                            linha de texto, e não abaixo dela. */}
+                        <div className="-my-[3px]">
+                        <AcoesDaLinha
+                          onAbrir={() => setDetalhe(p)}
+                          rotuloAbrir={`Abrir ficha de ${p.numero_cnj ?? 'crédito'}`}
+                          rotuloDasAcoes={`Ações do crédito ${formatCNJ(p.numero_cnj)}`}
+                          acoes={acoesDoCredito(p)}
+                        />
                         </div>
                       </TD>
                     </TR>
@@ -531,6 +579,8 @@ export default function Processos() {
               })}
             </TBody>
           </Table>
+          </div>
+          </>
         )}
       </Card>
 

@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Plus, Pencil, Trash2, ChevronRight } from 'lucide-react'
+import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { requerimentosCrud, useUltimaMovimentacao } from '@/lib/queries'
 import { invokeFunction } from '@/lib/functions'
@@ -8,11 +8,14 @@ import type { Requerimento } from '@/lib/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
 import { Field, Input, Textarea } from '@/components/ui/Field'
 import {
   CabecalhoDaFicha,
   CampoDeBusca,
+  CartaoNoCelular,
   FerramentasDoPainel,
+  ListaNoCelular,
   Partes,
   SecaoDaFicha,
   TituloDaSecao,
@@ -29,8 +32,9 @@ import {
   Loading,
   ErrorState,
   EmptyState,
+  SemResultado,
 } from '@/components/ui/Table'
-import { IconButton } from '@/components/ui/IconButton'
+import { AcoesDaLinha, type AcaoDoMenu } from '@/components/ui/MenuDeAcoes'
 import { SortableTH } from '@/components/ui/SortableTH'
 import { Drawer } from '@/components/ui/Drawer'
 import { DrawerHistorico } from '@/components/Movimentacoes'
@@ -57,8 +61,8 @@ const VAZIO: Partial<Requerimento> = {
 
 // Total de colunas da tabela — usado no colSpan da linha de apensos. Atualizar ao
 // adicionar/remover coluna, senão a linha expandida para antes do fim da tabela.
-// Protocolo | Tribunal/órgão | Classe | Matéria | Data | Últ. movimentação | Ações
-const N_COLUNAS = 7
+// Protocolo (com a classe) | Tribunal/órgão | Matéria | Data | Últ. movimentação | Ações
+const N_COLUNAS = 6
 
 export default function Requerimentos() {
   const { useList, useCreate, useUpdate, useRemove } = requerimentosCrud
@@ -241,13 +245,39 @@ export default function Requerimentos() {
     }
   }
 
+  /**
+   * AS AÇÕES DA LINHA NO MENU "⋯" (auditoria visual, C4 e R1): as mesmas 4
+   * ações de 12px de Créditos (+ ✎ 🗑 ›) viram o "›" que abre a ficha e o menu,
+   * com o Excluir em vermelho, por último.
+   */
+  const acoesDoRequerimento = (r: Requerimento): AcaoDoMenu[] => [
+    apensos.acaoAdicionar(r.id),
+    { rotulo: 'Editar', icone: <Pencil aria-hidden="true" />, onSelecionar: () => abrirForm(r) },
+    { rotulo: 'Excluir', icone: <Trash2 aria-hidden="true" />, perigo: true, onSelecionar: () => setToDelete(r) },
+  ]
+
+  /** A classe processual como selo pálido, ao lado do protocolo (R1). */
+  const seloDaClasse = (r: Requerimento) =>
+    r.classe_processual ? (
+      <Badge tone="gray" className="max-w-[220px]">
+        <span className="truncate" title={r.classe_processual}>
+          {r.classe_processual}
+        </span>
+      </Badge>
+    ) : null
+
   return (
     <div>
       <PageHeader
         title="Requerimentos administrativos"
         description="Pedidos feitos fora do processo — habilitações, preferências, retificações."
         actions={
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
+          // No celular, o primário ocupa a largura (K2).
+          <Button
+            icon={<Plus className="h-[16px] w-[16px]" />}
+            onClick={() => abrirForm({ ...VAZIO })}
+            className="w-full sm:w-auto"
+          >
             Novo requerimento
           </Button>
         }
@@ -259,7 +289,8 @@ export default function Requerimentos() {
           <CampoDeBusca
             valor={busca}
             onChange={setBusca}
-            placeholder="Buscar por protocolo, requerente, requerido, órgão, matéria…"
+            placeholder="Buscar por protocolo, parte ou órgão"
+            title="Busca em: protocolo, órgão, tribunal, requerente, requerido, matéria, classe e observações"
           />
         </FerramentasDoPainel>
         {isLoading ? (
@@ -270,28 +301,44 @@ export default function Requerimentos() {
           // VAZIO DA BUSCA É OUTRO VAZIO (item "Novo" da amostra): com requerimentos
           // cadastrados, "Cadastre o primeiro requerimento" afirmaria que a base
           // está vazia. A saída oferecida é limpar a busca, não cadastrar de novo.
+          // Sem resultado é uma linha simples (§0.10), sem a moldura do vazio.
           busca.trim() && (data ?? []).length > 0 ? (
-            <EmptyState
-              title="Nada encontrado"
-              description={`Nenhum requerimento corresponde a "${busca.trim()}".`}
-              action={
-                <Button variant="outline" onClick={() => setBusca('')}>
-                  Limpar busca
-                </Button>
-              }
+            <SemResultado
+              texto={`Nenhum requerimento corresponde a "${busca.trim()}".`}
+              rotuloLimpar="Limpar busca"
+              onLimpar={() => setBusca('')}
             />
           ) : (
             <EmptyState
               title="Nenhum requerimento"
               description="Cadastre o primeiro requerimento."
               action={
-                <Button icon={<Plus className="h-4 w-4" />} onClick={() => abrirForm({ ...VAZIO })}>
+                <Button icon={<Plus className="h-[16px] w-[16px]" />} onClick={() => abrirForm({ ...VAZIO })}>
                   Novo requerimento
                 </Button>
               }
             />
           )
         ) : (
+          <>
+          {/* No celular, cartões (K1): o protocolo, as partes e o órgão. */}
+          <ListaNoCelular rotulo="Requerimentos">
+            {lista.map((r) => (
+              <CartaoNoCelular
+                key={r.id}
+                titulo={<span className="tabular-nums">{r.numero_protocolo || '—'}</span>}
+                linhas={[
+                  <Partes a={r.requerente} b={r.requerido} />,
+                  [r.tribunal_entidade, r.orgao, r.classe_processual].filter(Boolean).join(' · '),
+                ]}
+                onAbrir={() => setDetalhe(r)}
+                rotuloAbrir={`Abrir ficha de ${r.numero_protocolo ?? 'requerimento'}`}
+                rotuloDasAcoes={`Ações do requerimento ${r.numero_protocolo ?? ''}`}
+                acoes={acoesDoRequerimento(r)}
+              />
+            ))}
+          </ListaNoCelular>
+          <div className="hidden md:block">
           <Table dense>
             <THead>
               {/* Larguras explícitas: sem elas o layout automático dava quase
@@ -309,15 +356,20 @@ export default function Requerimentos() {
                   que a versão quebrada, porque a maior palavra da versão longa
                   ("MOVIMENTAÇÃO") já era mais larga do que o rótulo curto inteiro. */}
               <tr>
-                <TH className="w-[20%]">Protocolo</TH>
+                {/* Sem largura declarada: o protocolo e o selo da classe ditam a
+                    largura (antes, 20% e o selo caindo para baixo mesmo com folga). */}
+                <TH>Protocolo</TH>
                 {/* Tribunal e órgão saíram do subtítulo do protocolo para uma coluna
                     própria: são a JURISDIÇÃO do requerimento, não parte da
                     identificação dele. Sob o número ficam as partes, que é o que
                     identifica a linha — igual "cedente v. cessionário" em Créditos. */}
                 {/* nowrap no único cabeçalho de duas palavras que poderia quebrar em
                     tela estreita. Os outros são palavra única. */}
-                <TH className="w-[13%] whitespace-nowrap">Tribunal / órgão</TH>
-                <TH className="w-[12%]">Classe</TH>
+                <TH className="w-[16%] whitespace-nowrap">Tribunal / órgão</TH>
+                {/* A COLUNA "CLASSE" SAIU (auditoria visual, R1): só tinha dois
+                    valores ("Processo SEI" ou "Requerimento administrativo") e
+                    forçava duas linhas por requerimento. A classe virou um selo
+                    pálido ao lado do protocolo. */}
                 <TH>Matéria</TH>
                 {/* "Protocolado", e não "Data de protocolo": metade da largura e a
                     mesma informação. Não virou só "Protocolo" para não repetir o nome
@@ -331,7 +383,8 @@ export default function Requerimentos() {
                   className="w-[1%] whitespace-nowrap"
                 />
                 <TH className="w-[1%] whitespace-nowrap">Últ. mov.</TH>
-                <TH className="w-[1%] whitespace-nowrap text-right">Ações</TH>
+                {/* A coluna das ações tem largura fixa (C4): o "⋯" e o "›". */}
+                <TH className="w-[72px] whitespace-nowrap text-right">Ações</TH>
               </tr>
             </THead>
             <TBody>
@@ -341,10 +394,13 @@ export default function Requerimentos() {
                   {/* Sem nowrap na célula: o número não quebra, mas os nomes das
                       partes podem. */}
                   <TD className="font-medium text-texto">
-                    <span className="inline-flex items-center gap-1.5">
+                    {/* O selo só desce de linha quando falta espaço (1280px com o menu
+                        aberto); com folga, fica ao lado do número. */}
+                    <span className="inline-flex flex-wrap items-center gap-s1.5">
                       <span className="whitespace-nowrap font-semibold tabular-nums">
                         {r.numero_protocolo || '—'}
                       </span>
+                      {seloDaClasse(r)}
                       {/* Mesmo padrão de Créditos: o contador de apensos fica
                           colado no número, não na coluna de ações. */}
                       {apensos.contador(r.id)}
@@ -353,7 +409,7 @@ export default function Requerimentos() {
                         a linha: protocolo sozinho não diz de quem é o requerimento.
                         O travessão de cada lado aparece mesmo vazio, para a falta
                         ficar à vista de quem cadastrou pela metade. */}
-                    <div className="mt-0.5 text-xs font-normal text-texto-2">
+                    <div className="mt-s0.5 text-xs font-normal text-texto-2">
                       <Partes a={r.requerente} b={r.requerido} />
                     </div>
                   </TD>
@@ -363,12 +419,11 @@ export default function Requerimentos() {
                     <div>{r.tribunal_entidade || '—'}</div>
                     <div className="text-xs text-texto-2">{r.orgao || '—'}</div>
                   </TD>
-                  <TD>{r.classe_processual || '—'}</TD>
                   <TD>{r.materia || '—'}</TD>
                   {/* tabular-nums como em todas as outras colunas de data da
                       plataforma: sem ele os dígitos têm largura variável e a
                       coluna fica com as datas desalinhadas entre si. */}
-                  <TD className="whitespace-nowrap tabular-nums text-texto-2">
+                  <TD curto className="tabular-nums text-texto-2">
                     {formatDate(r.data_protocolo)}
                   </TD>
                   {/* Do cache do ADVBOX, como em Créditos — a mesma consulta e o
@@ -377,38 +432,26 @@ export default function Requerimentos() {
                       também pelo número de protocolo. Enquanto o mapa carrega,
                       mostra vazio em vez de "—", que afirmaria não haver
                       movimentação. */}
-                  <TD className="whitespace-nowrap tabular-nums text-texto-2">
+                  <TD curto className="tabular-nums text-texto-2">
                     {ultimaMov.isLoading
                       ? ''
                       : formatDate(
                           ultimaMov.data?.get(onlyDigits(r.numero_protocolo)) ?? null,
                         )}
                   </TD>
-                  <TD>
-                    {/* stopPropagation: os botões não devem abrir a ficha da linha */}
-                    <div
-                      className="flex items-center justify-end gap-0.5"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {apensos.actions(r.id)}
-                      <IconButton
-                        label="Editar"
-                        icon={<Pencil className="h-4 w-4" />}
-                        onClick={() => abrirForm(r)}
-                      />
-                      <IconButton
-                        label="Excluir"
-                        variant="danger"
-                        icon={<Trash2 className="h-4 w-4" />}
-                        onClick={() => setToDelete(r)}
-                      />
-                      {/* Botão de verdade, e não seta decorativa: sem ele a ficha
-                          só abria com o mouse, clicando na linha. */}
-                      <IconButton
-                        label={`Abrir ficha de ${r.numero_protocolo ?? 'requerimento'}`}
-                        icon={<ChevronRight className="h-4 w-4" />}
-                        onClick={() => setDetalhe(r)}
-                      />
+                  {/* O "›" é botão de verdade: sem ele a ficha só abria com o
+                      mouse, clicando na linha. Os botões não deixam o clique
+                      chegar à linha. */}
+                  <TD className="w-[72px]">
+                        {/* -3px: o centro dos botões de 28px na altura da primeira
+                            linha de texto, e não abaixo dela. */}
+                        <div className="-my-[3px]">
+                    <AcoesDaLinha
+                      onAbrir={() => setDetalhe(r)}
+                      rotuloAbrir={`Abrir ficha de ${r.numero_protocolo ?? 'requerimento'}`}
+                      rotuloDasAcoes={`Ações do requerimento ${r.numero_protocolo ?? ''}`}
+                      acoes={acoesDoRequerimento(r)}
+                    />
                     </div>
                   </TD>
                 </TR>
@@ -417,6 +460,8 @@ export default function Requerimentos() {
               ))}
             </TBody>
           </Table>
+          </div>
+          </>
         )}
       </Card>
 
@@ -429,7 +474,8 @@ export default function Requerimentos() {
             <span className="tabular-nums">{editing.numero_protocolo}</span>
           ) : undefined
         }
-        size="lg"
+        // Formulário: 640px (auditoria visual, C8).
+        size="md"
         dirty={dirty}
         footer={
           <>
@@ -449,8 +495,8 @@ export default function Requerimentos() {
         }
       >
         {editing && (
-          <form id="form-requerimento" onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
+          <form id="form-requerimento" onSubmit={handleSubmit} className="space-y-s4">
+            <div className="grid gap-s4 sm:grid-cols-2">
               {/* "Número do processo", e não "de protocolo": o mesmo campo recebe as
                   duas coisas. Requerimento nasce com protocolo do órgão e, quando é
                   distribuído, passa a ter CNJ — e é o formato do que está aqui que
@@ -572,7 +618,7 @@ export default function Requerimentos() {
         }
       >
         {detalhe && (
-          <div className="space-y-6">
+          <div className="space-y-s5">
             {/* Partes numa seção própria, antes do resto — mesma ordem da ficha de
                 Créditos, que abre por "Partes". Quem abre a ficha quer saber de quem
                 é o requerimento antes de saber onde ele tramita. */}
