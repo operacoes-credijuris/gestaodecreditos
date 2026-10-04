@@ -9,8 +9,10 @@
 //         gasta uma consulta do plano.
 //   { acao: 'atualizar', kommo_lead_id }
 //       — pergunta à BullAI em que pé estão os pedidos abertos, baixa os PDFs que
-//         chegaram para a pasta do cedente no Drive e põe no checklist o estado e
-//         o RESULTADO de cada certidão.
+//         chegaram para a pasta da ANÁLISE do card no Drive (subpasta
+//         "Certidões") e põe no checklist o estado e o RESULTADO de cada certidão.
+//         A resposta traz, quando a pasta foi aberta, `pasta_certidoes_url` e
+//         `pasta_analise_url` — campos novos de 03/10/2026, para a tela dar o link.
 //
 // QUEM DECIDE O QUE PEDIR NÃO É ESTA FUNÇÃO. A tela marca os portais a partir do
 // checklist da casa (as regras da planilha) pelo `mapaBullai`; aqui só se confere
@@ -21,9 +23,10 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveBullai } from '../_shared/segredos.ts'
 import { BASE_BULLAI, ErroBullai, pedirBullai, portaisBullai } from '../_shared/bullai.ts'
 import { corpoDoPedido, estadoDoItem, type RodadaDoPortal } from '../_shared/resultadoBullai.ts'
-import { lerCadastroDoCard } from '../_shared/cadastroDoCard.ts'
-import { garantirPastaDoCedente } from '../_shared/planilhaJuridica.ts'
-import { driveFindOrCreateFolder, driveUploadBytes } from '../_shared/credijuris.ts'
+import { driveUploadBytes } from '../_shared/credijuris.ts'
+// A PASTA É A DA ANÁLISE DO CARD (03/10/2026) — ver _shared/pastaDaAnalise.ts.
+import { pastaDasCertidoesDoCard } from '../_shared/pastaDoCard.ts'
+import { urlDaPasta } from '../_shared/pastaDaAnalise.ts'
 // A RESERVA ATÔMICA DOS ITENS ANTES DE PEDIR (03/10/2026) — ver o módulo.
 import {
   itemPedivel,
@@ -46,12 +49,18 @@ interface JobDaBullai {
   artifacts: { artifactId: string; fileName: string; sizeBytes: number; portalKey: string }[]
 }
 
-/** Um PDF da BullAI já guardado na pasta do cedente. */
+/** Um PDF da BullAI já guardado na pasta das certidões. */
 interface ArquivoNoDrive {
   artifactId: string
   drive_file_id: string
   drive_link: string | null
   nome: string
+  /**
+   * A pasta "Certidões" onde o PDF caiu (03/10/2026). Vai para
+   * `dd_certidao.arquivos` (jsonb, sem migração): é por ela que a tela abre a
+   * pasta certa sem perguntar ao Drive. Arquivos de antes não a têm.
+   */
+  pasta_id?: string
 }
 
 const limparNome = (s: string) => s.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 150)
@@ -392,22 +401,20 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
     return jsonResponse({ ok: true, atualizados: recomposicao.mudou, falhas: recomposicao.falhas })
   }
 
-  // A PASTA DO CEDENTE, a mesma da planilha — e dentro dela, "Certidões".
-  let pastaCertidoes: { token: string; id: string } | null = null
+  // A PASTA DA ANÁLISE DO CARD — e dentro dela, "Certidões".
+  //
+  // ERA RECALCULADA AQUI, sempre em "Precatórios" e pelo nome do título, e
+  // GRAVADA no card: no RPV os PDFs iam para a categoria errada e o atalho do
+  // card para a análise passava a apontar para eles; no precatório, um nome
+  // mudado no título abria outra pasta. Agora é a pasta gravada no card, e só
+  // na falta dela o caminho pela categoria do funil — gravado no card só se ele
+  // estava sem pasta. Aberta uma vez por chamada, e só se houver PDF a subir.
+  type PastaAberta = { token: string; id: string; analiseId: string }
+  let pastaCertidoes: PastaAberta | null = null
   const pasta = async () => {
     if (pastaCertidoes) return pastaCertidoes
-    const { data: card } = await svc
-      .from('kommo_leads')
-      .select('nome, processo_cnj, notas, nota_texto')
-      .eq('kommo_lead_id', leadId)
-      .maybeSingle()
-    const cadastro = lerCadastroDoCard((card ?? {}) as any)
-    const { token, pastaId } = await garantirPastaDoCedente({
-      originador: cadastro.intermediador,
-      cedente: cadastro.cedente,
-    })
-    await svc.from('kommo_leads').update({ drive_pasta_id: pastaId }).eq('kommo_lead_id', leadId)
-    pastaCertidoes = { token, id: await driveFindOrCreateFolder(token, 'Certidões', pastaId) }
+    const p = await pastaDasCertidoesDoCard(svc, leadId)
+    pastaCertidoes = { token: p.token, id: p.pastaId, analiseId: p.pastaDaAnaliseId }
     return pastaCertidoes
   }
 
@@ -449,7 +456,13 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
         const nome = limparNome(`${rodada?.portalLabel ?? art.portalKey} - ${sujeito?.nome ?? p.documento}`) + '.pdf'
         const up = await driveUploadBytes(token, nome, id, bytes, 'application/pdf', true)
         const lista = arquivosPorPortal.get(art.portalKey) ?? []
-        lista.push({ artifactId: art.artifactId, drive_file_id: up.id, drive_link: up.webViewLink ?? null, nome })
+        lista.push({
+          artifactId: art.artifactId,
+          drive_file_id: up.id,
+          drive_link: up.webViewLink ?? null,
+          nome,
+          pasta_id: id,
+        })
         arquivosPorPortal.set(art.portalKey, lista)
         baixados.add(art.artifactId)
       } catch (e) {
@@ -468,7 +481,15 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
         artifacts: (job.artifacts ?? []).map((a) => {
           const noDrive = (arquivosPorPortal.get(a.portalKey) ?? []).find((x) => x.artifactId === a.artifactId)
           return noDrive
-            ? { ...a, drive: { drive_file_id: noDrive.drive_file_id, drive_link: noDrive.drive_link, nome: noDrive.nome } }
+            ? {
+                ...a,
+                drive: {
+                  drive_file_id: noDrive.drive_file_id,
+                  drive_link: noDrive.drive_link,
+                  nome: noDrive.nome,
+                  ...(noDrive.pasta_id ? { pasta_id: noDrive.pasta_id } : {}),
+                },
+              }
             : a
         }),
         baixados: [...baixados],
@@ -515,7 +536,21 @@ async function atualizar(svc: Servico, chave: string, leadId: number) {
     }
   }
 
-  return jsonResponse({ ok: true, atualizados: abertos.length, falhas })
+  // A PASTA NA RESPOSTA, quando foi aberta: a tela põe o link "Abrir pasta no
+  // Drive" ao lado do resultado. Campos novos — quem não os lê segue igual.
+  // (O elenco: o TypeScript não enxerga a atribuição feita dentro de `pasta()`.)
+  const aberta = pastaCertidoes as PastaAberta | null
+  return jsonResponse({
+    ok: true,
+    atualizados: abertos.length,
+    falhas,
+    ...(aberta
+      ? {
+          pasta_certidoes_url: urlDaPasta(aberta.id),
+          pasta_analise_url: urlDaPasta(aberta.analiseId),
+        }
+      : {}),
+  })
 }
 
 Deno.serve(async (req: Request) => {

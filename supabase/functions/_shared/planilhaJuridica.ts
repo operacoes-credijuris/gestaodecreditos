@@ -10,15 +10,9 @@
 
 import ExcelJS from 'npm:exceljs@4.4.0'
 import type { serviceClient } from './auth.ts'
-import {
-  driveEncontrarAnalisesRoot,
-  driveFindChildByTolerantName,
-  driveFindOrCreateFolder,
-  driveUploadBytes,
-  refreshGoogleAccessToken,
-  storageGetBytes,
-} from './credijuris.ts'
-import { segredoGoogle } from './segredos.ts'
+import { driveUploadBytes, storageGetBytes } from './credijuris.ts'
+import { caminhoDaAnalise, pastaDaAnaliseDoCard, tokenDoGoogle } from './pastaDoCard.ts'
+import { CATEGORIA_PRECATORIOS, nomeDaPastaDoCedente, urlDaPasta } from './pastaDaAnalise.ts'
 import {
   ABA_JURIDICA,
   type AbaDaPlanilha,
@@ -36,7 +30,6 @@ type Servico = ReturnType<typeof serviceClient>
 
 export const BUCKET_TEMPLATES = 'contratos-templates'
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-const CATEGORIA = 'Precatórios'
 
 /**
  * Acha o modelo no bucket sem depender do nome exato.
@@ -246,23 +239,17 @@ const limparNomeArquivo = (s: string) =>
  * Com dois cálculos do caminho, um nome escrito diferente abriria duas pastas
  * para o mesmo cedente — e a planilha cairia na que o link não aponta.
  */
+//
+// O CAMINHO MORA EM `pastaDoCard.ts` desde 03/10/2026: as certidões passaram a
+// calcular o mesmo caminho (com a categoria do funil), e duas cópias dele
+// divergiriam no nome de uma pasta.
 export async function garantirPastaDoCedente(dados: {
   originador?: string
   cedente?: string
 }): Promise<{ token: string; pastaId: string; cedente: string }> {
-  const google = await segredoGoogle()
-  if (!google) {
-    throw new Error('Credenciais do Google não configuradas — sem elas não dá para salvar no Drive.')
-  }
-  const token = await refreshGoogleAccessToken(google.client_id, google.client_secret, google.refresh_token)
-  const raiz = await driveEncontrarAnalisesRoot(token)
-  const catFolder = await driveFindChildByTolerantName(token, raiz, CATEGORIA)
-  const catId = catFolder?.id ?? (await driveFindOrCreateFolder(token, CATEGORIA, raiz))
-  const originador = (dados.originador || 'Sem originador').trim()
-  const cedente = (dados.cedente || 'Sem cedente').trim()
-  const origId = await driveFindOrCreateFolder(token, originador, catId)
-  const pastaId = await driveFindOrCreateFolder(token, cedente, origId)
-  return { token, pastaId, cedente }
+  const token = await tokenDoGoogle()
+  const pastaId = await caminhoDaAnalise(token, { categoria: CATEGORIA_PRECATORIOS, ...dados })
+  return { token, pastaId, cedente: nomeDaPastaDoCedente(CATEGORIA_PRECATORIOS, dados.cedente) }
 }
 
 /**
@@ -277,11 +264,23 @@ export async function ligarPastaAoCard(svc: Servico, leadId: number, pastaId: st
   await svc.from('kommo_leads').update({ drive_pasta_id: pastaId }).eq('kommo_lead_id', leadId)
 }
 
+/**
+ * COM O CARD (`card`), A PASTA É A DA ANÁLISE DELE (03/10/2026): a gravada em
+ * `drive_pasta_id` — a que o "Executar análise" criou e o título do card abre —
+ * e só na falta dela o caminho calculado, que então vai para o card (ver
+ * `pastaDaAnalise.ts`). Antes o caminho era recalculado aqui pelo nome do
+ * cedente: bastava o título mudar entre o clique e a gravação para a planilha
+ * — com o checklist das certidões dentro — cair numa pasta que o link não abre.
+ */
 export async function salvarPlanilhaNoDrive(
   wb: ExcelJS.Workbook,
   dados: { originador?: string; cedente?: string; numero_processo?: string; verbasNome: string },
+  card?: { svc: Servico; leadId: number },
 ): Promise<{ drive_file_url: string | null; drive_folder_url: string; pasta_id: string }> {
-  const { token, pastaId: cedId, cedente } = await garantirPastaDoCedente(dados)
+  const { token, pastaId: cedId } = card?.leadId
+    ? await pastaDaAnaliseDoCard(card.svc, card.leadId, { originador: dados.originador, cedente: dados.cedente })
+    : await garantirPastaDoCedente(dados)
+  const cedente = nomeDaPastaDoCedente(CATEGORIA_PRECATORIOS, dados.cedente)
 
   const bytes = new Uint8Array(await wb.xlsx.writeBuffer())
   // Fica logo depois de "Análise Jurídica", e não no fim: nome de arquivo é
@@ -294,7 +293,7 @@ export async function salvarPlanilhaNoDrive(
   const up = await driveUploadBytes(token, nomeArquivo, cedId, bytes, XLSX_MIME, true)
   return {
     drive_file_url: up.webViewLink ?? null,
-    drive_folder_url: `https://drive.google.com/drive/folders/${cedId}`,
+    drive_folder_url: urlDaPasta(cedId),
     pasta_id: cedId,
   }
 }

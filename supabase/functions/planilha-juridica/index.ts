@@ -34,7 +34,6 @@ import { aplicarRespostas, extrairSaidaColada } from '../_shared/questionarioJur
 import {
   abrirModelo,
   checklistEmTexto,
-  ligarPastaAoCard,
   preencherCertidoesDoChecklist,
   salvarPlanilhaNoDrive,
 } from '../_shared/planilhaJuridica.ts'
@@ -97,15 +96,14 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    const drive = await salvarPlanilhaNoDrive(wb, {
-      originador: body.originador,
-      cedente: body.cedente,
-      numero_processo: body.numero_processo,
-      verbasNome,
-    })
-    // O TÍTULO DO CARD VIRA LINK PARA A PASTA — antes só a análise de RPV
-    // gravava isto, e a planilha do precatório ia para o Drive sem atalho.
-    await ligarPastaAoCard(svc, leadId, drive.pasta_id)
+    // A PASTA DA ANÁLISE DO CARD (03/10/2026): a gravada nele, e só na falta
+    // dela o caminho calculado — que então vira o link do título. Uma pasta já
+    // gravada não é trocada (ver _shared/pastaDaAnalise.ts).
+    const drive = await salvarPlanilhaNoDrive(
+      wb,
+      { originador: body.originador, cedente: body.cedente, numero_processo: body.numero_processo, verbasNome },
+      { svc, leadId },
+    )
 
     return jsonResponse({
       ok: true,

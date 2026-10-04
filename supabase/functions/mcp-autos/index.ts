@@ -46,7 +46,6 @@ import {
   abrirModelo,
   checklistEmTexto,
   preencherCertidoesDoChecklist,
-  ligarPastaAoCard,
   salvarPlanilhaNoDrive,
 } from "../_shared/planilhaJuridica.ts";
 import { lerCadastroDoCard } from "../_shared/cadastroDoCard.ts";
@@ -545,13 +544,13 @@ async function entregarPlanilha(g: AutosGuardados, args: any) {
     );
   }
 
-  const drive = await salvarPlanilhaNoDrive(wb, {
-    originador: cadastro.intermediador,
-    cedente: cadastro.cedente,
-    numero_processo: cadastro.numero,
-    verbasNome,
-  });
-  await ligarPastaAoCard(db, g.lead_id, drive.pasta_id);
+  // A PASTA DA ANÁLISE DO CARD: a gravada nele, e só na falta dela o caminho
+  // calculado (ver _shared/pastaDaAnalise.ts).
+  const drive = await salvarPlanilhaNoDrive(
+    wb,
+    { originador: cadastro.intermediador, cedente: cadastro.cedente, numero_processo: cadastro.numero, verbasNome },
+    { svc: db, leadId: g.lead_id },
+  );
 
   // A NOTA NO CARD, com os mesmos textos que a plataforma escreve — é o que o
   // comercial lê, e ele não pode ler duas fichas diferentes para o mesmo ato.

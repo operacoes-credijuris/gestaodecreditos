@@ -93,6 +93,10 @@ import {
   refreshGoogleAccessToken,
   storageGetBytes,
 } from "../_shared/credijuris.ts";
+// O NOME DA PASTA DO CEDENTE em Title Case mora no módulo puro da pasta da
+// análise desde 03/10/2026: as certidões calculam o mesmo caminho na falta da
+// pasta gravada no card, e precisam escrever o nome igual.
+import { tituloNome } from "../_shared/pastaDaAnalise.ts";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 // VERSÃO EXATA, como todo import externo daqui (ver a política em _shared/auth.ts).
 // "@1" é qualquer 1.x: uma publicação nova do @std entra em produção sem ninguém
@@ -477,19 +481,6 @@ function aplicarCoresJuridica(ws: any) {
   ]);
   // A regra da necessidade de alvará saiu junto com a pergunta (linha 43 do
   // modelo antigo), que o dono removeu ao simplificar.
-}
-
-// Title Case para nomes: 1ª letra de cada palavra maiúscula, resto minúsculo
-// (conectores comuns em pt-BR ficam minúsculos: "Vanderlan Gomes de Morais").
-function tituloNome(s: string): string {
-  const conect = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'di', 'du', 'del', 'la', 'le', 'van', 'von']);
-  return String(s || '')
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w, i) => (i > 0 && conect.has(w)) ? w : (w.charAt(0).toUpperCase() + w.slice(1)))
-    .join(' ');
 }
 
 // Remove caracteres proibidos em nome de arquivo do Drive

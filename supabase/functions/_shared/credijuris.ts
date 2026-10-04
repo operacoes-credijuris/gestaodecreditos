@@ -164,6 +164,27 @@ export async function driveFindOrCreateFolder(token: string, name: string, paren
   return driveCreateFolder(token, name, parentId)
 }
 
+/**
+ * A pasta ainda está no Drive? true: existe, é pasta e não está na lixeira;
+ * false: o Drive respondeu que não (404, lixeira, ou não é pasta); null: não
+ * deu para saber (rede, permissão, cota) — quem chama decide o que fazer com a
+ * dúvida, e não a confunde com "sumiu".
+ */
+export async function driveExistePasta(token: string, id: string): Promise<boolean | null> {
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,mimeType,trashed&supportsAllDrives=true`,
+      { headers: { Authorization: 'Bearer ' + token } },
+    )
+    if (res.status === 404) return false
+    if (!res.ok) return null
+    const f = (await res.json()) as { mimeType?: string; trashed?: boolean }
+    return f.mimeType === FOLDER_MIME && !f.trashed
+  } catch {
+    return null
+  }
+}
+
 /** Busca tolerante: nome exato primeiro, senão a primeira pasta cujo nome CONTÉM a agulha. */
 export async function driveFindChildByTolerantName(
   token: string,
