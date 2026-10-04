@@ -637,34 +637,37 @@ function fundirRiscosEAvisos(
 }
 
 /**
- * O tom e o ícone de cada grau, como a amostra os pinta (GRAUS, no topo de
- * janelas-analise.js): IMPEDITIVO vermelho, ALTO âmbar, MODERADO azul, e os dois
- * de baixo neutros — distintos pelo ÍCONE, alerta no ATENÇÃO e informação na
- * NOTA, porque a cor nunca vai sozinha.
+ * O tom e o ícone de cada grau, com A COR DO RISCO DA AUDITORIA VISUAL
+ * (03/10/2026, C6) — a MESMA da janela do desfecho, para onde estes achados vão
+ * quando se recusa: vermelho do ALTO para cima, amarelo na ATENÇÃO, azul no
+ * MODERADO e neutro na NOTA. Antes o ALTO era âmbar e a ATENÇÃO, neutra. A cor
+ * nunca vai sozinha: o IMPEDITIVO leva o círculo de bloqueio, o ALTO e a ATENÇÃO
+ * o alerta, o MODERADO e a NOTA a informação.
  */
 const TOM_DO_GRAU: Record<GrauRisco, { tom: TomDaPeca; alerta: boolean }> = {
   IMPEDITIVO: { tom: 'perigo', alerta: true },
-  ALTO: { tom: 'aviso', alerta: true },
+  ALTO: { tom: 'perigo', alerta: true },
   MODERADO: { tom: 'info', alerta: false },
-  'ATENÇÃO': { tom: 'neutro', alerta: true },
+  'ATENÇÃO': { tom: 'aviso', alerta: true },
   NOTA: { tom: 'neutro', alerta: false },
 }
 
 /**
  * O selo do grau, inline no parágrafo — o `.pill` da amostra.
  *
- * LOCAL, e não o `Selo` de JanelaDeDesfecho: aquele tem 10 px e a escala de
- * cinzas antiga, e é a janela do desfecho (outro arquivo) que decide quando
- * trocá-lo. O vocabulário dos graus é o mesmo nos dois.
+ * LOCAL, e não o `Selo` de JanelaDeDesfecho: este usa a peça comum da Análise.
+ * O vocabulário, as cores e os ícones dos graus são os mesmos nos dois.
  */
 function SeloDoGrau({ grau }: { grau: GrauRisco }) {
   const g = TOM_DO_GRAU[grau]
   return (
     <SeloDaPeca
       tom={g.tom}
-      className="mr-1.5 align-middle"
+      className="mr-s1.5 align-middle"
       icone={
-        g.alerta ? (
+        grau === 'IMPEDITIVO' ? (
+          <XCircle className={icSelo} aria-hidden />
+        ) : g.alerta ? (
           <AlertTriangle className={icSelo} aria-hidden />
         ) : (
           <Info className={icSelo} aria-hidden />
@@ -2308,8 +2311,7 @@ export function AnaliseRpvModal({
       // botão Salvar, nada foi salvo.
       title="Análise de RPV"
       description={titulo}
-      footer={
-        /* AS DECISÕES NUMA FILEIRA SÓ, no rodapé.
+      /* AS DECISÕES NUMA FILEIRA SÓ, no rodapé.
            A seção que ficava no fim do corpo obrigava a rolar a análise inteira
            para decidir, e o desfecho aparecia longe do botão de salvar, que é o
            outro ato da mesma pessoa no mesmo momento. Aqui os quatro caminhos
@@ -2318,34 +2320,40 @@ export function AnaliseRpvModal({
 
            COMO NA AMOSTRA: os que interrompem à ESQUERDA, o que grava e o que
            segue à DIREITA — a distância entre os dois grupos é o que evita o
-           clique em Reprovar a caminho do Salvar. */
-        <div className="flex w-full flex-wrap items-center gap-2">
-          {acaoDiligencia && (
-            <Button
-              variant={acaoDiligencia.variant}
-              onClick={() => setDesfechoAberto(acaoDiligencia)}
-              disabled={ocupado}
-            >
-              {acaoDiligencia.label}
-            </Button>
-          )}
-          {acaoReprovar && (
-            <Button
-              variant={acaoReprovar.variant}
-              onClick={() => setDesfechoAberto(acaoReprovar)}
-              disabled={ocupado}
-              // O REPROVAR É CONTORNADO NA AMOSTRA (`.btn-danger-outline`), e o
-              // Button não tem essa variante: a troca é só de pintura, aqui.
-              // Vermelho cheio ao lado do Salvar gritava mais que a ação comum.
-              className={cn(
-                acaoReprovar.variant === 'danger' &&
-                  'border-perigo-borda bg-superficie text-perigo shadow-none hover:bg-perigo-fundo hover:brightness-100',
-              )}
-            >
-              {acaoReprovar.label}
-            </Button>
-          )}
-          <span className="flex-1" aria-hidden />
+           clique em Reprovar a caminho do Salvar.
+
+           NO `rodapeInicio` DO MODAL (auditoria visual de 03/10/2026, §0.6/C8):
+           a mesma ordem, agora a de todas as janelas — e o Reprovar com a
+           variante `dangerOutline` do Button, em vez da pintura feita aqui. */
+      rodapeInicio={
+        (acaoDiligencia || acaoReprovar) && (
+          <>
+            {acaoDiligencia && (
+              <Button
+                variant={acaoDiligencia.variant}
+                onClick={() => setDesfechoAberto(acaoDiligencia)}
+                disabled={ocupado}
+              >
+                {acaoDiligencia.label}
+              </Button>
+            )}
+            {acaoReprovar && (
+              <Button
+                onClick={() => setDesfechoAberto(acaoReprovar)}
+                disabled={ocupado}
+                // CONTORNADO (`dangerOutline`): vermelho cheio ao lado do Salvar
+                // gritava mais que a ação comum; o cheio fica para o Confirmar da
+                // janela do desfecho.
+                variant={acaoReprovar.variant === 'danger' ? 'dangerOutline' : acaoReprovar.variant}
+              >
+                {acaoReprovar.label}
+              </Button>
+            )}
+          </>
+        )
+      }
+      footer={
+        <>
           <Button
             variant="secondary"
             onClick={() => salvar()}
@@ -2376,7 +2384,7 @@ export function AnaliseRpvModal({
               {acaoValidacao.label}
             </Button>
           )}
-        </div>
+        </>
       }
     >
       {desfechoAberto && (

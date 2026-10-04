@@ -13,7 +13,7 @@
 // como ItemDeRisco — grau, texto, fundamento —, e quem sabe traduzir é quem
 // chama.
 import { useId, useState } from 'react'
-import { AlertTriangle, Info, Sparkles } from 'lucide-react'
+import { AlertTriangle, Info, Sparkles, XCircle } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -25,22 +25,24 @@ import type { GrauRisco } from '../../supabase/functions/_shared/graus.ts'
 
 export type { GrauRisco }
 
-// A ESCADA DE CINCO DEGRAUS DA AMOSTRA (`grau()`, janelas-analise.js): IMPEDITIVO
-// em vermelho, ALTO em âmbar, MODERADO em azul, ATENÇÃO e NOTA no neutro. OS DOIS
-// DE BAIXO SE DISTINGUEM PELO ÍCONE (alerta × informação) e pelo nome escrito —
-// não por um cinza mais claro, que era o NOTA em slate-400 (2,5:1), legível só de
-// perto. O texto do selo fica sempre no contraste de leitura.
+// A ESCADA DE CINCO DEGRAUS, COM A COR DO RISCO DA AUDITORIA VISUAL (03/10/2026,
+// C6): o vermelho vai do ALTO para cima, o amarelo é da ATENÇÃO e o neutro, da
+// NOTA. Antes o ALTO era âmbar — a mesma família da ATENÇÃO —, e na due
+// diligence o maior risco da tabela não se destacava dos outros.
+// IMPEDITIVO e ALTO dividem o vermelho e SE DISTINGUEM PELO ÍCONE (o círculo de
+// bloqueio × o alerta) e pelo nome escrito; MODERADO fica no azul. O texto do
+// selo fica sempre no contraste de leitura.
 export const COR_GRAU: Record<GrauRisco, string> = {
   IMPEDITIVO: 'border-perigo-borda bg-perigo-fundo text-perigo',
-  ALTO: 'border-aviso-borda bg-aviso-fundo text-aviso',
+  ALTO: 'border-perigo-borda bg-perigo-fundo text-perigo',
   MODERADO: 'border-info-borda bg-info-fundo text-info',
-  'ATENÇÃO': 'border-transparent bg-superficie-3 text-texto-2',
+  'ATENÇÃO': 'border-aviso-borda bg-aviso-fundo text-aviso',
   NOTA: 'border-transparent bg-superficie-3 text-texto-2',
 }
 
 /** O ícone de cada grau: a cor nunca vai sozinha (WCAG 1.4.1). */
 const ICONE_DO_GRAU: Record<GrauRisco, typeof AlertTriangle> = {
-  IMPEDITIVO: AlertTriangle,
+  IMPEDITIVO: XCircle,
   ALTO: AlertTriangle,
   MODERADO: Info,
   'ATENÇÃO': AlertTriangle,
@@ -58,7 +60,8 @@ export function Selo({ grau }: { grau: GrauRisco }) {
   return (
     <span
       className={cn(
-        'mr-2 inline-flex h-[22px] items-center gap-1 whitespace-nowrap rounded-full border px-2 align-middle text-xs font-semibold',
+        // O SELO `md` DE ui (auditoria visual, §0.8): 20px, 8px de lado.
+        'mr-s2 inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full border px-s2 align-middle text-xs font-semibold',
         COR_GRAU[grau],
       )}
     >
@@ -303,19 +306,20 @@ export function JanelaDeDesfecho({
       // por cima de outra, e é este texto que diz qual crédito vai ser movido.
       description={subtitulo || undefined}
       dirty={sujo}
+      // O RODAPÉ NA ORDEM ÚNICA DAS JANELAS (auditoria visual de 03/10/2026,
+      // §0.6/C8): `[Cancelar] [Confirmar]`, à direita, o ato por último. Antes o
+      // Cancelar ficava sozinho na outra ponta — a terceira ordem de rodapé da
+      // plataforma. Esta janela não tem alternativa para o lado esquerdo: o
+      // Confirmar JÁ É o desfecho (o vermelho cheio da confirmação final).
       footer={
-        // O RODAPÉ DA AMOSTRA: Cancelar à esquerda, o ato à direita. O cancelar
-        // era um link de 12px colado no Confirmar — pequeno demais para alvo de
-        // clique, e perto demais do botão que move o card.
-        <div className="flex w-full flex-wrap items-center gap-2">
+        <>
           <Button variant="ghost" onClick={() => void cancelar()} disabled={enviando || redigindo}>
             Cancelar
           </Button>
-          <div className="flex-1" />
           <Button variant={acao.variant} onClick={confirmar} disabled={!podeEnviar} loading={enviando}>
             {rotuloConfirmar ?? 'Confirmar'}
           </Button>
-        </div>
+        </>
       }
     >
       <div className="space-y-5">
@@ -348,12 +352,15 @@ export function JanelaDeDesfecho({
             >
               {grupos.map(([nome, indices]) => (
                 <div key={nome}>
+                  {/* O TITULAR COMO SUBTÍTULO, COM A CONTAGEM (auditoria visual,
+                      A4): rótulos em caixa alta empilhados competiam com o
+                      título da janela. */}
                   {nome && (
-                    <p className="font-display mt-1 text-xs font-bold uppercase tracking-[.06em] text-texto-3">
-                      {nome}
+                    <p className="mt-s1 text-sm font-semibold text-texto-2">
+                      {nome} <span className="font-normal tabular-nums text-texto-3">· {indices.length}</span>
                     </p>
                   )}
-                  <ul className="mt-1 space-y-0.5">
+                  <ul className="mt-s1 space-y-s0.5">
                     {indices.map((i) => (
                       <li key={i}>
                         {/* A LINHA INTEIRA É O ALVO: a caixa de 16px sozinha
@@ -421,7 +428,7 @@ export function JanelaDeDesfecho({
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
-              icon={<Sparkles className="h-4 w-4" aria-hidden />}
+              icon={<Sparkles className="h-[16px] w-[16px]" aria-hidden />}
               onClick={redigir}
               disabled={enviando || redigindo || (marcados.size === 0 && !motivo.trim())}
               loading={redigindo}

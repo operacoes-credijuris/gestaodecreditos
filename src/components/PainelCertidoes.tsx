@@ -86,6 +86,7 @@ import {
   pastaDoChecklistNaTela,
   placarDoChecklist,
   ROTULO_DO_GRUPO,
+  rotuloNoNumero,
   vencida,
   type PastaNaTela,
 } from '@/lib/checklistDeCertidoes'
@@ -455,8 +456,8 @@ function derivarAvisos(sujeitos: Sujeito[], itens: ItemChecklist[]): AvisoDoPlac
   const dispensadas = itens.filter((i) => i.status === 'NAO_APLICAVEL')
   if (dispensadas.length > 0) {
     push(
-      `${dispensadas.length} dispensada(s) fora da conta`,
-      `${dispensadas.length} certidão(ões) dispensada(s). Dispensa SAI do ` +
+      `${dispensadas.length} ${rotuloNoNumero(dispensadas.length, 'dispensada', 'dispensadas')} fora da conta`,
+      `${dispensadas.length} ${rotuloNoNumero(dispensadas.length, 'certidão dispensada', 'certidões dispensadas')}. Dispensa SAI do ` +
         `denominador do placar: "completo" abaixo significa completo entre as que ` +
         `sobraram, não entre as que a regra exigia.`,
     )
@@ -607,11 +608,11 @@ function LinhaCertidao({
       <div className="flex flex-wrap items-center justify-end gap-1">
         {pdfPrincipal ? (
           <a href={pdfPrincipal.link} target="_blank" rel="noreferrer" className={LINK_BTN}>
-            <FileText className="h-4 w-4" aria-hidden /> Abrir PDF
+            <FileText className="h-[16px] w-[16px]" aria-hidden /> Abrir PDF
           </a>
         ) : url ? (
           <a href={url} target="_blank" rel="noreferrer" className={LINK_BTN}>
-            Abrir portal <ExternalLink className="h-4 w-4" aria-hidden />
+            Abrir portal <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
           </a>
         ) : escopo ? (
           <button type="button" className={LINK_BTN} onClick={() => setAberto(true)}>
@@ -629,7 +630,7 @@ function LinhaCertidao({
           className={LINK_BTN}
         >
           <span className="hidden sm:inline">{aberto ? 'Fechar' : 'Como emitir'}</span>
-          <ChevronDown className={cn('h-4 w-4 transition-transform', aberto && 'rotate-180')} aria-hidden />
+          <ChevronDown className={cn('h-[16px] w-[16px] transition-transform', aberto && 'rotate-180')} aria-hidden />
         </button>
       </div>
 
@@ -637,7 +638,7 @@ function LinhaCertidao({
         <div className="col-span-full space-y-2 rounded-campo bg-superficie-2 px-3 py-2.5 text-sm">
           {barreiras.length > 0 ? (
             <p className="flex items-start gap-1.5 text-aviso">
-              <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+              <AlertTriangle className="mt-0.5 h-[16px] w-[16px] flex-none" aria-hidden />
               <span>{barreiras.join(' · ')}</span>
             </p>
           ) : (
@@ -690,12 +691,12 @@ function LinhaCertidao({
             <div className="flex flex-wrap items-center gap-1">
               {outrosPdfs.map((a) => (
                 <a key={a.link} href={a.link} target="_blank" rel="noreferrer" className={LINK_BTN}>
-                  <FileText className="h-4 w-4" aria-hidden /> {a.nome}
+                  <FileText className="h-[16px] w-[16px]" aria-hidden /> {a.nome}
                 </a>
               ))}
               {pdfPrincipal && url && (
                 <a href={url} target="_blank" rel="noreferrer" className={LINK_BTN}>
-                  Abrir portal <ExternalLink className="h-4 w-4" aria-hidden />
+                  Abrir portal <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
                 </a>
               )}
             </div>
@@ -2392,7 +2393,7 @@ export function PainelCertidoes({
       <div className="mb-3 rounded-cartao border border-borda bg-superficie px-4 py-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <div className="flex min-w-[min(100%,300px)] flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-corpo">
-            <span className="text-xs font-bold uppercase tracking-[.06em] text-texto-3">Cedente</span>
+            <span className="text-sm font-semibold text-texto-2">Cedente</span>
             <b className="min-w-0 break-words font-bold text-texto">{nome || 'ainda sem cadastro'}</b>
             {doc && (
               <CopiarTexto
@@ -2441,7 +2442,7 @@ export function PainelCertidoes({
                     : 'Abrir no Drive a pasta da análise (a subpasta Certidões nasce com o primeiro PDF)'
                 }
               >
-                <Folder className="h-4 w-4" aria-hidden /> Pasta no Drive
+                <Folder className="h-[16px] w-[16px]" aria-hidden /> Pasta no Drive
               </a>
             )}
             {!editando && (
@@ -2450,7 +2451,7 @@ export function PainelCertidoes({
                 size="sm"
                 onClick={() => setEditando(true)}
                 disabled={salvando}
-                icon={<Pencil className="h-4 w-4" aria-hidden />}
+                icon={<Pencil className="h-[16px] w-[16px]" aria-hidden />}
                 title="Corrigir dados / cônjuge"
               >
                 Editar
@@ -2489,7 +2490,8 @@ export function PainelCertidoes({
               'obrigatórias obtidas',
               completa ? 'text-sucesso' : 'text-texto',
             )}
-            {numero(placar.pendentes, 'pendentes')}
+            {/* NO NÚMERO CERTO (auditoria visual, A4): era "1 pendentes". */}
+            {numero(placar.pendentes, rotuloNoNumero(placar.pendentes, 'pendente', 'pendentes'))}
             {numero(
               placar.problema,
               `com problema${completude.vencidas > 0 ? ` (${completude.vencidas} vencida${completude.vencidas > 1 ? 's' : ''})` : ''}`,
@@ -2497,7 +2499,11 @@ export function PainelCertidoes({
             )}
             {numero(placar.emissao, 'em emissão', placar.emissao > 0 ? 'text-info' : 'text-texto')}
             {completude.dispensadas > 0 &&
-              numero(completude.dispensadas, 'dispensadas, fora da conta', 'text-aviso')}
+              numero(
+                completude.dispensadas,
+                rotuloNoNumero(completude.dispensadas, 'dispensada, fora da conta', 'dispensadas, fora da conta'),
+                'text-aviso',
+              )}
             <span className={cn('basis-full text-xs', completa ? 'font-semibold text-sucesso' : 'text-texto-3')}>
               {completude.necessarias === 0
                 ? 'Nenhuma certidão obrigatória no checklist.'
@@ -2529,10 +2535,16 @@ export function PainelCertidoes({
     )
   }
 
-  /** Um cabeçalho de grupo do checklist: o nome e quantos. */
+  /**
+   * Um cabeçalho de grupo do checklist: o nome e quantos.
+   *
+   * SUBTÍTULO, E NÃO RÓTULO EM CAIXA ALTA (auditoria visual de 03/10/2026, A4):
+   * "CEDENTE", "CHECKLIST", "COM PROBLEMA", "PENDENTES"… empilhados em caixa
+   * alta viravam uma parede de rótulos. A caixa alta fica só no "Checklist".
+   */
   const cabecalhoDoGrupo = (rotulo: string, n: number) => (
-    <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.06em] text-texto-3">
-      {rotulo} <span className="tabular-nums">{n}</span>
+    <span className="flex items-center gap-s1.5 text-sm font-semibold text-texto-2">
+      {rotulo} <span className="font-normal tabular-nums text-texto-3">{n}</span>
     </span>
   )
 
@@ -2577,7 +2589,7 @@ export function PainelCertidoes({
             size="sm"
             onClick={() => setEditando(true)}
             disabled={salvando}
-            icon={<Pencil className="h-4 w-4" aria-hidden />}
+            icon={<Pencil className="h-[16px] w-[16px]" aria-hidden />}
           >
             Abrir o cadastro para decidir
           </Button>
@@ -2604,7 +2616,7 @@ export function PainelCertidoes({
           size="sm"
           onClick={() => setEditando(true)}
           disabled={salvando}
-          icon={<Pencil className="h-4 w-4" aria-hidden />}
+          icon={<Pencil className="h-[16px] w-[16px]" aria-hidden />}
         >
           Cadastrar à mão
         </Button>
@@ -2685,7 +2697,7 @@ export function PainelCertidoes({
                 <span className="ml-auto inline-flex flex-none items-center gap-0.5 text-sm text-marca-texto">
                   {achadosVisiveis ? 'ocultar' : 'ver'}
                   <ChevronDown
-                    className={cn('h-4 w-4 transition-transform', achadosVisiveis && 'rotate-180')}
+                    className={cn('h-[16px] w-[16px] transition-transform', achadosVisiveis && 'rotate-180')}
                     aria-hidden
                   />
                 </span>
@@ -2938,7 +2950,7 @@ export function PainelCertidoes({
                 onClick={() => setResidenciaAberta((v) => !v)}
               >
                 {tipoCedente === 'PJ' ? 'Sedes anteriores' : 'Endereços anteriores'}
-                <ChevronDown className={cn('h-4 w-4 transition-transform', residenciaVisivel && 'rotate-180')} aria-hidden />
+                <ChevronDown className={cn('h-[16px] w-[16px] transition-transform', residenciaVisivel && 'rotate-180')} aria-hidden />
               </button>
             </div>
             <p className="text-xs text-texto-3">
@@ -3004,7 +3016,7 @@ export function PainelCertidoes({
                     size="sm"
                     className="ml-auto"
                     onClick={() => setConjugeAberto(true)}
-                    icon={<Pencil className="h-4 w-4" aria-hidden />}
+                    icon={<Pencil className="h-[16px] w-[16px]" aria-hidden />}
                   >
                     Editar
                   </Button>
@@ -3086,7 +3098,7 @@ export function PainelCertidoes({
             <ul className="mt-4 grid gap-1">
               {problemas.map((p) => (
                 <li key={p} className="flex items-start gap-1.5 text-corpo text-perigo">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+                  <AlertTriangle className="mt-0.5 h-[16px] w-[16px] flex-none" aria-hidden />
                   <span>{p}</span>
                 </li>
               ))}
@@ -3117,7 +3129,7 @@ export function PainelCertidoes({
                   size="sm"
                   onClick={() => cadastrarConjugeCom(respostaEstadoCivil.ancorado!)}
                   disabled={salvando}
-                  icon={<Pencil className="h-4 w-4" aria-hidden />}
+                  icon={<Pencil className="h-[16px] w-[16px]" aria-hidden />}
                 >
                   Cadastrar o cônjuge
                 </Button>
@@ -3137,9 +3149,12 @@ export function PainelCertidoes({
           {/* ---------------- as lacunas, juntas e recolhidas ---------------- */}
           {/* NÃO ESCONDE LACUNA: a linha diz QUAIS são, mesmo fechada, e abre o
               texto inteiro de cada uma (e o que os anexos dizem do estado civil). */}
+          {/* NO ESCURO, O ÂMBAR SÓ NO CONTORNO E NO ÍCONE (auditoria visual, E7): o
+              fundo `aviso-fundo` de lá é um marrom que, na largura da janela,
+              virava uma faixa pesada. O texto fica na cor do corpo. */}
           {avisos.length > 0 && (
-            <details className="group mb-3 rounded-campo border border-aviso-borda bg-aviso-fundo text-corpo">
-              <summary className="flex min-h-8 cursor-pointer list-none items-start gap-2 px-3 py-2 text-texto [&::-webkit-details-marker]:hidden">
+            <details className="group mb-s3 rounded-campo border border-aviso-borda bg-aviso-fundo text-corpo dark:bg-superficie-2">
+              <summary className="flex min-h-[32px] cursor-pointer list-none items-start gap-s2 px-s3 py-s2 text-texto [&::-webkit-details-marker]:hidden">
                 <AlertTriangle className="mt-0.5 h-[16px] w-[16px] flex-none text-aviso" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <b>
@@ -3148,11 +3163,11 @@ export function PainelCertidoes({
                   {avisos.map((a) => a.curto).join(' · ')}
                 </span>
                 <ChevronDown
-                  className="mt-0.5 h-4 w-4 flex-none text-texto-3 transition-transform group-open:rotate-180"
+                  className="mt-0.5 h-[16px] w-[16px] flex-none text-texto-3 transition-transform group-open:rotate-180"
                   aria-hidden
                 />
               </summary>
-              <div className="space-y-2 border-t border-aviso-borda px-3 py-2">
+              <div className="space-y-s2 border-t border-aviso-borda px-s3 py-s2 dark:border-borda">
                 <ul className="list-disc space-y-1 pl-6 text-sm text-texto marker:text-aviso">
                   {avisos.map((a) => (
                     <li key={a.texto}>{a.texto}</li>
@@ -3195,10 +3210,10 @@ export function PainelCertidoes({
                   const cab = cabecalhoDoGrupo(ROTULO_DO_GRUPO[grupo], lista.length)
                   return GRUPOS_RECOLHIDOS.has(grupo) ? (
                     <details key={grupo} className="group border-t border-borda first:border-t-0">
-                      <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 bg-superficie-2 px-3 py-1.5 [&::-webkit-details-marker]:hidden">
+                      <summary className="flex min-h-[32px] cursor-pointer list-none items-center justify-between gap-s2 bg-superficie-2 px-s3 py-s1.5 [&::-webkit-details-marker]:hidden">
                         {cab}
                         <ChevronDown
-                          className="h-4 w-4 flex-none text-texto-3 transition-transform group-open:rotate-180"
+                          className="h-[16px] w-[16px] flex-none text-texto-3 transition-transform group-open:rotate-180"
                           aria-hidden
                         />
                       </summary>
@@ -3206,7 +3221,7 @@ export function PainelCertidoes({
                     </details>
                   ) : (
                     <div key={grupo} className="border-t border-borda first:border-t-0">
-                      <div className="bg-superficie-2 px-3 py-1.5">{cab}</div>
+                      <div className="bg-superficie-2 px-s3 py-s1.5">{cab}</div>
                       {linhas}
                     </div>
                   )
@@ -3261,7 +3276,7 @@ export function PainelCertidoes({
               onClick={() => void salvarEGerar()}
               loading={salvando}
               disabled={problemas.length > 0}
-              icon={<Sparkles className="h-4 w-4" aria-hidden />}
+              icon={<Sparkles className="h-[16px] w-[16px]" aria-hidden />}
             >
               Gravar e montar checklist
             </Button>
@@ -3273,7 +3288,7 @@ export function PainelCertidoes({
             variant="outline"
             onClick={gerarFaltantes}
             loading={salvando}
-            icon={<Plus className="h-4 w-4" aria-hidden />}
+            icon={<Plus className="h-[16px] w-[16px]" aria-hidden />}
             title="Roda as regras de novo sobre o cadastro e acrescenta o que faltar (não tira nada)"
           >
             Gerar itens faltantes

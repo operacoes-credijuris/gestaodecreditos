@@ -16,6 +16,7 @@ import {
   origemDoCadastro,
   pastaDoChecklistNaTela,
   placarDoChecklist,
+  rotuloNoNumero,
   vencida,
 } from '../checklistDeCertidoes'
 
@@ -126,5 +127,13 @@ describe('auxiliares', () => {
   })
   it('hoje em Brasília', () => {
     expect(hojeEmBrasilia(new Date('2026-10-04T02:00:00Z'))).toBe('2026-10-03')
+  })
+})
+
+describe('o rótulo do placar no número certo (auditoria visual, A4)', () => {
+  it('um é singular; zero e dois ou mais, plural — nada de "1 pendentes"', () => {
+    expect(rotuloNoNumero(1, 'pendente', 'pendentes')).toBe('pendente')
+    expect(rotuloNoNumero(0, 'pendente', 'pendentes')).toBe('pendentes')
+    expect(rotuloNoNumero(2, 'pendente', 'pendentes')).toBe('pendentes')
   })
 })

@@ -81,6 +81,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table'
+import { Chip } from '@/components/ui/Chip'
 import { useToast } from '@/components/ui/Toast'
 import { Selo as SeloDoGrau, type ItemDeRisco } from '@/components/JanelaDeDesfecho'
 import { CaixaDeAviso, CaixaSuave, Selo, icSelo } from '@/components/analise/Pecas'
@@ -108,8 +109,9 @@ interface ProcessoNaTela extends ProcessoDD {
 /**
  * O selo de risco de um processo, graduado como na amostra (`riscoHTML`).
  *
- * A MESMA ESCADA DA JANELA DO DESFECHO: ALTO em âmbar e ATENÇÃO no neutro, com o
- * ícone de alerta — é o mesmo grau que vai para a lista de motivos quando se
+ * A MESMA ESCADA DA JANELA DO DESFECHO: ALTO em vermelho e ATENÇÃO em amarelo
+ * (auditoria visual de 03/10/2026, C6 — o ALTO em âmbar se confundia com a
+ * ATENÇÃO), com o ícone de alerta — é o mesmo grau que vai para a lista de motivos quando se
  * recusa, e o processo não pode mudar de cor entre a tabela e a janela. "Sem
  * risco" em verde, com o visto; "não avaliado" no neutro, sem ícone, porque não
  * afirma nada.
@@ -795,7 +797,7 @@ export function PainelProcessosJudiciais({
         aria-label={dica}
         className={cn('inline-flex cursor-help rounded-full text-texto-3 hover:text-texto-2', FOCO)}
       >
-        <Info className="h-4 w-4" aria-hidden />
+        <Info className="h-[16px] w-[16px]" aria-hidden />
       </span>
     </span>
   )
@@ -843,7 +845,7 @@ export function PainelProcessosJudiciais({
       onClick={() => void correnteCompleta()}
       loading={lendoTitulares}
       disabled={apurando || Boolean(passo)}
-      icon={<ScanText className="h-4 w-4" aria-hidden />}
+      icon={<ScanText className="h-[16px] w-[16px]" aria-hidden />}
     >
       Reler os autos
     </Button>
@@ -859,7 +861,7 @@ export function PainelProcessosJudiciais({
         onClick={() => void apurar()}
         loading={apurando}
         disabled={lendoTitulares || Boolean(passo)}
-        icon={<Search className="h-4 w-4" aria-hidden />}
+        icon={<Search className="h-[16px] w-[16px]" aria-hidden />}
       >
         {apuracoes.length > 0 ? 'Refazer' : 'Apurar'}
       </Button>
@@ -1153,34 +1155,26 @@ export function PainelProcessosJudiciais({
                   em que a aba abre. O NÚMERO AO LADO de cada estágio diz quantos
                   processos ele tem, para a escolha não ser às cegas. */}
               {estagiosDaAba.length > 1 && (
-                // OS `.chipf` DA AMOSTRA: o marcado fica escuro e ganha o visto, e o
-                // "limpar" e a conta do que ficou de fora vêm logo depois deles.
-                <div role="group" aria-label="Filtrar por estágio" className="flex flex-wrap items-center gap-2">
-                  <span className="mr-1 text-sm font-semibold text-texto-2" aria-hidden>
+                // OS CHIPS DE ui (auditoria visual de 03/10/2026, C7): filtros que
+                // se somam, como estes. O marcado ganha o azul suave da marca e o
+                // visto — o preto de antes era o elemento mais escuro da janela —,
+                // e o "limpar" e a conta do que ficou de fora vêm logo depois.
+                <div role="group" aria-label="Filtrar por estágio" className="flex flex-wrap items-center gap-s2">
+                  <span className="mr-s1 text-sm font-semibold text-texto-2" aria-hidden>
                     Estágio
                   </span>
                   {estagiosDaAba.map((e) => {
                     const marcado = estagiosMarcados.includes(e)
-                    const quantos = daAba.filter((x) => x.estagio === e).length
                     return (
-                      <button
+                      <Chip
                         key={e}
-                        type="button"
-                        role="checkbox"
-                        aria-checked={marcado}
+                        ativo={marcado}
+                        icone={marcado ? <Check aria-hidden /> : undefined}
+                        contagem={daAba.filter((x) => x.estagio === e).length}
                         onClick={() => alternarEstagio(e)}
-                        className={cn(
-                          'inline-flex h-10 items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors',
-                          FOCO,
-                          marcado
-                            ? 'border-texto bg-texto text-superficie'
-                            : 'border-borda-forte bg-superficie text-texto-2 hover:bg-superficie-3',
-                        )}
                       >
-                        {marcado && <Check className="h-4 w-4 flex-none" aria-hidden />}
                         {e}
-                        <span className="font-medium tabular-nums opacity-80">{quantos}</span>
-                      </button>
+                      </Chip>
                     )
                   })}
                   {estagiosMarcados.length > 0 && (
@@ -1189,7 +1183,7 @@ export function PainelProcessosJudiciais({
                         type="button"
                         onClick={() => setFiltroEstagios([])}
                         className={cn(
-                          'inline-flex h-9 items-center rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve',
+                          'inline-flex h-controle-sm items-center rounded-controle px-s2 text-sm font-semibold text-marca-texto hover:bg-marca-leve',
                           FOCO,
                         )}
                       >
@@ -1212,7 +1206,7 @@ export function PainelProcessosJudiciais({
                     <TH>Polo</TH>
                     {/* nowrap: sem ele o cabeçalho quebra em "VALOR DA / CAUSA" e a
                         linha do cabeçalho fica com o dobro da altura das outras. */}
-                    <TH className="whitespace-nowrap text-right">Valor da causa</TH>
+                    <TH numero className="whitespace-nowrap">Valor da causa</TH>
                     <TH>Estágio</TH>
                     {/* ÚLTIMA MOVIMENTAÇÃO, logo depois do estágio: as duas colunas
                         respondem juntas. "Penhora" sozinho não diz se a ameaça é de
@@ -1237,7 +1231,7 @@ export function PainelProcessosJudiciais({
                             className="inline-flex items-center gap-1 rounded-controle tabular-nums text-marca-texto underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anel"
                           >
                             {x.numero_processo}
-                            <ExternalLink className="h-4 w-4 flex-none" aria-hidden />
+                            <ExternalLink className="h-[16px] w-[16px] flex-none" aria-hidden />
                           </a>
                         ) : (
                           <span className="tabular-nums">{x.numero_processo}</span>
@@ -1253,7 +1247,7 @@ export function PainelProcessosJudiciais({
                           {x.polo === 'PASSIVO' ? 'réu' : x.polo === 'ATIVO' ? 'autor' : 'terceiro'}
                         </Selo>
                       </TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(x.valor_cobrado)}</TD>
+                      <TD numero>{brl(x.valor_cobrado)}</TD>
                       <TD>{x.estagio ?? '—'}</TD>
                       {/* MÊS E ANO, sem o dia: a pergunta é "isto ainda anda?", e ela se
                           responde na distância — agosto deste ano é vivo, agosto de 2021

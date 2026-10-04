@@ -58,12 +58,12 @@ export function CaixaDeAviso({
     <div
       role={role}
       className={cn(
-        'flex items-start gap-2.5 rounded-campo border px-[14px] py-3 text-corpo text-texto',
+        'flex items-start gap-s2 rounded-campo border px-s3 py-s3 text-corpo text-texto',
         t.caixa,
         className,
       )}
     >
-      {ic && <span className={cn('mt-0.5 flex-none', t.icone)}>{ic}</span>}
+      {ic && <span className={cn('mt-s0.5 flex-none', t.icone)}>{ic}</span>}
       <div className="min-w-0 flex-1 break-words">{children}</div>
     </div>
   )
@@ -78,7 +78,8 @@ const SELO: Record<TomDaPeca, string> = {
 }
 
 /**
- * O SELO da amostra (`.pill`): 22 px de altura, 12 px em negrito, redondo. Para
+ * O SELO da amostra (`.pill`), na medida do selo `md` de ui (auditoria visual,
+ * §0.8): 20 px de altura, 8 px de lado, 12 px em negrito, redondo. Para
  * estado (finalizado, parado, sem número) e para os campos do card (objeto,
  * percentual). As etiquetas do Kommo continuam na Badge, que tem a paleta de
  * reserva delas.
@@ -100,7 +101,7 @@ export function Selo({
     <span
       title={title}
       className={cn(
-        'inline-flex h-[22px] max-w-full items-center gap-1 whitespace-nowrap rounded-full border px-2 text-xs font-semibold',
+        'inline-flex h-[20px] max-w-full items-center gap-s1 whitespace-nowrap rounded-full border px-s2 text-xs font-semibold',
         SELO[tom],
         className,
       )}
@@ -120,8 +121,8 @@ export const icSelo = 'h-[13px] w-[13px] flex-none'
  */
 export function DicaDeAviso({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <p className={cn('mt-2 flex items-start gap-1.5 text-sm text-aviso', className)}>
-      <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+    <p className={cn('mt-s2 flex items-start gap-s1.5 text-sm text-aviso', className)}>
+      <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
       <span>{children}</span>
     </p>
   )
@@ -132,7 +133,7 @@ export function RotuloDeSecao({ children, className }: { children: ReactNode; cl
   return (
     <h4
       className={cn(
-        'font-display mb-2 mt-6 text-xs font-bold uppercase tracking-[.06em] text-texto-3 first:mt-0',
+        'font-display mb-s2 mt-s5 text-xs font-bold uppercase tracking-[.06em] text-texto-3 first:mt-0',
         className,
       )}
     >
@@ -158,7 +159,7 @@ export function CaixaSuave({
   return (
     <div
       className={cn(
-        'rounded-campo border px-4 py-[10px] text-corpo text-texto-2',
+        'rounded-campo border px-s3 py-s2 text-corpo text-texto-2',
         aviso ? 'border-aviso-borda bg-aviso-fundo' : 'border-info-borda bg-marca-leve',
         className,
       )}

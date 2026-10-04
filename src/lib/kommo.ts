@@ -370,8 +370,11 @@ export const TELAS: DefTela[] = [
     // renomear nada.
     label: 'Análise Jurídica e Econômica',
     statusId: ST_ANALISE,
+    // A FRASE DESTA ETAPA (auditoria visual de 03/10/2026, A5): dizia
+    // "aguardando revisão", que é a etapa seguinte, sob o título "Nenhum card em
+    // Análise Jurídica e Econômica".
     descricaoVazia:
-      'Nenhum card aguardando revisão. Quando o comercial mover um crédito para análise no Kommo, ele aparece aqui.',
+      'Nenhum card aguardando análise. Quando o comercial mover um crédito para análise no Kommo, ele aparece aqui.',
   },
   {
     key: 'validacao',
@@ -1527,7 +1530,9 @@ function colunaSoDeLeitura(e: { status_id: number; nome: string }): Aba {
     key: `col-${e.status_id}`,
     label: e.nome,
     statusIds: [e.status_id],
-    descricaoVazia: `Nenhum card em ${e.nome}.`,
+    // A FRASE NÃO REPETE O TÍTULO (auditoria visual, A5): a tela já diz
+    // "Nenhum card em <coluna>" em cima, e a frase igual embaixo não dizia nada.
+    descricaoVazia: 'Quando um card entrar nesta coluna no Kommo, ele aparece aqui na próxima sincronização.',
     descricao: DESCRICAO_DA_COLUNA[e.status_id],
     acoes: [],
     desfechoAgrupado: false,

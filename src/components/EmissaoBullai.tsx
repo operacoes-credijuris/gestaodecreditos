@@ -362,7 +362,7 @@ export function EmissaoBullai({
               size="sm"
               onClick={() => void atualizar(false)}
               disabled={atualizando}
-              icon={<RefreshCw className={cn('h-4 w-4', atualizando && 'animate-spin')} aria-hidden />}
+              icon={<RefreshCw className={cn('h-[16px] w-[16px]', atualizando && 'animate-spin')} aria-hidden />}
               title="A tela confere o andamento sozinha ao abrir e a cada 60 s."
             >
               Atualizar andamento
@@ -375,14 +375,14 @@ export function EmissaoBullai({
             onClick={() => setListaAberta((v) => !v)}
           >
             {listaAberta ? 'Ocultar a seleção' : 'Escolher certidões'}
-            <ChevronDown className={cn('h-4 w-4 transition-transform', listaAberta && 'rotate-180')} aria-hidden />
+            <ChevronDown className={cn('h-[16px] w-[16px] transition-transform', listaAberta && 'rotate-180')} aria-hidden />
           </button>
           <Button
             size="sm"
             onClick={() => setConfirmando(true)}
             disabled={consultas === 0 || semNascimento.length > 0 || pedindo}
             loading={pedindo}
-            icon={<Download className="h-4 w-4" aria-hidden />}
+            icon={<Download className="h-[16px] w-[16px]" aria-hidden />}
           >
             Extrair {consultas} certidão(ões)
           </Button>
@@ -393,10 +393,10 @@ export function EmissaoBullai({
           uma chamada assíncrona, então a pasta não abre sozinha — fica à mão. */}
       {pastaSalva ? (
         <p role="status" className="mt-2 flex flex-wrap items-center gap-x-2 text-sm text-sucesso">
-          <Check className="h-4 w-4 flex-none" aria-hidden />
+          <Check className="h-[16px] w-[16px] flex-none" aria-hidden />
           PDFs salvos na pasta da análise, em Certidões.
           <a href={pastaSalva} target="_blank" rel="noreferrer" className={LINK_BTN}>
-            <Folder className="h-4 w-4" aria-hidden /> Abrir pasta no Drive
+            <Folder className="h-[16px] w-[16px]" aria-hidden /> Abrir pasta no Drive
           </a>
         </p>
       ) : (
@@ -405,7 +405,7 @@ export function EmissaoBullai({
           <p className="mt-2 flex flex-wrap items-center gap-x-2 text-sm text-texto-2">
             Os PDFs chegam aos poucos e vão para a pasta da análise, em Certidões.
             <a href={pasta.url} target="_blank" rel="noreferrer" className={LINK_BTN}>
-              <Folder className="h-4 w-4" aria-hidden /> Abrir pasta no Drive
+              <Folder className="h-[16px] w-[16px]" aria-hidden /> Abrir pasta no Drive
             </a>
           </p>
         )
@@ -507,7 +507,7 @@ export function EmissaoBullai({
                             className={LINK_BTN}
                           >
                             {porChave.get(a.portal)?.rotulo ?? a.nome}
-                            <ExternalLink className="h-4 w-4" aria-hidden />
+                            <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
                           </a>
                         ))}
                       </li>

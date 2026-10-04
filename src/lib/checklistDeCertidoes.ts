@@ -106,6 +106,15 @@ export function placarDoChecklist(itens: readonly ItemParaAgrupar[], hoje: strin
   return p
 }
 
+/**
+ * O RÓTULO DE UM NÚMERO DO PLACAR, NO NÚMERO CERTO (auditoria visual de
+ * 03/10/2026, A4): a faixa dizia "1 pendentes". Um é singular; zero e dois ou
+ * mais, plural — como se fala ("0 pendentes", "1 pendente", "2 pendentes").
+ */
+export function rotuloNoNumero(n: number, singular: string, plural: string): string {
+  return n === 1 ? singular : plural
+}
+
 /** Hoje, 'AAAA-MM-DD', no fuso de Brasília — é contra ele que a validade vence. */
 export function hojeEmBrasilia(agora: Date = new Date()): string {
   return agora.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })

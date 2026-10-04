@@ -121,7 +121,9 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Textarea } from '@/components/ui/Field'
 import { SyncStatus } from '@/components/ui/SyncStatus'
-import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
+import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/Table'
+import { Chip } from '@/components/ui/Chip'
+import { CampoDeBusca } from '@/components/ui/CampoDeBusca'
 import { useToast } from '@/components/ui/Toast'
 import { CaixaDeAviso, DicaDeAviso, Selo, icSelo } from '@/components/analise/Pecas'
 import { haDialogoAberto } from '@/lib/dialogo'
@@ -633,13 +635,13 @@ async function anotarResultadoNaKommo(
 // PELO PAPEL, e não pelo status_id: as mesmas colunas têm ids diferentes em
 // cada funil, e um mapa por id deixaria os botões do Precatório sem ícone.
 const ICONES: Record<PapelDaTela, ReactNode> = {
-  validar: <ArrowRight className="h-4 w-4" />,
-  aprovar: <Check className="h-4 w-4" />,
-  diligenciar: <FileSearch className="h-4 w-4" />,
-  reprovar: <X className="h-4 w-4" />,
+  validar: <ArrowRight className="h-[16px] w-[16px]" aria-hidden />,
+  aprovar: <Check className="h-[16px] w-[16px]" aria-hidden />,
+  diligenciar: <FileSearch className="h-[16px] w-[16px]" aria-hidden />,
+  reprovar: <X className="h-[16px] w-[16px]" aria-hidden />,
   // O "FECHADO!" DA NEGOCIAÇÃO (onda 4): o aperto de mão da amostra — o cedente
   // aceitou, e isso não é a aprovação do crédito.
-  fechar: <Handshake className="h-4 w-4" />,
+  fechar: <Handshake className="h-[16px] w-[16px]" aria-hidden />,
 }
 
 /**
@@ -700,6 +702,14 @@ const BTN = 'h-[32px] px-4'
 const IC = 'h-[16px] w-[16px] flex-none'
 /** O "Excluir" contornado da amostra (`.btn-danger-outline`): o negativo sem gritar. */
 const PERIGO_CONTORNADO = 'border-perigo-borda bg-superficie text-perigo hover:bg-perigo-fundo'
+/**
+ * A AÇÃO DA ETAPA NO CARD: SECUNDÁRIO EM AZUL, e não primário cheio (auditoria
+ * visual de 03/10/2026, A3/AP2, aprovado pelo dono). Com um primário por card,
+ * a lista tinha dez botões azuis cheios na tela, e o primário deixava de dizer
+ * "o principal". O contorno com ícone e texto no azul da marca ainda separa a
+ * ação que avança das outras; o primário cheio fica só dentro das janelas.
+ */
+const ACAO_DA_ETAPA = 'text-marca-texto hover:bg-marca-leve hover:text-marca-texto'
 
 /**
  * Fecha uma caixa flutuante ao clicar fora e no Esc.
@@ -1419,7 +1429,8 @@ function BotaoEscolherProposta({
     <div className="relative" ref={caixa}>
       <Button
         size="sm"
-        className={BTN}
+        variant="secondary"
+        className={cn(BTN, ACAO_DA_ETAPA)}
         icon={<Handshake className={IC} aria-hidden />}
         onClick={() => {
           setFundo(null)
@@ -2911,8 +2922,11 @@ function CardCredito({
             className="leading-tight min-[900px]:text-right"
             title={`Na coluna desde ${formatDateTime(quandoNaEtapa)}`}
           >
+            {/* O TEMPO NA ETAPA EM 14PX SEMIBOLD (auditoria visual, A2): em 18px
+                negrito ele disputava com o nome do card, que é o que se lê
+                primeiro. */}
             <span className="block text-xs text-texto-3">Nesta etapa</span>
-            <span className={cn('font-display text-lg font-bold tabular-nums', parado ? 'text-aviso' : 'text-texto')}>
+            <span className={cn('text-corpo font-semibold tabular-nums', parado ? 'text-aviso' : 'text-texto')}>
               {textoDosDias(dias)}
             </span>
           </div>
@@ -2947,9 +2961,10 @@ function CardCredito({
             <Button
               size="sm"
               // CONTORNADO TAMBÉM COM O CONCLUIR (a Revisão do RPV, onda 4):
-              // lá o desfecho é que avança.
-              variant={(desfechoNoCard && acoes.length > 0) || onConcluir ? 'secondary' : 'primary'}
-              className={BTN}
+              // lá o desfecho é que avança. ONDE ELE AVANÇA, o secundário em
+              // azul da ação da etapa (AP2), e não mais o primário cheio.
+              variant="secondary"
+              className={cn(BTN, !((desfechoNoCard && acoes.length > 0) || onConcluir) && ACAO_DA_ETAPA)}
               icon={<FileSearch className={IC} aria-hidden />}
               onClick={() => onAnalisar(lead)}
               loading={analisando}
@@ -2993,8 +3008,8 @@ function CardCredito({
           {botoes !== 'nenhum' && onConcluir && (
             <Button
               size="sm"
-              variant="primary"
-              className={BTN}
+              variant="secondary"
+              className={cn(BTN, ACAO_DA_ETAPA)}
               icon={<CheckCircle2 className={IC} aria-hidden />}
               onClick={() => onConcluir(lead)}
               disabled={ocupado}
@@ -3087,7 +3102,8 @@ function CardCredito({
           {onGerarContrato && (
             <Button
               size="sm"
-              className={BTN}
+              variant="secondary"
+              className={cn(BTN, ACAO_DA_ETAPA)}
               icon={<FileSignature className={IC} aria-hidden />}
               onClick={() => onGerarContrato(lead)}
               disabled={ocupado}
@@ -3208,7 +3224,10 @@ function Seg<K extends string>({
       role="group"
       // O ÚNICO rótulo do controle: sem isto o leitor de tela anuncia botões soltos.
       aria-label={rotulo}
-      className={cn('inline-flex gap-0.5 rounded-campo border border-borda bg-superficie-3 p-[3px]', className)}
+      // 36PX, COMO O SEGMENTADO DE ui E A BUSCA AO LADO (auditoria visual, A3):
+      // o trilho com 3px de folga e as opções de 28px. Eram 39px contra os 35px
+      // da busca, na mesma linha.
+      className={cn('inline-flex gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-[3px]', className)}
     >
       {itens.map((it) => {
         const ativo = it.key === valor
@@ -3219,7 +3238,7 @@ function Seg<K extends string>({
             aria-pressed={ativo}
             onClick={() => onChange(it.key)}
             className={cn(
-              'inline-flex h-[32px] items-center gap-2 whitespace-nowrap rounded-controle px-4 text-sm font-semibold transition-colors',
+              'inline-flex h-controle-sm items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-colors',
               ativo ? 'bg-superficie text-marca-texto shadow-nivel-1' : 'text-texto-2 hover:text-texto',
             )}
           >
@@ -3228,7 +3247,7 @@ function Seg<K extends string>({
             {it.n !== undefined && (
               <span
                 className={cn(
-                  'rounded-full px-[7px] text-xs tabular-nums',
+                  'rounded-full px-s1.5 text-xs tabular-nums',
                   ativo ? 'bg-marca-suave text-marca-texto' : 'bg-superficie-3 text-texto-2',
                 )}
               >
@@ -3280,7 +3299,6 @@ export default function AnaliseCredito() {
   // A ORDEM, ESTA SIM, LEMBRADA ENTRE VISITAS (ver `lerOrdem`).
   const [ordem, setOrdem] = useState<OrdemDaLista>(() => lerOrdem(lerPreferencia<unknown>(PREF_ORDEM_DA_ANALISE, 'recente')))
   const [mostrar, setMostrar] = useState(POR_VEZ)
-  const campoDeBusca = useRef<HTMLInputElement>(null)
   // J E K ANDAM ENTRE OS CARDS (ver `passoDaTecla`): só o foco se move — nenhum
   // card abre, nenhum botão é apertado. Fora de campo e de janela, como o "/".
   useEffect(() => {
@@ -3298,19 +3316,11 @@ export default function AnaliseCredito() {
     document.addEventListener('keydown', aoTeclar)
     return () => document.removeEventListener('keydown', aoTeclar)
   }, [])
-  // "/" LEVA À BUSCA (amostra), fora de campo e de janela: quem está digitando
-  // uma barra num texto não pode ser arrancado dali.
-  useEffect(() => {
-    const aoTeclar = (e: KeyboardEvent) => {
-      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
-      const alvo = e.target as HTMLElement | null
-      if (alvo?.closest('input, textarea, select, [contenteditable="true"]') || haDialogoAberto()) return
-      e.preventDefault()
-      campoDeBusca.current?.focus()
-    }
-    document.addEventListener('keydown', aoTeclar)
-    return () => document.removeEventListener('keydown', aoTeclar)
-  }, [])
+  // "/" LEVA À BUSCA (amostra), fora de campo e de janela. DESDE A AUDITORIA
+  // VISUAL (03/10/2026) quem faz isso é o atalho comum da moldura
+  // (layout/Consultas), pelo `data-filtro-tela` que o CampoDeBusca põe: a mesma
+  // regra — não age com alguém digitando nem com janela aberta. Dois ouvintes
+  // para a mesma tecla seriam dois lugares para a regra divergir.
   /** Abre uma etapa: o filtro e o "Mostrar mais" voltam ao padrão. */
   const irParaAba = (key: string) => {
     setAba(key)
@@ -5050,9 +5060,10 @@ export default function AnaliseCredito() {
                 parcial só aparecia uma vez por carregamento de página, e
                 "sincronize de novo" era instrução impossível de seguir sem dar
                 F5. Card criado no Kommo agora também chega sem recarregar. */}
+            {/* SECUNDÁRIO `md`, NA ALTURA DE CONTROLE (auditoria visual, A3): era
+                um botão de 38px com texto de 14px, mais alto que tudo na linha. */}
             <Button
               variant="secondary"
-              className="h-[38px] px-4 text-corpo"
               icon={<RefreshCw className={IC} aria-hidden />}
               onClick={() => sync.mutate()}
               loading={sync.isPending}
@@ -5067,7 +5078,7 @@ export default function AnaliseCredito() {
           Precatório), a busca e a densidade, numa linha. A contagem sai do funil
           CARREGADO, então o outro fica sem número até ser aberto: melhor sem
           número que com número errado. */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-s3 flex flex-wrap items-center gap-s2">
         <Seg
           rotulo="Tipo de crédito"
           valor={funil === FUNIL_RPV ? 'rpv' : 'prec'}
@@ -5115,49 +5126,27 @@ export default function AnaliseCredito() {
             }))}
           />
         )}
-        <label className="flex h-[38px] min-w-[240px] flex-1 items-center gap-2 rounded-campo border border-borda-controle bg-superficie px-4 text-texto-3 focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20">
-          <span className="sr-only">Buscar nos cards</span>
-          <Search className={IC} aria-hidden />
-          <input
-            ref={campoDeBusca}
-            className="w-full min-w-0 bg-transparent text-corpo text-texto outline-none placeholder:text-texto-3"
-            placeholder="Buscar por nome do card, processo, responsável ou conteúdo…  ( / )"
-            value={busca}
-            onChange={(e) => {
-              setBusca(e.target.value)
-              setMostrar(POR_VEZ)
-            }}
-            // ESC LIMPA A BUSCA, com o foco ainda no campo — o jeito de voltar à
-            // lista inteira sem apagar letra por letra. Campo vazio: o Esc segue
-            // seu caminho.
-            onKeyDown={(e) => {
-              if (e.key !== 'Escape' || !busca) return
-              e.preventDefault()
-              e.stopPropagation()
-              setBusca('')
-              setMostrar(POR_VEZ)
-            }}
-            aria-describedby="dica-da-busca"
-          />
-          {busca && (
-            <button
-              type="button"
-              onClick={() => {
-                setBusca('')
-                setMostrar(POR_VEZ)
-                campoDeBusca.current?.focus()
-              }}
-              aria-label="Limpar a busca"
-              title="Limpar a busca (Esc)"
-              className="-mr-2 grid h-[24px] w-[24px] flex-none place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
-            >
-              <X className="h-[14px] w-[14px]" aria-hidden />
-            </button>
-          )}
-          <span id="dica-da-busca" className="sr-only">
-            Aceita o número do processo com ou sem pontuação. Esc limpa a busca; J e K andam entre os cards.
-          </span>
-        </label>
+        {/* A BUSCA DAS LISTAS DE ui (auditoria visual, C3/A3): a lupa de 16px, os
+            36px de altura e a tecla "/" desenhada, como o "Ctrl K" do topo — e
+            não mais o "( / )" no fim do texto de exemplo, que cortava a 1280px.
+            O exemplo tem até 40 caracteres; a lista inteira do que se busca vai
+            no `title`. O Esc limpa a busca (o CampoDeBusca faz isso), e o "/"
+            vem para cá pelo atalho comum da moldura (layout/Consultas). */}
+        <CampoDeBusca
+          classeDaCaixa="min-w-[240px] flex-1"
+          aria-label="Buscar nos cards"
+          placeholder="Buscar por nome, processo ou responsável"
+          title="Busca no nome do card, no número do processo (com ou sem pontuação), no responsável e no conteúdo das anotações"
+          valor={busca}
+          onMudar={(v) => {
+            setBusca(v)
+            setMostrar(POR_VEZ)
+          }}
+          aria-describedby="dica-da-busca"
+        />
+        <span id="dica-da-busca" className="sr-only">
+          Aceita o número do processo com ou sem pontuação. Esc limpa a busca; J e K andam entre os cards.
+        </span>
         {/* SEM ESCOLHA DE DENSIDADE (decisão do dono, 03/10/2026): a lista é
             sempre a confortável. */}
       </div>
@@ -5197,9 +5186,13 @@ export default function AnaliseCredito() {
         // moldura; a dos perdidos é mais discreta, porque não é etapa do fluxo;
         // coluna vazia fica esmaecida, mas legível. COM BUSCA, todo número vira
         // contagem de resultado.
+        // MAIS BAIXO, E SEMPRE ABERTO (auditoria visual, A1a; o recolhível, AP1,
+        // foi recusado pelo dono em 03/10/2026): linhas de 32px, a barrinha de
+        // 2px colada ao nome e o cartão com 12px de folga — os cards sobem para
+        // a dobra sem esconder fase nenhuma.
         <section
           aria-label="Visão do funil por fases"
-          className={cn('mb-6 grid grid-cols-1 gap-3 min-[621px]:grid-cols-2', gradeDoQuadro)}
+          className={cn('mb-s4 grid grid-cols-1 gap-s2 min-[621px]:grid-cols-2', gradeDoQuadro)}
         >
           {fasesDoFunil.map((f, i) => {
             const total = f.abas.reduce((t, a) => t + nDaAba(a.key), 0)
@@ -5210,12 +5203,12 @@ export default function AnaliseCredito() {
               <div
                 key={f.nome ?? 'etapas'}
                 className={cn(
-                  'relative min-w-0 rounded-cartao border px-3 pb-[10px] pt-[14px] shadow-nivel-1',
+                  'relative min-w-0 rounded-cartao border p-s3 shadow-nivel-1 dark:shadow-none',
                   f.discreta ? 'bg-superficie-2' : 'bg-superficie',
                   atual ? 'border-marca-viva/45 ring-[3px] ring-marca-viva/10' : 'border-borda',
                 )}
               >
-                <div className="flex items-center gap-2 px-1 pb-[10px]">
+                <div className="flex items-center gap-s2 px-s1 pb-s2">
                   {f.nome && (
                     <span
                       aria-hidden
@@ -5237,7 +5230,7 @@ export default function AnaliseCredito() {
                   </h2>
                   <span className="ml-auto text-sm font-bold tabular-nums text-texto-2">{total}</span>
                 </div>
-                <ul className="m-0 grid list-none gap-0.5 p-0">
+                <ul className="m-0 grid list-none gap-s0.5 p-0">
                   {f.abas.map((a) => {
                     const n = nDaAba(a.key)
                     const ativa = a.key === abaAtual?.key
@@ -5251,7 +5244,7 @@ export default function AnaliseCredito() {
                           onClick={() => irParaAba(a.key)}
                           title={`${nome} — ${n} ${busca.trim() ? 'resultado(s) da busca' : 'crédito(s)'}`}
                           className={cn(
-                            'relative grid h-[38px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-[10px] rounded-controle px-[10px] pb-1 text-left transition-colors',
+                            'relative grid h-[32px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-s2 rounded-controle px-s2 pb-s0.5 text-left transition-colors',
                             ativa ? 'bg-marca-suave' : 'hover:bg-superficie-3',
                           )}
                         >
@@ -5276,11 +5269,13 @@ export default function AnaliseCredito() {
                             {n}
                           </span>
                           {/* A BARRA EMBAIXO DO NOME: o comprimento compara as
-                              etapas sem ler número, e o nome inteiro cabe. */}
+                              etapas sem ler número, e o nome inteiro cabe. 2PX,
+                              COLADA AO NOME (A1a): era um traço de 3px a meio
+                              caminho da linha seguinte. */}
                           <span
                             aria-hidden
                             className={cn(
-                              'absolute bottom-[5px] left-[10px] right-[10px] h-[3px] overflow-hidden rounded-full',
+                              'absolute bottom-[4px] left-s2 right-s2 h-[2px] overflow-hidden rounded-full',
                               ativa ? 'bg-marca-viva/20' : 'bg-superficie-3',
                             )}
                           >
@@ -5301,7 +5296,7 @@ export default function AnaliseCredito() {
                 {!f.discreta && proxima && !proxima.discreta && (
                   <span
                     aria-hidden
-                    className="absolute -right-[11px] top-[18px] z-[1] hidden h-[18px] w-[18px] place-items-center rounded-full bg-papel text-texto-3 min-[1180px]:grid"
+                    className="absolute -right-[13px] top-[14px] z-[1] hidden h-[18px] w-[18px] place-items-center rounded-full bg-papel text-texto-3 min-[1180px]:grid"
                   >
                     <ChevronRight className="h-[14px] w-[14px]" />
                   </span>
@@ -5342,27 +5337,61 @@ export default function AnaliseCredito() {
       <section aria-live="polite" aria-label="Cards da etapa">
         {abaAtual && (
           // O CABEÇALHO DA ETAPA (item "Novo"): a fase, o nome com a contagem e
-          // uma frase do que se faz nela; à direita, a ordem da lista.
-          <div className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-            <div className="min-w-0">
-              {faseAberta?.nome && (
-                <p className="font-display text-xs font-bold uppercase tracking-[.06em] text-marca-texto">
-                  {faseAberta.discreta ? 'Fora do fluxo' : `Fase ${indiceDaFase + 1} · ${faseAberta.nome}`}
-                </p>
-              )}
-              <h2 className="font-display mt-0.5 flex items-center gap-[10px] text-2xl font-extrabold tracking-tight text-texto">
-                {nomeDaColuna(abaAtual.label)}
-                <span className="rounded-full bg-marca-suave px-[9px] py-0.5 text-sm font-bold tabular-nums text-marca-texto">
-                  {lista.length}
-                </span>
-              </h2>
-              {abaAtual.descricao && (
-                <p className="mt-1 max-w-[640px] text-corpo text-texto-2">
-                  <TextoComTermos texto={abaAtual.descricao} />
-                </p>
-              )}
-            </div>
-            <label className="flex h-[38px] w-[270px] items-center gap-2 rounded-campo border border-borda-controle bg-superficie px-4 text-texto-3 focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20 max-[900px]:w-full">
+          // uma frase do que se faz nela.
+          //
+          // H2 DE 18PX (auditoria visual, A2): em 24px extrabold a etapa tinha
+          // quase o tamanho do título da página. A FRASE NUMA LINHA SÓ (A1a), com
+          // o texto inteiro no `title`: em duas linhas ela empurrava os cards.
+          <div className="mb-s3 min-w-0">
+            {faseAberta?.nome && (
+              <p className="font-display text-xs font-bold uppercase tracking-[.06em] text-marca-texto">
+                {faseAberta.discreta ? 'Fora do fluxo' : `Fase ${indiceDaFase + 1} · ${faseAberta.nome}`}
+              </p>
+            )}
+            <h2 className="font-display mt-s0.5 flex items-center gap-s2 text-xl font-bold tracking-tight text-texto">
+              {nomeDaColuna(abaAtual.label)}
+              <span className="rounded-full bg-marca-suave px-s2 py-s0.5 text-sm font-bold tabular-nums text-marca-texto">
+                {lista.length}
+              </span>
+            </h2>
+            {abaAtual.descricao && (
+              <p className="mt-s1 line-clamp-1 max-w-[720px] text-corpo text-texto-2" title={abaAtual.descricao}>
+                <TextoComTermos texto={abaAtual.descricao} />
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* OS FILTROS RÁPIDOS (item "Novo"), com a contagem: um clique mostra os
+            parados, os com cotação, os com análise pronta ou os sem número. */}
+        {/* VISÍVEIS TAMBÉM COM A ETAPA VAZIA ("Todos 0"), como na amostra: a
+            barra que some e volta conforme a etapa faz a lista pular. Só não
+            aparecem antes de os cards chegarem — "0" ali seria afirmação falsa. */}
+        {/* OS CHIPS E O ORDENAR NA MESMA LINHA (auditoria visual, A1a): a ordem
+            ficava sozinha à direita do cabeçalho da etapa, numa linha a mais. Os
+            chips são o `Chip` de ui (C7): aceso, o azul suave da marca — o preto
+            de antes era o elemento mais escuro da tela. */}
+        {abaAtual && (
+          <div className="mb-s3 flex flex-wrap items-center gap-s2">
+            {leads.data && (
+              <div role="group" aria-label="Filtros rápidos" className="flex flex-wrap gap-s2">
+                {chips.map((c) => (
+                  <Chip
+                    key={c.key}
+                    ativo={filtro === c.key}
+                    icone={c.icone}
+                    contagem={contagemDoFiltro[c.key]}
+                    onClick={() => {
+                      setFiltro(c.key)
+                      setMostrar(POR_VEZ)
+                    }}
+                  >
+                    {c.rotulo}
+                  </Chip>
+                ))}
+              </div>
+            )}
+            <label className="ml-auto flex h-controle w-[270px] items-center gap-s2 rounded-campo border border-borda-controle bg-superficie px-s3 text-texto-3 focus-within:border-anel focus-within:ring-[3px] focus-within:ring-anel/20 max-[900px]:w-full">
               <span className="sr-only">Ordenar</span>
               <History className={IC} aria-hidden />
               <select
@@ -5382,40 +5411,6 @@ export default function AnaliseCredito() {
           </div>
         )}
 
-        {/* OS FILTROS RÁPIDOS (item "Novo"), com a contagem: um clique mostra os
-            parados, os com cotação, os com análise pronta ou os sem número. */}
-        {/* VISÍVEIS TAMBÉM COM A ETAPA VAZIA ("Todos 0"), como na amostra: a
-            barra que some e volta conforme a etapa faz a lista pular. Só não
-            aparecem antes de os cards chegarem — "0" ali seria afirmação falsa. */}
-        {abaAtual && leads.data && (
-          <div role="group" aria-label="Filtros rápidos" className="mb-3 flex flex-wrap gap-2">
-            {chips.map((c) => {
-              const ativo = filtro === c.key
-              return (
-                <button
-                  key={c.key}
-                  type="button"
-                  aria-pressed={ativo}
-                  onClick={() => {
-                    setFiltro(c.key)
-                    setMostrar(POR_VEZ)
-                  }}
-                  className={cn(
-                    'inline-flex h-[30px] items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors',
-                    ativo
-                      ? 'border-texto bg-texto text-superficie'
-                      : 'border-borda-forte bg-superficie text-texto-2 hover:bg-superficie-3',
-                  )}
-                >
-                  {c.icone}
-                  {c.rotulo}
-                  <span className="font-medium tabular-nums opacity-80">{contagemDoFiltro[c.key]}</span>
-                </button>
-              )
-            })}
-          </div>
-        )}
-
         {leads.isLoading ? (
           <Card>
             <Loading />
@@ -5425,21 +5420,22 @@ export default function AnaliseCredito() {
             <ErrorState message={(leads.error as Error)?.message} onRetry={() => leads.refetch()} />
           </Card>
         ) : filtrados.length === 0 ? (
-          <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie">
-            {lista.length > 0 ? (
-              <EmptyState
-                title="Nenhum card com esse filtro"
-                description="Limpe o filtro para ver todos os cards desta etapa."
-                action={
-                  <Button variant="secondary" className={BTN} onClick={() => setFiltro('todos')}>
-                    Limpar filtro
-                  </Button>
-                }
+          // OS VAZIOS COM A REGRA DE ui (auditoria visual, §0.10): o que o FILTRO
+          // ou a BUSCA esconderam é uma linha simples, com o jeito de desfazer ao
+          // lado; a moldura tracejada fica para o vazio de verdade, a etapa que
+          // não tem card nenhum.
+          lista.length > 0 ? (
+            <Card>
+              <SemResultado
+                texto="Nenhum card com esse filtro nesta etapa."
+                onLimpar={() => setFiltro('todos')}
+                rotuloLimpar="Limpar filtro"
               />
-            ) : busca.trim() ? (
-              <EmptyState
-                title="Nada encontrado"
-                description={
+            </Card>
+          ) : busca.trim() ? (
+            <Card>
+              <SemResultado
+                texto={
                   achadosEmOutrasAbas.length ? (
                     <>Nenhum card corresponde à busca nesta etapa. Achei em: {linksDosAchados(achadosEmOutrasAbas)}.</>
                   ) : (
@@ -5448,8 +5444,15 @@ export default function AnaliseCredito() {
                     }.`
                   )
                 }
+                onLimpar={() => {
+                  setBusca('')
+                  setMostrar(POR_VEZ)
+                }}
+                rotuloLimpar="Limpar a busca"
               />
-            ) : (
+            </Card>
+          ) : (
+            <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie">
               <EmptyState
                 title={`Nenhum card em ${abaAtual ? nomeDaColuna(abaAtual.label) : 'nenhuma etapa'}`}
                 description={
@@ -5457,11 +5460,11 @@ export default function AnaliseCredito() {
                   'Este funil ainda não tem card nenhum no Kommo. Quando o comercial criar um, ele aparece aqui na próxima sincronização.'
                 }
               />
-            )}
-          </div>
+            </div>
+          )
         ) : (
           <>
-            <div className="grid gap-[10px]">
+            <div className="grid gap-s2">
               {filtrados.slice(0, mostrar).map((l) => (
                 <CardCredito
                   key={l.kommo_lead_id}

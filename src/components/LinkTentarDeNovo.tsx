@@ -25,7 +25,7 @@ export function LinkTentarDeNovo({
       disabled={tentando}
       aria-busy={tentando || undefined}
       className={cn(
-        'inline-flex min-h-[24px] items-center gap-1 font-semibold underline disabled:cursor-wait disabled:no-underline disabled:opacity-80',
+        'inline-flex min-h-[24px] items-center gap-s1 font-semibold underline disabled:cursor-wait disabled:no-underline disabled:opacity-80',
         className,
       )}
     >

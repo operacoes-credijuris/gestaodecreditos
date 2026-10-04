@@ -282,13 +282,32 @@ export function DueDiligence({
       // cobre a lista, e sem isto não há na tela nada que diga de qual crédito
       // são os processos.
       description={tituloDoCard || undefined}
+      // O RODAPÉ NA ORDEM ÚNICA DAS JANELAS (auditoria visual de 03/10/2026,
+      // §0.6/C8): a recusa à esquerda, longe do primário; à direita, "Fechar" e
+      // o "Seguir" no canto. Antes o Seguir (primário) abria a fila à esquerda,
+      // colado no "Reprovar", e o Fechar ficava sozinho do outro lado — a única
+      // janela da plataforma nessa ordem.
+      rodapeInicio={
+        acaoReprovar && (
+          <Button
+            // CONTORNADO, E NÃO CHEIO (`dangerOutline`): o vermelho cheio fica
+            // para o Confirmar da janela do desfecho, que é onde a recusa
+            // acontece de fato. Aqui ele só abre essa janela.
+            variant={acaoReprovar.variant === 'danger' ? 'dangerOutline' : acaoReprovar.variant}
+            onClick={() => setDesfecho(acaoReprovar)}
+            disabled={!onMover || seguindo}
+          >
+            {acaoReprovar.label}
+          </Button>
+        )
+      }
       footer={
-        // `w-full`: o rodapé do Modal alinha tudo à direita, e sem ocupar a
-        // linha inteira o espaçador não teria o que empurrar.
-        <div className="flex w-full flex-wrap items-center gap-2">
-          {/* Os desfechos à esquerda, o Fechar à direita: são atos de peso
-              diferente, e enfileirá-los juntos faria "Fechar" parecer a quarta
-              opção de uma decisão. */}
+        <>
+          {/* PERGUNTA COMO O X: o formulário do cedente mexido e não salvo ia
+              embora com um clique no Fechar. */}
+          <Button variant="ghost" onClick={() => void fechar()}>
+            Fechar
+          </Button>
           {/* SEGUIR NÃO MOVE O CARD, e por isso não sai da lista de ações da
               etapa: "Enviar para validação" e "Aprovar" são passos do funil,
               decididos com a análise à frente. Aqui a pergunta é outra — os
@@ -297,31 +316,7 @@ export function DueDiligence({
           <Button onClick={seguir} loading={seguindo}>
             Seguir
           </Button>
-          {acaoReprovar && (
-            <Button
-              variant={acaoReprovar.variant}
-              onClick={() => setDesfecho(acaoReprovar)}
-              disabled={!onMover || seguindo}
-              // CONTORNADO, E NÃO CHEIO (o `btn-danger-outline` da amostra): o
-              // vermelho cheio fica para o Confirmar da janela do desfecho, que
-              // é onde a recusa acontece de fato. Aqui ele só abre essa janela,
-              // e ao lado do Seguir não pode gritar mais alto que ele.
-              className={
-                acaoReprovar.variant === 'danger'
-                  ? 'border-perigo-borda bg-superficie text-perigo shadow-none hover:bg-perigo-fundo hover:brightness-100'
-                  : undefined
-              }
-            >
-              {acaoReprovar.label}
-            </Button>
-          )}
-          <div className="flex-1" />
-          {/* PERGUNTA COMO O X: o formulário do cedente mexido e não salvo ia
-              embora com um clique no Fechar. */}
-          <Button variant="ghost" onClick={() => void fechar()}>
-            Fechar
-          </Button>
-        </div>
+        </>
       }
     >
       {comCertidoes && (
@@ -336,7 +331,7 @@ export function DueDiligence({
         />
       )}
 
-      <div className={comCertidoes ? 'mt-5' : undefined}>
+      <div className={comCertidoes ? 'mt-s4' : undefined}>
         {comCertidoes && (
           <div hidden={aba !== 'certidoes'}>
             <PainelCertidoes
