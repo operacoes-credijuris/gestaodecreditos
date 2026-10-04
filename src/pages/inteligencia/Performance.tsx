@@ -24,7 +24,7 @@ import { formatDate, formatCNJ } from '@/lib/format'
 import { distribuicaoDoRetorno } from '@/lib/graficosDoQuadro'
 import {
   usePainel, CarregandoPainel, ErroPainel, CabecalhoDaAba, Ressalva, Painel, Metricas,
-  LinhaMetrica, SeloAmostra, Explicacao, Dica, ProcessoOuRef, TABELA_NO_PAINEL,
+  LinhaMetrica, SeloAmostra, Explicacao, Dica, ProcessoOuRef, TABELA_NO_PAINEL, TabelaQueRola,
   pct, brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
 import { Histograma } from './graficos'
@@ -64,9 +64,9 @@ const DIZ = {
  */
 function Destaque({ valor, rotulo, explicacao }: { valor: string; rotulo: string; explicacao?: string }) {
   return (
-    <span className="inline-flex items-baseline gap-2">
+    <span className="inline-flex items-baseline gap-s2">
       <span className="text-3xl font-bold tracking-tight tabular-nums text-texto">{valor}</span>
-      <span className="inline-flex items-center gap-0.5 text-corpo text-texto-3">
+      <span className="inline-flex items-center gap-s0.5 text-corpo text-texto-3">
         {rotulo}
         {explicacao && <Dica texto={explicacao} />}
       </span>
@@ -85,7 +85,7 @@ function Metrica({
 }) {
   return (
     <Painel titulo={titulo} apoio={apoio}>
-      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 px-6 pb-3 pt-1">{destaques}</div>
+      <div className="flex flex-wrap items-baseline gap-x-s5 gap-y-s1 px-s5 pb-s2 pt-s1">{destaques}</div>
       <Metricas>{children}</Metricas>
     </Painel>
   )
@@ -105,7 +105,7 @@ export default function Performance() {
   const lista = ordenadas.filter((o) => (visao === 'extremos' ? extremos.has(o.ref) : true))
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-s4">
       <CabecalhoDaAba
         titulo="Performance"
         apoio={
@@ -117,7 +117,7 @@ export default function Performance() {
       />
       <AvisoParametros />
 
-      <div className="grid gap-4 min-[1180px]:grid-cols-3">
+      <div className="grid gap-s4 min-[1180px]:grid-cols-3">
         <Metrica
           titulo="Rentabilidade total"
           apoio="Quanto o capital rendeu, sem considerar o prazo."
@@ -212,7 +212,7 @@ export default function Performance() {
         titulo="Operações encerradas"
         apoio="Ordenadas da maior para a menor rentabilidade. A primeira linha é a melhor operação da carteira e a última é a pior."
         acao={
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-s2">
             <SeloAmostra
               n={carteira.n}
               classe={carteira.representatividade.classe}
@@ -232,7 +232,7 @@ export default function Performance() {
         }
       >
         {visao === 'extremos' && (
-          <div className="px-5 pb-3">
+          <div className="px-s4 pb-s2">
             <Ressalva>
               Estas <strong>{carteira.extremosTir.length}</strong> operações{' '}
               <strong>já estão contadas</strong> nas {carteira.n} do total — não são um grupo
@@ -249,67 +249,69 @@ export default function Performance() {
           />
         ) : (
           <div className="border-t border-borda">
-            <Table dense className={TABELA_NO_PAINEL}>
-              <THead>
-                <tr>
-                  <TH>
-                    <Explicacao texto={DIZ.processo}>Processo</Explicacao>
-                  </TH>
-                  <TH>Tribunal</TH>
-                  <TH>Aquisição</TH>
-                  <TH>Liquidação</TH>
-                  <TH className="text-right">Capital</TH>
-                  <TH className="text-right">Recebido</TH>
-                  <TH className="text-right">Ganho</TH>
-                  <TH className="text-right">Retorno</TH>
-                  <TH className="text-right">Prazo</TH>
-                  <TH className="text-right">
-                    <Explicacao texto={EXPLICA.tir}>Anualizada</Explicacao>
-                  </TH>
-                </tr>
-              </THead>
-              <TBody>
-                {lista.map((o) => {
-                  const extremo = extremos.has(o.ref)
-                  return (
-                    // A LINHA DO EXTREMO VEM TINGIDA (o `tr.extremo` da amostra),
-                    // além do selo na última coluna: na lista inteira, o olho acha
-                    // as marcadas sem ler a coluna.
-                    <TR key={o.ref} className={cn(extremo && 'bg-aviso-fundo/55')}>
-                      <TD>
-                        <ProcessoOuRef cnj={o.numeroCnj ? formatCNJ(o.numeroCnj) : null} refInterna={o.ref} />
-                      </TD>
-                      <TD>{o.tribunal ?? '—'}</TD>
-                      <TD className="whitespace-nowrap tabular-nums">{formatDate(o.dataAquisicao)}</TD>
-                      <TD className="whitespace-nowrap tabular-nums">{formatDate(o.dataLiquidacao)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(o.capitalInvestido)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(o.jaRecebido)}</TD>
-                      <TD className={cn('whitespace-nowrap text-right tabular-nums', (o.ganho ?? 0) < 0 && 'font-bold text-perigo')}>
-                        {brl(o.ganho)}
-                      </TD>
-                      <TD className={cn('whitespace-nowrap text-right tabular-nums', (o.retorno ?? 0) < 0 && 'font-bold text-perigo')}>
-                        {pct(o.retorno)}
-                      </TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{dias(o.prazoDias)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">
-                        <span className="inline-flex items-center gap-1.5">
-                          {pct(o.tirAnual, 0)}
-                          {extremo && (
-                            <span
-                              title={EXPLICA.extremos}
-                              className="inline-flex h-[22px] items-center gap-1 rounded-full border border-aviso-borda bg-aviso-fundo px-2 text-xs font-semibold text-aviso"
-                            >
-                              <AlertTriangle className="h-[13px] w-[13px]" aria-hidden />
-                              extremo
-                            </span>
-                          )}
-                        </span>
-                      </TD>
-                    </TR>
-                  )
-                })}
-              </TBody>
-            </Table>
+            <TabelaQueRola colunaFixa>
+              <Table dense className={TABELA_NO_PAINEL}>
+                <THead>
+                  <tr>
+                    <TH>
+                      <Explicacao texto={DIZ.processo}>Processo</Explicacao>
+                    </TH>
+                    <TH>Tribunal</TH>
+                    <TH>Aquisição</TH>
+                    <TH>Liquidação</TH>
+                    <TH className="text-right">Capital</TH>
+                    <TH className="text-right">Recebido</TH>
+                    <TH className="text-right">Ganho</TH>
+                    <TH className="text-right">Retorno</TH>
+                    <TH className="text-right">Prazo</TH>
+                    <TH className="text-right">
+                      <Explicacao texto={EXPLICA.tir}>Anualizada</Explicacao>
+                    </TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {lista.map((o) => {
+                    const extremo = extremos.has(o.ref)
+                    return (
+                      // A LINHA DO EXTREMO VEM TINGIDA (o `tr.extremo` da amostra),
+                      // além do selo na última coluna: na lista inteira, o olho acha
+                      // as marcadas sem ler a coluna.
+                      <TR key={o.ref} className={cn(extremo && 'bg-aviso-fundo/55')}>
+                        <TD>
+                          <ProcessoOuRef cnj={o.numeroCnj ? formatCNJ(o.numeroCnj) : null} refInterna={o.ref} />
+                        </TD>
+                        <TD>{o.tribunal ?? '—'}</TD>
+                        <TD className="whitespace-nowrap tabular-nums">{formatDate(o.dataAquisicao)}</TD>
+                        <TD className="whitespace-nowrap tabular-nums">{formatDate(o.dataLiquidacao)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{brl(o.capitalInvestido)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{brl(o.jaRecebido)}</TD>
+                        <TD className={cn('whitespace-nowrap text-right tabular-nums', (o.ganho ?? 0) < 0 && 'font-bold text-perigo')}>
+                          {brl(o.ganho)}
+                        </TD>
+                        <TD className={cn('whitespace-nowrap text-right tabular-nums', (o.retorno ?? 0) < 0 && 'font-bold text-perigo')}>
+                          {pct(o.retorno)}
+                        </TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{dias(o.prazoDias)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">
+                          <span className="inline-flex items-center gap-s1">
+                            {pct(o.tirAnual, 0)}
+                            {extremo && (
+                              <span
+                                title={EXPLICA.extremos}
+                                className="inline-flex h-[22px] items-center gap-s1 rounded-full border border-aviso-borda bg-aviso-fundo px-s2 text-xs font-semibold text-aviso"
+                              >
+                                <AlertTriangle className="h-[13px] w-[13px]" aria-hidden />
+                                extremo
+                              </span>
+                            )}
+                          </span>
+                        </TD>
+                      </TR>
+                    )
+                  })}
+                </TBody>
+              </Table>
+            </TabelaQueRola>
           </div>
         )}
       </Painel>

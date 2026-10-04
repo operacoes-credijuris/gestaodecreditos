@@ -63,6 +63,14 @@ const ADVBOX_FIXO = {
   type_nome: 'CREDJURIS',
 } as const
 
+/**
+ * A CAIXA TRAVADA SE LÊ (auditoria visual, CF1): o fundo `superficie-3` e o
+ * texto `texto-2` do Field já valiam, mas o Chrome ainda põe o <select>
+ * desligado a 70% de opacidade, e o "CREDIJURIS" ficava apagado demais. Aqui
+ * ele volta inteiro — o fundo cinza já diz que não se mexe.
+ */
+const SELECT_TRAVADO = 'disabled:opacity-100'
+
 export function SecaoAdvbox({
   consulta,
   pendencia,
@@ -239,7 +247,7 @@ export function SecaoAdvbox({
               cliente, responsável, fase e tipo. Vêm em lista, da própria conta,
               porque pedir ID digitado seria pedir para errar. */}
           <div className="mt-[16px]">
-            <label className="inline-flex cursor-pointer items-center gap-2 text-corpo font-semibold text-texto">
+            <label className="inline-flex cursor-pointer items-center gap-s2 text-corpo font-semibold text-texto">
               <input
                 type="checkbox"
                 className="h-[16px] w-[16px] accent-marca"
@@ -248,7 +256,7 @@ export function SecaoAdvbox({
               />
               Cadastro de créditos no ADVBOX
             </label>
-            <p className="mb-[10px] mt-1 text-xs text-texto-3">
+            <p className="mb-[10px] mt-s1 text-xs text-texto-3">
               Todo crédito, requerimento ou apenso novo vira um processo no ADVBOX, com o
               cliente e a fase abaixo.
             </p>
@@ -261,12 +269,12 @@ export function SecaoAdvbox({
                 escolha que não existe. */}
             <div className="grid grid-cols-[minmax(0,1fr)] gap-x-[16px] gap-y-[12px] min-[900px]:grid-cols-[repeat(3,minmax(0,1fr))]">
               <Field label="Cliente">
-                <Select value="fixo" disabled onChange={() => {}}>
+                <Select value="fixo" disabled onChange={() => {}} className={SELECT_TRAVADO}>
                   <option value="fixo">{ADVBOX_FIXO.customer_nome}</option>
                 </Select>
               </Field>
               <Field label="Fase processual">
-                <Select value="fixo" disabled onChange={() => {}}>
+                <Select value="fixo" disabled onChange={() => {}} className={SELECT_TRAVADO}>
                   <option value="fixo">{ADVBOX_FIXO.stage_nome}</option>
                 </Select>
               </Field>
@@ -295,7 +303,7 @@ export function SecaoAdvbox({
                   // travada. Select vazio e habilitado permitiria salvar por cima
                   // do responsável configurado com "nenhum" — perder configuração
                   // por causa de uma falha de rede seria o pior desfecho aqui.
-                  <Select value="atual" disabled onChange={() => {}}>
+                  <Select value="atual" disabled onChange={() => {}} className={SELECT_TRAVADO}>
                     <option value="atual">
                       {carregando
                         ? 'Carregando…'
@@ -308,7 +316,7 @@ export function SecaoAdvbox({
             </div>
 
             {erroOpcoes && !opcoes && (
-              <div className="mt-[8px] flex flex-wrap items-center gap-2">
+              <div className="mt-[8px] flex flex-wrap items-center gap-s2">
                 <Button
                   variant="secondary"
                   icon={<RefreshCw className="h-[14px] w-[14px]" />}

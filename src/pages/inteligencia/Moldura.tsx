@@ -77,7 +77,7 @@ export default function Moldura() {
         id={painel}
         role="tabpanel"
         aria-labelledby={idDaAba(painel, indice)}
-        className={cn('pt-6', trocou && 'animate-page')}
+        className={cn('pt-s5', trocou && 'animate-page')}
       >
         {/* A ABA CHEGA SOB DEMANDA (App.tsx). A espera e o erro ficam AQUI,
             dentro do painel, e não no layout: lá eles trocariam a moldura

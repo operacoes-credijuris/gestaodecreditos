@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -56,8 +56,10 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { Card } from '@/components/ui/Card'
+import { Chip } from '@/components/ui/Chip'
+import { GradeDeIndicadores } from '@/components/ui/StatCard'
 import { Combobox, type OpcaoCombo } from '@/components/ui/Combobox'
-import { Select } from '@/components/ui/Field'
+import { Field, Select } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
 import {
   Table,
@@ -83,10 +85,10 @@ import {
 import {
   CabecalhoDaAba,
   CartaoNumero,
-  GradeCartoes,
   ICONE_CARTAO,
   Painel,
   TABELA_NO_PAINEL,
+  TabelaQueRola,
 } from '@/pages/inteligencia/compartilhado'
 
 // As `key` são internas e não mudam com o rótulo: elas aparecem em estado e em
@@ -140,15 +142,6 @@ function rotuloMes(iso: string): string {
     month: 'long',
     year: 'numeric',
   })
-}
-
-/** O rótulo pequeno em caixa alta dos campos da barra (`.field.inline > label`). */
-function RotuloDaBarra({ children }: { children: ReactNode }) {
-  return (
-    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-texto-3">
-      {children}
-    </span>
-  )
 }
 
 // ----------------------- Individual -----------------------
@@ -432,34 +425,6 @@ function CelulasDoGrupo({
   }
 }
 
-/** O botão de liga/desliga de um grupo (o `.chipf` da amostra), com ✓ quando ligado. */
-function BotaoGrupo({
-  ligado,
-  onClick,
-  children,
-}: {
-  ligado: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={ligado}
-      onClick={onClick}
-      className={cn(
-        'inline-flex h-[30px] items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors',
-        ligado
-          ? 'border-texto bg-texto text-superficie'
-          : 'border-borda-forte bg-superficie text-texto-2 hover:bg-superficie-3',
-      )}
-    >
-      {ligado && <Check className="h-[13px] w-[13px]" aria-hidden />}
-      {children}
-    </button>
-  )
-}
-
 function Individual() {
   const processos = processosCrud.useList()
   // Última movimentação de cada crédito — mesmo cache do ADVBOX que alimenta a
@@ -714,9 +679,11 @@ function Individual() {
           escolhe e prepara (investidor, competência, parâmetros, resumos);
           embaixo o que sai daqui para o investidor (Excel, relatório,
           mensagem). */}
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="w-full sm:w-[300px]">
-          <RotuloDaBarra>Investidor</RotuloDaBarra>
+      {/* OS RÓTULOS SÃO OS DO FIELD (auditoria visual, §0.5 e Q4): o rótulo de
+          seção em caixa alta não é rótulo de campo. Com o Field, clicar em
+          "Investidor" também põe o foco na busca. */}
+      <div className="flex flex-wrap items-end gap-s4">
+        <Field label="Investidor" className="w-full sm:w-[300px]">
           <Combobox
             opcoes={opcoes}
             valor={indice >= 0 ? indice : null}
@@ -726,19 +693,18 @@ function Individual() {
             placeholder="Digite o nome…"
             vazio="Nenhum investidor nos créditos."
           />
-        </div>
-        <div>
-          <RotuloDaBarra>Mês de referência</RotuloDaBarra>
+        </Field>
+        <Field label="Mês de referência">
           {/* Fixo no mês corrente: é a competência do relatório, não filtro. */}
-          <div className="inline-flex items-center whitespace-nowrap rounded-campo bg-superficie-3 px-4 py-2 text-corpo text-texto-2">
+          <div className="inline-flex h-controle items-center whitespace-nowrap rounded-campo bg-superficie-3 px-s4 text-corpo text-texto-2">
             {mesRef}
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2 sm:ml-auto">
+        </Field>
+        <div className="flex flex-wrap gap-s2 sm:ml-auto">
           {/* SELIC e IPCA que alimentam a coluna Valor projetado. */}
           <Button
             variant="outline"
-            icon={<Settings className="h-[14px] w-[14px]" />}
+            icon={<Settings className="h-[16px] w-[16px]" />}
             onClick={() => setAbrirParametros(true)}
           >
             Parâmetros de atualização
@@ -749,7 +715,7 @@ function Individual() {
               uma consulta paga à IA. */}
           <Button
             variant="outline"
-            icon={<Sparkles className="h-[14px] w-[14px]" />}
+            icon={<Sparkles className="h-[16px] w-[16px]" />}
             loading={gerar.isPending && !gerar.variables?.processo_id}
             onClick={() => gerar.mutate({ forcar: true })}
             title="Refaz o estágio processual e as providências de TODOS os créditos com cessionário, não só os deste investidor. Cada crédito é uma consulta à IA."
@@ -758,232 +724,257 @@ function Individual() {
           </Button>
         </div>
       </div>
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button
-          variant="outline"
-          icon={<Download className="h-[14px] w-[14px]" />}
-          loading={baixando}
-          disabled={!ativo}
-          onClick={baixarXlsx}
-          title="O arquivo leva as 25 colunas, mesmo as dos grupos desligados na tela."
-        >
-          Baixar Excel
-        </Button>
-        {/* O documento que vai ao investidor. Ação primária desta barra: é o
-            fim do trabalho do mês, e os outros botões existem para prepará-lo. */}
-        <Button
-          icon={<FileText className="h-[14px] w-[14px]" />}
-          loading={gerandoHtml}
-          disabled={!ativo}
-          onClick={gerarRelatorio}
-        >
-          Relatório do investidor
-        </Button>
-        <Button
-          variant="outline"
-          icon={<MessageSquareText className="h-[14px] w-[14px]" />}
-          disabled={!ativo}
-          onClick={copiarMensagem}
-          title="Copia o texto de acompanhamento para colar no WhatsApp junto com o relatório"
-        >
-          Mensagem
-        </Button>
-      </div>
 
-      <GradeCartoes seis>
-        <CartaoNumero
-          rotulo="Capital total"
-          icone={<Wallet className={ICONE_CARTAO} />}
-          valor={
-            investidor && totais.capital.total !== null
-              ? formatBRL(totais.capital.total)
-              : '—'
-          }
-          dica={investidor ? cobertura(totais.capital.preenchidos) : sel}
+      {/* ANTES DE ESCOLHER O INVESTIDOR, SÓ A BUSCA E O VAZIO (auditoria visual,
+          Q4): a tela mostrava a barra de botões desligados e seis indicadores
+          "—", que não diziam nada e empurravam o vazio para baixo da dobra. Os
+          botões e os números aparecem com o investidor; os de cima (parâmetros e
+          resumos) valem para a carteira inteira e ficam sempre. */}
+      {!investidor ? (
+        <EmptyState
+          title="Selecione um investidor"
+          description="Escolha acima para ver a carteira dele."
         />
-        <CartaoNumero
-          rotulo="TIR média"
-          icone={<TrendingUp className={ICONE_CARTAO} />}
-          valor={
-            investidor && calc.tirMedia.valor !== null
-              ? formatPercent(calc.tirMedia.valor)
-              : '—'
-          }
-          dica={
-            !investidor
-              ? sel
-              : calc.tirMedia.valor === null
-                ? 'nenhum crédito com TIR calculável'
-                : `carteira como fluxo único, prazo médio de ${calc.tirMedia.prazoMedioDias} dias, ${calc.tirMedia.considerados} de ${carteira.length} créditos`
-          }
-        />
-        <CartaoNumero
-          rotulo="Retorno projetado"
-          icone={<Gauge className={ICONE_CARTAO} />}
-          valor={
-            investidor && calc.retornoCarteira.valor !== null
-              ? formatPercent(calc.retornoCarteira.valor)
-              : '—'
-          }
-          dica={
-            !investidor
-              ? sel
-              : calc.retornoCarteira.valor === null
-                ? 'nenhum crédito com ganho calculável'
-                : `soma dos ganhos sobre a soma do capital, de ${calc.retornoCarteira.considerados} de ${carteira.length} créditos`
-          }
-        />
-        <CartaoNumero
-          rotulo="Já recebido"
-          icone={<CheckCircle2 className={ICONE_CARTAO} />}
-          valor={
-            investidor && totais.recebido.total !== null
-              ? formatBRL(totais.recebido.total)
-              : '—'
-          }
-          dica={investidor ? cobertura(totais.recebido.preenchidos) : sel}
-        />
-        <CartaoNumero
-          rotulo="A receber estimado"
-          icone={<Clock className={ICONE_CARTAO} />}
-          valor={
-            investidor && calc.aReceber.total !== null
-              ? formatBRL(calc.aReceber.total)
-              : '—'
-          }
-          dica={
-            !investidor
-              ? sel
-              : calc.aReceber.total === null
-                ? // "Nada a receber" é conclusão, e só vale quando não há crédito
-                  // em aberto. Com crédito aberto e projeção incalculável (índice
-                  // do crédito ou parâmetro de atualização em falta), o card
-                  // afirmava que o investidor não tem nada a receber — o oposto
-                  // da verdade.
-                  calc.aReceber.incalculaveis > 0
-                  ? `sem projeção calculável em ${calc.aReceber.incalculaveis} crédito(s) — confira o índice e os Parâmetros de atualização`
-                  : 'nada a receber nesta carteira'
-                : [
-                    calc.aReceber.emAberto > 0 &&
-                      `${calc.aReceber.emAberto} crédito(s) em aberto`,
-                    calc.aReceber.complementares > 0 &&
-                      `${calc.aReceber.complementares} complementar(es) pendente(s)`,
-                  ]
-                    .filter(Boolean)
-                    .join(' + ')
-          }
-        />
-        <CartaoNumero
-          rotulo="Nº de operações"
-          icone={<FileText className={ICONE_CARTAO} />}
-          valor={investidor ? String(carteira.length) : '—'}
-          dica={investidor ? 'créditos deste investidor' : sel}
-        />
-      </GradeCartoes>
-
-      <Painel
-        titulo="Carteira"
-        apoio={`Da cessão mais antiga para a mais nova. A tabela inteira tem ${TOTAL_DE_COLUNAS} colunas em ${GRUPOS_DA_CARTEIRA.length} grupos — mostre só os que precisar.`}
-      >
-        <div
-          role="group"
-          aria-label="Grupos de colunas na tela"
-          className="flex flex-wrap items-center gap-2 border-b border-borda px-5 py-4"
-        >
-          <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-texto-3">
-            Colunas
-          </span>
-          {GRUPOS_DA_CARTEIRA.map((g) => (
-            <BotaoGrupo
-              key={g.chave}
-              ligado={grupos[g.chave]}
-              onClick={() => setGrupos((atual) => alternarGrupo(atual, g.chave))}
-            >
-              {g.curto}
-            </BotaoGrupo>
-          ))}
-          <span className="text-xs text-texto-3">
-            {colunasNaTela(grupos)} de {TOTAL_DE_COLUNAS} na tela · o Excel e o relatório levam
-            sempre as {TOTAL_DE_COLUNAS}
-          </span>
+      ) : (
+        <>
+        <div className="flex flex-wrap justify-end gap-s2">
+          <Button
+            variant="outline"
+            icon={<Download className="h-[16px] w-[16px]" />}
+            loading={baixando}
+            disabled={!ativo}
+            onClick={baixarXlsx}
+            title="O arquivo leva as 25 colunas, mesmo as dos grupos desligados na tela."
+          >
+            Baixar Excel
+          </Button>
+          {/* O documento que vai ao investidor. Ação primária desta barra: é o
+              fim do trabalho do mês, e os outros botões existem para prepará-lo. */}
+          <Button
+            icon={<FileText className="h-[16px] w-[16px]" />}
+            loading={gerandoHtml}
+            disabled={!ativo}
+            onClick={gerarRelatorio}
+          >
+            Relatório do investidor
+          </Button>
+          <Button
+            variant="outline"
+            icon={<MessageSquareText className="h-[16px] w-[16px]" />}
+            disabled={!ativo}
+            onClick={copiarMensagem}
+            title="Copia o texto de acompanhamento para colar no WhatsApp junto com o relatório"
+          >
+            Mensagem
+          </Button>
         </div>
 
-        {!investidor ? (
-          <EmptyState
-            title="Selecione um investidor"
-            description="Escolha acima para ver a carteira dele."
+        {/* A GRADE COMUM DE INDICADORES (auditoria visual, C12/Q4). A 1280px,
+            seis lado a lado espremiam o rótulo em três linhas ("A / receber /
+            estimado"). AQUI A COLUNA MÍNIMA É DE 340PX, e não 200: com 200, os
+            seis caíam em cinco mais um sobrando sozinho na segunda linha; com
+            340, ficam três por linha no computador (3 + 3), dois no tablet e um
+            no celular. */}
+        <GradeDeIndicadores className="grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))]">
+          <CartaoNumero
+            rotulo="Capital total"
+            icone={<Wallet className={ICONE_CARTAO} />}
+            valor={
+              investidor && totais.capital.total !== null
+                ? formatBRL(totais.capital.total)
+                : '—'
+            }
+            dica={investidor ? cobertura(totais.capital.preenchidos) : sel}
           />
-        ) : carteira.length === 0 ? (
-          <EmptyState
-            title="Nenhum crédito"
-            description="Este investidor não consta como cessionário em nenhum crédito."
+          <CartaoNumero
+            rotulo="TIR média"
+            icone={<TrendingUp className={ICONE_CARTAO} />}
+            valor={
+              investidor && calc.tirMedia.valor !== null
+                ? formatPercent(calc.tirMedia.valor)
+                : '—'
+            }
+            dica={
+              !investidor
+                ? sel
+                : calc.tirMedia.valor === null
+                  ? 'nenhum crédito com TIR calculável'
+                  : `carteira como fluxo único, prazo médio de ${calc.tirMedia.prazoMedioDias} dias, ${calc.tirMedia.considerados} de ${carteira.length} créditos`
+            }
           />
-        ) : visiveis.length === 0 ? (
-          <EmptyState
-            title="Nenhum grupo de colunas na tela"
-            description="Ligue pelo menos um grupo acima para ver a carteira."
+          <CartaoNumero
+            rotulo="Retorno projetado"
+            icone={<Gauge className={ICONE_CARTAO} />}
+            valor={
+              investidor && calc.retornoCarteira.valor !== null
+                ? formatPercent(calc.retornoCarteira.valor)
+                : '—'
+            }
+            dica={
+              !investidor
+                ? sel
+                : calc.retornoCarteira.valor === null
+                  ? 'nenhum crédito com ganho calculável'
+                  : `soma dos ganhos sobre a soma do capital, de ${calc.retornoCarteira.considerados} de ${carteira.length} créditos`
+            }
           />
-        ) : (
-          <Table className={cn(CLASSES_CARTEIRA, TABELA_NO_PAINEL)}>
-            <THead>
-              {/* Nível 1: os grupos, cada um na sua cor, centralizados e com o
-                  sublinhado grosso. Nível 2: as colunas, na cor do grupo. */}
-              <tr>
-                {visiveis.map((g) => (
-                  <TH
-                    key={g.chave}
-                    colSpan={g.colunas.length}
-                    className={cn('border-b-[3px] border-current text-center', COR_GRUPO[g.chave])}
-                  >
-                    {g.titulo}
-                  </TH>
-                ))}
-              </tr>
-              <tr>
-                {visiveis.map((g) =>
-                  g.colunas.map((c) => (
-                    <TH
-                      key={`${g.chave}-${c.titulo}`}
-                      className={cn(COR_GRUPO[g.chave], c.direita && 'text-right')}
-                    >
-                      {c.titulo}
-                    </TH>
-                  )),
-                )}
-              </tr>
-            </THead>
-            <TBody>
-              {calc.linhas.map((l) => {
-                // `resumo` continua sendo lido direto porque a célula precisa
-                // do campo `erro`, que não é conteúdo do relatório.
-                const resumo = resumos.data?.get(l.p.id)
-                return (
-                  <TR key={l.p.id}>
+          <CartaoNumero
+            rotulo="Já recebido"
+            icone={<CheckCircle2 className={ICONE_CARTAO} />}
+            valor={
+              investidor && totais.recebido.total !== null
+                ? formatBRL(totais.recebido.total)
+                : '—'
+            }
+            dica={investidor ? cobertura(totais.recebido.preenchidos) : sel}
+          />
+          <CartaoNumero
+            rotulo="A receber estimado"
+            icone={<Clock className={ICONE_CARTAO} />}
+            valor={
+              investidor && calc.aReceber.total !== null
+                ? formatBRL(calc.aReceber.total)
+                : '—'
+            }
+            dica={
+              !investidor
+                ? sel
+                : calc.aReceber.total === null
+                  ? // "Nada a receber" é conclusão, e só vale quando não há crédito
+                    // em aberto. Com crédito aberto e projeção incalculável (índice
+                    // do crédito ou parâmetro de atualização em falta), o card
+                    // afirmava que o investidor não tem nada a receber — o oposto
+                    // da verdade.
+                    calc.aReceber.incalculaveis > 0
+                    ? `sem projeção calculável em ${calc.aReceber.incalculaveis} crédito(s) — confira o índice e os Parâmetros de atualização`
+                    : 'nada a receber nesta carteira'
+                  : [
+                      calc.aReceber.emAberto > 0 &&
+                        `${calc.aReceber.emAberto} crédito(s) em aberto`,
+                      calc.aReceber.complementares > 0 &&
+                        `${calc.aReceber.complementares} complementar(es) pendente(s)`,
+                    ]
+                      .filter(Boolean)
+                      .join(' + ')
+            }
+          />
+          <CartaoNumero
+            rotulo="Nº de operações"
+            icone={<FileText className={ICONE_CARTAO} />}
+            valor={investidor ? String(carteira.length) : '—'}
+            dica={investidor ? 'créditos deste investidor' : sel}
+          />
+        </GradeDeIndicadores>
+
+        <Painel
+          titulo="Carteira"
+          apoio={`Da cessão mais antiga para a mais nova. A tabela inteira tem ${TOTAL_DE_COLUNAS} colunas em ${GRUPOS_DA_CARTEIRA.length} grupos — mostre só os que precisar.`}
+        >
+          <div
+            role="group"
+            aria-label="Grupos de colunas na tela"
+            className="flex flex-wrap items-center gap-s2 border-b border-borda px-s5 py-s4"
+          >
+            <span className="mr-s1 text-xs font-semibold uppercase tracking-[0.06em] text-texto-3">
+              Colunas
+            </span>
+            {/* O CHIP COMUM (auditoria visual, C7): os grupos SE SOMAM, e o aceso é
+                o azul suave da marca — o preto de antes era o elemento mais escuro
+                da tela. O ✓ continua: aceso não é só cor. */}
+            {GRUPOS_DA_CARTEIRA.map((g) => (
+              <Chip
+                key={g.chave}
+                ativo={grupos[g.chave]}
+                icone={grupos[g.chave] ? <Check aria-hidden /> : undefined}
+                onClick={() => setGrupos((atual) => alternarGrupo(atual, g.chave))}
+              >
+                {g.curto}
+              </Chip>
+            ))}
+            <span className="text-xs text-texto-3">
+              {colunasNaTela(grupos)} de {TOTAL_DE_COLUNAS} na tela · o Excel e o relatório levam
+              sempre as {TOTAL_DE_COLUNAS}
+            </span>
+          </div>
+
+          {carteira.length === 0 ? (
+            <EmptyState
+              title="Nenhum crédito"
+              description="Este investidor não consta como cessionário em nenhum crédito."
+            />
+          ) : visiveis.length === 0 ? (
+            <EmptyState
+              title="Nenhum grupo de colunas na tela"
+              description="Ligue pelo menos um grupo acima para ver a carteira."
+            />
+          ) : (
+            // 25 COLUNAS ROLAM DENTRO DO PAINEL, com a borda direita esmaecida
+            // enquanto há coluna escondida (Q2): a partir de 1280px a Table de ui/
+            // não rola mais sozinha, e a tabela passava da borda do painel.
+            <TabelaQueRola>
+              <Table className={cn(CLASSES_CARTEIRA, TABELA_NO_PAINEL)}>
+                <THead>
+                  {/* Nível 1: os grupos, cada um na sua cor, centralizados e com o
+                      sublinhado grosso. Nível 2: as colunas, na cor do grupo. */}
+                  <tr>
                     {visiveis.map((g) => (
-                      <CelulasDoGrupo
+                      <TH
                         key={g.chave}
-                        grupo={g.chave}
-                        l={l}
-                        erroResumo={resumo?.erro}
-                        carregandoResumos={resumos.isLoading}
-                        carregandoMov={ultimaMov.isLoading}
-                        abrir={(campo) =>
-                          setAberto({
-                            id: l.p.id,
-                            cnj: l.p.numero_cnj,
-                            status: l.p.status,
-                            campo,
-                          })
-                        }
-                      />
+                        colSpan={g.colunas.length}
+                        className={cn('border-b-[3px] border-current text-center', COR_GRUPO[g.chave])}
+                      >
+                        {g.titulo}
+                      </TH>
                     ))}
-                  </TR>
-                )
-              })}
-            </TBody>
-          </Table>
-        )}
-      </Painel>
+                  </tr>
+                  <tr>
+                    {visiveis.map((g) =>
+                      g.colunas.map((c) => (
+                        <TH
+                          key={`${g.chave}-${c.titulo}`}
+                          className={cn(COR_GRUPO[g.chave], c.direita && 'text-right')}
+                        >
+                          {c.titulo}
+                        </TH>
+                      )),
+                    )}
+                  </tr>
+                </THead>
+                <TBody>
+                  {calc.linhas.map((l) => {
+                    // `resumo` continua sendo lido direto porque a célula precisa
+                    // do campo `erro`, que não é conteúdo do relatório.
+                    const resumo = resumos.data?.get(l.p.id)
+                    return (
+                      <TR key={l.p.id}>
+                        {visiveis.map((g) => (
+                          <CelulasDoGrupo
+                            key={g.chave}
+                            grupo={g.chave}
+                            l={l}
+                            erroResumo={resumo?.erro}
+                            carregandoResumos={resumos.isLoading}
+                            carregandoMov={ultimaMov.isLoading}
+                            abrir={(campo) =>
+                              setAberto({
+                                id: l.p.id,
+                                cnj: l.p.numero_cnj,
+                                status: l.p.status,
+                                campo,
+                              })
+                            }
+                          />
+                        ))}
+                      </TR>
+                    )
+                  })}
+                </TBody>
+              </Table>
+            </TabelaQueRola>
+          )}
+        </Painel>
+        </>
+      )}
 
       <ModalParametrosAtualizacao
         open={abrirParametros}
@@ -1007,7 +998,7 @@ function Individual() {
                 não há o que regerar. */}
             {aberto?.status !== 'encerrado' && (
               <Button
-                icon={<Sparkles className="h-[14px] w-[14px]" />}
+                icon={<Sparkles className="h-[16px] w-[16px]" />}
                 loading={gerar.isPending && !!gerar.variables?.processo_id}
                 onClick={() => aberto && gerar.mutate({ processo_id: aberto.id })}
               >
@@ -1199,10 +1190,11 @@ function Consolidado() {
   }
 
   return (
-    <Card className="overflow-hidden">
-      <div className="border-b border-borda px-5 py-4">
-        <label className="block w-full sm:max-w-xs">
-          <RotuloDaBarra>Filtrar por mês</RotuloDaBarra>
+    // SEM `overflow-hidden` (auditoria visual, C4): ele prendia o cabeçalho fixo
+    // da tabela ao cartão, e o cabeçalho deixava de acompanhar a rolagem.
+    <Card>
+      <div className="border-b border-borda px-s5 py-s4">
+        <Field label="Filtrar por mês" className="w-full sm:max-w-xs">
           <Select value={mes} onChange={(e) => setMes(e.target.value)}>
             <option value="todos">Tudo</option>
             {meses.map((m) => (
@@ -1211,7 +1203,7 @@ function Consolidado() {
               </option>
             ))}
           </Select>
-        </label>
+        </Field>
       </div>
 
       {linhas.length === 0 ? (
@@ -1252,7 +1244,7 @@ function Consolidado() {
               {linhas.map((l) => (
                 <TR key={l.nome}>
                   <TD>
-                    <span className="flex items-center gap-2.5">
+                    <span className="flex items-center gap-s2">
                       <Avatar nome={l.nome} />
                       <span className="font-semibold text-texto">{l.nome}</span>
                     </span>
@@ -1286,7 +1278,16 @@ function Consolidado() {
                   produz número com significado (12% + 15% não é 27% de
                   carteira), e a média simples daria a um aporte de R$ 10 mil
                   o mesmo peso de um de R$ 500 mil. */}
-              <TR className="bg-superficie-3 font-bold hover:bg-superficie-3">
+              {/* O FUNDO VAI NAS CÉLULAS, e as das pontas acompanham o canto do
+                  cartão quando a linha é a última dele: sem o `overflow-hidden`
+                  do cartão, o fundo da linha vazava quadrado sobre o canto. */}
+              <TR
+                className={cn(
+                  'font-bold [&>td]:bg-superficie-3',
+                  semCessionario === 0 &&
+                    '[&>td:first-child]:rounded-bl-cartao [&>td:last-child]:rounded-br-cartao',
+                )}
+              >
                 <TD className="font-bold text-texto">Total da carteira</TD>
                 <TD className="whitespace-nowrap text-right font-bold tabular-nums text-texto">
                   {formatBRL(total.capital)}
@@ -1314,7 +1315,7 @@ function Consolidado() {
               total, e quem confere a soma a olho precisa saber por que a conta não
               fecha com a aba Créditos. */}
           {semCessionario > 0 && (
-            <p className="border-t border-borda px-6 py-4 text-xs text-texto-3">
+            <p className="border-t border-borda px-s5 py-s4 text-xs text-texto-3">
               {semCessionario} crédito(s) do período estão fora desta tabela por não
               ter cessionário cadastrado, e por isso também não entram no total.
             </p>

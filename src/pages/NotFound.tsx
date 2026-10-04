@@ -15,12 +15,12 @@ export default function NotFound() {
   const navigate = useNavigate()
   return (
     <div className="mx-auto max-w-[560px] pt-[48px]">
-      <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie px-6 py-[48px] text-center">
-        <div className="mx-auto mb-3 grid h-[52px] w-[52px] place-items-center rounded-[16px] bg-marca-suave text-marca-texto">
+      <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie px-s5 py-[48px] text-center">
+        <div className="mx-auto mb-s2 grid h-[52px] w-[52px] place-items-center rounded-cartao bg-marca-suave text-marca-texto">
           <Compass className="h-[20px] w-[20px]" aria-hidden />
         </div>
         <h1 className="font-display text-lg font-bold text-texto">Página não encontrada</h1>
-        <p className="mx-auto mt-1.5 max-w-[420px] text-corpo text-texto-2">
+        <p className="mx-auto mt-s1 max-w-[420px] text-corpo text-texto-2">
           O endereço acessado não existe ou foi movido. Confira o link ou volte para o início.
         </p>
         <div className="mt-[14px]">

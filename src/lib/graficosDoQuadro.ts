@@ -105,8 +105,34 @@ export function distribuicaoDoRetorno(
  */
 export function brlAbreviado(v: number): string {
   if (!Number.isFinite(v)) return '—'
+  return `R$ ${valorAbreviado(v)}`
+}
+
+/**
+ * O mesmo valor curto, SEM O "R$": "84 mil", "1,3 mi". É o rótulo acima da
+ * barra das Previsões (auditoria visual, Q1). Com o "R$", o rótulo era largo
+ * demais para a coluna e quebrava em três linhas ("R$ / 84 / mil"); o título do
+ * gráfico já diz que é dinheiro, e o exato fica na dica.
+ */
+export function valorAbreviado(v: number): string {
+  if (!Number.isFinite(v)) return '—'
   const abs = Math.abs(v)
-  if (abs >= 1e6) return `R$ ${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`
-  if (abs >= 1e3) return `R$ ${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`
-  return `R$ ${Math.round(v).toLocaleString('pt-BR')}`
+  if (abs >= 1e6) return `${(v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`
+  if (abs >= 1e3) return `${(v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`
+  return Math.round(v).toLocaleString('pt-BR')
+}
+
+/**
+ * O RÓTULO DA BARRA SÓ APARECE SE COUBER (auditoria visual, Q1): a fatia de
+ * cada mês no eixo (a área de desenho dividida pelos meses) precisa ter pelo
+ * menos `minimo` px — senão os rótulos vizinhos encostam um no outro. Não
+ * cabendo, nenhum aparece (todos ou nenhum: um gráfico com metade dos rótulos
+ * parece ter perdido dado), e o valor continua na dica de cada barra.
+ *
+ * `larguraDoDesenho` é a largura em que as barras se distribuem (sem o eixo
+ * vertical nem as margens); zero ou desconhecida conta como "não coube".
+ */
+export function cabeRotuloNaBarra(larguraDoDesenho: number, meses: number, minimo = 40): boolean {
+  if (!(larguraDoDesenho > 0) || meses <= 0) return false
+  return larguraDoDesenho / meses >= minimo
 }

@@ -48,9 +48,9 @@ export default function Login() {
     // O `.login` da amostra: sobre o papel da casa, a logomarca em cor plena
     // (o azul dela não sobrevive legível sobre navy escuro) e, embaixo, o
     // cartão do formulário. O degradê de antes saiu — a amostra não tem.
-    <div className="grid min-h-screen place-content-center gap-6 bg-papel px-4 py-11">
+    <div className="grid min-h-screen place-content-center gap-s6 bg-papel px-s4 py-s10">
       <FaixaBeta fixa />
-      <div className="flex flex-col items-center gap-2.5 text-center">
+      <div className="flex flex-col items-center gap-s2 text-center">
         <h1 className="sr-only">Credijuris</h1>
         {/* NO ESCURO, A LOGOMARCA CLAREIA UM QUARTO: o azul e o cinza de
             "créditos judiciais" ficavam em 4:1 sobre o papel escuro; com o
@@ -59,14 +59,16 @@ export default function Login() {
         <p className="text-corpo text-texto-2">Sistema de Gestão de Créditos</p>
       </div>
 
-      <div className="w-[min(400px,calc(100vw-32px))] rounded-[18px] border border-borda bg-superficie p-9 shadow-nivel-2">
-        <h2 className="mb-5 font-display text-xl font-extrabold tracking-tight text-texto">
+      {/* O RAIO DE JANELA (16px, §0.3): o `rounded-[18px]` de antes era um raio
+          fora da escala. No escuro, o anel claro do nível 2 (§0.4). */}
+      <div className="w-[min(400px,calc(100vw-32px))] rounded-janela border border-borda bg-superficie p-s8 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]">
+        <h2 className="mb-s4 font-display text-xl font-extrabold tracking-tight text-texto">
           Acessar o sistema
         </h2>
 
         {!isSupabaseConfigured && (
-          <div className="mb-5 flex items-start gap-2.5 rounded-campo border border-aviso-borda bg-aviso-fundo px-4 py-3 text-corpo">
-            <AlertTriangle className="mt-0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
+          <div className="mb-s4 flex items-start gap-s2 rounded-campo border border-aviso-borda bg-aviso-fundo px-s3 py-s2 text-corpo">
+            <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
             <p className="text-texto">
               Supabase não configurado. Defina <code className="font-mono text-xs">VITE_SUPABASE_URL</code> e{' '}
               <code className="font-mono text-xs">VITE_SUPABASE_ANON_KEY</code> no arquivo{' '}
@@ -78,7 +80,7 @@ export default function Login() {
         {/* O FORMULÁRIO DE SEMPRE: e-mail com type=email e autocomplete=email,
             senha com current-password — é o que deixa o gerenciador de senhas
             preencher —, os dois obrigatórios, e só o e-mail aparado. */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-s3">
           <Field label="E-mail" required>
             <Input
               type="email"
@@ -110,7 +112,7 @@ export default function Login() {
               required
             />
             {capsLock && (
-              <p id="aviso-caps-lock" className="mt-1.5 flex items-center gap-1.5 text-sm text-aviso">
+              <p id="aviso-caps-lock" className="mt-s1 flex items-center gap-s1 text-sm text-aviso">
                 <AlertTriangle className="h-[14px] w-[14px] shrink-0" aria-hidden />
                 Caps Lock ligado.
               </p>
@@ -122,7 +124,7 @@ export default function Login() {
           {error && (
             <p
               role="alert"
-              className="flex items-center gap-2 rounded-campo border border-perigo-borda bg-perigo-fundo px-4 py-2 text-corpo text-perigo"
+              className="flex items-center gap-s2 rounded-campo border border-perigo-borda bg-perigo-fundo px-s3 py-s2 text-corpo text-perigo"
             >
               <AlertTriangle className="h-[16px] w-[16px] shrink-0" aria-hidden />
               <span>{error}</span>
@@ -140,7 +142,7 @@ export default function Login() {
           </Button>
         </form>
 
-        <p className="mt-5 text-center text-xs text-texto-3">
+        <p className="mt-s4 text-center text-xs text-texto-3">
           Cadastro de usuários pelo administrador.
         </p>
       </div>
