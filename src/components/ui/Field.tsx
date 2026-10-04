@@ -26,7 +26,7 @@ const baseControl =
   'w-full rounded-campo border border-borda-controle bg-superficie px-4 py-2 text-corpo text-texto ' +
   'placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] ' +
   'focus:ring-anel/20 aria-[invalid=true]:border-perigo ' +
-  'disabled:cursor-not-allowed disabled:bg-superficie-3 disabled:text-texto-2'
+  'disabled:cursor-not-allowed disabled:bg-superficie-3 disabled:text-texto-2 disabled:opacity-100'
 
 /**
  * Liga rótulo, dica e erro ao controle.

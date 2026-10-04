@@ -94,7 +94,7 @@ export function StatCard({
           ) : (
             rotulo
           )}
-          <p className="font-display mt-1 text-2xl font-bold tabular-nums tracking-tight text-texto">
+          <p className="font-display mt-1 text-2xl font-bold tabular-nums tracking-tight text-texto [word-spacing:0.18em]">
             {value}
           </p>
           {sub && <p className="mt-1 text-xs text-texto-3">{sub}</p>}
