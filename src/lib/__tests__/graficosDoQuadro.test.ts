@@ -7,7 +7,10 @@ import {
   evolucaoDaCarteira,
   distribuicaoDoRetorno,
   brlAbreviado,
+  valorAbreviado,
+  cabeRotuloNaBarra,
 } from '@/lib/graficosDoQuadro'
+import { restaAlemDaBorda } from '@/lib/rolagemLateral'
 import { iniciais } from '@/lib/iniciais'
 
 const op = (
@@ -77,6 +80,47 @@ describe('brlAbreviado', () => {
     expect(brlAbreviado(820_400)).toBe('R$ 820 mil')
     expect(brlAbreviado(950)).toBe('R$ 950')
     expect(brlAbreviado(0)).toBe('R$ 0')
+  })
+})
+
+describe('valorAbreviado (o rótulo acima da barra das Previsões, Q1)', () => {
+  it('o mesmo número do brlAbreviado, sem o "R$"', () => {
+    expect(valorAbreviado(84_300)).toBe('84 mil')
+    expect(valorAbreviado(1_300_000)).toBe('1,3 mi')
+    expect(valorAbreviado(950)).toBe('950')
+    expect(brlAbreviado(84_300)).toBe('R$ ' + valorAbreviado(84_300))
+  })
+
+  it('valor que não é número vira o traço, e não "NaN mil"', () => {
+    expect(valorAbreviado(Number.NaN)).toBe('—')
+    expect(brlAbreviado(Number.POSITIVE_INFINITY)).toBe('—')
+  })
+})
+
+describe('cabeRotuloNaBarra', () => {
+  it('cabe com pelo menos 40px por mês; abaixo disso, nenhum rótulo', () => {
+    expect(cabeRotuloNaBarra(800, 20)).toBe(true) // 40px
+    expect(cabeRotuloNaBarra(799, 20)).toBe(false)
+    expect(cabeRotuloNaBarra(300, 4, 80)).toBe(false)
+  })
+
+  it('largura ainda não medida, ou nenhum mês, não cabe', () => {
+    expect(cabeRotuloNaBarra(0, 12)).toBe(false)
+    expect(cabeRotuloNaBarra(Number.NaN, 12)).toBe(false)
+    expect(cabeRotuloNaBarra(900, 0)).toBe(false)
+  })
+})
+
+describe('restaAlemDaBorda (a pista de rolagem lateral, Q2)', () => {
+  it('há coluna escondida à direita enquanto não chegou ao fim', () => {
+    expect(restaAlemDaBorda(0, 800, 1200)).toBe(true)
+    expect(restaAlemDaBorda(390, 800, 1200)).toBe(true)
+    expect(restaAlemDaBorda(400, 800, 1200)).toBe(false)
+  })
+
+  it('tabela que cabe inteira não tem pista, e o arredondamento do zoom não engana', () => {
+    expect(restaAlemDaBorda(0, 800, 800)).toBe(false)
+    expect(restaAlemDaBorda(399.4, 800, 1200)).toBe(false)
   })
 })
 

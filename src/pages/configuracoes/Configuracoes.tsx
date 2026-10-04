@@ -186,7 +186,7 @@ export default function Configuracoes() {
           {pendentes.size > 0 && (
             <p
               role="status"
-              className="mb-[16px] flex items-start gap-2 rounded-campo border border-aviso-borda bg-aviso-fundo px-3 py-2 text-corpo text-texto"
+              className="mb-[16px] flex items-start gap-s2 rounded-campo border border-aviso-borda bg-aviso-fundo px-s2 py-s2 text-corpo text-texto"
             >
               <Pencil className="mt-[3px] h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden />
               <span>{textoDasPendencias(pendentes)}</span>
@@ -292,7 +292,7 @@ function MenuDasSecoes({
                 aria-current={ativo ? 'true' : undefined}
                 onClick={() => aoEscolher(id)}
                 className={cn(
-                  'flex h-[36px] shrink-0 items-center gap-2 whitespace-nowrap rounded-controle px-[10px] text-left text-corpo font-medium text-texto-2 transition-colors',
+                  'flex h-[36px] shrink-0 items-center gap-s2 whitespace-nowrap rounded-controle px-[10px] text-left text-corpo font-medium text-texto-2 transition-colors',
                   'hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                   ativo &&
                     'bg-superficie font-bold text-marca-texto shadow-nivel-1 hover:bg-superficie hover:text-marca-texto',

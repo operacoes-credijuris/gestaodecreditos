@@ -24,7 +24,7 @@ import { Table, THead, TH, TBody, TR, TD, EmptyState } from '@/components/ui/Tab
 import { cn } from '@/lib/cn'
 import {
   usePainel, CarregandoPainel, ErroPainel, CabecalhoDaAba, Ressalva, SeloAmostra,
-  Explicacao, Painel, TABELA_NO_PAINEL, pct, brl, dias, EXPLICA, AvisoParametros,
+  Explicacao, Painel, TABELA_NO_PAINEL, TabelaQueRola, pct, brl, dias, EXPLICA, AvisoParametros,
 } from './compartilhado'
 import { Ranking } from './graficos'
 import type { ResumoGrupo } from '@/lib/analytics'
@@ -112,14 +112,14 @@ export default function Recortes() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-s4">
       <CabecalhoDaAba
         titulo="Recortes"
         apoio="Onde o capital está, quanto dele já voltou e quanto ainda falta voltar."
       />
       <AvisoParametros />
 
-      <div className="flex flex-wrap items-center gap-2.5">
+      <div className="flex flex-wrap items-center gap-s2">
         <span className="text-sm font-semibold text-texto-2">Ver por</span>
         <Segmented
           ariaLabel="Agrupar por"
@@ -207,7 +207,7 @@ function TabelaGrupos({
   concentracao: { maior: string; fracaoOperacoes: number; fracaoCapital: number; concentrada: boolean } | null
 }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-s4">
       {concentracao?.concentrada && (
         <Ressalva>
           <strong>{pct(concentracao.fracaoOperacoes)}</strong> das operações e{' '}
@@ -236,67 +236,72 @@ function TabelaGrupos({
 
           <Painel titulo={`Por ${contexto}`} apoio="Ordenado por número de operações.">
             <div className="border-t border-borda">
-              <Table dense className={TABELA_NO_PAINEL}>
-                <THead>
-                  <tr>
-                    <TH>Grupo</TH>
-                    <TH className="text-right">Operações</TH>
-                    <TH className="text-right">Encerradas</TH>
-                    <TH className="text-right">
-                      <Explicacao texto={colunas.expInvestido}>{colunas.investido}</Explicacao>
-                    </TH>
-                    <TH className="text-right">
-                      <Explicacao texto={colunas.expRecebido}>{colunas.recebido}</Explicacao>
-                    </TH>
-                    <TH className="text-right">
-                      <Explicacao texto={colunas.expAReceber}>{colunas.aReceber}</Explicacao>
-                    </TH>
-                    <TH className="text-right">
-                      <Explicacao texto={EXPLICA.ponderada}>Retorno ponderado</Explicacao>
-                    </TH>
-                    <TH className="text-right">
-                      <Explicacao texto={EXPLICA.mediana}>Mediana</Explicacao>
-                    </TH>
-                    <TH className="text-right">
-                      <Explicacao texto={EXPLICA.tir}>Anualizada</Explicacao>
-                    </TH>
-                    <TH className="text-right">Prazo mediano</TH>
-                    <TH>
-                      <Explicacao texto={EXPLICA.representatividade}>Amostra</Explicacao>
-                    </TH>
-                  </tr>
-                </THead>
-                <TBody>
-                  {grupos.map((g) => (
-                    <TR key={g.nome}>
-                      {/* "(sem tribunal)", "(sem investidor)": o grupo de quem
-                          não tem o dado aparece apagado, para não se ler como um
-                          tribunal ou um investidor de verdade. */}
-                      <TD className={cn('font-bold', g.nome.startsWith('(') ? 'text-texto-3' : 'text-texto')}>
-                        {nomeProprio(g.rotulo)}
-                      </TD>
-                      <TD className="text-right tabular-nums">{g.total}</TD>
-                      <TD className="text-right tabular-nums">{g.n}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.capitalTotal)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.recebidoTotal)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.aReceber)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.retornoPonderado)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.retorno.mediana)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.tir.mediana)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular-nums">{dias(g.prazo.mediana)}</TD>
-                      <TD>
-                        <SeloAmostra
-                          n={g.n}
-                          classe={g.representatividade.classe}
-                          rotulo={g.representatividade.rotulo}
-                          explicacao={g.representatividade.explicacao}
-                          compacto
-                        />
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
+              {/* A COLUNA DO GRUPO FICA PARADA e a borda direita esmaece
+                  enquanto há coluna escondida (auditoria visual, Q2): a tabela
+                  rolava de lado sem pista nenhuma ("PRAZO MI…"). */}
+              <TabelaQueRola colunaFixa>
+                <Table dense className={TABELA_NO_PAINEL}>
+                  <THead>
+                    <tr>
+                      <TH>Grupo</TH>
+                      <TH className="text-right">Operações</TH>
+                      <TH className="text-right">Encerradas</TH>
+                      <TH className="text-right">
+                        <Explicacao texto={colunas.expInvestido}>{colunas.investido}</Explicacao>
+                      </TH>
+                      <TH className="text-right">
+                        <Explicacao texto={colunas.expRecebido}>{colunas.recebido}</Explicacao>
+                      </TH>
+                      <TH className="text-right">
+                        <Explicacao texto={colunas.expAReceber}>{colunas.aReceber}</Explicacao>
+                      </TH>
+                      <TH className="text-right">
+                        <Explicacao texto={EXPLICA.ponderada}>Retorno ponderado</Explicacao>
+                      </TH>
+                      <TH className="text-right">
+                        <Explicacao texto={EXPLICA.mediana}>Mediana</Explicacao>
+                      </TH>
+                      <TH className="text-right">
+                        <Explicacao texto={EXPLICA.tir}>Anualizada</Explicacao>
+                      </TH>
+                      <TH className="text-right">Prazo mediano</TH>
+                      <TH>
+                        <Explicacao texto={EXPLICA.representatividade}>Amostra</Explicacao>
+                      </TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {grupos.map((g) => (
+                      <TR key={g.nome}>
+                        {/* "(sem tribunal)", "(sem investidor)": o grupo de quem
+                            não tem o dado aparece apagado, para não se ler como um
+                            tribunal ou um investidor de verdade. */}
+                        <TD className={cn('min-w-[180px] font-bold', g.nome.startsWith('(') ? 'text-texto-3' : 'text-texto')}>
+                          {nomeProprio(g.rotulo)}
+                        </TD>
+                        <TD className="text-right tabular-nums">{g.total}</TD>
+                        <TD className="text-right tabular-nums">{g.n}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.capitalTotal)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.recebidoTotal)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{brl(g.aReceber)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.retornoPonderado)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.retorno.mediana)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{pct(g.tir.mediana)}</TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{dias(g.prazo.mediana)}</TD>
+                        <TD>
+                          <SeloAmostra
+                            n={g.n}
+                            classe={g.representatividade.classe}
+                            rotulo={g.representatividade.rotulo}
+                            explicacao={g.representatividade.explicacao}
+                            compacto
+                          />
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TabelaQueRola>
             </div>
           </Painel>
         </>

@@ -45,7 +45,7 @@ function LinhaParametro({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-5 py-1.5">
+    <div className="flex items-center justify-between gap-s4 py-s1">
       <span className="text-corpo text-texto">{rotulo}</span>
       <div className="w-[160px] shrink-0">{children}</div>
     </div>
@@ -55,7 +55,7 @@ function LinhaParametro({
 /** O valor sem campo (o `.ro` da amostra): derivado ou fixo, só para ler. */
 function SoLeitura({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-campo bg-superficie-3 px-4 py-2 text-right text-corpo tabular-nums text-texto-2">
+    <div className="rounded-campo bg-superficie-3 px-s3 py-s2 text-right text-corpo tabular-nums text-texto-2">
       {children}
     </div>
   )
@@ -257,8 +257,8 @@ export function ModalParametrosAtualizacao({
             nulo por cima da SELIC e do IPCA reais — parando a projeção de toda a
             carteira. Por isso o aviso, e o Salvar desabilitado abaixo. */}
         {params.isError && (
-          <div className="mb-4 flex items-start gap-2.5 rounded-campo border border-aviso-borda bg-aviso-fundo px-4 py-3 text-corpo">
-            <AlertTriangle className="mt-0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
+          <div className="mb-s3 flex items-start gap-s2 rounded-campo border border-aviso-borda bg-aviso-fundo px-s3 py-s2 text-corpo">
+            <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
             <p className="text-texto">
               Não foi possível ler os parâmetros atuais, então não é seguro salvar
               por cima. Feche e abra novamente.{' '}
@@ -266,7 +266,7 @@ export function ModalParametrosAtualizacao({
                   parecia não ter feito nada até a resposta chegar. */}
               <button
                 type="button"
-                className="rounded font-semibold text-marca-texto underline underline-offset-2 disabled:cursor-wait disabled:no-underline disabled:opacity-70"
+                className="rounded-controle font-semibold text-marca-texto underline underline-offset-2 disabled:cursor-wait disabled:no-underline disabled:opacity-70"
                 disabled={params.isFetching}
                 onClick={() => void params.refetch()}
               >
