@@ -139,6 +139,49 @@ describe('valoresDoCard — o que a plataforma sabe do crédito', () => {
     expect(v.data_hoje).toBe('05/10/2026')
   })
 
+  it('proposta em SPREAD com percentual: a final como valor, a comissão com o percentual e sobre quanto', () => {
+    const card: CardDaJustificativa = {
+      pipeline_id: FUNIL_PRECATORIO_EXTERNO,
+      nome: 'Credijuris - ACME COMERCIO LTDA - 0001234-56.2020.8.26.0053 - principal - 30%',
+      notas: [notaDeGente('Seguir com a proposta do BTG.', '2026-10-01T10:00:00Z')],
+      tags: ['Cotado BTG', 'Cotado PX Ativos', 'Cotado PJus'],
+      raw: {
+        custom_fields_values: [
+          { field_id: 1, field_name: 'BTG', values: [{ value: 'R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)' }] },
+          { field_id: 2, field_name: 'PX Ativos', values: [{ value: 'R$ 800.000,00 / Spread' }] },
+          { field_id: 3, field_name: 'PJUS', values: [{ value: 'R$ 820.000,00 / R$ 30.000,00' }] },
+        ],
+      },
+    }
+    const v = valoresDoCard(card, { agora: new Date(AGORA) })
+    expect(v.fundo_escolhido).toBe('BTG')
+    expect(v.valor_proposta).toBe('R$ 807.500,00')
+    expect(v.comissao).toBe('R$ 42.500,00 (spread de 5% sobre R$ 850.000,00)')
+    expect(v.cotacoes_recebidas).toBe(
+      [
+        '  - PJus: R$ 820.000,00 / R$ 30.000,00',
+        '  - BTG: proposta final R$ 807.500,00, comissão R$ 42.500,00 (spread de 5% sobre R$ 850.000,00)',
+        '  - PX Ativos: R$ 800.000,00 / Spread',
+      ].join('\n'),
+    )
+  })
+
+  it('proposta em spread ANTIGO (sem percentual) e limitada: como antes', () => {
+    const base = (valor: string): CardDaJustificativa => ({
+      pipeline_id: FUNIL_PRECATORIO_EXTERNO,
+      nome: 'Credijuris - ACME COMERCIO LTDA - 0001234-56.2020.8.26.0053',
+      notas: [notaDeGente('Seguir com a proposta do BTG.', '2026-10-01T10:00:00Z')],
+      raw: { custom_fields_values: [{ field_id: 1, field_name: 'BTG', values: [{ value: valor }] }] },
+    })
+    const antigo = valoresDoCard(base('R$ 850.000,00 / Spread'), { agora: new Date(AGORA) })
+    expect(antigo.valor_proposta).toBe('R$ 850.000,00')
+    expect(antigo.comissao).toBe('Spread (a comissão da casa sai da diferença sobre a proposta)')
+    expect(antigo.cotacoes_recebidas).toBe('  - BTG: R$ 850.000,00 / Spread')
+    const comPct = valoresDoCard(base('850 mil / spread de 5,5%'), { agora: new Date(AGORA) })
+    expect(comPct.valor_proposta).toBe('R$ 850.000,00')
+    expect(comPct.comissao).toBe('Spread de 5,5% sobre a proposta (a comissão da casa sai dela)')
+  })
+
   it('RPV sem proposta de fundo: a ficha e o prazo da análise; a proposta sai "(não informado)"', () => {
     const card: CardDaJustificativa = {
       pipeline_id: FUNIL_RPV_JUSTIFICATIVA,

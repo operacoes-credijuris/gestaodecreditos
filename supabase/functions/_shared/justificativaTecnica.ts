@@ -15,7 +15,13 @@
 // no vitest, no navegador e na Edge Function `justificativa-tecnica`.
 
 import { lerCadastroDoCard, lerTituloCard, valorDoCampo } from './cadastroDoCard.ts'
-import { cotacoesDoCard, formatarReais, type CotacaoLida, type ValorDeCampo } from './cotacaoDoFundo.ts'
+import {
+  cotacoesDoCard,
+  formatarPercentual,
+  formatarReais,
+  type CotacaoLida,
+  type ValorDeCampo,
+} from './cotacaoDoFundo.ts'
 import { FUNDOS_DA_PRECIFICACAO, mesmaEtiqueta } from './etiquetasDoFundo.ts'
 import { lerNumeroCnj } from './tribunais.ts'
 import { FUNIL_PRECATORIO_EXTERNO, FUNIL_PRECATORIO_INTERNO } from './trilhasDoPrecatorio.ts'
@@ -82,8 +88,8 @@ export const VARIAVEIS_DA_JUSTIFICATIVA: readonly { nome: string; vale: string; 
   { nome: 'prazo_estimado', vale: 'Meses até o pagamento e a previsão.', fonte: 'O resumo salvo pela análise de RPV. Fora do RPV, quase sempre não informado.' },
   { nome: 'teto_rpv', vale: 'O teto de RPV do ente devedor.', fonte: 'Só no RPV: o cache de tetos da plataforma (sem pesquisar nada novo).' },
   { nome: 'fundo_escolhido', vale: 'O fundo cuja proposta a casa escolheu.', fonte: 'A anotação "Seguir com a proposta do(a) ‹fundo›." do Escolher proposta.' },
-  { nome: 'valor_proposta', vale: 'O valor da proposta do fundo escolhido.', fonte: 'O campo do fundo na aba "Cotações/propostas" do card.' },
-  { nome: 'comissao', vale: 'A comissão da proposta escolhida: em R$ (limitada) ou Spread.', fonte: 'O mesmo campo do fundo, depois da barra.' },
+  { nome: 'valor_proposta', vale: 'O valor da proposta do fundo escolhido (no spread, a proposta final, já sem a comissão).', fonte: 'O campo do fundo na aba "Cotações/propostas" do card.' },
+  { nome: 'comissao', vale: 'A comissão da proposta escolhida: em R$ (limitada) ou em spread (o valor, o percentual e sobre quanto).', fonte: 'O mesmo campo do fundo, depois da barra.' },
   { nome: 'cotacoes_recebidas', vale: 'Todas as cotações dos fundos no card, uma por linha.', fonte: 'Os campos da aba "Cotações/propostas" e as etiquetas dos fundos.' },
   { nome: 'data_hoje', vale: 'A data de hoje (dd/mm/aaaa).', fonte: 'O relógio do servidor, no horário de Brasília.' },
 ]
@@ -320,12 +326,39 @@ export function tribunalDoCnj(numero: unknown): string {
 const reais = (v: number | null | undefined): string =>
   typeof v === 'number' && Number.isFinite(v) && v > 0 ? formatarReais(Math.round(v * 100)) : ''
 
-/** "R$ 850.000,00", "Spread (a comissão sai da proposta)" — o que a cotação diz. */
+/**
+ * A COMISSÃO, por extenso — o que a cotação diz:
+ *   limitada:      "R$ 40.000,00 (limitada)"
+ *   spread novo:   "R$ 42.500,00 (spread de 5% sobre R$ 850.000,00)"
+ *   spread antigo: "Spread (a comissão da casa sai da diferença sobre a proposta)"
+ * No spread novo, "sobre" é o valor que a pessoa digitou (a final + a
+ * comissão): sem ele, a IA tomaria os 5% como sobre a final.
+ */
 function textoDaComissao(c: CotacaoLida | null): string {
-  if (!c?.comissao) return ''
-  return c.comissao.modalidade === 'spread'
-    ? 'Spread (a comissão da casa sai da diferença sobre a proposta)'
-    : `${formatarReais(c.comissao.centavos)} (limitada)`
+  const k = c?.comissao
+  if (!k) return ''
+  if (k.modalidade === 'limitada') return `${formatarReais(k.centavos)} (limitada)`
+  const pct = k.percentualCentesimos !== undefined ? `${formatarPercentual(k.percentualCentesimos)}%` : null
+  if (k.centavos !== undefined && c.proposta !== null) {
+    const sobre = formatarReais(c.proposta + k.centavos)
+    return `${formatarReais(k.centavos)} (spread${pct ? ` de ${pct}` : ''} sobre ${sobre})`
+  }
+  return pct
+    ? `Spread de ${pct} sobre a proposta (a comissão da casa sai dela)`
+    : 'Spread (a comissão da casa sai da diferença sobre a proposta)'
+}
+
+/**
+ * UMA LINHA DE {{cotacoes_recebidas}}: o texto do campo como está, e — no
+ * spread do formato novo — a conta por extenso, para a IA não ler a comissão
+ * como limitada nem os 5% como sobre a final.
+ */
+function linhaDaCotacao(fundo: string, c: CotacaoLida): string {
+  const k = c.comissao
+  if (k?.modalidade === 'spread' && k.centavos !== undefined && c.proposta !== null) {
+    return `  - ${fundo}: proposta final ${formatarReais(c.proposta)}, comissão ${textoDaComissao(c)}`
+  }
+  return `  - ${fundo}: ${c.texto}`
 }
 
 /** A data de hoje em Brasília, dd/mm/aaaa. */
@@ -417,7 +450,7 @@ export function valoresDoCard(card: CardDaJustificativa, extras: ExtrasDaJustifi
   for (const f of FUNDOS_DA_PRECIFICACAO) {
     const c = cotacoes[f]
     if (c) {
-      linhas.push(`  - ${f}: ${c.texto}`)
+      linhas.push(linhaDaCotacao(f, c))
       continue
     }
     if (tags.some((t) => mesmaEtiqueta(t, `Reprovado ${f}`))) linhas.push(`  - ${f}: reprovou o crédito`)

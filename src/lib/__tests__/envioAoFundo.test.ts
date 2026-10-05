@@ -18,7 +18,7 @@ const REPROVADO_BTG = ato(btg, 'Reprovado BTG')
 const ENVIADO_PJUS = ato(pjus, 'Enviado PJus')
 
 const LIMITADA: Cotacao = { propostaCentavos: 85_000_000, comissao: { modalidade: 'limitada', centavos: 4_000_000 } }
-const SPREAD: Cotacao = { propostaCentavos: 123_456_789, comissao: { modalidade: 'spread' } }
+const SPREAD: Cotacao = { propostaCentavos: 85_000_000, comissao: { modalidade: 'spread', percentualCentesimos: 500 } }
 
 /** Passos de mentira que anotam a ordem em que foram chamados. */
 function passosFalsos(o: {
@@ -84,11 +84,27 @@ describe('registrarEnvioAoFundo — "Cotado BTG" com a cotação', () => {
     ])
   })
 
-  it('com Spread, o texto é "R$ … / Spread"; faltando a PJus, o card não se move', async () => {
+  it('com Spread, o texto é "final / comissão (Spread de P%)"; faltando a PJus, o card não se move', async () => {
     const f = passosFalsos({ tagsDepois: ['Cotado BTG'] })
     const r = await registrarEnvioAoFundo({ ...base, fundo: 'BTG', ato: COTADO_BTG, cotacao: SPREAD, passos: f.passos })
     expect(f.chamadas).toEqual(['anotar', 'etiquetar'])
-    expect(r).toEqual({ tags: ['Cotado BTG'], cotacao: 'R$ 1.234.567,89 / Spread', movido: false, faltamFundos: true })
+    expect(f.cotacoesEnviadas).toEqual([SPREAD])
+    expect(r).toEqual({
+      tags: ['Cotado BTG'],
+      cotacao: 'R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)',
+      movido: false,
+      faltamFundos: true,
+    })
+  })
+
+  it('a tela nova não manda spread SEM percentual (só a aba antiga o manda, e o servidor ainda o aceita)', async () => {
+    const f = passosFalsos({ tagsDepois: ['Cotado BTG'] })
+    await expect(
+      registrarEnvioAoFundo({
+        ...base, fundo: 'BTG', ato: COTADO_BTG, cotacao: { propostaCentavos: 100, comissao: { modalidade: 'spread' } }, passos: f.passos,
+      }),
+    ).rejects.toThrow(/informe o percentual. Nada foi enviado ao Kommo/)
+    expect(f.chamadas).toEqual([])
   })
 
   it('SEM A COTAÇÃO (ou incompleta), nada vai ao Kommo — nem a anotação', async () => {

@@ -7,9 +7,19 @@
 // campos de volta, para comparar os fundos lado a lado.
 //
 // O TEXTO DO CAMPO É EXATAMENTE
-//   "R$ 850.000,00 / R$ 40.000,00"   (proposta / comissão limitada)
-//   "R$ 850.000,00 / Spread"         (a casa desconta o que puder da proposta)
-// com espaço comum depois do "R$" — e não o espaço inseparável do
+//   "R$ 850.000,00 / R$ 40.000,00"               (proposta / comissão limitada)
+//   "R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)" (proposta final / comissão, no spread)
+// No SPREAD (pedido do dono, 05/10/2026, à tarde), a pessoa digita o valor da
+// proposta (R$ 850.000,00) e o percentual (5%); a comissão é o percentual sobre
+// o valor (R$ 42.500,00) e a proposta final é o que sobra (R$ 807.500,00). QUEM
+// CALCULA É ESTE MÓDULO (`calcularSpread`), na prévia da tela e no servidor: a
+// `kommo-etiquetar` recebe valor e percentual e escreve o texto ela mesma.
+//
+// O FORMATO ANTERIOR do spread, "R$ 850.000,00 / Spread" (sem percentual), é o
+// que ainda grava uma aba aberta antes da mudança, e continua lido: ali o valor
+// é o da proposta, e a comissão não tem número.
+//
+// Sempre com espaço comum depois do "R$" — e não o espaço inseparável do
 // `toLocaleString`, que no Kommo parece igual e não é: quem buscar "R$ 850" lá
 // dentro não acharia. Por isso a formatação é feita à mão, em centavos inteiros
 // (sem vírgula flutuante no caminho do dinheiro).
@@ -102,24 +112,136 @@ export function lerReais(texto: unknown): number | null {
   return Math.round(centavos)
 }
 
+// ------------------------------------------------------------------ percentual
+
+/**
+ * O PERCENTUAL DO SPREAD EM CENTÉSIMOS DE PONTO, inteiro: 5% = 500, 5,5% = 550,
+ * 12,25% = 1225. Inteiro pelo mesmo motivo do dinheiro em centavos — a conta
+ * da comissão não passa por ponto flutuante.
+ */
+const PERCENTUAL_MINIMO = 1 // 0,01%
+const PERCENTUAL_MAXIMO = 9_999 // 99,99%
+
+/** O percentual que chegou é um inteiro de 0,01% a 99,99%? */
+export const percentualValido = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n >= PERCENTUAL_MINIMO && n <= PERCENTUAL_MAXIMO
+
+/** O que a pessoa digitou no campo do percentual, lido. */
+export type PercentualLido =
+  | { ok: true; centesimos: number }
+  | { ok: false; motivo: 'vazio' | 'formato' | 'casas' | 'zero' | 'teto'; erro: string }
+
+/**
+ * LÊ O PERCENTUAL DIGITADO: "5", "5,5", "12,25" (vírgula decimal, até duas
+ * casas). Tolera o "%" no fim, espaços e o ponto no lugar da vírgula ("5.5").
+ * Maior que 0 e menor que 100; fora disso, o erro diz por quê.
+ */
+export function lerPercentual(texto: unknown): PercentualLido {
+  const s = String(texto ?? '')
+    .replace(/[\s%]+/g, '')
+    .replace('.', ',')
+  if (!s) return { ok: false, motivo: 'vazio', erro: 'Informe o percentual do spread.' }
+  const m = s.match(/^(\d+)(?:,(\d{0,2}))?$/)
+  if (!m) {
+    return /^\d+,\d{3,}$/.test(s)
+      ? { ok: false, motivo: 'casas', erro: 'O percentual aceita no máximo duas casas depois da vírgula.' }
+      : { ok: false, motivo: 'formato', erro: 'Digite o percentual só com números e vírgula (por exemplo, 5 ou 5,5).' }
+  }
+  const inteiro = Number(m[1])
+  const centesimos = inteiro * 100 + Number((m[2] ?? '').padEnd(2, '0'))
+  if (inteiro >= 100) return { ok: false, motivo: 'teto', erro: 'O percentual precisa ser menor que 100.' }
+  if (centesimos < PERCENTUAL_MINIMO) return { ok: false, motivo: 'zero', erro: 'O percentual precisa ser maior que 0.' }
+  return { ok: true, centesimos }
+}
+
+/** "5", "5,5", "12,25", "0,05" — sem zeros à toa, com vírgula (sem o "%"). */
+export function formatarPercentual(centesimos: number): string {
+  const inteiro = Math.floor(centesimos / 100)
+  const fracao = String(centesimos % 100).padStart(2, '0').replace(/0+$/, '')
+  return fracao ? `${inteiro},${fracao}` : String(inteiro)
+}
+
+/**
+ * A CONTA DO SPREAD, em centavos inteiros:
+ *   comissão = valor × percentual / 100, arredondada ao centavo (meio para cima);
+ *   proposta final = valor − comissão.
+ *
+ * SEM PONTO FLUTUANTE E SEM ESTOURO: valor × centésimos passaria de 2^53 perto
+ * do teto (R$ 1 trilhão × 9.999), então o valor é partido em q·10.000 + r e a
+ * conta é feita por partes — q·p é exato e só r·p (< 10^8) é arredondado.
+ */
+export function calcularSpread(
+  propostaCentavos: number,
+  percentualCentesimos: number,
+): { comissaoCentavos: number; finalCentavos: number } {
+  const q = Math.floor(propostaCentavos / 10_000)
+  const r = propostaCentavos % 10_000
+  const comissaoCentavos = q * percentualCentesimos + Math.floor((r * percentualCentesimos + 5_000) / 10_000)
+  return { comissaoCentavos, finalCentavos: propostaCentavos - comissaoCentavos }
+}
+
 // ------------------------------------------------------------------ cotação
 
 /**
  * A COMISSÃO, em duas modalidades:
  *   - LIMITADA: o fundo já diz quanto aceita pagar de comissão, em reais;
- *   - SPREAD: a casa desconta o que puder do valor da proposta — não há valor.
+ *   - SPREAD: a casa desconta a comissão do valor da proposta, a um percentual
+ *     (`percentualCentesimos`: 5% = 500). SEM o percentual é o spread da tela
+ *     anterior a 05/10/2026 (uma aba aberta antes do deploy): o servidor ainda
+ *     o aceita e grava "R$ X / Spread".
  */
-export type Comissao = { modalidade: 'limitada'; centavos: number } | { modalidade: 'spread' }
+export type Comissao =
+  | { modalidade: 'limitada'; centavos: number }
+  | { modalidade: 'spread'; percentualCentesimos?: number }
 
+/**
+ * A COTAÇÃO COMO A PESSOA A DIGITOU: no spread, `propostaCentavos` é o valor
+ * da proposta ANTES da comissão (R$ 850.000,00), e o texto do campo traz a
+ * proposta final (R$ 807.500,00).
+ */
 export interface Cotacao {
   propostaCentavos: number
   comissao: Comissao
 }
 
-/** O texto do campo do fundo no Kommo: "R$ 850.000,00 / R$ 40.000,00" ou "R$ 850.000,00 / Spread". */
+/** A conta do spread desta cotação, ou null (limitada, ou spread sem percentual). */
+export function spreadDaCotacao(
+  c: Cotacao,
+): { percentualCentesimos: number; comissaoCentavos: number; finalCentavos: number } | null {
+  if (c.comissao.modalidade !== 'spread' || c.comissao.percentualCentesimos === undefined) return null
+  const p = c.comissao.percentualCentesimos
+  return { percentualCentesimos: p, ...calcularSpread(c.propostaCentavos, p) }
+}
+
+/**
+ * O texto do campo do fundo no Kommo:
+ *   "R$ 850.000,00 / R$ 40.000,00"                 (limitada)
+ *   "R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)"  (spread: final / comissão)
+ *   "R$ 850.000,00 / Spread"                       (spread sem percentual, da tela antiga)
+ */
 export function textoDaCotacao(c: Cotacao): string {
-  const comissao = c.comissao.modalidade === 'spread' ? 'Spread' : formatarReais(c.comissao.centavos)
-  return `${formatarReais(c.propostaCentavos)} / ${comissao}`
+  if (c.comissao.modalidade === 'limitada') {
+    return `${formatarReais(c.propostaCentavos)} / ${formatarReais(c.comissao.centavos)}`
+  }
+  const s = spreadDaCotacao(c)
+  if (!s) return `${formatarReais(c.propostaCentavos)} / Spread`
+  return (
+    `${formatarReais(s.finalCentavos)} / ${formatarReais(s.comissaoCentavos)} ` +
+    `(Spread de ${formatarPercentual(s.percentualCentesimos)}%)`
+  )
+}
+
+/**
+ * O RESUMO DA CONTA, para a prévia da janela:
+ * "Comissão (5%): R$ 42.500,00 · Proposta final: R$ 807.500,00" — ou null fora do spread.
+ */
+export function resumoDoSpread(c: Cotacao): { comissao: string; final: string } | null {
+  const s = spreadDaCotacao(c)
+  if (!s) return null
+  return {
+    comissao: `Comissão (${formatarPercentual(s.percentualCentesimos)}%): ${formatarReais(s.comissaoCentavos)}`,
+    final: `Proposta final: ${formatarReais(s.finalCentavos)}`,
+  }
 }
 
 const centavosValidos = (n: unknown): n is number =>
@@ -130,15 +252,50 @@ const centavosValidos = (n: unknown): n is number =>
  *
  * EM CENTAVOS INTEIROS, e não em reais com casas: 0,1 + 0,2 não é 0,3 em ponto
  * flutuante, e um centavo a mais no card é um centavo que ninguém digitou.
+ *
+ * O SPREAD SEM PERCENTUAL é aceito por padrão — é o que manda uma aba aberta
+ * antes de 05/10/2026, e recusá-lo quebraria o "Cotado" de quem está com ela
+ * aberta. A tela nova pede `exigirPercentualNoSpread` (e já não deixa enviar
+ * sem ele). Percentual PRESENTE e fora da faixa é sempre recusado: é a tela
+ * nova com um valor errado, não a antiga.
  */
-export function validarCotacao(x: unknown): { ok: true; cotacao: Cotacao } | { ok: false; erro: string } {
-  const c = (x ?? {}) as { propostaCentavos?: unknown; comissao?: { modalidade?: unknown; centavos?: unknown } }
+export function validarCotacao(
+  x: unknown,
+  opcoes: { exigirPercentualNoSpread?: boolean } = {},
+): { ok: true; cotacao: Cotacao } | { ok: false; erro: string } {
+  const c = (x ?? {}) as {
+    propostaCentavos?: unknown
+    comissao?: { modalidade?: unknown; centavos?: unknown; percentualCentesimos?: unknown }
+  }
   if (!centavosValidos(c.propostaCentavos)) {
     return { ok: false, erro: 'Informe o valor da proposta (em reais, maior que zero).' }
   }
   const m = c.comissao?.modalidade
   if (m === 'spread') {
-    return { ok: true, cotacao: { propostaCentavos: c.propostaCentavos, comissao: { modalidade: 'spread' } } }
+    const p = c.comissao?.percentualCentesimos
+    if (p === undefined || p === null) {
+      if (opcoes.exigirPercentualNoSpread) {
+        return { ok: false, erro: 'Com a comissão em spread, informe o percentual.' }
+      }
+      return { ok: true, cotacao: { propostaCentavos: c.propostaCentavos, comissao: { modalidade: 'spread' } } }
+    }
+    if (!percentualValido(p)) {
+      return {
+        ok: false,
+        erro: 'O percentual do spread precisa ser maior que 0 e menor que 100, com até duas casas depois da vírgula.',
+      }
+    }
+    const conta = calcularSpread(c.propostaCentavos, p)
+    if (conta.comissaoCentavos < 1 || conta.finalCentavos < 1) {
+      return {
+        ok: false,
+        erro: 'Com esse valor e esse percentual, a comissão ou a proposta final daria menos de um centavo.',
+      }
+    }
+    return {
+      ok: true,
+      cotacao: { propostaCentavos: c.propostaCentavos, comissao: { modalidade: 'spread', percentualCentesimos: p } },
+    }
   }
   if (m === 'limitada') {
     if (!centavosValidos(c.comissao?.centavos)) {
@@ -155,20 +312,59 @@ export function validarCotacao(x: unknown): { ok: true; cotacao: Cotacao } | { o
   return { ok: false, erro: 'A comissão precisa ser "limitada" ou "spread".' }
 }
 
+/**
+ * A comissão como se LÊ do campo. No spread, além do percentual (quando o texto
+ * o diz), `centavos` é a comissão em reais do FORMATO NOVO
+ * ("R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)"): com ela, a `proposta` lida é
+ * a FINAL, e o valor que a pessoa digitou é proposta + comissão
+ * (`valorDigitadoDaCotacao`). Sem ela ("R$ 850.000,00 / Spread"), a `proposta`
+ * é o valor da proposta, como sempre foi.
+ */
+export type ComissaoLida =
+  | { modalidade: 'limitada'; centavos: number }
+  | { modalidade: 'spread'; percentualCentesimos?: number; centavos?: number }
+
 /** O que se leu de um campo de cotação: os números, quando se leem, e o texto como está. */
 export interface CotacaoLida {
   /** O texto do campo, como está no Kommo (aparado). */
   texto: string
-  /** A proposta em centavos, ou null se o texto não a diz com segurança. */
+  /**
+   * A proposta em centavos, ou null se o texto não a diz com segurança. No
+   * spread do formato novo, é a proposta FINAL (já sem a comissão).
+   */
   proposta: number | null
   /** A comissão, ou null se o texto não a diz. */
-  comissao: Comissao | null
+  comissao: ComissaoLida | null
+}
+
+/**
+ * O VALOR QUE A PESSOA DIGITOU, de volta: no spread do formato novo, a final
+ * mais a comissão (R$ 807.500,00 + R$ 42.500,00 = R$ 850.000,00); nos outros,
+ * a proposta como está. É o que pré-preenche a janela ao recotar.
+ */
+export function valorDigitadoDaCotacao(l: CotacaoLida | null): number | null {
+  if (!l || l.proposta === null) return null
+  if (l.comissao?.modalidade === 'spread' && l.comissao.centavos !== undefined) {
+    return l.proposta + l.comissao.centavos
+  }
+  return l.proposta
 }
 
 /** Os rótulos que alguém pode ter escrito antes do número, no Kommo. */
 const ROTULO = /^(?:proposta|valor(?:\s+da\s+proposta)?|comissao|com\.?|cotacao)\s*[:=-]?\s*/
 
 const semAcento = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+
+/** O percentual escrito num pedaço de texto ("(Spread de 5,5%)", "spread 5%"), em centésimos. */
+function percentualNoTexto(s: string): number | undefined {
+  const m = s.match(/(\d{1,3}(?:[.,]\d+)?)\s*%/)
+  if (!m) return undefined
+  const p = lerPercentual(m[1])
+  return p.ok ? p.centesimos : undefined
+}
+
+/** O que vem ANTES do "spread" ou do parêntese: "R$ 42.500,00 (Spread de 5%)" → "r$ 42.500,00". */
+const antesDoSpread = (s: string) => semAcento(s).split(/\(|\bspread\b/)[0]
 
 /**
  * LÊ DE VOLTA o texto do campo do fundo — o que a plataforma gravou e o que
@@ -177,6 +373,13 @@ const semAcento = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
  * Devolve null para o campo vazio (inclusive o "..." que o Kommo mostra em campo
  * sem valor, se alguém o digitar). Com texto, devolve sempre o texto, e os
  * números só quando se leem: "proposta boa, ligar" fica como texto, sem valor.
+ *
+ * OS TRÊS FORMATOS DA PLATAFORMA:
+ *   "R$ 850.000,00 / R$ 40.000,00"                → limitada
+ *   "R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)" → spread novo: a final, a comissão e o percentual
+ *   "R$ 850.000,00 / Spread"                      → spread antigo: o valor, sem comissão
+ * E, à mão, as variações: "807.500 / 42.500 spread 5%", "850 mil / spread de 5%"
+ * (percentual sem a comissão em reais: o valor é o da proposta, como no antigo).
  */
 export function lerCotacao(texto: unknown): CotacaoLida | null {
   const bruto = String(texto ?? '').replace(/\s+/g, ' ').trim()
@@ -190,18 +393,29 @@ export function lerCotacao(texto: unknown): CotacaoLida | null {
   const limpa = (s: string) => semAcento(s).trim().replace(ROTULO, '')
   const temSpread = (s: string) => /\bspread\b/.test(semAcento(s))
 
+  /** O spread de um pedaço: o percentual (se escrito) e a comissão em reais (se escrita antes dele). */
+  const spreadDe = (s: string, comValor: boolean): ComissaoLida => {
+    const percentualCentesimos = percentualNoTexto(s)
+    const c = comValor ? lerReais(limpa(antesDoSpread(s))) : null
+    return {
+      modalidade: 'spread',
+      ...(percentualCentesimos !== undefined ? { percentualCentesimos } : {}),
+      ...(c !== null && c > 0 ? { centavos: c } : {}),
+    }
+  }
+
   let proposta = lerReais(limpa(p1))
-  let comissao: Comissao | null = null
+  let comissao: ComissaoLida | null = null
   if (resto.length > 0) {
-    if (temSpread(p2)) comissao = { modalidade: 'spread' }
+    if (temSpread(p2)) comissao = spreadDe(p2, true)
     else {
       const c = lerReais(limpa(p2))
       if (c !== null && c > 0) comissao = { modalidade: 'limitada', centavos: c }
     }
   } else if (temSpread(p1)) {
-    // "850 mil spread", sem separador.
-    comissao = { modalidade: 'spread' }
-    proposta = lerReais(limpa(semAcento(p1).replace(/\bspread\b/, '')))
+    // "850 mil spread", sem separador: o número antes do "spread" é a proposta.
+    comissao = spreadDe(p1, false)
+    proposta = lerReais(limpa(antesDoSpread(p1)))
   }
   if (proposta !== null && proposta <= 0) proposta = null
   return { texto: bruto, proposta, comissao }

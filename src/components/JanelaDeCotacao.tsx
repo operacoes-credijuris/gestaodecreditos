@@ -1,4 +1,4 @@
-import { useId, useState, type ClipboardEvent } from 'react'
+import { useId, useState, type ClipboardEvent, type KeyboardEvent } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
@@ -8,10 +8,15 @@ import {
   type Comissao,
   type Cotacao,
   type CotacaoLida,
+  formatarPercentual,
   formatarReaisSemPrefixo,
+  lerPercentual,
   lerReais,
   NOME_DO_GRUPO_DAS_COTACOES,
+  resumoDoSpread,
   textoDaCotacao,
+  validarCotacao,
+  valorDigitadoDaCotacao,
 } from '../../supabase/functions/_shared/cotacaoDoFundo.ts'
 
 /** Até R$ 1 trilhão: 15 dígitos de centavos. Além disso é tecla presa. */
@@ -34,12 +39,15 @@ function CampoReais({
   onMudar,
   onColagemRecusada,
   rotulo,
+  onEnter,
 }: {
   valor: number | null
   onMudar: (centavos: number | null) => void
   onColagemRecusada: (texto: string) => void
   /** Para o leitor de tela, quando o rótulo visível não é deste campo. */
   rotulo?: string
+  /** Enter envia, na janela que não é formulário (ver `teclaEnter`). */
+  onEnter?: () => void
 }) {
   function colar(e: ClipboardEvent<HTMLInputElement>) {
     const texto = e.clipboardData.getData('text')
@@ -59,6 +67,7 @@ function CampoReais({
         className="pl-[44px] text-right tabular-nums"
         value={valor === null ? '' : formatarReaisSemPrefixo(valor)}
         onPaste={colar}
+        onKeyDown={teclaEnter(onEnter)}
         onChange={(e) => {
           const d = onlyDigits(e.target.value).replace(/^0+/, '')
           if (d.length > MAX_DIGITOS) return
@@ -69,44 +78,148 @@ function CampoReais({
   )
 }
 
-type Modalidade = Comissao['modalidade']
+/**
+ * O CAMPO DO PERCENTUAL DO SPREAD: o número à direita e o "%" fixo dentro do
+ * campo — o espelho do `CampoReais`, com a mesma altura (36px) e o mesmo
+ * alinhamento dos números.
+ *
+ * DIGITANDO, só entram algarismos e UMA vírgula, com até duas casas depois
+ * dela ("5", "5,5", "12,25"); o ponto vira vírgula e o "%" digitado é
+ * ignorado (o sufixo já está ali). Até três algarismos inteiros, para que
+ * "100" apareça e o campo diga que passou — em vez de a tecla sumir calada.
+ *
+ * COLANDO, o texto é lido (`lerPercentual`): "5,5%" e "5.5" entram como 5,5; o
+ * que não se lê fica de fora, com o motivo.
+ */
+function CampoPercentual({
+  valor,
+  onMudar,
+  onColagemRecusada,
+  rotulo,
+  onEnter,
+}: {
+  valor: string
+  onMudar: (texto: string) => void
+  onColagemRecusada: (texto: string, erro: string) => void
+  rotulo: string
+  onEnter?: () => void
+}) {
+  function colar(e: ClipboardEvent<HTMLInputElement>) {
+    const texto = e.clipboardData.getData('text')
+    e.preventDefault()
+    const p = lerPercentual(texto)
+    if (p.ok) onMudar(formatarPercentual(p.centesimos))
+    else onColagemRecusada(texto, p.erro)
+  }
+  return (
+    <div className="relative">
+      <Input
+        inputMode="decimal"
+        autoComplete="off"
+        placeholder="0"
+        aria-label={rotulo}
+        className="pr-[34px] text-right tabular-nums"
+        value={valor}
+        onPaste={colar}
+        onKeyDown={teclaEnter(onEnter)}
+        onChange={(e) => {
+          const t = e.target.value.replace(/\./g, ',').replace(/[^\d,]/g, '')
+          if (!/^\d{0,3}(,\d{0,2})?$/.test(t)) return
+          onMudar(t)
+        }}
+      />
+      <span className="pointer-events-none absolute right-s4 top-1/2 -translate-y-1/2 text-corpo text-texto-2">%</span>
+    </div>
+  )
+}
 
 /**
- * O ESTADO DOS CAMPOS DA COTAÇÃO — valor da proposta, modalidade e valor da
- * comissão —, começando do que o campo do fundo já tem no card.
+ * ENTER NUM CAMPO DA COTAÇÃO ENVIA, quando a janela não é um formulário (a do
+ * envio ao BTG, que tem dois atos no rodapé: o Enter é o "Cotado"). Na janela
+ * da cotação o `<form>` já faz isso, e `onEnter` não vem.
+ */
+const teclaEnter = (onEnter?: () => void) =>
+  onEnter
+    ? (e: KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+          e.preventDefault()
+          onEnter()
+        }
+      }
+    : undefined
+
+type Modalidade = Comissao['modalidade']
+
+type CampoDaCotacao = 'proposta' | 'comissao' | 'percentual'
+
+/**
+ * O ESTADO DOS CAMPOS DA COTAÇÃO — valor da proposta, modalidade, valor da
+ * comissão (limitada) e percentual (spread) —, começando do que o campo do
+ * fundo já tem no card.
  *
  * À PARTE DA JANELA porque são duas as janelas que pedem a cotação: esta (o
  * "Cotado ‹fundo›" da Em precificação) e a do envio ao BTG, na Remessa aos
  * fundos (05/10/2026), onde a plataforma do BTG devolve a cotação na hora. As
  * duas usam este estado e os `CamposDaCotacao`, e o texto que vai ao Kommo sai
  * de um lugar só (`textoDaCotacao`).
+ *
+ * O VALOR PRÉ-PREENCHIDO é o que a pessoa digitou da outra vez: no spread do
+ * formato novo, a final mais a comissão (`valorDigitadoDaCotacao`), e o
+ * percentual de volta no campo. O spread antigo (sem percentual) volta com o
+ * percentual vazio — e obrigatório.
+ *
+ * A COTAÇÃO SÓ SAI PRONTA DEPOIS DA MESMA PORTA DO SERVIDOR (`validarCotacao`,
+ * exigindo o percentual no spread): a tela não monta o que a função recusaria.
  */
 export function useCotacaoEmEdicao(atual: CotacaoLida | null) {
+  const c0 = atual?.comissao ?? null
   const inicial = {
-    proposta: atual?.proposta ?? null,
-    modalidade: (atual?.comissao?.modalidade ?? 'limitada') as Modalidade,
-    comissao: atual?.comissao?.modalidade === 'limitada' ? atual.comissao.centavos : null,
+    proposta: valorDigitadoDaCotacao(atual),
+    modalidade: (c0?.modalidade ?? 'limitada') as Modalidade,
+    comissao: c0?.modalidade === 'limitada' ? c0.centavos : null,
+    percentual:
+      c0?.modalidade === 'spread' && c0.percentualCentesimos !== undefined
+        ? formatarPercentual(c0.percentualCentesimos)
+        : '',
   }
   const [proposta, setProposta] = useState<number | null>(inicial.proposta)
   const [modalidade, setModalidade] = useState<Modalidade>(inicial.modalidade)
   const [comissao, setComissao] = useState<number | null>(inicial.comissao)
-  const [colagem, setColagem] = useState<{ campo: 'proposta' | 'comissao'; texto: string } | null>(null)
+  const [percentual, setPercentual] = useState<string>(inicial.percentual)
+  const [colagem, setColagem] = useState<{ campo: CampoDaCotacao; texto: string; erro?: string } | null>(null)
 
   const sujo =
     proposta !== inicial.proposta ||
     modalidade !== inicial.modalidade ||
-    (modalidade === 'limitada' && comissao !== inicial.comissao)
+    (modalidade === 'limitada' && comissao !== inicial.comissao) ||
+    (modalidade === 'spread' && percentual !== inicial.percentual)
 
+  const pct = lerPercentual(percentual)
   const faltaProposta = !proposta
   const faltaComissao = modalidade === 'limitada' && !comissao
-  /** A cotação completa, ou null enquanto falta um valor obrigatório. */
-  const cotacao: Cotacao | null =
-    faltaProposta || faltaComissao
-      ? null
-      : {
-          propostaCentavos: proposta!,
-          comissao: modalidade === 'spread' ? { modalidade: 'spread' } : { modalidade: 'limitada', centavos: comissao! },
-        }
+  const faltaPercentual = modalidade === 'spread' && !pct.ok && pct.motivo === 'vazio'
+  /** O percentual digitado e inválido (fora de 0–100, casas a mais), com o motivo. */
+  const erroDoPercentual =
+    modalidade === 'spread' && !pct.ok && pct.motivo !== 'vazio' ? { motivo: pct.motivo, erro: pct.erro } : null
+
+  /** A cotação completa e conferida, ou null enquanto falta ou sobra algo. */
+  let cotacao: Cotacao | null = null
+  /** O que a porta do servidor recusou com tudo preenchido (valor pequeno demais para o percentual). */
+  let erroDaConta: string | null = null
+  if (!faltaProposta && !faltaComissao && !faltaPercentual && !erroDoPercentual) {
+    const v = validarCotacao(
+      {
+        propostaCentavos: proposta,
+        comissao:
+          modalidade === 'spread'
+            ? { modalidade: 'spread', percentualCentesimos: pct.ok ? pct.centesimos : undefined }
+            : { modalidade: 'limitada', centavos: comissao },
+      },
+      { exigirPercentualNoSpread: true },
+    )
+    if (v.ok) cotacao = v.cotacao
+    else erroDaConta = v.erro
+  }
 
   // O texto antigo de um campo escrito à mão, que não se leu como valor: fica à
   // vista, para a pessoa saber o que vai sobrescrever.
@@ -119,11 +232,16 @@ export function useCotacaoEmEdicao(atual: CotacaoLida | null) {
     setModalidade,
     comissao,
     setComissao,
+    percentual,
+    setPercentual,
     colagem,
     setColagem,
     sujo,
     faltaProposta,
     faltaComissao,
+    faltaPercentual,
+    erroDoPercentual,
+    erroDaConta,
     cotacao,
     textoIlegivel,
   }
@@ -132,23 +250,46 @@ export function useCotacaoEmEdicao(atual: CotacaoLida | null) {
 export type CotacaoEmEdicao = ReturnType<typeof useCotacaoEmEdicao>
 
 /**
+ * O TEXTO DO CAMPO NA PRÉVIA, quebrando só na barra: "R$ 807.500,00 /" e
+ * "R$ 42.500,00 (Spread de 5%)" ficam inteiros cada um, e no celular o
+ * segundo desce para a linha de baixo em vez de partir o "R$" do número. Os
+ * espaços continuam os comuns: copiado da tela, é o texto exato do Kommo.
+ */
+function TextoQuebrandoNaBarra({ texto }: { texto: string }) {
+  return (
+    <>
+      {texto.split(' / ').map((p, i) => (
+        <span key={i}>
+          {i > 0 && ' / '}
+          <span className="whitespace-nowrap">{p}</span>
+        </span>
+      ))}
+    </>
+  )
+}
+
+/**
  * OS CAMPOS DA COTAÇÃO: o valor da proposta, a comissão (Limitada, em R$, ou
- * Spread) e, embaixo, o texto exato que vai para o campo do fundo no Kommo.
+ * Spread, em %) e, embaixo, o texto exato que vai para o campo do fundo no
+ * Kommo — no spread, com a conta à vista (a comissão e a proposta final).
  *
  * `tentou` acende os avisos de obrigatório — depois do primeiro envio, e não
  * enquanto a pessoa ainda está preenchendo. `desligado` trava tudo enquanto a
- * gravação corre.
+ * gravação corre. `onEnter` faz o Enter dos campos enviar, na janela que não é
+ * um formulário (ver `teclaEnter`).
  */
 export function CamposDaCotacao({
   edicao,
   fundo,
   tentou,
   desligado = false,
+  onEnter,
 }: {
   edicao: CotacaoEmEdicao
   fundo: string
   tentou: boolean
   desligado?: boolean
+  onEnter?: () => void
 }) {
   const {
     proposta,
@@ -157,18 +298,35 @@ export function CamposDaCotacao({
     setModalidade,
     comissao,
     setComissao,
+    percentual,
+    setPercentual,
     colagem,
     setColagem,
     faltaProposta,
     faltaComissao,
+    faltaPercentual,
+    erroDoPercentual,
+    erroDaConta,
     cotacao,
     textoIlegivel,
   } = edicao
 
-  const avisoDeColagem = (campo: 'proposta' | 'comissao') =>
+  const avisoDeColagem = (campo: CampoDaCotacao) =>
     colagem?.campo === campo
-      ? `Não reconheci "${colagem.texto.slice(0, 40)}" como valor em reais. Digite o número.`
+      ? colagem.erro
+        ? `Não colei "${colagem.texto.slice(0, 40)}": ${colagem.erro.charAt(0).toLowerCase()}${colagem.erro.slice(1)}`
+        : `Não reconheci "${colagem.texto.slice(0, 40)}" como valor em reais. Digite o número.`
       : null
+
+  // O PERCENTUAL FORA DA FAIXA aparece na hora em que passa de 99 ("100"); o
+  // zero só depois do envio, porque "0" e "0," são o começo de "0,5".
+  const avisoDoPercentual =
+    avisoDeColagem('percentual') ??
+    (erroDoPercentual && (tentou || erroDoPercentual.motivo === 'teto') ? erroDoPercentual.erro : null) ??
+    (tentou && faltaPercentual ? 'Com a comissão em spread, informe o percentual.' : null) ??
+    (tentou ? erroDaConta : null)
+
+  const resumo = cotacao ? resumoDoSpread(cotacao) : null
 
   return (
     // O FIELDSET trava os campos de uma vez enquanto grava (o `disabled` dele
@@ -192,13 +350,14 @@ export function CamposDaCotacao({
             setProposta(c)
           }}
           onColagemRecusada={(texto) => setColagem({ campo: 'proposta', texto })}
+          onEnter={onEnter}
         />
       </Field>
 
       <div className="space-y-s2">
         <p className="text-corpo font-semibold text-texto">
           Comissão
-          {modalidade === 'limitada' && <span className="ml-s0.5 text-perigo">*</span>}
+          <span className="ml-s0.5 text-perigo">*</span>
         </p>
         <Segmented
           ariaLabel="Modalidade da comissão"
@@ -228,21 +387,48 @@ export function CamposDaCotacao({
                 setComissao(c)
               }}
               onColagemRecusada={(texto) => setColagem({ campo: 'comissao', texto })}
+              onEnter={onEnter}
             />
           </Field>
         ) : (
-          <p className="text-xs text-texto-3">
-            A Credijuris desconta a comissão do valor da proposta; não há valor a informar.
-          </p>
+          <Field
+            hint="O percentual da comissão sobre o valor da proposta. A Credijuris o desconta; o que sobra é a proposta final."
+            error={avisoDoPercentual ?? undefined}
+          >
+            <CampoPercentual
+              rotulo="Percentual do spread"
+              valor={percentual}
+              onMudar={(t) => {
+                setColagem(null)
+                setPercentual(t)
+              }}
+              onColagemRecusada={(texto, erro) => setColagem({ campo: 'percentual', texto, erro })}
+              onEnter={onEnter}
+            />
+          </Field>
         )}
       </div>
 
-      {/* COMO FICA NO KOMMO, letra por letra: é o que o comercial vai ler no card. */}
-      <div className="flex flex-wrap items-baseline justify-between gap-x-s4 gap-y-s1 rounded-campo bg-superficie-2 px-s4 py-s3">
-        <span className="text-xs font-bold uppercase tracking-[0.06em] text-texto-3">No campo {fundo}</span>
-        <span className="whitespace-nowrap text-corpo font-semibold tabular-nums text-texto">
-          {cotacao ? textoDaCotacao(cotacao) : '—'}
-        </span>
+      {/* COMO FICA NO KOMMO, letra por letra: é o que o comercial vai ler no
+          card. No spread, a conta em cima — a comissão e a proposta final. */}
+      <div className="space-y-s1 rounded-campo bg-superficie-2 px-s4 py-s3">
+        {resumo && (
+          // NUMA LINHA com o "·" no computador; no celular, uma em cima da
+          // outra — o "·" pendurado no fim da linha não separa nada.
+          <p className="text-sm tabular-nums text-texto-2">
+            <span className="block whitespace-nowrap sm:inline">{resumo.comissao}</span>
+            <span className="hidden sm:inline" aria-hidden>
+              {' · '}
+            </span>
+            <span className="block whitespace-nowrap sm:inline">{resumo.final}</span>
+          </p>
+        )}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-s4 gap-y-s1">
+          <span className="text-xs font-bold uppercase tracking-[0.06em] text-texto-3">No campo {fundo}</span>
+          <span className="min-w-0 text-right text-corpo font-semibold tabular-nums text-texto">
+            {cotacao ? <TextoQuebrandoNaBarra texto={textoDaCotacao(cotacao)} /> : '—'}
+          </span>
+        </div>
       </div>
     </fieldset>
   )

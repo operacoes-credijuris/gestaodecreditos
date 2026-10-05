@@ -214,6 +214,7 @@ import {
   type Cotacao,
   type CotacaoLida,
   cotacoesDoCard,
+  formatarPercentual,
   formatarReais,
   NOME_DO_GRUPO_DAS_COTACOES,
   type ValorDeCampo,
@@ -1444,10 +1445,30 @@ function SeletorDeEtiquetas({
 }
 
 /**
+ * A linha da comissão, embaixo do valor — limitada, spread novo, spread antigo —
+ * em dois pedaços: o `detalhe` ("(spread 5%)") desce para a linha de baixo
+ * quando a caixa é estreita (celular), em vez de empurrar o nome do fundo.
+ */
+function rotuloDaComissao(c: CotacaoLida['comissao']): { texto: string; detalhe?: string } {
+  if (c === null) return { texto: 'Comissão —' }
+  if (c.modalidade === 'limitada') return { texto: `Comissão ${formatarReais(c.centavos)}` }
+  const pct = c.percentualCentesimos !== undefined ? `${formatarPercentual(c.percentualCentesimos)}%` : null
+  if (c.centavos !== undefined) {
+    return { texto: `Comissão ${formatarReais(c.centavos)}`, detalhe: `(spread${pct ? ` ${pct}` : ''})` }
+  }
+  return pct ? { texto: 'Comissão em spread', detalhe: `(${pct})` } : { texto: 'Comissão em spread' }
+}
+
+/**
  * O VALOR E A COMISSÃO de um fundo, alinhados à direita e em números tabulares:
  * a proposta na linha de cima, a comissão embaixo, em texto secundário. Sem
  * cotação, "—". O que alguém escreveu à mão no Kommo e não se lê como valor
  * aparece como está, cortado, com o texto inteiro no passar do mouse.
+ *
+ * NO SPREAD DO FORMATO NOVO ("R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)"),
+ * em cima vai a proposta FINAL — é o que o cedente recebe, e é o número que se
+ * compara — e embaixo "Comissão R$ 42.500,00 (spread 5%)". O spread antigo,
+ * sem percentual, continua "Comissão em spread".
  */
 function ValoresDaCotacao({ cotacao }: { cotacao: CotacaoLida | null }) {
   if (!cotacao) return <span className="text-corpo tabular-nums text-texto-3">—</span>
@@ -1458,16 +1479,20 @@ function ValoresDaCotacao({ cotacao }: { cotacao: CotacaoLida | null }) {
       </span>
     )
   }
-  const comissao = cotacao.comissao
+  const linha = rotuloDaComissao(cotacao.comissao)
   return (
-    <span className="block whitespace-nowrap text-right tabular-nums">
-      <span className="block text-corpo font-semibold text-texto">{formatarReais(cotacao.proposta)}</span>
+    // NO CELULAR, NO MÁXIMO 160px: o "(spread 5%)" desce, e o "Cotado · há 2
+    // dias" à esquerda não fica por baixo da comissão.
+    <span className="block max-w-[160px] text-right tabular-nums sm:max-w-none">
+      <span className="block whitespace-nowrap text-corpo font-semibold text-texto">{formatarReais(cotacao.proposta)}</span>
       <span className="block text-xs text-texto-2">
-        {comissao === null
-          ? 'Comissão —'
-          : comissao.modalidade === 'spread'
-            ? 'Comissão em spread'
-            : `Comissão ${formatarReais(comissao.centavos)}`}
+        <span className="whitespace-nowrap">{linha.texto}</span>
+        {linha.detalhe && (
+          <>
+            {' '}
+            <span className="whitespace-nowrap">{linha.detalhe}</span>
+          </>
+        )}
       </span>
     </span>
   )
@@ -1577,7 +1602,7 @@ function BotaoEscolherProposta({
                         {f}
                       </span>
                       {s && (
-                        <span className="block whitespace-nowrap text-xs text-texto-3">
+                        <span className="block truncate text-xs text-texto-3">
                           {s.ato}
                           {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
                         </span>
@@ -1954,7 +1979,18 @@ function JanelaDoEnvioAoFundo({
                 {NOME_DO_GRUPO_DAS_COTACOES}”. A reprovação não a usa.
               </p>
             </div>
-            <CamposDaCotacao edicao={cotacao} fundo={fundo.fundo} tentou={tentouCotar} desligado={ocupado} />
+            {/* ENTER NUM CAMPO DA COTAÇÃO é o ato que a pede ("Cotado BTG"):
+                a janela tem dois atos no rodapé, e só este usa os campos. */}
+            <CamposDaCotacao
+              edicao={cotacao}
+              fundo={fundo.fundo}
+              tentou={tentouCotar}
+              desligado={ocupado}
+              onEnter={() => {
+                const ato = fundo.atos.find((a) => a.pedeCotacao)
+                if (ato) void confirmar(ato)
+              }}
+            />
           </section>
           <section aria-labelledby={`${idDaJanela}-anotacao`} className="space-y-s3">
             <h3 id={`${idDaJanela}-anotacao`} className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">

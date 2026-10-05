@@ -36,6 +36,14 @@
 // "Cotações/propostas" do card, NO MESMO PATCH da etiqueta (ver o passo 1). Sem
 // `cotacao`, a função faz exatamente o que fazia — a tela antiga continua só
 // pondo a etiqueta.
+//
+// NO SPREAD (05/10/2026), o valor digitado e o percentual em centésimos (5% = 500):
+//     "cotacao": { "propostaCentavos": 85000000,
+//                  "comissao": { "modalidade": "spread", "percentualCentesimos": 500 } }
+// A FUNÇÃO FAZ A CONTA (`textoDaCotacao`, a mesma da prévia da tela) e grava
+// "R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)" — não recebe texto pronto. O
+// spread SEM `percentualCentesimos` é o da tela anterior (aba aberta antes do
+// deploy): continua aceito e grava o formato antigo, "R$ 850.000,00 / Spread".
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
