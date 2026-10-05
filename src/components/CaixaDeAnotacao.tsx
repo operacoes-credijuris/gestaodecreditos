@@ -91,8 +91,13 @@ export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string)
   const mudarEstado = (chave: string, estado: EstadoDoAnexo) =>
     setAnexos((l) => l.map((a) => (a.chave === chave ? { ...a, estado } : a)))
 
+  // A ANOTAÇÃO DESTA RODADA JÁ ENTROU (o texto, ou a linha de "anexado"): numa
+  // nova tentativa só com os arquivos que falharam, não se escreve outra linha.
+  const textoSubiu = useRef(false)
+
   async function enviar(): Promise<boolean> {
     if (emVoo.current) return false
+    const textoJaNoCard = textoSubiu.current
     if (!texto.trim() && anexos.length === 0) return false
     emVoo.current = true
     setEnviando(true)
@@ -107,6 +112,7 @@ export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string)
         {
           anotar: async (t) => {
             await onEnviarTexto(t)
+            textoSubiu.current = true
             // O TEXTO ENTROU: sai da caixa e do rascunho já, antes dos arquivos.
             // Se um arquivo falhar, enviar de novo não repete a nota.
             setTextoNaTela('')
@@ -123,6 +129,7 @@ export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string)
             ),
         },
         mudarEstado,
+        { textoJaNoCard },
       )
       // O QUE ENTROU SAI DA LISTA; o que falhou fica, com o motivo. Com o texto
       // recusado, nenhum arquivo foi tentado — todos ficam como estavam.
@@ -133,6 +140,7 @@ export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string)
       }
       const resumo = resumoDaAnotacao(r)
       if (resumo.completo) {
+        textoSubiu.current = false
         // O AVISO DO TEXTO é o da página; aqui, só quando houve arquivo.
         if (r.enviados.length) (resumo.tom === 'sucesso' ? toast.success : toast.error)(resumo.texto)
         return true

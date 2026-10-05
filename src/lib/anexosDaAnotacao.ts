@@ -134,6 +134,8 @@ export async function enviarAnotacao(
   anexos: readonly AnexoDaAnotacao[],
   passos: PassosDaAnotacao,
   onEstado: (chave: string, estado: EstadoDoAnexo) => void,
+  /** O texto desta anotação JÁ ENTROU no card numa tentativa anterior: sem a linha de "anexado". */
+  opcoes: { textoJaNoCard?: boolean } = {},
 ): Promise<ResultadoDaAnotacao> {
   const r: ResultadoDaAnotacao = { textoEnviado: false, erroDoTexto: null, enviados: [], falhas: [], avisos: [] }
   const t = texto.trim()
@@ -166,6 +168,18 @@ export async function enviarAnotacao(
       const erro = mensagem(e)
       r.falhas.push({ chave: a.chave, nome: a.arquivo.name, erro })
       onEstado(a.chave, { fase: 'falhou', erro })
+    }
+  }
+  // SÓ ARQUIVO, SEM TEXTO: a nota de arquivo do Kommo não diz quem anexou. Uma
+  // linha de texto com os nomes, DEPOIS dos arquivos e só dos que entraram, leva
+  // o rodapé de quem enviou como toda anotação. Falhar aqui não desfaz nada: os
+  // arquivos já estão no card, e vira aviso.
+  if (!t && !opcoes.textoJaNoCard && r.enviados.length > 0) {
+    const nomes = juntar(r.enviados)
+    try {
+      await passos.anotar(r.enviados.length === 1 ? `Arquivo anexado: ${nomes}.` : `Arquivos anexados: ${nomes}.`)
+    } catch (e) {
+      r.avisos.push(`A linha dizendo quem anexou não subiu (${mensagem(e)}); os arquivos estão no card.`)
     }
   }
   return r

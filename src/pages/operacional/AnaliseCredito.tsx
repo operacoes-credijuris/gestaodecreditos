@@ -739,7 +739,25 @@ const ACAO_DA_ETAPA = 'text-marca-texto hover:bg-marca-leve hover:text-marca-tex
  * conforme a pessoa fosse clicando. Era o mesmo efeito copiado em quatro caixas
  * (anotação, etiquetas, proposta); juntou aqui sem mudar o que ele faz.
  */
+let caixasAbertas = 0
+
 function useFecharFora(aberto: boolean, fechar: () => void, caixa: RefObject<HTMLElement | null>) {
+  // O BOTÃO DO ASSISTENTE SAI DA FRENTE enquanto uma caixa do card está aberta
+  // (05/10/2026): perto do pé da tela ele cobria o "Enviar" da anotação. A caixa
+  // mora dentro da página, e a página não sobe acima do botão flutuante — então
+  // quem cede é o botão (ver `data-caixa-aberta` em Assistente.tsx).
+  useEffect(() => {
+    if (!aberto) return
+    caixasAbertas += 1
+    document.body.dataset.caixaAberta = ''
+    return () => {
+      caixasAbertas -= 1
+      if (caixasAbertas <= 0) {
+        caixasAbertas = 0
+        delete document.body.dataset.caixaAberta
+      }
+    }
+  }, [aberto])
   useEffect(() => {
     if (!aberto) return
     const fora = (e: MouseEvent) => {
@@ -1868,7 +1886,9 @@ function JanelaDoEnvioAoFundo({
           Anexar imagem
         </Button>
         {arquivos.length > 0 && (
-          <ul className="mt-s2 grid gap-s1">
+          // A COLUNA NÃO CRESCE COM O NOME: sem o minmax(0,1fr), um nome longo
+          // alargava a lista e empurrava o X para fora da janela no celular.
+          <ul className="mt-s2 grid grid-cols-[minmax(0,1fr)] gap-s1">
             {arquivos.map((a, i) => (
               <li
                 key={`${a.name}-${i}`}
@@ -1876,12 +1896,12 @@ function JanelaDoEnvioAoFundo({
               >
                 <FileText className="h-[14px] w-[14px] flex-none text-texto-3" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{a.name}</span>
-                <span className="text-xs text-texto-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
+                <span className="shrink-0 whitespace-nowrap text-xs text-texto-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
                 <button
                   type="button"
                   onClick={() => setArquivos((antes) => antes.filter((_, j) => j !== i))}
                   disabled={ocupado}
-                  className="grid h-[26px] w-[26px] place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo"
+                  className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo"
                   aria-label={`Tirar ${a.name}`}
                   title={`Tirar ${a.name}`}
                 >

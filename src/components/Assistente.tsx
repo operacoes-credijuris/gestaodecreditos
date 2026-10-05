@@ -617,7 +617,10 @@ export function Assistente({
           'fixed bottom-s4 right-s4 z-assistente flex h-[48px] w-[48px] items-center justify-center sm:bottom-[20px] sm:right-[20px] sm:h-[56px] sm:w-[56px]',
           // No escuro, o anel claro do nível 2 (§0.4): a sombra sozinha some no fundo.
           'rounded-full bg-gradient-to-br from-marca-viva to-marca-hover text-white shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]',
-          'transition-transform duration-150 hover:scale-105 active:scale-95',
+          'transition-[transform,opacity] duration-150 hover:scale-105 active:scale-95',
+          // Com uma caixa do card aberta (anotação, etiquetas, proposta), o botão
+          // sai da frente — ver useFecharFora na Análise de crédito.
+          '[body[data-caixa-aberta]_&]:pointer-events-none [body[data-caixa-aberta]_&]:opacity-0',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2',
           // O anel de foco vence o anel claro do escuro.
           'dark:focus-visible:ring-2 dark:focus-visible:ring-anel',

@@ -134,11 +134,17 @@ describe('enviarAnotacao — a sequência das chamadas', () => {
     expect(resumoDaAnotacao(r)).toEqual({ completo: true, tom: 'sucesso', texto: '2 arquivos anexados ao card no Kommo.' })
   })
 
-  it('só arquivo, sem texto: a kommo-anotar não é chamada', async () => {
+  // MUDOU DE PROPÓSITO (05/10/2026): só com arquivo, uma linha DEPOIS dos
+  // arquivos diz o que foi anexado — a nota de arquivo do Kommo não diz quem
+  // anexou, e a de texto leva o rodapé de quem enviou.
+  it('só arquivo, sem texto: os arquivos e depois UMA linha com os nomes dos que entraram', async () => {
     const f = passosFalsos()
     const r = await enviarAnotacao('   ', naLista(arq('memorando.pdf')), f.passos, f.onEstado)
-    expect(f.chamadas).toEqual(['anexar:memorando.pdf'])
+    expect(f.chamadas).toEqual(['anexar:memorando.pdf', 'anotar:Arquivo anexado: memorando.pdf.'])
     expect(resumoDaAnotacao(r)).toEqual({ completo: true, tom: 'sucesso', texto: 'Arquivo anexado ao card no Kommo.' })
+    const g = passosFalsos({ falhaArquivo: { 'b.pdf': 'caiu' } })
+    await enviarAnotacao('', naLista(arq('a.pdf'), arq('b.pdf'), arq('c.pdf')), g.passos, g.onEstado)
+    expect(g.chamadas.at(-1)).toBe('anotar:Arquivos anexados: a.pdf e c.pdf.')
   })
 
   it('só texto: como antes, uma chamada', async () => {
@@ -192,7 +198,7 @@ describe('enviarAnotacao — a falha parcial', () => {
     const texto = r1.textoEnviado ? '' : 'Texto'
 
     const g = passosFalsos()
-    const r2 = await enviarAnotacao(texto, sobra, g.passos, g.onEstado)
+    const r2 = await enviarAnotacao(texto, sobra, g.passos, g.onEstado, { textoJaNoCard: r1.textoEnviado })
     expect(g.chamadas).toEqual(['anexar:b.pdf'])
     expect(resumoDaAnotacao(r2)).toEqual({ completo: true, tom: 'sucesso', texto: 'Arquivo anexado ao card no Kommo.' })
   })
