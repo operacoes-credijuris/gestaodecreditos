@@ -95,6 +95,18 @@ export interface AtoDoEnvio {
   nota: string
   /** O fundo recusou o crédito — o botão sai vermelho. */
   reprova?: boolean
+  /**
+   * O ATO TRAZ A COTAÇÃO: a janela do envio pede o valor da proposta e a
+   * comissão (Limitada, em R$, ou Spread), obrigatórios, e o texto vai para o
+   * campo do fundo na aba "Cotações/propostas" do card, no mesmo PATCH da
+   * etiqueta (a `cotacao` da kommo-etiquetar). Só num ato "Cotado ‹fundo›": é o
+   * único a que a kommo-etiquetar aceita juntar a cotação.
+   *
+   * Pedido de 05/10/2026, só para o "Cotado BTG": a plataforma do BTG devolve a
+   * cotação na hora em que o crédito sobe. O "Reprovado BTG" e a PJus seguem
+   * sem valor.
+   */
+  pedeCotacao?: boolean
 }
 
 /** Um fundo com plataforma própria de envio, e os desfechos possíveis dele. */
@@ -563,7 +575,7 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
               artigo: 'o',
               plataforma: 'https://officer.precatoriosbrasil.com/monitor/precatorios/list/new',
               atos: [
-                { etiqueta: 'Cotado BTG', nota: 'Crédito enviado ao BTG.' },
+                { etiqueta: 'Cotado BTG', nota: 'Crédito enviado ao BTG.', pedeCotacao: true },
                 { etiqueta: 'Reprovado BTG', nota: 'Crédito reprovado pelo BTG.', reprova: true },
               ],
             },

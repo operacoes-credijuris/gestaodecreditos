@@ -72,6 +72,183 @@ function CampoReais({
 type Modalidade = Comissao['modalidade']
 
 /**
+ * O ESTADO DOS CAMPOS DA COTAÇÃO — valor da proposta, modalidade e valor da
+ * comissão —, começando do que o campo do fundo já tem no card.
+ *
+ * À PARTE DA JANELA porque são duas as janelas que pedem a cotação: esta (o
+ * "Cotado ‹fundo›" da Em precificação) e a do envio ao BTG, na Remessa aos
+ * fundos (05/10/2026), onde a plataforma do BTG devolve a cotação na hora. As
+ * duas usam este estado e os `CamposDaCotacao`, e o texto que vai ao Kommo sai
+ * de um lugar só (`textoDaCotacao`).
+ */
+export function useCotacaoEmEdicao(atual: CotacaoLida | null) {
+  const inicial = {
+    proposta: atual?.proposta ?? null,
+    modalidade: (atual?.comissao?.modalidade ?? 'limitada') as Modalidade,
+    comissao: atual?.comissao?.modalidade === 'limitada' ? atual.comissao.centavos : null,
+  }
+  const [proposta, setProposta] = useState<number | null>(inicial.proposta)
+  const [modalidade, setModalidade] = useState<Modalidade>(inicial.modalidade)
+  const [comissao, setComissao] = useState<number | null>(inicial.comissao)
+  const [colagem, setColagem] = useState<{ campo: 'proposta' | 'comissao'; texto: string } | null>(null)
+
+  const sujo =
+    proposta !== inicial.proposta ||
+    modalidade !== inicial.modalidade ||
+    (modalidade === 'limitada' && comissao !== inicial.comissao)
+
+  const faltaProposta = !proposta
+  const faltaComissao = modalidade === 'limitada' && !comissao
+  /** A cotação completa, ou null enquanto falta um valor obrigatório. */
+  const cotacao: Cotacao | null =
+    faltaProposta || faltaComissao
+      ? null
+      : {
+          propostaCentavos: proposta!,
+          comissao: modalidade === 'spread' ? { modalidade: 'spread' } : { modalidade: 'limitada', centavos: comissao! },
+        }
+
+  // O texto antigo de um campo escrito à mão, que não se leu como valor: fica à
+  // vista, para a pessoa saber o que vai sobrescrever.
+  const textoIlegivel = atual && atual.proposta === null ? atual.texto : null
+
+  return {
+    proposta,
+    setProposta,
+    modalidade,
+    setModalidade,
+    comissao,
+    setComissao,
+    colagem,
+    setColagem,
+    sujo,
+    faltaProposta,
+    faltaComissao,
+    cotacao,
+    textoIlegivel,
+  }
+}
+
+export type CotacaoEmEdicao = ReturnType<typeof useCotacaoEmEdicao>
+
+/**
+ * OS CAMPOS DA COTAÇÃO: o valor da proposta, a comissão (Limitada, em R$, ou
+ * Spread) e, embaixo, o texto exato que vai para o campo do fundo no Kommo.
+ *
+ * `tentou` acende os avisos de obrigatório — depois do primeiro envio, e não
+ * enquanto a pessoa ainda está preenchendo. `desligado` trava tudo enquanto a
+ * gravação corre.
+ */
+export function CamposDaCotacao({
+  edicao,
+  fundo,
+  tentou,
+  desligado = false,
+}: {
+  edicao: CotacaoEmEdicao
+  fundo: string
+  tentou: boolean
+  desligado?: boolean
+}) {
+  const {
+    proposta,
+    setProposta,
+    modalidade,
+    setModalidade,
+    comissao,
+    setComissao,
+    colagem,
+    setColagem,
+    faltaProposta,
+    faltaComissao,
+    cotacao,
+    textoIlegivel,
+  } = edicao
+
+  const avisoDeColagem = (campo: 'proposta' | 'comissao') =>
+    colagem?.campo === campo
+      ? `Não reconheci "${colagem.texto.slice(0, 40)}" como valor em reais. Digite o número.`
+      : null
+
+  return (
+    // O FIELDSET trava os campos de uma vez enquanto grava (o `disabled` dele
+    // chega a todo controle de dentro), sem moldura nem margem próprias.
+    <fieldset disabled={desligado} className="m-0 min-w-0 space-y-s5 border-0 p-0">
+      {textoIlegivel && (
+        <p className="rounded-campo bg-superficie-2 px-s4 py-s3 text-sm text-texto-2">
+          O campo tem hoje: <span className="font-semibold text-texto">“{textoIlegivel}”</span>. Enviar o substitui.
+        </p>
+      )}
+
+      <Field
+        label="Valor da proposta"
+        required
+        error={avisoDeColagem('proposta') ?? (tentou && faltaProposta ? 'Informe o valor da proposta.' : undefined)}
+      >
+        <CampoReais
+          valor={proposta}
+          onMudar={(c) => {
+            setColagem(null)
+            setProposta(c)
+          }}
+          onColagemRecusada={(texto) => setColagem({ campo: 'proposta', texto })}
+        />
+      </Field>
+
+      <div className="space-y-s2">
+        <p className="text-corpo font-semibold text-texto">
+          Comissão
+          {modalidade === 'limitada' && <span className="ml-s0.5 text-perigo">*</span>}
+        </p>
+        <Segmented
+          ariaLabel="Modalidade da comissão"
+          value={modalidade}
+          onChange={(k) => {
+            setColagem(null)
+            setModalidade(k as Modalidade)
+          }}
+          items={[
+            { key: 'limitada', label: 'Limitada' },
+            { key: 'spread', label: 'Spread' },
+          ]}
+        />
+        {modalidade === 'limitada' ? (
+          <Field
+            hint="A comissão que o fundo já disse que aceita, em reais."
+            error={
+              avisoDeColagem('comissao') ??
+              (tentou && faltaComissao ? 'Com a comissão limitada, informe o valor.' : undefined)
+            }
+          >
+            <CampoReais
+              rotulo="Valor da comissão"
+              valor={comissao}
+              onMudar={(c) => {
+                setColagem(null)
+                setComissao(c)
+              }}
+              onColagemRecusada={(texto) => setColagem({ campo: 'comissao', texto })}
+            />
+          </Field>
+        ) : (
+          <p className="text-xs text-texto-3">
+            A Credijuris desconta a comissão do valor da proposta; não há valor a informar.
+          </p>
+        )}
+      </div>
+
+      {/* COMO FICA NO KOMMO, letra por letra: é o que o comercial vai ler no card. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-s4 gap-y-s1 rounded-campo bg-superficie-2 px-s4 py-s3">
+        <span className="text-xs font-bold uppercase tracking-[0.06em] text-texto-3">No campo {fundo}</span>
+        <span className="whitespace-nowrap text-corpo font-semibold tabular-nums text-texto">
+          {cotacao ? textoDaCotacao(cotacao) : '—'}
+        </span>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
  * A JANELA DA COTAÇÃO: ao marcar "Cotado ‹fundo›" na Em precificação, quanto o
  * fundo ofereceu e qual a comissão. Pedido do dono em 05/10/2026.
  *
@@ -104,32 +281,10 @@ export function JanelaDeCotacao({
   onFechar: () => void
 }) {
   const formId = useId()
-  const inicial = {
-    proposta: atual?.proposta ?? null,
-    modalidade: (atual?.comissao?.modalidade ?? 'limitada') as Modalidade,
-    comissao: atual?.comissao?.modalidade === 'limitada' ? atual.comissao.centavos : null,
-  }
-  const [proposta, setProposta] = useState<number | null>(inicial.proposta)
-  const [modalidade, setModalidade] = useState<Modalidade>(inicial.modalidade)
-  const [comissao, setComissao] = useState<number | null>(inicial.comissao)
+  const edicao = useCotacaoEmEdicao(atual)
   const [tentou, setTentou] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
-  const [colagem, setColagem] = useState<{ campo: 'proposta' | 'comissao'; texto: string } | null>(null)
-
-  const sujo =
-    proposta !== inicial.proposta ||
-    modalidade !== inicial.modalidade ||
-    (modalidade === 'limitada' && comissao !== inicial.comissao)
-
-  const faltaProposta = !proposta
-  const faltaComissao = modalidade === 'limitada' && !comissao
-  const cotacao: Cotacao | null =
-    faltaProposta || faltaComissao
-      ? null
-      : {
-          propostaCentavos: proposta!,
-          comissao: modalidade === 'spread' ? { modalidade: 'spread' } : { modalidade: 'limitada', centavos: comissao! },
-        }
+  const { cotacao } = edicao
 
   async function enviar() {
     setTentou(true)
@@ -142,20 +297,11 @@ export function JanelaDeCotacao({
     }
   }
 
-  const avisoDeColagem = (campo: 'proposta' | 'comissao') =>
-    colagem?.campo === campo
-      ? `Não reconheci "${colagem.texto.slice(0, 40)}" como valor em reais. Digite o número.`
-      : null
-
-  // O texto antigo de um campo escrito à mão, que não se leu como valor: fica à
-  // vista, para a pessoa saber o que vai sobrescrever.
-  const textoIlegivel = atual && atual.proposta === null ? atual.texto : null
-
   return (
     <Modal
       open
       onClose={onFechar}
-      dirty={sujo && !enviando}
+      dirty={edicao.sujo && !enviando}
       size="md"
       title={etiqueta}
       description={
@@ -186,76 +332,7 @@ export function JanelaDeCotacao({
           void enviar()
         }}
       >
-        {textoIlegivel && (
-          <p className="rounded-campo bg-superficie-2 px-s4 py-s3 text-sm text-texto-2">
-            O campo tem hoje: <span className="font-semibold text-texto">“{textoIlegivel}”</span>. Enviar o substitui.
-          </p>
-        )}
-
-        <Field
-          label="Valor da proposta"
-          required
-          error={avisoDeColagem('proposta') ?? (tentou && faltaProposta ? 'Informe o valor da proposta.' : undefined)}
-        >
-          <CampoReais
-            valor={proposta}
-            onMudar={(c) => {
-              setColagem(null)
-              setProposta(c)
-            }}
-            onColagemRecusada={(texto) => setColagem({ campo: 'proposta', texto })}
-          />
-        </Field>
-
-        <div className="space-y-s2">
-          <p className="text-corpo font-semibold text-texto">
-            Comissão
-            {modalidade === 'limitada' && <span className="ml-s0.5 text-perigo">*</span>}
-          </p>
-          <Segmented
-            ariaLabel="Modalidade da comissão"
-            value={modalidade}
-            onChange={(k) => {
-              setColagem(null)
-              setModalidade(k as Modalidade)
-            }}
-            items={[
-              { key: 'limitada', label: 'Limitada' },
-              { key: 'spread', label: 'Spread' },
-            ]}
-          />
-          {modalidade === 'limitada' ? (
-            <Field
-              hint="A comissão que o fundo já disse que aceita, em reais."
-              error={
-                avisoDeColagem('comissao') ??
-                (tentou && faltaComissao ? 'Com a comissão limitada, informe o valor.' : undefined)
-              }
-            >
-              <CampoReais
-                rotulo="Valor da comissão"
-                valor={comissao}
-                onMudar={(c) => {
-                  setColagem(null)
-                  setComissao(c)
-                }}
-                onColagemRecusada={(texto) => setColagem({ campo: 'comissao', texto })}
-              />
-            </Field>
-          ) : (
-            <p className="text-xs text-texto-3">
-              A Credijuris desconta a comissão do valor da proposta; não há valor a informar.
-            </p>
-          )}
-        </div>
-
-        {/* COMO FICA NO KOMMO, letra por letra: é o que o comercial vai ler no card. */}
-        <div className="flex flex-wrap items-baseline justify-between gap-x-s4 gap-y-s1 rounded-campo bg-superficie-2 px-s4 py-s3">
-          <span className="text-xs font-bold uppercase tracking-[0.06em] text-texto-3">No campo {fundo}</span>
-          <span className="whitespace-nowrap text-corpo font-semibold tabular-nums text-texto">
-            {cotacao ? textoDaCotacao(cotacao) : '—'}
-          </span>
-        </div>
+        <CamposDaCotacao edicao={edicao} fundo={fundo} tentou={tentou} />
 
         {erro && (
           <p role="alert" className="rounded-campo border border-perigo-borda bg-perigo-fundo px-s4 py-s3 text-corpo text-perigo">

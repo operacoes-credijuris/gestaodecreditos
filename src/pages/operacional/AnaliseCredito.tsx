@@ -26,6 +26,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -199,13 +200,15 @@ import {
   type PorCard,
 } from '@/lib/emCursoPorCard'
 import { TextoComTermos } from '@/components/layout/TextoComTermos'
-import { JanelaDeCotacao } from '@/components/JanelaDeCotacao'
+import { CamposDaCotacao, JanelaDeCotacao, useCotacaoEmEdicao } from '@/components/JanelaDeCotacao'
+import { registrarEnvioAoFundo, type ResultadoDoEnvio } from '@/lib/envioAoFundo'
 import {
   comCotacaoGravada,
   type Cotacao,
   type CotacaoLida,
   cotacoesDoCard,
   formatarReais,
+  NOME_DO_GRUPO_DAS_COTACOES,
   type ValorDeCampo,
 } from '../../../supabase/functions/_shared/cotacaoDoFundo.ts'
 
@@ -1715,18 +1718,29 @@ function ChecksDosFundos({
  *
  * UM BOTÃO POR DESFECHO, no lugar do "Confirmar envio" (01/10/2026): o fundo
  * aceita ou reprova, e o botão escolhido decide a etiqueta e a linha da nota.
+ * No rodapé da casa (§0.6): o que reprova à esquerda, em contorno; à direita,
+ * Cancelar e o que aceita.
+ *
+ * A COTAÇÃO DO BTG (05/10/2026): no fundo cujo ato a pede (`pedeCotacao`, o
+ * "Cotado BTG"), a janela pede também o valor da proposta e a comissão — os
+ * mesmos campos da janela da cotação (`CamposDaCotacao`). Obrigatórios só para
+ * esse ato: "Reprovado BTG" não os usa, e a PJus não os vê.
  */
 function JanelaDoEnvioAoFundo({
   fundo,
+  atual,
   onFechar,
   onConfirmar,
 }: {
   fundo: FundoDoEnvio
+  /** O que o campo do fundo já tem no card (aba "Cotações/propostas"), lido de volta. */
+  atual: CotacaoLida | null
   onFechar: () => void
   onConfirmar: (
     ato: AtoDoEnvio,
     texto: string,
     arquivos: File[],
+    cotacao: Cotacao | null,
     onAndamento: (texto: string, pct?: number) => void,
   ) => Promise<void>
 }) {
@@ -1738,6 +1752,16 @@ function JanelaDoEnvioAoFundo({
   const [erro, setErro] = useState<string | null>(null)
   const entrada = useRef<HTMLInputElement>(null)
   const ocupado = andamento !== null
+  // A TRAVA DO DUPLO CLIQUE, num ref: o `andamento` só desliga os botões no
+  // próximo render, e o segundo clique cabe antes dele.
+  const emVoo = useRef(false)
+  const idDaJanela = useId()
+
+  // A COTAÇÃO, quando algum ato deste fundo a pede. O estado existe sempre (é
+  // um hook), mas só aparece e só vale no fundo que a pede.
+  const pedeCotacao = fundo.atos.some((a) => a.pedeCotacao)
+  const cotacao = useCotacaoEmEdicao(atual)
+  const [tentouCotar, setTentouCotar] = useState(false)
 
   // O PRINT COLADO chega como "image.png": ganha nome que diga de onde veio.
   const acrescentar = (lista: File[]) =>
@@ -1750,26 +1774,119 @@ function JanelaDoEnvioAoFundo({
       ),
     ])
 
-  // O MESMO CRITÉRIO DO X, DO ESCAPE E DO CANCELAR: texto escrito ou imagem
-  // colada. O Cancelar do rodapé fechava sem perguntar, e o print colado ia junto.
-  const sujo = texto.trim().length > 0 || arquivos.length > 0
+  // O MESMO CRITÉRIO DO X, DO ESCAPE E DO CANCELAR: texto escrito, imagem
+  // colada ou valor digitado. O Cancelar do rodapé fechava sem perguntar, e o
+  // print colado ia junto.
+  const sujo = texto.trim().length > 0 || arquivos.length > 0 || (pedeCotacao && cotacao.sujo)
   const cancelar = async () => {
     if (sujo && !(await perguntarDescarte())) return
     onFechar()
   }
 
   async function confirmar(ato: AtoDoEnvio) {
+    if (emVoo.current) return
     setErro(null)
+    // FALTANDO VALOR, nada sai daqui: os campos dizem o que falta.
+    if (ato.pedeCotacao) {
+      setTentouCotar(true)
+      if (!cotacao.cotacao) return
+    }
+    emVoo.current = true
     setAndamento({ texto: 'Começando…', pct: 0, ato: ato.etiqueta })
     try {
-      await onConfirmar(ato, texto, arquivos, (t, pct) => setAndamento({ texto: t, pct, ato: ato.etiqueta }))
+      await onConfirmar(ato, texto, arquivos, ato.pedeCotacao ? cotacao.cotacao : null, (t, pct) =>
+        setAndamento({ texto: t, pct, ato: ato.etiqueta }),
+      )
     } catch (e) {
       // A janela fica aberta para tentar de novo, com o motivo à vista.
       setErro((e as Error)?.message ?? String(e))
     } finally {
+      emVoo.current = false
       setAndamento(null)
     }
   }
+
+  const botaoDoAto = (a: AtoDoEnvio) => (
+    <Button
+      key={a.etiqueta}
+      variant={a.reprova ? 'dangerOutline' : 'success'}
+      onClick={() => void confirmar(a)}
+      loading={andamento?.ato === a.etiqueta}
+      disabled={ocupado}
+    >
+      {a.etiqueta}
+    </Button>
+  )
+
+  const anotacao = (
+    <div>
+      <textarea
+        // COM A COTAÇÃO, o foco começa no valor da proposta (o primeiro campo).
+        autoFocus={!pedeCotacao}
+        rows={4}
+        value={texto}
+        aria-label="Anotação"
+        onChange={(e) => setTexto(e.target.value)}
+        onPaste={(e) => {
+          const imagens = [...e.clipboardData.files].filter((a) => a.type.startsWith('image/'))
+          if (imagens.length) {
+            e.preventDefault()
+            acrescentar(imagens)
+          }
+        }}
+        disabled={ocupado}
+        placeholder="O que foi enviado, ou o motivo da reprovação (opcional) — dá para colar o print aqui com Ctrl+V."
+        className="w-full resize-y rounded-campo border border-borda-controle bg-superficie px-s4 py-s2 text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
+      />
+      <div className="mt-s3">
+        <input
+          ref={entrada}
+          type="file"
+          accept="image/*,application/pdf"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            acrescentar([...(e.target.files ?? [])])
+            e.target.value = ''
+          }}
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          className={BTN}
+          icon={<Upload className={IC} aria-hidden />}
+          onClick={() => entrada.current?.click()}
+          disabled={ocupado}
+        >
+          Anexar imagem
+        </Button>
+        {arquivos.length > 0 && (
+          <ul className="mt-s2 grid gap-s1">
+            {arquivos.map((a, i) => (
+              <li
+                key={`${a.name}-${i}`}
+                className="flex items-center gap-s2 rounded-controle bg-superficie-2 py-s1 pl-s2 pr-s1 text-corpo text-texto"
+              >
+                <FileText className="h-[14px] w-[14px] flex-none text-texto-3" aria-hidden />
+                <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                <span className="text-xs text-texto-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
+                <button
+                  type="button"
+                  onClick={() => setArquivos((antes) => antes.filter((_, j) => j !== i))}
+                  disabled={ocupado}
+                  className="grid h-[26px] w-[26px] place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo"
+                  aria-label={`Tirar ${a.name}`}
+                  title={`Tirar ${a.name}`}
+                >
+                  <X className="h-[14px] w-[14px]" aria-hidden />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <Modal
@@ -1788,111 +1905,59 @@ function JanelaDoEnvioAoFundo({
           <ExternalLink className="h-[14px] w-[14px]" aria-hidden />
         </a>
       }
+      rodapeInicio={fundo.atos.some((a) => a.reprova) ? fundo.atos.filter((a) => a.reprova).map(botaoDoAto) : undefined}
       footer={
-        <div className="flex w-full flex-wrap items-center justify-end gap-2">
-          <Button variant="ghost" className={BTN} onClick={() => void cancelar()} disabled={ocupado}>
+        <>
+          <Button variant="secondary" onClick={() => void cancelar()} disabled={ocupado}>
             Cancelar
           </Button>
-          {fundo.atos.map((a) => (
-            <Button
-              key={a.etiqueta}
-              variant={a.reprova ? 'danger' : 'success'}
-              className={BTN}
-              onClick={() => void confirmar(a)}
-              loading={andamento?.ato === a.etiqueta}
-              disabled={ocupado}
-            >
-              {a.etiqueta}
-            </Button>
-          ))}
-        </div>
+          {fundo.atos.filter((a) => !a.reprova).map(botaoDoAto)}
+        </>
       }
     >
-      <div>
-        <textarea
-          autoFocus
-          rows={4}
-          value={texto}
-          aria-label="Anotação"
-          onChange={(e) => setTexto(e.target.value)}
-          onPaste={(e) => {
-            const imagens = [...e.clipboardData.files].filter((a) => a.type.startsWith('image/'))
-            if (imagens.length) {
-              e.preventDefault()
-              acrescentar(imagens)
-            }
-          }}
-          disabled={ocupado}
-          placeholder="O que foi enviado, ou o motivo da reprovação (opcional) — dá para colar o print aqui com Ctrl+V."
-          className="w-full resize-y rounded-campo border border-borda-controle bg-superficie px-4 py-[10px] text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
-        />
-        <div className="mt-[10px]">
-          <input
-            ref={entrada}
-            type="file"
-            accept="image/*,application/pdf"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              acrescentar([...(e.target.files ?? [])])
-              e.target.value = ''
-            }}
-          />
-          <Button
-            size="sm"
-            variant="secondary"
-            className={BTN}
-            icon={<Upload className={IC} aria-hidden />}
-            onClick={() => entrada.current?.click()}
-            disabled={ocupado}
-          >
-            Anexar imagem
-          </Button>
-          {arquivos.length > 0 && (
-            <ul className="mt-2 grid gap-1">
-              {arquivos.map((a, i) => (
-                <li
-                  key={`${a.name}-${i}`}
-                  className="flex items-center gap-2 rounded-controle bg-superficie-2 py-1 pl-2 pr-1 text-corpo text-texto"
-                >
-                  <FileText className="h-[14px] w-[14px] flex-none text-texto-3" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate">{a.name}</span>
-                  <span className="text-xs text-texto-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
-                  <button
-                    type="button"
-                    onClick={() => setArquivos((antes) => antes.filter((_, j) => j !== i))}
-                    disabled={ocupado}
-                    className="grid h-[26px] w-[26px] place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo"
-                    aria-label={`Tirar ${a.name}`}
-                    title={`Tirar ${a.name}`}
-                  >
-                    <X className="h-[14px] w-[14px]" aria-hidden />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        {andamento && (
-          <div className="mt-3 grid gap-1.5 text-corpo text-texto-2" role="status">
-            <div className="h-2 overflow-hidden rounded-full bg-superficie-3">
-              <div
-                className={cn(
-                  'h-full rounded-full bg-marca-viva transition-all duration-300',
-                  andamento.pct === undefined && 'animate-pulse',
-                )}
-                style={{ width: `${andamento.pct ?? 100}%` }}
-              />
+      {pedeCotacao ? (
+        <div className="space-y-s6">
+          <section aria-labelledby={`${idDaJanela}-cotacao`} className="space-y-s3">
+            <div>
+              <h3 id={`${idDaJanela}-cotacao`} className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+                Cotação {doFundo(fundo)}
+              </h3>
+              <p className="mt-s1 text-xs text-texto-3">
+                Obrigatória no “{fundo.atos.find((a) => a.pedeCotacao)?.etiqueta}”; vai para o campo {fundo.fundo} da aba “
+                {NOME_DO_GRUPO_DAS_COTACOES}”. A reprovação não a usa.
+              </p>
             </div>
-            <span>{andamento.texto}</span>
+            <CamposDaCotacao edicao={cotacao} fundo={fundo.fundo} tentou={tentouCotar} desligado={ocupado} />
+          </section>
+          <section aria-labelledby={`${idDaJanela}-anotacao`} className="space-y-s3">
+            <h3 id={`${idDaJanela}-anotacao`} className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+              Anotação e print
+            </h3>
+            {anotacao}
+          </section>
+        </div>
+      ) : (
+        anotacao
+      )}
+      {andamento && (
+        <div className="mt-s3 grid gap-s1.5 text-corpo text-texto-2" role="status">
+          <div className="h-2 overflow-hidden rounded-full bg-superficie-3">
+            <div
+              className={cn(
+                'h-full rounded-full bg-marca-viva transition-all duration-300',
+                andamento.pct === undefined && 'animate-pulse',
+              )}
+              style={{ width: `${andamento.pct ?? 100}%` }}
+            />
           </div>
-        )}
-        {erro && !andamento && (
-          <CaixaDeAviso tom="perigo" role="alert" className="mt-3">
-            Não deu certo: {erro}
-          </CaixaDeAviso>
-        )}
-      </div>
+          <span>{andamento.texto}</span>
+        </div>
+      )}
+      {erro && !andamento && (
+        <CaixaDeAviso tom="perigo" role="alert" className="mt-s3">
+          Não deu certo: {erro}
+        </CaixaDeAviso>
+      )}
     </Modal>
   )
 }
@@ -4748,6 +4813,24 @@ export default function AnaliseCredito() {
    * e fica aberta, com o que foi digitado.
    */
   async function enviarCotacao(lead: KommoLead, etiqueta: string, cotacao: Cotacao) {
+    await gravarCotacaoNoCard(lead, etiqueta, cotacao)
+    setCotando(null)
+  }
+
+  /**
+   * A COTAÇÃO E A ETIQUETA "Cotado ‹fundo›" no card, num pedido só à
+   * `kommo-etiquetar`, com a trava do card e o cache atualizado — o caminho
+   * comum da janela da cotação (Em precificação) e do envio ao BTG (Remessa aos
+   * fundos). LANÇA com a mensagem quando falha.
+   *
+   * `cotacaoGravada` é a função confirmando que gravou o campo (a `cotacao` da
+   * resposta): é com ela que o envio ao BTG decide se pode mover o card.
+   */
+  async function gravarCotacaoNoCard(
+    lead: KommoLead,
+    etiqueta: string,
+    cotacao: Cotacao,
+  ): Promise<{ tags: string[]; cotacaoGravada: boolean }> {
     const id = lead.kommo_lead_id
     if (cotacaoEmVoo.current.has(id) || etiquetaEmVoo[id] !== undefined) {
       throw new Error('Há uma etiqueta deste card sendo gravada — espere terminar.')
@@ -4786,7 +4869,7 @@ export default function AnaliseCredito() {
         }),
       )
       if (r?.aviso) toast.error(r.aviso)
-      setCotando(null)
+      return { tags: r?.tags ?? [...(lead.tags ?? []), etiqueta], cotacaoGravada: Boolean(r?.cotacao) }
     } finally {
       cotacaoEmVoo.current.delete(id)
       setEtiquetaEmVoo((m) => terminarNoCard(m, id))
@@ -4922,12 +5005,22 @@ export default function AnaliseCredito() {
       mover.mutateAsync({ leadId: lead.kommo_lead_id, statusId: cfg.destino, comentario: '' }),
     )
   }
+  /**
+   * A ORDEM DAS CHAMADAS e as mensagens de cada falha moram em
+   * `registrarEnvioAoFundo` (lib/envioAoFundo.ts): a anotação, depois a etiqueta
+   * — com a cotação no campo do fundo, no ato que a pede ("Cotado BTG"), no
+   * mesmo PATCH —, e só então o movimento. Aqui ficam as chamadas, o cache e o
+   * que já subiu.
+   *
+   * LANÇA com a mensagem quando o envio falha: a janela a mostra e fica aberta.
+   */
   async function enviarAoFundo(
     lead: KommoLead,
     fundo: FundoDoEnvio,
     ato: AtoDoEnvio,
     texto: string,
     arquivos: File[],
+    cotacao: Cotacao | null,
     onAndamento: (texto: string, pct?: number) => void,
   ) {
     const cfg = abaAtual?.envioAosFundos
@@ -4938,92 +5031,92 @@ export default function AnaliseCredito() {
     const chave = `${id}:${fundo.fundo}:${ato.etiqueta}`
     const nota = [ato.nota, texto.trim()].filter(Boolean).join('\n\n')
 
-    // 1. A ANOTAÇÃO, e depois as imagens, se houver.
-    if (!notasDoEnvio.has(chave)) {
-      const feitas = partesDoEnvio.current
-      try {
-        if (!feitas.has(`${chave}:texto`)) {
-          onAndamento('Gravando a anotação no Kommo…')
-          await invokeFunction('kommo-anotar', { lead_id: id, texto: nota, origem: 'pessoa', autor: analistaNome })
-          feitas.add(`${chave}:texto`)
-        }
-        for (let i = 0; i < arquivos.length; i++) {
-          const a = arquivos[i]
-          const parteDoArquivo = `${chave}:arquivo:${a.name}:${a.size}:${a.lastModified}`
-          if (feitas.has(parteDoArquivo)) continue
-          if (a.size > 100 * 1024 * 1024) throw new Error(`${a.name} passa de 100 MB.`)
-          const qual = arquivos.length > 1 ? `arquivo ${i + 1} de ${arquivos.length} — ` : ''
-          const r = await enviarArquivo<{ aviso?: string | null }>(
-            'kommo-anexo-enviar',
-            a,
-            { 'x-lead-id': String(id), 'x-nome': encodeURIComponent(a.name), 'x-texto': '' },
-            (p) =>
-              p.fase === 'enviando'
-                ? onAndamento(`Enviando ${qual}${p.pct}%`, p.pct)
-                : onAndamento(`Gravando no Kommo ${qual}…`),
-          )
-          if (r?.aviso) toast.error(r.aviso)
-          feitas.add(parteDoArquivo)
-        }
-      } catch (e) {
-        toast.error(`A anotação não subiu para o Kommo: ${(e as Error).message}`)
-        throw e
-      }
-      setNotasDoEnvio((antes) => new Set(antes).add(chave))
-      for (const p of [...feitas]) if (p.startsWith(`${chave}:`)) feitas.delete(p)
-    }
-
-    // 2. A ETIQUETA DO FUNDO.
-    onAndamento(`Pondo a etiqueta "${ato.etiqueta}"…`)
-    let tags: string[]
+    let r: ResultadoDoEnvio
     try {
-      const r = await invokeFunction<{ tags?: string[]; aviso?: string | null }>('kommo-etiquetar', {
-        leadId: id,
-        etiqueta: ato.etiqueta,
-        acao: 'adicionar',
+      r = await registrarEnvioAoFundo({
+        fundo: fundo.fundo,
+        ato,
+        cotacao,
+        anotacaoFeita: notasDoEnvio.has(chave),
+        todosFeitos: (tags) => cfg.fundos.every((f) => atoFeito(f, tags)),
+        destino: 'Em precificação',
+        onAndamento: (t) => onAndamento(t),
+        passos: {
+          // 1. A ANOTAÇÃO, e depois as imagens, se houver.
+          anotar: async () => {
+            const feitas = partesDoEnvio.current
+            if (!feitas.has(`${chave}:texto`)) {
+              onAndamento('Gravando a anotação no Kommo…')
+              await invokeFunction('kommo-anotar', { lead_id: id, texto: nota, origem: 'pessoa', autor: analistaNome })
+              feitas.add(`${chave}:texto`)
+            }
+            for (let i = 0; i < arquivos.length; i++) {
+              const a = arquivos[i]
+              const parteDoArquivo = `${chave}:arquivo:${a.name}:${a.size}:${a.lastModified}`
+              if (feitas.has(parteDoArquivo)) continue
+              if (a.size > 100 * 1024 * 1024) throw new Error(`${a.name} passa de 100 MB.`)
+              const qual = arquivos.length > 1 ? `arquivo ${i + 1} de ${arquivos.length} — ` : ''
+              const rArq = await enviarArquivo<{ aviso?: string | null }>(
+                'kommo-anexo-enviar',
+                a,
+                { 'x-lead-id': String(id), 'x-nome': encodeURIComponent(a.name), 'x-texto': '' },
+                (p) =>
+                  p.fase === 'enviando'
+                    ? onAndamento(`Enviando ${qual}${p.pct}%`, p.pct)
+                    : onAndamento(`Gravando no Kommo ${qual}…`),
+              )
+              if (rArq?.aviso) toast.error(rArq.aviso)
+              feitas.add(parteDoArquivo)
+            }
+            setNotasDoEnvio((antes) => new Set(antes).add(chave))
+            for (const p of [...feitas]) if (p.startsWith(`${chave}:`)) feitas.delete(p)
+          },
+          // 2. A ETIQUETA DO FUNDO — com a cotação, pelo caminho da janela da
+          // cotação (a mesma trava do card e o mesmo cache).
+          etiquetar: async (comCotacao) => {
+            if (comCotacao) return gravarCotacaoNoCard(lead, ato.etiqueta, comCotacao)
+            const rEt = await invokeFunction<{ tags?: string[]; aviso?: string | null }>('kommo-etiquetar', {
+              leadId: id,
+              etiqueta: ato.etiqueta,
+              acao: 'adicionar',
+            })
+            const tags = rEt?.tags ?? [...(lead.tags ?? []), ato.etiqueta]
+            if (rEt?.aviso) toast.error(rEt.aviso)
+            qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+              antes?.map((l) =>
+                l.kommo_lead_id === id
+                  ? { ...l, tags, tags_em: { ...(l.tags_em ?? {}), [ato.etiqueta]: new Date().toISOString() } }
+                  : l,
+              ),
+            )
+            return { tags, cotacaoGravada: false }
+          },
+          // 3. O CARD PARA O DESTINO, com todos os fundos feitos.
+          mover: () => moverAposOsFundos(lead),
+        },
       })
-      tags = r?.tags ?? [...(lead.tags ?? []), ato.etiqueta]
-      if (r?.aviso) toast.error(r.aviso)
     } catch (e) {
-      toast.error(
-        `A anotação está no card, mas a etiqueta "${ato.etiqueta}" não entrou: ${(e as Error).message}. ` +
-          'Confirme de novo — a anotação não se repete.',
-      )
+      toast.error((e as Error).message)
       throw e
     }
-    qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
-      antes?.map((l) =>
-        l.kommo_lead_id === id
-          ? { ...l, tags, tags_em: { ...(l.tags_em ?? {}), [ato.etiqueta]: new Date().toISOString() } }
-          : l,
-      ),
-    )
+
+    // A ETIQUETA ENTROU: a anotação deste desfecho não fica mais pendente.
     setNotasDoEnvio((antes) => {
       const n = new Set(antes)
       n.delete(chave)
       return n
     })
 
-    // 3. TODOS OS FUNDOS FEITOS — aceito ou reprovado, cada um: o card segue
-    // para o destino.
-    const todos = cfg.fundos.every((f) => atoFeito(f, tags))
-    if (!todos) {
-      toast.success(ato.nota)
+    if (r.movido) return
+    if (r.faltamFundos) {
+      toast.success(r.cotacao ? `${ato.nota} Cotação no campo ${fundo.fundo}: ${r.cotacao}.` : ato.nota)
       return
     }
-    onAndamento('Movendo o card para Em precificação…')
-    // A FALHA DO MOVIMENTO NÃO É FALHA DO ENVIO. A anotação, as imagens e a
-    // etiqueta já estão no card, e a marca de "anotação feita" já saiu (acima):
-    // devolver o erro deixava a janela aberta convidando a confirmar de novo, e
-    // o novo clique subia a anotação e os prints UMA SEGUNDA VEZ antes de
-    // tentar mover. A janela fecha; quem refaz o movimento é o botão "Mover
-    // para Em precificação", que aparece no card com todos os checks feitos.
-    try {
-      await moverAposOsFundos(lead)
-    } catch {
-      // O motivo já foi avisado (o onError do mover); este diz o que fazer.
-      toast.error('O envio está registrado no card, mas ele não se moveu — clique em "Mover para Em precificação" no card.')
-    }
+    // A FALHA DO MOVIMENTO NÃO É FALHA DO ENVIO (ver `ResultadoDoEnvio`): a janela
+    // fecha, e quem refaz o movimento é o botão "Mover para Em precificação",
+    // que aparece no card com todos os checks feitos. O motivo já foi avisado
+    // (o onError do mover); este diz o que fazer.
+    toast.error('O envio está registrado no card, mas ele não se moveu — clique em "Mover para Em precificação" no card.')
   }
   async function anexarEMover(
     lead: KommoLead,
@@ -5772,10 +5865,17 @@ export default function AnaliseCredito() {
 
       {envioAberto && (
         <JanelaDoEnvioAoFundo
+          key={`${envioAberto.lead.kommo_lead_id}-${envioAberto.fundo.fundo}`}
           fundo={envioAberto.fundo}
+          // O CAMPO DO FUNDO COMO ESTÁ NO CARD: a cotação começa dele (o BTG).
+          atual={
+            cotacoesDoCard(envioAberto.lead.raw?.custom_fields_values, [envioAberto.fundo.fundo])[
+              envioAberto.fundo.fundo
+            ] ?? null
+          }
           onFechar={() => setEnvioAberto(null)}
-          onConfirmar={async (ato, texto, arquivos, onAndamento) => {
-            await enviarAoFundo(envioAberto.lead, envioAberto.fundo, ato, texto, arquivos, onAndamento)
+          onConfirmar={async (ato, texto, arquivos, cotacao, onAndamento) => {
+            await enviarAoFundo(envioAberto.lead, envioAberto.fundo, ato, texto, arquivos, cotacao, onAndamento)
             setEnvioAberto(null)
           }}
         />
