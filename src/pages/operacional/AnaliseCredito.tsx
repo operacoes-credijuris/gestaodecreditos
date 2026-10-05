@@ -72,6 +72,7 @@ import {
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
 import { enviarArquivo, type ProgressoDoEnvio } from '@/lib/enviarArquivo'
+import { CaixaDeAnotacao, useAnotacaoDoCard } from '@/components/CaixaDeAnotacao'
 import {
   FUNIL_RPV,
   FUNIL_PRECATORIO,
@@ -2073,35 +2074,22 @@ function BotaoAnexarEMover({
  *
  * "ANOTAR" COM TEXTO desde a onda 2 (amostra): era um ícone de 20 px ao lado do
  * título; virou botão com rótulo, na zona de ações, com alvo de 32 px.
+ *
+ * COM ARQUIVOS desde 05/10/2026 (pedido do dono): o miolo da caixa e o estado
+ * moram em components/CaixaDeAnotacao.tsx. ENVIANDO, A CAIXA NÃO FECHA por um
+ * clique fora: o andamento e a falha parcial precisam de onde aparecer.
  */
 function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (texto: string) => Promise<void> }) {
   const [aberto, setAberto] = useState(false)
-  // O RASCUNHO SOBREVIVE AO CARD (ver rascunhoDoCard.ts): trocar de etapa,
-  // filtrar ou sincronizar desmonta este botão, e o texto ia junto, sem aviso.
-  // Volta com o ponto âmbar no botão, como o rascunho de antes.
-  const [texto, setTexto] = useState(() => rascunhoGuardado(leadId, 'anotacao')?.texto ?? '')
-  const [enviando, setEnviando] = useState(false)
+  const anotacao = useAnotacaoDoCard(leadId, onEnviar)
   const caixa = useRef<HTMLDivElement>(null)
-  const fechar = useCallback(() => setAberto(false), [])
+  const enviando = anotacao.enviando
+  const fechar = useCallback(() => {
+    if (!enviando) setAberto(false)
+  }, [enviando])
   useFecharFora(aberto, fechar, caixa)
 
-  async function enviar() {
-    const t = texto.trim()
-    if (!t || enviando) return
-    setEnviando(true)
-    try {
-      await onEnviar(t)
-      setTexto('')
-      apagarRascunho(leadId, 'anotacao')
-      setAberto(false)
-    } catch {
-      // O aviso é de quem chamou; o texto fica na caixa para tentar de novo.
-    } finally {
-      setEnviando(false)
-    }
-  }
-
-  const temRascunho = texto.trim().length > 0
+  const temRascunho = anotacao.temRascunho
   return (
     <div className="relative" ref={caixa}>
       <Button
@@ -2118,37 +2106,8 @@ function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (text
       </Button>
 
       {aberto && (
-        <div className={cn(CAIXA_FLUTUANTE, 'right-0 w-[340px] max-w-[calc(100vw-2rem)] p-[10px]')}>
-          <textarea
-            autoFocus
-            rows={4}
-            value={texto}
-            aria-label="Anotação"
-            onChange={(e) => {
-              setTexto(e.target.value)
-              guardarRascunho(leadId, 'anotacao', e.target.value)
-            }}
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void enviar()
-            }}
-            placeholder="Ex.: Cedente enviou o RG; falta o comprovante de endereço."
-            className="min-h-[96px] w-full resize-y rounded-controle border border-borda-controle bg-superficie px-[10px] py-2 text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20"
-          />
-          <div className="mt-2 flex items-center justify-between text-xs text-texto-3">
-            <span>
-              <kbd className="rounded-[6px] border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2">
-                Ctrl
-              </kbd>{' '}
-              +{' '}
-              <kbd className="rounded-[6px] border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2">
-                Enter
-              </kbd>{' '}
-              envia
-            </span>
-            <Button size="sm" className={BTN} onClick={() => void enviar()} loading={enviando} disabled={!temRascunho}>
-              Enviar
-            </Button>
-          </div>
+        <div className={cn(CAIXA_FLUTUANTE, 'right-0 w-[360px] max-w-[calc(100vw-48px)] p-[10px]')}>
+          <CaixaDeAnotacao anotacao={anotacao} classeDoBotao={BTN} onFeito={() => setAberto(false)} />
         </div>
       )}
     </div>
