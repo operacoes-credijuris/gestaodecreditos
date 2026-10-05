@@ -35,6 +35,11 @@ import {
 } from '@/lib/arquivosDoAssistente'
 import { cn } from '@/lib/cn'
 import type { Processo } from '@/lib/types'
+import {
+  MODELO_PADRAO_DO_ASSISTENTE,
+  MODELOS_DO_ASSISTENTE,
+  modeloVigente,
+} from '../../supabase/functions/_shared/modeloDoAssistente.ts'
 
 // O ASSISTENTE MORA EM TODA TELA, mas o leitor de Markdown (react-markdown e o
 // GFM) e a janela de petição só servem com ele aberto e respondendo. Importados
@@ -70,7 +75,9 @@ function PeticaoIndisponivel({ onClose }: { onClose: () => void }) {
  */
 function lerModeloGuardado(): string | null {
   try {
-    return localStorage.getItem(CHAVE_MODELO_LOCAL)
+    const guardado = localStorage.getItem(CHAVE_MODELO_LOCAL)
+    // O "Opus" escolhido antes de 05/10/2026 era o 5; agora é o 5.5.
+    return guardado === null ? null : modeloVigente(guardado)
   } catch {
     return null
   }
@@ -139,12 +146,9 @@ const SUGESTOES = [
   'Consultar processos por situação',
 ]
 
-const MODELOS = [
-  { key: 'claude-haiku-4-5-20251001', label: 'Haiku' },
-  { key: 'claude-sonnet-5', label: 'Sonnet' },
-  { key: 'claude-opus-5', label: 'Opus' },
-]
-const MODELO_PADRAO = 'claude-sonnet-5'
+// A MESMA lista que o servidor aceita (`_shared/modeloDoAssistente.ts`).
+const MODELOS = MODELOS_DO_ASSISTENTE
+const MODELO_PADRAO = MODELO_PADRAO_DO_ASSISTENTE
 const CHAVE_MODELO_LOCAL = 'assistente_modelo'
 
 /**

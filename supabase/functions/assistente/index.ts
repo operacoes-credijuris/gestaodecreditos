@@ -19,6 +19,7 @@ import { ERRO_ACESSO, callerClient, getCallerAtivo, serviceClient } from '../_sh
 // "@latest" traria mudança de comportamento a produção sem ninguém mexer aqui.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
+import { resolverModeloDoAssistente } from '../_shared/modeloDoAssistente.ts'
 
 /**
  * Chave da Anthropic, gravada pela tela de Configurações (mesmo caminho do
@@ -64,20 +65,20 @@ const MAX_RODADAS = 8
  * conclusos" começa igual a uma contagem. Então começamos no esforço menor e
  * promovemos a partir do momento em que a busca textual é acionada — a decisão
  * vem do comportamento observado, não de um palpite sobre a intenção.
+ *
+ * A LISTA E A REGRA DA ESCOLHA moram em `_shared/modeloDoAssistente.ts`, a
+ * mesma que a tela usa (`resolverModeloDoAssistente`): o Opus é o 5.5 desde
+ * 05/10/2026, e quem ainda manda o id de um Opus anterior — a escolha guardada
+ * no navegador, uma aba aberta da versão antiga — recebe o 5.5. Fora da lista,
+ * vale o padrão: nunca a escolha crua do cliente.
+ *
+ * NO OPUS 5.5 o texto que o modelo escreve ENTRE chamadas de ferramenta vem em
+ * blocos `thinking` (vazios por padrão), e não mais em `text`. Aqui isso não
+ * tira nada da tela: ela só mostra o texto da ÚLTIMA rodada (a que termina sem
+ * ferramenta), que continua em `text`; o que vinha entre ferramentas nunca foi
+ * exibido. E os blocos `thinking` voltam intactos na rodada seguinte, porque a
+ * resposta entra em `mensagens` inteira, como chegou.
  */
-const MODELOS_PERMITIDOS = new Set([
-  'claude-haiku-4-5-20251001',
-  'claude-sonnet-5',
-  'claude-opus-5',
-])
-const MODELO_PADRAO = 'claude-sonnet-5'
-
-/** Nunca repassa a escolha do cliente direto pra API sem checar o allowlist. */
-function resolverModelo(pedido: unknown): string {
-  return typeof pedido === 'string' && MODELOS_PERMITIDOS.has(pedido)
-    ? pedido
-    : MODELO_PADRAO
-}
 /**
  * Ferramentas cuja presença promove a conversa ao esforço alto — as duas que
  * pedem para o modelo interpretar texto jurídico corrido, não só consultar
@@ -2543,7 +2544,7 @@ Deno.serve(async (req: Request) => {
     if (!pergunta || typeof pergunta !== 'string') {
       return jsonResponse({ error: 'Pergunta inválida.' }, 400)
     }
-    const modeloResolvido = resolverModelo(modelo)
+    const modeloResolvido = resolverModeloDoAssistente(modelo)
 
     const svc = callerClient(req)
     const anthropic = new Anthropic({ apiKey })

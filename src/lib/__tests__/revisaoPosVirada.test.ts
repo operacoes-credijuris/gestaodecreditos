@@ -47,12 +47,37 @@ describe('o título da aba do navegador vale em todo endereço', () => {
   })
 })
 
+/** A posição `i` do código está dentro do bloco do `try {` mais próximo antes dela? */
+function dentroDoTry(codigo: string, i: number): boolean {
+  const inicio = codigo.lastIndexOf('try {', i)
+  if (inicio < 0) return false
+  let profundidade = 0
+  for (const c of codigo.slice(inicio + 'try '.length, i)) {
+    if (c === '{') profundidade++
+    if (c === '}') profundidade--
+    if (profundidade <= 0) return false
+  }
+  return true
+}
+
 describe('o assistente não derruba a plataforma', () => {
   it('lê e grava o modelo no localStorage só dentro de try', () => {
     const a = semComentarios(ler('components/Assistente.tsx'))
     const usos = [...a.matchAll(/localStorage\.(get|set)Item/g)].map((m) => m.index ?? 0)
     expect(usos.length).toBeGreaterThan(0)
-    for (const i of usos) expect(a.slice(Math.max(0, i - 40), i)).toMatch(/try \{\s*(return )?$/)
+    // DENTRO do bloco do `try`, e não só logo depois dele: a leitura do modelo
+    // passou a guardar o valor numa constante antes de traduzi-lo (o Opus 5
+    // guardado vira o 5.5), e a checagem antiga só aceitava o acesso colado ao
+    // `try {`. Vale o que ela garantia: do `try {` mais próximo até o acesso,
+    // nenhum bloco se fechou sem ter sido aberto ali — o acesso está lá dentro.
+    for (const i of usos) expect(dentroDoTry(a, i)).toBe(true)
+  })
+
+  it('a checagem acima reprova o acesso fora do try (senão ela não testa nada)', () => {
+    const fora = 'function f() {\n  try {\n    x()\n  } catch {}\n  localStorage.getItem(k)\n}'
+    expect(dentroDoTry(fora, fora.indexOf('localStorage'))).toBe(false)
+    const dentro = 'function f() {\n  try {\n    const g = localStorage.getItem(k)\n  } catch {}\n}'
+    expect(dentroDoTry(dentro, dentro.indexOf('localStorage'))).toBe(true)
   })
 
   it('a lista de Skills mora sob a chave das Configurações, que a invalida', () => {
