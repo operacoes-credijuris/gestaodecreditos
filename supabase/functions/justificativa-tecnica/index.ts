@@ -49,7 +49,6 @@ import { municipioDoEnte, resolverUf } from '../_shared/tribunais.ts'
 import {
   aceitaRascunho,
   AVISO_MIGRACAO_0076,
-  CHAVE_DOMINIOS_JUSTIFICATIVA,
   CHAVE_PROMPT_JUSTIFICATIVA,
   type CardDaJustificativa,
   type ConsumoDaJustificativa,
@@ -62,7 +61,6 @@ import {
   FUNIL_RPV_JUSTIFICATIVA,
   FUNIS_DA_JUSTIFICATIVA,
   type LinhaDaJustificativa,
-  lerDominios,
   listaDeFontes,
   MAX_GERACOES_SIMULTANEAS,
   montarPrompt,
@@ -146,18 +144,20 @@ async function gravarDaTentativa(
 }
 
 /** O prompt e os domínios em vigor. Leitura que falha cai no padrão: nunca sem método. */
+/**
+ * O prompt em vigor. A PESQUISA É LIVRE NA INTERNET (decisão do dono,
+ * 05/10/2026): sem lista de domínios — nem a que tenha ficado salva em
+ * `prompts_operacao`. Quem quiser fontes oficiais pede no prompt; restringir
+ * cortava o alcance da pesquisa.
+ */
 async function lerConfiguracao(svc: SupabaseClient): Promise<{ prompt: string; dominios: string[] }> {
   try {
     const { data } = await svc
       .from('prompts_operacao')
-      .select('chave, texto')
-      .in('chave', [CHAVE_PROMPT_JUSTIFICATIVA, CHAVE_DOMINIOS_JUSTIFICATIVA])
-    const linhas = (data ?? []) as { chave: string; texto: string | null }[]
-    const de = (k: string) => linhas.find((l) => l.chave === k)?.texto ?? ''
-    return {
-      prompt: promptEmVigor(de(CHAVE_PROMPT_JUSTIFICATIVA)),
-      dominios: lerDominios(de(CHAVE_DOMINIOS_JUSTIFICATIVA)).dominios,
-    }
+      .select('texto')
+      .eq('chave', CHAVE_PROMPT_JUSTIFICATIVA)
+      .maybeSingle()
+    return { prompt: promptEmVigor((data as { texto?: string | null } | null)?.texto ?? ''), dominios: [] }
   } catch {
     return { prompt: promptEmVigor(''), dominios: [] }
   }
@@ -451,7 +451,8 @@ async function passo(svc: SupabaseClient, body: Record<string, unknown>): Promis
     const tarefa = String(l.prompt_usado ?? '')
     if (!tarefa.trim()) throw new Error('O prompt montado não foi gravado. Gere de novo.')
     if (etapa === 'pesquisa') {
-      const dossie = await pesquisar(c, tarefa, l.dominios ?? [])
+      // Livre: uma geração começada antes da mudança não leva a lista que tinha.
+      const dossie = await pesquisar(c, tarefa, [])
       const seguiu = await gravarDaTentativa(svc, leadId, tentativa, {
         etapa: 'redigindo',
         pesquisa: dossie,

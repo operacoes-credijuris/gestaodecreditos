@@ -15,14 +15,9 @@ import { Table, THead, TH, TBody, TR, TD, Loading } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { ROTEIRO_QUALIFICACAO } from '../../../supabase/functions/_shared/roteiroQualificacao.ts'
 import {
-  CHAVE_DOMINIOS_JUSTIFICATIVA,
   CHAVE_PROMPT_JUSTIFICATIVA,
-  DOMINIOS_SUGERIDOS,
-  lerDominios,
-  montarPrompt,
   PROMPT_JUSTIFICATIVA_PADRAO,
   promptEmVigor,
-  VARIAVEIS_DA_JUSTIFICATIVA,
 } from '../../../supabase/functions/_shared/justificativaTecnica.ts'
 import {
   AvisoLeitura,
@@ -471,9 +466,12 @@ const CONSULTA_DA_JUSTIFICATIVA = ['prompts_operacao', CHAVE_PROMPT_JUSTIFICATIV
 /**
  * O PROMPT DA JUSTIFICATIVA TÉCNICA, como o roteiro da qualificação: texto
  * longo em `prompts_operacao`, com o padrão no código como chão (campo vazio =
- * padrão). Ao lado, as variáveis que a plataforma preenche e de onde cada uma
- * sai — a mesma lista que a Edge Function usa. Embaixo, os domínios a que a
- * pesquisa se restringe (vazio = sem restrição).
+ * padrão).
+ *
+ * SÓ O PROMPT (decisão do dono, 05/10/2026): ele é só instrução — os dados do
+ * crédito vão junto sozinhos (ver `montarPrompt`) — e a pesquisa é livre na
+ * internet. A lista de variáveis e o campo de domínios saíram da tela; a Edge
+ * Function também ignora qualquer lista de domínios que tenha ficado salva.
  *
  * SÓ ADMIN EDITA porque esta tela inteira é de admin (o guarda da rota).
  * "Restaurar padrão" só põe o padrão no campo: salvar continua sendo um clique
@@ -489,18 +487,15 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
       const { data, error } = await supabase
         .from('prompts_operacao')
         .select('chave, texto, atualizado_em, atualizado_por')
-        .in('chave', [CHAVE_PROMPT_JUSTIFICATIVA, CHAVE_DOMINIOS_JUSTIFICATIVA])
+        .eq('chave', CHAVE_PROMPT_JUSTIFICATIVA)
       if (error) throw new Error(error.message)
       return (data ?? []) as LinhaDoPrompt[]
     },
   })
   const linhaDoPrompt = data?.find((l) => l.chave === CHAVE_PROMPT_JUSTIFICATIVA)
-  const linhaDosDominios = data?.find((l) => l.chave === CHAVE_DOMINIOS_JUSTIFICATIVA)
   const promptSalvo = promptEmVigor(linhaDoPrompt?.texto)
-  const dominiosSalvos = lerDominios(linhaDosDominios?.texto ?? '').dominios.join('\n')
 
   const [prompt, setPrompt] = useState('')
-  const [dominios, setDominios] = useState('')
   const [tocado, setTocado] = useState(false)
   const [salvando, setSalvando] = useState(false)
 
@@ -509,18 +504,14 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
   useEffect(() => {
     if (!tocado && !isLoading) {
       setPrompt(promptSalvo)
-      setDominios(dominiosSalvos)
     }
-  }, [promptSalvo, dominiosSalvos, isLoading, tocado])
+  }, [promptSalvo, isLoading, tocado])
 
-  const lidos = lerDominios(dominios)
   const mudouPrompt = prompt.trim() !== promptSalvo.trim()
-  const mudouDominios = lidos.dominios.join('\n') !== dominiosSalvos
-  const mudou = mudouPrompt || mudouDominios
+  const mudou = mudouPrompt
   const ehOPadrao = promptSalvo.trim() === PROMPT_JUSTIFICATIVA_PADRAO.trim()
   // LEITURA FALHOU, NADA FOI LIDO: salvar gravaria por cima sem saber o que está lá.
   const naoLido = !!error && data === undefined
-  const { desconhecidas, anexouDados } = montarPrompt(prompt, {})
 
   const pendente = tocado && mudou
   useEffect(() => {
@@ -541,15 +532,6 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
           // campo continua acompanhando o padrão do código quando ele melhorar.
           texto: prompt.trim() === PROMPT_JUSTIFICATIVA_PADRAO.trim() ? '' : prompt,
           texto_anterior: promptSalvo,
-          atualizado_em: agora,
-          atualizado_por: quem,
-        })
-      }
-      if (mudouDominios) {
-        linhas.push({
-          chave: CHAVE_DOMINIOS_JUSTIFICATIVA,
-          texto: lidos.dominios.join('\n'),
-          texto_anterior: dominiosSalvos,
           atualizado_em: agora,
           atualizado_por: quem,
         })
@@ -584,99 +566,27 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
         <Loading />
       ) : (
         <>
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-[16px] min-[1180px]:grid-cols-[minmax(0,1fr)_300px]">
-            <div className="min-w-0">
-              <TituloBloco>Prompt da justificativa técnica</TituloBloco>
-              <Textarea
-                rows={20}
-                className="font-mono text-xs leading-relaxed"
-                value={prompt}
-                spellCheck={false}
-                aria-label="Prompt da justificativa técnica"
-                onChange={(e) => {
-                  setTocado(true)
-                  setPrompt(e.target.value)
-                }}
-              />
-              {desconhecidas.length > 0 && (
-                <p className="mt-s2 flex items-start gap-s1.5 text-xs text-aviso">
-                  <TriangleAlert className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
-                  <span>
-                    Variável que a plataforma não conhece (fica no texto como está):{' '}
-                    {desconhecidas.map((v) => `{{${v}}}`).join(', ')}
-                  </span>
-                </p>
-              )}
-              {anexouDados && prompt.trim() !== '' && (
-                <p className="mt-s2 flex items-start gap-s1.5 text-xs text-texto-2">
-                  <Info className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
-                  <span>
-                    Os dados do crédito vão junto sozinhos, no fim do prompt (o mesmo bloco de{' '}
-                    <code>{'{{card}}'}</code>). As variáveis são opcionais: servem só para pôr um dado num ponto
-                    específico do texto.
-                  </span>
-                </p>
-              )}
-            </div>
-            <aside aria-label="Variáveis do prompt" className="min-w-0">
-              <TituloBloco>Variáveis</TituloBloco>
-              <p className="mb-s3 text-xs text-texto-3">
-                Escreva entre chaves duplas. O que a plataforma não tiver entra como “(não informado)”.
-              </p>
-              <dl className="m-0 max-h-[460px] space-y-s3 overflow-y-auto rounded-campo bg-superficie-2 p-s3 scrollbar-thin">
-                {VARIAVEIS_DA_JUSTIFICATIVA.map((v) => (
-                  <div key={v.nome}>
-                    <dt className="font-mono text-xs font-semibold text-marca-texto">{`{{${v.nome}}}`}</dt>
-                    <dd className="m-0 text-xs text-texto-2">
-                      {v.vale} <span className="text-texto-3">{v.fonte}</span>
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </aside>
-          </div>
-
-          <div className="mt-[20px]">
-            <TituloBloco>Domínios permitidos na pesquisa</TituloBloco>
-            <p className="mb-s2 text-xs text-texto-3">
-              Um por linha. Vazio = sem restrição — e é o recomendado: a referência de deságio de mercado quase nunca
-              está em site oficial.
-            </p>
+          <div className="min-w-0">
+            <TituloBloco>Prompt da justificativa técnica</TituloBloco>
             <Textarea
-              rows={5}
+              rows={22}
               className="font-mono text-xs leading-relaxed"
-              value={dominios}
+              value={prompt}
               spellCheck={false}
-              placeholder={'cnj.jus.br\nstf.jus.br'}
-              aria-label="Domínios permitidos na pesquisa"
+              aria-label="Prompt da justificativa técnica"
               onChange={(e) => {
                 setTocado(true)
-                setDominios(e.target.value)
+                setPrompt(e.target.value)
               }}
             />
-            <div className="mt-s2 flex flex-wrap items-center gap-s2">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setTocado(true)
-                  setDominios(DOMINIOS_SUGERIDOS.join('\n'))
-                }}
-              >
-                Usar a lista sugerida de fontes oficiais
-              </Button>
-              <span className="text-xs text-texto-3">
-                {lidos.dominios.length === 0
-                  ? 'Sem restrição de domínio.'
-                  : `${lidos.dominios.length} domínio(s): a pesquisa só busca e abre páginas deles.`}
+            <p className="mt-s2 flex items-start gap-s1.5 text-xs text-texto-2">
+              <Info className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
+              <span>
+                Escreva só as instruções. Os dados do crédito (cedente, processo, ente devedor, valores, proposta e
+                cotações) vão junto sozinhos, e a pesquisa é livre na internet — para pedir fontes confiáveis, diga
+                isso no prompt.
               </span>
-            </div>
-            {lidos.recusados.length > 0 && (
-              <p className="mt-s2 flex items-start gap-s1.5 text-xs text-aviso">
-                <TriangleAlert className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
-                <span>Não é domínio e fica de fora ao salvar: {lidos.recusados.join(', ')}</span>
-              </p>
-            )}
+            </p>
           </div>
 
           <RodapeSecao>
