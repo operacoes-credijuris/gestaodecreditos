@@ -14,7 +14,6 @@ import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
 import { ESQUEMA_DA_EXTRACAO, saidaDaExtracao } from '../_shared/extracaoDoCredito.ts'
 import {
-  ESFORCO_PADRAO_DO_OPUS,
   lerSaidaEstruturada,
   type NoFormatoDoOpus,
 } from '../_shared/respostaDoClaude.ts'
@@ -157,7 +156,9 @@ Deno.serve(async (req: Request) => {
       // _shared/extracaoDoCredito.ts. Esforço 'high', o padrão do Opus 5: o
       // do 5.5 é 'medium', e omitir seria rebaixar a leitura sem decidir.
       output_config: {
-        effort: ESFORCO_PADRAO_DO_OPUS,
+        // 'medium': extração de campos, que no Opus 5 rodava sem raciocínio
+        // nenhum; 'high' só alongaria a espera de quem escolheu a pasta.
+        effort: 'medium',
         format: { type: 'json_schema', schema: ESQUEMA_DA_EXTRACAO },
       },
       messages: [

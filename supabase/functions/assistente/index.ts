@@ -2545,6 +2545,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Pergunta inválida.' }, 400)
     }
     const modeloResolvido = resolverModeloDoAssistente(modelo)
+    const ehHaiku = modeloResolvido.startsWith('claude-haiku')
 
     const svc = callerClient(req)
     const anthropic = new Anthropic({ apiKey })
@@ -2651,8 +2652,14 @@ Deno.serve(async (req: Request) => {
         // ligado até no caminho barato porque, com ele desligado, o Sonnet
         // aciona ferramentas com menos disposição — e aqui TODA resposta
         // depende de uma consulta. O esforço é que muda entre os caminhos.
-        thinking: { type: 'adaptive' },
-        output_config: { effort: interpretandoTexto ? 'high' : 'low' },
+        // O HAIKU 4.5 NÃO TEM raciocínio adaptativo nem nível de esforço:
+        // mandar os dois a ele dava erro (defeito antigo, achado em 05/10/2026).
+        ...(ehHaiku
+          ? {}
+          : {
+              thinking: { type: 'adaptive' as const },
+              output_config: { effort: interpretandoTexto ? ('high' as const) : ('low' as const) },
+            }),
       }
       if (skills.length > 0) {
         params.container = {

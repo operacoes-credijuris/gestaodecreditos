@@ -99,7 +99,6 @@ import {
 import { tituloNome } from "../_shared/pastaDaAnalise.ts";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 import {
-  ESFORCO_PADRAO_DO_OPUS,
   chamadaDaFerramenta,
   pedidoParaChamarAFerramenta,
   textoDaResposta,
@@ -146,7 +145,10 @@ const CLAUDE_MODEL = 'claude-opus-5-5';
  * que estas leituras já tiveram — dentro do mesmo teto de 150 s de parede. Se
  * aparecer 504, este é o primeiro botão: 'medium' ou 'low'.
  */
-const ESFORCO = ESFORCO_PADRAO_DO_OPUS;
+// 'medium' DESDE A MIGRAÇÃO (05/10/2026): a análise já levava ~2 min do teto
+// de 150 s quando as extrações rodavam sem raciocínio, e no 5.5 ele é
+// obrigatório. Pela documentação, o 5.5 em 'medium' supera o Opus 5 em 'high'.
+const ESFORCO = 'medium' as const;
 // 32000, e não 16000: no Opus 5.5 o raciocínio, sempre ligado, conta DENTRO do
 // teto. A extração da análise é grande (M1+M2+M4), e cortada ela se perde.
 const CLAUDE_MAX_TOKENS = 32000;
