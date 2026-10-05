@@ -1,4 +1,5 @@
 import type { EntradaOportunidade } from './anotacaoKommo'
+import type { ValorDeCampo } from '../../supabase/functions/_shared/cotacaoDoFundo.ts'
 
 // Tipos de domínio do sistema Credijuris.
 // Espelham as tabelas da migração 0001_init.sql. Para tipagem 100% gerada
@@ -129,6 +130,13 @@ export interface KommoLead {
    */
   etapa_status_id: number | null
   sincronizado_em: string
+  /**
+   * O lead como o kommo-sync o leu do Kommo (coluna `raw`, jsonb). A tela usa
+   * só os campos personalizados — as cotações dos fundos, no grupo
+   * "Cotações/propostas" (ver _shared/cotacaoDoFundo.ts). A kommo-etiquetar
+   * troca ali o campo que acabou de gravar.
+   */
+  raw?: { custom_fields_values?: ValorDeCampo[] | null } | null
 }
 
 /**

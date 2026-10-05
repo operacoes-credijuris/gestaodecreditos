@@ -58,6 +58,7 @@ import {
   RefreshCw,
   Landmark,
   Handshake,
+  Pencil,
   Loader2,
   MessageSquarePlus,
   Paperclip,
@@ -84,6 +85,7 @@ import {
   type AtoDoEnvio,
   type FundoDoEnvio,
   ATOS_DA_PRECIFICACAO,
+  ETIQUETAS_DA_PRECIFICACAO,
   desdeQuandoAEtiqueta,
   etiquetaCanonica,
   etiquetasDaAba,
@@ -197,6 +199,15 @@ import {
   type PorCard,
 } from '@/lib/emCursoPorCard'
 import { TextoComTermos } from '@/components/layout/TextoComTermos'
+import { JanelaDeCotacao } from '@/components/JanelaDeCotacao'
+import {
+  comCotacaoGravada,
+  type Cotacao,
+  type CotacaoLida,
+  cotacoesDoCard,
+  formatarReais,
+  type ValorDeCampo,
+} from '../../../supabase/functions/_shared/cotacaoDoFundo.ts'
 
 // ===== Análise automática do card (Judit -> due diligence -> planilha) =====
 // Lê os dados do próprio card (título + notas) e roda a sequência no motor.
@@ -1264,6 +1275,7 @@ function SeletorDeEtiquetas({
   datas,
   emVoo,
   onAlternar,
+  onEditarCotacao,
 }: {
   oferecidas: readonly EtiquetaDoFundo[]
   /** As etiquetas que o card tem hoje — inclusive as de fora da lista. */
@@ -1273,6 +1285,11 @@ function SeletorDeEtiquetas({
   /** A etiqueta DESTE card que está em voo, ou null. */
   emVoo: string | null
   onAlternar: (etiqueta: string, acao: 'adicionar' | 'remover') => void
+  /**
+   * Reabre a janela da cotação de um "Cotado" já marcado — o lápis ao lado do
+   * fundo. Clicar no círculo marcado continua DESMARCANDO (e não apaga o campo).
+   */
+  onEditarCotacao?: (etiqueta: string) => void
 }) {
   const [aberto, setAberto] = useState(false)
   const caixa = useRef<HTMLDivElement>(null)
@@ -1330,8 +1347,27 @@ function SeletorDeEtiquetas({
                 <Fragment key={grupo.destino}>
                   {/* O FUNDO COM ETIQUETA fica em destaque: numa lista de sete, é
                       o que se procura primeiro. */}
-                  <span className={marcada ? 'font-bold text-texto' : 'font-medium text-texto-2'}>
-                    {grupo.destino}
+                  <span
+                    className={cn(
+                      'flex min-w-0 items-center gap-s1',
+                      marcada ? 'font-bold text-texto' : 'font-medium text-texto-2',
+                    )}
+                  >
+                    <span className="truncate">{grupo.destino}</span>
+                    {/* O LÁPIS DA COTAÇÃO, só com "Cotado" marcado: reabre a
+                        janela com o valor do card, e Enviar o sobrescreve. */}
+                    {onEditarCotacao && marcada?.ato === 'Cotado' && (
+                      <button
+                        type="button"
+                        disabled={emVoo !== null}
+                        onClick={() => onEditarCotacao(marcada.nome)}
+                        title={`Alterar a cotação (${grupo.destino})`}
+                        aria-label={`Alterar a cotação de "${marcada.nome}"`}
+                        className="grid h-[24px] w-[24px] shrink-0 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-marca-texto disabled:cursor-progress"
+                      >
+                        <Pencil className="h-[14px] w-[14px]" aria-hidden />
+                      </button>
+                    )}
                   </span>
                   {ATOS_DA_PRECIFICACAO.map((ato) => {
                     const e = grupo.etiquetas.find((x) => x.ato === ato)
@@ -1380,6 +1416,36 @@ function SeletorDeEtiquetas({
 }
 
 /**
+ * O VALOR E A COMISSÃO de um fundo, alinhados à direita e em números tabulares:
+ * a proposta na linha de cima, a comissão embaixo, em texto secundário. Sem
+ * cotação, "—". O que alguém escreveu à mão no Kommo e não se lê como valor
+ * aparece como está, cortado, com o texto inteiro no passar do mouse.
+ */
+function ValoresDaCotacao({ cotacao }: { cotacao: CotacaoLida | null }) {
+  if (!cotacao) return <span className="text-corpo tabular-nums text-texto-3">—</span>
+  if (cotacao.proposta === null) {
+    return (
+      <span className="block max-w-[150px] truncate text-right text-xs text-texto-2" title={cotacao.texto}>
+        {cotacao.texto}
+      </span>
+    )
+  }
+  const comissao = cotacao.comissao
+  return (
+    <span className="block whitespace-nowrap text-right tabular-nums">
+      <span className="block text-corpo font-semibold text-texto">{formatarReais(cotacao.proposta)}</span>
+      <span className="block text-xs text-texto-2">
+        {comissao === null
+          ? 'Comissão —'
+          : comissao.modalidade === 'spread'
+            ? 'Comissão em spread'
+            : `Comissão ${formatarReais(comissao.centavos)}`}
+      </span>
+    </span>
+  )
+}
+
+/**
  * ESCOLHER A PROPOSTA: os fundos responderam, e a casa escolhe com qual seguir.
  *
  * DOIS PASSOS NA MESMA CAIXA — o fundo, e depois a confirmação —, porque o
@@ -1389,6 +1455,9 @@ function SeletorDeEtiquetas({
  *
  * AO LADO DE CADA FUNDO, O QUE ELE RESPONDEU — a etiqueta que o card tem dele e
  * há quanto tempo —, para escolher sem sair da caixa. O cotado fica em destaque.
+ * E, à direita, O VALOR DA PROPOSTA E A COMISSÃO que ele ofereceu (05/10/2026),
+ * lidos dos campos do card: lado a lado, sem ranking — spread e limitada não se
+ * comparam direto.
  */
 function BotaoEscolherProposta({
   lead,
@@ -1413,6 +1482,14 @@ function BotaoEscolherProposta({
     const e = grupo?.etiquetas.find((x) => (lead.tags ?? []).some((t) => mesmaEtiqueta(t, x.nome)))
     return e ? { ato: e.ato, desde: desdeQuandoAEtiqueta(lead.tags_em, e.nome) } : null
   }
+
+  /**
+   * A COTAÇÃO DE CADA FUNDO, lida dos campos do card no Kommo (aba
+   * "Cotações/propostas") — o espelho os guarda em `raw`, e a kommo-etiquetar
+   * troca ali o que acabou de gravar. Só mostrar: spread e limitada não se
+   * comparam direto, e a escolha é de quem lê.
+   */
+  const cotacoes = cotacoesDoCard(lead.raw?.custom_fields_values)
 
   async function confirmar() {
     if (!fundo) return
@@ -1445,38 +1522,53 @@ function BotaoEscolherProposta({
       </Button>
 
       {aberto && (
-        <div className={cn(CAIXA_FLUTUANTE, 'right-0 w-[300px]')}>
+        <div className={cn(CAIXA_FLUTUANTE, 'right-0 w-[360px] max-w-[calc(100vw-48px)]')}>
           {fundo === null ? (
             <>
-              <p className="px-2.5 pb-1 pt-2 text-xs font-bold uppercase tracking-[.05em] text-texto-3">
-                Seguir com a proposta de
+              <p className="flex items-baseline justify-between gap-s3 px-s3 pb-s1 pt-s2 text-xs font-bold uppercase tracking-[.06em] text-texto-3">
+                <span>Seguir com a proposta de</span>
+                <span className="whitespace-nowrap">Proposta</span>
               </p>
               {FUNDOS_DA_PRECIFICACAO.map((f) => {
                 const s = situacao(f)
+                const c = cotacoes[f]
                 return (
                   <button
                     key={f}
                     type="button"
                     onClick={() => setFundo(f)}
-                    className={cn(
-                      'flex h-[36px] w-full items-center gap-2.5 rounded-controle px-2.5 text-left text-corpo text-texto hover:bg-superficie-3 focus-visible:bg-superficie-3',
-                      s?.ato === 'Cotado' && 'font-bold',
-                    )}
+                    className="grid min-h-[36px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-s4 rounded-controle px-s3 py-s1.5 text-left hover:bg-superficie-3 focus-visible:bg-superficie-3"
                   >
-                    {f}
-                    {s && (
-                      <span className="ml-auto whitespace-nowrap text-xs font-normal text-texto-3">
-                        {s.ato}
-                        {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
+                    <span className="min-w-0">
+                      <span
+                        className={cn(
+                          'block truncate text-corpo text-texto',
+                          s?.ato === 'Cotado' ? 'font-bold' : 'font-medium',
+                        )}
+                      >
+                        {f}
                       </span>
-                    )}
+                      {s && (
+                        <span className="block whitespace-nowrap text-xs text-texto-3">
+                          {s.ato}
+                          {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
+                        </span>
+                      )}
+                    </span>
+                    <ValoresDaCotacao cotacao={c} />
                   </button>
                 )
               })}
             </>
           ) : (
             <div>
-              <p className="px-2.5 pb-1 pt-2.5 text-corpo text-texto">{mensagemDaProposta(fundo)}</p>
+              <p className="px-s3 pb-s1 pt-s3 text-corpo text-texto">{mensagemDaProposta(fundo)}</p>
+              {cotacoes[fundo] && (
+                <div className="mx-s3 mt-s1 flex items-center justify-between gap-s4 rounded-campo bg-superficie-2 px-s3 py-s2">
+                  <span className="text-xs font-bold uppercase tracking-[.06em] text-texto-3">Proposta</span>
+                  <ValoresDaCotacao cotacao={cotacoes[fundo]} />
+                </div>
+              )}
               <div className="flex justify-end gap-2 px-2 pb-2 pt-2">
                 <Button size="sm" variant="secondary" className={BTN} onClick={() => setFundo(null)} disabled={carregando}>
                   Voltar
@@ -2369,6 +2461,7 @@ function CardCredito({
   mostrarTags,
   etiquetasOferecidas,
   onEtiquetar,
+  onEditarCotacao,
   etiquetaEmVoo,
   onAnotar,
   onEscolherProposta,
@@ -2439,6 +2532,8 @@ function CardCredito({
    */
   etiquetasOferecidas: readonly EtiquetaDoFundo[]
   onEtiquetar: (l: KommoLead, etiqueta: string, acao: 'adicionar' | 'remover') => void
+  /** Reabre a janela da cotação de um "Cotado" já marcado (o lápis do seletor). */
+  onEditarCotacao?: (l: KommoLead, etiqueta: string) => void
   /** A etiqueta deste card que está sendo gravada, ou null. */
   etiquetaEmVoo: string | null
   /** Escreve uma anotação no card do Kommo — ver `BotaoDeAnotacao`. */
@@ -2737,6 +2832,7 @@ function CardCredito({
                 datas={lead.tags_em}
                 emVoo={etiquetaEmVoo}
                 onAlternar={(etiqueta, acao) => onEtiquetar(lead, etiqueta, acao)}
+                onEditarCotacao={onEditarCotacao ? (etiqueta) => onEditarCotacao(lead, etiqueta) : undefined}
               />
             )}
           </div>
@@ -4628,6 +4724,76 @@ export default function AnaliseCredito() {
   })
 
   /**
+   * A JANELA DA COTAÇÃO aberta, ou null: o card e a etiqueta "Cotado ‹fundo›"
+   * que entra quando ela for enviada.
+   */
+  const [cotando, setCotando] = useState<{ lead: KommoLead; etiqueta: string; fundo: string } | null>(null)
+  /**
+   * A TRAVA DA COTAÇÃO, num ref: o estado `etiquetaEmVoo` só muda no próximo
+   * render, e um duplo clique em Enviar cabe antes dele — gravaria duas vezes e
+   * deixaria duas notas no card. O estado continua sendo o que trava o seletor.
+   */
+  const cotacaoEmVoo = useRef(new Set<number>())
+
+  /** "Cotado ‹fundo›" na Em precificação: em vez de etiquetar já, abre a janela. */
+  function abrirCotacao(lead: KommoLead, etiqueta: string) {
+    const e = ETIQUETAS_DA_PRECIFICACAO.find((x) => mesmaEtiqueta(x.nome, etiqueta))
+    if (!e || e.ato !== 'Cotado') return
+    setCotando({ lead, etiqueta: e.nome, fundo: e.destino })
+  }
+
+  /**
+   * ENVIA A COTAÇÃO: o valor no campo do fundo e a etiqueta, num pedido só (ver
+   * a `kommo-etiquetar`). LANÇA com a mensagem quando falha — a janela a mostra
+   * e fica aberta, com o que foi digitado.
+   */
+  async function enviarCotacao(lead: KommoLead, etiqueta: string, cotacao: Cotacao) {
+    const id = lead.kommo_lead_id
+    if (cotacaoEmVoo.current.has(id) || etiquetaEmVoo[id] !== undefined) {
+      throw new Error('Há uma etiqueta deste card sendo gravada — espere terminar.')
+    }
+    cotacaoEmVoo.current.add(id)
+    setEtiquetaEmVoo((m) => comecarNoCard(m, id, etiqueta))
+    try {
+      const r = await invokeFunction<{
+        tags: string[]
+        aviso: string | null
+        cotacao?: { texto: string; campo: { id: number; name: string; type: string } }
+        campos?: ValorDeCampo[] | null
+      }>('kommo-etiquetar', { leadId: id, etiqueta, acao: 'adicionar', cotacao })
+      qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+        antes?.map((l) => {
+          if (l.kommo_lead_id !== id) return l
+          const tags = r?.tags ?? l.tags
+          // As datas como no `etiquetar`: a que entrou é de agora, as que
+          // saíram deixam o mapa.
+          const datas: Record<string, string | null> = Object.fromEntries(
+            Object.entries(l.tags_em ?? {}).filter(
+              ([k]) => tags.some((t) => mesmaEtiqueta(t, k)) && !mesmaEtiqueta(k, etiqueta),
+            ),
+          )
+          datas[etiqueta] = new Date().toISOString()
+          // OS CAMPOS RELIDOS do Kommo; sem eles, só o campo gravado trocado.
+          const campos =
+            r?.campos ??
+            (r?.cotacao ? comCotacaoGravada(l.raw?.custom_fields_values, r.cotacao.campo, r.cotacao.texto) : null)
+          return {
+            ...l,
+            tags,
+            tags_em: datas,
+            ...(campos ? { raw: { ...(l.raw ?? {}), custom_fields_values: campos } } : {}),
+          }
+        }),
+      )
+      if (r?.aviso) toast.error(r.aviso)
+      setCotando(null)
+    } finally {
+      cotacaoEmVoo.current.delete(id)
+      setEtiquetaEmVoo((m) => terminarNoCard(m, id))
+    }
+  }
+
+  /**
    * Mover o card e deixar a mensagem como NOTA — o único caminho, para os dois
    * lugares em que se decide um desfecho (a janela de análise, em Pendentes, e
    * a janela do card, em Validação).
@@ -5490,9 +5656,22 @@ export default function AnaliseCredito() {
                   etiquetasOferecidas={etiquetasDaAba(abaAtual?.key)}
                   onEtiquetar={(l, etiqueta, acao) => {
                     if (etiquetaEmVoo[l.kommo_lead_id] !== undefined) return
+                    // "COTADO ‹FUNDO›" ABRE A JANELA DA COTAÇÃO (05/10/2026): a
+                    // etiqueta só entra com o valor, pelo Enviar dela. Tirar a
+                    // etiqueta, e "Enviado"/"Reprovado", seguem como sempre. O
+                    // seletor só existe na Em precificação (`etiquetasDaAba`) — a
+                    // Remessa aos fundos tem o seu próprio caminho e não passa aqui.
+                    if (
+                      acao === 'adicionar' &&
+                      etiquetasDaAba(abaAtual?.key).some((e) => e.ato === 'Cotado' && mesmaEtiqueta(e.nome, etiqueta))
+                    ) {
+                      abrirCotacao(l, etiqueta)
+                      return
+                    }
                     setEtiquetaEmVoo((m) => comecarNoCard(m, l.kommo_lead_id, etiqueta))
                     etiquetar.mutate({ leadId: l.kommo_lead_id, etiqueta, acao })
                   }}
+                  onEditarCotacao={etiquetasDaAba(abaAtual?.key).length > 0 ? abrirCotacao : undefined}
                   etiquetaEmVoo={etiquetaEmVoo[l.kommo_lead_id] ?? null}
                   // A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026).
                   onAnotar={anotarNoCard}
@@ -5599,6 +5778,20 @@ export default function AnaliseCredito() {
             await enviarAoFundo(envioAberto.lead, envioAberto.fundo, ato, texto, arquivos, onAndamento)
             setEnvioAberto(null)
           }}
+        />
+      )}
+
+      {/* A JANELA DA COTAÇÃO, aberta pelo "Cotado ‹fundo›" do seletor (ou pelo
+          lápis ao lado dele): pré-preenchida com o que o campo do card já tem. */}
+      {cotando && (
+        <JanelaDeCotacao
+          key={`${cotando.lead.kommo_lead_id}-${cotando.etiqueta}`}
+          fundo={cotando.fundo}
+          etiqueta={cotando.etiqueta}
+          atual={cotacoesDoCard(cotando.lead.raw?.custom_fields_values)[cotando.fundo] ?? null}
+          enviando={etiquetaEmVoo[cotando.lead.kommo_lead_id] !== undefined}
+          onEnviar={(c) => enviarCotacao(cotando.lead, cotando.etiqueta, c)}
+          onFechar={() => setCotando(null)}
         />
       )}
 

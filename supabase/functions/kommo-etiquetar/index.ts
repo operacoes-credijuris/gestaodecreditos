@@ -27,19 +27,97 @@
 //
 // USO (POST, com sessão logada):
 //   { "leadId": 15269795, "etiqueta": "Enviado PJus", "acao": "adicionar" }
+//
+// COM A COTAÇÃO (05/10/2026), só para "Cotado ‹fundo›" e só ao adicionar:
+//   { "leadId": 15269795, "etiqueta": "Cotado PX Ativos", "acao": "adicionar",
+//     "cotacao": { "propostaCentavos": 85000000,
+//                  "comissao": { "modalidade": "limitada", "centavos": 4000000 } } }
+// O texto "R$ 850.000,00 / R$ 40.000,00" vai para o campo do fundo no grupo
+// "Cotações/propostas" do card, NO MESMO PATCH da etiqueta (ver o passo 1). Sem
+// `cotacao`, a função faz exatamente o que fazia — a tela antiga continua só
+// pondo a etiqueta.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
 import {
+  ETIQUETAS_DA_PRECIFICACAO,
   etiquetaCanonica,
   irmasDaEtiqueta,
   mesmaEtiqueta,
   datasDasEtiquetas,
 } from '../_shared/etiquetasDoFundo.ts'
 import { trilhaDoPipeline } from '../_shared/trilhasDoPrecatorio.ts'
+import {
+  type CampoDoKommo,
+  campoDoFundo,
+  comCotacaoGravada,
+  type Cotacao,
+  type GrupoDoKommo,
+  textoDaCotacao,
+  validarCotacao,
+  type ValorDeCampo,
+} from '../_shared/cotacaoDoFundo.ts'
 
 /** Rótulo exibido no selo da anotação, dentro do card — o mesmo da kommo-mover. */
 const SERVICO = 'Operacional'
+
+// ------------------------------------------------------------------ o mapa dos campos
+//
+// OS CAMPOS DA CONTA, EM CACHE NA INSTÂNCIA. Achar o campo "PX Ativos" exige a
+// lista de campos de lead (paginada) e a dos grupos — duas ou três chamadas ao
+// Kommo, que tem teto de 7/s e bloqueia o IP de quem abusa. Pedir isso a cada
+// clique de "Cotado" seria pagar o mapa inteiro para gravar um texto; ele muda
+// quando alguém cria um campo no painel, isto é, quase nunca.
+//
+// DEZ MINUTOS, e um atalho: campo não achado num mapa com mais de 30 segundos
+// faz UMA releitura antes de recusar — é o caso de quem acabou de criar o campo
+// no Kommo e clica de novo.
+const VALIDADE_DO_MAPA_MS = 10 * 60 * 1000
+const RELEITURA_MINIMA_MS = 30 * 1000
+let mapaDosCampos: { base: string; em: number; campos: CampoDoKommo[]; grupos: GrupoDoKommo[] } | null = null
+
+/** Lê do Kommo os campos de lead (todas as páginas) e os grupos deles. Lança com o motivo. */
+async function lerCamposDaConta(
+  base: string,
+  headers: Record<string, string>,
+): Promise<{ campos: CampoDoKommo[]; grupos: GrupoDoKommo[] }> {
+  const campos: CampoDoKommo[] = []
+  for (let pagina = 1; pagina <= 20; pagina++) {
+    const res = await fetch(`${base}/leads/custom_fields?limit=50&page=${pagina}`, { headers })
+    // 204 é "não há (mais) nada" — e o corpo vem vazio, então .json() estouraria.
+    if (res.status === 204) break
+    if (!res.ok) throw new Error(`Não consegui ler os campos do card no Kommo (HTTP ${res.status}).`)
+    const j = (await res.json()) as {
+      _embedded?: { custom_fields?: CampoDoKommo[] }
+      _links?: { next?: { href?: string } }
+    }
+    campos.push(...(j._embedded?.custom_fields ?? []))
+    if (!j._links?.next?.href) break
+  }
+  // OS GRUPOS SÃO PREFERÊNCIA, não requisito: sem eles, vale o campo de mesmo
+  // nome em qualquer aba (ver `campoDoFundo`). Falhar aqui não impede a cotação.
+  let grupos: GrupoDoKommo[] = []
+  try {
+    const res = await fetch(`${base}/leads/custom_fields/groups`, { headers })
+    if (res.ok && res.status !== 204) {
+      const j = (await res.json()) as { _embedded?: { custom_field_groups?: GrupoDoKommo[] } }
+      grupos = j._embedded?.custom_field_groups ?? []
+    }
+  } catch { /* segue sem os grupos */ }
+  return { campos, grupos }
+}
+
+async function camposDaConta(base: string, headers: Record<string, string>, forcar = false) {
+  const agora = Date.now()
+  if (
+    !forcar && mapaDosCampos && mapaDosCampos.base === base &&
+    agora - mapaDosCampos.em < VALIDADE_DO_MAPA_MS
+  ) {
+    return mapaDosCampos
+  }
+  mapaDosCampos = { base, em: agora, ...(await lerCamposDaConta(base, headers)) }
+  return mapaDosCampos
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -54,6 +132,7 @@ Deno.serve(async (req: Request) => {
       leadId?: number
       etiqueta?: string
       acao?: string
+      cotacao?: unknown
     }
     const leadId = Number(body.leadId)
     const acao = String(body.acao ?? '')
@@ -77,6 +156,23 @@ Deno.serve(async (req: Request) => {
       )
     }
 
+    // A COTAÇÃO, quando vem: só com "Cotado ‹fundo›" e só ao pôr. É conferida
+    // AQUI, antes de qualquer chamada ao Kommo — valor inválido não pode deixar
+    // meia gravação no card.
+    let cotacao: Cotacao | null = null
+    const daLista = ETIQUETAS_DA_PRECIFICACAO.find((e) => e.nome === etiqueta)
+    if (body.cotacao !== undefined && body.cotacao !== null) {
+      if (acao !== 'adicionar' || daLista?.ato !== 'Cotado') {
+        return jsonResponse(
+          { error: 'A cotação só acompanha a etiqueta "Cotado" de um fundo, ao pô-la.', gravado: false },
+          400,
+        )
+      }
+      const v = validarCotacao(body.cotacao)
+      if (!v.ok) return jsonResponse({ error: v.erro, gravado: false }, 400)
+      cotacao = v.cotacao
+    }
+
     const svc = serviceClient()
 
     // O CARD PRECISA SER DE PRECATÓRIO, e o espelho é quem diz de qual funil ele
@@ -84,7 +180,9 @@ Deno.serve(async (req: Request) => {
     // da conta — inclusive os do comercial, que não são desta tela.
     const { data: espelho } = await svc
       .from('kommo_leads')
-      .select('pipeline_id, tags')
+      // O `raw` (o lead como o sync o leu, uma linha): é ali que moram os campos
+      // do card, e é ali que a cotação nova entra no espelho.
+      .select('pipeline_id, tags, raw')
       .eq('kommo_lead_id', leadId)
       .maybeSingle()
     if (!espelho) {
@@ -112,6 +210,43 @@ Deno.serve(async (req: Request) => {
     // porque o crédito está num dos dois e não nos dois. Duas chamadas fariam a
     // mesma coisa e deixariam um estado intermediário visível — sem etiqueta
     // nenhuma, ou com as duas — se a segunda falhasse.
+    //
+    // E A COTAÇÃO TAMBÉM: `custom_fields_values` no mesmo PATCH. O Kommo valida
+    // a requisição inteira antes de aplicar, então o card fica com as duas
+    // coisas ou com nenhuma — a etiqueta "Cotado" não aparece sem o valor, nem o
+    // valor sem a etiqueta. E o PATCH de `custom_fields_values` só toca os
+    // campos que leva: os outros campos do card ficam como estão, assim como as
+    // outras etiquetas com `tags_to_add`.
+    //
+    // O CAMPO É ACHADO ANTES, pelo nome do fundo (ver `campoDoFundo`). Não achado,
+    // ou de tipo que não aceita texto: nada vai ao card, e a resposta diz qual
+    // campo falta — a janela da tela fica aberta, com o que foi digitado.
+    let campo: CampoDoKommo | null = null
+    let textoDoCampo: string | null = null
+    if (cotacao && daLista) {
+      try {
+        let mapa = await camposDaConta(base, headers)
+        let achado = campoDoFundo(daLista.destino, mapa.campos, mapa.grupos)
+        if (!achado.ok && Date.now() - mapa.em > RELEITURA_MINIMA_MS) {
+          mapa = await camposDaConta(base, headers, true)
+          achado = campoDoFundo(daLista.destino, mapa.campos, mapa.grupos)
+        }
+        if (!achado.ok) {
+          return jsonResponse(
+            { error: `${achado.erro} A etiqueta não foi posta.`, codigo: 'campo-da-cotacao', gravado: false },
+            400,
+          )
+        }
+        campo = achado.campo
+      } catch (e) {
+        return jsonResponse(
+          { error: `${(e as Error).message} Nada foi gravado no card.`, gravado: false },
+          502,
+        )
+      }
+      textoDoCampo = textoDaCotacao(cotacao)
+    }
+
     const irmas = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta) : []
     // A GRAFIA QUE O CARD TEM SAI JUNTO: "Enviado PJUS", de antes de a PJus
     // passar a ser escrita assim (01/10/2026), é a mesma etiqueta para a casa,
@@ -127,6 +262,9 @@ Deno.serve(async (req: Request) => {
       ? {
         tags_to_add: [{ name: etiqueta }],
         ...(aTirar.length > 0 ? { tags_to_delete: aTirar.map((name) => ({ name })) } : {}),
+        ...(campo && textoDoCampo
+          ? { custom_fields_values: [{ field_id: campo.id, values: [{ value: textoDoCampo }] }] }
+          : {}),
       }
       : { tags_to_delete: aTirar.map((name) => ({ name })) }
     const res = await fetch(`${base}/leads/${leadId}`, {
@@ -138,8 +276,11 @@ Deno.serve(async (req: Request) => {
       const txt = await res.text().catch(() => '')
       return jsonResponse(
         {
-          error: `Kommo recusou a etiqueta (HTTP ${res.status}).`,
+          error: campo
+            ? `Kommo recusou a cotação e a etiqueta (HTTP ${res.status}); nada foi gravado no card.`
+            : `Kommo recusou a etiqueta (HTTP ${res.status}).`,
           detalhe: txt.slice(0, 300),
+          ...(campo ? { gravado: false } : {}),
         },
         502,
       )
@@ -151,17 +292,23 @@ Deno.serve(async (req: Request) => {
     // tela mostra em seguida é o que o Kommo tem, inclusive a etiqueta que o
     // comercial pôs há dez minutos e o nosso sync ainda não trouxe.
     let tags: string[] | null = null
+    // Os campos do card relidos (só com cotação): o que a tela põe no cache.
+    let campos: ValorDeCampo[] | null = null
     let aviso: string | null = null
     try {
       const resLead = await fetch(`${base}/leads/${leadId}`, { headers })
       if (resLead.ok) {
         const lead = (await resLead.json()) as {
           _embedded?: { tags?: { name?: string }[] }
+          custom_fields_values?: ValorDeCampo[] | null
         }
         const lidas = lead?._embedded?.tags
         if (Array.isArray(lidas)) {
           tags = lidas.map((t) => String(t?.name ?? '').trim()).filter(Boolean)
         }
+        // `null` no Kommo é "card sem campo preenchido" — aqui não acontece, porque
+        // acabamos de preencher um; o [] só protege a forma.
+        if (campo) campos = Array.isArray(lead?.custom_fields_values) ? lead.custom_fields_values : []
       }
     } catch {
       /* rede: cai no cálculo local, e o aviso abaixo explica */
@@ -183,9 +330,19 @@ Deno.serve(async (req: Request) => {
     // 3. O ESPELHO. Sem isto a tela mostraria a lista antiga até o próximo sync
     // — e o defeito seria mudo, porque supabase-js devolve { error } em vez de
     // lançar, e retorno que ninguém lê é falha que ninguém vê.
+    //
+    // COM COTAÇÃO, os campos do card vão para o `raw` — é de lá que a janela
+    // "Escolher proposta" lê, e sem isto ela mostraria o valor antigo até o
+    // próximo sync. Sem a releitura, troca-se só o campo gravado.
+    const rawAntes = ((espelho as { raw?: Record<string, unknown> | null }).raw ?? {}) as {
+      custom_fields_values?: ValorDeCampo[] | null
+    }
+    if (campo && textoDoCampo && !campos) {
+      campos = comCotacaoGravada(rawAntes.custom_fields_values, campo, textoDoCampo)
+    }
     const { error: eEspelho } = await svc
       .from('kommo_leads')
-      .update({ tags })
+      .update(campo && campos ? { tags, raw: { ...rawAntes, custom_fields_values: campos } } : { tags })
       .eq('kommo_lead_id', leadId)
     // A DATA DA ETIQUETA, na hora (migração 0074): é o "hoje" que aparece ao
     // lado dela. Gravação à parte e sem aviso se falhar — sem a coluna, a
@@ -233,14 +390,15 @@ Deno.serve(async (req: Request) => {
     const substituidas = irmas.filter((i) =>
       ((espelho.tags ?? []) as string[]).some((t) => mesmaEtiqueta(t, i)),
     )
+    const comCotacao = textoDoCampo ? ` Cotação: ${textoDoCampo}.` : ''
     const texto =
-      acao === 'adicionar'
+      (acao === 'adicionar'
         ? substituidas.length > 0
           ? `Etiqueta "${etiqueta}" aplicada por ${autor}, no lugar de ${
             substituidas.map((t) => `"${t}"`).join(', ')
           }.`
           : `Etiqueta "${etiqueta}" aplicada por ${autor}.`
-        : `Etiqueta "${etiqueta}" removida por ${autor}.`
+        : `Etiqueta "${etiqueta}" removida por ${autor}.`) + comCotacao
     try {
       const resNota = await fetch(`${base}/leads/notes`, {
         method: 'POST',
@@ -276,8 +434,12 @@ Deno.serve(async (req: Request) => {
       aviso,
       mensagem:
         acao === 'adicionar'
-          ? `Etiqueta "${etiqueta}" aplicada.`
+          ? `Etiqueta "${etiqueta}" aplicada${textoDoCampo ? `, com a cotação ${textoDoCampo}` : ''}.`
           : `Etiqueta "${etiqueta}" removida.`,
+      // SÓ COM COTAÇÃO — campos novos e opcionais, que a tela antiga ignora.
+      ...(campo && textoDoCampo
+        ? { cotacao: { texto: textoDoCampo, campo: { id: campo.id, name: campo.name, type: campo.type } }, campos }
+        : {}),
     })
   } catch (err) {
     return jsonResponse({ error: (err as Error).message }, 500)
