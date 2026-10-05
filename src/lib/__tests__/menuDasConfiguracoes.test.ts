@@ -18,7 +18,7 @@ describe('menu das Configurações', () => {
   it('tem as nove seções, nos três grupos, e começa no ADVBOX', () => {
     expect(GRUPOS_DO_MENU.map((g) => g.titulo)).toEqual(['Integrações', 'Assistente', 'Equipe'])
     expect(GRUPOS_DO_MENU.flatMap((g) => g.itens.map((i) => i.id))).toEqual([
-      'advbox', 'kommo', 'anthropic', 'escavador', 'bullai', 'djen', 'skills', 'roteiro', 'usuarios',
+      'advbox', 'kommo', 'anthropic', 'escavador', 'bullai', 'djen', 'skills', 'roteiro', 'justificativa', 'usuarios',
     ])
     expect(SECAO_INICIAL).toBe('advbox')
   })

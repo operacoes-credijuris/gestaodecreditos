@@ -1,5 +1,5 @@
-// As seções do assistente nas Configurações: as Skills e o Roteiro da
-// qualificação preliminar.
+// As seções do assistente nas Configurações: as Skills, o Roteiro da
+// qualificação preliminar e o prompt da Justificativa técnica.
 
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -14,6 +14,16 @@ import { IconButton } from '@/components/ui/IconButton'
 import { Table, THead, TH, TBody, TR, TD, Loading } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { ROTEIRO_QUALIFICACAO } from '../../../supabase/functions/_shared/roteiroQualificacao.ts'
+import {
+  CHAVE_DOMINIOS_JUSTIFICATIVA,
+  CHAVE_PROMPT_JUSTIFICATIVA,
+  DOMINIOS_SUGERIDOS,
+  lerDominios,
+  montarPrompt,
+  PROMPT_JUSTIFICATIVA_PADRAO,
+  promptEmVigor,
+  VARIAVEIS_DA_JUSTIFICATIVA,
+} from '../../../supabase/functions/_shared/justificativaTecnica.ts'
 import {
   AvisoLeitura,
   CabecalhoSecao,
@@ -434,6 +444,266 @@ export function SecaoRoteiro({ pendencia }: { pendencia: Pendencia }) {
               title={
                 naoLido
                   ? 'O roteiro atual não foi lido: salvar agora gravaria por cima sem saber o que está lá.'
+                  : undefined
+              }
+            >
+              Salvar
+            </Button>
+          </RodapeSecao>
+        </>
+      )}
+    </>
+  )
+}
+
+// ----------------------- Justificativa técnica -----------------------
+
+interface LinhaDoPrompt {
+  chave: string
+  texto: string | null
+  atualizado_em: string | null
+  atualizado_por: string | null
+}
+
+/** A chave da consulta das duas linhas da justificativa em `prompts_operacao`. */
+const CONSULTA_DA_JUSTIFICATIVA = ['prompts_operacao', CHAVE_PROMPT_JUSTIFICATIVA] as const
+
+/**
+ * O PROMPT DA JUSTIFICATIVA TÉCNICA, como o roteiro da qualificação: texto
+ * longo em `prompts_operacao`, com o padrão no código como chão (campo vazio =
+ * padrão). Ao lado, as variáveis que a plataforma preenche e de onde cada uma
+ * sai — a mesma lista que a Edge Function usa. Embaixo, os domínios a que a
+ * pesquisa se restringe (vazio = sem restrição).
+ *
+ * SÓ ADMIN EDITA porque esta tela inteira é de admin (o guarda da rota).
+ * "Restaurar padrão" só põe o padrão no campo: salvar continua sendo um clique
+ * de quem decide, e o texto anterior fica guardado para desfazer.
+ */
+export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const { user } = useAuth()
+  const { data, isLoading, error } = useQuery({
+    queryKey: CONSULTA_DA_JUSTIFICATIVA,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('prompts_operacao')
+        .select('chave, texto, atualizado_em, atualizado_por')
+        .in('chave', [CHAVE_PROMPT_JUSTIFICATIVA, CHAVE_DOMINIOS_JUSTIFICATIVA])
+      if (error) throw new Error(error.message)
+      return (data ?? []) as LinhaDoPrompt[]
+    },
+  })
+  const linhaDoPrompt = data?.find((l) => l.chave === CHAVE_PROMPT_JUSTIFICATIVA)
+  const linhaDosDominios = data?.find((l) => l.chave === CHAVE_DOMINIOS_JUSTIFICATIVA)
+  const promptSalvo = promptEmVigor(linhaDoPrompt?.texto)
+  const dominiosSalvos = lerDominios(linhaDosDominios?.texto ?? '').dominios.join('\n')
+
+  const [prompt, setPrompt] = useState('')
+  const [dominios, setDominios] = useState('')
+  const [tocado, setTocado] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+
+  // O CAMPO NASCE COM O QUE ESTÁ VALENDO, e só para de acompanhar o servidor
+  // depois que alguém digita — a mesma regra do roteiro.
+  useEffect(() => {
+    if (!tocado && !isLoading) {
+      setPrompt(promptSalvo)
+      setDominios(dominiosSalvos)
+    }
+  }, [promptSalvo, dominiosSalvos, isLoading, tocado])
+
+  const lidos = lerDominios(dominios)
+  const mudouPrompt = prompt.trim() !== promptSalvo.trim()
+  const mudouDominios = lidos.dominios.join('\n') !== dominiosSalvos
+  const mudou = mudouPrompt || mudouDominios
+  const ehOPadrao = promptSalvo.trim() === PROMPT_JUSTIFICATIVA_PADRAO.trim()
+  // LEITURA FALHOU, NADA FOI LIDO: salvar gravaria por cima sem saber o que está lá.
+  const naoLido = !!error && data === undefined
+  const desconhecidas = montarPrompt(prompt, {}).desconhecidas
+
+  const pendente = tocado && mudou
+  useEffect(() => {
+    pendencia(pendente)
+  }, [pendente, pendencia])
+
+  async function salvar() {
+    if (naoLido) return
+    setSalvando(true)
+    try {
+      const agora = new Date().toISOString()
+      const quem = user?.email ?? null
+      const linhas: Record<string, unknown>[] = []
+      if (mudouPrompt) {
+        linhas.push({
+          chave: CHAVE_PROMPT_JUSTIFICATIVA,
+          // O PADRÃO NÃO SE GRAVA COMO TEXTO: salvar o padrão grava vazio, e o
+          // campo continua acompanhando o padrão do código quando ele melhorar.
+          texto: prompt.trim() === PROMPT_JUSTIFICATIVA_PADRAO.trim() ? '' : prompt,
+          texto_anterior: promptSalvo,
+          atualizado_em: agora,
+          atualizado_por: quem,
+        })
+      }
+      if (mudouDominios) {
+        linhas.push({
+          chave: CHAVE_DOMINIOS_JUSTIFICATIVA,
+          texto: lidos.dominios.join('\n'),
+          texto_anterior: dominiosSalvos,
+          atualizado_em: agora,
+          atualizado_por: quem,
+        })
+      }
+      const { error } = await supabase.from('prompts_operacao').upsert(linhas)
+      if (error) throw new Error(error.message)
+      setTocado(false)
+      await qc.invalidateQueries({ queryKey: CONSULTA_DA_JUSTIFICATIVA })
+      toast.success('Justificativa técnica salva. A próxima geração já a usa.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <>
+      <CabecalhoSecao
+        titulo="Justificativa técnica"
+        apoio='O prompt que a IA segue no botão "Justificativa técnica" da Produção de proposta (RPV, precatório interno e externo).'
+        direita={
+          ehOPadrao ? null : (
+            <Selo tom="ok" icone={Pencil}>
+              Editado pela operação
+            </Selo>
+          )
+        }
+      />
+      <AvisoLeitura error={error} />
+      {isLoading ? (
+        <Loading />
+      ) : (
+        <>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-[16px] min-[1180px]:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="min-w-0">
+              <TituloBloco>Prompt da justificativa técnica</TituloBloco>
+              <Textarea
+                rows={20}
+                className="font-mono text-xs leading-relaxed"
+                value={prompt}
+                spellCheck={false}
+                aria-label="Prompt da justificativa técnica"
+                onChange={(e) => {
+                  setTocado(true)
+                  setPrompt(e.target.value)
+                }}
+              />
+              {desconhecidas.length > 0 && (
+                <p className="mt-s2 flex items-start gap-s1.5 text-xs text-aviso">
+                  <TriangleAlert className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
+                  <span>
+                    Variável que a plataforma não conhece (fica no texto como está):{' '}
+                    {desconhecidas.map((v) => `{{${v}}}`).join(', ')}
+                  </span>
+                </p>
+              )}
+            </div>
+            <aside aria-label="Variáveis do prompt" className="min-w-0">
+              <TituloBloco>Variáveis</TituloBloco>
+              <p className="mb-s3 text-xs text-texto-3">
+                Escreva entre chaves duplas. O que a plataforma não tiver entra como “(não informado)”.
+              </p>
+              <dl className="m-0 max-h-[460px] space-y-s3 overflow-y-auto rounded-campo bg-superficie-2 p-s3 scrollbar-thin">
+                {VARIAVEIS_DA_JUSTIFICATIVA.map((v) => (
+                  <div key={v.nome}>
+                    <dt className="font-mono text-xs font-semibold text-marca-texto">{`{{${v.nome}}}`}</dt>
+                    <dd className="m-0 text-xs text-texto-2">
+                      {v.vale} <span className="text-texto-3">{v.fonte}</span>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </aside>
+          </div>
+
+          <div className="mt-[20px]">
+            <TituloBloco>Domínios permitidos na pesquisa</TituloBloco>
+            <p className="mb-s2 text-xs text-texto-3">
+              Um por linha. Vazio = sem restrição — e é o recomendado: a referência de deságio de mercado quase nunca
+              está em site oficial.
+            </p>
+            <Textarea
+              rows={5}
+              className="font-mono text-xs leading-relaxed"
+              value={dominios}
+              spellCheck={false}
+              placeholder={'cnj.jus.br\nstf.jus.br'}
+              aria-label="Domínios permitidos na pesquisa"
+              onChange={(e) => {
+                setTocado(true)
+                setDominios(e.target.value)
+              }}
+            />
+            <div className="mt-s2 flex flex-wrap items-center gap-s2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setTocado(true)
+                  setDominios(DOMINIOS_SUGERIDOS.join('\n'))
+                }}
+              >
+                Usar a lista sugerida de fontes oficiais
+              </Button>
+              <span className="text-xs text-texto-3">
+                {lidos.dominios.length === 0
+                  ? 'Sem restrição de domínio.'
+                  : `${lidos.dominios.length} domínio(s): a pesquisa só busca e abre páginas deles.`}
+              </span>
+            </div>
+            {lidos.recusados.length > 0 && (
+              <p className="mt-s2 flex items-start gap-s1.5 text-xs text-aviso">
+                <TriangleAlert className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
+                <span>Não é domínio e fica de fora ao salvar: {lidos.recusados.join(', ')}</span>
+              </p>
+            )}
+          </div>
+
+          <RodapeSecao>
+            <span className="mr-auto text-xs text-texto-3">
+              {prompt.length.toLocaleString('pt-BR')} caracteres
+              {linhaDoPrompt?.atualizado_em && (
+                <>
+                  {' · Última alteração em '}
+                  {new Date(linhaDoPrompt.atualizado_em).toLocaleString('pt-BR')}
+                  {linhaDoPrompt.atualizado_por ? ' por ' + linhaDoPrompt.atualizado_por : ''}
+                </>
+              )}
+            </span>
+            {mudou && (
+              <span className="inline-flex items-center gap-s1 text-sm font-semibold text-aviso">
+                <TriangleAlert className="h-[14px] w-[14px]" aria-hidden />
+                alterações não salvas
+              </span>
+            )}
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setTocado(true)
+                setPrompt(PROMPT_JUSTIFICATIVA_PADRAO)
+              }}
+              disabled={prompt.trim() === PROMPT_JUSTIFICATIVA_PADRAO.trim()}
+              title="Põe o prompt padrão no campo. Nada é gravado até Salvar."
+            >
+              Restaurar padrão
+            </Button>
+            <Button
+              onClick={() => void salvar()}
+              disabled={!mudou || salvando || naoLido}
+              loading={salvando}
+              title={
+                naoLido
+                  ? 'O prompt atual não foi lido: salvar agora gravaria por cima sem saber o que está lá.'
                   : undefined
               }
             >

@@ -33,13 +33,14 @@ import {
   type Pendencia,
 } from './SecoesIntegracoes'
 import { SecaoBullai, SecaoEscavador } from './SecoesConsultas'
-import { SecaoRoteiro, SecaoSkills } from './SecoesAssistente'
+import { SecaoJustificativa, SecaoRoteiro, SecaoSkills } from './SecoesAssistente'
 import { SecaoUsuarios } from './SecaoUsuarios'
 
 /**
  * As seções em que digitar num campo já conta como "alteração não salva". O
  * Roteiro fica de fora porque tem regra própria (o texto diferir do que está em
- * vigor — voltar ao texto salvo apaga a pendência); Usuários, porque não tem
+ * vigor — voltar ao texto salvo apaga a pendência), e a Justificativa técnica
+ * pelo mesmo motivo; Usuários, porque não tem
  * campo na própria seção — os campos dele vivem nas janelas.
  */
 const MARCA_AO_DIGITAR: ReadonlySet<SecaoId> = new Set<SecaoId>([
@@ -150,6 +151,7 @@ export default function Configuracoes() {
     djen: <SecaoDjen pendencia={pendencia.djen} />,
     skills: <SecaoSkills pendencia={pendencia.skills} />,
     roteiro: <SecaoRoteiro pendencia={pendencia.roteiro} />,
+    justificativa: <SecaoJustificativa pendencia={pendencia.justificativa} />,
     usuarios: <SecaoUsuarios />,
   }
 

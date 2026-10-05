@@ -18,7 +18,7 @@
 //
 // USO (POST, com sessão logada): { "lead_id": 15269795, "texto": "..." }
 
-import { assinarNota, marcarComoDePessoa } from "../_shared/notaCredijuris.ts";
+import { postarNotas } from "../_shared/anotarNoKommo.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { contaKommo } from "../_shared/segredos.ts";
@@ -54,36 +54,25 @@ Deno.serve(async (req) => {
     if (!conta) return json({ erro: "Token ou subdomínio da Kommo não configurado (integracao_kommo_secret)." }, 500);
     const { token, subdominio } = conta;
 
-    const base = `https://${subdominio}.kommo.com/api/v4`;
-    const res = await fetch(`${base}/leads/notes`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify([
-        {
-          entity_id: leadId,
-          // NOTA DE VERDADE, e não service_message.
-          //
-          // O service_message é renderizado como LINHA DO HISTÓRICO: nome do
-          // serviço na frente e os parágrafos colados num bloco corrido atrás
-          // de um "mais". A ficha do crédito e o resumo da oportunidade
-          // chegavam ilegíveis — oito rótulos numa linha só.
-          //
-          // O que impede a análise de reler a própria anotação não é mais o
-          // tipo: é a marca no rodapé, que o kommo-sync descarta (ver
-          // _shared/notaCredijuris.ts). Duas perguntas diferentes — como se lê
-          // e de quem é — que estavam presas na mesma resposta.
-          note_type: "common",
-          params: { text: dePessoa ? marcarComoDePessoa(texto, autor) : assinarNota(texto) },
-          // Registro de resultado não é evento de pipeline: não dispara gatilho.
-          is_need_to_trigger_digital_pipeline: false,
-        },
-      ]),
-    });
-
-    if (!res.ok) {
-      return json({ erro: `Kommo recusou a anotação (HTTP ${res.status}).`, detalhe: (await res.text()).slice(0, 300) }, 502);
+    // O CORPO DE SEMPRE, montado em _shared/anotarNoKommo.ts desde 05/10/2026: a
+    // justificativa técnica grava nota pelo mesmo caminho (em partes, numa
+    // chamada só), e os dois escrevem igual.
+    //
+    // NOTA DE VERDADE (`common`), e não service_message. O service_message é
+    // renderizado como LINHA DO HISTÓRICO: nome do serviço na frente e os
+    // parágrafos colados num bloco corrido atrás de um "mais". A ficha do
+    // crédito e o resumo da oportunidade chegavam ilegíveis — oito rótulos numa
+    // linha só. O que impede a análise de reler a própria anotação não é mais o
+    // tipo: é a marca no rodapé, que o kommo-sync descarta (ver
+    // _shared/notaCredijuris.ts). Duas perguntas diferentes — como se lê e de
+    // quem é — que estavam presas na mesma resposta.
+    const r = await postarNotas({ token, subdominio }, leadId, [texto], { dePessoa, autor });
+    if (!r.ok) {
+      return json({ erro: `Kommo recusou a anotação (HTTP ${r.status}).`, detalhe: r.detalhe }, 502);
     }
-    return json({ ok: true });
+    // O id da nota vai junto, para quem quiser guardá-lo; os chamadores de
+    // sempre só leem o `ok`.
+    return json({ ok: true, nota_id: r.ids[0] ?? null });
   } catch (e) {
     return json({ erro: String((e as Error)?.message || e) }, 500);
   }

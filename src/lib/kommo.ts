@@ -955,6 +955,11 @@ export interface Aba {
   anexarEMover?: { rotulo: string; nota: string; statusId: number } | null
   /** O botão "Certidões" no card (ver `certidoes` na trilha). */
   certidoes?: boolean
+  /**
+   * O botão "Justificativa técnica" no card (ver `justificativaTecnica` na
+   * trilha; no RPV, a aba 'aprovados'). Trabalho, não desfecho: não move card.
+   */
+  justificativaTecnica?: boolean
   /** Os checks do envio aos fundos (ver `envioAosFundos` na trilha), com o destino resolvido. */
   envioAosFundos?: {
     fundos: FundoDoEnvio[]
@@ -1401,6 +1406,7 @@ function montarAbasDoFunil(
         return a.envioAosFundos && id !== undefined ? { fundos: a.envioAosFundos.fundos, destino: id } : null
       })(),
       certidoes: a.certidoes ?? false,
+      justificativaTecnica: a.justificativaTecnica ?? false,
     }
   }
 
@@ -1575,6 +1581,10 @@ function abasDoRpv(etapas: EtapaKommo[]): Aba[] {
     descricao: DESCRICAO_DA_COLUNA[t.statusId],
     acoes: t.key === 'diligencia' ? [...ACOES[t.key], SANAR_RPV] : ACOES[t.key],
     ...(t.key === 'validacao' ? { concluir: CONCLUIR_REVISAO_RPV } : {}),
+    // A JUSTIFICATIVA TÉCNICA NA PRODUÇÃO DE PROPOSTA (05/10/2026), como no
+    // Externo e no Interno. Só o botão de trabalho: as ações da aba seguem as de
+    // `ACOES`, e ela continua sem 'rpv' nem 'dd' (ver `botoesDaAba`).
+    ...(t.key === 'aprovados' ? { justificativaTecnica: true } : {}),
   })
 
   // AS COLUNAS SÓ DE LEITURA que ganham botão da onda 4: a Negociação (o desfecho,

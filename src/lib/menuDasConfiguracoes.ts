@@ -15,6 +15,7 @@ export type SecaoId =
   | 'djen'
   | 'skills'
   | 'roteiro'
+  | 'justificativa'
   | 'usuarios'
 
 /** Os grupos do menu, na ordem da amostra. */
@@ -38,6 +39,7 @@ export const GRUPOS_DO_MENU: ReadonlyArray<{
     itens: [
       { id: 'skills', rotulo: 'Skills' },
       { id: 'roteiro', rotulo: 'Roteiro da qualificação' },
+      { id: 'justificativa', rotulo: 'Justificativa técnica' },
     ],
   },
   { titulo: 'Equipe', itens: [{ id: 'usuarios', rotulo: 'Usuários' }] },

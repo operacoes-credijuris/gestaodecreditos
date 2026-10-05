@@ -39,6 +39,12 @@ import { perguntarDescarte } from '@/lib/descarte'
 import { guardarLugar, lugarGuardado } from '@/lib/lugarDaAnalise'
 import { LinkTentarDeNovo } from '@/components/LinkTentarDeNovo'
 import {
+  BotaoJustificativa,
+  JanelaJustificativa,
+  useJustificativasDaAba,
+  type ResumoDaJustificativa,
+} from '@/components/JustificativaTecnica'
+import {
   AlertTriangle,
   Search,
   ExternalLink,
@@ -2533,6 +2539,7 @@ function CardCredito({
   anexarEMover,
   envioAosFundos,
   onCertidoes,
+  justificativa,
   onCopiar,
   negociacao,
   onGerarContrato,
@@ -2623,6 +2630,14 @@ function CardCredito({
   }
   /** Abre o painel de certidões, onde a aba o declara (a Obtenção de documentação do Externo). */
   onCertidoes?: (l: KommoLead) => void
+  /**
+   * A justificativa técnica, onde a aba a declara (a Produção de proposta dos
+   * três funis): o botão, ou o cheque de enviada. Não move o card.
+   */
+  justificativa?: {
+    resumo?: ResumoDaJustificativa
+    onAbrir: (l: KommoLead) => void
+  }
   /**
    * Copia um texto do card (o número do processo, o nome do cedente) — o aviso
    * de sucesso ou de falha é da página; `aviso` é o que ela diz quando dá certo.
@@ -3232,6 +3247,17 @@ function CardCredito({
             >
               Certidões
             </Button>
+          )}
+
+          {/* A JUSTIFICATIVA TÉCNICA (a Produção de proposta dos três funis):
+              trabalho, não desfecho — o card não se move. Enviada, o botão
+              vira o cheque, que reabre o texto enviado. */}
+          {justificativa && (
+            <BotaoJustificativa
+              resumo={justificativa.resumo}
+              ocupado={ocupado}
+              onAbrir={() => justificativa.onAbrir(lead)}
+            />
           )}
 
           {/* A NEGOCIAÇÃO (onda 4, para todos desde 03/10/2026): o cedente respondeu. O negativo
@@ -4996,6 +5022,34 @@ export default function AnaliseCredito() {
    * print falhar, confirmar de novo não repete o texto nem os dois primeiros.
    */
   const [envioAberto, setEnvioAberto] = useState<{ lead: KommoLead; fundo: FundoDoEnvio } | null>(null)
+
+  /**
+   * A JUSTIFICATIVA TÉCNICA (05/10/2026): a janela do card aberto e o estado de
+   * cada card da aba — uma consulta só, que se repete sozinha enquanto algum
+   * card gera. Só nas abas que a declaram (a Produção de proposta dos três
+   * funis); nas outras, nada é consultado.
+   */
+  const [justificativaLead, setJustificativaLead] = useState<KommoLead | null>(null)
+  const justificativas = useJustificativasDaAba(
+    useMemo(() => filtrados.map((l) => l.kommo_lead_id), [filtrados]),
+    Boolean(abaAtual?.justificativaTecnica),
+  )
+  /** A nota subiu: entra no histórico do card já, sem esperar a sincronização. */
+  function justificativaEnviada(lead: KommoLead, texto: string) {
+    const nova: KommoNota = {
+      id: -Date.now(),
+      texto,
+      criado_em: new Date().toISOString(),
+      autor: analistaNome,
+      tipo: 'common',
+      automatica: false,
+    }
+    qc.setQueriesData<KommoLead[]>({ queryKey: ['kommo_leads'] }, (antes) =>
+      antes?.map((l) =>
+        l.kommo_lead_id === lead.kommo_lead_id ? { ...l, notas: [...(l.notas ?? []), nova] } : l,
+      ),
+    )
+  }
   const [notasDoEnvio, setNotasDoEnvio] = useState<Set<string>>(new Set())
   const partesDoEnvio = useRef<Set<string>>(new Set())
   async function moverAposOsFundos(lead: KommoLead) {
@@ -5817,6 +5871,12 @@ export default function AnaliseCredito() {
                   resultadoJuridico={resultadoJuridico[l.kommo_lead_id]}
                   botoes={botoesDoCard}
                   onCertidoes={abaAtual?.certidoes ? onCertidoes : undefined}
+                  // A JUSTIFICATIVA TÉCNICA, onde a aba a declara.
+                  justificativa={
+                    abaAtual?.justificativaTecnica
+                      ? { resumo: justificativas.data?.[l.kommo_lead_id], onAbrir: setJustificativaLead }
+                      : undefined
+                  }
                   // ONDA 4: os campos só existem na aba que `abaParaQuemVe`
                   // entrega com eles — a todos desde 03/10/2026; sem eles, nada
                   // disto é passado.
@@ -5862,6 +5922,15 @@ export default function AnaliseCredito() {
           onMotorAntigo={() => void onAnaliseJuridica(planilhaLead)}
         />
       )}
+
+      {/* A JUSTIFICATIVA TÉCNICA: uma janela só, sempre montada — a trava do
+          Enviar, por card, sobrevive a fechar e reabrir. */}
+      <JanelaJustificativa
+        lead={justificativaLead}
+        autor={analistaNome}
+        onFechar={() => setJustificativaLead(null)}
+        onEnviada={justificativaEnviada}
+      />
 
       {envioAberto && (
         <JanelaDoEnvioAoFundo

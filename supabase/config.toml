@@ -118,3 +118,9 @@ verify_jwt = false
 # função valida a autorização, por isso verify_jwt = false.
 [functions.escavador-autos-rotina]
 verify_jwt = false
+
+# Justificativa técnica da proposta: chamada pelo app (JWT do usuário) e por ela
+# mesma, para encadear as etapas da geração (service_role no Authorization, que
+# passa pelo gateway). A própria função confere quem pode cada ação.
+[functions.justificativa-tecnica]
+verify_jwt = true

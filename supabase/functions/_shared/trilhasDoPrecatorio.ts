@@ -178,6 +178,15 @@ export interface DefAbaPrecatorio {
    */
   certidoes?: boolean
   /**
+   * O BOTÃO "JUSTIFICATIVA TÉCNICA" no card: abre a janela em que a IA pesquisa
+   * e redige o amparo técnico do preço da proposta ao cedente, que a pessoa
+   * edita e envia ao Kommo como nota (pedido de 05/10/2026). É TRABALHO, NÃO
+   * DESFECHO: não move o card. Na Produção de proposta do Externo e do Interno;
+   * no RPV, que não mora nas trilhas, a aba 'aprovados' de `src/lib/kommo.ts`.
+   * Ver `_shared/justificativaTecnica.ts`.
+   */
+  justificativaTecnica?: boolean
+  /**
    * O ENVIO AOS FUNDOS: um check por fundo que tem plataforma própria de envio.
    * Quem sobe o crédito lá marca o check, escreve (ou cola o print) numa janela,
    * e a plataforma anota no card, põe a etiqueta daquele fundo e — com todos os
@@ -427,6 +436,8 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         label: 'Aprovados',
         colunaKommo: 'PRODUÇÃO DE PROPOSTA', statusId: 111533948,
         descricaoVazia: 'Nenhum precatório aprovado.',
+        // A JUSTIFICATIVA TÉCNICA DO PREÇO (05/10/2026), como no Externo.
+        justificativaTecnica: true,
       },
       {
         key: 'int-diligencia',
@@ -653,6 +664,10 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
         label: 'Proposta',
         colunaKommo: 'PRODUÇÃO DE PROPOSTA', statusId: 111533988,
         descricaoVazia: 'Nenhum precatório em apresentação.',
+        // A JUSTIFICATIVA TÉCNICA DO PREÇO (05/10/2026): o amparo técnico da
+        // proposta ao cedente, redigido pela IA e enviado ao Kommo como nota.
+        // Trabalho, não desfecho — o card fica onde está.
+        justificativaTecnica: true,
       },
       {
         key: 'ext-fechados',
