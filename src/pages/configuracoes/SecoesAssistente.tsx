@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileArchive, Pencil, Trash2, TriangleAlert, Upload } from 'lucide-react'
+import { FileArchive, Info, Pencil, Trash2, TriangleAlert, Upload } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
@@ -520,7 +520,7 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
   const ehOPadrao = promptSalvo.trim() === PROMPT_JUSTIFICATIVA_PADRAO.trim()
   // LEITURA FALHOU, NADA FOI LIDO: salvar gravaria por cima sem saber o que está lá.
   const naoLido = !!error && data === undefined
-  const desconhecidas = montarPrompt(prompt, {}).desconhecidas
+  const { desconhecidas, anexouDados } = montarPrompt(prompt, {})
 
   const pendente = tocado && mudou
   useEffect(() => {
@@ -604,6 +604,15 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
                   <span>
                     Variável que a plataforma não conhece (fica no texto como está):{' '}
                     {desconhecidas.map((v) => `{{${v}}}`).join(', ')}
+                  </span>
+                </p>
+              )}
+              {anexouDados && prompt.trim() !== '' && (
+                <p className="mt-s2 flex items-start gap-s1.5 text-xs text-texto-2">
+                  <Info className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
+                  <span>
+                    O prompt não usa nenhuma variável de dado: a plataforma anexa ao fim o bloco com os dados do
+                    crédito (o mesmo de <code>{'{{card}}'}</code>).
                   </span>
                 </p>
               )}

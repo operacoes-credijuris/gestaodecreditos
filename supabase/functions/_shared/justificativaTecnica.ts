@@ -76,6 +76,9 @@ export const NAO_INFORMADO = '(não informado)'
  * padrão manda a IA dizer isso em vez de supor.
  */
 export const VARIAVEIS_DA_JUSTIFICATIVA: readonly { nome: string; vale: string; fonte: string }[] = [
+  // O ATALHO (05/10/2026): a operação escreveu {{card}} esperando "os dados do
+  // card" — e a variável não existia, a IA recebia o texto literal. Agora existe.
+  { nome: 'card', vale: 'Todos os dados do crédito de uma vez, um por linha (as variáveis abaixo, com rótulo).', fonte: 'Montado pela plataforma a partir das variáveis abaixo.' },
   { nome: 'funil', vale: 'RPV, Precatório interno ou Precatório externo.', fonte: 'O funil do card no Kommo.' },
   { nome: 'cedente', vale: 'O titular do crédito.', fonte: 'A anotação "CEDENTE:" do comercial; na falta, o título do card.' },
   { nome: 'processo', vale: 'O número CNJ do processo.', fonte: 'O título do card; na falta, o espelho e a anotação "PROCESSO:".' },
@@ -217,21 +220,61 @@ const RE_VARIAVEL = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
  * digitação, e a IA leria "(não informado)" num lugar onde a pessoa queria um
  * dado.
  */
+/** Os rótulos de {{card}}, na ordem em que a IA os lê. */
+const ROTULOS_DO_CARD: readonly [string, string][] = [
+  ['funil', 'Tipo'],
+  ['cedente', 'Cedente'],
+  ['processo', 'Processo'],
+  ['tribunal', 'Tribunal'],
+  ['ente_devedor', 'Ente devedor'],
+  ['parcela_cedida', 'Parcela cedida'],
+  ['valor_face', 'Valor de face'],
+  ['valor_atualizado', 'Valor atualizado'],
+  ['valor_cedido', 'Valor do crédito negociado'],
+  ['prazo_estimado', 'Prazo estimado de pagamento'],
+  ['teto_rpv', 'Teto de RPV do ente (só RPV)'],
+  ['fundo_escolhido', 'Fundo da proposta escolhida'],
+  ['valor_proposta', 'Valor da proposta'],
+  ['comissao', 'Comissão'],
+  ['data_hoje', 'Data de hoje'],
+]
+
+/** {{card}}: todos os dados do crédito, um por linha, com as cotações no fim. */
+export function blocoDoCard(valores: Readonly<Record<string, string | null | undefined>>): string {
+  const v = (nome: string) => String(valores[nome] ?? '').trim() || NAO_INFORMADO
+  const linhas = ROTULOS_DO_CARD.map(([nome, rotulo]) => `- ${rotulo}: ${v(nome)}`)
+  return [...linhas, `- Cotações recebidas no card:\n${v('cotacoes_recebidas')}`].join('\n')
+}
+
+/**
+ * O prompt montado. `anexouDados`: o prompt não usava NENHUMA variável de dado,
+ * e a plataforma anexou o bloco do crédito ao fim — sem isso a IA pesquisaria
+ * sem saber de que crédito se trata (05/10/2026).
+ */
 export function montarPrompt(
   modelo: string,
   valores: Readonly<Record<string, string | null | undefined>>,
-): { texto: string; desconhecidas: string[] } {
+): { texto: string; desconhecidas: string[]; anexouDados: boolean } {
   const conhecidas = new Set(VARIAVEIS_DA_JUSTIFICATIVA.map((v) => v.nome))
   const desconhecidas: string[] = []
-  const texto = String(modelo ?? '').replace(RE_VARIAVEL, (inteiro, nome: string) => {
+  let usouDado = false
+  let texto = String(modelo ?? '').replace(RE_VARIAVEL, (inteiro, nome: string) => {
     if (!conhecidas.has(nome)) {
       if (!desconhecidas.includes(nome)) desconhecidas.push(nome)
       return inteiro
     }
+    if (nome !== 'data_hoje') usouDado = true
+    if (nome === 'card') return blocoDoCard(valores)
     const v = String(valores[nome] ?? '').trim()
     return v || NAO_INFORMADO
   })
-  return { texto, desconhecidas }
+  const anexouDados = !usouDado
+  if (anexouDados) {
+    texto =
+      `${texto.trimEnd()}\n\nDADOS DO CRÉDITO (anexados pela plataforma; "${NAO_INFORMADO}" quando ela não tem o dado):\n` +
+      blocoDoCard(valores)
+  }
+  return { texto, desconhecidas, anexouDados }
 }
 
 /** O prompt em vigor: o da operação, ou o padrão quando o campo está vazio. */

@@ -81,7 +81,8 @@ describe('montarPrompt — as variáveis no lugar', () => {
 
   it('o prompt padrão usa só variáveis conhecidas, e todas elas', () => {
     expect(montarPrompt(PROMPT_JUSTIFICATIVA_PADRAO, {}).desconhecidas).toEqual([])
-    for (const v of VARIAVEIS_DA_JUSTIFICATIVA) {
+    // {{card}} é o atalho que junta as outras: o padrão usa as variáveis uma a uma.
+    for (const v of VARIAVEIS_DA_JUSTIFICATIVA.filter((x) => x.nome !== 'card')) {
       expect(PROMPT_JUSTIFICATIVA_PADRAO, v.nome).toContain(`{{${v.nome}}}`)
     }
   })
@@ -531,5 +532,31 @@ describe('o botão nos três funis — a Produção de proposta, e só ela', () 
       [FUNIL_RPV_JUSTIFICATIVA, FUNIL_PRECATORIO_INTERNO, FUNIL_PRECATORIO_EXTERNO].sort(),
     )
     expect(FUNIL_RPV_JUSTIFICATIVA).toBe(FUNIL_RPV)
+  })
+})
+
+// O {{card}} E A REDE DE SEGURANÇA (05/10/2026): a operação escreveu {{card}}
+// esperando os dados do crédito, e a IA recebia o texto literal, sem dado nenhum.
+describe('montarPrompt — {{card}} e os dados anexados', () => {
+  const valores = { cedente: 'MARIA DA SILVA', processo: '0001234-56.2020.8.26.0053', valor_proposta: 'R$ 807.500,00', cotacoes_recebidas: '- PJus: R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)' }
+  it('{{card}} vira o bloco com todos os dados, um por linha', () => {
+    const r = montarPrompt('Analise o crédito:\n{{card}}', valores)
+    expect(r.desconhecidas).toEqual([])
+    expect(r.anexouDados).toBe(false)
+    expect(r.texto).toContain('- Cedente: MARIA DA SILVA')
+    expect(r.texto).toContain('- Processo: 0001234-56.2020.8.26.0053')
+    expect(r.texto).toContain('- Valor da proposta: R$ 807.500,00')
+    expect(r.texto).toContain('- Tribunal: (não informado)')
+    expect(r.texto).toContain('Cotações recebidas no card:\n- PJus:')
+    expect(r.texto).not.toContain('{{card}}')
+  })
+  it('prompt sem nenhuma variável de dado: o bloco é anexado ao fim', () => {
+    const r = montarPrompt('Escreva a justificativa. Hoje é {{data_hoje}}.', valores)
+    expect(r.anexouDados).toBe(true)
+    expect(r.texto).toMatch(/\n\nDADOS DO CRÉDITO \(anexados pela plataforma/)
+    expect(r.texto).toContain('- Cedente: MARIA DA SILVA')
+  })
+  it('prompt que já usa uma variável de dado não recebe anexo', () => {
+    expect(montarPrompt('Cedente: {{cedente}}', valores).anexouDados).toBe(false)
   })
 })
