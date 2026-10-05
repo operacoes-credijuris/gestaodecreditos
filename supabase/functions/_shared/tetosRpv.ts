@@ -14,12 +14,13 @@
 // ANTES DA MIGRAÇÃO 0057 (e se ela falhar) o módulo cai em TETOS_SEMENTE, que é
 // exatamente o mapa que vivia no código. Nada quebra; só não há pesquisa.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
+import { ESFORCO_PADRAO_DO_OPUS, type NoFormatoDoOpus } from './respostaDoClaude.ts'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
 export type EsferaTeto = 'federal' | 'estadual' | 'municipal'
 
 /** Opus: o valor decide se um crédito é reprovado, e a fonte tem de ser lida certo. */
-const MODELO = 'claude-opus-5'
+const MODELO = 'claude-opus-5-5'
 const MAX_BUSCAS = 5
 const MAX_FETCHES = 2
 
@@ -428,14 +429,19 @@ export async function executarPesquisaTeto(
     const resposta = await anthropic.messages
       .stream({
         model: MODELO,
-        max_tokens: 4000,
+        // 8000, e não 4000: no Opus 5.5 o raciocínio (sempre ligado) conta
+        // dentro do teto, somado em todas as voltas de busca do servidor.
+        max_tokens: 8000,
+        // O padrão do Opus 5. O do 5.5 é 'medium', e o valor aqui decide se
+        // um crédito é reprovado.
+        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
         tools: [
           FERRAMENTA,
           { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
           { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_FETCHES },
         ] as Anthropic.Tool[],
         messages: [{ role: 'user', content: pergunta(chave, esf, ano, mun) }],
-      })
+      } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
       .finalMessage()
 
     const uso = resposta.content.find((c) => c.type === 'tool_use' && c.name === FERRAMENTA.name)

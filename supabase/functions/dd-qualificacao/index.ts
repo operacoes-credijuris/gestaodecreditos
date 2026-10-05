@@ -50,6 +50,12 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
+import {
+  ESFORCO_PADRAO_DO_OPUS,
+  semCercaDeMarkdown,
+  textoDaResposta,
+  type PedidoAoOpus,
+} from '../_shared/respostaDoClaude.ts'
 import { MAX_TEXTO_CHARS } from '../_shared/orcamentoLeitura.ts'
 import { alvosDaCessao, type ParcelaCedida } from '../_shared/titularesDaCessao.ts'
 import { lerTituloCard } from '../_shared/cadastroDoCard.ts'
@@ -69,7 +75,7 @@ import {
   ROTULO_DA_NATUREZA,
 } from '../_shared/oficioDoCredito.ts'
 
-const CLAUDE_MODEL = 'claude-opus-5'
+const CLAUDE_MODEL = 'claude-opus-5-5'
 
 const SISTEMA = `Você lê autos de processo judicial e extrai a QUALIFICAÇÃO de UMA pessoa — a que está cedendo o crédito, cujo nome o pedido informa — para montar o checklist de certidões da due diligence.
 
@@ -211,20 +217,19 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: 2000,
+        // 8000, e não 2000: no Opus 5.5 o raciocínio, sempre ligado, conta
+        // dentro do teto, e com 2000 ele podia comer o JSON.
+        max_tokens: 8000,
+        // O padrão do Opus 5 (o do 5.5 é 'medium').
+        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
         system: SISTEMA,
         messages: [{ role: 'user', content: pedido }],
-      }),
+      } satisfies PedidoAoOpus),
     })
     const resposta = await res.json().catch(() => null)
     if (!res.ok) return jsonResponse({ erro: `A IA recusou a leitura (HTTP ${res.status}).` }, 502)
 
-    const bruto = ((resposta?.content ?? []) as { type?: string; text?: string }[])
-      .map((c) => (c.type === 'text' ? (c.text ?? '') : ''))
-      .join('')
-      .replace(/```json/gi, '')
-      .replace(/```/g, '')
-      .trim()
+    const bruto = semCercaDeMarkdown(textoDaResposta(resposta?.content))
 
     let lido: unknown
     try {

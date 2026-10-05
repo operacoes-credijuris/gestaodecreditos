@@ -32,9 +32,10 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
+import { ESFORCO_PADRAO_DO_OPUS, textoDaResposta, type PedidoAoOpus } from '../_shared/respostaDoClaude.ts'
 import { TITULO_DO_DESFECHO, garantirTitulo, type Desfecho } from '../_shared/desfecho.ts'
 
-const CLAUDE_MODEL = 'claude-opus-5'
+const CLAUDE_MODEL = 'claude-opus-5-5'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -106,9 +107,13 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        // Teto curto: a saída são três blocos curtos, e teto alto só dá margem
-        // para o modelo escrever mais do que alguém vai ler.
-        max_tokens: 900,
+        // A saída são três blocos curtos, e quem segura o tamanho é o prompt
+        // ("no máximo 250 palavras"): o modelo não enxerga este teto, que só
+        // CORTA. Era 900; no Opus 5.5 o raciocínio, sempre ligado, conta dentro
+        // dele, e 900 cortaria a anotação no meio.
+        max_tokens: 6000,
+        // O padrão do Opus 5 (o do 5.5 é 'medium').
+        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
         system:
           'Você redige a anotação que registra, no CRM, o desfecho de um crédito judicial em análise. ' +
           'QUEM LÊ é o comercial que vai falar com o cedente e com o advogado. Ele NÃO tem a análise à frente, ' +
@@ -147,17 +152,19 @@ Deno.serve(async (req: Request) => {
               '\nRedija a anotação.',
           },
         ],
-      }),
+      } satisfies PedidoAoOpus),
     })
     const resposta = await res.json().catch(() => null)
     if (!res.ok) {
       return jsonResponse({ error: `A IA recusou a redação (HTTP ${res.status}).`, resposta }, 502)
     }
+    // CORTADA NÃO VAI PARA O CRM: metade de uma anotação parece inteira para
+    // quem lê o feed.
+    if (resposta?.stop_reason === 'max_tokens') {
+      return jsonResponse({ error: 'A redação da anotação saiu cortada. Tente de novo.' }, 502)
+    }
 
-    const texto = ((resposta?.content ?? []) as { type?: string; text?: string }[])
-      .map((c) => (c.type === 'text' ? (c.text ?? '') : ''))
-      .join('\n')
-      .trim()
+    const texto = textoDaResposta(resposta?.content, '\n')
     if (!texto) return jsonResponse({ error: 'A IA não devolveu texto para a anotação.' }, 502)
 
     return jsonResponse({ ok: true, mensagem: garantirTitulo(texto, titulo) })

@@ -36,6 +36,7 @@
 // COMPARTILHADO (_shared) de propósito: a etapa de Precificação do precatório
 // vai precisar exatamente disto.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
+import { ESFORCO_PADRAO_DO_OPUS, type NoFormatoDoOpus } from './respostaDoClaude.ts'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 
 // ---------------------------------------------------------------------------
@@ -376,7 +377,7 @@ Responda chamando registrar_ato uma única vez, ao final.`
 // Chamadas à IA, curtas e com orçamento apertado
 // ---------------------------------------------------------------------------
 
-const MODELO = 'claude-opus-5'
+const MODELO = 'claude-opus-5-5'
 
 /**
  * Uma rodada de conversa com as ferramentas de servidor.
@@ -426,10 +427,13 @@ async function conversar(
       .stream({
         model: MODELO,
         max_tokens: maxTokens,
+        // O padrão do Opus 5. O do 5.5 é 'medium', e omitir seria rebaixar a
+        // leitura da tabela sem ninguém decidir.
+        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
         // 'auto': forçar a ferramenta impediria a busca, e sem busca não há tabela.
         tools: ferramentas as Anthropic.Tool[],
         messages: mensagens,
-      })
+      } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
       .finalMessage()
 
   let resposta = await pedir()
@@ -715,7 +719,8 @@ export async function executarPasso(
       // registra o que a busca mostrar — e o que a busca mostra, num tribunal,
       // é a página de apresentação, não o anexo. Registrada a página, a etapa
       // seguinte gasta a cota dela descobrindo o link que esta já tinha à mão.
-      const r = await conversar(apiKey, promptAchar(uf, ano), FERRAMENTA_ACHAR, 5, 1, 2000)
+      // 6000 de saída, e não 2000: no Opus 5.5 o raciocínio conta dentro do teto.
+      const r = await conversar(apiKey, promptAchar(uf, ano), FERRAMENTA_ACHAR, 5, 1, 6000)
       const docs = Array.isArray(r?.documentos) ? (r!.documentos as Array<Record<string, unknown>>) : []
       p.documentos = docs.map((d) => String(d?.url ?? '')).filter((u) => /^https?:\/\//i.test(u)).slice(0, 3)
       p.doc = 0
@@ -774,7 +779,8 @@ export async function executarPasso(
     // aqui, tenta-se na PROXIMA INVOCACAO, que e o que `p.doc++` faz e o que da
     // a ela um relogio zerado. As duas aberturas servem a um documento so — o
     // endereco, e o arquivo que ele linka quando for pagina de apresentacao.
-    const r = await conversar(apiKey, promptAto(uf, ano, ato, [p.documentos[p.doc]]), FERRAMENTA_ATO, 0, 2, 8000)
+    // 12000 de saída, e não 8000: no Opus 5.5 o raciocínio conta dentro do teto.
+    const r = await conversar(apiKey, promptAto(uf, ano, ato, [p.documentos[p.doc]]), FERRAMENTA_ATO, 0, 2, 12000)
 
     const fontes = Array.isArray(r?.fontes)
       ? (r!.fontes as unknown[]).map(String).filter((f) => /^https?:\/\//i.test(f))

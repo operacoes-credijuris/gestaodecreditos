@@ -43,6 +43,7 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, segredoGoogle } from '../_shared/segredos.ts'
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
+import { ESFORCO_PADRAO_DO_OPUS, type NoFormatoDoOpus } from '../_shared/respostaDoClaude.ts'
 // O QUESTIONÁRIO, AS REGRAS E A GRAVAÇÃO moram nos módulos compartilhados
 // desde 28/09/2026: a planilha passou a nascer também da conversa do Claude
 // (ver `planilha-juridica`), e duas cópias desta lógica divergiriam.
@@ -69,7 +70,7 @@ import {
  * sai mais caro que o token, porque a resposta errada entra numa planilha que a
  * pessoa vai ler como conferida.
  */
-const MODELO = 'claude-opus-5'
+const MODELO = 'claude-opus-5-5'
 
 
 /** Teto do texto do processo mandado ao modelo. Corta o MEIO, mantendo pontas. */
@@ -191,6 +192,10 @@ Deno.serve(async (req: Request) => {
         .stream({
           model: MODELO,
           max_tokens: 24000,
+          // O padrão do Opus 5. O do 5.5 é 'medium', e omitir seria rebaixar a
+          // leitura sem ninguém decidir. O raciocínio (sempre ligado no 5.5) e
+          // a resposta dividem os 24000.
+          output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
           system: [
             {
               type: 'text',
@@ -207,7 +212,7 @@ Deno.serve(async (req: Request) => {
             { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
           ],
           messages: mensagens,
-        })
+        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
         .finalMessage()
 
       // O laço de amostragem do servidor tem teto próprio; ao bater nele a
@@ -220,6 +225,7 @@ Deno.serve(async (req: Request) => {
           .stream({
             model: MODELO,
             max_tokens: 24000,
+            output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
             system: [
               {
                 type: 'text',
@@ -232,7 +238,7 @@ Deno.serve(async (req: Request) => {
               { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS },
             ],
             messages: mensagens,
-          })
+          } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
           .finalMessage()
       }
       return atual

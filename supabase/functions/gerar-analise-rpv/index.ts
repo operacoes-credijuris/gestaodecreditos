@@ -98,6 +98,15 @@ import {
 // pasta gravada no card, e precisam escrever o nome igual.
 import { tituloNome } from "../_shared/pastaDaAnalise.ts";
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
+import {
+  ESFORCO_PADRAO_DO_OPUS,
+  chamadaDaFerramenta,
+  pedidoParaChamarAFerramenta,
+  textoDaResposta,
+  type BlocoDaResposta,
+  type NoFormatoDoOpus,
+  type PedidoAoOpus,
+} from "../_shared/respostaDoClaude.ts";
 // VERSÃO EXATA, como todo import externo daqui (ver a política em _shared/auth.ts).
 // "@1" é qualquer 1.x: uma publicação nova do @std entra em produção sem ninguém
 // aprovar, e o deno.lock já resolvia 1.0.11.
@@ -123,8 +132,24 @@ import { encodeBase64 as b64encode } from "jsr:@std/encoding@1.0.11/base64";
  * processo lido (~170 mil tokens) se rodarem no mesmo. Trocar uma delas por um
  * modelo mais leve economiza numa ponta e paga o dobro na outra.
  */
-const CLAUDE_MODEL = 'claude-opus-5';
-const CLAUDE_MAX_TOKENS = 16000;                 // extração da análise é grande (M1+M2+M4)
+const CLAUDE_MODEL = 'claude-opus-5-5';
+/**
+ * O ESFORÇO de TODAS as chamadas desta função: 'high', o padrão do Opus 5. O
+ * do Opus 5.5 é 'medium', e omitir seria rebaixar a leitura sem ninguém decidir.
+ *
+ * UM SÓ, pelo mesmo motivo do modelo: mudar o esforço entre uma chamada e outra
+ * invalida o cache de prompt, e a qualificação e as duas leituras só dividem o
+ * processo lido se forem iguais em tudo o que vem antes dele.
+ *
+ * ATENÇÃO AO RELÓGIO. No Opus 5 as extrações rodavam SEM raciocínio (ferramenta
+ * forçada não o admitia); no 5.5 ele é obrigatório, e em 'high' é o mais longo
+ * que estas leituras já tiveram — dentro do mesmo teto de 150 s de parede. Se
+ * aparecer 504, este é o primeiro botão: 'medium' ou 'low'.
+ */
+const ESFORCO = ESFORCO_PADRAO_DO_OPUS;
+// 32000, e não 16000: no Opus 5.5 o raciocínio, sempre ligado, conta DENTRO do
+// teto. A extração da análise é grande (M1+M2+M4), e cortada ela se perde.
+const CLAUDE_MAX_TOKENS = 32000;
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const BUCKET_INPUT = 'analises-input';            // bucket novo (criar no painel)
 const BUCKET_TEMPLATES = 'contratos-templates';  // MESMO bucket de templates da gerar-contrato
@@ -1688,6 +1713,17 @@ const FERRAMENTA_QUALIFICACAO = ferramentaDoEsquema(
  * com o título. Se a variação entre leituras virar problema real, o caminho é
  * medir duas passadas do mesmo processo e apertar o esquema — não voltar o
  * parâmetro.
+ *
+ * FERRAMENTA EM 'auto', E NÃO MAIS FORÇADA (Opus 5.5, 05/10/2026). O 5.5 recusa
+ * `tool_choice` de tipo 'tool' (400). Saída estruturada (`output_config.format`)
+ * seria a troca mais fiel, mas não serve aqui por dois motivos: os esquemas são
+ * só descrições, sem tipo por campo; e o formato entra no prefixo do cache —
+ * um formato por leitura quebraria o reaproveitamento do processo entre a
+ * qualificação e as duas leituras, que é o que segura o custo e o relógio.
+ * Então: 'auto' com uma chamada no máximo, a instrução que já nomeia a
+ * ferramenta, e a CONFERÊNCIA — não veio a ferramenta nem o JSON em texto, a
+ * conversa continua UMA vez pedindo a ferramenta pelo nome (o processo já está
+ * no cache; o modelo parte do que já leu). Só no caminho que falhou.
  */
 async function extrairComFerramenta(
   apiKey: string,
@@ -1724,13 +1760,22 @@ async function extrairComFerramenta(
     i === o.conteudo.length - 1 ? { ...b, cache_control: { type: 'ephemeral' } } : b,
   );
 
-  const pedir = async (maxTokens: number) => {
+  // O primeiro turno, igual em toda tentativa — é ele que o cache reaproveita.
+  const primeiro = {
+    role: 'user',
+    content: [
+      ...conteudo,
+      { type: 'text', text: `${o.instrucoes}\n\n=== O QUE FAZER AGORA ===\nFaça o trabalho descrito acima e registre o resultado chamando a ferramenta ${o.ferramenta.name} UMA única vez. Não use as outras ferramentas e não escreva o JSON no texto da resposta.` },
+    ],
+  };
+
+  const pedir = async (mensagens: unknown[]) => {
     const res = await fetchComRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: maxTokens,
+        max_tokens: o.maxTokens,
         system: SYSTEM_BASE,
         // AS QUATRO, SEMPRE — inclusive a do resgate. A lista era fixa em três e a
         // segunda leitura forçava tool_choice numa quarta que não estava aqui: a
@@ -1738,78 +1783,84 @@ async function extrairComFerramenta(
         // nunca chegou a rodar. Todas em todas as chamadas por causa do cache:
         // o prefixo (tools → system → messages) tem de ser idêntico entre elas.
         tools: [FERRAMENTA_QUALIFICACAO, FERRAMENTA_PRECO, FERRAMENTA_DOCUMENTO, FERRAMENTA_RESGATE],
-        // FORÇADA, e não 'auto'. Eu deixei em 'auto' argumentando que forçar
-        // tiraria do modelo a chance de raciocinar em texto antes de responder.
-        // Em produção isso custou a análise inteira: em 'auto' o Opus 5 escreve
-        // a prosa ANTES de chamar a ferramenta, o que estoura tanto o tempo de
-        // parede (HTTP 504, teto de 150 s) quanto os recursos do worker (546).
-        //
-        // E o argumento estava errado de raiz: o formato ANTIGO era "devolva
-        // APENAS este JSON, sem markdown" — que também não deixava espaço para
-        // prosa nenhuma. Forçar a ferramenta não tira liberdade que existia;
-        // devolve o comportamento que já funcionava, agora sem o risco de o JSON
-        // vir cortado ou embrulhado em cerca de markdown.
-        tool_choice: { type: 'tool', name: o.ferramenta.name },
-        messages: [{
-          role: 'user',
-          content: [
-            ...conteudo,
-            { type: 'text', text: `${o.instrucoes}\n\n=== O QUE FAZER AGORA ===\nFaça o trabalho descrito acima e registre o resultado chamando a ferramenta ${o.ferramenta.name} UMA única vez. Não use as outras ferramentas e não escreva o JSON no texto da resposta.` },
-          ],
-        }],
-      }),
+        // 'AUTO', NO MÁXIMO UMA CHAMADA. Foi forçada (`{type: 'tool'}`) até o
+        // Opus 5, porque em 'auto' o Opus 5 escrevia prosa ANTES da ferramenta e
+        // estourava o tempo de parede (HTTP 504, teto de 150 s) e os recursos do
+        // worker (546). O Opus 5.5 recusa a forçada (400). O que segura a prosa
+        // agora é a instrução do fim do turno — que nomeia a ferramenta e proíbe
+        // o JSON em texto — e, no 5.5, o texto entre o pensamento e a chamada vem
+        // em bloco de raciocínio, não em texto. A falta da chamada é conferida
+        // abaixo.
+        tool_choice: { type: 'auto', disable_parallel_tool_use: true },
+        output_config: { effort: ESFORCO },
+        messages: mensagens,
+      } satisfies PedidoAoOpus),
     });
     if (!res.ok) throw new Error(`Claude API (${o.rotulo}) ${res.status}: ${(await res.text()).slice(0, 500)}`);
     return await res.json();
   };
 
-  // UMA CHAMADA, E SÓ. A retentativa com teto maior estava aqui e foi retirada:
+  /** O resultado, pela ferramenta ou — rede do caminho antigo — pelo JSON em texto. */
+  const resultadoDe = (content: BlocoDaResposta[]): { valor: any } | { raw: string } => {
+    const uso = chamadaDaFerramenta(content, o.ferramenta.name);
+    if (uso) return { valor: uso };
+    const raw = textoDaResposta(content, '\n')
+      .replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+    if (raw) {
+      try { return { valor: JSON.parse(raw) }; } catch { /* tenta o recorte */ }
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) { try { return { valor: JSON.parse(m[0]) }; } catch { /* incompleto */ } }
+    }
+    return { raw };
+  };
+
+  // UMA LEITURA, E SÓ. A retentativa com teto maior estava aqui e foi retirada:
   // ela reenvia o PROCESSO INTEIRO e refaz a leitura toda, o que num pedido que
   // já vive perto do teto de 150 s de tempo de parede significa estourar com
   // certeza em vez de falhar com aviso. Trocar uma falha explicada por um
   // timeout é piorar. O teto de saída já é generoso; se cortar, quem lê recebe
   // a mensagem dizendo exatamente isso e o que fazer.
-  const _tAntes = Date.now();
-  const data = await pedir(o.maxTokens);
-  // O ÚNICO REGISTRO QUE ESTA FUNÇÃO DEIXA. Ela tinha zero `console` em 4.700
-  // linhas, e três defeitos desta auditoria eram invisíveis exatamente por
-  // isso: a segunda leitura que nunca rodou, o input cortado aceito como
-  // inteiro e o cache de prompt sem hit. `cache_read_input_tokens` em zero é a
-  // única forma de ver que o prefixo quebrou — e ele quebra por qualquer
-  // diferença em tools/system.
-  console.log(JSON.stringify({
-    fn: 'gerar-analise-rpv', rotulo: o.rotulo, stop_reason: data?.stop_reason,
-    usage: data?.usage, blocos: o.conteudo.length, ms: Date.now() - _tAntes,
-  }));
+  //
+  // A SEGUNDA VOLTA que existe é outra coisa: a ferramenta não veio (o 'auto'
+  // não a garante). Ela não relê nada — continua a mesma conversa, com o
+  // processo no cache, pedindo só o registro do que já foi lido.
+  const mensagens: unknown[] = [primeiro];
+  let raw = '';
+  for (let volta = 0; volta < 2; volta++) {
+    const _tAntes = Date.now();
+    const data = await pedir(mensagens);
+    // O ÚNICO REGISTRO QUE ESTA FUNÇÃO DEIXA. Ela tinha zero `console` em 4.700
+    // linhas, e três defeitos desta auditoria eram invisíveis exatamente por
+    // isso: a segunda leitura que nunca rodou, o input cortado aceito como
+    // inteiro e o cache de prompt sem hit. `cache_read_input_tokens` em zero é a
+    // única forma de ver que o prefixo quebrou — e ele quebra por qualquer
+    // diferença em tools/system.
+    console.log(JSON.stringify({
+      fn: 'gerar-analise-rpv', rotulo: o.rotulo, volta, stop_reason: data?.stop_reason,
+      usage: data?.usage, blocos: o.conteudo.length, ms: Date.now() - _tAntes,
+    }));
 
-  // CORTADA É CORTADA, com ou sem tool_use. A checagem de max_tokens só corria
-  // quando não havia bloco de ferramenta; havendo, o input parcial era aceito
-  // como se inteiro — e um JSON de valores truncado vira análise com campos
-  // faltando e cara de resultado.
-  if (data?.stop_reason === 'max_tokens') {
-    throw new Error(
-      `A leitura (${o.rotulo}) foi CORTADA por tamanho: a resposta bateu no teto e veio incompleta. O processo pode estar grande demais para uma passada só — reduza os anexos do card e rode de novo.`,
-    );
+    // CORTADA É CORTADA, com ou sem tool_use. A checagem de max_tokens só corria
+    // quando não havia bloco de ferramenta; havendo, o input parcial era aceito
+    // como se inteiro — e um JSON de valores truncado vira análise com campos
+    // faltando e cara de resultado.
+    if (data?.stop_reason === 'max_tokens') {
+      throw new Error(
+        `A leitura (${o.rotulo}) foi CORTADA por tamanho: a resposta bateu no teto e veio incompleta. O processo pode estar grande demais para uma passada só — reduza os anexos do card e rode de novo.`,
+      );
+    }
+    // RECUSA não se repete: o filtro de segurança decidiria igual.
+    if (data?.stop_reason === 'refusal') {
+      throw new Error(`A IA recusou a leitura (${o.rotulo}) — filtro de segurança da Anthropic. Revise os anexos do card e rode de novo.`);
+    }
+
+    const content = (data?.content ?? []) as BlocoDaResposta[];
+    const r = resultadoDe(content);
+    if ('valor' in r) return r.valor;
+    raw = r.raw;
+    mensagens.push(...pedidoParaChamarAFerramenta(content, o.ferramenta.name));
   }
-
-  const uso = data.content?.find((c: { type: string; name?: string }) => c.type === 'tool_use' && c.name === o.ferramenta.name);
-  if (uso?.input && typeof uso.input === 'object') return uso.input;
-
-  // Rede: o caminho antigo, para o modelo que responder em prosa.
-  const texto = (data.content ?? [])
-    .filter((c: { type: string }) => c.type === 'text')
-    .map((c: { text?: string }) => String(c.text ?? '')).join('\n').trim();
-  const raw = texto.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
-  if (raw) {
-    try { return JSON.parse(raw); } catch { /* tenta o recorte */ }
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) { try { return JSON.parse(m[0]); } catch { /* incompleto */ } }
-  }
-  throw new Error(
-    data?.stop_reason === 'max_tokens'
-      ? `A leitura (${o.rotulo}) foi CORTADA por tamanho: a resposta bateu no teto e veio incompleta. O processo pode estar grande demais para uma passada só — reduza os anexos do card e rode de novo.`
-      : `A IA não registrou o resultado da ${o.rotulo}.${raw ? ` Ela disse: "${raw.slice(0, 200)}"` : ''}`,
-  );
+  throw new Error(`A IA não registrou o resultado da ${o.rotulo}.${raw ? ` Ela disse: "${raw.slice(0, 200)}"` : ''}`);
 }
 
 /**
@@ -1886,7 +1937,8 @@ const RESGATE_INSTRUCOES =
 const extrairValoresDeResgate = (apiKey: string, contentBlocks: any[]) =>
   extrairComFerramenta(apiKey, {
     rotulo: 'segunda leitura dos valores', instrucoes: RESGATE_INSTRUCOES, ferramenta: FERRAMENTA_RESGATE,
-    conteudo: contentBlocks, maxTokens: 2000,
+    // 8000, e não 2000: no Opus 5.5 o raciocínio conta dentro do teto.
+    conteudo: contentBlocks, maxTokens: 8000,
   });
 
 /**
@@ -1944,7 +1996,8 @@ const extrairQualificacao = (apiKey: string, contentBlocks: any[], cedente?: str
           '. É dele o crédito que está sendo cedido; os campos falam dele.'
         : ''),
     ferramenta: FERRAMENTA_QUALIFICACAO,
-    conteudo: contentBlocks, maxTokens: 4000,
+    // 12000, e não 4000: no Opus 5.5 o raciocínio conta dentro do teto.
+    conteudo: contentBlocks, maxTokens: 12000,
   });
 
 // ============================================================================
@@ -2064,8 +2117,10 @@ async function refinarDados(
     // regrava a marca depois de precificar.
     content: `ANÁLISE ATUAL (JSON):\n${JSON.stringify({ ...dadosAtuais, [CHAVE_EMOLUMENTOS_PRECIFICADOS]: undefined })}${notas}\n\nPEDIDO:\n${instrucao}`,
   });
-  // max_tokens curto de propósito: a saída agora é um patch de poucos campos, e
-  // um teto alto só dá margem para a resposta demorar.
+  // max_tokens curto de propósito: a saída agora é um patch de poucos campos.
+  // 8000, e não os 4000 de antes, porque no Opus 5.5 o raciocínio (sempre
+  // ligado) conta dentro do teto — e o modelo não escreve mais por ter teto
+  // maior: o teto só corta.
   const resp = await anthropic.messages
     .stream({
       // A MESMA constante das extrações, e não um literal solto. Foi assim que
@@ -2073,13 +2128,14 @@ async function refinarDados(
       // para o Opus 5 escrevendo o nome aqui, e a leitura que PRECIFICA ficou no
       // 4.5 lá em cima. Um nome só, um lugar só.
       model: CLAUDE_MODEL,
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: [{ type: 'text', text: SISTEMA_REVISAO, cache_control: { type: 'ephemeral' } }],
       tools: [FERRAMENTA_REVISAO],
+      output_config: { effort: ESFORCO },
       messages: mensagens,
-    })
+    } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
     .finalMessage();
-  // CORTADA É CORTADA, aqui também. Com max_tokens 4000, um patch grande
+  // CORTADA É CORTADA, aqui também. Com o teto de saída batido, um patch grande
   // (reescrever o m2 inteiro) volta truncado e o erro chegava como "A IA não
   // devolveu a análise revisada" — que manda a pessoa reformular a pergunta
   // quando o problema era o tamanho da resposta.

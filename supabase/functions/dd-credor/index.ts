@@ -7,6 +7,7 @@
 // ============================================================================
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { ESFORCO_PADRAO_DO_OPUS, textoDaResposta, type PedidoAoOpus } from "../_shared/respostaDoClaude.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveJudit, chaveAnthropic, segredoGoogle } from "../_shared/segredos.ts";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
@@ -16,7 +17,7 @@ const CORS = corsHeaders;
 const JUDIT_REQUESTS = "https://requests.prod.judit.io/requests";
 const JUDIT_RESPONSES = "https://requests.prod.judit.io/responses";
 const JUDIT_LAWSUITS = "https://lawsuits.production.judit.io/lawsuits";
-const CLAUDE_MODEL = "claude-opus-5";
+const CLAUDE_MODEL = "claude-opus-5-5";
 const MAX_DOC_CHARS = 380000;
 const MAX_DOCS_BAIXAR = 20;
 const POLL_MAX = 22;
@@ -101,10 +102,13 @@ A classificacao DEVE refletir o RISCO AO CRÉDITO PRINCIPAL e ser COERENTE com r
 - "🟢 Aprovada" = NÃO representa risco ao crédito principal (inclui créditos diferentes/já pagos — que são apenas informação).
 Responda APENAS com um JSON válido (sem markdown, sem texto antes ou depois):
 {"classificacao":"🟢 Aprovada" | "🟡 Ressalvas" | "🔴 Reprovada","risco_ao_credito_principal":{"tem_risco":"SIM" | "NÃO","tipo":"penhora | cessão anterior | insolvência | fraude | bloqueio | outro | nenhum","justificativa":"documento/movimentação + data + trecho que comprova o risco; ou explique por que NÃO há risco ao principal"},"resumo":"1 a 3 frases: o que é este processo e sua relação (ou não) com o crédito principal","riscos":[{"risco":"descrição","fundamento":"documento/movimentação + data + trecho","grau":"Impeditivo | Elevado | Moderado | Ponto de atenção"}],"observacoes":"o que NÃO pôde ser conferido (documentos sigilosos etc.)"}`;
-  const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 4000, system, messages: [{ role: "user", content: texto }] }) });
+  // 8000 de saída, e não 4000: no Opus 5.5 o raciocínio, sempre ligado, conta dentro do teto e podia
+  // comer o JSON. Esforço 'high', o padrão do Opus 5 (o do 5.5 é 'medium').
+  const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 8000, output_config: { effort: ESFORCO_PADRAO_DO_OPUS }, system, messages: [{ role: "user", content: texto }] } satisfies PedidoAoOpus) });
   const j = await res.json();
   if (!res.ok) return { erro: "IA recusou", http: res.status, resposta: j };
-  const txt = ((j?.content || []) as any[]).map((b) => b.text || "").join("").trim();
+  // Só os blocos de texto: no Opus 5.5 a resposta pode começar por blocos de raciocínio.
+  const txt = textoDaResposta(j?.content);
   const clean = txt.replace(/```json/gi, "").replace(/```/g, "").trim();
   try { return { ok: true, veredito: JSON.parse(clean) }; }
   catch { return { ok: false, texto_bruto: txt }; }

@@ -41,6 +41,12 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic } from '../_shared/segredos.ts'
+import {
+  ESFORCO_PADRAO_DO_OPUS,
+  semCercaDeMarkdown,
+  textoDaResposta,
+  type PedidoAoOpus,
+} from '../_shared/respostaDoClaude.ts'
 import { cnjDoCard } from '../_shared/nucleo/cnj.ts'
 import { MAX_TEXTO_CHARS } from '../_shared/orcamentoLeitura.ts'
 import {
@@ -63,7 +69,7 @@ import {
   type TitularDoOficio,
 } from '../_shared/oficioDoCredito.ts'
 
-const CLAUDE_MODEL = 'claude-opus-5'
+const CLAUDE_MODEL = 'claude-opus-5-5'
 
 const SISTEMA = `Você lê autos de processo judicial e identifica DE QUEM são as verbas que estão sendo cedidas.
 
@@ -173,10 +179,14 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: 1500,
+        // 8000, e não 1500: no Opus 5.5 o raciocínio, sempre ligado, conta
+        // dentro do teto, e com 1500 ele podia comer o JSON.
+        max_tokens: 8000,
+        // O padrão do Opus 5 (o do 5.5 é 'medium').
+        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
         system: SISTEMA,
         messages: [{ role: 'user', content: pedido }],
-      }),
+      } satisfies PedidoAoOpus),
     })
     const resposta = await res.json().catch(() => null)
     if (!res.ok) {
@@ -186,12 +196,7 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    const bruto = ((resposta?.content ?? []) as { type?: string; text?: string }[])
-      .map((c) => (c.type === 'text' ? (c.text ?? '') : ''))
-      .join('')
-      .replace(/```json/gi, '')
-      .replace(/```/g, '')
-      .trim()
+    const bruto = semCercaDeMarkdown(textoDaResposta(resposta?.content))
 
     let lido: { titulares?: unknown; titular_do_oficio?: unknown; aviso?: unknown }
     try {

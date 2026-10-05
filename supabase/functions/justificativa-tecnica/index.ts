@@ -38,6 +38,7 @@
 // `codigo: 'migracao-pendente'` e a frase de AVISO_MIGRACAO_0076 — nada é
 // gerado, nada é cobrado, e nenhuma outra função depende desta.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
+import { ESFORCO_PADRAO_DO_OPUS, type NoFormatoDoOpus } from '../_shared/respostaDoClaude.ts'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
@@ -81,7 +82,7 @@ import {
  * tetos de RPV). O texto vai ao cedente e sustenta um preço: errar uma norma ou
  * um número sai mais caro que o token.
  */
-const MODELO = 'claude-opus-5'
+const MODELO = 'claude-opus-5-5'
 
 /**
  * Os tetos da pesquisa. São o principal controle de tempo e de custo: o modelo
@@ -210,7 +211,12 @@ const SISTEMA_PESQUISA =
   'NESTA ETAPA VOCÊ SÓ PESQUISA — outra etapa redige. Use a busca na web (e, quando a busca só resumir um documento oficial que importa, abra-o) para levantar o que a tarefa pede pesquisar. ' +
   'Prefira fontes oficiais e recentes; diga a data de cada informação. Não invente nada: o que não achar, diga que não achou. ' +
   'Responda com um DOSSIÊ em tópicos curtos, em português, organizado nos assuntos da tarefa (situação de pagamento do ente; contexto jurídico e normativo; referências de deságio de mercado), e termine com "NÃO ENCONTRADO:" listando o que procurou e não achou. ' +
-  'Cada fato precisa vir da busca, para a citação acompanhá-lo.'
+  'Cada fato precisa vir da busca, para a citação acompanhá-lo. ' +
+  // NO OPUS 5.5 o texto escrito ENTRE uma busca e outra vem em bloco de
+  // raciocínio (vazio por padrão), e o dossiê (`dossieDaResposta`) só lê os
+  // blocos de texto. No Opus 5 essas notas chegavam como texto e entravam no
+  // dossiê; agora o que importa tem de estar na resposta final.
+  'Escreva o dossiê INTEIRO na resposta final, depois de terminar as buscas: o que você anotar entre uma busca e outra não chega a quem redige.'
 
 const SISTEMA_REDACAO =
   'Você é analista de crédito da Credijuris e redige a JUSTIFICATIVA TÉCNICA pedida na TAREFA, para o cedente ler. ' +
@@ -244,10 +250,13 @@ async function pesquisar(
         {
           model: MODELO,
           max_tokens: 16000,
+          // O padrão do Opus 5 (o do 5.5 é 'medium'). O raciocínio, sempre
+          // ligado no 5.5, divide os 16000 com o dossiê.
+          output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
           system: SISTEMA_PESQUISA,
           tools: ferramentas as unknown as Anthropic.Tool[],
           messages: mensagens,
-        },
+        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>,
         { signal: AbortSignal.timeout(Math.max(10_000, restante(c) - 15_000)) },
       )
       .finalMessage()
@@ -276,7 +285,13 @@ async function redigir(c: Contexto, tarefa: string, dossie: string, fontes: Font
     'Redija agora a justificativa técnica.'
   const resposta = await c.anthropic.messages
     .stream(
-      { model: MODELO, max_tokens: 12000, system: SISTEMA_REDACAO, messages: [{ role: 'user', content: pedido }] },
+      {
+        model: MODELO,
+        max_tokens: 12000,
+        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
+        system: SISTEMA_REDACAO,
+        messages: [{ role: 'user', content: pedido }],
+      } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>,
       { signal: AbortSignal.timeout(Math.max(10_000, restante(c) - 10_000)) },
     )
     .finalMessage()

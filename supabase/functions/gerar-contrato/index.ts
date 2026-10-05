@@ -33,6 +33,7 @@
 import { corsHeaders } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { chaveAnthropic, segredoGoogle } from '../_shared/segredos.ts'
+import { ESFORCO_PADRAO_DO_OPUS, semCercaDeMarkdown, textoDaResposta, type PedidoAoOpus } from '../_shared/respostaDoClaude.ts'
 import { normalizarNome } from '../_shared/nucleo/texto.ts'
 import { ehPastaCredijuris, ORIGINADOR_CREDIJURIS, pastaDoOriginador } from '../_shared/pastaDoOriginador.ts'
 import {
@@ -60,8 +61,10 @@ import { encodeBase64 as b64encode } from 'jsr:@std/encoding@1.0.11/base64'
 // Constants
 // ============================================================================
 
-const CLAUDE_MODEL = 'claude-opus-5';
-const CLAUDE_MAX_TOKENS = 1500;
+const CLAUDE_MODEL = 'claude-opus-5-5';
+// 8000, e não 1500: no Opus 5.5 o raciocínio, sempre ligado, conta dentro do
+// teto, e com 1500 ele podia comer o JSON das variáveis.
+const CLAUDE_MAX_TOKENS = 8000;
 
 const BUCKET_TEMPLATES = 'contratos-templates';
 // Bucket 'contratos' já existe (0001_init.sql) — reaproveitado como staging de
@@ -826,19 +829,21 @@ async function callClaude(apiKey: string, content: ClaudeContentBlock[], schema:
     body: JSON.stringify({
       model: CLAUDE_MODEL,
       max_tokens: CLAUDE_MAX_TOKENS,
+      // O padrão do Opus 5 (o do 5.5 é 'medium').
+      output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
       system: CLAUDE_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userContent }],
-    }),
+    } satisfies PedidoAoOpus),
   });
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`Claude API ${res.status}: ${txt.slice(0, 500)}`);
   }
   const data = await res.json();
-  const block = data.content?.find((c: { type: string }) => c.type === 'text');
-  if (!block) throw new Error('Claude retornou sem bloco de texto');
-  let raw: string = block.text.trim();
-  raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+  if (data?.stop_reason === 'max_tokens') throw new Error('Claude retornou a extração cortada por tamanho');
+  // Só os blocos de texto: no Opus 5.5 a resposta pode começar por raciocínio.
+  const raw = semCercaDeMarkdown(textoDaResposta(data?.content));
+  if (!raw) throw new Error('Claude retornou sem bloco de texto');
   try {
     return JSON.parse(raw);
   } catch (_) {
