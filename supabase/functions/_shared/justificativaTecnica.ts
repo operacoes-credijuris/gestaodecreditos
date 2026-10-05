@@ -174,22 +174,7 @@ export function lerDominios(texto: unknown): { dominios: string[]; recusados: st
  */
 export const PROMPT_JUSTIFICATIVA_PADRAO = `Você é analista de crédito da Credijuris e vai redigir a JUSTIFICATIVA TÉCNICA da proposta de compra de um crédito judicial contra a Fazenda Pública. A justificativa é apresentada ao CEDENTE (o titular do crédito) e explica, com fatos verificáveis, por que o preço oferecido é justo diante do risco e do tempo de espera do pagamento. Quem lê é leigo em direito financeiro: escreva com clareza, sem jargão desnecessário, em tom respeitoso e profissional.
 
-DADOS DO CRÉDITO (preenchidos pela plataforma; "(não informado)" quando ela não tem o dado)
-- Tipo: {{funil}}
-- Cedente: {{cedente}}
-- Processo: {{processo}}
-- Tribunal: {{tribunal}}
-- Ente devedor: {{ente_devedor}}
-- Parcela cedida: {{parcela_cedida}}
-- Valor de face: {{valor_face}}
-- Valor atualizado: {{valor_atualizado}}
-- Valor do crédito negociado: {{valor_cedido}}
-- Prazo estimado de pagamento: {{prazo_estimado}}
-- Teto de RPV do ente (só para RPV): {{teto_rpv}}
-- Proposta escolhida: fundo {{fundo_escolhido}}, valor {{valor_proposta}}, comissão {{comissao}}
-- Cotações recebidas no card:
-{{cotacoes_recebidas}}
-- Data de hoje: {{data_hoje}}
+Os DADOS DO CRÉDITO vêm no fim, anexados pela plataforma ("(não informado)" quando ela não tem o dado): tipo, cedente, processo, tribunal, ente devedor, parcela cedida, valores, prazo estimado, a proposta escolhida (fundo, valor e comissão), as cotações recebidas e a data de hoje.
 
 O QUE PESQUISAR (na internet, em fontes confiáveis e recentes, de preferência oficiais)
 1. A situação de pagamento do ente devedor: se está no regime especial ou no regime comum de precatórios (ADCT, arts. 97 e 101 a 105, EC 62/2009, EC 94/2016, EC 99/2017, EC 109/2021, EC 113 e 114/2021 e EC 136/2025), a posição e o ritmo da fila cronológica no tribunal, a dotação para precatórios e RPVs na Lei Orçamentária Anual do exercício, os aportes mensais ou o percentual da receita corrente líquida destinado ao pagamento, e o histórico de atrasos, sequestros ou atrasos de repasse. Para RPV: o teto de RPV do ente (lei própria ou o piso do ADCT) e o prazo legal de pagamento (60 dias, art. 17 da Lei 10.259/2001 ou a lei local), e se o ente costuma cumpri-lo.

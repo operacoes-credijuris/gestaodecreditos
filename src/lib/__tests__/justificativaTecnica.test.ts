@@ -83,12 +83,14 @@ describe('montarPrompt — as variáveis no lugar', () => {
     expect(r.desconhecidas).toEqual(['cedent'])
   })
 
-  it('o prompt padrão usa só variáveis conhecidas, e todas elas', () => {
-    expect(montarPrompt(PROMPT_JUSTIFICATIVA_PADRAO, {}).desconhecidas).toEqual([])
-    // {{card}} é o atalho que junta as outras: o padrão usa as variáveis uma a uma.
-    for (const v of VARIAVEIS_DA_JUSTIFICATIVA.filter((x) => x.nome !== 'card')) {
-      expect(PROMPT_JUSTIFICATIVA_PADRAO, v.nome).toContain(`{{${v.nome}}}`)
-    }
+  // MUDOU DE PROPÓSITO (05/10/2026): o prompt é só instrução, e o padrão também —
+  // sem variável nenhuma; os dados entram pelo bloco anexado.
+  it('o prompt padrão é só instrução: sem variável, e com os dados anexados', () => {
+    const r = montarPrompt(PROMPT_JUSTIFICATIVA_PADRAO, { cedente: 'MARIA' })
+    expect(PROMPT_JUSTIFICATIVA_PADRAO.includes('{{')).toBe(false)
+    expect(r.desconhecidas).toEqual([])
+    expect(r.anexouDados).toBe(true)
+    expect(r.texto).toContain('- Cedente: MARIA')
   })
 
   it('campo vazio cai no padrão — nenhuma geração sai sem método', () => {
@@ -567,8 +569,9 @@ describe('montarPrompt — {{card}} e os dados anexados', () => {
     expect(r.anexouDados).toBe(true)
     expect(r.texto).toContain('- Valor da proposta: R$ 807.500,00')
   })
-  it('o prompt padrão (todas as variáveis) e o {{card}} não recebem anexo', () => {
-    expect(montarPrompt(PROMPT_JUSTIFICATIVA_PADRAO, valores).anexouDados).toBe(false)
+  it('o {{card}} e um prompt com todas as variáveis não recebem anexo', () => {
     expect(montarPrompt('{{card}}', valores).anexouDados).toBe(false)
+    const todas = VARIAVEIS_DA_JUSTIFICATIVA.filter((v) => v.nome !== 'card').map((v) => `{{${v.nome}}}`).join(' ')
+    expect(montarPrompt(todas, valores).anexouDados).toBe(false)
   })
 })
