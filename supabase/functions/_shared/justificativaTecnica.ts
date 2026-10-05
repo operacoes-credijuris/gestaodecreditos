@@ -247,9 +247,14 @@ export function blocoDoCard(valores: Readonly<Record<string, string | null | und
 }
 
 /**
- * O prompt montado. `anexouDados`: o prompt não usava NENHUMA variável de dado,
- * e a plataforma anexou o bloco do crédito ao fim — sem isso a IA pesquisaria
- * sem saber de que crédito se trata (05/10/2026).
+ * O prompt montado. `anexouDados`: a plataforma anexou ao fim o bloco com
+ * TODOS os dados do crédito.
+ *
+ * O PROMPT É SÓ INSTRUÇÃO (pedido do dono, 05/10/2026: "quero ir mudando o
+ * prompt sem depender das variáveis"). Os dados vão SEMPRE junto, a menos que o
+ * prompt já os traga inteiros — pelo {{card}} ou usando todas as variáveis de
+ * dado, como o padrão. Um prompt com só {{cedente}} recebe o bloco completo:
+ * repetir um dado não atrapalha a IA; faltar o valor da proposta, sim.
  */
 export function montarPrompt(
   modelo: string,
@@ -257,18 +262,21 @@ export function montarPrompt(
 ): { texto: string; desconhecidas: string[]; anexouDados: boolean } {
   const conhecidas = new Set(VARIAVEIS_DA_JUSTIFICATIVA.map((v) => v.nome))
   const desconhecidas: string[] = []
-  let usouDado = false
+  const usadas = new Set<string>()
   let texto = String(modelo ?? '').replace(RE_VARIAVEL, (inteiro, nome: string) => {
     if (!conhecidas.has(nome)) {
       if (!desconhecidas.includes(nome)) desconhecidas.push(nome)
       return inteiro
     }
-    if (nome !== 'data_hoje') usouDado = true
+    usadas.add(nome)
     if (nome === 'card') return blocoDoCard(valores)
     const v = String(valores[nome] ?? '').trim()
     return v || NAO_INFORMADO
   })
-  const anexouDados = !usouDado
+  const completo =
+    usadas.has('card') ||
+    VARIAVEIS_DA_JUSTIFICATIVA.every((v) => v.nome === 'card' || v.nome === 'data_hoje' || usadas.has(v.nome))
+  const anexouDados = !completo
   if (anexouDados) {
     texto =
       `${texto.trimEnd()}\n\nDADOS DO CRÉDITO (anexados pela plataforma; "${NAO_INFORMADO}" quando ela não tem o dado):\n` +

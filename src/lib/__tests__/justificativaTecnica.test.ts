@@ -62,6 +62,10 @@ const minutosAntes = (m: number) => new Date(AGORA - m * 60_000).toISOString()
 
 // ---------------------------------------------------------------- o prompt
 
+// O BLOCO DE DADOS que a plataforma anexa ao fim (o prompt é só instrução): aqui
+// conferimos só a troca das variáveis, antes dele.
+const semAnexo = (t: string) => t.split('\n\nDADOS DO CRÉDITO (anexados')[0]
+
 describe('montarPrompt — as variáveis no lugar', () => {
   it('troca as conhecidas, e a sem valor vira "(não informado)"', () => {
     const r = montarPrompt('Cedente {{cedente}}, fundo {{ fundo_escolhido }}, comissão {{comissao}}.', {
@@ -69,13 +73,13 @@ describe('montarPrompt — as variáveis no lugar', () => {
       fundo_escolhido: 'BTG',
       comissao: '   ',
     })
-    expect(r.texto).toBe(`Cedente MARIA DA SILVA, fundo BTG, comissão ${NAO_INFORMADO}.`)
+    expect(semAnexo(r.texto)).toBe(`Cedente MARIA DA SILVA, fundo BTG, comissão ${NAO_INFORMADO}.`)
     expect(r.desconhecidas).toEqual([])
   })
 
   it('a desconhecida (erro de digitação) fica como está e é apontada', () => {
     const r = montarPrompt('{{cedente}} e {{cedent}} e {{cedent}}', { cedente: 'X' })
-    expect(r.texto).toBe('X e {{cedent}} e {{cedent}}')
+    expect(semAnexo(r.texto)).toBe('X e {{cedent}} e {{cedent}}')
     expect(r.desconhecidas).toEqual(['cedent'])
   })
 
@@ -203,7 +207,7 @@ describe('valoresDoCard — o que a plataforma sabe do crédito', () => {
     expect(v.teto_rpv).toBe('R$ 16.210,00')
     expect(v.fundo_escolhido).toBe('')
     const { texto } = montarPrompt('{{fundo_escolhido}} | {{valor_proposta}} | {{comissao}} | {{cotacoes_recebidas}}', v)
-    expect(texto).toBe([NAO_INFORMADO, NAO_INFORMADO, NAO_INFORMADO, NAO_INFORMADO].join(' | '))
+    expect(semAnexo(texto)).toBe([NAO_INFORMADO, NAO_INFORMADO, NAO_INFORMADO, NAO_INFORMADO].join(' | '))
   })
 
   it('Interno: a ficha anotada pela análise (nota nossa) vence o cadastro do comercial', () => {
@@ -556,7 +560,15 @@ describe('montarPrompt — {{card}} e os dados anexados', () => {
     expect(r.texto).toMatch(/\n\nDADOS DO CRÉDITO \(anexados pela plataforma/)
     expect(r.texto).toContain('- Cedente: MARIA DA SILVA')
   })
-  it('prompt que já usa uma variável de dado não recebe anexo', () => {
-    expect(montarPrompt('Cedente: {{cedente}}', valores).anexouDados).toBe(false)
+  // MUDOU DE PROPÓSITO (05/10/2026): o prompt é só instrução; os dados vão
+  // sempre, a menos que o prompt já os traga inteiros.
+  it('prompt com só algumas variáveis recebe o bloco completo mesmo assim', () => {
+    const r = montarPrompt('Cedente: {{cedente}}', valores)
+    expect(r.anexouDados).toBe(true)
+    expect(r.texto).toContain('- Valor da proposta: R$ 807.500,00')
+  })
+  it('o prompt padrão (todas as variáveis) e o {{card}} não recebem anexo', () => {
+    expect(montarPrompt(PROMPT_JUSTIFICATIVA_PADRAO, valores).anexouDados).toBe(false)
+    expect(montarPrompt('{{card}}', valores).anexouDados).toBe(false)
   })
 })

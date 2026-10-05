@@ -611,8 +611,9 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
                 <p className="mt-s2 flex items-start gap-s1.5 text-xs text-texto-2">
                   <Info className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
                   <span>
-                    O prompt não usa nenhuma variável de dado: a plataforma anexa ao fim o bloco com os dados do
-                    crédito (o mesmo de <code>{'{{card}}'}</code>).
+                    Os dados do crédito vão junto sozinhos, no fim do prompt (o mesmo bloco de{' '}
+                    <code>{'{{card}}'}</code>). As variáveis são opcionais: servem só para pôr um dado num ponto
+                    específico do texto.
                   </span>
                 </p>
               )}
