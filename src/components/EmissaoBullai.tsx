@@ -24,7 +24,7 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
-  Clock,
+  ArrowRight,
   Download,
   ExternalLink,
   Folder,
@@ -120,7 +120,7 @@ export function seloDoResultado(r: string | null | undefined) {
 
 /** O `.link-btn` da amostra: link na cor da marca, com área de clique de 24 px. */
 const LINK_BTN =
-  'inline-flex min-h-8 items-center gap-1 rounded-controle px-1.5 text-sm font-semibold text-marca-texto hover:bg-marca-leve'
+  'inline-flex min-h-8 items-center gap-s1 rounded-controle px-s1.5 text-sm font-semibold text-marca-texto hover:bg-marca-leve'
 
 export function EmissaoBullai({
   leadId,
@@ -316,7 +316,7 @@ export function EmissaoBullai({
   if (!ativo) return null
   // A MOLDURA É A MESMA NOS TRÊS ESTADOS (carregando, fora do ar, a lista), como
   // na amostra: a seção não pula de lugar quando o catálogo chega.
-  const moldura = 'my-4 rounded-cartao border border-borda px-4 py-3'
+  const moldura = 'my-s4 rounded-campo bg-superficie-2 px-s4 py-s3'
   if (catalogo.isLoading) {
     return (
       <div className={moldura}>
@@ -347,15 +347,15 @@ export function EmissaoBullai({
   // contagem de portais, a trava de nascimento e a confirmação são as mesmas.
   return (
     <div className={moldura}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className="flex flex-wrap items-center gap-x-s3 gap-y-s1.5">
         <div className="min-w-0 flex-1">
           <b className="text-corpo font-bold text-texto">Emitir pela BullAI</b>
-          <span className="ml-2 text-xs text-texto-3">
+          <span className="ml-s2 text-xs text-texto-3">
             {nMarcadas} marcada{nMarcadas === 1 ? '' : 's'} pelas regras da planilha ({consultas} consulta{consultas === 1 ? '' : 's'}) ·{' '}
-            {restantes == null ? 'plano ilimitado' : `${restantes} consulta(s) no plano`}
+            {restantes == null ? 'plano ilimitado' : `${restantes} ${restantes === 1 ? 'consulta' : 'consultas'} no plano`}
           </span>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-s2">
           {emEmissao && (
             <Button
               variant="ghost"
@@ -384,7 +384,7 @@ export function EmissaoBullai({
             loading={pedindo}
             icon={<Download className="h-[16px] w-[16px]" aria-hidden />}
           >
-            Extrair {consultas} certidão(ões)
+            Extrair {consultas} {consultas === 1 ? 'certidão' : 'certidões'}
           </Button>
         </div>
       </div>
@@ -485,8 +485,11 @@ export function EmissaoBullai({
                           <span className="text-xs text-aviso">Manual: {t.semBullai}</span>
                         )}
                         {i.status === 'OBTIDA' && seloDoResultado(i.resultado)}
+                        {/* O MESMO SELO DA LINHA DO CHECKLIST, logo acima (azul,
+                            com a seta): aqui era âmbar com relógio — a mesma
+                            certidão em duas cores na mesma janela. */}
                         {i.status === 'EM_EMISSAO' && (
-                          <Selo tom="aviso" icone={<Clock className={icSelo} aria-hidden />}>
+                          <Selo tom="info" icone={<ArrowRight className={icSelo} aria-hidden />}>
                             em emissão
                           </Selo>
                         )}
@@ -575,7 +578,7 @@ export function EmissaoBullai({
         title="Extrair pela BullAI"
         message={
           <>
-            Vou pedir <strong>{consultas}</strong> certidão(ões) à BullAI, em nome de{' '}
+            Vou pedir <strong>{consultas}</strong> {consultas === 1 ? 'certidão' : 'certidões'} à BullAI, em nome de{' '}
             {pedidos.map((p) => p.sujeito.nome).join(', ')}. Cada uma gasta uma consulta do plano
             {restantes == null ? '' : ` (restam ${restantes})`}. As certidões chegam aos poucos, e os PDFs vão para a
             pasta da análise no Drive, em Certidões.
