@@ -22,6 +22,7 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
+  Lock,
   RefreshCw,
   Send,
 } from 'lucide-react'
@@ -40,11 +41,15 @@ import {
   ehTabelaAusente,
   type EstadoDaJustificativa,
   type EtapaDaJustificativa,
+  type FaseDaGeracao,
   geracaoParada,
+  juntarNotas,
   type LinhaDaJustificativa,
-  ROTULO_DA_ETAPA,
+  ROTULO_DA_FASE,
+  separarNotas,
   textoEmVigor,
 } from '../../supabase/functions/_shared/justificativaTecnica.ts'
+import type { AndamentoDaGeracao } from '../../supabase/functions/_shared/justificativaParalela.ts'
 
 const FUNCAO = 'justificativa-tecnica'
 const TABELA = 'justificativa_tecnica'
@@ -172,7 +177,19 @@ type Linha = LinhaDaJustificativa & {
   rascunho_em?: string | null
   enviado_por?: string | null
   nota_kommo_ids?: number[] | null
+  /** O resumo do andamento (fase e frentes), lido de dentro do jsonb `pesquisa`. */
+  andamento?: AndamentoDaGeracao | null
 }
+
+/**
+ * AS COLUNAS QUE A JANELA LÊ — e não `*`. O jsonb `pesquisa` guarda o estado das
+ * frentes, com as conversas salvas para continuar (centenas de KB); a consulta
+ * a cada três segundos lê só o resumo dele, `andamento`.
+ */
+const COLUNAS_DA_JANELA =
+  'kommo_lead_id, pipeline_id, status, etapa, tentativa, texto, texto_editado, texto_enviado, rascunho_em, ' +
+  'fontes, erro, consumo, gerado_em, atualizado_em, enviando_desde, enviado_em, enviado_por, nota_kommo_ids, ' +
+  'andamento:pesquisa->andamento'
 
 type EstadoDoRascunho = 'salvo' | 'pendente' | 'salvando' | 'erro'
 
@@ -203,9 +220,9 @@ export function JanelaJustificativa({
     enabled: aberta,
     retry: false,
     queryFn: async () => {
-      const { data, error } = await supabase.from(TABELA).select('*').eq('kommo_lead_id', leadId).maybeSingle()
+      const { data, error } = await supabase.from(TABELA).select(COLUNAS_DA_JANELA).eq('kommo_lead_id', leadId).maybeSingle()
       if (error) throw error
-      return (data ?? null) as Linha | null
+      return (data ?? null) as unknown as Linha | null
     },
     refetchInterval: (q) => {
       const l = q.state.data as Linha | null | undefined
@@ -256,7 +273,13 @@ export function JanelaJustificativa({
   }, [aberta, consulta.isLoading, consulta.error, linha, leadId, gerar])
 
   // ---------------- o texto e o rascunho ----------------
-  const [texto, setTexto] = useState('')
+  // O TEXTO É UM SÓ (o que se salva e o que vai ao Kommo); na janela ele aparece
+  // em duas partes quando traz a linha ###NOTAS###: o corpo (com as fontes) e,
+  // numa caixa à parte, as notas internas. `notas` null = o texto não tem a linha,
+  // e tudo fica como sempre foi.
+  const [corpo, setCorpo] = useState('')
+  const [notas, setNotas] = useState<string | null>(null)
+  const texto = useMemo(() => (notas === null ? corpo : juntarNotas(corpo, notas)), [corpo, notas])
   const [rascunho, setRascunho] = useState<EstadoDoRascunho>('salvo')
   const [salvoEm, setSalvoEm] = useState<string | null>(null)
   const carregado = useRef<string | null>(null)
@@ -271,7 +294,9 @@ export function JanelaJustificativa({
     if (carregado.current === chave) return
     carregado.current = chave
     const t = textoEmVigor(linha)
-    setTexto(t)
+    const partes = separarNotas(t)
+    setCorpo(partes.corpo)
+    setNotas(partes.notas)
     ultimoEnviado.current = t
     setRascunho('salvo')
     setSalvoEm(linha.rascunho_em ?? null)
@@ -305,11 +330,18 @@ export function JanelaJustificativa({
   }
   useEffect(() => cancelarRelogio, [])
 
-  function aoDigitar(valor: string) {
-    setTexto(valor)
+  function agendarRascunho(valor: string) {
     setRascunho('pendente')
     cancelarRelogio()
     relogio.current = window.setTimeout(() => void salvarRascunho(valor), ESPERA_RASCUNHO_MS)
+  }
+  function aoDigitarCorpo(valor: string) {
+    setCorpo(valor)
+    agendarRascunho(notas === null ? valor : juntarNotas(valor, notas))
+  }
+  function aoDigitarNotas(valor: string) {
+    setNotas(valor)
+    agendarRascunho(juntarNotas(corpo, valor))
   }
 
   // FECHAR NÃO PERDE NADA: a edição que ainda esperava a pausa sai agora.
@@ -423,12 +455,16 @@ export function JanelaJustificativa({
             Não consegui ler a justificativa deste card: {(consulta.error as Error).message}
           </Aviso>
         ) : gerando ? (
-          <Andamento etapa={linha?.etapa ?? 'lendo'} desde={linha?.gerado_em ?? null} />
+          <Andamento
+            fase={faseDaLinha(linha)}
+            andamento={linha?.andamento ?? null}
+            desde={linha?.gerado_em ?? null}
+          />
         ) : falhou ? (
           <div className="space-y-s4">
             <Aviso tom="perigo">
               {parada
-                ? `A geração parou no meio (${ROTULO_DA_ETAPA[linha?.etapa ?? 'lendo'].toLowerCase()}): o servidor interrompeu a etapa. Tente de novo.`
+                ? `A geração parou no meio (${ROTULO_DA_FASE[faseDaLinha(linha)].toLowerCase()}): o servidor parou de dar sinal de progresso. Tente de novo.`
                 : `A geração falhou: ${linha?.erro ?? 'motivo não informado.'}`}
             </Aviso>
             {erroDoPedido && <Aviso tom="perigo">{erroDoPedido}</Aviso>}
@@ -450,13 +486,7 @@ export function JanelaJustificativa({
                 {(linha.nota_kommo_ids?.length ?? 0) > 1 ? `, em ${linha.nota_kommo_ids!.length} notas` : ''}.
               </span>
             </p>
-            <pre
-              tabIndex={0}
-              aria-label="Texto enviado (só leitura)"
-              className="max-h-[52vh] overflow-y-auto whitespace-pre-wrap break-words rounded-campo border border-borda bg-superficie-2 p-s4 font-sans text-corpo leading-relaxed text-texto scrollbar-thin"
-            >
-              {textoEmVigor(linha)}
-            </pre>
+            <TextoEnviado texto={textoEmVigor(linha)} />
           </div>
         ) : pronta && linha ? (
           <div className="space-y-s2">
@@ -466,12 +496,16 @@ export function JanelaJustificativa({
             </p>
             {erroDoPedido && <Aviso tom="perigo">{erroDoPedido}</Aviso>}
             <textarea
-              value={texto}
-              onChange={(e) => aoDigitar(e.target.value)}
+              value={corpo}
+              onChange={(e) => aoDigitarCorpo(e.target.value)}
               aria-label="Texto da justificativa técnica"
               spellCheck
-              className="block min-h-[46vh] w-full resize-y rounded-campo border border-borda-forte bg-superficie px-s4 py-s3 font-sans text-corpo leading-relaxed text-texto shadow-nivel-1 outline-none transition-colors scrollbar-thin placeholder:text-texto-3 focus:border-marca-viva focus:ring-[3px] focus:ring-marca-viva/20"
+              className={cn(
+                'block w-full resize-y rounded-campo border border-borda-forte bg-superficie px-s4 py-s3 font-sans text-corpo leading-relaxed text-texto shadow-nivel-1 outline-none transition-colors scrollbar-thin placeholder:text-texto-3 focus:border-marca-viva focus:ring-[3px] focus:ring-marca-viva/20',
+                notas === null ? 'min-h-[46vh]' : 'min-h-[36vh]',
+              )}
             />
+            {notas !== null && <NotasInternas valor={notas} onChange={aoDigitarNotas} />}
             <div className="flex flex-wrap items-center gap-x-s3 gap-y-s1 text-xs text-texto-3">
               <span aria-live="polite">
                 {rascunho === 'salvando'
@@ -494,7 +528,7 @@ export function JanelaJustificativa({
             </div>
           </div>
         ) : (
-          <Andamento etapa="lendo" desde={null} />
+          <Andamento fase="lendo" andamento={null} desde={null} />
         )}
       </Modal>
 
@@ -519,40 +553,104 @@ export function JanelaJustificativa({
   )
 }
 
-/** As três etapas da geração, com a atual em destaque e a dica de que dá para fechar. */
-function Andamento({ etapa, desde }: { etapa: EtapaDaJustificativa; desde: string | null }) {
-  const ordem: EtapaDaJustificativa[] = ['lendo', 'pesquisando', 'redigindo']
-  const atual = ordem.indexOf(etapa)
+/**
+ * A FASE DA GERAÇÃO, para a janela. A fina (planejando) vem do resumo do
+ * andamento; a coluna `etapa` é a reserva das gerações de antes da mudança.
+ */
+function faseDaLinha(linha: Linha | null): FaseDaGeracao {
+  const a = linha?.andamento
+  if (a?.fase && a.fase !== 'pronta') return a.fase
+  if (a?.fase === 'pronta') return 'redigindo'
+  const etapa: EtapaDaJustificativa = linha?.etapa ?? 'lendo'
+  return etapa
+}
+
+/**
+ * As etapas da geração — lendo, planejando, pesquisando (com as frentes, "2 de
+ * 4", e um ✓ em cada uma que termina) e redigindo —, a atual em destaque, e a
+ * dica de que dá para fechar.
+ */
+function Andamento({
+  fase,
+  andamento,
+  desde,
+}: {
+  fase: FaseDaGeracao
+  andamento: AndamentoDaGeracao | null
+  desde: string | null
+}) {
+  // A geração de antes da mudança não tem planejamento: três etapas, como era.
+  const ordem: FaseDaGeracao[] = andamento
+    ? ['lendo', 'planejando', 'pesquisando', 'redigindo']
+    : ['lendo', 'pesquisando', 'redigindo']
+  const atual = ordem.indexOf(fase)
+  const frentes = andamento?.frentes ?? []
+  const prontas = frentes.filter((f) => f.status !== 'pesquisando').length
   return (
     <div className="space-y-s5 py-s2">
       <ol className="m-0 list-none space-y-s3 p-0" aria-label="Andamento da geração">
         {ordem.map((e, i) => {
           const feita = i < atual
           const agora = i === atual
+          const comFrentes = e === 'pesquisando' && frentes.length > 0 && (agora || feita)
           return (
-            <li key={e} className="flex items-center gap-s3" aria-current={agora ? 'step' : undefined}>
-              <span
-                className={cn(
-                  'grid h-[24px] w-[24px] shrink-0 place-items-center rounded-full border-[1.5px]',
-                  feita
-                    ? 'border-sucesso-cheio bg-sucesso-cheio text-white'
-                    : agora
-                      ? 'border-marca-viva text-marca-texto'
-                      : 'border-borda-forte text-texto-3',
+            <li key={e} aria-current={agora ? 'step' : undefined}>
+              <div className="flex items-center gap-s3">
+                <span
+                  className={cn(
+                    'grid h-[24px] w-[24px] shrink-0 place-items-center rounded-full border-[1.5px]',
+                    feita
+                      ? 'border-sucesso-cheio bg-sucesso-cheio text-white'
+                      : agora
+                        ? 'border-marca-viva text-marca-texto'
+                        : 'border-borda-forte text-texto-3',
+                  )}
+                >
+                  {feita ? (
+                    <Check className="h-[13px] w-[13px]" strokeWidth={3} aria-hidden />
+                  ) : agora ? (
+                    <Loader2 className="h-[14px] w-[14px] animate-spin" aria-hidden />
+                  ) : (
+                    <span className="text-xs font-bold">{i + 1}</span>
+                  )}
+                </span>
+                <span className={cn('text-corpo', agora ? 'font-semibold text-texto' : feita ? 'text-texto-2' : 'text-texto-3')}>
+                  {ROTULO_DA_FASE[e]}
+                  {agora ? '…' : ''}
+                </span>
+                {comFrentes && (
+                  <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-texto-3">
+                    {prontas} de {frentes.length} {frentes.length === 1 ? 'frente' : 'frentes'}
+                  </span>
                 )}
-              >
-                {feita ? (
-                  <Check className="h-[13px] w-[13px]" strokeWidth={3} aria-hidden />
-                ) : agora ? (
-                  <Loader2 className="h-[14px] w-[14px] animate-spin" aria-hidden />
-                ) : (
-                  <span className="text-xs font-bold">{i + 1}</span>
-                )}
-              </span>
-              <span className={cn('text-corpo', agora ? 'font-semibold text-texto' : feita ? 'text-texto-2' : 'text-texto-3')}>
-                {ROTULO_DA_ETAPA[e]}
-                {agora ? '…' : ''}
-              </span>
+              </div>
+              {comFrentes && (
+                <ul
+                  className="m-0 mt-s2 list-none space-y-s1.5 rounded-campo bg-superficie-2 py-s2 pl-s3 pr-s3 sm:ml-[36px]"
+                  aria-label="Frentes da pesquisa"
+                >
+                  {frentes.map((f) => (
+                    <li key={f.id} className="flex items-start gap-s2 text-sm">
+                      <span className="mt-[2px] grid h-[16px] w-[16px] shrink-0 place-items-center">
+                        {f.status === 'pronta' ? (
+                          <Check className="h-[16px] w-[16px] text-sucesso" strokeWidth={3} aria-label="terminada" />
+                        ) : f.status === 'falha' ? (
+                          <AlertTriangle className="h-[14px] w-[14px] text-aviso" aria-label="sem resultado" />
+                        ) : (
+                          <Loader2 className="h-[14px] w-[14px] animate-spin text-marca-texto" aria-label="pesquisando" />
+                        )}
+                      </span>
+                      <span className={cn('min-w-0', f.status === 'pesquisando' ? 'text-texto' : 'text-texto-2')}>
+                        {f.titulo}
+                        {f.parcial && f.status !== 'pesquisando' && (
+                          <span className="ml-s1.5 text-xs text-texto-3">(parcial: no limite de tempo)</span>
+                        )}
+                        {f.status === 'falha' && <span className="ml-s1.5 text-xs text-texto-3">(sem resultado)</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           )
         })}
@@ -567,6 +665,67 @@ function Andamento({ etapa, desde }: { etapa: EtapaDaJustificativa; desde: strin
         )}
       </p>
     </div>
+  )
+}
+
+/**
+ * AS NOTAS INTERNAS (a parte depois de ###NOTAS###), numa caixa à parte: o que
+ * não foi confirmado e as divergências entre fontes. Vão no fim da nota do
+ * Kommo — que é interna —, mas não são para o cedente.
+ */
+function NotasInternas({
+  valor,
+  onChange,
+  enviada = false,
+}: {
+  valor: string
+  onChange?: (v: string) => void
+  enviada?: boolean
+}) {
+  return (
+    <section
+      aria-label="Notas internas"
+      className="rounded-campo border border-aviso-borda bg-aviso-fundo px-s4 py-s3"
+    >
+      <h3 className="m-0 flex items-center gap-s1.5 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-2">
+        <Lock className="h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden />
+        Notas internas (não vão para o cedente)
+      </h3>
+      {enviada || !onChange ? (
+        <p className="m-0 mt-s2 whitespace-pre-wrap break-words text-sm text-texto">{valor || '—'}</p>
+      ) : (
+        <textarea
+          value={valor}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label="Notas internas (não vão para o cedente)"
+          rows={4}
+          spellCheck
+          className="mt-s2 block w-full resize-y rounded-campo border border-borda-forte bg-superficie px-s3 py-s2 font-sans text-sm leading-relaxed text-texto outline-none transition-colors scrollbar-thin focus:border-marca-viva focus:ring-[3px] focus:ring-marca-viva/20"
+        />
+      )}
+      <p className="m-0 mt-s2 text-xs text-texto-3">
+        {enviada
+          ? 'Foram no fim da nota do Kommo, que é interna.'
+          : 'Vão no fim da nota do Kommo, que é interna. Antes de repassar o texto ao cedente, deixe esta parte de fora.'}
+      </p>
+    </section>
+  )
+}
+
+/** O texto enviado, só leitura — com as notas internas na caixa delas, se houver. */
+function TextoEnviado({ texto }: { texto: string }) {
+  const partes = separarNotas(texto)
+  return (
+    <>
+      <pre
+        tabIndex={0}
+        aria-label="Texto enviado (só leitura)"
+        className="max-h-[52vh] overflow-y-auto whitespace-pre-wrap break-words rounded-campo border border-borda bg-superficie-2 p-s4 font-sans text-corpo leading-relaxed text-texto scrollbar-thin"
+      >
+        {partes.corpo}
+      </pre>
+      {partes.notas !== null && <NotasInternas valor={partes.notas} enviada />}
+    </>
   )
 }
 

@@ -95,6 +95,11 @@ export const VARIAVEIS_DA_JUSTIFICATIVA: readonly { nome: string; vale: string; 
   { nome: 'comissao', vale: 'A comissão da proposta escolhida: em R$ (limitada) ou em spread (o valor, o percentual e sobre quanto).', fonte: 'O mesmo campo do fundo, depois da barra.' },
   { nome: 'cotacoes_recebidas', vale: 'Todas as cotações dos fundos no card, uma por linha.', fonte: 'Os campos da aba "Cotações/propostas" e as etiquetas dos fundos.' },
   { nome: 'data_hoje', vale: 'A data de hoje (dd/mm/aaaa).', fonte: 'O relógio do servidor, no horário de Brasília.' },
+  // O CARD INTEIRO (pedido do dono, 05/10/2026): o prompt manda "ler o card
+  // inteiro (título, campos, notas e histórico)", e a IA só recebia os dados
+  // extraídos. Agora o título e as notas vão juntos — ver notasDoCardParaIA.
+  { nome: 'titulo', vale: 'O título do card, como está no Kommo.', fonte: 'O nome do card.' },
+  { nome: 'notas', vale: 'As notas do card, das mais antigas para as mais novas, com data (as fichas automáticas muito longas ficam de fora).', fonte: 'O histórico de notas do espelho do Kommo.' },
 ]
 
 /**
@@ -207,6 +212,7 @@ const RE_VARIAVEL = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
  */
 /** Os rótulos de {{card}}, na ordem em que a IA os lê. */
 const ROTULOS_DO_CARD: readonly [string, string][] = [
+  ['titulo', 'Título do card'],
   ['funil', 'Tipo'],
   ['cedente', 'Cedente'],
   ['processo', 'Processo'],
@@ -224,11 +230,88 @@ const ROTULOS_DO_CARD: readonly [string, string][] = [
   ['data_hoje', 'Data de hoje'],
 ]
 
-/** {{card}}: todos os dados do crédito, um por linha, com as cotações no fim. */
+/**
+ * {{card}}: todos os dados do crédito, um por linha, com as cotações e — por
+ * último — as notas do card, das mais antigas para as mais novas.
+ */
 export function blocoDoCard(valores: Readonly<Record<string, string | null | undefined>>): string {
   const v = (nome: string) => String(valores[nome] ?? '').trim() || NAO_INFORMADO
   const linhas = ROTULOS_DO_CARD.map(([nome, rotulo]) => `- ${rotulo}: ${v(nome)}`)
-  return [...linhas, `- Cotações recebidas no card:\n${v('cotacoes_recebidas')}`].join('\n')
+  // As notas guardam o recuo dos itens: só as pontas em branco saem.
+  const notas = String(valores.notas ?? '').replace(/^\s*\n|\s+$/g, '')
+  return [
+    ...linhas,
+    `- Cotações recebidas no card:\n${v('cotacoes_recebidas')}`,
+    `- Notas do card (das mais antigas para as mais novas):\n${notas.trim() ? notas : NAO_INFORMADO}`,
+  ].join('\n')
+}
+
+// ------------------------------------------------------------------ as notas do card para a IA
+
+/** O teto de cada nota que vai para a IA: uma nota de gente raramente passa disto. */
+export const NOTA_IA_MAX_CARACTERES = 2_500
+/**
+ * A FICHA AUTOMÁTICA GIGANTE fica de fora: acima disto, a nota da máquina é a
+ * ficha da análise ou da due diligence inteira — o que importa dela (tribunal,
+ * ente, valor) já está nos dados extraídos, e o resto afogaria as notas de gente.
+ */
+export const NOTA_AUTOMATICA_MAX_CARACTERES = 3_000
+/** O teto do bloco inteiro. Passando, saem as MAIS ANTIGAS (as novas valem mais). */
+export const NOTAS_IA_MAX_CARACTERES = 14_000
+
+/** A data de uma nota em dd/mm/aaaa (Brasília), ou '' quando não há data. */
+function dataDaNota(iso: unknown): string {
+  const t = Date.parse(String(iso ?? ''))
+  if (!Number.isFinite(t)) return ''
+  return dataDeHoje(new Date(t))
+}
+
+/**
+ * AS NOTAS DO CARD, como a IA as lê: das mais antigas para as mais novas, uma
+ * por item, com data e texto.
+ *
+ *   - a ficha automática gigante sai (ver NOTA_AUTOMATICA_MAX_CARACTERES), e a
+ *     linha final diz quantas saíram — a IA não deve supor que leu tudo;
+ *   - cada nota é cortada em NOTA_IA_MAX_CARACTERES, com a marca do corte;
+ *   - passando de `teto` no total, saem as mais antigas primeiro.
+ *
+ * Nota vazia não entra. Sem nota nenhuma, devolve ''.
+ */
+export function notasDoCardParaIA(
+  notas: readonly (NotaDoCard & { tipo?: string | null })[] | null | undefined,
+  teto = NOTAS_IA_MAX_CARACTERES,
+): string {
+  const ordenadas = [...(notas ?? [])]
+    .filter((n) => String(n.texto ?? '').trim())
+    .sort((a, b) => String(a.criado_em ?? '').localeCompare(String(b.criado_em ?? '')))
+  let fichasFora = 0
+  const itens: string[] = []
+  for (const n of ordenadas) {
+    const bruto = String(n.texto ?? '').trim().replace(/\r\n/g, '\n')
+    if (n.automatica && bruto.length > NOTA_AUTOMATICA_MAX_CARACTERES) {
+      fichasFora++
+      continue
+    }
+    const texto = bruto.length > NOTA_IA_MAX_CARACTERES
+      ? `${bruto.slice(0, NOTA_IA_MAX_CARACTERES).trimEnd()} […nota cortada]`
+      : bruto
+    const data = dataDaNota(n.criado_em)
+    const origem = n.tipo === 'attachment' ? 'anexo' : n.automatica ? 'automática' : ''
+    const cabeca = [data, origem].filter(Boolean).join(', ')
+    itens.push(`  • ${cabeca ? `[${cabeca}] ` : ''}${texto.replace(/\n/g, '\n    ')}`)
+  }
+  // AS MAIS NOVAS FICAM: corta do começo (as antigas) até caber.
+  let antigasFora = 0
+  let total = itens.reduce((s, i) => s + i.length + 1, 0)
+  while (itens.length > 1 && total > teto) {
+    total -= itens.shift()!.length + 1
+    antigasFora++
+  }
+  const avisos: string[] = []
+  if (antigasFora > 0) avisos.push(`  (${antigasFora} nota(s) mais antiga(s) omitida(s) por tamanho)`)
+  if (fichasFora > 0) avisos.push(`  (${fichasFora} ficha(s) automática(s) longa(s) omitida(s): os dados delas já estão acima)`)
+  if (itens.length === 0 && avisos.length === 0) return ''
+  return [...(antigasFora > 0 ? [avisos.shift()!] : []), ...itens, ...avisos].join('\n')
 }
 
 /**
@@ -282,6 +365,8 @@ export interface NotaDoCard {
   texto?: string | null
   criado_em?: string | null
   automatica?: boolean | null
+  /** O tipo no Kommo (`common`, `attachment`…). */
+  tipo?: string | null
 }
 
 /** O card, no que a justificativa lê dele (a linha de `kommo_leads`). */
@@ -509,6 +594,8 @@ export function valoresDoCard(card: CardDaJustificativa, extras: ExtrasDaJustifi
     comissao: textoDaComissao(cotacaoDoFundo),
     cotacoes_recebidas: linhas.length > 0 ? linhas.join('\n') : '',
     data_hoje: dataDeHoje(extras.agora),
+    titulo: String(card.nome ?? '').trim(),
+    notas: notasDoCardParaIA(notas),
   }
 }
 
@@ -623,14 +710,12 @@ export function textoComFontes(
 ): { texto: string; fontes: FonteDaJustificativa[] } {
   const novaOrdem = new Map<number, number>()
   const usadas: FonteDaJustificativa[] = []
-  const corpo = String(redacao ?? '')
-    .replace(/\[(\s*\d+\s*(?:[,;–-]\s*\d+\s*)*)\]/g, (_inteiro, dentro: string) => {
-      const ns: number[] = []
-      for (const parte of dentro.split(/[,;]/)) {
-        const faixa = parte.split(/[–-]/).map((x) => Number(x.trim()))
-        const [a, b] = faixa.length === 2 ? faixa : [faixa[0], faixa[0]]
-        for (let n = a; n <= b && n - a < 50; n++) {
-          if (!Number.isInteger(n) || n < 1 || n > fontes.length) continue
+  const renumerar = (trecho: string) =>
+    trecho
+      .replace(RE_CITACAO, (_inteiro, dentro: string) => {
+        const ns: number[] = []
+        for (const n of numerosDaCitacao(dentro)) {
+          if (n < 1 || n > fontes.length) continue
           if (!novaOrdem.has(n)) {
             usadas.push(fontes[n - 1])
             novaOrdem.set(n, usadas.length)
@@ -638,16 +723,67 @@ export function textoComFontes(
           const novo = novaOrdem.get(n)!
           if (!ns.includes(novo)) ns.push(novo)
         }
-      }
-      return ns.length > 0 ? `[${ns.sort((x, y) => x - y).join(', ')}]` : ''
-    })
-    .replace(/[ \t]+([.,;:])/g, '$1')
-    .trim()
-  if (usadas.length === 0) return { texto: corpo, fontes: [] }
-  return {
-    texto: `${corpo}\n\nFONTES\n${listaDeFontes(usadas)}`,
-    fontes: usadas,
+        return ns.length > 0 ? `[${ns.sort((x, y) => x - y).join(', ')}]` : ''
+      })
+      .replace(/[ \t]+([.,;:])/g, '$1')
+      .trim()
+  // AS NOTAS INTERNAS (###NOTAS###): a numeração corre pelo parágrafo e depois
+  // pelas notas — uma divergência citada nas notas aponta para a mesma lista —,
+  // e a lista entra ENTRE os dois, logo depois do parágrafo.
+  const partes = separarNotas(String(redacao ?? ''))
+  const corpo = renumerar(partes.corpo)
+  const notas = partes.notas === null ? null : renumerar(partes.notas)
+  const comLista = usadas.length === 0 ? corpo : `${corpo}\n\nFONTES\n${listaDeFontes(usadas)}`
+  return { texto: juntarNotas(comLista, notas), fontes: usadas }
+}
+
+/** Uma citação: "[2]", "[1, 3]", "[1-3]", "[2; 5]". */
+const RE_CITACAO = /\[(\s*\d+\s*(?:[,;–-]\s*\d+\s*)*)\]/g
+
+/** Os números de dentro de uma citação, com a faixa aberta ("1-3" → 1, 2, 3). */
+function numerosDaCitacao(dentro: string): number[] {
+  const ns: number[] = []
+  for (const parte of dentro.split(/[,;]/)) {
+    const faixa = parte.split(/[–-]/).map((x) => Number(x.trim()))
+    const [a, b] = faixa.length === 2 ? faixa : [faixa[0], faixa[0]]
+    for (let n = a; n <= b && n - a < 50; n++) if (Number.isInteger(n)) ns.push(n)
   }
+  return ns
+}
+
+// ------------------------------------------------------------------ as notas internas
+
+/**
+ * A LINHA QUE SEPARA AS NOTAS INTERNAS (pedido do dono, 05/10/2026): depois do
+ * parágrafo, o prompt manda escrever `###NOTAS###` e, abaixo, o que não foi
+ * confirmado e as divergências — o que não vai para o cedente.
+ */
+export const MARCA_NOTAS = '###NOTAS###'
+const RE_MARCA_NOTAS = /^[ \t]*#{3}[ \t]*NOTAS[ \t]*#{3}[ \t]*$/im
+
+/**
+ * O texto e as notas internas. Sem a linha da marca, `notas` é null e o texto
+ * é o de sempre — nada muda para quem não usa a marca.
+ */
+export function separarNotas(texto: string): { corpo: string; notas: string | null } {
+  const t = String(texto ?? '')
+  const m = RE_MARCA_NOTAS.exec(t)
+  if (!m) return { corpo: t, notas: null }
+  return {
+    corpo: t.slice(0, m.index).trimEnd(),
+    notas: t.slice(m.index + m[0].length).replace(/^\s*\n/, '').trim(),
+  }
+}
+
+/**
+ * O texto único, de volta: o corpo, a linha da marca e as notas no fim. Notas
+ * null (o texto nunca teve a marca) ou vazias (a pessoa as apagou) saem sem a
+ * marca — uma linha `###NOTAS###` solta no card não diz nada.
+ */
+export function juntarNotas(corpo: string, notas: string | null): string {
+  const c = String(corpo ?? '').trimEnd()
+  const n = String(notas ?? '').trim()
+  return n ? `${c}\n\n${MARCA_NOTAS}\n${n}` : c
 }
 
 // ------------------------------------------------------------------ a nota no Kommo
@@ -742,13 +878,19 @@ export interface LinhaDaJustificativa {
 }
 
 /**
- * Uma geração parada há mais que isto morreu (o worker foi derrubado no meio).
+ * Uma geração SEM PULSO há mais que isto morreu (o worker foi derrubado no meio).
  *
- * Pouco acima do teto de tempo de parede de uma invocação (400 s ≈ 6,7 min):
- * cada etapa é uma invocação nova e grava `atualizado_em` ao começar, então
- * parado há mais de 8 minutos é morte, não lentidão.
+ * MEDE FALTA DE PROGRESSO, NÃO O TEMPO TOTAL (05/10/2026). Antes, cada etapa
+ * gravava `atualizado_em` só ao começar, e a pesquisa inteira cabia numa
+ * invocação de 400 s — então 8 minutos parados eram morte. Agora a pesquisa
+ * corre em frentes resumíveis que podem somar 15 minutos, e cada invocação viva
+ * bate o pulso em `atualizado_em` a cada PULSO_MS (e a cada checkpoint). Quatro
+ * minutos sem pulso nenhum, de nenhuma frente, é morte de verdade — e a tela
+ * oferece tentar de novo.
  */
-export const TRAVA_GERACAO_MIN = 8
+export const TRAVA_GERACAO_MIN = 4
+/** De quanto em quanto uma invocação viva grava o pulso (`atualizado_em`). */
+export const PULSO_MS = 30_000
 /** Um envio que não terminou em 3 minutos morreu — a nota é uma chamada só. */
 export const TRAVA_ENVIO_MIN = 3
 /** Quantas gerações podem correr ao mesmo tempo na casa toda (limite de taxa da API). */
@@ -828,6 +970,21 @@ export const ROTULO_DA_ETAPA: Readonly<Record<EtapaDaJustificativa, string>> = {
   redigindo: 'Redigindo a justificativa',
 }
 
+/**
+ * A FASE QUE A JANELA MOSTRA. A coluna `etapa` tem um CHECK da migração 0076
+ * ('lendo', 'pesquisando', 'redigindo'), e o planejamento não cabe nela sem
+ * migração — então a fase fina mora no `pesquisa.andamento` (ver
+ * justificativaParalela.ts), e a coluna fica em 'lendo' enquanto se planeja.
+ */
+export type FaseDaGeracao = 'lendo' | 'planejando' | 'pesquisando' | 'redigindo'
+
+export const ROTULO_DA_FASE: Readonly<Record<FaseDaGeracao, string>> = {
+  lendo: 'Lendo o crédito',
+  planejando: 'Planejando a pesquisa',
+  pesquisando: 'Pesquisando na internet',
+  redigindo: 'Redigindo a justificativa',
+}
+
 // ------------------------------------------------------------------ o consumo
 
 /** O que uma geração gastou, somado chamada a chamada. */
@@ -841,6 +998,16 @@ export interface ConsumoDaJustificativa {
   buscas: number
   fetches: number
   segundos: number
+  /**
+   * Chamadas cortadas no meio pelo relógio da invocação (a frente seguiu na
+   * invocação seguinte). Delas só chega o `usage` de entrada: o de saída vem no
+   * fim do stream, que não houve — o custo real é um pouco maior que o somado.
+   */
+  interrompidas?: number
+  /** O tempo de cada etapa, em segundos de relógio. */
+  etapas?: { planejamento_s?: number; pesquisa_s?: number; redacao_s?: number }
+  /** O que cada frente gastou, na ordem do plano. */
+  frentes?: { titulo: string; segundos: number; buscas: number; fetches: number; retomadas: number; parcial: boolean }[]
 }
 
 export const CONSUMO_ZERO: ConsumoDaJustificativa = {

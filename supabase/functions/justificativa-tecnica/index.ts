@@ -9,36 +9,47 @@
 //   gerar     { kommo_lead_id, refazer? }      usuário ativo — abre a geração
 //   rascunho  { kommo_lead_id, tentativa, texto } usuário ativo — a edição salva
 //   enviar    { kommo_lead_id, tentativa, texto, autor? } usuário ativo — a nota
-//   passo     { kommo_lead_id, tentativa, etapa } SÓ INTERNA — uma etapa
+//   passo     { kommo_lead_id, tentativa, etapa, frente?, anterior? } SÓ INTERNA
 // A tela LÊ a tabela direto (RLS de leitura) e acompanha por consulta periódica.
 //
-// O SEGUNDO PLANO, e por que em duas etapas. A Edge Function tem teto de tempo
-// de parede (400 s no plano pago) que `EdgeRuntime.waitUntil` NÃO estende — é a
-// lição dos emolumentos (ver _shared/emolumentos.ts). Pesquisa com oito buscas,
-// três páginas abertas e retomadas, mais a redação, passaria do teto numa
-// invocação só. Então:
-//   gerar    → lê o card, monta o prompt, reserva a linha e dispara a pesquisa
-//              (responde na hora);
-//   pesquisa → uma invocação NOVA (relógio zerado): só busca e lê, e grava o
-//              dossiê com as fontes; dispara a redação;
-//   redação  → outra invocação nova: escreve a partir do dossiê, sem ferramenta.
-// Cada etapa grava `atualizado_em` ao começar; parada há mais de
-// TRAVA_GERACAO_MIN é morte, e a tela oferece tentar de novo.
+// O SEGUNDO PLANO, EM FRENTES PARALELAS E RESUMÍVEIS (05/10/2026). A Edge
+// Function tem teto de parede (400 s no plano pago) que `EdgeRuntime.waitUntil`
+// NÃO estende. Com o prompt do dono, a pesquisa numa invocação só passava do
+// teto e morria. Agora (o desenho inteiro está em _shared/justificativaParalela.ts):
+//   gerar        → lê o card (dados, título e notas), monta o prompt, reserva a
+//                  linha e dispara o planejamento (responde na hora);
+//   planejamento → uma chamada curta ('low', sem ferramenta, saída estruturada)
+//                  divide a pesquisa em 3 a 4 frentes e dispara todas;
+//   frente       → cada uma na sua invocação ('medium', tetos próprios). Perto
+//                  do fim do relógio, salva a conversa e dispara a continuação;
+//                  a última a terminar dispara a redação, uma vez só;
+//   redação      → ('high') escreve a partir dos dossiês juntos.
+//
+// CADA INVOCAÇÃO INTERNA RESPONDE NA HORA e trabalha em `waitUntil`: o fetch de
+// quem dispara volta em milissegundos, e nenhum worker fica preso esperando a
+// próxima etapa terminar (era o custo do encadeamento antigo — ver tetosRpv.ts).
+//
+// O PULSO: toda invocação viva grava `atualizado_em` a cada PULSO_MS; parada
+// (sem pulso) há mais de TRAVA_GERACAO_MIN é morte, e a tela oferece tentar de
+// novo. A morte é medida por falta de progresso, não pelo tempo total.
 //
 // UMA GERAÇÃO POR CARD, com trava atômica no banco: a linha é o lock. Entrar em
 // 'gerando' é um UPDATE condicional na `tentativa` lida (ou o insert que não
 // pisa em linha existente) — de duas abas, só uma vê a linha mudar. Cada etapa
-// só grava se a `tentativa` ainda for a dela: uma geração refeita por cima de
-// uma que morreu não é atropelada pela morta que acorda tarde.
+// só grava se a `tentativa` ainda for a dela, e o pulso que descobre a
+// tentativa trocada CORTA a chamada paga em curso.
 //
-// LIMITE DE TAXA: no máximo MAX_GERACOES_SIMULTANEAS na casa toda; e a SDK
-// repete sozinha o 429 da Anthropic (duas vezes, com espera).
+// AS FRENTES DIVIDEM A LINHA pelo jsonb `pesquisa`, com gravação condicional ao
+// `pesquisa->>rev` (gravarComVersao): sem migração, e sem perder gravação.
+//
+// LIMITE DE TAXA: vagas de pesquisa contadas em frentes (VAGAS_DE_PESQUISA); e a
+// SDK repete sozinha o 429 da Anthropic (duas vezes, com espera).
 //
 // ANTES DA MIGRAÇÃO 0076 a tabela não existe: toda ação responde 409 com
 // `codigo: 'migracao-pendente'` e a frase de AVISO_MIGRACAO_0076 — nada é
 // gerado, nada é cobrado, e nenhuma outra função depende desta.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0'
-import { ESFORCO_PADRAO_DO_OPUS, type NoFormatoDoOpus } from '../_shared/respostaDoClaude.ts'
+import { ESFORCO_PADRAO_DO_OPUS, lerSaidaEstruturada, type NoFormatoDoOpus } from '../_shared/respostaDoClaude.ts'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
@@ -49,12 +60,12 @@ import { municipioDoEnte, resolverUf } from '../_shared/tribunais.ts'
 import {
   aceitaRascunho,
   AVISO_MIGRACAO_0076,
+  blocoDoCard,
   CHAVE_PROMPT_JUSTIFICATIVA,
   type CardDaJustificativa,
   type ConsumoDaJustificativa,
   CONSUMO_ZERO,
   dividirNota,
-  dossieDaResposta,
   ehTabelaAusente,
   esferaDoEnte,
   type FonteDaJustificativa,
@@ -62,11 +73,11 @@ import {
   FUNIS_DA_JUSTIFICATIVA,
   type LinhaDaJustificativa,
   listaDeFontes,
-  MAX_GERACOES_SIMULTANEAS,
   montarPrompt,
   podeEnviar,
   podeGerar,
   promptEmVigor,
+  PULSO_MS,
   somarConsumo,
   textoComFontes,
   textoDoTeto,
@@ -74,6 +85,42 @@ import {
   TRAVA_GERACAO_MIN,
   valoresDoCard,
 } from '../_shared/justificativaTecnica.ts'
+import {
+  type AndamentoDaGeracao,
+  aposInterrupcao,
+  aposResposta,
+  type BlocoDaConversa,
+  cabeMaisUmaGeracao,
+  comPlano,
+  consumoTotal,
+  conversaParaEncerrar,
+  decidirFrente,
+  dossieDaConversa,
+  dossiesDaLinha,
+  ehEstadoV2,
+  ESQUEMA_DO_PLANO,
+  type EstadoDaFrente,
+  type EstadoDaPesquisa,
+  estadoInicial,
+  fecharFrente,
+  FOLGA_PARA_NOVA_CHAMADA_MS,
+  gravarComVersao,
+  MAX_TOKENS_DA_PAGINA,
+  type MensagemDaConversa,
+  type MudancaDoEstado,
+  ORCAMENTO_DA_INVOCACAO_MS,
+  pedidoDaFrente,
+  pedidoDoPlanejamento,
+  planoDaSaida,
+  salvarCheckpoint,
+  somarConsumos,
+  SISTEMA_FRENTE,
+  SISTEMA_FRENTE_UNICA,
+  SISTEMA_PLANEJAMENTO,
+  tomarFrente,
+  usoDosBlocos,
+  usosRestantes,
+} from '../_shared/justificativaParalela.ts'
 
 /**
  * O MESMO MODELO das funções que já pesquisam (analise-precatorio, emolumentos,
@@ -83,23 +130,21 @@ import {
 const MODELO = 'claude-opus-5-5'
 
 /**
- * Os tetos da pesquisa. São o principal controle de tempo e de custo: o modelo
- * tende a gastar o orçamento que recebe. Oito buscas cobrem regime e fila,
- * LOA, normas recentes e deságio; três páginas abertas, o documento oficial que
- * a busca só resumiu. Duas retomadas cobrem o laço de amostragem do servidor.
+ * O ESFORÇO DE CADA ETAPA. Planejar é dividir um pedido em assuntos: 'low'. A
+ * frente pesquisa com 'medium' — pela documentação, o Opus 5.5 em 'medium' supera
+ * o Opus 5 em 'high' — e são quatro em paralelo. A redação, que sustenta o preço
+ * diante do cedente, fica no 'high' de antes.
  */
-const MAX_BUSCAS = 8
-const MAX_FETCHES = 3
-const MAX_RETOMADAS = 2
-/** Teto do texto de cada página aberta: decreto e LOA têm centenas de páginas. */
-const MAX_TOKENS_DA_PAGINA = 20_000
+const ESFORCO_PLANEJAMENTO = 'low' as const
+const ESFORCO_FRENTE = 'medium' as const
+const ESFORCO_REDACAO = ESFORCO_PADRAO_DO_OPUS
 
-/** O orçamento de relógio de UMA invocação, abaixo dos 400 s da plataforma. */
-const ORCAMENTO_MS = 340_000
-/** Abaixo disto, não vale começar mais uma retomada. */
-const FOLGA_MINIMA_MS = 70_000
+/** Quantas vezes a redação pode recomeçar (cortada pelo relógio ou erro passageiro). */
+const MAX_TENTATIVAS_REDACAO = 2
 
 const TABELA = 'justificativa_tecnica'
+
+type Etapa = 'planejamento' | 'frente' | 'redacao'
 
 // ---------------------------------------------------------------------------
 // Respostas e banco
@@ -120,6 +165,14 @@ async function lerLinha(svc: SupabaseClient, leadId: number): Promise<LinhaDaJus
     throw new Error(error.message)
   }
   return (data as LinhaDaJustificativa | null) ?? null
+}
+
+/** A linha no que as etapas leem. */
+type LinhaDaEtapa = LinhaDaJustificativa & {
+  prompt_usado?: string | null
+  variaveis?: Record<string, string> | null
+  pesquisa?: unknown
+  consumo?: Partial<ConsumoDaJustificativa> | null
 }
 
 /**
@@ -143,12 +196,60 @@ async function gravarDaTentativa(
   return (data?.length ?? 0) > 0
 }
 
-/** O prompt e os domínios em vigor. Leitura que falha cai no padrão: nunca sem método. */
+/** O PULSO: só o `atualizado_em`, sem tocar no estado das frentes (não disputa o `rev`). */
+async function pulsar(svc: SupabaseClient, leadId: number, tentativa: string): Promise<boolean> {
+  try {
+    return await gravarDaTentativa(svc, leadId, tentativa, {})
+  } catch {
+    // Falha de rede no pulso não é perda da geração: o próximo pulso tenta de novo.
+    return true
+  }
+}
+
+/** O estado das frentes desta geração, ou null se a linha não é mais dela. */
+async function lerEstado(svc: SupabaseClient, leadId: number, tentativa: string): Promise<EstadoDaPesquisa | null> {
+  const { data, error } = await svc
+    .from(TABELA).select('status, tentativa, pesquisa').eq('kommo_lead_id', leadId).maybeSingle()
+  if (error) throw new Error(error.message)
+  const l = data as { status?: string; tentativa?: string; pesquisa?: unknown } | null
+  if (!l || l.status !== 'gerando' || l.tentativa !== tentativa || !ehEstadoV2(l.pesquisa)) return null
+  return l.pesquisa
+}
+
+/**
+ * MUDA O ESTADO DAS FRENTES sem perder a gravação de outra frente: a gravação é
+ * condicional ao `rev` lido (`pesquisa->>rev`), e quem perde relê e reaplica
+ * (gravarComVersao).
+ */
+function mudarEstado(
+  svc: SupabaseClient,
+  leadId: number,
+  tentativa: string,
+  mudar: (e: EstadoDaPesquisa) => MudancaDoEstado,
+) {
+  return gravarComVersao(
+    () => lerEstado(svc, leadId, tentativa),
+    async (novo, revLido, colunas) => {
+      const { data, error } = await svc
+        .from(TABELA)
+        .update({ ...colunas, pesquisa: novo, atualizado_em: new Date().toISOString() })
+        .eq('kommo_lead_id', leadId)
+        .eq('tentativa', tentativa)
+        .eq('status', 'gerando')
+        .eq('pesquisa->>rev', String(revLido))
+        .select('kommo_lead_id')
+      if (error) throw new Error(error.message)
+      return (data?.length ?? 0) > 0
+    },
+    mudar,
+  )
+}
+
 /**
  * O prompt em vigor. A PESQUISA É LIVRE NA INTERNET (decisão do dono,
  * 05/10/2026): sem lista de domínios — nem a que tenha ficado salva em
  * `prompts_operacao`. Quem quiser fontes oficiais pede no prompt; restringir
- * cortava o alcance da pesquisa.
+ * cortava o alcance da pesquisa. Leitura que falha cai no padrão: nunca sem método.
  */
 async function lerConfiguracao(svc: SupabaseClient): Promise<{ prompt: string; dominios: string[] }> {
   try {
@@ -168,23 +269,44 @@ function emSegundoPlano(p: Promise<unknown>): void {
   if (rt?.waitUntil) rt.waitUntil(p)
 }
 
+const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
 /**
  * A próxima etapa, numa invocação NOVA — é o que zera o relógio de parede.
  * Leva a service_role no Authorization (passa pelo verify_jwt do gateway e é o
- * que a ação 'passo' aceita). Fire-and-forget, segurado pelo waitUntil.
+ * que a ação 'passo' aceita). A invocação chamada responde na hora (o trabalho
+ * dela corre em waitUntil), então isto volta rápido; falhando o disparo, tenta
+ * mais uma vez antes de desistir — sem o disparo, a geração morre por falta de
+ * pulso e a tela oferece tentar de novo.
  */
-function dispararEtapa(leadId: number, tentativa: string, etapa: 'pesquisa' | 'redacao'): void {
+function dispararEtapa(
+  leadId: number,
+  tentativa: string,
+  etapa: Etapa,
+  extra: { frente?: string; anterior?: string | null } = {},
+): Promise<void> {
   const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/justificativa-tecnica`
-  const p = fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
-      'x-cron-secret': Deno.env.get('CRON_SECRET') ?? '',
-    },
-    body: JSON.stringify({ acao: 'passo', kommo_lead_id: leadId, tentativa, etapa }),
-  }).catch(() => {})
+  const corpo = JSON.stringify({ acao: 'passo', kommo_lead_id: leadId, tentativa, etapa, ...extra })
+  const uma = () =>
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
+        'x-cron-secret': Deno.env.get('CRON_SECRET') ?? '',
+      },
+      body: corpo,
+    }).then(async (r) => {
+      await r.body?.cancel().catch(() => {})
+      return r.ok
+    }).catch(() => false)
+  const p = (async () => {
+    if (await uma()) return
+    await dormir(1_500)
+    await uma()
+  })()
   emSegundoPlano(p)
+  return p
 }
 
 /** A mensagem que a pessoa lê quando a IA falha — sem pilha, sem inglês cru. */
@@ -202,100 +324,358 @@ function mensagemDaFalha(e: unknown): string {
   return (e as Error)?.message ?? String(e)
 }
 
+/** Erro passageiro da API (vale tentar de novo noutra invocação, em vez de falhar a frente). */
+function ehPassageiro(e: unknown): boolean {
+  return (
+    e instanceof Anthropic.RateLimitError ||
+    e instanceof Anthropic.InternalServerError ||
+    e instanceof Anthropic.APIConnectionError ||
+    (e instanceof Anthropic.APIError && (e.status === 529 || e.status === 503))
+  )
+}
+
 // ---------------------------------------------------------------------------
-// As duas etapas da IA
+// A chamada com relógio
 // ---------------------------------------------------------------------------
 
-const SISTEMA_PESQUISA =
-  'Você é pesquisador da Credijuris, empresa que compra precatórios e RPVs. Abaixo vem a TAREFA: o pedido de uma justificativa técnica do preço de uma proposta, com os dados do crédito. ' +
-  'NESTA ETAPA VOCÊ SÓ PESQUISA — outra etapa redige. Use a busca na web (e, quando a busca só resumir um documento oficial que importa, abra-o) para levantar o que a tarefa pede pesquisar. ' +
-  'Prefira fontes oficiais e recentes; diga a data de cada informação. Não invente nada: o que não achar, diga que não achou. ' +
-  'Responda com um DOSSIÊ em tópicos curtos, em português, organizado nos assuntos da tarefa (situação de pagamento do ente; contexto jurídico e normativo; referências de deságio de mercado), e termine com "NÃO ENCONTRADO:" listando o que procurou e não achou. ' +
-  'Cada fato precisa vir da busca, para a citação acompanhá-lo. ' +
-  // NO OPUS 5.5 o texto escrito ENTRE uma busca e outra vem em bloco de
-  // raciocínio (vazio por padrão), e o dossiê (`dossieDaResposta`) só lê os
-  // blocos de texto. No Opus 5 essas notas chegavam como texto e entravam no
-  // dossiê; agora o que importa tem de estar na resposta final.
-  'Escreva o dossiê INTEIRO na resposta final, depois de terminar as buscas: o que você anotar entre uma busca e outra não chega a quem redige.'
+interface Relogio {
+  inicio: number
+  /** O pulso descobriu que a geração foi refeita por cima: parar tudo, sem gravar. */
+  perdeu: boolean
+  /** Corta a chamada em curso (o pulso usa quando perde a geração). */
+  cortar: (() => void) | null
+}
+
+const restante = (r: Relogio) => ORCAMENTO_DA_INVOCACAO_MS - (Date.now() - r.inicio)
+
+/** Liga o pulso desta invocação; devolve o desligar. */
+function ligarPulso(svc: SupabaseClient, leadId: number, tentativa: string, r: Relogio): () => void {
+  const id = setInterval(() => {
+    void pulsar(svc, leadId, tentativa).then((viva) => {
+      if (!viva) {
+        r.perdeu = true
+        r.cortar?.()
+      }
+    })
+  }, PULSO_MS)
+  return () => clearInterval(id)
+}
+
+type Chamada =
+  | { tipo: 'completa'; resposta: Anthropic.Message }
+  | { tipo: 'cortada'; blocos: BlocoDaConversa[]; usage: Anthropic.Usage | null }
+
+/**
+ * UMA CHAMADA EM STREAM, cortada no fim do relógio da invocação. Os blocos que
+ * chegam INTEIROS (o fim de cada bloco no stream) vão sendo guardados tal como
+ * a API os mandou: é deles que sai o checkpoint quando o relógio corta.
+ */
+async function chamarComRelogio(
+  anthropic: Anthropic,
+  r: Relogio,
+  params: Anthropic.MessageStreamParams,
+): Promise<Chamada> {
+  const controle = new AbortController()
+  const relogio = setTimeout(() => controle.abort(), Math.max(5_000, restante(r)))
+  r.cortar = () => controle.abort()
+  const completos: BlocoDaConversa[] = []
+  const stream = anthropic.messages.stream(params, { signal: controle.signal })
+  stream.on('contentBlock', (b) => completos.push(JSON.parse(JSON.stringify(b)) as BlocoDaConversa))
+  try {
+    return { tipo: 'completa', resposta: await stream.finalMessage() }
+  } catch (e) {
+    if (controle.signal.aborted) {
+      return { tipo: 'cortada', blocos: completos, usage: (stream.currentMessage?.usage as Anthropic.Usage | undefined) ?? null }
+    }
+    throw e
+  } finally {
+    clearTimeout(relogio)
+    r.cortar = null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Etapa 1: o planejamento
+// ---------------------------------------------------------------------------
+
+async function planejar(svc: SupabaseClient, leadId: number, tentativa: string): Promise<void> {
+  const r: Relogio = { inicio: Date.now(), perdeu: false, cortar: null }
+  const linha = (await lerLinha(svc, leadId)) as LinhaDaEtapa | null
+  if (!linha || linha.status !== 'gerando' || linha.tentativa !== tentativa) return
+  // UMA GERAÇÃO DE ANTES DA MUDANÇA (a etapa antiga 'pesquisa'): nasce no formato
+  // novo aqui, com o prompt padrão como propósito das frentes.
+  if (!ehEstadoV2(linha.pesquisa)) {
+    const { prompt } = await lerConfiguracao(svc)
+    if (!(await gravarDaTentativa(svc, leadId, tentativa, { pesquisa: estadoInicial(prompt) }))) return
+    return planejar(svc, leadId, tentativa)
+  }
+  const estado = linha.pesquisa
+  if (estado.fase !== 'planejando') return // disparo repetido: o plano já foi feito
+  const desligar = ligarPulso(svc, leadId, tentativa, r)
+  try {
+    await pulsar(svc, leadId, tentativa)
+    const valores = (linha.variaveis ?? {}) as Record<string, string>
+    let frentes: ReturnType<typeof planoDaSaida> = null
+    let motivo: string | null = null
+    let consumo: ConsumoDaJustificativa = { ...CONSUMO_ZERO, modelo: MODELO }
+    try {
+      const anthropic = new Anthropic({ apiKey: (await chaveAnthropic()) ?? '' })
+      const resposta = await anthropic.messages.create(
+        {
+          model: MODELO,
+          // O raciocínio (sempre ligado no 5.5) conta dentro deste teto; em
+          // 'low' ele é curto, e o plano é um JSON de poucas centenas de palavras.
+          max_tokens: 8000,
+          output_config: {
+            effort: ESFORCO_PLANEJAMENTO,
+            format: { type: 'json_schema', schema: ESQUEMA_DO_PLANO as unknown as Record<string, unknown> },
+          },
+          system: SISTEMA_PLANEJAMENTO,
+          messages: [{ role: 'user', content: pedidoDoPlanejamento(estado.instrucao, blocoDoCard(valores)) }],
+        } satisfies NoFormatoDoOpus<Anthropic.MessageCreateParamsNonStreaming>,
+        { signal: AbortSignal.timeout(150_000) },
+      )
+      consumo = somarConsumo(consumo, resposta.usage)
+      const lida = lerSaidaEstruturada(resposta)
+      if (lida.ok) {
+        frentes = planoDaSaida(lida.valor)
+        if (!frentes) motivo = 'o plano veio com menos de duas frentes legíveis'
+      } else motivo = `saída do planejamento ${lida.motivo}`
+    } catch (e) {
+      // O PLANO FALHOU: segue com a frente única (o comportamento de antes, agora
+      // resumível) — planejar é ganho, não condição.
+      motivo = mensagemDaFalha(e)
+    }
+    if (r.perdeu) return
+    const segundos = Math.round((Date.now() - r.inicio) / 1000)
+    const feito = await mudarEstado(svc, leadId, tentativa, (e) =>
+      e.fase === 'planejando'
+        ? { estado: comPlano(e, frentes, motivo, { ...consumo, segundos }), colunas: { etapa: 'pesquisando' } }
+        : null,
+    )
+    if (!feito.ok) return
+    await Promise.all(feito.estado.frentes.map((f) => dispararEtapa(leadId, tentativa, 'frente', { frente: f.id, anterior: null })))
+  } finally {
+    desligar()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Etapa 2: uma frente (uma invocação dela)
+// ---------------------------------------------------------------------------
+
+async function rodarFrente(
+  svc: SupabaseClient,
+  leadId: number,
+  tentativa: string,
+  frenteId: string,
+  anterior: string | null,
+): Promise<void> {
+  const r: Relogio = { inicio: Date.now(), perdeu: false, cortar: null }
+  const invocacao = crypto.randomUUID()
+  const tomada = await mudarEstado(svc, leadId, tentativa, (e) => {
+    const n = tomarFrente(e, frenteId, invocacao, anterior)
+    return n ? { estado: n } : null
+  })
+  if (!tomada.ok) return
+  const estado = tomada.estado
+  const f0 = estado.frentes.find((x) => x.id === frenteId)!
+
+  const { data: dados } = await svc.from(TABELA).select('prompt_usado, variaveis').eq('kommo_lead_id', leadId).maybeSingle()
+  const linha = (dados ?? {}) as { prompt_usado?: string | null; variaveis?: Record<string, string> | null }
+
+  // O ESTADO DE TRABALHO desta invocação, que vai para o checkpoint.
+  let conversa: MensagemDaConversa[] = f0.conversa ?? [
+    {
+      role: 'user',
+      content: f0.unica
+        ? `TAREFA:\n\n${String(linha.prompt_usado ?? '')}`
+        : pedidoDaFrente(f0, linha.variaveis ?? {}, estado.instrucao),
+    },
+  ]
+  let consumo: ConsumoDaJustificativa = { ...CONSUMO_ZERO, ...f0.consumo, modelo: MODELO }
+  let retomadas = f0.retomadas
+  let semAvanco = f0.interrupcoes_sem_avanco
+  let container = f0.container
+  /** A frente terminou o turno sem escrever o dossiê: a próxima chamada é o pedido dele. */
+  let pedirDossie = false
+  const segundos = () => f0.segundos + Math.round((Date.now() - r.inicio) / 1000)
+
+  const anthropic = new Anthropic({ apiKey: (await chaveAnthropic()) ?? '' })
+  const desligar = ligarPulso(svc, leadId, tentativa, r)
+
+  /** Fecha a frente (pronta ou falha) e, se era a última, dispara a redação. */
+  const fechar = async (fim: Pick<EstadoDaFrente, 'status' | 'dossie' | 'parcial' | 'erro'>) => {
+    let dispara = false
+    const feito = await mudarEstado(svc, leadId, tentativa, (e) => {
+      const m = fecharFrente(e, frenteId, invocacao, { ...fim, consumo, segundos: segundos(), retomadas })
+      if (!m) return null
+      dispara = m.disparaRedacao
+      return { estado: m.estado, colunas: m.disparaRedacao ? { etapa: 'redigindo' } : {} }
+    })
+    // A TRAVA DA REDAÇÃO: a marca entrou na mesma gravação condicional que
+    // fechou a frente. Só quem gravou com ela dispara.
+    if (feito.ok && dispara) await dispararEtapa(leadId, tentativa, 'redacao')
+  }
+
+  /** Salva a conversa e passa a frente para uma invocação nova (relógio zerado). */
+  const ceder = async (esperarMs = 0) => {
+    const feito = await mudarEstado(svc, leadId, tentativa, (e) => {
+      const n = salvarCheckpoint(e, frenteId, invocacao, {
+        conversa, container, retomadas, interrupcoes_sem_avanco: semAvanco, consumo, segundos: segundos(),
+      })
+      return n ? { estado: n } : null
+    })
+    if (!feito.ok) return
+    if (esperarMs > 0) await dormir(Math.min(esperarMs, Math.max(0, restante(r) - 20_000)))
+    await dispararEtapa(leadId, tentativa, 'frente', { frente: frenteId, anterior: invocacao })
+  }
+
+  try {
+    for (;;) {
+      if (r.perdeu) return
+      const decisao = decidirFrente(
+        { ...f0, consumo, interrupcoes_sem_avanco: semAvanco },
+        restante(r),
+      )
+      if (decisao === 'ceder') return await ceder()
+      if (decisao === 'desistir') {
+        const dossie = dossieDaConversa(conversa)
+        return await fechar({
+          status: dossie.texto.trim() ? 'pronta' : 'falha', dossie, parcial: true,
+          erro: dossie.texto.trim() ? null : 'a frente passou do teto de invocações sem escrever o dossiê',
+        })
+      }
+      const encerrar = decisao === 'encerrar' || pedirDossie
+      const mensagens = encerrar ? conversaParaEncerrar(conversa) : conversa
+      const usos = usosRestantes({ consumo, unica: f0.unica })
+      const ferramentas = [
+        { type: 'web_search_20260209', name: 'web_search', max_uses: usos.buscas },
+        { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: usos.paginas, max_content_tokens: MAX_TOKENS_DA_PAGINA },
+      ]
+      // O CONTÊINER do filtro dinâmico da busca volta junto ao continuar, enquanto vale.
+      const conteinerValido =
+        container && (!container.expires_at || Date.parse(container.expires_at) > Date.now() + 60_000) ? container.id : undefined
+      let chamada: Chamada
+      try {
+        chamada = await chamarComRelogio(anthropic, r, {
+          model: MODELO,
+          max_tokens: 32000,
+          output_config: { effort: ESFORCO_FRENTE },
+          system: f0.unica ? SISTEMA_FRENTE_UNICA : SISTEMA_FRENTE,
+          // AS MESMAS FERRAMENTAS SEMPRE: a conversa traz blocos delas, e uma
+          // chamada pendente de um pause_turn exige a ferramenta declarada. No
+          // encerramento, 'none' — escreve com o que tem.
+          tools: ferramentas as unknown as Anthropic.Tool[],
+          ...(encerrar ? { tool_choice: { type: 'none' as const } } : {}),
+          ...(conteinerValido ? { container: conteinerValido } : {}),
+          // O CACHE AUTOMÁTICO: cada continuação reenvia a conversa inteira, com
+          // os resultados das buscas e as páginas — o prefixo repetido sai a 5%.
+          cache_control: { type: 'ephemeral' },
+          messages: mensagens as unknown as Anthropic.MessageParam[],
+        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
+      } catch (e) {
+        if (r.perdeu) return
+        if (ehPassageiro(e)) {
+          // ERRO PASSAGEIRO (limite de taxa, sobrecarga, rede): conta como uma
+          // interrupção sem avanço e tenta noutra invocação, depois de esperar.
+          semAvanco++
+          return await ceder(e instanceof Anthropic.RateLimitError ? 30_000 : 5_000)
+        }
+        throw e
+      }
+      if (r.perdeu) return
+
+      if (chamada.tipo === 'cortada') {
+        // O RELÓGIO CORTOU: salva até o ponto seguro e continua numa invocação nova.
+        const uso = usoDosBlocos(chamada.blocos)
+        consumo = somarConsumo(consumo, chamada.usage
+          ? { ...chamada.usage, output_tokens: 0, server_tool_use: { web_search_requests: uso.buscas, web_fetch_requests: uso.fetches } }
+          : { server_tool_use: { web_search_requests: uso.buscas, web_fetch_requests: uso.fetches } })
+        consumo = { ...consumo, interrompidas: (consumo.interrompidas ?? 0) + 1 }
+        const depois = aposInterrupcao(mensagens, chamada.blocos)
+        conversa = depois.conversa
+        retomadas++
+        semAvanco = depois.avancou ? 0 : semAvanco + 1
+        return await ceder()
+      }
+
+      const resp = chamada.resposta
+      consumo = somarConsumo(consumo, resp.usage)
+      if (resp.container?.id) container = { id: resp.container.id, expires_at: resp.container.expires_at ?? null }
+      const depois = aposResposta(mensagens, resp.content as unknown as BlocoDaConversa[], resp.stop_reason)
+      if (depois.desfecho === 'recusa') {
+        throw new Error('O modelo recusou a pesquisa (filtro de segurança da Anthropic). Revise o prompt em Configurações.')
+      }
+      conversa = depois.conversa
+      semAvanco = 0
+      if (depois.desfecho === 'continuar') {
+        // pause_turn: o laço de amostragem do servidor tem teto próprio; reenviar
+        // a conversa retoma de onde parou.
+        retomadas++
+        continue
+      }
+      const dossie = dossieDaConversa(conversa)
+      if (dossie.texto.trim() || encerrar) {
+        return await fechar({
+          status: dossie.texto.trim() ? 'pronta' : 'falha', dossie, parcial: encerrar,
+          erro: dossie.texto.trim() ? null : 'a frente terminou sem escrever o dossiê',
+        })
+      }
+      // TERMINOU SEM DOSSIÊ (só buscou): pede o dossiê com o que achou, sem
+      // ferramenta. Sem relógio para isso, a conversa já sai fechada com o
+      // pedido e a invocação seguinte o atende.
+      if (restante(r) < FOLGA_PARA_NOVA_CHAMADA_MS) {
+        conversa = conversaParaEncerrar(conversa)
+        return await ceder()
+      }
+      pedirDossie = true
+    }
+  } catch (e) {
+    if (r.perdeu) return
+    // A FRENTE FALHOU: fecha como falha, com o que tiver achado — as outras
+    // seguem, e a redação diz o que faltou.
+    const dossie = dossieDaConversa(conversa)
+    await fechar({ status: dossie.texto.trim() ? 'pronta' : 'falha', dossie, parcial: true, erro: mensagemDaFalha(e) })
+      .catch(() => {})
+  } finally {
+    desligar()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Etapa 3: a redação
+// ---------------------------------------------------------------------------
 
 const SISTEMA_REDACAO =
   'Você é analista de crédito da Credijuris e redige a JUSTIFICATIVA TÉCNICA pedida na TAREFA, para o cedente ler. ' +
-  'Siga a TAREFA à risca no formato e no tom. Use SÓ os fatos do DOSSIÊ e os dados do crédito da tarefa; não acrescente fato, número, data, norma ou decisão que não esteja ali. ' +
+  'Siga a TAREFA à risca no formato e no tom. Use SÓ os fatos do DOSSIÊ (as frentes da pesquisa) e os dados do crédito da tarefa (dados extraídos, título e notas do card); não acrescente fato, número, data, norma ou decisão que não esteja ali. ' +
+  'Quando duas frentes divergirem, prefira a fonte oficial e mais recente. ' +
   'Cite as fontes pelo número entre colchetes da lista FONTES NUMERADAS, por exemplo [2] ou [1, 3], logo depois do fato; nunca cite número que não está na lista. ' +
-  'Não escreva a lista de fontes no fim (a plataforma acrescenta). Responda só com o texto da justificativa, sem comentário antes ou depois.'
+  'Não escreva a lista de fontes (a plataforma acrescenta, logo depois do texto e antes da linha ###NOTAS###, quando a tarefa pedir essa linha). ' +
+  'Se a tarefa pedir a linha ###NOTAS###, escreva-a exatamente assim, sozinha na linha. Responda só com o que a tarefa pede, sem comentário antes ou depois.'
 
-interface Contexto {
-  anthropic: Anthropic
-  inicio: number
-  consumo: ConsumoDaJustificativa
-}
-
-const restante = (c: Contexto) => ORCAMENTO_MS - (Date.now() - c.inicio)
-
-async function pesquisar(
-  c: Contexto,
+async function redigir(
+  anthropic: Anthropic,
+  r: Relogio,
   tarefa: string,
-  dominios: string[],
-): Promise<{ texto: string; fontes: FonteDaJustificativa[] }> {
-  const restricao = dominios.length > 0 ? { allowed_domains: dominios } : {}
-  const ferramentas = [
-    { type: 'web_search_20260209', name: 'web_search', max_uses: MAX_BUSCAS, ...restricao },
-    { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: MAX_FETCHES, max_content_tokens: MAX_TOKENS_DA_PAGINA, ...restricao },
-  ]
-  const mensagens: Anthropic.MessageParam[] = [{ role: 'user', content: `TAREFA:\n\n${tarefa}` }]
-  const blocos: Anthropic.ContentBlock[] = []
-  for (let volta = 0; volta <= MAX_RETOMADAS; volta++) {
-    const resposta = await c.anthropic.messages
-      .stream(
-        {
-          model: MODELO,
-          max_tokens: 16000,
-          // O padrão do Opus 5 (o do 5.5 é 'medium'). O raciocínio, sempre
-          // ligado no 5.5, divide os 16000 com o dossiê.
-          output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
-          system: SISTEMA_PESQUISA,
-          tools: ferramentas as unknown as Anthropic.Tool[],
-          messages: mensagens,
-        } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>,
-        { signal: AbortSignal.timeout(Math.max(10_000, restante(c) - 15_000)) },
-      )
-      .finalMessage()
-    c.consumo = somarConsumo(c.consumo, resposta.usage)
-    if (resposta.stop_reason === 'refusal') {
-      throw new Error('O modelo recusou a pesquisa (filtro de segurança da Anthropic). Revise o prompt em Configurações.')
-    }
-    blocos.push(...resposta.content)
-    // O laço de amostragem do servidor tem teto próprio e devolve 'pause_turn';
-    // reenviar o turno pausado retoma de onde parou, sem mensagem nova. Sem
-    // tempo para outra volta, segue com o que já foi achado — um dossiê parcial
-    // é melhor que nenhum, e a redação diz o que faltou.
-    if (resposta.stop_reason !== 'pause_turn' || restante(c) < FOLGA_MINIMA_MS) break
-    mensagens.push({ role: 'assistant', content: resposta.content })
-  }
-  const dossie = dossieDaResposta(blocos as unknown as Parameters<typeof dossieDaResposta>[0])
-  if (!dossie.texto.trim()) throw new Error('A pesquisa terminou sem devolver texto. Tente de novo.')
-  return dossie
-}
-
-async function redigir(c: Contexto, tarefa: string, dossie: string, fontes: FonteDaJustificativa[]): Promise<string> {
+  dossie: string,
+  fontes: FonteDaJustificativa[],
+): Promise<{ texto: string; usage: Anthropic.Usage | null; cortada: boolean }> {
   const pedido =
     `TAREFA (o pedido da casa, com os dados do crédito):\n\n${tarefa}\n\n` +
-    `DOSSIÊ DA PESQUISA (os números entre colchetes indicam as fontes de cada trecho):\n\n${dossie}\n\n` +
+    `DOSSIÊ DA PESQUISA (por frente; os números entre colchetes indicam as fontes de cada trecho):\n\n${dossie}\n\n` +
     `FONTES NUMERADAS:\n${fontes.length > 0 ? listaDeFontes(fontes) : '(nenhuma fonte foi citada pela pesquisa)'}\n\n` +
     'Redija agora a justificativa técnica.'
-  const resposta = await c.anthropic.messages
-    .stream(
-      {
-        model: MODELO,
-        max_tokens: 12000,
-        output_config: { effort: ESFORCO_PADRAO_DO_OPUS },
-        system: SISTEMA_REDACAO,
-        messages: [{ role: 'user', content: pedido }],
-      } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>,
-      { signal: AbortSignal.timeout(Math.max(10_000, restante(c) - 10_000)) },
-    )
-    .finalMessage()
-  c.consumo = somarConsumo(c.consumo, resposta.usage)
+  const chamada = await chamarComRelogio(anthropic, r, {
+    model: MODELO,
+    max_tokens: 32000,
+    output_config: { effort: ESFORCO_REDACAO },
+    system: SISTEMA_REDACAO,
+    messages: [{ role: 'user', content: pedido }],
+  } satisfies NoFormatoDoOpus<Anthropic.MessageStreamParams>)
+  if (chamada.tipo === 'cortada') return { texto: '', usage: chamada.usage, cortada: true }
+  const resposta = chamada.resposta
   if (resposta.stop_reason === 'refusal') {
     throw new Error('O modelo recusou a redação (filtro de segurança da Anthropic). Revise o prompt em Configurações.')
   }
@@ -305,7 +685,108 @@ async function redigir(c: Contexto, tarefa: string, dossie: string, fontes: Font
     .join('')
     .trim()
   if (!texto) throw new Error('A redação terminou sem texto. Tente de novo.')
-  return texto
+  return { texto, usage: resposta.usage, cortada: false }
+}
+
+async function redacao(svc: SupabaseClient, leadId: number, tentativa: string): Promise<void> {
+  const r: Relogio = { inicio: Date.now(), perdeu: false, cortar: null }
+  const linha = (await lerLinha(svc, leadId)) as LinhaDaEtapa | null
+  if (!linha || linha.status !== 'gerando' || linha.tentativa !== tentativa) return
+  const v2 = ehEstadoV2(linha.pesquisa)
+
+  // A CONTA DAS TENTATIVAS DA REDAÇÃO (cortada pelo relógio, recomeça uma vez).
+  if (v2) {
+    const conta = await mudarEstado(svc, leadId, tentativa, (e) =>
+      e.fase === 'redigindo' && e.redacao.tentativas < MAX_TENTATIVAS_REDACAO
+        ? { estado: { ...e, redacao: { ...e.redacao, tentativas: e.redacao.tentativas + 1 } }, colunas: { etapa: 'redigindo' } }
+        : null,
+    )
+    if (!conta.ok) {
+      if (conta.motivo === 'nada-a-fazer') {
+        await gravarDaTentativa(svc, leadId, tentativa, {
+          status: 'falha', etapa: null, erro: 'A redação passou do tempo duas vezes. Tente de novo.',
+        }).catch(() => false)
+      }
+      return
+    }
+  } else if (!(await gravarDaTentativa(svc, leadId, tentativa, { etapa: 'redigindo' }))) {
+    return
+  }
+
+  const desligar = ligarPulso(svc, leadId, tentativa, r)
+  let consumoRedacao: ConsumoDaJustificativa = { ...CONSUMO_ZERO, modelo: MODELO }
+  const consumoFinal = async (): Promise<ConsumoDaJustificativa> => {
+    const e = await lerEstado(svc, leadId, tentativa).catch(() => null)
+    if (e) {
+      const comTempo = { ...e, tempos: { ...e.tempos, redacao_s: Math.round((Date.now() - r.inicio) / 1000) } }
+      return consumoTotal(comTempo, consumoRedacao, new Date(), MODELO)
+    }
+    // A geração de antes da mudança: o consumo que a pesquisa gravou, mais a redação.
+    const antes = { ...CONSUMO_ZERO, ...(linha.consumo ?? {}) } as ConsumoDaJustificativa
+    return {
+      ...antes,
+      modelo: MODELO,
+      chamadas: antes.chamadas + consumoRedacao.chamadas,
+      input_tokens: antes.input_tokens + consumoRedacao.input_tokens,
+      output_tokens: antes.output_tokens + consumoRedacao.output_tokens,
+      cache_creation_input_tokens: antes.cache_creation_input_tokens + consumoRedacao.cache_creation_input_tokens,
+      cache_read_input_tokens: antes.cache_read_input_tokens + consumoRedacao.cache_read_input_tokens,
+      segundos: (antes.segundos ?? 0) + Math.round((Date.now() - r.inicio) / 1000),
+    }
+  }
+  try {
+    const tarefa = String(linha.prompt_usado ?? '')
+    if (!tarefa.trim()) throw new Error('O prompt montado não foi gravado. Gere de novo.')
+    const dossie = dossiesDaLinha(linha.pesquisa)
+    if (!dossie.texto.trim()) throw new Error('A pesquisa não trouxe resultado em nenhuma frente. Tente de novo.')
+    const anthropic = new Anthropic({ apiKey: (await chaveAnthropic()) ?? '' })
+    const feito = await redigir(anthropic, r, tarefa, dossie.texto, dossie.fontes)
+    if (r.perdeu) return
+    if (feito.usage) consumoRedacao = somarConsumo(consumoRedacao, feito.usage)
+    if (feito.cortada) {
+      // O RELÓGIO CORTOU A REDAÇÃO: recomeça numa invocação nova (a conta acima
+      // limita a MAX_TENTATIVAS_REDACAO).
+      if (v2) {
+        await mudarEstado(svc, leadId, tentativa, (e) => ({
+          estado: {
+            ...e,
+            consumo_redacao: somarConsumos(e.consumo_redacao, { ...consumoRedacao, output_tokens: 0, interrompidas: 1 }),
+          },
+        }))
+        await dispararEtapa(leadId, tentativa, 'redacao')
+        return
+      }
+      throw new Error('A redação passou do tempo que o servidor permite. Tente de novo.')
+    }
+    const final = textoComFontes(feito.texto, dossie.fontes)
+    const consumo = await consumoFinal()
+    const campos = {
+      status: 'pronta',
+      etapa: null,
+      texto: final.texto,
+      fontes: final.fontes,
+      erro: null,
+      consumo,
+    }
+    if (v2) {
+      const gravou = await mudarEstado(svc, leadId, tentativa, (e) => ({
+        estado: { ...e, fase: 'pronta', tempos: { ...e.tempos, redacao_s: consumo.etapas?.redacao_s ?? null } },
+        colunas: campos,
+      }))
+      if (gravou.ok || gravou.motivo === 'nao-e-mais-desta-geracao') return
+    }
+    await gravarDaTentativa(svc, leadId, tentativa, campos)
+  } catch (e) {
+    if (r.perdeu) return
+    await gravarDaTentativa(svc, leadId, tentativa, {
+      status: 'falha',
+      etapa: null,
+      erro: mensagemDaFalha(e),
+      consumo: await consumoFinal().catch(() => consumoRedacao),
+    }).catch(() => false)
+  } finally {
+    desligar()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -351,22 +832,25 @@ async function gerar(req: Request, svc: SupabaseClient, body: Record<string, unk
   const chave = await chaveAnthropic()
   if (!chave) return erro('Chave da Anthropic não configurada. Veja Configurações → Anthropic.', 400)
 
-  // O LIMITE DE TAXA DA CASA: gerações vivas ao mesmo tempo.
+  // O LIMITE DE TAXA DA CASA, em vagas de pesquisa (frentes). Só o resumo
+  // pequeno do andamento é lido — o estado das frentes, com as conversas, não.
   const desde = new Date(Date.now() - TRAVA_GERACAO_MIN * 60_000).toISOString()
-  const { count } = await svc
-    .from(TABELA).select('kommo_lead_id', { count: 'exact', head: true })
+  const { data: vivas } = await svc
+    .from(TABELA).select('kommo_lead_id, andamento:pesquisa->andamento')
     .eq('status', 'gerando').gt('atualizado_em', desde)
-  if ((count ?? 0) >= MAX_GERACOES_SIMULTANEAS) {
+  const andamentos = ((vivas ?? []) as { andamento?: AndamentoDaGeracao | null }[]).map((v) => v.andamento ?? null)
+  if (!cabeMaisUmaGeracao(andamentos)) {
     return erro(
-      `Já há ${count} justificativas sendo geradas agora, e a casa limita a ${MAX_GERACOES_SIMULTANEAS} ao mesmo tempo. Tente de novo em alguns minutos.`,
+      `Já há ${andamentos.length} justificativa(s) pesquisando agora, e a casa limita quantas pesquisas correm ao mesmo tempo. Tente de novo em alguns minutos.`,
       429,
       'fila-cheia',
     )
   }
 
   // A TRAVA: entrar em 'gerando' é condicional ao que se leu.
+  const { prompt, dominios } = await lerConfiguracao(svc)
   const tentativa = crypto.randomUUID()
-  const agora = new Date().toISOString()
+  const agora = new Date()
   const inicio = {
     kommo_lead_id: leadId,
     pipeline_id: Number(card.pipeline_id),
@@ -377,12 +861,12 @@ async function gerar(req: Request, svc: SupabaseClient, body: Record<string, unk
     texto_editado: null,
     rascunho_em: null,
     fontes: [],
-    pesquisa: null,
+    pesquisa: estadoInicial(prompt, agora),
     erro: null,
     consumo: {},
     criado_por: caller.email ?? null,
-    gerado_em: agora,
-    atualizado_em: agora,
+    gerado_em: agora.toISOString(),
+    atualizado_em: agora.toISOString(),
     enviando_desde: null,
   }
   let ganhou = false
@@ -402,19 +886,18 @@ async function gerar(req: Request, svc: SupabaseClient, body: Record<string, unk
   if (!ganhou) return jsonResponse({ ok: true, estado: 'gerando', motivo: 'em-curso' })
 
   try {
-    // LENDO O CRÉDITO: as variáveis e o prompt montado, guardados na linha —
-    // é o que permite conferir depois com que dados a IA trabalhou.
-    const { prompt, dominios } = await lerConfiguracao(svc)
+    // LENDO O CRÉDITO: as variáveis (com o título e as notas do card) e o prompt
+    // montado, guardados na linha — é o que permite conferir depois com que
+    // dados a IA trabalhou, e é o que as etapas leem.
     const previa = valoresDoCard(card)
     const valores = valoresDoCard(card, { tetoRpv: await tetoDoCard(svc, card, previa.ente_devedor, previa.tribunal) })
     const { texto: tarefa, desconhecidas } = montarPrompt(prompt, valores)
     await gravarDaTentativa(svc, leadId, tentativa, {
-      etapa: 'pesquisando',
       prompt_usado: tarefa,
       variaveis: { ...valores, ...(desconhecidas.length ? { _desconhecidas: desconhecidas.join(', ') } : {}) },
       dominios,
     })
-    dispararEtapa(leadId, tentativa, 'pesquisa')
+    void dispararEtapa(leadId, tentativa, 'planejamento')
     return jsonResponse({ ok: true, estado: 'gerando', tentativa })
   } catch (e) {
     await gravarDaTentativa(svc, leadId, tentativa, { status: 'falha', etapa: null, erro: mensagemDaFalha(e) }).catch(() => false)
@@ -422,66 +905,27 @@ async function gerar(req: Request, svc: SupabaseClient, body: Record<string, unk
   }
 }
 
-async function passo(svc: SupabaseClient, body: Record<string, unknown>): Promise<Response> {
+/**
+ * UMA ETAPA INTERNA. Quem chama já recebeu a resposta (202): o trabalho corre
+ * aqui, em segundo plano, dentro do relógio desta invocação.
+ */
+async function executarPasso(svc: SupabaseClient, body: Record<string, unknown>): Promise<void> {
   const leadId = Number(body.kommo_lead_id)
   const tentativa = String(body.tentativa ?? '')
-  const etapa = body.etapa === 'redacao' ? 'redacao' : 'pesquisa'
-  const linha = await lerLinha(svc, leadId)
-  if (!linha || linha.status !== 'gerando' || linha.tentativa !== tentativa) {
-    return jsonResponse({ ok: true, ignorado: true })
-  }
-  const l = linha as LinhaDaJustificativa & {
-    prompt_usado?: string | null
-    dominios?: string[] | null
-    pesquisa?: { texto?: string; fontes?: FonteDaJustificativa[] } | null
-    consumo?: Partial<ConsumoDaJustificativa> | null
-  }
-  const c: Contexto = {
-    anthropic: new Anthropic({ apiKey: (await chaveAnthropic()) ?? '' }),
-    inicio: Date.now(),
-    consumo: { ...CONSUMO_ZERO, ...(l.consumo ?? {}), modelo: MODELO },
-  }
-  const segundos = () => (c.consumo.segundos ?? 0) + Math.round((Date.now() - c.inicio) / 1000)
-
-  // O PULSO: a etapa começou agora. Parada além da trava, a tela sabe que morreu.
-  if (!(await gravarDaTentativa(svc, leadId, tentativa, { etapa: etapa === 'pesquisa' ? 'pesquisando' : 'redigindo' }))) {
-    return jsonResponse({ ok: true, ignorado: true })
-  }
+  if (!leadId || !tentativa) return
+  const etapa = String(body.etapa ?? '')
   try {
-    const tarefa = String(l.prompt_usado ?? '')
-    if (!tarefa.trim()) throw new Error('O prompt montado não foi gravado. Gere de novo.')
-    if (etapa === 'pesquisa') {
-      // Livre: uma geração começada antes da mudança não leva a lista que tinha.
-      const dossie = await pesquisar(c, tarefa, [])
-      const seguiu = await gravarDaTentativa(svc, leadId, tentativa, {
-        etapa: 'redigindo',
-        pesquisa: dossie,
-        consumo: { ...c.consumo, segundos: segundos() },
-      })
-      if (seguiu) dispararEtapa(leadId, tentativa, 'redacao')
-      return jsonResponse({ ok: true, etapa, fontes: dossie.fontes.length })
+    // 'pesquisa' é o nome antigo: uma geração começada antes da mudança cai no
+    // planejamento e segue no desenho novo.
+    if (etapa === 'planejamento' || etapa === 'pesquisa') return await planejar(svc, leadId, tentativa)
+    if (etapa === 'frente') {
+      return await rodarFrente(svc, leadId, tentativa, String(body.frente ?? ''), body.anterior ? String(body.anterior) : null)
     }
-    const dossie = l.pesquisa ?? {}
-    const fontesDaPesquisa = dossie.fontes ?? []
-    const redacao = await redigir(c, tarefa, String(dossie.texto ?? ''), fontesDaPesquisa)
-    const final = textoComFontes(redacao, fontesDaPesquisa)
-    await gravarDaTentativa(svc, leadId, tentativa, {
-      status: 'pronta',
-      etapa: null,
-      texto: final.texto,
-      fontes: final.fontes,
-      erro: null,
-      consumo: { ...c.consumo, segundos: segundos() },
-    })
-    return jsonResponse({ ok: true, etapa })
+    if (etapa === 'redacao') return await redacao(svc, leadId, tentativa)
   } catch (e) {
-    await gravarDaTentativa(svc, leadId, tentativa, {
-      status: 'falha',
-      etapa: null,
-      erro: mensagemDaFalha(e),
-      consumo: { ...c.consumo, segundos: segundos() },
-    }).catch(() => false)
-    return jsonResponse({ ok: false, error: mensagemDaFalha(e) })
+    // O imprevisto (banco fora, por exemplo): a geração vira falha com o motivo,
+    // em vez de morrer calada.
+    await gravarDaTentativa(svc, leadId, tentativa, { status: 'falha', etapa: null, erro: mensagemDaFalha(e) }).catch(() => false)
   }
 }
 
@@ -548,6 +992,8 @@ async function enviar(req: Request, svc: SupabaseClient, body: Record<string, un
     await soltar()
     return erro('Token ou subdomínio da Kommo não configurado. O texto ficou salvo.', 500)
   }
+  // A NOTA LEVA TUDO, as notas internas (###NOTAS###) inclusive, no fim: a nota
+  // do Kommo é interna — quem a repassa ao cedente é a pessoa.
   const partes = dividirNota(texto)
   // TODAS AS PARTES NUMA CHAMADA: ou entram todas, ou nenhuma — e tentar de
   // novo não duplica a parte 1 (ver _shared/anotarNoKommo.ts).
@@ -603,7 +1049,10 @@ Deno.serve(async (req: Request) => {
         (!!cronSecret && req.headers.get('x-cron-secret') === cronSecret) ||
         (!!svcKey && req.headers.get('Authorization') === `Bearer ${svcKey}`)
       if (!interna) return erro(ERRO_ACESSO, 401)
-      return await passo(svc, body)
+      // RESPONDE JÁ, TRABALHA DEPOIS: quem disparou não fica preso esperando.
+      const trabalho = executarPasso(svc, body).catch(() => {})
+      emSegundoPlano(trabalho)
+      return jsonResponse({ ok: true, aceito: true }, 202)
     }
     if (acao === 'gerar') return await gerar(req, svc, body)
     if (acao === 'rascunho') return await rascunho(req, svc, body)
