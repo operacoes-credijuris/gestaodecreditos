@@ -137,7 +137,7 @@ export function Modal({
       >
         {/* Cabeçalho sem divisória, como na amostra: o rodapé é que se separa,
             porque é ele que fica parado enquanto o corpo rola. */}
-        <div className="flex items-start justify-between gap-4 px-6 pt-6">
+        <div className="flex items-start justify-between gap-s3 px-s5 pt-s5">
           <div className="min-w-0">
             <h2
               id={titleId}
@@ -162,13 +162,16 @@ export function Modal({
             caixa posicionada em volta) abaixo da dobra se media pelo FUNDO da
             janela, que também rola — o fundo crescia, rolava, e a janela subia
             deixando um vão embaixo. O mesmo defeito da moldura do layout. */}
-        <div className="relative max-h-[70vh] overflow-y-auto px-6 py-5 scrollbar-thin">
+        <div className="relative max-h-[70vh] overflow-y-auto px-s5 py-s4 scrollbar-thin">
           {children}
         </div>
         {(footer || rodapeInicio) && (
-          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda px-6 pb-6 pt-4">
+          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda px-s5 pb-s5 pt-s3">
             {rodapeInicio && <div className="mr-auto flex flex-wrap items-center gap-s2">{rodapeInicio}</div>}
-            {footer}
+            {/* CANCELAR E A AÇÃO PRINCIPAL ANDAM JUNTOS: sem o grupo, no celular
+                cada botão quebrava a linha sozinho e o par se separava (revisão
+                visual 2, 05/10/2026). */}
+            {footer && <div className="ml-auto flex flex-wrap items-center justify-end gap-s2">{footer}</div>}
           </div>
         )}
       </div>

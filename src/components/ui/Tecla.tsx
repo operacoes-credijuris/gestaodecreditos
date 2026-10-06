@@ -9,7 +9,7 @@ import type { ReactNode } from 'react'
  */
 export function Tecla({ children }: { children: ReactNode }) {
   return (
-    <kbd className="rounded-md border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2">
+    <kbd className="rounded-[4px] border border-borda-forte bg-superficie px-s1.5 py-s0.5 font-sans text-xs font-semibold text-texto-2">
       {children}
     </kbd>
   )
