@@ -295,7 +295,7 @@ const CAND_FIXO = 'block w-full rounded-campo border border-borda bg-superficie 
 
 /** O `.link-btn` da amostra: link na cor da marca, com área de clique de 24 px. */
 const LINK_BTN =
-  'inline-flex min-h-8 items-center gap-1 rounded-controle px-1.5 text-sm font-semibold ' +
+  'inline-flex min-h-8 items-center gap-s1 rounded-controle px-s1.5 text-sm font-semibold ' +
   'text-marca-texto hover:bg-marca-leve'
 
 /** A caixa de marcar da amostra (`.check input`): 16 px, na cor da marca. */
@@ -579,8 +579,8 @@ function LinhaCertidao({
   const escopoTexto = rotuloParametros(item.parametros)
 
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-borda px-3 py-2 text-corpo last:border-b-0">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-s3 gap-y-s1 border-b border-borda px-s3 py-s2 text-corpo last:border-b-0">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-s2 gap-y-s1">
         <Selo tom={estaVencida ? 'perigo' : (estado?.tom ?? 'neutro')} icone={estaVencida ? undefined : estado?.icone}>
           {estaVencida ? 'Vencida' : (estado?.rotulo ?? item.status)}
         </Selo>
@@ -605,7 +605,7 @@ function LinhaCertidao({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-1">
+      <div className="flex flex-wrap items-center justify-end gap-s1">
         {pdfPrincipal ? (
           <a href={pdfPrincipal.link} target="_blank" rel="noreferrer" className={LINK_BTN}>
             <FileText className="h-[16px] w-[16px]" aria-hidden /> Abrir PDF
@@ -635,7 +635,7 @@ function LinhaCertidao({
       </div>
 
       {aberto && (
-        <div className="col-span-full space-y-2 rounded-campo bg-superficie-2 px-3 py-2.5 text-sm">
+        <div className="col-span-full space-y-s2 rounded-campo bg-superficie-2 px-s3 py-s2 text-sm">
           {barreiras.length > 0 ? (
             <p className="flex items-start gap-1.5 text-aviso">
               <AlertTriangle className="mt-0.5 h-[16px] w-[16px] flex-none" aria-hidden />
@@ -688,7 +688,7 @@ function LinhaCertidao({
           )}
 
           {(outrosPdfs.length > 0 || (pdfPrincipal && url)) && (
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="flex flex-wrap items-center gap-s1">
               {outrosPdfs.map((a) => (
                 <a key={a.link} href={a.link} target="_blank" rel="noreferrer" className={LINK_BTN}>
                   <FileText className="h-[16px] w-[16px]" aria-hidden /> {a.nome}
@@ -1672,7 +1672,7 @@ export function PainelCertidoes({
     if (carregando || (!oficioLocal && !servidorLeuOficio)) return null
     if (divergenciaDoTitulo) {
       return (
-        <CaixaDeAviso tom="aviso" role="alert" className="mb-3">
+        <CaixaDeAviso tom="aviso" role="alert" className="mb-s3">
           <b className="text-texto">O título do card e o ofício requisitório divergem.</b>{' '}
           {divergenciaDoTitulo.mensagem}
         </CaixaDeAviso>
@@ -1680,7 +1680,7 @@ export function PainelCertidoes({
     }
     if (avisoOficio) {
       return (
-        <CaixaDeAviso tom={semOficio ? 'info' : 'aviso'} className="mb-3">
+        <CaixaDeAviso tom={semOficio ? 'info' : 'aviso'} className="mb-s3">
           <b className="text-texto">Ofício requisitório:</b> {avisoOficio}
         </CaixaDeAviso>
       )
@@ -1695,9 +1695,12 @@ export function PainelCertidoes({
   function divergenciaDoCadastro(): ReactNode {
     if (!titularOficio || !cadastroDivergeDoOficio) return null
     return (
-      <CaixaDeAviso tom="perigo" role="alert" className="mb-3">
-        <span className="flex flex-wrap items-center justify-between gap-3">
-          <span className="min-w-0 flex-1">
+      <CaixaDeAviso tom="perigo" role="alert" className="mb-s3">
+        {/* O TEXTO COM BASE DE 260PX (como no aviso do cônjuge): com `flex-1`
+            ele nunca deixava o botão descer, e no celular espremia o texto numa
+            coluna de três palavras ao lado do "Usar o do ofício". */}
+        <span className="flex flex-wrap items-center justify-between gap-s3">
+          <span className="min-w-0 flex-[1_1_260px]">
             <b className="text-texto">O cadastro não bate com o ofício requisitório.</b> Cadastro:{' '}
             {comDoc(cedente.nome.trim() || '(sem nome)', docDoCadastro)}; ofício:{' '}
             {comDoc(titularOficio.nome, titularOficio.documento)}. As certidões saem no nome de quem está no
@@ -2370,7 +2373,7 @@ export function PainelCertidoes({
 
   /** Um número do placar, com o rótulo ao lado. */
   const numero = (n: ReactNode, rotulo: string, tom = 'text-texto') => (
-    <span className="inline-flex items-baseline gap-1.5">
+    <span className="inline-flex items-baseline gap-s1.5">
       <b className={cn('font-display text-lg font-bold tabular-nums', tom)}>{n}</b>
       <span className="text-texto-2">{rotulo}</span>
     </span>
@@ -2390,9 +2393,12 @@ export function PainelCertidoes({
       .join('/')
     const completa = Boolean(completude && completude.necessarias > 0 && completude.obtidas_validas === completude.necessarias)
     return (
-      <div className="mb-3 rounded-cartao border border-borda bg-superficie px-4 py-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <div className="flex min-w-[min(100%,300px)] flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-corpo">
+      // CARTÃO DENTRO DE CARTÃO, NÃO (§0.4, revisão visual 2): dentro da janela,
+      // a faixa é um bloco `superficie-2` sem borda — com borda e cantos de
+      // cartão, eram três molduras empilhadas (faixa, checklist, BullAI).
+      <div className="mb-s3 rounded-campo bg-superficie-2 px-s4 py-s3">
+        <div className="flex flex-wrap items-center gap-x-s3 gap-y-s1.5">
+          <div className="flex min-w-[min(100%,300px)] flex-1 flex-wrap items-center gap-x-s2 gap-y-s1 text-corpo">
             <span className="text-sm font-semibold text-texto-2">Cedente</span>
             <b className="min-w-0 break-words font-bold text-texto">{nome || 'ainda sem cadastro'}</b>
             {doc && (
@@ -2429,7 +2435,7 @@ export function PainelCertidoes({
               <span className="text-xs text-texto-3">({titularOficio.arquivo})</span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex flex-wrap items-center gap-s1">
             {pasta && (
               <a
                 href={pasta.url}
@@ -2463,7 +2469,7 @@ export function PainelCertidoes({
               aria-expanded={ajudaAberta}
               aria-label="Como funciona esta aba"
               title="Como funciona esta aba"
-              className="inline-grid h-8 w-8 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
+              className="inline-grid h-controle-sm w-controle-sm place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
             >
               <HelpCircle className="h-[16px] w-[16px]" aria-hidden />
             </button>
@@ -2471,7 +2477,7 @@ export function PainelCertidoes({
         </div>
 
         {!editando && conjugeGravado && (
-          <p className="mt-1 text-sm text-texto-2">
+          <p className="mt-s1 text-sm text-texto-2">
             Cônjuge: <b className="text-texto">{conjugeGravado.nome}</b> ·{' '}
             <span className="tabular-nums">{formatCpfCnpjInput(conjugeGravado.documento)}</span>
             {conjugeGravado.uf_atual &&
@@ -2484,7 +2490,7 @@ export function PainelCertidoes({
             escondidas: elas saem do denominador, e "8 de 8" com 6 dispensadas
             é um dossiê fechado sobre o que a regra exigia. */}
         {!editando && completude && (
-          <div className="mt-2.5 flex flex-wrap items-baseline gap-x-5 gap-y-1 border-t border-borda pt-2.5 text-sm">
+          <div className="mt-s3 flex flex-wrap items-baseline gap-x-s5 gap-y-s1 border-t border-borda pt-s3 text-sm">
             {numero(
               `${completude.obtidas_validas} de ${completude.necessarias}`,
               'obrigatórias obtidas',
@@ -2515,7 +2521,7 @@ export function PainelCertidoes({
         )}
 
         {ajudaAberta && (
-          <div className="mt-2.5 space-y-1 border-t border-borda pt-2.5 text-sm text-texto-2">
+          <div className="mt-s3 space-y-s1 border-t border-borda pt-s3 text-sm text-texto-2">
             <p>
               O checklist é montado por sujeito, antes de qualquer emissão, e congelado no banco. Sem CPF (ou
               CNPJ) e UF não há como saber quais certidões são exigidas.
@@ -2641,17 +2647,17 @@ export function PainelCertidoes({
       {/* OS ERROS VÊM PRIMEIRO: o que falhou ao ler é a primeira coisa a saber,
           antes de confiar no que está abaixo. */}
       {erro && (
-        <CaixaDeAviso tom="perigo" role="alert" className="mb-3">
+        <CaixaDeAviso tom="perigo" role="alert" className="mb-s3">
           {erro}
         </CaixaDeAviso>
       )}
       {erroMunicipios && (
-        <CaixaDeAviso tom="perigo" className="mb-3">
+        <CaixaDeAviso tom="perigo" className="mb-s3">
           {erroMunicipios}
         </CaixaDeAviso>
       )}
       {erroLinks && (
-        <CaixaDeAviso tom="aviso" className="mb-3">
+        <CaixaDeAviso tom="aviso" className="mb-s3">
           {erroLinks}
         </CaixaDeAviso>
       )}
@@ -2837,7 +2843,7 @@ export function PainelCertidoes({
           <RotuloDeSecao className="mt-5">Cedente</RotuloDeSecao>
           {/* PESSOA FÍSICA OU JURÍDICA (pedido do dono, 03/10/2026): a escolha
               troca o documento (CPF ↔ CNPJ) e tira o que não se aplica a empresa. */}
-          <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div className="mb-s3 flex flex-wrap items-center gap-x-s3 gap-y-s1.5">
             <Segmented
               ariaLabel="O cedente é pessoa física ou jurídica"
               items={[
@@ -3109,7 +3115,7 @@ export function PainelCertidoes({
         <div>
           {/* ---------------- o cônjuge que falta, em destaque ---------------- */}
           {conjugeFaltando && respostaEstadoCivil.ancorado && (
-            <CaixaDeAviso tom="aviso" className="mb-3">
+            <CaixaDeAviso tom="aviso" className="mb-s3">
               <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <span className="min-w-0 flex-[1_1_260px]">
                   Os anexos qualificam <b>{cedenteGravado?.nome ?? 'o cedente'}</b> como{' '}
@@ -3182,7 +3188,7 @@ export function PainelCertidoes({
           {itens.length > 0 && (
             <section>
               <RotuloDeSecao className="mt-4">Checklist · {itens.length} certidões</RotuloDeSecao>
-              <div className="overflow-hidden rounded-cartao border border-borda">
+              <div className="overflow-hidden rounded-campo border border-borda">
                 {grupos.map(({ grupo, itens: lista }) => {
                   const linhas = (
                     <ul>
@@ -3262,7 +3268,7 @@ export function PainelCertidoes({
 
       {/* AS AÇÕES FICAM NO PAINEL, não no rodapé da janela: o rodapé é dividido
           com a aba de Processos Judiciais. */}
-      <div className="mt-5 flex flex-wrap items-center justify-end gap-2.5 border-t border-borda pt-4">
+      <div className="mt-s5 flex flex-wrap items-center justify-end gap-s2 border-t border-borda pt-s4">
         {editando ? (
           <>
             {sujeitos.length > 0 && (
@@ -3285,7 +3291,7 @@ export function PainelCertidoes({
           // "Gerar itens faltantes" e não "Recalcular": o motor só acrescenta
           // (ver gerarFaltantes).
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={gerarFaltantes}
             loading={salvando}
             icon={<Plus className="h-[16px] w-[16px]" aria-hidden />}

@@ -31,6 +31,7 @@ import { supabase } from '@/lib/supabase'
 import { codigoDoErro, invokeFunction } from '@/lib/functions'
 import { comecarNoCard, terminarNoCard, type PorCard } from '@/lib/emCursoPorCard'
 import type { KommoLead } from '@/lib/types'
+import { CaixaDeAviso } from '@/components/analise/Pecas'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -164,7 +165,15 @@ export function BotaoJustificativa({
               : 'Gerar a justificativa técnica do preço da proposta (a IA pesquisa e redige)'
       }
     >
-      {gerando ? 'Gerando justificativa…' : pronta ? 'Revisar justificativa' : 'Justificativa técnica'}
+      {/* O ESTADO NA PALAVRA, também na falha (revisão visual 2): antes ela só
+          trocava o ícone, e "falhou" ficava no passar do mouse. */}
+      {gerando
+        ? 'Gerando justificativa…'
+        : pronta
+          ? 'Revisar justificativa'
+          : falhou
+            ? 'Justificativa falhou'
+            : 'Justificativa técnica'}
     </Button>
   )
 }
@@ -426,7 +435,8 @@ export function JanelaJustificativa({
           ) : undefined
         }
         footer={
-          <>
+          // [Fechar][Enviar] JUNTOS: no celular, o par quebra inteiro.
+          <div className="flex gap-s2">
             <Button variant="ghost" onClick={fechar}>
               Fechar
             </Button>
@@ -441,7 +451,7 @@ export function JanelaJustificativa({
                 Enviar
               </Button>
             )}
-          </>
+          </div>
         }
       >
         {semMigracao || migracaoPelaFuncao ? (
@@ -500,8 +510,11 @@ export function JanelaJustificativa({
               onChange={(e) => aoDigitarCorpo(e.target.value)}
               aria-label="Texto da justificativa técnica"
               spellCheck
+              // O CONTORNO E O FOCO DO CAMPO DA CASA (ui/Field): era a borda
+              // forte com sombra de cartão (§0.4: só o cartão leva sombra) e o
+              // anel de outro azul.
               className={cn(
-                'block w-full resize-y rounded-campo border border-borda-forte bg-superficie px-s4 py-s3 font-sans text-corpo leading-relaxed text-texto shadow-nivel-1 outline-none transition-colors scrollbar-thin placeholder:text-texto-3 focus:border-marca-viva focus:ring-[3px] focus:ring-marca-viva/20',
+                'block w-full resize-y rounded-campo border border-borda-controle bg-superficie px-s4 py-s3 font-sans text-corpo leading-relaxed text-texto outline-none transition-colors scrollbar-thin placeholder:text-texto-3 focus:border-anel focus:ring-[3px] focus:ring-anel/20',
                 notas === null ? 'min-h-[46vh]' : 'min-h-[36vh]',
               )}
             />
@@ -521,8 +534,9 @@ export function JanelaJustificativa({
               <span>{texto.length.toLocaleString('pt-BR')} caracteres</span>
               {linha.gerado_em && <span>Gerada <TempoRelativo valor={linha.gerado_em} /></span>}
               {consumo && (consumo.buscas || consumo.fetches) ? (
-                <span>
-                  {consumo.buscas ?? 0} busca(s), {consumo.fetches ?? 0} página(s) aberta(s)
+                <span className="tabular-nums">
+                  {noNumero(consumo.buscas ?? 0, 'busca', 'buscas')},{' '}
+                  {noNumero(consumo.fetches ?? 0, 'página aberta', 'páginas abertas')}
                 </span>
               ) : null}
             </div>
@@ -683,9 +697,11 @@ function NotasInternas({
   enviada?: boolean
 }) {
   return (
+    // NO ESCURO, O ÂMBAR SÓ NO CONTORNO E NO CADEADO (auditoria visual, E7): o
+    // fundo `aviso-fundo` de lá é um marrom que, na largura da janela, pesava.
     <section
       aria-label="Notas internas"
-      className="rounded-campo border border-aviso-borda bg-aviso-fundo px-s4 py-s3"
+      className="rounded-campo border border-aviso-borda bg-aviso-fundo px-s4 py-s3 dark:bg-superficie-2"
     >
       <h3 className="m-0 flex items-center gap-s1.5 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-2">
         <Lock className="h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden />
@@ -700,7 +716,7 @@ function NotasInternas({
           aria-label="Notas internas (não vão para o cedente)"
           rows={4}
           spellCheck
-          className="mt-s2 block w-full resize-y rounded-campo border border-borda-forte bg-superficie px-s3 py-s2 font-sans text-sm leading-relaxed text-texto outline-none transition-colors scrollbar-thin focus:border-marca-viva focus:ring-[3px] focus:ring-marca-viva/20"
+          className="mt-s2 block w-full resize-y rounded-campo border border-borda-controle bg-superficie px-s3 py-s2 font-sans text-sm leading-relaxed text-texto outline-none transition-colors scrollbar-thin focus:border-anel focus:ring-[3px] focus:ring-anel/20"
         />
       )}
       <p className="m-0 mt-s2 text-xs text-texto-3">
@@ -729,20 +745,18 @@ function TextoEnviado({ texto }: { texto: string }) {
   )
 }
 
+/**
+ * O aviso da janela: a CAIXA DA ANÁLISE (`CaixaDeAviso`), a mesma das janelas
+ * da cotação e do envio ao fundo — esta tinha uma cópia própria, com outro
+ * recuo e outro ícone de erro.
+ */
 function Aviso({ tom, children }: { tom: 'aviso' | 'perigo'; children: ReactNode }) {
   return (
-    <p
-      role={tom === 'perigo' ? 'alert' : 'status'}
-      className={cn(
-        'flex items-start gap-s2 rounded-campo border px-s4 py-s3 text-corpo text-texto',
-        tom === 'perigo' ? 'border-perigo-borda bg-perigo-fundo' : 'border-aviso-borda bg-aviso-fundo',
-      )}
-    >
-      <AlertTriangle
-        className={cn('mt-[3px] h-[16px] w-[16px] shrink-0', tom === 'perigo' ? 'text-perigo' : 'text-aviso')}
-        aria-hidden
-      />
-      <span>{children}</span>
-    </p>
+    <CaixaDeAviso tom={tom} role={tom === 'perigo' ? 'alert' : 'status'}>
+      {children}
+    </CaixaDeAviso>
   )
 }
+
+/** "1 busca", "21 buscas". */
+const noNumero = (n: number, um: string, varios: string) => `${n.toLocaleString('pt-BR')} ${n === 1 ? um : varios}`

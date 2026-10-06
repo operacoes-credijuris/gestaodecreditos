@@ -3,7 +3,9 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { Segmented } from '@/components/ui/Segmented'
+import { CaixaDeAviso } from '@/components/analise/Pecas'
 import { onlyDigits } from '@/lib/format'
+import { perguntarDescarte } from '@/lib/descarte'
 import {
   type Comissao,
   type Cotacao,
@@ -483,6 +485,13 @@ export function JanelaDeCotacao({
     }
   }
 
+  // O CANCELAR PERGUNTA COMO O X E O ESC (revisão visual 2): com valor digitado,
+  // ele fechava calado — e a janela irmã, a do envio ao BTG, já perguntava.
+  async function cancelar() {
+    if (edicao.sujo && !enviando && !(await perguntarDescarte())) return
+    onFechar()
+  }
+
   return (
     <Modal
       open
@@ -497,14 +506,16 @@ export function JanelaDeCotacao({
         </>
       }
       footer={
-        <>
-          <Button variant="secondary" onClick={onFechar} disabled={enviando}>
+        // O CANCELAR EM FANTASMA, como no ConfirmDialog e na due diligence; e
+        // [Cancelar][Enviar] JUNTOS, para no celular quebrarem como par.
+        <div className="flex gap-s2">
+          <Button variant="ghost" onClick={() => void cancelar()} disabled={enviando}>
             Cancelar
           </Button>
           <Button type="submit" form={formId} loading={enviando}>
             Enviar
           </Button>
-        </>
+        </div>
       }
     >
       {/* ENTER ENVIA: o Enviar do rodapé é o submit deste form (`form=`), e um
@@ -520,10 +531,12 @@ export function JanelaDeCotacao({
       >
         <CamposDaCotacao edicao={edicao} fundo={fundo} tentou={tentou} />
 
+        {/* A MESMA CAIXA DE ERRO DA JANELA DO ENVIO AO BTG: as duas pedem a
+            cotação, e são da mesma família. */}
         {erro && (
-          <p role="alert" className="rounded-campo border border-perigo-borda bg-perigo-fundo px-s4 py-s3 text-corpo text-perigo">
-            {erro}
-          </p>
+          <CaixaDeAviso tom="perigo" role="alert">
+            Não deu certo: {erro}
+          </CaixaDeAviso>
         )}
       </form>
     </Modal>

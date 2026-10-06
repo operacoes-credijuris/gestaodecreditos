@@ -18,6 +18,7 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import { AlertTriangle, FileText, Image as ImageIcon, Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { Tecla } from '@/components/ui/Tecla'
 import { useToast } from '@/components/ui/Toast'
 import { CaixaDeAviso } from '@/components/analise/Pecas'
 import { cn } from '@/lib/cn'
@@ -166,8 +167,8 @@ export function useAnotacaoDoCard(leadId: number, onEnviarTexto: (texto: string)
   }
 }
 
-const KBD =
-  'rounded-[6px] border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2'
+// O "Ctrl + Enter" usa a tecla da casa (`ui/Tecla`), a mesma do topo e da busca
+// das listas (revisão visual 2) — havia aqui uma cópia de classes.
 
 /** O que a linha do arquivo diz à direita, conforme o envio anda. */
 function situacao(e: EstadoDoAnexo): string | null {
@@ -213,7 +214,7 @@ function LinhaDoAnexo({
           type="button"
           onClick={onTirar}
           disabled={enviando}
-          className="grid h-[26px] w-[26px] flex-none place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-texto-3"
+          className="grid h-controle-sm w-controle-sm flex-none place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-texto-3"
           aria-label={`Tirar ${arquivo.name}`}
           title={`Tirar ${arquivo.name}`}
         >
@@ -295,7 +296,7 @@ export function CaixaDeAnotacao({
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void enviar()
         }}
         placeholder="Ex.: Cedente enviou o RG; falta o comprovante de endereço."
-        className="min-h-[96px] w-full resize-y rounded-controle border border-borda-controle bg-superficie px-[10px] py-2 text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
+        className="min-h-[96px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-s3 py-s2 text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
       />
 
       {a.anexos.length > 0 && (
@@ -317,7 +318,7 @@ export function CaixaDeAnotacao({
           'Até 100 MB por arquivo. Só o texto fica no rascunho: saindo da página, os arquivos saem da lista.'
         ) : (
           <>
-            <kbd className={KBD}>Ctrl</kbd> + <kbd className={KBD}>Enter</kbd> envia · arraste ou cole (Ctrl+V)
+            <Tecla>Ctrl</Tecla> + <Tecla>Enter</Tecla> envia · arraste ou cole (Ctrl+V)
             arquivos aqui, até 100 MB cada
           </>
         )}

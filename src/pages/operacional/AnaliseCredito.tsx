@@ -76,6 +76,7 @@ import {
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { useCaixaNaTela, type AjusteDaCaixa } from '@/lib/dentroDaJanela'
 import { invokeFunction } from '@/lib/functions'
 import { enviarArquivo, type ProgressoDoEnvio } from '@/lib/enviarArquivo'
 import { CaixaDeAnotacao, useAnotacaoDoCard } from '@/components/CaixaDeAnotacao'
@@ -776,9 +777,19 @@ function useFecharFora(aberto: boolean, fechar: () => void, caixa: RefObject<HTM
   }, [aberto, fechar, caixa])
 }
 
-/** A caixa flutuante da amostra (`.pop`): borda, sombra de menu, cantos de 12 px. */
+/**
+ * A caixa flutuante da amostra (`.pop`): borda, sombra de menu, cantos de 12 px.
+ * A MESMA DO `MenuDeAcoes` (revisão visual 2): `rounded-flutuante` (era o
+ * `rounded-campo`, de 10 px) e, no escuro, o anel claro que a separa da página.
+ * Quem a usa mede com `useCaixaNaTela` e aplica `posicaoDaCaixa`.
+ */
 const CAIXA_FLUTUANTE =
-  'absolute z-20 mt-1 rounded-campo border border-borda bg-superficie p-1.5 text-left shadow-nivel-2'
+  'absolute z-20 rounded-flutuante border border-borda bg-superficie p-s1.5 text-left shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]'
+
+/** Embaixo do botão (o natural) ou, sem lugar embaixo, em cima dele. */
+const posicaoDaCaixa = (a: AjusteDaCaixa) => (a.acima ? 'bottom-full mb-s1' : 'top-full mt-s1')
+/** O deslocamento lateral que faz a caixa caber na tela (celular). */
+const deslocamentoDaCaixa = (a: AjusteDaCaixa) => (a.dx ? { transform: `translateX(${a.dx}px)` } : undefined)
 
 /**
  * A PLANILHA QUE NASCE DA CONVERSA: colar o bloco que o Claude entregou.
@@ -1322,8 +1333,10 @@ function SeletorDeEtiquetas({
 }) {
   const [aberto, setAberto] = useState(false)
   const caixa = useRef<HTMLDivElement>(null)
+  const flutuante = useRef<HTMLDivElement>(null)
   const fechar = useCallback(() => setAberto(false), [])
   useFecharFora(aberto, fechar, caixa)
+  const ajuste = useCaixaNaTela(flutuante, aberto)
 
   // POR NOME NORMALIZADO, e não por igualdade: o que está no card veio do
   // Kommo, e caixa ou espaço a mais ali deixariam a etiqueta marcada aparecer
@@ -1341,48 +1354,65 @@ function SeletorDeEtiquetas({
         aria-label="Aplicar ou remover as etiquetas dos fundos"
         aria-expanded={aberto}
         className={cn(
-          'inline-flex h-[24px] items-center gap-1 rounded-full border border-dashed px-2 text-xs font-semibold transition-colors',
+          'inline-flex h-[24px] items-center gap-s1 rounded-full border border-dashed px-s2 text-xs font-semibold transition-colors',
           aberto
             ? 'border-marca-viva text-marca-texto'
             : 'border-borda-forte text-texto-2 hover:border-marca-viva hover:text-marca-texto',
         )}
       >
-        <Tag className="h-[13px] w-[13px]" aria-hidden />
+        <Tag className="h-[14px] w-[14px]" aria-hidden />
       </button>
 
       {aberto && (
-        <div className={cn(CAIXA_FLUTUANTE, 'left-0 w-[460px] max-w-[calc(100vw-2rem)] px-4 py-[10px]')}>
-          <p className="px-1 pb-2 pt-1 text-xs font-bold uppercase tracking-[.05em] text-texto-3">
+        <div
+          ref={flutuante}
+          className={cn(
+            CAIXA_FLUTUANTE,
+            posicaoDaCaixa(ajuste),
+            'left-0 w-[460px] max-w-[calc(100vw-24px)] px-s3 py-s2',
+          )}
+          style={deslocamentoDaCaixa(ajuste)}
+        >
+          <p className="px-s1 pb-s2 pt-s1 text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
             Etiquetas dos fundos · uma por fundo
           </p>
+          {/* NO CELULAR, SEM A COLUNA "DESDE" (revisão visual 2): a grade de
+              460px não cabia nos 351px da caixa, e o nome do fundo virava
+              "P…". As colunas dos atos medem o próprio título, e o "há 3 dias"
+              desce para baixo do nome. */}
           <div
             role="group"
             aria-label="Etiquetas dos fundos"
             className={cn(
-              'grid grid-cols-[minmax(0,1.4fr)_repeat(3,64px)_72px] items-center gap-x-1 gap-y-1.5 text-sm',
+              'grid grid-cols-[minmax(0,1fr)_repeat(3,auto)] items-center gap-x-s2 gap-y-s1.5 text-sm sm:grid-cols-[minmax(0,1.4fr)_repeat(3,64px)_72px] sm:gap-x-s1',
               emVoo !== null && 'opacity-70',
             )}
           >
             <span />
             {ATOS_DA_PRECIFICACAO.map((ato) => (
-              <span key={ato} className="text-center text-xs font-bold uppercase tracking-[.04em] text-texto-3">
+              <span key={ato} className="text-center text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
                 {ato}
               </span>
             ))}
-            <span className="text-right text-xs font-bold uppercase tracking-[.04em] text-texto-3">Desde</span>
+            <span className="hidden text-right text-xs font-bold uppercase tracking-[0.06em] text-texto-3 sm:block">
+              Desde
+            </span>
             {etiquetasPorDestino(oferecidas).map((grupo) => {
               const marcada = grupo.etiquetas.find((e) => temEtiqueta(e.nome))
               return (
                 <Fragment key={grupo.destino}>
                   {/* O FUNDO COM ETIQUETA fica em destaque: numa lista de sete, é
                       o que se procura primeiro. */}
+                  <span className="min-w-0">
                   <span
                     className={cn(
                       'flex min-w-0 items-center gap-s1',
                       marcada ? 'font-bold text-texto' : 'font-medium text-texto-2',
                     )}
                   >
-                    <span className="truncate">{grupo.destino}</span>
+                    <span className="truncate" title={grupo.destino}>
+                      {grupo.destino}
+                    </span>
                     {/* O LÁPIS DA COTAÇÃO, só com "Cotado" marcado: reabre a
                         janela com o valor do card, e Enviar o sobrescreve. */}
                     {onEditarCotacao && marcada?.ato === 'Cotado' && (
@@ -1397,6 +1427,13 @@ function SeletorDeEtiquetas({
                         <Pencil className="h-[14px] w-[14px]" aria-hidden />
                       </button>
                     )}
+                  </span>
+                  {/* O "DESDE" DO CELULAR, embaixo do nome. */}
+                  {marcada && desdeQuandoAEtiqueta(datas, marcada.nome) && (
+                    <span className="block text-xs text-texto-3 sm:hidden">
+                      {tempoDecorrido(desdeQuandoAEtiqueta(datas, marcada.nome)!)}
+                    </span>
+                  )}
                   </span>
                   {ATOS_DA_PRECIFICACAO.map((ato) => {
                     const e = grupo.etiquetas.find((x) => x.ato === ato)
@@ -1433,7 +1470,9 @@ function SeletorDeEtiquetas({
                   })}
                   {/* HÁ QUANTO TEMPO a opção marcada está no card: é o controle
                       de quanto o fundo está demorando. */}
-                  <DesdeQuando quando={marcada ? desdeQuandoAEtiqueta(datas, marcada.nome) : null} />
+                  <span className="hidden text-right sm:block">
+                    <DesdeQuando quando={marcada ? desdeQuandoAEtiqueta(datas, marcada.nome) : null} />
+                  </span>
                 </Fragment>
               )
             })}
@@ -1526,8 +1565,27 @@ function BotaoEscolherProposta({
   const [aberto, setAberto] = useState(false)
   const [fundo, setFundo] = useState<string | null>(null)
   const caixa = useRef<HTMLDivElement>(null)
+  const flutuante = useRef<HTMLDivElement>(null)
+  const pergunta = useRef<HTMLParagraphElement>(null)
   const fechar = useCallback(() => setAberto(false), [])
   useFecharFora(aberto, fechar, caixa)
+  const ajuste = useCaixaNaTela(flutuante, aberto)
+
+  // O FOCO ACOMPANHA O PASSO (revisão visual 2): o botão do fundo clicado some
+  // com a troca, e o foco caía no <body> — pelo teclado, perdia-se o lugar. Vai
+  // para a PERGUNTA, e não para o "Confirmar e mover": dois Enter seguidos não
+  // podem mover o card. No "Voltar", volta à lista.
+  const trocouDePasso = useRef(false)
+  const irAoPasso = (f: string | null) => {
+    trocouDePasso.current = true
+    setFundo(f)
+  }
+  useEffect(() => {
+    if (!trocouDePasso.current) return
+    trocouDePasso.current = false
+    if (fundo) pergunta.current?.focus()
+    else flutuante.current?.querySelector<HTMLButtonElement>('button')?.focus()
+  }, [fundo])
 
   /** A etiqueta que o card tem deste fundo, e desde quando. */
   const situacao = (destino: string) => {
@@ -1575,7 +1633,13 @@ function BotaoEscolherProposta({
       </Button>
 
       {aberto && (
-        <div className={cn(CAIXA_FLUTUANTE, 'right-0 w-[360px] max-w-[calc(100vw-48px)]')}>
+        <div
+          ref={flutuante}
+          role="group"
+          aria-label="Escolher a proposta"
+          className={cn(CAIXA_FLUTUANTE, posicaoDaCaixa(ajuste), 'right-0 w-[360px] max-w-[calc(100vw-24px)]')}
+          style={deslocamentoDaCaixa(ajuste)}
+        >
           {fundo === null ? (
             <>
               <p className="flex items-baseline justify-between gap-s3 px-s3 pb-s1 pt-s2 text-xs font-bold uppercase tracking-[.06em] text-texto-3">
@@ -1589,7 +1653,7 @@ function BotaoEscolherProposta({
                   <button
                     key={f}
                     type="button"
-                    onClick={() => setFundo(f)}
+                    onClick={() => irAoPasso(f)}
                     className="grid min-h-[36px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-s4 rounded-controle px-s3 py-s1.5 text-left hover:bg-superficie-3 focus-visible:bg-superficie-3"
                   >
                     <span className="min-w-0">
@@ -1615,15 +1679,22 @@ function BotaoEscolherProposta({
             </>
           ) : (
             <div>
-              <p className="px-s3 pb-s1 pt-s3 text-corpo text-texto">{mensagemDaProposta(fundo)}</p>
+              <p
+                ref={pergunta}
+                tabIndex={-1}
+                className="rounded-controle px-s3 pb-s1 pt-s3 text-corpo text-texto focus:outline-none"
+              >
+                {mensagemDaProposta(fundo)}
+              </p>
               {cotacoes[fundo] && (
                 <div className="mx-s3 mt-s1 flex items-center justify-between gap-s4 rounded-campo bg-superficie-2 px-s3 py-s2">
                   <span className="text-xs font-bold uppercase tracking-[.06em] text-texto-3">Proposta</span>
                   <ValoresDaCotacao cotacao={cotacoes[fundo]} />
                 </div>
               )}
-              <div className="flex justify-end gap-2 px-2 pb-2 pt-2">
-                <Button size="sm" variant="secondary" className={BTN} onClick={() => setFundo(null)} disabled={carregando}>
+              {/* O "VOLTAR" EM FANTASMA, como no "Fechado!": é o cancelar da caixa. */}
+              <div className="flex justify-end gap-s2 p-s2">
+                <Button size="sm" variant="ghost" className={BTN} onClick={() => irAoPasso(null)} disabled={carregando}>
                   Voltar
                 </Button>
                 <Button size="sm" className={BTN} onClick={() => void confirmar()} loading={carregando}>
@@ -1683,7 +1754,7 @@ function ChecksDosFundos({
     <div
       role="group"
       aria-label="Envio aos fundos"
-      className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-campo border border-dashed border-borda-forte bg-superficie-2 px-4 py-[10px]"
+      className="mt-[10px] flex flex-wrap items-center gap-s2 rounded-campo border border-dashed border-borda-forte bg-superficie-2 px-s3 py-s2"
     >
       {fundos.map((f) => {
         const ato = atoFeito(f, lead.tags)
@@ -1710,7 +1781,7 @@ function ChecksDosFundos({
                   ? `${ato.etiqueta}${desde ? ` · ${tempoDecorrido(desde)}` : ''}`
                   : `Registrar o envio ${aoFundo(f)}`
               }
-              className="inline-flex h-[30px] items-center gap-1.5 pl-1.5 pr-[10px] text-sm font-semibold text-texto hover:bg-superficie-3 disabled:cursor-default disabled:hover:bg-transparent"
+              className="inline-flex h-[30px] items-center gap-s1.5 pl-s1.5 pr-s3 text-sm font-semibold text-texto hover:bg-superficie-3 disabled:cursor-default disabled:hover:bg-transparent"
             >
               <span
                 className={cn(
@@ -1736,7 +1807,7 @@ function ChecksDosFundos({
               rel="noreferrer"
               title={`Abrir a plataforma ${doFundo(f)}`}
               aria-label={`Abrir a plataforma ${doFundo(f)}`}
-              className="grid h-[30px] place-items-center border-l border-borda px-[9px] text-texto-3 hover:bg-superficie-3 hover:text-marca-texto"
+              className="grid h-[30px] place-items-center border-l border-borda px-s2 text-texto-3 hover:bg-superficie-3 hover:text-marca-texto"
             >
               <ExternalLink className="h-[14px] w-[14px]" aria-hidden />
             </a>
@@ -1870,7 +1941,8 @@ function JanelaDoEnvioAoFundo({
 
   const anotacao = (
     <div>
-      <textarea
+      {/* O CAMPO DA CASA (ui/Field), o mesmo dos da cotação acima. */}
+      <Textarea
         // COM A COTAÇÃO, o foco começa no valor da proposta (o primeiro campo).
         autoFocus={!pedeCotacao}
         rows={4}
@@ -1886,7 +1958,6 @@ function JanelaDoEnvioAoFundo({
         }}
         disabled={ocupado}
         placeholder="O que foi enviado, ou o motivo da reprovação (opcional) — dá para colar o print aqui com Ctrl+V."
-        className="w-full resize-y rounded-campo border border-borda-controle bg-superficie px-s4 py-s2 text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
       />
       <div className="mt-s3">
         <input
@@ -1900,10 +1971,11 @@ function JanelaDoEnvioAoFundo({
             e.target.value = ''
           }}
         />
+        {/* DENTRO DA JANELA, O `sm` DE 28PX (§0.2), como as ações dos painéis
+            de certidões — os 32px de BTN são a medida do card. */}
         <Button
           size="sm"
           variant="secondary"
-          className={BTN}
           icon={<Upload className={IC} aria-hidden />}
           onClick={() => entrada.current?.click()}
           disabled={ocupado}
@@ -1919,14 +1991,16 @@ function JanelaDoEnvioAoFundo({
                 key={`${a.name}-${i}`}
                 className="flex items-center gap-s2 rounded-controle bg-superficie-2 py-s1 pl-s2 pr-s1 text-corpo text-texto"
               >
-                <FileText className="h-[14px] w-[14px] flex-none text-texto-3" aria-hidden />
+                {/* A LINHA DO ARQUIVO DA ANOTAÇÃO DO CARD (CaixaDeAnotacao): ícone
+                    de 16px, tamanho em números tabulares, o X de 28px. */}
+                <FileText className="h-[16px] w-[16px] flex-none text-texto-3" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{a.name}</span>
-                <span className="shrink-0 whitespace-nowrap text-xs text-texto-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
+                <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-texto-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
                 <button
                   type="button"
                   onClick={() => setArquivos((antes) => antes.filter((_, j) => j !== i))}
                   disabled={ocupado}
-                  className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo"
+                  className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-texto-3 hover:bg-superficie-3 hover:text-perigo disabled:cursor-default disabled:opacity-40"
                   aria-label={`Tirar ${a.name}`}
                   title={`Tirar ${a.name}`}
                 >
@@ -1951,20 +2025,23 @@ function JanelaDoEnvioAoFundo({
           href={fundo.plataforma}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 font-medium text-marca-texto hover:underline"
+          className="inline-flex items-center gap-s1 font-medium text-marca-texto hover:underline"
         >
           Abrir a plataforma {doFundo(fundo)}
-          <ExternalLink className="h-[14px] w-[14px]" aria-hidden />
+          <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
         </a>
       }
       rodapeInicio={fundo.atos.some((a) => a.reprova) ? fundo.atos.filter((a) => a.reprova).map(botaoDoAto) : undefined}
       footer={
-        <>
-          <Button variant="secondary" onClick={() => void cancelar()} disabled={ocupado}>
+        // CANCELAR EM FANTASMA, como na janela da cotação e na due diligence; e
+        // [Cancelar][ato] JUNTOS: no celular, o par quebra inteiro para a linha
+        // de baixo, em vez de deixar o ato sozinho.
+        <div className="flex gap-s2">
+          <Button variant="ghost" onClick={() => void cancelar()} disabled={ocupado}>
             Cancelar
           </Button>
           {fundo.atos.filter((a) => !a.reprova).map(botaoDoAto)}
-        </>
+        </div>
       }
     >
       {pedeCotacao ? (
@@ -2145,11 +2222,13 @@ function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (text
   const [aberto, setAberto] = useState(false)
   const anotacao = useAnotacaoDoCard(leadId, onEnviar)
   const caixa = useRef<HTMLDivElement>(null)
+  const flutuante = useRef<HTMLDivElement>(null)
   const enviando = anotacao.enviando
   const fechar = useCallback(() => {
     if (!enviando) setAberto(false)
   }, [enviando])
   useFecharFora(aberto, fechar, caixa)
+  const ajuste = useCaixaNaTela(flutuante, aberto)
 
   const temRascunho = anotacao.temRascunho
   return (
@@ -2168,7 +2247,13 @@ function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (text
       </Button>
 
       {aberto && (
-        <div className={cn(CAIXA_FLUTUANTE, 'right-0 w-[360px] max-w-[calc(100vw-48px)] p-[10px]')}>
+        <div
+          ref={flutuante}
+          role="group"
+          aria-label="Anotação no card"
+          className={cn(CAIXA_FLUTUANTE, posicaoDaCaixa(ajuste), 'right-0 w-[360px] max-w-[calc(100vw-24px)] p-s3')}
+          style={deslocamentoDaCaixa(ajuste)}
+        >
           <CaixaDeAnotacao anotacao={anotacao} classeDoBotao={BTN} onFeito={() => setAberto(false)} />
         </div>
       )}
@@ -2206,12 +2291,14 @@ function BotaoFechado({
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const caixa = useRef<HTMLDivElement>(null)
+  const flutuante = useRef<HTMLDivElement>(null)
   // ENVIANDO, A CAIXA NÃO FECHA POR UM CLIQUE FORA: o aviso de falha da nota
   // precisa de onde aparecer.
   const fechar = useCallback(() => {
     if (!enviando) setAberto(false)
   }, [enviando])
   useFecharFora(aberto, fechar, caixa)
+  const ajuste = useCaixaNaTela(flutuante, aberto)
 
   async function confirmar() {
     if (enviando) return
@@ -2249,7 +2336,13 @@ function BotaoFechado({
         <div
           role="dialog"
           aria-label="Confirmar negócio fechado"
-          className={cn(CAIXA_FLUTUANTE, 'right-0 w-[320px] max-w-[calc(100vw-2rem)] p-[14px] text-center')}
+          ref={flutuante}
+          className={cn(
+            CAIXA_FLUTUANTE,
+            posicaoDaCaixa(ajuste),
+            'right-0 w-[320px] max-w-[calc(100vw-24px)] p-s4 text-center',
+          )}
+          style={deslocamentoDaCaixa(ajuste)}
         >
           <span
             aria-hidden
@@ -3107,7 +3200,10 @@ function CardCredito({
       {/* A ZONA DE AÇÕES, SEMPRE À DIREITA (amostra): o tempo na etapa em cima,
           os botões embaixo, a ação que avança em destaque e as outras
           contornadas. Em tela estreita desce para baixo do card. */}
-      <div className="flex min-w-0 flex-row flex-wrap items-center justify-between gap-2.5 min-[900px]:flex-col min-[900px]:items-end">
+      {/* NA GRADE DE 4/8 (revisão visual 2): 8px entre os botões, como em toda
+          barra de controles (§0.1) — eram 4,5px, e a fileira que ganhou
+          Justificativa, Certidões e Anotar parecia um bloco só. */}
+      <div className="flex min-w-0 flex-row flex-wrap items-center justify-between gap-s3 min-[900px]:flex-col min-[900px]:items-end">
         {dias !== null && quandoNaEtapa && (
           <div
             className="leading-tight min-[900px]:text-right"
@@ -3122,7 +3218,7 @@ function CardCredito({
             </span>
           </div>
         )}
-        <div className="flex flex-wrap items-center justify-end gap-1.5 min-[900px]:mt-auto min-[900px]:max-w-[420px]">
+        <div className="flex flex-wrap items-center justify-end gap-s2 min-[900px]:mt-auto min-[900px]:max-w-[420px]">
           {/* A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026). */}
           {onAnotar && <BotaoDeAnotacao leadId={lead.kommo_lead_id} onEnviar={(t) => onAnotar(lead, t)} />}
 
