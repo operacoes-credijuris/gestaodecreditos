@@ -18,7 +18,11 @@ const REPROVADO_BTG = ato(btg, 'Reprovado BTG')
 const ENVIADO_PJUS = ato(pjus, 'Enviado PJus')
 
 const LIMITADA: Cotacao = { propostaCentavos: 85_000_000, comissao: { modalidade: 'limitada', centavos: 4_000_000 } }
-const SPREAD: Cotacao = { propostaCentavos: 85_000_000, comissao: { modalidade: 'spread', percentualCentesimos: 500 } }
+// O spread de 06/10/2026: 5% sobre o valor líquido validado (R$ 800.000,00).
+const SPREAD: Cotacao = {
+  propostaCentavos: 85_000_000,
+  comissao: { modalidade: 'spread', percentualCentesimos: 500, baseCentavos: 80_000_000 },
+}
 
 /** Passos de mentira que anotam a ordem em que foram chamados. */
 function passosFalsos(o: {
@@ -84,14 +88,14 @@ describe('registrarEnvioAoFundo — "Cotado BTG" com a cotação', () => {
     ])
   })
 
-  it('com Spread, o texto é "final / comissão (Spread de P%)"; faltando a PJus, o card não se move', async () => {
+  it('com Spread, o texto é "final / comissão (Spread de P%)", sobre o líquido; faltando a PJus, o card não se move', async () => {
     const f = passosFalsos({ tagsDepois: ['Cotado BTG'] })
     const r = await registrarEnvioAoFundo({ ...base, fundo: 'BTG', ato: COTADO_BTG, cotacao: SPREAD, passos: f.passos })
     expect(f.chamadas).toEqual(['anotar', 'etiquetar'])
     expect(f.cotacoesEnviadas).toEqual([SPREAD])
     expect(r).toEqual({
       tags: ['Cotado BTG'],
-      cotacao: 'R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)',
+      cotacao: 'R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)',
       movido: false,
       faltamFundos: true,
     })
@@ -104,6 +108,30 @@ describe('registrarEnvioAoFundo — "Cotado BTG" com a cotação', () => {
         ...base, fundo: 'BTG', ato: COTADO_BTG, cotacao: { propostaCentavos: 100, comissao: { modalidade: 'spread' } }, passos: f.passos,
       }),
     ).rejects.toThrow(/informe o percentual. Nada foi enviado ao Kommo/)
+    expect(f.chamadas).toEqual([])
+  })
+
+  it('a tela nova não manda spread SEM o valor líquido validado (a aba de 05/10/2026 o manda, e o servidor ainda o aceita)', async () => {
+    const f = passosFalsos({ tagsDepois: ['Cotado BTG'] })
+    await expect(
+      registrarEnvioAoFundo({
+        ...base, fundo: 'BTG', ato: COTADO_BTG,
+        cotacao: { propostaCentavos: 85_000_000, comissao: { modalidade: 'spread', percentualCentesimos: 500 } },
+        passos: f.passos,
+      }),
+    ).rejects.toThrow(/informe o valor líquido validado. Nada foi enviado ao Kommo/)
+    expect(f.chamadas).toEqual([])
+  })
+
+  it('comissão que alcança a proposta: recusada antes de qualquer chamada', async () => {
+    const f = passosFalsos({ tagsDepois: ['Cotado BTG'] })
+    await expect(
+      registrarEnvioAoFundo({
+        ...base, fundo: 'BTG', ato: COTADO_BTG,
+        cotacao: { propostaCentavos: 4_000_000, comissao: { modalidade: 'spread', percentualCentesimos: 500, baseCentavos: 80_000_000 } },
+        passos: f.passos,
+      }),
+    ).rejects.toThrow(/a proposta final precisa ser maior que zero.*Nada foi enviado ao Kommo/)
     expect(f.chamadas).toEqual([])
   })
 

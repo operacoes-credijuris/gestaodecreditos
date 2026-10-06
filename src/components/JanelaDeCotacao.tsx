@@ -11,6 +11,7 @@ import {
   type Cotacao,
   type CotacaoLida,
   formatarPercentual,
+  formatarReais,
   formatarReaisSemPrefixo,
   lerPercentual,
   lerReais,
@@ -20,6 +21,7 @@ import {
   validarCotacao,
   valorDigitadoDaCotacao,
 } from '../../supabase/functions/_shared/cotacaoDoFundo.ts'
+import { type LiquidoDaNota, origemDoLiquido } from '../../supabase/functions/_shared/liquidoDaOportunidade.ts'
 
 /** Até R$ 1 trilhão: 15 dígitos de centavos. Além disso é tecla presa. */
 const MAX_DIGITOS = 15
@@ -152,7 +154,7 @@ const teclaEnter = (onEnter?: () => void) =>
 
 type Modalidade = Comissao['modalidade']
 
-type CampoDaCotacao = 'proposta' | 'comissao' | 'percentual'
+type CampoDaCotacao = 'proposta' | 'comissao' | 'percentual' | 'base'
 
 /**
  * O ESTADO DOS CAMPOS DA COTAÇÃO — valor da proposta, modalidade, valor da
@@ -170,10 +172,18 @@ type CampoDaCotacao = 'proposta' | 'comissao' | 'percentual'
  * percentual de volta no campo. O spread antigo (sem percentual) volta com o
  * percentual vazio — e obrigatório.
  *
+ * A BASE DO SPREAD (06/10/2026) é o VALOR LÍQUIDO VALIDADO, que vem da nota de
+ * oportunidade do card (`liquido`, de `liquidoValidadoDasNotas`): pré-preenchido
+ * com o achado, editável, e obrigatório — sem nota, o campo começa vazio. O
+ * texto do campo no Kommo não diz a base, então ao recotar ela volta da nota, e
+ * não da cotação: é o mesmo valor que a pessoa conferiu da outra vez, salvo se
+ * a casa revalidou o crédito (e aí vale o novo).
+ *
  * A COTAÇÃO SÓ SAI PRONTA DEPOIS DA MESMA PORTA DO SERVIDOR (`validarCotacao`,
- * exigindo o percentual no spread): a tela não monta o que a função recusaria.
+ * exigindo o percentual e a base no spread): a tela não monta o que a função
+ * recusaria — nem a comissão que alcance a proposta.
  */
-export function useCotacaoEmEdicao(atual: CotacaoLida | null) {
+export function useCotacaoEmEdicao(atual: CotacaoLida | null, liquido: LiquidoDaNota | null = null) {
   const c0 = atual?.comissao ?? null
   const inicial = {
     proposta: valorDigitadoDaCotacao(atual),
@@ -183,23 +193,26 @@ export function useCotacaoEmEdicao(atual: CotacaoLida | null) {
       c0?.modalidade === 'spread' && c0.percentualCentesimos !== undefined
         ? formatarPercentual(c0.percentualCentesimos)
         : '',
+    base: liquido?.centavos ?? null,
   }
   const [proposta, setProposta] = useState<number | null>(inicial.proposta)
   const [modalidade, setModalidade] = useState<Modalidade>(inicial.modalidade)
   const [comissao, setComissao] = useState<number | null>(inicial.comissao)
   const [percentual, setPercentual] = useState<string>(inicial.percentual)
+  const [base, setBase] = useState<number | null>(inicial.base)
   const [colagem, setColagem] = useState<{ campo: CampoDaCotacao; texto: string; erro?: string } | null>(null)
 
   const sujo =
     proposta !== inicial.proposta ||
     modalidade !== inicial.modalidade ||
     (modalidade === 'limitada' && comissao !== inicial.comissao) ||
-    (modalidade === 'spread' && percentual !== inicial.percentual)
+    (modalidade === 'spread' && (percentual !== inicial.percentual || base !== inicial.base))
 
   const pct = lerPercentual(percentual)
   const faltaProposta = !proposta
   const faltaComissao = modalidade === 'limitada' && !comissao
   const faltaPercentual = modalidade === 'spread' && !pct.ok && pct.motivo === 'vazio'
+  const faltaBase = modalidade === 'spread' && !base
   /** O percentual digitado e inválido (fora de 0–100, casas a mais), com o motivo. */
   const erroDoPercentual =
     modalidade === 'spread' && !pct.ok && pct.motivo !== 'vazio' ? { motivo: pct.motivo, erro: pct.erro } : null
@@ -208,16 +221,20 @@ export function useCotacaoEmEdicao(atual: CotacaoLida | null) {
   let cotacao: Cotacao | null = null
   /** O que a porta do servidor recusou com tudo preenchido (valor pequeno demais para o percentual). */
   let erroDaConta: string | null = null
-  if (!faltaProposta && !faltaComissao && !faltaPercentual && !erroDoPercentual) {
+  if (!faltaProposta && !faltaComissao && !faltaPercentual && !faltaBase && !erroDoPercentual) {
     const v = validarCotacao(
       {
         propostaCentavos: proposta,
         comissao:
           modalidade === 'spread'
-            ? { modalidade: 'spread', percentualCentesimos: pct.ok ? pct.centesimos : undefined }
+            ? {
+                modalidade: 'spread',
+                percentualCentesimos: pct.ok ? pct.centesimos : undefined,
+                baseCentavos: base,
+              }
             : { modalidade: 'limitada', centavos: comissao },
       },
-      { exigirPercentualNoSpread: true },
+      { exigirPercentualNoSpread: true, exigirBaseNoSpread: true },
     )
     if (v.ok) cotacao = v.cotacao
     else erroDaConta = v.erro
@@ -236,12 +253,16 @@ export function useCotacaoEmEdicao(atual: CotacaoLida | null) {
     setComissao,
     percentual,
     setPercentual,
+    base,
+    setBase,
+    liquido,
     colagem,
     setColagem,
     sujo,
     faltaProposta,
     faltaComissao,
     faltaPercentual,
+    faltaBase,
     erroDoPercentual,
     erroDaConta,
     cotacao,
@@ -271,9 +292,30 @@ function TextoQuebrandoNaBarra({ texto }: { texto: string }) {
 }
 
 /**
+ * UM TEXTO QUE PODE QUEBRAR, MENOS NOS VALORES: "R$ 800.000,00" e "5%" ficam
+ * inteiros, e a linha quebra nos espaços entre as palavras.
+ */
+function SemPartirValores({ texto }: { texto: string }) {
+  return (
+    <>
+      {texto.split(/(R\$ [\d.]+,\d{2}|\d+(?:,\d+)?%)/).map((p, i) =>
+        i % 2 === 1 ? (
+          <span key={i} className="whitespace-nowrap">
+            {p}
+          </span>
+        ) : (
+          p
+        ),
+      )}
+    </>
+  )
+}
+
+/**
  * OS CAMPOS DA COTAÇÃO: o valor da proposta, a comissão (Limitada, em R$, ou
- * Spread, em %) e, embaixo, o texto exato que vai para o campo do fundo no
- * Kommo — no spread, com a conta à vista (a comissão e a proposta final).
+ * Spread, em %, sobre o valor líquido validado) e, embaixo, o texto exato que
+ * vai para o campo do fundo no Kommo — no spread, com a conta à vista (a
+ * comissão, sobre qual líquido, e a proposta final).
  *
  * `tentou` acende os avisos de obrigatório — depois do primeiro envio, e não
  * enquanto a pessoa ainda está preenchendo. `desligado` trava tudo enquanto a
@@ -302,11 +344,15 @@ export function CamposDaCotacao({
     setComissao,
     percentual,
     setPercentual,
+    base,
+    setBase,
+    liquido,
     colagem,
     setColagem,
     faltaProposta,
     faltaComissao,
     faltaPercentual,
+    faltaBase,
     erroDoPercentual,
     erroDaConta,
     cotacao,
@@ -325,8 +371,30 @@ export function CamposDaCotacao({
   const avisoDoPercentual =
     avisoDeColagem('percentual') ??
     (erroDoPercentual && (tentou || erroDoPercentual.motivo === 'teto') ? erroDoPercentual.erro : null) ??
-    (tentou && faltaPercentual ? 'Com a comissão em spread, informe o percentual.' : null) ??
-    (tentou ? erroDaConta : null)
+    (tentou && faltaPercentual ? 'Com a comissão em spread, informe o percentual.' : null)
+
+  // A BASE DO SPREAD: de onde veio o valor que está no campo. Da nota, com a
+  // data; trocado à mão, com o que a nota diz ao lado; sem nota, o aviso.
+  const origemDaBase = !liquido ? (
+    <span className="font-semibold text-aviso">
+      Não achei o valor líquido validado na nota de oportunidade do card — digite.
+    </span>
+  ) : base === liquido.centavos ? (
+    `${origemDoLiquido(liquido).replace(/^d/, 'D')}.`
+  ) : (
+    <>
+      Alterado. A nota de oportunidade{liquido.data ? ` de ${liquido.data}` : ''} diz{' '}
+      <span className="whitespace-nowrap tabular-nums">{formatarReais(liquido.centavos)}</span>.
+    </>
+  )
+  const avisoDaBase =
+    avisoDeColagem('base') ??
+    // Sem a nota, o erro repete o aviso (o porquê do campo vazio), agora em vermelho.
+    (tentou && faltaBase
+      ? liquido
+        ? 'Com a comissão em spread, informe o valor líquido validado.'
+        : 'Não achei o valor líquido validado na nota de oportunidade do card — digite.'
+      : null)
 
   const resumo = cotacao ? resumoDoSpread(cotacao) : null
 
@@ -393,21 +461,40 @@ export function CamposDaCotacao({
             />
           </Field>
         ) : (
-          <Field
-            hint="O percentual da comissão sobre o valor da proposta. A Credijuris o desconta; o que sobra é a proposta final."
-            error={avisoDoPercentual ?? undefined}
-          >
-            <CampoPercentual
-              rotulo="Percentual do spread"
-              valor={percentual}
-              onMudar={(t) => {
-                setColagem(null)
-                setPercentual(t)
-              }}
-              onColagemRecusada={(texto, erro) => setColagem({ campo: 'percentual', texto, erro })}
-              onEnter={onEnter}
-            />
-          </Field>
+          // O PERCENTUAL E A BASE, lado a lado no computador (o percentual
+          // estreito, a base com o espaço do valor) e um embaixo do outro no
+          // celular. A explicação da conta vem uma vez só, embaixo dos dois.
+          <div className="space-y-s2 pt-s2">
+            <div className="grid gap-s4 sm:grid-cols-[136px_minmax(0,1fr)]">
+              <Field label="Percentual" required error={avisoDoPercentual ?? undefined}>
+                <CampoPercentual
+                  rotulo="Percentual do spread"
+                  valor={percentual}
+                  onMudar={(t) => {
+                    setColagem(null)
+                    setPercentual(t)
+                  }}
+                  onColagemRecusada={(texto, erro) => setColagem({ campo: 'percentual', texto, erro })}
+                  onEnter={onEnter}
+                />
+              </Field>
+              <Field label="Valor líquido validado" required hint={origemDaBase} error={avisoDaBase ?? undefined}>
+                <CampoReais
+                  valor={base}
+                  onMudar={(c) => {
+                    setColagem(null)
+                    setBase(c)
+                  }}
+                  onColagemRecusada={(texto) => setColagem({ campo: 'base', texto })}
+                  onEnter={onEnter}
+                />
+              </Field>
+            </div>
+            <p className="text-xs text-texto-3">
+              A comissão é o percentual sobre o valor líquido validado. A Credijuris a desconta do valor da proposta;
+              o que sobra é a proposta final.
+            </p>
+          </div>
         )}
       </div>
 
@@ -417,12 +504,28 @@ export function CamposDaCotacao({
         {resumo && (
           // NUMA LINHA com o "·" no computador; no celular, uma em cima da
           // outra — o "·" pendurado no fim da linha não separa nada.
+          // A COMISSÃO PODE QUEBRAR (com a base, ela não cabe numa linha do
+          // celular), mas nunca no meio de um valor nem do percentual.
           <p className="text-sm tabular-nums text-texto-2">
-            <span className="block whitespace-nowrap sm:inline">{resumo.comissao}</span>
+            <span className="block sm:inline">
+              <SemPartirValores texto={resumo.comissao} />
+            </span>
             <span className="hidden sm:inline" aria-hidden>
               {' · '}
             </span>
             <span className="block whitespace-nowrap sm:inline">{resumo.final}</span>
+          </p>
+        )}
+        {/* A CONTA QUE NÃO FECHA (a comissão alcança a proposta), com tudo
+            preenchido: dita aqui, onde a conta apareceria. Em cinza enquanto a
+            pessoa ainda digita — o valor entra pela direita, e R$ 8,50 é o
+            começo de R$ 850.000,00 —, e em vermelho depois do Enviar. */}
+        {!cotacao && erroDaConta && (
+          <p
+            role={tentou ? 'alert' : undefined}
+            className={tentou ? 'text-sm font-semibold text-perigo' : 'text-sm text-texto-2'}
+          >
+            <SemPartirValores texto={erroDaConta} />
           </p>
         )}
         <div className="flex flex-wrap items-baseline justify-between gap-x-s4 gap-y-s1">
@@ -454,6 +557,7 @@ export function JanelaDeCotacao({
   fundo,
   etiqueta,
   atual,
+  liquido = null,
   enviando,
   onEnviar,
   onFechar,
@@ -463,13 +567,15 @@ export function JanelaDeCotacao({
   etiqueta: string
   /** O que o campo do fundo já tem no card, lido de volta (ou null). */
   atual: CotacaoLida | null
+  /** O valor líquido validado da nota de oportunidade do card — a base do spread (ou null). */
+  liquido?: LiquidoDaNota | null
   enviando: boolean
   /** Grava; LANÇA com a mensagem quando falha — a janela a mostra e fica aberta. */
   onEnviar: (c: Cotacao) => Promise<void>
   onFechar: () => void
 }) {
   const formId = useId()
-  const edicao = useCotacaoEmEdicao(atual)
+  const edicao = useCotacaoEmEdicao(atual, liquido)
   const [tentou, setTentou] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const { cotacao } = edicao

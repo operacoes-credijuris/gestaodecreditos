@@ -87,10 +87,10 @@ export async function registrarEnvioAoFundo({
   // pedem: o que tiver sido digitado na janela fica de fora.
   let comCotacao: Cotacao | null = null
   if (ato.pedeCotacao) {
-    // A TELA NOVA SEMPRE MANDA O PERCENTUAL NO SPREAD: sem ele, não sai daqui
-    // (o servidor ainda aceita o spread sem percentual, por causa das abas abertas
-    // antes de 05/10/2026 — esta, não).
-    const v = validarCotacao(cotacao, { exigirPercentualNoSpread: true })
+    // A TELA NOVA SEMPRE MANDA O PERCENTUAL E A BASE (o valor líquido validado,
+    // 06/10/2026) NO SPREAD: sem eles, não sai daqui (o servidor ainda aceita o
+    // spread sem eles, por causa das abas abertas antes do deploy — esta, não).
+    const v = validarCotacao(cotacao, { exigirPercentualNoSpread: true, exigirBaseNoSpread: true })
     if (!v.ok) throw new Error(`${v.erro} Nada foi enviado ao Kommo.`)
     comCotacao = v.cotacao
   }

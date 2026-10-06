@@ -146,7 +146,7 @@ describe('valoresDoCard — o que a plataforma sabe do crédito', () => {
     expect(v.data_hoje).toBe('05/10/2026')
   })
 
-  it('proposta em SPREAD com percentual: a final como valor, a comissão com o percentual e sobre quanto', () => {
+  it('proposta em SPREAD com percentual, sem nota de oportunidade: "sobre o valor líquido validado", sem valor (e nunca "sobre R$ final + comissão")', () => {
     const card: CardDaJustificativa = {
       pipeline_id: FUNIL_PRECATORIO_EXTERNO,
       nome: 'Credijuris - ACME COMERCIO LTDA - 0001234-56.2020.8.26.0053 - principal - 30%',
@@ -163,14 +163,68 @@ describe('valoresDoCard — o que a plataforma sabe do crédito', () => {
     const v = valoresDoCard(card, { agora: new Date(AGORA) })
     expect(v.fundo_escolhido).toBe('BTG')
     expect(v.valor_proposta).toBe('R$ 807.500,00')
-    expect(v.comissao).toBe('R$ 42.500,00 (spread de 5% sobre R$ 850.000,00)')
+    expect(v.comissao).toBe('R$ 42.500,00 (spread de 5% sobre o valor líquido validado)')
     expect(v.cotacoes_recebidas).toBe(
       [
         '  - PJus: R$ 820.000,00 / R$ 30.000,00',
-        '  - BTG: proposta final R$ 807.500,00, comissão R$ 42.500,00 (spread de 5% sobre R$ 850.000,00)',
+        '  - BTG: proposta final R$ 807.500,00, comissão R$ 42.500,00 (spread de 5% sobre o valor líquido validado)',
         '  - PX Ativos: R$ 800.000,00 / Spread',
       ].join('\n'),
     )
+  })
+
+  it('SPREAD SOBRE O LÍQUIDO (06/10/2026): com a nota de oportunidade, a comissão diz o líquido, e o {{card}} o traz', () => {
+    const oportunidade = notaDeGente(
+      'Oportunidade Credijuris — Precatório · TJSP/SP\nCedente: ACME\nValor líquido validado: R$ 800.000,00',
+      '2026-10-03T14:00:00Z',
+    )
+    const card: CardDaJustificativa = {
+      pipeline_id: FUNIL_PRECATORIO_EXTERNO,
+      nome: 'Credijuris - ACME COMERCIO LTDA - 0001234-56.2020.8.26.0053',
+      notas: [oportunidade, notaDeGente('Seguir com a proposta do BTG.', '2026-10-06T10:00:00Z')],
+      raw: {
+        custom_fields_values: [
+          { field_id: 1, field_name: 'BTG', values: [{ value: 'R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)' }] },
+          { field_id: 2, field_name: 'PX Ativos', values: [{ value: '850 mil / spread de 4%' }] },
+        ],
+      },
+    }
+    const v = valoresDoCard(card, { agora: new Date(AGORA) })
+    expect(v.valor_proposta).toBe('R$ 810.000,00')
+    expect(v.comissao).toBe('R$ 40.000,00 (spread de 5% sobre o valor líquido validado de R$ 800.000,00)')
+    expect(v.cotacoes_recebidas).toBe(
+      [
+        '  - BTG: proposta final R$ 810.000,00, comissão R$ 40.000,00 (spread de 5% sobre o valor líquido validado de R$ 800.000,00)',
+        '  - PX Ativos: 850 mil / spread de 4%',
+      ].join('\n'),
+    )
+    expect(v.comissao).not.toContain('850.000')
+    expect(v.valor_liquido_validado).toBe('R$ 800.000,00 (da nota de oportunidade de 03/10/2026)')
+    const bloco = montarPrompt('{{card}}', v).texto
+    expect(bloco).toContain('- Valor líquido validado: R$ 800.000,00 (da nota de oportunidade de 03/10/2026)')
+    expect(bloco.indexOf('Valor do crédito negociado')).toBeLessThan(bloco.indexOf('Valor líquido validado'))
+  })
+
+  it('a conta que não fecha com o líquido da nota (base trocada na janela): o valor não é dito', () => {
+    const card: CardDaJustificativa = {
+      pipeline_id: FUNIL_PRECATORIO_EXTERNO,
+      nome: 'Credijuris - ACME COMERCIO LTDA - 0001234-56.2020.8.26.0053',
+      notas: [
+        notaDeGente('Oportunidade Credijuris\nValor líquido validado: R$ 700.000,00', '2026-10-03T14:00:00Z'),
+        notaDeGente('Seguir com a proposta do BTG.', '2026-10-06T10:00:00Z'),
+      ],
+      raw: { custom_fields_values: [{ field_id: 1, field_name: 'BTG', values: [{ value: 'R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)' }] }] },
+    }
+    const v = valoresDoCard(card, { agora: new Date(AGORA) })
+    expect(v.comissao).toBe('R$ 40.000,00 (spread de 5% sobre o valor líquido validado)')
+    // O líquido achado continua no {{card}}: é dado do crédito.
+    expect(v.valor_liquido_validado).toBe('R$ 700.000,00 (da nota de oportunidade de 03/10/2026)')
+  })
+
+  it('sem nota de oportunidade, o {{card}} não tem a linha do líquido (nem "(não informado)")', () => {
+    const v = valoresDoCard({ pipeline_id: FUNIL_PRECATORIO_EXTERNO, nome: 'X', notas: [] }, { agora: new Date(AGORA) })
+    expect(v.valor_liquido_validado).toBe('')
+    expect(montarPrompt('{{card}}', v).texto).not.toContain('Valor líquido validado')
   })
 
   it('proposta em spread ANTIGO (sem percentual) e limitada: como antes', () => {
@@ -186,7 +240,7 @@ describe('valoresDoCard — o que a plataforma sabe do crédito', () => {
     expect(antigo.cotacoes_recebidas).toBe('  - BTG: R$ 850.000,00 / Spread')
     const comPct = valoresDoCard(base('850 mil / spread de 5,5%'), { agora: new Date(AGORA) })
     expect(comPct.valor_proposta).toBe('R$ 850.000,00')
-    expect(comPct.comissao).toBe('Spread de 5,5% sobre a proposta (a comissão da casa sai dela)')
+    expect(comPct.comissao).toBe('Spread de 5,5% sobre o valor líquido validado (a comissão da casa sai da proposta)')
   })
 
   it('RPV sem proposta de fundo: a ficha e o prazo da análise; a proposta sai "(não informado)"', () => {

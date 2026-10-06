@@ -16,12 +16,14 @@
 
 import { lerCadastroDoCard, lerTituloCard, valorDoCampo } from './cadastroDoCard.ts'
 import {
+  calcularSpread,
   cotacoesDoCard,
   formatarPercentual,
   formatarReais,
   type CotacaoLida,
   type ValorDeCampo,
 } from './cotacaoDoFundo.ts'
+import { type LiquidoDaNota, liquidoValidadoDasNotas, origemDoLiquido } from './liquidoDaOportunidade.ts'
 import { FUNDOS_DA_PRECIFICACAO, mesmaEtiqueta } from './etiquetasDoFundo.ts'
 import { lerNumeroCnj } from './tribunais.ts'
 import { FUNIL_PRECATORIO_EXTERNO, FUNIL_PRECATORIO_INTERNO } from './trilhasDoPrecatorio.ts'
@@ -92,7 +94,7 @@ export const VARIAVEIS_DA_JUSTIFICATIVA: readonly { nome: string; vale: string; 
   { nome: 'teto_rpv', vale: 'O teto de RPV do ente devedor.', fonte: 'Só no RPV: o cache de tetos da plataforma (sem pesquisar nada novo).' },
   { nome: 'fundo_escolhido', vale: 'O fundo cuja proposta a casa escolheu.', fonte: 'A anotação "Seguir com a proposta do(a) ‹fundo›." do Escolher proposta.' },
   { nome: 'valor_proposta', vale: 'O valor da proposta do fundo escolhido (no spread, a proposta final, já sem a comissão).', fonte: 'O campo do fundo na aba "Cotações/propostas" do card.' },
-  { nome: 'comissao', vale: 'A comissão da proposta escolhida: em R$ (limitada) ou em spread (o valor, o percentual e sobre quanto).', fonte: 'O mesmo campo do fundo, depois da barra.' },
+  { nome: 'comissao', vale: 'A comissão da proposta escolhida: em R$ (limitada) ou em spread (o valor e o percentual, sobre o valor líquido validado).', fonte: 'O mesmo campo do fundo, depois da barra; o valor líquido validado, da nota de oportunidade do card.' },
   { nome: 'cotacoes_recebidas', vale: 'Todas as cotações dos fundos no card, uma por linha.', fonte: 'Os campos da aba "Cotações/propostas" e as etiquetas dos fundos.' },
   { nome: 'data_hoje', vale: 'A data de hoje (dd/mm/aaaa).', fonte: 'O relógio do servidor, no horário de Brasília.' },
   // O CARD INTEIRO (pedido do dono, 05/10/2026): o prompt manda "ler o card
@@ -222,6 +224,7 @@ const ROTULOS_DO_CARD: readonly [string, string][] = [
   ['valor_face', 'Valor de face'],
   ['valor_atualizado', 'Valor atualizado'],
   ['valor_cedido', 'Valor do crédito negociado'],
+  ['valor_liquido_validado', 'Valor líquido validado'],
   ['prazo_estimado', 'Prazo estimado de pagamento'],
   ['teto_rpv', 'Teto de RPV do ente (só RPV)'],
   ['fundo_escolhido', 'Fundo da proposta escolhida'],
@@ -230,13 +233,21 @@ const ROTULOS_DO_CARD: readonly [string, string][] = [
   ['data_hoje', 'Data de hoje'],
 ]
 
+/** As linhas de {{card}} que só entram com valor. */
+const OPCIONAIS_DO_CARD: ReadonlySet<string> = new Set(['valor_liquido_validado'])
+
 /**
  * {{card}}: todos os dados do crédito, um por linha, com as cotações e — por
  * último — as notas do card, das mais antigas para as mais novas.
  */
 export function blocoDoCard(valores: Readonly<Record<string, string | null | undefined>>): string {
   const v = (nome: string) => String(valores[nome] ?? '').trim() || NAO_INFORMADO
-  const linhas = ROTULOS_DO_CARD.map(([nome, rotulo]) => `- ${rotulo}: ${v(nome)}`)
+  const linhas = ROTULOS_DO_CARD
+    // O LÍQUIDO VALIDADO SÓ QUANDO ACHADO na nota de oportunidade (06/10/2026):
+    // é a base do spread, e "(não informado)" ao lado do valor cedido sugeriria
+    // à IA um dado faltando onde a ficha já o diz.
+    .filter(([nome]) => !OPCIONAIS_DO_CARD.has(nome) || String(valores[nome] ?? '').trim())
+    .map(([nome, rotulo]) => `- ${rotulo}: ${v(nome)}`)
   // As notas guardam o recuo dos itens: só as pontas em branco saem.
   const notas = String(valores.notas ?? '').replace(/^\s*\n|\s+$/g, '')
   return [
@@ -450,23 +461,35 @@ const reais = (v: number | null | undefined): string =>
 /**
  * A COMISSÃO, por extenso — o que a cotação diz:
  *   limitada:      "R$ 40.000,00 (limitada)"
- *   spread novo:   "R$ 42.500,00 (spread de 5% sobre R$ 850.000,00)"
+ *   spread novo:   "R$ 40.000,00 (spread de 5% sobre o valor líquido validado de R$ 800.000,00)"
  *   spread antigo: "Spread (a comissão da casa sai da diferença sobre a proposta)"
- * No spread novo, "sobre" é o valor que a pessoa digitou (a final + a
- * comissão): sem ele, a IA tomaria os 5% como sobre a final.
+ *
+ * O SPREAD É SOBRE O VALOR LÍQUIDO VALIDADO (06/10/2026), e não mais sobre o
+ * valor da proposta: "sobre R$ {final + comissão}" estaria errado. O líquido
+ * não está no campo da cotação; ele vem da nota de oportunidade (`liquido`), e
+ * o valor só é dito quando a conta fecha com ele — o percentual sobre o líquido
+ * dá a comissão gravada. Não fechando (a pessoa trocou a base na janela, ou a
+ * nota foi revalidada depois), diz-se só "sobre o valor líquido validado": um
+ * número que não reproduz a comissão confundiria a IA.
  */
-function textoDaComissao(c: CotacaoLida | null): string {
+function textoDaComissao(c: CotacaoLida | null, liquido: LiquidoDaNota | null = null): string {
   const k = c?.comissao
   if (!k) return ''
   if (k.modalidade === 'limitada') return `${formatarReais(k.centavos)} (limitada)`
   const pct = k.percentualCentesimos !== undefined ? `${formatarPercentual(k.percentualCentesimos)}%` : null
   if (k.centavos !== undefined && c.proposta !== null) {
-    const sobre = formatarReais(c.proposta + k.centavos)
+    const fecha =
+      liquido !== null &&
+      k.percentualCentesimos !== undefined &&
+      calcularSpread(c.proposta + k.centavos, k.percentualCentesimos, liquido.centavos).comissaoCentavos === k.centavos
+    const sobre = fecha ? `o valor líquido validado de ${formatarReais(liquido.centavos)}` : 'o valor líquido validado'
     return `${formatarReais(k.centavos)} (spread${pct ? ` de ${pct}` : ''} sobre ${sobre})`
   }
-  return pct
-    ? `Spread de ${pct} sobre a proposta (a comissão da casa sai dela)`
-    : 'Spread (a comissão da casa sai da diferença sobre a proposta)'
+  if (pct) {
+    const sobre = liquido ? `o valor líquido validado de ${formatarReais(liquido.centavos)}` : 'o valor líquido validado'
+    return `Spread de ${pct} sobre ${sobre} (a comissão da casa sai da proposta)`
+  }
+  return 'Spread (a comissão da casa sai da diferença sobre a proposta)'
 }
 
 /**
@@ -474,10 +497,10 @@ function textoDaComissao(c: CotacaoLida | null): string {
  * spread do formato novo — a conta por extenso, para a IA não ler a comissão
  * como limitada nem os 5% como sobre a final.
  */
-function linhaDaCotacao(fundo: string, c: CotacaoLida): string {
+function linhaDaCotacao(fundo: string, c: CotacaoLida, liquido: LiquidoDaNota | null): string {
   const k = c.comissao
   if (k?.modalidade === 'spread' && k.centavos !== undefined && c.proposta !== null) {
-    return `  - ${fundo}: proposta final ${formatarReais(c.proposta)}, comissão ${textoDaComissao(c)}`
+    return `  - ${fundo}: proposta final ${formatarReais(c.proposta)}, comissão ${textoDaComissao(c, liquido)}`
   }
   return `  - ${fundo}: ${c.texto}`
 }
@@ -557,6 +580,9 @@ export function valoresDoCard(card: CardDaJustificativa, extras: ExtrasDaJustifi
     .filter(Boolean)
     .join(', ')
 
+  // O VALOR LÍQUIDO VALIDADO, da nota de oportunidade: a base do spread.
+  const liquido = liquidoValidadoDasNotas(notas)
+
   // A PROPOSTA: o fundo da nota do Escolher proposta, e a cotação DELE.
   const cotacoes = cotacoesDoCard(card.raw?.custom_fields_values ?? [])
   const fundo = fundoEscolhido(notas)
@@ -571,7 +597,7 @@ export function valoresDoCard(card: CardDaJustificativa, extras: ExtrasDaJustifi
   for (const f of FUNDOS_DA_PRECIFICACAO) {
     const c = cotacoes[f]
     if (c) {
-      linhas.push(linhaDaCotacao(f, c))
+      linhas.push(linhaDaCotacao(f, c, liquido))
       continue
     }
     if (tags.some((t) => mesmaEtiqueta(t, `Reprovado ${f}`))) linhas.push(`  - ${f}: reprovou o crédito`)
@@ -591,7 +617,9 @@ export function valoresDoCard(card: CardDaJustificativa, extras: ExtrasDaJustifi
     teto_rpv: Number(card.pipeline_id) === FUNIL_RPV_JUSTIFICATIVA ? (extras.tetoRpv ?? '') : '',
     fundo_escolhido: fundo,
     valor_proposta: valorProposta,
-    comissao: textoDaComissao(cotacaoDoFundo),
+    comissao: textoDaComissao(cotacaoDoFundo, liquido),
+    // SÓ NO {{card}}, e só quando achado (ver `blocoDoCard`).
+    valor_liquido_validado: liquido ? `${formatarReais(liquido.centavos)} (${origemDoLiquido(liquido)})` : '',
     cotacoes_recebidas: linhas.length > 0 ? linhas.join('\n') : '',
     data_hoje: dataDeHoje(extras.agora),
     titulo: String(card.nome ?? '').trim(),

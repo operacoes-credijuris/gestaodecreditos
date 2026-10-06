@@ -604,3 +604,137 @@ describe('cotacoesDoCard (o que a janela de escolha mostra)', () => {
     expect(depois.find((v) => v.field_id === 9)?.values?.[0]?.value).toBe('x')
   })
 })
+
+// ------------------------------------------------------------------ o spread sobre o líquido (06/10/2026)
+//
+// "O spread tem que ser sobre o valor líquido validado": comissão = líquido ×
+// percentual, e final = proposta − comissão. O texto do campo é o mesmo.
+
+const sobreLiquido = (proposta: number, pct: number, base: number): Cotacao => ({
+  propostaCentavos: proposta,
+  comissao: { modalidade: 'spread', percentualCentesimos: pct, baseCentavos: base },
+})
+
+describe('o spread sobre o valor líquido validado', () => {
+  it('o exemplo do dono, EXATO: proposta 850 mil, líquido 800 mil, 5%', () => {
+    expect(calcularSpread(85_000_000, 500, 80_000_000)).toEqual({ comissaoCentavos: 4_000_000, finalCentavos: 81_000_000 })
+    const c = sobreLiquido(85_000_000, 500, 80_000_000)
+    expect(textoDaCotacao(c)).toBe('R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)')
+    expect(resumoDoSpread(c)).toEqual({
+      comissao: 'Comissão (5% sobre o líquido de R$ 800.000,00): R$ 40.000,00',
+      final: 'Proposta final: R$ 810.000,00',
+    })
+    const r = resumoDoSpread(c)!
+    expect(`${r.comissao} · ${r.final}`).toBe(
+      'Comissão (5% sobre o líquido de R$ 800.000,00): R$ 40.000,00 · Proposta final: R$ 810.000,00',
+    )
+  })
+
+  it.each([
+    // proposta, líquido, %, comissão, texto
+    [100_000_000, 12_345, 1_225, 1_512, 'R$ 999.984,88 / R$ 15,12 (Spread de 12,25%)'], // 15,122625 → 15,12
+    [100_000, 30, 500, 2, 'R$ 999,98 / R$ 0,02 (Spread de 5%)'], //                         0,015 → 0,02 (meio para cima)
+    [100_000, 50, 500, 3, 'R$ 999,97 / R$ 0,03 (Spread de 5%)'], //                         0,025 → 0,03 (não para o par)
+    [50_000_000, 123_456_789, 333, 4_111_111, 'R$ 458.888,89 / R$ 41.111,11 (Spread de 3,33%)'], // líquido > proposta
+  ])('proposta %i, líquido %i, %i centésimos → comissão %i', (proposta, base, pct, comissao, texto) => {
+    const r = calcularSpread(proposta, pct, base)
+    expect(r.comissaoCentavos).toBe(comissao)
+    expect(r.finalCentavos).toBe(proposta - comissao)
+    expect(BigInt(r.comissaoCentavos)).toBe((BigInt(base) * BigInt(pct) + 5_000n) / 10_000n)
+    const v = validarCotacao(sobreLiquido(proposta, pct, base), { exigirPercentualNoSpread: true, exigirBaseNoSpread: true })
+    expect(v.ok).toBe(true)
+    if (v.ok) expect(textoDaCotacao(v.cotacao)).toBe(texto)
+  })
+
+  it('perto do teto, a base também não estoura o inteiro seguro', () => {
+    const base = 100_000_000_000_000 - 1
+    const r = calcularSpread(100_000_000_000_000, 9_999, base)
+    expect(BigInt(r.comissaoCentavos)).toBe((BigInt(base) * 9_999n + 5_000n) / 10_000n)
+  })
+
+  it('o servidor aceita a base, confere e recalcula (texto pronto e comissão no corpo são ignorados)', () => {
+    const r = validarCotacao({
+      propostaCentavos: 85_000_000,
+      texto: 'R$ 1,00 / R$ 0,01 (Spread de 5%)',
+      comissao: { modalidade: 'spread', percentualCentesimos: 500, baseCentavos: 80_000_000, centavos: 1 },
+    })
+    expect(r).toEqual({ ok: true, cotacao: sobreLiquido(85_000_000, 500, 80_000_000) })
+    if (r.ok) expect(textoDaCotacao(r.cotacao)).toBe('R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)')
+  })
+
+  it('COMISSÃO ≥ PROPOSTA: recusada, com os dois valores na mensagem', () => {
+    // 50% de 800 mil = 400 mil ≥ proposta de 400 mil → final zero.
+    const igual = validarCotacao(sobreLiquido(40_000_000, 5_000, 80_000_000))
+    expect(igual.ok).toBe(false)
+    if (!igual.ok) {
+      expect(igual.erro).toBe(
+        'A comissão (R$ 400.000,00) não pode ser igual ou maior que o valor da proposta (R$ 400.000,00): ' +
+          'a proposta final precisa ser maior que zero. Confira o percentual e o valor líquido validado.',
+      )
+    }
+    expect(validarCotacao(sobreLiquido(30_000_000, 5_000, 80_000_000)).ok).toBe(false) // final negativa
+    expect(validarCotacao(sobreLiquido(40_000_001, 5_000, 80_000_000)).ok).toBe(true) // final de 1 centavo
+  })
+
+  it('comissão abaixo de um centavo: recusada', () => {
+    const r = validarCotacao(sobreLiquido(85_000_000, 500, 9))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.erro).toMatch(/menos de um centavo/)
+  })
+
+  it('base presente e inválida: recusada sempre (0, negativa, fração, texto, acima do teto)', () => {
+    for (const b of [0, -1, 1.5, '80000000', NaN, 100_000_000_000_001]) {
+      const r = validarCotacao({
+        propostaCentavos: 85_000_000,
+        comissao: { modalidade: 'spread', percentualCentesimos: 500, baseCentavos: b },
+      })
+      expect(r.ok, String(b)).toBe(false)
+      if (!r.ok) expect(r.erro).toMatch(/valor líquido validado/)
+    }
+  })
+
+  it('COMPATIBILIDADE: a tela de 05/10/2026 (percentual sem base) continua aceita, sobre o valor da proposta', () => {
+    for (const comissao of [
+      { modalidade: 'spread', percentualCentesimos: 500 },
+      { modalidade: 'spread', percentualCentesimos: 500, baseCentavos: null },
+    ]) {
+      const r = validarCotacao({ propostaCentavos: 85_000_000, comissao })
+      expect(r).toEqual({ ok: true, cotacao: spread(85_000_000, 500) })
+      if (r.ok) {
+        expect(textoDaCotacao(r.cotacao)).toBe('R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)')
+        expect(resumoDoSpread(r.cotacao)?.comissao).toBe('Comissão (5%): R$ 42.500,00')
+      }
+    }
+    // E a de antes dela (sem percentual) também: "R$ X / Spread".
+    const antiga = validarCotacao({ propostaCentavos: 85_000_000, comissao: { modalidade: 'spread' } })
+    expect(antiga.ok && textoDaCotacao(antiga.cotacao)).toBe('R$ 850.000,00 / Spread')
+  })
+
+  it('a tela nova exige a base (exigirBaseNoSpread)', () => {
+    const r = validarCotacao(spread(85_000_000, 500), { exigirPercentualNoSpread: true, exigirBaseNoSpread: true })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.erro).toBe('Com a comissão em spread, informe o valor líquido validado.')
+  })
+
+  it('a LIMITADA não muda, com ou sem base no corpo', () => {
+    const r = validarCotacao({
+      propostaCentavos: 85_000_000,
+      comissao: { modalidade: 'limitada', centavos: 4_000_000, baseCentavos: 80_000_000 },
+    })
+    expect(r).toEqual({ ok: true, cotacao: { propostaCentavos: 85_000_000, comissao: { modalidade: 'limitada', centavos: 4_000_000 } } })
+    if (r.ok) expect(textoDaCotacao(r.cotacao)).toBe('R$ 850.000,00 / R$ 40.000,00')
+  })
+
+  it('LEITURA DE VOLTA: o texto gravado se lê, e o valor digitado volta (final + comissão = proposta)', () => {
+    const c = sobreLiquido(85_000_000, 500, 80_000_000)
+    const lida = lerCotacao(textoDaCotacao(c))
+    expect(lida).toEqual({
+      texto: 'R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)',
+      proposta: 81_000_000,
+      comissao: { modalidade: 'spread', percentualCentesimos: 500, centavos: 4_000_000 },
+    })
+    expect(valorDigitadoDaCotacao(lida)).toBe(85_000_000)
+    // A base não está no texto: ao recotar, ela volta da nota de oportunidade.
+    expect(lida?.comissao).not.toHaveProperty('baseCentavos')
+  })
+})

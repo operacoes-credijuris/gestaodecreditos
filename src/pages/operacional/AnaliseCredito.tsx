@@ -220,6 +220,10 @@ import {
   NOME_DO_GRUPO_DAS_COTACOES,
   type ValorDeCampo,
 } from '../../../supabase/functions/_shared/cotacaoDoFundo.ts'
+import {
+  type LiquidoDaNota,
+  liquidoValidadoDasNotas,
+} from '../../../supabase/functions/_shared/liquidoDaOportunidade.ts'
 
 // ===== Análise automática do card (Judit -> due diligence -> planilha) =====
 // Lê os dados do próprio card (título + notas) e roda a sequência no motor.
@@ -1850,12 +1854,15 @@ function ChecksDosFundos({
 function JanelaDoEnvioAoFundo({
   fundo,
   atual,
+  liquido,
   onFechar,
   onConfirmar,
 }: {
   fundo: FundoDoEnvio
   /** O que o campo do fundo já tem no card (aba "Cotações/propostas"), lido de volta. */
   atual: CotacaoLida | null
+  /** O valor líquido validado da nota de oportunidade do card — a base do spread (ou null). */
+  liquido: LiquidoDaNota | null
   onFechar: () => void
   onConfirmar: (
     ato: AtoDoEnvio,
@@ -1881,7 +1888,7 @@ function JanelaDoEnvioAoFundo({
   // A COTAÇÃO, quando algum ato deste fundo a pede. O estado existe sempre (é
   // um hook), mas só aparece e só vale no fundo que a pede.
   const pedeCotacao = fundo.atos.some((a) => a.pedeCotacao)
-  const cotacao = useCotacaoEmEdicao(atual)
+  const cotacao = useCotacaoEmEdicao(atual, liquido)
   const [tentouCotar, setTentouCotar] = useState(false)
 
   // O PRINT COLADO chega como "image.png": ganha nome que diga de onde veio.
@@ -6053,6 +6060,8 @@ export default function AnaliseCredito() {
               envioAberto.fundo.fundo
             ] ?? null
           }
+          // A BASE DO SPREAD: o valor líquido validado da nota de oportunidade.
+          liquido={liquidoValidadoDasNotas(envioAberto.lead.notas)}
           onFechar={() => setEnvioAberto(null)}
           onConfirmar={async (ato, texto, arquivos, cotacao, onAndamento) => {
             await enviarAoFundo(envioAberto.lead, envioAberto.fundo, ato, texto, arquivos, cotacao, onAndamento)
@@ -6069,6 +6078,8 @@ export default function AnaliseCredito() {
           fundo={cotando.fundo}
           etiqueta={cotando.etiqueta}
           atual={cotacoesDoCard(cotando.lead.raw?.custom_fields_values)[cotando.fundo] ?? null}
+          // A BASE DO SPREAD: o valor líquido validado da nota de oportunidade.
+          liquido={liquidoValidadoDasNotas(cotando.lead.notas)}
           enviando={etiquetaEmVoo[cotando.lead.kommo_lead_id] !== undefined}
           onEnviar={(c) => enviarCotacao(cotando.lead, cotando.etiqueta, c)}
           onFechar={() => setCotando(null)}

@@ -15,6 +15,18 @@
 // CALCULA É ESTE MÓDULO (`calcularSpread`), na prévia da tela e no servidor: a
 // `kommo-etiquetar` recebe valor e percentual e escreve o texto ela mesma.
 //
+// A BASE DO SPREAD É O VALOR LÍQUIDO VALIDADO (correção do dono, 06/10/2026):
+// "o spread tem que ser sobre o valor líquido validado", e não sobre o valor da
+// proposta. A conta passou a ser
+//   comissão = líquido validado × percentual;  proposta final = proposta − comissão
+// — proposta de R$ 850.000,00, líquido de R$ 800.000,00, 5%: comissão de
+// R$ 40.000,00 e final de R$ 810.000,00, gravado "R$ 810.000,00 / R$ 40.000,00
+// (Spread de 5%)". O texto do campo é o mesmo; o que mudou é de onde sai a
+// comissão. O líquido vem da nota de oportunidade do card
+// (`liquidoDaOportunidade.ts`), e a pessoa o confere na janela. A tela de
+// 05/10/2026 (aberta antes do deploy) manda o spread SEM a base: ele continua
+// aceito e calculado sobre o valor da proposta, como era.
+//
 // O FORMATO ANTERIOR do spread, "R$ 850.000,00 / Spread" (sem percentual), é o
 // que ainda grava uma aba aberta antes da mudança, e continua lido: ali o valor
 // é o da proposta, e a comissão não tem número.
@@ -163,19 +175,26 @@ export function formatarPercentual(centesimos: number): string {
 
 /**
  * A CONTA DO SPREAD, em centavos inteiros:
- *   comissão = valor × percentual / 100, arredondada ao centavo (meio para cima);
- *   proposta final = valor − comissão.
+ *   comissão = BASE × percentual / 100, arredondada ao centavo (meio para cima);
+ *   proposta final = valor da proposta − comissão.
  *
- * SEM PONTO FLUTUANTE E SEM ESTOURO: valor × centésimos passaria de 2^53 perto
- * do teto (R$ 1 trilhão × 9.999), então o valor é partido em q·10.000 + r e a
+ * A BASE É O VALOR LÍQUIDO VALIDADO (06/10/2026). Sem ela, é o valor da
+ * proposta — a conta de 05/10/2026, que a tela antiga ainda pede.
+ *
+ * SEM PONTO FLUTUANTE E SEM ESTOURO: base × centésimos passaria de 2^53 perto
+ * do teto (R$ 1 trilhão × 9.999), então a base é partida em q·10.000 + r e a
  * conta é feita por partes — q·p é exato e só r·p (< 10^8) é arredondado.
+ *
+ * A FINAL PODE SAIR ZERO OU NEGATIVA (líquido maior que a proposta, percentual
+ * alto): quem recusa é `validarCotacao`, com a mensagem.
  */
 export function calcularSpread(
   propostaCentavos: number,
   percentualCentesimos: number,
+  baseCentavos: number = propostaCentavos,
 ): { comissaoCentavos: number; finalCentavos: number } {
-  const q = Math.floor(propostaCentavos / 10_000)
-  const r = propostaCentavos % 10_000
+  const q = Math.floor(baseCentavos / 10_000)
+  const r = baseCentavos % 10_000
   const comissaoCentavos = q * percentualCentesimos + Math.floor((r * percentualCentesimos + 5_000) / 10_000)
   return { comissaoCentavos, finalCentavos: propostaCentavos - comissaoCentavos }
 }
@@ -186,13 +205,16 @@ export function calcularSpread(
  * A COMISSÃO, em duas modalidades:
  *   - LIMITADA: o fundo já diz quanto aceita pagar de comissão, em reais;
  *   - SPREAD: a casa desconta a comissão do valor da proposta, a um percentual
- *     (`percentualCentesimos`: 5% = 500). SEM o percentual é o spread da tela
- *     anterior a 05/10/2026 (uma aba aberta antes do deploy): o servidor ainda
- *     o aceita e grava "R$ X / Spread".
+ *     (`percentualCentesimos`: 5% = 500) sobre o VALOR LÍQUIDO VALIDADO
+ *     (`baseCentavos`, 06/10/2026).
+ *     SEM a base é o spread da tela de 05/10/2026: o percentual sobre o valor
+ *     da proposta. SEM o percentual é o da tela anterior a ela, que grava
+ *     "R$ X / Spread". As duas são abas abertas antes do deploy, e o servidor
+ *     ainda as aceita.
  */
 export type Comissao =
   | { modalidade: 'limitada'; centavos: number }
-  | { modalidade: 'spread'; percentualCentesimos?: number }
+  | { modalidade: 'spread'; percentualCentesimos?: number; baseCentavos?: number }
 
 /**
  * A COTAÇÃO COMO A PESSOA A DIGITOU: no spread, `propostaCentavos` é o valor
@@ -204,20 +226,31 @@ export interface Cotacao {
   comissao: Comissao
 }
 
-/** A conta do spread desta cotação, ou null (limitada, ou spread sem percentual). */
-export function spreadDaCotacao(
-  c: Cotacao,
-): { percentualCentesimos: number; comissaoCentavos: number; finalCentavos: number } | null {
+/**
+ * A conta do spread desta cotação, ou null (limitada, ou spread sem percentual).
+ * `baseCentavos` é sobre o que o percentual incidiu, e `sobreLiquido` diz se é
+ * o líquido validado (a tela nova) ou o valor da proposta (a de 05/10/2026).
+ */
+export function spreadDaCotacao(c: Cotacao): {
+  percentualCentesimos: number
+  baseCentavos: number
+  sobreLiquido: boolean
+  comissaoCentavos: number
+  finalCentavos: number
+} | null {
   if (c.comissao.modalidade !== 'spread' || c.comissao.percentualCentesimos === undefined) return null
   const p = c.comissao.percentualCentesimos
-  return { percentualCentesimos: p, ...calcularSpread(c.propostaCentavos, p) }
+  const sobreLiquido = c.comissao.baseCentavos !== undefined
+  const baseCentavos = c.comissao.baseCentavos ?? c.propostaCentavos
+  return { percentualCentesimos: p, baseCentavos, sobreLiquido, ...calcularSpread(c.propostaCentavos, p, baseCentavos) }
 }
 
 /**
  * O texto do campo do fundo no Kommo:
  *   "R$ 850.000,00 / R$ 40.000,00"                 (limitada)
- *   "R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)"  (spread: final / comissão)
+ *   "R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)"  (spread: final / comissão)
  *   "R$ 850.000,00 / Spread"                       (spread sem percentual, da tela antiga)
+ * O texto não diz a base: é o mesmo com o líquido (06/10/2026) ou sem ele.
  */
 export function textoDaCotacao(c: Cotacao): string {
   if (c.comissao.modalidade === 'limitada') {
@@ -232,14 +265,18 @@ export function textoDaCotacao(c: Cotacao): string {
 }
 
 /**
- * O RESUMO DA CONTA, para a prévia da janela:
- * "Comissão (5%): R$ 42.500,00 · Proposta final: R$ 807.500,00" — ou null fora do spread.
+ * O RESUMO DA CONTA, para a prévia da janela — ou null fora do spread:
+ * "Comissão (5% sobre o líquido de R$ 800.000,00): R$ 40.000,00" e
+ * "Proposta final: R$ 810.000,00". Sem a base (a conta de 05/10/2026),
+ * "Comissão (5%): …".
  */
 export function resumoDoSpread(c: Cotacao): { comissao: string; final: string } | null {
   const s = spreadDaCotacao(c)
   if (!s) return null
+  const pct = `${formatarPercentual(s.percentualCentesimos)}%`
+  const sobre = s.sobreLiquido ? `${pct} sobre o líquido de ${formatarReais(s.baseCentavos)}` : pct
   return {
-    comissao: `Comissão (${formatarPercentual(s.percentualCentesimos)}%): ${formatarReais(s.comissaoCentavos)}`,
+    comissao: `Comissão (${sobre}): ${formatarReais(s.comissaoCentavos)}`,
     final: `Proposta final: ${formatarReais(s.finalCentavos)}`,
   }
 }
@@ -258,14 +295,22 @@ const centavosValidos = (n: unknown): n is number =>
  * aberta. A tela nova pede `exigirPercentualNoSpread` (e já não deixa enviar
  * sem ele). Percentual PRESENTE e fora da faixa é sempre recusado: é a tela
  * nova com um valor errado, não a antiga.
+ *
+ * A BASE (o valor líquido validado, 06/10/2026) segue a mesma regra: AUSENTE é
+ * a tela de 05/10/2026, e a conta é sobre o valor da proposta, como era;
+ * PRESENTE e inválida é recusada; e a tela nova pede `exigirBaseNoSpread`.
+ *
+ * A COMISSÃO NÃO PODE ALCANÇAR A PROPOSTA: com o líquido como base, um
+ * percentual alto (ou um líquido maior que a proposta) faria a final zero ou
+ * negativa. É recusado, e a mensagem diz os dois números.
  */
 export function validarCotacao(
   x: unknown,
-  opcoes: { exigirPercentualNoSpread?: boolean } = {},
+  opcoes: { exigirPercentualNoSpread?: boolean; exigirBaseNoSpread?: boolean } = {},
 ): { ok: true; cotacao: Cotacao } | { ok: false; erro: string } {
   const c = (x ?? {}) as {
     propostaCentavos?: unknown
-    comissao?: { modalidade?: unknown; centavos?: unknown; percentualCentesimos?: unknown }
+    comissao?: { modalidade?: unknown; centavos?: unknown; percentualCentesimos?: unknown; baseCentavos?: unknown }
   }
   if (!centavosValidos(c.propostaCentavos)) {
     return { ok: false, erro: 'Informe o valor da proposta (em reais, maior que zero).' }
@@ -285,16 +330,43 @@ export function validarCotacao(
         erro: 'O percentual do spread precisa ser maior que 0 e menor que 100, com até duas casas depois da vírgula.',
       }
     }
-    const conta = calcularSpread(c.propostaCentavos, p)
-    if (conta.comissaoCentavos < 1 || conta.finalCentavos < 1) {
+    const b = c.comissao?.baseCentavos
+    const semBase = b === undefined || b === null
+    if (semBase && opcoes.exigirBaseNoSpread) {
+      return { ok: false, erro: 'Com a comissão em spread, informe o valor líquido validado.' }
+    }
+    if (!semBase && !centavosValidos(b)) {
+      return { ok: false, erro: 'Informe o valor líquido validado (em reais, maior que zero).' }
+    }
+    const base = semBase ? undefined : (b as number)
+    const conta = calcularSpread(c.propostaCentavos, p, base)
+    if (conta.comissaoCentavos < 1) {
       return {
         ok: false,
-        erro: 'Com esse valor e esse percentual, a comissão ou a proposta final daria menos de um centavo.',
+        erro: semBase
+          ? 'Com esse valor e esse percentual, a comissão daria menos de um centavo.'
+          : 'Com esse valor líquido e esse percentual, a comissão daria menos de um centavo.',
+      }
+    }
+    if (conta.finalCentavos < 1) {
+      return {
+        ok: false,
+        erro:
+          `A comissão (${formatarReais(conta.comissaoCentavos)}) não pode ser igual ou maior que o valor ` +
+          `da proposta (${formatarReais(c.propostaCentavos)}): a proposta final precisa ser maior que zero. ` +
+          (semBase ? 'Confira o percentual.' : 'Confira o percentual e o valor líquido validado.'),
       }
     }
     return {
       ok: true,
-      cotacao: { propostaCentavos: c.propostaCentavos, comissao: { modalidade: 'spread', percentualCentesimos: p } },
+      cotacao: {
+        propostaCentavos: c.propostaCentavos,
+        comissao: {
+          modalidade: 'spread',
+          percentualCentesimos: p,
+          ...(base !== undefined ? { baseCentavos: base } : {}),
+        },
+      },
     }
   }
   if (m === 'limitada') {

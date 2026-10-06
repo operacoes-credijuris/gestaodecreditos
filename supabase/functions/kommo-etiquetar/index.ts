@@ -44,6 +44,18 @@
 // "R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)" — não recebe texto pronto. O
 // spread SEM `percentualCentesimos` é o da tela anterior (aba aberta antes do
 // deploy): continua aceito e grava o formato antigo, "R$ 850.000,00 / Spread".
+//
+// A BASE DO SPREAD (06/10/2026) é o VALOR LÍQUIDO VALIDADO, que a tela acha na
+// nota de oportunidade do card e a pessoa confere:
+//     "cotacao": { "propostaCentavos": 85000000,
+//                  "comissao": { "modalidade": "spread", "percentualCentesimos": 500,
+//                               "baseCentavos": 80000000 } }
+// comissão = líquido × percentual (R$ 40.000,00) e final = proposta − comissão
+// (R$ 810.000,00): grava "R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)". A função
+// confere e recalcula (`validarCotacao`), e recusa a comissão que alcance a
+// proposta. SEM `baseCentavos` é a tela de 05/10/2026, ainda aberta em alguma
+// aba: continua aceita, com o percentual sobre o valor da proposta (a conta de
+// ontem). A base não cabe no texto do campo: ela fica na nota de registro.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
@@ -58,6 +70,8 @@ import { trilhaDoPipeline } from '../_shared/trilhasDoPrecatorio.ts'
 import {
   type CampoDoKommo,
   campoDoFundo,
+  formatarReais,
+  spreadDaCotacao,
   comCotacaoGravada,
   type Cotacao,
   type GrupoDoKommo,
@@ -398,7 +412,14 @@ Deno.serve(async (req: Request) => {
     const substituidas = irmas.filter((i) =>
       ((espelho.tags ?? []) as string[]).some((t) => mesmaEtiqueta(t, i)),
     )
-    const comCotacao = textoDoCampo ? ` Cotação: ${textoDoCampo}.` : ''
+    // NO SPREAD, A BASE VAI JUNTO: o texto do campo não a diz, e é este registro
+    // que conta, depois, sobre quanto o percentual incidiu.
+    const doSpread = cotacao ? spreadDaCotacao(cotacao) : null
+    const sobre = doSpread
+      ? `, sobre o ${doSpread.sobreLiquido ? 'valor líquido validado' : 'valor da proposta'} de ` +
+        formatarReais(doSpread.baseCentavos)
+      : ''
+    const comCotacao = textoDoCampo ? ` Cotação: ${textoDoCampo}${sobre}.` : ''
     const texto =
       (acao === 'adicionar'
         ? substituidas.length > 0
