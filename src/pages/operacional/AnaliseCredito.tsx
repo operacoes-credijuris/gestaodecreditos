@@ -172,6 +172,9 @@ import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
 import { escolherPaginasParaImagem, LIMITES_DO_CONECTOR } from '@/lib/paginasDigitalizadas'
 import { subirAnexosDeImagem, subirImagensDosAutos, type ImagemSubida } from '@/lib/imagensDosAutos'
 import { agruparNotas, ehAnexo, nomeDoAnexo } from '@/lib/historicoDeNotas'
+import { grupoDeMiniaturas } from '@/lib/previaDoAnexo'
+import { linksDosAnexos } from '@/lib/linksDosAnexos'
+import { MiniaturasDaNota } from '@/components/analise/MiniaturasDaNota'
 import { supabase } from '@/lib/supabase'
 import {
   verbasQueSobram,
@@ -766,11 +769,16 @@ function useFecharFora(aberto: boolean, fechar: () => void, caixa: RefObject<HTM
   }, [aberto])
   useEffect(() => {
     if (!aberto) return
+    // UMA JANELA POR CIMA É DONA DO CLIQUE E DO ESC (06/10/2026): o
+    // visualizador aberto da miniatura de um print na caixa do Anotar vai para
+    // o <body> por portal — fora da caixa, para o `contains` —, e clicar nele
+    // (ou fechá-lo com Esc) fechava a caixa e o levava junto.
     const fora = (e: MouseEvent) => {
+      if (haDialogoAberto()) return
       if (!caixa.current?.contains(e.target as Node)) fechar()
     }
     const tecla = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') fechar()
+      if (e.key === 'Escape' && !haDialogoAberto()) fechar()
     }
     document.addEventListener('mousedown', fora)
     document.addEventListener('keydown', tecla)
@@ -3151,29 +3159,35 @@ function CardCredito({
 
         {/* A ÚLTIMA NOTA À VISTA (amostra): a mais recente, com data e selo do
             tipo, numa linha; "Ver histórico" abre o resto. */}
-        {ultima && (
-          <div className="mt-[10px] flex min-w-0 flex-wrap items-baseline gap-2 rounded-r-controle border-l-[3px] border-borda-forte bg-superficie-2 px-[10px] py-2 text-corpo text-texto-2 sm:flex-nowrap">
-            {ultima.nota.criado_em && (
-              <span className="flex-none text-xs text-texto-3">{formatDataHoraSegundos(ultima.nota.criado_em)}</span>
-            )}
-            {(() => {
-              const arquivos = ehAnexo(ultima.nota) ? [ultima.nota, ...ultima.anexos] : ultima.anexos
-              const selo =
-                ehAnexo(ultima.nota) && arquivos.length > 1 ? `${arquivos.length} anexos` : rotuloDaNota(ultima.nota)
-              const texto = ehAnexo(ultima.nota)
-                ? arquivos.map(nomeDoAnexo).join(', ')
-                : ultima.nota.texto || arquivos.map(nomeDoAnexo).join(', ')
-              return (
-                <>
+        {ultima &&
+          (() => {
+            const arquivos = ehAnexo(ultima.nota) ? [ultima.nota, ...ultima.anexos] : ultima.anexos
+            const selo =
+              ehAnexo(ultima.nota) && arquivos.length > 1 ? `${arquivos.length} anexos` : rotuloDaNota(ultima.nota)
+            const texto = ehAnexo(ultima.nota)
+              ? arquivos.map(nomeDoAnexo).join(', ')
+              : ultima.nota.texto || arquivos.map(nomeDoAnexo).join(', ')
+            // A IMAGEM DA ÚLTIMA ANOTAÇÃO, NA PONTA DIREITA (06/10/2026): pequena
+            // (48px), porque esta linha é o resumo do card; a de 80px fica no
+            // histórico aberto.
+            const miniaturas = grupoDeMiniaturas(arquivos)
+            return (
+              <div className="mt-[10px] flex min-w-0 items-center gap-s3 rounded-r-controle border-l-[3px] border-borda-forte bg-superficie-2 px-[10px] py-2 text-corpo text-texto-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2 sm:flex-nowrap">
+                  {ultima.nota.criado_em && (
+                    <span className="flex-none text-xs text-texto-3">{formatDataHoraSegundos(ultima.nota.criado_em)}</span>
+                  )}
                   {selo && <Selo className="flex-none">{selo}</Selo>}
                   <span className="min-w-0 truncate" title={texto}>
                     {texto}
                   </span>
-                </>
-              )
-            })()}
-          </div>
-        )}
+                </div>
+                {miniaturas.imagens.length > 0 && (
+                  <MiniaturasDaNota imagens={miniaturas.imagens} selo={miniaturas.selo} tamanho="p" />
+                )}
+              </div>
+            )
+          })()}
 
         <div className="mt-[10px] flex flex-wrap items-center gap-x-4 gap-y-1">
           {/* As anotações vêm em texto livre e o formato varia entre cards, então
@@ -3436,6 +3450,9 @@ function CardCredito({
               // "3 anexos" em vez de "anexo" quando o bloco é só de arquivos.
               const selo = ehAnexo(n) && arquivos.length > 1 ? `${arquivos.length} anexos` : rotuloDaNota(n)
               const ultimo = i === grupos.length - 1
+              // AS IMAGENS VÃO PARA A MINIATURA, À DIREITA (06/10/2026); o resto
+              // (PDF, planilha, imagem de nota antiga sem uuid) segue na lista.
+              const { imagens, outros, selo: maisImagens } = grupoDeMiniaturas(arquivos)
               return (
                 <li key={n.id || i} className="relative pb-[14px] pl-[22px]">
                   <span
@@ -3446,6 +3463,8 @@ function CardCredito({
                     )}
                   />
                   {!ultimo && <span aria-hidden className="absolute bottom-0 left-2 top-[18px] w-px bg-borda" />}
+                  <div className="flex items-start gap-s3">
+                  <div className="min-w-0 flex-1">
                   {/* DATA COM HORA, MINUTO E SEGUNDO: as anotações chegam em
                       rajada, e só com a data some da tela a ORDEM. SEM AUTOR: a
                       equipe usa um login só e se identifica no próprio texto. */}
@@ -3468,9 +3487,9 @@ function CardCredito({
                       {corpo}
                     </pre>
                   )}
-                  {arquivos.length > 0 && (
+                  {outros.length > 0 && (
                     <div className="mt-1 flex flex-wrap items-start gap-1.5">
-                      {arquivos.map((a) => (
+                      {outros.map((a) => (
                         <button
                           key={a.id}
                           type="button"
@@ -3493,6 +3512,9 @@ function CardCredito({
                       ))}
                     </div>
                   )}
+                  </div>
+                  {imagens.length > 0 && <MiniaturasDaNota imagens={imagens} selo={maisImagens} className="mt-s1" />}
+                  </div>
                 </li>
               )
             })}
@@ -4183,11 +4205,9 @@ export default function AnaliseCredito() {
     nome: string,
   ): Promise<{ download: string }> {
     if (anexo.arquivo_uuid) {
-      const r = await invokeFunction<{ download?: string; erro?: string }>('kommo-anexo', {
-        file_uuid: anexo.arquivo_uuid,
-      })
-      if (r.erro || !r.download) throw new Error(r.erro ?? 'o Kommo não devolveu o endereço.')
-      return { download: r.download }
+      // O CACHE DA PÁGINA, o mesmo das miniaturas (lib/linksDosAnexos.ts): sabe
+      // quando o link assinado vence e pede outro.
+      return { download: (await linksDosAnexos.obter(anexo.arquivo_uuid)).download }
     }
     const r = await invokeFunction<{
       arquivos?: { nome: string; download: string }[]
@@ -4220,7 +4240,10 @@ export default function AnaliseCredito() {
   const anexosResolvidos = useRef<Map<string, Promise<{ download: string }>>>(new Map())
 
   function prepararAnexo(lead: KommoLead, anexo: KommoNota) {
-    const chave = anexo.arquivo_uuid ?? `${lead.kommo_lead_id}:${nomeDoAnexo(anexo)}`
+    // PELO UUID, O CACHE DA PÁGINA RESPONDE (e vence com o link); este mapa
+    // guardaria para sempre um link que vence.
+    if (anexo.arquivo_uuid) return enderecoDoAnexo(lead, anexo, nomeDoAnexo(anexo))
+    const chave = `${lead.kommo_lead_id}:${nomeDoAnexo(anexo)}`
     const guardada = anexosResolvidos.current.get(chave)
     if (guardada) return guardada
     const pedido = enderecoDoAnexo(lead, anexo, nomeDoAnexo(anexo))

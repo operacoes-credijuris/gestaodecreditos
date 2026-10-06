@@ -20,11 +20,13 @@
 // que se guarda é o uuid, que não muda, e o endereço se pede no clique.
 //
 // USO (POST, com sessão logada): { "file_uuid": "…" }
-//   -> { pronto: true, download, nome, mime }
+//   -> { pronto: true, download, nome, mime, miniatura }
+//   (`miniatura`: a prévia pequena do drive, ou null — ver `previaPequena`)
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveKommo } from "../_shared/segredos.ts";
+import { previaPequena } from "../_shared/previaDoDrive.ts";
 
 const CORS = corsHeaders;
 const KOMMO_SUBDOMAIN = "contatocredijuriscom";
@@ -109,6 +111,10 @@ Deno.serve(async (req) => {
       download,
       nome: String(m?.name ?? ""),
       mime: String(m?.metadata?.mime_type ?? ""),
+      // ACRÉSCIMO (06/10/2026): a prévia pequena, para a miniatura da anotação.
+      // Vem na MESMA resposta dos metadados — nenhuma ida a mais ao Kommo. Quem
+      // não a lê (as abas abertas antes do deploy) não percebe a diferença.
+      miniatura: previaPequena(m?.previews),
     });
   } catch (e) {
     return json({ erro: String((e as Error)?.message || e) }, 500);

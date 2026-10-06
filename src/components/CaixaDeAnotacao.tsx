@@ -15,13 +15,21 @@
 // O RASCUNHO É SÓ DO TEXTO (como antes, `rascunhoDoCard.ts`). Arquivo não cabe no
 // armazenamento do navegador: saindo da página, ele sai da lista — e a caixa
 // diz isso quando há arquivo nela.
-import { useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
+//
+// A IMAGEM GANHA MINIATURA (06/10/2026, pedido do dono): o print colado ou a foto
+// escolhida aparece À DIREITA do texto, em coluna, sem empurrá-lo para baixo (no
+// celular, embaixo dele); clicando, o visualizador da plataforma. O endereço é
+// local (`blob:`) e é revogado quando a imagem sai da lista — tirada ou enviada.
+// Os outros arquivos continuam na lista.
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import { AlertTriangle, FileText, Image as ImageIcon, Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Tecla } from '@/components/ui/Tecla'
 import { useToast } from '@/components/ui/Toast'
+import { VisualizadorDeImagem } from '@/components/ui/VisualizadorDeImagem'
 import { CaixaDeAviso } from '@/components/analise/Pecas'
 import { cn } from '@/lib/cn'
+import { acertarEnderecosLocais, ehImagem } from '@/lib/previaDoAnexo'
 import { enviarArquivo } from '@/lib/enviarArquivo'
 import { apagarRascunho, guardarRascunho, rascunhoGuardado } from '@/lib/rascunhoDoCard'
 import {
@@ -233,6 +241,112 @@ function LinhaDoAnexo({
   )
 }
 
+/** A imagem vai para a miniatura (e não para a lista)? */
+const ehImagemLocal = (a: AnexoDaAnotacao) => ehImagem(a.arquivo.name, a.arquivo.type)
+
+/**
+ * Os endereços locais (`blob:`) das imagens da lista, chave → endereço. Criados
+ * quando a imagem entra, revogados quando ela sai e quando a caixa fecha (a lista
+ * fica no botão; reabrindo, eles nascem de novo). Ver `acertarEnderecosLocais`.
+ */
+function useEnderecosLocais(imagens: readonly AnexoDaAnotacao[]): ReadonlyMap<string, string> {
+  const guardados = useRef<Map<string, string>>(new Map())
+  const [, redesenhar] = useState(0)
+  // AS CHAVES, e não a lista: ela muda de objeto a cada passo do andamento do
+  // envio, e nada disso cria ou revoga endereço.
+  const chaves = imagens.map((a) => a.chave).join('\n')
+  const atuais = useRef(imagens)
+  atuais.current = imagens
+  useEffect(() => {
+    guardados.current = acertarEnderecosLocais(
+      guardados.current,
+      atuais.current,
+      (b) => URL.createObjectURL(b),
+      (u) => URL.revokeObjectURL(u),
+    )
+    redesenhar((n) => n + 1)
+  }, [chaves])
+  useEffect(
+    () => () => {
+      for (const u of guardados.current.values()) URL.revokeObjectURL(u)
+      guardados.current = new Map()
+    },
+    [],
+  )
+  return guardados.current
+}
+
+/**
+ * A MINIATURA DE UMA IMAGEM DA CAIXA: clicando, o visualizador; o X tira (como o
+ * da linha); enviando, a barra de andamento embaixo; não entrando, a borda e o
+ * ícone de perigo (o motivo no `title` e no aviso da caixa).
+ */
+function MiniaturaDoAnexo({
+  anexo,
+  endereco,
+  enviando,
+  onVer,
+  onTirar,
+}: {
+  anexo: AnexoDaAnotacao
+  endereco: string | undefined
+  enviando: boolean
+  onVer: () => void
+  onTirar: () => void
+}) {
+  const { arquivo, estado } = anexo
+  const falhou = estado.fase === 'falhou'
+  const andando = estado.fase === 'enviando' || estado.fase === 'gravando'
+  const sit = situacao(estado)
+  return (
+    <li
+      className={cn(
+        'relative h-s16 w-s16 flex-none overflow-hidden rounded-campo border bg-superficie-2',
+        falhou ? 'border-perigo-borda ring-1 ring-perigo-borda' : 'border-borda',
+      )}
+      title={falhou ? `${arquivo.name}: ${estado.erro}` : `${arquivo.name} · ${sit ?? tamanhoLegivel(arquivo.size)}`}
+    >
+      <button
+        type="button"
+        onClick={onVer}
+        disabled={!endereco}
+        aria-label={`Ver imagem ${arquivo.name}`}
+        className="block h-full w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-anel"
+      >
+        {endereco ? (
+          <img src={endereco} alt={arquivo.name} draggable={false} className="h-full w-full object-cover" />
+        ) : (
+          <span className="skeleton block h-full w-full" aria-hidden />
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={onTirar}
+        disabled={enviando}
+        className="absolute right-s0.5 top-s0.5 grid h-s5 w-s5 place-items-center rounded-full bg-superficie text-texto-2 shadow-nivel-1 hover:text-perigo disabled:hidden dark:ring-1 dark:ring-white/[0.06]"
+        aria-label={`Tirar ${arquivo.name}`}
+        title={`Tirar ${arquivo.name}`}
+      >
+        <X className="h-[12px] w-[12px]" aria-hidden />
+      </button>
+      {falhou && (
+        <span className="absolute bottom-s0.5 left-s0.5 grid h-s5 w-s5 place-items-center rounded-full bg-perigo-fundo text-perigo" aria-hidden>
+          <AlertTriangle className="h-[12px] w-[12px]" />
+        </span>
+      )}
+      {andando && (
+        <div className="absolute inset-x-s1 bottom-s1 h-1 overflow-hidden rounded-full bg-superficie/80" aria-hidden>
+          <div
+            className={cn('h-full rounded-full bg-marca-viva transition-all duration-200', estado.fase === 'gravando' && 'animate-pulse')}
+            style={{ width: `${estado.fase === 'enviando' ? estado.pct : 100}%` }}
+          />
+        </div>
+      )}
+      <span className="sr-only">{falhou ? `não entrou: ${estado.erro}` : sit ?? ''}</span>
+    </li>
+  )
+}
+
 /**
  * O miolo da caixa: o texto, a lista de arquivos, o aviso e o rodapé ("Anexar
  * arquivo" à esquerda, "Enviar" à direita). `onFeito` fecha a caixa quando nada
@@ -251,6 +365,14 @@ export function CaixaDeAnotacao({
   const entrada = useRef<HTMLInputElement>(null)
   const [arrastando, setArrastando] = useState(false)
   const pode = !a.enviando && (a.texto.trim().length > 0 || a.anexos.length > 0)
+  const imagens = a.anexos.filter(ehImagemLocal)
+  const outros = a.anexos.filter((x) => !ehImagemLocal(x))
+  const enderecos = useEnderecosLocais(imagens)
+  const [vendo, setVendo] = useState<number | null>(null)
+  const noVisualizador = imagens.flatMap((x) => {
+    const src = enderecos.get(x.chave)
+    return src ? [{ chave: x.chave, nome: x.arquivo.name, src }] : []
+  })
 
   async function enviar() {
     if (await a.enviar()) onFeito()
@@ -284,6 +406,11 @@ export function CaixaDeAnotacao({
 
   return (
     <div className="relative" onDragEnter={sobre} onDragOver={sobre} onDragLeave={saiu} onDrop={soltou}>
+      {/* O TEXTO E, À DIREITA, A COLUNA DAS IMAGENS. A coluna não dá altura à
+          linha (fica `absolute` numa faixa de 64px): quem manda é o texto, que
+          cresce para caber duas miniaturas; da terceira em diante, a coluna
+          rola. No celular, as miniaturas descem para baixo do texto. */}
+      <div className="flex flex-col gap-s2 sm:flex-row">
       <textarea
         autoFocus
         rows={4}
@@ -296,12 +423,35 @@ export function CaixaDeAnotacao({
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void enviar()
         }}
         placeholder="Ex.: Cedente enviou o RG; falta o comprovante de endereço."
-        className="min-h-[96px] w-full resize-y rounded-campo border border-borda-controle bg-superficie px-s3 py-s2 text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3"
+        className={cn(
+          'min-h-[96px] w-full min-w-0 flex-1 resize-y rounded-campo border border-borda-controle bg-superficie px-s3 py-s2 text-corpo text-texto placeholder:text-texto-3 focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20 disabled:bg-superficie-3',
+          imagens.length > 1 && 'sm:min-h-[136px]',
+        )}
       />
+      {imagens.length > 0 && (
+        <div className="sm:relative sm:w-s16 sm:flex-none">
+          <ul
+            className="flex flex-wrap gap-s2 scrollbar-thin sm:absolute sm:inset-0 sm:flex-col sm:flex-nowrap sm:overflow-y-auto"
+            aria-label="Imagens da anotação"
+          >
+            {imagens.map((x, i) => (
+              <MiniaturaDoAnexo
+                key={x.chave}
+                anexo={x}
+                endereco={enderecos.get(x.chave)}
+                enviando={a.enviando}
+                onVer={() => setVendo(i)}
+                onTirar={() => a.tirar(x.chave)}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+      </div>
 
-      {a.anexos.length > 0 && (
+      {outros.length > 0 && (
         <ul className="mt-s2 grid max-h-[188px] grid-cols-[minmax(0,1fr)] gap-s1 overflow-y-auto" aria-label="Arquivos da anotação">
-          {a.anexos.map((x) => (
+          {outros.map((x) => (
             <LinhaDoAnexo key={x.chave} anexo={x} enviando={a.enviando} onTirar={() => a.tirar(x.chave)} />
           ))}
         </ul>
@@ -362,6 +512,14 @@ export function CaixaDeAnotacao({
           </span>
         </div>
       )}
+
+      {/* A imagem aberta saiu da lista (tirada, enviada): o visualizador fecha. */}
+      <VisualizadorDeImagem
+        aberto={vendo !== null && vendo < noVisualizador.length}
+        imagens={noVisualizador}
+        inicial={vendo ?? 0}
+        onFechar={() => setVendo(null)}
+      />
     </div>
   )
 }
