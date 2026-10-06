@@ -40,6 +40,14 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'O card não diz o cedente — sem ele não há nome para a pasta.' }, 400)
     }
 
+    // NO PRECATÓRIO EXTERNO NÃO SE CRIA PASTA no "Executar análise" (decisão do
+    // dono, 06/10/2026): ela só nasce quando a BullAI emite certidão. Resposta
+    // neutra (200, sem pasta), para a aba aberta antes da mudança não avisar erro.
+    const { data: card } = await svc.from('kommo_leads').select('pipeline_id').eq('kommo_lead_id', leadId).maybeSingle()
+    if (Number((card as { pipeline_id?: number } | null)?.pipeline_id) === 14439516) {
+      return jsonResponse({ ok: true, pasta_id: null, ignorado: 'precatorio-externo' })
+    }
+
     const { pastaId } = await garantirPastaDoCedente({
       originador: body.originador,
       cedente: body.cedente,

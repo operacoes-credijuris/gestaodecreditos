@@ -3853,6 +3853,10 @@ export default function AnaliseCredito() {
    */
   async function criarPastaDoCard(lead: KommoLead) {
     if (lead.drive_pasta_id) return
+    // NO PRECATÓRIO EXTERNO NÃO HÁ PASTA DA ANÁLISE (decisão do dono, 06/10/2026):
+    // a análise é do fundo, e a planilha jurídica é só do Interno. A pasta do
+    // Externo nasce só quando a BullAI emite certidão (pastaDasCertidoesDoCard).
+    if (ehCardExterno(Number(lead.pipeline_id))) return
     const dados = lerCardCredijuris(lead)
     if (!dados.cedente.trim()) return
     try {
