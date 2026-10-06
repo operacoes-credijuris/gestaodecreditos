@@ -2,12 +2,13 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, FolderKanban, History, Loader2, Phone, ScanSearch, Search } from 'lucide-react'
+import { ArrowRight, BookUser, History, Loader2, Search, SquareKanban, Wallet } from 'lucide-react'
 import { gravarPreferencia, lerPreferenciaValida } from '@/lib/preferencias'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { useAuth } from '@/contexts/AuthContext'
 import { Badge } from '@/components/ui/Badge'
+import { Tecla } from '@/components/ui/Tecla'
 import { useFocoPreso, useTravaScroll } from '@/lib/dialogo'
 import {
   FUNIL_PRECATORIO_EXTERNO,
@@ -44,11 +45,13 @@ const FUNIS_DA_ANALISE: Readonly<Record<number, string>> = {
   [FUNIL_PRECATORIO_EXTERNO]: 'Precatório externo',
 }
 
+// OS MESMOS ÍCONES DO MENU (navigation.ts): o card é da Análise de crédito, o
+// crédito mora em Créditos e o contato em Contatos (revisão visual 2).
 const ICONE: Record<TipoDoResultado, typeof ArrowRight> = {
   tela: ArrowRight,
-  card: ScanSearch,
-  credito: FolderKanban,
-  contato: Phone,
+  card: SquareKanban,
+  credito: Wallet,
+  contato: BookUser,
 }
 
 /** O texto digitado, só depois de uma pausa na digitação. */
@@ -210,7 +213,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
 
   return createPortal(
     <div
-      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin"
+      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-s4 backdrop-blur-[2px] scrollbar-thin"
       onClick={(e) => {
         if (e.target === e.currentTarget) onFechar()
       }}
@@ -223,7 +226,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
         aria-label="Buscar em toda a plataforma"
         className="animate-modal-in mt-[10vh] w-full max-w-[620px] overflow-hidden rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]"
       >
-        <div className="flex h-[56px] items-center gap-3 border-b border-borda px-5 text-texto-3">
+        <div className="flex h-[56px] items-center gap-s3 border-b border-borda px-s5 text-texto-3">
           <Search className="h-[18px] w-[18px] shrink-0" aria-hidden />
           <input
             role="combobox"
@@ -251,13 +254,11 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
             placeholder="Cedente, nº do processo, contato, tela…"
             className="min-w-0 flex-1 bg-transparent text-lg text-texto outline-none placeholder:text-texto-3"
           />
-          {carregando && <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />}
-          <kbd className="rounded-md border border-borda-forte bg-superficie px-1.5 py-0.5 font-sans text-xs font-semibold text-texto-2">
-            Esc
-          </kbd>
+          {carregando && <Loader2 className="h-[16px] w-[16px] shrink-0 animate-spin" aria-hidden />}
+          <Tecla>Esc</Tecla>
         </div>
 
-        <ul id={listaId} role="listbox" aria-label="Resultados" className="max-h-[50vh] overflow-y-auto p-2 scrollbar-thin">
+        <ul id={listaId} role="listbox" aria-label="Resultados" className="max-h-[50vh] overflow-y-auto p-s2 scrollbar-thin">
           {resultados.map((r, i) => {
             const Icone = r.recente ? History : ICONE[r.tipo]
             return (
@@ -275,11 +276,11 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
                   if (e.button === 1) escolher(r, true)
                 }}
                 className={cn(
-                  'flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2.5',
+                  'flex min-h-[44px] cursor-pointer items-center gap-s3 rounded-campo px-s3 py-s2',
                   i === atual && 'bg-superficie-3',
                 )}
               >
-                <Icone className="h-4 w-4 shrink-0 text-texto-3" aria-hidden />
+                <Icone className="h-[16px] w-[16px] shrink-0 text-texto-3" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-corpo font-semibold text-texto">{r.titulo}</span>
                   {r.sub && <span className="block truncate text-xs text-texto-3">{r.sub}</span>}
@@ -291,7 +292,7 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
         </ul>
 
         {/* O QUE A LISTA NÃO DIZ SOZINHA: por que só há telas, que está buscando, que não achou. */}
-        <p role="status" className="px-5 pb-3 text-corpo text-texto-3 empty:hidden">
+        <p role="status" className="px-s5 pb-s3 text-corpo text-texto-3 empty:hidden">
           {curta
             ? `Digite ${MIN_LETRAS} letras ou mais para buscar também créditos, cards e contatos.`
             : termo.consulta && !carregando && consulta.isError
@@ -303,15 +304,17 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
                   : ''}
         </p>
 
-        <div className="flex flex-wrap gap-4 border-t border-borda px-5 py-3 text-xs text-texto-3">
-          <span>
-            <kbd className="font-sans">↑</kbd> <kbd className="font-sans">↓</kbd> navegar
+        <div className="flex flex-wrap items-center gap-x-s4 gap-y-s2 border-t border-borda px-s5 py-s3 text-xs text-texto-3">
+          {/* AS TECLAS DESENHADAS, como o "Ctrl K" do topo e o "Esc" acima (ui/Tecla):
+              soltas no texto, "Ctrl Enter aba nova" se lia como uma frase só. */}
+          <span className="inline-flex items-center gap-s1">
+            <Tecla>↑</Tecla> <Tecla>↓</Tecla> navegar
           </span>
-          <span>
-            <kbd className="font-sans">Enter</kbd> abrir
+          <span className="inline-flex items-center gap-s1">
+            <Tecla>Enter</Tecla> abrir
           </span>
-          <span>
-            <kbd className="font-sans">Ctrl</kbd> <kbd className="font-sans">Enter</kbd> aba nova
+          <span className="inline-flex items-center gap-s1">
+            <Tecla>Ctrl</Tecla> <Tecla>Enter</Tecla> aba nova
           </span>
           <span className="hidden sm:inline">créditos, cards, contatos e telas da plataforma</span>
         </div>

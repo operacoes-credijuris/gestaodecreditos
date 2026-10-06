@@ -5,10 +5,10 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Copy,
   Download,
   FileText,
   Gauge,
-  MessageSquareText,
   Settings,
   Sparkles,
   TrendingUp,
@@ -653,7 +653,7 @@ function Individual() {
 
   if (processos.isLoading) {
     return (
-      <Card className="px-5">
+      <Card>
         <Loading label="Carregando créditos…" />
       </Card>
     )
@@ -703,7 +703,7 @@ function Individual() {
         <div className="flex flex-wrap gap-s2 sm:ml-auto">
           {/* SELIC e IPCA que alimentam a coluna Valor projetado. */}
           <Button
-            variant="outline"
+            variant="secondary"
             icon={<Settings className="h-[16px] w-[16px]" />}
             onClick={() => setAbrirParametros(true)}
           >
@@ -714,7 +714,7 @@ function Individual() {
               ALCANCE (Novo): não é só o investidor da tela, e cada crédito é
               uma consulta paga à IA. */}
           <Button
-            variant="outline"
+            variant="secondary"
             icon={<Sparkles className="h-[16px] w-[16px]" />}
             loading={gerar.isPending && !gerar.variables?.processo_id}
             onClick={() => gerar.mutate({ forcar: true })}
@@ -739,7 +739,7 @@ function Individual() {
         <>
         <div className="flex flex-wrap justify-end gap-s2">
           <Button
-            variant="outline"
+            variant="secondary"
             icon={<Download className="h-[16px] w-[16px]" />}
             loading={baixando}
             disabled={!ativo}
@@ -758,14 +758,16 @@ function Individual() {
           >
             Relatório do investidor
           </Button>
+          {/* COPIAR, DITO COMO NAS OUTRAS TELAS (revisão visual 2): "Copiar …" com o
+              ícone de copiar, como em Dados cadastrais e Geração de contratos. */}
           <Button
-            variant="outline"
-            icon={<MessageSquareText className="h-[16px] w-[16px]" />}
+            variant="secondary"
+            icon={<Copy className="h-[16px] w-[16px]" />}
             disabled={!ativo}
             onClick={copiarMensagem}
             title="Copia o texto de acompanhamento para colar no WhatsApp junto com o relatório"
           >
-            Mensagem
+            Copiar mensagem
           </Button>
         </div>
 
@@ -991,7 +993,7 @@ function Individual() {
         size="lg"
         footer={
           <>
-            <Button variant="outline" onClick={() => setAberto(null)}>
+            <Button variant="secondary" onClick={() => setAberto(null)}>
               Fechar
             </Button>
             {/* Crédito ENCERRADO (pelo status, não pela cor) tem texto fixo:
@@ -1173,7 +1175,7 @@ function Consolidado() {
 
   if (processos.isLoading) {
     return (
-      <Card className="px-5">
+      <Card>
         <Loading label="Carregando créditos…" />
       </Card>
     )

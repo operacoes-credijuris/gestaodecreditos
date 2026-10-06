@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, Trash2, TriangleAlert } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { KOMMO_SUBDOMINIO as SUBDOMINIO_PADRAO } from '@/lib/kommo'
@@ -246,7 +246,7 @@ export function SecaoAdvbox({
               As quatro escolhas são exigência da API — ela recusa a criação sem
               cliente, responsável, fase e tipo. Vêm em lista, da própria conta,
               porque pedir ID digitado seria pedir para errar. */}
-          <div className="mt-[16px]">
+          <div className="mt-s6">
             <label className="inline-flex cursor-pointer items-center gap-s2 text-corpo font-semibold text-texto">
               <input
                 type="checkbox"
@@ -256,7 +256,7 @@ export function SecaoAdvbox({
               />
               Cadastro de créditos no ADVBOX
             </label>
-            <p className="mb-[10px] mt-s1 text-xs text-texto-3">
+            <p className="mb-s2 mt-s1 text-xs text-texto-3">
               Todo crédito, requerimento ou apenso novo vira um processo no ADVBOX, com o
               cliente e a fase abaixo.
             </p>
@@ -316,16 +316,19 @@ export function SecaoAdvbox({
             </div>
 
             {erroOpcoes && !opcoes && (
-              <div className="mt-[8px] flex flex-wrap items-center gap-s2">
+              <div className="mt-s2 flex flex-wrap items-center gap-s2">
                 <Button
                   variant="secondary"
-                  icon={<RefreshCw className="h-[14px] w-[14px]" />}
+                  icon={<RefreshCw className="h-[16px] w-[16px]" />}
                   onClick={() => carregarOpcoes()}
                   loading={carregando}
                 >
                   Carregar responsáveis
                 </Button>
-                <span className="text-xs text-texto-3">
+                {/* FALHA DITA COMO FALHA (revisão visual 2): em cinza de metadado ela
+                    se lia como dica. */}
+                <span className="inline-flex items-center gap-s1.5 text-sm text-aviso">
+                  <TriangleAlert className="h-[16px] w-[16px] shrink-0" aria-hidden />
                   Não consegui buscar a lista de responsáveis na ADVBOX agora.
                 </span>
               </div>
@@ -698,7 +701,7 @@ export function SecaoDjen({ pendencia }: { pendencia: Pendencia }) {
                   <IconButton
                     label="Remover OAB"
                     variant="danger"
-                    className="inline-flex h-[35px] w-[32px] items-center justify-center p-0"
+                    className="inline-flex h-controle w-controle shrink-0 items-center justify-center p-0"
                     icon={<Trash2 className="h-[16px] w-[16px]" />}
                     onClick={() => removeOab(i)}
                   />
@@ -709,7 +712,7 @@ export function SecaoDjen({ pendencia }: { pendencia: Pendencia }) {
           <RodapeSecao>
             <Button
               variant="secondary"
-              icon={<Plus className="h-[14px] w-[14px]" />}
+              icon={<Plus className="h-[16px] w-[16px]" />}
               onClick={addOab}
               disabled={naoLido}
             >

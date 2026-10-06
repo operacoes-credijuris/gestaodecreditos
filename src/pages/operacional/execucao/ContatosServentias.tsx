@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/Table'
 import { AcoesDaLinha, type AcaoDoMenu } from '@/components/ui/MenuDeAcoes'
 import { useToast } from '@/components/ui/Toast'
+import { BotaoCopiar } from '@/components/ui/BotaoCopiar'
 import {
   CampoDeBusca,
   CartaoNoCelular,
@@ -83,24 +84,9 @@ const SELO_TIPO: Record<OrgaoRow['tipo'], { tom: 'blue' | 'purple'; label: strin
 
 type TipoValor = 'telefone' | 'whatsapp' | 'email'
 
-/**
- * Copia o contato com um clique (item "Novo" da amostra). Pela área de
- * transferência DE VERDADE; onde o navegador não deixa, o aviso diz como fazer à
- * mão — calar a falha deixaria a pessoa colar o que estava antes.
- */
-function useCopiar() {
-  const toast = useToast()
-  return async (valor: string, tipo: TipoValor) => {
-    try {
-      await navigator.clipboard.writeText(valor)
-      toast.success(tipo === 'email' ? 'E-mail copiado.' : 'Telefone copiado.')
-    } catch {
-      toast.error(
-        'O navegador não liberou a área de transferência. Selecione o contato e copie com Ctrl+C.',
-      )
-    }
-  }
-}
+// O COPIAR É O DA PLATAFORMA (ui/BotaoCopiar, revisão visual 2): o mesmo ✓ de
+// "copiado", o mesmo aviso e a mesma saída quando o navegador recusa a área de
+// transferência. Antes havia um botão próprio aqui, com outro comportamento.
 
 /**
  * Um valor de contato numa célula da grade: o ícone do tipo, o valor e, no
@@ -113,7 +99,6 @@ function useCopiar() {
  * ("1.juizado.especial…an@ / exemplo.invalid"), ele não se lia.
  */
 function ValorDoContato({ value, tipo }: { value: string | null | undefined; tipo: TipoValor }) {
-  const copiar = useCopiar()
   if (!value) return <span className="text-texto-3">—</span>
   const Icone = tipo === 'email' ? Mail : tipo === 'whatsapp' ? MessageCircle : Phone
   if (tipo === 'whatsapp') {
@@ -138,15 +123,12 @@ function ValorDoContato({ value, tipo }: { value: string | null | undefined; tip
       ) : (
         <span className="min-w-0 flex-1 whitespace-nowrap tabular-nums">{value}</span>
       )}
-      <button
-        type="button"
-        onClick={() => void copiar(value, tipo)}
-        aria-label={`Copiar ${value}`}
-        title="Copiar"
-        className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
-      >
-        <Copy className="h-[16px] w-[16px]" aria-hidden="true" />
-      </button>
+      <BotaoCopiar
+        valor={value}
+        rotulo={`Copiar ${value}`}
+        aviso={tipo === 'email' ? 'E-mail copiado.' : 'Telefone copiado.'}
+        tamanho="linha"
+      />
     </span>
   )
 }
@@ -161,8 +143,12 @@ function ValorDoContato({ value, tipo }: { value: string | null | undefined; tip
 // O E-MAIL LEVA UMA FATIA MAIOR que o telefone e o WhatsApp, que têm sempre
 // 14 ou 15 caracteres: com três frações iguais, sobrava espaço nos números e
 // o e-mail era cortado logo no começo.
+// O TELEFONE INTEIRO E O COPIAR AO LADO (revisão visual 2): com a coluna em `1fr`, a
+// 1440px o número (~100px) passava por baixo do botão de copiar. 160px cabem o
+// ícone, o número e o botão; o WhatsApp, sem botão, cabe em 140px. O e-mail é que
+// cede (ele já corta com "…" e mostra inteiro na dica).
 const GRADE_CONTATOS =
-  'grid grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)] items-center gap-x-s3'
+  'grid grid-cols-[88px_minmax(160px,1fr)_minmax(140px,1fr)_minmax(0,1.6fr)] items-center gap-x-s3'
 
 function SubLinha({
   rotulo,
@@ -742,7 +728,7 @@ export default function ContatosServentias() {
         dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={fecharForm}>
+            <Button variant="secondary" onClick={fecharForm}>
               Cancelar
             </Button>
             <Button

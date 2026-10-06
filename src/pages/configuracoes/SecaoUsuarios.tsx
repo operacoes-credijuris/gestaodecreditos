@@ -13,7 +13,8 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { IconButton } from '@/components/ui/IconButton'
 import { Modal } from '@/components/ui/Modal'
-import { Table, THead, TH, TBody, TR, TD, Loading } from '@/components/ui/Table'
+import { Table, THead, TH, TBody, TR, TD, Loading, ErrorState, Truncado } from '@/components/ui/Table'
+import { CartaoNoCelular, ListaNoCelular } from '@/components/operacional/Pecas'
 import { useToast } from '@/components/ui/Toast'
 import { perguntarDescarte } from '@/lib/descarte'
 import {
@@ -23,18 +24,16 @@ import {
 } from '@/lib/formulariosDasConfiguracoes'
 import {
   CabecalhoSecao,
-  CaixaAviso,
   DUAS_COLUNAS,
   GradeCampos,
   IconeOk,
-  IconeRuim,
   Selo,
 } from './comum'
 
 export function SecaoUsuarios() {
   const qc = useQueryClient()
   const toast = useToast()
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['profiles'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -155,19 +154,50 @@ export function SecaoUsuarios() {
         titulo="Usuários"
         apoio="Quem acessa a plataforma, e com que perfil."
         direita={
-          <Button icon={<Plus className="h-[14px] w-[14px]" />} onClick={() => setOpen(true)}>
+          <Button icon={<Plus className="h-[16px] w-[16px]" />} onClick={() => setOpen(true)}>
             Novo usuário
           </Button>
         }
       />
       {/* Erro antes de tudo: tabela vazia por falha de leitura era
           indistinguível de "não há usuário cadastrado". */}
+      {/* O ERRO É O DE TODA LISTA (§0.10): a caixa sólida com "Tentar novamente"
+          — a âmbar de antes não deixava tentar de novo sem recarregar a tela. */}
       {error ? (
-        <CaixaAviso>Não foi possível carregar os usuários: {(error as Error).message}</CaixaAviso>
+        <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
       ) : isLoading ? (
         <Loading />
+      ) : (data ?? []).length === 0 ? (
+        <p className="text-corpo text-texto-2">Nenhum usuário cadastrado.</p>
       ) : (
-        <div className="rounded-cartao border border-borda">
+        <>
+        {/* NO CELULAR, UM CARTÃO POR PESSOA (auditoria visual, K1): a tabela de
+            cinco colunas rolava de lado dentro do cartão. */}
+        <div className="rounded-cartao border border-borda md:hidden">
+          <ListaNoCelular rotulo="Usuários">
+            {(data ?? []).map((p) => {
+              const admin = p.role === 'admin' || p.email === ADMIN_EMAIL
+              return (
+                <CartaoNoCelular
+                  key={p.id}
+                  titulo={p.nome || p.email}
+                  linhas={[
+                    p.nome ? <Truncado texto={p.email} max={9999} /> : null,
+                    `${admin ? 'Administrador' : 'Usuário'} · ${p.ativo ? 'Ativo' : 'Inativo'}`,
+                  ]}
+                  rotuloDasAcoes={`Ações de ${p.nome || p.email}`}
+                  acoes={[
+                    { rotulo: 'Editar', icone: <Pencil />, onSelecionar: () => abrirEdicao(p) },
+                    ...(admin
+                      ? []
+                      : [{ rotulo: p.ativo ? 'Desativar' : 'Ativar', onSelecionar: () => toggleAtivo(p) }]),
+                  ]}
+                />
+              )
+            })}
+          </ListaNoCelular>
+        </div>
+        <div className="hidden rounded-cartao border border-borda md:block">
           <Table>
             <THead>
               <tr>
@@ -189,10 +219,10 @@ export function SecaoUsuarios() {
                         // lista se lê pelo rosto antes da letra. Nome vazio fica
                         // com o traço, sem círculo — um "?" redondo pareceria
                         // alguém chamado "?".
-                        <div className="flex items-center gap-[10px]">
+                        <div className="flex items-center gap-s2">
                           <span
                             aria-hidden
-                            className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full bg-marca-suave font-display text-sm font-bold text-marca-texto"
+                            className="grid h-[32px] w-[32px] shrink-0 place-items-center rounded-full bg-marca-suave font-display text-sm font-bold text-marca-texto"
                           >
                             {iniciais(p.nome)}
                           </span>
@@ -202,7 +232,9 @@ export function SecaoUsuarios() {
                         <span className="text-texto-3">—</span>
                       )}
                     </TD>
-                    <TD className="align-middle text-texto-2">{p.email}</TD>
+                    <TD className="align-middle text-texto-2">
+                      <Truncado texto={p.email} max={280} />
+                    </TD>
                     <TD className="align-middle">
                       {admin ? (
                         <Badge tone="purple">
@@ -219,9 +251,9 @@ export function SecaoUsuarios() {
                           Ativo
                         </Selo>
                       ) : (
-                        <Selo tom="ruim" icone={IconeRuim}>
-                          Inativo
-                        </Selo>
+                        // NEUTRO, E NÃO VERMELHO (§0.8): o vermelho é de vencido, erro e
+                        // risco alto; quem foi desativado não é nenhum dos três.
+                        <Selo tom="neutro">Inativo</Selo>
                       )}
                     </TD>
                     <TD className="whitespace-nowrap text-right align-middle">
@@ -244,6 +276,7 @@ export function SecaoUsuarios() {
             </TBody>
           </Table>
         </div>
+        </>
       )}
 
       <Modal

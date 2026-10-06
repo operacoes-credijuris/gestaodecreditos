@@ -488,16 +488,16 @@ export function MultiCombobox({
           {escolhidas.map((o) => (
             <span
               key={o.id}
-              className="inline-flex items-center gap-1 rounded-full bg-marca-leve py-0.5 pl-2.5 pr-1 text-xs font-semibold text-marca-texto ring-1 ring-inset ring-marca-suave"
+              className="inline-flex h-[24px] items-center gap-s1 rounded-full bg-marca-leve pl-s2 pr-s0.5 text-xs font-semibold text-marca-texto ring-1 ring-inset ring-marca-suave"
             >
               {o.titulo}
               <button
                 type="button"
                 onClick={() => onChange(valores.filter((v) => v !== o.id))}
                 aria-label={`Remover ${o.titulo}`}
-                className="rounded-full p-0.5 text-marca-texto hover:bg-marca-suave"
+                className="grid h-[20px] w-[20px] place-items-center rounded-full text-marca-texto hover:bg-marca-suave"
               >
-                <X className="h-3 w-3" />
+                <X className="h-[12px] w-[12px]" />
               </button>
             </span>
           ))}

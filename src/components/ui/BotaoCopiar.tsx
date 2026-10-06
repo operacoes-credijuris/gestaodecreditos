@@ -51,8 +51,13 @@ export interface BotaoCopiarProps {
    * "copiado" discreto, para o que se copia muitas vezes seguidas.
    */
   aviso?: string
-  /** `sm` (24px, o padrão — linhas e cartões) ou `md` (32px). */
-  tamanho?: 'sm' | 'md'
+  /**
+   * `sm` (24px, o padrão), `md` (32px) ou `linha` (28px com ícone de 16px — a
+   * MESMA medida do `IconButton tamanho="linha"` e do botão de ícone do cabeçalho
+   * das fichas; revisão visual 2, 05/10/2026: os copiar soltos tinham três
+   * tamanhos e o ícone de 12px ao lado de texto de 14px).
+   */
+  tamanho?: 'sm' | 'md' | 'linha'
   /**
    * Não deixa o clique subir (padrão: sim): o botão mora em linhas e cartões que
    * abrem ficha ou expandem ao clique, e copiar não pode abrir nada.
@@ -103,7 +108,7 @@ export function BotaoCopiar({
         'inline-grid flex-none place-items-center rounded-controle text-texto-3 transition-colors',
         'hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
         // 24px de alvo (h-8 = 24px na escala de 3px por unidade), ícone de 12px.
-        tamanho === 'sm' ? 'h-8 w-8' : 'h-[32px] w-[32px]',
+        tamanho === 'sm' ? 'h-8 w-8' : tamanho === 'linha' ? 'h-controle-sm w-controle-sm' : 'h-[32px] w-[32px]',
         className,
       )}
     >

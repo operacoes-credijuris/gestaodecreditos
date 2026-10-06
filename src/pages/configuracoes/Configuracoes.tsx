@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { usePreferencia, umaDas } from '@/lib/preferencias'
 import { Pencil } from 'lucide-react'
 import { cn } from '@/lib/cn'
@@ -173,7 +173,7 @@ export default function Configuracoes() {
         title="Configurações"
         description="Integrações, assistente e equipe. Só administradores veem esta tela."
       />
-      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-[16px] min-[900px]:grid-cols-[230px_minmax(0,1fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-s4 min-[900px]:grid-cols-[230px_minmax(0,1fr)]">
         <MenuDasSecoes
           secao={secao}
           aoEscolher={setSecao}
@@ -181,16 +181,16 @@ export default function Configuracoes() {
           extras={extras}
           pendentes={pendentes}
         />
-        <Card className="p-[20px]">
+        <Card className="p-s4 sm:p-s5">
           {/* O QUE NÃO ESTÁ SALVO, DITO COM TODAS AS LETRAS: o lápis no menu é
               discreto, e cada seção salva no próprio botão — salvar uma não
               salva as outras. Some quando não há pendência. */}
           {pendentes.size > 0 && (
             <p
               role="status"
-              className="mb-[16px] flex items-start gap-s2 rounded-campo border border-aviso-borda bg-aviso-fundo px-s2 py-s2 text-corpo text-texto"
+              className="mb-s4 flex items-start gap-s2 rounded-campo border border-aviso-borda bg-aviso-fundo px-s3 py-s2 text-corpo text-texto"
             >
-              <Pencil className="mt-[3px] h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden />
+              <Pencil className="mt-s0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
               <span>{textoDasPendencias(pendentes)}</span>
             </p>
           )}
@@ -236,6 +236,20 @@ function MenuDasSecoes({
   extras: Partial<Record<SecaoId, ExtraDoMenu | null>>
   pendentes: ReadonlySet<SecaoId>
 }) {
+  // NO CELULAR, A SEÇÃO ABERTA À VISTA NA FILEIRA (revisão visual 2): a fileira
+  // rola de lado, e quem voltava à tela com "Justificativa técnica" lembrada via
+  // "ADVBOX · Kommo · Anthropic" — a aba aberta ficava fora da tela. Só mexe na
+  // rolagem DA FILEIRA (nunca na da página), e só quando ela rola.
+  const fileira = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const nav = fileira.current
+    if (!nav || nav.scrollWidth <= nav.clientWidth) return
+    const botao = nav.querySelector<HTMLElement>(`button[data-secao="${secao}"]`)
+    if (!botao) return
+    const fora = botao.offsetLeft < nav.scrollLeft || botao.offsetLeft + botao.offsetWidth > nav.scrollLeft + nav.clientWidth
+    if (fora) nav.scrollLeft = Math.max(0, botao.offsetLeft - 16)
+  }, [secao])
+
   function andarComSetas(e: KeyboardEvent<HTMLElement>) {
     const passo =
       e.key === 'ArrowDown' || e.key === 'ArrowRight'
@@ -260,6 +274,7 @@ function MenuDasSecoes({
 
   return (
     <nav
+      ref={fileira}
       aria-label="Seções das configurações"
       onKeyDown={andarComSetas}
       // NO CELULAR, A FILEIRA QUE ROLA DE LADO:
@@ -270,14 +285,14 @@ function MenuDasSecoes({
       //   configurado)" de cada item) se medirem por esta fileira, e não pelo
       //   <main>. O do último item, fora da vista, alargava a página e a tela
       //   inteira rolava de lado.
-      className="relative flex gap-[2px] overflow-x-auto p-[3px] scrollbar-thin min-[900px]:sticky min-[900px]:top-[80px] min-[900px]:flex-col min-[900px]:overflow-visible min-[900px]:p-0"
+      className="relative flex gap-s0.5 overflow-x-auto p-s1 scrollbar-thin min-[900px]:sticky min-[900px]:top-[80px] min-[900px]:flex-col min-[900px]:overflow-visible min-[900px]:p-0"
     >
       {GRUPOS_DO_MENU.map((g, gi) => (
         <div key={g.titulo} className="contents">
           <div
             className={cn(
-              'hidden px-[10px] pb-[6px] font-display text-xs font-bold uppercase tracking-wider text-texto-3 min-[900px]:block',
-              gi === 0 ? 'pt-0' : 'pt-[14px]',
+              'hidden px-s2 pb-s1.5 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3 min-[900px]:block',
+              gi === 0 ? 'pt-0' : 'pt-s3',
             )}
           >
             {g.titulo}
@@ -294,14 +309,14 @@ function MenuDasSecoes({
                 aria-current={ativo ? 'true' : undefined}
                 onClick={() => aoEscolher(id)}
                 className={cn(
-                  'flex h-[36px] shrink-0 items-center gap-s2 whitespace-nowrap rounded-controle px-[10px] text-left text-corpo font-medium text-texto-2 transition-colors',
+                  'flex h-controle shrink-0 items-center gap-s2 whitespace-nowrap rounded-controle px-s2 text-left text-corpo font-medium text-texto-2 transition-colors',
                   'hover:bg-superficie-3 hover:text-texto focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                   ativo &&
                     'bg-superficie font-bold text-marca-texto shadow-nivel-1 hover:bg-superficie hover:text-marca-texto',
                 )}
               >
                 <span className="min-w-0 truncate">{rotulo}</span>
-                <span className="ml-auto inline-flex shrink-0 items-center gap-[6px]">
+                <span className="ml-auto inline-flex shrink-0 items-center gap-s1.5">
                   {extra && (
                     <span
                       className={cn(

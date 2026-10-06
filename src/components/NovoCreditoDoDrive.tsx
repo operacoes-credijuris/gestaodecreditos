@@ -265,11 +265,11 @@ export function NovoCreditoDoDrive({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-s4">
       {/* O campo com rótulo e dica (a amostra): diz o que se escolhe e por que a
           lista é curta — só aparecem as pastas que ainda não têm cadastro. */}
       <Field label="Pasta do crédito no Drive" hint="Só as pastas de crédito que ainda não têm cadastro.">
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-s2">
         <div className="min-w-0 flex-1">
           <Combobox
             opcoes={opcoes}
@@ -294,7 +294,7 @@ export function NovoCreditoDoDrive({
           icon={<RefreshCw className={cn('h-[16px] w-[16px]', buscando && 'animate-spin')} />}
           disabled={buscando || !!passo}
           onClick={procurar}
-          className="flex h-11 w-11 shrink-0 items-center justify-center border border-borda-forte bg-superficie p-0"
+          className="flex h-controle w-controle shrink-0 items-center justify-center border border-borda-forte bg-superficie p-0"
         />
       </div>
       </Field>
@@ -302,7 +302,7 @@ export function NovoCreditoDoDrive({
       {/* O passo da leitura, girando, para a tela não ficar parada sem dizer nada. */}
       {passo && (
         <CaixaSuave>
-          <span role="status" className="inline-flex items-center gap-2">
+          <span role="status" className="inline-flex items-center gap-s2">
             <Loader2 className="h-[16px] w-[16px] shrink-0 animate-spin text-info" aria-hidden="true" />
             {passo}
           </span>
@@ -330,11 +330,11 @@ export function NovoCreditoDoDrive({
           Arquivo lido que não rendeu campo nenhum aparece assim mesmo, dizendo isso:
           é o sinal de que o dado esperado não estava onde se pensava. */}
       {!!extracao?.lidos?.length && (
-        <div className="rounded-campo border border-borda bg-superficie-2 px-4 py-3 text-corpo text-texto-2">
-          <p className="font-display mb-1 text-xs font-bold uppercase tracking-wide text-texto-2">
+        <div className="rounded-campo bg-superficie-2 p-s4 text-corpo text-texto-2">
+          <p className="font-display mb-s1 text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
             Lido pela IA · {extracao.lidos.length} arquivo(s)
           </p>
-          <ul className="list-disc space-y-0.5 pl-5">
+          <ul className="list-disc space-y-s0.5 pl-s5">
             {extracao.lidos.map((nome) => {
               const campos = camposDoArquivo(nome, extracao.procedencia)
               return (
@@ -355,11 +355,11 @@ export function NovoCreditoDoDrive({
       {/* Arquivo que não deu para ler NÃO desaparece: PDF escaneado e formato sem
           texto são o caso em que falta campo, e é aqui que se descobre por quê. */}
       {!!extracao?.ignorados?.length && (
-        <div className="rounded-campo border border-perigo-borda bg-perigo-fundo px-4 py-3 text-corpo text-texto-2">
-          <p className="font-display mb-1 text-xs font-bold uppercase tracking-wide text-perigo">
+        <div role="alert" className="rounded-campo border border-perigo-borda bg-perigo-fundo px-s4 py-s3 text-corpo text-texto-2">
+          <p className="font-display mb-s1 text-xs font-bold uppercase tracking-[0.06em] text-perigo">
             Não foi possível ler
           </p>
-          <ul className="list-disc space-y-0.5 pl-5">
+          <ul className="list-disc space-y-s0.5 pl-s5">
             {extracao.ignorados.map((ig, i) => (
               <li key={i} className="break-words">
                 <span className="text-texto">{ig.nome}</span>{' '}

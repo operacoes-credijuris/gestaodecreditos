@@ -217,9 +217,9 @@ function TabelaGrupos({
       )}
 
       {grupos.length === 0 ? (
-        <section className="rounded-cartao border border-borda bg-superficie shadow-nivel-1">
-          <EmptyState title="Sem dados para este recorte" />
-        </section>
+        // O VAZIO DE SEMPRE, tracejado (§0.10): dentro de um cartão sólido ele virava
+        // cartão dentro de cartão.
+        <EmptyState title="Sem dados para este recorte" />
       ) : (
         <>
           {/* O RANKING (Novo): comparação é barra, e ordenada pelo capital. Os

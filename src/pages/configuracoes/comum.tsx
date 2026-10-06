@@ -19,7 +19,7 @@ export function CabecalhoSecao({
   direita?: ReactNode
 }) {
   return (
-    <div className="mb-[18px] flex flex-wrap items-start justify-between gap-[12px]">
+    <div className="mb-s5 flex flex-wrap items-start justify-between gap-s3">
       <div className="min-w-0">
         <h2 className="font-display text-xl font-extrabold tracking-tight text-texto">{titulo}</h2>
         {apoio && <p className="mt-s1 text-corpo text-texto-2">{apoio}</p>}
@@ -34,7 +34,7 @@ export function RodapeSecao({ children, className }: { children: ReactNode; clas
   return (
     <div
       className={cn(
-        'mt-[18px] flex flex-wrap items-center justify-end gap-s2 border-t border-borda pt-[16px]',
+        'mt-s5 flex flex-wrap items-center justify-end gap-s2 border-t border-borda pt-s4',
         className,
       )}
     >
@@ -66,19 +66,23 @@ export const DUAS_COLUNAS = 'min-[900px]:col-span-2'
 /** O `.fs-h` da amostra: título pequeno, em caixa alta, de um bloco dentro da seção. */
 export function TituloBloco({ children }: { children: ReactNode }) {
   return (
-    <h3 className="mb-[10px] font-display text-xs font-bold uppercase tracking-wider text-texto-3">
+    <h3 className="mb-s2 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
       {children}
     </h3>
   )
 }
 
-/** A caixa âmbar de aviso (o `.note-box.warn` da amostra). */
+/**
+ * A caixa âmbar de aviso (o `.note-box.warn` da amostra). NAS MEDIDAS DAS OUTRAS
+ * CAIXAS DE AVISO DA PLATAFORMA (revisão visual 2): 12/8px e 8px até o ícone, como a
+ * `Ressalva` do Quadro, o aviso da tela de Entrar e a faixa de pendências daqui.
+ */
 export function CaixaAviso({ children }: { children: ReactNode }) {
   return (
     <div
-      className="mb-[16px] flex items-start gap-[10px] rounded-campo border border-aviso-borda bg-aviso-fundo px-[14px] py-[12px] text-corpo text-aviso"
+      className="mb-s4 flex items-start gap-s2 rounded-campo border border-aviso-borda bg-aviso-fundo px-s3 py-s2 text-corpo text-aviso"
     >
-      <TriangleAlert className="mt-[2px] h-[16px] w-[16px] shrink-0" aria-hidden />
+      <TriangleAlert className="mt-s0.5 h-[16px] w-[16px] shrink-0" aria-hidden />
       <p className="text-texto">{children}</p>
     </div>
   )
@@ -101,10 +105,10 @@ export function AvisoLeitura({ error }: { error: unknown }) {
 
 type TomSelo = 'ok' | 'neutro' | 'alerta' | 'ruim'
 
-const TOM_DO_SELO: Record<TomSelo, 'green' | 'gray' | 'amber' | 'red'> = {
+const TOM_DO_SELO: Record<TomSelo, 'green' | 'gray' | 'yellow' | 'red'> = {
   ok: 'green',
   neutro: 'gray',
-  alerta: 'amber',
+  alerta: 'yellow',
   ruim: 'red',
 }
 

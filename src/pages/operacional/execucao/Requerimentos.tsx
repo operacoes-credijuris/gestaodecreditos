@@ -479,7 +479,7 @@ export default function Requerimentos() {
         dirty={dirty}
         footer={
           <>
-            <Button variant="outline" onClick={fecharForm}>
+            <Button variant="secondary" onClick={fecharForm}>
               Cancelar
             </Button>
             <Button
@@ -610,6 +610,7 @@ export default function Requerimentos() {
                     valor={detalhe.numero_protocolo}
                     rotulo="Copiar o número do processo"
                     aviso="Número copiado."
+                    tamanho="linha"
                   />
                 ) : null
               }

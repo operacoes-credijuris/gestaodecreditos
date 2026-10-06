@@ -431,14 +431,17 @@ function GerarPanel() {
   return (
     <div ref={topo}>
       {/* VINDO DO CARD (onda 4, para todos): o que foi preenchido, o que falta e o
-          caminho de volta. O originador só se diz escolhido depois da lista. */}
+          caminho de volta. O originador só se diz escolhido depois da lista.
+          AS TRÊS FAIXAS DESTA TELA (vindo do card, erro e resultado) NAS MEDIDAS
+          DAS CAIXAS DE AVISO DA PLATAFORMA (revisão visual 2): raio de campo,
+          16/12px, ícone de 16px — eram cartões de 20px de ícone e 15px de lado. */}
       {(doCard || erroDoCard) && cardPedido !== null && (
         <div
           role="status"
-          className="mb-5 flex flex-wrap items-start gap-3 rounded-cartao border border-info-borda bg-info-fundo px-5 py-4"
+          className="mb-s5 flex flex-wrap items-start gap-x-s2 gap-y-s2 rounded-campo border border-info-borda bg-info-fundo px-s4 py-s3"
         >
-          <Info className="mt-0.5 h-[20px] w-[20px] flex-none text-info" aria-hidden />
-          <p className="min-w-[220px] flex-1 text-corpo text-texto-2">
+          <Info className="mt-s0.5 h-[16px] w-[16px] flex-none text-info" aria-hidden />
+          <p className="min-w-[220px] flex-1 text-corpo text-texto">
             {erroDoCard ? (
               erroDoCard
             ) : doCard && !doCard.ehRpv ? (
@@ -472,7 +475,7 @@ function GerarPanel() {
               </>
             ) : null}
           </p>
-          <div className="flex items-center gap-1">
+          <div className="-my-s1 flex items-center gap-s1">
             <Button
               type="button"
               variant="ghost"
@@ -494,23 +497,23 @@ function GerarPanel() {
       {erro && (
         <div
           role="alert"
-          className="mb-5 flex items-start gap-3 rounded-cartao border border-perigo-borda bg-perigo-fundo px-5 py-4 text-perigo"
+          className="mb-s5 flex items-start gap-s2 rounded-campo border border-perigo-borda bg-perigo-fundo px-s4 py-s3 text-perigo"
         >
-          <AlertTriangle className="mt-0.5 h-[20px] w-[20px] flex-none" aria-hidden />
+          <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
           <div>
             <p className="font-semibold text-texto">Não deu para gerar</p>
-            <p className="mt-0.5 text-corpo text-texto-2">{erro}</p>
+            <p className="mt-s0.5 text-corpo text-texto-2">{erro}</p>
           </div>
         </div>
       )}
       {resultado && (
-        <div className="mb-5 flex flex-wrap items-start gap-3 rounded-cartao border border-sucesso-borda bg-sucesso-fundo px-5 py-4 text-sucesso">
-          <CheckCircle2 className="mt-0.5 h-[20px] w-[20px] flex-none" aria-hidden />
+        <div className="mb-s5 flex flex-wrap items-start gap-s2 rounded-campo border border-sucesso-borda bg-sucesso-fundo px-s4 py-s3 text-sucesso">
+          <CheckCircle2 className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
           {/* min-w: no celular o botão da pasta desce para a linha de baixo, em
               vez de espremer o texto numa coluna de uma palavra. */}
-          <div className="min-w-[200px] flex-1 space-y-1">
+          <div className="min-w-[200px] flex-1 space-y-s1">
             <p className="font-semibold text-texto">
-              ✓ {resultado.tipos_gerados.length} contrato(s) gerado(s)
+              {resultado.tipos_gerados.length} contrato(s) gerado(s)
             </p>
             {/* OS NOMES EM PORTUGUÊS: a função devolve as chaves
                 ("cessao_credito"), e só a tela traduz. */}
@@ -518,19 +521,19 @@ function GerarPanel() {
               {resultado.tipos_gerados.map(nomeDaPeca).join(', ')}
             </p>
             {resultado.originador_criado && (
-              <p className="flex items-start gap-1.5 text-sm text-aviso">
-                <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
+              <p className="flex items-start gap-s1.5 text-sm text-texto-2">
+                <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none text-aviso" aria-hidden />
                 Pasta nova criada para o originador "{resultado.originador_criado}" — confira se não é erro de digitação.
               </p>
             )}
             {resultado.pendentes.length > 0 && (
-              <p className="flex items-start gap-1.5 text-sm text-aviso">
-                <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
+              <p className="flex items-start gap-s1.5 text-sm text-texto-2">
+                <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none text-aviso" aria-hidden />
                 Variáveis não preenchidas: {resultado.pendentes.map(nomeDaVariavel).join(', ')}
               </p>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-s2">
             <a
               href={resultado.drive_folder_url}
               target="_blank"
@@ -687,7 +690,7 @@ function GerarPanel() {
             titulo="O que gerar"
             descricao="Pela análise de crédito a casa já sabe quais peças o negócio exige. Desmarque para escolher à mão."
           >
-            <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto">
+            <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-s2 text-corpo text-texto">
               <input
                 type="checkbox"
                 checked={tiposAuto}
@@ -697,12 +700,12 @@ function GerarPanel() {
               Escolher automaticamente
             </label>
             {!tiposAuto && (
-              <fieldset className="mt-3 grid gap-2 sm:grid-cols-2">
+              <fieldset className="mt-s3 grid gap-s2 sm:grid-cols-2">
                 <legend className="sr-only">Peças a gerar</legend>
                 {PECAS_DO_CONTRATO.map((t) => (
                   <label
                     key={t}
-                    className="inline-flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto"
+                    className="inline-flex min-h-[24px] cursor-pointer items-center gap-s2 text-corpo text-texto"
                   >
                     <input
                       type="checkbox"
@@ -716,7 +719,7 @@ function GerarPanel() {
               </fieldset>
             )}
             {semPecaEscolhida && (
-              <p className="mt-2 text-xs font-semibold text-aviso">
+              <p className="mt-s2 text-xs font-semibold text-aviso">
                 Marque ao menos uma peça — ou volte a marcar "Escolher automaticamente".
               </p>
             )}
@@ -732,7 +735,7 @@ function GerarPanel() {
             do que falta ficam à vista enquanto se preenche o formulário. */}
         <Card className="p-s5 lg:sticky lg:top-s6">
           <h2 className="mb-s4 font-display text-lg font-bold text-texto">Resumo</h2>
-          <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2.5 text-corpo">
+          <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-s4 gap-y-s2 text-corpo">
             <LinhaResumo rotulo="Investidor" valor={investidorNome} falta="a escolher" />
             <LinhaResumo rotulo="Categoria" valor={categoria} falta="" />
             <LinhaResumo rotulo="Originador" valor={originador} falta="a escolher" />
@@ -751,7 +754,7 @@ function GerarPanel() {
           <Button
             type="submit"
             size="lg"
-            className="mt-5 w-full"
+            className="mt-s5 w-full"
             loading={enviando}
             disabled={!podeSubmeter}
             title={
@@ -763,7 +766,7 @@ function GerarPanel() {
           >
             {enviando ? 'Gerando…' : 'Gerar contrato'}
           </Button>
-          <p aria-live="polite" className="mt-3 text-xs text-texto-3">
+          <p aria-live="polite" className="mt-s3 text-xs text-texto-3">
             {enviando
               ? progresso
               : falta.length === 0
@@ -822,10 +825,10 @@ function ArquivosField({
         <div
           role="radiogroup"
           aria-label={generoLabel}
-          className="flex flex-wrap items-center gap-x-4 gap-y-1 text-corpo text-texto-2"
+          className="flex flex-wrap items-center gap-x-s3 gap-y-s1 text-corpo text-texto-2"
         >
           <span className="text-xs text-texto-3">{generoLabel}</span>
-          <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-1.5">
+          <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-s1.5">
             <input
               type="radio"
               name={grupo}
@@ -835,7 +838,7 @@ function ArquivosField({
             />
             Masculino
           </label>
-          <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-1.5">
+          <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-s1.5">
             <input
               type="radio"
               name={grupo}
@@ -858,7 +861,7 @@ function ArquivosField({
         }}
         onDragLeave={() => setArrastando(false)}
         onDrop={soltar}
-        className={`flex w-full flex-col items-center justify-center gap-1 rounded-campo border-[1.5px] border-dashed px-4 py-4 text-center text-corpo transition-colors hover:border-marca-viva hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2 ${
+        className={`flex w-full flex-col items-center justify-center gap-s1 rounded-campo border-[1.5px] border-dashed p-s4 text-center text-corpo transition-colors hover:border-marca-viva hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-2 ${
           arrastando ? 'border-marca-viva bg-marca-leve' : 'border-borda-forte bg-superficie'
         }`}
       >
@@ -880,7 +883,7 @@ function ArquivosField({
         }}
       />
       {arquivos.length > 0 && (
-        <ul className="mt-2 grid gap-1">
+        <ul className="mt-s2 grid gap-s1">
           {arquivos.map((f, i) => (
             <li
               key={i}

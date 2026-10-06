@@ -54,10 +54,10 @@ export function NumeroProcessoDrive({
 
   if (!podeAbrir) {
     return (
-      <span className={cn(reservarIcone && 'inline-flex items-center gap-1', className)}>
+      <span className={cn(reservarIcone && 'inline-flex items-center gap-s1', className)}>
         {texto}
         {reservarIcone && (
-          <span className="inline-block h-[14px] w-[14px] flex-none" aria-hidden="true" />
+          <span className="inline-block h-[16px] w-[16px] flex-none" aria-hidden="true" />
         )}
       </span>
     )
@@ -69,18 +69,18 @@ export function NumeroProcessoDrive({
       onClick={(e) => void abrir(e)}
       title="Abrir a pasta deste crédito no Drive"
       className={cn(
-        'inline-flex min-h-[24px] items-center gap-1 rounded text-left underline decoration-dotted underline-offset-2 transition-colors hover:text-marca-texto hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+        'inline-flex min-h-[24px] items-center gap-s1 rounded-controle text-left underline decoration-dotted underline-offset-2 transition-colors hover:text-marca-texto hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anel',
         className,
       )}
     >
       {texto}
       {abrindo ? (
-        <Loader2 className="h-[14px] w-[14px] flex-none animate-spin text-texto-3" />
+        <Loader2 className="h-[16px] w-[16px] flex-none animate-spin text-texto-3" />
       ) : (
         // O ícone é discreto e sempre presente: sublinhado pontilhado sozinho não
         // diria PARA ONDE o clique leva, e a plataforma tem outros textos
         // sublinhados.
-        <FolderOpen className={cn('h-[14px] w-[14px] flex-none text-texto-3', classeDoIcone)} />
+        <FolderOpen className={cn('h-[16px] w-[16px] flex-none text-texto-3', classeDoIcone)} />
       )}
     </button>
   )

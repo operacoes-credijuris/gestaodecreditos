@@ -35,7 +35,7 @@ import { PeticaoModal } from '@/components/PeticaoModal'
 import { NumeroProcessoDrive } from '@/components/NumeroProcessoDrive'
 import type { Apenso, Processo } from '@/lib/types'
 import { useAuth } from '@/contexts/AuthContext'
-import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
+import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { formatCNJ, formatNome, hojeISO, onlyDigits as dig, sentenceCase } from '@/lib/format'
 import { perguntarDescarte } from '@/lib/descarte'
@@ -454,6 +454,7 @@ export default function TarefasAdvbox() {
                 valor={formatCNJ(t.processo)}
                 rotulo="Copiar o número do processo"
                 aviso="Número copiado."
+                tamanho="linha"
                 className={cn('-my-s1.5 align-middle', SO_NO_HOVER)}
               />
             )}
@@ -558,39 +559,36 @@ export default function TarefasAdvbox() {
       ) : data?.sem_correspondencia ? (
         // Lista vazia por falta de vínculo, não por ausência de trabalho — dizer
         // isso evita que a pessoa conclua que não tem tarefas.
-        <Card>
-          <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-            <div className="grid h-16 w-16 place-items-center rounded-cartao bg-marca-suave text-marca-texto">
-              <Users className="h-7 w-7" aria-hidden="true" />
-            </div>
-            <p className="font-display text-lg font-bold text-texto">
-              Perfil não encontrado no ADVBOX
-            </p>
-            <p className="max-w-md text-corpo text-texto-2">
+        // O VAZIO DA PLATAFORMA (ui/EmptyState), e não uma cópia dele dentro de um
+        // cartão (revisão visual 2).
+        <EmptyState
+          icon={<Users />}
+          title="Perfil não encontrado no ADVBOX"
+          description={
+            <>
               {data.perfil_nome
                 ? `O nome do seu perfil ("${data.perfil_nome}") não corresponde a nenhum usuário do ADVBOX`
                 : 'Seu perfil está sem nome cadastrado'}
               , então não há como identificar quais tarefas são suas. Peça a um
               administrador para acertar o nome em Configurações → Usuários,
               exatamente como aparece no ADVBOX.
-            </p>
-          </div>
-        </Card>
+            </>
+          }
+        />
+      ) : vazio && busca.trim() ? (
+        // COM BUSCA, A LINHA SIMPLES (§0.10): o filtro é que esvaziou a lista.
+        <SemResultado texto="Nenhuma tarefa com essa busca" rotuloLimpar="Limpar a busca" onLimpar={() => setBusca('')} />
       ) : vazio ? (
-        // O VAZIO DIZ POR QUE ESTÁ VAZIO (a amostra): a busca, a visão sem prazo,
-        // ou de fato nada com prazo no ADVBOX.
-        <Card>
-          <EmptyState
-            title="Nenhuma tarefa"
-            description={
-              busca.trim()
-                ? 'Nenhuma tarefa corresponde à busca.'
-                : filtroPrazo === 'sem_prazo'
-                  ? 'Nenhuma tarefa sem prazo no ADVBOX.'
-                  : 'Nada com prazo no ADVBOX por enquanto.'
-            }
-          />
-        </Card>
+        // O VAZIO DIZ POR QUE ESTÁ VAZIO (a amostra): a visão sem prazo, ou de
+        // fato nada com prazo no ADVBOX. Sozinho, sem cartão em volta.
+        <EmptyState
+          title="Nenhuma tarefa"
+          description={
+            filtroPrazo === 'sem_prazo'
+              ? 'Nenhuma tarefa sem prazo no ADVBOX.'
+              : 'Nada com prazo no ADVBOX por enquanto.'
+          }
+        />
       ) : filtroPrazo === 'sem_prazo' ? (
         <div className="space-y-s2">{semPrazo.map(card)}</div>
       ) : (
@@ -871,7 +869,7 @@ export function NovaTarefaModal({
       dirty={dirty}
       footer={
         <>
-          <Button variant="outline" onClick={fechar}>
+          <Button variant="secondary" onClick={fechar}>
             Cancelar
           </Button>
           <Button

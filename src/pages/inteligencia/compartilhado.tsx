@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Check, Info } from 'lucide-react'
-import { Card, CardBody } from '@/components/ui/Card'
+import { Card } from '@/components/ui/Card'
 import { ErrorState, Loading } from '@/components/ui/Table'
 import { cn } from '@/lib/cn'
 import { formatBRL, hojeISO } from '@/lib/format'
@@ -82,10 +82,10 @@ export function usePainel(): {
 
 export function CarregandoPainel() {
   return (
+    // SEM O CardBody: o Loading já tem o respiro dele, e os dois somados davam
+    // quase 40px de margem (revisão visual 2).
     <Card>
-      <CardBody>
-        <Loading label="Calculando a carteira…" />
-      </CardBody>
+      <Loading label="Calculando a carteira…" />
     </Card>
   )
 }
@@ -94,7 +94,7 @@ export function CarregandoPainel() {
 export function ErroPainel({ tentarDeNovo }: { tentarDeNovo: () => void }) {
   return (
     <Card>
-      <ErrorState message="Não foi possível carregar a carteira." onRetry={tentarDeNovo} />
+      <ErrorState message="Confira a conexão e tente de novo." onRetry={tentarDeNovo} />
     </Card>
   )
 }
@@ -159,10 +159,10 @@ export function Explicacao({ texto, children }: { texto: string; children: React
  * focável para quem não usa mouse chegar a ela.
  */
 const SELO_CLASSE: Record<ClasseAmostra, { cor: string; Icone: typeof Info }> = {
-  insuficiente: { cor: 'border-perigo-borda bg-perigo-fundo text-perigo', Icone: AlertTriangle },
-  baixa: { cor: 'border-aviso-borda bg-aviso-fundo text-aviso', Icone: AlertTriangle },
-  moderada: { cor: 'border-info-borda bg-info-fundo text-info', Icone: Info },
-  alta: { cor: 'border-sucesso-borda bg-sucesso-fundo text-sucesso', Icone: Check },
+  insuficiente: { cor: 'ring-perigo-borda bg-perigo-fundo text-perigo', Icone: AlertTriangle },
+  baixa: { cor: 'ring-aviso-borda bg-aviso-fundo text-aviso', Icone: AlertTriangle },
+  moderada: { cor: 'ring-info-borda bg-info-fundo text-info', Icone: Info },
+  alta: { cor: 'ring-sucesso-borda bg-sucesso-fundo text-sucesso', Icone: Check },
 }
 
 /**
@@ -185,11 +185,12 @@ export function SeloAmostra({
       tabIndex={0}
       aria-label={`${rotulo} · n=${n}. ${explicacao}`}
       className={cn(
-        'inline-flex h-[22px] shrink-0 items-center gap-s1 whitespace-nowrap rounded-full border px-s2 text-xs font-semibold',
+        // NAS MEDIDAS DA `Badge` (§0.8, revisão visual 2): 20px, contorno por dentro.
+        'inline-flex h-[20px] shrink-0 items-center gap-s1 whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset dark:ring-opacity-50',
         cor,
       )}
     >
-      <Icone className="h-[13px] w-[13px] shrink-0" aria-hidden />
+      <Icone className="h-[12px] w-[12px] shrink-0" aria-hidden />
       {compacto ? `n=${n}` : `${rotulo} · n=${n}`}
     </span>
   )
@@ -399,10 +400,10 @@ export function AvisoParametros() {
   if (!error) return null
   return (
     <Ressalva>
-      Não consegui ler os parâmetros de atualização (SELIC e IPCA):{' '}
-      {(error as Error)?.message ?? 'erro desconhecido'}. Os valores projetados dos créditos
-      corrigidos por esses índices ficam de fora até a leitura voltar — recarregue a página
-      ou confira em Carteiras › Parâmetros de atualização.
+      <span title={(error as Error)?.message ?? 'erro desconhecido'}>
+        Não consegui ler os parâmetros de atualização (SELIC e IPCA): as projeções dos créditos
+        corrigidos por eles ficam fora dos totais. Recarregue ou confira em Carteiras › Parâmetros.
+      </span>
     </Ressalva>
   )
 }

@@ -51,8 +51,8 @@ export function JanelaDeDescarte() {
         </>
       }
     >
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-aviso" aria-hidden />
+      <div className="flex items-start gap-s3">
+        <AlertTriangle className="mt-s0.5 h-[20px] w-[20px] shrink-0 text-aviso" aria-hidden />
         <p className="text-corpo text-texto-2">{textoDoDescarte(lugar)}</p>
       </div>
     </Modal>

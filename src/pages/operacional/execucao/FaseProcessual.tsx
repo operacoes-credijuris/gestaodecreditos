@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, CheckCircle2, ChevronDown, Pencil, Trash2, Info } from 'lucide-react'
+import { RefreshCw, CheckCircle2, ChevronDown, ChevronRight, Pencil, Trash2, Info } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
 import { invokeFunction } from '@/lib/functions'
@@ -300,11 +300,11 @@ function SituacaoSelect({
         aria-haspopup="true"
         title="Situação dentro da fase — clique para trocar"
         className={cn(
-          'flex min-h-[30px] w-full items-center justify-between gap-2 rounded-controle border px-2.5 py-1 text-left text-sm transition-colors hover:border-borda-forte',
+          'flex h-controle-sm w-full items-center justify-between gap-s2 rounded-controle border px-s2 text-left text-sm transition-colors hover:border-borda-forte',
           situacaoAtual ? classeSelecionadaParaCor(situacaoAtual.cor) : 'border-borda-controle bg-superficie text-texto-3',
         )}
       >
-        <span className="flex min-w-0 items-center gap-1.5">
+        <span className="flex min-w-0 items-center gap-s1.5">
           {situacaoAtual && (
             <span
               aria-hidden="true"
@@ -323,7 +323,7 @@ function SituacaoSelect({
         <div className="absolute z-20 mt-s1 max-h-72 w-full overflow-auto rounded-flutuante border border-borda bg-superficie py-s1 shadow-nivel-2 scrollbar-thin dark:ring-1 dark:ring-white/[0.06]">
           {/* O CABEÇALHO DIZ DE QUAL FASE SÃO AS SITUAÇÕES (o `.ph` da amostra):
               a lista muda de fase para fase, e quem abre o menu precisa saber. */}
-          <p className="px-2.5 pb-1 pt-1.5 text-xs font-bold uppercase tracking-wider text-texto-3">
+          <p className="px-s3 pb-s1 pt-s2 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
             Situações de "{nomeFase}"
           </p>
           <button
@@ -332,17 +332,17 @@ function SituacaoSelect({
               onDefinir(null)
               setAberto(false)
             }}
-            className="block w-full px-2 py-1.5 text-left text-xs text-texto-3 hover:bg-superficie-2"
+            className="block w-full px-s3 py-s2 text-left text-xs text-texto-3 hover:bg-superficie-3/60"
           >
             — (nenhuma)
           </button>
 
           {opcoes.map((o) =>
             editandoId === o.id ? (
-              <div key={o.id} className="space-y-1.5 border-t border-borda px-2 py-1.5">
+              <div key={o.id} className="space-y-s1.5 border-t border-borda px-s3 py-s2">
                 <input
                   autoFocus
-                  className="w-full rounded-controle border border-borda-controle bg-superficie px-s2 py-s1 text-xs text-texto focus:border-marca-viva focus:outline-none focus:ring-1 focus:ring-marca-viva"
+                  className="h-controle-sm w-full rounded-controle border border-borda-controle bg-superficie px-s2 text-sm text-texto focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20"
                   value={nomeEditado}
                   onChange={(e) => setNomeEditado(e.target.value)}
                   onKeyDown={(e) => {
@@ -350,7 +350,7 @@ function SituacaoSelect({
                     if (e.key === 'Enter') confirmarEdicao()
                   }}
                 />
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-s1.5">
                   {PALETA_SITUACAO.map((c) => (
                     <button
                       key={c.chave}
@@ -361,7 +361,7 @@ function SituacaoSelect({
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => setCorEditada(c.chave)}
                       className={cn(
-                        'h-4 w-4 shrink-0 rounded-full',
+                        'h-[20px] w-[20px] shrink-0 rounded-full',
                         c.bola,
                         corEditada === c.chave && 'ring-2 ring-offset-1 ring-texto-3',
                       )}
@@ -372,7 +372,7 @@ function SituacaoSelect({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={confirmarEdicao}
                     disabled={!nomeEditado.trim()}
-                    className="ml-s1 text-xs font-medium text-marca-texto hover:underline disabled:text-texto-3"
+                    className="ml-s1 inline-flex h-controle-sm items-center rounded-controle px-s2 text-sm font-semibold text-marca-texto hover:bg-marca-leve disabled:text-texto-3 disabled:hover:bg-transparent"
                   >
                     Salvar
                   </button>
@@ -380,7 +380,7 @@ function SituacaoSelect({
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => setEditandoId(null)}
-                    className="text-xs text-texto-3 hover:underline"
+                    className="inline-flex h-controle-sm items-center rounded-controle px-s2 text-sm text-texto-2 hover:bg-superficie-3"
                   >
                     Cancelar
                   </button>
@@ -390,8 +390,8 @@ function SituacaoSelect({
               <div
                 key={o.id}
                 className={cn(
-                  'group flex items-center gap-1.5 px-2 py-1.5 hover:bg-superficie-2',
-                  o.id === situacaoIdAtual && 'bg-brand-50/60',
+                  'group flex items-center gap-s1.5 px-s3 py-s0.5 hover:bg-superficie-3/60',
+                  o.id === situacaoIdAtual && 'bg-marca-leve',
                 )}
               >
                 <button
@@ -400,11 +400,11 @@ function SituacaoSelect({
                     onDefinir(o.id)
                     setAberto(false)
                   }}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                  className="flex min-h-controle-sm min-w-0 flex-1 items-center gap-s1.5 text-left"
                 >
                   <span
                     className={cn(
-                      'h-2.5 w-2.5 shrink-0 rounded-full',
+                      'h-[10px] w-[10px] shrink-0 rounded-full',
                       PALETA_SITUACAO.find((c) => c.chave === o.cor)?.bola ?? 'bg-borda-forte',
                     )}
                   />
@@ -424,7 +424,7 @@ function SituacaoSelect({
                   }}
                   className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-texto-3 opacity-60 hover:text-texto-2 focus-visible:opacity-100 group-hover:opacity-100"
                 >
-                  <Pencil className="h-[14px] w-[14px]" />
+                  <Pencil className="h-[16px] w-[16px]" />
                 </button>
                 <button
                   type="button"
@@ -433,19 +433,19 @@ function SituacaoSelect({
                   onClick={() => onExcluir(o.id)}
                   className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-texto-3 opacity-60 hover:text-perigo focus-visible:opacity-100 group-hover:opacity-100"
                 >
-                  <Trash2 className="h-[14px] w-[14px]" />
+                  <Trash2 className="h-[16px] w-[16px]" />
                 </button>
               </div>
             ),
           )}
 
-          <div className="border-t border-borda px-2 py-1.5">
+          <div className="border-t border-borda px-s3 py-s2">
             {novoAberto ? (
-              <div className="space-y-1.5">
+              <div className="space-y-s1.5">
                 <input
                   autoFocus
                   disabled={criando}
-                  className="w-full rounded-controle border border-borda-controle bg-superficie px-s2 py-s1 text-xs text-texto focus:border-marca-viva focus:outline-none focus:ring-1 focus:ring-marca-viva"
+                  className="h-controle-sm w-full rounded-controle border border-borda-controle bg-superficie px-s2 text-sm text-texto focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20"
                   placeholder="Nome da nova situação…"
                   value={novoNome}
                   onChange={(e) => setNovoNome(e.target.value)}
@@ -457,7 +457,7 @@ function SituacaoSelect({
                     if (e.key === 'Enter') void confirmarNovo()
                   }}
                 />
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-s1.5">
                   {PALETA_SITUACAO.map((c) => (
                     <button
                       key={c.chave}
@@ -468,7 +468,7 @@ function SituacaoSelect({
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => setNovaCor(c.chave)}
                       className={cn(
-                        'h-4 w-4 shrink-0 rounded-full',
+                        'h-[20px] w-[20px] shrink-0 rounded-full',
                         c.bola,
                         novaCor === c.chave && 'ring-2 ring-offset-1 ring-texto-3',
                       )}
@@ -479,7 +479,7 @@ function SituacaoSelect({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => void confirmarNovo()}
                     disabled={criando || !novoNome.trim()}
-                    className="ml-s1 text-xs font-medium text-marca-texto hover:underline disabled:text-texto-3"
+                    className="ml-s1 inline-flex h-controle-sm items-center rounded-controle px-s2 text-sm font-semibold text-marca-texto hover:bg-marca-leve disabled:text-texto-3 disabled:hover:bg-transparent"
                   >
                     Salvar
                   </button>
@@ -544,7 +544,7 @@ function DataDaSituacao({
     <input
       type="date"
       aria-label="Data da situação"
-      className="w-full rounded-controle border border-borda-controle bg-superficie px-2 py-1 text-sm tabular-nums text-texto focus:border-marca-viva focus:outline-none focus:ring-1 focus:ring-anel"
+      className="h-controle-sm w-full rounded-controle border border-borda-controle bg-superficie px-s2 text-sm tabular-nums text-texto focus:border-anel focus:outline-none focus:ring-[3px] focus:ring-anel/20"
       value={texto}
       onClick={(e) => e.stopPropagation()}
       onFocus={() => {
@@ -585,12 +585,12 @@ function CartaoDaFase({
       onClick={onClick}
       aria-pressed={ativo}
       className={cn(
-        'flex h-full flex-col gap-1 rounded-cartao border px-4 py-3 text-left shadow-nivel-1 transition hover:border-borda-forte focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
+        'flex h-full flex-col gap-s1 rounded-cartao border p-s4 text-left shadow-nivel-1 transition hover:border-borda-forte focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
         aviso ? 'border-aviso-borda bg-aviso-fundo' : 'border-borda bg-superficie',
         ativo && 'border-marca-viva ring-[3px] ring-marca-viva/15',
       )}
     >
-      <span className="flex min-h-[32px] items-start gap-1.5 text-xs font-medium leading-snug text-texto-2">
+      <span className="flex min-h-[32px] items-start gap-s1.5 text-xs font-medium leading-snug text-texto-2">
         {aviso && <CheckCircle2 className="mt-px h-[14px] w-[14px] shrink-0 text-aviso" aria-hidden="true" />}
         {rotulo}
       </span>
@@ -738,8 +738,8 @@ export function FaseProcessual({
   })
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <div className="space-y-s4">
+      <div className="flex flex-col gap-s2 sm:flex-row sm:items-center">
           <Segmented
             ariaLabel="Trilha do crédito"
             items={[
@@ -752,7 +752,7 @@ export function FaseProcessual({
               setFiltro(null)
             }}
           />
-          <div className="flex flex-1 items-center gap-2">
+          <div className="flex flex-1 items-center gap-s2">
             <div className="relative flex-1">
               <Input
                 className="w-full"
@@ -783,7 +783,7 @@ export function FaseProcessual({
         <ErrorState message={(fase.error as Error)?.message} onRetry={() => fase.refetch()} />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-s3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {ordem.map((codigo) => (
               <CartaoDaFase
                 key={codigo}
@@ -806,7 +806,7 @@ export function FaseProcessual({
           </div>
 
           {contagem.semClassificacao > 0 && (
-            <p className="text-sm text-texto-3">
+            <p className="text-xs text-texto-3">
               {contagem.semClassificacao} crédito(s) ainda sem classificação — clique em "Atualizar
               fases" (ao lado da busca) para gerar.
             </p>
@@ -814,7 +814,7 @@ export function FaseProcessual({
 
           {!filtro && (
             <CaixaSuave>
-              <Info className="mt-0.5 h-[16px] w-[16px] shrink-0 text-info" aria-hidden="true" />
+              <Info className="mt-s0.5 h-[16px] w-[16px] shrink-0 text-info" aria-hidden="true" />
               Escolha uma fase acima para ver os créditos dela.
             </CaixaSuave>
           )}
@@ -823,7 +823,7 @@ export function FaseProcessual({
             <Card className="p-0">
               {/* O nome da fase e a contagem no topo do painel (a amostra): a lista
                   diz o que está mostrando. */}
-              <div className="border-b border-borda px-5 pb-1 pt-4">
+              <div className="border-b border-borda px-s5 pb-s1 pt-s4">
                 <TituloDoGrupo
                   titulo={
                     filtro.tipo === 'concluso'
@@ -844,7 +844,7 @@ export function FaseProcessual({
                   <THead>
                     <tr>
                       <TH>Processo</TH>
-                      <TH className="w-96">Situação</TH>
+                      <TH className="md:w-96">Situação</TH>
                       <TH>Data da situação</TH>
                     </tr>
                   </THead>
@@ -857,7 +857,7 @@ export function FaseProcessual({
                       return (
                         <TR key={processo.id} onClick={() => onAbrirDetalhe(processo)}>
                           <TD>
-                            <p className="flex items-center gap-1.5 font-semibold tabular-nums text-texto">
+                            <p className="flex items-center gap-s1.5 whitespace-nowrap font-semibold tabular-nums text-texto">
                               {formatCNJ(processo.numero_cnj)}
                               {r?.conclusao_pendente && (
                                 <span title="Concluso para decisão">
@@ -870,7 +870,7 @@ export function FaseProcessual({
                             </p>
                             <p className="text-xs text-texto-2">{processo.entidade_devedora || '—'}</p>
                           </TD>
-                          <TD className="w-96">
+                          <TD className="min-w-[220px] md:w-96">
                             <SituacaoSelect
                               nomeFase={getLabel(FASE_PROCESSUAL, faseDaLinha).label}
                               situacaoIdAtual={r?.situacao_id ?? null}
@@ -911,7 +911,7 @@ export function FaseProcessual({
             </Card>
           )}
 
-          <Card className="p-4">
+          <Card className="p-s4 sm:p-s5">
             <button
               type="button"
               className="flex min-h-[24px] w-full items-center justify-between text-left"
@@ -923,7 +923,7 @@ export function FaseProcessual({
                 {/* A CONTAGEM SÓ DEPOIS DE CARREGAR: "(0)" durante a leitura
                     afirmaria que não há nada. */}
                 {recentes.porCredito.size > 0 && !recentes.isError && !recentes.isLoading && (
-                  <span className="ml-2 text-sm font-semibold text-texto-3">({recentes.porCredito.size})</span>
+                  <span className="ml-s2 text-sm font-semibold text-texto-3">({recentes.porCredito.size})</span>
                 )}
               </h3>
               <ChevronDown
@@ -934,7 +934,7 @@ export function FaseProcessual({
               />
             </button>
             {recentesAbertas && (
-              <div className="mt-3">
+              <div className="mt-s3">
                 {recentes.isLoading ? (
               <Loading />
             ) : recentes.isError ? (
@@ -942,7 +942,7 @@ export function FaseProcessual({
             ) : recentes.porCredito.size === 0 ? (
               <p className="text-corpo text-texto-2">Nenhuma movimentação nos últimos 7 dias.</p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-s2">
                 {daTrilha
                   .map((p) => ({ p, mov: recentes.porCredito.get(p.id), r: faseDe.get(p.id) }))
                   .filter((x): x is { p: Processo; mov: MovRecenteRow; r: FaseRow | undefined } => !!x.mov)
@@ -965,12 +965,12 @@ export function FaseProcessual({
                         // TRATADA ESMAECE (a amostra): continua na lista, no fim, e
                         // volta a acender sozinha quando chega movimentação nova.
                         className={cn(
-                          'cursor-pointer rounded-campo border border-borda p-3 transition-colors hover:bg-superficie-2',
+                          'cursor-pointer rounded-campo border border-borda p-s3 transition-colors hover:bg-superficie-3/60',
                           tratado && 'opacity-[.55]',
                         )}
                         onClick={() => onAbrirDetalhe(p)}
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start justify-between gap-s3">
                           <label
                             className="flex min-h-[24px] min-w-[24px] shrink-0 items-center"
                             title="Marcar como tratado"
@@ -978,7 +978,7 @@ export function FaseProcessual({
                           >
                             <input
                               type="checkbox"
-                              className="h-[16px] w-[16px] rounded border-borda-forte accent-marca"
+                              className="h-[16px] w-[16px] border-borda-forte accent-marca"
                               aria-label={`Marcar ${formatCNJ(p.numero_cnj)} como tratado`}
                               checked={tratado}
                               disabled={!mov.data}
@@ -996,11 +996,23 @@ export function FaseProcessual({
                             {formatCNJ(p.numero_cnj)}
                           </span>
                           <span className="shrink-0 text-xs tabular-nums text-texto-3">{formatDate(mov.data)}</span>
+                          {/* O CAMINHO DO TECLADO (§0.12, revisão visual 2): o cartão abre
+                              ao clique, mas não recebe foco — o "›" recebe. */}
+                          <IconButton
+                            tamanho="linha"
+                            label={`Abrir ${formatCNJ(p.numero_cnj)}`}
+                            icon={<ChevronRight />}
+                            className="-my-s1"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onAbrirDetalhe(p)
+                            }}
+                          />
                         </div>
                         {mov.conteudo && (
-                          <p className="mt-1 line-clamp-2 text-corpo italic text-texto-2">"{mov.conteudo}"</p>
+                          <p className="mt-s1 line-clamp-2 text-corpo italic text-texto-2">"{mov.conteudo}"</p>
                         )}
-                        <div className="mt-2">
+                        <div className="mt-s2">
                           {r ? (
                             mudouDeFase ? (
                               <Badge tone="blue">Avançou para {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}</Badge>

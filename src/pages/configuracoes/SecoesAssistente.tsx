@@ -3,8 +3,9 @@
 
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileArchive, Info, Pencil, Trash2, TriangleAlert, Upload } from 'lucide-react'
+import { FileArchive, Pencil, Trash2, Upload } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { formatDateTime } from '@/lib/format'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction, invokeFunctionForm } from '@/lib/functions'
 import { useAuth } from '@/contexts/AuthContext'
@@ -148,13 +149,16 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
     <>
       <CabecalhoSecao
         titulo="Skills do assistente"
-        apoio="Pacotes de habilidade da Anthropic (feitos no Claude, subidos como .zip) que o assistente passa a usar. Uma skill ativa vale para todo mundo que usa o assistente."
+        apoio="Pacotes .zip de habilidades, feitos no Claude, que o assistente passa a usar. Uma skill ativa vale para todos."
       />
       {isLoading ? (
         <Loading />
       ) : (
         <>
           <AvisoLeitura error={error} />
+          {data && data.length === 0 && (
+            <p className="text-corpo text-texto-2">Nenhuma skill enviada ainda.</p>
+          )}
           {data && data.length > 0 && (
             <div className="rounded-cartao border border-borda">
               <Table>
@@ -175,28 +179,35 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
                         {s.descricao && <p className="text-xs text-texto-3">{s.descricao}</p>}
                       </TD>
                       <TD>
-                        <button
-                          type="button"
-                          onClick={() => alternar(s.id)}
-                          title={s.ativo ? 'Clique para desativar' : 'Clique para ativar'}
-                          className="inline-flex min-h-[24px] items-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
-                        >
-                          {s.ativo ? (
-                            <Selo tom="ok" icone={IconeOk}>
-                              Ativa
-                            </Selo>
-                          ) : (
-                            <Selo tom="neutro">Desativada</Selo>
-                          )}
-                        </button>
+                        {s.ativo ? (
+                          <Selo tom="ok" icone={IconeOk}>
+                            Ativa
+                          </Selo>
+                        ) : (
+                          <Selo tom="neutro">Desativada</Selo>
+                        )}
                       </TD>
-                      <TD className="text-right">
-                        <IconButton
-                          label={`Remover skill ${s.nome}`}
-                          variant="danger"
-                          icon={<Trash2 className="h-[16px] w-[16px]" />}
-                          onClick={() => remover(s.id)}
-                        />
+                      {/* O LIGA-DESLIGA COMO EM USUÁRIOS (revisão visual 2): o selo só
+                          diz o estado, e o botão diz o que o clique faz. Antes o
+                          próprio selo era o botão, de 20px e com o nome "Ativa" —
+                          o leitor de tela não sabia que ali se desligava a skill. */}
+                      <TD className="whitespace-nowrap text-right">
+                        <div className="flex items-center justify-end gap-s1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`${s.ativo ? 'Desativar' : 'Ativar'} a skill ${s.nome}`}
+                            onClick={() => alternar(s.id)}
+                          >
+                            {s.ativo ? 'Desativar' : 'Ativar'}
+                          </Button>
+                          <IconButton
+                            label={`Remover skill ${s.nome}`}
+                            variant="danger"
+                            icon={<Trash2 className="h-[16px] w-[16px]" />}
+                            onClick={() => remover(s.id)}
+                          />
+                        </div>
                       </TD>
                     </TR>
                   ))}
@@ -205,7 +216,7 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
             </div>
           )}
 
-          <div className={cn(data && data.length > 0 && 'mt-[16px]')}>
+          <div className={cn(data && 'mt-s6')}>
             <TituloBloco>Enviar uma skill</TituloBloco>
             <GradeCampos>
               <Field label="Nome">
@@ -248,20 +259,20 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
                   className={cn(
                     // Os filhos não recebem o mouse: senão passar do ícone para o
                     // texto contava como sair da caixa, e o realce do arrastar piscava.
-                    'cursor-pointer rounded-campo border-[1.5px] border-dashed border-borda-forte bg-superficie-2 p-[12px] text-center text-corpo text-texto-2 transition-colors [&>*]:pointer-events-none',
+                    'cursor-pointer rounded-campo border-[1.5px] border-dashed border-borda-forte bg-superficie-2 p-s3 text-center text-corpo text-texto-2 transition-colors [&>*]:pointer-events-none',
                     'hover:bg-superficie-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                     arrastando && 'border-marca bg-marca-leve',
                   )}
                 >
                   {arquivo ? (
                     <>
-                      <FileArchive className="mx-auto mb-[6px] block h-[22px] w-[22px] text-texto-3" aria-hidden />
+                      <FileArchive className="mx-auto mb-s1.5 block h-[20px] w-[20px] text-texto-3" aria-hidden />
                       <b className="font-semibold text-marca-texto">{arquivo.name}</b> ·{' '}
                       {tamanhoEmKB(arquivo.size)} KB
                     </>
                   ) : (
                     <>
-                      <Upload className="mx-auto mb-[6px] block h-[22px] w-[22px] text-texto-3" aria-hidden />
+                      <Upload className="mx-auto mb-s1.5 block h-[20px] w-[20px] text-texto-3" aria-hidden />
                       <b className="font-semibold text-marca-texto">Solte o .zip aqui</b> ou clique
                       para escolher
                     </>
@@ -273,7 +284,7 @@ export function SecaoSkills({ pendencia }: { pendencia: Pendencia }) {
               <Button
                 onClick={enviar}
                 loading={enviando}
-                icon={<Upload className="h-[14px] w-[14px]" />}
+                icon={<Upload className="h-[16px] w-[16px]" />}
               >
                 Enviar Skill
               </Button>
@@ -389,7 +400,7 @@ export function SecaoRoteiro({ pendencia }: { pendencia: Pendencia }) {
         // ter saído do que o sistema entrega.
         direita={
           ehOPadrao ? null : (
-            <Selo tom="ok" icone={Pencil}>
+            <Selo tom="neutro" icone={Pencil}>
               Editado pela operação
             </Selo>
           )
@@ -421,14 +432,14 @@ export function SecaoRoteiro({ pendencia }: { pendencia: Pendencia }) {
               {data?.atualizado_em && (
                 <>
                   {' · Última alteração em '}
-                  {new Date(data.atualizado_em).toLocaleString('pt-BR')}
+                  {formatDateTime(data.atualizado_em)}
                   {data.atualizado_por ? ' por ' + data.atualizado_por : ''}
                 </>
               )}
             </span>
             {mudou && (
               <span className="inline-flex items-center gap-s1 text-sm font-semibold text-aviso">
-                <TriangleAlert className="h-[14px] w-[14px]" aria-hidden />
+                <Pencil className="h-[16px] w-[16px]" aria-hidden />
                 alterações não salvas
               </span>
             )}
@@ -552,10 +563,10 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
     <>
       <CabecalhoSecao
         titulo="Justificativa técnica"
-        apoio='O prompt que a IA segue no botão "Justificativa técnica" da Produção de proposta (RPV, precatório interno e externo).'
+        apoio='O prompt do botão "Justificativa técnica" da Produção de proposta (RPV, precatório interno e externo).'
         direita={
           ehOPadrao ? null : (
-            <Selo tom="ok" icone={Pencil}>
+            <Selo tom="neutro" icone={Pencil}>
               Editado pela operação
             </Selo>
           )
@@ -566,10 +577,13 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
         <Loading />
       ) : (
         <>
-          <div className="min-w-0">
-            <TituloBloco>Prompt da justificativa técnica</TituloBloco>
+          {/* COMO O ROTEIRO, A IRMÃ DELA (revisão visual 2): o campo direto, sem o
+              título de bloco que repetia o da seção, na mesma altura (18 linhas)
+              e com a dica de UMA linha no lugar de sempre — a do Field, ligada
+              ao campo para o leitor de tela. */}
+          <Field hint="Só as instruções: os dados do crédito (cedente, processo, valores, proposta e cotações) vão junto, e a pesquisa é livre na internet.">
             <Textarea
-              rows={22}
+              rows={18}
               className="font-mono text-xs leading-relaxed"
               value={prompt}
               spellCheck={false}
@@ -579,15 +593,7 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
                 setPrompt(e.target.value)
               }}
             />
-            <p className="mt-s2 flex items-start gap-s1.5 text-xs text-texto-2">
-              <Info className="mt-[1px] h-[14px] w-[14px] shrink-0" aria-hidden />
-              <span>
-                Escreva só as instruções. Os dados do crédito (cedente, processo, ente devedor, valores, proposta e
-                cotações) vão junto sozinhos, e a pesquisa é livre na internet — para pedir fontes confiáveis, diga
-                isso no prompt.
-              </span>
-            </p>
-          </div>
+          </Field>
 
           <RodapeSecao>
             <span className="mr-auto text-xs text-texto-3">
@@ -595,14 +601,14 @@ export function SecaoJustificativa({ pendencia }: { pendencia: Pendencia }) {
               {linhaDoPrompt?.atualizado_em && (
                 <>
                   {' · Última alteração em '}
-                  {new Date(linhaDoPrompt.atualizado_em).toLocaleString('pt-BR')}
+                  {formatDateTime(linhaDoPrompt.atualizado_em)}
                   {linhaDoPrompt.atualizado_por ? ' por ' + linhaDoPrompt.atualizado_por : ''}
                 </>
               )}
             </span>
             {mudou && (
               <span className="inline-flex items-center gap-s1 text-sm font-semibold text-aviso">
-                <TriangleAlert className="h-[14px] w-[14px]" aria-hidden />
+                <Pencil className="h-[16px] w-[16px]" aria-hidden />
                 alterações não salvas
               </span>
             )}

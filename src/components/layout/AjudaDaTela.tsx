@@ -69,7 +69,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
         aria-controls={id}
         aria-label="Como funciona esta tela"
         title="Como funciona esta tela"
-        className="font-display grid h-8 w-8 place-items-center rounded-full border-[1.5px] border-borda-forte bg-superficie text-sm font-extrabold text-texto-2 transition-colors hover:border-brand-500 hover:text-marca-texto"
+        className="font-display grid h-8 w-8 place-items-center rounded-full border-[1.5px] border-borda-forte bg-superficie text-sm font-extrabold text-texto-2 transition-colors hover:border-marca-viva hover:text-marca-texto"
       >
         ?
       </button>
@@ -85,16 +85,16 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
           className="absolute left-0 top-full z-40 mt-s1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-flutuante border border-borda bg-superficie px-s3 pb-s1.5 pt-s3 text-corpo shadow-nivel-2 outline-none dark:ring-1 dark:ring-white/[0.06]"
         >
           <p className="font-display font-bold text-texto">Como funciona esta tela</p>
-          <ol className="mb-3 mt-2 grid list-decimal gap-1.5 pl-5 text-texto-2">
+          <ol className="mb-s3 mt-s2 grid list-decimal gap-s1.5 pl-s5 text-texto-2">
             {frases.map((f) => (
               <li key={f}>{f}</li>
             ))}
           </ol>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-s1">
             <button
               type="button"
               onClick={abrir(abrirGlossario)}
-              className="inline-flex min-h-[30px] items-center gap-1.5 rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
+              className="inline-flex h-controle-sm items-center gap-s1.5 rounded-controle px-s2 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
             >
               <BookOpen className="h-[16px] w-[16px]" aria-hidden />
               Glossário
@@ -102,7 +102,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
             <button
               type="button"
               onClick={abrir(abrirAtalhos)}
-              className="inline-flex min-h-[30px] items-center gap-1.5 rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
+              className="inline-flex h-controle-sm items-center gap-s1.5 rounded-controle px-s2 text-sm font-semibold text-marca-texto hover:bg-marca-leve"
             >
               <Command className="h-[16px] w-[16px]" aria-hidden />
               Atalhos

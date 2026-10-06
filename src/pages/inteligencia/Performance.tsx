@@ -244,6 +244,7 @@ export default function Performance() {
 
         {lista.length === 0 ? (
           <EmptyState
+            embutido
             title="Nenhuma operação encerrada"
             description="A performance realizada só considera operações com status encerrado e capital, valor recebido e datas preenchidos."
           />
@@ -298,9 +299,9 @@ export default function Performance() {
                             {extremo && (
                               <span
                                 title={EXPLICA.extremos}
-                                className="inline-flex h-[22px] items-center gap-s1 rounded-full border border-aviso-borda bg-aviso-fundo px-s2 text-xs font-semibold text-aviso"
+                                className="inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full bg-aviso-fundo px-s2 text-xs font-semibold text-aviso ring-1 ring-inset ring-aviso-borda dark:ring-opacity-50"
                               >
-                                <AlertTriangle className="h-[13px] w-[13px]" aria-hidden />
+                                <AlertTriangle className="h-[12px] w-[12px]" aria-hidden />
                                 extremo
                               </span>
                             )}

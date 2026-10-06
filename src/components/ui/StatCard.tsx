@@ -61,7 +61,7 @@ export function StatCard({
       {/* A régua do indicador fica no tooltip do ⓘ — tela limpa,
           informação a um hover de distância. */}
       {typeof hint === 'string' && hint && (
-        <span title={hint} aria-label={hint} className="mt-[3px] shrink-0 cursor-help">
+        <span role="img" title={hint} aria-label={hint} className="mt-[3px] shrink-0 cursor-help">
           <Info className="h-[14px] w-[14px] text-texto-3 transition-colors hover:text-texto-2" />
         </span>
       )}

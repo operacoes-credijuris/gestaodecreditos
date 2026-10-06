@@ -176,7 +176,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   t.action?.onClick()
                   remove(t.id)
                 }}
-                className="-my-0.5 shrink-0 rounded-controle border border-superficie/35 px-2.5 py-1 text-sm font-bold text-superficie transition-colors hover:bg-superficie/15"
+                className="-my-s1 inline-flex h-controle-sm shrink-0 items-center rounded-controle border border-superficie/35 px-s3 text-sm font-bold text-superficie transition-colors hover:bg-superficie/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-flutuante-info"
               >
                 {t.action.label}
               </button>
@@ -184,10 +184,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             {t.type === 'error' && <CopiarDetalhes mensagem={t.message} em={t.em} />}
             <button
               onClick={() => remove(t.id)}
-              className="-my-0.5 -mr-1 grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie"
+              className="-my-s1 -mr-s1 grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie focus:outline-none focus-visible:ring-2 focus-visible:ring-flutuante-info"
               aria-label="Fechar aviso"
             >
-              <X className="h-4 w-4" />
+              <X className="h-[16px] w-[16px]" aria-hidden />
             </button>
           </div>
         ))}
@@ -223,9 +223,9 @@ function CopiarDetalhes({ mensagem, em }: { mensagem: string; em: number }) {
       }}
       aria-label={nome}
       title={nome}
-      className="-my-0.5 grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie"
+      className="-my-s1 grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie focus:outline-none focus-visible:ring-2 focus-visible:ring-flutuante-info"
     >
-      <Icone className="h-4 w-4" aria-hidden />
+      <Icone className="h-[16px] w-[16px]" aria-hidden />
     </button>
   )
 }

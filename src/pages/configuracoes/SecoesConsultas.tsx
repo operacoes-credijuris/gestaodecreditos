@@ -9,7 +9,7 @@ import { invokeFunction } from '@/lib/functions'
 import { formatBRL } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
-import { IconButton } from '@/components/ui/IconButton'
+import { BotaoCopiar, useCopiarTexto } from '@/components/ui/BotaoCopiar'
 import { Loading } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import {
@@ -18,6 +18,7 @@ import {
   CampoSegredo,
   DUAS_COLUNAS,
   GradeCampos,
+  IconeAlerta,
   IconeOk,
   PILULA,
   RodapeSecao,
@@ -37,8 +38,12 @@ import type { Pendencia } from './SecoesIntegracoes'
 /** O "saldo indisponível" do cabeçalho, com o motivo do serviço no `title`. */
 function SaldoIndisponivel({ motivo }: { motivo: string }) {
   return (
-    <span className="cursor-help self-center text-xs font-semibold text-aviso" title={motivo}>
-      saldo indisponível
+    // UM SELO, COMO O "Estado não carregado" ao lado (revisão visual 2): era um texto
+    // âmbar solto, de outro desenho. O motivo continua na dica.
+    <span className="self-center" title={motivo}>
+      <Selo tom="alerta" icone={IconeAlerta}>
+        Saldo indisponível
+      </Selo>
     </span>
   )
 }
@@ -233,7 +238,7 @@ export function SecaoEscavador({
               caminho deles é o inverso, eles avisam. Para isso precisam saber
               nosso endereço, e nós precisamos saber que o aviso é mesmo deles;
               daí os dois campos abaixo, que se preenchem UMA vez. */}
-          <div className="mt-[18px]">
+          <div className="mt-s6">
             <TituloBloco>Avisos automáticos (callback)</TituloBloco>
             <GradeCampos>
               <Field
@@ -241,22 +246,21 @@ export function SecaoEscavador({
                 hint="Cole este endereço em api.escavador.com/callbacks."
                 className={DUAS_COLUNAS}
               >
-                <div className="flex items-center gap-[6px]">
+                <div className="flex items-center gap-s1.5">
                   <Input
                     value={urlCallback}
                     readOnly
                     className="min-w-0 flex-1 tabular-nums"
                     onFocus={(e) => e.target.select()}
                   />
-                  <IconButton
-                    label="Copiar o endereço"
-                    icon={<Copy className="h-[16px] w-[16px]" />}
-                    onClick={() => {
-                      navigator.clipboard
-                        .writeText(urlCallback)
-                        .then(() => toast.success('Endereço copiado.'))
-                        .catch(() => toast.error('Não consegui copiar; selecione e copie à mão.'))
-                    }}
+                  {/* O COPIAR DA PLATAFORMA (revisão visual 2), na altura do campo: o ✓
+                      de copiado e a mesma saída quando o navegador recusa. */}
+                  <BotaoCopiar
+                    valor={urlCallback}
+                    rotulo="Copiar o endereço"
+                    aviso="Endereço copiado."
+                    tamanho="md"
+                    className="h-controle w-controle"
                   />
                 </div>
               </Field>
@@ -308,6 +312,7 @@ export function SecaoBullai({
   const { data, isLoading, error } = consulta
   const qc = useQueryClient()
   const toast = useToast()
+  const copiar = useCopiarTexto()
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState(false)
   const [verCatalogo, setVerCatalogo] = useState(false)
@@ -353,15 +358,12 @@ export function SecaoBullai({
     const linhas = portais.map((p) =>
       [p.rotulo, p.documento, p.presencial ? 'presencial' : 'automática', p.chave].join(TAB),
     )
-    navigator.clipboard
-      .writeText([['Certidão', 'Documento', 'Como', 'Chave'].join(TAB), ...linhas].join(QUEBRA))
-      .then(() => toast.success('Catálogo copiado.'))
-      .catch(() => toast.error('Não consegui copiar.'))
+    void copiar([['Certidão', 'Documento', 'Como', 'Chave'].join(TAB), ...linhas].join(QUEBRA), 'Catálogo copiado.')
   }
 
   // O `.link-btn` da amostra: botão com cara de link, 28px de alvo.
   const linkBtn =
-    '-ml-s2 inline-flex h-[28px] items-center gap-[6px] rounded-controle px-s2 text-sm font-semibold text-marca-texto transition-colors hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel'
+    '-ml-s2 inline-flex h-controle-sm items-center gap-s1.5 rounded-controle px-s2 text-sm font-semibold text-marca-texto transition-colors hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel'
 
   return (
     <>
@@ -409,7 +411,7 @@ export function SecaoBullai({
           </RodapeSecao>
 
           {configurado && portais.length > 0 && (
-            <div className="mt-[12px] flex flex-wrap items-center gap-x-s3 gap-y-s2">
+            <div className="mt-s3 flex flex-wrap items-center gap-x-s3 gap-y-s2">
               <button
                 type="button"
                 className={linkBtn}
@@ -436,22 +438,22 @@ export function SecaoBullai({
           {verCatalogo && (
             <div
               id={idTabela}
-              className="relative mt-[8px] max-h-96 overflow-auto rounded-cartao border border-borda scrollbar-thin"
+              className="relative mt-s2 max-h-96 overflow-auto rounded-cartao border border-borda scrollbar-thin"
             >
               <table className="w-full border-collapse text-left text-corpo">
-                <thead className="sticky top-0 bg-superficie-2 text-xs font-bold uppercase tracking-wide text-texto-3">
+                <thead className="sticky top-0 z-cabecalho bg-superficie-2 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
                   <tr>
-                    <th className="px-[14px] py-s2 font-bold">Certidão</th>
-                    <th className="px-[14px] py-s2 font-bold">Documento</th>
-                    <th className="px-[14px] py-s2 font-bold">Como</th>
+                    <th className="px-s3 py-s2 font-bold">Certidão</th>
+                    <th className="px-s3 py-s2 font-bold">Documento</th>
+                    <th className="px-s3 py-s2 font-bold">Como</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borda">
                   {portais.map((p) => (
                     <tr key={p.chave} title={p.criterio}>
-                      <td className="px-[14px] py-s2 text-texto">{p.rotulo}</td>
-                      <td className="px-[14px] py-s2 text-texto-2">{p.documento}</td>
-                      <td className="px-[14px] py-s2">
+                      <td className="px-s3 py-s2 text-texto">{p.rotulo}</td>
+                      <td className="px-s3 py-s2 text-texto-2">{p.documento}</td>
+                      <td className="px-s3 py-s2">
                         {p.presencial ? (
                           <Selo tom="neutro">presencial — não automatiza</Selo>
                         ) : (

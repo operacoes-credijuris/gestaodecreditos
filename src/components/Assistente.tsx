@@ -637,11 +637,11 @@ export function Assistente({
 
   // Item de menu da amostra (`.pop .mi`): 36px de altura, o ✓ à esquerda.
   const itemDeMenu = cn(
-    'flex h-controle w-full items-center gap-[10px] rounded-controle px-[10px] text-left text-corpo text-texto',
+    'flex h-controle w-full items-center gap-s2 rounded-controle px-s2 text-left text-corpo text-texto',
     'hover:bg-superficie-3 focus:outline-none focus-visible:bg-superficie-3',
   )
   const menuFlutuante =
-    'absolute bottom-full left-0 z-20 mb-s1 min-w-[220px] rounded-flutuante border border-borda bg-superficie p-[6px] shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]'
+    'absolute bottom-full left-0 z-20 mb-s1 min-w-[220px] rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]'
 
   return (
     <>
@@ -659,7 +659,7 @@ export function Assistente({
           'sm:h-[min(620px,calc(100vh-40px))] sm:w-[420px]',
         )}
       >
-        <header className="flex items-center gap-[6px] border-b border-borda bg-superficie p-[10px]">
+        <header className="flex items-center gap-s1.5 border-b border-borda bg-superficie p-s2">
           <IconButton
             label="Histórico de conversas"
             icon={<Menu className="h-[16px] w-[16px]" />}
@@ -730,6 +730,16 @@ export function Assistente({
                   Carregando…
                 </p>
               )}
+              {/* A LEITURA QUE FALHOU DIZ QUE FALHOU (revisão visual 2): sem isto o
+                  histórico ficava em branco, igual a "nenhuma conversa". */}
+              {conversasQuery.isError && (
+                <p role="alert" className="flex flex-wrap items-center gap-s2 p-s2 text-sm text-texto-2">
+                  Não foi possível carregar as conversas.
+                  <Button type="button" size="sm" variant="secondary" onClick={() => void conversasQuery.refetch()}>
+                    Tentar novamente
+                  </Button>
+                </p>
+              )}
               {conversasQuery.data?.length === 0 && (
                 <p className="p-s2 text-sm text-texto-3">
                   Nenhuma conversa salva ainda — as últimas 10 aparecem aqui.
@@ -778,10 +788,10 @@ export function Assistente({
           </div>
 
           <div className="relative flex flex-1 flex-col overflow-hidden">
-            <div className="flex flex-1 flex-col gap-s2 overflow-y-auto scrollbar-thin p-[14px]">
+            <div className="flex flex-1 flex-col gap-s2 overflow-y-auto scrollbar-thin p-s3">
               {mensagens.length === 0 && (
                 <div className="my-auto text-center">
-                  <div className="mx-auto mb-[8px] flex h-[48px] w-[48px] items-center justify-center rounded-cartao bg-marca-suave text-marca-texto">
+                  <div className="mx-auto mb-s2 flex h-[48px] w-[48px] items-center justify-center rounded-cartao bg-marca-suave text-marca-texto">
                     <Sparkles className="h-[20px] w-[20px]" />
                   </div>
                   <p className="font-display text-xl font-extrabold text-texto">
@@ -789,10 +799,10 @@ export function Assistente({
                   </p>
                   {/* A FRASE DE APOIO diz o que ele sabe responder antes das
                       sugestões — o painel só com "Olá" não dava pista nenhuma. */}
-                  <p className="mb-[14px] mt-s1 text-corpo text-texto-2">
+                  <p className="mb-s3 mt-s1 text-corpo text-texto-2">
                     Pergunte sobre a carteira, os processos ou os contatos.
                   </p>
-                  <div className="grid gap-[6px]">
+                  <div className="grid gap-s1.5">
                     {SUGESTOES.map((s) => (
                       <button
                         key={s}
@@ -827,15 +837,19 @@ export function Assistente({
                   // inteira, senão a tabela nasce comprimida.
                   <div
                     key={i}
-                    className="relative w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-s3 py-[10px] pr-[34px] text-corpo text-texto"
+                    className="relative w-full rounded-[14px_14px_14px_4px] bg-superficie-3 px-s3 py-[10px] pr-s10 text-corpo text-texto"
                   >
                     {/* COPIAR A RESPOSTA com um clique, no canto — a lista de
                         processos ou o texto pronto vão para a conversa com o
-                        cliente sem selecionar à mão. */}
+                        cliente sem selecionar à mão. Do tamanho do "Copiar
+                        conversa" do cabeçalho (28px, ícone de 16px), e o hover
+                        no tom da superfície: o cinza de sempre é o da bolha e
+                        sumia nela (revisão visual 2). */}
                     <BotaoCopiar
                       valor={m.content}
                       rotulo="Copiar resposta"
-                      className="absolute right-[6px] top-[6px]"
+                      tamanho="linha"
+                      className="absolute right-s1 top-s1 hover:bg-superficie"
                     />
                     <div className="[overflow-wrap:anywhere]">
                       {/* Enquanto o leitor de Markdown chega (só na primeira
@@ -846,7 +860,7 @@ export function Assistente({
                     </div>
 
                     {m.arquivos && m.arquivos.length > 0 && (
-                      <div className="mt-[8px] grid gap-s1">
+                      <div className="mt-s2 grid gap-s1">
                         {m.arquivos.map((f) => (
                           <a
                             key={f.url}
@@ -863,7 +877,7 @@ export function Assistente({
                     )}
 
                     {m.acaoProposta && (
-                      <div className="mt-[8px] grid gap-s1 rounded-flutuante border border-info-borda bg-marca-leve p-[10px]">
+                      <div className="mt-s2 grid gap-s1 rounded-flutuante border border-info-borda bg-marca-leve p-s3">
                         <p className="font-bold text-texto">
                           Gerar petição — processo {m.acaoProposta.numero_cnj ?? '(a confirmar)'}
                         </p>
@@ -871,14 +885,9 @@ export function Assistente({
                         <p className="text-xs text-texto-3">
                           Abre a tela de revisão de sempre — nada é gerado sem você conferir.
                         </p>
-                        <div className="mt-s1 flex gap-[6px]">
-                          <Button
-                            type="button"
-                            size="md"
-                            onClick={() => confirmarAcao(m.acaoProposta!, i)}
-                          >
-                            Confirmar
-                          </Button>
+                        {/* A ORDEM DAS JANELAS (§0.6): à direita, Cancelar e depois o
+                            primário. Antes o Confirmar vinha primeiro, à esquerda. */}
+                        <div className="mt-s1 flex justify-end gap-s2">
                           <Button
                             type="button"
                             size="md"
@@ -886,6 +895,13 @@ export function Assistente({
                             onClick={() => descartarAcao(i)}
                           >
                             Cancelar
+                          </Button>
+                          <Button
+                            type="button"
+                            size="md"
+                            onClick={() => confirmarAcao(m.acaoProposta!, i)}
+                          >
+                            Confirmar
                           </Button>
                         </div>
                       </div>
@@ -896,8 +912,8 @@ export function Assistente({
                         type="button"
                         onClick={() => abrirWhatsapp(m.contatoSugerido!)}
                         className={cn(
-                          'mt-[8px] flex w-full items-center gap-[10px] rounded-flutuante border border-sucesso-borda',
-                          'bg-sucesso-fundo p-[10px] text-left text-texto transition-colors hover:bg-sucesso-borda/40',
+                          'mt-s2 flex w-full items-center gap-s2 rounded-flutuante border border-sucesso-borda',
+                          'bg-sucesso-fundo p-s3 text-left text-texto transition-colors hover:bg-sucesso-borda/40',
                           'focus:outline-none focus-visible:ring-2 focus-visible:ring-anel',
                         )}
                       >
@@ -962,7 +978,7 @@ export function Assistente({
               e.preventDefault()
               enviar(texto)
             }}
-            className="grid gap-[6px] border-t border-borda bg-superficie p-[10px]"
+            className="grid gap-s1.5 border-t border-borda bg-superficie p-s2"
           >
             {arquivos.length > 0 && (
               <div className="flex flex-wrap gap-[6px]">
@@ -1084,7 +1100,7 @@ export function Assistente({
                     <div className={menuFlutuante}>
                       <p
                         id="assistente-skills-titulo"
-                        className="px-[10px] pb-s1 pt-[6px] text-xs font-bold uppercase tracking-wider text-texto-3"
+                        className="px-s2 pb-s1 pt-s1.5 font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3"
                       >
                         Skills desta conversa
                       </p>

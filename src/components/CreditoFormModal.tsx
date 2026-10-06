@@ -338,7 +338,7 @@ export function CreditoFormModal({
       {/* Só no cadastro NOVO. Editar um crédito que já existe não tem por que
           passar pela descoberta de pastas — a pasta dele já é conhecida. */}
       {!editando && (
-        <div className="mb-4">
+        <div className="mb-s4">
           <Tabs
             items={ABAS_NOVO_CREDITO}
             value={abaForm}
@@ -351,7 +351,7 @@ export function CreditoFormModal({
           São dois momentos diferentes do trabalho, e sem a divisão o campo de
           busca parecia o primeiro campo do formulário. */}
       {abaForm === 'auto' && !editando && (
-        <div className="mb-4 border-b border-borda pb-4">
+        <div className="mb-s4 border-b border-borda pb-s4">
           <NovoCreditoDoDrive processos={data} onPreencher={preencherDoDrive} />
         </div>
       )}
@@ -368,10 +368,10 @@ export function CreditoFormModal({
             navegador propaga para tudo o que está dentro. */}
         <fieldset
           disabled={abaForm === 'auto' && !editando && !autoPreenchido}
-          className="m-0 min-w-0 space-y-6 border-0 p-0 disabled:opacity-50"
+          className="m-0 min-w-0 space-y-s6 border-0 p-0 disabled:opacity-50"
         >
           <SecaoDoFormulario titulo="Processo">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-s4 sm:grid-cols-2">
               <Field
                 label="Número do processo"
                 required
@@ -430,7 +430,7 @@ export function CreditoFormModal({
                   />
                 </Field>
               )}
-              <div className="grid gap-4 sm:col-span-2 sm:grid-cols-3">
+              <div className="grid gap-s4 sm:col-span-2 sm:grid-cols-3">
                 <Field label="Tribunal">
                   <Input
                     placeholder="Ex.: TRT-5, TJBA"
@@ -457,7 +457,7 @@ export function CreditoFormModal({
           </SecaoDoFormulario>
 
           <SecaoDoFormulario titulo="Partes">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-s4 sm:grid-cols-2">
               <Field label="Cedente">
                 <Input
                   value={editing.cedente ?? ''}
@@ -502,7 +502,7 @@ export function CreditoFormModal({
           </SecaoDoFormulario>
 
           <SecaoDoFormulario titulo="Aquisição e liquidação">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-s4 sm:grid-cols-2">
               <Field label="Data de aquisição">
                 <Input
                   type="date"
@@ -599,11 +599,11 @@ export function CreditoFormModal({
                 </Field>
               )}
               <Field label="Tipo de crédito" className="sm:col-span-2">
-                <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
+                <div className="flex flex-wrap gap-x-s5 gap-y-s2 pt-s1">
                   {Object.entries(TIPO_CREDITO).map(([k, v]) => (
                     <label
                       key={k}
-                      className="flex min-h-[24px] cursor-pointer items-center gap-2 text-corpo text-texto"
+                      className="flex min-h-[24px] cursor-pointer items-center gap-s2 text-corpo text-texto"
                     >
                       <input
                         type="checkbox"
@@ -628,7 +628,7 @@ export function CreditoFormModal({
           </SecaoDoFormulario>
 
           <SecaoDoFormulario titulo="Valores">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-s4 sm:grid-cols-2">
               <Field label="Capital investido">
                 <CampoMoeda
                   valor={editing.capital_investido}

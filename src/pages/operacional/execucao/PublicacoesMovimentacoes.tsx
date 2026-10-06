@@ -21,7 +21,7 @@ import { Card, type FaixaDoCartao } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Tabs } from '@/components/ui/Tabs'
 import { SyncStatus } from '@/components/ui/SyncStatus'
-import { Loading, ErrorState, EmptyState } from '@/components/ui/Table'
+import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/Table'
 import { useToast } from '@/components/ui/Toast'
 import { CreditoDrawer } from '@/components/CreditoDrawer'
 import { Aviso, CampoDeBusca, Partes, TituloDoGrupo } from '@/components/operacional/Pecas'
@@ -234,7 +234,7 @@ export default function PublicacoesMovimentacoes() {
       )}
 
       {aba === 'publicacoes' ? (
-        <Publicacoes busca={busca} />
+        <Publicacoes busca={busca} onLimparBusca={() => setBusca('')} />
       ) : aba === 'movimentacoes' ? (
         <Movimentacoes busca={busca} />
       ) : (
@@ -280,7 +280,7 @@ interface RespostaSync {
 }
 
 // ----------------------- Publicações (DJEN) -----------------------
-function Publicacoes({ busca }: { busca: string }) {
+function Publicacoes({ busca, onLimparBusca }: { busca: string; onLimparBusca?: () => void }) {
   const qc = useQueryClient()
   const toast = useToast()
 
@@ -498,15 +498,18 @@ function Publicacoes({ busca }: { busca: string }) {
         </Aviso>
       )}
 
-      {filtradas.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="Nenhuma publicação"
-            description={
-              sync.isPending ? 'Sincronizando… pode levar ~1 min.' : undefined
-            }
-          />
-        </Card>
+      {/* OS DOIS VAZIOS DA PLATAFORMA (§0.10, revisão visual 2): com busca, a linha
+          simples "Nada com esse filtro · Limpar"; sem busca, o vazio tracejado —
+          sozinho, e não dentro de outro cartão. */}
+      {filtradas.length === 0 && busca.trim() ? (
+        <SemResultado texto="Nenhuma publicação com essa busca" rotuloLimpar="Limpar a busca" onLimpar={onLimparBusca} />
+      ) : filtradas.length === 0 ? (
+        <EmptyState
+          title="Nenhuma publicação"
+          description={
+            sync.isPending ? 'Sincronizando… pode levar ~1 min.' : undefined
+          }
+        />
       ) : (
         <>
           <Secao titulo="Novas" qtd={novas.length}>
@@ -644,7 +647,8 @@ function PublicacaoCard({
             valor={formatCNJ(p.numero_processo)}
             rotulo="Copiar o número do processo"
             aviso="Número copiado."
-            className="-mx-s1"
+            tamanho="linha"
+            className="-mx-s1 -my-s1"
           />
         )}
         {p.sigla_tribunal && <Badge tone="blue">{p.sigla_tribunal}</Badge>}

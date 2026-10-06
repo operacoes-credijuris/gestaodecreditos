@@ -111,7 +111,7 @@ export function AvisoDeVersaoNova() {
         <button
           type="button"
           onClick={recarregar}
-          className="shrink-0 rounded-controle border border-superficie/35 px-2.5 py-1 text-sm font-bold text-superficie transition-colors hover:bg-superficie/15"
+          className="inline-flex h-controle-sm shrink-0 items-center rounded-controle border border-superficie/35 px-s3 text-sm font-bold text-superficie transition-colors hover:bg-superficie/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-flutuante-info"
         >
           Recarregar
         </button>
@@ -120,9 +120,9 @@ export function AvisoDeVersaoNova() {
           onClick={() => setAdiadoAte(Date.now() + ADIAMENTO_MS)}
           aria-label="Lembrar depois"
           title="Lembrar daqui a meia hora"
-          className="grid h-[28px] w-[28px] shrink-0 place-items-center rounded-controle text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie"
+          className="grid h-controle-sm w-controle-sm shrink-0 place-items-center rounded-controle text-superficie/75 transition-colors hover:bg-superficie/15 hover:text-superficie focus:outline-none focus-visible:ring-2 focus-visible:ring-flutuante-info"
         >
-          <X className="h-4 w-4" aria-hidden />
+          <X className="h-[16px] w-[16px]" aria-hidden />
         </button>
       </div>
     </div>

@@ -93,6 +93,7 @@ export function CreditoDrawer({
                     valor={formatCNJ(processo.numero_cnj)}
                     rotulo="Copiar o número do processo"
                     aviso="Número copiado."
+                    tamanho="linha"
                   />
                 ) : null
               }
@@ -184,7 +185,8 @@ export function CreditoDrawer({
                   'Data de liquidação',
                   processo.data_liquidacao ? formatDate(processo.data_liquidacao) : null,
                 ],
-                ['Espécie do requisitório', esp ? <Badge tone={esp.tone}>{esp.label}</Badge> : null],
+                // O SÓLIDO DA ESPÉCIE EM `sm` (auditoria visual, CR2), como na lista de Créditos.
+                ['Espécie do requisitório', esp ? <Badge size="sm" tone={esp.tone}>{esp.label}</Badge> : null],
                 [
                   'Tipo de crédito',
                   processo.tipo_credito?.length ? (

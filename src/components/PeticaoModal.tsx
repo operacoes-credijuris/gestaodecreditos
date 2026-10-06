@@ -20,6 +20,7 @@
 // errada custa mais que um clique a mais.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Download, FileText, Pencil, RefreshCw, Send, Sparkles } from 'lucide-react'
+import { cn } from '@/lib/cn'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -670,7 +671,7 @@ export function PeticaoModal({
       }
       footer={
         <>
-          <Button variant="outline" onClick={fechar}>
+          <Button variant="secondary" onClick={fechar}>
             Fechar
           </Button>
           <Button
@@ -694,38 +695,36 @@ export function PeticaoModal({
         </>
       }
     >
-      <div className="mb-4">
+      <div className="mb-s4">
         <Tabs items={ABAS} value={aba} onChange={setAba} />
       </div>
 
       {naIA ? (
-        <div className="space-y-4">
+        <div className="space-y-s4">
           {!processo ? (
             <Aviso tom="erro">
-              Esta tarefa não casou com nenhum crédito cadastrado. Sem crédito não há
-              processo para analisar. Confira se o número do processo da tarefa no
-              ADVBOX está cadastrado em Créditos.
+              Tarefa sem crédito cadastrado: confira se o número do processo dela no
+              ADVBOX está em Créditos.
             </Aviso>
           ) : (
             <>
               {/* ---------- Panorama ---------- */}
               <section>
-                <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="mb-s2 flex items-center justify-between gap-s3">
                   <h4 className="font-display text-xs font-bold uppercase tracking-wide text-marca-texto">
                     Panorama do caso
                   </h4>
                   {panorama.data && (
-                    <button
+                    <Button
                       type="button"
+                      size="sm"
+                      variant="ghost"
                       onClick={() => void reanalisar()}
                       disabled={reanalisando}
-                      className="inline-flex min-h-[24px] items-center gap-s1 text-xs font-medium text-texto-3 transition-colors hover:text-marca-texto disabled:opacity-50"
+                      icon={<RefreshCw className={cn('h-[16px] w-[16px]', reanalisando && 'animate-spin')} />}
                     >
-                      <RefreshCw
-                        className={`h-[14px] w-[14px] ${reanalisando ? 'animate-spin' : ''}`}
-                      />
                       {reanalisando ? 'Analisando…' : 'Analisar de novo'}
-                    </button>
+                    </Button>
                   )}
                 </div>
 
@@ -734,22 +733,25 @@ export function PeticaoModal({
                     <p className="text-sm text-marca-texto">
                       Lendo as movimentações e as tarefas deste processo…
                     </p>
-                    <div className="mt-3 space-y-2">
-                      <div className="skeleton h-3 w-full rounded" />
-                      <div className="skeleton h-3 w-11/12 rounded" />
-                      <div className="skeleton h-3 w-9/12 rounded" />
+                    <div className="mt-s3 space-y-s2" aria-hidden>
+                      <div className="skeleton h-[12px] w-full rounded-controle" />
+                      <div className="skeleton h-[12px] w-11/12 rounded-controle" />
+                      <div className="skeleton h-[12px] w-9/12 rounded-controle" />
                     </div>
                   </div>
                 ) : panorama.isError ? (
-                  <Aviso tom="atencao">
+                  // FALHA DE LEITURA É ERRO (revisão visual 2): era âmbar, com um link.
+                  <Aviso tom="erro">
                     <p>{(panorama.error as Error).message}</p>
-                    <button
+                    <Button
                       type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="mt-s1"
                       onClick={() => void panorama.refetch()}
-                      className="mt-1 font-medium underline"
                     >
                       Tentar de novo
-                    </button>
+                    </Button>
                   </Aviso>
                 ) : panorama.data ? (
                   <div className="rounded-campo border border-info-borda bg-marca-leve p-s4 text-sm leading-relaxed text-texto">
@@ -760,9 +762,10 @@ export function PeticaoModal({
 
               {/* ---------- Comando do advogado ---------- */}
               <section>
+                {/* O RÓTULO DE CAMPO DA PLATAFORMA (§0.5): 14px em seminegrito, o do Field. */}
                 <label
                   htmlFor="peticao-instrucao"
-                  className="mb-1.5 block text-sm font-medium text-texto"
+                  className="mb-s2 block text-corpo font-semibold text-texto"
                 >
                   Objeto da petição
                 </label>
@@ -773,10 +776,10 @@ export function PeticaoModal({
                   placeholder="Ex.: peça o sequestro do valor do RPV, que venceu o prazo de 60 dias sem pagamento, e requeira a intimação do ente devedor."
                   onChange={(e) => setInstrucao(e.target.value)}
                 />
-                <div className="mt-2 flex justify-end">
+                <div className="mt-s2 flex justify-end">
                   <Button
                     size="sm"
-                    variant="outline"
+                    variant="secondary"
                     icon={<Send className="h-[16px] w-[16px]" />}
                     loading={redigindo}
                     disabled={!instrucao.trim() || redigindo}
@@ -794,10 +797,10 @@ export function PeticaoModal({
                       aqui: como é frase e não etiqueta, saía tomando a linha
                       inteira em negrito e roubando a atenção do texto da peça, que
                       é o que precisa ser lido. */}
-                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                  <div className="mb-s2 flex flex-wrap items-center justify-between gap-s2">
                     <label
                       htmlFor="peticao-texto"
-                      className="text-sm font-medium text-texto"
+                      className="text-corpo font-semibold text-texto"
                     >
                       Revisar
                     </label>
@@ -814,14 +817,14 @@ export function PeticaoModal({
                   </div>
 
                   {redacao.avisos && redacao.avisos.length > 0 && (
-                    <div className="mb-2">
+                    <div className="mb-s2">
                       <Aviso tom="atencao">
                         <p className="font-medium">
                           A peça saiu fora do padrão de formatação em{' '}
                           {redacao.avisos.length === 1 ? 'um ponto' : 'alguns pontos'}.
                           O arquivo sai, mas confira:
                         </p>
-                        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                        <ul className="mt-s1 list-disc space-y-s0.5 pl-s5">
                           {redacao.avisos.map((a, i) => (
                             <li key={i}>{a}</li>
                           ))}
@@ -846,14 +849,13 @@ export function PeticaoModal({
           )}
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-s4">
           {/* Sem crédito não há de onde tirar juízo, processo, cessionário nem
               dados bancários — a tarefa precisa estar vinculada. */}
           {!processo && (
             <Aviso tom="erro">
-              Esta tarefa não casou com nenhum crédito cadastrado. Sem crédito não
-              há dados para preencher a petição. Confira se o número do processo da
-              tarefa no ADVBOX está cadastrado em Créditos.
+              Tarefa sem crédito cadastrado: confira se o número do processo dela no
+              ADVBOX está em Créditos.
             </Aviso>
           )}
 
@@ -898,13 +900,13 @@ export function PeticaoModal({
               <p className="font-medium">
                 O arquivo foi baixado no seu computador, mas não subiu no Drive.
               </p>
-              <p className="mt-1">{semPasta.motivo}</p>
+              <p className="mt-s1">{semPasta.motivo}</p>
               {semPasta.caminho.length > 0 && (
-                <p className="mt-1">
+                <p className="mt-s1">
                   Desci até: <strong>{semPasta.caminho.join(' › ')}</strong>
                 </p>
               )}
-              <p className="mt-1">
+              <p className="mt-s1">
                 Suba o arquivo à mão nessa pasta, ou crie a pasta que falta e gere de
                 novo.
               </p>
@@ -933,7 +935,7 @@ export function PeticaoModal({
               <p className="font-medium">
                 Falta preencher no cadastro antes de gerar:
               </p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              <ul className="mt-s1 list-disc space-y-s0.5 pl-s5">
                 {pendencias.map((p) => (
                   <li key={p.variavel}>
                     <span className="font-medium">{NOME_VARIAVEL[p.variavel]}</span>{' '}
@@ -949,9 +951,9 @@ export function PeticaoModal({
                 <button
                   type="button"
                   onClick={() => setEditandoCredito(true)}
-                  className="mt-1 inline-flex min-h-[24px] items-center gap-1 text-sm font-semibold text-marca-texto hover:underline"
+                  className="mt-s1 inline-flex min-h-[24px] items-center gap-s1 rounded-controle text-sm font-semibold text-marca-texto hover:underline"
                 >
-                  <Pencil className="h-[14px] w-[14px]" aria-hidden="true" />
+                  <Pencil className="h-[16px] w-[16px]" aria-hidden="true" />
                   Abrir o cadastro do crédito
                 </button>
               )}
@@ -969,12 +971,12 @@ export function PeticaoModal({
               // AS FALTAS MARCADAS (item "Novo" da amostra): o rótulo que o
               // cadastro não preencheu fica destacado no próprio texto — a lista
               // de pendências acima aponta para um lugar que se vê.
-              <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-campo border border-borda bg-superficie-2 px-4 py-3 font-mono text-sm leading-relaxed text-texto scrollbar-thin">
+              <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-campo border border-borda bg-superficie-2 px-s4 py-s3 font-mono text-sm leading-relaxed text-texto scrollbar-thin">
                 {trechosDaPrevia(textoFinal).map((t, i) =>
                   t.falta ? (
                     <mark
                       key={i}
-                      className="rounded bg-aviso-fundo px-0.5 font-semibold text-aviso ring-1 ring-inset ring-aviso-borda"
+                      className="rounded bg-aviso-fundo px-s0.5 font-semibold text-aviso ring-1 ring-inset ring-aviso-borda"
                     >
                       {t.texto}
                       <span className="sr-only"> (falta preencher)</span>

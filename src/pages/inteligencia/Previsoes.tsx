@@ -39,13 +39,16 @@ const INCALCULAVEIS = '__incalculaveis__'
 function SeloDoBloco({ rotulo }: { rotulo: string }) {
   const estilo =
     rotulo === 'Previsão vencida'
-      ? { cor: 'border-perigo-borda bg-perigo-fundo text-perigo', Icone: AlertTriangle }
+      ? { cor: 'ring-perigo-borda bg-perigo-fundo text-perigo', Icone: AlertTriangle }
       : rotulo === 'Complementar a receber'
-        ? { cor: 'border-info-borda bg-info-fundo text-info', Icone: ArrowRight }
-        : { cor: 'border-transparent bg-superficie-3 text-texto-2', Icone: null }
+        ? { cor: 'ring-info-borda bg-info-fundo text-info', Icone: ArrowRight }
+        : { cor: 'ring-borda bg-superficie-3 text-texto-2', Icone: null }
+  // NAS MEDIDAS DA `Badge` (§0.8, revisão visual 2): 20px e o contorno por dentro
+  // (a meia força no escuro). Com 22px e borda, lado a lado com os outros selos,
+  // parecia de outra família.
   return (
-    <span className={cn('inline-flex h-[22px] items-center gap-s1 whitespace-nowrap rounded-full border px-s2 text-xs font-semibold', estilo.cor)}>
-      {estilo.Icone && <estilo.Icone className="h-[13px] w-[13px]" aria-hidden />}
+    <span className={cn('inline-flex h-[20px] items-center gap-s1 whitespace-nowrap rounded-full px-s2 text-xs font-semibold ring-1 ring-inset dark:ring-opacity-50', estilo.cor)}>
+      {estilo.Icone && <estilo.Icone className="h-[12px] w-[12px]" aria-hidden />}
       {rotulo}
     </span>
   )
@@ -64,11 +67,11 @@ function BotaoVer({
       type="button"
       onClick={onClick}
       aria-expanded={aberto}
-      className="-ml-s2 inline-flex h-[28px] items-center gap-s1 rounded-controle px-s2 text-sm font-semibold tabular-nums text-marca-texto transition-colors hover:bg-marca-leve"
+      className="-ml-s2 inline-flex h-controle-sm items-center gap-s1 rounded-controle px-s2 text-sm font-semibold tabular-nums text-marca-texto transition-colors hover:bg-marca-leve focus:outline-none focus-visible:ring-2 focus-visible:ring-anel"
     >
       {children}
       <ChevronDown
-        className={cn('h-[14px] w-[14px] transition-transform', aberto && 'rotate-180')}
+        className={cn('h-[16px] w-[16px] transition-transform', aberto && 'rotate-180')}
         aria-hidden
       />
     </button>
@@ -202,6 +205,7 @@ export default function Previsoes() {
       >
         {dados.length === 0 ? (
           <EmptyState
+            embutido
             title="Nenhuma previsão futura"
             description="Nenhuma operação em aberto tem data prevista à frente de hoje."
           />
@@ -277,7 +281,7 @@ export default function Previsoes() {
               )}
             </div>
           ) : (
-            <div className="h-3" />
+            <div className="h-s3" />
           )}
         </Painel>
       )}

@@ -18,7 +18,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { cn } from '@/lib/cn'
-import { Badge } from '@/components/ui/Badge'
+import { AlertTriangle, Flame, Star } from 'lucide-react'
+import { ErrorState } from '@/components/ui/Table'
 import { Button } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/Segmented'
 import { formatDate, formatNome, onlyDigits, sentenceCase } from '@/lib/format'
@@ -103,7 +104,7 @@ function TextoLongo({ texto }: { texto: string }) {
 function MovItem({ mov, primeiro }: { mov: MovLinha; primeiro: boolean }) {
   return (
     <li className="relative">
-      <Bolinha tone={primeiro ? 'bg-brand-500' : 'bg-borda-forte'} />
+      <Bolinha tone={primeiro ? 'bg-marca-viva' : 'bg-borda-forte'} />
       <div className="text-xs font-semibold tabular-nums text-texto-2">
         {mov.data ? formatDate(mov.data) : 'sem data'}
       </div>
@@ -141,15 +142,18 @@ function TarefaItem({ t }: { t: TarefaLinha }) {
           </span>
         </span>
         {/* Só aparecem se a origem informar (o /history não traz). */}
+        {/* A PRIORIDADE COMO EM TAREFAS (auditoria visual, T1; revisão visual 2):
+            ícone e texto, sem selo, e só o Urgente com cor — a do aviso. Aqui
+            ainda era selo vermelho e laranja. */}
         {t.urgent && (
-          <Badge size="sm" tone="red">
-            Urgente
-          </Badge>
+          <span className="inline-flex items-center gap-s1 text-sm font-semibold text-aviso">
+            <Flame className="h-[16px] w-[16px]" aria-hidden="true" /> Urgente
+          </span>
         )}
         {t.important && (
-          <Badge size="sm" tone="orange">
-            Importante
-          </Badge>
+          <span className="inline-flex items-center gap-s1 text-sm font-semibold text-texto-2">
+            <Star className="h-[16px] w-[16px]" aria-hidden="true" /> Importante
+          </span>
         )}
       </div>
       {(t.date_deadline || resp.length > 0) && (
@@ -211,7 +215,7 @@ function MostrarMais({ restantes, onClick }: { restantes: number; onClick: () =>
   if (restantes <= 0) return null
   return (
     <div className="mt-3">
-      <Button size="sm" variant="outline" onClick={onClick}>
+      <Button size="sm" variant="secondary" onClick={onClick}>
         Mostrar mais ({restantes} restantes)
       </Button>
     </div>
@@ -315,10 +319,10 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
       {/* O HISTÓRICO É UMA SEÇÃO DA FICHA, com o título de seção das outras, e as
           duas visões num controle segmentado (a amostra). A contagem só aparece
           depois de carregar: "(0)" durante a leitura afirmaria que não há nada. */}
-      <h3 className="font-display mb-2 text-xs font-bold uppercase tracking-wider text-texto-3">
+      <h3 className="font-display mb-s2 text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
         Histórico
       </h3>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div className="mb-s3 flex flex-wrap items-center justify-between gap-x-s3 gap-y-s2">
         <Segmented
           ariaLabel="Alternar entre movimentações e tarefas do processo"
           items={[
@@ -340,7 +344,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
           <div
             role="group"
             aria-label="Filtrar tarefas por situação"
-            className="flex shrink-0 items-center gap-3"
+            className="flex shrink-0 items-center gap-s3"
           >
             <ChipSituacao
               ativo={mostrar.concluidas}
@@ -373,18 +377,19 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
             <div className="skeleton h-12 w-11/12 rounded-campo" />
           </div>
         ) : movs.isError ? (
-          <p role="alert" className="text-corpo text-perigo">
-            Não foi possível carregar o histórico: {(movs.error as Error).message}
-          </p>
+          // O ERRO DE TODA LISTA (§0.10, revisão visual 2): com "Tentar novamente".
+          <ErrorState
+            message={`Não foi possível carregar o histórico: ${(movs.error as Error).message}`}
+            onRetry={() => movs.refetch()}
+          />
         ) : listaMov.length === 0 ? (
           <p className="text-corpo text-texto-2">
-            Nenhuma movimentação sincronizada para este processo. O histórico é
-            atualizado pelo cron e ao abrir a aba Movimentações.
+            Nenhuma movimentação sincronizada para este processo.
           </p>
         ) : (
           <>
             {listaMov.length === LIMITE && (
-              <p className="mb-3 text-xs text-texto-2">
+              <p className="mb-s3 text-xs text-texto-2">
                 Mostrando as {LIMITE} mais recentes.
               </p>
             )}
@@ -403,7 +408,7 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
       ) : (
         <>
           {sync.isPending && listaTar.length > 0 && (
-            <p className="mb-2 text-xs text-texto-2">atualizando do ADVBOX…</p>
+            <p className="mb-s2 text-xs text-texto-2">atualizando do ADVBOX…</p>
           )}
 
           {tarefas.isLoading ? (
@@ -412,9 +417,10 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
               <div className="skeleton h-12 w-11/12 rounded-campo" />
             </div>
           ) : tarefas.isError ? (
-            <p role="alert" className="text-corpo text-perigo">
-              Não foi possível carregar o histórico: {(tarefas.error as Error).message}
-            </p>
+            <ErrorState
+              message={`Não foi possível carregar o histórico: ${(tarefas.error as Error).message}`}
+              onRetry={() => tarefas.refetch()}
+            />
           ) : tarFiltradas.length === 0 ? (
             <p className="text-corpo text-texto-2">
               {listaTar.length === 0
@@ -453,7 +459,8 @@ export function DrawerHistorico({ numero }: { numero?: string | null }) {
           {/* Só com cache: sem ele, o próprio estado vazio acima já diz que a
               consulta falhou, e os dois juntos avisavam duas vezes. */}
           {sync.isError && listaTar.length > 0 && (
-            <p className="mt-3 text-xs text-aviso">
+            <p role="status" className="mt-s3 flex items-start gap-s1.5 text-sm text-texto-2">
+              <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] shrink-0 text-aviso" aria-hidden />
               Não foi possível atualizar do ADVBOX agora: {(sync.error as Error).message}
             </p>
           )}

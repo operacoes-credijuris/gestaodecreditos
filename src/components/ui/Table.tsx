@@ -204,10 +204,17 @@ export function EmptyState({
   description,
   action,
   icon,
+  embutido = false,
 }: {
   title?: string
   description?: ReactNode
   action?: ReactNode
+  /**
+   * DENTRO DE UM CARTÃO que já tem título (o painel do Quadro, por exemplo): sem a
+   * moldura tracejada e sem fundo próprio — senão vira cartão dentro de cartão
+   * (§0.4). Revisão visual 2; opcional, nada muda para quem não passa.
+   */
+  embutido?: boolean
   /**
    * O ícone da placa (ex.: `<Search />` para "nada encontrado"). Sem ele, a
    * caixa de entrada de sempre. O tamanho é o da placa: não precisa de classe.
@@ -219,7 +226,12 @@ export function EmptyState({
     // título em negrito e a explicação em cinza secundário, com largura de leitura.
     // A BORDA TRACEJADA é dela também: diz "aqui caberia algo" — a área existe,
     // só está vazia —, e separa o vazio de um cartão que não carregou.
-    <div className="flex flex-col items-center justify-center gap-3 rounded-cartao border border-dashed border-borda-forte bg-superficie px-6 py-14 text-center">
+    <div
+      className={cn(
+        'flex flex-col items-center justify-center gap-3 px-6 text-center',
+        embutido ? 'py-s8' : 'rounded-cartao border border-dashed border-borda-forte bg-superficie py-14',
+      )}
+    >
       <div
         className="grid h-16 w-16 place-items-center rounded-cartao bg-marca-suave text-marca-texto [&_svg]:h-7 [&_svg]:w-7"
         aria-hidden

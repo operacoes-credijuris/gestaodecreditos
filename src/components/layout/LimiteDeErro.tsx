@@ -30,18 +30,21 @@ export class LimiteDeErro extends Component<{ children: ReactNode }, { erro: unk
     if (!this.state.erro) return this.props.children
     const carga = ehFalhaDeCarga(this.state.erro)
     return (
-      <div role="alert" className="mx-auto max-w-[560px] pt-[48px]">
-        <div className="rounded-cartao border border-dashed border-borda-forte bg-superficie px-6 py-[48px] text-center">
-          <div className="mx-auto mb-3 grid h-[52px] w-[52px] place-items-center rounded-[16px] bg-perigo-fundo text-perigo">
+      // O ERRO EM CAIXA SÓLIDA (§0.10, revisão visual 2): a tracejada é a do VAZIO
+      // ("aqui caberia algo"); a página não encontrada a usa, o erro não. A placa
+      // nas medidas da da página não encontrada, no raio de cartão.
+      <div role="alert" className="mx-auto max-w-[560px] pt-s12">
+        <div className="rounded-cartao border border-borda bg-superficie px-s5 py-s12 text-center shadow-nivel-1">
+          <div className="mx-auto mb-s2 grid h-[52px] w-[52px] place-items-center rounded-cartao bg-perigo-fundo text-perigo">
             <AlertTriangle className="h-[20px] w-[20px]" aria-hidden />
           </div>
           <h1 className="font-display text-lg font-bold text-texto">Não foi possível abrir esta tela</h1>
-          <p className="mx-auto mt-1.5 max-w-[420px] text-corpo text-texto-2">
+          <p className="mx-auto mt-s1 max-w-[420px] text-corpo text-texto-2">
             {carga
               ? 'A tela não chegou do servidor — a conexão caiu ou saiu uma versão nova da plataforma. Recarregue a página.'
               : 'Algo deu errado ao montar esta tela. Recarregue a página; se continuar, avise o administrador.'}
           </p>
-          <div className="mt-[14px]">
+          <div className="mt-s4">
             <Button
               icon={<RefreshCw className="h-[16px] w-[16px]" />}
               onClick={() => window.location.reload()}

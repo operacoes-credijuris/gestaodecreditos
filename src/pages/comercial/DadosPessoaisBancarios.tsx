@@ -19,6 +19,7 @@
 // qualificação) na ficha do investidor, o endereço antigo à vista com o aviso e
 // o "Descartar alterações?" ao fechar a ficha com algo digitado. O que o Salvar
 // grava continua em lib/fichaPessoa.ts, com teste.
+import { cn } from '@/lib/cn'
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Copy, Info, Pencil, Plus, Trash2 } from 'lucide-react'
 import {
@@ -145,12 +146,16 @@ function SecaoFicha({ titulo, children }: { titulo: string; children: ReactNode 
   )
 }
 
-/** Aviso âmbar com ícone (o `.hint-warn` da amostra). */
+/**
+ * Aviso âmbar com ícone (o `.hint-warn` da amostra). O DE INFORMAÇÃO (`icone="info"`)
+ * NÃO É ÂMBAR (revisão visual 2): o ⓘ em âmbar dizia "cuidado" para o que é só
+ * contexto. Fica no cinza de leitura, com o ícone no azul de informação.
+ */
 function AvisoAmbar({ children, icone = 'alerta' }: { children: ReactNode; icone?: 'alerta' | 'info' }) {
   const Icone = icone === 'info' ? Info : AlertTriangle
   return (
-    <p role="status" className="mt-s2 flex items-start gap-s1.5 text-sm text-aviso">
-      <Icone className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
+    <p role="status" className={cn('mt-s2 flex items-start gap-s1.5 text-sm', icone === 'info' ? 'text-texto-2' : 'text-aviso')}>
+      <Icone className={cn('mt-s0.5 h-[16px] w-[16px] flex-none', icone === 'info' && 'text-info')} aria-hidden />
       <span>{children}</span>
     </p>
   )
@@ -653,7 +658,7 @@ export default function DadosPessoaisBancarios() {
     return (
       <div>
         {cabecalho}
-        <Card className="px-5">
+        <Card>
           {carregando ? (
             <Loading label="Carregando dados…" />
           ) : (
@@ -1211,7 +1216,7 @@ export default function DadosPessoaisBancarios() {
                 const legado = end.mantemAntigo && end.texto
                 return (
                   <>
-                    <p className="mt-s3 rounded-controle bg-superficie-2 px-s4 py-s2 text-corpo text-texto-3">
+                    <p className="mt-s3 rounded-campo bg-superficie-2 px-s4 py-s2 text-corpo text-texto-3">
                       {(legado ? compilado : end.texto) || 'Endereço em branco'}
                     </p>
                     {legado && (

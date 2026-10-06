@@ -14,11 +14,11 @@ export function FaixaBeta({ fixa = false }: { fixa?: boolean }) {
   return (
     <div
       role="note"
-      className={`flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-aviso-borda bg-aviso-fundo px-4 py-1.5 text-sm text-aviso ${
+      className={`flex flex-wrap items-center justify-center gap-x-s3 gap-y-s1 border-b border-aviso-borda bg-aviso-fundo px-s4 py-s1.5 text-sm text-aviso ${
         fixa ? 'fixed inset-x-0 top-0 z-50' : ''
       }`}
     >
-      <FlaskConical className="h-4 w-4 shrink-0" aria-hidden />
+      <FlaskConical className="h-[16px] w-[16px] shrink-0" aria-hidden />
       <span>
         <strong>Versão beta</strong> — mesmos dados e mesmo Kommo da oficial: o que se faz aqui é real.
       </span>
