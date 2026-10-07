@@ -36,14 +36,41 @@ export interface EtiquetaDoFundo {
    * BTG e reprovado no PJus, e é exatamente isso que a fila precisa mostrar.
    */
   destino: string
+  /**
+   * Quando usar a etiqueta, em poucas palavras — o seletor a mostra discreta ao
+   * lado: o "Enviado BTG" é "só para atacado" (07/10/2026).
+   */
+  observacao?: string
+}
+
+/** As modalidades de comissão de uma cotação (ver `Comissao` em cotacaoDoFundo.ts). */
+export const MODALIDADES_DA_COMISSAO = ['limitada', 'spread'] as const
+export type ModalidadeDaComissao = (typeof MODALIDADES_DA_COMISSAO)[number]
+
+interface FundoDaCasa {
+  destino: string
+  atos: readonly AtoDaPrecificacao[]
+  artigo: 'do' | 'da'
+  /** As modalidades de comissão que o fundo aceita na cotação, na ordem do seletor. */
+  comissoes: readonly ModalidadeDaComissao[]
+  /** Uma observação curta junto de um ato, no seletor (ver `EtiquetaDoFundo.observacao`). */
+  observacoes?: Partial<Record<AtoDaPrecificacao, string>>
 }
 
 /**
  * OS FUNDOS EM QUE A CASA COTA, na ordem da tela — ditados por quem opera em
  * 29/09/2026. Eram PJus, BTG e Luiz; o Luiz saiu e entraram cinco fundos.
  *
- * O BTG NÃO TEM "ENVIADO": ali o crédito não fica esperando — ou volta cotado,
- * ou recusado. É o único fundo com dois atos.
+ * O BTG GANHOU O "ENVIADO" EM 07/10/2026 — MUDOU DE PROPÓSITO. Até então ali o
+ * crédito não ficava esperando: subia na plataforma do banco e voltava cotado
+ * ou recusado na hora (o VAREJO). Acima de uns R$ 10 milhões o BTG cota no
+ * ATACADO, com análise personalizada: a casa manda por e-mail e espera, como na
+ * PJus. É esse caso que o "Enviado BTG" marca — e só ele (ver `observacoes`).
+ *
+ * A COMISSÃO DO BTG É SEMPRE LIMITADA (07/10/2026): o banco diz quanto paga, e
+ * não há spread. É propriedade do fundo (`comissoes`), e não um `if` na tela:
+ * vale para toda janela que pede a cotação e para a porta do servidor
+ * (`validarCotacao` com o `fundo`).
  *
  * "PJus", E NÃO "PJUS" (01/10/2026): é como a gestora escreve o nome. As
  * etiquetas antigas, com "PJUS", continuam no Kommo — ele não renomeia nem
@@ -51,18 +78,33 @@ export interface EtiquetaDoFundo {
  * (ver `mesmaEtiqueta`). A tela mostra o nome novo, e a kommo-etiquetar tira a
  * grafia antiga quando troca a etiqueta de fundo.
  */
-const FUNDOS: { destino: string; atos: readonly AtoDaPrecificacao[]; artigo: 'do' | 'da' }[] = [
-  { destino: 'PJus', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
-  { destino: 'BTG', atos: ['Cotado', 'Reprovado'], artigo: 'do' },
-  { destino: 'PX Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
-  { destino: 'Invest Precatórios', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
-  { destino: 'K & WC Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
-  { destino: 'Precatur', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
-  { destino: 'Carbon', atos: ATOS_DA_PRECIFICACAO, artigo: 'da' },
+const FUNDOS: readonly FundoDaCasa[] = [
+  { destino: 'PJus', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
+  {
+    destino: 'BTG',
+    atos: ATOS_DA_PRECIFICACAO,
+    artigo: 'do',
+    comissoes: ['limitada'],
+    observacoes: { Enviado: 'só para atacado' },
+  },
+  { destino: 'PX Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
+  { destino: 'Invest Precatórios', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
+  { destino: 'K & WC Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
+  { destino: 'Precatur', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
+  { destino: 'Carbon', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
 ]
 
 /** Os fundos, na ordem da tela — é entre eles que se escolhe a proposta. */
 export const FUNDOS_DA_PRECIFICACAO: readonly string[] = FUNDOS.map((f) => f.destino)
+
+/**
+ * AS MODALIDADES DE COMISSÃO QUE O FUNDO ACEITA, na ordem do seletor: o BTG só
+ * a limitada (07/10/2026); os outros, limitada e spread. Fundo fora da lista (ou
+ * nenhum) aceita as duas — o comportamento de antes desta propriedade.
+ */
+export function comissoesDoFundo(destino: unknown): readonly ModalidadeDaComissao[] {
+  return FUNDOS.find((f) => mesmaEtiqueta(f.destino, destino))?.comissoes ?? MODALIDADES_DA_COMISSAO
+}
 
 /**
  * A nota do card quando a casa escolhe a proposta: "Seguir com a proposta da PX
@@ -87,7 +129,12 @@ export function mensagemDaProposta(destino: string): string {
  * "Cotado PJus" substituindo "Enviado PJus" é a notícia de que o fundo respondeu.
  */
 export const ETIQUETAS_DA_PRECIFICACAO: readonly EtiquetaDoFundo[] = FUNDOS.flatMap((f) =>
-  f.atos.map((ato) => ({ destino: f.destino, ato, nome: `${ato} ${f.destino}` })),
+  f.atos.map((ato) => ({
+    destino: f.destino,
+    ato,
+    nome: `${ato} ${f.destino}`,
+    ...(f.observacoes?.[ato] ? { observacao: f.observacoes[ato] } : {}),
+  })),
 )
 
 /** Acento, caixa e espaço a mais não podem decidir se duas etiquetas são a mesma. */

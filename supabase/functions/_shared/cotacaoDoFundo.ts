@@ -44,7 +44,12 @@
 // MÓDULO PURO — sem `npm:` e sem `Deno.` —: roda no vitest, no navegador e na
 // Edge Function (a `kommo-etiquetar`), e os dois lados escrevem o mesmo texto.
 
-import { FUNDOS_DA_PRECIFICACAO, normalizarEtiqueta } from './etiquetasDoFundo.ts'
+import {
+  comissoesDoFundo,
+  FUNDOS_DA_PRECIFICACAO,
+  type ModalidadeDaComissao,
+  normalizarEtiqueta,
+} from './etiquetasDoFundo.ts'
 
 // ------------------------------------------------------------------ dinheiro
 
@@ -281,6 +286,18 @@ export function resumoDoSpread(c: Cotacao): { comissao: string; final: string } 
   }
 }
 
+/**
+ * A recusa de uma modalidade que o fundo não aceita — a de uma aba aberta antes
+ * de 07/10/2026 mandando spread no BTG. Diz o que fazer: recarregar.
+ */
+export function erroDaModalidade(fundo: string, modalidade: ModalidadeDaComissao): string {
+  const aceitas = comissoesDoFundo(fundo)
+  return modalidade === 'spread' && aceitas.length === 1 && aceitas[0] === 'limitada'
+    ? `O ${fundo} não trabalha com spread: a comissão dele é sempre limitada, em reais. ` +
+        'Recarregue a página (F5) e informe a comissão em R$.'
+    : `A comissão ${modalidade} não vale para o fundo ${fundo}. Recarregue a página (F5) e cote de novo.`
+}
+
 const centavosValidos = (n: unknown): n is number =>
   typeof n === 'number' && Number.isInteger(n) && n > 0 && n <= TETO_CENTAVOS
 
@@ -303,10 +320,17 @@ const centavosValidos = (n: unknown): n is number =>
  * A COMISSÃO NÃO PODE ALCANÇAR A PROPOSTA: com o líquido como base, um
  * percentual alto (ou um líquido maior que a proposta) faria a final zero ou
  * negativa. É recusado, e a mensagem diz os dois números.
+ *
+ * O FUNDO DECIDE AS MODALIDADES (07/10/2026): com `fundo`, a comissão precisa
+ * ser uma das que ele aceita (`comissoesDoFundo`) — o BTG só a limitada. Aqui
+ * NÃO HÁ TOLERÂNCIA para a tela antiga: uma aba aberta antes do deploy que mande
+ * spread no BTG recebe o erro, e a pessoa recarrega. Gravar um spread que o
+ * banco não pratica seria pior que pedir um clique a mais. Sem `fundo`, valem
+ * as duas, como antes.
  */
 export function validarCotacao(
   x: unknown,
-  opcoes: { exigirPercentualNoSpread?: boolean; exigirBaseNoSpread?: boolean } = {},
+  opcoes: { exigirPercentualNoSpread?: boolean; exigirBaseNoSpread?: boolean; fundo?: string } = {},
 ): { ok: true; cotacao: Cotacao } | { ok: false; erro: string } {
   const c = (x ?? {}) as {
     propostaCentavos?: unknown
@@ -316,6 +340,13 @@ export function validarCotacao(
     return { ok: false, erro: 'Informe o valor da proposta (em reais, maior que zero).' }
   }
   const m = c.comissao?.modalidade
+  if (
+    opcoes.fundo !== undefined &&
+    (m === 'spread' || m === 'limitada') &&
+    !comissoesDoFundo(opcoes.fundo).includes(m)
+  ) {
+    return { ok: false, erro: erroDaModalidade(opcoes.fundo, m) }
+  }
   if (m === 'spread') {
     const p = c.comissao?.percentualCentesimos
     if (p === undefined || p === null) {
@@ -420,6 +451,45 @@ export function valorDigitadoDaCotacao(l: CotacaoLida | null): number | null {
     return l.proposta + l.comissao.centavos
   }
   return l.proposta
+}
+
+/**
+ * COMO A JANELA DA COTAÇÃO COMEÇA, a partir do que o campo do fundo tem no card
+ * — o valor que a pessoa digitou da outra vez, a modalidade, a comissão e o
+ * percentual.
+ *
+ * AS MODALIDADES SÃO AS DO FUNDO (`comissoesDoFundo`, 07/10/2026). Um campo
+ * gravado numa modalidade que o fundo não aceita mais — o spread de um BTG
+ * antigo — volta na primeira modalidade dele (a limitada), com a comissão
+ * VAZIA e `foraDoFundo`: a janela mostra o texto de hoje, e o spread não vira
+ * sozinho uma comissão em reais. A LEITURA do campo (`lerCotacao`) não muda: o
+ * card continua mostrando o spread antigo como está.
+ */
+export function inicioDaCotacao(
+  atual: CotacaoLida | null,
+  fundo?: string,
+): {
+  modalidades: readonly ModalidadeDaComissao[]
+  proposta: number | null
+  modalidade: ModalidadeDaComissao
+  comissao: number | null
+  percentual: string
+  foraDoFundo: boolean
+} {
+  const modalidades = comissoesDoFundo(fundo)
+  const c0 = atual?.comissao ?? null
+  const aceita = c0 !== null && modalidades.includes(c0.modalidade)
+  return {
+    modalidades,
+    proposta: valorDigitadoDaCotacao(atual),
+    modalidade: aceita ? c0!.modalidade : modalidades[0],
+    comissao: aceita && c0!.modalidade === 'limitada' ? c0!.centavos : null,
+    percentual:
+      aceita && c0!.modalidade === 'spread' && c0!.percentualCentesimos !== undefined
+        ? formatarPercentual(c0!.percentualCentesimos)
+        : '',
+    foraDoFundo: c0 !== null && !aceita,
+  }
 }
 
 /** Os rótulos que alguém pode ter escrito antes do número, no Kommo. */

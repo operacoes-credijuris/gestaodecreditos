@@ -56,6 +56,17 @@
 // proposta. SEM `baseCentavos` é a tela de 05/10/2026, ainda aberta em alguma
 // aba: continua aceita, com o percentual sobre o valor da proposta (a conta de
 // ontem). A base não cabe no texto do campo: ela fica na nota de registro.
+//
+// O BTG NÃO TEM SPREAD (07/10/2026): a comissão dele é sempre limitada, e é
+// propriedade do fundo (`comissoes` em etiquetasDoFundo.ts). Um "Cotado BTG"
+// com spread é recusado com 400 e a mensagem diz para recarregar — é o que
+// manda uma aba aberta antes do deploy, e não há tolerância para ela aqui: o
+// banco não pratica spread, e gravar um seria registrar o que não existe. O
+// spread JÁ GRAVADO num card antigo continua sendo lido como está.
+//
+// "ENVIADO BTG" (07/10/2026, o crédito de atacado) é uma etiqueta da lista como
+// as outras: entra pelo `tags_to_add`, que cria a etiqueta na conta na primeira
+// vez em que é aplicada (ver o cabeçalho de etiquetasDoFundo.ts), sem cotação.
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts'
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from '../_shared/auth.ts'
 import { contaKommo } from '../_shared/segredos.ts'
@@ -190,7 +201,8 @@ Deno.serve(async (req: Request) => {
           400,
         )
       }
-      const v = validarCotacao(body.cotacao)
+      // COM O FUNDO: a modalidade precisa ser uma das que ele aceita (o BTG, só limitada).
+      const v = validarCotacao(body.cotacao, { fundo: daLista.destino })
       if (!v.ok) return jsonResponse({ error: v.erro, gravado: false }, 400)
       cotacao = v.cotacao
     }

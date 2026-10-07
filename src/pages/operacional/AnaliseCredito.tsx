@@ -213,6 +213,8 @@ import {
 import { TextoComTermos } from '@/components/layout/TextoComTermos'
 import { CamposDaCotacao, JanelaDeCotacao, useCotacaoEmEdicao } from '@/components/JanelaDeCotacao'
 import { registrarEnvioAoFundo, type ResultadoDoEnvio } from '@/lib/envioAoFundo'
+import { Tabs, idDaAba } from '@/components/ui/Tabs'
+import { atosDaAba, desfechoDoFundo } from '../../../supabase/functions/_shared/trilhasDoPrecatorio.ts'
 import {
   comCotacaoGravada,
   type Cotacao,
@@ -1312,7 +1314,8 @@ function DesdeQuando({ quando }: { quando: string | null }) {
  * pôs.
  *
  * UMA OU NENHUMA POR FUNDO, e é o que a grade desenha: uma linha por fundo, uma
- * coluna por ato (Enviado, Cotado, Reprovado — o BTG só os dois últimos), e em
+ * coluna por ato (Enviado, Cotado, Reprovado — no BTG, o Enviado só para o
+ * atacado, desde 07/10/2026, com a observação embaixo do nome), e em
  * cada linha no máximo um círculo marcado. Marcar "Reprovado BTG" tira "Cotado
  * BTG", porque o crédito está num dos dois e não nos dois. Entre fundos não há
  * exclusão nenhuma. A troca vai num PATCH só, do lado do servidor.
@@ -1411,6 +1414,7 @@ function SeletorDeEtiquetas({
             </span>
             {etiquetasPorDestino(oferecidas).map((grupo) => {
               const marcada = grupo.etiquetas.find((e) => temEtiqueta(e.nome))
+              const observacoes = grupo.etiquetas.filter((e) => e.observacao)
               return (
                 <Fragment key={grupo.destino}>
                   {/* O FUNDO COM ETIQUETA fica em destaque: numa lista de sete, é
@@ -1440,6 +1444,14 @@ function SeletorDeEtiquetas({
                       </button>
                     )}
                   </span>
+                  {/* A OBSERVAÇÃO DO ATO, discreta embaixo do nome: "Enviado:
+                      só para atacado" no BTG (07/10/2026). No celular ela vai
+                      para a linha inteira, embaixo dos círculos (abaixo). */}
+                  {observacoes.map((e) => (
+                    <span key={e.nome} className="hidden text-xs font-normal text-texto-3 sm:block">
+                      {e.ato}: {e.observacao}
+                    </span>
+                  ))}
                   {/* O "DESDE" DO CELULAR, embaixo do nome. */}
                   {marcada && desdeQuandoAEtiqueta(datas, marcada.nome) && (
                     <span className="block text-xs text-texto-3 sm:hidden">
@@ -1449,10 +1461,12 @@ function SeletorDeEtiquetas({
                   </span>
                   {ATOS_DA_PRECIFICACAO.map((ato) => {
                     const e = grupo.etiquetas.find((x) => x.ato === ato)
-                    // O ATO QUE O FUNDO NÃO TEM (o Enviado do BTG) deixa o lugar
-                    // em branco — é o que mantém as colunas alinhadas.
+                    // O ATO QUE O FUNDO NÃO TEM deixa o lugar em branco — é o
+                    // que mantém as colunas alinhadas.
                     if (!e) return <span key={ato} />
                     const posta = temEtiqueta(e.nome)
+                    // A OBSERVAÇÃO VAI TAMBÉM NO TÍTULO: "Marcar "Enviado BTG" (só para atacado)".
+                    const dica = e.observacao ? ` (${e.observacao})` : ''
                     return (
                       <button
                         key={e.nome}
@@ -1462,8 +1476,8 @@ function SeletorDeEtiquetas({
                         // sobrescreveria a outra na tela.
                         disabled={emVoo !== null}
                         onClick={() => onAlternar(e.nome, posta ? 'remover' : 'adicionar')}
-                        title={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"`}
-                        aria-label={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"`}
+                        title={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"${dica}`}
+                        aria-label={posta ? `Tirar "${e.nome}"` : `Marcar "${e.nome}"${dica}`}
                         aria-pressed={posta}
                         className={cn(
                           // REDONDO, e não quadrado: no fundo a escolha é uma só,
@@ -1485,6 +1499,13 @@ function SeletorDeEtiquetas({
                   <span className="hidden text-right sm:block">
                     <DesdeQuando quando={marcada ? desdeQuandoAEtiqueta(datas, marcada.nome) : null} />
                   </span>
+                  {/* A OBSERVAÇÃO NO CELULAR: a coluna do nome é estreita, e ela
+                      quebrava em três linhas, colada ao "desde". */}
+                  {observacoes.map((e) => (
+                    <span key={e.nome} className="col-span-full -mt-s1 text-xs text-texto-3 sm:hidden">
+                      {e.ato}: {e.observacao}
+                    </span>
+                  ))}
                 </Fragment>
               )
             })}
@@ -1727,7 +1748,8 @@ const doFundo = (f: FundoDoEnvio) => `${f.artigo === 'a' ? 'da' : 'do'} ${f.fund
 
 /** O desfecho do fundo já posto no card (a etiqueta de um dos atos dele), ou null. */
 function atoFeito(f: FundoDoEnvio, tags: readonly string[] | null | undefined): AtoDoEnvio | null {
-  return f.atos.find((a) => (tags ?? []).some((t) => mesmaEtiqueta(t, a.etiqueta))) ?? null
+  // Na trilha, onde é testado: qualquer ato do fundo, de qualquer aba (07/10/2026).
+  return desfechoDoFundo(f, tags)
 }
 
 /**
@@ -1858,6 +1880,12 @@ function ChecksDosFundos({
  * "Cotado BTG"), a janela pede também o valor da proposta e a comissão — os
  * mesmos campos da janela da cotação (`CamposDaCotacao`). Obrigatórios só para
  * esse ato: "Reprovado BTG" não os usa, e a PJus não os vê.
+ *
+ * AS ABAS DO BTG (07/10/2026), quando o fundo as declara (`abas`): VAREJO, a de
+ * sempre (a cotação, a anotação e o print; "Cotado BTG"), e ATACADO, só a
+ * anotação e o print ("Enviado BTG": o BTG responde depois, por e-mail). A
+ * reprovação vale nas duas. Os campos moram na janela, e não na aba: trocar de
+ * aba não apaga nada do que foi digitado ou colado.
  */
 function JanelaDoEnvioAoFundo({
   fundo,
@@ -1893,10 +1921,17 @@ function JanelaDoEnvioAoFundo({
   const emVoo = useRef(false)
   const idDaJanela = useId()
 
-  // A COTAÇÃO, quando algum ato deste fundo a pede. O estado existe sempre (é
-  // um hook), mas só aparece e só vale no fundo que a pede.
-  const pedeCotacao = fundo.atos.some((a) => a.pedeCotacao)
-  const cotacao = useCotacaoEmEdicao(atual, liquido)
+  // A ABA ABERTA (o BTG: varejo ou atacado), e os atos que ela mostra.
+  const [aba, setAba] = useState<string | null>(fundo.abas?.[0]?.key ?? null)
+  const comAbas = (fundo.abas?.length ?? 0) > 1
+  const abaAberta = fundo.abas?.find((a) => a.key === aba) ?? null
+  const atos = atosDaAba(fundo, aba)
+  const idDoPainel = `${idDaJanela}-painel`
+
+  // A COTAÇÃO, quando algum ato da aba aberta a pede. O estado existe sempre (é
+  // um hook, e sobrevive à troca de aba), mas só aparece e só vale onde é pedida.
+  const pedeCotacao = atos.some((a) => a.pedeCotacao)
+  const cotacao = useCotacaoEmEdicao(atual, liquido, fundo.fundo)
   const [tentouCotar, setTentouCotar] = useState(false)
 
   // O PRINT COLADO chega como "image.png": ganha nome que diga de onde veio.
@@ -1913,7 +1948,9 @@ function JanelaDoEnvioAoFundo({
   // O MESMO CRITÉRIO DO X, DO ESCAPE E DO CANCELAR: texto escrito, imagem
   // colada ou valor digitado. O Cancelar do rodapé fechava sem perguntar, e o
   // print colado ia junto.
-  const sujo = texto.trim().length > 0 || arquivos.length > 0 || (pedeCotacao && cotacao.sujo)
+  // A COTAÇÃO CONTA MESMO NA OUTRA ABA: digitada no varejo, ela continua lá.
+  const sujo =
+    texto.trim().length > 0 || arquivos.length > 0 || (fundo.atos.some((a) => a.pedeCotacao) && cotacao.sujo)
   const cancelar = async () => {
     if (sujo && !(await perguntarDescarte())) return
     onFechar()
@@ -2046,44 +2083,78 @@ function JanelaDoEnvioAoFundo({
           <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
         </a>
       }
-      rodapeInicio={fundo.atos.some((a) => a.reprova) ? fundo.atos.filter((a) => a.reprova).map(botaoDoAto) : undefined}
+      rodapeInicio={atos.some((a) => a.reprova) ? atos.filter((a) => a.reprova).map(botaoDoAto) : undefined}
       footer={
         // CANCELAR EM FANTASMA, como na janela da cotação e na due diligence; e
         // [Cancelar][ato] JUNTOS: no celular, o par quebra inteiro para a linha
-        // de baixo, em vez de deixar o ato sozinho.
+        // de baixo, em vez de deixar o ato sozinho. O ATO É O DA ABA ABERTA:
+        // "Cotado BTG" no varejo, "Enviado BTG" no atacado.
         <div className="flex gap-s2">
           <Button variant="ghost" onClick={() => void cancelar()} disabled={ocupado}>
             Cancelar
           </Button>
-          {fundo.atos.filter((a) => !a.reprova).map(botaoDoAto)}
+          {atos.filter((a) => !a.reprova).map(botaoDoAto)}
         </div>
       }
     >
-      {pedeCotacao ? (
-        <div className="space-y-s6">
-          <section aria-labelledby={`${idDaJanela}-cotacao`} className="space-y-s3">
-            <div>
-              <h3 id={`${idDaJanela}-cotacao`} className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
-                Cotação {doFundo(fundo)}
-              </h3>
-              <p className="mt-s1 text-xs text-texto-3">
-                Obrigatória no “{fundo.atos.find((a) => a.pedeCotacao)?.etiqueta}”; vai para o campo {fundo.fundo} da aba “
-                {NOME_DO_GRUPO_DAS_COTACOES}”. A reprovação não a usa.
-              </p>
-            </div>
-            {/* ENTER NUM CAMPO DA COTAÇÃO é o ato que a pede ("Cotado BTG"):
-                a janela tem dois atos no rodapé, e só este usa os campos. */}
-            <CamposDaCotacao
-              edicao={cotacao}
-              fundo={fundo.fundo}
-              tentou={tentouCotar}
-              desligado={ocupado}
-              onEnter={() => {
-                const ato = fundo.atos.find((a) => a.pedeCotacao)
-                if (ato) void confirmar(ato)
-              }}
-            />
-          </section>
+      {comAbas && (
+        <div className="mb-s4">
+          <Tabs
+            rotulo={`Tipo de envio ${aoFundo(fundo)}`}
+            items={fundo.abas!.map((a) => ({ key: a.key, label: a.rotulo }))}
+            value={aba ?? fundo.abas![0].key}
+            // NO MEIO DO ENVIO, A ABA NÃO TROCA: o ato em curso é o da aba aberta.
+            onChange={(k) => {
+              if (ocupado) return
+              setErro(null)
+              setAba(k)
+            }}
+            idDoPainel={idDoPainel}
+          />
+        </div>
+      )}
+      {pedeCotacao || comAbas ? (
+        // A MESMA ÁRVORE NAS DUAS ABAS — a explicação, a cotação e a anotação,
+        // cada uma no seu lugar, presente ou não: trocar de aba não remonta a
+        // anotação (nem o print colado, nem o foco).
+        <div
+          className="space-y-s6"
+          {...(comAbas
+            ? {
+                id: idDoPainel,
+                role: 'tabpanel',
+                'aria-labelledby': idDaAba(idDoPainel, Math.max(0, fundo.abas!.findIndex((a) => a.key === aba))),
+              }
+            : {})}
+        >
+          {abaAberta?.explicacao ? (
+            <p className="rounded-campo bg-superficie-2 px-s4 py-s3 text-sm text-texto-2">{abaAberta.explicacao}</p>
+          ) : null}
+          {pedeCotacao ? (
+            <section aria-labelledby={`${idDaJanela}-cotacao`} className="space-y-s3">
+              <div>
+                <h3 id={`${idDaJanela}-cotacao`} className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+                  Cotação {doFundo(fundo)}
+                </h3>
+                <p className="mt-s1 text-xs text-texto-3">
+                  Obrigatória no “{atos.find((a) => a.pedeCotacao)?.etiqueta}”; vai para o campo {fundo.fundo} da aba “
+                  {NOME_DO_GRUPO_DAS_COTACOES}”. A reprovação não a usa.
+                </p>
+              </div>
+              {/* ENTER NUM CAMPO DA COTAÇÃO é o ato que a pede ("Cotado BTG"):
+                  a janela tem dois atos no rodapé, e só este usa os campos. */}
+              <CamposDaCotacao
+                edicao={cotacao}
+                fundo={fundo.fundo}
+                tentou={tentouCotar}
+                desligado={ocupado}
+                onEnter={() => {
+                  const ato = atos.find((a) => a.pedeCotacao)
+                  if (ato) void confirmar(ato)
+                }}
+              />
+            </section>
+          ) : null}
           <section aria-labelledby={`${idDaJanela}-anotacao`} className="space-y-s3">
             <h3 id={`${idDaJanela}-anotacao`} className="font-display text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
               Anotação e print

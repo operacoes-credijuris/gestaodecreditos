@@ -83,14 +83,16 @@ export async function registrarEnvioAoFundo({
   passos: PassosDoEnvio
   onAndamento?: (texto: string) => void
 }): Promise<ResultadoDoEnvio> {
-  // 0. A COTAÇÃO, ANTES DE QUALQUER CHAMADA. "Reprovado BTG" e a PJus não a
-  // pedem: o que tiver sido digitado na janela fica de fora.
+  // 0. A COTAÇÃO, ANTES DE QUALQUER CHAMADA. "Reprovado BTG", o "Enviado BTG"
+  // do atacado (07/10/2026) e a PJus não a pedem: o que tiver sido digitado na
+  // janela fica de fora.
   let comCotacao: Cotacao | null = null
   if (ato.pedeCotacao) {
     // A TELA NOVA SEMPRE MANDA O PERCENTUAL E A BASE (o valor líquido validado,
     // 06/10/2026) NO SPREAD: sem eles, não sai daqui (o servidor ainda aceita o
     // spread sem eles, por causa das abas abertas antes do deploy — esta, não).
-    const v = validarCotacao(cotacao, { exigirPercentualNoSpread: true, exigirBaseNoSpread: true })
+    // E SÓ AS MODALIDADES DO FUNDO: no BTG, só a limitada (07/10/2026).
+    const v = validarCotacao(cotacao, { exigirPercentualNoSpread: true, exigirBaseNoSpread: true, fundo })
     if (!v.ok) throw new Error(`${v.erro} Nada foi enviado ao Kommo.`)
     comCotacao = v.cotacao
   }
