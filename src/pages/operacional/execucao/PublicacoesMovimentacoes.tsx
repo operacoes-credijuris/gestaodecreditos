@@ -655,9 +655,11 @@ function PublicacaoCard({
         <SeloDoVinculo info={info} />
         {/* A DATA À DIREITA, com HÁ QUANTO TEMPO ao lado (qualidade de vida): é a
             conta que decide a urgência de uma intimação, e a tela faz em vez de
-            quem lê. */}
-        <span className="ml-auto flex items-center gap-s1">
-          <span className="whitespace-nowrap text-sm tabular-nums text-texto-2" title="Data de disponibilização">
+            quem lê. NO CELULAR, UMA LINHA INTEIRA: a data à esquerda e as ações
+            à direita (antes o grupo descia empurrado para a direita e parecia
+            recuado sem motivo). */}
+        <span className="ml-auto flex items-center gap-s1 max-sm:ml-0 max-sm:w-full">
+          <span className="whitespace-nowrap text-sm tabular-nums text-texto-2 max-sm:mr-auto" title="Data de disponibilização">
             <span className="sr-only">Data de disponibilização: </span>
             {formatDate(p.data_disponibilizacao)}
             {decorrido && <span className="text-texto-3"> · {decorrido}</span>}
@@ -720,7 +722,7 @@ function TextoExpand({ text }: { text: string }) {
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="min-h-[24px] text-sm font-semibold text-marca-texto hover:underline"
+          className="min-h-[24px] text-sm font-semibold text-marca-texto hover:underline [@media(pointer:coarse)]:min-h-[36px] [@media(pointer:coarse)]:pr-s4"
         >
           {expanded ? 'Ler menos' : 'Ler tudo'}
         </button>

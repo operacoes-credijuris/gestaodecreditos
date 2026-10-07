@@ -1,5 +1,6 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/cn'
+import { rolarParaAVista } from '@/lib/rolarParaAVista'
 
 export interface TabItem {
   key: string
@@ -73,6 +74,12 @@ export function Tabs({
 }) {
   // Refs dos botões para mover o foco na navegação por setas.
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const filaRef = useRef<HTMLDivElement>(null)
+  // A ABA ABERTA SEMPRE À VISTA quando a régua rola de lado (celular).
+  const indiceAberto = items.findIndex((it) => it.key === value)
+  useEffect(() => {
+    rolarParaAVista(filaRef.current, tabRefs.current[indiceAberto] ?? null)
+  }, [indiceAberto])
 
   // Setas Esquerda/Direita movem o foco e selecionam a aba (com wrap).
   function handleKeyDown(e: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -103,6 +110,7 @@ export function Tabs({
           conteúdo para a borda da página. `min-w-0` mantém o scroll horizontal
           funcionando quando as abas não couberem. */}
       <div
+        ref={filaRef}
         role="tablist"
         aria-label={rotulo}
         // `relative`: o que for `absolute` dentro (um `sr-only`) se mede por esta
@@ -133,7 +141,7 @@ export function Tabs({
                 // O `.tabs button` da amostra: 14px na fonte do corpo, cinza
                 // secundário, e a aberta em azul com o sublinhado no azul da
                 // logomarca. A desabilitada fica no cinza de metadado, apagada.
-                'flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-corpo font-semibold transition-colors',
+                'flex shrink-0 items-center gap-s1.5 whitespace-nowrap border-b-2 px-s3 py-s2 text-corpo font-semibold transition-colors',
                 item.disabled
                   ? 'cursor-not-allowed border-transparent text-texto-3 opacity-60'
                   : active

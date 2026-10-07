@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, BookUser, History, Loader2, Search, SquareKanban, Wallet } from 'lucide-react'
+import { ArrowRight, BookUser, History, Loader2, Search, SquareKanban, Wallet, X } from 'lucide-react'
 import { gravarPreferencia, lerPreferenciaValida } from '@/lib/preferencias'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/cn'
@@ -224,9 +224,11 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-label="Buscar em toda a plataforma"
-        className="animate-modal-in mt-[10vh] w-full max-w-[620px] overflow-hidden rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]"
+        // NO CELULAR, COLADA NO ALTO: com o teclado aberto, os 10% de cima
+        // tiravam da vista justamente os primeiros resultados.
+        className="animate-modal-in mt-0 w-full max-w-[620px] overflow-hidden sm:mt-[10vh] rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]"
       >
-        <div className="flex h-[56px] items-center gap-s3 border-b border-borda px-s5 text-texto-3">
+        <div className="flex h-[56px] items-center gap-s3 border-b border-borda pl-s4 pr-s1 text-texto-3 sm:px-s5">
           <Search className="h-[18px] w-[18px] shrink-0" aria-hidden />
           <input
             role="combobox"
@@ -255,7 +257,18 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
             className="min-w-0 flex-1 bg-transparent text-lg text-texto outline-none placeholder:text-texto-3"
           />
           {carregando && <Loader2 className="h-[16px] w-[16px] shrink-0 animate-spin" aria-hidden />}
-          <Tecla>Esc</Tecla>
+          <span className="hidden sm:block">
+            <Tecla>Esc</Tecla>
+          </span>
+          {/* NO CELULAR NÃO HÁ ESC: um X de 44px no lugar da tecla desenhada. */}
+          <button
+            type="button"
+            onClick={onFechar}
+            aria-label="Fechar a busca"
+            className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-controle text-texto-2 hover:bg-superficie-3 hover:text-texto sm:hidden"
+          >
+            <X className="h-[20px] w-[20px]" aria-hidden />
+          </button>
         </div>
 
         <ul id={listaId} role="listbox" aria-label="Resultados" className="max-h-[50vh] overflow-y-auto p-s2 scrollbar-thin">
@@ -283,9 +296,24 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
                 <Icone className="h-[16px] w-[16px] shrink-0 text-texto-3" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-corpo font-semibold text-texto">{r.titulo}</span>
-                  {r.sub && <span className="block truncate text-xs text-texto-3">{r.sub}</span>}
+                  {/* NO CELULAR, O "ONDE" VAI PARA A LINHA DE BAIXO: o selo à
+                      direita ("Análise Jurídica e Econômica") comia o nome, que
+                      virava "Aparecida L…". */}
+                  {(r.sub || r.onde) && (
+                    <span className="block truncate text-xs text-texto-3">
+                      {r.onde && (
+                        <span className="font-semibold text-texto-2 sm:hidden">
+                          {r.onde}
+                          {r.sub ? ' · ' : ''}
+                        </span>
+                      )}
+                      {r.sub}
+                    </span>
+                  )}
                 </span>
-                <Badge tone="gray">{r.onde}</Badge>
+                <span className="hidden shrink-0 sm:block">
+                  <Badge tone="gray">{r.onde}</Badge>
+                </span>
               </li>
             )
           })}
@@ -304,7 +332,8 @@ export function BuscaGeral({ onFechar }: { onFechar: () => void }) {
                   : ''}
         </p>
 
-        <div className="flex flex-wrap items-center gap-x-s4 gap-y-s2 border-t border-borda px-s5 py-s3 text-xs text-texto-3">
+        {/* As teclas só valem com teclado: no celular, o rodapé some. */}
+        <div className="hidden flex-wrap items-center gap-x-s4 gap-y-s2 border-t border-borda px-s5 py-s3 text-xs text-texto-3 sm:flex">
           {/* AS TECLAS DESENHADAS, como o "Ctrl K" do topo e o "Esc" acima (ui/Tecla):
               soltas no texto, "Ctrl Enter aba nova" se lia como uma frase só. */}
           <span className="inline-flex items-center gap-s1">

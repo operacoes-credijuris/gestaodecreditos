@@ -117,7 +117,9 @@ export function Modal({
       // no fundo fechava a janela e levava o que estava digitado. A janela fecha
       // só pelo X, pelo Fechar/Cancelar do rodapé ou pelo Esc (que pergunta
       // antes de descartar quando há alteração).
-      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin sm:p-6"
+      // NO CELULAR, 8PX DE MARGEM (eram 12px; no computador, 24px): a janela
+      // usa quase a tela toda.
+      className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-s2 backdrop-blur-[2px] scrollbar-thin sm:p-s6"
     >
       <div
         ref={panelRef}
@@ -128,7 +130,11 @@ export function Modal({
           // fundo rola, em vez de a janela sair por cima.
           // No escuro, a sombra não separa a janela da página: o anel claro sim
           // (auditoria visual, E3).
-          'animate-modal-in my-auto w-full rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]',
+          // NUNCA MAIS ALTA QUE A TELA (`max-h-full` + coluna): o corpo é que
+          // rola, e o rodapé — com o botão principal — fica sempre à vista. Antes,
+          // no celular, uma janela comprida empurrava o rodapé para baixo da
+          // dobra e era preciso rolar o fundo para achar o "Salvar".
+          'animate-modal-in my-auto flex max-h-full w-full flex-col rounded-janela bg-superficie shadow-nivel-3 outline-none dark:ring-1 dark:ring-white/[0.06]',
           sizes[size],
         )}
         role="dialog"
@@ -137,7 +143,7 @@ export function Modal({
       >
         {/* Cabeçalho sem divisória, como na amostra: o rodapé é que se separa,
             porque é ele que fica parado enquanto o corpo rola. */}
-        <div className="flex items-start justify-between gap-s3 px-s5 pt-s5">
+        <div className="flex shrink-0 items-start justify-between gap-s3 px-s4 pt-s4 sm:px-s5 sm:pt-s5">
           <div className="min-w-0">
             <h2
               id={titleId}
@@ -149,10 +155,11 @@ export function Modal({
               <p className="mt-1 text-corpo text-texto-2">{description}</p>
             )}
           </div>
-          {/* O X COM ALVO DE 32PX e ícone de 18px (era 24px de alvo). */}
+          {/* O X COM ALVO DE 32PX e ícone de 18px (era 24px de alvo); 40px no
+              toque, onde ele é o jeito de fechar (o clique fora não fecha). */}
           <button
             onClick={requestClose}
-            className="-mr-s2 -mt-s1 grid h-[32px] w-[32px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto"
+            className="-mr-s2 -mt-s1 grid h-[32px] w-[32px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto [@media(pointer:coarse)]:h-[40px] [@media(pointer:coarse)]:w-[40px]"
             aria-label="Fechar"
           >
             <X className="h-[18px] w-[18px]" aria-hidden />
@@ -162,11 +169,13 @@ export function Modal({
             caixa posicionada em volta) abaixo da dobra se media pelo FUNDO da
             janela, que também rola — o fundo crescia, rolava, e a janela subia
             deixando um vão embaixo. O mesmo defeito da moldura do layout. */}
-        <div className="relative max-h-[70vh] overflow-y-auto px-s5 py-s4 scrollbar-thin">
+        {/* No celular, sem o teto de 70% da tela: o corpo ocupa o que sobra
+            entre o título e o rodapé (`min-h-0` deixa a coluna encolhê-lo). */}
+        <div className="relative max-h-[70vh] overflow-y-auto min-h-0 px-s4 py-s4 scrollbar-thin max-sm:max-h-none sm:px-s5">
           {children}
         </div>
         {(footer || rodapeInicio) && (
-          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda px-s5 pb-s5 pt-s3">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-s2 border-t border-borda px-s4 pb-s4 pt-s3 sm:px-s5 sm:pb-s5">
             {rodapeInicio && <div className="mr-auto flex flex-wrap items-center gap-s2">{rodapeInicio}</div>}
             {/* CANCELAR E A AÇÃO PRINCIPAL ANDAM JUNTOS: sem o grupo, no celular
                 cada botão quebrava a linha sozinho e o par se separava (revisão

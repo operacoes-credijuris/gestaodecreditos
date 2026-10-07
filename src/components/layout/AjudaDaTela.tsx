@@ -60,7 +60,9 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
         if (aberto && !caixaRef.current?.contains(e.relatedTarget as Node | null)) setAberto(false)
       }}
     >
-      {/* O `.ajuda` da amostra: um círculo de 24px com o "?". */}
+      {/* O `.ajuda` da amostra: um círculo de 24px com o "?". O ALVO DO TOQUE
+          É MAIOR que o desenho (36px, a camada invisível `after:`): no celular,
+          24px é pouco para o dedo, e o círculo maior pesaria ao lado do título. */}
       <button
         ref={botaoRef}
         type="button"
@@ -69,7 +71,7 @@ export function AjudaDaTela({ frases }: { frases: readonly string[] }) {
         aria-controls={id}
         aria-label="Como funciona esta tela"
         title="Como funciona esta tela"
-        className="font-display grid h-8 w-8 place-items-center rounded-full border-[1.5px] border-borda-forte bg-superficie text-sm font-extrabold text-texto-2 transition-colors hover:border-marca-viva hover:text-marca-texto"
+        className="font-display relative grid h-8 w-8 place-items-center rounded-full border-[1.5px] border-borda-forte bg-superficie text-sm font-extrabold text-texto-2 transition-colors after:absolute after:-inset-[6px] after:content-[''] hover:border-marca-viva hover:text-marca-texto"
       >
         ?
       </button>

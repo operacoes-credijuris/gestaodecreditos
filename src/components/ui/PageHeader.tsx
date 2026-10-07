@@ -38,22 +38,28 @@ export function PageHeader({
     <div className="mb-s6 flex flex-col gap-s3 sm:flex-row sm:items-end sm:justify-between">
       <div>
         {(() => {
+          // NO CELULAR, O H1 EM 22PX (revisão geral, 07/10/2026): em 26px,
+          // "Publicações e movimentações" e "Requerimentos administrativos"
+          // ocupavam duas linhas e meia da tela de 375px antes de qualquer dado.
           const titulo = (
             <Titulo
               className={cn(
                 'font-display font-extrabold tracking-tight text-texto',
-                nivel === 1 ? 'text-3xl' : 'text-xl',
+                nivel === 1 ? 'text-2xl sm:text-3xl' : 'text-xl',
               )}
             >
               {title}
             </Titulo>
           )
           // AO LADO do h1, e não dentro: dentro, o nome do botão entraria no
-          // nome do título que o leitor de tela anuncia.
+          // nome do título que o leitor de tela anuncia. SEM QUEBRAR DE LINHA:
+          // com o título em duas linhas (celular), o "?" descia sozinho para uma
+          // terceira; agora fica no alto, ao lado da primeira linha (centrado
+          // nela: 4px de 32px no computador, 2px de 28px no celular).
           return comAcessorio ? (
-            <div className="flex flex-wrap items-center gap-s2">
+            <div className="flex items-start gap-s2">
               {titulo}
-              {acessorio}
+              <span className="mt-[2px] shrink-0 sm:mt-[4px]">{acessorio}</span>
             </div>
           ) : (
             titulo

@@ -57,13 +57,18 @@ export const CampoDeBusca = forwardRef<
           onKeyDown?.(e)
         }}
         {...(atalho ? { 'data-filtro-tela': '', 'aria-keyshortcuts': '/' } : {})}
-        className={cn('pl-[36px]', (atalho || fim) && 'pr-[44px]', className)}
+        className={cn('pl-[36px]', fim ? 'pr-[44px]' : atalho && 'pr-[44px] [@media(pointer:coarse)]:pr-s4', className)}
         {...rest}
       />
       {(atalho || fim) && (
         <span className="pointer-events-none absolute right-s3 top-1/2 flex -translate-y-1/2 items-center gap-s2 text-xs text-texto-3">
           {fim}
-          {atalho && !valor && <Tecla>/</Tecla>}
+          {/* A tecla "/" só vale com teclado: no toque (celular), sai. */}
+          {atalho && !valor && (
+            <span className="[@media(pointer:coarse)]:hidden">
+              <Tecla>/</Tecla>
+            </span>
+          )}
         </span>
       )}
     </div>

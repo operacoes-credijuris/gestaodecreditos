@@ -17,6 +17,9 @@ import { formatCNJ, formatDate } from '@/lib/format'
 import type { Processo } from '@/lib/types'
 import { LEMBRAR, useEscolhaLembrada } from '@/lib/lembrarNaTela'
 
+/** Selo de texto longo que quebra em vez de vazar da tela (ver a lista de movimentações). */
+const SELO_QUE_QUEBRA = 'h-auto min-h-[20px] max-w-full whitespace-normal py-s0.5'
+
 const TRILHAS = ['ativo', 'complementar'] as const
 
 interface FaseRow {
@@ -1012,12 +1015,20 @@ export function FaseProcessual({
                         {mov.conteudo && (
                           <p className="mt-s1 line-clamp-2 text-corpo italic text-texto-2">"{mov.conteudo}"</p>
                         )}
+                        {/* O SELO PODE QUEBRAR LINHA: com o nome da fase inteiro
+                            ("Permaneceu em Homologado / Aguardando Período de
+                            Graça"), sem quebrar ele passava da tela do celular e a
+                            página rolava de lado (revisão geral, 07/10/2026). */}
                         <div className="mt-s2">
                           {r ? (
                             mudouDeFase ? (
-                              <Badge tone="blue">Avançou para {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}</Badge>
+                              <Badge tone="blue" className={SELO_QUE_QUEBRA}>
+                                Avançou para {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}
+                              </Badge>
                             ) : (
-                              <Badge tone="gray">Permaneceu em {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}</Badge>
+                              <Badge tone="gray" className={SELO_QUE_QUEBRA}>
+                                Permaneceu em {getLabel(FASE_PROCESSUAL, r.fase_codigo).label}
+                              </Badge>
                             )
                           ) : (
                             <Badge tone="gray">Ainda não classificado</Badge>

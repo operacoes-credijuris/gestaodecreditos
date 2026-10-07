@@ -150,6 +150,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         className={cn(
           'fixed bottom-s4 right-s3 z-aviso flex w-[calc(100vw-24px)] max-w-[420px] flex-col gap-s2 sm:right-[20px]',
           '[html[data-assistente=botao]_&]:bottom-[76px] sm:[html[data-assistente=botao]_&]:bottom-[88px]',
+          // Com o PAINEL do assistente aberto, fora da caixa de pergunta: no
+          // celular e no tablet, no alto (o painel ocupa o pé da tela); no
+          // computador, à esquerda do painel (420px + 20px de margem + 20px).
+          'max-lg:[html[data-assistente=painel]_&]:bottom-auto max-lg:[html[data-assistente=painel]_&]:top-s4 lg:[html[data-assistente=painel]_&]:right-[460px]',
+          // COM UMA JANELA OU GAVETA ABERTA (`data-janela`, posto por
+          // lib/dialogo.ts), fora do rodapé dela, onde moram Cancelar e o botão
+          // principal: no celular, logo acima do rodapé; no computador, no alto
+          // e no meio. O `!` vence as regras do assistente logo acima.
+          'max-sm:[html[data-janela]_&]:!bottom-[84px]',
+          'sm:[html[data-janela]_&]:!bottom-auto sm:[html[data-janela]_&]:!top-s4 sm:[html[data-janela]_&]:!right-auto sm:[html[data-janela]_&]:!left-1/2 sm:[html[data-janela]_&]:-translate-x-1/2',
         )}
       >
         {items.map((t) => (
