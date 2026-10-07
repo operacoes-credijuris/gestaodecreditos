@@ -42,7 +42,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         // Drawer — as ações de linha não devem ser as únicas sem foco visível.
         // p-2 (não p-1.5): fecha os 24px mínimos de alvo de clique na densidade
         // de 12px do <html> — ver index.css.
-        'rounded-controle p-2 text-texto-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-1',
+        // NO TOQUE, PELO MENOS 36PX (revisão geral, 07/10/2026): os 28px do
+        // mouse eram pouco para o dedo. O botão centra o ícone sozinho.
+        'rounded-controle p-2 text-texto-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-anel focus-visible:ring-offset-1 [@media(pointer:coarse)]:min-h-[36px] [@media(pointer:coarse)]:min-w-[36px]',
         tamanho === 'linha' &&
           'grid h-controle-sm w-controle-sm shrink-0 place-items-center p-0 [&_svg]:h-[16px] [&_svg]:w-[16px]',
         variants[variant],

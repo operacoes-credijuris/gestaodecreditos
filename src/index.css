@@ -174,6 +174,20 @@
     --parado-critico: 127 29 29; /* red-900  o vinho */
   }
 
+  /* A ALTURA DO CONTROLE PEQUENO (botão `sm`, o "⋯"/"›" das linhas, o chip, o
+     X dos avisos): 28px para o mouse. NO TOQUE, 36PX (revisão geral,
+     07/10/2026): 28px era pouco para o dedo no celular, onde se errava o alvo.
+     Só muda a medida (`h-controle-sm`, `w-controle-sm`); o desenho é o mesmo.
+     Num bloco à parte do :root das cores: é medida, não muda com o tema. */
+  :root {
+    --controle-sm: 28px;
+  }
+  @media (pointer: coarse) {
+    :root {
+      --controle-sm: 36px;
+    }
+  }
+
   /* =====================================================================
      MODO ESCURO — os mesmos nomes, outros valores (amostra, estilo.css,
      `[data-theme="dark"]`; o que a amostra não tem foi derivado no mesmo
@@ -358,6 +372,21 @@
   input[type='checkbox'],
   input[type='radio'] {
     accent-color: rgb(var(--marca-viva));
+  }
+
+  /* NO CELULAR, TODO CAMPO EM 16PX (revisão geral, 07/10/2026). O Safari do
+     iPhone dá zoom na página inteira quando se toca num campo com fonte menor
+     que 16px — e aqui todos têm 14px (`corpo`), alguns 13px. A pessoa tocava
+     na busca, a tela crescia e ficava torta até ela beliscar de volta. Só a
+     fonte do campo muda; a altura (36px) e o resto da tela continuam iguais.
+     O `!important` é porque a classe de tamanho do próprio campo (`text-corpo`,
+     `text-sm`) vem depois desta camada. Telas largas não mudam. */
+  @media (max-width: 767px), (hover: none) and (pointer: coarse) and (max-width: 1024px) {
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
   }
 
   /* O preflight do Tailwind pinta o placeholder de gray-400 (2,5:1). */

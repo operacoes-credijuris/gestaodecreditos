@@ -204,7 +204,8 @@ export default {
         s10: '40px',
         s12: '48px',
         s16: '64px',
-        'controle-sm': '28px',
+        // 28px no computador e 36px no toque (`--controle-sm`, em index.css).
+        'controle-sm': 'var(--controle-sm)',
         controle: '36px',
         'controle-lg': '40px',
       },

@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/cn'
+import { rolarParaAVista } from '@/lib/rolarParaAVista'
 
 export interface SegmentedItem {
   key: string
@@ -40,14 +42,26 @@ export function Segmented({
   ariaLabel?: string
   className?: string
 }) {
+  // A OPÇÃO ESCOLHIDA SEMPRE À VISTA quando a fila rola de lado (celular): um
+  // filtro lembrado ("Todos", à direita) não pode ficar escondido.
+  const filaRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const fila = filaRef.current
+    rolarParaAVista(fila, fila?.querySelector<HTMLElement>('[aria-pressed="true"]') ?? null)
+  }, [value])
   return (
     <div
+      ref={filaRef}
       role="group"
       aria-label={ariaLabel}
       className={cn(
         // O `.seg` da amostra: trilho na superfície 3 com contorno, e a opção
         // escolhida "levantada" em branco com o texto no azul da marca.
-        'inline-flex flex-wrap items-center gap-s0.5 rounded-campo border border-borda bg-superficie-3 p-[3px]',
+        // NUMA FILA SÓ, QUE ROLA DE LADO quando não cabe (revisão geral,
+        // 07/10/2026): no celular, as quatro opções de Créditos quebravam em
+        // duas linhas dentro do trilho cinza, que virava um bloco. A opção cortada
+        // na borda já mostra que há mais para o lado.
+        'relative inline-flex max-w-full items-center gap-s0.5 overflow-x-auto rounded-campo border border-borda bg-superficie-3 p-[3px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
         className,
       )}
     >
@@ -61,7 +75,7 @@ export function Segmented({
             disabled={item.disabled}
             onClick={() => onChange(item.key)}
             className={cn(
-              'flex h-controle-sm items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-all duration-150',
+              'flex h-controle-sm shrink-0 items-center gap-s1.5 whitespace-nowrap rounded-controle px-s3 text-sm font-semibold transition-all duration-150',
               item.disabled
                 ? 'cursor-not-allowed text-texto-3 opacity-60'
                 : active

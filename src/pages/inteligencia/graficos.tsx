@@ -203,8 +203,8 @@ export function GraficoPrevisoes({
         </span>
         <span className="text-texto-3">
           {comRotulo
-            ? 'Acima da barra, o valor previsto; o exato, ao passar o mouse.'
-            : 'O valor previsto de cada mês aparece ao passar o mouse.'}
+            ? 'Acima da barra, o valor previsto; o exato, ao passar o mouse ou tocar na barra.'
+            : 'O valor previsto de cada mês aparece ao passar o mouse ou tocar na barra.'}
         </span>
       </div>
       <div

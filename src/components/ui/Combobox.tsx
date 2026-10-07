@@ -95,8 +95,10 @@ function Lista({
               onEscolher(o)
             }}
             onMouseEnter={() => onDestacar(i)}
+            // NA GRADE (16/6px) e, NO TOQUE, 12px em cima e embaixo: a opção de
+            // 30px era estreita para o dedo, e se escolhia a de baixo.
             className={cn(
-              'block w-full px-4 py-1.5 text-left',
+              'block w-full px-s4 py-s1.5 text-left [@media(pointer:coarse)]:py-s3',
               i === destaque ? 'bg-marca-leve' : 'hover:bg-superficie-2',
             )}
           >

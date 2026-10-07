@@ -9,7 +9,7 @@ import { useToast } from '@/components/ui/Toast'
 import { cn } from '@/lib/cn'
 import { haDialogoAberto } from '@/lib/dialogo'
 import { alternarTema, OPCOES_DE_TEMA, useTema } from '@/lib/tema'
-import { caminhoNoTopo } from './navigation'
+import { caminhoNoTopo, findNavLocation } from './navigation'
 import { useConsultas } from './Consultas'
 
 export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
@@ -20,6 +20,11 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const caixaDoMenuRef = useRef<HTMLDivElement>(null)
   const { pathname } = useLocation()
   const partes = caminhoNoTopo(pathname)
+  // NO CELULAR, O RÓTULO CURTO DO MENU ("Publicações", "Requerimentos") no
+  // lugar do nome inteiro, que não cabia e virava "Publicações e mov…". O nome
+  // inteiro está no h1, logo abaixo.
+  const local = findNavLocation(pathname)
+  const curto = !local?.aba && local?.leaf.rotuloCurto ? local.leaf.rotuloCurto : null
   const { abrirBusca, abrirNovidades, abrirAtalhos, abrirGlossario } = useConsultas()
   const { preferencia, tema, escolher } = useTema()
   const escuro = tema === 'escuro'
@@ -97,7 +102,14 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           {partes.map((parte, i) =>
             i === partes.length - 1 ? (
               <span key={i} aria-current="page" className="truncate font-semibold text-texto-2">
-                {parte}
+                {curto ? (
+                  <>
+                    <span className="sm:hidden">{curto}</span>
+                    <span className="hidden sm:inline">{parte}</span>
+                  </>
+                ) : (
+                  parte
+                )}
               </span>
             ) : (
               <Fragment key={i}>
@@ -165,8 +177,9 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           {menuOpen && (
             // O `.pop` da amostra: o raio dos flutuantes (12px) e a sombra de
             // elemento flutuante; no escuro, o anel claro que o separa da
-            // página (auditoria visual, E3). Itens com 36px de altura.
-            <div className="absolute right-0 z-20 mt-s2 w-[240px] rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]">
+            // página (auditoria visual, E3). Itens com 36px de altura. 264PX (eram
+            // 240): "Do sistema", a terceira escolha do tema, vazava do trilho.
+            <div className="absolute right-0 z-20 mt-s2 w-[264px] rounded-flutuante border border-borda bg-superficie p-s1.5 shadow-nivel-2 dark:ring-1 dark:ring-white/[0.06]">
               {/* O `.user-card` da amostra: o avatar ao lado do nome e do
                   e-mail, e o papel logo abaixo. */}
               <div className="flex items-center gap-s2 px-s2 py-s2">
@@ -231,7 +244,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                       aria-pressed={preferencia === o.chave}
                       onClick={() => escolher(o.chave)}
                       className={cn(
-                        'h-[30px] whitespace-nowrap rounded-controle px-s1 text-sm font-semibold transition-colors',
+                        'h-[30px] whitespace-nowrap rounded-controle px-s1 text-sm font-semibold transition-colors [@media(pointer:coarse)]:h-[36px]',
                         preferencia === o.chave
                           ? 'bg-superficie text-marca-texto shadow-nivel-1'
                           : 'text-texto-2 hover:text-texto',

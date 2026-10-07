@@ -67,11 +67,18 @@ export function useTravaScroll(ativo: boolean) {
     if (abertos === 0) {
       overflowOriginal = document.body.style.overflow
       document.body.style.overflow = 'hidden'
+      // A JANELA ABERTA AVISA A PÁGINA pelo atributo no <html> (revisão geral,
+      // 07/10/2026): os avisos flutuantes (ui/Toast.tsx) saem de cima do rodapé
+      // dela — antes, "A leitura dos autos confirmou…" cobria o "Seguir".
+      document.documentElement.dataset.janela = 'aberta'
     }
     abertos += 1
     return () => {
       abertos -= 1
-      if (abertos === 0) document.body.style.overflow = overflowOriginal
+      if (abertos === 0) {
+        document.body.style.overflow = overflowOriginal
+        delete document.documentElement.dataset.janela
+      }
     }
   }, [ativo])
 }

@@ -253,19 +253,20 @@ export function Loading({ label = 'Carregando…' }: { label?: string }) {
   // O `blocoDeEstado('carregando')` da amostra: quatro linhas de esqueleto em
   // três colunas (como uma tabela chegando) e, embaixo, o TEXTO VISÍVEL com o
   // ícone girando. Só o esqueleto não dizia o que estava acontecendo — numa
-  // conexão lenta, parecia uma tabela quebrada.
+  // conexão lenta, parecia uma tabela quebrada. NA GRADE DE 4PX (era 18/12px
+  // de margem e 14px entre as linhas).
   return (
-    <div role="status" aria-live="polite" aria-busy="true" className="px-[18px] pb-[18px] pt-4">
-      <div className="mb-3 grid gap-[14px]" aria-hidden>
+    <div role="status" aria-live="polite" aria-busy="true" className="px-s5 pb-s5 pt-s4">
+      <div className="mb-s3 grid gap-s3" aria-hidden>
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="grid grid-cols-[2fr_3fr_1fr] items-center gap-[16px]">
+          <div key={i} className="grid grid-cols-[2fr_3fr_1fr] items-center gap-s4">
             <div className="skeleton h-[14px] w-[40%] rounded-controle" />
             <div className="skeleton h-[14px] w-[70%] rounded-controle" />
             <div className="skeleton h-[14px] w-[60%] rounded-controle" />
           </div>
         ))}
       </div>
-      <p className="flex items-center gap-1.5 text-xs text-texto-3">
+      <p className="flex items-center gap-s1.5 text-xs text-texto-3">
         <RefreshCw className="h-[14px] w-[14px] animate-spin" aria-hidden />
         {label}
       </p>

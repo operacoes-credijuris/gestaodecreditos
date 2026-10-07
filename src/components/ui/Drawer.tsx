@@ -121,23 +121,25 @@ export function Drawer({
           visible ? 'translate-x-0' : 'translate-x-full',
         )}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-borda px-6 py-5">
+        {/* NA GRADE DE 4PX (era 18/15px): 20px de margem no computador e 16px
+            no celular, onde o painel já ocupa a tela inteira. */}
+        <div className="flex items-start justify-between gap-s3 border-b border-borda px-s4 py-s4 sm:px-s5">
           <div id={tituloId} className="min-w-0 flex-1">
             {title}
           </div>
           <button
             onClick={pedirFechar}
             aria-label="Fechar painel"
-            className="-mr-s2 -mt-s1 grid h-[32px] w-[32px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto"
+            className="-mr-s2 -mt-s1 grid h-[32px] w-[32px] shrink-0 place-items-center rounded-controle text-texto-2 transition-colors hover:bg-superficie-3 hover:text-texto [@media(pointer:coarse)]:h-[40px] [@media(pointer:coarse)]:w-[40px]"
           >
             <X className="h-[18px] w-[18px]" aria-hidden />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5 scrollbar-thin">
+        <div className="flex-1 overflow-y-auto px-s4 py-s4 scrollbar-thin sm:px-s5 sm:py-s5">
           {children}
         </div>
         {(footer || rodapeInicio) && (
-          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda px-6 py-4">
+          <div className="flex flex-wrap items-center justify-end gap-s2 border-t border-borda px-s4 py-s3 sm:px-s5 sm:py-s4">
             {rodapeInicio && <div className="mr-auto flex flex-wrap items-center gap-s2">{rodapeInicio}</div>}
             {footer}
           </div>

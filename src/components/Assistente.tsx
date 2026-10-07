@@ -178,9 +178,13 @@ export function Assistente({
   // O BOTÃO À VISTA AVISA A PÁGINA, pelo atributo no <html>: os avisos
   // flutuantes (ui/Toast.tsx) sobem para cima dele em vez de cair em cima
   // (auditoria visual, M2). Fora da moldura (o Entrar), o atributo não existe.
+  // COM O PAINEL ABERTO, 'painel' (revisão geral, 07/10/2026): o aviso caía em
+  // cima da caixa de pergunta — no computador ele vai para a esquerda do
+  // painel; no celular, onde o painel é a tela toda, para o alto.
   useEffect(() => {
     const raiz = document.documentElement
-    if (!aberto && !escondido) raiz.dataset.assistente = 'botao'
+    if (aberto) raiz.dataset.assistente = 'painel'
+    else if (!escondido) raiz.dataset.assistente = 'botao'
     else delete raiz.dataset.assistente
     return () => {
       delete raiz.dataset.assistente
@@ -652,10 +656,13 @@ export function Assistente({
           // O PAINEL na camada dele (z-assistente-painel), abaixo das janelas que
           // ele mesmo abre. No escuro, a borda forte e o anel claro o separam da
           // página (auditoria visual, E3).
-          'fixed z-assistente-painel flex flex-col overflow-hidden rounded-janela border border-borda',
-          'bg-superficie shadow-nivel-3 dark:border-borda-forte dark:ring-1 dark:ring-white/[0.06]',
-          // Celular: ocupa a tela. Desktop: painel no canto, como um chat.
-          'inset-x-3 bottom-3 top-16 sm:inset-x-auto sm:top-auto sm:bottom-[20px] sm:right-[20px]',
+          'fixed z-assistente-painel flex flex-col overflow-hidden sm:rounded-janela sm:border sm:border-borda',
+          'bg-superficie shadow-nivel-3 dark:sm:border-borda-forte dark:sm:ring-1 dark:sm:ring-white/[0.06]',
+          // CELULAR: A TELA INTEIRA, como todo chat de celular (revisão geral,
+          // 07/10/2026). Antes era um cartão a 48px do alto, e uma tira do topo
+          // da plataforma (menu, busca) ficava à vista atrás dele, sem uso.
+          // Desktop: painel no canto, como um chat.
+          'inset-0 sm:inset-x-auto sm:left-auto sm:top-auto sm:bottom-[20px] sm:right-[20px]',
           'sm:h-[min(620px,calc(100vh-40px))] sm:w-[420px]',
         )}
       >

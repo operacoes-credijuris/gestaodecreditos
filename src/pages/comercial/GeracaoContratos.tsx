@@ -827,7 +827,12 @@ function ArquivosField({
           aria-label={generoLabel}
           className="flex flex-wrap items-center gap-x-s3 gap-y-s1 text-corpo text-texto-2"
         >
-          <span className="text-xs text-texto-3">{generoLabel}</span>
+          {/* À VISTA, SÓ "GÊNERO": o título do bloco ("Do escritório") já diz
+              de quem é, e "Gênero do sócio responsável" empurrava o "Feminino"
+              para outra linha. O nome inteiro fica no grupo (aria-label). */}
+          <span className="text-xs text-texto-3" aria-hidden>
+            Gênero
+          </span>
           <label className="inline-flex min-h-[24px] cursor-pointer items-center gap-s1.5">
             <input
               type="radio"

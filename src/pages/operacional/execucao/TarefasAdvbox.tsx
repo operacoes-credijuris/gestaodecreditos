@@ -362,7 +362,7 @@ export default function TarefasAdvbox() {
       // foco do cartão (T2).
       <Card
         key={t.id}
-        className="group grid grid-cols-1 items-start gap-s4 px-s4 py-s3 sm:grid-cols-[60px_minmax(0,1fr)_auto]"
+        className="group grid grid-cols-1 items-start gap-s2 px-s4 py-s3 sm:grid-cols-[60px_minmax(0,1fr)_auto] sm:gap-s4"
       >
         {/* Folhinha de calendário: o prazo é O dado desta tela, então ele é o
             maior elemento do cartão — e o ÚNICO VERMELHO dela (auditoria visual,
@@ -458,10 +458,14 @@ export default function TarefasAdvbox() {
                 className={cn('-my-s1.5 align-middle', SO_NO_HOVER)}
               />
             )}
+            {/* NO CELULAR, AS PARTES NUMA LINHA PRÓPRIA: coladas ao número, a
+                quebra caía no meio do nome ("· Antônia / Rodrigues Lima"). */}
             {cred && (cred.cedente || cred.cessionario) && (
               <>
-                {' · '}
-                <Partes a={cred.cedente} b={cred.cessionario} />
+                <span className="hidden sm:inline">{' · '}</span>
+                <span className="block sm:inline">
+                  <Partes a={cred.cedente} b={cred.cessionario} />
+                </span>
               </>
             )}
           </div>
@@ -489,7 +493,9 @@ export default function TarefasAdvbox() {
         </div>
         {/* "GERAR PETIÇÃO" FANTASMA (T2): secundário em todo cartão, a lista
             inteira repetia o mesmo botão em destaque. */}
-        <div className="flex sm:justify-end">
+        {/* No celular, o fantasma alinhado ao texto do cartão (sem o recuo do
+            próprio botão). */}
+        <div className="-ml-s3 flex sm:ml-0 sm:justify-end">
           <Button
             size="sm"
             variant="ghost"

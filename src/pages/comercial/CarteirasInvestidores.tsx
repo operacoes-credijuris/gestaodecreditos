@@ -700,7 +700,9 @@ function Individual() {
             {mesRef}
           </div>
         </Field>
-        <div className="flex flex-wrap gap-s2 sm:ml-auto">
+        {/* NO CELULAR, OS BOTÕES OCUPAM A LINHA (revisão geral, 07/10/2026): soltos,
+            cada um com a sua largura, desciam em degraus desalinhados. */}
+        <div className="flex flex-wrap gap-s2 max-sm:w-full sm:ml-auto max-sm:[&>*]:flex-1">
           {/* SELIC e IPCA que alimentam a coluna Valor projetado. */}
           <Button
             variant="secondary"
@@ -737,7 +739,9 @@ function Individual() {
         />
       ) : (
         <>
-        <div className="flex flex-wrap justify-end gap-s2">
+        {/* No celular, o relatório (o principal) numa linha inteira em cima, e
+            Excel e mensagem lado a lado embaixo. */}
+        <div className="grid grid-cols-2 gap-s2 sm:flex sm:flex-wrap sm:justify-end">
           <Button
             variant="secondary"
             icon={<Download className="h-[16px] w-[16px]" />}
@@ -755,6 +759,7 @@ function Individual() {
             loading={gerandoHtml}
             disabled={!ativo}
             onClick={gerarRelatorio}
+            className="order-first col-span-2 sm:order-none"
           >
             Relatório do investidor
           </Button>
