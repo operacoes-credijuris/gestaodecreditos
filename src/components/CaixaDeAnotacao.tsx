@@ -474,8 +474,14 @@ export function CaixaDeAnotacao({
           'Até 100 MB por arquivo. Só o texto fica no rascunho: saindo da página, os arquivos saem da lista.'
         ) : (
           <>
-            <Tecla>Ctrl</Tecla> + <Tecla>Enter</Tecla> envia · arraste ou cole (Ctrl+V)
-            arquivos aqui, até 100 MB cada
+            {/* AS TECLAS SÓ ONDE HÁ TECLADO E MOUSE (revisão visual de
+                07/10/2026): no celular não há Ctrl nem arrastar, e a dica era
+                ruído logo acima do Enviar. */}
+            <span className="[@media(pointer:coarse)]:hidden">
+              <Tecla>Ctrl</Tecla> + <Tecla>Enter</Tecla> envia · arraste ou cole (Ctrl+V) arquivos aqui,{' '}
+            </span>
+            <span className="hidden [@media(pointer:coarse)]:inline">Arquivos </span>
+            até 100 MB cada
           </>
         )}
       </p>

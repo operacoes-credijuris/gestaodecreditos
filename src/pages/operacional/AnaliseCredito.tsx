@@ -136,7 +136,7 @@ import { Loading, ErrorState, EmptyState, SemResultado } from '@/components/ui/T
 import { Chip } from '@/components/ui/Chip'
 import { CampoDeBusca } from '@/components/ui/CampoDeBusca'
 import { useToast } from '@/components/ui/Toast'
-import { CaixaDeAviso, DicaDeAviso, Selo, icSelo } from '@/components/analise/Pecas'
+import { CaixaDeAviso, DicaDeAviso, IdentificacaoDoCard, Selo, icSelo } from '@/components/analise/Pecas'
 import { haDialogoAberto } from '@/lib/dialogo'
 import { estaDigitando } from '@/lib/atalhos'
 import { gravarPreferencia, lerPreferencia } from '@/lib/preferencias'
@@ -735,7 +735,18 @@ const exigeMotivoDe = (acao: AcaoTela): boolean =>
  * lateral (`.btn`). O `size="sm"` do Button tem 27 px — pequeno para o alvo
  * principal da linha, que é o que a mão procura dezenas de vezes por dia.
  */
-const BTN = 'h-[32px] px-4'
+//
+// NO CELULAR, 36PX (revisão visual de 07/10/2026): lá o alvo é o dedo, e a
+// régua de toque da casa é 36px (`h-controle`).
+const BTN = 'h-[32px] px-4 max-sm:h-controle'
+/**
+ * O COPIAR DO NOME E DO NÚMERO: 24px à vista, mas com o alvo estendido a 36px
+ * por um `::after` invisível — no celular o dedo errava o ícone e acertava o
+ * link da pasta do Drive ao lado. O raio é o do controle (era 6px, fora da
+ * escala).
+ */
+const BOTAO_COPIAR =
+  'relative grid h-[24px] w-[24px] place-items-center rounded-controle text-texto-3 after:absolute after:-inset-[6px] hover:bg-superficie-3 hover:text-texto'
 /** O ícone de 16 px dos botões e caixas da amostra (`h-4` vale 12 px aqui). */
 const IC = 'h-[16px] w-[16px] flex-none'
 /** O "Excluir" contornado da amostra (`.btn-danger-outline`): o negativo sem gritar. */
@@ -860,7 +871,7 @@ function JanelaDaPlanilha({
       // bloco colado ainda no campo para tentar de novo.
       onClose={enviando ? () => undefined : onFechar}
       title="Preencher planilha"
-      description={tituloCard(lead)}
+      description={<IdentificacaoDoCard titulo={tituloCard(lead)} />}
       size="lg"
       dirty={colado.trim() !== ''}
       footer={
@@ -1058,6 +1069,48 @@ function JanelaDeMensagem({
     fecharDescartando()
   }
 
+  // O RODAPÉ DA CASA (§0.6, revisão visual de 07/10/2026): à esquerda as
+  // alternativas que interrompem o caminho (Exigir diligência, Reprovar,
+  // contornadas); à direita "Cancelar" e o primário (Aprovar), no canto. Antes
+  // as três saídas iam em fila à direita com o primário no meio delas, e no
+  // celular o Reprovar caía para baixo do Aprovar. Sem primário entre as
+  // saídas (ou com uma saída só), tudo fica à direita, como sempre.
+  const principais = varias ? acoes.filter((a) => a.variant === 'primary') : acoes
+  const alternativas = varias && principais.length > 0 ? acoes.filter((a) => a.variant !== 'primary') : []
+  const aDireita = alternativas.length > 0 ? principais : acoes
+  const botaoDaSaida = (acao: AcaoTela) => (
+    <Button
+      key={acao.statusId}
+      variant={acao.variant === 'danger' && varias ? 'outline' : acao.variant}
+      className={cn(BTN, acao.variant === 'danger' && varias && PERIGO_CONTORNADO)}
+      onClick={async () => {
+        setErro(null)
+        setEnviando(true)
+        setEmCurso(acao.statusId)
+        try {
+          await onConfirmar(acao, notaDe(acao))
+          // ENVIADO, O RASCUNHO SAI. Com falha (inclusive a da nota com o
+          // card já movido), ele fica — o texto ainda não chegou ao card.
+          esquecerRascunho()
+        } catch (e) {
+          setErro((e as Error)?.message ?? String(e))
+        } finally {
+          setEnviando(false)
+          setEmCurso(null)
+        }
+      }}
+      disabled={!podeEnviar(acao)}
+      // O SPINNER NO BOTÃO CLICADO, e não em todos: com `trabalhando`
+      // solto, os demais pareceriam estar enviando também.
+      loading={emCurso === acao.statusId || (acoes.length === 1 && trabalhando)}
+    >
+      {/* COM UMA SAÍDA SÓ, "Confirmar": o botão do card já disse o que
+          vai acontecer, e repetir o rótulo aqui é redundância. Com
+          várias, cada uma precisa dizer para onde leva. */}
+      {varias ? acao.label : 'Confirmar'}
+    </Button>
+  )
+
   return (
     <Modal
       open
@@ -1070,63 +1123,17 @@ function JanelaDeMensagem({
       // O CARD EMBAIXO, e não colado no título: são duas informações de peso
       // diferente — o que se vai fazer, e sobre qual crédito. Juntas numa linha
       // só passavam de oitenta caracteres e quebravam o título em duas.
-      description={tituloCard(lead)}
+      description={<IdentificacaoDoCard titulo={tituloCard(lead)} />}
       size="lg"
       dirty={sujo}
+      rodapeInicio={alternativas.length > 0 ? alternativas.map(botaoDaSaida) : undefined}
       footer={
-        // O QUE NÃO DECIDE À ESQUERDA, AS DECISÕES À DIREITA (amostra): com uma
-        // saída, "Cancelar" e "Confirmar"; com várias, "cancelar" discreto e um
-        // botão por saída — o negativo contornado, para não disputar com o
-        // positivo.
-        <div className="flex w-full flex-wrap items-center gap-2">
-          {varias ? (
-            <button
-              type="button"
-              onClick={cancelar}
-              disabled={trabalhando}
-              className="-ml-2 inline-flex h-[28px] items-center rounded-controle px-2 text-sm font-semibold text-marca-texto hover:bg-marca-leve disabled:opacity-50"
-            >
-              cancelar
-            </button>
-          ) : (
-            <Button variant="ghost" className={BTN} onClick={cancelar} disabled={trabalhando}>
-              Cancelar
-            </Button>
-          )}
-          <span className="flex-1" />
-          {acoes.map((acao) => (
-            <Button
-              key={acao.statusId}
-              variant={acao.variant === 'danger' && varias ? 'outline' : acao.variant}
-              className={cn(BTN, acao.variant === 'danger' && varias && PERIGO_CONTORNADO)}
-              onClick={async () => {
-                setErro(null)
-                setEnviando(true)
-                setEmCurso(acao.statusId)
-                try {
-                  await onConfirmar(acao, notaDe(acao))
-                  // ENVIADO, O RASCUNHO SAI. Com falha (inclusive a da nota com o
-                  // card já movido), ele fica — o texto ainda não chegou ao card.
-                  esquecerRascunho()
-                } catch (e) {
-                  setErro((e as Error)?.message ?? String(e))
-                } finally {
-                  setEnviando(false)
-                  setEmCurso(null)
-                }
-              }}
-              disabled={!podeEnviar(acao)}
-              // O SPINNER NO BOTÃO CLICADO, e não em todos: com `trabalhando`
-              // solto, os demais pareceriam estar enviando também.
-              loading={emCurso === acao.statusId || (acoes.length === 1 && trabalhando)}
-            >
-              {/* COM UMA SAÍDA SÓ, "Confirmar": o botão do card já disse o que
-                  vai acontecer, e repetir o rótulo aqui é redundância. Com
-                  várias, cada uma precisa dizer para onde leva. */}
-              {varias ? acao.label : 'Confirmar'}
-            </Button>
-          ))}
-        </div>
+        <>
+          <Button variant="ghost" className={BTN} onClick={cancelar} disabled={trabalhando}>
+            Cancelar
+          </Button>
+          {aDireita.map(botaoDaSaida)}
+        </>
       }
     >
       {recuperado.maisNovo && <AvisoDoRascunho rascunho={recuperado.maisNovo} onDescartar={descartarRascunho} />}
@@ -1145,10 +1152,14 @@ function JanelaDeMensagem({
         // ABERTA TAMBÉM COM O RESUMO RECUPERADO DO RASCUNHO: fechada, a mudança
         // feita antes passaria sem ser vista e iria para o card na aprovação.
         <details className="mb-3 rounded-campo border border-borda bg-superficie-2" open={semResumo || Boolean(recuperado.resumo)}>
-          <summary className="flex min-h-[36px] cursor-pointer items-center gap-2 px-4 py-2 text-corpo font-semibold text-texto">
+          <summary className="flex min-h-[36px] cursor-pointer flex-wrap items-center gap-x-2 gap-y-s0.5 px-4 py-2 text-corpo font-semibold text-texto">
             <FileText className={IC} aria-hidden />
             Resumo da oportunidade
-            <span className="text-sm font-normal text-texto-3">— editável · vai para o card junto com a aprovação</span>
+            {/* NO CELULAR, NA LINHA DE BAIXO, alinhada ao título: espremida ao
+                lado dele, a frase quebrava em três linhas tortas. */}
+            <span className="text-sm font-normal text-texto-3 max-sm:basis-full max-sm:pl-[22px]">
+              — editável · vai para o card junto com a aprovação
+            </span>
           </summary>
           <div className="border-t border-borda px-4 pb-3 pt-3">
             <textarea
@@ -1278,11 +1289,11 @@ function SelosDoCadastro({ d }: { d: ReturnType<typeof lerCardCredijuris> }) {
  * SEM DATA, NADA — nem traço, nem "—". "ÚLT. MOV." e "CRIADO EM" NA FRENTE: as
  * duas têm o mesmo formato, e cada uma diz de que é.
  */
-function DatasDoCard({ lead }: { lead: KommoLead }) {
+function DatasDoCard({ lead, diasAoLado = false }: { lead: KommoLead; diasAoLado?: boolean }) {
   const etapa = dataDaEtapa(lead)
   const criado = lead.criado_em
   if (!etapa && !criado) return null
-  const linha = (rotulo: string, quando: string, titulo: string) => {
+  const linha = (rotulo: string, quando: string, titulo: string, soNoCelular = false) => {
     const decorrido = tempoDecorrido(quando)
     return (
       // A QUEBRA SÓ PODE CAIR ENTRE AS DUAS METADES: cada uma é `nowrap`, o
@@ -1291,13 +1302,19 @@ function DatasDoCard({ lead }: { lead: KommoLead }) {
         <span className="whitespace-nowrap">
           {rotulo} {formatDateTime(quando)}
         </span>
-        {decorrido && <span className="whitespace-nowrap"> · {decorrido}</span>}
+        {decorrido && (
+          <span className={cn('whitespace-nowrap', soNoCelular && 'min-[900px]:hidden')}> · {decorrido}</span>
+        )}
       </span>
     )
   }
   return (
     <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-texto-3">
-      {etapa && linha('Últ. mov. em', etapa, 'Última movimentação: quando o card entrou na coluna em que está')}
+      {/* O "HÁ 3 DIAS" DA ÚLTIMA MOVIMENTAÇÃO SÓ NO CELULAR quando o card mostra
+          o "Nesta etapa" (revisão visual de 07/10/2026): no computador o bloco
+          diz o mesmo número, em destaque, na mesma altura do card. A data e a
+          hora exatas ficam. */}
+      {etapa && linha('Últ. mov. em', etapa, 'Última movimentação: quando o card entrou na coluna em que está', diasAoLado)}
       {criado && linha('Criado em', criado, 'Quando o card foi criado no Kommo')}
     </span>
   )
@@ -1386,7 +1403,7 @@ function SeletorDeEtiquetas({
         aria-label="Aplicar ou remover as etiquetas dos fundos"
         aria-expanded={aberto}
         className={cn(
-          'inline-flex h-[24px] items-center gap-s1 rounded-full border border-dashed px-s2 text-xs font-semibold transition-colors',
+          'relative inline-flex h-[24px] items-center gap-s1 rounded-full border border-dashed px-s2 text-xs font-semibold transition-colors after:absolute after:-inset-[6px]',
           aberto
             ? 'border-marca-viva text-marca-texto'
             : 'border-borda-forte text-texto-2 hover:border-marca-viva hover:text-marca-texto',
@@ -1416,7 +1433,7 @@ function SeletorDeEtiquetas({
             role="group"
             aria-label="Etiquetas dos fundos"
             className={cn(
-              'grid grid-cols-[minmax(0,1fr)_repeat(4,auto)] items-center gap-x-s1 gap-y-s1.5 text-sm sm:grid-cols-[minmax(0,1.4fr)_repeat(4,72px)_72px] sm:gap-x-s1',
+              'grid grid-cols-[minmax(0,1fr)_repeat(4,auto)] items-center gap-x-s1 gap-y-s3 text-sm sm:gap-y-s1.5 sm:grid-cols-[minmax(0,1.4fr)_repeat(4,72px)_72px] sm:gap-x-s1',
               emVoo !== null && 'opacity-70',
             )}
           >
@@ -1455,7 +1472,7 @@ function SeletorDeEtiquetas({
                         onClick={() => onEditarCotacao(marcada.nome)}
                         title={`Alterar a cotação (${grupo.destino})`}
                         aria-label={`Alterar a cotação de "${marcada.nome}"`}
-                        className="grid h-[24px] w-[24px] shrink-0 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-marca-texto disabled:cursor-progress"
+                        className="relative grid h-[24px] w-[24px] shrink-0 place-items-center rounded-controle text-texto-3 transition-colors hover:bg-superficie-3 hover:text-marca-texto disabled:cursor-progress after:absolute after:-inset-[6px]"
                       >
                         <Pencil className="h-[14px] w-[14px]" aria-hidden />
                       </button>
@@ -1499,7 +1516,7 @@ function SeletorDeEtiquetas({
                         className={cn(
                           // REDONDO, e não quadrado: no fundo a escolha é uma só,
                           // e círculo é a forma que diz isso antes de testar.
-                          'grid h-[24px] w-[24px] place-items-center justify-self-center rounded-full border-[1.5px] text-white transition-colors disabled:cursor-progress',
+                          'relative grid h-[24px] w-[24px] place-items-center justify-self-center rounded-full border-[1.5px] text-white transition-colors disabled:cursor-progress after:absolute after:-inset-[6px]',
                           posta ? 'border-marca bg-marca' : 'border-borda-forte bg-superficie hover:border-marca-viva',
                         )}
                       >
@@ -1858,7 +1875,7 @@ function ChecksDosFundos({
                   ? `${ato.etiqueta}${desde ? ` · ${tempoDecorrido(desde)}` : ''}`
                   : `Registrar o envio ${aoFundo(f)}`
               }
-              className="inline-flex h-[30px] items-center gap-s1.5 pl-s1.5 pr-s3 text-sm font-semibold text-texto hover:bg-superficie-3 disabled:cursor-default disabled:hover:bg-transparent"
+              className="inline-flex h-[30px] max-sm:h-controle items-center gap-s1.5 pl-s1.5 pr-s3 text-sm font-semibold text-texto hover:bg-superficie-3 disabled:cursor-default disabled:hover:bg-transparent"
             >
               <span
                 className={cn(
@@ -1890,7 +1907,7 @@ function ChecksDosFundos({
               rel="noreferrer"
               title={`Abrir a plataforma ${doFundo(f)}`}
               aria-label={`Abrir a plataforma ${doFundo(f)}`}
-              className="grid h-[30px] place-items-center border-l border-borda px-s2 text-texto-3 hover:bg-superficie-3 hover:text-marca-texto"
+              className="grid h-[30px] max-sm:h-controle place-items-center border-l border-borda px-s2 text-texto-3 hover:bg-superficie-3 hover:text-marca-texto"
             >
               <ExternalLink className="h-[14px] w-[14px]" aria-hidden />
             </a>
@@ -2632,7 +2649,7 @@ function JanelaNaoFechou({
       // NÃO FECHA COM A MOVIMENTAÇÃO NO AR — o mesmo motivo da JanelaDeMensagem.
       onClose={enviando ? () => undefined : fecharDescartando}
       title="O cedente não fechou"
-      description={tituloCard(lead)}
+      description={<IdentificacaoDoCard titulo={tituloCard(lead)} />}
       size="lg"
       dirty={motivo.trim() !== ''}
       footer={
@@ -2747,8 +2764,11 @@ function JanelaNaoFechou({
 }
 
 /** O "·" entre os campos do título do card. */
+// SÓ A PARTIR DE 640PX (revisão visual de 07/10/2026): no celular a linha
+// quebra, e a quebra deixava um "•" sozinho no começo da linha de baixo. Lá
+// quem separa os campos é o vão.
 const Ponto = () => (
-  <span className="text-borda-forte" aria-hidden>
+  <span className="hidden text-borda-forte sm:inline" aria-hidden>
     •
   </span>
 )
@@ -3016,7 +3036,7 @@ function CardCredito({
             }
             aria-label={campos?.cedente ? 'Copiar nome do cedente' : 'Copiar título do card'}
             title={campos?.cedente ? 'Copiar nome do cedente' : 'Copiar título do card'}
-            className="-ml-1 grid h-[24px] w-[24px] place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
+            className={cn(BOTAO_COPIAR, '-ml-1')}
           >
             <Copy className="h-[14px] w-[14px]" aria-hidden />
           </button>
@@ -3038,7 +3058,7 @@ function CardCredito({
         </div>
 
         {campos ? (
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-corpo text-texto-2">
+          <div className="mt-1 flex flex-wrap items-center gap-x-s3 gap-y-s1 text-corpo text-texto-2 sm:gap-x-2">
             <span>{campos.intermediador}</span>
             {/* SEM NÚMERO NO TÍTULO, O CAMPO SOME (amostra) — o resto do título
                 continua separado. Quem avisa da falta é o selo do cadastro. */}
@@ -3052,7 +3072,7 @@ function CardCredito({
                     onClick={() => onCopiar(campos.numero, 'Número do processo copiado.')}
                     aria-label="Copiar número do processo"
                     title="Copiar número do processo"
-                    className="grid h-[24px] w-[24px] place-items-center rounded-[6px] text-texto-3 hover:bg-superficie-3 hover:text-texto"
+                    className={BOTAO_COPIAR}
                   >
                     <Copy className="h-[14px] w-[14px]" aria-hidden />
                   </button>
@@ -3362,7 +3382,7 @@ function CardCredito({
               Negociação): ao lado do "Abrir no Kommo", porque é o que se ia ver
               lá. Sem nenhuma, nada aparece. */}
           {verPropostas && <BotaoVerPropostas lead={lead} />}
-          <DatasDoCard lead={lead} />
+          <DatasDoCard lead={lead} diasAoLado={dias !== null && Boolean(quandoNaEtapa)} />
         </div>
       </div>
 
@@ -3373,9 +3393,13 @@ function CardCredito({
           barra de controles (§0.1) — eram 4,5px, e a fileira que ganhou
           Justificativa, Certidões e Anotar parecia um bloco só. */}
       <div className="flex min-w-0 flex-row flex-wrap items-center justify-between gap-s3 min-[900px]:flex-col min-[900px]:items-end">
+        {/* SÓ NO COMPUTADOR (revisão visual de 07/10/2026): na tela estreita a
+            zona de ações desce para baixo do card, e o bloco repetia, duas
+            linhas abaixo, o "há 3 dias" da última movimentação no rodapé (e o
+            selo "Parado há N dias" do título). Lá fica o rodapé. */}
         {dias !== null && quandoNaEtapa && (
           <div
-            className="leading-tight min-[900px]:text-right"
+            className="hidden leading-tight min-[900px]:block min-[900px]:text-right"
             title={`Na coluna desde ${formatDateTime(quandoNaEtapa)}`}
           >
             {/* O TEMPO NA ETAPA EM 14PX SEMIBOLD (auditoria visual, A2): em 18px
@@ -3387,7 +3411,13 @@ function CardCredito({
             </span>
           </div>
         )}
-        <div className="flex flex-wrap items-center justify-end gap-s2 min-[900px]:mt-auto min-[900px]:max-w-[420px]">
+        {/* NO CELULAR OS BOTÕES ENCHEM A LINHA (revisão visual de 07/10/2026):
+            soltos à direita, o último caía sozinho numa linha de baixo — e era
+            justamente a ação da etapa, que vem por último. Esticados, cada linha
+            fecha inteira e a ação que avança fica larga, embaixo, perto do
+            polegar. NO COMPUTADOR, 500PX: com 420 o "Concluir" da Revisão (o
+            quarto botão) quebrava sozinho para baixo dos outros três. */}
+        <div className="flex w-full flex-wrap items-center justify-end gap-s2 max-sm:[&>*]:flex-auto max-sm:[&>div>button]:w-full min-[900px]:mt-auto min-[900px]:w-auto min-[900px]:max-w-[500px]">
           {/* A ANOTAÇÃO EM TODO CARD, de toda etapa e funil (30/09/2026). */}
           {onAnotar && <BotaoDeAnotacao leadId={lead.kommo_lead_id} onEnviar={(t) => onAnotar(lead, t)} />}
 
@@ -3496,6 +3526,24 @@ function CardCredito({
               </Button>
             ))}
 
+          {/* AS CERTIDÕES (a Em precificação e a Obtenção de documentação do Externo):
+              é trabalho, como a due diligence, e não desfecho. ANTES DA AÇÃO QUE
+              AVANÇA (revisão visual de 07/10/2026): como Due diligence antes de
+              Executar análise, o trabalho vem antes e a ação da etapa fecha a
+              fileira — no celular, larga, na última linha. */}
+          {onCertidoes && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className={BTN}
+              icon={<ScrollText className={IC} aria-hidden />}
+              onClick={() => onCertidoes(lead)}
+              disabled={ocupado}
+            >
+              Certidões
+            </Button>
+          )}
+
           {anexarEMover && (
             <BotaoAnexarEMover
               rotulo={anexarEMover.rotulo}
@@ -3512,21 +3560,6 @@ function CardCredito({
               carregando={ocupado}
               onEscolher={(f) => onEscolherProposta(lead, f)}
             />
-          )}
-
-          {/* AS CERTIDÕES (a Obtenção de documentação do Externo): é trabalho,
-              como a due diligence, e não desfecho. */}
-          {onCertidoes && (
-            <Button
-              size="sm"
-              variant="secondary"
-              className={BTN}
-              icon={<ScrollText className={IC} aria-hidden />}
-              onClick={() => onCertidoes(lead)}
-              disabled={ocupado}
-            >
-              Certidões
-            </Button>
           )}
 
           {/* A JUSTIFICATIVA TÉCNICA (a Produção de proposta dos três funis):
@@ -4816,6 +4849,22 @@ export default function AnaliseCredito() {
   const indiceDaFase = fasesDoFunil.findIndex((f) => f.abas.some((a) => a.key === abaAtual?.key))
   const faseAberta = indiceDaFase >= 0 ? fasesDoFunil[indiceDaFase] : null
 
+  // NO CELULAR, AS FASES FICAM LADO A LADO NUMA FAIXA QUE SE ARRASTA (revisão
+  // visual de 07/10/2026; ESPECIFICACAO A1): empilhadas, as quatro ocupavam
+  // ~800px antes do primeiro card. Continuam todas abertas, com todas as
+  // colunas (decisão do dono, AP1) — só deslizam. A fase da etapa aberta vem
+  // para a vista quando a etapa muda; no computador a faixa não rola e isto não
+  // faz nada.
+  const quadroRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const faixa = quadroRef.current
+    if (!faixa || faixa.scrollWidth <= faixa.clientWidth || indiceDaFase < 0) return
+    const cartao = faixa.children[indiceDaFase] as HTMLElement | undefined
+    if (!cartao) return
+    const margem = parseFloat(getComputedStyle(faixa).paddingLeft) || 0
+    faixa.scrollTo({ left: Math.max(0, cartao.offsetLeft - margem), behavior: 'smooth' })
+  }, [indiceDaFase, funil, subdivisao])
+
   // OS BOTÕES DE TRABALHO DA ETAPA ABERTA. A regra e o porquê estão em
   // `botoesDaAba` (src/lib/kommo.ts), que saiu daqui para os testes prenderem o
   // que cada aba oferece — análise e due diligence são pagas.
@@ -5721,13 +5770,14 @@ export default function AnaliseCredito() {
         {/* A BUSCA DAS LISTAS DE ui (auditoria visual, C3/A3): a lupa de 16px, os
             36px de altura e a tecla "/" desenhada, como o "Ctrl K" do topo — e
             não mais o "( / )" no fim do texto de exemplo, que cortava a 1280px.
-            O exemplo tem até 40 caracteres; a lista inteira do que se busca vai
-            no `title`. O Esc limpa a busca (o CampoDeBusca faz isso), e o "/"
+            O exemplo tem até 30 caracteres, sem o "Buscar por" que a lupa já
+            diz: com 40 ele cortava no celular ("…responsá", revisão visual de
+            07/10/2026). A lista inteira do que se busca vai no `title`. O Esc limpa a busca (o CampoDeBusca faz isso), e o "/"
             vem para cá pelo atalho comum da moldura (layout/Consultas). */}
         <CampoDeBusca
           classeDaCaixa="min-w-[240px] flex-1"
           aria-label="Buscar nos cards"
-          placeholder="Buscar por nome, processo ou responsável"
+          placeholder="Nome, processo ou responsável"
           title="Busca no nome do card, no número do processo (com ou sem pontuação), no responsável e no conteúdo das anotações"
           valor={busca}
           onMudar={(v) => {
@@ -5782,9 +5832,18 @@ export default function AnaliseCredito() {
         // foi recusado pelo dono em 03/10/2026): linhas de 32px, a barrinha de
         // 2px colada ao nome e o cartão com 12px de folga — os cards sobem para
         // a dobra sem esconder fase nenhuma.
+        // NO CELULAR (até 620px), UMA FAIXA QUE DESLIZA: cada fase com 82% da
+        // largura, para a seguinte aparecer na borda e dizer que há mais. A
+        // faixa vai até a borda da tela (-mx-s4) e tem 4px de folga em cima e
+        // embaixo para a moldura da fase aberta não ser cortada pela rolagem.
         <section
+          ref={quadroRef}
           aria-label="Visão do funil por fases"
-          className={cn('mb-s4 grid grid-cols-1 gap-s2 min-[621px]:grid-cols-2', gradeDoQuadro)}
+          className={cn(
+            'relative -mx-s4 mb-s3 flex snap-x snap-mandatory gap-s2 overflow-x-auto px-s4 py-s1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+            'min-[621px]:mx-0 min-[621px]:mb-s4 min-[621px]:grid min-[621px]:grid-cols-2 min-[621px]:overflow-visible min-[621px]:p-0',
+            gradeDoQuadro,
+          )}
         >
           {fasesDoFunil.map((f, i) => {
             const total = f.abas.reduce((t, a) => t + nDaAba(a.key), 0)
@@ -5795,7 +5854,8 @@ export default function AnaliseCredito() {
               <div
                 key={f.nome ?? 'etapas'}
                 className={cn(
-                  'relative min-w-0 rounded-cartao border p-s3 shadow-nivel-1 dark:shadow-none',
+                  'relative min-w-0 flex-none snap-start scroll-ml-s4 rounded-cartao border p-s3 shadow-nivel-1 dark:shadow-none min-[621px]:w-auto',
+                  fasesDoFunil.length > 1 ? 'w-[82%]' : 'w-full',
                   f.discreta ? 'bg-superficie-2' : 'bg-superficie',
                   atual ? 'border-marca-viva/45 ring-[3px] ring-marca-viva/10' : 'border-borda',
                 )}
@@ -5836,7 +5896,8 @@ export default function AnaliseCredito() {
                           onClick={() => irParaAba(a.key)}
                           title={`${nome} — ${n} ${busca.trim() ? 'resultado(s) da busca' : 'crédito(s)'}`}
                           className={cn(
-                            'relative grid h-[32px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-s2 rounded-controle px-s2 pb-s0.5 text-left transition-colors',
+                            // 36PX NO CELULAR: é alvo de toque (no computador, 32px, A1a).
+                            'relative grid h-controle w-full min-[621px]:h-[32px] grid-cols-[minmax(0,1fr)_auto] items-center gap-s2 rounded-controle px-s2 pb-s0.5 text-left transition-colors',
                             ativa ? 'bg-marca-suave' : 'hover:bg-superficie-3',
                           )}
                         >
@@ -5966,10 +6027,18 @@ export default function AnaliseCredito() {
         {abaAtual && (
           <div className="mb-s3 flex flex-wrap items-center gap-s2">
             {leads.data && (
-              <div role="group" aria-label="Filtros rápidos" className="flex flex-wrap gap-s2">
+              // NO CELULAR, UMA FAIXA QUE DESLIZA, como o quadro de fases: o
+              // terceiro filtro quebrava sozinho numa linha a mais. E os chips
+              // com 36px de altura, alvo de toque (revisão visual de 07/10/2026).
+              <div
+                role="group"
+                aria-label="Filtros rápidos"
+                className="flex flex-wrap gap-s2 max-sm:-mx-s4 max-sm:w-[calc(100%+32px)] max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-s4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              >
                 {chips.map((c) => (
                   <Chip
                     key={c.key}
+                    className="flex-none max-sm:h-controle"
                     ativo={filtro === c.key}
                     icone={c.icone}
                     contagem={contagemDoFiltro[c.key]}

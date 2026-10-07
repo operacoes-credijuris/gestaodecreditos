@@ -31,7 +31,7 @@ import { supabase } from '@/lib/supabase'
 import { codigoDoErro, invokeFunction } from '@/lib/functions'
 import { comecarNoCard, terminarNoCard, type PorCard } from '@/lib/emCursoPorCard'
 import type { KommoLead } from '@/lib/types'
-import { CaixaDeAviso } from '@/components/analise/Pecas'
+import { CaixaDeAviso, IdentificacaoDoCard } from '@/components/analise/Pecas'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -421,7 +421,7 @@ export function JanelaJustificativa({
         onClose={fechar}
         size="lg"
         title="Justificativa técnica"
-        description={descricao}
+        description={descricao ? <IdentificacaoDoCard titulo={descricao} /> : undefined}
         dirty={rascunho === 'erro'}
         rodapeInicio={
           podeRefazer && !semMigracao && !migracaoPelaFuncao ? (

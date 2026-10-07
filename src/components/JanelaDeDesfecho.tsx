@@ -18,7 +18,7 @@ import { cn } from '@/lib/cn'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Field'
-import { CaixaDeAviso, DicaDeAviso, icSelo } from '@/components/analise/Pecas'
+import { CaixaDeAviso, DicaDeAviso, IdentificacaoDoCard, icSelo } from '@/components/analise/Pecas'
 import { perguntarDescarte } from '@/lib/descarte'
 import type { AcaoTela } from '@/lib/kommo'
 import type { GrauRisco } from '../../supabase/functions/_shared/graus.ts'
@@ -304,7 +304,7 @@ export function JanelaDeDesfecho({
       title={acao.label}
       // O CARD DE QUE SE FALA, sob o título (o apoio da amostra): a janela abre
       // por cima de outra, e é este texto que diz qual crédito vai ser movido.
-      description={subtitulo || undefined}
+      description={subtitulo ? <IdentificacaoDoCard titulo={subtitulo} /> : undefined}
       dirty={sujo}
       // O RODAPÉ NA ORDEM ÚNICA DAS JANELAS (auditoria visual de 03/10/2026,
       // §0.6/C8): `[Cancelar] [Confirmar]`, à direita, o ato por último. Antes o
