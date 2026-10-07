@@ -2101,7 +2101,17 @@ function JanelaDoEnvioAoFundo({
         <div className="mb-s4">
           <Tabs
             rotulo={`Tipo de envio ${aoFundo(fundo)}`}
-            items={fundo.abas!.map((a) => ({ key: a.key, label: a.rotulo }))}
+            items={fundo.abas!.map((a) => ({
+              key: a.key,
+              label: a.subrotulo ? (
+                <span className="flex flex-col items-start leading-tight">
+                  <span>{a.rotulo}</span>
+                  <span className="text-xs font-normal text-texto-3">{a.subrotulo}</span>
+                </span>
+              ) : (
+                a.rotulo
+              ),
+            }))}
             value={aba ?? fundo.abas![0].key}
             // NO MEIO DO ENVIO, A ABA NÃO TROCA: o ato em curso é o da aba aberta.
             onChange={(k) => {

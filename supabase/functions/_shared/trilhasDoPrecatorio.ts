@@ -126,6 +126,8 @@ export interface AtoDoEnvio {
 export interface AbaDoEnvio {
   key: string
   rotulo: string
+  /** Uma linha bem pequena embaixo do rótulo da aba, para guiar a escolha ("> R$ 10 milhões"). */
+  subrotulo?: string
   /** Uma linha curta no topo da aba, dizendo quando ela vale. */
   explicacao?: string
 }
@@ -652,6 +654,9 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
                 {
                   key: 'atacado',
                   rotulo: 'Atacado',
+                  // O GUIA NO PRÓPRIO RÓTULO (pedido do dono, 07/10/2026): quem não
+                  // sabe o que é varejo e atacado escolhe pelo valor.
+                  subrotulo: '> R$ 10 milhões',
                   explicacao: 'Crédito de atacado: o BTG analisa fora da plataforma e responde depois (por e-mail).',
                 },
               ],
