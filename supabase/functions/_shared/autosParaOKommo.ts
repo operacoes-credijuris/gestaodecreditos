@@ -162,7 +162,11 @@ const dataBR = (iso: string | null | undefined) => {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : ''
 }
 
-/** A nota do card quando os autos terminam de descer. */
+/**
+ * A nota do card quando os autos terminam de descer — no formato ANTIGO, um
+ * arquivo por documento. Vale só enquanto a migração 0077 não roda; depois
+ * dela a nota é `notaDosAutosJuntos` (`_shared/autosJuntos.ts`).
+ */
 export function notaDosAutos(o: {
   cnj: string
   /** "Conhecimento", "Precatório"… — o que abre o nome dos anexos deste processo. */
@@ -176,10 +180,10 @@ export function notaDosAutos(o: {
 }): string {
   const periodo = o.primeiro && o.ultimo ? `, de ${dataBR(o.primeiro)} a ${dataBR(o.ultimo)}` : ''
   const linhas = [
-    `📂 Autos do processo ${o.cnj}${o.rotulo && o.rotulo !== 'Autos' ? ` (${o.rotulo.toLowerCase()})` : ''} anexados a este card pelo Escavador: ${o.anexados} de ${o.total} documento(s)` +
+    `📂 Autos do processo ${o.cnj}${papelDe(o.rotulo)} anexados a este card pelo Escavador: ${o.anexados} de ${o.total} documento(s)` +
       (o.paginas ? `, ${o.paginas.toLocaleString('pt-BR')} páginas` : '') +
       `${periodo}.`,
-    `Os arquivos "${o.rotulo ?? 'Autos'} 001, 002…" seguem a ordem do processo, do mais antigo ao mais novo.`,
+    `Estão na área Arquivos do card, um arquivo por documento: "${o.rotulo ?? 'Autos'} 001, 002…", na ordem do processo, do mais antigo ao mais novo.`,
   ]
   if (o.falhas.length) {
     linhas.push(`⚠️ ${o.falhas.length} documento(s) não desceram: ${o.falhas.slice(0, 5).join('; ')}${o.falhas.length > 5 ? '…' : ''}`)
@@ -187,9 +191,46 @@ export function notaDosAutos(o: {
   return linhas.join('\n')
 }
 
-/** A nota do card quando o tribunal não entrega os autos. */
-export function notaDeFalha(cnj: string, motivo: string): string {
-  return `⚠️ Não consegui baixar os autos do processo ${cnj} pelo Escavador: ${motivo}. Anexe os autos à mão.`
+/** " (conhecimento)" — o papel do processo entre parênteses, quando diz algo. */
+function papelDe(rotulo: string | null | undefined): string {
+  return rotulo && !/^(autos|processo)$/i.test(rotulo) ? ` (${rotulo.toLowerCase()})` : ''
+}
+
+/**
+ * A nota do card quando o tribunal não entrega os autos.
+ *
+ * O PROCESSO E O PAPEL DELE no começo: um card tem até três processos, e
+ * "não consegui baixar os autos" sem dizer de qual deixava a equipe sem saber
+ * o que anexar à mão.
+ */
+export function notaDeFalha(cnj: string, motivo: string, rotulo?: string): string {
+  return `⚠️ Não consegui baixar os autos do processo ${cnj}${papelDe(rotulo)} pelo Escavador: ${motivo}. ` +
+    'Nada deste processo foi anexado ao card; anexe os autos à mão.'
+}
+
+/**
+ * A PRIMEIRA falha passageira do robô do Escavador (pedido do dono, 07/10/2026).
+ *
+ * DE QUEM É A FALHA, dito com todas as letras: a equipe lia "não consegui
+ * baixar" e entendia defeito da plataforma.
+ */
+export function notaDaFalhaDoRobo(o: { cnj: string; rotulo?: string; codigo: string; teto: number; intervaloMin: number }): string {
+  return `⚠️ Falha do Escavador no processo ${o.cnj}${papelDe(o.rotulo)}: o robô dele não conseguiu entrar no tribunal ` +
+    `(${o.codigo}). Não é erro da Credijuris. Tento de novo automaticamente a cada ${o.intervaloMin} minutos ` +
+    `(até ${o.teto} vezes no total). Não escrevo a cada tentativa: a próxima nota é a dos autos, se der certo, ou a de desistência.`
+}
+
+/** O fim da rodada: o robô seguiu falhando e a rotina parou. Diz como pedir outra rodada. */
+export function notaDaDesistenciaDoRobo(o: { cnj: string; rotulo?: string; codigo: string; tentativas: number }): string {
+  return `⚠️ O Escavador seguiu falhando no processo ${o.cnj}${papelDe(o.rotulo)} depois de ${o.tentativas} tentativa(s) ` +
+    `(${o.codigo}); parei de tentar. Para tentar de novo, tire o card da coluna de entrada do Operacional e devolva-o a ela: ` +
+    'na volta seguinte a rotina recomeça as tentativas. Se o tribunal seguir fora do ar, anexe os autos à mão.'
+}
+
+/** Outra rodada pedida (card devolvido à entrada, ou pela ação `repetir_falhas`). */
+export function notaDaNovaRodada(o: { cnj: string; rotulo?: string; codigo: string; teto: number; intervaloMin: number; porque: string }): string {
+  return `🔄 ${o.porque}: peço de novo os autos do processo ${o.cnj}${papelDe(o.rotulo)} ao Escavador, que falhou antes ` +
+    `(${o.codigo}, falha do robô dele, não da Credijuris). Tento a cada ${o.intervaloMin} minutos, até ${o.teto} vezes.`
 }
 
 /** O que o estado do pedido no Escavador quer dizer para quem lê o card. */

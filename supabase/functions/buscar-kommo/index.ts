@@ -17,10 +17,50 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { ERRO_ACESSO, getCallerAtivo, serviceClient } from "../_shared/auth.ts";
 import { chaveKommo } from "../_shared/segredos.ts";
+import { arquivosParaAnalise, lerJuntada, type ProcessoParaAnalise } from "../_shared/autosJuntos.ts";
 
 const CORS = corsHeaders;
 // Subdomínio da conta Kommo (o "nome" antes de .kommo.com). Trocar aqui se mudar.
 const KOMMO_SUBDOMAIN = "contatocredijuriscom";
+
+/**
+ * Os processos do card que a rotina dos autos conhece, com as partes juntadas
+ * e os documentos soltos de cada um — é o que deixa a análise preferir as
+ * partes aos soltos (ver `arquivosParaAnalise`). Sem a migração 0077, ou sem
+ * processo nenhum, volta vazio e nada é ignorado.
+ */
+async function processosDoCard(svc: ReturnType<typeof serviceClient>, leadId: number): Promise<ProcessoParaAnalise[]> {
+  const { data, error } = await svc
+    .from("escavador_autos_processo")
+    .select("numero_cnj, rotulo, juntada")
+    .eq("kommo_lead_id", leadId);
+  if (error || !data?.length) return [];
+  const fora: ProcessoParaAnalise[] = [];
+  for (const p of data as Array<{ numero_cnj: string; rotulo: string; juntada: unknown }>) {
+    const j = lerJuntada(p.juntada);
+    const juntado = !!j?.concluida && j.partes.length > 0;
+    let soltos: { uuid: string; ordem: number }[] = [];
+    if (juntado) {
+      const { data: docs } = await svc
+        .from("escavador_documento")
+        .select("kommo_file_uuid, ordem")
+        .eq("numero_cnj", p.numero_cnj)
+        .not("kommo_file_uuid", "is", null)
+        .range(0, 4999);
+      soltos = ((docs ?? []) as Array<{ kommo_file_uuid: string; ordem: number | null }>)
+        .map((d) => ({ uuid: String(d.kommo_file_uuid), ordem: Number(d.ordem) || 0 }));
+    }
+    fora.push({
+      cnj: p.numero_cnj,
+      rotulo: p.rotulo,
+      juntado,
+      partes: (j?.partes ?? []).map((x) => x.uuid),
+      soltos,
+      naoJuntados: (j?.naoJuntados ?? []).map((d) => d.ordem),
+    });
+  }
+  return fora;
+}
 
 function json(o: unknown, s = 200) {
   return new Response(JSON.stringify(o), {
@@ -34,7 +74,8 @@ Deno.serve(async (req) => {
   try {
     // ATIVO, e não só autenticado: desativar alguém em Configurações não
     // revoga o JWT dele, e esta função entrega os anexos do processo.
-    const user = await getCallerAtivo(req, serviceClient());
+    const svc = serviceClient();
+    const user = await getCallerAtivo(req, svc);
     if (!user) return json({ erro: ERRO_ACESSO }, 401);
 
     const body = await req.json().catch(() => ({}));
@@ -74,6 +115,17 @@ Deno.serve(async (req) => {
       return json({ erro: "Nenhum arquivo anexado neste card. Anexe o PDF do processo e tente de novo." }, 404);
     }
 
+    // 1b) PARTES > SOLTOS (07/10/2026). O card antigo tem os documentos dos
+    // autos soltos ("Conhecimento 001 - …", centenas) E, depois de rejuntado,
+    // os mesmos autos em poucos PDFs. A análise lê as partes e deixa os soltos do
+    // mesmo processo de fora — pelo uuid, antes mesmo de pedir os metadados de
+    // cada um (eram centenas de idas ao drive). O histórico (`todos`) vê tudo.
+    const pedeTodos = (body as any).todos === true;
+    const processos = pedeTodos ? [] : await processosDoCard(svc, Number(leadId)).catch(() => []);
+    const peloUuid = arquivosParaAnalise(arquivos.map((a) => ({ uuid: a.file_uuid })), processos);
+    const ignoradosPeloUuid = new Set(peloUuid.ignorados.map((a) => a.uuid));
+    const aOlhar = arquivos.filter((a) => !ignoradosPeloUuid.has(a.file_uuid));
+
     // 2) descobre a URL do drive da conta (ex.: drive-g)
     const accRes = await fetch(`${base}/api/v4/account?with=drive_url`, { headers: auth });
     const accJson = await accRes.json().catch(() => ({}));
@@ -85,13 +137,14 @@ Deno.serve(async (req) => {
     // Anexo cujo metadado não veio NÃO SOME: entra em `sem_link`, com o que se
     // souber dele. Sumir era o que acontecia — e o navegador então dizia "não
     // achei" sobre um arquivo que estava no card.
-    const metas: Array<{ nome: string; mime: string; ext: string; download?: string }> = [];
+    const metas: Array<{ uuid: string; nome: string; mime: string; ext: string; download?: string }> = [];
     const semMetadado: string[] = [];
-    for (const a of arquivos) {
+    for (const a of aOlhar) {
       const mRes = await fetch(`${driveUrl}/v1.0/files/${a.file_uuid}`, { headers: auth });
       const m = mRes.ok ? await mRes.json().catch(() => null) : null;
       if (!m) { semMetadado.push(`anexo ${a.file_uuid.slice(0, 8)}`); continue; }
       metas.push({
+        uuid: a.file_uuid,
         nome: String((m as any)?.name || ""),
         mime: String((m as any)?.metadata?.mime_type || "").toLowerCase(),
         ext: String((m as any)?.metadata?.extension || "").toLowerCase(),
@@ -105,7 +158,7 @@ Deno.serve(async (req) => {
     // PDF não há o que analisar, e devolver um JPG faria a leitura falhar mais
     // adiante, longe da causa. Aqui a pergunta é outra: a pessoa clicou no nome de
     // um arquivo que ela está VENDO no card, e ele pode ser o RG em foto.
-    if ((body as any).todos === true) {
+    if (pedeTodos) {
       const todos = metas.filter((x) => !!x.download);
       return json({
         pronto: true,
@@ -127,8 +180,13 @@ Deno.serve(async (req) => {
     // a resposta antiga.
     const ehPdf = (x: { mime: string; ext: string; nome: string }) =>
       x.mime === "application/pdf" || x.ext === "pdf" || /\.pdf$/i.test(x.nome);
-    const pdfs = metas.filter(ehPdf);
-    const naoPdf = metas.filter((x) => !ehPdf(x)).map((x) => x.nome || x.ext || x.mime || "anexo sem nome");
+    // A SEGUNDA PASSADA, pelo nome: o solto que subiu duas vezes e cujo uuid o
+    // banco não guardou. A regra (e os cuidados dela) mora em autosJuntos.ts.
+    const peloNome = arquivosParaAnalise(metas, processos);
+    const soltosIgnorados = ignoradosPeloUuid.size + peloNome.ignorados.length;
+    const lidos = peloNome.ler;
+    const pdfs = lidos.filter(ehPdf);
+    const naoPdf = lidos.filter((x) => !ehPdf(x)).map((x) => x.nome || x.ext || x.mime || "anexo sem nome");
     if (pdfs.length === 0) {
       const tipos = metas.map((x) => x.ext || x.mime || "desconhecido").join(", ");
       return json({ erro: `O card tem ${arquivos.length} anexo(s) (${tipos}), nenhum em PDF. Anexe o PDF do processo e tente de novo.` }, 404);
@@ -145,7 +203,7 @@ Deno.serve(async (req) => {
       /^image\/(jpeg|png|webp|gif|bmp)$/.test(x.mime) ||
       /^(jpe?g|png|webp|gif|bmp)$/.test(x.ext) ||
       /\.(jpe?g|png|webp|gif|bmp)$/i.test(x.nome);
-    const imagens = metas
+    const imagens = lidos
       .filter((x) => !ehPdf(x) && ehImagem(x) && !!x.download)
       .map((x) => ({ nome: x.nome, download: x.download!, mime: x.mime }));
     return json({
@@ -154,6 +212,9 @@ Deno.serve(async (req) => {
       nao_pdf: naoPdf,
       imagens,
       sem_link: semLink,
+      // Os documentos soltos deixados de fora porque as partes juntadas do mesmo
+      // processo estão no card.
+      soltos_ignorados: soltosIgnorados,
       download_url: ultimo.download,
       nome_arquivo: ultimo.nome,
       mime: ultimo.mime,

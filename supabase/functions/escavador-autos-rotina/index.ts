@@ -16,10 +16,29 @@
 //      de novo.
 //   3. ACOMPANHA. O robô leva horas no tribunal (2h15 no teste de 22/09). O
 //      aviso deles acorda a rotina; de meia em meia hora, sem custo, ela confere.
-//   4. ANEXA. Pronto o pedido, cada PDF desce do Escavador e sobe DIRETO como
-//      anexo do card, na ordem do processo e com o papel na frente:
-//      "Conhecimento 001 - 09-06-2020 - Petição Inicial.pdf". Nada fica guardado
-//      na plataforma além do registro do que já subiu.
+//   4. ANEXA. Pronto o pedido, os documentos descem do Escavador e sobem ao card
+//      JUNTADOS: um PDF por processo, na ordem do processo, dividido em partes
+//      só quando o tamanho obriga — "Conhecimento - autos completos - {CNJ}.pdf"
+//      ou "Conhecimento - autos (parte 1 de 3) - {CNJ}.pdf". Cada parte fica na
+//      área Arquivos do card E como nota de anexo no chat, onde a equipe a vê
+//      (pedido do dono, 07/10/2026; ver `juntar.ts`). Nada fica guardado na
+//      plataforma além do registro do que já subiu.
+//
+//      ANTES DA MIGRAÇÃO 0077 a rotina faz o que fazia: um arquivo por
+//      documento, só na área Arquivos. A coluna `juntada` é o que liga o novo.
+//
+// A FALHA DO ROBÔ DO ESCAVADOR (INTERNAL_ERROR, LOGIN_ERROR) não encerra mais
+// o processo: o pedido se repete de 10 em 10 minutos, até um teto (6 por
+// padrão), com uma nota no card na primeira falha e outra no fim. Ver
+// `_shared/falhasDosAutos.ts`.
+//
+// AÇÕES (só com x-cron-secret; `simular: true` lista sem mudar nada):
+//   { acao: 'rejuntar', lead_id?, cnj? }      os processos já CONCLUIDOS com os
+//       documentos soltos no card são montados de novo, juntados, a partir do
+//       Escavador (baixar não custa). Os soltos NÃO são apagados.
+//   { acao: 'repetir_falhas', lead_id?, teto? }  os processos em FALHOU por falha
+//       passageira do robô entram numa rodada de repetição (cada uma é um
+//       pedido pago, R$ 1,34, dentro da cota diária).
 //
 // UM PEDIDO POR PROCESSO DO CARD, e isso é garantido por POSSE NO BANCO, não por
 // cuidado: o cron, o sync e o aviso podem acordar a rotina ao mesmo tempo, e quem
@@ -34,7 +53,7 @@ import { chaveAnthropic, chaveEscavador, contaKommo } from '../_shared/segredos.
 import { BASE_ESCAVADOR } from '../_shared/escavador.ts'
 import { cnjDoCard, digitosDoCnj } from '../_shared/nucleo/cnj.ts'
 import { assinarNota } from '../_shared/notaCredijuris.ts'
-import { subirAoDriveDoKommo } from '../_shared/driveDoKommo.ts'
+import { subirAoDriveDoKommo, subirAoDriveDoKommoComVersao } from '../_shared/driveDoKommo.ts'
 import {
   documentosDosAutos,
   emOrdemDosAutos,
@@ -43,9 +62,14 @@ import {
   FUNIS_DE_ENTRADA_POR_NOME,
   motivoDoEstado,
   nomeDoAnexo,
+  notaDaDesistenciaDoRobo,
+  notaDaFalhaDoRobo,
+  notaDaNovaRodada,
   notaDeFalha,
   notaDosAutos,
 } from '../_shared/autosParaOKommo.ts'
+import { juntadaInicial, lerJuntada } from '../_shared/autosJuntos.ts'
+import { juntarProcessos } from './juntar.ts'
 import {
   ehAnexoDosAutos,
   faltaPapel,
@@ -58,14 +82,22 @@ import {
   SISTEMA_PROCESSOS,
 } from '../_shared/processosDoCredito.ts'
 import {
+  codigoDoRoboNoDetalhe,
   consultaRespondeu,
+  depoisDaFalhaDoRobo,
   ehPdf,
   erroPassageiro,
   falhaPassageira,
+  falhaPassageiraDoRobo,
+  horaDeConferir,
+  horaDeRepetir,
+  INTERVALO_REPETIR_MIN,
   MAX_BYTES_NA_MEMORIA,
   recusaDaConta,
   SEM_RESPOSTA,
   semAcessoAoKommo,
+  tetoDoRobo,
+  voltouParaAEntrada,
 } from '../_shared/falhasDosAutos.ts'
 
 type Servico = ReturnType<typeof serviceClient>
@@ -140,6 +172,29 @@ interface Processo {
   verificado_em: string | null
   criado_em: string
   atualizado_em: string
+  detalhe?: string | null
+  // Da migração 0077 (ausentes antes dela):
+  juntada?: unknown
+  tentativas_do_pedido?: number
+  teto_de_tentativas?: number | null
+  falha_do_robo?: string | null
+  desistiu_em?: string | null
+}
+
+/** Quanto a junção trabalha, contado do início da invocação: o relógio da Edge Function é 400 s. */
+const PRAZO_JUNCAO_MS = 330_000
+
+/**
+ * A migração 0077 já rodou? Sem as colunas dela, a rotina faz o que fazia
+ * antes (um arquivo por documento; falha do robô encerra o processo) — e não
+ * quebra: gravar numa coluna que não existe derrubaria a gravação inteira.
+ */
+async function temAMigracaoNova(svc: Servico): Promise<boolean> {
+  const { error } = await svc
+    .from('escavador_autos_processo')
+    .select('juntada, tentativas_do_pedido, teto_de_tentativas, falha_do_robo, desistiu_em')
+    .limit(1)
+  return !error
 }
 
 // ------------------------------------------------------------------ Escavador
@@ -260,6 +315,43 @@ function clienteKommo(token: string, subdominio: string) {
     /** Sobe um PDF ao drive do Kommo, em partes — ver `_shared/driveDoKommo.ts`. */
     async subir(nome: string, bytes: Uint8Array): Promise<string> {
       return subirAoDriveDoKommo({ drive: await cliente.urlDoDrive(), auth, nome, bytes, mime: 'application/pdf' })
+    },
+    /** Sobe um PDF e devolve o uuid e a versão — a nota de anexo no chat pede as duas. */
+    async subirComVersao(nome: string, bytes: Uint8Array) {
+      return subirAoDriveDoKommoComVersao({ drive: await cliente.urlDoDrive(), auth, nome, bytes, mime: 'application/pdf' })
+    },
+    /** A versão atual de um arquivo do drive, pelos metadados dele. */
+    async versaoDoArquivo(uuid: string): Promise<string | null> {
+      const d = await cliente.urlDoDrive()
+      const r = await fetch(`${d}/v1.0/files/${uuid}`, { headers: auth, signal: AbortSignal.timeout(TEMPO_API_MS) })
+      if (!r.ok) return null
+      const m = (await r.json().catch(() => null)) as any
+      return m?.version_uuid ? String(m.version_uuid) : null
+    },
+    /**
+     * A NOTA DE ANEXO no chat do card (`note_type: 'attachment'`), como a
+     * kommo-anexo-enviar faz. É ela que põe o arquivo à vista da equipe: o que
+     * só se liga ao card fica na área Arquivos, e lá ninguém o achava. O
+     * kommo-sync a espelha com o uuid, e o histórico do card na plataforma a
+     * mostra junto da nota dos autos. Devolve null se entrou, ou o erro.
+     */
+    async anotarAnexo(leadId: number, a: { uuid: string; versao: string | null; nome: string }): Promise<string | null> {
+      try {
+        const r = await api('/leads/notes', {
+          method: 'POST',
+          body: JSON.stringify([
+            {
+              entity_id: leadId,
+              note_type: 'attachment',
+              params: { file_uuid: a.uuid, file_name: a.nome, ...(a.versao ? { version_uuid: a.versao } : {}) },
+              is_need_to_trigger_digital_pipeline: false,
+            },
+          ]),
+        })
+        return r.ok ? null : `o Kommo recusou a nota de anexo (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`
+      } catch (e) {
+        return `a nota de anexo não respondeu (${(e as Error)?.message ?? e})`
+      }
     },
     async anexar(leadId: number, uuids: string[]) {
       const r = await api(`/leads/${leadId}/files`, {
@@ -579,8 +671,18 @@ async function registrarPedido(svc: Servico, id: number, cnj: string, leadId: nu
   )
 }
 
-async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number | null, avisos: string[]) {
-  let q = svc.from('escavador_autos_processo').select('*').in('estado', ['NOVO', 'FILA', 'SEM_SALDO', 'PEDINDO'])
+async function pedir(
+  svc: Servico,
+  chave: string,
+  kommo: Kommo,
+  soEste: number | null,
+  avisos: string[],
+  novas: boolean,
+) {
+  // REPETIR (0077): o robô falhou de passagem e o pedido se refaz — de 10 em 10
+  // minutos, contados do último pedido pago.
+  const estados = ['NOVO', 'FILA', 'SEM_SALDO', 'PEDINDO', ...(novas ? ['REPETIR'] : [])]
+  let q = svc.from('escavador_autos_processo').select('*').in('estado', estados)
   if (soEste) q = q.eq('kommo_lead_id', soEste)
   const { data } = await q.order('criado_em')
   const processos = (data ?? []) as Processo[]
@@ -602,6 +704,10 @@ async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number |
     // Posse de pedido só se retoma parada; fila da cota cheia nem se consulta.
     if (p.estado === 'PEDINDO' && Date.now() - Date.parse(p.atualizado_em) < POSSE_PARADA_MS) continue
     if (p.estado === 'FILA' && pedidosHoje >= LIMITE_PEDIDOS_DIA) continue
+    if (p.estado === 'REPETIR') {
+      if (pedidosHoje >= LIMITE_PEDIDOS_DIA) continue
+      if (!horaDeRepetir(await quandoFoiPedido(svc, p.pedido_id), Date.now())) continue
+    }
 
     // A POSSE DO PEDIDO, antes de qualquer chamada paga.
     const { data: tomei } = await svc
@@ -712,7 +818,7 @@ async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number |
         await gravar({ estado: 'AGUARDANDO', pedido_id: Number(depois.id), verificado_em: agora(), detalhe: null })
       } else {
         await gravar({ estado: 'FALHOU', detalhe })
-        await kommo.anotar(leadId, notaDeFalha(cnj, detalhe.replace(/^O Escavador/, 'o Escavador')))
+        await kommo.anotar(leadId, notaDeFalha(cnj, detalhe.replace(/^O Escavador/, 'o Escavador'), p.rotulo))
       }
       continue
     }
@@ -726,7 +832,15 @@ async function pedir(svc: Servico, chave: string, kommo: Kommo, soEste: number |
       requisicoes: 1,
       processos: 1,
     })
-    await gravar({ estado: 'AGUARDANDO', pedido_id: pedidoId, verificado_em: agora(), detalhe: null })
+    // A CONTAGEM DOS PEDIDOS PAGOS deste processo: é ela que o teto de
+    // repetições do robô confere.
+    await gravar({
+      estado: 'AGUARDANDO',
+      pedido_id: pedidoId,
+      verificado_em: agora(),
+      detalhe: p.falha_do_robo ? `Nova tentativa depois da falha do Escavador (${p.falha_do_robo}).` : null,
+      ...(novas ? { tentativas_do_pedido: (Number(p.tentativas_do_pedido) || 0) + 1 } : {}),
+    })
   }
 }
 
@@ -738,13 +852,15 @@ async function quandoFoiPedido(svc: Servico, pedidoId: number | null): Promise<n
   return Date.parse(String(data?.criado_em ?? '')) || null
 }
 
-async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: number | null) {
+async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: number | null, novas: boolean) {
   let q = svc.from('escavador_autos_processo').select('*').eq('estado', 'AGUARDANDO')
   if (soEste) q = q.eq('kommo_lead_id', soEste)
   const { data } = await q
-  const limite = Date.now() - REVER_MIN * 60_000
   for (const p of (data ?? []) as Processo[]) {
-    if (!soEste && p.verificado_em && Date.parse(p.verificado_em) > limite) continue
+    // NA RODADA DE REPETIÇÃO confere-se de 10 em 10 minutos, e não de 30: senão
+    // cada tentativa levaria 40 minutos.
+    const verificado = p.verificado_em ? Date.parse(p.verificado_em) : null
+    if (!soEste && !horaDeConferir(verificado, Date.now(), !!p.falha_do_robo, REVER_MIN)) continue
     const gravar = (m: Record<string, unknown>) =>
       svc.from('escavador_autos_processo')
         .update({ atualizado_em: agora(), ...m })
@@ -767,16 +883,54 @@ async function acompanhar(svc: Servico, chave: string, kommo: Kommo, soEste: num
     // perdidos e nada no card.
     const pedidoEm = (doPedido && Date.parse(String(v?.criado_em ?? ''))) || (await quandoFoiPedido(svc, p.pedido_id))
 
+    const codigoDoRobo = novas && doPedido ? falhaPassageiraDoRobo(status, v?.motivo_erro ?? null) : null
     if (doPedido && status === 'SUCESSO') {
-      await gravar({ estado: 'ANEXANDO', verificado_em: agora(), detalhe: null })
+      await gravar({
+        estado: 'ANEXANDO',
+        verificado_em: agora(),
+        detalhe: null,
+        ...(novas ? { falha_do_robo: null, juntada: juntadaInicial('novo') } : {}),
+      })
+    } else if (codigoDoRobo) {
+      // A FALHA É DO ROBÔ DO ESCAVADOR, e passa: o pedido se repete. Nota no
+      // card só na primeira falha e no fim (ver `depoisDaFalhaDoRobo`).
+      const teto = tetoDoRobo(p.teto_de_tentativas)
+      const d = depoisDaFalhaDoRobo({ tentativas: Number(p.tentativas_do_pedido) || 0, teto, jaAvisou: !!p.falha_do_robo })
+      const rotulo = p.rotulo
+      if (d.estado === 'REPETIR') {
+        await gravar({
+          estado: 'REPETIR',
+          falha_do_robo: codigoDoRobo,
+          verificado_em: agora(),
+          detalhe: `Falha do Escavador (${codigoDoRobo}) na tentativa ${d.tentativas} de ${teto}; peço de novo em ${INTERVALO_REPETIR_MIN} minutos.`,
+        })
+        if (d.nota === 'primeira') {
+          await kommo.anotar(
+            p.kommo_lead_id,
+            notaDaFalhaDoRobo({ cnj: p.numero_cnj, rotulo, codigo: codigoDoRobo, teto, intervaloMin: INTERVALO_REPETIR_MIN }),
+          )
+        }
+      } else {
+        await gravar({
+          estado: 'FALHOU',
+          falha_do_robo: codigoDoRobo,
+          desistiu_em: agora(),
+          verificado_em: agora(),
+          detalhe: `${motivoDoEstado(status, v?.motivo_erro ?? null)} — ${d.tentativas} tentativa(s); parei de tentar.`,
+        })
+        await kommo.anotar(
+          p.kommo_lead_id,
+          notaDaDesistenciaDoRobo({ cnj: p.numero_cnj, rotulo, codigo: codigoDoRobo, tentativas: d.tentativas }),
+        )
+      }
     } else if (doPedido && status !== 'PENDENTE') {
       const motivo = motivoDoEstado(status, v?.motivo_erro ?? null)
       await gravar({ estado: 'FALHOU', detalhe: motivo, verificado_em: agora() })
-      await kommo.anotar(p.kommo_lead_id, notaDeFalha(`${p.numero_cnj} (${p.rotulo.toLowerCase()})`, motivo))
+      await kommo.anotar(p.kommo_lead_id, notaDeFalha(p.numero_cnj, motivo, p.rotulo))
     } else if (pedidoEm && Date.now() - pedidoEm > DESISTIR_H * 3_600_000) {
       const motivo = `o tribunal não respondeu em ${DESISTIR_H} horas`
       await gravar({ estado: 'FALHOU', detalhe: motivo })
-      await kommo.anotar(p.kommo_lead_id, notaDeFalha(`${p.numero_cnj} (${p.rotulo.toLowerCase()})`, motivo))
+      await kommo.anotar(p.kommo_lead_id, notaDeFalha(p.numero_cnj, motivo, p.rotulo))
     } else {
       await gravar({ verificado_em: agora() })
     }
@@ -881,7 +1035,7 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
         if (lista.length === 0) {
           const motivo = 'o Escavador concluiu, mas não entregou documento nenhum'
           await gravar({ estado: 'FALHOU', detalhe: motivo, trabalhando_ate: null })
-          await kommo.anotar(leadId, notaDeFalha(`${cnj} (${p.rotulo.toLowerCase()})`, motivo))
+          await kommo.anotar(leadId, notaDeFalha(cnj, motivo, p.rotulo))
           continue
         }
         const paginas = lista.reduce((t, d) => t + d.paginas, 0)
@@ -998,7 +1152,7 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
         // tentativas, então a espera não vira laço.
         if (semAcessoAoKommo(ultimoErro)) {
           await gravar({ estado: 'FALHOU', detalhe: motivo, trabalhando_ate: null })
-          await kommo.anotar(leadId, notaDeFalha(`${cnj} (${p.rotulo.toLowerCase()})`, motivo))
+          await kommo.anotar(leadId, notaDeFalha(cnj, motivo, p.rotulo))
         } else {
           // A TENTATIVA DEVOLVIDA quando a queda foi passageira: uma
           // indisponibilidade longa esgotaria os documentos da frente um a um,
@@ -1050,6 +1204,169 @@ async function anexar(svc: Servico, chave: string, kommo: Kommo, soEste: number 
   return sobrou
 }
 
+// ------------------------------------------------------------------ OUTRA RODADA
+/**
+ * O CARD DEVOLVIDO À ENTRADA pede outra rodada ao robô. É o "como tentar de
+ * novo" que a nota de desistência ensina à equipe: tirar o card da coluna de
+ * entrada e devolvê-lo. Só vale para o processo de que a rotina DESISTIU por
+ * falha do robô (`desistiu_em`); os FALHOU antigos não voltam sozinhos.
+ */
+async function rearmarQuemVoltou(svc: Servico, kommo: Kommo, soEste: number | null) {
+  let q = svc
+    .from('escavador_autos_processo')
+    .select('kommo_lead_id, numero_cnj, rotulo, falha_do_robo, desistiu_em, teto_de_tentativas')
+    .eq('estado', 'FALHOU')
+    .not('desistiu_em', 'is', null)
+  if (soEste) q = q.eq('kommo_lead_id', soEste)
+  const { data: processos } = await q
+  if (!processos?.length) return
+  const ids = [...new Set((processos as any[]).map((p) => Number(p.kommo_lead_id)))]
+  const { data: leads, error } = await svc
+    .from('kommo_leads')
+    .select('kommo_lead_id, pipeline_id, status_id, etapa_em')
+    .in('kommo_lead_id', ids)
+  if (error) return // sem a coluna da etapa (0074), não há como saber quando o card voltou
+  const { data: etapas } = await svc
+    .from('kommo_etapa')
+    .select('pipeline_id, status_id, nome')
+    .in('pipeline_id', FUNIS_DE_ENTRADA_POR_NOME)
+  const entradas = entradasDoOperacional((etapas ?? []) as any[])
+  const porLead = new Map(((leads ?? []) as any[]).map((l) => [Number(l.kommo_lead_id), l]))
+  for (const p of processos as any[]) {
+    const l = porLead.get(Number(p.kommo_lead_id))
+    if (!l) continue
+    const naEntrada = entradas.some((e) => e.pipeline_id === Number(l.pipeline_id) && e.status_id === Number(l.status_id))
+    if (!voltouParaAEntrada({ naEntrada, etapaEm: l.etapa_em ?? null, desistiuEm: p.desistiu_em })) continue
+    const teto = tetoDoRobo(p.teto_de_tentativas)
+    const { data: tomei } = await svc
+      .from('escavador_autos_processo')
+      .update({
+        estado: 'REPETIR',
+        tentativas_do_pedido: 0,
+        desistiu_em: null,
+        verificado_em: null,
+        detalhe: 'O card voltou para a entrada: nova rodada de pedidos ao Escavador.',
+        atualizado_em: agora(),
+      })
+      .eq('kommo_lead_id', p.kommo_lead_id)
+      .eq('numero_cnj', p.numero_cnj)
+      .eq('estado', 'FALHOU')
+      .eq('desistiu_em', p.desistiu_em)
+      .select('kommo_lead_id')
+    if (!tomei?.length) continue
+    await kommo.anotar(
+      Number(p.kommo_lead_id),
+      notaDaNovaRodada({
+        cnj: p.numero_cnj,
+        rotulo: p.rotulo,
+        codigo: String(p.falha_do_robo ?? 'erro do robô'),
+        teto,
+        intervaloMin: INTERVALO_REPETIR_MIN,
+        porque: 'O card voltou para a coluna de entrada',
+      }),
+    )
+  }
+}
+
+/** O motivo do erro do robô, pelo registro do pedido; na falta, pelo texto gravado no processo. */
+async function codigoDaFalhaAntiga(svc: Servico, p: Processo): Promise<string | null> {
+  if (p.pedido_id) {
+    const { data } = await svc.from('escavador_pedido').select('status, motivo_erro').eq('id', p.pedido_id).maybeSingle()
+    const c = falhaPassageiraDoRobo(data?.status ?? null, data?.motivo_erro ?? null)
+    if (c) return c
+  }
+  return codigoDoRoboNoDetalhe(p.detalhe ?? null)
+}
+
+/**
+ * AÇÃO `repetir_falhas`: os processos em FALHOU por falha passageira do robô
+ * entram numa rodada de repetição. NÃO É AUTOMÁTICO de propósito: são ~13
+ * processos antigos, e cada tentativa é um pedido pago — o dono dispara.
+ */
+async function acaoRepetirFalhas(
+  svc: Servico,
+  kommo: Kommo,
+  o: { soEste: number | null; teto: number | null; simular: boolean },
+) {
+  let q = svc.from('escavador_autos_processo').select('*').eq('estado', 'FALHOU')
+  if (o.soEste) q = q.eq('kommo_lead_id', o.soEste)
+  const { data } = await q
+  const fora: { kommo_lead_id: number; numero_cnj: string; rotulo: string; codigo: string }[] = []
+  for (const p of (data ?? []) as Processo[]) {
+    const codigo = await codigoDaFalhaAntiga(svc, p)
+    if (!codigo) continue
+    fora.push({ kommo_lead_id: p.kommo_lead_id, numero_cnj: p.numero_cnj, rotulo: p.rotulo, codigo })
+    if (o.simular) continue
+    const teto = tetoDoRobo(o.teto ?? p.teto_de_tentativas)
+    const { data: tomei } = await svc
+      .from('escavador_autos_processo')
+      .update({
+        estado: 'REPETIR',
+        tentativas_do_pedido: 0,
+        falha_do_robo: codigo,
+        desistiu_em: null,
+        verificado_em: null,
+        ...(o.teto ? { teto_de_tentativas: teto } : {}),
+        detalhe: `Nova rodada pedida (falha do Escavador: ${codigo}).`,
+        atualizado_em: agora(),
+      })
+      .eq('kommo_lead_id', p.kommo_lead_id)
+      .eq('numero_cnj', p.numero_cnj)
+      .eq('estado', 'FALHOU')
+      .select('kommo_lead_id')
+    if (!tomei?.length) continue
+    await kommo.anotar(
+      p.kommo_lead_id,
+      notaDaNovaRodada({
+        cnj: p.numero_cnj,
+        rotulo: p.rotulo,
+        codigo,
+        teto,
+        intervaloMin: INTERVALO_REPETIR_MIN,
+        porque: 'Nova rodada pedida pela Credijuris',
+      }),
+    )
+  }
+  return fora
+}
+
+/**
+ * AÇÃO `rejuntar`: os processos já CONCLUIDOS no formato antigo (um arquivo
+ * por documento) voltam a ANEXANDO com uma junção nova, e a rotina monta as
+ * partes baixando de novo do Escavador — o que não custa. Os arquivos soltos
+ * que já estão no card NÃO são apagados (decisão do dono, depois).
+ */
+async function acaoRejuntar(svc: Servico, o: { soEste: number | null; cnj: string | null; simular: boolean }) {
+  let q = svc
+    .from('escavador_autos_processo')
+    .select('kommo_lead_id, numero_cnj, rotulo, total_documentos, anexados, juntada, atualizado_em')
+    .eq('estado', 'CONCLUIDO')
+  if (o.soEste) q = q.eq('kommo_lead_id', o.soEste)
+  if (o.cnj) q = q.eq('numero_cnj', o.cnj)
+  const { data } = await q
+  const fora: { kommo_lead_id: number; numero_cnj: string; rotulo: string; documentos: number }[] = []
+  for (const p of (data ?? []) as any[]) {
+    if (lerJuntada(p.juntada)?.concluida) continue // já está juntado
+    if (!(Number(p.total_documentos) > 0)) continue
+    fora.push({ kommo_lead_id: p.kommo_lead_id, numero_cnj: p.numero_cnj, rotulo: p.rotulo, documentos: p.total_documentos })
+    if (o.simular) continue
+    await svc
+      .from('escavador_autos_processo')
+      .update({
+        estado: 'ANEXANDO',
+        juntada: juntadaInicial('rejuntar'),
+        trabalhando_ate: null,
+        detalhe: 'Rejuntando os autos em poucos PDFs.',
+        atualizado_em: agora(),
+      })
+      .eq('kommo_lead_id', p.kommo_lead_id)
+      .eq('numero_cnj', p.numero_cnj)
+      .eq('estado', 'CONCLUIDO')
+      .eq('atualizado_em', p.atualizado_em)
+  }
+  return fora
+}
+
 /** A próxima volta, numa invocação separada — nenhuma passa do teto de tempo. */
 function proximaVolta(volta: number, soEste: number | null) {
   const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/escavador-autos-rotina`
@@ -1073,7 +1390,14 @@ Deno.serve(async (req: Request) => {
       const caller = await getCallerAtivo(req, serviceClient())
       if (!caller) return jsonResponse({ erro: ERRO_ACESSO }, 401)
     }
-    const body = (await req.json().catch(() => ({}))) as { lead_id?: number; volta?: number }
+    const body = (await req.json().catch(() => ({}))) as {
+      lead_id?: number
+      volta?: number
+      acao?: string
+      cnj?: string
+      teto?: number
+      simular?: boolean
+    }
     const soEste = Number(body.lead_id) || null
     const volta = Number(body.volta) || 0
 
@@ -1085,22 +1409,87 @@ Deno.serve(async (req: Request) => {
     const kommo = clienteKommo(conta.token, conta.subdominio)
     const chaveIA = await chaveAnthropic()
     const avisos: string[] = []
+    const novas = await temAMigracaoNova(svc)
 
-    // A primeira volta lê, pede e acompanha; as encadeadas só continuam anexando.
-    if (volta === 0) {
-      await lerCards(svc, kommo, chaveIA, soEste, resta, avisos)
-      await pedir(svc, chave, kommo, soEste, avisos)
-      await acompanhar(svc, chave, kommo, soEste)
+    // AS AÇÕES EXPLÍCITAS: só pelo segredo do cron (quem dispara é o dono, pelo
+    // SQL Editor) — uma delas gasta dinheiro.
+    let acao: Record<string, unknown> | null = null
+    if (body.acao) {
+      if (!porCron) return jsonResponse({ erro: 'Ação só com o segredo do cron.' }, 403)
+      if (!novas) return jsonResponse({ erro: 'A migração 0077 ainda não rodou.' }, 409)
+      const simular = body.simular === true
+      if (body.acao === 'rejuntar') {
+        const lista = await acaoRejuntar(svc, { soEste, cnj: body.cnj ? String(body.cnj) : null, simular })
+        acao = { acao: 'rejuntar', simular, processos: lista }
+      } else if (body.acao === 'repetir_falhas') {
+        const teto = Number(body.teto) > 0 ? Number(body.teto) : null
+        const lista = await acaoRepetirFalhas(svc, kommo, { soEste, teto, simular })
+        acao = { acao: 'repetir_falhas', simular, teto: tetoDoRobo(teto), processos: lista }
+      } else {
+        return jsonResponse({ erro: `Ação desconhecida: ${body.acao}` }, 400)
+      }
+      if (simular) return jsonResponse({ ok: true, ...acao })
     }
-    const sobrou = await anexar(svc, chave, kommo, soEste, resta)
-    if (sobrou && volta < MAX_ENCADEADAS) proximaVolta(volta, soEste)
+
+    // A primeira volta lê, acompanha e pede; as encadeadas só continuam
+    // anexando. ACOMPANHAR ANTES DE PEDIR: o processo cujo robô acabou de
+    // falhar é pedido de novo na mesma volta — é o que faz a repetição sair de
+    // 10 em 10 minutos, e não de 20 em 20.
+    if (volta === 0) {
+      if (novas) await rearmarQuemVoltou(svc, kommo, soEste)
+      await lerCards(svc, kommo, chaveIA, soEste, resta, avisos)
+      await acompanhar(svc, chave, kommo, soEste, novas)
+      await pedir(svc, chave, kommo, soEste, avisos, novas)
+    }
+
+    let sobrou = false
+    let juntando = false
+    if (!novas) {
+      sobrou = await anexar(svc, chave, kommo, soEste, resta)
+      if (sobrou && volta < MAX_ENCADEADAS) proximaVolta(volta, soEste)
+    } else {
+      // A JUNÇÃO RODA DEPOIS DA RESPOSTA, em segundo plano: uma parte de 48 MB
+      // (baixar, juntar, subir) passa dos 150 s em que a resposta tem de sair,
+      // e o relógio da função é 400 s. Sem `waitUntil` (rodando local), ela
+      // roda aqui mesmo, no orçamento curto.
+      const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime
+      const fundo = typeof rt?.waitUntil === 'function'
+      const orcamento = fundo ? PRAZO_JUNCAO_MS : ORCAMENTO_MS
+      const trabalho = juntarProcessos({
+        svc,
+        chave,
+        kommo,
+        soEste,
+        resta: () => orcamento - (Date.now() - inicio),
+        orcamento,
+        listar: (cnj, pedidoId) => listarAutos(svc, chave, cnj, pedidoId),
+      })
+        .then((s) => {
+          if (s && volta < MAX_ENCADEADAS) proximaVolta(volta, soEste)
+          return s
+        })
+        .catch(() => false)
+      if (fundo) {
+        rt!.waitUntil!(trabalho)
+        juntando = true
+      } else sobrou = await trabalho
+    }
 
     let q = svc
       .from('escavador_autos_processo')
       .select('kommo_lead_id, numero_cnj, rotulo, estado, anexados, total_documentos, detalhe')
     if (soEste) q = q.eq('kommo_lead_id', soEste)
     const { data: processos } = await q.order('atualizado_em', { ascending: false }).limit(soEste ? 10 : 20)
-    return jsonResponse({ ok: true, volta, continua: sobrou, avisos, processos: processos ?? [] })
+    return jsonResponse({
+      ok: true,
+      volta,
+      continua: sobrou,
+      juntando,
+      formato: novas ? 'juntado' : 'um arquivo por documento',
+      ...(acao ? { acao } : {}),
+      avisos,
+      processos: processos ?? [],
+    })
   } catch (e) {
     return jsonResponse({ erro: (e as Error).message }, 500)
   }

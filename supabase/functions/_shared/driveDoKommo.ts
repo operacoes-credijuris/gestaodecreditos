@@ -28,6 +28,22 @@ export async function urlDoDriveDaConta(baseApi: string, auth: Record<string, st
   return String(u)
 }
 
+/** O arquivo que subiu: o uuid e a versão (a nota de anexo no chat leva as duas). */
+export interface ArquivoNoDrive {
+  uuid: string
+  versao: string | null
+}
+
+/**
+ * O arquivo é maior que o teto que o drive do Kommo informou na sessão. A
+ * rotina dos autos usa o `limite` para encolher as partes seguintes.
+ */
+export class ArquivoGrandeDemaisParaOKommo extends Error {
+  constructor(readonly bytes: number, readonly limite: number) {
+    super(`arquivo maior que o limite do Kommo (${bytes} bytes; o limite é ${limite})`)
+  }
+}
+
 /** Sobe um arquivo ao drive do Kommo, em partes, e devolve o uuid dele. */
 export async function subirAoDriveDoKommo(o: {
   drive: string
@@ -36,6 +52,24 @@ export async function subirAoDriveDoKommo(o: {
   bytes: Uint8Array
   mime: string
 }): Promise<string> {
+  return (await subirAoDriveDoKommoComVersao(o)).uuid
+}
+
+/**
+ * Sobe um arquivo ao drive do Kommo, em partes, e devolve o uuid E A VERSÃO.
+ *
+ * A VERSÃO (`version_uuid`) vem na resposta da última parte, junto do uuid; é
+ * o que a nota de anexo do Kommo (`note_type: 'attachment'`) leva, ao lado do
+ * `file_uuid` e do `file_name` — como a kommo-anexo-enviar já faz. Resposta
+ * sem ela devolve null, e quem anota pede a versão aos metadados do arquivo.
+ */
+export async function subirAoDriveDoKommoComVersao(o: {
+  drive: string
+  auth: Record<string, string>
+  nome: string
+  bytes: Uint8Array
+  mime: string
+}): Promise<ArquivoNoDrive> {
   const s = await fetch(`${o.drive}/v1.0/sessions`, {
     method: 'POST',
     signal: AbortSignal.timeout(TEMPO_SESSAO_MS),
@@ -45,7 +79,7 @@ export async function subirAoDriveDoKommo(o: {
   if (!s.ok) throw new Error(`o drive do Kommo recusou a sessão (HTTP ${s.status}): ${(await s.text()).slice(0, 160)}`)
   const sessao = (await s.json()) as { upload_url?: string; max_part_size?: number; max_file_size?: number }
   if (sessao.max_file_size && o.bytes.byteLength > Number(sessao.max_file_size)) {
-    throw new Error(`arquivo maior que o limite do Kommo (${o.bytes.byteLength} bytes)`)
+    throw new ArquivoGrandeDemaisParaOKommo(o.bytes.byteLength, Number(sessao.max_file_size))
   }
   let url: string | null = sessao.upload_url ?? null
   for (const [a, b] of fatias(o.bytes.byteLength, Number(sessao.max_part_size) || 524_288)) {
@@ -59,8 +93,8 @@ export async function subirAoDriveDoKommo(o: {
       body: o.bytes.slice(a, b),
     })
     if (!r.ok) throw new Error(`o drive do Kommo recusou uma parte (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`)
-    const j = (await r.json().catch(() => ({}))) as { uuid?: string; next_url?: string }
-    if (j?.uuid) return String(j.uuid)
+    const j = (await r.json().catch(() => ({}))) as { uuid?: string; version_uuid?: string; next_url?: string }
+    if (j?.uuid) return { uuid: String(j.uuid), versao: j.version_uuid ? String(j.version_uuid) : null }
     url = j?.next_url ?? null
   }
   throw new Error('o drive do Kommo terminou o envio sem devolver o arquivo')

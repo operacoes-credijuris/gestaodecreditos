@@ -24,6 +24,7 @@
 // SEM `Deno.` E SEM `npm:`.
 
 import { cnjsNoTexto, digitosDoCnj, mascaraCnj } from './nucleo/cnj.ts'
+import { ehParteJuntada } from './autosJuntos.ts'
 
 export type Papel = 'conhecimento' | 'cumprimento' | 'requisitorio'
 const PAPEIS = new Set<string>(['conhecimento', 'cumprimento', 'requisitorio'])
@@ -181,14 +182,25 @@ export function notaDosProcessos(processos: ProcessoDoCredito[], rpv: boolean, n
       ? '🔎 Processos deste crédito, identificados para baixar os autos:'
       : `🔎 ${novos} processo(s) novo(s) identificado(s) neste crédito. Todos, até agora:`,
     ...linhas,
-    'Os autos de cada um são pedidos ao Escavador e sobem como anexos deste card. ' +
+    'Os autos de cada um são pedidos ao Escavador e sobem a este card juntados num PDF por processo ' +
+      '(em partes, se for muito grande), no chat e na área Arquivos. ' +
       'Se algum número estiver errado, corrija o título ou as anotações do card.',
   ].join('\n')
 }
 
-/** Anexo que a própria rotina subiu — não se lê para achar processo. */
+/**
+ * Anexo que a própria rotina subiu — não se lê para achar processo.
+ *
+ * OS DOIS FORMATOS: o documento solto de antes de 07/10/2026 ("Conhecimento
+ * 001 - …") e a parte juntada ("Conhecimento - autos (parte 1 de 3) - CNJ.pdf").
+ * Faltar o segundo aqui seria caro: a nota de anexo de cada parte entra no
+ * chat do card, mudaria a impressão dele, e cada parte que sobe pediria uma
+ * nova leitura paga pela IA. O CLIPE na frente é o do espelho ("📎 nome"),
+ * que é como a nota de anexo chega em `notas`.
+ */
 export function ehAnexoDosAutos(nome: string): boolean {
-  return /^(Autos|Processo|Conhecimento|Cumprimento|Precatório|RPV)( e cumprimento)? \d{3,}\b/i.test(nome.trim())
+  const n = nome.trim().replace(/^📎\s*/u, '')
+  return /^(Autos|Processo|Conhecimento|Cumprimento|Precatório|RPV)( e cumprimento)? \d{3,}\b/i.test(n) || ehParteJuntada(n)
 }
 
 /**
