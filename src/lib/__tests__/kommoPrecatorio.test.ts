@@ -735,11 +735,13 @@ describe('abas da trilha Externa', () => {
    */
   it('a Remessa aos fundos tem os checks do BTG e da PJus, e leva a Em precificação', () => {
     const remessa = abas.find((a) => a.key === ABA_APROVADOS_EXTERNO)!
-    // DOIS DESFECHOS POR FUNDO (01/10/2026): aceito ou reprovado.
+    // DOIS DESFECHOS POR FUNDO (01/10/2026): aceito ou reprovado. O BTG COM
+    // TRÊS — mudou de propósito em 07/10/2026: "Cotado BTG" no varejo, "Enviado
+    // BTG" no atacado (por e-mail, resposta depois) e a reprovação.
     expect(
       remessa.envioAosFundos?.fundos.map((f) => [f.fundo, f.atos.map((a) => [a.etiqueta, a.reprova ?? false])]),
     ).toEqual([
-      ['BTG', [['Cotado BTG', false], ['Reprovado BTG', true]]],
+      ['BTG', [['Cotado BTG', false], ['Enviado BTG', false], ['Reprovado BTG', true]]],
       ['PJus', [['Enviado PJus', false], ['Reprovado PJus', true]]],
     ])
     for (const f of remessa.envioAosFundos!.fundos) {

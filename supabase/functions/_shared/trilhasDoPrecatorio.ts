@@ -17,6 +17,8 @@
 // MÓDULO PURO — sem `npm:` e sem `Deno.` —, então o mesmo arquivo roda no vitest
 // do site, no navegador (importado por caminho relativo) e na Edge Function.
 
+import { mesmaEtiqueta } from './etiquetasDoFundo.ts'
+
 export type SubdivisaoPrecatorio = 'interno' | 'externo'
 
 /**
@@ -107,6 +109,25 @@ export interface AtoDoEnvio {
    * sem valor.
    */
   pedeCotacao?: boolean
+  /**
+   * A ABA DA JANELA em que o ato aparece (a `key` de uma das `abas` do fundo).
+   * Sem ela, o ato aparece em todas — é o caso da reprovação, que vale tanto no
+   * varejo quanto no atacado do BTG.
+   */
+  aba?: string
+}
+
+/**
+ * Uma aba da janela do envio a um fundo: o jeito de mandar o crédito, quando o
+ * fundo tem mais de um. O BTG tem dois (07/10/2026): VAREJO, a plataforma dele,
+ * que devolve a cotação na hora; e ATACADO (créditos acima de uns R$ 10
+ * milhões), mandado por e-mail, com análise personalizada e resposta depois.
+ */
+export interface AbaDoEnvio {
+  key: string
+  rotulo: string
+  /** Uma linha curta no topo da aba, dizendo quando ela vale. */
+  explicacao?: string
 }
 
 /** Um fundo com plataforma própria de envio, e os desfechos possíveis dele. */
@@ -115,7 +136,43 @@ export interface FundoDoEnvio {
   /** "o BTG", "a PJus" — para a tela escrever "envio ao BTG" e "envio à PJus". */
   artigo: 'o' | 'a'
   plataforma: string
+  /**
+   * TODOS os desfechos do fundo — qualquer um faz o check dele na remessa,
+   * inclusive o da aba que não está aberta (o "Enviado BTG" do atacado conta
+   * como o "Cotado BTG" do varejo).
+   */
   atos: AtoDoEnvio[]
+  /**
+   * As abas da janela, quando o fundo tem mais de um jeito de envio; a primeira
+   * é a que abre. Sem `abas`, a janela é uma só, com todos os atos.
+   */
+  abas?: AbaDoEnvio[]
+}
+
+/**
+ * Os atos que a janela mostra na aba aberta: os daquela aba e os sem aba (a
+ * reprovação). Sem abas no fundo, ou sem aba aberta, todos.
+ */
+export function atosDaAba(fundo: FundoDoEnvio, aba: string | null | undefined): AtoDoEnvio[] {
+  if (!fundo.abas?.length || !aba) return fundo.atos
+  return fundo.atos.filter((a) => a.aba === undefined || a.aba === aba)
+}
+
+/**
+ * O CHECK DE UM FUNDO NA REMESSA: o desfecho dele já posto no card (a etiqueta
+ * de QUALQUER um dos atos, de qualquer aba), ou null. No BTG, "Cotado BTG"
+ * (varejo), "Enviado BTG" (atacado, 07/10/2026) ou "Reprovado BTG".
+ */
+export function desfechoDoFundo(
+  fundo: FundoDoEnvio,
+  tags: readonly string[] | null | undefined,
+): AtoDoEnvio | null {
+  return fundo.atos.find((a) => (tags ?? []).some((t) => mesmaEtiqueta(t, a.etiqueta))) ?? null
+}
+
+/** Com estas etiquetas, todos os fundos da remessa têm o check feito? É o que move o card. */
+export function fundosFeitos(fundos: readonly FundoDoEnvio[], tags: readonly string[] | null | undefined): boolean {
+  return fundos.every((f) => desfechoDoFundo(f, tags) !== null)
 }
 
 export interface DefAbaPrecatorio {
@@ -585,8 +642,26 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
               fundo: 'BTG',
               artigo: 'o',
               plataforma: 'https://officer.precatoriosbrasil.com/monitor/precatorios/list/new',
+              // VAREJO E ATACADO (07/10/2026): no varejo, a plataforma do BTG
+              // cota na hora ("Cotado BTG", com a cotação); no atacado, acima de
+              // uns R$ 10 milhões, a casa manda por e-mail e espera — "Enviado
+              // BTG", sem cotação, como o "Enviado PJus". Qualquer um dos três
+              // faz o check do BTG.
+              abas: [
+                { key: 'varejo', rotulo: 'Varejo' },
+                {
+                  key: 'atacado',
+                  rotulo: 'Atacado',
+                  explicacao: 'Crédito de atacado: o BTG analisa fora da plataforma e responde depois (por e-mail).',
+                },
+              ],
               atos: [
-                { etiqueta: 'Cotado BTG', nota: 'Crédito enviado ao BTG.', pedeCotacao: true },
+                { etiqueta: 'Cotado BTG', nota: 'Crédito enviado ao BTG.', pedeCotacao: true, aba: 'varejo' },
+                {
+                  etiqueta: 'Enviado BTG',
+                  nota: 'Crédito de atacado enviado ao BTG (por e-mail), para análise personalizada.',
+                  aba: 'atacado',
+                },
                 { etiqueta: 'Reprovado BTG', nota: 'Crédito reprovado pelo BTG.', reprova: true },
               ],
             },

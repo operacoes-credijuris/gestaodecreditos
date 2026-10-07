@@ -27,6 +27,7 @@ import {
   normalizarEtiqueta,
   tomDaTag,
 } from '@/lib/kommo'
+import { comissoesDoFundo } from '../../../supabase/functions/_shared/etiquetasDoFundo.ts'
 
 describe('as etiquetas da precificação', () => {
   // OS SETE FUNDOS QUE A OPERAÇÃO DITOU em 29/09/2026, no molde "‹ato› ‹fundo›"
@@ -38,6 +39,9 @@ describe('as etiquetas da precificação', () => {
       'Enviado PJus',
       'Cotado PJus',
       'Reprovado PJus',
+      // O "ENVIADO BTG" ENTROU EM 07/10/2026 — MUDOU DE PROPÓSITO: é o crédito
+      // de atacado, que o BTG analisa fora da plataforma e responde depois.
+      'Enviado BTG',
       'Cotado BTG',
       'Reprovado BTG',
       'Enviado PX Ativos',
@@ -88,15 +92,40 @@ describe('as etiquetas da precificação', () => {
 
 /**
  * O QUE O SELETOR MOSTRA AO LADO DE CADA FUNDO: os atos dele, na ordem do
- * percurso. O BTG só tem dois — não aparece "Enviado" nele.
+ * percurso. Até 07/10/2026 o BTG tinha só dois (sem "Enviado"); MUDOU DE
+ * PROPÓSITO em 07/10/2026: o "Enviado BTG" é o crédito de atacado.
  */
 describe('os atos de cada fundo', () => {
-  it('três em cada fundo, e o BTG sem Enviado', () => {
+  it('três em cada fundo, o BTG inclusive', () => {
     const atos = Object.fromEntries(etiquetasPorDestino().map((g) => [g.destino, g.etiquetas.map((e) => e.ato)]))
-    expect(atos.BTG).toEqual(['Cotado', 'Reprovado'])
-    for (const f of ['PJus', 'PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur', 'Carbon']) {
+    for (const f of ['PJus', 'BTG', 'PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur', 'Carbon']) {
       expect(atos[f], f).toEqual(['Enviado', 'Cotado', 'Reprovado'])
     }
+  })
+
+  // A OBSERVAÇÃO DISCRETA DO SELETOR: só o "Enviado BTG" a tem, e diz quando usar.
+  it('o "Enviado BTG" é "só para atacado" — e é a única etiqueta com observação', () => {
+    const com = ETIQUETAS_DA_PRECIFICACAO.filter((e) => e.observacao)
+    expect(com.map((e) => [e.nome, e.observacao])).toEqual([['Enviado BTG', 'só para atacado']])
+  })
+})
+
+/**
+ * A COMISSÃO DE CADA FUNDO (07/10/2026): o BTG só a limitada — nunca há spread
+ * nele. É propriedade do fundo, e é dela que a janela e o servidor tiram a regra.
+ */
+describe('comissoesDoFundo', () => {
+  it('o BTG só aceita a limitada; os outros, limitada e spread', () => {
+    expect(comissoesDoFundo('BTG')).toEqual(['limitada'])
+    expect(comissoesDoFundo(' btg ')).toEqual(['limitada'])
+    for (const f of ['PJus', 'PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur', 'Carbon']) {
+      expect(comissoesDoFundo(f), f).toEqual(['limitada', 'spread'])
+    }
+  })
+
+  it('fundo fora da lista (ou nenhum) aceita as duas, como antes', () => {
+    expect(comissoesDoFundo('Luiz')).toEqual(['limitada', 'spread'])
+    expect(comissoesDoFundo(undefined)).toEqual(['limitada', 'spread'])
   })
 })
 
@@ -109,8 +138,11 @@ describe('os atos de cada fundo', () => {
  */
 describe('irmasDaEtiqueta', () => {
   it('as alternativas do mesmo destino saem quando esta entra', () => {
-    expect(irmasDaEtiqueta('Cotado BTG')).toEqual(['Reprovado BTG'])
-    expect(irmasDaEtiqueta('Reprovado BTG')).toEqual(['Cotado BTG'])
+    // O BTG COM TRÊS (07/10/2026, mudou de propósito): o "Cotado" do varejo
+    // tira o "Enviado" do atacado — é a resposta que chegou por e-mail.
+    expect(irmasDaEtiqueta('Cotado BTG')).toEqual(['Enviado BTG', 'Reprovado BTG'])
+    expect(irmasDaEtiqueta('Reprovado BTG')).toEqual(['Enviado BTG', 'Cotado BTG'])
+    expect(irmasDaEtiqueta('Enviado BTG')).toEqual(['Cotado BTG', 'Reprovado BTG'])
     // TRÊS NO DESTINO, DUAS IRMÃS: cotar um crédito que estava só enviado apaga
     // o "Enviado", que é a notícia velha.
     expect(irmasDaEtiqueta('Cotado PJus')).toEqual(['Enviado PJus', 'Reprovado PJus'])
@@ -142,7 +174,7 @@ describe('irmasDaEtiqueta', () => {
   })
 
   it('a comparação tolera caixa e espaço, como no resto', () => {
-    expect(irmasDaEtiqueta(' cotado   btg ')).toEqual(['Reprovado BTG'])
+    expect(irmasDaEtiqueta(' cotado   btg ')).toEqual(['Enviado BTG', 'Reprovado BTG'])
   })
 })
 
@@ -268,6 +300,8 @@ describe('a cor das etiquetas da precificação', () => {
   it('o ato manda, inclusive no que está pendente', () => {
     expect(tomDaTag('Enviado PJus')).toBe('blue')
     expect(tomDaTag('Cotado BTG')).toBe('green')
+    // O "ENVIADO BTG" (07/10/2026) no azul dos outros "Enviado": esperando resposta.
+    expect(tomDaTag('Enviado BTG')).toBe('blue')
     expect(tomDaTag('Enviado PX Ativos')).toBe('blue')
     expect(tomDaTag('Cotado K & WC Ativos')).toBe('green')
     expect(tomDaTag('Reprovado PJus')).toBe('red')

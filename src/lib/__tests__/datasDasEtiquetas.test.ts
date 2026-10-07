@@ -58,3 +58,17 @@ describe('faltaDataDeEtiqueta e desdeQuandoAEtiqueta', () => {
     expect(desdeQuandoAEtiqueta(null, 'Cotado PJus')).toBeNull()
   })
 })
+
+// O "ENVIADO BTG" (07/10/2026, o crédito de atacado) tem data como os outros
+// "Enviado": é o "há 9 dias" que diz que o BTG ainda não respondeu o e-mail.
+describe('o "Enviado BTG" tem data, como os outros "Enviado"', () => {
+  it('entra no mapa, e desdeQuandoAEtiqueta a acha', () => {
+    const d = datasDasEtiquetas({
+      tags: ['Enviado BTG', 'Enviado PJus'],
+      eventos: [ev('Enviado BTG', '2026-10-07T12:00:00Z'), ev('Enviado PJus', '2026-10-01T12:00:00Z')],
+    })
+    expect(d).toEqual({ 'Enviado BTG': '2026-10-07T12:00:00.000Z', 'Enviado PJus': '2026-10-01T12:00:00.000Z' })
+    expect(desdeQuandoAEtiqueta(d, 'enviado btg')).toBe('2026-10-07T12:00:00.000Z')
+    expect(faltaDataDeEtiqueta(['Enviado BTG'], {})).toBe(true)
+  })
+})

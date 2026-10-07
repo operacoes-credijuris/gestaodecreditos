@@ -11,6 +11,7 @@ import {
   type Cotacao,
   type CotacaoLida,
   formatarPercentual,
+  inicioDaCotacao,
   formatarReais,
   formatarReaisSemPrefixo,
   lerPercentual,
@@ -19,7 +20,6 @@ import {
   resumoDoSpread,
   textoDaCotacao,
   validarCotacao,
-  valorDigitadoDaCotacao,
 } from '../../supabase/functions/_shared/cotacaoDoFundo.ts'
 import { type LiquidoDaNota, origemDoLiquido } from '../../supabase/functions/_shared/liquidoDaOportunidade.ts'
 
@@ -182,19 +182,19 @@ type CampoDaCotacao = 'proposta' | 'comissao' | 'percentual' | 'base'
  * A COTAÇÃO SÓ SAI PRONTA DEPOIS DA MESMA PORTA DO SERVIDOR (`validarCotacao`,
  * exigindo o percentual e a base no spread): a tela não monta o que a função
  * recusaria — nem a comissão que alcance a proposta.
+ *
+ * AS MODALIDADES SÃO DO FUNDO (`comissoesDoFundo`, 07/10/2026): no BTG, só a
+ * limitada — a janela nem oferece o spread. Um BTG antigo gravado com spread
+ * volta com a comissão VAZIA (e obrigatória) e o texto de hoje à vista: o
+ * spread não se converte sozinho numa comissão em reais.
  */
-export function useCotacaoEmEdicao(atual: CotacaoLida | null, liquido: LiquidoDaNota | null = null) {
-  const c0 = atual?.comissao ?? null
-  const inicial = {
-    proposta: valorDigitadoDaCotacao(atual),
-    modalidade: (c0?.modalidade ?? 'limitada') as Modalidade,
-    comissao: c0?.modalidade === 'limitada' ? c0.centavos : null,
-    percentual:
-      c0?.modalidade === 'spread' && c0.percentualCentesimos !== undefined
-        ? formatarPercentual(c0.percentualCentesimos)
-        : '',
-    base: liquido?.centavos ?? null,
-  }
+export function useCotacaoEmEdicao(
+  atual: CotacaoLida | null,
+  liquido: LiquidoDaNota | null = null,
+  fundo?: string,
+) {
+  const { modalidades, foraDoFundo, ...doCampo } = inicioDaCotacao(atual, fundo)
+  const inicial = { ...doCampo, base: liquido?.centavos ?? null }
   const [proposta, setProposta] = useState<number | null>(inicial.proposta)
   const [modalidade, setModalidade] = useState<Modalidade>(inicial.modalidade)
   const [comissao, setComissao] = useState<number | null>(inicial.comissao)
@@ -234,17 +234,19 @@ export function useCotacaoEmEdicao(atual: CotacaoLida | null, liquido: LiquidoDa
               }
             : { modalidade: 'limitada', centavos: comissao },
       },
-      { exigirPercentualNoSpread: true, exigirBaseNoSpread: true },
+      { exigirPercentualNoSpread: true, exigirBaseNoSpread: true, fundo },
     )
     if (v.ok) cotacao = v.cotacao
     else erroDaConta = v.erro
   }
 
-  // O texto antigo de um campo escrito à mão, que não se leu como valor: fica à
-  // vista, para a pessoa saber o que vai sobrescrever.
-  const textoIlegivel = atual && atual.proposta === null ? atual.texto : null
+  // O texto antigo de um campo escrito à mão, que não se leu como valor — ou
+  // gravado numa modalidade que o fundo não aceita mais (o spread do BTG): fica
+  // à vista, para a pessoa saber o que vai sobrescrever.
+  const textoIlegivel = atual && (atual.proposta === null || foraDoFundo) ? atual.texto : null
 
   return {
+    modalidades,
     proposta,
     setProposta,
     modalidade,
@@ -336,6 +338,7 @@ export function CamposDaCotacao({
   onEnter?: () => void
 }) {
   const {
+    modalidades,
     proposta,
     setProposta,
     modalidade,
@@ -424,79 +427,102 @@ export function CamposDaCotacao({
         />
       </Field>
 
-      <div className="space-y-s2">
-        <p className="text-corpo font-semibold text-texto">
-          Comissão
-          <span className="ml-s0.5 text-perigo">*</span>
-        </p>
-        <Segmented
-          ariaLabel="Modalidade da comissão"
-          value={modalidade}
-          onChange={(k) => {
-            setColagem(null)
-            setModalidade(k as Modalidade)
-          }}
-          items={[
-            { key: 'limitada', label: 'Limitada' },
-            { key: 'spread', label: 'Spread' },
-          ]}
-        />
-        {modalidade === 'limitada' ? (
-          <Field
-            hint="A comissão que o fundo já disse que aceita, em reais."
-            error={
-              avisoDeColagem('comissao') ??
-              (tentou && faltaComissao ? 'Com a comissão limitada, informe o valor.' : undefined)
-            }
-          >
-            <CampoReais
-              rotulo="Valor da comissão"
-              valor={comissao}
-              onMudar={(c) => {
-                setColagem(null)
-                setComissao(c)
-              }}
-              onColagemRecusada={(texto) => setColagem({ campo: 'comissao', texto })}
-              onEnter={onEnter}
-            />
-          </Field>
-        ) : (
-          // O PERCENTUAL E A BASE, lado a lado no computador (o percentual
-          // estreito, a base com o espaço do valor) e um embaixo do outro no
-          // celular. A explicação da conta vem uma vez só, embaixo dos dois.
-          <div className="space-y-s2 pt-s2">
-            <div className="grid gap-s4 sm:grid-cols-[136px_minmax(0,1fr)]">
-              <Field label="Percentual" required error={avisoDoPercentual ?? undefined}>
-                <CampoPercentual
-                  rotulo="Percentual do spread"
-                  valor={percentual}
-                  onMudar={(t) => {
-                    setColagem(null)
-                    setPercentual(t)
-                  }}
-                  onColagemRecusada={(texto, erro) => setColagem({ campo: 'percentual', texto, erro })}
-                  onEnter={onEnter}
-                />
-              </Field>
-              <Field label="Valor líquido validado" required hint={origemDaBase} error={avisoDaBase ?? undefined}>
-                <CampoReais
-                  valor={base}
-                  onMudar={(c) => {
-                    setColagem(null)
-                    setBase(c)
-                  }}
-                  onColagemRecusada={(texto) => setColagem({ campo: 'base', texto })}
-                  onEnter={onEnter}
-                />
-              </Field>
+      {modalidades.length === 1 ? (
+        // SÓ A LIMITADA (o BTG, 07/10/2026): sem o seletor de modalidade — um
+        // segmentado de uma opção só é ruído. O campo é a comissão em R$.
+        <Field
+          label="Comissão"
+          required
+          hint={`A comissão que o ${fundo} paga, em reais. O ${fundo} não trabalha com spread.`}
+          error={
+            avisoDeColagem('comissao') ?? (tentou && faltaComissao ? 'Informe o valor da comissão.' : undefined)
+          }
+        >
+          <CampoReais
+            valor={comissao}
+            onMudar={(c) => {
+              setColagem(null)
+              setComissao(c)
+            }}
+            onColagemRecusada={(texto) => setColagem({ campo: 'comissao', texto })}
+            onEnter={onEnter}
+          />
+        </Field>
+      ) : (
+        <div className="space-y-s2">
+          <p className="text-corpo font-semibold text-texto">
+            Comissão
+            <span className="ml-s0.5 text-perigo">*</span>
+          </p>
+          <Segmented
+            ariaLabel="Modalidade da comissão"
+            value={modalidade}
+            onChange={(k) => {
+              setColagem(null)
+              setModalidade(k as Modalidade)
+            }}
+            items={[
+              { key: 'limitada', label: 'Limitada' },
+              { key: 'spread', label: 'Spread' },
+            ]}
+          />
+          {modalidade === 'limitada' ? (
+            <Field
+              hint="A comissão que o fundo já disse que aceita, em reais."
+              error={
+                avisoDeColagem('comissao') ??
+                (tentou && faltaComissao ? 'Com a comissão limitada, informe o valor.' : undefined)
+              }
+            >
+              <CampoReais
+                rotulo="Valor da comissão"
+                valor={comissao}
+                onMudar={(c) => {
+                  setColagem(null)
+                  setComissao(c)
+                }}
+                onColagemRecusada={(texto) => setColagem({ campo: 'comissao', texto })}
+                onEnter={onEnter}
+              />
+            </Field>
+          ) : (
+            // O PERCENTUAL E A BASE, lado a lado no computador (o percentual
+            // estreito, a base com o espaço do valor) e um embaixo do outro no
+            // celular. A explicação da conta vem uma vez só, embaixo dos dois.
+            <div className="space-y-s2 pt-s2">
+              <div className="grid gap-s4 sm:grid-cols-[136px_minmax(0,1fr)]">
+                <Field label="Percentual" required error={avisoDoPercentual ?? undefined}>
+                  <CampoPercentual
+                    rotulo="Percentual do spread"
+                    valor={percentual}
+                    onMudar={(t) => {
+                      setColagem(null)
+                      setPercentual(t)
+                    }}
+                    onColagemRecusada={(texto, erro) => setColagem({ campo: 'percentual', texto, erro })}
+                    onEnter={onEnter}
+                  />
+                </Field>
+                <Field label="Valor líquido validado" required hint={origemDaBase} error={avisoDaBase ?? undefined}>
+                  <CampoReais
+                    valor={base}
+                    onMudar={(c) => {
+                      setColagem(null)
+                      setBase(c)
+                    }}
+                    onColagemRecusada={(texto) => setColagem({ campo: 'base', texto })}
+                    onEnter={onEnter}
+                  />
+                </Field>
+              </div>
+              <p className="text-xs text-texto-3">
+                A comissão é o percentual sobre o valor líquido validado. A Credijuris a desconta do valor da proposta;
+                o que sobra é a proposta final.
+              </p>
             </div>
-            <p className="text-xs text-texto-3">
-              A comissão é o percentual sobre o valor líquido validado. A Credijuris a desconta do valor da proposta;
-              o que sobra é a proposta final.
-            </p>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* COMO FICA NO KOMMO, letra por letra: é o que o comercial vai ler no
           card. No spread, a conta em cima — a comissão e a proposta final. */}
@@ -575,7 +601,7 @@ export function JanelaDeCotacao({
   onFechar: () => void
 }) {
   const formId = useId()
-  const edicao = useCotacaoEmEdicao(atual, liquido)
+  const edicao = useCotacaoEmEdicao(atual, liquido, fundo)
   const [tentou, setTentou] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const { cotacao } = edicao

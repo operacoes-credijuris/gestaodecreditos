@@ -17,6 +17,7 @@ import {
   ehGrupoDasCotacoes,
   formatarPercentual,
   formatarReais,
+  inicioDaCotacao,
   lerCotacao,
   lerPercentual,
   lerReais,
@@ -28,6 +29,8 @@ import {
   type Cotacao,
 } from '../../../supabase/functions/_shared/cotacaoDoFundo.ts'
 import { FUNDOS_DA_PRECIFICACAO } from '../../../supabase/functions/_shared/etiquetasDoFundo.ts'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 describe('formatarReais', () => {
   it('ponto de milhar, vírgula e espaço COMUM depois do R$', () => {
@@ -736,5 +739,90 @@ describe('o spread sobre o valor líquido validado', () => {
     expect(valorDigitadoDaCotacao(lida)).toBe(85_000_000)
     // A base não está no texto: ao recotar, ela volta da nota de oportunidade.
     expect(lida?.comissao).not.toHaveProperty('baseCentavos')
+  })
+})
+
+/**
+ * O BTG SÓ COM COMISSÃO LIMITADA (07/10/2026): "a comissão do BTG é sempre
+ * limitada, nunca tem spread". A regra é do fundo (`comissoesDoFundo`), e a
+ * porta (`validarCotacao` com o `fundo`) é a mesma da tela e do servidor.
+ */
+describe('o BTG sem spread', () => {
+  const SPREAD_NOVO = {
+    propostaCentavos: 85_000_000,
+    comissao: { modalidade: 'spread', percentualCentesimos: 500, baseCentavos: 80_000_000 },
+  }
+  const LIMITADA = { propostaCentavos: 85_000_000, comissao: { modalidade: 'limitada', centavos: 4_000_000 } }
+
+  // SEM TOLERÂNCIA PARA A ABA ANTIGA: o spread no BTG é recusado em qualquer
+  // formato — com percentual e base, só com percentual, ou sem nenhum (o "R$ X
+  // / Spread" da primeira tela). A mensagem diz para recarregar.
+  it('o servidor recusa spread no BTG, com uma mensagem clara', () => {
+    for (const comissao of [
+      SPREAD_NOVO.comissao,
+      { modalidade: 'spread', percentualCentesimos: 500 },
+      { modalidade: 'spread' },
+    ]) {
+      const v = validarCotacao({ propostaCentavos: 85_000_000, comissao }, { fundo: 'BTG' })
+      expect(v.ok, JSON.stringify(comissao)).toBe(false)
+      if (!v.ok) {
+        expect(v.erro).toBe(
+          'O BTG não trabalha com spread: a comissão dele é sempre limitada, em reais. ' +
+            'Recarregue a página (F5) e informe a comissão em R$.',
+        )
+      }
+    }
+  })
+
+  it('a limitada passa no BTG; o spread passa nos outros fundos e sem fundo (como antes)', () => {
+    expect(validarCotacao(LIMITADA, { fundo: 'BTG' }).ok).toBe(true)
+    expect(validarCotacao(SPREAD_NOVO, { fundo: 'PX Ativos' }).ok).toBe(true)
+    expect(validarCotacao(SPREAD_NOVO).ok).toBe(true)
+  })
+
+  it('a kommo-etiquetar confere a cotação COM o fundo da etiqueta', () => {
+    const fonte = readFileSync(
+      fileURLToPath(new URL('../../../supabase/functions/kommo-etiquetar/index.ts', import.meta.url)),
+      'utf8',
+    )
+    expect(fonte).toContain('validarCotacao(body.cotacao, { fundo: daLista.destino })')
+  })
+
+  // A LEITURA DE VOLTA NÃO MUDA: o BTG antigo gravado com spread continua lido como está.
+  it('um BTG antigo com spread continua sendo lido como spread', () => {
+    const l = lerCotacao('R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)')
+    expect(l?.comissao).toEqual({ modalidade: 'spread', percentualCentesimos: 500, centavos: 4_000_000 })
+    expect(cotacoesDoCard([{ field_name: 'BTG', values: [{ value: 'R$ 850.000,00 / Spread' }] }]).BTG?.comissao).toEqual({
+      modalidade: 'spread',
+    })
+  })
+
+  it('a janela do BTG começa na limitada, sem spread; com um spread antigo, a comissão vem vazia e o texto à vista', () => {
+    expect(inicioDaCotacao(null, 'BTG')).toEqual({
+      modalidades: ['limitada'],
+      proposta: null,
+      modalidade: 'limitada',
+      comissao: null,
+      percentual: '',
+      foraDoFundo: false,
+    })
+    const antigo = lerCotacao('R$ 810.000,00 / R$ 40.000,00 (Spread de 5%)')
+    expect(inicioDaCotacao(antigo, 'BTG')).toEqual({
+      modalidades: ['limitada'],
+      proposta: 85_000_000,
+      modalidade: 'limitada',
+      comissao: null,
+      percentual: '',
+      foraDoFundo: true,
+    })
+    // O MESMO TEXTO NUM FUNDO QUE ACEITA SPREAD volta como era.
+    expect(inicioDaCotacao(antigo, 'PX Ativos')).toMatchObject({ modalidade: 'spread', percentual: '5', foraDoFundo: false })
+    // A LIMITADA DO BTG volta preenchida.
+    expect(inicioDaCotacao(lerCotacao('R$ 850.000,00 / R$ 40.000,00'), 'BTG')).toMatchObject({
+      modalidade: 'limitada',
+      proposta: 85_000_000,
+      comissao: 4_000_000,
+      foraDoFundo: false,
+    })
   })
 })
