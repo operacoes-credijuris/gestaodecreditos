@@ -181,6 +181,7 @@ import { subirAnexosDeImagem, subirImagensDosAutos, type ImagemSubida } from '@/
 import { agruparNotas, ehAnexo, nomeDoAnexo } from '@/lib/historicoDeNotas'
 import { grupoDeMiniaturas } from '@/lib/previaDoAnexo'
 import { linksDosAnexos } from '@/lib/linksDosAnexos'
+import { baixarSemAba } from '@/lib/baixarSemAba'
 import { MiniaturasDaNota } from '@/components/analise/MiniaturasDaNota'
 import { supabase } from '@/lib/supabase'
 import {
@@ -3632,8 +3633,8 @@ function CardCredito({
                           onFocus={() => onPrepararAnexo(lead, a)}
                           title={
                             a.criado_em
-                              ? `Anexado em ${formatDataHoraSegundos(a.criado_em)} — clique para abrir`
-                              : 'Clique para abrir'
+                              ? `Anexado em ${formatDataHoraSegundos(a.criado_em)} — clique para baixar`
+                              : 'Clique para baixar'
                           }
                           className="inline-flex min-h-[26px] max-w-full items-center gap-1.5 rounded-controle border border-borda bg-superficie px-2 py-0.5 text-sm font-medium text-marca-texto hover:bg-marca-leve"
                         >
@@ -4308,17 +4309,16 @@ export default function AnaliseCredito() {
    * o que não serve, porque o que se quer é o arquivo no disco para arrastar.
    */
   /**
-   * Abre, numa aba, o arquivo que a pessoa clicou no histórico do card.
+   * Baixa o arquivo que a pessoa clicou no histórico do card.
    *
    * O LINK NÃO ESTÁ NA ANOTAÇÃO. A nota de anexo do Kommo traz o NOME do
    * arquivo; o endereço de download vive na API de arquivos e é assinado na
    * hora. Guardá-lo no espelho seria guardar um link que vence — por isso a
    * busca acontece no clique.
    *
-   * A ABA ABRE ANTES DA BUSCA, e isto não é ordem arbitrária: janela aberta
-   * depois de um `await` perde a ativação do gesto e é barrada como popup. Ela
-   * nasce em branco e recebe o endereço quando ele chega; falhando a busca, é
-   * fechada — aba em branco esquecida é pior que erro nenhum.
+   * SEM ABA NENHUMA (pedido do dono, 07/10/2026): a versão anterior abria uma
+   * aba "Abrindo o anexo…" antes da busca; o drive responde como download, o
+   * arquivo era salvo e a aba ficava aberta, vazia, poluindo o navegador.
    */
   /**
    * O endereço de download de um anexo — pelo uuid quando ele existe.
@@ -4391,39 +4391,26 @@ export default function AnaliseCredito() {
     return pedido
   }
 
+  // O mesmo arquivo clicado duas vezes enquanto baixa sairia salvo duas vezes.
+  const anexosBaixando = useRef<Set<string>>(new Set())
+
   async function abrirAnexo(lead: KommoLead, anexo: KommoNota) {
-    // SEM `noopener` AQUI, e isso não é descuido: com ele o `window.open`
-    // devolve NULL por definição — o opener não recebe referência nenhuma da
-    // janela nova. A aba abria e ficava órfã em "about:blank" para sempre,
-    // enquanto o código caía no ramo de reserva e tentava abrir uma SEGUNDA
-    // janela, essa sim barrada como popup por já não haver gesto.
-    //
-    // A proteção continua, por outro caminho: `opener = null` logo depois faz o
-    // mesmo que a flag, e ainda assim devolve a referência que precisamos para
-    // apontar a aba ao arquivo.
-    const aba = window.open('', '_blank')
-    if (aba) {
-      aba.opener = null
-      // Uma linha enquanto o link é resolvido: a aba em branco por dois segundos
-      // parece defeito, e é o que estava sendo relatado como "abriu em branco".
-      aba.document.write(
-        '<title>Abrindo anexo…</title>' +
-          '<p style="font:14px system-ui,sans-serif;color:#475569;padding:24px">Abrindo o anexo…</p>',
-      )
-      aba.document.close()
-    }
+    const nome = nomeDoAnexo(anexo)
+    const chave = `${lead.kommo_lead_id}:${anexo.arquivo_uuid ?? nome}`
+    if (anexosBaixando.current.has(chave)) return
+    anexosBaixando.current.add(chave)
+    // O AVISO SÓ SE A ESPERA SE NOTA: arquivo pequeno baixa antes dele, e um
+    // "Baixando…" que pisca e some é ruído. Os autos juntados (até 32 MB) levam
+    // alguns segundos, e aí a pessoa precisa saber que o clique pegou.
+    const avisar = window.setTimeout(() => toast.info(`Baixando "${nome}"…`), 800)
     try {
-      const alvo = await prepararAnexo(lead, anexo)
-      // A ABA JÁ ESTÁ ABERTA: só recebe o endereço. O ramo de reserva existe
-      // para o caso de o bloqueador de popup ter impedido a abertura lá em cima
-      // — aí se tenta de novo, e se também for barrado o toast conta o que houve.
-      if (aba) aba.location.href = alvo.download
-      else if (!window.open(alvo.download, '_blank', 'noopener')) {
-        throw new Error('o navegador bloqueou a janela — libere os popups deste site')
-      }
+      const { download } = await prepararAnexo(lead, anexo)
+      await baixarSemAba(download, nome)
     } catch (e) {
-      aba?.close()
-      toast.error('Não consegui abrir o anexo: ' + ((e as Error)?.message ?? String(e)))
+      toast.error('Não consegui baixar o anexo: ' + ((e as Error)?.message ?? String(e)))
+    } finally {
+      window.clearTimeout(avisar)
+      anexosBaixando.current.delete(chave)
     }
   }
 
