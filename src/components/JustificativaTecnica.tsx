@@ -684,8 +684,8 @@ function Andamento({
 
 /**
  * AS NOTAS INTERNAS (a parte depois de ###NOTAS###), numa caixa à parte: o que
- * não foi confirmado e as divergências entre fontes. Vão no fim da nota do
- * Kommo — que é interna —, mas não são para o cedente.
+ * não foi confirmado e as divergências entre fontes. Ficam SÓ na plataforma
+ * (decisão do dono, 07/10/2026): o envio ao Kommo leva o parágrafo e as fontes.
  */
 function NotasInternas({
   valor,
@@ -721,8 +721,8 @@ function NotasInternas({
       )}
       <p className="m-0 mt-s2 text-xs text-texto-3">
         {enviada
-          ? 'Foram no fim da nota do Kommo, que é interna.'
-          : 'Vão no fim da nota do Kommo, que é interna. Antes de repassar o texto ao cedente, deixe esta parte de fora.'}
+          ? 'Ficaram salvas só aqui, na plataforma; não foram para o Kommo.'
+          : 'Ficam só aqui, na plataforma: não vão para o Kommo nem para o cedente.'}
       </p>
     </section>
   )

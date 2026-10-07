@@ -66,6 +66,7 @@ import {
   type ConsumoDaJustificativa,
   CONSUMO_ZERO,
   dividirNota,
+  separarNotas,
   ehTabelaAusente,
   esferaDoEnte,
   type FonteDaJustificativa,
@@ -992,9 +993,10 @@ async function enviar(req: Request, svc: SupabaseClient, body: Record<string, un
     await soltar()
     return erro('Token ou subdomínio da Kommo não configurado. O texto ficou salvo.', 500)
   }
-  // A NOTA LEVA TUDO, as notas internas (###NOTAS###) inclusive, no fim: a nota
-  // do Kommo é interna — quem a repassa ao cedente é a pessoa.
-  const partes = dividirNota(texto)
+  // AS NOTAS INTERNAS (###NOTAS###) NÃO VÃO AO KOMMO (decisão do dono,
+  // 07/10/2026): ficam só na plataforma, no `texto_enviado` gravado abaixo. A
+  // nota do card leva o parágrafo e a lista de fontes.
+  const partes = dividirNota(separarNotas(texto).corpo)
   // TODAS AS PARTES NUMA CHAMADA: ou entram todas, ou nenhuma — e tentar de
   // novo não duplica a parte 1 (ver _shared/anotarNoKommo.ts).
   const r = await postarNotas(conta, leadId, partes, { dePessoa: true, autor }).catch((e) => ({
