@@ -752,7 +752,17 @@ const ACAO_DA_ETAPA = 'text-marca-texto hover:bg-marca-leve hover:text-marca-tex
  */
 let caixasAbertas = 0
 
-function useFecharFora(aberto: boolean, fechar: () => void, caixa: RefObject<HTMLElement | null>) {
+function useFecharFora(
+  aberto: boolean,
+  fechar: () => void,
+  caixa: RefObject<HTMLElement | null>,
+  /**
+   * O clique fora fecha? Não nas caixas em que se DIGITA (a anotação, o
+   * "Fechado!"): um clique sem querer levava o texto e os anexos (pedido do
+   * dono, 07/10/2026). Elas fecham pelo próprio botão, pelo Fechar ou pelo Esc.
+   */
+  { foraFecha = true }: { foraFecha?: boolean } = {},
+) {
   // O BOTÃO DO ASSISTENTE SAI DA FRENTE enquanto uma caixa do card está aberta
   // (05/10/2026): perto do pé da tela ele cobria o "Enviar" da anotação. A caixa
   // mora dentro da página, e a página não sobe acima do botão flutuante — então
@@ -776,6 +786,7 @@ function useFecharFora(aberto: boolean, fechar: () => void, caixa: RefObject<HTM
     // o <body> por portal — fora da caixa, para o `contains` —, e clicar nele
     // (ou fechá-lo com Esc) fechava a caixa e o levava junto.
     const fora = (e: MouseEvent) => {
+      if (!foraFecha) return
       if (haDialogoAberto()) return
       if (!caixa.current?.contains(e.target as Node)) fechar()
     }
@@ -788,7 +799,7 @@ function useFecharFora(aberto: boolean, fechar: () => void, caixa: RefObject<HTM
       document.removeEventListener('mousedown', fora)
       document.removeEventListener('keydown', tecla)
     }
-  }, [aberto, fechar, caixa])
+  }, [aberto, fechar, caixa, foraFecha])
 }
 
 /**
@@ -2323,7 +2334,7 @@ function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (text
   const fechar = useCallback(() => {
     if (!enviando) setAberto(false)
   }, [enviando])
-  useFecharFora(aberto, fechar, caixa)
+  useFecharFora(aberto, fechar, caixa, { foraFecha: false })
   const ajuste = useCaixaNaTela(flutuante, aberto)
 
   const temRascunho = anotacao.temRascunho
@@ -2350,7 +2361,7 @@ function BotaoDeAnotacao({ leadId, onEnviar }: { leadId: number; onEnviar: (text
           className={cn(CAIXA_FLUTUANTE, posicaoDaCaixa(ajuste), 'right-0 w-[360px] max-w-[calc(100vw-24px)] p-s3')}
           style={deslocamentoDaCaixa(ajuste)}
         >
-          <CaixaDeAnotacao anotacao={anotacao} classeDoBotao={BTN} onFeito={() => setAberto(false)} />
+          <CaixaDeAnotacao anotacao={anotacao} classeDoBotao={BTN} onFeito={() => setAberto(false)} onFechar={fechar} />
         </div>
       )}
     </div>
@@ -2393,7 +2404,7 @@ function BotaoFechado({
   const fechar = useCallback(() => {
     if (!enviando) setAberto(false)
   }, [enviando])
-  useFecharFora(aberto, fechar, caixa)
+  useFecharFora(aberto, fechar, caixa, { foraFecha: false })
   const ajuste = useCaixaNaTela(flutuante, aberto)
 
   async function confirmar() {

@@ -101,7 +101,7 @@ export function Drawer({
           'absolute inset-0 bg-veu/40 backdrop-blur-[2px] transition-opacity duration-200',
           visible ? 'opacity-100' : 'opacity-0',
         )}
-        onClick={pedirFechar}
+        // CLIQUE FORA NÃO FECHA (07/10/2026): só o X, o Fechar ou o Esc — ver ui/Modal.
       />
       {/* O DIÁLOGO É O PAINEL, e não a camada inteira: o fundo escurecido não
           faz parte dele. O nome vem do título (ou de `ariaLabel`) — antes o

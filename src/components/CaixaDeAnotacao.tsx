@@ -356,11 +356,17 @@ export function CaixaDeAnotacao({
   anotacao: a,
   classeDoBotao,
   onFeito,
+  onFechar,
 }: {
   anotacao: AnotacaoDoCard
   /** A altura dos botões do card (o `BTN` da página). */
   classeDoBotao?: string
   onFeito: () => void
+  /**
+   * O "Fechar" da caixa. O clique fora não fecha mais (07/10/2026), então a
+   * caixa precisa de uma saída à vista. O texto continua no rascunho.
+   */
+  onFechar?: () => void
 }) {
   const entrada = useRef<HTMLInputElement>(null)
   const [arrastando, setArrastando] = useState(false)
@@ -496,9 +502,16 @@ export function CaixaDeAnotacao({
         >
           Anexar arquivo
         </Button>
-        <Button size="sm" className={classeDoBotao} onClick={() => void enviar()} loading={a.enviando} disabled={!pode}>
-          Enviar
-        </Button>
+        <div className="flex items-center gap-s2">
+          {onFechar && (
+            <Button size="sm" variant="ghost" className={classeDoBotao} onClick={onFechar} disabled={a.enviando}>
+              Fechar
+            </Button>
+          )}
+          <Button size="sm" className={classeDoBotao} onClick={() => void enviar()} loading={a.enviando} disabled={!pode}>
+            Enviar
+          </Button>
+        </div>
       </div>
 
       {arrastando && (

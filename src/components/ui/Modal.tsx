@@ -113,11 +113,11 @@ export function Modal({
 
   return createPortal(
     <div
+      // CLIQUE FORA NÃO FECHA (pedido do dono, 07/10/2026): um clique sem querer
+      // no fundo fechava a janela e levava o que estava digitado. A janela fecha
+      // só pelo X, pelo Fechar/Cancelar do rodapé ou pelo Esc (que pergunta
+      // antes de descartar quando há alteração).
       className="animate-fade-in fixed inset-0 z-janela flex items-start justify-center overflow-y-auto bg-veu/50 p-4 backdrop-blur-[2px] scrollbar-thin sm:p-6"
-      onClick={(e) => {
-        // Fecha só quando o clique é no próprio overlay, não dentro do painel.
-        if (e.target === e.currentTarget) requestClose()
-      }}
     >
       <div
         ref={panelRef}
