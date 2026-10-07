@@ -65,6 +65,7 @@ import {
   ETIQUETAS_DA_PRECIFICACAO,
   type EtiquetaDoFundo,
   ATOS_DA_PRECIFICACAO,
+  COLUNAS_DO_SELETOR,
   desdeQuandoAEtiqueta,
   etiquetaCanonica,
   etiquetasPorDestino,
@@ -105,6 +106,7 @@ export {
   ETIQUETAS_DA_PRECIFICACAO,
   type EtiquetaDoFundo,
   ATOS_DA_PRECIFICACAO,
+  COLUNAS_DO_SELETOR,
   desdeQuandoAEtiqueta,
   etiquetaCanonica,
   etiquetasPorDestino,
@@ -231,6 +233,9 @@ const TOM_POR_ATO: { comeca: string; tom: TomDaTag }[] = [
   // reserva, e um crédito que ainda vai ser cotado sairia da mesma cor de um
   // rótulo qualquer, ao lado do verde de quem já cotou.
   { comeca: 'pendente', tom: 'yellow' },
+  // ERRO DA PLATAFORMA DO FUNDO (07/10/2026): nem cotado nem reprovado — âmbar,
+  // como pediu o dono ("reprovado é vermelho, cotado é verde, amarelo o erro").
+  { comeca: 'erro', tom: 'yellow' },
 ]
 
 /** A cor que o ato manda, ou nada — e aí quem decide é a paleta de reserva. */

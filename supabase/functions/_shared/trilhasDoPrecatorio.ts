@@ -98,6 +98,12 @@ export interface AtoDoEnvio {
   /** O fundo recusou o crédito — o botão sai vermelho. */
   reprova?: boolean
   /**
+   * A PLATAFORMA DO FUNDO DEU ERRO (07/10/2026): nem enviado, nem reprovado — o
+   * botão e o check saem em âmbar. Faz o check como os outros: a casa não fica
+   * esperando o fundo para mudar de fase.
+   */
+  erro?: boolean
+  /**
    * O ATO TRAZ A COTAÇÃO: a janela do envio pede o valor da proposta e a
    * comissão (Limitada, em R$, ou Spread), obrigatórios, e o texto vai para o
    * campo do fundo na aba "Cotações/propostas" do card, no mesmo PATCH da
@@ -669,6 +675,14 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
                   aba: 'atacado',
                 },
                 { etiqueta: 'Reprovado BTG', nota: 'Crédito reprovado pelo BTG.', reprova: true },
+                // O ERRO É DA PLATAFORMA, e por isso só no varejo: o atacado vai
+                // por e-mail.
+                {
+                  etiqueta: 'Erro BTG',
+                  nota: 'A plataforma do BTG deu erro: o crédito não foi enviado nem reprovado.',
+                  erro: true,
+                  aba: 'varejo',
+                },
               ],
             },
             {
@@ -678,6 +692,11 @@ export const TRILHAS_PRECATORIO: DefSubdivisao[] = [
               atos: [
                 { etiqueta: 'Enviado PJus', nota: 'Crédito enviado à PJus.' },
                 { etiqueta: 'Reprovado PJus', nota: 'Crédito reprovado pela PJus.', reprova: true },
+                {
+                  etiqueta: 'Erro PJus',
+                  nota: 'A plataforma da PJus deu erro: o crédito não foi enviado nem reprovado.',
+                  erro: true,
+                },
               ],
             },
           ],

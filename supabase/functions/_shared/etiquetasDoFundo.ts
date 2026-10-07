@@ -18,12 +18,29 @@
 export const ATOS_DA_PRECIFICACAO = ['Enviado', 'Cotado', 'Reprovado'] as const
 export type AtoDaPrecificacao = (typeof ATOS_DA_PRECIFICACAO)[number]
 
+/**
+ * O ERRO DA PLATAFORMA DO FUNDO (07/10/2026, pedido do dono): às vezes a
+ * plataforma do BTG ou da PJus falha — o crédito não foi enviado nem reprovado,
+ * e a casa não pode ficar esperando o fundo para mudar de fase. "Erro BTG" e
+ * "Erro PJus" fazem o check na remessa, em âmbar.
+ *
+ * UMA DO LADO DA OUTRA, E UMA SÓ POR FUNDO (pedido do dono): no seletor é a
+ * quarta coluna (`COLUNAS_DO_SELETOR`), e é irmã das outras — marcar "Cotado
+ * BTG" depois tira o "Erro BTG". Só os dois fundos de plataforma a têm; nos
+ * outros o lugar fica em branco. Fora de `ATOS_DA_PRECIFICACAO` por isso: lá
+ * estão os atos que TODO fundo tem.
+ */
+export type AtoDaEtiqueta = AtoDaPrecificacao | 'Erro'
+
+/** As colunas do seletor de etiquetas, na ordem da tela. */
+export const COLUNAS_DO_SELETOR: readonly AtoDaEtiqueta[] = [...ATOS_DA_PRECIFICACAO, 'Erro']
+
 /** Uma etiqueta da casa, e o destino de que ela fala. */
 export interface EtiquetaDoFundo {
   /** O nome EXATO como está escrito no Kommo — é ele que vai no PATCH. */
   nome: string
-  /** O que aconteceu naquele fundo: a coluna da grade em que ela aparece. */
-  ato: AtoDaPrecificacao
+  /** O que aconteceu naquele fundo: a coluna da grade em que ela aparece ("Erro" não tem coluna). */
+  ato: AtoDaEtiqueta
   /**
    * O destino a que a etiqueta se refere: o fundo, ou a pessoa que negocia.
    *
@@ -55,6 +72,8 @@ interface FundoDaCasa {
   comissoes: readonly ModalidadeDaComissao[]
   /** Uma observação curta junto de um ato, no seletor (ver `EtiquetaDoFundo.observacao`). */
   observacoes?: Partial<Record<AtoDaPrecificacao, string>>
+  /** O fundo tem plataforma própria, que pode falhar: ganha a etiqueta "Erro ‹fundo›". */
+  erroDePlataforma?: boolean
 }
 
 /**
@@ -79,13 +98,20 @@ interface FundoDaCasa {
  * grafia antiga quando troca a etiqueta de fundo.
  */
 const FUNDOS: readonly FundoDaCasa[] = [
-  { destino: 'PJus', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
+  {
+    destino: 'PJus',
+    atos: ATOS_DA_PRECIFICACAO,
+    artigo: 'da',
+    comissoes: MODALIDADES_DA_COMISSAO,
+    erroDePlataforma: true,
+  },
   {
     destino: 'BTG',
     atos: ATOS_DA_PRECIFICACAO,
     artigo: 'do',
     comissoes: ['limitada'],
     observacoes: { Enviado: 'só para atacado' },
+    erroDePlataforma: true,
   },
   { destino: 'PX Ativos', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
   { destino: 'Invest Precatórios', atos: ATOS_DA_PRECIFICACAO, artigo: 'da', comissoes: MODALIDADES_DA_COMISSAO },
@@ -128,14 +154,16 @@ export function mensagemDaProposta(destino: string): string {
  * por fim a recusa. Como só uma vale por fundo, marcar outra apaga a anterior —
  * "Cotado PJus" substituindo "Enviado PJus" é a notícia de que o fundo respondeu.
  */
-export const ETIQUETAS_DA_PRECIFICACAO: readonly EtiquetaDoFundo[] = FUNDOS.flatMap((f) =>
-  f.atos.map((ato) => ({
+export const ETIQUETAS_DA_PRECIFICACAO: readonly EtiquetaDoFundo[] = FUNDOS.flatMap((f) => [
+  ...f.atos.map((ato) => ({
     destino: f.destino,
     ato,
     nome: `${ato} ${f.destino}`,
     ...(f.observacoes?.[ato] ? { observacao: f.observacoes[ato] } : {}),
   })),
-)
+  // O ERRO POR ÚLTIMO: é o desfecho que não é do fundo, e sim da plataforma dele.
+  ...(f.erroDePlataforma ? [{ destino: f.destino, ato: 'Erro' as const, nome: `Erro ${f.destino}` }] : []),
+])
 
 /** Acento, caixa e espaço a mais não podem decidir se duas etiquetas são a mesma. */
 export function normalizarEtiqueta(nome: unknown): string {

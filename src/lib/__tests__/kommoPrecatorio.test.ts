@@ -748,8 +748,13 @@ describe('abas da trilha Externa', () => {
     expect(
       remessa.envioAosFundos?.fundos.map((f) => [f.fundo, f.atos.map((a) => [a.etiqueta, a.reprova ?? false])]),
     ).toEqual([
-      ['BTG', [['Cotado BTG', false], ['Enviado BTG', false], ['Reprovado BTG', true]]],
-      ['PJus', [['Enviado PJus', false], ['Reprovado PJus', true]]],
+      // O ERRO DA PLATAFORMA (07/10/2026): nem enviado nem reprovado, e faz o check.
+      ['BTG', [['Cotado BTG', false], ['Enviado BTG', false], ['Reprovado BTG', true], ['Erro BTG', false]]],
+      ['PJus', [['Enviado PJus', false], ['Reprovado PJus', true], ['Erro PJus', false]]],
+    ])
+    expect(remessa.envioAosFundos!.fundos.flatMap((f) => f.atos.filter((a) => a.erro).map((a) => a.etiqueta))).toEqual([
+      'Erro BTG',
+      'Erro PJus',
     ])
     for (const f of remessa.envioAosFundos!.fundos) {
       for (const a of f.atos) expect(etiquetaCanonica(a.etiqueta), a.etiqueta).toBe(a.etiqueta)

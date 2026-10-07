@@ -94,7 +94,7 @@ import {
   type EtiquetaDoFundo,
   type AtoDoEnvio,
   type FundoDoEnvio,
-  ATOS_DA_PRECIFICACAO,
+  COLUNAS_DO_SELETOR,
   ETIQUETAS_DA_PRECIFICACAO,
   desdeQuandoAEtiqueta,
   etiquetaCanonica,
@@ -1401,7 +1401,7 @@ function SeletorDeEtiquetas({
           className={cn(
             CAIXA_FLUTUANTE,
             posicaoDaCaixa(ajuste),
-            'left-0 w-[460px] max-w-[calc(100vw-24px)] px-s3 py-s2',
+            'left-0 w-[560px] max-w-[calc(100vw-24px)] px-s3 py-s2',
           )}
           style={deslocamentoDaCaixa(ajuste)}
         >
@@ -1416,13 +1416,13 @@ function SeletorDeEtiquetas({
             role="group"
             aria-label="Etiquetas dos fundos"
             className={cn(
-              'grid grid-cols-[minmax(0,1fr)_repeat(3,auto)] items-center gap-x-s2 gap-y-s1.5 text-sm sm:grid-cols-[minmax(0,1.4fr)_repeat(3,64px)_72px] sm:gap-x-s1',
+              'grid grid-cols-[minmax(0,1fr)_repeat(4,auto)] items-center gap-x-s1 gap-y-s1.5 text-sm sm:grid-cols-[minmax(0,1.4fr)_repeat(4,72px)_72px] sm:gap-x-s1',
               emVoo !== null && 'opacity-70',
             )}
           >
             <span />
-            {ATOS_DA_PRECIFICACAO.map((ato) => (
-              <span key={ato} className="text-center text-xs font-bold uppercase tracking-[0.06em] text-texto-3">
+            {COLUNAS_DO_SELETOR.map((ato) => (
+              <span key={ato} className="text-center text-xs font-bold uppercase tracking-normal text-texto-3 sm:tracking-[0.06em]">
                 {ato}
               </span>
             ))}
@@ -1476,7 +1476,7 @@ function SeletorDeEtiquetas({
                     </span>
                   )}
                   </span>
-                  {ATOS_DA_PRECIFICACAO.map((ato) => {
+                  {COLUNAS_DO_SELETOR.map((ato) => {
                     const e = grupo.etiquetas.find((x) => x.ato === ato)
                     // O ATO QUE O FUNDO NÃO TEM deixa o lugar em branco — é o
                     // que mantém as colunas alinhadas.
@@ -1796,8 +1796,9 @@ function atoFeito(f: FundoDoEnvio, tags: readonly string[] | null | undefined): 
  * OS CHECKS DO ENVIO AOS FUNDOS, na remessa: um por fundo com plataforma própria.
  *
  * O CHECK É A ETIQUETA DO CARD — a posta pela janela do envio e a posta à mão no
- * Kommo: verde com o fundo aceitando o crédito, vermelho com ele reprovando, e
- * há quanto tempo no passar do mouse.
+ * Kommo: verde com o fundo aceitando o crédito, vermelho com ele reprovando,
+ * âmbar com a plataforma dele em erro (07/10/2026), e há quanto tempo no passar
+ * do mouse.
  *
  * NA FAIXA DA AMOSTRA desde a onda 2: cada fundo é uma pílula com o quadrado e o
  * nome (abre a janela do envio) e, ao lado, o ícone que abre a plataforma dele
@@ -1840,9 +1841,11 @@ function ChecksDosFundos({
               'inline-flex items-center overflow-hidden rounded-full border',
               ato?.reprova
                 ? 'border-perigo-borda bg-perigo-fundo'
-                : ato
-                  ? 'border-sucesso-borda bg-sucesso-fundo'
-                  : 'border-borda-forte bg-superficie',
+                : ato?.erro
+                  ? 'border-aviso-borda bg-aviso-fundo'
+                  : ato
+                    ? 'border-sucesso-borda bg-sucesso-fundo'
+                    : 'border-borda-forte bg-superficie',
             )}
           >
             <button
@@ -1862,13 +1865,19 @@ function ChecksDosFundos({
                   'grid h-[18px] w-[18px] place-items-center rounded-[5px] border-[1.5px]',
                   ato?.reprova
                     ? 'border-perigo-cheio bg-perigo-cheio text-white'
-                    : ato
-                      ? 'border-sucesso-cheio bg-sucesso-cheio text-white'
-                      : 'border-borda-forte bg-superficie',
+                    : ato?.erro
+                      ? // ÂMBAR COM O PONTO DE EXCLAMAÇÃO NA COR DO TEXTO DE AVISO: o
+                        // branco sobre o âmbar cheio não se lê.
+                        'border-aviso-cheio bg-aviso-fundo text-aviso'
+                      : ato
+                        ? 'border-sucesso-cheio bg-sucesso-cheio text-white'
+                        : 'border-borda-forte bg-superficie',
                 )}
               >
                 {ato?.reprova ? (
                   <X className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />
+                ) : ato?.erro ? (
+                  <AlertTriangle className="h-[12px] w-[12px]" strokeWidth={2.5} aria-hidden />
                 ) : ato ? (
                   <Check className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />
                 ) : null}
@@ -2019,10 +2028,15 @@ function JanelaDoEnvioAoFundo({
     }
   }
 
+  // À ESQUERDA DO RODAPÉ, o que não é o envio: a reprovação (vermelha) e o erro
+  // da plataforma (âmbar, 07/10/2026). À direita, Cancelar e o envio.
+  const foraDoEnvio = (a: AtoDoEnvio) => a.reprova || a.erro
   const botaoDoAto = (a: AtoDoEnvio) => (
     <Button
       key={a.etiqueta}
-      variant={a.reprova ? 'dangerOutline' : 'success'}
+      variant={a.reprova ? 'dangerOutline' : a.erro ? 'warning' : 'success'}
+      icon={a.erro ? <AlertTriangle className={IC} aria-hidden /> : undefined}
+      title={a.erro ? `A plataforma ${doFundo(fundo)} falhou: marca o check sem enviar nem reprovar` : undefined}
       onClick={() => void confirmar(a)}
       loading={andamento?.ato === a.etiqueta}
       disabled={ocupado}
@@ -2049,7 +2063,7 @@ function JanelaDoEnvioAoFundo({
           }
         }}
         disabled={ocupado}
-        placeholder="O que foi enviado, ou o motivo da reprovação (opcional) — dá para colar o print aqui com Ctrl+V."
+        placeholder="O que foi enviado, o motivo da reprovação ou o erro da plataforma (opcional) — dá para colar o print aqui com Ctrl+V."
       />
       <div className="mt-s3">
         <input
@@ -2123,7 +2137,7 @@ function JanelaDoEnvioAoFundo({
           <ExternalLink className="h-[16px] w-[16px]" aria-hidden />
         </a>
       }
-      rodapeInicio={atos.some((a) => a.reprova) ? atos.filter((a) => a.reprova).map(botaoDoAto) : undefined}
+      rodapeInicio={atos.some(foraDoEnvio) ? atos.filter(foraDoEnvio).map(botaoDoAto) : undefined}
       footer={
         // CANCELAR EM FANTASMA, como na janela da cotação e na due diligence; e
         // [Cancelar][ato] JUNTOS: no celular, o par quebra inteiro para a linha
@@ -2133,7 +2147,7 @@ function JanelaDoEnvioAoFundo({
           <Button variant="ghost" onClick={() => void cancelar()} disabled={ocupado}>
             Cancelar
           </Button>
-          {atos.filter((a) => !a.reprova).map(botaoDoAto)}
+          {atos.filter((a) => !foraDoEnvio(a)).map(botaoDoAto)}
         </div>
       }
     >
@@ -2740,7 +2754,9 @@ const Ponto = () => (
 )
 
 /** O ícone de cada tom de etiqueta (amostra): cotado ✓, reprovado ✕, enviado →. */
-function iconeDaEtiqueta(tom: TomDaTag): ReactNode {
+function iconeDaEtiqueta(tom: TomDaTag, nome = ''): ReactNode {
+  // O ERRO DA PLATAFORMA é âmbar como o pendente, mas não é espera: o alerta, e não o relógio.
+  if (mesmaEtiqueta(nome.split(' ')[0], 'Erro')) return <AlertTriangle className="h-[12px] w-[12px]" aria-hidden />
   if (tom === 'green') return <Check className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />
   if (tom === 'red') return <X className="h-[12px] w-[12px]" strokeWidth={3} aria-hidden />
   if (tom === 'blue') return <ArrowRight className="h-[12px] w-[12px]" aria-hidden />
@@ -3147,7 +3163,7 @@ function CardCredito({
               return (
                 <span key={t} title={quando ? `Desde ${formatDateTime(quando)}` : 'Etiqueta do Kommo'}>
                   <Badge size="sm" tone={tom} className="h-[22px] gap-1 px-2">
-                    {iconeDaEtiqueta(tom)}
+                    {iconeDaEtiqueta(tom, t)}
                     {/* O NOME DA CASA, e não a grafia que o card tem: "Enviado
                         PJUS", de antes de 01/10/2026, aparece como "Enviado PJus". */}
                     {etiquetaCanonica(t) ?? t}

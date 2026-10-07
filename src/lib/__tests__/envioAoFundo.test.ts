@@ -290,10 +290,13 @@ describe('as abas do envio ao BTG', () => {
     const varejo = atosDaAba(btg, 'varejo')
     const atacado = atosDaAba(btg, 'atacado')
     // À DIREITA DO RODAPÉ, o ato da aba; À ESQUERDA, a reprovação, nas duas.
-    expect(nomes(varejo.filter((a) => !a.reprova))).toEqual(['Cotado BTG'])
-    expect(nomes(atacado.filter((a) => !a.reprova))).toEqual(['Enviado BTG'])
-    expect(nomes(varejo.filter((a) => a.reprova))).toEqual(['Reprovado BTG'])
-    expect(nomes(atacado.filter((a) => a.reprova))).toEqual(['Reprovado BTG'])
+    // À ESQUERDA TAMBÉM O ERRO DA PLATAFORMA (07/10/2026) — só no varejo, que é
+    // a plataforma; o atacado vai por e-mail.
+    const fora = (a: AtoDoEnvio) => a.reprova || a.erro
+    expect(nomes(varejo.filter((a) => !fora(a)))).toEqual(['Cotado BTG'])
+    expect(nomes(atacado.filter((a) => !fora(a)))).toEqual(['Enviado BTG'])
+    expect(nomes(varejo.filter(fora))).toEqual(['Reprovado BTG', 'Erro BTG'])
+    expect(nomes(atacado.filter(fora))).toEqual(['Reprovado BTG'])
     expect(varejo.some((a) => a.pedeCotacao)).toBe(true)
     expect(atacado.some((a) => a.pedeCotacao)).toBe(false)
   })
@@ -306,7 +309,7 @@ describe('as abas do envio ao BTG', () => {
 
   it('fundo sem abas (a PJus) mostra todos os atos, como sempre', () => {
     expect(pjus.abas).toBeUndefined()
-    expect(nomes(atosDaAba(pjus, null))).toEqual(['Enviado PJus', 'Reprovado PJus'])
+    expect(nomes(atosDaAba(pjus, null))).toEqual(['Enviado PJus', 'Reprovado PJus', 'Erro PJus'])
   })
 
   // A JANELA USA AS ABAS DA TRILHA, e não uma lista própria: os botões saem de
@@ -319,7 +322,8 @@ describe('as abas do envio ao BTG', () => {
     expect(tela).toContain('const atos = atosDaAba(fundo, aba)')
     expect(tela).toContain('<Tabs')
     expect(tela).toContain('useCotacaoEmEdicao(atual, liquido, fundo.fundo)')
-    expect(tela).toContain('rodapeInicio={atos.some((a) => a.reprova)')
+    expect(tela).toContain('rodapeInicio={atos.some(foraDoEnvio)')
+    expect(tela).toContain("variant={a.reprova ? 'dangerOutline' : a.erro ? 'warning' : 'success'}")
   })
 })
 

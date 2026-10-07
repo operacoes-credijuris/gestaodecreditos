@@ -39,11 +39,14 @@ describe('as etiquetas da precificação', () => {
       'Enviado PJus',
       'Cotado PJus',
       'Reprovado PJus',
+      // O ERRO DA PLATAFORMA (07/10/2026): só os dois fundos de plataforma própria.
+      'Erro PJus',
       // O "ENVIADO BTG" ENTROU EM 07/10/2026 — MUDOU DE PROPÓSITO: é o crédito
       // de atacado, que o BTG analisa fora da plataforma e responde depois.
       'Enviado BTG',
       'Cotado BTG',
       'Reprovado BTG',
+      'Erro BTG',
       'Enviado PX Ativos',
       'Cotado PX Ativos',
       'Reprovado PX Ativos',
@@ -85,7 +88,9 @@ describe('as etiquetas da precificação', () => {
     for (const g of grupos) {
       const recusas = g.etiquetas.filter((e) => /^Reprovado /.test(e.nome))
       expect(recusas, g.destino).toHaveLength(1)
-      expect(g.etiquetas[g.etiquetas.length - 1].nome, g.destino).toMatch(/^Reprovado /)
+      // A RECUSA FECHA O PERCURSO; depois dela, só o erro da plataforma (BTG e PJus).
+      const percurso = g.etiquetas.filter((e) => e.ato !== 'Erro')
+      expect(percurso[percurso.length - 1].nome, g.destino).toMatch(/^Reprovado /)
     }
   })
 })
@@ -96,11 +101,12 @@ describe('as etiquetas da precificação', () => {
  * PROPÓSITO em 07/10/2026: o "Enviado BTG" é o crédito de atacado.
  */
 describe('os atos de cada fundo', () => {
-  it('três em cada fundo, o BTG inclusive', () => {
+  it('três em cada fundo; o BTG e a PJus com o Erro da plataforma (07/10/2026)', () => {
     const atos = Object.fromEntries(etiquetasPorDestino().map((g) => [g.destino, g.etiquetas.map((e) => e.ato)]))
-    for (const f of ['PJus', 'BTG', 'PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur', 'Carbon']) {
+    for (const f of ['PX Ativos', 'Invest Precatórios', 'K & WC Ativos', 'Precatur', 'Carbon']) {
       expect(atos[f], f).toEqual(['Enviado', 'Cotado', 'Reprovado'])
     }
+    for (const f of ['PJus', 'BTG']) expect(atos[f], f).toEqual(['Enviado', 'Cotado', 'Reprovado', 'Erro'])
   })
 
   // A OBSERVAÇÃO DISCRETA DO SELETOR: só o "Enviado BTG" a tem, e diz quando usar.
@@ -140,13 +146,16 @@ describe('irmasDaEtiqueta', () => {
   it('as alternativas do mesmo destino saem quando esta entra', () => {
     // O BTG COM TRÊS (07/10/2026, mudou de propósito): o "Cotado" do varejo
     // tira o "Enviado" do atacado — é a resposta que chegou por e-mail.
-    expect(irmasDaEtiqueta('Cotado BTG')).toEqual(['Enviado BTG', 'Reprovado BTG'])
-    expect(irmasDaEtiqueta('Reprovado BTG')).toEqual(['Enviado BTG', 'Cotado BTG'])
-    expect(irmasDaEtiqueta('Enviado BTG')).toEqual(['Cotado BTG', 'Reprovado BTG'])
+    // O ERRO É IRMÃO TAMBÉM (07/10/2026): uma etiqueta só por fundo.
+    expect(irmasDaEtiqueta('Cotado BTG')).toEqual(['Enviado BTG', 'Reprovado BTG', 'Erro BTG'])
+    expect(irmasDaEtiqueta('Reprovado BTG')).toEqual(['Enviado BTG', 'Cotado BTG', 'Erro BTG'])
+    expect(irmasDaEtiqueta('Enviado BTG')).toEqual(['Cotado BTG', 'Reprovado BTG', 'Erro BTG'])
+    expect(irmasDaEtiqueta('Erro BTG')).toEqual(['Enviado BTG', 'Cotado BTG', 'Reprovado BTG'])
+    expect(irmasDaEtiqueta('Erro PJus')).toEqual(['Enviado PJus', 'Cotado PJus', 'Reprovado PJus'])
     // TRÊS NO DESTINO, DUAS IRMÃS: cotar um crédito que estava só enviado apaga
     // o "Enviado", que é a notícia velha.
-    expect(irmasDaEtiqueta('Cotado PJus')).toEqual(['Enviado PJus', 'Reprovado PJus'])
-    expect(irmasDaEtiqueta('Enviado PJus')).toEqual(['Cotado PJus', 'Reprovado PJus'])
+    expect(irmasDaEtiqueta('Cotado PJus')).toEqual(['Enviado PJus', 'Reprovado PJus', 'Erro PJus'])
+    expect(irmasDaEtiqueta('Enviado PJus')).toEqual(['Cotado PJus', 'Reprovado PJus', 'Erro PJus'])
     expect(irmasDaEtiqueta('Reprovado Carbon')).toEqual(['Enviado Carbon', 'Cotado Carbon'])
     // O "&" e o acento não confundem a troca.
     expect(irmasDaEtiqueta('Cotado K & WC Ativos')).toEqual(['Enviado K & WC Ativos', 'Reprovado K & WC Ativos'])
@@ -174,7 +183,7 @@ describe('irmasDaEtiqueta', () => {
   })
 
   it('a comparação tolera caixa e espaço, como no resto', () => {
-    expect(irmasDaEtiqueta(' cotado   btg ')).toEqual(['Enviado BTG', 'Reprovado BTG'])
+    expect(irmasDaEtiqueta(' cotado   btg ')).toEqual(['Enviado BTG', 'Reprovado BTG', 'Erro BTG'])
   })
 })
 
