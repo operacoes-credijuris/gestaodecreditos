@@ -73,6 +73,7 @@ import { contaKommo } from '../_shared/segredos.ts'
 import {
   ETIQUETAS_DA_PRECIFICACAO,
   etiquetaCanonica,
+  etiquetasATirar,
   irmasDaEtiqueta,
   mesmaEtiqueta,
   datasDasEtiquetas,
@@ -236,8 +237,9 @@ Deno.serve(async (req: Request) => {
     }
 
     // 1. A ESCRITA INCREMENTAL. Um nome só, e o Kommo resolve o resto: pedir
-    // para acrescentar o que já está lá não duplica, e pedir para tirar o que
-    // não está não é erro — as duas são idempotentes, que é o que um botão de
+    // para acrescentar o que já está lá não duplica; para tirar, só se pede o que
+    // o card TEM (pedir uma que não existe na conta faz o Kommo recusar tudo,
+    // ver `etiquetasATirar`) — idempotente, que é o que um botão de
     // alternar precisa quando o clique chega duas vezes.
     //
     // E A TROCA VAI NO MESMO PATCH: marcar "Reprovado BTG" tira "Cotado BTG",
@@ -281,17 +283,24 @@ Deno.serve(async (req: Request) => {
       textoDoCampo = textoDaCotacao(cotacao)
     }
 
+    // AS ETIQUETAS QUE O CARD TEM AGORA, lidas do Kommo: só elas podem sair
+    // (ver `etiquetasATirar` — tirar uma que não existe na conta faz o Kommo
+    // recusar o PATCH inteiro). Do Kommo, e não do espelho, porque a etiqueta
+    // que o comercial pôs há dez minutos ainda não chegou aqui pelo sync. Se a
+    // leitura falhar, vale o espelho.
+    let doCard = (espelho.tags ?? []) as string[]
+    try {
+      const resAntes = await fetch(`${base}/leads/${leadId}`, { headers })
+      if (resAntes.ok) {
+        const antes = (await resAntes.json()) as { _embedded?: { tags?: { name?: string }[] } }
+        const lidas = antes?._embedded?.tags
+        if (Array.isArray(lidas)) doCard = lidas.map((t) => String(t?.name ?? '').trim()).filter(Boolean)
+      }
+    } catch {
+      /* rede: fica o espelho */
+    }
     const irmas = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta) : []
-    // A GRAFIA QUE O CARD TEM SAI JUNTO: "Enviado PJUS", de antes de a PJus
-    // passar a ser escrita assim (01/10/2026), é a mesma etiqueta para a casa,
-    // mas o Kommo pode não tratá-la como tal — e aí pedir para tirar "Enviado
-    // PJus" deixaria a antiga no card. Pede-se também pelo nome exato de lá.
-    const doCard = (espelho.tags ?? []) as string[]
-    const comoNoCard = (nomes: string[]) =>
-      doCard.filter((t) => !nomes.includes(t) && nomes.some((n) => mesmaEtiqueta(t, n)))
-    const aTirar = acao === 'adicionar'
-      ? [...irmas, ...comoNoCard(irmas)]
-      : [etiqueta, ...comoNoCard([etiqueta])]
+    const aTirar = etiquetasATirar(acao, etiqueta, doCard)
     const patch = acao === 'adicionar'
       ? {
         tags_to_add: [{ name: etiqueta }],
@@ -301,11 +310,14 @@ Deno.serve(async (req: Request) => {
           : {}),
       }
       : { tags_to_delete: aTirar.map((name) => ({ name })) }
-    const res = await fetch(`${base}/leads/${leadId}`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify(patch),
-    })
+    // TIRAR O QUE O CARD NÃO TEM é não fazer nada: sem PATCH, segue para a releitura.
+    const res = acao === 'remover' && aTirar.length === 0
+      ? new Response(null, { status: 204 })
+      : await fetch(`${base}/leads/${leadId}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(patch),
+      })
     if (!res.ok) {
       const txt = await res.text().catch(() => '')
       return jsonResponse(
@@ -419,10 +431,9 @@ Deno.serve(async (req: Request) => {
     const autor = perfil?.nome?.trim() || perfil?.email || caller.email || 'usuário do sistema'
     // A QUE SAIU ENTRA NO TEXTO, quando saiu: "aplicada" sozinha esconderia que
     // a outra do mesmo destino caiu junto, e é ela que o comercial tinha lido no
-    // card. Só entra a que o card de fato tinha — a lista de irmãs vai inteira
-    // ao Kommo, mas nem toda estava lá.
+    // card. Só entra a que o card de fato tinha (lida do Kommo antes do PATCH).
     const substituidas = irmas.filter((i) =>
-      ((espelho.tags ?? []) as string[]).some((t) => mesmaEtiqueta(t, i)),
+      doCard.some((t) => mesmaEtiqueta(t, i)),
     )
     // NO SPREAD, A BASE VAI JUNTO: o texto do campo não a diz, e é este registro
     // que conta, depois, sobre quanto o percentual incidiu.

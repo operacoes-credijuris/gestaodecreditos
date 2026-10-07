@@ -11,6 +11,8 @@
  * Kommo é sempre o DESTA lista, nunca o que chegou na requisição.
  */
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   ETIQUETAS_DA_PRECIFICACAO,
   ABA_APROVADOS_EXTERNO,
@@ -27,7 +29,7 @@ import {
   normalizarEtiqueta,
   tomDaTag,
 } from '@/lib/kommo'
-import { comissoesDoFundo } from '../../../supabase/functions/_shared/etiquetasDoFundo.ts'
+import { comissoesDoFundo, etiquetasATirar } from '../../../supabase/functions/_shared/etiquetasDoFundo.ts'
 
 describe('as etiquetas da precificação', () => {
   // OS SETE FUNDOS QUE A OPERAÇÃO DITOU em 29/09/2026, no molde "‹ato› ‹fundo›"
@@ -334,5 +336,37 @@ describe('mensagemDaProposta', () => {
     expect(mensagemDaProposta('BTG')).toBe('Seguir com a proposta do BTG.')
     expect(mensagemDaProposta('PX Ativos')).toBe('Seguir com a proposta da PX Ativos.')
     expect(mensagemDaProposta('invest precatorios')).toBe('Seguir com a proposta da Invest Precatórios.')
+  })
+})
+
+/**
+ * O PATCH SÓ TIRA O QUE O CARD TEM (07/10/2026). Tirar pelo nome uma etiqueta
+ * que ainda não existe na conta do Kommo faz ele recusar o PATCH inteiro: foi o
+ * "Reprovado PJus" que não ia, no dia em que o "Erro PJus" entrou na lista.
+ */
+describe('etiquetasATirar', () => {
+  it('ao pôr, só as irmãs que o card tem — nunca o "Erro" que ninguém usou', () => {
+    expect(etiquetasATirar('adicionar', 'Reprovado PJus', ['Enviado PJus', 'Cotado BTG'])).toEqual(['Enviado PJus'])
+    expect(etiquetasATirar('adicionar', 'Reprovado PJus', ['Cotado BTG'])).toEqual([])
+    expect(etiquetasATirar('adicionar', 'Cotado BTG', ['Erro BTG', 'Enviado PJus'])).toEqual(['Erro BTG'])
+  })
+
+  it('na grafia do card ("Enviado PJUS", de antes de 01/10/2026)', () => {
+    expect(etiquetasATirar('adicionar', 'Reprovado PJus', ['Enviado PJUS'])).toEqual(['Enviado PJUS'])
+  })
+
+  it('ao tirar, só a própria, e só se o card a tem', () => {
+    expect(etiquetasATirar('remover', 'Cotado PJus', ['Cotado PJUS', 'Cotado BTG'])).toEqual(['Cotado PJUS'])
+    expect(etiquetasATirar('remover', 'Erro PJus', ['Cotado BTG'])).toEqual([])
+  })
+
+  it('a kommo-etiquetar usa a regra, com as etiquetas lidas do Kommo antes do PATCH', () => {
+    const f = readFileSync(
+      fileURLToPath(new URL('../../../supabase/functions/kommo-etiquetar/index.ts', import.meta.url)),
+      'utf8',
+    )
+    expect(f).toContain('const aTirar = etiquetasATirar(acao, etiqueta, doCard)')
+    // As irmãs (todas) continuam valendo para a conta local e o aviso das substituídas.
+    expect(f).toContain("const irmas = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta) : []")
   })
 })

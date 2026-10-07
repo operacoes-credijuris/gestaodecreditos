@@ -215,6 +215,28 @@ export function irmasDaEtiqueta(
 }
 
 /**
+ * O QUE O PATCH TIRA DO CARD: só as etiquetas que o card TEM, na grafia que ele
+ * tem — as irmãs, ao pôr; a própria, ao tirar.
+ *
+ * SÓ AS QUE ESTÃO NO CARD (07/10/2026): pedir ao Kommo para tirar uma etiqueta
+ * que ainda NÃO EXISTE NA CONTA faz ele recusar o PATCH inteiro. Foi o que
+ * travou o "Reprovado PJus" no dia em que o "Erro PJus" entrou na lista: o
+ * pedido levava `tags_to_delete` com "Erro PJus", que ninguém tinha usado ainda.
+ *
+ * NA GRAFIA DO CARD: "Enviado PJUS", de antes de 01/10/2026, sai pelo nome que
+ * tem lá, e não pelo canônico.
+ */
+export function etiquetasATirar(
+  acao: 'adicionar' | 'remover',
+  etiqueta: string,
+  doCard: readonly string[],
+  etiquetas: readonly EtiquetaDoFundo[] = ETIQUETAS_DA_PRECIFICACAO,
+): string[] {
+  const alvo = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta, etiquetas) : [etiqueta]
+  return [...new Set(doCard.filter((t) => alvo.some((n) => mesmaEtiqueta(t, n))))]
+}
+
+/**
  * As etiquetas de um card NA ORDEM DA CASA: a dos fundos na lista (PJus, BTG,
  * PX Ativos…).
  *
