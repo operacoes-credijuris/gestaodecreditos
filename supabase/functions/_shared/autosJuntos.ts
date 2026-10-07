@@ -29,7 +29,9 @@
  * MB deixa folga para a janela de download e para o envio. Se mesmo assim a
  * parte derrubar a volta, ela encolhe pela metade (ver `antesDaParte`).
  */
-export const ALVO_PARTE_BYTES = 48 * 1024 * 1024
+// 32 MB, e não 48: com o teto de 150 s de parede (ver PRAZO_JUNCAO_MS), a parte
+// tem de baixar, juntar e subir ao Kommo numa invocação só.
+export const ALVO_PARTE_BYTES = 32 * 1024 * 1024
 /** Menor que isto a parte não encolhe: o defeito não é de tamanho. */
 export const MIN_ALVO_BYTES = 4 * 1024 * 1024
 /** Quantas vezes a mesma parte pode derrubar a volta (ou falhar de vez) antes de encolher. */

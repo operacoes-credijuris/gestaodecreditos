@@ -66,13 +66,17 @@ export const MIN_FRENTES = 2
 export const MAX_FRENTES = 4
 
 /**
- * O RELÓGIO DE UMA INVOCAÇÃO. O teto da plataforma é 400 s de parede; aos
- * ORCAMENTO_DA_INVOCACAO_MS a chamada em curso é interrompida e o que já chegou
- * inteiro é salvo, sobrando folga para gravar e disparar a próxima.
+ * O RELÓGIO DE UMA INVOCAÇÃO. O teto REAL deste projeto é 150 s de parede (o do
+ * plano do Supabase em uso), e não os 400 s do plano pago que a primeira versão
+ * supôs: medido em produção em 07/10/2026, a frente que passava de ~2 min era
+ * derrubada pela plataforma SEM salvar nada, e a geração esperava até dar "o
+ * servidor parou de dar sinal". Aos ORCAMENTO_DA_INVOCACAO_MS a chamada em curso
+ * é interrompida e o que já chegou inteiro é salvo, com folga para gravar e
+ * disparar a próxima (a mesma margem da rotina do Escavador, que usa 100 s).
  */
-export const ORCAMENTO_DA_INVOCACAO_MS = 330_000
+export const ORCAMENTO_DA_INVOCACAO_MS = 115_000
 /** Abaixo disto, não vale começar outra chamada: cede para uma invocação nova. */
-export const FOLGA_PARA_NOVA_CHAMADA_MS = 60_000
+export const FOLGA_PARA_NOVA_CHAMADA_MS = 25_000
 /** O teto de relógio de uma frente, somadas as invocações. */
 export const TETO_DA_FRENTE_MIN = 15
 /** O teto de invocações de uma frente (a rede de segurança do teto de tempo). */

@@ -94,11 +94,17 @@ describe('o plano das partes', () => {
     expect(j.partes[0].documentos).toBe(21)
   })
 
-  it('o maior processo (421 documentos, 187 MB): 4 partes, uma por invocação, nomes que batem', () => {
+  // MUDOU DE PROPÓSITO (07/10/2026): partes de 32 MB (o teto real é 150 s de parede), e o
+  // número de partes sai da conta, não de um valor fixo.
+  it('o maior processo (421 documentos, 187 MB): uma parte por invocação, nomes que batem', () => {
     const docs = processo(421, 187 * MB)
     const { j, invocacoes } = simular(docs)
-    expect(invocacoes).toBe(4)
-    expect(j.partes.map((p) => p.nome)).toEqual([1, 2, 3, 4].map((n) => `Conhecimento - autos (parte ${n} de 4) - ${CNJ}.pdf`))
+    const n = j.partes.length
+    expect(n).toBeGreaterThanOrEqual(Math.ceil((187 * MB) / ALVO_PARTE_BYTES))
+    expect(invocacoes).toBe(n)
+    expect(j.partes.map((p) => p.nome)).toEqual(
+      Array.from({ length: n }, (_, i) => `Conhecimento - autos (parte ${i + 1} de ${n}) - ${CNJ}.pdf`),
+    )
     // Todos os documentos, cada um uma vez, na ordem do processo.
     expect(j.partes.reduce((t, p) => t + p.documentos, 0)).toBe(421)
     for (let i = 1; i < j.partes.length; i++) expect(j.partes[i].de).toBe(j.partes[i - 1].ate + 1)

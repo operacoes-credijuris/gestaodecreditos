@@ -181,8 +181,12 @@ interface Processo {
   desistiu_em?: string | null
 }
 
-/** Quanto a junção trabalha, contado do início da invocação: o relógio da Edge Function é 400 s. */
-const PRAZO_JUNCAO_MS = 330_000
+/**
+ * Quanto a junção trabalha, contado do início da invocação. O teto real do
+ * projeto é 150 s de parede (medido em 07/10/2026 na justificativa técnica —
+ * não os 400 s do plano pago); 115 s deixa folga para fechar e gravar.
+ */
+const PRAZO_JUNCAO_MS = 115_000
 
 /**
  * A migração 0077 já rodou? Sem as colunas dela, a rotina faz o que fazia
