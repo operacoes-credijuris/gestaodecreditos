@@ -404,7 +404,8 @@ export const ABA_EM_PRECIFICACAO_EXTERNO = 'ext-precificacao'
  * este arquivo inteiro existe para evitar.
  */
 export const ABAS_COM_TAGS: ReadonlySet<string> = new Set([
-  ABA_APROVADOS_EXTERNO,
+  // REMESSA AOS FUNDOS SAIU EM 07/10/2026, a pedido: os checks do BTG e da PJus
+  // no card já dizem o desfecho de cada fundo, e a etiqueta repetia o mesmo.
   // EM PRECIFICAÇÃO É ONDE A ETIQUETA MAIS IMPORTA: o crédito está com um fundo
   // específico, esperando o preço dele, e a etiqueta é o que diz com qual.
   ABA_EM_PRECIFICACAO_EXTERNO,

@@ -161,6 +161,13 @@ describe('SUBDIVISOES_PRECATORIO', () => {
     expect(ABAS_COM_TAGS.has(ABA_REPROVADOS_EXTERNO)).toBe(false)
   })
 
+  // REMESSA AOS FUNDOS NÃO MOSTRA ETIQUETA desde 07/10/2026, a pedido: os
+  // checks dos fundos no card já dizem o mesmo.
+  it('a Remessa aos fundos não mostra etiquetas; a Em precificação mostra', () => {
+    expect(ABAS_COM_TAGS.has(ABA_APROVADOS_EXTERNO)).toBe(false)
+    expect(ABAS_COM_TAGS.size).toBeGreaterThan(0)
+  })
+
   it('toda aba aponta para uma coluna que existe no kanban', () => {
     // O teste que pega erro de digitação no nome da coluna.
     expect(colunasPrecatorioDesalinhadas(espelho())).toEqual([])
