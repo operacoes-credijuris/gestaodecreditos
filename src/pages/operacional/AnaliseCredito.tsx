@@ -1770,10 +1770,12 @@ function BotaoVerPropostas({ lead }: { lead: KommoLead }) {
         aria-controls={aberto ? id : undefined}
         aria-label={rotulo}
         title={rotulo}
+        // NA COR DA MARCA, EM PÍLULA (07/10/2026, pedido do dono): em cinza ele
+        // sumia no meio do texto cinza da linha de metadados.
         className={cn(
           LINK_BTN,
-          'text-texto-3 hover:bg-superficie-3 hover:text-texto-2',
-          aberto && 'bg-superficie-3 text-texto-2',
+          'ml-0 rounded-full border border-marca-viva/45 bg-marca-leve px-s2.5 text-marca-texto hover:border-marca-viva',
+          aberto && 'border-marca-viva ring-[3px] ring-marca-viva/15',
         )}
       >
         <Scale className={IC} aria-hidden />
