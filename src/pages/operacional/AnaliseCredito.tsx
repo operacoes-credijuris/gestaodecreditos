@@ -70,6 +70,7 @@ import {
   MessageSquarePlus,
   Paperclip,
   Receipt,
+  Scale,
   ScrollText,
   Tag,
   CheckCircle2,
@@ -99,7 +100,6 @@ import {
   etiquetaCanonica,
   etiquetasDaAba,
   etiquetasPorDestino,
-  FUNDOS_DA_PRECIFICACAO,
   mensagemDaProposta,
   mesmaEtiqueta,
   ordenarEtiquetas,
@@ -167,6 +167,13 @@ import {
   type OrdemDaLista,
 } from '@/lib/quadroDaAnalise'
 import { DueDiligence } from '@/components/DueDiligence'
+import { ListaDeCotacoes, ValoresDaCotacao } from '@/components/analise/ListaDeCotacoes'
+import {
+  linhasDasCotacoes,
+  mostraAsPropostas,
+  propostasCadastradas,
+  rotuloDasPropostas,
+} from '@/lib/propostasDoCard'
 import { JanelaDeCertidoes } from '@/components/JanelaDeCertidoes'
 import { promptDaAnaliseExterna, urlDoClaude } from '@/lib/analiseExterna'
 import { escolherPaginasParaImagem, LIMITES_DO_CONECTOR } from '@/lib/paginasDigitalizadas'
@@ -220,8 +227,6 @@ import {
   type Cotacao,
   type CotacaoLida,
   cotacoesDoCard,
-  formatarPercentual,
-  formatarReais,
   NOME_DO_GRUPO_DAS_COTACOES,
   type ValorDeCampo,
 } from '../../../supabase/functions/_shared/cotacaoDoFundo.ts'
@@ -1528,60 +1533,6 @@ function SeletorDeEtiquetas({
 }
 
 /**
- * A linha da comissão, embaixo do valor — limitada, spread novo, spread antigo —
- * em dois pedaços: o `detalhe` ("(spread 5%)") desce para a linha de baixo
- * quando a caixa é estreita (celular), em vez de empurrar o nome do fundo.
- */
-function rotuloDaComissao(c: CotacaoLida['comissao']): { texto: string; detalhe?: string } {
-  if (c === null) return { texto: 'Comissão —' }
-  if (c.modalidade === 'limitada') return { texto: `Comissão ${formatarReais(c.centavos)}` }
-  const pct = c.percentualCentesimos !== undefined ? `${formatarPercentual(c.percentualCentesimos)}%` : null
-  if (c.centavos !== undefined) {
-    return { texto: `Comissão ${formatarReais(c.centavos)}`, detalhe: `(spread${pct ? ` ${pct}` : ''})` }
-  }
-  return pct ? { texto: 'Comissão em spread', detalhe: `(${pct})` } : { texto: 'Comissão em spread' }
-}
-
-/**
- * O VALOR E A COMISSÃO de um fundo, alinhados à direita e em números tabulares:
- * a proposta na linha de cima, a comissão embaixo, em texto secundário. Sem
- * cotação, "—". O que alguém escreveu à mão no Kommo e não se lê como valor
- * aparece como está, cortado, com o texto inteiro no passar do mouse.
- *
- * NO SPREAD DO FORMATO NOVO ("R$ 807.500,00 / R$ 42.500,00 (Spread de 5%)"),
- * em cima vai a proposta FINAL — é o que o cedente recebe, e é o número que se
- * compara — e embaixo "Comissão R$ 42.500,00 (spread 5%)". O spread antigo,
- * sem percentual, continua "Comissão em spread".
- */
-function ValoresDaCotacao({ cotacao }: { cotacao: CotacaoLida | null }) {
-  if (!cotacao) return <span className="text-corpo tabular-nums text-texto-3">—</span>
-  if (cotacao.proposta === null) {
-    return (
-      <span className="block max-w-[150px] truncate text-right text-xs text-texto-2" title={cotacao.texto}>
-        {cotacao.texto}
-      </span>
-    )
-  }
-  const linha = rotuloDaComissao(cotacao.comissao)
-  return (
-    // NO CELULAR, NO MÁXIMO 160px: o "(spread 5%)" desce, e o "Cotado · há 2
-    // dias" à esquerda não fica por baixo da comissão.
-    <span className="block max-w-[160px] text-right tabular-nums sm:max-w-none">
-      <span className="block whitespace-nowrap text-corpo font-semibold text-texto">{formatarReais(cotacao.proposta)}</span>
-      <span className="block text-xs text-texto-2">
-        <span className="whitespace-nowrap">{linha.texto}</span>
-        {linha.detalhe && (
-          <>
-            {' '}
-            <span className="whitespace-nowrap">{linha.detalhe}</span>
-          </>
-        )}
-      </span>
-    </span>
-  )
-}
-
-/**
  * ESCOLHER A PROPOSTA: os fundos responderam, e a casa escolhe com qual seguir.
  *
  * DOIS PASSOS NA MESMA CAIXA — o fundo, e depois a confirmação —, porque o
@@ -1631,20 +1582,15 @@ function BotaoEscolherProposta({
     else flutuante.current?.querySelector<HTMLButtonElement>('button')?.focus()
   }, [fundo])
 
-  /** A etiqueta que o card tem deste fundo, e desde quando. */
-  const situacao = (destino: string) => {
-    const grupo = etiquetasPorDestino().find((g) => g.destino === destino)
-    const e = grupo?.etiquetas.find((x) => (lead.tags ?? []).some((t) => mesmaEtiqueta(t, x.nome)))
-    return e ? { ato: e.ato, desde: desdeQuandoAEtiqueta(lead.tags_em, e.nome) } : null
-  }
-
   /**
-   * A COTAÇÃO DE CADA FUNDO, lida dos campos do card no Kommo (aba
-   * "Cotações/propostas") — o espelho os guarda em `raw`, e a kommo-etiquetar
-   * troca ali o que acabou de gravar. Só mostrar: spread e limitada não se
-   * comparam direto, e a escolha é de quem lê.
+   * CADA FUNDO, com a etiqueta que o card tem dele e a COTAÇÃO lida dos campos
+   * do card no Kommo (aba "Cotações/propostas") — o espelho os guarda em `raw`,
+   * e a kommo-etiquetar troca ali o que acabou de gravar. Só mostrar: spread e
+   * limitada não se comparam direto, e a escolha é de quem lê. A MESMA LISTA do
+   * "Ver propostas" (`ListaDeCotacoes`), aqui com todos os fundos e clicável.
    */
-  const cotacoes = cotacoesDoCard(lead.raw?.custom_fields_values)
+  const linhas = linhasDasCotacoes(lead)
+  const cotacaoDe = (f: string) => linhas.find((l) => l.fundo === f)?.cotacao ?? null
 
   async function confirmar() {
     if (!fundo) return
@@ -1685,42 +1631,7 @@ function BotaoEscolherProposta({
           style={deslocamentoDaCaixa(ajuste)}
         >
           {fundo === null ? (
-            <>
-              <p className="flex items-baseline justify-between gap-s3 px-s3 pb-s1 pt-s2 text-xs font-bold uppercase tracking-[.06em] text-texto-3">
-                <span>Seguir com a proposta de</span>
-                <span className="whitespace-nowrap">Proposta</span>
-              </p>
-              {FUNDOS_DA_PRECIFICACAO.map((f) => {
-                const s = situacao(f)
-                const c = cotacoes[f]
-                return (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => irAoPasso(f)}
-                    className="grid min-h-[36px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-s4 rounded-controle px-s3 py-s1.5 text-left hover:bg-superficie-3 focus-visible:bg-superficie-3"
-                  >
-                    <span className="min-w-0">
-                      <span
-                        className={cn(
-                          'block truncate text-corpo text-texto',
-                          s?.ato === 'Cotado' ? 'font-bold' : 'font-medium',
-                        )}
-                      >
-                        {f}
-                      </span>
-                      {s && (
-                        <span className="block truncate text-xs text-texto-3">
-                          {s.ato}
-                          {s.desde ? ` · ${tempoDecorrido(s.desde)}` : ''}
-                        </span>
-                      )}
-                    </span>
-                    <ValoresDaCotacao cotacao={c} />
-                  </button>
-                )
-              })}
-            </>
+            <ListaDeCotacoes titulo="Seguir com a proposta de" linhas={linhas} onEscolher={irAoPasso} />
           ) : (
             <div>
               <p
@@ -1730,10 +1641,10 @@ function BotaoEscolherProposta({
               >
                 {mensagemDaProposta(fundo)}
               </p>
-              {cotacoes[fundo] && (
+              {cotacaoDe(fundo) && (
                 <div className="mx-s3 mt-s1 flex items-center justify-between gap-s4 rounded-campo bg-superficie-2 px-s3 py-s2">
                   <span className="text-xs font-bold uppercase tracking-[.06em] text-texto-3">Proposta</span>
-                  <ValoresDaCotacao cotacao={cotacoes[fundo]} />
+                  <ValoresDaCotacao cotacao={cotacaoDe(fundo)} />
                 </div>
               )}
               {/* O "VOLTAR" EM FANTASMA, como no "Fechado!": é o cancelar da caixa. */}
@@ -1747,6 +1658,123 @@ function BotaoEscolherProposta({
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Quanto o passar do mouse espera para abrir a caixa das propostas, e para fechá-la (ms). */
+const ATRASO_DE_ABRIR = 200
+const ATRASO_DE_FECHAR = 150
+
+/**
+ * VER AS PROPOSTAS CADASTRADAS (pedido do dono, 07/10/2026): na Produção de
+ * proposta e na Negociação dos três funis chegam propostas novas, e é preciso
+ * comparar com as antigas sem ir ao Kommo. Um indicador discreto na linha de
+ * metadados do card — a balança e "3 propostas" — abre a lista dos fundos com
+ * valor, do mesmo jeito da "Escolher proposta" (`ListaDeCotacoes`).
+ *
+ * SÓ LEITURA: nenhum botão de escolher, mover ou editar. O que conta como
+ * proposta e a ordem são de `propostasCadastradas`; sem nenhuma, o indicador
+ * nem aparece.
+ *
+ * COMO ABRE:
+ * - O MOUSE abre com um pequeno atraso e fecha ao sair — com um atraso também,
+ *   para a caixa não piscar enquanto o mouse atravessa o vão entre o ícone e
+ *   ela (a caixa mora dentro do mesmo embrulho, e voltar a ele cancela o fechar);
+ * - O CLIQUE (e o toque, no celular, onde não há passar do mouse) prende a caixa
+ *   aberta, e outro clique a fecha;
+ * - O FOCO DO TECLADO abre, e sair dele fecha (a não ser que ela esteja presa);
+ * - Esc e o clique fora fecham (`useFecharFora`): não há nada digitado a perder.
+ */
+function BotaoVerPropostas({ lead }: { lead: KommoLead }) {
+  const propostas = propostasCadastradas(lead)
+  const [aberto, setAberto] = useState(false)
+  /** Aberta pelo clique, pelo toque ou pelo Enter: sair com o mouse não fecha. */
+  const presa = useRef(false)
+  const timer = useRef<number | null>(null)
+  const caixa = useRef<HTMLDivElement>(null)
+  const flutuante = useRef<HTMLDivElement>(null)
+  const id = useId()
+  const limpar = () => {
+    if (timer.current !== null) window.clearTimeout(timer.current)
+    timer.current = null
+  }
+  const depois = (ms: number, fazer: () => void) => {
+    limpar()
+    timer.current = window.setTimeout(fazer, ms)
+  }
+  const fechar = useCallback(() => {
+    limpar()
+    presa.current = false
+    setAberto(false)
+  }, [])
+  useFecharFora(aberto, fechar, caixa)
+  const ajuste = useCaixaNaTela(flutuante, aberto)
+  useEffect(() => limpar, [])
+
+  if (propostas.length === 0) return null
+  const rotulo = `Ver propostas cadastradas (${propostas.length})`
+  return (
+    <div
+      className="relative"
+      ref={caixa}
+      onPointerEnter={(e) => {
+        if (e.pointerType === 'mouse') depois(ATRASO_DE_ABRIR, () => setAberto(true))
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === 'mouse' && !presa.current) depois(ATRASO_DE_FECHAR, fechar)
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          limpar()
+          if (aberto && presa.current) fechar()
+          else {
+            presa.current = true
+            setAberto(true)
+          }
+        }}
+        onFocus={(e) => {
+          // SÓ O FOCO DO TECLADO: o clique também foca, e quem decide ali é o clique.
+          if (e.currentTarget.matches(':focus-visible')) {
+            limpar()
+            setAberto(true)
+          }
+        }}
+        onBlur={(e) => {
+          if (!presa.current && !caixa.current?.contains(e.relatedTarget as Node | null)) fechar()
+        }}
+        aria-expanded={aberto}
+        aria-controls={aberto ? id : undefined}
+        aria-label={rotulo}
+        title={rotulo}
+        className={cn(
+          LINK_BTN,
+          'text-texto-3 hover:bg-superficie-3 hover:text-texto-2',
+          aberto && 'bg-superficie-3 text-texto-2',
+        )}
+      >
+        <Scale className={IC} aria-hidden />
+        <span className="whitespace-nowrap tabular-nums">{rotuloDasPropostas(propostas.length)}</span>
+      </button>
+
+      {aberto && (
+        <div
+          ref={flutuante}
+          id={id}
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby={`${id}-titulo`}
+          className={cn(CAIXA_FLUTUANTE, posicaoDaCaixa(ajuste), 'left-0 w-[360px] max-w-[calc(100vw-24px)]')}
+          style={deslocamentoDaCaixa(ajuste)}
+        >
+          <ListaDeCotacoes titulo="Propostas cadastradas" tituloId={`${id}-titulo`} linhas={propostas} />
+          <p className="px-s3 pb-s1.5 pt-s1 text-xs text-texto-3">
+            Dos campos do card no Kommo (aba {NOME_DO_GRUPO_DAS_COTACOES}).
+          </p>
         </div>
       )}
     </div>
@@ -2751,6 +2779,7 @@ function CardCredito({
   etiquetaEmVoo,
   onAnotar,
   onEscolherProposta,
+  verPropostas = false,
   anexarEMover,
   envioAosFundos,
   onCertidoes,
@@ -2830,6 +2859,12 @@ function CardCredito({
    * Só na aba que declara `escolhaDeProposta` (Em precificação do Externo).
    */
   onEscolherProposta?: (l: KommoLead, fundo: string) => Promise<void>
+  /**
+   * O indicador "3 propostas", só de leitura, na linha de metadados (ver
+   * `BotaoVerPropostas`): na Produção de proposta e na Negociação dos três
+   * funis (`mostraAsPropostas`).
+   */
+  verPropostas?: boolean
   /** O botão de anexar e mover, onde a aba o declara (o Memorando do Externo). */
   anexarEMover?: {
     rotulo: string
@@ -3306,6 +3341,10 @@ function CardCredito({
             <ExternalLink className={IC} aria-hidden />
             Abrir no Kommo
           </a>
+          {/* AS PROPOSTAS CADASTRADAS, só para ver (Produção de proposta e
+              Negociação): ao lado do "Abrir no Kommo", porque é o que se ia ver
+              lá. Sem nenhuma, nada aparece. */}
+          {verPropostas && <BotaoVerPropostas lead={lead} />}
           <DatasDoCard lead={lead} />
         </div>
       </div>
@@ -6062,6 +6101,9 @@ export default function AnaliseCredito() {
                   // A ESCOLHA DA PROPOSTA, onde a aba a declara — ver
                   // `escolhaDeProposta` em trilhasDoPrecatorio.ts.
                   onEscolherProposta={abaAtual?.escolhaDeProposta ? escolherProposta : undefined}
+                  // AS PROPOSTAS CADASTRADAS, só para ver — a Produção de
+                  // proposta e a Negociação dos três funis (`mostraAsPropostas`).
+                  verPropostas={mostraAsPropostas(abaAtual?.statusIds)}
                   // OS CHECKS DO ENVIO AOS FUNDOS, onde a aba os declara — a Remessa.
                   envioAosFundos={
                     abaAtual?.envioAosFundos
