@@ -370,3 +370,30 @@ describe('etiquetasATirar', () => {
     expect(f).toContain("const irmas = acao === 'adicionar' ? irmasDaEtiqueta(etiqueta) : []")
   })
 })
+
+/**
+ * O "x" DA ETIQUETA DE FORA (07/10/2026, pedido do dono): na Em precificação,
+ * a etiqueta que não é da lista da casa ganha um "x" que a tira do card. O
+ * servidor aceita TIRAR um nome de fora (tirar não cria nada); PÔR, só da lista.
+ */
+describe('tirar etiqueta de fora da lista', () => {
+  const ler = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
+
+  it('a kommo-etiquetar aceita o nome de fora só para remover', () => {
+    const f = ler('../../../supabase/functions/kommo-etiquetar/index.ts')
+    expect(f).toContain(
+      "etiquetaCanonica(body.etiqueta) ?? (acao === 'remover' ? String(body.etiqueta ?? '').trim() : null)",
+    )
+  })
+
+  it('o "x" aparece só onde há seletor, e só na etiqueta que não é da casa', () => {
+    const t = ler('../../pages/operacional/AnaliseCredito.tsx')
+    expect(t).toContain('const tiravel = etiquetasOferecidas.length > 0 && !etiquetaCanonica(t)')
+    expect(t).toContain("onClick={() => onEtiquetar(lead, t, 'remover')}")
+  })
+
+  it('a regra do PATCH tira a de fora só se o card a tem', () => {
+    expect(etiquetasATirar('remover', 'Cliente VIP', ['Cliente VIP', 'Cotado BTG'])).toEqual(['Cliente VIP'])
+    expect(etiquetasATirar('remover', 'Cliente VIP', ['Cotado BTG'])).toEqual([])
+  })
+})

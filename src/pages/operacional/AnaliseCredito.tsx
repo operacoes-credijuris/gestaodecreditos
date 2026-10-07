@@ -182,6 +182,7 @@ import { agruparNotas, ehAnexo, nomeDoAnexo } from '@/lib/historicoDeNotas'
 import { grupoDeMiniaturas } from '@/lib/previaDoAnexo'
 import { linksDosAnexos } from '@/lib/linksDosAnexos'
 import { baixarSemAba } from '@/lib/baixarSemAba'
+import { pedacosComLinks } from '@/lib/linksNoTexto'
 import { MiniaturasDaNota } from '@/components/analise/MiniaturasDaNota'
 import { supabase } from '@/lib/supabase'
 import {
@@ -1799,6 +1800,33 @@ function BotaoVerPropostas({ lead }: { lead: KommoLead }) {
   )
 }
 
+/**
+ * O TEXTO DE UMA ANOTAÇÃO COM OS LINKS CLICÁVEIS (07/10/2026, pedido do dono):
+ * azuis e sublinhados, abrem em outra aba. A regra de achar o link mora em
+ * `lib/linksNoTexto.ts`, testada.
+ */
+function TextoComLinks({ texto }: { texto: string }) {
+  return (
+    <>
+      {pedacosComLinks(texto).map((p, i) =>
+        p.tipo === 'link' ? (
+          <a
+            key={i}
+            href={p.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="break-all font-medium text-marca-texto underline underline-offset-2 hover:no-underline"
+          >
+            {p.texto}
+          </a>
+        ) : (
+          <Fragment key={i}>{p.texto}</Fragment>
+        ),
+      )}
+    </>
+  )
+}
+
 /** "ao BTG", "à PJus"; "do BTG", "da PJus". */
 const aoFundo = (f: FundoDoEnvio) => `${f.artigo === 'a' ? 'à' : 'ao'} ${f.fundo}`
 const doFundo = (f: FundoDoEnvio) => `${f.artigo === 'a' ? 'da' : 'do'} ${f.fundo}`
@@ -3180,14 +3208,35 @@ function CardCredito({
             {[...coresDasTags(ordenarEtiquetas(lead.tags ?? []))].map(([t, tom]) => {
               const quando = desdeQuandoAEtiqueta(lead.tags_em, t)
               const idade = idadeCurta(quando)
+              // O "x" DA ETIQUETA DE FORA (07/10/2026, pedido do dono): o card às
+              // vezes chega com etiqueta que nada tem a ver com os fundos. Só
+              // onde o seletor existe (Em precificação), e só nas que NÃO são da
+              // lista da casa — as dos fundos se tiram pelo seletor.
+              const tiravel = etiquetasOferecidas.length > 0 && !etiquetaCanonica(t)
               return (
                 <span key={t} title={quando ? `Desde ${formatDateTime(quando)}` : 'Etiqueta do Kommo'}>
-                  <Badge size="sm" tone={tom} className="h-[22px] gap-1 px-2">
+                  <Badge size="sm" tone={tom} className={cn('h-[22px] gap-1 px-2', tiravel && 'pr-0.5')}>
                     {iconeDaEtiqueta(tom, t)}
                     {/* O NOME DA CASA, e não a grafia que o card tem: "Enviado
                         PJUS", de antes de 01/10/2026, aparece como "Enviado PJus". */}
                     {etiquetaCanonica(t) ?? t}
                     {idade && <span className="font-medium opacity-80"> · {idade}</span>}
+                    {tiravel && (
+                      <button
+                        type="button"
+                        disabled={etiquetaEmVoo !== null}
+                        onClick={() => onEtiquetar(lead, t, 'remover')}
+                        title={`Tirar a etiqueta "${t}" do card`}
+                        aria-label={`Tirar a etiqueta "${t}" do card`}
+                        className="relative grid h-[18px] w-[18px] place-items-center rounded-full opacity-70 transition-opacity after:absolute after:-inset-[6px] hover:bg-superficie-3 hover:opacity-100 disabled:cursor-progress"
+                      >
+                        {etiquetaEmVoo === t ? (
+                          <Loader2 className="h-[12px] w-[12px] animate-spin" aria-hidden />
+                        ) : (
+                          <X className="h-[12px] w-[12px]" strokeWidth={2.5} aria-hidden />
+                        )}
+                      </button>
+                    )}
                   </Badge>
                 </span>
               )
@@ -3343,7 +3392,7 @@ function CardCredito({
                   )}
                   {selo && <Selo className="flex-none">{selo}</Selo>}
                   <span className="min-w-0 truncate" title={texto}>
-                    {texto}
+                    {ehAnexo(ultima.nota) ? texto : <TextoComLinks texto={texto} />}
                   </span>
                 </div>
                 {miniaturas.imagens.length > 0 && (
@@ -3665,7 +3714,7 @@ function CardCredito({
                         n.automatica ? 'text-texto-3' : 'text-texto-2',
                       )}
                     >
-                      {corpo}
+                      <TextoComLinks texto={corpo} />
                     </pre>
                   )}
                   {outros.length > 0 && (

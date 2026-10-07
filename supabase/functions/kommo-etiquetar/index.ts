@@ -182,7 +182,13 @@ Deno.serve(async (req: Request) => {
     //
     // E O NOME QUE SEGUE É O DA LISTA, nunca o que chegou na requisição:
     // "enviado pjus" casa com a regra, mas quem vai ao Kommo é "Enviado PJus".
-    const etiqueta = etiquetaCanonica(body.etiqueta)
+    //
+    // TIRAR UMA ETIQUETA DE FORA DA LISTA, PODE (07/10/2026, pedido do dono): o
+    // card às vezes chega com etiqueta que nada tem a ver com os fundos, e o "x"
+    // ao lado dela a tira. A porta existe contra CRIAR etiqueta; tirar não cria
+    // nada, e só vai ao Kommo se o card a tiver (ver `etiquetasATirar`).
+    const etiqueta =
+      etiquetaCanonica(body.etiqueta) ?? (acao === 'remover' ? String(body.etiqueta ?? '').trim() : null)
     if (!etiqueta) {
       return jsonResponse(
         { error: `Etiqueta não reconhecida: "${String(body.etiqueta ?? '')}".` },
