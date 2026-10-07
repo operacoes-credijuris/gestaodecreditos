@@ -26,6 +26,7 @@ import { supabase } from '@/lib/supabase'
 import { useToast } from '@/components/ui/Toast'
 import { useAuth } from '@/contexts/AuthContext'
 import { Modal } from '@/components/ui/Modal'
+import { IdentificacaoDoCard } from '@/components/analise/Pecas'
 import { Button } from '@/components/ui/Button'
 import { Tabs } from '@/components/ui/Tabs'
 import { PainelCertidoes } from '@/components/PainelCertidoes'
@@ -281,7 +282,7 @@ export function DueDiligence({
       // O CARD DE QUE SE FALA, sob o título (o "apoio" da amostra): a janela
       // cobre a lista, e sem isto não há na tela nada que diga de qual crédito
       // são os processos.
-      description={tituloDoCard || undefined}
+      description={tituloDoCard ? <IdentificacaoDoCard titulo={tituloDoCard} /> : undefined}
       // O RODAPÉ NA ORDEM ÚNICA DAS JANELAS (auditoria visual de 03/10/2026,
       // §0.6/C8): a recusa à esquerda, longe do primário; à direita, "Fechar" e
       // o "Seguir" no canto. Antes o Seguir (primário) abria a fila à esquerda,

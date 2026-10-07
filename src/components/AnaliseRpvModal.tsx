@@ -48,6 +48,7 @@ import {
   RotuloDeSecao,
   Selo as SeloDaPeca,
   icSelo,
+  IdentificacaoDoCard,
   type TomDaPeca,
 } from '@/components/analise/Pecas'
 import type { FichaDoCredito } from '@/lib/anotacaoKommo'
@@ -2310,7 +2311,7 @@ export function AnaliseRpvModal({
       // explicava um estado que a própria janela mostra — enquanto houver o
       // botão Salvar, nada foi salvo.
       title="Análise de RPV"
-      description={titulo}
+      description={<IdentificacaoDoCard titulo={titulo} />}
       /* AS DECISÕES NUMA FILEIRA SÓ, no rodapé.
            A seção que ficava no fim do corpo obrigava a rolar a análise inteira
            para decidir, e o desfecho aparecia longe do botão de salvar, que é o

@@ -9,6 +9,7 @@
 // "Seguir" ou "Reprovar" no rodapé pareceriam decisões que esta etapa não toma.
 import { useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
+import { IdentificacaoDoCard } from '@/components/analise/Pecas'
 import { Button } from '@/components/ui/Button'
 import { PainelCertidoes } from '@/components/PainelCertidoes'
 import { perguntarDescarte } from '@/lib/descarte'
@@ -47,7 +48,7 @@ export function JanelaDeCertidoes({
       title="Certidões do crédito"
       // O TÍTULO DO CARD COMO APOIO, como na amostra: a janela cobre o quadro, e
       // é este texto que diz de QUAL crédito são as certidões.
-      description={tituloDoCard || undefined}
+      description={tituloDoCard ? <IdentificacaoDoCard titulo={tituloDoCard} /> : undefined}
       footer={
         <Button variant="ghost" onClick={() => void fechar()}>
           Fechar

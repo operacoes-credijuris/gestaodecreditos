@@ -11,6 +11,7 @@
 import type { ReactNode } from 'react'
 import { AlertTriangle, CheckCircle2, Info, XCircle } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { camposDoTitulo } from '@/lib/quadroDaAnalise'
 
 export type TomDaPeca = 'perigo' | 'aviso' | 'sucesso' | 'info' | 'neutro'
 
@@ -125,6 +126,31 @@ export function DicaDeAviso({ children, className }: { children: ReactNode; clas
       <AlertTriangle className="mt-s0.5 h-[16px] w-[16px] flex-none" aria-hidden />
       <span>{children}</span>
     </p>
+  )
+}
+
+/**
+ * DE QUAL CRÉDITO É A JANELA, no subtítulo dela: o cedente e o processo, como o
+ * card os mostra (revisão visual de 07/10/2026). Era o título cru do Kommo
+ * ("Credijuris - FULANO - 0001234-… - 100% - 30%"), que no celular ocupava três
+ * linhas antes do primeiro campo e repetia o intermediador e os percentuais que
+ * o card já mostra. O título inteiro fica no passar do mouse. Fora do padrão
+ * (sem campos separáveis), o título cru, como sempre.
+ */
+export function IdentificacaoDoCard({ titulo }: { titulo: string | null | undefined }) {
+  const t = titulo?.trim() ?? ''
+  const campos = camposDoTitulo(t)
+  if (!campos) return <>{t}</>
+  return (
+    <span title={t}>
+      {campos.cedente}
+      {campos.numero && (
+        <>
+          {' · '}
+          <span className="whitespace-nowrap tabular-nums">{campos.numero}</span>
+        </>
+      )}
+    </span>
   )
 }
 
