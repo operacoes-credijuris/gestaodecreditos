@@ -49,6 +49,7 @@ import {
   FUNDOS_DA_PRECIFICACAO,
   type ModalidadeDaComissao,
   normalizarEtiqueta,
+  semEntidadesHtml,
 } from './etiquetasDoFundo.ts'
 
 // ------------------------------------------------------------------ dinheiro
@@ -666,7 +667,8 @@ export interface ValorDeCampo {
 /** O texto de um valor de campo (o primeiro valor, que é o que um campo de texto tem). */
 function textoDoValor(v: ValorDeCampo): string {
   const x = v.values?.[0]?.value
-  return typeof x === 'string' || typeof x === 'number' ? String(x) : ''
+  // "&amp;" do Kommo vira "&" também no valor (o texto escrito à mão aparece na caixa).
+  return typeof x === 'string' ? semEntidadesHtml(x) : typeof x === 'number' ? String(x) : ''
 }
 
 /**

@@ -165,9 +165,27 @@ export const ETIQUETAS_DA_PRECIFICACAO: readonly EtiquetaDoFundo[] = FUNDOS.flat
   ...(f.erroDePlataforma ? [{ destino: f.destino, ato: 'Erro' as const, nome: `Erro ${f.destino}` }] : []),
 ])
 
-/** Acento, caixa e espaço a mais não podem decidir se duas etiquetas são a mesma. */
+/**
+ * O "&" QUE O KOMMO DEVOLVE COMO "&amp;" (07/10/2026): o campo da K & WC Ativos
+ * vem no card como "K &amp; WC Ativos", e a comparação o perdia — a proposta
+ * dela não aparecia, e a cotação não achava o campo. Desfaz as entidades HTML
+ * antes de comparar (só as que aparecem em nome: &amp; &lt; &gt; &quot; &#39;
+ * e as numéricas).
+ */
+export function semEntidadesHtml(texto: string): string {
+  return texto
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+}
+
+/** Acento, caixa, espaço a mais e "&amp;" não podem decidir se duas etiquetas são a mesma. */
 export function normalizarEtiqueta(nome: unknown): string {
-  return String(nome ?? '')
+  return semEntidadesHtml(String(nome ?? ''))
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
